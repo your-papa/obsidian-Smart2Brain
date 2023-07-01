@@ -3,7 +3,7 @@
   "compilerOptions": {
     "target": "ESNext",
     "useDefineForClassFields": true,
-    "module": "ESNext",
+    "module": "ES6",
     "resolveJsonModule": true,
     "allowJs": true,
     "isolatedModules": true
