@@ -31,8 +31,7 @@ export default defineConfig({
 				...builtins,
 			],
 		},
-		outDir: ".",
-		assetsDir: ".",
+		outDir: "build",
 		emptyOutDir: false,
 	},
 });
