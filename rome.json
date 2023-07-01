@@ -10,6 +10,6 @@
 		}
 	},
 	"files": {
-		"ignore": [".svelte-kit", "node_modules", "main"]
+		"ignore": [".svelte-kit", "node_modules", "test-vault", "build"]
 	}
 }

@@ -1,6 +1,6 @@
-import { Plugin } from "obsidian";
 import { ExampleView, VIEW_TYPE_EXAMPLE } from "./Views/ExampleView";
 import "./styles.css";
+import { Plugin } from "obsidian";
 
 interface ObsidianNoteConnectionsSettings {
 	mySetting: string;
@@ -23,31 +23,28 @@ export default class ObsidianNoteConnections extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
-		
-		this.registerView(
-      VIEW_TYPE_EXAMPLE,
-      (leaf) => new ExampleView(leaf)
-    );
+
+		this.registerView(VIEW_TYPE_EXAMPLE, (leaf) => new ExampleView(leaf));
 
 		this.addRibbonIcon("dice", "Activate view", () => {
-      this.activateView();
-    });
+			this.activateView();
+		});
 	}
 
 	onunload() {
-		console.log("unloading plugin")
+		console.log("unloading plugin");
 	}
 
 	async activateView() {
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE_EXAMPLE);
+		this.app.workspace.detachLeavesOfType(VIEW_TYPE_EXAMPLE);
 
-    await this.app.workspace.getRightLeaf(false).setViewState({
-      type: VIEW_TYPE_EXAMPLE,
-      active: true,
-    });
+		await this.app.workspace.getRightLeaf(false).setViewState({
+			type: VIEW_TYPE_EXAMPLE,
+			active: true,
+		});
 
-    this.app.workspace.revealLeaf(
-      this.app.workspace.getLeavesOfType(VIEW_TYPE_EXAMPLE)[0]
-    );
-  }
+		this.app.workspace.revealLeaf(
+			this.app.workspace.getLeavesOfType(VIEW_TYPE_EXAMPLE)[0],
+		);
+	}
 }
