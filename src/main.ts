@@ -1,5 +1,5 @@
-import { ExampleView, VIEW_TYPE_EXAMPLE } from "./Views/ExampleView";
 import "./styles.css";
+import { ExampleView, VIEW_TYPE_EXAMPLE } from "./views/ExampleView";
 import { Plugin } from "obsidian";
 
 interface ObsidianNoteConnectionsSettings {

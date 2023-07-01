@@ -1,6 +1,6 @@
 import { ItemView } from "obsidian";
 
-import Component from "../Components/Example.svelte";
+import Component from "../components/Example.svelte";
 
 export const VIEW_TYPE_EXAMPLE = "example-view";
 
