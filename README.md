@@ -27,6 +27,7 @@ interfaces, along with Tailwind CSS, a utility-first CSS framework.
 Before you get started, ensure that you have the following software installed:
 
 - [Node.js](https://nodejs.org) (v14 or above)
+- [Pnpm](https://pnpm.io/) (way better than npm)
 
 ## Getting Started
 
@@ -39,13 +40,13 @@ To create a new plugin using this template, follow these steps:
 4. Install the project dependencies by running the following command:
 
 ```bash
-npm install
+pnpm install
 ```
 
 5. Start the development server with hot-reloading using the following command:
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 6. In **Obsidian**, open **Settings**.
@@ -59,7 +60,7 @@ npm run dev
     following command:
 
 ```bash
-npm run build
+pnpm build
 ```
 
 11. The bundled plugin file will be generated in the `build` directory.
