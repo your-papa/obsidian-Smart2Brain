@@ -1,0 +1,26 @@
+{
+	"name": "svelted-obsidian",
+	"private": true,
+	"version": "0.0.0",
+	"main": "main.js",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"lint": "rome check --apply-unsafe .",
+		"format": "rome format --write .",
+		"check": "svelte-check --tsconfig ./tsconfig.json"
+	},
+	"devDependencies": {
+		"@sveltejs/vite-plugin-svelte": "^2.4.1",
+		"@tsconfig/svelte": "^4.0.1",
+		"builtin-modules": "^3.3.0",
+		"obsidian": "^1.2.8",
+		"rome": "^12.1.3",
+		"svelte": "^4.0.0",
+		"svelte-check": "^3.4.3",
+		"tslib": "^2.5.0",
+		"typescript": "^5.0.0",
+		"vite": "^4.3.9"
+	}
+}
