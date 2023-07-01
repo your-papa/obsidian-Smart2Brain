@@ -1,7 +1,7 @@
 {
 	"name": "svelted-obsidian",
 	"private": true,
-	"version": "0.0.0",
+	"version": "1.0.0",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
