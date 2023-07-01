@@ -5,8 +5,8 @@
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
-		"dev": "vite build --watch",
-		"build": "vite build",
+		"dev": "vite build --mode development",
+		"build": "vite build --mode production",
 		"lint": "rome check --apply-unsafe .",
 		"format": "rome format --write .",
 		"check": "svelte-check --tsconfig ./tsconfig.json"

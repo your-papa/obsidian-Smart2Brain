@@ -13,6 +13,11 @@ dist-ssr
 *.local
 build
 
+test-vault/.obsidian/workspace
+test-vault/.obsidian/plugins/obsidian-svelte-plugin/*.css
+test-vault/.obsidian/plugins/obsidian-svelte-plugin/*.js
+test-vault/.obsidian/plugins/obsidian-svelte-plugin/*.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
