@@ -5,7 +5,7 @@
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
-		"dev": "vite",
+		"dev": "vite build --watch",
 		"build": "vite build",
 		"lint": "rome check --apply-unsafe .",
 		"format": "rome format --write .",
