@@ -10,10 +10,6 @@ export default defineConfig({
 			formats: ["cjs"],
 		},
 		rollupOptions: {
-			input: {
-				main: "src/main.ts",
-				styles: "src/styles.css"
-			},
 			output: {
 				entryFileNames: "main.js",
 				assetFileNames: "styles.css",

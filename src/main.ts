@@ -1,4 +1,5 @@
 import { Plugin } from "obsidian";
+import "./styles.css";
 
 interface ObsidianNoteConnectionsSettings {
 	mySetting: string;
