@@ -5,23 +5,23 @@ import Component from "../Components/Example.svelte";
 export const VIEW_TYPE_EXAMPLE = "example-view";
 
 export class ExampleView extends ItemView {
-  component: Component;
+	component: Component;
 
-  getViewType() {
-    return VIEW_TYPE_EXAMPLE;
-  }
+	getViewType() {
+		return VIEW_TYPE_EXAMPLE;
+	}
 
-  getDisplayText() {
-    return "Example view";
-  }
+	getDisplayText() {
+		return "Example view";
+	}
 
-  async onOpen() {
-    this.component = new Component({
-      target: this.contentEl,
-    });
-  }
+	async onOpen() {
+		this.component = new Component({
+			target: this.contentEl,
+		});
+	}
 
-  async onClose() {
-    this.component.$destroy();
-  }
+	async onClose() {
+		this.component.$destroy();
+	}
 }
