@@ -82,8 +82,6 @@ additional files specific to Obsidian plugin development. Here's an overview:
   command.
 - **manifest.json** - The plugin manifest file that describes your plugin's
   metadata.
-- **LICENSE** - The license file for your plugin.
-- **README.md** - This file, providing instructions on how to use the template.
 
 ## Resources
 
