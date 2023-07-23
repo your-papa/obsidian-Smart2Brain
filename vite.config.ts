@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => {
 				output: {
 					entryFileNames: "main.js",
 					assetFileNames: "styles.css",
+					// sourcemapBaseUrl: 'file:/// [Local path to plugin src folder] /test-vault/.obsidian/plugins/obsidian-svelte-plugin/'
 				},
 				external: [
 					"obsidian",
@@ -43,6 +44,7 @@ export default defineConfig(({ mode }) => {
 			},
 			outDir: setOutDir(mode),
 			emptyOutDir: false,
+			sourcemap: "inline",
 		},
 	};
 });
