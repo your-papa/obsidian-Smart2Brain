@@ -84,6 +84,11 @@ additional files specific to Obsidian plugin development. Here's an overview:
 - **manifest.json** - The plugin manifest file that describes your plugin's
   metadata.
 
+## Source mapping
+To get the source map to load in Obsidian, and thus allowing you to see your Typescript code when debugging, you might need to set the 
+**sourcemapBaseUrl** parameter in **vite.config.ts**. To actual path can be found by adding the folder (test-vault) containing your .map file to the "Filesystem" 
+tab in the debugger. Right-click the map file and select "Copy link address". Set **sourcemapBaseUrl** to the base address.
+
 ## Resources
 
 Here are some resources to help you get started with building plugins for
