@@ -1,6 +1,7 @@
 import { svelte, vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 import builtins from "builtin-modules";
 import { defineConfig } from "vite";
+import { pathToFileURL } from "url";
 
 const setOutDir = (mode: string) => {
 	switch (mode) {
@@ -23,7 +24,9 @@ export default defineConfig(({ mode }) => {
 				output: {
 					entryFileNames: "main.js",
 					assetFileNames: "styles.css",
-					// sourcemapBaseUrl: 'file:/// [Local path to plugin src folder] /test-vault/.obsidian/plugins/obsidian-svelte-plugin/'
+					sourcemapBaseUrl: pathToFileURL(
+						`${__dirname}/test-vault/.obsidian/plugins/obsidian-svelte-plugin/`,
+					).toString(),
 				},
 				external: [
 					"obsidian",
