@@ -1,50 +1,100 @@
 import "./styles.css";
-import { ExampleView, VIEW_TYPE_EXAMPLE } from "./views/ExampleView";
-import { Plugin } from "obsidian";
+import { ChatView, VIEW_TYPE_CHAT } from "./views/ChatView";
+import { App, Modal, Plugin, PluginSettingTab, Setting } from "obsidian";
 
-interface ObsidianNoteConnectionsSettings {
-	mySetting: string;
+interface PluginSettings {
+    mySetting: string;
 }
 
-const DEFAULT_SETTINGS: ObsidianNoteConnectionsSettings = {
-	mySetting: "default",
+const DEFAULT_SETTINGS: PluginSettings = {
+    mySetting: "default",
 };
 
-export default class ObsidianNoteConnections extends Plugin {
-	settings: ObsidianNoteConnectionsSettings;
+export default class BrainPlugin extends Plugin {
+    settings: PluginSettings;
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	}
+    async loadSettings() {
+        this.settings = Object.assign(
+            {},
+            DEFAULT_SETTINGS,
+            await this.loadData()
+        );
+    }
 
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
+    async saveSettings() {
+        await this.saveData(this.settings);
+    }
 
-	async onload() {
-		await this.loadSettings();
+    async onload() {
+        await this.loadSettings();
 
-		this.registerView(VIEW_TYPE_EXAMPLE, (leaf) => new ExampleView(leaf));
+        this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf));
 
-		this.addRibbonIcon("dice", "Activate view", () => {
-			this.activateView();
-		});
-	}
+        this.addRibbonIcon("brain-circuit", "Smart Second Brain", () => {
+            this.activateView();
+        });
 
-	onunload() {
-		console.log("unloading plugin");
-	}
+        this.addSettingTab(new SettingsTab(this.app, this));
+    }
 
-	async activateView() {
-		this.app.workspace.detachLeavesOfType(VIEW_TYPE_EXAMPLE);
+    onunload() {
+        console.log("unloading plugin");
+    }
 
-		await this.app.workspace.getRightLeaf(false).setViewState({
-			type: VIEW_TYPE_EXAMPLE,
-			active: true,
-		});
+    async activateView() {
+        this.app.workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
 
-		this.app.workspace.revealLeaf(
-			this.app.workspace.getLeavesOfType(VIEW_TYPE_EXAMPLE)[0],
-		);
-	}
+        await this.app.workspace.getRightLeaf(false).setViewState({
+            type: VIEW_TYPE_CHAT,
+            active: true,
+        });
+
+        this.app.workspace.revealLeaf(
+            this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0]
+        );
+    }
+}
+
+class SampleModal extends Modal {
+    constructor(app: App) {
+        super(app);
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.setText("Woah!");
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
+}
+
+class SettingsTab extends PluginSettingTab {
+    plugin: BrainPlugin;
+
+    constructor(app: App, plugin: BrainPlugin) {
+        super(app, plugin);
+        this.plugin = plugin;
+    }
+
+    display(): void {
+        const { containerEl } = this;
+
+        containerEl.empty();
+
+        new Setting(containerEl)
+            .setName("Setting #1")
+            .setDesc("It's a secret")
+            .addText((text) =>
+                text
+                    .setPlaceholder("Enter your secret")
+                    .setValue(this.plugin.settings.mySetting)
+                    .onChange(async (value) => {
+                        this.plugin.settings.mySetting = value;
+                        await this.plugin.saveSettings();
+                    })
+            );
+    }
 }
