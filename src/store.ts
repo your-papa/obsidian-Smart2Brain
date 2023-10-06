@@ -5,7 +5,7 @@ export type Message = {
     text: string;
 };
 
-export const chatMessages = writable<Message[]>([
+export let chatUserInput = writable<Message[]>([
     { user: false, text: 'Hello' },
     { user: true, text: 'Hi' },
     { user: false, text: 'How are you?' },
@@ -20,4 +20,3 @@ export const chatMessages = writable<Message[]>([
     { user: true, text: 'Good, you?' },
     { user: false, text: "I'm good, thanks!" },
 ]);
-export const chatUserInput = writable<string>('');

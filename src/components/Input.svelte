@@ -2,27 +2,17 @@
     import MdSend from 'svelte-icons/md/MdSend.svelte';
     import { Notice } from 'obsidian';
     import { chatUserInput } from '../store';
-    import { onMount } from 'svelte';
 
-    let bullshit;
     let inputPlaceholder = 'Chat with your second Brain...';
     let messageText = '';
-    let chatWindow: HTMLElement;
-
-    onMount(async () => {
-        chatWindow = document.querySelector('.chat-window');
-    });
 
     async function sendMessage() {
         if (messageText.trim() !== '') {
             console.log('Sending message: ' + messageText);
-            $chatUserInput = messageText;
-            chatUserInput.subscribe((value) => console.log('User input: ' + value));
-            await bullshit;
+            chatUserInput.update((messages) => [...messages, { text: messageText, user: true }]);
         } else {
             new Notice('Your Second Brain does not understand empty messages!');
         }
-        chatWindow.scrollTop = chatWindow.scrollHeight;
         messageText = '';
     }
 
