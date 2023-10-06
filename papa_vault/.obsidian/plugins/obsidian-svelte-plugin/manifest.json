@@ -1,10 +1,10 @@
 {
-	"id": "obsidian-svelte-plugin",
-	"name": "Obsidian Svelte Plugin",
-	"description": "A powerful Obsidian plugin template that provides a solid foundation for kickstarting your Svelte projects with Obsidian.",
-	"author": "Emilio Toledo",
-	"authorUrl": "https://github.com/emilio-toledo",
-	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
-	"isDesktopOnly": false
+    "id": "smart-second-brain",
+    "name": "Smart Second Brain",
+    "description": "A powerful Obsidian plugin allowing you to combine the power of your notes with the power of intelligence.",
+    "author": "Nicolas Kohl",
+    "authorUrl": "https://github.com/nicobrauchtgit",
+    "version": "0.1.0",
+    "minAppVersion": "0.15.0",
+    "isDesktopOnly": true
 }

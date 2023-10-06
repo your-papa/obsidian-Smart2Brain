@@ -7,6 +7,11 @@ export const VIEW_TYPE_CHAT = "chat-view";
 export class ChatView extends ItemView {
     component: Component;
 
+    constructor(leaf) {
+        super(leaf);
+        this.icon = "message-square";
+    }
+
     getViewType() {
         return VIEW_TYPE_CHAT;
     }
