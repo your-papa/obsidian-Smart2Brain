@@ -1,24 +1,20 @@
-import "./styles.css";
-import { ChatView, VIEW_TYPE_CHAT } from "./views/ChatView";
-import { App, Modal, Plugin, PluginSettingTab, Setting } from "obsidian";
+import './styles.css';
+import { ChatView, VIEW_TYPE_CHAT } from './views/ChatView';
+import { App, Modal, Plugin, PluginSettingTab, Setting } from 'obsidian';
 
 interface PluginSettings {
     mySetting: string;
 }
 
 const DEFAULT_SETTINGS: PluginSettings = {
-    mySetting: "default",
+    mySetting: 'default',
 };
 
 export default class BrainPlugin extends Plugin {
     settings: PluginSettings;
 
     async loadSettings() {
-        this.settings = Object.assign(
-            {},
-            DEFAULT_SETTINGS,
-            await this.loadData()
-        );
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     }
 
     async saveSettings() {
@@ -30,7 +26,7 @@ export default class BrainPlugin extends Plugin {
 
         this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf));
 
-        this.addRibbonIcon("brain-circuit", "Smart Second Brain", () => {
+        this.addRibbonIcon('brain-circuit', 'Smart Second Brain', () => {
             this.activateView();
         });
 
@@ -38,7 +34,7 @@ export default class BrainPlugin extends Plugin {
     }
 
     onunload() {
-        console.log("unloading plugin");
+        console.log('unloading plugin');
     }
 
     async activateView() {
@@ -49,20 +45,15 @@ export default class BrainPlugin extends Plugin {
             active: true,
         });
 
-        this.app.workspace.revealLeaf(
-            this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0]
-        );
+        this.app.workspace.revealLeaf(this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0]);
     }
 }
 
 class SampleModal extends Modal {
-    constructor(app: App) {
-        super(app);
-    }
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.setText("Woah!");
+        contentEl.setText('Woah!');
     }
 
     onClose() {
@@ -85,11 +76,11 @@ class SettingsTab extends PluginSettingTab {
         containerEl.empty();
 
         new Setting(containerEl)
-            .setName("Setting #1")
+            .setName('Setting #1')
             .setDesc("It's a secret")
             .addText((text) =>
                 text
-                    .setPlaceholder("Enter your secret")
+                    .setPlaceholder('Enter your secret')
                     .setValue(this.plugin.settings.mySetting)
                     .onChange(async (value) => {
                         this.plugin.settings.mySetting = value;

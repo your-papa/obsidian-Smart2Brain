@@ -74,7 +74,7 @@
       {
         "id": "95dd5120b30f9eec",
         "type": "tabs",
-        "dimension": 85.86572438162544,
+        "dimension": 75,
         "children": [
           {
             "id": "c7b5cb28a12aebae",
@@ -115,7 +115,7 @@
             }
           },
           {
-            "id": "e3edf790918d82d8",
+            "id": "8cd1c48acae157fd",
             "type": "leaf",
             "state": {
               "type": "chat-view",
@@ -128,7 +128,7 @@
       {
         "id": "70796ec6c1f897d3",
         "type": "tabs",
-        "dimension": 14.13427561837456,
+        "dimension": 25,
         "children": [
           {
             "id": "1f549af365695e7d",
@@ -142,7 +142,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 333.5
+    "width": 377.5
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -152,9 +152,9 @@
       "daily-notes:Open today's daily note": false,
       "templates:Insert template": false,
       "command-palette:Open command palette": false,
-      "smart-second-brain:Smart Second Brain": false
+      "obsidian-svelte-plugin:Smart Second Brain": false
     }
   },
-  "active": "e3edf790918d82d8",
+  "active": "8cd1c48acae157fd",
   "lastOpenFiles": []
 }

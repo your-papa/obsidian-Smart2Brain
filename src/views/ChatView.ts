@@ -1,15 +1,15 @@
-import { ItemView } from "obsidian";
+import { ItemView } from 'obsidian';
 
-import Component from "../components/ChatView.svelte";
+import Component from '../components/ChatView.svelte';
 
-export const VIEW_TYPE_CHAT = "chat-view";
+export const VIEW_TYPE_CHAT = 'chat-view';
 
 export class ChatView extends ItemView {
     component: Component;
 
     constructor(leaf) {
         super(leaf);
-        this.icon = "message-square";
+        this.icon = 'message-square';
     }
 
     getViewType() {
@@ -17,7 +17,7 @@ export class ChatView extends ItemView {
     }
 
     getDisplayText() {
-        return "Chat view";
+        return 'Chat view';
     }
 
     async onOpen() {

@@ -1,18 +1,12 @@
-import { onDestroy } from "svelte";
-import { chatUserInput, chatMessages } from "./store";
+import { onDestroy } from 'svelte';
+import { chatUserInput, chatMessages } from './store';
 
-let unsubscribe = chatUserInput.subscribe(async (message) => {
-    console.log("message" + message);
+const unsubscribe = chatUserInput.subscribe(async (message) => {
+    console.log(`message${message}`);
     message;
-    chatMessages.update((messages) => [
-        ...messages,
-        { user: true, text: message },
-    ]);
-    let answer = await processMessage(message);
-    chatMessages.update((messages) => [
-        ...messages,
-        { user: false, text: answer },
-    ]);
+    chatMessages.update((messages) => [...messages, { user: true, text: message }]);
+    const answer = await processMessage(message);
+    chatMessages.update((messages) => [...messages, { user: false, text: answer }]);
     console.log(chatMessages);
 });
 
