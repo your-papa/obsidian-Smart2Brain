@@ -2,49 +2,19 @@
     import { chatMessages } from '../store';
 </script>
 
-<div class="chat-window">
+<div class="flex-grow w-full overflow-scroll border-2 border-solid rounded-md border-slate-30 mb-1 p-4">
     {#each $chatMessages as message (message.text)}
         {#if message.user}
-            <div class="message user-message">{message.text}</div>
+            <div class="flex justify-end mb-3">
+                <div class="p-2 break-words rounded-t-md rounded-bl-md max-w-[80%] bg-primary text-slate-0">{message.text}</div>
+            </div>
         {:else}
-            <div class="message response-message">{message.text}</div>
+            <div class="mb-3">
+                <div class="p-2 break-words rounded-t-md rounded-br-md w-fit max-w-[80%] bg-secondary text-slate-100">{message.text}</div>
+            </div>
         {/if}
     {/each}
 </div>
 
 <style>
-    .chat-window {
-        width: 100%;
-        border: 1px solid #b3b3b3;
-        border-radius: 1rem;
-        padding: 10px;
-        overflow-y: auto;
-        min-height: calc(100% - 7rem);
-        margin-bottom: 1rem;
-    }
-
-    .message {
-        margin: 10px;
-        margin-left: calc(100% - max-content);
-        padding: 10px;
-        border-radius: 5px;
-        display: inline-block;
-        max-width: 80%;
-        overflow-wrap: break-word;
-        justify-content: space-around;
-    }
-
-    .user-message {
-        background-color: #007bff;
-        margin-left: 30%;
-        color: white;
-        float: right;
-    }
-
-    .response-message {
-        background-color: #f2f2f2;
-        margin-right: 30%;
-        color: black;
-        float: left;
-    }
 </style>

@@ -34,15 +34,9 @@
     }
 </script>
 
-<div class="relative flex items-stretch">
-    <input
-        id="myInput"
-        class="w-full px-4 py-2 border rounded-md focus:border-blue-500 focus:outline-none"
-        placeholder={inputPlaceholder}
-        bind:value={messageText}
-        on:keyup={handleKeyPress}
-    />
-    <button class="px-4 py-2 bg-blue-500 rounded-r-md hover:bg-blue-600 transition duration-300 ease-in-out absolute top-0.5 right-0" on:click={sendMessage}>
+<div class="sticky flex w-full gap-1">
+    <input type="text" class="flex-1" placeholder={inputPlaceholder} bind:value={messageText} on:keyup={handleKeyPress} />
+    <button class="px-4 py-2 rounded-r-md hover:bg-primary transition duration-300 ease-in-out" on:click={sendMessage}>
         <MdSend />
     </button>
 </div>

@@ -50,7 +50,6 @@ export default class BrainPlugin extends Plugin {
 }
 
 class SampleModal extends Modal {
-
     onOpen() {
         const { contentEl } = this;
         contentEl.setText('Woah!');

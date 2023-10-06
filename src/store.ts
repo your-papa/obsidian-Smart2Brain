@@ -11,5 +11,13 @@ export const chatMessages = writable<Message[]>([
     { user: false, text: 'How are you?' },
     { user: true, text: 'Good, you?' },
     { user: false, text: "I'm good, thanks!" },
+    { user: true, text: 'Good, you?' },
+    { user: false, text: "I'm good, thanks!" },
+    { user: true, text: 'Good, you?' },
+    { user: false, text: "I'm good, thanks!" },
+    { user: true, text: 'Good, you?' },
+    { user: false, text: "I'm good, thanks!" },
+    { user: true, text: 'Good, you?' },
+    { user: false, text: "I'm good, thanks!" },
 ]);
 export const chatUserInput = writable<string>('');

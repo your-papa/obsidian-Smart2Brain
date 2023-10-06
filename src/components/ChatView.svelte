@@ -3,6 +3,8 @@
     import MessagesComponent from './Messages.svelte';
 </script>
 
-<h1>Chat View</h1>
-<MessagesComponent />
-<InputComponent />
+<div class="h-full flex flex-col">
+    <h1>Second Brain Interface</h1>
+    <MessagesComponent />
+    <InputComponent />
+</div>
