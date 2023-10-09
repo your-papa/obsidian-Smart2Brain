@@ -14,8 +14,17 @@
               "type": "empty",
               "state": {}
             }
+          },
+          {
+            "id": "c9e0a8473ddb4fbd",
+            "type": "leaf",
+            "state": {
+              "type": "empty",
+              "state": {}
+            }
           }
-        ]
+        ],
+        "currentTab": 1
       }
     ],
     "direction": "vertical"
@@ -74,6 +83,7 @@
       {
         "id": "95dd5120b30f9eec",
         "type": "tabs",
+        "dimension": 85.86572438162544,
         "children": [
           {
             "id": "c7b5cb28a12aebae",
@@ -114,7 +124,7 @@
             }
           },
           {
-            "id": "e2398410e01d32c5",
+            "id": "998100bef2e95233",
             "type": "leaf",
             "state": {
               "type": "chat-view",
@@ -125,8 +135,9 @@
         "currentTab": 3
       },
       {
-        "id": "1f089df92c247c4b",
+        "id": "70796ec6c1f897d3",
         "type": "tabs",
+        "dimension": 14.13427561837456,
         "children": [
           {
             "id": "1f549af365695e7d",
@@ -140,7 +151,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 453.5
+    "width": 372.5
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -153,6 +164,6 @@
       "smart-second-brain:Smart Second Brain": false
     }
   },
-  "active": "e2398410e01d32c5",
+  "active": "998100bef2e95233",
   "lastOpenFiles": []
 }

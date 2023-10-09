@@ -1,22 +1,8 @@
 import { writable } from 'svelte/store';
 
 export type Message = {
-    user: boolean;
-    text: string;
+    role: 'system' | 'assistant' | 'user';
+    content: string;
 };
 
-export let chatUserInput = writable<Message[]>([
-    { user: false, text: 'Hello' },
-    { user: true, text: 'Hi' },
-    { user: false, text: 'How are you?' },
-    { user: true, text: 'Good, you?' },
-    { user: false, text: "I'm good, thanks!" },
-    { user: true, text: 'Good, you?' },
-    { user: false, text: "I'm good, thanks!" },
-    { user: true, text: 'Good, you?' },
-    { user: false, text: "I'm good, thanks!" },
-    { user: true, text: 'Good, you?' },
-    { user: false, text: "I'm good, thanks!" },
-    { user: true, text: 'Good, you?' },
-    { user: false, text: "I'm good, thanks!" },
-]);
+export let messages = writable<Message[]>([{ role: 'system', content: 'Hi, this is your Second Brain!' }]);
