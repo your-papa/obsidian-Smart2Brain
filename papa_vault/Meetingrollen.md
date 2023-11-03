@@ -11,6 +11,7 @@
 - Roadmap
 - Organisatorische Fragen
 
+
 ## Design updates 20min:
 
 - CPO

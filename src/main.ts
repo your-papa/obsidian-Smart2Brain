@@ -1,13 +1,19 @@
 import './styles.css';
+import { ChatModal } from './views/ChatModal';
+import Input from './components/Input.svelte';
 import { ChatView, VIEW_TYPE_CHAT } from './views/ChatView';
-import { App, Modal, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, FuzzySuggestModal, Modal, Notice, Plugin, TFile, MarkdownRenderer } from 'obsidian';
+import SettingsTab from './views/Settings';
 
 interface PluginSettings {
-    mySetting: string;
+    AIcolor: string;
+    UserColor: string;
+    llm: string;
 }
 
-const DEFAULT_SETTINGS: PluginSettings = {
-    mySetting: 'default',
+export const DEFAULT_SETTINGS: Partial<PluginSettings> = {
+    AIcolor: '#82c8f6',
+    UserColor: '#8e5eef',
 };
 
 export default class BrainPlugin extends Plugin {
@@ -24,13 +30,29 @@ export default class BrainPlugin extends Plugin {
     async onload() {
         await this.loadSettings();
 
-        this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf));
+        this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(app, leaf, this.settings.AIcolor, this.settings.UserColor));
 
         this.addRibbonIcon('brain-circuit', 'Smart Second Brain', () => {
             this.activateView();
         });
 
         this.addSettingTab(new SettingsTab(this.app, this));
+
+        this.addCommand({
+            id: 'chat-modal',
+            name: 'Chat with AI',
+            callback: () => {
+                new ChatModal(this.app).open();
+            },
+        });
+
+        this.addCommand({
+            id: 'find-files',
+            name: 'ff',
+            callback: () => {
+                new FileSelectModal(this.app).open();
+            },
+        });
     }
 
     onunload() {
@@ -49,42 +71,20 @@ export default class BrainPlugin extends Plugin {
     }
 }
 
-class SampleModal extends Modal {
-    onOpen() {
-        const { contentEl } = this;
-        contentEl.setText('Woah!');
+export class FileSelectModal extends FuzzySuggestModal<TFile> {
+    constructor(app: App) {
+        super(app);
+        this.app = app;
+        this.setPlaceholder('Type the name of a file...');
     }
-
-    onClose() {
-        const { contentEl } = this;
-        contentEl.empty();
+    getItems(): TFile[] {
+        return this.app.vault.getMarkdownFiles().sort((a, b) => a.basename.localeCompare(b.basename));
     }
-}
-
-class SettingsTab extends PluginSettingTab {
-    plugin: BrainPlugin;
-
-    constructor(app: App, plugin: BrainPlugin) {
-        super(app, plugin);
-        this.plugin = plugin;
+    getItemText(item: TFile): string {
+        return item.basename;
     }
-
-    display(): void {
-        const { containerEl } = this;
-
-        containerEl.empty();
-
-        new Setting(containerEl)
-            .setName('Setting #1')
-            .setDesc("It's a secret")
-            .addText((text) =>
-                text
-                    .setPlaceholder('Enter your secret')
-                    .setValue(this.plugin.settings.mySetting)
-                    .onChange(async (value) => {
-                        this.plugin.settings.mySetting = value;
-                        await this.plugin.saveSettings();
-                    })
-            );
+    onChooseItem(file: TFile) {
+        const elem = document.getElementById('chat-view-user-input-element') as HTMLInputElement;
+        elem.value = elem.value + `[${file.basename}]]`;
     }
 }

@@ -1,2 +1,0 @@
-[[Studienprojekt - WiGePa]]
-[[Wiederholung Anforderungen]]

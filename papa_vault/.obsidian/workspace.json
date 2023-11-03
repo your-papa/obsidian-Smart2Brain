@@ -4,27 +4,22 @@
     "type": "split",
     "children": [
       {
-        "id": "68694ac5a4e737f2",
+        "id": "0a4b52cf69489fdd",
         "type": "tabs",
         "children": [
           {
-            "id": "921fa673bcda5bd8",
+            "id": "d3fb785b603a910b",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {}
-            }
-          },
-          {
-            "id": "c9e0a8473ddb4fbd",
-            "type": "leaf",
-            "state": {
-              "type": "empty",
-              "state": {}
+              "type": "markdown",
+              "state": {
+                "file": "test/Labor Agile Methoden.md",
+                "mode": "source",
+                "source": false
+              }
             }
           }
-        ],
-        "currentTab": 1
+        ]
       }
     ],
     "direction": "vertical"
@@ -83,7 +78,7 @@
       {
         "id": "95dd5120b30f9eec",
         "type": "tabs",
-        "dimension": 85.86572438162544,
+        "dimension": 81.4986123959297,
         "children": [
           {
             "id": "c7b5cb28a12aebae",
@@ -91,6 +86,7 @@
             "state": {
               "type": "backlink",
               "state": {
+                "file": "test/Labor Agile Methoden.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -107,6 +103,7 @@
             "state": {
               "type": "outgoing-link",
               "state": {
+                "file": "test/Labor Agile Methoden.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               }
@@ -124,7 +121,7 @@
             }
           },
           {
-            "id": "998100bef2e95233",
+            "id": "c3814a52c566ea0d",
             "type": "leaf",
             "state": {
               "type": "chat-view",
@@ -137,21 +134,23 @@
       {
         "id": "70796ec6c1f897d3",
         "type": "tabs",
-        "dimension": 14.13427561837456,
+        "dimension": 18.501387604070306,
         "children": [
           {
             "id": "1f549af365695e7d",
             "type": "leaf",
             "state": {
               "type": "outline",
-              "state": {}
+              "state": {
+                "file": "test/Labor Agile Methoden.md"
+              }
             }
           }
         ]
       }
     ],
     "direction": "horizontal",
-    "width": 372.5
+    "width": 503.5
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -164,6 +163,10 @@
       "smart-second-brain:Smart Second Brain": false
     }
   },
-  "active": "998100bef2e95233",
-  "lastOpenFiles": []
+  "active": "c3814a52c566ea0d",
+  "lastOpenFiles": [
+    "Meetingrollen.md",
+    "test",
+    "Literaturliste.pdf"
+  ]
 }
