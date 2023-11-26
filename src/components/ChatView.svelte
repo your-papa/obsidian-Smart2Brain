@@ -9,6 +9,6 @@
 
 <div class="h-full flex flex-col --background-modifier-border">
     <h1>Second Brain Interface</h1>
-    <MessagesComponent {AiBubbleColor} {UserBubbleColor}/>
-    <InputComponent {app}/>
+    <MessagesComponent {AiBubbleColor} {UserBubbleColor} />
+    <InputComponent {app} />
 </div>

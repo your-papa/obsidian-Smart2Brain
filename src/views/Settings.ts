@@ -19,23 +19,23 @@ export default class SettingsTab extends PluginSettingTab {
             .setName('AI Color')
             .addExtraButton((value) =>
                 value.setIcon('reset').onClick(async () => {
-                    this.plugin.settings.AIcolor = DEFAULT_SETTINGS.AIcolor;
+                    this.plugin.data.AIcolor = DEFAULT_SETTINGS.AIcolor;
                     await this.plugin.saveSettings();
                 })
             )
             .addColorPicker((color) =>
-                color.setValue(this.plugin.settings.AIcolor).onChange(async (value) => {
-                    this.plugin.settings.AIcolor = value;
+                color.setValue(this.plugin.data.AIcolor).onChange(async (value) => {
+                    this.plugin.data.AIcolor = value;
                     await this.plugin.saveSettings();
                 })
             );
 
         new Setting(containerEl)
             .setName('User Color')
-            .addExtraButton((value) => value.setIcon('reset').onClick(() => (this.plugin.settings.UserColor = DEFAULT_SETTINGS.UserColor)))
+            .addExtraButton((value) => value.setIcon('reset').onClick(() => (this.plugin.data.UserColor = DEFAULT_SETTINGS.UserColor)))
             .addColorPicker((color) =>
-                color.setValue(this.plugin.settings.UserColor).onChange(async (value) => {
-                    this.plugin.settings.UserColor = value;
+                color.setValue(this.plugin.data.UserColor).onChange(async (value) => {
+                    this.plugin.data.UserColor = value;
                     await this.plugin.saveSettings();
                 })
             );
@@ -46,11 +46,21 @@ export default class SettingsTab extends PluginSettingTab {
                     LLama: 'LLama',
                     Anthropic: 'Anthropic',
                 })
-                .setValue(this.plugin.settings.llm)
+                .setValue(this.plugin.data.llm)
                 .onChange(async (value) => {
-                    this.plugin.settings.llm = value;
+                    this.plugin.data.llm = value;
                     await this.plugin.saveSettings();
                 });
         });
+
+        new Setting(containerEl).setName('OpenAI API Key').addText((text) =>
+            text
+                .setPlaceholder('OpenAI API Key')
+                .setValue(this.plugin.data.secondBrain.openAIApiKey || '')
+                .onChange(async (value) => {
+                    this.plugin.data.secondBrain.openAIApiKey = value;
+                    await this.plugin.saveSettings();
+                })
+        );
     }
 }

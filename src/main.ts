@@ -1,36 +1,56 @@
 import './styles.css';
 import { ChatModal } from './views/ChatModal';
-import Input from './components/Input.svelte';
 import { ChatView, VIEW_TYPE_CHAT } from './views/ChatView';
-import { App, FuzzySuggestModal, Modal, Notice, Plugin, TFile, MarkdownRenderer } from 'obsidian';
 import SettingsTab from './views/Settings';
+import { FuzzySuggestModal, TFile, App, Plugin } from 'obsidian';
+import { secondBrain } from './store';
+import { SecondBrain, obsidianDocumentLoader, type SecondBrainData } from 'second-brain-ts';
 
-interface PluginSettings {
+interface PluginData {
     AIcolor: string;
     UserColor: string;
     llm: string;
+    secondBrain: SecondBrainData;
 }
 
-export const DEFAULT_SETTINGS: Partial<PluginSettings> = {
-    AIcolor: '#82c8f6',
-    UserColor: '#8e5eef',
+const getThemeColor = (name: string) => {
+    return getComputedStyle(document.body).getPropertyValue(name);
+};
+
+export const DEFAULT_SETTINGS: Partial<PluginData> = {
+    AIcolor: getThemeColor('--color-accent'),
+    UserColor: getThemeColor('--color-base-40'),
+    secondBrain: {
+        openAIApiKey: 'Your key',
+    },
 };
 
 export default class BrainPlugin extends Plugin {
-    settings: PluginSettings;
+    data: PluginData;
 
     async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        this.data = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     }
 
     async saveSettings() {
-        await this.saveData(this.settings);
+        await this.saveData(this.data);
     }
 
     async onload() {
         await this.loadSettings();
+        secondBrain.set(await SecondBrain.loadFromData(this.data.secondBrain));
 
-        this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(app, leaf, this.settings.AIcolor, this.settings.UserColor));
+        this.app.vault.on('modify', (file: TAbstractFile) => {
+            secondBrain.subscribe(async (secondBrain) => {
+                console.log('File modified, reloading', file.basename);
+                const docs = await obsidianDocumentLoader(this.app);
+                await secondBrain.embedDocuments(docs);
+                this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
+                await this.saveSettings();
+            });
+        });
+
+        this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(app, leaf, this.data.AIcolor, this.data.UserColor));
 
         this.addRibbonIcon('brain-circuit', 'Smart Second Brain', () => {
             this.activateView();

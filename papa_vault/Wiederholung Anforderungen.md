@@ -1,3 +1,10 @@
+---
+aliases:
+  - WA
+tags:
+  - test
+category: research
+---
  ![[Literaturliste.pdf]]
 
 • Wiederholung gute Anforderungen & agile Anforderungsdefinitionstechniken (User Stories & Alternativen wie z.B. Jobs-to-be-done, Akzeptanzkriterien)

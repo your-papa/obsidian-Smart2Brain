@@ -1,6 +1,6 @@
 [
   "obsidian-svelte-plugin",
-  "hot-reload",
   "obsidian-minimal-settings",
+  "hot-reload",
   "smart-second-brain"
 ]

@@ -1,11 +1,18 @@
+---
+aliases:
+  - roles
+tags:
+  - test
+related: "[[Wiederholung Anforderungen]]"
+---
 ==Mandatory für die Customer Calls==
 
-==**CEO - Projektleitung**==
+# CEO - Projektleitung
 
 - Organisationsmanagement
 - Produkt-Pitch
 
-==**COO**==
+# COO
 
 - Kundenkommunikation
     
@@ -22,17 +29,17 @@
     - Unterstützung COO
     - Globales Zeitmanagement mit lokalem Zeitmanagment
     - Protokollierung
-
-==**CPO**==
+	
+# CPO
 
 - Produktmanager / Anforderungsmanagement (Priorisierung, Koordinierung)
     
 - Kommunikation mit den Teamleads (bzgl. Anforderungen - Fragen / Entscheidungen)
     
-    **Design Team**
-    
+## **Design Team**
+lorem ipsum
 
-==**CTO**==
+# CTO
 
 - Taskmanagement
     
@@ -44,20 +51,20 @@
     
 - Kommunikation mit den Teamleads (bzgl. Anforderungen - Fragen / Entscheidungen)
     
-    **CTO Assistant**
+## CTO Assistant
     
-    - Unterstützung des CTO
+- Unterstützung des CTO
     
-    **Feature Teams**
+## Feature Teams
     
 
-**Integration Team**
+## **Integration Team**
 
 - Kommunikation mit Team Leads der Feature Teams & dem Design Team
 - Integration aller Features
 - QAs der gesamten Solution
 
-**Allgemeinanforderungen an jedes Team**
+## **Allgemeinanforderungen an jedes Team**
 
 - Team Lead - Kontaktperson für Organisatorisches / Verantwortung fürs Team
 - ==Hauptverantwortliche Person fürs Anforderungsmanagement== - Ausarbeitung der Anforderungen / Roadmap
