@@ -10,6 +10,7 @@ interface PluginData {
     AIcolor: string;
     UserColor: string;
     llm: string;
+    embeddedAllOnce: boolean;
     secondBrain: SecondBrainData;
 }
 
@@ -40,11 +41,20 @@ export default class BrainPlugin extends Plugin {
         await this.loadSettings();
         secondBrain.set(await SecondBrain.loadFromData(this.data.secondBrain));
 
-        this.app.vault.on('modify', (file: TAbstractFile) => {
+        this.app.vault.on('modify', (file: TFile) => {
+            setTimeout(async () => {
+                secondBrain.subscribe(async (secondBrain) => {
+                    const docs = await obsidianDocumentLoader(this.app, [file]);
+                    await secondBrain.embedDocuments(docs);
+                    this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
+                    await this.saveSettings();
+                });
+            }, 1000);
+        });
+        this.app.vault.on('delete', (file: TFile) => {
             secondBrain.subscribe(async (secondBrain) => {
-                console.log('File modified, reloading', file.basename);
-                const docs = await obsidianDocumentLoader(this.app);
-                await secondBrain.embedDocuments(docs);
+                const docs = await obsidianDocumentLoader(this.app, [file]);
+                await secondBrain.removeDocuments(docs);
                 this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
                 await this.saveSettings();
             });
@@ -73,6 +83,19 @@ export default class BrainPlugin extends Plugin {
                 new FileSelectModal(this.app).open();
             },
         });
+
+        if (!this.data.embeddedAllOnce) {
+            setTimeout(() => {
+                secondBrain.subscribe(async (secondBrain) => {
+                    const docs = await obsidianDocumentLoader(this.app, this.app.vault.getMarkdownFiles());
+                    await secondBrain.embedDocuments(docs);
+                    this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
+                    await this.saveSettings();
+                });
+            }, 1000);
+            this.data.embeddedAllOnce = true;
+            await this.saveSettings();
+        }
     }
 
     onunload() {
