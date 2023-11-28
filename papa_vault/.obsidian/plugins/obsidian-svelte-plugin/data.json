@@ -1,8 +1,0 @@
-{
-  "AIcolor": "hsl(83, 36%, 53%)",
-  "UserColor": "#bdbdbd",
-  "secondBrain": {
-    "openAIApiKey": "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",
-    "vectorStoreJson": "{\"internalDocumentIDStore\":{\"internalIdToId\":[]},\"index\":{\"indexes\":{\"metadata.initialPageContent\":{\"type\":\"Radix\",\"node\":{\"w\":\"\",\"s\":\"\",\"c\":{},\"d\":[],\"e\":false},\"isArray\":false}},\"vectorIndexes\":{\"embedding\":{\"size\":1536,\"vectors\":{}}},\"searchableProperties\":[\"metadata.initialPageContent\",\"embedding\"],\"searchablePropertiesWithTypes\":{\"metadata.initialPageContent\":\"string\",\"embedding\":\"vector[1536]\"},\"frequencies\":{\"metadata.initialPageContent\":{}},\"tokenOccurrences\":{\"metadata.initialPageContent\":{}},\"avgFieldLength\":{\"metadata.initialPageContent\":0},\"fieldLengths\":{\"metadata.initialPageContent\":{}}},\"docs\":{\"docs\":{},\"count\":0},\"sorting\":{\"language\":\"english\",\"sortableProperties\":[\"metadata.initialPageContent\"],\"sortablePropertiesWithTypes\":{\"metadata.initialPageContent\":\"string\"},\"sorts\":{\"metadata.initialPageContent\":{\"docs\":{},\"orderedDocs\":[],\"type\":\"string\"}},\"enabled\":true,\"isSorted\":true},\"language\":\"english\"}"
-  }
-}

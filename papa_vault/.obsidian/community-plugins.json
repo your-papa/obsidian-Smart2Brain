@@ -2,5 +2,6 @@
   "obsidian-svelte-plugin",
   "obsidian-minimal-settings",
   "hot-reload",
-  "smart-second-brain"
+  "smart-second-brain",
+  "dataview"
 ]
