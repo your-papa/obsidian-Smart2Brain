@@ -15,7 +15,7 @@ interface PluginData {
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
     secondBrain: {
-        openAIApiKey: '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',
+        openAIApiKey: 'Your key',
     },
 };
 
@@ -87,7 +87,7 @@ export default class BrainPlugin extends Plugin {
                     this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
                     await this.saveSettings();
                 });
-            }, 1000);
+            }, 3000);
             this.data.embeddedAllOnce = true;
             await this.saveSettings();
         }
