@@ -1,5 +1,5 @@
 # Meetings:
-## Generelles Projektupdate 20min:
+## Generelles Projektupdate 10min:
 
 - C-Suite
 - Protokollant/in

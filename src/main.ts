@@ -22,7 +22,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     AIcolor: getThemeColor('--color-accent'),
     UserColor: getThemeColor('--color-base-40'),
     secondBrain: {
-        openAIApiKey: 'Your key',
+        openAIApiKey: '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',
     },
 };
 
