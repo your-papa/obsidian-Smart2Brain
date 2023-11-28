@@ -6,8 +6,6 @@
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { FileSelectModal } from '../main';
 
-    export let app;
-
     let inputPlaceholder = 'Chat with your second Brain...';
     let messageText = '';
     let isProcesccing: boolean;

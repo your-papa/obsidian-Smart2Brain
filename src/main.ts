@@ -5,22 +5,15 @@ import SettingsTab from './views/Settings';
 import { FuzzySuggestModal, TFile, App, Plugin } from 'obsidian';
 import { secondBrain } from './store';
 import { SecondBrain, obsidianDocumentLoader, type SecondBrainData } from 'second-brain-ts';
+import { plugin } from './store';
 
 interface PluginData {
-    AIcolor: string;
-    UserColor: string;
     llm: string;
     embeddedAllOnce: boolean;
     secondBrain: SecondBrainData;
 }
 
-const getThemeColor = (name: string) => {
-    return getComputedStyle(document.body).getPropertyValue(name);
-};
-
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
-    AIcolor: getThemeColor('--color-accent'),
-    UserColor: getThemeColor('--color-base-40'),
     secondBrain: {
         openAIApiKey: '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',
     },
@@ -41,6 +34,8 @@ export default class BrainPlugin extends Plugin {
         await this.loadSettings();
         secondBrain.set(await SecondBrain.loadFromData(this.data.secondBrain));
 
+        plugin.set(this);
+
         this.app.vault.on('modify', (file: TFile) => {
             setTimeout(async () => {
                 secondBrain.subscribe(async (secondBrain) => {
@@ -60,7 +55,7 @@ export default class BrainPlugin extends Plugin {
             });
         });
 
-        this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(app, leaf, this.data.AIcolor, this.data.UserColor));
+        this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf));
 
         this.addRibbonIcon('brain-circuit', 'Smart Second Brain', () => {
             this.activateView();
