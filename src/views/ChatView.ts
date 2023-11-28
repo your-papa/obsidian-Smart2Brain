@@ -1,4 +1,4 @@
-import { App, ItemView, MarkdownRenderer, WorkspaceLeaf } from 'obsidian';
+import { App, ItemView, WorkspaceLeaf } from 'obsidian';
 
 import ChatViewComponent from '../components/ChatView.svelte';
 
@@ -9,11 +9,8 @@ export class ChatView extends ItemView {
     AiBubbleColor: string;
     UserBubbleColor: string;
 
-    constructor(app: App, leaf: WorkspaceLeaf, AiBubbleColor: string, UserBubbleColor: string) {
+    constructor(leaf: WorkspaceLeaf) {
         super(leaf);
-        this.app = app;
-        this.AiBubbleColor = AiBubbleColor;
-        this.UserBubbleColor = UserBubbleColor;
         this.icon = 'message-square';
     }
 
@@ -28,11 +25,6 @@ export class ChatView extends ItemView {
     async onOpen() {
         this.component = new ChatViewComponent({
             target: this.contentEl,
-            props: {
-                app: this.app,
-                AiBubbleColor: this.AiBubbleColor,
-                UserBubbleColor: this.UserBubbleColor,
-            },
         });
     }
 
