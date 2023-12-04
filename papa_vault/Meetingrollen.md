@@ -1,3 +1,4 @@
+
 # Meetings:
 ## Generelles Projektupdate 20min:
 
@@ -49,3 +50,5 @@ Stellt euch bei eurem ersten Meeting alle mit Namen und Firma vor.
 Ihr müsst keine 20min füllen! Sollte es keinen Fortschritt geben, könnt ihr das Meeting beenden oder vorab Bescheid geben bei allen, vor allem dem Kunden Marc und dann canceln.
 
 Tauscht euch aus über das was ihr erreicht habt und stellt Fragen bzgl. den Anforderungen und fragt nach Feedback.
+
+# Test

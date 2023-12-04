@@ -4,11 +4,11 @@
     "type": "split",
     "children": [
       {
-        "id": "f8d4c8f5d41c081d",
+        "id": "5291b2f5e4b75c18",
         "type": "tabs",
         "children": [
           {
-            "id": "cf97f1a33a31a868",
+            "id": "6f22fda87974d1f5",
             "type": "leaf",
             "state": {
               "type": "markdown",
@@ -150,7 +150,7 @@
             }
           },
           {
-            "id": "87ca6eeabd098229",
+            "id": "a98d5513cf959389",
             "type": "leaf",
             "state": {
               "type": "chat-view",
@@ -175,19 +175,19 @@
       "smart-second-brain:Smart Second Brain": false
     }
   },
-  "active": "87ca6eeabd098229",
+  "active": "6f22fda87974d1f5",
   "lastOpenFiles": [
-    "Rollen.md",
     "Meetingrollen.md",
-    "Studienprojekt - WiGePa.md",
-    "Wiederholung Anforderungen.md",
+    "Rollen.md",
+    "Rollenbeschreibung.md",
     "WiGePa Meeting 19.09..md",
+    "Wiederholung Anforderungen.md",
+    "Studienprojekt - WiGePa.md",
     "Literaturliste.pdf",
     "test/Labor Agile Methoden.md",
     "test",
     "Untitled.md",
     "Untitled 1.md",
-    "Rollenbeschreibung.md",
     "ref^^.md"
   ]
 }
