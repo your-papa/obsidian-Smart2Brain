@@ -24,10 +24,21 @@
             // let message: Message = { role: 'user', content: messageText };
             let message = messageText;
             messageText = '';
+            let chatHistory = [];
+            messages.subscribe((messages) => {
+                chatHistory = messages.map((chatMessage) => {
+                if(chatMessage.role === "system")
+                    return;
+                if (chatMessage.role === "user") 
+                    return `Human: ${chatMessage.content}`;
+                if (chatMessage.role === "assistant") 
+                    return `Assistant: ${chatMessage.content}`;
+                return `${chatMessage.content}`;
+                })});
             messages.update((messages) => [...messages, { role: 'user', content: message }]);
-            console.log($messages);
             secondBrain.subscribe(async (secondBrain) => {
-                const res = await secondBrain.runRAG(message);
+                chatHistory.pop()
+                const res = await secondBrain.runRAG({query: message, chatHistory: chatHistory.join("\n")});
                 if (res) {
                     messages.update((messages) => [...messages, { role: 'assistant', content: res }]);
                 }

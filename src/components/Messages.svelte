@@ -4,7 +4,7 @@
     import MdLibraryBooks from 'svelte-icons/md/MdLibraryBooks.svelte';
     import Electron from 'electron';
     import type { MouseEventHandler } from 'svelte/elements';
-    import { Keymap, MarkdownRenderer, Notice, htmlToMarkdown } from 'obsidian';
+    import { MarkdownRenderer, Notice, htmlToMarkdown } from 'obsidian';
     import { plugin } from '../store';
     import type { Action } from 'svelte/action';
 
@@ -24,20 +24,8 @@
         return;
     }
 
-    function test() {
-        const link_tfile = $plugin.app.metadataCache.getFirstLinkpathDest('Meetingrollen', "/");
-        const mod = Keymap.isModEvent(event);
-        const leaf = $plugin.app.workspace.getLeaf(mod);
-        leaf.openFile(link_tfile);
-    }
-
    const html:Action<HTMLSpanElement, string> = (node: HTMLSpanElement, content: string) => {
-        node.click = () => {          
-            const link_tfile = $plugin.app.metadataCache.getFirstLinkpathDest('Meetingrollen#Test', "/");
-          
-            const leaf = $plugin.app.workspace.getLeaf(mod);
-            leaf.openFile(link_tfile);}
-        const inhalt = MarkdownRenderer.render($plugin.app, htmlToMarkdown(content), node, '', $plugin);
+        MarkdownRenderer.render($plugin.app, htmlToMarkdown(content), node, '', $plugin);
         return 
     }
     
@@ -47,7 +35,7 @@
     {#each $messages as message (message.content)}
         {#if message.role === 'user'}
             <div class="flex justify-end mb-3">
-                <button class="p-2 break-words rounded-t-md rounded-bl-md max-w-[80%] text-slate-0" style="background: {UserColor};" on:click={test}></button>
+                <p class="p-2 break-words rounded-t-md rounded-bl-md max-w-[80%] text-slate-0" style="background: {UserColor};" use:html={message.content}></p>
             </div>
         {:else}
             <div class="mb-3">
