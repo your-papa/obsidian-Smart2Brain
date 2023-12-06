@@ -1,8 +1,8 @@
 import './styles.css';
 import { ChatModal } from './views/ChatModal';
-import { ChatView, VIEW_TYPE_CHAT } from './views/ChatView';
+import { ChatView, VIEW_TYPE_CHAT, DEFAULT_DATA } from './views/ChatView';
 import SettingsTab from './views/Settings';
-import { FuzzySuggestModal, TFile, App, Plugin } from 'obsidian';
+import { FuzzySuggestModal, TFile, App, Plugin, type ViewState } from 'obsidian';
 import { secondBrain } from './store';
 import { SecondBrain, obsidianDocumentLoader, type SecondBrainData } from 'second-brain-ts';
 import { plugin } from './store';
@@ -15,12 +15,13 @@ interface PluginData {
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
     secondBrain: {
-        openAIApiKey: 'Your key',
+        openAIApiKey: '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',
     },
 };
 
 export default class BrainPlugin extends Plugin {
     data: PluginData;
+    chatView: ChatView;
 
     async loadSettings() {
         this.data = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -32,9 +33,20 @@ export default class BrainPlugin extends Plugin {
 
     async onload() {
         await this.loadSettings();
-        secondBrain.set(await SecondBrain.loadFromData(this.data.secondBrain));
-
         plugin.set(this);
+        secondBrain.set(SecondBrain.loadFromData(this.data.secondBrain));
+
+        if (!this.data.embeddedAllOnce) {
+            setTimeout(() => {
+                secondBrain.subscribe(async (secondBrain) => {
+                    const docs = await obsidianDocumentLoader(this.app, this.app.vault.getMarkdownFiles());
+                    await secondBrain.embedDocuments(docs);
+                    this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
+                    this.data.embeddedAllOnce = true;
+                    await this.saveSettings();
+                });
+            }, 1000);
+        }
 
         this.app.vault.on('modify', (file: TFile) => {
             setTimeout(async () => {
@@ -55,7 +67,10 @@ export default class BrainPlugin extends Plugin {
             });
         });
 
-        this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf));
+        this.registerView(VIEW_TYPE_CHAT, (leaf) => {
+            this.chatView = new ChatView(leaf);
+            return this.chatView;
+        });
 
         this.addRibbonIcon('brain-circuit', 'Smart Second Brain', () => {
             this.activateView();
@@ -78,18 +93,6 @@ export default class BrainPlugin extends Plugin {
                 new FileSelectModal(this.app).open();
             },
         });
-
-        if (!this.data.embeddedAllOnce) {
-            setTimeout(() => {
-                secondBrain.subscribe(async (secondBrain) => {
-                    const docs = await obsidianDocumentLoader(this.app, this.app.vault.getMarkdownFiles());
-                    await secondBrain.embedDocuments(docs);
-                    this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
-                    this.data.embeddedAllOnce = true;
-                    await this.saveSettings();
-                });
-            }, 1000);
-        }
     }
 
     onunload() {
@@ -99,11 +102,14 @@ export default class BrainPlugin extends Plugin {
     async activateView() {
         this.app.workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
 
-        await this.app.workspace.getRightLeaf(false).setViewState({
+        const file = await this.app.vault.create(`Chat ${window.moment().format('YY-MM-DD hh.mm.ss')}.md`, DEFAULT_DATA);
+        const leaf = this.app.workspace.getLeaf('tab');
+        await leaf.openFile(file, { active: true });
+        leaf.setViewState({
             type: VIEW_TYPE_CHAT,
-            active: true,
-        });
-
+            state: leaf.view.getState(),
+            popstate: true,
+        } as ViewState);
         this.app.workspace.revealLeaf(this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0]);
     }
 }

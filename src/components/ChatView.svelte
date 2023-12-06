@@ -4,7 +4,6 @@
 </script>
 
 <div class="h-full flex flex-col --background-modifier-border">
-    <h1>Second Brain Interface</h1>
-    <MessagesComponent/>
-    <InputComponent/>
+    <MessagesComponent />
+    <InputComponent />
 </div>

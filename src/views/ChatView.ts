@@ -1,13 +1,16 @@
-import { App, ItemView, WorkspaceLeaf } from 'obsidian';
+import { WorkspaceLeaf, type HoverParent, HoverPopover, TextFileView, TFile } from 'obsidian';
 
 import ChatViewComponent from '../components/ChatView.svelte';
+import { plugin } from '../store';
 
 export const VIEW_TYPE_CHAT = 'chat-view';
 
-export class ChatView extends ItemView {
+export const DEFAULT_DATA = '';
+
+export class ChatView extends TextFileView {
     component: ChatViewComponent;
-    AiBubbleColor: string;
-    UserBubbleColor: string;
+    hoverPopover: HoverPopover | null;
+    data: string = DEFAULT_DATA;
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);
@@ -18,17 +21,42 @@ export class ChatView extends ItemView {
         return VIEW_TYPE_CHAT;
     }
 
-    getDisplayText() {
-        return 'Chat view';
+    setViewData(data: string, clear?: boolean): void {
+        this.data = data;
+
+        if (clear) {
+            this.clear();
+        }
     }
 
-    async onOpen() {
+    getViewData(): string {
+        return this.data;
+    }
+
+    clear(): void {
+        this.setViewData(DEFAULT_DATA);
+        this.component.$destroy();
+    }
+
+    getDisplayText() {
+        return 'Second Brain';
+    }
+
+    async onLoadFile(file: TFile) {
+        this.file = file;
+        this.render();
+    }
+
+    async onUnloadFile(file: TFile): Promise<void> {
+        this.clear();
+    }
+
+    async render() {
+        let fileData = await this.app.vault.read(this.file);
+        this.setViewData(fileData);
+
         this.component = new ChatViewComponent({
             target: this.contentEl,
         });
-    }
-
-    async onClose() {
-        this.component.$destroy();
     }
 }
