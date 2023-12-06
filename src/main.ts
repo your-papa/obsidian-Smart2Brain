@@ -85,11 +85,10 @@ export default class BrainPlugin extends Plugin {
                     const docs = await obsidianDocumentLoader(this.app, this.app.vault.getMarkdownFiles());
                     await secondBrain.embedDocuments(docs);
                     this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
+                    this.data.embeddedAllOnce = true;
                     await this.saveSettings();
                 });
-            }, 3000);
-            this.data.embeddedAllOnce = true;
-            await this.saveSettings();
+            }, 1000);
         }
     }
 

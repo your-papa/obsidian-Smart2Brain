@@ -6,6 +6,7 @@
     import type { MouseEventHandler } from 'svelte/elements';
     import { MarkdownRenderer, Notice } from 'obsidian';
     import { plugin } from '../store';
+    import type { Action } from 'svelte/action';
 
     const getThemeColor = (name: string) => {
         return getComputedStyle(document.body).getPropertyValue(name);
@@ -23,17 +24,13 @@
         return;
     }
 
-    function absolutePath(file: string) {
-        const vaultName = this.app.vault.getName();
-        return 'obsidian://open?vault=' + encodeURIComponent(vaultName) + String.raw`&file=` + encodeURIComponent(file);
-    }
-
-    const html = (node: HTMLElement, content: string) => {
-        MarkdownRenderer.render($plugin.app, content, node, '', $plugin);
+    const html: Action<HTMLSpanElement, string> = (node: HTMLSpanElement, content: string) => {
+        MarkdownRenderer.render($plugin.app, htmlToMarkdown(content), node, '', $plugin);
+        return;
     };
 </script>
 
-<div class="chat-window flex-grow w-full overflow-scroll border-2 border-solid rounded-md border-slate-30 mb-1 p-4">
+<div class="chat-window flex-grow w-full overflow-scroll border-2 border-solid roundedmd border-slate-30 mb-1 p-4">
     {#each $messages as message (message.content)}
         {#if message.role === 'user'}
             <div class="flex justify-end mb-3">
