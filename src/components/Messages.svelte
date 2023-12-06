@@ -116,7 +116,7 @@
     {#each $messages as message (message.content)}
         {#if message.role === 'user'}
             <div class="flex justify-end mb-3">
-                <div class="bg-[--background-secondary] pl-4 pr-4 rounded-t-lg rounded-bl-lg max-w-[80%]">
+                <div class="pl-4 pr-4 rounded-t-lg rounded-bl-lg max-w-[80%]" style="background-color: hsla(var(--color-accent-hsl), 0.4);">
                     <span class="break-words text-[--text-normal] p-0" use:html={message.content} on:mouseover={onMouseOver} on:click={onClick} />
                     <!-- <div class="flex justify-end"> -->
                     <!-- <div class="text-[--text-normal] hover:text-[--text-accent-hover] w-6" on:click|preventDefault={toClipboard(message.content)}> -->
