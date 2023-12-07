@@ -112,7 +112,7 @@
     };
 </script>
 
-<div class="chat-window select-text flex-grow w-full overflow-y-scroll border-2 border-solid rounded-md border-[--background-secondary] mb-1 p-4">
+<div class="chat-window select-text flex-grow w-full overflow-y-scroll rounded-md mb-1 p-4">
     {#each $messages as message (message.content)}
         {#if message.role === 'User'}
             <div class="flex justify-end mb-3">
