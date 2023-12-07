@@ -112,9 +112,9 @@
     };
 </script>
 
-<div class="chat-window select-text flex-grow w-full overflow-scroll border-2 border-solid rounded-md border-[--background-secondary] mb-1 p-4">
+<div class="chat-window select-text flex-grow w-full overflow-y-scroll border-2 border-solid rounded-md border-[--background-secondary] mb-1 p-4">
     {#each $messages as message (message.content)}
-        {#if message.role === 'user'}
+        {#if message.role === 'User'}
             <div class="flex justify-end mb-3">
                 <div class="pl-4 pr-4 rounded-t-lg rounded-bl-lg max-w-[80%]" style="background-color: hsla(var(--color-accent-hsl), 0.4);">
                     <span class="break-words text-[--text-normal] p-0" use:html={message.content} on:mouseover={onMouseOver} on:click={onClick} />

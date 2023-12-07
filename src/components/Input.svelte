@@ -1,21 +1,21 @@
 <script lang="ts">
     import MdSend from 'svelte-icons/md/MdSend.svelte';
-    import { secondBrain } from '../store';
+    import { secondBrain, plugin } from '../store';
     import { Notice } from 'obsidian';
-    import { messages, type Message } from '../store';
+    import { messages } from '../store';
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { FileSelectModal } from '../main';
 
     let inputPlaceholder = 'Chat with your second Brain...';
     let messageText = '';
-    let isProcesccing: boolean;
+    let isProcessing: boolean;
 
     async function sendMessage() {
-        if (isProcesccing) {
+        if (isProcessing) {
             new Notice('Please wait while your Second Brain is thinking...');
             return;
         }
-        isProcesccing = true;
+        isProcessing = true;
         //TODO das is kaka
         const test = document.getElementById('chat-view-user-input-element') as HTMLInputElement;
         //messageText = test.value;
@@ -25,26 +25,24 @@
             let message = messageText;
             messageText = '';
             let chatHistory = [];
-            messages.subscribe((messages) => {
-                chatHistory = messages.map((chatMessage) => {
-                    if (chatMessage.role === 'system') return;
-                    if (chatMessage.role === 'user') return `Human: ${chatMessage.content}`;
-                    if (chatMessage.role === 'assistant') return `Assistant: ${chatMessage.content}`;
-                    return `${chatMessage.content}`;
-                });
+            chatHistory = $messages.map((chatMessage) => {
+                if (chatMessage.role === 'System') return;
+                else if (chatMessage.role === 'User') return `${chatMessage.role}: ${chatMessage.content}`;
+                else if (chatMessage.role === 'Assistant') return `${chatMessage.role}: ${chatMessage.content}`;
+                return `${chatMessage.content}`;
             });
-            messages.update((messages) => [...messages, { role: 'user', content: message }]);
-            secondBrain.subscribe(async (secondBrain) => {
-                chatHistory.pop();
-                const res = await secondBrain.runRAG({ query: message, chatHistory: chatHistory.join('\n') });
-                if (res) {
-                    messages.update((messages) => [...messages, { role: 'assistant', content: res }]);
-                }
-            });
+            chatHistory.pop(); // remove last message which is the current query
+            $plugin.chatView.requestSave();
+            $messages = [...$messages, { role: 'User', content: message }];
+            const res = await $secondBrain.runRAG({ query: message, chatHistory: chatHistory.join('\n') });
+            if (res) {
+                $messages = [...$messages, { role: 'Assistant', content: res }];
+                $plugin.chatView.requestSave();
+            }
         } else {
             new Notice('Your Second Brain does not understand empty messages!');
         }
-        isProcesccing = false;
+        isProcessing = false;
     }
     function injectContext(event: KeyboardEvent): KeyboardEventHandler<HTMLInputElement> {
         if (event.key !== '[') return;

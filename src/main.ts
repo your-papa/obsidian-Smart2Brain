@@ -2,21 +2,22 @@ import './styles.css';
 import { ChatModal } from './views/ChatModal';
 import { ChatView, VIEW_TYPE_CHAT, DEFAULT_DATA } from './views/ChatView';
 import SettingsTab from './views/Settings';
-import { FuzzySuggestModal, TFile, App, Plugin, type ViewState } from 'obsidian';
-import { secondBrain } from './store';
+import { FuzzySuggestModal, TFile, App, Plugin, WorkspaceLeaf, normalizePath } from 'obsidian';
 import { SecondBrain, obsidianDocumentLoader, type SecondBrainData } from 'second-brain-ts';
-import { plugin } from './store';
+import { plugin, secondBrain } from './store';
 
 interface PluginData {
     llm: string;
     embeddedAllOnce: boolean;
     secondBrain: SecondBrainData;
+    targetFolder: string;
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
     secondBrain: {
-        openAIApiKey: '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',
+        openAIApiKey: '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', // TODO: remove
     },
+    targetFolder: 'Chats',
 };
 
 export default class BrainPlugin extends Plugin {
@@ -39,7 +40,11 @@ export default class BrainPlugin extends Plugin {
         if (!this.data.embeddedAllOnce) {
             setTimeout(() => {
                 secondBrain.subscribe(async (secondBrain) => {
-                    const docs = await obsidianDocumentLoader(this.app, this.app.vault.getMarkdownFiles());
+                    const files = this.app.vault.getMarkdownFiles();
+                    const docs = await obsidianDocumentLoader(
+                        this.app,
+                        files.filter((file) => !file.path.startsWith(this.data.targetFolder))
+                    );
                     await secondBrain.embedDocuments(docs);
                     this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
                     this.data.embeddedAllOnce = true;
@@ -50,6 +55,7 @@ export default class BrainPlugin extends Plugin {
 
         this.app.vault.on('modify', (file: TFile) => {
             setTimeout(async () => {
+                if (file.path.startsWith(this.data.targetFolder)) return; // don't embed chat files
                 secondBrain.subscribe(async (secondBrain) => {
                     const docs = await obsidianDocumentLoader(this.app, [file]);
                     await secondBrain.embedDocuments(docs);
@@ -60,6 +66,7 @@ export default class BrainPlugin extends Plugin {
         });
         this.app.vault.on('delete', (file: TFile) => {
             secondBrain.subscribe(async (secondBrain) => {
+                if (file.path.startsWith(this.data.targetFolder)) return; // don't embed chat files
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 await secondBrain.removeDocuments(docs);
                 this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
@@ -100,17 +107,27 @@ export default class BrainPlugin extends Plugin {
     }
 
     async activateView() {
-        this.app.workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
-
-        const file = await this.app.vault.create(`Chat ${window.moment().format('YY-MM-DD hh.mm.ss')}.md`, DEFAULT_DATA);
-        const leaf = this.app.workspace.getLeaf('tab');
-        await leaf.openFile(file, { active: true });
-        leaf.setViewState({
-            type: VIEW_TYPE_CHAT,
-            state: leaf.view.getState(),
-            popstate: true,
-        } as ViewState);
-        this.app.workspace.revealLeaf(this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0]);
+        let leaf: WorkspaceLeaf;
+        const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
+        if (leaves.length) {
+            leaf = leaves[0];
+        } else {
+            leaf = this.app.workspace.getLeaf('tab');
+            const chatDirExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder));
+            if (!chatDirExists) {
+                await this.app.vault.createFolder(normalizePath(this.data.targetFolder));
+            }
+            const defaultChatExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder + '/Chat Second Brain.md'));
+            const file = defaultChatExists
+                ? this.app.metadataCache.getFirstLinkpathDest(this.data.targetFolder + '/Chat Second Brain.md', '')
+                : await this.app.vault.create(normalizePath(this.data.targetFolder + '/Chat Second Brain.md'), DEFAULT_DATA);
+            await leaf.openFile(file, { active: true });
+            await leaf.setViewState({
+                type: VIEW_TYPE_CHAT,
+                state: { file: file.path },
+            });
+        }
+        this.app.workspace.revealLeaf(leaf);
     }
 }
 
