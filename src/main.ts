@@ -112,7 +112,7 @@ export default class BrainPlugin extends Plugin {
         if (leaves.length) {
             leaf = leaves[0];
         } else {
-            leaf = this.app.workspace.getLeaf('tab');
+            leaf = this.app.workspace.getRightLeaf(false);
             const chatDirExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder));
             if (!chatDirExists) {
                 await this.app.vault.createFolder(normalizePath(this.data.targetFolder));

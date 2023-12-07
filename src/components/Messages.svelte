@@ -126,7 +126,7 @@
                 </div>
             </div>
         {:else}
-            <div class="bg-[--background-secondary] mb-3 p-1 pl-4 pr-4 rounded-t-lg rounded-br-lg w-fit max-w-[80%]">
+            <div class="bg-[--background-primary-alt] mb-3 p-1 pl-4 pr-4 rounded-t-lg rounded-br-lg w-fit max-w-[80%]">
                 <span
                     class="break-words text-[--text-normal]"
                     use:html={message.content}
