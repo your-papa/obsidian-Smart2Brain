@@ -9,6 +9,7 @@
     let inputPlaceholder = 'Chat with your second Brain...';
     let messageText = '';
     let isProcessing: boolean;
+    let textarea;
 
     async function sendMessage() {
         if (isProcessing) {
@@ -48,11 +49,45 @@
         if (event.key !== '[') return;
         new FileSelectModal(app).open();
     }
+    let isToggled = true;
+    function handleRAGToggle() {
+        isToggled = !isToggled;
+        new Notice(isToggled ? 'Now chatting with your Second Brain' : 'Now chatting with the LLM');
+    }
+
+    function handelEnter(event: KeyboardEvent) {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            sendMessage();
+        }
+    }
+
+    $: if (messageText) {
+        updateHeight();
+    }
+
+    function updateHeight() {
+        textarea.style.height = '2rem';
+        if (textarea.scrollHeight == 42) textarea.style.height = '2rem';
+        else textarea.style.height = textarea.scrollHeight + 'px';
+    }
 </script>
 
+<div class="w-full flex gap-3 items-center">
+    <p class="inline-block">Connected to your Notes:</p>
+    <div class="checkbox-container" class:is-enabled={isToggled} on:click={handleRAGToggle}><input type="checkbox" tabindex="0" /></div>
+</div>
 <form on:submit|preventDefault={sendMessage} class="sticky flex w-full gap-1">
-    <input id="chat-view-user-input-element" type="text" class="flex-1" placeholder={inputPlaceholder} bind:value={messageText} on:keyup={injectContext} />
-    <button type="submit" class="px-4 py-2 rounded-r-md hover:bg-primary transition duration-300 ease-in-out">
+    <textarea
+        bind:this={textarea}
+        id="chat-view-user-input-element"
+        class="h-8 flex-1 max-h-40 resize-none"
+        placeholder={inputPlaceholder}
+        bind:value={messageText}
+        on:keydown={handelEnter}
+        on:keyup={injectContext}
+    />
+    <button type="submit" class="h-8 px-4 py-2 rounded-r-md hover:bg-primary transition duration-300 ease-in-out">
         <MdSend />
     </button>
 </form>

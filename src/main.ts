@@ -33,25 +33,25 @@ export default class BrainPlugin extends Plugin {
     }
 
     async onload() {
-        await this.loadSettings();
+        this.loadSettings().then(() => {
+            secondBrain.set(SecondBrain.loadFromData(this.data.secondBrain));
+            if (!this.data.embeddedAllOnce) {
+                setTimeout(() => {
+                    secondBrain.subscribe(async (secondBrain) => {
+                        const files = this.app.vault.getMarkdownFiles();
+                        const docs = await obsidianDocumentLoader(
+                            this.app,
+                            files.filter((file) => !file.path.startsWith(this.data.targetFolder))
+                        );
+                        await secondBrain.embedDocuments(docs);
+                        this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
+                        this.data.embeddedAllOnce = true;
+                        await this.saveSettings();
+                    });
+                }, 1000);
+            }
+        });
         plugin.set(this);
-        secondBrain.set(SecondBrain.loadFromData(this.data.secondBrain));
-
-        if (!this.data.embeddedAllOnce) {
-            setTimeout(() => {
-                secondBrain.subscribe(async (secondBrain) => {
-                    const files = this.app.vault.getMarkdownFiles();
-                    const docs = await obsidianDocumentLoader(
-                        this.app,
-                        files.filter((file) => !file.path.startsWith(this.data.targetFolder))
-                    );
-                    await secondBrain.embedDocuments(docs);
-                    this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
-                    this.data.embeddedAllOnce = true;
-                    await this.saveSettings();
-                });
-            }, 1000);
-        }
 
         this.app.vault.on('modify', (file: TFile) => {
             setTimeout(async () => {
