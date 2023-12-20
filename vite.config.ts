@@ -6,9 +6,9 @@ import { pathToFileURL } from 'url';
 const setOutDir = (mode: string) => {
     switch (mode) {
         case 'development':
-            return './papa_vault/.obsidian/plugins/obsidian-svelte-plugin/';
+            return './build/smart-second-brain/';
         case 'production':
-            return 'build';
+            return 'build/prod';
     }
 };
 
@@ -24,7 +24,7 @@ export default defineConfig(({ mode }) => {
                 output: {
                     entryFileNames: 'main.js',
                     assetFileNames: 'styles.css',
-                    sourcemapBaseUrl: pathToFileURL(`${__dirname}/papa_vault/.obsidian/plugins/obsidian-svelte-plugin/`).toString(),
+                    sourcemapBaseUrl: pathToFileURL(`${__dirname}/build/smart-second-brain/`).toString(),
                     inlineDynamicImports: true,
                 },
                 external: [

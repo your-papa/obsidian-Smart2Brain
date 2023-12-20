@@ -14,7 +14,6 @@ dist-ssr
 build
 
 workspace.json
-obsidian-svelte-plugin
 
 # Editor directories and files
 .vscode/*
