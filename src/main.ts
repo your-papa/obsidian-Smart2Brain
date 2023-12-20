@@ -3,21 +3,19 @@ import { ChatModal } from './views/ChatModal';
 import { ChatView, VIEW_TYPE_CHAT, DEFAULT_DATA } from './views/ChatView';
 import SettingsTab from './views/Settings';
 import { FuzzySuggestModal, TFile, App, Plugin, WorkspaceLeaf, normalizePath } from 'obsidian';
-import { SecondBrain, obsidianDocumentLoader, type SecondBrainData } from 'second-brain-ts';
+import { SecondBrain, obsidianDocumentLoader } from 'second-brain-ts';
 import { plugin, secondBrain } from './store';
 
 interface PluginData {
     llm: string;
     embeddedAllOnce: boolean;
-    secondBrain: SecondBrainData;
     targetFolder: string;
+    openAIApiKey: string;
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
-    secondBrain: {
-        openAIApiKey: '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', // TODO: remove
-    },
     targetFolder: 'Chats',
+    openAIApiKey: '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', // TODO: remove this
 };
 
 export default class BrainPlugin extends Plugin {
@@ -33,25 +31,34 @@ export default class BrainPlugin extends Plugin {
     }
 
     async onload() {
-        this.loadSettings().then(() => {
-            secondBrain.set(SecondBrain.loadFromData(this.data.secondBrain));
-            if (!this.data.embeddedAllOnce) {
-                setTimeout(() => {
-                    secondBrain.subscribe(async (secondBrain) => {
-                        const files = this.app.vault.getMarkdownFiles();
-                        const docs = await obsidianDocumentLoader(
-                            this.app,
-                            files.filter((file) => !file.path.startsWith(this.data.targetFolder))
-                        );
-                        await secondBrain.embedDocuments(docs);
-                        this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
-                        this.data.embeddedAllOnce = true;
-                        await this.saveSettings();
-                    });
-                }, 1000);
-            }
-        });
+        await this.loadSettings();
         plugin.set(this);
+        secondBrain.set(new SecondBrain({ openAIApiKey: this.data.openAIApiKey }));
+
+        const vectorStoreDataPath = normalizePath('.obsidian/plugins/smart-second-brain/vector-store-data.json');
+
+        if (!this.data.embeddedAllOnce) {
+            setTimeout(() => {
+                secondBrain.subscribe(async (secondBrain) => {
+                    const mdFiles = this.app.vault.getMarkdownFiles();
+                    const docs = await obsidianDocumentLoader(
+                        this.app,
+                        mdFiles.filter((mdFile) => !mdFile.path.startsWith(this.data.targetFolder))
+                    );
+                    await secondBrain.embedDocuments(docs);
+                    const vectorStoreData = await secondBrain.getVectorStoreJson();
+                    await this.app.vault.adapter.write(vectorStoreDataPath, vectorStoreData);
+                    this.data.embeddedAllOnce = true;
+                    await this.saveSettings();
+                });
+            }, 1000);
+        } else {
+            setTimeout(() => {
+                this.app.vault.adapter.read(vectorStoreDataPath).then((vectorStoreData) => {
+                    secondBrain.set(new SecondBrain({ openAIApiKey: this.data.openAIApiKey, vectorStoreJson: vectorStoreData }));
+                });
+            }, 1000);
+        }
 
         this.app.vault.on('modify', (file: TFile) => {
             setTimeout(async () => {
@@ -59,8 +66,7 @@ export default class BrainPlugin extends Plugin {
                 secondBrain.subscribe(async (secondBrain) => {
                     const docs = await obsidianDocumentLoader(this.app, [file]);
                     await secondBrain.embedDocuments(docs);
-                    this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
-                    await this.saveSettings();
+                    await this.app.vault.adapter.write(vectorStoreDataPath, await secondBrain.getVectorStoreJson());
                 });
             }, 1000);
         });
@@ -69,8 +75,8 @@ export default class BrainPlugin extends Plugin {
                 if (file.path.startsWith(this.data.targetFolder)) return; // don't embed chat files
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 await secondBrain.removeDocuments(docs);
-                this.data.secondBrain.vectorStoreJson = await secondBrain.getVectorStoreJson();
-                await this.saveSettings();
+
+                await this.app.vault.adapter.write(vectorStoreDataPath, await secondBrain.getVectorStoreJson());
             });
         });
 

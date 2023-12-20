@@ -30,7 +30,6 @@ export class ChatView extends TextFileView implements HoverParent {
             .map((message) => message.trim())
             .filter((message) => message.length > 0)
             .map((message) => {
-                // message can have multiple lines
                 const lines = message.split('\n');
                 const role = lines[0];
                 const content = lines.slice(1).join('\n');
