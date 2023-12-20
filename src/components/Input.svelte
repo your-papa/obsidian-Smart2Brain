@@ -35,7 +35,7 @@
             chatHistory.pop(); // remove last message which is the current query
             $plugin.chatView.requestSave();
             $messages = [...$messages, { role: 'User', content: message }];
-            const res = await $secondBrain.runRAG({ query: message, chatHistory: chatHistory.join('\n') });
+            const res = await $secondBrain.runRAG({ isRAG: isRAG, query: message, chatHistory: chatHistory.join('\n') });
             if (res) {
                 $messages = [...$messages, { role: 'Assistant', content: res }];
                 $plugin.chatView.requestSave();
@@ -49,10 +49,10 @@
         if (event.key !== '[') return;
         new FileSelectModal(app).open();
     }
-    let isToggled = true;
+    let isRAG = true;
     function handleRAGToggle() {
-        isToggled = !isToggled;
-        new Notice(isToggled ? 'Now chatting with your Second Brain' : 'Now chatting with the LLM');
+        isRAG = !isRAG;
+        new Notice(isRAG ? 'Now chatting with your Second Brain' : 'Now chatting with the LLM');
     }
 
     function handelEnter(event: KeyboardEvent) {
@@ -75,7 +75,7 @@
 
 <div class="w-full flex gap-3 items-center">
     <p class="inline-block">Connected to your Notes:</p>
-    <div class="checkbox-container" class:is-enabled={isToggled} on:click={handleRAGToggle}><input type="checkbox" tabindex="0" /></div>
+    <div class="checkbox-container" class:is-enabled={isRAG} on:click={handleRAGToggle}><input type="checkbox" tabindex="0" /></div>
 </div>
 <form on:submit|preventDefault={sendMessage} class="sticky flex w-full gap-1">
     <textarea
