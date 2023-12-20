@@ -1,5 +1,6 @@
 <script lang="ts">
     import MdSend from 'svelte-icons/md/MdSend.svelte';
+    import MdDelete from 'svelte-icons/md/MdDelete.svelte';
     import { secondBrain, plugin } from '../store';
     import { Notice } from 'obsidian';
     import { messages } from '../store';
@@ -35,7 +36,7 @@
             chatHistory.pop(); // remove last message which is the current query
             $plugin.chatView.requestSave();
             $messages = [...$messages, { role: 'User', content: message }];
-            const res = await $secondBrain.runRAG({ isRAG: isRAG, query: message, chatHistory: chatHistory.join('\n') });
+            const res = await $secondBrain.runRAG({ isRAG: isRAG, userQuery: message, chatHistory: chatHistory.join('\n') });
             if (res) {
                 $messages = [...$messages, { role: 'Assistant', content: res }];
                 $plugin.chatView.requestSave();
@@ -53,6 +54,12 @@
     function handleRAGToggle() {
         isRAG = !isRAG;
         new Notice(isRAG ? 'Now chatting with your Second Brain' : 'Now chatting with the LLM');
+    }
+
+    function handleDelete() {
+        // delete everything except the first message
+        $messages = [$messages[0]];
+        $plugin.chatView.requestSave();
     }
 
     function handelEnter(event: KeyboardEvent) {
@@ -74,8 +81,14 @@
 </script>
 
 <div class="w-full flex gap-3 items-center">
-    <p class="inline-block">Connected to your Notes:</p>
+    <p class="inline-block m-0">Connected to your Notes:</p>
     <div class="checkbox-container" class:is-enabled={isRAG} on:click={handleRAGToggle}><input type="checkbox" tabindex="0" /></div>
+</div>
+<div class="w-full flex gap-3 items-center">
+    <p class="inline-block">Chat History:</p>
+    <div class="h-6" on:click={handleDelete}>
+        <MdDelete />
+    </div>
 </div>
 <form on:submit|preventDefault={sendMessage} class="sticky flex w-full gap-1">
     <textarea
