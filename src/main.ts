@@ -4,11 +4,11 @@ import { ChatView, VIEW_TYPE_CHAT, DEFAULT_DATA } from './views/ChatView';
 import SettingsTab from './views/Settings';
 import { FuzzySuggestModal, TFile, App, Plugin, WorkspaceLeaf, normalizePath } from 'obsidian';
 import { SecondBrain, obsidianDocumentLoader } from 'second-brain-ts';
-import { plugin, secondBrain } from './store';
+import { plugin } from './store';
 
 interface PluginData {
     llm: string;
-    embeddedAllOnce: boolean;
+    fromBackup: boolean;
     targetFolder: string;
     openAIApiKey: string;
 }
@@ -16,11 +16,13 @@ interface PluginData {
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
     targetFolder: 'Chats',
     openAIApiKey: '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', // TODO: remove this
+    fromBackup: false,
 };
 
 export default class BrainPlugin extends Plugin {
     data: PluginData;
     chatView: ChatView;
+    secondBrain: SecondBrain;
 
     async loadSettings() {
         this.data = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -30,54 +32,49 @@ export default class BrainPlugin extends Plugin {
         await this.saveData(this.data);
     }
 
+    async initSecondBrain(fromBackup = false) {
+        const vectorStoreDataPath = normalizePath('.obsidian/plugins/smart-second-brain/vector-store-data.json');
+        this.secondBrain = new SecondBrain({
+            openAIApiKey: this.data.openAIApiKey,
+            saveHandler: async (vectorStoreJson: string) => await this.app.vault.adapter.write(vectorStoreDataPath, vectorStoreJson),
+        });
+
+        if (fromBackup) {
+            setTimeout(async () => {
+                const vectorStoreData = await this.app.vault.adapter.read(vectorStoreDataPath);
+                this.secondBrain.load(vectorStoreData);
+            }, 1000);
+            return;
+        }
+        setTimeout(async () => {
+            const mdFiles = this.app.vault.getMarkdownFiles();
+            const docs = await obsidianDocumentLoader(
+                this.app,
+                mdFiles.filter((mdFile) => !mdFile.path.startsWith(this.data.targetFolder))
+            );
+            await this.secondBrain.embedDocuments(docs);
+        }, 1000);
+    }
+
     async onload() {
         await this.loadSettings();
         plugin.set(this);
-        secondBrain.set(new SecondBrain({ openAIApiKey: this.data.openAIApiKey }));
 
-        const vectorStoreDataPath = normalizePath('.obsidian/plugins/smart-second-brain/vector-store-data.json');
-
-        if (!this.data.embeddedAllOnce) {
-            setTimeout(() => {
-                secondBrain.subscribe(async (secondBrain) => {
-                    const mdFiles = this.app.vault.getMarkdownFiles();
-                    const docs = await obsidianDocumentLoader(
-                        this.app,
-                        mdFiles.filter((mdFile) => !mdFile.path.startsWith(this.data.targetFolder))
-                    );
-                    await secondBrain.embedDocuments(docs);
-                    const vectorStoreData = await secondBrain.getVectorStoreJson();
-                    await this.app.vault.adapter.write(vectorStoreDataPath, vectorStoreData);
-                    this.data.embeddedAllOnce = true;
-                    await this.saveSettings();
-                });
-            }, 1000);
-        } else {
-            setTimeout(() => {
-                this.app.vault.adapter.read(vectorStoreDataPath).then((vectorStoreData) => {
-                    secondBrain.set(new SecondBrain({ openAIApiKey: this.data.openAIApiKey, vectorStoreJson: vectorStoreData }));
-                });
-            }, 1000);
-        }
+        await this.initSecondBrain(this.data.fromBackup);
+        this.data.fromBackup = true;
+        await this.saveSettings();
 
         this.app.vault.on('modify', (file: TFile) => {
             setTimeout(async () => {
                 if (file.path.startsWith(this.data.targetFolder)) return; // don't embed chat files
-                secondBrain.subscribe(async (secondBrain) => {
-                    const docs = await obsidianDocumentLoader(this.app, [file]);
-                    await secondBrain.embedDocuments(docs);
-                    await this.app.vault.adapter.write(vectorStoreDataPath, await secondBrain.getVectorStoreJson());
-                });
+                const docs = await obsidianDocumentLoader(this.app, [file]);
+                await this.secondBrain.embedDocuments(docs);
             }, 1000);
         });
-        this.app.vault.on('delete', (file: TFile) => {
-            secondBrain.subscribe(async (secondBrain) => {
-                if (file.path.startsWith(this.data.targetFolder)) return; // don't embed chat files
-                const docs = await obsidianDocumentLoader(this.app, [file]);
-                await secondBrain.removeDocuments(docs);
-
-                await this.app.vault.adapter.write(vectorStoreDataPath, await secondBrain.getVectorStoreJson());
-            });
+        this.app.vault.on('delete', async (file: TFile) => {
+            if (file.path.startsWith(this.data.targetFolder)) return; // don't embed chat files
+            const docs = await obsidianDocumentLoader(this.app, [file]);
+            await this.secondBrain.removeDocuments(docs);
         });
 
         this.registerView(VIEW_TYPE_CHAT, (leaf) => {

@@ -1,5 +1,4 @@
 import { writable } from 'svelte/store';
-import { SecondBrain } from 'second-brain-ts';
 import type BrainPlugin from './main';
 
 export type Message = {
@@ -8,7 +7,5 @@ export type Message = {
 };
 
 export let messages = writable<Message[]>([]);
-
-export let secondBrain = writable<SecondBrain>();
 
 export const plugin = writable<BrainPlugin>();

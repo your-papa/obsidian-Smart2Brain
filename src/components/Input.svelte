@@ -1,7 +1,8 @@
 <script lang="ts">
     import MdSend from 'svelte-icons/md/MdSend.svelte';
     import MdDelete from 'svelte-icons/md/MdDelete.svelte';
-    import { secondBrain, plugin } from '../store';
+    import FaRedo from 'svelte-icons/fa/FaRedo.svelte';
+    import { plugin } from '../store';
     import { Notice } from 'obsidian';
     import { messages } from '../store';
     import type { KeyboardEventHandler } from 'svelte/elements';
@@ -33,10 +34,8 @@
                 else if (chatMessage.role === 'Assistant') return `${chatMessage.role}: ${chatMessage.content}`;
                 return `${chatMessage.content}`;
             });
-            chatHistory.pop(); // remove last message which is the current query
-            $plugin.chatView.requestSave();
             $messages = [...$messages, { role: 'User', content: message }];
-            const res = await $secondBrain.runRAG({ isRAG: isRAG, userQuery: message, chatHistory: chatHistory.join('\n') });
+            const res = await $plugin.secondBrain.runRAG({ isRAG: isRAG, userQuery: message, chatHistory: chatHistory.join('\n') });
             if (res) {
                 $messages = [...$messages, { role: 'Assistant', content: res }];
                 $plugin.chatView.requestSave();
@@ -85,7 +84,11 @@
     <div class="checkbox-container" class:is-enabled={isRAG} on:click={handleRAGToggle}><input type="checkbox" tabindex="0" /></div>
 </div>
 <div class="w-full flex gap-3 items-center">
-    <p class="inline-block">Chat History:</p>
+    <p class="inline-block m-0">Reset Secondbrain</p>
+    <div class="h-6" on:click={() => $plugin.initSecondBrain()}><FaRedo /></div>
+</div>
+<div class="w-full flex gap-3 items-center mb-2">
+    <p class="inline-block m-0">Chat History:</p>
     <div class="h-6" on:click={handleDelete}>
         <MdDelete />
     </div>
