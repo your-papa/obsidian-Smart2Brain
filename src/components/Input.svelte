@@ -12,7 +12,7 @@
     let inputPlaceholder = 'Chat with your second Brain...';
     let messageText = '';
     let isProcessing: boolean;
-    let textarea;
+    let textarea: HTMLTextAreaElement;
     let isRAG = true;
 
     async function sendMessage() {
@@ -37,7 +37,7 @@
                 })
                 .join('\n');
             $messages = [...$messages, { role: 'User', content: userQuery }];
-            const responseStream = $plugin.secondBrain.runRAG({ isRAG, userQuery, chatHistory, lang: 'en' });
+            const responseStream = $plugin.secondBrain.runRAG({ isRAG, userQuery, chatHistory, lang: $plugin.data.assistantLanguage });
             let testObject;
             $messages = [...$messages, { role: 'Assistant', content: '...' }];
             for await (const response of responseStream) {
@@ -61,6 +61,10 @@
     }
 
     function handleDelete() {
+        if (isProcessing) {
+            new Notice('Please wait while your Second Brain is thinking...');
+            return;
+        }
         // delete everything except the first message
         $messages = [$messages[0]];
         $plugin.chatView.requestSave();

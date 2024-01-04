@@ -5,15 +5,23 @@ import SettingsTab from './views/Settings';
 import { FuzzySuggestModal, TFile, App, Plugin, WorkspaceLeaf, normalizePath } from 'obsidian';
 import { SecondBrain, obsidianDocumentLoader } from 'second-brain-ts';
 import { plugin } from './store';
+import moment from 'moment';
+export type OpenAIModel = 'gpt-3.5-turbo' | 'gpt-3.5-turbo-1106' | 'gpt-4' | 'gpt-4-1106-preview';
 
 interface PluginData {
-    llm: string;
+    excludeFolders: string[];
+    assistantLanguage: string;
+    ollamaUrl: string;
+    ollamaModel: string;
+    openAIApiKey: string;
+    openAIModel: string;
     fromBackup: boolean;
     targetFolder: string;
-    openAIApiKey: string;
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
+    assistantLanguage: window.localStorage.getItem('language'),
+    ollamaUrl: 'http://localhost:11434',
     targetFolder: 'Chats',
     openAIApiKey: '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', // TODO: remove this
     fromBackup: false,
@@ -36,6 +44,9 @@ export default class BrainPlugin extends Plugin {
         const vectorStoreDataPath = normalizePath('.obsidian/plugins/smart-second-brain/vector-store-data.json');
         this.secondBrain = new SecondBrain({
             openAIApiKey: this.data.openAIApiKey,
+            openAIModel: this.data.openAIModel,
+            ollamaUrl: this.data.ollamaUrl,
+            ollamaModel: this.data.ollamaModel,
             saveHandler: async (vectorStoreJson: string) => await this.app.vault.adapter.write(vectorStoreDataPath, vectorStoreJson),
         });
 
