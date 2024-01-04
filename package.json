@@ -29,6 +29,7 @@
   "type": "module",
   "dependencies": {
     "electron": "^27.0.3",
+    "fast-json-patch": "^3.1.1",
     "svelte-icons": "^2.1.0"
   }
 }

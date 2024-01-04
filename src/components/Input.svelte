@@ -7,11 +7,13 @@
     import { messages } from '../store';
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { FileSelectModal } from '../main';
+    import { applyPatch } from 'fast-json-patch';
 
     let inputPlaceholder = 'Chat with your second Brain...';
     let messageText = '';
     let isProcessing: boolean;
     let textarea;
+    let isRAG = true;
 
     async function sendMessage() {
         if (isProcessing) {
@@ -20,26 +22,30 @@
         }
         isProcessing = true;
         //TODO das is kaka
-        const test = document.getElementById('chat-view-user-input-element') as HTMLInputElement;
         //messageText = test.value;
 
         if (messageText.trim() !== '') {
             // let message: Message = { role: 'user', content: messageText };
-            let message = messageText;
+            let userQuery = messageText;
             messageText = '';
-            let chatHistory = [];
-            chatHistory = $messages.map((chatMessage) => {
-                if (chatMessage.role === 'System') return;
-                else if (chatMessage.role === 'User') return `${chatMessage.role}: ${chatMessage.content}`;
-                else if (chatMessage.role === 'Assistant') return `${chatMessage.role}: ${chatMessage.content}`;
-                return `${chatMessage.content}`;
-            });
-            $messages = [...$messages, { role: 'User', content: message }];
-            const res = await $plugin.secondBrain.runRAG({ isRAG: isRAG, userQuery: message, chatHistory: chatHistory.join('\n') });
-            if (res) {
-                $messages = [...$messages, { role: 'Assistant', content: res }];
-                $plugin.chatView.requestSave();
+            const chatHistory = $messages
+                .map((chatMessage) => {
+                    if (chatMessage.role === 'System') return;
+                    else if (chatMessage.role === 'User') return `${chatMessage.role}: ${chatMessage.content}`;
+                    else if (chatMessage.role === 'Assistant') return `${chatMessage.role}: ${chatMessage.content}`;
+                    return `${chatMessage.content}`;
+                })
+                .join('\n');
+            $messages = [...$messages, { role: 'User', content: userQuery }];
+            const responseStream = $plugin.secondBrain.runRAG({ isRAG, userQuery, chatHistory, lang: 'en' });
+            let testObject;
+            $messages = [...$messages, { role: 'Assistant', content: '...' }];
+            for await (const response of responseStream) {
+                testObject = applyPatch(testObject, response.ops).newDocument;
+                // console.log(testObject.streamed_output.join(''));
+                $messages[$messages.length - 1].content = testObject?.streamed_output.join('') || '';
             }
+            $plugin.chatView.requestSave();
         } else {
             new Notice('Your Second Brain does not understand empty messages!');
         }
@@ -49,7 +55,6 @@
         if (event.key !== '[') return;
         new FileSelectModal(app).open();
     }
-    let isRAG = true;
     function handleRAGToggle() {
         isRAG = !isRAG;
         new Notice(isRAG ? 'Now chatting with your Second Brain' : 'Now chatting with the LLM');
