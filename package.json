@@ -28,8 +28,10 @@
   },
   "type": "module",
   "dependencies": {
+    "@popperjs/core": "^2.11.8",
     "electron": "^27.0.3",
     "fast-json-patch": "^3.1.1",
+    "nanoid": "^5.0.4",
     "openai": "^4.24.1",
     "svelte-icons": "^2.1.0"
   }

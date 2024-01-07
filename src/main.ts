@@ -3,14 +3,13 @@ import { ChatModal } from './views/ChatModal';
 import { ChatView, VIEW_TYPE_CHAT, DEFAULT_DATA } from './views/ChatView';
 import SettingsTab from './views/Settings';
 import { FuzzySuggestModal, TFile, App, Plugin, WorkspaceLeaf, normalizePath } from 'obsidian';
-import { SecondBrain, obsidianDocumentLoader } from 'second-brain-ts';
+import { SecondBrain, obsidianDocumentLoader, type Language } from 'second-brain-ts';
 import { plugin } from './store';
-import moment from 'moment';
 export type OpenAIModel = 'gpt-3.5-turbo' | 'gpt-3.5-turbo-1106' | 'gpt-4' | 'gpt-4-1106-preview';
 
 interface PluginData {
     excludeFolders: string[];
-    assistantLanguage: string;
+    assistantLanguage: Language;
     ollamaUrl: string;
     ollamaModel: string;
     openAIApiKey: string;
@@ -20,7 +19,7 @@ interface PluginData {
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
-    assistantLanguage: window.localStorage.getItem('language'),
+    assistantLanguage: window.localStorage.getItem('language') as Language,
     ollamaUrl: 'http://localhost:11434',
     targetFolder: 'Chats',
     openAIApiKey: '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', // TODO: remove this

@@ -1,10 +1,11 @@
 <script lang="ts">
-    import { messages } from '../store';
-    import { MdContentCopy, MdEdit } from 'svelte-icons/md';
+    import { messages, plugin } from '../store';
+    import { MdContentCopy, MdAutorenew } from 'svelte-icons/md';
     import Electron from 'electron';
     import type { MouseEventHandler } from 'svelte/elements';
     import { MarkdownRenderer, Notice } from 'obsidian';
-    import { plugin } from '../store';
+    import callChainfromChat from '../callChain';
+    import type { Message } from '../store';
 
     function toClipboard(messageText: string): MouseEventHandler<HTMLDivElement> {
         if (!messageText) {
@@ -21,9 +22,7 @@
 
     const onMouseOver = (e: MouseEvent) => {
         const targetEl = e.target as HTMLElement;
-
         if (targetEl.tagName !== 'A') return;
-
         if (targetEl.hasClass('internal-link')) {
             $plugin.chatView.app.workspace.trigger('hover-link', {
                 event: e,
@@ -110,30 +109,46 @@
             window.open(closestAnchor.getAttr('href'), '_blank');
         }
     };
+
+    async function redoGeneration(message: Message) {
+        const targetIndex = $messages.indexOf(message);
+        $messages = $messages.slice(0, targetIndex);
+        //TODO implement isRAG
+        await callChainfromChat(true, message.content);
+    }
 </script>
 
 <div class="chat-window select-text flex-grow w-full overflow-y-scroll rounded-md mb-1 p-4">
-    {#each $messages as message (message.content)}
+    {#each $messages as message (message.id)}
         {#if message.role === 'User'}
             <div class="flex justify-end mb-3">
+                <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <div class="pl-4 pr-4 rounded-t-lg rounded-bl-lg max-w-[80%]" style="background-color: hsla(var(--color-accent-hsl), 0.4);">
-                    <span class="break-words text-[--text-normal] p-0" use:html={message.content} on:mouseover={onMouseOver} on:click={onClick} />
-                    <!-- <div class="flex justify-end"> -->
-                    <!-- <div class="text-[--text-normal] hover:text-[--text-accent-hover] w-6" on:click|preventDefault={toClipboard(message.content)}> -->
-                    <!--     <MdEdit /> -->
-                    <!-- </div> -->
-                    <!-- </div> -->
+                    <!-- svelte-ignore a11y-click-events-have-key-events -->
+                    <!-- svelte-ignore a11y-no-static-element-interactions -->
+                    <!-- svelte-ignore a11y-mouse-events-have-key-events -->
+                    <span class="break-words text-[--text-normal] p-0" on:mouseover={onMouseOver} use:html={message.content} on:click={onClick} />
+                    <!-- svelte-ignore a11y-click-events-have-key-events -->
+                    <!-- svelte-ignore a11y-no-static-element-interactions -->
+                    <div class="text-[--text-normal] hover:text-[--text-accent-hover] w-6" on:click|preventDefault={() => redoGeneration(message)}>
+                        <MdAutorenew />
+                    </div>
                 </div>
             </div>
         {:else}
             <div class="bg-[--background-primary-alt] mb-3 p-1 pl-4 pr-4 rounded-t-lg rounded-br-lg w-fit max-w-[80%]">
+                <!-- svelte-ignore a11y-click-events-have-key-events -->
+                <!-- svelte-ignore a11y-no-static-element-interactions -->
+                <!-- svelte-ignore a11y-mouse-events-have-key-events -->
                 <span
                     class="break-words text-[--text-normal]"
+                    on:mouseover={onMouseOver}
                     use:html={message.content}
                     style="background: transparent;"
-                    on:mouseover={onMouseOver}
                     on:click={onClick}
                 />
+                <!-- svelte-ignore a11y-no-static-element-interactions -->
+                <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <div class="text-[--text-normal] hover:text-[--text-accent-hover] w-6" on:click|preventDefault={toClipboard(message.content)}>
                     <MdContentCopy />
                 </div>

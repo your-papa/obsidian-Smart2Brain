@@ -2,6 +2,7 @@ import { WorkspaceLeaf, type HoverParent, HoverPopover, TextFileView, TFile } fr
 
 import ChatViewComponent from '../components/ChatView.svelte';
 import { plugin, messages, type Message } from '../store';
+import { nanoid } from 'nanoid';
 
 export const VIEW_TYPE_CHAT = 'chat-view';
 
@@ -21,7 +22,7 @@ export class ChatView extends TextFileView implements HoverParent {
     getViewType() {
         return VIEW_TYPE_CHAT;
     }
-
+    //TODO redo this
     setViewData(data: string, clear: boolean): void {
         this.data = data;
         // parse data into messages
@@ -33,9 +34,11 @@ export class ChatView extends TextFileView implements HoverParent {
                 const lines = message.split('\n');
                 const role = lines[0];
                 const content = lines.slice(1).join('\n');
+                const id = nanoid();
                 return {
                     role,
                     content,
+                    id,
                 } as Message;
             });
         messages.set(chatMessages);

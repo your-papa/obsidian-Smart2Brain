@@ -1,13 +1,10 @@
 <script lang="ts">
-    import MdSend from 'svelte-icons/md/MdSend.svelte';
-    import MdDelete from 'svelte-icons/md/MdDelete.svelte';
-    import FaRedo from 'svelte-icons/fa/FaRedo.svelte';
-    import { plugin } from '../store';
+    import { MdSend, MdDelete, MdRefresh } from 'svelte-icons/md';
     import { Notice } from 'obsidian';
-    import { messages } from '../store';
+    import { plugin, messages } from '../store';
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { FileSelectModal } from '../main';
-    import { applyPatch } from 'fast-json-patch';
+    import callChainfromChat from '../callChain';
 
     let inputPlaceholder = 'Chat with your second Brain...';
     let messageText = '';
@@ -28,24 +25,7 @@
             // let message: Message = { role: 'user', content: messageText };
             let userQuery = messageText;
             messageText = '';
-            const chatHistory = $messages
-                .map((chatMessage) => {
-                    if (chatMessage.role === 'System') return;
-                    else if (chatMessage.role === 'User') return `${chatMessage.role}: ${chatMessage.content}`;
-                    else if (chatMessage.role === 'Assistant') return `${chatMessage.role}: ${chatMessage.content}`;
-                    return `${chatMessage.content}`;
-                })
-                .join('\n');
-            $messages = [...$messages, { role: 'User', content: userQuery }];
-            const responseStream = $plugin.secondBrain.runRAG({ isRAG, userQuery, chatHistory, lang: $plugin.data.assistantLanguage });
-            let testObject;
-            $messages = [...$messages, { role: 'Assistant', content: '...' }];
-            for await (const response of responseStream) {
-                testObject = applyPatch(testObject, response.ops).newDocument;
-                // console.log(testObject.streamed_output.join(''));
-                $messages[$messages.length - 1].content = testObject?.streamed_output.join('') || '';
-            }
-            $plugin.chatView.requestSave();
+            await callChainfromChat(isRAG, userQuery);
         } else {
             new Notice('Your Second Brain does not understand empty messages!');
         }
@@ -90,14 +70,20 @@
 
 <div class="w-full flex gap-3 items-center">
     <p class="inline-block m-0">Connected to your Notes:</p>
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="checkbox-container" class:is-enabled={isRAG} on:click={handleRAGToggle}><input type="checkbox" tabindex="0" /></div>
 </div>
 <div class="w-full flex gap-3 items-center">
     <p class="inline-block m-0">Reset Secondbrain</p>
-    <div class="h-6" on:click={() => $plugin.initSecondBrain()}><FaRedo /></div>
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div class="h-6" on:click={() => $plugin.initSecondBrain()}><MdRefresh /></div>
 </div>
 <div class="w-full flex gap-3 items-center mb-2">
     <p class="inline-block m-0">Chat History:</p>
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="h-6" on:click={handleDelete}>
         <MdDelete />
     </div>
