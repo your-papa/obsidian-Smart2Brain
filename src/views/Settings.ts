@@ -100,7 +100,7 @@ export default class SettingsTab extends PluginSettingTab {
                                     },
                                     body: JSON.stringify(openaiTest),
                                 });
-                                // TODO also reinit second brain here somehow
+                                this.plugin.secondBrain.setGenModel(model);
                             } catch (e) {
                                 setting_input2.style.backgroundColor = 'rgba(var(--color-red-rgb), 0.3)';
                             }
@@ -123,7 +123,7 @@ export default class SettingsTab extends PluginSettingTab {
                 dropdown.setValue(model.modelName).onChange(async (modelName: any) => {
                     model.modelName = modelName;
                     await this.plugin.saveSettings();
-                    this.plugin.initSecondBrain();
+                    this.plugin.secondBrain.setGenModel(model);
                 });
             });
         } else {
@@ -158,13 +158,12 @@ export default class SettingsTab extends PluginSettingTab {
                         .setPlaceholder('http://localhost:11434')
                         .onChange(async (value) => {
                             value = value.trim();
-                            if (value.endsWith('/')) {
-                                value = value.slice(0, -1);
-                            }
-                            if (!isValidUrl(value)) setting_input.style.backgroundColor = 'rgba(var(--color-red-rgb), 0.3)';
-                            else setting_input.style.backgroundColor = 'var(--background-modifier-form-field)';
-                            // TODO also reinit second brain here somehow
+                            if (value.endsWith('/')) value = value.slice(0, -1);
                             model.baseUrl = value;
+                            if (isValidUrl(value)) {
+                                setting_input.style.backgroundColor = 'var(--background-modifier-form-field)';
+                                this.plugin.secondBrain.setGenModel(model);
+                            } else setting_input.style.backgroundColor = 'rgba(var(--color-red-rgb), 0.3)';
                             await this.plugin.saveSettings();
                         })
                         .then((setting) => {
@@ -173,20 +172,21 @@ export default class SettingsTab extends PluginSettingTab {
                 );
 
             new Setting(containerEl).setName('Ollama Model').addDropdown(async (dropdown) => {
-                // const response = await requestUrl({
-                //     url: model.baseUrl + '/api/tags',
-                //     method: 'GET',
-                //     headers: {
-                //         'Content-Type': 'application/json',
-                //     },
-                // });
-                // const jsonData = response.json;
+                const response = await requestUrl({
+                    url: model.baseUrl + '/api/tags',
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+                const jsonData = response.json;
                 // const models: String[] = jsonData.models.map((model: { name: string }) => model.name);
                 OllamaGenModelNames.forEach((model: string) => dropdown.addOption(model, model));
                 dropdown.setValue(model.model).onChange(async (modelName: any) => {
                     model.model = modelName;
+                    console.log(jsonData);
                     await this.plugin.saveSettings();
-                    this.plugin.initSecondBrain();
+                    this.plugin.secondBrain.setGenModel(model);
                 });
             });
         }

@@ -78,7 +78,7 @@
     <p class="inline-block m-0">Reset Secondbrain</p>
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <div class="h-6" on:click={() => $plugin.initSecondBrain()}><MdRefresh /></div>
+    <div class="h-6" on:click={() => $plugin.initSecondBrain(false)}><MdRefresh /></div>
 </div>
 <div class="w-full flex gap-3 items-center mb-2">
     <p class="inline-block m-0">Chat History:</p>

@@ -20,8 +20,9 @@ interface PluginData {
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     genModelToggle: true,
-    ollamaGenModel: { model: 'llama-2', baseUrl: 'http://localhost:11434' },
+    ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
     openAIGenModel: { modelName: 'gpt-3.5-turbo', openAIApiKey: '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' }, // TODO: remove openAIApiKey
+    openAIEmbedModel: { modelName: 'text-embedding-ada-002', openAIApiKey: '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' }, // TODO: remove openAIApiKey
     targetFolder: 'Chats',
     fromBackup: false,
 };
