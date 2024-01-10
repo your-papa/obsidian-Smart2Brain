@@ -1,11 +1,10 @@
 <script lang="ts">
-    import { messages, plugin } from '../store';
     import { MdContentCopy, MdAutorenew } from 'svelte-icons/md';
     import Electron from 'electron';
     import type { MouseEventHandler } from 'svelte/elements';
     import { MarkdownRenderer, Notice } from 'obsidian';
     import runSecondBrainFromChat from '../runSecondBrain';
-    import type { Message } from '../store';
+    import { type ChatMessage, plugin, chatHistory } from '../main';
 
     function toClipboard(messageText: string): MouseEventHandler<HTMLDivElement> {
         if (!messageText) {
@@ -110,16 +109,16 @@
         }
     };
 
-    async function redoGeneration(message: Message) {
-        const targetIndex = $messages.indexOf(message);
-        $messages = $messages.slice(0, targetIndex);
+    async function redoGeneration(message: ChatMessage) {
+        const targetIndex = $chatHistory.indexOf(message);
+        $chatHistory = $chatHistory.slice(0, targetIndex);
         //TODO implement isRAG
         await runSecondBrainFromChat(true, message.content);
     }
 </script>
 
 <div class="chat-window select-text flex-grow w-full overflow-y-scroll rounded-md mb-1 p-4">
-    {#each $messages as message (message.id)}
+    {#each $chatHistory as message (message.id)}
         {#if message.role === 'User'}
             <div class="flex justify-end mb-3">
                 <!-- svelte-ignore a11y-click-events-have-key-events -->

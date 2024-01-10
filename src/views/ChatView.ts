@@ -1,8 +1,9 @@
 import { WorkspaceLeaf, type HoverParent, HoverPopover, TextFileView, TFile } from 'obsidian';
 
 import ChatViewComponent from '../components/ChatView.svelte';
-import { plugin, messages, type Message } from '../store';
 import { nanoid } from 'nanoid';
+import { type ChatMessage, chatHistory } from '../main';
+import { get } from 'svelte/store';
 
 export const VIEW_TYPE_CHAT = 'chat-view';
 
@@ -26,7 +27,7 @@ export class ChatView extends TextFileView implements HoverParent {
     setViewData(data: string, clear: boolean): void {
         this.data = data;
         // parse data into messages
-        const chatMessages: Message[] = data
+        const parsedChatHistory: ChatMessage[] = data
             .split('- - - - -')
             .map((message) => message.trim())
             .filter((message) => message.length > 0)
@@ -39,9 +40,9 @@ export class ChatView extends TextFileView implements HoverParent {
                     role,
                     content,
                     id,
-                } as Message;
+                } as ChatMessage;
             });
-        messages.set(chatMessages);
+        chatHistory.set(parsedChatHistory);
 
         if (clear) {
             this.clear();
@@ -49,12 +50,10 @@ export class ChatView extends TextFileView implements HoverParent {
     }
 
     getViewData(): string {
-        messages.subscribe((messages) => {
-            const chatHistory = messages.map((chatMessage) => {
-                return `${chatMessage.role}\n${chatMessage.content}\n- - - - -`;
-            });
-            this.data = chatHistory.join('\n');
+        const serializedChatHistory = get(chatHistory).map((chatMessage) => {
+            return `${chatMessage.role}\n${chatMessage.content}\n- - - - -`;
         });
+        this.data = serializedChatHistory.join('\n');
         return this.data;
     }
 

@@ -1,15 +1,13 @@
 import { App, PluginSettingTab, Setting, requestUrl } from 'obsidian';
-import { DEFAULT_SETTINGS } from '../main';
+import SecondBrainPlugin, { DEFAULT_SETTINGS } from '../main';
 // import OpenAI from 'openai';
-import type BrainPlugin from '../main';
 import { Languages, type Language, OpenAIGenModelNames, OllamaGenModelNames } from 'second-brain-ts';
-import { FolderSuggest } from '../FolderSuggester';
 
 export default class SettingsTab extends PluginSettingTab {
-    plugin: BrainPlugin;
+    plugin: SecondBrainPlugin;
     isSecretVisible: boolean;
 
-    constructor(app: App, plugin: BrainPlugin) {
+    constructor(app: App, plugin: SecondBrainPlugin) {
         super(app, plugin);
         this.plugin = plugin;
         this.isSecretVisible = false;
@@ -65,7 +63,7 @@ export default class SettingsTab extends PluginSettingTab {
                 temperature: 0.7,
             };
 
-            let setting_input2;
+            let setting_input2: HTMLInputElement;
             new Setting(containerEl)
                 .setName('OpenAI API Key')
                 .addButton((button) => {
@@ -138,7 +136,7 @@ export default class SettingsTab extends PluginSettingTab {
 
                 return true;
             }
-            let setting_input;
+            let setting_input: HTMLInputElement;
             new Setting(containerEl)
                 .setName('Ollama URL')
                 .addButton((button) =>

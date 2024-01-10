@@ -1,10 +1,19 @@
+import { App, FuzzySuggestModal, Plugin, TFile, WorkspaceLeaf, normalizePath } from 'obsidian';
+import { SecondBrain, obsidianDocumentLoader, type Language, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'second-brain-ts';
+import { writable } from 'svelte/store';
+
 import './styles.css';
 import { ChatModal } from './views/ChatModal';
-import { ChatView, VIEW_TYPE_CHAT, DEFAULT_DATA } from './views/ChatView';
+import { ChatView, DEFAULT_DATA, VIEW_TYPE_CHAT } from './views/ChatView';
 import SettingsTab from './views/Settings';
-import { FuzzySuggestModal, TFile, App, Plugin, WorkspaceLeaf, normalizePath } from 'obsidian';
-import { SecondBrain, obsidianDocumentLoader, type Language, type OllamaGenModel, type OpenAIGenModel, type OpenAIEmbedModel } from 'second-brain-ts';
-import { plugin } from './store';
+
+export type ChatMessage = {
+    role: 'Assistant' | 'User';
+    content: string;
+    id: string;
+};
+export const plugin = writable<SecondBrainPlugin>();
+export const chatHistory = writable<ChatMessage[]>([]);
 
 interface PluginData {
     excludeFolders: string[];
@@ -27,7 +36,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     fromBackup: false,
 };
 
-export default class BrainPlugin extends Plugin {
+export default class SecondBrainPlugin extends Plugin {
     data: PluginData;
     chatView: ChatView;
     secondBrain: SecondBrain;

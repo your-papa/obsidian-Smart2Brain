@@ -1,9 +1,8 @@
 <script lang="ts">
     import { MdSend, MdDelete, MdRefresh } from 'svelte-icons/md';
     import { Notice } from 'obsidian';
-    import { plugin, messages } from '../store';
     import type { KeyboardEventHandler } from 'svelte/elements';
-    import { FileSelectModal } from '../main';
+    import { FileSelectModal, plugin, chatHistory } from '../main';
     import runSecondBrainFromChat from '../runSecondBrain';
 
     let inputPlaceholder = 'Chat with your second Brain...';
@@ -46,7 +45,7 @@
             return;
         }
         // delete everything except the first message
-        $messages = [$messages[0]];
+        $chatHistory = [$chatHistory[0]];
         $plugin.chatView.requestSave();
     }
 
