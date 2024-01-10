@@ -4,7 +4,7 @@
     import Electron from 'electron';
     import type { MouseEventHandler } from 'svelte/elements';
     import { MarkdownRenderer, Notice } from 'obsidian';
-    import callChainfromChat from '../callChain';
+    import runSecondBrainFromChat from '../runSecondBrain';
     import type { Message } from '../store';
 
     function toClipboard(messageText: string): MouseEventHandler<HTMLDivElement> {
@@ -114,7 +114,7 @@
         const targetIndex = $messages.indexOf(message);
         $messages = $messages.slice(0, targetIndex);
         //TODO implement isRAG
-        await callChainfromChat(true, message.content);
+        await runSecondBrainFromChat(true, message.content);
     }
 </script>
 

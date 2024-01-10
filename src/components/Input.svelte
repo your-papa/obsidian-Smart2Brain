@@ -4,7 +4,7 @@
     import { plugin, messages } from '../store';
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { FileSelectModal } from '../main';
-    import callChainfromChat from '../callChain';
+    import runSecondBrainFromChat from '../runSecondBrain';
 
     let inputPlaceholder = 'Chat with your second Brain...';
     let messageText = '';
@@ -25,7 +25,7 @@
             // let message: Message = { role: 'user', content: messageText };
             let userQuery = messageText;
             messageText = '';
-            await callChainfromChat(isRAG, userQuery);
+            await runSecondBrainFromChat(isRAG, userQuery);
         } else {
             new Notice('Your Second Brain does not understand empty messages!');
         }
