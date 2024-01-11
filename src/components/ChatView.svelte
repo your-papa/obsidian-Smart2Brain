@@ -6,6 +6,6 @@
 </script>
 
 <div class="h-full flex flex-col --background-modifier-border">
-    <MessagesComponent bind:messageText={message} />
+    <MessagesComponent bind:messageText={message}/>
     <InputComponent bind:messageText={message} />
 </div>

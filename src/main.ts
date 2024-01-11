@@ -16,6 +16,7 @@ export const plugin = writable<SecondBrainPlugin>();
 export const chatHistory = writable<ChatMessage[]>([]);
 
 interface PluginData {
+    isUsingRag: boolean;
     assistantLanguage: Language;
     genModelToggle: boolean; // 0 = ollama, 1 = openai
     ollamaGenModel: OllamaGenModel;
@@ -27,6 +28,7 @@ interface PluginData {
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
+    isUsingRag: true,
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     genModelToggle: true,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },

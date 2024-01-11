@@ -115,8 +115,7 @@
     async function redoGeneration(message: ChatMessage) {
         const targetIndex = $chatHistory.indexOf(message);
         $chatHistory = $chatHistory.slice(0, targetIndex);
-        //TODO implement isRAG
-        await runSecondBrainFromChat(true, message.content);
+        await runSecondBrainFromChat($plugin.data.isUsingRag, message.content);
     }
 
     function editMessage(message: ChatMessage) {

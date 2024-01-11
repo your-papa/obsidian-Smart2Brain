@@ -9,7 +9,6 @@
     export let messageText = '';
     let isProcessing: boolean;
     let textarea: HTMLTextAreaElement;
-    let isRAG = true;
 
     async function sendMessage() {
         if (isProcessing) {
@@ -24,7 +23,7 @@
             // let message: Message = { role: 'user', content: messageText };
             let userQuery = messageText;
             messageText = '';
-            await runSecondBrainFromChat(isRAG, userQuery);
+            await runSecondBrainFromChat($plugin.data.isUsingRag, userQuery);
         } else {
             new Notice('Your Second Brain does not understand empty messages!');
         }
@@ -35,8 +34,9 @@
         new FileSelectModal(app).open();
     }
     function handleRAGToggle() {
-        isRAG = !isRAG;
-        new Notice(isRAG ? 'Now chatting with your Second Brain' : 'Now chatting with the LLM');
+        $plugin.data.isUsingRag = !$plugin.data.isUsingRag;
+        $plugin.saveSettings();
+        new Notice($plugin.data.isUsingRag ? 'Now chatting with your Second Brain' : 'Now chatting with the LLM');
     }
 
     function handleDelete() {
@@ -71,7 +71,7 @@
     <p class="inline-block m-0">Connected to your Notes:</p>
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <div class="checkbox-container" class:is-enabled={isRAG} on:click={handleRAGToggle}><input type="checkbox" tabindex="0" /></div>
+    <div class="checkbox-container" class:is-enabled={$plugin.data.isUsingRag} on:click={handleRAGToggle}><input type="checkbox" tabindex="0" /></div>
 </div>
 <div class="w-full flex gap-3 items-center">
     <p class="inline-block m-0">Reset Secondbrain</p>
