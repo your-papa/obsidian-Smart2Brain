@@ -16,7 +16,6 @@ export const plugin = writable<SecondBrainPlugin>();
 export const chatHistory = writable<ChatMessage[]>([]);
 
 interface PluginData {
-    excludeFolders: string[];
     assistantLanguage: Language;
     genModelToggle: boolean; // 0 = ollama, 1 = openai
     ollamaGenModel: OllamaGenModel;
@@ -24,6 +23,7 @@ interface PluginData {
     openAIEmbedModel: OpenAIEmbedModel;
     fromBackup: boolean;
     targetFolder: string;
+    excludeFolders: string;
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {

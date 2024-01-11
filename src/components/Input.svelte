@@ -6,7 +6,7 @@
     import runSecondBrainFromChat from '../runSecondBrain';
 
     let inputPlaceholder = 'Chat with your second Brain...';
-    let messageText = '';
+    export let messageText = '';
     let isProcessing: boolean;
     let textarea: HTMLTextAreaElement;
     let isRAG = true;

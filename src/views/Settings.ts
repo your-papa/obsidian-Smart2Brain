@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, requestUrl } from 'obsidian';
+import { App, PluginSettingTab, Setting, requestUrl, Notice } from 'obsidian';
 import SecondBrainPlugin, { DEFAULT_SETTINGS } from '../main';
 // import OpenAI from 'openai';
 import { Languages, type Language, OpenAIGenModelNames, OllamaGenModelNames } from 'second-brain-ts';
@@ -170,22 +170,32 @@ export default class SettingsTab extends PluginSettingTab {
                 );
 
             new Setting(containerEl).setName('Ollama Model').addDropdown(async (dropdown) => {
-                const response = await requestUrl({
-                    url: model.baseUrl + '/api/tags',
-                    method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                });
-                const jsonData = response.json;
-                // const models: String[] = jsonData.models.map((model: { name: string }) => model.name);
-                OllamaGenModelNames.forEach((model: string) => dropdown.addOption(model, model));
-                dropdown.setValue(model.model).onChange(async (modelName: any) => {
-                    model.model = modelName;
-                    console.log(jsonData);
-                    await this.plugin.saveSettings();
-                    this.plugin.secondBrain.setGenModel(model);
-                });
+
+                try {
+                    const response = await requestUrl({
+                        url: model.baseUrl + '/api/tags',
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                    const jsonData = response.json;
+                    // const models: String[] = jsonData.models.map((model: { name: string }) => model.name);
+                    OllamaGenModelNames.forEach((model: string) => dropdown.addOption(model, model));
+                    dropdown.setValue(model.model).onChange(async (modelName: any) => {
+                        model.model = modelName;
+                        console.log(jsonData);
+                        await this.plugin.saveSettings();
+                        this.plugin.secondBrain.setGenModel(model);
+                    });
+                } catch (e) {
+                    console.log(e);
+                    if (e.toString() == "Error: net::ERR_CONNECTION_REFUSED") {
+                        new Notice('Ollama server is not running');
+                        dropdown.addOption('Start Ollama service', 'Start Ollama service');
+                        dropdown.setValue("Start Ollama service");
+                    }
+                }
             });
         }
     }

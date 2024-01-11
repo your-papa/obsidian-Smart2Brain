@@ -1,10 +1,13 @@
 <script lang="ts">
-    import { MdContentCopy, MdAutorenew } from 'svelte-icons/md';
+    import { MdContentCopy, MdAutorenew, MdEdit } from 'svelte-icons/md';
     import Electron from 'electron';
     import type { MouseEventHandler } from 'svelte/elements';
     import { MarkdownRenderer, Notice } from 'obsidian';
     import runSecondBrainFromChat from '../runSecondBrain';
     import { type ChatMessage, plugin, chatHistory } from '../main';
+
+    export let messageText = '';
+    export let isEditing = false;
 
     function toClipboard(messageText: string): MouseEventHandler<HTMLDivElement> {
         if (!messageText) {
@@ -43,12 +46,12 @@
     export function getNormalizedPath(path: string): NormalizedPath {
         const stripped = path.replace(noBreakSpace, ' ').normalize('NFC');
 
-        // split on first occurance of '|'
+        // split on first occurrence of '|'
         // "root#subpath##subsubpath|alias with |# chars"
         //             0            ^        1
         const splitOnAlias = stripped.split(/\|(.*)/);
 
-        // split on first occurance of '#' (in substring)
+        // split on first occurrence of '#' (in substring)
         // "root#subpath##subsubpath"
         //   0  ^        1
         const splitOnHash = splitOnAlias[0].split(/#(.*)/);
@@ -115,6 +118,13 @@
         //TODO implement isRAG
         await runSecondBrainFromChat(true, message.content);
     }
+
+    function editMessage(message: ChatMessage) {
+        isEditing = true;
+        const targetIndex = $chatHistory.indexOf(message);
+        $chatHistory = $chatHistory.slice(0, targetIndex);
+        messageText = message.content;
+    }
 </script>
 
 <div class="chat-window select-text flex-grow w-full overflow-y-scroll rounded-md mb-1 p-4">
@@ -129,8 +139,22 @@
                     <span class="break-words text-[--text-normal] p-0" on:mouseover={onMouseOver} use:html={message.content} on:click={onClick} />
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <div class="text-[--text-normal] hover:text-[--text-accent-hover] w-6" on:click|preventDefault={() => redoGeneration(message)}>
+                    <div class='flex justify-end'>
+                    <div
+                        title="Deletes all following Messages and regenerates the answer to the current query"
+                        class="text-[--text-normal] hover:text-[--text-accent-hover] w-6"
+                        on:click|preventDefault={() => redoGeneration(message)}
+                    >
                         <MdAutorenew />
+                    </div>
+                    <!-- svelte-ignore a11y-no-static-element-interactions -->
+                    <div
+                        title="Edit query and regenerate the answer"
+                        class="text-[--text-normal] hover:text-[--text-accent-hover] w-5"
+                        on:click|preventDefault={() => editMessage(message)}
+                    >
+                        <MdEdit />
+                    </div>
                     </div>
                 </div>
             </div>
@@ -148,7 +172,7 @@
                 />
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <div class="text-[--text-normal] hover:text-[--text-accent-hover] w-6" on:click|preventDefault={toClipboard(message.content)}>
+                <div title="Copy Text" class="text-[--text-normal] hover:text-[--text-accent-hover] w-6" on:click|preventDefault={toClipboard(message.content)}>
                     <MdContentCopy />
                 </div>
             </div>
