@@ -47,14 +47,14 @@ export default class SettingsTab extends PluginSettingTab {
             assistantMessage.setValue(data.initialAssistantMessage.replace('Assistant\n', '')
                     .replace('\n- - - - -', ''))
                     .onChange(async (value) => {
-                data.initialAssistantMessage = "Assistant\n" + value + "\n- - - - -";
-                await this.plugin.saveSettings();
-               if(get(chatHistory).length == 1 ) {
-                   chatHistory.set([{role: 'Assistant', content: value, id: nanoid()}]);
-                   this.plugin.chatView.requestSave();
-               }
-
-
+                        if (value !== ""){
+                            data.initialAssistantMessage = "Assistant\n" + value + "\n- - - - -";
+                            await this.plugin.saveSettings();
+                            if(get(chatHistory).length == 1 ) {
+                                chatHistory.set([{role: 'Assistant', content: value, id: nanoid()}]);
+                                this.plugin.chatView.requestSave();
+                            }
+                        }
             })
         );
 
