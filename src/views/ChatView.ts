@@ -62,7 +62,7 @@ export class ChatView extends TextFileView implements HoverParent {
     }
 
     getDisplayText() {
-        return 'Chat Second Brain';
+        return this.file?.basename || 'Second Brain Chat';
     }
 
     async onLoadFile(file: TFile) {

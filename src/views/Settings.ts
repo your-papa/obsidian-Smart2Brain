@@ -1,10 +1,10 @@
 import { App, PluginSettingTab, Setting, requestUrl, Notice } from 'obsidian';
-import SecondBrainPlugin, { DEFAULT_SETTINGS, chatHistory} from '../main';
+import SecondBrainPlugin, { DEFAULT_SETTINGS, chatHistory } from '../main';
 import { ChatView } from './ChatView';
 // import OpenAI from 'openai';
-import { Languages, type Language, OpenAIGenModelNames, OllamaGenModelNames } from 'second-brain-ts';
 import { get } from 'svelte/store';
 import { nanoid } from 'nanoid';
+import { Languages, type Language, OpenAIGenModelNames, OllamaGenModelNames } from 'papa-ts';
 
 export default class SettingsTab extends PluginSettingTab {
     plugin: SecondBrainPlugin;
@@ -24,39 +24,41 @@ export default class SettingsTab extends PluginSettingTab {
 
         this.containerEl.createEl('h2', { text: 'General Settings' });
 
-        new Setting(containerEl).setName('Adjust initial Assistant Message')
+        new Setting(containerEl)
+            .setName('Adjust initial Assistant Message')
             .addButton((button) =>
-            button
-                .setButtonText('Restore Default')
-                .setIcon('rotate-cw')
-                .setClass('clickable-icon')
-                .onClick(async () => {
-                    data.initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
-                    await this.plugin.saveSettings();
-                    if(get(chatHistory).length == 1 ) {
-                        chatHistory.set([{
-                            role: 'Assistant', content: (data.initialAssistantMessage.replace('Assistant\n', '')
-                                .replace('\n- - - - -', '')), id: nanoid()
-                        }]);
-                        this.plugin.chatView.requestSave();
-                    }
-                    this.display();
-                })
-        )
-            .addText((assistantMessage  ) =>
-            assistantMessage.setValue(data.initialAssistantMessage.replace('Assistant\n', '')
-                    .replace('\n- - - - -', ''))
-                    .onChange(async (value) => {
-                        if (value !== ""){
-                            data.initialAssistantMessage = "Assistant\n" + value + "\n- - - - -";
-                            await this.plugin.saveSettings();
-                            if(get(chatHistory).length == 1 ) {
-                                chatHistory.set([{role: 'Assistant', content: value, id: nanoid()}]);
-                                this.plugin.chatView.requestSave();
-                            }
+                button
+                    .setButtonText('Restore Default')
+                    .setIcon('rotate-cw')
+                    .setClass('clickable-icon')
+                    .onClick(async () => {
+                        data.initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
+                        await this.plugin.saveSettings();
+                        if (get(chatHistory).length == 1) {
+                            chatHistory.set([
+                                {
+                                    role: 'Assistant',
+                                    content: data.initialAssistantMessage.replace('Assistant\n', '').replace('\n- - - - -', ''),
+                                    id: nanoid(),
+                                },
+                            ]);
+                            this.plugin.chatView.requestSave();
                         }
-            })
-        );
+                        this.display();
+                    })
+            )
+            .addText((assistantMessage) =>
+                assistantMessage.setValue(data.initialAssistantMessage.replace('Assistant\n', '').replace('\n- - - - -', '')).onChange(async (value) => {
+                    if (value !== '') {
+                        data.initialAssistantMessage = 'Assistant\n' + value + '\n- - - - -';
+                        await this.plugin.saveSettings();
+                        if (get(chatHistory).length == 1) {
+                            chatHistory.set([{ role: 'Assistant', content: value, id: nanoid() }]);
+                            this.plugin.chatView.requestSave();
+                        }
+                    }
+                })
+            );
 
         new Setting(containerEl).setName('Assistant Language').addDropdown((dropdown) => {
             Languages.forEach((lang: Language) => dropdown.addOption(lang, lang));
@@ -208,7 +210,6 @@ export default class SettingsTab extends PluginSettingTab {
                 );
 
             new Setting(containerEl).setName('Ollama Model').addDropdown(async (dropdown) => {
-
                 try {
                     const response = await requestUrl({
                         url: model.baseUrl + '/api/tags',
@@ -228,10 +229,10 @@ export default class SettingsTab extends PluginSettingTab {
                     });
                 } catch (e) {
                     console.log(e);
-                    if (e.toString() == "Error: net::ERR_CONNECTION_REFUSED") {
+                    if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
                         new Notice('Ollama server is not running');
                         dropdown.addOption('Start Ollama service', 'Start Ollama service');
-                        dropdown.setValue("Start Ollama service");
+                        dropdown.setValue('Start Ollama service');
                     }
                 }
             });

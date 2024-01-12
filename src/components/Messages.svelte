@@ -157,22 +157,22 @@
                           use:renderMarkdown='{message.content}' on:click={onClick} />
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <div class='flex justify-end'>
-                    <div
-                        title="Deletes all following Messages and regenerates the answer to the current query"
-                        class="text-[--text-normal] hover:text-[--text-accent-hover] w-6"
-                        on:click|preventDefault={() => redoGeneration(message)}
-                    >
-                        <MdAutorenew />
-                    </div>
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <div
-                        title="Edit query and regenerate the answer"
-                        class="text-[--text-normal] hover:text-[--text-accent-hover] w-5"
-                        on:click|preventDefault={() => editMessage(message)}
-                    >
-                        <MdEdit />
-                    </div>
+                    <div class="flex justify-end">
+                        <div
+                            title="Deletes all following Messages and regenerates the answer to the current query"
+                            class="text-[--text-normal] hover:text-[--text-accent-hover] w-6"
+                            on:click|preventDefault={() => redoGeneration(message)}
+                        >
+                            <MdAutorenew />
+                        </div>
+                        <!-- svelte-ignore a11y-no-static-element-interactions -->
+                        <div
+                            title="Edit query and regenerate the answer"
+                            class="text-[--text-normal] hover:text-[--text-accent-hover] w-5"
+                            on:click|preventDefault={() => editMessage(message)}
+                        >
+                            <MdEdit />
+                        </div>
                     </div>
                 </div>
             </div>

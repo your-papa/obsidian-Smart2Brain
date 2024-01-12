@@ -1,10 +1,11 @@
-import { App, FuzzySuggestModal, Plugin, TFile, WorkspaceLeaf, normalizePath } from 'obsidian';
-import { SecondBrain, obsidianDocumentLoader, type Language, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'second-brain-ts';
-import { writable } from 'svelte/store';
+import { App, FuzzySuggestModal, Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
+import { Papa, obsidianDocumentLoader, type Language, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
+import { get, writable } from 'svelte/store';
+import { around } from 'monkey-around';
 
 import './styles.css';
 import { ChatModal } from './views/ChatModal';
-import { ChatView,  VIEW_TYPE_CHAT } from './views/ChatView';
+import { ChatView, VIEW_TYPE_CHAT } from './views/ChatView';
 import SettingsTab from './views/Settings';
 
 export type ChatMessage = {
@@ -14,6 +15,15 @@ export type ChatMessage = {
 };
 export const plugin = writable<SecondBrainPlugin>();
 export const chatHistory = writable<ChatMessage[]>([]);
+
+export const serializeChatHistory = (cH: ChatMessage[]) =>
+    cH
+        .map((chatMessage: ChatMessage) => {
+            if (chatMessage.role === 'User') return `${chatMessage.role}: ${chatMessage.content}`;
+            else if (chatMessage.role === 'Assistant') return `${chatMessage.role}: ${chatMessage.content}`;
+            return `${chatMessage.content}`;
+        })
+        .join('\n');
 
 interface PluginData {
     initialAssistantMessage: string;
@@ -26,6 +36,7 @@ interface PluginData {
     fromBackup: boolean;
     targetFolder: string;
     excludeFolders: string;
+    defaultChatName: string;
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
@@ -38,12 +49,14 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     openAIEmbedModel: { modelName: 'text-embedding-ada-002', openAIApiKey: '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' }, // TODO: remove openAIApiKey
     targetFolder: 'Chats',
     fromBackup: false,
+    defaultChatName: 'Chat Second Brain',
 };
 
 export default class SecondBrainPlugin extends Plugin {
     data: PluginData;
     chatView: ChatView;
-    secondBrain: SecondBrain;
+    secondBrain: Papa;
+    leaf: WorkspaceLeaf;
 
     async loadSettings() {
         this.data = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -55,7 +68,7 @@ export default class SecondBrainPlugin extends Plugin {
 
     async initSecondBrain(fromBackup = true) {
         const vectorStoreDataPath = normalizePath('.obsidian/plugins/smart-second-brain/vector-store-data.json');
-        this.secondBrain = new SecondBrain({
+        this.secondBrain = new Papa({
             genModel: this.data.genModelToggle ? this.data.openAIGenModel : this.data.ollamaGenModel,
             embedModel: this.data.openAIEmbedModel,
             saveHandler: async (vectorStoreJson: string) => await this.app.vault.adapter.write(vectorStoreDataPath, vectorStoreJson),
@@ -125,6 +138,8 @@ export default class SecondBrainPlugin extends Plugin {
                 new FileSelectModal(this.app).open();
             },
         });
+
+        this.registerMonkeyPatches();
     }
 
     onunload() {
@@ -132,27 +147,73 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async activateView() {
-        let leaf: WorkspaceLeaf;
         const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
         if (leaves.length) {
-            leaf = leaves[0];
+            this.leaf = leaves[0];
         } else {
-            leaf = this.app.workspace.getRightLeaf(false);
+            this.leaf = this.app.workspace.getRightLeaf(false);
             const chatDirExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder));
             if (!chatDirExists) {
                 await this.app.vault.createFolder(normalizePath(this.data.targetFolder));
             }
-            const defaultChatExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder + '/Chat Second Brain.md'));
+            const defaultChatExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'));
             const file = defaultChatExists
-                ? this.app.metadataCache.getFirstLinkpathDest(this.data.targetFolder + '/Chat Second Brain.md', '')
-                : await this.app.vault.create(normalizePath(this.data.targetFolder + '/Chat Second Brain.md'), this.data.initialAssistantMessage);
-            await leaf.openFile(file, { active: true });
-            await leaf.setViewState({
+                ? this.app.metadataCache.getFirstLinkpathDest(this.data.targetFolder + '/' + this.data.defaultChatName + '.md', '')
+                : await this.app.vault.create(normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'), DEFAULT_DATA);
+            await this.leaf.openFile(file, { active: true });
+            await this.leaf.setViewState({
                 type: VIEW_TYPE_CHAT,
                 state: { file: file.path },
             });
         }
-        this.app.workspace.revealLeaf(leaf);
+        this.app.workspace.revealLeaf(this.leaf);
+    }
+
+    async saveChatHistory() {
+        let fileName = await this.secondBrain.createTitleFromChatHistory(this.data.assistantLanguage, serializeChatHistory(get(chatHistory)));
+        fileName = fileName.replace(/_/g, ' ');
+        chatHistory.set([get(chatHistory)[0]]);
+        this.chatView.requestSave();
+        const newChatFile = await this.app.vault.copy(this.chatView.file, normalizePath(this.data.targetFolder + '/' + fileName + '.md'));
+        await this.leaf.openFile(newChatFile);
+        await this.leaf.setViewState({
+            type: VIEW_TYPE_CHAT,
+            state: { file: newChatFile.path },
+        });
+    }
+
+    registerMonkeyPatches() {
+        const self = this;
+        // Monkey patch WorkspaceLeaf to open Kanbans with KanbanView by default
+        this.register(
+            around(WorkspaceLeaf.prototype, {
+                setViewState(next) {
+                    return function (state: ViewState, ...rest: any[]) {
+                        if (
+                            // If we have a markdown file
+                            state.type === 'markdown' &&
+                            state.state?.file
+                        ) {
+                            // Then check for the kanban frontMatterKey
+                            // const cache = self.app.metadataCache.getCache(state.state.file);
+
+                            // if (cache?.frontmatter && cache.frontmatter['second-brain-chat']) {
+                            if (state.state.file.startsWith(self.data.targetFolder)) {
+                                // If we have it, force the view type to kanban
+                                const newState = {
+                                    ...state,
+                                    type: VIEW_TYPE_CHAT,
+                                };
+
+                                return next.apply(this, [newState, ...rest]);
+                            }
+                        }
+
+                        return next.apply(this, [state, ...rest]);
+                    };
+                },
+            })
+        );
     }
 }
 

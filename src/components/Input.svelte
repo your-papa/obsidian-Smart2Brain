@@ -1,6 +1,7 @@
 <script lang="ts">
     import { MdSend, MdDelete, MdRefresh } from 'svelte-icons/md';
-    import { MarkdownRenderer, Notice } from 'obsidian';
+    import { Notice } from 'obsidian';
+    import MdSave from 'svelte-icons/md/MdSave.svelte';
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { FileSelectModal, plugin, chatHistory } from '../main';
     import runSecondBrainFromChat from '../runSecondBrain';
@@ -13,8 +14,7 @@
     export let isEditing: boolean;
 
     async function sendMessage() {
-        if(isEditing)
-            isEditing = false;
+        if (isEditing) isEditing = false;
         if (isProcessing) {
             new Notice('Please wait while your Second Brain is thinking...');
             return;
@@ -60,7 +60,7 @@
         }
     }
 
-    $: if (messageText ) {
+    $: if (messageText) {
         updateHeight();
     }
 
@@ -69,10 +69,7 @@
         if (textarea.scrollHeight == 42) textarea.style.height = '2rem';
         else textarea.style.height = textarea.scrollHeight + 'px';
     }
-
 </script>
-
-
 
 <div class="w-full flex gap-3 items-center">
     <p class="inline-block m-0">Connected to your Notes:</p>
@@ -85,6 +82,12 @@
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="h-6" on:click={() => $plugin.initSecondBrain(false)}><MdRefresh /></div>
+</div>
+<div class="w-full flex gap-3 items-center">
+    <p class="inline-block m-0">Save Chat</p>
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div class="h-6" on:click={() => $plugin.saveChatHistory()}><MdSave /></div>
 </div>
 <div class="w-full flex gap-3 items-center mb-2">
     <p class="inline-block m-0">Chat History:</p>
