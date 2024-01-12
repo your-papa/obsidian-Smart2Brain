@@ -1,7 +1,10 @@
 import { App, PluginSettingTab, Setting, requestUrl, Notice } from 'obsidian';
-import SecondBrainPlugin, { DEFAULT_SETTINGS } from '../main';
+import SecondBrainPlugin, { DEFAULT_SETTINGS, chatHistory} from '../main';
+import { ChatView } from './ChatView';
 // import OpenAI from 'openai';
 import { Languages, type Language, OpenAIGenModelNames, OllamaGenModelNames } from 'second-brain-ts';
+import { get } from 'svelte/store';
+import { nanoid } from 'nanoid';
 
 export default class SettingsTab extends PluginSettingTab {
     plugin: SecondBrainPlugin;
@@ -20,6 +23,41 @@ export default class SettingsTab extends PluginSettingTab {
         const data = this.plugin.data;
 
         this.containerEl.createEl('h2', { text: 'General Settings' });
+
+        new Setting(containerEl).setName('Adjust initial Assistant Message')
+            .addButton((button) =>
+            button
+                .setButtonText('Restore Default')
+                .setIcon('rotate-cw')
+                .setClass('clickable-icon')
+                .onClick(async () => {
+                    data.initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
+                    await this.plugin.saveSettings();
+                    if(get(chatHistory).length == 1 ) {
+                        chatHistory.set([{
+                            role: 'Assistant', content: (data.initialAssistantMessage.replace('Assistant\n', '')
+                                .replace('\n- - - - -', '')), id: nanoid()
+                        }]);
+                        this.plugin.chatView.requestSave();
+                    }
+                    this.display();
+                })
+        )
+            .addText((assistantMessage  ) =>
+            assistantMessage.setValue(data.initialAssistantMessage.replace('Assistant\n', '')
+                    .replace('\n- - - - -', ''))
+                    .onChange(async (value) => {
+                data.initialAssistantMessage = "Assistant\n" + value + "\n- - - - -";
+                await this.plugin.saveSettings();
+               if(get(chatHistory).length == 1 ) {
+                   chatHistory.set([{role: 'Assistant', content: value, id: nanoid()}]);
+                   this.plugin.chatView.requestSave();
+               }
+
+
+            })
+        );
+
         new Setting(containerEl).setName('Assistant Language').addDropdown((dropdown) => {
             Languages.forEach((lang: Language) => dropdown.addOption(lang, lang));
             dropdown.setValue(data.assistantLanguage).onChange(async (lang: any) => {

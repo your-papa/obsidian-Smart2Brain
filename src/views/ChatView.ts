@@ -2,18 +2,17 @@ import { WorkspaceLeaf, type HoverParent, HoverPopover, TextFileView, TFile } fr
 
 import ChatViewComponent from '../components/ChatView.svelte';
 import { nanoid } from 'nanoid';
-import { type ChatMessage, chatHistory } from '../main';
+import { type ChatMessage, chatHistory, plugin } from '../main';
 import { get } from 'svelte/store';
 
 export const VIEW_TYPE_CHAT = 'chat-view';
 
 // TODO: think about System message
-export const DEFAULT_DATA = 'Assistant\nHallo, wie kann ich dir helfen?\n- - - - -';
 
 export class ChatView extends TextFileView implements HoverParent {
     component: ChatViewComponent;
     hoverPopover: HoverPopover | null;
-    data: string = DEFAULT_DATA;
+    data: string = get(plugin).data.initialAssistantMessage;
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);

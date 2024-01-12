@@ -4,7 +4,7 @@ import { writable } from 'svelte/store';
 
 import './styles.css';
 import { ChatModal } from './views/ChatModal';
-import { ChatView, DEFAULT_DATA, VIEW_TYPE_CHAT } from './views/ChatView';
+import { ChatView,  VIEW_TYPE_CHAT } from './views/ChatView';
 import SettingsTab from './views/Settings';
 
 export type ChatMessage = {
@@ -16,6 +16,7 @@ export const plugin = writable<SecondBrainPlugin>();
 export const chatHistory = writable<ChatMessage[]>([]);
 
 interface PluginData {
+    initialAssistantMessage: string;
     isUsingRag: boolean;
     assistantLanguage: Language;
     genModelToggle: boolean; // 0 = ollama, 1 = openai
@@ -28,6 +29,7 @@ interface PluginData {
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
+    initialAssistantMessage: 'Assistant\nHallo, wie kann ich dir helfen?\n- - - - -',
     isUsingRag: true,
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     genModelToggle: true,
@@ -143,7 +145,7 @@ export default class SecondBrainPlugin extends Plugin {
             const defaultChatExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder + '/Chat Second Brain.md'));
             const file = defaultChatExists
                 ? this.app.metadataCache.getFirstLinkpathDest(this.data.targetFolder + '/Chat Second Brain.md', '')
-                : await this.app.vault.create(normalizePath(this.data.targetFolder + '/Chat Second Brain.md'), DEFAULT_DATA);
+                : await this.app.vault.create(normalizePath(this.data.targetFolder + '/Chat Second Brain.md'), this.data.initialAssistantMessage);
             await leaf.openFile(file, { active: true });
             await leaf.setViewState({
                 type: VIEW_TYPE_CHAT,
