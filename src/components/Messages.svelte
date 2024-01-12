@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { MdContentCopy, MdAutorenew, MdEdit } from 'svelte-icons/md';
+    import { MdContentCopy, MdAutorenew, MdEdit, MdCancel } from 'svelte-icons/md';
     import Electron from 'electron';
     import type { MouseEventHandler } from 'svelte/elements';
     import { MarkdownRenderer, Notice } from 'obsidian';
@@ -7,8 +7,12 @@
     import { type ChatMessage, plugin, chatHistory } from '../main';
 
     export let messageText = '';
-    export let isEditing = false;
+    export let isEditing: boolean;
+    export let textarea: HTMLTextAreaElement;
 
+    let editElem: HTMLSpanElement;
+
+    let temporaryEditingHistory: ChatMessage[] = [];
     function toClipboard(messageText: string): MouseEventHandler<HTMLDivElement> {
         if (!messageText) {
             new Notice('Only for Valid Messages! Implement that you lazy fuck!');
@@ -18,7 +22,7 @@
         return;
     }
 
-    const html = (node: HTMLElement, content: string) => {
+    const renderMarkdown = (node: HTMLElement, content: string) => {
         MarkdownRenderer.render($plugin.app, content, node, 'Chat view.md', $plugin);
     };
 
@@ -121,8 +125,22 @@
     function editMessage(message: ChatMessage) {
         isEditing = true;
         const targetIndex = $chatHistory.indexOf(message);
+        temporaryEditingHistory = $chatHistory.slice(targetIndex);
         $chatHistory = $chatHistory.slice(0, targetIndex);
-        messageText = message.content;
+        messageText = message.content + " ";
+        textarea.focus();
+    }
+
+    $: if (editElem != null) {
+        editElem.innerText = "";
+        renderMarkdown(editElem, messageText);
+    }
+
+    function cancelEditing() {
+        isEditing = false;
+        messageText = "";
+        $chatHistory = $chatHistory.concat(temporaryEditingHistory);
+        $plugin.chatView.requestSave();
     }
 </script>
 
@@ -135,7 +153,8 @@
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <!-- svelte-ignore a11y-mouse-events-have-key-events -->
-                    <span class="break-words text-[--text-normal] p-0" on:mouseover={onMouseOver} use:html={message.content} on:click={onClick} />
+                    <span class="break-words text-[--text-normal] p-0" on:mouseover={onMouseOver}
+                          use:renderMarkdown='{message.content}' on:click={onClick} />
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <div class='flex justify-end'>
@@ -165,7 +184,7 @@
                 <span
                     class="break-words text-[--text-normal]"
                     on:mouseover={onMouseOver}
-                    use:html={message.content}
+                    use:renderMarkdown='{message.content}'
                     style="background: transparent;"
                     on:click={onClick}
                 />
@@ -177,4 +196,20 @@
             </div>
         {/if}
     {/each}
+    {#if isEditing}
+    <div class="flex justify-end mb-3">
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <div class="pl-4 pr-4 rounded-t-lg rounded-bl-lg max-w-[80%]" style="background-color: hsla(var(--color-accent-hsl), 0.4);">
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <!-- svelte-ignore a11y-mouse-events-have-key-events -->
+            <span class="break-words text-[--text-normal] p-0" on:mouseover={onMouseOver} bind:this={editElem} />
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div title="Copy Text" class="text-[--text-normal] hover:text-[--text-accent-hover] w-6" on:click|preventDefault={cancelEditing}>
+                <MdCancel />
+            </div>
+        </div>
+    </div>
+    {/if}
 </div>

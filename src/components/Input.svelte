@@ -1,6 +1,6 @@
 <script lang="ts">
     import { MdSend, MdDelete, MdRefresh } from 'svelte-icons/md';
-    import { Notice } from 'obsidian';
+    import { MarkdownRenderer, Notice } from 'obsidian';
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { FileSelectModal, plugin, chatHistory } from '../main';
     import runSecondBrainFromChat from '../runSecondBrain';
@@ -8,9 +8,13 @@
     let inputPlaceholder = 'Chat with your second Brain...';
     export let messageText = '';
     let isProcessing: boolean;
-    let textarea: HTMLTextAreaElement;
+    export let textarea: HTMLTextAreaElement;
+
+    export let isEditing: boolean;
 
     async function sendMessage() {
+        if(isEditing)
+            isEditing = false;
         if (isProcessing) {
             new Notice('Please wait while your Second Brain is thinking...');
             return;
@@ -56,7 +60,7 @@
         }
     }
 
-    $: if (messageText) {
+    $: if (messageText ) {
         updateHeight();
     }
 
@@ -65,7 +69,10 @@
         if (textarea.scrollHeight == 42) textarea.style.height = '2rem';
         else textarea.style.height = textarea.scrollHeight + 'px';
     }
+
 </script>
+
+
 
 <div class="w-full flex gap-3 items-center">
     <p class="inline-block m-0">Connected to your Notes:</p>
