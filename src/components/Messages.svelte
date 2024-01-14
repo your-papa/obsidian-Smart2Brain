@@ -1,16 +1,19 @@
 <script lang="ts">
-    import { MdContentCopy, MdAutorenew, MdEdit, MdCancel } from 'svelte-icons/md';
+    import { MdContentCopy, MdAutorenew, MdEdit, MdCancel, MdRefresh } from 'svelte-icons/md';
     import Electron from 'electron';
     import type { MouseEventHandler } from 'svelte/elements';
     import { MarkdownRenderer, Notice } from 'obsidian';
     import runSecondBrainFromChat from '../runSecondBrain';
-    import { type ChatMessage, plugin, chatHistory } from '../main';
+    import { type ChatMessage, plugin, chatHistory, DEFAULT_SETTINGS } from '../main';
+    import { isAssistantMessage } from 'openai/lib/chatCompletionUtils';
 
     export let messageText = '';
     export let isEditing: boolean;
+    export let isEditingAssistantMessage: boolean;
     export let textarea: HTMLTextAreaElement;
 
     let editElem: HTMLSpanElement;
+    let initialAssistantMessageSpan: HTMLSpanElement;
 
     let temporaryEditingHistory: ChatMessage[] = [];
     function toClipboard(messageText: string): MouseEventHandler<HTMLDivElement> {
@@ -136,11 +139,46 @@
         renderMarkdown(editElem, messageText);
     }
 
+    $: if(isEditingAssistantMessage){
+        initialAssistantMessageSpan.innerText = "";
+        renderMarkdown(initialAssistantMessageSpan, messageText);
+    }
+
     function cancelEditing() {
         isEditing = false;
         messageText = "";
         $chatHistory = $chatHistory.concat(temporaryEditingHistory);
         $plugin.chatView.requestSave();
+    }
+
+    function editInitialAssistantMessage(initialMessage: string){
+        isEditingAssistantMessage = true;
+        messageText = initialMessage;
+        textarea.focus();
+        //TODO: make it work
+        textarea.select();
+    }
+
+    function cancelEditingInitialAssistantMessage(){
+        isEditingAssistantMessage = false;
+        messageText = "";
+        initialAssistantMessageSpan.innerText = "";
+        renderMarkdown(initialAssistantMessageSpan, $plugin.data.initialAssistantMessage.replace('Assistant\n', '')
+            .replace('\n- - - - -', ''));
+        $plugin.chatView.requestSave();
+    }
+
+    function resetInitialAssistantMessage(){
+        isEditingAssistantMessage = false;
+        messageText = "";
+        initialAssistantMessageSpan.innerText = "";
+        const initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage.replace('Assistant\n', '')
+            .replace('\n- - - - -', '');
+        renderMarkdown(initialAssistantMessageSpan, initialAssistantMessage);
+        $chatHistory[0].content = initialAssistantMessage;
+        $plugin.data.initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
+        $plugin.chatView.requestSave();
+        $plugin.saveSettings();
     }
 </script>
 
@@ -182,16 +220,40 @@
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-mouse-events-have-key-events -->
                 <span
+                    id='test'
                     class="break-words text-[--text-normal]"
                     on:mouseover={onMouseOver}
-                    use:renderMarkdown='{message.content}'
+                    use:renderMarkdown={message.content}
                     style="background: transparent;"
                     on:click={onClick}
+                    bind:this={initialAssistantMessageSpan}
                 />
+                <div class="flex justify-start mb-3">
+                    {#if (!isEditingAssistantMessage)}
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <div title="Copy Text" class="text-[--text-normal] hover:text-[--text-accent-hover] w-6" on:click|preventDefault={toClipboard(message.content)}>
-                    <MdContentCopy />
+                        <div title="Copy Text" class="text-[--text-normal] hover:text-[--text-accent-hover] w-6" on:click|preventDefault={toClipboard(message.content)}>
+                            <MdContentCopy />
+                        </div>
+                        {#if $chatHistory.length === 1}
+                        <!-- svelte-ignore a11y-no-static-element-interactions -->
+                        <!-- svelte-ignore a11y-click-events-have-key-events -->
+                            <div
+                                title="Change the initial assistant message"
+                                class="text-[--text-normal] hover:text-[--text-accent-hover] w-5"
+                                on:click|preventDefault={() => editInitialAssistantMessage(message.content)}>
+                                    <MdEdit />
+                            </div>
+                        {/if}
+                    {/if}
+                    {#if isEditingAssistantMessage}
+                        <div title="Copy Text" class="text-[--text-normal] hover:text-[--text-accent-hover] w-6" on:click|preventDefault={cancelEditingInitialAssistantMessage}>
+                            <MdCancel />
+                        </div>
+                        <div title="Reset to default" class="text-[--text-normal] hover:text-[--text-accent-hover] w-6" on:click={resetInitialAssistantMessage}>
+                            <MdRefresh/>
+                        </div>
+                    {/if}
                 </div>
             </div>
         {/if}

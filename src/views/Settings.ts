@@ -24,7 +24,7 @@ export default class SettingsTab extends PluginSettingTab {
 
         this.containerEl.createEl('h2', { text: 'General Settings' });
 
-        new Setting(containerEl)
+        /*new Setting(containerEl)
             .setName('Adjust initial Assistant Message')
             .addButton((button) =>
                 button
@@ -58,7 +58,7 @@ export default class SettingsTab extends PluginSettingTab {
                         }
                     }
                 })
-            );
+            );*/
 
         new Setting(containerEl).setName('Assistant Language').addDropdown((dropdown) => {
             Languages.forEach((lang: Language) => dropdown.addOption(lang, lang));
@@ -210,6 +210,7 @@ export default class SettingsTab extends PluginSettingTab {
                 );
 
             new Setting(containerEl).setName('Ollama Model').addDropdown(async (dropdown) => {
+
                 try {
                     const response = await requestUrl({
                         url: model.baseUrl + '/api/tags',
@@ -229,10 +230,10 @@ export default class SettingsTab extends PluginSettingTab {
                     });
                 } catch (e) {
                     console.log(e);
-                    if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
+                    if (e.toString() == "Error: net::ERR_CONNECTION_REFUSED") {
                         new Notice('Ollama server is not running');
                         dropdown.addOption('Start Ollama service', 'Start Ollama service');
-                        dropdown.setValue('Start Ollama service');
+                        dropdown.setValue("Start Ollama service");
                     }
                 }
             });

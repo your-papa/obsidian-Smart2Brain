@@ -1,6 +1,7 @@
 import { App, FuzzySuggestModal, Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
 import { Papa, obsidianDocumentLoader, type Language, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
 import { get, writable } from 'svelte/store';
+import { INITIAL_ASSISTANT_MESSAGE} from './ChatMessages';
 import { around } from 'monkey-around';
 
 import './styles.css';
@@ -40,7 +41,7 @@ interface PluginData {
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
-    initialAssistantMessage: 'Assistant\nHallo, wie kann ich dir helfen?\n- - - - -',
+    initialAssistantMessage: INITIAL_ASSISTANT_MESSAGE.get(window.localStorage.getItem('language')),
     isUsingRag: true,
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     genModelToggle: true,
@@ -159,7 +160,7 @@ export default class SecondBrainPlugin extends Plugin {
             const defaultChatExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'));
             const file = defaultChatExists
                 ? this.app.metadataCache.getFirstLinkpathDest(this.data.targetFolder + '/' + this.data.defaultChatName + '.md', '')
-                : await this.app.vault.create(normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'), DEFAULT_DATA);
+                : await this.app.vault.create(normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'), this.data.initialAssistantMessage);
             await this.leaf.openFile(file, { active: true });
             await this.leaf.setViewState({
                 type: VIEW_TYPE_CHAT,

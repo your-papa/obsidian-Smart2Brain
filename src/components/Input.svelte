@@ -1,10 +1,10 @@
 <script lang="ts">
-    import { MdSend, MdDelete, MdRefresh } from 'svelte-icons/md';
-    import { Notice } from 'obsidian';
-    import MdSave from 'svelte-icons/md/MdSave.svelte';
+    import { MdSend, MdDelete, MdRefresh, MdSave } from 'svelte-icons/md';
+    import { MarkdownRenderer, Notice } from 'obsidian';
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { FileSelectModal, plugin, chatHistory } from '../main';
     import runSecondBrainFromChat from '../runSecondBrain';
+    import { nanoid } from 'nanoid';
 
     let inputPlaceholder = 'Chat with your second Brain...';
     export let messageText = '';
@@ -13,8 +13,21 @@
 
     export let isEditing: boolean;
 
+    export let isEditingAssistantMessage: boolean;
+
     async function sendMessage() {
         if (isEditing) isEditing = false;
+        if (isEditingAssistantMessage) {
+            //TODO: refactor this
+            $chatHistory[0].content = messageText;
+            $plugin.data.initialAssistantMessage = "Assistant\n" + messageText + "\n- - - - -";
+            messageText = "";
+            isEditingAssistantMessage = false;
+            $plugin.chatView.requestSave();
+            await $plugin.saveSettings();
+            return;
+        }
+        if(isEditing) isEditing = false;
         if (isProcessing) {
             new Notice('Please wait while your Second Brain is thinking...');
             return;
@@ -49,7 +62,9 @@
             return;
         }
         // delete everything except the first message
-        $chatHistory = [$chatHistory[0]];
+        $chatHistory = [];
+        $chatHistory.push({ role: 'Assistant', content: $plugin.data.initialAssistantMessage.replace('Assistant\n', '')
+                .replace('\n- - - - -', ''), id: nanoid()});
         $plugin.chatView.requestSave();
     }
 
