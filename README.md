@@ -1,6 +1,7 @@
 # Smart Second Brain 
-![DALL·E 2024-01-15 22 26 45 - Adjust the second redesigned logo to include a bit more white in the head of the stylized llama  Maintain the light blue (#68cbfa) and light purple (#](https://github.com/nicobrauchtgit/Smart2Brain-Obsidian/assets/103033288/3e2ea736-b4cf-4b69-a7ef-a2eee78cfa6a)
-
+<p align='center'>
+  <img src='https://github.com/nicobrauchtgit/Smart2Brain-Obsidian/assets/103033288/3e2ea736-b4cf-4b69-a7ef-a2eee78cfa6a=10x' height=600rem>
+<p/>
 
 This is a template repository for creating an Obsidian plugin using Svelte and
 Tailwind CSS. It provides a basic setup and structure to kickstart your
