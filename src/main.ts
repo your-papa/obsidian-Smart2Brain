@@ -1,7 +1,7 @@
 import { App, FuzzySuggestModal, Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
 import { Papa, obsidianDocumentLoader, type Language, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
 import { get, writable } from 'svelte/store';
-import { INITIAL_ASSISTANT_MESSAGE} from './ChatMessages';
+import { INITIAL_ASSISTANT_MESSAGE } from './ChatMessages';
 import { around } from 'monkey-around';
 
 import './styles.css';
@@ -118,9 +118,7 @@ export default class SecondBrainPlugin extends Plugin {
             return this.chatView;
         });
 
-        this.addRibbonIcon('brain-circuit', 'Smart Second Brain', () => {
-            this.activateView();
-        });
+        this.addRibbonIcon('brain-circuit', 'Smart Second Brain', () => this.activateView());
 
         this.addSettingTab(new SettingsTab(this.app, this));
 
@@ -147,40 +145,39 @@ export default class SecondBrainPlugin extends Plugin {
         console.log('unloading plugin');
     }
 
-    async activateView() {
+    async activateView(file?: TFile) {
         const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
         if (leaves.length) {
             this.leaf = leaves[0];
         } else {
             this.leaf = this.app.workspace.getRightLeaf(false);
+        }
+        if (!file) {
             const chatDirExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder));
             if (!chatDirExists) {
                 await this.app.vault.createFolder(normalizePath(this.data.targetFolder));
             }
             const defaultChatExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'));
-            const file = defaultChatExists
+            file = defaultChatExists
                 ? this.app.metadataCache.getFirstLinkpathDest(this.data.targetFolder + '/' + this.data.defaultChatName + '.md', '')
-                : await this.app.vault.create(normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'), this.data.initialAssistantMessage);
-            await this.leaf.openFile(file, { active: true });
-            await this.leaf.setViewState({
-                type: VIEW_TYPE_CHAT,
-                state: { file: file.path },
-            });
+                : await this.app.vault.create(
+                      normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'),
+                      this.data.initialAssistantMessage
+                  );
         }
-        this.app.workspace.revealLeaf(this.leaf);
+        await this.leaf.openFile(file, { active: true });
+        await this.leaf.setViewState({
+            type: VIEW_TYPE_CHAT,
+            state: { file: file.path },
+        });
+        await this.app.workspace.revealLeaf(this.leaf);
     }
 
     async saveChatHistory() {
         let fileName = await this.secondBrain.createTitleFromChatHistory(this.data.assistantLanguage, serializeChatHistory(get(chatHistory)));
-        fileName = fileName.replace(/_/g, ' ');
-        chatHistory.set([get(chatHistory)[0]]);
-        this.chatView.requestSave();
         const newChatFile = await this.app.vault.copy(this.chatView.file, normalizePath(this.data.targetFolder + '/' + fileName + '.md'));
-        await this.leaf.openFile(newChatFile);
-        await this.leaf.setViewState({
-            type: VIEW_TYPE_CHAT,
-            state: { file: newChatFile.path },
-        });
+        // TODO handle if file already exists
+        await this.activateView(newChatFile);
     }
 
     registerMonkeyPatches() {
