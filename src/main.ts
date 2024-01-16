@@ -167,14 +167,11 @@ export default class SecondBrainPlugin extends Plugin {
                       normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'),
                       this.data.initialAssistantMessage
                   );
-<<<<<<< Updated upstream
-=======
             await this.leaf.openFile(file, { active: true });
             await this.leaf.setViewState({
                 type: VIEW_TYPE_CHAT,
                 state: { file: file.path },
             });
->>>>>>> Stashed changes
         }
         await this.leaf.openFile(file, { active: true });
         await this.leaf.setViewState({
