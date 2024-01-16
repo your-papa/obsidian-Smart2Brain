@@ -3,110 +3,99 @@
   <img src='https://github.com/nicobrauchtgit/Smart2Brain-Obsidian/assets/103033288/3e2ea736-b4cf-4b69-a7ef-a2eee78cfa6a=10x' height=600rem>
 <p/>
 
-This is a template repository for creating an Obsidian plugin using Svelte and
-Tailwind CSS. It provides a basic setup and structure to kickstart your
-development process.
+# Obsidian Sample Plugin
 
-Obsidian is a powerful note-taking and knowledge management application. With
-the help of this template, you can create a plugin that extends Obsidian's
-functionality using Svelte, a popular JavaScript framework for building user
-interfaces, along with Tailwind CSS, a utility-first CSS framework.
+This is a sample plugin for Obsidian (https://obsidian.md).
 
-## Features
+This project uses Typescript to provide type checking and documentation.
+The repo depends on the latest plugin API (obsidian.d.ts) in Typescript Definition format, which contains TSDoc comments describing what it does.
 
-- **Svelte integration**: Leverage the power of Svelte to build interactive and
-  reactive user interfaces.
-- **Tailwind CSS**: Utilize the comprehensive utility classes provided by
-  Tailwind CSS to style your plugin.
-- **Easy setup**: Get started quickly with a pre-configured project structure
-  and build setup.
-- **Hot-reloading**: Enjoy fast development cycles with automatic reloading
-  during development.
-- **Example plugin**: Includes a basic example plugin to help you understand the
-  structure and usage.
+**Note:** The Obsidian API is still in early alpha and is subject to change at any time!
 
-## Prerequisites
+This sample plugin demonstrates some of the basic functionality the plugin API can do.
+- Adds a ribbon icon, which shows a Notice when clicked.
+- Adds a command "Open Sample Modal" which opens a Modal.
+- Adds a plugin setting tab to the settings page.
+- Registers a global click event and output 'click' to the console.
+- Registers a global interval which logs 'setInterval' to the console.
 
-Before you get started, ensure that you have the following software installed:
+## First time developing plugins?
 
-- [node.js](https://nodejs.org) (v14 or above)
-- [bun.sh](https://bun.sh/) (way better than any other node package managers)
+Quick starting guide for new plugin devs:
 
-## Getting Started
+- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
+- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
+- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
+- Install NodeJS, then run `npm i` in the command line under your repo folder.
+- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
+- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
+- Reload Obsidian to load the new version of your plugin.
+- Enable plugin in settings window.
+- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
 
-To create a new plugin using this template, follow these steps:
+## Releasing new releases
 
-1. Click on the **"Use this template"** button at the top of the repository to
-   create a new repository based on this template.
-2. Clone the newly created repository to your local machine.
-3. Open a terminal and navigate to the cloned repository.
-4. Install the project dependencies by running the following command:
+- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
+- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
+- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
+- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
+- Publish the release.
 
-```bash
-bun install
+> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
+> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+
+## Adding your plugin to the community plugin list
+
+- Check https://github.com/obsidianmd/obsidian-releases/blob/master/plugin-review.md
+- Publish an initial version.
+- Make sure you have a `README.md` file in the root of your repo.
+- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+
+## How to use
+
+- Clone this repo.
+- Make sure your NodeJS is at least v16 (`node --version`).
+- `npm i` or `yarn` to install dependencies.
+- `npm run dev` to start compilation in watch mode.
+
+## Manually installing the plugin
+
+- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+
+## Improve code quality with eslint (optional)
+- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
+- To use eslint with this project, make sure to install eslint from terminal:
+  - `npm install -g eslint`
+- To use eslint to analyze this project use this command:
+  - `eslint main.ts`
+  - eslint will then create a report with suggestions for code improvement by file and line number.
+- If your source code is in a folder, such as `src`, you can use eslint with this command to analyze all files in that folder:
+  - `eslint .\src\`
+
+## Funding URL
+
+You can include funding URLs where people who use your plugin can financially support it.
+
+The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
+
+```json
+{
+    "fundingUrl": "https://buymeacoffee.com"
+}
 ```
 
-5. Start the development server with hot-reloading using the following command:
+If you have multiple URLs, you can also do:
 
-```bash
-bun dev
+```json
+{
+    "fundingUrl": {
+        "Buy Me a Coffee": "https://buymeacoffee.com",
+        "GitHub Sponsor": "https://github.com/sponsors",
+        "Patreon": "https://www.patreon.com/"
+    }
+}
 ```
 
-6. In **Obsidian**, open **Settings**.
-7. In the side menu, select **Community plugins**.
-8. Select **Turn on community plugins**.
-9. Under **Installed plugins**, enable the **Obsidian Svelte Plugin** by
-   selecting the toggle button next to it.
-10. Start **building** your plugin by modifying the example plugin located in
-    the src directory. You can also create new components and files as needed.
-11. Once you're ready to bundle your plugin for **production**, run the
-    following command:
+## API Documentation
 
-```bash
-bun run build
-```
-
-11. The bundled plugin file will be generated in the `build` directory.
-
-## Project Structure
-
-The project structure follows a typical Svelte application structure with a few
-additional files specific to Obsidian plugin development. Here's an overview:
-
-- `src/` - Contains the **source code** for your plugin.
-  - **main.ts** - The **entry point** for your plugin, initializes the plugin in
-    Obsidian.
-  - **styles.css** - The global css **styles** for your plugin.
-  - `components/` - Contains **Svelte Components**.
-    - **Example.svelte** - An example **Svelte Component** for the example
-      Obsidian View.
-  - `views/` - Contains **Obsidian Views**.
-    - **ExampleView.ts** - An example **Obsidian View** with Svelte.
-- `build/` - The bundled output directory for the plugin generated by the build
-  command.
-- **manifest.json** - The plugin manifest file that describes your plugin's
-  metadata.
-
-## Source mapping
-To get the source map to load in Obsidian, and thus allowing you to see your Typescript code when debugging, you might need to set the 
-**sourcemapBaseUrl** parameter in **vite.config.ts**. To actual path can be found by adding the folder (test-vault) containing your .map file to the "Filesystem" 
-tab in the debugger. Right-click the map file and select "Copy link address". Set **sourcemapBaseUrl** to the base address.
-
-## Resources
-
-Here are some resources to help you get started with building plugins for
-Obsidian, Svelte, and Tailwind CSS:
-
-- [Obsidian Plugin API Documentation](https://github.com/obsidianmd/obsidian-api)
-- [Svelte Documentation](https://svelte.dev/docs)
-- [Tailwind CSS Documentation](https://tailwindcss.com/docs)
-
-## Contributing
-
-If you encounter any issues or have suggestions for improvements, feel free to
-open an issue or submit a pull request. Contributions are welcome!
-
-## License
-
-This template is available under the [MIT License](LICENSE). Feel free to modify
-and use it to create your own Obsidian plugins.
+See https://github.com/obsidianmd/obsidian-api
