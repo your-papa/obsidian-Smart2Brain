@@ -5,8 +5,10 @@ import { ChatView } from './ChatView';
 import { get } from 'svelte/store';
 import { nanoid } from 'nanoid';
 import { Languages, type Language, OpenAIGenModelNames, OllamaGenModelNames } from 'papa-ts';
+import SettingsComponent from '../components/Settings.svelte';
 
 export default class SettingsTab extends PluginSettingTab {
+    component: SettingsComponent;
     plugin: SecondBrainPlugin;
     isSecretVisible: boolean;
 
@@ -67,6 +69,11 @@ export default class SettingsTab extends PluginSettingTab {
                 await this.plugin.saveSettings();
             });
         });
+
+        this.component = new SettingsComponent({
+            target: this.containerEl,
+        });
+
         new Setting(this.containerEl).setName('Toggle OpenAI').addToggle((toggle) =>
             toggle.setValue(data.genModelToggle).onChange(async (value) => {
                 data.genModelToggle = value;
@@ -75,21 +82,6 @@ export default class SettingsTab extends PluginSettingTab {
                 this.display();
             })
         );
-
-        // new Setting(containerEl).setName('Folder Exclusion').addSearch((folder) => {
-        //     try {
-        //         new FolderSuggest(this.app, folder.inputEl);
-        //     } catch {
-        //         // eslint-disable
-        //     }
-        //     folder
-        //         .setPlaceholder('Example: folder1/folder2')
-        //         .setValue(data.excludeFolders)
-        //         .onChange((new_folder) => {
-        //             data.excludeFolder = new_folder;
-        //             this.plugin.saveSettings();
-        //         });
-        // });
 
         if (data.genModelToggle) {
             this.containerEl.createEl('h2', { text: 'OpenAI Settings' });
@@ -210,7 +202,6 @@ export default class SettingsTab extends PluginSettingTab {
                 );
 
             new Setting(containerEl).setName('Ollama Model').addDropdown(async (dropdown) => {
-
                 try {
                     const response = await requestUrl({
                         url: model.baseUrl + '/api/tags',
@@ -230,10 +221,10 @@ export default class SettingsTab extends PluginSettingTab {
                     });
                 } catch (e) {
                     console.log(e);
-                    if (e.toString() == "Error: net::ERR_CONNECTION_REFUSED") {
+                    if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
                         new Notice('Ollama server is not running');
                         dropdown.addOption('Start Ollama service', 'Start Ollama service');
-                        dropdown.setValue("Start Ollama service");
+                        dropdown.setValue('Start Ollama service');
                     }
                 }
             });
