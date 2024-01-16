@@ -6,6 +6,7 @@ import { get } from 'svelte/store';
 import { nanoid } from 'nanoid';
 import { Languages, type Language, OpenAIGenModelNames, OllamaGenModelNames } from 'papa-ts';
 import SettingsComponent from '../components/Settings.svelte';
+import { INITIAL_ASSISTANT_MESSAGE } from '../ChatMessages';
 
 export default class SettingsTab extends PluginSettingTab {
     component: SettingsComponent;
@@ -66,6 +67,17 @@ export default class SettingsTab extends PluginSettingTab {
             Languages.forEach((lang: Language) => dropdown.addOption(lang, lang));
             dropdown.setValue(data.assistantLanguage).onChange(async (lang: any) => {
                 data.assistantLanguage = lang;
+                data.initialAssistantMessage = INITIAL_ASSISTANT_MESSAGE.get(lang) || INITIAL_ASSISTANT_MESSAGE.get('en');
+                if (get(chatHistory).length === 1) {
+                    chatHistory.set([
+                        {
+                            role: 'Assistant',
+                            content: data.initialAssistantMessage.replace('Assistant\n', '').replace('\n- - - - -', ''),
+                            id: nanoid(),
+                        },
+                    ]);
+                    this.plugin.chatView.requestSave();
+                }
                 await this.plugin.saveSettings();
             });
         });
