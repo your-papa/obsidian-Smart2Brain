@@ -9,7 +9,8 @@
 </picture>
 # Obsidian Sample Plugin
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+This is a sample plugin for Obsidian (https://obsidian.md).![Light LLama](https://github.com/nicobrauchtgit/obsidian-Smart2Brain/assets/103033288/3066b9e6-ac2e-4e91-a071-61e4f5d9d85b)
+
 
 This project uses Typescript to provide type checking and documentation.
 The repo depends on the latest plugin API (obsidian.d.ts) in Typescript Definition format, which contains TSDoc comments describing what it does.
