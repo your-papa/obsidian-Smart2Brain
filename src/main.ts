@@ -36,7 +36,7 @@ interface PluginData {
     openAIEmbedModel: OpenAIEmbedModel;
     fromBackup: boolean;
     targetFolder: string;
-    excludeFolders: string;
+    excludeFF: Array<string>;
     defaultChatName: string;
 }
 
@@ -51,6 +51,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     targetFolder: 'Chats',
     fromBackup: false,
     defaultChatName: 'Chat Second Brain',
+    excludeFF: ['Chats'],
 };
 
 export default class SecondBrainPlugin extends Plugin {
@@ -86,7 +87,9 @@ export default class SecondBrainPlugin extends Plugin {
             const mdFiles = this.app.vault.getMarkdownFiles();
             const docs = await obsidianDocumentLoader(
                 this.app,
-                mdFiles.filter((mdFile) => !mdFile.path.startsWith(this.data.targetFolder))
+                mdFiles.filter((mdFile) => {
+                    for (const exclude in this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+                })
             );
             await this.secondBrain.embedDocuments(docs);
         }, 1000);
@@ -102,13 +105,13 @@ export default class SecondBrainPlugin extends Plugin {
 
         this.app.vault.on('modify', (file: TFile) => {
             setTimeout(async () => {
-                if (file.path.startsWith(this.data.targetFolder)) return; // don't embed chat files
+                for (const exclude in this.data.excludeFF) if (file.path.startsWith(exclude)) return; // don't embed those files
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 await this.secondBrain.embedDocuments(docs);
             }, 1000);
         });
         this.app.vault.on('delete', async (file: TFile) => {
-            if (file.path.startsWith(this.data.targetFolder)) return; // don't embed chat files
+            for (const exclude in this.data.excludeFF) if (file.path.startsWith(exclude)) return; // don't embed those files
             const docs = await obsidianDocumentLoader(this.app, [file]);
             await this.secondBrain.removeDocuments(docs);
         });
@@ -164,6 +167,14 @@ export default class SecondBrainPlugin extends Plugin {
                       normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'),
                       this.data.initialAssistantMessage
                   );
+<<<<<<< Updated upstream
+=======
+            await this.leaf.openFile(file, { active: true });
+            await this.leaf.setViewState({
+                type: VIEW_TYPE_CHAT,
+                state: { file: file.path },
+            });
+>>>>>>> Stashed changes
         }
         await this.leaf.openFile(file, { active: true });
         await this.leaf.setViewState({

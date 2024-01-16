@@ -1,6 +1,6 @@
 // Credits go to Liam's Periodic Notes Plugin: https://github.com/liamcain/obsidian-periodic-notes
 
-import { App, Scope } from 'obsidian';
+import { App, Scope, type TAbstractFile } from 'obsidian';
 import type { ISuggestOwner } from 'obsidian';
 import { createPopper } from '@popperjs/core';
 import type { Instance as PopperInstance } from '@popperjs/core';
@@ -102,7 +102,10 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
     private suggestEl: HTMLElement;
     private suggest: Suggest<T>;
 
-    constructor(protected app: App, protected inputEl: HTMLInputElement | HTMLTextAreaElement) {
+    constructor(
+        protected app: App,
+        protected inputEl: HTMLInputElement | HTMLTextAreaElement
+    ) {
         this.scope = new Scope();
 
         this.suggestEl = createDiv('suggestion-container');
