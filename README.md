@@ -1,8 +1,9 @@
 # Smart Second Brain 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="[https://user-images.githubusercontent.com/71297412/178180562-38f53e67-a31f-4c9f-b1a1-c9221703df4b.png height=600rem]">
-  <source media="(prefers-color-scheme: light)" srcset="[https://github.com/nicobrauchtgit/obsidian-Smart2Brain/assets/103033288/3066b9e6-ac2e-4e91-a071-61e4f5d9d85b]">
+  <source media="(prefers-color-scheme: dark)" srcset="https://user-images.githubusercontent.com/71297412/178180562-38f53e67-a31f-4c9f-b1a1-c9221703df4b.png height=600rem">
+  <source media="(prefers-color-scheme: light)" srcset="https://github.com/nicobrauchtgit/obsidian-Smart2Brain/assets/103033288/3066b9e6-ac2e-4e91-a071-61e4f5d9d85b">
 </picture>
+
 # Obsidian Sample Plugin
 
 This is a sample plugin for Obsidian (https://obsidian.md).
