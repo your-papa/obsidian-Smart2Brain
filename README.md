@@ -1,6 +1,6 @@
 # Smart Second Brain 
 <p align='center'>
-  <img src='https://github.com/nicobrauchtgit/Smart2Brain-Obsidian/assets/103033288/3e2ea736-b4cf-4b69-a7ef-a2eee78cfa6a=10x' height=600rem>
+  <img src='https://github.com/nicobrauchtgit/Smart2Brain-Obsidian/assets/103033288/3e2ea736-b4cf-4b69-a7ef-a2eee78cfa6a=10x' height=600rem #gh-dark-mode-only>
 <p/>
 
 # Obsidian Sample Plugin
