@@ -41,9 +41,9 @@ interface PluginData {
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
-    initialAssistantMessage: INITIAL_ASSISTANT_MESSAGE.get(window.localStorage.getItem('language')),
     isUsingRag: true,
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
+    initialAssistantMessage: INITIAL_ASSISTANT_MESSAGE.get(window.localStorage.getItem('language')),
     genModelToggle: true,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
     openAIGenModel: { modelName: 'gpt-3.5-turbo', openAIApiKey: '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' }, // TODO: remove openAIApiKey
