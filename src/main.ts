@@ -106,14 +106,38 @@ export default class SecondBrainPlugin extends Plugin {
         this.app.vault.on('modify', (file: TFile) => {
             setTimeout(async () => {
                 for (const exclude in this.data.excludeFF) if (file.path.startsWith(exclude)) return; // don't embed those files
-                const docs = await obsidianDocumentLoader(this.app, [file]);
+                // const docs = await obsidianDocumentLoader(this.app, [file]);
+                const mdFiles = this.app.vault.getMarkdownFiles();
+                const docs = await obsidianDocumentLoader(
+                    this.app,
+                    mdFiles.filter((mdFile) => !mdFile.path.startsWith(this.data.targetFolder))
+                );
                 await this.secondBrain.embedDocuments(docs);
             }, 1000);
         });
         this.app.vault.on('delete', async (file: TFile) => {
             for (const exclude in this.data.excludeFF) if (file.path.startsWith(exclude)) return; // don't embed those files
-            const docs = await obsidianDocumentLoader(this.app, [file]);
-            await this.secondBrain.removeDocuments(docs);
+            if (file.path.startsWith(this.data.targetFolder)) return; // don't embed chat files
+            // const docs = await obsidianDocumentLoader(this.app, [file]);
+            const mdFiles = this.app.vault.getMarkdownFiles();
+            const docs = await obsidianDocumentLoader(
+                this.app,
+                mdFiles.filter((mdFile) => !mdFile.path.startsWith(this.data.targetFolder))
+            );
+            await this.secondBrain.embedDocuments(docs);
+        });
+
+        this.app.vault.on('rename', async (file: TFile, oldPath: string) => {
+            setTimeout(async () => {
+                for (const exclude in this.data.excludeFF) if (file.path.startsWith(exclude)) return; // don't embed those files
+                // const docs = await obsidianDocumentLoader(this.app, [file]);
+                const mdFiles = this.app.vault.getMarkdownFiles();
+                const docs = await obsidianDocumentLoader(
+                    this.app,
+                    mdFiles.filter((mdFile) => !mdFile.path.startsWith(this.data.targetFolder))
+                );
+                await this.secondBrain.embedDocuments(docs);
+            }, 1000);
         });
 
         this.registerView(VIEW_TYPE_CHAT, (leaf) => {
