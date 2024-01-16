@@ -48,17 +48,14 @@ export class ChatView extends TextFileView implements HoverParent {
         }
     }
 
+    clear() {}
+
     getViewData(): string {
         const serializedChatHistory = get(chatHistory).map((chatMessage) => {
             return `${chatMessage.role}\n${chatMessage.content}\n- - - - -`;
         });
         this.data = serializedChatHistory.join('\n');
         return this.data;
-    }
-
-    clear(): void {
-        // this.setViewData(DEFAULT_DATA, false);
-        // TODO clear component
     }
 
     getDisplayText() {
@@ -72,8 +69,9 @@ export class ChatView extends TextFileView implements HoverParent {
         });
     }
 
-    // async onUnloadFile(file: TFile) {
-    //     this.clear();
-    // }
-    //
+    async onUnloadFile(file: TFile) {
+        this.clear();
+        this.component.$destroy();
+        return await super.onUnloadFile(file);
+    }
 }

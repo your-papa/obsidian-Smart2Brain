@@ -20,14 +20,14 @@
         if (isEditingAssistantMessage) {
             //TODO: refactor this
             $chatHistory[0].content = messageText;
-            $plugin.data.initialAssistantMessage = "Assistant\n" + messageText + "\n- - - - -";
-            messageText = "";
+            $plugin.data.initialAssistantMessage = 'Assistant\n' + messageText + '\n- - - - -';
+            messageText = '';
             isEditingAssistantMessage = false;
             $plugin.chatView.requestSave();
             await $plugin.saveSettings();
             return;
         }
-        if(isEditing) isEditing = false;
+        if (isEditing) isEditing = false;
         if (isProcessing) {
             new Notice('Please wait while your Second Brain is thinking...');
             return;
@@ -63,8 +63,11 @@
         }
         // delete everything except the first message
         $chatHistory = [];
-        $chatHistory.push({ role: 'Assistant', content: $plugin.data.initialAssistantMessage.replace('Assistant\n', '')
-                .replace('\n- - - - -', ''), id: nanoid()});
+        $chatHistory.push({
+            role: 'Assistant',
+            content: $plugin.data.initialAssistantMessage.replace('Assistant\n', '').replace('\n- - - - -', ''),
+            id: nanoid(),
+        });
         $plugin.chatView.requestSave();
     }
 
@@ -98,20 +101,22 @@
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="h-6" on:click={() => $plugin.initSecondBrain(false)}><MdRefresh /></div>
 </div>
-<div class="w-full flex gap-3 items-center">
-    <p class="inline-block m-0">Save Chat</p>
-    <!-- svelte-ignore a11y-click-events-have-key-events -->
-    <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <div class="h-6" on:click={() => $plugin.saveChatHistory()}><MdSave /></div>
-</div>
-<div class="w-full flex gap-3 items-center mb-2">
-    <p class="inline-block m-0">Chat History:</p>
-    <!-- svelte-ignore a11y-click-events-have-key-events -->
-    <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <div class="h-6" on:click={handleDelete}>
-        <MdDelete />
+{#if $chatHistory.length > 1}
+    <div class="w-full flex gap-3 items-center">
+        <p class="inline-block m-0">Save Chat</p>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        <div class="h-6" on:click={() => $plugin.saveChatHistory()}><MdSave /></div>
     </div>
-</div>
+    <div class="w-full flex gap-3 items-center">
+        <p class="inline-block m-0">Chat History:</p>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        <div class="h-6" on:click={handleDelete}>
+            <MdDelete />
+        </div>
+    </div>
+{/if}
 <form on:submit|preventDefault={sendMessage} class="sticky flex w-full gap-1">
     <textarea
         bind:this={textarea}
