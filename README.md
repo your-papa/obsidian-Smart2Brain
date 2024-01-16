@@ -1,8 +1,12 @@
 # Smart Second Brain 
 <p align='center'>
-  <img src='https://github.com/nicobrauchtgit/Smart2Brain-Obsidian/assets/103033288/3e2ea736-b4cf-4b69-a7ef-a2eee78cfa6a=10x' height=600rem #gh-dark-mode-only>
+  <img src=' #gh-dark-mode-only>
 <p/>
-
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="[https://user-images.githubusercontent.com/71297412/178180562-38f53e67-a31f-4c9f-b1a1-c9221703df4b.png height=600rem]">
+  <source media="(prefers-color-scheme: light)" srcset="https://user-images.githubusercontent.com/71297412/178180441-59f1644e-2ab6-4bf0-866f-2c77b2a63433.png">
+  <img alt="Hashnode logo" src="https://user-images.githubusercontent.com/71297412/178180441-59f1644e-2ab6-4bf0-866f-2c77b2a63433.png" height="25">
+</picture>
 # Obsidian Sample Plugin
 
 This is a sample plugin for Obsidian (https://obsidian.md).
