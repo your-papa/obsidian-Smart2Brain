@@ -5,7 +5,6 @@
     import { plugin } from '../store';
 
     let textarea: HTMLTextAreaElement;
-    let isEditingAssistantMessage = false;
 
     function handleChatToggel() {
         $plugin.data.isChat = !$plugin.data.isChat;
@@ -15,7 +14,9 @@
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
 <!-- svelte-ignore a11y-no-static-element-interactions -->
-<span class="checkbox-container" class:is-enabled={$plugin.data.isChat} on:click={handleChatToggel}><input type="checkbox" tabindex="0" /> </span>
+<span class="checkbox-container" class:is-enabled={$plugin.data.isChat} on:click={handleChatToggel}
+    ><input type="checkbox" tabindex="0" />
+</span>
 <div class="h-full flex flex-col --background-modifier-border">
     {#if $plugin.data.isChat}
         <MessagesComponent bind:textarea />

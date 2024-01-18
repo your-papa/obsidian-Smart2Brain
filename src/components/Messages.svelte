@@ -19,6 +19,7 @@
 
     let editElem: HTMLSpanElement;
     let initialAssistantMessageSpan: HTMLSpanElement;
+    let editMessageId: string;
 
     $: if ($isEditing) {
         editElem.innerText = '';
@@ -29,6 +30,10 @@
         initialAssistantMessageSpan.innerText = '';
         renderMarkdown(initialAssistantMessageSpan, $chatInput);
     }
+
+    function wrapperEditMessage(message, textarea) {
+        editMessageId = editMessage(message, textarea);
+    }
 </script>
 
 <div class="chat-window select-text flex-grow w-full overflow-y-scroll rounded-md mb-1 p-4">
@@ -36,7 +41,10 @@
         {#if message.role === 'User'}
             <div class="flex justify-end mb-3">
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <div class="pl-4 pr-4 rounded-t-lg rounded-bl-lg max-w-[80%]" style="background-color: hsla(var(--color-accent-hsl), 0.4);">
+                <div
+                    class="pl-4 pr-4 rounded-t-lg rounded-bl-lg max-w-[80%]"
+                    style="background-color: hsla(var(--color-accent-hsl), 0.4);"
+                >
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <!-- svelte-ignore a11y-mouse-events-have-key-events -->
@@ -50,7 +58,7 @@
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <div class="flex justify-end">
-                        {#if $isEditing}
+                        {#if $isEditing && editMessageId === message.id}
                             <span
                                 aria-label="Copy Text"
                                 class="text-[--text-normal] hover:text-[--text-accent-hover]"
@@ -69,7 +77,8 @@
                             <span
                                 aria-label="Edit query and regenerate the answer"
                                 class="text-[--text-normal] hover:text-[--text-accent-hover] w-5"
-                                on:click|preventDefault={() => editMessage(message, textarea)}
+                                on:click|preventDefault={() =>
+                                    wrapperEditMessage(message, textarea)}
                                 use:icon={'pencil-line'}
                             />
                         {/if}
@@ -77,7 +86,9 @@
                 </div>
             </div>
         {:else}
-            <div class="bg-[--background-primary-alt] mb-3 p-1 pl-4 pr-4 rounded-t-lg rounded-br-lg w-fit max-w-[80%]">
+            <div
+                class="bg-[--background-primary-alt] mb-3 p-1 pl-4 pr-4 rounded-t-lg rounded-br-lg w-fit max-w-[80%]"
+            >
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-mouse-events-have-key-events -->
@@ -106,7 +117,8 @@
                             <sapn
                                 aria-label="Change the initial assistant message"
                                 class="text-[--text-normal] hover:text-[--text-accent-hover]"
-                                on:click|preventDefault={() => editInitialAssistantMessage(message.content, textarea)}
+                                on:click|preventDefault={() =>
+                                    editInitialAssistantMessage(message.content, textarea)}
                                 use:icon={'pencil-line'}
                             />
                         {/if}
@@ -116,7 +128,9 @@
                         <span
                             aria-label="Cancel editing"
                             class="text-[--text-normal] hover:text-[--text-accent-hover]"
-                            on:click|preventDefault={cancelEditingInitialAssistantMessage(initialAssistantMessageSpan)}
+                            on:click|preventDefault={cancelEditingInitialAssistantMessage(
+                                initialAssistantMessageSpan
+                            )}
                             use:icon={'x-circle'}
                         />
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
