@@ -18,10 +18,10 @@
 <span class="checkbox-container" class:is-enabled={$plugin.data.isChat} on:click={handleChatToggel}><input type="checkbox" tabindex="0" /> </span>
 <div class="h-full flex flex-col --background-modifier-border">
     {#if $plugin.data.isChat}
-        <MessagesComponent bind:textarea bind:isEditingAssistantMessage />
+        <MessagesComponent bind:textarea />
     {:else}
-        <GptMessages />
+        <GptMessages bind:textarea />
     {/if}
-    <InputComponent bind:textarea bind:isEditingAssistantMessage />
+    <InputComponent bind:textarea />
     <span class="mb-3" />
 </div>

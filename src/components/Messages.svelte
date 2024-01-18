@@ -1,58 +1,33 @@
 <script lang="ts">
-    import { type ChatMessage, plugin, chatHistory, chatInput, isEditing } from '../store';
+    import { plugin, chatHistory, chatInput, isEditing, isEditingAssistantMessage } from '../store';
     import { DEFAULT_SETTINGS } from '../main';
-    import { onClick, onMouseOver, renderMarkdown, toClipboard, icon, redoGeneration, editMessage } from './Messages';
+    import {
+        onClick,
+        onMouseOver,
+        renderMarkdown,
+        toClipboard,
+        icon,
+        redoGeneration,
+        editMessage,
+        cancelEditing,
+        editInitialAssistantMessage,
+        cancelEditingInitialAssistantMessage,
+        resetInitialAssistantMessage,
+    } from './Messages';
 
-    export let isEditingAssistantMessage: boolean;
     export let textarea: HTMLTextAreaElement;
 
     let editElem: HTMLSpanElement;
     let initialAssistantMessageSpan: HTMLSpanElement;
-    let temporaryEditingHistory: ChatMessage[] = [];
 
-    $: if (editElem != null) {
+    $: if ($isEditing) {
         editElem.innerText = '';
         renderMarkdown(editElem, $chatInput);
     }
 
-    $: if (isEditingAssistantMessage) {
+    $: if ($isEditingAssistantMessage) {
         initialAssistantMessageSpan.innerText = '';
         renderMarkdown(initialAssistantMessageSpan, $chatInput);
-    }
-
-    function cancelEditing() {
-        $isEditing = false;
-        $chatInput = '';
-        $chatHistory = $chatHistory.concat(temporaryEditingHistory);
-        $plugin.chatView.requestSave();
-    }
-
-    function editInitialAssistantMessage(initialMessage: string) {
-        isEditingAssistantMessage = true;
-        $chatInput = initialMessage;
-        textarea.focus();
-        //TODO: make it work
-        textarea.select();
-    }
-
-    function cancelEditingInitialAssistantMessage() {
-        isEditingAssistantMessage = false;
-        $chatInput = '';
-        initialAssistantMessageSpan.innerText = '';
-        renderMarkdown(initialAssistantMessageSpan, $plugin.data.initialAssistantMessage.replace('Assistant\n', '').replace('\n- - - - -', ''));
-        $plugin.chatView.requestSave();
-    }
-
-    function resetInitialAssistantMessage() {
-        isEditingAssistantMessage = false;
-        $chatInput = '';
-        initialAssistantMessageSpan.innerText = '';
-        const initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage.replace('Assistant\n', '').replace('\n- - - - -', '');
-        renderMarkdown(initialAssistantMessageSpan, initialAssistantMessage);
-        $chatHistory[0].content = initialAssistantMessage;
-        $plugin.data.initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
-        $plugin.chatView.requestSave();
-        $plugin.saveSettings();
     }
 </script>
 
@@ -65,24 +40,39 @@
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <!-- svelte-ignore a11y-mouse-events-have-key-events -->
-                    <span class="break-words text-[--text-normal] p-0" on:mouseover={onMouseOver} on:click={onClick} use:renderMarkdown={message.content} />
+                    <span
+                        class="break-words text-[--text-normal] p-0"
+                        bind:this={editElem}
+                        on:mouseover={onMouseOver}
+                        on:click={onClick}
+                        use:renderMarkdown={message.content}
+                    />
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <div class="flex justify-end">
-                        <span
-                            aria-label="Deletes all following Messages and regenerates the answer to the current query"
-                            class="text-[--text-normal] hover:text-[--text-accent-hover] w-6"
-                            on:click|preventDefault={redoGeneration(message)}
-                            use:icon={'refresh-cw'}
-                        />
+                        {#if $isEditing}
+                            <span
+                                aria-label="Copy Text"
+                                class="text-[--text-normal] hover:text-[--text-accent-hover]"
+                                on:click|preventDefault={cancelEditing}
+                                use:icon={'x-circle'}
+                            />
+                        {:else}
+                            <span
+                                aria-label="Deletes all following Messages and regenerates the answer to the current query"
+                                class="text-[--text-normal] hover:text-[--text-accent-hover] w-6"
+                                on:click|preventDefault={redoGeneration(message)}
+                                use:icon={'refresh-cw'}
+                            />
 
-                        <!-- svelte-ignore a11y-no-static-element-interactions -->
-                        <span
-                            aria-label="Edit query and regenerate the answer"
-                            class="text-[--text-normal] hover:text-[--text-accent-hover] w-5"
-                            on:click|preventDefault={() => editMessage(message, textarea)}
-                            use:icon={'pencil-line'}
-                        />
+                            <!-- svelte-ignore a11y-no-static-element-interactions -->
+                            <span
+                                aria-label="Edit query and regenerate the answer"
+                                class="text-[--text-normal] hover:text-[--text-accent-hover] w-5"
+                                on:click|preventDefault={() => editMessage(message, textarea)}
+                                use:icon={'pencil-line'}
+                            />
+                        {/if}
                     </div>
                 </div>
             </div>
@@ -101,7 +91,7 @@
                     bind:this={initialAssistantMessageSpan}
                 />
                 <div class="flex justify-start mb-3">
-                    {#if !isEditingAssistantMessage}
+                    {#if !$isEditingAssistantMessage}
                         <!-- svelte-ignore a11y-no-static-element-interactions -->
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
                         <span
@@ -116,18 +106,17 @@
                             <sapn
                                 aria-label="Change the initial assistant message"
                                 class="text-[--text-normal] hover:text-[--text-accent-hover]"
-                                on:click|preventDefault={() => editInitialAssistantMessage(message.content)}
+                                on:click|preventDefault={() => editInitialAssistantMessage(message.content, textarea)}
                                 use:icon={'pencil-line'}
                             />
                         {/if}
-                    {/if}
-                    {#if isEditingAssistantMessage}
+                    {:else}
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
                         <!-- svelte-ignore a11y-no-static-element-interactions -->
                         <span
                             aria-label="Cancel editing"
                             class="text-[--text-normal] hover:text-[--text-accent-hover]"
-                            on:click|preventDefault={cancelEditingInitialAssistantMessage}
+                            on:click|preventDefault={cancelEditingInitialAssistantMessage(initialAssistantMessageSpan)}
                             use:icon={'x-circle'}
                         />
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -135,7 +124,7 @@
                         <span
                             aria-label="Reset to default"
                             class="text-[--text-normal] hover:text-[--text-accent-hover] w-6"
-                            on:click={resetInitialAssistantMessage}
+                            on:click={resetInitialAssistantMessage(initialAssistantMessageSpan)}
                             use:icon={'rotate-ccw'}
                         />
                     {/if}
@@ -143,23 +132,4 @@
             </div>
         {/if}
     {/each}
-    {#if $isEditing}
-        <div class="flex justify-end mb-3">
-            <!-- svelte-ignore a11y-click-events-have-key-events -->
-            <div class="pl-4 pr-4 rounded-t-lg rounded-bl-lg max-w-[80%]" style="background-color: hsla(var(--color-accent-hsl), 0.4);">
-                <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <!-- svelte-ignore a11y-mouse-events-have-key-events -->
-                <span class="break-words text-[--text-normal] p-0" on:mouseover={onMouseOver} bind:this={editElem} />
-                <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <sapn
-                    aria-label="Copy Text"
-                    class="text-[--text-normal] hover:text-[--text-accent-hover]"
-                    on:click|preventDefault={cancelEditing}
-                    use:icon={'x-circle'}
-                />
-            </div>
-        </div>
-    {/if}
 </div>

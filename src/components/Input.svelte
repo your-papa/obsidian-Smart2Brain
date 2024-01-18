@@ -4,31 +4,27 @@
     import { FileSelectModal } from '../main';
     import { runSecondBrainFromChat } from '../runSecondBrain';
     import { nanoid } from 'nanoid';
-    import { plugin, chatHistory, chatInput, isEditing } from '../store';
+    import { plugin, chatHistory, chatInput, isEditing, isEditingAssistantMessage } from '../store';
 
     let inputPlaceholder = 'Chat with your second Brain...';
     let isProcessing: boolean;
     export let textarea: HTMLTextAreaElement;
-
-    export let isEditingAssistantMessage: boolean;
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
     };
 
     async function sendMessage() {
-        if ($isEditing) $isEditing = false;
-        if (isEditingAssistantMessage) {
+        if ($isEditingAssistantMessage) {
             //TODO: refactor this
             $chatHistory[0].content = $chatInput;
             $plugin.data.initialAssistantMessage = 'Assistant\n' + $chatInput + '\n- - - - -';
             $chatInput = '';
-            isEditingAssistantMessage = false;
+            $isEditingAssistantMessage = false;
             $plugin.chatView.requestSave();
             await $plugin.saveSettings();
             return;
         }
-        if ($isEditing) $isEditing = false;
         if (isProcessing) {
             new Notice('Please wait while your Second Brain is thinking...');
             return;
