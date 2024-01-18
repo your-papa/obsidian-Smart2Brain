@@ -112,7 +112,7 @@ export default class SecondBrainPlugin extends Plugin {
             await this.secondBrain.embedDocuments(docs);
         });
 
-        this.app.vault.on('rename', async (file: TFile, oldPath: string) => {
+        this.app.vault.on('rename', async (file: TFile) => {
             setTimeout(async () => {
                 for (const exclude in this.data.excludeFF) if (file.path.startsWith(exclude)) return; // don't embed those files
                 // const docs = await obsidianDocumentLoader(this.app, [file]);
