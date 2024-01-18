@@ -1,6 +1,6 @@
 import { App, PluginSettingTab, Setting, requestUrl, Notice } from 'obsidian';
-import SecondBrainPlugin, { DEFAULT_SETTINGS, chatHistory } from '../main';
-import { ChatView } from './ChatView';
+import SecondBrainPlugin, { DEFAULT_SETTINGS } from '../main';
+import { chatHistory } from '../store';
 // import OpenAI from 'openai';
 import { get } from 'svelte/store';
 import { nanoid } from 'nanoid';
@@ -20,7 +20,7 @@ export default class SettingsTab extends PluginSettingTab {
     }
 
     async display(): Promise<void> {
-        let { containerEl } = this;
+        const { containerEl } = this;
         containerEl.empty();
 
         const data = this.plugin.data;

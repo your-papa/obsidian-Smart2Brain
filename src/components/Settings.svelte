@@ -1,9 +1,8 @@
 <script lang="ts">
     import TextComponent from './SettingComponents/Text.svelte';
     import SearchComponent from './SettingComponents/Search.svelte';
-    import { DEFAULT_SETTINGS, plugin } from '../main';
-    import { MdCancel, MdKeyboardArrowDown, MdKeyboardArrowUp } from 'svelte-icons/md';
-    import { Notice } from 'obsidian';
+    import { plugin } from '../store';
+    import { Notice, setIcon } from 'obsidian';
     import { afterUpdate, onMount } from 'svelte';
 
     let baseFontSize: number;
@@ -11,6 +10,10 @@
     let excludeComponent: HTMLDivElement;
     let isExpanded: boolean = false;
     let isOverflowingVertically: boolean = false;
+
+    const icon = (node: HTMLElement, iconId: string) => {
+        setIcon(node, iconId);
+    };
 
     function addFolder(ff: string) {
         ff = ff.trim();
@@ -58,20 +61,21 @@
                         {ff}
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
                         <!-- svelte-ignore a11y-no-static-element-interactions -->
-                        <span class="setting-hotkey-icon setting-delete-hotkey w-4" aria-label="Delete from Exclusions" on:click={() => deleteFolder(ff)}>
-                            <MdCancel />
-                        </span>
+                        <span
+                            aria-label="Delete from Exclusions"
+                            class="setting-hotkey-icon setting-delete-hotkey w-4"
+                            use:icon={'x'}
+                            on:click={() => deleteFolder(ff)}
+                        />
                     </span>
                 </div>
             {/each}
         </div>
-        <button class=" w-6 h-6 shrink-0 clickable-icon ml-2 p-0 hover:text-primary hover:bg-transparent" on:click={() => toggleExpand()}>
-            {#if isExpanded}
-                <MdKeyboardArrowUp class="h-max" />
-            {/if}
-            {#if isOverflowingVertically && !isExpanded}
-                <MdKeyboardArrowDown h-max />
-            {/if}
-        </button>
+        {#if isExpanded}
+            <span class="clickable-icon algin-baseline h-6" use:icon={'chevron-up'} on:click={toggleExpand} />
+        {/if}
+        {#if isOverflowingVertically && !isExpanded}
+            <span class="clickable-icon mb-3" use:icon={'chevron-down'} on:click={toggleExpand} />
+        {/if}
     </div>
 {/if}

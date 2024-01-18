@@ -1,8 +1,8 @@
 import { get } from 'svelte/store';
 import { nanoid } from 'nanoid';
-import { chatHistory as cH, plugin as p, serializeChatHistory } from './main';
+import { chatHistory as cH, plugin as p, serializeChatHistory } from './store';
 
-export default async function runSecondBrain(isRAG: boolean, userQuery: string) {
+export async function runSecondBrainFromChat(isRAG: boolean, userQuery: string) {
     const plugin = get(p);
 
     const responseStream = plugin.secondBrain.run({ isRAG, userQuery, chatHistory: serializeChatHistory(get(cH)), lang: plugin.data.assistantLanguage });

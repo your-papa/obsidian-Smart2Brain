@@ -2,6 +2,7 @@ import { svelte, vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import builtins from 'builtin-modules';
 import { defineConfig } from 'vite';
 import { pathToFileURL } from 'url';
+import typescript from '@rollup/plugin-typescript';
 
 const setOutDir = (mode: string) => {
     switch (mode) {
@@ -21,6 +22,9 @@ export default defineConfig(({ mode }) => {
                 formats: ['cjs'],
             },
             rollupOptions: {
+                plugins: [
+                    typescript({ tsconfig: './tsconfig.json' }), // Add this line
+                ],
                 output: {
                     entryFileNames: 'main.js',
                     assetFileNames: 'styles.css',
