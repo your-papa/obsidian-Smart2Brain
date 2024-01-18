@@ -2,7 +2,7 @@ import { WorkspaceLeaf, type HoverParent, HoverPopover, TextFileView, TFile } fr
 
 import ChatViewComponent from '../components/ChatView.svelte';
 import { nanoid } from 'nanoid';
-import { type ChatMessage, chatHistory, plugin } from '../main';
+import { type ChatMessage, chatHistory, plugin } from '../store';
 import { get } from 'svelte/store';
 
 export const VIEW_TYPE_CHAT = 'chat-view';

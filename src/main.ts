@@ -1,32 +1,16 @@
 import { App, FuzzySuggestModal, Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
 import { Papa, obsidianDocumentLoader, type Language, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
-import { get, writable } from 'svelte/store';
+import { get } from 'svelte/store';
 import { INITIAL_ASSISTANT_MESSAGE } from './ChatMessages';
 import { around } from 'monkey-around';
-
+import { serializeChatHistory, chatHistory, plugin } from './store';
 import './styles.css';
 import { ChatModal } from './views/ChatModal';
 import { ChatView, VIEW_TYPE_CHAT } from './views/ChatView';
 import SettingsTab from './views/Settings';
 
-export type ChatMessage = {
-    role: 'Assistant' | 'User';
-    content: string;
-    id: string;
-};
-export const plugin = writable<SecondBrainPlugin>();
-export const chatHistory = writable<ChatMessage[]>([]);
-
-export const serializeChatHistory = (cH: ChatMessage[]) =>
-    cH
-        .map((chatMessage: ChatMessage) => {
-            if (chatMessage.role === 'User') return `${chatMessage.role}: ${chatMessage.content}`;
-            else if (chatMessage.role === 'Assistant') return `${chatMessage.role}: ${chatMessage.content}`;
-            return `${chatMessage.content}`;
-        })
-        .join('\n');
-
 interface PluginData {
+    isChat: boolean;
     initialAssistantMessage: string;
     isUsingRag: boolean;
     assistantLanguage: Language;
@@ -41,9 +25,10 @@ interface PluginData {
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
+    isChat: true,
     isUsingRag: true,
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
-    initialAssistantMessage: INITIAL_ASSISTANT_MESSAGE.get(window.localStorage.getItem('language')),
+    initialAssistantMessage: INITIAL_ASSISTANT_MESSAGE.get(window.localStorage.getItem('language') || 'en'),
     genModelToggle: true,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
     openAIGenModel: { modelName: 'gpt-3.5-turbo', openAIApiKey: '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' }, // TODO: remove openAIApiKey
@@ -88,7 +73,7 @@ export default class SecondBrainPlugin extends Plugin {
             const docs = await obsidianDocumentLoader(
                 this.app,
                 mdFiles.filter((mdFile) => {
-                    for (const exclude in this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+                    for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
                 })
             );
             await this.secondBrain.embedDocuments(docs);
@@ -105,7 +90,7 @@ export default class SecondBrainPlugin extends Plugin {
 
         this.app.vault.on('modify', (file: TFile) => {
             setTimeout(async () => {
-                for (const exclude in this.data.excludeFF) if (file.path.startsWith(exclude)) return; // don't embed those files
+                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return; // don't embed those files
                 // const docs = await obsidianDocumentLoader(this.app, [file]);
                 const mdFiles = this.app.vault.getMarkdownFiles();
                 const docs = await obsidianDocumentLoader(
@@ -116,7 +101,7 @@ export default class SecondBrainPlugin extends Plugin {
             }, 1000);
         });
         this.app.vault.on('delete', async (file: TFile) => {
-            for (const exclude in this.data.excludeFF) if (file.path.startsWith(exclude)) return; // don't embed those files
+            for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return; // don't embed those files
             if (file.path.startsWith(this.data.targetFolder)) return; // don't embed chat files
             // const docs = await obsidianDocumentLoader(this.app, [file]);
             const mdFiles = this.app.vault.getMarkdownFiles();
@@ -206,18 +191,20 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async saveChatHistory() {
-        let fileName = await this.secondBrain.createTitleFromChatHistory(this.data.assistantLanguage, serializeChatHistory(get(chatHistory)));
+        const fileName = await this.secondBrain.createTitleFromChatHistory(this.data.assistantLanguage, serializeChatHistory(get(chatHistory)));
         const newChatFile = await this.app.vault.copy(this.chatView.file, normalizePath(this.data.targetFolder + '/' + fileName + '.md'));
         // TODO handle if file already exists
         await this.activateView(newChatFile);
     }
 
     registerMonkeyPatches() {
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
         const self = this;
         // Monkey patch WorkspaceLeaf to open Kanbans with KanbanView by default
         this.register(
             around(WorkspaceLeaf.prototype, {
                 setViewState(next) {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     return function (state: ViewState, ...rest: any[]) {
                         if (
                             // If we have a markdown file

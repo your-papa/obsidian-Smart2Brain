@@ -1,45 +1,46 @@
 <script lang="ts">
-    import { MdSend, MdDelete, MdRefresh, MdSave } from 'svelte-icons/md';
-    import { MarkdownRenderer, Notice } from 'obsidian';
+    import { Notice, setIcon } from 'obsidian';
     import type { KeyboardEventHandler } from 'svelte/elements';
-    import { FileSelectModal, plugin, chatHistory } from '../main';
-    import runSecondBrainFromChat from '../runSecondBrain';
+    import { FileSelectModal } from '../main';
+    import { runSecondBrainFromChat } from '../runSecondBrain';
     import { nanoid } from 'nanoid';
+    import { plugin, chatHistory, chatInput, isEditing } from '../store';
 
     let inputPlaceholder = 'Chat with your second Brain...';
-    export let messageText = '';
     let isProcessing: boolean;
     export let textarea: HTMLTextAreaElement;
 
-    export let isEditing: boolean;
-
     export let isEditingAssistantMessage: boolean;
 
+    const icon = (node: HTMLElement, iconId: string) => {
+        setIcon(node, iconId);
+    };
+
     async function sendMessage() {
-        if (isEditing) isEditing = false;
+        if ($isEditing) $isEditing = false;
         if (isEditingAssistantMessage) {
             //TODO: refactor this
-            $chatHistory[0].content = messageText;
-            $plugin.data.initialAssistantMessage = 'Assistant\n' + messageText + '\n- - - - -';
-            messageText = '';
+            $chatHistory[0].content = $chatInput;
+            $plugin.data.initialAssistantMessage = 'Assistant\n' + $chatInput + '\n- - - - -';
+            $chatInput = '';
             isEditingAssistantMessage = false;
             $plugin.chatView.requestSave();
             await $plugin.saveSettings();
             return;
         }
-        if (isEditing) isEditing = false;
+        if ($isEditing) $isEditing = false;
         if (isProcessing) {
             new Notice('Please wait while your Second Brain is thinking...');
             return;
         }
         isProcessing = true;
         //TODO das is kaka
-        //messageText = test.value;
+        //$chatInput = test.value;
 
-        if (messageText.trim() !== '') {
-            // let message: Message = { role: 'user', content: messageText };
-            let userQuery = messageText;
-            messageText = '';
+        if ($chatInput.trim() !== '') {
+            // let message: Message = { role: 'user', content: $chatInput };
+            let userQuery = $chatInput;
+            $chatInput = '';
             await runSecondBrainFromChat($plugin.data.isUsingRag, userQuery);
         } else {
             new Notice('Your Second Brain does not understand empty messages!');
@@ -78,7 +79,7 @@
         }
     }
 
-    $: if (messageText) {
+    $: if ($chatInput) {
         updateHeight();
     }
 
@@ -93,28 +94,42 @@
     <p class="inline-block m-0">Connected to your Notes:</p>
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <div class="checkbox-container" class:is-enabled={$plugin.data.isUsingRag} on:click={handleRAGToggle}><input type="checkbox" tabindex="0" /></div>
+    <span class="checkbox-container" class:is-enabled={$plugin.data.isUsingRag} on:click={handleRAGToggle}><input type="checkbox" tabindex="0" /> </span>
 </div>
 <div class="w-full flex gap-3 items-center">
     <p class="inline-block m-0">Reset Secondbrain</p>
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <div class="h-6" on:click={() => $plugin.initSecondBrain(false)}><MdRefresh /></div>
+    <span
+        aria-label="Rest the Second Brain"
+        class="text-[--text-normal] hover:text-[--text-accent-hover]"
+        use:icon={'rotate-ccw'}
+        on:click={() => $plugin.initSecondBrain(false)}
+    >
+    </span>
 </div>
 {#if $chatHistory.length > 1}
     <div class="w-full flex gap-3 items-center">
         <p class="inline-block m-0">Save Chat</p>
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-static-element-interactions -->
-        <div class="h-6" on:click={() => $plugin.saveChatHistory()}><MdSave /></div>
+        <span
+            aria-label="Save the Chat to a file"
+            class="text-[--text-normal] hover:text-[--text-accent-hover]"
+            use:icon={'save'}
+            on:click={() => $plugin.saveChatHistory()}
+        />
     </div>
     <div class="w-full flex gap-3 items-center">
         <p class="inline-block m-0">Chat History:</p>
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-static-element-interactions -->
-        <div class="h-6" on:click={handleDelete}>
-            <MdDelete />
-        </div>
+        <span
+            aria-label="Delete Chat History"
+            class="text-[--text-normal] hover:text-[--text-accent-hover]"
+            on:click|preventDefault={handleDelete}
+            use:icon={'trash-2'}
+        />
     </div>
 {/if}
 <form on:submit|preventDefault={sendMessage} class="sticky flex w-full gap-1">
@@ -123,11 +138,9 @@
         id="chat-view-user-input-element"
         class="h-8 flex-1 max-h-40 resize-none"
         placeholder={inputPlaceholder}
-        bind:value={messageText}
+        bind:value={$chatInput}
         on:keydown={handelEnter}
         on:keyup={injectContext}
     />
-    <button type="submit" class="h-8 px-4 py-2 rounded-r-md hover:bg-primary transition duration-300 ease-in-out">
-        <MdSend />
-    </button>
+    <button aria-label="Ask the AI" type="submit" class="h-8 px-4 py-2 rounded-r-md hover:bg-primary transition duration-300 ease-in-out" use:icon={'send'} />
 </form>
