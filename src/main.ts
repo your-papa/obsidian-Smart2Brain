@@ -14,7 +14,7 @@ interface PluginData {
     initialAssistantMessage: string;
     isUsingRag: boolean;
     assistantLanguage: Language;
-    genModelToggle: boolean; // 0 = ollama, 1 = openai
+    isIncognitoMode: boolean;
     ollamaGenModel: OllamaGenModel;
     openAIGenModel: OpenAIGenModel;
     openAIEmbedModel: OpenAIEmbedModel;
@@ -29,7 +29,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isUsingRag: true,
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     initialAssistantMessage: INITIAL_ASSISTANT_MESSAGE.get(window.localStorage.getItem('language') || 'en'),
-    genModelToggle: true,
+    isIncognitoMode: true,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
     openAIGenModel: { modelName: 'gpt-3.5-turbo', openAIApiKey: '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' }, // TODO: remove openAIApiKey
     openAIEmbedModel: { modelName: 'text-embedding-ada-002', openAIApiKey: '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' }, // TODO: remove openAIApiKey
@@ -54,30 +54,39 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async initSecondBrain(fromBackup = true) {
+        console.log('initializing second brain' + (fromBackup ? ' from backup' : ''));
         const vectorStoreDataPath = normalizePath('.obsidian/plugins/smart-second-brain/vector-store-data.json');
         this.secondBrain = new Papa({
-            genModel: this.data.genModelToggle ? this.data.openAIGenModel : this.data.ollamaGenModel,
+            genModel: this.data.isIncognitoMode ? this.data.openAIGenModel : this.data.ollamaGenModel,
             embedModel: this.data.openAIEmbedModel,
             saveHandler: async (vectorStoreJson: string) => await this.app.vault.adapter.write(vectorStoreDataPath, vectorStoreJson),
         });
 
-        if (fromBackup) {
-            setTimeout(async () => {
-                const vectorStoreData = await this.app.vault.adapter.read(vectorStoreDataPath);
-                this.secondBrain.load(vectorStoreData);
-            }, 1000);
-            return;
-        }
-        setTimeout(async () => {
-            const mdFiles = this.app.vault.getMarkdownFiles();
-            const docs = await obsidianDocumentLoader(
-                this.app,
-                mdFiles.filter((mdFile) => {
-                    for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
-                })
-            );
-            await this.secondBrain.embedDocuments(docs);
-        }, 1000);
+        // if (fromBackup) {
+        //     setTimeout(async () => {
+        //         const vectorStoreData = await this.app.vault.adapter.read(vectorStoreDataPath);
+        //         this.secondBrain.load(vectorStoreData);
+        //         const mdFiles = this.app.vault.getMarkdownFiles();
+        //         const docs = await obsidianDocumentLoader(
+        //             this.app,
+        //             mdFiles.filter((mdFile) => {
+        //                 for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+        //             })
+        //         );
+        //         await this.secondBrain.embedDocuments(docs);
+        //     }, 1000);
+        //     return;
+        // }
+        // setTimeout(async () => {
+        //     const mdFiles = this.app.vault.getMarkdownFiles();
+        //     const docs = await obsidianDocumentLoader(
+        //         this.app,
+        //         mdFiles.filter((mdFile) => {
+        //             for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+        //         })
+        //     );
+        //     await this.secondBrain.embedDocuments(docs);
+        // }, 1000);
     }
 
     async onload() {
@@ -90,38 +99,30 @@ export default class SecondBrainPlugin extends Plugin {
 
         this.app.vault.on('modify', (file: TFile) => {
             setTimeout(async () => {
-                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return; // don't embed those files
-                // const docs = await obsidianDocumentLoader(this.app, [file]);
-                const mdFiles = this.app.vault.getMarkdownFiles();
-                const docs = await obsidianDocumentLoader(
-                    this.app,
-                    mdFiles.filter((mdFile) => !mdFile.path.startsWith(this.data.targetFolder))
-                );
-                await this.secondBrain.embedDocuments(docs);
+                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                const docs = await obsidianDocumentLoader(this.app, [file]);
+                await this.secondBrain.embedDocuments(docs, 'byFile');
             }, 1000);
         });
         this.app.vault.on('delete', async (file: TFile) => {
-            for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return; // don't embed those files
-            if (file.path.startsWith(this.data.targetFolder)) return; // don't embed chat files
-            // const docs = await obsidianDocumentLoader(this.app, [file]);
-            const mdFiles = this.app.vault.getMarkdownFiles();
-            const docs = await obsidianDocumentLoader(
-                this.app,
-                mdFiles.filter((mdFile) => !mdFile.path.startsWith(this.data.targetFolder))
-            );
-            await this.secondBrain.embedDocuments(docs);
+            // TODO could make this more efficient in backendend with a deleteDocuments method
+            setTimeout(async () => {
+                const mdFiles = this.app.vault.getMarkdownFiles();
+                const docs = await obsidianDocumentLoader(
+                    this.app,
+                    mdFiles.filter((mdFile) => {
+                        for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+                    })
+                );
+                await this.secondBrain.embedDocuments(docs, 'full');
+            }, 1000);
         });
 
         this.app.vault.on('rename', async (file: TFile) => {
             setTimeout(async () => {
-                for (const exclude in this.data.excludeFF) if (file.path.startsWith(exclude)) return; // don't embed those files
-                // const docs = await obsidianDocumentLoader(this.app, [file]);
-                const mdFiles = this.app.vault.getMarkdownFiles();
-                const docs = await obsidianDocumentLoader(
-                    this.app,
-                    mdFiles.filter((mdFile) => !mdFile.path.startsWith(this.data.targetFolder))
-                );
-                await this.secondBrain.embedDocuments(docs);
+                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                const docs = await obsidianDocumentLoader(this.app, [file]);
+                await this.secondBrain.embedDocuments(docs, 'byFile');
             }, 1000);
         });
 
@@ -187,7 +188,7 @@ export default class SecondBrainPlugin extends Plugin {
             type: VIEW_TYPE_CHAT,
             state: { file: file.path },
         });
-        await this.app.workspace.revealLeaf(this.leaf);
+        this.app.workspace.revealLeaf(this.leaf);
     }
 
     async saveChatHistory() {

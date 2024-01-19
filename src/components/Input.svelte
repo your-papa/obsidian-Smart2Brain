@@ -84,6 +84,11 @@
         if (textarea.scrollHeight == 42) textarea.style.height = '2rem';
         else textarea.style.height = textarea.scrollHeight + 'px';
     }
+
+    function handleChatToggel() {
+        $plugin.data.isChat = !$plugin.data.isChat;
+        $plugin.saveSettings();
+    }
 </script>
 
 <div class="w-full flex gap-3 items-center">
@@ -93,16 +98,10 @@
     <span class="checkbox-container" class:is-enabled={$plugin.data.isUsingRag} on:click={handleRAGToggle}><input type="checkbox" tabindex="0" /> </span>
 </div>
 <div class="w-full flex gap-3 items-center">
-    <p class="inline-block m-0">Reset Secondbrain</p>
+    <p class="inline-block m-0">Change Chatview</p>
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <span
-        aria-label="Rest the Second Brain"
-        class="text-[--text-normal] hover:text-[--text-accent-hover]"
-        use:icon={'rotate-ccw'}
-        on:click={() => $plugin.initSecondBrain(false)}
-    >
-    </span>
+    <span class="checkbox-container" class:is-enabled={$plugin.data.isChat} on:click={handleChatToggel}><input type="checkbox" tabindex="0" /> </span>
 </div>
 {#if $chatHistory.length > 1}
     <div class="w-full flex gap-3 items-center">

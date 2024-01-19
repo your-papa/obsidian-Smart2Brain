@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, requestUrl, Notice } from 'obsidian';
+import { App, PluginSettingTab, Setting, requestUrl, Notice, setIcon } from 'obsidian';
 import SecondBrainPlugin, { DEFAULT_SETTINGS } from '../main';
 import { chatHistory } from '../store';
 // import OpenAI from 'openai';
@@ -20,50 +20,18 @@ export default class SettingsTab extends PluginSettingTab {
     }
 
     async display(): Promise<void> {
-        const { containerEl } = this;
-        containerEl.empty();
+        this.containerEl.empty();
 
         const data = this.plugin.data;
 
-        this.containerEl.createEl('h2', { text: 'General Settings' });
+        setIcon(this.containerEl.createEl('div', { cls: ['flex', 'justify-center', '*:!w-[--icon-xl]', '*:!h-[--icon-xl]'] }), 'brain-circuit');
+        this.containerEl.createEl('h1', { text: 'Smart Second Brain', cls: ['text-center', 'mt-1'] });
 
-        /*new Setting(containerEl)
-            .setName('Adjust initial Assistant Message')
-            .addButton((button) =>
-                button
-                    .setButtonText('Restore Default')
-                    .setIcon('rotate-cw')
-                    .setClass('clickable-icon')
-                    .onClick(async () => {
-                        data.initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
-                        await this.plugin.saveSettings();
-                        if (get(chatHistory).length == 1) {
-                            chatHistory.set([
-                                {
-                                    role: 'Assistant',
-                                    content: data.initialAssistantMessage.replace('Assistant\n', '').replace('\n- - - - -', ''),
-                                    id: nanoid(),
-                                },
-                            ]);
-                            this.plugin.chatView.requestSave();
-                        }
-                        this.display();
-                    })
-            )
-            .addText((assistantMessage) =>
-                assistantMessage.setValue(data.initialAssistantMessage.replace('Assistant\n', '').replace('\n- - - - -', '')).onChange(async (value) => {
-                    if (value !== '') {
-                        data.initialAssistantMessage = 'Assistant\n' + value + '\n- - - - -';
-                        await this.plugin.saveSettings();
-                        if (get(chatHistory).length == 1) {
-                            chatHistory.set([{ role: 'Assistant', content: value, id: nanoid() }]);
-                            this.plugin.chatView.requestSave();
-                        }
-                    }
-                })
-            );*/
+        const generalSettingsEl = this.containerEl.createEl('details');
+        generalSettingsEl.open = true;
+        generalSettingsEl.createEl('summary', { text: 'General Settings', cls: ['setting-item-heading', 'py-3'] });
 
-        new Setting(containerEl).setName('Assistant Language').addDropdown((dropdown) => {
+        new Setting(generalSettingsEl).setName('Assistant Language').addDropdown((dropdown) => {
             Languages.forEach((lang: Language) => dropdown.addOption(lang, lang));
             dropdown.setValue(data.assistantLanguage).onChange(async (lang: any) => {
                 data.assistantLanguage = lang;
@@ -83,20 +51,85 @@ export default class SettingsTab extends PluginSettingTab {
         });
 
         this.component = new SettingsComponent({
-            target: this.containerEl,
+            target: generalSettingsEl,
         });
 
-        new Setting(this.containerEl).setName('Toggle OpenAI').addToggle((toggle) =>
-            toggle.setValue(data.genModelToggle).onChange(async (value) => {
-                data.genModelToggle = value;
+        new Setting(generalSettingsEl).setName('Icognito Mode').addToggle((toggle) =>
+            toggle.setValue(data.isIncognitoMode).onChange(async (value) => {
+                data.isIncognitoMode = value;
                 await this.plugin.saveSettings();
                 this.plugin.initSecondBrain();
                 this.display();
             })
         );
 
-        if (data.genModelToggle) {
-            this.containerEl.createEl('h2', { text: 'OpenAI Settings' });
+        if (data.isIncognitoMode) {
+            new Setting(generalSettingsEl).setHeading().setName('Ollama Settings');
+            const model = data.ollamaGenModel;
+            let setting_input: HTMLInputElement;
+            new Setting(generalSettingsEl)
+                .setName('Ollama URL')
+                .addButton((button) =>
+                    button
+                        .setButtonText('Restore Default')
+                        .setIcon('rotate-cw')
+                        .setClass('clickable-icon')
+                        .onClick(async () => {
+                            model.baseUrl = DEFAULT_SETTINGS.ollamaGenModel.baseUrl;
+                            await this.plugin.saveSettings();
+                            this.display();
+                        })
+                )
+                .addText((text) =>
+                    text
+                        .setValue(model.baseUrl)
+                        .setPlaceholder('http://localhost:11434')
+                        .onChange(async (value) => {
+                            value = value.trim();
+                            if (value.endsWith('/')) value = value.slice(0, -1);
+                            model.baseUrl = value;
+                            try {
+                                // check if url is valid
+                                new URL(model.baseUrl);
+                                setting_input.style.backgroundColor = 'var(--background-modifier-form-field)';
+                                this.plugin.secondBrain.setGenModel(model);
+                            } catch (_) {
+                                setting_input.style.backgroundColor = 'rgba(var(--color-red-rgb), 0.3)';
+                            }
+                            await this.plugin.saveSettings();
+                        })
+                        .then((setting) => {
+                            setting_input = setting.inputEl;
+                        })
+                );
+
+            new Setting(generalSettingsEl).setName('Ollama Model').addDropdown(async (dropdown) => {
+                try {
+                    const response = await requestUrl({
+                        url: model.baseUrl + '/api/tags',
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                    const jsonData = response.json;
+                    // const models: String[] = jsonData.models.map((model: { name: string }) => model.name);
+                    OllamaGenModelNames.forEach((model: string) => dropdown.addOption(model, model));
+                    dropdown.setValue(model.model).onChange(async (modelName: any) => {
+                        model.model = modelName;
+                        await this.plugin.saveSettings();
+                        this.plugin.secondBrain.setGenModel(model);
+                    });
+                } catch (e) {
+                    if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
+                        new Notice('Ollama server is not running');
+                        dropdown.addOption('Start Ollama service', 'Start Ollama service');
+                        dropdown.setValue('Start Ollama service');
+                    }
+                }
+            });
+        } else {
+            new Setting(generalSettingsEl).setHeading().setName('OpenAI Settings');
             const model = data.openAIGenModel;
             const openaiAPIUrl = 'https://api.openai.com/v1';
             // const openAI = new OpenAI({ apiKey: data.openAIGenModel.openAIApiKey, dangerouslyAllowBrowser: true });
@@ -108,7 +141,7 @@ export default class SettingsTab extends PluginSettingTab {
             };
 
             let setting_input2: HTMLInputElement;
-            new Setting(containerEl)
+            new Setting(generalSettingsEl)
                 .setName('OpenAI API Key')
                 .addButton((button) => {
                     button
@@ -152,7 +185,7 @@ export default class SettingsTab extends PluginSettingTab {
                         })
                 );
 
-            new Setting(containerEl).setName('OpenAI Model').addDropdown(async (dropdown) => {
+            new Setting(generalSettingsEl).setName('OpenAI Model').addDropdown(async (dropdown) => {
                 // dropdown.addOption(data.openAIModel, data.openAIModel).setValue(data.openAIModel);
                 // const models = await openAI.models.list();
                 // models.data.forEach((model: { id: string }) => {
@@ -168,78 +201,22 @@ export default class SettingsTab extends PluginSettingTab {
                     this.plugin.secondBrain.setGenModel(model);
                 });
             });
-        } else {
-            this.containerEl.createEl('h2', { text: 'Ollama Settings' });
-            const model = data.ollamaGenModel;
-            function isValidUrl(url: string) {
-                try {
-                    new URL(url);
-                } catch (_) {
-                    return false;
-                }
-
-                return true;
-            }
-            let setting_input: HTMLInputElement;
-            new Setting(containerEl)
-                .setName('Ollama URL')
-                .addButton((button) =>
-                    button
-                        .setButtonText('Restore Default')
-                        .setIcon('rotate-cw')
-                        .setClass('clickable-icon')
-                        .onClick(async () => {
-                            model.baseUrl = DEFAULT_SETTINGS.ollamaGenModel.baseUrl;
-                            await this.plugin.saveSettings();
-                            this.display();
-                        })
-                )
-                .addText((text) =>
-                    text
-                        .setValue(model.baseUrl)
-                        .setPlaceholder('http://localhost:11434')
-                        .onChange(async (value) => {
-                            value = value.trim();
-                            if (value.endsWith('/')) value = value.slice(0, -1);
-                            model.baseUrl = value;
-                            if (isValidUrl(value)) {
-                                setting_input.style.backgroundColor = 'var(--background-modifier-form-field)';
-                                this.plugin.secondBrain.setGenModel(model);
-                            } else setting_input.style.backgroundColor = 'rgba(var(--color-red-rgb), 0.3)';
-                            await this.plugin.saveSettings();
-                        })
-                        .then((setting) => {
-                            setting_input = setting.inputEl;
-                        })
-                );
-
-            new Setting(containerEl).setName('Ollama Model').addDropdown(async (dropdown) => {
-                try {
-                    const response = await requestUrl({
-                        url: model.baseUrl + '/api/tags',
-                        method: 'GET',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                    });
-                    const jsonData = response.json;
-                    // const models: String[] = jsonData.models.map((model: { name: string }) => model.name);
-                    OllamaGenModelNames.forEach((model: string) => dropdown.addOption(model, model));
-                    dropdown.setValue(model.model).onChange(async (modelName: any) => {
-                        model.model = modelName;
-                        console.log(jsonData);
-                        await this.plugin.saveSettings();
-                        this.plugin.secondBrain.setGenModel(model);
-                    });
-                } catch (e) {
-                    console.log(e);
-                    if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
-                        new Notice('Ollama server is not running');
-                        dropdown.addOption('Start Ollama service', 'Start Ollama service');
-                        dropdown.setValue('Start Ollama service');
-                    }
-                }
-            });
         }
+        // Setting to initialze SecondBrain
+        new Setting(generalSettingsEl).addButton((button) =>
+            button
+                .setButtonText('Reset Smart Second Brain')
+                .setClass('mod-cta')
+                .onClick(async () => {
+                    await this.plugin.initSecondBrain(false);
+                })
+        );
+
+        const advancedSettingsEl = this.containerEl.createEl('details');
+        advancedSettingsEl.createEl('summary', { text: 'Advanced Settings', cls: ['setting-item-heading', 'py-3'] });
+        new Setting(advancedSettingsEl)
+            .setName('Prompt')
+            .addButton((button) => button.setButtonText('Restore Default').setIcon('rotate-cw').setClass('clickable-icon'))
+            .addText((text) => text.setPlaceholder('Hi was geht ab'));
     }
 }
