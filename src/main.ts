@@ -100,13 +100,6 @@ export default class SecondBrainPlugin extends Plugin {
         this.app.vault.on('modify', (file: TFile) => {
             setTimeout(async () => {
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                const docs = await obsidianDocumentLoader(this.app, [file]);
-                await this.secondBrain.embedDocuments(docs, 'byFile');
-            }, 1000);
-        });
-        this.app.vault.on('delete', async (file: TFile) => {
-            // TODO could make this more efficient in backendend with a deleteDocuments method
-            setTimeout(async () => {
                 const mdFiles = this.app.vault.getMarkdownFiles();
                 const docs = await obsidianDocumentLoader(
                     this.app,
@@ -114,15 +107,35 @@ export default class SecondBrainPlugin extends Plugin {
                         for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
                     })
                 );
-                await this.secondBrain.embedDocuments(docs, 'full');
+                await this.secondBrain.embedDocuments(docs);
+            }, 1000);
+        });
+        this.app.vault.on('delete', async (file: TFile) => {
+            // TODO could make this more efficient in backendend with a deleteDocuments method
+            setTimeout(async () => {
+                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                const mdFiles = this.app.vault.getMarkdownFiles();
+                const docs = await obsidianDocumentLoader(
+                    this.app,
+                    mdFiles.filter((mdFile) => {
+                        for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+                    })
+                );
+                await this.secondBrain.embedDocuments(docs);
             }, 1000);
         });
 
         this.app.vault.on('rename', async (file: TFile) => {
             setTimeout(async () => {
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                const docs = await obsidianDocumentLoader(this.app, [file]);
-                await this.secondBrain.embedDocuments(docs, 'byFile');
+                const mdFiles = this.app.vault.getMarkdownFiles();
+                const docs = await obsidianDocumentLoader(
+                    this.app,
+                    mdFiles.filter((mdFile) => {
+                        for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+                    })
+                );
+                await this.secondBrain.embedDocuments(docs);
             }, 1000);
         });
 
