@@ -62,31 +62,31 @@ export default class SecondBrainPlugin extends Plugin {
             saveHandler: async (vectorStoreJson: string) => await this.app.vault.adapter.write(vectorStoreDataPath, vectorStoreJson),
         });
 
-        // if (fromBackup) {
-        //     setTimeout(async () => {
-        //         const vectorStoreData = await this.app.vault.adapter.read(vectorStoreDataPath);
-        //         this.secondBrain.load(vectorStoreData);
-        //         const mdFiles = this.app.vault.getMarkdownFiles();
-        //         const docs = await obsidianDocumentLoader(
-        //             this.app,
-        //             mdFiles.filter((mdFile) => {
-        //                 for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
-        //             })
-        //         );
-        //         await this.secondBrain.embedDocuments(docs);
-        //     }, 1000);
-        //     return;
-        // }
-        // setTimeout(async () => {
-        //     const mdFiles = this.app.vault.getMarkdownFiles();
-        //     const docs = await obsidianDocumentLoader(
-        //         this.app,
-        //         mdFiles.filter((mdFile) => {
-        //             for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
-        //         })
-        //     );
-        //     await this.secondBrain.embedDocuments(docs);
-        // }, 1000);
+        if (fromBackup) {
+            setTimeout(async () => {
+                const vectorStoreData = await this.app.vault.adapter.read(vectorStoreDataPath);
+                this.secondBrain.load(vectorStoreData);
+                const mdFiles = this.app.vault.getMarkdownFiles();
+                const docs = await obsidianDocumentLoader(
+                    this.app,
+                    mdFiles.filter((mdFile) => {
+                        for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+                    })
+                );
+                await this.secondBrain.embedDocuments(docs);
+            }, 1000);
+            return;
+        }
+        setTimeout(async () => {
+            const mdFiles = this.app.vault.getMarkdownFiles();
+            const docs = await obsidianDocumentLoader(
+                this.app,
+                mdFiles.filter((mdFile) => {
+                    for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+                })
+            );
+            await this.secondBrain.embedDocuments(docs);
+        }, 1000);
     }
 
     async onload() {
