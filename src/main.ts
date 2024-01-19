@@ -57,7 +57,7 @@ export default class SecondBrainPlugin extends Plugin {
         console.log('initializing second brain' + (fromBackup ? ' from backup' : ''));
         const vectorStoreDataPath = normalizePath('.obsidian/plugins/smart-second-brain/vector-store-data.json');
         this.secondBrain = new Papa({
-            genModel: this.data.isIncognitoMode ? this.data.openAIGenModel : this.data.ollamaGenModel,
+            genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
             embedModel: this.data.openAIEmbedModel,
             saveHandler: async (vectorStoreJson: string) => await this.app.vault.adapter.write(vectorStoreDataPath, vectorStoreJson),
         });
@@ -100,20 +100,13 @@ export default class SecondBrainPlugin extends Plugin {
         this.app.vault.on('modify', (file: TFile) => {
             setTimeout(async () => {
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                const mdFiles = this.app.vault.getMarkdownFiles();
-                const docs = await obsidianDocumentLoader(
-                    this.app,
-                    mdFiles.filter((mdFile) => {
-                        for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
-                    })
-                );
-                await this.secondBrain.embedDocuments(docs);
+                const docs = await obsidianDocumentLoader(this.app, [file]);
+                await this.secondBrain.embedDocuments(docs, 'byFile');
             }, 1000);
         });
         this.app.vault.on('delete', async (file: TFile) => {
             // TODO could make this more efficient in backendend with a deleteDocuments method
             setTimeout(async () => {
-                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
                 const mdFiles = this.app.vault.getMarkdownFiles();
                 const docs = await obsidianDocumentLoader(
                     this.app,
@@ -121,21 +114,15 @@ export default class SecondBrainPlugin extends Plugin {
                         for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
                     })
                 );
-                await this.secondBrain.embedDocuments(docs);
+                await this.secondBrain.embedDocuments(docs, 'full');
             }, 1000);
         });
 
         this.app.vault.on('rename', async (file: TFile) => {
             setTimeout(async () => {
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                const mdFiles = this.app.vault.getMarkdownFiles();
-                const docs = await obsidianDocumentLoader(
-                    this.app,
-                    mdFiles.filter((mdFile) => {
-                        for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
-                    })
-                );
-                await this.secondBrain.embedDocuments(docs);
+                const docs = await obsidianDocumentLoader(this.app, [file]);
+                await this.secondBrain.embedDocuments(docs, 'byFile');
             }, 1000);
         });
 
