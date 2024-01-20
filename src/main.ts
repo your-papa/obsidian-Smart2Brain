@@ -97,34 +97,49 @@ export default class SecondBrainPlugin extends Plugin {
         this.data.fromBackup = true;
         await this.saveSettings();
 
-        this.app.vault.on('modify', (file: TFile) => {
-            setTimeout(async () => {
-                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                const docs = await obsidianDocumentLoader(this.app, [file]);
-                await this.secondBrain.embedDocuments(docs, 'byFile');
-            }, 1000);
+        const embedFile = async (file: TFile) => {
+            for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+            const docs = await obsidianDocumentLoader(this.app, [file]);
+            await this.secondBrain.embedDocuments(docs, 'byFile');
+        };
+        this.registerEvent(
+            this.app.vault.on('modify', (file: TFile) => {
+                console.log('Modifying file: ' + file.path);
+                setTimeout(() => embedFile(file), 1000);
+            })
+        );
+        this.app.workspace.onLayoutReady(() => {
+            this.registerEvent(
+                this.app.vault.on('create', (file: TFile) => {
+                    console.log('Created file' + file.path);
+                    setTimeout(() => embedFile(file), 1000);
+                })
+            );
         });
-        this.app.vault.on('delete', async (file: TFile) => {
-            // TODO could make this more efficient in backendend with a deleteDocuments method
-            setTimeout(async () => {
-                const mdFiles = this.app.vault.getMarkdownFiles();
-                const docs = await obsidianDocumentLoader(
-                    this.app,
-                    mdFiles.filter((mdFile) => {
-                        for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
-                    })
-                );
-                await this.secondBrain.embedDocuments(docs, 'full');
-            }, 1000);
-        });
+        this.registerEvent(
+            this.app.vault.on('delete', async (file: TFile) => {
+                console.log('Deleted file' + file.path);
+                // TODO could make this more efficient in backendend with a deleteDocuments method
+                setTimeout(async () => {
+                    for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                    const mdFiles = this.app.vault.getMarkdownFiles();
+                    const docs = await obsidianDocumentLoader(
+                        this.app,
+                        mdFiles.filter((mdFile) => {
+                            for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+                        })
+                    );
+                    await this.secondBrain.embedDocuments(docs, 'full');
+                }, 1000);
+            })
+        );
 
-        this.app.vault.on('rename', async (file: TFile) => {
-            setTimeout(async () => {
-                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                const docs = await obsidianDocumentLoader(this.app, [file]);
-                await this.secondBrain.embedDocuments(docs, 'byFile');
-            }, 1000);
-        });
+        this.registerEvent(
+            this.app.vault.on('rename', async (file: TFile) => {
+                console.log('Renamed file' + file.path);
+                setTimeout(() => embedFile(file), 1000);
+            })
+        );
 
         this.registerView(VIEW_TYPE_CHAT, (leaf) => {
             this.chatView = new ChatView(leaf);
