@@ -50,6 +50,7 @@ export default class SecondBrainPlugin extends Plugin {
     chatView: ChatView;
     secondBrain: Papa;
     leaf: WorkspaceLeaf;
+    private vectorStoreDataPath = normalizePath('.obsidian/plugins/smart-second-brain/vector-store-data.json');
 
     async loadSettings() {
         this.data = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -61,17 +62,15 @@ export default class SecondBrainPlugin extends Plugin {
 
     async initSecondBrain(fromBackup = true) {
         console.log('initializing second brain' + (fromBackup ? ' from backup' : ''));
-        const vectorStoreDataPath = normalizePath('.obsidian/plugins/smart-second-brain/vector-store-data.json');
         this.secondBrain = new Papa({
             genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
             embedModel: this.data.openAIEmbedModel,
-            saveHandler: async (vectorStoreJson: string) => await this.app.vault.adapter.write(vectorStoreDataPath, vectorStoreJson),
         });
 
         if (fromBackup) {
             setTimeout(async () => {
-                const vectorStoreData = await this.app.vault.adapter.read(vectorStoreDataPath);
-                this.secondBrain.load(vectorStoreData);
+                const vectorStoreData = await this.app.vault.adapter.read(this.vectorStoreDataPath);
+                await this.secondBrain.load(vectorStoreData);
                 const mdFiles = this.app.vault.getMarkdownFiles();
                 const docs = await obsidianDocumentLoader(
                     this.app,
@@ -80,6 +79,7 @@ export default class SecondBrainPlugin extends Plugin {
                     })
                 );
                 await this.secondBrain.embedDocuments(docs);
+                this.app.vault.adapter.write(this.vectorStoreDataPath, await this.secondBrain.getData());
             }, 1000);
             return;
         }
@@ -92,6 +92,7 @@ export default class SecondBrainPlugin extends Plugin {
                 })
             );
             await this.secondBrain.embedDocuments(docs);
+            this.app.vault.adapter.write(this.vectorStoreDataPath, await this.secondBrain.getData());
         }, 1000);
     }
 
@@ -107,6 +108,7 @@ export default class SecondBrainPlugin extends Plugin {
             for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
             const docs = await obsidianDocumentLoader(this.app, [file]);
             await this.secondBrain.embedDocuments(docs, 'byFile');
+            this.app.vault.adapter.write(this.vectorStoreDataPath, await this.secondBrain.getData());
         };
         this.registerEvent(
             this.app.vault.on('modify', (file: TFile) => {
@@ -133,7 +135,8 @@ export default class SecondBrainPlugin extends Plugin {
                 console.log('Deleted file' + file.path);
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
-                this.secondBrain.deleteDocuments(docs);
+                await this.secondBrain.deleteDocuments(docs);
+                this.app.vault.adapter.write(this.vectorStoreDataPath, await this.secondBrain.getData());
             })
         );
 
@@ -157,7 +160,7 @@ export default class SecondBrainPlugin extends Plugin {
         this.registerMonkeyPatches();
     }
 
-    onunload() {
+    async onunload() {
         console.log('unloading plugin');
     }
 
