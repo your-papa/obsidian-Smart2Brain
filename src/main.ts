@@ -1,4 +1,4 @@
-import { App, FuzzySuggestModal, Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
+import { Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
 import { Papa, obsidianDocumentLoader, type Language, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
 import { get } from 'svelte/store';
 import { INITIAL_ASSISTANT_MESSAGE } from './ChatMessages';
@@ -31,8 +31,14 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     initialAssistantMessage: INITIAL_ASSISTANT_MESSAGE.get(window.localStorage.getItem('language') || 'en'),
     isIncognitoMode: true,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
-    openAIGenModel: { modelName: 'gpt-3.5-turbo', openAIApiKey: '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' }, // TODO: remove openAIApiKey
-    openAIEmbedModel: { modelName: 'text-embedding-ada-002', openAIApiKey: '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' }, // TODO: remove openAIApiKey
+    openAIGenModel: {
+        modelName: 'gpt-3.5-turbo',
+        openAIApiKey: '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',
+    }, // TODO: remove openAIApiKey
+    openAIEmbedModel: {
+        modelName: 'text-embedding-ada-002',
+        openAIApiKey: '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',
+    }, // TODO: remove openAIApiKey
     targetFolder: 'Chats',
     fromBackup: false,
     defaultChatName: 'Chat Second Brain',
@@ -158,14 +164,6 @@ export default class SecondBrainPlugin extends Plugin {
             },
         });
 
-        this.addCommand({
-            id: 'find-files',
-            name: 'ff',
-            callback: () => {
-                new FileSelectModal(this.app).open();
-            },
-        });
-
         this.registerMonkeyPatches();
     }
 
@@ -247,23 +245,5 @@ export default class SecondBrainPlugin extends Plugin {
                 },
             })
         );
-    }
-}
-
-export class FileSelectModal extends FuzzySuggestModal<TFile> {
-    constructor(app: App) {
-        super(app);
-        this.app = app;
-        this.setPlaceholder('Type the name of a file...');
-    }
-    getItems(): TFile[] {
-        return this.app.vault.getMarkdownFiles().sort((a, b) => a.basename.localeCompare(b.basename));
-    }
-    getItemText(item: TFile): string {
-        return item.basename;
-    }
-    onChooseItem(file: TFile) {
-        const elem = document.getElementById('chat-view-user-input-element') as HTMLInputElement;
-        elem.value = elem.value + `[${file.basename}]]`;
     }
 }
