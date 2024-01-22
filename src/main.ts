@@ -51,6 +51,7 @@ export default class SecondBrainPlugin extends Plugin {
     secondBrain: Papa;
     leaf: WorkspaceLeaf;
     private vectorStoreDataPath = normalizePath('.obsidian/plugins/smart-second-brain/vector-store-data.json');
+    private needsToSaveVectorStoreData = false;
 
     async loadSettings() {
         this.data = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -60,6 +61,12 @@ export default class SecondBrainPlugin extends Plugin {
         await this.saveData(this.data);
     }
 
+    async saveVectorStoreData() {
+        console.log('saving vector store data');
+        await this.app.vault.adapter.write(this.vectorStoreDataPath, await this.secondBrain.getData());
+        console.log('saved vector store data');
+    }
+
     async initSecondBrain(fromBackup = true) {
         console.log('initializing second brain' + (fromBackup ? ' from backup' : ''));
         this.secondBrain = new Papa({
@@ -67,33 +74,29 @@ export default class SecondBrainPlugin extends Plugin {
             embedModel: this.data.openAIEmbedModel,
         });
 
+        const embedVault = async () => {
+            const mdFiles = this.app.vault.getMarkdownFiles();
+            const docs = await obsidianDocumentLoader(
+                this.app,
+                mdFiles.filter((mdFile: TFile) => {
+                    for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+                })
+            );
+            const result = await this.secondBrain.embedDocuments(docs);
+            if (result.numAdded > 0 || result.numDeleted > 0) this.needsToSaveVectorStoreData = true;
+        };
+
         if (fromBackup) {
             setTimeout(async () => {
                 const vectorStoreData = await this.app.vault.adapter.read(this.vectorStoreDataPath);
                 await this.secondBrain.load(vectorStoreData);
-                const mdFiles = this.app.vault.getMarkdownFiles();
-                const docs = await obsidianDocumentLoader(
-                    this.app,
-                    mdFiles.filter((mdFile) => {
-                        for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
-                    })
-                );
-                await this.secondBrain.embedDocuments(docs);
-                this.app.vault.adapter.write(this.vectorStoreDataPath, await this.secondBrain.getData());
-            }, 1000);
+                embedVault();
+            }, 5000);
             return;
         }
         setTimeout(async () => {
-            const mdFiles = this.app.vault.getMarkdownFiles();
-            const docs = await obsidianDocumentLoader(
-                this.app,
-                mdFiles.filter((mdFile) => {
-                    for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
-                })
-            );
-            await this.secondBrain.embedDocuments(docs);
-            this.app.vault.adapter.write(this.vectorStoreDataPath, await this.secondBrain.getData());
-        }, 1000);
+            embedVault();
+        }, 5000);
     }
 
     async onload() {
@@ -108,7 +111,7 @@ export default class SecondBrainPlugin extends Plugin {
             for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
             const docs = await obsidianDocumentLoader(this.app, [file]);
             await this.secondBrain.embedDocuments(docs, 'byFile');
-            this.app.vault.adapter.write(this.vectorStoreDataPath, await this.secondBrain.getData());
+            this.needsToSaveVectorStoreData = true;
         };
         this.registerEvent(
             this.app.vault.on('modify', (file: TFile) => {
@@ -136,9 +139,16 @@ export default class SecondBrainPlugin extends Plugin {
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 await this.secondBrain.deleteDocuments(docs);
-                this.app.vault.adapter.write(this.vectorStoreDataPath, await this.secondBrain.getData());
+                this.needsToSaveVectorStoreData = true;
             })
         );
+
+        window.addEventListener('blur', async () => {
+            if (this.needsToSaveVectorStoreData) {
+                this.needsToSaveVectorStoreData = false;
+                await this.saveVectorStoreData();
+            }
+        });
 
         this.registerView(VIEW_TYPE_CHAT, (leaf) => {
             this.chatView = new ChatView(leaf);
