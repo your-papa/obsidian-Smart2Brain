@@ -34,14 +34,10 @@
     }
 </script>
 
-<div
-    class="flex-grow w-full overflow-y-scroll rounded-md mb-1 border border-solid border-[--background-modifier-border]"
->
+<div class="flex-grow w-full select-text overflow-y-scroll rounded-md mb-1 border border-solid border-[--background-modifier-border]">
     {#each $chatHistory as message (message.id)}
         {#if message.role === 'User'}
-            <div
-                class="bg-[--background-secondary] p-2 border-x-0 border-t-0 border-b border-solid border-[--background-modifier-border]"
-            >
+            <div class="bg-[--background-secondary] p-2 border-x-0 border-t-0 border-b border-solid border-[--background-modifier-border]">
                 <span class="text-primary font-bold">User</span>
                 {#if $isEditing && editMessageId === message.id}
                     <span
@@ -64,18 +60,10 @@
                         use:icon={'refresh-cw'}
                     />
                 {/if}
-                <span
-                    class="*:m-0"
-                    bind:this={editElem}
-                    on:mouseover={onMouseOver}
-                    on:click={onClick}
-                    use:renderMarkdown={message.content}
-                />
+                <span class="*:m-0" bind:this={editElem} on:mouseover={onMouseOver} on:click={onClick} use:renderMarkdown={message.content} />
             </div>
         {:else}
-            <div
-                class="bg-[--background-secondary-alt] p-2 border-x-0 border-t-0 border-b border-solid border-[--background-modifier-border]"
-            >
+            <div class="bg-[--background-secondary-alt] p-2 border-x-0 border-t-0 border-b border-solid border-[--background-modifier-border]">
                 <span class="text-primary font-bold">Smart2Brain</span>
                 {#if !$isEditingAssistantMessage}
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -92,8 +80,7 @@
                         <sapn
                             aria-label="Change the initial assistant message"
                             class="text-[--text-normal] hover:text-[--text-accent-hover]"
-                            on:click|preventDefault={() =>
-                                editInitialAssistantMessage(message.content, textarea)}
+                            on:click|preventDefault={() => editInitialAssistantMessage(message.content, textarea)}
                             use:icon={'pencil-line'}
                         />
                     {/if}
@@ -103,9 +90,7 @@
                     <span
                         aria-label="Cancel editing"
                         class="text-[--text-normal] hover:text-[--text-accent-hover]"
-                        on:click|preventDefault={cancelEditingInitialAssistantMessage(
-                            initialAssistantMessageSpan
-                        )}
+                        on:click|preventDefault={cancelEditingInitialAssistantMessage(initialAssistantMessageSpan)}
                         use:icon={'x-circle'}
                     />
                     <!-- svelte-ignore a11y-click-events-have-key-events -->

@@ -115,27 +115,23 @@ export default class SecondBrainPlugin extends Plugin {
         };
         this.registerEvent(
             this.app.vault.on('modify', (file: TFile) => {
-                console.log('Modifying file: ' + file.path);
                 setTimeout(() => embedFile(file), 1000);
             })
         );
         this.app.workspace.onLayoutReady(() => {
             this.registerEvent(
                 this.app.vault.on('create', (file: TFile) => {
-                    console.log('Created file' + file.path);
                     setTimeout(() => embedFile(file), 1000);
                 })
             );
         });
         this.registerEvent(
             this.app.vault.on('rename', async (file: TFile) => {
-                console.log('Renamed file' + file.path);
                 setTimeout(() => embedFile(file), 1000);
             })
         );
         this.registerEvent(
             this.app.vault.on('delete', async (file: TFile) => {
-                console.log('Deleted file' + file.path);
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 await this.secondBrain.deleteDocuments(docs);
