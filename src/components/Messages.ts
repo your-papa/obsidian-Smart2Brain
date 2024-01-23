@@ -133,6 +133,7 @@ export function cancelEditing() {
     chatHistory.pop();
     isEditing.set(false);
     chatInput.set('');
+    temporaryEditingHistory[0].id = nanoid();
     history.set(chatHistory.concat(temporaryEditingHistory));
     get(p).chatView.requestSave();
 }
