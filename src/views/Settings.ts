@@ -7,6 +7,7 @@ import { nanoid } from 'nanoid';
 import { Languages, type Language, OpenAIGenModelNames, OllamaGenModelNames } from 'papa-ts';
 import SettingsComponent from '../components/Settings.svelte';
 import { INITIAL_ASSISTANT_MESSAGE } from '../ChatMessages';
+import DocsComponent from '../components/temp.svelte';
 
 export default class SettingsTab extends PluginSettingTab {
     component: SettingsComponent;
@@ -40,7 +41,7 @@ export default class SettingsTab extends PluginSettingTab {
                     chatHistory.set([
                         {
                             role: 'Assistant',
-                            content: data.initialAssistantMessage.replace('Assistant\n', '').replace('\n- - - - -', ''),
+                            content: data.initialAssistantMessage,
                             id: nanoid(),
                         },
                     ]);
@@ -213,10 +214,15 @@ export default class SettingsTab extends PluginSettingTab {
         );
 
         const advancedSettingsEl = this.containerEl.createEl('details');
+
         advancedSettingsEl.createEl('summary', { text: 'Advanced Settings', cls: ['setting-item-heading', 'py-3'] });
         new Setting(advancedSettingsEl)
             .setName('Prompt')
             .addButton((button) => button.setButtonText('Restore Default').setIcon('rotate-cw').setClass('clickable-icon'))
             .addText((text) => text.setPlaceholder('Hi was geht ab'));
+
+        new DocsComponent({
+            target: advancedSettingsEl,
+        });
     }
 }

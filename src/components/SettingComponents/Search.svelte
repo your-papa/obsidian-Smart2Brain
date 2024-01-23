@@ -16,7 +16,7 @@
         inputValue = '';
     }
     $: if (inputElem) {
-        new FFSuggest($plugin.app, inputElem);
+        new FFSuggest($plugin.app, inputElem, $plugin.data.excludeFF);
     }
 </script>
 

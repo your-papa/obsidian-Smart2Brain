@@ -7,12 +7,10 @@ import { get } from 'svelte/store';
 
 export const VIEW_TYPE_CHAT = 'chat-view';
 
-// TODO: think about System message
-
 export class ChatView extends TextFileView implements HoverParent {
     component: ChatViewComponent;
     hoverPopover: HoverPopover | null;
-    data: string = get(plugin).data.initialAssistantMessage;
+    data: string = 'Assistant\n' + get(plugin).data.initialAssistantMessage + '\n- - - - -';
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);
@@ -22,7 +20,6 @@ export class ChatView extends TextFileView implements HoverParent {
     getViewType() {
         return VIEW_TYPE_CHAT;
     }
-    //TODO redo this
     setViewData(data: string, clear: boolean): void {
         this.data = data;
         // parse data into messages

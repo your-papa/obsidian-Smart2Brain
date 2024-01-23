@@ -1,18 +1,15 @@
 // Credits go to Liam's Periodic Notes Plugin: https://github.com/liamcain/obsidian-periodic-notes
 
 import { TAbstractFile, TFile, TFolder } from 'obsidian';
-import { get } from 'svelte/store';
-import { plugin } from '../store';
 import { TextInputSuggest } from './suggest';
 
 export class FFSuggest extends TextInputSuggest<TAbstractFile> {
-    getSuggestions(inputStr: string): TAbstractFile[] {
+    getSuggestions(inputStr: string, excludeFF: Array<string>): TAbstractFile[] {
         const abstractFiles = this.app.vault.getAllLoadedFiles();
         const files: TAbstractFile[] = [];
         const folders: TAbstractFile[] = [];
         const lowerCaseInputStr = inputStr.toLowerCase();
-        //TODO: make this more reusable
-        const excludeFromList = structuredClone(get(plugin).data.excludeFF);
+        const excludeFromList = structuredClone(excludeFF);
 
         abstractFiles.forEach((ff: TAbstractFile) => {
             for (const exclude of excludeFromList) {
