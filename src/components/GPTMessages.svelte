@@ -37,80 +37,39 @@
 <div class="flex-grow w-full select-text overflow-y-scroll rounded-md mb-1 border border-solid border-[--background-modifier-border]">
     {#each $chatHistory as message (message.id)}
         {#if message.role === 'User'}
-            <div class="bg-[--background-secondary] p-2 border-x-0 border-t-0 border-b border-solid border-[--background-modifier-border]">
-                <span class="text-primary font-bold">User</span>
-                {#if $isEditing && editMessageId === message.id}
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <span
-                        aria-label="Copy Text"
-                        class="text-[--text-normal] hover:text-[--text-accent-hover]"
-                        on:click|preventDefault={cancelEditing}
-                        use:icon={'x-circle'}
-                    />
-                {:else}
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <span
-                        aria-label="Edit query and regenerate the answer"
-                        class="text-[--text-normal] hover:text-[--text-accent-hover] w-5"
-                        on:click|preventDefault={() => wrapperEditMessage(message, textarea)}
-                        use:icon={'pencil-line'}
-                    />
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <span
-                        aria-label="Deletes all following Messages and regenerates the answer to the current query"
-                        class="text-[--text-normal] hover:text-[--text-accent-hover] w-6"
-                        on:click|preventDefault={() => redoGeneration(message)}
-                        use:icon={'refresh-cw'}
-                    />
-                {/if}
+            <div class="group bg-[--background-secondary] p-2 border-x-0 border-t-0 border-b border-solid border-[--background-modifier-border]">
+                <div class="text-primary font-bold mt-2">User</div>
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <!-- svelte-ignore a11y-mouse-events-have-key-events -->
                 <span class="*:m-0" bind:this={editElem} on:mouseover={onMouseOver} on:click={onClick} use:renderMarkdown={message.content} />
-            </div>
-        {:else}
-            <div class="bg-[--background-secondary-alt] p-2 border-x-0 border-t-0 border-b border-solid border-[--background-modifier-border]">
-                <span class="text-primary font-bold">Smart2Brain</span>
-                {#if !$isEditingAssistantMessage}
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <span
-                        aria-label="Copy Text"
-                        class="text-[--text-normal] hover:text-[--text-accent-hover]"
-                        on:click={() => toClipboard(message.content)}
-                        use:icon={'copy'}
-                    />
-                    {#if $chatHistory.length === 1}
+                <div class="flex mt-1 gap-1 group-hover:opacity-100 opacity-0">
+                    {#if $isEditing && editMessageId === message.id}
                         <!-- svelte-ignore a11y-no-static-element-interactions -->
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
-                        <sapn
-                            aria-label="Change the initial assistant message"
+                        <span
+                            aria-label="Copy Text"
                             class="text-[--text-normal] hover:text-[--text-accent-hover]"
-                            on:click|preventDefault={() => editInitialAssistantMessage(message.content, textarea)}
+                            on:click|preventDefault={cancelEditing}
+                            use:icon={'x-circle'}
+                        />
+                    {:else}
+                        <!-- svelte-ignore a11y-no-static-element-interactions -->
+                        <!-- svelte-ignore a11y-click-events-have-key-events -->
+                        <span
+                            aria-label="Edit query and regenerate the answer"
+                            class="text-[--text-normal] hover:text-[--text-accent-hover]"
+                            on:click|preventDefault={() => wrapperEditMessage(message, textarea)}
                             use:icon={'pencil-line'}
                         />
+                        <!-- svelte-ignore a11y-no-static-element-interactions -->
+                        <!-- svelte-ignore a11y-click-events-have-key-events -->
                     {/if}
-                {:else}
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <span
-                        aria-label="Cancel editing"
-                        class="text-[--text-normal] hover:text-[--text-accent-hover]"
-                        on:click|preventDefault={() => cancelEditingInitialAssistantMessage(initialAssistantMessageSpan)}
-                        use:icon={'x-circle'}
-                    />
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <span
-                        aria-label="Reset to default"
-                        class="text-[--text-normal] hover:text-[--text-accent-hover] w-6"
-                        on:click={() => resetInitialAssistantMessage(initialAssistantMessageSpan)}
-                        use:icon={'rotate-ccw'}
-                    />
-                {/if}
+                </div>
+            </div>
+        {:else}
+            <div class="group bg-[--background-secondary-alt] p-2 border-x-0 border-t-0 border-b border-solid border-[--background-modifier-border]">
+                <div class="text-primary font-bold mt-2">Smart2Brain</div>
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <!-- svelte-ignore a11y-mouse-events-have-key-events -->
@@ -121,6 +80,55 @@
                     on:click={onClick}
                     use:renderMarkdown={message.content}
                 />
+                <div class="flex gap-1 mt-1 group-hover:opacity-100 opacity-0">
+                    {#if !$isEditingAssistantMessage}
+                        <!-- svelte-ignore a11y-no-static-element-interactions -->
+                        <!-- svelte-ignore a11y-click-events-have-key-events -->
+                        <span
+                            aria-label="Copy Text"
+                            class="text-[--text-normal] hover:text-[--text-accent-hover]"
+                            on:click={() => toClipboard(message.content)}
+                            use:icon={'copy'}
+                        />
+                        {#if $chatHistory.indexOf(message) !== 0}
+                            <!-- svelte-ignore a11y-no-static-element-interactions -->
+                            <!-- svelte-ignore a11y-click-events-have-key-events -->
+                            <span
+                                aria-label="Deletes all following Messages and regenerates the answer to the current query"
+                                class="text-[--text-normal] hover:text-[--text-accent-hover]"
+                                on:click|preventDefault={() => redoGeneration(message)}
+                                use:icon={'refresh-cw'}
+                            />
+                        {/if}
+                        {#if $chatHistory.length === 1}
+                            <!-- svelte-ignore a11y-no-static-element-interactions -->
+                            <!-- svelte-ignore a11y-click-events-have-key-events -->
+                            <sapn
+                                aria-label="Change the initial assistant message"
+                                class="text-[--text-normal] hover:text-[--text-accent-hover]"
+                                on:click|preventDefault={() => editInitialAssistantMessage(message.content, textarea)}
+                                use:icon={'pencil-line'}
+                            />
+                        {/if}
+                    {:else}
+                        <!-- svelte-ignore a11y-click-events-have-key-events -->
+                        <!-- svelte-ignore a11y-no-static-element-interactions -->
+                        <span
+                            aria-label="Cancel editing"
+                            class="text-[--text-normal] hover:text-[--text-accent-hover]"
+                            on:click|preventDefault={() => cancelEditingInitialAssistantMessage(initialAssistantMessageSpan)}
+                            use:icon={'x-circle'}
+                        />
+                        <!-- svelte-ignore a11y-click-events-have-key-events -->
+                        <!-- svelte-ignore a11y-no-static-element-interactions -->
+                        <span
+                            aria-label="Reset to default"
+                            class="text-[--text-normal] hover:text-[--text-accent-hover]"
+                            on:click={() => resetInitialAssistantMessage(initialAssistantMessageSpan)}
+                            use:icon={'rotate-ccw'}
+                        />
+                    {/if}
+                </div>
             </div>
         {/if}
     {/each}

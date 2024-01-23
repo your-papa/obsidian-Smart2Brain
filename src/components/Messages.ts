@@ -112,9 +112,10 @@ export const toClipboard = (messageText: string) => {
 export const redoGeneration = async (message: ChatMessage) => {
     const plugin = get(p);
     const chatHistory = get(history);
-    const targetIndex = chatHistory.indexOf(message);
+    const targetIndex = chatHistory.indexOf(message) - 1;
+    const userQuery = chatHistory[targetIndex];
     history.set(chatHistory.slice(0, targetIndex));
-    await runSecondBrainFromChat(plugin.data.isUsingRag, message.content);
+    await runSecondBrainFromChat(plugin.data.isUsingRag, userQuery.content);
 };
 
 export function editMessage(message: ChatMessage, textarea: HTMLTextAreaElement): string {
