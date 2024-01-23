@@ -22,6 +22,7 @@ interface PluginData {
     targetFolder: string;
     excludeFF: Array<string>;
     defaultChatName: string;
+    docRetrieveNum: number;
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
@@ -33,16 +34,17 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
     openAIGenModel: {
         modelName: 'gpt-3.5-turbo',
-        openAIApiKey: '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',
-    }, // TODO: remove openAIApiKey
+        openAIApiKey: '',
+    },
     openAIEmbedModel: {
         modelName: 'text-embedding-ada-002',
-        openAIApiKey: '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',
-    }, // TODO: remove openAIApiKey
+        openAIApiKey: '',
+    },
     targetFolder: 'Chats',
     fromBackup: false,
     defaultChatName: 'Chat Second Brain',
     excludeFF: ['Chats'],
+    docRetrieveNum: 5,
 };
 
 export default class SecondBrainPlugin extends Plugin {
@@ -72,6 +74,7 @@ export default class SecondBrainPlugin extends Plugin {
         this.secondBrain = new Papa({
             genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
             embedModel: this.data.openAIEmbedModel,
+            DOC_RETRIEVE_NUM: this.data.docRetrieveNum,
         });
 
         const embedVault = async () => {
@@ -187,7 +190,7 @@ export default class SecondBrainPlugin extends Plugin {
                 ? this.app.metadataCache.getFirstLinkpathDest(this.data.targetFolder + '/' + this.data.defaultChatName + '.md', '')
                 : await this.app.vault.create(
                       normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'),
-                      this.data.initialAssistantMessage
+                      'Assistant\n' + this.data.initialAssistantMessage + '\n- - - - -'
                   );
             await this.leaf.openFile(file, { active: true });
             await this.leaf.setViewState({
@@ -204,9 +207,21 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async saveChatHistory() {
-        const fileName = await this.secondBrain.createTitleFromChatHistory(this.data.assistantLanguage, serializeChatHistory(get(chatHistory)));
-        const newChatFile = await this.app.vault.copy(this.chatView.file, normalizePath(this.data.targetFolder + '/' + fileName + '.md'));
-        // TODO handle if file already exists
+        let fileName = await this.secondBrain.createTitleFromChatHistory(this.data.assistantLanguage, serializeChatHistory(get(chatHistory)));
+        let normalizedFilePath = normalizePath(this.data.targetFolder + '/' + fileName + '.md');
+        while (await this.app.vault.adapter.exists(normalizedFilePath)) {
+            //Checks if already existing file has a number at the end
+            const regex = /\((\d+)\)$/;
+            const match = fileName.match(regex);
+            if (match) {
+                fileName = fileName.slice(0, -3) + '(' + (parseInt(match[1], 10) + 1) + ')';
+            } else {
+                fileName = fileName + ' (1)';
+            }
+            normalizedFilePath = normalizePath(this.data.targetFolder + '/' + fileName + '.md');
+        }
+        const newChatFile = await this.app.vault.copy(this.chatView.file, normalizedFilePath);
+
         await this.activateView(newChatFile);
     }
 

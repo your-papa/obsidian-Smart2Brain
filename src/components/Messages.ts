@@ -1,11 +1,4 @@
-import {
-    plugin as p,
-    chatHistory as history,
-    type ChatMessage,
-    isEditing,
-    chatInput,
-    isEditingAssistantMessage,
-} from '../store';
+import { plugin as p, chatHistory as history, type ChatMessage, isEditing, chatInput, isEditingAssistantMessage } from '../store';
 import { get } from 'svelte/store';
 import { clipboard } from 'electron';
 import { MarkdownRenderer, Notice, setIcon } from 'obsidian';
@@ -40,12 +33,7 @@ export const onClick = async (e: MouseEvent) => {
         e.preventDefault();
         const href = closestAnchor.getAttribute('href');
         const normalizedPath = getNormalizedPath(href);
-        const target =
-            typeof href === 'string' &&
-            plugin.chatView.app.metadataCache.getFirstLinkpathDest(
-                normalizedPath.root,
-                plugin.chatView.file.path
-            );
+        const target = typeof href === 'string' && plugin.chatView.app.metadataCache.getFirstLinkpathDest(normalizedPath.root, plugin.chatView.file.path);
 
         if (!target) return;
         //@ts-expect-error Find correct type
@@ -69,9 +57,7 @@ export const onClick = async (e: MouseEvent) => {
     if (closestAnchor.hasClass('tag')) {
         e.preventDefault();
         //@ts-expect-error Find correct type
-        plugin.app.internalPlugins
-            .getPluginById('global-search')
-            .instance.openGlobalSearch(`tag:${closestAnchor.getAttr('href')}`);
+        plugin.app.internalPlugins.getPluginById('global-search').instance.openGlobalSearch(`tag:${closestAnchor.getAttr('href')}`);
 
         return;
     }
@@ -155,8 +141,7 @@ export function editInitialAssistantMessage(initialMessage: string, textarea: HT
     isEditingAssistantMessage.set(true);
     chatInput.set(initialMessage);
     textarea.focus();
-    //TODO: make it work
-    textarea.select();
+    setTimeout(() => textarea.select(), 0);
 }
 
 export function cancelEditingInitialAssistantMessage(initialAssistantMessageSpan: HTMLSpanElement) {
@@ -164,10 +149,7 @@ export function cancelEditingInitialAssistantMessage(initialAssistantMessageSpan
     isEditingAssistantMessage.set(false);
     chatInput.set('');
     initialAssistantMessageSpan.innerText = '';
-    renderMarkdown(
-        initialAssistantMessageSpan,
-        plugin.data.initialAssistantMessage.replace('Assistant\n', '').replace('\n- - - - -', '')
-    );
+    renderMarkdown(initialAssistantMessageSpan, plugin.data.initialAssistantMessage);
     plugin.chatView.requestSave();
 }
 
@@ -176,13 +158,9 @@ export function resetInitialAssistantMessage(initialAssistantMessageSpan: HTMLSp
     isEditingAssistantMessage.set(false);
     chatInput.set('');
     initialAssistantMessageSpan.innerText = '';
-    const initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage
-        .replace('Assistant\n', '')
-        .replace('\n- - - - -', '');
+    const initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
     renderMarkdown(initialAssistantMessageSpan, initialAssistantMessage);
-    history.set([
-        { role: 'Assistant', content: initialAssistantMessage, id: nanoid() } as ChatMessage,
-    ]);
+    history.set([{ role: 'Assistant', content: initialAssistantMessage, id: nanoid() } as ChatMessage]);
     plugin.data.initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
     plugin.chatView.requestSave();
     plugin.saveSettings();

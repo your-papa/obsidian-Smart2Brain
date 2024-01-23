@@ -15,9 +15,8 @@
 
     async function sendMessage() {
         if ($isEditingAssistantMessage) {
-            //TODO: refactor this
             $chatHistory[0].content = $chatInput;
-            $plugin.data.initialAssistantMessage = 'Assistant\n' + $chatInput + '\n- - - - -';
+            $plugin.data.initialAssistantMessage = $chatInput;
             $chatInput = '';
             $isEditingAssistantMessage = false;
             $plugin.chatView.requestSave();
@@ -46,11 +45,7 @@
     function handleRAGToggle() {
         $plugin.data.isUsingRag = !$plugin.data.isUsingRag;
         $plugin.saveSettings();
-        new Notice(
-            $plugin.data.isUsingRag
-                ? 'Now chatting with your Second Brain'
-                : 'Now chatting with the LLM'
-        );
+        new Notice($plugin.data.isUsingRag ? 'Now chatting with your Second Brain' : 'Now chatting with the LLM');
     }
 
     function handleDelete() {
@@ -62,9 +57,7 @@
         $chatHistory = [];
         $chatHistory.push({
             role: 'Assistant',
-            content: $plugin.data.initialAssistantMessage
-                .replace('Assistant\n', '')
-                .replace('\n- - - - -', ''),
+            content: $plugin.data.initialAssistantMessage,
             id: nanoid(),
         });
         $plugin.chatView.requestSave();
@@ -97,12 +90,7 @@
     <p class="inline-block m-0">Connected to your Notes:</p>
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <span
-        class="checkbox-container"
-        class:is-enabled={$plugin.data.isUsingRag}
-        on:click={handleRAGToggle}
-        ><input type="checkbox" tabindex="0" />
-    </span>
+    <span class="checkbox-container" class:is-enabled={$plugin.data.isUsingRag} on:click={handleRAGToggle}><input type="checkbox" tabindex="0" /> </span>
 </div>
 <div class="w-full flex gap-3 items-center">
     <p class="inline-block m-0">Change Chatview</p>
@@ -144,10 +132,5 @@
         on:keydown={handelEnter}
         on:keyup={injectContext}
     />
-    <button
-        aria-label="Ask the AI"
-        type="submit"
-        class="h-8 px-4 py-2 rounded-r-md hover:bg-primary transition duration-300 ease-in-out"
-        use:icon={'send'}
-    />
+    <button aria-label="Ask the AI" type="submit" class="h-8 px-4 py-2 rounded-r-md hover:bg-primary transition duration-300 ease-in-out" use:icon={'send'} />
 </form>
