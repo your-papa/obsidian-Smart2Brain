@@ -27,6 +27,11 @@ export default {
             },
         },
     },
+    variants: {
+        extend: {
+            display: ['group-hover'],
+        },
+    },
     corePlugins: {
         preflight: false,
     },
