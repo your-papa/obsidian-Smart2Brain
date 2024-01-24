@@ -99,6 +99,7 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-static-element-interactions -->
         <div
+            aria-label="Toggle between chatting with your Notes or the LLM"
             on:click={handleRAGToggle}
             use:icon={'brain-circuit'}
             class={`w-[--icon-xl] h-[--icon-xl] *:!w-[--icon-xl] *:!h-[--icon-xl] ${

@@ -1,5 +1,5 @@
 import { Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
-import { Papa, obsidianDocumentLoader, type Language, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
+import { Papa, obsidianDocumentLoader, type Language, type OllamaGenModel, type OllamaEmbedModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
 import { get } from 'svelte/store';
 import { INITIAL_ASSISTANT_MESSAGE } from './ChatMessages';
 import { around } from 'monkey-around';
@@ -16,6 +16,7 @@ interface PluginData {
     assistantLanguage: Language;
     isIncognitoMode: boolean;
     ollamaGenModel: OllamaGenModel;
+    ollamaEmbedModel: OllamaEmbedModel;
     openAIGenModel: OpenAIGenModel;
     openAIEmbedModel: OpenAIEmbedModel;
     fromBackup: boolean;
@@ -32,6 +33,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     initialAssistantMessage: INITIAL_ASSISTANT_MESSAGE.get(window.localStorage.getItem('language') || 'en'),
     isIncognitoMode: true,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
+    ollamaEmbedModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
     openAIGenModel: {
         modelName: 'gpt-3.5-turbo',
         openAIApiKey: '',
@@ -75,9 +77,10 @@ export default class SecondBrainPlugin extends Plugin {
 
     async initSecondBrain(fromBackup = true) {
         console.log('initializing second brain' + (fromBackup ? ' from backup' : ''));
+        console.log(this.data.isIncognitoMode);
         this.secondBrain = new Papa({
             genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
-            embedModel: this.data.openAIEmbedModel,
+            embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
         });
 
         const embedVault = async () => {
@@ -113,6 +116,8 @@ export default class SecondBrainPlugin extends Plugin {
 
             // reembed documents on change
             this.app.metadataCache.on('changed', async (file: TFile) => {
+                console.log('changed');
+
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 await this.secondBrain.embedDocuments(docs, 'byFile');
