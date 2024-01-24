@@ -66,7 +66,8 @@ export default class SettingsTab extends PluginSettingTab {
 
         if (data.isIncognitoMode) {
             new Setting(generalSettingsEl).setHeading().setName('Ollama Settings');
-            const model = data.ollamaGenModel;
+            const chatModel = data.ollamaGenModel;
+            const embedModel = data.ollamaEmbedModel;
             let setting_input: HTMLInputElement;
             new Setting(generalSettingsEl)
                 .setName('Ollama URL')
@@ -76,24 +77,27 @@ export default class SettingsTab extends PluginSettingTab {
                         .setIcon('rotate-cw')
                         .setClass('clickable-icon')
                         .onClick(async () => {
-                            model.baseUrl = DEFAULT_SETTINGS.ollamaGenModel.baseUrl;
+                            chatModel.baseUrl = DEFAULT_SETTINGS.ollamaGenModel.baseUrl;
+                            embedModel.baseUrl = DEFAULT_SETTINGS.ollamaEmbedModel.baseUrl;
                             await this.plugin.saveSettings();
                             this.display();
                         })
                 )
                 .addText((text) =>
                     text
-                        .setValue(model.baseUrl)
+                        .setValue(chatModel.baseUrl)
                         .setPlaceholder('http://localhost:11434')
                         .onChange(async (value) => {
                             value = value.trim();
                             if (value.endsWith('/')) value = value.slice(0, -1);
-                            model.baseUrl = value;
+                            chatModel.baseUrl = value;
+                            embedModel.baseUrl = value;
                             try {
                                 // check if url is valid
-                                new URL(model.baseUrl);
+                                new URL(chatModel.baseUrl);
                                 setting_input.style.backgroundColor = 'var(--background-modifier-form-field)';
-                                this.plugin.secondBrain.setGenModel(model);
+                                this.plugin.secondBrain.setGenModel(chatModel);
+                                this.plugin.secondBrain.setEmbedModel(embedModel);
                             } catch (_) {
                                 setting_input.style.backgroundColor = 'rgba(var(--color-red-rgb), 0.3)';
                             }
@@ -104,10 +108,10 @@ export default class SettingsTab extends PluginSettingTab {
                         })
                 );
 
-            new Setting(generalSettingsEl).setName('Ollama Model').addDropdown(async (dropdown) => {
+            new Setting(generalSettingsEl).setName('Ollama Chat Model').addDropdown(async (dropdown) => {
                 try {
                     const response = await requestUrl({
-                        url: model.baseUrl + '/api/tags',
+                        url: chatModel.baseUrl + '/api/tags',
                         method: 'GET',
                         headers: {
                             'Content-Type': 'application/json',
@@ -116,10 +120,36 @@ export default class SettingsTab extends PluginSettingTab {
                     const jsonData = response.json;
                     // const models: String[] = jsonData.models.map((model: { name: string }) => model.name);
                     OllamaGenModelNames.forEach((model: string) => dropdown.addOption(model, model));
-                    dropdown.setValue(model.model).onChange(async (modelName: any) => {
-                        model.model = modelName;
+                    dropdown.setValue(chatModel.model).onChange(async (modelName: any) => {
+                        chatModel.model = modelName;
                         await this.plugin.saveSettings();
-                        this.plugin.secondBrain.setGenModel(model);
+                        this.plugin.secondBrain.setGenModel(chatModel);
+                    });
+                } catch (e) {
+                    if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
+                        new Notice('Ollama server is not running');
+                        dropdown.addOption('Start Ollama service', 'Start Ollama service');
+                        dropdown.setValue('Start Ollama service');
+                    }
+                }
+            });
+
+            new Setting(generalSettingsEl).setName('Ollama Embedding Model').addDropdown(async (dropdown) => {
+                try {
+                    const response = await requestUrl({
+                        url: embedModel.baseUrl + '/api/tags',
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                    const jsonData = response.json;
+                    // const models: String[] = jsonData.models.map((model: { name: string }) => model.name);
+                    OllamaGenModelNames.forEach((model: string) => dropdown.addOption(model, model));
+                    dropdown.setValue(embedModel.model).onChange(async (modelName: any) => {
+                        embedModel.model = modelName;
+                        await this.plugin.saveSettings();
+                        this.plugin.secondBrain.setEmbedModel(embedModel);
                     });
                 } catch (e) {
                     if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
@@ -132,6 +162,7 @@ export default class SettingsTab extends PluginSettingTab {
         } else {
             new Setting(generalSettingsEl).setHeading().setName('OpenAI Settings');
             const model = data.openAIGenModel;
+            const emodel = data.openAIEmbedModel;
             const openaiAPIUrl = 'https://api.openai.com/v1';
             // const openAI = new OpenAI({ apiKey: data.openAIGenModel.openAIApiKey, dangerouslyAllowBrowser: true });
 
@@ -164,6 +195,7 @@ export default class SettingsTab extends PluginSettingTab {
                         )
                         .onChange(async (value) => {
                             model.openAIApiKey = value;
+                            emodel.openAIApiKey = value;
                             await this.plugin.saveSettings();
                             setting_input2.style.backgroundColor = 'var(--background-modifier-form-field)';
                             try {
@@ -177,6 +209,7 @@ export default class SettingsTab extends PluginSettingTab {
                                     body: JSON.stringify(openaiTest),
                                 });
                                 this.plugin.secondBrain.setGenModel(model);
+                                this.plugin.secondBrain.setEmbedModel(emodel);
                             } catch (e) {
                                 setting_input2.style.backgroundColor = 'rgba(var(--color-red-rgb), 0.3)';
                             }
@@ -198,8 +231,10 @@ export default class SettingsTab extends PluginSettingTab {
                 });
                 dropdown.setValue(model.modelName).onChange(async (modelName: any) => {
                     model.modelName = modelName;
+                    emodel.modelName = 'text-embedding-ada-002';
                     await this.plugin.saveSettings();
                     this.plugin.secondBrain.setGenModel(model);
+                    this.plugin.secondBrain.setEmbedModel(emodel);
                 });
             });
         }
