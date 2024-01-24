@@ -11,8 +11,8 @@
 
     let textarea: HTMLTextAreaElement;
 
-    let isOpen = false;
-    let isOpening = false;
+    let isOpen = true;
+    let isOpening = true;
 
     function handleChatToggel() {
         $plugin.data.isChat = !$plugin.data.isChat;
@@ -37,7 +37,11 @@
         <div class="h-full flex flex-col justify-center items-center">
             <div use:icon={'brain-circuit'} class="w-[--icon-xl] h-[--icon-xl] *:!w-[--icon-xl] *:!h-[--icon-xl]" />
             <h1 class="text-[--text-normal] text-center">
-                {$plugin.data.isIncognitoMode ? $plugin.data.ollamaGenModel.model : $plugin.data.openAIGenModel.modelName}
+                {$plugin.data.isIncognitoMode
+                    ? $plugin.data.ollamaGenModel.model
+                    : $plugin.data.openAIGenModel.openAIApiKey
+                    ? $plugin.data.openAIGenModel.modelName
+                    : 'Please setup in settings'}
             </h1>
             <div class="flex gap-3 items-center">
                 <p class="inline-block m-0">Change Chatview</p>

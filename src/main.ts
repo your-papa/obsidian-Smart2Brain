@@ -31,7 +31,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isUsingRag: true,
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     initialAssistantMessage: INITIAL_ASSISTANT_MESSAGE.get(window.localStorage.getItem('language') || 'en'),
-    isIncognitoMode: true,
+    isIncognitoMode: false,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
     ollamaEmbedModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
     openAIGenModel: {
@@ -77,7 +77,6 @@ export default class SecondBrainPlugin extends Plugin {
 
     async initSecondBrain(fromBackup = true) {
         console.log('initializing second brain' + (fromBackup ? ' from backup' : ''));
-        console.log(this.data.isIncognitoMode);
         this.secondBrain = new Papa({
             genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
             embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
@@ -112,38 +111,38 @@ export default class SecondBrainPlugin extends Plugin {
         plugin.set(this);
 
         this.app.workspace.onLayoutReady(async () => {
-            await this.initSecondBrain(this.data.fromBackup);
+            if (this.data.openAIGenModel.openAIApiKey !== '') {
+                await this.initSecondBrain(this.data.fromBackup);
 
-            // reembed documents on change
-            this.app.metadataCache.on('changed', async (file: TFile) => {
-                console.log('changed');
-
-                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                const docs = await obsidianDocumentLoader(this.app, [file]);
-                await this.secondBrain.embedDocuments(docs, 'byFile');
-                this.needsToSaveVectorStoreData = true;
-            });
-            this.registerEvent(
-                this.app.vault.on('delete', async (file: TFile) => {
+                // reembed documents on change
+                this.app.metadataCache.on('changed', async (file: TFile) => {
                     for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
                     const docs = await obsidianDocumentLoader(this.app, [file]);
-                    await this.secondBrain.deleteDocuments(docs);
+                    await this.secondBrain.embedDocuments(docs, 'byFile');
                     this.needsToSaveVectorStoreData = true;
-                })
-            );
+                });
+                this.registerEvent(
+                    this.app.vault.on('delete', async (file: TFile) => {
+                        for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                        const docs = await obsidianDocumentLoader(this.app, [file]);
+                        await this.secondBrain.deleteDocuments(docs);
+                        this.needsToSaveVectorStoreData = true;
+                    })
+                );
 
-            // periodically or on unfocus save vector store data to disk
-            window.addEventListener('blur', () => this.saveVectorStoreData());
+                // periodically or on unfocus save vector store data to disk
+                window.addEventListener('blur', () => this.saveVectorStoreData());
 
-            const resetAutoSaveTimer = () => {
-                clearTimeout(this.autoSaveTimer);
-                this.autoSaveTimer = setTimeout(() => this.saveVectorStoreData(), 30 * 1000);
-            };
-            // listen for any event to reset the timer
-            window.addEventListener('mousemove', () => resetAutoSaveTimer());
-            window.addEventListener('mousedown', () => resetAutoSaveTimer());
-            window.addEventListener('keypress', () => resetAutoSaveTimer());
-            window.addEventListener('scroll', () => resetAutoSaveTimer());
+                const resetAutoSaveTimer = () => {
+                    clearTimeout(this.autoSaveTimer);
+                    this.autoSaveTimer = setTimeout(() => this.saveVectorStoreData(), 30 * 1000);
+                };
+                // listen for any event to reset the timer
+                window.addEventListener('mousemove', () => resetAutoSaveTimer());
+                window.addEventListener('mousedown', () => resetAutoSaveTimer());
+                window.addEventListener('keypress', () => resetAutoSaveTimer());
+                window.addEventListener('scroll', () => resetAutoSaveTimer());
+            }
         });
 
         this.registerView(VIEW_TYPE_CHAT, (leaf) => {
