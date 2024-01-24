@@ -81,36 +81,42 @@
     }
 </script>
 
-<div class="w-full flex gap-3 items-center">
-    <p class="inline-block m-0">Connected to your Notes:</p>
-    <!-- svelte-ignore a11y-click-events-have-key-events -->
-    <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <span class="checkbox-container" class:is-enabled={$plugin.data.isUsingRag} on:click={handleRAGToggle}><input type="checkbox" tabindex="0" /> </span>
+<!-- save delete and rag settings slightly above input field -->
+<div class="relative pb-1">
+    <div
+        class="absolute -top-[3.3rem] left-1/2 -translate-x-1/2 flex items-center gap-3 bg-[--background-secondary] border-solid border-b-transparent border-t-[--background-modifier-border] border-x-[--background-modifier-border] p-2 rounded-t-2xl"
+    >
+        {#if $chatHistory.length > 1}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div
+                aria-label="Save the Chat to a file"
+                class="text-[--text-normal] hover:text-[--text-accent-hover]"
+                use:icon={'save'}
+                on:click={() => $plugin.saveChatHistory()}
+            />
+        {/if}
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        <div
+            on:click={handleRAGToggle}
+            use:icon={'brain-circuit'}
+            class={`w-[--icon-xl] h-[--icon-xl] *:!w-[--icon-xl] *:!h-[--icon-xl] ${
+                $plugin.data.isUsingRag ? 'text-[--color-accent]' : 'text-[--text-normal]'
+            }`}
+        />
+        {#if $chatHistory.length > 1}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div
+                aria-label="Delete Chat History"
+                class="text-[--text-normal] hover:text-[--text-accent-hover]"
+                on:click|preventDefault={handleDelete}
+                use:icon={'trash-2'}
+            />
+        {/if}
+    </div>
 </div>
-{#if $chatHistory.length > 1}
-    <div class="w-full flex gap-3 items-center">
-        <p class="inline-block m-0">Save Chat</p>
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-static-element-interactions -->
-        <span
-            aria-label="Save the Chat to a file"
-            class="text-[--text-normal] hover:text-[--text-accent-hover]"
-            use:icon={'save'}
-            on:click={() => $plugin.saveChatHistory()}
-        />
-    </div>
-    <div class="w-full flex gap-3 items-center">
-        <p class="inline-block m-0">Chat History:</p>
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-static-element-interactions -->
-        <span
-            aria-label="Delete Chat History"
-            class="text-[--text-normal] hover:text-[--text-accent-hover]"
-            on:click|preventDefault={handleDelete}
-            use:icon={'trash-2'}
-        />
-    </div>
-{/if}
 <form on:submit|preventDefault={sendMessage} class="sticky flex w-full gap-1">
     <textarea
         bind:this={textarea}
