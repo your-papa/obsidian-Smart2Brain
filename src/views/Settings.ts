@@ -25,16 +25,9 @@ export default class SettingsTab extends PluginSettingTab {
 
         const data = this.plugin.data;
 
-        setIcon(this.containerEl.createEl('div', { cls: ['flex', 'justify-center', '*:!w-[--icon-xl]', '*:!h-[--icon-xl]'] }), 'brain-circuit');
-        this.containerEl.createEl('h1', { text: 'Smart Second Brain', cls: ['text-center', 'mt-1'] });
-
         let ollamaServiceRunning = false;
 
-        const generalSettingsEl = this.containerEl.createEl('details');
-        generalSettingsEl.open = true;
-        generalSettingsEl.createEl('summary', { text: 'General Settings', cls: ['setting-item-heading', 'py-3'] });
-
-        new Setting(generalSettingsEl).setName('Assistant Language').addDropdown((dropdown) => {
+        new Setting(this.containerEl).setName('Assistant Language').addDropdown((dropdown) => {
             Languages.forEach((lang: Language) => dropdown.addOption(lang, lang));
             dropdown.setValue(data.assistantLanguage).onChange(async (lang: any) => {
                 data.assistantLanguage = lang;
@@ -54,10 +47,10 @@ export default class SettingsTab extends PluginSettingTab {
         });
 
         this.component = new SettingsComponent({
-            target: generalSettingsEl,
+            target: this.containerEl,
         });
 
-        new Setting(generalSettingsEl).setName('Icognito Mode').addToggle((toggle) =>
+        new Setting(this.containerEl).setName('Icognito Mode').addToggle((toggle) =>
             toggle.setValue(data.isIncognitoMode).onChange(async (value) => {
                 data.isIncognitoMode = value;
                 await this.plugin.saveSettings();
@@ -68,11 +61,11 @@ export default class SettingsTab extends PluginSettingTab {
         );
 
         if (data.isIncognitoMode) {
-            new Setting(generalSettingsEl).setHeading().setName('Ollama Settings');
+            new Setting(this.containerEl).setHeading().setName('Ollama Settings');
             const chatModel = data.ollamaGenModel;
             const embedModel = data.ollamaEmbedModel;
             let setting_input: HTMLInputElement;
-            new Setting(generalSettingsEl)
+            new Setting(this.containerEl)
                 .setName('Ollama URL')
                 .addButton((button) =>
                     button
@@ -109,7 +102,7 @@ export default class SettingsTab extends PluginSettingTab {
                         })
                 );
 
-            new Setting(generalSettingsEl).setName('Ollama Chat Model').addDropdown(async (dropdown) => {
+            new Setting(this.containerEl).setName('Ollama Chat Model').addDropdown(async (dropdown) => {
                 try {
                     const response = await requestUrl({
                         url: chatModel.baseUrl + '/api/tags',
@@ -136,7 +129,7 @@ export default class SettingsTab extends PluginSettingTab {
                 }
             });
 
-            new Setting(generalSettingsEl).setName('Ollama Embedding Model').addDropdown(async (dropdown) => {
+            new Setting(this.containerEl).setName('Ollama Embedding Model').addDropdown(async (dropdown) => {
                 try {
                     const response = await requestUrl({
                         url: embedModel.baseUrl + '/api/tags',
@@ -162,7 +155,7 @@ export default class SettingsTab extends PluginSettingTab {
                 }
             });
         } else {
-            new Setting(generalSettingsEl).setHeading().setName('OpenAI Settings');
+            new Setting(this.containerEl).setHeading().setName('OpenAI Settings');
             const model = data.openAIGenModel;
             const emodel = data.openAIEmbedModel;
             const openaiAPIUrl = 'https://api.openai.com/v1';
@@ -175,7 +168,7 @@ export default class SettingsTab extends PluginSettingTab {
             };
 
             let setting_input2: HTMLInputElement;
-            new Setting(generalSettingsEl)
+            new Setting(this.containerEl)
                 .setName('OpenAI API Key')
                 .addButton((button) => {
                     button
@@ -194,8 +187,8 @@ export default class SettingsTab extends PluginSettingTab {
                             model.openAIApiKey == ''
                                 ? ''
                                 : this.isSecretVisible
-                                  ? model.openAIApiKey
-                                  : model.openAIApiKey.substring(0, 6) + '...' + model.openAIApiKey.substring(model.openAIApiKey.length - 3)
+                                ? model.openAIApiKey
+                                : model.openAIApiKey.substring(0, 6) + '...' + model.openAIApiKey.substring(model.openAIApiKey.length - 3)
                         )
                         .onChange(async (value) => {
                             model.openAIApiKey = value;
@@ -222,7 +215,7 @@ export default class SettingsTab extends PluginSettingTab {
                         })
                 );
 
-            new Setting(generalSettingsEl).setName('OpenAI Model').addDropdown(async (dropdown) => {
+            new Setting(this.containerEl).setName('OpenAI Model').addDropdown(async (dropdown) => {
                 // dropdown.addOption(data.openAIModel, data.openAIModel).setValue(data.openAIModel);
                 // const models = await openAI.models.list();
                 // models.data.forEach((model: { id: string }) => {
@@ -240,7 +233,7 @@ export default class SettingsTab extends PluginSettingTab {
             });
         }
         // Setting to initialze SecondBrain
-        new Setting(generalSettingsEl).addButton((button) =>
+        new Setting(this.containerEl).addButton((button) =>
             button
                 .setButtonText('Initialize Smart Second Brain')
                 .setClass('mod-cta')
