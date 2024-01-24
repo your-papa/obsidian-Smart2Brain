@@ -28,6 +28,8 @@ export default class SettingsTab extends PluginSettingTab {
         setIcon(this.containerEl.createEl('div', { cls: ['flex', 'justify-center', '*:!w-[--icon-xl]', '*:!h-[--icon-xl]'] }), 'brain-circuit');
         this.containerEl.createEl('h1', { text: 'Smart Second Brain', cls: ['text-center', 'mt-1'] });
 
+        let ollamaServiceRunning = false;
+
         const generalSettingsEl = this.containerEl.createEl('details');
         generalSettingsEl.open = true;
         generalSettingsEl.createEl('summary', { text: 'General Settings', cls: ['setting-item-heading', 'py-3'] });
@@ -59,7 +61,8 @@ export default class SettingsTab extends PluginSettingTab {
             toggle.setValue(data.isIncognitoMode).onChange(async (value) => {
                 data.isIncognitoMode = value;
                 await this.plugin.saveSettings();
-                this.plugin.initSecondBrain();
+                if ((!data.isIncognitoMode && data.openAIGenModel.openAIApiKey) !== '' || (data.isIncognitoMode && ollamaServiceRunning))
+                    this.plugin.initSecondBrain();
                 this.display();
             })
         );
@@ -96,8 +99,6 @@ export default class SettingsTab extends PluginSettingTab {
                                 // check if url is valid
                                 new URL(chatModel.baseUrl);
                                 setting_input.style.backgroundColor = 'var(--background-modifier-form-field)';
-                                this.plugin.secondBrain.setGenModel(chatModel);
-                                this.plugin.secondBrain.setEmbedModel(embedModel);
                             } catch (_) {
                                 setting_input.style.backgroundColor = 'rgba(var(--color-red-rgb), 0.3)';
                             }
@@ -125,6 +126,7 @@ export default class SettingsTab extends PluginSettingTab {
                         await this.plugin.saveSettings();
                         this.plugin.secondBrain.setGenModel(chatModel);
                     });
+                    ollamaServiceRunning = true;
                 } catch (e) {
                     if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
                         new Notice('Ollama server is not running');
@@ -189,9 +191,11 @@ export default class SettingsTab extends PluginSettingTab {
                     text
                         .setPlaceholder('OpenAI API Key')
                         .setValue(
-                            this.isSecretVisible
-                                ? model.openAIApiKey
-                                : model.openAIApiKey.substring(0, 6) + '...' + model.openAIApiKey.substring(model.openAIApiKey.length - 3)
+                            model.openAIApiKey == ''
+                                ? ''
+                                : this.isSecretVisible
+                                  ? model.openAIApiKey
+                                  : model.openAIApiKey.substring(0, 6) + '...' + model.openAIApiKey.substring(model.openAIApiKey.length - 3)
                         )
                         .onChange(async (value) => {
                             model.openAIApiKey = value;
@@ -208,9 +212,8 @@ export default class SettingsTab extends PluginSettingTab {
                                     },
                                     body: JSON.stringify(openaiTest),
                                 });
-                                this.plugin.secondBrain.setGenModel(model);
-                                this.plugin.secondBrain.setEmbedModel(emodel);
                             } catch (e) {
+                                console.log(e);
                                 setting_input2.style.backgroundColor = 'rgba(var(--color-red-rgb), 0.3)';
                             }
                         })
@@ -233,15 +236,13 @@ export default class SettingsTab extends PluginSettingTab {
                     model.modelName = modelName;
                     emodel.modelName = 'text-embedding-ada-002';
                     await this.plugin.saveSettings();
-                    this.plugin.secondBrain.setGenModel(model);
-                    this.plugin.secondBrain.setEmbedModel(emodel);
                 });
             });
         }
         // Setting to initialze SecondBrain
         new Setting(generalSettingsEl).addButton((button) =>
             button
-                .setButtonText('Reset Smart Second Brain')
+                .setButtonText('Initialize Smart Second Brain')
                 .setClass('mod-cta')
                 .onClick(async () => {
                     await this.plugin.initSecondBrain(false);
@@ -251,13 +252,14 @@ export default class SettingsTab extends PluginSettingTab {
         const advancedSettingsEl = this.containerEl.createEl('details');
 
         advancedSettingsEl.createEl('summary', { text: 'Advanced Settings', cls: ['setting-item-heading', 'py-3'] });
-        new Setting(advancedSettingsEl)
-            .setName('Prompt')
-            .addButton((button) => button.setButtonText('Restore Default').setIcon('rotate-cw').setClass('clickable-icon'))
-            .addText((text) => text.setPlaceholder('Hi was geht ab'));
-
-        new DocsComponent({
-            target: advancedSettingsEl,
-        });
+        new Setting(advancedSettingsEl).setName('TBD');
+        // new Setting(advancedSettingsEl)
+        //     .setName('Prompt')
+        //     .addButton((button) => button.setButtonText('Restore Default').setIcon('rotate-cw').setClass('clickable-icon'))
+        //     .addText((text) => text.setPlaceholder('Hi was geht ab'));
+        //
+        // new DocsComponent({
+        //     target: advancedSettingsEl,
+        // });
     }
 }
