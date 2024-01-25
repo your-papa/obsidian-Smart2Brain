@@ -3,6 +3,7 @@ import builtins from 'builtin-modules';
 import { defineConfig } from 'vite';
 import { pathToFileURL } from 'url';
 import fs from 'fs';
+import { execSync } from 'child_process';
 import typescript from '@rollup/plugin-typescript';
 
 const setOutDir = (mode: string) => {
@@ -21,6 +22,9 @@ export default defineConfig(({ mode }) => {
         packageJson.dependencies['papa-ts'] = '^0.1.6';
 
         fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
+
+        execSync('bun install', { stdio: 'inherit' });
+        execSync('bun run build', { stdio: 'inherit' });
     }
     return {
         plugins: [svelte({ preprocess: vitePreprocess() })],
