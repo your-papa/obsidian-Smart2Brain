@@ -36,6 +36,7 @@
         "electron": "^27.0.3",
         "monkey-around": "^2.3.0",
         "nanoid": "^5.0.4",
-        "openai": "^4.24.1"
+        "openai": "^4.24.1",
+        "papa-ts": "^0.1.6"
     }
 }
