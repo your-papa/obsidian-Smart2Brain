@@ -125,7 +125,16 @@ export default class SecondBrainPlugin extends Plugin {
                     this.app.vault.on('delete', async (file: TFile) => {
                         for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
                         const docs = await obsidianDocumentLoader(this.app, [file]);
-                        await this.secondBrain.deleteDocuments(docs);
+                        await this.secondBrain.deleteDocuments({ docs });
+                        this.needsToSaveVectorStoreData = true;
+                    })
+                );
+                this.registerEvent(
+                    this.app.vault.on('rename', async (file: TFile, oldPath: string) => {
+                        for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                        await this.secondBrain.deleteDocuments({ sources: [oldPath] });
+                        const docs = await obsidianDocumentLoader(this.app, [file]);
+                        await this.secondBrain.embedDocuments(docs, 'byFile');
                         this.needsToSaveVectorStoreData = true;
                     })
                 );
