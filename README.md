@@ -1,9 +1,10 @@
 # Smart Second Brain 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/nicobrauchtgit/obsidian-Smart2Brain/assets/103033288/ec69cda2-9c3c-4e56-8bcf-70479beea1f3">
-    <source media="(prefers-color-scheme: light)" srcset="https://github.com/nicobrauchtgit/obsidian-Smart2Brain/assets/103033288/3066b9e6-ac2e-4e91-a071-61e4f5d9d85b">
-    <img alt="LLama" src="https://github.com/nicobrauchtgit/obsidian-Smart2Brain/assets/103033288/3066b9e6-ac2e-4e91-a071-61e4f5d9d85b" height="600rem">
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/nicobrauchtgit/obsidian-Smart2Brain/assets/103033288/25639510-a75d-4500-b907-5b416af37353">
+">
+    <source media="(prefers-color-scheme: light)" srcset="https://github.com/nicobrauchtgit/obsidian-Smart2Brain/assets/103033288/25639510-a75d-4500-b907-5b416af37353">
+    <img alt="Octopus" src="https://github.com/nicobrauchtgit/obsidian-Smart2Brain/assets/103033288/25639510-a75d-4500-b907-5b416af37353" height="600rem">
   </picture>
 </p>
 
