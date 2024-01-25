@@ -18,7 +18,7 @@ jobs:
                   node -e "
                   const fs = require('fs');
                   const packageJson = JSON.parse(fs.readFileSync('./package.json', 'utf-8'));
-                  packageJson.dependencies['papa-ts'] = '^0.1.6';
+                  packageJson.dependencies['papa-ts'] = '^0.1.0';
                   fs.writeFileSync('./package.json', JSON.stringify(packageJson, null, 2));
                   "
 
