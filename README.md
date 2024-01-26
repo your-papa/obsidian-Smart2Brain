@@ -81,7 +81,7 @@ as an environment variable. 3. Restart the Ollama service.
 
 ## Setup with OpenAI
 
-> [!Warning] Function of Api-Key
+> [!Important] Function of Api-Key
 > Currently, in order for the Api-Key to work you have to upgrade to an OpenAI paid account. This means depositing at least $5 onto your OpenAI account. Maybe this changes in the future
 
 0. If you do not have an OpenAI account, [create one](https://platform.openai.com/login/).
