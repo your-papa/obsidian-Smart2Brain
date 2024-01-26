@@ -6,8 +6,6 @@
 
 <source media="(prefers-color-scheme: dark)" srcset="https://github.com/nicobrauchtgit/obsidian-Smart2Brain/assets/103033288/25639510-a75d-4500-b907-5b416af37353">
 
-">
-
 <source media="(prefers-color-scheme: light)" srcset="https://github.com/nicobrauchtgit/obsidian-Smart2Brain/assets/103033288/25639510-a75d-4500-b907-5b416af37353">
 
 <img alt="Octopus" src="https://github.com/nicobrauchtgit/obsidian-Smart2Brain/assets/103033288/25639510-a75d-4500-b907-5b416af37353" height="600rem">
@@ -15,13 +13,14 @@
 </picture>
 
 </p>
+
 # Featurs
 TBD
 # Setup
 The Smart Second Brain provides two methods to connect to your notes. You can either use [Ollama](https://github.com/ollama/ollama) to run an LLM locally on your computer or create an [OpenAI](https://openai.com/) Key and make use of the GPT models.
 ## Setup with Ollama
 
-> [!Warning] Ollama Origins env var
+> [!Warning]
 > Ollama currently does not support persistent environment variables. So the `OLLAMA_ORIGINS="*"` var has to be set every time the service is launched.
 > This includes a restart of the Mac Application.
 
@@ -76,12 +75,12 @@ as an environment variable. 3. Restart the Ollama service.
 
 ## Windows
 
-> [!Note] Ollama currently doesn't support a Windows application!
+> [!Note]
 > Coming soon! For now, you can install Ollama on Windows via WSL2.
 
 ## Setup with OpenAI
 
-> [!Important] Function of Api-Key
+> [!Important]
 > Currently, in order for the Api-Key to work you have to upgrade to an OpenAI paid account. This means depositing at least $5 onto your OpenAI account. Maybe this changes in the future
 
 0. If you do not have an OpenAI account, [create one](https://platform.openai.com/login/).
