@@ -8,6 +8,7 @@ import './styles.css';
 import { ChatModal } from './views/ChatModal';
 import { ChatView, VIEW_TYPE_CHAT } from './views/ChatView';
 import SettingsTab from './views/Settings';
+import { settingsChanged } from './store';
 
 interface PluginData {
     isChat: boolean;
@@ -19,7 +20,6 @@ interface PluginData {
     ollamaEmbedModel: OllamaEmbedModel;
     openAIGenModel: OpenAIGenModel;
     openAIEmbedModel: OpenAIEmbedModel;
-    fromBackup: boolean;
     targetFolder: string;
     excludeFF: Array<string>;
     defaultChatName: string;
@@ -43,7 +43,6 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
         openAIApiKey: '',
     },
     targetFolder: 'Chats',
-    fromBackup: false,
     defaultChatName: 'Chat Second Brain',
     excludeFF: ['Chats'],
     docRetrieveNum: 5,
@@ -63,6 +62,7 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async saveSettings() {
+        settingsChanged.set(get(settingsChanged) + 1);
         await this.saveData(this.data);
     }
 
@@ -75,34 +75,27 @@ export default class SecondBrainPlugin extends Plugin {
         }
     }
 
-    async initSecondBrain(fromBackup = true) {
-        console.log('initializing second brain' + (fromBackup ? ' from backup' : ''));
+    async initSecondBrain() {
+        console.log('initializing second brain');
         this.secondBrain = new Papa({
             genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
             embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
         });
 
-        const embedVault = async () => {
-            const mdFiles = this.app.vault.getMarkdownFiles();
-            const docs = await obsidianDocumentLoader(
-                this.app,
-                mdFiles.filter((mdFile: TFile) => {
-                    for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
-                })
-            );
-            const result = await this.secondBrain.embedDocuments(docs);
-            if (result.numAdded > 0 || result.numDeleted > 0) this.needsToSaveVectorStoreData = true;
-        };
-
-        if (fromBackup) {
+        // check if vector store data exists
+        if (await this.app.vault.adapter.exists(this.vectorStoreDataPath)) {
             const vectorStoreData = await this.app.vault.adapter.readBinary(this.vectorStoreDataPath);
             await this.secondBrain.load(vectorStoreData);
-            await embedVault();
-            return;
         }
-        await embedVault();
-        this.data.fromBackup = true;
-        this.saveSettings();
+        const mdFiles = this.app.vault.getMarkdownFiles();
+        const docs = await obsidianDocumentLoader(
+            this.app,
+            mdFiles.filter((mdFile: TFile) => {
+                for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+            })
+        );
+        const result = await this.secondBrain.embedDocuments(docs);
+        if (result.numAdded > 0 || result.numDeleted > 0) this.needsToSaveVectorStoreData = true;
         this.saveVectorStoreData();
     }
 
@@ -112,7 +105,7 @@ export default class SecondBrainPlugin extends Plugin {
 
         this.app.workspace.onLayoutReady(async () => {
             if (this.data.openAIGenModel.openAIApiKey !== '') {
-                await this.initSecondBrain(this.data.fromBackup);
+                await this.initSecondBrain();
 
                 // reembed documents on change
                 this.app.metadataCache.on('changed', async (file: TFile) => {

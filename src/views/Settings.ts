@@ -4,7 +4,7 @@ import { chatHistory } from '../store';
 // import OpenAI from 'openai';
 import { get } from 'svelte/store';
 import { nanoid } from 'nanoid';
-import { Languages, type Language, OpenAIGenModelNames, OllamaGenModelNames } from 'papa-ts';
+import { Languages, type Language, OpenAIGenModelNames, OllamaGenModelNames, OpenAIEmbedModelNames } from 'papa-ts';
 import SettingsComponent from '../components/Settings.svelte';
 import { INITIAL_ASSISTANT_MESSAGE } from '../ChatMessages';
 import DocsComponent from '../components/temp.svelte';
@@ -24,8 +24,6 @@ export default class SettingsTab extends PluginSettingTab {
         this.containerEl.empty();
 
         const data = this.plugin.data;
-
-        let ollamaServiceRunning = false;
 
         new Setting(this.containerEl).setName('Assistant Language').addDropdown((dropdown) => {
             Languages.forEach((lang: Language) => dropdown.addOption(lang, lang));
@@ -51,11 +49,9 @@ export default class SettingsTab extends PluginSettingTab {
         });
 
         new Setting(this.containerEl).setName('Icognito Mode').addToggle((toggle) =>
-            toggle.setValue(data.isIncognitoMode).onChange(async (value) => {
-                data.isIncognitoMode = value;
+            toggle.setValue(data.isIncognitoMode).onChange(async (isIncognitoMode) => {
+                data.isIncognitoMode = isIncognitoMode;
                 await this.plugin.saveSettings();
-                if ((!data.isIncognitoMode && data.openAIGenModel.openAIApiKey) !== '' || (data.isIncognitoMode && ollamaServiceRunning))
-                    this.plugin.initSecondBrain();
                 this.display();
             })
         );
@@ -101,63 +97,44 @@ export default class SettingsTab extends PluginSettingTab {
                             setting_input = setting.inputEl;
                         })
                 );
+            try {
+                const response = await requestUrl({
+                    url: embedModel.baseUrl + '/api/tags',
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+                const jsonData = response.json;
+                // const models: String[] = jsonData.models.map((model: { name: string }) => model.name);
 
-            new Setting(this.containerEl).setName('Ollama Chat Model').addDropdown(async (dropdown) => {
-                try {
-                    const response = await requestUrl({
-                        url: chatModel.baseUrl + '/api/tags',
-                        method: 'GET',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                    });
-                    const jsonData = response.json;
-                    // const models: String[] = jsonData.models.map((model: { name: string }) => model.name);
+                new Setting(this.containerEl).setName('Ollama Chat Model').addDropdown(async (dropdown) => {
                     OllamaGenModelNames.forEach((model: string) => dropdown.addOption(model, model));
                     dropdown.setValue(chatModel.model).onChange(async (modelName: any) => {
                         chatModel.model = modelName;
                         await this.plugin.saveSettings();
                         this.plugin.secondBrain.setGenModel(chatModel);
                     });
-                    ollamaServiceRunning = true;
-                } catch (e) {
-                    if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
-                        new Notice('Ollama server is not running');
-                        dropdown.addOption('Start Ollama service', 'Start Ollama service');
-                        dropdown.setValue('Start Ollama service');
-                    }
-                }
-            });
+                });
 
-            new Setting(this.containerEl).setName('Ollama Embedding Model').addDropdown(async (dropdown) => {
-                try {
-                    const response = await requestUrl({
-                        url: embedModel.baseUrl + '/api/tags',
-                        method: 'GET',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                    });
-                    const jsonData = response.json;
-                    // const models: String[] = jsonData.models.map((model: { name: string }) => model.name);
+                new Setting(this.containerEl).setName('Ollama Embedding Model').addDropdown(async (dropdown) => {
                     OllamaGenModelNames.forEach((model: string) => dropdown.addOption(model, model));
                     dropdown.setValue(embedModel.model).onChange(async (modelName: any) => {
                         embedModel.model = modelName;
                         await this.plugin.saveSettings();
                         this.plugin.secondBrain.setEmbedModel(embedModel);
+                        // TODO reinit secondbrain because we need to load other vector-store.bin
                     });
-                } catch (e) {
-                    if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
-                        new Notice('Ollama server is not running');
-                        dropdown.addOption('Start Ollama service', 'Start Ollama service');
-                        dropdown.setValue('Start Ollama service');
-                    }
+                });
+            } catch (e) {
+                if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
+                    new Notice('Ollama service is not running');
                 }
-            });
+            }
         } else {
             new Setting(this.containerEl).setHeading().setName('OpenAI Settings');
-            const model = data.openAIGenModel;
-            const emodel = data.openAIEmbedModel;
+            const chatModel = data.openAIGenModel;
+            const embedModel = data.openAIEmbedModel;
             const openaiAPIUrl = 'https://api.openai.com/v1';
             // const openAI = new OpenAI({ apiKey: data.openAIGenModel.openAIApiKey, dangerouslyAllowBrowser: true });
 
@@ -169,7 +146,7 @@ export default class SettingsTab extends PluginSettingTab {
 
             let setting_input2: HTMLInputElement;
             new Setting(this.containerEl)
-                .setName('OpenAI API Key')
+                .setName('API Key')
                 .addButton((button) => {
                     button
                         .setButtonText(this.isSecretVisible ? 'Hide Key' : 'Show Key')
@@ -184,15 +161,15 @@ export default class SettingsTab extends PluginSettingTab {
                     text
                         .setPlaceholder('OpenAI API Key')
                         .setValue(
-                            model.openAIApiKey == ''
+                            chatModel.openAIApiKey == ''
                                 ? ''
                                 : this.isSecretVisible
-                                ? model.openAIApiKey
-                                : model.openAIApiKey.substring(0, 6) + '...' + model.openAIApiKey.substring(model.openAIApiKey.length - 3)
+                                  ? chatModel.openAIApiKey
+                                  : chatModel.openAIApiKey.substring(0, 6) + '...' + chatModel.openAIApiKey.substring(chatModel.openAIApiKey.length - 3)
                         )
                         .onChange(async (value) => {
-                            model.openAIApiKey = value;
-                            emodel.openAIApiKey = value;
+                            chatModel.openAIApiKey = value;
+                            embedModel.openAIApiKey = value;
                             await this.plugin.saveSettings();
                             setting_input2.style.backgroundColor = 'var(--background-modifier-form-field)';
                             try {
@@ -201,7 +178,7 @@ export default class SettingsTab extends PluginSettingTab {
                                     url: `${openaiAPIUrl}/chat/completions`,
                                     headers: {
                                         'Content-Type': 'application/json',
-                                        Authorization: `Bearer ${model.openAIApiKey}`,
+                                        Authorization: `Bearer ${chatModel.openAIApiKey}`,
                                     },
                                     body: JSON.stringify(openaiTest),
                                 });
@@ -215,7 +192,7 @@ export default class SettingsTab extends PluginSettingTab {
                         })
                 );
 
-            new Setting(this.containerEl).setName('OpenAI Model').addDropdown(async (dropdown) => {
+            new Setting(this.containerEl).setName('Chat Model').addDropdown(async (dropdown) => {
                 // dropdown.addOption(data.openAIModel, data.openAIModel).setValue(data.openAIModel);
                 // const models = await openAI.models.list();
                 // models.data.forEach((model: { id: string }) => {
@@ -225,10 +202,19 @@ export default class SettingsTab extends PluginSettingTab {
                 OpenAIGenModelNames.forEach((model: string) => {
                     dropdown.addOption(model, model);
                 });
-                dropdown.setValue(model.modelName).onChange(async (modelName: any) => {
-                    model.modelName = modelName;
-                    emodel.modelName = 'text-embedding-ada-002';
+                dropdown.setValue(chatModel.modelName).onChange(async (modelName: any) => {
+                    chatModel.modelName = modelName;
+                    this.plugin.secondBrain.setGenModel(chatModel);
                     await this.plugin.saveSettings();
+                });
+            });
+            new Setting(this.containerEl).setName('Embedding Model').addDropdown(async (dropdown) => {
+                OpenAIEmbedModelNames.forEach((model: string) => dropdown.addOption(model, model));
+                dropdown.setValue(embedModel.modelName).onChange(async (modelName: any) => {
+                    embedModel.modelName = modelName;
+                    await this.plugin.saveSettings();
+                    this.plugin.secondBrain.setEmbedModel(embedModel);
+                    // TODO reinit secondbrain because we need to load other vector-store.bin
                 });
             });
         }
@@ -238,7 +224,7 @@ export default class SettingsTab extends PluginSettingTab {
                 .setButtonText('Initialize Smart Second Brain')
                 .setClass('mod-cta')
                 .onClick(async () => {
-                    await this.plugin.initSecondBrain(false);
+                    await this.plugin.initSecondBrain();
                 })
         );
 
