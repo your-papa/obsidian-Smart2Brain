@@ -1,4 +1,4 @@
-#Smart Second Brain
+# Smart Second Brain
 
 <p align="center">
 
