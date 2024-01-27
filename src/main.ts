@@ -53,7 +53,6 @@ export default class SecondBrainPlugin extends Plugin {
     chatView: ChatView;
     secondBrain: Papa;
     leaf: WorkspaceLeaf;
-    private vectorStoreDataPath = normalizePath('.obsidian/plugins/smart-second-brain/vector-store-data.bin');
     private needsToSaveVectorStoreData = false;
     private autoSaveTimer: NodeJS.Timeout;
 
@@ -66,11 +65,19 @@ export default class SecondBrainPlugin extends Plugin {
         await this.saveData(this.data);
     }
 
+    private getVectorStorePath() {
+        return normalizePath(
+            '.obsidian/plugins/smart-second-brain/' +
+                (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName) +
+                '-vector-store.bin'
+        );
+    }
+
     async saveVectorStoreData() {
         if (this.needsToSaveVectorStoreData) {
             console.log('saving vector store data');
             this.needsToSaveVectorStoreData = false;
-            await this.app.vault.adapter.writeBinary(this.vectorStoreDataPath, await this.secondBrain.getData());
+            await this.app.vault.adapter.writeBinary(this.getVectorStorePath(), await this.secondBrain.getData());
             console.log('saved vector store data');
         }
     }
@@ -83,8 +90,8 @@ export default class SecondBrainPlugin extends Plugin {
         });
 
         // check if vector store data exists
-        if (await this.app.vault.adapter.exists(this.vectorStoreDataPath)) {
-            const vectorStoreData = await this.app.vault.adapter.readBinary(this.vectorStoreDataPath);
+        if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
+            const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
             await this.secondBrain.load(vectorStoreData);
         }
         const mdFiles = this.app.vault.getMarkdownFiles();
