@@ -1,4 +1,4 @@
-import { Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
+import { Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState, Notice, requestUrl } from 'obsidian';
 import { Papa, obsidianDocumentLoader, type Language, type OllamaGenModel, type OllamaEmbedModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
 import { get } from 'svelte/store';
 import { INITIAL_ASSISTANT_MESSAGE } from './ChatMessages';
@@ -111,47 +111,60 @@ export default class SecondBrainPlugin extends Plugin {
         plugin.set(this);
 
         this.app.workspace.onLayoutReady(async () => {
-            if (this.data.openAIGenModel.openAIApiKey !== '') {
-                await this.initSecondBrain();
+            if (this.data.isIncognitoMode) {
+                try {
+                    await requestUrl({
+                        url: this.data.ollamaGenModel.baseUrl + '/api/tags',
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                } catch (e) {
+                    if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') new Notice('Ollama service is not running');
+                    return;
+                }
+            } else if (this.data.openAIGenModel.openAIApiKey === '') return;
 
-                // reembed documents on change
-                this.app.metadataCache.on('changed', async (file: TFile) => {
+            await this.initSecondBrain();
+
+            // reembed documents on change
+            this.app.metadataCache.on('changed', async (file: TFile) => {
+                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                const docs = await obsidianDocumentLoader(this.app, [file]);
+                await this.secondBrain.embedDocuments(docs, 'byFile');
+                this.needsToSaveVectorStoreData = true;
+            });
+            this.registerEvent(
+                this.app.vault.on('delete', async (file: TFile) => {
                     for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                    const docs = await obsidianDocumentLoader(this.app, [file]);
+                    await this.secondBrain.deleteDocuments({ docs });
+                    this.needsToSaveVectorStoreData = true;
+                })
+            );
+            this.registerEvent(
+                this.app.vault.on('rename', async (file: TFile, oldPath: string) => {
+                    for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                    await this.secondBrain.deleteDocuments({ sources: [oldPath] });
                     const docs = await obsidianDocumentLoader(this.app, [file]);
                     await this.secondBrain.embedDocuments(docs, 'byFile');
                     this.needsToSaveVectorStoreData = true;
-                });
-                this.registerEvent(
-                    this.app.vault.on('delete', async (file: TFile) => {
-                        for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                        const docs = await obsidianDocumentLoader(this.app, [file]);
-                        await this.secondBrain.deleteDocuments({ docs });
-                        this.needsToSaveVectorStoreData = true;
-                    })
-                );
-                this.registerEvent(
-                    this.app.vault.on('rename', async (file: TFile, oldPath: string) => {
-                        for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                        await this.secondBrain.deleteDocuments({ sources: [oldPath] });
-                        const docs = await obsidianDocumentLoader(this.app, [file]);
-                        await this.secondBrain.embedDocuments(docs, 'byFile');
-                        this.needsToSaveVectorStoreData = true;
-                    })
-                );
+                })
+            );
 
-                // periodically or on unfocus save vector store data to disk
-                window.addEventListener('blur', () => this.saveVectorStoreData());
+            // periodically or on unfocus save vector store data to disk
+            window.addEventListener('blur', () => this.saveVectorStoreData());
 
-                const resetAutoSaveTimer = () => {
-                    clearTimeout(this.autoSaveTimer);
-                    this.autoSaveTimer = setTimeout(() => this.saveVectorStoreData(), 30 * 1000);
-                };
-                // listen for any event to reset the timer
-                window.addEventListener('mousemove', () => resetAutoSaveTimer());
-                window.addEventListener('mousedown', () => resetAutoSaveTimer());
-                window.addEventListener('keypress', () => resetAutoSaveTimer());
-                window.addEventListener('scroll', () => resetAutoSaveTimer());
-            }
+            const resetAutoSaveTimer = () => {
+                clearTimeout(this.autoSaveTimer);
+                this.autoSaveTimer = setTimeout(() => this.saveVectorStoreData(), 30 * 1000);
+            };
+            // listen for any event to reset the timer
+            window.addEventListener('mousemove', () => resetAutoSaveTimer());
+            window.addEventListener('mousedown', () => resetAutoSaveTimer());
+            window.addEventListener('keypress', () => resetAutoSaveTimer());
+            window.addEventListener('scroll', () => resetAutoSaveTimer());
         });
 
         this.registerView(VIEW_TYPE_CHAT, (leaf) => {
