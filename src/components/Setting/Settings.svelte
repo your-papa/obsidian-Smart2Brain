@@ -35,6 +35,8 @@
     let componentDebugging: TextComponent;
 
     onMount(async () => {
+        baseFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize);
+        if (excludeComponent) checkOverflow(excludeComponent);
         const data = $plugin.data;
         componentDocNum.setInputValue(data.docRetrieveNum);
         if (componentBaseUrl) componentBaseUrl.setInputValue(data.ollamaGenModel.baseUrl);
@@ -44,7 +46,7 @@
                     '...' +
                     data.openAIGenModel.openAIApiKey.substring(data.openAIGenModel.openAIApiKey.length - 3)
             );
-        ollamaModels = await ollamaGenModel();
+        ollamaModels = await getOllamaGenModel();
     });
 
     //TODO: This triggers on every change
@@ -81,11 +83,6 @@
         isOverflowingVertically = excludeComponent.scrollHeight > baseFontSize * 1.5; //convert to rem
         if (!isOverflowingVertically) isExpanded = false;
     }
-
-    onMount(() => {
-        baseFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize);
-        if (excludeComponent) checkOverflow(excludeComponent);
-    });
 
     afterUpdate(() => {
         if (excludeComponent) checkOverflow(excludeComponent);
@@ -158,7 +155,7 @@
         isSecretVisible = !isSecretVisible;
     };
 
-    async function ollamaGenModel(): Promise<{ display: string; value: string }[]> {
+    async function getOllamaGenModel(): Promise<{ display: string; value: string }[]> {
         try {
             const modelsRes = await requestUrl({
                 url: $plugin.data.ollamaGenModel.baseUrl + '/api/tags',
@@ -265,7 +262,7 @@
         <ButtonComponent
             iconId={'refresh-ccw'}
             changeFunc={async () => {
-                ollamaModels = await ollamaGenModel();
+                ollamaModels = await getOllamaGenModel();
             }}
         /></SettingContainer
     >
@@ -290,7 +287,7 @@
         <ButtonComponent
             iconId={'refresh-ccw'}
             changeFunc={async () => {
-                ollamaModels = await ollamaGenModel();
+                ollamaModels = await getOllamaGenModel();
             }}
         /></SettingContainer
     >
