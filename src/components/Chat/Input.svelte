@@ -1,9 +1,9 @@
 <script lang="ts">
     import { Notice, setIcon } from 'obsidian';
     import type { KeyboardEventHandler } from 'svelte/elements';
-    import { runSecondBrainFromChat } from '../runSecondBrain';
+    import { runSecondBrainFromChat } from '../../controller/runSecondBrain';
     import { nanoid } from 'nanoid';
-    import { plugin, chatHistory, chatInput, isEditing, isEditingAssistantMessage } from '../store';
+    import { plugin, chatHistory, chatInput, isEditing, isEditingAssistantMessage } from '../../globals/store';
 
     let inputPlaceholder = 'Chat with your second Brain...';
     let isProcessing: boolean;
