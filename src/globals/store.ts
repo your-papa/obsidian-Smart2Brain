@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import type SecondBrainPlugin from './main';
+import type SecondBrainPlugin from '../main';
 
 export type ChatMessage = {
     role: 'Assistant' | 'User';
@@ -11,7 +11,7 @@ export const chatHistory = writable<ChatMessage[]>([]);
 export const isEditing = writable<boolean>(false);
 export const isEditingAssistantMessage = writable<boolean>(false);
 export const chatInput = writable<string>('');
-
+export const settingsChanged = writable<number>(1);
 // Does this work? / refactoring
 export const serializeChatHistory = (cH: ChatMessage[]) =>
     cH

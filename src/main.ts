@@ -1,12 +1,11 @@
-import { Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
+import { Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState, Notice, requestUrl } from 'obsidian';
 import { Papa, obsidianDocumentLoader, type Language, type OllamaGenModel, type OllamaEmbedModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
 import { get } from 'svelte/store';
-import { INITIAL_ASSISTANT_MESSAGE } from './ChatMessages';
+import { INITIAL_ASSISTANT_MESSAGE } from './globals/ChatMessages';
 import { around } from 'monkey-around';
-import { serializeChatHistory, chatHistory, plugin } from './store';
+import { serializeChatHistory, chatHistory, plugin, settingsChanged } from './globals/store';
 import './styles.css';
-import { ChatModal } from './views/ChatModal';
-import { ChatView, VIEW_TYPE_CHAT } from './views/ChatView';
+import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
 
 interface PluginData {
@@ -19,11 +18,11 @@ interface PluginData {
     ollamaEmbedModel: OllamaEmbedModel;
     openAIGenModel: OpenAIGenModel;
     openAIEmbedModel: OpenAIEmbedModel;
-    fromBackup: boolean;
     targetFolder: string;
     excludeFF: Array<string>;
     defaultChatName: string;
     docRetrieveNum: number;
+    debugginLangchainKey: string;
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
@@ -43,7 +42,6 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
         openAIApiKey: '',
     },
     targetFolder: 'Chats',
-    fromBackup: false,
     defaultChatName: 'Chat Second Brain',
     excludeFF: ['Chats'],
     docRetrieveNum: 5,
@@ -54,7 +52,6 @@ export default class SecondBrainPlugin extends Plugin {
     chatView: ChatView;
     secondBrain: Papa;
     leaf: WorkspaceLeaf;
-    private vectorStoreDataPath = normalizePath('.obsidian/plugins/smart-second-brain/vector-store-data.bin');
     private needsToSaveVectorStoreData = false;
     private autoSaveTimer: NodeJS.Timeout;
 
@@ -63,46 +60,50 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async saveSettings() {
+        settingsChanged.set(get(settingsChanged) + 1);
         await this.saveData(this.data);
+    }
+
+    private getVectorStorePath() {
+        return normalizePath(
+            this.app.vault.configDir +
+                '/plugins/smart-second-brain/' +
+                (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName) +
+                '-vector-store.bin'
+        );
     }
 
     async saveVectorStoreData() {
         if (this.needsToSaveVectorStoreData) {
             console.log('saving vector store data');
             this.needsToSaveVectorStoreData = false;
-            await this.app.vault.adapter.writeBinary(this.vectorStoreDataPath, await this.secondBrain.getData());
+            await this.app.vault.adapter.writeBinary(this.getVectorStorePath(), await this.secondBrain.getData());
             console.log('saved vector store data');
         }
     }
 
-    async initSecondBrain(fromBackup = true) {
-        console.log('initializing second brain' + (fromBackup ? ' from backup' : ''));
+    async initSecondBrain() {
+        console.log('initializing second brain');
         this.secondBrain = new Papa({
             genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
             embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
+            langsmithApiKey: this.data.debugginLangchainKey || undefined,
         });
 
-        const embedVault = async () => {
-            const mdFiles = this.app.vault.getMarkdownFiles();
-            const docs = await obsidianDocumentLoader(
-                this.app,
-                mdFiles.filter((mdFile: TFile) => {
-                    for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
-                })
-            );
-            const result = await this.secondBrain.embedDocuments(docs);
-            if (result.numAdded > 0 || result.numDeleted > 0) this.needsToSaveVectorStoreData = true;
-        };
-
-        if (fromBackup) {
-            const vectorStoreData = await this.app.vault.adapter.readBinary(this.vectorStoreDataPath);
+        // check if vector store data exists
+        if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
+            const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
             await this.secondBrain.load(vectorStoreData);
-            await embedVault();
-            return;
         }
-        await embedVault();
-        this.data.fromBackup = true;
-        this.saveSettings();
+        const mdFiles = this.app.vault.getMarkdownFiles();
+        const docs = await obsidianDocumentLoader(
+            this.app,
+            mdFiles.filter((mdFile: TFile) => {
+                for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+            })
+        );
+        const result = await this.secondBrain.embedDocuments(docs);
+        if (result.numAdded > 0 || result.numDeleted > 0) this.needsToSaveVectorStoreData = true;
         this.saveVectorStoreData();
     }
 
@@ -111,47 +112,60 @@ export default class SecondBrainPlugin extends Plugin {
         plugin.set(this);
 
         this.app.workspace.onLayoutReady(async () => {
-            if (this.data.openAIGenModel.openAIApiKey !== '') {
-                await this.initSecondBrain(this.data.fromBackup);
+            if (this.data.isIncognitoMode) {
+                try {
+                    await requestUrl({
+                        url: this.data.ollamaGenModel.baseUrl + '/api/tags',
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                } catch (e) {
+                    if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') new Notice('Ollama service is not running');
+                    return;
+                }
+            } else if (this.data.openAIGenModel.openAIApiKey === '') return;
 
-                // reembed documents on change
-                this.app.metadataCache.on('changed', async (file: TFile) => {
+            await this.initSecondBrain();
+
+            // reembed documents on change
+            this.app.metadataCache.on('changed', async (file: TFile) => {
+                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                const docs = await obsidianDocumentLoader(this.app, [file]);
+                await this.secondBrain.embedDocuments(docs, 'byFile');
+                this.needsToSaveVectorStoreData = true;
+            });
+            this.registerEvent(
+                this.app.vault.on('delete', async (file: TFile) => {
                     for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                    const docs = await obsidianDocumentLoader(this.app, [file]);
+                    await this.secondBrain.deleteDocuments({ docs });
+                    this.needsToSaveVectorStoreData = true;
+                })
+            );
+            this.registerEvent(
+                this.app.vault.on('rename', async (file: TFile, oldPath: string) => {
+                    for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                    await this.secondBrain.deleteDocuments({ sources: [oldPath] });
                     const docs = await obsidianDocumentLoader(this.app, [file]);
                     await this.secondBrain.embedDocuments(docs, 'byFile');
                     this.needsToSaveVectorStoreData = true;
-                });
-                this.registerEvent(
-                    this.app.vault.on('delete', async (file: TFile) => {
-                        for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                        const docs = await obsidianDocumentLoader(this.app, [file]);
-                        await this.secondBrain.deleteDocuments({ docs });
-                        this.needsToSaveVectorStoreData = true;
-                    })
-                );
-                this.registerEvent(
-                    this.app.vault.on('rename', async (file: TFile, oldPath: string) => {
-                        for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                        await this.secondBrain.deleteDocuments({ sources: [oldPath] });
-                        const docs = await obsidianDocumentLoader(this.app, [file]);
-                        await this.secondBrain.embedDocuments(docs, 'byFile');
-                        this.needsToSaveVectorStoreData = true;
-                    })
-                );
+                })
+            );
 
-                // periodically or on unfocus save vector store data to disk
-                window.addEventListener('blur', () => this.saveVectorStoreData());
+            // periodically or on unfocus save vector store data to disk
+            window.addEventListener('blur', () => this.saveVectorStoreData());
 
-                const resetAutoSaveTimer = () => {
-                    clearTimeout(this.autoSaveTimer);
-                    this.autoSaveTimer = setTimeout(() => this.saveVectorStoreData(), 30 * 1000);
-                };
-                // listen for any event to reset the timer
-                window.addEventListener('mousemove', () => resetAutoSaveTimer());
-                window.addEventListener('mousedown', () => resetAutoSaveTimer());
-                window.addEventListener('keypress', () => resetAutoSaveTimer());
-                window.addEventListener('scroll', () => resetAutoSaveTimer());
-            }
+            const resetAutoSaveTimer = () => {
+                clearTimeout(this.autoSaveTimer);
+                this.autoSaveTimer = setTimeout(() => this.saveVectorStoreData(), 30 * 1000);
+            };
+            // listen for any event to reset the timer
+            window.addEventListener('mousemove', () => resetAutoSaveTimer());
+            window.addEventListener('mousedown', () => resetAutoSaveTimer());
+            window.addEventListener('keypress', () => resetAutoSaveTimer());
+            window.addEventListener('scroll', () => resetAutoSaveTimer());
         });
 
         this.registerView(VIEW_TYPE_CHAT, (leaf) => {
@@ -162,14 +176,6 @@ export default class SecondBrainPlugin extends Plugin {
         this.addRibbonIcon('brain-circuit', 'Smart Second Brain', () => this.activateView());
 
         this.addSettingTab(new SettingsTab(this.app, this));
-
-        this.addCommand({
-            id: 'chat-modal',
-            name: 'Chat with AI',
-            callback: () => {
-                new ChatModal(this.app).open();
-            },
-        });
 
         this.registerMonkeyPatches();
     }

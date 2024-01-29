@@ -1,8 +1,8 @@
-import { plugin as p, chatHistory as history, type ChatMessage, isEditing, chatInput, isEditingAssistantMessage } from '../store';
+import { plugin as p, chatHistory as history, type ChatMessage, isEditing, chatInput, isEditingAssistantMessage } from '../globals/store';
 import { get } from 'svelte/store';
 import { clipboard } from 'electron';
 import { MarkdownRenderer, Notice, setIcon } from 'obsidian';
-import { runSecondBrainFromChat } from '../runSecondBrain';
+import { runSecondBrainFromChat } from './runSecondBrain';
 import { DEFAULT_SETTINGS } from '../main';
 import { nanoid } from 'nanoid';
 
