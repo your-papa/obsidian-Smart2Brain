@@ -22,6 +22,7 @@ interface PluginData {
     excludeFF: Array<string>;
     defaultChatName: string;
     docRetrieveNum: number;
+    debugginLangchainKey: string;
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
@@ -85,6 +86,7 @@ export default class SecondBrainPlugin extends Plugin {
         this.secondBrain = new Papa({
             genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
             embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
+            langsmithApiKey: this.data.debugginLangchainKey || undefined,
         });
 
         // check if vector store data exists

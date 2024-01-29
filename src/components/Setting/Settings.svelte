@@ -32,6 +32,7 @@
         display: model,
         value: model,
     }));
+    let componentDebugging: TextComponent;
 
     onMount(async () => {
         const data = $plugin.data;
@@ -210,6 +211,11 @@
 
         await $plugin.saveSettings();
     }
+    const changeLangchainKey = (newKey: string) => {
+        $plugin.data.debugginLangchainKey = newKey;
+        $plugin.saveSettings();
+        $plugin.secondBrain.setTracer($plugin.data.debugginLangchainKey);
+    };
 </script>
 
 <!-- Assistant Language -->
@@ -317,7 +323,12 @@
 <!-- Advanced Settings -->
 <details>
     <summary class="setting-item-heading py-3">Advanced Settings</summary>
+    <!-- Num of Docs to Retrieve -->
     <SettingContainer settingName="Num. of Docs to Retrieve">
         <TextComponent inputType="number" bind:this={componentDocNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} />
+    </SettingContainer>
+    <!-- Debugging -->
+    <SettingContainer settingName="Debugging">
+        <TextComponent bind:this={componentDebugging} changeFunc={changeLangchainKey} />
     </SettingContainer>
 </details>
