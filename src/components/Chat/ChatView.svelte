@@ -32,8 +32,7 @@
             setTimeout(() => (isOpen = true), 300);
         }}
     />
-
-    <div class={`relative ${isOpening ? 'drawer open' : 'drawer'}`}>
+    <div class={`relative ${isOpening ? 'h-[33%] min-h-[33%]' : 'h-0 min-h-0'} overflow-hidden transition-all duration-300 ease-in-out`}>
         <div class="h-full flex flex-col justify-center items-center">
             <div use:icon={'brain-circuit'} class="w-[--icon-xl] h-[--icon-xl] *:!w-[--icon-xl] *:!h-[--icon-xl]" />
             <h1 class="text-[--text-normal] text-center">
@@ -72,16 +71,3 @@
     <InputComponent bind:textarea />
     <span class="mb-3" />
 </div>
-
-<style>
-    .drawer {
-        min-height: 0;
-        height: 0;
-        overflow: hidden;
-        transition: min-height 0.3s ease-in-out;
-    }
-
-    .drawer.open {
-        min-height: 33%;
-    }
-</style>
