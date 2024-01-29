@@ -3,7 +3,7 @@
     import InputComponent from './Input.svelte';
     import MessagesComponent from './Messages.svelte';
     import GptMessages from './GPTMessages.svelte';
-    import { plugin, settingsChanged } from '../store';
+    import { plugin } from '../../globals/store';
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -13,15 +13,6 @@
 
     let isOpen = true;
     let isOpening = true;
-
-    let displayModel: HTMLHeadingElement;
-    $: if ($settingsChanged && displayModel) {
-        displayModel.innerText = $plugin.data.isIncognitoMode
-            ? $plugin.data.ollamaGenModel.model
-            : $plugin.data.openAIGenModel.openAIApiKey
-            ? $plugin.data.openAIGenModel.modelName
-            : 'Please setup in settings';
-    }
 
     function handleChatToggel() {
         $plugin.data.isChat = !$plugin.data.isChat;
@@ -33,7 +24,7 @@
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div class="h-full flex flex-col --background-modifier-border">
     <div
-        aria-label="Open Quick Settings"
+        aria-label="Open Settings"
         class={`text-[--text-normal] flex justify-center hover:text-[--text-accent-hover] ${isOpening || isOpen ? 'hidden' : ''}`}
         use:icon={'chevron-down'}
         on:click={() => {
@@ -45,7 +36,13 @@
     <div class={`relative ${isOpening ? 'drawer open' : 'drawer'}`}>
         <div class="h-full flex flex-col justify-center items-center">
             <div use:icon={'brain-circuit'} class="w-[--icon-xl] h-[--icon-xl] *:!w-[--icon-xl] *:!h-[--icon-xl]" />
-            <h1 bind:this={displayModel} class="text-[--text-normal] text-center" />
+            <h1 class="text-[--text-normal] text-center">
+                {$plugin.data.isIncognitoMode
+                    ? $plugin.data.ollamaGenModel.model
+                    : $plugin.data.openAIGenModel.openAIApiKey
+                      ? $plugin.data.openAIGenModel.modelName
+                      : 'Please setup in settings'}
+            </h1>
             <div class="flex gap-3 items-center">
                 <p class="inline-block m-0">Change Chatview</p>
                 <!-- svelte-ignore a11y-click-events-have-key-events -->

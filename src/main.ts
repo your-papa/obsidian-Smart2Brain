@@ -1,14 +1,12 @@
 import { Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState, Notice, requestUrl } from 'obsidian';
 import { Papa, obsidianDocumentLoader, type Language, type OllamaGenModel, type OllamaEmbedModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
 import { get } from 'svelte/store';
-import { INITIAL_ASSISTANT_MESSAGE } from './ChatMessages';
+import { INITIAL_ASSISTANT_MESSAGE } from './globals/ChatMessages';
 import { around } from 'monkey-around';
-import { serializeChatHistory, chatHistory, plugin } from './store';
+import { serializeChatHistory, chatHistory, plugin, settingsChanged } from './globals/store';
 import './styles.css';
-import { ChatModal } from './views/ChatModal';
-import { ChatView, VIEW_TYPE_CHAT } from './views/ChatView';
+import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
-import { settingsChanged } from './store';
 
 interface PluginData {
     isChat: boolean;
@@ -175,14 +173,6 @@ export default class SecondBrainPlugin extends Plugin {
         this.addRibbonIcon('brain-circuit', 'Smart Second Brain', () => this.activateView());
 
         this.addSettingTab(new SettingsTab(this.app, this));
-
-        this.addCommand({
-            id: 'chat-modal',
-            name: 'Chat with AI',
-            callback: () => {
-                new ChatModal(this.app).open();
-            },
-        });
 
         this.registerMonkeyPatches();
     }
