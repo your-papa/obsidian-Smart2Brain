@@ -35,7 +35,6 @@
         "@popperjs/core": "^2.11.8",
         "electron": "^27.0.3",
         "monkey-around": "^2.3.0",
-        "nanoid": "^5.0.4",
-        "openai": "^4.24.1"
+        "nanoid": "^5.0.4"
     }
 }
