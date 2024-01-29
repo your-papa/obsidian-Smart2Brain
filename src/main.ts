@@ -66,7 +66,8 @@ export default class SecondBrainPlugin extends Plugin {
 
     private getVectorStorePath() {
         return normalizePath(
-            '.obsidian/plugins/smart-second-brain/' +
+            this.app.vault.configDir +
+                '/plugins/smart-second-brain/' +
                 (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName) +
                 '-vector-store.bin'
         );
