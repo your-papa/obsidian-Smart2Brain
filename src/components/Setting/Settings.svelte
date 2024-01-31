@@ -3,10 +3,10 @@
     import SearchComponent from '../base/Search.svelte';
     import { chatHistory, plugin } from '../../globals/store';
     import { Notice, requestUrl, setIcon } from 'obsidian';
-    import { afterUpdate, beforeUpdate, onMount, tick } from 'svelte';
+    import { afterUpdate, onMount } from 'svelte';
     import SettingContainer from '../base/SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
-    import { Languages, type Language, type OllamaGenModel, type OllamaEmbedModel, OpenAIGenModelNames, OpenAIEmbedModelNames } from 'papa-ts';
+    import { Languages, type Language, OpenAIGenModelNames, OpenAIEmbedModelNames } from 'papa-ts';
     import { INITIAL_ASSISTANT_MESSAGE } from '../../globals/ChatMessages';
     import { nanoid } from 'nanoid';
     import ToggleComponent from '../base/Toggle.svelte';
