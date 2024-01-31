@@ -7,6 +7,8 @@ import { serializeChatHistory, chatHistory, plugin, settingsChanged } from './gl
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
+import { isOllamaRunning } from './controller/Ollama';
+import { isAPIKeyValid } from './controller/OpenAI';
 
 interface PluginData {
     isChat: boolean;
@@ -112,20 +114,7 @@ export default class SecondBrainPlugin extends Plugin {
         plugin.set(this);
 
         this.app.workspace.onLayoutReady(async () => {
-            if (this.data.isIncognitoMode) {
-                try {
-                    await requestUrl({
-                        url: this.data.ollamaGenModel.baseUrl + '/api/tags',
-                        method: 'GET',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                    });
-                } catch (e) {
-                    if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') new Notice('Ollama service is not running');
-                    return;
-                }
-            } else if (this.data.openAIGenModel.openAIApiKey === '') return;
+            if (!((this.data.isIncognitoMode && (await isOllamaRunning())) || (!this.data.isIncognitoMode && (await isAPIKeyValid())))) return;
 
             await this.initSecondBrain();
 
