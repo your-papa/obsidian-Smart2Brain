@@ -11,6 +11,9 @@
     export function setInputValue(value: string | number) {
         inputValue = value;
     }
+    export function getInputValue(): string {
+        return inputValue;
+    }
 </script>
 
 {#if inputType === 'text'}

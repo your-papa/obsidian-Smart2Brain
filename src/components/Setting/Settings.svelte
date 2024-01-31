@@ -51,6 +51,19 @@
         ollamaModels = await getOllamaGenModel();
     });
 
+    $: if ($plugin.data.isIncognitoMode && componentBaseUrl && componentBaseUrl.getInputValue().trim() === '' && $plugin.data.ollamaGenModel.baseUrl !== '') {
+        componentBaseUrl.setInputValue($plugin.data.ollamaGenModel.baseUrl);
+    }
+
+    $: if (
+        !$plugin.data.isIncognitoMode &&
+        componentApiKey &&
+        componentApiKey.getInputValue().trim() === '' &&
+        $plugin.data.openAIGenModel.openAIApiKey !== ''
+    ) {
+        componentApiKey.setInputValue($plugin.data.openAIGenModel.openAIApiKey);
+    }
+
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
     };
@@ -81,10 +94,6 @@
         if (!isOverflowingVertically) isExpanded = false;
     }
 
-    afterUpdate(() => {
-        if (excludeComponent) checkOverflow(excludeComponent);
-    });
-
     const languages: { display: Language; value: Language }[] = Object.values(Languages).map((language: Language) => ({ display: language, value: language }));
 
     const languageChange = (selected: Language) => {
@@ -101,21 +110,6 @@
             $plugin.chatView.requestSave();
         }
         $plugin.saveSettings();
-    };
-
-    const changeIncognitoMode = () => {
-        $plugin.data.isIncognitoMode = !$plugin.data.isIncognitoMode;
-        $plugin.saveSettings();
-        if (!$plugin.data.isIncognitoMode)
-            setTimeout(() => {
-                if ($plugin.data.openAIGenModel.openAIApiKey.trim() !== '')
-                    componentApiKey.setInputValue(
-                        $plugin.data.openAIGenModel.openAIApiKey.substring(0, 6) +
-                            '...' +
-                            $plugin.data.openAIGenModel.openAIApiKey.substring($plugin.data.openAIGenModel.openAIApiKey.length - 3)
-                    );
-            });
-        if ($plugin.data.isIncognitoMode) setTimeout(() => componentBaseUrl.setInputValue($plugin.data.ollamaGenModel.baseUrl));
     };
 
     const changeOllamaBaseUrl = (newBaseUrl: string) => {
@@ -228,6 +222,11 @@
         $plugin.saveSettings();
         $plugin.secondBrain.setTracer($plugin.data.debugginLangchainKey);
     };
+
+    function toggleIncognitoMode() {
+        $plugin.data.isIncognitoMode = !$plugin.data.isIncognitoMode;
+        $plugin.saveSettings();
+    }
 </script>
 
 <!-- Assistant Language -->
@@ -268,7 +267,7 @@
 
 <!-- Toggle Incognito -->
 <SettingContainer settingName="Incognito Mode">
-    <ToggleComponent isEnabled={$plugin.data.isIncognitoMode} changeFunc={changeIncognitoMode} />
+    <ToggleComponent isEnabled={$plugin.data.isIncognitoMode} changeFunc={toggleIncognitoMode} />
 </SettingContainer>
 
 {#if $plugin.data.isIncognitoMode}
