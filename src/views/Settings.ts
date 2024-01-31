@@ -19,7 +19,7 @@ export default class SettingsTab extends PluginSettingTab {
         this.isSecretVisible = false;
     }
 
-    async display(): Promise<void> {
+    display(): void {
         this.containerEl.empty();
 
         // const data = this.plugin.data;
