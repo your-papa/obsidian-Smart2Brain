@@ -12,6 +12,8 @@
     import ToggleComponent from '../base/Toggle.svelte';
     import { DEFAULT_SETTINGS } from '../../main';
     import ButtonComponent from '../base/Button.svelte';
+    import { isOllamaRunning } from '../../controller/Ollama';
+    import { isAPIKeyValid } from '../../controller/OpenAI';
 
     let baseFontSize: number;
     let searchValue: string;
@@ -22,7 +24,7 @@
     let componentBaseUrl: TextComponent;
     let componentApiKey: TextComponent;
     let ollamaModels: { display: string; value: string }[] = [];
-    let isSecretVisible: boolean = true;
+    let isSecretVisible: boolean = false;
     let componentDocNum: TextComponent;
     const openAIGenModels: { display: string; value: string }[] = Object.values(OpenAIGenModelNames).map((model: string) => ({
         display: model,
@@ -40,7 +42,7 @@
         const data = $plugin.data;
         componentDocNum.setInputValue(data.docRetrieveNum);
         if (componentBaseUrl) componentBaseUrl.setInputValue(data.ollamaGenModel.baseUrl);
-        if (componentApiKey)
+        if (componentApiKey && data.openAIGenModel.openAIApiKey !== '')
             componentApiKey.setInputValue(
                 data.openAIGenModel.openAIApiKey.substring(0, 6) +
                     '...' +
@@ -48,11 +50,6 @@
             );
         ollamaModels = await getOllamaGenModel();
     });
-
-    //TODO: This triggers on every change
-    $: if ($plugin.data.isIncognitoMode && componentBaseUrl) {
-        componentBaseUrl.setInputValue($plugin.data.ollamaGenModel.baseUrl);
-    }
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -109,14 +106,16 @@
     const changeIncognitoMode = () => {
         $plugin.data.isIncognitoMode = !$plugin.data.isIncognitoMode;
         $plugin.saveSettings();
-        setTimeout(() => {
-            if (!$plugin.data.isIncognitoMode)
-                componentApiKey.setInputValue(
-                    $plugin.data.openAIGenModel.openAIApiKey.substring(0, 6) +
-                        '...' +
-                        $plugin.data.openAIGenModel.openAIApiKey.substring($plugin.data.openAIGenModel.openAIApiKey.length - 3)
-                );
-        }, 1);
+        if (!$plugin.data.isIncognitoMode)
+            setTimeout(() => {
+                if ($plugin.data.openAIGenModel.openAIApiKey.trim() !== '')
+                    componentApiKey.setInputValue(
+                        $plugin.data.openAIGenModel.openAIApiKey.substring(0, 6) +
+                            '...' +
+                            $plugin.data.openAIGenModel.openAIApiKey.substring($plugin.data.openAIGenModel.openAIApiKey.length - 3)
+                    );
+            });
+        if ($plugin.data.isIncognitoMode) setTimeout(() => componentBaseUrl.setInputValue($plugin.data.ollamaGenModel.baseUrl));
     };
 
     const changeOllamaBaseUrl = (newBaseUrl: string) => {
@@ -149,10 +148,16 @@
     };
 
     const hideApiKey = () => {
+        if ($plugin.data.openAIGenModel.openAIApiKey.trim() === '') return;
+        isSecretVisible = false;
         const apiKey = $plugin.data.openAIGenModel.openAIApiKey;
-        if (!isSecretVisible) componentApiKey.setInputValue(apiKey);
-        else componentApiKey.setInputValue(apiKey.substring(0, 6) + '...' + apiKey.substring(apiKey.length - 3));
-        isSecretVisible = !isSecretVisible;
+        componentApiKey.setInputValue(apiKey.substring(0, 6) + '...' + apiKey.substring(apiKey.length - 3));
+    };
+
+    const showApiKey = () => {
+        if ($plugin.data.openAIGenModel.openAIApiKey.trim() === '') return;
+        isSecretVisible = true;
+        componentApiKey.setInputValue($plugin.data.openAIGenModel.openAIApiKey);
     };
 
     async function getOllamaGenModel(): Promise<{ display: string; value: string }[]> {
@@ -196,6 +201,16 @@
     };
 
     const initializeSecondBrain = async () => {
+        if ($plugin.data.isIncognitoMode && !(await isOllamaRunning())) {
+            new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 5000);
+            return;
+        }
+
+        if (!$plugin.data.isIncognitoMode && !(await isAPIKeyValid())) {
+            new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 5000);
+            return;
+        }
+
         await $plugin.initSecondBrain();
     };
 
@@ -293,12 +308,14 @@
     >
     <!-- OpenAI API Key -->
     <SettingContainer settingName="API Key">
-        {#if isSecretVisible}
-            <ButtonComponent iconId={'eye-off'} changeFunc={hideApiKey} />
-        {:else}
-            <ButtonComponent iconId={'eye'} changeFunc={hideApiKey} />
-        {/if}
-        <TextComponent bind:this={componentApiKey} styles={styleOllamaBaseUrl} placeholder="sk-...Lk" changeFunc={changeApiKey} />
+        <TextComponent
+            bind:this={componentApiKey}
+            styles={styleOllamaBaseUrl}
+            placeholder="sk-...Lk"
+            changeFunc={changeApiKey}
+            blurFunc={hideApiKey}
+            focusFunc={showApiKey}
+        />
     </SettingContainer>
     <!-- OpenAI Models -->
     {#if true}
