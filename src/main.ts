@@ -85,7 +85,11 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async initSecondBrain() {
-        console.log('initializing second brain');
+        console.log(
+            'Initializing second brain',
+            '\nGen Model: ' + (this.data.isIncognitoMode ? this.data.ollamaGenModel.model : this.data.openAIGenModel.modelName),
+            '\nEmbed Model: ' + (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName)
+        );
         this.secondBrain = new Papa({
             genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
             embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
@@ -101,7 +105,8 @@ export default class SecondBrainPlugin extends Plugin {
         const docs = await obsidianDocumentLoader(
             this.app,
             mdFiles.filter((mdFile: TFile) => {
-                for (const exclude of this.data.excludeFF) return !mdFile.path.startsWith(exclude);
+                for (const exclude of this.data.excludeFF) if (mdFile.path.startsWith(exclude)) return false;
+                return true;
             })
         );
         const result = await this.secondBrain.embedDocuments(docs);
