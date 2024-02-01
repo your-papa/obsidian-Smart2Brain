@@ -1,8 +1,8 @@
 import { WorkspaceLeaf, type HoverParent, HoverPopover, TextFileView, TFile } from 'obsidian';
 
-import ChatViewComponent from '../components/Chat/ChatView.svelte';
+import ChatViewComponent from '../components/Chat/Chat.svelte';
 import { nanoid } from 'nanoid';
-import { type ChatMessage, chatHistory, plugin } from '../globals/store';
+import { type ChatMessage, chatHistory, plugin } from '../store';
 import { get } from 'svelte/store';
 
 export const VIEW_TYPE_CHAT = 'chat-view';

@@ -1,9 +1,8 @@
-import { Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState, Notice, requestUrl } from 'obsidian';
+import { Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
 import { Papa, obsidianDocumentLoader, type Language, type OllamaGenModel, type OllamaEmbedModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
 import { get } from 'svelte/store';
-import { INITIAL_ASSISTANT_MESSAGE } from './globals/ChatMessages';
 import { around } from 'monkey-around';
-import { serializeChatHistory, chatHistory, plugin, settingsChanged, isIncognitoMode } from './globals/store';
+import { serializeChatHistory, chatHistory, plugin, settingsChanged, isIncognitoMode } from './store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
@@ -27,6 +26,10 @@ interface PluginData {
     debugginLangchainKey: string;
 }
 
+export const INITIAL_ASSISTANT_MESSAGE: Map<string, string> = new Map([
+    ['de', 'Hallo, wie kann ich dir helfen?'],
+    ['en', 'Hello, how can I help you?'],
+]);
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isChat: true,
     isUsingRag: true,

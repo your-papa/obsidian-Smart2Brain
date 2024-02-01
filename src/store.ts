@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import type SecondBrainPlugin from '../main';
+import type SecondBrainPlugin from './main';
 
 export type ChatMessage = {
     role: 'Assistant' | 'User';

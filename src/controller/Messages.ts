@@ -1,4 +1,4 @@
-import { plugin as p, chatHistory as history, type ChatMessage, isEditing, chatInput, isEditingAssistantMessage } from '../globals/store';
+import { plugin as p, chatHistory as history, type ChatMessage, isEditing, chatInput, isEditingAssistantMessage } from '../store';
 import { get } from 'svelte/store';
 import { clipboard } from 'electron';
 import { MarkdownRenderer, Notice, setIcon } from 'obsidian';
@@ -124,7 +124,7 @@ export function editMessage(message: ChatMessage, textarea: HTMLTextAreaElement)
     const targetIndex = chatHistory.indexOf(message);
     temporaryEditingHistory = chatHistory.slice(targetIndex);
     history.set(chatHistory.slice(0, targetIndex + 1));
-    chatInput.set(message.content + ' ');
+    chatInput.set(message.content);
     textarea.focus();
     return message.id;
 }

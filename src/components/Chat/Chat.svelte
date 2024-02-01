@@ -1,9 +1,9 @@
 <script lang="ts">
     import { setIcon } from 'obsidian';
     import InputComponent from './Input.svelte';
-    import MessagesComponent from './Messages.svelte';
-    import GptMessages from './GPTMessages.svelte';
-    import { plugin, isIncognitoMode } from '../../globals/store';
+    import MessagesBubble from './MessagesBubble.svelte';
+    import MessagesCompact from './MessagesCompact.svelte';
+    import { plugin, isIncognitoMode } from '../../store';
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -53,9 +53,9 @@
         </div>
     </div>
     {#if $plugin.data.isChat}
-        <MessagesComponent bind:textarea />
+        <MessagesBubble bind:textarea />
     {:else}
-        <GptMessages bind:textarea />
+        <MessagesCompact bind:textarea />
     {/if}
     <InputComponent bind:textarea />
     <span class="mb-3" />

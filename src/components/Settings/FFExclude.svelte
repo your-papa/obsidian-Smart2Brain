@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { plugin } from '../../globals/store';
-    import { FFSuggest, FileSuggest } from '../../utils/Suggester';
+    import { plugin } from '../../store';
+    import { FFSuggest } from './Suggester';
 
     export let placeholder: string = '';
     export let changeFunc: (value: string) => void;
@@ -29,5 +29,5 @@
     on:blur={() => changeFunc(inputValue)}
 />
 {#if inputValue.length > 0}
-    <div class="search-input-clear-button" on:click={clearSearch}></div>
+    <div class="search-input-clear-button" on:click={clearSearch} />
 {/if}

@@ -1,6 +1,6 @@
 import { requestUrl } from 'obsidian';
 import { get } from 'svelte/store';
-import { plugin } from '../globals/store';
+import { plugin } from '../store';
 
 export async function isAPIKeyValid() {
     try {
