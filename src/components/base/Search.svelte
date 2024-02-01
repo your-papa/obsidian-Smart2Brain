@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onMount } from 'svelte';
     import { plugin } from '../../globals/store';
     import { FFSuggest, FileSuggest } from '../../utils/Suggester';
 
@@ -13,9 +14,9 @@
         inputValue = '';
     }
 
-    $: if (inputElem) {
+    onMount(() => {
         new FFSuggest($plugin.app, inputElem);
-    }
+    });
 </script>
 
 <input
