@@ -3,7 +3,7 @@
     import InputComponent from './Input.svelte';
     import MessagesComponent from './Messages.svelte';
     import GptMessages from './GPTMessages.svelte';
-    import { plugin } from '../../globals/store';
+    import { plugin, isIncognitoMode } from '../../globals/store';
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -36,7 +36,7 @@
         <div class="h-full flex flex-col justify-center items-center">
             <div use:icon={'brain-circuit'} class="w-[--icon-xl] h-[--icon-xl] *:!w-[--icon-xl] *:!h-[--icon-xl]" />
             <h1 class="text-[--text-normal] text-center">
-                {$plugin.data.isIncognitoMode
+                {$isIncognitoMode
                     ? $plugin.data.ollamaGenModel.model
                     : $plugin.data.openAIGenModel.openAIApiKey
                       ? $plugin.data.openAIGenModel.modelName
