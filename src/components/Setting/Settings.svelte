@@ -56,7 +56,11 @@
     }
 
     $: if (!$isIncognitoMode && componentApiKey && componentApiKey.getInputValue().trim() === '' && $plugin.data.openAIGenModel.openAIApiKey !== '') {
-        componentApiKey.setInputValue($plugin.data.openAIGenModel.openAIApiKey);
+        componentApiKey.setInputValue(
+            $plugin.data.openAIGenModel.openAIApiKey.substring(0, 6) +
+                '...' +
+                $plugin.data.openAIGenModel.openAIApiKey.substring($plugin.data.openAIGenModel.openAIApiKey.length - 3)
+        );
     }
 
     const icon = (node: HTMLElement, iconId: string) => {
