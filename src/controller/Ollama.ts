@@ -1,5 +1,5 @@
 import { requestUrl } from 'obsidian';
-import { plugin } from '../globals/store';
+import { plugin } from '../store';
 import { get } from 'svelte/store';
 
 export async function isOllamaRunning() {

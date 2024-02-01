@@ -1,6 +1,6 @@
 import { App, PluginSettingTab } from 'obsidian';
 import SecondBrainPlugin from '../main';
-import SettingsComponent from '../components/Setting/Settings.svelte';
+import SettingsComponent from '../components/Settings/Settings.svelte';
 
 export default class SettingsTab extends PluginSettingTab {
     component: SettingsComponent;
