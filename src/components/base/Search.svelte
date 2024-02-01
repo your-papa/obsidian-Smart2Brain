@@ -1,6 +1,6 @@
 <script lang="ts">
     import { plugin } from '../../globals/store';
-    import { FFSuggest } from '../../utils/Suggester';
+    import { FFSuggest, FileSuggest } from '../../utils/Suggester';
 
     export let placeholder: string = '';
     export let changeFunc: (value: string) => void;
@@ -12,8 +12,9 @@
     function clearSearch() {
         inputValue = '';
     }
+
     $: if (inputElem) {
-        new FFSuggest($plugin.app, inputElem, $plugin.data.excludeFF);
+        new FFSuggest($plugin.app, inputElem);
     }
 </script>
 
@@ -22,8 +23,8 @@
     type="search"
     spellcheck="false"
     {placeholder}
-    bind:this={inputElem}
     bind:value={inputValue}
+    bind:this={inputElem}
     on:blur={() => changeFunc(inputValue)}
 />
 {#if inputValue.length > 0}
