@@ -102,7 +102,7 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
     private suggestEl: HTMLElement;
     private suggest: Suggest<T>;
 
-    constructor(protected app: App, protected inputEl: HTMLInputElement | HTMLTextAreaElement, protected excludeFF?: Array<string>) {
+    constructor(protected app: App, protected inputEl: HTMLInputElement | HTMLTextAreaElement) {
         this.scope = new Scope();
 
         this.suggestEl = createDiv('suggestion-container');
@@ -110,7 +110,6 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
         this.suggest = new Suggest(this, suggestion, this.scope);
 
         this.scope.register([], 'Escape', this.close.bind(this));
-
         this.inputEl.addEventListener('input', this.onInputChanged.bind(this));
         this.inputEl.addEventListener('focus', this.onInputChanged.bind(this));
         this.inputEl.addEventListener('blur', this.close.bind(this));
@@ -121,7 +120,7 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
 
     onInputChanged(): void {
         const inputStr = this.inputEl.value;
-        const suggestions = this.getSuggestions(inputStr, this.excludeFF || []);
+        const suggestions = this.getSuggestions(inputStr);
 
         if (!suggestions) {
             this.close();

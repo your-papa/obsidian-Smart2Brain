@@ -2,27 +2,35 @@
 
 import { TAbstractFile, TFile, TFolder } from 'obsidian';
 import { TextInputSuggest } from './suggest';
+import { plugin } from '../globals/store';
+import { get } from 'svelte/store';
 
 export class FFSuggest extends TextInputSuggest<TAbstractFile> {
-    getSuggestions(inputStr: string, excludeFF: Array<string>): TAbstractFile[] {
+    getSuggestions(inputStr: string): TAbstractFile[] {
         const abstractFiles = this.app.vault.getAllLoadedFiles();
         const files: TAbstractFile[] = [];
         const folders: TAbstractFile[] = [];
         const lowerCaseInputStr = inputStr.toLowerCase();
-        const excludeFromList = structuredClone(excludeFF);
+        const excludeFF = get(plugin).data.excludeFF;
+
+        function wildTest(wildcard, str): boolean {
+            const w = wildcard.replace(/[.+^${}()|[\]\\]/g, '\\$&'); // regexp escape
+            const re = new RegExp(`\\b${w.replace(/\*/g, '.*').replace(/\?/g, '.')}`, 'i');
+            return re.test(str);
+        }
 
         abstractFiles.forEach((ff: TAbstractFile) => {
-            for (const exclude of excludeFromList) {
-                if (ff.path === exclude) {
-                    excludeFromList.remove(exclude);
+            for (const exclude of excludeFF) {
+                if (wildTest(exclude, ff.path)) {
                     return;
                 }
             }
-            if (ff instanceof TFile && ff.extension === 'md' && ff.path.toLowerCase().contains(lowerCaseInputStr)) {
-                files.push(ff);
-            }
-            if (ff instanceof TFolder && ff.path.toLowerCase().contains(lowerCaseInputStr)) {
-                folders.push(ff);
+            if (wildTest(lowerCaseInputStr, ff.path.toLowerCase())) {
+                if (ff instanceof TFile) {
+                    files.push(ff);
+                } else if (ff instanceof TFolder) {
+                    folders.push(ff);
+                }
             }
         });
 
