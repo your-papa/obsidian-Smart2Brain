@@ -3,7 +3,7 @@ import { Papa, obsidianDocumentLoader, type Language, type OllamaGenModel, type 
 import { get } from 'svelte/store';
 import { INITIAL_ASSISTANT_MESSAGE } from './globals/ChatMessages';
 import { around } from 'monkey-around';
-import { serializeChatHistory, chatHistory, plugin, settingsChanged } from './globals/store';
+import { serializeChatHistory, chatHistory, plugin, settingsChanged, isIncognitoMode } from './globals/store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
@@ -59,6 +59,7 @@ export default class SecondBrainPlugin extends Plugin {
 
     async loadSettings() {
         this.data = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        isIncognitoMode.set(this.data.isIncognitoMode);
     }
 
     async saveSettings() {

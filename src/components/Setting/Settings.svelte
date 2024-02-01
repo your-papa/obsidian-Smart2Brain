@@ -1,9 +1,9 @@
 <script lang="ts">
     import TextComponent from '../base/Text.svelte';
     import SearchComponent from '../base/Search.svelte';
-    import { chatHistory, plugin } from '../../globals/store';
+    import { chatHistory, plugin, isIncognitoMode } from '../../globals/store';
     import { Notice, requestUrl, setIcon } from 'obsidian';
-    import { afterUpdate, onMount } from 'svelte';
+    import { afterUpdate, beforeUpdate, onMount } from 'svelte';
     import SettingContainer from '../base/SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
     import { Languages, type Language, OpenAIGenModelNames, OpenAIEmbedModelNames } from 'papa-ts';
@@ -51,16 +51,11 @@
         ollamaModels = await getOllamaGenModel();
     });
 
-    $: if ($plugin.data.isIncognitoMode && componentBaseUrl && componentBaseUrl.getInputValue().trim() === '' && $plugin.data.ollamaGenModel.baseUrl !== '') {
+    $: if ($isIncognitoMode && componentBaseUrl && componentBaseUrl.getInputValue().trim() === '' && $plugin.data.ollamaGenModel.baseUrl !== '') {
         componentBaseUrl.setInputValue($plugin.data.ollamaGenModel.baseUrl);
     }
 
-    $: if (
-        !$plugin.data.isIncognitoMode &&
-        componentApiKey &&
-        componentApiKey.getInputValue().trim() === '' &&
-        $plugin.data.openAIGenModel.openAIApiKey !== ''
-    ) {
+    $: if (!$isIncognitoMode && componentApiKey && componentApiKey.getInputValue().trim() === '' && $plugin.data.openAIGenModel.openAIApiKey !== '') {
         componentApiKey.setInputValue($plugin.data.openAIGenModel.openAIApiKey);
     }
 
@@ -195,12 +190,12 @@
     };
 
     const initializeSecondBrain = async () => {
-        if ($plugin.data.isIncognitoMode && !(await isOllamaRunning())) {
+        if ($isIncognitoMode && !(await isOllamaRunning())) {
             new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 5000);
             return;
         }
 
-        if (!$plugin.data.isIncognitoMode && !(await isAPIKeyValid())) {
+        if (!$isIncognitoMode && !(await isAPIKeyValid())) {
             new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 5000);
             return;
         }
@@ -224,7 +219,8 @@
     };
 
     function toggleIncognitoMode() {
-        $plugin.data.isIncognitoMode = !$plugin.data.isIncognitoMode;
+        $isIncognitoMode = !$isIncognitoMode;
+        $plugin.data.isIncognitoMode = $isIncognitoMode;
         $plugin.saveSettings();
     }
 </script>
@@ -266,73 +262,74 @@
 {/if}
 
 <!-- Toggle Incognito -->
+
 <SettingContainer settingName="Incognito Mode">
-    <ToggleComponent isEnabled={$plugin.data.isIncognitoMode} changeFunc={toggleIncognitoMode} />
+    <ToggleComponent isEnabled={$isIncognitoMode} changeFunc={toggleIncognitoMode} />
 </SettingContainer>
-
-{#if $plugin.data.isIncognitoMode}
-    <!-- Ollama -->
-    <SettingContainer settingName="Ollama" isHeading={true} settingDesc="Incognito Mode is enabled. Ollama is enabled.">
-        <ButtonComponent
-            iconId={'refresh-ccw'}
-            changeFunc={async () => {
-                ollamaModels = await getOllamaGenModel();
-            }}
-        /></SettingContainer
-    >
-    <!-- Ollama URL -->
-    <SettingContainer settingName="Ollama URL">
-        <ButtonComponent iconId={'rotate-cw'} changeFunc={resetOllamaBaseUrl} />
-        <TextComponent bind:this={componentBaseUrl} styles={styleOllamaBaseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
-    </SettingContainer>
-    {#if ollamaModels.length !== 0}
-        <!-- Ollama Gen Model -->
-        <SettingContainer settingName="Chat Model">
-            <DropdownComponent selected={$plugin.data.ollamaGenModel.model} options={ollamaModels} changeFunc={ollamaGenChange} />
+<div>
+    {#if $isIncognitoMode}
+        <!-- Ollama -->
+        <SettingContainer settingName="Ollama" isHeading={true} settingDesc="Incognito Mode is enabled. Ollama is enabled.">
+            <ButtonComponent
+                iconId={'refresh-ccw'}
+                changeFunc={async () => {
+                    ollamaModels = await getOllamaGenModel();
+                }}
+            /></SettingContainer
+        >
+        <!-- Ollama URL -->
+        <SettingContainer settingName="Ollama URL">
+            <ButtonComponent iconId={'rotate-cw'} changeFunc={resetOllamaBaseUrl} />
+            <TextComponent bind:this={componentBaseUrl} styles={styleOllamaBaseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
         </SettingContainer>
-        <!-- Ollama Embed Model -->
-        <SettingContainer settingName="Embed Model">
-            <DropdownComponent selected={$plugin.data.ollamaEmbedModel.model} options={ollamaModels} changeFunc={ollamaEmbedChange} />
+        {#if ollamaModels.length !== 0}
+            <!-- Ollama Gen Model -->
+            <SettingContainer settingName="Chat Model">
+                <DropdownComponent selected={$plugin.data.ollamaGenModel.model} options={ollamaModels} changeFunc={ollamaGenChange} />
+            </SettingContainer>
+            <!-- Ollama Embed Model -->
+            <SettingContainer settingName="Embed Model">
+                <DropdownComponent selected={$plugin.data.ollamaEmbedModel.model} options={ollamaModels} changeFunc={ollamaEmbedChange} />
+            </SettingContainer>
+        {/if}
+    {:else}
+        <!-- Open AI -->
+        <SettingContainer settingName="OpenAI" isHeading={true} settingDesc="Incognito Mode is disabled. OpenAI is enabled.">
+            <ButtonComponent
+                iconId={'refresh-ccw'}
+                changeFunc={async () => {
+                    ollamaModels = await getOllamaGenModel();
+                }}
+            /></SettingContainer
+        >
+        <!-- OpenAI API Key -->
+        <SettingContainer settingName="API Key">
+            <TextComponent
+                bind:this={componentApiKey}
+                styles={styleOllamaBaseUrl}
+                placeholder="sk-...Lk"
+                changeFunc={changeApiKey}
+                blurFunc={hideApiKey}
+                focusFunc={showApiKey}
+            />
         </SettingContainer>
+        <!-- OpenAI Models -->
+        {#if true}
+            <!-- OpenAI Gen Model -->
+            <SettingContainer settingName="Chat Model">
+                <DropdownComponent selected={$plugin.data.openAIGenModel.modelName} options={openAIGenModels} changeFunc={openAIGenChange} />
+            </SettingContainer>
+            <!-- openAI Embed Model -->
+            <SettingContainer settingName="Embed Model">
+                <DropdownComponent selected={$plugin.data.openAIEmbedModel.modelName} options={openAIEmbedModels} changeFunc={openAIEmbedChange} />
+            </SettingContainer>
+        {/if}
     {/if}
-{:else}
-    <!-- Open AI -->
-    <SettingContainer settingName="OpenAI" isHeading={true} settingDesc="Incognito Mode is disabled. OpenAI is enabled.">
-        <ButtonComponent
-            iconId={'refresh-ccw'}
-            changeFunc={async () => {
-                ollamaModels = await getOllamaGenModel();
-            }}
-        /></SettingContainer
-    >
-    <!-- OpenAI API Key -->
-    <SettingContainer settingName="API Key">
-        <TextComponent
-            bind:this={componentApiKey}
-            styles={styleOllamaBaseUrl}
-            placeholder="sk-...Lk"
-            changeFunc={changeApiKey}
-            blurFunc={hideApiKey}
-            focusFunc={showApiKey}
-        />
+    <!-- Initialize Second Brain -->
+    <SettingContainer settingName="">
+        <ButtonComponent buttonText="Initialize Smart Second Brain" styles="mod-cta" changeFunc={initializeSecondBrain} />
     </SettingContainer>
-    <!-- OpenAI Models -->
-    {#if true}
-        <!-- OpenAI Gen Model -->
-        <SettingContainer settingName="Chat Model">
-            <DropdownComponent selected={$plugin.data.openAIGenModel.modelName} options={openAIGenModels} changeFunc={openAIGenChange} />
-        </SettingContainer>
-        <!-- openAI Embed Model -->
-        <SettingContainer settingName="Embed Model">
-            <DropdownComponent selected={$plugin.data.openAIEmbedModel.modelName} options={openAIEmbedModels} changeFunc={openAIEmbedChange} />
-        </SettingContainer>
-    {/if}
-{/if}
-<!-- Initialize Second Brain -->
-<SettingContainer settingName="">
-    <ButtonComponent buttonText="Initialize Smart Second Brain" styles="mod-cta" changeFunc={initializeSecondBrain} />
-</SettingContainer>
-
+</div>
 <!-- Advanced Settings -->
 <details>
     <summary class="setting-item-heading py-3">Advanced Settings</summary>
