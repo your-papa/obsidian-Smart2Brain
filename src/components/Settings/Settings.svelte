@@ -13,6 +13,7 @@
     import ButtonComponent from '../base/Button.svelte';
     import { isOllamaRunning } from '../../controller/Ollama';
     import { isAPIKeyValid } from '../../controller/OpenAI';
+    import { t } from 'svelte-i18n';
 
     let baseFontSize: number;
     let searchValue: string;
@@ -229,11 +230,11 @@
 </script>
 
 <!-- Assistant Language -->
-<SettingContainer settingName="Assistant Language"
+<SettingContainer settingName={$t('assistant_language')}
     ><DropdownComponent selected={$plugin.data.assistantLanguage} options={languages} changeFunc={languageChange} /></SettingContainer
 >
 <!-- Exclude Folders -->
-<SettingContainer settingName="Exclude Files and Folders"
+<SettingContainer settingName={$t('excludeff')}
     ><FFExcludeComponent placeholder="Folder/SubFolder" bind:inputValue={searchValue} changeFunc={addFolder} /></SettingContainer
 >
 {#if $plugin.data.excludeFF.length !== 0}
@@ -266,7 +267,7 @@
 
 <!-- Toggle Incognito -->
 
-<SettingContainer settingName="Incognito Mode">
+<SettingContainer settingName={$t('incognito_mode')}>
     <ToggleComponent isEnabled={$isIncognitoMode} changeFunc={toggleIncognitoMode} />
 </SettingContainer>
 <div>
@@ -330,7 +331,7 @@
     {/if}
     <!-- Initialize Second Brain -->
     <SettingContainer settingName="">
-        <ButtonComponent buttonText="Initialize Smart Second Brain" styles="mod-cta" changeFunc={initializeSecondBrain} />
+        <ButtonComponent buttonText={$t('init_s2b')} styles="mod-cta" changeFunc={initializeSecondBrain} />
     </SettingContainer>
 </div>
 <!-- Advanced Settings -->
