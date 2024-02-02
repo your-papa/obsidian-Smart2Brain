@@ -1,13 +1,12 @@
 <script lang="ts">
     import TextComponent from '../base/Text.svelte';
     import FFExcludeComponent from './FFExclude.svelte';
-    import { chatHistory, plugin, isIncognitoMode } from '../../store';
+    import { plugin, isIncognitoMode } from '../../store';
     import { Notice, requestUrl, setIcon } from 'obsidian';
     import { onMount } from 'svelte';
     import SettingContainer from './SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
-    import { Languages, type Language, OpenAIGenModelNames, OpenAIEmbedModelNames, Prompts } from 'papa-ts';
-    import { nanoid } from 'nanoid';
+    import { OpenAIGenModelNames, OpenAIEmbedModelNames } from 'papa-ts';
     import ToggleComponent from '../base/Toggle.svelte';
     import { DEFAULT_SETTINGS } from '../../main';
     import ButtonComponent from '../base/Button.svelte';
@@ -92,24 +91,6 @@
         isOverflowingVertically = excludeComponent.scrollHeight > baseFontSize * 1.5; //convert to rem
         if (!isOverflowingVertically) isExpanded = false;
     }
-
-    const languages: { display: Language; value: Language }[] = Object.values(Languages).map((language: Language) => ({ display: language, value: language }));
-
-    const languageChange = (selected: Language) => {
-        $plugin.data.assistantLanguage = selected;
-        $plugin.data.initialAssistantMessage = Prompts[selected].initialAssitantMessage;
-        if ($chatHistory.length === 1) {
-            chatHistory.set([
-                {
-                    role: 'Assistant',
-                    content: $plugin.data.initialAssistantMessage,
-                    id: nanoid(),
-                },
-            ]);
-            $plugin.chatView.requestSave();
-        }
-        $plugin.saveSettings();
-    };
 
     const changeOllamaBaseUrl = (newBaseUrl: string) => {
         newBaseUrl.trim();
@@ -229,10 +210,6 @@
     }
 </script>
 
-<!-- Assistant Language -->
-<SettingContainer settingName={$t('assistant_language')}
-    ><DropdownComponent selected={$plugin.data.assistantLanguage} options={languages} changeFunc={languageChange} /></SettingContainer
->
 <!-- Exclude Folders -->
 <SettingContainer settingName={$t('excludeff')}
     ><FFExcludeComponent placeholder="Folder/SubFolder" bind:inputValue={searchValue} changeFunc={addFolder} /></SettingContainer
