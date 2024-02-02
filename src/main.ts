@@ -1,5 +1,14 @@
 import { Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
-import { Papa, obsidianDocumentLoader, type Language, type OllamaGenModel, type OllamaEmbedModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
+import {
+    Papa,
+    obsidianDocumentLoader,
+    type Language,
+    type OllamaGenModel,
+    type OllamaEmbedModel,
+    type OpenAIEmbedModel,
+    type OpenAIGenModel,
+    Prompts,
+} from 'papa-ts';
 import { get } from 'svelte/store';
 import { around } from 'monkey-around';
 import { serializeChatHistory, chatHistory, plugin, settingsChanged, isIncognitoMode } from './store';
@@ -8,6 +17,7 @@ import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
 import { isOllamaRunning } from './controller/Ollama';
 import { isAPIKeyValid } from './controller/OpenAI';
+import './lang/i18n';
 
 interface PluginData {
     isChat: boolean;
@@ -26,15 +36,11 @@ interface PluginData {
     debugginLangchainKey: string;
 }
 
-export const INITIAL_ASSISTANT_MESSAGE: Map<string, string> = new Map([
-    ['de', 'Hallo, wie kann ich dir helfen?'],
-    ['en', 'Hello, how can I help you?'],
-]);
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isChat: true,
     isUsingRag: true,
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
-    initialAssistantMessage: INITIAL_ASSISTANT_MESSAGE.get(window.localStorage.getItem('language') || 'en'),
+    initialAssistantMessage: Prompts[window.localStorage.getItem('language') || 'en'].initialAssistantMessage,
     isIncognitoMode: false,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
     ollamaEmbedModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },

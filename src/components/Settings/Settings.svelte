@@ -6,14 +6,13 @@
     import { onMount } from 'svelte';
     import SettingContainer from './SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
-    import { Languages, type Language, OpenAIGenModelNames, OpenAIEmbedModelNames } from 'papa-ts';
+    import { Languages, type Language, OpenAIGenModelNames, OpenAIEmbedModelNames, Prompts } from 'papa-ts';
     import { nanoid } from 'nanoid';
     import ToggleComponent from '../base/Toggle.svelte';
     import { DEFAULT_SETTINGS } from '../../main';
     import ButtonComponent from '../base/Button.svelte';
     import { isOllamaRunning } from '../../controller/Ollama';
     import { isAPIKeyValid } from '../../controller/OpenAI';
-    import { INITIAL_ASSISTANT_MESSAGE } from '../../main';
 
     let baseFontSize: number;
     let searchValue: string;
@@ -97,7 +96,7 @@
 
     const languageChange = (selected: Language) => {
         $plugin.data.assistantLanguage = selected;
-        $plugin.data.initialAssistantMessage = INITIAL_ASSISTANT_MESSAGE.get(selected) || INITIAL_ASSISTANT_MESSAGE.get('en');
+        $plugin.data.initialAssistantMessage = Prompts[selected].initialAssitantMessage;
         if ($chatHistory.length === 1) {
             chatHistory.set([
                 {
@@ -346,4 +345,3 @@
         <TextComponent bind:this={componentDebugging} changeFunc={changeLangchainKey} />
     </SettingContainer>
 </details>
-
