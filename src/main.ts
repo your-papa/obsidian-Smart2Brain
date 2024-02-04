@@ -18,6 +18,7 @@ import SettingsTab from './views/Settings';
 import { isOllamaRunning } from './controller/Ollama';
 import { isAPIKeyValid } from './controller/OpenAI';
 import './lang/i18n';
+import { nanoid } from 'nanoid';
 
 interface PluginData {
     isChatComfy: boolean;
@@ -41,7 +42,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isChatComfy: true,
     isUsingRag: true,
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
-    initialAssistantMessage: Prompts[window.localStorage.getItem('language') || 'en'].initialAssistantMessage,
+    initialAssistantMessage: Prompts[(window.localStorage.getItem('language') as Language) || 'en'].initialAssistantMessage,
     isIncognitoMode: false,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
     ollamaEmbedModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
@@ -54,7 +55,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
         openAIApiKey: '',
     },
     targetFolder: 'Chats',
-    defaultChatName: 'Chat Second Brain',
+    defaultChatName: 'New Chat',
     excludeFF: ['Chats'],
     docRetrieveNum: 5,
     isQuickSettingsOpen: true,
@@ -218,8 +219,11 @@ export default class SecondBrainPlugin extends Plugin {
         this.app.workspace.revealLeaf(this.leaf);
     }
 
-    async saveChatHistory() {
+    async saveChat() {
         let fileName = await this.secondBrain.createTitleFromChatHistory(this.data.assistantLanguage, serializeChatHistory(get(chatHistory)));
+        // File name cannot contain any of the following characters: \ / :
+        fileName = fileName.replace(/[\\/:]/g, '');
+
         let normalizedFilePath = normalizePath(this.data.targetFolder + '/' + fileName + '.md');
         while (await this.app.vault.adapter.exists(normalizedFilePath)) {
             //Checks if already existing file has a number at the end
@@ -233,7 +237,15 @@ export default class SecondBrainPlugin extends Plugin {
             normalizedFilePath = normalizePath(this.data.targetFolder + '/' + fileName + '.md');
         }
         const newChatFile = await this.app.vault.copy(this.chatView.file, normalizedFilePath);
-
+        // delete default chat history (TODO redundant with delete chat button in input.svelte)
+        chatHistory.set([
+            {
+                role: 'Assistant',
+                content: this.data.initialAssistantMessage,
+                id: nanoid(),
+            },
+        ]);
+        await this.chatView.save();
         await this.activateView(newChatFile);
     }
 
