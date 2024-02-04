@@ -1,9 +1,11 @@
 // Credits go to Liam's Periodic Notes Plugin: https://github.com/liamcain/obsidian-periodic-notes
 
-import { App, Scope, type TAbstractFile } from 'obsidian';
-import type { ISuggestOwner } from 'obsidian';
-import { createPopper } from '@popperjs/core';
 import type { Instance as PopperInstance } from '@popperjs/core';
+import { createPopper } from '@popperjs/core';
+import type { ISuggestOwner } from 'obsidian';
+import { App, Scope, TAbstractFile, TFile, TFolder } from 'obsidian';
+import { get } from 'svelte/store';
+import { plugin } from '../../store';
 
 const wrapAround = (value: number, size: number): number => {
     return ((value % size) + size) % size;
@@ -102,7 +104,10 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
     private suggestEl: HTMLElement;
     private suggest: Suggest<T>;
 
-    constructor(protected app: App, protected inputEl: HTMLInputElement | HTMLTextAreaElement, protected excludeFF?: Array<string>) {
+    constructor(
+        protected app: App,
+        protected inputEl: HTMLInputElement | HTMLTextAreaElement
+    ) {
         this.scope = new Scope();
 
         this.suggestEl = createDiv('suggestion-container');
@@ -110,7 +115,6 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
         this.suggest = new Suggest(this, suggestion, this.scope);
 
         this.scope.register([], 'Escape', this.close.bind(this));
-
         this.inputEl.addEventListener('input', this.onInputChanged.bind(this));
         this.inputEl.addEventListener('focus', this.onInputChanged.bind(this));
         this.inputEl.addEventListener('blur', this.close.bind(this));
@@ -121,7 +125,7 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
 
     onInputChanged(): void {
         const inputStr = this.inputEl.value;
-        const suggestions = this.getSuggestions(inputStr, this.excludeFF || []);
+        const suggestions = this.getSuggestions(inputStr);
 
         if (!suggestions) {
             this.close();
@@ -179,4 +183,100 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
     abstract getSuggestions(inputStr: string, excludeFF?: Array<string>): T[];
     abstract renderSuggestion(item: T, el: HTMLElement): void;
     abstract selectSuggestion(item: T): void;
+}
+
+export class FFSuggest extends TextInputSuggest<TAbstractFile> {
+    getSuggestions(inputStr: string): TAbstractFile[] {
+        const abstractFiles = this.app.vault.getAllLoadedFiles();
+        const files: TAbstractFile[] = [];
+        const folders: TAbstractFile[] = [];
+        const lowerCaseInputStr = inputStr.toLowerCase();
+        const excludeFF = get(plugin).data.excludeFF;
+
+        function wildTest(wildcard: string, str: string): boolean {
+            const w = wildcard.replace(/[.+^${}()|[\]\\]/g, '\\$&'); // regexp escape
+            const re = new RegExp(`\\b${w.replace(/\*/g, '.*').replace(/\?/g, '.')}`, 'i');
+            return re.test(str);
+        }
+
+        abstractFiles.forEach((ff: TAbstractFile) => {
+            for (const exclude of excludeFF) {
+                if (wildTest(exclude, ff.path)) {
+                    return;
+                }
+            }
+            if (wildTest(lowerCaseInputStr, ff.path.toLowerCase())) {
+                if (ff instanceof TFile) {
+                    files.push(ff);
+                } else if (ff instanceof TFolder) {
+                    folders.push(ff);
+                }
+            }
+        });
+
+        files.sort((a, b) => a.path.localeCompare(b.path));
+        folders.sort((a, b) => a.path.localeCompare(b.path));
+        return folders.concat(files);
+    }
+
+    renderSuggestion(file: TFile, el: HTMLElement): void {
+        el.setText(file.path);
+    }
+
+    selectSuggestion(file: TFile): void {
+        this.inputEl.value = file.path;
+        this.inputEl.trigger('input');
+        this.close();
+    }
+}
+export class FileSuggest extends TextInputSuggest<TFile> {
+    getSuggestions(inputStr: string): TFile[] {
+        const abstractFiles = this.app.vault.getAllLoadedFiles();
+        const files: TFile[] = [];
+        const lowerCaseInputStr = inputStr.toLowerCase();
+
+        abstractFiles.forEach((file: TAbstractFile) => {
+            if (file instanceof TFile && file.extension === 'md' && file.path.toLowerCase().contains(lowerCaseInputStr)) {
+                files.push(file);
+            }
+        });
+
+        return files;
+    }
+
+    renderSuggestion(file: TFile, el: HTMLElement): void {
+        el.setText(file.path);
+    }
+
+    selectSuggestion(file: TFile): void {
+        this.inputEl.value = file.path;
+        this.inputEl.trigger('input');
+        this.close();
+    }
+}
+
+export class FolderSuggest extends TextInputSuggest<TFolder> {
+    getSuggestions(inputStr: string): TFolder[] {
+        const abstractFiles = this.app.vault.getAllLoadedFiles();
+        const folders: TFolder[] = [];
+        const lowerCaseInputStr = inputStr.toLowerCase();
+
+        abstractFiles.forEach((folder: TAbstractFile) => {
+            if (folder instanceof TFolder && folder.path.toLowerCase().contains(lowerCaseInputStr)) {
+                folders.push(folder);
+            }
+        });
+
+        return folders;
+    }
+
+    renderSuggestion(file: TFolder, el: HTMLElement): void {
+        el.setText(file.path);
+    }
+
+    selectSuggestion(file: TFolder): void {
+        this.inputEl.value = file.path;
+        this.inputEl.trigger('input');
+        this.close();
+    }
 }

@@ -27,7 +27,6 @@ export default defineConfig(({ mode }) => {
                     entryFileNames: 'main.js',
                     assetFileNames: 'styles.css',
                     sourcemapBaseUrl: pathToFileURL(`${__dirname}/build/smart-second-brain/`).toString(),
-                    inlineDynamicImports: true,
                 },
                 external: [
                     'obsidian',
@@ -48,7 +47,10 @@ export default defineConfig(({ mode }) => {
             },
             outDir: setOutDir(mode),
             emptyOutDir: false,
-            sourcemap: 'inline',
+            sourcemap: true,
+        },
+        css: {
+            devSourcemap: true,
         },
     };
 });
