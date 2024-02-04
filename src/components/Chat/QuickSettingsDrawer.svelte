@@ -11,9 +11,14 @@
         setIcon(node, iconId);
     };
 
-    let isOpen = true;
+    let isOpen = $plugin.data.isQuickSettingsOpen;
 
-    // TODO redundant code (settings.svelte)
+    function toggleDrawer() {
+        isOpen = !isOpen;
+        $plugin.data.isQuickSettingsOpen = isOpen;
+        $plugin.saveSettings();
+    }
+
     const languages: { display: Language; value: Language }[] = Object.values(Languages).map((language: Language) => ({ display: language, value: language }));
     const setAssistantLanguage = (selected: Language) => {
         $plugin.data.assistantLanguage = selected;
@@ -30,8 +35,8 @@
         }
         $plugin.saveSettings();
     };
-    function handleChatToggel() {
-        $plugin.data.isChat = !$plugin.data.isChat;
+    function setChatViewDensity() {
+        $plugin.data.isChatComfy = !$plugin.data.isChatComfy;
         $plugin.saveSettings();
     }
 </script>
@@ -61,7 +66,7 @@
                 <p class="inline-block m-0">Comfy Chatview</p>
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <Toggle isEnabled={$plugin.data.isChat} changeFunc={handleChatToggel} />
+                <Toggle isEnabled={$plugin.data.isChatComfy} changeFunc={setChatViewDensity} />
             </div>
             <div class="w-full flex justify-between items-center">
                 <p class="inline-block m-0">{$t('assistant_language')}</p>
@@ -78,7 +83,7 @@
                 isOpen ? 'transform rotate-180' : 'transform rotate-0'
             }`}
             use:icon={'chevron-down'}
-            on:click={() => (isOpen = !isOpen)}
+            on:click={toggleDrawer}
         />
     </div>
 </div>
