@@ -11,7 +11,7 @@ import {
 } from 'papa-ts';
 import { get } from 'svelte/store';
 import { around } from 'monkey-around';
-import { serializeChatHistory, chatHistory, plugin, settingsChanged, isIncognitoMode } from './store';
+import { serializeChatHistory, chatHistory, plugin, isIncognitoMode } from './store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
@@ -20,7 +20,7 @@ import { isAPIKeyValid } from './controller/OpenAI';
 import './lang/i18n';
 
 interface PluginData {
-    isChat: boolean;
+    isChatComfy: boolean;
     initialAssistantMessage: string;
     isUsingRag: boolean;
     assistantLanguage: Language;
@@ -34,10 +34,11 @@ interface PluginData {
     defaultChatName: string;
     docRetrieveNum: number;
     debugginLangchainKey: string;
+    isQuickSettingsOpen: boolean;
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
-    isChat: true,
+    isChatComfy: true,
     isUsingRag: true,
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     initialAssistantMessage: Prompts[window.localStorage.getItem('language') || 'en'].initialAssistantMessage,
@@ -56,6 +57,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     defaultChatName: 'Chat Second Brain',
     excludeFF: ['Chats'],
     docRetrieveNum: 5,
+    isQuickSettingsOpen: true,
 };
 
 export default class SecondBrainPlugin extends Plugin {
@@ -72,7 +74,6 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async saveSettings() {
-        settingsChanged.set(get(settingsChanged) + 1);
         await this.saveData(this.data);
     }
 
