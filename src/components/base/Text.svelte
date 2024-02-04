@@ -3,12 +3,16 @@
     export let placeholder: string = '';
     export let styles: string = '';
     export let changeFunc: (inputValue: string | number) => void;
-
+    export let focusFunc = () => {};
+    export let blurFunc = () => {};
     let inputValue: string | number = '';
 
     let inputElem: HTMLInputElement;
     export function setInputValue(value: string | number) {
         inputValue = value;
+    }
+    export function getInputValue(): string {
+        return inputValue;
     }
 </script>
 
@@ -19,9 +23,19 @@
         type="text"
         spellcheck="false"
         {placeholder}
+        on:focus={focusFunc}
+        on:blur={blurFunc}
         bind:value={inputValue}
         on:change={() => changeFunc(inputValue)}
     />
 {:else if inputType === 'number'}
-    <input type="number" spellcheck="false" {placeholder} bind:value={inputValue} on:change={() => changeFunc(inputValue)} />
+    <input
+        type="number"
+        spellcheck="false"
+        {placeholder}
+        bind:value={inputValue}
+        on:blur={blurFunc}
+        on:focus={() => focusFunc}
+        on:change={() => changeFunc(inputValue)}
+    />
 {/if}

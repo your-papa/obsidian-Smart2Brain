@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage } from '../../globals/store';
+    import { chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage } from '../../store';
     import {
         icon,
         onClick,

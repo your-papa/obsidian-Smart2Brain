@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { plugin, chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage } from '../../globals/store';
+    import { plugin, chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage } from '../../store';
     import {
         onClick,
         onMouseOver,
@@ -40,7 +40,7 @@
         {#if message.role === 'User'}
             <div class="flex justify-end mb-3">
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <div class="group px-4 rounded-t-lg rounded-bl-lg max-w-[80%] min-w-[20%]" style="background-color: hsla(var(--color-accent-hsl), 0.4);">
+                <div class="group px-4 rounded-t-lg rounded-bl-lg max-w-[80%]" style="background-color: hsla(var(--color-accent-hsl), 0.4);">
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <!-- svelte-ignore a11y-mouse-events-have-key-events -->
@@ -53,7 +53,7 @@
                     />
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <div class="flex justify-start gap-1 my-1 group-hover:opacity-100 opacity-0">
+                    <div class="flex justify-end gap-1 my-1 group-hover:opacity-100 opacity-0">
                         {#if $isEditing && editMessageId === message.id}
                             <span
                                 aria-label="Copy Text"
@@ -79,7 +79,6 @@
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-mouse-events-have-key-events -->
                 <span
-                    id="test"
                     class="break-words text-[--text-normal] *:mb-0"
                     on:mouseover={onMouseOver}
                     use:renderMarkdown={message.content}
