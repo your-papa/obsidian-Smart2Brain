@@ -196,6 +196,7 @@ export default class SecondBrainPlugin extends Plugin {
             this.leaf = this.app.workspace.getRightLeaf(false);
         }
         if (!file) {
+            // If no file is provided, open the default chat
             const chatDirExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder));
             if (!chatDirExists) {
                 await this.app.vault.createFolder(normalizePath(this.data.targetFolder));
@@ -207,11 +208,6 @@ export default class SecondBrainPlugin extends Plugin {
                       normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'),
                       'Assistant\n' + this.data.initialAssistantMessage + '\n- - - - -'
                   );
-            await this.leaf.openFile(file, { active: true });
-            await this.leaf.setViewState({
-                type: VIEW_TYPE_CHAT,
-                state: { file: file.path },
-            });
         }
         await this.leaf.openFile(file, { active: true });
         await this.leaf.setViewState({
@@ -243,7 +239,7 @@ export default class SecondBrainPlugin extends Plugin {
     registerMonkeyPatches() {
         // eslint-disable-next-line @typescript-eslint/no-this-alias
         const self = this;
-        // Monkey patch WorkspaceLeaf to open Kanbans with KanbanView by default
+        // Monkey patch WorkspaceLeaf to open Chats with ChatView by default
         this.register(
             around(WorkspaceLeaf.prototype, {
                 setViewState(next) {
@@ -254,18 +250,23 @@ export default class SecondBrainPlugin extends Plugin {
                             state.type === 'markdown' &&
                             state.state?.file
                         ) {
-                            // Then check for the kanban frontMatterKey
+                            // Then check for the chat frontMatterKey
                             // const cache = self.app.metadataCache.getCache(state.state.file);
 
                             // if (cache?.frontmatter && cache.frontmatter['second-brain-chat']) {
                             if (state.state.file.startsWith(self.data.targetFolder)) {
-                                // If we have it, force the view type to kanban
+                                // If we have it, force the view type to be chat
                                 const newState = {
                                     ...state,
                                     type: VIEW_TYPE_CHAT,
                                 };
-
-                                return next.apply(this, [newState, ...rest]);
+                                const leaves = self.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
+                                if (leaves.length) {
+                                    self.leaf = leaves[0];
+                                } else {
+                                    self.leaf = self.app.workspace.getRightLeaf(false);
+                                }
+                                return next.apply(self.leaf, [newState, ...rest]);
                             }
                         }
 
