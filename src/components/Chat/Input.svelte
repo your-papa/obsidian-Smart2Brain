@@ -93,7 +93,7 @@
                 aria-label="Save the Chat to a file"
                 class="text-[--text-normal] hover:text-[--text-accent-hover]"
                 use:icon={'save'}
-                on:click={() => $plugin.saveChatHistory()}
+                on:click={() => $plugin.saveChat()}
             />
         {/if}
         <!-- svelte-ignore a11y-click-events-have-key-events -->
