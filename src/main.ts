@@ -68,6 +68,7 @@ export default class SecondBrainPlugin extends Plugin {
     leaf: WorkspaceLeaf;
     private needsToSaveVectorStoreData = false;
     private autoSaveTimer: NodeJS.Timeout;
+    private isChatAcivatedFromRibbon = false; // workaround for a bug where the chat view is activated twice through monkey patching
 
     async loadSettings() {
         this.data = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -191,12 +192,6 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async activateView(file?: TFile) {
-        const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
-        if (leaves.length) {
-            this.leaf = leaves[0];
-        } else {
-            this.leaf = this.app.workspace.getRightLeaf(false);
-        }
         if (!file) {
             // If no file is provided, open the default chat
             const chatDirExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder));
@@ -211,6 +206,9 @@ export default class SecondBrainPlugin extends Plugin {
                       'Assistant\n' + this.data.initialAssistantMessage + '\n- - - - -'
                   );
         }
+        const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
+        this.leaf = leaves.length ? leaves[0] : this.app.workspace.getRightLeaf(false);
+        this.isChatAcivatedFromRibbon = true;
         await this.leaf.openFile(file, { active: true });
         await this.leaf.setViewState({
             type: VIEW_TYPE_CHAT,
@@ -221,7 +219,7 @@ export default class SecondBrainPlugin extends Plugin {
 
     async saveChat() {
         let fileName = await this.secondBrain.createTitleFromChatHistory(this.data.assistantLanguage, serializeChatHistory(get(chatHistory)));
-        // File name cannot contain any of the following characters: \ / :
+        // File name cannot contain any of the following characters: \/:
         fileName = fileName.replace(/[\\/:]/g, '');
 
         let normalizedFilePath = normalizePath(this.data.targetFolder + '/' + fileName + '.md');
@@ -273,11 +271,9 @@ export default class SecondBrainPlugin extends Plugin {
                                     ...state,
                                     type: VIEW_TYPE_CHAT,
                                 };
-                                const leaves = self.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
-                                if (leaves.length) {
-                                    self.leaf = leaves[0];
-                                } else {
-                                    self.leaf = self.app.workspace.getRightLeaf(false);
+                                if (!self.isChatAcivatedFromRibbon) {
+                                    const leaves = self.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
+                                    self.leaf = leaves.length ? leaves[0] : self.app.workspace.getRightLeaf(false);
                                 }
                                 return next.apply(self.leaf, [newState, ...rest]);
                             }
