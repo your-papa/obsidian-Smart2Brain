@@ -3,17 +3,15 @@
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { runSecondBrainFromChat } from '../../controller/runSecondBrain';
     import { nanoid } from 'nanoid';
-    import { plugin, chatHistory, chatInput, isEditing, isEditingAssistantMessage } from '../../store';
+    import { plugin, chatHistory, chatInput, isEditingAssistantMessage, isSecondBrainRunning } from '../../store';
 
-    let inputPlaceholder = 'Chat with your second Brain...';
-    let isProcessing: boolean;
     export let textarea: HTMLTextAreaElement;
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
     };
 
-    async function sendMessage() {
+    async function runSecondBrain() {
         if ($isEditingAssistantMessage) {
             $chatHistory[0].content = $chatInput;
             $plugin.data.initialAssistantMessage = $chatInput;
@@ -23,11 +21,6 @@
             await $plugin.saveSettings();
             return;
         }
-        if (isProcessing) {
-            new Notice('Please wait while your Second Brain is thinking...');
-            return;
-        }
-        isProcessing = true;
 
         if ($chatInput.trim() !== '') {
             let userQuery = $chatInput;
@@ -36,7 +29,6 @@
         } else {
             new Notice('Your Second Brain does not understand empty messages!');
         }
-        isProcessing = false;
     }
     function injectContext(event: KeyboardEvent): KeyboardEventHandler<HTMLInputElement> {
         if (event.key !== '[') return;
@@ -49,10 +41,6 @@
     }
 
     function handleDelete() {
-        if (isProcessing) {
-            new Notice('Please wait while your Second Brain is thinking...');
-            return;
-        }
         // delete everything except the first message
         $chatHistory = [];
         $chatHistory.push({
@@ -66,8 +54,12 @@
     function handelEnter(event: KeyboardEvent) {
         if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
-            sendMessage();
+            runSecondBrain();
         }
+    }
+
+    function stopSecondBrain() {
+        // TODO: stop the second brain
     }
 
     $: if ($chatInput) {
@@ -94,6 +86,7 @@
                 class="text-[--text-normal] hover:text-[--text-accent-hover]"
                 use:icon={'save'}
                 on:click={() => $plugin.saveChat()}
+                hidden={$isSecondBrainRunning}
             />
         {/if}
         <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -102,7 +95,7 @@
             aria-label="Toggle between chatting with your Notes or the LLM"
             on:click={handleRAGToggle}
             use:icon={'brain-circuit'}
-            class={`w-[--icon-xl] h-[--icon-xl] *:!w-[--icon-xl] *:!h-[--icon-xl] ${
+            class={`hover:text-[--text-accent-hover] w-[--icon-xl] h-[--icon-xl] *:!w-[--icon-xl] *:!h-[--icon-xl] ${
                 $plugin.data.isUsingRag ? 'text-[--color-accent]' : 'text-[--text-normal]'
             }`}
         />
@@ -114,19 +107,34 @@
                 class="text-[--text-normal] hover:text-[--text-accent-hover]"
                 on:click|preventDefault={handleDelete}
                 use:icon={'trash-2'}
+                hidden={$isSecondBrainRunning}
             />
         {/if}
     </div>
 </div>
-<form on:submit|preventDefault={sendMessage} class="sticky flex w-full gap-1">
+<div class="sticky flex w-full gap-1">
     <textarea
         bind:this={textarea}
         id="chat-view-user-input-element"
         class="h-8 flex-1 max-h-40 resize-none"
-        placeholder={inputPlaceholder}
+        placeholder={'Chat with your second Brain...'}
         bind:value={$chatInput}
         on:keydown={handelEnter}
         on:keyup={injectContext}
     />
-    <button aria-label="Ask the AI" type="submit" class="h-8 px-4 py-2 rounded-r-md hover:bg-primary transition duration-300 ease-in-out" use:icon={'send'} />
-</form>
+    {#if $isSecondBrainRunning}
+        <button
+            aria-label="Stop your Smart Second Brain"
+            on:click={stopSecondBrain}
+            class="h-8 px-4 py-2 rounded-r-md hover:bg-[--text-accent-hover] transition duration-300 ease-in-out"
+            use:icon={'pause'}
+        />
+    {:else}
+        <button
+            aria-label="Run your Smart Second Brain"
+            on:click={runSecondBrain}
+            class="h-8 px-4 py-2 rounded-r-md hover:bg-[--text-accent-hover] transition duration-300 ease-in-out"
+            use:icon={'send-horizontal'}
+        />
+    {/if}
+</div>

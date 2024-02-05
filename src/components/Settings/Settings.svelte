@@ -175,16 +175,6 @@
     };
 
     const initializeSecondBrain = async () => {
-        if ($isIncognitoMode && !(await isOllamaRunning())) {
-            new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 5000);
-            return;
-        }
-
-        if (!$isIncognitoMode && !(await isAPIKeyValid())) {
-            new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 5000);
-            return;
-        }
-
         await $plugin.initSecondBrain();
     };
 
