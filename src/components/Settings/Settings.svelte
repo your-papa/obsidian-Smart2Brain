@@ -11,6 +11,7 @@
     import { DEFAULT_SETTINGS } from '../../main';
     import ButtonComponent from '../base/Button.svelte';
     import { t } from 'svelte-i18n';
+    import Log from '../../logging';
 
     let baseFontSize: number;
     let searchValue: string;
@@ -147,7 +148,8 @@
             if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
                 return [];
             }
-            console.log(e);
+            // TODO handle better
+            Log.error(e);
         }
     }
 
@@ -193,6 +195,7 @@
 
     const changeVerbosity = () => {
         $plugin.data.isVerbose = !$plugin.data.isVerbose;
+        Log.setLogLevel($plugin.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
         $plugin.secondBrain.setLogLevel($plugin.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
         $plugin.saveSettings();
     };

@@ -1,6 +1,7 @@
 import { requestUrl } from 'obsidian';
 import { plugin } from '../store';
 import { get } from 'svelte/store';
+import Log from '../logging';
 
 export async function isOllamaRunning() {
     try {
@@ -8,7 +9,7 @@ export async function isOllamaRunning() {
         return response.status === 200;
     } catch (error) {
         if (error.toString() === 'Error: net::ERR_CONNECTION_REFUSED') console.error('Ollama is not running', error);
-        else console.error(error);
+        else Log.error(error); // handle better dont necessarily log error
         return false;
     }
 }
@@ -19,7 +20,7 @@ export async function origingsNotSet() {
         return response.status === 200;
     } catch (error) {
         if (error.toString() === 'Error: net::ERR_CONNECTION_REFUSED') console.error('Ollama is not running', error);
-        else console.error(error);
+        else Log.error(error); // handle better dont necessarily log error
         return false;
     }
 }
