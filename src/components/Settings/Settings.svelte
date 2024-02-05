@@ -10,8 +10,6 @@
     import ToggleComponent from '../base/Toggle.svelte';
     import { DEFAULT_SETTINGS } from '../../main';
     import ButtonComponent from '../base/Button.svelte';
-    import { isOllamaRunning } from '../../controller/Ollama';
-    import { isAPIKeyValid } from '../../controller/OpenAI';
     import { t } from 'svelte-i18n';
 
     let baseFontSize: number;
