@@ -1,8 +1,9 @@
 import { get } from 'svelte/store';
 import { nanoid } from 'nanoid';
-import { chatHistory as cH, isEditing, plugin as p, serializeChatHistory } from '../store';
+import { chatHistory as cH, isEditing, plugin as p, serializeChatHistory, isSecondBrainRunning } from '../store';
 
 export async function runSecondBrainFromChat(isRAG: boolean, userQuery: string) {
+    isSecondBrainRunning.set(true);
     const plugin = get(p);
 
     const responseStream = plugin.secondBrain.run({
@@ -23,5 +24,6 @@ export async function runSecondBrainFromChat(isRAG: boolean, userQuery: string) 
     for await (const response of responseStream) {
         cH.set([...chatHistory, { role: 'Assistant', content: response.content, id: nanoid() }]);
     }
-    plugin.chatView.requestSave();
+    plugin.chatView.save();
+    isSecondBrainRunning.set(false);
 }

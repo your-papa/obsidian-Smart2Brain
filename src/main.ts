@@ -1,4 +1,4 @@
-import { Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
+import { Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState, Notice } from 'obsidian';
 import {
     Papa,
     obsidianDocumentLoader,
@@ -11,7 +11,7 @@ import {
 } from 'papa-ts';
 import { get } from 'svelte/store';
 import { around } from 'monkey-around';
-import { serializeChatHistory, chatHistory, plugin, isIncognitoMode } from './store';
+import { serializeChatHistory, chatHistory, plugin, isIncognitoMode, isSecondBrainRunning } from './store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
@@ -98,6 +98,12 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async initSecondBrain() {
+        if (get(isSecondBrainRunning)) return new Notice('Smart Second Brain is still running.', 4000);
+        else if (this.data.isIncognitoMode && !(await isOllamaRunning()))
+            return new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 4000);
+        else if (this.data.isIncognitoMode && !(await isAPIKeyValid()))
+            return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);
+
         console.log(
             'Initializing second brain',
             '\nGen Model: ' + (this.data.isIncognitoMode ? this.data.ollamaGenModel.model : this.data.openAIGenModel.modelName),
@@ -132,8 +138,6 @@ export default class SecondBrainPlugin extends Plugin {
         plugin.set(this);
 
         this.app.workspace.onLayoutReady(async () => {
-            if (!((this.data.isIncognitoMode && (await isOllamaRunning())) || (!this.data.isIncognitoMode && (await isAPIKeyValid())))) return;
-
             await this.initSecondBrain();
 
             // reembed documents on change
