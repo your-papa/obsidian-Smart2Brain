@@ -6,7 +6,7 @@
     import { onMount } from 'svelte';
     import SettingContainer from './SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
-    import { OpenAIGenModelNames, OpenAIEmbedModelNames } from 'papa-ts';
+    import { OpenAIGenModelNames, OpenAIEmbedModelNames, LogLvl } from 'papa-ts';
     import ToggleComponent from '../base/Toggle.svelte';
     import { DEFAULT_SETTINGS } from '../../main';
     import ButtonComponent from '../base/Button.svelte';
@@ -185,10 +185,16 @@
 
         await $plugin.saveSettings();
     }
-    const changeLangchainKey = (newKey: string) => {
+    const changeLangsmithKey = (newKey: string) => {
         $plugin.data.debugginLangchainKey = newKey;
         $plugin.saveSettings();
         $plugin.secondBrain.setTracer($plugin.data.debugginLangchainKey);
+    };
+
+    const changeVerbosity = () => {
+        $plugin.data.isVerbose = !$plugin.data.isVerbose;
+        $plugin.secondBrain.setLogLevel($plugin.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
+        $plugin.saveSettings();
     };
 
     function toggleIncognitoMode() {
@@ -307,7 +313,11 @@
         <TextComponent inputType="number" bind:this={componentDocNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} />
     </SettingContainer>
     <!-- Debugging -->
-    <SettingContainer settingName="Debugging">
-        <TextComponent bind:this={componentDebugging} changeFunc={changeLangchainKey} />
+    <SettingContainer settingName="Debugging" isHeading={true} />
+    <SettingContainer settingName="Langsmith Key">
+        <TextComponent bind:this={componentDebugging} changeFunc={changeLangsmithKey} />
+    </SettingContainer>
+    <SettingContainer settingName="Verbose">
+        <ToggleComponent isEnabled={$plugin.data.isVerbose} changeFunc={changeVerbosity} />
     </SettingContainer>
 </details>

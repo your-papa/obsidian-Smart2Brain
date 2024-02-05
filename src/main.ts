@@ -1,24 +1,26 @@
-import { Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState, Notice } from 'obsidian';
+import { around } from 'monkey-around';
+import { nanoid } from 'nanoid';
+import { Notice, Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
 import {
     Papa,
+    Prompts,
     obsidianDocumentLoader,
     type Language,
-    type OllamaGenModel,
     type OllamaEmbedModel,
+    type OllamaGenModel,
     type OpenAIEmbedModel,
     type OpenAIGenModel,
-    Prompts,
+    LogLvl,
 } from 'papa-ts';
 import { get } from 'svelte/store';
-import { around } from 'monkey-around';
-import { serializeChatHistory, chatHistory, plugin, isIncognitoMode, isSecondBrainRunning } from './store';
-import './styles.css';
-import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
-import SettingsTab from './views/Settings';
+
 import { isOllamaRunning } from './controller/Ollama';
 import { isAPIKeyValid } from './controller/OpenAI';
 import './lang/i18n';
-import { nanoid } from 'nanoid';
+import { chatHistory, isIncognitoMode, isSecondBrainRunning, plugin, serializeChatHistory } from './store';
+import './styles.css';
+import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
+import SettingsTab from './views/Settings';
 
 interface PluginData {
     isChatComfy: boolean;
@@ -36,6 +38,7 @@ interface PluginData {
     docRetrieveNum: number;
     debugginLangchainKey: string;
     isQuickSettingsOpen: boolean;
+    isVerbose: boolean;
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
@@ -59,6 +62,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     excludeFF: ['Chats'],
     docRetrieveNum: 5,
     isQuickSettingsOpen: true,
+    isVerbose: false,
 };
 
 export default class SecondBrainPlugin extends Plugin {
@@ -113,6 +117,7 @@ export default class SecondBrainPlugin extends Plugin {
             genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
             embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
             langsmithApiKey: this.data.debugginLangchainKey || undefined,
+            logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
         });
 
         // check if vector store data exists
