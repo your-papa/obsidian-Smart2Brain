@@ -14,6 +14,6 @@ export async function isAPIKeyValid() {
         });
         return response.status === 200;
     } catch (error) {
-        console.log(error);
+        return false;
     }
 }

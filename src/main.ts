@@ -21,6 +21,7 @@ import { chatHistory, isIncognitoMode, isSecondBrainRunning, plugin, serializeCh
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
+import Log from './logging';
 
 interface PluginData {
     isChatComfy: boolean;
@@ -94,10 +95,10 @@ export default class SecondBrainPlugin extends Plugin {
 
     async saveVectorStoreData() {
         if (this.needsToSaveVectorStoreData) {
-            console.log('saving vector store data');
+            Log.debug('Saving vector store data');
             this.needsToSaveVectorStoreData = false;
             await this.app.vault.adapter.writeBinary(this.getVectorStorePath(), await this.secondBrain.getData());
-            console.log('saved vector store data');
+            Log.info('Saved vector store data');
         }
     }
 
@@ -108,7 +109,7 @@ export default class SecondBrainPlugin extends Plugin {
         else if (this.data.isIncognitoMode && !(await isAPIKeyValid()))
             return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);
 
-        console.log(
+        Log.info(
             'Initializing second brain',
             '\nGen Model: ' + (this.data.isIncognitoMode ? this.data.ollamaGenModel.model : this.data.openAIGenModel.modelName),
             '\nEmbed Model: ' + (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName)
@@ -141,6 +142,7 @@ export default class SecondBrainPlugin extends Plugin {
     async onload() {
         await this.loadSettings();
         plugin.set(this);
+        Log.setLogLevel(this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
 
         this.app.workspace.onLayoutReady(async () => {
             await this.initSecondBrain();
@@ -197,7 +199,7 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async onunload() {
-        console.log('unloading plugin');
+        Log.info('Unloading plugin');
     }
 
     async activateView(file?: TFile) {
