@@ -145,12 +145,15 @@ export default class SecondBrainPlugin extends Plugin {
             await this.initSecondBrain();
 
             // reembed documents on change
-            this.app.metadataCache.on('changed', async (file: TFile) => {
-                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                const docs = await obsidianDocumentLoader(this.app, [file]);
-                await this.secondBrain.embedDocuments(docs, 'byFile');
-                this.needsToSaveVectorStoreData = true;
-            });
+            this.registerEvent(
+                this.app.metadataCache.on('changed', async (file: TFile) => {
+                    for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                    const docs = await obsidianDocumentLoader(this.app, [file]);
+                    await this.secondBrain.embedDocuments(docs, 'byFile');
+                    this.needsToSaveVectorStoreData = true;
+                })
+            );
+
             this.registerEvent(
                 this.app.vault.on('delete', async (file: TFile) => {
                     for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
