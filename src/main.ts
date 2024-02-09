@@ -72,7 +72,7 @@ export default class SecondBrainPlugin extends Plugin {
     secondBrain: Papa;
     leaf: WorkspaceLeaf;
     private needsToSaveVectorStoreData = false;
-    private autoSaveTimer: NodeJS.Timeout;
+    private autoSaveTimer: number;
     private isChatAcivatedFromRibbon = false; // workaround for a bug where the chat view is activated twice through monkey patching
 
     async loadSettings() {
@@ -173,8 +173,8 @@ export default class SecondBrainPlugin extends Plugin {
             window.addEventListener('blur', () => this.saveVectorStoreData());
 
             const resetAutoSaveTimer = () => {
-                clearTimeout(this.autoSaveTimer);
-                this.autoSaveTimer = setTimeout(() => this.saveVectorStoreData(), 30 * 1000);
+                window.clearTimeout(this.autoSaveTimer);
+                this.autoSaveTimer = window.setTimeout(() => this.saveVectorStoreData(), 30 * 1000);
             };
             // listen for any event to reset the timer
             window.addEventListener('mousemove', () => resetAutoSaveTimer());
