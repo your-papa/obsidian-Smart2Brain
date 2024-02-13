@@ -10,6 +10,8 @@
     import ToggleComponent from '../base/Toggle.svelte';
     import { DEFAULT_SETTINGS } from '../../main';
     import ButtonComponent from '../base/Button.svelte';
+    import { changeOllamaBaseUrl, getOllamaGenModel, isOllamaRunning, ollamaEmbedChange } from '../../controller/Ollama';
+    import { isAPIKeyValid } from '../../controller/OpenAI';
     import { t } from 'svelte-i18n';
     import Log from '../../logging';
 
@@ -22,7 +24,6 @@
     let componentBaseUrl: TextComponent;
     let componentApiKey: TextComponent;
     let ollamaModels: { display: string; value: string }[] = [];
-    let isSecretVisible: boolean = false;
     let componentDocNum: TextComponent;
     const openAIGenModels: { display: string; value: string }[] = Object.values(OpenAIGenModelNames).map((model: string) => ({
         display: model,
@@ -91,20 +92,6 @@
         if (!isOverflowingVertically) isExpanded = false;
     }
 
-    const changeOllamaBaseUrl = (newBaseUrl: string) => {
-        newBaseUrl.trim();
-        if (newBaseUrl.endsWith('/')) newBaseUrl = newBaseUrl.slice(0, -1);
-        $plugin.data.ollamaGenModel.baseUrl = newBaseUrl;
-        $plugin.data.ollamaEmbedModel.baseUrl = newBaseUrl;
-        try {
-            // check if url is valid
-            new URL($plugin.data.ollamaGenModel.baseUrl);
-            styleOllamaBaseUrl = 'bg-[--background-modifier-form-field]';
-        } catch (_) {
-            styleOllamaBaseUrl = 'bg-[--background-modifier-error]';
-        }
-        $plugin.saveSettings();
-    };
     const changeApiKey = (newApiKey: string) => {
         newApiKey.trim();
         $plugin.data.openAIGenModel.openAIApiKey = newApiKey;
@@ -122,45 +109,18 @@
 
     const hideApiKey = () => {
         if ($plugin.data.openAIGenModel.openAIApiKey.trim() === '') return;
-        isSecretVisible = false;
         const apiKey = $plugin.data.openAIGenModel.openAIApiKey;
         componentApiKey.setInputValue(apiKey.substring(0, 6) + '...' + apiKey.substring(apiKey.length - 3));
     };
 
     const showApiKey = () => {
         if ($plugin.data.openAIGenModel.openAIApiKey.trim() === '') return;
-        isSecretVisible = true;
         componentApiKey.setInputValue($plugin.data.openAIGenModel.openAIApiKey);
     };
-
-    async function getOllamaGenModel(): Promise<{ display: string; value: string }[]> {
-        try {
-            const modelsRes = await requestUrl({
-                url: $plugin.data.ollamaGenModel.baseUrl + '/api/tags',
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            });
-            const models: String[] = modelsRes.json.models.map((model: { name: string }) => model.name);
-            return models.map((model: string) => ({ display: model.replace(':latest', ''), value: model.replace(':latest', '') }));
-        } catch (e) {
-            if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
-                return [];
-            }
-            // TODO handle better
-            Log.error(e);
-        }
-    }
 
     const ollamaGenChange = (selected: string) => {
         //TODO Modle types
         $plugin.data.ollamaGenModel.model = selected;
-        $plugin.saveSettings();
-    };
-    const ollamaEmbedChange = (selected: string) => {
-        //TODO Modle types
-        $plugin.data.ollamaEmbedModel.model = selected;
         $plugin.saveSettings();
     };
     const openAIGenChange = (selected: string) => {
@@ -175,7 +135,17 @@
     };
 
     const initializeSecondBrain = async () => {
-        await $plugin.initSecondBrain();
+        if ($isIncognitoMode && !(await isOllamaRunning())) {
+            new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 5000);
+            return;
+        }
+
+        if (!$isIncognitoMode && !(await isAPIKeyValid())) {
+            new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 5000);
+            return;
+        }
+
+        await $plugin.initPapa();
     };
 
     async function changeDocNum(docNum: number) {
@@ -256,6 +226,7 @@
             /></SettingContainer
         >
         <!-- Ollama URL -->
+        <!--TODO: styles from Ollama.ts-->
         <SettingContainer settingName="Ollama URL">
             <ButtonComponent iconId={'rotate-cw'} changeFunc={resetOllamaBaseUrl} />
             <TextComponent bind:this={componentBaseUrl} styles={styleOllamaBaseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
@@ -282,6 +253,7 @@
         >
         <!-- OpenAI API Key -->
         <SettingContainer settingName="API Key">
+            <!--TODO: Cange to openAI styles-->
             <TextComponent
                 bind:this={componentApiKey}
                 styles={styleOllamaBaseUrl}

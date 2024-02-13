@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { isSecondBrainRunning, chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage } from '../../store';
+    import { isPapaRunning, chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage } from '../../store';
     import {
         onClick,
         onMouseOver,
@@ -22,7 +22,7 @@
 
     let isAutoScrolling = true;
     let chatWindow: HTMLDivElement;
-    $: if (chatWindow && $isSecondBrainRunning && isAutoScrolling && $chatHistory) {
+    $: if (chatWindow && $isPapaRunning && isAutoScrolling && $chatHistory) {
         chatWindow.scrollTop = chatWindow.scrollHeight;
     }
 

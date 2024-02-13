@@ -13,14 +13,14 @@ import {
     LogLvl,
 } from 'papa-ts';
 import { get } from 'svelte/store';
-
-import { isOllamaRunning } from './controller/Ollama';
-import { isAPIKeyValid } from './controller/OpenAI';
-import './lang/i18n';
-import { chatHistory, isIncognitoMode, isSecondBrainRunning, plugin, serializeChatHistory } from './store';
+import { serializeChatHistory, chatHistory, plugin, isIncognitoMode, isPapaRunning } from './store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
+import { isOllamaRunning } from './controller/Ollama';
+import { isAPIKeyValid } from './controller/OpenAI';
+import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
+import './lang/i18n';
 import Log from './logging';
 
 interface PluginData {
@@ -68,6 +68,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
 
 export default class SecondBrainPlugin extends Plugin {
     data: PluginData;
+    setupView: SetupView;
     chatView: ChatView;
     secondBrain: Papa;
     leaf: WorkspaceLeaf;
@@ -91,7 +92,7 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async saveVectorStoreData() {
-        if (this.needsToSaveVectorStoreData) {
+        if (this.needsToSaveVectorStoreData && this.secondBrain) {
             Log.debug('Saving vector store data');
             this.needsToSaveVectorStoreData = false;
             await this.app.vault.adapter.writeBinary(this.getVectorStorePath(), await this.secondBrain.getData());
@@ -99,8 +100,9 @@ export default class SecondBrainPlugin extends Plugin {
         }
     }
 
-    async initSecondBrain() {
-        if (get(isSecondBrainRunning)) return new Notice('Smart Second Brain is still running.', 4000);
+    async initPapa() {
+        console.log('initPapa');
+        if (get(isPapaRunning)) return new Notice('Smart Second Brain is still running.', 4000);
         else if (this.data.isIncognitoMode && !(await isOllamaRunning()))
             return new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 4000);
         else if (this.data.isIncognitoMode && !(await isAPIKeyValid()))
@@ -142,48 +144,60 @@ export default class SecondBrainPlugin extends Plugin {
         Log.setLogLevel(this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
 
         this.app.workspace.onLayoutReady(async () => {
-            await this.initSecondBrain();
+            if (!((this.data.isIncognitoMode && (await isOllamaRunning())) || (!this.data.isIncognitoMode && (await isAPIKeyValid())))) return;
+            await this.initPapa();
+        });
+        // reembed documents on change
+        this.registerEvent(
+            this.app.metadataCache.on('changed', async (file: TFile) => {
+                if (!this.secondBrain) return;
+                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                const docs = await obsidianDocumentLoader(this.app, [file]);
+                await this.secondBrain.embedDocuments(docs, 'byFile');
+                this.needsToSaveVectorStoreData = true;
+            })
+        );
 
-            // reembed documents on change
-            this.registerEvent(
-                this.app.metadataCache.on('changed', async (file: TFile) => {
-                    for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                    const docs = await obsidianDocumentLoader(this.app, [file]);
-                    await this.secondBrain.embedDocuments(docs, 'byFile');
-                    this.needsToSaveVectorStoreData = true;
-                })
-            );
+        this.registerEvent(
+            this.app.vault.on('delete', async (file: TFile) => {
+                if (!this.secondBrain) return;
+                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                const docs = await obsidianDocumentLoader(this.app, [file]);
+                await this.secondBrain.deleteDocuments({ docs });
+                this.needsToSaveVectorStoreData = true;
+            })
+        );
+        this.registerEvent(
+            this.app.vault.on('rename', async (file: TFile, oldPath: string) => {
+                if (!this.secondBrain) return;
+                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                await this.secondBrain.deleteDocuments({ sources: [oldPath] });
+                const docs = await obsidianDocumentLoader(this.app, [file]);
+                await this.secondBrain.embedDocuments(docs, 'byFile');
+                this.needsToSaveVectorStoreData = true;
+            })
+        );
 
-            this.registerEvent(
-                this.app.vault.on('delete', async (file: TFile) => {
-                    for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                    const docs = await obsidianDocumentLoader(this.app, [file]);
-                    await this.secondBrain.deleteDocuments({ docs });
-                    this.needsToSaveVectorStoreData = true;
-                })
-            );
-            this.registerEvent(
-                this.app.vault.on('rename', async (file: TFile, oldPath: string) => {
-                    for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
-                    await this.secondBrain.deleteDocuments({ sources: [oldPath] });
-                    const docs = await obsidianDocumentLoader(this.app, [file]);
-                    await this.secondBrain.embedDocuments(docs, 'byFile');
-                    this.needsToSaveVectorStoreData = true;
-                })
-            );
+        // periodically or on unfocus save vector store data to disk
+        window.addEventListener('blur', () => this.saveVectorStoreData());
 
-            // periodically or on unfocus save vector store data to disk
-            window.addEventListener('blur', () => this.saveVectorStoreData());
+        const resetAutoSaveTimer = () => {
+            window.clearTimeout(this.autoSaveTimer);
+            this.autoSaveTimer = window.setTimeout(() => this.saveVectorStoreData(), 30 * 1000);
+        };
+        // listen for any event to reset the timer
+        window.addEventListener('mousemove', () => resetAutoSaveTimer());
+        window.addEventListener('mousedown', () => resetAutoSaveTimer());
+        window.addEventListener('keypress', () => resetAutoSaveTimer());
+        window.addEventListener('scroll', () => resetAutoSaveTimer());
 
-            const resetAutoSaveTimer = () => {
-                window.clearTimeout(this.autoSaveTimer);
-                this.autoSaveTimer = window.setTimeout(() => this.saveVectorStoreData(), 30 * 1000);
-            };
-            // listen for any event to reset the timer
-            window.addEventListener('mousemove', () => resetAutoSaveTimer());
-            window.addEventListener('mousedown', () => resetAutoSaveTimer());
-            window.addEventListener('keypress', () => resetAutoSaveTimer());
-            window.addEventListener('scroll', () => resetAutoSaveTimer());
+        if (!this.secondBrain) {
+            this.app.workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
+        }
+
+        this.registerView(VIEW_TYPE_SETUP, (leaf) => {
+            this.setupView = new SetupView(leaf);
+            return this.setupView;
         });
 
         this.registerView(VIEW_TYPE_CHAT, (leaf) => {
@@ -203,6 +217,28 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async activateView(file?: TFile) {
+        if (this.secondBrain === undefined) {
+            const { workspace } = this.app;
+            workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
+
+            let leaf: WorkspaceLeaf | null = null;
+            const leaves = workspace.getLeavesOfType(VIEW_TYPE_SETUP);
+
+            if (leaves.length > 0) {
+                // A leaf with our view already exists, use that
+                leaf = leaves[0];
+            } else {
+                // Our view could not be found in the workspace, create a new leaf
+                // in the right sidebar for it
+                leaf = workspace.getRightLeaf(false);
+                await leaf.setViewState({ type: VIEW_TYPE_SETUP, active: true });
+            }
+
+            // "Reveal" the leaf in case it is in a collapsed sidebar
+            workspace.revealLeaf(leaf);
+            return;
+        }
+        this.app.workspace.detachLeavesOfType(VIEW_TYPE_SETUP);
         if (!file) {
             // If no file is provided, open the default chat
             const chatDirExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder));
