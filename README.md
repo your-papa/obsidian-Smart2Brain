@@ -42,7 +42,7 @@ $ launchctl setenv OLLAMA_ORIGINS "*"
     - with curl:
     
     ```zsh
-    $ curl https://ollama.ai/install.sh | sh
+    $ curl -fsSL https://ollama.ai/install.sh | sh
     ```
     
     - or [manually](https://github.com/ollama/ollama/blob/main/docs/linux.md) with binaries.
@@ -59,7 +59,7 @@ $ OLLAMA_ORIGINS="*" ollama serve
 
     - with curl: 
     ```zsh
-    $ curl https://ollama.ai/install.sh | sh
+    $ curl -fsSL https://ollama.ai/install.sh | sh
     ```
 
    - or [manually](https://github.com/ollama/ollama/blob/main/docs/linux.md) with binaries.
