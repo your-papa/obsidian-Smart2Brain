@@ -1,7 +1,13 @@
 <script lang="ts">
-    import { isOllamaRunning, isOriginSet } from '../../controller/Ollama';
+    import { getOllamaGenModel, isOllamaRunning, isOriginSet, ollamaEmbedChange } from '../../controller/Ollama';
     import { icon, renderMarkdown } from '../../controller/Messages';
     import { plugin } from '../../store';
+    import DropdownComponent from '../base/Dropdown.svelte';
+    import InitButtonComponent from './InitButton.svelte';
+
+    let ollamaModels: { display: string; value: string }[] = [];
+    let ollamaModelComponent: DropdownComponent;
+    let model: string = '';
 
     let isRunning: boolean = false;
     let isOrigin: boolean = false;
@@ -29,20 +35,27 @@
     <p class="w-max *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\n$ launchctl setenv OLLAMA_ORIGINS "*"\n```')} />
     <li>Restart the Ollama service (click menu bar icon and then quit)</li>
     <li>
-        <button on:click={async () => (isOrigin = await isOriginSet())}>Check if the origins are set correctly</button>
+        <button
+            on:click={async () => {
+                isOrigin = await isOriginSet();
+                ollamaModels = await getOllamaGenModel();
+            }}>Check if Ollama is running and the origins are set correctly</button
+        >
     </li>
     {#if isOrigin}
         <div class="flex items-center gap-5">
             <p>Origins are correctly set!</p>
             <div class=" *:text-[--background-modifier-success]" use:icon={'check'} />
         </div>
-        <button
-            class="mod-cta"
-            on:click={async () => {
-                $plugin.data.isIncognitoMode = true;
-                await $plugin.initPapa();
-            }}>Initialize your Second Brain</button
-        >
-        <p>Hurray! Your Smart Second Brain is ready!</p>
+        <li>
+            Install an Ollama Model and set it
+            <div class="flex items-center gap-1">
+                <button class="clickable-icon" use:icon={'refresh-ccw'} on:click={async () => (ollamaModels = await getOllamaGenModel())} />
+                <DropdownComponent bind:this={ollamaModelComponent} selected={model} options={ollamaModels} changeFunc={ollamaEmbedChange} />
+            </div>
+        </li>
+        {#if $plugin.data.ollamaEmbedModel.model}
+            <InitButtonComponent />
+        {/if}
     {/if}
 {/if}
