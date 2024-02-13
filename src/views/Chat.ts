@@ -67,6 +67,8 @@ export class ChatView extends TextFileView implements HoverParent {
     }
 
     async onUnloadFile(file: TFile) {
+        console.log('unloading file');
+
         this.clear();
         this.component.$destroy();
         return await super.onUnloadFile(file);

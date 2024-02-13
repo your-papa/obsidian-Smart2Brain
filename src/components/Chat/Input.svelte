@@ -3,7 +3,7 @@
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { runSecondBrainFromChat } from '../../controller/runSecondBrain';
     import { nanoid } from 'nanoid';
-    import { plugin, chatHistory, chatInput, isEditingAssistantMessage, isSecondBrainRunning } from '../../store';
+    import { plugin, chatHistory, chatInput, isEditingAssistantMessage, isPapaRunning } from '../../store';
 
     export let textarea: HTMLTextAreaElement;
 
@@ -86,7 +86,7 @@
                 class="text-[--text-normal] hover:text-[--text-accent-hover]"
                 use:icon={'save'}
                 on:click={() => $plugin.saveChat()}
-                hidden={$isSecondBrainRunning}
+                hidden={$isPapaRunning}
             />
         {/if}
         <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -107,7 +107,7 @@
                 class="text-[--text-normal] hover:text-[--text-accent-hover]"
                 on:click|preventDefault={handleDelete}
                 use:icon={'trash-2'}
-                hidden={$isSecondBrainRunning}
+                hidden={$isPapaRunning}
             />
         {/if}
     </div>
@@ -122,7 +122,7 @@
         on:keydown={handelEnter}
         on:keyup={injectContext}
     />
-    {#if $isSecondBrainRunning}
+    {#if $isPapaRunning}
         <button
             aria-label="Stop your Smart Second Brain"
             on:click={stopSecondBrain}
