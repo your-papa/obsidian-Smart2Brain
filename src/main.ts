@@ -87,7 +87,10 @@ export default class SecondBrainPlugin extends Plugin {
 
     private getVectorStorePath() {
         return normalizePath(
-            this.manifest.dir + (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName) + '-vector-store.bin'
+            this.manifest.dir +
+                '/' +
+                (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName) +
+                '-vector-store.bin'
         );
     }
 
@@ -96,6 +99,7 @@ export default class SecondBrainPlugin extends Plugin {
             Log.debug('Saving vector store data');
             this.needsToSaveVectorStoreData = false;
             await this.app.vault.adapter.writeBinary(this.getVectorStorePath(), await this.secondBrain.getData());
+            Log.info(this.getVectorStorePath());
             Log.info('Saved vector store data');
         }
     }

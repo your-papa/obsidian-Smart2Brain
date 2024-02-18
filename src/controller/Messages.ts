@@ -111,7 +111,7 @@ export const onMouseOver = (e: MouseEvent): void => {
 };
 
 export const toClipboard = (messageText: string) => {
-    clipboard.writeText(messageText);
+    navigator.clipboard.writeText(messageText);
     new Notice(`Copied to clipboard:\n${messageText}`);
 };
 
