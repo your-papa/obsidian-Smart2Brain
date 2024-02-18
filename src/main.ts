@@ -99,7 +99,6 @@ export default class SecondBrainPlugin extends Plugin {
             Log.debug('Saving vector store data');
             this.needsToSaveVectorStoreData = false;
             await this.app.vault.adapter.writeBinary(this.getVectorStorePath(), await this.secondBrain.getData());
-            Log.info(this.getVectorStorePath());
             Log.info('Saved vector store data');
         }
     }
