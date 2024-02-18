@@ -16,6 +16,7 @@
 
     onMount(() => {
         new FFSuggest($plugin.app, inputElem);
+        setTimeout(() => inputElem.blur(), 100);
     });
 </script>
 

@@ -9,10 +9,10 @@ export type ChatMessage = {
 export const plugin = writable<SecondBrainPlugin>();
 export const chatHistory = writable<ChatMessage[]>([]);
 export const isEditing = writable<boolean>(false);
-export const isIncognitoMode = writable<boolean>(false);
+export const isPapaRunning = writable<boolean>(false);
+export const isIncognitoMode = writable<boolean>();
 export const isEditingAssistantMessage = writable<boolean>();
 export const chatInput = writable<string>('');
-export const settingsChanged = writable<number>(1);
 // Does this work? / refactoring
 export const serializeChatHistory = (cH: ChatMessage[]) =>
     cH
