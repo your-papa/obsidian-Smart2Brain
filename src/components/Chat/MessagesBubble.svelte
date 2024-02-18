@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { plugin, chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage } from '../../store';
+    import { isPapaRunning, chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage } from '../../store';
     import {
         onClick,
         onMouseOver,
@@ -20,6 +20,12 @@
     let initialAssistantMessageSpan: HTMLSpanElement;
     let editMessageId: string;
 
+    let isAutoScrolling = true;
+    let chatWindow: HTMLDivElement;
+    $: if (chatWindow && $isPapaRunning && isAutoScrolling && $chatHistory) {
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
     $: if ($isEditing) {
         editElem.innerText = '';
         renderMarkdown(editElem, $chatInput);
@@ -35,7 +41,11 @@
     }
 </script>
 
-<div class="chat-window select-text flex-grow w-full overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border] mb-1 p-4">
+<div
+    bind:this={chatWindow}
+    on:scroll={() => (isAutoScrolling = chatWindow.scrollTop + chatWindow.clientHeight + 1 >= chatWindow.scrollHeight)}
+    class="chat-window select-text flex-grow w-full overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border] mb-1 p-4"
+>
     {#each $chatHistory as message (message.id)}
         {#if message.role === 'User'}
             <div class="flex justify-end mb-3">

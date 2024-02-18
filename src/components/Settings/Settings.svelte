@@ -6,13 +6,14 @@
     import { onMount } from 'svelte';
     import SettingContainer from './SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
-    import { OpenAIGenModelNames, OpenAIEmbedModelNames } from 'papa-ts';
+    import { OpenAIGenModelNames, OpenAIEmbedModelNames, LogLvl } from 'papa-ts';
     import ToggleComponent from '../base/Toggle.svelte';
     import { DEFAULT_SETTINGS } from '../../main';
     import ButtonComponent from '../base/Button.svelte';
-    import { isOllamaRunning } from '../../controller/Ollama';
+    import { changeOllamaBaseUrl, getOllamaGenModel, isOllamaRunning, ollamaEmbedChange } from '../../controller/Ollama';
     import { isAPIKeyValid } from '../../controller/OpenAI';
     import { t } from 'svelte-i18n';
+    import Log from '../../logging';
 
     let baseFontSize: number;
     let searchValue: string;
@@ -23,7 +24,6 @@
     let componentBaseUrl: TextComponent;
     let componentApiKey: TextComponent;
     let ollamaModels: { display: string; value: string }[] = [];
-    let isSecretVisible: boolean = false;
     let componentDocNum: TextComponent;
     const openAIGenModels: { display: string; value: string }[] = Object.values(OpenAIGenModelNames).map((model: string) => ({
         display: model,
@@ -92,20 +92,6 @@
         if (!isOverflowingVertically) isExpanded = false;
     }
 
-    const changeOllamaBaseUrl = (newBaseUrl: string) => {
-        newBaseUrl.trim();
-        if (newBaseUrl.endsWith('/')) newBaseUrl = newBaseUrl.slice(0, -1);
-        $plugin.data.ollamaGenModel.baseUrl = newBaseUrl;
-        $plugin.data.ollamaEmbedModel.baseUrl = newBaseUrl;
-        try {
-            // check if url is valid
-            new URL($plugin.data.ollamaGenModel.baseUrl);
-            styleOllamaBaseUrl = 'bg-[--background-modifier-form-field]';
-        } catch (_) {
-            styleOllamaBaseUrl = 'bg-[--background-modifier-error]';
-        }
-        $plugin.saveSettings();
-    };
     const changeApiKey = (newApiKey: string) => {
         newApiKey.trim();
         $plugin.data.openAIGenModel.openAIApiKey = newApiKey;
@@ -123,44 +109,18 @@
 
     const hideApiKey = () => {
         if ($plugin.data.openAIGenModel.openAIApiKey.trim() === '') return;
-        isSecretVisible = false;
         const apiKey = $plugin.data.openAIGenModel.openAIApiKey;
         componentApiKey.setInputValue(apiKey.substring(0, 6) + '...' + apiKey.substring(apiKey.length - 3));
     };
 
     const showApiKey = () => {
         if ($plugin.data.openAIGenModel.openAIApiKey.trim() === '') return;
-        isSecretVisible = true;
         componentApiKey.setInputValue($plugin.data.openAIGenModel.openAIApiKey);
     };
-
-    async function getOllamaGenModel(): Promise<{ display: string; value: string }[]> {
-        try {
-            const modelsRes = await requestUrl({
-                url: $plugin.data.ollamaGenModel.baseUrl + '/api/tags',
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            });
-            const models: String[] = modelsRes.json.models.map((model: { name: string }) => model.name);
-            return models.map((model: string) => ({ display: model.replace(':latest', ''), value: model.replace(':latest', '') }));
-        } catch (e) {
-            if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
-                return [];
-            }
-            console.log(e);
-        }
-    }
 
     const ollamaGenChange = (selected: string) => {
         //TODO Modle types
         $plugin.data.ollamaGenModel.model = selected;
-        $plugin.saveSettings();
-    };
-    const ollamaEmbedChange = (selected: string) => {
-        //TODO Modle types
-        $plugin.data.ollamaEmbedModel.model = selected;
         $plugin.saveSettings();
     };
     const openAIGenChange = (selected: string) => {
@@ -185,7 +145,7 @@
             return;
         }
 
-        await $plugin.initSecondBrain();
+        await $plugin.initPapa();
     };
 
     async function changeDocNum(docNum: number) {
@@ -197,10 +157,17 @@
 
         await $plugin.saveSettings();
     }
-    const changeLangchainKey = (newKey: string) => {
+    const changeLangsmithKey = (newKey: string) => {
         $plugin.data.debugginLangchainKey = newKey;
         $plugin.saveSettings();
         $plugin.secondBrain.setTracer($plugin.data.debugginLangchainKey);
+    };
+
+    const changeVerbosity = () => {
+        $plugin.data.isVerbose = !$plugin.data.isVerbose;
+        Log.setLogLevel($plugin.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
+        $plugin.secondBrain.setLogLevel($plugin.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
+        $plugin.saveSettings();
     };
 
     function toggleIncognitoMode() {
@@ -259,6 +226,7 @@
             /></SettingContainer
         >
         <!-- Ollama URL -->
+        <!--TODO: styles from Ollama.ts-->
         <SettingContainer settingName="Ollama URL">
             <ButtonComponent iconId={'rotate-cw'} changeFunc={resetOllamaBaseUrl} />
             <TextComponent bind:this={componentBaseUrl} styles={styleOllamaBaseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
@@ -285,6 +253,7 @@
         >
         <!-- OpenAI API Key -->
         <SettingContainer settingName="API Key">
+            <!--TODO: Cange to openAI styles-->
             <TextComponent
                 bind:this={componentApiKey}
                 styles={styleOllamaBaseUrl}
@@ -319,7 +288,11 @@
         <TextComponent inputType="number" bind:this={componentDocNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} />
     </SettingContainer>
     <!-- Debugging -->
-    <SettingContainer settingName="Debugging">
-        <TextComponent bind:this={componentDebugging} changeFunc={changeLangchainKey} />
+    <SettingContainer settingName="Debugging" isHeading={true} />
+    <SettingContainer settingName="Langsmith Key">
+        <TextComponent bind:this={componentDebugging} changeFunc={changeLangsmithKey} />
+    </SettingContainer>
+    <SettingContainer settingName="Verbose">
+        <ToggleComponent isEnabled={$plugin.data.isVerbose} changeFunc={changeVerbosity} />
     </SettingContainer>
 </details>

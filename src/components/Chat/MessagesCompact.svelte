@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage } from '../../store';
+    import { chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage, isPapaRunning } from '../../store';
     import {
         icon,
         onClick,
@@ -19,6 +19,12 @@
     let initialAssistantMessageSpan: HTMLSpanElement;
     let editMessageId: string;
 
+    let isAutoScrolling = true;
+    let chatWindow: HTMLDivElement;
+    $: if (chatWindow && $isPapaRunning && isAutoScrolling && $chatHistory) {
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
     $: if ($isEditing) {
         editElem.innerText = '';
         renderMarkdown(editElem, $chatInput);
@@ -34,7 +40,11 @@
     }
 </script>
 
-<div class="flex-grow w-full select-text overflow-y-scroll rounded-md mb-1 border border-solid border-[--background-modifier-border]">
+<div
+    bind:this={chatWindow}
+    on:scroll={() => (isAutoScrolling = chatWindow.scrollTop + chatWindow.clientHeight + 1 >= chatWindow.scrollHeight)}
+    class="flex-grow w-full select-text overflow-y-scroll rounded-md mb-1 border border-solid border-[--background-modifier-border]"
+>
     {#each $chatHistory as message (message.id)}
         {#if message.role === 'User'}
             <div class="group bg-[--background-secondary] p-2 border-x-0 border-t-0 border-b border-solid border-[--background-modifier-border]">

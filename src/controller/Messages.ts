@@ -9,9 +9,15 @@ import { nanoid } from 'nanoid';
 const noBreakSpace = /\u00A0/g;
 let temporaryEditingHistory: ChatMessage[] = [];
 
+//TOOD: change sourcePath to sourceFile
 export const renderMarkdown = (node: HTMLElement, content: string) => {
     const plugin = get(p);
     MarkdownRenderer.render(plugin.app, content, node, 'Chat view.md', plugin);
+    const codeElem = node.querySelector('.copy-code-button');
+    if (codeElem) {
+        codeElem.className = 'clickable-icon';
+        icon(codeElem as HTMLElement, 'copy');
+    }
 };
 
 export const icon = (node: HTMLElement, iconId: string) => {
@@ -105,7 +111,7 @@ export const onMouseOver = (e: MouseEvent): void => {
 };
 
 export const toClipboard = (messageText: string) => {
-    clipboard.writeText(messageText);
+    navigator.clipboard.writeText(messageText);
     new Notice(`Copied to clipboard:\n${messageText}`);
 };
 
