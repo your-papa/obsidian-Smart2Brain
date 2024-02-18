@@ -34,7 +34,6 @@
     "type": "module",
     "dependencies": {
         "@popperjs/core": "^2.11.8",
-        "electron": "^27.0.3",
         "i18next": "^23.8.2",
         "monkey-around": "^2.3.0",
         "nanoid": "^5.0.4",

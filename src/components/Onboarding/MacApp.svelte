@@ -11,6 +11,7 @@
 
     let isRunning: boolean = false;
     let isOrigin: boolean = false;
+    $: if (ollamaModelComponent) model = $plugin.data.ollamaEmbedModel.model;
 </script>
 
 <li>
