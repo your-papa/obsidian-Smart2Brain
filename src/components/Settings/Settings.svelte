@@ -35,6 +35,10 @@
     }));
     let componentDebugging: TextComponent;
 
+    $: if (componentDebugging) {
+        componentDebugging.setInputValue($plugin.data.debugginLangchainKey);
+    }
+
     onMount(async () => {
         baseFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize);
         if (excludeComponent) checkOverflow(excludeComponent);
