@@ -1,11 +1,14 @@
 <script lang="ts">
-    import { plugin } from '../../store';
+    import { plugin, isIncognitoMode } from '../../store';
+    export let isInIncognitoMode: boolean;
 </script>
 
 <button
     class="mod-cta"
     on:click={async () => {
-        $plugin.data.isIncognitoMode = true;
+        $isIncognitoMode = isInIncognitoMode;
+        $plugin.data.isIncognitoMode = $isIncognitoMode;
+        $plugin.saveSettings();
         await $plugin.initPapa();
     }}>Initialize your Second Brain</button
 >

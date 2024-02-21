@@ -67,7 +67,7 @@
             </div>
         </li>
         {#if $plugin.data.ollamaEmbedModel.model}
-            <InitButtonComponent />
+            <InitButtonComponent isInIncognitoMode={true} />
         {/if}
     {/if}
 </ol>

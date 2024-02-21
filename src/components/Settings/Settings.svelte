@@ -183,7 +183,7 @@
 >
 {#if $plugin.data.excludeFF.length !== 0}
     <div class="flex justify-between">
-        <div bind:this={excludeComponent} class="{isExpanded ? 'max-h-auto' : 'max-h-6 overflow-hidden'} gap-1 flex flex-row flex-wrap mb-3">
+        <div bind:this={excludeComponent} class="{isExpanded ? 'max-h-auto' : 'max-h-6 overflow-hidden'} mb-3 flex flex-row flex-wrap gap-1">
             {#each $plugin.data.excludeFF as ff ($plugin.data.excludeFF)}
                 <div class="setting-command-hotkeys h-6">
                     <span class="setting-hotkey">
