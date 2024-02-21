@@ -23,7 +23,6 @@
 </script>
 
 <div class="flex h-full flex-col pt-10">
-    <p class="text-center text-[--text-normal]">The detailed OS type is: {osType}</p>
     <div class="flex w-full justify-center *:!h-[--icon-xl] *:!w-[--icon-xl]" use:icon={'brain-circuit'} />
     <h1 class="text-center text-[--text-normal]">Smart Second Brain Setup</h1>
     <div class="flex w-full justify-center">
