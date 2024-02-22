@@ -136,8 +136,19 @@ export default class SecondBrainPlugin extends Plugin {
                 return true;
             })
         );
-        const result = await this.secondBrain.embedDocuments(docs);
-        if (result.numAdded > 0 || result.numDeleted > 0) this.needsToSaveVectorStoreData = true;
+        // const result = await this.secondBrain.embedDocuments(docs);
+        // if (result.numAdded > 0 || result.numDeleted > 0) this.needsToSaveVectorStoreData = true;
+        // embedDocuments is now an async generator so we need to iterate over it. It returns the number of added, skipped and deleted documents. We should notify the user if any documents were skipped or added.
+        const embedNotice = new Notice('Indexing notes into your smart second brain...', 0);
+        for await (const result of this.secondBrain.embedDocuments(docs)) {
+            embedNotice.setMessage(
+                `Indexing notes into your smart second brain... Added: ${result.numAdded}, Skipped: ${result.numSkipped}, Deleted: ${result.numDeleted}`
+            );
+            if ((!this.needsToSaveVectorStoreData && result.numAdded > 0) || result.numDeleted > 0) this.needsToSaveVectorStoreData = true;
+        }
+        embedNotice.hide();
+        new Notice('Smart Second Brain initialized.', 2000);
+
         this.saveVectorStoreData();
     }
 
@@ -156,7 +167,7 @@ export default class SecondBrainPlugin extends Plugin {
                 if (!this.secondBrain) return;
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
-                await this.secondBrain.embedDocuments(docs, 'byFile');
+                this.secondBrain.embedDocuments(docs, 'byFile');
                 this.needsToSaveVectorStoreData = true;
             })
         );
@@ -166,7 +177,7 @@ export default class SecondBrainPlugin extends Plugin {
                 if (!this.secondBrain) return;
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
-                await this.secondBrain.deleteDocuments({ docs });
+                this.secondBrain.deleteDocuments({ docs });
                 this.needsToSaveVectorStoreData = true;
             })
         );
@@ -176,7 +187,7 @@ export default class SecondBrainPlugin extends Plugin {
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
                 await this.secondBrain.deleteDocuments({ sources: [oldPath] });
                 const docs = await obsidianDocumentLoader(this.app, [file]);
-                await this.secondBrain.embedDocuments(docs, 'byFile');
+                this.secondBrain.embedDocuments(docs, 'byFile');
                 this.needsToSaveVectorStoreData = true;
             })
         );
