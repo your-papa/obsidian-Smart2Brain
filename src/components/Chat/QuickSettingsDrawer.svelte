@@ -22,7 +22,7 @@
     const languages: { display: Language; value: Language }[] = Object.values(Languages).map((language: Language) => ({ display: language, value: language }));
     const setAssistantLanguage = (selected: Language) => {
         $plugin.data.assistantLanguage = selected;
-        $plugin.data.initialAssistantMessage = Prompts[selected].initialAssitantMessage;
+        $plugin.data.initialAssistantMessage = Prompts[selected].initialAssistantMessage;
         if ($chatHistory.length === 1) {
             chatHistory.set([
                 {
