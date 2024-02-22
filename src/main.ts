@@ -13,7 +13,7 @@ import {
     LogLvl,
 } from 'papa-ts';
 import { get } from 'svelte/store';
-import { serializeChatHistory, chatHistory, plugin, isIncognitoMode, isPapaRunning } from './store';
+import { serializeChatHistory, chatHistory, plugin, isIncognitoMode, papaState, papaIndexingProgress } from './store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
@@ -104,8 +104,8 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async initPapa() {
-        console.log('initPapa');
-        if (get(isPapaRunning)) return new Notice('Smart Second Brain is still running.', 4000);
+        papaState.set('loading');
+        if (get(papaState) === 'running') return new Notice('Smart Second Brain is still running.', 4000);
         else if (this.data.isIncognitoMode && !(await isOllamaRunning()))
             return new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 4000);
         else if (!this.data.isIncognitoMode && !(await isAPIKeyValid()))
@@ -136,20 +136,22 @@ export default class SecondBrainPlugin extends Plugin {
                 return true;
             })
         );
-        // const result = await this.secondBrain.embedDocuments(docs);
-        // if (result.numAdded > 0 || result.numDeleted > 0) this.needsToSaveVectorStoreData = true;
-        // embedDocuments is now an async generator so we need to iterate over it. It returns the number of added, skipped and deleted documents. We should notify the user if any documents were skipped or added.
-        const embedNotice = new Notice('Indexing notes into your smart second brain...', 0);
+        papaState.set('indexing');
+        // const embedNotice = new Notice('Indexing notes into your smart second brain...', 0);
+        let needsSave = false;
         for await (const result of this.secondBrain.embedDocuments(docs)) {
-            embedNotice.setMessage(
-                `Indexing notes into your smart second brain... Added: ${result.numAdded}, Skipped: ${result.numSkipped}, Deleted: ${result.numDeleted}`
-            );
-            if ((!this.needsToSaveVectorStoreData && result.numAdded > 0) || result.numDeleted > 0) this.needsToSaveVectorStoreData = true;
+            // embedNotice.setMessage(
+            //     `Indexing notes into your smart second brain... Added: ${result.numAdded}, Skipped: ${result.numSkipped}, Deleted: ${result.numDeleted}`
+            // );
+            needsSave = (!this.needsToSaveVectorStoreData && result.numAdded > 0) || result.numDeleted > 0;
+            papaIndexingProgress.set(((result.numAdded + result.numDeleted + result.numSkipped) / docs.length) * 100);
         }
-        embedNotice.hide();
+        this.needsToSaveVectorStoreData = needsSave;
+        // embedNotice.hide();
         new Notice('Smart Second Brain initialized.', 2000);
 
         this.saveVectorStoreData();
+        papaState.set('idle');
     }
 
     async onload() {
