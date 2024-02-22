@@ -108,7 +108,7 @@ export default class SecondBrainPlugin extends Plugin {
         if (get(isPapaRunning)) return new Notice('Smart Second Brain is still running.', 4000);
         else if (this.data.isIncognitoMode && !(await isOllamaRunning()))
             return new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 4000);
-        else if (this.data.isIncognitoMode && !(await isAPIKeyValid()))
+        else if (!this.data.isIncognitoMode && !(await isAPIKeyValid()))
             return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);
 
         Log.info(
