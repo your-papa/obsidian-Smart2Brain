@@ -41,6 +41,6 @@
             <p>API Key works!</p>
             <div class=" *:text-[--background-modifier-success]" use:icon={'check'} />
         </div>
-        <InitButtonComponent />
+        <InitButtonComponent isInIncognitoMode={false} />
     {/if}
 </ol>
