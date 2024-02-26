@@ -23,6 +23,7 @@ export async function runSecondBrainFromChat(isRAG: boolean, userQuery: string) 
 
     for await (const response of responseStream) {
         cH.set([...chatHistory, { role: 'Assistant', content: response.content, id: nanoid() }]);
+        if (get(papaState) === 'running-stopped') break;
     }
     plugin.chatView.save();
     papaState.set('idle');
