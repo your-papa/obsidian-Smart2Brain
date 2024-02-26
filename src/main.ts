@@ -140,17 +140,23 @@ export default class SecondBrainPlugin extends Plugin {
         papaState.set('indexing');
         // const embedNotice = new Notice('Indexing notes into your smart second brain...', 0);
         let needsSave = false;
-        for await (const result of this.secondBrain.embedDocuments(docs)) {
-            // embedNotice.setMessage(
-            //     `Indexing notes into your smart second brain... Added: ${result.numAdded}, Skipped: ${result.numSkipped}, Deleted: ${result.numDeleted}`
-            // );
-            needsSave = (!this.needsToSaveVectorStoreData && result.numAdded > 0) || result.numDeleted > 0;
-            const progress = ((result.numAdded + result.numDeleted + result.numSkipped) / docs.length) * 100;
-            papaIndexingProgress.set(Math.max(progress, get(papaIndexingProgress)));
-            // pause indexing on "indexing-stopped" state
-            if (get(papaState) === 'indexing-paused') break;
+        try {
+            for await (const result of this.secondBrain.embedDocuments(docs)) {
+                // embedNotice.setMessage(
+                //     `Indexing notes into your smart second brain... Added: ${result.numAdded}, Skipped: ${result.numSkipped}, Deleted: ${result.numDeleted}`
+                // );
+                needsSave = (!this.needsToSaveVectorStoreData && result.numAdded > 0) || result.numDeleted > 0;
+                const progress = ((result.numAdded + result.numDeleted + result.numSkipped) / docs.length) * 100;
+                papaIndexingProgress.set(Math.max(progress, get(papaIndexingProgress)));
+                // pause indexing on "indexing-stopped" state
+                if (get(papaState) === 'indexing-paused') break;
+            }
+            // embedNotice.hide();
+        } catch (e) {
+            Log.error(e);
+            papaState.set('error');
+            new Notice('Failed to index notes into your smart second brain. Please retry.', 4000);
         }
-        // embedNotice.hide();
         this.needsToSaveVectorStoreData = needsSave;
         this.saveVectorStoreData();
         if (get(papaIndexingProgress) === 100) {
