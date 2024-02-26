@@ -15,6 +15,7 @@
     } from '../../controller/Messages';
 
     export let textarea: HTMLTextAreaElement;
+    export let backgroundColorAlt: string;
 
     let editElem: HTMLSpanElement;
     let initialAssistantMessageSpan: HTMLSpanElement;
@@ -44,13 +45,13 @@
 <div
     bind:this={chatWindow}
     on:scroll={() => (isAutoScrolling = chatWindow.scrollTop + chatWindow.clientHeight + 1 >= chatWindow.scrollHeight)}
-    class="chat-window select-text flex-grow w-full overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border] mb-1 p-4"
+    class="chat-window mb-1 w-full flex-grow select-text overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border] p-4"
 >
     {#each $chatHistory as message (message.id)}
         {#if message.role === 'User'}
-            <div class="flex justify-end mb-3">
+            <div class="mb-3 flex justify-end">
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <div class="group px-4 rounded-t-lg rounded-bl-lg max-w-[80%]" style="background-color: hsla(var(--color-accent-hsl), 0.4);">
+                <div class="group max-w-[80%] rounded-t-lg rounded-bl-lg px-4" style="background-color: hsla(var(--color-accent-hsl), 0.4);">
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <!-- svelte-ignore a11y-mouse-events-have-key-events -->
@@ -63,7 +64,7 @@
                     />
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <div class="flex justify-end gap-1 my-1 group-hover:opacity-100 opacity-0">
+                    <div class="my-1 flex justify-end gap-1 opacity-0 group-hover:opacity-100">
                         {#if $isEditing && editMessageId === message.id}
                             <span
                                 aria-label="Copy Text"
@@ -84,7 +85,7 @@
                 </div>
             </div>
         {:else}
-            <div class="group bg-[--background-secondary-alt] mb-3 p-1 pl-4 pr-4 rounded-t-lg rounded-br-lg w-fit max-w-[80%]">
+            <div class="group {backgroundColorAlt} mb-3 w-fit max-w-[80%] rounded-t-lg rounded-br-lg p-1 pl-4 pr-4">
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-mouse-events-have-key-events -->
@@ -96,7 +97,7 @@
                     on:click={onClick}
                     bind:this={initialAssistantMessageSpan}
                 />
-                <div class="flex justify-start my-1 gap-1 group-hover:opacity-100 opacity-0">
+                <div class="my-1 flex justify-start gap-1 opacity-0 group-hover:opacity-100">
                     {#if !$isEditingAssistantMessage}
                         <!-- svelte-ignore a11y-no-static-element-interactions -->
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
