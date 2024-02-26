@@ -3,11 +3,10 @@
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { runSecondBrainFromChat } from '../../controller/runSecondBrain';
     import { nanoid } from 'nanoid';
-    import { plugin, chatHistory, chatInput, isEditingAssistantMessage, papaState, papaIndexingProgress } from '../../store';
+    import { plugin, chatHistory, chatInput, isEditingAssistantMessage, papaState, papaIndexingProgress, isChatInSidebar } from '../../store';
     import ProgressCircle from '../base/ProgressCircle.svelte';
 
     export let textarea: HTMLTextAreaElement;
-    export let backgroundColor: string;
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -72,7 +71,9 @@
 <!-- save delete and rag settings slightly above input field -->
 <div class="relative pb-1">
     <div
-        class="absolute -top-[3.3rem] left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-t-2xl border-solid border-x-[--background-modifier-border] border-b-transparent border-t-[--background-modifier-border] {backgroundColor} p-2"
+        class="absolute -top-[3.3rem] left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-t-2xl border-solid border-x-[--background-modifier-border] border-b-transparent border-t-[--background-modifier-border] {$isChatInSidebar
+            ? 'bg-[--background-secondary]'
+            : 'bg-[--background-primary]'} p-2"
     >
         {#if $chatHistory.length > 1}
             <!-- svelte-ignore a11y-click-events-have-key-events -->

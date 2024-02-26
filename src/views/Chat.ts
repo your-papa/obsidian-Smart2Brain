@@ -1,4 +1,4 @@
-import { WorkspaceLeaf, type HoverParent, HoverPopover, TextFileView, TFile, WorkspaceSidedock } from 'obsidian';
+import { WorkspaceLeaf, type HoverParent, HoverPopover, TextFileView, TFile } from 'obsidian';
 
 import ChatViewComponent from '../components/Chat/Chat.svelte';
 import { nanoid } from 'nanoid';
@@ -63,15 +63,10 @@ export class ChatView extends TextFileView implements HoverParent {
         await super.onLoadFile(file);
         this.component = new ChatViewComponent({
             target: this.contentEl,
-            props: {
-                chatViewLeaf: this.leaf,
-            },
         });
     }
 
     async onUnloadFile(file: TFile) {
-        console.log('unloading file');
-
         this.clear();
         this.component.$destroy();
         return await super.onUnloadFile(file);

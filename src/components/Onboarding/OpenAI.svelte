@@ -13,7 +13,6 @@
         $plugin.data.openAIEmbedModel.openAIApiKey = newApiKey;
         $plugin.saveSettings();
     };
-
     $: if (apiKeyInput) apiKeyInput.setInputValue($plugin.data.openAIGenModel.openAIApiKey);
 </script>
 
@@ -41,6 +40,6 @@
             <p>API Key works!</p>
             <div class=" *:text-[--background-modifier-success]" use:icon={'check'} />
         </div>
-        <InitButtonComponent isInIncognitoMode={false} />
+        <InitButtonComponent />
     {/if}
 </ol>
