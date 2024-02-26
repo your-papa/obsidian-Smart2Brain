@@ -68,7 +68,7 @@
                     />
                     <progress class="w-full max-w-[300px] custom-progress" value={$papaIndexingProgress} max="100" />
                 </div>
-            {:else}
+            {:else if $papaState === 'idle'}
                 {#if $isIncognitoMode}
                     <h2 class="text-[--text-normal] text-center mb-0">Ollama</h2>
                     <p class="text-[--text-normal] text-center mt-1">Chat via {$plugin.data.ollamaGenModel.model}</p>
@@ -98,6 +98,14 @@
                         <DropdownComponent selected={$plugin.data.assistantLanguage} options={languages} changeFunc={setAssistantLanguage} />
                     </div>
                 </div>
+            {:else if $papaState === 'error'}
+                <h2 class="text-[--text-normal] text-center">An error occured.<br /> Please retry initialization...</h2>
+                <button
+                    aria-label="Retry initializing"
+                    on:click={() => $plugin.initPapa()}
+                    class="h-8 px-4 py-2 rounded-l-md hover:bg-[--text-accent-hover] transition duration-300 ease-in-out"
+                    use:icon={'refresh-cw'}
+                />
             {/if}
         {/if}
         <div class="absolute bottom-0 z-10 flex justify-center w-full bg-[--background-secondary]">
