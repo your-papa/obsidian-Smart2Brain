@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { papaState, chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage } from '../../store';
+    import { papaState, chatHistory, chatInput, isEditing, isEditingAssistantMessage, isChatInSidebar, type ChatMessage } from '../../store';
     import {
         onClick,
         onMouseOver,
@@ -15,7 +15,6 @@
     } from '../../controller/Messages';
 
     export let textarea: HTMLTextAreaElement;
-    export let backgroundColorAlt: string;
 
     let editElem: HTMLSpanElement;
     let initialAssistantMessageSpan: HTMLSpanElement;
@@ -85,7 +84,11 @@
                 </div>
             </div>
         {:else}
-            <div class="group {backgroundColorAlt} mb-3 w-fit max-w-[80%] rounded-t-lg rounded-br-lg p-1 pl-4 pr-4">
+            <div
+                class="group {$isChatInSidebar
+                    ? 'bg-[--background-secondary-alt]'
+                    : 'bg-[--background-primary-alt]'} mb-3 w-fit max-w-[80%] rounded-t-lg rounded-br-lg p-1 pl-4 pr-4"
+            >
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-mouse-events-have-key-events -->

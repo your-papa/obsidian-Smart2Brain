@@ -1,13 +1,21 @@
 <script lang="ts">
+    import { onMount } from 'svelte';
     import { getOllamaGenModel, isOllamaRunning, isOriginSet, ollamaEmbedChange } from '../../controller/Ollama';
     import { icon, renderMarkdown } from '../../controller/Messages';
-    import { plugin } from '../../store';
+    import { plugin, isIncognitoMode } from '../../store';
     import DropdownComponent from '../base/Dropdown.svelte';
     import InitButtonComponent from './InitButton.svelte';
 
     let ollamaModels: { display: string; value: string }[] = [];
     let ollamaModelComponent: DropdownComponent;
     let model: string = '';
+
+    onMount(() => {
+        // TODO redundant with Settings.svelete
+        $isIncognitoMode = true;
+        $plugin.data.isIncognitoMode = $isIncognitoMode;
+        $plugin.saveSettings();
+    });
 
     let isRunning: boolean = false;
     let isOrigin: boolean = false;
@@ -56,7 +64,7 @@
             </div>
         </li>
         {#if $plugin.data.ollamaEmbedModel.model}
-            <InitButtonComponent isInIncognitoMode={true} />
+            <InitButtonComponent />
         {/if}
     {/if}
 {/if}

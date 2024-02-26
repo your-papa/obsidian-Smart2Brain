@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage, papaState } from '../../store';
+    import { chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage, papaState, isChatInSidebar } from '../../store';
     import {
         icon,
         onClick,
@@ -15,7 +15,6 @@
     } from '../../controller/Messages';
 
     export let textarea: HTMLTextAreaElement;
-    export let backgroundColorAlt: string;
     let editElem: HTMLSpanElement;
     let initialAssistantMessageSpan: HTMLSpanElement;
     let editMessageId: string;
@@ -48,7 +47,11 @@
 >
     {#each $chatHistory as message (message.id)}
         {#if message.role === 'User'}
-            <div class="group border-x-0 border-b border-t-0 border-solid border-[--background-modifier-border] {backgroundColorAlt} p-2">
+            <div
+                class="group border-x-0 border-b border-t-0 border-solid border-[--background-modifier-border] {$isChatInSidebar
+                    ? 'var(--background-secondary-alt)'
+                    : 'var(--background-primary-alt)'} p-2"
+            >
                 <div class="text-primary mt-2 font-bold">User</div>
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -79,7 +82,11 @@
                 </div>
             </div>
         {:else}
-            <div class="group border-x-0 border-b border-t-0 border-solid border-[--background-modifier-border] bg-[{backgroundColorAlt}] p-2">
+            <div
+                class="group border-x-0 border-b border-t-0 border-solid border-[--background-modifier-border] {$isChatInSidebar
+                    ? 'bg-[--background-secondary-alt]'
+                    : 'bg-[--background-primary-alt]'} p-2"
+            >
                 <div class="text-primary mt-2 font-bold">Smart2Brain</div>
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-click-events-have-key-events -->

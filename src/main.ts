@@ -1,6 +1,6 @@
 import { around } from 'monkey-around';
 import { nanoid } from 'nanoid';
-import { Notice, Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState } from 'obsidian';
+import { Notice, Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState, WorkspaceSidedock } from 'obsidian';
 import {
     Papa,
     Prompts,
@@ -13,7 +13,7 @@ import {
     LogLvl,
 } from 'papa-ts';
 import { get } from 'svelte/store';
-import { serializeChatHistory, chatHistory, plugin, isIncognitoMode, papaState, papaIndexingProgress } from './store';
+import { serializeChatHistory, chatHistory, plugin, isOnboarded, isIncognitoMode, papaState, papaIndexingProgress, isChatInSidebar } from './store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
@@ -40,6 +40,7 @@ interface PluginData {
     debugginLangchainKey: string;
     isQuickSettingsOpen: boolean;
     isVerbose: boolean;
+    isOnboarded: boolean;
 }
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
@@ -64,6 +65,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     docRetrieveNum: 5,
     isQuickSettingsOpen: true,
     isVerbose: false,
+    isOnboarded: false,
 };
 
 export default class SecondBrainPlugin extends Plugin {
@@ -79,6 +81,7 @@ export default class SecondBrainPlugin extends Plugin {
     async loadSettings() {
         this.data = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
         isIncognitoMode.set(this.data.isIncognitoMode);
+        isOnboarded.set(this.data.isOnboarded);
     }
 
     async saveSettings() {
@@ -110,24 +113,22 @@ export default class SecondBrainPlugin extends Plugin {
         else if (!this.data.isIncognitoMode && !(await isAPIKeyValid()))
             return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);
 
-        if (!this.secondBrain) {
-            papaState.set('loading');
-            Log.info(
-                'Initializing second brain',
-                '\nGen Model: ' + (this.data.isIncognitoMode ? this.data.ollamaGenModel.model : this.data.openAIGenModel.modelName),
-                '\nEmbed Model: ' + (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName)
-            );
-            this.secondBrain = new Papa({
-                genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
-                embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
-                langsmithApiKey: this.data.debugginLangchainKey || undefined,
-                logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
-            });
-            // check if vector store data exists
-            if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
-                const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
-                await this.secondBrain.load(vectorStoreData);
-            }
+        papaState.set('loading');
+        Log.info(
+            'Initializing second brain',
+            '\nGen Model: ' + (this.data.isIncognitoMode ? this.data.ollamaGenModel.model : this.data.openAIGenModel.modelName),
+            '\nEmbed Model: ' + (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName)
+        );
+        this.secondBrain = new Papa({
+            genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
+            embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
+            langsmithApiKey: this.data.debugginLangchainKey || undefined,
+            logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
+        });
+        // check if vector store data exists
+        if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
+            const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
+            await this.secondBrain.load(vectorStoreData);
         }
         const mdFiles = this.app.vault.getMarkdownFiles();
         const docs = await obsidianDocumentLoader(
@@ -205,6 +206,18 @@ export default class SecondBrainPlugin extends Plugin {
             })
         );
 
+        this.registerEvent(
+            this.app.workspace.on('layout-change', () => {
+                if (!this.leaf) {
+                    const leaves = this.app.workspace.getLeavesOfType(get(isOnboarded) ? VIEW_TYPE_CHAT : VIEW_TYPE_SETUP);
+                    if (!leaves.length) return;
+                    this.leaf = leaves[0];
+                }
+                const isInSidebar = [this.app.workspace.leftSplit, this.app.workspace.rightSplit].includes(this.leaf.getRoot() as WorkspaceSidedock);
+                isChatInSidebar.set(isInSidebar);
+            })
+        );
+
         // periodically or on unfocus save vector store data to disk
         window.addEventListener('blur', () => this.saveVectorStoreData());
 
@@ -244,50 +257,36 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async activateView(file?: TFile) {
-        if (this.secondBrain === undefined) {
-            const { workspace } = this.app;
-            workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
-
-            let leaf: WorkspaceLeaf | null = null;
-            const leaves = workspace.getLeavesOfType(VIEW_TYPE_SETUP);
-
-            if (leaves.length > 0) {
-                // A leaf with our view already exists, use that
-                leaf = leaves[0];
-            } else {
-                // Our view could not be found in the workspace, create a new leaf
-                // in the right sidebar for it
-                leaf = workspace.getRightLeaf(false);
-                await leaf.setViewState({ type: VIEW_TYPE_SETUP, active: true });
+        if (!get(isOnboarded)) {
+            this.app.workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
+            const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_SETUP);
+            this.leaf = leaves.length ? leaves[0] : this.app.workspace.getRightLeaf(false);
+            await this.leaf.setViewState({ type: VIEW_TYPE_SETUP, active: true });
+        } else {
+            this.app.workspace.detachLeavesOfType(VIEW_TYPE_SETUP);
+            if (!file) {
+                // If no file is provided, open the default chat
+                const chatDirExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder));
+                if (!chatDirExists) {
+                    await this.app.vault.createFolder(normalizePath(this.data.targetFolder));
+                }
+                const defaultChatExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'));
+                file = defaultChatExists
+                    ? this.app.metadataCache.getFirstLinkpathDest(this.data.targetFolder + '/' + this.data.defaultChatName + '.md', '')
+                    : await this.app.vault.create(
+                          normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'),
+                          'Assistant\n' + this.data.initialAssistantMessage + '\n- - - - -'
+                      );
             }
-
-            // "Reveal" the leaf in case it is in a collapsed sidebar
-            workspace.revealLeaf(leaf);
-            return;
+            const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
+            this.leaf = leaves.length ? leaves[0] : this.app.workspace.getRightLeaf(false);
+            this.isChatAcivatedFromRibbon = true;
+            await this.leaf.openFile(file, { active: true });
+            await this.leaf.setViewState({
+                type: VIEW_TYPE_CHAT,
+                state: { file: file.path },
+            });
         }
-        this.app.workspace.detachLeavesOfType(VIEW_TYPE_SETUP);
-        if (!file) {
-            // If no file is provided, open the default chat
-            const chatDirExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder));
-            if (!chatDirExists) {
-                await this.app.vault.createFolder(normalizePath(this.data.targetFolder));
-            }
-            const defaultChatExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'));
-            file = defaultChatExists
-                ? this.app.metadataCache.getFirstLinkpathDest(this.data.targetFolder + '/' + this.data.defaultChatName + '.md', '')
-                : await this.app.vault.create(
-                      normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'),
-                      'Assistant\n' + this.data.initialAssistantMessage + '\n- - - - -'
-                  );
-        }
-        const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
-        this.leaf = leaves.length ? leaves[0] : this.app.workspace.getRightLeaf(false);
-        this.isChatAcivatedFromRibbon = true;
-        await this.leaf.openFile(file, { active: true });
-        await this.leaf.setViewState({
-            type: VIEW_TYPE_CHAT,
-            state: { file: file.path },
-        });
         this.app.workspace.revealLeaf(this.leaf);
     }
 

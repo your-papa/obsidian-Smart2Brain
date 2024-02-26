@@ -1,16 +1,12 @@
 <script lang="ts">
     import { setIcon } from 'obsidian';
-    import { plugin, isIncognitoMode, chatHistory, papaState, papaIndexingProgress } from '../../store';
+    import { plugin, isIncognitoMode, chatHistory, papaState, papaIndexingProgress, isChatInSidebar } from '../../store';
     import { nanoid } from 'nanoid';
     import { Prompts, type Language, Languages } from 'papa-ts';
+    import ProgressBar from '../base/ProgressBar.svelte';
     import { t } from 'svelte-i18n';
     import DropdownComponent from '../base/Dropdown.svelte';
     import Toggle from '../base/Toggle.svelte';
-    export let backgroundColor: string;
-    let color: string;
-
-    $: if (backgroundColor === 'bg-[--background-secondary]') color = 'var(--background-secondary-alt)';
-    else color = 'var(--background-primary-alt)';
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -60,7 +56,7 @@
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'pause'}
                     />
-                    <progress style="--dynamic-color: {color};" class="custom-progress w-full max-w-[300px]" value={$papaIndexingProgress} max="100" />
+                    <ProgressBar progress={$papaIndexingProgress} />
                 </div>
             {:else if $papaState === 'indexing-paused'}
                 <h2 class="text-center text-[--text-normal]">Paused indexing vault</h2>
@@ -71,7 +67,7 @@
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'play'}
                     />
-                    <progress style="--dynamic-color: {color};" class="custom-progress w-full max-w-[300px]" value={$papaIndexingProgress} max="100" />
+                    <ProgressBar progress={$papaIndexingProgress} />
                 </div>
             {:else if $papaState === 'idle'}
                 {#if $isIncognitoMode}
@@ -113,7 +109,7 @@
                 />
             {/if}
         {/if}
-        <div class="absolute bottom-0 z-10 flex w-full justify-center {backgroundColor}">
+        <div class="absolute bottom-0 z-10 flex w-full justify-center {$isChatInSidebar ? 'bg-[--background-secondary]' : 'bg-[--background-primary]'}">
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <!-- svelte-ignore a11y-no-static-element-interactions -->
             <div
@@ -127,28 +123,3 @@
         </div>
     </div>
 </div>
-
-<style>
-    .custom-progress {
-        -webkit-appearance: none;
-        appearance: none;
-    }
-    .custom-progress::-webkit-progress-bar {
-        background: var(--dynamic-color);
-        box-shadow: 0px 0px 0px 0.3px var(--background-modifier-form-field) inset;
-        border-radius: 8px;
-        overflow: hidden;
-    }
-
-    .custom-progress::-webkit-progress-value {
-        border-radius: 8px;
-        background: var(--color-accent);
-    }
-
-    .custom-progress::-moz-progress-bar {
-        background: var(--dynamic-color);
-        box-shadow: 0px 0px 0px 0.3px var(--background-modifier-form-field) inset;
-        border-radius: 0px;
-        overflow: hidden;
-    }
-</style>
