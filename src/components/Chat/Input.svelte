@@ -7,6 +7,7 @@
     import ProgressCircle from '../base/ProgressCircle.svelte';
 
     export let textarea: HTMLTextAreaElement;
+    export let backgroundColor: string;
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -71,7 +72,7 @@
 <!-- save delete and rag settings slightly above input field -->
 <div class="relative pb-1">
     <div
-        class="absolute -top-[3.3rem] left-1/2 -translate-x-1/2 flex items-center gap-3 bg-[--background-secondary] border-solid border-b-transparent border-t-[--background-modifier-border] border-x-[--background-modifier-border] p-2 rounded-t-2xl"
+        class="absolute -top-[3.3rem] left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-t-2xl border-solid border-x-[--background-modifier-border] border-b-transparent border-t-[--background-modifier-border] {backgroundColor} p-2"
     >
         {#if $chatHistory.length > 1}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -90,7 +91,7 @@
             aria-label="Toggle between chatting with your Notes or the LLM"
             on:click={handleRAGToggle}
             use:icon={'brain-circuit'}
-            class={`hover:text-[--text-accent-hover] w-[--icon-xl] h-[--icon-xl] *:!w-[--icon-xl] *:!h-[--icon-xl] ${
+            class={`h-[--icon-xl] w-[--icon-xl] *:!h-[--icon-xl] *:!w-[--icon-xl] hover:text-[--text-accent-hover] ${
                 $plugin.data.isUsingRag ? 'text-[--color-accent]' : 'text-[--text-normal]'
             }`}
         />
@@ -111,7 +112,7 @@
     <textarea
         bind:this={textarea}
         id="chat-view-user-input-element"
-        class="h-8 flex-1 max-h-40 resize-none"
+        class="h-8 max-h-40 flex-1 resize-none"
         placeholder={'Chat with your second Brain...'}
         bind:value={$chatInput}
         on:keydown={handelEnter}
@@ -121,18 +122,18 @@
         <button
             aria-label="Stop your Smart Second Brain"
             on:click={() => ($papaState = 'running-stopped')}
-            class="h-8 px-4 py-2 rounded-r-md hover:bg-[--text-accent-hover] transition duration-300 ease-in-out"
+            class="h-8 rounded-r-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
             use:icon={'stop-circle'}
         />
     {:else if $papaState === 'indexing' || $papaState === 'loading' || $papaState === 'indexing-paused'}
-        <div class="h-8 px-4 py-2 flex items-center">
+        <div class="flex h-8 items-center px-4 py-2">
             <ProgressCircle bind:progress={$papaIndexingProgress} />
         </div>
     {:else}
         <button
             aria-label="Run your Smart Second Brain"
             on:click={runSecondBrain}
-            class="h-8 px-4 py-2 rounded-r-md hover:bg-[--text-accent-hover] transition duration-300 ease-in-out"
+            class="h-8 rounded-r-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
             use:icon={'send-horizontal'}
         />
     {/if}
