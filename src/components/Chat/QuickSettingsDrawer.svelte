@@ -7,6 +7,10 @@
     import DropdownComponent from '../base/Dropdown.svelte';
     import Toggle from '../base/Toggle.svelte';
     export let backgroundColor: string;
+    let color: string;
+
+    $: if (backgroundColor === 'bg-[--background-secondary]') color = 'var(--background-secondary-alt)';
+    else color = 'var(--background-primary-alt)';
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -56,7 +60,7 @@
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'pause'}
                     />
-                    <progress class="custom-progress w-full max-w-[300px]" value={$papaIndexingProgress} max="100" />
+                    <progress style="--dynamic-color: {color};" class="custom-progress w-full max-w-[300px]" value={$papaIndexingProgress} max="100" />
                 </div>
             {:else if $papaState === 'indexing-paused'}
                 <h2 class="text-center text-[--text-normal]">Paused indexing vault</h2>
@@ -67,7 +71,7 @@
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'play'}
                     />
-                    <progress class="custom-progress w-full max-w-[300px]" value={$papaIndexingProgress} max="100" />
+                    <progress style="--dynamic-color: {color};" class="custom-progress w-full max-w-[300px]" value={$papaIndexingProgress} max="100" />
                 </div>
             {:else if $papaState === 'idle'}
                 {#if $isIncognitoMode}
@@ -100,11 +104,11 @@
                     </div>
                 </div>
             {:else if $papaState === 'error'}
-                <h2 class="text-[--text-normal] text-center">An error occured.<br /> Please retry initialization...</h2>
+                <h2 class="text-center text-[--text-normal]">An error occured.<br /> Please retry initialization...</h2>
                 <button
                     aria-label="Retry initializing"
                     on:click={() => $plugin.initPapa()}
-                    class="h-8 px-4 py-2 rounded-l-md hover:bg-[--text-accent-hover] transition duration-300 ease-in-out"
+                    class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'refresh-cw'}
                 />
             {/if}
@@ -130,7 +134,7 @@
         appearance: none;
     }
     .custom-progress::-webkit-progress-bar {
-        background: var(--background-primary);
+        background: var(--dynamic-color);
         box-shadow: 0px 0px 0px 0.3px var(--background-modifier-form-field) inset;
         border-radius: 8px;
         overflow: hidden;
@@ -142,7 +146,7 @@
     }
 
     .custom-progress::-moz-progress-bar {
-        background: var(--background-secondary-alt);
+        background: var(--dynamic-color);
         box-shadow: 0px 0px 0px 0.3px var(--background-modifier-form-field) inset;
         border-radius: 0px;
         overflow: hidden;
