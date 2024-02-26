@@ -104,29 +104,30 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async initPapa() {
-        papaState.set('loading');
         if (get(papaState) === 'running') return new Notice('Smart Second Brain is still running.', 4000);
         else if (this.data.isIncognitoMode && !(await isOllamaRunning()))
             return new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 4000);
         else if (!this.data.isIncognitoMode && !(await isAPIKeyValid()))
             return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);
 
-        Log.info(
-            'Initializing second brain',
-            '\nGen Model: ' + (this.data.isIncognitoMode ? this.data.ollamaGenModel.model : this.data.openAIGenModel.modelName),
-            '\nEmbed Model: ' + (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName)
-        );
-        this.secondBrain = new Papa({
-            genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
-            embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
-            langsmithApiKey: this.data.debugginLangchainKey || undefined,
-            logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
-        });
-
-        // check if vector store data exists
-        if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
-            const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
-            await this.secondBrain.load(vectorStoreData);
+        if (!this.secondBrain) {
+            papaState.set('loading');
+            Log.info(
+                'Initializing second brain',
+                '\nGen Model: ' + (this.data.isIncognitoMode ? this.data.ollamaGenModel.model : this.data.openAIGenModel.modelName),
+                '\nEmbed Model: ' + (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName)
+            );
+            this.secondBrain = new Papa({
+                genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
+                embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
+                langsmithApiKey: this.data.debugginLangchainKey || undefined,
+                logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
+            });
+            // check if vector store data exists
+            if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
+                const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
+                await this.secondBrain.load(vectorStoreData);
+            }
         }
         const mdFiles = this.app.vault.getMarkdownFiles();
         const docs = await obsidianDocumentLoader(
@@ -144,14 +145,18 @@ export default class SecondBrainPlugin extends Plugin {
             //     `Indexing notes into your smart second brain... Added: ${result.numAdded}, Skipped: ${result.numSkipped}, Deleted: ${result.numDeleted}`
             // );
             needsSave = (!this.needsToSaveVectorStoreData && result.numAdded > 0) || result.numDeleted > 0;
-            papaIndexingProgress.set(((result.numAdded + result.numDeleted + result.numSkipped) / docs.length) * 100);
+            const progress = ((result.numAdded + result.numDeleted + result.numSkipped) / docs.length) * 100;
+            papaIndexingProgress.set(Math.max(progress, get(papaIndexingProgress)));
+            // pause indexing on "indexing-stopped" state
+            if (get(papaState) === 'indexing-paused') break;
         }
-        this.needsToSaveVectorStoreData = needsSave;
         // embedNotice.hide();
-        new Notice('Smart Second Brain initialized.', 2000);
-
+        this.needsToSaveVectorStoreData = needsSave;
         this.saveVectorStoreData();
-        papaState.set('idle');
+        if (get(papaIndexingProgress) === 100) {
+            new Notice('Smart Second Brain initialized.', 2000);
+            papaState.set('idle');
+        }
     }
 
     async onload() {

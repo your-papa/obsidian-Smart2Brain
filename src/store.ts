@@ -13,7 +13,7 @@ export const isIncognitoMode = writable<boolean>();
 export const isEditingAssistantMessage = writable<boolean>();
 export const chatInput = writable<string>('');
 
-export type PapaState = 'idle' | 'loading' | 'indexing' | 'running' | 'error';
+export type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-paused' | 'running' | 'error';
 export const papaIndexingProgress = writable<number>(0);
 export const papaState = writable<PapaState>('loading');
 

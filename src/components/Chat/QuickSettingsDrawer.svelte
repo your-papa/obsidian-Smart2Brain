@@ -45,9 +45,29 @@
     <div class="h-full flex flex-col justify-center items-center">
         {#if isOpen}
             {#if $papaState === 'loading'}
-                <h2 class="text-[--text-normal] text-center mb-0">Starting...</h2>
+                <h2 class="text-[--text-normal] text-center">Starting...</h2>
             {:else if $papaState === 'indexing'}
-                <progress class="w-full max-w-[300px] custom-progress" value={$papaIndexingProgress} max="100" />
+                <h2 class="text-[--text-normal] text-center">Indexing vault...</h2>
+                <div class="w-full flex justify-center gap-1 items-center">
+                    <button
+                        aria-label="Pause indexing"
+                        on:click={() => ($papaState = 'indexing-paused')}
+                        class="h-8 px-4 py-2 rounded-l-md hover:bg-[--text-accent-hover] transition duration-300 ease-in-out"
+                        use:icon={'pause'}
+                    />
+                    <progress class="w-full max-w-[300px] custom-progress" value={$papaIndexingProgress} max="100" />
+                </div>
+            {:else if $papaState === 'indexing-paused'}
+                <h2 class="text-[--text-normal] text-center">Paused indexing vault</h2>
+                <div class="w-full flex justify-center gap-1 items-center">
+                    <button
+                        aria-label="Resume indexing"
+                        on:click={() => $plugin.initPapa()}
+                        class="h-8 px-4 py-2 rounded-l-md hover:bg-[--text-accent-hover] transition duration-300 ease-in-out"
+                        use:icon={'play'}
+                    />
+                    <progress class="w-full max-w-[300px] custom-progress" value={$papaIndexingProgress} max="100" />
+                </div>
             {:else}
                 {#if $isIncognitoMode}
                     <h2 class="text-[--text-normal] text-center mb-0">Ollama</h2>
