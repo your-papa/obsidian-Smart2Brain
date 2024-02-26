@@ -3,7 +3,8 @@
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { runSecondBrainFromChat } from '../../controller/runSecondBrain';
     import { nanoid } from 'nanoid';
-    import { plugin, chatHistory, chatInput, isEditingAssistantMessage, isPapaRunning } from '../../store';
+    import { plugin, chatHistory, chatInput, isEditingAssistantMessage, papaState, papaIndexingProgress } from '../../store';
+    import ProgressCircle from '../base/ProgressCircle.svelte';
 
     export let textarea: HTMLTextAreaElement;
 
@@ -26,8 +27,6 @@
             let userQuery = $chatInput;
             $chatInput = '';
             await runSecondBrainFromChat($plugin.data.isUsingRag, userQuery);
-        } else {
-            new Notice('Your Second Brain does not understand empty messages!');
         }
     }
     function injectContext(event: KeyboardEvent): KeyboardEventHandler<HTMLInputElement> {
@@ -58,10 +57,6 @@
         }
     }
 
-    function stopSecondBrain() {
-        // TODO: stop the second brain
-    }
-
     $: if ($chatInput) {
         updateHeight();
     }
@@ -86,7 +81,7 @@
                 class="text-[--text-normal] hover:text-[--text-accent-hover]"
                 use:icon={'save'}
                 on:click={() => $plugin.saveChat()}
-                hidden={$isPapaRunning}
+                hidden={$papaState === 'running'}
             />
         {/if}
         <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -107,7 +102,7 @@
                 class="text-[--text-normal] hover:text-[--text-accent-hover]"
                 on:click|preventDefault={handleDelete}
                 use:icon={'trash-2'}
-                hidden={$isPapaRunning}
+                hidden={$papaState === 'running'}
             />
         {/if}
     </div>
@@ -122,13 +117,17 @@
         on:keydown={handelEnter}
         on:keyup={injectContext}
     />
-    {#if $isPapaRunning}
+    {#if $papaState === 'running'}
         <button
             aria-label="Stop your Smart Second Brain"
-            on:click={stopSecondBrain}
+            on:click={() => ($papaState = 'running-stopped')}
             class="h-8 px-4 py-2 rounded-r-md hover:bg-[--text-accent-hover] transition duration-300 ease-in-out"
-            use:icon={'pause'}
+            use:icon={'stop-circle'}
         />
+    {:else if $papaState === 'indexing' || $papaState === 'loading' || $papaState === 'indexing-paused'}
+        <div class="h-8 px-4 py-2 flex items-center">
+            <ProgressCircle bind:progress={$papaIndexingProgress} />
+        </div>
     {:else}
         <button
             aria-label="Run your Smart Second Brain"

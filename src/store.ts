@@ -9,10 +9,14 @@ export type ChatMessage = {
 export const plugin = writable<SecondBrainPlugin>();
 export const chatHistory = writable<ChatMessage[]>([]);
 export const isEditing = writable<boolean>(false);
-export const isPapaRunning = writable<boolean>(false);
 export const isIncognitoMode = writable<boolean>();
 export const isEditingAssistantMessage = writable<boolean>();
 export const chatInput = writable<string>('');
+
+export type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-paused' | 'running' | 'running-stopped' | 'error';
+export const papaIndexingProgress = writable<number>(0);
+export const papaState = writable<PapaState>('loading');
+
 // Does this work? / refactoring
 export const serializeChatHistory = (cH: ChatMessage[]) =>
     cH

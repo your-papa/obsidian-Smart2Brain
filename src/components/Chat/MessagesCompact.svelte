@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage, isPapaRunning } from '../../store';
+    import { chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage, papaState } from '../../store';
     import {
         icon,
         onClick,
@@ -21,7 +21,7 @@
 
     let isAutoScrolling = true;
     let chatWindow: HTMLDivElement;
-    $: if (chatWindow && $isPapaRunning && isAutoScrolling && $chatHistory) {
+    $: if (chatWindow && $papaState === 'running' && isAutoScrolling && $chatHistory) {
         chatWindow.scrollTop = chatWindow.scrollHeight;
     }
 

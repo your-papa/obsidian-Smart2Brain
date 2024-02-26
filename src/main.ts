@@ -13,7 +13,7 @@ import {
     LogLvl,
 } from 'papa-ts';
 import { get } from 'svelte/store';
-import { serializeChatHistory, chatHistory, plugin, isIncognitoMode, isPapaRunning } from './store';
+import { serializeChatHistory, chatHistory, plugin, isIncognitoMode, papaState, papaIndexingProgress } from './store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
@@ -104,29 +104,30 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async initPapa() {
-        console.log('initPapa');
-        if (get(isPapaRunning)) return new Notice('Smart Second Brain is still running.', 4000);
+        if (get(papaState) === 'running') return new Notice('Smart Second Brain is still running.', 4000);
         else if (this.data.isIncognitoMode && !(await isOllamaRunning()))
             return new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 4000);
         else if (!this.data.isIncognitoMode && !(await isAPIKeyValid()))
             return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);
 
-        Log.info(
-            'Initializing second brain',
-            '\nGen Model: ' + (this.data.isIncognitoMode ? this.data.ollamaGenModel.model : this.data.openAIGenModel.modelName),
-            '\nEmbed Model: ' + (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName)
-        );
-        this.secondBrain = new Papa({
-            genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
-            embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
-            langsmithApiKey: this.data.debugginLangchainKey || undefined,
-            logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
-        });
-
-        // check if vector store data exists
-        if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
-            const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
-            await this.secondBrain.load(vectorStoreData);
+        if (!this.secondBrain) {
+            papaState.set('loading');
+            Log.info(
+                'Initializing second brain',
+                '\nGen Model: ' + (this.data.isIncognitoMode ? this.data.ollamaGenModel.model : this.data.openAIGenModel.modelName),
+                '\nEmbed Model: ' + (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName)
+            );
+            this.secondBrain = new Papa({
+                genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
+                embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
+                langsmithApiKey: this.data.debugginLangchainKey || undefined,
+                logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
+            });
+            // check if vector store data exists
+            if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
+                const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
+                await this.secondBrain.load(vectorStoreData);
+            }
         }
         const mdFiles = this.app.vault.getMarkdownFiles();
         const docs = await obsidianDocumentLoader(
@@ -136,9 +137,26 @@ export default class SecondBrainPlugin extends Plugin {
                 return true;
             })
         );
-        const result = await this.secondBrain.embedDocuments(docs);
-        if (result.numAdded > 0 || result.numDeleted > 0) this.needsToSaveVectorStoreData = true;
+        papaState.set('indexing');
+        // const embedNotice = new Notice('Indexing notes into your smart second brain...', 0);
+        let needsSave = false;
+        for await (const result of this.secondBrain.embedDocuments(docs)) {
+            // embedNotice.setMessage(
+            //     `Indexing notes into your smart second brain... Added: ${result.numAdded}, Skipped: ${result.numSkipped}, Deleted: ${result.numDeleted}`
+            // );
+            needsSave = (!this.needsToSaveVectorStoreData && result.numAdded > 0) || result.numDeleted > 0;
+            const progress = ((result.numAdded + result.numDeleted + result.numSkipped) / docs.length) * 100;
+            papaIndexingProgress.set(Math.max(progress, get(papaIndexingProgress)));
+            // pause indexing on "indexing-stopped" state
+            if (get(papaState) === 'indexing-paused') break;
+        }
+        // embedNotice.hide();
+        this.needsToSaveVectorStoreData = needsSave;
         this.saveVectorStoreData();
+        if (get(papaIndexingProgress) === 100) {
+            new Notice('Smart Second Brain initialized.', 2000);
+            papaState.set('idle');
+        }
     }
 
     async onload() {
@@ -156,7 +174,7 @@ export default class SecondBrainPlugin extends Plugin {
                 if (!this.secondBrain) return;
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
-                await this.secondBrain.embedDocuments(docs, 'byFile');
+                this.secondBrain.embedDocuments(docs, 'byFile');
                 this.needsToSaveVectorStoreData = true;
             })
         );
@@ -166,7 +184,7 @@ export default class SecondBrainPlugin extends Plugin {
                 if (!this.secondBrain) return;
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
-                await this.secondBrain.deleteDocuments({ docs });
+                this.secondBrain.deleteDocuments({ docs });
                 this.needsToSaveVectorStoreData = true;
             })
         );
@@ -176,7 +194,7 @@ export default class SecondBrainPlugin extends Plugin {
                 for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
                 await this.secondBrain.deleteDocuments({ sources: [oldPath] });
                 const docs = await obsidianDocumentLoader(this.app, [file]);
-                await this.secondBrain.embedDocuments(docs, 'byFile');
+                this.secondBrain.embedDocuments(docs, 'byFile');
                 this.needsToSaveVectorStoreData = true;
             })
         );
