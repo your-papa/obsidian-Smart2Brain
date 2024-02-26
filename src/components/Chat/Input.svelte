@@ -27,8 +27,6 @@
             let userQuery = $chatInput;
             $chatInput = '';
             await runSecondBrainFromChat($plugin.data.isUsingRag, userQuery);
-        } else {
-            new Notice('Your Second Brain does not understand empty messages!');
         }
     }
     function injectContext(event: KeyboardEvent): KeyboardEventHandler<HTMLInputElement> {
@@ -57,10 +55,6 @@
             event.preventDefault();
             runSecondBrain();
         }
-    }
-
-    function stopSecondBrain() {
-        // TODO: stop the second brain
     }
 
     $: if ($chatInput) {
@@ -126,9 +120,9 @@
     {#if $papaState === 'running'}
         <button
             aria-label="Stop your Smart Second Brain"
-            on:click={stopSecondBrain}
+            on:click={() => ($papaState = 'running-stopped')}
             class="h-8 px-4 py-2 rounded-r-md hover:bg-[--text-accent-hover] transition duration-300 ease-in-out"
-            use:icon={'pause'}
+            use:icon={'stop-circle'}
         />
     {:else if $papaState === 'indexing' || $papaState === 'loading' || $papaState === 'indexing-paused'}
         <div class="h-8 px-4 py-2 flex items-center">
