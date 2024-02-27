@@ -161,6 +161,9 @@
 
     let oldPapaState: PapaState;
     function toggleIncognitoMode() {
+        if ($papaState === 'running') return new Notice('Please wait for the current query to finish', 4000);
+        else if ($papaState === 'indexing' || $papaState === 'indexing-paused' || $papaState === 'loading')
+            return new Notice('Please wait for the indexing to finish', 4000);
         $isIncognitoMode = !$isIncognitoMode;
         $plugin.data.isIncognitoMode = $isIncognitoMode;
         $plugin.saveSettings();
