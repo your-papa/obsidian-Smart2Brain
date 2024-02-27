@@ -320,6 +320,14 @@ export default class SecondBrainPlugin extends Plugin {
         await this.activateView(newChatFile);
     }
 
+    async clearPluginData() {
+        await this.saveData({});
+        const files = (await this.app.vault.adapter.list(normalizePath(this.manifest.dir))).files;
+        for (const file of files) {
+            if (file.endsWith('vector-store.bin')) await this.app.vault.adapter.remove(file);
+        }
+    }
+
     registerMonkeyPatches() {
         // eslint-disable-next-line @typescript-eslint/no-this-alias
         const self = this;

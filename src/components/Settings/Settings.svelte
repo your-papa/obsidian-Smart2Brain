@@ -291,6 +291,11 @@
     <SettingContainer settingName="Num. of Docs to Retrieve">
         <TextComponent inputType="number" bind:this={componentDocNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} />
     </SettingContainer>
+    <!-- Clear Plugin Data -->
+    <SettingContainer settingName="Clear Plugin Data">
+        <!-- TODO Add a warning modal -->
+        <ButtonComponent buttonText="Clear" styles="mod-warning" changeFunc={() => $plugin.clearPluginData()} />
+    </SettingContainer>
     <!-- Debugging -->
     <SettingContainer settingName="Debugging" isHeading={true} />
     <SettingContainer settingName="Langsmith Key">
