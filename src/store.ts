@@ -15,11 +15,9 @@ export const chatInput = writable<string>('');
 export const isOnboarded = writable<boolean>(false);
 export const isChatInSidebar = writable<boolean>(true);
 
-// TODO for each onboarding flow separate state
-
-export type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-paused' | 'running' | 'running-stopped' | 'error' | 'uninitialized';
-export const papaIndexingProgress = writable<number>(0);
+type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-paused' | 'running' | 'running-stopped' | 'error' | 'uninitialized';
 export const papaState = writable<PapaState>('uninitialized');
+export const papaIndexingProgress = writable<number>(0);
 
 // Does this work? / refactoring
 export const serializeChatHistory = (cH: ChatMessage[]) =>
