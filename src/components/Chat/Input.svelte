@@ -1,7 +1,7 @@
 <script lang="ts">
     import { Notice, setIcon } from 'obsidian';
     import type { KeyboardEventHandler } from 'svelte/elements';
-    import { runSecondBrainFromChat } from '../../controller/runSecondBrain';
+    import { runSecondBrain, canRunSecondBrain } from '../../controller/runSecondBrain';
     import { nanoid } from 'nanoid';
     import { plugin, chatHistory, chatInput, isEditingAssistantMessage, papaState, papaIndexingProgress, isChatInSidebar } from '../../store';
     import ProgressCircle from '../base/ProgressCircle.svelte';
@@ -12,7 +12,9 @@
         setIcon(node, iconId);
     };
 
-    async function runSecondBrain() {
+    async function runSecondBrainFromInput() {
+        if (!canRunSecondBrain()) return;
+
         if ($isEditingAssistantMessage) {
             $chatHistory[0].content = $chatInput;
             $plugin.data.initialAssistantMessage = $chatInput;
@@ -26,7 +28,7 @@
         if ($chatInput.trim() !== '') {
             let userQuery = $chatInput;
             $chatInput = '';
-            await runSecondBrainFromChat($plugin.data.isUsingRag, userQuery);
+            await runSecondBrain($plugin.data.isUsingRag, userQuery);
         }
     }
     function injectContext(event: KeyboardEvent): KeyboardEventHandler<HTMLInputElement> {
@@ -53,7 +55,7 @@
     function handelEnter(event: KeyboardEvent) {
         if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
-            runSecondBrain();
+            runSecondBrainFromInput();
         }
     }
 
@@ -126,16 +128,16 @@
             class="h-8 rounded-r-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
             use:icon={'stop-circle'}
         />
-    {:else if $papaState === 'indexing' || $papaState === 'loading' || $papaState === 'indexing-paused'}
-        <div class="flex h-8 items-center px-4 py-2">
-            <ProgressCircle bind:progress={$papaIndexingProgress} />
-        </div>
-    {:else}
+    {:else if $papaState === 'idle'}
         <button
             aria-label="Run your Smart Second Brain"
-            on:click={runSecondBrain}
+            on:click={runSecondBrainFromInput}
             class="h-8 rounded-r-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
             use:icon={'send-horizontal'}
         />
+    {:else}
+        <div class="flex h-8 items-center px-4 py-2">
+            <ProgressCircle bind:progress={$papaIndexingProgress} />
+        </div>
     {/if}
 </div>

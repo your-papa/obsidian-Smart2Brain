@@ -1,7 +1,7 @@
 <script lang="ts">
     import TextComponent from '../base/Text.svelte';
     import FFExcludeComponent from './FFExclude.svelte';
-    import { plugin, isIncognitoMode } from '../../store';
+    import { plugin, isIncognitoMode, papaState, type PapaState } from '../../store';
     import { Notice, requestUrl, setIcon } from 'obsidian';
     import { onMount } from 'svelte';
     import SettingContainer from './SettingContainer.svelte';
@@ -10,8 +10,7 @@
     import ToggleComponent from '../base/Toggle.svelte';
     import { DEFAULT_SETTINGS } from '../../main';
     import ButtonComponent from '../base/Button.svelte';
-    import { changeOllamaBaseUrl, getOllamaGenModel, isOllamaRunning, ollamaEmbedChange } from '../../controller/Ollama';
-    import { isAPIKeyValid } from '../../controller/OpenAI';
+    import { changeOllamaBaseUrl, getOllamaGenModel, ollamaEmbedChange } from '../../controller/Ollama';
     import { t } from 'svelte-i18n';
     import Log from '../../logging';
 
@@ -138,20 +137,6 @@
         $plugin.saveSettings();
     };
 
-    const initializeSecondBrain = async () => {
-        if ($isIncognitoMode && !(await isOllamaRunning())) {
-            new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 5000);
-            return;
-        }
-
-        if (!$isIncognitoMode && !(await isAPIKeyValid())) {
-            new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 5000);
-            return;
-        }
-
-        await $plugin.initPapa();
-    };
-
     async function changeDocNum(docNum: number) {
         if (docNum < 1 || !docNum) {
             docNum = DEFAULT_SETTINGS.docRetrieveNum;
@@ -174,10 +159,21 @@
         $plugin.saveSettings();
     };
 
+    let oldPapaState: PapaState;
     function toggleIncognitoMode() {
+        if ($papaState === 'running') return new Notice('Please wait for the current query to finish', 4000);
+        else if ($papaState === 'indexing' || $papaState === 'indexing-paused' || $papaState === 'loading')
+            return new Notice('Please wait for the indexing to finish', 4000);
         $isIncognitoMode = !$isIncognitoMode;
         $plugin.data.isIncognitoMode = $isIncognitoMode;
         $plugin.saveSettings();
+        if ($papaState === 'mode-changed') {
+            // Already in mode-changed state so we restore the previous state (there are only two states)
+            $papaState = oldPapaState;
+            return;
+        }
+        oldPapaState = $papaState;
+        $papaState = 'mode-changed';
     }
 </script>
 
@@ -279,10 +275,6 @@
             </SettingContainer>
         {/if}
     {/if}
-    <!-- Initialize Second Brain -->
-    <SettingContainer settingName="">
-        <ButtonComponent buttonText={$t('init_s2b')} styles="mod-cta" changeFunc={initializeSecondBrain} />
-    </SettingContainer>
 </div>
 <!-- Advanced Settings -->
 <details>
@@ -290,6 +282,11 @@
     <!-- Num of Docs to Retrieve -->
     <SettingContainer settingName="Num. of Docs to Retrieve">
         <TextComponent inputType="number" bind:this={componentDocNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} />
+    </SettingContainer>
+    <!-- Clear Plugin Data -->
+    <SettingContainer settingName="Clear Plugin Data">
+        <!-- TODO Add a warning modal -->
+        <ButtonComponent buttonText="Clear" styles="mod-warning" changeFunc={() => $plugin.clearPluginData()} />
     </SettingContainer>
     <!-- Debugging -->
     <SettingContainer settingName="Debugging" isHeading={true} />
