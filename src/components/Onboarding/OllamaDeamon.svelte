@@ -1,12 +1,12 @@
 <script lang="ts">
+    import { onMount } from 'svelte';
     import SliderComponent from '../base/Slider.svelte';
     import InitButtonComponent from './InitButton.svelte';
     import TextComponent from '../base/Text.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
     import { renderMarkdown, icon } from '../../controller/Messages';
-    import { plugin } from '../../store';
+    import { plugin, isIncognitoMode } from '../../store';
     import { getOllamaGenModel, changeOllamaBaseUrl, isOriginSet, ollamaEmbedChange } from '../../controller/Ollama';
-    import Button from '../base/Button.svelte';
 
     export let osType: 'Linux' | 'Darwin' | 'Windows_NT';
     let ollamaModels: { display: string; value: string }[] = [];
@@ -15,6 +15,12 @@
     let isOrigin: boolean = false;
     let model: string;
     let ollamaModelComponent: DropdownComponent;
+
+    onMount(() => {
+        $isIncognitoMode = true;
+        $plugin.data.isIncognitoMode = $isIncognitoMode;
+        $plugin.saveSettings();
+    });
 
     $: if (componentBaseUrl) componentBaseUrl.setInputValue($plugin.data.ollamaEmbedModel.baseUrl);
     $: if (ollamaModelComponent) model = $plugin.data.ollamaEmbedModel.model;
@@ -67,7 +73,7 @@
             </div>
         </li>
         {#if $plugin.data.ollamaEmbedModel.model}
-            <InitButtonComponent isInIncognitoMode={true} />
+            <InitButtonComponent />
         {/if}
     {/if}
 </ol>

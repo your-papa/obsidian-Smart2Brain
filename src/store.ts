@@ -12,10 +12,12 @@ export const isEditing = writable<boolean>(false);
 export const isIncognitoMode = writable<boolean>();
 export const isEditingAssistantMessage = writable<boolean>();
 export const chatInput = writable<string>('');
+export const isOnboarded = writable<boolean>(false);
+export const isChatInSidebar = writable<boolean>(true);
 
-export type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-paused' | 'running' | 'running-stopped' | 'error';
+type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-paused' | 'running' | 'running-stopped' | 'error' | 'uninitialized';
+export const papaState = writable<PapaState>('uninitialized');
 export const papaIndexingProgress = writable<number>(0);
-export const papaState = writable<PapaState>('loading');
 
 // Does this work? / refactoring
 export const serializeChatHistory = (cH: ChatMessage[]) =>
