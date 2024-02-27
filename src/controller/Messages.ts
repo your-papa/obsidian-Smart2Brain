@@ -1,7 +1,7 @@
 import { plugin as p, chatHistory as history, type ChatMessage, isEditing, chatInput, isEditingAssistantMessage } from '../store';
 import { get } from 'svelte/store';
 import { MarkdownRenderer, Notice, setIcon } from 'obsidian';
-import { runSecondBrainFromChat } from './runSecondBrain';
+import { canRunSecondBrain, runSecondBrain } from './runSecondBrain';
 import { DEFAULT_SETTINGS } from '../main';
 import { nanoid } from 'nanoid';
 
@@ -115,12 +115,13 @@ export const toClipboard = (messageText: string) => {
 };
 
 export const redoGeneration = async (message: ChatMessage) => {
+    if (!canRunSecondBrain()) return;
     const plugin = get(p);
     const chatHistory = get(history);
     const targetIndex = chatHistory.indexOf(message) - 1;
     const userQuery = chatHistory[targetIndex];
     history.set(chatHistory.slice(0, targetIndex));
-    await runSecondBrainFromChat(plugin.data.isUsingRag, userQuery.content);
+    await runSecondBrain(plugin.data.isUsingRag, userQuery.content);
 };
 
 export function editMessage(message: ChatMessage, textarea: HTMLTextAreaElement): string {
