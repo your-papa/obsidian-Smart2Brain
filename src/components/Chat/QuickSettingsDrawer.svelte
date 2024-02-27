@@ -1,8 +1,9 @@
 <script lang="ts">
     import { setIcon } from 'obsidian';
-    import { plugin, isIncognitoMode, chatHistory, papaState, papaIndexingProgress } from '../../store';
+    import { plugin, isIncognitoMode, chatHistory, papaState, papaIndexingProgress, isChatInSidebar } from '../../store';
     import { nanoid } from 'nanoid';
     import { Prompts, type Language, Languages } from 'papa-ts';
+    import ProgressBar from '../base/ProgressBar.svelte';
     import { t } from 'svelte-i18n';
     import DropdownComponent from '../base/Dropdown.svelte';
     import Toggle from '../base/Toggle.svelte';
@@ -42,43 +43,43 @@
 </script>
 
 <div class={`relative ${isOpen ? 'h-[33%] min-h-[33%]' : 'h-[--icon-m] min-h-[--icon-m]'} overflow-hidden transition-all duration-300 ease-in-out`}>
-    <div class="h-full flex flex-col justify-center items-center">
+    <div class="flex h-full flex-col items-center justify-center">
         {#if isOpen}
             {#if $papaState === 'loading'}
-                <h2 class="text-[--text-normal] text-center">Starting...</h2>
+                <h2 class="text-center text-[--text-normal]">Starting...</h2>
             {:else if $papaState === 'indexing'}
-                <h2 class="text-[--text-normal] text-center">Indexing vault...</h2>
-                <div class="w-full flex justify-center gap-1 items-center">
+                <h2 class="text-center text-[--text-normal]">Indexing vault...</h2>
+                <div class="flex w-full items-center justify-center gap-1">
                     <button
                         aria-label="Pause indexing"
                         on:click={() => ($papaState = 'indexing-paused')}
-                        class="h-8 px-4 py-2 rounded-l-md hover:bg-[--text-accent-hover] transition duration-300 ease-in-out"
+                        class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'pause'}
                     />
-                    <progress class="w-full max-w-[300px] custom-progress" value={$papaIndexingProgress} max="100" />
+                    <ProgressBar progress={$papaIndexingProgress} />
                 </div>
             {:else if $papaState === 'indexing-paused'}
-                <h2 class="text-[--text-normal] text-center">Paused indexing vault</h2>
-                <div class="w-full flex justify-center gap-1 items-center">
+                <h2 class="text-center text-[--text-normal]">Paused indexing vault</h2>
+                <div class="flex w-full items-center justify-center gap-1">
                     <button
                         aria-label="Resume indexing"
                         on:click={() => $plugin.initPapa()}
-                        class="h-8 px-4 py-2 rounded-l-md hover:bg-[--text-accent-hover] transition duration-300 ease-in-out"
+                        class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'play'}
                     />
-                    <progress class="w-full max-w-[300px] custom-progress" value={$papaIndexingProgress} max="100" />
+                    <ProgressBar progress={$papaIndexingProgress} />
                 </div>
             {:else if $papaState === 'idle'}
                 {#if $isIncognitoMode}
-                    <h2 class="text-[--text-normal] text-center mb-0">Ollama</h2>
-                    <p class="text-[--text-normal] text-center mt-1">Chat via {$plugin.data.ollamaGenModel.model}</p>
+                    <h2 class="mb-0 text-center text-[--text-normal]">Ollama</h2>
+                    <p class="mt-1 text-center text-[--text-normal]">Chat via {$plugin.data.ollamaGenModel.model}</p>
                     <!-- <p class="text-[--text-normal] text-center mt-0"> -->
                     <!--     Embed with {$plugin.data.ollamaEmbedModel.model}<br /> -->
                     <!--     Generate with {$plugin.data.ollamaGenModel.model} -->
                     <!-- </p> -->
                 {:else}
-                    <h2 class="text-[--text-normal] text-center mb-0">OpenAI</h2>
-                    <p class="text-[--text-normal] text-center mt-1">Chat via {$plugin.data.openAIGenModel.modelName}</p>
+                    <h2 class="mb-0 text-center text-[--text-normal]">OpenAI</h2>
+                    <p class="mt-1 text-center text-[--text-normal]">Chat via {$plugin.data.openAIGenModel.modelName}</p>
                     <!-- {#if $plugin.data.openAIGenModel.openAIApiKey} -->
                     <!--     <p class="text-[--text-normal] text-center mt-0"> -->
                     <!--         Embed with {$plugin.data.openAIEmbedModel.modelName}<br /> -->
@@ -87,34 +88,34 @@
                     <!-- {/if} -->
                 {/if}
                 <div class="w-full max-w-[220px]">
-                    <div class="w-full flex justify-between items-center mb-1">
-                        <p class="inline-block m-0">Comfy Chatview</p>
+                    <div class="mb-1 flex w-full items-center justify-between">
+                        <p class="m-0 inline-block">Comfy Chatview</p>
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
                         <!-- svelte-ignore a11y-no-static-element-interactions -->
                         <Toggle isEnabled={$plugin.data.isChatComfy} changeFunc={setChatViewDensity} />
                     </div>
-                    <div class="w-full flex justify-between items-center">
-                        <p class="inline-block m-0">{$t('assistant_language')}</p>
+                    <div class="flex w-full items-center justify-between">
+                        <p class="m-0 inline-block">{$t('assistant_language')}</p>
                         <DropdownComponent selected={$plugin.data.assistantLanguage} options={languages} changeFunc={setAssistantLanguage} />
                     </div>
                 </div>
             {:else if $papaState === 'error'}
-                <h2 class="text-[--text-normal] text-center">An error occured.<br /> Please retry initialization...</h2>
+                <h2 class="text-center text-[--text-normal]">An error occured.<br /> Please retry initialization...</h2>
                 <button
                     aria-label="Retry initializing"
                     on:click={() => $plugin.initPapa()}
-                    class="h-8 px-4 py-2 rounded-l-md hover:bg-[--text-accent-hover] transition duration-300 ease-in-out"
+                    class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'refresh-cw'}
                 />
             {/if}
         {/if}
-        <div class="absolute bottom-0 z-10 flex justify-center w-full bg-[--background-secondary]">
+        <div class="absolute bottom-0 z-10 flex w-full justify-center {$isChatInSidebar ? 'bg-[--background-secondary]' : 'bg-[--background-primary]'}">
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <!-- svelte-ignore a11y-no-static-element-interactions -->
             <div
                 aria-label={`${isOpen ? 'Close' : 'Open'} quick Settings`}
-                class={`text-[--text-normal] hover:text-[--text-accent-hover] transition-transform duration-300 ${
-                    isOpen ? 'transform rotate-180' : 'transform rotate-0'
+                class={`text-[--text-normal] transition-transform duration-300 hover:text-[--text-accent-hover] ${
+                    isOpen ? 'rotate-180 transform' : 'rotate-0 transform'
                 }`}
                 use:icon={'chevron-down'}
                 on:click={toggleDrawer}
@@ -122,28 +123,3 @@
         </div>
     </div>
 </div>
-
-<style>
-    .custom-progress {
-        -webkit-appearance: none;
-        appearance: none;
-    }
-    .custom-progress::-webkit-progress-bar {
-        background: var(--background-primary);
-        box-shadow: 0px 0px 0px 0.3px var(--background-modifier-form-field) inset;
-        border-radius: 8px;
-        overflow: hidden;
-    }
-
-    .custom-progress::-webkit-progress-value {
-        border-radius: 8px;
-        background: var(--color-accent);
-    }
-
-    .custom-progress::-moz-progress-bar {
-        background: var(--background-secondary-alt);
-        box-shadow: 0px 0px 0px 0.3px var(--background-modifier-form-field) inset;
-        border-radius: 0px;
-        overflow: hidden;
-    }
-</style>

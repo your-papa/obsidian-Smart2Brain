@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage, papaState } from '../../store';
+    import { chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage, papaState, isChatInSidebar } from '../../store';
     import {
         icon,
         onClick,
@@ -43,17 +43,21 @@
 <div
     bind:this={chatWindow}
     on:scroll={() => (isAutoScrolling = chatWindow.scrollTop + chatWindow.clientHeight + 1 >= chatWindow.scrollHeight)}
-    class="flex-grow w-full select-text overflow-y-scroll rounded-md mb-1 border border-solid border-[--background-modifier-border]"
+    class="mb-1 w-full flex-grow select-text overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border]"
 >
     {#each $chatHistory as message (message.id)}
         {#if message.role === 'User'}
-            <div class="group bg-[--background-secondary] p-2 border-x-0 border-t-0 border-b border-solid border-[--background-modifier-border]">
-                <div class="text-primary font-bold mt-2">User</div>
+            <div
+                class="group border-x-0 border-b border-t-0 border-solid border-[--background-modifier-border] {$isChatInSidebar
+                    ? 'var(--background-secondary-alt)'
+                    : 'var(--background-primary-alt)'} p-2"
+            >
+                <div class="text-primary mt-2 font-bold">User</div>
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <!-- svelte-ignore a11y-mouse-events-have-key-events -->
                 <span class="*:m-0" bind:this={editElem} on:mouseover={onMouseOver} on:click={onClick} use:renderMarkdown={message.content} />
-                <div class="flex mt-1 gap-1 group-hover:opacity-100 opacity-0">
+                <div class="mt-1 flex gap-1 opacity-0 group-hover:opacity-100">
                     {#if $isEditing && editMessageId === message.id}
                         <!-- svelte-ignore a11y-no-static-element-interactions -->
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -78,8 +82,12 @@
                 </div>
             </div>
         {:else}
-            <div class="group bg-[--background-secondary-alt] p-2 border-x-0 border-t-0 border-b border-solid border-[--background-modifier-border]">
-                <div class="text-primary font-bold mt-2">Smart2Brain</div>
+            <div
+                class="group border-x-0 border-b border-t-0 border-solid border-[--background-modifier-border] {$isChatInSidebar
+                    ? 'bg-[--background-secondary-alt]'
+                    : 'bg-[--background-primary-alt]'} p-2"
+            >
+                <div class="text-primary mt-2 font-bold">Smart2Brain</div>
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <!-- svelte-ignore a11y-mouse-events-have-key-events -->
@@ -90,7 +98,7 @@
                     on:click={onClick}
                     use:renderMarkdown={message.content}
                 />
-                <div class="flex gap-1 mt-1 group-hover:opacity-100 opacity-0">
+                <div class="mt-1 flex gap-1 opacity-0 group-hover:opacity-100">
                     {#if !$isEditingAssistantMessage}
                         <!-- svelte-ignore a11y-no-static-element-interactions -->
                         <!-- svelte-ignore a11y-click-events-have-key-events -->

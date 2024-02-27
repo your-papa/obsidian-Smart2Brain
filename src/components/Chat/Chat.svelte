@@ -10,7 +10,7 @@
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
 <!-- svelte-ignore a11y-no-static-element-interactions -->
-<div class="h-full flex flex-col --background-modifier-border">
+<div class="--background-modifier-border flex h-full flex-col">
     <QuickSettingsDrawer />
     {#if $plugin.data.isChatComfy}
         <MessagesBubble bind:textarea />

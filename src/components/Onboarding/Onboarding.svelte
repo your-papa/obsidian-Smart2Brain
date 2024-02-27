@@ -1,15 +1,11 @@
 <script lang="ts">
-    import { icon, renderMarkdown } from '../../controller/Messages';
+    import { isIncognitoMode, plugin } from '../../store';
+    import { icon } from '../../controller/Messages';
     import * as os from 'os';
-    import { plugin } from '../../store';
-    import TextComponent from '../base/Text.svelte';
-    import { isAPIKeyValid } from '../../controller/OpenAI';
     import SliderComponent from '../base/Slider.svelte';
-    import DropdownComponent from '../base/Dropdown.svelte';
-    import { changeOllamaBaseUrl, getOllamaGenModel, isOllamaRunning, isOriginSet, ollamaEmbedChange } from '../../controller/Ollama';
-    import MacAppComponent from './MacApp.svelte';
+    import MacAppComponent from './OllamaMacApp.svelte';
     import OpenAiComponent from './OpenAI.svelte';
-    import DeamonComponent from './Deamon.svelte';
+    import DeamonComponent from './OllamaDeamon.svelte';
 
     const osType = os.type();
     const installOptionsAll = {
@@ -19,12 +15,18 @@
     };
     const installOptions: Array<'Ollama App' | 'Ollama Deamon' | 'OpenAI'> = installOptionsAll[osType];
 
+    $: if (selected) {
+        $isIncognitoMode = selected === 'Ollama Deamon' || selected === 'Ollama App';
+        $plugin.data.isIncognitoMode = $isIncognitoMode;
+        $plugin.saveSettings();
+    }
+
     let selected: string;
 </script>
 
 <div class="flex h-full flex-col pt-10">
     <div class="flex w-full justify-center *:!h-[--icon-xl] *:!w-[--icon-xl]" use:icon={'brain-circuit'} />
-    <h1 class="text-center text-[--text-normal]">Smart Second Brain Setup</h1>
+    <h1 class="text-center text-[--text-normal]">Setup</h1>
     <div class="flex w-full justify-center">
         <SliderComponent options={installOptions} bind:selected />
     </div>

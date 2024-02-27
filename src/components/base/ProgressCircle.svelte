@@ -1,4 +1,5 @@
-<script>
+<script lang="ts">
+    import { isChatInSidebar } from '../../store';
     import { onMount } from 'svelte';
     import { tweened } from 'svelte/motion';
     import { cubicOut } from 'svelte/easing';
@@ -23,7 +24,14 @@
 </script>
 
 <svg class="w-6 h-6 -rotate-90" viewBox="0 0 100 100">
-    <circle class="stroke-current text-[--background-secondary-alt]" fill="none" stroke-width="10" cx="50" cy="50" r={radius} />
+    <circle
+        class="stroke-current {$isChatInSidebar ? 'text-[--background-secondary-alt]' : 'text-[--background-primary-alt]'}"
+        fill="none"
+        stroke-width="10"
+        cx="50"
+        cy="50"
+        r={radius}
+    />
     <circle
         class="stroke-current text-[--color-accent]"
         fill="none"
