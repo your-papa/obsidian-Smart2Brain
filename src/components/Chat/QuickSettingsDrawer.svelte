@@ -45,7 +45,7 @@
 <div class={`relative ${isOpen ? 'h-[33%] min-h-[33%]' : 'h-[--icon-m] min-h-[--icon-m]'} overflow-hidden transition-all duration-300 ease-in-out`}>
     <div class="flex h-full flex-col items-center justify-center">
         {#if isOpen}
-            {#if $papaState === 'loading'}
+            {#if $papaState === 'loading' || $papaState === 'uninitialized'}
                 <h2 class="text-center text-[--text-normal]">Starting...</h2>
             {:else if $papaState === 'indexing'}
                 <h2 class="text-center text-[--text-normal]">Indexing vault...</h2>
@@ -69,7 +69,23 @@
                     />
                     <ProgressBar progress={$papaIndexingProgress} />
                 </div>
-            {:else if $papaState === 'idle'}
+            {:else if $papaState === 'error'}
+                <h2 class="text-center text-[--text-normal]">An error occured.<br /> Please retry initialization...</h2>
+                <button
+                    aria-label="Retry initializing"
+                    on:click={() => $plugin.initPapa()}
+                    class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+                    use:icon={'refresh-cw'}
+                />
+            {:else if $papaState === 'mode-changed'}
+                <h2 class="text-center text-[--text-normal]">Reinitialize Smart Second Brain <br />with {$isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h2>
+                <button
+                    aria-label="Initialize"
+                    on:click={() => $plugin.initPapa()}
+                    class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+                    use:icon={'play'}
+                />
+            {:else}
                 {#if $isIncognitoMode}
                     <h2 class="mb-0 text-center text-[--text-normal]">Ollama</h2>
                     <p class="mt-1 text-center text-[--text-normal]">Chat via {$plugin.data.ollamaGenModel.model}</p>
@@ -99,14 +115,6 @@
                         <DropdownComponent selected={$plugin.data.assistantLanguage} options={languages} changeFunc={setAssistantLanguage} />
                     </div>
                 </div>
-            {:else if $papaState === 'error'}
-                <h2 class="text-center text-[--text-normal]">An error occured.<br /> Please retry initialization...</h2>
-                <button
-                    aria-label="Retry initializing"
-                    on:click={() => $plugin.initPapa()}
-                    class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
-                    use:icon={'refresh-cw'}
-                />
             {/if}
         {/if}
         <div class="absolute bottom-0 z-10 flex w-full justify-center {$isChatInSidebar ? 'bg-[--background-secondary]' : 'bg-[--background-primary]'}">

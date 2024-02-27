@@ -25,7 +25,6 @@
 </script>
 
 <div class="flex h-full flex-col pt-10">
-    <div class="flex w-full justify-center *:!h-[--icon-xl] *:!w-[--icon-xl]" use:icon={'brain-circuit'} />
     <h1 class="text-center text-[--text-normal]">Setup</h1>
     <div class="flex w-full justify-center">
         <SliderComponent options={installOptions} bind:selected />

@@ -15,7 +15,7 @@ export const chatInput = writable<string>('');
 export const isOnboarded = writable<boolean>(false);
 export const isChatInSidebar = writable<boolean>(true);
 
-type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-paused' | 'running' | 'running-stopped' | 'error' | 'uninitialized';
+export type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-paused' | 'running' | 'running-stopped' | 'error' | 'uninitialized' | 'mode-changed';
 export const papaState = writable<PapaState>('uninitialized');
 export const papaIndexingProgress = writable<number>(0);
 
