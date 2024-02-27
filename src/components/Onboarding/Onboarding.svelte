@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { isIncognitoMode, plugin, papaState } from '../../store';
+    import { isIncognitoMode, plugin } from '../../store';
     import { icon } from '../../controller/Messages';
     import * as os from 'os';
     import SliderComponent from '../base/Slider.svelte';
