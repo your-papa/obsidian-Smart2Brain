@@ -162,6 +162,7 @@ export default class SecondBrainPlugin extends Plugin {
         this.saveVectorStoreData();
         if (get(papaIndexingProgress) === 100) {
             new Notice('Smart Second Brain initialized.', 2000);
+            papaIndexingProgress.set(0);
             papaState.set('idle');
         }
     }
