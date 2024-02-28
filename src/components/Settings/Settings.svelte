@@ -69,18 +69,6 @@
         setIcon(node, iconId);
     };
 
-    function addFolder(ff: string) {
-        ff = ff.trim();
-        if (!$plugin.data.excludeFF.includes(ff) && ff !== '') {
-            $plugin.data.excludeFF = [...$plugin.data.excludeFF, ff];
-            searchValue = '';
-            $plugin.saveSettings();
-        } else {
-            searchValue = '';
-            new Notice('Folder already exists or value is empty');
-        }
-    }
-
     function deleteFolder(ff: string) {
         $plugin.data.excludeFF = $plugin.data.excludeFF.filter((f: string) => f !== ff);
         $plugin.saveSettings();
@@ -178,9 +166,7 @@
 </script>
 
 <!-- Exclude Folders -->
-<SettingContainer settingName={$t('excludeff')}
-    ><FFExcludeComponent placeholder="Folder/SubFolder" bind:inputValue={searchValue} changeFunc={addFolder} /></SettingContainer
->
+<SettingContainer settingName={$t('excludeff')}><FFExcludeComponent /></SettingContainer>
 {#if $plugin.data.excludeFF.length !== 0}
     <div class="flex justify-between">
         <div bind:this={excludeComponent} class="{isExpanded ? 'max-h-auto' : 'max-h-6 overflow-hidden'} mb-3 flex flex-row flex-wrap gap-1">
