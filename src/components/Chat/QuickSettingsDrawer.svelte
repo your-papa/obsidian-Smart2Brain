@@ -117,7 +117,7 @@
                 </div>
             {/if}
         {/if}
-        <div class="absolute bottom-0 z-10 flex w-full justify-center {$isChatInSidebar ? 'bg-[--background-secondary]' : 'bg-[--background-primary]'}">
+        <div class="absolute bottom-0 z-10 flex w-full justify-center">
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <!-- svelte-ignore a11y-no-static-element-interactions -->
             <div
