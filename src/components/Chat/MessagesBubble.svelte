@@ -44,13 +44,13 @@
 <div
     bind:this={chatWindow}
     on:scroll={() => (isAutoScrolling = chatWindow.scrollTop + chatWindow.clientHeight + 1 >= chatWindow.scrollHeight)}
-    class="chat-window mb-1 w-full flex-grow select-text overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border] p-4"
+    class="chat-window w-full flex-grow select-text overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border] p-4"
 >
     {#each $chatHistory as message (message.id)}
         {#if message.role === 'User'}
             <div class="mb-3 flex justify-end">
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <div class="group max-w-[80%] rounded-t-lg rounded-bl-lg px-4" style="background-color: hsla(var(--color-accent-hsl), 0.4);">
+                <div class="group max-w-[80%] rounded-t-lg rounded-bl-lg px-4" style="background-color: var(--text-selection);">
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <!-- svelte-ignore a11y-mouse-events-have-key-events -->
