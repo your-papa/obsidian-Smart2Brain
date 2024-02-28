@@ -149,7 +149,7 @@ export default class SecondBrainPlugin extends Plugin {
                 //     `Indexing notes into your smart second brain... Added: ${result.numAdded}, Skipped: ${result.numSkipped}, Deleted: ${result.numDeleted}`
                 // );
                 needsSave = (!this.needsToSaveVectorStoreData && result.numAdded > 0) || result.numDeleted > 0;
-                const progress = ((result.numAdded + result.numDeleted + result.numSkipped) / docs.length) * 100;
+                const progress = ((result.numAdded + result.numSkipped) / docs.length) * 100;
                 papaIndexingProgress.set(Math.max(progress, get(papaIndexingProgress)));
                 // pause indexing on "indexing-stopped" state
                 if (get(papaState) === 'indexing-paused') break;
