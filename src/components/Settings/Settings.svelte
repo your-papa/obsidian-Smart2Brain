@@ -2,7 +2,7 @@
     import TextComponent from '../base/Text.svelte';
     import FFExcludeComponent from './FFExclude.svelte';
     import { plugin, isIncognitoMode, papaState, type PapaState } from '../../store';
-    import { Notice, requestUrl, setIcon } from 'obsidian';
+    import { Notice, setIcon } from 'obsidian';
     import { onMount } from 'svelte';
     import SettingContainer from './SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
@@ -128,12 +128,12 @@
     };
     const openAIGenChange = (selected: string) => {
         //TODO Modle types
-        $plugin.data.openAIGenModel.modelName = selected;
+        $plugin.data.openAIGenModel.model = selected;
         $plugin.saveSettings();
     };
     const openAIEmbedChange = (selected: string) => {
         //TODO Modle types
-        $plugin.data.openAIEmbedModel.modelName = selected;
+        $plugin.data.openAIEmbedModel.model = selected;
         $plugin.saveSettings();
     };
 
@@ -267,11 +267,11 @@
         {#if true}
             <!-- OpenAI Gen Model -->
             <SettingContainer settingName="Chat Model">
-                <DropdownComponent selected={$plugin.data.openAIGenModel.modelName} options={openAIGenModels} changeFunc={openAIGenChange} />
+                <DropdownComponent selected={$plugin.data.openAIGenModel.model} options={openAIGenModels} changeFunc={openAIGenChange} />
             </SettingContainer>
             <!-- openAI Embed Model -->
             <SettingContainer settingName="Embed Model">
-                <DropdownComponent selected={$plugin.data.openAIEmbedModel.modelName} options={openAIEmbedModels} changeFunc={openAIEmbedChange} />
+                <DropdownComponent selected={$plugin.data.openAIEmbedModel.model} options={openAIEmbedModels} changeFunc={openAIEmbedChange} />
             </SettingContainer>
         {/if}
     {/if}

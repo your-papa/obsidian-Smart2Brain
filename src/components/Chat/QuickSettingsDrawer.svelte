@@ -95,11 +95,11 @@
                     <!-- </p> -->
                 {:else}
                     <h2 class="mb-0 text-center text-[--text-normal]">OpenAI</h2>
-                    <p class="mt-1 text-center text-[--text-normal]">Chat via {$plugin.data.openAIGenModel.modelName}</p>
+                    <p class="mt-1 text-center text-[--text-normal]">Chat via {$plugin.data.openAIGenModel.model}</p>
                     <!-- {#if $plugin.data.openAIGenModel.openAIApiKey} -->
                     <!--     <p class="text-[--text-normal] text-center mt-0"> -->
-                    <!--         Embed with {$plugin.data.openAIEmbedModel.modelName}<br /> -->
-                    <!--         Generate with {$plugin.data.openAIGenModel.modelName} -->
+                    <!--         Embed with {$plugin.data.openAIEmbedModel.model}<br /> -->
+                    <!--         Generate with {$plugin.data.openAIGenModel.model} -->
                     <!--     </p> -->
                     <!-- {/if} -->
                 {/if}
