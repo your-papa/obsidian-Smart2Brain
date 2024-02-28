@@ -2,7 +2,7 @@
     import TextComponent from '../base/Text.svelte';
     import FFExcludeComponent from './FFExclude.svelte';
     import { plugin, isIncognitoMode, papaState, type PapaState } from '../../store';
-    import { Notice, requestUrl, setIcon } from 'obsidian';
+    import { Notice, setIcon } from 'obsidian';
     import { onMount } from 'svelte';
     import SettingContainer from './SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
@@ -69,18 +69,6 @@
         setIcon(node, iconId);
     };
 
-    function addFolder(ff: string) {
-        ff = ff.trim();
-        if (!$plugin.data.excludeFF.includes(ff) && ff !== '') {
-            $plugin.data.excludeFF = [...$plugin.data.excludeFF, ff];
-            searchValue = '';
-            $plugin.saveSettings();
-        } else {
-            searchValue = '';
-            new Notice('Folder already exists or value is empty');
-        }
-    }
-
     function deleteFolder(ff: string) {
         $plugin.data.excludeFF = $plugin.data.excludeFF.filter((f: string) => f !== ff);
         $plugin.saveSettings();
@@ -128,12 +116,12 @@
     };
     const openAIGenChange = (selected: string) => {
         //TODO Modle types
-        $plugin.data.openAIGenModel.modelName = selected;
+        $plugin.data.openAIGenModel.model = selected;
         $plugin.saveSettings();
     };
     const openAIEmbedChange = (selected: string) => {
         //TODO Modle types
-        $plugin.data.openAIEmbedModel.modelName = selected;
+        $plugin.data.openAIEmbedModel.model = selected;
         $plugin.saveSettings();
     };
 
@@ -178,9 +166,7 @@
 </script>
 
 <!-- Exclude Folders -->
-<SettingContainer settingName={$t('excludeff')}
-    ><FFExcludeComponent placeholder="Folder/SubFolder" bind:inputValue={searchValue} changeFunc={addFolder} /></SettingContainer
->
+<SettingContainer settingName={$t('excludeff')}><FFExcludeComponent /></SettingContainer>
 {#if $plugin.data.excludeFF.length !== 0}
     <div class="flex justify-between">
         <div bind:this={excludeComponent} class="{isExpanded ? 'max-h-auto' : 'max-h-6 overflow-hidden'} mb-3 flex flex-row flex-wrap gap-1">
@@ -267,11 +253,11 @@
         {#if true}
             <!-- OpenAI Gen Model -->
             <SettingContainer settingName="Chat Model">
-                <DropdownComponent selected={$plugin.data.openAIGenModel.modelName} options={openAIGenModels} changeFunc={openAIGenChange} />
+                <DropdownComponent selected={$plugin.data.openAIGenModel.model} options={openAIGenModels} changeFunc={openAIGenChange} />
             </SettingContainer>
             <!-- openAI Embed Model -->
             <SettingContainer settingName="Embed Model">
-                <DropdownComponent selected={$plugin.data.openAIEmbedModel.modelName} options={openAIEmbedModels} changeFunc={openAIEmbedChange} />
+                <DropdownComponent selected={$plugin.data.openAIEmbedModel.model} options={openAIEmbedModels} changeFunc={openAIEmbedChange} />
             </SettingContainer>
         {/if}
     {/if}

@@ -50,14 +50,15 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     initialAssistantMessage: Prompts[(window.localStorage.getItem('language') as Language) || 'en'].initialAssistantMessage,
     isIncognitoMode: false,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
-    ollamaEmbedModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
+    ollamaEmbedModel: { model: 'nomic-embed-text', baseUrl: 'http://localhost:11434', similarityThreshold: 0.75 },
     openAIGenModel: {
-        modelName: 'gpt-3.5-turbo',
+        model: 'gpt-3.5-turbo',
         openAIApiKey: '',
     },
     openAIEmbedModel: {
-        modelName: 'text-embedding-ada-002',
+        model: 'text-embedding-ada-002',
         openAIApiKey: '',
+        similarityThreshold: 0.75,
     },
     targetFolder: 'Chats',
     defaultChatName: 'New Chat',
@@ -90,10 +91,7 @@ export default class SecondBrainPlugin extends Plugin {
 
     private getVectorStorePath() {
         return normalizePath(
-            this.manifest.dir +
-                '/' +
-                (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName) +
-                '-vector-store.bin'
+            this.manifest.dir + '/' + (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.model) + '-vector-store.bin'
         );
     }
 
@@ -118,8 +116,10 @@ export default class SecondBrainPlugin extends Plugin {
         papaState.set('loading');
         Log.info(
             'Initializing second brain',
-            '\nGen Model: ' + (this.data.isIncognitoMode ? this.data.ollamaGenModel.model : this.data.openAIGenModel.modelName),
-            '\nEmbed Model: ' + (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.modelName)
+            '\nGen Model: ',
+            this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
+            '\nEmbed Model: ',
+            this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel
         );
         this.secondBrain = new Papa({
             genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
