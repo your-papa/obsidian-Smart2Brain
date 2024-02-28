@@ -71,9 +71,9 @@
 </script>
 
 <!-- save delete and rag settings slightly above input field -->
-<div class="relative pb-1">
+<div class="relative">
     <div
-        class="absolute -top-[3.3rem] left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-t-2xl border-solid border-x-[--background-modifier-border] border-b-transparent border-t-[--background-modifier-border] {$isChatInSidebar
+        class="absolute -top-[54px] left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-t-2xl border border-solid border-x-[--background-modifier-border] border-b-transparent border-t-[--background-modifier-border] {$isChatInSidebar
             ? 'bg-[--background-secondary]'
             : 'bg-[--background-primary]'} p-2"
     >
