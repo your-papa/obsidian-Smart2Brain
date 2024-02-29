@@ -330,6 +330,7 @@ export default class SecondBrainPlugin extends Plugin {
         for (const file of files) {
             if (file.endsWith('vector-store.bin')) await this.app.vault.adapter.remove(file);
         }
+        new Notice('Plugin data cleared. Please reload the plugin.', 4000);
     }
 
     registerMonkeyPatches() {
