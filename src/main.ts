@@ -106,12 +106,15 @@ export default class SecondBrainPlugin extends Plugin {
 
     async initPapa() {
         if (get(papaState) === 'running') return new Notice('Smart Second Brain is still running.', 4000);
-        else if (get(papaState) === 'indexing' || get(papaState) === 'indexing-paused' || get(papaState) === 'loading')
+        else if (get(papaState) === 'indexing' || get(papaState) === 'indexing-pause' || get(papaState) === 'loading') {
             return new Notice('Please wait for the indexing to finish', 4000);
-        else if (this.data.isIncognitoMode && !(await isOllamaRunning()))
+        } else if (this.data.isIncognitoMode && !(await isOllamaRunning())) {
+            papaState.set('error');
             return new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 4000);
-        else if (!this.data.isIncognitoMode && !(await isAPIKeyValid()))
+        } else if (!this.data.isIncognitoMode && !(await isAPIKeyValid())) {
+            papaState.set('error');
             return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);
+        }
 
         papaState.set('loading');
         Log.info(
@@ -152,7 +155,7 @@ export default class SecondBrainPlugin extends Plugin {
                 const progress = ((result.numAdded + result.numSkipped) / docs.length) * 100;
                 papaIndexingProgress.set(Math.max(progress, get(papaIndexingProgress)));
                 // pause indexing on "indexing-stopped" state
-                if (get(papaState) === 'indexing-paused') break;
+                if (get(papaState) === 'indexing-pause') break;
             }
             // embedNotice.hide();
         } catch (e) {
@@ -174,10 +177,7 @@ export default class SecondBrainPlugin extends Plugin {
         plugin.set(this);
         Log.setLogLevel(this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
 
-        this.app.workspace.onLayoutReady(async () => {
-            if (!((this.data.isIncognitoMode && (await isOllamaRunning())) || (!this.data.isIncognitoMode && (await isAPIKeyValid())))) return;
-            await this.initPapa();
-        });
+        this.app.workspace.onLayoutReady(() => this.initPapa());
         // reembed documents on change
         this.registerEvent(
             this.app.metadataCache.on('changed', async (file: TFile) => {

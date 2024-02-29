@@ -5,7 +5,7 @@ import { Notice } from 'obsidian';
 
 export const canRunSecondBrain = () => {
     if (get(papaState) === 'running') return new Notice('Please wait for the current query to finish', 4000) && false;
-    else if (get(papaState) === 'indexing' || get(papaState) === 'indexing-paused' || get(papaState) === 'loading')
+    else if (get(papaState) === 'indexing' || get(papaState) === 'indexing-pause' || get(papaState) === 'loading')
         return new Notice('Please wait for the indexing to finish', 4000) && false;
     else if (get(papaState) === 'error') return new Notice('Please wait for the error to resolve', 4000) && false;
     else if (get(papaState) !== 'idle') return new Notice('Please initialize your Smart Second Brain first', 4000) && false;
@@ -33,7 +33,7 @@ export async function runSecondBrain(isRAG: boolean, userQuery: string) {
 
     for await (const response of responseStream) {
         cH.set([...chatHistory, { role: 'Assistant', content: response.content, id: nanoid() }]);
-        if (get(papaState) === 'running-stopped') {
+        if (get(papaState) === 'running-stop') {
             if (response.status !== 'Generating') cH.set([...chatHistory, { role: 'Assistant', content: 'Stopped', id: nanoid() }]);
             papaState.set('idle');
             plugin.chatView.save();
