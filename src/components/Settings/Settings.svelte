@@ -97,7 +97,6 @@
         await $plugin.saveSettings();
         componentBaseUrl.setInputValue($plugin.data.ollamaGenModel.baseUrl);
         changeOllamaBaseUrl($plugin.data.ollamaGenModel.baseUrl);
-        $papaState = 'settings-change';
     };
 
     const hideApiKey = () => {
