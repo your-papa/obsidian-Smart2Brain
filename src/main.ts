@@ -20,6 +20,7 @@ import SettingsTab from './views/Settings';
 import { isOllamaRunning } from './controller/Ollama';
 import { isAPIKeyValid } from './controller/OpenAI';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
+import { wildTest } from './components/Settings/FuzzyModal';
 import './lang/i18n';
 import Log from './logging';
 
@@ -62,7 +63,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     },
     targetFolder: 'Chats',
     defaultChatName: 'New Chat',
-    excludeFF: ['Chats'],
+    excludeFF: ['Chats', '*.excalidraw.md'],
     docRetrieveNum: 5,
     isQuickSettingsOpen: true,
     isVerbose: false,
@@ -106,12 +107,15 @@ export default class SecondBrainPlugin extends Plugin {
 
     async initPapa() {
         if (get(papaState) === 'running') return new Notice('Smart Second Brain is still running.', 4000);
-        else if (get(papaState) === 'indexing' || get(papaState) === 'indexing-paused' || get(papaState) === 'loading')
+        else if (get(papaState) === 'indexing' || get(papaState) === 'indexing-pause' || get(papaState) === 'loading') {
             return new Notice('Please wait for the indexing to finish', 4000);
-        else if (this.data.isIncognitoMode && !(await isOllamaRunning()))
+        } else if (this.data.isIncognitoMode && !(await isOllamaRunning())) {
+            papaState.set('error');
             return new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 4000);
-        else if (!this.data.isIncognitoMode && !(await isAPIKeyValid()))
+        } else if (!this.data.isIncognitoMode && !(await isAPIKeyValid())) {
+            papaState.set('error');
             return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);
+        }
 
         papaState.set('loading');
         Log.info(
@@ -136,7 +140,7 @@ export default class SecondBrainPlugin extends Plugin {
         const docs = await obsidianDocumentLoader(
             this.app,
             mdFiles.filter((mdFile: TFile) => {
-                for (const exclude of this.data.excludeFF) if (mdFile.path.startsWith(exclude)) return false;
+                for (const exclude of this.data.excludeFF) if (wildTest(exclude, mdFile.path)) return false;
                 return true;
             })
         );
@@ -152,7 +156,7 @@ export default class SecondBrainPlugin extends Plugin {
                 const progress = ((result.numAdded + result.numSkipped) / docs.length) * 100;
                 papaIndexingProgress.set(Math.max(progress, get(papaIndexingProgress)));
                 // pause indexing on "indexing-stopped" state
-                if (get(papaState) === 'indexing-paused') break;
+                if (get(papaState) === 'indexing-pause') break;
             }
             // embedNotice.hide();
         } catch (e) {
@@ -174,15 +178,12 @@ export default class SecondBrainPlugin extends Plugin {
         plugin.set(this);
         Log.setLogLevel(this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
 
-        this.app.workspace.onLayoutReady(async () => {
-            if (!((this.data.isIncognitoMode && (await isOllamaRunning())) || (!this.data.isIncognitoMode && (await isAPIKeyValid())))) return;
-            await this.initPapa();
-        });
+        this.app.workspace.onLayoutReady(() => this.initPapa());
         // reembed documents on change
         this.registerEvent(
             this.app.metadataCache.on('changed', async (file: TFile) => {
                 if (!this.secondBrain) return;
-                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                for (const exclude of this.data.excludeFF) if (wildTest(exclude, file.path)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 this.secondBrain.embedDocuments(docs, 'byFile');
                 this.needsToSaveVectorStoreData = true;
@@ -192,7 +193,7 @@ export default class SecondBrainPlugin extends Plugin {
         this.registerEvent(
             this.app.vault.on('delete', async (file: TFile) => {
                 if (!this.secondBrain) return;
-                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                for (const exclude of this.data.excludeFF) if (wildTest(exclude, file.path)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 this.secondBrain.deleteDocuments({ docs });
                 this.needsToSaveVectorStoreData = true;
@@ -201,7 +202,7 @@ export default class SecondBrainPlugin extends Plugin {
         this.registerEvent(
             this.app.vault.on('rename', async (file: TFile, oldPath: string) => {
                 if (!this.secondBrain) return;
-                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                for (const exclude of this.data.excludeFF) if (wildTest(exclude, file.path)) return;
                 await this.secondBrain.deleteDocuments({ sources: [oldPath] });
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 this.secondBrain.embedDocuments(docs, 'byFile');
@@ -329,6 +330,7 @@ export default class SecondBrainPlugin extends Plugin {
         for (const file of files) {
             if (file.endsWith('vector-store.bin')) await this.app.vault.adapter.remove(file);
         }
+        new Notice('Plugin data cleared. Please reload the plugin.', 4000);
     }
 
     registerMonkeyPatches() {

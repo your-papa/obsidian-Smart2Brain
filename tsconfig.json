@@ -7,7 +7,15 @@
         "resolveJsonModule": true,
         "allowJs": true,
         "isolatedModules": true,
-        "noEmitOnError": true
+        "noEmitOnError": true,
+        "plugins": [
+            {
+                "name": "typescript-svelte-plugin",
+                // the following options can be set additionally; they are optional; their default values are listed here
+                "enabled": true, // enables this plugin
+                "assumeIsSvelteProject": true // if true, skip detection and always assume it's a Svelte project
+            }
+        ]
     },
     "include": ["src/**/*.d.ts", "src/**/*.ts", "src/**/*.js", "src/**/*.svelte"]
 }

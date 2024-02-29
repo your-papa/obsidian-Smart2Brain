@@ -6,7 +6,7 @@
     import DropdownComponent from '../base/Dropdown.svelte';
     import { renderMarkdown, icon } from '../../controller/Messages';
     import { plugin, isIncognitoMode } from '../../store';
-    import { getOllamaGenModel, changeOllamaBaseUrl, isOriginSet, ollamaEmbedChange } from '../../controller/Ollama';
+    import { getOllamaGenModels, changeOllamaBaseUrl, isOllamaOriginsSet, ollamaEmbedChange } from '../../controller/Ollama';
 
     export let osType: 'Linux' | 'Darwin' | 'Windows_NT';
     let ollamaModels: { display: string; value: string }[] = [];
@@ -55,8 +55,8 @@
     <li>
         <button
             on:click={async () => {
-                isOrigin = await isOriginSet();
-                ollamaModels = await getOllamaGenModel();
+                isOrigin = await isOllamaOriginsSet();
+                ollamaModels = await getOllamaGenModels();
             }}>Check if Ollama is running and the origins are set correctly</button
         >
     </li>
@@ -68,7 +68,7 @@
         <li>
             Install an Ollama Model and set it
             <div class="flex items-center gap-1">
-                <button class="clickable-icon" use:icon={'refresh-ccw'} on:click={async () => (ollamaModels = await getOllamaGenModel())} />
+                <button class="clickable-icon" use:icon={'refresh-ccw'} on:click={async () => (ollamaModels = await getOllamaGenModels())} />
                 <DropdownComponent bind:this={ollamaModelComponent} selected={model} options={ollamaModels} changeFunc={ollamaEmbedChange} />
             </div>
         </li>

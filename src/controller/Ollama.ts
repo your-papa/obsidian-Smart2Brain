@@ -1,31 +1,39 @@
 import { requestUrl } from 'obsidian';
-import { plugin as p } from '../store';
+import { plugin as p, papaState } from '../store';
 import { get } from 'svelte/store';
 import Log from '../logging';
 
 export async function isOllamaRunning() {
     try {
         const response = await requestUrl(get(p).data.ollamaGenModel.baseUrl + '/api/tags');
-        return response.status === 200;
+        if (response.status === 200) {
+            return true;
+        } else {
+            Log.debug(`IsOllamaRunning, Unexpected status code: ${response.status}`);
+            return false;
+        }
     } catch (error) {
-        if (error.toString() === 'Error: net::ERR_CONNECTION_REFUSED') console.error('Ollama is not running', error);
-        else Log.error(error); // handle better dont necessarily log error
+        Log.debug('Ollama is not running', error);
         return false;
     }
 }
 
-export async function isOriginSet() {
+export async function isOllamaOriginsSet() {
     try {
         const response = await fetch(get(p).data.ollamaGenModel.baseUrl + '/api/tags');
-        return response.status === 200;
+        if (response.status === 200) {
+            return true;
+        } else {
+            Log.debug(`Unexpected status code: ${response.status}`);
+            return false;
+        }
     } catch (error) {
-        if (error.toString() === 'Error: net::ERR_CONNECTION_REFUSED') console.error('Ollama is not running', error);
-        else Log.error(error); // handle better dont necessarily log error
+        Log.debug('Ollama is not running or origins not correctly set', error);
         return false;
     }
 }
 
-export async function getOllamaGenModel(): Promise<{ display: string; value: string }[]> {
+export async function getOllamaGenModels(): Promise<{ display: string; value: string }[]> {
     const plugin = get(p);
     try {
         const modelsRes = await requestUrl({
@@ -37,12 +45,9 @@ export async function getOllamaGenModel(): Promise<{ display: string; value: str
         });
         const models: string[] = modelsRes.json.models.map((model: { name: string }) => model.name);
         return models.map((model: string) => ({ display: model.replace(':latest', ''), value: model.replace(':latest', '') }));
-    } catch (e) {
-        if (e.toString() == 'Error: net::ERR_CONNECTION_REFUSED') {
-            return [];
-        }
-        // TODO handle better
-        Log.error(e);
+    } catch (error) {
+        Log.debug('Ollama is not running', error);
+        return [];
     }
 }
 
@@ -60,6 +65,7 @@ export const changeOllamaBaseUrl = (newBaseUrl: string) => {
         //styleOllamaBaseUrl = 'bg-[--background-modifier-error]';
     }
     plugin.saveSettings();
+    papaState.set('settings-change');
 };
 
 export const ollamaEmbedChange = (selected: string) => {
@@ -67,5 +73,6 @@ export const ollamaEmbedChange = (selected: string) => {
     const plugin = get(p);
     // @ts-expect-error Have to do this
     plugin.data.ollamaEmbedModel.model = selected;
+    papaState.set('settings-change');
     plugin.saveSettings();
 };

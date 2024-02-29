@@ -10,7 +10,7 @@
     import ToggleComponent from '../base/Toggle.svelte';
     import { DEFAULT_SETTINGS } from '../../main';
     import ButtonComponent from '../base/Button.svelte';
-    import { changeOllamaBaseUrl, getOllamaGenModel, ollamaEmbedChange } from '../../controller/Ollama';
+    import { changeOllamaBaseUrl, getOllamaGenModels, ollamaEmbedChange } from '../../controller/Ollama';
     import { t } from 'svelte-i18n';
     import Log from '../../logging';
 
@@ -50,7 +50,7 @@
                     '...' +
                     data.openAIGenModel.openAIApiKey.substring(data.openAIGenModel.openAIApiKey.length - 3)
             );
-        ollamaModels = await getOllamaGenModel();
+        ollamaModels = await getOllamaGenModels();
     });
 
     $: if ($isIncognitoMode && componentBaseUrl && componentBaseUrl.getInputValue().trim() === '' && $plugin.data.ollamaGenModel.baseUrl !== '') {
@@ -88,6 +88,7 @@
         $plugin.data.openAIGenModel.openAIApiKey = newApiKey;
         $plugin.data.openAIEmbedModel.openAIApiKey = newApiKey;
         $plugin.saveSettings();
+        $papaState = 'settings-change';
     };
 
     const resetOllamaBaseUrl = async () => {
@@ -96,6 +97,7 @@
         await $plugin.saveSettings();
         componentBaseUrl.setInputValue($plugin.data.ollamaGenModel.baseUrl);
         changeOllamaBaseUrl($plugin.data.ollamaGenModel.baseUrl);
+        $papaState = 'settings-change';
     };
 
     const hideApiKey = () => {
@@ -113,16 +115,19 @@
         //TODO Modle types
         $plugin.data.ollamaGenModel.model = selected;
         $plugin.saveSettings();
+        $papaState = 'settings-change';
     };
     const openAIGenChange = (selected: string) => {
         //TODO Modle types
         $plugin.data.openAIGenModel.model = selected;
         $plugin.saveSettings();
+        $papaState = 'settings-change';
     };
     const openAIEmbedChange = (selected: string) => {
         //TODO Modle types
         $plugin.data.openAIEmbedModel.model = selected;
         $plugin.saveSettings();
+        $papaState = 'settings-change';
     };
 
     async function changeDocNum(docNum: number) {
@@ -150,18 +155,18 @@
     let oldPapaState: PapaState;
     function toggleIncognitoMode() {
         if ($papaState === 'running') return new Notice('Please wait for the current query to finish', 4000);
-        else if ($papaState === 'indexing' || $papaState === 'indexing-paused' || $papaState === 'loading')
+        else if ($papaState === 'indexing' || $papaState === 'indexing-pause' || $papaState === 'loading')
             return new Notice('Please wait for the indexing to finish', 4000);
         $isIncognitoMode = !$isIncognitoMode;
         $plugin.data.isIncognitoMode = $isIncognitoMode;
         $plugin.saveSettings();
-        if ($papaState === 'mode-changed') {
-            // Already in mode-changed state so we restore the previous state (there are only two states)
+        if ($papaState === 'mode-change') {
+            // Already in mode-change state so we restore the previous state (there are only two states)
             $papaState = oldPapaState;
             return;
         }
         oldPapaState = $papaState;
-        $papaState = 'mode-changed';
+        $papaState = 'mode-change';
     }
 </script>
 
@@ -207,7 +212,7 @@
             <ButtonComponent
                 iconId={'refresh-ccw'}
                 changeFunc={async () => {
-                    ollamaModels = await getOllamaGenModel();
+                    ollamaModels = await getOllamaGenModels();
                 }}
             /></SettingContainer
         >
@@ -233,7 +238,7 @@
             <ButtonComponent
                 iconId={'refresh-ccw'}
                 changeFunc={async () => {
-                    ollamaModels = await getOllamaGenModel();
+                    ollamaModels = await getOllamaGenModels();
                 }}
             /></SettingContainer
         >
