@@ -20,6 +20,7 @@ import SettingsTab from './views/Settings';
 import { isOllamaRunning } from './controller/Ollama';
 import { isAPIKeyValid } from './controller/OpenAI';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
+import { wildTest } from './components/Settings/FuzzyModal';
 import './lang/i18n';
 import Log from './logging';
 
@@ -62,7 +63,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     },
     targetFolder: 'Chats',
     defaultChatName: 'New Chat',
-    excludeFF: ['Chats'],
+    excludeFF: ['Chats', '*.excalidraw.md'],
     docRetrieveNum: 5,
     isQuickSettingsOpen: true,
     isVerbose: false,
@@ -139,7 +140,7 @@ export default class SecondBrainPlugin extends Plugin {
         const docs = await obsidianDocumentLoader(
             this.app,
             mdFiles.filter((mdFile: TFile) => {
-                for (const exclude of this.data.excludeFF) if (mdFile.path.startsWith(exclude)) return false;
+                for (const exclude of this.data.excludeFF) if (wildTest(exclude, mdFile.path)) return false;
                 return true;
             })
         );
@@ -182,7 +183,7 @@ export default class SecondBrainPlugin extends Plugin {
         this.registerEvent(
             this.app.metadataCache.on('changed', async (file: TFile) => {
                 if (!this.secondBrain) return;
-                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                for (const exclude of this.data.excludeFF) if (wildTest(exclude, file.path)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 this.secondBrain.embedDocuments(docs, 'byFile');
                 this.needsToSaveVectorStoreData = true;
@@ -192,7 +193,7 @@ export default class SecondBrainPlugin extends Plugin {
         this.registerEvent(
             this.app.vault.on('delete', async (file: TFile) => {
                 if (!this.secondBrain) return;
-                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                for (const exclude of this.data.excludeFF) if (wildTest(exclude, file.path)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 this.secondBrain.deleteDocuments({ docs });
                 this.needsToSaveVectorStoreData = true;
@@ -201,7 +202,7 @@ export default class SecondBrainPlugin extends Plugin {
         this.registerEvent(
             this.app.vault.on('rename', async (file: TFile, oldPath: string) => {
                 if (!this.secondBrain) return;
-                for (const exclude of this.data.excludeFF) if (file.path.startsWith(exclude)) return;
+                for (const exclude of this.data.excludeFF) if (wildTest(exclude, file.path)) return;
                 await this.secondBrain.deleteDocuments({ sources: [oldPath] });
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 this.secondBrain.embedDocuments(docs, 'byFile');
