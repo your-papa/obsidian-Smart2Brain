@@ -52,13 +52,13 @@
                 <div class="flex w-full items-center justify-center gap-1">
                     <button
                         aria-label="Pause indexing"
-                        on:click={() => ($papaState = 'indexing-paused')}
+                        on:click={() => ($papaState = 'indexing-pause')}
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'pause'}
                     />
                     <ProgressBar progress={$papaIndexingProgress} />
                 </div>
-            {:else if $papaState === 'indexing-paused'}
+            {:else if $papaState === 'indexing-pause'}
                 <h2 class="text-center text-[--text-normal]">Paused indexing vault</h2>
                 <div class="flex w-full items-center justify-center gap-1">
                     <button
@@ -77,13 +77,21 @@
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'refresh-cw'}
                 />
-            {:else if $papaState === 'mode-changed'}
+            {:else if $papaState === 'mode-change'}
                 <h2 class="text-center text-[--text-normal]">Reinitialize Smart Second Brain <br />with {$isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h2>
                 <button
                     aria-label="Initialize"
                     on:click={() => $plugin.initPapa()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'play'}
+                />
+            {:else if $papaState === 'settings-change'}
+                <h2 class="text-center text-[--text-normal]">Settings changed. <br />Reinitialize Smart Second Brain.</h2>
+                <button
+                    aria-label="Reinitialize, Settings changed"
+                    on:click={() => $plugin.initPapa()}
+                    class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+                    use:icon={'refresh-cw'}
                 />
             {:else}
                 {#if $isIncognitoMode}

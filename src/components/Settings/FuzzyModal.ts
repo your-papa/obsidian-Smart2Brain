@@ -2,7 +2,7 @@ import { SuggestModal, TFile, TAbstractFile, App } from 'obsidian';
 import { get } from 'svelte/store';
 import { plugin } from '../../store';
 
-function wildTest(wildcard: string, str: string): boolean {
+export function wildTest(wildcard: string, str: string): boolean {
     const w = wildcard.replace(/[.+^${}()|[\]\\]/g, '\\$&'); // regexp escape
     const re = new RegExp(`\\b${w.replace(/\*/g, '.*').replace(/\?/g, '.')}`, 'i');
     return re.test(str);
