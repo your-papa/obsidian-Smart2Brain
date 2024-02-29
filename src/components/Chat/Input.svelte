@@ -124,7 +124,7 @@
     {#if $papaState === 'running'}
         <button
             aria-label="Stop your Smart Second Brain"
-            on:click={() => ($papaState = 'running-stopped')}
+            on:click={() => ($papaState = 'running-stop')}
             class="h-8 rounded-r-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
             use:icon={'stop-circle'}
         />
@@ -134,6 +134,20 @@
             on:click={runSecondBrainFromInput}
             class="h-8 rounded-r-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
             use:icon={'send-horizontal'}
+        />
+    {:else if $papaState === 'error'}
+        <button
+            aria-label="Retry initializing"
+            on:click={() => $plugin.initPapa()}
+            class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+            use:icon={'refresh-cw'}
+        />
+    {:else if $papaState === 'settings-change'}
+        <button
+            aria-label="Reinitialize, Settings changed"
+            on:click={() => $plugin.initPapa()}
+            class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+            use:icon={'refresh-cw'}
         />
     {:else}
         <div class="flex h-8 items-center px-4 py-2">
