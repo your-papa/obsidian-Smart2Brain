@@ -6,7 +6,7 @@
 
 # Smart Second Brain
 > [!Note]
-> Still in Open Beta. MVP will be released in mid-March.
+> Still in Open Beta. MVP will be released mid-March.
 
 ## Features
 TBD
