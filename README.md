@@ -5,7 +5,8 @@
 </div>
 
 # Smart Second Brain
-TBD
+> [!Note]
+> Still in Open Beta. MVP will be released mid-March.
 
 ## Features
 TBD
@@ -25,7 +26,7 @@ The Smart Second Brain provides two modes. When the Incognito mode is enabled it
 2. Go to your Terminal and execute the following Command:
 
 ```zsh
-$ launchctl setenv OLLAMA_ORIGINS "*"
+launchctl setenv OLLAMA_ORIGINS "*"
 ```
 
 3. Quit the Ollama service (in your Menu Bar click on the Ollama Icon and click Quit)
@@ -36,13 +37,13 @@ $ launchctl setenv OLLAMA_ORIGINS "*"
     - with [Homebrew](https://brew.sh/):
     
     ```zsh
-    $ brew install Ollama
+    brew install Ollama
     ```
     
     - with curl:
     
     ```zsh
-    $ curl -fsSL https://ollama.ai/install.sh | sh
+    curl -fsSL https://ollama.ai/install.sh | sh
     ```
     
     - or [manually](https://github.com/ollama/ollama/blob/main/docs/linux.md) with binaries.
@@ -50,7 +51,7 @@ $ launchctl setenv OLLAMA_ORIGINS "*"
 2. Start the Ollama service with the Origins flag:
 
 ```zsh
-$ OLLAMA_ORIGINS="*" ollama serve
+OLLAMA_ORIGINS="*" ollama serve
 ```
 
 ### Linux
@@ -59,7 +60,7 @@ $ OLLAMA_ORIGINS="*" ollama serve
 
     - with curl: 
     ```zsh
-    $ curl -fsSL https://ollama.ai/install.sh | sh
+    curl -fsSL https://ollama.ai/install.sh | sh
     ```
 
    - or [manually](https://github.com/ollama/ollama/blob/main/docs/linux.md) with binaries.
@@ -70,8 +71,12 @@ $ OLLAMA_ORIGINS="*" ollama serve
 
 ### Windows
 
-> [!Note]
-> Coming soon! For now, you can install Ollama on Windows via WSL2.
+1. Install [Ollama](https://ollama.com/download)
+2. Quit running Ollama instance
+3. Start PowerShell and run the following command to set the origins
+```powershell
+$env:OLLAMA_ORIGINS="*"; ollama serve
+```
 
 ## OpenAI
 
