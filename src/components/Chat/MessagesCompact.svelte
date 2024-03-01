@@ -38,16 +38,14 @@
     function wrapperEditMessage(message: ChatMessage, textarea: HTMLTextAreaElement) {
         editMessageId = editMessage(message, textarea);
     }
-
-    let backgroundColor: string;
-    $: if (isChatInSidebar) backgroundColor = 'bg-[--background-secondary-alt]';
-    else backgroundColor = 'bg-[--background-primary-alt]';
 </script>
 
 <div
     bind:this={chatWindow}
     on:scroll={() => (isAutoScrolling = chatWindow.scrollTop + chatWindow.clientHeight + 1 >= chatWindow.scrollHeight)}
-    class="w-full flex-grow select-text overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border] {backgroundColor}"
+    class="w-full flex-grow select-text overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border] {$isChatInSidebar
+        ? 'bg-[--background-secondary-alt]'
+        : 'bg-[--background-primary-alt]'}"
 >
     {#each $chatHistory as message (message.id)}
         {#if message.role === 'User'}
@@ -82,7 +80,11 @@
                 </div>
             </div>
         {:else}
-            <div class="group border-x-0 border-b border-t-0 border-solid border-[--background-modifier-border] p-2 pr-4 {backgroundColor}">
+            <div
+                class="group border-x-0 border-b border-t-0 border-solid border-[--background-modifier-border] p-2 pr-4 {$isChatInSidebar
+                    ? 'bg-[--background-secondary]'
+                    : 'bg-[--background-primary]'}"
+            >
                 <div class="text-[--text-accent] mt-2 font-bold">Smart2Brain</div>
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
