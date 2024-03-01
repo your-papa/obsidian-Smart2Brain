@@ -178,7 +178,14 @@ export default class SecondBrainPlugin extends Plugin {
         plugin.set(this);
         Log.setLogLevel(this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
 
-        this.app.workspace.onLayoutReady(() => this.initPapa());
+        this.app.workspace.onLayoutReady(() => {
+            const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT) || this.app.workspace.getLeavesOfType(VIEW_TYPE_SETUP);
+            if (leaves.length) {
+                this.leaf = leaves[0];
+                this.activateView();
+            }
+            this.initPapa();
+        });
         // reembed documents on change
         this.registerEvent(
             this.app.metadataCache.on('changed', async (file: TFile) => {
@@ -213,7 +220,7 @@ export default class SecondBrainPlugin extends Plugin {
         this.registerEvent(
             this.app.workspace.on('layout-change', () => {
                 if (!this.leaf) {
-                    const leaves = this.app.workspace.getLeavesOfType(get(isOnboarded) ? VIEW_TYPE_CHAT : VIEW_TYPE_SETUP);
+                    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT) || this.app.workspace.getLeavesOfType(VIEW_TYPE_SETUP);
                     if (!leaves.length) return;
                     this.leaf = leaves[0];
                 }
