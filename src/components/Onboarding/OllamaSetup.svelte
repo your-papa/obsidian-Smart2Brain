@@ -73,7 +73,7 @@
 <li>
     <div class="flex flex-wrap justify-between items-center">
         Test if the origins are set correctly
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-1">
             {#if isOriginsTested}
                 {#if isOrigin}
                     <div class="h-[28px] *:!h-[28px] *:!w-[28px] *:text-[--background-modifier-success]" use:icon={'check'} />
