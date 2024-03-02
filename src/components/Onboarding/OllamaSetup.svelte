@@ -21,7 +21,7 @@
     let isPullingError = false;
     let isProcessing = false;
 
-    let isClickedOrigin: boolean = false;
+    let isOriginsTested: boolean = false;
 
     let isOrigin: boolean = false;
     let index = 0;
@@ -70,50 +70,57 @@
     }
 </script>
 
-<li>Test if Ollama is running and the origins are set correctly</li>
-<div class="w-full !pr-10 text-center">
-    <button
-        on:click={async () => {
-            isOrigin = await isOllamaOriginsSet();
-            isClickedOrigin = true;
-            ollamaModels = await getOllamaGenModels();
-        }}>Test</button
-    >
-</div>
-{#if !isOrigin && isClickedOrigin}
-    <div class="flex items-center gap-5">
-        <div class="h-[--icon-xl] *:!h-[--icon-xl] *:!w-[--icon-xl] *:text-[--background-modifier-error]" use:icon={'cross'} />
-        <p class="m-0 text-sm">Origins are not set correctly!</p>
+<li>
+    <div class="flex flex-wrap justify-between items-center">
+        Test if the origins are set correctly
+        <div class="flex items-center gap-4">
+            {#if isOriginsTested}
+                {#if isOrigin}
+                    <div class="h-[28px] *:!h-[28px] *:!w-[28px] *:text-[--background-modifier-success]" use:icon={'check'} />
+                {:else}
+                    <div class="h-[28px] *:!h-[28px] *:!w-[28px] *:text-[--background-modifier-error]" use:icon={'cross'} />
+                {/if}
+            {/if}
+            {#if !isOrigin}
+                <button
+                    aria-label="Test if origins are set correctly"
+                    on:click={async () => {
+                        isOrigin = await isOllamaOriginsSet();
+                        isOriginsTested = true;
+                        ollamaModels = await getOllamaGenModels();
+                    }}>Test</button
+                >
+            {/if}
+        </div>
     </div>
-{/if}
+</li>
 {#if isOrigin}
-    <div class="flex items-center gap-5">
-        <div class="h-[--icon-xl] *:!h-[--icon-xl] *:!w-[--icon-xl] *:text-[--background-modifier-success]" use:icon={'check'} />
-        <p class="m-0 text-sm">Origins are set correctly!</p>
-    </div>
-    <li>Install an Ollama Model. <br /> Recomended:</li>
-    <div class="w-full !pr-10 text-center">
-        <input type="text" list="ollama-models" bind:value={pullModel} />
-        <button
-            on:click={() => {
-                isPullingRecommendedModel = true;
-                consumeStream();
-            }}>Install</button
-        >
-    </div>
+    <li>
+        Install an Ollama Embedding Model. <br />
+        <div class="flex flex-wrap justify-between items-center">
+            Recomended:
+            <div>
+                <input type="text" list="ollama-models" bind:value={pullModel} />
+                <button
+                    on:click={() => {
+                        isPullingRecommendedModel = true;
+                        consumeStream();
+                    }}>Install</button
+                >
+            </div>
+        </div>
+    </li>
     {#if isPullingRecommendedModel}
         <div class="flex justify-between">
-            <div class="flex">
-                <span>{status}</span>
+            <div>
+                {status}
                 {#each ['', '.', '..', '...'] as sequence, i}
                     {#if i === index}
-                        <span>
-                            {sequence}
-                        </span>
+                        {sequence}
                     {/if}
                 {/each}
             </div>
-            <span>{progress}% / {formatBytes(total)}</span>
+            {progress}% / {formatBytes(total)}
         </div>
         <div>
             <ProgressBarComponent {progress} />
@@ -121,16 +128,19 @@
     {:else if isPullingError}
         <p>There was an error pulling the recommended model</p>
     {/if}
-    <li>
-        Set your embed Model:
-        <div class="flex w-full justify-center !pr-10 pt-1">
-            <button class="clickable-icon mr-1" use:icon={'refresh-ccw'} on:click={async () => (ollamaModels = await getOllamaGenModels())} />
-            <DropdownComponent bind:this={ollamaModelComponent} selected={model} options={ollamaModels} changeFunc={ollamaEmbedChange} />
-            <div class="h–[--icon-m] w-[--icon-m] bg-transparent" />
-        </div>
-    </li>
+    {#if ollamaModels.length}
+        <li>
+            <div class="flex flex-wrap justify-between items-center">
+                Set your embed Model:
+                <div class="flex items-center gap-1">
+                    <button class="clickable-icon mr-1" use:icon={'refresh-ccw'} on:click={async () => (ollamaModels = await getOllamaGenModels())} />
+                    <DropdownComponent bind:this={ollamaModelComponent} selected={model} options={ollamaModels} changeFunc={ollamaEmbedChange} />
+                </div>
+            </div>
+        </li>
+    {/if}
     {#if model !== ''}
-        <div class="w-full !pr-10 !pt-5 text-center">
+        <div class="w-full text-center mt-4">
             <InitButtonComponent />
         </div>
     {/if}

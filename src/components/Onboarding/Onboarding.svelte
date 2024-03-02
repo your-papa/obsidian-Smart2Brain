@@ -7,7 +7,7 @@
     import DaemonComponent from './OllamaDaemon.svelte';
     import { icon } from '../../controller/Messages';
 
-    const osType = 'Windows_NT';
+    const osType = os.type();
     const installOptionsAll = {
         Darwin: ['Ollama App', 'Ollama Daemon', 'OpenAI'],
         Linux: ['Ollama Daemon', 'OpenAI'],
@@ -24,12 +24,10 @@
     let selected: string;
 </script>
 
-<div class="m-2 flex h-full flex-col overflow-auto pt-8">
+<div class="flex h-full w-full items-center flex-col overflow-auto pt-8">
     <div class="w-full text-center *:!h-[--icon-xl] *:!w-[--icon-xl]" use:icon={'brain-circuit'} />
-    <h1 class="text-center text-[--text-normal]">Setup</h1>
-    <div class="flex w-full justify-center">
-        <SliderComponent options={installOptions} bind:selected />
-    </div>
+    <h1 class="text-[--text-normal]">Setup</h1>
+    <SliderComponent options={installOptions} bind:selected />
     {#if selected === 'Ollama App'}
         <AppComponent {osType} />
     {:else if selected === 'Ollama Daemon'}
