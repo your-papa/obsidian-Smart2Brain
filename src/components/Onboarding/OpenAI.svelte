@@ -21,17 +21,17 @@
 
 <ol class="w-full max-w-[500px] *:p-1 pr-10">
     <li>
-        Create an OpenAI
+        Create an
         <a href="https://platform.openai.com/signup">account</a>
     </li>
     <li>
-        Create an OpenAI
+        Create an
         <a href="https://platform.openai.com/account/api-keys">API Key</a>
     </li>
     <div
         class=""
         use:renderMarkdown={(this,
-        '> [!Warning] Activate Api-Key \n> For the Api-Key to work you might have to upgrade to an OpenAI paid account. This means depositing at least $5 onto your OpenAI account. This might change in the future.')}
+        '> [!Warning] Activate API-Key \n> For the Api-Key to work you might have to upgrade to an OpenAI paid account. This means depositing at least $5 onto your OpenAI account. This might change in the future.')}
     />
     <li>
         <div class="flex flex-wrap justify-between items-center">
@@ -41,7 +41,7 @@
     <li>
         <div class="flex flex-wrap justify-between items-center">
             Test your API Key
-            <div class="flex items-center gap-4">
+            <div class="flex items-center gap-1">
                 {#if isKeyTested}
                     {#if isValid}
                         <div class="h-[28px] *:!h-[28px] *:!w-[28px] *:text-[--background-modifier-success]" use:icon={'check'} />

@@ -22,7 +22,7 @@
     <li>
         <div class="flex flex-wrap justify-between items-center">
             Test if Ollama is running:
-            <div class="flex items-center gap-4">
+            <div class="flex items-center gap-1">
                 {#if isOllamaTested}
                     {#if isRunning}
                         <div class="h-[28px] *:!h-[28px] *:!w-[28px] *:text-[--background-modifier-success]" use:icon={'check'} />
