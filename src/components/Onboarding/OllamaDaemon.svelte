@@ -18,10 +18,10 @@
     $: if (componentBaseUrl) componentBaseUrl.setInputValue($plugin.data.ollamaEmbedModel.baseUrl);
 </script>
 
-<ol class="max-w-fit *:p-1">
+<ol class="w-full max-w-[500px] *:p-1 pr-10">
     <li>Install Ollama through one of these options:</li>
     {#if osType === 'Darwin'}
-        <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\n$ brew install ollama\n```')} />
+        <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\nbrew install ollama\n```')} />
     {:else if osType === 'Linux'}
         <div
             class="w-max max-w-full text-xs *:flex *:rounded *:pr-1"
@@ -29,11 +29,13 @@
         />
     {/if}
 
-    <li>Set the BaseUrl</li>
-    <div class="w-full !pr-10 text-center">
-        <TextComponent bind:this={componentBaseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
-    </div>
+    <li>
+        <div class="flex flex-wrap justify-between items-center">
+            Set the BaseUrl
+            <TextComponent bind:this={componentBaseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
+        </div>
+    </li>
     <li>Start the Ollama service with origins</li>
-    <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\n$ OLLAMA_ORIGINS="*" ollama serve\n```')} />
+    <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\nOLLAMA_ORIGINS="*" ollama serve\n```')} />
     <OllamaSetup />
 </ol>
