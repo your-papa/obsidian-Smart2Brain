@@ -31,7 +31,7 @@
     <div
         class=""
         use:renderMarkdown={(this,
-        '> [!Warning] Activate API-Key \n> For the Api-Key to work you might have to upgrade to an OpenAI paid account. This means depositing at least $5 onto your OpenAI account. This might change in the future.')}
+        '> [!Warning] Activate API-Key \n> For the API-Key to work you might have to upgrade to an OpenAI paid account. This means depositing at least $5 onto your OpenAI account. This might change in the future.')}
     />
     <li>
         <div class="flex flex-wrap justify-between items-center">
