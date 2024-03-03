@@ -1,12 +1,12 @@
 <script lang="ts">
     import TextComponent from '../base/Text.svelte';
     import FFExcludeComponent from './FFExclude.svelte';
-    import { plugin, isIncognitoMode, papaState, type PapaState } from '../../store';
+    import { plugin, isIncognitoMode, papaState, type PapaState, errorState } from '../../store';
     import { Notice, setIcon } from 'obsidian';
     import { onMount } from 'svelte';
     import SettingContainer from './SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
-    import { OpenAIGenModelNames, OpenAIEmbedModelNames, LogLvl } from 'papa-ts';
+    import { OpenAIGenModelNames, OpenAIEmbedModelNames, LogLvl, OllamaRGenModelNames } from 'papa-ts';
     import { isAPIKeyValid } from '../../controller/OpenAI';
     import ToggleComponent from '../base/Toggle.svelte';
     import { DEFAULT_SETTINGS } from '../../main';
@@ -16,7 +16,6 @@
     import Log from '../../logging';
 
     let baseFontSize: number;
-    let searchValue: string;
     let excludeComponent: HTMLDivElement;
     let isExpanded: boolean = false;
     let isOverflowingVertically: boolean = false;
@@ -24,16 +23,9 @@
     let componentBaseUrl: TextComponent;
     let componentApiKey: TextComponent;
     let isOpenAIAPIKeyValid = false;
-    let ollamaModels: { display: string; value: string }[] = [];
+    let installedOllamaModels: string[] = [];
+    let ollamaModels: string[] = [];
     let componentDocNum: TextComponent;
-    const openAIGenModels: { display: string; value: string }[] = Object.values(OpenAIGenModelNames).map((model: string) => ({
-        display: model,
-        value: model,
-    }));
-    const openAIEmbedModels: { display: string; value: string }[] = Object.values(OpenAIEmbedModelNames).map((model: string) => ({
-        display: model,
-        value: model,
-    }));
     let componentDebugging: TextComponent;
 
     $: if (componentDebugging) {
@@ -52,7 +44,8 @@
                     '...' +
                     data.openAIGenModel.openAIApiKey.substring(data.openAIGenModel.openAIApiKey.length - 3)
             );
-        ollamaModels = await getOllamaGenModels();
+        installedOllamaModels = await getOllamaGenModels();
+        ollamaModels = [...new Set(installedOllamaModels.concat(OllamaRGenModelNames))];
         isOpenAIAPIKeyValid = await isAPIKeyValid();
     });
 
@@ -114,9 +107,13 @@
     };
 
     const ollamaGenChange = (selected: string) => {
-        //TODO Modle types
         $plugin.data.ollamaGenModel.model = selected;
         $plugin.saveSettings();
+        if (!installedOllamaModels.includes(selected)) {
+            papaState.set('error');
+            errorState.set('ollama-model-not-installed');
+            return;
+        }
         $papaState = 'settings-change';
     };
     const openAIGenChange = (selected: string) => {
@@ -214,7 +211,8 @@
             <ButtonComponent
                 iconId={'refresh-ccw'}
                 changeFunc={async () => {
-                    ollamaModels = await getOllamaGenModels();
+                    installedOllamaModels = await getOllamaGenModels();
+                    ollamaModels = [...new Set(installedOllamaModels.concat(OllamaRGenModelNames))];
                 }}
             /></SettingContainer
         >
@@ -227,11 +225,19 @@
         {#if ollamaModels.length !== 0}
             <!-- Ollama Gen Model -->
             <SettingContainer settingName="Chat Model">
-                <DropdownComponent selected={$plugin.data.ollamaGenModel.model} options={ollamaModels} changeFunc={ollamaGenChange} />
+                <DropdownComponent
+                    selected={$plugin.data.ollamaGenModel.model}
+                    options={ollamaModels.map((model) => ({ display: model, value: model }))}
+                    changeFunc={ollamaGenChange}
+                />
             </SettingContainer>
             <!-- Ollama Embed Model -->
             <SettingContainer settingName="Embed Model">
-                <DropdownComponent selected={$plugin.data.ollamaEmbedModel.model} options={ollamaModels} changeFunc={ollamaEmbedChange} />
+                <DropdownComponent
+                    selected={$plugin.data.ollamaEmbedModel.model}
+                    options={ollamaModels.map((model) => ({ display: model, value: model }))}
+                    changeFunc={ollamaEmbedChange}
+                />
             </SettingContainer>
         {/if}
     {:else}
@@ -260,11 +266,19 @@
         {#if isOpenAIAPIKeyValid}
             <!-- OpenAI Gen Model -->
             <SettingContainer settingName="Chat Model">
-                <DropdownComponent selected={$plugin.data.openAIGenModel.model} options={openAIGenModels} changeFunc={openAIGenChange} />
+                <DropdownComponent
+                    selected={$plugin.data.openAIGenModel.model}
+                    options={OpenAIGenModelNames.map((model) => ({ display: model, value: model }))}
+                    changeFunc={openAIGenChange}
+                />
             </SettingContainer>
             <!-- openAI Embed Model -->
             <SettingContainer settingName="Embed Model">
-                <DropdownComponent selected={$plugin.data.openAIEmbedModel.model} options={openAIEmbedModels} changeFunc={openAIEmbedChange} />
+                <DropdownComponent
+                    selected={$plugin.data.openAIEmbedModel.model}
+                    options={OpenAIEmbedModelNames.map((model) => ({ display: model, value: model }))}
+                    changeFunc={openAIEmbedChange}
+                />
             </SettingContainer>
         {/if}
     {/if}
