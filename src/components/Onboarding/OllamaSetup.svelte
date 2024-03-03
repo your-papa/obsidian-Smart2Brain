@@ -71,8 +71,8 @@
 </script>
 
 <li>
-    <div class="flex flex-wrap justify-between items-center">
-        Test if the origins are set correctly
+    <div class="flex flex-wrap items-center justify-between">
+        <span class="mr-2">Test if the origins are set correctly:</span>
         <div class="flex items-center gap-1">
             {#if isOriginsTested}
                 {#if isOrigin}
@@ -97,7 +97,7 @@
 {#if isOrigin}
     <li>
         Install an Ollama Embedding Model. <br />
-        <div class="flex flex-wrap justify-between items-center">
+        <div class="flex flex-wrap items-center justify-between">
             Recomended:
             <div>
                 <input type="text" list="ollama-models" bind:value={pullModel} />
@@ -130,7 +130,7 @@
     {/if}
     {#if ollamaModels.length}
         <li>
-            <div class="flex flex-wrap justify-between items-center">
+            <div class="flex flex-wrap items-center justify-between">
                 Set your embed Model:
                 <div class="flex items-center gap-1">
                     <button class="clickable-icon mr-1" use:icon={'refresh-ccw'} on:click={async () => (ollamaModels = await getOllamaGenModels())} />
@@ -140,7 +140,7 @@
         </li>
     {/if}
     {#if model !== ''}
-        <div class="w-full text-center mt-4">
+        <div class="mt-4 w-full text-center">
             <InitButtonComponent />
         </div>
     {/if}
