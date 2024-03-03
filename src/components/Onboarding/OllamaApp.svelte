@@ -9,7 +9,7 @@
     let isOllamaTested: boolean = false;
 </script>
 
-<ol class="w-full max-w-[500px] *:p-1 pr-10">
+<ol class="w-full max-w-[500px] pr-10 *:p-1">
     <li>
         Download the App
         <a href="https://ollama.ai/download">here</a>
@@ -20,8 +20,8 @@
         <li>Run the setup.exe</li>
     {/if}
     <li>
-        <div class="flex flex-wrap justify-between items-center">
-            Test if Ollama is running:
+        <div class="flex flex-wrap items-center justify-between">
+            <span class="mr-2">Test if Ollama is running:</span>
             <div class="flex items-center gap-1">
                 {#if isOllamaTested}
                     {#if isRunning}
