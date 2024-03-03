@@ -13,11 +13,11 @@ import {
     LogLvl,
 } from 'papa-ts';
 import { get } from 'svelte/store';
-import { serializeChatHistory, chatHistory, plugin, isOnboarded, isIncognitoMode, papaState, papaIndexingProgress, isChatInSidebar } from './store';
+import { serializeChatHistory, chatHistory, plugin, isOnboarded, isIncognitoMode, papaState, papaIndexingProgress, isChatInSidebar, errorState } from './store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
-import { isOllamaRunning } from './controller/Ollama';
+import { getOllamaGenModels, isOllamaRunning } from './controller/Ollama';
 import { isAPIKeyValid } from './controller/OpenAI';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
 import { wildTest } from './components/Settings/FuzzyModal';
@@ -111,7 +111,15 @@ export default class SecondBrainPlugin extends Plugin {
             return new Notice('Please wait for the indexing to finish', 4000);
         } else if (this.data.isIncognitoMode && !(await isOllamaRunning())) {
             papaState.set('error');
+            errorState.set('ollama-not-running');
             return new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 4000);
+        } else if (this.data.isIncognitoMode) {
+            const models = await getOllamaGenModels();
+            if (!models.includes(this.data.ollamaGenModel.model)) {
+                papaState.set('error');
+                errorState.set('ollama-model-not-installed');
+                return new Notice('Ollama model not installed. Please install the model before initializing Smart Second Brain.', 4000);
+            }
         } else if (!this.data.isIncognitoMode && !(await isAPIKeyValid())) {
             papaState.set('error');
             return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);

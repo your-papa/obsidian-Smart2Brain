@@ -33,7 +33,7 @@ export async function isOllamaOriginsSet() {
     }
 }
 
-export async function getOllamaGenModels(): Promise<{ display: string; value: string }[]> {
+export async function getOllamaGenModels(): Promise<string[]> {
     const plugin = get(p);
     try {
         const modelsRes = await requestUrl({
@@ -44,7 +44,7 @@ export async function getOllamaGenModels(): Promise<{ display: string; value: st
             },
         });
         const models: string[] = modelsRes.json.models.map((model: { name: string }) => model.name);
-        return models.map((model: string) => ({ display: model.replace(':latest', ''), value: model.replace(':latest', '') }));
+        return models.map((model: string) => model.replace(':latest', ''));
     } catch (error) {
         Log.debug('Ollama is not running', error);
         return [];
@@ -77,8 +77,8 @@ export const ollamaEmbedChange = (selected: string) => {
     plugin.saveSettings();
 };
 
-export async function* pullOllamaModel() {
-    console.log('pulling');
+export async function* pullOllamaModel(model: string) {
+    Log.info('Pulling model from Ollama', model);
     try {
         const response = await fetch(`${get(p).data.ollamaEmbedModel.baseUrl}/api/pull`, {
             method: 'POST',
@@ -86,7 +86,7 @@ export async function* pullOllamaModel() {
                 'Content-Type': 'application/json',
                 Accept: 'application/json',
             },
-            body: JSON.stringify({ name: 'nomic-embed-text' }),
+            body: JSON.stringify({ name: model }),
         });
 
         if (!response.ok) {
@@ -112,7 +112,6 @@ export async function* pullOllamaModel() {
                 if (line.trim()) {
                     try {
                         const json = JSON.parse(line);
-                        console.log(json);
                         yield json;
                     } catch (error) {
                         return error;
