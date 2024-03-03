@@ -184,7 +184,7 @@ export default class SecondBrainPlugin extends Plugin {
                 this.leaf = leaves[0];
                 this.activateView();
             }
-            this.initPapa();
+            if (get(isOnboarded)) this.initPapa();
         });
         // reembed documents on change
         this.registerEvent(
@@ -303,8 +303,8 @@ export default class SecondBrainPlugin extends Plugin {
 
     async saveChat() {
         let fileName = await this.secondBrain.createTitleFromChatHistory(this.data.assistantLanguage, serializeChatHistory(get(chatHistory)));
-        // File name cannot contain any of the following characters: \/:
-        fileName = fileName.replace(/[\\/:]/g, '');
+        // File name cannot contain any of the following characters: \, /, :, *, ?, ", <, >, |, #
+        fileName = fileName.replace(/[\\/:*?"<>|#]/g, '');
 
         let normalizedFilePath = normalizePath(this.data.targetFolder + '/' + fileName + '.md');
         while (await this.app.vault.adapter.exists(normalizedFilePath)) {

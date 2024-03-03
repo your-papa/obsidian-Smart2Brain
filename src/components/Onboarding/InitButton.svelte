@@ -10,4 +10,4 @@
     }
 </script>
 
-<button aria-label="Initialize your Smart Second Brain" class="mod-cta" on:click={() => completeOnboarding()}>Initialize your Second Brain</button>
+<button aria-label="Initialize your Smart Second Brain" class="mod-cta" on:click={() => completeOnboarding()}>Initialize your Smart Second Brain</button>

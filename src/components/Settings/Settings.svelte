@@ -7,6 +7,7 @@
     import SettingContainer from './SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
     import { OpenAIGenModelNames, OpenAIEmbedModelNames, LogLvl } from 'papa-ts';
+    import { isAPIKeyValid } from '../../controller/OpenAI';
     import ToggleComponent from '../base/Toggle.svelte';
     import { DEFAULT_SETTINGS } from '../../main';
     import ButtonComponent from '../base/Button.svelte';
@@ -22,6 +23,7 @@
     let styleOllamaBaseUrl: string;
     let componentBaseUrl: TextComponent;
     let componentApiKey: TextComponent;
+    let isOpenAIAPIKeyValid = false;
     let ollamaModels: { display: string; value: string }[] = [];
     let componentDocNum: TextComponent;
     const openAIGenModels: { display: string; value: string }[] = Object.values(OpenAIGenModelNames).map((model: string) => ({
@@ -51,6 +53,7 @@
                     data.openAIGenModel.openAIApiKey.substring(data.openAIGenModel.openAIApiKey.length - 3)
             );
         ollamaModels = await getOllamaGenModels();
+        isOpenAIAPIKeyValid = await isAPIKeyValid();
     });
 
     $: if ($isIncognitoMode && componentBaseUrl && componentBaseUrl.getInputValue().trim() === '' && $plugin.data.ollamaGenModel.baseUrl !== '') {
@@ -237,7 +240,7 @@
             <ButtonComponent
                 iconId={'refresh-ccw'}
                 changeFunc={async () => {
-                    ollamaModels = await getOllamaGenModels();
+                    isOpenAIAPIKeyValid = await isAPIKeyValid();
                 }}
             /></SettingContainer
         >
@@ -254,7 +257,7 @@
             />
         </SettingContainer>
         <!-- OpenAI Models -->
-        {#if true}
+        {#if isOpenAIAPIKeyValid}
             <!-- OpenAI Gen Model -->
             <SettingContainer settingName="Chat Model">
                 <DropdownComponent selected={$plugin.data.openAIGenModel.model} options={openAIGenModels} changeFunc={openAIGenChange} />
