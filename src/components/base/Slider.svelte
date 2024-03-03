@@ -6,11 +6,11 @@
     const [send, recieve] = crossfade({ duration: 500 });
 </script>
 
-<ul class="m-0 flex list-none items-center gap-3 p-0 transition-all">
+<ul class="m-0 flex list-none items-center p-0 transition-all">
     {#each options as option}
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-        <li class="rounded-md p-3 hover:bg-[--background-modifier-hover] font-bold" on:click={() => (selected = option)}>
+        <li class="rounded-md p-2 text-center font-bold hover:bg-[--background-modifier-hover]" on:click={() => (selected = option)}>
             {option}
             {#if option === selected}
                 <div in:send={{ key: 0 }} out:recieve={{ key: 0 }} class="border-1 rounded-mda border-primary w-full border border-solid" />

@@ -44,7 +44,9 @@
 <div
     bind:this={chatWindow}
     on:scroll={() => (isAutoScrolling = chatWindow.scrollTop + chatWindow.clientHeight + 1 >= chatWindow.scrollHeight)}
-    class="chat-window w-full flex-grow select-text overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border] p-4"
+    class="chat-window w-full flex-grow select-text overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border] p-4 {$isChatInSidebar
+        ? 'bg-[--background-secondary-alt]'
+        : 'bg-[--background-primary-alt]'}"
 >
     {#each $chatHistory as message (message.id)}
         {#if message.role === 'User'}
@@ -85,9 +87,9 @@
             </div>
         {:else}
             <div
-                class="group {$isChatInSidebar
-                    ? 'bg-[--background-secondary-alt]'
-                    : 'bg-[--background-primary-alt]'} mb-3 w-fit max-w-[80%] rounded-t-lg rounded-br-lg p-1 pl-4 pr-4"
+                class="group mb-3 w-fit max-w-[80%] rounded-t-lg rounded-br-lg p-1 pl-4 pr-4 {$isChatInSidebar
+                    ? 'bg-[--background-secondary]'
+                    : 'bg-[--background-primary]'}"
             >
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
