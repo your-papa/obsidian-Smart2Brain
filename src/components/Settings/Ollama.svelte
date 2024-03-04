@@ -1,6 +1,6 @@
 <script lang="ts">
     import { DEFAULT_SETTINGS } from '../../main';
-    import { plugin, papaState, errorState, isIncognitoMode } from '../../store';
+    import { plugin, papaState, errorState } from '../../store';
     import TextComponent from '../base/Text.svelte';
     import SettingContainer from './SettingContainer.svelte';
     import ButtonComponent from '../base/Button.svelte';
@@ -9,7 +9,7 @@
     import { onMount } from 'svelte';
 
     let styleOllamaBaseUrl: string;
-    let componentBaseUrl: TextComponent;
+    let ollamaBaseUrl: string = '';
     let installedOllamaModels: string[] = [];
     let ollamaModels: string[] = [];
 
@@ -18,15 +18,15 @@
         ollamaModels = [...new Set(installedOllamaModels.concat(OllamaGenModelNames).concat(OllamaEmbedModelNames))];
     });
 
-    $: if ($isIncognitoMode && componentBaseUrl && componentBaseUrl.getInputValue().trim() === '' && $plugin.data.ollamaGenModel.baseUrl !== '') {
-        componentBaseUrl.setInputValue($plugin.data.ollamaGenModel.baseUrl);
+    $: if (ollamaBaseUrl.trim() === '' && $plugin.data.ollamaGenModel.baseUrl !== '') {
+        ollamaBaseUrl = $plugin.data.ollamaGenModel.baseUrl;
     }
 
     const resetOllamaBaseUrl = async () => {
         $plugin.data.ollamaGenModel.baseUrl = DEFAULT_SETTINGS.ollamaGenModel.baseUrl;
         $plugin.data.ollamaEmbedModel.baseUrl = DEFAULT_SETTINGS.ollamaEmbedModel.baseUrl;
         await $plugin.saveSettings();
-        componentBaseUrl.setInputValue($plugin.data.ollamaGenModel.baseUrl);
+        ollamaBaseUrl = $plugin.data.ollamaGenModel.baseUrl;
         changeOllamaBaseUrl($plugin.data.ollamaGenModel.baseUrl);
     };
     const ollamaGenChange = (selected: string) => {
@@ -65,7 +65,7 @@
 <!--TODO: styles from Ollama.ts-->
 <SettingContainer settingName="Ollama URL">
     <ButtonComponent iconId={'rotate-cw'} changeFunc={resetOllamaBaseUrl} />
-    <TextComponent bind:this={componentBaseUrl} styles={styleOllamaBaseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
+    <TextComponent value={ollamaBaseUrl} styles={styleOllamaBaseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
 </SettingContainer>
 {#if ollamaModels.length !== 0}
     <!-- Ollama Gen Model -->

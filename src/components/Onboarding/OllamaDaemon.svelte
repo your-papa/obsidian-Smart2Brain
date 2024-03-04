@@ -7,15 +7,12 @@
     import OllamaSetup from './OllamaSetup.svelte';
 
     export let osType: 'Linux' | 'Darwin' | 'Windows_NT';
-    let componentBaseUrl: TextComponent;
 
     onMount(() => {
         $isIncognitoMode = true;
         $plugin.data.isIncognitoMode = $isIncognitoMode;
         $plugin.saveSettings();
     });
-
-    $: if (componentBaseUrl) componentBaseUrl.setInputValue($plugin.data.ollamaEmbedModel.baseUrl);
 </script>
 
 <ol class="w-full max-w-[500px] pr-10 *:p-1">
@@ -32,7 +29,7 @@
     <li>
         <div class="flex flex-wrap items-center justify-between">
             <span class="mr-2">Set the BaseUrl</span>
-            <TextComponent bind:this={componentBaseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
+            <TextComponent value={$plugin.data.ollamaEmbedModel.baseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
         </div>
     </li>
     <li>Start the Ollama service with origins</li>

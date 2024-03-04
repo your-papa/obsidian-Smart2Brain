@@ -5,15 +5,9 @@
     import ButtonComponent from '../base/Button.svelte';
     import type { FuzzySuggestModal, TAbstractFile } from 'obsidian';
 
-    export let inputValue: string = '';
-
     let buttonComp: ButtonComponent;
 
     let fileSelectModal: FuzzySuggestModal<TAbstractFile>;
-
-    function clearSearch() {
-        inputValue = '';
-    }
 
     onMount(() => {
         fileSelectModal = new FileSelectModal($plugin.app);

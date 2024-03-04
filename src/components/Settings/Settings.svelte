@@ -3,33 +3,24 @@
     import FFExcludeComponent from './FFExclude.svelte';
     import { plugin, isIncognitoMode, papaState, type PapaState } from '../../store';
     import { Notice, setIcon } from 'obsidian';
-    import { onMount } from 'svelte';
     import SettingContainer from './SettingContainer.svelte';
     import { LogLvl, Papa } from 'papa-ts';
     import ToggleComponent from '../base/Toggle.svelte';
-    import { DEFAULT_SETTINGS } from '../../main';
     import ButtonComponent from '../base/Button.svelte';
     import OllamaSettings from './Ollama.svelte';
     import OpenAISettings from './OpenAI.svelte';
     import { t } from 'svelte-i18n';
     import Log from '../../logging';
 
-    let baseFontSize: number;
-    let excludeComponent: HTMLDivElement;
-    let isExpanded: boolean = false;
-    let isOverflowingVertically: boolean = false;
-    let componentDocNum: TextComponent;
-    let componentDebugging: TextComponent;
-
-    onMount(async () => {
-        baseFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize);
-        if (excludeComponent) checkOverflow(excludeComponent);
-        const data = $plugin.data;
-        componentDocNum.setInputValue(data.docRetrieveNum);
-    });
-
-    $: if (componentDebugging) {
-        componentDebugging.setInputValue($plugin.data.debugginLangchainKey);
+    let isFFOverflowingY: boolean = false;
+    let isFFExpanded: boolean = false;
+    let excludeFFComponent: HTMLDivElement;
+    $: if (excludeFFComponent) {
+        let items = excludeFFComponent.children;
+        isFFOverflowingY = items[items.length - 1].getBoundingClientRect().bottom > excludeFFComponent.getBoundingClientRect().bottom;
+    }
+    function toggleExpand() {
+        isFFExpanded = !isFFExpanded;
     }
 
     const icon = (node: HTMLElement, iconId: string) => {
@@ -41,22 +32,11 @@
         $plugin.saveSettings();
     }
 
-    function toggleExpand() {
-        isExpanded = !isExpanded;
-    }
-
-    function checkOverflow(excludeComponent: HTMLDivElement) {
-        isOverflowingVertically = excludeComponent.scrollHeight > baseFontSize * 1.5; //convert to rem
-        if (!isOverflowingVertically) isExpanded = false;
-    }
-
     async function changeDocNum(docNum: number) {
-        if (docNum < 1 || !docNum) {
-            docNum = DEFAULT_SETTINGS.docRetrieveNum;
-            componentDocNum.setInputValue(docNum);
+        if (docNum < 1) {
+            return new Notice('Number of documents to retrieve must be greater than 0', 4000);
         }
         $plugin.data.docRetrieveNum = docNum;
-
         await $plugin.saveSettings();
     }
     const changeLangsmithKey = (newKey: string) => {
@@ -93,10 +73,10 @@
 <!-- Exclude Folders -->
 <SettingContainer settingName={$t('excludeff')}><FFExcludeComponent /></SettingContainer>
 {#if $plugin.data.excludeFF.length !== 0}
-    <div class="flex justify-between">
-        <div bind:this={excludeComponent} class="{isExpanded ? 'max-h-auto' : 'max-h-6 overflow-hidden'} mb-3 flex flex-row flex-wrap gap-1">
+    <div class="flex justify-between mb-3">
+        <div bind:this={excludeFFComponent} class="{isFFExpanded ? '' : 'overflow-hidden'} flex flex-wrap gap-1">
             {#each $plugin.data.excludeFF as ff ($plugin.data.excludeFF)}
-                <div class="setting-command-hotkeys h-6">
+                <div class="setting-command-hotkeys">
                     <span class="setting-hotkey">
                         {ff}
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -111,11 +91,14 @@
                 </div>
             {/each}
         </div>
-        {#if isExpanded}
-            <span class="clickable-icon algin-baseline h-6" use:icon={'chevron-up'} on:click={toggleExpand} />
-        {/if}
-        {#if isOverflowingVertically && !isExpanded}
-            <span class="clickable-icon mb-3" use:icon={'chevron-down'} on:click={toggleExpand} />
+        {#if isFFExpanded}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <span class="clickable-icon align-baseline h-6" use:icon={'chevron-up'} on:click={toggleExpand} />
+        {:else if isFFOverflowingY}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <span class="clickable-icon h-6" use:icon={'chevron-down'} on:click={toggleExpand} />
         {/if}
     </div>
 {/if}
@@ -137,7 +120,7 @@
     <summary class="setting-item-heading py-3">Advanced Settings</summary>
     <!-- Num of Docs to Retrieve -->
     <SettingContainer settingName="Num. of Docs to Retrieve">
-        <TextComponent inputType="number" bind:this={componentDocNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} />
+        <TextComponent inputType="number" value={$plugin.data.docRetrieveNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} />
     </SettingContainer>
     <!-- Clear Plugin Data -->
     <SettingContainer settingName="Clear Plugin Data">
@@ -147,7 +130,7 @@
     <!-- Debugging -->
     <SettingContainer settingName="Debugging" isHeading={true} />
     <SettingContainer settingName="Langsmith Key">
-        <TextComponent bind:this={componentDebugging} changeFunc={changeLangsmithKey} />
+        <TextComponent value={$plugin.data.debugginLangchainKey} changeFunc={changeLangsmithKey} />
     </SettingContainer>
     <SettingContainer settingName="Verbose">
         <ToggleComponent isEnabled={$plugin.data.isVerbose} changeFunc={changeVerbosity} />
