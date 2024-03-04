@@ -14,11 +14,19 @@
         type="text"
         spellcheck="false"
         {placeholder}
-        on:focus={focusFunc}
-        on:blur={blurFunc}
+        on:focus={() => focusFunc()}
+        on:blur={() => blurFunc()}
         bind:value
         on:change={() => changeFunc(value)}
     />
 {:else if inputType === 'number'}
-    <input type="number" spellcheck="false" {placeholder} bind:value on:blur={blurFunc} on:focus={() => focusFunc} on:change={() => changeFunc(value)} />
+    <input
+        type="number"
+        spellcheck="false"
+        {placeholder}
+        bind:value
+        on:blur={() => blurFunc()}
+        on:focus={() => focusFunc()}
+        on:change={() => changeFunc(value)}
+    />
 {/if}
