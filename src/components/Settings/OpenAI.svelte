@@ -7,30 +7,33 @@
     import { OpenAIEmbedModels, OpenAIGenModels, OpenAIGenModelNames, OpenAIEmbedModelNames } from './models';
     import { onMount } from 'svelte';
 
-    let openAIApiKey: string = $plugin.data.openAIGenModel.openAIApiKey;
+    let openAIApiKey: string;
     let isOpenAIAPIKeyValid = false;
 
     onMount(async () => {
-        isOpenAIAPIKeyValid = await isAPIKeyValid(openAIApiKey);
+        isOpenAIAPIKeyValid = await isAPIKeyValid($plugin.data.openAIGenModel.openAIApiKey);
+        openAIApiKey = $plugin.data.openAIGenModel.openAIApiKey;
         hideApiKey();
     });
 
     const changeApiKey = async (newApiKey: string) => {
-        openAIApiKey = newApiKey.trim();
-        isOpenAIAPIKeyValid = await isAPIKeyValid(openAIApiKey);
-        $plugin.data.openAIGenModel.openAIApiKey = openAIApiKey;
-        $plugin.data.openAIEmbedModel.openAIApiKey = openAIApiKey;
+        console.log('isChanged', newApiKey);
+        newApiKey = newApiKey.trim();
+        openAIApiKey = newApiKey;
+        isOpenAIAPIKeyValid = await isAPIKeyValid(newApiKey);
+        $plugin.data.openAIGenModel.openAIApiKey = newApiKey;
+        $plugin.data.openAIEmbedModel.openAIApiKey = newApiKey;
         $plugin.saveSettings();
         $papaState = 'settings-change';
+        console.log($plugin.data.openAIGenModel.openAIApiKey);
     };
 
     const hideApiKey = () => {
-        if ($plugin.data.openAIGenModel.openAIApiKey.trim() === '') return;
+        if (openAIApiKey.trim() === '') return;
         openAIApiKey = openAIApiKey.substring(0, 6) + '...' + openAIApiKey.substring(openAIApiKey.length - 3);
     };
 
     const showApiKey = () => {
-        if ($plugin.data.openAIGenModel.openAIApiKey.trim() === '') return;
         openAIApiKey = $plugin.data.openAIGenModel.openAIApiKey;
     };
 
