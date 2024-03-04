@@ -33,7 +33,7 @@ export async function isOllamaOriginsSet() {
     }
 }
 
-export async function getOllamaGenModels(): Promise<string[]> {
+export async function getOllamaModels(): Promise<string[]> {
     const plugin = get(p);
     try {
         const modelsRes = await requestUrl({
@@ -66,15 +66,6 @@ export const changeOllamaBaseUrl = (newBaseUrl: string) => {
     }
     plugin.saveSettings();
     papaState.set('settings-change');
-};
-
-export const ollamaEmbedChange = (selected: string) => {
-    //TODO Modle types
-    const plugin = get(p);
-    // @ts-expect-error Have to do this
-    plugin.data.ollamaEmbedModel.model = selected;
-    papaState.set('settings-change');
-    plugin.saveSettings();
 };
 
 export async function* pullOllamaModel(model: string) {

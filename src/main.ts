@@ -17,7 +17,7 @@ import { serializeChatHistory, chatHistory, plugin, isOnboarded, isIncognitoMode
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
-import { getOllamaGenModels, isOllamaRunning } from './controller/Ollama';
+import { getOllamaModels, isOllamaRunning } from './controller/Ollama';
 import { isAPIKeyValid } from './controller/OpenAI';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
 import { wildTest } from './components/Settings/FuzzyModal';
@@ -51,7 +51,11 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     initialAssistantMessage: Prompts[(window.localStorage.getItem('language') as Language) || 'en'].initialAssistantMessage,
     isIncognitoMode: false,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
-    ollamaEmbedModel: { model: 'nomic-embed-text', baseUrl: 'http://localhost:11434', similarityThreshold: 0.75 },
+    ollamaEmbedModel: {
+        model: 'nomic-embed-text',
+        baseUrl: 'http://localhost:11434',
+        similarityThreshold: 0.75,
+    },
     openAIGenModel: {
         model: 'gpt-3.5-turbo',
         openAIApiKey: '',
@@ -114,7 +118,7 @@ export default class SecondBrainPlugin extends Plugin {
             errorState.set('ollama-not-running');
             return new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 4000);
         } else if (this.data.isIncognitoMode) {
-            const models = await getOllamaGenModels();
+            const models = await getOllamaModels();
             if (!models.includes(this.data.ollamaGenModel.model)) {
                 papaState.set('error');
                 errorState.set('ollama-model-not-installed');
