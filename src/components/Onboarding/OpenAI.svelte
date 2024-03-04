@@ -6,7 +6,7 @@
     import { plugin } from '../../store';
     import InitButtonComponent from './InitButton.svelte';
 
-    let apiKeyInput: TextComponent;
+    let openAIApiKey: string = $plugin.data.openAIGenModel.openAIApiKey;
     let isValid: boolean = false;
     let isKeyTested: boolean = false;
     const changeApiKey = (newApiKey: string) => {
@@ -16,7 +16,6 @@
         $plugin.saveSettings();
         isKeyTested = false;
     };
-    $: if (apiKeyInput) apiKeyInput.setInputValue($plugin.data.openAIGenModel.openAIApiKey);
 </script>
 
 <ol class="w-full max-w-[500px] pr-10 *:p-1">
@@ -36,7 +35,7 @@
     <li>
         <div class="flex flex-wrap items-center justify-between">
             <span class="mr-2">Paste the Key here:</span>
-            <TextComponent bind:this={apiKeyInput} placeholder="sk-...Lk" changeFunc={changeApiKey} />
+            <TextComponent value={openAIApiKey} placeholder="sk-...Lk" changeFunc={changeApiKey} />
         </div>
     </li>
     <li>
@@ -55,7 +54,7 @@
                     <button
                         aria-label="Test your API Key"
                         on:click={async () => {
-                            isValid = await isAPIKeyValid();
+                            isValid = await isAPIKeyValid(openAIApiKey);
                             if (!isValid) new Notice('Api Key is not valid!', 4000);
                             isKeyTested = true;
                         }}>Test</button

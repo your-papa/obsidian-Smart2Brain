@@ -124,7 +124,7 @@ export default class SecondBrainPlugin extends Plugin {
                 errorState.set('ollama-model-not-installed');
                 return new Notice('Ollama model not installed. Please install the model before initializing Smart Second Brain.', 4000);
             }
-        } else if (!this.data.isIncognitoMode && !(await isAPIKeyValid())) {
+        } else if (!this.data.isIncognitoMode && !(await isAPIKeyValid(this.data.openAIGenModel.openAIApiKey))) {
             papaState.set('error');
             return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);
         }
