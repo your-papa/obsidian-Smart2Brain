@@ -17,7 +17,6 @@
     });
 
     const changeApiKey = async (newApiKey: string) => {
-        console.log('isChanged', newApiKey);
         newApiKey = newApiKey.trim();
         openAIApiKey = newApiKey;
         isOpenAIAPIKeyValid = await isAPIKeyValid(newApiKey);
@@ -25,7 +24,6 @@
         $plugin.data.openAIEmbedModel.openAIApiKey = newApiKey;
         $plugin.saveSettings();
         $papaState = 'settings-change';
-        console.log($plugin.data.openAIGenModel.openAIApiKey);
     };
 
     const hideApiKey = () => {
