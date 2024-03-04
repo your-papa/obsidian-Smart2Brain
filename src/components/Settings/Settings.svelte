@@ -6,14 +6,24 @@
     import { onMount } from 'svelte';
     import SettingContainer from './SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
-    import { OpenAIGenModelNames, OpenAIEmbedModelNames, LogLvl, OllamaRGenModelNames } from 'papa-ts';
+    import { LogLvl, Papa } from 'papa-ts';
     import { isAPIKeyValid } from '../../controller/OpenAI';
     import ToggleComponent from '../base/Toggle.svelte';
     import { DEFAULT_SETTINGS } from '../../main';
     import ButtonComponent from '../base/Button.svelte';
-    import { changeOllamaBaseUrl, getOllamaGenModels, ollamaEmbedChange } from '../../controller/Ollama';
+    import { changeOllamaBaseUrl, getOllamaModels } from '../../controller/Ollama';
     import { t } from 'svelte-i18n';
     import Log from '../../logging';
+    import {
+        OllamaEmbedModels,
+        OllamaGenModelNames,
+        OllamaGenModels,
+        OpenAIEmbedModels,
+        OpenAIGenModels,
+        OpenAIGenModelNames,
+        OpenAIEmbedModelNames,
+        OllamaEmbedModelNames,
+    } from './models';
 
     let baseFontSize: number;
     let excludeComponent: HTMLDivElement;
@@ -44,8 +54,8 @@
                     '...' +
                     data.openAIGenModel.openAIApiKey.substring(data.openAIGenModel.openAIApiKey.length - 3)
             );
-        installedOllamaModels = await getOllamaGenModels();
-        ollamaModels = [...new Set(installedOllamaModels.concat(OllamaRGenModelNames))];
+        installedOllamaModels = await getOllamaModels();
+        ollamaModels = [...new Set(installedOllamaModels.concat(OllamaGenModelNames).concat(OllamaEmbedModelNames))];
         isOpenAIAPIKeyValid = await isAPIKeyValid();
     });
 
@@ -108,6 +118,7 @@
 
     const ollamaGenChange = (selected: string) => {
         $plugin.data.ollamaGenModel.model = selected;
+        $plugin.data.ollamaGenModel.contextWindow = OllamaGenModels[selected] ? OllamaGenModels[selected].contextWindow : 2048;
         $plugin.saveSettings();
         if (!installedOllamaModels.includes(selected)) {
             papaState.set('error');
@@ -116,14 +127,25 @@
         }
         $papaState = 'settings-change';
     };
+    const ollamaEmbedChange = (selected: string) => {
+        $plugin.data.ollamaEmbedModel.model = selected;
+        $plugin.saveSettings();
+        if (!installedOllamaModels.includes(selected)) {
+            papaState.set('error');
+            errorState.set('ollama-model-not-installed');
+            return;
+        }
+        papaState.set('settings-change');
+    };
+
     const openAIGenChange = (selected: string) => {
-        //TODO Modle types
         $plugin.data.openAIGenModel.model = selected;
+        $plugin.data.openAIGenModel.contextWindow = OpenAIGenModels[selected] ? OpenAIGenModels[selected].contextWindow : 2048;
         $plugin.saveSettings();
         $papaState = 'settings-change';
     };
     const openAIEmbedChange = (selected: string) => {
-        //TODO Modle types
+        // TODO also set new vector size
         $plugin.data.openAIEmbedModel.model = selected;
         $plugin.saveSettings();
         $papaState = 'settings-change';
@@ -147,7 +169,7 @@
     const changeVerbosity = () => {
         $plugin.data.isVerbose = !$plugin.data.isVerbose;
         Log.setLogLevel($plugin.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
-        $plugin.secondBrain.setLogLevel($plugin.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
+        Papa.setLogLevel($plugin.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
         $plugin.saveSettings();
     };
 
@@ -211,8 +233,8 @@
             <ButtonComponent
                 iconId={'refresh-ccw'}
                 changeFunc={async () => {
-                    installedOllamaModels = await getOllamaGenModels();
-                    ollamaModels = [...new Set(installedOllamaModels.concat(OllamaRGenModelNames))];
+                    installedOllamaModels = await getOllamaModels();
+                    ollamaModels = [...new Set(installedOllamaModels.concat(OllamaGenModelNames).concat(OllamaEmbedModelNames))];
                 }}
             /></SettingContainer
         >
@@ -224,20 +246,44 @@
         </SettingContainer>
         {#if ollamaModels.length !== 0}
             <!-- Ollama Gen Model -->
-            <SettingContainer settingName="Chat Model">
-                <DropdownComponent
-                    selected={$plugin.data.ollamaGenModel.model}
-                    options={ollamaModels.map((model) => ({ display: model, value: model }))}
-                    changeFunc={ollamaGenChange}
-                />
+            <SettingContainer
+                settingName="Chat Model"
+                settingDesc={OllamaGenModels[$plugin.data.ollamaGenModel.model] ? OllamaGenModels[$plugin.data.ollamaGenModel.model].description : ''}
+            >
+                <select class="dropdown" bind:value={$plugin.data.ollamaGenModel.model} on:change={() => ollamaGenChange($plugin.data.ollamaGenModel.model)}>
+                    <optgroup label="Recommended">
+                        {#each OllamaGenModelNames as model}
+                            <option value={model}>{model}</option>
+                        {/each}
+                    </optgroup>
+                    <optgroup label="Other">
+                        {#each installedOllamaModels.filter((model) => !OllamaGenModelNames.includes(model) && !OllamaEmbedModelNames.includes(model)) as model}
+                            <option value={model}>{model}</option>
+                        {/each}
+                    </optgroup>
+                </select>
             </SettingContainer>
             <!-- Ollama Embed Model -->
-            <SettingContainer settingName="Embed Model">
-                <DropdownComponent
-                    selected={$plugin.data.ollamaEmbedModel.model}
-                    options={ollamaModels.map((model) => ({ display: model, value: model }))}
-                    changeFunc={ollamaEmbedChange}
-                />
+            <SettingContainer
+                settingName="Embed Model"
+                settingDesc={OllamaEmbedModels[$plugin.data.ollamaEmbedModel.model] ? OllamaEmbedModels[$plugin.data.ollamaEmbedModel.model].description : ''}
+            >
+                <select
+                    class="dropdown"
+                    bind:value={$plugin.data.ollamaEmbedModel.model}
+                    on:change={() => ollamaEmbedChange($plugin.data.ollamaEmbedModel.model)}
+                >
+                    <optgroup label="Recommended">
+                        {#each OllamaEmbedModelNames as model}
+                            <option value={model}>{model}</option>
+                        {/each}
+                    </optgroup>
+                    <optgroup label="Other">
+                        {#each installedOllamaModels.filter((model) => !OllamaEmbedModelNames.includes(model)) as model}
+                            <option value={model}>{model}</option>
+                        {/each}
+                    </optgroup>
+                </select>
             </SettingContainer>
         {/if}
     {:else}
@@ -265,7 +311,7 @@
         <!-- OpenAI Models -->
         {#if isOpenAIAPIKeyValid}
             <!-- OpenAI Gen Model -->
-            <SettingContainer settingName="Chat Model">
+            <SettingContainer settingName="Chat Model" settingDesc={OpenAIGenModels[$plugin.data.ollamaEmbedModel.model].description}>
                 <DropdownComponent
                     selected={$plugin.data.openAIGenModel.model}
                     options={OpenAIGenModelNames.map((model) => ({ display: model, value: model }))}
@@ -273,7 +319,7 @@
                 />
             </SettingContainer>
             <!-- openAI Embed Model -->
-            <SettingContainer settingName="Embed Model">
+            <SettingContainer settingName="Embed Model" settingDesc={OpenAIEmbedModels[$plugin.data.openAIEmbedModel.model].description}>
                 <DropdownComponent
                     selected={$plugin.data.openAIEmbedModel.model}
                     options={OpenAIEmbedModelNames.map((model) => ({ display: model, value: model }))}

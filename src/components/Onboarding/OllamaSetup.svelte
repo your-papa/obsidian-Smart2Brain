@@ -1,7 +1,7 @@
 <script lang="ts">
     import InitButtonComponent from './InitButton.svelte';
     import { onMount } from 'svelte';
-    import { getOllamaGenModels } from '../../controller/Ollama';
+    import { getOllamaModels } from '../../controller/Ollama';
     import { icon } from '../../controller/Messages';
     import { plugin, isIncognitoMode } from '../../store';
     import DropdownComponent from '../base/Dropdown.svelte';
@@ -41,7 +41,7 @@
                     on:click={async () => {
                         isOrigin = await isOllamaOriginsSet();
                         isOriginsTested = true;
-                        ollamaModels = await getOllamaGenModels();
+                        ollamaModels = await getOllamaModels();
                     }}>Test</button
                 >
             {/if}
@@ -62,7 +62,7 @@
             <div class="flex flex-wrap items-center justify-between">
                 Set your embed Model:
                 <div class="flex items-center gap-1">
-                    <button class="clickable-icon mr-1" use:icon={'refresh-ccw'} on:click={async () => (ollamaModels = await getOllamaGenModels())} />
+                    <button class="clickable-icon mr-1" use:icon={'refresh-ccw'} on:click={async () => (ollamaModels = await getOllamaModels())} />
                     <DropdownComponent
                         bind:this={ollamaModelComponent}
                         selected={model}
