@@ -9,12 +9,31 @@
     import ButtonComponent from '../base/Button.svelte';
     import OllamaSettings from './Ollama.svelte';
     import OpenAISettings from './OpenAI.svelte';
+    import SliderComponent from '../base/Slider.svelte';
     import { t } from 'svelte-i18n';
     import Log from '../../logging';
+    import { onMount } from 'svelte';
 
+    const incognitoOptions: Array<'Offline' | 'Online'> = ['Offline', 'Online'];
+    let selectedMode: 'Offline' | 'Online';
     let isFFOverflowingY: boolean = false;
     let isFFExpanded: boolean = false;
     let excludeFFComponent: HTMLDivElement;
+
+    onMount(() => {
+        selectedMode = incognitoOptions[$isIncognitoMode ? 0 : 1];
+    });
+
+    function updateSelected(value: string) {
+        $isIncognitoMode = value === 'Offline';
+        $plugin.data.isIncognitoMode = $isIncognitoMode;
+        $plugin.saveSettings();
+    }
+
+    $: if (selectedMode) {
+        updateSelected(selectedMode);
+    }
+
     $: if (excludeFFComponent) {
         let items = excludeFFComponent.children;
         isFFOverflowingY = items[items.length - 1].getBoundingClientRect().bottom > excludeFFComponent.getBoundingClientRect().bottom;
@@ -73,7 +92,7 @@
 <!-- Exclude Folders -->
 <SettingContainer settingName={$t('excludeff')}><FFExcludeComponent /></SettingContainer>
 {#if $plugin.data.excludeFF.length !== 0}
-    <div class="flex justify-between mb-3">
+    <div class="mb-3 flex justify-between">
         <div bind:this={excludeFFComponent} class="{isFFExpanded ? '' : 'overflow-hidden'} flex flex-wrap gap-1">
             {#each $plugin.data.excludeFF as ff ($plugin.data.excludeFF)}
                 <div class="setting-command-hotkeys">
@@ -94,7 +113,7 @@
         {#if isFFExpanded}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <!-- svelte-ignore a11y-no-static-element-interactions -->
-            <span class="clickable-icon align-baseline h-6" use:icon={'chevron-up'} on:click={toggleExpand} />
+            <span class="clickable-icon h-6 align-baseline" use:icon={'chevron-up'} on:click={toggleExpand} />
         {:else if isFFOverflowingY}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -104,12 +123,11 @@
 {/if}
 
 <!-- Toggle Incognito -->
-
-<SettingContainer settingName={$t('incognito_mode')}>
-    <ToggleComponent isEnabled={$isIncognitoMode} changeFunc={toggleIncognitoMode} />
-</SettingContainer>
+<div class="setting-item flex items-center justify-center !pb-0">
+    <SliderComponent options={incognitoOptions} bind:selected={selectedMode} />
+</div>
 <div>
-    {#if $isIncognitoMode}
+    {#if selectedMode === 'Offline'}
         <OllamaSettings />
     {:else}
         <OpenAISettings />
