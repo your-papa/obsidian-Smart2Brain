@@ -1,49 +1,40 @@
 <script lang="ts">
-    import { isIncognitoMode, plugin } from '../../store';
+    import { isIncognitoMode } from '../../store';
     import * as os from 'os';
     import SliderComponent from '../base/Slider.svelte';
     import AppComponent from './OllamaApp.svelte';
     import OpenAiComponent from './OpenAI.svelte';
     import DaemonComponent from './OllamaDaemon.svelte';
     import { icon } from '../../controller/Messages';
-    import { afterUpdate } from 'svelte';
-    import Button from '../base/Button.svelte';
-    import { LogLvl } from 'papa-ts';
+    import IncognitoToggle from '../Settings/IncognitoToggle.svelte';
 
     const osType = os.type();
-    const installOptionsAll = {
-        Darwin: ['Ollama App', 'Ollama Daemon', 'OpenAI'],
-        Linux: ['Ollama Daemon', 'OpenAI'],
-        Windows_NT: ['Ollama App', 'OpenAI'],
-    };
-    const installOptions: Array<'Ollama App' | 'Ollama Daemon' | 'OpenAI'> = installOptionsAll[osType];
-    let selected: 'Ollama App' | 'Ollama Daemon' | 'OpenAI';
 
-    afterUpdate(() => {
-        selected = installOptions[$isIncognitoMode ? 0 : installOptions.length - 1];
-    });
-
-    // TODO refactor
-    function updateSelected(value: string) {
-        $isIncognitoMode = value === 'Ollama Daemon' || value === 'Ollama App';
-        $plugin.data.isIncognitoMode = $isIncognitoMode;
-        $plugin.saveSettings();
-    }
-
-    $: if (selected) {
-        updateSelected(selected);
-    }
+    const options = ['Ollama App', 'Ollama Daemon'];
+    let selected: 'Ollama App' | 'Ollama Daemon' = 'Ollama App';
 </script>
 
 <div class="flex h-full w-full flex-col items-center overflow-auto pt-8">
     <div class="w-full text-center *:!h-[--icon-xl] *:!w-[--icon-xl]" use:icon={'brain-circuit'} />
     <h1 class="text-[--text-normal]">Setup</h1>
-    <SliderComponent options={installOptions} bind:selected />
-    {#if selected === 'Ollama App'}
-        <AppComponent {osType} />
-    {:else if selected === 'Ollama Daemon'}
-        <DaemonComponent {osType} />
-    {:else if selected === 'OpenAI'}
+    <IncognitoToggle />
+    {#if $isIncognitoMode}
+        <p class="px-10">
+            Your assistant is running in privacy mode. That means it is not connected to the internet and is running fully locally by leveraging Ollama.
+        </p>
+        {#if osType === 'Darwin'}
+            <SliderComponent {options} bind:selected />
+        {/if}
+        {#if selected === 'Ollama App' || osType === 'Windows_NT'}
+            <AppComponent {osType} />
+        {:else}
+            <DaemonComponent {osType} />
+        {/if}
+    {:else}
+        <p class="px-10">
+            Your assistant is using third party services to run. That means you will have to share all your personal information with these services and your
+            Smart Second Brain needs to be connected to the internet to leverage OpenAIs large language models like ChatGPT.
+        </p>
         <OpenAiComponent />
     {/if}
 </div>

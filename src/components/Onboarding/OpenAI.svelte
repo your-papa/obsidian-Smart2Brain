@@ -20,7 +20,7 @@
 
 <ol class="w-full max-w-[500px] pr-10 *:p-1">
     <li>
-        Create an
+        Create an OpenAI
         <a href="https://platform.openai.com/signup">account</a>
     </li>
     <li>
