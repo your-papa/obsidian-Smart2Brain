@@ -1,7 +1,7 @@
 <script lang="ts">
     import TextComponent from '../base/Text.svelte';
     import FFExcludeComponent from './FFExclude.svelte';
-    import { plugin, isIncognitoMode, papaState, type PapaState } from '../../store';
+    import { plugin, isIncognitoMode } from '../../store';
     import { Notice, setIcon } from 'obsidian';
     import SettingContainer from './SettingContainer.svelte';
     import { LogLvl, Papa } from 'papa-ts';
@@ -9,30 +9,13 @@
     import ButtonComponent from '../base/Button.svelte';
     import OllamaSettings from './Ollama.svelte';
     import OpenAISettings from './OpenAI.svelte';
-    import SliderComponent from '../base/Slider.svelte';
     import { t } from 'svelte-i18n';
     import Log from '../../logging';
-    import { onMount } from 'svelte';
+    import LocalToggle from './IncognitoToggle.svelte';
 
-    const incognitoOptions: Array<'Offline' | 'Online'> = ['Offline', 'Online'];
-    let selectedMode: 'Offline' | 'Online';
     let isFFOverflowingY: boolean = false;
     let isFFExpanded: boolean = false;
     let excludeFFComponent: HTMLDivElement;
-
-    onMount(() => {
-        selectedMode = incognitoOptions[$isIncognitoMode ? 0 : 1];
-    });
-
-    function updateSelected(value: string) {
-        $isIncognitoMode = value === 'Offline';
-        $plugin.data.isIncognitoMode = $isIncognitoMode;
-        $plugin.saveSettings();
-    }
-
-    $: if (selectedMode) {
-        updateSelected(selectedMode);
-    }
 
     $: if (excludeFFComponent) {
         let items = excludeFFComponent.children;
@@ -70,23 +53,6 @@
         Papa.setLogLevel($plugin.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
         $plugin.saveSettings();
     };
-
-    let oldPapaState: PapaState;
-    function toggleIncognitoMode() {
-        if ($papaState === 'running') return new Notice('Please wait for the current query to finish', 4000);
-        else if ($papaState === 'indexing' || $papaState === 'indexing-pause' || $papaState === 'loading')
-            return new Notice('Please wait for the indexing to finish', 4000);
-        $isIncognitoMode = !$isIncognitoMode;
-        $plugin.data.isIncognitoMode = $isIncognitoMode;
-        $plugin.saveSettings();
-        if ($papaState === 'mode-change') {
-            // Already in mode-change state so we restore the previous state (there are only two states)
-            $papaState = oldPapaState;
-            return;
-        }
-        oldPapaState = $papaState;
-        $papaState = 'mode-change';
-    }
 </script>
 
 <!-- Exclude Folders -->
@@ -124,10 +90,10 @@
 
 <!-- Toggle Incognito -->
 <div class="setting-item flex items-center justify-center !pb-0">
-    <SliderComponent options={incognitoOptions} bind:selected={selectedMode} />
+    <LocalToggle />
 </div>
 <div>
-    {#if selectedMode === 'Offline'}
+    {#if $isIncognitoMode}
         <OllamaSettings />
     {:else}
         <OpenAISettings />
