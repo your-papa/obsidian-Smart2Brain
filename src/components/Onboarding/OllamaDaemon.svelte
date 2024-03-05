@@ -6,7 +6,7 @@
     import { changeOllamaBaseUrl } from '../../controller/Ollama';
     import OllamaSetup from './OllamaSetup.svelte';
 
-    export let osType: 'Linux' | 'Darwin' | 'Windows_NT';
+    export let osType: string;
 
     onMount(() => {
         $isIncognitoMode = true;
@@ -16,7 +16,7 @@
 </script>
 
 <ol class="w-full max-w-[500px] pr-10 *:p-1">
-    <li>Install Ollama through one of these options:</li>
+    <li>Install Ollama</li>
     {#if osType === 'Darwin'}
         <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\nbrew install ollama\n```')} />
     {:else if osType === 'Linux'}
