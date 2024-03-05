@@ -1,10 +1,11 @@
 <script lang="ts">
+    import { Notice } from 'obsidian';
     import { DEFAULT_SETTINGS } from '../../main';
     import { plugin, papaState, errorState } from '../../store';
     import TextComponent from '../base/Text.svelte';
     import SettingContainer from './SettingContainer.svelte';
     import ButtonComponent from '../base/Button.svelte';
-    import { changeOllamaBaseUrl, getOllamaModels } from '../../controller/Ollama';
+    import { changeOllamaBaseUrl, getOllamaModels, isOllamaRunning } from '../../controller/Ollama';
     import { OllamaEmbedModels, OllamaGenModelNames, OllamaGenModels, OllamaEmbedModelNames } from './models';
     import { onMount } from 'svelte';
 
@@ -12,10 +13,12 @@
     let ollamaBaseUrl: string = '';
     let installedOllamaModels: string[] = [];
     let ollamaModels: string[] = [];
+    let isRunning: boolean = false;
 
     onMount(async () => {
         installedOllamaModels = await getOllamaModels();
         ollamaModels = [...new Set(installedOllamaModels.concat(OllamaGenModelNames).concat(OllamaEmbedModelNames))];
+        isRunning = await isOllamaRunning();
     });
 
     $: if (ollamaBaseUrl.trim() === '' && $plugin.data.ollamaGenModel.baseUrl !== '') {
@@ -23,11 +26,9 @@
     }
 
     const resetOllamaBaseUrl = async () => {
-        $plugin.data.ollamaGenModel.baseUrl = DEFAULT_SETTINGS.ollamaGenModel.baseUrl;
-        $plugin.data.ollamaEmbedModel.baseUrl = DEFAULT_SETTINGS.ollamaEmbedModel.baseUrl;
-        await $plugin.saveSettings();
-        ollamaBaseUrl = $plugin.data.ollamaGenModel.baseUrl;
-        changeOllamaBaseUrl($plugin.data.ollamaGenModel.baseUrl);
+        ollamaBaseUrl = DEFAULT_SETTINGS.ollamaGenModel.baseUrl;
+        await changeOllamaBaseUrl(ollamaBaseUrl);
+        isRunning = await isOllamaRunning();
     };
     const ollamaGenChange = (selected: string) => {
         $plugin.data.ollamaGenModel.model = selected;
@@ -56,6 +57,8 @@
     <ButtonComponent
         iconId={'refresh-ccw'}
         changeFunc={async () => {
+            isRunning = await isOllamaRunning();
+            if (!isRunning) return new Notice('Ollama is not running', 4000);
             installedOllamaModels = await getOllamaModels();
             ollamaModels = [...new Set(installedOllamaModels.concat(OllamaGenModelNames).concat(OllamaEmbedModelNames))];
         }}
@@ -65,9 +68,17 @@
 <!--TODO: styles from Ollama.ts-->
 <SettingContainer settingName="Ollama URL">
     <ButtonComponent iconId={'rotate-cw'} changeFunc={resetOllamaBaseUrl} />
-    <TextComponent value={ollamaBaseUrl} styles={styleOllamaBaseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
+    <TextComponent
+        bind:value={ollamaBaseUrl}
+        styles={styleOllamaBaseUrl}
+        placeholder="http://localhost:11434"
+        changeFunc={async (newBaseUrl) => {
+            await changeOllamaBaseUrl(newBaseUrl);
+            isRunning = await isOllamaRunning();
+        }}
+    />
 </SettingContainer>
-{#if ollamaModels.length !== 0}
+{#if isRunning}
     <!-- Ollama Gen Model -->
     <SettingContainer
         settingName="Chat Model"
