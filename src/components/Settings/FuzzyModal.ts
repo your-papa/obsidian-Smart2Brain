@@ -12,7 +12,7 @@ export class FileSelectModal extends SuggestModal<TAbstractFile | string> {
     ff: TAbstractFile[];
     constructor(app: App) {
         super(app);
-        this.ff = this.app.vault.getAllLoadedFiles();
+        this.ff = this.app.vault.getMarkdownFiles();
     }
     getSuggestions(query: string): Array<TAbstractFile | string> {
         const input = this.inputEl.value;
