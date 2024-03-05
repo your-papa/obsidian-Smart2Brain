@@ -8,6 +8,7 @@
     import DropdownComponent from '../base/Dropdown.svelte';
     import Toggle from '../base/Toggle.svelte';
     import PullOllamaModel from '../Onboarding/PullOllamaModel.svelte';
+    import LoadingAnimation from '../base/LoadingAnimation.svelte';
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -49,25 +50,29 @@
     <div class="flex w-full max-w-[500px] h-full flex-col items-center justify-center">
         {#if isOpen}
             {#if $papaState === 'loading' || $papaState === 'uninitialized'}
-                <h2 class="text-center text-[--text-normal]">Starting...</h2>
+                <LoadingAnimation />
             {:else if $papaState === 'indexing'}
-                <h2 class="text-center text-[--text-normal]">Indexing vault...</h2>
-                <ProgressBar progress={$papaIndexingProgress} />
-                <button
-                    aria-label="Pause indexing"
-                    on:click={() => ($papaState = 'indexing-pause')}
-                    class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
-                    use:icon={'pause'}
-                />
+                <h2 class="text-[--text-normal] m-0">Indexing vault</h2>
+                <div class="w-full flex items-center gap-2">
+                    <ProgressBar progress={$papaIndexingProgress} />
+                    <button
+                        aria-label="Pause indexing"
+                        on:click={() => ($papaState = 'indexing-pause')}
+                        class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+                        use:icon={'pause'}
+                    />
+                </div>
             {:else if $papaState === 'indexing-pause'}
-                <h2 class="text-center text-[--text-normal]">Paused indexing vault</h2>
-                <ProgressBar progress={$papaIndexingProgress} />
-                <button
-                    aria-label="Resume indexing"
-                    on:click={() => $plugin.initPapa()}
-                    class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
-                    use:icon={'play'}
-                />
+                <h2 class="text-[--text-normal] m-0">Indexing vault</h2>
+                <div class="w-full flex items-center gap-2">
+                    <ProgressBar progress={$papaIndexingProgress} />
+                    <button
+                        aria-label="Resume indexing"
+                        on:click={() => $plugin.initPapa()}
+                        class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+                        use:icon={'play'}
+                    />
+                </div>
             {:else if $papaState === 'error'}
                 {#if $errorState === 'ollama-model-not-installed'}
                     <h2 class="text-center text-[--text-normal]">Install {$plugin.data.ollamaGenModel.model} first.</h2>
@@ -98,6 +103,7 @@
                     use:icon={'refresh-cw'}
                 />
             {:else}
+                <div class="loader"></div>
                 {#if $isIncognitoMode}
                     <h2 class="mb-0 text-center text-[--text-normal]">Ollama</h2>
                     <p class="mt-1 text-center text-[--text-normal]">Chat via {$plugin.data.ollamaGenModel.model}</p>
