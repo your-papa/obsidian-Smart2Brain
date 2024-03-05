@@ -137,9 +137,9 @@
 <details>
     <summary class="setting-item-heading py-3">Advanced Settings</summary>
     <!-- Num of Docs to Retrieve -->
-    <SettingContainer settingName="Num. of Docs to Retrieve">
-        <TextComponent inputType="number" value={$plugin.data.docRetrieveNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} />
-    </SettingContainer>
+    <!-- <SettingContainer settingName="Num. of Docs to Retrieve"> -->
+    <!--     <TextComponent inputType="number" value={$plugin.data.docRetrieveNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} /> -->
+    <!-- </SettingContainer> -->
     <!-- Clear Plugin Data -->
     <SettingContainer settingName="Clear Plugin Data">
         <!-- TODO Add a warning modal -->

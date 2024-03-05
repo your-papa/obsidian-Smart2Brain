@@ -51,20 +51,20 @@ export async function getOllamaModels(): Promise<string[]> {
     }
 }
 
-export const changeOllamaBaseUrl = (newBaseUrl: string) => {
+export const changeOllamaBaseUrl = async (newBaseUrl: string) => {
     const plugin = get(p);
     newBaseUrl.trim();
     if (newBaseUrl.endsWith('/')) newBaseUrl = newBaseUrl.slice(0, -1);
-    plugin.data.ollamaGenModel.baseUrl = newBaseUrl;
-    plugin.data.ollamaEmbedModel.baseUrl = newBaseUrl;
     try {
         // check if url is valid
-        new URL(plugin.data.ollamaGenModel.baseUrl);
+        new URL(newBaseUrl);
+        plugin.data.ollamaGenModel.baseUrl = newBaseUrl;
+        plugin.data.ollamaEmbedModel.baseUrl = newBaseUrl;
         //styleOllamaBaseUrl = 'bg-[--background-modifier-form-field]';
     } catch (_) {
         //styleOllamaBaseUrl = 'bg-[--background-modifier-error]';
     }
-    plugin.saveSettings();
+    await plugin.saveSettings();
     papaState.set('settings-change');
 };
 

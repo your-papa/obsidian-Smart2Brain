@@ -2,10 +2,10 @@
     export let inputType: 'text' | 'number' = 'text';
     export let placeholder: string = '';
     export let styles: string = '';
-    export let changeFunc: (value: string | number) => void;
+    export let changeFunc: (value: string) => void;
     export let focusFunc = () => {};
     export let blurFunc = () => {};
-    export let value: string | number = '';
+    export let value: string = '';
 </script>
 
 {#if inputType === 'text'}
