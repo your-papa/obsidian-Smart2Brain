@@ -1,7 +1,7 @@
 <script lang="ts">
     import { crossfade } from 'svelte/transition';
 
-    export let options: Array<string>;
+    export let options: string[];
     export let selected: string = options[0];
     const [send, recieve] = crossfade({ duration: 500 });
 </script>
