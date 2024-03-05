@@ -94,7 +94,7 @@
 {#if $plugin.data.excludeFF.length !== 0}
     <div class="mb-3 flex justify-between">
         <div bind:this={excludeFFComponent} class="{isFFExpanded ? '' : 'overflow-hidden'} flex flex-wrap gap-1">
-            {#each $plugin.data.excludeFF as ff ($plugin.data.excludeFF)}
+            {#each $plugin.data.excludeFF as ff}
                 <div class="setting-command-hotkeys">
                     <span class="setting-hotkey">
                         {ff}
