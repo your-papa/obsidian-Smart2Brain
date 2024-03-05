@@ -13,11 +13,11 @@ import {
     LogLvl,
 } from 'papa-ts';
 import { get } from 'svelte/store';
-import { serializeChatHistory, chatHistory, plugin, isOnboarded, isIncognitoMode, papaState, papaIndexingProgress, isChatInSidebar } from './store';
+import { serializeChatHistory, chatHistory, plugin, isOnboarded, isIncognitoMode, papaState, papaIndexingProgress, isChatInSidebar, errorState } from './store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
-import { isOllamaRunning } from './controller/Ollama';
+import { getOllamaModels, isOllamaRunning } from './controller/Ollama';
 import { isAPIKeyValid } from './controller/OpenAI';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
 import { wildTest } from './components/Settings/FuzzyModal';
@@ -51,7 +51,11 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     initialAssistantMessage: Prompts[(window.localStorage.getItem('language') as Language) || 'en'].initialAssistantMessage,
     isIncognitoMode: false,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
-    ollamaEmbedModel: { model: 'nomic-embed-text', baseUrl: 'http://localhost:11434', similarityThreshold: 0.75 },
+    ollamaEmbedModel: {
+        model: 'nomic-embed-text',
+        baseUrl: 'http://localhost:11434',
+        similarityThreshold: 0.75,
+    },
     openAIGenModel: {
         model: 'gpt-3.5-turbo',
         openAIApiKey: '',
@@ -107,34 +111,43 @@ export default class SecondBrainPlugin extends Plugin {
 
     async initPapa() {
         if (get(papaState) === 'running') return new Notice('Smart Second Brain is still running.', 4000);
-        else if (get(papaState) === 'indexing' || get(papaState) === 'indexing-pause' || get(papaState) === 'loading') {
+        else if (get(papaState) === 'indexing' || get(papaState) === 'loading') {
             return new Notice('Please wait for the indexing to finish', 4000);
         } else if (this.data.isIncognitoMode && !(await isOllamaRunning())) {
             papaState.set('error');
+            errorState.set('ollama-not-running');
             return new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 4000);
-        } else if (!this.data.isIncognitoMode && !(await isAPIKeyValid())) {
+        } else if (this.data.isIncognitoMode) {
+            const models = await getOllamaModels();
+            if (!models.includes(this.data.ollamaGenModel.model)) {
+                papaState.set('error');
+                errorState.set('ollama-model-not-installed');
+                return new Notice('Ollama model not installed. Please install the model before initializing Smart Second Brain.', 4000);
+            }
+        } else if (!this.data.isIncognitoMode && !(await isAPIKeyValid(this.data.openAIGenModel.openAIApiKey))) {
             papaState.set('error');
             return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);
         }
-
-        papaState.set('loading');
-        Log.info(
-            'Initializing second brain',
-            '\nGen Model: ',
-            this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
-            '\nEmbed Model: ',
-            this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel
-        );
-        this.secondBrain = new Papa({
-            genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
-            embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
-            langsmithApiKey: this.data.debugginLangchainKey || undefined,
-            logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
-        });
-        // check if vector store data exists
-        if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
-            const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
-            await this.secondBrain.load(vectorStoreData);
+        if (get(papaState) !== 'indexing-pause') {
+            papaState.set('loading');
+            Log.info(
+                'Initializing second brain',
+                '\nGen Model: ',
+                this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
+                '\nEmbed Model: ',
+                this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel
+            );
+            this.secondBrain = new Papa({
+                genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
+                embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
+                langsmithApiKey: this.data.debugginLangchainKey || undefined,
+                logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
+            });
+            // check if vector store data exists
+            if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
+                const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
+                await this.secondBrain.load(vectorStoreData);
+            }
         }
         const mdFiles = this.app.vault.getMarkdownFiles();
         const docs = await obsidianDocumentLoader(

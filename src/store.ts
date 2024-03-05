@@ -15,6 +15,9 @@ export const chatInput = writable<string>('');
 export const isOnboarded = writable<boolean>(false);
 export const isChatInSidebar = writable<boolean>(true);
 
+export type ErrorState = 'ollama-model-not-installed' | 'ollama-not-running' | 'ollama-origins-not-set';
+export const errorState = writable<ErrorState>();
+
 export type PapaState =
     | 'idle'
     | 'loading'

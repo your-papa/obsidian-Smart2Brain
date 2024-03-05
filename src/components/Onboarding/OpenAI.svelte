@@ -6,7 +6,7 @@
     import { plugin } from '../../store';
     import InitButtonComponent from './InitButton.svelte';
 
-    let apiKeyInput: TextComponent;
+    let openAIApiKey: string = $plugin.data.openAIGenModel.openAIApiKey;
     let isValid: boolean = false;
     let isKeyTested: boolean = false;
     const changeApiKey = (newApiKey: string) => {
@@ -16,12 +16,11 @@
         $plugin.saveSettings();
         isKeyTested = false;
     };
-    $: if (apiKeyInput) apiKeyInput.setInputValue($plugin.data.openAIGenModel.openAIApiKey);
 </script>
 
-<ol class="w-full max-w-[500px] *:p-1 pr-10">
+<ol class="w-full max-w-[500px] pr-10 *:p-1">
     <li>
-        Create an
+        Create an OpenAI
         <a href="https://platform.openai.com/signup">account</a>
     </li>
     <li>
@@ -34,13 +33,14 @@
         '> [!Warning] Activate API-Key \n> For the API-Key to work you might have to upgrade to an OpenAI paid account. This means depositing at least $5 onto your OpenAI account. This might change in the future.')}
     />
     <li>
-        <div class="flex flex-wrap justify-between items-center">
-            Paste the Key here: <TextComponent bind:this={apiKeyInput} placeholder="sk-...Lk" changeFunc={changeApiKey} />
+        <div class="flex flex-wrap items-center justify-between">
+            <span class="mr-2">Paste the Key here:</span>
+            <TextComponent value={openAIApiKey} placeholder="sk-...Lk" changeFunc={changeApiKey} />
         </div>
     </li>
     <li>
-        <div class="flex flex-wrap justify-between items-center">
-            Test your API Key
+        <div class="flex flex-wrap items-center justify-between">
+            <span class="mr-2">Test your API Key:</span>
             <div class="flex items-center gap-1">
                 {#if isKeyTested}
                     {#if isValid}
@@ -54,7 +54,7 @@
                     <button
                         aria-label="Test your API Key"
                         on:click={async () => {
-                            isValid = await isAPIKeyValid();
+                            isValid = await isAPIKeyValid(openAIApiKey);
                             if (!isValid) new Notice('Api Key is not valid!', 4000);
                             isKeyTested = true;
                         }}>Test</button

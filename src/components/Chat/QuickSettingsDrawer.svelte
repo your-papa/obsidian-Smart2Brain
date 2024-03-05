@@ -1,12 +1,14 @@
 <script lang="ts">
     import { setIcon } from 'obsidian';
-    import { plugin, isIncognitoMode, chatHistory, papaState, papaIndexingProgress, isChatInSidebar } from '../../store';
+    import { plugin, isIncognitoMode, chatHistory, papaState, papaIndexingProgress, errorState } from '../../store';
     import { nanoid } from 'nanoid';
     import { Prompts, type Language, Languages } from 'papa-ts';
     import ProgressBar from '../base/ProgressBar.svelte';
     import { t } from 'svelte-i18n';
     import DropdownComponent from '../base/Dropdown.svelte';
     import Toggle from '../base/Toggle.svelte';
+    import PullOllamaModel from '../Onboarding/PullOllamaModel.svelte';
+    import LoadingAnimation from '../base/LoadingAnimation.svelte';
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -42,41 +44,48 @@
     }
 </script>
 
-<div class={`relative ${isOpen ? 'h-[33%] min-h-[33%]' : 'h-[--icon-m] min-h-[--icon-m]'} overflow-hidden transition-all duration-300 ease-in-out`}>
-    <div class="flex h-full flex-col items-center justify-center">
+<div
+    class={`relative ${isOpen ? 'h-[33%] min-h-[33%]' : 'h-[--icon-m] min-h-[--icon-m]'} flex justify-center overflow-hidden transition-all duration-300 ease-in-out`}
+>
+    <div class="flex w-full max-w-[500px] h-full flex-col items-center justify-center">
         {#if isOpen}
             {#if $papaState === 'loading' || $papaState === 'uninitialized'}
-                <h2 class="text-center text-[--text-normal]">Starting...</h2>
+                <LoadingAnimation />
             {:else if $papaState === 'indexing'}
-                <h2 class="text-center text-[--text-normal]">Indexing vault...</h2>
-                <div class="flex w-full items-center justify-center gap-1">
+                <h2 class="text-[--text-normal] m-0">Indexing vault</h2>
+                <div class="w-full flex items-center gap-2">
+                    <ProgressBar progress={$papaIndexingProgress} />
                     <button
                         aria-label="Pause indexing"
                         on:click={() => ($papaState = 'indexing-pause')}
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'pause'}
                     />
-                    <ProgressBar progress={$papaIndexingProgress} />
                 </div>
             {:else if $papaState === 'indexing-pause'}
-                <h2 class="text-center text-[--text-normal]">Paused indexing vault</h2>
-                <div class="flex w-full items-center justify-center gap-1">
+                <h2 class="text-[--text-normal] m-0">Indexing vault</h2>
+                <div class="w-full flex items-center gap-2">
+                    <ProgressBar progress={$papaIndexingProgress} />
                     <button
                         aria-label="Resume indexing"
                         on:click={() => $plugin.initPapa()}
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'play'}
                     />
-                    <ProgressBar progress={$papaIndexingProgress} />
                 </div>
             {:else if $papaState === 'error'}
-                <h2 class="text-center text-[--text-normal]">An error occured.<br /> Please retry initialization...</h2>
-                <button
-                    aria-label="Retry initializing"
-                    on:click={() => $plugin.initPapa()}
-                    class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
-                    use:icon={'refresh-cw'}
-                />
+                {#if $errorState === 'ollama-model-not-installed'}
+                    <h2 class="text-center text-[--text-normal]">Install {$plugin.data.ollamaGenModel.model} first.</h2>
+                    <PullOllamaModel onSuccessfulPull={() => ($papaState = 'settings-change')} />
+                {:else}
+                    <h2 class="text-center text-[--text-normal]">An error occured.<br /> Please retry initialization...</h2>
+                    <button
+                        aria-label="Retry initializing"
+                        on:click={() => $plugin.initPapa()}
+                        class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+                        use:icon={'refresh-cw'}
+                    />
+                {/if}
             {:else if $papaState === 'mode-change'}
                 <h2 class="text-center text-[--text-normal]">Reinitialize Smart Second Brain <br />with {$isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h2>
                 <button
@@ -86,7 +95,7 @@
                     use:icon={'play'}
                 />
             {:else if $papaState === 'settings-change'}
-                <h2 class="text-center text-[--text-normal]">Settings changed. <br />Reinitialize Smart Second Brain.</h2>
+                <h2 class="text-center text-[--text-normal]">Settings changed.<br />Reinitialize Smart Second Brain.</h2>
                 <button
                     aria-label="Reinitialize, Settings changed"
                     on:click={() => $plugin.initPapa()}
@@ -94,6 +103,7 @@
                     use:icon={'refresh-cw'}
                 />
             {:else}
+                <div class="loader"></div>
                 {#if $isIncognitoMode}
                     <h2 class="mb-0 text-center text-[--text-normal]">Ollama</h2>
                     <p class="mt-1 text-center text-[--text-normal]">Chat via {$plugin.data.ollamaGenModel.model}</p>

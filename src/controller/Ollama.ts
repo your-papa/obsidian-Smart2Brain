@@ -33,7 +33,7 @@ export async function isOllamaOriginsSet() {
     }
 }
 
-export async function getOllamaGenModels(): Promise<{ display: string; value: string }[]> {
+export async function getOllamaModels(): Promise<string[]> {
     const plugin = get(p);
     try {
         const modelsRes = await requestUrl({
@@ -44,41 +44,32 @@ export async function getOllamaGenModels(): Promise<{ display: string; value: st
             },
         });
         const models: string[] = modelsRes.json.models.map((model: { name: string }) => model.name);
-        return models.map((model: string) => ({ display: model.replace(':latest', ''), value: model.replace(':latest', '') }));
+        return models.map((model: string) => model.replace(':latest', ''));
     } catch (error) {
         Log.debug('Ollama is not running', error);
         return [];
     }
 }
 
-export const changeOllamaBaseUrl = (newBaseUrl: string) => {
+export const changeOllamaBaseUrl = async (newBaseUrl: string) => {
     const plugin = get(p);
     newBaseUrl.trim();
     if (newBaseUrl.endsWith('/')) newBaseUrl = newBaseUrl.slice(0, -1);
-    plugin.data.ollamaGenModel.baseUrl = newBaseUrl;
-    plugin.data.ollamaEmbedModel.baseUrl = newBaseUrl;
     try {
         // check if url is valid
-        new URL(plugin.data.ollamaGenModel.baseUrl);
+        new URL(newBaseUrl);
+        plugin.data.ollamaGenModel.baseUrl = newBaseUrl;
+        plugin.data.ollamaEmbedModel.baseUrl = newBaseUrl;
         //styleOllamaBaseUrl = 'bg-[--background-modifier-form-field]';
     } catch (_) {
         //styleOllamaBaseUrl = 'bg-[--background-modifier-error]';
     }
-    plugin.saveSettings();
+    await plugin.saveSettings();
     papaState.set('settings-change');
 };
 
-export const ollamaEmbedChange = (selected: string) => {
-    //TODO Modle types
-    const plugin = get(p);
-    // @ts-expect-error Have to do this
-    plugin.data.ollamaEmbedModel.model = selected;
-    papaState.set('settings-change');
-    plugin.saveSettings();
-};
-
-export async function* pullOllamaModel() {
-    console.log('pulling');
+export async function* pullOllamaModel(model: string) {
+    Log.info('Pulling model from Ollama', model);
     try {
         const response = await fetch(`${get(p).data.ollamaEmbedModel.baseUrl}/api/pull`, {
             method: 'POST',
@@ -86,7 +77,7 @@ export async function* pullOllamaModel() {
                 'Content-Type': 'application/json',
                 Accept: 'application/json',
             },
-            body: JSON.stringify({ name: 'nomic-embed-text' }),
+            body: JSON.stringify({ name: model }),
         });
 
         if (!response.ok) {
@@ -112,7 +103,6 @@ export async function* pullOllamaModel() {
                 if (line.trim()) {
                     try {
                         const json = JSON.parse(line);
-                        console.log(json);
                         yield json;
                     } catch (error) {
                         return error;
