@@ -6,20 +6,17 @@
     import { changeOllamaBaseUrl } from '../../controller/Ollama';
     import OllamaSetup from './OllamaSetup.svelte';
 
-    export let osType: 'Linux' | 'Darwin' | 'Windows_NT';
-    let componentBaseUrl: TextComponent;
+    export let osType: string;
 
     onMount(() => {
         $isIncognitoMode = true;
         $plugin.data.isIncognitoMode = $isIncognitoMode;
         $plugin.saveSettings();
     });
-
-    $: if (componentBaseUrl) componentBaseUrl.setInputValue($plugin.data.ollamaEmbedModel.baseUrl);
 </script>
 
-<ol class="w-full max-w-[500px] *:p-1 pr-10">
-    <li>Install Ollama through one of these options:</li>
+<ol class="w-full max-w-[500px] pr-10 *:p-1">
+    <li>Install Ollama</li>
     {#if osType === 'Darwin'}
         <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\nbrew install ollama\n```')} />
     {:else if osType === 'Linux'}
@@ -30,9 +27,9 @@
     {/if}
 
     <li>
-        <div class="flex flex-wrap justify-between items-center">
-            Set the BaseUrl
-            <TextComponent bind:this={componentBaseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
+        <div class="flex flex-wrap items-center justify-between">
+            <span class="mr-2">Set the BaseUrl</span>
+            <TextComponent value={$plugin.data.ollamaEmbedModel.baseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
         </div>
     </li>
     <li>Start the Ollama service with origins</li>

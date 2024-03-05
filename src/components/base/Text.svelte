@@ -2,40 +2,31 @@
     export let inputType: 'text' | 'number' = 'text';
     export let placeholder: string = '';
     export let styles: string = '';
-    export let changeFunc: (inputValue: string | number) => void;
+    export let changeFunc: (value: string) => void;
     export let focusFunc = () => {};
     export let blurFunc = () => {};
-    let inputValue: string | number = '';
-
-    let inputElem: HTMLInputElement;
-    export function setInputValue(value: string | number) {
-        inputValue = value;
-    }
-    export function getInputValue(): string {
-        return inputValue;
-    }
+    export let value: string = '';
 </script>
 
 {#if inputType === 'text'}
     <input
-        bind:this={inputElem}
         class="!{styles}"
         type="text"
         spellcheck="false"
         {placeholder}
-        on:focus={focusFunc}
-        on:blur={blurFunc}
-        bind:value={inputValue}
-        on:change={() => changeFunc(inputValue)}
+        on:focus={() => focusFunc()}
+        on:blur={() => blurFunc()}
+        bind:value
+        on:change={() => changeFunc(value)}
     />
 {:else if inputType === 'number'}
     <input
         type="number"
         spellcheck="false"
         {placeholder}
-        bind:value={inputValue}
-        on:blur={blurFunc}
-        on:focus={() => focusFunc}
-        on:change={() => changeFunc(inputValue)}
+        bind:value
+        on:blur={() => blurFunc()}
+        on:focus={() => focusFunc()}
+        on:change={() => changeFunc(value)}
     />
 {/if}
