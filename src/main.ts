@@ -128,25 +128,26 @@ export default class SecondBrainPlugin extends Plugin {
             papaState.set('error');
             return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);
         }
-
-        papaState.set('loading');
-        Log.info(
-            'Initializing second brain',
-            '\nGen Model: ',
-            this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
-            '\nEmbed Model: ',
-            this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel
-        );
-        this.secondBrain = new Papa({
-            genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
-            embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
-            langsmithApiKey: this.data.debugginLangchainKey || undefined,
-            logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
-        });
-        // check if vector store data exists
-        if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
-            const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
-            await this.secondBrain.load(vectorStoreData);
+        if (get(papaState) !== 'indexing-pause') {
+            papaState.set('loading');
+            Log.info(
+                'Initializing second brain',
+                '\nGen Model: ',
+                this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
+                '\nEmbed Model: ',
+                this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel
+            );
+            this.secondBrain = new Papa({
+                genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
+                embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
+                langsmithApiKey: this.data.debugginLangchainKey || undefined,
+                logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
+            });
+            // check if vector store data exists
+            if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
+                const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
+                await this.secondBrain.load(vectorStoreData);
+            }
         }
         const mdFiles = this.app.vault.getMarkdownFiles();
         const docs = await obsidianDocumentLoader(
