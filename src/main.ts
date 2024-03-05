@@ -111,7 +111,7 @@ export default class SecondBrainPlugin extends Plugin {
 
     async initPapa() {
         if (get(papaState) === 'running') return new Notice('Smart Second Brain is still running.', 4000);
-        else if (get(papaState) === 'indexing' || get(papaState) === 'indexing-pause' || get(papaState) === 'loading') {
+        else if (get(papaState) === 'indexing' || get(papaState) === 'loading') {
             return new Notice('Please wait for the indexing to finish', 4000);
         } else if (this.data.isIncognitoMode && !(await isOllamaRunning())) {
             papaState.set('error');
