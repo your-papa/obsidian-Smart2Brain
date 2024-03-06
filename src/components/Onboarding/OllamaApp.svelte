@@ -9,7 +9,7 @@
     let isOllamaTested: boolean = false;
 </script>
 
-<ol class="w-full max-w-[500px] pr-10 *:p-1">
+<ol class="w-full pr-10 *:p-1">
     <li>
         Download the App
         <a href="https://ollama.ai/download">here</a>

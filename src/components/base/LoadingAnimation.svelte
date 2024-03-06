@@ -2,7 +2,7 @@
 
 <style>
     .loader {
-        color: #000;
+        color: var(--color-accent);
         width: 4px;
         aspect-ratio: 1;
         border-radius: 50%;

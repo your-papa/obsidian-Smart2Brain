@@ -15,7 +15,7 @@
     });
 </script>
 
-<ol class="w-full max-w-[500px] pr-10 *:p-1">
+<ol class="w-full pr-10 *:p-1">
     <li>Install Ollama</li>
     {#if osType === 'Darwin'}
         <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\nbrew install ollama\n```')} />
