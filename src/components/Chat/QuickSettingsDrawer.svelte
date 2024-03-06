@@ -22,6 +22,21 @@
         $plugin.saveSettings();
     }
 
+    let similarityThreshold = Math.round(
+        ($isIncognitoMode ? $plugin.data.ollamaEmbedModel.similarityThreshold : $plugin.data.openAIEmbedModel.similarityThreshold) * 100
+    );
+    $: similarityThreshold = Math.min(Math.max(similarityThreshold, 0), 100);
+    function setSimilarityThreshold() {
+        if ($isIncognitoMode) {
+            $plugin.data.ollamaEmbedModel.similarityThreshold = similarityThreshold / 100;
+        } else {
+            $plugin.data.openAIEmbedModel.similarityThreshold = similarityThreshold / 100;
+        }
+        if ($plugin.secondBrain) $plugin.secondBrain.setSimilarityThreshold(similarityThreshold / 100);
+        $plugin.saveSettings();
+    }
+    $: similarityThreshold, setSimilarityThreshold();
+
     const languages: { display: Language; value: Language }[] = Object.values(Languages).map((language: Language) => ({ display: language, value: language }));
     const setAssistantLanguage = (selected: Language) => {
         $plugin.data.assistantLanguage = selected;
@@ -131,6 +146,10 @@
                     <div class="flex w-full items-center justify-between">
                         <p class="m-0 inline-block">{$t('assistant_language')}</p>
                         <DropdownComponent selected={$plugin.data.assistantLanguage} options={languages} changeFunc={setAssistantLanguage} />
+                    </div>
+                    <div class="flex w-full items-center justify-between">
+                        <p class="m-0 inline-block">Relevancy in %</p>
+                        <input type="number" bind:value={similarityThreshold} min="0" max="100" />
                     </div>
                 </div>
             {/if}

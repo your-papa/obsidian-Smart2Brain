@@ -137,7 +137,8 @@ export default class SecondBrainPlugin extends Plugin {
                 '\nEmbed Model: ',
                 this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel
             );
-            this.secondBrain = new Papa({
+            this.secondBrain = new Papa();
+            await this.secondBrain.init({
                 genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
                 embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
                 langsmithApiKey: this.data.debugginLangchainKey || undefined,
