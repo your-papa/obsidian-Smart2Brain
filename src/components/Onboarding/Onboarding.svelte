@@ -14,7 +14,7 @@
     let selected: 'Ollama App' | 'Ollama Daemon' = 'Ollama App';
 </script>
 
-<div class="flex h-full w-full flex-col items-center overflow-auto pt-8">
+<div class="flex h-full w-full max-w-[500px] flex-col items-center mx-auto overflow-auto pt-8">
     <div class="w-full text-center *:!h-[--icon-xl] *:!w-[--icon-xl]" use:icon={'brain-circuit'} />
     <h1 class="text-[--text-normal]">Setup</h1>
     <IncognitoToggle />
