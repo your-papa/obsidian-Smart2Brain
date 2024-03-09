@@ -40,18 +40,11 @@
     const languages: { display: Language; value: Language }[] = Object.values(Languages).map((language: Language) => ({ display: language, value: language }));
     const setAssistantLanguage = (selected: Language) => {
         $data.assistantLanguage = selected;
-        $data.initialAssistantMessage = Prompts[selected].initialAssistantMessage;
+        $data.initialAssistantMessageContent = Prompts[selected].initialAssistantMessage;
         if ($chatHistory.length === 1) {
-            chatHistory.set([
-                {
-                    role: 'Assistant',
-                    content: $data.initialAssistantMessage,
-                    id: nanoid(),
-                },
-            ]);
-            $plugin.chatView.requestSave();
+            chatHistory.reset;
+            $plugin.saveSettings();
         }
-        $plugin.saveSettings();
     };
     function setChatViewDensity() {
         $data.isChatComfy = !$data.isChatComfy;

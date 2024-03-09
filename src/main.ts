@@ -1,6 +1,6 @@
 import { around } from 'monkey-around';
-import { nanoid } from 'nanoid';
-import { Notice, Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState, WorkspaceSidedock } from 'obsidian';
+import { ConfirmModal } from './components/Settings/ConfirmModal';
+import { Notice, Plugin, TFile, WorkspaceLeaf, normalizePath, type ViewState, WorkspaceSidedock, Modal } from 'obsidian';
 import {
     Papa,
     Prompts,
@@ -26,7 +26,7 @@ import Log from './logging';
 
 export interface PluginData {
     isChatComfy: boolean;
-    initialAssistantMessage: string;
+    initialAssistantMessageContent: string;
     isUsingRag: boolean;
     assistantLanguage: Language;
     isIncognitoMode: boolean;
@@ -48,7 +48,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isChatComfy: true,
     isUsingRag: true,
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
-    initialAssistantMessage: Prompts[(window.localStorage.getItem('language') as Language) || 'en'].initialAssistantMessage,
+    initialAssistantMessageContent: Prompts[(window.localStorage.getItem('language') as Language) || 'en'].initialAssistantMessage,
     isIncognitoMode: false,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
     ollamaEmbedModel: {
@@ -305,7 +305,7 @@ export default class SecondBrainPlugin extends Plugin {
                     ? this.app.metadataCache.getFirstLinkpathDest(d.targetFolder + '/' + d.defaultChatName + '.md', '')
                     : await this.app.vault.create(
                           normalizePath(d.targetFolder + '/' + d.defaultChatName + '.md'),
-                          'Assistant\n' + d.initialAssistantMessage + '\n- - - - -'
+                          'Assistant\n' + d.initialAssistantMessageContent + '\n- - - - -'
                       );
             }
             const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
@@ -339,25 +339,23 @@ export default class SecondBrainPlugin extends Plugin {
             normalizedFilePath = normalizePath(d.targetFolder + '/' + fileName + '.md');
         }
         const newChatFile = await this.app.vault.copy(this.chatView.file, normalizedFilePath);
-        // delete default chat history (TODO redundant with delete chat button in input.svelte)
-        chatHistory.set([
-            {
-                role: 'Assistant',
-                content: d.initialAssistantMessage,
-                id: nanoid(),
-            },
-        ]);
-        await this.chatView.save();
+        chatHistory.reset;
         await this.activateView(newChatFile);
     }
 
     async clearPluginData() {
-        await this.saveData({});
-        const files = (await this.app.vault.adapter.list(normalizePath(this.manifest.dir))).files;
-        for (const file of files) {
-            if (file.endsWith('vector-store.bin')) await this.app.vault.adapter.remove(file);
-        }
-        new Notice('Plugin data cleared. Please reload the plugin.', 4000);
+        new ConfirmModal(get(plugin).app, async (result) => {
+            if (result === 'Yes') {
+                await this.saveData({});
+                const files = (await this.app.vault.adapter.list(normalizePath(this.manifest.dir))).files;
+                for (const file of files) {
+                    if (file.endsWith('vector-store.bin')) await this.app.vault.adapter.remove(file);
+                }
+                new Notice('Plugin data cleared. Please reload the plugin.', 4000);
+            } else {
+                new Notice('Plugin data not cleared.', 4000);
+            }
+        }).open();
     }
 
     registerMonkeyPatches() {

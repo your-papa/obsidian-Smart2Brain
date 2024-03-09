@@ -158,7 +158,7 @@ export function cancelEditingInitialAssistantMessage(initialAssistantMessageSpan
     isEditingAssistantMessage.set(false);
     chatInput.set('');
     initialAssistantMessageSpan.innerText = '';
-    renderMarkdown(initialAssistantMessageSpan, d.initialAssistantMessage);
+    renderMarkdown(initialAssistantMessageSpan, d.initialAssistantMessageContent);
     plugin.chatView.requestSave();
 }
 
@@ -168,10 +168,10 @@ export function resetInitialAssistantMessage(initialAssistantMessageSpan: HTMLSp
     isEditingAssistantMessage.set(false);
     chatInput.set('');
     initialAssistantMessageSpan.innerText = '';
-    const initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
-    renderMarkdown(initialAssistantMessageSpan, initialAssistantMessage);
-    history.set([{ role: 'Assistant', content: initialAssistantMessage, id: nanoid() } as ChatMessage]);
-    d.initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
+    const initialAssistantMessageContent = DEFAULT_SETTINGS.initialAssistantMessageContent;
+    renderMarkdown(initialAssistantMessageSpan, initialAssistantMessageContent);
+    history.set([{ role: 'Assistant', content: initialAssistantMessageContent, id: nanoid() } as ChatMessage]);
+    d.initialAssistantMessageContent = DEFAULT_SETTINGS.initialAssistantMessageContent;
     plugin.chatView.requestSave();
     plugin.saveSettings();
 }

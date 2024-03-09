@@ -17,7 +17,7 @@
 
         if ($isEditingAssistantMessage) {
             $chatHistory[0].content = $chatInput;
-            $data.initialAssistantMessage = $chatInput;
+            $data.initialAssistantMessageContent = $chatInput;
             $chatInput = '';
             $isEditingAssistantMessage = false;
             $plugin.chatView.requestSave();
@@ -39,17 +39,6 @@
         $data.isUsingRag = !$data.isUsingRag;
         $plugin.saveSettings();
         new Notice($data.isUsingRag ? 'Now chatting with your Second Brain' : 'Now chatting with the LLM');
-    }
-
-    function handleDelete() {
-        // delete everything except the first message
-        $chatHistory = [];
-        $chatHistory.push({
-            role: 'Assistant',
-            content: $data.initialAssistantMessage,
-            id: nanoid(),
-        });
-        $plugin.chatView.requestSave();
     }
 
     function handelEnter(event: KeyboardEvent) {
@@ -104,7 +93,7 @@
             <div
                 aria-label="Delete Chat History"
                 class="text-[--text-normal] hover:text-[--text-accent-hover]"
-                on:click|preventDefault={handleDelete}
+                on:click|preventDefault={chatHistory.reset}
                 use:icon={'trash-2'}
                 hidden={$papaState === 'running'}
             />

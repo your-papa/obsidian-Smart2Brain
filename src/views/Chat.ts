@@ -10,7 +10,7 @@ export const VIEW_TYPE_CHAT = 'chat-view';
 export class ChatView extends TextFileView implements HoverParent {
     component: ChatViewComponent;
     hoverPopover: HoverPopover | null;
-    data: string = 'Assistant\n' + get(data).initialAssistantMessage + '\n- - - - -';
+    data: string = 'Assistant\n' + get(data).initialAssistantMessageContent + '\n- - - - -';
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);
