@@ -137,13 +137,19 @@ export default class SecondBrainPlugin extends Plugin {
                 '\nEmbed Model: ',
                 this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel
             );
-            this.secondBrain = new Papa();
-            await this.secondBrain.init({
-                genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
-                embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
-                langsmithApiKey: this.data.debugginLangchainKey || undefined,
-                logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
-            });
+            try {
+                this.secondBrain = new Papa();
+                await this.secondBrain.init({
+                    genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
+                    embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
+                    langsmithApiKey: this.data.debugginLangchainKey || undefined,
+                    logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
+                });
+            } catch (e) {
+                Log.error(e);
+                papaState.set('error');
+                return new Notice('Failed to initialize Smart Second Brain (Error: ' + e + '). Please retry.', 4000);
+            }
             // check if vector store data exists
             if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
                 const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
