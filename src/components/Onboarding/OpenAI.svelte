@@ -3,16 +3,16 @@
     import { icon, renderMarkdown } from '../../controller/Messages';
     import TextComponent from '../base/Text.svelte';
     import { isAPIKeyValid } from '../../controller/OpenAI';
-    import { plugin } from '../../store';
+    import { plugin, data } from '../../store';
     import InitButtonComponent from './InitButton.svelte';
 
-    let openAIApiKey: string = $plugin.data.openAIGenModel.openAIApiKey;
+    let openAIApiKey: string = $data.openAIGenModel.openAIApiKey;
     let isValid: boolean = false;
     let isKeyTested: boolean = false;
     const changeApiKey = (newApiKey: string) => {
         newApiKey.trim();
-        $plugin.data.openAIGenModel.openAIApiKey = newApiKey;
-        $plugin.data.openAIEmbedModel.openAIApiKey = newApiKey;
+        $data.openAIGenModel.openAIApiKey = newApiKey;
+        $data.openAIEmbedModel.openAIApiKey = newApiKey;
         $plugin.saveSettings();
         isKeyTested = false;
     };

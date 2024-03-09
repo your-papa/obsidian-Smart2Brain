@@ -1,19 +1,17 @@
 <script lang="ts">
     import { Notice } from 'obsidian';
-    import { isIncognitoMode } from '../../store';
-    import { plugin, papaState, type PapaState } from '../../store';
+    import { plugin, data, papaState, type PapaState } from '../../store';
     import { crossfade } from 'svelte/transition';
 
     const [send, recieve] = crossfade({ duration: 500 });
 
     let oldPapaState: PapaState;
     function setIncognitoMode(incognito: boolean) {
-        if (incognito === $isIncognitoMode) return;
+        if (incognito === $data.isIncognitoMode) return;
         if ($papaState === 'running') return new Notice('Please wait for the current query to finish', 4000);
         else if ($papaState === 'indexing' || $papaState === 'indexing-pause' || $papaState === 'loading')
             return new Notice('Please wait for the indexing to finish', 4000);
-        $isIncognitoMode = incognito;
-        $plugin.data.isIncognitoMode = $isIncognitoMode;
+        $data.isIncognitoMode = incognito;
         $plugin.saveSettings();
         if ($papaState === 'mode-change') {
             // Already in mode-change state so we restore the previous state (there are only two states)
@@ -33,7 +31,7 @@
         on:click={() => setIncognitoMode(true)}
     >
         Run on your machine
-        {#if $isIncognitoMode}
+        {#if $data.isIncognitoMode}
             <div in:send={{ key: 0 }} out:recieve={{ key: 0 }} class="border-1 border-primary w-full border border-solid" />
         {/if}
     </li>
@@ -44,7 +42,7 @@
         on:click={() => setIncognitoMode(false)}
     >
         Run via Third-Parties
-        {#if !$isIncognitoMode}
+        {#if !$data.isIncognitoMode}
             <div in:send={{ key: 0 }} out:recieve={{ key: 0 }} class="border-1 border-primary w-full border border-solid" />
         {/if}
     </li>

@@ -1,11 +1,12 @@
 import { requestUrl } from 'obsidian';
-import { plugin as p, papaState } from '../store';
+import { plugin as p, data, papaState } from '../store';
 import { get } from 'svelte/store';
 import Log from '../logging';
 
 export async function isOllamaRunning() {
+    const d = get(data);
     try {
-        const response = await requestUrl(get(p).data.ollamaGenModel.baseUrl + '/api/tags');
+        const response = await requestUrl(d.ollamaGenModel.baseUrl + '/api/tags');
         if (response.status === 200) {
             return true;
         } else {
@@ -19,8 +20,9 @@ export async function isOllamaRunning() {
 }
 
 export async function isOllamaOriginsSet() {
+    const d = get(data);
     try {
-        const response = await fetch(get(p).data.ollamaGenModel.baseUrl + '/api/tags');
+        const response = await fetch(d.ollamaGenModel.baseUrl + '/api/tags');
         if (response.status === 200) {
             return true;
         } else {
@@ -34,10 +36,10 @@ export async function isOllamaOriginsSet() {
 }
 
 export async function getOllamaModels(): Promise<string[]> {
-    const plugin = get(p);
+    const d = get(data);
     try {
         const modelsRes = await requestUrl({
-            url: plugin.data.ollamaGenModel.baseUrl + '/api/tags',
+            url: d.ollamaGenModel.baseUrl + '/api/tags',
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -52,14 +54,15 @@ export async function getOllamaModels(): Promise<string[]> {
 }
 
 export const changeOllamaBaseUrl = async (newBaseUrl: string) => {
+    const d = get(data);
     const plugin = get(p);
     newBaseUrl.trim();
     if (newBaseUrl.endsWith('/')) newBaseUrl = newBaseUrl.slice(0, -1);
     try {
         // check if url is valid
         new URL(newBaseUrl);
-        plugin.data.ollamaGenModel.baseUrl = newBaseUrl;
-        plugin.data.ollamaEmbedModel.baseUrl = newBaseUrl;
+        d.ollamaGenModel.baseUrl = newBaseUrl;
+        d.ollamaEmbedModel.baseUrl = newBaseUrl;
         //styleOllamaBaseUrl = 'bg-[--background-modifier-form-field]';
     } catch (_) {
         //styleOllamaBaseUrl = 'bg-[--background-modifier-error]';
@@ -71,7 +74,7 @@ export const changeOllamaBaseUrl = async (newBaseUrl: string) => {
 export async function* pullOllamaModel(model: string) {
     Log.info('Pulling model from Ollama', model);
     try {
-        const response = await fetch(`${get(p).data.ollamaEmbedModel.baseUrl}/api/pull`, {
+        const response = await fetch(`${get(data).ollamaEmbedModel.baseUrl}/api/pull`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

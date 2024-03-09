@@ -1,6 +1,6 @@
 import { SuggestModal, TFile, TAbstractFile, App } from 'obsidian';
 import { get } from 'svelte/store';
-import { plugin } from '../../store';
+import { plugin, data } from '../../store';
 
 export function wildTest(wildcard: string, str: string): boolean {
     const w = wildcard.replace(/[.+^${}()|[\]\\]/g, '\\$&'); // regexp escape
@@ -16,7 +16,7 @@ export class FileSelectModal extends SuggestModal<TAbstractFile | string> {
     }
     getSuggestions(query: string): Array<TAbstractFile | string> {
         const input = this.inputEl.value;
-        const excludeFF = get(plugin).data.excludeFF;
+        const excludeFF = get(data).excludeFF;
         const files: TAbstractFile[] = [];
         this.ff.forEach((ff: TAbstractFile) => {
             if (ff.path === '/') return;
@@ -38,17 +38,17 @@ export class FileSelectModal extends SuggestModal<TAbstractFile | string> {
     }
 
     onChooseSuggestion(file: TFile | string) {
-        const p = get(plugin);
+        const d = get(data);
         let path: string;
         if (typeof file === 'string') path = file;
         else path = file.path;
 
-        if (!p.data.excludeFF.includes(path)) {
-            plugin.update((pl) => {
-                pl.data.excludeFF = [...p.data.excludeFF, path];
-                return pl;
+        if (!d.excludeFF.includes(path)) {
+            data.update((dl) => {
+                dl.excludeFF = [...dl.excludeFF, path];
+                return dl;
             });
-            p.saveSettings();
+            get(plugin).saveSettings();
         }
     }
 }

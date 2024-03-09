@@ -2,7 +2,7 @@ import { WorkspaceLeaf, type HoverParent, HoverPopover, TextFileView, TFile } fr
 
 import ChatViewComponent from '../components/Chat/Chat.svelte';
 import { nanoid } from 'nanoid';
-import { type ChatMessage, chatHistory, plugin } from '../store';
+import { type ChatMessage, chatHistory, data } from '../store';
 import { get } from 'svelte/store';
 
 export const VIEW_TYPE_CHAT = 'chat-view';
@@ -10,7 +10,7 @@ export const VIEW_TYPE_CHAT = 'chat-view';
 export class ChatView extends TextFileView implements HoverParent {
     component: ChatViewComponent;
     hoverPopover: HoverPopover | null;
-    data: string = 'Assistant\n' + get(plugin).data.initialAssistantMessage + '\n- - - - -';
+    data: string = 'Assistant\n' + get(data).initialAssistantMessage + '\n- - - - -';
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);

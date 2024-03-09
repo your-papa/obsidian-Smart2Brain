@@ -1,6 +1,6 @@
 <script lang="ts">
     import { Notice } from 'obsidian';
-    import { plugin } from '../../store';
+    import { data } from '../../store';
     import { pullOllamaModel } from '../../controller/Ollama';
     import ProgressBar from '../base/ProgressBar.svelte';
 
@@ -15,7 +15,7 @@
     async function pullOllamaModelStream() {
         isPullingModel = true;
         try {
-            for await (const chunk of pullOllamaModel($plugin.data.ollamaGenModel.model)) {
+            for await (const chunk of pullOllamaModel($data.ollamaGenModel.model)) {
                 status = chunk.status;
                 if (chunk.total) total = chunk.total;
                 if (chunk.completed) progress = Math.floor((chunk.completed / total) * 100);
@@ -48,7 +48,7 @@
 {#if !isPullingModel}
     <button on:click={() => pullOllamaModelStream()}>Install</button>
 {:else}
-    <div class="w-full flex justify-between">
+    <div class="flex w-full justify-between">
         <div>
             {status}
             {#each ['', '.', '..', '...'] as sequence, i}

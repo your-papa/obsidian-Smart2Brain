@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
 import { nanoid } from 'nanoid';
-import { chatHistory as cH, isEditing, plugin as p, serializeChatHistory, papaState } from '../store';
+import { chatHistory as cH, isEditing, plugin as p, data, serializeChatHistory, papaState } from '../store';
 import { Notice } from 'obsidian';
 
 export const canRunSecondBrain = () => {
@@ -15,12 +15,13 @@ export const canRunSecondBrain = () => {
 export async function runSecondBrain(isRAG: boolean, userQuery: string) {
     papaState.set('running');
     const plugin = get(p);
+    const d = get(data);
 
     const responseStream = plugin.secondBrain.run({
         isRAG,
         userQuery,
         chatHistory: serializeChatHistory(get(cH)),
-        lang: plugin.data.assistantLanguage,
+        lang: d.assistantLanguage,
     });
     let chatHistory = get(cH);
 

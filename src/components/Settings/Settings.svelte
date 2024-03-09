@@ -1,7 +1,7 @@
 <script lang="ts">
     import TextComponent from '../base/Text.svelte';
     import FFExcludeComponent from './FFExclude.svelte';
-    import { plugin, isIncognitoMode } from '../../store';
+    import { plugin, data } from '../../store';
     import { Notice, setIcon } from 'obsidian';
     import SettingContainer from './SettingContainer.svelte';
     import { LogLvl, Papa } from 'papa-ts';
@@ -30,7 +30,7 @@
     };
 
     function deleteFolder(ff: string) {
-        $plugin.data.excludeFF = $plugin.data.excludeFF.filter((f: string) => f !== ff);
+        $data.excludeFF = $data.excludeFF.filter((f: string) => f !== ff);
         $plugin.saveSettings();
     }
 
@@ -38,29 +38,29 @@
         if (docNum < 1) {
             return new Notice('Number of documents to retrieve must be greater than 0', 4000);
         }
-        $plugin.data.docRetrieveNum = docNum;
+        $data.docRetrieveNum = docNum;
         await $plugin.saveSettings();
     }
     const changeLangsmithKey = (newKey: string) => {
-        $plugin.data.debugginLangchainKey = newKey;
+        $data.debugginLangchainKey = newKey;
         $plugin.saveSettings();
-        $plugin.secondBrain.setTracer($plugin.data.debugginLangchainKey);
+        $plugin.secondBrain.setTracer($data.debugginLangchainKey);
     };
 
     const changeVerbosity = () => {
-        $plugin.data.isVerbose = !$plugin.data.isVerbose;
-        Log.setLogLevel($plugin.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
-        Papa.setLogLevel($plugin.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
+        $data.isVerbose = !$data.isVerbose;
+        Log.setLogLevel($data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
+        Papa.setLogLevel($data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
         $plugin.saveSettings();
     };
 </script>
 
 <!-- Exclude Folders -->
 <SettingContainer settingName={$t('excludeff')}><FFExcludeComponent /></SettingContainer>
-{#if $plugin.data.excludeFF.length !== 0}
+{#if $data.excludeFF.length !== 0}
     <div class="mb-3 flex justify-between">
         <div bind:this={excludeFFComponent} class="{isFFExpanded ? '' : 'overflow-hidden'} flex flex-wrap gap-1">
-            {#each $plugin.data.excludeFF as ff}
+            {#each $data.excludeFF as ff}
                 <div class="setting-command-hotkeys">
                     <span class="setting-hotkey">
                         {ff}
@@ -93,7 +93,7 @@
     <LocalToggle />
 </div>
 <div>
-    {#if $isIncognitoMode}
+    {#if $data.isIncognitoMode}
         <OllamaSettings />
     {:else}
         <OpenAISettings />
@@ -104,7 +104,7 @@
     <summary class="setting-item-heading py-3">Advanced Settings</summary>
     <!-- Num of Docs to Retrieve -->
     <!-- <SettingContainer settingName="Num. of Docs to Retrieve"> -->
-    <!--     <TextComponent inputType="number" value={$plugin.data.docRetrieveNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} /> -->
+    <!--     <TextComponent inputType="number" value={$data.docRetrieveNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} /> -->
     <!-- </SettingContainer> -->
     <!-- Clear Plugin Data -->
     <SettingContainer settingName="Clear Plugin Data">
@@ -114,9 +114,9 @@
     <!-- Debugging -->
     <SettingContainer settingName="Debugging" isHeading={true} />
     <SettingContainer settingName="Langsmith Key">
-        <TextComponent value={$plugin.data.debugginLangchainKey} changeFunc={changeLangsmithKey} />
+        <TextComponent value={$data.debugginLangchainKey} changeFunc={changeLangsmithKey} />
     </SettingContainer>
     <SettingContainer settingName="Verbose">
-        <ToggleComponent isEnabled={$plugin.data.isVerbose} changeFunc={changeVerbosity} />
+        <ToggleComponent isEnabled={$data.isVerbose} changeFunc={changeVerbosity} />
     </SettingContainer>
 </details>
