@@ -16,7 +16,6 @@
     let isOrigin: boolean = false;
 
     onMount(() => {
-        // TODO redundant with Settings.svelete
         $data.isIncognitoMode = true;
         $plugin.saveSettings();
     });

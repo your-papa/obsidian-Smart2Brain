@@ -1,6 +1,7 @@
-import { writable } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 import type SecondBrainPlugin from './main';
-import { type PluginData } from './main';
+import { DEFAULT_SETTINGS, type PluginData } from './main';
+import { nanoid } from 'nanoid';
 
 export type ChatMessage = {
     role: 'Assistant' | 'User';
@@ -10,7 +11,6 @@ export type ChatMessage = {
 export const plugin = writable<SecondBrainPlugin>();
 export const data = writable<PluginData>();
 
-export const chatHistory = writable<ChatMessage[]>([]);
 export const isEditing = writable<boolean>(false);
 export const isEditingAssistantMessage = writable<boolean>();
 export const chatInput = writable<string>('');
@@ -42,3 +42,25 @@ export const serializeChatHistory = (cH: ChatMessage[]) =>
             return `${chatMessage.content}`;
         })
         .join('\n');
+
+function createChatHistory() {
+    const { subscribe, set, update } = writable<ChatMessage[]>();
+
+    return {
+        subscribe,
+        set,
+        update,
+        reset: () => {
+            set([
+                {
+                    role: 'Assistant',
+                    content: DEFAULT_SETTINGS.initialAssistantMessageContent,
+                    id: nanoid(),
+                },
+            ]);
+            get(plugin).chatView.save();
+        },
+    };
+}
+
+export const chatHistory = createChatHistory();
