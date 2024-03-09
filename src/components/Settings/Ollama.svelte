@@ -1,7 +1,7 @@
 <script lang="ts">
     import { Notice } from 'obsidian';
     import { DEFAULT_SETTINGS } from '../../main';
-    import { plugin, papaState, errorState } from '../../store';
+    import { plugin, data, papaState, errorState } from '../../store';
     import TextComponent from '../base/Text.svelte';
     import SettingContainer from './SettingContainer.svelte';
     import ButtonComponent from '../base/Button.svelte';
@@ -21,8 +21,8 @@
         isRunning = await isOllamaRunning();
     });
 
-    $: if (ollamaBaseUrl.trim() === '' && $plugin.data.ollamaGenModel.baseUrl !== '') {
-        ollamaBaseUrl = $plugin.data.ollamaGenModel.baseUrl;
+    $: if (ollamaBaseUrl.trim() === '' && $data.ollamaGenModel.baseUrl !== '') {
+        ollamaBaseUrl = $data.ollamaGenModel.baseUrl;
     }
 
     const resetOllamaBaseUrl = async () => {
@@ -31,8 +31,8 @@
         isRunning = await isOllamaRunning();
     };
     const ollamaGenChange = (selected: string) => {
-        $plugin.data.ollamaGenModel.model = selected;
-        $plugin.data.ollamaGenModel.contextWindow = OllamaGenModels[selected] ? OllamaGenModels[selected].contextWindow : 2048;
+        $data.ollamaGenModel.model = selected;
+        $data.ollamaGenModel.contextWindow = OllamaGenModels[selected] ? OllamaGenModels[selected].contextWindow : 2048;
         $plugin.saveSettings();
         if (!installedOllamaModels.includes(selected)) {
             papaState.set('error');
@@ -42,7 +42,7 @@
         $papaState = 'settings-change';
     };
     const ollamaEmbedChange = (selected: string) => {
-        $plugin.data.ollamaEmbedModel.model = selected;
+        $data.ollamaEmbedModel.model = selected;
         $plugin.saveSettings();
         if (!installedOllamaModels.includes(selected)) {
             papaState.set('error');
@@ -82,9 +82,9 @@
     <!-- Ollama Gen Model -->
     <SettingContainer
         settingName="Chat Model"
-        settingDesc={OllamaGenModels[$plugin.data.ollamaGenModel.model] ? OllamaGenModels[$plugin.data.ollamaGenModel.model].description : ''}
+        settingDesc={OllamaGenModels[$data.ollamaGenModel.model] ? OllamaGenModels[$data.ollamaGenModel.model].description : ''}
     >
-        <select class="dropdown" bind:value={$plugin.data.ollamaGenModel.model} on:change={() => ollamaGenChange($plugin.data.ollamaGenModel.model)}>
+        <select class="dropdown" bind:value={$data.ollamaGenModel.model} on:change={() => ollamaGenChange($data.ollamaGenModel.model)}>
             <optgroup label="Recommended">
                 {#each OllamaGenModelNames as model}
                     <option value={model}>{model}</option>
@@ -100,9 +100,9 @@
     <!-- Ollama Embed Model -->
     <SettingContainer
         settingName="Embed Model"
-        settingDesc={OllamaEmbedModels[$plugin.data.ollamaEmbedModel.model] ? OllamaEmbedModels[$plugin.data.ollamaEmbedModel.model].description : ''}
+        settingDesc={OllamaEmbedModels[$data.ollamaEmbedModel.model] ? OllamaEmbedModels[$data.ollamaEmbedModel.model].description : ''}
     >
-        <select class="dropdown" bind:value={$plugin.data.ollamaEmbedModel.model} on:change={() => ollamaEmbedChange($plugin.data.ollamaEmbedModel.model)}>
+        <select class="dropdown" bind:value={$data.ollamaEmbedModel.model} on:change={() => ollamaEmbedChange($data.ollamaEmbedModel.model)}>
             <optgroup label="Recommended">
                 {#each OllamaEmbedModelNames as model}
                     <option value={model}>{model}</option>

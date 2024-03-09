@@ -3,7 +3,7 @@
     import MessagesBubble from './MessagesBubble.svelte';
     import MessagesCompact from './MessagesCompact.svelte';
     import QuickSettingsDrawer from './QuickSettingsDrawer.svelte';
-    import { plugin } from '../../store';
+    import { data } from '../../store';
 
     let textarea: HTMLTextAreaElement;
 </script>
@@ -12,7 +12,7 @@
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div class="--background-modifier-border flex h-full flex-col gap-1">
     <QuickSettingsDrawer />
-    {#if $plugin.data.isChatComfy}
+    {#if $data.isChatComfy}
         <MessagesBubble bind:textarea />
     {:else}
         <MessagesCompact bind:textarea />

@@ -1,4 +1,4 @@
-import { plugin as p, chatHistory as history, type ChatMessage, isEditing, chatInput, isEditingAssistantMessage } from '../store';
+import { plugin as p, data, chatHistory as history, type ChatMessage, isEditing, chatInput, isEditingAssistantMessage } from '../store';
 import { get } from 'svelte/store';
 import { MarkdownRenderer, Notice, setIcon } from 'obsidian';
 import { canRunSecondBrain, runSecondBrain } from './runSecondBrain';
@@ -116,12 +116,12 @@ export const toClipboard = (messageText: string) => {
 
 export const redoGeneration = async (message: ChatMessage) => {
     if (!canRunSecondBrain()) return;
-    const plugin = get(p);
+    const d = get(data);
     const chatHistory = get(history);
     const targetIndex = chatHistory.indexOf(message) - 1;
     const userQuery = chatHistory[targetIndex];
     history.set(chatHistory.slice(0, targetIndex));
-    await runSecondBrain(plugin.data.isUsingRag, userQuery.content);
+    await runSecondBrain(d.isUsingRag, userQuery.content);
 };
 
 export function editMessage(message: ChatMessage, textarea: HTMLTextAreaElement): string {
@@ -154,22 +154,24 @@ export function editInitialAssistantMessage(initialMessage: string, textarea: HT
 
 export function cancelEditingInitialAssistantMessage(initialAssistantMessageSpan: HTMLSpanElement) {
     const plugin = get(p);
+    const d = get(data);
     isEditingAssistantMessage.set(false);
     chatInput.set('');
     initialAssistantMessageSpan.innerText = '';
-    renderMarkdown(initialAssistantMessageSpan, plugin.data.initialAssistantMessage);
+    renderMarkdown(initialAssistantMessageSpan, d.initialAssistantMessage);
     plugin.chatView.requestSave();
 }
 
 export function resetInitialAssistantMessage(initialAssistantMessageSpan: HTMLSpanElement) {
     const plugin = get(p);
+    const d = get(data);
     isEditingAssistantMessage.set(false);
     chatInput.set('');
     initialAssistantMessageSpan.innerText = '';
     const initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
     renderMarkdown(initialAssistantMessageSpan, initialAssistantMessage);
     history.set([{ role: 'Assistant', content: initialAssistantMessage, id: nanoid() } as ChatMessage]);
-    plugin.data.initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
+    d.initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
     plugin.chatView.requestSave();
     plugin.saveSettings();
 }

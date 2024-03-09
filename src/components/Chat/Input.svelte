@@ -3,7 +3,7 @@
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { runSecondBrain, canRunSecondBrain } from '../../controller/runSecondBrain';
     import { nanoid } from 'nanoid';
-    import { plugin, chatHistory, chatInput, isEditingAssistantMessage, papaState, papaIndexingProgress, isChatInSidebar } from '../../store';
+    import { plugin, data, chatHistory, chatInput, isEditingAssistantMessage, papaState, papaIndexingProgress, isChatInSidebar } from '../../store';
     import ProgressCircle from '../base/ProgressCircle.svelte';
 
     export let textarea: HTMLTextAreaElement;
@@ -17,7 +17,7 @@
 
         if ($isEditingAssistantMessage) {
             $chatHistory[0].content = $chatInput;
-            $plugin.data.initialAssistantMessage = $chatInput;
+            $data.initialAssistantMessage = $chatInput;
             $chatInput = '';
             $isEditingAssistantMessage = false;
             $plugin.chatView.requestSave();
@@ -28,7 +28,7 @@
         if ($chatInput.trim() !== '') {
             let userQuery = $chatInput;
             $chatInput = '';
-            await runSecondBrain($plugin.data.isUsingRag, userQuery);
+            await runSecondBrain($data.isUsingRag, userQuery);
         }
     }
     function injectContext(event: KeyboardEvent): KeyboardEventHandler<HTMLInputElement> {
@@ -36,9 +36,9 @@
         new Notice('Injecting context...');
     }
     function handleRAGToggle() {
-        $plugin.data.isUsingRag = !$plugin.data.isUsingRag;
+        $data.isUsingRag = !$data.isUsingRag;
         $plugin.saveSettings();
-        new Notice($plugin.data.isUsingRag ? 'Now chatting with your Second Brain' : 'Now chatting with the LLM');
+        new Notice($data.isUsingRag ? 'Now chatting with your Second Brain' : 'Now chatting with the LLM');
     }
 
     function handleDelete() {
@@ -46,7 +46,7 @@
         $chatHistory = [];
         $chatHistory.push({
             role: 'Assistant',
-            content: $plugin.data.initialAssistantMessage,
+            content: $data.initialAssistantMessage,
             id: nanoid(),
         });
         $plugin.chatView.requestSave();
@@ -95,7 +95,7 @@
             on:click={handleRAGToggle}
             use:icon={'brain-circuit'}
             class={`h-[--icon-xl] w-[--icon-xl] *:!h-[--icon-xl] *:!w-[--icon-xl] hover:text-[--text-accent-hover] ${
-                $plugin.data.isUsingRag ? 'text-[--color-accent]' : 'text-[--text-normal]'
+                $data.isUsingRag ? 'text-[--color-accent]' : 'text-[--text-normal]'
             }`}
         />
         {#if $chatHistory.length > 1}

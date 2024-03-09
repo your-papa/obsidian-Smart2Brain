@@ -1,6 +1,6 @@
 <script lang="ts">
     import TextComponent from '../base/Text.svelte';
-    import { plugin, papaState } from '../../store';
+    import { plugin, data, papaState } from '../../store';
     import SettingContainer from './SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
     import { isAPIKeyValid } from '../../controller/OpenAI';
@@ -11,8 +11,8 @@
     let isOpenAIAPIKeyValid = false;
 
     onMount(async () => {
-        isOpenAIAPIKeyValid = await isAPIKeyValid($plugin.data.openAIGenModel.openAIApiKey);
-        openAIApiKey = $plugin.data.openAIGenModel.openAIApiKey;
+        isOpenAIAPIKeyValid = await isAPIKeyValid($data.openAIGenModel.openAIApiKey);
+        openAIApiKey = $data.openAIGenModel.openAIApiKey;
         hideApiKey();
     });
 
@@ -20,8 +20,8 @@
         newApiKey = newApiKey.trim();
         openAIApiKey = newApiKey;
         isOpenAIAPIKeyValid = await isAPIKeyValid(newApiKey);
-        $plugin.data.openAIGenModel.openAIApiKey = newApiKey;
-        $plugin.data.openAIEmbedModel.openAIApiKey = newApiKey;
+        $data.openAIGenModel.openAIApiKey = newApiKey;
+        $data.openAIEmbedModel.openAIApiKey = newApiKey;
         $plugin.saveSettings();
         $papaState = 'settings-change';
     };
@@ -32,17 +32,17 @@
     };
 
     const showApiKey = () => {
-        openAIApiKey = $plugin.data.openAIGenModel.openAIApiKey;
+        openAIApiKey = $data.openAIGenModel.openAIApiKey;
     };
 
     const openAIGenChange = (selected: string) => {
-        $plugin.data.openAIGenModel.model = selected;
-        $plugin.data.openAIGenModel.contextWindow = OpenAIGenModels[selected] ? OpenAIGenModels[selected].contextWindow : 2048;
+        $data.openAIGenModel.model = selected;
+        $data.openAIGenModel.contextWindow = OpenAIGenModels[selected] ? OpenAIGenModels[selected].contextWindow : 2048;
         $plugin.saveSettings();
         $papaState = 'settings-change';
     };
     const openAIEmbedChange = (selected: string) => {
-        $plugin.data.openAIEmbedModel.model = selected;
+        $data.openAIEmbedModel.model = selected;
         $plugin.saveSettings();
         $papaState = 'settings-change';
     };
@@ -59,10 +59,10 @@
     <!-- OpenAI Gen Model -->
     <SettingContainer
         settingName="Chat Model"
-        settingDesc={OpenAIGenModels[$plugin.data.openAIGenModel.model] ? OpenAIGenModels[$plugin.data.openAIGenModel.model].description : ''}
+        settingDesc={OpenAIGenModels[$data.openAIGenModel.model] ? OpenAIGenModels[$data.openAIGenModel.model].description : ''}
     >
         <DropdownComponent
-            selected={$plugin.data.openAIGenModel.model}
+            selected={$data.openAIGenModel.model}
             options={OpenAIGenModelNames.map((model) => ({ display: model, value: model }))}
             changeFunc={openAIGenChange}
         />
@@ -70,10 +70,10 @@
     <!-- openAI Embed Model -->
     <SettingContainer
         settingName="Embed Model"
-        settingDesc={OpenAIEmbedModels[$plugin.data.openAIEmbedModel.model] ? OpenAIEmbedModels[$plugin.data.openAIEmbedModel.model].description : ''}
+        settingDesc={OpenAIEmbedModels[$data.openAIEmbedModel.model] ? OpenAIEmbedModels[$data.openAIEmbedModel.model].description : ''}
     >
         <DropdownComponent
-            selected={$plugin.data.openAIEmbedModel.model}
+            selected={$data.openAIEmbedModel.model}
             options={OpenAIEmbedModelNames.map((model) => ({ display: model, value: model }))}
             changeFunc={openAIEmbedChange}
         />

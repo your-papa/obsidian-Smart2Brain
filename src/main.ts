@@ -13,7 +13,7 @@ import {
     LogLvl,
 } from 'papa-ts';
 import { get } from 'svelte/store';
-import { serializeChatHistory, chatHistory, plugin, isOnboarded, isIncognitoMode, papaState, papaIndexingProgress, isChatInSidebar, errorState } from './store';
+import { data, serializeChatHistory, chatHistory, plugin, papaState, papaIndexingProgress, isChatInSidebar, errorState } from './store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import SettingsTab from './views/Settings';
@@ -24,7 +24,7 @@ import { wildTest } from './components/Settings/FuzzyModal';
 import './lang/i18n';
 import Log from './logging';
 
-interface PluginData {
+export interface PluginData {
     isChatComfy: boolean;
     initialAssistantMessage: string;
     isUsingRag: boolean;
@@ -75,7 +75,6 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
 };
 
 export default class SecondBrainPlugin extends Plugin {
-    data: PluginData;
     setupView: SetupView;
     chatView: ChatView;
     secondBrain: Papa;
@@ -85,19 +84,16 @@ export default class SecondBrainPlugin extends Plugin {
     private isChatAcivatedFromRibbon = false; // workaround for a bug where the chat view is activated twice through monkey patching
 
     async loadSettings() {
-        this.data = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-        isIncognitoMode.set(this.data.isIncognitoMode);
-        isOnboarded.set(this.data.isOnboarded);
+        data.set(Object.assign({}, DEFAULT_SETTINGS, await this.loadData()));
     }
 
     async saveSettings() {
-        await this.saveData(this.data);
+        await this.saveData(get(data));
     }
 
     private getVectorStorePath() {
-        return normalizePath(
-            this.manifest.dir + '/' + (this.data.isIncognitoMode ? this.data.ollamaEmbedModel.model : this.data.openAIEmbedModel.model) + '-vector-store.bin'
-        );
+        const d = get(data);
+        return normalizePath(this.manifest.dir + '/' + (d.isIncognitoMode ? d.ollamaEmbedModel.model : d.openAIEmbedModel.model) + '-vector-store.bin');
     }
 
     async saveVectorStoreData() {
@@ -110,21 +106,22 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async initPapa() {
+        const d = get(data);
         if (get(papaState) === 'running') return new Notice('Smart Second Brain is still running.', 4000);
         else if (get(papaState) === 'indexing' || get(papaState) === 'loading') {
             return new Notice('Please wait for the indexing to finish', 4000);
-        } else if (this.data.isIncognitoMode && !(await isOllamaRunning())) {
+        } else if (d.isIncognitoMode && !(await isOllamaRunning())) {
             papaState.set('error');
             errorState.set('ollama-not-running');
             return new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 4000);
-        } else if (this.data.isIncognitoMode) {
+        } else if (d.isIncognitoMode) {
             const models = await getOllamaModels();
-            if (!models.includes(this.data.ollamaGenModel.model)) {
+            if (!models.includes(d.ollamaGenModel.model)) {
                 papaState.set('error');
                 errorState.set('ollama-model-not-installed');
                 return new Notice('Ollama model not installed. Please install the model before initializing Smart Second Brain.', 4000);
             }
-        } else if (!this.data.isIncognitoMode && !(await isAPIKeyValid(this.data.openAIGenModel.openAIApiKey))) {
+        } else if (!d.isIncognitoMode && !(await isAPIKeyValid(d.openAIGenModel.openAIApiKey))) {
             papaState.set('error');
             return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);
         }
@@ -133,17 +130,17 @@ export default class SecondBrainPlugin extends Plugin {
             Log.info(
                 'Initializing second brain',
                 '\nGen Model: ',
-                this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
+                d.isIncognitoMode ? d.ollamaGenModel : d.openAIGenModel,
                 '\nEmbed Model: ',
-                this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel
+                d.isIncognitoMode ? d.ollamaEmbedModel : d.openAIEmbedModel
             );
             try {
                 this.secondBrain = new Papa();
                 await this.secondBrain.init({
-                    genModel: this.data.isIncognitoMode ? this.data.ollamaGenModel : this.data.openAIGenModel,
-                    embedModel: this.data.isIncognitoMode ? this.data.ollamaEmbedModel : this.data.openAIEmbedModel,
-                    langsmithApiKey: this.data.debugginLangchainKey || undefined,
-                    logLvl: this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
+                    genModel: d.isIncognitoMode ? d.ollamaGenModel : d.openAIGenModel,
+                    embedModel: d.isIncognitoMode ? d.ollamaEmbedModel : d.openAIEmbedModel,
+                    langsmithApiKey: d.debugginLangchainKey || undefined,
+                    logLvl: d.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
                 });
             } catch (e) {
                 Log.error(e);
@@ -160,7 +157,7 @@ export default class SecondBrainPlugin extends Plugin {
         const docs = await obsidianDocumentLoader(
             this.app,
             mdFiles.filter((mdFile: TFile) => {
-                for (const exclude of this.data.excludeFF) if (wildTest(exclude, mdFile.path)) return false;
+                for (const exclude of d.excludeFF) if (wildTest(exclude, mdFile.path)) return false;
                 return true;
             })
         );
@@ -194,9 +191,10 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async onload() {
-        await this.loadSettings();
         plugin.set(this);
-        Log.setLogLevel(this.data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
+        await this.loadSettings();
+        const d = get(data);
+        Log.setLogLevel(d.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
 
         this.app.workspace.onLayoutReady(() => {
             const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT) || this.app.workspace.getLeavesOfType(VIEW_TYPE_SETUP);
@@ -204,13 +202,13 @@ export default class SecondBrainPlugin extends Plugin {
                 this.leaf = leaves[0];
                 this.activateView();
             }
-            if (get(isOnboarded)) this.initPapa();
+            if (d.isOnboarded) this.initPapa();
         });
         // reembed documents on change
         this.registerEvent(
             this.app.metadataCache.on('changed', async (file: TFile) => {
                 if (!this.secondBrain) return;
-                for (const exclude of this.data.excludeFF) if (wildTest(exclude, file.path)) return;
+                for (const exclude of d.excludeFF) if (wildTest(exclude, file.path)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 this.secondBrain.embedDocuments(docs, 'byFile');
                 this.needsToSaveVectorStoreData = true;
@@ -220,7 +218,7 @@ export default class SecondBrainPlugin extends Plugin {
         this.registerEvent(
             this.app.vault.on('delete', async (file: TFile) => {
                 if (!this.secondBrain) return;
-                for (const exclude of this.data.excludeFF) if (wildTest(exclude, file.path)) return;
+                for (const exclude of d.excludeFF) if (wildTest(exclude, file.path)) return;
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 this.secondBrain.deleteDocuments({ docs });
                 this.needsToSaveVectorStoreData = true;
@@ -229,7 +227,7 @@ export default class SecondBrainPlugin extends Plugin {
         this.registerEvent(
             this.app.vault.on('rename', async (file: TFile, oldPath: string) => {
                 if (!this.secondBrain) return;
-                for (const exclude of this.data.excludeFF) if (wildTest(exclude, file.path)) return;
+                for (const exclude of d.excludeFF) if (wildTest(exclude, file.path)) return;
                 await this.secondBrain.deleteDocuments({ sources: [oldPath] });
                 const docs = await obsidianDocumentLoader(this.app, [file]);
                 this.secondBrain.embedDocuments(docs, 'byFile');
@@ -288,7 +286,8 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async activateView(file?: TFile) {
-        if (!get(isOnboarded)) {
+        const d = get(data);
+        if (!d.isOnboarded) {
             this.app.workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
             const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_SETUP);
             this.leaf = leaves.length ? leaves[0] : this.app.workspace.getRightLeaf(false);
@@ -297,16 +296,16 @@ export default class SecondBrainPlugin extends Plugin {
             this.app.workspace.detachLeavesOfType(VIEW_TYPE_SETUP);
             if (!file) {
                 // If no file is provided, open the default chat
-                const chatDirExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder));
+                const chatDirExists = await this.app.vault.adapter.exists(normalizePath(d.targetFolder));
                 if (!chatDirExists) {
-                    await this.app.vault.createFolder(normalizePath(this.data.targetFolder));
+                    await this.app.vault.createFolder(normalizePath(d.targetFolder));
                 }
-                const defaultChatExists = await this.app.vault.adapter.exists(normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'));
+                const defaultChatExists = await this.app.vault.adapter.exists(normalizePath(d.targetFolder + '/' + d.defaultChatName + '.md'));
                 file = defaultChatExists
-                    ? this.app.metadataCache.getFirstLinkpathDest(this.data.targetFolder + '/' + this.data.defaultChatName + '.md', '')
+                    ? this.app.metadataCache.getFirstLinkpathDest(d.targetFolder + '/' + d.defaultChatName + '.md', '')
                     : await this.app.vault.create(
-                          normalizePath(this.data.targetFolder + '/' + this.data.defaultChatName + '.md'),
-                          'Assistant\n' + this.data.initialAssistantMessage + '\n- - - - -'
+                          normalizePath(d.targetFolder + '/' + d.defaultChatName + '.md'),
+                          'Assistant\n' + d.initialAssistantMessage + '\n- - - - -'
                       );
             }
             const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
@@ -322,11 +321,12 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async saveChat() {
-        let fileName = await this.secondBrain.createTitleFromChatHistory(this.data.assistantLanguage, serializeChatHistory(get(chatHistory)));
+        const d = get(data);
+        let fileName = await this.secondBrain.createTitleFromChatHistory(d.assistantLanguage, serializeChatHistory(get(chatHistory)));
         // File name cannot contain any of the following characters: \, /, :, *, ?, ", <, >, |, #
         fileName = fileName.replace(/[\\/:*?"<>|#]/g, '');
 
-        let normalizedFilePath = normalizePath(this.data.targetFolder + '/' + fileName + '.md');
+        let normalizedFilePath = normalizePath(d.targetFolder + '/' + fileName + '.md');
         while (await this.app.vault.adapter.exists(normalizedFilePath)) {
             //Checks if already existing file has a number at the end
             const regex = /\((\d+)\)$/;
@@ -336,14 +336,14 @@ export default class SecondBrainPlugin extends Plugin {
             } else {
                 fileName = fileName + ' (1)';
             }
-            normalizedFilePath = normalizePath(this.data.targetFolder + '/' + fileName + '.md');
+            normalizedFilePath = normalizePath(d.targetFolder + '/' + fileName + '.md');
         }
         const newChatFile = await this.app.vault.copy(this.chatView.file, normalizedFilePath);
         // delete default chat history (TODO redundant with delete chat button in input.svelte)
         chatHistory.set([
             {
                 role: 'Assistant',
-                content: this.data.initialAssistantMessage,
+                content: d.initialAssistantMessage,
                 id: nanoid(),
             },
         ]);
@@ -378,7 +378,7 @@ export default class SecondBrainPlugin extends Plugin {
                             // const cache = self.app.metadataCache.getCache(state.state.file);
 
                             // if (cache?.frontmatter && cache.frontmatter['second-brain-chat']) {
-                            if (state.state.file.startsWith(self.data.targetFolder)) {
+                            if (state.state.file.startsWith(get(data).targetFolder)) {
                                 // If we have it, force the view type to be chat
                                 const newState = {
                                     ...state,
