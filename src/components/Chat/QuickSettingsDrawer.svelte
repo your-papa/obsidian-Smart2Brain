@@ -32,7 +32,7 @@
         } else {
             $data.openAIEmbedModel.similarityThreshold = similarityThreshold / 100;
         }
-        if ($plugin.secondBrain) $plugin.secondBrain.setSimilarityThreshold(similarityThreshold / 100);
+        $plugin.s2b.setSimilarityThreshold(similarityThreshold / 100);
         $plugin.saveSettings();
     }
     $: similarityThreshold, setSimilarityThreshold();
@@ -76,7 +76,7 @@
                     <ProgressBar progress={$papaIndexingProgress} />
                     <button
                         aria-label="Resume indexing"
-                        on:click={() => $plugin.initPapa()}
+                        on:click={() => $plugin.s2b.init()}
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'play'}
                     />
@@ -89,7 +89,7 @@
                     <h2 class="text-center text-[--text-normal]">An error occured.<br /> Please retry initialization...</h2>
                     <button
                         aria-label="Retry initializing"
-                        on:click={() => $plugin.initPapa()}
+                        on:click={() => $plugin.s2b.init()}
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'refresh-cw'}
                     />
@@ -98,7 +98,7 @@
                 <h2 class="text-center text-[--text-normal]">Reinitialize Smart Second Brain <br />with {$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h2>
                 <button
                     aria-label="Initialize"
-                    on:click={() => $plugin.initPapa()}
+                    on:click={() => $plugin.s2b.init()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'play'}
                 />
@@ -106,7 +106,7 @@
                 <h2 class="text-center text-[--text-normal]">Settings changed.<br />Reinitialize Smart Second Brain.</h2>
                 <button
                     aria-label="Reinitialize, Settings changed"
-                    on:click={() => $plugin.initPapa()}
+                    on:click={() => $plugin.s2b.init()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'refresh-cw'}
                 />
@@ -147,6 +147,7 @@
                 </div>
             {/if}
         {/if}
+        <div style="height: 1rem" />
         <div class="absolute bottom-0 z-10 flex w-full justify-center">
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <!-- svelte-ignore a11y-no-static-element-interactions -->

@@ -5,7 +5,7 @@
         $data.isOnboarded = true;
         $plugin.saveSettings();
         $plugin.activateView();
-        $plugin.initPapa();
+        $plugin.s2b.init();
     }
 </script>
 

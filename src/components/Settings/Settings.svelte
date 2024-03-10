@@ -44,7 +44,7 @@
     const changeLangsmithKey = (newKey: string) => {
         $data.debugginLangchainKey = newKey;
         $plugin.saveSettings();
-        $plugin.secondBrain.setTracer($data.debugginLangchainKey);
+        $plugin.s2b.setTracer($data.debugginLangchainKey);
     };
 
     const changeVerbosity = () => {
