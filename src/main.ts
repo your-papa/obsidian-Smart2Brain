@@ -48,8 +48,10 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isChatComfy: true,
     isUsingRag: true,
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
-    initialAssistantMessageContent: Prompts[(window.localStorage.getItem('language') as Language) || 'en'].initialAssistantMessage,
-    isIncognitoMode: false,
+    initialAssistantMessageContent: Prompts[(window.localStorage.getItem('language') as Language) || 'en']
+        ? Prompts[(window.localStorage.getItem('language') as Language) || 'en'].initialAssistantMessage
+        : Prompts.en.initialAssistantMessage,
+    isIncognitoMode: true,
     ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
     ollamaEmbedModel: {
         model: 'nomic-embed-text',
