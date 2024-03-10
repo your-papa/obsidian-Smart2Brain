@@ -44,12 +44,9 @@
         if (contentNode && $runState === 'generating' && $runContent) renderMarkdown(contentNode, $runContent);
     });
 
-    // TODO not working yet
-    // $: if ($runState === 'reducing' && $runContent) {
-    //     if ($runContent === '0') {
-    //         new Notice('No notes found. Maybe lower the similarity threshold.');
-    //     }
-    // }
+    $: if ($runState === 'retrieving' && $runContent == '0') {
+        new Notice('No notes retrieved. Maybe lower the similarity threshold.');
+    }
 
     let editElem: HTMLSpanElement;
     let initialAssistantMessageSpan: HTMLSpanElement;
