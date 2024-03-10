@@ -2,6 +2,7 @@ import { get, writable } from 'svelte/store';
 import type SecondBrainPlugin from './main';
 import { DEFAULT_SETTINGS, type PluginData } from './main';
 import { nanoid } from 'nanoid';
+import { type PapaResponseStatus } from 'papa-ts';
 
 export type ChatMessage = {
     role: 'Assistant' | 'User';
@@ -19,17 +20,10 @@ export const isChatInSidebar = writable<boolean>(true);
 export type ErrorState = 'ollama-model-not-installed' | 'ollama-not-running' | 'ollama-origins-not-set';
 export const errorState = writable<ErrorState>();
 
-export type PapaState =
-    | 'idle'
-    | 'loading'
-    | 'indexing'
-    | 'indexing-pause'
-    | 'running'
-    | 'running-stop'
-    | 'error'
-    | 'uninitialized'
-    | 'mode-change'
-    | 'settings-change';
+export const runState = writable<PapaResponseStatus>('startup');
+export const runContent = writable<string>('');
+
+export type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-pause' | 'running' | 'error' | 'uninitialized' | 'mode-change' | 'settings-change';
 export const papaState = writable<PapaState>('uninitialized');
 export const papaIndexingProgress = writable<number>(0);
 
