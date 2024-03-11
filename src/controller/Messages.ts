@@ -1,7 +1,6 @@
-import { plugin as p, chatHistory as history, type ChatMessage, isEditing, chatInput, isEditingAssistantMessage } from '../store';
+import { plugin as p, data, chatHistory as history, type ChatMessage, isEditing, chatInput, isEditingAssistantMessage, runContent } from '../store';
 import { get } from 'svelte/store';
 import { MarkdownRenderer, Notice, setIcon } from 'obsidian';
-import { canRunSecondBrain, runSecondBrain } from './runSecondBrain';
 import { DEFAULT_SETTINGS } from '../main';
 import { nanoid } from 'nanoid';
 
@@ -11,6 +10,7 @@ let temporaryEditingHistory: ChatMessage[] = [];
 //TOOD: change sourcePath to sourceFile
 export const renderMarkdown = (node: HTMLElement, content: string) => {
     const plugin = get(p);
+    node.innerHTML = '';
     MarkdownRenderer.render(plugin.app, content, node, 'Chat view.md', plugin);
     const codeElem = node.querySelector('.copy-code-button');
     if (codeElem) {
@@ -114,14 +114,19 @@ export const toClipboard = (messageText: string) => {
     new Notice(`Copied to clipboard:\n${messageText}`);
 };
 
+export const addMessage = (role: 'Assistant' | 'User', content: string) => {
+    history.set([...get(history), { role, content, id: nanoid() }]);
+    get(p).chatView.save();
+};
+
 export const redoGeneration = async (message: ChatMessage) => {
-    if (!canRunSecondBrain()) return;
-    const plugin = get(p);
+    if (!get(p).s2b.canRunPapa()) return;
     const chatHistory = get(history);
-    const targetIndex = chatHistory.indexOf(message) - 1;
-    const userQuery = chatHistory[targetIndex];
+    const targetIndex = chatHistory.indexOf(message);
     history.set(chatHistory.slice(0, targetIndex));
-    await runSecondBrain(plugin.data.isUsingRag, userQuery.content);
+    get(p).chatView.save();
+    await get(p).s2b.runPapa();
+    addMessage('Assistant', get(runContent));
 };
 
 export function editMessage(message: ChatMessage, textarea: HTMLTextAreaElement): string {
@@ -157,7 +162,7 @@ export function cancelEditingInitialAssistantMessage(initialAssistantMessageSpan
     isEditingAssistantMessage.set(false);
     chatInput.set('');
     initialAssistantMessageSpan.innerText = '';
-    renderMarkdown(initialAssistantMessageSpan, plugin.data.initialAssistantMessage);
+    renderMarkdown(initialAssistantMessageSpan, get(data).initialAssistantMessageContent);
     plugin.chatView.requestSave();
 }
 
@@ -166,10 +171,10 @@ export function resetInitialAssistantMessage(initialAssistantMessageSpan: HTMLSp
     isEditingAssistantMessage.set(false);
     chatInput.set('');
     initialAssistantMessageSpan.innerText = '';
-    const initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
-    renderMarkdown(initialAssistantMessageSpan, initialAssistantMessage);
-    history.set([{ role: 'Assistant', content: initialAssistantMessage, id: nanoid() } as ChatMessage]);
-    plugin.data.initialAssistantMessage = DEFAULT_SETTINGS.initialAssistantMessage;
+    const initialAssistantMessageContent = DEFAULT_SETTINGS.initialAssistantMessageContent;
+    renderMarkdown(initialAssistantMessageSpan, initialAssistantMessageContent);
+    history.set([{ role: 'Assistant', content: initialAssistantMessageContent, id: nanoid() } as ChatMessage]);
+    get(data).initialAssistantMessageContent = DEFAULT_SETTINGS.initialAssistantMessageContent;
     plugin.chatView.requestSave();
     plugin.saveSettings();
 }

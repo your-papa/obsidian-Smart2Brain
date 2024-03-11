@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { isIncognitoMode } from '../../store';
+    import { data } from '../../store';
     import * as os from 'os';
     import SliderComponent from '../base/Slider.svelte';
     import AppComponent from './OllamaApp.svelte';
@@ -14,11 +14,11 @@
     let selected: 'Ollama App' | 'Ollama Daemon' = 'Ollama App';
 </script>
 
-<div class="flex h-full w-full max-w-[500px] flex-col items-center mx-auto overflow-auto pt-8">
+<div class="mx-auto flex h-full w-full max-w-[500px] flex-col items-center overflow-auto pt-8">
     <div class="w-full text-center *:!h-[--icon-xl] *:!w-[--icon-xl]" use:icon={'brain-circuit'} />
     <h1 class="text-[--text-normal]">Setup</h1>
     <IncognitoToggle />
-    {#if $isIncognitoMode}
+    {#if $data.isIncognitoMode}
         <p class="px-10">
             Your assistant is running in privacy mode. That means it is not connected to the internet and is running fully locally by leveraging Ollama.
         </p>
