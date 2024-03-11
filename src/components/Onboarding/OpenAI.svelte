@@ -54,7 +54,7 @@
                     <button
                         aria-label="Test your API Key"
                         on:click={async () => {
-                            isValid = await isAPIKeyValid(openAIApiKey);
+                            isValid = await isAPIKeyValid($data.openAIGenModel.openAIApiKey);
                             if (!isValid) new Notice('Api Key is not valid!', 4000);
                             isKeyTested = true;
                         }}>Test</button
