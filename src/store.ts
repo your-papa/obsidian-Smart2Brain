@@ -10,7 +10,6 @@ export type ChatMessage = {
     id: string;
 };
 export const plugin = writable<SecondBrainPlugin>();
-export const data = writable<PluginData>();
 
 export const isEditing = writable<boolean>(false);
 export const isEditingAssistantMessage = writable<boolean>();
@@ -58,3 +57,23 @@ function createChatHistory() {
 }
 
 export const chatHistory = createChatHistory();
+
+function createData() {
+    const { subscribe, set, update } = writable<PluginData>();
+
+    return {
+        subscribe,
+        set,
+        update,
+        warningOff: (value) => {
+            update((d) => {
+                d[value] = true;
+                console.log('d', d.hideIncognitoWarning);
+                return d;
+            });
+            get(plugin).saveSettings();
+        },
+    };
+}
+
+export const data = createData();

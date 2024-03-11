@@ -1,36 +1,40 @@
-import { App, ButtonComponent, Modal } from 'obsidian';
+import { App, Modal } from 'obsidian';
+import ConfirmComponent from './ConfirmModal.svelte';
+import { get } from 'svelte/store';
+import { data } from '../../store';
+import type { PluginDataKey } from '../../main';
 
 export class ConfirmModal extends Modal {
     result: string;
+    title: string;
+    content: string;
+    hideModalOption: PluginDataKey | '';
+    component: ConfirmComponent;
     onSubmit: (result: string) => void;
 
-    constructor(app: App, onSubmit: (result: string) => void) {
+    constructor(app: App, title: string, content: string, onSubmit: (result: string) => void, hideModalOption: PluginDataKey | '' = '') {
         super(app);
+        this.title = title;
+        this.content = content;
         this.onSubmit = onSubmit;
+        this.hideModalOption = hideModalOption;
+    }
+
+    activate() {
+        if (this.hideModalOption !== '' && get(data)[this.hideModalOption]) {
+            this.onSubmit('Yes');
+            return;
+        }
+        this.open();
     }
 
     onOpen() {
         this.modalEl.parentElement.addClass('mod-confirmation');
-
-        this.setTitle('Clear Plugin Data');
-
-        this.setContent(
-            'Are you sure you want to delete the plugin data? Note that only the plugin data and the vector store data will be removed. All chat files inside your vault will not be affected.'
-        );
-
-        const test = this.modalEl.createDiv({ cls: 'modal-button-container' });
-
-        new ButtonComponent(test)
-            .setButtonText('Yes')
-            .setWarning()
-            .onClick(() => {
-                this.close();
-                this.onSubmit('Yes');
-            });
-
-        new ButtonComponent(test).setButtonText('No').onClick(() => {
-            this.close();
-            this.onSubmit('No');
+        this.component = new ConfirmComponent({
+            target: this.contentEl,
+            props: {
+                modal: this,
+            },
         });
     }
 
