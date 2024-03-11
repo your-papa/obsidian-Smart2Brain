@@ -39,7 +39,7 @@
             errorState.set('ollama-model-not-installed');
             return;
         }
-        $papaState = 'settings-change';
+        $plugin.s2b.setGenModel($data.openAIGenModel);
     };
     const ollamaEmbedChange = (selected: string) => {
         $data.ollamaEmbedModel.model = selected;
