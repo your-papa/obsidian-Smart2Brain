@@ -1,5 +1,5 @@
 import { App, Notice, TFile, normalizePath } from 'obsidian';
-import { Papa, obsidianDocumentLoader } from 'papa-ts';
+import { Papa, obsidianDocumentLoader, type GenModel } from 'papa-ts';
 import { get } from 'svelte/store';
 import { wildTest } from './components/Settings/FuzzyModal';
 import { isOllamaRunning, getOllamaModels } from './controller/Ollama';
@@ -181,6 +181,10 @@ export default class SmartSecondBrain {
 
     setSimilarityThreshold(value: number) {
         if (this.papa) this.papa.setSimilarityThreshold(value);
+    }
+
+    setGenModel(genModel: GenModel) {
+        if (this.papa) this.papa.setGenModel(genModel);
     }
 
     setTracer(langchainKey: string) {

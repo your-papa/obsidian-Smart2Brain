@@ -1,7 +1,6 @@
 <script lang="ts">
     import { setIcon } from 'obsidian';
     import { plugin, data, chatHistory, papaState, papaIndexingProgress, errorState } from '../../store';
-    import { nanoid } from 'nanoid';
     import { Prompts, type Language, Languages } from 'papa-ts';
     import ProgressBar from '../base/ProgressBar.svelte';
     import { t } from 'svelte-i18n';
@@ -36,6 +35,20 @@
         $plugin.saveSettings();
     }
     $: similarityThreshold, setSimilarityThreshold();
+
+    let temperature = Math.round($data.isIncognitoMode ? $data.ollamaGenModel.temperature : $data.openAIGenModel.temperature) * 100;
+    $: temperature = Math.min(Math.max(temperature, 0), 100);
+    function setTemperature(temperature: number) {
+        if ($data.isIncognitoMode) {
+            $data.ollamaGenModel.temperature = temperature / 100;
+            $plugin.s2b.setGenModel($data.ollamaGenModel);
+        } else {
+            $data.openAIGenModel.temperature = temperature / 100;
+            $plugin.s2b.setGenModel($data.openAIGenModel);
+        }
+        $plugin.saveSettings();
+    }
+    $: temperature, setTemperature(temperature);
 
     const languages: { display: Language; value: Language }[] = Object.values(Languages).map((language: Language) => ({ display: language, value: language }));
     const setAssistantLanguage = (selected: Language) => {
@@ -143,6 +156,10 @@
                     <div class="flex w-full items-center justify-between">
                         <p class="m-0 inline-block">Relevancy in %</p>
                         <input type="number" bind:value={similarityThreshold} min="0" max="100" />
+                    </div>
+                    <div class="flex w-full items-center justify-between">
+                        <p class="m-0 inline-block">Creativity in %</p>
+                        <input type="number" bind:value={temperature} min="0" max="100" />
                     </div>
                 </div>
             {/if}
