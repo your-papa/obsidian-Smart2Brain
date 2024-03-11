@@ -1,0 +1,23 @@
+name: Check Console Logs
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check-logs:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Check for console.log statements
+      run: |
+        if grep -rnw 'src/' -e 'console.log'; then
+          echo "console.log statement found!"
+          exit 1
+        else
+          echo "No console.log statements found."
+        fi
+
