@@ -31,7 +31,10 @@ export interface PluginData {
     isQuickSettingsOpen: boolean;
     isVerbose: boolean;
     isOnboarded: boolean;
+    hideIncognitoWarning: boolean;
 }
+
+export type PluginDataKey = keyof PluginData;
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isChatComfy: true,
@@ -63,6 +66,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isQuickSettingsOpen: true,
     isVerbose: false,
     isOnboarded: false,
+    hideIncognitoWarning: false,
 };
 
 export default class SecondBrainPlugin extends Plugin {
@@ -204,18 +208,24 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async clearPluginData() {
-        new ConfirmModal(get(plugin).app, async (result) => {
-            if (result === 'Yes') {
-                await this.saveData({});
-                const files = (await this.app.vault.adapter.list(normalizePath(this.manifest.dir))).files;
-                for (const file of files) {
-                    if (file.endsWith('vector-store.bin')) await this.app.vault.adapter.remove(file);
+        new ConfirmModal(
+            get(plugin).app,
+            'Clear Plugin Data',
+            'Are you sure you want to delete the plugin data? Note that only the plugin data and the vector store data will be removed. All chat files inside your vault will not be affected.',
+            async (result) => {
+                if (result === 'Yes') {
+                    await this.saveData({});
+                    const files = (await this.app.vault.adapter.list(normalizePath(this.manifest.dir))).files;
+                    for (const file of files) {
+                        if (file.endsWith('vector-store.bin')) await this.app.vault.adapter.remove(file);
+                    }
+                    new Notice('Plugin data cleared. Please reload the plugin.', 4000);
+                } else {
+                    new Notice('Plugin data not cleared.', 4000);
                 }
-                new Notice('Plugin data cleared. Please reload the plugin.', 4000);
-            } else {
-                new Notice('Plugin data not cleared.', 4000);
-            }
-        }).open();
+            },
+            ''
+        ).activate();
     }
 
     registerMonkeyPatches() {

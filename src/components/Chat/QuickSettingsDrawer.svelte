@@ -8,6 +8,8 @@
     import Toggle from '../base/Toggle.svelte';
     import PullOllamaModel from '../Onboarding/PullOllamaModel.svelte';
     import LoadingAnimation from '../base/LoadingAnimation.svelte';
+    import { ConfirmModal } from '../Settings/ConfirmModal';
+    import { get } from 'svelte/store';
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -63,6 +65,20 @@
         $data.isChatComfy = !$data.isChatComfy;
         $plugin.saveSettings();
     }
+
+    function initSecondBrain() {
+        $data.isIncognitoMode
+            ? $plugin.s2b.init()
+            : new ConfirmModal(
+                  get(plugin).app,
+                  'Run via Third-Parties',
+                  'Are you sure you want to run via third-parties? Your data will be given to third-party servers.',
+                  (result) => {
+                      if (result === 'Yes') $plugin.s2b.init();
+                  },
+                  'hideIncognitoWarning'
+              ).activate();
+    }
 </script>
 
 <div
@@ -111,7 +127,7 @@
                 <h2 class="text-center text-[--text-normal]">Reinitialize Smart Second Brain <br />with {$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h2>
                 <button
                     aria-label="Initialize"
-                    on:click={() => $plugin.s2b.init()}
+                    on:click={() => initSecondBrain()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'play'}
                 />

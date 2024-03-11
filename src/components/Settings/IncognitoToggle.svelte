@@ -2,6 +2,8 @@
     import { Notice } from 'obsidian';
     import { plugin, data, papaState, type PapaState } from '../../store';
     import { crossfade } from 'svelte/transition';
+    import { ConfirmModal } from './ConfirmModal';
+    import { get } from 'svelte/store';
 
     const [send, recieve] = crossfade({ duration: 500 });
 
