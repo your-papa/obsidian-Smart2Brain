@@ -14,10 +14,15 @@ jobs:
 
     - name: Check for console.log statements
       run: |
-        if grep -rnw 'src/' -e 'console.log'; then
-          echo "console.log statement found!"
+        LOGS_FOUND=0
+        while IFS= read -r line
+        do
+          echo "::error ::console.log found: $line"
+          LOGS_FOUND=1
+        done < <(grep -rnw 'src/' -e 'console.log')
+
+        if [ "$LOGS_FOUND" -ne "0" ]; then
           exit 1
         else
           echo "No console.log statements found."
         fi
-
