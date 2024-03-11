@@ -38,8 +38,8 @@
     const openAIGenChange = (selected: string) => {
         $data.openAIGenModel.model = selected;
         $data.openAIGenModel.contextWindow = OpenAIGenModels[selected] ? OpenAIGenModels[selected].contextWindow : 2048;
+        $plugin.s2b.setGenModel($data.openAIGenModel);
         $plugin.saveSettings();
-        $papaState = 'settings-change';
     };
     const openAIEmbedChange = (selected: string) => {
         $data.openAIEmbedModel.model = selected;
