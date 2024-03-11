@@ -14,8 +14,15 @@ jobs:
 
     - name: Check for console.log statements
       run: |
-        grep -rnw 'src/' -e 'console.log' | while read line; do
-          echo "::warning file=${line%%:*},line=${line#*:},col=1::Found console.log"
-        done
+        LOGS_FOUND=0
+        while IFS= read -r line
+        do
+          echo "::error ::console.log found: $line"
+          LOGS_FOUND=1
+        done < <(grep -rnw 'src/' -e 'console.log')
 
-        # The job will complete successfully, but with warnings if console.log statements are found.
+        if [ "$LOGS_FOUND" -ne "0" ]; then
+          exit 1
+        else
+          echo "No console.log statements found."
+        fi
