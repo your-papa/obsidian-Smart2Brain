@@ -2,15 +2,14 @@
     import { onMount } from 'svelte';
     import TextComponent from '../base/Text.svelte';
     import { renderMarkdown } from '../../controller/Messages';
-    import { plugin, isIncognitoMode } from '../../store';
+    import { plugin, data } from '../../store';
     import { changeOllamaBaseUrl } from '../../controller/Ollama';
     import OllamaSetup from './OllamaSetup.svelte';
 
     export let osType: string;
 
     onMount(() => {
-        $isIncognitoMode = true;
-        $plugin.data.isIncognitoMode = $isIncognitoMode;
+        $data.isIncognitoMode = true;
         $plugin.saveSettings();
     });
 </script>
@@ -29,7 +28,7 @@
     <li>
         <div class="flex flex-wrap items-center justify-between">
             <span class="mr-2">Set the BaseUrl</span>
-            <TextComponent value={$plugin.data.ollamaEmbedModel.baseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
+            <TextComponent value={$data.ollamaEmbedModel.baseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
         </div>
     </li>
     <li>Start the Ollama service with origins</li>

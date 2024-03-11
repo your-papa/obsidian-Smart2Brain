@@ -1,10 +1,22 @@
 <script lang="ts">
     import { Notice, setIcon } from 'obsidian';
     import type { KeyboardEventHandler } from 'svelte/elements';
-    import { runSecondBrain, canRunSecondBrain } from '../../controller/runSecondBrain';
     import { nanoid } from 'nanoid';
-    import { plugin, chatHistory, chatInput, isEditingAssistantMessage, papaState, papaIndexingProgress, isChatInSidebar } from '../../store';
+    import {
+        plugin,
+        data,
+        chatHistory,
+        chatInput,
+        isEditingAssistantMessage,
+        papaState,
+        papaIndexingProgress,
+        isChatInSidebar,
+        runState,
+        runContent,
+        isEditing,
+    } from '../../store';
     import ProgressCircle from '../base/ProgressCircle.svelte';
+    import { addMessage } from '../../controller/Messages';
 
     export let textarea: HTMLTextAreaElement;
 
@@ -12,12 +24,12 @@
         setIcon(node, iconId);
     };
 
-    async function runSecondBrainFromInput() {
-        if (!canRunSecondBrain()) return;
+    async function runPapaFromInput() {
+        if (!$plugin.s2b.canRunPapa()) return;
 
         if ($isEditingAssistantMessage) {
             $chatHistory[0].content = $chatInput;
-            $plugin.data.initialAssistantMessage = $chatInput;
+            $data.initialAssistantMessageContent = $chatInput;
             $chatInput = '';
             $isEditingAssistantMessage = false;
             $plugin.chatView.requestSave();
@@ -26,9 +38,14 @@
         }
 
         if ($chatInput.trim() !== '') {
-            let userQuery = $chatInput;
+            if ($isEditing) {
+                $chatHistory.pop();
+                $isEditing = false;
+            }
+            addMessage('User', $chatInput);
             $chatInput = '';
-            await runSecondBrain($plugin.data.isUsingRag, userQuery);
+            await $plugin.s2b.runPapa();
+            addMessage('Assistant', $runContent);
         }
     }
     function injectContext(event: KeyboardEvent): KeyboardEventHandler<HTMLInputElement> {
@@ -36,26 +53,15 @@
         new Notice('Injecting context...');
     }
     function handleRAGToggle() {
-        $plugin.data.isUsingRag = !$plugin.data.isUsingRag;
+        $data.isUsingRag = !$data.isUsingRag;
         $plugin.saveSettings();
-        new Notice($plugin.data.isUsingRag ? 'Now chatting with your Second Brain' : 'Now chatting with the LLM');
-    }
-
-    function handleDelete() {
-        // delete everything except the first message
-        $chatHistory = [];
-        $chatHistory.push({
-            role: 'Assistant',
-            content: $plugin.data.initialAssistantMessage,
-            id: nanoid(),
-        });
-        $plugin.chatView.requestSave();
+        new Notice($data.isUsingRag ? 'Now chatting with your Second Brain' : 'Now chatting with the LLM');
     }
 
     function handelEnter(event: KeyboardEvent) {
         if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
-            runSecondBrainFromInput();
+            runPapaFromInput();
         }
     }
 
@@ -95,7 +101,7 @@
             on:click={handleRAGToggle}
             use:icon={'brain-circuit'}
             class={`h-[--icon-xl] w-[--icon-xl] *:!h-[--icon-xl] *:!w-[--icon-xl] hover:text-[--text-accent-hover] ${
-                $plugin.data.isUsingRag ? 'text-[--color-accent]' : 'text-[--text-normal]'
+                $data.isUsingRag ? 'text-[--color-accent]' : 'text-[--text-normal]'
             }`}
         />
         {#if $chatHistory.length > 1}
@@ -104,7 +110,7 @@
             <div
                 aria-label="Delete Chat History"
                 class="text-[--text-normal] hover:text-[--text-accent-hover]"
-                on:click|preventDefault={handleDelete}
+                on:click|preventDefault={chatHistory.reset}
                 use:icon={'trash-2'}
                 hidden={$papaState === 'running'}
             />
@@ -124,28 +130,28 @@
     {#if $papaState === 'running'}
         <button
             aria-label="Stop your Smart Second Brain"
-            on:click={() => ($papaState = 'running-stop')}
+            on:click={() => ($runState = 'stopped')}
             class="h-8 rounded-r-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
             use:icon={'stop-circle'}
         />
     {:else if $papaState === 'idle'}
         <button
             aria-label="Run your Smart Second Brain"
-            on:click={runSecondBrainFromInput}
+            on:click={runPapaFromInput}
             class="h-8 rounded-r-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
             use:icon={'send-horizontal'}
         />
     {:else if $papaState === 'error'}
         <button
             aria-label="Retry initializing"
-            on:click={() => $plugin.initPapa()}
+            on:click={() => $plugin.s2b.init()}
             class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
             use:icon={'refresh-cw'}
         />
     {:else if $papaState === 'settings-change'}
         <button
             aria-label="Reinitialize, Settings changed"
-            on:click={() => $plugin.initPapa()}
+            on:click={() => $plugin.s2b.init()}
             class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
             use:icon={'refresh-cw'}
         />

@@ -1,12 +1,11 @@
 <script lang="ts">
-    import { plugin, isOnboarded } from '../../store';
+    import { plugin, data } from '../../store';
 
     function completeOnboarding() {
-        $isOnboarded = true;
-        $plugin.data.isOnboarded = true;
+        $data.isOnboarded = true;
         $plugin.saveSettings();
         $plugin.activateView();
-        $plugin.initPapa();
+        $plugin.s2b.init();
     }
 </script>
 

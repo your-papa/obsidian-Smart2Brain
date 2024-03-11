@@ -3,7 +3,7 @@
     import { onMount } from 'svelte';
     import { getOllamaModels } from '../../controller/Ollama';
     import { icon } from '../../controller/Messages';
-    import { plugin, isIncognitoMode } from '../../store';
+    import { plugin, data } from '../../store';
     import DropdownComponent from '../base/Dropdown.svelte';
     import { isOllamaOriginsSet } from '../../controller/Ollama';
     import PullOllamaModel from './PullOllamaModel.svelte';
@@ -16,12 +16,10 @@
     let isOrigin: boolean = false;
 
     onMount(() => {
-        // TODO redundant with Settings.svelete
-        $isIncognitoMode = true;
-        $plugin.data.isIncognitoMode = $isIncognitoMode;
+        $data.isIncognitoMode = true;
         $plugin.saveSettings();
     });
-    $: if (ollamaModelComponent && ollamaModels.some((model) => model === $plugin.data.ollamaEmbedModel.model)) model = $plugin.data.ollamaEmbedModel.model;
+    $: if (ollamaModelComponent && ollamaModels.some((model) => model === $data.ollamaEmbedModel.model)) model = $data.ollamaEmbedModel.model;
 </script>
 
 <li>
