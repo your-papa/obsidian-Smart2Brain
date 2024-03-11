@@ -2,6 +2,7 @@ import { around } from 'monkey-around';
 import { Notice, Plugin, TFile, WorkspaceLeaf, WorkspaceSidedock, normalizePath, type ViewState } from 'obsidian';
 import { LogLvl, Prompts, type Language, type OllamaEmbedModel, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
 import { get } from 'svelte/store';
+import { _ } from 'svelte-i18n';
 
 import SmartSecondBrain from './SmartSecondBrain';
 import { ConfirmModal } from './components/Settings/ConfirmModal';
@@ -208,10 +209,11 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async clearPluginData() {
+        const t = get(_);
         new ConfirmModal(
             get(plugin).app,
-            'Clear Plugin Data',
-            'Are you sure you want to delete the plugin data? Note that only the plugin data and the vector store data will be removed. All chat files inside your vault will not be affected.',
+            t('settings.clear_modal.title'),
+            t('settings.clear_modal.description'),
             async (result) => {
                 if (result === 'Yes') {
                     await this.saveData({});
@@ -219,9 +221,7 @@ export default class SecondBrainPlugin extends Plugin {
                     for (const file of files) {
                         if (file.endsWith('vector-store.bin')) await this.app.vault.adapter.remove(file);
                     }
-                    new Notice('Plugin data cleared. Please reload the plugin.', 4000);
-                } else {
-                    new Notice('Plugin data not cleared.', 4000);
+                    new Notice(t('notice.plugin_data_cleared'), 4000);
                 }
             },
             ''

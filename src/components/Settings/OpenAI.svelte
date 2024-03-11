@@ -4,8 +4,9 @@
     import SettingContainer from './SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
     import { isAPIKeyValid } from '../../controller/OpenAI';
-    import { OpenAIEmbedModels, OpenAIGenModels, OpenAIGenModelNames, OpenAIEmbedModelNames } from './models';
+    import { OpenAIGenModels, OpenAIGenModelNames, OpenAIEmbedModelNames } from './models';
     import { onMount } from 'svelte';
+    import { t } from 'svelte-i18n';
 
     let openAIApiKey: string;
     let isOpenAIAPIKeyValid = false;
@@ -48,19 +49,16 @@
     };
 </script>
 
-<SettingContainer settingName="OpenAI" isHeading={true} settingDesc="Incognito Mode is disabled. OpenAI is enabled." />
+<SettingContainer name="OpenAI" isHeading={true} desc={$t('settings.openai.description')} />
 <!-- OpenAI API Key -->
-<SettingContainer settingName="API Key">
+<SettingContainer name={$t('settings.openai.api_key')}>
     <!--TODO: Cange to openAI styles-->
     <TextComponent value={openAIApiKey} placeholder="sk-...Lk" changeFunc={changeApiKey} blurFunc={hideApiKey} focusFunc={showApiKey} />
 </SettingContainer>
 <!-- OpenAI Models -->
 {#if isOpenAIAPIKeyValid}
     <!-- OpenAI Gen Model -->
-    <SettingContainer
-        settingName="Chat Model"
-        settingDesc={OpenAIGenModels[$data.openAIGenModel.model] ? OpenAIGenModels[$data.openAIGenModel.model].description : ''}
-    >
+    <SettingContainer name={$t('settings.openai.gen_model')} desc={$t('settings.openai.model_descriptions.' + $data.openAIGenModel.model, { default: '' })}>
         <DropdownComponent
             selected={$data.openAIGenModel.model}
             options={OpenAIGenModelNames.map((model) => ({ display: model, value: model }))}
@@ -68,10 +66,7 @@
         />
     </SettingContainer>
     <!-- openAI Embed Model -->
-    <SettingContainer
-        settingName="Embed Model"
-        settingDesc={OpenAIEmbedModels[$data.openAIEmbedModel.model] ? OpenAIEmbedModels[$data.openAIEmbedModel.model].description : ''}
-    >
+    <SettingContainer name={$t('settings.openai.embed_model')} desc={$t('settings.openai.model_descriptions.' + $data.openAIEmbedModel.model, { default: '' })}>
         <DropdownComponent
             selected={$data.openAIEmbedModel.model}
             options={OpenAIEmbedModelNames.map((model) => ({ display: model, value: model }))}

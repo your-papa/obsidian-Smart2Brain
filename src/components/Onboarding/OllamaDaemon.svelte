@@ -5,6 +5,7 @@
     import { plugin, data } from '../../store';
     import { changeOllamaBaseUrl } from '../../controller/Ollama';
     import OllamaSetup from './OllamaSetup.svelte';
+    import { t } from 'svelte-i18n';
 
     export let osType: string;
 
@@ -15,7 +16,7 @@
 </script>
 
 <ol class="w-full pr-10 *:p-1">
-    <li>Install Ollama</li>
+    <li>{$t('onboarding.ollama.deamon.install')}</li>
     {#if osType === 'Darwin'}
         <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\nbrew install ollama\n```')} />
     {:else if osType === 'Linux'}
@@ -27,11 +28,11 @@
 
     <li>
         <div class="flex flex-wrap items-center justify-between">
-            <span class="mr-2">Set the BaseUrl</span>
+            <span class="mr-2">{$t('onboarding.ollama.deamon.set_baseurl')}</span>
             <TextComponent value={$data.ollamaEmbedModel.baseUrl} placeholder="http://localhost:11434" changeFunc={changeOllamaBaseUrl} />
         </div>
     </li>
-    <li>Start the Ollama service with origins</li>
+    <li>{$t('onboarding.ollama.deamon.start')}</li>
     <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\nOLLAMA_ORIGINS="*" ollama serve\n```')} />
     <OllamaSetup />
 </ol>

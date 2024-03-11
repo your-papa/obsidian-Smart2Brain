@@ -6,6 +6,7 @@ import { isOllamaRunning, getOllamaModels } from './controller/Ollama';
 import { isAPIKeyValid } from './controller/OpenAI';
 import Log, { LogLvl } from './logging';
 import { data, papaState, errorState, papaIndexingProgress, chatHistory, serializeChatHistory, runState, runContent } from './store';
+import { _ } from 'svelte-i18n';
 
 export default class SmartSecondBrain {
     private papa: Papa;
@@ -20,23 +21,29 @@ export default class SmartSecondBrain {
 
     async init() {
         const d = get(data);
-        if (get(papaState) === 'running') return new Notice('Smart Second Brain is still running.', 4000);
+        const t = get(_);
+        if (get(papaState) === 'running') return new Notice(t('notice.still_running'), 4000);
         else if (get(papaState) === 'indexing' || get(papaState) === 'loading') {
-            return new Notice('Please wait for the indexing to finish', 4000);
+            return new Notice(t('notice.still_indexing'), 4000);
         } else if (d.isIncognitoMode && !(await isOllamaRunning())) {
             papaState.set('error');
             errorState.set('ollama-not-running');
-            return new Notice('Please make sure Ollama is running before initializing Smart Second Brain.', 4000);
+            return new Notice(t('notice.ollama_not_running'), 4000);
         } else if (d.isIncognitoMode) {
             const models = await getOllamaModels();
             if (!models.includes(d.ollamaGenModel.model)) {
                 papaState.set('error');
-                errorState.set('ollama-model-not-installed');
-                return new Notice('Ollama model not installed. Please install the model before initializing Smart Second Brain.', 4000);
+                errorState.set('ollama-gen-model-not-installed');
+                return new Notice(t('notice.ollama_gen_model'), 4000);
+            }
+            if (!models.includes(d.ollamaEmbedModel.model)) {
+                papaState.set('error');
+                errorState.set('ollama-embed-model-not-installed');
+                return new Notice(t('notice.ollama_embed_model'), 4000);
             }
         } else if (!d.isIncognitoMode && !(await isAPIKeyValid(d.openAIGenModel.openAIApiKey))) {
             papaState.set('error');
-            return new Notice('Please make sure OpenAI API Key is valid before initializing Smart Second Brain.', 4000);
+            return new Notice(t('notice.openai_key'), 4000);
         }
         if (get(papaState) !== 'indexing-pause') {
             papaState.set('loading');
@@ -58,7 +65,7 @@ export default class SmartSecondBrain {
             } catch (e) {
                 Log.error(e);
                 papaState.set('error');
-                return new Notice('Failed to initialize Smart Second Brain (Error: ' + e + '). Please retry.', 4000);
+                return new Notice(t('notice.failed', { values: { error: e } }), 4000);
             }
             // check if vector store data exists
             if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
@@ -75,7 +82,6 @@ export default class SmartSecondBrain {
             })
         );
         papaState.set('indexing');
-        // const embedNotice = new Notice('Indexing notes into your smart second brain...', 0);
         let needsSave = false;
         try {
             for await (const result of this.papa.embedDocuments(docs)) {
@@ -93,23 +99,24 @@ export default class SmartSecondBrain {
             Log.error(e);
             papaState.set('error');
             // TODO add error state
-            new Notice('Failed to index notes into your smart second brain. Please retry.', 4000);
+            new Notice(t('notice.failed_indexing'), 4000);
         }
         this.needsToSaveVectorStoreData = needsSave;
         this.saveVectorStoreData();
         if (get(papaIndexingProgress) === 100) {
-            new Notice('Smart Second Brain initialized.', 2000);
+            new Notice(t('notice.done'), 2000);
             papaIndexingProgress.set(0);
             papaState.set('idle');
         }
     }
 
     canRunPapa() {
-        if (get(papaState) === 'running') return new Notice('Please wait for the current query to finish', 4000) && false;
+        const t = get(_);
+        if (get(papaState) === 'running') return new Notice(t('notice.still_running'), 4000) && false;
         else if (get(papaState) === 'indexing' || get(papaState) === 'indexing-pause' || get(papaState) === 'loading')
-            return new Notice('Please wait for the indexing to finish', 4000) && false;
-        else if (get(papaState) === 'error') return new Notice('Please wait for the error to resolve', 4000) && false;
-        else if (get(papaState) !== 'idle') return new Notice('Please initialize your Smart Second Brain first', 4000) && false;
+            return new Notice(t('notice.still_indexing'), 4000) && false;
+        else if (get(papaState) === 'error') return new Notice(t('notice.error'), 4000) && false;
+        else if (get(papaState) !== 'idle') return new Notice(t('notice.not_initialized'), 4000) && false;
         return true;
     }
 

@@ -6,6 +6,7 @@
     import { plugin, data } from '../../store';
     import DropdownComponent from '../base/Dropdown.svelte';
     import { isOllamaOriginsSet } from '../../controller/Ollama';
+    import { t } from 'svelte-i18n';
     import PullOllamaModel from './PullOllamaModel.svelte';
 
     let model: string = '';
@@ -24,7 +25,7 @@
 
 <li>
     <div class="flex flex-wrap items-center justify-between">
-        <span class="mr-2">Test if the origins are set correctly:</span>
+        <span class="mr-2">{$t('onboarding.ollama.test_origins')}</span>
         <div class="flex items-center gap-1">
             {#if isOriginsTested}
                 {#if isOrigin}
@@ -40,7 +41,7 @@
                         isOrigin = await isOllamaOriginsSet();
                         isOriginsTested = true;
                         ollamaModels = await getOllamaModels();
-                    }}>Test</button
+                    }}>{$t('onboarding.test')}</button
                 >
             {/if}
         </div>
@@ -48,9 +49,9 @@
 </li>
 {#if isOrigin}
     <li>
-        Install an Ollama Embedding Model. <br />
+        {$t('onboarding.ollama.install_model')}<br />
         <div class="flex flex-wrap items-center justify-between">
-            Recomended:
+            {$t('onboarding.ollama.recommended_models')}
             <input type="text" list="ollama-models" bind:value={pullModel} />
         </div>
         <PullOllamaModel />
@@ -58,7 +59,7 @@
     {#if ollamaModels.length}
         <li>
             <div class="flex flex-wrap items-center justify-between">
-                Set your embed Model:
+                {$t('onboarding.ollama.set_model')}
                 <div class="flex items-center gap-1">
                     <button class="clickable-icon mr-1" use:icon={'refresh-ccw'} on:click={async () => (ollamaModels = await getOllamaModels())} />
                     <DropdownComponent
