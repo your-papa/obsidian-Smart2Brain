@@ -40,7 +40,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     initialAssistantMessageContent:
         Prompts[(window.localStorage.getItem('language') as Language) || 'en']?.initialAssistantMessage || Prompts.en.initialAssistantMessage,
     isIncognitoMode: true,
-    ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434' },
+    ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434', temperature: 0.5 },
     ollamaEmbedModel: {
         model: 'nomic-embed-text',
         baseUrl: 'http://localhost:11434',
@@ -49,6 +49,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     openAIGenModel: {
         model: 'gpt-3.5-turbo',
         openAIApiKey: '',
+        temperature: 0.5,
     },
     openAIEmbedModel: {
         model: 'text-embedding-ada-002',
