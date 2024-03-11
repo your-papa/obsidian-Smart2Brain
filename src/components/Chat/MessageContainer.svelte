@@ -1,5 +1,7 @@
 <script lang="ts">
     import { data, isChatInSidebar } from '../../store';
+    import { t } from 'svelte-i18n';
+
     export let role: 'User' | 'Assistant';
 </script>
 
@@ -13,7 +15,7 @@
         </div>
     {:else}
         <div class="group border-x-0 border-b border-t-0 border-solid border-[--background-modifier-border] p-2 pr-4">
-            <div class="text-[--text-accent] mt-2 font-bold">User</div>
+            <div class="text-[--text-accent] mt-2 font-bold">{$t('chat.user')}</div>
             <slot />
         </div>
     {/if}
@@ -31,7 +33,7 @@
             ? 'bg-[--background-secondary]'
             : 'bg-[--background-primary]'}"
     >
-        <div class="text-[--text-accent] mt-2 font-bold">Smart2Brain</div>
+        <div class="text-[--text-accent] mt-2 font-bold">{$t('chat.assistant')}</div>
         <slot />
     </div>
 {/if}

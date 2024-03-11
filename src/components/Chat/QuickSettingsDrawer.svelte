@@ -71,8 +71,8 @@
             ? $plugin.s2b.init()
             : new ConfirmModal(
                   get(plugin).app,
-                  'Run via Third-Parties',
-                  'Are you sure you want to run via third-parties? Your data will be given to third-party servers.',
+                  $t('init_third_party_modal.title'),
+                  $t('init_third_party_modal.description'),
                   (result) => {
                       if (result === 'Yes') $plugin.s2b.init();
                   },
@@ -89,52 +89,55 @@
             {#if $papaState === 'loading' || $papaState === 'uninitialized'}
                 <LoadingAnimation />
             {:else if $papaState === 'indexing'}
-                <h2 class="m-0 text-[--text-normal]">Indexing vault</h2>
+                <h2 class="m-0">{$t('quick_settings.indexing_vault')}</h2>
                 <div class="flex w-full items-center gap-2">
                     <ProgressBar progress={$papaIndexingProgress} />
                     <button
-                        aria-label="Pause indexing"
+                        aria-label={$t('quick_settings.pause_indexing')}
                         on:click={() => ($papaState = 'indexing-pause')}
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'pause'}
                     />
                 </div>
             {:else if $papaState === 'indexing-pause'}
-                <h2 class="m-0 text-[--text-normal]">Indexing vault</h2>
+                <h2 class="m-0">{$t('quick_settings.indexing_vault')}</h2>
                 <div class="flex w-full items-center gap-2">
                     <ProgressBar progress={$papaIndexingProgress} />
                     <button
-                        aria-label="Resume indexing"
+                        aria-label={$t('quick_settings.resume_indexing')}
                         on:click={() => $plugin.s2b.init()}
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'play'}
                     />
                 </div>
             {:else if $papaState === 'error'}
-                {#if $errorState === 'ollama-model-not-installed'}
-                    <h2 class="text-center text-[--text-normal]">Install {$data.ollamaGenModel.model} first.</h2>
+                {#if $errorState === 'ollama-gen-model-not-installed'}
+                    <h2 class="text-center">{$t('install_model', { values: { model: $data.ollamaGenModel.model } })}</h2>
+                    <PullOllamaModel onSuccessfulPull={() => ($papaState = 'settings-change')} />
+                {:else if $errorState === 'ollama-embed-model-not-installed'}}
+                    <h2 class="text-center">{$t('install_model', { values: { model: $data.ollamaEmbedModel.model } })}</h2>
                     <PullOllamaModel onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else}
-                    <h2 class="text-center text-[--text-normal]">An error occured.<br /> Please retry initialization...</h2>
+                    <h2 class="text-center">{$t('quick_settings.error.other')}</h2>
                     <button
-                        aria-label="Retry initializing"
+                        aria-label={$t('quick_settings.retry_initialization')}
                         on:click={() => $plugin.s2b.init()}
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'refresh-cw'}
                     />
                 {/if}
             {:else if $papaState === 'mode-change'}
-                <h2 class="text-center text-[--text-normal]">Reinitialize Smart Second Brain <br />with {$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h2>
+                <h2 class="text-center text-[--text-normal]">{$t('quick_settings.mode_changed')}{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h2>
                 <button
-                    aria-label="Initialize"
+                    aria-label={$t('quick_settings.reinitialize')}
                     on:click={() => initSecondBrain()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'play'}
                 />
             {:else if $papaState === 'settings-change'}
-                <h2 class="text-center text-[--text-normal]">Settings changed.<br />Reinitialize Smart Second Brain.</h2>
+                <h2 class="text-center text-[--text-normal]">{$t('quick_settings.settings_change')}</h2>
                 <button
-                    aria-label="Reinitialize, Settings changed"
+                    aria-label={$t('quick_settings.reinitialize')}
                     on:click={() => $plugin.s2b.init()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'refresh-cw'}
@@ -142,39 +145,29 @@
             {:else}
                 <div class="loader"></div>
                 {#if $data.isIncognitoMode}
-                    <h2 class="mb-0 text-center text-[--text-normal]">Ollama</h2>
-                    <p class="mt-1 text-center text-[--text-normal]">Chat via {$data.ollamaGenModel.model}</p>
-                    <!-- <p class="text-[--text-normal] text-center mt-0"> -->
-                    <!--     Embed with {$data.ollamaEmbedModel.model}<br /> -->
-                    <!--     Generate with {$data.ollamaGenModel.model} -->
-                    <!-- </p> -->
+                    <h2 class="mb-0 text-center">Ollama</h2>
+                    <p class="mt-1 text-center">{$t('quick_settings.chat_via', { values: { model: $data.ollamaGenModel.model } })}</p>
                 {:else}
-                    <h2 class="mb-0 text-center text-[--text-normal]">OpenAI</h2>
-                    <p class="mt-1 text-center text-[--text-normal]">Chat via {$data.openAIGenModel.model}</p>
-                    <!-- {#if $data.openAIGenModel.openAIApiKey} -->
-                    <!--     <p class="text-[--text-normal] text-center mt-0"> -->
-                    <!--         Embed with {$data.openAIEmbedModel.model}<br /> -->
-                    <!--         Generate with {$data.openAIGenModel.model} -->
-                    <!--     </p> -->
-                    <!-- {/if} -->
+                    <h2 class="mb-0 text-center">OpenAI</h2>
+                    <p class="mt-1 text-center">{$t('quick_settings.chat_via', { values: { model: $data.openAIGenModel.model } })}</p>
                 {/if}
                 <div class="w-full max-w-[220px]">
                     <div class="mb-1 flex w-full items-center justify-between">
-                        <p class="m-0 inline-block">Comfy Chatview</p>
+                        <p class="m-0 inline-block">{$t('quick_settings.chatview')}</p>
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
                         <!-- svelte-ignore a11y-no-static-element-interactions -->
                         <Toggle isEnabled={$data.isChatComfy} changeFunc={setChatViewDensity} />
                     </div>
                     <div class="flex w-full items-center justify-between">
-                        <p class="m-0 inline-block">{$t('assistant_language')}</p>
+                        <p class="m-0 inline-block">{$t('quick_settings.assistant_language')}</p>
                         <DropdownComponent selected={$data.assistantLanguage} options={languages} changeFunc={setAssistantLanguage} />
                     </div>
                     <div class="flex w-full items-center justify-between">
-                        <p class="m-0 inline-block">Relevancy in %</p>
+                        <p class="m-0 inline-block">{$t('quick_settings.similarity_threshold')}</p>
                         <input type="number" bind:value={similarityThreshold} min="0" max="100" />
                     </div>
                     <div class="flex w-full items-center justify-between">
-                        <p class="m-0 inline-block">Creativity in %</p>
+                        <p class="m-0 inline-block">{$t('quick_settings.creativity')}</p>
                         <input type="number" bind:value={temperature} min="0" max="100" />
                     </div>
                 </div>
@@ -185,7 +178,7 @@
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <!-- svelte-ignore a11y-no-static-element-interactions -->
             <div
-                aria-label={`${isOpen ? 'Close' : 'Open'} quick Settings`}
+                aria-label={isOpen ? $t('quick_settings.close') : $t('quick_settings.open')}
                 class={`text-[--text-normal] transition-transform duration-300 hover:text-[--text-accent-hover] ${
                     isOpen ? 'rotate-180 transform' : 'rotate-0 transform'
                 }`}

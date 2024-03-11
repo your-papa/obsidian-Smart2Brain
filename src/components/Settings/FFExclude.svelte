@@ -4,6 +4,7 @@
     import { FileSelectModal } from './FuzzyModal';
     import ButtonComponent from '../base/Button.svelte';
     import type { FuzzySuggestModal, TAbstractFile } from 'obsidian';
+    import { t } from 'svelte-i18n';
 
     let buttonComp: ButtonComponent;
 
@@ -14,4 +15,4 @@
     });
 </script>
 
-<ButtonComponent bind:this={buttonComp} changeFunc={() => fileSelectModal.open()} buttonText="Add" />
+<ButtonComponent bind:this={buttonComp} changeFunc={() => fileSelectModal.open()} buttonText={$t('settings.excludeff_add')} />

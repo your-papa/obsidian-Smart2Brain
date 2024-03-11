@@ -2,6 +2,7 @@
     import { Notice } from 'obsidian';
     import { data } from '../../store';
     import { pullOllamaModel } from '../../controller/Ollama';
+    import { t } from 'svelte-i18n';
     import ProgressBar from '../base/ProgressBar.svelte';
 
     export let onSuccessfulPull: () => void = () => {};
@@ -24,7 +25,7 @@
             isPullingModel = false;
         } catch (e) {
             isPullingError = true;
-            new Notice(e);
+            new Notice($t('notice.error_pulling_model', { values: { error: e.message } }));
         }
     }
     function formatBytes(bytes: number, decimals = 2) {

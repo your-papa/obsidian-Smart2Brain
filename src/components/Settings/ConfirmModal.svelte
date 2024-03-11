@@ -2,6 +2,7 @@
     import ButtonComponent from '../base/Button.svelte';
     import { type ConfirmModal } from './ConfirmModal';
     import { data } from '../../store';
+    import { t } from 'svelte-i18n';
 
     export let modal: ConfirmModal;
 </script>
@@ -12,18 +13,18 @@
     {#if modal.hideModalOption !== ''}
         <form class="mr-auto flex items-center self-center">
             <input type="checkbox" name="dontShowAgain" on:click={() => data.warningOff(modal.hideModalOption)} />
-            <label for="dontShowAgain">Don't show this again</label>
+            <label for="dontShowAgain">{$t('modal.dont_show')}</label>
         </form>
     {/if}
     <ButtonComponent
-        buttonText="No"
+        buttonText={$t('modal.cancel')}
         changeFunc={() => {
             modal.close();
-            modal.onSubmit('No');
+            modal.onSubmit('Cancel');
         }}
     />
     <ButtonComponent
-        buttonText="Yes"
+        buttonText={$t('modal.confirm')}
         styles="mod-warning"
         changeFunc={() => {
             modal.close();

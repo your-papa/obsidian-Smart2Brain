@@ -1,12 +1,13 @@
 <script lang="ts">
     import { Notice } from 'obsidian';
     import { DEFAULT_SETTINGS } from '../../main';
+    import { t } from 'svelte-i18n';
     import { plugin, data, papaState, errorState } from '../../store';
     import TextComponent from '../base/Text.svelte';
     import SettingContainer from './SettingContainer.svelte';
     import ButtonComponent from '../base/Button.svelte';
     import { changeOllamaBaseUrl, getOllamaModels, isOllamaRunning } from '../../controller/Ollama';
-    import { OllamaEmbedModels, OllamaGenModelNames, OllamaGenModels, OllamaEmbedModelNames } from './models';
+    import { OllamaGenModelNames, OllamaGenModels, OllamaEmbedModelNames } from './models';
     import { onMount } from 'svelte';
 
     let styleOllamaBaseUrl: string;
@@ -36,7 +37,7 @@
         $plugin.saveSettings();
         if (!installedOllamaModels.includes(selected)) {
             papaState.set('error');
-            errorState.set('ollama-model-not-installed');
+            errorState.set('ollama-gen-model-not-installed');
             return;
         }
         $plugin.s2b.setGenModel($data.openAIGenModel);
@@ -46,19 +47,19 @@
         $plugin.saveSettings();
         if (!installedOllamaModels.includes(selected)) {
             papaState.set('error');
-            errorState.set('ollama-model-not-installed');
+            errorState.set('ollama-embed-model-not-installed');
             return;
         }
         papaState.set('settings-change');
     };
 </script>
 
-<SettingContainer settingName="Ollama" isHeading={true} settingDesc="Incognito Mode is enabled. Ollama is enabled.">
+<SettingContainer name="Ollama" isHeading={true} desc={$t('settings.ollama.description')}>
     <ButtonComponent
         iconId={'refresh-ccw'}
         changeFunc={async () => {
             isRunning = await isOllamaRunning();
-            if (!isRunning) return new Notice('Ollama is not running', 4000);
+            if (!isRunning) return new Notice($t('notice.ollama_not_running'), 4000);
             installedOllamaModels = await getOllamaModels();
             ollamaModels = [...new Set(installedOllamaModels.concat(OllamaGenModelNames).concat(OllamaEmbedModelNames))];
         }}
@@ -66,7 +67,7 @@
 >
 <!-- Ollama URL -->
 <!--TODO: styles from Ollama.ts-->
-<SettingContainer settingName="Ollama URL">
+<SettingContainer name="Ollama URL">
     <ButtonComponent iconId={'rotate-cw'} changeFunc={resetOllamaBaseUrl} />
     <TextComponent
         bind:value={ollamaBaseUrl}
@@ -80,17 +81,14 @@
 </SettingContainer>
 {#if isRunning}
     <!-- Ollama Gen Model -->
-    <SettingContainer
-        settingName="Chat Model"
-        settingDesc={OllamaGenModels[$data.ollamaGenModel.model] ? OllamaGenModels[$data.ollamaGenModel.model].description : ''}
-    >
+    <SettingContainer name={$t('settings.ollama.gen_model')} desc={$t('settings.ollama.model_descriptions.' + $data.ollamaGenModel.model, { default: '' })}>
         <select class="dropdown" bind:value={$data.ollamaGenModel.model} on:change={() => ollamaGenChange($data.ollamaGenModel.model)}>
-            <optgroup label="Recommended">
+            <optgroup label={$t('settings.ollama.recommended')}>
                 {#each OllamaGenModelNames as model}
                     <option value={model}>{model}</option>
                 {/each}
             </optgroup>
-            <optgroup label="Other">
+            <optgroup label={$t('settings.ollama.other')}>
                 {#each installedOllamaModels.filter((model) => !OllamaGenModelNames.includes(model) && !OllamaEmbedModelNames.includes(model)) as model}
                     <option value={model}>{model}</option>
                 {/each}
@@ -98,17 +96,14 @@
         </select>
     </SettingContainer>
     <!-- Ollama Embed Model -->
-    <SettingContainer
-        settingName="Embed Model"
-        settingDesc={OllamaEmbedModels[$data.ollamaEmbedModel.model] ? OllamaEmbedModels[$data.ollamaEmbedModel.model].description : ''}
-    >
+    <SettingContainer name={$t('settings.ollama.embed_model')} desc={$t('settings.ollama.model_descriptions.' + $data.ollamaEmbedModel.model, { default: '' })}>
         <select class="dropdown" bind:value={$data.ollamaEmbedModel.model} on:change={() => ollamaEmbedChange($data.ollamaEmbedModel.model)}>
-            <optgroup label="Recommended">
+            <optgroup label={$t('settings.ollama.recommended')}>
                 {#each OllamaEmbedModelNames as model}
                     <option value={model}>{model}</option>
                 {/each}
             </optgroup>
-            <optgroup label="Other">
+            <optgroup label={$t('settings.ollama.other')}>
                 {#each installedOllamaModels.filter((model) => !OllamaEmbedModelNames.includes(model)) as model}
                     <option value={model}>{model}</option>
                 {/each}
