@@ -12,17 +12,14 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v2
 
-    - name: Check for console.log statements
-      run: |
-        LOGS_FOUND=0
-        while IFS= read -r line
-        do
-          echo "::error ::console.log found: $line"
-          LOGS_FOUND=1
-        done < <(grep -rnw 'src/' -e 'console.log')
+    - name: Set up Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '14'
 
-        if [ "$LOGS_FOUND" -ne "0" ]; then
-          exit 1
-        else
-          echo "No console.log statements found."
-        fi
+    - name: Run check script
+      run: |
+        npm install @octokit/rest @actions/github child_process
+        node create-check.js
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
