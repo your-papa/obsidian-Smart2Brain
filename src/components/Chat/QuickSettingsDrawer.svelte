@@ -86,7 +86,16 @@
 >
     <div class="flex h-full w-full max-w-[500px] flex-col items-center justify-center">
         {#if isOpen}
-            {#if $papaState === 'loading' || $papaState === 'uninitialized'}
+            {#if $papaState === 'uninitialized' && !$data.isAutostart}
+                <h2 class="text-center">{$t('quick_settings.initialize')}</h2>
+                <button
+                    aria-label={$t('quick_settings.initialize')}
+                    on:click={() => $plugin.s2b.init()}
+                    class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+                    use:icon={'play'}
+                />
+                <!-- TODO User should be able to enable autostart from here or point to the settings page -->
+            {:else if $papaState === 'loading' || $papaState === 'uninitialized'}
                 <LoadingAnimation />
             {:else if $papaState === 'indexing'}
                 <h2 class="m-0">{$t('quick_settings.indexing_vault')}</h2>
@@ -127,15 +136,15 @@
                     />
                 {/if}
             {:else if $papaState === 'mode-change'}
-                <h2 class="text-center text-[--text-normal]">{$t('quick_settings.mode_changed')}{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h2>
+                <h2 class="text-center">{$t('quick_settings.mode_changed')}{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h2>
                 <button
                     aria-label={$t('quick_settings.reinitialize')}
                     on:click={() => initSecondBrain()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
-                    use:icon={'play'}
+                    use:icon={'refresh-cw'}
                 />
             {:else if $papaState === 'settings-change'}
-                <h2 class="text-center text-[--text-normal]">{$t('quick_settings.settings_change')}</h2>
+                <h2 class="text-center">{$t('quick_settings.settings_change')}</h2>
                 <button
                     aria-label={$t('quick_settings.reinitialize')}
                     on:click={() => $plugin.s2b.init()}

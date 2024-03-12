@@ -33,6 +33,7 @@ export interface PluginData {
     isVerbose: boolean;
     isOnboarded: boolean;
     hideIncognitoWarning: boolean;
+    isAutostart: boolean;
 }
 
 export type PluginDataKey = keyof PluginData;
@@ -68,6 +69,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isVerbose: false,
     isOnboarded: false,
     hideIncognitoWarning: false,
+    isAutostart: false,
 };
 
 export default class SecondBrainPlugin extends Plugin {
@@ -98,7 +100,7 @@ export default class SecondBrainPlugin extends Plugin {
                 this.leaf = leaves[0];
                 this.activateView();
             }
-            if (get(data).isOnboarded) this.s2b.init();
+            if (get(data).isOnboarded && get(data).isAutostart) this.s2b.init();
         });
         this.registerEvent(
             this.app.workspace.on('layout-change', () => {

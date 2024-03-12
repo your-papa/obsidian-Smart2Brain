@@ -53,6 +53,11 @@
         Papa.setLogLevel($data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
         $plugin.saveSettings();
     };
+
+    const changeAutostart = () => {
+        $data.isAutostart = !$data.isAutostart;
+        $plugin.saveSettings();
+    };
 </script>
 
 <!-- Exclude Folders -->
@@ -106,6 +111,9 @@
     <!-- <SettingContainer name="Num. of Docs to Retrieve"> -->
     <!--     <TextComponent inputType="number" value={$data.docRetrieveNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} /> -->
     <!-- </SettingContainer> -->
+    <SettingContainer name={$t('settings.autostart')}>
+        <ToggleComponent isEnabled={$data.isAutostart} changeFunc={changeAutostart} />
+    </SettingContainer>
     <!-- Clear Plugin Data -->
     <SettingContainer name={$t('settings.clear')}>
         <!-- TODO Add a warning modal -->
