@@ -1,4 +1,3 @@
-// TODO translate model descriptions
 export const OpenAIGenModels = {
     'gpt-3.5-turbo': {
         contextWindow: 4096,

@@ -104,6 +104,7 @@
             "description": "Are you sure you want to delete the plugin data? Note that only the plugin data and the vector store data will be removed. All chat files inside your vault will not be affected."
         },
         "clear_label": "Clear",
+        "autostart": "Autostart",
         "debugging": "Debugging",
         "langsmith_key": "Langsmith API Key",
         "verbose": "Verbose",
@@ -141,6 +142,7 @@
         }
     },
     "quick_settings": {
+        "initialize": "Initialize your Smart Second Brain",
         "indexing_vault": "Indexing Vault",
         "assistant_language": "Assistant language",
         "pause_indexing": "Pause Indexing",
