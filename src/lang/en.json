@@ -54,6 +54,8 @@
         "test": "Test",
         "privacy_mode_note": "Your assistant is running in privacy mode. That means it is not connected to the internet and is running fully locally by leveraging Ollama.",
         "openai_mode_note": "Your assistant is using third party services to run. That means you will have to share all your personal information with these services and your Smart Second Brain needs to be connected to the internet to leverage OpenAIs large language models like ChatGPT.",
+        "init": "Initialize your Smart Second Brain",
+        "init_label": "Click to initialize",
         "ollama": {
             "deamon": {
                 "install": "Install Ollama",
@@ -152,8 +154,8 @@
         "reinitialize": "Reinitialize Smart Second Brain",
         "chat_via": "Chat via {model}",
         "chatview": "Comfy Chatview",
-        "similarity_threshold": "Relevancy in %",
-        "creativity": "Creativity in %",
+        "similarity_threshold": "Relevancy",
+        "creativity": "Creativity",
         "settings_changed": "Settings changed.\nReinitialize Smart Second Brain.",
         "open": "Open quick settings",
         "close": "Close quick settings",

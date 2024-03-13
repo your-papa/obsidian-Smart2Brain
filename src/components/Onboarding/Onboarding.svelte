@@ -22,7 +22,7 @@
     <IncognitoToggle />
     {#if $data.isIncognitoMode}
         <p class="px-10">
-            {$t('onboarding.privacy_mode_note')}}
+            {$t('onboarding.privacy_mode_note')}
         </p>
         {#if osType === 'Darwin'}
             <SliderComponent {options} bind:selected />
