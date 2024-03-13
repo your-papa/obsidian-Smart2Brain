@@ -10,7 +10,7 @@
 
 {#if inputType === 'text'}
     <input
-        class="!{styles}"
+        class={styles}
         type="text"
         spellcheck="false"
         {placeholder}

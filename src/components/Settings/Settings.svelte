@@ -117,7 +117,6 @@
     </SettingContainer>
     <!-- Clear Plugin Data -->
     <SettingContainer name={$t('settings.clear')}>
-        <!-- TODO Add a warning modal -->
         <ButtonComponent buttonText={$t('settings.clear_label')} styles="mod-warning" changeFunc={() => $plugin.clearPluginData()} />
     </SettingContainer>
     <!-- Debugging -->

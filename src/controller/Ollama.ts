@@ -58,15 +58,8 @@ export const changeOllamaBaseUrl = async (newBaseUrl: string) => {
     const plugin = get(p);
     newBaseUrl.trim();
     if (newBaseUrl.endsWith('/')) newBaseUrl = newBaseUrl.slice(0, -1);
-    try {
-        // check if url is valid
-        new URL(newBaseUrl);
-        d.ollamaGenModel.baseUrl = newBaseUrl;
-        d.ollamaEmbedModel.baseUrl = newBaseUrl;
-        //styleOllamaBaseUrl = 'bg-[--background-modifier-form-field]';
-    } catch (_) {
-        //styleOllamaBaseUrl = 'bg-[--background-modifier-error]';
-    }
+    d.ollamaGenModel.baseUrl = newBaseUrl;
+    d.ollamaEmbedModel.baseUrl = newBaseUrl;
     await plugin.saveSettings();
     papaState.set('settings-change');
 };
