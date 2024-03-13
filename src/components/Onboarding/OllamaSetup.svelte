@@ -9,17 +9,18 @@
     import { t } from 'svelte-i18n';
     import PullOllamaModel from './PullOllamaModel.svelte';
 
-    let model: string = '';
     let ollamaModels: string[] = [];
+    let model: string = '';
     let ollamaModelComponent: DropdownComponent;
     let pullModel = 'nomic-embed-text';
     let isOriginsTested: boolean = false;
     let isOrigin: boolean = false;
 
-    onMount(() => {
+    onMount(async () => {
         $data.isIncognitoMode = true;
         $plugin.saveSettings();
     });
+
     $: if (ollamaModelComponent && ollamaModels.some((model) => model === $data.ollamaEmbedModel.model)) model = $data.ollamaEmbedModel.model;
 </script>
 
@@ -54,9 +55,9 @@
             {$t('onboarding.ollama.recommended_models')}
             <input type="text" list="ollama-models" bind:value={pullModel} />
         </div>
-        <PullOllamaModel {pullModel} />
+        <PullOllamaModel {pullModel} onSuccessfulPull={async () => (ollamaModels = await getOllamaModels())} />
     </li>
-    {#if ollamaModels.length}
+    {#if ollamaModels.length > 0}
         <li>
             <div class="flex flex-wrap items-center justify-between">
                 {$t('onboarding.ollama.set_model')}
@@ -66,7 +67,7 @@
                         bind:this={ollamaModelComponent}
                         selected={model}
                         options={ollamaModels.map((model) => ({ display: model, value: model }))}
-                        changeFunc={(selected) => (model = selected)}
+                        changeFunc={(selected) => ($data.ollamaEmbedModel.model = selected)}
                     />
                 </div>
             </div>

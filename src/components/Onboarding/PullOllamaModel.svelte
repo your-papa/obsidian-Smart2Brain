@@ -26,6 +26,7 @@
                 if (chunk.completed) progress = Math.floor((chunk.completed / total) * 100);
             }
             if (progress === 100) onSuccessfulPull();
+
             isPullingModel = false;
         } catch (e) {
             isPullingError = true;
