@@ -26,6 +26,8 @@ export type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-pause' | 'ru
 export const papaState = writable<PapaState>('uninitialized');
 export const papaIndexingProgress = writable<number>(0);
 
+export const cancelPullModel = writable<boolean>(false);
+
 // Does this work? / refactoring
 export const serializeChatHistory = (cH: ChatMessage[]) =>
     cH
