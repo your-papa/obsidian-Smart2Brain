@@ -121,10 +121,10 @@
             {:else if $papaState === 'error'}
                 {#if $errorState === 'ollama-gen-model-not-installed'}
                     <h2 class="text-center">{$t('install_model', { values: { model: $data.ollamaGenModel.model } })}</h2>
-                    <PullOllamaModel onSuccessfulPull={() => ($papaState = 'settings-change')} />
+                    <PullOllamaModel pullModel={$data.ollamaEmbedModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else if $errorState === 'ollama-embed-model-not-installed'}}
                     <h2 class="text-center">{$t('install_model', { values: { model: $data.ollamaEmbedModel.model } })}</h2>
-                    <PullOllamaModel onSuccessfulPull={() => ($papaState = 'settings-change')} />
+                    <PullOllamaModel pullModel={$data.ollamaEmbedModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else}
                     <h2 class="text-center">{$t('quick_settings.error.other')}</h2>
                     <button
@@ -156,15 +156,15 @@
                     {$t('quick_settings.chat_via', { values: { model: $data.isIncognitoMode ? $data.ollamaGenModel.model : $data.openAIGenModel.model } })}
                 </p>
                 <div class="w-full max-w-[300px]">
-                    <div class="flex justify-between items-center h-8">
+                    <div class="flex h-8 items-center justify-between">
                         {$t('quick_settings.chatview')}
                         <ToggleComponent isEnabled={$data.isChatComfy} changeFunc={setChatViewDensity} />
                     </div>
-                    <div class="flex justify-between items-center h-8">
+                    <div class="flex h-8 items-center justify-between">
                         {$t('quick_settings.assistant_language')}
                         <DropdownComponent selected={$data.assistantLanguage} options={languages} changeFunc={setAssistantLanguage} />
                     </div>
-                    <div class="flex justify-between items-center h-8">
+                    <div class="flex h-8 items-center justify-between">
                         {$t('quick_settings.creativity')}
                         <div class="flex items-center">
                             <output>{temperature}%</output>
@@ -172,7 +172,7 @@
                         </div>
                     </div>
                     {#if $data.isUsingRag}
-                        <div class="flex justify-between items-center h-8">
+                        <div class="flex h-8 items-center justify-between">
                             {$t('quick_settings.similarity_threshold')}
                             <div class="flex items-center">
                                 <output>{similarityThreshold}%</output>

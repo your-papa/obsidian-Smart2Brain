@@ -1,5 +1,5 @@
-import { requestUrl } from 'obsidian';
-import { plugin as p, data, papaState } from '../store';
+import { Notice, requestUrl } from 'obsidian';
+import { plugin as p, data, papaState, cancelPullModel } from '../store';
 import { get } from 'svelte/store';
 import Log from '../logging';
 
@@ -84,8 +84,16 @@ export async function* pullOllamaModel(model: string) {
         const decoder = new TextDecoder();
         let buffer = '';
 
+        cancelPullModel.subscribe((value: boolean) => {
+            if (value) {
+                reader.cancel();
+                new Notice('Model pull cancelled', 1000);
+            }
+        });
+
         while (true) {
             const { done, value } = await reader.read();
+
             if (done) break; // Exit the loop when no more data
 
             const chunkText = decoder.decode(value, { stream: true });
