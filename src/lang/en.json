@@ -97,7 +97,7 @@
         "excludeff": "Exclude files and folders",
         "excludeff_add": "Add",
         "excludeff_delete": "Delete from exclude list",
-        "advanced": "Advanced Settigns",
+        "advanced": "Advanced Settings",
         "clear": "Clear Plugin Data",
         "clear_modal": {
             "title": "Clear Plugin Data",
@@ -107,7 +107,7 @@
         "autostart": "Autostart",
         "debugging": "Debugging",
         "langsmith_key": "Langsmith API Key",
-        "verbose": "Verbose",
+        "verbose": "Developer Console logging",
         "openai": {
             "description": "Incognito Mode is disabled. OpenAI is enabled.",
             "api_key": "API Key",

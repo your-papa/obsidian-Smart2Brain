@@ -1,7 +1,7 @@
 <script lang="ts">
     import TextComponent from '../base/Text.svelte';
     import FFExcludeComponent from './FFExclude.svelte';
-    import { plugin, data } from '../../store';
+    import { plugin, data, papaState } from '../../store';
     import { setIcon } from 'obsidian';
     import SettingContainer from './SettingContainer.svelte';
     import { LogLvl, Papa } from 'papa-ts';
@@ -56,6 +56,7 @@
 
     const changeAutostart = () => {
         $data.isAutostart = !$data.isAutostart;
+        if ($data.isAutostart && $papaState === 'uninitialized') $plugin.s2b.init();
         $plugin.saveSettings();
     };
 </script>
