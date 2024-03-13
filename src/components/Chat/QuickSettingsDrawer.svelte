@@ -5,11 +5,12 @@
     import ProgressBar from '../base/ProgressBar.svelte';
     import { t } from 'svelte-i18n';
     import DropdownComponent from '../base/Dropdown.svelte';
-    import Toggle from '../base/Toggle.svelte';
+    import ToggleComponent from '../base/Toggle.svelte';
     import PullOllamaModel from '../Onboarding/PullOllamaModel.svelte';
     import LoadingAnimation from '../base/LoadingAnimation.svelte';
     import { ConfirmModal } from '../Settings/ConfirmModal';
     import { get } from 'svelte/store';
+    import SettingContainer from '../Settings/SettingContainer.svelte';
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -36,11 +37,10 @@
         $plugin.s2b.setSimilarityThreshold(similarityThreshold / 100);
         $plugin.saveSettings();
     }
-    $: similarityThreshold, setSimilarityThreshold();
 
     let temperature = Math.round($data.isIncognitoMode ? $data.ollamaGenModel.temperature : $data.openAIGenModel.temperature) * 100;
     $: temperature = Math.min(Math.max(temperature, 0), 100);
-    function setTemperature(temperature: number) {
+    function setTemperature() {
         if ($data.isIncognitoMode) {
             $data.ollamaGenModel.temperature = temperature / 100;
             $plugin.s2b.setGenModel($data.ollamaGenModel);
@@ -50,7 +50,6 @@
         }
         $plugin.saveSettings();
     }
-    $: temperature, setTemperature(temperature);
 
     const languages: { display: Language; value: Language }[] = Object.values(Languages).map((language: Language) => ({ display: language, value: language }));
     const setAssistantLanguage = (selected: Language) => {
@@ -144,7 +143,7 @@
                     use:icon={'refresh-cw'}
                 />
             {:else if $papaState === 'settings-change'}
-                <h2 class="text-center">{$t('quick_settings.settings_change')}</h2>
+                <h2 class="text-center">{$t('quick_settings.settings_changed')}</h2>
                 <button
                     aria-label={$t('quick_settings.reinitialize')}
                     on:click={() => $plugin.s2b.init()}
@@ -152,33 +151,35 @@
                     use:icon={'refresh-cw'}
                 />
             {:else}
-                <div class="loader"></div>
-                {#if $data.isIncognitoMode}
-                    <h2 class="mb-0 text-center">Ollama</h2>
-                    <p class="mt-1 text-center">{$t('quick_settings.chat_via', { values: { model: $data.ollamaGenModel.model } })}</p>
-                {:else}
-                    <h2 class="mb-0 text-center">OpenAI</h2>
-                    <p class="mt-1 text-center">{$t('quick_settings.chat_via', { values: { model: $data.openAIGenModel.model } })}</p>
-                {/if}
-                <div class="w-full max-w-[220px]">
-                    <div class="mb-1 flex w-full items-center justify-between">
-                        <p class="m-0 inline-block">{$t('quick_settings.chatview')}</p>
-                        <!-- svelte-ignore a11y-click-events-have-key-events -->
-                        <!-- svelte-ignore a11y-no-static-element-interactions -->
-                        <Toggle isEnabled={$data.isChatComfy} changeFunc={setChatViewDensity} />
+                <h2 class="mb-0">{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}</h2>
+                <p class="mt-1">
+                    {$t('quick_settings.chat_via', { values: { model: $data.isIncognitoMode ? $data.ollamaGenModel.model : $data.openAIGenModel.model } })}
+                </p>
+                <div class="w-full max-w-[300px]">
+                    <div class="flex justify-between items-center h-8">
+                        {$t('quick_settings.chatview')}
+                        <ToggleComponent isEnabled={$data.isChatComfy} changeFunc={setChatViewDensity} />
                     </div>
-                    <div class="flex w-full items-center justify-between">
-                        <p class="m-0 inline-block">{$t('quick_settings.assistant_language')}</p>
+                    <div class="flex justify-between items-center h-8">
+                        {$t('quick_settings.assistant_language')}
                         <DropdownComponent selected={$data.assistantLanguage} options={languages} changeFunc={setAssistantLanguage} />
                     </div>
-                    <div class="flex w-full items-center justify-between">
-                        <p class="m-0 inline-block">{$t('quick_settings.similarity_threshold')}</p>
-                        <input type="number" bind:value={similarityThreshold} min="0" max="100" />
+                    <div class="flex justify-between items-center h-8">
+                        {$t('quick_settings.creativity')}
+                        <div class="flex items-center">
+                            <output>{temperature}%</output>
+                            <input class="slider" type="range" bind:value={temperature} on:blur={setTemperature} min="0" max="100" />
+                        </div>
                     </div>
-                    <div class="flex w-full items-center justify-between">
-                        <p class="m-0 inline-block">{$t('quick_settings.creativity')}</p>
-                        <input type="number" bind:value={temperature} min="0" max="100" />
-                    </div>
+                    {#if $data.isUsingRag}
+                        <div class="flex justify-between items-center h-8">
+                            {$t('quick_settings.similarity_threshold')}
+                            <div class="flex items-center">
+                                <output>{similarityThreshold}%</output>
+                                <input class="slider" type="range" bind:value={similarityThreshold} on:blur={setSimilarityThreshold} min="0" max="100" />
+                            </div>
+                        </div>
+                    {/if}
                 </div>
             {/if}
         {/if}

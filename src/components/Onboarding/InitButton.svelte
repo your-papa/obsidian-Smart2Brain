@@ -1,6 +1,7 @@
 <script lang="ts">
     import { plugin, data } from '../../store';
     import { ConfirmModal } from '../Settings/ConfirmModal';
+    import { t } from 'svelte-i18n';
     import { get } from 'svelte/store';
 
     function completeOnboarding() {
@@ -12,7 +13,7 @@
 </script>
 
 <button
-    aria-label="Initialize your Smart Second Brain"
+    aria-label={$t('onboarding.init_label')}
     class="mod-cta"
     on:click={() => {
         $data.isIncognitoMode
@@ -26,5 +27,5 @@
                   },
                   'hideIncognitoWarning'
               ).activate();
-    }}>Initialize your Smart Second Brain</button
+    }}>{$t('onboarding.init')}</button
 >
