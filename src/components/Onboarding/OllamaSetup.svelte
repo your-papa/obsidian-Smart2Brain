@@ -54,7 +54,7 @@
             {$t('onboarding.ollama.recommended_models')}
             <input type="text" list="ollama-models" bind:value={pullModel} />
         </div>
-        <PullOllamaModel />
+        <PullOllamaModel {pullModel} />
     </li>
     {#if ollamaModels.length}
         <li>
