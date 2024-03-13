@@ -68,7 +68,6 @@ function createData() {
         warningOff: (value) => {
             update((d) => {
                 d[value] = true;
-                console.log('d', d.hideIncognitoWarning);
                 return d;
             });
             get(plugin).saveSettings();

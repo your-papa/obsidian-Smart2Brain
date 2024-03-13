@@ -10,11 +10,13 @@
 
     let openAIApiKey: string;
     let isOpenAIAPIKeyValid = false;
+    let apiKeyStyles: string = '';
 
     onMount(async () => {
         isOpenAIAPIKeyValid = await isAPIKeyValid($data.openAIGenModel.openAIApiKey);
         openAIApiKey = $data.openAIGenModel.openAIApiKey;
         hideApiKey();
+        apiKeyStyles = isOpenAIAPIKeyValid ? '' : '!bg-[--background-modifier-error]';
     });
 
     const changeApiKey = async (newApiKey: string) => {
@@ -25,6 +27,7 @@
         $data.openAIEmbedModel.openAIApiKey = newApiKey;
         $plugin.saveSettings();
         $papaState = 'settings-change';
+        apiKeyStyles = isOpenAIAPIKeyValid ? '' : '!bg-[--background-modifier-error]';
     };
 
     const hideApiKey = () => {
@@ -52,8 +55,7 @@
 <SettingContainer name="OpenAI" isHeading={true} desc={$t('settings.openai.description')} />
 <!-- OpenAI API Key -->
 <SettingContainer name={$t('settings.openai.api_key')}>
-    <!--TODO: Cange to openAI styles-->
-    <TextComponent value={openAIApiKey} placeholder="sk-...Lk" changeFunc={changeApiKey} blurFunc={hideApiKey} focusFunc={showApiKey} />
+    <TextComponent styles={apiKeyStyles} value={openAIApiKey} placeholder="sk-...Lk" changeFunc={changeApiKey} blurFunc={hideApiKey} focusFunc={showApiKey} />
 </SettingContainer>
 <!-- OpenAI Models -->
 {#if isOpenAIAPIKeyValid}
