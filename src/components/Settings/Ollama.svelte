@@ -11,7 +11,7 @@
     import { onMount } from 'svelte';
 
     let styleOllamaBaseUrl: string;
-    let ollamaBaseUrl: string = '';
+    let ollamaBaseUrl: string = $data.ollamaGenModel.baseUrl;
     let installedOllamaModels: string[] = [];
     let ollamaModels: string[] = [];
     let isRunning: boolean = false;
@@ -22,10 +22,6 @@
         isRunning = await isOllamaRunning();
         styleOllamaBaseUrl = isRunning ? '' : '!bg-[--background-modifier-error]';
     });
-
-    $: if (ollamaBaseUrl.trim() === '' && $data.ollamaGenModel.baseUrl !== '') {
-        ollamaBaseUrl = $data.ollamaGenModel.baseUrl;
-    }
 
     const resetOllamaBaseUrl = async () => {
         ollamaBaseUrl = DEFAULT_SETTINGS.ollamaGenModel.baseUrl;
