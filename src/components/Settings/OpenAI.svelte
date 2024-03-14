@@ -57,22 +57,27 @@
 <SettingContainer name={$t('settings.openai.api_key')}>
     <TextComponent styles={apiKeyStyles} value={openAIApiKey} placeholder="sk-...Lk" changeFunc={changeApiKey} blurFunc={hideApiKey} focusFunc={showApiKey} />
 </SettingContainer>
-<!-- OpenAI Models -->
-{#if isOpenAIAPIKeyValid}
-    <!-- OpenAI Gen Model -->
-    <SettingContainer name={$t('settings.openai.gen_model')} desc={$t('settings.openai.model_descriptions.' + $data.openAIGenModel.model, { default: '' })}>
-        <DropdownComponent
-            selected={$data.openAIGenModel.model}
-            options={OpenAIGenModelNames.map((model) => ({ display: model, value: model }))}
-            changeFunc={openAIGenChange}
-        />
-    </SettingContainer>
-    <!-- openAI Embed Model -->
-    <SettingContainer name={$t('settings.openai.embed_model')} desc={$t('settings.openai.model_descriptions.' + $data.openAIEmbedModel.model, { default: '' })}>
-        <DropdownComponent
-            selected={$data.openAIEmbedModel.model}
-            options={OpenAIEmbedModelNames.map((model) => ({ display: model, value: model }))}
-            changeFunc={openAIEmbedChange}
-        />
-    </SettingContainer>
-{/if}
+<!-- OpenAI Gen Model -->
+<SettingContainer
+    name={$t('settings.openai.gen_model')}
+    desc={$t('settings.openai.model_descriptions.' + $data.openAIGenModel.model, { default: '' })}
+    isDisabled={!isOpenAIAPIKeyValid}
+>
+    <DropdownComponent
+        selected={$data.openAIGenModel.model}
+        options={OpenAIGenModelNames.map((model) => ({ display: model, value: model }))}
+        changeFunc={openAIGenChange}
+    />
+</SettingContainer>
+<!-- openAI Embed Model -->
+<SettingContainer
+    name={$t('settings.openai.embed_model')}
+    desc={$t('settings.openai.model_descriptions.' + $data.openAIEmbedModel.model, { default: '' })}
+    isDisabled={!isOpenAIAPIKeyValid}
+>
+    <DropdownComponent
+        selected={$data.openAIEmbedModel.model}
+        options={OpenAIEmbedModelNames.map((model) => ({ display: model, value: model }))}
+        changeFunc={openAIEmbedChange}
+    />
+</SettingContainer>

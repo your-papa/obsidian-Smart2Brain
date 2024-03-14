@@ -24,9 +24,7 @@
         "api_key_invalid": "API Key is invalid!",
         "error_pulling_model": "Failed to pull model from Ollama (Error: {error}). Please retry.",
         "copied_to_clipboard": "Copied to clipboard:\n{text}",
-        "no_notes_retrieved": "No notes retrieved. Maybe lower the similarity threshold.",
-        "using_papa": "Now chatting with your Notes.",
-        "using_llm": "Now chatting with plain LLM."
+        "no_notes_retrieved": "No notes retrieved. Maybe lower the similarity threshold."
     },
     "chat": {
         "edit": "Edit query and regenerate answer",
@@ -111,7 +109,7 @@
         "langsmith_key": "Langsmith API Key",
         "verbose": "Developer Console logging",
         "openai": {
-            "description": "Incognito Mode is disabled. OpenAI is enabled.",
+            "description": " ",
             "api_key": "API Key",
             "gen_model": "Chat Model",
             "embed_model": "Embedding Model",
@@ -125,7 +123,7 @@
             }
         },
         "ollama": {
-            "description": "Incognito Mode is enabled. Ollama is enabled.",
+            "description": "Refresh if your started Ollama.",
             "gen_model": "Chat Model",
             "embed_model": "Embedding Model",
             "recommended": "Recommended",

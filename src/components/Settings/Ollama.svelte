@@ -56,7 +56,7 @@
     };
 </script>
 
-<SettingContainer name="Ollama" isHeading={true} desc={$t('settings.ollama.description')}>
+<SettingContainer name="Ollama" isHeading={true} desc={!isRunning ? $t('settings.ollama.description') : ''}>
     <ButtonComponent
         iconId={'refresh-ccw'}
         changeFunc={async () => {
@@ -81,35 +81,41 @@
         }}
     />
 </SettingContainer>
-{#if isRunning}
-    <!-- Ollama Gen Model -->
-    <SettingContainer name={$t('settings.ollama.gen_model')} desc={$t('settings.ollama.model_descriptions.' + $data.ollamaGenModel.model, { default: '' })}>
-        <select class="dropdown" bind:value={$data.ollamaGenModel.model} on:change={() => ollamaGenChange($data.ollamaGenModel.model)}>
-            <optgroup label={$t('settings.ollama.recommended')}>
-                {#each OllamaGenModelNames as model}
-                    <option value={model}>{model}</option>
-                {/each}
-            </optgroup>
-            <optgroup label={$t('settings.ollama.other')}>
-                {#each installedOllamaModels.filter((model) => !OllamaGenModelNames.includes(model) && !OllamaEmbedModelNames.includes(model)) as model}
-                    <option value={model}>{model}</option>
-                {/each}
-            </optgroup>
-        </select>
-    </SettingContainer>
-    <!-- Ollama Embed Model -->
-    <SettingContainer name={$t('settings.ollama.embed_model')} desc={$t('settings.ollama.model_descriptions.' + $data.ollamaEmbedModel.model, { default: '' })}>
-        <select class="dropdown" bind:value={$data.ollamaEmbedModel.model} on:change={() => ollamaEmbedChange($data.ollamaEmbedModel.model)}>
-            <optgroup label={$t('settings.ollama.recommended')}>
-                {#each OllamaEmbedModelNames as model}
-                    <option value={model}>{model}</option>
-                {/each}
-            </optgroup>
-            <optgroup label={$t('settings.ollama.other')}>
-                {#each installedOllamaModels.filter((model) => !OllamaEmbedModelNames.includes(model)) as model}
-                    <option value={model}>{model}</option>
-                {/each}
-            </optgroup>
-        </select>
-    </SettingContainer>
-{/if}
+<!-- Ollama Gen Model -->
+<SettingContainer
+    name={$t('settings.ollama.gen_model')}
+    desc={$t('settings.ollama.model_descriptions.' + $data.ollamaGenModel.model, { default: '' })}
+    isDisabled={!isRunning}
+>
+    <select class="dropdown" bind:value={$data.ollamaGenModel.model} on:change={() => ollamaGenChange($data.ollamaGenModel.model)}>
+        <optgroup label={$t('settings.ollama.recommended')}>
+            {#each OllamaGenModelNames as model}
+                <option value={model}>{model}</option>
+            {/each}
+        </optgroup>
+        <optgroup label={$t('settings.ollama.other')}>
+            {#each installedOllamaModels.filter((model) => !OllamaGenModelNames.includes(model) && !OllamaEmbedModelNames.includes(model)) as model}
+                <option value={model}>{model}</option>
+            {/each}
+        </optgroup>
+    </select>
+</SettingContainer>
+<!-- Ollama Embed Model -->
+<SettingContainer
+    name={$t('settings.ollama.embed_model')}
+    desc={$t('settings.ollama.model_descriptions.' + $data.ollamaEmbedModel.model, { default: '' })}
+    isDisabled={!isRunning}
+>
+    <select class="dropdown" bind:value={$data.ollamaEmbedModel.model} on:change={() => ollamaEmbedChange($data.ollamaEmbedModel.model)}>
+        <optgroup label={$t('settings.ollama.recommended')}>
+            {#each OllamaEmbedModelNames as model}
+                <option value={model}>{model}</option>
+            {/each}
+        </optgroup>
+        <optgroup label={$t('settings.ollama.other')}>
+            {#each installedOllamaModels.filter((model) => !OllamaEmbedModelNames.includes(model)) as model}
+                <option value={model}>{model}</option>
+            {/each}
+        </optgroup>
+    </select>
+</SettingContainer>
