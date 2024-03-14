@@ -3,6 +3,7 @@ import { get } from 'svelte/store';
 import { MarkdownRenderer, Notice, setIcon } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../main';
 import { nanoid } from 'nanoid';
+import { t } from 'svelte-i18n';
 
 const noBreakSpace = /\u00A0/g;
 let temporaryEditingHistory: ChatMessage[] = [];
@@ -111,7 +112,7 @@ export const onMouseOver = (e: MouseEvent): void => {
 
 export const toClipboard = (messageText: string) => {
     navigator.clipboard.writeText(messageText);
-    new Notice(`Copied to clipboard:\n${messageText}`);
+    new Notice(get(t)('notice.copied_to_clipboard', { values: { text: messageText } }), 4000);
 };
 
 export const addMessage = (role: 'Assistant' | 'User', content: string) => {

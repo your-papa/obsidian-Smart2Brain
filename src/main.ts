@@ -2,6 +2,7 @@ import { around } from 'monkey-around';
 import { Notice, Plugin, TFile, WorkspaceLeaf, WorkspaceSidedock, normalizePath, type ViewState } from 'obsidian';
 import { LogLvl, Prompts, type Language, type OllamaEmbedModel, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
 import { get } from 'svelte/store';
+import { _ } from 'svelte-i18n';
 
 import SmartSecondBrain from './SmartSecondBrain';
 import { ConfirmModal } from './components/Settings/ConfirmModal';
@@ -31,7 +32,11 @@ export interface PluginData {
     isQuickSettingsOpen: boolean;
     isVerbose: boolean;
     isOnboarded: boolean;
+    hideIncognitoWarning: boolean;
+    isAutostart: boolean;
 }
+
+export type PluginDataKey = keyof PluginData;
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isChatComfy: true,
@@ -63,6 +68,8 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isQuickSettingsOpen: true,
     isVerbose: false,
     isOnboarded: false,
+    hideIncognitoWarning: false,
+    isAutostart: false,
 };
 
 export default class SecondBrainPlugin extends Plugin {
@@ -93,7 +100,7 @@ export default class SecondBrainPlugin extends Plugin {
                 this.leaf = leaves[0];
                 this.activateView();
             }
-            if (get(data).isOnboarded) this.s2b.init();
+            if (get(data).isOnboarded && get(data).isAutostart) this.s2b.init();
         });
         this.registerEvent(
             this.app.workspace.on('layout-change', () => {
@@ -204,18 +211,23 @@ export default class SecondBrainPlugin extends Plugin {
     }
 
     async clearPluginData() {
-        new ConfirmModal(get(plugin).app, async (result) => {
-            if (result === 'Yes') {
-                await this.saveData({});
-                const files = (await this.app.vault.adapter.list(normalizePath(this.manifest.dir))).files;
-                for (const file of files) {
-                    if (file.endsWith('vector-store.bin')) await this.app.vault.adapter.remove(file);
+        const t = get(_);
+        new ConfirmModal(
+            get(plugin).app,
+            t('settings.clear_modal.title'),
+            t('settings.clear_modal.description'),
+            async (result) => {
+                if (result === 'Yes') {
+                    await this.saveData({});
+                    const files = (await this.app.vault.adapter.list(normalizePath(this.manifest.dir))).files;
+                    for (const file of files) {
+                        if (file.endsWith('vector-store.bin')) await this.app.vault.adapter.remove(file);
+                    }
+                    new Notice(t('notice.plugin_data_cleared'), 4000);
                 }
-                new Notice('Plugin data cleared. Please reload the plugin.', 4000);
-            } else {
-                new Notice('Plugin data not cleared.', 4000);
-            }
-        }).open();
+            },
+            ''
+        ).activate();
     }
 
     registerMonkeyPatches() {

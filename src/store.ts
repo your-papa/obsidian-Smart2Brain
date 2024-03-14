@@ -10,14 +10,13 @@ export type ChatMessage = {
     id: string;
 };
 export const plugin = writable<SecondBrainPlugin>();
-export const data = writable<PluginData>();
 
 export const isEditing = writable<boolean>(false);
 export const isEditingAssistantMessage = writable<boolean>();
 export const chatInput = writable<string>('');
 export const isChatInSidebar = writable<boolean>(true);
 
-export type ErrorState = 'ollama-model-not-installed' | 'ollama-not-running' | 'ollama-origins-not-set';
+export type ErrorState = 'ollama-gen-model-not-installed' | 'ollama-embed-model-not-installed' | 'ollama-not-running' | 'ollama-origins-not-set';
 export const errorState = writable<ErrorState>();
 
 export const runState = writable<PapaResponseStatus>('startup');
@@ -26,6 +25,8 @@ export const runContent = writable<string>('');
 export type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-pause' | 'running' | 'error' | 'uninitialized' | 'mode-change' | 'settings-change';
 export const papaState = writable<PapaState>('uninitialized');
 export const papaIndexingProgress = writable<number>(0);
+
+export const cancelPullModel = writable<boolean>(false);
 
 // Does this work? / refactoring
 export const serializeChatHistory = (cH: ChatMessage[]) =>
@@ -58,3 +59,22 @@ function createChatHistory() {
 }
 
 export const chatHistory = createChatHistory();
+
+function createData() {
+    const { subscribe, set, update } = writable<PluginData>();
+
+    return {
+        subscribe,
+        set,
+        update,
+        warningOff: (value) => {
+            update((d) => {
+                d[value] = true;
+                return d;
+            });
+            get(plugin).saveSettings();
+        },
+    };
+}
+
+export const data = createData();

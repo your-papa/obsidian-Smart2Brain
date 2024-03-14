@@ -1,10 +1,13 @@
 <script lang="ts">
     import { Notice } from 'obsidian';
-    import { data } from '../../store';
+    import { icon } from '../../controller/Messages';
     import { pullOllamaModel } from '../../controller/Ollama';
+    import { t } from 'svelte-i18n';
     import ProgressBar from '../base/ProgressBar.svelte';
+    import { cancelPullModel } from '../../store';
 
     export let onSuccessfulPull: () => void = () => {};
+    export let pullModel: string;
 
     let isPullingModel = false;
     let total: number = 0;
@@ -15,17 +18,21 @@
     async function pullOllamaModelStream() {
         isPullingModel = true;
         try {
-            for await (const chunk of pullOllamaModel($data.ollamaGenModel.model)) {
+            progress = 0;
+            total = 0;
+            for await (const chunk of pullOllamaModel(pullModel)) {
                 status = chunk.status;
                 if (chunk.total) total = chunk.total;
                 if (chunk.completed) progress = Math.floor((chunk.completed / total) * 100);
             }
             if (progress === 100) onSuccessfulPull();
+
             isPullingModel = false;
         } catch (e) {
             isPullingError = true;
-            new Notice(e);
+            new Notice($t('notice.error_pulling_model', { values: { error: e.message } }));
         }
+        $cancelPullModel = false;
     }
     function formatBytes(bytes: number, decimals = 2) {
         if (bytes === 0) return '0 Bytes';
@@ -58,6 +65,14 @@
             {/each}
         </div>
         {progress}% / {formatBytes(total)}
+        <button
+            use:icon={'x'}
+            aria-label={$t('pullModel.cancel')}
+            on:click={() => {
+                $cancelPullModel = true;
+            }}
+            class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+        />
     </div>
     <ProgressBar {progress} />
 {/if}

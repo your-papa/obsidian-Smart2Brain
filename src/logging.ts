@@ -1,5 +1,3 @@
-// TODO eslint rule to remove all console.logs before production
-
 export enum LogLvl {
     DEBUG = 1,
     INFO = 2,

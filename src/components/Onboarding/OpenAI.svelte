@@ -5,6 +5,7 @@
     import { isAPIKeyValid } from '../../controller/OpenAI';
     import { plugin, data } from '../../store';
     import InitButtonComponent from './InitButton.svelte';
+    import { t } from 'svelte-i18n';
 
     let openAIApiKey: string = $data.openAIGenModel.openAIApiKey;
     let isValid: boolean = false;
@@ -20,44 +21,40 @@
 
 <ol class="w-full pr-10 *:p-1">
     <li>
-        Create an OpenAI
-        <a href="https://platform.openai.com/signup">account</a>
+        {$t('onboarding.openai.create_account')}
+        <a href="https://platform.openai.com/signup">{$t('onboarding.openai.create_account_link')}</a>
     </li>
     <li>
-        Create an
-        <a href="https://platform.openai.com/account/api-keys">API Key</a>
+        {$t('onboarding.openai.create_api_key')}
+        <a href="https://platform.openai.com/account/api-keys">{$t('onboarding.openai.create_api_key_link')}</a>
     </li>
-    <div
-        class=""
-        use:renderMarkdown={(this,
-        '> [!Warning] Activate API-Key \n> For the API-Key to work you might have to upgrade to an OpenAI paid account. This means depositing at least $5 onto your OpenAI account. This might change in the future.')}
-    />
+    <div class="" use:renderMarkdown={(this, $t('onboarding.openai.api_key_warning'))} />
     <li>
         <div class="flex flex-wrap items-center justify-between">
-            <span class="mr-2">Paste the Key here:</span>
+            <span class="mr-2">{$t('onboarding.openai.paste_api_key')} </span>
             <TextComponent value={openAIApiKey} placeholder="sk-...Lk" changeFunc={changeApiKey} />
         </div>
     </li>
     <li>
         <div class="flex flex-wrap items-center justify-between">
-            <span class="mr-2">Test your API Key:</span>
+            <span class="mr-2">{$t('onboarding.openai.test_api_key')}</span>
             <div class="flex items-center gap-1">
                 {#if isKeyTested}
                     {#if isValid}
                         <div class="h-[28px] *:!h-[28px] *:!w-[28px] *:text-[--background-modifier-success]" use:icon={'check'} />
-                        <p class="m-0 text-sm">Api Key is valid!</p>
+                        <p class="m-0 text-sm">{$t('onboarding.openai.api_key_valid')}</p>
                     {:else}
                         <div class="h-[28px] *:!h-[28px] *:!w-[28px] *:text-[--background-modifier-error]" use:icon={'cross'} />
                     {/if}
                 {/if}
                 {#if !isValid}
                     <button
-                        aria-label="Test your API Key"
+                        aria-label={$t('onboarding.openai.test_api_key')}
                         on:click={async () => {
-                            isValid = await isAPIKeyValid(openAIApiKey);
-                            if (!isValid) new Notice('Api Key is not valid!', 4000);
+                            isValid = await isAPIKeyValid($data.openAIGenModel.openAIApiKey);
+                            if (!isValid) new Notice($t('notice.api_key_invalid'), 4000);
                             isKeyTested = true;
-                        }}>Test</button
+                        }}>{$t('onboarding.test')}</button
                     >
                 {/if}
             </div>

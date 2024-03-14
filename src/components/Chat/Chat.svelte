@@ -5,6 +5,7 @@
     import { afterUpdate } from 'svelte';
     import DotAnimation from '../base/DotAnimation.svelte';
     import MessageContainer from './MessageContainer.svelte';
+    import { t } from 'svelte-i18n';
     import {
         papaState,
         chatHistory,
@@ -45,7 +46,7 @@
     });
 
     $: if ($runState === 'retrieving' && $runContent == '0') {
-        new Notice('No notes retrieved. Maybe lower the similarity threshold.');
+        new Notice($t('notice.no_notes_retrieved'));
     }
 
     let editElem: HTMLSpanElement;
@@ -90,11 +91,11 @@
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <div class="flex {$data.isChatComfy ? 'justify-end' : ''} gap-1 opacity-0 group-hover:opacity-100">
                         {#if $isEditing && editMessageId === message.id}
-                            <span aria-label="Copy Text" class={iconStyle} on:click|preventDefault={cancelEditing} use:icon={'x-circle'} />
+                            <span aria-label={$t('chat.copy')} class={iconStyle} on:click|preventDefault={cancelEditing} use:icon={'x-circle'} />
                         {:else}
                             <!-- svelte-ignore a11y-no-static-element-interactions -->
                             <span
-                                aria-label="Edit query and regenerate the answer"
+                                aria-label={$t('chat.edit')}
                                 class={iconStyle}
                                 on:click|preventDefault={() => wrapperEditMessage(message, textarea)}
                                 use:icon={'pencil-line'}
@@ -105,23 +106,17 @@
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <!-- svelte-ignore a11y-mouse-events-have-key-events -->
-                    <span
-                        on:mouseover={onMouseOver}
-                        use:renderMarkdown={message.content}
-                        style="background: transparent;"
-                        on:click={onClick}
-                        bind:this={initialAssistantMessageSpan}
-                    />
+                    <span on:mouseover={onMouseOver} use:renderMarkdown={message.content} on:click={onClick} bind:this={initialAssistantMessageSpan} />
                     <div class="flex gap-1 opacity-0 group-hover:opacity-100">
                         {#if !$isEditingAssistantMessage}
                             <!-- svelte-ignore a11y-no-static-element-interactions -->
                             <!-- svelte-ignore a11y-click-events-have-key-events -->
-                            <span aria-label="Copy Text" class={iconStyle} on:click={() => toClipboard(message.content)} use:icon={'copy'} />
+                            <span aria-label={$t('chat.copy')} class={iconStyle} on:click={() => toClipboard(message.content)} use:icon={'copy'} />
                             {#if $chatHistory.indexOf(message) !== 0}
                                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                                 <span
-                                    aria-label="Deletes all following Messages and regenerates the answer to the current query"
+                                    aria-label={$t('chat.regenerate')}
                                     class={iconStyle}
                                     on:click|preventDefault={() => redoGeneration(message)}
                                     use:icon={'refresh-cw'}
@@ -131,7 +126,7 @@
                                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                                 <span
-                                    aria-label="Change the initial assistant message"
+                                    aria-label={$t('chat.change_assistant_prompt')}
                                     class={iconStyle}
                                     on:click|preventDefault={() => editInitialAssistantMessage(message.content, textarea)}
                                     use:icon={'pencil-line'}
@@ -141,7 +136,7 @@
                             <!-- svelte-ignore a11y-click-events-have-key-events -->
                             <!-- svelte-ignore a11y-no-static-element-interactions -->
                             <span
-                                aria-label="Cancel editing"
+                                aria-label={$t('chat.cancel_edit')}
                                 class={iconStyle}
                                 on:click|preventDefault={() => cancelEditingInitialAssistantMessage(initialAssistantMessageSpan)}
                                 use:icon={'x-circle'}
@@ -149,7 +144,7 @@
                             <!-- svelte-ignore a11y-click-events-have-key-events -->
                             <!-- svelte-ignore a11y-no-static-element-interactions -->
                             <span
-                                aria-label="Reset to default"
+                                aria-label={$t('chat.reset_assistant_prompt')}
                                 class={iconStyle}
                                 on:click={() => resetInitialAssistantMessage(initialAssistantMessageSpan)}
                                 use:icon={'rotate-ccw'}
@@ -164,9 +159,9 @@
                 {#if $runState === 'startup'}
                     <DotAnimation />
                 {:else if $runState === 'retrieving'}
-                    <p>Retrieving<DotAnimation /></p>
+                    <p>{$t('chat.retrieving')}<DotAnimation /></p>
                 {:else if $runState === 'reducing'}
-                    <p>Reducing {$runContent} Notes<DotAnimation /></p>
+                    <p>{$t('chat.reducing', { values: { num: $runContent } })}<DotAnimation /></p>
                 {:else if $runState === 'generating' && $runContent}
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->

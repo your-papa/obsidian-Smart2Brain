@@ -5,9 +5,12 @@
     import ProgressBar from '../base/ProgressBar.svelte';
     import { t } from 'svelte-i18n';
     import DropdownComponent from '../base/Dropdown.svelte';
-    import Toggle from '../base/Toggle.svelte';
+    import ToggleComponent from '../base/Toggle.svelte';
     import PullOllamaModel from '../Onboarding/PullOllamaModel.svelte';
     import LoadingAnimation from '../base/LoadingAnimation.svelte';
+    import { ConfirmModal } from '../Settings/ConfirmModal';
+    import { get } from 'svelte/store';
+    import SettingContainer from '../Settings/SettingContainer.svelte';
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -34,11 +37,10 @@
         $plugin.s2b.setSimilarityThreshold(similarityThreshold / 100);
         $plugin.saveSettings();
     }
-    $: similarityThreshold, setSimilarityThreshold();
 
     let temperature = Math.round($data.isIncognitoMode ? $data.ollamaGenModel.temperature : $data.openAIGenModel.temperature) * 100;
     $: temperature = Math.min(Math.max(temperature, 0), 100);
-    function setTemperature(temperature: number) {
+    function setTemperature() {
         if ($data.isIncognitoMode) {
             $data.ollamaGenModel.temperature = temperature / 100;
             $plugin.s2b.setGenModel($data.ollamaGenModel);
@@ -48,7 +50,6 @@
         }
         $plugin.saveSettings();
     }
-    $: temperature, setTemperature(temperature);
 
     const languages: { display: Language; value: Language }[] = Object.values(Languages).map((language: Language) => ({ display: language, value: language }));
     const setAssistantLanguage = (selected: Language) => {
@@ -63,6 +64,20 @@
         $data.isChatComfy = !$data.isChatComfy;
         $plugin.saveSettings();
     }
+
+    function initSecondBrain() {
+        $data.isIncognitoMode
+            ? $plugin.s2b.init()
+            : new ConfirmModal(
+                  get(plugin).app,
+                  $t('init_third_party_modal.title'),
+                  $t('init_third_party_modal.description'),
+                  (result) => {
+                      if (result === 'Yes') $plugin.s2b.init();
+                  },
+                  'hideIncognitoWarning'
+              ).activate();
+    }
 </script>
 
 <div
@@ -70,97 +85,101 @@
 >
     <div class="flex h-full w-full max-w-[500px] flex-col items-center justify-center">
         {#if isOpen}
-            {#if $papaState === 'loading' || $papaState === 'uninitialized'}
+            {#if $papaState === 'uninitialized' && !$data.isAutostart}
+                <h2 class="text-center">{$t('quick_settings.initialize')}</h2>
+                <button
+                    aria-label={$t('quick_settings.initialize')}
+                    on:click={() => $plugin.s2b.init()}
+                    class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+                    use:icon={'play'}
+                />
+                <!-- TODO User should be able to enable autostart from here or point to the settings page -->
+            {:else if $papaState === 'loading' || $papaState === 'uninitialized'}
                 <LoadingAnimation />
             {:else if $papaState === 'indexing'}
-                <h2 class="m-0 text-[--text-normal]">Indexing vault</h2>
+                <h2 class="m-0">{$t('quick_settings.indexing_vault')}</h2>
                 <div class="flex w-full items-center gap-2">
                     <ProgressBar progress={$papaIndexingProgress} />
                     <button
-                        aria-label="Pause indexing"
+                        aria-label={$t('quick_settings.pause_indexing')}
                         on:click={() => ($papaState = 'indexing-pause')}
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'pause'}
                     />
                 </div>
             {:else if $papaState === 'indexing-pause'}
-                <h2 class="m-0 text-[--text-normal]">Indexing vault</h2>
+                <h2 class="m-0">{$t('quick_settings.indexing_vault')}</h2>
                 <div class="flex w-full items-center gap-2">
                     <ProgressBar progress={$papaIndexingProgress} />
                     <button
-                        aria-label="Resume indexing"
+                        aria-label={$t('quick_settings.resume_indexing')}
                         on:click={() => $plugin.s2b.init()}
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'play'}
                     />
                 </div>
             {:else if $papaState === 'error'}
-                {#if $errorState === 'ollama-model-not-installed'}
-                    <h2 class="text-center text-[--text-normal]">Install {$data.ollamaGenModel.model} first.</h2>
-                    <PullOllamaModel onSuccessfulPull={() => ($papaState = 'settings-change')} />
+                {#if $errorState === 'ollama-gen-model-not-installed'}
+                    <h2 class="text-center">{$t('install_model', { values: { model: $data.ollamaGenModel.model } })}</h2>
+                    <PullOllamaModel pullModel={$data.ollamaEmbedModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
+                {:else if $errorState === 'ollama-embed-model-not-installed'}}
+                    <h2 class="text-center">{$t('install_model', { values: { model: $data.ollamaEmbedModel.model } })}</h2>
+                    <PullOllamaModel pullModel={$data.ollamaEmbedModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else}
-                    <h2 class="text-center text-[--text-normal]">An error occured.<br /> Please retry initialization...</h2>
+                    <h2 class="text-center">{$t('quick_settings.error.other')}</h2>
                     <button
-                        aria-label="Retry initializing"
+                        aria-label={$t('quick_settings.retry_initialization')}
                         on:click={() => $plugin.s2b.init()}
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'refresh-cw'}
                     />
                 {/if}
             {:else if $papaState === 'mode-change'}
-                <h2 class="text-center text-[--text-normal]">Reinitialize Smart Second Brain <br />with {$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h2>
+                <h2 class="text-center">{$t('quick_settings.mode_changed')}{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h2>
                 <button
-                    aria-label="Initialize"
-                    on:click={() => $plugin.s2b.init()}
+                    aria-label={$t('quick_settings.reinitialize')}
+                    on:click={() => initSecondBrain()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
-                    use:icon={'play'}
+                    use:icon={'refresh-cw'}
                 />
             {:else if $papaState === 'settings-change'}
-                <h2 class="text-center text-[--text-normal]">Settings changed.<br />Reinitialize Smart Second Brain.</h2>
+                <h2 class="text-center">{$t('quick_settings.settings_changed')}</h2>
                 <button
-                    aria-label="Reinitialize, Settings changed"
+                    aria-label={$t('quick_settings.reinitialize')}
                     on:click={() => $plugin.s2b.init()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'refresh-cw'}
                 />
             {:else}
-                <div class="loader"></div>
-                {#if $data.isIncognitoMode}
-                    <h2 class="mb-0 text-center text-[--text-normal]">Ollama</h2>
-                    <p class="mt-1 text-center text-[--text-normal]">Chat via {$data.ollamaGenModel.model}</p>
-                    <!-- <p class="text-[--text-normal] text-center mt-0"> -->
-                    <!--     Embed with {$data.ollamaEmbedModel.model}<br /> -->
-                    <!--     Generate with {$data.ollamaGenModel.model} -->
-                    <!-- </p> -->
-                {:else}
-                    <h2 class="mb-0 text-center text-[--text-normal]">OpenAI</h2>
-                    <p class="mt-1 text-center text-[--text-normal]">Chat via {$data.openAIGenModel.model}</p>
-                    <!-- {#if $data.openAIGenModel.openAIApiKey} -->
-                    <!--     <p class="text-[--text-normal] text-center mt-0"> -->
-                    <!--         Embed with {$data.openAIEmbedModel.model}<br /> -->
-                    <!--         Generate with {$data.openAIGenModel.model} -->
-                    <!--     </p> -->
-                    <!-- {/if} -->
-                {/if}
-                <div class="w-full max-w-[220px]">
-                    <div class="mb-1 flex w-full items-center justify-between">
-                        <p class="m-0 inline-block">Comfy Chatview</p>
-                        <!-- svelte-ignore a11y-click-events-have-key-events -->
-                        <!-- svelte-ignore a11y-no-static-element-interactions -->
-                        <Toggle isEnabled={$data.isChatComfy} changeFunc={setChatViewDensity} />
+                <h2 class="mb-0">{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}</h2>
+                <p class="mt-1">
+                    {$t('quick_settings.chat_via', { values: { model: $data.isIncognitoMode ? $data.ollamaGenModel.model : $data.openAIGenModel.model } })}
+                </p>
+                <div class="w-full max-w-[300px]">
+                    <div class="flex h-8 items-center justify-between">
+                        {$t('quick_settings.chatview')}
+                        <ToggleComponent isEnabled={$data.isChatComfy} changeFunc={setChatViewDensity} />
                     </div>
-                    <div class="flex w-full items-center justify-between">
-                        <p class="m-0 inline-block">{$t('assistant_language')}</p>
+                    <div class="flex h-8 items-center justify-between">
+                        {$t('quick_settings.assistant_language')}
                         <DropdownComponent selected={$data.assistantLanguage} options={languages} changeFunc={setAssistantLanguage} />
                     </div>
-                    <div class="flex w-full items-center justify-between">
-                        <p class="m-0 inline-block">Relevancy in %</p>
-                        <input type="number" bind:value={similarityThreshold} min="0" max="100" />
+                    <div class="flex h-8 items-center justify-between">
+                        {$t('quick_settings.creativity')}
+                        <div class="flex items-center">
+                            <output>{temperature}%</output>
+                            <input class="slider" type="range" bind:value={temperature} on:blur={setTemperature} min="0" max="100" />
+                        </div>
                     </div>
-                    <div class="flex w-full items-center justify-between">
-                        <p class="m-0 inline-block">Creativity in %</p>
-                        <input type="number" bind:value={temperature} min="0" max="100" />
-                    </div>
+                    {#if $data.isUsingRag}
+                        <div class="flex h-8 items-center justify-between">
+                            {$t('quick_settings.similarity_threshold')}
+                            <div class="flex items-center">
+                                <output>{similarityThreshold}%</output>
+                                <input class="slider" type="range" bind:value={similarityThreshold} on:blur={setSimilarityThreshold} min="0" max="100" />
+                            </div>
+                        </div>
+                    {/if}
                 </div>
             {/if}
         {/if}
@@ -169,7 +188,7 @@
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <!-- svelte-ignore a11y-no-static-element-interactions -->
             <div
-                aria-label={`${isOpen ? 'Close' : 'Open'} quick Settings`}
+                aria-label={isOpen ? $t('quick_settings.close') : $t('quick_settings.open')}
                 class={`text-[--text-normal] transition-transform duration-300 hover:text-[--text-accent-hover] ${
                     isOpen ? 'rotate-180 transform' : 'rotate-0 transform'
                 }`}
