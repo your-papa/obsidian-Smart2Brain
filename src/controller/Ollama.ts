@@ -6,8 +6,8 @@ import Log from '../logging';
 export async function isOllamaRunning() {
     const d = get(data);
     try {
-        const url = new URL(d.ollamaGenModel.baseUrl);
-        const response = await requestUrl(url + '/api/tags');
+        new URL(d.ollamaGenModel.baseUrl);
+        const response = await requestUrl(d.ollamaGenModel.baseUrl + '/api/tags');
         if (response.status === 200) {
             return true;
         } else {
