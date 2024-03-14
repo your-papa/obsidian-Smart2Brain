@@ -16,6 +16,7 @@
     } from '../../store';
     import ProgressCircle from '../base/ProgressCircle.svelte';
     import { addMessage } from '../../controller/Messages';
+    import Logo from '../base/Logo.svelte';
 
     export let textarea: HTMLTextAreaElement;
 
@@ -50,7 +51,6 @@
     function handleRAGToggle() {
         $data.isUsingRag = !$data.isUsingRag;
         $plugin.saveSettings();
-        new Notice($data.isUsingRag ? $t('notice.using_papa') : $t('notice.using_llm'));
     }
 
     function handelEnter(event: KeyboardEvent) {
@@ -75,9 +75,9 @@
 <!-- save delete and rag settings slightly above input field -->
 <div class="relative">
     <div
-        class="absolute -top-[54px] left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-t-2xl border border-solid border-x-[--background-modifier-border] border-b-transparent border-t-[--background-modifier-border] {$isChatInSidebar
+        class="absolute -top-[62px] left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-t-2xl border border-solid border-x-[--background-modifier-border] border-b-transparent border-t-[--background-modifier-border] {$isChatInSidebar
             ? 'bg-[--background-secondary]'
-            : 'bg-[--background-primary]'} p-2"
+            : 'bg-[--background-primary]'} pt-2 px-2"
     >
         {#if $chatHistory.length > 1}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -89,11 +89,12 @@
         <div
             aria-label={$data.isUsingRag ? $t('chat.toggle_llm') : $t('chat.toggle_papa')}
             on:click={handleRAGToggle}
-            use:icon={'brain-circuit'}
-            class={`h-[--icon-xl] w-[--icon-xl] *:!h-[--icon-xl] *:!w-[--icon-xl] hover:text-[--text-accent-hover] ${
+            class={`h-[48px] w-[48px] *:!h-[48px] *:!w-[48px] hover:text-[--text-accent-hover] ${
                 $data.isUsingRag ? 'text-[--color-accent]' : 'text-[--text-normal]'
             }`}
-        />
+        >
+            <Logo />
+        </div>
         {#if $chatHistory.length > 1}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <!-- svelte-ignore a11y-no-static-element-interactions -->

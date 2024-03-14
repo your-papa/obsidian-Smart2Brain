@@ -5,9 +5,9 @@
     import AppComponent from './OllamaApp.svelte';
     import OpenAiComponent from './OpenAI.svelte';
     import DaemonComponent from './OllamaDaemon.svelte';
-    import { icon } from '../../controller/Messages';
     import IncognitoToggle from '../Settings/IncognitoToggle.svelte';
     import { t } from 'svelte-i18n';
+    import Logo from '../base/Logo.svelte';
 
     const osType = os.type();
 
@@ -16,7 +16,9 @@
 </script>
 
 <div class="mx-auto flex h-full w-full max-w-[500px] flex-col items-center overflow-auto pt-8">
-    <div class="w-full text-center *:!h-[--icon-xl] *:!w-[--icon-xl]" use:icon={'brain-circuit'} />
+    <div class="w-40 h-40 mb-2">
+        <Logo />
+    </div>
     <h1 class="text-[--text-normal]">{$t('onboarding.setup')}</h1>
     <!-- TODO add welcoming message -->
     <IncognitoToggle />
