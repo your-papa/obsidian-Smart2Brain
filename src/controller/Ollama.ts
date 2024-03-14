@@ -6,10 +6,12 @@ import Log from '../logging';
 export async function isOllamaRunning() {
     const d = get(data);
     try {
-        const response = await requestUrl(d.ollamaGenModel.baseUrl + '/api/tags');
+        const url = new URL(d.ollamaGenModel.baseUrl);
+        const response = await requestUrl(url + '/api/tags');
         if (response.status === 200) {
             return true;
         } else {
+            console.log(d.ollamaGenModel.baseUrl);
             Log.debug(`IsOllamaRunning, Unexpected status code: ${response.status}`);
             return false;
         }
@@ -50,6 +52,23 @@ export async function getOllamaModels(): Promise<string[]> {
     } catch (error) {
         Log.debug('Ollama is not running', error);
         return [];
+    }
+}
+
+export async function deleteOllamaModels(): Promise<void> {
+    const d = get(data);
+    try {
+        const modelsRes = await requestUrl({
+            url: d.ollamaGenModel.baseUrl + '/api/delete',
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+        //TODO langugage
+        modelsRes.status === 404 ? new Notice('No models to delete') : new Notice('Models deleted');
+    } catch (error) {
+        Log.debug('Ollama is not running', error);
     }
 }
 
