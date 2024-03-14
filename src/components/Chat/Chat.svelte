@@ -106,13 +106,7 @@
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <!-- svelte-ignore a11y-mouse-events-have-key-events -->
-                    <span
-                        on:mouseover={onMouseOver}
-                        use:renderMarkdown={message.content}
-                        style="background: transparent;"
-                        on:click={onClick}
-                        bind:this={initialAssistantMessageSpan}
-                    />
+                    <span on:mouseover={onMouseOver} use:renderMarkdown={message.content} on:click={onClick} bind:this={initialAssistantMessageSpan} />
                     <div class="flex gap-1 opacity-0 group-hover:opacity-100">
                         {#if !$isEditingAssistantMessage}
                             <!-- svelte-ignore a11y-no-static-element-interactions -->
