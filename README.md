@@ -4,85 +4,29 @@
 
 </div>
 
-# Smart Second Brain
+# Your Smart Second Brain
 > [!Note]
 > Still in Open Beta. MVP will be released mid-March.
 
-## Features
-TBD
+# Features
+
+- **Chat with your Notes**
+    - **RAG pipeline:** all your notes will be embedded into vectors and then retrieved based on the similarity (relevance) to your query in order to generate an answer based on the retrieved notes
+    - **Get reference links to notes:** because the answers are generated based on your retrieved notes we can trace where the information comes from and reference the origin of the knowledge in the answers as Obsidian links
+    - **Chat with LLM:** you can disable the function to answer queries based on your notes and then all the answers generated are based on the chosen LLM’s training knowledge
+    - **Save chats:** you can save your chats and continue the conversation at a later time
+    - **Different chat views:** you can choose between two chat views: ‘comfy’ (like a typical chat view) and the ‘compact’ view
+
+- **Choose ANY preferred Large Language Model (LLM)**
+    - **https://github.com/ollama/ollama to integrate LLMs:** Ollama is a tool to run LLMs locally, without the need of a cloud service. Its usage is similar to Docker, but it's specifically designed for LLMs. You can use it as an interactive shell, through its REST API or using it from a Python library.
+    - **Quickly switch between LLMs:** Ollama allows to comfortably change in between different LLMs for different purposes, as for example changing from one for scientific writing to one for persuasive writing.
+    - **Use ChatGPT:** Although, our focus lays on a private AI Assistant you can leverage OpenAI’s ChatGPT and it’s advanced capabilities which makes it a whole solution to switch between private LLMs and ChatGPT.
+
+# Limitations
+
+- **Performance depends on chosen LLM:** as LLMs are trained for different tasks, LLMs perform better or worse in embedding notes or generating answers. You can go with our recommendations or find your own best fit.
+- **Performance depends on knowledge structure and organisation:** the performance improves when you have a clear structure and do not mix up to many unrelated information or connect unrelated notes. Therefore we recommend a well-structured vault and notes.
+- **AI Assistant might generate incorrect or irrelevant answers:** due to lack of relevant notes or limitations of AI understanding the AI Assistant might generate unsatisfying answers. In those cases we recommend to rephrase your query or describe the context in more detail
 
 # Setup
-The Smart Second Brain provides two modes. When the Incognito mode is enabled it uses [Ollama](https://github.com/ollama/ollama) to run an LLM locally on your computer. When it is disabled it uses [OpenAI](https://openai.com/)'s GPT-Models.
-
-## Ollama
-
-> [!Note]
-> Ollama currently does not support a persistent config. So the `OLLAMA_ORIGINS="*"` environment variable has to be set every time the service is launched.
-> This includes a restart of the Mac Application.
-
-### MacOS App
-
-1. Go to the [Ollama](https://ollama.ai/download/) Website and follow the install instructions.
-2. Go to your Terminal and execute the following Command:
-
-```zsh
-launchctl setenv OLLAMA_ORIGINS "*"
-```
-
-3. Quit the Ollama service (in your Menu Bar click on the Ollama Icon and click Quit)
-4. Start the Ollama service again.
-
-### MacOS CLI App
-1. Install Ollama.
-    - with [Homebrew](https://brew.sh/):
-    
-    ```zsh
-    brew install Ollama
-    ```
-    
-    - with curl:
-    
-    ```zsh
-    curl -fsSL https://ollama.ai/install.sh | sh
-    ```
-    
-    - or [manually](https://github.com/ollama/ollama/blob/main/docs/linux.md) with binaries.
-
-2. Start the Ollama service with the Origins flag:
-
-```zsh
-OLLAMA_ORIGINS="*" ollama serve
-```
-
-### Linux
-
-1. Install Ollama:
-
-    - with curl: 
-    ```zsh
-    curl -fsSL https://ollama.ai/install.sh | sh
-    ```
-
-   - or [manually](https://github.com/ollama/ollama/blob/main/docs/linux.md) with binaries.
-     
-2. Follow these [instructions](https://github.com/ollama/ollama/blob/main/docs/faq.md#setting-environment-variables-on-linux) to set `OLLAMA_ORIGINS="*"` as an environment variable. 
-
-3. Restart the Ollama service.
-
-### Windows
-
-1. Install [Ollama](https://ollama.com/download)
-2. Quit running Ollama instance
-3. Start PowerShell and run the following command to set the origins
-```powershell
-$env:OLLAMA_ORIGINS="*"; ollama serve
-```
-
-## OpenAI
-
-> [!Note]
-> Currently, for the API-Key to work you have to upgrade to an OpenAI paid account. This means depositing at least $5 onto your OpenAI account. Maybe this changes in the future
-
-1. Create an [OpenAI Account](https://platform.openai.com/login/).
-2. Create an [API-Key](https://platform.openai.com/api-keys) by clicking on "Create new secret key" and following the instructions.
-3. Copy the key and paste it into the Smart Second Brain settings.
+Follow the onboarding instructions provided on initial plugin startup.
