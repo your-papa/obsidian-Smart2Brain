@@ -1,6 +1,165 @@
 {
-    "assistant_language": "Assistant language",
-    "excludeff": "Exclude files and folders",
-    "incognito_mode": "Incognito Mode",
-    "init_s2b": "Initialize Smart Second Brain"
+    "modal": {
+        "dont_show": "Don't show this again",
+        "cancel": "Cancel",
+        "confirm": "Confirm"
+    },
+    "init_third_party_modal": {
+        "title": "Run via Third-Party Services",
+        "description": "Are you sure you want to run via third-parties? Your personal data will be shared with third-party services like OpenAI."
+    },
+    "notice": {
+        "still_running": "Smart Second Brain is still running. Pelase wait.",
+        "still_indexing": "Smart Second Brain is still indexing. Please wait.",
+        "ollama_not_running": "Please make sure Ollama is running before initializing Smart Second Brain.",
+        "ollama_gen_model": "Ollama model not installed. Please install the model before initializing Smart Second Brain.",
+        "ollama_embed_model": "Ollama model not installed. Please install the model before initializing Smart Second Brain.",
+        "openai_key": "Please make sure your OpenAI API Key is valid before initializing Smart Second Brain.",
+        "failed": "Failed to initialize Smart Second Brain (Error: {error}). Please retry.",
+        "failed_indexing": "Failed to index notes into your smart second brain. Please retry.",
+        "done": "Smart Second Brain initialized.",
+        "error": "An error occured. Please wait for the error to resolve.",
+        "not_initialized": "Smart Second Brain not initialized. Please initialize first.",
+        "plugin_data_cleared": "Plugin data cleared. Please reload the plugin.",
+        "api_key_invalid": "API Key is invalid!",
+        "error_pulling_model": "Failed to pull model from Ollama (Error: {error}). Please retry.",
+        "copied_to_clipboard": "Copied to clipboard:\n{text}",
+        "no_notes_retrieved": "No notes retrieved. Maybe lower the similarity threshold."
+    },
+    "chat": {
+        "edit": "Edit query and regenerate answer",
+        "cancel_edit": "Cancel editing",
+        "copy": "Copy Text",
+        "regenerate": "Deletes all following Messages and regenerates the answer to the current query",
+        "change_assistant_prompt": "Change the initial assistant message",
+        "reset_assistant_prompt": "Reset the initial assistant message",
+        "retrieving": "Retrieving",
+        "reducing": "Reducing {num} Notes",
+        "user": "You",
+        "assistant": "Assistant",
+        "save": "Save the Chat to a Note",
+        "delete": "Delete the Chat History",
+        "toggle_papa": "Chatting with your Notes",
+        "toggle_llm": "Chatting with plain LLM",
+        "stop": "Stop your Smart Second Brain",
+        "send": "Run your Smart Second Brain",
+        "retry_error": "An error occured. Retry initialization",
+        "reinitialize": "Reinitialize, Settings changed",
+        "input_placeholder": "Chat with your Smart Second Brain..."
+    },
+    "onboarding": {
+        "setup": "Setup",
+        "test": "Test",
+        "privacy_mode_note": "Your assistant is running in privacy mode. That means it is not connected to the internet and is running fully locally by leveraging Ollama.",
+        "openai_mode_note": "Your assistant is using third party services to run. That means you will have to share all your personal information with these services and your Smart Second Brain needs to be connected to the internet to leverage OpenAIs large language models like ChatGPT.",
+        "init": "Initialize your Smart Second Brain",
+        "init_label": "Click to initialize",
+        "ollama": {
+            "deamon": {
+                "install": "Install Ollama",
+                "set_baseurl": "Set the Ollama Base URL",
+                "start": "Start the Ollama with origins"
+            },
+            "app": {
+                "download": "Download the App",
+                "download_link": "here",
+                "extract": "Extract the .zip and start Ollama",
+                "run": "Run the setup.exe",
+                "test_label": "Test if Ollama is running",
+                "set_origins": "Set Ollama origins to enable streaming responses",
+                "restart": "Restart the Ollama service ",
+                "restart_label": "Click menu bar icon and then quit",
+                "quit": "Quit the Ollama service ",
+                "quit_label": "Click menu bar icon and then quit",
+                "start_origins": "Start the Ollama service with origins"
+            },
+            "test_origins": "Test if the origins are set correctly",
+            "install_model": "Install an Ollama Embedding Model.",
+            "recommended_models": "Recommended:",
+            "set_model": "Set your Embedding Model:"
+        },
+        "openai": {
+            "create_account": "Create an OpenAI ",
+            "create_account_link": "Account",
+            "create_api_key": "Create an ",
+            "create_api_key_link": "API Key",
+            "api_key_warning": "> [!Warning] Activate API-Key \n> For the API-Key to work you might have to upgrade to an OpenAI paid account. This means depositing at least $5 onto your OpenAI account. This might change in the future.",
+            "paste_api_key": "Paste your key here:",
+            "test_api_key": "Test your API Key",
+            "api_key_valid": "API Key is valid!"
+        }
+    },
+    "incognito_toggle": {
+        "enable": "Run on your machine",
+        "disable": "Run via Third-Party Services"
+    },
+    "settings": {
+        "excludeff": "Exclude files and folders",
+        "excludeff_add": "Add",
+        "excludeff_delete": "Delete from exclude list",
+        "advanced": "Advanced Settings",
+        "clear": "Clear Plugin Data",
+        "clear_modal": {
+            "title": "Clear Plugin Data",
+            "description": "Are you sure you want to delete the plugin data? Note that only the plugin data and the vector store data will be removed. All chat files inside your vault will not be affected."
+        },
+        "clear_label": "Clear",
+        "autostart": "Autostart",
+        "debugging": "Debugging",
+        "langsmith_key": "Langsmith API Key",
+        "verbose": "Developer Console logging",
+        "openai": {
+            "description": " ",
+            "api_key": "API Key",
+            "gen_model": "Chat Model",
+            "embed_model": "Embedding Model",
+            "model_descritions": {
+                "gpt-3.5-turbo": "GPT-3.5 Turbo (4096 Tokens)",
+                "gpt-3.5-turbo-1106": "Latest GPT-3.5 Turbo (16385 Tokens)",
+                "gpt-4": "GPT-4 (8192 Tokens)",
+                "gpt-4-32k": "GPT-4 (32768 Tokens)",
+                "gpt-4-1106-preview": "Latest GPT-4 (128000 Tokens)",
+                "text-embedding-ada-002": ""
+            }
+        },
+        "ollama": {
+            "description": "Refresh if your started Ollama.",
+            "gen_model": "Chat Model",
+            "embed_model": "Embedding Model",
+            "recommended": "Recommended",
+            "other": "Other",
+            "model_descriptions": {
+                "llama2": "Llama 2 is a collection of foundation language models ranging from 7B to 70B parameters.",
+                "llama2-uncensored": "Uncensored Llama 2 model by George Sung and Jarrad Hope.",
+                "mistral": "The 7B model released by Mistral AI, updated to version 0.2.",
+                "mistral-openorca": "Mistral OpenOrca is a 7 billion parameter model, fine-tuned on top of the Mistral 7B model using the OpenOrca dataset.",
+                "gemma": "Gemma is a family of lightweight, state-of-the-art open models built by Google DeepMind.",
+                "mixtral": "A high-quality Mixture of Experts (MoE) model with open weights by Mistral AI.",
+                "dolphin-mixtral": "Dolphin Mixtral (32000 Tokens)",
+                "phi": "Phi-2: a 2.7B language model by Microsoft Research that demonstrates outstanding reasoning and language understanding capabilities.",
+                "nomic-embed-text": "A high-performing open embedding model with a large token context window."
+            }
+        }
+    },
+    "quick_settings": {
+        "initialize": "Initialize your Smart Second Brain",
+        "indexing_vault": "Indexing Vault",
+        "assistant_language": "Assistant language",
+        "pause_indexing": "Pause Indexing",
+        "resume_indexing": "Resume Indexing",
+        "retry_initialization": "Retry Initialization",
+        "mode_changed": "Reinitialize Smart Second Brain \nwith ",
+        "reinitialize": "Reinitialize Smart Second Brain",
+        "chat_via": "Chat via {model}",
+        "chatview": "Comfy Chatview",
+        "similarity_threshold": "Relevancy",
+        "creativity": "Creativity",
+        "settings_changed": "Settings changed.\nReinitialize Smart Second Brain.",
+        "open": "Open quick settings",
+        "close": "Close quick settings",
+        "error": {
+            "install_model": "Install {model} model first",
+            "other": "An error occured.\nPlease retry initialization..."
+        }
+    }
 }

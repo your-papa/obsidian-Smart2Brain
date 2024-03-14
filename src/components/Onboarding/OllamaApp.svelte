@@ -3,6 +3,8 @@
     import { renderMarkdown, icon } from '../../controller/Messages';
     import { isOllamaRunning } from '../../controller/Ollama';
     import OllamaSetup from './OllamaSetup.svelte';
+    import { t } from 'svelte-i18n';
+
     export let osType: string;
 
     let isRunning: boolean = false;
@@ -11,17 +13,17 @@
 
 <ol class="w-full pr-10 *:p-1">
     <li>
-        Download the App
-        <a href="https://ollama.ai/download">here</a>
+        {$t('onboarding.ollama.app.download')}
+        <a href="https://ollama.ai/download">{$t('onboarding.ollama.app.download_link')} </a>
     </li>
     {#if osType === 'Darwin'}
-        <li>Extract the .zip and start Ollama</li>
+        <li>{$t('onboarding.ollama.app.extract')}</li>
     {:else}
-        <li>Run the setup.exe</li>
+        <li>{$t('onboarding.ollama.app.run')}</li>
     {/if}
     <li>
         <div class="flex flex-wrap items-center justify-between">
-            <span class="mr-2">Test if Ollama is running:</span>
+            <span class="mr-2">{$t('onboarding.ollama.app.test_label')}</span>
             <div class="flex items-center gap-1">
                 {#if isOllamaTested}
                     {#if isRunning}
@@ -32,12 +34,12 @@
                 {/if}
                 {#if !isRunning}
                     <button
-                        aria-label="Test if Ollama is running"
+                        aria-label={$t('onboarding.ollama.app.test_label')}
                         on:click={async () => {
                             isRunning = await isOllamaRunning();
                             isOllamaTested = true;
-                            if (!isRunning) new Notice('Ollama is not running!', 4000);
-                        }}>Test</button
+                            if (!isRunning) new Notice($t('notice.ollama_not_running'), 4000);
+                        }}>{$t('onboarding.test')}</button
                     >
                 {/if}
             </div>
@@ -45,14 +47,14 @@
     </li>
     {#if isRunning}
         {#if osType === 'Darwin'}
-            <li>Set Ollama origins to enable streaming responses</li>
+            <li>{$t('onboarding.ollama.app.set_origins')}</li>
             <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\nlaunchctl setenv OLLAMA_ORIGINS "*"\n```')} />
             <li>
-                Restart the Ollama service <span aria-label="click menu bar icon and then quit" use:icon={'help-circle'} />
+                {$t('onboarding.ollama.app.restart')}<span aria-label={$t('onboarding.ollama.app.restart_label')} use:icon={'help-circle'} />
             </li>
         {:else}
-            <li>Quit Ollama <span aria-label="click on it in the task bar" use:icon={'help-circle'} /></li>
-            <li>Start the Ollama service with origins</li>
+            <li>{$t('onboarding.ollama.app.quit')}<span aria-label={$t('onboarding.ollama.app.quit_label')} use:icon={'help-circle'} /></li>
+            <li>{$t('onboarding.ollama.app.start_origins')}</li>
             <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\n$env:OLLAMA_ORIGINS="*"; ollama serve\n```')} />
         {/if}
         <OllamaSetup />

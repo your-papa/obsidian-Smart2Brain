@@ -5,8 +5,9 @@
     import AppComponent from './OllamaApp.svelte';
     import OpenAiComponent from './OpenAI.svelte';
     import DaemonComponent from './OllamaDaemon.svelte';
-    import { icon } from '../../controller/Messages';
     import IncognitoToggle from '../Settings/IncognitoToggle.svelte';
+    import { t } from 'svelte-i18n';
+    import Logo from '../base/Logo.svelte';
 
     const osType = os.type();
 
@@ -15,12 +16,15 @@
 </script>
 
 <div class="mx-auto flex h-full w-full max-w-[500px] flex-col items-center overflow-auto pt-8">
-    <div class="w-full text-center *:!h-[--icon-xl] *:!w-[--icon-xl]" use:icon={'brain-circuit'} />
-    <h1 class="text-[--text-normal]">Setup</h1>
+    <div class="w-40 h-40 mb-2">
+        <Logo />
+    </div>
+    <h1 class="text-[--text-normal]">{$t('onboarding.setup')}</h1>
+    <!-- TODO add welcoming message -->
     <IncognitoToggle />
     {#if $data.isIncognitoMode}
         <p class="px-10">
-            Your assistant is running in privacy mode. That means it is not connected to the internet and is running fully locally by leveraging Ollama.
+            {$t('onboarding.privacy_mode_note')}
         </p>
         {#if osType === 'Darwin'}
             <SliderComponent {options} bind:selected />
@@ -32,8 +36,7 @@
         {/if}
     {:else}
         <p class="px-10">
-            Your assistant is using third party services to run. That means you will have to share all your personal information with these services and your
-            Smart Second Brain needs to be connected to the internet to leverage OpenAIs large language models like ChatGPT.
+            {$t('onboarding.openai_mode_note')}
         </p>
         <OpenAiComponent />
     {/if}
