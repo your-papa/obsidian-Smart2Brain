@@ -20,7 +20,7 @@
         "done": "Smart Second Brain initialized.",
         "error": "An error occured. Please wait for the error to resolve.",
         "not_initialized": "Smart Second Brain not initialized. Please initialize first.",
-        "plugin_data_cleared": "Plugin data cleared. Please reload the plugin.",
+        "plugin_data_cleared": "Plugin data cleared.",
         "api_key_invalid": "API Key is invalid!",
         "error_pulling_model": "Failed to pull model from Ollama (Error: {error}). Please retry.",
         "copied_to_clipboard": "Copied to clipboard:\n{text}",
