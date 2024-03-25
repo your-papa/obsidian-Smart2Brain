@@ -77,8 +77,8 @@
         bind:this={chatWindow}
         on:scroll={() => (isAutoScrolling = chatWindow.scrollTop + chatWindow.clientHeight + 1 >= chatWindow.scrollHeight)}
         class="chat-window w-full flex-grow select-text overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border] {$isChatInSidebar
-            ? 'bg-[--background-secondary-alt]'
-            : 'bg-[--background-primary-alt]'}"
+            ? 'bg-[--background-secondary]'
+            : 'bg-[--background-primary]'}"
     >
         {#each $chatHistory as message (message.id)}
             <MessageContainer role={message.role}>
