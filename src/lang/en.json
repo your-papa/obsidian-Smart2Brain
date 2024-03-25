@@ -164,5 +164,9 @@
             "install_model": "Install {model} model first",
             "other": "An error occured.\nPlease retry initialization..."
         }
+    },
+    "tooltip": {
+        "creativity": "Adjusts the level of originality in the model's outputs to suit your preference.",
+        "similarity": "How similar the retrieved documents should be to the user query."
     }
 }

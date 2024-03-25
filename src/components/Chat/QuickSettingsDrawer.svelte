@@ -117,21 +117,21 @@
                         <div
                             aria-label={$t('quick_settings.pause_indexing')}
                             on:click={() => ($papaState = 'indexing-pause')}
-                            class="h-8 pl-3 pr-2 py-2 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
+                            class="h-8 py-2 pl-3 pr-2 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
                             use:icon={'pause'}
                         />
                     {:else if $papaState === 'indexing-pause'}
                         <div
                             aria-label={$t('quick_settings.resume_indexing')}
                             on:click={() => $plugin.s2b.init()}
-                            class="h-8 pl-3 pr-2 py-2 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
+                            class="h-8 py-2 pl-3 pr-2 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
                             use:icon={'play'}
                         />
                     {/if}
                     <div
                         aria-label={$t('quick_settings.cancel_indexing')}
                         on:click={() => $plugin.s2b.cancelIndexing()}
-                        class="h-8 pr-3 pl-2 py-2 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
+                        class="h-8 py-2 pl-2 pr-3 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
                         use:icon={'stop-circle'}
                     />
                 </div>
@@ -183,6 +183,7 @@
                     </div>
                     <div class="flex h-8 items-center justify-between">
                         {$t('quick_settings.creativity')}
+                        <div use:icon={'help'} aria-label={$t('tooltip.creativity')} class="ml-1 mr-auto" />
                         <div class="flex items-center">
                             <output>{temperature}%</output>
                             <input class="slider" type="range" bind:value={temperature} on:blur={setTemperature} min="0" max="100" />
@@ -191,6 +192,7 @@
                     {#if $data.isUsingRag}
                         <div class="flex h-8 items-center justify-between">
                             {$t('quick_settings.similarity_threshold')}
+                            <div use:icon={'help'} aria-label={$t('tooltip.similarity')} class="ml-1 mr-auto" />
                             <div class="flex items-center">
                                 <output>{similarityThreshold}%</output>
                                 <input class="slider" type="range" bind:value={similarityThreshold} on:blur={setSimilarityThreshold} min="0" max="100" />
