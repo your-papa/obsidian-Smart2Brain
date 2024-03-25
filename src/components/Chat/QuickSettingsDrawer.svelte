@@ -1,6 +1,6 @@
 <script lang="ts">
     import { setIcon } from 'obsidian';
-    import { plugin, data, chatHistory, papaState, papaIndexingProgress, errorState } from '../../store';
+    import { plugin, data, chatHistory, papaState, papaIndexingProgress, errorState, papaIndexingTimeLeft, isChatInSidebar } from '../../store';
     import { Prompts, type Language, Languages } from 'papa-ts';
     import ProgressBar from '../base/ProgressBar.svelte';
     import { t } from 'svelte-i18n';
@@ -10,7 +10,6 @@
     import LoadingAnimation from '../base/LoadingAnimation.svelte';
     import { ConfirmModal } from '../Settings/ConfirmModal';
     import { get } from 'svelte/store';
-    import SettingContainer from '../Settings/SettingContainer.svelte';
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -78,15 +77,24 @@
                   'hideIncognitoWarning'
               ).activate();
     }
+    function formatTime(secondsInput: number) {
+        const minutes = Math.floor(secondsInput / 60); // Calculate minutes
+        const seconds = secondsInput % 60; // Remaining seconds
+        return minutes > 0
+            ? $t('quick_settings.time_left_minutes', { values: { minutes, seconds } })
+            : $t('quick_settings.time_left_seconds', { values: { seconds } });
+    }
 </script>
 
+<!-- svelte-ignore a11y-click-events-have-key-events -->
+<!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
     class={`relative ${isOpen ? 'h-[33%] min-h-[33%]' : 'h-[--icon-m] min-h-[--icon-m]'} flex justify-center overflow-hidden transition-all duration-300 ease-in-out`}
 >
     <div class="flex h-full w-full max-w-[500px] flex-col items-center justify-center">
         {#if isOpen}
-            {#if $papaState === 'uninitialized' && !$data.isAutostart}
-                <h2 class="text-center">{$t('quick_settings.initialize')}</h2>
+            {#if $papaState === 'uninitialized'}
+                <h3 class="text-center">{$t('quick_settings.initialize')}</h3>
                 <button
                     aria-label={$t('quick_settings.initialize')}
                     on:click={() => $plugin.s2b.init()}
@@ -94,39 +102,48 @@
                     use:icon={'play'}
                 />
                 <!-- TODO User should be able to enable autostart from here or point to the settings page -->
-            {:else if $papaState === 'loading' || $papaState === 'uninitialized'}
+            {:else if $papaState === 'loading'}
                 <LoadingAnimation />
-            {:else if $papaState === 'indexing'}
-                <h2 class="m-0">{$t('quick_settings.indexing_vault')}</h2>
-                <div class="flex w-full items-center gap-2">
-                    <ProgressBar progress={$papaIndexingProgress} />
-                    <button
-                        aria-label={$t('quick_settings.pause_indexing')}
-                        on:click={() => ($papaState = 'indexing-pause')}
-                        class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
-                        use:icon={'pause'}
-                    />
-                </div>
-            {:else if $papaState === 'indexing-pause'}
-                <h2 class="m-0">{$t('quick_settings.indexing_vault')}</h2>
-                <div class="flex w-full items-center gap-2">
-                    <ProgressBar progress={$papaIndexingProgress} />
-                    <button
-                        aria-label={$t('quick_settings.resume_indexing')}
-                        on:click={() => $plugin.s2b.init()}
-                        class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
-                        use:icon={'play'}
+            {:else if $papaState === 'indexing' || $papaState === 'indexing-pause'}
+                <h3 class="m-0">{$t('quick_settings.indexing_vault')}</h3>
+                <output class={$papaState === 'indexing' && $papaIndexingTimeLeft > 0 ? '' : 'invisible'}>{formatTime($papaIndexingTimeLeft)}</output>
+                <ProgressBar progress={$papaIndexingProgress} />
+                <div
+                    class="flex items-center justify-center rounded-xl shadow {$isChatInSidebar
+                        ? 'bg-[--background-secondary-alt]'
+                        : 'bg-[--background-primary-alt]'}"
+                >
+                    {#if $papaState === 'indexing'}
+                        <div
+                            aria-label={$t('quick_settings.pause_indexing')}
+                            on:click={() => ($papaState = 'indexing-pause')}
+                            class="h-8 py-2 pl-3 pr-2 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
+                            use:icon={'pause'}
+                        />
+                    {:else if $papaState === 'indexing-pause'}
+                        <div
+                            aria-label={$t('quick_settings.resume_indexing')}
+                            on:click={() => $plugin.s2b.init()}
+                            class="h-8 py-2 pl-3 pr-2 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
+                            use:icon={'play'}
+                        />
+                    {/if}
+                    <div
+                        aria-label={$t('quick_settings.cancel_indexing')}
+                        on:click={() => $plugin.s2b.cancelIndexing()}
+                        class="h-8 py-2 pl-2 pr-3 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
+                        use:icon={'stop-circle'}
                     />
                 </div>
             {:else if $papaState === 'error'}
                 {#if $errorState === 'ollama-gen-model-not-installed'}
-                    <h2 class="text-center">{$t('install_model', { values: { model: $data.ollamaGenModel.model } })}</h2>
+                    <h3 class="text-center">{$t('install_model', { values: { model: $data.ollamaGenModel.model } })}</h3>
                     <PullOllamaModel pullModel={$data.ollamaEmbedModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else if $errorState === 'ollama-embed-model-not-installed'}}
-                    <h2 class="text-center">{$t('install_model', { values: { model: $data.ollamaEmbedModel.model } })}</h2>
+                    <h3 class="text-center">{$t('install_model', { values: { model: $data.ollamaEmbedModel.model } })}</h3>
                     <PullOllamaModel pullModel={$data.ollamaEmbedModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else}
-                    <h2 class="text-center">{$t('quick_settings.error.other')}</h2>
+                    <h3 class="text-center">{$t('quick_settings.error.other')}</h3>
                     <button
                         aria-label={$t('quick_settings.retry_initialization')}
                         on:click={() => $plugin.s2b.init()}
@@ -135,7 +152,7 @@
                     />
                 {/if}
             {:else if $papaState === 'mode-change'}
-                <h2 class="text-center">{$t('quick_settings.mode_changed')}{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h2>
+                <h3 class="text-center">{$t('quick_settings.mode_changed')}{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h3>
                 <button
                     aria-label={$t('quick_settings.reinitialize')}
                     on:click={() => initSecondBrain()}
@@ -143,7 +160,7 @@
                     use:icon={'refresh-cw'}
                 />
             {:else if $papaState === 'settings-change'}
-                <h2 class="text-center">{$t('quick_settings.settings_changed')}</h2>
+                <h3 class="text-center">{$t('quick_settings.settings_changed')}</h3>
                 <button
                     aria-label={$t('quick_settings.reinitialize')}
                     on:click={() => $plugin.s2b.init()}
@@ -166,6 +183,7 @@
                     </div>
                     <div class="flex h-8 items-center justify-between">
                         {$t('quick_settings.creativity')}
+                        <div use:icon={'help'} aria-label={$t('tooltip.creativity')} class="ml-1 mr-auto" />
                         <div class="flex items-center">
                             <output>{temperature}%</output>
                             <input class="slider" type="range" bind:value={temperature} on:blur={setTemperature} min="0" max="100" />
@@ -174,6 +192,7 @@
                     {#if $data.isUsingRag}
                         <div class="flex h-8 items-center justify-between">
                             {$t('quick_settings.similarity_threshold')}
+                            <div use:icon={'help'} aria-label={$t('tooltip.similarity')} class="ml-1 mr-auto" />
                             <div class="flex items-center">
                                 <output>{similarityThreshold}%</output>
                                 <input class="slider" type="range" bind:value={similarityThreshold} on:blur={setSimilarityThreshold} min="0" max="100" />
@@ -185,8 +204,6 @@
         {/if}
         <div style="height: 1rem" />
         <div class="absolute bottom-0 z-10 flex w-full justify-center">
-            <!-- svelte-ignore a11y-click-events-have-key-events -->
-            <!-- svelte-ignore a11y-no-static-element-interactions -->
             <div
                 aria-label={isOpen ? $t('quick_settings.close') : $t('quick_settings.open')}
                 class={`text-[--text-normal] transition-transform duration-300 hover:text-[--text-accent-hover] ${
