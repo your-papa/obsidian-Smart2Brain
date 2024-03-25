@@ -1,6 +1,6 @@
 import { SuggestModal, TFile, TAbstractFile, App } from 'obsidian';
 import { get } from 'svelte/store';
-import { plugin, data } from '../../store';
+import { plugin, data, papaState } from '../../store';
 
 export function wildTest(wildcard: string, str: string): boolean {
     const w = wildcard.replace(/[.+^${}()|[\]\\]/g, '\\$&'); // regexp escape
@@ -46,6 +46,7 @@ export class FileSelectModal extends SuggestModal<TAbstractFile | string> {
         if (!d.excludeFF.includes(path)) {
             data.update((dl) => {
                 dl.excludeFF = [...dl.excludeFF, path];
+                papaState.set('settings-change');
                 return dl;
             });
             get(plugin).saveSettings();

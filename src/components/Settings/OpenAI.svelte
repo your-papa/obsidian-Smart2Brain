@@ -16,7 +16,7 @@
         isOpenAIAPIKeyValid = await isAPIKeyValid($data.openAIGenModel.openAIApiKey);
         openAIApiKey = $data.openAIGenModel.openAIApiKey;
         hideApiKey();
-        apiKeyStyles = openAIApiKey && !isOpenAIAPIKeyValid ? '!bg-[--background-modifier-error]' : '';
+        apiKeyStyles = openAIApiKey && !isOpenAIAPIKeyValid ? '!border-[--background-modifier-error]' : '';
     });
 
     const changeApiKey = async (newApiKey: string) => {
@@ -27,7 +27,7 @@
         $data.openAIEmbedModel.openAIApiKey = newApiKey;
         $plugin.saveSettings();
         $papaState = 'settings-change';
-        apiKeyStyles = openAIApiKey && !isOpenAIAPIKeyValid ? '!bg-[--background-modifier-error]' : '';
+        apiKeyStyles = openAIApiKey && !isOpenAIAPIKeyValid ? '!border-[--background-modifier-error]' : '';
     };
 
     const hideApiKey = () => {
@@ -52,9 +52,9 @@
     };
 </script>
 
-<SettingContainer name="OpenAI" isHeading={true} desc={$t('settings.openai.description')} />
+<SettingContainer name="OpenAI" isHeading={true} desc={$t('settings.openai.desc')} />
 <!-- OpenAI API Key -->
-<SettingContainer name={$t('settings.openai.api_key')}>
+<SettingContainer name={$t('settings.openai.api_key')} desc={$t('settings.openai.api_key_desc')}>
     <TextComponent styles={apiKeyStyles} value={openAIApiKey} placeholder="sk-...Lk" changeFunc={changeApiKey} blurFunc={hideApiKey} focusFunc={showApiKey} />
 </SettingContainer>
 <!-- OpenAI Gen Model -->

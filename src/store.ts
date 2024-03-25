@@ -16,7 +16,7 @@ export const isEditingAssistantMessage = writable<boolean>();
 export const chatInput = writable<string>('');
 export const isChatInSidebar = writable<boolean>(true);
 
-export type ErrorState = 'ollama-gen-model-not-installed' | 'ollama-embed-model-not-installed' | 'ollama-not-running' | 'ollama-origins-not-set';
+export type ErrorState = 'ollama-gen-model-not-installed' | 'ollama-embed-model-not-installed' | 'ollama-not-running' | 'ollama-origins-not-set' | 'run-failed';
 export const errorState = writable<ErrorState>();
 
 export const runState = writable<PapaResponseStatus>('startup');
@@ -25,6 +25,7 @@ export const runContent = writable<string>('');
 export type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-pause' | 'running' | 'error' | 'uninitialized' | 'mode-change' | 'settings-change';
 export const papaState = writable<PapaState>('uninitialized');
 export const papaIndexingProgress = writable<number>(0);
+export const papaIndexingTimeLeft = writable<number>(0);
 
 export const cancelPullModel = writable<boolean>(false);
 

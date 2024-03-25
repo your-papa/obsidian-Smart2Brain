@@ -20,14 +20,14 @@
         installedOllamaModels = await getOllamaModels();
         ollamaModels = [...new Set(installedOllamaModels.concat(OllamaGenModelNames).concat(OllamaEmbedModelNames))];
         isRunning = await isOllamaRunning();
-        styleOllamaBaseUrl = isRunning ? '' : '!bg-[--background-modifier-error]';
+        styleOllamaBaseUrl = isRunning ? '' : '!border-[--background-modifier-error]';
     });
 
     const resetOllamaBaseUrl = async () => {
         ollamaBaseUrl = DEFAULT_SETTINGS.ollamaGenModel.baseUrl;
         await changeOllamaBaseUrl(ollamaBaseUrl);
         isRunning = await isOllamaRunning();
-        styleOllamaBaseUrl = isRunning ? '' : '!bg-[--background-modifier-error]';
+        styleOllamaBaseUrl = isRunning ? '' : '!border-[--background-modifier-error]';
     };
     const ollamaGenChange = (selected: string) => {
         $data.ollamaGenModel.model = selected;
@@ -52,7 +52,7 @@
     };
 </script>
 
-<SettingContainer name="Ollama" isHeading={true} desc={!isRunning ? $t('settings.ollama.description') : ''}>
+<SettingContainer name="Ollama" isHeading={true} desc={$t('settings.ollama.desc')}>
     <ButtonComponent
         iconId={'refresh-ccw'}
         changeFunc={async () => {
@@ -64,7 +64,7 @@
     /></SettingContainer
 >
 <!-- Ollama URL -->
-<SettingContainer name="Ollama URL">
+<SettingContainer name={$t('settings.ollama.base_url')} desc={$t('settings.ollama.base_url_desc')}>
     <ButtonComponent iconId={'rotate-cw'} changeFunc={resetOllamaBaseUrl} />
     <TextComponent
         bind:value={ollamaBaseUrl}
@@ -73,7 +73,7 @@
         changeFunc={async (newBaseUrl) => {
             await changeOllamaBaseUrl(newBaseUrl);
             isRunning = await isOllamaRunning();
-            styleOllamaBaseUrl = isRunning ? '' : '!bg-[--background-modifier-error]';
+            styleOllamaBaseUrl = isRunning ? '' : '!border-[--background-modifier-error]';
         }}
     />
 </SettingContainer>

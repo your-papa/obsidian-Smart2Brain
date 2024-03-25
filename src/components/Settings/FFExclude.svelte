@@ -3,12 +3,11 @@
     import { plugin } from '../../store';
     import { FileSelectModal } from './FuzzyModal';
     import ButtonComponent from '../base/Button.svelte';
-    import type { FuzzySuggestModal, TAbstractFile } from 'obsidian';
     import { t } from 'svelte-i18n';
 
     let buttonComp: ButtonComponent;
 
-    let fileSelectModal: FuzzySuggestModal<TAbstractFile>;
+    let fileSelectModal: FileSelectModal;
 
     onMount(() => {
         fileSelectModal = new FileSelectModal($plugin.app);
