@@ -1,8 +1,5 @@
 export const OpenAIGenModels = {
     'gpt-3.5-turbo': {
-        contextWindow: 4096,
-    },
-    'gpt-3.5-turbo-1106': {
         contextWindow: 16385,
     },
     'gpt-4': {
@@ -11,7 +8,7 @@ export const OpenAIGenModels = {
     'gpt-4-32k': {
         contextWindow: 32768,
     },
-    'gpt-4-1106-preview': {
+    'gpt-4-turbo-preview': {
         contextWindow: 128000,
     },
 };
@@ -43,19 +40,7 @@ export const OllamaGenModels = {
     },
 };
 
-export const OpenAIEmbedModels = {
-    'text-embedding-ada-002': {
-        contextWindow: 8191,
-    },
-};
-
-export const OllamaEmbedModels = {
-    'nomic-embed-text': {
-        contextWindow: 8192,
-    },
-};
-
 export const OpenAIGenModelNames = Object.keys(OpenAIGenModels);
 export const OllamaGenModelNames = Object.keys(OllamaGenModels);
-export const OpenAIEmbedModelNames = Object.keys(OpenAIEmbedModels);
-export const OllamaEmbedModelNames = Object.keys(OllamaEmbedModels);
+export const OpenAIEmbedModelNames = ['text-embedding-3-large', 'text-embedding-3-small', 'text-embedding-ada-002'];
+export const OllamaEmbedModelNames = ['nomic-embed-text'];

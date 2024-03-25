@@ -31,6 +31,7 @@
 
     function deleteExcludeFF(ff: string) {
         $data.excludeFF = $data.excludeFF.filter((f: string) => f !== ff);
+        $papaState = 'settings-change';
         $plugin.saveSettings();
     }
 
@@ -62,7 +63,7 @@
 </script>
 
 <!-- Exclude Folders -->
-<SettingContainer name={$t('settings.excludeff')}><FFExcludeComponent /></SettingContainer>
+<SettingContainer name={$t('settings.excludeff')} desc={$t('settings.excludeff_desc')}><FFExcludeComponent /></SettingContainer>
 {#if $data.excludeFF.length !== 0}
     <div class="mb-3 flex justify-between">
         <div bind:this={excludeFFComponent} class="{isFFExpanded ? '' : 'overflow-hidden'} flex flex-wrap gap-1">
@@ -112,19 +113,19 @@
     <!-- <SettingContainer name="Num. of Docs to Retrieve"> -->
     <!--     <TextComponent inputType="number" value={$data.docRetrieveNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} /> -->
     <!-- </SettingContainer> -->
-    <SettingContainer name={$t('settings.autostart')}>
+    <SettingContainer name={$t('settings.autostart')} desc={$t('settings.autostart_desc')}>
         <ToggleComponent isEnabled={$data.isAutostart} changeFunc={changeAutostart} />
     </SettingContainer>
     <!-- Clear Plugin Data -->
-    <SettingContainer name={$t('settings.clear')}>
+    <SettingContainer name={$t('settings.clear')} desc={$t('settings.clear_desc')}>
         <ButtonComponent buttonText={$t('settings.clear_label')} styles="mod-warning" changeFunc={() => $plugin.clearPluginData()} />
     </SettingContainer>
     <!-- Debugging -->
     <SettingContainer name={$t('settings.debugging')} isHeading={true} />
-    <SettingContainer name={$t('settings.langsmith_key')}>
-        <TextComponent value={$data.debugginLangchainKey} changeFunc={changeLangsmithKey} />
+    <SettingContainer name={$t('settings.langsmith_key')} desc={$t('settings.langsmith_key_desc')}>
+        <TextComponent placeholder="ls__1c...4b" value={$data.debugginLangchainKey} changeFunc={changeLangsmithKey} />
     </SettingContainer>
-    <SettingContainer name={$t('settings.verbose')}>
+    <SettingContainer name={$t('settings.verbose')} desc={$t('settings.verbose_desc')}>
         <ToggleComponent isEnabled={$data.isVerbose} changeFunc={changeVerbosity} />
     </SettingContainer>
 </details>

@@ -52,9 +52,9 @@
     };
 </script>
 
-<SettingContainer name="OpenAI" isHeading={true} desc={$t('settings.openai.description')} />
+<SettingContainer name="OpenAI" isHeading={true} desc={$t('settings.openai.desc')} />
 <!-- OpenAI API Key -->
-<SettingContainer name={$t('settings.openai.api_key')}>
+<SettingContainer name={$t('settings.openai.api_key')} desc={$t('settings.openai.api_key_desc')}>
     <TextComponent styles={apiKeyStyles} value={openAIApiKey} placeholder="sk-...Lk" changeFunc={changeApiKey} blurFunc={hideApiKey} focusFunc={showApiKey} />
 </SettingContainer>
 <!-- OpenAI Gen Model -->
