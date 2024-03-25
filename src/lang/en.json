@@ -106,6 +106,7 @@
             "description": "Are you sure you want to delete the plugin data? Note that only the plugin data and the vector store data will be removed. All chat files inside your vault will not be affected."
         },
         "clear_label": "Clear",
+        "relaunch": "Relaunch",
         "autostart": "Autostart",
         "autostart_desc": "Automatically start the Smart Second Brain when Obsidian starts.",
         "debugging": "Debugging",

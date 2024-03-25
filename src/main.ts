@@ -221,6 +221,8 @@ export default class SecondBrainPlugin extends Plugin {
                         if (file.endsWith('vector-store.bin')) await this.app.vault.adapter.remove(file);
                     }
                     new Notice(t('notice.plugin_data_cleared'), 4000);
+                    await this.loadSettings();
+                    await this.activateView();
                 }
             },
             ''

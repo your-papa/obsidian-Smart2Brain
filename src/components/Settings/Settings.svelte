@@ -2,7 +2,7 @@
     import TextComponent from '../base/Text.svelte';
     import FFExcludeComponent from './FFExclude.svelte';
     import { plugin, data, papaState } from '../../store';
-    import { setIcon } from 'obsidian';
+    import { setIcon, App } from 'obsidian';
     import SettingContainer from './SettingContainer.svelte';
     import { LogLvl, Papa } from 'papa-ts';
     import ToggleComponent from '../base/Toggle.svelte';
@@ -118,7 +118,13 @@
     </SettingContainer>
     <!-- Clear Plugin Data -->
     <SettingContainer name={$t('settings.clear')} desc={$t('settings.clear_desc')}>
-        <ButtonComponent buttonText={$t('settings.clear_label')} styles="mod-warning" changeFunc={() => $plugin.clearPluginData()} />
+        <ButtonComponent
+            buttonText={$t('settings.clear_label')}
+            styles="mod-warning"
+            changeFunc={() => {
+                $plugin.clearPluginData();
+            }}
+        />
     </SettingContainer>
     <!-- Debugging -->
     <SettingContainer name={$t('settings.debugging')} isHeading={true} />
