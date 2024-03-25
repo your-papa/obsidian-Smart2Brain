@@ -141,20 +141,27 @@ export default class SmartSecondBrain {
         papaState.set('running');
         const cH = get(chatHistory);
         const userQuery = cH[cH.length - 1].content;
-        const responseStream = this.papa.run({
-            isRAG: get(data).isUsingRag,
-            userQuery,
-            chatHistory: serializeChatHistory(cH.slice(0, cH.length - 1)),
-            lang: get(data).assistantLanguage,
-        });
+        try {
+            const responseStream = this.papa.run({
+                isRAG: get(data).isUsingRag,
+                userQuery,
+                chatHistory: serializeChatHistory(cH.slice(0, cH.length - 1)),
+                lang: get(data).assistantLanguage,
+            });
 
-        for await (const response of responseStream) {
-            runState.set(response.status);
-            runContent.set(response.content);
-            if (get(runState) === 'stopped') {
-                papaState.set('idle');
-                return; // when used break it somehow returns the whole function
+            for await (const response of responseStream) {
+                runState.set(response.status);
+                runContent.set(response.content);
+                if (get(runState) === 'stopped') {
+                    papaState.set('idle');
+                    return; // when used break it somehow returns the whole function
+                }
             }
+        } catch (error) {
+            Log.error(error);
+            // papaState.set('error');
+            // errorState.set('run-failed');
+            new Notice(get(_)('notice.failed_run', { values: { error } }), 4000);
         }
         papaState.set('idle');
     }
