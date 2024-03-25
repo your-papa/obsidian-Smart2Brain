@@ -25,6 +25,7 @@ export const runContent = writable<string>('');
 export type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-pause' | 'running' | 'error' | 'uninitialized' | 'mode-change' | 'settings-change';
 export const papaState = writable<PapaState>('uninitialized');
 export const papaIndexingProgress = writable<number>(0);
+export const papaIndexingTimeLeft = writable<number>(0);
 
 export const cancelPullModel = writable<boolean>(false);
 

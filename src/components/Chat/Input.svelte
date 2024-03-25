@@ -89,7 +89,7 @@
         <div
             aria-label={$data.isUsingRag ? $t('chat.toggle_llm') : $t('chat.toggle_papa')}
             on:click={handleRAGToggle}
-            class={`h-[48px] w-[48px] *:!h-[48px] *:!w-[48px] hover:text-[--text-accent-hover] ${
+            class={`h-[48px] w-[48px] *:!h-[48px] *:!w-[48px] hover:text-[--text-accent-hover] hover:scale-110 transform duration-300 ease-in-out ${
                 $data.isUsingRag ? 'text-[--color-accent]' : 'text-[--text-normal]'
             }`}
         >
