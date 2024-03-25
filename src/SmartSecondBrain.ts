@@ -5,7 +5,7 @@ import { wildTest } from './components/Settings/FuzzyModal';
 import { isOllamaRunning, getOllamaModels } from './controller/Ollama';
 import { isAPIKeyValid } from './controller/OpenAI';
 import Log, { LogLvl } from './logging';
-import { data, papaState, errorState, papaIndexingProgress, chatHistory, serializeChatHistory, runState, runContent } from './store';
+import { data, papaState, errorState, papaIndexingProgress, chatHistory, serializeChatHistory, runState, runContent, papaIndexingTimeLeft } from './store';
 import { _ } from 'svelte-i18n';
 
 export default class SmartSecondBrain {
@@ -84,23 +84,34 @@ export default class SmartSecondBrain {
         papaState.set('indexing');
         let needsSave = false;
         try {
+            let lastTime = Date.now();
+            const timePerDoc = [];
+
+            let lastTotalDocs = 0;
             for await (const result of this.papa.embedDocuments(docs)) {
-                // embedNotice.setMessage(
-                //     `Indexing notes into your smart second brain... Added: ${result.numAdded}, Skipped: ${result.numSkipped}, Deleted: ${result.numDeleted}`
-                // );
                 needsSave = (!this.needsToSaveVectorStoreData && result.numAdded > 0) || result.numDeleted > 0;
                 const progress = ((result.numAdded + result.numSkipped) / docs.length) * 100;
                 papaIndexingProgress.set(Math.max(progress, get(papaIndexingProgress)));
-                // pause indexing on "indexing-stopped" state
+                const currentTime = Date.now();
+                timePerDoc.push(currentTime - lastTime);
+                const numberOfDocumentsRemaining = docs.length * (1 - get(papaIndexingProgress) / 100);
+                const averageTimePerDocumentInSeconds =
+                    timePerDoc.reduce((a, b) => a + b, 0) / timePerDoc.length / (result.numAdded + result.numSkipped - lastTotalDocs) / 1000;
+                lastTotalDocs = result.numAdded + result.numSkipped;
+                if (timePerDoc.length > 5) {
+                    timePerDoc.shift();
+                    papaIndexingTimeLeft.set(Math.ceil(averageTimePerDocumentInSeconds * numberOfDocumentsRemaining));
+                }
+                lastTime = currentTime;
                 if (get(papaState) === 'indexing-pause') break;
             }
-            // embedNotice.hide();
         } catch (e) {
             Log.error(e);
             papaState.set('error');
             // TODO add error state
             new Notice(t('notice.failed_indexing'), 4000);
         }
+
         this.needsToSaveVectorStoreData = needsSave;
         this.saveVectorStoreData();
         if (get(papaIndexingProgress) === 100) {
@@ -108,6 +119,12 @@ export default class SmartSecondBrain {
             papaIndexingProgress.set(0);
             papaState.set('idle');
         }
+    }
+
+    async cancelIndexing() {
+        // if (this.app.vault.adapter.exists(this.getVectorStorePath())) await this.app.vault.adapter.remove(this.getVectorStorePath());
+        papaState.set('uninitialized');
+        papaIndexingProgress.set(0);
     }
 
     canRunPapa() {

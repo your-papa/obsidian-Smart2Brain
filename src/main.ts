@@ -96,10 +96,7 @@ export default class SecondBrainPlugin extends Plugin {
 
         this.app.workspace.onLayoutReady(() => {
             const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT) || this.app.workspace.getLeavesOfType(VIEW_TYPE_SETUP);
-            if (leaves.length) {
-                this.leaf = leaves[0];
-                this.activateView();
-            }
+            if (leaves.length) this.leaf = leaves[0];
             if (get(data).isOnboarded && get(data).isAutostart) this.s2b.init();
         });
         this.registerEvent(
@@ -144,7 +141,7 @@ export default class SecondBrainPlugin extends Plugin {
             return this.chatView;
         });
 
-        this.addRibbonIcon('brain-circuit', 'Smart Second Brain', () => this.activateView());
+        this.addRibbonIcon('message-square', 'Chat', () => this.activateView());
 
         this.addSettingTab(new SettingsTab(this.app, this));
 
