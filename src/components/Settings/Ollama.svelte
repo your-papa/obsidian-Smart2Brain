@@ -52,7 +52,7 @@
     };
 </script>
 
-<SettingContainer name="Ollama" isHeading={true} desc={!isRunning ? $t('settings.ollama.description') : ''}>
+<SettingContainer name="Ollama" isHeading={true} desc={$t('settings.ollama.desc')}>
     <ButtonComponent
         iconId={'refresh-ccw'}
         changeFunc={async () => {
@@ -64,7 +64,7 @@
     /></SettingContainer
 >
 <!-- Ollama URL -->
-<SettingContainer name="Ollama URL">
+<SettingContainer name={$t('settings.ollama.base_url')} desc={$t('settings.ollama.base_url_desc')}>
     <ButtonComponent iconId={'rotate-cw'} changeFunc={resetOllamaBaseUrl} />
     <TextComponent
         bind:value={ollamaBaseUrl}
