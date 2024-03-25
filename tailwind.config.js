@@ -8,7 +8,7 @@ export default {
                     DEFAULT: 'hsl(var(--accent-h), var(--accent-s), var(--accent-l))',
                 },
                 secondary: {
-                    DEFAULT: 'var(--color-base-50)',
+                    DEFAULT: 'hsl(var(--accent-h), 10%, var(--accent-l))',
                 },
                 slate: {
                     0o0: 'var(--color-base-00)',
