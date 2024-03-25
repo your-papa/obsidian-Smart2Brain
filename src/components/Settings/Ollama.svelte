@@ -20,14 +20,14 @@
         installedOllamaModels = await getOllamaModels();
         ollamaModels = [...new Set(installedOllamaModels.concat(OllamaGenModelNames).concat(OllamaEmbedModelNames))];
         isRunning = await isOllamaRunning();
-        styleOllamaBaseUrl = isRunning ? '' : '!bg-[--background-modifier-error]';
+        styleOllamaBaseUrl = isRunning ? '' : '!border-[--background-modifier-error]';
     });
 
     const resetOllamaBaseUrl = async () => {
         ollamaBaseUrl = DEFAULT_SETTINGS.ollamaGenModel.baseUrl;
         await changeOllamaBaseUrl(ollamaBaseUrl);
         isRunning = await isOllamaRunning();
-        styleOllamaBaseUrl = isRunning ? '' : '!bg-[--background-modifier-error]';
+        styleOllamaBaseUrl = isRunning ? '' : '!border-[--background-modifier-error]';
     };
     const ollamaGenChange = (selected: string) => {
         $data.ollamaGenModel.model = selected;
@@ -73,7 +73,7 @@
         changeFunc={async (newBaseUrl) => {
             await changeOllamaBaseUrl(newBaseUrl);
             isRunning = await isOllamaRunning();
-            styleOllamaBaseUrl = isRunning ? '' : '!bg-[--background-modifier-error]';
+            styleOllamaBaseUrl = isRunning ? '' : '!border-[--background-modifier-error]';
         }}
     />
 </SettingContainer>

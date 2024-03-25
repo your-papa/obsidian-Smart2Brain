@@ -16,7 +16,7 @@
         isOpenAIAPIKeyValid = await isAPIKeyValid($data.openAIGenModel.openAIApiKey);
         openAIApiKey = $data.openAIGenModel.openAIApiKey;
         hideApiKey();
-        apiKeyStyles = openAIApiKey && !isOpenAIAPIKeyValid ? '!bg-[--background-modifier-error]' : '';
+        apiKeyStyles = openAIApiKey && !isOpenAIAPIKeyValid ? '!border-[--background-modifier-error]' : '';
     });
 
     const changeApiKey = async (newApiKey: string) => {
@@ -27,7 +27,7 @@
         $data.openAIEmbedModel.openAIApiKey = newApiKey;
         $plugin.saveSettings();
         $papaState = 'settings-change';
-        apiKeyStyles = openAIApiKey && !isOpenAIAPIKeyValid ? '!bg-[--background-modifier-error]' : '';
+        apiKeyStyles = openAIApiKey && !isOpenAIAPIKeyValid ? '!border-[--background-modifier-error]' : '';
     };
 
     const hideApiKey = () => {
