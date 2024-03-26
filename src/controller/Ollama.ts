@@ -2,6 +2,7 @@ import { Notice, requestUrl } from 'obsidian';
 import { plugin as p, data, papaState, cancelPullModel } from '../store';
 import { get } from 'svelte/store';
 import Log from '../logging';
+import { _ } from 'svelte-i18n';
 
 export async function isOllamaRunning() {
     const d = get(data);
@@ -57,6 +58,7 @@ export async function getOllamaModels(): Promise<string[]> {
 
 export async function deleteOllamaModels(): Promise<void> {
     const d = get(data);
+    const t = get(_);
     try {
         const modelsRes = await requestUrl({
             url: d.ollamaGenModel.baseUrl + '/api/delete',
@@ -65,8 +67,7 @@ export async function deleteOllamaModels(): Promise<void> {
                 'Content-Type': 'application/json',
             },
         });
-        //TODO langugage
-        modelsRes.status === 404 ? new Notice('No models to delete') : new Notice('Models deleted');
+        modelsRes.status === 404 ? new Notice(t('notice.no.models')) : new Notice(t('notice.models.deleted'));
     } catch (error) {
         Log.debug('Ollama is not running', error);
     }
@@ -84,6 +85,7 @@ export const changeOllamaBaseUrl = async (newBaseUrl: string) => {
 };
 
 export async function* pullOllamaModel(model: string) {
+    const t = get(_);
     Log.info('Pulling model from Ollama', model);
     try {
         const response = await fetch(`${get(data).ollamaEmbedModel.baseUrl}/api/pull`, {
@@ -106,7 +108,7 @@ export async function* pullOllamaModel(model: string) {
         cancelPullModel.subscribe((value: boolean) => {
             if (value) {
                 reader.cancel();
-                new Notice('Model pull cancelled', 1000);
+                new Notice(t('notice.model_pull_canceled'), 1000);
             }
         });
 

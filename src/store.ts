@@ -16,7 +16,13 @@ export const isEditingAssistantMessage = writable<boolean>();
 export const chatInput = writable<string>('');
 export const isChatInSidebar = writable<boolean>(true);
 
-export type ErrorState = 'ollama-gen-model-not-installed' | 'ollama-embed-model-not-installed' | 'ollama-not-running' | 'ollama-origins-not-set' | 'run-failed';
+export type ErrorState =
+    | 'ollama-gen-model-not-installed'
+    | 'ollama-embed-model-not-installed'
+    | 'ollama-not-running'
+    | 'ollama-origins-not-set'
+    | 'run-failed'
+    | 'failed-indexing';
 export const errorState = writable<ErrorState>();
 
 export const runState = writable<PapaResponseStatus>('startup');
