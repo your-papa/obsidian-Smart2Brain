@@ -110,6 +110,8 @@
         "relaunch": "Relaunch",
         "autostart": "Autostart",
         "autostart_desc": "Automatically start the Smart Second Brain when Obsidian starts.",
+        "num_docs_retrieve": "Documents to retrieve",
+        "num_docs_retrieve_desc": "The maximum amount of documents to retrieve from your vault. Note that documents are not equivalent to notes.",
         "debugging": "Debugging",
         "langsmith_key": "Langsmith API Key",
         "langsmith_key_desc": "Provide a Langsmith API Key if you want to trace and evaluate the internals of your Smart Second Brain.",
