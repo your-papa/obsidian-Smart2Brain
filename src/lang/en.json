@@ -39,6 +39,7 @@
         "reset_assistant_prompt": "Reset the initial assistant message",
         "retrieving": "Retrieving",
         "reducing": "Reducing {num} Notes",
+        "stopped": "Stopped!",
         "user": "You",
         "assistant": "Assistant",
         "save": "Save the Chat to a Note",

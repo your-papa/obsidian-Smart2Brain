@@ -2,22 +2,10 @@
     import InputComponent from './Input.svelte';
     import QuickSettingsDrawer from './QuickSettingsDrawer.svelte';
     import { Notice } from 'obsidian';
-    import { afterUpdate } from 'svelte';
     import DotAnimation from '../base/DotAnimation.svelte';
     import MessageContainer from './MessageContainer.svelte';
     import { t } from 'svelte-i18n';
-    import {
-        papaState,
-        chatHistory,
-        isChatInSidebar,
-        chatInput,
-        isEditing,
-        isEditingAssistantMessage,
-        type ChatMessage,
-        runContent,
-        runState,
-        data,
-    } from '../../store';
+    import { papaState, chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage, runContent, runState, data } from '../../store';
     import {
         onClick,
         onMouseOver,
@@ -41,9 +29,9 @@
     }
     let contentNode: HTMLElement;
 
-    afterUpdate(() => {
-        if (contentNode && $runState === 'generating' && $runContent) renderMarkdown(contentNode, $runContent);
-    });
+    $: if (contentNode && ($runState === 'generating' || $runState === 'stopped') && $runContent) {
+        renderMarkdown(contentNode, $runContent);
+    }
 
     $: if ($runState === 'retrieving' && $runContent == '0') {
         new Notice($t('notice.no_notes_retrieved'));
@@ -71,6 +59,7 @@
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
 <!-- svelte-ignore a11y-no-static-element-interactions -->
+<!-- svelte-ignore a11y-mouse-events-have-key-events -->
 <div class="--background-modifier-border flex h-full flex-col gap-1">
     <QuickSettingsDrawer />
     <div
@@ -81,17 +70,11 @@
         {#each $chatHistory as message (message.id)}
             <MessageContainer role={message.role}>
                 {#if message.role === 'User'}
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <!-- svelte-ignore a11y-mouse-events-have-key-events -->
                     <span bind:this={editElem} on:mouseover={onMouseOver} on:click={onClick} use:renderMarkdown={message.content} />
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <div class="flex {$data.isChatComfy ? 'justify-end' : ''} gap-1 opacity-0 group-hover:opacity-100">
                         {#if $isEditing && editMessageId === message.id}
                             <span aria-label={$t('chat.copy')} class={iconStyle} on:click|preventDefault={cancelEditing} use:icon={'x-circle'} />
                         {:else}
-                            <!-- svelte-ignore a11y-no-static-element-interactions -->
                             <span
                                 aria-label={$t('chat.edit')}
                                 class={iconStyle}
@@ -101,18 +84,11 @@
                         {/if}
                     </div>
                 {:else}
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <!-- svelte-ignore a11y-mouse-events-have-key-events -->
                     <span on:mouseover={onMouseOver} use:renderMarkdown={message.content} on:click={onClick} bind:this={initialAssistantMessageSpan} />
                     <div class="flex gap-1 opacity-0 group-hover:opacity-100">
                         {#if !$isEditingAssistantMessage}
-                            <!-- svelte-ignore a11y-no-static-element-interactions -->
-                            <!-- svelte-ignore a11y-click-events-have-key-events -->
                             <span aria-label={$t('chat.copy')} class={iconStyle} on:click={() => toClipboard(message.content)} use:icon={'copy'} />
                             {#if $chatHistory.indexOf(message) !== 0}
-                                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                                <!-- svelte-ignore a11y-click-events-have-key-events -->
                                 <span
                                     aria-label={$t('chat.regenerate')}
                                     class={iconStyle}
@@ -121,8 +97,6 @@
                                 />
                             {/if}
                             {#if $chatHistory.length === 1}
-                                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                                <!-- svelte-ignore a11y-click-events-have-key-events -->
                                 <span
                                     aria-label={$t('chat.change_assistant_prompt')}
                                     class={iconStyle}
@@ -131,16 +105,12 @@
                                 />
                             {/if}
                         {:else}
-                            <!-- svelte-ignore a11y-click-events-have-key-events -->
-                            <!-- svelte-ignore a11y-no-static-element-interactions -->
                             <span
                                 aria-label={$t('chat.cancel_edit')}
                                 class={iconStyle}
                                 on:click|preventDefault={() => cancelEditingInitialAssistantMessage(initialAssistantMessageSpan)}
                                 use:icon={'x-circle'}
                             />
-                            <!-- svelte-ignore a11y-click-events-have-key-events -->
-                            <!-- svelte-ignore a11y-no-static-element-interactions -->
                             <span
                                 aria-label={$t('chat.reset_assistant_prompt')}
                                 class={iconStyle}
@@ -160,12 +130,20 @@
                     <p>{$t('chat.retrieving')}<DotAnimation /></p>
                 {:else if $runState === 'reducing'}
                     <p>{$t('chat.reducing', { values: { num: $runContent } })}<DotAnimation /></p>
-                {:else if $runState === 'generating' && $runContent}
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <!-- svelte-ignore a11y-mouse-events-have-key-events -->
+                {:else if $runState === 'generating'}
                     <span bind:this={contentNode} style="background: transparent;" />
                 {/if}
+            </MessageContainer>
+        {:else if $papaState === 'idle' && $runState === 'stopped'}
+            <MessageContainer role="Assistant">
+                <span bind:this={contentNode} style="background: transparent;" />
+                <p>{$t('chat.stopped')}</p>
+                <span
+                    aria-label={$t('chat.regenerate')}
+                    class={iconStyle + ' opacity-0 group-hover:opacity-100'}
+                    on:click|preventDefault={() => redoGeneration()}
+                    use:icon={'refresh-cw'}
+                />
             </MessageContainer>
         {/if}
     </div>

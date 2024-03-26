@@ -45,7 +45,6 @@
             }
 
             .cls-11 {
-                fill: #8a5cf5;
                 stroke-width: 0px;
             }
 

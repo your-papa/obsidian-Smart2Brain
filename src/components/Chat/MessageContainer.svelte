@@ -1,11 +1,8 @@
 <script lang="ts">
-    import { afterUpdate, onMount } from 'svelte';
-    import { data, isChatInSidebar } from '../../store';
+    import { data } from '../../store';
     import { t } from 'svelte-i18n';
 
     export let role: 'User' | 'Assistant';
-
-    let color: string;
 </script>
 
 {#if role === 'User'}
