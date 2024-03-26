@@ -214,6 +214,10 @@ export default class SmartSecondBrain {
         if (this.papa) this.papa.setSimilarityThreshold(value);
     }
 
+    setNumOfDocsToRetrieve(k: number) {
+        if (this.papa) this.papa.setNumOfDocsToRetrieve(k);
+    }
+
     setGenModel(genModel: GenModel) {
         if (this.papa) this.papa.setGenModel(genModel);
     }
