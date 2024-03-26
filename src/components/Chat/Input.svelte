@@ -16,7 +16,7 @@
     } from '../../store';
     import ProgressCircle from '../base/ProgressCircle.svelte';
     import { addMessage } from '../../controller/Messages';
-    import Logo from '../base/Logo.svelte';
+    import Logo from '../Logos/LogoSimple.svelte';
 
     export let textarea: HTMLTextAreaElement;
 
@@ -87,7 +87,7 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-static-element-interactions -->
         <div
-            aria-label={$data.isUsingRag ? $t('chat.toggle_llm') : $t('chat.toggle_papa')}
+            aria-label={$data.isUsingRag ? $t('chat.toggle_papa') : $t('chat.toggle_llm')}
             on:click={handleRAGToggle}
             class={`h-[48px] w-[48px] *:!h-[48px] *:!w-[48px] hover:text-[--text-accent-hover] hover:scale-110 transform duration-300 ease-in-out ${
                 $data.isUsingRag ? 'text-[--color-accent]' : 'text-[--text-normal]'

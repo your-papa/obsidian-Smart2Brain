@@ -62,6 +62,10 @@
     };
 </script>
 
+<!-- Autostart -->
+<SettingContainer name={$t('settings.autostart')} desc={$t('settings.autostart_desc')}>
+    <ToggleComponent isEnabled={$data.isAutostart} changeFunc={changeAutostart} />
+</SettingContainer>
 <!-- Exclude Folders -->
 <SettingContainer name={$t('settings.excludeff')} desc={$t('settings.excludeff_desc')}><FFExcludeComponent /></SettingContainer>
 {#if $data.excludeFF.length !== 0}
@@ -113,9 +117,6 @@
     <!-- <SettingContainer name="Num. of Docs to Retrieve"> -->
     <!--     <TextComponent inputType="number" value={$data.docRetrieveNum} changeFunc={(docNum) => changeDocNum(parseInt(docNum))} /> -->
     <!-- </SettingContainer> -->
-    <SettingContainer name={$t('settings.autostart')} desc={$t('settings.autostart_desc')}>
-        <ToggleComponent isEnabled={$data.isAutostart} changeFunc={changeAutostart} />
-    </SettingContainer>
     <!-- Clear Plugin Data -->
     <SettingContainer name={$t('settings.clear')} desc={$t('settings.clear_desc')}>
         <ButtonComponent
