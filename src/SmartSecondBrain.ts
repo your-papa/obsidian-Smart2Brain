@@ -108,7 +108,7 @@ export default class SmartSecondBrain {
         } catch (e) {
             Log.error(e);
             papaState.set('error');
-            // TODO add error state
+            errorState.set('failed-indexing');
             new Notice(t('notice.failed_indexing'), 4000);
         }
 

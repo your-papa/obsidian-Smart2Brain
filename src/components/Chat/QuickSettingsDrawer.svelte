@@ -101,7 +101,6 @@
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'play'}
                 />
-                <!-- TODO User should be able to enable autostart from here or point to the settings page -->
             {:else if $papaState === 'loading'}
                 <LoadingAnimation />
             {:else if $papaState === 'indexing' || $papaState === 'indexing-pause'}
@@ -142,6 +141,14 @@
                 {:else if $errorState === 'ollama-embed-model-not-installed'}}
                     <h3 class="text-center text-primary">{$t('install_model', { values: { model: $data.ollamaEmbedModel.model } })}</h3>
                     <PullOllamaModel pullModel={$data.ollamaEmbedModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
+                {:else if $errorState === 'failed-indexing'}
+                    <h3 class="text-center">{$t('notice.failed_indexing')}</h3>
+                    <button
+                        aria-label={$t('quick_settings.retry_indexing')}
+                        on:click={() => $plugin.s2b.init()}
+                        class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+                        use:icon={'refresh-cw'}
+                    />
                 {:else}
                     <h3 class="text-center text-primary">{$t('quick_settings.error.other')}</h3>
                     <button

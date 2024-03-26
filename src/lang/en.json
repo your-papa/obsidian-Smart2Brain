@@ -25,7 +25,10 @@
         "error_pulling_model": "Failed to pull model from Ollama (Error: {error}). Please retry.",
         "copied_to_clipboard": "Copied to clipboard:\n{text}",
         "no_notes_retrieved": "No notes retrieved. Maybe lower the similarity threshold.",
-        "run_failed": "Failed to run Smart Second Brain (Error: {error}). Please retry."
+        "run_failed": "Failed to run Smart Second Brain (Error: {error}). Please retry.",
+        "models_deleted": "Models deleted",
+        "no_models": "No models to delete",
+        "model_pull_canceled": "Model pull cancelled"
     },
     "chat": {
         "edit": "Edit query and regenerate answer",
@@ -49,6 +52,7 @@
         "input_placeholder": "Chat with your Smart Second Brain..."
     },
     "onboarding": {
+        "welcome_msg": "Welcome to your Smart Second Brain! Your personal AI assistant that helps you to find information in your notes.",
         "setup": "Setup",
         "test": "Test",
         "privacy_mode_note": "Your assistant is running in privacy mode. That means it is not connected to the internet and is running fully locally by leveraging Ollama.",
