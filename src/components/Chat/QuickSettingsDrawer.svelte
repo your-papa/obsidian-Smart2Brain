@@ -183,7 +183,7 @@
                     </div>
                     <div class="flex h-8 items-center justify-between">
                         {$t('quick_settings.creativity')}
-                        <div use:icon={'help'} aria-label={$t('tooltip.creativity')} class="ml-1 h-[18px] mr-auto" />
+                        <div use:icon={'help'} aria-label={$t('tooltip.creativity')} class="ml-1 mr-auto h-[18px]" />
                         <div class="flex items-center">
                             <output>{temperature}%</output>
                             <input class="slider" type="range" bind:value={temperature} on:blur={setTemperature} min="0" max="100" />
@@ -192,7 +192,7 @@
                     {#if $data.isUsingRag}
                         <div class="flex h-8 items-center justify-between">
                             {$t('quick_settings.similarity_threshold')}
-                            <div use:icon={'help'} aria-label={$t('tooltip.similarity')} class="ml-1 h-[18px] mr-auto" />
+                            <div use:icon={'help'} aria-label={$t('tooltip.similarity')} class="ml-1 mr-auto h-[18px]" />
                             <div class="flex items-center">
                                 <output>{similarityThreshold}%</output>
                                 <input class="slider" type="range" bind:value={similarityThreshold} on:blur={setSimilarityThreshold} min="0" max="100" />
