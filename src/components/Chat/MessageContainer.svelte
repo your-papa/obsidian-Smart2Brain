@@ -1,8 +1,11 @@
 <script lang="ts">
+    import { afterUpdate, onMount } from 'svelte';
     import { data, isChatInSidebar } from '../../store';
     import { t } from 'svelte-i18n';
 
     export let role: 'User' | 'Assistant';
+
+    let color: string;
 </script>
 
 {#if role === 'User'}
@@ -20,17 +23,12 @@
         </div>
     {/if}
 {:else if $data.isChatComfy}
-    <div class="group ml-4 my-4 w-fit max-w-[80%] rounded-t-lg rounded-br-lg bg-[--background-primary-alt] px-4 pb-1 pt-[1px] [&_p]:mb-2">
+    <div class="group my-4 ml-4 w-fit max-w-[80%] rounded-t-lg rounded-br-lg bg-[--background-primary-alt] px-4 pb-1 pt-[1px] [&_p]:mb-2">
         <slot />
     </div>
 {:else}
-    <div
-        class="group border-x-0 border-b border-t-0 border-solid border-[--background-modifier-border] p-2 pr-4 {$isChatInSidebar
-            ? 'bg-[--background-secondary-alt]'
-            : 'bg-[--background-primary-alt]'}"
-    >
+    <div class="group border-x-0 border-b border-t-0 border-solid border-[--background-modifier-border] bg-[--background-primary-alt] p-2 pr-4">
         <div class="mt-2 font-bold text-[--text-accent]">{$t('chat.assistant')}</div>
         <slot />
     </div>
 {/if}
-
