@@ -23,7 +23,7 @@
     });
 </script>
 
-<svg class="w-6 h-6 -rotate-90" viewBox="0 0 100 100">
+<svg class="h-6 w-6 -rotate-90" viewBox="0 0 100 100">
     <circle
         class="stroke-current {$isChatInSidebar ? 'text-[--background-secondary-alt]' : 'text-[--background-primary-alt]'}"
         fill="none"

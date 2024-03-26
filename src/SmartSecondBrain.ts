@@ -108,7 +108,7 @@ export default class SmartSecondBrain {
         } catch (e) {
             Log.error(e);
             papaState.set('error');
-            // TODO add error state
+            errorState.set('failed-indexing');
             new Notice(t('notice.failed_indexing'), 4000);
         }
 
@@ -139,29 +139,26 @@ export default class SmartSecondBrain {
 
     async runPapa() {
         papaState.set('running');
-        const cH = get(chatHistory);
-        const userQuery = cH[cH.length - 1].content;
         try {
+            const cH = get(chatHistory);
+            const userQuery = cH[cH.length - 1].content;
             const responseStream = this.papa.run({
                 isRAG: get(data).isUsingRag,
                 userQuery,
                 chatHistory: serializeChatHistory(cH.slice(0, cH.length - 1)),
                 lang: get(data).assistantLanguage,
             });
-
             for await (const response of responseStream) {
                 runState.set(response.status);
                 runContent.set(response.content);
-                if (get(runState) === 'stopped') {
-                    papaState.set('idle');
-                    return; // when used break it somehow returns the whole function
-                }
             }
         } catch (error) {
-            Log.error(error);
+            const errorMsg = get(_)('notice.run_failed', { values: { error } });
+            // Log.error(errorMsg);
+            runContent.set(errorMsg);
             // papaState.set('error');
             // errorState.set('run-failed');
-            new Notice(get(_)('notice.failed_run', { values: { error } }), 4000);
+            new Notice(errorMsg, 4000);
         }
         papaState.set('idle');
     }
@@ -212,6 +209,15 @@ export default class SmartSecondBrain {
 
     setSimilarityThreshold(value: number) {
         if (this.papa) this.papa.setSimilarityThreshold(value);
+    }
+
+    stopRun() {
+        if (this.papa) this.papa.stopRun();
+        papaState.set('idle');
+    }
+
+    setNumOfDocsToRetrieve(k: number) {
+        if (this.papa) this.papa.setNumOfDocsToRetrieve(k);
     }
 
     setGenModel(genModel: GenModel) {

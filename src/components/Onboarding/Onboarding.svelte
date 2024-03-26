@@ -7,7 +7,7 @@
     import DaemonComponent from './OllamaDaemon.svelte';
     import IncognitoToggle from '../Settings/IncognitoToggle.svelte';
     import { t } from 'svelte-i18n';
-    import Logo from '../base/Logo.svelte';
+    import Logo from '../Logos/LogoDetailed.svelte';
 
     const osType = os.type();
 
@@ -16,11 +16,11 @@
 </script>
 
 <div class="mx-auto flex h-full w-full max-w-[500px] flex-col items-center overflow-auto pt-8">
-    <div class="w-40 h-40 mb-2">
+    <div class="mb-2 h-40 w-40">
         <Logo />
     </div>
-    <h1 class="text-[--text-normal]">{$t('onboarding.setup')}</h1>
-    <!-- TODO add welcoming message -->
+    <h1 class="mb-0 text-[--text-normal]">{$t('onboarding.setup')}</h1>
+    <p class="px-10">{$t('onboarding.welcome_msg')}</p>
     <IncognitoToggle />
     {#if $data.isIncognitoMode}
         <p class="px-10">

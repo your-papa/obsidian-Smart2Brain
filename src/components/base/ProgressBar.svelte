@@ -5,7 +5,7 @@
 
 <progress
     style="--dynamic-color: {$isChatInSidebar ? 'var(--background-secondary-alt)' : 'var(--background-primary-alt)'};"
-    class="custom-progress w-full h-2 my-2"
+    class="custom-progress border-1 my-2 h-2 w-full rounded-lg border border-solid border-[--background-modifier-border]"
     value={progress}
     max="100"
 />
