@@ -120,10 +120,10 @@ export const addMessage = (role: 'Assistant' | 'User', content: string) => {
     get(p).chatView.save();
 };
 
-export const redoGeneration = async (message: ChatMessage) => {
+export const redoGeneration = async (message?: ChatMessage) => {
     if (!get(p).s2b.canRunPapa()) return;
     const chatHistory = get(history);
-    const targetIndex = chatHistory.indexOf(message);
+    const targetIndex = message ? chatHistory.indexOf(message) : chatHistory.length;
     history.set(chatHistory.slice(0, targetIndex));
     get(p).chatView.save();
     await get(p).s2b.runPapa();

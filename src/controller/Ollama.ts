@@ -12,7 +12,6 @@ export async function isOllamaRunning() {
         if (response.status === 200) {
             return true;
         } else {
-            console.log(d.ollamaGenModel.baseUrl);
             Log.debug(`IsOllamaRunning, Unexpected status code: ${response.status}`);
             return false;
         }

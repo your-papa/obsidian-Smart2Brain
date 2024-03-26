@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Notice, setIcon } from 'obsidian';
+    import { setIcon } from 'obsidian';
     import { t } from 'svelte-i18n';
     import {
         plugin,
@@ -10,7 +10,6 @@
         papaState,
         papaIndexingProgress,
         isChatInSidebar,
-        runState,
         runContent,
         isEditing,
     } from '../../store';
@@ -73,6 +72,8 @@
 </script>
 
 <!-- save delete and rag settings slightly above input field -->
+<!-- svelte-ignore a11y-click-events-have-key-events -->
+<!-- svelte-ignore a11y-no-static-element-interactions -->
 <div class="relative">
     <div
         class="absolute -top-[62px] left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-t-2xl border border-solid border-x-[--background-modifier-border] border-b-transparent border-t-[--background-modifier-border] {$isChatInSidebar
@@ -80,12 +81,8 @@
             : 'bg-[--background-primary]'} pt-2 px-2"
     >
         {#if $chatHistory.length > 1}
-            <!-- svelte-ignore a11y-click-events-have-key-events -->
-            <!-- svelte-ignore a11y-no-static-element-interactions -->
             <div aria-label={$t('chat.save')} class={iconStyle} use:icon={'save'} on:click={() => $plugin.saveChat()} hidden={$papaState === 'running'} />
         {/if}
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-static-element-interactions -->
         <div
             aria-label={$data.isUsingRag ? $t('chat.toggle_papa') : $t('chat.toggle_llm')}
             on:click={handleRAGToggle}
@@ -96,8 +93,6 @@
             <Logo />
         </div>
         {#if $chatHistory.length > 1}
-            <!-- svelte-ignore a11y-click-events-have-key-events -->
-            <!-- svelte-ignore a11y-no-static-element-interactions -->
             <div
                 aria-label={$t('chat.delete')}
                 class={iconStyle}
@@ -120,7 +115,7 @@
     {#if $papaState === 'running'}
         <button
             aria-label={$t('chat.stop')}
-            on:click={() => ($runState = 'stopped')}
+            on:click={() => $plugin.s2b.stopRun()}
             class="h-8 rounded-r-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
             use:icon={'stop-circle'}
         />
