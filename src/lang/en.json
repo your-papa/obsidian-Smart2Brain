@@ -25,7 +25,10 @@
         "error_pulling_model": "Failed to pull model from Ollama (Error: {error}). Please retry.",
         "copied_to_clipboard": "Copied to clipboard:\n{text}",
         "no_notes_retrieved": "No notes retrieved. Maybe lower the similarity threshold.",
-        "run_failed": "Failed to run Smart Second Brain (Error: {error}). Please retry."
+        "run_failed": "Failed to run Smart Second Brain (Error: {error}). Please retry.",
+        "models_deleted": "Models deleted",
+        "no_models": "No models to delete",
+        "model_pull_canceled": "Model pull cancelled"
     },
     "chat": {
         "edit": "Edit query and regenerate answer",
@@ -36,6 +39,7 @@
         "reset_assistant_prompt": "Reset the initial assistant message",
         "retrieving": "Retrieving",
         "reducing": "Reducing {num} Notes",
+        "stopped": "Stopped!",
         "user": "You",
         "assistant": "Assistant",
         "save": "Save the Chat to a Note",
@@ -49,6 +53,7 @@
         "input_placeholder": "Chat with your Smart Second Brain..."
     },
     "onboarding": {
+        "welcome_msg": "Welcome to your Smart Second Brain! Your personal AI assistant that helps you to find information in your notes.",
         "setup": "Setup",
         "test": "Test",
         "privacy_mode_note": "Your assistant is running in privacy mode. That means it is not connected to the internet and is running fully locally by leveraging Ollama.",
@@ -101,7 +106,7 @@
         "excludeff_delete": "Delete from exclude list",
         "advanced": "Advanced Settings",
         "clear": "Clear Plugin Data",
-        "clear_desc": "Clear all plugin data and reinitialize the plugin. This will delete all plugin data and the vector store data. All chat files inside your vault will not be affected.",
+        "clear_desc": "This will delete all plugin data and the vector store data. All chat files inside your vault will not be affected.",
         "clear_modal": {
             "title": "Clear Plugin Data",
             "description": "Are you sure you want to delete the plugin data? Note that only the plugin data and the vector store data will be removed. All chat files inside your vault will not be affected."
@@ -110,6 +115,8 @@
         "relaunch": "Relaunch",
         "autostart": "Autostart",
         "autostart_desc": "Automatically start the Smart Second Brain when Obsidian starts.",
+        "num_docs_retrieve": "Documents to retrieve",
+        "num_docs_retrieve_desc": "The maximum amount of documents to retrieve from your vault. Note that documents are not equivalent to notes.",
         "debugging": "Debugging",
         "langsmith_key": "Langsmith API Key",
         "langsmith_key_desc": "Provide a Langsmith API Key if you want to trace and evaluate the internals of your Smart Second Brain.",

@@ -27,7 +27,6 @@ export interface PluginData {
     targetFolder: string;
     excludeFF: Array<string>;
     defaultChatName: string;
-    docRetrieveNum: number;
     debugginLangchainKey: string;
     isQuickSettingsOpen: boolean;
     isVerbose: boolean;
@@ -50,6 +49,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
         model: 'nomic-embed-text',
         baseUrl: 'http://localhost:11434',
         similarityThreshold: 0.75,
+        k: 100,
     },
     openAIGenModel: {
         model: 'gpt-3.5-turbo',
@@ -60,11 +60,11 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
         model: 'text-embedding-ada-002',
         openAIApiKey: '',
         similarityThreshold: 0.75,
+        k: 100,
     },
     targetFolder: 'Chats',
     defaultChatName: 'New Chat',
     excludeFF: ['Chats', '*.excalidraw.md'],
-    docRetrieveNum: 5,
     isQuickSettingsOpen: true,
     isVerbose: false,
     isOnboarded: false,

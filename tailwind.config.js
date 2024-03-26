@@ -5,7 +5,7 @@ export default {
         extend: {
             colors: {
                 primary: {
-                    DEFAULT: 'hsl(var(--accent-h), var(--accent-s), var(--accent-l))',
+                    DEFAULT: 'var(--color-accent)',
                 },
                 secondary: {
                     DEFAULT: 'hsl(var(--accent-h), 10%, var(--accent-l))',

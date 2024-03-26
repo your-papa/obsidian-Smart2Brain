@@ -94,18 +94,17 @@
     <div class="flex h-full w-full max-w-[500px] flex-col items-center justify-center">
         {#if isOpen}
             {#if $papaState === 'uninitialized'}
-                <h3 class="text-center">{$t('quick_settings.initialize')}</h3>
+                <h3 class="text-center text-primary">{$t('quick_settings.initialize')}</h3>
                 <button
                     aria-label={$t('quick_settings.initialize')}
                     on:click={() => $plugin.s2b.init()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'play'}
                 />
-                <!-- TODO User should be able to enable autostart from here or point to the settings page -->
             {:else if $papaState === 'loading'}
                 <LoadingAnimation />
             {:else if $papaState === 'indexing' || $papaState === 'indexing-pause'}
-                <h3 class="m-0">{$t('quick_settings.indexing_vault')}</h3>
+                <h3 class="m-0 text-primary">{$t('quick_settings.indexing_vault')}</h3>
                 <output class={$papaState === 'indexing' && $papaIndexingTimeLeft > 0 ? '' : 'invisible'}>{formatTime($papaIndexingTimeLeft)}</output>
                 <ProgressBar progress={$papaIndexingProgress} />
                 <div
@@ -137,13 +136,21 @@
                 </div>
             {:else if $papaState === 'error'}
                 {#if $errorState === 'ollama-gen-model-not-installed'}
-                    <h3 class="text-center">{$t('install_model', { values: { model: $data.ollamaGenModel.model } })}</h3>
+                    <h3 class="text-center text-primary">{$t('install_model', { values: { model: $data.ollamaGenModel.model } })}</h3>
                     <PullOllamaModel pullModel={$data.ollamaEmbedModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else if $errorState === 'ollama-embed-model-not-installed'}}
-                    <h3 class="text-center">{$t('install_model', { values: { model: $data.ollamaEmbedModel.model } })}</h3>
+                    <h3 class="text-center text-primary">{$t('install_model', { values: { model: $data.ollamaEmbedModel.model } })}</h3>
                     <PullOllamaModel pullModel={$data.ollamaEmbedModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
+                {:else if $errorState === 'failed-indexing'}
+                    <h3 class="text-center">{$t('notice.failed_indexing')}</h3>
+                    <button
+                        aria-label={$t('quick_settings.retry_indexing')}
+                        on:click={() => $plugin.s2b.init()}
+                        class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+                        use:icon={'refresh-cw'}
+                    />
                 {:else}
-                    <h3 class="text-center">{$t('quick_settings.error.other')}</h3>
+                    <h3 class="text-center text-primary">{$t('quick_settings.error.other')}</h3>
                     <button
                         aria-label={$t('quick_settings.retry_initialization')}
                         on:click={() => $plugin.s2b.init()}
@@ -152,7 +159,7 @@
                     />
                 {/if}
             {:else if $papaState === 'mode-change'}
-                <h3 class="text-center">{$t('quick_settings.mode_changed')}{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h3>
+                <h3 class="text-center text-primary">{$t('quick_settings.mode_changed')}{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h3>
                 <button
                     aria-label={$t('quick_settings.reinitialize')}
                     on:click={() => initSecondBrain()}
@@ -160,7 +167,7 @@
                     use:icon={'refresh-cw'}
                 />
             {:else if $papaState === 'settings-change'}
-                <h3 class="text-center">{$t('quick_settings.settings_changed')}</h3>
+                <h3 class="text-center text-primary">{$t('quick_settings.settings_changed')}</h3>
                 <button
                     aria-label={$t('quick_settings.reinitialize')}
                     on:click={() => $plugin.s2b.init()}
@@ -168,7 +175,7 @@
                     use:icon={'refresh-cw'}
                 />
             {:else}
-                <h2 class="mb-0">{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}</h2>
+                <h2 class="mb-0 text-primary">{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}</h2>
                 <p class="mt-1">
                     {$t('quick_settings.chat_via', { values: { model: $data.isIncognitoMode ? $data.ollamaGenModel.model : $data.openAIGenModel.model } })}
                 </p>
@@ -183,7 +190,7 @@
                     </div>
                     <div class="flex h-8 items-center justify-between">
                         {$t('quick_settings.creativity')}
-                        <div use:icon={'help'} aria-label={$t('tooltip.creativity')} class="ml-1 mr-auto" />
+                        <div use:icon={'help'} aria-label={$t('tooltip.creativity')} class="ml-1 mr-auto h-[18px]" />
                         <div class="flex items-center">
                             <output>{temperature}%</output>
                             <input class="slider" type="range" bind:value={temperature} on:blur={setTemperature} min="0" max="100" />
@@ -192,7 +199,7 @@
                     {#if $data.isUsingRag}
                         <div class="flex h-8 items-center justify-between">
                             {$t('quick_settings.similarity_threshold')}
-                            <div use:icon={'help'} aria-label={$t('tooltip.similarity')} class="ml-1 mr-auto" />
+                            <div use:icon={'help'} aria-label={$t('tooltip.similarity')} class="ml-1 mr-auto h-[18px]" />
                             <div class="flex items-center">
                                 <output>{similarityThreshold}%</output>
                                 <input class="slider" type="range" bind:value={similarityThreshold} on:blur={setSimilarityThreshold} min="0" max="100" />
