@@ -20,7 +20,7 @@
         </div>
     {/if}
 {:else if $data.isChatComfy}
-    <div class="group ml-4 mt-4 w-fit max-w-[80%] rounded-t-lg rounded-br-lg bg-[--background-primary-alt] px-4 pb-1 pt-[1px] [&_p]:mb-2">
+    <div class="group ml-4 my-4 w-fit max-w-[80%] rounded-t-lg rounded-br-lg bg-[--background-primary-alt] px-4 pb-1 pt-[1px] [&_p]:mb-2">
         <slot />
     </div>
 {:else}
@@ -33,3 +33,4 @@
         <slot />
     </div>
 {/if}
+
