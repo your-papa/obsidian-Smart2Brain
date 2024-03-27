@@ -5,10 +5,14 @@
     import { t } from 'svelte-i18n';
     import ProgressBar from '../base/ProgressBar.svelte';
     import { cancelPullModel } from '../../store';
+    import InputComponent from '../base/Text.svelte';
+    import SettingContainer from '../Settings/SettingContainer.svelte';
 
     export let onSuccessfulPull: () => void = () => {};
-    export let pullModel: string;
+    export let text: string;
+    export let desc = '';
 
+    let pullModel: string;
     let isPullingModel = false;
     let total: number = 0;
     let progress: number = 0;
@@ -52,29 +56,41 @@
     }
 </script>
 
-{#if !isPullingModel}
-    <button on:click={() => pullOllamaModelStream()}>Install</button>
-{:else}
-    <div class="flex w-full justify-between">
-        <div>
-            {status}
-            {#each ['', '.', '..', '...'] as sequence, i}
-                {#if i === index}
-                    {sequence}
-                {/if}
-            {/each}
+<div class="mb-1 flex items-center justify-between">
+    <div>
+        <div class="setting-item-name">{text}</div>
+        <div class="setting-item-description">{desc}</div>
+    </div>
+    <div class="flex flex-row justify-end gap-2">
+        <InputComponent styles="w-3/6" changeFunc={(v) => (pullModel = v)} />
+        <button on:click={() => pullOllamaModelStream()} disabled={isPullingModel}>Install</button>
+    </div>
+</div>
+{#if isPullingModel}
+    <div class="flex items-center gap-2">
+        <div class="flex w-full flex-col justify-center">
+            <div class="flex w-full justify-between">
+                <div>
+                    {status}
+                    {#each ['   ', '.  ', '.. ', '...'] as sequence, i}
+                        {#if i === index}
+                            {sequence}
+                        {/if}
+                    {/each}
+                </div>
+                {progress}% / {formatBytes(total)}
+            </div>
+            <ProgressBar {progress} />
         </div>
-        {progress}% / {formatBytes(total)}
         <button
             use:icon={'x'}
             aria-label={$t('pullModel.cancel')}
             on:click={() => {
                 $cancelPullModel = true;
             }}
-            class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
+            class="mb-1 h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
         />
     </div>
-    <ProgressBar {progress} />
 {/if}
 {#if isPullingError}
     <p>There was an error pulling the recommended model</p>

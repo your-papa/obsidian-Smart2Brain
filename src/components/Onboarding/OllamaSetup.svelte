@@ -51,11 +51,7 @@
 {#if isOrigin}
     <li>
         {$t('onboarding.ollama.install_model')}<br />
-        <div class="flex flex-wrap items-center justify-between">
-            {$t('onboarding.ollama.recommended_models')}
-            <input type="text" list="ollama-models" bind:value={pullModel} />
-        </div>
-        <PullOllamaModel {pullModel} onSuccessfulPull={async () => (ollamaModels = await getOllamaModels())} />
+        <PullOllamaModel text="Recommended" onSuccessfulPull={async () => (ollamaModels = await getOllamaModels())} />
     </li>
     {#if ollamaModels.length > 0}
         <li>

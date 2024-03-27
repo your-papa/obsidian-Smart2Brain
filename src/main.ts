@@ -6,6 +6,7 @@ import { _ } from 'svelte-i18n';
 
 import SmartSecondBrain from './SmartSecondBrain';
 import { ConfirmModal } from './components/Settings/ConfirmModal';
+import { PullModal } from './components/Modal/PullModal';
 import './lang/i18n';
 import Log from './logging';
 import { chatHistory, data, isChatInSidebar, plugin } from './store';
@@ -90,6 +91,7 @@ export default class SecondBrainPlugin extends Plugin {
 
     async onload() {
         plugin.set(this);
+        const t = get(_);
         await this.loadSettings();
         this.s2b = new SmartSecondBrain(this.app, this.manifest.dir);
         Log.setLogLevel(get(data).isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
@@ -141,7 +143,11 @@ export default class SecondBrainPlugin extends Plugin {
             return this.chatView;
         });
 
-        this.addRibbonIcon('message-square', 'Chat', () => this.activateView());
+        this.addRibbonIcon('message-square', t('ribbon.chat'), () => this.activateView());
+
+        this.addCommand({ id: 'open-chat', name: t('cmd.chat'), icon: 'message-square', callback: () => this.activateView() });
+
+        this.addCommand({ id: 'pull-model', name: t('cmd.pull_model'), icon: 'arrow-down-to-line', callback: () => new PullModal(this.app).open() });
 
         this.addSettingTab(new SettingsTab(this.app, this));
 

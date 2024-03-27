@@ -1,8 +1,17 @@
 {
+    "ribbon": {
+        "chat": "Open S2B Chat"
+    },
+    "cmd": {
+        "chat": "Open Chat",
+        "pull_model": "Pull Ollama Model"
+    },
     "modal": {
         "dont_show": "Don't show this again",
         "cancel": "Cancel",
-        "confirm": "Confirm"
+        "confirm": "Confirm",
+        "pull_model_name": "Pull Ollama Model",
+        "pull_model_desc": "Install a model from the Ollama registry"
     },
     "init_third_party_modal": {
         "title": "Run via Third-Party Services",
