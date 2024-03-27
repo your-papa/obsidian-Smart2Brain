@@ -3,6 +3,8 @@ import { plugin as p, data, papaState, cancelPullModel } from '../store';
 import { get } from 'svelte/store';
 import Log from '../logging';
 import { _ } from 'svelte-i18n';
+import { OllamaGenModels } from '../components/Settings/models';
+import { errorState } from '../store';
 
 export async function isOllamaRunning() {
     const d = get(data);
@@ -53,6 +55,41 @@ export async function getOllamaModels(): Promise<string[]> {
         Log.debug('Ollama is not running', error);
         return [];
     }
+}
+
+export async function ollamaGenChange(selected: string) {
+    const plugin = get(p);
+    const d = get(data);
+    const installedOllamaModels = await getOllamaModels();
+    data.update((data) => {
+        data.ollamaGenModel.model = selected;
+        data.ollamaGenModel.contextWindow = OllamaGenModels[selected] ? OllamaGenModels[selected].contextWindow : 2048;
+        return data;
+    });
+    plugin.saveSettings();
+    if (!installedOllamaModels.includes(selected)) {
+        papaState.set('error');
+        errorState.set('ollama-gen-model-not-installed');
+        return;
+    }
+    plugin.s2b.setGenModel(d.openAIGenModel);
+}
+
+export async function ollamaEmbedChange(selected: string) {
+    const plugin = get(p);
+    const installedOllamaModels = await getOllamaModels();
+    data.update((data) => {
+        data.ollamaGenModel.model = selected;
+        data.ollamaGenModel.contextWindow = OllamaGenModels[selected] ? OllamaGenModels[selected].contextWindow : 2048;
+        return data;
+    });
+    plugin.saveSettings();
+    if (!installedOllamaModels.includes(selected)) {
+        papaState.set('error');
+        errorState.set('ollama-embed-model-not-installed');
+        return;
+    }
+    papaState.set('settings-change');
 }
 
 export async function deleteOllamaModels(): Promise<void> {
