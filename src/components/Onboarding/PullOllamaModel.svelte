@@ -59,7 +59,7 @@
         </div>
         <div class="flex flex-row justify-end gap-2">
             <InputComponent styles="w-4/6" value={pullModel} changeFunc={(v) => (pullModel = v)} />
-            <button on:click={() => pullOllamaModelStream()}>Install</button>
+            <button on:click={() => pullOllamaModelStream()}>{$t('general.install')}</button>
         </div>
     </div>
 {:else}

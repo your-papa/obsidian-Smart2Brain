@@ -92,23 +92,6 @@ export async function ollamaEmbedChange(selected: string) {
     papaState.set('settings-change');
 }
 
-export async function deleteOllamaModels(): Promise<void> {
-    const d = get(data);
-    const t = get(_);
-    try {
-        const modelsRes = await requestUrl({
-            url: d.ollamaGenModel.baseUrl + '/api/delete',
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        });
-        modelsRes.status === 404 ? new Notice(t('notice.no.models')) : new Notice(t('notice.models.deleted'));
-    } catch (error) {
-        Log.debug('Ollama is not running', error);
-    }
-}
-
 export const changeOllamaBaseUrl = async (newBaseUrl: string) => {
     const d = get(data);
     const plugin = get(p);
@@ -119,6 +102,31 @@ export const changeOllamaBaseUrl = async (newBaseUrl: string) => {
     await plugin.saveSettings();
     papaState.set('settings-change');
 };
+
+export async function deleteOllamaModels(model: string): Promise<boolean> {
+    const d = get(data);
+    const t = get(_);
+    try {
+        const modelsRes = await requestUrl({
+            url: d.ollamaGenModel.baseUrl + '/api/delete',
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ name: model }),
+        });
+        if (modelsRes.status === 404) {
+            new Notice(t('notice.no_models', { values: { model } }), 4000);
+            return false;
+        } else if (modelsRes.status === 200) {
+            new Notice(t('notice.models_deleted', { values: { model } }), 4000);
+            return true;
+        }
+        return false;
+    } catch (error) {
+        Log.debug('Ollama is not running', error);
+    }
+}
 
 export async function* pullOllamaModel(model: string) {
     const t = get(_);

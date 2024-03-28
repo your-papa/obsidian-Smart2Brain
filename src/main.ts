@@ -14,6 +14,7 @@ import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
 import SettingsTab from './views/Settings';
+import { RemoveModal } from './components/Modal/RemoveModal';
 
 export interface PluginData {
     isChatComfy: boolean;
@@ -148,6 +149,8 @@ export default class SecondBrainPlugin extends Plugin {
         this.addCommand({ id: 'open-chat', name: t('cmd.chat'), icon: 'message-square', callback: () => this.activateView() });
 
         this.addCommand({ id: 'pull-model', name: t('cmd.pull_model'), icon: 'arrow-down-to-line', callback: () => new PullModal(this.app).open() });
+
+        this.addCommand({ id: 'remove-model', name: t('cmd.remove_model'), icon: 'trash', callback: () => new RemoveModal(this.app).open() });
 
         this.addSettingTab(new SettingsTab(this.app, this));
 
