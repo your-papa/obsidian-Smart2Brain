@@ -2,7 +2,6 @@
     import { onMount } from 'svelte';
     import { isOllamaRunning } from '../../controller/Ollama';
     import PullOllamaModel from '../Onboarding/PullOllamaModel.svelte';
-    import TextComponent from '../base/Text.svelte';
     import SettingContainer from '../Settings/SettingContainer.svelte';
     import { t } from 'svelte-i18n';
     import { data, plugin } from '../../store';
