@@ -100,7 +100,7 @@
                     aria-label={$t('quick_settings.initialize')}
                     on:click={() => $plugin.s2b.init()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
-                    use:icon={'play'}
+                    use:icon={'power'}
                 />
             {:else if $papaState === 'loading'}
                 <LoadingAnimation />

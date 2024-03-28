@@ -4,10 +4,11 @@
     import PullOllamaModel from '../Onboarding/PullOllamaModel.svelte';
     import SettingContainer from '../Settings/SettingContainer.svelte';
     import { t } from 'svelte-i18n';
-    import { data, plugin } from '../../store';
+    import { data } from '../../store';
     import { OllamaGenModelNames, OllamaEmbedModelNames } from '../Settings/models';
     import { getOllamaModels, ollamaGenChange, ollamaEmbedChange } from '../../controller/Ollama';
     import type { PullModal } from './PullModal';
+    import DotAnimation from '../base/DotAnimation.svelte';
 
     export let modal: PullModal;
 
@@ -26,6 +27,9 @@
 <div class="modal-content">
     {#if !isOllama}
         Ollama is Not Running
+    {:else if isOllama === undefined}
+        Loading
+        <DotAnimation />
     {:else}
         <PullOllamaModel
             text={$t('modal.pull_model_name')}
@@ -73,7 +77,4 @@
             </SettingContainer>
         {/if}
     {/if}
-</div>
-<div class="modal-button-container">
-    <button class="mod-cta" on:click={() => modal.close()}>{$t('modal.cancel')}</button>
 </div>

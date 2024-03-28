@@ -51,7 +51,7 @@
 {#if isOrigin}
     <li>
         {$t('onboarding.ollama.install_model')}<br />
-        <PullOllamaModel value={pullModel} text="Recommended" onSuccessfulPull={async () => (ollamaModels = await getOllamaModels())} />
+        <PullOllamaModel {pullModel} text="Recommended" onSuccessfulPull={async () => (ollamaModels = await getOllamaModels())} />
     </li>
     {#if ollamaModels.length > 0}
         <li>
