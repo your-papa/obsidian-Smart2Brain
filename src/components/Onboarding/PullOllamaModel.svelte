@@ -6,18 +6,19 @@
     import ProgressBar from '../base/ProgressBar.svelte';
     import { cancelPullModel } from '../../store';
     import InputComponent from '../base/Text.svelte';
-    import SettingContainer from '../Settings/SettingContainer.svelte';
+    import DotAnimation from '../base/DotAnimation.svelte';
 
     export let onSuccessfulPull: () => void = () => {};
-    export let text: string;
+    export let text = '';
     export let desc = '';
+    export let pullModel: string = '';
 
-    let pullModel: string;
     let isPullingModel = false;
     let total: number = 0;
     let progress: number = 0;
     let status: string = '';
     let isPullingError = false;
+    console.log('pullModel', pullModel);
 
     async function pullOllamaModelStream() {
         isPullingModel = true;
@@ -48,35 +49,26 @@
 
         return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
     }
-    let index = 0;
-    $: if (isPullingModel) {
-        setTimeout(() => {
-            index = (index + 1) % 4;
-        }, 300);
-    }
 </script>
 
-<div class="mb-1 flex items-center justify-between">
-    <div>
-        <div class="setting-item-name">{text}</div>
-        <div class="setting-item-description">{desc}</div>
+{#if !isPullingModel}
+    <div class="mb-1 flex items-center justify-between">
+        <div>
+            <div class="setting-item-name">{text}</div>
+            <div class="setting-item-description">{desc}</div>
+        </div>
+        <div class="flex flex-row justify-end gap-2">
+            <InputComponent styles="w-4/6" value={pullModel} changeFunc={(v) => (pullModel = v)} />
+            <button on:click={() => pullOllamaModelStream()}>Install</button>
+        </div>
     </div>
-    <div class="flex flex-row justify-end gap-2">
-        <InputComponent styles="w-3/6" changeFunc={(v) => (pullModel = v)} />
-        <button on:click={() => pullOllamaModelStream()} disabled={isPullingModel}>Install</button>
-    </div>
-</div>
-{#if isPullingModel}
-    <div class="flex items-center gap-2">
-        <div class="flex w-full flex-col justify-center">
+{:else}
+    <div class="flex w-full items-center gap-2">
+        <div class="flex w-full flex-col">
             <div class="flex w-full justify-between">
                 <div>
                     {status}
-                    {#each ['   ', '.  ', '.. ', '...'] as sequence, i}
-                        {#if i === index}
-                            {sequence}
-                        {/if}
-                    {/each}
+                    <DotAnimation />
                 </div>
                 {progress}% / {formatBytes(total)}
             </div>

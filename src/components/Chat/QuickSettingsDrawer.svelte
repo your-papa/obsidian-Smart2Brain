@@ -10,6 +10,7 @@
     import LoadingAnimation from '../base/LoadingAnimation.svelte';
     import { ConfirmModal } from '../Settings/ConfirmModal';
     import { get } from 'svelte/store';
+    import Ollama from '../Settings/Ollama.svelte';
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -51,13 +52,13 @@
     }
 
     const languages: { display: Language; value: Language }[] = Object.values(Languages).map((language: Language) => ({ display: language, value: language }));
+
     const setAssistantLanguage = (selected: Language) => {
         $data.assistantLanguage = selected;
         $data.initialAssistantMessageContent = Prompts[selected].initialAssistantMessage;
-        if ($chatHistory.length === 1) {
-            chatHistory.reset;
-            $plugin.saveSettings();
-        }
+        if ($chatHistory.length === 1) chatHistory.reset();
+
+        $plugin.saveSettings();
     };
     function setChatViewDensity() {
         $data.isChatComfy = !$data.isChatComfy;
@@ -136,8 +137,8 @@
                 </div>
             {:else if $papaState === 'error'}
                 {#if $errorState === 'ollama-gen-model-not-installed'}
-                    <h3 class="text-center text-primary">{$t('install_model', { values: { model: $data.ollamaGenModel.model } })}</h3>
-                    <PullOllamaModel pullModel={$data.ollamaEmbedModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
+                    <h3 class="text-center text-primary">{$t('quick_settings.error.install_model', { values: { model: $data.ollamaGenModel.model } })}</h3>
+                    <PullOllamaModel pullModel={$data.ollamaGenModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else if $errorState === 'ollama-embed-model-not-installed'}}
                     <h3 class="text-center text-primary">{$t('install_model', { values: { model: $data.ollamaEmbedModel.model } })}</h3>
                     <PullOllamaModel pullModel={$data.ollamaEmbedModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
