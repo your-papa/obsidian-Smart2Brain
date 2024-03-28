@@ -5,8 +5,10 @@
 </div>
 
 # Your Smart Second Brain
-> [!Note]
-> Still in Open Beta. MVP will be released mid-March.
+
+Your Smart Second Brain is an Obsidian plugin with the goal of improving your overall knowledge management.
+It serves as your personal assistant, powered by large language models like ChatGPT or Llama2. 
+It has the ability to directly access and process your notes, eliminating the need for manual prompt editing and it can operate completely offline, ensuring your data remains private and secure.
 
 # Features
 
