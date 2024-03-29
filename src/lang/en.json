@@ -175,7 +175,8 @@
                 "mixtral": "A high-quality Mixture of Experts (MoE) model with open weights by Mistral AI.",
                 "dolphin-mixtral": "Dolphin Mixtral (32000 Tokens)",
                 "phi": "Phi-2: a 2.7B language model by Microsoft Research that demonstrates outstanding reasoning and language understanding capabilities.",
-                "nomic-embed-text": "A high-performing open embedding model with a large token context window."
+                "nomic-embed-text": "A high-performing open embedding model with a large token context window.",
+                "mxbai-embed-large": "State-of-the-art large embedding model from mixedbread.ai."
             }
         }
     },
