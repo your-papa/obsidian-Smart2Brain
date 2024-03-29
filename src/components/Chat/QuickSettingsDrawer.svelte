@@ -139,8 +139,8 @@
                 {#if $errorState === 'ollama-gen-model-not-installed'}
                     <h3 class="text-center text-primary">{$t('quick_settings.error.install_model', { values: { model: $data.ollamaGenModel.model } })}</h3>
                     <PullOllamaModel pullModel={$data.ollamaGenModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
-                {:else if $errorState === 'ollama-embed-model-not-installed'}}
-                    <h3 class="text-center text-primary">{$t('install_model', { values: { model: $data.ollamaEmbedModel.model } })}</h3>
+                {:else if $errorState === 'ollama-embed-model-not-installed'}
+                    <h3 class="text-center text-primary">{$t('quick_settings.error.install_model', { values: { model: $data.ollamaEmbedModel.model } })}</h3>
                     <PullOllamaModel pullModel={$data.ollamaEmbedModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else if $errorState === 'failed-indexing'}
                     <h3 class="text-center">{$t('notice.failed_indexing')}</h3>
