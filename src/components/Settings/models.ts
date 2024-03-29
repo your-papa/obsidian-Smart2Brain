@@ -43,4 +43,4 @@ export const OllamaGenModels = {
 export const OpenAIGenModelNames = Object.keys(OpenAIGenModels);
 export const OllamaGenModelNames = Object.keys(OllamaGenModels);
 export const OpenAIEmbedModelNames = ['text-embedding-3-large', 'text-embedding-3-small', 'text-embedding-ada-002'];
-export const OllamaEmbedModelNames = ['nomic-embed-text'];
+export const OllamaEmbedModelNames = ['nomic-embed-text', 'mxbai-embed-large'];
