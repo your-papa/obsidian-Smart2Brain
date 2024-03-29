@@ -7,15 +7,21 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to fill out this bug report!
+        # Thanks for taking the time to fill out this bug report!
   - type: textarea
     id: what-happened
     attributes:
       label: What happened?
-      description: Also add a screenshot, if possible
+      description: Also add a screenshot, if possible.
       placeholder: Tell us what you see!
     validations:
       required: true
+        - type: textarea
+    id: error-log
+    attributes:
+      label: Error Statement
+      description: Enable Settings > Advanced > Developer Console logging. Open Developer Tools (⌘ Cmd + ⌥ Opt + I / Ctrl + Shift + I). Open Console Tab. 
+      placeholder: Tell us what you see!
   - type: input 
     id: version
     attributes:
