@@ -1,6 +1,6 @@
 import { get, writable } from 'svelte/store';
 import type SecondBrainPlugin from './main';
-import { DEFAULT_SETTINGS, type PluginData } from './main';
+import { type PluginData } from './main';
 import { nanoid } from 'nanoid';
 import { type PapaResponseStatus } from 'papa-ts';
 
@@ -56,7 +56,7 @@ function createChatHistory() {
             set([
                 {
                     role: 'Assistant',
-                    content: DEFAULT_SETTINGS.initialAssistantMessageContent,
+                    content: get(data).initialAssistantMessageContent,
                     id: nanoid(),
                 },
             ]);

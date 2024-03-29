@@ -3,6 +3,8 @@ import { plugin as p, data, papaState, cancelPullModel } from '../store';
 import { get } from 'svelte/store';
 import Log from '../logging';
 import { _ } from 'svelte-i18n';
+import { OllamaEmbedModelNames, OllamaGenModels } from '../components/Settings/models';
+import { errorState } from '../store';
 
 export async function isOllamaRunning() {
     const d = get(data);
@@ -55,21 +57,38 @@ export async function getOllamaModels(): Promise<string[]> {
     }
 }
 
-export async function deleteOllamaModels(): Promise<void> {
+export async function ollamaGenChange(selected: string) {
+    const plugin = get(p);
     const d = get(data);
-    const t = get(_);
-    try {
-        const modelsRes = await requestUrl({
-            url: d.ollamaGenModel.baseUrl + '/api/delete',
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        });
-        modelsRes.status === 404 ? new Notice(t('notice.no.models')) : new Notice(t('notice.models.deleted'));
-    } catch (error) {
-        Log.debug('Ollama is not running', error);
+    const installedOllamaModels = await getOllamaModels();
+    data.update((data) => {
+        data.ollamaGenModel.model = selected;
+        data.ollamaGenModel.contextWindow = OllamaGenModels[selected] ? OllamaGenModels[selected].contextWindow : 2048;
+        return data;
+    });
+    plugin.saveSettings();
+    if (!installedOllamaModels.includes(selected)) {
+        papaState.set('error');
+        errorState.set('ollama-gen-model-not-installed');
+        return;
     }
+    plugin.s2b.setGenModel(d.openAIGenModel);
+}
+
+export async function ollamaEmbedChange(selected: string) {
+    const plugin = get(p);
+    const installedOllamaModels = await getOllamaModels();
+    data.update((data) => {
+        data.ollamaEmbedModel.model = selected;
+        return data;
+    });
+    plugin.saveSettings();
+    if (!installedOllamaModels.includes(selected)) {
+        papaState.set('error');
+        errorState.set('ollama-embed-model-not-installed');
+        return;
+    }
+    papaState.set('settings-change');
 }
 
 export const changeOllamaBaseUrl = async (newBaseUrl: string) => {
@@ -82,6 +101,31 @@ export const changeOllamaBaseUrl = async (newBaseUrl: string) => {
     await plugin.saveSettings();
     papaState.set('settings-change');
 };
+
+export async function deleteOllamaModels(model: string): Promise<boolean> {
+    const d = get(data);
+    const t = get(_);
+    try {
+        const modelsRes = await requestUrl({
+            url: d.ollamaGenModel.baseUrl + '/api/delete',
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ name: model }),
+        });
+        if (modelsRes.status === 404) {
+            new Notice(t('notice.no_models', { values: { model } }), 4000);
+            return false;
+        } else if (modelsRes.status === 200) {
+            new Notice(t('notice.models_deleted', { values: { model } }), 4000);
+            return true;
+        }
+        return false;
+    } catch (error) {
+        Log.debug('Ollama is not running', error);
+    }
+}
 
 export async function* pullOllamaModel(model: string) {
     const t = get(_);

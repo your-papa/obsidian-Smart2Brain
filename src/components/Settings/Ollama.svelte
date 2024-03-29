@@ -6,7 +6,7 @@
     import TextComponent from '../base/Text.svelte';
     import SettingContainer from './SettingContainer.svelte';
     import ButtonComponent from '../base/Button.svelte';
-    import { changeOllamaBaseUrl, getOllamaModels, isOllamaRunning } from '../../controller/Ollama';
+    import { changeOllamaBaseUrl, getOllamaModels, isOllamaRunning, ollamaEmbedChange, ollamaGenChange } from '../../controller/Ollama';
     import { OllamaGenModelNames, OllamaGenModels, OllamaEmbedModelNames } from './models';
     import { onMount } from 'svelte';
 
@@ -28,27 +28,6 @@
         await changeOllamaBaseUrl(ollamaBaseUrl);
         isRunning = await isOllamaRunning();
         styleOllamaBaseUrl = isRunning ? '' : '!border-[--background-modifier-error]';
-    };
-    const ollamaGenChange = (selected: string) => {
-        $data.ollamaGenModel.model = selected;
-        $data.ollamaGenModel.contextWindow = OllamaGenModels[selected] ? OllamaGenModels[selected].contextWindow : 2048;
-        $plugin.saveSettings();
-        if (!installedOllamaModels.includes(selected)) {
-            papaState.set('error');
-            errorState.set('ollama-gen-model-not-installed');
-            return;
-        }
-        $plugin.s2b.setGenModel($data.openAIGenModel);
-    };
-    const ollamaEmbedChange = (selected: string) => {
-        $data.ollamaEmbedModel.model = selected;
-        $plugin.saveSettings();
-        if (!installedOllamaModels.includes(selected)) {
-            papaState.set('error');
-            errorState.set('ollama-embed-model-not-installed');
-            return;
-        }
-        papaState.set('settings-change');
     };
 </script>
 
