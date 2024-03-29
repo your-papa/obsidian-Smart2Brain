@@ -21,7 +21,7 @@ body:
     attributes:
       label: Error Statement
       description: Enable Settings > Advanced > Developer Console logging. Open Developer Tools (⌘ Cmd + ⌥ Opt + I / Ctrl + Shift + I). Open Console Tab. 
-      placeholder: Tell us what you see!
+      placeholder: Obsidian Developer Console
   - type: input 
     id: version
     attributes:
@@ -34,6 +34,7 @@ body:
     id: debug-info
     attributes:
       label: Debug Info
+      placeholder: SYSTEM INFO: ...
       description: In Obsidian open Command Palette > Show debug info
     validations:
       required: true
