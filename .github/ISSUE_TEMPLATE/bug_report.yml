@@ -16,7 +16,7 @@ body:
       placeholder: Tell us what you see!
     validations:
       required: true
-        - type: textarea
+  - type: textarea
     id: error-log
     attributes:
       label: Error Statement
