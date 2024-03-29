@@ -3,7 +3,7 @@ import { plugin as p, data, papaState, cancelPullModel } from '../store';
 import { get } from 'svelte/store';
 import Log from '../logging';
 import { _ } from 'svelte-i18n';
-import { OllamaGenModels } from '../components/Settings/models';
+import { OllamaEmbedModelNames, OllamaGenModels } from '../components/Settings/models';
 import { errorState } from '../store';
 
 export async function isOllamaRunning() {
@@ -79,8 +79,7 @@ export async function ollamaEmbedChange(selected: string) {
     const plugin = get(p);
     const installedOllamaModels = await getOllamaModels();
     data.update((data) => {
-        data.ollamaGenModel.model = selected;
-        data.ollamaGenModel.contextWindow = OllamaGenModels[selected] ? OllamaGenModels[selected].contextWindow : 2048;
+        data.ollamaEmbedModel.model = selected;
         return data;
     });
     plugin.saveSettings();
