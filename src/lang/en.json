@@ -1,8 +1,28 @@
 {
+    "general": {
+        "delete": "Delete",
+        "install": "Install"
+    },
+    "ribbon": {
+        "chat": "Open S2B Chat"
+    },
+    "cmd": {
+        "chat": "Open Chat",
+        "pull_model": "Pull Ollama Model",
+        "remove_model": "Remove Ollama Model"
+    },
     "modal": {
         "dont_show": "Don't show this again",
         "cancel": "Cancel",
-        "confirm": "Confirm"
+        "confirm": "Confirm",
+        "pull_model_name": "Pull Ollama Model",
+        "pull_model_desc": "Install a model from the Ollama registry",
+        "remove": {
+            "name": "Remove Ollama Model",
+            "desc": "Remove an installed model from your system",
+            "success": "Model removed successfully",
+            "error": "Failed to remove model. Model might not be installed"
+        }
     },
     "init_third_party_modal": {
         "title": "Run via Third-Party Services",
@@ -26,8 +46,8 @@
         "copied_to_clipboard": "Copied to clipboard:\n{text}",
         "no_notes_retrieved": "No notes retrieved. Maybe lower the similarity threshold.",
         "run_failed": "Failed to run Smart Second Brain (Error: {error}). Please retry.",
-        "models_deleted": "Models deleted",
-        "no_models": "No models to delete",
+        "models_deleted": "The Model {model} has been deleted",
+        "no_models": "The model {model} was not found",
         "model_pull_canceled": "Model pull cancelled"
     },
     "chat": {
@@ -58,8 +78,8 @@
         "test": "Test",
         "privacy_mode_note": "Your assistant is running in privacy mode. That means it is not connected to the internet and is running fully locally by leveraging Ollama.",
         "openai_mode_note": "Your assistant is using third party services to run. That means you will have to share all your personal information with these services and your Smart Second Brain needs to be connected to the internet to leverage OpenAIs large language models like ChatGPT.",
-        "init": "Initialize your Smart Second Brain",
-        "init_label": "Click to initialize",
+        "init": "Start your Smart Second Brain",
+        "init_label": "Click to Start",
         "ollama": {
             "deamon": {
                 "install": "Install Ollama",
@@ -155,12 +175,13 @@
                 "mixtral": "A high-quality Mixture of Experts (MoE) model with open weights by Mistral AI.",
                 "dolphin-mixtral": "Dolphin Mixtral (32000 Tokens)",
                 "phi": "Phi-2: a 2.7B language model by Microsoft Research that demonstrates outstanding reasoning and language understanding capabilities.",
-                "nomic-embed-text": "A high-performing open embedding model with a large token context window."
+                "nomic-embed-text": "A high-performing open embedding model with a large token context window.",
+                "mxbai-embed-large": "State-of-the-art large embedding model from mixedbread.ai."
             }
         }
     },
     "quick_settings": {
-        "initialize": "Initialize your Smart Second Brain",
+        "initialize": "Start your Smart Second Brain",
         "indexing_vault": "Indexing vault",
         "time_left_minutes": "About {minutes}min {seconds}s remaining...",
         "time_left_seconds": "About {seconds}s remaining...",
