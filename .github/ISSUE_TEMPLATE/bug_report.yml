@@ -35,7 +35,7 @@ body:
     attributes:
       label: Debug Info
       description: In Obsidian open Command Palette > Show debug info
-       placeholder: SYSTEM INFO
+      placeholder: SYSTEM INFO
     validations:
       required: true
          
