@@ -28,8 +28,8 @@ body:
       label: Describe your idea
       description: A concise description of what you want to happen.
       placeholder: 'In this state ..., When I do this ... then ...'
-      validations:
-        required: true
+    validations:
+      required: true
   - type: textarea
     id: alternatives
     attributes:
