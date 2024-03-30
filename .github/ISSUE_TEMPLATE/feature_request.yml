@@ -16,6 +16,8 @@ body:
       label: Feature Area
       description: Which category does the feature belong to?
       placeholder: 'Models, AI Services, Settings, ...'
+    validations:
+      required: true
   - type: textarea
     id: problem
     attributes:
