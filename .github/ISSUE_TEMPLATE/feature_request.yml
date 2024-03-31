@@ -1,0 +1,47 @@
+name: Feature Request
+description: What would you like to see added to smart second brain?
+title: Feature Request
+labels:
+  - enhancement
+assignees:
+  - leo310
+  - nicobrauchtgit
+body:
+  - type: markdown
+    attributes:
+      value: "# Thanks for inspiring us!\U0001F419\n"
+  - type: input
+    id: feature-area
+    attributes:
+      label: Feature Area
+      description: Which category does the feature belong to?
+      placeholder: 'Models, AI Services, Settings, ...'
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Painpoint
+      description: Is your feature idea related to a problem?
+      placeholder: I'm always frustrated when ...
+  - type: textarea
+    id: desc
+    attributes:
+      label: Describe your idea
+      description: A concise description of what you want to happen.
+      placeholder: "In this state ...,\nWhen I do this ... then ..."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Describe alternatives you have considered.
+      placeholder: A different option could be ...
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: 'Give context, link similar implementations, add screenshots.'
+      placeholder: My idea came from using xy
+
