@@ -15,7 +15,7 @@
     } from '../../store';
     import ProgressCircle from '../base/ProgressCircle.svelte';
     import { addMessage } from '../../controller/Messages';
-    import Logo from '../Logos/LogoSimple.svelte';
+    import Logo from '../Logos/Logo.svelte';
 
     export let textarea: HTMLTextAreaElement;
 

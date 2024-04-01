@@ -225,10 +225,8 @@ export default class SecondBrainPlugin extends Plugin {
             async (result) => {
                 if (result === 'Yes') {
                     await this.saveData({});
-                    const files = (await this.app.vault.adapter.list(normalizePath(this.manifest.dir))).files;
-                    for (const file of files) {
-                        if (file.endsWith('vector-store.bin')) await this.app.vault.adapter.remove(file);
-                    }
+                    const files = (await this.app.vault.adapter.list(normalizePath(this.manifest.dir + '/vectorstores'))).files;
+                    for (const file of files) await this.app.vault.adapter.remove(file);
                     new Notice(t('notice.plugin_data_cleared'), 4000);
                     await this.loadSettings();
                     await this.activateView();
