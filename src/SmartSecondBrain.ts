@@ -68,8 +68,8 @@ export default class SmartSecondBrain {
                 return new Notice(t('notice.failed', { values: { error: e } }), 4000);
             }
             // check if vector store data exists
-            if (await this.app.vault.adapter.exists(this.getVectorStorePath())) {
-                const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStorePath());
+            if (await this.app.vault.adapter.exists(this.getVectorStoreFile())) {
+                const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStoreFile());
                 await this.papa.load(vectorStoreData);
             }
         }
@@ -122,7 +122,7 @@ export default class SmartSecondBrain {
     }
 
     async cancelIndexing() {
-        // if (this.app.vault.adapter.exists(this.getVectorStorePath())) await this.app.vault.adapter.remove(this.getVectorStorePath());
+        // if (this.app.vault.adapter.exists(this.getVectorStoreFile())) await this.app.vault.adapter.remove(this.getVectorStoreFile());
         papaState.set('uninitialized');
         papaIndexingProgress.set(0);
     }
@@ -170,16 +170,18 @@ export default class SmartSecondBrain {
         return fileName;
     }
 
-    private getVectorStorePath() {
+    getVectorStoreFile() {
         const d = get(data);
-        return normalizePath(this.pluginDir + '/' + (d.isIncognitoMode ? d.ollamaEmbedModel.model : d.openAIEmbedModel.model) + '-vector-store.bin');
+        return normalizePath(this.pluginDir + '/vectorstores/' + (d.isIncognitoMode ? d.ollamaEmbedModel.model : d.openAIEmbedModel.model) + '.bin');
     }
 
     async saveVectorStoreData() {
         if (this.needsToSaveVectorStoreData && this.papa) {
             Log.debug('Saving vector store data');
             this.needsToSaveVectorStoreData = false;
-            await this.app.vault.adapter.writeBinary(this.getVectorStorePath(), await this.papa.getData());
+            // create vectorstores directory if it doesn't exist
+            (await this.app.vault.adapter.exists(this.pluginDir + '/vectorstores')) || (await this.app.vault.adapter.mkdir(this.pluginDir + '/vectorstores'));
+            await this.app.vault.adapter.writeBinary(this.getVectorStoreFile(), await this.papa.getData());
             Log.info('Saved vector store data');
         }
     }

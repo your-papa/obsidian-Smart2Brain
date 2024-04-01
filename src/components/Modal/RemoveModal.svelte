@@ -3,11 +3,8 @@
     import { deleteOllamaModels, isOllamaRunning } from '../../controller/Ollama';
     import { t } from 'svelte-i18n';
     import { getOllamaModels } from '../../controller/Ollama';
-    import type { PullModal } from './PullModal';
     import DropdownComponent from '../base/Dropdown.svelte';
     import DotAnimation from '../base/DotAnimation.svelte';
-
-    export let modal: PullModal;
 
     let model = '';
     let isOllama: boolean;

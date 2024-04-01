@@ -7,12 +7,8 @@
     import { data } from '../../store';
     import { OllamaGenModelNames, OllamaEmbedModelNames } from '../Settings/models';
     import { getOllamaModels, ollamaGenChange, ollamaEmbedChange } from '../../controller/Ollama';
-    import type { PullModal } from './PullModal';
     import DotAnimation from '../base/DotAnimation.svelte';
 
-    export let modal: PullModal;
-
-    let model = '';
     let isOllama: boolean;
     let pulledModel = false;
     let installedOllamaModels: string[] = [];
