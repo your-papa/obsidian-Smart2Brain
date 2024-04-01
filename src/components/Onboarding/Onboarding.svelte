@@ -7,7 +7,7 @@
     import DaemonComponent from './OllamaDaemon.svelte';
     import IncognitoToggle from '../Settings/IncognitoToggle.svelte';
     import { t } from 'svelte-i18n';
-    import Logo from '../Logos/LogoDetailed.svelte';
+    import Logo from '../Logos/Logo.svelte';
 
     const osType = os.type();
 
