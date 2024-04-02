@@ -1,14 +1,15 @@
-<div align="center">
-
-![2-05](https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/0f9671ab-c39a-46f1-b3e8-bc045b578965)
-
-</div>
-
 # Your Smart Second Brain
 
 Your Smart Second Brain is a **free** and **open-source** Obsidian plugin to improve your overall knowledge management.
 It serves as your **personal assistant**, powered by large language models like ChatGPT or Llama2.
 It can directly access and process your notes, eliminating the need for manual prompt editing and it can operate **completely offline**, ensuring your data remains private and secure.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/6c60c62e-c47c-458a-83dc-4cd526baf84e">
+  <source media="(prefers-color-scheme: light)" srcset="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/1b0eded9-745f-4a05-9adc-6740a7020a84">
+  <img alt="S2B Chat" src="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/1b0eded9-745f-4a05-9adc-6740a7020a84">
+</picture>
+
 
 # 🌟 Features
 
