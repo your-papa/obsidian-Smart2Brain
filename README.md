@@ -33,9 +33,9 @@ It can directly access and process your notes, eliminating the need for manual p
 - **AI Assistant might generate incorrect or irrelevant answers:** Due to a lack of relevant notes or limitations of AI understanding the AI Assistant might generate unsatisfying answers. In those cases, we recommend rephrasing your query or describing the context in more detail
 
 # 🔧 Getting started
->[!NOTE]  
->If you use **Obsidian Sync** the vector store binaries might take up a lot of space due to the version history.  
->Exclude the `.obsidian/plugins/smart-second-brain/vectorstores` folder in the Obsidian Sync settings to avoid this.
+> [!NOTE]  
+> If you use **Obsidian Sync** the vector store binaries might take up a lot of space due to the version history.  
+> Exclude the `.obsidian/plugins/smart-second-brain/vectorstores` folder in the Obsidian Sync settings to avoid this.
 
 Follow the onboarding instructions provided on initial plugin startup in Obsidian.
 
@@ -54,3 +54,12 @@ Follow the onboarding instructions provided on initial plugin startup in Obsidia
 We initially made this plugin as part of a university project, which is now complete. However, we are still fully committed to developing and improving the assistant in our spare time.
 This and the [papa-ts](https://github.com/your-papa/papa-ts) (backend) repo serve as an experimental playground, allowing us to explore state-of-the-art AI topics further and as a tool to enrich the obsidian experience we’re so passionate about.
 If you have any suggestions or wish to contribute, we would greatly appreciate it.
+
+# 📢 You want to support?
+
+- Report issues or open a feature request [here](https://github.com/your-papa/obsidian-Smart2Brain/issues/new/choose)
+- Open a PR for code contributions (Development setup instructions TBD)
+
+# ❓ Need help?
+
+- Don't hesitate to ask your question in the [Q&A](https://github.com/your-papa/obsidian-Smart2Brain/discussions/categories/q-a)
