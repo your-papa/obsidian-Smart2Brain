@@ -33,6 +33,9 @@ It can directly access and process your notes, eliminating the need for manual p
 - **AI Assistant might generate incorrect or irrelevant answers:** Due to a lack of relevant notes or limitations of AI understanding the AI Assistant might generate unsatisfying answers. In those cases, we recommend rephrasing your query or describing the context in more detail
 
 # 🔧 Getting started
+>[!NOTE]  
+>If you use **Obsidian Sync** the vector store binaries might take up a lot of space due to the version history.  
+>Exclude the `.obsidian/plugins/smart-second-brain/vectorstores` folder in the Obsidian Sync settings to avoid this.
 
 Follow the onboarding instructions provided on initial plugin startup in Obsidian.
 
