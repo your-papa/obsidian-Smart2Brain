@@ -1,3 +1,9 @@
+<div align="center">
+
+![2-05](https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/0f9671ab-c39a-46f1-b3e8-bc045b578965)
+
+</div>
+
 # Your Smart Second Brain
 
 Your Smart Second Brain is a **free** and **open-source** Obsidian plugin to improve your overall knowledge management.
@@ -5,9 +11,9 @@ It serves as your **personal assistant**, powered by large language models like 
 It can directly access and process your notes, eliminating the need for manual prompt editing and it can operate **completely offline**, ensuring your data remains private and secure.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/6c60c62e-c47c-458a-83dc-4cd526baf84e">
-  <source media="(prefers-color-scheme: light)" srcset="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/1b0eded9-745f-4a05-9adc-6740a7020a84">
-  <img alt="S2B Chat" src="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/1b0eded9-745f-4a05-9adc-6740a7020a84">
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/3e9cb3bc-ea57-4afc-b616-9c9360e39232">
+  <source media="(prefers-color-scheme: light)" srcset="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/9948671a-ebc4-4315-b376-0918c6f7f4f8">
+  <img alt="S2B Chat" src="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/9948671a-ebc4-4315-b376-0918c6f7f4f8">
 </picture>
 
 
@@ -40,6 +46,10 @@ It can directly access and process your notes, eliminating the need for manual p
 
 Follow the onboarding instructions provided on initial plugin startup in Obsidian.
 
+# ⚙️ Under the hood
+
+Check out our [Architecture Wiki](https://github.com/your-papa/obsidian-Smart2Brain/wiki) page.
+
 # 🎯 Roadmap
 
 - Support Gemini and Claude models and integrate KoboldCpp
@@ -50,7 +60,7 @@ Follow the onboarding instructions provided on initial plugin startup in Obsidia
 - Agent with Obsidian tooling
 - Multimodality
 
-# 👨‍🎓 About us
+# 🧑‍💻 About us
 
 We initially made this plugin as part of a university project, which is now complete. However, we are still fully committed to developing and improving the assistant in our spare time.
 This and the [papa-ts](https://github.com/your-papa/papa-ts) (backend) repo serve as an experimental playground, allowing us to explore state-of-the-art AI topics further and as a tool to enrich the obsidian experience we’re so passionate about.
@@ -63,4 +73,4 @@ If you have any suggestions or wish to contribute, we would greatly appreciate i
 
 # ❓ Need help?
 
-- Don't hesitate to ask your question in the [Q&A](https://github.com/your-papa/obsidian-Smart2Brain/discussions/categories/q-a)
+Don't hesitate to ask your question in the [Q&A](https://github.com/your-papa/obsidian-Smart2Brain/discussions/categories/q-a)
