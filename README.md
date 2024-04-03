@@ -10,6 +10,13 @@ Your Smart Second Brain is a **free** and **open-source** Obsidian plugin to imp
 It serves as your **personal assistant**, powered by large language models like ChatGPT or Llama2.
 It can directly access and process your notes, eliminating the need for manual prompt editing and it can operate **completely offline**, ensuring your data remains private and secure.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/3e9cb3bc-ea57-4afc-b616-9c9360e39232">
+  <source media="(prefers-color-scheme: light)" srcset="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/9948671a-ebc4-4315-b376-0918c6f7f4f8">
+  <img alt="S2B Chat" src="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/9948671a-ebc4-4315-b376-0918c6f7f4f8">
+</picture>
+
+
 # 🌟 Features
 
 **📝 Chat with your Notes**
@@ -33,8 +40,15 @@ It can directly access and process your notes, eliminating the need for manual p
 - **AI Assistant might generate incorrect or irrelevant answers:** Due to a lack of relevant notes or limitations of AI understanding the AI Assistant might generate unsatisfying answers. In those cases, we recommend rephrasing your query or describing the context in more detail
 
 # 🔧 Getting started
+> [!NOTE]  
+> If you use **Obsidian Sync** the vector store binaries might take up a lot of space due to the version history.  
+> Exclude the `.obsidian/plugins/smart-second-brain/vectorstores` folder in the Obsidian Sync settings to avoid this.
 
 Follow the onboarding instructions provided on initial plugin startup in Obsidian.
+
+# ⚙️ Under the hood
+
+Check out our [Architecture Wiki](https://github.com/your-papa/obsidian-Smart2Brain/wiki) page.
 
 # 🎯 Roadmap
 
@@ -46,8 +60,39 @@ Follow the onboarding instructions provided on initial plugin startup in Obsidia
 - Agent with Obsidian tooling
 - Multimodality
 
-# 👨‍🎓 About us
+# 🧑‍💻 About us
 
 We initially made this plugin as part of a university project, which is now complete. However, we are still fully committed to developing and improving the assistant in our spare time.
 This and the [papa-ts](https://github.com/your-papa/papa-ts) (backend) repo serve as an experimental playground, allowing us to explore state-of-the-art AI topics further and as a tool to enrich the obsidian experience we’re so passionate about.
 If you have any suggestions or wish to contribute, we would greatly appreciate it.
+
+# 📢 You want to support?
+
+- Report issues or open a feature request [here](https://github.com/your-papa/obsidian-Smart2Brain/issues/new/choose)
+- Open a PR for code contributions (Development setup instructions TBD)
+
+
+# ❓ FAQ
+
+Don't hesitate to ask your question in the [Q&A](https://github.com/your-papa/obsidian-Smart2Brain/discussions/categories/q-a)
+
+## Are any queries sent to the cloud?
+
+The queries are sent to the cloud only if you choose to use OpenAI's models. You can also choose Ollama to run your models locally. Therefore, your data will never be sent to any cloud services and stay on your machine.
+    
+## How does it differ from the SmartConnections plugin?
+Our plugin is quite similar to Smart Connections. However, we improve it based on our experience and the research we do for the university.
+    
+For now, these are the main differences:
+- We are completely open-source
+- We support Ollama/local models without needing a license
+- We place more value on UI/UX
+- We use a different tech stack leveraging Langchain and Orama as our vector store
+- Under the hood, our RAG pipeline uses other techniques to process your notes like hierarchical tree summarization
+
+## What models do you recommend?
+OpenAI's models are still the most capable. Especially "GPT-4" and "text-embedding-3-large". The best working local embedding modal we tested so far would be "mxbai-embed-large".
+
+## Does it support multi-language vaults?
+
+It’s supported, although the response quality may vary depending on which prompt language is used internally (we will support more translations in the future) and which models you use. It should work best with OpenAI's "text-embedding-large-3" model.
