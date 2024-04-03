@@ -31,6 +31,8 @@ body:
       label: Theme
       description: Which theme are you using?
       placeholder: "Minimal v7.5.3: Rose Pine" 
+    validations:
+      required: true
   - type: textarea 
     id: improvement
     attributes:
