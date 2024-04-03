@@ -71,6 +71,28 @@ If you have any suggestions or wish to contribute, we would greatly appreciate i
 - Report issues or open a feature request [here](https://github.com/your-papa/obsidian-Smart2Brain/issues/new/choose)
 - Open a PR for code contributions (Development setup instructions TBD)
 
-# ❓ Need help?
+
+# ❓ FAQ
 
 Don't hesitate to ask your question in the [Q&A](https://github.com/your-papa/obsidian-Smart2Brain/discussions/categories/q-a)
+
+## Are any queries sent to the cloud?
+
+The queries are sent to the cloud only if you choose to use OpenAI's models. You can also choose Ollama to run your models locally. Therefore, your data will never be sent to any cloud services and stay on your machine.
+    
+## How does it differ from the SmartConnections plugin?
+Our plugin is quite similar to Smart Connections. However, we improve it based on our experience and the research we do for the university.
+    
+For now, these are the main differences:
+- We are completely open-source
+- We support Ollama/local models without needing a license
+- We place more value on UI/UX
+- We use a different tech stack leveraging Langchain and Orama as our vector store
+- Under the hood, our RAG pipeline uses other techniques to process your notes like hierarchical tree summarization
+
+## What models do you recommend?
+OpenAI's models are still the most capable. Especially "GPT-4" and "text-embedding-3-large". The best working local embedding modal we tested so far would be "mxbai-embed-large".
+
+## Does it support multi-language vaults?
+
+It’s supported, although the response quality may vary depending on which prompt language is used internally (we will support more translations in the future) and which models you use. It should work best with OpenAI's "text-embedding-large-3" model.
