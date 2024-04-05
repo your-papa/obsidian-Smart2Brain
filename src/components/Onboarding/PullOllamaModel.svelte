@@ -18,7 +18,6 @@
     let progress: number = 0;
     let status: string = '';
     let isPullingError = false;
-    console.log('pullModel', pullModel);
 
     async function pullOllamaModelStream() {
         isPullingModel = true;

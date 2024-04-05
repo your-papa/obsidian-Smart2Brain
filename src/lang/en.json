@@ -73,18 +73,18 @@
         "input_placeholder": "Chat with your Smart Second Brain..."
     },
     "onboarding": {
-        "welcome_msg": "Welcome to your Smart Second Brain! Your personal AI assistant that helps you to find information in your notes.",
+        "welcome_msg": "Welcome to your Smart Second Brain! Your personal AI assistant that helps you to find and process information in your notes.",
         "setup": "Setup",
         "test": "Test",
-        "privacy_mode_note": "Your assistant is running in privacy mode. That means it is not connected to the internet and is running fully locally by leveraging Ollama.",
-        "openai_mode_note": "Your assistant is using third party services to run. That means you will have to share all your personal information with these services and your Smart Second Brain needs to be connected to the internet to leverage OpenAIs large language models like ChatGPT.",
+        "privacy_mode_note": "Your assistant will run in privacy mode. That means it is not connected to the internet and is running fully locally by leveraging Ollama.",
+        "openai_mode_note": "Your assistant will use third-party services to run. That means you will have to share all your personal information with these services and your Smart Second Brain needs to be connected to the internet to leverage OpenAIs large language models like ChatGPT.",
         "init": "Start your Smart Second Brain",
         "init_label": "Click to Start",
         "ollama": {
             "deamon": {
-                "install": "Install Ollama",
+                "install": "Install Ollama in the terminal:",
                 "set_baseurl": "Set the Ollama Base URL",
-                "start": "Start the Ollama with origins"
+                "start": "Start Ollama by running this command in the terminal"
             },
             "app": {
                 "download": "Download the App",
@@ -92,16 +92,16 @@
                 "extract": "Extract the .zip and start Ollama",
                 "run": "Run the setup.exe",
                 "test_label": "Test if Ollama is running",
-                "set_origins": "Set Ollama origins to enable streaming responses",
+                "set_origins": "In the terminal set Ollama origins to enable streaming responses:",
                 "restart": "Restart the Ollama service ",
-                "restart_label": "Click menu bar icon and then quit",
+                "restart_label": "Click Ollamas menu bar icon and then quit",
                 "quit": "Quit the Ollama service ",
-                "quit_label": "Click menu bar icon and then quit",
-                "start_origins": "Start the Ollama service with origins"
+                "quit_label": "Click Ollamas menu bar icon and then quit",
+                "start_origins": "Start Ollama by running this command in the powershell"
             },
             "test_origins": "Test if the origins are set correctly",
             "install_model": "Install an Ollama Embedding Model.",
-            "recommended_models": "Recommended:",
+            "recommended": "Recommended: ",
             "set_model": "Set your Embedding Model:"
         },
         "openai": {

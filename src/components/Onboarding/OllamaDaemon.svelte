@@ -8,6 +8,7 @@
     import { t } from 'svelte-i18n';
 
     export let osType: string;
+    export let scrollToBottom = () => {};
 
     onMount(() => {
         $data.isIncognitoMode = true;
@@ -34,5 +35,5 @@
     </li>
     <li>{$t('onboarding.ollama.deamon.start')}</li>
     <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\nOLLAMA_ORIGINS="*" ollama serve\n```')} />
-    <OllamaSetup />
+    <OllamaSetup {scrollToBottom} />
 </ol>

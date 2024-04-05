@@ -24,7 +24,7 @@
 
     let isAutoScrolling = true;
     let chatWindow: HTMLDivElement;
-    $: if (chatWindow && $papaState === 'running' && isAutoScrolling && $chatHistory) {
+    $: if (chatWindow && $papaState === 'running' && isAutoScrolling && $runContent) {
         chatWindow.scrollTop = chatWindow.scrollHeight;
     }
     let contentNode: HTMLElement;
@@ -65,7 +65,7 @@
     <div
         bind:this={chatWindow}
         on:scroll={() => (isAutoScrolling = chatWindow.scrollTop + chatWindow.clientHeight + 1 >= chatWindow.scrollHeight)}
-        class="chat-window w-full flex-grow select-text overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border] bg-[--background-primary]"
+        class="chat-window w-full pb-8 flex-grow select-text overflow-y-scroll rounded-md border border-solid border-[--background-modifier-border] bg-[--background-primary]"
     >
         {#each $chatHistory as message (message.id)}
             <MessageContainer role={message.role}>
@@ -148,5 +148,5 @@
         {/if}
     </div>
     <InputComponent bind:textarea />
-    <span class="mb-3" />
+    <div class="mb-3" />
 </div>
