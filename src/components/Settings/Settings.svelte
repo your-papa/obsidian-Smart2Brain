@@ -7,11 +7,8 @@
     import { LogLvl, Papa } from 'papa-ts';
     import ToggleComponent from '../base/Toggle.svelte';
     import ButtonComponent from '../base/Button.svelte';
-    import OllamaSettings from './Ollama.svelte';
-    import OpenAISettings from './OpenAI.svelte';
     import { t } from 'svelte-i18n';
     import Log from '../../logging';
-    import LocalToggle from './IncognitoToggle.svelte';
 
     let isFFOverflowingY: boolean = false;
     let isFFExpanded: boolean = false;
@@ -35,10 +32,10 @@
         $plugin.saveSettings();
     }
 
+    // Todo: store fucntion
     function setNumOfDocsToRetrieve(num: number) {
         if (num < 1) num = 1;
-        if ($data.isIncognitoMode) $data.ollamaEmbedModel.k = num;
-        else $data.openAIEmbedModel.k = num;
+        $data.retrieveTopK = num;
         $plugin.s2b.setNumOfDocsToRetrieve(num);
         $plugin.saveSettings();
     }
@@ -96,27 +93,18 @@
     </div>
 {/if}
 
-<!-- Toggle Incognito -->
-<div class="setting-item flex items-center justify-center !pb-0">
-    <LocalToggle />
-</div>
-<div>
-    {#if $data.isIncognitoMode}
-        <OllamaSettings />
-    {:else}
-        <OpenAISettings />
-    {/if}
-</div>
+<!-- Embed Model Settings -->
+
+<!-- Gen Modal Settings -->
+
+<!-- Provider Settings -->
+
 <!-- Advanced Settings -->
 <details>
     <summary class="setting-item-heading py-3">{$t('settings.advanced')}</summary>
     <!-- Num of Docs to Retrieve -->
     <SettingContainer name={$t('settings.num_docs_retrieve')} desc={$t('settings.num_docs_retrieve_desc')}>
-        <TextComponent
-            inputType="number"
-            value={$data.isIncognitoMode ? $data.ollamaEmbedModel.k.toString() : $data.openAIEmbedModel.k.toString()}
-            changeFunc={(docNum) => setNumOfDocsToRetrieve(parseInt(docNum))}
-        />
+        <TextComponent inputType="number" value={$data.retrieveTopK.toString()} changeFunc={(docNum) => setNumOfDocsToRetrieve(parseInt(docNum))} />
     </SettingContainer>
     <!-- Clear Plugin Data -->
     <SettingContainer name={$t('settings.clear')} desc={$t('settings.clear_desc')}>

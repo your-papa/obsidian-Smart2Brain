@@ -1,4 +1,4 @@
-<script lang="ts">
+<!-- <script lang="ts">
     import { Notice } from 'obsidian';
     import { DEFAULT_SETTINGS } from '../../main';
     import { t } from 'svelte-i18n';
@@ -28,7 +28,7 @@
         await changeOllamaBaseUrl(ollamaBaseUrl);
         isRunning = await isOllamaRunning();
         styleOllamaBaseUrl = isRunning ? '' : '!border-[--background-modifier-error]';
-    };
+    }; -->
 </script>
 
 <SettingContainer name="Ollama" isHeading={true} desc={$t('settings.ollama.desc')}>
