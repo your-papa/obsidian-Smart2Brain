@@ -1,0 +1,44 @@
+
+name: UI Issue
+description: "Use this template if something looks weird or you would like some styles changed."
+title: "UI issue"
+labels: ["styles"]
+assignees: ["leo310", "nicobrauchtgit"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        # Thanks for helping us improve our UI!🐙
+  - type: textarea
+    id: whats-wrong
+    attributes:
+      label: What looks weird?
+      description: Also add a screenshot, if possible.
+      placeholder: Tell us what you see!
+    validations:
+      required: true
+  - type: input 
+    id: version
+    attributes:
+      label: Smart Second Brain Version
+      description: What version of S2B are you running?
+      placeholder: 0.6.1
+    validations:
+      required: true
+  - type: input 
+    id: theme
+    attributes:
+      label: Theme
+      description: Which theme are you using?
+      placeholder: "Minimal v7.5.3: Rose Pine" 
+    validations:
+      required: true
+  - type: textarea 
+    id: improvement
+    attributes:
+      label: What should change?
+      description: Tell us what we should change and add screenshots if possible.
+      placeholder: S2B logo covers the chat text.
+    validations:
+      required: true
+         
