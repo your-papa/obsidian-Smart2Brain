@@ -40,7 +40,27 @@ export const OllamaGenModels = {
     },
 };
 
-export const OpenAIGenModelNames = Object.keys(OpenAIGenModels);
-export const OllamaGenModelNames = Object.keys(OllamaGenModels);
-export const OpenAIEmbedModelNames = ['text-embedding-3-large', 'text-embedding-3-small', 'text-embedding-ada-002'];
-export const OllamaEmbedModelNames = ['nomic-embed-text', 'mxbai-embed-large'];
+export const Providers = {
+    Ollama: {
+        embeddingModelNames: ['nomic-embed-text', 'mxbai-embed-large'] as const,
+        genModelNames: ['llama2', 'llama2-uncensored', 'mistral', 'mistral-openorca', 'gemma', 'mixtral', 'dolphin-mixtral', 'phi'] as const,
+        isLocal: true,
+    },
+    OpenAI: {
+        embeddingModelNames: ['text-embedding-3-large', 'text-embedding-3-small', 'text-embedding-ada-002'] as const,
+        genModelNames: ['gpt-3.5-turbo', 'gpt-4', 'gpt-4-32k', 'gpt-4-turbo-preview'] as const,
+        isLocal: false,
+    },
+    Anthropic: {
+        embeddingModelNames: [] as const,
+        genModelNames: ['claude3'] as const,
+        isLocal: false,
+    },
+};
+
+export type ProviderName = keyof typeof Providers;
+
+export const ProviderNames = Object.keys(Providers);
+
+export type EmbedModelName = (typeof Providers)[keyof typeof Providers]['embeddingModelNames'][number];
+export type GenModelName = (typeof Providers)[keyof typeof Providers]['genModelNames'][number];
