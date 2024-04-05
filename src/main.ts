@@ -1,6 +1,6 @@
 import { around } from 'monkey-around';
 import { Notice, Plugin, TFile, WorkspaceLeaf, WorkspaceSidedock, normalizePath, type ViewState } from 'obsidian';
-import { LogLvl, Prompts, type Language, type OllamaEmbedModel, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
+import { LogLvl, Prompts, type Language, type OllamaEmbedModel, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel, type GenModel } from 'papa-ts';
 import { get } from 'svelte/store';
 import { _ } from 'svelte-i18n';
 
@@ -15,17 +15,20 @@ import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
 import SettingsTab from './views/Settings';
 import { RemoveModal } from './components/Modal/RemoveModal';
+import type { EmbedModelName, GenModelName, ProviderName } from './components/Settings/models';
 
 export interface PluginData {
     isChatComfy: boolean;
     initialAssistantMessageContent: string;
     isUsingRag: boolean;
+    retrieveTopK: number;
     assistantLanguage: Language;
-    isIncognitoMode: boolean;
-    ollamaGenModel: OllamaGenModel;
-    ollamaEmbedModel: OllamaEmbedModel;
-    openAIGenModel: OpenAIGenModel;
-    openAIEmbedModel: OpenAIEmbedModel;
+    embedProvider: ProviderName;
+    embedModel: EmbedModelName;
+    genProvider: ProviderName;
+    genModel: GenModelName;
+    embedModels: { [model: string]: OllamaEmbedModel | OpenAIEmbedModel };
+    genModels: { [model: string]: OllamaGenModel | OpenAIGenModel };
     targetFolder: string;
     excludeFF: Array<string>;
     defaultChatName: string;
@@ -42,27 +45,17 @@ export type PluginDataKey = keyof PluginData;
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isChatComfy: true,
     isUsingRag: true,
+    retrieveTopK: 100,
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     initialAssistantMessageContent:
         Prompts[(window.localStorage.getItem('language') as Language) || 'en']?.initialAssistantMessage || Prompts.en.initialAssistantMessage,
-    isIncognitoMode: true,
-    ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434', temperature: 0.5 },
-    ollamaEmbedModel: {
-        model: 'nomic-embed-text',
-        baseUrl: 'http://localhost:11434',
-        similarityThreshold: 0.75,
-        k: 100,
+    embedModels: {
+        'text-embedding-ada-002': { model: 'text-embedding-ada-002', openAIApiKey: '', similarityThreshold: 0.75 },
+        'nomic-embed-text': { model: 'nomic-embed-text', baseUrl: 'http://localhost:11434', similarityThreshold: 0.5 },
     },
-    openAIGenModel: {
-        model: 'gpt-3.5-turbo',
-        openAIApiKey: '',
-        temperature: 0.5,
-    },
-    openAIEmbedModel: {
-        model: 'text-embedding-ada-002',
-        openAIApiKey: '',
-        similarityThreshold: 0.75,
-        k: 100,
+    genModels: {
+        'gpt-3.5-turbo': { model: 'gpt-3.5-turbo', openAIApiKey: '', temperature: 0.5 },
+        llama2: { model: 'llama2', baseUrl: 'http://localhost:11434', temperature: 0.5 },
     },
     targetFolder: 'Chats',
     defaultChatName: 'New Chat',
