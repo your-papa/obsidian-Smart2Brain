@@ -6,6 +6,13 @@
     import { plugin, data } from '../../store';
     import InitButtonComponent from './InitButton.svelte';
     import { t } from 'svelte-i18n';
+    import { afterUpdate } from 'svelte';
+
+    export let scrollToBottom = () => {};
+
+    afterUpdate(() => {
+        scrollToBottom();
+    });
 
     let openAIApiKey: string = $data.openAIGenModel.openAIApiKey;
     let isValid: boolean = false;
@@ -62,5 +69,7 @@
     </li>
 </ol>
 {#if isValid}
-    <InitButtonComponent />
+    <div class="w-full text-center">
+        <InitButtonComponent />
+    </div>
 {/if}

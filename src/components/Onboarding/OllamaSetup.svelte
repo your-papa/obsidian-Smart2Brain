@@ -1,6 +1,6 @@
 <script lang="ts">
     import InitButtonComponent from './InitButton.svelte';
-    import { onMount } from 'svelte';
+    import { afterUpdate, onMount } from 'svelte';
     import { getOllamaModels } from '../../controller/Ollama';
     import { icon } from '../../controller/Messages';
     import { plugin, data } from '../../store';
@@ -8,6 +8,12 @@
     import { isOllamaOriginsSet } from '../../controller/Ollama';
     import { t } from 'svelte-i18n';
     import PullOllamaModel from './PullOllamaModel.svelte';
+
+    export let scrollToBottom = () => {};
+
+    afterUpdate(() => {
+        scrollToBottom();
+    });
 
     let ollamaModels: string[] = [];
     let model: string = '';
@@ -51,14 +57,14 @@
 {#if isOrigin}
     <li>
         {$t('onboarding.ollama.install_model')}<br />
-        <PullOllamaModel {pullModel} text="Recommended" onSuccessfulPull={async () => (ollamaModels = await getOllamaModels())} />
+        <PullOllamaModel {pullModel} text={$t('onboarding.ollama.recommended')} onSuccessfulPull={async () => (ollamaModels = await getOllamaModels())} />
     </li>
     {#if ollamaModels.length > 0}
         <li>
             <div class="flex flex-wrap items-center justify-between">
                 {$t('onboarding.ollama.set_model')}
                 <div class="flex items-center gap-1">
-                    <button class="clickable-icon mr-1" use:icon={'refresh-ccw'} on:click={async () => (ollamaModels = await getOllamaModels())} />
+                    <button class="clickable-icon" use:icon={'refresh-ccw'} on:click={async () => (ollamaModels = await getOllamaModels())} />
                     <DropdownComponent
                         bind:this={ollamaModelComponent}
                         selected={model}
@@ -70,7 +76,7 @@
         </li>
     {/if}
     {#if model !== ''}
-        <div class="mt-4 w-full text-center">
+        <div class="my-4 w-full text-center">
             <InitButtonComponent />
         </div>
     {/if}
