@@ -84,5 +84,6 @@
     </div>
 {/if}
 {#if isPullingError}
+    <!-- TODO -->
     <p>There was an error pulling the recommended model</p>
 {/if}

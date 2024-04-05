@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { isOllamaRunning } from '../../controller/Ollama';
+    import { Providers } from '../../provider';
     import PullOllamaModel from '../Onboarding/PullOllamaModel.svelte';
     import SettingContainer from '../Settings/SettingContainer.svelte';
     import { t } from 'svelte-i18n';
@@ -40,12 +41,12 @@
             <SettingContainer name={$t('settings.ollama.gen_model')} desc={$t('settings.ollama.model_descriptions.' + $data.genModel, { default: '' })}>
                 <select class="dropdown" bind:value={$data.genModel} on:change={() => ollamaGenChange($data.genModel)}>
                     <optgroup label={$t('settings.ollama.recommended')}>
-                        {#each OllamaGenModelNames as model}
+                        {#each Providers.Ollama.rcmdGenModel as model}
                             <option value={model}>{model}</option>
                         {/each}
                     </optgroup>
                     <optgroup label={$t('settings.ollama.other')}>
-                        {#each installedOllamaModels.filter((model) => !OllamaGenModelNames.includes(model) && !OllamaEmbedModelNames.includes(model)) as model}
+                        {#each installedOllamaModels.filter((model) => !Providers.Ollama.rcmdGenModel.includes(model) && !Providers.Ollama.rcmdEmbedModel.includes(model)) as model}
                             <option value={model}>{model}</option>
                         {/each}
                     </optgroup>
@@ -55,12 +56,12 @@
             <SettingContainer name={$t('settings.ollama.embed_model')} desc={$t('settings.ollama.model_descriptions.' + $data.genModel, { default: '' })}>
                 <select class="dropdown" bind:value={$data.genModel} on:change={() => ollamaEmbedChange($data.genModel)}>
                     <optgroup label={$t('settings.ollama.recommended')}>
-                        {#each OllamaEmbedModelNames as model}
+                        {#each Providers.Ollama.rcmdEmbedModel as model}
                             <option value={model}>{model}</option>
                         {/each}
                     </optgroup>
                     <optgroup label={$t('settings.ollama.other')}>
-                        {#each installedOllamaModels.filter((model) => !OllamaEmbedModelNames.includes(model)) as model}
+                        {#each installedOllamaModels.filter((model) => !Providers.Ollama.rcmdEmbedModel.includes(model)) as model}
                             <option value={model}>{model}</option>
                         {/each}
                     </optgroup>
