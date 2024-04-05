@@ -1,6 +1,6 @@
 import { around } from 'monkey-around';
 import { Notice, Plugin, TFile, WorkspaceLeaf, WorkspaceSidedock, normalizePath, type ViewState } from 'obsidian';
-import { LogLvl, Prompts, type Language, type OllamaEmbedModel, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel, type GenModel } from 'papa-ts';
+import { LogLvl, Prompts, type Language } from 'papa-ts';
 import { get } from 'svelte/store';
 import { _ } from 'svelte-i18n';
 
@@ -15,7 +15,6 @@ import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
 import SettingsTab from './views/Settings';
 import { RemoveModal } from './components/Modal/RemoveModal';
-import type { EmbedModelName, GenModelName, ProviderName } from './components/Settings/models';
 
 export interface PluginData {
     isChatComfy: boolean;
@@ -23,12 +22,14 @@ export interface PluginData {
     isUsingRag: boolean;
     retrieveTopK: number;
     assistantLanguage: Language;
-    embedProvider: ProviderName;
-    embedModel: EmbedModelName;
-    genProvider: ProviderName;
-    genModel: GenModelName;
-    embedModels: { [model: string]: OllamaEmbedModel | OpenAIEmbedModel };
-    genModels: { [model: string]: OllamaGenModel | OpenAIGenModel };
+    embedProvider: 'Ollama' | 'OpenAI';
+    genProvider: 'Ollama' | 'OpenAI';
+    openAISettings: { apiKey: string };
+    ollamaSettings: { baseUrl: string };
+    embedModel: string;
+    genModel: string;
+    genModels: { [model: string]: { temperature: number; contextWindow: number } };
+    embedModels: { [model: string]: { similarityThreshold: number } };
     targetFolder: string;
     excludeFF: Array<string>;
     defaultChatName: string;
@@ -50,12 +51,22 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     initialAssistantMessageContent:
         Prompts[(window.localStorage.getItem('language') as Language) || 'en']?.initialAssistantMessage || Prompts.en.initialAssistantMessage,
     embedModels: {
-        'text-embedding-ada-002': { model: 'text-embedding-ada-002', openAIApiKey: '', similarityThreshold: 0.75 },
-        'nomic-embed-text': { model: 'nomic-embed-text', baseUrl: 'http://localhost:11434', similarityThreshold: 0.5 },
+        'text-embedding-ada-002': { similarityThreshold: 0.75 },
+        'nomic-embed-text': { similarityThreshold: 0.5 },
     },
     genModels: {
-        'gpt-3.5-turbo': { model: 'gpt-3.5-turbo', openAIApiKey: '', temperature: 0.5 },
-        llama2: { model: 'llama2', baseUrl: 'http://localhost:11434', temperature: 0.5 },
+        'gpt-3.5-turbo': { temperature: 0.5, contextWindow: 16385 },
+        'gpt-4': { temperature: 0.5, contextWindow: 8192 },
+        'gpt-4-32k': { temperature: 0.5, contextWindow: 32768 },
+        'gpt-4-turbo-preview': { temperature: 0.5, contextWindow: 128000 },
+        llama2: { temperature: 0.5, contextWindow: 4096 },
+        'llama2-uncensored': { temperature: 0.5, contextWindow: 4096 },
+        mistral: { temperature: 0.5, contextWindow: 8000 },
+        'mistral-openorca': { temperature: 0.5, contextWindow: 8000 },
+        gemma: { temperature: 0.5, contextWindow: 8000 },
+        mixtral: { temperature: 0.5, contextWindow: 32000 },
+        'dolphin-mixtral': { temperature: 0.5, contextWindow: 32000 },
+        phi: { temperature: 0.5, contextWindow: 2048 },
     },
     targetFolder: 'Chats',
     defaultChatName: 'New Chat',
