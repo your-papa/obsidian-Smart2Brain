@@ -26,7 +26,7 @@
     </div>
     <h1 class="mb-0 text-[--text-normal]">{$t('onboarding.setup')}</h1>
     <p class="px-10">{$t('onboarding.welcome_msg')}</p>
-    <SlideComponent options={modes} selected={mode} />
+    <SlideComponent options={modes} bind:selected={mode} />
     {#if mode === $t('incognito_toggle.enable')}
         <p class="px-10">
             {$t('onboarding.privacy_mode_note')}

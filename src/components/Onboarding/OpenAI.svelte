@@ -6,21 +6,24 @@
     import { plugin, data } from '../../store';
     import InitButtonComponent from './InitButton.svelte';
     import { t } from 'svelte-i18n';
-    import { afterUpdate } from 'svelte';
+    import { afterUpdate, onMount } from 'svelte';
 
     export let scrollToBottom = () => {};
+
+    onMount(async () => {
+        $data.embedProvider = 'OpenAI';
+    });
 
     afterUpdate(() => {
         scrollToBottom();
     });
 
-    let openAIApiKey: string = $data.openAIGenModel.openAIApiKey;
+    let openAIApiKey: string = $data.openAISettings.apiKey;
     let isValid: boolean = false;
     let isKeyTested: boolean = false;
     const changeApiKey = (newApiKey: string) => {
         newApiKey.trim();
-        $data.openAIGenModel.openAIApiKey = newApiKey;
-        $data.openAIEmbedModel.openAIApiKey = newApiKey;
+        $data.openAISettings.apiKey = newApiKey;
         $plugin.saveSettings();
         isKeyTested = false;
     };
@@ -58,7 +61,7 @@
                     <button
                         aria-label={$t('onboarding.openai.test_api_key')}
                         on:click={async () => {
-                            isValid = await isAPIKeyValid($data.openAIGenModel.openAIApiKey);
+                            isValid = await isAPIKeyValid($data.openAISettings.apiKey);
                             if (!isValid) new Notice($t('notice.api_key_invalid'), 4000);
                             isKeyTested = true;
                         }}>{$t('onboarding.test')}</button

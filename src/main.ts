@@ -15,7 +15,7 @@ import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
 import SettingsTab from './views/Settings';
 import { RemoveModal } from './components/Modal/RemoveModal';
-import type { Provider } from './provider';
+import { type Provider } from './provider';
 
 export interface PluginData {
     isChatComfy: boolean;
@@ -51,6 +51,8 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     initialAssistantMessageContent:
         Prompts[(window.localStorage.getItem('language') as Language) || 'en']?.initialAssistantMessage || Prompts.en.initialAssistantMessage,
+    ollamaSettings: { baseUrl: 'http://localhost:11434' },
+    openAISettings: { apiKey: '' },
     embedModels: {
         'text-embedding-ada-002': { similarityThreshold: 0.75 },
         'text-embedding-3-large': { similarityThreshold: 0.5 },

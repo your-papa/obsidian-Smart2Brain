@@ -3,7 +3,7 @@
     import { afterUpdate, onMount } from 'svelte';
     import { getOllamaModels } from '../../controller/Ollama';
     import { icon } from '../../controller/Messages';
-    import { plugin, data } from '../../store';
+    import { data } from '../../store';
     import DropdownComponent from '../base/Dropdown.svelte';
     import { isOllamaOriginsSet } from '../../controller/Ollama';
     import { t } from 'svelte-i18n';
@@ -23,11 +23,10 @@
     let isOrigin: boolean = false;
 
     onMount(async () => {
-        $data.isIncognitoMode = true;
-        $plugin.saveSettings();
+        $data.embedProvider = 'Ollama';
     });
 
-    $: if (ollamaModelComponent && ollamaModels.some((model) => model === $data.ollamaEmbedModel.model)) model = $data.ollamaEmbedModel.model;
+    $: if (ollamaModelComponent && ollamaModels.some((model) => model === $data.embedModel)) model = $data.embedModel;
 </script>
 
 <li>
@@ -69,7 +68,7 @@
                         bind:this={ollamaModelComponent}
                         selected={model}
                         options={ollamaModels.map((model) => ({ display: model, value: model }))}
-                        changeFunc={(selected) => ($data.ollamaEmbedModel.model = selected)}
+                        changeFunc={(selected) => ($data.embedModel = selected)}
                     />
                 </div>
             </div>
