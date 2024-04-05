@@ -1,16 +1,15 @@
 import { Notice, requestUrl } from 'obsidian';
-import { plugin as p, data, papaState, cancelPullModel } from '../store';
+import { plugin, data, papaState, cancelPullModel } from '../store';
 import { get } from 'svelte/store';
 import Log from '../logging';
 import { _ } from 'svelte-i18n';
-import { OllamaEmbedModelNames, OllamaGenModels } from '../components/Settings/models';
 import { errorState } from '../store';
 
 export async function isOllamaRunning() {
-    const d = get(data);
+    const { ollamaSettings } = get(data);
     try {
-        new URL(d.ollamaGenModel.baseUrl);
-        const response = await requestUrl(d.ollamaGenModel.baseUrl + '/api/tags');
+        new URL(ollamaSettings.baseUrl);
+        const response = await requestUrl(ollamaSettings.baseUrl + '/api/tags');
         if (response.status === 200) {
             return true;
         } else {
@@ -24,9 +23,9 @@ export async function isOllamaRunning() {
 }
 
 export async function isOllamaOriginsSet() {
-    const d = get(data);
+    const { ollamaSettings } = get(data);
     try {
-        const response = await fetch(d.ollamaGenModel.baseUrl + '/api/tags');
+        const response = await fetch(ollamaSettings.baseUrl + '/api/tags');
         if (response.status === 200) {
             return true;
         } else {
@@ -40,10 +39,10 @@ export async function isOllamaOriginsSet() {
 }
 
 export async function getOllamaModels(): Promise<string[]> {
-    const d = get(data);
+    const { ollamaSettings } = get(data);
     try {
         const modelsRes = await requestUrl({
-            url: d.ollamaGenModel.baseUrl + '/api/tags',
+            url: ollamaSettings.baseUrl + '/api/tags',
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -58,31 +57,22 @@ export async function getOllamaModels(): Promise<string[]> {
 }
 
 export async function ollamaGenChange(selected: string) {
-    const plugin = get(p);
-    const d = get(data);
+    const { s2b, saveSettings } = get(plugin);
     const installedOllamaModels = await getOllamaModels();
-    data.update((data) => {
-        data.ollamaGenModel.model = selected;
-        data.ollamaGenModel.contextWindow = OllamaGenModels[selected] ? OllamaGenModels[selected].contextWindow : 2048;
-        return data;
-    });
-    plugin.saveSettings();
+    get(data).genModel = selected;
+    await saveSettings();
     if (!installedOllamaModels.includes(selected)) {
         papaState.set('error');
         errorState.set('ollama-gen-model-not-installed');
         return;
     }
-    plugin.s2b.setGenModel(d.openAIGenModel);
+    s2b.setGenModel();
 }
 
 export async function ollamaEmbedChange(selected: string) {
-    const plugin = get(p);
     const installedOllamaModels = await getOllamaModels();
-    data.update((data) => {
-        data.ollamaEmbedModel.model = selected;
-        return data;
-    });
-    plugin.saveSettings();
+    get(data).genModel = selected;
+    await get(plugin).saveSettings();
     if (!installedOllamaModels.includes(selected)) {
         papaState.set('error');
         errorState.set('ollama-embed-model-not-installed');
@@ -92,22 +82,20 @@ export async function ollamaEmbedChange(selected: string) {
 }
 
 export const changeOllamaBaseUrl = async (newBaseUrl: string) => {
-    const d = get(data);
-    const plugin = get(p);
+    const { ollamaSettings } = get(data);
     newBaseUrl.trim();
     if (newBaseUrl.endsWith('/')) newBaseUrl = newBaseUrl.slice(0, -1);
-    d.ollamaGenModel.baseUrl = newBaseUrl;
-    d.ollamaEmbedModel.baseUrl = newBaseUrl;
-    await plugin.saveSettings();
+    ollamaSettings.baseUrl = newBaseUrl;
+    await get(plugin).saveSettings();
     papaState.set('settings-change');
 };
 
 export async function deleteOllamaModels(model: string): Promise<boolean> {
-    const d = get(data);
+    const { ollamaSettings } = get(data);
     const t = get(_);
     try {
         const modelsRes = await requestUrl({
-            url: d.ollamaGenModel.baseUrl + '/api/delete',
+            url: `${ollamaSettings.baseUrl}/api/pull`,
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',
@@ -128,10 +116,11 @@ export async function deleteOllamaModels(model: string): Promise<boolean> {
 }
 
 export async function* pullOllamaModel(model: string) {
+    const { ollamaSettings } = get(data);
     const t = get(_);
     Log.info('Pulling model from Ollama', model);
     try {
-        const response = await fetch(`${get(data).ollamaEmbedModel.baseUrl}/api/pull`, {
+        const response = await fetch(`${ollamaSettings.baseUrl}/api/pull`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
