@@ -1,4 +1,4 @@
-<script lang="ts">
+<!-- <script lang="ts">
     import TextComponent from '../base/Text.svelte';
     import { plugin, data, papaState } from '../../store';
     import SettingContainer from './SettingContainer.svelte';
@@ -50,7 +50,7 @@
         $plugin.saveSettings();
         $papaState = 'settings-change';
     };
-</script>
+</script> -->
 
 <SettingContainer name="OpenAI" isHeading={true} desc={$t('settings.openai.desc')} />
 <!-- OpenAI API Key -->
