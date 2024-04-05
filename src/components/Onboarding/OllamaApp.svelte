@@ -4,8 +4,14 @@
     import { isOllamaRunning } from '../../controller/Ollama';
     import OllamaSetup from './OllamaSetup.svelte';
     import { t } from 'svelte-i18n';
+    import { afterUpdate } from 'svelte';
 
     export let osType: string;
+    export let scrollToBottom = () => {};
+
+    afterUpdate(() => {
+        scrollToBottom();
+    });
 
     let isRunning: boolean = false;
     let isOllamaTested: boolean = false;
@@ -52,11 +58,11 @@
             <li>
                 {$t('onboarding.ollama.app.restart')}<span aria-label={$t('onboarding.ollama.app.restart_label')} use:icon={'help-circle'} />
             </li>
-        {:else}
+        {:else if osType === 'Windows_NT'}
             <li>{$t('onboarding.ollama.app.quit')}<span aria-label={$t('onboarding.ollama.app.quit_label')} use:icon={'help-circle'} /></li>
             <li>{$t('onboarding.ollama.app.start_origins')}</li>
             <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\n$env:OLLAMA_ORIGINS="*"; ollama serve\n```')} />
         {/if}
-        <OllamaSetup />
+        <OllamaSetup {scrollToBottom} />
     {/if}
 </ol>
