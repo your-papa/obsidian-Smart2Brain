@@ -145,8 +145,8 @@ export default class SmartSecondBrain {
     }
 
     getVectorStoreFile() {
-        const d = get(data);
-        return normalizePath(this.pluginDir + '/vectorstores/' + (d.isIncognitoMode ? d.ollamaEmbedModel.model : d.openAIEmbedModel.model) + '.bin');
+        const { embedModel } = get(data);
+        return normalizePath(this.pluginDir + '/vectorstores/' + embedModel + '.bin');
     }
 
     async saveVectorStoreData() {
@@ -183,8 +183,8 @@ export default class SmartSecondBrain {
         this.needsToSaveVectorStoreData = true;
     }
 
-    setSimilarityThreshold(value: number) {
-        if (this.papa) this.papa.setSimilarityThreshold(value);
+    setSimilarityThreshold() {
+        if (this.papa) this.papa.setSimilarityThreshold(get(data).embedModels[get(data).embedModel].similarityThreshold);
     }
 
     stopRun() {
@@ -196,8 +196,8 @@ export default class SmartSecondBrain {
         if (this.papa) this.papa.setNumOfDocsToRetrieve(k);
     }
 
-    setGenModel(genModel: GenModel) {
-        if (this.papa) this.papa.setGenModel(genModel);
+    setGenModel() {
+        if (this.papa) this.papa.setGenModel(this.getPapaGenModel());
     }
 
     setTracer(langchainKey: string) {

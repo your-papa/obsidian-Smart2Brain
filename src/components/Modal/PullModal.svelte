@@ -5,7 +5,6 @@
     import SettingContainer from '../Settings/SettingContainer.svelte';
     import { t } from 'svelte-i18n';
     import { data } from '../../store';
-    import { OllamaGenModelNames, OllamaEmbedModelNames } from '../Settings/models';
     import { getOllamaModels, ollamaGenChange, ollamaEmbedChange } from '../../controller/Ollama';
     import DotAnimation from '../base/DotAnimation.svelte';
 
@@ -22,8 +21,10 @@
 <div class="modal-title">{$t('cmd.pull_model')}</div>
 <div class="modal-content">
     {#if !isOllama}
+        <!-- TODO translate -->
         Ollama is Not Running
     {:else if isOllama === undefined}
+        <!-- TODO translate -->
         Loading
         <DotAnimation />
     {:else}
@@ -36,11 +37,8 @@
             }}
         />
         {#if pulledModel}
-            <SettingContainer
-                name={$t('settings.ollama.gen_model')}
-                desc={$t('settings.ollama.model_descriptions.' + $data.ollamaGenModel.model, { default: '' })}
-            >
-                <select class="dropdown" bind:value={$data.ollamaGenModel.model} on:change={() => ollamaGenChange($data.ollamaGenModel.model)}>
+            <SettingContainer name={$t('settings.ollama.gen_model')} desc={$t('settings.ollama.model_descriptions.' + $data.genModel, { default: '' })}>
+                <select class="dropdown" bind:value={$data.genModel} on:change={() => ollamaGenChange($data.genModel)}>
                     <optgroup label={$t('settings.ollama.recommended')}>
                         {#each OllamaGenModelNames as model}
                             <option value={model}>{model}</option>
@@ -54,11 +52,8 @@
                 </select>
             </SettingContainer>
             <!-- Ollama Embed Model -->
-            <SettingContainer
-                name={$t('settings.ollama.embed_model')}
-                desc={$t('settings.ollama.model_descriptions.' + $data.ollamaEmbedModel.model, { default: '' })}
-            >
-                <select class="dropdown" bind:value={$data.ollamaEmbedModel.model} on:change={() => ollamaEmbedChange($data.ollamaEmbedModel.model)}>
+            <SettingContainer name={$t('settings.ollama.embed_model')} desc={$t('settings.ollama.model_descriptions.' + $data.genModel, { default: '' })}>
+                <select class="dropdown" bind:value={$data.genModel} on:change={() => ollamaEmbedChange($data.genModel)}>
                     <optgroup label={$t('settings.ollama.recommended')}>
                         {#each OllamaEmbedModelNames as model}
                             <option value={model}>{model}</option>

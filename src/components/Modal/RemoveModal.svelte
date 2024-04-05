@@ -19,8 +19,10 @@
 <div class="modal-title">{$t('cmd.remove_model')}</div>
 <div class="modal-content">
     {#if isOllama === false}
+        <!-- TODO translate -->
         Ollama is Not Running
     {:else if isOllama === undefined}
+        <!-- TODO translate -->
         Loading
         <DotAnimation />
     {:else}

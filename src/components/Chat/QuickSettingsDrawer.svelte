@@ -8,9 +8,6 @@
     import ToggleComponent from '../base/Toggle.svelte';
     import PullOllamaModel from '../Onboarding/PullOllamaModel.svelte';
     import LoadingAnimation from '../base/LoadingAnimation.svelte';
-    import { ConfirmModal } from '../Settings/ConfirmModal';
-    import { get } from 'svelte/store';
-    import Ollama from '../Settings/Ollama.svelte';
 
     const icon = (node: HTMLElement, iconId: string) => {
         setIcon(node, iconId);
@@ -24,30 +21,19 @@
         $plugin.saveSettings();
     }
 
-    let similarityThreshold = Math.round(
-        ($data.isIncognitoMode ? $data.ollamaEmbedModel.similarityThreshold : $data.openAIEmbedModel.similarityThreshold) * 100
-    );
+    let similarityThreshold = Math.round($data.embedModels[$data.embedModel].similarityThreshold * 100);
     $: similarityThreshold = Math.min(Math.max(similarityThreshold, 0), 100);
     function setSimilarityThreshold() {
-        if ($data.isIncognitoMode) {
-            $data.ollamaEmbedModel.similarityThreshold = similarityThreshold / 100;
-        } else {
-            $data.openAIEmbedModel.similarityThreshold = similarityThreshold / 100;
-        }
-        $plugin.s2b.setSimilarityThreshold(similarityThreshold / 100);
+        $data.embedModels[$data.embedModel].similarityThreshold = similarityThreshold / 100;
+        $plugin.s2b.setSimilarityThreshold();
         $plugin.saveSettings();
     }
 
-    let temperature = Math.round($data.isIncognitoMode ? $data.ollamaGenModel.temperature : $data.openAIGenModel.temperature) * 100;
+    let temperature = Math.round($data.genModels[$data.genModel].temperature * 100);
     $: temperature = Math.min(Math.max(temperature, 0), 100);
     function setTemperature() {
-        if ($data.isIncognitoMode) {
-            $data.ollamaGenModel.temperature = temperature / 100;
-            $plugin.s2b.setGenModel($data.ollamaGenModel);
-        } else {
-            $data.openAIGenModel.temperature = temperature / 100;
-            $plugin.s2b.setGenModel($data.openAIGenModel);
-        }
+        $data.genModels[$data.genModel].temperature = temperature / 100;
+        $plugin.s2b.setGenModel();
         $plugin.saveSettings();
     }
 
@@ -65,19 +51,6 @@
         $plugin.saveSettings();
     }
 
-    function initSecondBrain() {
-        $data.isIncognitoMode
-            ? $plugin.s2b.init()
-            : new ConfirmModal(
-                  get(plugin).app,
-                  $t('init_third_party_modal.title'),
-                  $t('init_third_party_modal.description'),
-                  (result) => {
-                      if (result === 'Yes') $plugin.s2b.init();
-                  },
-                  'hideIncognitoWarning'
-              ).activate();
-    }
     function formatTime(secondsInput: number) {
         const minutes = Math.floor(secondsInput / 60); // Calculate minutes
         const seconds = secondsInput % 60; // Remaining seconds
@@ -137,11 +110,11 @@
                 </div>
             {:else if $papaState === 'error'}
                 {#if $errorState === 'ollama-gen-model-not-installed'}
-                    <h3 class="text-center text-primary">{$t('quick_settings.error.install_model', { values: { model: $data.ollamaGenModel.model } })}</h3>
-                    <PullOllamaModel pullModel={$data.ollamaGenModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
+                    <h3 class="text-center text-primary">{$t('quick_settings.error.install_model', { values: { model: $data.genModel } })}</h3>
+                    <PullOllamaModel pullModel={$data.genModel} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else if $errorState === 'ollama-embed-model-not-installed'}
-                    <h3 class="text-center text-primary">{$t('quick_settings.error.install_model', { values: { model: $data.ollamaEmbedModel.model } })}</h3>
-                    <PullOllamaModel pullModel={$data.ollamaEmbedModel.model} onSuccessfulPull={() => ($papaState = 'settings-change')} />
+                    <h3 class="text-center text-primary">{$t('quick_settings.error.install_model', { values: { model: $data.embedModel } })}</h3>
+                    <PullOllamaModel pullModel={$data.embedModel} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else if $errorState === 'failed-indexing'}
                     <h3 class="text-center">{$t('notice.failed_indexing')}</h3>
                     <button
@@ -160,10 +133,10 @@
                     />
                 {/if}
             {:else if $papaState === 'mode-change'}
-                <h3 class="text-center text-primary">{$t('quick_settings.mode_changed')}{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}.</h3>
+                <h3 class="text-center text-primary">{$t('quick_settings.mode_changed')}{$data.genProvider}.</h3>
                 <button
                     aria-label={$t('quick_settings.reinitialize')}
-                    on:click={() => initSecondBrain()}
+                    on:click={() => $plugin.s2b.init()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'refresh-cw'}
                 />
@@ -176,9 +149,9 @@
                     use:icon={'refresh-cw'}
                 />
             {:else}
-                <h2 class="mb-0 text-primary">{$data.isIncognitoMode ? 'Ollama' : 'OpenAI'}</h2>
+                <h2 class="mb-0 text-primary">{$data.genProvider}</h2>
                 <p class="mt-1">
-                    {$t('quick_settings.chat_via', { values: { model: $data.isIncognitoMode ? $data.ollamaGenModel.model : $data.openAIGenModel.model } })}
+                    {$t('quick_settings.chat_via', { values: { model: $data.genModel } })}
                 </p>
                 <div class="w-full max-w-[300px]">
                     <div class="flex h-8 items-center justify-between">
