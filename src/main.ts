@@ -15,6 +15,7 @@ import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
 import SettingsTab from './views/Settings';
 import { RemoveModal } from './components/Modal/RemoveModal';
+import type { Provider } from './provider';
 
 export interface PluginData {
     isChatComfy: boolean;
@@ -22,8 +23,8 @@ export interface PluginData {
     isUsingRag: boolean;
     retrieveTopK: number;
     assistantLanguage: Language;
-    embedProvider: 'Ollama' | 'OpenAI';
-    genProvider: 'Ollama' | 'OpenAI';
+    embedProvider: Provider;
+    genProvider: Provider;
     openAISettings: { apiKey: string };
     ollamaSettings: { baseUrl: string };
     embedModel: string;
@@ -52,7 +53,10 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
         Prompts[(window.localStorage.getItem('language') as Language) || 'en']?.initialAssistantMessage || Prompts.en.initialAssistantMessage,
     embedModels: {
         'text-embedding-ada-002': { similarityThreshold: 0.75 },
+        'text-embedding-3-large': { similarityThreshold: 0.5 },
+        'text-embedding-3-small': { similarityThreshold: 0.5 },
         'nomic-embed-text': { similarityThreshold: 0.5 },
+        'mxbai-embed-large': { similarityThreshold: 0.5 },
     },
     genModels: {
         'gpt-3.5-turbo': { temperature: 0.5, contextWindow: 16385 },
