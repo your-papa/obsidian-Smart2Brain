@@ -1,10 +1,10 @@
 <script lang="ts">
     import { Notice } from 'obsidian';
     import { renderMarkdown, icon } from '../../controller/Messages';
-    import { isOllamaRunning } from '../../controller/Ollama';
     import OllamaSetup from './OllamaSetup.svelte';
-    import { t } from 'svelte-i18n';
+    import { date, t } from 'svelte-i18n';
     import { afterUpdate } from 'svelte';
+    import { data } from '../../store';
 
     export let osType: string;
     export let scrollToBottom = () => {};
@@ -42,7 +42,7 @@
                     <button
                         aria-label={$t('onboarding.ollama.app.test_label')}
                         on:click={async () => {
-                            isRunning = await isOllamaRunning();
+                            isRunning = await $data.ollamaProvider.isSetup();
                             isOllamaTested = true;
                             if (!isRunning) new Notice($t('notice.ollama_not_running'), 4000);
                         }}>{$t('onboarding.test')}</button

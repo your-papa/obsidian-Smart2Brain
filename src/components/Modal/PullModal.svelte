@@ -1,12 +1,9 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { isOllamaRunning } from '../../controller/Ollama';
-    import { Providers } from '../../provider';
     import PullOllamaModel from '../Onboarding/PullOllamaModel.svelte';
     import SettingContainer from '../Settings/SettingContainer.svelte';
     import { t } from 'svelte-i18n';
     import { data } from '../../store';
-    import { getOllamaModels, ollamaGenChange, ollamaEmbedChange } from '../../controller/Ollama';
     import DotAnimation from '../base/DotAnimation.svelte';
 
     let isOllama: boolean;
@@ -14,8 +11,8 @@
     let installedOllamaModels: string[] = [];
 
     onMount(async () => {
-        installedOllamaModels = await getOllamaModels();
-        isOllama = await isOllamaRunning();
+        isOllama = await $data.ollamaProvider.isSetup();
+        installedOllamaModels = await $data.ollamaProvider.getModels();
     });
 </script>
 
@@ -33,20 +30,18 @@
             text={$t('modal.pull_model_name')}
             desc={$t('modal.pull_model_desc')}
             onSuccessfulPull={async () => {
-                installedOllamaModels = await getOllamaModels();
+                installedOllamaModels = await $data.ollamaProvider.getModels();
                 pulledModel = true;
             }}
         />
         {#if pulledModel}
             <SettingContainer name={$t('settings.ollama.gen_model')} desc={$t('settings.ollama.model_descriptions.' + $data.genModel, { default: '' })}>
-                <select class="dropdown" bind:value={$data.genModel} on:change={() => ollamaGenChange($data.genModel)}>
+                <select class="dropdown" bind:value={$data.genModel} on:change={() => $data.ollamaProvider.setGenModel($data.genModel)}>
                     <optgroup label={$t('settings.ollama.recommended')}>
-                        {#each Providers.Ollama.rcmdGenModel as model}
-                            <option value={model}>{model}</option>
-                        {/each}
+                        <option value={$data.ollamaProvider.rcmdGenModel}>{$data.ollamaProvider.rcmdGenModel}</option>
                     </optgroup>
                     <optgroup label={$t('settings.ollama.other')}>
-                        {#each installedOllamaModels.filter((model) => !Providers.Ollama.rcmdGenModel.includes(model) && !Providers.Ollama.rcmdEmbedModel.includes(model)) as model}
+                        {#each installedOllamaModels.filter((model) => $data.ollamaProvider.rcmdGenModel !== model && $data.ollamaProvider.rcmdEmbedModel !== model && !$data.ollamaProvider.otherEmbedModels.includes(model)) as model}
                             <option value={model}>{model}</option>
                         {/each}
                     </optgroup>
@@ -54,14 +49,12 @@
             </SettingContainer>
             <!-- Ollama Embed Model -->
             <SettingContainer name={$t('settings.ollama.embed_model')} desc={$t('settings.ollama.model_descriptions.' + $data.genModel, { default: '' })}>
-                <select class="dropdown" bind:value={$data.genModel} on:change={() => ollamaEmbedChange($data.genModel)}>
+                <select class="dropdown" bind:value={$data.embedModel} on:change={() => $data.ollamaProvider.setEmbedModel($data.embedModel)}>
                     <optgroup label={$t('settings.ollama.recommended')}>
-                        {#each Providers.Ollama.rcmdEmbedModel as model}
-                            <option value={model}>{model}</option>
-                        {/each}
+                        <option value={$data.ollamaProvider.rcmdEmbedModel}>{$data.ollamaProvider.rcmdEmbedModel}</option>
                     </optgroup>
                     <optgroup label={$t('settings.ollama.other')}>
-                        {#each installedOllamaModels.filter((model) => !Providers.Ollama.rcmdEmbedModel.includes(model)) as model}
+                        {#each installedOllamaModels.filter((model) => $data.ollamaProvider.rcmdEmbedModel !== model) as model}
                             <option value={model}>{model}</option>
                         {/each}
                     </optgroup>

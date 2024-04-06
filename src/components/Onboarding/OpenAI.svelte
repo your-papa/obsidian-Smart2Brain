@@ -2,31 +2,23 @@
     import { Notice } from 'obsidian';
     import { icon, renderMarkdown } from '../../controller/Messages';
     import TextComponent from '../base/Text.svelte';
-    import { isAPIKeyValid } from '../../controller/OpenAI';
     import { plugin, data } from '../../store';
     import InitButtonComponent from './InitButton.svelte';
     import { t } from 'svelte-i18n';
     import { afterUpdate, onMount } from 'svelte';
 
     export let scrollToBottom = () => {};
+    let isValid = false;
+    let isKeyTested = false;
 
     onMount(async () => {
-        $data.embedProvider = 'OpenAI';
+        $data.embedProvider = $data.openAIProvider;
+        $data.genProvider = $data.openAIProvider;
     });
 
     afterUpdate(() => {
         scrollToBottom();
     });
-
-    let openAIApiKey: string = $data.openAISettings.apiKey;
-    let isValid: boolean = false;
-    let isKeyTested: boolean = false;
-    const changeApiKey = (newApiKey: string) => {
-        newApiKey.trim();
-        $data.openAISettings.apiKey = newApiKey;
-        $plugin.saveSettings();
-        isKeyTested = false;
-    };
 </script>
 
 <ol class="w-full pr-10 *:p-1">
@@ -42,7 +34,13 @@
     <li>
         <div class="flex flex-wrap items-center justify-between">
             <span class="mr-2">{$t('onboarding.openai.paste_api_key')} </span>
-            <TextComponent value={openAIApiKey} placeholder="sk-...Lk" changeFunc={changeApiKey} />
+            <TextComponent
+                value={$data.openAIProvider.apiKey}
+                placeholder="sk-...Lk"
+                changeFunc={(value) => {
+                    $data.openAIProvider.changeSetup(value);
+                }}
+            />
         </div>
     </li>
     <li>
@@ -61,7 +59,7 @@
                     <button
                         aria-label={$t('onboarding.openai.test_api_key')}
                         on:click={async () => {
-                            isValid = await isAPIKeyValid($data.openAISettings.apiKey);
+                            isValid = await $data.openAIProvider.isSetup();
                             if (!isValid) new Notice($t('notice.api_key_invalid'), 4000);
                             isKeyTested = true;
                         }}>{$t('onboarding.test')}</button

@@ -1,14 +1,12 @@
 <script lang="ts">
     import InitButtonComponent from './InitButton.svelte';
     import { afterUpdate, onMount } from 'svelte';
-    import { getOllamaModels } from '../../controller/Ollama';
     import { icon } from '../../controller/Messages';
     import { data } from '../../store';
     import DropdownComponent from '../base/Dropdown.svelte';
-    import { isOllamaOriginsSet } from '../../controller/Ollama';
     import { t } from 'svelte-i18n';
     import PullOllamaModel from './PullOllamaModel.svelte';
-
+    import { Ollama } from '../../Providers/Ollama';
     export let scrollToBottom = () => {};
 
     afterUpdate(() => {
@@ -23,7 +21,7 @@
     let isOrigin: boolean = false;
 
     onMount(async () => {
-        $data.embedProvider = 'Ollama';
+        $data.embedProvider = $data.ollamaProvider;
     });
 
     $: if (ollamaModelComponent && ollamaModels.some((model) => model === $data.embedModel)) model = $data.embedModel;
@@ -44,9 +42,9 @@
                 <button
                     aria-label="Test if origins are set correctly"
                     on:click={async () => {
-                        isOrigin = await isOllamaOriginsSet();
+                        isOrigin = await $data.ollamaProvider.isSetup();
                         isOriginsTested = true;
-                        ollamaModels = await getOllamaModels();
+                        ollamaModels = await $data.ollamaProvider.getModels();
                     }}>{$t('onboarding.test')}</button
                 >
             {/if}
@@ -56,14 +54,18 @@
 {#if isOrigin}
     <li>
         {$t('onboarding.ollama.install_model')}<br />
-        <PullOllamaModel {pullModel} text={$t('onboarding.ollama.recommended')} onSuccessfulPull={async () => (ollamaModels = await getOllamaModels())} />
+        <PullOllamaModel
+            {pullModel}
+            text={$t('onboarding.ollama.recommended')}
+            onSuccessfulPull={async () => (ollamaModels = await $data.ollamaProvider.getModels())}
+        />
     </li>
     {#if ollamaModels.length > 0}
         <li>
             <div class="flex flex-wrap items-center justify-between">
                 {$t('onboarding.ollama.set_model')}
                 <div class="flex items-center gap-1">
-                    <button class="clickable-icon" use:icon={'refresh-ccw'} on:click={async () => (ollamaModels = await getOllamaModels())} />
+                    <button class="clickable-icon" use:icon={'refresh-ccw'} on:click={async () => (ollamaModels = await $data.ollamaProvider.getModels())} />
                     <DropdownComponent
                         bind:this={ollamaModelComponent}
                         selected={model}

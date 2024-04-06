@@ -15,7 +15,9 @@ import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
 import SettingsTab from './views/Settings';
 import { RemoveModal } from './components/Modal/RemoveModal';
-import { type Provider } from './provider';
+import type { Provider } from './Providers/Provider';
+import { OpenAI } from './Providers/OpenAI';
+import { Ollama } from './Providers/Ollama';
 
 export interface PluginData {
     isChatComfy: boolean;
@@ -25,8 +27,8 @@ export interface PluginData {
     assistantLanguage: Language;
     embedProvider: Provider;
     genProvider: Provider;
-    openAISettings: { apiKey: string };
-    ollamaSettings: { baseUrl: string };
+    openAIProvider: OpenAI;
+    ollamaProvider: Ollama;
     embedModel: string;
     genModel: string;
     genModels: { [model: string]: { temperature: number; contextWindow: number } };
@@ -48,11 +50,11 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isChatComfy: true,
     isUsingRag: true,
     retrieveTopK: 100,
+    ollamaProvider: new Ollama('http://localhost:11434'),
+    openAIProvider: new OpenAI(''),
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     initialAssistantMessageContent:
         Prompts[(window.localStorage.getItem('language') as Language) || 'en']?.initialAssistantMessage || Prompts.en.initialAssistantMessage,
-    ollamaSettings: { baseUrl: 'http://localhost:11434' },
-    openAISettings: { apiKey: '' },
     embedModels: {
         'text-embedding-ada-002': { similarityThreshold: 0.75 },
         'text-embedding-3-large': { similarityThreshold: 0.5 },
@@ -104,6 +106,14 @@ export default class SecondBrainPlugin extends Plugin {
         plugin.set(this);
         const t = get(_);
         await this.loadSettings();
+        data.update((d) => {
+            d.openAIProvider = new OpenAI(d.openAIProvider.apiKey);
+            d.ollamaProvider = new Ollama(d.ollamaProvider.baseUrl);
+            //ToDo make this better
+            if (d.embedProvider) d.embedProvider = d.embedProvider.name === 'OpenAI' ? d.openAIProvider : d.ollamaProvider;
+            if (d.genProvider) d.genProvider = d.genProvider.name === 'OpenAI' ? d.openAIProvider : d.ollamaProvider;
+            return d;
+        });
         this.s2b = new SmartSecondBrain(this.app, this.manifest.dir);
         Log.setLogLevel(get(data).isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
 
