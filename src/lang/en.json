@@ -131,6 +131,18 @@
             "title": "Clear Plugin Data",
             "description": "Are you sure you want to delete the plugin data? Note that only the plugin data and the vector store data will be removed. All chat files inside your vault will not be affected."
         },
+        "provider_modal": {
+            "title": "Setup your Provider",
+            "provider": "Provider",
+            "provider_desc": "Choose the provider you want to set up."
+        },
+        "provider": {
+            "title": "Provider",
+            "provider": "Provider",
+            "provider_desc": "Choose the provider for the embedding model.",
+            "baseUrl": "BaseUrl",
+            "apiKey": "Api Key"
+        },
         "clear_label": "Clear",
         "relaunch": "Relaunch",
         "autostart": "Autostart",
@@ -142,6 +154,26 @@
         "langsmith_key_desc": "Provide a Langsmith API Key if you want to trace and evaluate the internals of your Smart Second Brain.",
         "verbose": "Developer Console logging",
         "verbose_desc": "Enable verbose logging in the Developer Console.",
+        "embed_model": {
+            "title": "Embed Model",
+            "provider": "Provider",
+            "provider_desc": "Choose the provider for the embedding model.",
+            "model": "Model",
+            "model_des": "Choose the model you want to use to embed your notes.",
+            "recommended": "Recommended: ",
+            "other_embed": "Other Embedding Models:",
+            "other": "Other:"
+        },
+        "gen_model": {
+            "title": "Chat Model",
+            "provider": "Provider",
+            "provider_desc": "Choose the provider for the chat model.",
+            "model": "Model",
+            "model_des": "Choose the model you want to use to chat your notes.",
+            "recommended": "Recommended: ",
+            "other_gen": "Other Chat Models:",
+            "other": "Other:"
+        },
         "openai": {
             "desc": " ",
             "api_key": "API Key",

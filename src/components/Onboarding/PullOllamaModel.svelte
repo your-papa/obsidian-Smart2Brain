@@ -1,12 +1,12 @@
 <script lang="ts">
     import { Notice } from 'obsidian';
     import { icon } from '../../controller/Messages';
-    import { pullOllamaModel } from '../../controller/Ollama';
     import { t } from 'svelte-i18n';
     import ProgressBar from '../base/ProgressBar.svelte';
     import { cancelPullModel } from '../../store';
     import InputComponent from '../base/Text.svelte';
     import DotAnimation from '../base/DotAnimation.svelte';
+    import { data } from '../../store';
 
     export let onSuccessfulPull: () => void = () => {};
     export let text = '';
@@ -24,7 +24,7 @@
         try {
             progress = 0;
             total = 0;
-            for await (const chunk of pullOllamaModel(pullModel)) {
+            for await (const chunk of $data.ollanaProvider.pullOllamaModel(pullModel)) {
                 status = chunk.status;
                 if (chunk.total) total = chunk.total;
                 if (chunk.completed) progress = Math.floor((chunk.completed / total) * 100);

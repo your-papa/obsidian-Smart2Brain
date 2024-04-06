@@ -2,11 +2,11 @@ import { App, Notice, TFile, normalizePath } from 'obsidian';
 import { Papa, obsidianDocumentLoader, type GenModel, type EmbedModel } from 'papa-ts';
 import { get } from 'svelte/store';
 import { wildTest } from './components/Settings/FuzzyModal';
-import { isOllamaRunning, getOllamaModels } from './controller/Ollama';
-import { isAPIKeyValid } from './controller/OpenAI';
 import Log, { LogLvl } from './logging';
 import { data, papaState, errorState, papaIndexingProgress, chatHistory, serializeChatHistory, runState, runContent, papaIndexingTimeLeft } from './store';
 import { _ } from 'svelte-i18n';
+import { Ollama } from './Providers/Ollama';
+import { OpenAI } from './Providers/OpenAI';
 
 export default class SmartSecondBrain {
     private papa: Papa;
@@ -204,52 +204,54 @@ export default class SmartSecondBrain {
         if (this.papa) this.papa.setTracer(langchainKey);
     }
 
-    private async canInit() {
-        const d = get(data);
+    private async canInit(): Promise<boolean> {
+        const { genModel, embedModel, ollamaProvider, genProvider, embedProvider } = get(data);
         const t = get(_);
-        const ollamaModels = getOllamaModels();
-        if (get(papaState) === 'running') return new Notice(t('notice.still_running'), 4000);
-        else if (get(papaState) === 'indexing' || get(papaState) === 'loading') {
-            return new Notice(t('notice.still_indexing'), 4000) && false;
-        } else if ((d.genProvider === 'Ollama' || d.embedProvider === 'Ollama') && !(await isOllamaRunning())) {
+        const ollamaModels = ollamaProvider.getModels();
+
+        if (get(papaState) === 'running') {
+            new Notice(t('notice.still_running'), 4000);
+            return false;
+        } else if (get(papaState) === 'indexing' || get(papaState) === 'loading') {
+            new Notice(t('notice.still_indexing'), 4000);
+            return false;
+        } else if (!(await genProvider.isSetup())) {
             papaState.set('error');
-            errorState.set('ollama-not-running');
-            return new Notice(t('notice.ollama_not_running'), 4000) && false;
-        } else if (d.genProvider === 'Ollama' && !(await ollamaModels).includes(d.genModel)) {
+            return false;
+        } else if (!(await embedProvider.isSetup())) {
+            papaState.set('error');
+            return false;
+        } else if (genProvider.isLocal && !(await ollamaModels).includes(genModel)) {
             papaState.set('error');
             errorState.set('ollama-gen-model-not-installed');
-            return new Notice(t('notice.ollama_gen_model'), 4000) && false;
-        } else if (d.embedProvider === 'Ollama' && !(await ollamaModels).includes(d.embedModel)) {
+            new Notice(t('notice.ollama_gen_model'), 4000);
+            return false;
+        } else if (embedProvider.isLocal && !(await ollamaModels).includes(embedModel)) {
             papaState.set('error');
             errorState.set('ollama-embed-model-not-installed');
-            return new Notice(t('notice.ollama_embed_model'), 4000) && false;
-        } else if (
-            (d.genProvider === 'OpenAI' && !(await isAPIKeyValid(d.openAISettings.apiKey))) ||
-            (d.embedProvider === 'OpenAI' && !(await isAPIKeyValid(d.openAISettings.apiKey)))
-        ) {
-            papaState.set('error');
-            return new Notice(t('notice.openai_key'), 4000) && false;
-        }
+            new Notice(t('notice.ollama_embed_model'), 4000);
+            return false;
+        } else return true;
     }
 
     private getPapaGenModel() {
-        const { genModel, genModels, genProvider, ollamaSettings, openAISettings } = get(data);
+        const { genModel, genModels, genProvider } = get(data);
         let papaGenModel: GenModel;
-        if (genProvider === 'Ollama') {
-            papaGenModel = { model: genModel, ...genModels[genModel], baseUrl: ollamaSettings.baseUrl };
-        } else if (genProvider === 'OpenAI') {
-            papaGenModel = { model: genModel, ...genModels[genModel], openAIApiKey: openAISettings.apiKey };
+        if (genProvider instanceof Ollama) {
+            papaGenModel = { model: genModel, ...genModels[genModel], baseUrl: genProvider.baseUrl };
+        } else if (genProvider instanceof OpenAI) {
+            papaGenModel = { model: genModel, ...genModels[genModel], openAIApiKey: genProvider.apiKey };
         }
         return papaGenModel;
     }
 
     private getPapaEmbedModel() {
-        const { embedModel, embedModels, embedProvider, ollamaSettings, openAISettings } = get(data);
+        const { embedModel, embedModels, embedProvider } = get(data);
         let papaEmbedModel: EmbedModel;
-        if (embedProvider === 'Ollama') {
-            papaEmbedModel = { model: embedModel, ...embedModels[embedModel], baseUrl: ollamaSettings.baseUrl };
-        } else if (embedProvider === 'OpenAI') {
-            papaEmbedModel = { model: embedModel, ...embedModels[embedModel], openAIApiKey: openAISettings.apiKey };
+        if (embedProvider instanceof Ollama) {
+            papaEmbedModel = { model: embedModel, ...embedModels[embedModel], baseUrl: embedProvider.baseUrl };
+        } else if (embedProvider instanceof OpenAI) {
+            papaEmbedModel = { model: embedModel, ...embedModels[embedModel], openAIApiKey: embedProvider.apiKey };
         }
         return papaEmbedModel;
     }

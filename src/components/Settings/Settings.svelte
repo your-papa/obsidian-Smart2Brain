@@ -9,6 +9,9 @@
     import ButtonComponent from '../base/Button.svelte';
     import { t } from 'svelte-i18n';
     import Log from '../../logging';
+    import EmbedModel from './EmbedModel.svelte';
+    import ChatModel from './ChatModel.svelte';
+    import ProviderSetup from './ProviderSetup.svelte';
 
     let isFFOverflowingY: boolean = false;
     let isFFExpanded: boolean = false;
@@ -94,11 +97,12 @@
 {/if}
 
 <!-- Embed Model Settings -->
+<EmbedModel />
 
 <!-- Gen Modal Settings -->
-
+<ChatModel />
 <!-- Provider Settings -->
-
+<ProviderSetup />
 <!-- Advanced Settings -->
 <details>
     <summary class="setting-item-heading py-3">{$t('settings.advanced')}</summary>

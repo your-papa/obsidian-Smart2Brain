@@ -1,18 +1,20 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { deleteOllamaModels, isOllamaRunning } from '../../controller/Ollama';
     import { t } from 'svelte-i18n';
-    import { getOllamaModels } from '../../controller/Ollama';
     import DropdownComponent from '../base/Dropdown.svelte';
     import DotAnimation from '../base/DotAnimation.svelte';
+    import { data } from '../../store';
+    import { Ollama } from '../../Providers/Ollama';
 
     let model = '';
     let isOllama: boolean;
     let installedOllamaModels: string[] = [];
+    let ollama: Ollama;
 
     onMount(async () => {
-        installedOllamaModels = await getOllamaModels();
-        isOllama = await isOllamaRunning();
+        ollama = $data.ollamaProvider;
+        isOllama = await ollama.isSetup();
+        installedOllamaModels = await ollama.getModels();
     });
 </script>
 
@@ -40,8 +42,8 @@
                 <button
                     class="mod-warning"
                     on:click={async () => {
-                        await deleteOllamaModels(model);
-                        installedOllamaModels = await getOllamaModels();
+                        await ollama.deleteOllamaModel(model);
+                        installedOllamaModels = await ollama.getModels();
                     }}>{$t('general.delete')}</button
                 >
             </div>

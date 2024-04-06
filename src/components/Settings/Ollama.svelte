@@ -28,7 +28,7 @@
         await changeOllamaBaseUrl(ollamaBaseUrl);
         isRunning = await isOllamaRunning();
         styleOllamaBaseUrl = isRunning ? '' : '!border-[--background-modifier-error]';
-    }; -->
+    };
 </script>
 
 <SettingContainer name="Ollama" isHeading={true} desc={$t('settings.ollama.desc')}>
@@ -46,7 +46,6 @@
 <SettingContainer name={$t('settings.ollama.base_url')} desc={$t('settings.ollama.base_url_desc')}>
     <ButtonComponent iconId={'rotate-cw'} changeFunc={resetOllamaBaseUrl} />
     <TextComponent
-        bind:value={ollamaBaseUrl}
         styles={styleOllamaBaseUrl}
         placeholder="http://localhost:11434"
         changeFunc={async (newBaseUrl) => {
