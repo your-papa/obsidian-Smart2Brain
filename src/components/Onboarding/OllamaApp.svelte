@@ -54,14 +54,14 @@
     {#if isRunning}
         {#if osType === 'Darwin'}
             <li>{$t('onboarding.ollama.app.set_origins')}</li>
-            <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\nlaunchctl setenv OLLAMA_ORIGINS "*"\n```')} />
+            <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\nlaunchctl setenv OLLAMA_ORIGINS "app://obsidian.md*"\n```')} />
             <li>
                 {$t('onboarding.ollama.app.restart')}<span aria-label={$t('onboarding.ollama.app.restart_label')} use:icon={'help-circle'} />
             </li>
         {:else if osType === 'Windows_NT'}
             <li>{$t('onboarding.ollama.app.quit')}<span aria-label={$t('onboarding.ollama.app.quit_label')} use:icon={'help-circle'} /></li>
             <li>{$t('onboarding.ollama.app.start_origins')}</li>
-            <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\n$env:OLLAMA_ORIGINS="*"; ollama serve\n```')} />
+            <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\n$env:OLLAMA_ORIGINS="app://obsidian.md*"; ollama serve\n```')} />
         {/if}
         <OllamaSetup {scrollToBottom} />
     {/if}
