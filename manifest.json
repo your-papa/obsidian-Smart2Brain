@@ -4,7 +4,7 @@
     "description": "Interact with your privacy focused assistant, leveraging Ollama or OpenAI, making your second brain even smarter.",
     "author": "Leo310, nicobrauchtgit",
     "authorUrl": "https://github.com/nicobrauchtgit",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "minAppVersion": "1.5.0",
     "isDesktopOnly": true
 }
