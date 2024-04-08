@@ -1,6 +1,6 @@
 import { around } from 'monkey-around';
 import { Notice, Plugin, TFile, WorkspaceLeaf, WorkspaceSidedock, normalizePath, type ViewState } from 'obsidian';
-import { LogLvl, Prompts, type Language } from 'papa-ts';
+import { LogLvl, Prompts, type Language, type GenModel, type EmbedModel } from 'papa-ts';
 import { get } from 'svelte/store';
 import { _ } from 'svelte-i18n';
 
@@ -15,24 +15,21 @@ import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
 import SettingsTab from './views/Settings';
 import { RemoveModal } from './components/Modal/RemoveModal';
-import type { Provider } from './Providers/Provider';
-import { OpenAI } from './Providers/OpenAI';
-import { Ollama } from './Providers/Ollama';
+import type { EmbedModelSettings, GenModelSettings, Provider, ProviderBase, ProviderName } from './Providers/Provider';
+import { OpenAIEmbedProvider, OpenAIGenProvider, OpenAIBaseProvider } from './Providers/OpenAI';
+import { OllamaEmbedProvider, OllamaGenProvider, OllamaBaseProvider } from './Providers/Ollama';
 
 export interface PluginData {
+    selEmbedProvider: ProviderName;
+    selGenProvider: ProviderName;
+    providerSettings: { [provider: ProviderName]: ProviderBase };
+    embedProviders: { [provider: ProviderName]: Provider<EmbedModelSettings, EmbedModel> };
+    genProviders: { [provider: ProviderName]: Provider<GenModelSettings, GenModel> };
     isChatComfy: boolean;
     initialAssistantMessageContent: string;
     isUsingRag: boolean;
     retrieveTopK: number;
     assistantLanguage: Language;
-    embedProvider: Provider;
-    genProvider: Provider;
-    openAIProvider: OpenAI;
-    ollamaProvider: Ollama;
-    embedModel: string;
-    genModel: string;
-    genModels: { [model: string]: { temperature: number; contextWindow: number } };
-    embedModels: { [model: string]: { similarityThreshold: number } };
     targetFolder: string;
     excludeFF: Array<string>;
     defaultChatName: string;
@@ -50,32 +47,14 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     isChatComfy: true,
     isUsingRag: true,
     retrieveTopK: 100,
-    ollamaProvider: new Ollama('http://localhost:11434'),
-    openAIProvider: new OpenAI(''),
+    selEmbedProvider: 'Ollama',
+    selGenProvider: 'Ollama',
+    providerSettings: { OpenAI: new OpenAIBaseProvider(''), Ollama: new OllamaBaseProvider('http://localhost:11434') },
+    embedProviders: { OpenAI: new OpenAIEmbedProvider('text-embedding-3-large'), Ollama: new OllamaEmbedProvider('mxbai-embed-large') },
+    genProviders: { OpenAI: new OpenAIGenProvider('gpt-4'), Ollama: new OllamaGenProvider('llama2') },
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     initialAssistantMessageContent:
         Prompts[(window.localStorage.getItem('language') as Language) || 'en']?.initialAssistantMessage || Prompts.en.initialAssistantMessage,
-    embedModels: {
-        'text-embedding-ada-002': { similarityThreshold: 0.75 },
-        'text-embedding-3-large': { similarityThreshold: 0.5 },
-        'text-embedding-3-small': { similarityThreshold: 0.5 },
-        'nomic-embed-text': { similarityThreshold: 0.5 },
-        'mxbai-embed-large': { similarityThreshold: 0.5 },
-    },
-    genModels: {
-        'gpt-3.5-turbo': { temperature: 0.5, contextWindow: 16385 },
-        'gpt-4': { temperature: 0.5, contextWindow: 8192 },
-        'gpt-4-32k': { temperature: 0.5, contextWindow: 32768 },
-        'gpt-4-turbo-preview': { temperature: 0.5, contextWindow: 128000 },
-        llama2: { temperature: 0.5, contextWindow: 4096 },
-        'llama2-uncensored': { temperature: 0.5, contextWindow: 4096 },
-        mistral: { temperature: 0.5, contextWindow: 8000 },
-        'mistral-openorca': { temperature: 0.5, contextWindow: 8000 },
-        gemma: { temperature: 0.5, contextWindow: 8000 },
-        mixtral: { temperature: 0.5, contextWindow: 32000 },
-        'dolphin-mixtral': { temperature: 0.5, contextWindow: 32000 },
-        phi: { temperature: 0.5, contextWindow: 2048 },
-    },
     targetFolder: 'Chats',
     defaultChatName: 'New Chat',
     excludeFF: ['Chats', '*.excalidraw.md'],
@@ -106,14 +85,25 @@ export default class SecondBrainPlugin extends Plugin {
         plugin.set(this);
         const t = get(_);
         await this.loadSettings();
+
         data.update((d) => {
-            d.openAIProvider = new OpenAI(d.openAIProvider.apiKey);
-            d.ollamaProvider = new Ollama(d.ollamaProvider.baseUrl);
-            //ToDo make this better
-            if (d.embedProvider) d.embedProvider = d.embedProvider.name === 'OpenAI' ? d.openAIProvider : d.ollamaProvider;
-            if (d.genProvider) d.genProvider = d.genProvider.name === 'OpenAI' ? d.openAIProvider : d.ollamaProvider;
+            d.providerSettings = {
+                OpenAI: new OpenAIBaseProvider(d.providerSettings['OpenAI'].getConfig()),
+                Ollama: new OllamaBaseProvider(d.providerSettings['Ollama'].getConfig()),
+            };
+            d.embedProviders = {
+                OpenAI: new OpenAIEmbedProvider(d.embedProviders['OpenAI'].getModel()),
+                Ollama: new OllamaEmbedProvider(d.embedProviders['Ollama'].getModel()),
+            };
+            d.genProviders = {
+                OpenAI: new OpenAIGenProvider(d.genProviders['OpenAI'].getModel()),
+                Ollama: new OllamaGenProvider(d.genProviders['Ollama'].getModel()),
+            };
             return d;
         });
+        console.log(get(data).genProviders['OpenAI'].getModels());
+        await this.saveSettings();
+
         this.s2b = new SmartSecondBrain(this.app, this.manifest.dir);
         Log.setLogLevel(get(data).isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
 
