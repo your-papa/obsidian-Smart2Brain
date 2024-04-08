@@ -1,31 +1,18 @@
-import { Provider } from './Provider';
+import { ProviderBase, Provider, type EmbedModelSettings, type GenModelSettings } from './Provider';
 import Log from '../logging';
 import { requestUrl, Notice } from 'obsidian';
 import { cancelPullModel, data, errorState, papaState, plugin } from '../store';
 import { get } from 'svelte/store';
 import { _ } from 'svelte-i18n';
+import type { GenModel, EmbedModel } from 'papa-ts';
 
-export class Ollama implements Provider {
-    name = 'Ollama';
-    rcmdGenModel = 'llama2';
-    otherGenModels = ['llama2-uncensored', 'mistral', 'mistral-openorca', 'gemma', 'mixtral', 'dolphin-mixtral', 'phi'];
-    rcmdEmbedModel = 'mxbai-embed-large';
-    otherEmbedModels = ['nomic-embed-text'];
-    isLocal = true;
-    baseUrl: string;
+export class OllamaBaseProvider extends ProviderBase {
+    readonly isLocal = true;
 
-    constructor(baseUrl: string) {
-        this.baseUrl = baseUrl;
-    }
-
-    getSetup(): string {
-        return this.baseUrl;
-    }
-
-    async isSetup(): Promise<boolean> {
+    async isSetuped(): Promise<boolean> {
         const t = get(_);
         try {
-            const response = await fetch(this.baseUrl + '/api/tags');
+            const response = await fetch(this.apiConfig + '/api/tags');
             if (response.status === 200) {
                 return true;
             } else {
@@ -42,18 +29,34 @@ export class Ollama implements Provider {
         }
     }
 
-    async changeSetup(newBaseUrl: string) {
-        newBaseUrl.trim();
-        if (newBaseUrl.endsWith('/')) newBaseUrl = newBaseUrl.slice(0, -1);
-        this.baseUrl = newBaseUrl;
-        await get(plugin).saveSettings();
-        papaState.set('settings-change');
+    // async setSetup({ baseUrl }: IOllamaSettings) {
+    //     baseUrl.trim();
+    //     if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
+    //     this.baseUrl = baseUrl;
+    //     await get(plugin).saveSettings();
+    //     papaState.set('settings-change');
+    // }
+
+    async isOllamaRunning() {
+        try {
+            new URL(this.apiConfig);
+            const response = await requestUrl(this.apiConfig + '/api/tags');
+            if (response.status === 200) {
+                return true;
+            } else {
+                Log.debug(`IsOllamaRunning, Unexpected status code: ${response.status}`);
+                return false;
+            }
+        } catch (error) {
+            Log.debug('Ollama is not running', error);
+            return false;
+        }
     }
 
     async getModels(): Promise<string[]> {
         try {
             const modelsRes = await requestUrl({
-                url: this.baseUrl + '/api/tags',
+                url: this.apiConfig + '/api/tags',
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
@@ -67,52 +70,11 @@ export class Ollama implements Provider {
         }
     }
 
-    async setGenModel(model: string): Promise<void> {
-        const { s2b, saveSettings } = get(plugin);
-        const installedOllamaModels = await this.getModels();
-        get(data).genModel = model;
-        await saveSettings();
-        if (!installedOllamaModels.includes(model)) {
-            papaState.set('error');
-            errorState.set('ollama-gen-model-not-installed');
-            return;
-        }
-        s2b.setGenModel();
-    }
-
-    async setEmbedModel(model: string): Promise<void> {
-        const installedOllamaModels = await this.getModels();
-        get(data).embedModel = model;
-        await get(plugin).saveSettings();
-        if (!installedOllamaModels.includes(model)) {
-            papaState.set('error');
-            errorState.set('ollama-embed-model-not-installed');
-            return;
-        }
-        papaState.set('settings-change');
-    }
-
-    async isOllamaRunning() {
-        try {
-            new URL(this.baseUrl);
-            const response = await requestUrl(this.baseUrl + '/api/tags');
-            if (response.status === 200) {
-                return true;
-            } else {
-                Log.debug(`IsOllamaRunning, Unexpected status code: ${response.status}`);
-                return false;
-            }
-        } catch (error) {
-            Log.debug('Ollama is not running', error);
-            return false;
-        }
-    }
-
     async deleteOllamaModel(model: string): Promise<boolean> {
         const t = get(_);
         try {
             const modelsRes = await requestUrl({
-                url: `${this.baseUrl}/api/pull`,
+                url: `${this.apiConfig}/api/pull`,
                 method: 'DELETE',
                 headers: {
                     'Content-Type': 'application/json',
@@ -136,7 +98,7 @@ export class Ollama implements Provider {
         const t = get(_);
         Log.info('Pulling model from Ollama', model);
         try {
-            const response = await fetch(`${this.baseUrl}/api/pull`, {
+            const response = await fetch(`${this.apiConfig}/api/pull`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -187,7 +149,67 @@ export class Ollama implements Provider {
             return error;
         }
     }
-    toString(): string {
-        return 'Ollama';
+}
+
+export class OllamaGenProvider extends Provider<GenModelSettings, GenModel> {
+    models = {
+        llama2: { temperature: 0.5, contextWindow: 4096 },
+        'llama2-uncensored': { temperature: 0.5, contextWindow: 4096 },
+        mistral: { temperature: 0.5, contextWindow: 8000 },
+        'mistral-openorca': { temperature: 0.5, contextWindow: 8000 },
+        gemma: { temperature: 0.5, contextWindow: 8000 },
+        mixtral: { temperature: 0.5, contextWindow: 32000 },
+        'dolphin-mixtral': { temperature: 0.5, contextWindow: 32000 },
+        phi: { temperature: 0.5, contextWindow: 2048 },
+    };
+
+    getPapaModel() {
+        return {
+            model: this.selectedModel,
+            ...this.models[this.selectedModel],
+            baseUrl: get(data).providerSettings['Ollama'].getConfig(),
+        };
+    }
+
+    async setModel(model: string) {
+        this.selectedModel = model;
+        const { s2b, saveSettings } = get(plugin);
+        const installedOllamaModels = await get(data).providerSettings['Ollama'].getModels();
+        await saveSettings();
+        if (!installedOllamaModels.includes(model)) {
+            papaState.set('error');
+            errorState.set('ollama-gen-model-not-installed');
+            new Notice(get(_)('notice.ollama_gen_model'), 4000);
+            return;
+        }
+        s2b.setGenModel(this.getPapaModel());
+    }
+}
+
+export class OllamaEmbedProvider extends Provider<EmbedModelSettings, EmbedModel> {
+    models = {
+        'nomic-embed-text': { similarityThreshold: 0.5 },
+        'mxbai-embed-large': { similarityThreshold: 0.5 },
+    };
+
+    getPapaModel() {
+        return {
+            model: this.selectedModel,
+            ...this.models[this.selectedModel],
+            baseUrl: get(data).providerSettings['Ollama'].getConfig(),
+        };
+    }
+
+    async setModel(model: string) {
+        this.selectedModel = model;
+        const installedOllamaModels = await get(data).providerSettings['Ollama'].getModels();
+        await get(plugin).saveSettings();
+        if (!installedOllamaModels.includes(model)) {
+            papaState.set('error');
+            errorState.set('ollama-embed-model-not-installed');
+            new Notice(get(_)('notice.ollama_embed_model'), 4000);
+            return;
+        }
+        papaState.set('settings-change');
     }
 }

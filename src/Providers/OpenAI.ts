@@ -1,28 +1,15 @@
 import { Notice, requestUrl } from 'obsidian';
-import { type Provider } from './Provider';
 import Log from '../logging';
+import { Provider, ProviderBase, type GenModelSettings, type EmbedModelSettings } from './Provider';
 import { _ } from 'svelte-i18n';
 import { get } from 'svelte/store';
-import { plugin } from '../store';
+import { data, plugin } from '../store';
+import type { EmbedModel, GenModel } from 'papa-ts';
 
-export class OpenAI implements Provider {
-    name = 'OpenAI';
-    rcmdGenModel = 'gpt-4';
-    otherGenModels = ['gpt-3.5-turbo', 'gpt-3.5-turbo-16k', 'gpt-4-turbo-preview'];
-    rcmdEmbedModel = 'text-embedding-3-large';
-    otherEmbedModels = ['text-embedding-ada-002', 'text-embedding-3-small'];
-    isLocal = false;
-    apiKey: string;
+export class OpenAIBaseProvider extends ProviderBase {
+    readonly isLocal = false;
 
-    constructor(apiKey: string) {
-        this.apiKey = apiKey;
-    }
-
-    getSetup(): string {
-        return this.apiKey;
-    }
-
-    async isSetup(): Promise<boolean> {
+    async isSetuped(): Promise<boolean> {
         const t = get(_);
         try {
             const response = await requestUrl({
@@ -30,7 +17,7 @@ export class OpenAI implements Provider {
                 url: `https://api.openai.com/v1/models`,
                 headers: {
                     'Content-Type': 'application/json',
-                    Authorization: `Bearer ${this.apiKey}`,
+                    Authorization: `Bearer ${this.apiConfig}`,
                 },
             });
             return response.status === 200;
@@ -39,38 +26,60 @@ export class OpenAI implements Provider {
             return false;
         }
     }
+}
 
-    changeSetup(apiKey: string): void {
-        const { saveSettings } = get(plugin);
-        apiKey.trim();
-        this.apiKey = apiKey;
-        saveSettings();
+async function getOpenAIModels(apiKey: string, models: { [model: string]: GenModelSettings | EmbedModelSettings }) {
+    try {
+        const modelRes = await requestUrl({
+            method: 'GET',
+            url: `https://api.openai.com/v1/models`,
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`,
+            },
+        });
+        return modelRes.json.data.map((model: { id: string }) => model.id).filter((id: string) => Object.keys(models).includes(id));
+    } catch (error) {
+        Log.debug('OpenAI is not running', error);
+        return [];
+    }
+}
+
+export class OpenAIGenProvider extends Provider<GenModelSettings, GenModel> {
+    models = {
+        'gpt-3.5-turbo': { temperature: 0.5, contextWindow: 16385 },
+        'gpt-4': { temperature: 0.5, contextWindow: 8192 },
+        'gpt-4-32k': { temperature: 0.5, contextWindow: 32768 },
+        'gpt-4-turbo-preview': { temperature: 0.5, contextWindow: 128000 },
+    };
+    getPapaModel() {
+        return {
+            model: this.selectedModel,
+            ...this.getModelSettings(),
+            openAIApiKey: get(data).providerSettings['OpenAI'].getConfig(),
+        };
     }
 
     async getModels(): Promise<string[]> {
-        try {
-            const modelRes = await requestUrl({
-                method: 'GET',
-                url: `https://api.openai.com/v1/models`,
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${this.apiKey}`,
-                },
-            });
-            return modelRes.json.data
-                .map((model: { id: string }) => model.id)
-                .filter(
-                    (id) => id === this.rcmdEmbedModel || this.otherEmbedModels.includes(id) || id === this.rcmdGenModel || this.otherGenModels.includes(id)
-                );
-        } catch (error) {
-            Log.debug('OpenAI is not running', error);
-            return [];
-        }
+        return getOpenAIModels(get(data).providerSettings['OpenAI'].getConfig(), this.models);
     }
-    setGenModel: (model: string) => void;
-    setEmbedModel: (model: string) => void;
+}
 
-    toString(): string {
-        return 'OpenAI';
+export class OpenAIEmbedProvider extends Provider<EmbedModelSettings, EmbedModel> {
+    models = {
+        'text-embedding-ada-002': { similarityThreshold: 0.75 },
+        'text-embedding-3-large': { similarityThreshold: 0.5 },
+        'text-embedding-3-small': { similarityThreshold: 0.5 },
+    };
+    getPapaModel() {
+        return {
+            model: this.selectedModel,
+            ...this.getModelSettings(),
+            openAIApiKey: get(data).providerSettings['OpenAI'].getConfig(),
+        };
+    }
+
+    async getModels(): Promise<string[]> {
+        return getOpenAIModels(get(data).providerSettings['OpenAI'].getConfig(), this.models);
     }
 }

@@ -1,12 +1,10 @@
 import { App, Notice, TFile, normalizePath } from 'obsidian';
-import { Papa, obsidianDocumentLoader, type GenModel, type EmbedModel } from 'papa-ts';
+import { Papa, obsidianDocumentLoader, type GenModel } from 'papa-ts';
 import { get } from 'svelte/store';
 import { wildTest } from './components/Settings/FuzzyModal';
 import Log, { LogLvl } from './logging';
 import { data, papaState, errorState, papaIndexingProgress, chatHistory, serializeChatHistory, runState, runContent, papaIndexingTimeLeft } from './store';
 import { _ } from 'svelte-i18n';
-import { Ollama } from './Providers/Ollama';
-import { OpenAI } from './Providers/OpenAI';
 
 export default class SmartSecondBrain {
     private papa: Papa;
@@ -20,19 +18,21 @@ export default class SmartSecondBrain {
     }
 
     async init() {
-        const { genModel, embedModel, debugginLangchainKey, isVerbose, excludeFF } = get(data);
+        const { selGenProvider, genProviders, selEmbedProvider, embedProviders, debugginLangchainKey, isVerbose, excludeFF } = get(data);
+        const genProvider = genProviders[selGenProvider];
+        const embedProvider = embedProviders[selEmbedProvider];
         const t = get(_);
 
         if (!(await this.canInit())) return;
 
         if (get(papaState) !== 'indexing-pause') {
             papaState.set('loading');
-            Log.info('Initializing second brain', '\nGen Model: ', genModel, '\nEmbed Model: ', embedModel);
+            Log.info('Initializing second brain', '\nGen Model: ', genProvider.getModel(), '\nEmbed Model: ', embedProvider.getModel());
             try {
                 this.papa = new Papa();
                 await this.papa.init({
-                    genModel: this.getPapaGenModel(),
-                    embedModel: this.getPapaEmbedModel(),
+                    genModel: genProvider.getPapaModel(),
+                    embedModel: embedProvider.getPapaModel(),
                     langsmithApiKey: debugginLangchainKey || undefined,
                     logLvl: isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
                 });
@@ -145,8 +145,8 @@ export default class SmartSecondBrain {
     }
 
     getVectorStoreFile() {
-        const { embedModel } = get(data);
-        return normalizePath(this.pluginDir + '/vectorstores/' + embedModel + '.bin');
+        const { embedProviders, selEmbedProvider } = get(data);
+        return normalizePath(this.pluginDir + '/vectorstores/' + embedProviders[selEmbedProvider].getModel() + '.bin');
     }
 
     async saveVectorStoreData() {
@@ -183,8 +183,8 @@ export default class SmartSecondBrain {
         this.needsToSaveVectorStoreData = true;
     }
 
-    setSimilarityThreshold() {
-        if (this.papa) this.papa.setSimilarityThreshold(get(data).embedModels[get(data).embedModel].similarityThreshold);
+    setSimilarityThreshold(similarityThreshold: number) {
+        if (this.papa) this.papa.setSimilarityThreshold(similarityThreshold);
     }
 
     stopRun() {
@@ -196,8 +196,8 @@ export default class SmartSecondBrain {
         if (this.papa) this.papa.setNumOfDocsToRetrieve(k);
     }
 
-    setGenModel() {
-        if (this.papa) this.papa.setGenModel(this.getPapaGenModel());
+    setGenModel(genModel: GenModel) {
+        if (this.papa) this.papa.setGenModel(genModel);
     }
 
     setTracer(langchainKey: string) {
@@ -205,9 +205,8 @@ export default class SmartSecondBrain {
     }
 
     private async canInit(): Promise<boolean> {
-        const { genModel, embedModel, ollamaProvider, genProvider, embedProvider } = get(data);
         const t = get(_);
-        const ollamaModels = ollamaProvider.getModels();
+        const { providerSettings, selGenProvider, selEmbedProvider } = get(data);
 
         if (get(papaState) === 'running') {
             new Notice(t('notice.still_running'), 4000);
@@ -215,44 +214,12 @@ export default class SmartSecondBrain {
         } else if (get(papaState) === 'indexing' || get(papaState) === 'loading') {
             new Notice(t('notice.still_indexing'), 4000);
             return false;
-        } else if (!(await genProvider.isSetup())) {
+        } else if (!(await providerSettings[selGenProvider].isSetuped())) {
             papaState.set('error');
             return false;
-        } else if (!(await embedProvider.isSetup())) {
+        } else if (!(await providerSettings[selEmbedProvider].isSetuped())) {
             papaState.set('error');
-            return false;
-        } else if (genProvider.isLocal && !(await ollamaModels).includes(genModel)) {
-            papaState.set('error');
-            errorState.set('ollama-gen-model-not-installed');
-            new Notice(t('notice.ollama_gen_model'), 4000);
-            return false;
-        } else if (embedProvider.isLocal && !(await ollamaModels).includes(embedModel)) {
-            papaState.set('error');
-            errorState.set('ollama-embed-model-not-installed');
-            new Notice(t('notice.ollama_embed_model'), 4000);
             return false;
         } else return true;
-    }
-
-    private getPapaGenModel() {
-        const { genModel, genModels, genProvider } = get(data);
-        let papaGenModel: GenModel;
-        if (genProvider instanceof Ollama) {
-            papaGenModel = { model: genModel, ...genModels[genModel], baseUrl: genProvider.baseUrl };
-        } else if (genProvider instanceof OpenAI) {
-            papaGenModel = { model: genModel, ...genModels[genModel], openAIApiKey: genProvider.apiKey };
-        }
-        return papaGenModel;
-    }
-
-    private getPapaEmbedModel() {
-        const { embedModel, embedModels, embedProvider } = get(data);
-        let papaEmbedModel: EmbedModel;
-        if (embedProvider instanceof Ollama) {
-            papaEmbedModel = { model: embedModel, ...embedModels[embedModel], baseUrl: embedProvider.baseUrl };
-        } else if (embedProvider instanceof OpenAI) {
-            papaEmbedModel = { model: embedModel, ...embedModels[embedModel], openAIApiKey: embedProvider.apiKey };
-        }
-        return papaEmbedModel;
     }
 }

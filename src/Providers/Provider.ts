@@ -1,51 +1,59 @@
 import { get } from 'svelte/store';
-import { data, plugin } from '../store';
+import { plugin } from '../store';
 
 export const providerNames = ['OpenAI', 'Ollama'];
-export type providers = (typeof providerNames)[number];
+export type ProviderName = (typeof providerNames)[number];
 
-export abstract class Provider {
-    name: providers;
-    rcmdGenModel: string;
-    otherGenModels: string[];
-    rcmdEmbedModel: string;
-    otherEmbedModels: string[];
-    isLocal: boolean;
+export abstract class ProviderBase {
+    readonly isLocal: boolean;
+    protected apiConfig: string;
 
-    isSetup: () => Promise<boolean>;
-    changeSetup: (setup: string) => void;
-    getModels: () => Promise<string[]>;
-    setGenModel: (model: string) => void;
-    setEmbedModel: (model: string) => void;
-    getSetup: () => string;
-    toString: () => string;
+    constructor(apiConfig: string) {
+        this.apiConfig = apiConfig;
+    }
 
-    static changeEmbedProvider = async (provider: string) => {
-        data.update((d) => {
-            switch (provider) {
-                case 'Ollama':
-                    d.embedProvider = d.ollamaProvider;
-                    break;
-                case 'OpenAI':
-                    d.embedProvider = d.openAIProvider;
-                    break;
-            }
-            return d;
-        });
-        get(plugin).saveSettings();
-    };
-    static changeGenProvider = async (provider: string) => {
-        data.update((d) => {
-            switch (provider) {
-                case 'Ollama':
-                    d.genProvider = d.ollamaProvider;
-                    break;
-                case 'OpenAI':
-                    d.genProvider = d.openAIProvider;
-                    break;
-            }
-            return d;
-        });
-        get(plugin).saveSettings();
-    };
+    abstract isSetuped(): Promise<boolean>;
+    async setConfig(apiConfig: string) {
+        const { saveSettings } = get(plugin);
+        this.apiConfig = apiConfig.trim();
+        await saveSettings();
+    }
+    getConfig() {
+        return this.apiConfig;
+    }
+}
+
+export type GenModelSettings = {
+    temperature: number;
+    contextWindow: number;
+};
+
+export type EmbedModelSettings = {
+    similarityThreshold: number;
+};
+
+export abstract class Provider<TModelSettings, TPapaModel> {
+    protected selectedModel: string;
+    protected models: { [model: string]: TModelSettings } = {};
+
+    constructor(selectedModel: string) {
+        this.selectedModel = selectedModel;
+    }
+
+    abstract getModels(): Promise<string[]>;
+    abstract setModel(model: string): void;
+    getModel() {
+        return this.selectedModel;
+    }
+    getModelSettings() {
+        return this.models[this.selectedModel];
+    }
+
+    async setModelSettings(settings: TModelSettings) {
+        const { saveSettings } = get(plugin);
+        this.models[this.selectedModel] = settings;
+        await saveSettings();
+    }
+
+    abstract getPapaModel(): TPapaModel;
 }
