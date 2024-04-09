@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { plugin } from '../store';
+import { data, plugin } from '../store';
 
 export const providerNames = ['OpenAI', 'Ollama'];
 export type ProviderName = (typeof providerNames)[number];
@@ -57,3 +57,8 @@ export abstract class Provider<TModelSettings, TPapaModel> {
 
     abstract getPapaModel(): TPapaModel;
 }
+
+export const getSelectedProvider = () => {
+    const { embedProviders, selEmbedProvider, genProviders, selGenProvider } = get(data);
+    return [embedProviders[selEmbedProvider], genProviders[selGenProvider]];
+};

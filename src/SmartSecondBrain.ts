@@ -5,6 +5,7 @@ import { wildTest } from './components/Settings/FuzzyModal';
 import Log, { LogLvl } from './logging';
 import { data, papaState, errorState, papaIndexingProgress, chatHistory, serializeChatHistory, runState, runContent, papaIndexingTimeLeft } from './store';
 import { _ } from 'svelte-i18n';
+import { getSelectedProvider } from './Providers/Provider';
 
 export default class SmartSecondBrain {
     private papa: Papa;
@@ -18,9 +19,8 @@ export default class SmartSecondBrain {
     }
 
     async init() {
-        const { selGenProvider, genProviders, selEmbedProvider, embedProviders, debugginLangchainKey, isVerbose, excludeFF } = get(data);
-        const genProvider = genProviders[selGenProvider];
-        const embedProvider = embedProviders[selEmbedProvider];
+        const { debugginLangchainKey, isVerbose, excludeFF } = get(data);
+        const [embedProvider, genProvider] = getSelectedProvider();
         const t = get(_);
 
         if (!(await this.canInit())) return;
