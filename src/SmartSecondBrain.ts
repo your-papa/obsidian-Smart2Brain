@@ -20,19 +20,19 @@ export default class SmartSecondBrain {
 
     async init() {
         const { debugginLangchainKey, isVerbose, excludeFF } = get(data);
-        const [embedProvider, genProvider] = getSelectedProvider();
+        const provider = getSelectedProvider();
         const t = get(_);
 
         if (!(await this.canInit())) return;
 
         if (get(papaState) !== 'indexing-pause') {
             papaState.set('loading');
-            Log.info('Initializing second brain', '\nGen Model: ', genProvider.getModel(), '\nEmbed Model: ', embedProvider.getModel());
+            Log.info('Initializing second brain', '\nGen Model: ', provider.gen.getModel(), '\nEmbed Model: ', provider.embed.getModel());
             try {
                 this.papa = new Papa();
                 await this.papa.init({
-                    genModel: genProvider.getPapaModel(),
-                    embedModel: embedProvider.getPapaModel(),
+                    genModel: provider.gen.getPapaModel(),
+                    embedModel: provider.embed.getPapaModel(),
                     langsmithApiKey: debugginLangchainKey || undefined,
                     logLvl: isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
                 });

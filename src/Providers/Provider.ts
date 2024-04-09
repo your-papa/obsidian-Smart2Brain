@@ -60,5 +60,5 @@ export abstract class Provider<TModelSettings, TPapaModel> {
 
 export const getSelectedProvider = () => {
     const { embedProviders, selEmbedProvider, genProviders, selGenProvider } = get(data);
-    return [embedProviders[selEmbedProvider], genProviders[selGenProvider]];
+    return { embed: embedProviders[selEmbedProvider], gen: genProviders[selGenProvider] };
 };
