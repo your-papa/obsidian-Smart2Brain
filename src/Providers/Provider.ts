@@ -51,7 +51,7 @@ export abstract class Provider<TModelSettings, TPapaModel> {
 
     async setModelSettings(settings: TModelSettings) {
         const { saveSettings } = get(plugin);
-        this.models[this.selectedModel] = settings;
+        this.models[this.selectedModel] = { ...this.models[this.selectedModel], ...settings };
         await saveSettings();
     }
 
