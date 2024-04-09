@@ -24,12 +24,12 @@ export abstract class ProviderBase {
 }
 
 export type GenModelSettings = {
-    temperature: number;
-    contextWindow: number;
+    temperature?: number;
+    contextWindow?: number;
 };
 
 export type EmbedModelSettings = {
-    similarityThreshold: number;
+    similarityThreshold?: number;
 };
 
 export abstract class Provider<TModelSettings, TPapaModel> {
