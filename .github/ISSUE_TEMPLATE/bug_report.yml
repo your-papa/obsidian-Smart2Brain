@@ -1,6 +1,5 @@
 name: 🐛 Bug Report
 description: "Create a bug report for obsidian smart second brain to help us improve"
-placeholder: "Meaningful title that describes your issue"
 labels: ["bug"]
 assignees: ["leo310", "nicobrauchtgit"]
 body:
