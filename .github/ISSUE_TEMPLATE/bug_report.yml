@@ -1,6 +1,5 @@
-name: Bug Report
+name: 🐛 Bug Report
 description: "Create a bug report for obsidian smart second brain to help us improve"
-title: "Bug report"
 labels: ["bug"]
 assignees: ["leo310", "nicobrauchtgit"]
 body:
@@ -22,6 +21,14 @@ body:
       label: Error Statement
       description: Enable Settings > Advanced > Developer Console logging. Open Developer Tools (⌘ Cmd + ⌥ Opt + I / Ctrl + Shift + I). Open Console Tab. 
       placeholder: Obsidian Developer Console
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: List the steps to reproduce the behavior.
+      placeholder: "1. Go to '...'\n2. Click on '...'\n3. Scroll down to '...'\n4. See error"
+    validations:
+      required: true
   - type: input 
     id: version
     attributes:
