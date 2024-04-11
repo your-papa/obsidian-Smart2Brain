@@ -21,7 +21,7 @@ body:
       label: Error Statement
       description: Enable Settings > Advanced > Developer Console logging. Open Developer Tools (⌘ Cmd + ⌥ Opt + I / Ctrl + Shift + I). Open Console Tab. 
       placeholder: Obsidian Developer Console
-   - type: textarea
+  - type: textarea
     id: steps-to-reproduce
     attributes:
       label: Steps to Reproduce
