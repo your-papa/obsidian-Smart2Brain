@@ -1,0 +1,211 @@
+{
+    "general": {
+        "delete": "Eliminar",
+        "install": "Instalar"
+    },
+    "ribbon": {
+        "chat": "Abrir Chat S2B"
+    },
+    "cmd": {
+        "chat": "Abrir Chat",
+        "pull_model": "Obtener Modelo Ollama",
+        "remove_model": "Eliminar Modelo Ollama"
+    },
+    "modal": {
+        "dont_show": "No mostrar esto de nuevo",
+        "cancel": "Cancelar",
+        "confirm": "Confirmar",
+        "pull_model_name": "Obtener Modelo Ollama",
+        "pull_model_desc": "Instalar un modelo desde el registro de Ollama",
+        "remove": {
+            "name": "Eliminar Modelo Ollama",
+            "desc": "Eliminar un modelo instalado de tu sistema",
+            "success": "Modelo eliminado con éxito",
+            "error": "Error al eliminar el modelo. El modelo podría no estar instalado"
+        }
+    },
+    "init_third_party_modal": {
+        "title": "Ejecutar mediante Servicios de Terceros",
+        "description": "¿Estás seguro de que quieres ejecutar mediante servicios de terceros? Tus datos personales serán compartidos con servicios de terceros como OpenAI."
+    },
+    "notice": {
+        "still_running": "Smart Second Brain sigue en ejecución. Por favor, espera.",
+        "still_indexing": "Smart Second Brain sigue indexando. Por favor, espera.",
+        "ollama_not_running": "Por favor, asegúrate de que Ollama está en ejecución antes de inicializar Smart Second Brain.",
+        "ollama_gen_model": "Modelo de Ollama no instalado. Por favor, instala el modelo antes de inicializar Smart Second Brain.",
+        "ollama_embed_model": "Modelo de Ollama no instalado. Por favor, instala el modelo antes de inicializar Smart Second Brain.",
+        "openai_key": "Por favor, asegúrate de que tu clave API de OpenAI es válida antes de inicializar Smart Second Brain.",
+        "failed": "Fallo al inicializar Smart Second Brain (Error: {error}). Por favor, reintenta.",
+        "failed_indexing": "Fallo al indexar notas en tu Smart Second Brain. Por favor, reintenta.",
+        "done": "Smart Second Brain inicializado.",
+        "error": "Ocurrió un error. Por favor, espera a que se resuelva el error.",
+        "not_initialized": "Smart Second Brain no inicializado. Por favor, inicializa primero.",
+        "plugin_data_cleared": "Datos del complemento eliminados.",
+        "api_key_invalid": "¡La clave API no es válida!",
+        "error_pulling_model": "Fallo al obtener el modelo de Ollama (Error: {error}). Por favor, reintenta.",
+        "copied_to_clipboard": "Copiado al portapapeles:\n{text}",
+        "no_notes_retrieved": "No se recuperaron notas. Quizás reduzca el umbral de similitud.",
+        "run_failed": "Fallo al ejecutar Smart Second Brain (Error: {error}). Por favor, reintenta.",
+        "models_deleted": "El modelo {model} ha sido eliminado",
+        "no_models": "El modelo {model} no fue encontrado",
+        "model_pull_canceled": "Cancelación de la obtención del modelo"
+    },
+    "chat": {
+        "edit": "Editar consulta y regenerar respuesta",
+        "cancel_edit": "Cancelar edición",
+        "copy": "Copiar texto",
+        "regenerate": "Elimina todos los mensajes siguientes y regenera la respuesta a la consulta actual",
+        "change_assistant_prompt": "Cambiar el mensaje inicial del asistente",
+        "reset_assistant_prompt": "Restablecer el mensaje inicial del asistente",
+        "retrieving": "Recuperando",
+        "reducing": "Reduciendo {num} notas",
+        "stopped": "¡Detenido!",
+        "user": "Tú",
+        "assistant": "Asistente",
+        "save": "Guardar el chat en una nota",
+        "delete": "Eliminar el historial de chat",
+        "toggle_papa": "Chatear con tus notas",
+        "toggle_llm": "Chatear con LLM simple",
+        "stop": "Detener tu Smart Second Brain",
+        "send": "Ejecutar tu Smart Second Brain",
+        "retry_error": "Ocurrió un error. Reintentar inicialización",
+        "reinitialize": "Reiniciar, ajustes cambiados",
+        "input_placeholder": "Chatea con tu Smart Second Brain..."
+    },
+    "onboarding": {
+        "welcome_msg": "¡Bienvenido a tu Smart Second Brain! Tu asistente personal de inteligencia artificial que te ayuda a encontrar y procesar información en tus notas.",
+        "setup": "Configuración",
+        "test": "Prueba",
+        "privacy_mode_note": "Tu asistente funcionará en modo privacidad. Eso significa que no está conectado a internet y funciona completamente de manera local utilizando Ollama.",
+        "openai_mode_note": "Tu asistente utilizará servicios de terceros para funcionar. Eso significa que tendrás que compartir toda tu información personal con estos servicios y tu Smart Second Brain necesita estar conectado a internet para aprovechar los modelos de lenguaje de gran escala de OpenAI, como ChatGPT.",
+        "init": "Inicia tu Smart Second Brain",
+        "init_label": "Haz clic para comenzar",
+        "ollama": {
+            "deamon": {
+                "install": "Instala Ollama en la terminal:",
+                "set_baseurl": "Establece la URL base de Ollama",
+                "start": "Inicia Ollama ejecutando este comando en la terminal"
+            },
+            "app": {
+                "download": "Descargar la aplicación",
+                "download_link": "aquí",
+                "extract": "Extrae el .zip e inicia Ollama",
+                "run": "Ejecuta el setup.exe",
+                "test_label": "Prueba si Ollama está en funcionamiento",
+                "set_origins": "En la terminal, establece los orígenes de Ollama para habilitar respuestas en streaming:",
+                "restart": "Reinicia el servicio de Ollama",
+                "restart_label": "Haz clic en el icono de la barra de menús de Ollama y luego cierra",
+                "quit": "Cierra el servicio de Ollama",
+                "quit_label": "Haz clic en el icono de la barra de menús de Ollama y luego cierra",
+                "start_origins": "Inicia Ollama ejecutando este comando en el powershell"
+            },
+            "test_origins": "Prueba si los orígenes están configurados correctamente",
+            "install_model": "Instala un Modelo de Embedding  de Ollama.",
+            "recommended": "Recomendado:",
+            "set_model": "Configura tu Modelo de Embedding :"
+        },
+        "openai": {
+            "create_account": "Crea una cuenta de OpenAI",
+            "create_account_link": "Cuenta",
+            "create_api_key": "Crea una",
+            "create_api_key_link": "Clave API",
+            "api_key_warning": "> [!Advertencia] Activa la Clave API \n> Para que la Clave API funcione, es posible que tengas que actualizar a una cuenta de pago de OpenAI. Esto implica depositar al menos $5 en tu cuenta de OpenAI. Esto podría cambiar en el futuro.",
+            "paste_api_key": "Pega tu clave aquí:",
+            "test_api_key": "Prueba tu Clave API",
+            "api_key_valid": "¡La Clave API es válida!"
+        }
+    },
+    "incognito_toggle": {
+        "enable": "Ejecutar en tu máquina",
+        "disable": "Ejecutar mediante Servicios de Terceros"
+    },
+    "settings": {
+        "excludeff": "Excluir archivos y carpetas",
+        "excludeff_desc": "Estos archivos y carpetas no se incrustarán y no se utilizarán para generar respuestas.",
+        "excludeff_add": "Agregar",
+        "excludeff_delete": "Eliminar de la lista de excluidos",
+        "advanced": "Configuración Avanzada",
+        "clear": "Limpiar Datos del Complemento",
+        "clear_desc": "Esto eliminará todos los datos del complemento y los datos del almacén de vectores. Todos los archivos de chat dentro de tu bóveda no se verán afectados.",
+        "clear_modal": {
+            "title": "Limpiar Datos del Complemento",
+            "description": "¿Estás seguro de que quieres eliminar los datos del complemento? Ten en cuenta que solo se eliminarán los datos del complemento y los datos del almacén de vectores. Todos los archivos de chat dentro de tu bóveda no se verán afectados."
+        },
+        "clear_label": "Limpiar",
+        "relaunch": "Reiniciar",
+        "autostart": "Inicio Automático",
+        "autostart_desc": "Iniciar automáticamente el Smart Second Brain cuando Obsidian se inicia.",
+        "num_docs_retrieve": "Documentos a recuperar",
+        "num_docs_retrieve_desc": "La cantidad máxima de documentos a recuperar de tu bóveda. Ten en cuenta que los documentos no son equivalentes a las notas.",
+        "debugging": "Depuración",
+        "langsmith_key": "Clave API de Langsmith",
+        "langsmith_key_desc": "Proporciona una Clave API de Langsmith si deseas rastrear y evaluar los componentes internos de tu Smart Second Brain.",
+        "verbose": "Registro de la Consola del Desarrollador",
+        "verbose_desc": "Habilitar el registro detallado en la Consola del Desarrollador.",
+        "openai": {
+            "desc": " ",
+            "api_key": "Clave API",
+            "api_key_desc": "Proporciona tu Clave API de OpenAI para usar los modelos de lenguaje de gran escala de OpenAI.",
+            "gen_model": "Modelo de Chat",
+            "embed_model": "Modelo de Embedding ",
+            "model_descriptions": {
+                "gpt-3.5-turbo": "Modelo GPT-3.5 Turbo más reciente (ventana de contexto de 16385 tokens)",
+                "gpt-4": "Modelo GPT-4 más reciente (ventana de contexto de 8192 tokens)",
+                "gpt-4-32k": "Modelo GPT-4 (ventana de contexto de 32768 tokens)",
+                "gpt-4-turbo-preview": "Modelo GPT-4 Turbo más reciente (ventana de contexto de 128000 tokens)",
+                "text-embedding-3-large": "Modelo de Embedding  más reciente y capaz para tareas tanto en inglés como en otros idiomas",
+                "text-embedding-3-small": "Rendimiento mejorado sobre el modelo de Embedding  ada de 2da generación",
+                "text-embedding-ada-002": "Modelo de Embedding  de 2da generación más capaz."
+            }
+        },
+        "ollama": {
+            "desc": " ",
+            "gen_model": "Modelo de Chat",
+            "base_url": "URL Base de Ollama",
+            "base_url_desc": "Establece la URL de tu instancia de Ollama.",
+            "embed_model": "Modelo de Embedding",
+            "recommended": "Recomendado",
+            "other": "Otro",
+            "model_descriptions": {
+                "llama2": "Llama 2 es una colección de modelos de lenguaje base que varían de 7B a 70B de parámetros.",
+                "llama2-uncensored": "Modelo Llama 2 sin censura por George Sung y Jarrad Hope.",
+                "mistral": "El modelo de 7B liberado por Mistral AI, actualizado a la versión 0.2.",
+                "mistral-openorca": "Mistral OpenOrca es un modelo de 7 mil millones de parámetros, ajustado sobre el modelo Mistral 7B utilizando el conjunto de datos OpenOrca.",
+                "gemma": "Gemma es una familia de modelos abiertos ligeros y de última generación construidos por Google DeepMind.",
+                "mixtral": "Un modelo de Mezcla de Expertos (MoE) de alta calidad con pesos abiertos por Mistral AI.",
+                "dolphin-mixtral": "Dolphin Mixtral (32000 Tokens)",
+                "phi": "Phi-2: un modelo de lenguaje de 2.7B de Microsoft Research que demuestra capacidades sobresalientes de razonamiento y comprensión del lenguaje.",
+                "nomic-embed-text": "Un modelo de Embedding abierto de alto rendimiento con una amplia ventana de contexto de tokens.",
+                "mxbai-embed-large": "Modelo grande de Embedding de última generación de mixedbread.ai."
+            }
+        }
+    },
+    "quick_settings": {
+        "initialize": "Inicia tu Smart Second Brain",
+        "indexing_vault": "Indexando bóveda",
+        "time_left_minutes": "Quedan aproximadamente {minutes}min {seconds}s...",
+        "time_left_seconds": "Quedan aproximadamente {seconds}s...",
+        "assistant_language": "Idioma del asistente",
+        "pause_indexing": "Pausar indexación",
+        "resume_indexing": "Reanudar indexación",
+        "cancel_indexing": "Cancelar indexación",
+        "retry_initialization": "Reintentar inicialización",
+        "mode_changed": "Reiniciar Smart Second Brain \ncon ",
+        "reinitialize": "Reiniciar Smart Second Brain",
+        "chat_via": "Chatear mediante {model}",
+        "chatview": "Vista de chat cómoda",
+        "similarity_threshold": "Similitud",
+        "creativity": "Creatividad",
+        "settings_changed": "Configuración cambiada.\nReiniciar Smart Second Brain.",
+        "open": "Abrir configuración rápida",
+        "close": "Cerrar configuración rápida",
+        "error": {
+            "install_model": "Primero instala el modelo {model}",
+            "other": "Ocurrió un error.\nPor favor, reintenta la inicialización..."
+        }
+    },
+    "tooltip": {
+        "creativity": "Ajusta el nivel de originalidad en las respuestas del modelo según tu preferencia.",
+        "similarity": "Qué tan similares deben ser los documentos recuperados a la consulta del usuario."
+    }
+}
