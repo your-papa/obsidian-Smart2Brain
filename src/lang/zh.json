@@ -16,7 +16,7 @@
         "cancel": "取消",
         "confirm": "确认",
         "pull_model_name": "拉取 Ollama 模型",
-        "pull_model_desc": "从 Ollama registry 安装一个模型",
+        "pull_model_desc": "从 Ollama registry 安装模型",
         "remove": {
             "name": "移除 Ollama 模型",
             "desc": "从系统中移除已安装的模型",
@@ -109,19 +109,19 @@
             "create_account_link": "账户",
             "create_api_key": "创建一个 ",
             "create_api_key_link": "API Key",
-            "api_key_warning": "> [!Warning] 激活 API-Key \n> 为了使 API-Key 有效，您可能需要升级到 OpenAI 的付费账户。需要至少在您的 OpenAI 账户上存入 $5。未来可能会改变。",
-            "paste_api_key": "在这里粘贴 API Key：",
+            "api_key_warning": "> [!Warning] 激活 API-Key \n> 为了使 API-Key 有效，您可能需要升级到 OpenAI 付费账户。需至少在您的 OpenAI 账户上存入 $5。此信息未来可能改变。",
+            "paste_api_key": "在此处粘贴 API Key：",
             "test_api_key": "测试 API Key",
             "api_key_valid": " API Key 有效！"
         }
     },
     "incognito_toggle": {
-        "enable": "在本地运行",
-        "disable": "以第三方服务运行"
+        "enable": "本地运行",
+        "disable": "通过第三方服务运行"
     },
     "settings": {
         "excludeff": "排除文件和文件夹",
-        "excludeff_desc": "这些文件和文件夹将不会被嵌入，也不会用于生成对话。",
+        "excludeff_desc": "这些文件和文件夹将不做向量嵌入和索引，也不会用于生成对话。",
         "excludeff_add": "添加",
         "excludeff_delete": "从排除列表中删除",
         "advanced": "高级设置",
@@ -132,14 +132,14 @@
             "description": "您确定要删除插件数据吗？请注意，只有插件数据和向量存储数据将被移除。仓库中的所有聊天文件将不受影响。"
         },
         "clear_label": "清除",
-        "relaunch": "重新启动",
-        "autostart": "自动启动",
-        "autostart_desc": "Obsidian 开启后，自动启动 Smart Second Brain。",
-        "num_docs_retrieve": "检索文档数量",
-        "num_docs_retrieve_desc": "从您的仓库中检索的最大文档数量。注意，文档 (documents, 本插件索引的笔记片段) 不等同于笔记。",
+        "relaunch": "重启",
+        "autostart": "自启动",
+        "autostart_desc": "Obsidian 开启后，自动运行 Smart Second Brain。",
+        "num_docs_retrieve": "检索 (retrieve) 文档数量",
+        "num_docs_retrieve_desc": "仓库中每次允许检索的最大文档数。注意，文档 (本插件索引的笔记片段) 不等同于笔记。",
         "debugging": "调试",
         "langsmith_key": "Langsmith API Key",
-        "langsmith_key_desc": "如果需要跟踪和评估您的 Smart Second Brain 的内部情况，请提供 Langsmith API Key。",
+        "langsmith_key_desc": "如需跟踪和评估您的 Smart Second Brain 的内部情况，请提供 Langsmith API Key。",
         "verbose": "开发者控制台日志",
         "verbose_desc": "在 Developer Console 中启用详细日志记录。",
         "openai": {
@@ -172,7 +172,7 @@
                 "mistral": "由 Mistral AI 发布的 7B 模型，已更新至版本 0.2。",
                 "mistral-openorca": "Mistral OpenOrca 是一个 70 亿参数的模型，基于 Mistral 7B 模型并使用 OpenOrca 数据集进行了微调。",
                 "gemma": "Gemma 是由 Google DeepMind 构建的一系列轻量级、最先进的开放模型。",
-                "mixtral": "由 Mistral AI 提供的高质量专家混合（MoE）模型，具有开放权重。",
+                "mixtral": "由 Mistral AI 提供的高质量 MoE 模型，具有开放权重。",
                 "dolphin-mixtral": "Dolphin Mixtral（32000 个令牌）",
                 "phi": "Phi-2：微软研究院的 2.7B 语言模型，展示了出色的推理和语言理解能力。",
                 "nomic-embed-text": "具有大令牌上下文窗口的高性能开放嵌入模型。",
@@ -181,7 +181,7 @@
         }
     },
     "quick_settings": {
-        "initialize": "启动您的 Smart Second Brain",
+        "initialize": "启动 Smart Second Brain",
         "indexing_vault": "索引仓库",
         "time_left_minutes": "约剩余 {minutes} 分 {seconds} 秒...",
         "time_left_seconds": "约剩余 {seconds} 秒...",
