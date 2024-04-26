@@ -7,7 +7,7 @@
         "chat": "打开 S2B 聊天"
     },
     "cmd": {
-        "chat": "打开聊天",
+        "chat": "打开聊天窗口",
         "pull_model": "拉取 Ollama 模型",
         "remove_model": "移除 Ollama 模型"
     },
@@ -16,7 +16,7 @@
         "cancel": "取消",
         "confirm": "确认",
         "pull_model_name": "拉取 Ollama 模型",
-        "pull_model_desc": "从 Ollama registry 安装模型",
+        "pull_model_desc": "安装在 Ollama 注册的模型",
         "remove": {
             "name": "移除 Ollama 模型",
             "desc": "从系统中移除已安装的模型",
@@ -26,7 +26,7 @@
     },
     "init_third_party_modal": {
         "title": "通过第三方服务运行",
-        "description": "您确定要通过第三方运行吗？您的个人数据将与 OpenAI 等第三方服务共享。"
+        "description": "您确定要使用第三方服务吗？您的个人数据将与 OpenAI 等第三方服务共享。"
     },
     "notice": {
         "still_running": "Smart Second Brain 仍在运行。请稍候。",
@@ -37,38 +37,38 @@
         "openai_key": "在初始化 Smart Second Brain 之前，请确保您的 OpenAI API 密钥有效。",
         "failed": "初始化 Smart Second Brain 失败 (Error: {error}) 。请重试。",
         "failed_indexing": "将笔记索引到 smart second brain 失败。请重试。",
-        "done": "Smart Second Brain 已初始化。",
-        "error": "发生了一个错误。请等待错误解决。",
+        "done": "Smart Second Brain 初始化成功。",
+        "error": "发生错误。请等待错误解决。",
         "not_initialized": "Smart Second Brain 未初始化。请先初始化。",
         "plugin_data_cleared": "插件数据已清除。",
         "api_key_invalid": "API Key 无效！",
         "error_pulling_model": "从 Ollama 拉取模型失败  (Error: {error}) 。请重试。",
         "copied_to_clipboard": "已复制到剪贴板：\n{text}",
-        "no_notes_retrieved": "未检索到笔记。考虑降低相似度阈值。",
-        "run_failed": "运行 Smart Second Brain 失败  (Error: {error}) 。请重试。",
+        "no_notes_retrieved": "未检索到笔记。建议降低相似度阈值。",
+        "run_failed": "运行 Smart Second Brain 失败 (Error: {error}) 。请重试。",
         "models_deleted": "模型 {model} 已被删除",
         "no_models": "未找到模型 {model}",
         "model_pull_canceled": "模型拉取已取消"
     },
     "chat": {
-        "edit": "编辑查询并重生成回答",
+        "edit": "编辑问题并重生成回答",
         "cancel_edit": "取消编辑",
         "copy": "复制文本",
-        "regenerate": "删除所有后续对话并重生成当前查询的回答",
+        "regenerate": "删除所有后续对话并重生成当前问题的回答",
         "change_assistant_prompt": "更改初始助手消息 (initial assistant message)",
         "reset_assistant_prompt": "重置初始助手消息 (initial assistant message)",
         "retrieving": "正在检索",
         "reducing": "正在化简 {num} 条笔记",
         "stopped": "已停止！",
-        "user": "You",
-        "assistant": "Assistant",
+        "user": "您",
+        "assistant": "助手",
         "save": "将聊天保存到笔记",
         "delete": "删除聊天记录",
         "toggle_papa": "与您的笔记聊天",
         "toggle_llm": "仅与 LLM 聊天",
         "stop": "停止 Smart Second Brain",
         "send": "运行 Smart Second Brain",
-        "retry_error": "发生了一个错误。重新初始化",
+        "retry_error": "发生了一个错误。重试初始化",
         "reinitialize": "重新初始化，设置已更改",
         "input_placeholder": "与 Smart Second Brain 聊天..."
     },
@@ -76,10 +76,10 @@
         "welcome_msg": "欢迎使用 Smart Second Brain！您的个人 AI 助手，帮助您在笔记中查找和处理信息。",
         "setup": "设置",
         "test": "测试",
-        "privacy_mode_note": "您的助手将在隐私模式下运行。它未联网，完全通过 Ollama 在本地运行。",
-        "openai_mode_note": "您的助手将使用第三方服务来运行。您必须与服务商共享个人信息，您的 Smart Second Brain 需要联网使用 OpenAI 的 LLMs，如 ChatGPT。",
-        "init": "启动 Smart Second Brain",
-        "init_label": "点击开始",
+        "privacy_mode_note": "您的助手将在隐私模式下运行。它没有联网，以 Ollama 在本地运行。",
+        "openai_mode_note": "您的助手将使用第三方服务来运行。您将与服务商共享个人信息，您的 Smart Second Brain 需要联网使用 OpenAI 的 LLMs，如 ChatGPT。",
+        "init": "开启 Smart Second Brain",
+        "init_label": "点击以开启",
         "ollama": {
             "deamon": {
                 "install": "在终端中安装 Ollama：",
@@ -109,8 +109,8 @@
             "create_account_link": "账户",
             "create_api_key": "创建一个 ",
             "create_api_key_link": "API Key",
-            "api_key_warning": "> [!Warning] 激活 API-Key \n> 为了使 API-Key 有效，您可能需要升级到 OpenAI 付费账户。需至少在您的 OpenAI 账户上存入 $5。此信息未来可能改变。",
-            "paste_api_key": "在此处粘贴 API Key：",
+            "api_key_warning": "> [!Warning] 激活 API-Key \n> 为使 API-Key 有效，您可能需要升级到 OpenAI 付费账户。这需要在您的 OpenAI 账户上存入至少 $5。该提示未来可能改变。",
+            "paste_api_key": "在此粘贴 API Key：",
             "test_api_key": "测试 API Key",
             "api_key_valid": " API Key 有效！"
         }
@@ -135,7 +135,7 @@
         "relaunch": "重启",
         "autostart": "自启动",
         "autostart_desc": "Obsidian 开启后，自动运行 Smart Second Brain。",
-        "num_docs_retrieve": "检索 (retrieve) 文档数量",
+        "num_docs_retrieve": "检索 (retrieve) 文档数",
         "num_docs_retrieve_desc": "仓库中每次允许检索的最大文档数。注意，文档 (本插件索引的笔记片段) 不等同于笔记。",
         "debugging": "调试",
         "langsmith_key": "Langsmith API Key",
@@ -149,13 +149,13 @@
         "gen_model": "聊天模型",
         "embed_model": "嵌入模型",
         "model_descriptions": {
-            "gpt-3.5-turbo": "最新 GPT-3.5 Turbo 模型（16385 Token 上下文）",
-            "gpt-4": "最新 GPT-4 模型（8192 Token 上下文）",
+            "gpt-3.5-turbo": "最新的 GPT-3.5 Turbo 模型（16385 Token 上下文）",
+            "gpt-4": "最新的 GPT-4 模型（8192 Token 上下文）",
             "gpt-4-32k": "GPT-4 模型（32768 Token 上下文）",
-            "gpt-4-turbo-preview": "最新 GPT-4 Turbo 模型（128000 Token 上下文）",
-            "text-embedding-3-large": "最新、最强的嵌入模型，适用于英文和非英文任务",
+            "gpt-4-turbo-preview": "最新的 GPT-4 Turbo 模型（128000 Token 上下文）",
+            "text-embedding-3-large": "最新、最强的嵌入模型，适用于多语言任务",
             "text-embedding-3-small": "性能超过二代 ada 嵌入模型",
-            "text-embedding-ada-002": "最强大的二代嵌入模型。"
+            "text-embedding-ada-002": "最好的二代嵌入模型。"
         }
         },
         "ollama": {
@@ -170,12 +170,12 @@
                 "llama2": "Llama 2 是一系列基础语言模型，参数范围从 7B 到 70B。",
                 "llama2-uncensored": "由 George Sung 和 Jarrad Hope 提供的未审查的 Llama 2 模型。",
                 "mistral": "由 Mistral AI 发布的 7B 模型，已更新至版本 0.2。",
-                "mistral-openorca": "Mistral OpenOrca 是一个 70 亿参数的模型，基于 Mistral 7B 模型并使用 OpenOrca 数据集进行了微调。",
+                "mistral-openorca": "Mistral OpenOrca 是 70 亿参数的模型，基于 Mistral 7B 模型并使用 OpenOrca 数据集进行了微调。",
                 "gemma": "Gemma 是由 Google DeepMind 构建的一系列轻量级、最先进的开放模型。",
                 "mixtral": "由 Mistral AI 提供的高质量 MoE 模型，具有开放权重。",
                 "dolphin-mixtral": "Dolphin Mixtral（32000 个令牌）",
                 "phi": "Phi-2：微软研究院的 2.7B 语言模型，展示了出色的推理和语言理解能力。",
-                "nomic-embed-text": "具有大令牌上下文窗口的高性能开放嵌入模型。",
+                "nomic-embed-text": "具有较大上下文的高性能开放嵌入模型。",
                 "mxbai-embed-large": "来自 mixedbread.ai 的最先进大型嵌入模型。"
             }
         }
@@ -190,7 +190,7 @@
         "resume_indexing": "恢复索引",
         "cancel_indexing": "取消索引",
         "retry_initialization": "重试初始化",
-        "mode_changed": "重新初始化 Smart Second Brain \n使用 ",
+        "mode_changed": "重新初始化 Smart Second Brain \n使用以下模型 ",
         "reinitialize": "重新初始化 Smart Second Brain",
         "chat_via": "通过 {model} 聊天",
         "chatview": "Comfy 聊天视图",
@@ -201,11 +201,11 @@
         "close": "关闭快速设置",
         "error": {
             "install_model": "请先安装 {model} 模型",
-            "other": "发生了一个错误。\n请重试初始化..."
+            "other": "发生错误。\n请重试初始化..."
         }
     },
     "tooltip": {
         "creativity": "调整模型输出的创意以适应您的偏好。",
-        "similarity": "待检索文档与用户查询文本的相似度。"
+        "similarity": "检索文档与用户提问的相似度。"
     }
 }
