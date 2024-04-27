@@ -48,14 +48,15 @@ Follow the onboarding instructions provided on initial plugin startup in Obsidia
 
 # ⚙️ Under the hood
 
-Check out our [Architecture Wiki](https://github.com/your-papa/obsidian-Smart2Brain/wiki) page.
+Check out our [Architecture Wiki](https://github.com/your-papa/obsidian-Smart2Brain/wiki) page and our backend repo [papa-ts](https://github.com/your-papa/papa-ts).
 
 # 🎯 Roadmap
 
-- Support Gemini and Claude models and integrate KoboldCpp
+- Support Gemini and Claude models and OpenAI likes (Openrouter...)
 - Similar note connections view
 - Chat Threads
 - Hybrid Vector Search
+- Inline AI Assistant
 - Predictive Note Placement
 - Agent with Obsidian tooling
 - Multimodality
