@@ -138,8 +138,8 @@
         "num_docs_retrieve": "检索 (retrieve) 文档数",
         "num_docs_retrieve_desc": "仓库中每次允许检索的最大文档数。注意，文档 (本插件索引的笔记片段) 不等同于笔记。",
         "debugging": "调试",
-        "langsmith_key": "Langsmith API Key",
-        "langsmith_key_desc": "如需跟踪和评估您的 Smart Second Brain 的内部情况，请提供 Langsmith API Key。",
+        "langsmith_key": "LangSmith API Key",
+        "langsmith_key_desc": "如需跟踪和评估您的 Smart Second Brain 的内部情况，请提供 LangSmith API Key。",
         "verbose": "开发者控制台日志",
         "verbose_desc": "在 Developer Console 中启用详细日志记录。",
         "openai": {
