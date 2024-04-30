@@ -55,11 +55,12 @@ Check out our [Architecture Wiki](https://github.com/your-papa/obsidian-Smart2Br
 - Support Gemini and Claude models and OpenAI likes (Openrouter...)
 - Similar note connections view
 - Chat Threads
-- Hybrid Vector Search
+- Hybrid Vector Search (e.g. for Time-based retrieval)
 - Inline AI Assistant
 - Predictive Note Placement
 - Agent with Obsidian tooling
 - Multimodality
+- Benchmarking
 
 # 🧑‍💻 About us
 
