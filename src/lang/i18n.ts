@@ -5,6 +5,7 @@ import es from './es.json';
 import tr from './tr.json';
 import fr from './fr.json';
 import zh from './zh.json';
+import ko from './ko.json';
 
 // import de from './de.json';
 
@@ -13,6 +14,7 @@ addMessages('es', es);
 addMessages('tr', tr);
 addMessages('fr', fr);
 addMessages('zh', zh);
+addMessages('ko', ko);
 // addMessages('de', de);
 
 init({
