@@ -34,6 +34,6 @@
         </div>
     </li>
     <li>{$t('onboarding.ollama.deamon.start')}</li>
-    <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\OLLAMA_ORIGINS="app://obsidian.md*" ollama serve\n```')} />
+    <div class="w-max max-w-full text-xs *:flex *:rounded *:pr-1" use:renderMarkdown={(this, '```bash\nOLLAMA_ORIGINS="app://obsidian.md*" ollama serve\n```')} />
     <OllamaSetup {scrollToBottom} />
 </ol>
