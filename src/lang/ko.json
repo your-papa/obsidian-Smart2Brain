@@ -152,7 +152,7 @@
                 "gpt-3.5-turbo": "최신 GPT-3.5 Turbo 모델 (16,385 토큰 컨텍스트 창)",
                 "gpt-4": "최신 GPT-4 모델 (8,192 토큰 컨텍스트 창)",
                 "gpt-4-32k": "GPT-4 모델 (32,768 토큰 컨텍스트 창)",
-                "gpt-4-turbo-preview": "최신 GPT-4 Turbo 모델 (128,000 토큰 컨텍스트 창)",
+                "gpt-4-turbo": "최신 GPT-4 Turbo 모델 (128,000 토큰 컨텍스트 창)",
                 "text-embedding-3-large": "영어 및 비영어권 작업 모두에 대해 가장 능력이 뛰어난 최신 임베딩 모델",
                 "text-embedding-3-small": "2세대 ada 임베딩 모델보다 성능이 향상됨",
                 "text-embedding-ada-002": "가장 능력이 뛰어난 2세대 임베딩 모델."

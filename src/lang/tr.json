@@ -152,7 +152,7 @@
                 "gpt-3.5-turbo": "En son GPT-3.5 Turbo modeli (16385 Token bağlam penceresi)",
                 "gpt-4": "En son GPT-4 modeli (8192 Token bağlam penceresi)",
                 "gpt-4-32k": "GPT-4 modeli (32768 Token bağlam penceresi)",
-                "gpt-4-turbo-preview": "En son GPT-4 Turbo modeli (128000 Token bağlam penceresi)",
+                "gpt-4-turbo": "En son GPT-4 Turbo modeli (128000 Token bağlam penceresi)",
                 "text-embedding-3-large": "Hem İngilizce hem de İngilizce olmayan görevler için en son ve en yetenekli embedding modeli",
                 "text-embedding-3-small": "2. nesil 'ada' embedding modeline göre artırılmış performans",
                 "text-embedding-ada-002": "En yetenekli 2. nesil embedding modeli."

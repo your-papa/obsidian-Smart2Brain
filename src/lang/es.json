@@ -152,7 +152,7 @@
                 "gpt-3.5-turbo": "Modelo GPT-3.5 Turbo más reciente (ventana de contexto de 16385 tokens)",
                 "gpt-4": "Modelo GPT-4 más reciente (ventana de contexto de 8192 tokens)",
                 "gpt-4-32k": "Modelo GPT-4 (ventana de contexto de 32768 tokens)",
-                "gpt-4-turbo-preview": "Modelo GPT-4 Turbo más reciente (ventana de contexto de 128000 tokens)",
+                "gpt-4-turbo": "Modelo GPT-4 Turbo más reciente (ventana de contexto de 128000 tokens)",
                 "text-embedding-3-large": "Modelo de Embedding  más reciente y capaz para tareas tanto en inglés como en otros idiomas",
                 "text-embedding-3-small": "Rendimiento mejorado sobre el modelo de Embedding  ada de 2da generación",
                 "text-embedding-ada-002": "Modelo de Embedding  de 2da generación más capaz."
