@@ -153,6 +153,7 @@
             "gpt-4": "最新的 GPT-4 模型（8192 Token 上下文）",
             "gpt-4-32k": "GPT-4 模型（32768 Token 上下文）",
             "gpt-4-turbo": "最新的 GPT-4 Turbo 模型（128000 Token 上下文）",
+            "gpt-4o": "最新的 GPT-4 Omni 模型 (128000 Token 上下文)",
             "text-embedding-3-large": "最新、最强的嵌入模型，适用于多语言任务",
             "text-embedding-3-small": "性能超过二代 ada 嵌入模型",
             "text-embedding-ada-002": "最好的二代嵌入模型。"
