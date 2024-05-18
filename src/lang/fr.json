@@ -152,7 +152,8 @@
           "gpt-3.5-turbo": "Dernier modèle GPT-3.5 Turbo (fenêtre de contexte de 16385 tokens)",
           "gpt-4": "Dernier modèle GPT-4 (fenêtre de contexte de 8192 tokens)",
           "gpt-4-32k": "Modèle GPT-4 (fenêtre de contexte de 32768 tokens)",
-          "gpt-4-turbo-preview": "Dernier modèle GPT-4 Turbo (fenêtre de contexte de 128000 tokens)",
+          "gpt-4-turbo": "Dernier modèle GPT-4 Turbo (fenêtre de contexte de 128000 tokens)",
+          "gpt-4o": "Dernier modèle GPT-4 Omni (fenêtre de contexte de 128000 jetons)",
           "text-embedding-3-large": "Dernier modèle d'encodage le plus capable pour les tâches en anglais et non anglais",
           "text-embedding-3-small": "Performances accrues par rapport au modèle d'encodage ada de 2ème génération",
           "text-embedding-ada-002": "Modèle d'encodage le plus capable de 2ème génération."
