@@ -8,7 +8,10 @@ export const OpenAIGenModels = {
     'gpt-4-32k': {
         contextWindow: 32768,
     },
-    'gpt-4-turbo-preview': {
+    'gpt-4-turbo': {
+        contextWindow: 128000,
+    },
+    'gpt-4o': {
         contextWindow: 128000,
     },
 };

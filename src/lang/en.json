@@ -152,7 +152,8 @@
                 "gpt-3.5-turbo": "Latest GPT-3.5 Turbo model (16385 Token context window)",
                 "gpt-4": "Latest GPT-4 model (8192 Token context window)",
                 "gpt-4-32k": "GPT-4 model (32768 Token context window)",
-                "gpt-4-turbo-preview": "Latest GPT-4 Turbo model (128000 Token context window)",
+                "gpt-4-turbo": "Latest GPT-4 Turbo model (128000 Token context window)",
+                "gpt-4o": "Latest GPT-4 Omni model (128000 Token context window)",
                 "text-embedding-3-large": "Latest, most capable embedding model for both english and non-english tasks",
                 "text-embedding-3-small": "Increased performance over 2nd generation ada embedding model",
                 "text-embedding-ada-002": "Most capable 2rd generation embedding model."
