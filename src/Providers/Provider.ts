@@ -4,18 +4,14 @@ import { data, plugin } from '../store';
 export const providerNames = ['OpenAI', 'Ollama'];
 export type ProviderName = (typeof providerNames)[number];
 
-export abstract class ProviderBase {
+export abstract class ProviderBase<TSettings> {
     readonly isLocal: boolean;
-    protected apiConfig: string;
-
-    constructor(apiConfig: string) {
-        this.apiConfig = apiConfig;
-    }
+    protected apiConfig: TSettings;
 
     abstract isSetuped(): Promise<boolean>;
-    async setConfig(apiConfig: string) {
+    async setConfig(apiConfig: TSettings) {
         const { saveSettings } = get(plugin);
-        this.apiConfig = apiConfig.trim();
+        this.apiConfig = apiConfig;
         await saveSettings();
     }
     getConfig() {
@@ -35,6 +31,7 @@ export type EmbedModelSettings = {
 export abstract class Provider<TModelSettings, TPapaModel> {
     protected selectedModel: string;
     protected models: { [model: string]: TModelSettings } = {};
+    protected providerName: ProviderName;
 
     constructor(selectedModel: string) {
         this.selectedModel = selectedModel;
@@ -55,7 +52,13 @@ export abstract class Provider<TModelSettings, TPapaModel> {
         await saveSettings();
     }
 
-    abstract getPapaModel(): TPapaModel;
+    getPapaModel(): TPapaModel {
+        return {
+            model: this.selectedModel,
+            ...this.models[this.selectedModel],
+            ...get(data).providerSettings[this.providerName].getConfig(),
+        };
+    }
 }
 
 export const getSelectedProvider = () => {
