@@ -6,13 +6,17 @@ import { get } from 'svelte/store';
 import { _ } from 'svelte-i18n';
 import type { GenModel, EmbedModel } from 'papa-ts';
 
-export class OllamaBaseProvider extends ProviderBase {
+export type OllamaSettings = {
+    baseUrl: string;
+};
+
+export class OllamaBaseProvider extends ProviderBase<OllamaSettings> {
     readonly isLocal = true;
 
     async isSetuped(): Promise<boolean> {
         const t = get(_);
         try {
-            const response = await fetch(this.apiConfig + '/api/tags');
+            const response = await fetch(this.apiConfig.baseUrl + '/api/tags');
             if (response.status === 200) {
                 return true;
             } else {
@@ -39,8 +43,8 @@ export class OllamaBaseProvider extends ProviderBase {
 
     async isOllamaRunning() {
         try {
-            new URL(this.apiConfig);
-            const response = await requestUrl(this.apiConfig + '/api/tags');
+            new URL(this.apiConfig.baseUrl);
+            const response = await requestUrl(this.apiConfig.baseUrl + '/api/tags');
             if (response.status === 200) {
                 return true;
             } else {
@@ -163,14 +167,6 @@ export class OllamaGenProvider extends Provider<GenModelSettings, GenModel> {
         phi: { temperature: 0.5, contextWindow: 2048 },
     };
 
-    getPapaModel() {
-        return {
-            model: this.selectedModel,
-            ...this.models[this.selectedModel],
-            baseUrl: get(data).providerSettings['Ollama'].getConfig(),
-        };
-    }
-
     async setModel(model: string) {
         this.selectedModel = model;
         const { s2b, saveSettings } = get(plugin);
@@ -191,14 +187,6 @@ export class OllamaEmbedProvider extends Provider<EmbedModelSettings, EmbedModel
         'nomic-embed-text': { similarityThreshold: 0.5 },
         'mxbai-embed-large': { similarityThreshold: 0.5 },
     };
-
-    getPapaModel() {
-        return {
-            model: this.selectedModel,
-            ...this.models[this.selectedModel],
-            baseUrl: get(data).providerSettings['Ollama'].getConfig(),
-        };
-    }
 
     async setModel(model: string) {
         this.selectedModel = model;
