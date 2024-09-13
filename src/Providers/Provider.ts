@@ -1,67 +1,68 @@
-import { get } from 'svelte/store';
-import { data, plugin } from '../store';
+// import { get } from 'svelte/store';
+// import { data, plugin } from '../store';
 
-export const providerNames = ['OpenAI', 'Ollama'];
-export type ProviderName = (typeof providerNames)[number];
+// export const providerNames = ['OpenAI', 'Ollama'];
+// export type ProviderName = (typeof providerNames)[number];
 
-export abstract class ProviderBase<TSettings> {
-    readonly isLocal: boolean;
-    protected apiConfig: TSettings;
+// export abstract class ProviderBase<TSettings> {
+//     readonly isLocal: boolean;
+//     protected apiConfig: TSettings;
 
-    abstract isSetuped(): Promise<boolean>;
-    async setConfig(apiConfig: TSettings) {
-        const { saveSettings } = get(plugin);
-        this.apiConfig = apiConfig;
-        await saveSettings();
-    }
-    getConfig() {
-        return this.apiConfig;
-    }
-}
+//     abstract isSetuped(): Promise<boolean>;
 
-export type GenModelSettings = {
-    temperature?: number;
-    contextWindow?: number;
-};
+//     async setConfig(apiConfig: TSettings) {
+//         const { saveSettings } = get(plugin);
+//         this.apiConfig = apiConfig;
+//         await saveSettings();
+//     }
+//     getConfig() {
+//         return this.apiConfig;
+//     }
+// }
 
-export type EmbedModelSettings = {
-    similarityThreshold?: number;
-};
+// export type GenModelSettings = {
+//     temperature?: number;
+//     contextWindow?: number;
+// };
 
-export abstract class Provider<TModelSettings, TPapaModel> {
-    protected selectedModel: string;
-    protected models: { [model: string]: TModelSettings } = {};
-    protected providerName: ProviderName;
+// export type EmbedModelSettings = {
+//     similarityThreshold?: number;
+// };
 
-    constructor(selectedModel: string) {
-        this.selectedModel = selectedModel;
-    }
+// export abstract class Provider<TModelSettings, TPapaModel> {
+//     protected selectedModel: string;
+//     protected models: { [model: string]: TModelSettings } = {};
+//     protected providerName: ProviderName;
 
-    abstract getModels(): Promise<string[]>;
-    abstract setModel(model: string): void;
-    getModel() {
-        return this.selectedModel;
-    }
-    getModelSettings() {
-        return this.models[this.selectedModel];
-    }
+//     constructor(selectedModel: string) {
+//         this.selectedModel = selectedModel;
+//     }
 
-    async setModelSettings(settings: TModelSettings) {
-        const { saveSettings } = get(plugin);
-        this.models[this.selectedModel] = { ...this.models[this.selectedModel], ...settings };
-        await saveSettings();
-    }
+//     abstract getModels(): Promise<string[]>;
+//     abstract setModel(model: string): void;
+//     getModel() {
+//         return this.selectedModel;
+//     }
+//     getModelSettings() {
+//         return this.models[this.selectedModel];
+//     }
 
-    getPapaModel(): TPapaModel {
-        return {
-            model: this.selectedModel,
-            ...this.models[this.selectedModel],
-            ...get(data).providerSettings[this.providerName].getConfig(),
-        };
-    }
-}
+//     async setModelSettings(settings: TModelSettings) {
+//         const { saveSettings } = get(plugin);
+//         this.models[this.selectedModel] = { ...this.models[this.selectedModel], ...settings };
+//         await saveSettings();
+//     }
 
-export const getSelectedProvider = () => {
-    const { embedProviders, selEmbedProvider, genProviders, selGenProvider } = get(data);
-    return { embed: embedProviders[selEmbedProvider], gen: genProviders[selGenProvider] };
-};
+//     getPapaModel(): TPapaModel {
+//         return {
+//             model: this.selectedModel,
+//             ...this.models[this.selectedModel],
+//             ...get(data).providerSettings[this.providerName].getConfig(),
+//         };
+//     }
+// }
+
+// export const getSelectedProvider = () => {
+//     const { embedProviders, selEmbedProvider, genProviders, selGenProvider } = get(data);
+//     return { embed: embedProviders[selEmbedProvider], gen: genProviders[selGenProvider] };
+// };

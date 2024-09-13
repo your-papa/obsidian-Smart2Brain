@@ -1,11 +1,24 @@
 import { App, Notice, TFile, normalizePath } from 'obsidian';
-import { Papa, obsidianDocumentLoader, type GenModel } from 'papa-ts';
+import { Papa, obsidianDocumentLoader } from 'papa-ts';
 import { get } from 'svelte/store';
 import { wildTest } from './components/Settings/FuzzyModal';
 import Log, { LogLvl } from './logging';
-import { data, papaState, errorState, papaIndexingProgress, chatHistory, serializeChatHistory, runState, runContent, papaIndexingTimeLeft } from './store';
+import {
+    data,
+    papaState,
+    errorState,
+    papaIndexingProgress,
+    chatHistory,
+    serializeChatHistory,
+    runState,
+    runContent,
+    papaIndexingTimeLeft,
+    providers,
+    selGenProvider,
+    selEmbedProvider,
+} from './store';
 import { _ } from 'svelte-i18n';
-import { getSelectedProvider } from './Providers/Provider';
+// import { getSelectedProvider } from './Providers/Provider';
 
 export default class SmartSecondBrain {
     private papa: Papa;
@@ -20,19 +33,19 @@ export default class SmartSecondBrain {
 
     async init() {
         const { debugginLangchainKey, isVerbose, excludeFF } = get(data);
-        const provider = getSelectedProvider();
+        const provider = { gen: get(providers)[get(selGenProvider)], embed: get(providers)[get(selEmbedProvider)] };
         const t = get(_);
 
         if (!(await this.canInit())) return;
 
         if (get(papaState) !== 'indexing-pause') {
             papaState.set('loading');
-            Log.info('Initializing second brain', '\nGen Model: ', provider.gen.getModel(), '\nEmbed Model: ', provider.embed.getModel());
+            Log.info('Initializing second brain', '\nGen Model: ', provider.gen.getSelGenModel(), '\nEmbed Model: ', provider.embed.getSelEmbedModel());
             try {
                 this.papa = new Papa();
                 await this.papa.init({
-                    genModel: provider.gen.getPapaModel(),
-                    embedModel: provider.embed.getPapaModel(),
+                    genModel: providers[get(selGenProvider)].createGenModel(),
+                    embedModel: provider[get(selEmbedProvider)].createEmbedModel(),
                     langsmithApiKey: debugginLangchainKey || undefined,
                     logLvl: isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
                 });
@@ -145,8 +158,8 @@ export default class SmartSecondBrain {
     }
 
     getVectorStoreFile() {
-        const { embedProviders, selEmbedProvider } = get(data);
-        return normalizePath(this.pluginDir + '/vectorstores/' + embedProviders[selEmbedProvider].getModel() + '.bin');
+        const { providers, selEmbedProvider } = get(data);
+        return normalizePath(this.pluginDir + '/vectorstores/' + providers[selEmbedProvider].selectedEmbedModel + '.bin');
     }
 
     async saveVectorStoreData() {
@@ -196,7 +209,7 @@ export default class SmartSecondBrain {
         if (this.papa) this.papa.setNumOfDocsToRetrieve(k);
     }
 
-    setGenModel(genModel: GenModel) {
+    setGenModel(genModel) {
         if (this.papa) this.papa.setGenModel(genModel);
     }
 
@@ -206,7 +219,7 @@ export default class SmartSecondBrain {
 
     private async canInit(): Promise<boolean> {
         const t = get(_);
-        const { providerSettings, selGenProvider, selEmbedProvider } = get(data);
+        const { providers, selGenProvider, selEmbedProvider } = get(data);
 
         if (get(papaState) === 'running') {
             new Notice(t('notice.still_running'), 4000);
@@ -214,10 +227,10 @@ export default class SmartSecondBrain {
         } else if (get(papaState) === 'indexing' || get(papaState) === 'loading') {
             new Notice(t('notice.still_indexing'), 4000);
             return false;
-        } else if (!(await providerSettings[selGenProvider].isSetuped())) {
+        } else if (!(await providers[selGenProvider].isSetuped())) {
             papaState.set('error');
             return false;
-        } else if (!(await providerSettings[selEmbedProvider].isSetuped())) {
+        } else if (!(await providers[selEmbedProvider].isSetuped())) {
             papaState.set('error');
             return false;
         } else return true;

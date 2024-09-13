@@ -102,7 +102,9 @@
 <!-- Gen Modal Settings -->
 <ChatModel />
 <!-- Provider Settings -->
-<ProviderSetup />
+<details>
+    <ProviderSetup />
+</details>
 <!-- Advanced Settings -->
 <details>
     <summary class="setting-item-heading py-3">{$t('settings.advanced')}</summary>

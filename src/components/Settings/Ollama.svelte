@@ -43,7 +43,7 @@
     /></SettingContainer
 >
 <!-- Ollama URL -->
-<SettingContainer name={$t('settings.ollama.base_url')} desc={$t('settings.ollama.base_url_desc')}>
+<!-- <SettingContainer name={$t('settings.ollama.base_url')} desc={$t('settings.ollama.base_url_desc')}>
     <ButtonComponent iconId={'rotate-cw'} changeFunc={resetOllamaBaseUrl} />
     <TextComponent
         styles={styleOllamaBaseUrl}
@@ -55,7 +55,7 @@
         }}
     />
 </SettingContainer>
-<!-- Ollama Gen Model -->
+
 <SettingContainer
     name={$t('settings.ollama.gen_model')}
     desc={$t('settings.ollama.model_descriptions.' + $data.ollamaGenModel.model, { default: '' })}
@@ -74,7 +74,7 @@
         </optgroup>
     </select>
 </SettingContainer>
-<!-- Ollama Embed Model -->
+
 <SettingContainer
     name={$t('settings.ollama.embed_model')}
     desc={$t('settings.ollama.model_descriptions.' + $data.ollamaEmbedModel.model, { default: '' })}
@@ -92,4 +92,4 @@
             {/each}
         </optgroup>
     </select>
-</SettingContainer>
+</SettingContainer> -->

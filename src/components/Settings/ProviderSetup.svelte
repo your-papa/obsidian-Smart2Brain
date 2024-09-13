@@ -2,45 +2,69 @@
     import SettingContainer from './SettingContainer.svelte';
     import { t } from 'svelte-i18n';
     import DropdownComponent from '../base/Dropdown.svelte';
-    import { providerNames } from '../../Providers/Provider';
-    import { data, plugin } from '../../store';
+    import { providerNames, type ProviderName } from 'papa-ts';
+    import { data, plugin, selEmbedProvider, providers } from '../../store';
     import TextComponent from '../base/Text.svelte';
+    import ButtonComponent from '../base/Button.svelte';
+    import { onMount } from 'svelte';
+    import Settings from './Settings.svelte';
+    import Button from '../base/Button.svelte';
 
-    let selected = $data.embedProvider.name;
+    let selectedProvider: ProviderName = '';
+    const embedModles: Array<string> = [];
+    const genModels: Array<string> = [];
+    const modles: Array<string> = [];
+    let model: string = '';
+
+    type EmbedModelSettings = {
+        similarityThreshold: number;
+    };
+
+    onMount(() => {
+        selectedProvider = $selEmbedProvider;
+    });
+
+    $: provider = $providers[selectedProvider];
+    let isSetuped = false;
 </script>
 
-<details>
-    <summary class="setting-item-heading py-3">{$t('settings.provider.title')}</summary>
-    <SettingContainer name={$t('settings.provider.provider')} desc={$t('settings.provider.provider_desc')}>
-        <DropdownComponent
-            options={providerNames.map((providerName) => {
-                return { display: providerName, value: providerName };
-            })}
-            {selected}
-            changeFunc={(val) => (selected = val)}
-        />
-    </SettingContainer>
+<summary class="setting-item-heading py-3">{$t('settings.provider.title')}</summary>
+<SettingContainer name={$t('settings.provider.provider')} desc={$t('settings.provider.provider_desc')}>
+    <DropdownComponent
+        options={providerNames.map((providerName) => {
+            return { display: providerName, value: providerName };
+        })}
+        selected={selectedProvider}
+        changeFunc={(val) => (selectedProvider = val)}
+    />
+</SettingContainer>
 
-    <!--ToDo make better-->
-    {#if selected === 'Ollama'}
-        <SettingContainer name={$t('settings.provider.baseUrl')} desc={$t('settings.provider.desc')}>
+{#if provider}
+    {#each Object.entries(provider.getConnectionArgs()) as [cArgKey, connectionArgument]}
+        <SettingContainer name={$t(`settings.provider.${cArgKey}`)} desc={$t(`settings.provider.${cArgKey}.desc`)}>
+            {#if !isSetuped}
+                <ButtonComponent
+                    styles="mod-cta"
+                    buttonText={'Check Connection'}
+                    changeFunc={async () => {
+                        isSetuped = await provider.isSetuped();
+                        $plugin.saveSettings();
+                    }}
+                />
+            {/if}
             <TextComponent
-                bind:value={$data.ollamaProvider.baseUrl}
-                changeFunc={(value) => {
-                    $data.ollamaProvider.baseUrl = value;
-                    $plugin.saveSettings();
+                bind:value={connectionArgument}
+                styles={isSetuped ? '!border-[--background-modifier-success]' : '!border-[--background-modifier-error]'}
+                changeFunc={async (value) => {
+                    let connectionArgs = provider.setConnectionArgs({ [cArgKey]: value });
+                    isSetuped = false;
+                    await $plugin.syncProviders(selectedProvider, connectionArgs);
                 }}
             />
         </SettingContainer>
-    {:else if selected === 'OpenAI'}
-        <SettingContainer name={$t('settings.provider.apiKey')} desc={$t('settings.provider.desc')}>
-            <TextComponent
-                bind:value={$data.openAIProvider.apiKey}
-                changeFunc={(value) => {
-                    $data.openAIProvider.apiKey = value;
-                    $plugin.saveSettings();
-                }}
-            />
-        </SettingContainer>
-    {/if}
-</details>
+    {/each}
+
+    <SettingContainer name={$t(`settings.provider.embedModles`)} desc={$t(`settings.provider.embedModles.desc`)} isDisabled={!isSetuped}>
+        <Button buttonText={$t('settings.provider.embedModles.manage')} changeFunc={() => {}} />
+    </SettingContainer>
+{/if}
