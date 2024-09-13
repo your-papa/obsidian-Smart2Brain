@@ -2,7 +2,7 @@ import { get, writable } from 'svelte/store';
 import type SecondBrainPlugin from './main';
 import { type PluginData } from './main';
 import { nanoid } from 'nanoid';
-import { type PapaResponseStatus } from 'papa-ts';
+import { type PapaResponseStatus, BaseProvider, type OllamaSettings, type OpenAISettings, GenProvider, EmbedProvider } from 'papa-ts';
 
 export type ChatMessage = {
     role: 'Assistant' | 'User';
@@ -10,6 +10,71 @@ export type ChatMessage = {
     id: string;
 };
 export const plugin = writable<SecondBrainPlugin>();
+
+export const providers = writable<{ [key: string]: BaseProvider<OllamaSettings | OpenAISettings> }>({});
+
+// function createProviders() {
+//     const { subscribe, set } = writable<{ [key: string]: BaseProvider<OllamaSettings | OpenAISettings> }>({});
+
+//     return {
+//         subscribe,
+//         set,
+//         update: (value: ) => {
+//             set(value);
+//             get(plugin).chatView.save();
+//         },
+//     };
+// }
+
+function createSelGenProvider() {
+    const { subscribe, set } = writable<string>();
+
+    return {
+        subscribe,
+        set,
+        update: async (value: string) => {
+            set(value);
+            data.update((d) => {
+                d.selGenProvider = value;
+                return d;
+            });
+            await get(plugin).saveSettings();
+        },
+    };
+}
+
+export const selGenProvider = createSelGenProvider();
+
+function createSelEmbedProvider() {
+    const { subscribe, set } = writable<string>();
+
+    return {
+        subscribe,
+        set,
+        update: async (value: string) => {
+            set(value);
+            data.update((d) => {
+                d.selEmbedProvider = value;
+                return d;
+            });
+            await get(plugin).saveSettings();
+        },
+    };
+}
+
+export const selEmbedProvider = createSelEmbedProvider();
+
+export const genProvider = writable<GenProvider>();
+
+selGenProvider.subscribe((selGenProv) => {
+    genProvider.set(new GenProvider(get(providers)[selGenProv]));
+});
+
+export const embedProvider = writable<EmbedProvider>();
+
+selEmbedProvider.subscribe((selEmbedProv) => {
+    embedProvider.set(new EmbedProvider(get(providers)[selEmbedProv]));
+});
 
 export const isEditing = writable<boolean>(false);
 export const isEditingAssistantMessage = writable<boolean>();

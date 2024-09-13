@@ -1,6 +1,18 @@
 import { around } from 'monkey-around';
 import { Notice, Plugin, TFile, WorkspaceLeaf, WorkspaceSidedock, normalizePath, type ViewState } from 'obsidian';
-import { LogLvl, Prompts, type Language, type GenModel, type EmbedModel } from 'papa-ts';
+import {
+    LogLvl,
+    Prompts,
+    type Language,
+    type ProviderSettings,
+    type OpenAISettings,
+    type OllamaSettings,
+    providerFactory,
+    providerNames,
+    OPENAIDEFAULT,
+    OLLAMADEFAULT,
+    type ProviderName,
+} from 'papa-ts';
 import { get } from 'svelte/store';
 import { _ } from 'svelte-i18n';
 
@@ -9,22 +21,20 @@ import { ConfirmModal } from './components/Settings/ConfirmModal';
 import { PullModal } from './components/Modal/PullModal';
 import './lang/i18n';
 import Log from './logging';
-import { chatHistory, data, isChatInSidebar, plugin } from './store';
+import { chatHistory, data, isChatInSidebar, plugin, providers, selEmbedProvider, selGenProvider } from './store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
 import SettingsTab from './views/Settings';
 import { RemoveModal } from './components/Modal/RemoveModal';
-import type { EmbedModelSettings, GenModelSettings, Provider, ProviderBase, ProviderName } from './Providers/Provider';
-import { OpenAIEmbedProvider, OpenAIGenProvider, OpenAIBaseProvider } from './Providers/OpenAI';
-import { OllamaEmbedProvider, OllamaGenProvider, OllamaBaseProvider } from './Providers/Ollama';
 
 export interface PluginData {
-    selEmbedProvider: ProviderName;
-    selGenProvider: ProviderName;
-    providerSettings: { [provider: ProviderName]: ProviderBase };
-    embedProviders: { [provider: ProviderName]: Provider<EmbedModelSettings, EmbedModel> };
-    genProviders: { [provider: ProviderName]: Provider<GenModelSettings, GenModel> };
+    selEmbedProvider: string;
+    selGenProvider: string;
+    providers: {
+        OpenAI: ProviderSettings<OpenAISettings>;
+        Ollama: ProviderSettings<OllamaSettings>;
+    };
     isChatComfy: boolean;
     initialAssistantMessageContent: string;
     isUsingRag: boolean;
@@ -49,9 +59,10 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     retrieveTopK: 100,
     selEmbedProvider: 'Ollama',
     selGenProvider: 'Ollama',
-    providerSettings: { OpenAI: new OpenAIBaseProvider(''), Ollama: new OllamaBaseProvider('http://localhost:11434') },
-    embedProviders: { OpenAI: new OpenAIEmbedProvider('text-embedding-3-large'), Ollama: new OllamaEmbedProvider('mxbai-embed-large') },
-    genProviders: { OpenAI: new OpenAIGenProvider('gpt-4'), Ollama: new OllamaGenProvider('llama2') },
+    providers: {
+        OpenAI: OPENAIDEFAULT,
+        Ollama: OLLAMADEFAULT,
+    },
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     initialAssistantMessageContent:
         Prompts[(window.localStorage.getItem('language') as Language) || 'en']?.initialAssistantMessage || Prompts.en.initialAssistantMessage,
@@ -81,27 +92,28 @@ export default class SecondBrainPlugin extends Plugin {
         await this.saveData(get(data));
     }
 
+    async syncProviders(provider: ProviderName, providerSettings: Partial<ProviderSettings<OllamaSettings | OpenAISettings>>) {
+        data.update((currentData) => {
+            currentData.providers[provider] = { ...currentData.providers[provider], ...providerSettings };
+            return currentData;
+        });
+        await this.saveSettings();
+    }
+
     async onload() {
         plugin.set(this);
         const t = get(_);
         await this.loadSettings();
 
-        data.update((d) => {
-            d.providerSettings = {
-                OpenAI: new OpenAIBaseProvider(d.providerSettings['OpenAI'].getConfig()),
-                Ollama: new OllamaBaseProvider(d.providerSettings['Ollama'].getConfig()),
-            };
-            d.embedProviders = {
-                OpenAI: new OpenAIEmbedProvider(d.embedProviders['OpenAI'].getModel()),
-                Ollama: new OllamaEmbedProvider(d.embedProviders['Ollama'].getModel()),
-            };
-            d.genProviders = {
-                OpenAI: new OpenAIGenProvider(d.genProviders['OpenAI'].getModel()),
-                Ollama: new OllamaGenProvider(d.genProviders['Ollama'].getModel()),
-            };
-            return d;
-        });
-        console.log(get(data).genProviders['OpenAI'].getModels());
+        for (const provider of providerNames) {
+            providers.update((currentProviders) => {
+                return { ...currentProviders, [provider]: providerFactory(provider, get(data).providers[provider]) };
+            });
+        }
+
+        selEmbedProvider.set(get(data).selEmbedProvider);
+        selGenProvider.set(get(data).selGenProvider);
+
         await this.saveSettings();
 
         this.s2b = new SmartSecondBrain(this.app, this.manifest.dir);

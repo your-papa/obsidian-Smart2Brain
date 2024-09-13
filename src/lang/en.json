@@ -137,9 +137,9 @@
             "provider_desc": "Choose the provider you want to set up."
         },
         "provider": {
-            "title": "Provider",
+            "title": "Provider Setup",
             "provider": "Provider",
-            "provider_desc": "Choose the provider for the embedding model.",
+            "provider_desc": "Choose a provider to set up.",
             "baseUrl": "BaseUrl",
             "apiKey": "Api Key"
         },

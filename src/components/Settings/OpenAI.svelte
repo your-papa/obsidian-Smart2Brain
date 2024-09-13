@@ -52,13 +52,13 @@
     };
 </script> -->
 
-<SettingContainer name="OpenAI" isHeading={true} desc={$t('settings.openai.desc')} />
+<!-- <SettingContainer name="OpenAI" isHeading={true} desc={$t('settings.openai.desc')} /> -->
 <!-- OpenAI API Key -->
-<SettingContainer name={$t('settings.openai.api_key')} desc={$t('settings.openai.api_key_desc')}>
+<!-- <SettingContainer name={$t('settings.openai.api_key')} desc={$t('settings.openai.api_key_desc')}>
     <TextComponent styles={apiKeyStyles} value={openAIApiKey} placeholder="sk-...Lk" changeFunc={changeApiKey} blurFunc={hideApiKey} focusFunc={showApiKey} />
-</SettingContainer>
+</SettingContainer> -->
 <!-- OpenAI Gen Model -->
-<SettingContainer
+<!-- <SettingContainer
     name={$t('settings.openai.gen_model')}
     desc={$t('settings.openai.model_descriptions.' + $data.openAIGenModel.model, { default: '' })}
     isDisabled={!isOpenAIAPIKeyValid}
@@ -68,9 +68,9 @@
         options={OpenAIGenModelNames.map((model) => ({ display: model, value: model }))}
         changeFunc={openAIGenChange}
     />
-</SettingContainer>
+</SettingContainer> -->
 <!-- openAI Embed Model -->
-<SettingContainer
+<!-- <SettingContainer
     name={$t('settings.openai.embed_model')}
     desc={$t('settings.openai.model_descriptions.' + $data.openAIEmbedModel.model, { default: '' })}
     isDisabled={!isOpenAIAPIKeyValid}
@@ -80,4 +80,4 @@
         options={OpenAIEmbedModelNames.map((model) => ({ display: model, value: model }))}
         changeFunc={openAIEmbedChange}
     />
-</SettingContainer>
+</SettingContainer> -->
