@@ -3,17 +3,22 @@
     import { icon, renderMarkdown } from '../../controller/Messages';
     import TextComponent from '../base/Text.svelte';
     import { plugin, data } from '../../store';
-    import InitButtonComponent from './InitButton.svelte';
     import { t } from 'svelte-i18n';
     import { afterUpdate, onMount } from 'svelte';
+    import  SettingContainer  from '../Settings/SettingContainer.svelte';
+    import { providers, setupStatus} from '../../store';
+    import InitButton from './InitButton.svelte';
 
     export let scrollToBottom = () => {};
-    let isValid = false;
+    let keyEmpty;
     let isKeyTested = false;
+    let selectedProvider: 'OpenAI' | 'Ollama' = 'OpenAI';
+    $: provider = $providers[selectedProvider];
+
 
     onMount(async () => {
-        $data.embedProvider = $data.openAIProvider;
-        $data.genProvider = $data.openAIProvider;
+        console.log(provider.getConnectionArgs().apiKey);
+        keyEmpty = provider.getConnectionArgs()['api_key'].length == 0;
     });
 
     afterUpdate(() => {
@@ -32,45 +37,45 @@
     </li>
     <div class="" use:renderMarkdown={(this, $t('onboarding.openai.api_key_warning'))} />
     <li>
-        <div class="flex flex-wrap items-center justify-between">
-            <span class="mr-2">{$t('onboarding.openai.paste_api_key')} </span>
-            <TextComponent
-                value={$data.openAIProvider.apiKey}
-                placeholder="sk-...Lk"
-                changeFunc={(value) => {
-                    $data.openAIProvider.changeSetup(value);
-                }}
-            />
-        </div>
+        {#if provider}
+            {#each Object.entries(provider.getConnectionArgs()) as [cArgKey, connectionArgument]}
+                <SettingContainer name={$t(`settings.provider.${cArgKey}`)} desc={$t(`settings.provider.${cArgKey}.desc`)}>
+                    <TextComponent
+                        bind:value={connectionArgument}
+                        changeFunc={async (value) => {
+                            console.log(value);
+                            keyEmpty = value == undefined;
+                            let connectionArgs = provider.setConnectionArgs({ [cArgKey]: value });
+                            setupStatus.sync(selectedProvider, await provider.isSetuped());
+                            await $plugin.syncProviders(selectedProvider, connectionArgs);
+                        }}
+                    />
+                </SettingContainer>
+        {/each}
+        {/if}
     </li>
     <li>
         <div class="flex flex-wrap items-center justify-between">
             <span class="mr-2">{$t('onboarding.openai.test_api_key')}</span>
             <div class="flex items-center gap-1">
                 {#if isKeyTested}
-                    {#if isValid}
+                    {#if $setupStatus[selectedProvider]}
                         <div class="h-[28px] *:!h-[28px] *:!w-[28px] *:text-[--background-modifier-success]" use:icon={'check'} />
                         <p class="m-0 text-sm">{$t('onboarding.openai.api_key_valid')}</p>
                     {:else}
                         <div class="h-[28px] *:!h-[28px] *:!w-[28px] *:text-[--background-modifier-error]" use:icon={'cross'} />
                     {/if}
                 {/if}
-                {#if !isValid}
-                    <button
-                        aria-label={$t('onboarding.openai.test_api_key')}
-                        on:click={async () => {
-                            isValid = await $data.openAIProvider.isSetup();
-                            if (!isValid) new Notice($t('notice.api_key_invalid'), 4000);
-                            isKeyTested = true;
-                        }}>{$t('onboarding.test')}</button
-                    >
+                {#if !keyEmpty}
+                    <button aria-label={$t('onboarding.openai.test_api_key')} on:click={() => isKeyTested = true}>{$t('onboarding.openai.test_api_key')}</button>
                 {/if}
             </div>
         </div>
     </li>
 </ol>
-{#if isValid}
+{#if !keyEmpty && isKeyTested && $setupStatus[selectedProvider]}
     <div class="w-full text-center">
-        <InitButtonComponent />
+        <InitButton providerName={selectedProvider} />
     </div>
 {/if}
+
