@@ -119,6 +119,16 @@
         "enable": "Run on your machine",
         "disable": "Run via Third-Party Services"
     },
+    "model_management": {
+        "embed_model": {
+            "title": "Choose Model",
+            "similarityThreshold": "Similarity Threshold",
+            "delete": "Delete",
+            "save": "Save",
+            "cancel": "Cancel",
+            "create": "Create"
+        }
+    },
     "settings": {
         "excludeff": "Exclude files and folders",
         "excludeff_desc": "These files and folders won't be embedded and not be used for generating answers.",
@@ -141,7 +151,9 @@
             "provider": "Provider",
             "provider_desc": "Choose a provider to set up.",
             "baseUrl": "BaseUrl",
-            "apiKey": "Api Key"
+            "apiKey": "Api Key",
+            "embedModles": "Embed Models",
+            "manage": "Manage"
         },
         "clear_label": "Clear",
         "relaunch": "Relaunch",
@@ -159,7 +171,7 @@
             "provider": "Provider",
             "provider_desc": "Choose the provider for the embedding model.",
             "model": "Model",
-            "model_des": "Choose the model you want to use to embed your notes.",
+            "   des": "Choose the model you want to use to embed your notes.",
             "recommended": "Recommended: ",
             "other_embed": "Other Embedding Models:",
             "other": "Other:"

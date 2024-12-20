@@ -3,15 +3,13 @@
     import SettingContainer from './SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
     import { onMount } from 'svelte';
-    import { data, plugin, providers, selGenProvider, genProvider } from '../../store';
+    import { plugin, providers, selGenProvider, genProvider, setupStatus } from '../../store';
     import Button from '../base/Button.svelte';
     import { SetupModal } from './SetupModal';
     import { icon } from '../../controller/Messages';
     import Dropdown from '../base/Dropdown.svelte';
-    import { GenProvider } from 'papa-ts';
 
     let selected = '';
-    let isSetup: boolean;
 
     let genModel: string = $genProvider.getSelectedModel();
 
@@ -20,7 +18,7 @@
     onMount(async () => {
         selected = $selGenProvider;
         if ($genProvider) {
-            isSetup = await $genProvider.isSetuped();
+            setupStatus.sync($selGenProvider, await $genProvider.isSetuped());
             genModel = $genProvider.getSelectedModel();
             models = await $genProvider.getModels();
         }
@@ -29,13 +27,13 @@
 
 <SettingContainer name={$t('settings.gen_model.title')} isHeading={true} />
 <SettingContainer name={$t('settings.gen_model.provider')} desc={$t('settings.gen_model.provider_desc')}>
-    {#if $genProvider && isSetup === false}
+    {#if $genProvider && !$setupStatus[$selGenProvider]}
         <Button
             styles={'mod-cta'}
             buttonText={'Setup'}
             changeFunc={async () => {
                 new SetupModal($plugin.app, 'chat', async (result) => {
-                    isSetup = result;
+                    setupStatus.sync($selGenProvider, result);
                     if (result) {
                         models = await $genProvider.getModels();
                     }
@@ -50,15 +48,15 @@
         {selected}
         changeFunc={async (selected) => {
             selGenProvider.update(selected);
-            isSetup = await $genProvider.isSetuped();
-            if (isSetup) {
+            setupStatus.sync($selGenProvider, await $providers[selected].isSetuped());
+            if ($setupStatus[$selGenProvider]) {
                 models = await $genProvider.getModels();
             }
         }}
     />
 </SettingContainer>
 
-<SettingContainer isDisabled={!isSetup} name={$t('settings.gen_model.model')} desc={$t('settings.gen_model.model.desc')}>
+<SettingContainer isDisabled={!$setupStatus[$selGenProvider]} name={$t('settings.gen_model.model')} desc={$t('settings.gen_model.model.desc')}>
     <button class="clickable-icon" use:icon={'refresh-ccw'} on:click={async () => (models = await $genProvider.getModels())} />
     <Dropdown
         selected={genModel}

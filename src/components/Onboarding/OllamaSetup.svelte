@@ -1,4 +1,4 @@
-<script lang="ts">
+<!-- <script lang="ts">
     import InitButtonComponent from './InitButton.svelte';
     import { afterUpdate, onMount } from 'svelte';
     import { icon } from '../../controller/Messages';
@@ -6,7 +6,6 @@
     import DropdownComponent from '../base/Dropdown.svelte';
     import { t } from 'svelte-i18n';
     import PullOllamaModel from './PullOllamaModel.svelte';
-    import { Ollama } from '../../Providers/Ollama';
     export let scrollToBottom = () => {};
 
     afterUpdate(() => {
@@ -81,4 +80,4 @@
             <InitButtonComponent />
         </div>
     {/if}
-{/if}
+{/if} -->

@@ -3,7 +3,7 @@
     import SettingContainer from './SettingContainer.svelte';
     import DropdownComponent from '../base/Dropdown.svelte';
     import { onMount } from 'svelte';
-    import { data, plugin, providers, selEmbedProvider, embedProvider } from '../../store';
+    import { data, plugin, providers, selEmbedProvider, embedProvider, setupStatus } from '../../store';
     import Button from '../base/Button.svelte';
     import { SetupModal } from './SetupModal';
     import { icon } from '../../controller/Messages';
@@ -11,8 +11,6 @@
     import { EmbedProvider } from 'papa-ts';
 
     let selected = '';
-    let isSetup: boolean;
-
     let embedModel: string = $embedProvider.getSelectedModel();
 
     let models: Array<string> = [];
@@ -20,7 +18,7 @@
     onMount(async () => {
         selected = $selEmbedProvider;
         if ($embedProvider) {
-            isSetup = await $embedProvider.isSetuped();
+            setupStatus.sync($selEmbedProvider, await $embedProvider.isSetuped());
             embedModel = $embedProvider.getSelectedModel();
             models = await $embedProvider.getModels();
         }
@@ -29,13 +27,13 @@
 
 <SettingContainer name={$t('settings.embed_model.title')} isHeading={true} />
 <SettingContainer name={$t('settings.embed_model.provider')} desc={$t('settings.embed_model.provider_desc')}>
-    {#if $embedProvider && isSetup === false}
+    {#if $embedProvider && !$setupStatus[$selEmbedProvider]}
         <Button
             styles={'mod-cta'}
             buttonText={'Setup'}
             changeFunc={async () => {
                 new SetupModal($plugin.app, 'embed', async (result) => {
-                    isSetup = result;
+                    setupStatus.sync($selEmbedProvider, result);
                     if (result) {
                         models = await $embedProvider.getModels();
                     }
@@ -50,15 +48,15 @@
         {selected}
         changeFunc={async (selected) => {
             selEmbedProvider.update(selected);
-            isSetup = await $embedProvider.isSetuped();
-            if (isSetup) {
+            setupStatus.sync($selEmbedProvider, await $embedProvider.isSetuped());
+            if ($setupStatus[$selEmbedProvider]) {
                 models = await $embedProvider.getModels();
             }
         }}
     />
 </SettingContainer>
 
-<SettingContainer isDisabled={!isSetup} name={$t('settings.embed_model.model')} desc={$t('settings.gen_model.model.desc')}>
+<SettingContainer isDisabled={!$setupStatus[$selEmbedProvider]} name={$t('settings.embed_model.model')} desc={$t('settings.gen_model.model.desc')}>
     <button class="clickable-icon" use:icon={'refresh-ccw'} on:click={async () => (models = await $embedProvider.getModels())} />
     <Dropdown
         selected={embedModel}
