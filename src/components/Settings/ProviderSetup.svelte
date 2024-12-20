@@ -48,6 +48,15 @@
         <Button
             buttonText={$t('settings.provider.manage')}
             changeFunc={() => {
+                new ModelManagementModal($plugin.app, provider, selectedProvider, 'embed').open();
+            }}
+        />
+    </SettingContainer>
+
+    <SettingContainer name={$t(`settings.provider.genModels`)} desc={$t(`settings.provider.genModels.desc`)} isDisabled={!$setupStatus[selectedProvider]}>
+        <Button
+            buttonText={$t('settings.provider.manage')}
+            changeFunc={() => {
                 new ModelManagementModal($plugin.app, provider, selectedProvider, 'chat').open();
             }}
         />
