@@ -21,7 +21,7 @@ import { ConfirmModal } from './components/Settings/ConfirmModal';
 import { PullModal } from './components/Modal/PullModal';
 import './lang/i18n';
 import Log from './logging';
-import { chatHistory, data, isChatInSidebar, plugin, providers, selEmbedProvider, selGenProvider } from './store';
+import { chatHistory, data, isChatInSidebar, plugin, providers, selEmbedProvider, selGenProvider, setupStatus } from './store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
@@ -29,8 +29,8 @@ import SettingsTab from './views/Settings';
 import { RemoveModal } from './components/Modal/RemoveModal';
 
 export interface PluginData {
-    selEmbedProvider: string;
-    selGenProvider: string;
+    selEmbedProvider: ProviderName;
+    selGenProvider: ProviderName;
     providers: {
         OpenAI: ProviderSettings<OpenAISettings>;
         Ollama: ProviderSettings<OllamaSettings>;
@@ -94,6 +94,7 @@ export default class SecondBrainPlugin extends Plugin {
 
     async syncProviders(provider: ProviderName, providerSettings: Partial<ProviderSettings<OllamaSettings | OpenAISettings>>) {
         data.update((currentData) => {
+            // @ts-ignore
             currentData.providers[provider] = { ...currentData.providers[provider], ...providerSettings };
             return currentData;
         });
@@ -111,8 +112,15 @@ export default class SecondBrainPlugin extends Plugin {
             });
         }
 
-        selEmbedProvider.set(get(data).selEmbedProvider);
-        selGenProvider.set(get(data).selGenProvider);
+        const sEP: ProviderName = get(data).selEmbedProvider;
+        const sGP = get(data).selGenProvider;
+        const p = get(providers);
+
+        selEmbedProvider.set(sEP);
+        selGenProvider.set(sGP);
+
+        setupStatus.sync(sEP, await p[sEP].isSetuped());
+        setupStatus.sync(sGP, await p[sGP].isSetuped());
 
         await this.saveSettings();
 

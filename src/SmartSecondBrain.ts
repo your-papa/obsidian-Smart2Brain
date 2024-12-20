@@ -219,7 +219,8 @@ export default class SmartSecondBrain {
 
     private async canInit(): Promise<boolean> {
         const t = get(_);
-        const { providers, selGenProvider, selEmbedProvider } = get(data);
+        const { selGenProvider, selEmbedProvider } = get(data);
+        const p = get(providers);
 
         if (get(papaState) === 'running') {
             new Notice(t('notice.still_running'), 4000);
@@ -227,10 +228,10 @@ export default class SmartSecondBrain {
         } else if (get(papaState) === 'indexing' || get(papaState) === 'loading') {
             new Notice(t('notice.still_indexing'), 4000);
             return false;
-        } else if (!(await providers[selGenProvider].isSetuped())) {
+        } else if (!(await p[selGenProvider].isSetuped())) {
             papaState.set('error');
             return false;
-        } else if (!(await providers[selEmbedProvider].isSetuped())) {
+        } else if (!(await p[selEmbedProvider].isSetuped())) {
             papaState.set('error');
             return false;
         } else return true;

@@ -1,6 +1,5 @@
-<script lang="ts">
+<!-- <script lang="ts">
     import { plugin, data } from '../../store';
-    import { type Provider } from '../../Providers/Provider';
     import { ConfirmModal } from '../Settings/ConfirmModal';
     import { t } from 'svelte-i18n';
     import { get } from 'svelte/store';
@@ -32,4 +31,4 @@
                   'hideIncognitoWarning'
               ).activate();
     }}>{$t('onboarding.init')}</button
->
+> -->

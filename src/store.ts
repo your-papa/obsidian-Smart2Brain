@@ -2,7 +2,11 @@ import { get, writable } from 'svelte/store';
 import type SecondBrainPlugin from './main';
 import { type PluginData } from './main';
 import { nanoid } from 'nanoid';
-import { type PapaResponseStatus, BaseProvider, type OllamaSettings, type OpenAISettings, GenProvider, EmbedProvider } from 'papa-ts';
+import { type PapaResponseStatus, BaseProvider, type OllamaSettings, type OpenAISettings, GenProvider, EmbedProvider, type ProviderName } from 'papa-ts';
+
+type SetupStatus = {
+    [key in ProviderName]: boolean;
+};
 
 export type ChatMessage = {
     role: 'Assistant' | 'User';
@@ -13,26 +17,32 @@ export const plugin = writable<SecondBrainPlugin>();
 
 export const providers = writable<{ [key: string]: BaseProvider<OllamaSettings | OpenAISettings> }>({});
 
-// function createProviders() {
-//     const { subscribe, set } = writable<{ [key: string]: BaseProvider<OllamaSettings | OpenAISettings> }>({});
+function createSetupStatus() {
+    const { subscribe, set, update } = writable<SetupStatus>({
+        OpenAI: false,
+        Ollama: false,
+    });
+    return {
+        subscribe,
+        set,
+        sync: (providerName: ProviderName, value: boolean) => {
+            update((d) => {
+                d[providerName] = value;
+                return d;
+            });
+        },
+    };
+}
 
-//     return {
-//         subscribe,
-//         set,
-//         update: (value: ) => {
-//             set(value);
-//             get(plugin).chatView.save();
-//         },
-//     };
-// }
+export const setupStatus = createSetupStatus();
 
 function createSelGenProvider() {
-    const { subscribe, set } = writable<string>();
+    const { subscribe, set } = writable<ProviderName>();
 
     return {
         subscribe,
         set,
-        update: async (value: string) => {
+        update: async (value: ProviderName) => {
             set(value);
             data.update((d) => {
                 d.selGenProvider = value;
@@ -46,12 +56,12 @@ function createSelGenProvider() {
 export const selGenProvider = createSelGenProvider();
 
 function createSelEmbedProvider() {
-    const { subscribe, set } = writable<string>();
+    const { subscribe, set } = writable<ProviderName>();
 
     return {
         subscribe,
         set,
-        update: async (value: string) => {
+        update: async (value: ProviderName) => {
             set(value);
             data.update((d) => {
                 d.selEmbedProvider = value;
