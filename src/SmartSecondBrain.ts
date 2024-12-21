@@ -1,5 +1,5 @@
 import { App, Notice, TFile, normalizePath } from 'obsidian';
-import { Papa, obsidianDocumentLoader } from 'papa-ts';
+import { obsidianDocumentLoader, Papa, type PapaConfig } from 'papa-ts'
 import { get } from 'svelte/store';
 import { wildTest } from './components/Settings/FuzzyModal';
 import Log, { LogLvl } from './logging';
@@ -13,9 +13,6 @@ import {
     runState,
     runContent,
     papaIndexingTimeLeft,
-    providers,
-    selGenProvider,
-    selEmbedProvider,
 } from './store';
 import { _ } from 'svelte-i18n';
 // import { getSelectedProvider } from './Providers/Provider';
@@ -29,23 +26,25 @@ export default class SmartSecondBrain {
     constructor(app: App, pluginDir: string) {
         this.app = app;
         this.pluginDir = pluginDir;
+        this.papa = new Papa();
     }
 
     async init() {
-        const { debugginLangchainKey, isVerbose, excludeFF } = get(data);
-        const provider = { gen: get(providers)[get(selGenProvider)], embed: get(providers)[get(selEmbedProvider)] };
+        const { debugginLangchainKey, isVerbose, excludeFF, providers, selEmbedProvider, selGenProvider, selEmbedModel, selGenModel } = get(data);
         const t = get(_);
 
         if (!(await this.canInit())) return;
 
         if (get(papaState) !== 'indexing-pause') {
             papaState.set('loading');
-            Log.info('Initializing second brain', '\nGen Model: ', provider.gen.getSelGenModel(), '\nEmbed Model: ', provider.embed.getSelEmbedModel());
+            Log.info('Initializing second brain', '\nGen Model: ', selGenModel, '\nEmbed Model: ', selEmbedModel);
             try {
-                this.papa = new Papa();
                 await this.papa.init({
-                    genModel: providers[get(selGenProvider)].createGenModel(),
-                    embedModel: provider[get(selEmbedProvider)].createEmbedModel(),
+                    baseProviders: providers,
+                    selEmbedProvider,
+                    selGenProvider,
+                    selEmbedModel,
+                    selGenModel,
                     langsmithApiKey: debugginLangchainKey || undefined,
                     logLvl: isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED,
                 });
@@ -57,16 +56,17 @@ export default class SmartSecondBrain {
             // check if vector store data exists
             if (await this.app.vault.adapter.exists(this.getVectorStoreFile())) {
                 const vectorStoreData = await this.app.vault.adapter.readBinary(this.getVectorStoreFile());
-                await this.papa.load(vectorStoreData);
+                await this.papa.load(new Uint8Array(vectorStoreData));
             }
         }
         const mdFiles = this.app.vault.getMarkdownFiles();
         const docs = await obsidianDocumentLoader(
-            this.app,
-            mdFiles.filter((mdFile: TFile) => {
-                for (const exclude of excludeFF) if (wildTest(exclude, mdFile.path)) return false;
-                return true;
-            })
+            await this.createPapaObsidianFiles(
+                mdFiles.filter((mdFile: TFile) => {
+                    for (const exclude of excludeFF) if (wildTest(exclude, mdFile.path)) return false;
+                    return true;
+                })
+            )
         );
         papaState.set('indexing');
         let needsSave = false;
@@ -106,6 +106,22 @@ export default class SmartSecondBrain {
             papaIndexingProgress.set(0);
             papaState.set('idle');
         }
+    }
+
+    // temporary function to create obsidian files for papa, refactor later
+    private async createPapaObsidianFiles(files: TFile[]) {
+        let obsidianFiles = [];
+        for (const file of files) {
+            const fileMetadata = this.app.metadataCache.getFileCache(file);
+            if (!fileMetadata) continue;
+            const noteContent = await this.app.vault.cachedRead(file);
+            obsidianFiles.push({
+                path: file.path,
+                content: noteContent,
+                metadata: fileMetadata,
+            });
+        }
+        return obsidianFiles;
     }
 
     async cancelIndexing() {
@@ -158,17 +174,17 @@ export default class SmartSecondBrain {
     }
 
     getVectorStoreFile() {
-        const { providers, selEmbedProvider } = get(data);
-        return normalizePath(this.pluginDir + '/vectorstores/' + providers[selEmbedProvider].selectedEmbedModel + '.bin');
+        const { selEmbedModel } = get(data);
+        return normalizePath(this.pluginDir + '/vectorstores/' + selEmbedModel + '.bin');
     }
 
     async saveVectorStoreData() {
-        if (this.needsToSaveVectorStoreData && this.papa) {
+        if (this.needsToSaveVectorStoreData) {
             Log.debug('Saving vector store data');
             this.needsToSaveVectorStoreData = false;
             // create vectorstores directory if it doesn't exist
             (await this.app.vault.adapter.exists(this.pluginDir + '/vectorstores')) || (await this.app.vault.adapter.mkdir(this.pluginDir + '/vectorstores'));
-            await this.app.vault.adapter.writeBinary(this.getVectorStoreFile(), await this.papa.getData());
+            await this.app.vault.adapter.writeBinary(this.getVectorStoreFile(), (await this.papa.getData()).buffer as ArrayBuffer);
             Log.info('Saved vector store data');
         }
     }
@@ -176,14 +192,14 @@ export default class SmartSecondBrain {
     async onFileChange(file: TFile) {
         if (!this.papa) return;
         for (const exclude of get(data).excludeFF) if (wildTest(exclude, file.path)) return;
-        const docs = await obsidianDocumentLoader(this.app, [file]);
+        const docs = await obsidianDocumentLoader(await this.createPapaObsidianFiles([file]));
         this.papa.embedDocuments(docs, 'byFile');
         this.needsToSaveVectorStoreData = true;
     }
     async onFileDelete(file: TFile) {
         if (!this.papa) return;
         for (const exclude of get(data).excludeFF) if (wildTest(exclude, file.path)) return;
-        const docs = await obsidianDocumentLoader(this.app, [file]);
+        const docs = await obsidianDocumentLoader(await this.createPapaObsidianFiles([file]));
         this.papa.deleteDocuments({ docs });
         this.needsToSaveVectorStoreData = true;
     }
@@ -191,36 +207,22 @@ export default class SmartSecondBrain {
         if (!this.papa) return;
         for (const exclude of get(data).excludeFF) if (wildTest(exclude, file.path)) return;
         await this.papa.deleteDocuments({ sources: [oldPath] });
-        const docs = await obsidianDocumentLoader(this.app, [file]);
+        const docs = await obsidianDocumentLoader(await this.createPapaObsidianFiles([file]));
         this.papa.embedDocuments(docs, 'byFile');
         this.needsToSaveVectorStoreData = true;
     }
 
-    setSimilarityThreshold(similarityThreshold: number) {
-        if (this.papa) this.papa.setSimilarityThreshold(similarityThreshold);
+    updatePapaConfig(config: Partial<PapaConfig>) {
+        this.papa.updatePapaConfig(config);
     }
 
     stopRun() {
-        if (this.papa) this.papa.stopRun();
+        this.papa.stopRun();
         papaState.set('idle');
-    }
-
-    setNumOfDocsToRetrieve(k: number) {
-        if (this.papa) this.papa.setNumOfDocsToRetrieve(k);
-    }
-
-    setGenModel(genModel) {
-        if (this.papa) this.papa.setGenModel(genModel);
-    }
-
-    setTracer(langchainKey: string) {
-        if (this.papa) this.papa.setTracer(langchainKey);
     }
 
     private async canInit(): Promise<boolean> {
         const t = get(_);
-        const { selGenProvider, selEmbedProvider } = get(data);
-        const p = get(providers);
 
         if (get(papaState) === 'running') {
             new Notice(t('notice.still_running'), 4000);
@@ -228,10 +230,7 @@ export default class SmartSecondBrain {
         } else if (get(papaState) === 'indexing' || get(papaState) === 'loading') {
             new Notice(t('notice.still_indexing'), 4000);
             return false;
-        } else if (!(await p[selGenProvider].isSetuped())) {
-            papaState.set('error');
-            return false;
-        } else if (!(await p[selEmbedProvider].isSetuped())) {
+        } else if (!(await this.papa.isReady())) {
             papaState.set('error');
             return false;
         } else return true;

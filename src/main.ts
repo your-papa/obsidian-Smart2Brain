@@ -3,15 +3,14 @@ import { Notice, Plugin, TFile, WorkspaceLeaf, WorkspaceSidedock, normalizePath,
 import {
     LogLvl,
     Prompts,
+    RegisteredProviders,
+    type EmbedModelConfig,
+    type EmbedModelName,
+    type GenModelConfig,
+    type GenModelName,
     type Language,
-    type ProviderSettings,
-    type OpenAISettings,
-    type OllamaSettings,
-    providerFactory,
-    providerNames,
-    OPENAIDEFAULT,
-    OLLAMADEFAULT,
-    type ProviderName,
+    type ProviderConfig,
+    type RegisteredProvider,
 } from 'papa-ts';
 import { get } from 'svelte/store';
 import { _ } from 'svelte-i18n';
@@ -21,7 +20,7 @@ import { ConfirmModal } from './components/Settings/ConfirmModal';
 import { PullModal } from './components/Modal/PullModal';
 import './lang/i18n';
 import Log from './logging';
-import { chatHistory, data, isChatInSidebar, plugin, providers, selEmbedProvider, selGenProvider, setupStatus } from './store';
+import { chatHistory, data, isChatInSidebar, plugin } from './store';
 import './styles.css';
 import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
 import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
@@ -29,12 +28,13 @@ import SettingsTab from './views/Settings';
 import { RemoveModal } from './components/Modal/RemoveModal';
 
 export interface PluginData {
-    selEmbedProvider: ProviderName;
-    selGenProvider: ProviderName;
-    providers: {
-        OpenAI: ProviderSettings<OpenAISettings>;
-        Ollama: ProviderSettings<OllamaSettings>;
-    };
+    providers: { [provider in RegisteredProvider]: ProviderConfig };
+    embedModelConfigs: { [model in EmbedModelName]: EmbedModelConfig };
+    genModelConfigs: { [model in GenModelName]: GenModelConfig };
+    selEmbedProvider: RegisteredProvider;
+    selGenProvider: RegisteredProvider;
+    selEmbedModel: EmbedModelName;
+    selGenModel: GenModelName;
     isChatComfy: boolean;
     initialAssistantMessageContent: string;
     isUsingRag: boolean;
@@ -59,10 +59,8 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
     retrieveTopK: 100,
     selEmbedProvider: 'Ollama',
     selGenProvider: 'Ollama',
-    providers: {
-        OpenAI: OPENAIDEFAULT,
-        Ollama: OLLAMADEFAULT,
-    },
+    selEmbedModel: 'nomic-embed-text',
+    selGenModel: 'llama2',
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     initialAssistantMessageContent:
         Prompts[(window.localStorage.getItem('language') as Language) || 'en']?.initialAssistantMessage || Prompts.en.initialAssistantMessage,
@@ -92,35 +90,10 @@ export default class SecondBrainPlugin extends Plugin {
         await this.saveData(get(data));
     }
 
-    async syncProviders(provider: ProviderName, providerSettings: Partial<ProviderSettings<OllamaSettings | OpenAISettings>>) {
-        data.update((currentData) => {
-            // @ts-ignore
-            currentData.providers[provider] = { ...currentData.providers[provider], ...providerSettings };
-            return currentData;
-        });
-        await this.saveSettings();
-    }
-
     async onload() {
         plugin.set(this);
         const t = get(_);
         await this.loadSettings();
-
-        for (const provider of providerNames) {
-            providers.update((currentProviders) => {
-                return { ...currentProviders, [provider]: providerFactory(provider, get(data).providers[provider]) };
-            });
-        }
-
-        const sEP: ProviderName = get(data).selEmbedProvider;
-        const sGP = get(data).selGenProvider;
-        const p = get(providers);
-
-        selEmbedProvider.set(sEP);
-        selGenProvider.set(sGP);
-
-        setupStatus.sync(sEP, await p[sEP].isSetuped());
-        setupStatus.sync(sGP, await p[sGP].isSetuped());
 
         await this.saveSettings();
 
@@ -177,9 +150,7 @@ export default class SecondBrainPlugin extends Plugin {
         this.addRibbonIcon('message-square', t('ribbon.chat'), () => this.activateView());
 
         this.addCommand({ id: 'open-chat', name: t('cmd.chat'), icon: 'message-square', callback: () => this.activateView() });
-
         this.addCommand({ id: 'pull-model', name: t('cmd.pull_model'), icon: 'arrow-down-to-line', callback: () => new PullModal(this.app).open() });
-
         this.addCommand({ id: 'remove-model', name: t('cmd.remove_model'), icon: 'trash', callback: () => new RemoveModal(this.app).open() });
 
         this.addSettingTab(new SettingsTab(this.app, this));
@@ -210,9 +181,9 @@ export default class SecondBrainPlugin extends Plugin {
                 file = defaultChatExists
                     ? this.app.metadataCache.getFirstLinkpathDest(d.targetFolder + '/' + d.defaultChatName + '.md', '')
                     : await this.app.vault.create(
-                          normalizePath(d.targetFolder + '/' + d.defaultChatName + '.md'),
-                          'Assistant\n' + d.initialAssistantMessageContent + '\n- - - - -'
-                      );
+                        normalizePath(d.targetFolder + '/' + d.defaultChatName + '.md'),
+                        'Assistant\n' + d.initialAssistantMessageContent + '\n- - - - -'
+                    );
             }
             const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
             this.leaf = leaves.length ? leaves[0] : this.app.workspace.getRightLeaf(false);
