@@ -212,8 +212,8 @@ export default class SmartSecondBrain {
         this.needsToSaveVectorStoreData = true;
     }
 
-    updatePapaConfig(config: Partial<PapaConfig>) {
-        this.papa.updatePapaConfig(config);
+    configure(config: Partial<PapaConfig>) {
+        this.papa.configure(config);
     }
 
     stopRun() {
@@ -230,7 +230,7 @@ export default class SmartSecondBrain {
         } else if (get(papaState) === 'indexing' || get(papaState) === 'loading') {
             new Notice(t('notice.still_indexing'), 4000);
             return false;
-        } else if (!(await this.papa.isReady())) {
+        } else if (!(await this.papa.isEmbedProviderSetuped())) {
             papaState.set('error');
             return false;
         } else return true;

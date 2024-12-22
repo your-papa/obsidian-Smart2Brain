@@ -83,11 +83,11 @@ export default class SecondBrainPlugin extends Plugin {
     private autoSaveTimer: number;
 
     async loadSettings() {
-        data.set(Object.assign({}, DEFAULT_SETTINGS, await this.loadData()));
+        data.set({ ...DEFAULT_SETTINGS, ...await this.loadData() });
     }
 
-    async saveSettings() {
-        await this.saveData(get(data));
+    async saveSettings(partialData: Partial<PluginData> = {}) {
+        await this.saveData({ ...get(data), ...partialData });
     }
 
     async onload() {
