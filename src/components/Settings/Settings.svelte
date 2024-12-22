@@ -30,36 +30,31 @@
     };
 
     function deleteExcludeFF(ff: string) {
-        $data.excludeFF = $data.excludeFF.filter((f: string) => f !== ff);
         $papaState = 'settings-change';
-        $plugin.saveSettings();
+        $plugin.saveSettings({ excludeFF: $data.excludeFF.filter((f: string) => f !== ff) });
     }
 
     // Todo: store fucntion
     function setNumOfDocsToRetrieve(num: number) {
         if (num < 1) num = 1;
-        $data.retrieveTopK = num;
-        $plugin.s2b.setNumOfDocsToRetrieve(num);
-        $plugin.saveSettings();
+        $plugin.s2b.configure({ numDocsToRetrieve: num });
+        $plugin.saveSettings({ retrieveTopK: num });
     }
 
     const changeLangsmithKey = (newKey: string) => {
-        $data.debugginLangchainKey = newKey;
-        $plugin.saveSettings();
-        $plugin.s2b.setTracer($data.debugginLangchainKey);
+        $plugin.s2b.configure({ langsmithApiKey: newKey });
+        $plugin.saveSettings({ debugginLangchainKey: newKey });
     };
 
-    const changeVerbosity = () => {
-        $data.isVerbose = !$data.isVerbose;
+    const changeVerbosity = async () => {
+        await $plugin.saveSettings({ isVerbose: !$data.isVerbose });
         Log.setLogLevel($data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
-        Papa.setLogLevel($data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
-        $plugin.saveSettings();
+        $plugin.s2b.configure({ logLvl: $data.isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED });
     };
 
-    const changeAutostart = () => {
-        $data.isAutostart = !$data.isAutostart;
+    const changeAutostart = async () => {
+        await $plugin.saveSettings({ isAutostart: !$data.isAutostart });
         if ($data.isAutostart && $papaState === 'uninitialized') $plugin.s2b.init();
-        $plugin.saveSettings();
     };
 </script>
 

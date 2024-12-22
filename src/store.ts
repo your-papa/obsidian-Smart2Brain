@@ -28,6 +28,8 @@ export const errorState = writable<ErrorState>();
 export const runState = writable<PapaResponseStatus>('startup');
 export const runContent = writable<string>('');
 
+
+// TODO should be named s2bState
 export type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-pause' | 'running' | 'error' | 'uninitialized' | 'mode-change' | 'settings-change';
 export const papaState = writable<PapaState>('uninitialized');
 export const papaIndexingProgress = writable<number>(0);

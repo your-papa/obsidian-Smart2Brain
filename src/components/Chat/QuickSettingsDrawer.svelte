@@ -17,38 +17,33 @@
 
     function toggleDrawer() {
         isOpen = !isOpen;
-        $data.isQuickSettingsOpen = isOpen;
-        $plugin.saveSettings();
+        $plugin.saveSettings({ isQuickSettingsOpen: isOpen });
     }
 
-    let similarityThreshold = Math.round($data.embedModels[$data.embedModel].similarityThreshold * 100);
+    let similarityThreshold = Math.round($data.embedModelConfigs[$data.selEmbedModel].similarityThreshold * 100);
     $: similarityThreshold = Math.min(Math.max(similarityThreshold, 0), 100);
     function setSimilarityThreshold() {
-        $data.embedModels[$data.embedModel].similarityThreshold = similarityThreshold / 100;
-        $plugin.s2b.setSimilarityThreshold();
+        $data.embedModelConfigs[$data.selEmbedModel].similarityThreshold = similarityThreshold / 100;
+        $plugin.s2b.configure({ embedModelConfig: { similarityThreshold: similarityThreshold / 100 } });
         $plugin.saveSettings();
     }
 
-    let temperature = Math.round($data.genModels[$data.genModel].temperature * 100);
+    let temperature = Math.round($data.genModelConfigs[$data.selGenModel].temperature * 100);
     $: temperature = Math.min(Math.max(temperature, 0), 100);
     function setTemperature() {
-        $data.genModels[$data.genModel].temperature = temperature / 100;
-        $plugin.s2b.setGenModel();
+        $data.genModelConfigs[$data.selGenModel].temperature = temperature / 100;
+        $plugin.s2b.configure({ genModelConfig: { temperature: temperature / 100 } });
         $plugin.saveSettings();
     }
 
     const languages: { display: Language; value: Language }[] = Object.values(Languages).map((language: Language) => ({ display: language, value: language }));
 
     const setAssistantLanguage = (selected: Language) => {
-        $data.assistantLanguage = selected;
-        $data.initialAssistantMessageContent = Prompts[selected].initialAssistantMessage;
         if ($chatHistory.length === 1) chatHistory.reset();
-
-        $plugin.saveSettings();
+        $plugin.saveSettings({ assistantLanguage: selected, initialAssistantMessageContent: Prompts[selected].initialAssistantMessage });
     };
     function setChatViewDensity() {
-        $data.isChatComfy = !$data.isChatComfy;
-        $plugin.saveSettings();
+        $plugin.saveSettings({ isChatComfy: !$data.isChatComfy });
     }
 
     function formatTime(secondsInput: number) {
@@ -110,11 +105,11 @@
                 </div>
             {:else if $papaState === 'error'}
                 {#if $errorState === 'ollama-gen-model-not-installed'}
-                    <h3 class="text-center text-primary">{$t('quick_settings.error.install_model', { values: { model: $data.genModel } })}</h3>
-                    <PullOllamaModel pullModel={$data.genModel} onSuccessfulPull={() => ($papaState = 'settings-change')} />
+                    <h3 class="text-center text-primary">{$t('quick_settings.error.install_model', { values: { model: $data.selGenModel } })}</h3>
+                    <PullOllamaModel pullModel={$data.selGenModel} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else if $errorState === 'ollama-embed-model-not-installed'}
-                    <h3 class="text-center text-primary">{$t('quick_settings.error.install_model', { values: { model: $data.embedModel } })}</h3>
-                    <PullOllamaModel pullModel={$data.embedModel} onSuccessfulPull={() => ($papaState = 'settings-change')} />
+                    <h3 class="text-center text-primary">{$t('quick_settings.error.install_model', { values: { model: $data.selEmbedModel } })}</h3>
+                    <PullOllamaModel pullModel={$data.selEmbedModel} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else if $errorState === 'failed-indexing'}
                     <h3 class="text-center">{$t('notice.failed_indexing')}</h3>
                     <button
@@ -133,7 +128,7 @@
                     />
                 {/if}
             {:else if $papaState === 'mode-change'}
-                <h3 class="text-center text-primary">{$t('quick_settings.mode_changed')}{$data.genProvider}.</h3>
+                <h3 class="text-center text-primary">{$t('quick_settings.mode_changed')}{$data.selGenProvider}.</h3>
                 <button
                     aria-label={$t('quick_settings.reinitialize')}
                     on:click={() => $plugin.s2b.init()}
@@ -149,9 +144,9 @@
                     use:icon={'refresh-cw'}
                 />
             {:else}
-                <h2 class="mb-0 text-primary">{$data.genProvider}</h2>
+                <h2 class="mb-0 text-primary">{$data.selGenProvider}</h2>
                 <p class="mt-1">
-                    {$t('quick_settings.chat_via', { values: { model: $data.genModel } })}
+                    {$t('quick_settings.chat_via', { values: { model: $data.selGenModel } })}
                 </p>
                 <div class="w-full max-w-[300px]">
                     <div class="flex h-8 items-center justify-between">
