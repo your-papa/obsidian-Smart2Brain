@@ -9,6 +9,8 @@ import {
     type GenModelConfig,
     type GenModelName,
     type Language,
+    type OllamaConfig,
+    type OpenAIConfig,
     type ProviderConfig,
     type RegisteredProvider,
 } from 'papa-ts';
@@ -28,13 +30,22 @@ import SettingsTab from './views/Settings';
 import { RemoveModal } from './components/Modal/RemoveModal';
 
 export interface PluginData {
-    providers: { [provider in RegisteredProvider]: ProviderConfig };
-    embedModelConfigs: { [model in EmbedModelName]: EmbedModelConfig };
-    genModelConfigs: { [model in GenModelName]: GenModelConfig };
-    selEmbedProvider: RegisteredProvider;
-    selGenProvider: RegisteredProvider;
-    selEmbedModel: EmbedModelName;
-    selGenModel: GenModelName;
+    registeredProviders: {
+        Ollama: {
+            baseUrl: string,
+            selEmbedModel: string,
+            embedModels: { [key: string]: EmbedModelConfig },
+            selGenModel: string,
+            genModels: { [key: string]: GenModelConfig },
+        },
+        OpenAI: {
+            apiKey: string,
+            selEmbedModel: string,
+            embedModels: { [key: string]: EmbedModelConfig },
+            selGenModel: string,
+            genModels: { [key: string]: GenModelConfig },
+        },
+    };
     isChatComfy: boolean;
     initialAssistantMessageContent: string;
     isUsingRag: boolean;
@@ -54,13 +65,47 @@ export interface PluginData {
 export type PluginDataKey = keyof PluginData;
 
 export const DEFAULT_SETTINGS: Partial<PluginData> = {
+    registeredProviders: {
+        Ollama: {
+            baseUrl: 'http://localhost:11434',
+            selEmbedModel: 'nomic-text-embed',
+            genModels: {
+                llama2: { temperature: 0.5, contextWindow: 4096 },
+                'llama2-uncensored': { temperature: 0.5, contextWindow: 4096 },
+                mistral: { temperature: 0.5, contextWindow: 8000 },
+                'mistral-openorca': { temperature: 0.5, contextWindow: 8000 },
+                gemma: { temperature: 0.5, contextWindow: 8000 },
+                mixtral: { temperature: 0.5, contextWindow: 32000 },
+                'dolphin-mixtral': { temperature: 0.5, contextWindow: 32000 },
+                phi: { temperature: 0.5, contextWindow: 2048 },
+            },
+            embedModels: {
+                'nomic-embed-text': { similarityThreshold: 0.5 },
+                'mxbai-embed-large': { similarityThreshold: 0.5 },
+            },
+            selGenModel: 'llama3.1',
+        },
+        OpenAI: {
+            apiKey: '',
+            selEmbedModel: 'text-embedding-3-small',
+            embedModels: {
+                'text-embedding-ada-002': { similarityThreshold: 0.75 },
+                'text-embedding-3-large': { similarityThreshold: 0.5 },
+                'text-embedding-3-small': { similarityThreshold: 0.5 },
+            },
+            selGenModel: 'gpt-4o-mini',
+            genModels: {
+                'gpt-3.5-turbo': { temperature: 0.5, contextWindow: 16385 },
+                'gpt-4': { temperature: 0.5, contextWindow: 8192 },
+                'gpt-4-32k': { temperature: 0.5, contextWindow: 32768 },
+                'gpt-4-turbo-preview': { temperature: 0.5, contextWindow: 128000 },
+                'gpt-4o-mini': { temperature: 0.5, contextWindow: 8192 },
+            },
+        }
+    },
     isChatComfy: true,
     isUsingRag: true,
     retrieveTopK: 100,
-    selEmbedProvider: 'Ollama',
-    selGenProvider: 'Ollama',
-    selEmbedModel: 'nomic-embed-text',
-    selGenModel: 'llama2',
     assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
     initialAssistantMessageContent:
         Prompts[(window.localStorage.getItem('language') as Language) || 'en']?.initialAssistantMessage || Prompts.en.initialAssistantMessage,
