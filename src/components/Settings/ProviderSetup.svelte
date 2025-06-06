@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { t } from 'svelte-i18n';
-    import { providerNames, type ProviderName } from 'papa-ts';
+    import { registeredProviders, type RegisteredProvider } from 'papa-ts';
     import { plugin, selEmbedProvider, providers, setupStatus } from '../../store';
     import SettingContainer from './SettingContainer.svelte';
     import TextComponent from '../base/Text.svelte';
@@ -9,7 +9,7 @@
     import Button from '../base/Button.svelte';
     import { ModelManagementModal } from './ModelManagementModal';
 
-    let selectedProvider: ProviderName = '';
+    let selectedProvider: RegisteredProvider | undefined = undefined;
 
     onMount(() => {
         selectedProvider = $selEmbedProvider;
@@ -21,8 +21,8 @@
 <summary class="setting-item-heading py-3">{$t('settings.provider.title')}</summary>
 <SettingContainer name={$t('settings.provider.provider')} desc={$t('settings.provider.provider_desc')}>
     <DropdownComponent
-        options={providerNames.map((providerName) => {
-            return { display: providerName, value: providerName };
+        options={registeredProviders.map((RegisteredProvider) => {
+            return { display: RegisteredProvider, value: RegisteredProvider };
         })}
         selected={selectedProvider}
         changeFunc={(val) => (selectedProvider = val)}

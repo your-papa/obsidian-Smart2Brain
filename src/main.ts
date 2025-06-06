@@ -1,13 +1,10 @@
 import { around } from 'monkey-around';
-import { Notice, Plugin, TFile, WorkspaceLeaf, WorkspaceSidedock, normalizePath, type ViewState } from 'obsidian';
+import { Notice, Plugin, TAbstractFile, TFile, WorkspaceLeaf, WorkspaceSidedock, normalizePath, type ViewState } from 'obsidian';
 import {
     LogLvl,
     Prompts,
-    RegisteredProviders,
     type EmbedModelConfig,
-    type EmbedModelName,
     type GenModelConfig,
-    type GenModelName,
     type Language,
     type OllamaConfig,
     type OpenAIConfig,
@@ -32,19 +29,19 @@ import { RemoveModal } from './components/Modal/RemoveModal';
 export interface PluginData {
     registeredProviders: {
         Ollama: {
-            baseUrl: string,
-            selEmbedModel: string,
-            embedModels: { [key: string]: EmbedModelConfig },
-            selGenModel: string,
-            genModels: { [key: string]: GenModelConfig },
-        },
+            baseUrl: string;
+            selEmbedModel: string;
+            embedModels: { [key: string]: EmbedModelConfig };
+            selGenModel: string;
+            genModels: { [key: string]: GenModelConfig };
+        };
         OpenAI: {
-            apiKey: string,
-            selEmbedModel: string,
-            embedModels: { [key: string]: EmbedModelConfig },
-            selGenModel: string,
-            genModels: { [key: string]: GenModelConfig },
-        },
+            apiKey: string;
+            selEmbedModel: string;
+            embedModels: { [key: string]: EmbedModelConfig };
+            selGenModel: string;
+            genModels: { [key: string]: GenModelConfig };
+        };
     };
     isChatComfy: boolean;
     initialAssistantMessageContent: string;
@@ -101,7 +98,7 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
                 'gpt-4-turbo-preview': { temperature: 0.5, contextWindow: 128000 },
                 'gpt-4o-mini': { temperature: 0.5, contextWindow: 8192 },
             },
-        }
+        },
     },
     isChatComfy: true,
     isUsingRag: true,
@@ -120,7 +117,6 @@ export const DEFAULT_SETTINGS: Partial<PluginData> = {
 };
 
 export default class SecondBrainPlugin extends Plugin {
-    setupView: SetupView;
     chatView: ChatView;
     s2b: SmartSecondBrain;
     leaf: WorkspaceLeaf;
@@ -128,7 +124,7 @@ export default class SecondBrainPlugin extends Plugin {
     private autoSaveTimer: number;
 
     async loadSettings() {
-        data.set({ ...DEFAULT_SETTINGS, ...await this.loadData() });
+        data.set({ ...DEFAULT_SETTINGS, ...(await this.loadData()) });
     }
 
     async saveSettings(partialData: Partial<PluginData> = {}) {
@@ -162,9 +158,20 @@ export default class SecondBrainPlugin extends Plugin {
             })
         );
         this.registerEvent(this.app.metadataCache.on('changed', async (file: TFile) => this.s2b.onFileChange(file)));
-        this.registerEvent(this.app.vault.on('delete', async (file: TFile) => this.s2b.onFileDelete(file)));
-        this.registerEvent(this.app.vault.on('rename', async (file: TFile, oldPath: string) => this.s2b.onFileRename(file, oldPath)));
-
+        this.registerEvent(
+            this.app.vault.on('delete', async (file: TAbstractFile) => {
+                // guard: only handle real files
+                if (!(file instanceof TFile)) return;
+                await this.s2b.onFileDelete(file);
+            })
+        );
+        this.registerEvent(
+            this.app.vault.on('rename', async (file: TAbstractFile, oldPath: string) => {
+                // guard: only handle real files
+                if (!(file instanceof TFile)) return;
+                await this.s2b.onFileRename(file, oldPath);
+            })
+        );
         // periodically or on unfocus save vector store data to disk
         window.addEventListener('blur', () => this.s2b.saveVectorStoreData());
 
@@ -181,11 +188,6 @@ export default class SecondBrainPlugin extends Plugin {
         if (!this.s2b) {
             this.app.workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
         }
-
-        this.registerView(VIEW_TYPE_SETUP, (leaf) => {
-            this.setupView = new SetupView(leaf);
-            return this.setupView;
-        });
 
         this.registerView(VIEW_TYPE_CHAT, (leaf) => {
             this.chatView = new ChatView(leaf);
@@ -226,9 +228,9 @@ export default class SecondBrainPlugin extends Plugin {
                 file = defaultChatExists
                     ? this.app.metadataCache.getFirstLinkpathDest(d.targetFolder + '/' + d.defaultChatName + '.md', '')
                     : await this.app.vault.create(
-                        normalizePath(d.targetFolder + '/' + d.defaultChatName + '.md'),
-                        'Assistant\n' + d.initialAssistantMessageContent + '\n- - - - -'
-                    );
+                          normalizePath(d.targetFolder + '/' + d.defaultChatName + '.md'),
+                          'Assistant\n' + d.initialAssistantMessageContent + '\n- - - - -'
+                      );
             }
             const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
             this.leaf = leaves.length ? leaves[0] : this.app.workspace.getRightLeaf(false);

@@ -5,8 +5,8 @@
     import { plugin, data } from '../../store';
     import { t } from 'svelte-i18n';
     import { afterUpdate, onMount } from 'svelte';
-    import  SettingContainer  from '../Settings/SettingContainer.svelte';
-    import { providers, setupStatus} from '../../store';
+    import SettingContainer from '../Settings/SettingContainer.svelte';
+    import { providers, setupStatus } from '../../store';
     import InitButton from './InitButton.svelte';
 
     export let scrollToBottom = () => {};
@@ -14,7 +14,6 @@
     let isKeyTested = false;
     let selectedProvider: 'OpenAI' | 'Ollama' = 'OpenAI';
     $: provider = $providers[selectedProvider];
-
 
     onMount(async () => {
         console.log(provider.getConnectionArgs().apiKey);
@@ -51,7 +50,7 @@
                         }}
                     />
                 </SettingContainer>
-        {/each}
+            {/each}
         {/if}
     </li>
     <li>
@@ -67,7 +66,9 @@
                     {/if}
                 {/if}
                 {#if !keyEmpty}
-                    <button aria-label={$t('onboarding.openai.test_api_key')} on:click={() => isKeyTested = true}>{$t('onboarding.openai.test_api_key')}</button>
+                    <button aria-label={$t('onboarding.openai.test_api_key')} on:click={() => (isKeyTested = true)}
+                        >{$t('onboarding.openai.test_api_key')}</button
+                    >
                 {/if}
             </div>
         </div>
@@ -75,7 +76,6 @@
 </ol>
 {#if !keyEmpty && isKeyTested && $setupStatus[selectedProvider]}
     <div class="w-full text-center">
-        <InitButton providerName={selectedProvider} />
+        <InitButton embedProviderName={selectedProvider} />
     </div>
 {/if}
-

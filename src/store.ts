@@ -2,7 +2,7 @@ import { get, writable } from 'svelte/store';
 import type SecondBrainPlugin from './main';
 import { type PluginData } from './main';
 import { nanoid } from 'nanoid';
-import { type PapaResponseStatus } from 'papa-ts';
+import { type AssistantResponseStatus, type RegisteredEmbedProvider, type RegisteredGenProvider, type RegisteredProvider } from 'papa-ts';
 
 export type ChatMessage = {
     role: 'Assistant' | 'User';
@@ -25,11 +25,9 @@ export type ErrorState =
     | 'failed-indexing';
 export const errorState = writable<ErrorState>();
 
-export const runState = writable<PapaResponseStatus>('startup');
+export const runState = writable<AssistantResponseStatus>('startup');
 export const runContent = writable<string>('');
 
-
-// TODO should be named s2bState
 export type PapaState = 'idle' | 'loading' | 'indexing' | 'indexing-pause' | 'running' | 'error' | 'uninitialized' | 'mode-change' | 'settings-change';
 export const papaState = writable<PapaState>('uninitialized');
 export const papaIndexingProgress = writable<number>(0);
@@ -37,7 +35,10 @@ export const papaIndexingTimeLeft = writable<number>(0);
 
 export const cancelPullModel = writable<boolean>(false);
 
-// Does this work? / refactoring
+export const selEmbedProvider = writable<RegisteredEmbedProvider | undefined>(undefined);
+
+export const selGenProvider = writable<RegisteredGenProvider | undefined>(undefined);
+
 export const serializeChatHistory = (cH: ChatMessage[]) =>
     cH
         .map((chatMessage: ChatMessage) => {

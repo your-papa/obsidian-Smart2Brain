@@ -6,7 +6,6 @@
     import { t } from 'svelte-i18n';
     import DropdownComponent from '../base/Dropdown.svelte';
     import ToggleComponent from '../base/Toggle.svelte';
-    import PullOllamaModel from '../Onboarding/PullOllamaModel.svelte';
     import LoadingAnimation from '../base/LoadingAnimation.svelte';
 
     const icon = (node: HTMLElement, iconId: string) => {
@@ -69,7 +68,7 @@
                     on:click={() => $plugin.s2b.init()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'power'}
-                />
+                ></button>
             {:else if $papaState === 'loading'}
                 <LoadingAnimation />
             {:else if $papaState === 'indexing' || $papaState === 'indexing-pause'}
@@ -87,29 +86,27 @@
                             on:click={() => ($papaState = 'indexing-pause')}
                             class="h-8 py-2 pl-3 pr-2 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
                             use:icon={'pause'}
-                        />
+                        ></div>
                     {:else if $papaState === 'indexing-pause'}
                         <div
                             aria-label={$t('quick_settings.resume_indexing')}
                             on:click={() => $plugin.s2b.init()}
                             class="h-8 py-2 pl-3 pr-2 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
                             use:icon={'play'}
-                        />
+                        ></div>
                     {/if}
                     <div
                         aria-label={$t('quick_settings.cancel_indexing')}
                         on:click={() => $plugin.s2b.cancelIndexing()}
                         class="h-8 py-2 pl-2 pr-3 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
                         use:icon={'stop-circle'}
-                    />
+                    ></div>
                 </div>
             {:else if $papaState === 'error'}
                 {#if $errorState === 'ollama-gen-model-not-installed'}
                     <h3 class="text-center text-primary">{$t('quick_settings.error.install_model', { values: { model: $data.selGenModel } })}</h3>
-                    <PullOllamaModel pullModel={$data.selGenModel} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else if $errorState === 'ollama-embed-model-not-installed'}
                     <h3 class="text-center text-primary">{$t('quick_settings.error.install_model', { values: { model: $data.selEmbedModel } })}</h3>
-                    <PullOllamaModel pullModel={$data.selEmbedModel} onSuccessfulPull={() => ($papaState = 'settings-change')} />
                 {:else if $errorState === 'failed-indexing'}
                     <h3 class="text-center">{$t('notice.failed_indexing')}</h3>
                     <button
@@ -117,7 +114,7 @@
                         on:click={() => $plugin.s2b.init()}
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'refresh-cw'}
-                    />
+                    ></button>
                 {:else}
                     <h3 class="text-center text-primary">{$t('quick_settings.error.other')}</h3>
                     <button
@@ -125,7 +122,7 @@
                         on:click={() => $plugin.s2b.init()}
                         class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                         use:icon={'refresh-cw'}
-                    />
+                    ></button>
                 {/if}
             {:else if $papaState === 'mode-change'}
                 <h3 class="text-center text-primary">{$t('quick_settings.mode_changed')}{$data.selGenProvider}.</h3>
@@ -134,7 +131,7 @@
                     on:click={() => $plugin.s2b.init()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'refresh-cw'}
-                />
+                ></button>
             {:else if $papaState === 'settings-change'}
                 <h3 class="text-center text-primary">{$t('quick_settings.settings_changed')}</h3>
                 <button
@@ -142,7 +139,7 @@
                     on:click={() => $plugin.s2b.init()}
                     class="h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
                     use:icon={'refresh-cw'}
-                />
+                ></button>
             {:else}
                 <h2 class="mb-0 text-primary">{$data.selGenProvider}</h2>
                 <p class="mt-1">
@@ -159,7 +156,7 @@
                     </div>
                     <div class="flex h-8 items-center justify-between">
                         {$t('quick_settings.creativity')}
-                        <div use:icon={'help'} aria-label={$t('tooltip.creativity')} class="ml-1 mr-auto h-[18px]" />
+                        <div use:icon={'help'} aria-label={$t('tooltip.creativity')} class="ml-1 mr-auto h-[18px]"></div>
                         <div class="flex items-center">
                             <output>{temperature}%</output>
                             <input class="slider" type="range" bind:value={temperature} on:blur={setTemperature} min="0" max="100" />
@@ -168,7 +165,7 @@
                     {#if $data.isUsingRag}
                         <div class="flex h-8 items-center justify-between">
                             {$t('quick_settings.similarity_threshold')}
-                            <div use:icon={'help'} aria-label={$t('tooltip.similarity')} class="ml-1 mr-auto h-[18px]" />
+                            <div use:icon={'help'} aria-label={$t('tooltip.similarity')} class="ml-1 mr-auto h-[18px]"></div>
                             <div class="flex items-center">
                                 <output>{similarityThreshold}%</output>
                                 <input class="slider" type="range" bind:value={similarityThreshold} on:blur={setSimilarityThreshold} min="0" max="100" />
@@ -178,7 +175,7 @@
                 </div>
             {/if}
         {/if}
-        <div style="height: 1rem" />
+        <div style="height: 1rem"></div>
         <div class="absolute bottom-0 z-10 flex w-full justify-center">
             <div
                 aria-label={isOpen ? $t('quick_settings.close') : $t('quick_settings.open')}
@@ -187,7 +184,7 @@
                 }`}
                 use:icon={'chevron-down'}
                 on:click={toggleDrawer}
-            />
+            ></div>
         </div>
     </div>
 </div>

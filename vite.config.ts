@@ -1,32 +1,45 @@
+// vite.config.ts
 import { svelte, vitePreprocess } from '@sveltejs/vite-plugin-svelte';
-import builtins from 'builtin-modules';
 import { defineConfig } from 'vite';
+import { resolve } from 'path';
 import { pathToFileURL } from 'url';
-import typescript from '@rollup/plugin-typescript';
+import builtinModules from 'builtin-modules';
 
 const setOutDir = (mode: string) => {
     switch (mode) {
         case 'development':
             return './build/smart-second-brain/';
         case 'production':
-            return 'build/prod';
+            return './build/prod';
+        default: // <--- ADD THIS DEFAULT CASE
+            // You must return a string here.
+            // A common choice is to default to the development output, or a generic 'dist'
+            console.warn(`Unexpected mode: "${mode}". Defaulting to development output directory.`);
+            return './build/smart-second-brain/'; // Or throw an error, or './dist'
     }
 };
 
 export default defineConfig(({ mode }) => {
+    const isDevelopment = mode === 'development';
+
     return {
-        plugins: [svelte({ preprocess: vitePreprocess() })],
+        plugins: [
+            svelte({
+                preprocess: vitePreprocess(),
+            }),
+        ],
         build: {
             lib: {
-                entry: 'src/main',
+                entry: resolve(__dirname, 'src/main.ts'),
                 formats: ['cjs'],
+                fileName: () => 'main.js',
             },
             rollupOptions: {
-                plugins: [typescript({ tsconfig: './tsconfig.json' })],
+                plugins: [],
                 output: {
                     entryFileNames: 'main.js',
                     assetFileNames: 'styles.css',
-                    sourcemapBaseUrl: pathToFileURL(`${__dirname}/build/smart-second-brain/`).toString(),
+                    sourcemapBaseUrl: pathToFileURL(resolve(process.cwd(), setOutDir(mode))).toString(),
                 },
                 external: [
                     'obsidian',
@@ -42,15 +55,15 @@ export default defineConfig(({ mode }) => {
                     '@lezer/common',
                     '@lezer/highlight',
                     '@lezer/lr',
-                    ...builtins,
+                    ...builtinModules,
                 ],
             },
-            outDir: setOutDir(mode),
+            outDir: setOutDir(mode), // This will now always be a string
             emptyOutDir: false,
-            sourcemap: true,
+            sourcemap: isDevelopment,
         },
         css: {
-            devSourcemap: true,
+            devSourcemap: isDevelopment,
         },
     };
 });
