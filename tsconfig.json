@@ -3,17 +3,22 @@
     "compilerOptions": {
         "target": "ESNext",
         "useDefineForClassFields": true,
-        "module": "ES6",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
         "resolveJsonModule": true,
         "allowJs": true,
         "isolatedModules": true,
         "noEmitOnError": true,
+        "esModuleInterop": true,
+        "forceConsistentCasingInFileNames": true,
+        "skipLibCheck": true,
+        "strict": true,
+        "types": ["svelte", "vite/client"],
         "plugins": [
             {
                 "name": "typescript-svelte-plugin",
-                // the following options can be set additionally; they are optional; their default values are listed here
-                "enabled": true, // enables this plugin
-                "assumeIsSvelteProject": true // if true, skip detection and always assume it's a Svelte project
+                "enabled": true,
+                "assumeIsSvelteProject": true
             }
         ]
     },

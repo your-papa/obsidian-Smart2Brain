@@ -1,15 +1,15 @@
 <script lang="ts">
-    import { providerFactory, type ProviderName } from 'papa-ts';
-    import { plugin, data, providers, embedProvider, selEmbedProvider } from '../../store';
+    import { type RegisteredEmbedProvider, type RegisteredProvider } from 'papa-ts';
+    import { plugin, data, selEmbedProvider } from '../../store';
     import { ConfirmModal } from '../Settings/ConfirmModal';
     import { t } from 'svelte-i18n';
     import { get } from 'svelte/store';
 
-    export let providerName: ProviderName;
+    export let embedProviderName: RegisteredEmbedProvider;
 
     function completeOnboarding() {
         $data.isOnboarded = true;
-        $selEmbedProvider = providerName
+        $selEmbedProvider = embedProviderName;
         $plugin.saveSettings();
         $plugin.activateView();
         $plugin.s2b.init();
@@ -20,7 +20,7 @@
     aria-label={$t('onboarding.init_label')}
     class="mod-cta"
     on:click={() => {
-        $providers[providerName].isLocal
+        true
             ? completeOnboarding()
             : new ConfirmModal(
                   get(plugin).app,
