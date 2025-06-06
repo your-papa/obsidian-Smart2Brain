@@ -4,7 +4,11 @@
     import { data } from '../../store';
     import { t } from 'svelte-i18n';
 
-    export let modal: ConfirmModal;
+    interface Props {
+        modal: ConfirmModal;
+    }
+
+    let { modal }: Props = $props();
 </script>
 
 <div class="modal-title">{modal.title}</div>
@@ -12,7 +16,7 @@
 <div class="modal-button-container">
     {#if modal.hideModalOption !== ''}
         <form class="mr-auto flex items-center self-center">
-            <input type="checkbox" name="dontShowAgain" on:click={() => data.warningOff(modal.hideModalOption)} />
+            <input type="checkbox" name="dontShowAgain" onclick={() => data.warningOff(modal.hideModalOption)} />
             <label for="dontShowAgain">{$t('modal.dont_show')}</label>
         </form>
     {/if}

@@ -10,11 +10,11 @@
 
     const osType = os.type();
     const modes = [$t('incognito_toggle.enable'), $t('incognito_toggle.disable')];
-    let mode = $t('incognito_toggle.enable');
+    let mode = $state($t('incognito_toggle.enable'));
     const options = ['Ollama App', 'Ollama Daemon'];
-    let selected: 'Ollama App' | 'Ollama Daemon' = osType === 'Linux' ? 'Ollama Daemon' : 'Ollama App';
+    let selected: 'Ollama App' | 'Ollama Daemon' = $state(osType === 'Linux' ? 'Ollama Daemon' : 'Ollama App');
 
-    let onboardingWindow: HTMLDivElement;
+    let onboardingWindow: HTMLDivElement = $state();
     function scrollToBottom() {
         onboardingWindow.scrollTop = onboardingWindow.scrollHeight;
     }

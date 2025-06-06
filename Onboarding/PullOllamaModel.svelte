@@ -8,16 +8,25 @@
     import DotAnimation from '../base/DotAnimation.svelte';
     import { data } from '../../store';
 
-    export let onSuccessfulPull: () => void = () => {};
-    export let text = '';
-    export let desc = '';
-    export let pullModel: string = '';
+    interface Props {
+        onSuccessfulPull?: () => void;
+        text?: string;
+        desc?: string;
+        pullModel?: string;
+    }
 
-    let isPullingModel = false;
-    let total: number = 0;
-    let progress: number = 0;
-    let status: string = '';
-    let isPullingError = false;
+    let {
+        onSuccessfulPull = () => {},
+        text = '',
+        desc = '',
+        pullModel = $bindable('')
+    }: Props = $props();
+
+    let isPullingModel = $state(false);
+    let total: number = $state(0);
+    let progress: number = $state(0);
+    let status: string = $state('');
+    let isPullingError = $state(false);
 
     async function pullOllamaModelStream() {
         isPullingModel = true;
@@ -58,7 +67,7 @@
         </div>
         <div class="flex flex-row justify-end gap-2">
             <InputComponent styles="w-4/6" value={pullModel} changeFunc={(v) => (pullModel = v)} />
-            <button on:click={() => pullOllamaModelStream()}>{$t('general.install')}</button>
+            <button onclick={() => pullOllamaModelStream()}>{$t('general.install')}</button>
         </div>
     </div>
 {:else}
@@ -76,11 +85,11 @@
         <button
             use:icon={'x'}
             aria-label={$t('pullModel.cancel')}
-            on:click={() => {
+            onclick={() => {
                 $cancelPullModel = true;
             }}
             class="mb-1 h-8 rounded-l-md px-4 py-2 transition duration-300 ease-in-out hover:bg-[--text-accent-hover]"
-        />
+></button>
     </div>
 {/if}
 {#if isPullingError}

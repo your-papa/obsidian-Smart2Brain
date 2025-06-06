@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { run } from 'svelte/legacy';
+
     import TextComponent from '../base/Text.svelte';
     import FFExcludeComponent from './FFExclude.svelte';
     import { plugin, data, papaState } from '../../store';
@@ -13,14 +15,16 @@
     import ChatModel from './ChatModel.svelte';
     import ProviderSetup from './ProviderSetup.svelte';
 
-    let isFFOverflowingY: boolean = false;
-    let isFFExpanded: boolean = false;
-    let excludeFFComponent: HTMLDivElement;
+    let isFFOverflowingY: boolean = $state(false);
+    let isFFExpanded: boolean = $state(false);
+    let excludeFFComponent: HTMLDivElement = $state();
 
-    $: if (excludeFFComponent) {
-        let items = excludeFFComponent.children;
-        isFFOverflowingY = items[items.length - 1].getBoundingClientRect().bottom > excludeFFComponent.getBoundingClientRect().bottom;
-    }
+    run(() => {
+        if (excludeFFComponent) {
+            let items = excludeFFComponent.children;
+            isFFOverflowingY = items[items.length - 1].getBoundingClientRect().bottom > excludeFFComponent.getBoundingClientRect().bottom;
+        }
+    });
     function toggleExpand() {
         isFFExpanded = !isFFExpanded;
     }
@@ -64,8 +68,8 @@
 </SettingContainer>
 <!-- Exclude Folders -->
 <SettingContainer name={$t('settings.excludeff')} desc={$t('settings.excludeff_desc')}><FFExcludeComponent /></SettingContainer>
-<!-- svelte-ignore a11y-click-events-have-key-events -->
-<!-- svelte-ignore a11y-no-static-element-interactions -->
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 {#if $data.excludeFF.length !== 0}
     <div class="mb-3 flex justify-between">
         <div bind:this={excludeFFComponent} class="{isFFExpanded ? '' : 'overflow-hidden'} flex flex-wrap gap-1">
@@ -77,16 +81,16 @@
                             aria-label={$t('settings.excludeff_delete')}
                             class="setting-hotkey-icon setting-delete-hotkey w-4"
                             use:icon={'x'}
-                            on:click={() => deleteExcludeFF(ff)}
-                        />
+                            onclick={() => deleteExcludeFF(ff)}
+></span>
                     </span>
                 </div>
             {/each}
         </div>
         {#if isFFExpanded}
-            <span class="clickable-icon h-6 align-baseline" use:icon={'chevron-up'} on:click={toggleExpand} />
+            <span class="clickable-icon h-6 align-baseline" use:icon={'chevron-up'} onclick={toggleExpand}></span>
         {:else if isFFOverflowingY}
-            <span class="clickable-icon h-6" use:icon={'chevron-down'} on:click={toggleExpand} />
+            <span class="clickable-icon h-6" use:icon={'chevron-down'} onclick={toggleExpand}></span>
         {/if}
     </div>
 {/if}

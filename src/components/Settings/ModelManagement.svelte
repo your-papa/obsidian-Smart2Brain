@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { run } from 'svelte/legacy';
+
     import { onMount } from 'svelte';
     import SettingContainer from './SettingContainer.svelte';
     import { t } from 'svelte-i18n';
@@ -9,15 +11,24 @@
     import TextComponent from '../base/Text.svelte';
     import Button from '../base/Button.svelte';
 
-    export let mode: string;
-    export let provider: BaseProvider<Settings>;
-    export let providerName: ProviderName;
-    export let modal: Modal;
+    interface Props {
+        mode: string;
+        provider: BaseProvider<Settings>;
+        providerName: ProviderName;
+        modal: Modal;
+    }
 
-    let models: string[] = [];
-    let model: string;
-    let setupedModels = {};
-    let currentSettings = {};
+    let {
+        mode,
+        provider,
+        providerName,
+        modal
+    }: Props = $props();
+
+    let models: string[] = $state([]);
+    let model: string = $state();
+    let setupedModels = $state({});
+    let currentSettings = $state({});
     
     const SIMILARITYTHERSHOLD = 0.5;
     const TEMPERATURE = 0;
@@ -32,13 +43,15 @@
         contextWindow: CONTEXTWINDOW,
     }
 
-    let getSettings;
+    let getSettings = $state();
     let settings;
 
         // When model or mode changes, this runs automatically
-        $: if (model !== undefined) {
-        currentSettings = setupedModels[model] || (mode === 'embed' ? embedSettings : chatSettings);
-    }
+        run(() => {
+        if (model !== undefined) {
+            currentSettings = setupedModels[model] || (mode === 'embed' ? embedSettings : chatSettings);
+        }
+    });
 
     async function deleteModel() {
         if (mode === 'embed') {
@@ -71,11 +84,10 @@
             changeFunc={deleteModel}
         />
         {/if}
-        <select bind:value={model} on:change={(event) => {
+        <select bind:value={model} onchange={(event) => {
             model = event.target.value;
             getSettings();
-        }
-        }>
+        }}>
             <optgroup label="Setup">
                 {#each models.filter((model) => model in setupedModels) as option}
                     <option value={option}>{option}</option>

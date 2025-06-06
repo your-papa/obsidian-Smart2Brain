@@ -9,13 +9,13 @@
     import Button from '../base/Button.svelte';
     import { ModelManagementModal } from './ModelManagementModal';
 
-    let selectedProvider: RegisteredProvider | undefined = undefined;
+    let selectedProvider: RegisteredProvider | undefined = $state(undefined);
 
     onMount(() => {
         selectedProvider = $selEmbedProvider;
     });
 
-    $: provider = $providers[selectedProvider];
+    let provider = $derived($providers[selectedProvider]);
 </script>
 
 <summary class="setting-item-heading py-3">{$t('settings.provider.title')}</summary>

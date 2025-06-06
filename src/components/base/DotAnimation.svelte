@@ -1,5 +1,5 @@
 <script lang="ts">
-    let index = 0;
+    let index = $state(0);
     setInterval(() => {
         index = (index + 1) % 4;
     }, 300);

@@ -9,11 +9,11 @@
     import { icon } from '../../controller/Messages';
     import Dropdown from '../base/Dropdown.svelte';
 
-    let selected = '';
+    let selected = $state('');
 
-    let genModel: string = $genProvider.getSelectedModel();
+    let genModel: string = $state($genProvider.getSelectedModel());
 
-    let models: Array<string> = [];
+    let models: Array<string> = $state([]);
 
     onMount(async () => {
         selected = $selGenProvider;
@@ -57,7 +57,7 @@
 </SettingContainer>
 
 <SettingContainer isDisabled={!$setupStatus[$selGenProvider]} name={$t('settings.gen_model.model')} desc={$t('settings.gen_model.model.desc')}>
-    <button class="clickable-icon" use:icon={'refresh-ccw'} on:click={async () => (models = await $genProvider.getModels())} />
+    <button class="clickable-icon" use:icon={'refresh-ccw'} onclick={async () => (models = await $genProvider.getModels())}></button>
     <Dropdown
         selected={genModel}
         options={models.map((model) => {

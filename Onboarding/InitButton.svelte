@@ -5,7 +5,11 @@
     import { t } from 'svelte-i18n';
     import { get } from 'svelte/store';
 
-    export let embedProviderName: RegisteredEmbedProvider;
+    interface Props {
+        embedProviderName: RegisteredEmbedProvider;
+    }
+
+    let { embedProviderName }: Props = $props();
 
     function completeOnboarding() {
         $data.isOnboarded = true;
@@ -19,7 +23,7 @@
 <button
     aria-label={$t('onboarding.init_label')}
     class="mod-cta"
-    on:click={() => {
+    onclick={() => {
         true
             ? completeOnboarding()
             : new ConfirmModal(

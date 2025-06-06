@@ -1,6 +1,7 @@
 import { App, Modal } from 'obsidian';
 import ModelManagement from './ModelManagement.svelte';
 import { BaseProvider, type ProviderName, type Settings } from 'papa-ts';
+import { mount } from "svelte";
 
 export class ModelManagementModal extends Modal {
     private component: ModelManagement;
@@ -16,15 +17,15 @@ export class ModelManagementModal extends Modal {
     }
 
     onOpen() {
-        this.component = new ModelManagement({
-            target: this.contentEl,
-            props: {
-                provider: this.provider,
-                mode: this.mode,
-                providerName: this.providerName,
-                modal: this,
-            },
-        });
+        this.component = mount(ModelManagement, {
+                    target: this.contentEl,
+                    props: {
+                        provider: this.provider,
+                        mode: this.mode,
+                        providerName: this.providerName,
+                        modal: this,
+                    },
+                });
     }
 
     onClose() {

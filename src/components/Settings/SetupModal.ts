@@ -1,5 +1,6 @@
 import { App, Modal } from 'obsidian';
 import ProviderSetupComponent from './ProviderSetup.svelte';
+import { mount } from "svelte";
 
 export class SetupModal extends Modal {
     component: ProviderSetupComponent;
@@ -14,13 +15,13 @@ export class SetupModal extends Modal {
     }
 
     onOpen() {
-        this.component = new ProviderSetupComponent({
-            target: this.contentEl,
-            props: {
-                mode: this.mode,
-                modal: this,
-            },
-        });
+        this.component = mount(ProviderSetupComponent, {
+                    target: this.contentEl,
+                    props: {
+                        mode: this.mode,
+                        modal: this,
+                    },
+                });
     }
 
     onClose() {
