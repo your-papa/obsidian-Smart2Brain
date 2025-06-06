@@ -4,6 +4,7 @@ import ChatViewComponent from '../components/Chat/Chat.svelte';
 import { nanoid } from 'nanoid';
 import { type ChatMessage, chatHistory, data } from '../store';
 import { get } from 'svelte/store';
+import { mount } from "svelte";
 
 export const VIEW_TYPE_CHAT = 'chat-view';
 
@@ -61,9 +62,9 @@ export class ChatView extends TextFileView implements HoverParent {
 
     async onLoadFile(file: TFile) {
         await super.onLoadFile(file);
-        this.component = new ChatViewComponent({
-            target: this.contentEl,
-        });
+        this.component = mount(ChatViewComponent, {
+                    target: this.contentEl,
+                });
     }
 
     async onUnloadFile(file: TFile) {

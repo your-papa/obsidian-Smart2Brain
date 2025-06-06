@@ -6,9 +6,9 @@
     import { data } from '../../store';
     import DotAnimation from '../base/DotAnimation.svelte';
 
-    let isOllama: boolean;
-    let pulledModel = false;
-    let installedOllamaModels: string[] = [];
+    let isOllama: boolean = $state();
+    let pulledModel = $state(false);
+    let installedOllamaModels: string[] = $state([]);
 
     onMount(async () => {
         isOllama = await $data.ollamaProvider.isSetup();
@@ -36,7 +36,7 @@
         />
         {#if pulledModel}
             <SettingContainer name={$t('settings.ollama.gen_model')} desc={$t('settings.ollama.model_descriptions.' + $data.genModel, { default: '' })}>
-                <select class="dropdown" bind:value={$data.genModel} on:change={() => $data.ollamaProvider.setGenModel($data.genModel)}>
+                <select class="dropdown" bind:value={$data.genModel} onchange={() => $data.ollamaProvider.setGenModel($data.genModel)}>
                     <optgroup label={$t('settings.ollama.recommended')}>
                         <option value={$data.ollamaProvider.rcmdGenModel}>{$data.ollamaProvider.rcmdGenModel}</option>
                     </optgroup>
@@ -49,7 +49,7 @@
             </SettingContainer>
             <!-- Ollama Embed Model -->
             <SettingContainer name={$t('settings.ollama.embed_model')} desc={$t('settings.ollama.model_descriptions.' + $data.genModel, { default: '' })}>
-                <select class="dropdown" bind:value={$data.embedModel} on:change={() => $data.ollamaProvider.setEmbedModel($data.embedModel)}>
+                <select class="dropdown" bind:value={$data.embedModel} onchange={() => $data.ollamaProvider.setEmbedModel($data.embedModel)}>
                     <optgroup label={$t('settings.ollama.recommended')}>
                         <option value={$data.ollamaProvider.rcmdEmbedModel}>{$data.ollamaProvider.rcmdEmbedModel}</option>
                     </optgroup>

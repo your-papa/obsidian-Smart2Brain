@@ -1,5 +1,6 @@
 import { Modal, App } from 'obsidian';
 import RemoveComponent from './RemoveModal.svelte';
+import { mount } from "svelte";
 
 export class RemoveModal extends Modal {
     component: RemoveComponent;
@@ -8,12 +9,12 @@ export class RemoveModal extends Modal {
     }
 
     onOpen() {
-        new RemoveComponent({
-            target: this.contentEl,
-            props: {
-                modal: this,
-            },
-        });
+        mount(RemoveComponent, {
+                    target: this.contentEl,
+                    props: {
+                        modal: this,
+                    },
+                });
     }
 
     onClose() {

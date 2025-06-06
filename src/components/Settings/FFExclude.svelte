@@ -5,9 +5,9 @@
     import ButtonComponent from '../base/Button.svelte';
     import { t } from 'svelte-i18n';
 
-    let buttonComp: ButtonComponent;
+    let buttonComp: ButtonComponent = $state();
 
-    let fileSelectModal: FileSelectModal;
+    let fileSelectModal: FileSelectModal = $state();
 
     onMount(() => {
         fileSelectModal = new FileSelectModal($plugin.app);

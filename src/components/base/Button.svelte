@@ -1,13 +1,22 @@
 <script lang="ts">
     import { icon } from '../../controller/Messages';
-    export let changeFunc: () => void;
-    export let iconId: string = '';
-    export let buttonText: string = '';
-    export let styles: string = '';
+    interface Props {
+        changeFunc: () => void;
+        iconId?: string;
+        buttonText?: string;
+        styles?: string;
+    }
+
+    let {
+        changeFunc,
+        iconId = '',
+        buttonText = '',
+        styles = ''
+    }: Props = $props();
 </script>
 
 {#if iconId !== ''}
-    <button class="clickable-icon {styles}" use:icon={iconId} on:click={changeFunc} />
+    <button class="clickable-icon {styles}" use:icon={iconId} onclick={changeFunc}></button>
 {:else}
-    <button class={styles} on:click={changeFunc}>{buttonText}</button>
+    <button class={styles} onclick={changeFunc}>{buttonText}</button>
 {/if}

@@ -3,6 +3,7 @@ import ConfirmComponent from './ConfirmModal.svelte';
 import { get } from 'svelte/store';
 import { data } from '../../store';
 import type { PluginDataKey } from '../../main';
+import { mount } from "svelte";
 
 export class ConfirmModal extends Modal {
     result: string;
@@ -30,12 +31,12 @@ export class ConfirmModal extends Modal {
 
     onOpen() {
         this.modalEl.parentElement.addClass('mod-confirmation');
-        this.component = new ConfirmComponent({
-            target: this.contentEl,
-            props: {
-                modal: this,
-            },
-        });
+        this.component = mount(ConfirmComponent, {
+                    target: this.contentEl,
+                    props: {
+                        modal: this,
+                    },
+                });
     }
 
     onClose() {

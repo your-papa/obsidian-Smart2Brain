@@ -1,6 +1,7 @@
 import { App, PluginSettingTab } from 'obsidian';
 import SecondBrainPlugin from '../main';
 import SettingsComponent from '../components/Settings/Settings.svelte';
+import { mount } from "svelte";
 
 export default class SettingsTab extends PluginSettingTab {
     component: SettingsComponent;
@@ -16,8 +17,8 @@ export default class SettingsTab extends PluginSettingTab {
     display(): void {
         this.containerEl.empty();
 
-        this.component = new SettingsComponent({
-            target: this.containerEl,
-        });
+        this.component = mount(SettingsComponent, {
+                    target: this.containerEl,
+                });
     }
 }

@@ -1,6 +1,10 @@
 <script lang="ts">
     import { isChatInSidebar } from '../../store';
-    export let progress = 0; // Progress value from 0 to 100
+    interface Props {
+        progress?: number; // Progress value from 0 to 100
+    }
+
+    let { progress = 0 }: Props = $props();
 </script>
 
 <progress
@@ -8,7 +12,7 @@
     class="custom-progress border-1 my-2 h-2 w-full rounded-lg border border-solid border-[--background-modifier-border]"
     value={progress}
     max="100"
-/>
+></progress>
 
 <style>
     .custom-progress {

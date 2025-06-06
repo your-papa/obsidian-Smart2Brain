@@ -10,10 +10,10 @@
     import Dropdown from '../base/Dropdown.svelte';
     import { EmbedProvider } from 'papa-ts';
 
-    let selected = '';
-    let embedModel: string = $embedProvider.getSelectedModel();
+    let selected = $state('');
+    let embedModel: string = $state($embedProvider.getSelectedModel());
 
-    let models: Array<string> = [];
+    let models: Array<string> = $state([]);
 
     onMount(async () => {
         selected = $selEmbedProvider;
@@ -57,7 +57,7 @@
 </SettingContainer>
 
 <SettingContainer isDisabled={!$setupStatus[$selEmbedProvider]} name={$t('settings.embed_model.model')} desc={$t('settings.gen_model.model.desc')}>
-    <button class="clickable-icon" use:icon={'refresh-ccw'} on:click={async () => (models = await $embedProvider.getModels())} />
+    <button class="clickable-icon" use:icon={'refresh-ccw'} onclick={async () => (models = await $embedProvider.getModels())}></button>
     <Dropdown
         selected={embedModel}
         options={models.map((model) => {
