@@ -1,5 +1,5 @@
 <script>
-    import { data } from '../../store';
+import { data } from "../../store";
 </script>
 
 <svg

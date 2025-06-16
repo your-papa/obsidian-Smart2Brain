@@ -1,77 +1,82 @@
-<script lang="ts">
-    import { run, preventDefault } from 'svelte/legacy';
+<!-- <script lang="ts">
+import { run, preventDefault } from "svelte/legacy";
 
-    import InputComponent from './Input.svelte';
-    import QuickSettingsDrawer from './QuickSettingsDrawer.svelte';
-    import { Notice } from 'obsidian';
-    import DotAnimation from '../base/DotAnimation.svelte';
-    import MessageContainer from './MessageContainer.svelte';
-    import { t } from 'svelte-i18n';
-    import { papaState, chatHistory, chatInput, isEditing, isEditingAssistantMessage, type ChatMessage, runContent, runState, data } from '../../store';
-    import {
-        onClick,
-        onMouseOver,
-        renderMarkdown,
-        toClipboard,
-        icon,
-        redoGeneration,
-        editMessage,
-        cancelEditing,
-        editInitialAssistantMessage,
-        cancelEditingInitialAssistantMessage,
-        resetInitialAssistantMessage,
-    } from '../../controller/Messages';
+import InputComponent from "./Input.svelte";
+import QuickSettingsDrawer from "./QuickSettingsDrawer.svelte";
+import { Notice } from "obsidian";
+import DotAnimation from "../base/DotAnimation.svelte";
+import MessageContainer from "./MessageContainer.svelte";
+import { t } from "svelte-i18n";
+import {
+	papaState,
+	chatHistory,
+	isEditing,
+	isEditingAssistantMessage,
+	type ChatMessage,
+	runContent,
+	runState,
+} from "../../store";
+import {
+	onClick,
+	onMouseOver,
+	renderMarkdown,
+	toClipboard,
+	icon,
+	redoGeneration,
+	editMessage,
+	cancelEditing,
+	editInitialAssistantMessage,
+	cancelEditingInitialAssistantMessage,
+	resetInitialAssistantMessage,
+} from "../../controller/Messages";
 
-    let textarea: HTMLTextAreaElement = $state();
+let textarea: HTMLTextAreaElement = $state();
 
-    let isAutoScrolling = $state(true);
-    let chatWindow: HTMLDivElement = $state();
-    run(() => {
-        if (chatWindow && $papaState === 'running' && isAutoScrolling && $runContent) {
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-        }
-    });
-    let contentNode: HTMLElement = $state();
+let isAutoScrolling = $state(true);
+let chatWindow: HTMLDivElement = $state();
+run(() => {
+	if (chatWindow && $papaState === "running" && isAutoScrolling && $runContent) {
+		chatWindow.scrollTop = chatWindow.scrollHeight;
+	}
+});
+let contentNode: HTMLElement = $state();
 
-    run(() => {
-        if (contentNode && ($runState === 'generating' || $runState === 'stopped') && $runContent) {
-            renderMarkdown(contentNode, $runContent);
-        }
-    });
+run(() => {
+	if (contentNode && ($runState === "generating" || $runState === "stopped") && $runContent) {
+		renderMarkdown(contentNode, $runContent);
+	}
+});
 
-    run(() => {
-        if ($runState === 'retrieving' && $runContent == '0') {
-            new Notice($t('notice.no_notes_retrieved'));
-        }
-    });
+run(() => {
+	if ($runState === "retrieving" && $runContent == "0") {
+		new Notice($t("notice.no_notes_retrieved"));
+	}
+});
 
-    let editElem: HTMLSpanElement = $state();
-    let initialAssistantMessageSpan: HTMLSpanElement = $state();
-    let editMessageId: string = $state();
+let editElem: HTMLSpanElement = $state();
+let initialAssistantMessageSpan: HTMLSpanElement = $state();
+let editMessageId: string = $state();
 
-    run(() => {
-        if (editElem && $isEditing) {
-            editElem.innerText = '';
-            renderMarkdown(editElem, $chatInput);
-        }
-    });
+run(() => {
+	if (editElem && $isEditing) {
+		editElem.innerText = "";
+		renderMarkdown(editElem, $chatInput);
+	}
+});
 
-    run(() => {
-        if (initialAssistantMessageSpan && $isEditingAssistantMessage) {
-            initialAssistantMessageSpan.innerText = '';
-            renderMarkdown(initialAssistantMessageSpan, $chatInput);
-        }
-    });
+run(() => {
+	if (initialAssistantMessageSpan && $isEditingAssistantMessage) {
+		initialAssistantMessageSpan.innerText = "";
+		renderMarkdown(initialAssistantMessageSpan, $chatInput);
+	}
+});
 
-    function wrapperEditMessage(message: ChatMessage, textarea: HTMLTextAreaElement) {
-        editMessageId = editMessage(message, textarea);
-    }
-    const iconStyle = 'text-[--text-normal] hover:text-[--text-accent-hover]';
+function wrapperEditMessage(message: ChatMessage, textarea: HTMLTextAreaElement) {
+	editMessageId = editMessage(message, textarea);
+}
+const iconStyle = "text-[--text-normal] hover:text-[--text-accent-hover]";
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<!-- svelte-ignore a11y_mouse_events_have_key_events -->
 <div class="--background-modifier-border flex h-full flex-col gap-1">
     <QuickSettingsDrawer />
     <div
@@ -161,4 +166,4 @@
     </div>
     <InputComponent bind:textarea />
     <div class="mb-3"></div>
-</div>
+</div> -->

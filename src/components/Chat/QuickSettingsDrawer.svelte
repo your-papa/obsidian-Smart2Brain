@@ -1,67 +1,75 @@
-<script lang="ts">
-    import { run } from 'svelte/legacy';
+<!-- <script lang="ts">
+import { run } from "svelte/legacy";
+import {
+	plugin,
+	chatHistory,
+	papaState,
+	papaIndexingProgress,
+	errorState,
+	papaIndexingTimeLeft,
+	isChatInSidebar,
+} from "../../store";
+import { Prompts, type Language, Languages } from "papa-ts";
+import ProgressBar from "../base/ProgressBar.svelte";
+import { t } from "svelte-i18n";
+import DropdownComponent from "../base/Dropdown.svelte";
+import ToggleComponent from "../base/Toggle.svelte";
+import LoadingAnimation from "../base/LoadingAnimation.svelte";
+import { icon } from "../../utils/icons";
+import { getData } from "../../lib/data.svelte";
 
-    import { setIcon } from 'obsidian';
-    import { plugin, data, chatHistory, papaState, papaIndexingProgress, errorState, papaIndexingTimeLeft, isChatInSidebar } from '../../store';
-    import { Prompts, type Language, Languages } from 'papa-ts';
-    import ProgressBar from '../base/ProgressBar.svelte';
-    import { t } from 'svelte-i18n';
-    import DropdownComponent from '../base/Dropdown.svelte';
-    import ToggleComponent from '../base/Toggle.svelte';
-    import LoadingAnimation from '../base/LoadingAnimation.svelte';
+const { isQuickSettingsOpen } = plugin.pluginData;
 
-    const icon = (node: HTMLElement, iconId: string) => {
-        setIcon(node, iconId);
-    };
+function toggleDrawer() {
+	isOpen = !isOpen;
+	$plugin.saveSettings({ isQuickSettingsOpen: isOpen });
+}
 
-    let isOpen = $state($data.isQuickSettingsOpen);
+let similarityThreshold = $state(Math.round($data.embedModelConfigs[$data.selEmbedModel].similarityThreshold * 100));
+run(() => {
+	similarityThreshold = Math.min(Math.max(similarityThreshold, 0), 100);
+});
+function setSimilarityThreshold() {
+	$data.embedModelConfigs[$data.selEmbedModel].similarityThreshold = similarityThreshold / 100;
+	$plugin.s2b.configure({ embedModelConfig: { similarityThreshold: similarityThreshold / 100 } });
+	$plugin.saveSettings();
+}
 
-    function toggleDrawer() {
-        isOpen = !isOpen;
-        $plugin.saveSettings({ isQuickSettingsOpen: isOpen });
-    }
+let temperature = $state(Math.round($data.genModelConfigs[$data.selGenModel].temperature * 100));
+run(() => {
+	temperature = Math.min(Math.max(temperature, 0), 100);
+});
+function setTemperature() {
+	$data.genModelConfigs[$data.selGenModel].temperature = temperature / 100;
+	$plugin.s2b.configure({ genModelConfig: { temperature: temperature / 100 } });
+	$plugin.saveSettings();
+}
 
-    let similarityThreshold = $state(Math.round($data.embedModelConfigs[$data.selEmbedModel].similarityThreshold * 100));
-    run(() => {
-        similarityThreshold = Math.min(Math.max(similarityThreshold, 0), 100);
-    });
-    function setSimilarityThreshold() {
-        $data.embedModelConfigs[$data.selEmbedModel].similarityThreshold = similarityThreshold / 100;
-        $plugin.s2b.configure({ embedModelConfig: { similarityThreshold: similarityThreshold / 100 } });
-        $plugin.saveSettings();
-    }
+const languages: { display: Language; value: Language }[] = Object.values(Languages).map((language: Language) => ({
+	display: language,
+	value: language,
+}));
 
-    let temperature = $state(Math.round($data.genModelConfigs[$data.selGenModel].temperature * 100));
-    run(() => {
-        temperature = Math.min(Math.max(temperature, 0), 100);
-    });
-    function setTemperature() {
-        $data.genModelConfigs[$data.selGenModel].temperature = temperature / 100;
-        $plugin.s2b.configure({ genModelConfig: { temperature: temperature / 100 } });
-        $plugin.saveSettings();
-    }
+const setAssistantLanguage = (selected: Language) => {
+	if ($chatHistory.length === 1) chatHistory.reset();
+	$plugin.saveSettings({
+		assistantLanguage: selected,
+		initialAssistantMessageContent: Prompts[selected].initialAssistantMessage,
+	});
+};
+function setChatViewDensity() {
+	$plugin.saveSettings({ isChatComfy: !$data.isChatComfy });
+}
 
-    const languages: { display: Language; value: Language }[] = Object.values(Languages).map((language: Language) => ({ display: language, value: language }));
-
-    const setAssistantLanguage = (selected: Language) => {
-        if ($chatHistory.length === 1) chatHistory.reset();
-        $plugin.saveSettings({ assistantLanguage: selected, initialAssistantMessageContent: Prompts[selected].initialAssistantMessage });
-    };
-    function setChatViewDensity() {
-        $plugin.saveSettings({ isChatComfy: !$data.isChatComfy });
-    }
-
-    function formatTime(secondsInput: number) {
-        const minutes = Math.floor(secondsInput / 60); // Calculate minutes
-        const seconds = secondsInput % 60; // Remaining seconds
-        return minutes > 0
-            ? $t('quick_settings.time_left_minutes', { values: { minutes, seconds } })
-            : $t('quick_settings.time_left_seconds', { values: { seconds } });
-    }
+function formatTime(secondsInput: number) {
+	const minutes = Math.floor(secondsInput / 60); // Calculate minutes
+	const seconds = secondsInput % 60; // Remaining seconds
+	return minutes > 0
+		? $t("quick_settings.time_left_minutes", { values: { minutes, seconds } })
+		: $t("quick_settings.time_left_seconds", { values: { seconds } });
+}
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
     class={`relative ${isOpen ? 'h-[33%] min-h-[33%]' : 'h-[--icon-m] min-h-[--icon-m]'} flex justify-center overflow-hidden transition-all duration-300 ease-in-out`}
 >
@@ -193,4 +201,4 @@
             ></div>
         </div>
     </div>
-</div>
+</div> -->

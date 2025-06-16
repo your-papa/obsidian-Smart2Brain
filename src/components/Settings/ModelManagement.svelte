@@ -1,78 +1,73 @@
 <script lang="ts">
-    import { run } from 'svelte/legacy';
+import { run } from "svelte/legacy";
 
-    import { onMount } from 'svelte';
-    import SettingContainer from './SettingContainer.svelte';
-    import { t } from 'svelte-i18n';
-    import type { BaseProvider, ProviderName, Settings } from 'papa-ts';
-    import { plugin } from '../../store';
-    import ButtonComponent from '../base/Button.svelte';
-    import type { Modal } from 'obsidian';
-    import TextComponent from '../base/Text.svelte';
-    import Button from '../base/Button.svelte';
+import { onMount } from "svelte";
+import SettingContainer from "./SettingContainer.svelte";
+import { t } from "svelte-i18n";
+import type { BaseProvider, ProviderName, Settings } from "papa-ts";
+import { plugin } from "../../store";
+import ButtonComponent from "../base/Button.svelte";
+import type { Modal } from "obsidian";
+import TextComponent from "../base/Text.svelte";
+import Button from "../base/Button.svelte";
 
-    interface Props {
-        mode: string;
-        provider: BaseProvider<Settings>;
-        providerName: ProviderName;
-        modal: Modal;
-    }
+interface Props {
+	mode: string;
+	provider: BaseProvider<Settings>;
+	providerName: ProviderName;
+	modal: Modal;
+}
 
-    let {
-        mode,
-        provider,
-        providerName,
-        modal
-    }: Props = $props();
+let { mode, provider, providerName, modal }: Props = $props();
 
-    let models: string[] = $state([]);
-    let model: string = $state();
-    let setupedModels = $state({});
-    let currentSettings = $state({});
-    
-    const SIMILARITYTHERSHOLD = 0.5;
-    const TEMPERATURE = 0;
-    const CONTEXTWINDOW = 1028;
+let models: string[] = $state([]);
+let model: string = $state();
+let setupedModels = $state({});
+let currentSettings = $state({});
 
-    let embedSettings = {
-        similarityThreshold: SIMILARITYTHERSHOLD,
-    };
+const SIMILARITYTHERSHOLD = 0.5;
+const TEMPERATURE = 0;
+const CONTEXTWINDOW = 1028;
 
-    let chatSettings = {
-        temperature: TEMPERATURE,
-        contextWindow: CONTEXTWINDOW,
-    }
+let embedSettings = {
+	similarityThreshold: SIMILARITYTHERSHOLD,
+};
 
-    let getSettings = $state();
-    let settings;
+let chatSettings = {
+	temperature: TEMPERATURE,
+	contextWindow: CONTEXTWINDOW,
+};
 
-        // When model or mode changes, this runs automatically
-        run(() => {
-        if (model !== undefined) {
-            currentSettings = setupedModels[model] || (mode === 'embed' ? embedSettings : chatSettings);
-        }
-    });
+let getSettings = $state();
+let settings;
 
-    async function deleteModel() {
-        if (mode === 'embed') {
-            provider.deleteEmbedModel(model);
-        } else {
-            provider.deleteGenModel(model);
-        }
-        $plugin.saveSettings();
-        setupedModels = mode === 'embed' ? provider.getEmbedModels() : provider.getGenModels();
-    }
+// When model or mode changes, this runs automatically
+run(() => {
+	if (model !== undefined) {
+		currentSettings = setupedModels[model] || (mode === "embed" ? embedSettings : chatSettings);
+	}
+});
 
-    onMount(async () => {
-        models = (await provider.getModels()).sort((a, b) => a.localeCompare(b));;
-        model = mode == 'embed' ? provider.getSelEmbedModel() : provider.getSelGenModel();
-        setupedModels = mode == 'embed' ? provider.getEmbedModels() : provider.getGenModels();
-        settings = mode == 'embed' ? embedSettings : chatSettings;
-        currentSettings = setupedModels[model] || settings;
-        getSettings = () => {
-        currentSettings = setupedModels[model] || settings;
-        }
-    });
+async function deleteModel() {
+	if (mode === "embed") {
+		provider.deleteEmbedModel(model);
+	} else {
+		provider.deleteGenModel(model);
+	}
+	$plugin.saveSettings();
+	setupedModels = mode === "embed" ? provider.getEmbedModels() : provider.getGenModels();
+}
+
+onMount(async () => {
+	models = (await provider.getModels()).sort((a, b) => a.localeCompare(b));
+	model = mode == "embed" ? provider.getSelEmbedModel() : provider.getSelGenModel();
+	setupedModels = mode == "embed" ? provider.getEmbedModels() : provider.getGenModels();
+	settings = mode == "embed" ? embedSettings : chatSettings;
+	currentSettings = setupedModels[model] || settings;
+	getSettings = () => {
+		currentSettings = setupedModels[model] || settings;
+	};
+});
 </script>
 
 <summary class="setting-item-heading py-3">{providerName}</summary>

@@ -1,24 +1,24 @@
-import { Modal, App } from 'obsidian';
-import RemoveComponent from './RemoveModal.svelte';
+import { Modal, App } from "obsidian";
+import RemoveComponent from "./RemoveModal.svelte";
 import { mount } from "svelte";
 
 export class RemoveModal extends Modal {
-    component: RemoveComponent;
-    constructor(app: App) {
-        super(app);
-    }
+	component: RemoveComponent;
+	constructor(app: App) {
+		super(app);
+	}
 
-    onOpen() {
-        mount(RemoveComponent, {
-                    target: this.contentEl,
-                    props: {
-                        modal: this,
-                    },
-                });
-    }
+	onOpen() {
+		mount(RemoveComponent, {
+			target: this.contentEl,
+			props: {
+				modal: this,
+			},
+		});
+	}
 
-    onClose() {
-        const { contentEl } = this;
-        contentEl.empty();
-    }
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
 }

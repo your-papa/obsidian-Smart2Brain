@@ -1,19 +1,19 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
-    import PullOllamaModel from '../Onboarding/PullOllamaModel.svelte';
-    import SettingContainer from '../Settings/SettingContainer.svelte';
-    import { t } from 'svelte-i18n';
-    import { data } from '../../store';
-    import DotAnimation from '../base/DotAnimation.svelte';
+import { onMount } from "svelte";
+import PullOllamaModel from "../Onboarding/PullOllamaModel.svelte";
+import SettingContainer from "../Settings/SettingContainer.svelte";
+import { t } from "svelte-i18n";
+import { data } from "../../store";
+import DotAnimation from "../base/DotAnimation.svelte";
 
-    let isOllama: boolean = $state();
-    let pulledModel = $state(false);
-    let installedOllamaModels: string[] = $state([]);
+let isOllama: boolean = $state();
+let pulledModel = $state(false);
+let installedOllamaModels: string[] = $state([]);
 
-    onMount(async () => {
-        isOllama = await $data.ollamaProvider.isSetup();
-        installedOllamaModels = await $data.ollamaProvider.getModels();
-    });
+onMount(async () => {
+	isOllama = await $data.ollamaProvider.isSetup();
+	installedOllamaModels = await $data.ollamaProvider.getModels();
+});
 </script>
 
 <div class="modal-title">{$t('cmd.pull_model')}</div>

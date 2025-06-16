@@ -1,28 +1,28 @@
-<script lang="ts">
-    import { t } from 'svelte-i18n';
-    import SettingContainer from './SettingContainer.svelte';
-    import DropdownComponent from '../base/Dropdown.svelte';
-    import { onMount } from 'svelte';
-    import { plugin, providers, selGenProvider, genProvider, setupStatus } from '../../store';
-    import Button from '../base/Button.svelte';
-    import { SetupModal } from './SetupModal';
-    import { icon } from '../../controller/Messages';
-    import Dropdown from '../base/Dropdown.svelte';
+<!-- <script lang="ts">
+import { t } from "svelte-i18n";
+import SettingContainer from "./SettingContainer.svelte";
+import DropdownComponent from "../base/Dropdown.svelte";
+import { onMount } from "svelte";
+import { plugin, providers, selGenProvider, genProvider, setupStatus } from "../../store";
+import Button from "../base/Button.svelte";
+import { SetupModal } from "./SetupModal";
+import { icon } from "../../controller/Messages";
+import Dropdown from "../base/Dropdown.svelte";
 
-    let selected = $state('');
+let selected = $state("");
 
-    let genModel: string = $state($genProvider.getSelectedModel());
+let genModel: string = $state($genProvider.getSelectedModel());
 
-    let models: Array<string> = $state([]);
+let models: Array<string> = $state([]);
 
-    onMount(async () => {
-        selected = $selGenProvider;
-        if ($genProvider) {
-            setupStatus.sync($selGenProvider, await $genProvider.isSetuped());
-            genModel = $genProvider.getSelectedModel();
-            models = await $genProvider.getModels();
-        }
-    });
+onMount(async () => {
+	selected = $selGenProvider;
+	if ($genProvider) {
+		setupStatus.sync($selGenProvider, await $genProvider.isSetuped());
+		genModel = $genProvider.getSelectedModel();
+		models = await $genProvider.getModels();
+	}
+});
 </script>
 
 <SettingContainer name={$t('settings.gen_model.title')} isHeading={true} />
@@ -69,4 +69,4 @@
             $plugin.syncProviders($selGenProvider, { selectedGenModel: genModel });
         }}
     />
-</SettingContainer>
+</SettingContainer> -->
