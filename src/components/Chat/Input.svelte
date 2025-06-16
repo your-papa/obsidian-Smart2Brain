@@ -1,87 +1,81 @@
-<script lang="ts">
-    import { run, preventDefault } from 'svelte/legacy';
+<!-- <script lang="ts">
+import { run, preventDefault } from "svelte/legacy";
 
-    import { setIcon } from 'obsidian';
-    import { t } from 'svelte-i18n';
-    import {
-        plugin,
-        data,
-        chatHistory,
-        chatInput,
-        isEditingAssistantMessage,
-        papaState,
-        papaIndexingProgress,
-        isChatInSidebar,
-        runContent,
-        isEditing,
-    } from '../../store';
-    import ProgressCircle from '../base/ProgressCircle.svelte';
-    import { addMessage } from '../../controller/Messages';
-    import Logo from '../Logos/Logo.svelte';
+import { setIcon } from "obsidian";
+import { t } from "svelte-i18n";
+import {
+	data,
+	chatHistory,
+	chatInput,
+	isEditingAssistantMessage,
+	papaState,
+	papaIndexingProgress,
+	runContent,
+	isEditing,
+} from "../../store";
+import ProgressCircle from "../base/ProgressCircle.svelte";
+import { addMessage } from "../../controller/Messages";
+import Logo from "../Logos/Logo.svelte";
 
-    interface Props {
-        textarea: HTMLTextAreaElement;
-    }
+interface Props {
+	textarea: HTMLTextAreaElement;
+}
 
-    let { textarea = $bindable() }: Props = $props();
+let { textarea = $bindable() }: Props = $props();
 
-    const icon = (node: HTMLElement, iconId: string) => {
-        setIcon(node, iconId);
-    };
+const icon = (node: HTMLElement, iconId: string) => {
+	setIcon(node, iconId);
+};
 
-    async function runPapaFromInput() {
-        if (!$plugin.s2b.canRunPapa()) return;
+async function runPapaFromInput() {
+	if (!$plugin.s2b.canRunPapa()) return;
 
-        if ($isEditingAssistantMessage) {
-            $chatHistory[0].content = $chatInput;
-            $data.initialAssistantMessageContent = $chatInput;
-            $chatInput = '';
-            $isEditingAssistantMessage = false;
-            $plugin.chatView.requestSave();
-            await $plugin.saveSettings();
-            return;
-        }
+	if ($isEditingAssistantMessage) {
+		$chatHistory[0].content = $chatInput;
+		$data.initialAssistantMessageContent = $chatInput;
+		$chatInput = "";
+		$isEditingAssistantMessage = false;
+		$plugin.chatView.requestSave();
+		await $plugin.saveSettings();
+		return;
+	}
 
-        if ($chatInput.trim() !== '') {
-            if ($isEditing) {
-                $chatHistory.pop();
-                $isEditing = false;
-            }
-            addMessage('User', $chatInput);
-            $chatInput = '';
-            await $plugin.s2b.runPapa();
-            addMessage('Assistant', $runContent);
-        }
-    }
-    function handleRAGToggle() {
-        $data.isUsingRag = !$data.isUsingRag;
-        $plugin.saveSettings();
-    }
+	if ($chatInput.trim() !== "") {
+		if ($isEditing) {
+			$chatHistory.pop();
+			$isEditing = false;
+		}
+		addMessage("User", $chatInput);
+		$chatInput = "";
+		await $plugin.s2b.runPapa();
+		addMessage("Assistant", $runContent);
+	}
+}
+function handleRAGToggle() {
+	$data.isUsingRag = !$data.isUsingRag;
+	$plugin.saveSettings();
+}
 
-    function handelEnter(event: KeyboardEvent) {
-        if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            runPapaFromInput();
-        }
-    }
+function handelEnter(event: KeyboardEvent) {
+	if (event.key === "Enter" && !event.shiftKey) {
+		event.preventDefault();
+		runPapaFromInput();
+	}
+}
 
-
-    function updateHeight() {
-        textarea.style.height = '2rem';
-        if (textarea.scrollHeight == 42) textarea.style.height = '2rem';
-        else textarea.style.height = textarea.scrollHeight + 'px';
-    }
-    const iconStyle = 'text-[--text-normal] hover:text-[--text-accent-hover]';
-    run(() => {
-        if ($chatInput) {
-            updateHeight();
-        }
-    });
+function updateHeight() {
+	textarea.style.height = "2rem";
+	if (textarea.scrollHeight == 42) textarea.style.height = "2rem";
+	else textarea.style.height = textarea.scrollHeight + "px";
+}
+const iconStyle = "text-[--text-normal] hover:text-[--text-accent-hover]";
+run(() => {
+	if ($chatInput) {
+		updateHeight();
+	}
+});
 </script>
 
-<!-- save delete and rag settings slightly above input field -->
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="relative">
     <div
         class="absolute -top-[62px] left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-t-2xl border border-solid border-x-[--background-modifier-border] border-b-transparent border-t-[--background-modifier-border] {$isChatInSidebar
@@ -153,4 +147,4 @@
             <ProgressCircle bind:progress={$papaIndexingProgress} />
         </div>
     {/if}
-</div>
+</div> -->

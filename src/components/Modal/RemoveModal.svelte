@@ -1,21 +1,21 @@
 <!-- <script lang="ts">
-    import { onMount } from 'svelte';
-    import { t } from 'svelte-i18n';
-    import DropdownComponent from '../base/Dropdown.svelte';
-    import DotAnimation from '../base/DotAnimation.svelte';
-    import { data } from '../../store';
-    import { Ollama } from '../../Providers/Ollama';
+import { onMount } from "svelte";
+import { t } from "svelte-i18n";
+import DropdownComponent from "../base/Dropdown.svelte";
+import DotAnimation from "../base/DotAnimation.svelte";
+import { data } from "../../store";
+import { Ollama } from "../../Providers/Ollama";
 
-    let model = '';
-    let isOllama: boolean;
-    let installedOllamaModels: string[] = [];
-    let ollama: Ollama;
+let model = "";
+let isOllama: boolean;
+let installedOllamaModels: string[] = [];
+let ollama: Ollama;
 
-    onMount(async () => {
-        ollama = $data.ollamaProvider;
-        isOllama = await ollama.isSetup();
-        installedOllamaModels = await ollama.getModels();
-    });
+onMount(async () => {
+	ollama = $data.ollamaProvider;
+	isOllama = await ollama.isSetup();
+	installedOllamaModels = await ollama.getModels();
+});
 </script> -->
 
 <!-- <div class="modal-title">{$t('cmd.remove_model')}</div>

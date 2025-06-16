@@ -1,28 +1,14 @@
-<script lang="ts">
-    import { t } from 'svelte-i18n';
-    import SettingContainer from './SettingContainer.svelte';
-    import DropdownComponent from '../base/Dropdown.svelte';
-    import { onMount } from 'svelte';
-    import { data, plugin, providers, selEmbedProvider, embedProvider, setupStatus } from '../../store';
-    import Button from '../base/Button.svelte';
-    import { SetupModal } from './SetupModal';
-    import { icon } from '../../controller/Messages';
-    import Dropdown from '../base/Dropdown.svelte';
-    import { EmbedProvider } from 'papa-ts';
+<!-- <script lang="ts">
+import { t } from "svelte-i18n";
+import SettingContainer from "./SettingContainer.svelte";
+import DropdownComponent from "../base/Dropdown.svelte";
+import { onMount } from "svelte";
+import Button from "../base/Button.svelte";
+import { SetupModal } from "./SetupModal";
+import { icon } from "../../controller/Messages";
+import Dropdown from "../base/Dropdown.svelte";
 
-    let selected = $state('');
-    let embedModel: string = $state($embedProvider.getSelectedModel());
-
-    let models: Array<string> = $state([]);
-
-    onMount(async () => {
-        selected = $selEmbedProvider;
-        if ($embedProvider) {
-            setupStatus.sync($selEmbedProvider, await $embedProvider.isSetuped());
-            embedModel = $embedProvider.getSelectedModel();
-            models = await $embedProvider.getModels();
-        }
-    });
+let models: Array<string> = $state([]);
 </script>
 
 <SettingContainer name={$t('settings.embed_model.title')} isHeading={true} />
@@ -69,4 +55,4 @@
             $plugin.syncProviders($selEmbedProvider, { selectedEmbedModel: embedModel });
         }}
     />
-</SettingContainer>
+</SettingContainer> -->

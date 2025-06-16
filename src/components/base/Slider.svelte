@@ -1,13 +1,13 @@
 <script lang="ts">
-    import { crossfade } from 'svelte/transition';
+import { crossfade } from "svelte/transition";
 
-    interface Props {
-        options: string[];
-        selected?: string;
-    }
+interface Props {
+	options: string[];
+	selected?: string;
+}
 
-    let { options, selected = $bindable(options[0]) }: Props = $props();
-    const [send, recieve] = crossfade({ duration: 500 });
+let { options, selected = $bindable(options[0]) }: Props = $props();
+const [send, recieve] = crossfade({ duration: 500 });
 </script>
 
 <ul class="m-0 flex list-none p-0 transition-all">

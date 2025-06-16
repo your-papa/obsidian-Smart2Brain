@@ -1,22 +1,18 @@
 <script lang="ts">
-    import { icon } from '../../controller/Messages';
-    interface Props {
-        changeFunc: () => void;
-        iconId?: string;
-        buttonText?: string;
-        styles?: string;
-    }
+import { icon } from "../../utils/icons";
+interface Props {
+	changeFunc: () => void;
+	iconId?: string;
+	buttonText?: string;
+	styles?: string;
+	disabled?: boolean;
+}
 
-    let {
-        changeFunc,
-        iconId = '',
-        buttonText = '',
-        styles = ''
-    }: Props = $props();
+let { changeFunc, iconId = "", buttonText = "", styles = "", disabled = false }: Props = $props();
 </script>
 
 {#if iconId !== ''}
-    <button class="clickable-icon {styles}" use:icon={iconId} onclick={changeFunc}></button>
+    <button disabled={disabled} class="clickable-icon {styles}" use:icon={iconId} onclick={changeFunc} aria-label={buttonText}></button>
 {:else}
-    <button class={styles} onclick={changeFunc}>{buttonText}</button>
+    <button disabled={disabled} class={styles} onclick={changeFunc}>{buttonText}</button>
 {/if}

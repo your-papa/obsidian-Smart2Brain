@@ -1,23 +1,23 @@
 <script lang="ts">
-    interface Props {
-        inputType?: 'text' | 'number';
-        placeholder?: string;
-        styles?: string;
-        changeFunc: (value: string) => void;
-        focusFunc?: any;
-        blurFunc?: any;
-        value?: string;
-    }
+interface Props {
+	inputType?: "text" | "number";
+	placeholder?: string;
+	styles?: string;
+	changeFunc: (value: string) => void;
+	focusFunc?: any;
+	blurFunc?: any;
+	value?: string;
+}
 
-    let {
-        inputType = 'text',
-        placeholder = '',
-        styles = '',
-        changeFunc,
-        focusFunc = () => {},
-        blurFunc = () => {},
-        value = $bindable('')
-    }: Props = $props();
+let {
+	inputType = "text",
+	placeholder = "",
+	styles = "",
+	changeFunc,
+	focusFunc = () => {},
+	blurFunc = () => {},
+	value = $bindable(""),
+}: Props = $props();
 </script>
 
 {#if inputType === 'text'}

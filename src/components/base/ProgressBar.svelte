@@ -1,14 +1,15 @@
 <script lang="ts">
-    import { isChatInSidebar } from '../../store';
-    interface Props {
-        progress?: number; // Progress value from 0 to 100
-    }
+import { chatLayout } from "../../lib/state.svelte";
 
-    let { progress = 0 }: Props = $props();
+interface Props {
+	progress?: number; // Progress value from 0 to 100
+}
+
+let { progress = 0 }: Props = $props();
 </script>
 
 <progress
-    style="--dynamic-color: {$isChatInSidebar ? 'var(--background-secondary-alt)' : 'var(--background-primary-alt)'};"
+    style="--dynamic-color: {chatLayout.isSidebar ? 'var(--background-secondary-alt)' : 'var(--background-primary-alt)'};"
     class="custom-progress border-1 my-2 h-2 w-full rounded-lg border border-solid border-[--background-modifier-border]"
     value={progress}
     max="100"
