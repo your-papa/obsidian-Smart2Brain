@@ -1,8 +1,7 @@
-import type { RegisteredProvider, Language } from "papa-ts";
-import { registeredProviders } from "papa-ts";
+import { Prompts, type Language, registeredProviders, type RegisteredProvider } from "papa-ts";
 import type { PluginData } from "../main";
-import type { ProviderConfigs, GetProviderConfig } from "../types/providers";
-import { DEFAULT_SETTINGS } from "../constants/defaults";
+import type { ProviderConfigs, GetProviderConfig, GetProviderAuth } from "../types/providers";
+import { DEFAULT_SETTINGS, DEFAULT_PROVIDER_CONFIGS } from "../constants/defaults";
 
 /**
  * Validation result type
@@ -195,6 +194,113 @@ function validateGenModelConfig(value: unknown, modelName: string): ValidationRe
 }
 
 /**
+ * Validates a Map or object of models
+ */
+function validateModelMap<T>(
+	value: unknown,
+	validateModelFn: (value: unknown, modelName: string) => ValidationResult,
+	defaultMap: Map<string, T>,
+	mapName: string,
+): ValidationResult {
+	const errors: string[] = [];
+	const warnings: string[] = [];
+	const validatedMap = new Map<string, T>();
+
+	// If Map was serialized to object (happens in storage), convert back
+	if (value && typeof value === "object" && !value.entries && !value.size) {
+		// Handle plain object conversion to Map
+		try {
+			for (const [key, modelConfig] of Object.entries(value as Record<string, unknown>)) {
+				const validation = validateModelFn(modelConfig, `${mapName}.${key}`);
+				if (validation.isValid) {
+					validatedMap.set(key, validation.data as T);
+					warnings.push(...validation.warnings);
+				} else {
+					warnings.push(`Skipping invalid model config for ${key}: ${validation.errors.join(", ")}`);
+				}
+			}
+		} catch (e) {
+			warnings.push(`Error converting object to Map: ${e}. Using defaults.`);
+		}
+	} else if (value instanceof Map) {
+		// Handle actual Map instance
+		try {
+			for (const [key, modelConfig] of value.entries()) {
+				const validation = validateModelFn(modelConfig, `${mapName}.${key}`);
+				if (validation.isValid) {
+					validatedMap.set(key, validation.data as T);
+					warnings.push(...validation.warnings);
+				} else {
+					warnings.push(`Skipping invalid model config for ${key}: ${validation.errors.join(", ")}`);
+				}
+			}
+		} catch (e) {
+			warnings.push(`Error processing Map: ${e}. Using defaults.`);
+		}
+	} else {
+		warnings.push(`${mapName} is not a valid Map or object. Using defaults.`);
+	}
+
+	// Ensure we have at least the default models
+	for (const [key, value] of defaultMap.entries()) {
+		if (!validatedMap.has(key)) {
+			validatedMap.set(key, value);
+		}
+	}
+
+	return {
+		isValid: true, // We can always fall back to defaults
+		errors,
+		warnings,
+		data: validatedMap,
+	};
+}
+
+/**
+ * Validates the provider auth configuration
+ */
+function validateProviderAuth<T extends RegisteredProvider>(provider: T, value: unknown): ValidationResult {
+	const errors: string[] = [];
+	const warnings: string[] = [];
+	const validatedAuth: Record<string, string> = {};
+
+	if (!value || typeof value !== "object") {
+		warnings.push(`Provider auth for ${provider} is missing or invalid, using defaults.`);
+		return {
+			isValid: true,
+			errors,
+			warnings,
+			data: { ...DEFAULT_PROVIDER_CONFIGS[provider].providerAuth },
+		};
+	}
+
+	const config = value as Record<string, unknown>;
+	const defaultAuth = DEFAULT_PROVIDER_CONFIGS[provider].providerAuth;
+
+	// Validate each auth field
+	for (const [key, defaultValue] of Object.entries(defaultAuth)) {
+		const authValue = config[key];
+		const validation = validateString(authValue, `${provider}.providerAuth.${key}`, false);
+
+		if (validation.isValid && validation.data !== undefined) {
+			validatedAuth[key] = validation.data;
+		} else {
+			validatedAuth[key] = defaultValue as string;
+			if (validation.warnings.length > 0) {
+				warnings.push(...validation.warnings);
+			}
+		}
+	}
+
+	return {
+		isValid: true,
+		errors,
+		warnings,
+		data: validatedAuth as GetProviderAuth<T>,
+	};
+}
+
+/**
  * Validates a single provider configuration
  */
 function validateProviderConfig<T extends RegisteredProvider>(provider: T, value: unknown): ValidationResult {
@@ -203,66 +309,45 @@ function validateProviderConfig<T extends RegisteredProvider>(provider: T, value
 
 	if (!value || typeof value !== "object") {
 		errors.push(`Provider config for ${provider} must be an object`);
-		return { isValid: false, errors, warnings };
+		return {
+			isValid: true,
+			errors,
+			warnings: [...warnings, `Using default config for ${provider}`],
+			data: DEFAULT_PROVIDER_CONFIGS[provider],
+		};
 	}
 
 	const config = value as any;
-	const defaultConfig = DEFAULT_SETTINGS.providerConfig[provider] as any;
+	const defaultConfig = DEFAULT_PROVIDER_CONFIGS[provider];
 	const validatedConfig: any = {};
 
-	// Validate base configuration based on provider type
-	switch (provider) {
-		case "OpenAI":
-		case "Anthropic":
-		case "CustomOpenAI":
-			const keyValidation = validateString(config.apiKey, `${provider}.apiKey`, false);
-			warnings.push(...keyValidation.warnings);
-			validatedConfig.apiKey = keyValidation.data || "";
+	// Validate isConfigured
+	const configuredValidation = validateBoolean(config.isConfigured, `${provider}.isConfigured`, false);
+	validatedConfig.isConfigured = configuredValidation.data;
+	warnings.push(...configuredValidation.warnings);
 
-			if (provider === "CustomOpenAI") {
-				const urlValidation = validateString(config.baseUrl, `${provider}.baseUrl`, false);
-				warnings.push(...urlValidation.warnings);
-				validatedConfig.baseUrl = urlValidation.data || "";
-			}
-			break;
-
-		case "Ollama":
-			const urlValidation = validateString(config.baseUrl, `${provider}.baseUrl`);
-			if (!urlValidation.isValid) {
-				errors.push(...urlValidation.errors);
-				return { isValid: false, errors, warnings };
-			}
-			validatedConfig.baseUrl = urlValidation.data;
-			break;
-	}
+	// Validate providerAuth
+	const authValidation = validateProviderAuth(provider, config.providerAuth);
+	validatedConfig.providerAuth = authValidation.data;
+	warnings.push(...authValidation.warnings);
 
 	// Validate embedding models if provider supports them
-	if ("embedModels" in defaultConfig) {
-		const embedModels: any = {};
-
-		if (config.embedModels && typeof config.embedModels === "object") {
-			for (const [modelName, modelConfig] of Object.entries(config.embedModels)) {
-				const validation = validateEmbedModelConfig(modelConfig, `${provider}.embedModels.${modelName}`);
-				if (validation.isValid) {
-					embedModels[modelName] = validation.data;
-					warnings.push(...validation.warnings);
-				} else {
-					warnings.push(
-						`Skipping invalid embed model config for ${modelName}: ${validation.errors.join(", ")}`,
-					);
-				}
-			}
-		}
-
-		// Ensure we have at least the default models
-		Object.assign(embedModels, defaultConfig.embedModels, embedModels);
-		validatedConfig.embedModels = embedModels;
+	if (defaultConfig.embedModels instanceof Map) {
+		// Validate the map of embed models
+		const embedModelsValidation = validateModelMap(
+			config.embedModels,
+			validateEmbedModelConfig,
+			defaultConfig.embedModels,
+			`${provider}.embedModels`,
+		);
+		validatedConfig.embedModels = embedModelsValidation.data;
+		warnings.push(...embedModelsValidation.warnings);
 
 		// Validate selected embed model
 		const selEmbedValidation = validateString(config.selEmbedModel, `${provider}.selEmbedModel`, false);
 		const selectedEmbed = selEmbedValidation.data || defaultConfig.selEmbedModel;
 
-		if (!embedModels[selectedEmbed]) {
+		if (!validatedConfig.embedModels.has(selectedEmbed)) {
 			warnings.push(
 				`Selected embed model ${selectedEmbed} not found, using default: ${defaultConfig.selEmbedModel}`,
 			);
@@ -273,32 +358,22 @@ function validateProviderConfig<T extends RegisteredProvider>(provider: T, value
 	}
 
 	// Validate generation models if provider supports them
-	if ("genModels" in defaultConfig) {
-		const genModels: any = {};
-
-		if (config.genModels && typeof config.genModels === "object") {
-			for (const [modelName, modelConfig] of Object.entries(config.genModels)) {
-				const validation = validateGenModelConfig(modelConfig, `${provider}.genModels.${modelName}`);
-				if (validation.isValid) {
-					genModels[modelName] = validation.data;
-					warnings.push(...validation.warnings);
-				} else {
-					warnings.push(
-						`Skipping invalid gen model config for ${modelName}: ${validation.errors.join(", ")}`,
-					);
-				}
-			}
-		}
-
-		// Ensure we have at least the default models
-		Object.assign(genModels, defaultConfig.genModels, genModels);
-		validatedConfig.genModels = genModels;
+	if (defaultConfig.genModels instanceof Map) {
+		// Validate the map of gen models
+		const genModelsValidation = validateModelMap(
+			config.genModels,
+			validateGenModelConfig,
+			defaultConfig.genModels,
+			`${provider}.genModels`,
+		);
+		validatedConfig.genModels = genModelsValidation.data;
+		warnings.push(...genModelsValidation.warnings);
 
 		// Validate selected gen model
 		const selGenValidation = validateString(config.selGenModel, `${provider}.selGenModel`, false);
 		const selectedGen = selGenValidation.data || defaultConfig.selGenModel;
 
-		if (!genModels[selectedGen]) {
+		if (!validatedConfig.genModels.has(selectedGen)) {
 			warnings.push(`Selected gen model ${selectedGen} not found, using default: ${defaultConfig.selGenModel}`);
 			validatedConfig.selGenModel = defaultConfig.selGenModel;
 		} else {
@@ -310,7 +385,7 @@ function validateProviderConfig<T extends RegisteredProvider>(provider: T, value
 		isValid: true,
 		errors: [],
 		warnings,
-		data: validatedConfig,
+		data: validatedConfig as GetProviderConfig<T>,
 	};
 }
 
@@ -320,7 +395,7 @@ function validateProviderConfig<T extends RegisteredProvider>(provider: T, value
 function validateProviderConfigs(value: unknown): ValidationResult {
 	const errors: string[] = [];
 	const warnings: string[] = [];
-	const validatedConfigs: any = {};
+	const validatedConfigs: ProviderConfigs = {} as ProviderConfigs;
 
 	if (!value || typeof value !== "object") {
 		warnings.push("Provider config is missing or invalid, using defaults");
@@ -328,7 +403,7 @@ function validateProviderConfigs(value: unknown): ValidationResult {
 			isValid: true,
 			errors: [],
 			warnings,
-			data: DEFAULT_SETTINGS.providerConfig,
+			data: DEFAULT_PROVIDER_CONFIGS,
 		};
 	}
 
@@ -343,7 +418,7 @@ function validateProviderConfigs(value: unknown): ValidationResult {
 		} else {
 			errors.push(...validation.errors);
 			warnings.push(`Using default config for ${provider} due to validation errors`);
-			validatedConfigs[provider] = DEFAULT_SETTINGS.providerConfig[provider];
+			validatedConfigs[provider] = DEFAULT_PROVIDER_CONFIGS[provider];
 		}
 	}
 
@@ -381,6 +456,19 @@ export function validatePluginData(rawData: unknown): ValidationResult {
 	errors.push(...providerValidation.errors);
 	warnings.push(...providerValidation.warnings);
 
+	// Validate provider selections
+	const selEmbedProviderValidation = validateString(data.selEmbedProvider, "selEmbedProvider", false);
+	validatedData.selEmbedProvider =
+		selEmbedProviderValidation.data && registeredProviders.includes(selEmbedProviderValidation.data)
+			? selEmbedProviderValidation.data
+			: DEFAULT_SETTINGS.selEmbedProvider;
+
+	const selGenProviderValidation = validateString(data.selGenProvider, "selGenProvider", false);
+	validatedData.selGenProvider =
+		selGenProviderValidation.data && registeredProviders.includes(selGenProviderValidation.data)
+			? selGenProviderValidation.data
+			: DEFAULT_SETTINGS.selGenProvider;
+
 	// Validate boolean fields
 	const booleanFields = [
 		"isChatComfy",
@@ -390,6 +478,7 @@ export function validatePluginData(rawData: unknown): ValidationResult {
 		"isOnboarded",
 		"hideIncognitoWarning",
 		"isAutostart",
+		"isExcluding",
 	] as const;
 
 	for (const field of booleanFields) {
@@ -426,6 +515,10 @@ export function validatePluginData(rawData: unknown): ValidationResult {
 	const excludeFFValidation = validateStringArray(data.excludeFF, "excludeFF");
 	validatedData.excludeFF = excludeFFValidation.data || DEFAULT_SETTINGS.excludeFF;
 	warnings.push(...excludeFFValidation.warnings);
+
+	const includeFFValidation = validateStringArray(data.includeFF, "includeFF");
+	validatedData.includeFF = includeFFValidation.data || DEFAULT_SETTINGS.includeFF;
+	warnings.push(...includeFFValidation.warnings);
 
 	// Ensure we have all required fields
 	const completeData: PluginData = {
