@@ -20,7 +20,7 @@ import {
 	type Providers,
 	type RegisteredProvider,
 	type RegisteredEmbedProvider,
-	type RegisteredGenProvider,
+type RegisteredGenProvider,
 } from "papa-ts";
 import { get } from "svelte/store";
 import { _ } from "svelte-i18n";

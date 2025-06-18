@@ -26,15 +26,21 @@ import {
 
 export class PluginDataStore {
 	#data: PluginData;
-	#plugin: SecondBrainPlugin;
+	private _plugin: SecondBrainPlugin;
 
 	constructor(plugin: SecondBrainPlugin, initialData: PluginData) {
-		this.#plugin = plugin;
+		this._plugin = plugin;
 		this.#data = $state(initialData);
 	}
 
 	private async saveSettings() {
-		await this.#plugin.saveData($state.snapshot(this.#data));
+		await this._plugin.saveData($state.snapshot(this.#data));
+	}
+
+	getConfiguredProviders(): RegisteredProvider[] {
+		return Object.entries(this.#data.providerConfig)
+			.filter(([_, conf]) => conf.isConfigured)
+			.map(([provider]) => provider as RegisteredProvider);
 	}
 
 	deleteData() {
@@ -191,8 +197,6 @@ export class PluginDataStore {
 
 	getProviderAuthParams(provider: RegisteredProvider): GetProviderAuth<typeof provider> {
 		//TODO check runtime validity
-		console.log(provider);
-		console.log(this.#data.providerConfig[provider].providerAuth);
 		return this.#data.providerConfig[provider].providerAuth;
 	}
 
@@ -201,7 +205,9 @@ export class PluginDataStore {
 		key: K,
 		value: GetProviderAuth<T>[K],
 	): void {
-		this.#data.providerConfig[provider].providerAuth[key] = value;
+		const newAuth = { ...this.#data.providerConfig[provider].providerAuth };
+		newAuth[key] = value;
+		this.#data.providerConfig[provider].providerAuth = newAuth;
 		this.saveSettings();
 	}
 
