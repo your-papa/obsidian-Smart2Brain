@@ -20,7 +20,7 @@ import {
 	type Providers,
 	type RegisteredProvider,
 	type RegisteredEmbedProvider,
-type RegisteredGenProvider,
+	type RegisteredGenProvider,
 } from "papa-ts";
 import { get } from "svelte/store";
 import { _ } from "svelte-i18n";
@@ -37,6 +37,7 @@ import type { ProviderConfigs } from "./types/providers";
 import { DEFAULT_SETTINGS } from "./constants/defaults";
 import { createData, getData, PluginDataStore } from "./lib/data.svelte";
 import { chatLayout, setPlugin } from "./lib/state.svelte";
+import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
 
 export interface PluginData {
 	providerConfig: ProviderConfigs;
@@ -55,7 +56,6 @@ export interface PluginData {
 	debuggingLangchainKey: string;
 	isQuickSettingsOpen: boolean;
 	isVerbose: boolean;
-	isOnboarded: boolean;
 	hideIncognitoWarning: boolean;
 	isAutostart: boolean;
 }
@@ -241,7 +241,7 @@ export default class SecondBrainPlugin extends Plugin {
 					).files;
 					for (const file of files) await this.app.vault.adapter.remove(file);
 					new Notice(t("notice.plugin_data_cleared"), 4000);
-					this.pluginData = await getData(this);
+					this.pluginData = await createData(this);
 					await this.activateView();
 				}
 			},

@@ -4,26 +4,28 @@ import { run } from "svelte/legacy";
 import { onMount } from "svelte";
 import SettingContainer from "./SettingContainer.svelte";
 import { t } from "svelte-i18n";
-import type { BaseProvider, ProviderName, Settings } from "papa-ts";
-import { plugin } from "../../store";
 import ButtonComponent from "../base/Button.svelte";
 import type { Modal } from "obsidian";
 import TextComponent from "../base/Text.svelte";
 import Button from "../base/Button.svelte";
+import type { RegisteredProvider } from "papa-ts";
+import type { ModelManagementModal } from "./ModelManagementModal";
+import { getData } from "../../lib/data.svelte";
 
 interface Props {
-	mode: string;
-	provider: BaseProvider<Settings>;
-	providerName: ProviderName;
-	modal: Modal;
+	modal: ModelManagementModal;
+	provider: RegisteredProvider;
 }
 
-let { mode, provider, providerName, modal }: Props = $props();
+let { modal, provider }: Props = $props();
+
+const data = getData();
 
 let models: string[] = $state([]);
-let model: string = $state();
 let setupedModels = $state({});
 let currentSettings = $state({});
+
+const mode: "Embed" | "Chat" = $state("Chat");
 
 const SIMILARITYTHERSHOLD = 0.5;
 const TEMPERATURE = 0;
@@ -41,42 +43,23 @@ let chatSettings = {
 let getSettings = $state();
 let settings;
 
-// When model or mode changes, this runs automatically
-run(() => {
-	if (model !== undefined) {
-		currentSettings = setupedModels[model] || (mode === "embed" ? embedSettings : chatSettings);
-	}
-});
-
-async function deleteModel() {
-	if (mode === "embed") {
-		provider.deleteEmbedModel(model);
+async function deleteModel(model: string) {
+	if (mode === "Embed") {
+		data.deleteEmbedModel(model);
 	} else {
-		provider.deleteGenModel(model);
+		data.deleteGenModel(model);
 	}
-	$plugin.saveSettings();
 	setupedModels = mode === "embed" ? provider.getEmbedModels() : provider.getGenModels();
 }
-
-onMount(async () => {
-	models = (await provider.getModels()).sort((a, b) => a.localeCompare(b));
-	model = mode == "embed" ? provider.getSelEmbedModel() : provider.getSelGenModel();
-	setupedModels = mode == "embed" ? provider.getEmbedModels() : provider.getGenModels();
-	settings = mode == "embed" ? embedSettings : chatSettings;
-	currentSettings = setupedModels[model] || settings;
-	getSettings = () => {
-		currentSettings = setupedModels[model] || settings;
-	};
-});
 </script>
 
-<summary class="setting-item-heading py-3">{providerName}</summary>
-<SettingContainer name={$t(`model_management.embed_model.title`)} desc={$t(`model_management.desc`)}>
+<summary class="setting-item-heading py-3">{provider}</summary>
+<!-- <SettingContainer name={$t(`model_management.embed_model.title`)} desc={$t(`model_management.desc`)}>
     {#if models}
         {#if model in setupedModels && !(model == provider.getSelEmbedModel() || model == provider.getSelGenModel())}
             <ButtonComponent
             buttonText="Delete"
-            changeFunc={deleteModel}
+            onClick={deleteModel}
         />
         {/if}
         <select bind:value={model} onchange={(event) => {
@@ -97,8 +80,8 @@ onMount(async () => {
 </SettingContainer>
 
 {#each Object.keys(currentSettings) as modelArg}
-    <SettingContainer 
-        name={$t(`model_management.embed_model.${modelArg}`)} 
+    <SettingContainer
+        name={$t(`model_management.embed_model.${modelArg}`)}
         desc={$t(`model_management.${modelArg}.desc`)}
     >
     {#if modelArg == 'contextWindow'}
@@ -126,19 +109,19 @@ onMount(async () => {
 
 <div class="modal-button-container">
     {#if model in setupedModels}
-        <ButtonComponent styles="mod-cta" buttonText={$t(`model_management.embed_model.save`)} changeFunc={() => {
+        <ButtonComponent styles="mod-cta" buttonText={$t(`model_management.embed_model.save`)} onClick={() => {
             mode == 'embed' ? provider.updateEmbedModel(model, embedSettings) : provider.updateGenModel(model, chatSettings);
             $plugin.saveSettings()
             modal.close()
             }}
             />
     {:else}
-        <ButtonComponent styles="mod-cta" buttonText={$t(`model_management.embed_model.create`)} changeFunc={async () => {
+        <ButtonComponent styles="mod-cta" buttonText={$t(`model_management.embed_model.create`)} onClick={async () => {
             mode == 'chat' ? await provider.addGenModel(model, chatSettings) : await provider.addEmbedModel(model, embedSettings)
             $plugin.saveSettings()
             modal.close()
         }
     } />
     {/if}
-    <ButtonComponent buttonText={$t(`model_management.embed_model.cancel`)} changeFunc={() => modal.close()} />
-</div>
+    <ButtonComponent buttonText={$t(`model_management.embed_model.cancel`)} onClick={() => modal.close()} />
+</div> -->

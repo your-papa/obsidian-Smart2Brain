@@ -91,7 +91,6 @@ export const DEFAULT_SETTINGS: PluginData = {
 	isExcluding: true,
 	isQuickSettingsOpen: true,
 	isVerbose: false,
-	isOnboarded: false,
 	hideIncognitoWarning: false,
 	isAutostart: false,
 	debuggingLangchainKey: "",
