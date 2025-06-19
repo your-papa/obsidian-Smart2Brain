@@ -15,7 +15,7 @@ let { modal }: Props = $props();
 <div class="modal-button-container">
     <ButtonComponent
         buttonText={$t('modal.cancel')}
-        changeFunc={() => {
+        onClick={() => {
             modal.close();
             modal.onSubmit('Cancel');
         }}
@@ -23,7 +23,7 @@ let { modal }: Props = $props();
     <ButtonComponent
         buttonText={$t('modal.confirm')}
         styles="mod-warning"
-        changeFunc={() => {
+        onClick={() => {
             modal.close();
             modal.onSubmit('Yes');
         }}

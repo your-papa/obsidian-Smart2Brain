@@ -20,13 +20,14 @@
   "scripts": {
     "dev": "vite build --mode development --watch",
     "build": "vite build --mode production",
+    "debug": "vite build --mode development",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "format": "biome format --write ./src",
     "lint": "biome lint --apply-unsafe ./src"
   },
   "type": "module",
   "dependencies": {
-    "@tanstack/svelte-query": "^5.80.6",
+    "@tanstack/svelte-query": "https://pkg.pr.new/@tanstack/svelte-query@746b9c5d83e901deb3a5ca7012a4b4e2b617c5e3",
     "builtin-modules": "^5.0.0",
     "i18next": "^23.16.8",
     "monkey-around": "^3.0.0",

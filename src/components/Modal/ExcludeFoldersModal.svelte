@@ -70,8 +70,8 @@ function removeExcludeFolder(folder: string) {
     {#if data.indexList.length > 0}
             {#each data.indexList as folder, index}
                 <div class="sync-exclude-folder">
-                    <Button styles='sync-exclude-folder-remove' iconId='x' changeFunc={() => removeExcludeFolder(folder)}></Button>
-                    <Button iconId='folder-open' changeFunc={() => ''}></Button>
+                    <Button styles='sync-exclude-folder-remove' iconId='x' onClick={() => removeExcludeFolder(folder)}></Button>
+                    <Button iconId='folder-open' onClick={() => ''}></Button>
                     <div class="sync-exclude-folder-name">
                         <span>{folder}</span>
                     </div>
@@ -110,6 +110,6 @@ function removeExcludeFolder(folder: string) {
 <div class="modal-button-container">
     <ButtonComponent
         buttonText="Done"
-        changeFunc={() => modal.close()}
+        onClick={() => modal.close()}
     />
 </div>

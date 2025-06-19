@@ -1,19 +1,15 @@
 import { App, Modal } from "obsidian";
 import ModelManagement from "./ModelManagement.svelte";
-import { BaseProvider, type ProviderName, type Settings } from "papa-ts";
 import { mount } from "svelte";
+import type { RegisteredProvider } from "papa-ts";
 
 export class ModelManagementModal extends Modal {
-	private component: ModelManagement;
-	private provider: BaseProvider<Settings>;
-	private mode: "chat" | "embed";
-	private providerName: ProviderName;
+	private component!: ModelManagement;
+	private provider: RegisteredProvider;
 
-	constructor(app: App, provider: BaseProvider<Settings>, providerName: ProviderName, mode: "chat" | "embed") {
+	constructor(app: App, provider: RegisteredProvider) {
 		super(app);
 		this.provider = provider;
-		this.providerName = providerName;
-		this.mode = mode;
 	}
 
 	onOpen() {
@@ -21,8 +17,6 @@ export class ModelManagementModal extends Modal {
 			target: this.contentEl,
 			props: {
 				provider: this.provider,
-				mode: this.mode,
-				providerName: this.providerName,
 				modal: this,
 			},
 		});
