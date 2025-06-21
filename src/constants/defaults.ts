@@ -39,12 +39,12 @@ export const DEFAULT_PROVIDER_CONFIGS: ProviderConfigs = {
 		]),
 		selGenModel: "gpt-4o-mini",
 		genModels: new Map([
-			["gpt-3.5-turbo", { temperature: 0.5, contextWindow: 16385 }],
-			["gpt-4", { temperature: 0.5, contextWindow: 8192 }],
-			["gpt-4-32k", { temperature: 0.5, contextWindow: 32768 }],
-			["gpt-4-turbo-preview", { temperature: 0.5, contextWindow: 128000 }],
-			["gpt-4o-mini", { temperature: 0.5, contextWindow: 8192 }],
-			["gpt-4o", { temperature: 0.5, contextWindow: 128000 }],
+			["chatgpt-4o-latest", { temperature: 0.4, contextWindow: 128000 }],
+			["gpt-4.1-mini-2025-04-14", { temperature: 0.4, contextWindow: 1047576 }],
+			["gpt-4.1", { temperature: 0.2, contextWindow: 1047576 }],
+			["o4-mini", { temperature: 0.2, contextWindow: 200000 }],
+			["o1", { temperature: 0.2, contextWindow: 200000 }],
+			["o1", { temperature: 0.2, contextWindow: 200000 }],
 		]),
 	},
 	Anthropic: {

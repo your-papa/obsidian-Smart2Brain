@@ -11,6 +11,7 @@ interface Props {
 	onSubmit: (value: string) => void;
 	onSelected: (folder: string) => void;
 	placeholder?: string;
+	value?: string;
 }
 
 let {
@@ -20,12 +21,13 @@ let {
 	onSubmit,
 	suggestionFn,
 	onSelected,
+	value = "",
 }: Props = $props();
 
 let inputEl: HTMLInputElement;
 let suggestInstance: FileFolderSuggest<T>;
 
-let inputValue: string = $state("");
+let inputValue: string = $state(value);
 
 class FileFolderSuggest<T extends TAbstractFile> extends AbstractInputSuggest<T> {
 	private suggestionCallback: (query: string) => T[];
@@ -63,8 +65,8 @@ class FileFolderSuggest<T extends TAbstractFile> extends AbstractInputSuggest<T>
 	}
 
 	selectSuggestion(file: T, evt: MouseEvent | KeyboardEvent): void {
-		onSelected(file.name);
-		inputValue = "";
+		onSelected(file.path);
+		inputValue = file.path;
 		this.close();
 	}
 }
@@ -72,7 +74,6 @@ class FileFolderSuggest<T extends TAbstractFile> extends AbstractInputSuggest<T>
 function submit(e: KeyboardEvent) {
 	if (e.key === "Enter" && inputValue.trim()) {
 		onSubmit(inputValue);
-		inputValue = "";
 		suggestInstance.close();
 	}
 }

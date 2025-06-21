@@ -94,7 +94,7 @@ function removeExcludeFolder(folder: string) {
                 display: mode,
                 value: mode
             }))}
-            changeFunc={(selected) => (exclusionMode = selected)}
+            onSelect={(selected) => (exclusionMode = selected)}
             selected={exclusionMode}
         />
         <FolderSuggest
