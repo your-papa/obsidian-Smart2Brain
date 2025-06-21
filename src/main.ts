@@ -71,16 +71,29 @@ export default class SecondBrainPlugin extends Plugin {
 		Anthropic: new AnthropicProvider(),
 		CustomOpenAI: new CustomOpenAIProvider(),
 	};
+	queryClient = new QueryClient({
+		defaultOptions: {
+			queries: {
+				refetchOnWindowFocus: false,
+				refetchOnReconnect: false,
+				retry: 0,
+			},
+		},
+	});
 	pluginData!: PluginDataStore;
 	private isChatAcivatedFromRibbon = false; // workaround for a bug where the chat view is activated twice through monkey patching
 	private autoSaveTimer!: number;
 
 	async onload() {
+		setPlugin(this);
 		const VIEW_TYPE_CHAT = "chat-view";
 		this.pluginData = await createData(this);
 		const t = get(_);
 
-		setPlugin(this);
+		//Todo setup method wiht preamptife fetching etcs
+		this.pluginData.getConfiguredProviders().forEach((provider) => {
+			this.providerRegistry[provider].setup(this.pluginData.getProviderAuthParams(provider));
+		});
 
 		const { isVerbose, isAutostart } = this.pluginData;
 

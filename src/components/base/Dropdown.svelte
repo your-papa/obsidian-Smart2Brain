@@ -1,14 +1,38 @@
 <script lang="ts" generics="T">
-type DropdownProps<T> = {
-	options: { display: string; value: T }[];
-	changeFunc: (selected: T) => void;
-	selected: T;
+type DropdownOption<T> = {
+	display: string;
+	value: T;
 };
 
-let { options, changeFunc, selected = $bindable() }: DropdownProps<T> = $props();
+type DropdownGroup<T> = {
+	label: string;
+	options: DropdownOption<T>[];
+};
+
+type DropdownProps<T> = {
+	onSelect: (selected: T) => void;
+	selected: T;
+	style?: string;
+} & ({ type: "options"; dropdown: DropdownOption<T>[] } | { type: "groups"; dropdown: DropdownGroup<T>[] });
+
+let { dropdown, onSelect, selected = $bindable(), style, type }: DropdownProps<T> = $props();
+
+// Create typed variables for proper type narrowing
+let groups = $derived(type === "groups" ? (dropdown as DropdownGroup<T>[]) : undefined);
+let options = $derived(type === "options" ? (dropdown as DropdownOption<T>[]) : undefined);
 </script>
-<select class="dropdown" bind:value={selected} onchange={() => changeFunc(selected)}>
-    {#each options as option}
-        <option value={option.value}>{option.display}</option>
-    {/each}
+<select class={`dropdown ${style}`} bind:value={selected} onchange={() => onSelect(selected)}>
+    {#if groups}
+        {#each groups as group}
+            <optgroup label={group.label}>
+                {#each group.options as option}
+                    <option value={option.value}>{option.display}</option>
+                {/each}
+            </optgroup>
+        {/each}
+    {:else if options}
+        {#each options as option}
+            <option value={option.value}>{option.display}</option>
+        {/each}
+    {/if}
 </select>

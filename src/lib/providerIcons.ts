@@ -62,8 +62,31 @@ export function renderIcon(icon: SVGIcon, size?: { width?: number; height?: numb
 	return icon.svg.replace("<svg", `<svg width="${width}" height="${height}"`);
 }
 
-export const providerIconMap: Record<string, SVGIcon> = {
+// Smart2Brain logo icon (simplified version)
+export const smart2BrainIcon: SVGIcon = {
+	svg: `<svg viewBox="0 0 600 600" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+		<path d="m213.65,439.39c-156.18-117.66-57.58-266.4,33.7-296.7,92.35-30.65,191.19,25.48,215.75,115.84,14.78,54.37,8.76,147.79-96.73,185.9" stroke="currentColor" stroke-width="11" fill="none" stroke-linecap="round" stroke-miterlimit="10"/>
+		<path d="m131.9,313.62c13.38-14.5,44.13-41.35,68.84-41.2,31.81.18,28.04,37.47,77.4,36.41,55.76-1.2,40.15-24.38,76.96-28.66,22.86-2.66,59.98,16.98,111.95,45.65" stroke="currentColor" stroke-width="11" fill="none" stroke-miterlimit="10"/>
+		<path d="m261.69,373.58c0,23.09,28.26,17.24,28.26.4" stroke="currentColor" stroke-width="11" fill="none" stroke-linecap="round" stroke-miterlimit="10"/>
+		<circle cx="207.38" cy="355.1" r="35" fill="currentColor"/>
+		<circle cx="347.46" cy="360.03" r="35" fill="currentColor"/>
+		<circle cx="221.89" cy="349.55" r="13.5" fill="white"/>
+		<circle cx="363.94" cy="354.48" r="13.5" fill="white"/>
+	</svg>`,
+	viewBox: "0 0 600 600",
+	width: 24,
+	height: 24,
+};
+
+const providerIconMap: Record<string, SVGIcon> = {
 	Ollama: ollamaIcon,
 	OpenAI: openAiIcon,
 	Anthropic: anthropicIcon,
+	CustomOpenAI: smart2BrainIcon,
 };
+
+export function getProviderIcon(provider: string) {
+	const icon = providerIconMap[provider];
+	if (!icon) return smart2BrainIcon;
+	return icon;
+}

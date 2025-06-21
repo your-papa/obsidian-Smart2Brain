@@ -1,4 +1,3 @@
-    <!-- TODO: Fix this -->
 <svg
     class="z-[-1] h-full {true ? 'fill-[--color-accent] stroke-[--color-accent]' : 'fill-[--text-normal] stroke-[--text-normal]'}"
     viewBox="30 29 300 300"

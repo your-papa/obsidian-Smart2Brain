@@ -1,5 +1,5 @@
 <script lang="ts">
-import { icon } from "../../utils/icons";
+import { icon } from "../../utils/utils";
 
 type Props = {
 	suggestionText: string;

@@ -2,7 +2,7 @@ import { App, Notice, TFile, normalizePath } from "obsidian";
 import { obsidianDocumentLoader, Papa, type PapaConfig } from "papa-ts";
 import { get } from "svelte/store";
 import Log, { LogLvl } from "./logging";
-import { wildTest } from "./utils/icons";
+import { wildTest } from "./utils/utils";
 import {
 	papaState,
 	errorState,
