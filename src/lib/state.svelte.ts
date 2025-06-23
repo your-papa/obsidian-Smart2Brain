@@ -1,5 +1,6 @@
 import { OllamaProvider, OpenAIProvider, type RegisteredProvider } from "papa-ts";
 import SecondBrainPlugin from "../main";
+import type { ChatMessage } from "../types/chat";
 
 export const providerState: Record<RegisteredProvider, boolean> = $state({
 	OpenAI: false,
@@ -34,3 +35,5 @@ export function getPlugin(): SecondBrainPlugin {
 	if (!_plugin) throw Error("No");
 	return _plugin;
 }
+
+export const chatHistory: ChatMessage | undefined = $state(undefined);

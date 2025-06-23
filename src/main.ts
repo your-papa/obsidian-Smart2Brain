@@ -29,20 +29,19 @@ import SmartSecondBrain from "./SmartSecondBrain";
 import { ConfirmModal } from "./components/Settings/ConfirmModal";
 import "./lang/i18n";
 import Log from "./logging";
-import { chatHistory } from "./store";
 import "./styles.css";
 import SettingsTab from "./views/Settings";
 import { RemoveModal } from "./components/Modal/RemoveModal";
 import type { ProviderConfigs } from "./types/providers";
-import { DEFAULT_SETTINGS } from "./constants/defaults";
-import { createData, getData, PluginDataStore } from "./lib/data.svelte";
+import { createData, PluginDataStore } from "./lib/data.svelte";
 import { chatLayout, setPlugin } from "./lib/state.svelte";
-import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
+import { QueryClient } from "@tanstack/svelte-query";
+import { ChatView, VIEW_TYPE_CHAT } from "./views/Chat";
 
 export interface PluginData {
 	providerConfig: ProviderConfigs;
-	selEmbedProvider: RegisteredEmbedProvider;
-	selGenProvider: RegisteredGenProvider;
+	selEmbedModel: { provider: RegisteredEmbedProvider; model: string };
+	selGenModel: { provider: RegisteredGenProvider; model: string };
 	isChatComfy: boolean;
 	initialAssistantMessageContent: string;
 	isUsingRag: boolean;
@@ -64,7 +63,6 @@ export type PluginDataKey = keyof PluginData;
 
 export default class SecondBrainPlugin extends Plugin {
 	s2b!: SmartSecondBrain;
-	leaf!: WorkspaceLeaf;
 	providerRegistry: Record<RegisteredProvider, Providers> = {
 		Ollama: new OllamaProvider(),
 		OpenAI: new OpenAIProvider(),
@@ -90,7 +88,7 @@ export default class SecondBrainPlugin extends Plugin {
 		this.pluginData = await createData(this);
 		const t = get(_);
 
-		//Todo setup method wiht preamptife fetching etcs
+		//Todo setup method with preamptife fetching etcs
 		this.pluginData.getConfiguredProviders().forEach((provider) => {
 			this.providerRegistry[provider].setup(this.pluginData.getProviderAuthParams(provider));
 		});
@@ -106,22 +104,21 @@ export default class SecondBrainPlugin extends Plugin {
 		Log.setLogLevel(isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
 
 		this.app.workspace.onLayoutReady(() => {
-			const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
-			if (leaves.length) this.leaf = leaves[0];
 			if (isAutostart) this.s2b.init();
 		});
-		this.registerEvent(
-			this.app.workspace.on("layout-change", () => {
-				if (!this.leaf) {
-					const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
-					if (!leaves.length) return;
-					this.leaf = leaves[0];
-				}
-				chatLayout.isSidebar = [this.app.workspace.leftSplit, this.app.workspace.rightSplit].includes(
-					this.leaf.getRoot() as WorkspaceSidedock,
-				);
-			}),
-		);
+
+		// this.registerEvent(
+		// 	this.app.workspace.on("layout-change", () => {
+		// 		if (!this.leaf) {
+		// 			const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
+		// 			if (!leaves.length) return;
+		// 			this.leaf = leaves[0];
+		// 		}
+		// 		chatLayout.isSidebar = [this.app.workspace.leftSplit, this.app.workspace.rightSplit].includes(
+		// 			this.leaf.getRoot() as WorkspaceSidedock,
+		// 		);
+		// 	}),
+		// );
 		this.registerEvent(this.app.metadataCache.on("changed", async (file: TFile) => this.s2b.onFileChange(file)));
 		this.registerEvent(
 			this.app.vault.on("delete", async (file: TAbstractFile) => {
@@ -150,14 +147,7 @@ export default class SecondBrainPlugin extends Plugin {
 		window.addEventListener("keypress", () => resetAutoSaveTimer());
 		window.addEventListener("scroll", () => resetAutoSaveTimer());
 
-		if (!this.s2b) {
-			this.app.workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
-		}
-
-		// this.registerView(VIEW_TYPE_CHAT, (leaf) => {
-		//     this.chatView = new ChatView(leaf);
-		//     return this.chatView;
-		// });
+		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(this, leaf));
 
 		this.addRibbonIcon("message-square", t("ribbon.chat"), () => this.activateView());
 
@@ -182,62 +172,65 @@ export default class SecondBrainPlugin extends Plugin {
 
 		this.addSettingTab(new SettingsTab(this));
 
-		this.registerMonkeyPatches();
+		//this.registerMonkeyPatches();
 	}
 
 	async onunload() {
 		Log.info("Unloading plugin");
 	}
 
-	async activateView(file?: TFile) {
+	async activateView() {
 		const { targetFolder, defaultChatName, initialAssistantMessageContent } = this.pluginData;
+		// If no file is provided, open the default chat
+
+		const chatDirExists: boolean = !!this.app.vault.getFolderByPath(normalizePath(targetFolder));
+
+		if (!chatDirExists) {
+			await this.app.vault.createFolder(normalizePath(targetFolder));
+		}
+
+		const filePath = normalizePath(`${targetFolder}/${defaultChatName}.md`);
+
+		let file = this.app.vault.getFileByPath(filePath);
 		if (!file) {
-			// If no file is provided, open the default chat
-			const chatDirExists = await this.app.vault.adapter.exists(normalizePath(targetFolder));
-			if (!chatDirExists) {
-				await this.app.vault.createFolder(normalizePath(targetFolder));
-			}
-			const defaultChatExists = await this.app.vault.adapter.exists(
-				normalizePath(targetFolder + "/" + defaultChatName + ".md"),
+			file = await this.app.vault.create(
+				filePath,
+				"Assistant\n" + initialAssistantMessageContent + "\n- - - - -",
 			);
-			file = defaultChatExists
-				? this.app.metadataCache.getFirstLinkpathDest(targetFolder + "/" + defaultChatName + ".md", "")
-				: await this.app.vault.create(
-						normalizePath(targetFolder + "/" + defaultChatName + ".md"),
-						"Assistant\n" + initialAssistantMessageContent + "\n- - - - -",
-					);
 		}
+
 		const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
-		this.leaf = leaves.length ? leaves[0] : this.app.workspace.getRightLeaf(false);
-		this.isChatAcivatedFromRibbon = true;
-		await this.leaf.openFile(file, { active: true });
-		await this.leaf.setViewState({
-			type: VIEW_TYPE_CHAT,
-			state: { file: file.path },
-		});
-
-		this.app.workspace.revealLeaf(this.leaf);
-	}
-
-	async saveChat() {
-		const { targetFolder } = this.pluginData;
-		let fileName = await this.s2b.createFilenameForChat();
-		let normalizedFilePath = normalizePath(targetFolder + "/" + fileName + ".md");
-		while (await this.app.vault.adapter.exists(normalizedFilePath)) {
-			//Checks if already existing file has a number at the end
-			const regex = /\((\d+)\)$/;
-			const match = fileName.match(regex);
-			if (match) {
-				fileName = fileName.slice(0, -3) + "(" + (parseInt(match[1], 10) + 1) + ")";
-			} else {
-				fileName = fileName + " (1)";
-			}
-			normalizedFilePath = normalizePath(d.targetFolder + "/" + fileName + ".md");
+		const isNewLeaf: boolean = !leaves.length;
+		const leaf = isNewLeaf ? this.app.workspace.getRightLeaf(false) : leaves[0];
+		if (isNewLeaf) {
+			await leaf.openFile(file, { active: true });
+			await leaf.setViewState({
+				type: VIEW_TYPE_CHAT,
+				state: { file: file.path },
+			});
 		}
-		// const newChatFile = await this.app.vault.copy(this.chatView.file, normalizedFilePath);
-		chatHistory.reset;
-		await this.activateView(newChatFile);
+		this.app.workspace.revealLeaf(leaf);
 	}
+
+	// async saveChat() {
+	// 	const { targetFolder } = this.pluginData;
+	// 	let fileName = await this.s2b.createFilenameForChat();
+	// 	let normalizedFilePath = normalizePath(targetFolder + "/" + fileName + ".md");
+	// 	while (await this.app.vault.adapter.exists(normalizedFilePath)) {
+	// 		//Checks if already existing file has a number at the end
+	// 		const regex = /\((\d+)\)$/;
+	// 		const match = fileName.match(regex);
+	// 		if (match) {
+	// 			fileName = fileName.slice(0, -3) + "(" + (parseInt(match[1], 10) + 1) + ")";
+	// 		} else {
+	// 			fileName = fileName + " (1)";
+	// 		}
+	// 		normalizedFilePath = normalizePath(d.targetFolder + "/" + fileName + ".md");
+	// 	}
+	// 	// const newChatFile = await this.app.vault.copy(this.chatView.file, normalizedFilePath);
+	// 	chatHistory.reset;
+	// 	await this.activateView(newChatFile);
+	// }
 
 	async clearPluginData() {
 		const t = get(_);

@@ -1,6 +1,7 @@
 import { setIcon } from "obsidian";
 
 export const icon = (node: HTMLElement, iconId: string) => {
+	console.log(iconId);
 	setIcon(node, iconId);
 };
 

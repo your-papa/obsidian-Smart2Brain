@@ -33,7 +33,6 @@
     "monkey-around": "^3.0.0",
     "nanoid": "^5.1.5",
     "papa-ts": "link:papa-ts",
-    "prettier-plugin-svelte": "^3.4.0",
     "svelte-i18n": "^4.0.1"
   }
 }

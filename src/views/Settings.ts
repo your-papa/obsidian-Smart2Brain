@@ -17,7 +17,6 @@ export default class SettingsTab extends PluginSettingTab {
 
 		this.component = mount(SettingsComponent, {
 			target: this.containerEl,
-			props: { plugin: this.plugin },
 		});
 	}
 }
