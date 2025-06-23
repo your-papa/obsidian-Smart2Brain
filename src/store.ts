@@ -9,12 +9,6 @@ import {
 	type RegisteredProvider,
 } from "papa-ts";
 
-export type ChatMessage = {
-	role: "Assistant" | "User";
-	content: string;
-	id: string;
-};
-
 export const isEditing = writable<boolean>(false);
 export const isEditingAssistantMessage = writable<boolean>();
 
@@ -45,34 +39,3 @@ export const papaIndexingProgress = writable<number>(0);
 export const papaIndexingTimeLeft = writable<number>(0);
 
 export const cancelPullModel = writable<boolean>(false);
-
-export const serializeChatHistory = (cH: ChatMessage[]) =>
-	cH
-		.map((chatMessage: ChatMessage) => {
-			if (chatMessage.role === "User") return `${chatMessage.role}: ${chatMessage.content}`;
-			else if (chatMessage.role === "Assistant") return `${chatMessage.role}: ${chatMessage.content}`;
-			return `${chatMessage.content}`;
-		})
-		.join("\n");
-
-function createChatHistory() {
-	const { subscribe, set, update } = writable<ChatMessage[]>();
-
-	return {
-		subscribe,
-		set,
-		update,
-		reset: () => {
-			set([
-				{
-					role: "Assistant",
-					content: get(data).initialAssistantMessageContent,
-					id: nanoid(),
-				},
-			]);
-			get(plugin).chatView.save();
-		},
-	};
-}
-
-export const chatHistory = createChatHistory();

@@ -1,14 +1,14 @@
 <script lang="ts">
-import { setIcon, TFile, TFolder } from "obsidian";
+import { TFolder } from "obsidian";
 import SettingContainer from "./SettingContainer.svelte";
-import { LogLvl, Papa, type Language } from "papa-ts";
+import { type Language } from "papa-ts";
 import ToggleComponent from "../base/Toggle.svelte";
 import ButtonComponent from "../base/Button.svelte";
 import { t } from "svelte-i18n";
 import Log from "../../logging";
 import ProviderSetup from "./ProviderSetup.svelte";
 import { getData } from "../../lib/data.svelte";
-import type SecondBrainPlugin from "../../main";
+
 import { ExcludeFoldersModal } from "../Modal/ExcludeFoldersModal";
 import { QueryClientProvider } from "@tanstack/svelte-query";
 import FolderSuggest from "../Modal/FolderSuggest.svelte";

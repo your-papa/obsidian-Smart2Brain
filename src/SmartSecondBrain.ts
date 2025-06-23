@@ -3,16 +3,7 @@ import { obsidianDocumentLoader, Papa, type PapaConfig } from "papa-ts";
 import { get } from "svelte/store";
 import Log, { LogLvl } from "./logging";
 import { wildTest } from "./utils/utils";
-import {
-	papaState,
-	errorState,
-	papaIndexingProgress,
-	chatHistory,
-	serializeChatHistory,
-	runState,
-	runContent,
-	papaIndexingTimeLeft,
-} from "./store";
+import { papaState, errorState, papaIndexingProgress, runState, runContent, papaIndexingTimeLeft } from "./store";
 import { _ } from "svelte-i18n";
 import type SecondBrainPlugin from "./main";
 

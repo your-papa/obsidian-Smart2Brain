@@ -13,11 +13,10 @@ import type {
 
 // Helper types for model settings
 type EmbedModelSettings = {
-	selEmbedModel: string;
 	embedModels: Map<string, EmbedModelConfig>;
 };
+
 type GenModelSettings = {
-	selGenModel: string;
 	genModels: Map<string, GenModelConfig>;
 };
 
