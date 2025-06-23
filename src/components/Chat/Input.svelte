@@ -3,7 +3,7 @@ import { icon } from "../../utils/utils";
 import Button from "../base/Button.svelte";
 </script>
 
-<div class="border-reflect m-2 mb-0 rounded-t-[20px] bg-[--text-accent-lighter] p-2 pb-0 backdrop-blur-lg"
+<div class="border-reflect m-2 mb-0 rounded-t-lg bg-[--text-accent-lighter] p-1 pb-0 backdrop-blur-lg"
 style="
   --gradientBorder-gradient: linear-gradient(180deg, var(--min), var(--max), var(--min)), linear-gradient(15deg, var(--min) 50%, var(--max));
   --start: #000000e0;
@@ -11,10 +11,10 @@ style="
   --text-accent-lighter: hsl(var(--accent-h), var(--accent-s), calc(var(--accent-l) + 25%));
 "
 >
-<div class="flex w-full flex-col rounded-t-xl p-2 bg-[--background-primary]">
+<div class="flex w-full flex-col rounded-t-md p-2 pb-1 bg-[--background-primary]">
     <textarea
         id="chat-view-user-input-element"
-        class="h-4 max-h-40 flex-1 resize-none border-0 !shadow-none"
+        class="h-2 max-h-40 flex-1 resize-none border-0 !shadow-none p-0"
         placeholder={'Your text here'}
         onkeydown={() => console.log()}
     ></textarea>
@@ -24,37 +24,12 @@ style="
         <button
             aria-label={'stop'}
             onclick={() => () => console.log("run")}
-            class="h-8 w-8 p-1 rounded-r-md transition duration-300 ease-in-out !bg-[--text-accent-hover]"
+            class="h-7 w-7 p-1 rounded-r-md transition duration-300 ease-in-out !bg-[--text-accent-lighter]"
             use:icon={'arrow-up'}
         ></button>
     </div>
 </div>
 </div>
-
-<style>
-  .border-gradient {
-    position: relative;
-  }
-
-  .border-gradient::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: var(--border-radius) var(--border-radius) 0 0;
-    padding: var(--border-width);
-    background: linear-gradient(135deg,
-      hsl(var(--accent-h), var(--accent-s), var(--accent-l)),
-      hsl(var(--accent-h), calc(var(--accent-s) - 20%), calc(var(--accent-l) + 15%)),
-      hsl(var(--accent-h), var(--accent-s), calc(var(--accent-l) - 10%))
-    );
-    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-    z-index: 1;
-  }
-</style>
 <!-- <script lang="ts">
 import { run, preventDefault } from "svelte/legacy";
 
