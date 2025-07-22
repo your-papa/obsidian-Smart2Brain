@@ -1,39 +1,61 @@
-import { OllamaProvider, OpenAIProvider, type RegisteredProvider } from "papa-ts";
-import SecondBrainPlugin from "../main";
-import type { ChatMessage } from "../types/chat";
+import {
+  OllamaProvider,
+  OpenAIProvider,
+  type GenModelConfig,
+  type RegisteredProvider,
+} from "papa-ts";
+import SecondBrainPlugin, { type PluginData } from "../main";
+
+import { createQuery } from "@tanstack/svelte-query";
+import type { PluginDataStore } from "./data.svelte";
+import SmartSecondBrain from "../SmartSecondBrain";
+import type { GenProviders } from "../types/providers";
+import type { ChatModel } from "../components/Chat/chatState";
 
 export const providerState: Record<RegisteredProvider, boolean> = $state({
-	OpenAI: false,
-	Ollama: false,
-	CustomOpenAI: false,
-	Anthropic: false,
+  OpenAI: false,
+  Ollama: false,
+  CustomOpenAI: false,
+  Anthropic: false,
 });
 
 let isChatInSidebar: boolean = $state(true);
 
 export const chatLayout = {
-	get isSidebar(): boolean {
-		return isChatInSidebar;
-	},
+  get isSidebar(): boolean {
+    return isChatInSidebar;
+  },
 
-	set isSidebar(val: boolean) {
-		isChatInSidebar = val;
-	},
+  set isSidebar(val: boolean) {
+    isChatInSidebar = val;
+  },
 
-	toggleIsSidebar() {
-		isChatInSidebar = !isChatInSidebar;
-	},
+  toggleIsSidebar() {
+    isChatInSidebar = !isChatInSidebar;
+  },
 };
 
 let _plugin: SecondBrainPlugin | undefined = $state(undefined);
 
 export function setPlugin(plugin: SecondBrainPlugin) {
-	_plugin = plugin;
+  _plugin = plugin;
 }
 
 export function getPlugin(): SecondBrainPlugin {
-	if (!_plugin) throw Error("No");
-	return _plugin;
+  if (!_plugin) throw Error("No");
+  return _plugin;
 }
 
-export const chatHistory: ChatMessage | undefined = $state(undefined);
+export function modelQuery(
+  provider: RegisteredProvider,
+  plugin: SecondBrainPlugin,
+) {
+  return createQuery(() => ({
+    queryKey: ["models", provider],
+    queryFn: async () => {
+      return await plugin.papa.providerRegistry
+        .getProvider(provider)
+        .getModels();
+    },
+  }));
+}

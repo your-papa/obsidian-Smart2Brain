@@ -1,22 +1,24 @@
 <script lang="ts">
-import { run, preventDefault } from "svelte/legacy";
+    import { QueryClientProvider } from "@tanstack/svelte-query";
+    import Input from "./Input.svelte";
+    import { getPlugin } from "../../lib/state.svelte";
+    import { messenger } from "./chatState.svelte";
+    import { ChatView } from "../../views/Chat";
+    import MessageContainer from "./MessageContainer.svelte";
+    const plugin = getPlugin();
+    const iconStyle = "text-[--text-normal] hover:text-[--text-accent-hover]";
 
-import Input from "./Input.svelte";
-import QuickSettingsDrawer from "./QuickSettingsDrawer.svelte";
-import { Notice } from "obsidian";
-import DotAnimation from "../base/DotAnimation.svelte";
-import MessageContainer from "./MessageContainer.svelte";
-import { t } from "svelte-i18n";
-import { papaState, isEditing, isEditingAssistantMessage, runContent, runState } from "../../store";
-import { icon } from "../../utils/utils";
-
-const iconStyle = "text-[--text-normal] hover:text-[--text-accent-hover]";
+    const chat = messenger.createChat();
+    console.log(chat);
 </script>
 
-<div class="--background-modifier-border rounded-t-md flex h-full flex-col gap-1 border border-solid border-[--background-modifier-border] bg-[--background-primary]">
+<QueryClientProvider client={plugin.queryClient}>
     <div
-        class="chat-window w-full flex-grow select-text overflow-y-scroll"
+        class="--background-modifier-border rounded-t-md flex h-full flex-col gap-1 border border-solid border-[--background-modifier-border] bg-[--background-primary]"
     >
+        <div class="chat-window w-full flex-grow select-text overflow-y-scroll">
+            <MessageContainer messages={chat.messages} />
+        </div>
+        <Input chatId={chat.id} messengner={messenger} />
     </div>
-    <Input/>
-</div>
+</QueryClientProvider>
