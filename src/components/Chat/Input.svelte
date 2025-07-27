@@ -1,20 +1,22 @@
 <script lang="ts">
     import { icon } from "../../utils/utils";
     import { onMount } from "svelte";
-    import { nanoid } from "nanoid";
-    import { getPlugin, modelQuery } from "../../lib/state.svelte";
+    import { getPlugin } from "../../lib/state.svelte";
     import { Messenger, type ChatModel } from "./chatState.svelte";
-    import type { Language } from "papa-ts";
     import Dropdown from "../base/Dropdown.svelte";
-    import { getData, PluginDataStore } from "../../lib/data.svelte";
-    import { createQuery, Query, QueryClient } from "@tanstack/svelte-query";
-    import type SecondBrainPlugin from "../../main";
+    import { getData } from "../../lib/data.svelte";
+    import { createQuery } from "@tanstack/svelte-query";
+    import Icon from "../icons/Icon.svelte";
     import Button from "../base/Button.svelte";
 
     interface Props {
         chatId: string;
         messengner: Messenger;
     }
+
+    const baseOptions = ".txt, .json";
+
+    const test = "";
 
     const { chatId, messengner }: Props = $props();
 
@@ -110,6 +112,36 @@
             queryKey: ["chatModels", providers],
         });
     }
+
+    let files: File[] = $state([]);
+
+    function sendMessage() {
+        messengner.sendMessage(chatId, inputValue, chatModel!!, files);
+        files = [];
+        inputValue = "";
+    }
+
+    const handeEnter = (event: KeyboardEvent) => {
+        if (event.key === "Enter" && inputValue.length !== 0) {
+            event.preventDefault();
+            sendMessage();
+        }
+    };
+
+    function onFileAttachment(event: Event) {
+        const input = event.target as HTMLInputElement;
+        const fileList = input.files;
+        if (fileList) {
+            for (const file of fileList) {
+                files.push(file);
+            }
+            console.log("Files:", files);
+        }
+    }
+
+    function removeAttachedFile(file: File) {
+        files.remove(file);
+    }
 </script>
 
 <div class="w-full px-2">
@@ -125,9 +157,42 @@
         <div
             class="flex w-full flex-col rounded-t-md p-2 pb-1 bg-[--background-primary]"
         >
+            <div class="flex flex-row flex-wrap gap-2">
+                {#each files as file}
+                    <div
+                        class="flex flex-row gap-0.5 items-center bg-[buttonface] rounded-md"
+                    >
+                        {#if file.type === "text/plain"}
+                            <div
+                                class="p-0 flex items-center"
+                                use:icon={"file-text"}
+                                style={"--icon-size: var(--icon-xs)"}
+                            ></div>
+                        {:else if file.type === "application/json"}
+                            <div
+                                class="p-0 flex items-center"
+                                use:icon={"file-json"}
+                                style={"--icon-size: var(--icon-xs)"}
+                            ></div>
+                        {/if}
+                        <div class="text-xs">
+                            {file.name}
+                        </div>
+                        <!-- svelte-ignore a11y_click_events_have_key_events -->
+                        <!-- svelte-ignore a11y_no_static_element_interactions -->
+                        <div
+                            use:icon={"x"}
+                            style={"--icon-size: 10px"}
+                            onclick={() => removeAttachedFile(file)}
+                            class="hover:bg-[buttonface] flex items-center justify-center h-4 w-4 bg-white rounded-sm mr-1 my-1"
+                        ></div>
+                    </div>
+                {/each}
+            </div>
             <textarea
                 bind:this={textarea}
                 bind:value={inputValue}
+                onkeypress={(event) => handeEnter(event)}
                 id="chat-view-user-input-element"
                 class="resize-none border-0 !shadow-none p-1"
                 placeholder={"Your text here"}
@@ -135,7 +200,7 @@
             ></textarea>
 
             <div class="flex w-full items-center">
-                <div class="flex flex-row flex-1">
+                <div class="flex flex-row flex-1 gap-2">
                     <Dropdown
                         type="options"
                         dropdown={availModelsQuery.data?.map((model) => ({
@@ -145,7 +210,14 @@
                         selected={chatModel}
                         onSelect={(model) => (chatModel = model)}
                     />
-                    <input type="file" id="attachment" style="display:none;" />
+                    <input
+                        type="file"
+                        multiple={true}
+                        id="attachment"
+                        accept={baseOptions}
+                        style="display:none;"
+                        oninput={(event) => onFileAttachment(event)}
+                    />
                     <label
                         class="clickable-icon"
                         use:icon={"paperclip"}
@@ -154,11 +226,8 @@
                 </div>
                 <button
                     disabled={inputValue.length === 0}
-                    aria-label={"stop"}
-                    onclick={() => {
-                        messengner.sendMessage(chatId, inputValue, chatModel!!);
-                        inputValue = "";
-                    }}
+                    aria-label={"send message"}
+                    onclick={sendMessage}
                     class="h-7 w-7 p-1 rounded-r-md transition duration-300 ease-in-out !bg-[--text-accent-lighter] color-[--background-primary]"
                     use:icon={"arrow-up"}
                 ></button>

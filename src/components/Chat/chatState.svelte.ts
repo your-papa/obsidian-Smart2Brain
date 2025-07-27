@@ -1,10 +1,5 @@
 import { nanoid } from "nanoid";
-import type {
-  GenModelConfig,
-  Language,
-  RegisteredEmbedProvider,
-  RegisteredGenProvider,
-} from "papa-ts";
+import type { GenModelConfig, Language, RegisteredGenProvider } from "papa-ts";
 import { getPlugin } from "../../lib/state.svelte";
 import { getData } from "../../lib/data.svelte";
 
@@ -16,9 +11,11 @@ export type ChatModel = {
   modelConfig: GenModelConfig;
 };
 
+const defaultAttachments = [".txt", ".json"];
+
 export type UserMessage = {
   content: string;
-  attatchments?: Uint8Array[];
+  attatchments?: File[];
   id: string;
 };
 
@@ -105,12 +102,23 @@ export class ChatSession {
     return this.chat;
   }
 
-  async sendMessage(messageContent: string, model: ChatModel): Promise<string> {
+  async sendMessage(
+    messageContent: string,
+    model: ChatModel,
+    attachments?: File[],
+  ): Promise<string> {
     const messagePairId = nanoid();
     const userMessage: UserMessage = {
       content: messageContent,
+      attatchments: attachments,
       id: nanoid(),
     };
+
+    if (attachments) {
+      for (const attachment of attachments) {
+        console.log(attachment.type);
+      }
+    }
 
     const assistantMessage: AssistantMessage = {
       state: "idle",
@@ -274,9 +282,10 @@ export class Messenger {
     chatId: string,
     messageContent: string,
     model: ChatModel,
+    attachments?: File[],
   ): Promise<string> {
     const session = this.getSession(chatId);
-    return session.sendMessage(messageContent, model);
+    return session.sendMessage(messageContent, model, attachments);
   }
 
   // async regenerateLastMessage(
