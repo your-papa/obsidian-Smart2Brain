@@ -2,8 +2,6 @@ import {
   WorkspaceLeaf,
   type HoverParent,
   HoverPopover,
-  TextFileView,
-  TFile,
   ItemView,
 } from "obsidian";
 
@@ -17,6 +15,7 @@ export class ChatView extends ItemView implements HoverParent {
   plugin!: SecondBrainPlugin;
   component!: ChatViewComponent;
   hoverPopover!: HoverPopover | null;
+  database!: Dexie;
 
   constructor(plugin: SecondBrainPlugin, leaf: WorkspaceLeaf) {
     super(leaf);
@@ -54,7 +53,6 @@ export class ChatView extends ItemView implements HoverParent {
   }
 
   protected onClose(): Promise<void> {
-    console.log("Hii");
     return super.onClose();
   }
 }
