@@ -31,11 +31,66 @@ export class PluginDataStore {
 
   constructor(plugin: SecondBrainPlugin, initialData: PluginData) {
     this._plugin = plugin;
+    // Restore Maps from plain object shapes (after persistence serialization)
+    for (const cfg of Object.values(initialData.providerConfig) as any[]) {
+      if (
+        cfg &&
+        "embedModels" in cfg &&
+        cfg.embedModels &&
+        !(cfg.embedModels instanceof Map)
+      ) {
+        cfg.embedModels = new Map(Object.entries(cfg.embedModels));
+      }
+      if (
+        cfg &&
+        "genModels" in cfg &&
+        cfg.genModels &&
+        !(cfg.genModels instanceof Map)
+      ) {
+        cfg.genModels = new Map(Object.entries(cfg.genModels));
+      }
+    }
     this.#data = $state(initialData);
   }
 
+  /**
+   * Persist current settings.
+   * We need to serialize Maps (embedModels / genModels) because Obsidian (JSON) persistence
+   * will turn Map instances into empty objects `{}` otherwise, losing data.
+   * Also we always snapshot the $state to avoid saving reactive proxies.
+   */
   private async saveSettings() {
-    await this._plugin.saveData($state.snapshot(this.#data));
+    const snap = $state.snapshot(this.#data);
+
+    // Deep(ish) clone with Map -> plain object conversion
+    const plain: any = {
+      ...snap,
+      providerConfig: {},
+    };
+
+    for (const [provider, cfg] of Object.entries(snap.providerConfig)) {
+      const cloned: any = { ...cfg };
+
+      if ("embedModels" in cfg && cfg.embedModels instanceof Map) {
+        cloned.embedModels = Object.fromEntries(cfg.embedModels);
+      }
+      if ("genModels" in cfg && cfg.genModels instanceof Map) {
+        cloned.genModels = Object.fromEntries(cfg.genModels);
+      }
+
+      plain.providerConfig[provider] = cloned;
+    }
+
+    await this._plugin.saveData(plain);
+  }
+
+  getLastActiveChatId(): string | null {
+    return this.#data.lastActiveChatId;
+  }
+
+  setLastActiveChatId(id: string | null) {
+    this.#data.lastActiveChatId = id;
+    this.saveSettings();
   }
 
   deleteData() {
@@ -169,14 +224,6 @@ export class PluginDataStore {
     this.saveSettings();
   }
 
-  get isOnboarded() {
-    return this.#data.isOnboarded;
-  }
-  set isOnboarded(val: boolean) {
-    this.#data.isOnboarded = val;
-    this.saveSettings();
-  }
-
   get hideIncognitoWarning() {
     return this.#data.hideIncognitoWarning;
   }
@@ -222,16 +269,14 @@ export class PluginDataStore {
 
   // --- Embed Model Management (Map-based) ---
 
-  getSelEmbedModel<P extends EmbedProviders>(
-    provider: P,
-  ): GetProviderConfig<P>["selEmbedModel"] {
-    return this.#data.providerConfig[provider].selEmbedModel;
+  getSelEmbedModel() {
+    return this.#data.selEmbedModel;
   }
 
-  selectEmbedModel<P extends EmbedProviders>(provider: P, value: string) {
+  selectEmbedModel(provider: RegisteredEmbedProvider, value: string) {
     if (!this.#data.providerConfig[provider].embedModels.has(value))
       throw new SetEmbedModelError(provider, value);
-    this.#data.providerConfig[provider].selEmbedModel = value;
+    this.#data.selEmbedModel = { provider, model: value };
     this.saveSettings();
   }
 
@@ -246,9 +291,13 @@ export class PluginDataStore {
     modelName: string,
     conf: EmbedModelConfig,
   ) {
-    if (this.#data.providerConfig[provider].embedModels.has(modelName))
+    const current = this.#data.providerConfig[provider].embedModels;
+    if (current.has(modelName))
       throw new AddEmbedModelError(provider, modelName);
-    this.#data.providerConfig[provider].embedModels.set(modelName, conf);
+    // Reassign a new Map to ensure reactivity + easier change detection
+    const next = new Map(current);
+    next.set(modelName, conf);
+    this.#data.providerConfig[provider].embedModels = next;
     this.saveSettings();
   }
 
@@ -257,16 +306,22 @@ export class PluginDataStore {
     modelName: string,
     conf: EmbedModelConfig,
   ) {
-    if (!this.#data.providerConfig[provider].embedModels.has(modelName))
+    const current = this.#data.providerConfig[provider].embedModels;
+    if (!current.has(modelName))
       throw new SetEmbedModelError(provider, modelName);
-    this.#data.providerConfig[provider].embedModels.set(modelName, conf);
+    const next = new Map(current);
+    next.set(modelName, conf);
+    this.#data.providerConfig[provider].embedModels = next;
     this.saveSettings();
   }
 
   deleteEmbedModel<P extends EmbedProviders>(provider: P, modelName: string) {
-    if (!this.#data.providerConfig[provider].embedModels.has(modelName))
+    const current = this.#data.providerConfig[provider].embedModels;
+    if (!current.has(modelName))
       throw new SetEmbedModelError(provider, modelName);
-    this.#data.providerConfig[provider].embedModels.delete(modelName);
+    const next = new Map(current);
+    next.delete(modelName);
+    this.#data.providerConfig[provider].embedModels = next;
     this.saveSettings();
   }
 
@@ -281,9 +336,11 @@ export class PluginDataStore {
     modelName: string,
     conf: GenModelConfig,
   ) {
-    if (this.#data.providerConfig[provider].genModels.has(modelName))
-      throw new AddGenModelError(provider, modelName);
-    this.#data.providerConfig[provider].genModels.set(modelName, conf);
+    const current = this.#data.providerConfig[provider].genModels;
+    if (current.has(modelName)) throw new AddGenModelError(provider, modelName);
+    const next = new Map(current);
+    next.set(modelName, conf);
+    this.#data.providerConfig[provider].genModels = next;
     this.saveSettings();
   }
 
@@ -292,33 +349,34 @@ export class PluginDataStore {
     modelName: string,
     conf: GenModelConfig,
   ) {
-    if (!this.#data.providerConfig[provider].genModels.has(modelName))
+    const current = this.#data.providerConfig[provider].genModels;
+    if (!current.has(modelName))
       throw new SetGenModelError(provider, modelName);
-    this.#data.providerConfig[provider].genModels.set(modelName, conf);
+    const next = new Map(current);
+    next.set(modelName, conf);
+    this.#data.providerConfig[provider].genModels = next;
     this.saveSettings();
   }
 
   deleteGenModel<P extends GenProviders>(provider: P, modelName: string) {
-    if (!this.#data.providerConfig[provider].genModels.has(modelName))
+    const current = this.#data.providerConfig[provider].genModels;
+    if (!current.has(modelName))
       throw new SetGenModelError(provider, modelName);
-    this.#data.providerConfig[provider].genModels.delete(modelName);
+    const next = new Map(current);
+    next.delete(modelName);
+    this.#data.providerConfig[provider].genModels = next;
     this.saveSettings();
   }
 
-  // Get/set selGenModel (if present)
-  getProviderSelGenModel<K extends keyof PluginData["providerConfig"]>(
-    provider: K,
-  ): string | undefined {
-    return (this.#data.providerConfig[provider] as any).selGenModel;
+  getSelGenModel() {
+    return this.#data.selGenModel;
   }
-  setProviderSelGenModel<K extends keyof PluginData["providerConfig"]>(
-    provider: K,
-    value: string,
-  ) {
-    if ("selGenModel" in this.#data.providerConfig[provider]) {
-      (this.#data.providerConfig[provider] as any).selGenModel = value;
-      this.saveSettings();
-    }
+
+  selectGenModel(provider: RegisteredGenProvider, value: string) {
+    if (!this.#data.providerConfig[provider].genModels.has(value))
+      throw new SetGenModelError(provider, value);
+    this.#data.selGenModel = { provider, model: value };
+    this.saveSettings();
   }
 
   // Get/set genModels (if present)

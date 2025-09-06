@@ -33,10 +33,17 @@ import "./styles.css";
 import SettingsTab from "./views/Settings";
 import { RemoveModal } from "./components/Modal/RemoveModal";
 import type { ProviderConfigs } from "./types/providers";
-import { createData, PluginDataStore } from "./lib/data.svelte";
+import { createData, getData, PluginDataStore } from "./lib/data.svelte";
 import { chatLayout, setPlugin } from "./lib/state.svelte";
 import { QueryClient } from "@tanstack/svelte-query";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/Chat";
+import { ChatDB } from "./components/db/chatDbSchema";
+import {
+  Chat,
+  createMessenger,
+  getLastActiveChatId,
+  Messenger,
+} from "./components/Chat/chatState.svelte";
 
 export interface PluginData {
   providerConfig: ProviderConfigs;
@@ -57,6 +64,7 @@ export interface PluginData {
   isVerbose: boolean;
   hideIncognitoWarning: boolean;
   isAutostart: boolean;
+  lastActiveChatId: string | null;
 }
 
 const queryClient = new QueryClient({
@@ -75,12 +83,19 @@ export default class SecondBrainPlugin extends Plugin {
   pluginData!: PluginDataStore;
   private isChatAcivatedFromRibbon = false; // workaround for a bug where the chat view is activated twice through monkey patching
   private autoSaveTimer!: number;
+  private chatCacheDb!: ChatDB;
 
   async onload() {
     setPlugin(this);
     const VIEW_TYPE_CHAT = "chat-view";
     this.pluginData = await createData(this);
-    const t = get(_);
+    this.chatCacheDb = new ChatDB();
+    const messenger = createMessenger(this.chatCacheDb);
+
+    const lastActiveChat: Chat = await getLastActiveChatId(
+      messenger,
+      this.pluginData,
+    );
 
     this.papa = new Papa({
       debugging: {
@@ -160,30 +175,33 @@ export default class SecondBrainPlugin extends Plugin {
     // window.addEventListener("keypress", () => resetAutoSaveTimer());
     // window.addEventListener("scroll", () => resetAutoSaveTimer());
 
-    this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(this, leaf));
-
-    this.addRibbonIcon("message-square", t("ribbon.chat"), () =>
-      this.activateView(),
+    this.registerView(
+      VIEW_TYPE_CHAT,
+      (leaf) => new ChatView(this, leaf, lastActiveChat),
     );
 
-    this.addCommand({
-      id: "open-chat",
-      name: t("cmd.chat"),
-      icon: "message-square",
-      callback: () => this.activateView(),
-    });
-    this.addCommand({
-      id: "pull-model",
-      name: t("cmd.pull_model"),
-      icon: "arrow-down-to-line",
-      callback: () => new PullModal(this.app).open(),
-    });
-    this.addCommand({
-      id: "remove-model",
-      name: t("cmd.remove_model"),
-      icon: "trash",
-      callback: () => new RemoveModal(this.app).open(),
-    });
+    // this.addRibbonIcon("message-square", t("ribbon.chat"), () =>
+    //   this.activateView(),
+    // );
+
+    // this.addCommand({
+    //   id: "open-chat",
+    //   name: t("cmd.chat"),
+    //   icon: "message-square",
+    //   callback: () => this.activateView(),
+    // });
+    // this.addCommand({
+    //   id: "pull-model",
+    //   name: t("cmd.pull_model"),
+    //   icon: "arrow-down-to-line",
+    //   callback: () => new PullModal(this.app).open(),
+    // });
+    // this.addCommand({
+    //   id: "remove-model",
+    //   name: t("cmd.remove_model"),
+    //   icon: "trash",
+    //   callback: () => new RemoveModal(this.app).open(),
+    // });
 
     this.addSettingTab(new SettingsTab(this));
 

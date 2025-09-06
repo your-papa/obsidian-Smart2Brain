@@ -16,8 +16,6 @@
 
     const baseOptions = ".txt, .json";
 
-    const test = "";
-
     const { chatId, messengner }: Props = $props();
 
     let textarea: HTMLTextAreaElement;
@@ -83,29 +81,56 @@
 
     const allModelsLoaded = $derived(modelQueries.every((q) => q.isSuccess));
 
+    function mapAvailableModels(): ChatModel[] {
+        const available: ChatModel[] = [];
+        for (const provider of providers) {
+            const models: string[] | undefined =
+                plugin.queryClient.getQueryData(["models", provider]);
+            if (!models) continue;
+            const confModels = data.getGenModels(provider);
+            for (const [modelName, modelConfig] of confModels.entries()) {
+                if (models.includes(modelName)) {
+                    available.push({
+                        model: modelName,
+                        provider,
+                        modelConfig,
+                    });
+                }
+            }
+        }
+        return available;
+    }
+
     const availModelsQuery = createQuery(() => ({
         queryKey: ["chatModels", providers],
         enabled: allModelsLoaded,
         queryFn: async () => {
-            const availableModels = [];
-            for (const provider of providers) {
-                const models: string[] | undefined =
-                    plugin.queryClient.getQueryData(["models", provider]);
-                if (!models) continue;
-                const confModels = data.getGenModels(provider);
-                for (const [modelName, modelConfig] of confModels.entries()) {
-                    if (models.includes(modelName)) {
-                        availableModels.push({
-                            model: modelName,
-                            provider,
-                            modelConfig,
-                        });
-                    }
-                }
-            }
-            return availableModels;
+            const list = mapAvailableModels();
+            return list;
         },
     }));
+
+    let _chatModelInitialized = $state(false);
+    $effect(() => {
+        if (_chatModelInitialized) return;
+        const list = availModelsQuery.data;
+        if (!list || !list.length) return;
+
+        const sel = data.getSelGenModel();
+        if (sel) {
+            const found = list.find(
+                (m) => m.provider === sel.provider && m.model === sel.model,
+            );
+            if (found) {
+                chatModel = found;
+                _chatModelInitialized = true;
+                return;
+            }
+        }
+        chatModel = list[0];
+        data.selectGenModel(list[0].provider, list[0].model);
+        _chatModelInitialized = true;
+    });
 
     function refetch() {
         plugin.queryClient.invalidateQueries({
@@ -116,7 +141,8 @@
     let files: File[] = $state([]);
 
     function sendMessage() {
-        messengner.sendMessage(chatId, inputValue, chatModel!!, files);
+        const session = messengner.getSession(chatId)!!;
+        messengner.sendMessage(session, inputValue, chatModel!!, files);
         files = [];
         inputValue = "";
     }
@@ -203,12 +229,18 @@
                 <div class="flex flex-row flex-1 gap-2">
                     <Dropdown
                         type="options"
-                        dropdown={availModelsQuery.data?.map((model) => ({
-                            display: model.model,
-                            value: model,
-                        })) ?? []}
+                        dropdown={availModelsQuery.data
+                            ? availModelsQuery.data.map((model) => ({
+                                  display: model.model,
+                                  value: model,
+                              }))
+                            : []}
                         selected={chatModel}
-                        onSelect={(model) => (chatModel = model)}
+                        onSelect={(model) => {
+                            if (!model) return;
+                            chatModel = model;
+                            data.selectGenModel(model.provider, model.model);
+                        }}
                     />
                     <input
                         type="file"
