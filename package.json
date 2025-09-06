@@ -26,14 +26,13 @@
   },
   "type": "module",
   "dependencies": {
-    "@signaldb/core": "^1.7.0",
-    "@signaldb/svelte": "^1.1.1",
     "@tanstack/svelte-query": "https://pkg.pr.new/@tanstack/svelte-query@746b9c5d83e901deb3a5ca7012a4b4e2b617c5e3",
     "builtin-modules": "^5.0.0",
+    "dexie": "^4.0.11",
     "i18next": "^23.16.8",
     "monkey-around": "^3.0.0",
-    "nanoid": "^5.1.5",
     "papa-ts": "link:papa-ts",
-    "svelte-i18n": "^4.0.1"
+    "svelte-i18n": "^4.0.1",
+    "uuid": "^11.1.0"
   }
 }
