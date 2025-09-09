@@ -4,7 +4,6 @@
     import { getData } from "../../lib/data.svelte";
     import Button from "../base/Button.svelte";
     import SettingContainer from "../Settings/SettingContainer.svelte";
-    import { createQuery } from "@tanstack/svelte-query";
     import { getPlugin, modelQuery } from "../../lib/state.svelte";
     import type SecondBrainPlugin from "../../main";
     import Dropdown from "../base/Dropdown.svelte";
@@ -34,12 +33,28 @@
 
     let { data: models, isPending, isError } = $derived(query);
 
-    let genModels: Map<string, GenModelConfig> = $derived(
-        data.getGenModels(provider),
-    );
+    let genModels = $derived.by<Map<string, GenModelConfig>>(() => {
+        const confGenModels = data.getGenModels(provider);
+
+        const allowedKeys = new Set(
+            (models ?? [])
+                .map((m: any) => (typeof m === "string" ? m : m?.key))
+                .filter(Boolean),
+        );
+
+        if (allowedKeys.size === 0) return confGenModels;
+
+        return new Map(
+            Array.from(confGenModels.entries()).filter(([key]) =>
+                allowedKeys.has(key),
+            ),
+        );
+    });
 
     let configuredModels: string[] = $derived(
-        Array.from(data.getGenModels(provider).keys()),
+        models?.filter((model) =>
+            Array.from(data.getGenModels(provider).keys()).includes(model),
+        ) ?? [],
     );
     let selectedModel = $derived(
         !isPending && !isError && models ? models[0] : configuredModels[0],
@@ -72,7 +87,15 @@
     >
         {#each genModels as genModel}
             <div class="community-item">
-                <span>{genModel[0]}</span>
+                <div class="flex items-center">
+                    <span>{genModel[0]}</span>
+                    <Button
+                        styles={"ml-auto hover:text-[--text-error]"}
+                        iconId="trash"
+                        onClick={() =>
+                            data.deleteGenModel(provider, genModel[0])}
+                    />
+                </div>
                 <span class="text-muted text-xs pt-1 leading-tight"
                     >{genModel[1].contextWindow}</span
                 >
@@ -135,8 +158,9 @@
         disabled={!selectedModel}
         buttonText={isModelConfigured() ? "Update" : "Add"}
         onClick={() =>
-            selectedModel &&
-            data.addGenModel(provider, selectedModel, genModelConfig)}
+            selectedModel && isModelConfigured()
+                ? data.updateGenModel(provider, selectedModel, genModelConfig)
+                : data.addGenModel(provider, selectedModel, genModelConfig)}
     />
     <Button buttonText="Cancel" onClick={() => modal.close()} />
 </div>
