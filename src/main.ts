@@ -180,9 +180,9 @@ export default class SecondBrainPlugin extends Plugin {
       (leaf) => new ChatView(this, leaf, lastActiveChat),
     );
 
-    // this.addRibbonIcon("message-square", t("ribbon.chat"), () =>
-    //   this.activateView(),
-    // );
+    this.addRibbonIcon("message-square", "ribbon.chat", () =>
+      this.activateView(),
+    );
 
     // this.addCommand({
     //   id: "open-chat",

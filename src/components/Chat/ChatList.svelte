@@ -28,9 +28,6 @@
 
     let hostEl: HTMLElement | null = null;
 
-    /**********************
-     * Sync external prop changes
-     **********************/
     $effect(() => {
         // If parent updates the prop externally and it's different from our internal
         if (incomingSelectedChatId !== selectedChatId) {
@@ -169,52 +166,6 @@
     }
 
     /**********************
-     * Keyboard Navigation
-     **********************/
-    function moveFocus(delta: number) {
-        if (!chats.length) return;
-        if (focusedIndex < 0) focusedIndex = 0;
-        let idx = focusedIndex + delta;
-        if (idx < 0) idx = 0;
-        if (idx >= chats.length) idx = chats.length - 1;
-        focusedIndex = idx;
-    }
-
-    function moveFocusAbs(index: number) {
-        if (!chats.length) return;
-        focusedIndex = Math.max(0, Math.min(chats.length - 1, index));
-    }
-
-    function handleListKeyDown(e: KeyboardEvent) {
-        if (!chats.length) return;
-        switch (e.key) {
-            case "ArrowDown":
-                e.preventDefault();
-                moveFocus(1);
-                break;
-            case "ArrowUp":
-                e.preventDefault();
-                moveFocus(-1);
-                break;
-            case "Home":
-                e.preventDefault();
-                moveFocusAbs(0);
-                break;
-            case "End":
-                e.preventDefault();
-                moveFocusAbs(chats.length - 1);
-                break;
-            case "Enter":
-            case " ":
-                e.preventDefault();
-                if (focusedIndex >= 0 && focusedIndex < chats.length) {
-                    selectChat(chats[focusedIndex].id);
-                }
-                break;
-        }
-    }
-
-    /**********************
      * Lifecycle
      **********************/
     onMount(() => {
@@ -256,7 +207,6 @@
         role="listbox"
         aria-label="Chat list"
         tabindex="0"
-        onkeydown={handleListKeyDown}
         aria-activedescendant={focusedIndex >= 0 && focusedIndex < chats.length
             ? `chat-opt-${focusedIndex}`
             : undefined}
