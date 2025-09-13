@@ -2,21 +2,23 @@
     import { icon } from "../../utils/utils";
     import { onMount } from "svelte";
     import { getPlugin } from "../../lib/state.svelte";
-    import { Messenger, type ChatModel } from "./chatState.svelte";
+    import {
+        CurrentChatId,
+        Messenger,
+        type ChatModel,
+    } from "./chatState.svelte";
     import Dropdown from "../base/Dropdown.svelte";
     import { getData } from "../../lib/data.svelte";
     import { createQuery } from "@tanstack/svelte-query";
-    import Icon from "../icons/Icon.svelte";
-    import Button from "../base/Button.svelte";
 
     interface Props {
-        chatId: string;
         messengner: Messenger;
+        currentChatId: CurrentChatId;
     }
 
     const baseOptions = ".txt, .json";
 
-    const { chatId, messengner }: Props = $props();
+    const { messengner, currentChatId }: Props = $props();
 
     let textarea: HTMLTextAreaElement;
     let inputValue = $state("");

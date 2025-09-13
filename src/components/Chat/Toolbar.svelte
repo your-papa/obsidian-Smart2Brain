@@ -6,4 +6,8 @@
     const { chatName }: Props = $props();
 </script>
 
-<div class="mx-2">{chatName}</div>
+<div
+    class="border-solid border-[--background-modifier-border] rounded-lg px-2 py-1π"
+>
+    {chatName}
+</div>
