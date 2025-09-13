@@ -1,6 +1,6 @@
 import { v7 as uuidv7 } from "uuid";
 import type { GenModelConfig, Language, RegisteredGenProvider } from "papa-ts";
-import { writable, type Writable } from "svelte/store";
+import { get, writable, type Writable } from "svelte/store";
 import { getPlugin } from "../../lib/state.svelte";
 import { getData, type PluginDataStore } from "../../lib/data.svelte";
 import type {
@@ -49,7 +49,7 @@ export interface MessagePair {
 export interface ChatPreview {
   id: string;
   title: string;
-  lastAccessed: string;
+  lastAccessed: Date;
 }
 
 export interface ChatModel {
@@ -76,23 +76,23 @@ export type Chat = ChatRecord; // Backward compatibility alias
  *  - Ephemeral per-chat runtime state (streaming, abort, reactive messages)
  *  - Uses granular persistence API (addMessage + assistant partial updates)
  * ---------------------------------------------------------------------------*/
+// ChatSession.svelte.ts
+
 export class ChatSession {
   readonly chatId: string;
   title: string;
   lastAccessed: Date;
-
-  // Reactive messages store for UI components to subscribe.
-  readonly messagesStore: Writable<MessagePair[]>;
-  // Local array backing the store.
-  private _messages: MessagePair[] = [];
+  // Reactive messages array (mutate with push/splice/etc.)
+  messages: MessagePair[] = $state<MessagePair[]>([]);
 
   // Streaming / lifecycle
   private abortController: AbortController | null = null;
-  private flushTimer: any = null;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingText = "";
   private cancelled = false;
 
-  messageState: "idle" | "answering" | "editing" = "idle";
+  // Reactive UI state (if you read it in the UI)
+  messageState = $state<"idle" | "answering" | "editing">("idle");
 
   constructor(
     initial: ChatRecord,
@@ -101,13 +101,9 @@ export class ChatSession {
     this.chatId = initial.id;
     this.title = initial.title;
     this.lastAccessed = initial.lastAccessed;
-    this._messages = initial.messages.slice();
-    this.messagesStore = writable(this._messages);
-  }
 
-  /** Internal helper: push updates to Svelte store */
-  private updateMessagesStore() {
-    this.messagesStore.set(this._messages);
+    // Seed messages reactively
+    this.messages = initial.messages.slice();
   }
 
   /** Public snapshot (immutable-ish) */
@@ -116,25 +112,24 @@ export class ChatSession {
       id: this.chatId,
       title: this.title,
       lastAccessed: this.lastAccessed,
-      messages: this._messages,
+      messages: this.messages.slice(),
     };
   }
 
   /** Append a message locally (no persistence). */
   private appendLocal(message: MessagePair) {
-    this._messages.push(message);
-    this.updateMessagesStore();
+    this.messages.push(message);
   }
 
   /** Lookup a message by id */
   private findMessage(id: string): MessagePair | undefined {
-    return this._messages.find((m) => m.id === id);
+    return this.messages.find((m) => m.id === id);
   }
 
   /** Build chat history excluding the last (incomplete) message. */
   private buildChatHistory(): string {
-    if (this._messages.length === 0) return "";
-    return this._messages
+    if (this.messages.length === 0) return "";
+    return this.messages
       .slice(0, -1)
       .map(
         (p) =>
@@ -163,7 +158,7 @@ export class ChatSession {
       assistantMessage: { state: "idle", content: "" },
     };
 
-    // Optimistic local update
+    // Optimistic local update (reactive)
     this.appendLocal(pair);
 
     // Persist initial (user) turn
@@ -187,9 +182,9 @@ export class ChatSession {
     this.abortController.abort();
   }
 
-  /* ---------------------------------------------------------------------------
+  /* -----------------------------------------------------------------------
    * Streaming logic
-   * -------------------------------------------------------------------------*/
+   * ---------------------------------------------------------------------*/
 
   private scheduleFlush(messageId: string) {
     if (this.flushTimer) return;
@@ -198,7 +193,6 @@ export class ChatSession {
       if (mp) {
         mp.assistantMessage.state = "streaming";
         mp.assistantMessage.content = this.pendingText;
-        this.updateMessagesStore();
 
         // Granular partial persistence (state + content)
         await this.persistence.updateAssistantMessagePartial(
@@ -240,7 +234,6 @@ export class ChatSession {
 
     mp.assistantMessage.state = finalState;
     mp.assistantMessage.content = this.pendingText;
-    this.updateMessagesStore();
 
     await this.persistence.updateAssistantMessagePartial(
       this.chatId,
@@ -265,7 +258,6 @@ export class ChatSession {
 
       // Mark streaming started
       target.assistantMessage.state = "streaming";
-      this.updateMessagesStore();
       await this.persistence.updateAssistantMessagePartial(
         this.chatId,
         messageId,
@@ -304,24 +296,26 @@ export class ChatSession {
     }
   }
 
-  /* ---------------------------------------------------------------------------
+  /* -----------------------------------------------------------------------
    * Utilities exposed for Messenger / consumers
-   * -------------------------------------------------------------------------*/
+   * ---------------------------------------------------------------------*/
+
+  // If you don't want callers to mutate the array, you can expose a copy,
+  // but for reactivity in the UI it’s typical to read session.messages directly.
   getMessages(): MessagePair[] {
-    return this._messages;
+    return this.messages;
   }
 
   addPreloadedMessages(messages: MessagePair[], replace = false) {
     if (replace) {
-      this._messages = messages.slice();
+      this.messages = messages.slice();
     } else {
       // ensure no duplicates
-      const existing = new Set(this._messages.map((m) => m.id));
+      const existing = new Set(this.messages.map((m) => m.id));
       for (const m of messages) {
-        if (!existing.has(m.id)) this._messages.push(m);
+        if (!existing.has(m.id)) this.messages.push(m);
       }
     }
-    this.updateMessagesStore();
   }
 }
 
@@ -332,7 +326,7 @@ export class ChatSession {
  * ---------------------------------------------------------------------------*/
 export class Messenger {
   private persistence: IChatPersistence;
-  private activeSessions = new Map<string, ChatSession>();
+  private sessions = new Map<string, ChatSession>();
   private pendingLoads = new Map<string, Promise<ChatSession>>();
 
   constructor(db: ChatDB) {
@@ -381,7 +375,7 @@ export class Messenger {
   async deleteChat(id: string): Promise<boolean> {
     const ok = await this.persistence.deleteChat(id);
     if (ok) {
-      this.activeSessions.delete(id);
+      this.sessions.delete(id);
     }
     return ok;
   }
@@ -393,7 +387,7 @@ export class Messenger {
     preloadAll = true,
     bumpLastAccessed = true,
   ): Promise<ChatSession> {
-    const existing = this.activeSessions.get(chatId);
+    const existing = this.sessions.get(chatId);
     if (existing) {
       if (bumpLastAccessed) {
         existing.lastAccessed = new Date();
@@ -428,7 +422,7 @@ export class Messenger {
       }
 
       const session = new ChatSession(record, this.persistence);
-      this.activeSessions.set(chatId, session);
+      this.sessions.set(chatId, session);
       return session;
     })();
 
@@ -440,27 +434,15 @@ export class Messenger {
     }
   }
 
-  getSession(chatId: string): ChatSession | null {
-    return this.activeSessions.get(chatId) ?? null;
+  getSessions(chatId: string | null): ChatSession | null {
+    if (!chatId) return null;
+    return this.sessions.get(chatId) ?? null;
   }
 
   /* ---------------- Sending Messages ---------------- */
 
-  // Overload signatures for backward compatibility
   async sendMessage(
-    chatId: string,
-    content: string,
-    model: ChatModel,
-    attachments?: File[],
-  ): Promise<string>;
-  async sendMessage(
-    session: ChatSession,
-    content: string,
-    model: ChatModel,
-    attachments?: File[],
-  ): Promise<string>;
-  async sendMessage(
-    sessionOrId: string | ChatSession,
+    sessionId: string | null,
     content: string,
     model: ChatModel,
     attachments?: File[],
@@ -475,7 +457,7 @@ export class Messenger {
   }
 
   getActiveSessionsCount(): number {
-    return this.activeSessions.size;
+    return this.sessions.size;
   }
 
   /* ---------------- Dirty Response Cleanup ---------------- */
@@ -557,4 +539,8 @@ export async function getLastActiveChatId(
   const created = await messenger.createChat();
   dataStore.setLastActiveChatId(created.id);
   return created;
+}
+
+export class CurrentChatId {
+  id: string | null = $state(null);
 }

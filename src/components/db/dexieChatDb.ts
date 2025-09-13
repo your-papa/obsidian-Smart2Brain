@@ -81,7 +81,7 @@ export class DexiePersistence implements IChatPersistence {
     return rows.map((r) => ({
       id: r.id,
       title: r.title,
-      lastAccessed: r.lastAccessed, // Keep ISO string format for preview
+      lastAccessed: new Date(r.lastAccessed), // Convert ISO string -> Date for preview
     }));
   }
 
