@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { onMount } from "svelte";
     import { QueryClientProvider } from "@tanstack/svelte-query";
 
     import ChatList from "./ChatList.svelte";

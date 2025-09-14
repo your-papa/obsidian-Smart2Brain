@@ -1,10 +1,5 @@
 <script lang="ts">
-    import { t } from "svelte-i18n";
-    import type {
-        CurrentSession,
-        MessagePair,
-        Messenger,
-    } from "./chatState.svelte";
+    import type { CurrentSession, Messenger } from "./chatState.svelte";
 
     interface Props {
         messenger: Messenger;
