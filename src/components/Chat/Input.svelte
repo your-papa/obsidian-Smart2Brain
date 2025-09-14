@@ -143,8 +143,7 @@
     let files: File[] = $state([]);
 
     function sendMessage() {
-        const session = messengner.getSession(chatId)!!;
-        messengner.sendMessage(session, inputValue, chatModel!!, files);
+        messengner.sendMessage(currentSession, inputValue, chatModel!!, files);
         files = [];
         inputValue = "";
     }

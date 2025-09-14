@@ -10,6 +10,7 @@ import type {
 } from "../db/persistance";
 import { DexiePersistence } from "../db/dexieChatDb";
 import { ChatDB } from "../db/chatDbSchema";
+import { Notice } from "obsidian";
 
 /* -----------------------------------------------------------------------------
  * Shared Types
@@ -393,6 +394,8 @@ export class Messenger {
   }
 
   async deleteChat(id: string): Promise<boolean> {
+    const info = this.sessions.delete(id);
+    console.info("Was an active session", info);
     const ok = await this.persistence.deleteChat(id);
     if (ok) {
       this.sessions.delete(id);
@@ -462,18 +465,17 @@ export class Messenger {
   /* ---------------- Sending Messages ---------------- */
 
   async sendMessage(
-    sessionId: string | null,
+    currentSession: CurrentSession,
     content: string,
     model: ChatModel,
     attachments?: File[],
   ): Promise<string> {
-    let session: ChatSession;
-    if (typeof sessionOrId === "string") {
-      session = await this.ensureSession(sessionOrId);
-    } else {
-      session = sessionOrId;
+    if (!currentSession.session) {
+      const newChat = await this.createChat();
+      new Notice("New chat created");
+      currentSession.session = await this.ensureSession(newChat.id);
     }
-    return session.sendMessage(content, model, attachments);
+    return currentSession.session.sendMessage(content, model, attachments);
   }
 
   getActiveSessionsCount(): number {
