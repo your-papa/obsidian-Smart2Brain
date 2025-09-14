@@ -80,7 +80,7 @@ export type Chat = ChatRecord; // Backward compatibility alias
 
 export class ChatSession {
   readonly chatId: string;
-  title: string;
+  #title: string;
   lastAccessed: Date;
   // Reactive messages array (mutate with push/splice/etc.)
   messages: MessagePair[] = $state<MessagePair[]>([]);
@@ -99,7 +99,7 @@ export class ChatSession {
     private persistence: IChatPersistence,
   ) {
     this.chatId = initial.id;
-    this.title = initial.title;
+    this.#title = initial.title;
     this.lastAccessed = initial.lastAccessed;
 
     // Seed messages reactively
@@ -110,10 +110,21 @@ export class ChatSession {
   get snapshot(): ChatRecord {
     return {
       id: this.chatId,
-      title: this.title,
+      title: this.#title,
       lastAccessed: this.lastAccessed,
       messages: this.messages.slice(),
     };
+  }
+
+  getTitle(): string {
+    return this.#title;
+  }
+
+  setTitle(messenger: Messenger, title: string) {
+    if (this.#title !== title) {
+      this.#title = title;
+      messenger.setTitle(this.chatId, title);
+    }
   }
 
   /** Append a message locally (no persistence). */
@@ -353,6 +364,15 @@ export class Messenger {
     return record;
   }
 
+  async setTitle(id: string, title: string): Promise<boolean> {
+    const session = await this.loadChatRecord(id);
+    if (!session) return false;
+    if (session.title === title) return true;
+    await this.persistence.updateChatMeta(id, { title });
+    session.title = title;
+    return true;
+  }
+
   async loadChatRecord(
     id: string,
     options?: ListMessagesOptions,
@@ -541,6 +561,6 @@ export async function getLastActiveChatId(
   return created;
 }
 
-export class CurrentChatId {
-  id: string | null = $state(null);
+export class CurrentSession {
+  session: ChatSession | null = $state(null);
 }
