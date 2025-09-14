@@ -1,10 +1,12 @@
 <script lang="ts">
     import { onMount } from "svelte";
+    import Button from "../base/Button.svelte";
     import type {
         ChatPreview,
         CurrentSession,
         Messenger,
     } from "./chatState.svelte";
+    import { icon } from "../../utils/utils";
 
     interface props {
         messenger: Messenger;
@@ -14,6 +16,7 @@
     const { messenger, currentSession }: props = $props();
 
     let chats: ChatPreview[] = $state([]);
+    let hoveredChatId: string | null = $state(null);
 
     onMount(async () => {
         chats = await messenger.listChats();
@@ -37,6 +40,19 @@
         const session = await messenger.ensureSession(chatId);
         currentSession.session = session;
     }
+
+    async function deleteChat(chatId: string) {
+        const deleted = await messenger.deleteChat(chatId);
+        if (deleted) {
+            chats = chats.filter((c) => c.id !== chatId);
+            if (
+                currentSession.session &&
+                currentSession.session.chatId === chatId
+            ) {
+                currentSession.session = null;
+            }
+        }
+    }
 </script>
 
 <div class="flex flex-col mt-auto mb-4 gap-1">
@@ -48,11 +64,30 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-            class="flex w-full px-1 hover:bg-[--background-modifier-hover] cursor-pointer"
+            class="flex items-center w-full px-1 hover:bg-[--background-modifier-hover] cursor-pointer"
             onclick={async () => await activateNewSession(chat.id)}
+            onmouseenter={() => (hoveredChatId = chat.id)}
+            onmouseleave={() => (hoveredChatId = null)}
         >
             <div class="text-sm">{chat.title}</div>
-            <div class="ml-auto">{formatDDMMYY_HHMM(chat.lastAccessed)}</div>
+            <div class="ml-auto flex items-center gap-1">
+                {formatDDMMYY_HHMM(chat.lastAccessed)}
+                {#if hoveredChatId === chat.id}
+                    <div onclick={(e) => e.stopPropagation()}>
+                        <div
+                            use:icon={"trash"}
+                            class="trash-icon hover:text-[--background-modifier-error] items-center justify-center m-0"
+                            onclick={async () => await deleteChat(chat.id)}
+                        ></div>
+                    </div>
+                {/if}
+            </div>
         </div>
     {/each}
 </div>
+
+<style>
+    .trash-icon {
+        --icon-size: var(--icon-xs);
+    }
+</style>
