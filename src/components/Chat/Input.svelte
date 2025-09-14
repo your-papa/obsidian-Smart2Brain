@@ -3,7 +3,7 @@
     import { onMount } from "svelte";
     import { getPlugin } from "../../lib/state.svelte";
     import {
-        CurrentChatId,
+        CurrentSession,
         Messenger,
         type ChatModel,
     } from "./chatState.svelte";
@@ -13,12 +13,12 @@
 
     interface Props {
         messengner: Messenger;
-        currentChatId: CurrentChatId;
+        currentSession: CurrentSession;
     }
 
     const baseOptions = ".txt, .json";
 
-    const { messengner, currentChatId }: Props = $props();
+    const { messengner, currentSession }: Props = $props();
 
     let textarea: HTMLTextAreaElement;
     let inputValue = $state("");

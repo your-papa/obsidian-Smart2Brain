@@ -1,20 +1,20 @@
 <script lang="ts">
     import { t } from "svelte-i18n";
     import type {
-        CurrentChatId,
+        CurrentSession,
         MessagePair,
         Messenger,
     } from "./chatState.svelte";
 
     interface Props {
         messenger: Messenger;
-        currentChatId: CurrentChatId;
+        currentSession: CurrentSession;
     }
 
-    const { messenger, currentChatId }: Props = $props();
+    const { messenger, currentSession }: Props = $props();
 
     const messages = $derived.by(() => {
-        const session = messenger.getSessions(currentChatId.id);
+        const session = currentSession.session;
         const getMessagesFunction = session?.getMessages();
         return getMessagesFunction;
     });

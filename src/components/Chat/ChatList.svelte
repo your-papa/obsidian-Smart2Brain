@@ -2,16 +2,16 @@
     import { onMount } from "svelte";
     import type {
         ChatPreview,
-        CurrentChatId,
+        CurrentSession,
         Messenger,
     } from "./chatState.svelte";
 
     interface props {
         messenger: Messenger;
-        currentChatId: CurrentChatId;
+        currentSession: CurrentSession;
     }
 
-    const { messenger, currentChatId }: props = $props();
+    const { messenger, currentSession }: props = $props();
 
     let chats: ChatPreview[] = $state([]);
 
@@ -35,9 +35,7 @@
 
     async function activateNewSession(chatId: string) {
         const session = await messenger.ensureSession(chatId);
-        console.log(session);
-        console.log("Session:", messenger.getSessions(chatId)?.getMessages());
-        currentChatId.id = chatId;
+        currentSession.session = session;
     }
 </script>
 
