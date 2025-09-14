@@ -28,7 +28,8 @@ export class ChatView extends ItemView implements HoverParent {
     super(leaf);
     this.plugin = plugin;
     this.icon = "message-square";
-    this.contentEl.style = "padding-bottom: 0, padding-top:var(--size-2-3)";
+    this.contentEl.style.paddingBottom = "0";
+    this.contentEl.style.paddingTop = "0";
     this.lastActiveChat = chat;
   }
   getViewType() {

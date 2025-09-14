@@ -25,7 +25,9 @@
     }
 </script>
 
-<div class="flex flex-row gap-1">
+<div
+    class="flex flex-row gap-1 w-full sticky top-0 bg-[--background-primary] pt-[var(--size-2-3)]"
+>
     <input
         class="flex-1 border-solid border-[--background-modifier-border] rounded-lg px-2 py-1 !text-sm"
         bind:value={title}
