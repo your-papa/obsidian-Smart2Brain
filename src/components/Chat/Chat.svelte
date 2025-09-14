@@ -9,11 +9,8 @@
 
     import {
         type Chat as ChatRecord,
-        type ChatSession,
-        type MessagePair,
-        type ChatPreview,
+        CurrentSession,
         getMessenger,
-        CurrentChatId,
     } from "./chatState.svelte";
     import { getPlugin } from "../../lib/state.svelte";
 
@@ -21,7 +18,7 @@
         lastActiveChat?: ChatRecord;
     }
 
-    const currentChatId = new CurrentChatId();
+    const currentSession = new CurrentSession();
 
     const plugin = getPlugin();
     const messenger = getMessenger();
@@ -29,17 +26,17 @@
 
 <QueryClientProvider client={plugin.queryClient}>
     <div class="chat-root h-full flex flex-col gap-2">
-        <Toolbar chatName={"New Name"} />
+        <Toolbar messenger={messenger!!} {currentSession} />
         <div
             class="chat-window relative flex w-full flex-1 flex-col overflow-hidden"
         >
-            {#if currentChatId.id}
-                <MessageContainer messenger={messenger!!} {currentChatId} />
+            {#if currentSession.session}
+                <MessageContainer messenger={messenger!!} {currentSession} />
             {:else}
-                <ChatList messenger={messenger!!} {currentChatId} />
+                <ChatList messenger={messenger!!} {currentSession} />
             {/if}
 
-            <Input messengner={messenger!!} {currentChatId} />
+            <Input messengner={messenger!!} {currentSession} />
         </div>
     </div>
 </QueryClientProvider>

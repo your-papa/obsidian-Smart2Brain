@@ -1,13 +1,29 @@
 <script lang="ts">
+    import type { CurrentSession, Messenger } from "./chatState.svelte";
+
     interface Props {
-        chatName: string;
+        messenger: Messenger;
+        currentSession: CurrentSession;
     }
 
-    const { chatName }: Props = $props();
+    const { messenger, currentSession }: Props = $props();
+
+    function updateChatTitle() {
+        if (
+            currentSession.session &&
+            currentSession.session.getTitle() !== title
+        ) {
+            currentSession.session.setTitle(messenger, title);
+        }
+    }
+
+    let title = $derived(currentSession.session?.getTitle() ?? "New Thread");
 </script>
 
-<div
-    class="border-solid border-[--background-modifier-border] rounded-lg px-2 py-1π"
->
-    {chatName}
-</div>
+<input
+    class="border-solid border-[--background-modifier-border] rounded-lg px-2 py-1 !text-sm"
+    bind:value={title}
+    onblur={() => updateChatTitle()}
+    type="text"
+    spellcheck="false"
+/>
