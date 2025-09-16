@@ -4,6 +4,7 @@
     import { getPlugin } from "../../lib/state.svelte";
     import {
         CurrentSession,
+        MessageState,
         Messenger,
         type ChatModel,
     } from "./chatState.svelte";
@@ -158,6 +159,10 @@
         }
     };
 
+    function stopMessage() {
+        currentSession.session?.stopStreaming();
+    }
+
     function onFileAttachment(event: Event) {
         const input = event.target as HTMLInputElement;
         const fileList = input.files;
@@ -172,6 +177,12 @@
     function removeAttachedFile(file: File) {
         files.remove(file);
     }
+
+    $effect(() =>
+        console.log(
+            currentSession.session?.messageState === MessageState.answering,
+        ),
+    );
 </script>
 
 <div class="w-full px-2 sticky bottom-0">
@@ -251,13 +262,21 @@
                     for="attachment"
                 ></label>
             </div>
-            <button
-                disabled={inputValue.length === 0}
-                aria-label={"send message"}
-                onclick={sendMessage}
-                class="h-7 w-7 p-1 rounded-r-md transition duration-300 ease-in-out !bg-[--text-accent-lighter] color-[--background-primary]"
-                use:icon={"arrow-up"}
-            ></button>
+            {#if !currentSession.session || currentSession.session.messageState === MessageState.idle}
+                <button
+                    disabled={inputValue.length === 0}
+                    aria-label={"send message"}
+                    onclick={sendMessage}
+                    class="h-7 w-7 p-1 rounded-r-md transition duration-300 ease-in-out !bg-[--text-accent-lighter] color-[--background-primary]"
+                    use:icon={"arrow-up"}
+                ></button>
+            {:else if currentSession.session.messageState === MessageState.answering}
+                <button
+                    aria-label={"stop streaming"}
+                    onclick={stopMessage}
+                    class="h-7 w-7 p-1 rounded-r-md transition duration-300 ease-in-out !bg-[--text-accent-lighter] color-[--background-primary]"
+                    use:icon={"square"}
+                ></button>{/if}
         </div>
     </div>
 </div>

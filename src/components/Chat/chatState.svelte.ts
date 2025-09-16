@@ -24,6 +24,12 @@ export enum AssistantState {
   "cancelled",
 }
 
+export enum MessageState {
+  "idle",
+  "answering",
+  "editing",
+}
+
 export interface UserMessage {
   content: string;
   attachments?: File[];
@@ -94,7 +100,7 @@ export class ChatSession {
   private cancelled = false;
 
   // Reactive UI state (if you read it in the UI)
-  messageState = $state<"idle" | "answering" | "editing">("idle");
+  messageState = $state<MessageState>(MessageState.idle);
 
   constructor(
     initial: ChatRecord,
@@ -204,7 +210,7 @@ export class ChatSession {
     this.flushTimer = setTimeout(async () => {
       const mp = this.findMessage(messageId);
       if (mp) {
-        mp.assistantMessage.state = "streaming";
+        mp.assistantMessage.state = AssistantState.streaming;
         mp.assistantMessage.content = this.pendingText;
 
         // Granular partial persistence (state + content)
@@ -212,7 +218,7 @@ export class ChatSession {
           this.chatId,
           messageId,
           {
-            state: "streaming",
+            state: AssistantState.streaming,
             content: this.pendingText,
           },
         );
@@ -267,7 +273,7 @@ export class ChatSession {
     if (!target) return;
 
     try {
-      this.messageState = "answering";
+      this.messageState = MessageState.answering;
 
       // Mark streaming started
       target.assistantMessage.state = AssistantState.streaming;
@@ -305,7 +311,7 @@ export class ChatSession {
       this.abortController = null;
       this.cancelled = false;
       this.pendingText = "";
-      this.messageState = "idle";
+      this.messageState = MessageState.idle;
     }
   }
 
