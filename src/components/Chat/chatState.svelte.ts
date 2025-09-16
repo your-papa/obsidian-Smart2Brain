@@ -16,12 +16,13 @@ import { Notice } from "obsidian";
  * Shared Types
  * ---------------------------------------------------------------------------*/
 
-export type AssistantState =
-  | "idle"
-  | "streaming"
-  | "success"
-  | "error"
-  | "cancelled";
+export enum AssistantState {
+  "idle",
+  "streaming",
+  "success",
+  "error",
+  "cancelled",
+}
 
 export interface UserMessage {
   content: string;
@@ -167,7 +168,7 @@ export class ChatSession {
       timestamp: new Date(),
       model: { provider: model.provider, model: model.model },
       userMessage: { content, attachments },
-      assistantMessage: { state: "idle", content: "" },
+      assistantMessage: { state: AssistantState.idle, content: "" },
     };
 
     // Optimistic local update (reactive)
@@ -269,11 +270,11 @@ export class ChatSession {
       this.messageState = "answering";
 
       // Mark streaming started
-      target.assistantMessage.state = "streaming";
+      target.assistantMessage.state = AssistantState.streaming;
       await this.persistence.updateAssistantMessagePartial(
         this.chatId,
         messageId,
-        { state: "streaming" },
+        { state: AssistantState.streaming },
       );
 
       const plugin = getPlugin();
@@ -294,11 +295,11 @@ export class ChatSession {
       await this.handleStreamingChunks(messageId, stream);
 
       // Final success
-      await this.finalizeAssistantMessage(messageId, "success");
+      await this.finalizeAssistantMessage(messageId, AssistantState.success);
     } catch (err) {
       const failedState: AssistantState = this.cancelled
-        ? "cancelled"
-        : "error";
+        ? AssistantState.cancelled
+        : AssistantState.error;
       await this.finalizeAssistantMessage(messageId, failedState);
     } finally {
       this.abortController = null;
@@ -490,7 +491,11 @@ export class Messenger {
     for (const p of previews) {
       const rec = await this.loadChatRecord(p.id);
       if (!rec) continue;
-      if (rec.messages.some((m) => m.assistantMessage.state === "streaming")) {
+      if (
+        rec.messages.some(
+          (m) => m.assistantMessage.state === AssistantState.streaming,
+        )
+      ) {
         dirty.push(rec);
       }
     }
@@ -501,12 +506,12 @@ export class Messenger {
     const dirtyChats = await this.findDirtyResponses();
     for (const chat of dirtyChats) {
       for (const mp of chat.messages) {
-        if (mp.assistantMessage.state === "streaming") {
-          mp.assistantMessage.state = "error";
+        if (mp.assistantMessage.state === AssistantState.streaming) {
+          mp.assistantMessage.state = AssistantState.error;
           mp.assistantMessage.content =
             mp.assistantMessage.content || "Response interrupted";
           await this.persistence.updateAssistantMessagePartial(chat.id, mp.id, {
-            state: "error",
+            state: AssistantState.error,
             content: mp.assistantMessage.content,
           });
         }
