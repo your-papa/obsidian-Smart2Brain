@@ -38,7 +38,7 @@
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div
                     use:icon={"refresh-cw"}
-                    class="trash-icon hover:text-[--background-modifier-error] items-center justify-center"
+                    class="trash-icon hover:text-[--text-accent] items-center justify-center"
                     onclick={async () => console.log("redo")}
                 ></div>
 
@@ -47,7 +47,7 @@
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div
                     use:icon={"copy"}
-                    class="trash-icon hover:text-[--background-modifier-error] items-center justify-center"
+                    class="trash-icon hover:text-[--text-accent] items-center justify-center"
                     onclick={async () => console.log("copy")}
                 ></div>
             </div>
@@ -69,7 +69,7 @@
                     <!-- svelte-ignore a11y_no_static_element_interactions -->
                     <div
                         use:icon={"refresh-cw"}
-                        class="trash-icon hover:text-[--background-modifier-error] items-center justify-center"
+                        class="trash-icon hover:text-[--text-accent] items-center justify-center"
                         onclick={async () => console.log("redo-assistant")}
                     ></div>
 
@@ -78,7 +78,7 @@
                     <!-- svelte-ignore a11y_no_static_element_interactions -->
                     <div
                         use:icon={"copy"}
-                        class="trash-icon hover:text-[--background-modifier-error] items-center justify-center"
+                        class="trash-icon hover:text-[--text-accent] items-center justify-center"
                         onclick={async () => console.log("copy-assistant")}
                     ></div>
                 </div>
