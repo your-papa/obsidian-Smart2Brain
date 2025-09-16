@@ -1,6 +1,12 @@
 <script lang="ts">
-    import { renderMarkdown } from "../../utils/utils";
-    import type { CurrentSession, Messenger } from "./chatState.svelte";
+    import { render } from "svelte/server";
+    import { icon, renderMarkdown } from "../../utils/utils";
+    import {
+        AssistantState,
+        type CurrentSession,
+        type Messenger,
+    } from "./chatState.svelte";
+    import Dots from "../../utils/Dots.svelte";
 
     interface Props {
         messenger: Messenger;
@@ -16,19 +22,67 @@
     });
 </script>
 
-<div class="flex-1">
-    {#if messages}
-        {#each messages as messagePair}
-            <div class="mb-2 mr-2 flex justify-end">
+<div class="flex-1 gap-1 mb-2">
+    {#each messages!! as messagePair}
+        <div class="group mr-2 flex flex-col items-end gap-2">
+            <div
+                class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[--text-selection] px-4 py-2 [&>p]:m-0"
+                use:renderMarkdown={messagePair.userMessage.content}
+            ></div>
+
+            <div
+                class="mt-1 flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+            >
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div
-                    class="group max-w-[80%] rounded-t-lg rounded-bl-lg bg-[--text-selection] px-4 py-2 [&>p]:m-0"
-                    use:renderMarkdown={messagePair.userMessage.content}
+                    use:icon={"refresh-cw"}
+                    class="trash-icon hover:text-[--background-modifier-error] items-center justify-center"
+                    onclick={async () => console.log("redo")}
+                ></div>
+
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                    use:icon={"copy"}
+                    class="trash-icon hover:text-[--background-modifier-error] items-center justify-center"
+                    onclick={async () => console.log("copy")}
                 ></div>
             </div>
-            <div
-                class="group mb-2 py-2 px-2 [&>p]:m-0"
-                use:renderMarkdown={messagePair.assistantMessage.content}
-            ></div>
-        {/each}
-    {/if}
+        </div>
+
+        <div class="group flex flex-col px-2 gap-2">
+            {#if messagePair.assistantMessage.state === AssistantState.streaming}
+                <Dots size={"50"} color={"var(--text-accent)"} />
+            {:else}
+                <div
+                    class="[&>p]:m-0"
+                    use:renderMarkdown={messagePair.assistantMessage.content}
+                ></div>
+                <div
+                    class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+                >
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <div
+                        use:icon={"refresh-cw"}
+                        class="trash-icon hover:text-[--background-modifier-error] items-center justify-center"
+                        onclick={async () => console.log("redo-assistant")}
+                    ></div>
+
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <div
+                        use:icon={"copy"}
+                        class="trash-icon hover:text-[--background-modifier-error] items-center justify-center"
+                        onclick={async () => console.log("copy-assistant")}
+                    ></div>
+                </div>
+            {/if}
+        </div>
+    {/each}
 </div>

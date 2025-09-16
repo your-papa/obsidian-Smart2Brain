@@ -14,13 +14,37 @@ export function wildTest(wildcard: string, str: string): boolean {
   return re.test(str);
 }
 
-export const renderMarkdown = (node: HTMLElement, content: string) => {
+export function renderMarkdown(node: HTMLElement, content: string) {
   const plugin = getPlugin();
-  node.innerHTML = "";
-  MarkdownRenderer.render(plugin.app, content, node, "Chat view.md", plugin);
-  const codeElem = node.querySelector(".copy-code-button");
-  if (codeElem) {
-    codeElem.className = "clickable-icon";
-    icon(codeElem as HTMLElement, "copy");
-  }
-};
+
+  const render = (c: string) => {
+    node.innerHTML = "";
+    MarkdownRenderer.render(plugin.app, c ?? "", node, "Chat view.md", plugin);
+
+    const codeElem = node.querySelector(
+      ".copy-code-button",
+    ) as HTMLElement | null;
+    if (codeElem) {
+      codeElem.className = "clickable-icon";
+      icon(codeElem, "copy");
+    }
+  };
+
+  render(content);
+
+  let raf = 0;
+
+  return {
+    update(next: string) {
+      // optional: coalesce rapid streaming updates
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        render(next);
+      });
+    },
+    destroy() {
+      cancelAnimationFrame(raf);
+      node.innerHTML = "";
+    },
+  };
+}
