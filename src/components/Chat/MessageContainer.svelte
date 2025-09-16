@@ -3,6 +3,7 @@
     import { icon, renderMarkdown } from "../../utils/utils";
     import {
         AssistantState,
+        type AssistantMessage,
         type CurrentSession,
         type Messenger,
     } from "./chatState.svelte";
@@ -20,6 +21,16 @@
         const getMessagesFunction = session?.getMessages();
         return getMessagesFunction;
     });
+
+    function renderAssitantAnswer(assistantAnswer: AssistantMessage) {
+        if (assistantAnswer.state === AssistantState.cancelled) {
+            return "> [!Warning] stopped by user";
+        }
+        if (assistantAnswer.state === AssistantState.error) {
+            return "> [!Error] an error occured";
+        }
+        return assistantAnswer.content;
+    }
 </script>
 
 <div class="flex-1 gap-1 mb-2">
@@ -59,7 +70,9 @@
             {:else}
                 <div
                     class="[&>p]:m-0"
-                    use:renderMarkdown={messagePair.assistantMessage.content}
+                    use:renderMarkdown={renderAssitantAnswer(
+                        messagePair.assistantMessage,
+                    )}
                 ></div>
                 <div
                     class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
