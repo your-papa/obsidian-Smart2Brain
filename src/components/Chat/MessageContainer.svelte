@@ -65,7 +65,7 @@
         </div>
 
         <div class="group flex flex-col px-2 gap-2">
-            {#if messagePair.assistantMessage.state === AssistantState.streaming}
+            {#if !messagePair.assistantMessage.content}
                 <Dots size={"50"} color={"var(--text-accent)"} />
             {:else}
                 <div
@@ -74,6 +74,8 @@
                         messagePair.assistantMessage,
                     )}
                 ></div>
+            {/if}
+            {#if !(messagePair.assistantMessage.state === AssistantState.streaming)}
                 <div
                     class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
                 >
