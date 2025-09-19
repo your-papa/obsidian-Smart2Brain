@@ -8,6 +8,7 @@
         type Messenger,
     } from "./chatState.svelte";
     import Dots from "../../utils/Dots.svelte";
+    import { Notice } from "obsidian";
 
     interface Props {
         messenger: Messenger;
@@ -30,6 +31,11 @@
             return "> [!Error] an error occured";
         }
         return assistantAnswer.content;
+    }
+
+    async function copyToClipboard(content: string) {
+        await navigator.clipboard.writeText(content);
+        new Notice("Copied to Clipboard");
     }
 </script>
 
@@ -59,7 +65,8 @@
                 <div
                     use:icon={"copy"}
                     class="trash-icon hover:text-[--text-accent] items-center justify-center"
-                    onclick={async () => console.log("copy")}
+                    onclick={async () =>
+                        copyToClipboard(messagePair.userMessage.content)}
                 ></div>
             </div>
         </div>
@@ -80,21 +87,23 @@
                     class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
                 >
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <div
+                        use:icon={"copy"}
+                        class="trash-icon hover:text-[--text-accent] items-center justify-center"
+                        onclick={async () =>
+                            copyToClipboard(
+                                messagePair.assistantMessage.content,
+                            )}
+                    ></div>
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_static_element_interactions -->
                     <div
                         use:icon={"refresh-cw"}
                         class="trash-icon hover:text-[--text-accent] items-center justify-center"
                         onclick={async () => console.log("redo-assistant")}
-                    ></div>
-
-                    <!-- svelte-ignore a11y_click_events_have_key_events -->
-                    <!-- svelte-ignore a11y_no_static_element_interactions -->
-                    <!-- svelte-ignore a11y_no_static_element_interactions -->
-                    <div
-                        use:icon={"copy"}
-                        class="trash-icon hover:text-[--text-accent] items-center justify-center"
-                        onclick={async () => console.log("copy-assistant")}
                     ></div>
                 </div>
             {/if}
