@@ -214,31 +214,30 @@ export class ChatSession {
         mp.assistantMessage.content = this.pendingText;
 
         // Granular partial persistence (state + content)
-        await this.persistence.updateAssistantMessagePartial(
-          this.chatId,
-          messageId,
-          {
-            state: AssistantState.streaming,
-            content: this.pendingText,
-          },
-        );
+        // await this.persistence.updateAssistantMessagePartial(
+        //   this.chatId,
+        //   messageId,
+        //   {
+        //     state: AssistantState.streaming,
+        //     content: this.pendingText,
+        //   },
+        // );
       }
       this.flushTimer = null;
-    }, 110); // ~9fps to reduce churn
+    }, 30); // ~9fps to reduce churn
   }
 
   private async handleStreamingChunks(
     messageId: string,
     stream: AsyncIterable<any>,
   ) {
-    for await (const chunk of stream) {
-      if (chunk?.content !== undefined) {
-        this.pendingText = chunk.content;
+    for await (const event of stream) {
+      if (event.event === "on_parser_stream" && event.data.chunk) {
+        this.pendingText += event.data.chunk;
         this.scheduleFlush(messageId);
       }
     }
   }
-
   private async finalizeAssistantMessage(
     messageId: string,
     finalState: AssistantState,
