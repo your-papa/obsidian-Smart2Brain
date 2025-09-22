@@ -14,7 +14,7 @@
             currentSession.session &&
             currentSession.session.getTitle() !== title
         ) {
-            currentSession.session.setTitle(messenger, title);
+            currentSession.session.setTitle(title);
         }
     }
 

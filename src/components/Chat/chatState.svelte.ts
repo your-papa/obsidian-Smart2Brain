@@ -88,7 +88,7 @@ export type Chat = ChatRecord; // Backward compatibility alias
 
 export class ChatSession {
   readonly chatId: string;
-  #title: string;
+  #title = $state<string>("");
   lastAccessed: Date;
   // Reactive messages array (mutate with push/splice/etc.)
   messages: MessagePair[] = $state<MessagePair[]>([]);
@@ -128,10 +128,10 @@ export class ChatSession {
     return this.#title;
   }
 
-  setTitle(messenger: Messenger, title: string) {
+  setTitle(title: string) {
     if (this.#title !== title) {
       this.#title = title;
-      messenger.setTitle(this.chatId, title);
+      this.persistence.updateChatMeta(this.chatId, { title });
     }
   }
 
@@ -157,6 +157,21 @@ export class ChatSession {
       .join("\n\n");
   }
 
+  async generateNewTitle(content: string, model: ChatModel) {
+    const plugin = getPlugin();
+    const input = {
+      modelConfig: {
+        provider: model.provider,
+        model: model.model,
+        modelConfig: model.modelConfig,
+      },
+      userQuery: content,
+      chatHistory: "",
+      lang: "en" as Language,
+    };
+    this.setTitle(await plugin.papa.generateTitle(input));
+  }
+
   /**
    * Send a user message:
    *  - Create MessagePair (assistant idle)
@@ -168,6 +183,9 @@ export class ChatSession {
     model: ChatModel,
     attachments: File[] | undefined,
   ): Promise<string> {
+    if (this.messages.length === 0) {
+      this.generateNewTitle(content, model);
+    }
     const id = uuidv7();
     const pair: MessagePair = {
       id,
