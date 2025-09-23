@@ -3,7 +3,6 @@ import type {
   MessagePair,
   AssistantMessage,
 } from "../Chat/chatState.svelte";
-import type { Chat } from "../Chat/chatState.svelte";
 import type {
   IChatPersistence,
   ChatRecordMeta,
@@ -11,13 +10,14 @@ import type {
 } from "./persistance";
 import type { ChatDB, ChatRow, MessagePairRow } from "./chatDbSchema";
 import { Dexie } from "dexie";
+import type { UUIDv7 } from "../../utils/uuid7Validator";
 
 /**
  * DexiePersistence
  * Implements granular, per-message CRUD operations while keeping the old
  * "saveChat(chatId, messagePair)" API for backward compatibility.
  *
- * NEW (preferred) METHODS:
+ * METHODS:
  *  - loadChatMeta()
  *  - getMessages()
  *  - addMessage()
@@ -25,9 +25,6 @@ import { Dexie } from "dexie";
  *  - updateAssistantMessagePartial()
  *  - deleteMessage()
  *
- * LEGACY (still supported):
- *  - loadChat()
- *  - saveChat()
  *
  * NOTE: We keep returning a Chat instance from loadChat() so existing code
  * using the original Chat class will continue to function until migrated.
@@ -42,11 +39,7 @@ export class DexiePersistence implements IChatPersistence {
   private rowToMessagePair(row: MessagePairRow): MessagePair {
     return {
       id: row.id,
-      timestamp: new Date(row.timestamp),
-      model: {
-        provider: row.modelProvider as any,
-        model: row.modelName,
-      },
+      model: row.model,
       userMessage: {
         content: row.userContent,
       },
@@ -57,7 +50,7 @@ export class DexiePersistence implements IChatPersistence {
     };
   }
 
-  private async internalIncrementMsgCount(chatId: string): Promise<void> {
+  private async internalIncrementMsgCount(chatId: UUIDv7): Promise<void> {
     // Optimistic approach: recompute count from table (avoids race)
     const count = await this.db.messagePairs
       .where("chatId")
@@ -85,31 +78,7 @@ export class DexiePersistence implements IChatPersistence {
     }));
   }
 
-  /**
-   * Legacy full load: returns a Chat instance (to not break existing code).
-   * Newer code should prefer: loadChatMeta() + getMessages()
-   */
-  async loadChat(id: string): Promise<Chat | null> {
-    const row = await this.db.chats.get(id);
-    if (!row) return null;
-
-    const pairs = await this.db.messagePairs
-      .where("[chatId+timestamp]")
-      .between([id, Dexie.minKey], [id, Dexie.maxKey])
-      .sortBy("timestamp");
-
-    const messages = pairs.map((p) => this.rowToMessagePair(p));
-
-    // Return plain object matching Chat (ChatRecord) shape for legacy callers
-    return {
-      id: row.id,
-      title: row.title,
-      lastAccessed: new Date(row.lastAccessed),
-      messages,
-    } as Chat;
-  }
-
-  async loadChatMeta(id: string): Promise<ChatRecordMeta | null> {
+  async loadChatMeta(id: UUIDv7): Promise<ChatRecordMeta | null> {
     const row = await this.db.chats.get(id);
     if (!row) return null;
     return {
@@ -121,10 +90,9 @@ export class DexiePersistence implements IChatPersistence {
   }
 
   async createChat(chatLike: {
-    id: string;
+    id: UUIDv7;
     title: string;
     lastAccessed: Date;
-    messages?: MessagePair[];
   }): Promise<string> {
     const { id, title, lastAccessed } = chatLike;
 
@@ -136,32 +104,12 @@ export class DexiePersistence implements IChatPersistence {
       msgCount: 0,
     });
 
-    // If initial messages were provided (should be rare), add them:
-    if (chatLike.messages && chatLike.messages.length) {
-      await this.db.transaction("rw", this.db.messagePairs, async () => {
-        for (const m of chatLike.messages!) {
-          const row: MessagePairRow = {
-            id: m.id,
-            chatId: id,
-            timestamp: m.timestamp.toISOString(),
-            modelProvider: m.model.provider as any,
-            modelName: m.model.model,
-            userContent: m.userMessage.content,
-            assistantState: m.assistantMessage.state,
-            assistantContent: m.assistantMessage.content,
-          };
-          await this.db.messagePairs.put(row);
-        }
-      });
-      await this.internalIncrementMsgCount(id);
-    }
-
     return id;
   }
 
   async updateChatMeta(
-    id: string,
-    patch: Partial<Omit<ChatRecordMeta, "id" | "msgCount">>,
+    id: UUIDv7,
+    patch: Partial<Omit<ChatRecordMeta, "UUIDv7" | "msgCount">>,
   ): Promise<void> {
     const update: Partial<ChatRow> = {};
     if (patch.title !== undefined) update.title = patch.title;
@@ -173,7 +121,7 @@ export class DexiePersistence implements IChatPersistence {
     }
   }
 
-  async deleteChat(id: string): Promise<boolean> {
+  async deleteChat(id: UUIDv7): Promise<boolean> {
     return this.db.transaction(
       "rw",
       this.db.chats,
@@ -194,14 +142,14 @@ export class DexiePersistence implements IChatPersistence {
    * =======================================================*/
 
   async getMessages(
-    chatId: string,
+    chatId: UUIDv7,
     options: ListMessagesOptions = {},
   ): Promise<MessagePair[]> {
     const { offset = 0, limit, order = "asc" } = options;
 
     // Retrieve ordered by timestamp via compound index
     let collection = this.db.messagePairs
-      .where("[chatId+timestamp]")
+      .where("[chatId+id]")
       .between([chatId, Dexie.minKey], [chatId, Dexie.maxKey]);
 
     if (order === "desc") {
@@ -216,15 +164,15 @@ export class DexiePersistence implements IChatPersistence {
   }
 
   async getMessage(
-    chatId: string,
-    messageId: string,
+    chatId: UUIDv7,
+    messageId: UUIDv7,
   ): Promise<MessagePair | null> {
     const row = await this.db.messagePairs.get(messageId);
     if (!row || row.chatId !== chatId) return null;
     return this.rowToMessagePair(row);
   }
 
-  async addMessage(chatId: string, message: MessagePair): Promise<void> {
+  async addMessage(chatId: UUIDv7, message: MessagePair): Promise<void> {
     await this.db.transaction(
       "rw",
       this.db.messagePairs,
@@ -240,9 +188,7 @@ export class DexiePersistence implements IChatPersistence {
         const row: MessagePairRow = {
           id: message.id,
           chatId,
-          timestamp: message.timestamp.toISOString(),
-          modelProvider: message.model.provider as any,
-          modelName: message.model.model,
+          model: message.model,
           userContent: message.userMessage.content,
           assistantState: message.assistantMessage.state,
           assistantContent: message.assistantMessage.content,
@@ -258,7 +204,7 @@ export class DexiePersistence implements IChatPersistence {
     await this.internalIncrementMsgCount(chatId);
   }
 
-  async upsertMessage(chatId: string, message: MessagePair): Promise<void> {
+  async upsertMessage(chatId: UUIDv7, message: MessagePair): Promise<void> {
     await this.db.transaction(
       "rw",
       this.db.messagePairs,
@@ -269,9 +215,7 @@ export class DexiePersistence implements IChatPersistence {
         const row: MessagePairRow = {
           id: message.id,
           chatId,
-          timestamp: message.timestamp.toISOString(),
-          modelProvider: message.model.provider as any,
-          modelName: message.model.model,
+          model: message.model,
           userContent: message.userMessage.content,
           assistantState: message.assistantMessage.state,
           assistantContent: message.assistantMessage.content,
@@ -284,16 +228,36 @@ export class DexiePersistence implements IChatPersistence {
         });
 
         if (!prior) {
-          // new message -> adjust count
           await this.internalIncrementMsgCount(chatId);
         }
       },
     );
   }
 
+  async dropHistoryAt(chatId: UUIDv7, messageId: UUIDv7): Promise<boolean> {
+    return this.db.transaction(
+      "rw",
+      this.db.messagePairs,
+      this.db.chats,
+      async () => {
+        const existing = await this.getMessage(chatId, messageId);
+        console.log(existing);
+        if (!existing) return false;
+
+        await this.db.messagePairs
+          .where("[chatId+id]")
+          .between([chatId, messageId], [chatId, Dexie.maxKey])
+          .delete();
+
+        await this.internalIncrementMsgCount(chatId);
+        return true;
+      },
+    );
+  }
+
   async updateAssistantMessagePartial(
-    chatId: string,
-    messageId: string,
+    chatId: UUIDv7,
+    messageId: UUIDv7,
     patch: Partial<AssistantMessage>,
   ): Promise<void> {
     const allowed: Partial<MessagePairRow> = {};
@@ -317,7 +281,7 @@ export class DexiePersistence implements IChatPersistence {
     });
   }
 
-  async deleteMessage(chatId: string, messageId: string): Promise<boolean> {
+  async deleteMessage(chatId: UUIDv7, messageId: UUIDv7): Promise<boolean> {
     const deleted = await this.db.transaction(
       "rw",
       this.db.messagePairs,
@@ -333,19 +297,7 @@ export class DexiePersistence implements IChatPersistence {
     return deleted;
   }
 
-  async countMessages(chatId: string): Promise<number> {
+  async countMessages(chatId: UUIDv7): Promise<number> {
     return this.db.messagePairs.where("chatId").equals(chatId).count();
-  }
-
-  /* =========================================================
-   * Backward Compatibility Aliases
-   * =======================================================*/
-
-  /**
-   * DEPRECATED: Historically saved "the chat" by passing just the new/updated messagePair.
-   * Kept for compatibility; now simply delegates to upsertMessage.
-   */
-  async saveChat(chatId: string, messagePair: MessagePair): Promise<void> {
-    await this.upsertMessage(chatId, messagePair);
   }
 }

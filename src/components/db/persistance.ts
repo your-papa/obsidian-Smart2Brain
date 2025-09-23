@@ -1,18 +1,6 @@
 /**
  * Persistence layer abstractions for chat + message storage.
- *
- * Goals:
- *  - Backward compatible with the earlier (monolithic) API.
- *  - Enable per-message CRUD so we do NOT have to rewrite / re-save the whole chat object.
- *  - Provide streaming-friendly "upsert" semantics for assistant message updates.
- *
- * Legacy methods retained (for backward compatibility):
- *  - listChats()
- *  - loadChat()
- *  - createChat()
- *  - saveChat()          (DEPRECATED alias – internally should delegate to upsertMessage)
- *  - deleteChat()
- *
+
  * New granular methods:
  *  - getMessages()
  *  - getMessage()
@@ -32,13 +20,14 @@ import type {
   MessagePair,
   AssistantMessage,
 } from "../Chat/chatState.svelte";
+import type { UUIDv7 } from "../../utils/uuid7Validator";
 
 /**
  * Minimal chat record metadata (messages loaded separately).
  * If you still rely on the old full Chat class, you can adapt it externally.
  */
 export interface ChatRecordMeta {
-  id: string;
+  id: UUIDv7;
   title: string;
   lastAccessed: Date;
   msgCount: number;
@@ -80,41 +69,32 @@ export interface IChatPersistence {
   listChats(): Promise<ChatPreview[]>;
 
   /**
-   * Load an entire chat including all message pairs (legacy/full load).
-   * IMPORTANT: New code should prefer:
-   *   - loadChatMeta()
-   *   - getMessages(chatId, { ... })
-   */
-  loadChat(id: string): Promise<any | null>;
-
-  /**
    * Create a new chat with no messages yet.
-   * Accepts either a legacy Chat object or a lightweight meta shape.
+   * Accepts a lightweight meta shape.
    */
   createChat(chatLike: {
-    id: string;
+    id: UUIDv7;
     title: string;
     lastAccessed: Date;
-    messages?: MessagePair[];
   }): Promise<string>;
 
   /**
    * Delete a chat and all its messages.
    */
-  deleteChat(id: string): Promise<boolean>;
+  deleteChat(id: UUIDv7): Promise<boolean>;
 
   /**
    * Lightweight meta load (no messages).
    */
-  loadChatMeta(id: string): Promise<ChatRecordMeta | null>;
+  loadChatMeta(id: UUIDv7): Promise<ChatRecordMeta | null>;
 
   /**
    * Update basic chat metadata (title, lastAccessed).
    * Implementations may merge with existing row.
    */
   updateChatMeta(
-    id: string,
-    patch: Partial<Omit<ChatRecordMeta, "id" | "msgCount">>,
+    id: UUIDv7,
+    patch: Partial<Omit<ChatRecordMeta, "UUIDv7" | "msgCount">>,
   ): Promise<void>;
 
   /* ---------------------------------------------------------
@@ -125,58 +105,51 @@ export interface IChatPersistence {
    * Get messages for a chat. Supports paging & order.
    */
   getMessages(
-    chatId: string,
+    chatId: UUIDv7,
     options?: ListMessagesOptions,
   ): Promise<MessagePair[]>;
 
   /**
    * Get a single message by its ID (scoped to a chat).
    */
-  getMessage(chatId: string, messageId: string): Promise<MessagePair | null>;
+  getMessage(chatId: UUIDv7, messageId: string): Promise<MessagePair | null>;
 
   /**
    * Add a brand-new message pair (user + empty/initial assistant).
    * Should fail / reject if an entry with the same ID already exists.
    */
-  addMessage(chatId: string, message: MessagePair): Promise<void>;
+  addMessage(chatId: UUIDv7, message: MessagePair): Promise<void>;
 
   /**
    * Insert or update a message pair (idempotent).
    * Use this for streaming updates (assistant content/state changes).
    */
-  upsertMessage(chatId: string, message: MessagePair): Promise<void>;
+  upsertMessage(chatId: UUIDv7, message: MessagePair): Promise<void>;
 
   /**
    * Partial, assistant-only update to avoid re-writing unchanged user fields.
    * Implementations can optimize to only patch assistant columns.
    */
   updateAssistantMessagePartial(
-    chatId: string,
-    messageId: string,
+    chatId: UUIDv7,
+    messageId: UUIDv7,
     patch: Partial<AssistantMessage>,
   ): Promise<void>;
 
   /**
    * Remove a single message from a chat.
    */
-  deleteMessage(chatId: string, messageId: string): Promise<boolean>;
+  deleteMessage(chatId: UUIDv7, messageId: UUIDv7): Promise<boolean>;
+
+  /**
+   * Drop all messages at given id from a chat.
+   */
+  dropHistoryAt(chatId: UUIDv7, messageId: UUIDv7): Promise<boolean>;
 
   /**
    * Count messages in a chat (for pagination / analytics).
    */
-  countMessages(chatId: string): Promise<number>;
-
-  /* ---------------------------------------------------------
-   * Legacy (monolithic) method – retained for compatibility.
-   * New code SHOULD NOT call this directly; use addMessage/upsertMessage.
-   * -------------------------------------------------------*/
-
-  /**
-   * DEPRECATED:
-   * Historically used to "save the chat" by passing a single messagePair.
-   * Treat this as an alias for upsertMessage + metadata bump.
-   */
-  saveChat(chatId: string, messagePair: MessagePair): Promise<void>;
+  countMessages(chatId: UUIDv7): Promise<number>;
 }
 
 /**
