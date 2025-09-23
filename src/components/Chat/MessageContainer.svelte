@@ -4,11 +4,13 @@
     import {
         AssistantState,
         type AssistantMessage,
+        type ChatModel,
         type CurrentSession,
         type Messenger,
     } from "./chatState.svelte";
     import Dots from "../../utils/Dots.svelte";
     import { Notice } from "obsidian";
+    import type { UUIDv7 } from "../../utils/uuid7Validator";
 
     interface Props {
         messenger: Messenger;
@@ -37,6 +39,10 @@
         await navigator.clipboard.writeText(content);
         new Notice("Copied to Clipboard");
     }
+
+    async function redoMessage(messageId: UUIDv7, model: ChatModel) {
+        currentSession.session?.resendMessage(messageId, model);
+    }
 </script>
 
 <div class="flex-1 gap-1 mb-2">
@@ -56,7 +62,8 @@
                 <div
                     use:icon={"refresh-cw"}
                     class="trash-icon hover:text-[--text-accent] items-center justify-center"
-                    onclick={async () => console.log("redo")}
+                    onclick={async () =>
+                        redoMessage(messagePair.id, messagePair.model)}
                 ></div>
 
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -103,7 +110,8 @@
                     <div
                         use:icon={"refresh-cw"}
                         class="trash-icon hover:text-[--text-accent] items-center justify-center"
-                        onclick={async () => console.log("redo-assistant")}
+                        onclick={async () =>
+                            redoMessage(messagePair.id, messagePair.model)}
                     ></div>
                 </div>
             {/if}

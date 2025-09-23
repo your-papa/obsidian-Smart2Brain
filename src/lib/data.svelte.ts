@@ -24,6 +24,7 @@ import {
   type ProviderConfigs,
 } from "../types/providers";
 import ConfiguredProvider from "../components/Settings/ConfiguredProvider.svelte";
+import type { UUIDv7 } from "../utils/uuid7Validator";
 
 export class PluginDataStore {
   #data: PluginData;
@@ -84,11 +85,11 @@ export class PluginDataStore {
     await this._plugin.saveData(plain);
   }
 
-  getLastActiveChatId(): string | null {
+  getLastActiveChatId(): UUIDv7 | null {
     return this.#data.lastActiveChatId;
   }
 
-  setLastActiveChatId(id: string | null) {
+  setLastActiveChatId(id: UUIDv7 | null) {
     this.#data.lastActiveChatId = id;
     this.saveSettings();
   }

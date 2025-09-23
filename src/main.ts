@@ -44,6 +44,7 @@ import {
   getLastActiveChatId,
   Messenger,
 } from "./components/Chat/chatState.svelte";
+import type { UUIDv7 } from "./utils/uuid7Validator";
 
 export interface PluginData {
   providerConfig: ProviderConfigs;
@@ -64,7 +65,7 @@ export interface PluginData {
   isVerbose: boolean;
   hideIncognitoWarning: boolean;
   isAutostart: boolean;
-  lastActiveChatId: string | null;
+  lastActiveChatId: UUIDv7 | null;
 }
 
 const queryClient = new QueryClient({

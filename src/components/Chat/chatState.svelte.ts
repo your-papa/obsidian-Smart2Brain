@@ -1,4 +1,3 @@
-import { v7 as uuidv7 } from "uuid";
 import type { GenModelConfig, Language, RegisteredGenProvider } from "papa-ts";
 import { get, writable, type Writable } from "svelte/store";
 import { getPlugin } from "../../lib/state.svelte";
@@ -11,6 +10,7 @@ import type {
 import { DexiePersistence } from "../db/dexieChatDb";
 import { ChatDB } from "../db/chatDbSchema";
 import { Notice } from "obsidian";
+import { genUUIDv7, type UUIDv7 } from "../../utils/uuid7Validator";
 
 /* -----------------------------------------------------------------------------
  * Shared Types
@@ -47,15 +47,14 @@ export interface AssistantMessage {
 }
 
 export interface MessagePair {
-  id: string;
-  timestamp: Date;
-  model: { provider: RegisteredGenProvider; model: string };
+  id: UUIDv7;
+  model: ChatModel;
   userMessage: UserMessage;
   assistantMessage: AssistantMessage;
 }
 
 export interface ChatPreview {
-  id: string;
+  id: UUIDv7;
   title: string;
   lastAccessed: Date;
 }
@@ -71,7 +70,7 @@ export interface ChatModel {
  * For compatibility with legacy code that imported/expected `Chat`.
  */
 export interface ChatRecord {
-  id: string;
+  id: UUIDv7;
   title: string;
   lastAccessed: Date;
   messages: MessagePair[];
@@ -87,7 +86,7 @@ export type Chat = ChatRecord; // Backward compatibility alias
 // ChatSession.svelte.ts
 
 export class ChatSession {
-  readonly chatId: string;
+  readonly chatId: UUIDv7;
   #title = $state<string>("");
   lastAccessed: Date;
   // Reactive messages array (mutate with push/splice/etc.)
@@ -141,10 +140,15 @@ export class ChatSession {
   }
 
   /** Lookup a message by id */
-  private findMessage(id: string): MessagePair | undefined {
+  private findMessage(id: UUIDv7): MessagePair | undefined {
     return this.messages.find((m) => m.id === id);
   }
 
+  private findMessageIndex(id: UUIDv7): number | undefined {
+    const idx = this.messages.findIndex((m) => m.id === id);
+    if (idx === -1) return undefined;
+    return idx;
+  }
   /** Build chat history excluding the last (incomplete) message. */
   private buildChatHistory(): string {
     if (this.messages.length === 0) return "";
@@ -172,6 +176,24 @@ export class ChatSession {
     this.setTitle(await plugin.papa.generateTitle(input));
   }
 
+  async resendMessage(messageId: UUIDv7, model: ChatModel) {
+    const message = this.findMessage(messageId);
+    const idx = this.findMessageIndex(messageId);
+    if (!(message && idx)) return false;
+
+    //Todo: is it safe to splice proxy Objs?
+    this.messages.splice(idx);
+    console.log(await this.persistence.dropHistoryAt(this.chatId, messageId));
+
+    const res = await this.sendMessage(
+      message.userMessage.content,
+      model,
+      message.userMessage.attachments,
+    );
+    if (res) return true;
+    return false;
+  }
+
   /**
    * Send a user message:
    *  - Create MessagePair (assistant idle)
@@ -186,11 +208,10 @@ export class ChatSession {
     if (this.messages.length === 0) {
       this.generateNewTitle(content, model);
     }
-    const id = uuidv7();
+    const id = genUUIDv7();
     const pair: MessagePair = {
       id,
-      timestamp: new Date(),
-      model: { provider: model.provider, model: model.model },
+      model: JSON.parse(JSON.stringify(model)),
       userMessage: { content, attachments },
       assistantMessage: { state: AssistantState.idle, content: "" },
     };
@@ -223,7 +244,7 @@ export class ChatSession {
    * Streaming logic
    * ---------------------------------------------------------------------*/
 
-  private scheduleFlush(messageId: string) {
+  private scheduleFlush(messageId: UUIDv7) {
     if (this.flushTimer) return;
     this.flushTimer = setTimeout(async () => {
       const mp = this.findMessage(messageId);
@@ -246,7 +267,7 @@ export class ChatSession {
   }
 
   private async handleStreamingChunks(
-    messageId: string,
+    messageId: UUIDv7,
     stream: AsyncIterable<any>,
   ) {
     for await (const event of stream) {
@@ -257,7 +278,7 @@ export class ChatSession {
     }
   }
   private async finalizeAssistantMessage(
-    messageId: string,
+    messageId: UUIDv7,
     finalState: AssistantState,
   ) {
     if (this.flushTimer) {
@@ -282,7 +303,7 @@ export class ChatSession {
   }
 
   private async processAssistantReply(
-    messageId: string,
+    messageId: UUIDv7,
     userContent: string,
     model: ChatModel,
   ) {
@@ -375,7 +396,7 @@ export class Messenger {
     const data = getData();
     const title = data.defaultChatName;
     const record: ChatRecord = {
-      id: uuidv7(),
+      id: genUUIDv7(),
       title,
       lastAccessed: new Date(),
       messages: [],
@@ -384,12 +405,11 @@ export class Messenger {
       id: record.id,
       title: record.title,
       lastAccessed: record.lastAccessed,
-      messages: [],
     });
     return record;
   }
 
-  async setTitle(id: string, title: string): Promise<boolean> {
+  async setTitle(id: UUIDv7, title: string): Promise<boolean> {
     const session = await this.loadChatRecord(id);
     if (!session) return false;
     if (session.title === title) return true;
@@ -399,7 +419,7 @@ export class Messenger {
   }
 
   async loadChatRecord(
-    id: string,
+    id: UUIDv7,
     options?: ListMessagesOptions,
   ): Promise<ChatRecord | null> {
     const meta = await this.persistence.loadChatMeta(id);
@@ -417,7 +437,7 @@ export class Messenger {
     return this.persistence.listChats();
   }
 
-  async deleteChat(id: string): Promise<boolean> {
+  async deleteChat(id: UUIDv7): Promise<boolean> {
     const info = this.sessions.delete(id);
     console.info("Was an active session", info);
     const ok = await this.persistence.deleteChat(id);
@@ -430,7 +450,7 @@ export class Messenger {
   /* ---------------- Session Management ---------------- */
 
   async ensureSession(
-    chatId: string,
+    chatId: UUIDv7,
     preloadAll = true,
     bumpLastAccessed = true,
   ): Promise<ChatSession> {
@@ -481,7 +501,7 @@ export class Messenger {
     }
   }
 
-  getSessions(chatId: string | null): ChatSession | null {
+  getSessions(chatId: UUIDv7 | null): ChatSession | null {
     if (!chatId) return null;
     return this.sessions.get(chatId) ?? null;
   }
