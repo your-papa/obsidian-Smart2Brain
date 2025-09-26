@@ -12,6 +12,7 @@
         getMessenger,
     } from "./chatState.svelte";
     import { getPlugin } from "../../lib/state.svelte";
+    import { onMount } from "svelte";
 
     interface Props {
         lastActiveChat?: ChatRecord;
@@ -20,6 +21,7 @@
     const currentSession = new CurrentSession();
 
     const plugin = getPlugin();
+
     const messenger = getMessenger();
 </script>
 

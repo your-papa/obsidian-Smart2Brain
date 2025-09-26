@@ -39,7 +39,7 @@ import { QueryClient } from "@tanstack/svelte-query";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/Chat";
 import { ChatDB } from "./components/db/chatDbSchema";
 import {
-  Chat,
+  type Chat,
   createMessenger,
   getLastActiveChatId,
   Messenger,
@@ -92,11 +92,6 @@ export default class SecondBrainPlugin extends Plugin {
     this.pluginData = await createData(this);
     this.chatCacheDb = new ChatDB();
     const messenger = createMessenger(this.chatCacheDb);
-
-    const lastActiveChat: Chat = await getLastActiveChatId(
-      messenger,
-      this.pluginData,
-    );
 
     this.papa = new Papa({
       debugging: {
@@ -176,10 +171,7 @@ export default class SecondBrainPlugin extends Plugin {
     // window.addEventListener("keypress", () => resetAutoSaveTimer());
     // window.addEventListener("scroll", () => resetAutoSaveTimer());
 
-    this.registerView(
-      VIEW_TYPE_CHAT,
-      (leaf) => new ChatView(this, leaf, lastActiveChat),
-    );
+    this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(this, leaf));
 
     this.addRibbonIcon("message-square", "ribbon.chat", () =>
       this.activateView(),
