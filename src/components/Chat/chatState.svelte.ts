@@ -209,6 +209,8 @@ export class ChatSession {
       this.generateNewTitle(content, model);
     }
     const id = genUUIDv7();
+
+    console.log(id);
     const pair: MessagePair = {
       id,
       model: JSON.parse(JSON.stringify(model)),
@@ -447,6 +449,21 @@ export class Messenger {
     return ok;
   }
 
+  async branchOffFromMessage(
+    chatId: UUIDv7,
+    cutoffMessageId: UUIDv7,
+  ): Promise<UUIDv7> {
+    const lastAccessed = new Date();
+    const newChatId = await this.persistence.branchOffFromMessage(
+      genUUIDv7(),
+      chatId,
+      cutoffMessageId,
+      lastAccessed,
+    );
+
+    return newChatId;
+  }
+
   /* ---------------- Session Management ---------------- */
 
   async ensureSession(
@@ -577,38 +594,6 @@ export function createMessenger(db: ChatDB): Messenger {
 
 export function getMessenger(): Messenger | null {
   return messengerSingleton;
-}
-
-/**
- * Retrieve the last active chat (if exists) or create a new one.
- */
-export async function getLastActiveChatId(
-  messenger: Messenger,
-  dataStore: PluginDataStore,
-): Promise<ChatRecord> {
-  // 1. Try stored last active id
-  const lastId = dataStore.getLastActiveChatId();
-  if (lastId) {
-    const rec = await messenger.loadChatRecord(lastId);
-    if (rec) return rec;
-  }
-
-  // 2. Fallback: if there are existing chats, reuse the most recently accessed
-  // (listChats() returns rows ordered by lastAccessed DESC in DexiePersistence)
-  const previews = await messenger.listChats();
-  if (previews.length) {
-    const fallback = await messenger.loadChatRecord(previews[0].id);
-    if (fallback) {
-      // Persist this as the new last active for next load
-      dataStore.setLastActiveChatId(fallback.id);
-      return fallback;
-    }
-  }
-
-  // 3. No existing chats -> create a new one
-  const created = await messenger.createChat();
-  dataStore.setLastActiveChatId(created.id);
-  return created;
 }
 
 export class CurrentSession {

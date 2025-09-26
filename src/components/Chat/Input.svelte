@@ -11,6 +11,7 @@
     import Dropdown from "../base/Dropdown.svelte";
     import { getData } from "../../lib/data.svelte";
     import { createQuery } from "@tanstack/svelte-query";
+    import { Notice } from "obsidian";
 
     interface Props {
         messengner: Messenger;
@@ -170,19 +171,13 @@
             for (const file of fileList) {
                 files.push(file);
             }
-            console.log("Files:", files);
+            new Notice(`New files attached`);
         }
     }
 
     function removeAttachedFile(file: File) {
         files.remove(file);
     }
-
-    $effect(() =>
-        console.log(
-            currentSession.session?.messageState === MessageState.answering,
-        ),
-    );
 </script>
 
 <div class="w-full px-2 sticky bottom-0">

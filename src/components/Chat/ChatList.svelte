@@ -7,6 +7,7 @@
         Messenger,
     } from "./chatState.svelte";
     import { icon } from "../../utils/utils";
+    import type { UUIDv7 } from "../../utils/uuid7Validator";
 
     interface props {
         messenger: Messenger;
@@ -17,10 +18,6 @@
 
     let chats: ChatPreview[] = $state([]);
     let hoveredChatId: string | null = $state(null);
-
-    onMount(async () => {
-        chats = await messenger.listChats();
-    });
 
     export function formatDDMMYY_HHMM(d: Date): string {
         const parts = new Intl.DateTimeFormat("de-DE", {
@@ -36,12 +33,12 @@
         return `${byType.day}.${byType.month}.${byType.year} ${byType.hour}:${byType.minute}`;
     }
 
-    async function activateNewSession(chatId: string) {
+    async function activateNewSession(chatId: UUIDv7) {
         const session = await messenger.ensureSession(chatId);
         currentSession.session = session;
     }
 
-    async function deleteChat(chatId: string) {
+    async function deleteChat(chatId: UUIDv7) {
         const deleted = await messenger.deleteChat(chatId);
         if (deleted) {
             chats = chats.filter((c) => c.id !== chatId);
@@ -53,12 +50,18 @@
             }
         }
     }
+
+    onMount(async () => {
+        chats = await messenger.listChats();
+    });
 </script>
 
 <div class="flex flex-col mt-auto mb-4 gap-1">
-    <div class="border-b border-x-0 border-t-0 border-solid mx-2 p-1">
-        Recent
-    </div>
+    {#if chats.length > 0}
+        <div class="border-b border-x-0 border-t-0 border-solid mx-2 p-1">
+            Recent
+        </div>
+    {/if}
     {#each chats as chat}
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->

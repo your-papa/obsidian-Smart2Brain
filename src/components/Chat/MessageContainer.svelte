@@ -43,18 +43,28 @@
     async function redoMessage(messageId: UUIDv7, model: ChatModel) {
         currentSession.session?.resendMessage(messageId, model);
     }
+
+    async function branchOff(messageId: UUIDv7) {
+        if (currentSession.session) {
+            const id = await messenger.branchOffFromMessage(
+                currentSession.session.chatId,
+                messageId,
+            );
+            console.log(id);
+        }
+    }
 </script>
 
 <div class="flex-1 gap-1 mb-2">
     {#each messages!! as messagePair}
-        <div class="group mr-2 flex flex-col items-end gap-2">
+        <div class="group mr-2 flex flex-col items-end gap-2 mb-2">
             <div
                 class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[--text-selection] px-4 py-2 [&>p]:m-0"
                 use:renderMarkdown={messagePair.userMessage.content}
             ></div>
 
             <div
-                class="mt-1 flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+                class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
             >
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -70,6 +80,24 @@
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div
+                    use:icon={"split"}
+                    class="trash-icon hover:text-[--text-accent] items-center justify-center"
+                    onclick={() => console.log("split")}
+                ></div>
+
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                    use:icon={"edit"}
+                    class="trash-icon hover:text-[--text-accent] items-center justify-center"
+                    onclick={async () => console.log("edit")}
+                ></div>
+
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
                     use:icon={"copy"}
                     class="trash-icon hover:text-[--text-accent] items-center justify-center"
                     onclick={async () =>
@@ -78,7 +106,7 @@
             </div>
         </div>
 
-        <div class="group flex flex-col px-2 gap-2">
+        <div class="group flex flex-col px-2 gap-2 mb-2">
             {#if !messagePair.assistantMessage.content}
                 <Dots size={"50"} color={"var(--text-accent)"} />
             {:else}
@@ -104,6 +132,16 @@
                                 messagePair.assistantMessage.content,
                             )}
                     ></div>
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <div
+                        use:icon={"split"}
+                        class="trash-icon hover:text-[--text-accent] items-center justify-center"
+                        onclick={() => branchOff(messagePair.id)}
+                    >
+                        >
+                    </div>
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_static_element_interactions -->

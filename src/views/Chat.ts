@@ -1,36 +1,22 @@
-import {
-  WorkspaceLeaf,
-  type HoverParent,
-  HoverPopover,
-  ItemView,
-} from "obsidian";
+import { WorkspaceLeaf, ItemView } from "obsidian";
 
 import ChatViewComponent from "../components/Chat/Chat.svelte";
 import { mount } from "svelte";
 import type SecondBrainPlugin from "../main";
-import {
-  Chat,
-  getMessenger,
-  Messenger,
-} from "../components/Chat/chatState.svelte";
-import MessageContainer from "../components/Chat/MessageContainer.svelte";
-import { getData } from "../lib/data.svelte";
+import { type Chat } from "../components/Chat/chatState.svelte";
 
 export const VIEW_TYPE_CHAT = "chat-view";
 
-export class ChatView extends ItemView implements HoverParent {
+export class ChatView extends ItemView {
   plugin!: SecondBrainPlugin;
   component!: ChatViewComponent;
-  hoverPopover!: HoverPopover | null;
-  lastActiveChat!: Chat;
 
-  constructor(plugin: SecondBrainPlugin, leaf: WorkspaceLeaf, chat: Chat) {
+  constructor(plugin: SecondBrainPlugin, leaf: WorkspaceLeaf) {
     super(leaf);
     this.plugin = plugin;
     this.icon = "message-square";
     this.contentEl.style.paddingBottom = "0";
     this.contentEl.style.paddingTop = "0";
-    this.lastActiveChat = chat;
   }
   getViewType() {
     return VIEW_TYPE_CHAT;
@@ -57,9 +43,7 @@ export class ChatView extends ItemView implements HoverParent {
   protected onOpen(): Promise<void> {
     mount(ChatViewComponent, {
       target: this.contentEl,
-      props: {
-        lastActiveChat: this.lastActiveChat,
-      },
+      props: {},
     });
     return super.onOpen();
   }

@@ -20,7 +20,7 @@ import type {
   MessagePair,
   AssistantMessage,
 } from "../Chat/chatState.svelte";
-import type { UUIDv7 } from "../../utils/uuid7Validator";
+import { isUUIDv7, type UUIDv7 } from "../../utils/uuid7Validator";
 
 /**
  * Minimal chat record metadata (messages loaded separately).
@@ -76,12 +76,27 @@ export interface IChatPersistence {
     id: UUIDv7;
     title: string;
     lastAccessed: Date;
-  }): Promise<string>;
+  }): Promise<UUIDv7>;
 
   /**
    * Delete a chat and all its messages.
    */
   deleteChat(id: UUIDv7): Promise<boolean>;
+
+  /**
+   *
+   * @param id
+   * @param chatId
+   * @param cutoffMessageId
+   *
+   * Branches off a chat from a message.
+   */
+  branchOffFromMessage(
+    id: UUIDv7,
+    chatId: UUIDv7,
+    cutoffMessageId: UUIDv7,
+    lastAccessed: Date,
+  ): Promise<UUIDv7>;
 
   /**
    * Lightweight meta load (no messages).
@@ -158,7 +173,7 @@ export interface IChatPersistence {
 export function isChatRecordMeta(obj: any): obj is ChatRecordMeta {
   return (
     obj &&
-    typeof obj.id === "string" &&
+    isUUIDv7(obj.id) &&
     typeof obj.title === "string" &&
     obj.lastAccessed instanceof Date &&
     typeof obj.msgCount === "number"
