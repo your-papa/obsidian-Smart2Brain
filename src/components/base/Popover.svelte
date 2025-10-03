@@ -37,7 +37,7 @@
 <Popover.Root bind:open={isOpen}>
     <Popover.Portal>
         <Popover.Content
-            class="bg-white rounded-md border-[--background-modifier-border] border-solid shadow-md"
+            class="bg-[--background-primary] rounded-md border-[--background-modifier-border] border-solid shadow-md"
             {customAnchor}
             sideOffset={8}
             side="top"
@@ -56,11 +56,23 @@
                         }}
                     >
                         {#if model.provider === "OpenAI"}
-                            <OpenAILogo height={16} width={16} />
+                            <OpenAILogo
+                                style={"fill: var(--text-normal)"}
+                                height={16}
+                                width={16}
+                            />
                         {:else if model.provider === "Anthropic"}
-                            <AnthropicLogo height={16} width={16} />
+                            <AnthropicLogo
+                                style={"fill: var(--text-normal)"}
+                                height={16}
+                                width={16}
+                            />
                         {:else if model.provider === "Ollama"}
-                            <OllamaLogo height={16} width={16} />
+                            <OllamaLogo
+                                style={"fill: var(--text-normal)"}
+                                height={16}
+                                width={16}
+                            />
                         {:else}
                             <div use:icon={"sparkles"}></div>
                         {/if}
@@ -70,7 +82,7 @@
                 {/each}
             </div>
             <Separator.Root
-                class="bg-black shrink-0 my-1 w-full data-[orientation=horizontal]:h-px"
+                class="bg-[--background-modifier-border]  shrink-0 my-1 w-full data-[orientation=horizontal]:h-px"
             />
 
             <!-- svelte-ignore a11y_click_events_have_key_events -->
