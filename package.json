@@ -26,7 +26,9 @@
   },
   "type": "module",
   "dependencies": {
+    "@selemondev/svgl-svelte": "^0.0.3",
     "@tanstack/svelte-query": "https://pkg.pr.new/@tanstack/svelte-query@746b9c5d83e901deb3a5ca7012a4b4e2b617c5e3",
+    "bits-ui": "^2.11.4",
     "builtin-modules": "^5.0.0",
     "dexie": "^4.2.0",
     "i18next": "^23.16.8",

@@ -7,10 +7,6 @@ import {
 import SecondBrainPlugin, { type PluginData } from "../main";
 
 import { createQuery } from "@tanstack/svelte-query";
-import type { PluginDataStore } from "./data.svelte";
-import SmartSecondBrain from "../SmartSecondBrain";
-import type { GenProviders } from "../types/providers";
-import type { ChatModel } from "../components/Chat/chatState";
 
 export const providerState: Record<RegisteredProvider, boolean> = $state({
   OpenAI: false,
