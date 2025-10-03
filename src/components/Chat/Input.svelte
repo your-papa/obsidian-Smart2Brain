@@ -1,17 +1,17 @@
 <script lang="ts">
     import { icon } from "../../utils/utils";
     import { onMount } from "svelte";
-    import { getPlugin } from "../../lib/state.svelte";
+    import { getPlugin, modelQuery } from "../../lib/state.svelte";
     import {
         CurrentSession,
         MessageState,
         Messenger,
         type ChatModel,
     } from "./chatState.svelte";
-    import Dropdown from "../base/Dropdown.svelte";
     import { getData } from "../../lib/data.svelte";
     import { createQuery } from "@tanstack/svelte-query";
     import { Notice } from "obsidian";
+    import Popover from "../base/Popover.svelte";
 
     interface Props {
         messengner: Messenger;
@@ -73,57 +73,37 @@
     const plugin = getPlugin();
     const providers = data.getConfiguredProviders();
 
+    // Use your shared modelQuery for each provider
     const modelQueries = providers.map((provider) =>
-        createQuery(() => ({
-            queryKey: ["models", provider],
-            queryFn: async () =>
-                await plugin.papa.providerRegistry
-                    .getProvider(provider)
-                    .getModels(),
-        })),
+        modelQuery(provider, plugin),
     );
 
-    const allModelsLoaded = $derived(modelQueries.every((q) => q.isSuccess));
-
-    function mapAvailableModels(): ChatModel[] {
-        const available: ChatModel[] = [];
-        for (const provider of providers) {
-            const models: string[] | undefined =
-                plugin.queryClient.getQueryData(["models", provider]);
-            if (!models) continue;
+    const availableModels = $derived.by(() => {
+        const out: ChatModel[] = [];
+        providers.forEach((provider, idx) => {
+            const models: string[] = modelQueries[idx].data ?? [];
             const confModels = data.getGenModels(provider);
             for (const [modelName, modelConfig] of confModels.entries()) {
                 if (models.includes(modelName)) {
-                    available.push({
-                        model: modelName,
-                        provider,
-                        modelConfig,
-                    });
+                    out.push({ model: modelName, provider, modelConfig });
                 }
             }
-        }
-        return available;
-    }
-
-    const availModelsQuery = createQuery(() => ({
-        queryKey: ["chatModels", providers],
-        enabled: allModelsLoaded,
-        queryFn: async () => {
-            const list = mapAvailableModels();
-            return list;
-        },
-    }));
+        });
+        return out;
+    });
 
     let _chatModelInitialized = $state(false);
+
     $effect(() => {
         if (_chatModelInitialized) return;
-        const list = availModelsQuery.data;
+        const list = availableModels;
         if (!list || !list.length) return;
 
         const sel = data.getSelGenModel();
         if (sel) {
             const found = list.find(
-                (m) => m.provider === sel.provider && m.model === sel.model,
+                (m: ChatModel) =>
+                    m.provider === sel.provider && m.model === sel.model,
             );
             if (found) {
                 chatModel = found;
@@ -136,10 +116,9 @@
         _chatModelInitialized = true;
     });
 
+    // Refetch by invalidating the per-provider 'models' queries
     function refetch() {
-        plugin.queryClient.invalidateQueries({
-            queryKey: ["chatModels", providers],
-        });
+        plugin.queryClient.invalidateQueries({ queryKey: ["models"] });
     }
 
     let files: File[] = $state([]);
@@ -177,6 +156,10 @@
 
     function removeAttachedFile(file: File) {
         files.remove(file);
+    }
+
+    function setModel(model: ChatModel) {
+        chatModel = model;
     }
 </script>
 
@@ -227,21 +210,12 @@
         ></textarea>
 
         <div class="flex w-full items-center">
-            <div class="flex flex-row flex-1 gap-2">
-                <Dropdown
-                    type="options"
-                    dropdown={availModelsQuery.data
-                        ? availModelsQuery.data.map((model) => ({
-                              display: model.model,
-                              value: model,
-                          }))
-                        : []}
-                    selected={chatModel}
-                    onSelect={(model) => {
-                        if (!model) return;
-                        chatModel = model;
-                        data.selectGenModel(model.provider, model.model);
-                    }}
+            <div class="flex flex-row flex-1 gap-1">
+                <Popover
+                    model={chatModel}
+                    models={availableModels ?? []}
+                    {refetch}
+                    {setModel}
                 />
                 <input
                     type="file"
