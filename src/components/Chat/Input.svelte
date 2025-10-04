@@ -205,7 +205,7 @@
             onkeypress={(event) => handeEnter(event)}
             id="chat-view-user-input-element"
             class="resize-none border-0 !shadow-none p-1 w-full"
-            placeholder={"Your text here"}
+            placeholder={"Type your message here..."}
             oninput={updateHeight}
         ></textarea>
 
