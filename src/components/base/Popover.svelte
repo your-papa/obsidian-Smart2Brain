@@ -86,12 +86,16 @@
             />
 
             <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div
-                class="clickable-icon w-8 ml-auto mr-1 my-1"
-                use:icon={"refresh-cw"}
                 onclick={refetch}
-            ></div>
+                aria-label="refetch available models"
+                class="flex flex-row w-fit m-1 ml-auto py-1 px-2 rounded-md gap-1 hover:bg-[--background-modifier-hover]"
+            >
+                <div class="self-center">Refetch</div>
+                <div class="flex items-center" use:icon={"refresh-cw"}></div>
+            </div>
         </Popover.Content>
     </Popover.Portal>
 </Popover.Root>
