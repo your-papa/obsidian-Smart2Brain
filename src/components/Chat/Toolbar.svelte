@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { getData } from "../../lib/data.svelte";
     import Button from "../base/Button.svelte";
     import type { CurrentSession, Messenger } from "./chatState.svelte";
 
@@ -18,7 +19,11 @@
         }
     }
 
-    let title = $derived(currentSession.session?.getTitle() ?? "New Thread");
+    const data = getData();
+
+    let title = $derived(
+        currentSession.session?.getTitle() ?? data.defaultChatName,
+    );
 
     function openMenu() {
         currentSession.session = null;

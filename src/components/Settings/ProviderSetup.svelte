@@ -7,6 +7,7 @@
     import { getData } from "../../lib/data.svelte";
     import { ProviderSetupModal } from "../Modal/ProviderSetup";
     import Dropdown from "../base/Dropdown.svelte";
+    import { Accordion } from "bits-ui";
     import ConfiguredProvider from "./ConfiguredProvider.svelte";
 
     const data = getData();
@@ -21,6 +22,12 @@
     let selectedProvider: RegisteredProvider | undefined = $derived(
         unconfiguredProviders[0] || undefined,
     );
+
+    let activeProvider: RegisteredProvider | undefined = $state(undefined);
+
+    const onAccordionClick = (provider: RegisteredProvider) => {
+        activeProvider = activeProvider === provider ? undefined : provider;
+    };
 </script>
 
 {#if unconfiguredProviders.length !== 0 && selectedProvider}
@@ -49,6 +56,8 @@
     </SettingContainer>
 {/if}
 
-{#each configuredProviders as configuredProvider}
-    <ConfiguredProvider {configuredProvider} />
-{/each}
+<Accordion.Root type="single" bind:value={activeProvider}>
+    {#each configuredProviders as provider, i (provider + i)}
+        <ConfiguredProvider configuredProvider={provider} {onAccordionClick} />
+    {/each}
+</Accordion.Root>
