@@ -122,6 +122,7 @@
 </div>
 
 <div class="modal-button-container">
+    {query.status}
     {#if query.data !== undefined}
         <div
             class="flex items-center gap-2 rounded px-[--pill-padding-x] mr-auto"
