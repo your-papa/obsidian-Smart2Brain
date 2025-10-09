@@ -1,7 +1,7 @@
 <script lang="ts">
     import { icon } from "../../utils/utils";
     interface Props {
-        onClick: () => void;
+        onClick?: (event: MouseEvent) => void;
         iconId?: string;
         buttonText?: string;
         tooltip?: string | undefined;
@@ -9,6 +9,7 @@
         disabled?: boolean;
         cta?: boolean;
         style?: string;
+        stopPropagation?: boolean;
     }
 
     let {
@@ -20,7 +21,13 @@
         cta = false,
         tooltip = undefined,
         style = undefined,
+        stopPropagation = false,
     }: Props = $props();
+
+    function handleClick(event: MouseEvent) {
+        if (stopPropagation) event.stopPropagation();
+        onclick?.(event);
+    }
 </script>
 
 {#if iconId !== ""}
@@ -29,7 +36,7 @@
         {style}
         class="clickable-icon {styles}"
         use:icon={iconId}
-        {onclick}
+        onclick={handleClick}
         aria-label={tooltip}
     ></button>
 {:else}
@@ -37,7 +44,7 @@
         {disabled}
         class:mod-cta={cta}
         class={styles}
-        {onclick}
+        onclick={handleClick}
         aria-label={tooltip}>{buttonText}</button
     >
 {/if}
