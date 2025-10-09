@@ -3,7 +3,6 @@ import { WorkspaceLeaf, ItemView } from "obsidian";
 import ChatViewComponent from "../components/Chat/Chat.svelte";
 import { mount } from "svelte";
 import type SecondBrainPlugin from "../main";
-import { type Chat } from "../components/Chat/chatState.svelte";
 
 export const VIEW_TYPE_CHAT = "chat-view";
 
@@ -15,7 +14,6 @@ export class ChatView extends ItemView {
     super(leaf);
     this.plugin = plugin;
     this.icon = "message-square";
-    this.contentEl.style.paddingBottom = "0";
     this.contentEl.style.paddingTop = "0";
   }
   getViewType() {

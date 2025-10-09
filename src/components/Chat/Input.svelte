@@ -9,9 +9,10 @@
         type ChatModel,
     } from "./chatState.svelte";
     import { getData } from "../../lib/data.svelte";
-    import { createQuery } from "@tanstack/svelte-query";
-    import { Notice } from "obsidian";
-    import Popover from "../base/Popover.svelte";
+    import { Notice, TFile } from "obsidian";
+    import ModelPopover from "../base/ModelPopover.svelte";
+    import FilePopover from "../base/FilePopover.svelte";
+    import { getWikiLinkAtCursor } from "../../utils/wikiLinkExtraction";
 
     interface Props {
         messengner: Messenger;
@@ -22,26 +23,29 @@
 
     const { messengner, currentSession }: Props = $props();
 
-    let textarea: HTMLTextAreaElement;
+    let textarea = $state<HTMLTextAreaElement | null>(null);
     let inputValue = $state("");
+    let isFilePopoverOpen = $state(false);
+    let markdownFiles: TFile[] = $state([]);
+
+    // New: hidden combobox input ref & selected file value
+    let comboInputRef: HTMLInputElement | null = $state(null);
+    let fileSearchQuery = $state("");
+    let isFocused = $state(false);
 
     const maxLines = 4;
 
     let chatModel: ChatModel | undefined = $state(undefined);
 
     onMount(() => {
-        // Set initial height
+        const plugin = getPlugin();
+        markdownFiles = plugin.app.vault.getMarkdownFiles();
         resetHeight();
-
-        // Adjust height when the textarea's width changes
         const resizeObserver = new ResizeObserver(() => {
             updateHeight();
         });
-        resizeObserver.observe(textarea);
-
-        return () => {
-            resizeObserver.disconnect();
-        };
+        if (textarea) resizeObserver.observe(textarea);
+        return () => resizeObserver.disconnect();
     });
 
     function resetHeight() {
@@ -52,14 +56,10 @@
 
     function updateHeight() {
         if (!textarea) return;
-
-        // Reset to auto to get accurate scrollHeight
         textarea.style.height = "auto";
-
         const scrollHeight = textarea.scrollHeight;
-        const lineHeight = 20; // Approximate line height in pixels
+        const lineHeight = 20;
         const maxHeight = lineHeight * maxLines;
-
         if (scrollHeight <= maxHeight) {
             textarea.style.height = `${scrollHeight}px`;
             textarea.style.overflowY = "hidden";
@@ -73,7 +73,6 @@
     const plugin = getPlugin();
     const providers = data.getConfiguredProviders();
 
-    // Use your shared modelQuery for each provider
     const modelQueries = providers.map((provider) =>
         modelQuery(provider, plugin),
     );
@@ -116,7 +115,6 @@
         _chatModelInitialized = true;
     });
 
-    // Refetch by invalidating the per-provider 'models' queries
     function refetch() {
         plugin.queryClient.invalidateQueries({ queryKey: ["models"] });
     }
@@ -124,19 +122,94 @@
     let files: File[] = $state([]);
 
     function sendMessage() {
-        messengner.sendMessage(currentSession, inputValue, chatModel!!, files);
+        if (!chatModel) return;
+        messengner.sendMessage(currentSession, inputValue, chatModel, files);
         files = [];
         inputValue = "";
     }
 
-    const handeEnter = (event: KeyboardEvent) => {
+    const handleEnter = (event: KeyboardEvent) => {
         if (event.shiftKey && event.key === "Enter") {
             return;
         }
-        if (event.key === "Enter" && inputValue.length !== 0) {
-            event.preventDefault();
+        event.preventDefault();
+
+        if (inputValue.trim().length !== 0) {
             sendMessage();
+        } else {
+            new Notice("Your second brain does not understand empty messages");
         }
+    };
+
+    function autoCloseBracket(textarea: HTMLTextAreaElement) {
+        const start = textarea.selectionStart ?? 0;
+        const end = textarea.selectionEnd ?? start;
+        const value = textarea.value;
+        const before = value.slice(0, start);
+        const selected = value.slice(start, end);
+        const after = value.slice(end);
+        const insertion = selected.length ? `[${selected}]` : `[]`;
+        textarea.value = before + insertion + after;
+        const caretPos = start + 1;
+        const newSelectionEnd = selected.length
+            ? caretPos + selected.length
+            : caretPos;
+        textarea.setSelectionRange(caretPos, newSelectionEnd);
+        return [start, end];
+    }
+
+    function handleBracket(
+        event: KeyboardEvent,
+        textarea: HTMLTextAreaElement,
+    ) {
+        event.preventDefault();
+        const [start, end] = autoCloseBracket(textarea);
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    // Insert selected filename into the current [] region
+    const onFileSelect = (name: string) => {
+        if (!textarea || !name) return;
+        const value = textarea.value;
+        const cursor = textarea.selectionStart ?? 0;
+
+        const ctx = getWikiLinkAtCursor(value, cursor);
+        if (!ctx) return; // per your assumption this shouldn't happen
+
+        // Replace the inner range [innerStart, innerEnd)
+        textarea.setRangeText(name, ctx.innerStart, ctx.innerEnd, "preserve");
+
+        // Compute new fullEnd after replacement and place caret just after ]]
+        const delta = name.length - (ctx.innerEnd - ctx.innerStart);
+        const newFullEnd = ctx.fullEnd + delta;
+        textarea.setSelectionRange(newFullEnd, newFullEnd);
+
+        // Notify any bindings/framework
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+
+    const handleKeydown = (event: KeyboardEvent) => {
+        if (isFilePopoverOpen) {
+            const keys = ["ArrowDown", "ArrowUp", "Enter", "Escape"];
+            if (keys.includes(event.key)) {
+                event.preventDefault();
+                event.stopPropagation();
+                comboInputRef?.dispatchEvent(
+                    new KeyboardEvent("keydown", {
+                        key: event.key,
+                        bubbles: true,
+                        cancelable: true,
+                    }),
+                );
+                // Do not fall through to Enter handling here;
+                // Combobox will handle selection/close, effect will insert.
+                return;
+            }
+        }
+
+        if (event.key === "Enter") handleEnter(event);
+        if (event.key === "[")
+            handleBracket(event, event.target as HTMLTextAreaElement);
     };
 
     function stopMessage() {
@@ -161,11 +234,25 @@
     function setModel(model: ChatModel) {
         chatModel = model;
     }
+    const handleKeyup = (event: KeyboardEvent) => {
+        const textarea = event.target as HTMLTextAreaElement;
+        const wikiLink = getWikiLinkAtCursor(
+            textarea.value,
+            textarea.selectionStart,
+        );
+        if (wikiLink) {
+            isFilePopoverOpen = true;
+            fileSearchQuery = wikiLink.filePart;
+        } else {
+            if (isFilePopoverOpen) isFilePopoverOpen = false;
+        }
+    };
 </script>
 
-<div class="w-full px-2 sticky bottom-0">
+<div class="w-full sticky bottom-1">
     <div
-        class="mx-auto my-0 p-2 trans-border trans-bg backdrop-blur-lg rounded-t-lg max-w-[500px]"
+        class="mx-auto my-0 p-1 border-standard trans-bg backdrop-blur-lg rounded-lg max-w-[500px]"
+        class:trans-border={isFocused}
     >
         <div class="flex flex-row flex-wrap gap-2">
             {#each files as file}
@@ -202,21 +289,35 @@
         <textarea
             bind:this={textarea}
             bind:value={inputValue}
-            onkeypress={(event) => handeEnter(event)}
+            onkeyup={handleKeyup}
+            onkeydown={(event) => handleKeydown(event)}
             id="chat-view-user-input-element"
-            class="resize-none border-0 !shadow-none p-1 w-full"
+            class="resize-none text-[length:--font-text-size] border-0 !shadow-none p-1 w-full !bg-transparent"
             placeholder={"Type your message here..."}
             oninput={updateHeight}
+            onfocus={() => (isFocused = true)}
+            onblur={() => (isFocused = false)}
         ></textarea>
+
+        <FilePopover
+            customAnchor={textarea}
+            files={markdownFiles}
+            bind:isOpen={isFilePopoverOpen}
+            bind:comboInputRef
+            searchQuery={fileSearchQuery}
+            {onFileSelect}
+        />
 
         <div class="flex w-full items-center">
             <div class="flex flex-row flex-1 gap-1">
-                <Popover
-                    model={chatModel}
-                    models={availableModels ?? []}
-                    {refetch}
-                    {setModel}
-                />
+                {#if chatModel}
+                    <ModelPopover
+                        model={chatModel}
+                        models={availableModels ?? []}
+                        {refetch}
+                        {setModel}
+                    />
+                {/if}
                 <input
                     type="file"
                     multiple={true}
@@ -233,17 +334,17 @@
             </div>
             {#if !currentSession.session || currentSession.session.messageState === MessageState.idle}
                 <button
-                    disabled={inputValue.length === 0}
+                    disabled={inputValue.trim().length === 0}
                     aria-label={"send message"}
                     onclick={sendMessage}
-                    class="h-7 w-7 p-1 rounded-r-md transition duration-300 ease-in-out !bg-[--text-accent-lighter] color-[--background-primary]"
-                    use:icon={"arrow-up"}
+                    class="h-7 w-7 p-1 rounded-r-md transition duration-300 ease-in-out !bg-[--text-accent] !text-[--background-primary]"
+                    use:icon={"send-horizontal"}
                 ></button>
             {:else if currentSession.session.messageState === MessageState.answering}
                 <button
                     aria-label={"stop streaming"}
                     onclick={stopMessage}
-                    class="h-7 w-7 p-1 rounded-r-md transition duration-300 ease-in-out !bg-[--text-accent-lighter] color-[--background-primary]"
+                    class="h-7 w-7 p-1 rounded-r-md transition duration-300 ease-in-out !bg-[--text-accent] !text-[--background-primary]"
                     use:icon={"square"}
                 ></button>{/if}
         </div>
@@ -257,6 +358,10 @@
             var(--background-primary) 4.5%,
             transparent
         );
+    }
+
+    .border-standard {
+        outline: 2px solid var(--background-modifier-border-hover);
     }
 
     .trans-border {
