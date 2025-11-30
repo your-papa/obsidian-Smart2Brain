@@ -1,8 +1,8 @@
 import { WorkspaceLeaf, ItemView } from "obsidian";
 
-import ChatViewComponent from "../components/Chat/Chat.svelte";
+import ChatViewComponent from "./Chat.svelte";
 import { mount } from "svelte";
-import type SecondBrainPlugin from "../main";
+import type SecondBrainPlugin from "../../main";
 
 export const VIEW_TYPE_CHAT = "chat-view";
 

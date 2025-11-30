@@ -1,7 +1,6 @@
 import type { GenModelConfig, Language, RegisteredGenProvider } from "papa-ts";
-import { get, writable, type Writable } from "svelte/store";
-import { getPlugin } from "../../lib/state.svelte";
-import { getData, type PluginDataStore } from "../../lib/data.svelte";
+import { getPlugin } from "./state.svelte";
+import { getData, type PluginDataStore } from "./dataStore.svelte";
 import type {
   IChatPersistence,
   ChatRecordMeta,
@@ -10,7 +9,7 @@ import type {
 import { DexiePersistence } from "../db/dexieChatDb";
 import { ChatDB } from "../db/chatDbSchema";
 import { Notice } from "obsidian";
-import { genUUIDv7, type UUIDv7 } from "../../utils/uuid7Validator";
+import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 
 /* -----------------------------------------------------------------------------
  * Shared Types
@@ -205,7 +204,8 @@ export class ChatSession {
     model: ChatModel,
     attachments: File[] | undefined,
   ): Promise<string> {
-    if (this.messages.length === 0) {
+    const data = getData();
+    if (data.isGeneratingChatTitle && this.messages.length === 0) {
       this.generateNewTitle(content, model);
     }
     const id = genUUIDv7();

@@ -1,16 +1,14 @@
 <script lang="ts">
     import { t } from "svelte-i18n";
     import { registeredProviders, type RegisteredProvider } from "papa-ts";
-    import SettingContainer from "../Settings/SettingContainer.svelte";
-    import TextComponent from "../base/Text.svelte";
-    import DropdownComponent from "../base/Dropdown.svelte";
-    import Button from "../base/Button.svelte";
+    import SettingContainer from "../../components/Settings/SettingContainer.svelte";
+    import TextComponent from "../../components/base/Text.svelte";
+    import Button from "../../components/base/Button.svelte";
     import type { ProviderSetupModal } from "./ProviderSetup";
-    import { getData } from "../../lib/data.svelte";
+    import { getData } from "../../stores/dataStore.svelte";
     import { createQuery, QueryClientProvider } from "@tanstack/svelte-query";
-    import Icon from "../icons/Icon.svelte";
-    import { getProviderIcon } from "../../lib/providerIcons";
     import type SecondBrainPlugin from "../../main";
+    import ProviderIcon from "../../components/icons/ProviderIcon.svelte";
     import { mount, onMount } from "svelte";
     import { icon } from "../../utils/utils";
 
@@ -53,11 +51,11 @@
         });
 
         if (header) {
-            mount(Icon, {
+            mount(ProviderIcon, {
                 target: header,
                 anchor: title,
                 props: {
-                    icon: getProviderIcon(selectedProvider),
+                    providerName: selectedProvider,
                     size: {
                         height: 32,
                         width: 32,
@@ -122,7 +120,6 @@
 </div>
 
 <div class="modal-button-container">
-    {query.status}
     {#if query.data !== undefined}
         <div
             class="flex items-center gap-2 rounded px-[--pill-padding-x] mr-auto"

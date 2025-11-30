@@ -1,16 +1,15 @@
 <script lang="ts">
     import { icon } from "../../utils/utils";
     import { onMount } from "svelte";
-    import { getPlugin, modelQuery } from "../../lib/state.svelte";
+    import { getPlugin, modelQuery } from "../../stores/state.svelte";
     import {
         CurrentSession,
         MessageState,
         Messenger,
         type ChatModel,
-    } from "./chatState.svelte";
-    import { getData } from "../../lib/data.svelte";
+    } from "../../stores/chatStore.svelte";
     import { Notice, TFile } from "obsidian";
-    import ModelPopover from "../base/ModelPopover.svelte";
+    import ModelPopover from "../bitui/ModelPopover.svelte";
     import FilePopover from "../base/FilePopover.svelte";
     import { getWikiLinkAtCursor } from "../../utils/wikiLinkExtraction";
 
@@ -35,7 +34,7 @@
 
     const maxLines = 4;
 
-    let chatModel: ChatModel | undefined = $state(undefined);
+    let chatModel: ChatModel | null = $state(null);
 
     onMount(() => {
         const plugin = getPlugin();
@@ -67,56 +66,6 @@
             textarea.style.height = `${maxHeight}px`;
             textarea.style.overflowY = "auto";
         }
-    }
-
-    const data = getData();
-    const plugin = getPlugin();
-    const providers = data.getConfiguredProviders();
-
-    const modelQueries = providers.map((provider) =>
-        modelQuery(provider, plugin),
-    );
-
-    const availableModels = $derived.by(() => {
-        const out: ChatModel[] = [];
-        providers.forEach((provider, idx) => {
-            const models: string[] = modelQueries[idx].data ?? [];
-            const confModels = data.getGenModels(provider);
-            for (const [modelName, modelConfig] of confModels.entries()) {
-                if (models.includes(modelName)) {
-                    out.push({ model: modelName, provider, modelConfig });
-                }
-            }
-        });
-        return out;
-    });
-
-    let _chatModelInitialized = $state(false);
-
-    $effect(() => {
-        if (_chatModelInitialized) return;
-        const list = availableModels;
-        if (!list || !list.length) return;
-
-        const sel = data.getSelGenModel();
-        if (sel) {
-            const found = list.find(
-                (m: ChatModel) =>
-                    m.provider === sel.provider && m.model === sel.model,
-            );
-            if (found) {
-                chatModel = found;
-                _chatModelInitialized = true;
-                return;
-            }
-        }
-        chatModel = list[0];
-        data.selectGenModel(list[0].provider, list[0].model);
-        _chatModelInitialized = true;
-    });
-
-    function refetch() {
-        plugin.queryClient.invalidateQueries({ queryKey: ["models"] });
     }
 
     let files: File[] = $state([]);
@@ -310,14 +259,7 @@
 
         <div class="flex w-full items-center">
             <div class="flex flex-row flex-1 gap-1">
-                {#if chatModel}
-                    <ModelPopover
-                        model={chatModel}
-                        models={availableModels ?? []}
-                        {refetch}
-                        {setModel}
-                    />
-                {/if}
+                <ModelPopover model={chatModel} {setModel} />
                 <input
                     type="file"
                     multiple={true}

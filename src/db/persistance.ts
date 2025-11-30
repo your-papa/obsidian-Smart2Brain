@@ -19,7 +19,7 @@ import type {
   ChatPreview,
   MessagePair,
   AssistantMessage,
-} from "../Chat/chatState.svelte";
+} from "../stores/stateState.svelte";
 import { isUUIDv7, type UUIDv7 } from "../../utils/uuid7Validator";
 
 /**

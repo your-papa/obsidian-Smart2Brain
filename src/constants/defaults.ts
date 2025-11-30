@@ -75,23 +75,15 @@ export const DEFAULT_PROVIDER_CONFIGS: ProviderConfigs = {
 
 export const DEFAULT_SETTINGS: PluginData = {
   providerConfig: DEFAULT_PROVIDER_CONFIGS,
-  selEmbedModel: {
-    provider: "OpenAI",
-    model: "text-embedding-3-small",
-  },
-  selGenModel: {
-    provider: "OpenAI",
-    model: "gpt-4.1-mini-2025-04-14",
-  },
-  isChatComfy: true,
   isUsingRag: false,
+  isGeneratingChatTitle: false,
+  defaultChatModel: null,
   retrieveTopK: 100,
   assistantLanguage:
     (window.localStorage.getItem("language") as Language) || "en",
   initialAssistantMessageContent:
     Prompts[(window.localStorage.getItem("language") as Language) || "en"]
       ?.initialAssistantMessage || Prompts.en.initialAssistantMessage,
-  targetFolder: "Chats",
   defaultChatName: "New Chat",
   excludeFF: ["Chats", ".excalidraw.md"],
   includeFF: [],

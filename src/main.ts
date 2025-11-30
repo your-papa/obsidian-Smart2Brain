@@ -30,32 +30,28 @@ import { ConfirmModal } from "./components/Settings/ConfirmModal";
 import "./lang/i18n";
 import Log from "./logging";
 import "./styles.css";
-import SettingsTab from "./views/Settings";
-import { RemoveModal } from "./components/Modal/RemoveModal";
+import SettingsTab from "./views/Settings/Settings";
 import type { ProviderConfigs } from "./types/providers";
-import { createData, getData, PluginDataStore } from "./lib/data.svelte";
-import { chatLayout, setPlugin } from "./lib/state.svelte";
-import { QueryClient } from "@tanstack/svelte-query";
-import { ChatView, VIEW_TYPE_CHAT } from "./views/Chat";
-import { ChatDB } from "./components/db/chatDbSchema";
 import {
-  type Chat,
-  createMessenger,
-  getLastActiveChatId,
-  Messenger,
-} from "./components/Chat/chatState.svelte";
+  createData,
+  getData,
+  PluginDataStore,
+} from "./stores/dataStore.svelte";
+import { chatLayout, setPlugin } from "./stores/state.svelte";
+import { QueryClient } from "@tanstack/svelte-query";
+import { ChatView, VIEW_TYPE_CHAT } from "./views/Chat/Chat";
+import { ChatDB } from "./db/chatDbSchema";
+import { type ChatModel, createMessenger } from "./stores/chatStore.svelte";
 import type { UUIDv7 } from "./utils/uuid7Validator";
 
 export interface PluginData {
   providerConfig: ProviderConfigs;
-  selEmbedModel: { provider: RegisteredEmbedProvider; model: string };
-  selGenModel: { provider: RegisteredGenProvider; model: string };
-  isChatComfy: boolean;
   initialAssistantMessageContent: string;
   isUsingRag: boolean;
+  isGeneratingChatTitle: boolean;
+  defaultChatModel: ChatModel | null;
   retrieveTopK: number;
   assistantLanguage: Language;
-  targetFolder: string;
   excludeFF: Array<string>;
   includeFF: Array<string>;
   isExcluding: boolean;
