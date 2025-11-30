@@ -88,9 +88,3 @@
         </div>
     {/each}
 </div>
-
-<style>
-    .trash-icon {
-        --icon-size: var(--icon-xs);
-    }
-</style>

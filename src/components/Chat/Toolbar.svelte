@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { getData } from "../../lib/data.svelte";
+    import { getData } from "../../stores/dataStore.svelte";
     import Button from "../base/Button.svelte";
     import type { CurrentSession, Messenger } from "./chatState.svelte";
 

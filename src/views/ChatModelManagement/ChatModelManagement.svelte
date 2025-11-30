@@ -1,14 +1,14 @@
 <script lang="ts">
     import type { ChatModelManagementModal } from "./ChatModelManagement";
     import type { GenProviders } from "../../types/providers";
-    import { getData } from "../../lib/data.svelte";
-    import Button from "../base/Button.svelte";
-    import SettingContainer from "../Settings/SettingContainer.svelte";
-    import { getPlugin, modelQuery } from "../../lib/state.svelte";
+    import { getData } from "../../stores/dataStore.svelte";
+    import Button from "../../components/base/Button.svelte";
+    import SettingContainer from "../../components/Settings/SettingContainer.svelte";
+    import { getPlugin, modelQuery } from "../../stores/state.svelte";
     import type SecondBrainPlugin from "../../main";
-    import Dropdown from "../base/Dropdown.svelte";
+    import Dropdown from "../../components/base/Dropdown.svelte";
     import { type GenModelConfig } from "papa-ts";
-    import Text from "../base/Text.svelte";
+    import Text from "../../components/base/Text.svelte";
 
     interface Props {
         modal: ChatModelManagementModal;

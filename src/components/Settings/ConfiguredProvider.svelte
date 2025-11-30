@@ -1,13 +1,12 @@
 <script lang="ts">
     import { createQuery } from "@tanstack/svelte-query";
     import { registeredProviders, type RegisteredProvider } from "papa-ts";
-    import { getPlugin } from "../../lib/state.svelte";
-    import { getData } from "../../lib/data.svelte";
-    import Icon from "../icons/Icon.svelte";
-    import { getProviderIcon } from "../../lib/providerIcons";
+    import { getPlugin } from "../../stores/state.svelte";
+    import { getData } from "../../stores/dataStore.svelte";
     import Button from "../base/Button.svelte";
-    import { EmbedModelManagementModal } from "../Modal/EmbedModelManagement";
-    import { ChatModelManagementModal } from "../Modal/ChatModelManagement";
+    import ProviderIcon from "../icons/ProviderIcon.svelte";
+    import { EmbedModelManagementModal } from "../../views/EmbedModelManagement/EmbedModelManagement";
+    import { ChatModelManagementModal } from "../../views/ChatModelManagement/ChatModelManagement";
     import {
         type EmbedProviders,
         type GenProviders,
@@ -15,14 +14,18 @@
     import SettingContainer from "./SettingContainer.svelte";
     import Text from "../base/Text.svelte";
     import { Accordion } from "bits-ui";
-    import { icon } from "../../utils/utils";
 
     interface Props {
         configuredProvider: RegisteredProvider;
         onAccordionClick: (provider: RegisteredProvider) => void;
+        isLast?: boolean;
     }
 
-    const { configuredProvider, onAccordionClick }: Props = $props();
+    const {
+        configuredProvider,
+        onAccordionClick,
+        isLast = false,
+    }: Props = $props();
 
     const data = getData();
     const plugin = getPlugin();
@@ -70,48 +73,52 @@
 
 <Accordion.Item
     value={configuredProvider}
-    class="group [&[data-state=open]_.chev]:rotate-180"
+    class="setting-item flex-col group [&[data-state=open]_.chev]:rotate-180 p-0"
 >
-    <Accordion.Header onclick={() => onAccordionClick(configuredProvider)}>
-        <div class="sync-exclude-folder">
-            <div class="sync-exclude-folder-name flex items-center gap-2">
-                <Icon
-                    icon={getProviderIcon(configuredProvider)}
-                    size={{ width: 24, height: 24 }}
-                />
-                <span>{configuredProvider}</span>
-                {#if query.data}
-                    <Button
-                        iconId={"check"}
-                        styles={"text-[--background-modifier-success]"}
-                        tooltip={"Click to refresh"}
-                        onClick={() => refetch()}
-                    />
-                {:else}
-                    <Button
-                        iconId={"x"}
-                        styles={"text-[--background-modifier-error]"}
-                        tooltip={"Click to refresh"}
-                        onClick={() => refetch()}
-                    />
-                {/if}
-                <Button
-                    cta={true}
-                    iconId="trash"
-                    styles={"hover:text-[--text-error]"}
-                    onClick={() =>
-                        data.toggleProviderIsConfigured(configuredProvider)}
-                />
-            </div>
-            <span
-                use:icon={"chevron-down"}
-                class="chev inline-flex items-center justify-center transition-transform duration-200"
+    <Accordion.Header
+        onclick={() => onAccordionClick(configuredProvider)}
+        class="sync-exclude-folder  w-[-webkit-fill-available] !mr-0"
+    >
+        <!-- TODO make this color theme dependent -->
+        <div class="sync-exclude-folder-name flex items-center gap-2">
+            <ProviderIcon
+                providerName={configuredProvider}
+                size={{ width: 16, height: 16 }}
+                className={"fill-white"}
             />
+            <span>{configuredProvider}</span>
+            {#if query.data}
+                <Button
+                    iconId={"check"}
+                    styles={"text-[--background-modifier-success]"}
+                    tooltip={"Click to refresh"}
+                    onClick={() => refetch()}
+                    stopPropagation={true}
+                />
+            {:else}
+                <Button
+                    iconId={"x"}
+                    styles={"text-[--background-modifier-error]"}
+                    tooltip={"Click to refresh"}
+                    onClick={() => refetch()}
+                />
+            {/if}
         </div>
+        <Button
+            cta={true}
+            iconId="trash"
+            styles={"hover:text-[--text-error]"}
+            stopPropagation={true}
+            onClick={() => data.toggleProviderIsConfigured(configuredProvider)}
+        />
+        <Button
+            styles="chev inline-flex items-center justify-center transition-transform duration-200"
+            iconId="chevron-down"
+        />
     </Accordion.Header>
 
     <Accordion.Content
-        class="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down tracking-[-0.01em] pl-8"
+        class="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down tracking-[-0.01em] pl-8 w-[-webkit-fill-available]"
     >
         {#if data.getProviderAuthParams(configuredProvider)}
             {#each Object.entries(data.getProviderAuthParams(configuredProvider)) as [authKey, authValue]}

@@ -6,14 +6,65 @@
         OllamaLogo,
         OpenAILogo,
     } from "@selemondev/svgl-svelte";
-    import type { ChatModel } from "../Chat/chatState.svelte";
+    import type { ChatModel } from "../stores/stateState.svelte";
+    import { getData } from "../../stores/dataStore.svelte";
+    import { getPlugin, modelQuery } from "../../stores/state.svelte";
     interface props {
-        model: ChatModel;
-        models: ChatModel[];
+        model: ChatModel | null;
         setModel: (model: ChatModel) => void;
-        refetch: () => void;
     }
-    const { model, models, refetch, setModel }: props = $props();
+
+    let { model, setModel }: props = $props();
+
+    const data = getData();
+    const plugin = getPlugin();
+    const providers = data.getConfiguredProviders();
+
+    const modelQueries = providers.map((provider) =>
+        modelQuery(provider, plugin),
+    );
+
+    const availableModels = $derived.by(() => {
+        const out: ChatModel[] = [];
+        providers.forEach((provider, idx) => {
+            const models: string[] = modelQueries[idx].data ?? [];
+            const confModels = data.getGenModels(provider);
+            for (const [modelName, modelConfig] of confModels.entries()) {
+                if (models.includes(modelName)) {
+                    out.push({ model: modelName, provider, modelConfig });
+                }
+            }
+        });
+        return out;
+    });
+
+    let _chatModelInitialized = $state(false);
+
+    $effect(() => {
+        if (_chatModelInitialized) return;
+        const list = availableModels;
+        if (!list || !list.length) return;
+
+        const sel = data.getDefaultChatModel();
+        if (sel) {
+            const found = list.find(
+                (m: ChatModel) =>
+                    m.provider === sel.provider && m.model === sel.model,
+            );
+            if (found) {
+                model = found;
+                _chatModelInitialized = true;
+                return;
+            }
+        }
+        model = list[0];
+        _chatModelInitialized = true;
+    });
+
+    function refetch() {
+        plugin.queryClient.invalidateQueries({ queryKey: ["models"] });
+    }
+
     let isOpen = $state(false);
     let customAnchor = $state<HTMLElement>(null!);
 </script>
@@ -44,7 +95,7 @@
             align="start"
         >
             <div class="flex flex-col mx-2 my-4">
-                {#each models as model}
+                {#each availableModels as model}
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_static_element_interactions -->

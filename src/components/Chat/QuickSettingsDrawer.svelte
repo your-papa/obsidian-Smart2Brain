@@ -16,7 +16,7 @@ import DropdownComponent from "../base/Dropdown.svelte";
 import ToggleComponent from "../base/Toggle.svelte";
 import LoadingAnimation from "../base/LoadingAnimation.svelte";
 import { icon } from "../../utils/icons";
-import { getData } from "../../lib/data.svelte";
+import { getData } from "../../stores/dataStore.svelte";
 
 const { isQuickSettingsOpen } = plugin.pluginData;
 

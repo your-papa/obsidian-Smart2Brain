@@ -2,7 +2,7 @@ import type {
   ChatPreview,
   MessagePair,
   AssistantMessage,
-} from "../Chat/chatState.svelte";
+} from "../stores/stateState.svelte";
 import type {
   IChatPersistence,
   ChatRecordMeta,

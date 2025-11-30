@@ -1,5 +1,5 @@
 import { MarkdownRenderer, setIcon } from "obsidian";
-import { getPlugin } from "../lib/state.svelte";
+import { getPlugin } from "../stores/state.svelte";
 
 export const icon = (node: HTMLElement, iconId: string) => {
   setIcon(node, iconId);

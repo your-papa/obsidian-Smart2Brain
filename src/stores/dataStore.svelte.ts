@@ -15,16 +15,12 @@ import {
   AddGenModelError,
   SetEmbedModelError,
   SetGenModelError,
-  type AllProviderConfigs,
   type EmbedProviders,
-  type EmbedProvidersConfig,
   type GenProviders,
   type GetProviderAuth,
-  type GetProviderConfig,
-  type ProviderConfigs,
 } from "../types/providers";
-import ConfiguredProvider from "../components/Settings/ConfiguredProvider.svelte";
 import type { UUIDv7 } from "../utils/uuid7Validator";
+import type { ChatModel } from "./chatStore.svelte";
 
 export class PluginDataStore {
   #data: PluginData;
@@ -111,14 +107,6 @@ export class PluginDataStore {
     );
   }
 
-  get isChatComfy() {
-    return this.#data.isChatComfy;
-  }
-  set isChatComfy(val: boolean) {
-    this.#data.isChatComfy = val;
-    this.saveSettings();
-  }
-
   get initialAssistantMessageContent() {
     return this.#data.initialAssistantMessageContent;
   }
@@ -151,20 +139,21 @@ export class PluginDataStore {
     this.saveSettings();
   }
 
-  get targetFolder() {
-    return this.#data.targetFolder;
-  }
-  set targetFolder(val: string) {
-    this.#data.targetFolder = val;
-    this.saveSettings();
-  }
-
   get isExcluding(): boolean {
     return this.#data.isExcluding;
   }
 
   toggleIsExcluding() {
     this.#data.isExcluding = !this.#data.isExcluding;
+  }
+
+  toggleGeneratingChatTitle() {
+    this.#data.isGeneratingChatTitle = !this.#data.isGeneratingChatTitle;
+    this.saveSettings();
+  }
+
+  get isGeneratingChatTitle(): boolean {
+    return this.#data.isGeneratingChatTitle;
   }
 
   get indexList() {
@@ -241,6 +230,18 @@ export class PluginDataStore {
     this.saveSettings();
   }
 
+  getDefaultChatModel(): ChatModel | null {
+    return this.#data.defaultChatModel;
+  }
+
+  //TODO some check here?
+  setDefaultChatModel(model: ChatModel) {
+    if (!model) throw new Error("Model does not exist");
+    // if (model.provider not in RegisteredProvider) throw new Error("Provider does not exist");
+    this.#data.defaultChatModel = model;
+    this.saveSettings();
+  }
+
   // Get/set isConfigured for a provider
   getProviderIsConfigured(provider: RegisteredProvider): boolean {
     return this.#data.providerConfig[provider].isConfigured;
@@ -269,17 +270,6 @@ export class PluginDataStore {
   }
 
   // --- Embed Model Management (Map-based) ---
-
-  getSelEmbedModel() {
-    return this.#data.selEmbedModel;
-  }
-
-  selectEmbedModel(provider: RegisteredEmbedProvider, value: string) {
-    if (!this.#data.providerConfig[provider].embedModels.has(value))
-      throw new SetEmbedModelError(provider, value);
-    this.#data.selEmbedModel = { provider, model: value };
-    this.saveSettings();
-  }
 
   getEmbedModels<P extends EmbedProviders>(
     provider: P,
@@ -366,17 +356,6 @@ export class PluginDataStore {
     const next = new Map(current);
     next.delete(modelName);
     this.#data.providerConfig[provider].genModels = next;
-    this.saveSettings();
-  }
-
-  getSelGenModel() {
-    return this.#data.selGenModel;
-  }
-
-  selectGenModel(provider: RegisteredGenProvider, value: string) {
-    if (!this.#data.providerConfig[provider].genModels.has(value))
-      throw new SetGenModelError(provider, value);
-    this.#data.selGenModel = { provider, model: value };
     this.saveSettings();
   }
 

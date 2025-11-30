@@ -7,7 +7,7 @@
         type ChatModel,
         type CurrentSession,
         type Messenger,
-    } from "./chatState.svelte";
+    } from "../../stores/chatStore.svelte";
     import Dots from "../../utils/Dots.svelte";
     import { Notice } from "obsidian";
     import type { UUIDv7 } from "../../utils/uuid7Validator";
