@@ -1,4 +1,4 @@
-import { MarkdownRenderer, Component, Keymap, type App } from "obsidian";
+import { MarkdownRenderer, Component, Keymap, type App, loadMathJax } from "obsidian";
 
 export function formatToolInput(input: any): { key: string; value: any }[] {
 	if (!input || typeof input !== "object" || Array.isArray(input)) {
@@ -91,6 +91,7 @@ export async function renderMarkdown(
 	sourcePath: string,
 	component: Component
 ) {
+	await loadMathJax();
 	await MarkdownRenderer.render(
 		app,
 		content,
