@@ -130,7 +130,26 @@
 	// Derived content
 	$: content = getMessageContent(message);
 
+	// Tool collapse logic
+	let areToolsOpen = true;
+	let hasAutoCollapsed = false;
+
+	$: toolStatus = message.toolCalls?.some(t => t.status === "running") ? "running" : "completed";
+	$: toolCount = message.toolCalls?.length || 0;
+	$: summaryText = toolStatus === "running" 
+		? "Running tools..." 
+		: `Used ${toolCount} tool${toolCount === 1 ? "" : "s"}`;
+
+	$: if (content && content.length > 0 && !hasAutoCollapsed && message.toolCalls && message.toolCalls.length > 0) {
+		areToolsOpen = false;
+		hasAutoCollapsed = true;
+	}
+
 	onMount(() => {
+		if (content && content.length > 0) {
+			areToolsOpen = false;
+			hasAutoCollapsed = true;
+		}
 		renderContent(true);
 	});
 
@@ -248,62 +267,70 @@
 <div class="message {message.role}">
 	<div class="message-content">
 		{#if message.toolCalls && message.toolCalls.length > 0}
-			<div class="tool-calls">
-				{#each message.toolCalls as toolCall (toolCall.id)}
-					<div class="tool-call {toolCall.status}">
-						<details>
-							<summary>
-								<span class="status-icon">
-									{#if toolCall.status === "running"}
-										⏳
-									{:else if toolCall.status === "completed"}
-										✅
-									{:else}
-										❌
-									{/if}
-								</span>
-								<span class="tool-name"
-									>{formatToolName(toolCall.name)}</span
-								>
-							</summary>
-							<div class="tool-details">
-								<div class="tool-input">
-									<strong>Input:</strong>
-									{#if formatToolInput(toolCall.input).length > 0}
-										<div class="tool-input-kv">
-											{#each formatToolInput(toolCall.input) as { key, value } (key)}
-												<div class="tool-input-row">
-													<span class="tool-input-key"
-														>{key}:</span
-													>
-													<span
-														class="tool-input-value"
-														>{formatValue(
-															value,
-														)}</span
-													>
-												</div>
-											{/each}
-										</div>
-									{:else}
-										<span class="tool-input-empty"
-											>(empty)</span
+			<div class="tool-calls-container">
+				<details bind:open={areToolsOpen} class="tool-calls-wrapper">
+					<summary class="tool-calls-summary">
+						<span class="summary-icon">{toolStatus === "running" ? "⏳" : "🛠️"}</span>
+						<span class="summary-text">{summaryText}</span>
+					</summary>
+					<div class="tool-calls">
+						{#each message.toolCalls as toolCall (toolCall.id)}
+							<div class="tool-call {toolCall.status}">
+								<details>
+									<summary>
+										<span class="status-icon">
+											{#if toolCall.status === "running"}
+												⏳
+											{:else if toolCall.status === "completed"}
+												✅
+											{:else}
+												❌
+											{/if}
+										</span>
+										<span class="tool-name"
+											>{formatToolName(toolCall.name)}</span
 										>
-									{/if}
-								</div>
-								{#if toolCall.output}
-									<div class="tool-output">
-										<strong>Output:</strong>
-										<div
-											class="tool-output-content markdown-preview-view"
-											use:bindToolOutputContainer={toolCall.id}
-										></div>
+									</summary>
+									<div class="tool-details">
+										<div class="tool-input">
+											<strong>Input:</strong>
+											{#if formatToolInput(toolCall.input).length > 0}
+												<div class="tool-input-kv">
+													{#each formatToolInput(toolCall.input) as { key, value } (key)}
+														<div class="tool-input-row">
+															<span class="tool-input-key"
+																>{key}:</span
+															>
+															<span
+																class="tool-input-value"
+																>{formatValue(
+																	value,
+																)}</span
+															>
+														</div>
+													{/each}
+												</div>
+											{:else}
+												<span class="tool-input-empty"
+													>(empty)</span
+												>
+											{/if}
+										</div>
+										{#if toolCall.output}
+											<div class="tool-output">
+												<strong>Output:</strong>
+												<div
+													class="tool-output-content markdown-preview-view"
+													use:bindToolOutputContainer={toolCall.id}
+												></div>
+											</div>
+										{/if}
 									</div>
-								{/if}
+								</details>
 							</div>
-						</details>
+						{/each}
 					</div>
-				{/each}
+				</details>
 			</div>
 		{/if}
 
@@ -351,7 +378,7 @@
 		max-width: 100%;
 	}
 
-	.message.assistant .tool-calls + .message-text {
+	.message.assistant .tool-calls-container + .message-text {
 		margin-top: 0.25rem;
 	}
 
@@ -372,10 +399,58 @@
 		border: none;
 	}
 
+	.tool-calls-wrapper {
+		width: 100%;
+	}
+
+	.tool-calls-wrapper > summary {
+		list-style: none;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem;
+		color: var(--text-muted);
+		font-size: 0.85rem;
+		border-radius: 6px;
+		transition: background-color 0.15s ease;
+		user-select: none;
+	}
+
+	.tool-calls-wrapper > summary:hover {
+		background: var(--background-modifier-hover);
+		color: var(--text-normal);
+	}
+
+	.tool-calls-wrapper > summary::-webkit-details-marker {
+		display: none;
+	}
+
+	/* Add arrow indicator */
+	.tool-calls-wrapper > summary::before {
+		content: "▶";
+		font-size: 0.7em;
+		display: inline-block;
+		transition: transform 0.2s ease;
+		margin-right: 0.25rem;
+		opacity: 0.7;
+	}
+
+	.tool-calls-wrapper[open] > summary::before {
+		transform: rotate(90deg);
+	}
+
+	.summary-icon {
+		font-size: 1.1em;
+	}
+
 	.tool-calls {
 		display: flex;
 		flex-direction: column;
 		gap: 0.375rem;
+		margin-top: 0.5rem;
+		padding-left: 0.5rem;
+		border-left: 2px solid var(--background-modifier-border);
 	}
 
 	.tool-call {
