@@ -1,38 +1,29 @@
 <script lang="ts">
-	import { MarkdownRenderer, Component, Keymap } from "obsidian";
+	import { Component } from "obsidian";
 	import { onMount, onDestroy } from "svelte";
 	import type SmartSecondBrainPlugin from "../main";
-
-	import type { ThreadMessage, ThreadMessageContent } from "papa-ts";
-
-	interface ToolCallState {
-		id: string;
-		name: string;
-		input: any;
-		status: "running" | "completed" | "failed";
-		output?: any;
-	}
-
-	interface UIMessage extends ThreadMessage {
-		toolCalls?: ToolCallState[];
-	}
+	import type { UIMessage, ToolCallState } from "./types";
+	import {
+		formatToolInput,
+		formatValue,
+		formatToolName,
+		formatToolOutput,
+		renderMarkdown,
+	} from "./markdownHelper";
 
 	export let message: UIMessage;
 	export let plugin: SmartSecondBrainPlugin;
 
 	let messageContainer: HTMLElement;
 	const component = new Component();
-	let linkClickHandler: ((evt: Event) => void) | null = null;
-	let linkHoverHandler: ((evt: Event) => void) | null = null;
 	
 	// Map to store tool output containers and their components
 	const toolOutputContainers = new Map<string, HTMLElement>();
 	const toolOutputComponents = new Map<string, Component>();
-	const toolOutputLinkHandlers = new Map<string, ((evt: Event) => void) | null>();
-	const toolOutputHoverHandlers = new Map<string, ((evt: Event) => void) | null>();
+	const toolOutputCleanups = new Map<string, () => void>();
 
 	// Helper to extract text content from ThreadMessage
-	function getMessageContent(msg: ThreadMessage): string {
+	function getMessageContent(msg: UIMessage): string {
 		if (!msg.content) return "";
 		if (Array.isArray(msg.content)) {
 			return msg.content
@@ -48,94 +39,6 @@
 			: String(msg.content);
 	}
 
-	// Helper to format tool input as key-value pairs
-	function formatToolInput(input: any): { key: string; value: any }[] {
-		if (!input || typeof input !== "object" || Array.isArray(input)) {
-			return [];
-		}
-		return Object.entries(input).map(([key, value]) => ({
-			key,
-			value,
-		}));
-	}
-
-	// Helper to format a value for display
-	function formatValue(value: any): string {
-		if (value === null || value === undefined) {
-			return "null";
-		}
-		if (typeof value === "string") {
-			return value;
-		}
-		if (typeof value === "object") {
-			return JSON.stringify(value, null, 2);
-		}
-		return String(value);
-	}
-
-	// Helper to format tool name to readable label
-	function formatToolName(name: string): string {
-		if (!name) return "";
-		// Replace underscores with spaces
-		let formatted = name.replace(/_/g, " ");
-		// Split camelCase into words
-		formatted = formatted.replace(/([a-z])([A-Z])/g, "$1 $2");
-		// Capitalize first letter of each word
-		return formatted
-			.split(" ")
-			.map(
-				(word) =>
-					word.charAt(0).toUpperCase() + word.slice(1).toLowerCase(),
-			)
-			.join(" ");
-	}
-
-	// Helper to format tool output - handles ThreadMessage content format
-	function formatToolOutput(output: any): string {
-		if (!output) return "";
-		
-		// If it's already a string, return it
-		if (typeof output === "string") {
-			return output;
-		}
-		
-		// If it's an array (ThreadMessage content format)
-		if (Array.isArray(output)) {
-			// Extract text from ThreadMessage content items
-			const textItems = output
-				.map((item: any) => {
-					if (item && typeof item === "object") {
-						if (item.type === "text" && item.text !== undefined) {
-							return item.text;
-						}
-						// Handle other content types if needed
-						if (item.type === "json" && item.data !== undefined) {
-							return JSON.stringify(item.data, null, 2);
-						}
-					}
-					return "";
-				})
-				.filter((text: string) => text !== "")
-				.join("\n");
-			// If we found text items, return them
-			if (textItems) return textItems;
-		}
-		
-		// If it's an object, check if it's a single content item
-		if (typeof output === "object" && output !== null) {
-			if (output.type === "text" && output.text !== undefined) {
-				return output.text;
-			}
-			// Check if it has a content field (nested structure)
-			if (output.content !== undefined) {
-				return formatToolOutput(output.content);
-			}
-		}
-		
-		// Fall back to JSON stringify for other formats
-		return JSON.stringify(output, null, 2);
-	}
-	
 	// Svelte action to bind container and render tool output
 	function bindToolOutputContainer(node: HTMLElement, toolCallId: string) {
 		toolOutputContainers.set(toolCallId, node);
@@ -183,91 +86,20 @@
 		const toolComponent = toolOutputComponents.get(toolCallId)!;
 		
 		// Remove old event listeners if they exist
-		const oldClickHandler = toolOutputLinkHandlers.get(toolCallId);
-		const oldHoverHandler = toolOutputHoverHandlers.get(toolCallId);
-		if (oldClickHandler) {
-			container.removeEventListener("click", oldClickHandler, true);
-		}
-		if (oldHoverHandler) {
-			container.removeEventListener("mouseover", oldHoverHandler, true);
+		const oldCleanup = toolOutputCleanups.get(toolCallId);
+		if (oldCleanup) {
+			oldCleanup();
 		}
 		
-		await MarkdownRenderer.render(
+		const { cleanup } = await renderMarkdown(
 			plugin.app,
 			outputText,
 			container,
 			sourcePath,
-			toolComponent,
+			toolComponent
 		);
-		
-		// Helper to get link text from href or data-href (Dataview uses data-href)
-		const getLinkText = (link: HTMLAnchorElement): string | null => {
-			return link.getAttribute("href") || link.getAttribute("data-href");
-		};
-		
-		// Handle internal links - make them clickable to navigate to notes
-		const clickHandler = (evt: Event) => {
-			const target = evt.target as HTMLElement;
-			const link = target.closest("a.internal-link") as HTMLAnchorElement;
-			if (!link) return;
-			
-			const mouseEvent = evt as MouseEvent;
-			mouseEvent.preventDefault();
-			mouseEvent.stopPropagation();
-			
-			const linktext = getLinkText(link);
-			if (linktext) {
-				plugin.app.workspace.openLinkText(
-					linktext,
-					sourcePath,
-					Keymap.isModEvent(mouseEvent),
-				);
-			}
-		};
-		
-		const hoverHandler = (event: Event) => {
-			const target = event.target as HTMLElement;
-			const link = target.closest("a.internal-link") as HTMLAnchorElement;
-			if (!link) return;
-			
-			const mouseEvent = event as MouseEvent;
-			const linktext = getLinkText(link);
-			if (linktext) {
-				plugin.app.workspace.trigger("hover-link", {
-					event: mouseEvent,
-					source: "preview",
-					hoverParent: { hoverPopover: null },
-					targetEl: mouseEvent.currentTarget,
-					linktext: linktext,
-					sourcePath: sourcePath,
-				});
-			}
-		};
-		
-		// Store handlers
-		toolOutputLinkHandlers.set(toolCallId, clickHandler);
-		toolOutputHoverHandlers.set(toolCallId, hoverHandler);
-		
-		// Attach event listeners using capture phase to catch events early
-		container.addEventListener("click", clickHandler, true);
-		container.addEventListener("mouseover", hoverHandler, true);
-		
-		// Clean up interfering attributes on existing links (Dataview sets target="_blank")
-		const links = container.querySelectorAll("a.internal-link");
-		links.forEach((linkEl) => {
-			const link = linkEl as HTMLAnchorElement;
-			link.removeAttribute("target");
-			link.removeAttribute("rel");
-			link.style.cursor = "pointer";
-		});
-		
-		// Handle external links
-		const externalLinks = container.querySelectorAll("a:not(.internal-link)");
-		externalLinks.forEach((linkEl) => {
-			const link = linkEl as HTMLAnchorElement;
-			link.target = "_blank";
-			link.rel = "noopener";
-		});
+
+		toolOutputCleanups.set(toolCallId, cleanup);
 	}
 
 	// Helper to check if there are incomplete dataview/dataviewjs code blocks
@@ -303,32 +135,17 @@
 	});
 
 	onDestroy(() => {
-		// Clean up event listeners
-		if (messageContainer && linkClickHandler) {
-			messageContainer.removeEventListener(
-				"click",
-				linkClickHandler,
-				true,
-			);
-		}
-		if (messageContainer && linkHoverHandler) {
-			messageContainer.removeEventListener(
-				"mouseover",
-				linkHoverHandler,
-				true,
-			);
+		// Clean up main message component
+		if (messageCleanup) {
+			messageCleanup();
 		}
 		component.unload();
 		
 		// Clean up tool output containers
 		toolOutputContainers.forEach((container, toolCallId) => {
-			const clickHandler = toolOutputLinkHandlers.get(toolCallId);
-			const hoverHandler = toolOutputHoverHandlers.get(toolCallId);
-			if (container && clickHandler) {
-				container.removeEventListener("click", clickHandler, true);
-			}
-			if (container && hoverHandler) {
-				container.removeEventListener("mouseover", hoverHandler, true);
+			const cleanup = toolOutputCleanups.get(toolCallId);
+			if (cleanup) {
+				cleanup();
 			}
 			const toolComponent = toolOutputComponents.get(toolCallId);
 			if (toolComponent) {
@@ -337,8 +154,7 @@
 		});
 		toolOutputContainers.clear();
 		toolOutputComponents.clear();
-		toolOutputLinkHandlers.clear();
-		toolOutputHoverHandlers.clear();
+		toolOutputCleanups.clear();
 	});
 
 	$: if (content && messageContainer && plugin) {
@@ -374,6 +190,7 @@
 	let lastRenderedContent = "";
 	let renderTimeout: any;
 	let isWaitingForDataview = false;
+	let messageCleanup: (() => void) | null = null;
 
 	async function renderContent(immediate = false) {
 		if (!messageContainer || !plugin || !content) return;
@@ -412,97 +229,19 @@
 		const sourcePath = activeFile ? activeFile.path : "";
 
 		// Remove old event listeners if they exist
-		if (linkClickHandler) {
-			messageContainer.removeEventListener(
-				"click",
-				linkClickHandler,
-				true,
-			);
-		}
-		if (linkHoverHandler) {
-			messageContainer.removeEventListener(
-				"mouseover",
-				linkHoverHandler,
-				true,
-			);
+		if (messageCleanup) {
+			messageCleanup();
 		}
 
-		await MarkdownRenderer.render(
+		const { cleanup } = await renderMarkdown(
 			plugin.app,
 			content,
 			messageContainer,
 			sourcePath,
-			component,
+			component
 		);
-
-		// Helper to get link text from href or data-href (Dataview uses data-href)
-		const getLinkText = (link: HTMLAnchorElement): string | null => {
-			return link.getAttribute("href") || link.getAttribute("data-href");
-		};
-
-		// Handle internal links - make them clickable to navigate to notes
-		// Based on: https://forum.obsidian.md/t/internal-links-dont-work-in-custom-view/90169/3
-		// Uses event delegation to catch all links, including dynamically added ones (e.g., from Dataview)
-		linkClickHandler = (evt: Event) => {
-			const target = evt.target as HTMLElement;
-			const link = target.closest("a.internal-link") as HTMLAnchorElement;
-			if (!link) return;
-
-			const mouseEvent = evt as MouseEvent;
-			mouseEvent.preventDefault();
-			mouseEvent.stopPropagation();
-
-			const linktext = getLinkText(link);
-			if (linktext) {
-				plugin.app.workspace.openLinkText(
-					linktext,
-					sourcePath,
-					Keymap.isModEvent(mouseEvent),
-				);
-			}
-		};
-
-		linkHoverHandler = (event: Event) => {
-			const target = event.target as HTMLElement;
-			const link = target.closest("a.internal-link") as HTMLAnchorElement;
-			if (!link) return;
-
-			const mouseEvent = event as MouseEvent;
-			const linktext = getLinkText(link);
-			if (linktext) {
-				plugin.app.workspace.trigger("hover-link", {
-					event: mouseEvent,
-					source: "preview",
-					hoverParent: { hoverPopover: null },
-					targetEl: mouseEvent.currentTarget,
-					linktext: linktext,
-					sourcePath: sourcePath,
-				});
-			}
-		};
-
-		// Attach event listeners using capture phase to catch events early
-		messageContainer.addEventListener("click", linkClickHandler, true);
-		messageContainer.addEventListener("mouseover", linkHoverHandler, true);
-
-		// Clean up interfering attributes on existing links (Dataview sets target="_blank")
-		const links = messageContainer.querySelectorAll("a.internal-link");
-		links.forEach((linkEl) => {
-			const link = linkEl as HTMLAnchorElement;
-			link.removeAttribute("target");
-			link.removeAttribute("rel");
-			link.style.cursor = "pointer";
-		});
-
-		// Handle external links
-		const externalLinks = messageContainer.querySelectorAll(
-			"a:not(.internal-link)",
-		);
-		externalLinks.forEach((linkEl) => {
-			const link = linkEl as HTMLAnchorElement;
-			link.target = "_blank";
-			link.rel = "noopener";
-		});
+		
+		messageCleanup = cleanup;
 	}
 </script>
 
