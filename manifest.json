@@ -1,10 +1,12 @@
 {
-    "id": "smart-second-brain",
-    "name": "Smart Second Brain",
-    "description": "Interact with your privacy focused assistant, leveraging Ollama or OpenAI, making your second brain even smarter.",
-    "author": "Leo310, nicobrauchtgit",
-    "authorUrl": "https://github.com/nicobrauchtgit",
-    "version": "1.3.0",
-    "minAppVersion": "1.5.0",
-    "isDesktopOnly": true
+  "id": "smart-second-brain",
+  "name": "Smart Second Brain",
+  "version": "0.1.0",
+  "minAppVersion": "0.15.0",
+  "description": "Privacy-focused chat agent for Obsidian using papa-ts",
+  "author": "",
+  "authorUrl": "",
+  "fundingUrl": "",
+  "isDesktopOnly": false
 }
+

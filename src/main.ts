@@ -1,277 +1,353 @@
-import { around } from 'monkey-around';
-import { Notice, Plugin, TFile, WorkspaceLeaf, WorkspaceSidedock, normalizePath, type ViewState } from 'obsidian';
-import { LogLvl, Prompts, type Language, type OllamaEmbedModel, type OllamaGenModel, type OpenAIEmbedModel, type OpenAIGenModel } from 'papa-ts';
-import { get } from 'svelte/store';
-import { _ } from 'svelte-i18n';
+import { App, Plugin, PluginSettingTab, Setting, TFile, normalizePath } from "obsidian";
+import { ChatView, VIEW_TYPE_CHAT } from "./ui/ChatView";
+import type { SmartSecondBrainSettings } from "./settings";
+import { DEFAULT_SETTINGS } from "./settings";
+import { AgentManager } from "./agent/AgentManager";
 
-import SmartSecondBrain from './SmartSecondBrain';
-import { ConfirmModal } from './components/Settings/ConfirmModal';
-import { PullModal } from './components/Modal/PullModal';
-import './lang/i18n';
-import Log from './logging';
-import { chatHistory, data, isChatInSidebar, plugin } from './store';
-import './styles.css';
-import { ChatView, VIEW_TYPE_CHAT } from './views/Chat';
-import { SetupView, VIEW_TYPE_SETUP } from './views/Onboarding';
-import SettingsTab from './views/Settings';
-import { RemoveModal } from './components/Modal/RemoveModal';
+export default class SmartSecondBrainPlugin extends Plugin {
+	settings!: SmartSecondBrainSettings;
+	agentManager!: AgentManager;
 
-export interface PluginData {
-    isChatComfy: boolean;
-    initialAssistantMessageContent: string;
-    isUsingRag: boolean;
-    assistantLanguage: Language;
-    isIncognitoMode: boolean;
-    ollamaGenModel: OllamaGenModel;
-    ollamaEmbedModel: OllamaEmbedModel;
-    openAIGenModel: OpenAIGenModel;
-    openAIEmbedModel: OpenAIEmbedModel;
-    targetFolder: string;
-    excludeFF: Array<string>;
-    defaultChatName: string;
-    debugginLangchainKey: string;
-    isQuickSettingsOpen: boolean;
-    isVerbose: boolean;
-    isOnboarded: boolean;
-    hideIncognitoWarning: boolean;
-    isAutostart: boolean;
+	async onload() {
+		await this.loadSettings();
+
+		// Register .chat extension
+		this.registerExtensions(["chat"], VIEW_TYPE_CHAT);
+
+		// Register the chat view
+		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
+
+		// Add ribbon icon to open chat
+		this.addRibbonIcon("message-square", "Open Smart Second Brain", () => {
+			this.activateView();
+		});
+
+		// Add command to open chat
+		this.addCommand({
+			id: "open-chat",
+			name: "Open Smart Second Brain Chat",
+			callback: () => {
+				this.activateView();
+			},
+		});
+
+		// Add settings tab
+		this.addSettingTab(new SmartSecondBrainSettingTab(this.app, this));
+
+		// Initialize agent manager
+		this.agentManager = new AgentManager(this);
+		await this.agentManager.initialize();
+	}
+
+	onunload() {
+		// Cleanup agent manager
+		if (this.agentManager) {
+			this.agentManager.cleanup();
+		}
+	}
+
+	async loadSettings() {
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData()
+		);
+	}
+
+	async saveSettings() {
+		await this.saveData(this.settings);
+		// Reinitialize agent when settings change
+		if (this.agentManager) {
+			await this.agentManager.initialize();
+		}
+	}
+
+	async createNewChat() {
+		const { workspace } = this.app;
+		const chatsFolder = this.settings.chatsFolder || "Chats";
+
+		// Ensure folder exists
+		if (!(await this.app.vault.adapter.exists(chatsFolder))) {
+			await this.app.vault.createFolder(chatsFolder);
+		}
+
+		// Create a new chat file
+		const newId = crypto.randomUUID();
+		const newPath = normalizePath(`${chatsFolder}/${newId}.chat`);
+		// Initialize with minimal valid JSON
+		const initialData = {
+			threadId: newId,
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			checkpoints: {},
+			writes: {}
+		};
+		const file = await this.app.vault.create(newPath, JSON.stringify(initialData, null, 2));
+
+		// Open it
+		await workspace.getLeaf(false).openFile(file);
+	}
+
+	async activateView() {
+		const { workspace } = this.app;
+		const chatsFolder = this.settings.chatsFolder || "Chats";
+
+		// Ensure folder exists
+		if (!(await this.app.vault.adapter.exists(chatsFolder))) {
+			await this.app.vault.createFolder(chatsFolder);
+		}
+
+		// Find latest chat file
+		const files = this.app.vault.getFiles()
+			.filter(f => f.path.startsWith(chatsFolder) && f.extension === "chat")
+			.sort((a, b) => b.stat.mtime - a.stat.mtime);
+
+		let fileToOpen = files[0];
+
+		if (!fileToOpen) {
+			// Create a new chat file
+			const newId = crypto.randomUUID();
+			const newPath = normalizePath(`${chatsFolder}/${newId}.chat`);
+			// Initialize with minimal valid JSON
+			const initialData = {
+				threadId: newId,
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+				checkpoints: {},
+				writes: {}
+			};
+			fileToOpen = await this.app.vault.create(newPath, JSON.stringify(initialData, null, 2));
+		}
+
+		await workspace.getLeaf(false).openFile(fileToOpen);
+	}
 }
 
-export type PluginDataKey = keyof PluginData;
+class SmartSecondBrainSettingTab extends PluginSettingTab {
+	plugin: SmartSecondBrainPlugin;
 
-export const DEFAULT_SETTINGS: Partial<PluginData> = {
-    isChatComfy: true,
-    isUsingRag: true,
-    assistantLanguage: (window.localStorage.getItem('language') as Language) || 'en',
-    initialAssistantMessageContent:
-        Prompts[(window.localStorage.getItem('language') as Language) || 'en']?.initialAssistantMessage || Prompts.en.initialAssistantMessage,
-    isIncognitoMode: true,
-    ollamaGenModel: { model: 'llama2', baseUrl: 'http://localhost:11434', temperature: 0.5 },
-    ollamaEmbedModel: {
-        model: 'nomic-embed-text',
-        baseUrl: 'http://localhost:11434',
-        similarityThreshold: 0.75,
-        k: 100,
-    },
-    openAIGenModel: {
-        model: 'gpt-3.5-turbo',
-        openAIApiKey: '',
-        temperature: 0.5,
-    },
-    openAIEmbedModel: {
-        model: 'text-embedding-ada-002',
-        openAIApiKey: '',
-        similarityThreshold: 0.75,
-        k: 100,
-    },
-    targetFolder: 'Chats',
-    defaultChatName: 'New Chat',
-    excludeFF: ['Chats', '*.excalidraw.md'],
-    isQuickSettingsOpen: true,
-    isVerbose: false,
-    isOnboarded: false,
-    hideIncognitoWarning: false,
-    isAutostart: false,
-};
+	constructor(app: App, plugin: SmartSecondBrainPlugin) {
+		super(app, plugin);
+		this.plugin = plugin;
+	}
 
-export default class SecondBrainPlugin extends Plugin {
-    setupView: SetupView;
-    chatView: ChatView;
-    s2b: SmartSecondBrain;
-    leaf: WorkspaceLeaf;
-    private isChatAcivatedFromRibbon = false; // workaround for a bug where the chat view is activated twice through monkey patching
-    private autoSaveTimer: number;
+	async display(): Promise<void> {
+		const { containerEl } = this;
 
-    async loadSettings() {
-        data.set(Object.assign({}, DEFAULT_SETTINGS, await this.loadData()));
-    }
+		containerEl.empty();
 
-    async saveSettings() {
-        await this.saveData(get(data));
-    }
+		containerEl.createEl("h2", { text: "Smart Second Brain Settings" });
 
-    async onload() {
-        plugin.set(this);
-        const t = get(_);
-        await this.loadSettings();
-        this.s2b = new SmartSecondBrain(this.app, this.manifest.dir);
-        Log.setLogLevel(get(data).isVerbose ? LogLvl.DEBUG : LogLvl.DISABLED);
+		new Setting(containerEl)
+			.setName("Chats Folder")
+			.setDesc("Folder to store chat history files")
+			.addText((text) => {
+				text
+					.setPlaceholder("Chats")
+					.setValue(this.plugin.settings.chatsFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.chatsFolder = value;
+						await this.plugin.saveSettings();
+					});
+			});
 
-        this.app.workspace.onLayoutReady(() => {
-            const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT) || this.app.workspace.getLeavesOfType(VIEW_TYPE_SETUP);
-            if (leaves.length) this.leaf = leaves[0];
-            if (get(data).isOnboarded && get(data).isAutostart) this.s2b.init();
-        });
-        this.registerEvent(
-            this.app.workspace.on('layout-change', () => {
-                if (!this.leaf) {
-                    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT) || this.app.workspace.getLeavesOfType(VIEW_TYPE_SETUP);
-                    if (!leaves.length) return;
-                    this.leaf = leaves[0];
-                }
-                const isInSidebar = [this.app.workspace.leftSplit, this.app.workspace.rightSplit].includes(this.leaf.getRoot() as WorkspaceSidedock);
-                isChatInSidebar.set(isInSidebar);
-            })
-        );
-        this.registerEvent(this.app.metadataCache.on('changed', async (file: TFile) => this.s2b.onFileChange(file)));
-        this.registerEvent(this.app.vault.on('delete', async (file: TFile) => this.s2b.onFileDelete(file)));
-        this.registerEvent(this.app.vault.on('rename', async (file: TFile, oldPath: string) => this.s2b.onFileRename(file, oldPath)));
+		new Setting(containerEl)
+			.setName("Readable Line Length")
+			.setDesc("Limit chat view width to 75 characters for better readability")
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.readableLineLength ?? false)
+					.onChange(async (value) => {
+						this.plugin.settings.readableLineLength = value;
+						await this.plugin.saveSettings();
+					});
+			});
 
-        // periodically or on unfocus save vector store data to disk
-        window.addEventListener('blur', () => this.s2b.saveVectorStoreData());
+		new Setting(containerEl)
+			.setName("LLM Provider")
+			.setDesc("Choose your LLM provider")
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption("openai", "OpenAI")
+					.addOption("anthropic", "Anthropic")
+					.addOption("ollama", "Ollama")
+					.addOption("sap-ai-core", "SAP AI Core")
+					.addOption("custom", "Custom")
+					.setValue(this.plugin.settings.provider)
+					.onChange(async (value) => {
+						this.plugin.settings.provider = value as any;
+						await this.plugin.saveSettings();
+						// Refresh the settings display to update descriptions
+						await this.display();
+					});
+			});
 
-        const resetAutoSaveTimer = () => {
-            window.clearTimeout(this.autoSaveTimer);
-            this.autoSaveTimer = window.setTimeout(() => this.s2b.saveVectorStoreData(), 30 * 1000);
-        };
-        // listen for any event to reset the timer
-        window.addEventListener('mousemove', () => resetAutoSaveTimer());
-        window.addEventListener('mousedown', () => resetAutoSaveTimer());
-        window.addEventListener('keypress', () => resetAutoSaveTimer());
-        window.addEventListener('scroll', () => resetAutoSaveTimer());
+		const apiKeySetting = new Setting(containerEl)
+			.setName("API Key / Base URL")
+			.addText((text) => {
+				text
+					.setPlaceholder(
+						this.plugin.settings.provider === "ollama"
+							? "http://localhost:11434"
+							: "Enter your API key"
+					)
+					.setValue(this.plugin.settings.apiKey)
+					.onChange(async (value) => {
+						this.plugin.settings.apiKey = value;
+						await this.plugin.saveSettings();
+						// Reload models when API key changes
+						if (updateModelDropdown) {
+							await updateModelDropdown();
+						}
+					});
+			});
 
-        if (!this.s2b) {
-            this.app.workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
-        }
+		// Set description based on provider
+		if (this.plugin.settings.provider === "ollama") {
+			apiKeySetting.setDesc("Ollama base URL (e.g., http://localhost:11434) - API key not required");
+		} else if (this.plugin.settings.provider === "sap-ai-core") {
+			apiKeySetting.setDesc("SAP AI Core configuration (API key or connection details)");
+		} else {
+			apiKeySetting.setDesc("Your API key for the selected provider");
+		}
 
-        this.registerView(VIEW_TYPE_SETUP, (leaf) => {
-            this.setupView = new SetupView(leaf);
-            return this.setupView;
-        });
+		const modelSetting = new Setting(containerEl)
+			.setName("Model")
+			.setDesc("Select a model from the available options");
 
-        this.registerView(VIEW_TYPE_CHAT, (leaf) => {
-            this.chatView = new ChatView(leaf);
-            return this.chatView;
-        });
+		let modelDropdown: any;
+		modelSetting.addDropdown((dropdown) => {
+			modelDropdown = dropdown;
+			dropdown
+				.addOption("", "Loading models...")
+				.setValue("")
+				.setDisabled(true);
+		});
 
-        this.addRibbonIcon('message-square', t('ribbon.chat'), () => this.activateView());
+		// Function to update model dropdown
+		const updateModelDropdown = async () => {
+			const provider = this.plugin.settings.provider;
+			const apiKey = this.plugin.settings.apiKey;
 
-        this.addCommand({ id: 'open-chat', name: t('cmd.chat'), icon: 'message-square', callback: () => this.activateView() });
+			// Skip if custom provider or no API key (except for Ollama which has default)
+			if (provider === "custom" || (!apiKey && provider !== "ollama")) {
+				modelDropdown.selectEl.empty();
+				modelDropdown.addOption("", "Enter API key first");
+				modelDropdown.setValue("");
+				modelDropdown.setDisabled(true);
+				return;
+			}
 
-        this.addCommand({ id: 'pull-model', name: t('cmd.pull_model'), icon: 'arrow-down-to-line', callback: () => new PullModal(this.app).open() });
+			// Show loading state
+			modelDropdown.selectEl.empty();
+			modelDropdown.addOption("", "Loading models...");
+			modelDropdown.setValue("");
+			modelDropdown.setDisabled(true);
 
-        this.addCommand({ id: 'remove-model', name: t('cmd.remove_model'), icon: 'trash', callback: () => new RemoveModal(this.app).open() });
+			try {
+				const models = await this.plugin.agentManager.getAvailableModels(
+					provider,
+					apiKey
+				);
 
-        this.addSettingTab(new SettingsTab(this.app, this));
+				// Clear and populate dropdown
+				modelDropdown.selectEl.empty();
+				if (models.length === 0) {
+					modelDropdown.addOption("", "No models available");
+					modelDropdown.setValue("");
+					modelDropdown.setDisabled(true);
+				} else {
+					for (const model of models) {
+						modelDropdown.addOption(model, model);
+					}
+					// Set to current model if it's in the list, otherwise first model
+					const currentModel = this.plugin.settings.modelName;
+					if (models.includes(currentModel)) {
+						modelDropdown.setValue(currentModel);
+					} else {
+						modelDropdown.setValue(models[0]);
+						this.plugin.settings.modelName = models[0];
+						await this.plugin.saveSettings();
+					}
+					modelDropdown.setDisabled(false);
+				}
+			} catch (error) {
+				modelDropdown.selectEl.empty();
+				modelDropdown.addOption(
+					"",
+					`Error: ${error instanceof Error ? error.message : "Failed to load models"}`
+				);
+				modelDropdown.setValue("");
+				modelDropdown.setDisabled(true);
+			}
+		};
 
-        this.registerMonkeyPatches();
-    }
+		// Set up dropdown change handler
+		modelDropdown.onChange(async (value: string) => {
+			if (value) {
+				this.plugin.settings.modelName = value;
+				await this.plugin.saveSettings();
+			}
+		});
 
-    async onunload() {
-        Log.info('Unloading plugin');
-    }
+		// Load models initially
+		await updateModelDropdown();
 
-    async activateView(file?: TFile) {
-        const d = get(data);
-        if (!d.isOnboarded) {
-            this.app.workspace.detachLeavesOfType(VIEW_TYPE_CHAT);
-            const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_SETUP);
-            this.leaf = leaves.length ? leaves[0] : this.app.workspace.getRightLeaf(false);
-            await this.leaf.setViewState({ type: VIEW_TYPE_SETUP, active: true });
-        } else {
-            this.app.workspace.detachLeavesOfType(VIEW_TYPE_SETUP);
-            if (!file) {
-                // If no file is provided, open the default chat
-                const chatDirExists = await this.app.vault.adapter.exists(normalizePath(d.targetFolder));
-                if (!chatDirExists) {
-                    await this.app.vault.createFolder(normalizePath(d.targetFolder));
-                }
-                const defaultChatExists = await this.app.vault.adapter.exists(normalizePath(d.targetFolder + '/' + d.defaultChatName + '.md'));
-                file = defaultChatExists
-                    ? this.app.metadataCache.getFirstLinkpathDest(d.targetFolder + '/' + d.defaultChatName + '.md', '')
-                    : await this.app.vault.create(
-                          normalizePath(d.targetFolder + '/' + d.defaultChatName + '.md'),
-                          'Assistant\n' + d.initialAssistantMessageContent + '\n- - - - -'
-                      );
-            }
-            const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
-            this.leaf = leaves.length ? leaves[0] : this.app.workspace.getRightLeaf(false);
-            this.isChatAcivatedFromRibbon = true;
-            await this.leaf.openFile(file, { active: true });
-            await this.leaf.setViewState({
-                type: VIEW_TYPE_CHAT,
-                state: { file: file.path },
-            });
-        }
-        this.app.workspace.revealLeaf(this.leaf);
-    }
+		containerEl.createEl("h3", { text: "Telemetry" });
 
-    async saveChat() {
-        const d = get(data);
-        let fileName = await this.s2b.createFilenameForChat();
-        let normalizedFilePath = normalizePath(d.targetFolder + '/' + fileName + '.md');
-        while (await this.app.vault.adapter.exists(normalizedFilePath)) {
-            //Checks if already existing file has a number at the end
-            const regex = /\((\d+)\)$/;
-            const match = fileName.match(regex);
-            if (match) {
-                fileName = fileName.slice(0, -3) + '(' + (parseInt(match[1], 10) + 1) + ')';
-            } else {
-                fileName = fileName + ' (1)';
-            }
-            normalizedFilePath = normalizePath(d.targetFolder + '/' + fileName + '.md');
-        }
-        const newChatFile = await this.app.vault.copy(this.chatView.file, normalizedFilePath);
-        chatHistory.reset;
-        await this.activateView(newChatFile);
-    }
+		new Setting(containerEl)
+			.setName("Enable LangSmith Telemetry")
+			.setDesc("Enable tracing with LangSmith")
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.enableLangSmith || false)
+					.onChange(async (value) => {
+						this.plugin.settings.enableLangSmith = value;
+						await this.plugin.saveSettings();
+						this.display(); // Refresh to show/hide API key field
+					});
+			});
 
-    async clearPluginData() {
-        const t = get(_);
-        new ConfirmModal(
-            get(plugin).app,
-            t('settings.clear_modal.title'),
-            t('settings.clear_modal.description'),
-            async (result) => {
-                if (result === 'Yes') {
-                    await this.saveData({});
-                    const files = (await this.app.vault.adapter.list(normalizePath(this.manifest.dir + '/vectorstores'))).files;
-                    for (const file of files) await this.app.vault.adapter.remove(file);
-                    new Notice(t('notice.plugin_data_cleared'), 4000);
-                    await this.loadSettings();
-                    await this.activateView();
-                }
-            },
-            ''
-        ).activate();
-    }
+		if (this.plugin.settings.enableLangSmith) {
+			new Setting(containerEl)
+				.setName("LangSmith API Key")
+				.setDesc("Your LangSmith API Key (starts with lsv2_...)")
+				.addText((text) => {
+					text
+						.setPlaceholder("lsv2_...")
+						.setValue(this.plugin.settings.langSmithApiKey || "")
+						.onChange(async (value) => {
+							this.plugin.settings.langSmithApiKey = value;
+							await this.plugin.saveSettings();
+						});
+				});
 
-    registerMonkeyPatches() {
-        // eslint-disable-next-line @typescript-eslint/no-this-alias
-        const self = this;
-        // Monkey patch WorkspaceLeaf to open Chats with ChatView by default
-        this.register(
-            around(WorkspaceLeaf.prototype, {
-                setViewState(next) {
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    return function (state: ViewState, ...rest: any[]) {
-                        if (
-                            // If we have a markdown file
-                            state.type === 'markdown' &&
-                            state.state?.file
-                        ) {
-                            // Then check for the chat frontMatterKey
-                            // const cache = self.app.metadataCache.getCache(state.state.file);
+			new Setting(containerEl)
+				.setName("LangSmith Project")
+				.setDesc("Project name for traces")
+				.addText((text) => {
+					text
+						.setPlaceholder("default")
+						.setValue(this.plugin.settings.langSmithProject || "obsidian-agent")
+						.onChange(async (value) => {
+							this.plugin.settings.langSmithProject = value;
+							await this.plugin.saveSettings();
+						});
+				});
 
-                            // if (cache?.frontmatter && cache.frontmatter['second-brain-chat']) {
-                            if (state.state.file.startsWith(get(data).targetFolder)) {
-                                // If we have it, force the view type to be chat
-                                const newState = {
-                                    ...state,
-                                    type: VIEW_TYPE_CHAT,
-                                };
-                                if (!self.isChatAcivatedFromRibbon) {
-                                    const leaves = self.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
-                                    self.leaf = leaves.length ? leaves[0] : self.app.workspace.getRightLeaf(false);
-                                }
-                                return next.apply(self.leaf, [newState, ...rest]);
-                            }
-                        }
-
-                        return next.apply(this, [state, ...rest]);
-                    };
-                },
-            })
-        );
-    }
+			new Setting(containerEl)
+				.setName("LangSmith Endpoint")
+				.setDesc("API endpoint for LangSmith (EU: https://eu.api.smith.langchain.com)")
+				.addText((text) => {
+					text
+						.setPlaceholder("https://api.smith.langchain.com")
+						.setValue(this.plugin.settings.langSmithEndpoint || "https://api.smith.langchain.com")
+						.onChange(async (value) => {
+							this.plugin.settings.langSmithEndpoint = value;
+							await this.plugin.saveSettings();
+						});
+				});
+		}
+	}
 }
+

@@ -1,0 +1,20 @@
+/* Smart Second Brain Plugin Styles */
+
+/* Chart legend background - make transparent to match Obsidian theme */
+.markdown-preview-view canvas + div,
+.markdown-preview-view .chartjs-legend,
+.message-text canvas + div,
+.message-text .chartjs-legend,
+.markdown-preview-view div[style*="background"],
+.message-text div[style*="background"] {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+/* Chart container background */
+.markdown-preview-view .chartjs-container,
+.message-text .chartjs-container {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+

@@ -1,21 +1,23 @@
 {
-    "extends": "@tsconfig/svelte/tsconfig.json",
-    "compilerOptions": {
-        "target": "ESNext",
-        "useDefineForClassFields": true,
-        "module": "ES6",
-        "resolveJsonModule": true,
-        "allowJs": true,
-        "isolatedModules": true,
-        "noEmitOnError": true,
-        "plugins": [
-            {
-                "name": "typescript-svelte-plugin",
-                // the following options can be set additionally; they are optional; their default values are listed here
-                "enabled": true, // enables this plugin
-                "assumeIsSvelteProject": true // if true, skip detection and always assume it's a Svelte project
-            }
-        ]
-    },
-    "include": ["src/**/*.d.ts", "src/**/*.ts", "src/**/*.js", "src/**/*.svelte"]
+  "extends": "@tsconfig/svelte/tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "sourceMap": false,
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "module": "ESNext",
+    "target": "ES2020",
+    "allowJs": true,
+    "noImplicitAny": true,
+    "moduleResolution": "node",
+    "importHelpers": true,
+    "lib": ["DOM", "ES5", "ES6", "ES2017", "ES2020"],
+    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "resolveJsonModule": true,
+    "types": ["node", "svelte"]
+  },
+  "include": ["**/*.ts", "**/*.svelte"],
+  "exclude": ["node_modules"]
 }
+

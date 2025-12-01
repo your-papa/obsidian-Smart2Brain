@@ -1,41 +1,30 @@
 {
-    "name": "smart-second-brain",
-    "version": "1.1.0",
-    "main": "main.js",
-    "devDependencies": {
-        "@biomejs/biome": "1.2.2",
-        "@rollup/plugin-json": "^6.1.0",
-        "@rollup/plugin-typescript": "^11.1.6",
-        "@sveltejs/vite-plugin-svelte": "^2.4.6",
-        "@tsconfig/svelte": "^4.0.1",
-        "@typescript-eslint/eslint-plugin": "^6.19.0",
-        "@typescript-eslint/parser": "^6.19.0",
-        "autoprefixer": "^10.4.16",
-        "builtin-modules": "^3.3.0",
-        "bun-types": "latest",
-        "eslint": "^8.56.0",
-        "obsidian": "^1.4.11",
-        "postcss": "^8.4.30",
-        "svelte": "^4.2.1",
-        "svelte-check": "^3.5.2",
-        "tailwindcss": "^3.3.3",
-        "tslib": "^2.6.2",
-        "typescript": "^5.2.2",
-        "vite": "^4.4.9"
-    },
-    "private": true,
-    "scripts": {
-        "dev": "vite build --mode development --watch",
-        "build": "vite build --mode production",
-        "check": "svelte-check --tsconfig ./tsconfig.json",
-        "format": "biome format --write ./src",
-        "lint": "biome lint --apply-unsafe ./src"
-    },
-    "type": "module",
-    "dependencies": {
-        "i18next": "^23.8.2",
-        "monkey-around": "^2.3.0",
-        "nanoid": "^5.0.4",
-        "svelte-i18n": "^4.0.0"
-    }
+  "name": "smart-second-brain",
+  "version": "0.1.0",
+  "description": "Privacy-focused chat agent for Obsidian using papa-ts",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "typecheck": "NODE_OPTIONS=--max-old-space-size=8192 tsc -noEmit -skipLibCheck",
+    "version": "node version-bump.mjs && git add manifest.json versions.json"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@tsconfig/svelte": "^5.0.0",
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.19.0",
+    "esbuild-svelte": "^0.8.0",
+    "obsidian": "latest",
+    "svelte": "^4.2.0",
+    "svelte-preprocess": "^5.1.0",
+    "tslib": "^2.4.1",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "papa-ts": "^2.7.1",
+    "zod": "^3.22.0"
+  }
 }
