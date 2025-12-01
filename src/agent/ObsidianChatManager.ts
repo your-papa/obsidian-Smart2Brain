@@ -3,12 +3,11 @@ import {
     type Checkpoint,
     type CheckpointMetadata,
     type CheckpointTuple,
-    type SerializerProtocol,
     type PendingWrite,
     type CheckpointListOptions
 } from "@langchain/langgraph-checkpoint";
 import type { RunnableConfig } from "@langchain/core/runnables";
-import { Plugin, debounce, TFile, normalizePath } from "obsidian";
+import { Plugin, debounce, TFile, normalizePath, type DataAdapter } from "obsidian";
 import { type ThreadStore, type ThreadSnapshot } from "papa-ts";
 
 interface CheckpointEntry {
@@ -32,65 +31,30 @@ interface ThreadData {
 
 export class ObsidianChatManager extends BaseCheckpointSaver {
     private plugin: Plugin;
+    private adapter: DataAdapter;
+
     // In-memory cache: thread_id -> ThreadData (Loaded on demand)
     private storage: Map<string, ThreadData> = new Map();
+
     // Index cache: thread_id -> ThreadSnapshot (Loaded on startup)
     private threadIndex: Map<string, ThreadSnapshot> = new Map();
-    private loaded: boolean = false;
+
+    // Path cache: thread_id -> file_path (Optimizes file lookups)
+    private filePathCache: Map<string, string> = new Map();
+
     private indexLoaded: boolean = false;
 
     constructor(plugin: Plugin) {
         super();
         this.plugin = plugin;
+        this.adapter = plugin.app.vault.adapter;
     }
+
+    // --- File System Helpers ---
 
     private getChatFolder(): string {
         // @ts-ignore
         return this.plugin.settings.chatsFolder || "Chats";
-    }
-
-    private async getFilePath(threadId: string): Promise<string> {
-        const folder = this.getChatFolder();
-        const adapter = this.plugin.app.vault.adapter;
-
-        // First try the default path
-        const defaultPath = `${folder}/${threadId}.chat`;
-        if (await adapter.exists(defaultPath)) {
-            return defaultPath;
-        }
-
-        // If not found, it might be renamed.
-        // Check if threadId is in the format "Chat YYYY-MM-DD HH-MM-SS"
-        // and if so, try to find a file that ends with the timestamp part.
-        let timestampPart = "";
-        if (threadId.startsWith("Chat ")) {
-            timestampPart = threadId.substring(5);
-        }
-
-        // Search for files
-        try {
-            if (await adapter.exists(folder)) {
-                const result = await adapter.list(folder);
-                for (const file of result.files) {
-                    if (!file.endsWith(".chat")) continue;
-
-                    // Check if file contains threadId (legacy check)
-                    if (file.includes(threadId)) {
-                        return file;
-                    }
-
-                    // Check for renamed files: "{Title} - {Timestamp}.chat"
-                    if (timestampPart && file.endsWith(` - ${timestampPart}.chat`)) {
-                        return file;
-                    }
-                }
-            }
-        } catch (e) {
-            console.error(`Error searching for file with threadId ${threadId}:`, e);
-        }
-
-        // Fallback to default path
-        return defaultPath;
     }
 
     private getIndexPath(): string {
@@ -100,38 +64,85 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
     private async ensureFolder(): Promise<void> {
         const folder = this.getChatFolder();
-        const adapter = this.plugin.app.vault.adapter;
-        if (!(await adapter.exists(folder))) {
-            await adapter.mkdir(folder);
+        if (!(await this.adapter.exists(folder))) {
+            await this.adapter.mkdir(folder);
         }
 
         // Ensure plugin data dir for index
         const dataDir = `${(this.plugin.app.vault as any).configDir || '.obsidian'}/plugins/${this.plugin.manifest.id}/data`;
-        if (!(await adapter.exists(dataDir))) {
-            await adapter.mkdir(dataDir);
+        if (!(await this.adapter.exists(dataDir))) {
+            await this.adapter.mkdir(dataDir);
         }
     }
 
-    // --- Load / Save Logic ---
+    private async resolveFilePath(threadId: string): Promise<string> {
+        // Check cache first
+        if (this.filePathCache.has(threadId)) {
+            return this.filePathCache.get(threadId)!;
+        }
+
+        const folder = this.getChatFolder();
+
+        // First try the default path
+        const defaultPath = `${folder}/${threadId}.chat`;
+        if (await this.adapter.exists(defaultPath)) {
+            this.filePathCache.set(threadId, defaultPath);
+            return defaultPath;
+        }
+
+        // If not found, search for it (renamed files)
+        // Look for: "{Title} - {Timestamp}.chat"
+        // Timestamp is usually the part after "Chat " in the threadId
+        let timestampPart = "";
+        if (threadId.startsWith("Chat ")) {
+            timestampPart = threadId.substring(5);
+        }
+
+        try {
+            if (await this.adapter.exists(folder)) {
+                const result = await this.adapter.list(folder);
+                for (const file of result.files) {
+                    if (!file.endsWith(".chat")) continue;
+
+                    // Check if file contains threadId (legacy check)
+                    if (file.includes(threadId)) {
+                        this.filePathCache.set(threadId, file);
+                        return file;
+                    }
+
+                    // Check for renamed files with matching timestamp
+                    if (timestampPart && file.endsWith(` - ${timestampPart}.chat`)) {
+                        this.filePathCache.set(threadId, file);
+                        return file;
+                    }
+                }
+            }
+        } catch (e) {
+            console.error(`Error searching for file with threadId ${threadId}:`, e);
+        }
+
+        // Fallback to default path (will be created there if writing)
+        this.filePathCache.set(threadId, defaultPath);
+        return defaultPath;
+    }
+
+    // --- Index Management ---
 
     async load(): Promise<void> {
-        // Load index only initially
         if (this.indexLoaded) return;
 
         await this.ensureFolder();
-        const adapter = this.plugin.app.vault.adapter;
         const indexPath = this.getIndexPath();
 
         try {
-            if (await adapter.exists(indexPath)) {
-                const content = await adapter.read(indexPath);
+            if (await this.adapter.exists(indexPath)) {
+                const content = await this.adapter.read(indexPath);
                 const snapshots = JSON.parse(content) as ThreadSnapshot[];
                 this.threadIndex.clear();
                 snapshots.forEach(s => this.threadIndex.set(s.threadId, s));
                 this.indexLoaded = true;
                 console.log(`ObsidianChatManager: Loaded index with ${this.threadIndex.size} threads`);
             } else {
-                // Rebuild index from files if missing (one-time cost)
                 console.log("ObsidianChatManager: Index missing, rebuilding...");
                 await this.rebuildIndex();
             }
@@ -141,22 +152,27 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
     }
 
     async rebuildIndex(): Promise<void> {
-        const adapter = this.plugin.app.vault.adapter;
         const folder = this.getChatFolder();
+        if (!(await this.adapter.exists(folder))) return;
 
-        if (!(await adapter.exists(folder))) return;
-
-        const result = await adapter.list(folder);
+        const result = await this.adapter.list(folder);
         this.threadIndex.clear();
+        this.filePathCache.clear();
 
         for (const file of result.files) {
             if (!file.endsWith(".chat")) continue;
-            // Yield to event loop to prevent freezing
+
+            // Yield to event loop
             await new Promise(resolve => setTimeout(resolve, 0));
+
             try {
-                const content = await adapter.read(file);
+                const content = await this.adapter.read(file);
                 const data = JSON.parse(content) as ThreadData;
                 if (data && data.threadId) {
+                    // Cache path
+                    this.filePathCache.set(data.threadId, file);
+
+                    // Update index
                     this.threadIndex.set(data.threadId, {
                         threadId: data.threadId,
                         title: data.title,
@@ -175,11 +191,10 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
     }
 
     private async saveIndex() {
-        const adapter = this.plugin.app.vault.adapter;
         const indexPath = this.getIndexPath();
         const snapshots = Array.from(this.threadIndex.values());
         try {
-            await adapter.write(indexPath, JSON.stringify(snapshots, null, 2));
+            await this.adapter.write(indexPath, JSON.stringify(snapshots, null, 2));
         } catch (e) {
             console.error("Error saving chat index:", e);
         }
@@ -189,16 +204,16 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
         this.saveIndex();
     }, 2000, true);
 
-    // Helper to load specific thread data into memory
+    // --- Thread Loading / Saving ---
+
     async ensureThreadLoaded(threadId: string): Promise<ThreadData | undefined> {
         if (this.storage.has(threadId)) return this.storage.get(threadId);
 
-        const adapter = this.plugin.app.vault.adapter;
-        const path = await this.getFilePath(threadId);
+        const path = await this.resolveFilePath(threadId);
 
         try {
-            if (await adapter.exists(path)) {
-                const content = await adapter.read(path);
+            if (await this.adapter.exists(path)) {
+                const content = await this.adapter.read(path);
                 const data = JSON.parse(content) as ThreadData;
                 this.storage.set(threadId, data);
                 return data;
@@ -209,16 +224,26 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
         return undefined;
     }
 
+    private createThreadData(threadId: string): ThreadData {
+        return {
+            threadId,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            checkpoints: {},
+            writes: {}
+        };
+    }
+
     private async saveThread(threadId: string) {
         const data = this.storage.get(threadId);
         if (!data) return;
 
         await this.ensureFolder();
-        const adapter = this.plugin.app.vault.adapter;
-        const path = await this.getFilePath(threadId);
+        const path = await this.resolveFilePath(threadId);
 
         try {
-            await adapter.write(path, JSON.stringify(data, null, 2));
+            await this.adapter.write(path, JSON.stringify(data, null, 2));
+
             // Update index
             this.threadIndex.set(threadId, {
                 threadId: data.threadId,
@@ -237,20 +262,17 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
         this.saveThread(threadId);
     }, 1000, true);
 
-    // --- ThreadStore-like Implementation ---
-    // We don't implement the interface directly due to 'list' name collision with BaseCheckpointSaver
+    // --- ThreadStore Implementation ---
 
     async read(threadId: string, forceReload: boolean = false): Promise<ThreadSnapshot | undefined> {
-        // If forceReload is true, skip cache and read from file
         if (!forceReload && this.threadIndex.has(threadId)) {
             return this.threadIndex.get(threadId);
         }
 
-        // Load from file (this will update cache if needed)
         const data = await this.ensureThreadLoaded(threadId);
         if (!data) return undefined;
 
-        const snapshot = {
+        const snapshot: ThreadSnapshot = {
             threadId: data.threadId,
             title: data.title,
             metadata: data.metadata,
@@ -258,7 +280,6 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
             updatedAt: data.updatedAt
         };
 
-        // Update cache if we loaded from file
         if (!this.threadIndex.has(threadId) || forceReload) {
             this.threadIndex.set(threadId, snapshot);
         }
@@ -267,24 +288,17 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
     }
 
     async write(snapshot: ThreadSnapshot): Promise<void> {
-        // Ensure data is loaded before modifying
         let data = await this.ensureThreadLoaded(snapshot.threadId);
 
         if (!data) {
-            data = {
-                threadId: snapshot.threadId,
-                createdAt: snapshot.createdAt,
-                updatedAt: snapshot.updatedAt,
-                checkpoints: {},
-                writes: {}
-            };
+            data = this.createThreadData(snapshot.threadId);
+            data.createdAt = snapshot.createdAt;
             this.storage.set(snapshot.threadId, data);
         }
 
-        // Update metadata
         data.title = snapshot.title;
         data.metadata = snapshot.metadata;
-        data.updatedAt = snapshot.updatedAt; // Ensure update time is synced
+        data.updatedAt = snapshot.updatedAt;
 
         this.saveDebounced(snapshot.threadId);
     }
@@ -294,11 +308,10 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
     }
 
     async listThreads(): Promise<ThreadSnapshot[]> {
-        await this.load(); // Ensures index is loaded
+        await this.load();
         return Array.from(this.threadIndex.values()).sort((a, b) => b.updatedAt - a.updatedAt);
     }
 
-    // Helper to get a ThreadStore compatible object
     asThreadStore(): ThreadStore {
         return {
             read: this.read.bind(this),
@@ -311,12 +324,11 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
     async clear(): Promise<void> {
         await this.load();
-        const ids = Array.from(this.storage.keys());
+        const ids = Array.from(this.threadIndex.keys()); // Use index keys as source of truth
         for (const id of ids) {
             await this.deleteThread(id);
         }
     }
-
 
     // --- CheckpointSaver Implementation ---
 
@@ -324,7 +336,6 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
         const threadId = config.configurable?.thread_id;
         if (!threadId) return undefined;
 
-        // Ensure loaded
         const threadData = await this.ensureThreadLoaded(threadId);
         if (!threadData) return undefined;
 
@@ -346,6 +357,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
         const checkpoints = Object.values(threadData.checkpoints);
         if (checkpoints.length === 0) return undefined;
 
+        // Find latest by getting keys and sorting (could rely on insertion order if reliable, but timestamps/keys are safer)
+        // We use lex sort on keys (checkpoint_ids are usually lex-sortable uuids or similar)
         const keys = Object.keys(threadData.checkpoints).sort().reverse();
         const latestId = keys[0];
         const entry = threadData.checkpoints[latestId];
@@ -401,19 +414,11 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
         let threadData = await this.ensureThreadLoaded(threadId);
         if (!threadData) {
-            threadData = {
-                threadId,
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
-                checkpoints: {},
-                writes: {}
-            };
+            threadData = this.createThreadData(threadId);
             this.storage.set(threadId, threadData);
         }
 
-        // Sanitize checkpoint to plain JSON to match disk storage behavior.
-        // This ensures papa-ts always receives consistent plain objects, 
-        // preventing normalization issues with mixed class instances/plain objects.
+        // Sanitize to plain JSON
         const plainCheckpoint = JSON.parse(JSON.stringify(checkpoint));
         const plainMetadata = JSON.parse(JSON.stringify(metadata));
 
@@ -423,19 +428,14 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
             parentConfig: config
         };
 
-        // Update timestamp
         threadData.updatedAt = Date.now();
-
         this.saveDebounced(threadId);
 
-        // Update index immediately for timestamp
+        // Update index cache immediately
         if (this.threadIndex.has(threadId)) {
             const snap = this.threadIndex.get(threadId)!;
             snap.updatedAt = threadData.updatedAt;
-            this.threadIndex.set(threadId, snap);
-            this.saveIndexDebounced();
         } else {
-            // New thread potentially
             this.threadIndex.set(threadId, {
                 threadId: threadData.threadId,
                 title: threadData.title,
@@ -443,8 +443,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
                 createdAt: threadData.createdAt,
                 updatedAt: threadData.updatedAt
             });
-            this.saveIndexDebounced();
         }
+        // Persist index changes debounced
+        this.saveIndexDebounced();
 
         return {
             ...config,
@@ -453,23 +454,6 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
                 checkpoint_id: checkpointId
             }
         };
-    }
-
-    async deleteThread(threadId: string): Promise<void> {
-        this.storage.delete(threadId);
-        this.threadIndex.delete(threadId);
-        this.saveIndexDebounced();
-
-        const adapter = this.plugin.app.vault.adapter;
-        const path = await this.getFilePath(threadId);
-
-        try {
-            if (await adapter.exists(path)) {
-                await adapter.remove(path);
-            }
-        } catch (e) {
-            console.error(`Error deleting thread ${threadId}:`, e);
-        }
     }
 
     async putWrites(
@@ -484,13 +468,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
         let threadData = await this.ensureThreadLoaded(threadId);
         if (!threadData) {
-            threadData = {
-                threadId,
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
-                checkpoints: {},
-                writes: {}
-            };
+            threadData = this.createThreadData(threadId);
             this.storage.set(threadId, threadData);
         }
 
@@ -500,38 +478,47 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
         threadData.writes[checkpointId].push(...writes);
         threadData.updatedAt = Date.now();
-
         this.saveDebounced(threadId);
 
-        // Update index for timestamp
         if (this.threadIndex.has(threadId)) {
-            const snap = this.threadIndex.get(threadId)!;
-            snap.updatedAt = threadData.updatedAt;
-            this.threadIndex.set(threadId, snap);
+            this.threadIndex.get(threadId)!.updatedAt = threadData.updatedAt;
             this.saveIndexDebounced();
         }
     }
 
-    // Helper to sanitize a title for use as a filename
-    private sanitizeFileName(title: string): string {
-        // Remove or replace invalid filename characters
-        // Obsidian allows most characters, but we'll be conservative
-        return title
-            .replace(/[<>:"/\\|?*]/g, "-") // Replace invalid chars with dash
-            .replace(/\s+/g, " ") // Normalize whitespace
-            .trim()
-            .substring(0, 100); // Limit length
+    async deleteThread(threadId: string): Promise<void> {
+        // Remove from memory
+        this.storage.delete(threadId);
+        this.threadIndex.delete(threadId);
+        this.filePathCache.delete(threadId);
+        this.saveIndexDebounced();
+
+        // Remove from disk
+        const path = await this.resolveFilePath(threadId);
+        try {
+            if (await this.adapter.exists(path)) {
+                await this.adapter.remove(path);
+            }
+        } catch (e) {
+            console.error(`Error deleting thread ${threadId}:`, e);
+        }
     }
 
-    // Rename the chat file to use the generated title
+    // --- Utilities ---
+
+    private sanitizeFileName(title: string): string {
+        return title
+            .replace(/[<>:"/\\|?*]/g, "-")
+            .replace(/\s+/g, " ")
+            .trim()
+            .substring(0, 100);
+    }
+
     async renameChatFile(threadId: string, title: string): Promise<void> {
-        if (!title || !title.trim()) {
-            console.warn(`renameChatFile: Empty title provided for thread ${threadId}`);
-            return;
-        }
+        if (!title || !title.trim()) return;
 
         try {
-            const oldPath = await this.getFilePath(threadId);
+            const oldPath = await this.resolveFilePath(threadId);
             const file = this.plugin.app.vault.getAbstractFileByPath(oldPath);
 
             if (!file || !(file instanceof TFile)) {
@@ -543,26 +530,20 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
             const dateTimePart = threadId.startsWith("Chat ") ? threadId.substring(5) : threadId;
             const newFileName = `${sanitizedTitle} - ${dateTimePart}.chat`;
 
-            // If names are same, do nothing
-            if (file.name === newFileName) {
-                console.log(`renameChatFile: Filename already matches title, skipping rename.`);
-                return;
-            }
+            if (file.name === newFileName) return;
 
             const folder = this.getChatFolder();
             const newPath = normalizePath(`${folder}/${newFileName}`);
 
-            console.log(`renameChatFile: Renaming ${oldPath} to ${newPath}`);
-
-            // Check if target file already exists
-            if (await this.plugin.app.vault.adapter.exists(newPath)) {
+            if (await this.adapter.exists(newPath)) {
                 console.warn(`renameChatFile: Target file already exists: ${newPath}`);
-                // If the content is identical or we decide to overwrite/merge? 
-                // For now, just skip to avoid data loss.
                 return;
             }
 
             await this.plugin.app.fileManager.renameFile(file, newPath);
+
+            // Update cache with new path
+            this.filePathCache.set(threadId, newPath);
             console.log(`renameChatFile: Successfully renamed to ${newPath}`);
 
         } catch (error) {
@@ -570,4 +551,3 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
         }
     }
 }
-

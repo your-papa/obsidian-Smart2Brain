@@ -192,8 +192,18 @@
 				// Use normalized messages from chunk (papa-ts v2.7.0+)
 				// This is the only way to handle tool calls and outputs - raw events are no longer available
 				if (chunk.messages && Array.isArray(chunk.messages)) {
-					// Process all messages to find tool calls and tool outputs
-					for (const msg of chunk.messages) {
+					// Find the last user message to define the start of the current turn
+					let startIndex = 0;
+					for (let i = chunk.messages.length - 1; i >= 0; i--) {
+						if (chunk.messages[i].role === "user") {
+							startIndex = i + 1;
+							break;
+						}
+					}
+
+					// Process messages from the current turn only
+					for (let i = startIndex; i < chunk.messages.length; i++) {
+						const msg = chunk.messages[i];
 						// Handle assistant messages with tool calls
 						if (
 							msg.role === "assistant" &&

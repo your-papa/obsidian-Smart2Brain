@@ -18,6 +18,88 @@ export class AgentManager {
 		this.chatManager = new ObsidianChatManager(plugin);
 	}
 
+	private async configureRegistry(registry: ProviderRegistry, provider: string, apiKey: string): Promise<{ providerName: string, modelOptions: Record<string, any> }> {
+		let providerName: string = provider;
+		let modelOptions: Record<string, any> = {};
+
+		if (apiKey || provider === "ollama") {
+			try {
+				if (provider === "openai" && apiKey) {
+					await registry.useOpenAI({ apiKey });
+					modelOptions = { apiKey };
+					providerName = "openai";
+				} else if (provider === "anthropic" && apiKey) {
+					await registry.useAnthropic({ apiKey });
+					modelOptions = { apiKey };
+					providerName = "anthropic";
+				} else if (provider === "ollama") {
+					const baseUrl = apiKey || "http://localhost:11434";
+					await registry.useOllama({ baseUrl });
+					modelOptions = { baseUrl };
+					providerName = "ollama";
+				} else if (provider === "sap-ai-core" && apiKey) {
+					await registry.useSapAICore({ apiKey });
+					modelOptions = { apiKey };
+					providerName = "sap-ai-core";
+				} else if (provider === "custom" && apiKey) {
+					// Default to OpenAI structure for custom
+					await registry.useOpenAI({ apiKey });
+					modelOptions = { apiKey };
+					providerName = "openai";
+				}
+			} catch (error) {
+				console.error("Error configuring provider:", error);
+				throw error;
+			}
+		}
+		return { providerName, modelOptions };
+	}
+
+	private configureTelemetry(settings: any): Telemetry | undefined {
+		const { enableLangSmith, langSmithApiKey, langSmithProject, langSmithEndpoint } = settings;
+		if (enableLangSmith && langSmithApiKey) {
+			try {
+				const telemetry = new LangSmithTelemetry({
+					projectName: langSmithProject || "obsidian-agent",
+					apiKey: langSmithApiKey,
+					endpoint: langSmithEndpoint || "https://api.smith.langchain.com",
+					flushOnComplete: true
+				});
+				console.log("Smart Second Brain: LangSmith telemetry enabled");
+				return telemetry;
+			} catch (e) {
+				console.error("Smart Second Brain: Failed to initialize LangSmith telemetry", e);
+			}
+		}
+		return undefined;
+	}
+
+	private bindTools(agent: Agent) {
+		const searchNotesTool = createSearchNotesTool(this.plugin.app);
+		const getAllTagsTool = createGetAllTagsTool(this.plugin.app);
+		const executeDataviewTool = createExecuteDataviewTool(this.plugin.app);
+		const getPropertiesTool = createGetPropertiesTool(this.plugin.app);
+		const readNoteTool = createReadNoteTool(this.plugin.app);
+		agent.bindTools([
+			searchNotesTool,
+			getAllTagsTool,
+			executeDataviewTool,
+			getPropertiesTool,
+			readNoteTool,
+		]);
+	}
+
+	private async ensureAgent(): Promise<Agent> {
+		if (!this.agent) {
+			await this.initialize();
+		}
+
+		if (!this.agent) {
+			throw new Error("Agent initialization failed.");
+		}
+		return this.agent;
+	}
+
 	async initialize(): Promise<void> {
 		// Load chats
 		await this.chatManager.load();
@@ -27,56 +109,27 @@ export class AgentManager {
 			this.agent = null;
 		}
 
-		const { provider, apiKey, modelName, enableLangSmith, langSmithApiKey, langSmithProject, langSmithEndpoint } = this.plugin.settings;
+		const { provider, apiKey, modelName } = this.plugin.settings;
 
 		console.log("Smart Second Brain: Initializing agent...");
 
 		// Create provider registry
 		const registry = new ProviderRegistry();
-		let providerName: string = provider;
-		let modelOptions: Record<string, any> = {};
 
-		if (apiKey || provider === "ollama") {
-			try {
-				if (provider === "openai" && apiKey) {
-					await registry.useOpenAI({ apiKey });
-					modelOptions = { apiKey };
-				} else if (provider === "anthropic" && apiKey) {
-					await registry.useAnthropic({ apiKey });
-					modelOptions = { apiKey };
-				} else if (provider === "ollama") {
-					const baseUrl = apiKey || "http://localhost:11434";
-					await registry.useOllama({ baseUrl });
-					modelOptions = { baseUrl };
-				} else if (provider === "sap-ai-core" && apiKey) {
-					await registry.useSapAICore({ apiKey });
-					modelOptions = { apiKey };
-				} else if (provider === "custom" && apiKey) {
-					// Default to OpenAI structure for custom
-					await registry.useOpenAI({ apiKey });
-					modelOptions = { apiKey };
-					providerName = "openai";
-				}
-			} catch (error) {
-				console.error("Error configuring provider:", error);
-			}
+		let providerName: string;
+		let modelOptions: Record<string, any>;
+
+		try {
+			const config = await this.configureRegistry(registry, provider, apiKey);
+			providerName = config.providerName;
+			modelOptions = config.modelOptions;
+		} catch (error) {
+			// Error is already logged in configureRegistry
+			return;
 		}
 
 		// Configure Telemetry
-		let telemetry: Telemetry | undefined;
-		if (enableLangSmith && langSmithApiKey) {
-			try {
-				telemetry = new LangSmithTelemetry({
-					projectName: langSmithProject || "obsidian-agent",
-					apiKey: langSmithApiKey,
-					endpoint: langSmithEndpoint || "https://api.smith.langchain.com",
-					flushOnComplete: true
-				});
-				console.log("Smart Second Brain: LangSmith telemetry enabled");
-			} catch (e) {
-				console.error("Smart Second Brain: Failed to initialize LangSmith telemetry", e);
-			}
-		}
+		const telemetry = this.configureTelemetry(this.plugin.settings);
 
 		// Create agent with checkpoint storage
 		// The chatManager acts as both checkpointer and thread store
@@ -95,18 +148,7 @@ export class AgentManager {
 		agent.setPrompt(createSystemPrompt(hasChartsPlugin));
 
 		// Bind tools
-		const searchNotesTool = createSearchNotesTool(this.plugin.app);
-		const getAllTagsTool = createGetAllTagsTool(this.plugin.app);
-		const executeDataviewTool = createExecuteDataviewTool(this.plugin.app);
-		const getPropertiesTool = createGetPropertiesTool(this.plugin.app);
-		const readNoteTool = createReadNoteTool(this.plugin.app);
-		agent.bindTools([
-			searchNotesTool,
-			getAllTagsTool,
-			executeDataviewTool,
-			getPropertiesTool,
-			readNoteTool,
-		]);
+		this.bindTools(agent);
 
 		// If we have configuration, try to choose the model
 		if ((apiKey || provider === "ollama") && modelName) {
@@ -129,19 +171,13 @@ export class AgentManager {
 	}
 
 	async runQuery(query: string, threadId: string = "default-thread"): Promise<string> {
-		if (!this.agent) {
-			await this.initialize();
-		}
-
-		if (!this.agent) {
-			throw new Error("Agent initialization failed.");
-		}
+		const agent = await this.ensureAgent();
 
 		// Ensure model is selected (if api key was provided later or something)
 		// Agent.run throws if no model.
 
 		try {
-			const result = await this.agent.run({
+			const result = await agent.run({
 				query,
 				threadId,
 			});
@@ -163,16 +199,10 @@ export class AgentManager {
 		query: string,
 		threadId: string = "default-thread"
 	): AsyncGenerator<{ type: "token" | "result"; token?: string; result?: any; messages?: any[] }, void, unknown> {
-		if (!this.agent) {
-			await this.initialize();
-		}
-
-		if (!this.agent) {
-			throw new Error("Agent initialization failed.");
-		}
+		const agent = await this.ensureAgent();
 
 		try {
-			for await (const chunk of this.agent.streamTokens({
+			for await (const chunk of agent.streamTokens({
 				query,
 				threadId,
 			})) {
@@ -196,32 +226,9 @@ export class AgentManager {
 	async getAvailableModels(provider: string, apiKey: string): Promise<string[]> {
 		try {
 			const registry = new ProviderRegistry();
-			let providerName: string;
+			const { providerName } = await this.configureRegistry(registry, provider, apiKey);
 
-			if (provider === "openai") {
-				providerName = "openai";
-				await registry.useOpenAI({
-					apiKey: apiKey,
-				});
-			} else if (provider === "anthropic") {
-				providerName = "anthropic";
-				await registry.useAnthropic({
-					apiKey: apiKey,
-				});
-			} else if (provider === "ollama") {
-				providerName = "ollama";
-				const baseUrl = apiKey || "http://localhost:11434";
-				await registry.useOllama({
-					baseUrl: baseUrl,
-				});
-			} else if (provider === "sap-ai-core") {
-				providerName = "sap-ai-core";
-				await registry.useSapAICore({
-					apiKey: apiKey,
-				});
-			} else {
-				return [];
-			}
+			if (!providerName) return [];
 
 			return registry.listChatModels(providerName);
 		} catch (error) {
@@ -261,17 +268,15 @@ export class AgentManager {
 	}
 
 	async generateThreadTitle(threadId: string): Promise<void> {
-		if (!this.agent) {
-			await this.initialize();
-		}
-
-		if (!this.agent) {
+		const agent = await this.ensureAgent().catch(e => {
 			console.warn("Agent not initialized, cannot generate title");
-			return;
-		}
+			return null;
+		});
+
+		if (!agent) return;
 
 		try {
-			await this.agent.generateTitle(threadId);
+			await agent.generateTitle(threadId);
 			console.log(`Generated title for thread ${threadId}`);
 
 			// Wait a bit for the title to be persisted
