@@ -49,9 +49,48 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
         return this.plugin.settings.chatsFolder || "Chats";
     }
 
-    private getFilePath(threadId: string): string {
+    private async getFilePath(threadId: string): Promise<string> {
         const folder = this.getChatFolder();
-        return `${folder}/${threadId}.chat`;
+        const adapter = this.plugin.app.vault.adapter;
+
+        // First try the default path
+        const defaultPath = `${folder}/${threadId}.chat`;
+        if (await adapter.exists(defaultPath)) {
+            return defaultPath;
+        }
+
+        // If not found, it might be renamed.
+        // Check if threadId is in the format "Chat YYYY-MM-DD HH-MM-SS"
+        // and if so, try to find a file that ends with the timestamp part.
+        let timestampPart = "";
+        if (threadId.startsWith("Chat ")) {
+            timestampPart = threadId.substring(5);
+        }
+
+        // Search for files
+        try {
+            if (await adapter.exists(folder)) {
+                const result = await adapter.list(folder);
+                for (const file of result.files) {
+                    if (!file.endsWith(".chat")) continue;
+
+                    // Check if file contains threadId (legacy check)
+                    if (file.includes(threadId)) {
+                        return file;
+                    }
+
+                    // Check for renamed files: "{Title} - {Timestamp}.chat"
+                    if (timestampPart && file.endsWith(` - ${timestampPart}.chat`)) {
+                        return file;
+                    }
+                }
+            }
+        } catch (e) {
+            console.error(`Error searching for file with threadId ${threadId}:`, e);
+        }
+
+        // Fallback to default path
+        return defaultPath;
     }
 
     private getIndexPath(): string {
@@ -151,11 +190,11 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
     }, 2000, true);
 
     // Helper to load specific thread data into memory
-    private async ensureThreadLoaded(threadId: string): Promise<ThreadData | undefined> {
+    async ensureThreadLoaded(threadId: string): Promise<ThreadData | undefined> {
         if (this.storage.has(threadId)) return this.storage.get(threadId);
 
         const adapter = this.plugin.app.vault.adapter;
-        const path = this.getFilePath(threadId);
+        const path = await this.getFilePath(threadId);
 
         try {
             if (await adapter.exists(path)) {
@@ -176,7 +215,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
         await this.ensureFolder();
         const adapter = this.plugin.app.vault.adapter;
-        const path = this.getFilePath(threadId);
+        const path = await this.getFilePath(threadId);
 
         try {
             await adapter.write(path, JSON.stringify(data, null, 2));
@@ -201,23 +240,30 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
     // --- ThreadStore-like Implementation ---
     // We don't implement the interface directly due to 'list' name collision with BaseCheckpointSaver
 
-    async read(threadId: string): Promise<ThreadSnapshot | undefined> {
-        // Read metadata from index if available
-        if (this.threadIndex.has(threadId)) {
+    async read(threadId: string, forceReload: boolean = false): Promise<ThreadSnapshot | undefined> {
+        // If forceReload is true, skip cache and read from file
+        if (!forceReload && this.threadIndex.has(threadId)) {
             return this.threadIndex.get(threadId);
         }
 
-        // Fallback to loading file
+        // Load from file (this will update cache if needed)
         const data = await this.ensureThreadLoaded(threadId);
         if (!data) return undefined;
 
-        return {
+        const snapshot = {
             threadId: data.threadId,
             title: data.title,
             metadata: data.metadata,
             createdAt: data.createdAt,
             updatedAt: data.updatedAt
         };
+
+        // Update cache if we loaded from file
+        if (!this.threadIndex.has(threadId) || forceReload) {
+            this.threadIndex.set(threadId, snapshot);
+        }
+
+        return snapshot;
     }
 
     async write(snapshot: ThreadSnapshot): Promise<void> {
@@ -415,7 +461,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
         this.saveIndexDebounced();
 
         const adapter = this.plugin.app.vault.adapter;
-        const path = this.getFilePath(threadId);
+        const path = await this.getFilePath(threadId);
 
         try {
             if (await adapter.exists(path)) {
@@ -463,6 +509,64 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
             snap.updatedAt = threadData.updatedAt;
             this.threadIndex.set(threadId, snap);
             this.saveIndexDebounced();
+        }
+    }
+
+    // Helper to sanitize a title for use as a filename
+    private sanitizeFileName(title: string): string {
+        // Remove or replace invalid filename characters
+        // Obsidian allows most characters, but we'll be conservative
+        return title
+            .replace(/[<>:"/\\|?*]/g, "-") // Replace invalid chars with dash
+            .replace(/\s+/g, " ") // Normalize whitespace
+            .trim()
+            .substring(0, 100); // Limit length
+    }
+
+    // Rename the chat file to use the generated title
+    async renameChatFile(threadId: string, title: string): Promise<void> {
+        if (!title || !title.trim()) {
+            console.warn(`renameChatFile: Empty title provided for thread ${threadId}`);
+            return;
+        }
+
+        try {
+            const oldPath = await this.getFilePath(threadId);
+            const file = this.plugin.app.vault.getAbstractFileByPath(oldPath);
+
+            if (!file || !(file instanceof TFile)) {
+                console.warn(`renameChatFile: File not found: ${oldPath}`);
+                return;
+            }
+
+            const sanitizedTitle = this.sanitizeFileName(title);
+            const dateTimePart = threadId.startsWith("Chat ") ? threadId.substring(5) : threadId;
+            const newFileName = `${sanitizedTitle} - ${dateTimePart}.chat`;
+
+            // If names are same, do nothing
+            if (file.name === newFileName) {
+                console.log(`renameChatFile: Filename already matches title, skipping rename.`);
+                return;
+            }
+
+            const folder = this.getChatFolder();
+            const newPath = normalizePath(`${folder}/${newFileName}`);
+
+            console.log(`renameChatFile: Renaming ${oldPath} to ${newPath}`);
+
+            // Check if target file already exists
+            if (await this.plugin.app.vault.adapter.exists(newPath)) {
+                console.warn(`renameChatFile: Target file already exists: ${newPath}`);
+                // If the content is identical or we decide to overwrite/merge? 
+                // For now, just skip to avoid data loss.
+                return;
+            }
+
+            await this.plugin.app.fileManager.renameFile(file, newPath);
+            console.log(`renameChatFile: Successfully renamed to ${newPath}`);
+
+        } catch (error) {
+            console.error(`Error renaming chat file for thread ${threadId}:`, error);
         }
     }
 }

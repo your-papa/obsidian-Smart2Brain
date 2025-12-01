@@ -4,6 +4,23 @@ import type { SmartSecondBrainSettings } from "./settings";
 import { DEFAULT_SETTINGS } from "./settings";
 import { AgentManager } from "./agent/AgentManager";
 
+// Helper function to generate a date/time-based thread ID and filename
+function generateChatId(): { threadId: string; filename: string } {
+	const now = new Date();
+	const year = now.getFullYear();
+	const month = String(now.getMonth() + 1).padStart(2, '0');
+	const day = String(now.getDate()).padStart(2, '0');
+	const hours = String(now.getHours()).padStart(2, '0');
+	const minutes = String(now.getMinutes()).padStart(2, '0');
+	const seconds = String(now.getSeconds()).padStart(2, '0');
+
+	// Format: Chat YYYY-MM-DD HH-MM-SS
+	const threadId = `Chat ${year}-${month}-${day} ${hours}-${minutes}-${seconds}`;
+	const filename = threadId; // Use same format so getFilePath can find it
+
+	return { threadId, filename };
+}
+
 export default class SmartSecondBrainPlugin extends Plugin {
 	settings!: SmartSecondBrainSettings;
 	agentManager!: AgentManager;
@@ -71,12 +88,12 @@ export default class SmartSecondBrainPlugin extends Plugin {
 			await this.app.vault.createFolder(chatsFolder);
 		}
 
-		// Create a new chat file
-		const newId = crypto.randomUUID();
-		const newPath = normalizePath(`${chatsFolder}/${newId}.chat`);
+		// Create a new chat file with date/time-based name
+		const { threadId, filename } = generateChatId();
+		const newPath = normalizePath(`${chatsFolder}/${filename}.chat`);
 		// Initialize with minimal valid JSON
 		const initialData = {
-			threadId: newId,
+			threadId: threadId,
 			createdAt: Date.now(),
 			updatedAt: Date.now(),
 			checkpoints: {},
@@ -105,12 +122,12 @@ export default class SmartSecondBrainPlugin extends Plugin {
 		let fileToOpen = files[0];
 
 		if (!fileToOpen) {
-			// Create a new chat file
-			const newId = crypto.randomUUID();
-			const newPath = normalizePath(`${chatsFolder}/${newId}.chat`);
+			// Create a new chat file with date/time-based name
+			const { threadId, filename } = generateChatId();
+			const newPath = normalizePath(`${chatsFolder}/${filename}.chat`);
 			// Initialize with minimal valid JSON
 			const initialData = {
-				threadId: newId,
+				threadId: threadId,
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
 				checkpoints: {},

@@ -260,6 +260,63 @@ export class AgentManager {
 		await this.chatManager.delete(threadId);
 	}
 
+	async generateThreadTitle(threadId: string): Promise<void> {
+		if (!this.agent) {
+			await this.initialize();
+		}
+
+		if (!this.agent) {
+			console.warn("Agent not initialized, cannot generate title");
+			return;
+		}
+
+		try {
+			await this.agent.generateTitle(threadId);
+			console.log(`Generated title for thread ${threadId}`);
+
+			// Wait a bit for the title to be persisted
+			await new Promise(resolve => setTimeout(resolve, 200));
+
+			// Try multiple ways to get the title:
+			// 1. Read from thread store (may have it in cache)
+			let snapshot = await this.chatManager.read(threadId, true);
+			console.log(`Read snapshot for thread ${threadId}:`, snapshot);
+
+			// 2. If not found, try reading directly from in-memory storage
+			if (!snapshot?.title) {
+				const threadData = await this.chatManager.ensureThreadLoaded(threadId);
+				if (threadData?.title) {
+					console.log(`Title found in threadData: "${threadData.title}"`);
+					snapshot = {
+						threadId: threadData.threadId,
+						title: threadData.title,
+						metadata: threadData.metadata,
+						createdAt: threadData.createdAt,
+						updatedAt: threadData.updatedAt
+					};
+				}
+			}
+
+			if (snapshot?.title) {
+				console.log(`Title found: "${snapshot.title}", renaming file...`);
+				await this.chatManager.renameChatFile(threadId, snapshot.title);
+			} else {
+				console.warn(`No title found for thread ${threadId} after generation. Waiting longer and retrying...`);
+				// Wait longer and try again
+				await new Promise(resolve => setTimeout(resolve, 1000));
+				snapshot = await this.chatManager.read(threadId, true);
+				if (snapshot?.title) {
+					console.log(`Title found on retry: "${snapshot.title}", renaming file...`);
+					await this.chatManager.renameChatFile(threadId, snapshot.title);
+				} else {
+					console.error(`Title still not found for thread ${threadId} after retry`);
+				}
+			}
+		} catch (error) {
+			console.error(`Error generating title for thread ${threadId}:`, error);
+		}
+	}
+
 	cleanup(): void {
 		// Cleanup if needed
 		this.agent = null;

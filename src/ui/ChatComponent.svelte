@@ -39,9 +39,17 @@
 
 	onMount(async () => {
 		// If currentThreadId was passed in props (or set externally via component.$set),
-		// we load it. Otherwise we default to latest thread.
+		// we load it. Otherwise we create a new thread with date/time-based ID.
 		if (currentThreadId === "default-thread") {
-			currentThreadId = crypto.randomUUID();
+			// Generate a date/time-based thread ID: Chat YYYY-MM-DD HH-MM-SS
+			const now = new Date();
+			const year = now.getFullYear();
+			const month = String(now.getMonth() + 1).padStart(2, "0");
+			const day = String(now.getDate()).padStart(2, "0");
+			const hours = String(now.getHours()).padStart(2, "0");
+			const minutes = String(now.getMinutes()).padStart(2, "0");
+			const seconds = String(now.getSeconds()).padStart(2, "0");
+			currentThreadId = `Chat ${year}-${month}-${day} ${hours}-${minutes}-${seconds}`;
 		}
 
 		if (messagesContent) {
@@ -448,6 +456,21 @@
 		} finally {
 			isLoading = false;
 			scrollToBottom();
+
+			// Generate thread title after conversation completes
+			// Only generate if we have at least one user message and one assistant response
+			const userMessages = messages.filter((m) => m.role === "user");
+			const assistantMessages = messages.filter(
+				(m) => m.role === "assistant",
+			);
+			if (userMessages.length > 0 && assistantMessages.length > 0) {
+				// Generate title asynchronously without blocking
+				plugin.agentManager
+					.generateThreadTitle(currentThreadId)
+					.catch((err) => {
+						console.error("Failed to generate thread title:", err);
+					});
+			}
 		}
 	}
 
