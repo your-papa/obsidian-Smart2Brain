@@ -113,12 +113,9 @@ export class AgentManager {
 				// Looking at the error: "Access to fetch ... blocked by CORS"
 				// Using Obsidian's requestUrl bypasses this.
 
-				const mcpClient = new MultiServerMCPClient(this.plugin.settings.mcpServers, {
-					clientInfo: {
-						name: "Smart Second Brain",
-						version: "0.1.0",
-					}
-				});
+				// MultiServerMCPClient expects a single argument (config object or server map).
+				// clientInfo is not currently supported/exposed by the wrapper (it uses its own package info).
+				const mcpClient = new MultiServerMCPClient(this.plugin.settings.mcpServers);
 
 				// HACK: Monkey patch the global fetch for the entire lifecycle
 				// This is necessary because mcp-adapters might use fetch internally in places
@@ -128,7 +125,7 @@ export class AgentManager {
 
 				if (!(window as any)._originalFetch) {
 					(window as any)._originalFetch = window.fetch;
-					window.fetch = createObsidianFetch() as any;
+					window.fetch = createObsidianFetch((window as any)._originalFetch) as any;
 				}
 
 				try {

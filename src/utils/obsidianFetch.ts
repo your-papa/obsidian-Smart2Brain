@@ -4,8 +4,21 @@ import { requestUrl, type RequestUrlParam } from "obsidian";
  * Creates a custom fetch implementation that uses Obsidian's requestUrl
  * to bypass CORS restrictions in the plugin environment.
  */
-export function createObsidianFetch(): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
+export function createObsidianFetch(originalFetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
     return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        // Try using the original fetch first to support streaming
+        if (originalFetch) {
+            try {
+                // We clone the init object to avoid side effects if fetch modifies it,
+                // though usually it doesn't. 
+                // NOTE: If body is a ReadableStream and it gets locked/consumed by originalFetch,
+                // fallback to requestUrl might fail. But usually for LLM calls body is a string (JSON).
+                return await originalFetch(input, init);
+            } catch (e) {
+                // If original fetch fails (likely CORS or network), fallback to requestUrl
+            }
+        }
+
         const url = input.toString();
         const method = init?.method || "GET";
         const headers = init?.headers as Record<string, string> || {};
