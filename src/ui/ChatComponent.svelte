@@ -2,7 +2,9 @@
 	import { onMount, tick } from "svelte";
 	import MessageBubble from "./MessageBubble.svelte";
 	import Logo from "./Logo.svelte";
+	import FileSuggestionPopup from "./FileSuggestionPopup.svelte";
 	import type SmartSecondBrainPlugin from "../main";
+	import type { TFile } from "obsidian";
 
 	import type { ThreadMessageToolCall } from "papa-ts";
 	import type { UIMessage, ToolCallState } from "./types";
@@ -19,6 +21,12 @@
 	let shouldScrollToLatest = false;
 	let isRestoring = false;
 	let isInputFocused = false;
+
+	// Suggestion state
+	let showSuggestions = false;
+	let filteredFiles: TFile[] = [];
+	let selectedSuggestionIndex = 0;
+	let matchStart = -1;
 
 	// Use plugin setting for readable line length
 	let readableLineLength: boolean = false;
@@ -73,6 +81,75 @@
 			console.error("Error loading messages:", error);
 			messages = [];
 		}
+	}
+
+	function handleInput(event: Event) {
+		const textarea = event.target as HTMLTextAreaElement;
+		const cursor = textarea.selectionStart;
+		const text = textarea.value;
+
+		// Look for [[ before cursor
+		const lastOpenBracket = text.lastIndexOf("[[", cursor);
+		if (lastOpenBracket !== -1) {
+			// Check if there is a closing ]] before the cursor (which would mean we are outside)
+			// or if there is a newline
+			const textAfterBracket = text.slice(lastOpenBracket + 2, cursor);
+			if (
+				!textAfterBracket.includes("]]") &&
+				!textAfterBracket.includes("\n")
+			) {
+				matchStart = lastOpenBracket;
+				const query = textAfterBracket.toLowerCase();
+
+				// Filter files
+				const allFiles = plugin.app.vault.getFiles();
+				filteredFiles = allFiles
+					.filter(
+						(file) =>
+							file.basename.toLowerCase().includes(query) ||
+							file.path.toLowerCase().includes(query),
+					)
+					.slice(0, 10); // Limit to 10 suggestions
+
+				if (filteredFiles.length > 0) {
+					showSuggestions = true;
+					selectedSuggestionIndex = 0;
+				} else {
+					showSuggestions = false;
+				}
+			} else {
+				showSuggestions = false;
+			}
+		} else {
+			showSuggestions = false;
+		}
+	}
+
+	function selectFile(file: TFile) {
+		const cursor = chatInput.selectionStart;
+		const text = input;
+		const before = text.substring(0, matchStart);
+		const after = text.substring(cursor);
+
+		// Use Obsidian's link generator to respect user settings
+		const activeFile = plugin.app.workspace.getActiveFile();
+		const sourcePath = activeFile ? activeFile.path : "";
+		const link = plugin.app.fileManager.generateMarkdownLink(
+			file,
+			sourcePath,
+		);
+
+		// Replace [[query with generated link
+		input = `${before}${link}${after}`;
+
+		showSuggestions = false;
+
+		// Restore focus and set cursor position
+		tick().then(() => {
+			chatInput.focus();
+			const newCursorPos = before.length + link.length;
+			chatInput.setSelectionRange(newCursorPos, newCursorPos);
+		});
 	}
 
 	function scrollToBottom() {
@@ -324,6 +401,25 @@
 	}
 
 	function handleKeyPress(event: KeyboardEvent) {
+		if (showSuggestions) {
+			if (event.key === "ArrowUp") {
+				event.preventDefault();
+				selectedSuggestionIndex =
+					(selectedSuggestionIndex - 1 + filteredFiles.length) %
+					filteredFiles.length;
+			} else if (event.key === "ArrowDown") {
+				event.preventDefault();
+				selectedSuggestionIndex =
+					(selectedSuggestionIndex + 1) % filteredFiles.length;
+			} else if (event.key === "Enter") {
+				event.preventDefault();
+				selectFile(filteredFiles[selectedSuggestionIndex]);
+			} else if (event.key === "Escape") {
+				showSuggestions = false;
+			}
+			return;
+		}
+
 		if (event.key === "Enter" && !event.shiftKey) {
 			event.preventDefault();
 			sendMessage();
@@ -406,14 +502,27 @@
 			<div
 				class="chat-input-wrapper"
 				on:focusin={() => (isInputFocused = true)}
-				on:focusout={() => (isInputFocused = false)}
+				on:focusout={() => {
+					isInputFocused = false;
+					setTimeout(() => {
+						showSuggestions = false;
+					}, 100);
+				}}
 			>
+				{#if showSuggestions}
+					<FileSuggestionPopup
+						suggestions={filteredFiles}
+						selectedIndex={selectedSuggestionIndex}
+						on:select={(e) => selectFile(e.detail)}
+					/>
+				{/if}
 				<textarea
 					class="chat-input"
 					placeholder="Type a message..."
 					bind:value={input}
 					bind:this={chatInput}
 					on:keydown={handleKeyPress}
+					on:input={handleInput}
 					use:adjustTextareaHeight
 					disabled={isLoading}
 					rows="1"
