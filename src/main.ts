@@ -34,17 +34,26 @@ export default class SmartSecondBrainPlugin extends Plugin {
 		// Register the chat view
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
 
-		// Add ribbon icon to open chat
-		this.addRibbonIcon("message-square", "Open Smart Second Brain", () => {
-			this.activateView();
+		// Add ribbon icon to create and open a fresh chat
+		this.addRibbonIcon("message-square", "New S2B Chat", () => {
+			this.createNewChat();
 		});
 
-		// Add command to open chat
+		// Add command to open latest chat
 		this.addCommand({
 			id: "open-chat",
-			name: "Open Smart Second Brain Chat",
+			name: "Open S2B Chat",
 			callback: () => {
 				this.activateView();
+			},
+		});
+
+		// Add command to create a new chat
+		this.addCommand({
+			id: "new-chat",
+			name: "Create New S2B Chat",
+			callback: () => {
+				this.createNewChat();
 			},
 		});
 
