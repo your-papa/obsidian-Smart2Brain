@@ -387,8 +387,9 @@
 		padding: 0.5rem 0.8rem;
 		border-radius: 12px;
 		border-bottom-right-radius: 4px;
-		background: var(--interactive-accent);
-		color: var(--text-on-accent);
+		background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+		color: var(--text-normal);
+		border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, transparent);
 	}
 
 	.message.assistant .message-content {
@@ -705,7 +706,7 @@
 	}
 
 	.message.user .message-text :global(code) {
-		background: rgba(255, 255, 255, 0.2);
+		background: var(--code-background);
 	}
 
 	/* Markdown overrides for user messages */
@@ -718,7 +719,7 @@
 	}
 
 	.message.user .message-text :global(a) {
-		color: inherit;
+		color: var(--text-accent);
 		text-decoration: underline;
 	}
 
