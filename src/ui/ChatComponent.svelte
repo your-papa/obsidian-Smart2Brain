@@ -18,6 +18,7 @@
 	let chatContainer: HTMLElement;
 	let shouldScrollToLatest = false;
 	let isRestoring = false;
+	let isInputFocused = false;
 
 	// Use plugin setting for readable line length
 	let readableLineLength: boolean = false;
@@ -368,7 +369,10 @@
 
 				{#if messages.length === 0 && !isLoading && !isRestoring}
 					<div class="welcome-message">
-						<div class="logo-container">
+						<div
+							class="logo-container"
+							class:input-focused={isInputFocused}
+						>
 							<Logo class="chat-logo" />
 						</div>
 						<p>Start a new conversation</p>
@@ -399,7 +403,11 @@
 		</div>
 
 		<div class="chat-input-container">
-			<div class="chat-input-wrapper">
+			<div
+				class="chat-input-wrapper"
+				on:focusin={() => (isInputFocused = true)}
+				on:focusout={() => (isInputFocused = false)}
+			>
 				<textarea
 					class="chat-input"
 					placeholder="Type a message..."
@@ -566,6 +574,12 @@
 
 	.welcome-message .logo-container {
 		margin-bottom: 1.5rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.5rem;
+		border-radius: 999px;
+		transition: transform 0.12s ease-out;
 	}
 
 	.welcome-message :global(.chat-logo) {
@@ -573,6 +587,35 @@
 		width: 80px;
 		fill: var(--text-faint);
 		stroke: var(--text-faint);
+		transition:
+			fill 0.12s ease-out,
+			stroke 0.12s ease-out,
+			filter 0.12s ease-out;
+	}
+
+	.welcome-message .logo-container.input-focused {
+		transform: translateY(-2px) scale(1.01);
+	}
+
+	.welcome-message .logo-container.input-focused :global(.chat-logo) {
+		fill: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
+		stroke: hsl(var(--accent-h), 15%, 35%);
+		filter: drop-shadow(
+				0 0 8px
+					color-mix(
+						in srgb,
+						var(--interactive-accent) 30%,
+						transparent
+					)
+			)
+			drop-shadow(
+				0 4px 10px
+					color-mix(
+						in srgb,
+						var(--interactive-accent) 18%,
+						transparent
+					)
+			);
 	}
 
 	.loading-container {
