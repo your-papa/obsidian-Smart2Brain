@@ -8,6 +8,7 @@ export interface SmartSecondBrainSettings {
 	langSmithProject?: string;
 	langSmithEndpoint?: string;
 	enableLangSmith?: boolean;
+	mcpServers?: Record<string, any>;
 }
 
 export const DEFAULT_SETTINGS: SmartSecondBrainSettings = {
@@ -20,5 +21,6 @@ export const DEFAULT_SETTINGS: SmartSecondBrainSettings = {
 	langSmithProject: "obsidian-agent",
 	langSmithEndpoint: "https://api.smith.langchain.com",
 	enableLangSmith: false,
+	mcpServers: {}
 };
 

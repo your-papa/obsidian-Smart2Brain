@@ -1,4 +1,5 @@
 import { Agent, ProviderRegistry, type ThreadSnapshot, LangSmithTelemetry, type Telemetry } from "papa-ts";
+import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import SmartSecondBrainPlugin from "../main";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import { createSearchNotesTool } from "../tools/searchNotes";
@@ -7,6 +8,7 @@ import { createExecuteDataviewTool } from "../tools/executeDataview";
 import { createGetPropertiesTool } from "../tools/getProperties";
 import { createReadNoteTool } from "../tools/readNote";
 import { createSystemPrompt } from "./prompts";
+import { createObsidianFetch } from "../utils/obsidianFetch";
 
 export class AgentManager {
 	private plugin: SmartSecondBrainPlugin;
@@ -74,19 +76,77 @@ export class AgentManager {
 		return undefined;
 	}
 
-	private bindTools(agent: Agent) {
+	private async bindTools(agent: Agent) {
 		const searchNotesTool = createSearchNotesTool(this.plugin.app);
 		const getAllTagsTool = createGetAllTagsTool(this.plugin.app);
 		const executeDataviewTool = createExecuteDataviewTool(this.plugin.app);
 		const getPropertiesTool = createGetPropertiesTool(this.plugin.app);
 		const readNoteTool = createReadNoteTool(this.plugin.app);
-		agent.bindTools([
+
+		const tools: any[] = [
 			searchNotesTool,
 			getAllTagsTool,
 			executeDataviewTool,
 			getPropertiesTool,
 			readNoteTool,
-		]);
+		];
+
+		// Load MCP tools if configured
+		if (this.plugin.settings.mcpServers && Object.keys(this.plugin.settings.mcpServers).length > 0) {
+			try {
+				console.log("Smart Second Brain: Initializing MCP client...", this.plugin.settings.mcpServers);
+
+				// Use request via Obsidian proxy (obsidian-fetch) to avoid CORS issues
+				// We need to monkey-patch the global fetch for this scope or pass it if supported
+				// Currently mcp-adapters uses fetch or EventSource depending on transport
+
+				// For SSE transport (which Tavily likely uses if http url), we need EventSource to work
+				// Obsidian environment might block EventSource CORS too. 
+
+				// However, the error above shows it failing on POST/GET fetch calls.
+				// Let's try to pass a custom fetch if the library supports it, or we might need to polyfill.
+
+				// NOTE: MultiServerMCPClient doesn't accept a fetch polyfill directly in constructor options in current version
+				// But we can try to assign it to global scope temporarily if needed, OR
+				// check if we can pass it in client options.
+
+				// Looking at the error: "Access to fetch ... blocked by CORS"
+				// Using Obsidian's requestUrl bypasses this.
+
+				const mcpClient = new MultiServerMCPClient(this.plugin.settings.mcpServers, {
+					clientInfo: {
+						name: "Smart Second Brain",
+						version: "0.1.0",
+					}
+				});
+
+				// HACK: Monkey patch the global fetch for the entire lifecycle
+				// This is necessary because mcp-adapters might use fetch internally in places
+				// we can't easily wrap (e.g. connection maintenance, keep-alive, etc.)
+				// Since this plugin runs inside Obsidian's Electron environment, 
+				// replacing window.fetch with obsidianFetch is generally safe and desired for avoiding CORS.
+
+				if (!(window as any)._originalFetch) {
+					(window as any)._originalFetch = window.fetch;
+					window.fetch = createObsidianFetch() as any;
+				}
+
+				try {
+					const mcpTools = await mcpClient.getTools();
+					console.log(`Smart Second Brain: Loaded ${mcpTools.length} MCP tools`);
+					tools.push(...mcpTools);
+				} catch (e) {
+					console.error("Failed to get MCP tools", e);
+					// If it fails, we might want to restore fetch? 
+					// But if we want persistent CORS bypass for retries, maybe keep it.
+					// For safety, let's log.
+				}
+			} catch (error) {
+				console.error("Smart Second Brain: Failed to load MCP tools", error);
+			}
+		}
+
+		agent.bindTools(tools);
 	}
 
 	private async ensureAgent(): Promise<Agent> {
@@ -148,7 +208,7 @@ export class AgentManager {
 		agent.setPrompt(createSystemPrompt(hasChartsPlugin));
 
 		// Bind tools
-		this.bindTools(agent);
+		await this.bindTools(agent);
 
 		// If we have configuration, try to choose the model
 		if ((apiKey || provider === "ollama") && modelName) {
@@ -323,6 +383,12 @@ export class AgentManager {
 	}
 
 	cleanup(): void {
+		// Restore original fetch if it was patched
+		if ((window as any)._originalFetch) {
+			window.fetch = (window as any)._originalFetch;
+			delete (window as any)._originalFetch;
+		}
+
 		// Cleanup if needed
 		this.agent = null;
 	}

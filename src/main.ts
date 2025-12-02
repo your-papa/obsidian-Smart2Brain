@@ -310,6 +310,37 @@ class SmartSecondBrainSettingTab extends PluginSettingTab {
 		// Load models initially
 		await updateModelDropdown();
 
+		containerEl.createEl("h3", { text: "MCP Servers" });
+
+		new Setting(containerEl)
+			.setName("MCP Server Configuration")
+			.setDesc("JSON configuration for MCP servers (see langchain docs)")
+			.addTextArea((text) => {
+				text
+					.setPlaceholder(`{
+  "tavily": {
+    "url": "https://mcp.tavily.com/mcp/?tavilyApiKey=..."
+  },
+  "math": {
+    "transport": "stdio",
+    "command": "node",
+    "args": ["/path/to/math_server.js"]
+  }
+}`)
+					.setValue(JSON.stringify(this.plugin.settings.mcpServers || {}, null, 2))
+					.onChange(async (value) => {
+						try {
+							const parsed = JSON.parse(value);
+							this.plugin.settings.mcpServers = parsed;
+							await this.plugin.saveSettings();
+						} catch (e) {
+							console.error("Invalid JSON for MCP servers");
+						}
+					});
+				text.inputEl.rows = 10;
+				text.inputEl.cols = 50;
+			});
+
 		containerEl.createEl("h3", { text: "Telemetry" });
 
 		new Setting(containerEl)
