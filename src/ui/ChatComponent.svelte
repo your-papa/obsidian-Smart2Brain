@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy, tick } from "svelte";
+	import { onMount, tick } from "svelte";
 	import MessageBubble from "./MessageBubble.svelte";
 	import Logo from "./Logo.svelte";
 	import type SmartSecondBrainPlugin from "../main";
@@ -16,9 +16,7 @@
 	let chatInput: HTMLTextAreaElement;
 	let isLoading: boolean = false;
 	let chatContainer: HTMLElement;
-	let messagesContent: HTMLElement;
-	let resizeObserver: ResizeObserver;
-	let isPinnedToBottom = true;
+	let shouldScrollToLatest = false;
 	let isRestoring = false;
 
 	// Use plugin setting for readable line length
@@ -36,38 +34,9 @@
 			currentThreadId = createThreadId();
 		}
 
-		if (messagesContent) {
-			resizeObserver = new ResizeObserver(() => {
-				if (isPinnedToBottom && chatContainer) {
-					chatContainer.scrollTop = chatContainer.scrollHeight;
-				}
-			});
-			resizeObserver.observe(messagesContent);
-		}
-
 		await loadMessages();
-		scrollToBottom();
 		chatInput?.focus();
 	});
-
-	onDestroy(() => {
-		if (resizeObserver) {
-			resizeObserver.disconnect();
-		}
-	});
-
-	function handleScroll() {
-		if (!chatContainer) return;
-		const { scrollTop, scrollHeight, clientHeight } = chatContainer;
-		const distanceToBottom = scrollHeight - scrollTop - clientHeight;
-		// If user scrolls up (distance > 50px), unpin.
-		// If user scrolls to bottom (distance < 20px), pin.
-		if (distanceToBottom > 50) {
-			isPinnedToBottom = false;
-		} else if (distanceToBottom < 20) {
-			isPinnedToBottom = true;
-		}
-	}
 
 	// Watch for external ID changes (e.g. from ChatView when opening a file)
 	let previousThreadId = "";
@@ -75,7 +44,6 @@
 		previousThreadId = currentThreadId;
 		messages = [];
 		isLoading = true;
-		isPinnedToBottom = true; // Reset pin on thread switch
 		isRestoring = true; // Hide content during load to prevent jumping
 		(async () => {
 			await loadMessages();
@@ -84,7 +52,6 @@
 			await tick();
 			// Small delay to ensure markdown rendering is complete before showing
 			setTimeout(() => {
-				scrollToBottom();
 				isRestoring = false;
 				chatInput?.focus();
 			}, 150);
@@ -98,13 +65,6 @@
 
 			if (storedMessages && storedMessages.length > 0) {
 				messages = processMessages(storedMessages);
-
-				// Scroll immediately after setting messages, without animation
-				if (chatContainer) {
-					requestAnimationFrame(() => {
-						chatContainer.scrollTop = chatContainer.scrollHeight;
-					});
-				}
 			} else {
 				messages = [];
 			}
@@ -114,14 +74,8 @@
 		}
 	}
 
-	// Reactive statement to scroll when messages change
-	$: if (messages.length > 0) {
-		scrollToBottom();
-	}
-
 	function scrollToBottom() {
 		if (chatContainer) {
-			isPinnedToBottom = true;
 			setTimeout(() => {
 				if (chatContainer) {
 					chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -149,28 +103,26 @@
 	async function sendMessage() {
 		if (!input.trim() || isLoading) return;
 
-		// Reset height
 		const textarea = document.querySelector(
 			".chat-input",
 		) as HTMLTextAreaElement;
 		if (textarea) textarea.style.height = "auto";
 
-		isPinnedToBottom = true;
+		const trimmedInput = input.trim();
+		const currentInput = trimmedInput;
 
 		const userMessage: UIMessage = {
 			id: crypto.randomUUID(),
 			role: "user",
-			content: [{ type: "text", text: input.trim() }],
+			content: [{ type: "text", text: trimmedInput }],
 			timestamp: Date.now(),
 		};
 
 		messages = [...messages, userMessage];
-		const currentInput = input;
 		input = "";
 		isLoading = true;
-		scrollToBottom();
+		shouldScrollToLatest = true;
 
-		// Create assistant message immediately for streaming
 		const assistantMessage: UIMessage = {
 			id: crypto.randomUUID(),
 			role: "assistant",
@@ -180,6 +132,12 @@
 		};
 		messages = [...messages, assistantMessage];
 		const messageIndex = messages.length - 1;
+
+		await tick();
+		if (shouldScrollToLatest) {
+			scrollToBottom();
+			shouldScrollToLatest = false;
+		}
 
 		// Track if this is a new thread so we can refresh the list
 		// const isNewThread = !threads.some(t => t.threadId === currentThreadId);
@@ -329,7 +287,7 @@
 
 				// Trigger reactivity after processing any chunk
 				messages = messages;
-				scrollToBottom();
+				// No scrolling here!
 			}
 		} catch (error) {
 			// Update the message with error
@@ -345,7 +303,7 @@
 			messages = messages;
 		} finally {
 			isLoading = false;
-			scrollToBottom();
+			// No scroll at the end either
 
 			// Generate thread title after conversation completes
 			// Only generate if we have at least one user message and one assistant response
@@ -396,12 +354,8 @@
 	<!-- Sidebar removed, use Obsidian File Explorer -->
 
 	<div class="chat-wrapper" class:readable-line-length={readableLineLength}>
-		<div
-			class="chat-messages"
-			bind:this={chatContainer}
-			on:scroll={handleScroll}
-		>
-			<div class="messages-content" bind:this={messagesContent}>
+		<div class="chat-messages" bind:this={chatContainer}>
+			<div class="messages-content">
 				{#if (isLoading && messages.length === 0) || isRestoring}
 					<div class="loading-container overlay">
 						<div class="typing-indicator">
