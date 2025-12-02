@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from "svelte";
 	import MessageBubble from "./MessageBubble.svelte";
+	import Logo from "./Logo.svelte";
 	import type SmartSecondBrainPlugin from "../main";
 
 	import type { ThreadMessageToolCall } from "papa-ts";
@@ -12,6 +13,7 @@
 	export let currentThreadId: string = "default-thread";
 	let messages: UIMessage[] = [];
 	let input: string = "";
+	let chatInput: HTMLTextAreaElement;
 	let isLoading: boolean = false;
 	let chatContainer: HTMLElement;
 	let messagesContent: HTMLElement;
@@ -45,6 +47,7 @@
 
 		await loadMessages();
 		scrollToBottom();
+		chatInput?.focus();
 	});
 
 	onDestroy(() => {
@@ -83,6 +86,7 @@
 			setTimeout(() => {
 				scrollToBottom();
 				isRestoring = false;
+				chatInput?.focus();
 			}, 150);
 		})();
 	}
@@ -410,6 +414,9 @@
 
 				{#if messages.length === 0 && !isLoading && !isRestoring}
 					<div class="welcome-message">
+						<div class="logo-container">
+							<Logo class="chat-logo" />
+						</div>
 						<p>Start a new conversation</p>
 						<p>Ask me anything about your notes.</p>
 					</div>
@@ -443,6 +450,7 @@
 					class="chat-input"
 					placeholder="Type a message..."
 					bind:value={input}
+					bind:this={chatInput}
 					on:keydown={handleKeyPress}
 					use:adjustTextareaHeight
 					disabled={isLoading}
@@ -600,6 +608,17 @@
 		color: var(--text-muted);
 		padding: 2rem;
 		margin: auto;
+	}
+
+	.welcome-message .logo-container {
+		margin-bottom: 1.5rem;
+	}
+
+	.welcome-message :global(.chat-logo) {
+		height: 80px;
+		width: 80px;
+		fill: var(--text-faint);
+		stroke: var(--text-faint);
 	}
 
 	.loading-container {
