@@ -35,14 +35,14 @@ export default class SmartSecondBrainPlugin extends Plugin {
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
 
 		// Add ribbon icon to create and open a fresh chat
-		this.addRibbonIcon("message-square", "New S2B Chat", () => {
+		this.addRibbonIcon("message-square", "New Chat", () => {
 			this.createNewChat();
 		});
 
 		// Add command to open latest chat
 		this.addCommand({
 			id: "open-chat",
-			name: "Open S2B Chat",
+			name: "Open Chat",
 			callback: () => {
 				this.activateView();
 			},
@@ -51,7 +51,7 @@ export default class SmartSecondBrainPlugin extends Plugin {
 		// Add command to create a new chat
 		this.addCommand({
 			id: "new-chat",
-			name: "Create New S2B Chat",
+			name: "Create New Chat",
 			callback: () => {
 				this.createNewChat();
 			},
