@@ -16,7 +16,7 @@
 
 	let messageContainer: HTMLElement;
 	const component = new Component();
-	
+
 	// Map to store tool output containers and their components
 	const toolOutputContainers = new Map<string, HTMLElement>();
 	const toolOutputComponents = new Map<string, Component>();
@@ -42,61 +42,71 @@
 	// Svelte action to bind container and render tool output
 	function bindToolOutputContainer(node: HTMLElement, toolCallId: string) {
 		toolOutputContainers.set(toolCallId, node);
-		
+
 		// Find the tool call to get its output
-		const toolCall = message.toolCalls?.find(tc => tc.id === toolCallId);
+		const toolCall = message.toolCalls?.find((tc) => tc.id === toolCallId);
 		if (toolCall && toolCall.output && toolCall.status === "completed") {
 			renderToolOutput(toolCallId, toolCall.output, node);
 		}
-		
+
 		return {
 			update(newToolCallId: string) {
 				if (newToolCallId !== toolCallId) {
 					toolOutputContainers.delete(toolCallId);
 					toolOutputContainers.set(newToolCallId, node);
-					const toolCall = message.toolCalls?.find(tc => tc.id === newToolCallId);
-					if (toolCall && toolCall.output && toolCall.status === "completed") {
+					const toolCall = message.toolCalls?.find(
+						(tc) => tc.id === newToolCallId,
+					);
+					if (
+						toolCall &&
+						toolCall.output &&
+						toolCall.status === "completed"
+					) {
 						renderToolOutput(newToolCallId, toolCall.output, node);
 					}
 				}
 			},
 			destroy() {
 				toolOutputContainers.delete(toolCallId);
-			}
+			},
 		};
 	}
-	
+
 	// Render tool output as markdown
-	async function renderToolOutput(toolCallId: string, output: any, container: HTMLElement) {
+	async function renderToolOutput(
+		toolCallId: string,
+		output: any,
+		container: HTMLElement,
+	) {
 		if (!container || !plugin) return;
-		
+
 		const outputText = formatToolOutput(output);
 		if (!outputText) return;
-		
+
 		container.empty();
-		
+
 		// Get the active file as source path for link resolution
 		const activeFile = plugin.app.workspace.getActiveFile();
 		const sourcePath = activeFile ? activeFile.path : "";
-		
+
 		// Create component for this tool output if it doesn't exist
 		if (!toolOutputComponents.has(toolCallId)) {
 			toolOutputComponents.set(toolCallId, new Component());
 		}
 		const toolComponent = toolOutputComponents.get(toolCallId)!;
-		
+
 		// Remove old event listeners if they exist
 		const oldCleanup = toolOutputCleanups.get(toolCallId);
 		if (oldCleanup) {
 			oldCleanup();
 		}
-		
+
 		const { cleanup } = await renderMarkdown(
 			plugin.app,
 			outputText,
 			container,
 			sourcePath,
-			toolComponent
+			toolComponent,
 		);
 
 		toolOutputCleanups.set(toolCallId, cleanup);
@@ -134,13 +144,22 @@
 	let areToolsOpen = true;
 	let hasAutoCollapsed = false;
 
-	$: toolStatus = message.toolCalls?.some(t => t.status === "running") ? "running" : "completed";
+	$: toolStatus = message.toolCalls?.some((t) => t.status === "running")
+		? "running"
+		: "completed";
 	$: toolCount = message.toolCalls?.length || 0;
-	$: summaryText = toolStatus === "running" 
-		? "Running tools..." 
-		: `Used ${toolCount} tool${toolCount === 1 ? "" : "s"}`;
+	$: summaryText =
+		toolStatus === "running"
+			? "Running tools..."
+			: `Used ${toolCount} tool${toolCount === 1 ? "" : "s"}`;
 
-	$: if (content && content.length > 0 && !hasAutoCollapsed && message.toolCalls && message.toolCalls.length > 0) {
+	$: if (
+		content &&
+		content.length > 0 &&
+		!hasAutoCollapsed &&
+		message.toolCalls &&
+		message.toolCalls.length > 0
+	) {
 		areToolsOpen = false;
 		hasAutoCollapsed = true;
 	}
@@ -159,7 +178,7 @@
 			messageCleanup();
 		}
 		component.unload();
-		
+
 		// Clean up tool output containers
 		toolOutputContainers.forEach((container, toolCallId) => {
 			const cleanup = toolOutputCleanups.get(toolCallId);
@@ -183,15 +202,15 @@
 			message.role === "assistant";
 		renderContent();
 	}
-	
+
 	// Reactive statement to render tool outputs when they change
 	// Watch both the toolCalls array and individual outputs
-	$: toolCallsWithOutputs = message.toolCalls?.map(tc => ({
+	$: toolCallsWithOutputs = message.toolCalls?.map((tc) => ({
 		id: tc.id,
 		output: tc.output,
-		status: tc.status
+		status: tc.status,
 	}));
-	
+
 	$: if (toolCallsWithOutputs && plugin && messageContainer) {
 		// Use setTimeout to ensure DOM is ready
 		setTimeout(() => {
@@ -199,7 +218,11 @@
 				if (toolCall.output && toolCall.status === "completed") {
 					const container = toolOutputContainers.get(toolCall.id);
 					if (container) {
-						renderToolOutput(toolCall.id, toolCall.output, container);
+						renderToolOutput(
+							toolCall.id,
+							toolCall.output,
+							container,
+						);
 					}
 				}
 			}
@@ -207,9 +230,9 @@
 	}
 
 	let lastRenderedContent = "";
-	let renderTimeout: any;
 	let isWaitingForDataview = false;
 	let messageCleanup: (() => void) | null = null;
+	let isRenderPending = false;
 
 	async function renderContent(immediate = false) {
 		if (!messageContainer || !plugin || !content) return;
@@ -225,14 +248,24 @@
 			return;
 		}
 
-		// For assistant messages (streaming), debounce the rendering to avoid flickering
+		// For assistant messages (streaming), throttle the rendering to avoid flickering
 		// and performance issues. For user messages, render immediately.
 		if (!immediate && message.role === "assistant") {
-			if (renderTimeout) clearTimeout(renderTimeout);
-			renderTimeout = setTimeout(async () => {
-				await doRender();
-			}, 50); // 50ms debounce
+			if (!isRenderPending) {
+				isRenderPending = true;
+				setTimeout(async () => {
+					await doRender();
+					isRenderPending = false;
+					// If content changed while we were rendering, trigger another check
+					if (content !== lastRenderedContent) {
+						renderContent();
+					}
+				}, 33); // ~30fps throttling
+			}
 		} else {
+			// If a throttled render is pending, cancel it since we're forcing an update
+			// (Actually we can't easily cancel the promise inside setTimeout, but we can ignore it
+			// or just let it happen. For simplicity, we just render immediately here.)
 			await doRender();
 		}
 	}
@@ -257,9 +290,9 @@
 			content,
 			messageContainer,
 			sourcePath,
-			component
+			component,
 		);
-		
+
 		messageCleanup = cleanup;
 	}
 </script>
@@ -270,7 +303,9 @@
 			<div class="tool-calls-container">
 				<details bind:open={areToolsOpen} class="tool-calls-wrapper">
 					<summary class="tool-calls-summary">
-						<span class="summary-icon">{toolStatus === "running" ? "⏳" : "🛠️"}</span>
+						<span class="summary-icon"
+							>{toolStatus === "running" ? "⏳" : "🛠️"}</span
+						>
 						<span class="summary-text">{summaryText}</span>
 					</summary>
 					<div class="tool-calls">
@@ -288,7 +323,9 @@
 											{/if}
 										</span>
 										<span class="tool-name"
-											>{formatToolName(toolCall.name)}</span
+											>{formatToolName(
+												toolCall.name,
+											)}</span
 										>
 									</summary>
 									<div class="tool-details">
@@ -297,8 +334,11 @@
 											{#if formatToolInput(toolCall.input).length > 0}
 												<div class="tool-input-kv">
 													{#each formatToolInput(toolCall.input) as { key, value } (key)}
-														<div class="tool-input-row">
-															<span class="tool-input-key"
+														<div
+															class="tool-input-row"
+														>
+															<span
+																class="tool-input-key"
 																>{key}:</span
 															>
 															<span
@@ -387,9 +427,14 @@
 		padding: 0.5rem 0.8rem;
 		border-radius: 12px;
 		border-bottom-right-radius: 4px;
-		background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+		background: color-mix(
+			in srgb,
+			var(--interactive-accent) 15%,
+			transparent
+		);
 		color: var(--text-normal);
-		border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+		border: 1px solid
+			color-mix(in srgb, var(--interactive-accent) 30%, transparent);
 	}
 
 	.message.assistant .message-content {
@@ -595,7 +640,7 @@
 		margin-top: 0.5rem;
 		display: block;
 	}
-	
+
 	.tool-output-content {
 		margin: 0;
 		padding: 0.875rem 1rem;
@@ -608,19 +653,19 @@
 		color: var(--text-normal);
 		word-wrap: break-word;
 	}
-	
+
 	.tool-output-content :global(p) {
 		margin: 0.5rem 0;
 	}
-	
+
 	.tool-output-content :global(p:first-child) {
 		margin-top: 0;
 	}
-	
+
 	.tool-output-content :global(p:last-child) {
 		margin-bottom: 0;
 	}
-	
+
 	.tool-output-content :global(code) {
 		background: var(--background-primary);
 		padding: 0.2rem 0.4rem;
@@ -628,7 +673,7 @@
 		font-family: var(--font-monospace);
 		font-size: 0.9em;
 	}
-	
+
 	.tool-output-content :global(pre) {
 		background: var(--background-primary);
 		padding: 0.75rem;
@@ -636,37 +681,37 @@
 		overflow-x: auto;
 		margin: 0.5rem 0;
 	}
-	
+
 	.tool-output-content :global(pre code) {
 		background: transparent;
 		padding: 0;
 	}
-	
+
 	.tool-output-content :global(ul),
 	.tool-output-content :global(ol) {
 		margin: 0.5rem 0;
 		padding-left: 1.5rem;
 	}
-	
+
 	.tool-output-content :global(blockquote) {
 		border-left: 3px solid var(--background-modifier-border);
 		padding-left: 1rem;
 		margin: 0.5rem 0;
 		color: var(--text-muted);
 	}
-	
+
 	.tool-output-content :global(table) {
 		border-collapse: collapse;
 		margin: 0.5rem 0;
 		width: 100%;
 	}
-	
+
 	.tool-output-content :global(th),
 	.tool-output-content :global(td) {
 		border: 1px solid var(--background-modifier-border);
 		padding: 0.5rem;
 	}
-	
+
 	.tool-output-content :global(th) {
 		background: var(--background-secondary);
 		font-weight: 600;
