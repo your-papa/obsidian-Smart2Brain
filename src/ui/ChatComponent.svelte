@@ -747,9 +747,9 @@
 		position: relative;
 		isolation: isolate;
 		box-shadow:
-			0 6px 24px rgba(0, 0, 0, 0.28),
-			0 0 12px 0
-				color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+			0 4px 16px rgba(0, 0, 0, 0.18),
+			0 0 8px 0
+				color-mix(in srgb, var(--interactive-accent) 10%, transparent);
 	}
 
 	.chat-input-wrapper::before {
@@ -762,8 +762,8 @@
 			color-mix(in srgb, var(--interactive-accent) 35%, transparent),
 			transparent 60%
 		);
-		opacity: 0.18;
-		filter: blur(14px);
+		opacity: 0.12;
+		filter: blur(10px);
 		z-index: -1;
 		transition:
 			opacity 0.25s ease,
@@ -774,14 +774,14 @@
 	.chat-input-wrapper:focus-within {
 		border-color: var(--interactive-accent);
 		box-shadow:
-			0 8px 28px rgba(0, 0, 0, 0.32),
-			0 0 18px 0
-				color-mix(in srgb, var(--interactive-accent) 35%, transparent);
+			0 6px 20px rgba(0, 0, 0, 0.24),
+			0 0 14px 0
+				color-mix(in srgb, var(--interactive-accent) 25%, transparent);
 	}
 
 	.chat-input-wrapper:focus-within::before {
-		opacity: 0.35;
-		filter: blur(11px);
+		opacity: 0.22;
+		filter: blur(9px);
 	}
 
 	.input-actions-row {
