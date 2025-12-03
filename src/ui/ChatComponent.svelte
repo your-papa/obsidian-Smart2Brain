@@ -530,31 +530,6 @@
 
 				<div class="input-actions-row">
 					<button
-						class="input-action-btn"
-						on:click={startNewChat}
-						title="New Chat"
-						disabled={isLoading}
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							width="20"
-							height="20"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							><line x1="12" y1="5" x2="12" y2="19"></line><line
-								x1="5"
-								y1="12"
-								x2="19"
-								y2="12"
-							></line></svg
-						>
-					</button>
-
-					<button
 						class="send-button-icon"
 						on:click={sendMessage}
 						disabled={isLoading || !input.trim()}
@@ -811,26 +786,8 @@
 
 	.input-actions-row {
 		display: flex;
-		justify-content: space-between;
+		justify-content: flex-end;
 		align-items: center;
-	}
-
-	.input-action-btn {
-		background: none;
-		border: none;
-		color: var(--text-muted);
-		cursor: pointer;
-		padding: 0.4rem;
-		border-radius: 4px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		transition: all 0.2s ease;
-	}
-
-	.input-action-btn:hover:not(:disabled) {
-		color: var(--text-normal);
-		background: var(--background-modifier-hover);
 	}
 
 	.chat-input {
