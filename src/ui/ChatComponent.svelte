@@ -696,10 +696,10 @@
 		width: 80px;
 		fill: var(--text-faint);
 		stroke: var(--text-faint);
-		transition:
+		/* transition:
 			fill 0.12s ease-out,
 			stroke 0.12s ease-out,
-			filter 0.12s ease-out;
+			filter 0.12s ease-out; */
 	}
 
 	.welcome-message .logo-container.input-focused {
@@ -708,7 +708,7 @@
 
 	.welcome-message .logo-container.input-focused :global(.chat-logo) {
 		fill: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
-		stroke: hsl(var(--accent-h), 15%, 35%);
+		stroke: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
 		filter: drop-shadow(
 				0 0 8px
 					color-mix(
