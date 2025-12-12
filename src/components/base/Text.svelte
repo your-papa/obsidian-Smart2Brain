@@ -1,23 +1,48 @@
 <script lang="ts">
-    export let inputType: 'text' | 'number' = 'text';
-    export let placeholder: string = '';
-    export let styles: string = '';
-    export let changeFunc: (value: string) => void;
-    export let focusFunc = () => {};
-    export let blurFunc = () => {};
-    export let value: string = '';
+interface BaseProps {
+	placeholder?: string;
+	styles?: string;
+}
+
+interface TextInputProps extends BaseProps {
+	inputType: "text";
+	value: string;
+	changeFunc?: (value: string) => void;
+	focusFunc?: (value: string) => void;
+	blurFunc?: (value: string) => void;
+}
+
+interface NumberInputProps extends BaseProps {
+	inputType: "number";
+	value: number;
+	changeFunc?: (value: number) => void;
+	focusFunc?: (value: number) => void;
+	blurFunc?: (value: number) => void;
+}
+
+type Props = TextInputProps | NumberInputProps;
+
+let {
+	inputType = "text",
+	placeholder = "",
+	styles = "",
+	changeFunc,
+	focusFunc,
+	blurFunc,
+	value = $bindable(),
+}: Props = $props();
 </script>
 
 {#if inputType === 'text'}
     <input
+        bind:value
         class={styles}
         type="text"
         spellcheck="false"
         {placeholder}
-        on:focus={() => focusFunc()}
-        on:blur={() => blurFunc()}
-        bind:value
-        on:change={() => changeFunc(value)}
+        onfocus={() => focusFunc?.(value!)}
+        onblur={() => blurFunc?.(value!)}
+        onchange={() => changeFunc?.(value!)}
     />
 {:else if inputType === 'number'}
     <input
@@ -25,8 +50,8 @@
         spellcheck="false"
         {placeholder}
         bind:value
-        on:blur={() => blurFunc()}
-        on:focus={() => focusFunc()}
-        on:change={() => changeFunc(value)}
+        onblur={() => blurFunc?.(value || 0)}
+        onfocus={() => focusFunc?.(value || 0)}
+        onchange={() => changeFunc?.(value || 0)}
     />
 {/if}

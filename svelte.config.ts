@@ -1,13 +1,10 @@
-import type { RollupWarning } from 'rollup';
+import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 
-const config = {
-    onwarn: (warning: RollupWarning, handler: (warning: RollupWarning) => void) => {
-        const { code, frame } = warning;
-        if (code?.startsWith('a11y-')) return;
-
-        // let Rollup handle all other warnings normally
-        handler(warning);
-    },
+export default {
+	preprocess: vitePreprocess(),
+	compilerOptions: {},
+	onwarn: (warning, handler) => {
+		if (warning.code && warning.code.startsWith("a11y")) return;
+		handler(warning);
+	},
 };
-
-export default config;

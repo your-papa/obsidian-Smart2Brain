@@ -25,3 +25,5 @@ workspace.json
 *.njsproj
 *.sln
 *.sw?
+.envrc
+.direnv/*
