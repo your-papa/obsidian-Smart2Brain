@@ -1,0 +1,40 @@
+{
+  "name": "smart-second-brain",
+  "version": "0.1.0",
+  "main": "main.js",
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@sveltejs/vite-plugin-svelte": "^5.1.1",
+    "@tsconfig/svelte": "^5.0.5",
+    "autoprefixer": "^10.4.21",
+    "obsidian": "^1.10.0",
+    "postcss": "^8.5.6",
+    "svelte": "^5.41.0",
+    "svelte-check": "^4.3.3",
+    "tailwindcss": "^3.4.18",
+    "tslib": "^2.8.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.0"
+  },
+  "private": true,
+  "scripts": {
+    "dev": "vite build --mode development --watch",
+    "build": "vite build --mode production",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "format": "biome format --write ./src",
+    "lint": "biome lint --apply-unsafe ./src"
+  },
+  "type": "module",
+  "dependencies": {
+    "@selemondev/svgl-svelte": "^0.0.3",
+    "@tanstack/svelte-query": "https://pkg.pr.new/@tanstack/svelte-query@746b9c5d83e901deb3a5ca7012a4b4e2b617c5e3",
+    "bits-ui": "^2.11.8",
+    "builtin-modules": "^5.0.0",
+    "dexie": "^4.2.1",
+    "i18next": "^23.16.8",
+    "monkey-around": "^3.0.0",
+    "papa-ts": "link:papa-ts",
+    "svelte-i18n": "^4.0.1",
+    "uuid": "^11.1.0"
+  }
+}

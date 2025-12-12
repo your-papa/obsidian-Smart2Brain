@@ -1,0 +1,41 @@
+name: Bug Report
+description: "Create a bug report for obsidian smart second brain to help us improve"
+title: "Bug report"
+labels: ["bug"]
+assignees: ["leo310", "nicobrauchtgit"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        # Thanks for taking the time to fill out this bug report!🐙
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Also add a screenshot, if possible.
+      placeholder: Tell us what you see!
+    validations:
+      required: true
+  - type: textarea
+    id: error-log
+    attributes:
+      label: Error Statement
+      description: Enable Settings > Advanced > Developer Console logging. Open Developer Tools (⌘ Cmd + ⌥ Opt + I / Ctrl + Shift + I). Open Console Tab. 
+      placeholder: Obsidian Developer Console
+  - type: input 
+    id: version
+    attributes:
+      label: Smart Second Brain Version
+      description: What version of S2B are you running?
+      placeholder: 0.6.1
+    validations:
+      required: true
+  - type: textarea 
+    id: debug-info
+    attributes:
+      label: Debug Info
+      description: In Obsidian open Command Palette > Show debug info
+      placeholder: "SYSTEM INFO: ..."
+    validations:
+      required: true
+         
