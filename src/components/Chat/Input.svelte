@@ -71,8 +71,7 @@
     let files: File[] = $state([]);
 
     function sendMessage() {
-        if (!chatModel) return;
-        messengner.sendMessage(currentSession, inputValue, chatModel, files);
+        messengner.sendMessage(inputValue, files);
         files = [];
         inputValue = "";
     }
@@ -290,6 +289,17 @@
                     use:icon={"square"}
                 ></button>{/if}
         </div>
+    </div>
+    <div
+        class="flex items-center justify-center gap-2 text-[0.7rem] text-[var(--text-muted)] opacity-70"
+    >
+        <span>AI can make mistakes. Please check important information.</span>
+        <button
+            class="inline-flex items-center justify-center rounded-[4px] p-1 text-[var(--text-muted)] opacity-70 transition-all duration-200 hover:bg-[var(--background-modifier-hover)] hover:text-[var(--text-normal)] hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-0 focus-visible:ring-[var(--interactive-accent)]"
+            title="Settings"
+            use:icon={"settings"}
+        >
+        </button>
     </div>
 </div>
 

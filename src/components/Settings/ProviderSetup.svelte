@@ -1,11 +1,14 @@
 <script lang="ts">
     import { t } from "svelte-i18n";
-    import { registeredProviders, type RegisteredProvider } from "papa-ts";
+    import {
+        type RegisteredProvider,
+        registeredProviders,
+    } from "../../types/providers";
     import SettingContainer from "./SettingContainer.svelte";
     import Button from "../base/Button.svelte";
     import { getPlugin } from "../../stores/state.svelte";
     import { getData } from "../../stores/dataStore.svelte";
-    import ProviderSetupModal from "../../views/ProviderSetup/ProviderSetup.svelte";
+    import { ProviderSetupModal } from "../../views/ProviderSetup/ProviderSetup";
     import Dropdown from "../base/Dropdown.svelte";
     import { Accordion } from "bits-ui";
     import ConfiguredProvider from "./ConfiguredProvider.svelte";
