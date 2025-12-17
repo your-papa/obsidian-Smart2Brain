@@ -3,7 +3,6 @@
     import SettingContainer from "../Settings/SettingContainer.svelte";
     import ButtonComponent from "../base/Button.svelte";
     import { getData } from "../../stores/dataStore.svelte";
-    import { papaState } from "../../stores/store";
     import type { ExcludeFoldersModal } from "./ExcludeFoldersModal";
     import Button from "../base/Button.svelte";
     import Dropdown from "../base/Dropdown.svelte";
