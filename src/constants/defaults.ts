@@ -1,4 +1,3 @@
-import { Prompts, type Language } from "papa-ts";
 import type { PluginData } from "../main";
 import type { ProviderConfigs } from "../types/providers";
 
@@ -79,12 +78,10 @@ export const DEFAULT_SETTINGS: PluginData = {
   isGeneratingChatTitle: false,
   defaultChatModel: null,
   retrieveTopK: 100,
-  assistantLanguage:
-    (window.localStorage.getItem("language") as Language) || "en",
-  initialAssistantMessageContent:
-    Prompts[(window.localStorage.getItem("language") as Language) || "en"]
-      ?.initialAssistantMessage || Prompts.en.initialAssistantMessage,
+  assistantLanguage: "en",
+  initialAssistantMessageContent: "Hi",
   defaultChatName: "New Chat",
+  targetFolder: "Chats",
   excludeFF: ["Chats", ".excalidraw.md"],
   includeFF: [],
   isExcluding: true,
@@ -92,6 +89,13 @@ export const DEFAULT_SETTINGS: PluginData = {
   isVerbose: false,
   hideIncognitoWarning: false,
   isAutostart: false,
+  isChatComfy: false,
+  isOnboarded: false,
+  enableLangSmith: false,
+  langSmithApiKey: "",
+  langSmithProject: "obsidian-agent",
+  langSmithEndpoint: "https://api.smith.langchain.com",
+  mcpServers: {},
   debuggingLangchainKey: "",
   lastActiveChatId: null,
 };

@@ -13,6 +13,7 @@
     import Dropdown from "../../components/base/Dropdown.svelte";
     import { getPlugin } from "../../stores/state.svelte";
     import DropdownComp from "../../components/bitui/Dropdown.svelte";
+    import FolderSuggest from "../../components/Modal/FolderSuggest.svelte";
 
     const pluginData = getData();
     const plugin = getPlugin();
@@ -22,11 +23,37 @@
     function suggestFolders(): TFolder[] {
         return plugin.app.vault.getAllFolders(true);
     }
+
+    $effect(() => {
+        // Keep textarea in sync if mcpServers changed elsewhere
+        mcpServersJson = JSON.stringify(pluginData.mcpServers || {}, null, 2);
+    });
+
+    let mcpServersJson: string = $state(
+        JSON.stringify(pluginData.mcpServers || {}, null, 2),
+    );
 </script>
 
 <ProviderSetup />
 
 <summary class="setting-item-heading py-3">Chat Settings</summary>
+<SettingContainer
+    name={"Chats Folder"}
+    desc={"Folder to store chat files and related data"}
+>
+    <FolderSuggest
+        app={plugin.app}
+        value={pluginData.targetFolder}
+        placeholder={"Chats"}
+        suggestionFn={(q) =>
+            suggestFolders().filter((f) =>
+                f.path.toLowerCase().includes(q.toLowerCase()),
+            )}
+        onSelected={(path: string) => (pluginData.targetFolder = path)}
+        onSubmit={(path: string) => (pluginData.targetFolder = path)}
+    />
+</SettingContainer>
+
 <SettingContainer
     name={"Assistant Language"}
     desc={"Choose in which language you want to talk to your assistant"}
@@ -122,14 +149,66 @@
     <!-- Debugging --->
     <SettingContainer name={$t("settings.debugging")} isHeading={true} />
     <SettingContainer
-        name={$t("settings.langsmith_key")}
-        desc={$t("settings.langsmith_key_desc")}
+        name={"Observability (LangSmith)"}
+        desc={"Enable and configure LangSmith telemetry"}
     >
-        <Text
-            placeholder="ls__1c...4b"
-            value={pluginData.debuggingLangchainKey}
-            changeFunc={() => console.log("Changing Key")}
+        <ToggleComponent
+            isToggled={pluginData.enableLangSmith}
+            changeFunc={() =>
+                (pluginData.enableLangSmith = !pluginData.enableLangSmith)}
         />
+    </SettingContainer>
+    {#if pluginData.enableLangSmith}
+        <SettingContainer
+            name={"LangSmith API Key"}
+            desc={"Private API key used for telemetry"}
+        >
+            <Text
+                placeholder="ls__1c...4b"
+                inputType="text"
+                value={pluginData.langSmithApiKey}
+                blurFunc={(v) => (pluginData.langSmithApiKey = v)}
+            />
+        </SettingContainer>
+        <SettingContainer
+            name={"LangSmith Project"}
+            desc={"Project name to attribute runs"}
+        >
+            <Text
+                placeholder="obsidian-agent"
+                inputType="text"
+                value={pluginData.langSmithProject}
+                blurFunc={(v) => (pluginData.langSmithProject = v)}
+            />
+        </SettingContainer>
+        <SettingContainer
+            name={"LangSmith Endpoint"}
+            desc={"Override LangSmith API base URL"}
+        >
+            <Text
+                placeholder="https://api.smith.langchain.com"
+                inputType="text"
+                value={pluginData.langSmithEndpoint}
+                blurFunc={(v) => (pluginData.langSmithEndpoint = v)}
+            />
+        </SettingContainer>
+    {/if}
+    <SettingContainer
+        name={"MCP Servers"}
+        desc={"JSON map of MCP server configurations"}
+    >
+        <textarea
+            class="w-full h-32"
+            bind:value={mcpServersJson}
+            onblur={() => {
+                try {
+                    const parsed = JSON.parse(mcpServersJson || "{}");
+                    pluginData.mcpServers = parsed;
+                } catch (e) {
+                    console.warn("Invalid MCP servers JSON", e);
+                }
+            }}
+        ></textarea>
     </SettingContainer>
     <SettingContainer
         name={$t("settings.verbose")}

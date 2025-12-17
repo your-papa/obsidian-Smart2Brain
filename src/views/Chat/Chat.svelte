@@ -29,12 +29,7 @@
         <div
             class="chat-window relative flex w-full flex-1 flex-col overflow-y gap-1"
         >
-            <Toolbar messenger={messenger!!} {currentSession} />
-            {#if currentSession.session}
-                <MessageContainer messenger={messenger!!} {currentSession} />
-            {:else}
-                <ChatList messenger={messenger!!} {currentSession} />
-            {/if}
+            <MessageContainer messenger={messenger!!} {currentSession} />
             <Input messengner={messenger!!} {currentSession} />
         </div>
     </div>
