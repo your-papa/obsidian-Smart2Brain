@@ -41,7 +41,6 @@ export default defineConfig(({ mode }) => {
 					entryFileNames: "main.js",
 					assetFileNames: "styles.css",
 					sourcemapBaseUrl: new URL(setOutDir(mode), import.meta.url).toString(),
-					// --- Add these two lines to force single file ---
 					manualChunks: undefined,
 					inlineDynamicImports: true,
 				},

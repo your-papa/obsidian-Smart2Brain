@@ -6,9 +6,10 @@
         OllamaLogo,
         OpenAILogo,
     } from "@selemondev/svgl-svelte";
-    import type { ChatModel } from "../stores/stateState.svelte";
+    import type { ChatModel } from "../../stores/chatStore.svelte";
     import { getData } from "../../stores/dataStore.svelte";
     import { getPlugin, modelQuery } from "../../stores/state.svelte";
+
     interface props {
         model: ChatModel | null;
         setModel: (model: ChatModel) => void;
@@ -18,6 +19,7 @@
 
     const data = getData();
     const plugin = getPlugin();
+
     const providers = data.getConfiguredProviders();
 
     const modelQueries = providers.map((provider) =>

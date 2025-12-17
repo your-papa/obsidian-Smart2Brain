@@ -1,40 +1,83 @@
 <script lang="ts">
     import { Select } from "bits-ui";
     import Icon from "../base/Icon.svelte";
+    import {
+        AnthropicLogo,
+        OllamaLogo,
+        OpenAILogo,
+    } from "@selemondev/svgl-svelte";
+    import { getPlugin, modelQuery } from "../../stores/state.svelte";
+    import { getData } from "../../stores/dataStore.svelte";
+    import type { ChatModel } from "../../stores/chatStore.svelte";
 
-    const themes = [
-        { value: "light-monochrome", label: "Light Monochrome" },
-        { value: "dark-green", label: "Dark Green" },
-        { value: "svelte-orange", label: "Svelte Orange" },
-        { value: "punk-pink", label: "Punk Pink" },
-        { value: "ocean-blue", label: "Ocean Blue", disabled: true },
-        { value: "sunset-orange", label: "Sunset Orange" },
-        { value: "sunset-red", label: "Sunset Red" },
-        { value: "forest-green", label: "Forest Green" },
-        { value: "lavender-purple", label: "Lavender Purple", disabled: true },
-        { value: "mustard-yellow", label: "Mustard Yellow" },
-        { value: "slate-gray", label: "Slate Gray" },
-        { value: "neon-green", label: "Neon Green" },
-        { value: "coral-reef", label: "Coral Reef" },
-        { value: "midnight-blue", label: "Midnight Blue" },
-        { value: "crimson-red", label: "Crimson Red" },
-        { value: "mint-green", label: "Mint Green" },
-        { value: "pastel-pink", label: "Pastel Pink" },
-        { value: "golden-yellow", label: "Golden Yellow" },
-        { value: "deep-purple", label: "Deep Purple" },
-        { value: "turquoise-blue", label: "Turquoise Blue" },
-        { value: "burnt-orange", label: "Burnt Orange" },
-    ];
+    const plugin = getPlugin();
+    const data = getData();
+
+    const providers = data.getConfiguredProviders();
+
+    const modelQueries = providers.map((provider) =>
+        modelQuery(provider, plugin),
+    );
+
+    const availableModels = $derived.by(() => {
+        const out: ChatModel[] = [];
+        providers.forEach((provider, idx) => {
+            const models: string[] = modelQueries[idx].data ?? [];
+            const confModels = data.getGenModels(provider);
+            for (const [modelName, modelConfig] of confModels.entries()) {
+                if (models.includes(modelName)) {
+                    out.push({ model: modelName, provider, modelConfig });
+                }
+            }
+        });
+        return out;
+    });
+
+    const modelOptions = $derived.by(() =>
+        availableModels.map((m) => ({
+            value: `${m.provider}:${m.model}`,
+            label: m.model,
+            chatModel: m,
+        })),
+    );
 
     let value = $state<string>("");
     const selectedLabel = $derived(
         value
-            ? themes.find((theme) => theme.value === value)?.label
-            : "Select a theme",
+            ? (modelOptions.find((o) => o.value === value)?.label ??
+                  "Select a model")
+            : "Select a model",
     );
+
+    // Initialize from stored default chat model or first available
+    let _initialized = $state(false);
+    $effect(() => {
+        if (_initialized) return;
+        const opts = modelOptions;
+        if (!opts.length) return;
+
+        const sel = data.getDefaultChatModel();
+        if (sel) {
+            const key = `${sel.provider}:${sel.model}`;
+            if (opts.some((o) => o.value === key)) {
+                value = key;
+                _initialized = true;
+                return;
+            }
+        }
+        value = opts[0].value;
+        data.setDefaultChatModel(opts[0].chatModel as ChatModel);
+        _initialized = true;
+    });
+
+    function onValueChange(v: string) {
+        value = v;
+        const opt = modelOptions.find((o) => o.value === v);
+        if (opt) data.setDefaultChatModel(opt.chatModel as ChatModel);
+    }
 </script>
 
-<Select.Root type="single" onValueChange={(v) => (value = v)} items={themes}>
+<Select.Root type="single" items={modelOptions} {onValueChange}>
     <Select.Trigger class="!pr-[6px] !pl-3 items-center h-30">
         <div class="flex h-4">{selectedLabel}</div>
         <div class="flex items-center h-4 pl-2 ml-auto">
@@ -52,15 +95,35 @@
                 <Icon name="chevron-up" />
             </Select.ScrollUpButton>
             <Select.Viewport class="p-1">
-                {#each themes as theme, i (i + theme.value)}
+                {#each modelOptions as opt, i (i + opt.value)}
                     <Select.Item
-                        class="rounded-button data-highlighted:bg-muted outline-hidden data-disabled:opacity-50 flex h-10 w-full select-none items-center py-3 pl-5 pr-1.5 text-sm capitalize"
-                        value={theme.value}
-                        label={theme.label}
-                        disabled={theme.disabled}
+                        class="rounded-button data-highlighted:bg-muted outline-hidden flex h-10 w-full select-none items-center py-3 pl-5 pr-1.5 text-sm"
+                        value={opt.value}
+                        label={opt.label}
                     >
                         {#snippet children({ selected })}
-                            {theme.label}
+                            {#if opt.chatModel.provider === "OpenAI"}
+                                <OpenAILogo
+                                    style={"fill: var(--text-normal)"}
+                                    height={16}
+                                    width={16}
+                                />
+                            {:else if opt.chatModel.provider === "Anthropic"}
+                                <AnthropicLogo
+                                    style={"fill: var(--text-normal)"}
+                                    height={16}
+                                    width={16}
+                                />
+                            {:else if opt.chatModel.provider === "Ollama"}
+                                <OllamaLogo
+                                    style={"fill: var(--text-normal)"}
+                                    height={16}
+                                    width={16}
+                                />
+                            {:else}
+                                <Icon name="sparkles" size="16px" />
+                            {/if}
+                            <span class="ml-2">{opt.label}</span>
                         {/snippet}
                     </Select.Item>
                 {/each}

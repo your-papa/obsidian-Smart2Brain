@@ -81,7 +81,6 @@
             >
         </div>
     </div>
-
     <div
         class="grid p-3 gap-2 grid-cols-3 border-solid border-x-0 border-t border-b-0 border-[--background-modifier-border]"
     >

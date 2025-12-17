@@ -1,52 +1,63 @@
-import { WorkspaceLeaf, ItemView } from "obsidian";
-
+import { FileView, TFile, WorkspaceLeaf } from "obsidian";
 import ChatViewComponent from "./Chat.svelte";
-import { mount } from "svelte";
+import { mount, unmount } from "svelte";
+import { setCurrentThreadId } from "../../stores/chatStore.svelte";
 import type SecondBrainPlugin from "../../main";
 
-export const VIEW_TYPE_CHAT = "chat-view";
+export const VIEW_TYPE_CHAT = "smart-second-brain-chat";
 
-export class ChatView extends ItemView {
+const deriveThreadId = (file: TFile): string | null => {
+  let threadId = file.basename;
+  if (threadId.includes(" - ")) {
+    const parts = threadId.split(" - ");
+    const dateTimePart = parts[parts.length - 1];
+    threadId = `Chat ${dateTimePart}`;
+  }
+  if (!threadId || threadId === "New Chat") return null;
+  return threadId;
+};
+
+export class ChatView extends FileView {
   plugin!: SecondBrainPlugin;
-  component!: ChatViewComponent;
+  component: any;
 
-  constructor(plugin: SecondBrainPlugin, leaf: WorkspaceLeaf) {
+  // Keep constructor signature stable for current registrations
+  constructor(leaf: WorkspaceLeaf, plugin: SecondBrainPlugin) {
     super(leaf);
     this.plugin = plugin;
-    this.icon = "message-square";
-    this.contentEl.style.paddingTop = "0";
   }
+
   getViewType() {
     return VIEW_TYPE_CHAT;
   }
 
-  getViewData(): string {
-    return "hii";
+  getDisplayText() {
+    if (this.file) return this.file.basename;
+    return "Smart Second Brain";
   }
 
-  getDisplayText(): string {
-    return "Smart Chat";
+  getIcon() {
+    return "message-square";
   }
 
-  setViewData(data: string, clear: boolean): void {
-    if (clear) {
-      this.clear();
-    }
-  }
-  clear(): void {
-    {
-    }
+  async onLoadFile(file: TFile): Promise<void> {
+    await super.onLoadFile(file);
+    const threadId = deriveThreadId(file);
+    setCurrentThreadId(threadId);
   }
 
-  protected onOpen(): Promise<void> {
-    mount(ChatViewComponent, {
+  protected async onOpen(): Promise<void> {
+    console.log("ChatView onOpen");
+    this.component = mount(ChatViewComponent, {
       target: this.contentEl,
       props: {},
     });
     return super.onOpen();
   }
 
-  protected onClose(): Promise<void> {
-    return super.onClose();
+  async onClose() {
+    setCurrentThreadId(null);
+    super.onClose();
+    if (this.component) unmount(this.component);
   }
 }

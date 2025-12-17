@@ -1,11 +1,5 @@
-import {
-  OllamaProvider,
-  OpenAIProvider,
-  type GenModelConfig,
-  type RegisteredProvider,
-} from "papa-ts";
-import SecondBrainPlugin, { type PluginData } from "../main";
-
+import type { RegisteredProvider } from "../types/providers";
+import SecondBrainPlugin from "../main";
 import { createQuery } from "@tanstack/svelte-query";
 
 export const providerState: Record<RegisteredProvider, boolean> = $state({
@@ -49,9 +43,7 @@ export function modelQuery(
   return createQuery(() => ({
     queryKey: ["models", provider],
     queryFn: async () => {
-      return await plugin.papa.providerRegistry
-        .getProvider(provider)
-        .getModels();
+      return await ["Models"];
     },
   }));
 }

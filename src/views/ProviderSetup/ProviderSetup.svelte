@@ -6,7 +6,7 @@
     import Button from "../../components/base/Button.svelte";
     import type { ProviderSetupModal } from "./ProviderSetup";
     import { getData } from "../../stores/dataStore.svelte";
-    import { createQuery, QueryClientProvider } from "@tanstack/svelte-query";
+    import { createQuery } from "@tanstack/svelte-query";
     import type SecondBrainPlugin from "../../main";
     import ProviderIcon from "../../components/icons/ProviderIcon.svelte";
     import { mount, onMount } from "svelte";

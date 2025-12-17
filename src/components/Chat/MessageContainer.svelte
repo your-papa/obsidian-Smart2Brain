@@ -1,6 +1,7 @@
 <script lang="ts">
-    import { render } from "svelte/server";
-    import { icon, renderMarkdown } from "../../utils/utils";
+    import { icon } from "../../utils/utils";
+    import { createMarkdownRenderer } from "../../utils/markdownHelper";
+    import { getPlugin } from "../../stores/state.svelte";
     import {
         AssistantState,
         type AssistantMessage,
@@ -24,6 +25,26 @@
         const getMessagesFunction = session?.getMessages();
         return getMessagesFunction;
     });
+
+    const markdownRenderer = (node: HTMLElement, content: string) => {
+        const plugin = getPlugin();
+        const renderer = createMarkdownRenderer({
+            app: plugin.app,
+            container: node,
+            sourcePath: plugin.app.workspace.getActiveFile()?.path ?? "",
+            component: plugin,
+            content,
+        });
+
+        return {
+            update(value: string) {
+                renderer.update(value);
+            },
+            destroy() {
+                renderer.destroy();
+            },
+        };
+    };
 
     function renderAssitantAnswer(assistantAnswer: AssistantMessage) {
         if (assistantAnswer.state === AssistantState.cancelled) {
@@ -53,6 +74,21 @@
             console.log(id);
         }
     }
+
+    function formatToolInput(
+        input: Record<string, unknown> | null | undefined,
+    ): { key: string; value: string }[] {
+        if (!input) return [];
+        return Object.entries(input).map(([key, value]) => ({
+            key,
+            value:
+                typeof value === "string"
+                    ? value
+                    : value === null || value === undefined
+                      ? ""
+                      : JSON.stringify(value),
+        }));
+    }
 </script>
 
 <div class="flex-1 gap-1 mb-2">
@@ -60,7 +96,7 @@
         <div class="group mr-2 flex flex-col items-end gap-2 mb-2">
             <div
                 class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[--text-selection] px-4 py-2 [&>p]:m-0"
-                use:renderMarkdown={messagePair.userMessage.content}
+                use:markdownRenderer={messagePair.userMessage.content}
             ></div>
 
             <div
@@ -112,11 +148,73 @@
             {:else}
                 <div
                     class="[&>p]:m-0"
-                    use:renderMarkdown={renderAssitantAnswer(
+                    use:markdownRenderer={renderAssitantAnswer(
                         messagePair.assistantMessage,
                     )}
                 ></div>
             {/if}
+
+            {#if messagePair.assistantMessage.toolCalls?.length}
+                <div
+                    class="flex flex-col gap-2 rounded border border-[var(--background-modifier-border)] bg-[var(--background-secondary)] p-2"
+                >
+                    <div class="text-xs font-semibold text-[var(--text-muted)]">
+                        Tools
+                    </div>
+                    {#each messagePair.assistantMessage.toolCalls as toolCall (toolCall.id)}
+                        <div
+                            class="rounded border border-[var(--background-modifier-border-hover)] bg-[var(--background-primary)] p-2 text-xs space-y-1"
+                        >
+                            <div class="flex items-center gap-2">
+                                <span class="font-semibold"
+                                    >{toolCall.name}</span
+                                >
+                                <span
+                                    class="uppercase tracking-wide text-[10px]"
+                                >
+                                    {toolCall.status}
+                                </span>
+                                {#if toolCall.id}
+                                    <span
+                                        class="text-[10px] opacity-60 truncate"
+                                    >
+                                        {toolCall.id}
+                                    </span>
+                                {/if}
+                            </div>
+
+                            {#if formatToolInput(toolCall.input).length > 0}
+                                <div class="space-y-0.5">
+                                    <div class="font-semibold">Input</div>
+                                    {#each formatToolInput(toolCall.input) as item (item.key)}
+                                        <div class="flex gap-2">
+                                            <span
+                                                class="text-[10px] uppercase tracking-wide"
+                                            >
+                                                {item.key}
+                                            </span>
+                                            <span class="break-words"
+                                                >{item.value}</span
+                                            >
+                                        </div>
+                                    {/each}
+                                </div>
+                            {/if}
+
+                            {#if toolCall.output !== undefined}
+                                <div class="space-y-0.5">
+                                    <div class="font-semibold">Output</div>
+                                    <pre
+                                        class="whitespace-pre-wrap break-words text-[11px]">
+{JSON.stringify(toolCall.output, null, 2)}
+                                    </pre>
+                                </div>
+                            {/if}
+                        </div>
+                    {/each}
+                </div>
+            {/if}
+
             {#if !(messagePair.assistantMessage.state === AssistantState.streaming)}
                 <div
                     class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
