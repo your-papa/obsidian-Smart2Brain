@@ -1,10 +1,18 @@
 import {
-  Agent,
-  ProviderRegistry,
-  type ThreadSnapshot,
-  LangSmithTelemetry,
-  type Telemetry,
+	Agent,
+	ProviderRegistry,
+	type ThreadSnapshot,
+	LangSmithTelemetry,
+	type Telemetry,
+	type BuiltInProviderOptions,
+	ProviderAuthError,
+	ProviderEndpointError,
+	ProviderRegistryError,
+	type ThreadMessage,
+	type ChooseModelParams,
+	type ThreadHistory,
 } from "papa-ts";
+import { normalizePath } from "obsidian";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import { createSearchNotesTool } from "../tools/searchNotes";
 import { createGetAllTagsTool } from "../tools/getAllTags";
@@ -14,443 +22,487 @@ import { createReadNoteTool } from "../tools/readNote";
 import { createSystemPrompt } from "./prompts";
 import { createObsidianFetch } from "../utils/obsidianFetch";
 import { getData } from "../stores/dataStore.svelte";
+import type { RegisteredProvider } from "../types/providers";
 import type SecondBrainPlugin from "../main";
+import type { ChatModel } from "../stores/chatStore.svelte";
+import { createThreadId } from "../utils/threadId";
+
+export type ValidationResult =
+	| { success: true }
+	| { success: false; message: string };
 
 declare const MultiServerMCPClient: any;
 
+/**
+ * Maps the UI ChatModel type to papa-ts ChooseModelParams.
+ */
+function toChooseModelParams(model: ChatModel): ChooseModelParams {
+	return {
+		provider: model.provider,
+		chatModel: model.model,
+		options: model.modelConfig,
+	};
+}
+
 export class AgentManager {
-  private plugin: SecondBrainPlugin;
-  private agent: Agent | null = null;
-  private chatManager: ObsidianChatManager;
+	private plugin: SecondBrainPlugin;
+	private agent: Agent | null = null;
+	private chatManager: ObsidianChatManager;
+	private registry: ProviderRegistry;
 
-  constructor(plugin: SecondBrainPlugin) {
-    this.plugin = plugin;
-    this.chatManager = new ObsidianChatManager(plugin);
-  }
+	constructor(plugin: SecondBrainPlugin) {
+		this.plugin = plugin;
+		this.chatManager = new ObsidianChatManager(plugin);
+		this.registry = new ProviderRegistry();
+	}
 
-  private async configureRegistry(
-    registry: ProviderRegistry,
-    provider: string,
-    apiKey: string,
-  ): Promise<{ providerName: string; modelOptions: Record<string, any> }> {
-    let providerName: string = provider;
-    let modelOptions: Record<string, any> = {};
+	/**
+	 * Configures a specific provider on the given registry.
+	 */
+	private async configureProviderOnRegistry(
+		registry: ProviderRegistry,
+		provider: RegisteredProvider,
+		options: BuiltInProviderOptions,
+	): Promise<void> {
+		switch (provider) {
+			case "OpenAI":
+				await registry.useOpenAI(options);
+				break;
+			case "CustomOpenAI":
+				await registry.useOpenAI(options);
+				break;
+			case "Anthropic":
+				await registry.useAnthropic(options);
+				break;
+			case "Ollama":
+				await registry.useOllama(options);
+				break;
+			default:
+				throw new Error(`Unsupported provider: ${provider}`);
+		}
+	}
 
-    if (apiKey || provider === "ollama") {
-      try {
-        if (provider === "openai" && apiKey) {
-          await registry.useOpenAI({ apiKey });
-          modelOptions = { apiKey };
-          providerName = "openai";
-        } else if (provider === "anthropic" && apiKey) {
-          await registry.useAnthropic({ apiKey });
-          modelOptions = { apiKey };
-          providerName = "anthropic";
-        } else if (provider === "ollama") {
-          const baseUrl = apiKey || "http://localhost:11434";
-          await registry.useOllama({ baseUrl });
-          modelOptions = { baseUrl };
-          providerName = "ollama";
-        } else if (provider === "sap-ai-core" && apiKey) {
-          await registry.useSapAICore({ apiKey });
-          modelOptions = { apiKey };
-          providerName = "sap-ai-core";
-        } else if (provider === "custom" && apiKey) {
-          // Default to OpenAI structure for custom
-          await registry.useOpenAI({ apiKey });
-          modelOptions = { apiKey };
-          providerName = "openai";
-        }
-      } catch (error) {
-        console.error("Error configuring provider:", error);
-        throw error;
-      }
-    }
-    return { providerName, modelOptions };
-  }
+	/**
+	 * Configures a provider on the main registry.
+	 */
+	private async configureRegistry(
+		provider: RegisteredProvider,
+		options: BuiltInProviderOptions,
+	): Promise<void> {
+		await this.configureProviderOnRegistry(this.registry, provider, options);
+	}
 
-  private configureTelemetry(): Telemetry | undefined {
-    const data = getData();
-    if (data.enableLangSmith && data.langSmithApiKey) {
-      try {
-        const telemetry = new LangSmithTelemetry({
-          projectName: data.langSmithProject || "obsidian-agent",
-          apiKey: data.langSmithApiKey,
-          endpoint: data.langSmithEndpoint || "https://api.smith.langchain.com",
-          flushOnComplete: true,
-        });
-        console.log("Smart Second Brain: LangSmith telemetry enabled");
-        return telemetry;
-      } catch (e) {
-        console.error(
-          "Smart Second Brain: Failed to initialize LangSmith telemetry",
-          e,
-        );
-      }
-    }
-    return undefined;
-  }
+	/**
+	 * Tests and configures a provider on the actual registry.
+	 * Returns a ValidationResult indicating success or failure with a message.
+	 */
+	async testProviderConfig(
+		provider: RegisteredProvider,
+		options: BuiltInProviderOptions,
+	): Promise<ValidationResult> {
+		try {
+			await this.configureProviderOnRegistry(this.registry, provider, options);
+			return { success: true };
+		} catch (error) {
+			if (error instanceof ProviderAuthError) {
+				return { success: false, message: "Invalid API key" };
+			}
+			if (error instanceof ProviderEndpointError) {
+				return {
+					success: false,
+					message: "Invalid base URL or endpoint unreachable",
+				};
+			}
+			if (error instanceof ProviderRegistryError) {
+				return { success: false, message: error.message };
+			}
+			return {
+				success: false,
+				message: "Provider configuration failed",
+			};
+		}
+	}
 
-  private async bindTools(agent: Agent) {
-    const searchNotesTool = createSearchNotesTool(this.plugin.app);
-    const getAllTagsTool = createGetAllTagsTool(this.plugin.app);
-    const executeDataviewTool = createExecuteDataviewTool(this.plugin.app);
-    const getPropertiesTool = createGetPropertiesTool(this.plugin.app);
-    const readNoteTool = createReadNoteTool(this.plugin.app);
+	private configureTelemetry(): Telemetry | undefined {
+		const data = getData();
+		if (data.enableLangSmith && data.langSmithApiKey) {
+			try {
+				const telemetry = new LangSmithTelemetry({
+					projectName: data.langSmithProject || "obsidian-agent",
+					apiKey: data.langSmithApiKey,
+					endpoint: data.langSmithEndpoint || "https://api.smith.langchain.com",
+					flushOnComplete: true,
+				});
+				console.log("Smart Second Brain: LangSmith telemetry enabled");
+				return telemetry;
+			} catch (e) {
+				console.error(
+					"Smart Second Brain: Failed to initialize LangSmith telemetry",
+					e,
+				);
+			}
+		}
+		return undefined;
+	}
 
-    const tools: any[] = [
-      searchNotesTool,
-      getAllTagsTool,
-      executeDataviewTool,
-      getPropertiesTool,
-      readNoteTool,
-    ];
+	private async bindTools(agent: Agent) {
+		const searchNotesTool = createSearchNotesTool(this.plugin.app);
+		const getAllTagsTool = createGetAllTagsTool(this.plugin.app);
+		const executeDataviewTool = createExecuteDataviewTool(this.plugin.app);
+		const getPropertiesTool = createGetPropertiesTool(this.plugin.app);
+		const readNoteTool = createReadNoteTool(this.plugin.app);
 
-    // Load MCP tools if configured (use getData())
-    const data = getData();
-    if (data.mcpServers && Object.keys(data.mcpServers).length > 0) {
-      try {
-        console.log(
-          "Smart Second Brain: Initializing MCP client...",
-          data.mcpServers,
-        );
+		const tools: any[] = [
+			searchNotesTool,
+			getAllTagsTool,
+			executeDataviewTool,
+			getPropertiesTool,
+			readNoteTool,
+		];
 
-        // HACK: Monkey patch the global fetch for the entire lifecycle
-        if (!(window as any)._originalFetch) {
-          (window as any)._originalFetch = window.fetch;
-          window.fetch = createObsidianFetch(
-            (window as any)._originalFetch,
-          ) as any;
-        }
+		// Load MCP tools if configured (use getData())
+		const data = getData();
+		if (data.mcpServers && Object.keys(data.mcpServers).length > 0) {
+			try {
+				console.log(
+					"Smart Second Brain: Initializing MCP client...",
+					data.mcpServers,
+				);
 
-        try {
-          const mcpClient = new MultiServerMCPClient(data.mcpServers);
-          const mcpTools = await mcpClient.getTools();
-          console.log(
-            `Smart Second Brain: Loaded ${mcpTools.length} MCP tools`,
-          );
-          tools.push(...mcpTools);
-        } catch (e) {
-          console.error("Failed to get MCP tools", e);
-        }
-      } catch (error) {
-        console.error("Smart Second Brain: Failed to load MCP tools", error);
-      }
-    }
+				// HACK: Monkey patch the global fetch for the entire lifecycle
+				if (!(window as any)._originalFetch) {
+					(window as any)._originalFetch = window.fetch;
+					window.fetch = createObsidianFetch(
+						(window as any)._originalFetch,
+					) as any;
+				}
 
-    agent.bindTools(tools);
-  }
+				try {
+					const mcpClient = new MultiServerMCPClient(data.mcpServers);
+					const mcpTools = await mcpClient.getTools();
+					console.log(
+						`Smart Second Brain: Loaded ${mcpTools.length} MCP tools`,
+					);
+					tools.push(...mcpTools);
+				} catch (e) {
+					console.error("Failed to get MCP tools", e);
+				}
+			} catch (error) {
+				console.error("Smart Second Brain: Failed to load MCP tools", error);
+			}
+		}
 
-  private async ensureAgent(): Promise<Agent> {
-    console.log(this.agent);
-    this.agent = null;
-    if (!this.agent) {
-      await this.initialize();
-    }
+		agent.bindTools(tools);
+	}
 
-    if (!this.agent) {
-      throw new Error("Agent initialization failed.");
-    }
-    return this.agent;
-  }
+	private async ensureAgent(): Promise<Agent> {
+		if (!this.agent) {
+			await this.initialize();
+		}
 
-  async initialize(): Promise<void> {
-    // Load chats
-    await this.chatManager.load();
+		if (!this.agent) {
+			throw new Error("Agent initialization failed.");
+		}
+		return this.agent;
+	}
 
-    // Cleanup existing agent if any
-    if (this.agent) {
-      this.agent = null;
-    }
+	async initialize(): Promise<void> {
+		// Load chats
+		await this.chatManager.load();
 
-    try {
-      const pluginData = getData();
-      pluginData.getConfiguredProviders().forEach((provider) => {
-        registry.listProviders().forEach((providerName) => {
-          this.configureRegistry(
-            registry,
-            providerName,
-            pluginData.getProviderAuthParams(provider),
-          );
-        });
-      });
-    } catch (e) {
-      console.warn(
-        "Smart Second Brain: Failed to derive default model from data store",
-        e,
-      );
-    }
+		// Cleanup existing agent if any
+		this.agent = null;
 
-    console.log("Smart Second Brain: Initializing agent...");
+		// Reset registry for fresh configuration
+		this.registry = new ProviderRegistry();
 
-    // Create provider registry
-    const registry = new ProviderRegistry();
+		const pluginData = getData();
 
-    let providerName: string;
-    let modelOptions: Record<string, any>;
+		// Configure all providers - use for...of to properly await each
+		const configuredProviders = pluginData.getConfiguredProviders();
+		for (const provider of configuredProviders) {
+			const options = pluginData.getProviderAuthParams(provider);
+			await this.configureRegistry(provider, options);
+		}
 
-    registry.registerProvider();
+		console.log(this.registry);
 
-    try {
-      const config = await this.configureRegistry(
-        registry,
-        "ollama",
-        "http://localhost:11434",
-      );
-      providerName = config.providerName;
-      modelOptions = config.modelOptions;
-    } catch (error) {
-      // Error is already logged in configureRegistry
-      return;
-    }
+		// Configure Telemetry (use getData())
+		const telemetry = this.configureTelemetry();
 
-    // Configure Telemetry (use getData())
-    const telemetry = this.configureTelemetry();
+		// Create agent with checkpoint storage
+		// The chatManager acts as both checkpointer and thread store
+		this.agent = new Agent({
+			registry: this.registry,
+			checkpointer: this.chatManager,
+			threadStore: this.chatManager.asThreadStore(),
+			telemetry,
+		});
 
-    // Create agent with checkpoint storage
-    // The chatManager acts as both checkpointer and thread store
-    const agent = new Agent({
-      registry,
-      checkpointer: this.chatManager,
-      threadStore: this.chatManager.asThreadStore(),
-      telemetry,
-    });
+		// Check for available plugins to adjust prompt capabilities
+		// @ts-ignore - Dynamic access to plugins
+		const hasChartsPlugin =
+			this.plugin.app.plugins?.enabledPlugins?.has("obsidian-charts");
 
-    // Check for available plugins to adjust prompt capabilities
-    // @ts-ignore - Dynamic access to plugins
-    const hasChartsPlugin =
-      this.plugin.app.plugins?.enabledPlugins?.has("obsidian-charts");
+		// Set prompt
+		this.agent.setPrompt(createSystemPrompt(hasChartsPlugin));
 
-    // Set prompt
-    agent.setPrompt(createSystemPrompt(hasChartsPlugin));
+		const defaultModel = pluginData.getDefaultChatModel();
+		if (defaultModel) {
+			await this.agent.chooseModel(toChooseModelParams(defaultModel));
+		}
 
-    // Bind tools
-    await this.bindTools(agent);
+		// Bind tools
+		await this.bindTools(this.agent);
+	}
 
-    // If we have configuration, try to choose the model
-    if ((apiKey || provider === "ollama") && modelName) {
-      try {
-        console.log("Smart Second Brain: Choosing model...", {
-          provider: providerName,
-          chatModel: modelName,
-        });
-        await agent.chooseModel({
-          provider: providerName,
-          chatModel: modelName,
-          options: modelOptions,
-        });
-        console.log("Smart Second Brain: Model chosen successfully");
-      } catch (chooseModelError) {
-        console.error(
-          "Smart Second Brain: Error choosing model:",
-          chooseModelError,
-        );
-      }
-    } else {
-      console.warn(
-        "Smart Second Brain: API key or model name not configured. Agent initialized for history reading only.",
-      );
-    }
+	async *streamQuery(
+		query: string,
+		threadId: string = "default-thread",
+		signal?: AbortSignal,
+	): AsyncGenerator<
+		| { type: "token"; token: string }
+		| {
+				type: "tool_start";
+				toolCallId: string;
+				toolName: string;
+				input: unknown;
+		  }
+		| {
+				type: "tool_end";
+				toolCallId: string;
+				toolName: string;
+				output: unknown;
+		  }
+		| { type: "result"; result: any },
+		void,
+		unknown
+	> {
+		const agent = await this.ensureAgent();
 
-    this.agent = agent;
-  }
+		const defaultModel = getData().getDefaultChatModel();
+		if (defaultModel) {
+			await agent.chooseModel(toChooseModelParams(defaultModel));
+		} else {
+			throw new Error("No chat model configured");
+		}
 
-  async runQuery(
-    query: string,
-    threadId: string = "default-thread",
-  ): Promise<string> {
-    const agent = await this.ensureAgent();
+		try {
+			for await (const chunk of agent.streamTokens({
+				query,
+				threadId,
+				signal,
+			})) {
+				// Check if aborted before yielding
+				if (signal?.aborted) {
+					break;
+				}
+				switch (chunk.type) {
+					case "token":
+						yield { type: "token", token: chunk.token };
+						break;
+					case "tool_start":
+						yield {
+							type: "tool_start",
+							toolCallId: chunk.toolCallId,
+							toolName: chunk.toolName,
+							input: chunk.input,
+						};
+						break;
+					case "tool_end":
+						yield {
+							type: "tool_end",
+							toolCallId: chunk.toolCallId,
+							toolName: chunk.toolName,
+							output: chunk.output,
+						};
+						break;
+					case "result":
+						yield { type: "result", result: chunk.result };
+						break;
+					default:
+						break;
+				}
+			}
+		} catch (error) {
+			// Don't log abort errors as they're expected during cancellation
+			if (error instanceof Error && error.name === "AbortError") {
+				return;
+			}
+			console.error("Smart Second Brain: Error streaming query", error);
+			throw error;
+		} finally {
+			// Cleanup logging - stream completed or aborted
+			if (signal?.aborted) {
+				console.log("Smart Second Brain: Stream aborted by user");
+			}
+		}
+	}
 
-    try {
-      const result = await agent.run({
-        query,
-        threadId,
-      });
+	async getAvailableModels(
+		providerName: RegisteredProvider,
+	): Promise<string[]> {
+		try {
+			if (!providerName) return [];
 
-      if (typeof result.response === "string") {
-        return result.response;
-      } else if (result.response !== undefined && result.response !== null) {
-        return String(result.response);
-      } else {
-        return "No response received from agent.";
-      }
-    } catch (error) {
-      console.error("Smart Second Brain: Error running query", error);
-      throw error;
-    }
-  }
+			return this.registry.listChatModels(providerName);
+		} catch (error) {
+			console.error(
+				"Smart Second Brain: Error fetching available models",
+				error,
+			);
+			return [];
+		}
+	}
 
-  async *streamQuery(
-    query: string,
-    threadId: string = "default-thread",
-  ): AsyncGenerator<
-    {
-      type: "token" | "result";
-      token?: string;
-      result?: any;
-      messages?: any[];
-    },
-    void,
-    unknown
-  > {
-    const agent = await this.ensureAgent();
-    await this.agent?.chooseModel({
-      provider: "Ollama",
-      chatModel: "ministral-3:3b",
-    });
-    console.log(agent);
+	async getThreadHistory(threadId: string): Promise<ThreadHistory | null> {
+		try {
+			// Try to use agent if available to get history from checkpoint (more robust)
+			if (this.agent) {
+				try {
+					const history = await this.agent.getThreadHistory(threadId);
+					if (history) {
+						return history;
+					}
+				} catch (e) {
+					console.warn("Failed to get history from agent", e);
+				}
+			}
+			return null;
+		} catch (error) {
+			console.error("Smart Second Brain: Error fetching thread history", error);
+			return null;
+		}
+	}
 
-    try {
-      for await (const chunk of agent.streamTokens({
-        query,
-        threadId,
-      })) {
-        switch (chunk.type) {
-          case "token":
-            yield {
-              type: "token",
-              token: chunk.token,
-              messages: (chunk as any).messages,
-            };
-            break;
-          case "result":
-            yield { type: "result", result: chunk.result };
-            break;
-          default:
-            break;
-        }
-      }
-    } catch (error) {
-      console.error("Smart Second Brain: Error streaming query", error);
-      throw error;
-    }
-  }
+	async getAllThreads(): Promise<ThreadSnapshot[]> {
+		await this.chatManager.load();
+		return this.chatManager.listThreads();
+	}
 
-  async getAvailableModels(
-    provider: string,
-    apiKey: string,
-  ): Promise<string[]> {
-    try {
-      const registry = new ProviderRegistry();
-      const { providerName } = await this.configureRegistry(
-        registry,
-        provider,
-        apiKey,
-      );
+	async deleteThread(threadId: string): Promise<void> {
+		await this.chatManager.delete(threadId);
+	}
 
-      if (!providerName) return [];
+	async generateThreadTitle(threadId: string): Promise<void> {
+		const agent = await this.ensureAgent().catch((e) => {
+			console.warn("Agent not initialized, cannot generate title");
+			return null;
+		});
 
-      return registry.listChatModels(providerName);
-    } catch (error) {
-      console.error(
-        "Smart Second Brain: Error fetching available models",
-        error,
-      );
-      return [];
-    }
-  }
+		if (!agent) return;
 
-  async getThreadMessages(threadId: string): Promise<any[]> {
-    try {
-      // Try to use agent if available to get history from checkpoint (more robust)
-      if (this.agent) {
-        try {
-          const history = await this.agent.getThreadHistory(threadId);
-          if (history && history.messages) {
-            return history.messages;
-          }
-        } catch (e) {
-          console.warn("Failed to get history from agent", e);
-        }
-      }
-      return [];
-    } catch (error) {
-      console.error(
-        "Smart Second Brain: Error fetching thread messages",
-        error,
-      );
-      return [];
-    }
-  }
+		try {
+			await agent.generateTitle(threadId);
+			console.log(`Generated title for thread ${threadId}`);
 
-  async getAllThreads(): Promise<ThreadSnapshot[]> {
-    await this.chatManager.load();
-    return this.chatManager.listThreads();
-  }
+			// Wait a bit for the title to be persisted
+			await new Promise((resolve) => setTimeout(resolve, 200));
 
-  async deleteThread(threadId: string): Promise<void> {
-    await this.chatManager.delete(threadId);
-  }
+			// Try multiple ways to get the title:
+			// 1. Read from thread store (may have it in cache)
+			let snapshot = await this.chatManager.read(threadId, true);
+			console.log(`Read snapshot for thread ${threadId}:`, snapshot);
 
-  async generateThreadTitle(threadId: string): Promise<void> {
-    const agent = await this.ensureAgent().catch((e) => {
-      console.warn("Agent not initialized, cannot generate title");
-      return null;
-    });
+			// 2. If not found, try reading directly from in-memory storage
+			if (!snapshot?.title) {
+				const threadData = await this.chatManager.ensureThreadLoaded(threadId);
+				if (threadData?.title) {
+					console.log(`Title found in threadData: "${threadData.title}"`);
+					snapshot = {
+						threadId: threadData.threadId,
+						title: threadData.title,
+						metadata: threadData.metadata,
+						createdAt: threadData.createdAt,
+						updatedAt: threadData.updatedAt,
+					};
+				}
+			}
 
-    if (!agent) return;
+			if (snapshot?.title) {
+				console.log(`Title found: "${snapshot.title}", renaming file...`);
+				await this.chatManager.renameChatFile(threadId, snapshot.title);
+			} else {
+				console.warn(
+					`No title found for thread ${threadId} after generation. Waiting longer and retrying...`,
+				);
+				// Wait longer and try again
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+				snapshot = await this.chatManager.read(threadId, true);
+				if (snapshot?.title) {
+					console.log(
+						`Title found on retry: "${snapshot.title}", renaming file...`,
+					);
+					await this.chatManager.renameChatFile(threadId, snapshot.title);
+				} else {
+					console.error(
+						`Title still not found for thread ${threadId} after retry`,
+					);
+				}
+			}
+		} catch (error) {
+			console.error(`Error generating title for thread ${threadId}:`, error);
+		}
+	}
 
-    try {
-      await agent.generateTitle(threadId);
-      console.log(`Generated title for thread ${threadId}`);
+	cleanup(): void {
+		// Restore original fetch if it was patched
+		if ((window as any)._originalFetch) {
+			window.fetch = (window as any)._originalFetch;
+			delete (window as any)._originalFetch;
+		}
 
-      // Wait a bit for the title to be persisted
-      await new Promise((resolve) => setTimeout(resolve, 200));
+		// Cleanup if needed
+		this.agent = null;
+	}
 
-      // Try multiple ways to get the title:
-      // 1. Read from thread store (may have it in cache)
-      let snapshot = await this.chatManager.read(threadId, true);
-      console.log(`Read snapshot for thread ${threadId}:`, snapshot);
+	async createNewChat(): Promise<void> {
+		const threadId = createThreadId();
+		const now = Date.now();
 
-      // 2. If not found, try reading directly from in-memory storage
-      if (!snapshot?.title) {
-        const threadData = await this.chatManager.ensureThreadLoaded(threadId);
-        if (threadData?.title) {
-          console.log(`Title found in threadData: "${threadData.title}"`);
-          snapshot = {
-            threadId: threadData.threadId,
-            title: threadData.title,
-            metadata: threadData.metadata,
-            createdAt: threadData.createdAt,
-            updatedAt: threadData.updatedAt,
-          };
-        }
-      }
+		const folder = getData().targetFolder;
 
-      if (snapshot?.title) {
-        console.log(`Title found: "${snapshot.title}", renaming file...`);
-        await this.chatManager.renameChatFile(threadId, snapshot.title);
-      } else {
-        console.warn(
-          `No title found for thread ${threadId} after generation. Waiting longer and retrying...`,
-        );
-        // Wait longer and try again
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        snapshot = await this.chatManager.read(threadId, true);
-        if (snapshot?.title) {
-          console.log(
-            `Title found on retry: "${snapshot.title}", renaming file...`,
-          );
-          await this.chatManager.renameChatFile(threadId, snapshot.title);
-        } else {
-          console.error(
-            `Title still not found for thread ${threadId} after retry`,
-          );
-        }
-      }
-    } catch (error) {
-      console.error(`Error generating title for thread ${threadId}:`, error);
-    }
-  }
+		// Ensure folder exists
+		if (!(await this.plugin.app.vault.adapter.exists(folder))) {
+			await this.plugin.app.vault.createFolder(folder);
+		}
 
-  cleanup(): void {
-    // Restore original fetch if it was patched
-    if ((window as any)._originalFetch) {
-      window.fetch = (window as any)._originalFetch;
-      delete (window as any)._originalFetch;
-    }
+		const path = normalizePath(`${folder}/${threadId}.chat`);
 
-    // Cleanup if needed
-    this.agent = null;
-  }
+		// Initialize with valid thread data structure
+		const initialData = {
+			threadId,
+			createdAt: now,
+			updatedAt: now,
+			checkpoints: {},
+			writes: {},
+		};
+
+		// Create file directly and open it
+		const file = await this.plugin.app.vault.create(
+			path,
+			JSON.stringify(initialData, null, 2),
+		);
+		await this.plugin.app.workspace.getLeaf(false).openFile(file);
+	}
+
+	async openLatestChat(): Promise<void> {
+		const threads = await this.chatManager.listThreads();
+
+		if (threads.length === 0) {
+			await this.createNewChat();
+			return;
+		}
+
+		const latestThread = threads[0];
+		const folder = getData().targetFolder;
+		const path = normalizePath(`${folder}/${latestThread.threadId}.chat`);
+		const file = this.plugin.app.vault.getAbstractFileByPath(path);
+
+		if (file) {
+			await this.plugin.app.workspace.getLeaf(false).openFile(file as any);
+		} else {
+			await this.createNewChat();
+		}
+	}
 }
