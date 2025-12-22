@@ -4,7 +4,7 @@
         AnthropicLogo,
         OllamaLogo,
     } from "@selemondev/svgl-svelte";
-    import type { RegisteredProvider } from "papa-ts";
+    import type { RegisteredProvider } from "../../types/providers";
     import GenericAIIcon from "./GenericAIIcon.svelte";
 
     interface Props {
