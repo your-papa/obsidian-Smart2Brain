@@ -1,7 +1,6 @@
 <script lang="ts">
     import { TFolder } from "obsidian";
     import SettingContainer from "../../components/Settings/SettingContainer.svelte";
-    import { type Language } from "papa-ts";
     import ToggleComponent from "../../components/base/Toggle.svelte";
     import ButtonComponent from "../../components/base/Button.svelte";
     import { t } from "svelte-i18n";
@@ -18,20 +17,18 @@
     const pluginData = getData();
     const plugin = getPlugin();
 
+    // MCP servers JSON editing buffer
+    let mcpServersText: string = JSON.stringify(
+        pluginData.mcpServers ?? {},
+        null,
+        2,
+    );
+
     let fuzzySuggestModel = new ExcludeFoldersModal(plugin.app);
 
     function suggestFolders(): TFolder[] {
         return plugin.app.vault.getAllFolders(true);
     }
-
-    $effect(() => {
-        // Keep textarea in sync if mcpServers changed elsewhere
-        mcpServersJson = JSON.stringify(pluginData.mcpServers || {}, null, 2);
-    });
-
-    let mcpServersJson: string = $state(
-        JSON.stringify(pluginData.mcpServers || {}, null, 2),
-    );
 </script>
 
 <ProviderSetup />
@@ -51,22 +48,6 @@
             )}
         onSelected={(path: string) => (pluginData.targetFolder = path)}
         onSubmit={(path: string) => (pluginData.targetFolder = path)}
-    />
-</SettingContainer>
-
-<SettingContainer
-    name={"Assistant Language"}
-    desc={"Choose in which language you want to talk to your assistant"}
->
-    <!-- //TODO  pull languages from prompt template langs-->
-    <Dropdown
-        type="options"
-        dropdown={[
-            { display: "en", value: "en" },
-            { display: "de", value: "de" },
-        ]}
-        onSelect={(value: Language) => (pluginData.assistantLanguage = value)}
-        selected={pluginData.assistantLanguage}
     />
 </SettingContainer>
 
@@ -199,10 +180,10 @@
     >
         <textarea
             class="w-full h-32"
-            bind:value={mcpServersJson}
+            bind:value={mcpServersText}
             onblur={() => {
                 try {
-                    const parsed = JSON.parse(mcpServersJson || "{}");
+                    const parsed = JSON.parse(mcpServersText || "{}");
                     pluginData.mcpServers = parsed;
                 } catch (e) {
                     console.warn("Invalid MCP servers JSON", e);

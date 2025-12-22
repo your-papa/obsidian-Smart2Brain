@@ -7,7 +7,13 @@ import {
 	type CheckpointListOptions,
 } from "@langchain/langgraph-checkpoint";
 import type { RunnableConfig } from "@langchain/core/runnables";
-import { Plugin, debounce, TFile, normalizePath, type DataAdapter } from "obsidian";
+import {
+	Plugin,
+	debounce,
+	TFile,
+	normalizePath,
+	type DataAdapter,
+} from "obsidian";
 import type SecondBrainPlugin from "../main";
 import { type ThreadStore, type ThreadSnapshot } from "papa-ts";
 import { getData } from "../stores/dataStore.svelte";
@@ -55,14 +61,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	// --- File System Helpers ---
 
 	private getChatFolder(): string {
-		// Prefer the new data store (targetFolder). Fallback to legacy v2 setting.
-		try {
-			const data = getData();
-			return data.targetFolder || "Chats";
-		} catch {
-			// @ts-ignore legacy v2 settings
-			return (this.plugin.settings?.chatsFolder as string) || "Chats";
-		}
+		const data = getData();
+		return data.targetFolder;
 	}
 
 	private getIndexPath(): string {
@@ -149,7 +149,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 				this.threadIndex.clear();
 				snapshots.forEach((s) => this.threadIndex.set(s.threadId, s));
 				this.indexLoaded = true;
-				console.log(`ObsidianChatManager: Loaded index with ${this.threadIndex.size} threads`);
+				console.log(
+					`ObsidianChatManager: Loaded index with ${this.threadIndex.size} threads`,
+				);
 			} else {
 				console.log("ObsidianChatManager: Index missing, rebuilding...");
 				await this.rebuildIndex();
@@ -246,6 +248,11 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		};
 	}
 
+	/**
+	 * Creates a new thread and persists it to disk.
+	 * Returns
+	 **/
+
 	private async saveThread(threadId: string) {
 		const data = this.storage.get(threadId);
 		if (!data) return;
@@ -280,7 +287,10 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 	// --- ThreadStore Implementation ---
 
-	async read(threadId: string, forceReload: boolean = false): Promise<ThreadSnapshot | undefined> {
+	async read(
+		threadId: string,
+		forceReload: boolean = false,
+	): Promise<ThreadSnapshot | undefined> {
 		if (!forceReload && this.threadIndex.has(threadId)) {
 			return this.threadIndex.get(threadId);
 		}
@@ -325,7 +335,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 	async listThreads(): Promise<ThreadSnapshot[]> {
 		await this.load();
-		return Array.from(this.threadIndex.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+		return Array.from(this.threadIndex.values()).sort(
+			(a, b) => b.updatedAt - a.updatedAt,
+		);
 	}
 
 	asThreadStore(): ThreadStore {
@@ -361,12 +373,18 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			const entry = threadData.checkpoints[checkpointId];
 			if (!entry) return undefined;
 
+			// For specific checkpoint, also include any error writes from child checkpoints
+			const pendingWrites = this.collectWritesWithErrors(
+				threadData,
+				checkpointId,
+			);
+
 			return {
 				config,
 				checkpoint: entry.checkpoint,
 				metadata: entry.metadata,
 				parentConfig: entry.parentConfig,
-				pendingWrites: (threadData.writes[checkpointId] || []) as any,
+				pendingWrites: pendingWrites as any,
 			};
 		}
 
@@ -379,16 +397,61 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		const latestId = keys[0];
 		const entry = threadData.checkpoints[latestId];
 
+		// Collect writes from the latest checkpoint AND any error writes from subsequent checkpoints
+		const pendingWrites = this.collectWritesWithErrors(threadData, latestId);
+
 		return {
-			config: { ...config, configurable: { ...config.configurable, checkpoint_id: latestId } },
+			config: {
+				...config,
+				configurable: { ...config.configurable, checkpoint_id: latestId },
+			},
 			checkpoint: entry.checkpoint,
 			metadata: entry.metadata,
 			parentConfig: entry.parentConfig,
-			pendingWrites: (threadData.writes[latestId] || []) as any,
+			pendingWrites: pendingWrites as any,
 		};
 	}
 
-	async *list(config: RunnableConfig, options?: CheckpointListOptions): AsyncGenerator<CheckpointTuple> {
+	/**
+	 * Collects pending writes for a checkpoint, including error writes from child checkpoints.
+	 * This is needed because errors are written to a child checkpoint that may not exist in the checkpoints map.
+	 */
+	private collectWritesWithErrors(
+		threadData: ThreadData,
+		checkpointId: string,
+	): PendingWrite[] {
+		const writes: PendingWrite[] = [];
+
+		// Add writes from the specific checkpoint
+		if (threadData.writes[checkpointId]) {
+			writes.push(...threadData.writes[checkpointId]);
+		}
+
+		// Collect ALL error writes from the entire thread
+		// This is needed because each errored user message has its own error in a subsequent checkpoint
+		const allWriteKeys = Object.keys(threadData.writes).sort();
+		for (const writeKey of allWriteKeys) {
+			// Skip the checkpoint we already added
+			if (writeKey === checkpointId) continue;
+
+			const checkpointWrites = threadData.writes[writeKey];
+			for (const write of checkpointWrites) {
+				if (
+					Array.isArray(write) &&
+					(write[0] === "__error__" || write[1] === "__error__")
+				) {
+					writes.push(write);
+				}
+			}
+		}
+
+		return writes;
+	}
+
+	async *list(
+		config: RunnableConfig,
+		options?: CheckpointListOptions,
+	): AsyncGenerator<CheckpointTuple> {
 		const threadId = config.configurable?.thread_id;
 		if (!threadId) return;
 
@@ -408,7 +471,10 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			}
 
 			yield {
-				config: { ...config, configurable: { ...config.configurable, checkpoint_id: key } },
+				config: {
+					...config,
+					configurable: { ...config.configurable, checkpoint_id: key },
+				},
 				checkpoint: entry.checkpoint,
 				metadata: entry.metadata,
 				parentConfig: entry.parentConfig,
@@ -473,7 +539,11 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		};
 	}
 
-	async putWrites(config: RunnableConfig, writes: PendingWrite[], taskId: string): Promise<void> {
+	async putWrites(
+		config: RunnableConfig,
+		writes: PendingWrite[],
+		taskId: string,
+	): Promise<void> {
 		const threadId = config.configurable?.thread_id;
 		const checkpointId = config.configurable?.checkpoint_id;
 
@@ -540,7 +610,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			}
 
 			const sanitizedTitle = this.sanitizeFileName(title);
-			const dateTimePart = threadId.startsWith("Chat ") ? threadId.substring(5) : threadId;
+			const dateTimePart = threadId.startsWith("Chat ")
+				? threadId.substring(5)
+				: threadId;
 			const newFileName = `${sanitizedTitle} - ${dateTimePart}.chat`;
 
 			if (file.name === newFileName) return;

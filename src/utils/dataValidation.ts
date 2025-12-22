@@ -648,6 +648,29 @@ export function validatePluginData(rawData: unknown): ValidationResult {
 	validatedData.includeFF = includeFFValidation.data || DEFAULT_SETTINGS.includeFF;
 	warnings.push(...includeFFValidation.warnings);
 
+	// Validate defaultChatModel
+	if (data.defaultChatModel !== undefined && data.defaultChatModel !== null) {
+		const chatModel = data.defaultChatModel;
+		if (
+			typeof chatModel === "object" &&
+			typeof chatModel.model === "string" &&
+			chatModel.model.length > 0 &&
+			typeof chatModel.provider === "string" &&
+			chatModel.provider.length > 0
+		) {
+			validatedData.defaultChatModel = {
+				model: chatModel.model,
+				provider: chatModel.provider,
+				modelConfig: chatModel.modelConfig ?? {},
+			};
+		} else {
+			warnings.push("defaultChatModel has invalid structure, using default (null)");
+			validatedData.defaultChatModel = DEFAULT_SETTINGS.defaultChatModel;
+		}
+	} else {
+		validatedData.defaultChatModel = DEFAULT_SETTINGS.defaultChatModel;
+	}
+
 	// Ensure we have all required fields
 	const completeData: PluginData = {
 		...DEFAULT_SETTINGS,

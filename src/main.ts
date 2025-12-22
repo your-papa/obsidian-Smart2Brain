@@ -1,138 +1,103 @@
-import { Modal, Notice, Plugin, normalizePath, type ViewState } from "obsidian";
-import { _ } from "svelte-i18n";
+import { AbstractTextComponent, Plugin } from "obsidian";
 import "./lang/i18n";
 import Log from "./logging";
 import "./styles.css";
 import SettingsTab from "./views/Settings/Settings";
 import type { ProviderConfigs } from "./types/providers";
-import {
-  createData,
-  getData,
-  PluginDataStore,
-} from "./stores/dataStore.svelte";
-import { chatLayout, setPlugin } from "./stores/state.svelte";
+import { createData, PluginDataStore } from "./stores/dataStore.svelte";
+import { setPlugin } from "./stores/state.svelte";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/Chat/Chat";
 import { AgentManager } from "./agent/AgentManager";
-import type { SmartSecondBrainSettings } from "../v2/src/settings";
-import { ChatDB } from "./db/chatDbSchema";
 import { type ChatModel, createMessenger } from "./stores/chatStore.svelte";
 import type { UUIDv7 } from "./utils/uuid7Validator";
 import { getQueryClient } from "./utils/query";
 
 export interface PluginData {
-  providerConfig: ProviderConfigs;
-  initialAssistantMessageContent: string;
-  isUsingRag: boolean;
-  isGeneratingChatTitle: boolean;
-  defaultChatModel: ChatModel | null;
-  retrieveTopK: number;
-  assistantLanguage: "de" | "en";
-  excludeFF: Array<string>;
-  includeFF: Array<string>;
-  isExcluding: boolean;
-  defaultChatName: string;
-  targetFolder: string;
-  isChatComfy: boolean;
-  isOnboarded: boolean;
-  debuggingLangchainKey: string;
-  enableLangSmith: boolean;
-  langSmithApiKey: string;
-  langSmithProject: string;
-  langSmithEndpoint: string;
-  mcpServers: Record<string, any>;
-  isQuickSettingsOpen: boolean;
-  isVerbose: boolean;
-  hideIncognitoWarning: boolean;
-  isAutostart: boolean;
-  lastActiveChatId: UUIDv7 | null;
+	providerConfig: ProviderConfigs;
+	initialAssistantMessageContent: string;
+	isUsingRag: boolean;
+	isGeneratingChatTitle: boolean;
+	defaultChatModel: ChatModel | null;
+	retrieveTopK: number;
+	assistantLanguage: "de" | "en";
+	excludeFF: Array<string>;
+	includeFF: Array<string>;
+	isExcluding: boolean;
+	defaultChatName: string;
+	targetFolder: string;
+	isChatComfy: boolean;
+	isOnboarded: boolean;
+	debuggingLangchainKey: string;
+	enableLangSmith: boolean;
+	langSmithApiKey: string;
+	langSmithProject: string;
+	langSmithEndpoint: string;
+	mcpServers: Record<string, any>;
+	isQuickSettingsOpen: boolean;
+	isVerbose: boolean;
+	hideIncognitoWarning: boolean;
+	isAutostart: boolean;
+	lastActiveChatId: UUIDv7 | null;
 }
 export type ProviderName = "ollama" | "openai" | "anthropic" | "sap-ai-core";
 
 export default class SecondBrainPlugin extends Plugin {
-  agentManager!: AgentManager;
-  queryClient = getQueryClient();
-  pluginData!: PluginDataStore;
-  private chatCacheDb!: ChatDB;
+	agentManager!: AgentManager;
+	queryClient = getQueryClient();
+	pluginData!: PluginDataStore;
 
-  async onload() {
-    setPlugin(this);
-    this.pluginData = await createData(this);
+	async onload() {
+		setPlugin(this);
+		this.pluginData = await createData(this);
 
-    // Register file-based chat view and .chat extension (v2 ChatView)
-    this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
-    this.registerExtensions(["chat"], VIEW_TYPE_CHAT);
+		// Register file-based chat view and .chat extension (v2 ChatView)
+		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
+		this.registerExtensions(["chat"], VIEW_TYPE_CHAT);
 
-    const { isVerbose, isAutostart } = this.pluginData;
+		const { isVerbose, isAutostart } = this.pluginData;
 
-    if (this.manifest.dir === undefined) {
-      this.unload();
-      throw Error("Cannot localize plugin directory.");
-    }
+		if (this.manifest.dir === undefined) {
+			this.unload();
+			throw Error("Cannot localize plugin directory.");
+		}
 
-    this.addRibbonIcon("message-square", "New Chat", () =>
-      this.createNewChat(),
-    );
+		this.addRibbonIcon("message-square", "New Chat", () =>
+			this.createNewChat(),
+		);
 
-    this.addCommand({
-      id: "open-chat",
-      name: "Open Chat",
-      icon: "message-square",
-      callback: () => this.openLatestChat(),
-    });
+		this.addCommand({
+			id: "open-chat",
+			name: "Open Chat",
+			icon: "message-square",
+			callback: async () => await this.agentManager.openLatestChat(),
+		});
 
-    this.addSettingTab(new SettingsTab(this));
+		this.addCommand({
+			id: "new-chat",
+			name: "New Chat",
+			icon: "plus",
+			callback: async () => await this.agentManager.createNewChat(),
+		});
 
-    // Initialize Agent Manager (v2)
-    this.agentManager = new AgentManager(this);
-    await this.agentManager.initialize();
-  }
+		this.addSettingTab(new SettingsTab(this));
 
-  async onunload() {
-    Log.info("Unloading plugin");
-    if (this.agentManager) this.agentManager.cleanup();
-  }
+		// Initialize Agent Manager (v2)
+		this.agentManager = new AgentManager(this);
+		await this.agentManager.initialize();
 
-  async createNewChat() {
-    const folder = this.pluginData.targetFolder || "Chats";
-    // Ensure folder exists
-    if (!(await this.app.vault.adapter.exists(folder))) {
-      await this.app.vault.adapter.mkdir(folder);
-    }
-    // Timestamp-based name
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const threadId = `Chat ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-    const path = normalizePath(`${folder}/${threadId}.chat`);
-    const initial = {
-      threadId,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      checkpoints: {},
-      writes: {},
-    };
-    const file = await this.app.vault.create(
-      path,
-      JSON.stringify(initial, null, 2),
-    );
-    await this.app.workspace.getLeaf(false).openFile(file);
-  }
+		createMessenger(this.agentManager);
+	}
 
-  async openLatestChat() {
-    const folder = this.pluginData.targetFolder || "Chats";
-    // Ensure folder exists
-    if (!(await this.app.vault.adapter.exists(folder))) {
-      await this.app.vault.adapter.mkdir(folder);
-    }
-    // Find latest .chat file
-    const files = this.app.vault
-      .getFiles()
-      .filter((f) => f.path.startsWith(folder + "/") && f.extension === "chat")
-      .sort((a, b) => b.stat.mtime - a.stat.mtime);
-    let fileToOpen = files[0];
-    if (!fileToOpen) {
-      await this.createNewChat();
-      return;
-    }
-    await this.app.workspace.getLeaf(false).openFile(fileToOpen);
-  }
+	async onunload() {
+		Log.info("Unloading plugin");
+		if (this.agentManager) this.agentManager.cleanup();
+	}
+
+	async createNewChat() {
+		return this.agentManager.createNewChat();
+	}
+
+	async openLatestChat() {
+		return this.agentManager.openLatestChat();
+	}
 }

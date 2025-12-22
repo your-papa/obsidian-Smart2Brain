@@ -98,21 +98,21 @@ function formatTime(secondsInput: number) {
                         <div
                             aria-label={$t('quick_settings.pause_indexing')}
                             onclick={() => ($papaState = 'indexing-pause')}
-                            class="h-8 py-2 pl-3 pr-2 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
+                            class="h-8 py-2 pl-3 pr-2 transition duration-300 ease-in-out hover:text-text-accent-hover"
                             use:icon={'pause'}
                         ></div>
                     {:else if $papaState === 'indexing-pause'}
                         <div
                             aria-label={$t('quick_settings.resume_indexing')}
                             onclick={() => $plugin.s2b.init()}
-                            class="h-8 py-2 pl-3 pr-2 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
+                            class="h-8 py-2 pl-3 pr-2 transition duration-300 ease-in-out hover:text-text-accent-hover"
                             use:icon={'play'}
                         ></div>
                     {/if}
                     <div
                         aria-label={$t('quick_settings.cancel_indexing')}
                         onclick={() => $plugin.s2b.cancelIndexing()}
-                        class="h-8 py-2 pl-2 pr-3 transition duration-300 ease-in-out hover:text-[var(--text-accent-hover)]"
+                        class="h-8 py-2 pl-2 pr-3 transition duration-300 ease-in-out hover:text-text-accent-hover"
                         use:icon={'stop-circle'}
                     ></div>
                 </div>

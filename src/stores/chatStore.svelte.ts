@@ -1,449 +1,488 @@
 import { getPlugin } from "./state.svelte";
 import { getData } from "./dataStore.svelte";
-import { Notice } from "obsidian";
-import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
+import { Notice, TFile } from "obsidian";
+import {
+	genUUIDv7,
+	dateFromUUIDv7,
+	type UUIDv7,
+} from "../utils/uuid7Validator";
+import type { AgentManager } from "../agent/AgentManager";
+import type { ThreadMessage, ThreadHistory } from "papa-ts";
+
+/** Error info from a failed thread run */
+export interface ThreadError {
+	message: string;
+	name?: string;
+}
 
 /* -----------------------------------------------------------------------------
  * Shared Types
  * ---------------------------------------------------------------------------*/
 
 export enum AssistantState {
-  "idle",
-  "streaming",
-  "success",
-  "error",
-  "cancelled",
+	idle,
+	streaming,
+	success,
+	error,
+	cancelled,
 }
 
 export enum MessageState {
-  "idle",
-  "answering",
-  "editing",
+	idle,
+	answering,
+	editing,
 }
 
-export type ToolCallStatus = "running" | "completed";
+export type ToolCallStatus = "running" | "completed" | "failed";
 
 export interface ToolCallState {
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-  status: ToolCallStatus;
-  output?: unknown;
+	id: string;
+	name: string;
+	input: Record<string, unknown>;
+	status: ToolCallStatus;
+	output?: unknown;
 }
 
 export interface UserMessage {
-  content: string;
-  attachments?: File[];
+	content: string;
+	attachments?: File[];
 }
 
 export interface AssistantMessage {
-  state: AssistantState;
-  content: string;
-  toolCalls?: ToolCallState[];
-  nerd_stats?: {
-    tokensPerSecond: number;
-    retrievedDocsNum: number;
-    genModelConfig: any;
-  };
-  errorCode?: string;
+	state: AssistantState;
+	content: string;
+	toolCalls?: ToolCallState[];
+	nerd_stats?: {
+		tokensPerSecond: number;
+		retrievedDocsNum: number;
+		genModelConfig: any;
+	};
+	errorCode?: string;
 }
 
 export interface MessagePair {
-  id: UUIDv7;
-  userMessage: UserMessage;
-  assistantMessage: AssistantMessage;
+	id: UUIDv7;
+	userMessage: UserMessage;
+	assistantMessage: AssistantMessage;
+	/** The model used to generate the assistant response */
+	model?: ChatModel;
 }
 
 export interface ChatPreview {
-  id: UUIDv7;
-  title: string;
-  lastAccessed: Date;
+	id: UUIDv7;
+	title: string;
+	lastAccessed: Date;
 }
 
 export interface ChatModel {
-  model: string;
-  provider: any;
-  modelConfig: any;
+	model: string;
+	provider: any;
+	modelConfig: any;
 }
 
 /**
- * In-memory representation of a chat with (optionally) loaded messages.
- * For compatibility with legacy code that imported/expected `Chat`.
+ * In-memory representation of a chat with messages.
  */
 export interface ChatRecord {
-  id: UUIDv7;
-  title: string;
-  lastAccessed: Date;
-  messages: MessagePair[];
+	id: string;
+	messages: MessagePair[];
 }
 
-export type Chat = ChatRecord; // Backward compatibility alias
+/* -----------------------------------------------------------------------------
+ * ThreadMessage to MessagePair conversion
+ * ---------------------------------------------------------------------------*/
 
-type StreamRole = "user" | "assistant" | "tool";
-
-interface NormalizedToolCall {
-  id: string;
-  name: string;
-  arguments?: unknown;
-  input?: unknown;
+/**
+ * Extracts text content from a ThreadMessage content field.
+ * Handles both string content and array of content objects.
+ */
+function extractTextContent(content: ThreadMessage["content"]): string {
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		return content
+			.filter(
+				(c): c is { type: "text"; text: string } =>
+					typeof c === "object" && c !== null && (c as any).type === "text",
+			)
+			.map((c) => c.text)
+			.join("");
+	}
+	return "";
 }
 
-interface NormalizedMessage {
-  id?: string;
-  role: StreamRole;
-  content?: unknown;
-  toolCalls?: NormalizedToolCall[];
-  tool_call_id?: string;
-  toolCallId?: string;
-  name?: string;
+/**
+ * Parses tool call arguments into a normalized object format.
+ */
+function normalizeToolInput(raw: unknown): Record<string, unknown> {
+	if (raw === undefined || raw === null) return {};
+	if (typeof raw === "string") {
+		try {
+			const parsed = JSON.parse(raw);
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				return parsed as Record<string, unknown>;
+			}
+			return { value: parsed };
+		} catch {
+			return { input: raw };
+		}
+	}
+	if (Array.isArray(raw)) return { value: raw };
+	if (typeof raw === "object") return raw as Record<string, unknown>;
+	return { value: raw };
 }
+
+/**
+ * Converts an array of ThreadMessage (from papa-ts/LangGraph) into MessagePair[] for UI rendering.
+ *
+ * This function:
+ * 1. Pairs user messages with their corresponding assistant responses
+ * 2. Attaches tool outputs to their parent assistant message's tool calls
+ * 3. Merges consecutive assistant messages (tool calls + final response)
+ * 4. Uses UUIDv7 for message pair IDs (with timestamp extraction capability)
+ * 5. Uses errorCount to distinguish error state from cancelled state
+ */
+export function threadMessagesToMessagePairs(
+	threadMessages: ThreadMessage[],
+	errorCount: number = 0,
+): MessagePair[] {
+	if (!threadMessages || threadMessages.length === 0) return [];
+
+	const messagePairs: MessagePair[] = [];
+
+	// Build a map of tool outputs: tool_call_id -> { content, status }
+	const toolOutputs = new Map<
+		string,
+		{ content: unknown; status: ToolCallStatus }
+	>();
+	for (const msg of threadMessages) {
+		const toolCallId = (msg as any).tool_call_id || (msg as any).toolCallId;
+		if (msg.role === "tool" && toolCallId) {
+			toolOutputs.set(toolCallId, {
+				content: msg.content,
+				status: (msg as any).status === "error" ? "failed" : "completed",
+			});
+		}
+	}
+
+	// Filter to just user and assistant messages
+	const conversationMessages = threadMessages.filter(
+		(msg) => msg.role === "user" || msg.role === "assistant",
+	);
+
+	let i = 0;
+	while (i < conversationMessages.length) {
+		const msg = conversationMessages[i];
+
+		if (msg.role === "user") {
+			// Start a new pair with user message
+			const userContent = extractTextContent(msg.content);
+			// ThreadMessages from LangGraph use UUIDv4, not UUIDv7 - generate fresh UUIDv7
+			const pairId = genUUIDv7();
+
+			// Look ahead for assistant response(s)
+			const assistantMessages: ThreadMessage[] = [];
+			let j = i + 1;
+			while (
+				j < conversationMessages.length &&
+				conversationMessages[j].role === "assistant"
+			) {
+				assistantMessages.push(conversationMessages[j]);
+				j++;
+			}
+
+			// Merge assistant messages
+			let assistantContent = "";
+			const allToolCalls: ToolCallState[] = [];
+
+			for (const assistantMsg of assistantMessages) {
+				// Collect tool calls
+				const rawToolCalls =
+					(assistantMsg as any).tool_calls || (assistantMsg as any).toolCalls;
+				if (Array.isArray(rawToolCalls)) {
+					for (const tc of rawToolCalls) {
+						const toolOutput = toolOutputs.get(tc.id);
+						allToolCalls.push({
+							id: tc.id,
+							name: tc.name,
+							input: normalizeToolInput(tc.arguments || tc.input),
+							status: toolOutput?.status ?? "running",
+							output: toolOutput?.content,
+						});
+					}
+				}
+
+				// Get text content (final response)
+				const textContent = extractTextContent(assistantMsg.content);
+				if (textContent.trim()) {
+					assistantContent = textContent;
+				}
+			}
+
+			// Determine state for the last message pair
+			// If this is the last user message and there's no assistant response:
+			// - If errorCount > 0, it was likely an error (errors prevent responses)
+			// - Otherwise, it was cancelled by user
+			const isLastUserMessage = j >= conversationMessages.length;
+			const hasNoResponse = assistantMessages.length === 0;
+
+			let state: AssistantState;
+
+			if (hasNoResponse && errorCount > 0) {
+				// If there are errors in the thread and this message has no response, it errored
+				state = AssistantState.error;
+				errorCount--; // Consume one error
+			} else if (hasNoResponse) {
+				state = AssistantState.cancelled;
+			} else {
+				state = AssistantState.success;
+			}
+
+			messagePairs.push({
+				id: pairId,
+				userMessage: { content: userContent },
+				assistantMessage: {
+					state,
+					content: assistantContent,
+					toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+				},
+			});
+
+			i = j; // Skip past all the assistant messages we consumed
+		} else {
+			// Orphaned assistant message (no preceding user message)
+			// This shouldn't happen normally, but handle it gracefully
+			const assistantContent = extractTextContent(msg.content);
+			// ThreadMessages from LangGraph use UUIDv4, not UUIDv7 - generate fresh UUIDv7
+			const pairId = genUUIDv7();
+
+			messagePairs.push({
+				id: pairId,
+				userMessage: { content: "" },
+				assistantMessage: {
+					state: AssistantState.success,
+					content: assistantContent,
+				},
+			});
+			i++;
+		}
+	}
+
+	return messagePairs;
+}
+
+/**
+ * Get the timestamp from a MessagePair's UUIDv7 id.
+ */
+export function getMessagePairTimestamp(pair: MessagePair): Date {
+	return dateFromUUIDv7(pair.id);
+}
+
+/* -----------------------------------------------------------------------------
+ * Streaming Types
+ * ---------------------------------------------------------------------------*/
 
 type StreamChunk =
-  | { type: "token"; token?: string; messages?: NormalizedMessage[] }
-  | { type: "result"; result?: { messages?: NormalizedMessage[] } }
-  | { type: "message"; messages: NormalizedMessage[] };
+	| { type: "token"; token: string }
+	| { type: "tool_start"; toolCallId: string; toolName: string; input: unknown }
+	| { type: "tool_end"; toolCallId: string; toolName: string; output: unknown }
+	| { type: "result"; result?: unknown };
 
 /* -----------------------------------------------------------------------------
  * ChatSession
  *  - Ephemeral per-chat runtime state (streaming, abort, reactive messages)
- *  - Uses granular persistence API (addMessage + assistant partial updates)
+ *  - Converts ThreadMessages to MessagePairs on load, then works with MessagePairs only
  * ---------------------------------------------------------------------------*/
-// ChatSession.svelte.ts
 
 export class ChatSession {
-  readonly chatId: UUIDv7;
-  #title = $state<string>("");
-  lastAccessed: Date;
-  // Reactive messages array (mutate with push/splice/etc.)
-  messages: MessagePair[] = $state<MessagePair[]>([]);
+	readonly id: string;
+	// In-memory MessagePairs for UI
+	messages: MessagePair[] = $state<MessagePair[]>([]);
 
-  // Streaming / lifecycle
-  private abortController: AbortController | null = null;
-  private cancelled = false;
+	// Streaming / lifecycle
+	private abortController: AbortController | null = null;
+	private cancelled = false;
 
-  // Reactive UI state (if you read it in the UI)
-  messageState = $state<MessageState>(MessageState.idle);
+	// Reactive UI state
+	messageState = $state<MessageState>(MessageState.idle);
 
-  constructor(initial: ChatRecord) {
-    this.chatId = initial.id;
-    this.#title = initial.title;
-    this.lastAccessed = initial.lastAccessed;
+	constructor(
+		id: string,
+		threadMessages: ThreadMessage[],
+		errorCount: number = 0,
+	) {
+		this.id = id;
+		// Convert once on load, then drop the raw ThreadMessages
+		this.messages = threadMessagesToMessagePairs(threadMessages, errorCount);
+	}
 
-    // Seed messages reactively
-    this.messages = initial.messages.slice();
-  }
+	/** Public snapshot (immutable-ish) */
+	get snapshot(): ChatRecord {
+		return {
+			id: this.id,
+			messages: this.messages.slice(),
+		};
+	}
 
-  /** Public snapshot (immutable-ish) */
-  get snapshot(): ChatRecord {
-    return {
-      id: this.chatId,
-      title: this.#title,
-      lastAccessed: this.lastAccessed,
-      messages: this.messages.slice(),
-    };
-  }
+	/** Find a message pair by id */
+	private findPair(id: UUIDv7): MessagePair | undefined {
+		return this.messages.find((m) => m.id === id);
+	}
 
-  getTitle(): string {
-    return this.#title;
-  }
+	/**
+	 * Send a user message:
+	 *  - Create MessagePair with idle assistant
+	 *  - Kick off streaming process
+	 */
+	async sendMessage(content: string, attachments?: File[]): Promise<UUIDv7> {
+		const pairId = genUUIDv7();
 
-  setTitle(title: string) {
-    if (this.#title !== title) {
-      this.#title = title;
-    }
-  }
+		// Capture the current model at send time
+		const currentModel = getData().getDefaultChatModel() ?? undefined;
 
-  /** Append a message locally (no persistence). */
-  private appendLocal(message: MessagePair) {
-    this.messages.push(message);
-  }
+		const pair: MessagePair = {
+			id: pairId,
+			userMessage: { content, attachments },
+			assistantMessage: { state: AssistantState.idle, content: "" },
+			model: currentModel,
+		};
 
-  /** Lookup a message by id */
-  private findMessage(id: UUIDv7): MessagePair | undefined {
-    return this.messages.find((m) => m.id === id);
-  }
+		this.messages.push(pair);
 
-  private findMessageIndex(id: UUIDv7): number | undefined {
-    const idx = this.messages.findIndex((m) => m.id === id);
-    if (idx === -1) return undefined;
-    return idx;
-  }
-  /** Build chat history excluding the last (incomplete) message. */
-  private buildChatHistory(): string {
-    if (this.messages.length === 0) return "";
-    return this.messages
-      .slice(0, -1)
-      .map(
-        (p) =>
-          `User: ${p.userMessage.content}\nAssistant: ${p.assistantMessage.content}`,
-      )
-      .join("\n\n");
-  }
+		// Stream assistant reply
+		void this.processAssistantReply(pairId, content);
 
-  // async generateNewTitle(content: string, model: ChatModel) {
-  //   const plugin = getPlugin();
-  //   const input = {
-  //     modelConfig: {
-  //       provider: model.provider,
-  //       model: model.model,
-  //       modelConfig: model.modelConfig,
-  //     },
-  //     userQuery: content,
-  //     chatHistory: "",
-  //     lang: "en" as Language,
-  //   };
-  //   this.setTitle(await plugin.papa.generateTitle(input));
-  // }
+		return pairId;
+	}
 
-  async resendMessage(messageId: UUIDv7, model: ChatModel) {
-    const message = this.findMessage(messageId);
-    const idx = this.findMessageIndex(messageId);
-    if (!(message && idx)) return false;
+	/** Abort current streaming (if any) */
+	stopStreaming(): void {
+		if (!this.abortController) {
+			throw new Error("No active stream to abort");
+		}
+		this.cancelled = true;
+		this.abortController.abort();
+	}
 
-    //Todo: is it safe to splice proxy Objs?
-    this.messages.splice(idx);
+	/* -----------------------------------------------------------------------
+	 * Streaming logic
+	 * ---------------------------------------------------------------------*/
 
-    const res = await this.sendMessage(
-      message.userMessage.content,
-      message.userMessage.attachments,
-    );
-    if (res) return true;
-    return false;
-  }
+	private appendToken(message: AssistantMessage, token: string) {
+		if (!token) return;
+		message.content += token;
+	}
 
-  /**
-   * Send a user message:
-   *  - Create MessagePair (assistant idle)
-   *  - Persist via addMessage
-   *  - Kick off streaming process
-   */
-  async sendMessage(
-    content: string,
-    attachments: File[] | undefined,
-  ): Promise<string> {
-    const data = getData();
-    // if (data.isGeneratingChatTitle && this.messages.length === 0) {
-    //   this.generateNewTitle(content, model);
-    // }
-    const id = genUUIDv7();
+	private normalizeToolInput(raw: unknown): Record<string, unknown> {
+		if (raw === undefined || raw === null) return {};
+		if (typeof raw === "string") {
+			try {
+				const parsed = JSON.parse(raw);
+				if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+					return parsed as Record<string, unknown>;
+				}
+				return { value: parsed };
+			} catch {
+				return { input: raw };
+			}
+		}
+		if (Array.isArray(raw)) return { value: raw };
+		if (typeof raw === "object") return raw as Record<string, unknown>;
+		return { value: raw };
+	}
 
-    console.log(id);
-    const pair: MessagePair = {
-      id,
-      userMessage: { content, attachments },
-      assistantMessage: { state: AssistantState.idle, content: "" },
-    };
+	private async processAssistantReply(pairId: UUIDv7, userContent: string) {
+		const pair = this.findPair(pairId);
+		if (!pair) return;
 
-    // Optimistic local update (reactive)
-    this.appendLocal(pair);
+		// Create AbortController for this streaming session
+		this.abortController = new AbortController();
+		const signal = this.abortController.signal;
 
-    // Update global "last active" marker
-    getData().setLastActiveChatId(this.chatId);
+		try {
+			this.messageState = MessageState.answering;
 
-    // Stream assistant reply (fire & forget)
-    void this.processAssistantReply(id, content);
+			// Mark streaming started
+			pair.assistantMessage.state = AssistantState.streaming;
 
-    return id;
-  }
+			const plugin = getPlugin();
+			const stream = plugin.agentManager.streamQuery(
+				userContent,
+				String(this.id),
+				signal,
+			) as AsyncIterable<StreamChunk>;
 
-  /** Abort current streaming (if any) */
-  stopStreaming(): void {
-    if (!this.abortController) {
-      throw new Error("No active stream to abort");
-    }
-    this.cancelled = true;
-    this.abortController.abort();
-  }
+			const assistantMsg = pair.assistantMessage;
 
-  /* -----------------------------------------------------------------------
-   * Streaming logic
-   * ---------------------------------------------------------------------*/
+			for await (const chunk of stream) {
+				if (chunk.type === "token") {
+					this.appendToken(assistantMsg, chunk.token);
+					continue;
+				}
 
-  private appendToken(message: AssistantMessage, token: string) {
-    if (!token) return;
-    message.content += token;
-  }
+				if (chunk.type === "tool_start") {
+					// Add a new tool call in "running" state
+					if (!assistantMsg.toolCalls) assistantMsg.toolCalls = [];
+					assistantMsg.toolCalls.push({
+						id: chunk.toolCallId,
+						name: chunk.toolName,
+						input: this.normalizeToolInput(chunk.input),
+						status: "running",
+					});
+					continue;
+				}
 
-  private normalizeToolInput(raw: unknown): Record<string, unknown> {
-    if (raw === undefined || raw === null) return {};
-    if (typeof raw === "string") {
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          return parsed as Record<string, unknown>;
-        }
-        return { value: parsed };
-      } catch {
-        return { input: raw };
-      }
-    }
-    if (Array.isArray(raw)) return { value: raw };
-    if (typeof raw === "object") return raw as Record<string, unknown>;
-    return { value: raw };
-  }
+				if (chunk.type === "tool_end") {
+					// Find the tool call and mark it completed with output
+					if (assistantMsg.toolCalls) {
+						const tc = assistantMsg.toolCalls.find(
+							(t) => t.id === chunk.toolCallId,
+						);
+						if (tc) {
+							tc.status = "completed";
+							tc.output = chunk.output;
+						} else {
+							// Tool call wasn't found (shouldn't happen, but handle gracefully)
+							assistantMsg.toolCalls.push({
+								id: chunk.toolCallId,
+								name: chunk.toolName,
+								input: {},
+								status: "completed",
+								output: chunk.output,
+							});
+						}
+					} else {
+						// No tool calls array yet (shouldn't happen, but handle gracefully)
+						assistantMsg.toolCalls = [
+							{
+								id: chunk.toolCallId,
+								name: chunk.toolName,
+								input: {},
+								status: "completed",
+								output: chunk.output,
+							},
+						];
+					}
+					continue;
+				}
 
-  private upsertToolCall(
-    message: AssistantMessage,
-    tc: NormalizedToolCall,
-  ): ToolCallState {
-    if (!message.toolCalls) message.toolCalls = [];
-    const idx = message.toolCalls.findIndex((t) => t.id === tc.id);
-    const base: ToolCallState = {
-      id: tc.id,
-      name: tc.name,
-      input: this.normalizeToolInput(tc.arguments ?? tc.input),
-      status: "running",
-    };
-    if (idx >= 0) {
-      message.toolCalls[idx] = {
-        ...base,
-        output: message.toolCalls[idx].output,
-        status: message.toolCalls[idx].status,
-      };
-      return message.toolCalls[idx];
-    }
-    message.toolCalls.push(base);
-    return base;
-  }
+				// For result chunks, stream is complete
+				if (chunk.type === "result") {
+					break;
+				}
+			}
 
-  private attachToolOutput(
-    message: AssistantMessage,
-    toolCallId: string,
-    output: unknown,
-    name?: string,
-  ) {
-    if (!message.toolCalls) message.toolCalls = [];
-    const idx = message.toolCalls.findIndex((t) => t.id === toolCallId);
-    if (idx >= 0) {
-      message.toolCalls[idx] = {
-        ...message.toolCalls[idx],
-        status: "completed",
-        output,
-      };
-      return;
-    }
-    message.toolCalls.push({
-      id: toolCallId,
-      name: name ?? "tool",
-      input: {},
-      status: "completed",
-      output,
-    });
-  }
-
-  private async processAssistantReply(messageId: UUIDv7, userContent: string) {
-    const target = this.findMessage(messageId);
-    if (!target) return;
-    console.log("target foudnd");
-    try {
-      this.messageState = MessageState.answering;
-
-      // Mark streaming started
-      target.assistantMessage.state = AssistantState.streaming;
-
-      const plugin = getPlugin();
-      const stream = plugin.agentManager.streamQuery(
-        userContent,
-        String(this.chatId),
-      ) as AsyncIterable<StreamChunk>;
-
-      const assistantMsg = target.assistantMessage;
-
-      const normalizeMessages = (chunk: StreamChunk): NormalizedMessage[] => {
-        if (chunk.type === "message") return chunk.messages ?? [];
-        if (chunk.type === "result") return chunk.result?.messages ?? [];
-        return [];
-      };
-
-      const applyNormalizedMessages = (
-        normalizedMessages: NormalizedMessage[],
-      ) => {
-        if (!normalizedMessages.length) return;
-
-        for (const msg of normalizedMessages) {
-          switch (msg.role) {
-            case "assistant": {
-              if (msg.toolCalls?.length) {
-                for (const tc of msg.toolCalls) {
-                  this.upsertToolCall(assistantMsg, tc);
-                }
-              }
-              if (msg.content !== undefined) {
-                assistantMsg.content = String(msg.content ?? "");
-              }
-              break;
-            }
-            case "tool": {
-              const toolCallId = (msg.tool_call_id ||
-                (msg as any).toolCallId) as string | undefined;
-              if (toolCallId) {
-                this.attachToolOutput(
-                  assistantMsg,
-                  toolCallId,
-                  msg.content,
-                  msg.name,
-                );
-              }
-              break;
-            }
-            default:
-              break;
-          }
-        }
-      };
-
-      for await (const chunk of stream) {
-        if (chunk.type === "token") {
-          console.log(chunk.token);
-          this.appendToken(assistantMsg, chunk.token ?? "");
-          continue;
-        }
-
-        const normalizedMessages = normalizeMessages(chunk);
-        applyNormalizedMessages(normalizedMessages);
-
-        if (chunk.type === "result" && normalizedMessages.length) {
-          const lastMsg = normalizedMessages[normalizedMessages.length - 1];
-          if (lastMsg.role === "assistant") {
-            assistantMsg.content = String(lastMsg.content ?? "");
-          }
-        }
-      }
-
-      target.assistantMessage.state = AssistantState.success;
-    } catch (err) {
-      const failedState: AssistantState = this.cancelled
-        ? AssistantState.cancelled
-        : AssistantState.error;
-      target.assistantMessage.state = failedState;
-    } finally {
-      this.abortController = null;
-      this.cancelled = false;
-      this.messageState = MessageState.idle;
-    }
-  }
-
-  /* -----------------------------------------------------------------------
-   * Utilities exposed for Messenger / consumers
-   * ---------------------------------------------------------------------*/
-
-  // If you don't want callers to mutate the array, you can expose a copy,
-  // but for reactivity in the UI it’s typical to read session.messages directly.
-  getMessages(): MessagePair[] {
-    return this.messages;
-  }
-
-  addPreloadedMessages(messages: MessagePair[], replace = false) {
-    if (replace) {
-      this.messages = messages.slice();
-    } else {
-      // ensure no duplicates
-      const existing = new Set(this.messages.map((m) => m.id));
-      for (const m of messages) {
-        if (!existing.has(m.id)) this.messages.push(m);
-      }
-    }
-  }
+			pair.assistantMessage.state = AssistantState.success;
+		} catch (err) {
+			const failedState: AssistantState = this.cancelled
+				? AssistantState.cancelled
+				: AssistantState.error;
+			pair.assistantMessage.state = failedState;
+		} finally {
+			this.abortController = null;
+			this.cancelled = false;
+			this.messageState = MessageState.idle;
+		}
+	}
 }
 
 /* -----------------------------------------------------------------------------
@@ -452,184 +491,49 @@ export class ChatSession {
  *  - Uses granular persistence APIs
  * ---------------------------------------------------------------------------*/
 export class Messenger {
-  private sessions = new Map<string, ChatSession>();
-  private records = new Map<string, ChatRecord>();
-  private pendingLoads = new Map<string, Promise<ChatSession>>();
+	session: ChatSession | null = $state(null);
+	#agentManager: AgentManager;
 
-  constructor() {}
+	constructor(agentManager: AgentManager) {
+		this.#agentManager = agentManager;
+	}
 
-  /* ---------------- Chat Creation / Metadata ---------------- */
+	deriveThreadId = (file: TFile): string | null => {
+		let threadId = file.basename;
+		if (threadId.includes(" - ")) {
+			const parts = threadId.split(" - ");
+			const dateTimePart = parts[parts.length - 1];
+			threadId = `Chat ${dateTimePart}`;
+		}
+		if (!threadId || threadId === "New Chat") return null;
+		return threadId;
+	};
 
-  async createChat(): Promise<ChatRecord> {
-    const data = getData();
-    const title = data.defaultChatName;
-    const record: ChatRecord = {
-      id: genUUIDv7(),
-      title,
-      lastAccessed: new Date(),
-      messages: [],
-    };
-    this.records.set(record.id, record);
-    return record;
-  }
+	/* ---------------- Chat Creation / Metadata ---------------- */
 
-  async setTitle(id: UUIDv7, title: string): Promise<boolean> {
-    const record = this.records.get(id);
-    if (!record) return false;
-    if (record.title === title) return true;
-    record.title = title;
-    const session = this.sessions.get(id);
-    if (session) session.setTitle(title);
-    return true;
-  }
+	async loadSession(file: TFile) {
+		const id = this.deriveThreadId(file);
+		if (!id) throw new Error("Invalid thread ID");
+		const history = await this.#agentManager.getThreadHistory(id);
+		// Cast to access lastError and errorCount properties (available after papa-ts rebuild)
+		const historyWithError = history as
+			| (ThreadHistory & { lastError?: ThreadError; errorCount?: number })
+			| null;
+		this.session = new ChatSession(
+			id,
+			historyWithError?.messages || [],
+			historyWithError?.errorCount || 0,
+		);
+	}
 
-  async loadChatRecord(id: UUIDv7): Promise<ChatRecord | null> {
-    return this.records.get(id) ?? null;
-  }
+	/* ---------------- Sending Messages ---------------- */
 
-  async listChats(): Promise<ChatPreview[]> {
-    return Array.from(this.records.values()).map((r) => ({
-      id: r.id,
-      title: r.title,
-      lastAccessed: r.lastAccessed,
-    }));
-  }
-
-  async deleteChat(id: UUIDv7): Promise<boolean> {
-    this.sessions.delete(id);
-    return this.records.delete(id);
-  }
-
-  async branchOffFromMessage(
-    chatId: UUIDv7,
-    cutoffMessageId: UUIDv7,
-  ): Promise<UUIDv7> {
-    const source = this.records.get(chatId);
-    if (!source) return genUUIDv7();
-    const cutoffIndex = source.messages.findIndex(
-      (m) => m.id === cutoffMessageId,
-    );
-    const sliceEnd =
-      cutoffIndex >= 0 ? cutoffIndex + 1 : source.messages.length;
-    const newChatId = genUUIDv7();
-    const cloned: ChatRecord = {
-      id: newChatId,
-      title: `${source.title} (branch)`,
-      lastAccessed: new Date(),
-      messages: source.messages.slice(0, sliceEnd).map((m) => ({
-        ...m,
-        id: genUUIDv7(),
-      })),
-    };
-    this.records.set(newChatId, cloned);
-    return newChatId;
-  }
-
-  /* ---------------- Session Management ---------------- */
-
-  async ensureSession(
-    chatId: UUIDv7,
-    preloadAll = true,
-    bumpLastAccessed = true,
-  ): Promise<ChatSession> {
-    const existing = this.sessions.get(chatId);
-    if (existing) {
-      if (bumpLastAccessed) {
-        existing.lastAccessed = new Date();
-      }
-      return existing;
-    }
-
-    const inflight = this.pendingLoads.get(chatId);
-    if (inflight) return inflight;
-
-    const promise = (async () => {
-      const record = this.records.get(chatId);
-      if (!record) throw new Error(`Chat ${chatId} not found`);
-
-      const hydrated: ChatRecord = {
-        ...record,
-        lastAccessed: bumpLastAccessed ? new Date() : record.lastAccessed,
-        messages: preloadAll ? record.messages.slice() : [],
-      };
-
-      if (bumpLastAccessed) {
-        record.lastAccessed = hydrated.lastAccessed;
-      }
-
-      const session = new ChatSession(hydrated);
-      this.sessions.set(chatId, session);
-      return session;
-    })();
-
-    this.pendingLoads.set(chatId, promise);
-    try {
-      return await promise;
-    } finally {
-      this.pendingLoads.delete(chatId);
-    }
-  }
-
-  getSessions(chatId: UUIDv7 | null): ChatSession | null {
-    if (!chatId) return null;
-    return this.sessions.get(chatId) ?? null;
-  }
-
-  /* ---------------- Sending Messages ---------------- */
-
-  async sendMessage(
-    content: string,
-
-    attachments?: File[],
-    currentSession?: CurrentSession | null,
-  ): Promise<string> {
-    let session = currentSession?.session ?? null;
-
-    if (!session) {
-      const newChat = await this.createChat();
-      new Notice("New chat created");
-      session = await this.ensureSession(newChat.id);
-      if (currentSession) currentSession.session = session;
-    }
-
-    return session.sendMessage(content, attachments);
-  }
-
-  getActiveSessionsCount(): number {
-    return this.sessions.size;
-  }
-
-  /* ---------------- Dirty Response Cleanup ---------------- */
-
-  async findDirtyResponses(): Promise<ChatRecord[]> {
-    const previews = await this.listChats();
-    const dirty: ChatRecord[] = [];
-    for (const p of previews) {
-      const rec = await this.loadChatRecord(p.id);
-      if (!rec) continue;
-      if (
-        rec.messages.some(
-          (m) => m.assistantMessage.state === AssistantState.streaming,
-        )
-      ) {
-        dirty.push(rec);
-      }
-    }
-    return dirty;
-  }
-
-  async cleanupDirtyResponses(): Promise<void> {
-    const dirtyChats = await this.findDirtyResponses();
-    for (const chat of dirtyChats) {
-      for (const mp of chat.messages) {
-        if (mp.assistantMessage.state === AssistantState.streaming) {
-          mp.assistantMessage.state = AssistantState.error;
-          mp.assistantMessage.content =
-            mp.assistantMessage.content || "Response interrupted";
-        }
-      }
-    }
-  }
+	async sendMessage(content: string, attachments?: File[]): Promise<string> {
+		if (!this.session) {
+			throw new Error("No active session");
+		}
+		return this.session.sendMessage(content, attachments);
+	}
 }
 
 /* -----------------------------------------------------------------------------
@@ -637,27 +541,16 @@ export class Messenger {
  * ---------------------------------------------------------------------------*/
 let messengerSingleton: Messenger | null = null;
 
-export function createMessenger(): Messenger {
-  if (!messengerSingleton) {
-    messengerSingleton = new Messenger();
-  }
-  return messengerSingleton;
+export function createMessenger(agentManager?: AgentManager): Messenger {
+	if (!messengerSingleton) {
+		if (!agentManager) {
+			throw new Error("AgentManager is required for first Messenger creation");
+		}
+		messengerSingleton = new Messenger(agentManager);
+	}
+	return messengerSingleton;
 }
 
 export function getMessenger(): Messenger | null {
-  return messengerSingleton;
-}
-
-let currentThreadId = $state<string | null>(null);
-
-export function getCurrentThreadId(): string | null {
-  return currentThreadId;
-}
-
-export function setCurrentThreadId(id: string | null) {
-  currentThreadId = id;
-}
-
-export class CurrentSession {
-  session: ChatSession | null = $state(null);
+	return messengerSingleton;
 }

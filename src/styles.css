@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+	--icon-xs: 0.75rem;
+	--icon-sm: 1rem;
+	--icon-md: 1.25rem;
+	--icon-lg: 1.5rem;
+	--icon-xl: 2rem;
+}
+
 .obsidian-border {
-    border-bottom: 1px solid var(--background-modifier-border);
+	border-bottom: 1px solid var(--background-modifier-border);
 }

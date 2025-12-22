@@ -4,11 +4,11 @@
     import { getData } from "../../stores/dataStore.svelte";
     import Button from "../../components/base/Button.svelte";
     import SettingContainer from "../../components/Settings/SettingContainer.svelte";
-    import { getPlugin, modelQuery } from "../../stores/state.svelte";
     import type SecondBrainPlugin from "../../main";
     import Dropdown from "../../components/base/Dropdown.svelte";
-    import { type GenModelConfig } from "papa-ts";
     import Text from "../../components/base/Text.svelte";
+    import { createModelListQuery } from "../../utils/query";
+    import { getPlugin } from "../../stores/state.svelte";
 
     interface Props {
         modal: ChatModelManagementModal;
@@ -29,7 +29,7 @@
     const plugin: SecondBrainPlugin = getPlugin();
     const data = getData();
 
-    const query = modelQuery(provider, plugin);
+    const query = createModelListQuery(() => provider);
 
     let { data: models, isPending, isError } = $derived(query);
 
