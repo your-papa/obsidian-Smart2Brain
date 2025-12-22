@@ -1,75 +1,67 @@
 <script lang="ts">
-    import { t } from "svelte-i18n";
-    import { registeredProviders, type RegisteredProvider } from "papa-ts";
-    import SettingContainer from "../../components/Settings/SettingContainer.svelte";
-    import TextComponent from "../../components/base/Text.svelte";
-    import Button from "../../components/base/Button.svelte";
-    import type { ProviderSetupModal } from "./ProviderSetup";
-    import { getData } from "../../stores/dataStore.svelte";
-    import { createQuery } from "@tanstack/svelte-query";
-    import type SecondBrainPlugin from "../../main";
-    import ProviderIcon from "../../components/icons/ProviderIcon.svelte";
-    import { mount, onMount } from "svelte";
-    import { icon } from "../../utils/utils";
+import AuthConfigFields from "../../components/Settings/AuthConfigFields.svelte";
+import Button from "../../components/base/Button.svelte";
+import type { ProviderSetupModal } from "./ProviderSetup";
+import { getData } from "../../stores/dataStore.svelte";
+import type SecondBrainPlugin from "../../main";
+import ProviderIcon from "../../components/icons/ProviderIcon.svelte";
+import { mount, onMount } from "svelte";
+import { icon } from "../../utils/utils";
+import { type RegisteredProvider } from "../../types/providers";
+import { createAuthStateQuery } from "../../utils/query";
 
-    interface Props {
-        modal: ProviderSetupModal;
-        plugin: SecondBrainPlugin;
-        selectedProvider: RegisteredProvider;
-    }
+interface Props {
+	modal: ProviderSetupModal;
+	plugin: SecondBrainPlugin;
+	selectedProvider: RegisteredProvider;
+}
 
-    let { modal, plugin, selectedProvider }: Props = $props();
+const { modal, plugin, selectedProvider }: Props = $props();
 
-    const data = getData();
+const data = getData();
 
-    const query = createQuery(() => ({
-        queryKey: ["authState", selectedProvider],
-        queryFn: async () =>
-            await plugin.papa.providerRegistry
-                .getProvider(selectedProvider)
-                .setup(data.getProviderAuthParams(selectedProvider)),
-    }));
+const query = createAuthStateQuery(() => selectedProvider);
 
-    function handleAddProvider() {
-        data.toggleProviderIsConfigured(selectedProvider);
-        modal.close();
-    }
+function handleAddProvider() {
+	data.toggleProviderIsConfigured(selectedProvider);
+	modal.close();
+}
 
-    // Function to create and append the header element
-    function appendHeaderElement() {
-        const title = modal.titleEl;
-        const header = title.parentElement;
-        title.setCssStyles({
-            marginBlock: "0",
-        });
-        header?.setCssStyles({
-            display: "flex",
-            flexDirection: "row",
-            gap: "0.5rem",
-            alignItems: "center",
-            justifyItems: "start",
-        });
+// Function to create and append the header element
+function appendHeaderElement() {
+	const title = modal.titleEl;
+	const header = title.parentElement;
+	title.setCssStyles({
+		marginBlock: "0",
+	});
+	header?.setCssStyles({
+		display: "flex",
+		flexDirection: "row",
+		gap: "0.5rem",
+		alignItems: "center",
+		justifyItems: "start",
+	});
 
-        if (header) {
-            mount(ProviderIcon, {
-                target: header,
-                anchor: title,
-                props: {
-                    providerName: selectedProvider,
-                    size: {
-                        height: 32,
-                        width: 32,
-                    },
-                },
-            });
+	if (header) {
+		mount(ProviderIcon, {
+			target: header,
+			anchor: title,
+			props: {
+				providerName: selectedProvider,
+				size: {
+					height: 32,
+					width: 32,
+				},
+			},
+		});
 
-            return true;
-        }
-    }
+		return true;
+	}
+}
 
-    onMount(() => {
-        appendHeaderElement();
-    });
+onMount(() => {
+	appendHeaderElement();
+});
 </script>
 
 <div class="modal-content">
@@ -91,51 +83,28 @@
             </li>
         </div>
     </div>
-    {#if data.getProviderAuthParams(selectedProvider)}
-        {#each Object.entries(data.getProviderAuthParams(selectedProvider)) as [authKey, authValue]}
-            <SettingContainer
-                name={$t(`settings.provider.${authKey}`)}
-                desc={$t(`settings.provider.${authKey}.desc`)}
-            >
-                <TextComponent
-                    inputType="text"
-                    value={authValue}
-                    styles={authValue === ""
-                        ? ""
-                        : query.data
-                          ? "!border-[--background-modifier-success]"
-                          : "!border-[--background-modifier-error]"}
-                    blurFunc={async (value: string) => {
-                        (data.setProviderAuthParam as any)(
-                            selectedProvider,
-                            authKey,
-                            value,
-                        );
-                        query.refetch();
-                    }}
-                />
-            </SettingContainer>
-        {/each}
-    {/if}
+    <AuthConfigFields provider={selectedProvider} />
 </div>
 
 <div class="modal-button-container">
     {#if query.data !== undefined}
         <div
             class="flex items-center gap-2 rounded px-[--pill-padding-x] mr-auto"
-            class:bg-green-100={query.data}
-            class:bg-red-100={!query.data}
+            class:bg-green-100={query.data.success}
+            class:bg-red-100={!query.data.success}
         >
             <div
                 class="h-4 w-4"
-                class:text-green-600={query.data}
-                class:text-red-600={!query.data}
-                use:icon={query.data ? "check" : "x"}
+                class:text-green-600={query.data.success}
+                class:text-red-600={!query.data.success}
+                use:icon={query.data.success ? "check" : "x"}
             ></div>
             <span>
-                {query.data
-                    ? "Provider authentication successful"
-                    : "Provider authentication failed"}
+                {#if query.data.success}
+                    Provider authentication successful
+                {:else}
+                    {query.data.message}
+                {/if}
             </span>
         </div>
     {/if}
@@ -143,7 +112,7 @@
     <Button
         buttonText="Add Provider"
         cta={true}
-        disabled={!query.data}
+        disabled={!query.data?.success}
         onClick={handleAddProvider}
     />
 </div>

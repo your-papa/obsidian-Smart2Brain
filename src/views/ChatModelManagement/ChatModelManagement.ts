@@ -7,47 +7,47 @@ import ChatModelManagementComponent from "./ChatModelManagement.svelte";
 import type { GenProviders } from "../../types/providers";
 
 export class ChatModelManagementModal extends Modal {
-  private component!: ChatModelManagementComponent;
-  private plugin: SecondBrainPlugin;
-  private provider!: GenProviders;
-  private config?: GenModelConfig;
+	private component!: ChatModelManagementComponent;
+	private plugin: SecondBrainPlugin;
+	private provider!: GenProviders;
+	private config?: GenModelConfig;
 
-  constructor(
-    plugin: SecondBrainPlugin,
-    provider: GenProviders,
-    config?: GenModelConfig,
-  ) {
-    super(plugin.app);
-    this.plugin = plugin;
-    this.setTitle(`${provider} Chat Model Management`);
-    this.provider = provider;
-    this.config = config;
-  }
+	constructor(
+		plugin: SecondBrainPlugin,
+		provider: GenProviders,
+		config?: GenModelConfig,
+	) {
+		super(plugin.app);
+		this.plugin = plugin;
+		this.setTitle(`${provider} Chat Model Management`);
+		this.provider = provider;
+		this.config = config;
+	}
 
-  onOpen() {
-    this.component = mount(
-      ModalProvider<{
-        modal: ChatModelManagementModal;
-        provider: GenProviders;
-        config?: GenModelConfig;
-      }>,
-      {
-        target: this.contentEl,
-        props: {
-          plugin: this.plugin,
-          component: ChatModelManagementComponent,
-          componentProps: {
-            modal: this,
-            provider: this.provider,
-            config: this.config,
-          },
-        },
-      },
-    );
-  }
+	onOpen() {
+		this.component = mount(
+			ModalProvider<{
+				modal: ChatModelManagementModal;
+				provider: GenProviders;
+				config?: GenModelConfig;
+			}>,
+			{
+				target: this.contentEl,
+				props: {
+					plugin: this.plugin,
+					component: ChatModelManagementComponent,
+					componentProps: {
+						modal: this,
+						provider: this.provider,
+						config: this.config,
+					},
+				},
+			},
+		);
+	}
 
-  onClose() {
-    const { contentEl } = this;
-    contentEl.empty();
-  }
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
 }

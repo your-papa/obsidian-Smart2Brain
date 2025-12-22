@@ -4,6 +4,9 @@
   "main": "main.js",
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@langchain/langgraph-checkpoint": "^1.0.0",
+    "@langchain/mcp-adapters": "^1.0.2",
+    "@langchain/tavily": "^1.0.1",
     "@sveltejs/vite-plugin-svelte": "^5.1.1",
     "@tsconfig/svelte": "^5.0.5",
     "autoprefixer": "^10.4.21",
@@ -33,6 +36,7 @@
     "dexie": "^4.2.1",
     "i18next": "^23.16.8",
     "svelte-i18n": "^4.0.1",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "zod": "^4.2.1"
   }
 }

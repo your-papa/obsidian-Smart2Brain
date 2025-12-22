@@ -8,14 +8,8 @@
     } from "@selemondev/svgl-svelte";
     import type { ChatModel } from "../../stores/chatStore.svelte";
     import { getData } from "../../stores/dataStore.svelte";
-    import { getPlugin, modelQuery } from "../../stores/state.svelte";
-
-    interface props {
-        model: ChatModel | null;
-        setModel: (model: ChatModel) => void;
-    }
-
-    let { model, setModel }: props = $props();
+    import { getPlugin } from "../../stores/state.svelte";
+    import { createModelListQuery } from "../../utils/query";
 
     const data = getData();
     const plugin = getPlugin();
@@ -23,7 +17,7 @@
     const providers = data.getConfiguredProviders();
 
     const modelQueries = providers.map((provider) =>
-        modelQuery(provider, plugin),
+        createModelListQuery(() => provider),
     );
 
     const availableModels = $derived.by(() => {
@@ -54,12 +48,11 @@
                     m.provider === sel.provider && m.model === sel.model,
             );
             if (found) {
-                model = found;
                 _chatModelInitialized = true;
                 return;
             }
         }
-        model = list[0];
+        data.setDefaultChatModel(list[0]);
         _chatModelInitialized = true;
     });
 
@@ -78,13 +71,16 @@
 <div
     bind:this={customAnchor}
     onclick={() => (isOpen = !isOpen)}
-    class="flex flex-row hover:bg-[--background-modifier-hover] pl-1 rounded-md gap-1"
+    class="clickable-icon"
 >
-    <div class="text-[--text-accent] self-center">{model?.model}</div>
-    <div
-        class="text-[--text-accent] flex items-center"
-        use:icon={"chevron-down"}
-    ></div>
+    <div class="text-[--text-normal] self-center">
+        {data.getDefaultChatModel()?.model}
+    </div>
+    {#if isOpen}
+        <div class="flex items-center" use:icon={"chevron-up"}></div>
+    {:else}
+        <div class=" flex items-center" use:icon={"chevron-down"}></div>
+    {/if}
 </div>
 
 <Popover.Root bind:open={isOpen}>
@@ -104,8 +100,8 @@
                     <div
                         class="flex flex-row items-center gap-2 p-2 rounded-lg hover:bg-[--background-modifier-hover]"
                         onclick={() => {
-                            setModel(model);
                             isOpen = false;
+                            data.setDefaultChatModel(model);
                         }}
                     >
                         {#if model.provider === "OpenAI"}
