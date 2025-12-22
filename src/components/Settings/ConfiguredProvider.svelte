@@ -1,6 +1,8 @@
 <script lang="ts">
-    import { createQuery } from "@tanstack/svelte-query";
-    import { registeredProviders, type RegisteredProvider } from "papa-ts";
+    import {
+        createAuthStateQuery,
+        invalidateAuthState,
+    } from "../../utils/query";
     import { getPlugin } from "../../stores/state.svelte";
     import { getData } from "../../stores/dataStore.svelte";
     import Button from "../base/Button.svelte";
@@ -10,10 +12,11 @@
     import {
         type EmbedProviders,
         type GenProviders,
+        type RegisteredProvider,
     } from "../../types/providers";
-    import SettingContainer from "./SettingContainer.svelte";
-    import Text from "../base/Text.svelte";
+    import AuthConfigFields from "./AuthConfigFields.svelte";
     import { Accordion } from "bits-ui";
+    import SettingContainer from "./SettingContainer.svelte";
 
     interface Props {
         configuredProvider: RegisteredProvider;
@@ -30,20 +33,10 @@
     const data = getData();
     const plugin = getPlugin();
 
-    const query = createQuery(() => ({
-        queryKey: ["authState", configuredProvider],
-        queryFn: async () => {
-            const res = await plugin.papa.providerRegistry
-                .getProvider(configuredProvider)
-                .setup(data.getProviderAuthParams(configuredProvider));
-            return res;
-        },
-    }));
+    const query = createAuthStateQuery(() => configuredProvider);
 
     function refetch() {
-        plugin.queryClient.invalidateQueries({
-            queryKey: ["authState", configuredProvider],
-        });
+        invalidateAuthState(configuredProvider);
     }
 
     //ToDo put somewhere else
@@ -84,10 +77,10 @@
             <ProviderIcon
                 providerName={configuredProvider}
                 size={{ width: 16, height: 16 }}
-                className={"fill-white"}
+                className={"fill-black"}
             />
             <span>{configuredProvider}</span>
-            {#if query.data}
+            {#if query.data?.success}
                 <Button
                     iconId={"check"}
                     styles={"text-[--background-modifier-success]"}
@@ -120,29 +113,7 @@
     <Accordion.Content
         class="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down tracking-[-0.01em] pl-8 w-[-webkit-fill-available]"
     >
-        {#if data.getProviderAuthParams(configuredProvider)}
-            {#each Object.entries(data.getProviderAuthParams(configuredProvider)) as [authKey, authValue]}
-                <SettingContainer name={"Key"} desc={"Value"}>
-                    <Text
-                        inputType="text"
-                        value={authValue}
-                        styles={authValue === ""
-                            ? ""
-                            : query.data
-                              ? "!border-[--background-modifier-success]"
-                              : "!border-[--background-modifier-error]"}
-                        blurFunc={async (value: string) => {
-                            (data.setProviderAuthParam as any)(
-                                configuredProvider,
-                                authKey,
-                                value,
-                            );
-                            refetch();
-                        }}
-                    />
-                </SettingContainer>
-            {/each}
-        {/if}
+        <AuthConfigFields provider={configuredProvider} />
         {#if isGenProvider(configuredProvider)}
             <SettingContainer name="Manage Chat Models">
                 <Button
