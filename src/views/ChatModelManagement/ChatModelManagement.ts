@@ -1,10 +1,9 @@
 import { App, Modal } from "obsidian";
-import type { GenModelConfig } from "papa-ts";
+import type { GenModelConfig, GenProviders } from "../../types/providers";
 import { mount } from "svelte";
 import type SecondBrainPlugin from "../../main";
 import ModalProvider from "../../components/QueryClientProvider.svelte";
 import ChatModelManagementComponent from "./ChatModelManagement.svelte";
-import type { GenProviders } from "../../types/providers";
 
 export class ChatModelManagementModal extends Modal {
 	private component!: ChatModelManagementComponent;

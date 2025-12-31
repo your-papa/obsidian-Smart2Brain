@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { EmbedModelConfig } from "papa-ts";
+    import type { EmbedModelConfig } from "../../types/providers";
     import type { EmbedModelManagementModal } from "./EmbedModelManagement";
     import type { EmbedProviders } from "../../types/providers";
     import { getData } from "../../stores/dataStore.svelte";

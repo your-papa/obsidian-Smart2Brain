@@ -1,5 +1,5 @@
 import { App } from "obsidian";
-import { tool } from "papa-ts";
+import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
 /**

@@ -7,7 +7,8 @@ import {
 	type UUIDv7,
 } from "../utils/uuid7Validator";
 import type { AgentManager } from "../agent/AgentManager";
-import type { ThreadMessage, ThreadHistory } from "papa-ts";
+import type { ThreadMessage } from "../agent/messages/ThreadMessage";
+import type { ThreadHistory } from "../agent/Agent";
 
 /** Error info from a failed thread run */
 export interface ThreadError {

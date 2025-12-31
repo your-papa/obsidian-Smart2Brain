@@ -1,10 +1,9 @@
 import { App, Modal } from "obsidian";
-import type { EmbedModelConfig } from "papa-ts";
+import type { EmbedModelConfig, EmbedProviders } from "../../types/providers";
 import { mount } from "svelte";
 import type SecondBrainPlugin from "../../main";
 import ModalProvider from "../../components/QueryClientProvider.svelte";
 import EmbedModelManagementComponent from "./EmbedModelManagement.svelte";
-import type { EmbedProviders } from "../../types/providers";
 
 export class EmbedModelManagementModal extends Modal {
   private component!: EmbedModelManagementComponent;
