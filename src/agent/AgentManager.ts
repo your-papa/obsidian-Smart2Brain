@@ -1,17 +1,13 @@
+import { Agent, type ChooseModelParams, type ThreadHistory } from "./Agent";
+import { ProviderRegistry } from "./providers/ProviderRegistry";
+import { type ThreadSnapshot } from "./memory/ThreadStore";
+import { LangSmithTelemetry, type Telemetry } from "./telemetry";
 import {
-	Agent,
-	ProviderRegistry,
-	type ThreadSnapshot,
-	LangSmithTelemetry,
-	type Telemetry,
 	type BuiltInProviderOptions,
 	ProviderAuthError,
 	ProviderEndpointError,
 	ProviderRegistryError,
-	type ThreadMessage,
-	type ChooseModelParams,
-	type ThreadHistory,
-} from "papa-ts";
+} from "./providers";
 import { normalizePath } from "obsidian";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import { createSearchNotesTool } from "../tools/searchNotes";

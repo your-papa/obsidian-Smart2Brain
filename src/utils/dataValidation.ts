@@ -1,8 +1,10 @@
-import { Prompts, type Language } from "papa-ts";
 import { registeredProviders, type RegisteredProvider } from "../types/providers";
 import type { PluginData } from "../main";
 import type { ProviderConfigs, GetProviderConfig, GetProviderAuth } from "../types/providers";
 import { DEFAULT_SETTINGS, DEFAULT_PROVIDER_CONFIGS } from "../constants/defaults";
+
+// Language type for assistant language selection
+export type Language = "en" | "de";
 
 /**
  * Validation result type

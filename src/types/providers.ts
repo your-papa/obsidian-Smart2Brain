@@ -1,4 +1,4 @@
-import { type BuiltInProviderOptions } from "papa-ts";
+import { type BuiltInProviderOptions } from "../agent/providers/types";
 
 // Re-export for convenience
 export type { BuiltInProviderOptions };

@@ -58,6 +58,7 @@ export default defineConfig(({ mode }) => {
 					"@lezer/common",
 					"@lezer/highlight",
 					"@lezer/lr",
+					"@sap-ai-sdk/langchain", // Optional dependency for SAP AI Core provider
 					...builtinModules,
 				],
 			},

@@ -15,7 +15,7 @@ import {
 	type DataAdapter,
 } from "obsidian";
 import type SecondBrainPlugin from "../main";
-import { type ThreadStore, type ThreadSnapshot } from "papa-ts";
+import { type ThreadStore, type ThreadSnapshot } from "./memory/ThreadStore";
 import { getData } from "../stores/dataStore.svelte";
 
 interface CheckpointEntry {

@@ -130,148 +130,153 @@
 
 <div class="relative flex-1 min-h-0 z-20">
     <!-- Scrollable messages area -->
-    <div
-        bind:this={scrollContainer}
-        class="h-full overflow-y-auto px-2 py-4 w-full max-w-[--file-line-width] mx-auto"
-    >
-        {#if !messages || messages.length === 0}
-            <!-- Empty state with logo -->
-            <div class="flex flex-col items-center justify-center h-full">
-                <div
-                    class="logo-container h-[80px] w-[80px] items-center justify-center transition-transform duration-150 ease-out"
-                    class:input-focused={isInputFocused}
-                >
-                    <Logo />
-                </div>
-                <p class="text-lg mb-1">Start a new conversation</p>
-                <p class="text-sm opacity-70">
-                    Ask me anything about your notes.
-                </p>
-            </div>
-        {:else}
-            {#each messages as messagePair, index}
-                <div
-                    use:registerMessageRef={messagePair.id + "-user"}
-                    class="group mr-2 flex flex-col items-end gap-2 mb-2"
-                >
+    <div bind:this={scrollContainer} class="h-full overflow-y-auto px-2 py-4">
+        <div class="w-full max-w-[--file-line-width] mx-auto h-full">
+            {#if !messages || messages.length === 0}
+                <!-- Empty state with logo -->
+                <div class="flex flex-col items-center justify-center h-full">
                     <div
-                        class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2 [&>p]:m-0"
-                        use:markdownRenderer={messagePair.userMessage.content}
-                    ></div>
-
-                    <div
-                        class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+                        class="logo-container h-[80px] w-[80px] items-center justify-center transition-transform duration-150 ease-out"
+                        class:input-focused={isInputFocused}
                     >
-                        <!-- svelte-ignore a11y_click_events_have_key_events -->
-                        <!-- svelte-ignore a11y_no_static_element_interactions -->
-                        <div
-                            use:icon={"refresh-cw"}
-                            class="trash-icon hover:text-[--text-accent] items-center justify-center"
-                            onclick={async () => console.log("redo Message")}
-                        ></div>
-
-                        <!-- svelte-ignore a11y_click_events_have_key_events -->
-                        <!-- svelte-ignore a11y_no_static_element_interactions -->
-                        <div
-                            use:icon={"split"}
-                            class="trash-icon hover:text-[--text-accent] items-center justify-center"
-                            onclick={() => console.log("split")}
-                        ></div>
-
-                        <!-- svelte-ignore a11y_click_events_have_key_events -->
-                        <!-- svelte-ignore a11y_no_static_element_interactions -->
-                        <div
-                            use:icon={"edit"}
-                            class="trash-icon hover:text-[--text-accent] items-center justify-center"
-                            onclick={async () => console.log("edit")}
-                        ></div>
-
-                        <!-- svelte-ignore a11y_click_events_have_key_events -->
-                        <!-- svelte-ignore a11y_no_static_element_interactions -->
-                        <div
-                            use:icon={"copy"}
-                            class="trash-icon hover:text-[--text-accent] items-center justify-center"
-                            onclick={async () =>
-                                copyToClipboard(
-                                    messagePair.userMessage.content,
-                                )}
-                        ></div>
+                        <Logo />
                     </div>
+                    <p class="text-lg mb-1">Start a new conversation</p>
+                    <p class="text-sm opacity-70">
+                        Ask me anything about your notes.
+                    </p>
                 </div>
-                <div class:min-h-[95%]={index === messages.length - 1}>
-                    <div class="group flex flex-col px-2 gap-3 mb-2 w-full">
-                        <!-- Tools Section (collapsible) -->
-                        {#if messagePair.assistantMessage.toolCalls?.length}
-                            <ToolCallsSection
-                                toolCalls={messagePair.assistantMessage
-                                    .toolCalls}
-                                isOpen={getToolsOpen(
-                                    messagePair.id,
-                                    messagePair.assistantMessage,
-                                )}
-                                onToggle={(open) =>
-                                    setToolsOpen(messagePair.id, open)}
-                            />
-                        {/if}
+            {:else}
+                {#each messages as messagePair, index}
+                    <div
+                        use:registerMessageRef={messagePair.id + "-user"}
+                        class="group mr-2 flex flex-col items-end gap-2 mb-2"
+                    >
+                        <div
+                            class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2 [&>p]:m-0"
+                            use:markdownRenderer={messagePair.userMessage
+                                .content}
+                        ></div>
 
-                        <!-- Content Section -->
-                        {#if messagePair.assistantMessage.state === AssistantState.streaming && !messagePair.assistantMessage.content}
-                            <Dots size={"35"} color={"var(--text-accent)"} />
-                        {:else if messagePair.assistantMessage.content || messagePair.assistantMessage.state === AssistantState.cancelled || messagePair.assistantMessage.state === AssistantState.error}
+                        <div
+                            class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+                        >
+                            <!-- svelte-ignore a11y_click_events_have_key_events -->
+                            <!-- svelte-ignore a11y_no_static_element_interactions -->
                             <div
-                                class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
-                                use:markdownRenderer={renderAssitantAnswer(
-                                    messagePair.assistantMessage,
-                                )}
+                                use:icon={"refresh-cw"}
+                                class="trash-icon hover:text-[--text-accent] items-center justify-center"
+                                onclick={async () =>
+                                    console.log("redo Message")}
                             ></div>
-                        {:else if messagePair.assistantMessage.state === AssistantState.idle || messagePair.assistantMessage.state === AssistantState.streaming}
-                            <!-- Show loading dots only if streaming and no content yet (and no tool calls) -->
-                            {#if !messagePair.assistantMessage.toolCalls?.length}
-                                <Dots
-                                    size={"50"}
-                                    color={"var(--text-accent)"}
+
+                            <!-- svelte-ignore a11y_click_events_have_key_events -->
+                            <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            <div
+                                use:icon={"split"}
+                                class="trash-icon hover:text-[--text-accent] items-center justify-center"
+                                onclick={() => console.log("split")}
+                            ></div>
+
+                            <!-- svelte-ignore a11y_click_events_have_key_events -->
+                            <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            <div
+                                use:icon={"edit"}
+                                class="trash-icon hover:text-[--text-accent] items-center justify-center"
+                                onclick={async () => console.log("edit")}
+                            ></div>
+
+                            <!-- svelte-ignore a11y_click_events_have_key_events -->
+                            <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            <div
+                                use:icon={"copy"}
+                                class="trash-icon hover:text-[--text-accent] items-center justify-center"
+                                onclick={async () =>
+                                    copyToClipboard(
+                                        messagePair.userMessage.content,
+                                    )}
+                            ></div>
+                        </div>
+                    </div>
+                    <div class:min-h-[95%]={index === messages.length - 1}>
+                        <div class="group flex flex-col px-2 gap-3 mb-2 w-full">
+                            <!-- Tools Section (collapsible) -->
+                            {#if messagePair.assistantMessage.toolCalls?.length}
+                                <ToolCallsSection
+                                    toolCalls={messagePair.assistantMessage
+                                        .toolCalls}
+                                    isOpen={getToolsOpen(
+                                        messagePair.id,
+                                        messagePair.assistantMessage,
+                                    )}
+                                    onToggle={(open) =>
+                                        setToolsOpen(messagePair.id, open)}
                                 />
                             {/if}
-                        {/if}
 
-                        {#if !(messagePair.assistantMessage.state === AssistantState.streaming)}
-                            <div
-                                class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-                            >
-                                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            <!-- Content Section -->
+                            {#if messagePair.assistantMessage.state === AssistantState.streaming && !messagePair.assistantMessage.content}
+                                <Dots
+                                    size={"35"}
+                                    color={"var(--text-accent)"}
+                                />
+                            {:else if messagePair.assistantMessage.content || messagePair.assistantMessage.state === AssistantState.cancelled || messagePair.assistantMessage.state === AssistantState.error}
                                 <div
-                                    use:icon={"copy"}
-                                    class="trash-icon hover:text-[--text-accent] items-center justify-center"
-                                    onclick={async () =>
-                                        copyToClipboard(
-                                            messagePair.assistantMessage
-                                                .content,
-                                        )}
+                                    class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
+                                    use:markdownRenderer={renderAssitantAnswer(
+                                        messagePair.assistantMessage,
+                                    )}
                                 ></div>
-                                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            {:else if messagePair.assistantMessage.state === AssistantState.idle || messagePair.assistantMessage.state === AssistantState.streaming}
+                                <!-- Show loading dots only if streaming and no content yet (and no tool calls) -->
+                                {#if !messagePair.assistantMessage.toolCalls?.length}
+                                    <Dots
+                                        size={"50"}
+                                        color={"var(--text-accent)"}
+                                    />
+                                {/if}
+                            {/if}
+
+                            {#if !(messagePair.assistantMessage.state === AssistantState.streaming)}
                                 <div
-                                    use:icon={"split"}
-                                    class="trash-icon hover:text-[--text-accent] items-center justify-center"
-                                    onclick={() => branchOff(messagePair.id)}
+                                    class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
                                 >
+                                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                                    <div
+                                        use:icon={"copy"}
+                                        class="trash-icon hover:text-[--text-accent] items-center justify-center"
+                                        onclick={async () =>
+                                            copyToClipboard(
+                                                messagePair.assistantMessage
+                                                    .content,
+                                            )}
+                                    ></div>
+                                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                                    <div
+                                        use:icon={"split"}
+                                        class="trash-icon hover:text-[--text-accent] items-center justify-center"
+                                        onclick={() =>
+                                            branchOff(messagePair.id)}
                                     >
+                                        >
+                                    </div>
+                                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                                    <div
+                                        use:icon={"refresh-cw"}
+                                        class="trash-icon hover:text-[--text-accent] items-center justify-center"
+                                        onclick={async () =>
+                                            console.log("redo Message")}
+                                    ></div>
                                 </div>
-                                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                                <div
-                                    use:icon={"refresh-cw"}
-                                    class="trash-icon hover:text-[--text-accent] items-center justify-center"
-                                    onclick={async () =>
-                                        console.log("redo Message")}
-                                ></div>
-                            </div>
-                        {/if}
+                            {/if}
+                        </div>
                     </div>
-                </div>
-            {/each}
-        {/if}
+                {/each}
+            {/if}
+        </div>
     </div>
 </div>
 

@@ -1,7 +1,7 @@
 import SecondBrainPlugin, { type PluginData } from "../main";
 import { normalizePath } from "obsidian";
 import { DEFAULT_SETTINGS } from "../constants/defaults";
-import { safeLoadPluginData } from "../utils/dataValidation";
+import { safeLoadPluginData, type Language } from "../utils/dataValidation";
 import {
 	AddEmbedModelError,
 	AddGenModelError,
@@ -25,20 +25,10 @@ export class PluginDataStore {
 		this._plugin = plugin;
 		// Restore Maps from plain object shapes (after persistence serialization)
 		for (const cfg of Object.values(initialData.providerConfig) as any[]) {
-			if (
-				cfg &&
-				"embedModels" in cfg &&
-				cfg.embedModels &&
-				!(cfg.embedModels instanceof Map)
-			) {
+			if (cfg && "embedModels" in cfg && cfg.embedModels && !(cfg.embedModels instanceof Map)) {
 				cfg.embedModels = new Map(Object.entries(cfg.embedModels));
 			}
-			if (
-				cfg &&
-				"genModels" in cfg &&
-				cfg.genModels &&
-				!(cfg.genModels instanceof Map)
-			) {
+			if (cfg && "genModels" in cfg && cfg.genModels && !(cfg.genModels instanceof Map)) {
 				cfg.genModels = new Map(Object.entries(cfg.genModels));
 			}
 		}
@@ -317,22 +307,20 @@ export class PluginDataStore {
 		return this.#data.providerConfig[provider].isConfigured;
 	}
 	toggleProviderIsConfigured(provider: RegisteredProvider) {
-		this.#data.providerConfig[provider].isConfigured =
-			!this.#data.providerConfig[provider].isConfigured;
+		this.#data.providerConfig[provider].isConfigured = !this.#data.providerConfig[provider].isConfigured;
 		this.saveSettings();
 	}
 
-	getProviderAuthParams(
-		provider: RegisteredProvider,
-	): GetProviderAuth<typeof provider> {
+	getProviderAuthParams(provider: RegisteredProvider): GetProviderAuth<typeof provider> {
 		//TODO check runtime validity
 		return this.#data.providerConfig[provider].providerAuth;
 	}
 
-	setProviderAuthParam<
-		T extends RegisteredProvider,
-		K extends keyof GetProviderAuth<T>,
-	>(provider: T, key: K, value: GetProviderAuth<T>[K]): void {
+	setProviderAuthParam<T extends RegisteredProvider, K extends keyof GetProviderAuth<T>>(
+		provider: T,
+		key: K,
+		value: GetProviderAuth<T>[K],
+	): void {
 		const newAuth = { ...this.#data.providerConfig[provider].providerAuth };
 		newAuth[key] = value;
 		this.#data.providerConfig[provider].providerAuth = newAuth;
@@ -341,20 +329,13 @@ export class PluginDataStore {
 
 	// --- Embed Model Management (Map-based) ---
 
-	getEmbedModels<P extends EmbedProviders>(
-		provider: P,
-	): Map<string, EmbedModelConfig> {
+	getEmbedModels<P extends EmbedProviders>(provider: P): Map<string, EmbedModelConfig> {
 		return this.#data.providerConfig[provider].embedModels;
 	}
 
-	addEmbedModel<P extends EmbedProviders>(
-		provider: P,
-		modelName: string,
-		conf: EmbedModelConfig,
-	) {
+	addEmbedModel<P extends EmbedProviders>(provider: P, modelName: string, conf: EmbedModelConfig) {
 		const current = this.#data.providerConfig[provider].embedModels;
-		if (current.has(modelName))
-			throw new AddEmbedModelError(provider, modelName);
+		if (current.has(modelName)) throw new AddEmbedModelError(provider, modelName);
 		// Reassign a new Map to ensure reactivity + easier change detection
 		const next = new Map(current);
 		next.set(modelName, conf);
@@ -362,14 +343,9 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
-	updateEmbedModel<P extends EmbedProviders>(
-		provider: P,
-		modelName: string,
-		conf: EmbedModelConfig,
-	) {
+	updateEmbedModel<P extends EmbedProviders>(provider: P, modelName: string, conf: EmbedModelConfig) {
 		const current = this.#data.providerConfig[provider].embedModels;
-		if (!current.has(modelName))
-			throw new SetEmbedModelError(provider, modelName);
+		if (!current.has(modelName)) throw new SetEmbedModelError(provider, modelName);
 		const next = new Map(current);
 		next.set(modelName, conf);
 		this.#data.providerConfig[provider].embedModels = next;
@@ -378,25 +354,18 @@ export class PluginDataStore {
 
 	deleteEmbedModel<P extends EmbedProviders>(provider: P, modelName: string) {
 		const current = this.#data.providerConfig[provider].embedModels;
-		if (!current.has(modelName))
-			throw new SetEmbedModelError(provider, modelName);
+		if (!current.has(modelName)) throw new SetEmbedModelError(provider, modelName);
 		const next = new Map(current);
 		next.delete(modelName);
 		this.#data.providerConfig[provider].embedModels = next;
 		this.saveSettings();
 	}
 
-	getGenModels<P extends GenProviders>(
-		provider: P,
-	): Map<string, GenModelConfig> {
+	getGenModels<P extends GenProviders>(provider: P): Map<string, GenModelConfig> {
 		return this.#data.providerConfig[provider].genModels;
 	}
 
-	addGenModel<P extends GenProviders>(
-		provider: P,
-		modelName: string,
-		conf: GenModelConfig,
-	) {
+	addGenModel<P extends GenProviders>(provider: P, modelName: string, conf: GenModelConfig) {
 		const current = this.#data.providerConfig[provider].genModels;
 		if (current.has(modelName)) throw new AddGenModelError(provider, modelName);
 		const next = new Map(current);
@@ -405,14 +374,9 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
-	updateGenModel<P extends GenProviders>(
-		provider: P,
-		modelName: string,
-		conf: GenModelConfig,
-	) {
+	updateGenModel<P extends GenProviders>(provider: P, modelName: string, conf: GenModelConfig) {
 		const current = this.#data.providerConfig[provider].genModels;
-		if (!current.has(modelName))
-			throw new SetGenModelError(provider, modelName);
+		if (!current.has(modelName)) throw new SetGenModelError(provider, modelName);
 		const next = new Map(current);
 		next.set(modelName, conf);
 		this.#data.providerConfig[provider].genModels = next;
@@ -421,8 +385,7 @@ export class PluginDataStore {
 
 	deleteGenModel<P extends GenProviders>(provider: P, modelName: string) {
 		const current = this.#data.providerConfig[provider].genModels;
-		if (!current.has(modelName))
-			throw new SetGenModelError(provider, modelName);
+		if (!current.has(modelName)) throw new SetGenModelError(provider, modelName);
 		const next = new Map(current);
 		next.delete(modelName);
 		this.#data.providerConfig[provider].genModels = next;
@@ -430,15 +393,10 @@ export class PluginDataStore {
 	}
 
 	// Get/set genModels (if present)
-	getProviderGenModels<K extends keyof PluginData["providerConfig"]>(
-		provider: K,
-	): Record<string, any> | undefined {
+	getProviderGenModels<K extends keyof PluginData["providerConfig"]>(provider: K): Record<string, any> | undefined {
 		return (this.#data.providerConfig[provider] as any).genModels;
 	}
-	setProviderGenModels<K extends keyof PluginData["providerConfig"]>(
-		provider: K,
-		value: Record<string, any>,
-	) {
+	setProviderGenModels<K extends keyof PluginData["providerConfig"]>(provider: K, value: Record<string, any>) {
 		if ("genModels" in this.#data.providerConfig[provider]) {
 			(this.#data.providerConfig[provider] as any).genModels = value;
 			this.saveSettings();
@@ -448,21 +406,13 @@ export class PluginDataStore {
 
 let _pluginDataStore: PluginDataStore | null = null;
 
-export async function createData(
-	plugin: SecondBrainPlugin,
-): Promise<PluginDataStore> {
+export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataStore> {
 	if (_pluginDataStore) return _pluginDataStore;
 
 	const rawData = await plugin.loadData();
 
 	// Validate and safely load plugin data
-	const {
-		data: validatedData,
-		hasErrors,
-		hasWarnings,
-		errors,
-		warnings,
-	} = safeLoadPluginData(rawData);
+	const { data: validatedData, hasErrors, hasWarnings, errors, warnings } = safeLoadPluginData(rawData);
 
 	// Log validation results
 	if (hasWarnings) {
