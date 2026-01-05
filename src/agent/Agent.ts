@@ -88,6 +88,12 @@ export type AgentStreamChunk =
 			result: AgentResult;
 			runId: string;
 			threadId: string;
+	  }
+	| {
+			type: "checkpoint_message";
+			message: ThreadMessage;
+			runId: string;
+			threadId: string;
 	  };
 
 interface SelectedModel {
@@ -369,6 +375,23 @@ export class Agent {
 			runId,
 			threadId,
 		};
+
+		// Read the latest checkpoint to get the final assistant message as persisted
+		// This ensures UI stays in sync with the database
+		const checkpointMessage = await this.getLastAssistantMessageFromCheckpoint(threadId);
+		if (checkpointMessage) {
+			Logger.debug("agent.streamTokens.checkpoint_message", {
+				runId,
+				threadId,
+				messageId: checkpointMessage.id,
+			});
+			yield {
+				type: "checkpoint_message",
+				message: checkpointMessage,
+				runId,
+				threadId,
+			};
+		}
 	}
 
 	async getThreadHistory(threadId: string): Promise<ThreadHistory | undefined> {
@@ -739,5 +762,30 @@ ${conversationText}`;
 			return globalThis.crypto.randomUUID();
 		}
 		return `run_${Math.random().toString(36).slice(2, 10)}`;
+	}
+
+	/**
+	 * Reads the latest checkpoint and extracts the last assistant message.
+	 * Used to ensure UI stays in sync with persisted state after streaming.
+	 */
+	private async getLastAssistantMessageFromCheckpoint(threadId: string): Promise<ThreadMessage | undefined> {
+		const tuple = await this.safeGetCheckpointTuple(threadId);
+		if (!tuple) {
+			return undefined;
+		}
+
+		const messages = this.extractMessagesFromCheckpoint(tuple);
+		if (messages.length === 0) {
+			return undefined;
+		}
+
+		// Find the last assistant message
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (messages[i].role === "assistant") {
+				return messages[i];
+			}
+		}
+
+		return undefined;
 	}
 }
