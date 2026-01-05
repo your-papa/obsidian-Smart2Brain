@@ -1,11 +1,7 @@
 import { getPlugin } from "./state.svelte";
 import { getData } from "./dataStore.svelte";
 import { Notice, TFile } from "obsidian";
-import {
-	genUUIDv7,
-	dateFromUUIDv7,
-	type UUIDv7,
-} from "../utils/uuid7Validator";
+import { genUUIDv7, dateFromUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 import type { AgentManager } from "../agent/AgentManager";
 import type { ThreadMessage } from "../agent/messages/ThreadMessage";
 import type { ThreadHistory } from "../agent/Agent";
@@ -133,28 +129,12 @@ function normalizeToolInput(raw: unknown): Record<string, unknown> {
 }
 
 /**
- * Converts an array of ThreadMessage (from papa-ts/LangGraph) into MessagePair[] for UI rendering.
- *
- * This function:
- * 1. Pairs user messages with their corresponding assistant responses
- * 2. Attaches tool outputs to their parent assistant message's tool calls
- * 3. Merges consecutive assistant messages (tool calls + final response)
- * 4. Uses UUIDv7 for message pair IDs (with timestamp extraction capability)
- * 5. Uses errorCount to distinguish error state from cancelled state
+ * Builds a map of tool outputs from tool messages.
  */
-export function threadMessagesToMessagePairs(
+function buildToolOutputsMap(
 	threadMessages: ThreadMessage[],
-	errorCount: number = 0,
-): MessagePair[] {
-	if (!threadMessages || threadMessages.length === 0) return [];
-
-	const messagePairs: MessagePair[] = [];
-
-	// Build a map of tool outputs: tool_call_id -> { content, status }
-	const toolOutputs = new Map<
-		string,
-		{ content: unknown; status: ToolCallStatus }
-	>();
+): Map<string, { content: unknown; status: ToolCallStatus }> {
+	const toolOutputs = new Map<string, { content: unknown; status: ToolCallStatus }>();
 	for (const msg of threadMessages) {
 		const toolCallId = (msg as any).tool_call_id || (msg as any).toolCallId;
 		if (msg.role === "tool" && toolCallId) {
@@ -164,11 +144,107 @@ export function threadMessagesToMessagePairs(
 			});
 		}
 	}
+	return toolOutputs;
+}
+
+/**
+ * Converts a single assistant ThreadMessage to an AssistantMessage.
+ * Used to sync UI with checkpoint state after streaming, and reused in batch conversion.
+ */
+export function threadMessageToAssistantMessage(
+	msg: ThreadMessage,
+	toolOutputs?: Map<string, { content: unknown; status: ToolCallStatus }>,
+	stateOverride?: AssistantState,
+): AssistantMessage {
+	const textContent = extractTextContent(msg.content);
+
+	// Extract tool calls if present
+	const rawToolCalls = (msg as any).tool_calls || (msg as any).toolCalls;
+	let toolCalls: ToolCallState[] | undefined;
+
+	if (Array.isArray(rawToolCalls) && rawToolCalls.length > 0) {
+		toolCalls = rawToolCalls.map((tc: any) => {
+			const toolOutput = toolOutputs?.get(tc.id);
+			return {
+				id: tc.id,
+				name: tc.name,
+				input: normalizeToolInput(tc.arguments || tc.input),
+				status: toolOutput?.status ?? "completed",
+				output: toolOutput?.content,
+			};
+		});
+	}
+
+	return {
+		state: stateOverride ?? AssistantState.success,
+		content: textContent,
+		toolCalls,
+	};
+}
+
+/**
+ * Merges multiple assistant ThreadMessages into a single AssistantMessage.
+ * Combines tool calls from all messages and uses the last non-empty text content.
+ */
+function mergeAssistantMessages(
+	assistantMessages: ThreadMessage[],
+	toolOutputs: Map<string, { content: unknown; status: ToolCallStatus }>,
+	stateOverride?: AssistantState,
+): AssistantMessage {
+	if (assistantMessages.length === 0) {
+		return {
+			state: stateOverride ?? AssistantState.success,
+			content: "",
+		};
+	}
+
+	if (assistantMessages.length === 1) {
+		return threadMessageToAssistantMessage(assistantMessages[0], toolOutputs, stateOverride);
+	}
+
+	// Merge multiple assistant messages
+	let finalContent = "";
+	const allToolCalls: ToolCallState[] = [];
+
+	for (const msg of assistantMessages) {
+		const converted = threadMessageToAssistantMessage(msg, toolOutputs);
+
+		// Use the last non-empty content
+		if (converted.content.trim()) {
+			finalContent = converted.content;
+		}
+
+		// Collect all tool calls
+		if (converted.toolCalls) {
+			allToolCalls.push(...converted.toolCalls);
+		}
+	}
+
+	return {
+		state: stateOverride ?? AssistantState.success,
+		content: finalContent,
+		toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+	};
+}
+
+/**
+ * Converts an array of ThreadMessage (from papa-ts/LangGraph) into MessagePair[] for UI rendering.
+ *
+ * This function:
+ * 1. Pairs user messages with their corresponding assistant responses
+ * 2. Attaches tool outputs to their parent assistant message's tool calls
+ * 3. Merges consecutive assistant messages (tool calls + final response)
+ * 4. Uses UUIDv7 for message pair IDs (with timestamp extraction capability)
+ * 5. Uses errorCount to distinguish error state from cancelled state
+ */
+export function threadMessagesToMessagePairs(threadMessages: ThreadMessage[], errorCount: number = 0): MessagePair[] {
+	if (!threadMessages || threadMessages.length === 0) return [];
+
+	const messagePairs: MessagePair[] = [];
+	const toolOutputs = buildToolOutputsMap(threadMessages);
 
 	// Filter to just user and assistant messages
-	const conversationMessages = threadMessages.filter(
-		(msg) => msg.role === "user" || msg.role === "assistant",
-	);
+	const conversationMessages = threadMessages.filter((msg) => msg.role === "user" || msg.role === "assistant");
 
 	let i = 0;
 	while (i < conversationMessages.length) {
@@ -183,55 +259,18 @@ export function threadMessagesToMessagePairs(
 			// Look ahead for assistant response(s)
 			const assistantMessages: ThreadMessage[] = [];
 			let j = i + 1;
-			while (
-				j < conversationMessages.length &&
-				conversationMessages[j].role === "assistant"
-			) {
+			while (j < conversationMessages.length && conversationMessages[j].role === "assistant") {
 				assistantMessages.push(conversationMessages[j]);
 				j++;
 			}
 
-			// Merge assistant messages
-			let assistantContent = "";
-			const allToolCalls: ToolCallState[] = [];
-
-			for (const assistantMsg of assistantMessages) {
-				// Collect tool calls
-				const rawToolCalls =
-					(assistantMsg as any).tool_calls || (assistantMsg as any).toolCalls;
-				if (Array.isArray(rawToolCalls)) {
-					for (const tc of rawToolCalls) {
-						const toolOutput = toolOutputs.get(tc.id);
-						allToolCalls.push({
-							id: tc.id,
-							name: tc.name,
-							input: normalizeToolInput(tc.arguments || tc.input),
-							status: toolOutput?.status ?? "running",
-							output: toolOutput?.content,
-						});
-					}
-				}
-
-				// Get text content (final response)
-				const textContent = extractTextContent(assistantMsg.content);
-				if (textContent.trim()) {
-					assistantContent = textContent;
-				}
-			}
-
-			// Determine state for the last message pair
-			// If this is the last user message and there's no assistant response:
-			// - If errorCount > 0, it was likely an error (errors prevent responses)
-			// - Otherwise, it was cancelled by user
-			const isLastUserMessage = j >= conversationMessages.length;
+			// Determine state for the message pair
 			const hasNoResponse = assistantMessages.length === 0;
-
 			let state: AssistantState;
 
 			if (hasNoResponse && errorCount > 0) {
-				// If there are errors in the thread and this message has no response, it errored
 				state = AssistantState.error;
-				errorCount--; // Consume one error
+				errorCount--;
 			} else if (hasNoResponse) {
 				state = AssistantState.cancelled;
 			} else {
@@ -241,28 +280,18 @@ export function threadMessagesToMessagePairs(
 			messagePairs.push({
 				id: pairId,
 				userMessage: { content: userContent },
-				assistantMessage: {
-					state,
-					content: assistantContent,
-					toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-				},
+				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state),
 			});
 
-			i = j; // Skip past all the assistant messages we consumed
+			i = j;
 		} else {
 			// Orphaned assistant message (no preceding user message)
-			// This shouldn't happen normally, but handle it gracefully
-			const assistantContent = extractTextContent(msg.content);
-			// ThreadMessages from LangGraph use UUIDv4, not UUIDv7 - generate fresh UUIDv7
 			const pairId = genUUIDv7();
 
 			messagePairs.push({
 				id: pairId,
 				userMessage: { content: "" },
-				assistantMessage: {
-					state: AssistantState.success,
-					content: assistantContent,
-				},
+				assistantMessage: threadMessageToAssistantMessage(msg, toolOutputs),
 			});
 			i++;
 		}
@@ -286,7 +315,8 @@ type StreamChunk =
 	| { type: "token"; token: string }
 	| { type: "tool_start"; toolCallId: string; toolName: string; input: unknown }
 	| { type: "tool_end"; toolCallId: string; toolName: string; output: unknown }
-	| { type: "result"; result?: unknown };
+	| { type: "result"; result?: unknown }
+	| { type: "checkpoint_message"; message: ThreadMessage };
 
 /* -----------------------------------------------------------------------------
  * ChatSession
@@ -306,11 +336,7 @@ export class ChatSession {
 	// Reactive UI state
 	messageState = $state<MessageState>(MessageState.idle);
 
-	constructor(
-		id: string,
-		threadMessages: ThreadMessage[],
-		errorCount: number = 0,
-	) {
+	constructor(id: string, threadMessages: ThreadMessage[], errorCount: number = 0) {
 		this.id = id;
 		// Convert once on load, then drop the raw ThreadMessages
 		this.messages = threadMessagesToMessagePairs(threadMessages, errorCount);
@@ -435,9 +461,7 @@ export class ChatSession {
 				if (chunk.type === "tool_end") {
 					// Find the tool call and mark it completed with output
 					if (assistantMsg.toolCalls) {
-						const tc = assistantMsg.toolCalls.find(
-							(t) => t.id === chunk.toolCallId,
-						);
+						const tc = assistantMsg.toolCalls.find((t) => t.id === chunk.toolCallId);
 						if (tc) {
 							tc.status = "completed";
 							tc.output = chunk.output;
@@ -466,17 +490,24 @@ export class ChatSession {
 					continue;
 				}
 
-				// For result chunks, stream is complete
+				// For result chunks, stream is complete but wait for checkpoint_message
 				if (chunk.type === "result") {
+					continue;
+				}
+
+				// Sync UI with persisted checkpoint state
+				if (chunk.type === "checkpoint_message") {
+					const checkpointAssistant = threadMessageToAssistantMessage(chunk.message);
+					// Preserve the streaming state, update content and tool calls from checkpoint
+					pair.assistantMessage.content = checkpointAssistant.content;
+					pair.assistantMessage.toolCalls = checkpointAssistant.toolCalls;
 					break;
 				}
 			}
 
 			pair.assistantMessage.state = AssistantState.success;
 		} catch (err) {
-			const failedState: AssistantState = this.cancelled
-				? AssistantState.cancelled
-				: AssistantState.error;
+			const failedState: AssistantState = this.cancelled ? AssistantState.cancelled : AssistantState.error;
 			pair.assistantMessage.state = failedState;
 		} finally {
 			this.abortController = null;
@@ -517,14 +548,8 @@ export class Messenger {
 		if (!id) throw new Error("Invalid thread ID");
 		const history = await this.#agentManager.getThreadHistory(id);
 		// Cast to access lastError and errorCount properties (available after papa-ts rebuild)
-		const historyWithError = history as
-			| (ThreadHistory & { lastError?: ThreadError; errorCount?: number })
-			| null;
-		this.session = new ChatSession(
-			id,
-			historyWithError?.messages || [],
-			historyWithError?.errorCount || 0,
-		);
+		const historyWithError = history as (ThreadHistory & { lastError?: ThreadError; errorCount?: number }) | null;
+		this.session = new ChatSession(id, historyWithError?.messages || [], historyWithError?.errorCount || 0);
 	}
 
 	/* ---------------- Sending Messages ---------------- */

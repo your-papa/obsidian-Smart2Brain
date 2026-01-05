@@ -5,7 +5,7 @@
         ChatPreview,
         CurrentSession,
         Messenger,
-    } from "./chatState.svelte";
+    } from "../../stores/chatStore.svelte";
     import { icon } from "../../utils/utils";
     import type { UUIDv7 } from "../../utils/uuid7Validator";
 
