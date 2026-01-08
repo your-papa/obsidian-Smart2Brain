@@ -1,131 +1,97 @@
 <script lang="ts">
-    import { icon } from "../../utils/utils";
-    import { createMarkdownRenderer } from "../../utils/markdownHelper";
-    import { getPlugin } from "../../stores/state.svelte";
-    import {
-        AssistantState,
-        type AssistantMessage,
-        type ChatModel,
-        type Messenger,
-    } from "../../stores/chatStore.svelte";
-    import Dots from "../../utils/Dots.svelte";
-    import ToolCallsSection from "./ToolCallsSection.svelte";
-    import { Notice } from "obsidian";
-    import type { UUIDv7 } from "../../utils/uuid7Validator";
-    import Logo from "../Logos/Logo.svelte";
-    import { tick } from "svelte";
+import { icon } from "../../utils/utils";
+import MarkdownRenderer from "../base/MarkdownRenderer.svelte";
+import { AssistantState, type AssistantMessage, type ChatModel, type Messenger } from "../../stores/chatStore.svelte";
+import Dots from "../../utils/Dots.svelte";
+import ToolCallsSection from "./ToolCallsSection.svelte";
+import { Notice } from "obsidian";
+import type { UUIDv7 } from "../../utils/uuid7Validator";
+import Logo from "../Logos/Logo.svelte";
+import { tick } from "svelte";
 
-    interface Props {
-        messenger: Messenger;
-        isInputFocused?: boolean;
-    }
+interface Props {
+	messenger: Messenger;
+	isInputFocused?: boolean;
+}
 
-    const { messenger, isInputFocused = false }: Props = $props();
+const { messenger, isInputFocused = false }: Props = $props();
 
-    const messages = $derived.by(() => {
-        return messenger.session?.messages;
-    });
+const messages = $derived.by(() => {
+	return messenger.session?.messages;
+});
 
-    let scrollContainer: HTMLDivElement | undefined = $state();
-    const messageRefs = new Map<string, HTMLDivElement>();
+let scrollContainer: HTMLDivElement | undefined = $state();
+const messageRefs = new Map<string, HTMLDivElement>();
 
-    export async function scrollToLatestMessage() {
-        await tick();
-        if (messages && messages.length > 0 && scrollContainer) {
-            const latestPair = messages[messages.length - 1];
-            const messageElement = messageRefs.get(latestPair.id + "-user");
+export async function scrollToLatestMessage() {
+	await tick();
+	if (messages && messages.length > 0 && scrollContainer) {
+		const latestPair = messages[messages.length - 1];
+		const messageElement = messageRefs.get(latestPair.id + "-user");
 
-            if (messageElement && scrollContainer) {
-                const containerTop =
-                    scrollContainer.getBoundingClientRect().top;
-                const messageTop = messageElement.getBoundingClientRect().top;
-                const currentScroll = scrollContainer.scrollTop;
+		if (messageElement && scrollContainer) {
+			const containerTop = scrollContainer.getBoundingClientRect().top;
+			const messageTop = messageElement.getBoundingClientRect().top;
+			const currentScroll = scrollContainer.scrollTop;
 
-                // Calculate scroll position to place message at top of container
-                const targetScroll =
-                    currentScroll + (messageTop - containerTop);
+			// Calculate scroll position to place message at top of container
+			const targetScroll = currentScroll + (messageTop - containerTop);
 
-                scrollContainer.scrollTo({
-                    top: targetScroll,
-                    behavior: "smooth",
-                });
-            }
-        }
-    }
+			scrollContainer.scrollTo({
+				top: targetScroll,
+				behavior: "smooth",
+			});
+		}
+	}
+}
 
-    // Svelte action to register message refs
-    function registerMessageRef(node: HTMLDivElement, id: string) {
-        messageRefs.set(id, node);
-        return {
-            destroy() {
-                messageRefs.delete(id);
-            },
-        };
-    }
+// Svelte action to register message refs
+function registerMessageRef(node: HTMLDivElement, id: string) {
+	messageRefs.set(id, node);
+	return {
+		destroy() {
+			messageRefs.delete(id);
+		},
+	};
+}
 
-    const markdownRenderer = (node: HTMLElement, content: string) => {
-        const plugin = getPlugin();
-        const renderer = createMarkdownRenderer({
-            app: plugin.app,
-            container: node,
-            sourcePath: plugin.app.workspace.getActiveFile()?.path ?? "",
-            component: plugin,
-            content,
-        });
+function renderAssitantAnswer(assistantAnswer: AssistantMessage) {
+	if (assistantAnswer.state === AssistantState.cancelled) {
+		return "> [!Warning] stopped by user";
+	}
+	if (assistantAnswer.state === AssistantState.error) {
+		return "> [!Error] an error occured";
+	}
+	return assistantAnswer.content;
+}
 
-        return {
-            update(value: string) {
-                renderer.update(value);
-            },
-            destroy() {
-                renderer.destroy();
-            },
-        };
-    };
+async function copyToClipboard(content: string) {
+	await navigator.clipboard.writeText(content);
+	new Notice("Copied to Clipboard");
+}
 
-    function renderAssitantAnswer(assistantAnswer: AssistantMessage) {
-        if (assistantAnswer.state === AssistantState.cancelled) {
-            return "> [!Warning] stopped by user";
-        }
-        if (assistantAnswer.state === AssistantState.error) {
-            return "> [!Error] an error occured";
-        }
-        return assistantAnswer.content;
-    }
+async function redoMessage(messageId: UUIDv7, model: ChatModel) {
+	console.log("todo resend");
+}
 
-    async function copyToClipboard(content: string) {
-        await navigator.clipboard.writeText(content);
-        new Notice("Copied to Clipboard");
-    }
+async function branchOff(messageId: UUIDv7) {
+	console.log("todo branch off");
+}
 
-    async function redoMessage(messageId: UUIDv7, model: ChatModel) {
-        console.log("todo resend");
-    }
+// Track which message pairs have their tools open
+let toolsOpenState: Record<string, boolean> = $state({});
 
-    async function branchOff(messageId: UUIDv7) {
-        console.log("todo branch off");
-    }
+function getToolsOpen(messageId: string, assistantMessage: AssistantMessage): boolean {
+	// Default: open if no content yet, closed if content exists
+	if (toolsOpenState[messageId] === undefined) {
+		return !assistantMessage.content || assistantMessage.content.length === 0;
+	}
+	return toolsOpenState[messageId];
+}
 
-    // Track which message pairs have their tools open
-    let toolsOpenState: Record<string, boolean> = $state({});
-
-    function getToolsOpen(
-        messageId: string,
-        assistantMessage: AssistantMessage,
-    ): boolean {
-        // Default: open if no content yet, closed if content exists
-        if (toolsOpenState[messageId] === undefined) {
-            return (
-                !assistantMessage.content ||
-                assistantMessage.content.length === 0
-            );
-        }
-        return toolsOpenState[messageId];
-    }
-
-    function setToolsOpen(messageId: string, open: boolean) {
-        toolsOpenState[messageId] = open;
-    }
+function setToolsOpen(messageId: string, open: boolean) {
+	toolsOpenState[messageId] = open;
+}
 </script>
 
 <div class="relative flex-1 min-h-0 z-20">
@@ -152,11 +118,10 @@
                         use:registerMessageRef={messagePair.id + "-user"}
                         class="group mr-2 flex flex-col items-end gap-2 mb-2"
                     >
-                        <div
+                        <MarkdownRenderer
+                            content={messagePair.userMessage.content}
                             class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2 [&>p]:m-0"
-                            use:markdownRenderer={messagePair.userMessage
-                                .content}
-                        ></div>
+                        />
 
                         <div
                             class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
@@ -221,12 +186,10 @@
                                     color={"var(--text-accent)"}
                                 />
                             {:else if messagePair.assistantMessage.content || messagePair.assistantMessage.state === AssistantState.cancelled || messagePair.assistantMessage.state === AssistantState.error}
-                                <div
+                                <MarkdownRenderer
+                                    content={renderAssitantAnswer(messagePair.assistantMessage)}
                                     class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
-                                    use:markdownRenderer={renderAssitantAnswer(
-                                        messagePair.assistantMessage,
-                                    )}
-                                ></div>
+                                />
                             {:else if messagePair.assistantMessage.state === AssistantState.idle || messagePair.assistantMessage.state === AssistantState.streaming}
                                 <!-- Show loading dots only if streaming and no content yet (and no tool calls) -->
                                 {#if !messagePair.assistantMessage.toolCalls?.length}

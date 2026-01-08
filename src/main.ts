@@ -51,6 +51,14 @@ export default class SecondBrainPlugin extends Plugin {
 		this.pluginData = await createData(this);
 
 		// Register file-based chat view and .chat extension (v2 ChatView)
+		// const VIEW_TYPE = "my-view";
+
+		this.registerHoverLinkSource(VIEW_TYPE_CHAT, {
+			display: "Smart2Brain Chat",
+			// true = by default require Cmd/Ctrl for this source
+			// false = by default no modifier required (more “reading-mode-like”)
+			defaultMod: false,
+		});
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
 		this.registerExtensions(["chat"], VIEW_TYPE_CHAT);
 
