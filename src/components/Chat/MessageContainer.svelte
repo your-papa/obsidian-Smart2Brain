@@ -96,7 +96,7 @@ function setToolsOpen(messageId: string, open: boolean) {
 
 <div class="relative flex-1 min-h-0 z-20">
     <!-- Scrollable messages area -->
-    <div bind:this={scrollContainer} class="h-full overflow-y-auto px-2 py-4">
+    <div bind:this={scrollContainer} class="scroll-container h-full overflow-y-auto px-2 py-4">
         <div class="w-full max-w-[--file-line-width] mx-auto h-full">
             {#if !messages || messages.length === 0}
                 <!-- Empty state with logo -->
@@ -244,6 +244,13 @@ function setToolsOpen(messageId: string, open: boolean) {
 </div>
 
 <style>
+    .scroll-container {
+        /* Enable native elastic/rubber-band scrolling on macOS/iOS */
+        -webkit-overflow-scrolling: touch;
+        /* Allow the container to have its own scroll bounce */
+        overscroll-behavior: contain;
+    }
+
     .logo-container :global(svg) {
         width: 100%;
         height: 100%;
