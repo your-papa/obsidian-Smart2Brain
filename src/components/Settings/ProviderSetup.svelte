@@ -34,7 +34,7 @@
 </script>
 
 <Accordion.Root type="single" bind:value={activeProvider}>
-    <summary class="setting-item-heading py-3">Provider Config</summary>
+    <SettingContainer isHeading={true} name="Provier Config" />
     {#if unconfiguredProviders.length !== 0 && selectedProvider}
         <SettingContainer
             name={$t("settings.provider.provider")}

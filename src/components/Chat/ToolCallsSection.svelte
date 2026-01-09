@@ -1,123 +1,95 @@
 <script lang="ts">
-    import type { ToolCallState } from "../../stores/chatStore.svelte";
-    import { createMarkdownRenderer } from "../../utils/markdownHelper";
-    import { getPlugin } from "../../stores/state.svelte";
+import type { ToolCallState } from "../../stores/chatStore.svelte";
+import MarkdownRenderer from "../base/MarkdownRenderer.svelte";
 
-    interface Props {
-        toolCalls: ToolCallState[];
-        isOpen: boolean;
-        onToggle: (open: boolean) => void;
-    }
+interface Props {
+	toolCalls: ToolCallState[];
+	isOpen: boolean;
+	onToggle: (open: boolean) => void;
+}
 
-    const { toolCalls, isOpen, onToggle }: Props = $props();
+const { toolCalls, isOpen, onToggle }: Props = $props();
 
-    const markdownRenderer = (node: HTMLElement, content: string) => {
-        const plugin = getPlugin();
-        const renderer = createMarkdownRenderer({
-            app: plugin.app,
-            container: node,
-            sourcePath: plugin.app.workspace.getActiveFile()?.path ?? "",
-            component: plugin,
-            content,
-        });
+function formatToolInput(input: Record<string, unknown> | null | undefined): { key: string; value: unknown }[] {
+	if (!input || typeof input !== "object" || Array.isArray(input)) return [];
+	return Object.entries(input).map(([key, value]) => ({
+		key,
+		value,
+	}));
+}
 
-        return {
-            update(value: string) {
-                renderer.update(value);
-            },
-            destroy() {
-                renderer.destroy();
-            },
-        };
-    };
+function formatToolName(name: string): string {
+	if (!name) return "Unknown Tool";
+	// Convert snake_case or camelCase to Title Case with spaces
+	return name
+		.replace(/_/g, " ")
+		.replace(/([a-z])([A-Z])/g, "$1 $2")
+		.replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
-    function formatToolInput(
-        input: Record<string, unknown> | null | undefined,
-    ): { key: string; value: unknown }[] {
-        if (!input || typeof input !== "object" || Array.isArray(input))
-            return [];
-        return Object.entries(input).map(([key, value]) => ({
-            key,
-            value,
-        }));
-    }
+function formatValue(value: unknown): string {
+	if (value === null || value === undefined) return "null";
+	if (typeof value === "string") return value;
+	if (typeof value === "object") return JSON.stringify(value, null, 2);
+	return String(value);
+}
 
-    function formatToolName(name: string): string {
-        if (!name) return "Unknown Tool";
-        // Convert snake_case or camelCase to Title Case with spaces
-        return name
-            .replace(/_/g, " ")
-            .replace(/([a-z])([A-Z])/g, "$1 $2")
-            .replace(/\b\w/g, (c) => c.toUpperCase());
-    }
+function formatToolOutput(output: unknown): string {
+	if (output === null || output === undefined) return "";
+	if (typeof output === "string") return output;
 
-    function formatValue(value: unknown): string {
-        if (value === null || value === undefined) return "null";
-        if (typeof value === "string") return value;
-        if (typeof value === "object") return JSON.stringify(value, null, 2);
-        return String(value);
-    }
+	// If it's an array (ThreadMessage content format)
+	if (Array.isArray(output)) {
+		const textItems = output
+			.map((item: unknown) => {
+				if (item && typeof item === "object") {
+					const obj = item as Record<string, unknown>;
+					if (obj.type === "text" && obj.text !== undefined) {
+						return String(obj.text);
+					}
+					if (obj.type === "json" && obj.data !== undefined) {
+						return JSON.stringify(obj.data, null, 2);
+					}
+				}
+				return "";
+			})
+			.filter((text: string) => text !== "")
+			.join("\n");
+		if (textItems) return textItems;
+	}
 
-    function formatToolOutput(output: unknown): string {
-        if (output === null || output === undefined) return "";
-        if (typeof output === "string") return output;
+	// If it's an object, check if it's a single content item
+	if (typeof output === "object") {
+		const obj = output as Record<string, unknown>;
+		if (obj.type === "text" && obj.text !== undefined) {
+			return String(obj.text);
+		}
+		// Check if it has a content field (nested structure)
+		if (obj.content !== undefined) {
+			return formatToolOutput(obj.content);
+		}
+	}
 
-        // If it's an array (ThreadMessage content format)
-        if (Array.isArray(output)) {
-            const textItems = output
-                .map((item: unknown) => {
-                    if (item && typeof item === "object") {
-                        const obj = item as Record<string, unknown>;
-                        if (obj.type === "text" && obj.text !== undefined) {
-                            return String(obj.text);
-                        }
-                        if (obj.type === "json" && obj.data !== undefined) {
-                            return JSON.stringify(obj.data, null, 2);
-                        }
-                    }
-                    return "";
-                })
-                .filter((text: string) => text !== "")
-                .join("\n");
-            if (textItems) return textItems;
-        }
+	return JSON.stringify(output, null, 2);
+}
 
-        // If it's an object, check if it's a single content item
-        if (typeof output === "object") {
-            const obj = output as Record<string, unknown>;
-            if (obj.type === "text" && obj.text !== undefined) {
-                return String(obj.text);
-            }
-            // Check if it has a content field (nested structure)
-            if (obj.content !== undefined) {
-                return formatToolOutput(obj.content);
-            }
-        }
+function getToolStatus(calls: ToolCallState[] | undefined): "running" | "completed" {
+	if (!calls || calls.length === 0) return "completed";
+	return calls.some((t) => t.status === "running") ? "running" : "completed";
+}
 
-        return JSON.stringify(output, null, 2);
-    }
+function getToolSummaryText(calls: ToolCallState[] | undefined): string {
+	if (!calls || calls.length === 0) return "";
+	const count = calls.length;
+	const status = getToolStatus(calls);
+	if (status === "running") {
+		return "Running tools...";
+	}
+	return `Used ${count} tool${count === 1 ? "" : "s"}`;
+}
 
-    function getToolStatus(
-        calls: ToolCallState[] | undefined,
-    ): "running" | "completed" {
-        if (!calls || calls.length === 0) return "completed";
-        return calls.some((t) => t.status === "running")
-            ? "running"
-            : "completed";
-    }
-
-    function getToolSummaryText(calls: ToolCallState[] | undefined): string {
-        if (!calls || calls.length === 0) return "";
-        const count = calls.length;
-        const status = getToolStatus(calls);
-        if (status === "running") {
-            return "Running tools...";
-        }
-        return `Used ${count} tool${count === 1 ? "" : "s"}`;
-    }
-
-    const toolStatus = $derived(getToolStatus(toolCalls));
-    const summaryText = $derived(getToolSummaryText(toolCalls));
+const toolStatus = $derived(getToolStatus(toolCalls));
+const summaryText = $derived(getToolSummaryText(toolCalls));
 </script>
 
 <div class="w-full">
@@ -187,12 +159,10 @@
                                                     class="text-text-accent text-s"
                                                     >{key}:</span
                                                 >
-                                                <div
+                                                <MarkdownRenderer
+                                                    content={formatValue(value)}
                                                     class="flex-1 text-s [&_p]:m-0 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0"
-                                                    use:markdownRenderer={formatValue(
-                                                        value,
-                                                    )}
-                                                ></div>
+                                                />
                                             </div>
                                         {/each}
                                     </div>
@@ -209,12 +179,10 @@
                                         class="text-[0.75rem] font-semibold uppercase tracking-[0.05em] text-text-muted mb-1"
                                         >Output:</strong
                                     >
-                                    <div
+                                    <MarkdownRenderer
+                                        content={formatToolOutput(toolCall.output)}
                                         class="tool-output-content markdown-preview-view m-0 px-4 py-3 bg-code-background border border-bg-modifier-border rounded-md overflow-x-auto text-[0.85rem] leading-[1.6] text-text-normal break-words [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-background-primary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em] [&_pre]:bg-background-primary [&_pre]:p-3 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0"
-                                        use:markdownRenderer={formatToolOutput(
-                                            toolCall.output,
-                                        )}
-                                    ></div>
+                                    />
                                 </div>
                             {/if}
                         </div>
