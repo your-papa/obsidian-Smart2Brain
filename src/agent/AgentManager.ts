@@ -23,9 +23,7 @@ import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { createThreadId } from "../utils/threadId";
 
-export type ValidationResult =
-	| { success: true }
-	| { success: false; message: string };
+export type ValidationResult = { success: true } | { success: false; message: string };
 
 declare const MultiServerMCPClient: any;
 
@@ -81,10 +79,7 @@ export class AgentManager {
 	/**
 	 * Configures a provider on the main registry.
 	 */
-	private async configureRegistry(
-		provider: RegisteredProvider,
-		options: BuiltInProviderOptions,
-	): Promise<void> {
+	private async configureRegistry(provider: RegisteredProvider, options: BuiltInProviderOptions): Promise<void> {
 		await this.configureProviderOnRegistry(this.registry, provider, options);
 	}
 
@@ -92,10 +87,7 @@ export class AgentManager {
 	 * Tests and configures a provider on the actual registry.
 	 * Returns a ValidationResult indicating success or failure with a message.
 	 */
-	async testProviderConfig(
-		provider: RegisteredProvider,
-		options: BuiltInProviderOptions,
-	): Promise<ValidationResult> {
+	async testProviderConfig(provider: RegisteredProvider, options: BuiltInProviderOptions): Promise<ValidationResult> {
 		try {
 			await this.configureProviderOnRegistry(this.registry, provider, options);
 			return { success: true };
@@ -132,10 +124,7 @@ export class AgentManager {
 				console.log("Smart Second Brain: LangSmith telemetry enabled");
 				return telemetry;
 			} catch (e) {
-				console.error(
-					"Smart Second Brain: Failed to initialize LangSmith telemetry",
-					e,
-				);
+				console.error("Smart Second Brain: Failed to initialize LangSmith telemetry", e);
 			}
 		}
 		return undefined;
@@ -148,37 +137,24 @@ export class AgentManager {
 		const getPropertiesTool = createGetPropertiesTool(this.plugin.app);
 		const readNoteTool = createReadNoteTool(this.plugin.app);
 
-		const tools: any[] = [
-			searchNotesTool,
-			getAllTagsTool,
-			executeDataviewTool,
-			getPropertiesTool,
-			readNoteTool,
-		];
+		const tools: any[] = [searchNotesTool, getAllTagsTool, executeDataviewTool, getPropertiesTool, readNoteTool];
 
 		// Load MCP tools if configured (use getData())
 		const data = getData();
 		if (data.mcpServers && Object.keys(data.mcpServers).length > 0) {
 			try {
-				console.log(
-					"Smart Second Brain: Initializing MCP client...",
-					data.mcpServers,
-				);
+				console.log("Smart Second Brain: Initializing MCP client...", data.mcpServers);
 
 				// HACK: Monkey patch the global fetch for the entire lifecycle
 				if (!(window as any)._originalFetch) {
 					(window as any)._originalFetch = window.fetch;
-					window.fetch = createObsidianFetch(
-						(window as any)._originalFetch,
-					) as any;
+					window.fetch = createObsidianFetch((window as any)._originalFetch) as any;
 				}
 
 				try {
 					const mcpClient = new MultiServerMCPClient(data.mcpServers);
 					const mcpTools = await mcpClient.getTools();
-					console.log(
-						`Smart Second Brain: Loaded ${mcpTools.length} MCP tools`,
-					);
+					console.log(`Smart Second Brain: Loaded ${mcpTools.length} MCP tools`);
 					tools.push(...mcpTools);
 				} catch (e) {
 					console.error("Failed to get MCP tools", e);
@@ -237,8 +213,7 @@ export class AgentManager {
 
 		// Check for available plugins to adjust prompt capabilities
 		// @ts-ignore - Dynamic access to plugins
-		const hasChartsPlugin =
-			this.plugin.app.plugins?.enabledPlugins?.has("obsidian-charts");
+		const hasChartsPlugin = this.plugin.app.plugins?.enabledPlugins?.has("obsidian-charts");
 
 		// Set prompt
 		this.agent.setPrompt(createSystemPrompt(hasChartsPlugin));
@@ -335,18 +310,13 @@ export class AgentManager {
 		}
 	}
 
-	async getAvailableModels(
-		providerName: RegisteredProvider,
-	): Promise<string[]> {
+	async getAvailableModels(providerName: RegisteredProvider): Promise<string[]> {
 		try {
 			if (!providerName) return [];
 
 			return this.registry.listChatModels(providerName);
 		} catch (error) {
-			console.error(
-				"Smart Second Brain: Error fetching available models",
-				error,
-			);
+			console.error("Smart Second Brain: Error fetching available models", error);
 			return [];
 		}
 	}
@@ -380,7 +350,11 @@ export class AgentManager {
 		await this.chatManager.delete(threadId);
 	}
 
-	async generateThreadTitle(threadId: string): Promise<void> {
+	/**
+	 * Generate a title for a thread using only the user's first message.
+	 * This can run in parallel with streaming since it doesn't need the AI response.
+	 */
+	async generateThreadTitleFromUserMessage(threadId: string, userMessage: string): Promise<void> {
 		const agent = await this.ensureAgent().catch((e) => {
 			console.warn("Agent not initialized, cannot generate title");
 			return null;
@@ -389,52 +363,10 @@ export class AgentManager {
 		if (!agent) return;
 
 		try {
-			await agent.generateTitle(threadId);
-			console.log(`Generated title for thread ${threadId}`);
-
-			// Wait a bit for the title to be persisted
-			await new Promise((resolve) => setTimeout(resolve, 200));
-
-			// Try multiple ways to get the title:
-			// 1. Read from thread store (may have it in cache)
-			let snapshot = await this.chatManager.read(threadId, true);
-			console.log(`Read snapshot for thread ${threadId}:`, snapshot);
-
-			// 2. If not found, try reading directly from in-memory storage
-			if (!snapshot?.title) {
-				const threadData = await this.chatManager.ensureThreadLoaded(threadId);
-				if (threadData?.title) {
-					console.log(`Title found in threadData: "${threadData.title}"`);
-					snapshot = {
-						threadId: threadData.threadId,
-						title: threadData.title,
-						metadata: threadData.metadata,
-						createdAt: threadData.createdAt,
-						updatedAt: threadData.updatedAt,
-					};
-				}
-			}
-
-			if (snapshot?.title) {
-				console.log(`Title found: "${snapshot.title}", renaming file...`);
-				await this.chatManager.renameChatFile(threadId, snapshot.title);
-			} else {
-				console.warn(
-					`No title found for thread ${threadId} after generation. Waiting longer and retrying...`,
-				);
-				// Wait longer and try again
-				await new Promise((resolve) => setTimeout(resolve, 1000));
-				snapshot = await this.chatManager.read(threadId, true);
-				if (snapshot?.title) {
-					console.log(
-						`Title found on retry: "${snapshot.title}", renaming file...`,
-					);
-					await this.chatManager.renameChatFile(threadId, snapshot.title);
-				} else {
-					console.error(
-						`Title still not found for thread ${threadId} after retry`,
-					);
-				}
+			const title = await agent.generateTitle(userMessage);
+			if (title) {
+				console.log(`Generated title for thread ${threadId}: "${title}"`);
+				await this.chatManager.renameChatFile(threadId, title);
 			}
 		} catch (error) {
 			console.error(`Error generating title for thread ${threadId}:`, error);
@@ -475,10 +407,7 @@ export class AgentManager {
 		};
 
 		// Create file directly and open it
-		const file = await this.plugin.app.vault.create(
-			path,
-			JSON.stringify(initialData, null, 2),
-		);
+		const file = await this.plugin.app.vault.create(path, JSON.stringify(initialData, null, 2));
 		await this.plugin.app.workspace.getLeaf(false).openFile(file);
 	}
 

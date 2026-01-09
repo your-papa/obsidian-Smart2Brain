@@ -432,6 +432,14 @@ export class ChatSession {
 			pair.assistantMessage.state = AssistantState.streaming;
 
 			const plugin = getPlugin();
+
+			// Generate chat title in parallel with streaming (on first message only)
+			if (this.messages.length === 1 && getData().isGeneratingChatTitle) {
+				plugin.agentManager.generateThreadTitleFromUserMessage(String(this.id), userContent).catch((err) => {
+					console.warn("[ChatSession] Failed to generate chat title:", err);
+				});
+			}
+
 			const stream = plugin.agentManager.streamQuery(
 				userContent,
 				String(this.id),
