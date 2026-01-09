@@ -1,4 +1,4 @@
-import { createReactAgent } from "@langchain/langgraph/prebuilt";
+import { createAgent, type ReactAgent } from "langchain";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { StreamEvent } from "@langchain/core/tracers/log_stream";
@@ -56,7 +56,7 @@ export interface AgentOptions {
 	defaultPrompt?: string;
 }
 
-type AgentRunnable = ReturnType<typeof createReactAgent>; // invoke(), stream(), etc.
+type AgentRunnable = ReactAgent; // invoke(), stream(), etc.
 
 export type AgentStreamOptions = AgentRunOptions;
 
@@ -506,10 +506,10 @@ export class Agent {
 			return this.agentRunnable;
 		}
 
-		this.agentRunnable = createReactAgent({
-			llm: this.selectedModel.instance,
+		this.agentRunnable = createAgent({
+			model: this.selectedModel.instance,
 			tools: Array.isArray(this.tools) ? [...this.tools] : [],
-			prompt: this.prompt,
+			systemPrompt: this.prompt,
 			checkpointer: this.checkpointer,
 		});
 		this.dirty = false;
@@ -698,22 +698,15 @@ export class Agent {
 		Logger.debug("agent.threadStore.write", { threadId, lastRunId: runId });
 	}
 
-	async generateTitle(threadId: string): Promise<string | undefined> {
+	async generateTitle(userMessage: string): Promise<string | undefined> {
 		if (!this.selectedModel) {
 			throw new Error("No model selected. Call chooseModel() before generateTitle().");
 		}
 
-		const history = await this.getThreadHistory(threadId);
-		if (!history || history.messages.length === 0) {
-			return undefined;
-		}
+		const prompt = `Generate a short, concise title (max 5 words) for the following user question. Do not use quotes or markdown.
 
-		const conversationText = history.messages.map((m) => `${m.role}: ${getMessageText(m) ?? ""}`).join("\n");
-
-		const prompt = `Generate a short, concise title (max 5 words) for the following conversation. Do not use quotes or markdown.
-
-Conversation:
-${conversationText}`;
+User question:
+${userMessage}`;
 
 		const response = await this.selectedModel.instance.invoke([{ role: "user", content: prompt }]);
 
@@ -725,22 +718,7 @@ ${conversationText}`;
 			title = content.map((c) => (typeof c === "string" ? c : ((c as { text?: string }).text ?? ""))).join("");
 		}
 
-		const cleanTitle = title.replace(/^["']|["']$/g, "").trim();
-
-		if (cleanTitle && this.threadStore) {
-			const existing = await this.threadStore.read(threadId);
-			await this.threadStore.write(
-				createSnapshot({
-					threadId,
-					title: cleanTitle,
-					metadata: existing?.metadata,
-					createdAt: existing?.createdAt,
-					updatedAt: Date.now(),
-				}),
-			);
-		}
-
-		return cleanTitle;
+		return title.replace(/^["']|["']$/g, "").trim();
 	}
 
 	private async safeGetCheckpointTuple(threadId: string): Promise<CheckpointTuple | undefined> {
