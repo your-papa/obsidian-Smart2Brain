@@ -130,7 +130,7 @@ export class DexiePersistence implements IChatPersistence {
 				.toArray();
 
 			if (!parentPointers.length) {
-				return [];
+				return newChatId;
 			}
 
 			const newPointers: ChatMessageRow[] = parentPointers.map((p) => ({

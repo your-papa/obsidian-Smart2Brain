@@ -214,7 +214,7 @@ function validateModelMap<T>(
 	const validatedMap = new Map<string, T>();
 
 	// If Map was serialized to object (happens in storage), convert back
-	if (value && typeof value === "object" && !value.entries && !value.size) {
+	if (value && typeof value === "object" && !("entries" in value) && !("size" in value)) {
 		// Handle plain object conversion to Map
 		try {
 			for (const [key, modelConfig] of Object.entries(value as Record<string, unknown>)) {
@@ -349,19 +349,6 @@ function validateProviderConfig<T extends RegisteredProvider>(provider: T, value
 		);
 		validatedConfig.embedModels = embedModelsValidation.data;
 		warnings.push(...embedModelsValidation.warnings);
-
-		// Validate selected embed model
-		const selEmbedValidation = validateString(config.selEmbedModel, `${provider}.selEmbedModel`, false);
-		const selectedEmbed = selEmbedValidation.data || defaultConfig.selEmbedModel;
-
-		if (!validatedConfig.embedModels.has(selectedEmbed)) {
-			warnings.push(
-				`Selected embed model ${selectedEmbed} not found, using default: ${defaultConfig.selEmbedModel}`,
-			);
-			validatedConfig.selEmbedModel = defaultConfig.selEmbedModel;
-		} else {
-			validatedConfig.selEmbedModel = selectedEmbed;
-		}
 	}
 
 	// Validate generation models if provider supports them
@@ -375,17 +362,6 @@ function validateProviderConfig<T extends RegisteredProvider>(provider: T, value
 		);
 		validatedConfig.genModels = genModelsValidation.data;
 		warnings.push(...genModelsValidation.warnings);
-
-		// Validate selected gen model
-		const selGenValidation = validateString(config.selGenModel, `${provider}.selGenModel`, false);
-		const selectedGen = selGenValidation.data || defaultConfig.selGenModel;
-
-		if (!validatedConfig.genModels.has(selectedGen)) {
-			warnings.push(`Selected gen model ${selectedGen} not found, using default: ${defaultConfig.selGenModel}`);
-			validatedConfig.selGenModel = defaultConfig.selGenModel;
-		} else {
-			validatedConfig.selGenModel = selectedGen;
-		}
 	}
 
 	return {
@@ -462,138 +438,6 @@ export function validatePluginData(rawData: unknown): ValidationResult {
 	validatedData.providerConfig = providerValidation.data;
 	errors.push(...providerValidation.errors);
 	warnings.push(...providerValidation.warnings);
-
-	// Validate provider selections
-	// ---------------------------------------------------------------------
-	// Composite selection validation (selEmbedModel / selGenModel)
-	// Supports new shape:
-	//   selGenModel:   { provider: RegisteredGenProvider; model: string }
-	//   selEmbedModel: { provider: RegisteredEmbedProvider; model: string }
-	// Backward compatibility:
-	//   legacy fields selGenProvider / selEmbedProvider (string) + a per-provider
-	//   selected model stored previously (deprecated). If legacy is present and
-	//   composite is missing or invalid we synthesize a composite.
-	// ---------------------------------------------------------------------
-	function validateCompositeSelection(
-		key: "selGenModel" | "selEmbedModel",
-		value: unknown,
-		defaultValue: any,
-		isGen: boolean,
-	): { data: typeof defaultValue; warnings: string[] } {
-		const warnings: string[] = [];
-		const isObj = value && typeof value === "object" && "provider" in (value as any) && "model" in (value as any);
-
-		if (!isObj) {
-			warnings.push(`${key} missing or invalid, attempting legacy fallback.`);
-			return { data: defaultValue, warnings };
-		}
-
-		const { provider, model } = value as any;
-		if (!provider || typeof provider !== "string" || !model || typeof model !== "string") {
-			warnings.push(`${key} has invalid provider/model fields, using default.`);
-			return { data: defaultValue, warnings };
-		}
-
-		if (!registeredProviders.includes(provider as any)) {
-			warnings.push(`${key}.provider "${provider}" not registered, using default.`);
-			return { data: defaultValue, warnings };
-		}
-
-		const providerCfg: any = validatedData.providerConfig?.[provider];
-		if (!providerCfg) {
-			warnings.push(`${key}.provider "${provider}" has no config, using default.`);
-			return { data: defaultValue, warnings };
-		}
-
-		const map: Map<string, any> | undefined = isGen ? providerCfg.genModels : providerCfg.embedModels;
-		if (!(map instanceof Map)) {
-			warnings.push(`${key}.provider "${provider}" missing model map, using default.`);
-			return { data: defaultValue, warnings };
-		}
-		if (!map.has(model)) {
-			warnings.push(`${key}.model "${model}" not found for provider "${provider}", using default.`);
-			return { data: defaultValue, warnings };
-		}
-
-		return { data: { provider, model }, warnings };
-	}
-
-	// Validate composite selections (new schema)
-	const genSelValidation = validateCompositeSelection(
-		"selGenModel",
-		(data as any).selGenModel,
-		DEFAULT_SETTINGS.selGenModel,
-		true,
-	);
-	validatedData.selGenModel = genSelValidation.data;
-	warnings.push(...genSelValidation.warnings);
-
-	const embedSelValidation = validateCompositeSelection(
-		"selEmbedModel",
-		(data as any).selEmbedModel,
-		DEFAULT_SETTINGS.selEmbedModel,
-		false,
-	);
-	validatedData.selEmbedModel = embedSelValidation.data;
-	warnings.push(...embedSelValidation.warnings);
-
-	// Legacy fallback: if composite is still default BUT legacy provider fields exist and match a model,
-	// attempt to synthesize a better selection once.
-	if (
-		((data as any).selGenProvider || (data as any).selGenModel) &&
-		genSelValidation.data === DEFAULT_SETTINGS.selGenModel
-	) {
-		const legacyProv = (data as any).selGenProvider;
-		const legacyModel =
-			(data as any).selGenModel && typeof (data as any).selGenModel === "string"
-				? (data as any).selGenModel
-				: undefined;
-		if (
-			legacyProv &&
-			typeof legacyProv === "string" &&
-			registeredProviders.includes(legacyProv as any) &&
-			legacyModel
-		) {
-			const cfg: any = validatedData.providerConfig?.[legacyProv];
-			if (cfg?.genModels instanceof Map && cfg.genModels.has(legacyModel)) {
-				validatedData.selGenModel = {
-					provider: legacyProv,
-					model: legacyModel,
-				};
-				warnings.push(
-					`Migrated legacy selGenProvider/selGenModel to composite { provider: "${legacyProv}", model: "${legacyModel}" }.`,
-				);
-			}
-		}
-	}
-
-	if (
-		((data as any).selEmbedProvider || (data as any).selEmbedModel) &&
-		embedSelValidation.data === DEFAULT_SETTINGS.selEmbedModel
-	) {
-		const legacyProv = (data as any).selEmbedProvider;
-		const legacyModel =
-			(data as any).selEmbedModel && typeof (data as any).selEmbedModel === "string"
-				? (data as any).selEmbedModel
-				: undefined;
-		if (
-			legacyProv &&
-			typeof legacyProv === "string" &&
-			registeredProviders.includes(legacyProv as any) &&
-			legacyModel
-		) {
-			const cfg: any = validatedData.providerConfig?.[legacyProv];
-			if (cfg?.embedModels instanceof Map && cfg.embedModels.has(legacyModel)) {
-				validatedData.selEmbedModel = {
-					provider: legacyProv,
-					model: legacyModel,
-				};
-				warnings.push(
-					`Migrated legacy selEmbedProvider/selEmbedModel to composite { provider: "${legacyProv}", model: "${legacyModel}" }.`,
-				);
-			}
-		}
-	}
 
 	// Validate boolean fields
 	const booleanFields = [
