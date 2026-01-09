@@ -33,7 +33,7 @@
 
 <ProviderSetup />
 
-<summary class="setting-item-heading py-3">Chat Settings</summary>
+<SettingContainer isHeading={true} name="Chat Settings" />
 <SettingContainer
     name={"Chats Folder"}
     desc={"Folder to store chat files and related data"}
@@ -77,7 +77,7 @@
     <DropdownComp />
 </SettingContainer>
 
-<summary class="setting-item-heading py-3">RAG Config</summary>
+<SettingContainer isHeading={true} name="Rag Setting" />
 <!-- Autostart -->
 <SettingContainer
     name={$t("settings.autostart")}
