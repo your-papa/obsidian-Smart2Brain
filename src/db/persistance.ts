@@ -15,7 +15,7 @@
  * `loadChat()` + `saveChat()` pair can then be phased out later.
  */
 
-import type { ChatPreview, MessagePair, AssistantMessage } from "../stores/stateState.svelte";
+import type { ChatPreview, MessagePair, AssistantMessage } from "../stores/chatStore.svelte";
 import { isUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 
 /**
