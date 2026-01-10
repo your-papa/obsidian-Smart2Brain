@@ -6,6 +6,7 @@ import {
 	type BuiltInProviderOptions,
 	ProviderAuthError,
 	ProviderEndpointError,
+	ProviderNotFoundError,
 	ProviderRegistryError,
 } from "./providers";
 import { normalizePath } from "obsidian";
@@ -220,7 +221,19 @@ export class AgentManager {
 
 		const defaultModel = pluginData.getDefaultChatModel();
 		if (defaultModel) {
-			await this.agent.chooseModel(toChooseModelParams(defaultModel));
+			try {
+				await this.agent.chooseModel(toChooseModelParams(defaultModel));
+			} catch (error) {
+				if (error instanceof ProviderNotFoundError) {
+					// Provider no longer exists, clear the default model
+					console.warn(
+						`Smart Second Brain: Default model provider "${defaultModel.provider}" not found, clearing default model.`,
+					);
+					pluginData.clearDefaultChatModel();
+				} else {
+					throw error;
+				}
+			}
 		}
 
 		// Bind tools
