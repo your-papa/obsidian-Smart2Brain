@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+# jjai-msg: Generate jj change description using AI with validation and auto-rerun
+
+set -e
+
+# Check if jj is available
+if ! command -v jj &> /dev/null; then
+    echo "Error: jj command not found. Please install Jujutsu."
+    exit 1
+fi
+
+# Check if there are changes to describe
+if ! jj diff --stat | grep -q .; then
+    echo "No changes to describe. Please make some changes first."
+    exit 1
+fi
+
+# Configuration
+MAX_RETRIES=3
+VALID_DESCRIPTORS=("feat:" "fix:" "docs:" "style:" "refactor:" "perf:" "test:" "chore:" "ci:" "build:")
+
+# Function to validate the first token
+validate_first_token() {
+    local subject="$1"
+    local first_word=$(echo "$subject" | awk '{print $1}' | sed 's/[^a-zA-Z]*$//')
+    
+    for descriptor in "${VALID_DESCRIPTORS[@]}"; do
+        if [[ "$first_word" == "$descriptor" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Function to generate description using AI (placeholder - replace with actual AI call)
+generate_description() {
+    # This should call your AI service to generate the jj description
+    # For now, using a placeholder that might fail validation
+    echo "Add data validation to plugin data store"
+    echo ""
+    echo "- Import safeLoadPluginData and Language type from utils"
+    echo "- Replace simple merge with validated data loading using safeLoadPluginData"
+    echo "- Add console logging for validation warnings and errors"
+}
+
+# Main logic
+attempt=1
+while [ $attempt -le $MAX_RETRIES ]; do
+    echo "Attempt $attempt/$MAX_RETRIES: Generating jj change description..."
+    
+    # Generate the description
+    description=$(generate_description)
+    
+    # Extract subject (first line)
+    subject=$(echo "$description" | head -1)
+    
+    # Validate
+    if validate_first_token "$subject"; then
+        echo "Validation passed. Using description:"
+        echo "$description"
+        echo "$description" | jj describe -m -
+        exit 0
+    else
+        echo "Validation failed. First token '$first_word' not in valid descriptors."
+        if [ $attempt -lt $MAX_RETRIES ]; then
+            echo "Retrying..."
+        fi
+        ((attempt++))
+    fi
+done
+
+echo "Failed to generate valid description after $MAX_RETRIES attempts."
+exit 1
