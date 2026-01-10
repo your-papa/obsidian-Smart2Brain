@@ -1,72 +1,53 @@
 <script lang="ts">
-    import {
-        createAuthStateQuery,
-        invalidateAuthState,
-    } from "../../utils/query";
-    import { getPlugin } from "../../stores/state.svelte";
-    import { getData } from "../../stores/dataStore.svelte";
-    import Button from "../base/Button.svelte";
-    import ProviderIcon from "../icons/ProviderIcon.svelte";
-    import { EmbedModelManagementModal } from "../../views/EmbedModelManagement/EmbedModelManagement";
-    import { ChatModelManagementModal } from "../../views/ChatModelManagement/ChatModelManagement";
-    import {
-        type EmbedProviders,
-        type GenProviders,
-        type RegisteredProvider,
-    } from "../../types/providers";
-    import AuthConfigFields from "./AuthConfigFields.svelte";
-    import { Accordion } from "bits-ui";
-    import SettingContainer from "./SettingContainer.svelte";
+import { createProviderStateQuery, invalidateProviderState } from "../../utils/query";
+import { getPlugin } from "../../stores/state.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import Button from "../base/Button.svelte";
+import ProviderIcon from "../icons/ProviderIcon.svelte";
+import { EmbedModelManagementModal } from "../../views/EmbedModelManagement/EmbedModelManagement";
+import { ChatModelManagementModal } from "../../views/ChatModelManagement/ChatModelManagement";
+import { type EmbedProviders, type GenProviders, type RegisteredProvider } from "../../types/providers";
+import AuthConfigFields from "./AuthConfigFields.svelte";
+import { Accordion } from "bits-ui";
+import SettingContainer from "./SettingContainer.svelte";
 
-    interface Props {
-        configuredProvider: RegisteredProvider;
-        onAccordionClick: (provider: RegisteredProvider) => void;
-        isLast?: boolean;
-    }
+interface Props {
+	configuredProvider: RegisteredProvider;
+	onAccordionClick: (provider: RegisteredProvider) => void;
+	isLast?: boolean;
+}
 
-    const {
-        configuredProvider,
-        onAccordionClick,
-        isLast = false,
-    }: Props = $props();
+const { configuredProvider, onAccordionClick, isLast = false }: Props = $props();
 
-    const data = getData();
-    const plugin = getPlugin();
+const data = getData();
+const plugin = getPlugin();
 
-    const query = createAuthStateQuery(() => configuredProvider);
+const query = createProviderStateQuery(() => configuredProvider);
 
-    function refetch() {
-        invalidateAuthState(configuredProvider);
-    }
+function refetch() {
+	invalidateProviderState(configuredProvider);
+}
 
-    //ToDo put somewhere else
-    function isEmbedProvider(
-        provider: RegisteredProvider,
-    ): provider is EmbedProviders {
-        const embedProviders: RegisteredProvider[] = [
-            "OpenAI",
-            "CustomOpenAI",
-            "Ollama",
-        ];
-        return embedProviders.includes(provider);
-    }
+function handleRemoveProvider() {
+	data.toggleProviderIsConfigured(configuredProvider);
+	invalidateProviderState(configuredProvider);
+}
 
-    function isGenProvider(
-        provider: RegisteredProvider,
-    ): provider is GenProviders {
-        const genProviders: RegisteredProvider[] = [
-            "OpenAI",
-            "CustomOpenAI",
-            "Ollama",
-            "Anthropic",
-        ];
-        return genProviders.includes(provider);
-    }
+//ToDo put somewhere else
+function isEmbedProvider(provider: RegisteredProvider): provider is EmbedProviders {
+	const embedProviders: RegisteredProvider[] = ["OpenAI", "CustomOpenAI", "Ollama"];
+	return embedProviders.includes(provider);
+}
+
+function isGenProvider(provider: RegisteredProvider): provider is GenProviders {
+	const genProviders: RegisteredProvider[] = ["OpenAI", "CustomOpenAI", "Ollama", "Anthropic"];
+	return genProviders.includes(provider);
+}
 </script>
 
 <Accordion.Item
     value={configuredProvider}
-    class="setting-item flex-col group [&[data-state=open]_.chev]:rotate-180 p-0"
+    class="setting-item flex-col group [&[data-state=open]_.chev]:rotate-180 !py-0"
 >
     <Accordion.Header
         onclick={() => onAccordionClick(configuredProvider)}
@@ -80,7 +61,7 @@
                 className={"fill-black"}
             />
             <span>{configuredProvider}</span>
-            {#if query.data?.success}
+            {#if query.data?.auth.success}
                 <Button
                     iconId={"check"}
                     styles={"text-[--background-modifier-success]"}
@@ -102,7 +83,7 @@
             iconId="trash"
             styles={"hover:text-[--text-error]"}
             stopPropagation={true}
-            onClick={() => data.toggleProviderIsConfigured(configuredProvider)}
+            onClick={handleRemoveProvider}
         />
         <Button
             styles="chev inline-flex items-center justify-center transition-transform duration-200"
@@ -111,7 +92,7 @@
     </Accordion.Header>
 
     <Accordion.Content
-        class="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down tracking-[-0.01em] pl-8 w-[-webkit-fill-available]"
+        class="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down tracking-[-0.01em] w-[-webkit-fill-available] pb-2"
     >
         <AuthConfigFields provider={configuredProvider} />
         {#if isGenProvider(configuredProvider)}
