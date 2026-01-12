@@ -13,6 +13,7 @@
     import { getPlugin } from "../../stores/state.svelte";
     import DropdownComp from "../../components/bitui/Dropdown.svelte";
     import FolderSuggest from "../../components/Modal/FolderSuggest.svelte";
+    import type { SearchAlgorithm } from "../../main";
 
     const pluginData = getData();
     const plugin = getPlugin();
@@ -29,6 +30,37 @@
     function suggestFolders(): TFolder[] {
         return plugin.app.vault.getAllFolders(true);
     }
+
+    // Check if Omnisearch plugin is installed
+    const isOmnisearchInstalled = $derived(
+        // @ts-ignore - Obsidian plugin API
+        !!plugin.app.plugins?.getPlugin?.("omnisearch"),
+    );
+
+    // Search algorithm options
+    const searchAlgorithmOptions: {
+        display: string;
+        value: SearchAlgorithm;
+        disabled?: boolean;
+    }[] = $derived([
+        { display: $t("settings.search_algorithm.grep"), value: "grep" },
+        {
+            display: isOmnisearchInstalled
+                ? $t("settings.search_algorithm.omnisearch")
+                : $t("settings.search_algorithm.omnisearch_not_installed"),
+            value: "omnisearch",
+            disabled: !isOmnisearchInstalled,
+        },
+        {
+            display: $t("settings.search_algorithm.embeddings"),
+            value: "embeddings",
+            disabled: true,
+        },
+    ]);
+
+    let selectedSearchAlgorithm: SearchAlgorithm = $state(
+        pluginData.searchAlgorithm,
+    );
 </script>
 
 <ProviderSetup />
@@ -78,6 +110,25 @@
 </SettingContainer>
 
 <SettingContainer isHeading={true} name="Rag Setting" />
+
+<!-- Search Algorithm -->
+<SettingContainer
+    name={$t("settings.search_algorithm.title")}
+    desc={$t("settings.search_algorithm.desc")}
+>
+    <select
+        class="dropdown"
+        bind:value={selectedSearchAlgorithm}
+        onchange={() => (pluginData.searchAlgorithm = selectedSearchAlgorithm)}
+    >
+        {#each searchAlgorithmOptions as option}
+            <option value={option.value} disabled={option.disabled}>
+                {option.display}
+            </option>
+        {/each}
+    </select>
+</SettingContainer>
+
 <!-- Autostart -->
 <SettingContainer
     name={$t("settings.autostart")}

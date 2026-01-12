@@ -1,4 +1,4 @@
-import SecondBrainPlugin, { type PluginData } from "../main";
+import SecondBrainPlugin, { type PluginData, type SearchAlgorithm } from "../main";
 import { normalizePath } from "obsidian";
 import { DEFAULT_SETTINGS } from "../constants/defaults";
 import { safeLoadPluginData, type Language } from "../utils/dataValidation";
@@ -287,6 +287,14 @@ export class PluginDataStore {
 	}
 	toggleAutostart() {
 		this.#data.isAutostart = !this.isAutostart;
+		this.saveSettings();
+	}
+
+	get searchAlgorithm() {
+		return this.#data.searchAlgorithm;
+	}
+	set searchAlgorithm(val: SearchAlgorithm) {
+		this.#data.searchAlgorithm = val;
 		this.saveSettings();
 	}
 

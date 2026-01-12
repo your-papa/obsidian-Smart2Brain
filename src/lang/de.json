@@ -2,5 +2,15 @@
 	"assistant_language": "Assistent Sprache",
 	"excludeff": "Ausschließen von Dateien und Ordnern",
 	"incognito_mode": "Inkognito-Modus",
-	"init_s2b": "Smart Second Brain initialisieren"
+	"init_s2b": "Smart Second Brain initialisieren",
+	"settings": {
+		"search_algorithm": {
+			"title": "Suchalgorithmus",
+			"desc": "Wähle den Suchalgorithmus zum Abrufen von Notizen. Omnisearch erfordert, dass das Omnisearch-Plugin installiert ist.",
+			"grep": "Einfache Suche (Grep)",
+			"omnisearch": "Omnisearch",
+			"omnisearch_not_installed": "Omnisearch (nicht installiert)",
+			"embeddings": "Embeddings (demnächst)"
+		}
+	}
 }
