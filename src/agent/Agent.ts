@@ -4,12 +4,15 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 import type { StreamEvent } from "@langchain/core/tracers/log_stream";
 import type { BaseCheckpointSaver, CheckpointTuple } from "@langchain/langgraph";
 import { MemorySaver } from "@langchain/langgraph";
+import { Notice } from "obsidian";
 
 import type { ProviderRegistry } from "./providers/ProviderRegistry";
+import { ProviderEndpointError, ProviderNotFoundError } from "./providers/errors";
 import type { ModelOptions } from "./providers/types";
 import type { Telemetry } from "./telemetry/Telemetry";
 import { createSnapshot, type ThreadSnapshot, type ThreadStore } from "./memory/ThreadStore";
 import { getMessageText, normalizeThreadMessages, type ThreadMessage } from "./messages/ThreadMessage";
+import { getData } from "../stores/dataStore.svelte";
 import Logger from "../logging";
 
 export interface ChooseModelParams {
@@ -139,7 +142,17 @@ export class Agent {
 
 	async chooseModel(params: ChooseModelParams): Promise<void> {
 		const { provider, chatModel, options } = params;
-		const instance = await this.registry.getChatModel(provider, chatModel, options);
+		let instance: BaseChatModel;
+		try {
+			instance = await this.registry.getChatModel(provider, chatModel, options);
+		} catch (error) {
+			if (error instanceof ProviderNotFoundError) {
+				getData().setDefaultChatModel(null);
+				new Notice(`Provider "${provider}" is no longer available. Please select a new model.`);
+				throw error;
+			}
+			throw error;
+		}
 		const modelName = chatModel ?? this.registry.listChatModels(provider)[0];
 		if (!modelName) {
 			throw new Error(`No chat models registered for provider "${provider}".`);
@@ -330,6 +343,14 @@ export class Agent {
 				Logger.debug("agent.streamTokens.aborted", { runId, threadId });
 				return;
 			}
+
+			// Wrap connection errors in ProviderEndpointError for consistent handling
+			if (error instanceof TypeError && error.message.includes("fetch")) {
+				const provider = this.selectedModel?.provider ?? "unknown";
+				Logger.debug("agent.streamTokens.error", { runId, message: `Connection failed to ${provider}` });
+				throw new ProviderEndpointError(provider, "Connection refused - service may not be running");
+			}
+
 			Logger.debug("agent.streamTokens.error", {
 				runId,
 				message: error instanceof Error ? error.message : String(error),

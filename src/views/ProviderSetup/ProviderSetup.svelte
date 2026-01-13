@@ -8,7 +8,7 @@ import ProviderIcon from "../../components/icons/ProviderIcon.svelte";
 import { mount, onMount } from "svelte";
 import { icon } from "../../utils/utils";
 import { type RegisteredProvider } from "../../types/providers";
-import { createAuthStateQuery } from "../../utils/query";
+import { createAuthStateQuery, invalidateProviderState } from "../../utils/query";
 
 interface Props {
 	modal: ProviderSetupModal;
@@ -24,6 +24,7 @@ const query = createAuthStateQuery(() => selectedProvider);
 
 function handleAddProvider() {
 	data.toggleProviderIsConfigured(selectedProvider);
+	invalidateProviderState(selectedProvider);
 	modal.close();
 }
 

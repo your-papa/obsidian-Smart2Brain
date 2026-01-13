@@ -1,73 +1,72 @@
 <script lang="ts">
-    import type { ChatModelManagementModal } from "./ChatModelManagement";
-    import type { GenProviders } from "../../types/providers";
-    import { getData } from "../../stores/dataStore.svelte";
-    import Button from "../../components/base/Button.svelte";
-    import SettingContainer from "../../components/Settings/SettingContainer.svelte";
-    import type SecondBrainPlugin from "../../main";
-    import Dropdown from "../../components/base/Dropdown.svelte";
-    import Text from "../../components/base/Text.svelte";
-    import { createModelListQuery } from "../../utils/query";
-    import { getPlugin } from "../../stores/state.svelte";
+import type { ChatModelManagementModal } from "./ChatModelManagement";
+import type { GenProviders } from "../../types/providers";
+import { getData } from "../../stores/dataStore.svelte";
+import Button from "../../components/base/Button.svelte";
+import SettingContainer from "../../components/Settings/SettingContainer.svelte";
+import type SecondBrainPlugin from "../../main";
+import Dropdown from "../../components/base/Dropdown.svelte";
+import Text from "../../components/base/Text.svelte";
+import { createModelListQuery, invalidateProviderState } from "../../utils/query";
+import { getPlugin } from "../../stores/state.svelte";
 
-    interface Props {
-        modal: ChatModelManagementModal;
-        provider: GenProviders;
-        config?: GenModelConfig;
-    }
+interface Props {
+	modal: ChatModelManagementModal;
+	provider: GenProviders;
+	config?: GenModelConfig;
+}
 
-    const chatModelSettings = {
-        keys: ["contextWindow", "temperature"] as (keyof GenModelConfig)[],
-        defaults: {
-            contextWindow: 8600,
-            temperature: 0.2,
-        } as GenModelConfig,
-    };
+const chatModelSettings = {
+	keys: ["contextWindow", "temperature"] as (keyof GenModelConfig)[],
+	defaults: {
+		contextWindow: 8600,
+		temperature: 0.2,
+	} as GenModelConfig,
+};
 
-    let { modal, provider, config }: Props = $props();
+let { modal, provider, config }: Props = $props();
 
-    const plugin: SecondBrainPlugin = getPlugin();
-    const data = getData();
+const plugin: SecondBrainPlugin = getPlugin();
+const data = getData();
 
-    const query = createModelListQuery(() => provider);
+const query = createModelListQuery(() => provider);
 
-    let { data: models, isPending, isError } = $derived(query);
+let { data: models, isPending, isError } = $derived(query);
 
-    let genModels = $derived.by<Map<string, GenModelConfig>>(() => {
-        const confGenModels = data.getGenModels(provider);
+let genModels = $derived.by<Map<string, GenModelConfig>>(() => {
+	const confGenModels = data.getGenModels(provider);
 
-        const allowedKeys = new Set(
-            (models ?? [])
-                .map((m: any) => (typeof m === "string" ? m : m?.key))
-                .filter(Boolean),
-        );
+	const allowedKeys = new Set((models ?? []).map((m: any) => (typeof m === "string" ? m : m?.key)).filter(Boolean));
 
-        if (allowedKeys.size === 0) return confGenModels;
+	if (allowedKeys.size === 0) return confGenModels;
 
-        return new Map(
-            Array.from(confGenModels.entries()).filter(([key]) =>
-                allowedKeys.has(key),
-            ),
-        );
-    });
+	return new Map(Array.from(confGenModels.entries()).filter(([key]) => allowedKeys.has(key)));
+});
 
-    let configuredModels: string[] = $derived(
-        models?.filter((model) =>
-            Array.from(data.getGenModels(provider).keys()).includes(model),
-        ) ?? [],
-    );
-    let selectedModel = $derived(
-        !isPending && !isError && models ? models[0] : configuredModels[0],
-    );
+let configuredModels: string[] = $derived(
+	models?.filter((model) => Array.from(data.getGenModels(provider).keys()).includes(model)) ?? [],
+);
+let selectedModel = $derived(!isPending && !isError && models ? models[0] : configuredModels[0]);
 
-    let unconfiguredModels: string[] = $derived(
-        models?.filter((model) => !configuredModels.includes(model)) ?? [],
-    );
+let unconfiguredModels: string[] = $derived(models?.filter((model) => !configuredModels.includes(model)) ?? []);
 
-    let genModelConfig: GenModelConfig = $state(chatModelSettings.defaults);
+let genModelConfig: GenModelConfig = $state(chatModelSettings.defaults);
+const isModelConfigured: () => boolean = () => configuredModels.includes(selectedModel!);
 
-    const isModelConfigured: () => boolean = () =>
-        configuredModels.includes(selectedModel!);
+function handleDeleteModel(modelName: string) {
+	data.deleteGenModel(provider, modelName);
+	invalidateProviderState(provider);
+}
+
+function handleSaveModel() {
+	if (!selectedModel) return;
+	if (isModelConfigured()) {
+		data.updateGenModel(provider, selectedModel, genModelConfig);
+	} else {
+		data.addGenModel(provider, selectedModel, genModelConfig);
+	}
+	invalidateProviderState(provider);
+}
 </script>
 
 <div class="modal-content">
@@ -91,8 +90,7 @@
                     <Button
                         styles={"ml-auto hover:text-[--text-error]"}
                         iconId="trash"
-                        onClick={() =>
-                            data.deleteGenModel(provider, genModel[0])}
+                        onClick={() => handleDeleteModel(genModel[0])}
                     />
                 </div>
                 <span class="text-muted text-xs pt-1 leading-tight"
@@ -156,10 +154,7 @@
         cta={true}
         disabled={!selectedModel}
         buttonText={isModelConfigured() ? "Update" : "Add"}
-        onClick={() =>
-            selectedModel && isModelConfigured()
-                ? data.updateGenModel(provider, selectedModel, genModelConfig)
-                : data.addGenModel(provider, selectedModel, genModelConfig)}
+        onClick={handleSaveModel}
     />
     <Button buttonText="Cancel" onClick={() => modal.close()} />
 </div>
