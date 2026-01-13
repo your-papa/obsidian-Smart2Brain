@@ -1,7 +1,6 @@
 import SecondBrainPlugin, { type PluginData } from "../main";
 import { normalizePath } from "obsidian";
 import { DEFAULT_SETTINGS } from "../constants/defaults";
-import { safeLoadPluginData, type Language } from "../utils/dataValidation";
 import {
 	AddEmbedModelError,
 	AddGenModelError,
@@ -119,7 +118,7 @@ export class PluginDataStore {
 	get assistantLanguage() {
 		return this.#data.assistantLanguage;
 	}
-	set assistantLanguage(val: Language) {
+	set assistantLanguage(val: "de" | "en") {
 		this.#data.assistantLanguage = val;
 		this.saveSettings();
 	}
@@ -295,9 +294,7 @@ export class PluginDataStore {
 	}
 
 	//TODO some check here?
-	setDefaultChatModel(model: ChatModel) {
-		if (!model) throw new Error("Model does not exist");
-		// if (model.provider not in RegisteredProvider) throw new Error("Provider does not exist");
+	setDefaultChatModel(model: ChatModel | null) {
 		this.#data.defaultChatModel = model;
 		this.saveSettings();
 	}
@@ -307,7 +304,17 @@ export class PluginDataStore {
 		return this.#data.providerConfig[provider].isConfigured;
 	}
 	toggleProviderIsConfigured(provider: RegisteredProvider) {
-		this.#data.providerConfig[provider].isConfigured = !this.#data.providerConfig[provider].isConfigured;
+		const wasConfigured = this.#data.providerConfig[provider].isConfigured;
+		this.#data.providerConfig[provider].isConfigured = !wasConfigured;
+
+		// If disabling this provider and it's the default model's provider, clear default model
+		if (wasConfigured) {
+			const defaultModel = this.#data.defaultChatModel;
+			if (defaultModel && defaultModel.provider === provider) {
+				this.#data.defaultChatModel = null;
+			}
+		}
+
 		this.saveSettings();
 	}
 
@@ -389,6 +396,13 @@ export class PluginDataStore {
 		const next = new Map(current);
 		next.delete(modelName);
 		this.#data.providerConfig[provider].genModels = next;
+
+		// Clear default model if the deleted model was the default
+		const defaultModel = this.#data.defaultChatModel;
+		if (defaultModel && defaultModel.provider === provider && defaultModel.model === modelName) {
+			this.#data.defaultChatModel = null;
+		}
+
 		this.saveSettings();
 	}
 
@@ -411,18 +425,13 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 
 	const rawData = await plugin.loadData();
 
-	// Validate and safely load plugin data
-	const { data: validatedData, hasErrors, hasWarnings, errors, warnings } = safeLoadPluginData(rawData);
+	// Merge raw data with defaults (no validation during active development)
+	const mergedData: PluginData = {
+		...DEFAULT_SETTINGS,
+		...rawData,
+	};
 
-	// Log validation results
-	if (hasWarnings) {
-		console.warn("[S2B] Data validation warnings:", warnings);
-	}
-	if (hasErrors) {
-		console.error("[S2B] Data validation errors:", errors);
-	}
-
-	_pluginDataStore = new PluginDataStore(plugin, validatedData);
+	_pluginDataStore = new PluginDataStore(plugin, mergedData);
 	return _pluginDataStore;
 }
 
