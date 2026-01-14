@@ -2,8 +2,8 @@
     import { icon } from "../../utils/utils";
     import { TextareaAutosize } from "runed";
     import { getPlugin } from "../../stores/state.svelte";
-    import { MessageState, type Messenger } from "../../stores/chatStore.svelte";
-    import { Notice, type TFile } from "obsidian";
+    import { MessageState, Messenger } from "../../stores/chatStore.svelte";
+    import { Notice, TFile } from "obsidian";
     import ModelPopover from "../bitui/ModelPopover.svelte";
     import FilePopover from "../base/FilePopover.svelte";
     import { getWikiLinkAtCursor } from "../../utils/wikiLinkExtraction";
@@ -19,13 +19,13 @@
 
     const { messenger, onFocusChange, onMessageSent }: Props = $props();
 
-    const textarea = $state<HTMLTextAreaElement | null>(null);
+    let textarea = $state<HTMLTextAreaElement | null>(null);
     let inputValue = $state("");
     let isFilePopoverOpen = $state(false);
     let markdownFiles: TFile[] = $state([]);
 
     // New: hidden combobox input ref & selected file value
-    const comboInputRef: HTMLInputElement | null = $state(null);
+    let comboInputRef: HTMLInputElement | null = $state(null);
     let fileSearchQuery = $state("");
 
     // Number of visible lines before scrolling kicks in
@@ -37,10 +37,10 @@
         if (!textarea) return undefined;
         const computed = getComputedStyle(textarea);
         const lineHeight =
-            Number.parseFloat(computed.lineHeight) ||
-            Number.parseFloat(computed.fontSize) * 1.5;
-        const paddingTop = Number.parseFloat(computed.paddingTop) || 0;
-        const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0;
+            parseFloat(computed.lineHeight) ||
+            parseFloat(computed.fontSize) * 1.5;
+        const paddingTop = parseFloat(computed.paddingTop) || 0;
+        const paddingBottom = parseFloat(computed.paddingBottom) || 0;
         return Math.ceil(lineHeight * maxLines + paddingTop + paddingBottom);
     };
 
@@ -87,7 +87,7 @@
         const before = value.slice(0, start);
         const selected = value.slice(start, end);
         const after = value.slice(end);
-        const insertion = selected.length ? `[${selected}]` : "[]";
+        const insertion = selected.length ? `[${selected}]` : `[]`;
         textarea.value = before + insertion + after;
         const caretPos = start + 1;
         const newSelectionEnd = selected.length
@@ -158,7 +158,7 @@
             for (const file of fileList) {
                 files.push(file);
             }
-            new Notice("New files attached");
+            new Notice(`New files attached`);
         }
     }
 

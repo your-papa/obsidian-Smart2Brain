@@ -1,6 +1,6 @@
 import { Agent, type ChooseModelParams, type ThreadHistory } from "./Agent";
 import { ProviderRegistry } from "./providers/ProviderRegistry";
-import type { ThreadSnapshot } from "./memory/ThreadStore";
+import { type ThreadSnapshot } from "./memory/ThreadStore";
 import { LangSmithTelemetry, type Telemetry } from "./telemetry";
 import {
 	type BuiltInProviderOptions,
@@ -229,7 +229,7 @@ export class AgentManager {
 
 	async *streamQuery(
 		query: string,
-		threadId = "default-thread",
+		threadId: string = "default-thread",
 		signal?: AbortSignal,
 	): AsyncGenerator<
 		| { type: "token"; token: string }
@@ -377,7 +377,7 @@ export class AgentManager {
 		// Restore original fetch if it was patched
 		if ((window as any)._originalFetch) {
 			window.fetch = (window as any)._originalFetch;
-			(window as any)._originalFetch = undefined;
+			delete (window as any)._originalFetch;
 		}
 
 		// Cleanup if needed

@@ -15,11 +15,11 @@ type DropdownProps<T> = {
 	style?: string;
 } & ({ type: "options"; dropdown: DropdownOption<T>[] } | { type: "groups"; dropdown: DropdownGroup<T>[] });
 
-const { dropdown, onSelect, selected = $bindable(), style, type }: DropdownProps<T> = $props();
+let { dropdown, onSelect, selected = $bindable(), style, type }: DropdownProps<T> = $props();
 
 // Create typed variables for proper type narrowing
-const groups = $derived(type === "groups" ? (dropdown as DropdownGroup<T>[]) : undefined);
-const options = $derived(type === "options" ? (dropdown as DropdownOption<T>[]) : undefined);
+let groups = $derived(type === "groups" ? (dropdown as DropdownGroup<T>[]) : undefined);
+let options = $derived(type === "options" ? (dropdown as DropdownOption<T>[]) : undefined);
 </script>
 <select class={`dropdown ${style}`} bind:value={selected} onchange={() => onSelect(selected)}>
     {#if groups}

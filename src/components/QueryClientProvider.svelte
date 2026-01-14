@@ -9,7 +9,7 @@
         componentProps: T;
     }
 
-    const { plugin, component, componentProps }: Props<T> = $props();
+    let { plugin, component, componentProps }: Props<T> = $props();
 </script>
 
 <QueryClientProvider client={plugin.queryClient}>

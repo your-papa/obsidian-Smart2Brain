@@ -6,7 +6,7 @@ interface Props {
 	selected?: string;
 }
 
-const { options, selected = $bindable(options[0]) }: Props = $props();
+let { options, selected = $bindable(options[0]) }: Props = $props();
 const [send, recieve] = crossfade({ duration: 500 });
 </script>
 

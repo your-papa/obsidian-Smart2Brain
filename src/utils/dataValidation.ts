@@ -19,7 +19,7 @@ export interface ValidationResult {
 /**
  * Validates a string value
  */
-function validateString(value: unknown, fieldName: string, required = true): ValidationResult {
+function validateString(value: unknown, fieldName: string, required: boolean = true): ValidationResult {
 	const errors: string[] = [];
 
 	if (value === undefined || value === null) {
@@ -64,7 +64,7 @@ function validateNumber(value: unknown, fieldName: string, min?: number, max?: n
 	const errors: string[] = [];
 	const warnings: string[] = [];
 
-	if (value === undefined || value === null || typeof value !== "number" || Number.isNaN(value)) {
+	if (value === undefined || value === null || typeof value !== "number" || isNaN(value)) {
 		errors.push(`${fieldName} must be a valid number`);
 		return { isValid: false, errors, warnings };
 	}

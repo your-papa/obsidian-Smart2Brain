@@ -1,6 +1,6 @@
 import type { ChatPreview, MessagePair, AssistantMessage } from "../stores/chatStore.svelte";
 import type { IChatPersistence, ChatRecordMeta, ListMessagesOptions } from "./persistance";
-import type { ChatDB } from "./chatDbSchema";
+import { ChatDB } from "./chatDbSchema";
 import type { ChatRow, MessagePairRow, ChatMessageRow } from "./chatDbSchema";
 import { Dexie } from "dexie";
 import type { UUIDv7 } from "../utils/uuid7Validator";
@@ -192,7 +192,7 @@ export class DexiePersistence implements IChatPersistence {
 			);
 			return deleted;
 		} catch (err: any) {
-			new Notice(`deleteChat failed: ${err?.message}`);
+			new Notice("deleteChat failed: " + err?.message);
 			return false;
 		}
 	}
@@ -220,7 +220,7 @@ export class DexiePersistence implements IChatPersistence {
 		const rows = await this.db.messagePairs.bulkGet(ids);
 
 		// Preserve pointer-derived order
-		const rowMap = new Map(rows.filter(Boolean).map((r) => [r?.id, r!]));
+		const rowMap = new Map(rows.filter(Boolean).map((r) => [r!.id, r!]));
 		return ids
 			.map((id) => rowMap.get(id))
 			.filter((r): r is MessagePairRow => !!r)

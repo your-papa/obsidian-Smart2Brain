@@ -15,7 +15,7 @@ import {
 } from "../types/providers";
 import type { UUIDv7 } from "../utils/uuid7Validator";
 import type { ChatModel } from "./chatStore.svelte";
-import type { RegisteredProvider } from "../types/providers";
+import { type RegisteredProvider } from "../types/providers";
 
 export class PluginDataStore {
 	#data: PluginData;

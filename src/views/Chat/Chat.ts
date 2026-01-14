@@ -1,4 +1,4 @@
-import { FileView, type TFile, type WorkspaceLeaf } from "obsidian";
+import { FileView, TFile, WorkspaceLeaf } from "obsidian";
 import ChatViewComponent from "./Chat.svelte";
 import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";

@@ -11,7 +11,7 @@
         onFileSelect: (fileName: string) => void;
     }
 
-    const {
+    let {
         customAnchor,
         isOpen = $bindable(false),
         files,
@@ -20,7 +20,7 @@
         onFileSelect,
     }: Props = $props();
 
-    const searchValue = $state("");
+    let searchValue = $state("");
 
     function handleValueChange(newVal: string) {
         if (newVal) {

@@ -9,10 +9,10 @@
     import ProviderIcon from "../icons/ProviderIcon.svelte";
     import { EmbedModelManagementModal } from "../../views/EmbedModelManagement/EmbedModelManagement";
     import { ChatModelManagementModal } from "../../views/ChatModelManagement/ChatModelManagement";
-    import type {
-        EmbedProviders,
-        GenProviders,
-        RegisteredProvider,
+    import {
+        type EmbedProviders,
+        type GenProviders,
+        type RegisteredProvider,
     } from "../../types/providers";
     import AuthConfigFields from "./AuthConfigFields.svelte";
     import { Accordion } from "bits-ui";

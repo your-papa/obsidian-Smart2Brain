@@ -1,6 +1,6 @@
 import { getPlugin } from "./state.svelte";
 import { getData } from "./dataStore.svelte";
-import { Notice, type TFile } from "obsidian";
+import { Notice, TFile } from "obsidian";
 import { genUUIDv7, dateFromUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 import type { AgentManager } from "../agent/AgentManager";
 import type { ThreadMessage } from "../agent/messages/ThreadMessage";
@@ -17,17 +17,17 @@ export interface ThreadError {
  * ---------------------------------------------------------------------------*/
 
 export enum AssistantState {
-	idle = 0,
-	streaming = 1,
-	success = 2,
-	error = 3,
-	cancelled = 4,
+	idle,
+	streaming,
+	success,
+	error,
+	cancelled,
 }
 
 export enum MessageState {
-	idle = 0,
-	answering = 1,
-	editing = 2,
+	idle,
+	answering,
+	editing,
 }
 
 export type ToolCallStatus = "running" | "completed" | "failed";
@@ -237,7 +237,7 @@ function mergeAssistantMessages(
  * 4. Uses UUIDv7 for message pair IDs (with timestamp extraction capability)
  * 5. Uses errorCount to distinguish error state from cancelled state
  */
-export function threadMessagesToMessagePairs(threadMessages: ThreadMessage[], errorCount = 0): MessagePair[] {
+export function threadMessagesToMessagePairs(threadMessages: ThreadMessage[], errorCount: number = 0): MessagePair[] {
 	if (!threadMessages || threadMessages.length === 0) return [];
 
 	const messagePairs: MessagePair[] = [];
@@ -336,7 +336,7 @@ export class ChatSession {
 	// Reactive UI state
 	messageState = $state<MessageState>(MessageState.idle);
 
-	constructor(id: string, threadMessages: ThreadMessage[], errorCount = 0) {
+	constructor(id: string, threadMessages: ThreadMessage[], errorCount: number = 0) {
 		this.id = id;
 		// Convert once on load, then drop the raw ThreadMessages
 		this.messages = threadMessagesToMessagePairs(threadMessages, errorCount);

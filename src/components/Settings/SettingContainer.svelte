@@ -8,7 +8,7 @@
         children?: import("svelte").Snippet;
     }
 
-    const {
+    let {
         name,
         isHeading = false,
         desc = "",

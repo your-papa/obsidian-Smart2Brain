@@ -1,4 +1,4 @@
-import { type App, TFile } from "obsidian";
+import { App, TFile } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 

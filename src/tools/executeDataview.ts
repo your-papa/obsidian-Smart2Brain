@@ -1,4 +1,4 @@
-import type { App } from "obsidian";
+import { App } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
@@ -17,7 +17,7 @@ export function createExecuteDataviewTool(app: App) {
     query: string;
   }): Promise<string> => {
     // @ts-ignore - Dynamic access to plugins
-    const dataviewApi = app.plugins.plugins.dataview?.api as
+    const dataviewApi = app.plugins.plugins["dataview"]?.api as
       | DataviewAPI
       | undefined;
 

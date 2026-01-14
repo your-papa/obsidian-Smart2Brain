@@ -475,7 +475,7 @@ export class Agent {
 						message: String(errorObj.message ?? "Unknown error"),
 						name: errorObj.name ? String(errorObj.name) : undefined,
 					};
-					Logger.debug(`extractErrorsFromCheckpoint - FOUND ERROR #${errorCount}:`, lastError);
+					Logger.debug("extractErrorsFromCheckpoint - FOUND ERROR #" + errorCount + ":", lastError);
 				}
 			}
 		}

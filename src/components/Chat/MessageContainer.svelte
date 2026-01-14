@@ -20,14 +20,14 @@ const messages = $derived.by(() => {
 	return messenger.session?.messages;
 });
 
-const scrollContainer: HTMLDivElement | undefined = $state();
+let scrollContainer: HTMLDivElement | undefined = $state();
 const messageRefs = new Map<string, HTMLDivElement>();
 
 export async function scrollToLatestMessage() {
 	await tick();
 	if (messages && messages.length > 0 && scrollContainer) {
 		const latestPair = messages[messages.length - 1];
-		const messageElement = messageRefs.get(`${latestPair.id}-user`);
+		const messageElement = messageRefs.get(latestPair.id + "-user");
 
 		if (messageElement && scrollContainer) {
 			const containerTop = scrollContainer.getBoundingClientRect().top;
@@ -79,7 +79,7 @@ async function branchOff(messageId: UUIDv7) {
 }
 
 // Track which message pairs have their tools open
-const toolsOpenState: Record<string, boolean> = $state({});
+let toolsOpenState: Record<string, boolean> = $state({});
 
 function getToolsOpen(messageId: string, assistantMessage: AssistantMessage): boolean {
 	// Default: open if no content yet, closed if content exists

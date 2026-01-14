@@ -5,6 +5,10 @@ import { mount } from "svelte";
 export class ExcludeFoldersModal extends Modal {
 	component!: ExcludeFoldersComponent;
 
+	constructor(app: App) {
+		super(app);
+	}
+
 	onOpen() {
 		this.component = mount(ExcludeFoldersComponent, {
 			target: this.contentEl,

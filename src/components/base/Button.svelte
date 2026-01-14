@@ -12,7 +12,7 @@
         stopPropagation?: boolean;
     }
 
-    const {
+    let {
         onClick: onclick,
         iconId = "",
         buttonText = "",

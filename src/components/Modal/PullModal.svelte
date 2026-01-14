@@ -7,7 +7,7 @@ import { data } from "../../store";
 import DotAnimation from "../base/DotAnimation.svelte";
 
 let isOllama: boolean = $state();
-const pulledModel = $state(false);
+let pulledModel = $state(false);
 let installedOllamaModels: string[] = $state([]);
 
 onMount(async () => {

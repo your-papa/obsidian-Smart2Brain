@@ -1,5 +1,5 @@
 import type { RegisteredProvider } from "../types/providers";
-import type SecondBrainPlugin from "../main";
+import SecondBrainPlugin from "../main";
 import { createQuery } from "@tanstack/svelte-query";
 
 export const providerState: Record<RegisteredProvider, boolean> = $state({

@@ -60,8 +60,8 @@
         plugin.queryClient.invalidateQueries({ queryKey: ["models"] });
     }
 
-    const isOpen = $state(false);
-    const customAnchor = $state<HTMLElement>(null!);
+    let isOpen = $state(false);
+    let customAnchor = $state<HTMLElement>(null!);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->

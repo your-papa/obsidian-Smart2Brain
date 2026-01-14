@@ -24,16 +24,16 @@
         } as GenModelConfig,
     };
 
-    const { modal, provider, config }: Props = $props();
+    let { modal, provider, config }: Props = $props();
 
     const plugin: SecondBrainPlugin = getPlugin();
     const data = getData();
 
     const query = createModelListQuery(() => provider);
 
-    const { data: models, isPending, isError } = $derived(query);
+    let { data: models, isPending, isError } = $derived(query);
 
-    const genModels = $derived.by<Map<string, GenModelConfig>>(() => {
+    let genModels = $derived.by<Map<string, GenModelConfig>>(() => {
         const confGenModels = data.getGenModels(provider);
 
         const allowedKeys = new Set(
@@ -51,20 +51,20 @@
         );
     });
 
-    const configuredModels: string[] = $derived(
+    let configuredModels: string[] = $derived(
         models?.filter((model) =>
             Array.from(data.getGenModels(provider).keys()).includes(model),
         ) ?? [],
     );
-    const selectedModel = $derived(
+    let selectedModel = $derived(
         !isPending && !isError && models ? models[0] : configuredModels[0],
     );
 
-    const unconfiguredModels: string[] = $derived(
+    let unconfiguredModels: string[] = $derived(
         models?.filter((model) => !configuredModels.includes(model)) ?? [],
     );
 
-    const genModelConfig: GenModelConfig = $state(chatModelSettings.defaults);
+    let genModelConfig: GenModelConfig = $state(chatModelSettings.defaults);
 
     const isModelConfigured: () => boolean = () =>
         configuredModels.includes(selectedModel!);

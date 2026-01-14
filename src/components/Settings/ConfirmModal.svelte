@@ -1,13 +1,13 @@
 <script lang="ts">
 import ButtonComponent from "../base/Button.svelte";
-import type { ConfirmModal } from "./ConfirmModal";
+import { type ConfirmModal } from "./ConfirmModal";
 import { t } from "svelte-i18n";
 
 interface Props {
 	modal: ConfirmModal;
 }
 
-const { modal }: Props = $props();
+let { modal }: Props = $props();
 </script>
 
 <div class="modal-title">{modal.title}</div>
