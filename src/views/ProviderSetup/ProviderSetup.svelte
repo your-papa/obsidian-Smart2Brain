@@ -7,7 +7,7 @@ import type SecondBrainPlugin from "../../main";
 import ProviderIcon from "../../components/icons/ProviderIcon.svelte";
 import { mount, onMount } from "svelte";
 import { icon } from "../../utils/utils";
-import { type RegisteredProvider } from "../../types/providers";
+import type { RegisteredProvider } from "../../types/providers";
 import { createAuthStateQuery } from "../../utils/query";
 
 interface Props {

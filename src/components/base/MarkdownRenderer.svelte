@@ -17,7 +17,7 @@ const plugin = getPlugin();
 let lastHoverLink: HTMLElement | null = $state(null);
 
 // Container element reference
-let container: HTMLElement | undefined = $state();
+const container: HTMLElement | undefined = $state();
 
 // Get the source path for link resolution
 const sourcePath = $derived(plugin.app.workspace.getActiveFile()?.path ?? "");

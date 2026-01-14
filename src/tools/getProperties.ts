@@ -1,4 +1,4 @@
-import { App } from "obsidian";
+import type { App } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
@@ -28,14 +28,14 @@ export function createGetPropertiesTool(app: App) {
       const { position, ...properties } = cache.frontmatter;
 
       return JSON.stringify(properties, null, 2);
-    } else {
+    }
       // Get all unique property keys
       const files = app.vault.getMarkdownFiles();
       const allKeys = new Set<string>();
 
       for (const file of files) {
         const cache = app.metadataCache.getFileCache(file);
-        if (cache && cache.frontmatter) {
+        if (cache?.frontmatter) {
           Object.keys(cache.frontmatter).forEach((key) => {
             // "position" is internal Obsidian metadata
             if (key !== "position") {
@@ -52,7 +52,6 @@ export function createGetPropertiesTool(app: App) {
       }
 
       return `Found ${sortedKeys.length} unique properties:\n${sortedKeys.join("\n")}`;
-    }
   };
 
   return tool(getPropertiesFn, {

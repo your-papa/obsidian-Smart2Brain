@@ -1,4 +1,4 @@
-import { App } from "obsidian";
+import { type App, TFile } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { getData } from "../stores/dataStore.svelte";
@@ -91,9 +91,9 @@ async function omnisearchSearch(app: App, query: string): Promise<SearchResult[]
 
     for (const result of searchResults.slice(0, 10)) {
       const file = app.vault.getAbstractFileByPath(result.path);
-      if (!file) continue;
+      if (!file || !(file instanceof TFile)) continue;
 
-      const cache = app.metadataCache.getFileCache(file as any);
+      const cache = app.metadataCache.getFileCache(file);
       const frontmatter = cache?.frontmatter;
 
       results.push({
@@ -132,7 +132,6 @@ async function performSearch(
       return omnisearchSearch(app, query);
     case "embeddings":
       return embeddingsSearch(app, query);
-    case "grep":
     default:
       return grepSearch(app, query);
   }
@@ -164,7 +163,12 @@ export function createSearchNotesTool(app: App) {
       })
       .join("\n\n");
 
-    const algorithmLabel = algorithm === "omnisearch" ? "Omnisearch" : algorithm === "embeddings" ? "Embeddings" : "Grep";
+    const algorithmLabelMap: Record<string, string> = {
+      omnisearch: "Omnisearch",
+      embeddings: "Embeddings",
+      grep: "Grep",
+    };
+    const algorithmLabel = algorithmLabelMap[algorithm] ?? "Grep";
     return `Found ${results.length} note(s) matching "${query}" using ${algorithmLabel}. Use the execute_dataview_query tool to retrieve content or perform analysis if needed.\n\n${formattedResults}`;
   };
 

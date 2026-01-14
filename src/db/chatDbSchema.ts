@@ -1,6 +1,6 @@
 import Dexie, { type Table } from "dexie";
-import { type AssistantState, type ChatModel } from "../stores/chatStore.svelte";
-import { type UUIDv7 } from "../utils/uuid7Validator";
+import type { AssistantState, ChatModel } from "../stores/chatStore.svelte";
+import type { UUIDv7 } from "../utils/uuid7Validator";
 
 /**
  * Chat metadata row.

@@ -7,7 +7,7 @@
     import Button from "../base/Button.svelte";
     import Dropdown from "../base/Dropdown.svelte";
     import Toggle from "../base/Toggle.svelte";
-    import { prepareFuzzySearch, TAbstractFile } from "obsidian";
+    import { prepareFuzzySearch, type TAbstractFile } from "obsidian";
     import FolderSuggest from "./FolderSuggest.svelte";
     import { getPlugin } from "../../stores/state.svelte";
 
@@ -21,16 +21,16 @@
 
     const suggestionLength: number = 100;
 
-    let { modal }: Props = $props();
+    const { modal }: Props = $props();
 
     //TODO: Finish implementing modes
 
     export const modes = ["File/Folder", "Filetyp"] as const;
 
-    let exclusionMode: (typeof modes)[number] = $state("File/Folder");
+    const exclusionMode: (typeof modes)[number] = $state("File/Folder");
 
     function matchFilesFolders(query: string): TAbstractFile[] {
-        let allFiles = plugin.app.vault.getAllLoadedFiles();
+        const allFiles = plugin.app.vault.getAllLoadedFiles();
 
         if (!query) {
             return allFiles.slice(0, 10);
@@ -44,7 +44,7 @@
                 match: fuzzySearch(file.path),
             }))
             .filter((item) => item.match)
-            .sort((a, b) => b.match!.score - a.match!.score)
+            .sort((a, b) => b.match?.score - a.match?.score)
             .map((item) => item.file);
 
         return matches;

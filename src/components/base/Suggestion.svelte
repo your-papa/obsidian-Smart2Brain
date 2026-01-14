@@ -6,7 +6,7 @@ type Props = {
 	iconId: string;
 };
 
-let { suggestionText, iconId }: Props = $props();
+const { suggestionText, iconId }: Props = $props();
 </script>
 
     <span class="flex flex-row gap-2">

@@ -10,7 +10,7 @@
         progress?: number; // Progress value from 0 to 100
     }
 
-    let { progress = 0 }: Props = $props();
+    const { progress = 0 }: Props = $props();
     const radius = 45; // Radius of the circle
     const circumference = 2 * Math.PI * radius; // Circumference of the circle
     const progressValue = tweened(0, {
@@ -24,7 +24,7 @@
     });
 
     // Calculate the stroke dashoffset based on the progress
-    let strokeDashoffset = $derived(
+    const strokeDashoffset = $derived(
         circumference - (progress / 100) * circumference,
     );
 

@@ -22,7 +22,7 @@
 
     type Props = TextInputProps | NumberInputProps;
 
-    let {
+    const {
         inputType = "text",
         placeholder = "",
         styles = "",
@@ -44,7 +44,7 @@
     const numberFocusFunc = focusFunc as ((value: number) => void) | undefined;
     const numberBlurFunc = blurFunc as ((value: number) => void) | undefined;
 
-    let isFocused = $state(false);
+    const isFocused = $state(false);
 
     /**
      * Masks a secret value for display.

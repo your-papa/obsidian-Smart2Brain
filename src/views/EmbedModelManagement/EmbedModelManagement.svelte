@@ -24,7 +24,7 @@
         } as EmbedModelConfig,
     };
 
-    let { modal, provider, config }: Props = $props();
+    const { modal, provider, config }: Props = $props();
 
     const plugin: SecondBrainPlugin = getPlugin();
     const data = getData();
@@ -36,22 +36,22 @@
         },
     }));
 
-    let { data: models, isPending, isError } = $derived(query);
+    const { data: models, isPending, isError } = $derived(query);
 
-    let embedModels: Map<string, EmbedModelConfig> = $derived(
+    const embedModels: Map<string, EmbedModelConfig> = $derived(
         data.getEmbedModels(provider),
     );
 
-    let configuredModels: string[] = $derived(Array.from(embedModels.keys()));
-    let selectedModel = $derived(
+    const configuredModels: string[] = $derived(Array.from(embedModels.keys()));
+    const selectedModel = $derived(
         !isPending && !isError && models ? models[0] : configuredModels[0],
     );
 
-    let unconfiguredModels: string[] = $derived(
+    const unconfiguredModels: string[] = $derived(
         models?.filter((model) => !configuredModels.includes(model)) ?? [],
     );
 
-    let embedConfig: EmbedModelConfig = $state(embedModelSettings.defaults);
+    const embedConfig: EmbedModelConfig = $state(embedModelSettings.defaults);
 
     const isModelConfigured = () => configuredModels.includes(selectedModel);
 </script>
