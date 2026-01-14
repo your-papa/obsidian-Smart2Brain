@@ -26,4 +26,4 @@ workspace.json
 *.sln
 *.sw?
 .envrc
-.direnv/*
+.direnv/*package-lock.json
