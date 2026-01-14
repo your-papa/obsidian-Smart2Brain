@@ -1,184 +1,176 @@
 <script lang="ts">
-    import { icon } from "../../utils/utils";
-    import { TextareaAutosize } from "runed";
-    import { getPlugin } from "../../stores/state.svelte";
-    import { MessageState, Messenger } from "../../stores/chatStore.svelte";
-    import { Notice, TFile } from "obsidian";
-    import ModelPopover from "../bitui/ModelPopover.svelte";
-    import FilePopover from "../base/FilePopover.svelte";
-    import { getWikiLinkAtCursor } from "../../utils/wikiLinkExtraction";
-    import { onMount } from "svelte";
+import { icon } from "../../utils/utils";
+import { TextareaAutosize } from "runed";
+import { getPlugin } from "../../stores/state.svelte";
+import { MessageState, Messenger } from "../../stores/chatStore.svelte";
+import { Notice, TFile } from "obsidian";
+import ModelPopover from "../bitui/ModelPopover.svelte";
+import FilePopover from "../base/FilePopover.svelte";
+import { getWikiLinkAtCursor } from "../../utils/wikiLinkExtraction";
+import { onMount } from "svelte";
+import { useAvailableModels } from "../../composables/useAvailableModels.svelte";
 
-    interface Props {
-        messenger: Messenger;
-        onFocusChange?: (focused: boolean) => void;
-        onMessageSent?: () => void;
-    }
+interface Props {
+	messenger: Messenger;
+	onFocusChange?: (focused: boolean) => void;
+	onMessageSent?: () => void;
+}
 
-    const baseOptions = ".txt, .json";
+const baseOptions = ".txt, .json";
 
-    const { messenger, onFocusChange, onMessageSent }: Props = $props();
+const { messenger, onFocusChange, onMessageSent }: Props = $props();
 
-    let textarea = $state<HTMLTextAreaElement | null>(null);
-    let inputValue = $state("");
-    let isFilePopoverOpen = $state(false);
-    let markdownFiles: TFile[] = $state([]);
+let textarea = $state<HTMLTextAreaElement | null>(null);
+let inputValue = $state("");
+let isFilePopoverOpen = $state(false);
+let markdownFiles: TFile[] = $state([]);
 
-    // New: hidden combobox input ref & selected file value
-    let comboInputRef: HTMLInputElement | null = $state(null);
-    let fileSearchQuery = $state("");
+// New: hidden combobox input ref & selected file value
+let comboInputRef: HTMLInputElement | null = $state(null);
+let fileSearchQuery = $state("");
 
-    // Number of visible lines before scrolling kicks in
-    const maxLines = 6;
+// Number of visible lines before scrolling kicks in
+const maxLines = 6;
 
-    // Calculate max height in pixels based on computed line height
-    // Uses a getter so it recalculates when textarea is available
-    const getMaxHeight = (): number | undefined => {
-        if (!textarea) return undefined;
-        const computed = getComputedStyle(textarea);
-        const lineHeight =
-            parseFloat(computed.lineHeight) ||
-            parseFloat(computed.fontSize) * 1.5;
-        const paddingTop = parseFloat(computed.paddingTop) || 0;
-        const paddingBottom = parseFloat(computed.paddingBottom) || 0;
-        return Math.ceil(lineHeight * maxLines + paddingTop + paddingBottom);
-    };
+// Calculate max height in pixels based on computed line height
+// Uses a getter so it recalculates when textarea is available
+const getMaxHeight = (): number | undefined => {
+	if (!textarea) return undefined;
+	const computed = getComputedStyle(textarea);
+	const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.5;
+	const paddingTop = parseFloat(computed.paddingTop) || 0;
+	const paddingBottom = parseFloat(computed.paddingBottom) || 0;
+	return Math.ceil(lineHeight * maxLines + paddingTop + paddingBottom);
+};
 
-    // Use runed's TextareaAutosize for automatic height adjustment
-    new TextareaAutosize({
-        element: () => textarea ?? undefined,
-        input: () => inputValue,
-        get maxHeight() {
-            return getMaxHeight();
-        },
-    });
+// Use runed's TextareaAutosize for automatic height adjustment
+new TextareaAutosize({
+	element: () => textarea ?? undefined,
+	input: () => inputValue,
+	get maxHeight() {
+		return getMaxHeight();
+	},
+});
 
-    onMount(() => {
-        const plugin = getPlugin();
-        markdownFiles = plugin.app.vault.getMarkdownFiles();
-    });
+onMount(() => {
+	const plugin = getPlugin();
+	markdownFiles = plugin.app.vault.getMarkdownFiles();
+});
 
-    let files: File[] = $state([]);
+const models = useAvailableModels();
 
-    function sendMessage() {
-        messenger.sendMessage(inputValue, files);
-        files = [];
-        inputValue = "";
-        onMessageSent?.();
-    }
+let files: File[] = $state([]);
 
-    const handleEnter = (event: KeyboardEvent) => {
-        if (event.shiftKey && event.key === "Enter") {
-            return;
-        }
-        event.preventDefault();
+function sendMessage() {
+	messenger.sendMessage(inputValue, files);
+	files = [];
+	inputValue = "";
+	onMessageSent?.();
+}
 
-        if (inputValue.trim().length !== 0) {
-            sendMessage();
-        } else {
-            new Notice("Your second brain does not understand empty messages");
-        }
-    };
+const handleEnter = (event: KeyboardEvent) => {
+	if (event.shiftKey && event.key === "Enter") {
+		return;
+	}
+	event.preventDefault();
 
-    function autoCloseBracket(textarea: HTMLTextAreaElement) {
-        const start = textarea.selectionStart ?? 0;
-        const end = textarea.selectionEnd ?? start;
-        const value = textarea.value;
-        const before = value.slice(0, start);
-        const selected = value.slice(start, end);
-        const after = value.slice(end);
-        const insertion = selected.length ? `[${selected}]` : `[]`;
-        textarea.value = before + insertion + after;
-        const caretPos = start + 1;
-        const newSelectionEnd = selected.length
-            ? caretPos + selected.length
-            : caretPos;
-        textarea.setSelectionRange(caretPos, newSelectionEnd);
-        return [start, end];
-    }
+	if (inputValue.trim().length !== 0) {
+		sendMessage();
+	} else {
+		new Notice("Your second brain does not understand empty messages");
+	}
+};
 
-    function handleBracket(
-        event: KeyboardEvent,
-        textarea: HTMLTextAreaElement,
-    ) {
-        event.preventDefault();
-        const [start, end] = autoCloseBracket(textarea);
-        textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    }
+function autoCloseBracket(textarea: HTMLTextAreaElement) {
+	const start = textarea.selectionStart ?? 0;
+	const end = textarea.selectionEnd ?? start;
+	const value = textarea.value;
+	const before = value.slice(0, start);
+	const selected = value.slice(start, end);
+	const after = value.slice(end);
+	const insertion = selected.length ? `[${selected}]` : `[]`;
+	textarea.value = before + insertion + after;
+	const caretPos = start + 1;
+	const newSelectionEnd = selected.length ? caretPos + selected.length : caretPos;
+	textarea.setSelectionRange(caretPos, newSelectionEnd);
+	return [start, end];
+}
 
-    // Insert selected filename into the current [] region
-    const onFileSelect = (name: string) => {
-        if (!textarea || !name) return;
-        const value = textarea.value;
-        const cursor = textarea.selectionStart ?? 0;
+function handleBracket(event: KeyboardEvent, textarea: HTMLTextAreaElement) {
+	event.preventDefault();
+	const [start, end] = autoCloseBracket(textarea);
+	textarea.dispatchEvent(new Event("input", { bubbles: true }));
+}
 
-        const ctx = getWikiLinkAtCursor(value, cursor);
-        if (!ctx) return; // per your assumption this shouldn't happen
+// Insert selected filename into the current [] region
+const onFileSelect = (name: string) => {
+	if (!textarea || !name) return;
+	const value = textarea.value;
+	const cursor = textarea.selectionStart ?? 0;
 
-        // Replace the inner range [innerStart, innerEnd)
-        textarea.setRangeText(name, ctx.innerStart, ctx.innerEnd, "preserve");
+	const ctx = getWikiLinkAtCursor(value, cursor);
+	if (!ctx) return; // per your assumption this shouldn't happen
 
-        // Compute new fullEnd after replacement and place caret just after ]]
-        const delta = name.length - (ctx.innerEnd - ctx.innerStart);
-        const newFullEnd = ctx.fullEnd + delta;
-        textarea.setSelectionRange(newFullEnd, newFullEnd);
+	// Replace the inner range [innerStart, innerEnd)
+	textarea.setRangeText(name, ctx.innerStart, ctx.innerEnd, "preserve");
 
-        // Notify any bindings/framework
-        textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    };
+	// Compute new fullEnd after replacement and place caret just after ]]
+	const delta = name.length - (ctx.innerEnd - ctx.innerStart);
+	const newFullEnd = ctx.fullEnd + delta;
+	textarea.setSelectionRange(newFullEnd, newFullEnd);
 
-    const handleKeydown = (event: KeyboardEvent) => {
-        if (isFilePopoverOpen) {
-            const keys = ["ArrowDown", "ArrowUp", "Enter", "Escape"];
-            if (keys.includes(event.key)) {
-                event.preventDefault();
-                event.stopPropagation();
-                comboInputRef?.dispatchEvent(
-                    new KeyboardEvent("keydown", {
-                        key: event.key,
-                        bubbles: true,
-                        cancelable: true,
-                    }),
-                );
-                // Do not fall through to Enter handling here;
-                // Combobox will handle selection/close, effect will insert.
-                return;
-            }
-        }
+	// Notify any bindings/framework
+	textarea.dispatchEvent(new Event("input", { bubbles: true }));
+};
 
-        if (event.key === "Enter") handleEnter(event);
-        if (event.key === "[")
-            handleBracket(event, event.target as HTMLTextAreaElement);
-    };
+const handleKeydown = (event: KeyboardEvent) => {
+	if (isFilePopoverOpen) {
+		const keys = ["ArrowDown", "ArrowUp", "Enter", "Escape"];
+		if (keys.includes(event.key)) {
+			event.preventDefault();
+			event.stopPropagation();
+			comboInputRef?.dispatchEvent(
+				new KeyboardEvent("keydown", {
+					key: event.key,
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+			// Do not fall through to Enter handling here;
+			// Combobox will handle selection/close, effect will insert.
+			return;
+		}
+	}
 
-    function onFileAttachment(event: Event) {
-        const input = event.target as HTMLInputElement;
-        const fileList = input.files;
-        if (fileList) {
-            for (const file of fileList) {
-                files.push(file);
-            }
-            new Notice(`New files attached`);
-        }
-    }
+	if (event.key === "Enter") handleEnter(event);
+	if (event.key === "[") handleBracket(event, event.target as HTMLTextAreaElement);
+};
 
-    function removeAttachedFile(file: File) {
-        files.remove(file);
-    }
+function onFileAttachment(event: Event) {
+	const input = event.target as HTMLInputElement;
+	const fileList = input.files;
+	if (fileList) {
+		for (const file of fileList) {
+			files.push(file);
+		}
+		new Notice(`New files attached`);
+	}
+}
 
-    const handleKeyup = (event: KeyboardEvent) => {
-        const textarea = event.target as HTMLTextAreaElement;
-        const wikiLink = getWikiLinkAtCursor(
-            textarea.value,
-            textarea.selectionStart,
-        );
-        if (wikiLink) {
-            isFilePopoverOpen = true;
-            fileSearchQuery = wikiLink.filePart;
-        } else {
-            if (isFilePopoverOpen) isFilePopoverOpen = false;
-        }
-    };
+function removeAttachedFile(file: File) {
+	files.remove(file);
+}
+
+const handleKeyup = (event: KeyboardEvent) => {
+	const textarea = event.target as HTMLTextAreaElement;
+	const wikiLink = getWikiLinkAtCursor(textarea.value, textarea.selectionStart);
+	if (wikiLink) {
+		isFilePopoverOpen = true;
+		fileSearchQuery = wikiLink.filePart;
+	} else {
+		if (isFilePopoverOpen) isFilePopoverOpen = false;
+	}
+};
 </script>
 
 <div
@@ -197,6 +189,26 @@
         ></div>
         <div class="text-xs">New Chat</div>
     </button>
+    
+    {#if models.hasUnavailableProviders}
+        <button
+            class="flex flex-row items-center gap-1.5 px-2 py-1 rounded-md bg-[--background-modifier-error] text-[--text-on-accent] text-xs cursor-pointer border-none"
+            onclick={models.refetchProviders}
+            title="Click to retry connection"
+        >
+            <div
+                class="h-icon-xs"
+                use:icon={"alert-triangle"}
+                style={"--icon-size: var(--icon-xs)"}
+            ></div>
+            <span>Cannot connect to: {models.unavailableProviders.join(", ")}</span>
+            <div
+                class="h-icon-xs"
+                use:icon={"refresh-cw"}
+                style={"--icon-size: var(--icon-xs)"}
+            ></div>
+        </button>
+    {/if}
     <!-- Input wrapper with glow effect -->
     <div
         class="chat-input-wrapper flex flex-col gap-3 bg-background-secondary border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate"
