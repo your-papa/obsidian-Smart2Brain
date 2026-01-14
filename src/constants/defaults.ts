@@ -92,4 +92,5 @@ export const DEFAULT_SETTINGS: PluginData = {
 	mcpServers: {},
 	debuggingLangchainKey: "",
 	lastActiveChatId: null,
+	searchAlgorithm: "grep",
 };

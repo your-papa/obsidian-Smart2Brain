@@ -58,7 +58,7 @@ export function createGetPropertiesTool(app: App) {
   return tool(getPropertiesFn, {
     name: "get_properties",
     description:
-      "Retrieve properties (frontmatter) from Obsidian. If 'note_name' is provided, returns the properties (key-value pairs) of that specific note. If 'note_name' is omitted, returns a list of all unique property keys used across the entire vault.",
+      "Retrieve properties (frontmatter) from Obsidian. Omit 'note_name' to list all available property keys in the vault.",
     schema: z.object({
       note_name: z
         .string()

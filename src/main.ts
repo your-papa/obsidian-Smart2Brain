@@ -12,6 +12,8 @@ import { type ChatModel, createMessenger } from "./stores/chatStore.svelte";
 import type { UUIDv7 } from "./utils/uuid7Validator";
 import { getQueryClient } from "./utils/query";
 
+export type SearchAlgorithm = "grep" | "omnisearch" | "embeddings";
+
 export interface PluginData {
 	providerConfig: ProviderConfigs;
 	initialAssistantMessageContent: string;
@@ -38,6 +40,7 @@ export interface PluginData {
 	hideIncognitoWarning: boolean;
 	isAutostart: boolean;
 	lastActiveChatId: UUIDv7 | null;
+	searchAlgorithm: SearchAlgorithm;
 }
 export type ProviderName = "ollama" | "openai" | "anthropic" | "sap-ai-core";
 
