@@ -61,6 +61,22 @@
     let selectedSearchAlgorithm: SearchAlgorithm = $state(
         pluginData.searchAlgorithm,
     );
+
+    // Sync local state with store changes
+    $effect(() => {
+        selectedSearchAlgorithm = pluginData.searchAlgorithm;
+    });
+
+    // Guard against selecting Omnisearch when the plugin isn't installed
+    $effect(() => {
+        if (selectedSearchAlgorithm === "omnisearch" && !isOmnisearchInstalled) {
+            console.warn(
+                "Omnisearch selected but plugin not available, switching to grep",
+            );
+            selectedSearchAlgorithm = "grep";
+            pluginData.searchAlgorithm = "grep";
+        }
+    });
 </script>
 
 <ProviderSetup />

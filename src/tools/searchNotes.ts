@@ -1,4 +1,4 @@
-import { App } from "obsidian";
+import { App, TFile } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { getData } from "../stores/dataStore.svelte";
@@ -91,9 +91,9 @@ async function omnisearchSearch(app: App, query: string): Promise<SearchResult[]
 
     for (const result of searchResults.slice(0, 10)) {
       const file = app.vault.getAbstractFileByPath(result.path);
-      if (!file) continue;
+      if (!file || !(file instanceof TFile)) continue;
 
-      const cache = app.metadataCache.getFileCache(file as any);
+      const cache = app.metadataCache.getFileCache(file);
       const frontmatter = cache?.frontmatter;
 
       results.push({
