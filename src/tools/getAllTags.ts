@@ -1,4 +1,4 @@
-import { App, getAllTags, type CachedMetadata } from "obsidian";
+import { type App, getAllTags, type CachedMetadata } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 

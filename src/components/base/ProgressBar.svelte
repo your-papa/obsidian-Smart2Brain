@@ -5,7 +5,7 @@
         progress?: number; // Progress value from 0 to 100
     }
 
-    let { progress = 0 }: Props = $props();
+    const { progress = 0 }: Props = $props();
 </script>
 
 <progress

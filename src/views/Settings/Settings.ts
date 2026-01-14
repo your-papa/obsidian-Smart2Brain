@@ -1,5 +1,5 @@
 import { PluginSettingTab } from "obsidian";
-import SecondBrainPlugin from "../../main";
+import type SecondBrainPlugin from "../../main";
 import SettingsComponent from "./Settings.svelte";
 import { mount } from "svelte";
 import QueryClientProvider from "../../components/QueryClientProvider.svelte";

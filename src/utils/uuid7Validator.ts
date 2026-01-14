@@ -16,7 +16,7 @@ export function isUUIDv7(s: string): s is UUIDv7 {
 // Parse Date from a UUIDv7 (first 48 bits are Unix epoch ms)
 export function dateFromUUIDv7(id: UUIDv7): Date {
   const hex = id.replace(/-/g, "").slice(0, 12); // 48 bits (12 hex chars)
-  const ms = parseInt(hex, 16);
+  const ms = Number.parseInt(hex, 16);
   return new Date(ms);
 }
 

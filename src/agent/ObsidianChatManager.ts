@@ -15,7 +15,7 @@ import {
 	type DataAdapter,
 } from "obsidian";
 import type SecondBrainPlugin from "../main";
-import { type ThreadStore, type ThreadSnapshot } from "./memory/ThreadStore";
+import type { ThreadStore, ThreadSnapshot } from "./memory/ThreadStore";
 import { getData } from "../stores/dataStore.svelte";
 
 interface CheckpointEntry {
@@ -50,7 +50,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	// Path cache: thread_id -> file_path (Optimizes file lookups)
 	private filePathCache: Map<string, string> = new Map();
 
-	private indexLoaded: boolean = false;
+	private indexLoaded = false;
 
 	constructor(plugin: SecondBrainPlugin) {
 		super();
@@ -178,7 +178,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			try {
 				const content = await this.adapter.read(file);
 				const data = JSON.parse(content) as ThreadData;
-				if (data && data.threadId) {
+				if (data?.threadId) {
 					// Cache path
 					this.filePathCache.set(data.threadId, file);
 
@@ -289,7 +289,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 	async read(
 		threadId: string,
-		forceReload: boolean = false,
+		forceReload = false,
 	): Promise<ThreadSnapshot | undefined> {
 		if (!forceReload && this.threadIndex.has(threadId)) {
 			return this.threadIndex.get(threadId);
@@ -463,8 +463,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		for (const key of keys) {
 			const entry = threadData.checkpoints[key];
 			if (
-				options?.before &&
-				options.before.configurable?.checkpoint_id &&
+				options?.before?.configurable?.checkpoint_id &&
 				key >= options.before.configurable.checkpoint_id
 			) {
 				continue;

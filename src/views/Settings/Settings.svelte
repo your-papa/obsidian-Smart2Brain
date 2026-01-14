@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { TFolder } from "obsidian";
+    import type { TFolder } from "obsidian";
     import SettingContainer from "../../components/Settings/SettingContainer.svelte";
     import ToggleComponent from "../../components/base/Toggle.svelte";
     import ButtonComponent from "../../components/base/Button.svelte";
@@ -19,13 +19,13 @@
     const plugin = getPlugin();
 
     // MCP servers JSON editing buffer
-    let mcpServersText: string = JSON.stringify(
+    const mcpServersText: string = JSON.stringify(
         pluginData.mcpServers ?? {},
         null,
         2,
     );
 
-    let fuzzySuggestModel = new ExcludeFoldersModal(plugin.app);
+    const fuzzySuggestModel = new ExcludeFoldersModal(plugin.app);
 
     function suggestFolders(): TFolder[] {
         return plugin.app.vault.getAllFolders(true);
@@ -61,6 +61,20 @@
     let selectedSearchAlgorithm: SearchAlgorithm = $state(
         pluginData.searchAlgorithm,
     );
+
+    // Sync local state with store changes
+    $effect(() => {
+        selectedSearchAlgorithm = pluginData.searchAlgorithm;
+    });
+
+    // Validate that omnisearch is available if selected
+    $effect(() => {
+        if (selectedSearchAlgorithm === "omnisearch" && !isOmnisearchInstalled) {
+            console.warn("Omnisearch selected but plugin not available, switching to grep");
+            selectedSearchAlgorithm = "grep";
+            pluginData.searchAlgorithm = "grep";
+        }
+    });
 </script>
 
 <ProviderSetup />

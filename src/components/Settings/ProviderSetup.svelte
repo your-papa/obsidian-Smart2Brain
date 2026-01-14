@@ -16,13 +16,13 @@
     const data = getData();
     const plugin = getPlugin();
 
-    let configuredProviders = $derived(data.getConfiguredProviders());
-    let unconfiguredProviders = $derived(
+    const configuredProviders = $derived(data.getConfiguredProviders());
+    const unconfiguredProviders = $derived(
         registeredProviders.filter(
             (provider) => !configuredProviders.includes(provider),
         ),
     );
-    let selectedProvider: RegisteredProvider | undefined = $derived(
+    const selectedProvider: RegisteredProvider | undefined = $derived(
         unconfiguredProviders[0] || undefined,
     );
 

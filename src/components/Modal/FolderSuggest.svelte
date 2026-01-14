@@ -1,5 +1,5 @@
 <script lang="ts" generics="T extends TAbstractFile">
-import { AbstractInputSuggest, App, TAbstractFile, TFile, TFolder } from "obsidian";
+import { AbstractInputSuggest, type App, type TAbstractFile, TFile, TFolder } from "obsidian";
 import { onMount, onDestroy } from "svelte";
 import Suggestion from "../base/Suggestion.svelte";
 import { mount } from "svelte";
@@ -14,7 +14,7 @@ interface Props {
 	value?: string;
 }
 
-let {
+const {
 	app,
 	placeholder = "Search folders...",
 	suggestionLength = 10,

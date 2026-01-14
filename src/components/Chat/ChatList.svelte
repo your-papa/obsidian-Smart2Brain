@@ -17,7 +17,7 @@
     const { messenger, currentSession }: props = $props();
 
     let chats: ChatPreview[] = $state([]);
-    let hoveredChatId: string | null = $state(null);
+    const hoveredChatId: string | null = $state(null);
 
     export function formatDDMMYY_HHMM(d: Date): string {
         const parts = new Intl.DateTimeFormat("de-DE", {

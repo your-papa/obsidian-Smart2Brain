@@ -4,9 +4,9 @@ import { t } from "svelte-i18n";
 import DropdownComponent from "../base/Dropdown.svelte";
 import DotAnimation from "../base/DotAnimation.svelte";
 import { data } from "../../store";
-import { Ollama } from "../../Providers/Ollama";
+import type { Ollama } from "../../Providers/Ollama";
 
-let model = "";
+const model = "";
 let isOllama: boolean;
 let installedOllamaModels: string[] = [];
 let ollama: Ollama;
