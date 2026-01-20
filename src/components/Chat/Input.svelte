@@ -1,14 +1,12 @@
 <script lang="ts">
-import { icon } from "../../utils/utils";
-import { TextareaAutosize } from "runed";
-import { getPlugin } from "../../stores/state.svelte";
-import { MessageState, Messenger } from "../../stores/chatStore.svelte";
-import { Notice, TFile } from "obsidian";
-import ModelPopover from "../bitui/ModelPopover.svelte";
-import FilePopover from "../base/FilePopover.svelte";
-import { getWikiLinkAtCursor } from "../../utils/wikiLinkExtraction";
-import { onMount } from "svelte";
+import { Notice } from "obsidian";
+import { onDestroy, onMount } from "svelte";
 import { useAvailableModels } from "../../composables/useAvailableModels.svelte";
+import { EmbeddableMarkdownEditor } from "../../editor/EmbeddableMarkdownEditor";
+import { MessageState, type Messenger } from "../../stores/chatStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { icon } from "../../utils/utils";
+import ModelPopover from "../bitui/ModelPopover.svelte";
 
 interface Props {
 	messenger: Messenger;
@@ -20,131 +18,79 @@ const baseOptions = ".txt, .json";
 
 const { messenger, onFocusChange, onMessageSent }: Props = $props();
 
-let textarea = $state<HTMLTextAreaElement | null>(null);
+// biome-ignore lint/style/useConst: Svelte bind:this requires let
+let editorContainer: HTMLDivElement | undefined = $state();
+let markdownEditor: EmbeddableMarkdownEditor | undefined = $state();
 let inputValue = $state("");
-let isFilePopoverOpen = $state(false);
-let markdownFiles: TFile[] = $state([]);
 
-// New: hidden combobox input ref & selected file value
-let comboInputRef: HTMLInputElement | null = $state(null);
-let fileSearchQuery = $state("");
-
-// Number of visible lines before scrolling kicks in
-const maxLines = 6;
-
-// Calculate max height in pixels based on computed line height
-// Uses a getter so it recalculates when textarea is available
-const getMaxHeight = (): number | undefined => {
-	if (!textarea) return undefined;
-	const computed = getComputedStyle(textarea);
-	const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.5;
-	const paddingTop = parseFloat(computed.paddingTop) || 0;
-	const paddingBottom = parseFloat(computed.paddingBottom) || 0;
-	return Math.ceil(lineHeight * maxLines + paddingTop + paddingBottom);
-};
-
-// Use runed's TextareaAutosize for automatic height adjustment
-new TextareaAutosize({
-	element: () => textarea ?? undefined,
-	input: () => inputValue,
-	get maxHeight() {
-		return getMaxHeight();
-	},
-});
-
-onMount(() => {
-	const plugin = getPlugin();
-	markdownFiles = plugin.app.vault.getMarkdownFiles();
-});
+let files: File[] = $state([]);
 
 const models = useAvailableModels();
 
-let files: File[] = $state([]);
+onMount(() => {
+	// Initialize the markdown editor once the container is ready
+	if (editorContainer) {
+		initializeEditor();
+	}
+});
+
+onDestroy(() => {
+	markdownEditor?.destroy();
+});
+
+function initializeEditor() {
+	if (!editorContainer) return;
+
+	const plugin = getPlugin();
+
+	markdownEditor = new EmbeddableMarkdownEditor(plugin.app, editorContainer, {
+		value: inputValue,
+		placeholder: "Type a message...",
+		cls: "chat-markdown-editor",
+		onChange: (value) => {
+			inputValue = value;
+		},
+		onEnter: (_editor, _mod, shift) => {
+			// Shift+Enter: allow newline (return false to use default behavior)
+			if (shift) {
+				return false;
+			}
+
+			// Regular Enter: send message
+			if (inputValue.trim().length !== 0) {
+				sendMessage();
+			} else {
+				new Notice("Your second brain does not understand empty messages");
+			}
+			return true;
+		},
+		onSubmit: () => {
+			// Mod+Enter: send message
+			if (inputValue.trim().length !== 0) {
+				sendMessage();
+			}
+		},
+		onFocus: () => {
+			onFocusChange?.(true);
+		},
+		onBlur: () => {
+			onFocusChange?.(false);
+		},
+	});
+
+	// Focus the editor after next paint
+	requestAnimationFrame(() => {
+		markdownEditor?.focus();
+	});
+}
 
 function sendMessage() {
 	messenger.sendMessage(inputValue, files);
 	files = [];
 	inputValue = "";
+	markdownEditor?.clear();
 	onMessageSent?.();
 }
-
-const handleEnter = (event: KeyboardEvent) => {
-	if (event.shiftKey && event.key === "Enter") {
-		return;
-	}
-	event.preventDefault();
-
-	if (inputValue.trim().length !== 0) {
-		sendMessage();
-	} else {
-		new Notice("Your second brain does not understand empty messages");
-	}
-};
-
-function autoCloseBracket(textarea: HTMLTextAreaElement) {
-	const start = textarea.selectionStart ?? 0;
-	const end = textarea.selectionEnd ?? start;
-	const value = textarea.value;
-	const before = value.slice(0, start);
-	const selected = value.slice(start, end);
-	const after = value.slice(end);
-	const insertion = selected.length ? `[${selected}]` : `[]`;
-	textarea.value = before + insertion + after;
-	const caretPos = start + 1;
-	const newSelectionEnd = selected.length ? caretPos + selected.length : caretPos;
-	textarea.setSelectionRange(caretPos, newSelectionEnd);
-	return [start, end];
-}
-
-function handleBracket(event: KeyboardEvent, textarea: HTMLTextAreaElement) {
-	event.preventDefault();
-	const [start, end] = autoCloseBracket(textarea);
-	textarea.dispatchEvent(new Event("input", { bubbles: true }));
-}
-
-// Insert selected filename into the current [] region
-const onFileSelect = (name: string) => {
-	if (!textarea || !name) return;
-	const value = textarea.value;
-	const cursor = textarea.selectionStart ?? 0;
-
-	const ctx = getWikiLinkAtCursor(value, cursor);
-	if (!ctx) return; // per your assumption this shouldn't happen
-
-	// Replace the inner range [innerStart, innerEnd)
-	textarea.setRangeText(name, ctx.innerStart, ctx.innerEnd, "preserve");
-
-	// Compute new fullEnd after replacement and place caret just after ]]
-	const delta = name.length - (ctx.innerEnd - ctx.innerStart);
-	const newFullEnd = ctx.fullEnd + delta;
-	textarea.setSelectionRange(newFullEnd, newFullEnd);
-
-	// Notify any bindings/framework
-	textarea.dispatchEvent(new Event("input", { bubbles: true }));
-};
-
-const handleKeydown = (event: KeyboardEvent) => {
-	if (isFilePopoverOpen) {
-		const keys = ["ArrowDown", "ArrowUp", "Enter", "Escape"];
-		if (keys.includes(event.key)) {
-			event.preventDefault();
-			event.stopPropagation();
-			comboInputRef?.dispatchEvent(
-				new KeyboardEvent("keydown", {
-					key: event.key,
-					bubbles: true,
-					cancelable: true,
-				}),
-			);
-			// Do not fall through to Enter handling here;
-			// Combobox will handle selection/close, effect will insert.
-			return;
-		}
-	}
-
-	if (event.key === "Enter") handleEnter(event);
-	if (event.key === "[") handleBracket(event, event.target as HTMLTextAreaElement);
-};
 
 function onFileAttachment(event: Event) {
 	const input = event.target as HTMLInputElement;
@@ -153,30 +99,17 @@ function onFileAttachment(event: Event) {
 		for (const file of fileList) {
 			files.push(file);
 		}
-		new Notice(`New files attached`);
+		new Notice("New files attached");
 	}
 }
 
 function removeAttachedFile(file: File) {
 	files.remove(file);
 }
-
-const handleKeyup = (event: KeyboardEvent) => {
-	const textarea = event.target as HTMLTextAreaElement;
-	const wikiLink = getWikiLinkAtCursor(textarea.value, textarea.selectionStart);
-	if (wikiLink) {
-		isFilePopoverOpen = true;
-		fileSearchQuery = wikiLink.filePart;
-	} else {
-		if (isFilePopoverOpen) isFilePopoverOpen = false;
-	}
-};
 </script>
 
 <div
     class="chat-input-container w-full max-w-[--file-line-width] mx-auto bg-background-primary flex flex-col relative isolate gap-1"
-    onfocusin={() => onFocusChange?.(true)}
-    onfocusout={() => onFocusChange?.(false)}
 >
     <button
         class="clickable-icon flex flex-row items-center gap-1 ml-auto"
@@ -185,7 +118,7 @@ const handleKeyup = (event: KeyboardEvent) => {
         <div
             class="h-icon-xs"
             use:icon={"plus"}
-            style={"--icon-size: var(--icon-xs)"}
+            style="--icon-size: var(--icon-xs)"
         ></div>
         <div class="text-xs">New Chat</div>
     </button>
@@ -199,13 +132,13 @@ const handleKeyup = (event: KeyboardEvent) => {
             <div
                 class="h-icon-xs"
                 use:icon={"alert-triangle"}
-                style={"--icon-size: var(--icon-xs)"}
+                style="--icon-size: var(--icon-xs)"
             ></div>
             <span>Cannot connect to: {models.unavailableProviders.join(", ")}</span>
             <div
                 class="h-icon-xs"
                 use:icon={"refresh-cw"}
-                style={"--icon-size: var(--icon-xs)"}
+                style="--icon-size: var(--icon-xs)"
             ></div>
         </button>
     {/if}
@@ -222,13 +155,13 @@ const handleKeyup = (event: KeyboardEvent) => {
                         <div
                             class="p-0 flex items-center"
                             use:icon={"file-text"}
-                            style={"--icon-size: var(--icon-xs)"}
+                            style="--icon-size: var(--icon-xs)"
                         ></div>
                     {:else if file.type === "application/json"}
                         <div
                             class="p-0 flex items-center"
                             use:icon={"file-json"}
-                            style={"--icon-size: var(--icon-xs)"}
+                            style="--icon-size: var(--icon-xs)"
                         ></div>
                     {/if}
                     <div class="text-xs">
@@ -238,32 +171,20 @@ const handleKeyup = (event: KeyboardEvent) => {
                     <!-- svelte-ignore a11y_no_static_element_interactions -->
                     <div
                         use:icon={"x"}
-                        style={"--icon-size: 10px"}
+                        style="--icon-size: 10px"
                         onclick={() => removeAttachedFile(file)}
                         class="hover:bg-[buttonface] flex items-center justify-center h-4 w-4 bg-white rounded-sm mr-1 my-1"
                     ></div>
                 </div>
             {/each}
         </div>
-        <textarea
-            class="w-full px-0 pt-0 pb-[0.1rem] rounded-none !bg-transparent text-text-normal font-[inherit] text-[0.95rem] resize-none max-h-[200px] min-h-[40px] leading-[1.5] !outline-none !border-none !shadow-none"
-            bind:this={textarea}
-            bind:value={inputValue}
-            onkeyup={handleKeyup}
-            onkeydown={(event) => handleKeydown(event)}
-            id="chat-view-user-input-element"
-            placeholder={"Type a message..."}
-            rows="1"
-        ></textarea>
 
-        <FilePopover
-            customAnchor={textarea}
-            files={markdownFiles}
-            bind:isOpen={isFilePopoverOpen}
-            bind:comboInputRef
-            searchQuery={fileSearchQuery}
-            {onFileSelect}
-        />
+        <!-- Markdown Editor Container -->
+        <div
+            bind:this={editorContainer}
+            class="markdown-editor-container w-full min-h-[40px] max-h-[200px] overflow-y-auto"
+            id="chat-view-user-input-element"
+        ></div>
 
         <!-- Actions row: model, attachment, send -->
         <div class="flex items-center">
@@ -288,7 +209,7 @@ const handleKeyup = (event: KeyboardEvent) => {
                 {#if !messenger.session || messenger.session.messageState === MessageState.idle}
                     <button
                         disabled={inputValue.trim().length === 0}
-                        aria-label={"send message"}
+                        aria-label="send message"
                         title="Send message"
                         onclick={sendMessage}
                         class="h-7 w-7 p-1 rounded-md !bg-text-accent border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -296,7 +217,7 @@ const handleKeyup = (event: KeyboardEvent) => {
                     ></button>
                 {:else if messenger.session.messageState === MessageState.answering}
                     <button
-                        aria-label={"stop streaming"}
+                        aria-label="stop streaming"
                         title="Stop streaming"
                         onclick={() => messenger.session?.stopStreaming()}
                         class="h-7 w-7 p-1 rounded-md bg-interactive-accent text-text-on-accent border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 hover:bg-interactive-accent-hover"
@@ -371,5 +292,38 @@ const handleKeyup = (event: KeyboardEvent) => {
     .chat-input-wrapper:focus-within::before {
         opacity: 0.22;
         filter: blur(9px);
+    }
+
+    /* Markdown editor styling */
+    .markdown-editor-container {
+        /* Reset some CM6 styles for chat input look */
+        :global(.cm-editor) {
+            background: transparent !important;
+            font-family: inherit;
+            font-size: 0.95rem;
+        }
+
+        :global(.cm-editor.cm-focused) {
+            outline: none !important;
+        }
+
+        :global(.cm-scroller) {
+            overflow-x: hidden;
+        }
+
+        :global(.cm-content) {
+            padding: 0 !important;
+            caret-color: var(--text-normal);
+        }
+
+        :global(.cm-line) {
+            padding: 0 !important;
+            line-height: 1.5;
+        }
+
+        :global(.cm-placeholder) {
+            color: var(--text-muted);
+            font-style: normal;
+        }
     }
 </style>
