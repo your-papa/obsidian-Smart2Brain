@@ -8,7 +8,7 @@ import {
 	ProviderEndpointError,
 	ProviderRegistryError,
 } from "./providers";
-import { normalizePath } from "obsidian";
+import { normalizePath, Notice } from "obsidian";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import { createSearchNotesTool } from "../tools/searchNotes";
 import { createGetAllTagsTool } from "../tools/getAllTags";
@@ -18,6 +18,7 @@ import { createReadNoteTool } from "../tools/readNote";
 import { createSystemPrompt } from "./prompts";
 import { createObsidianFetch } from "../utils/obsidianFetch";
 import { getData } from "../stores/dataStore.svelte";
+import { invalidateProviderState } from "../utils/query";
 import type { RegisteredProvider } from "../types/providers";
 import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
@@ -192,9 +193,22 @@ export class AgentManager {
 
 		// Configure all providers - use for...of to properly await each
 		const configuredProviders = pluginData.getConfiguredProviders();
+		const unavailableProviders: string[] = [];
 		for (const provider of configuredProviders) {
 			const options = pluginData.getProviderAuthParams(provider);
-			await this.configureRegistry(provider, options);
+			try {
+				await this.configureRegistry(provider, options);
+			} catch (error) {
+				if (error instanceof ProviderEndpointError) {
+					unavailableProviders.push(provider);
+					continue;
+				}
+				throw error;
+			}
+		}
+
+		if (unavailableProviders.length > 0) {
+			new Notice(`Cannot connect to: ${unavailableProviders.join(", ")}. Check that the service is running.`);
 		}
 
 		console.log(this.registry);
@@ -300,6 +314,18 @@ export class AgentManager {
 			if (error instanceof Error && error.name === "AbortError") {
 				return;
 			}
+
+			// Handle connection errors (e.g., Ollama server not running)
+			if (error instanceof ProviderEndpointError) {
+				const model = getData().getDefaultChatModel();
+				const provider = model?.provider;
+				if (provider) {
+					invalidateProviderState(provider);
+				}
+				new Notice(error.message);
+				throw error;
+			}
+
 			console.error("Smart Second Brain: Error streaming query", error);
 			throw error;
 		} finally {
@@ -313,6 +339,11 @@ export class AgentManager {
 	async getAvailableModels(providerName: RegisteredProvider): Promise<string[]> {
 		try {
 			if (!providerName) return [];
+
+			// Provider might be configured but not connected (e.g., Ollama not running)
+			if (!this.registry.hasProvider(providerName)) {
+				return [];
+			}
 
 			return this.registry.listChatModels(providerName);
 		} catch (error) {

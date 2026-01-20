@@ -1,6 +1,7 @@
 <script lang="ts">
 import { Notice } from "obsidian";
 import { onDestroy, onMount } from "svelte";
+import { useAvailableModels } from "../../composables/useAvailableModels.svelte";
 import { EmbeddableMarkdownEditor } from "../../editor/EmbeddableMarkdownEditor";
 import { MessageState, type Messenger } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
@@ -23,6 +24,8 @@ let markdownEditor: EmbeddableMarkdownEditor | undefined = $state();
 let inputValue = $state("");
 
 let files: File[] = $state([]);
+
+const models = useAvailableModels();
 
 onMount(() => {
 	// Initialize the markdown editor once the container is ready
@@ -119,6 +122,26 @@ function removeAttachedFile(file: File) {
         ></div>
         <div class="text-xs">New Chat</div>
     </button>
+    
+    {#if models.hasUnavailableProviders}
+        <button
+            class="flex flex-row items-center gap-1.5 px-2 py-1 rounded-md bg-[--background-modifier-error] text-[--text-on-accent] text-xs cursor-pointer border-none"
+            onclick={models.refetchProviders}
+            title="Click to retry connection"
+        >
+            <div
+                class="h-icon-xs"
+                use:icon={"alert-triangle"}
+                style="--icon-size: var(--icon-xs)"
+            ></div>
+            <span>Cannot connect to: {models.unavailableProviders.join(", ")}</span>
+            <div
+                class="h-icon-xs"
+                use:icon={"refresh-cw"}
+                style="--icon-size: var(--icon-xs)"
+            ></div>
+        </button>
+    {/if}
     <!-- Input wrapper with glow effect -->
     <div
         class="chat-input-wrapper flex flex-col gap-3 bg-background-secondary border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate"

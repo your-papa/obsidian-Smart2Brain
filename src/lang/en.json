@@ -130,6 +130,14 @@
 		}
 	},
 	"settings": {
+		"search_algorithm": {
+			"title": "Search Algorithm",
+			"desc": "Choose the search algorithm for retrieving notes. Omnisearch requires the Omnisearch plugin to be installed.",
+			"grep": "Simple Grep",
+			"omnisearch": "Omnisearch",
+			"omnisearch_not_installed": "Omnisearch (not installed)",
+			"embeddings": "Embeddings (coming soon)"
+		},
 		"excludeff": "Exclude files and folders",
 		"excludeff_desc": "These files and folders won't be embedded and not be used for generating answers.",
 		"excludeff_add": "Add",
