@@ -32,26 +32,46 @@ interface WidgetEditorView {
 }
 
 /**
- * Resolves the internal ScrollableMarkdownEditor prototype from Obsidian
+ * Resolves the internal ScrollableMarkdownEditor prototype from Obsidian.
+ *
+ * WARNING: Uses internal Obsidian APIs (app.embedRegistry) that are not part of
+ * the official plugin API. This may break with future Obsidian updates.
+ * Tested with Obsidian 1.5.x - 1.10.x
+ *
  * @param app - The Obsidian App instance
  * @returns The ScrollableMarkdownEditor constructor
+ * @throws Error if internal APIs are unavailable or changed
  */
 function resolveEditorPrototype(app: App): Constructor<ScrollableMarkdownEditor> {
-	// @ts-expect-error - Using internal API
-	const widgetEditorView = app.embedRegistry.embedByExtension.md(
-		{ app, containerEl: document.createElement("div") },
-		null as unknown as TFile,
-		"",
-	) as WidgetEditorView;
+	try {
+		// @ts-expect-error - Using internal API
+		const embedRegistry = app.embedRegistry?.embedByExtension?.md;
+		if (!embedRegistry) {
+			throw new Error("Obsidian embedRegistry API not available");
+		}
 
-	widgetEditorView.editable = true;
-	widgetEditorView.showEditor();
+		const widgetEditorView = embedRegistry(
+			{ app, containerEl: document.createElement("div") },
+			null as unknown as TFile,
+			"",
+		) as WidgetEditorView;
 
-	// biome-ignore lint/style/noNonNullAssertion: editMode is guaranteed to exist after showEditor()
-	const MarkdownEditor = Object.getPrototypeOf(Object.getPrototypeOf(widgetEditorView.editMode!));
+		widgetEditorView.editable = true;
+		widgetEditorView.showEditor();
 
-	widgetEditorView.unload();
-	return MarkdownEditor.constructor as Constructor<ScrollableMarkdownEditor>;
+		if (!widgetEditorView.editMode) {
+			throw new Error("Editor mode not initialized");
+		}
+
+		const MarkdownEditor = Object.getPrototypeOf(Object.getPrototypeOf(widgetEditorView.editMode));
+		widgetEditorView.unload();
+
+		return MarkdownEditor.constructor as Constructor<ScrollableMarkdownEditor>;
+	} catch (error) {
+		throw new Error(
+			`Failed to resolve Obsidian editor prototype. This may be due to an incompatible Obsidian version. ${error}`,
+		);
+	}
 }
 
 export interface MarkdownEditorProps {

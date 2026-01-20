@@ -75,10 +75,10 @@ function initializeEditor() {
 		},
 	});
 
-	// Focus the editor after initialization
-	setTimeout(() => {
+	// Focus the editor after next paint
+	requestAnimationFrame(() => {
 		markdownEditor?.focus();
-	}, 100);
+	});
 }
 
 function sendMessage() {
