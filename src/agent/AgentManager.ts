@@ -1,28 +1,28 @@
+import { Notice, normalizePath } from "obsidian";
+import type SecondBrainPlugin from "../main";
+import type { ChatModel } from "../stores/chatStore.svelte";
+import { getData } from "../stores/dataStore.svelte";
+import { createExecuteDataviewTool } from "../tools/executeDataview";
+import { createGetAllTagsTool } from "../tools/getAllTags";
+import { createGetPropertiesTool } from "../tools/getProperties";
+import { createReadNoteTool } from "../tools/readNote";
+import { createSearchNotesTool } from "../tools/searchNotes";
+import type { RegisteredProvider } from "../types/providers";
+import { createObsidianFetch } from "../utils/obsidianFetch";
+import { invalidateProviderState } from "../utils/query";
+import { createThreadId } from "../utils/threadId";
 import { Agent, type ChooseModelParams, type ThreadHistory } from "./Agent";
-import { ProviderRegistry } from "./providers/ProviderRegistry";
-import { type ThreadSnapshot } from "./memory/ThreadStore";
-import { LangSmithTelemetry, type Telemetry } from "./telemetry";
+import { ObsidianChatManager } from "./ObsidianChatManager";
+import type { ThreadSnapshot } from "./memory/ThreadStore";
+import { createSystemPrompt } from "./prompts";
 import {
 	type BuiltInProviderOptions,
 	ProviderAuthError,
 	ProviderEndpointError,
 	ProviderRegistryError,
 } from "./providers";
-import { normalizePath, Notice } from "obsidian";
-import { ObsidianChatManager } from "./ObsidianChatManager";
-import { createSearchNotesTool } from "../tools/searchNotes";
-import { createGetAllTagsTool } from "../tools/getAllTags";
-import { createExecuteDataviewTool } from "../tools/executeDataview";
-import { createGetPropertiesTool } from "../tools/getProperties";
-import { createReadNoteTool } from "../tools/readNote";
-import { createSystemPrompt } from "./prompts";
-import { createObsidianFetch } from "../utils/obsidianFetch";
-import { getData } from "../stores/dataStore.svelte";
-import { invalidateProviderState } from "../utils/query";
-import type { RegisteredProvider } from "../types/providers";
-import type SecondBrainPlugin from "../main";
-import type { ChatModel } from "../stores/chatStore.svelte";
-import { createThreadId } from "../utils/threadId";
+import { ProviderRegistry } from "./providers/ProviderRegistry";
+import { LangSmithTelemetry, type Telemetry } from "./telemetry";
 
 export type ValidationResult = { success: true } | { success: false; message: string };
 
@@ -195,7 +195,8 @@ export class AgentManager {
 		const configuredProviders = pluginData.getConfiguredProviders();
 		const unavailableProviders: string[] = [];
 		for (const provider of configuredProviders) {
-			const options = pluginData.getProviderAuthParams(provider);
+			// Resolve secrets from SecretStorage to get actual API keys
+			const options = pluginData.getResolvedProviderAuth(provider);
 			try {
 				await this.configureRegistry(provider, options);
 			} catch (error) {
@@ -243,7 +244,7 @@ export class AgentManager {
 
 	async *streamQuery(
 		query: string,
-		threadId: string = "default-thread",
+		threadId = "default-thread",
 		signal?: AbortSignal,
 	): AsyncGenerator<
 		| { type: "token"; token: string }
@@ -408,7 +409,7 @@ export class AgentManager {
 		// Restore original fetch if it was patched
 		if ((window as any)._originalFetch) {
 			window.fetch = (window as any)._originalFetch;
-			delete (window as any)._originalFetch;
+			(window as any)._originalFetch = undefined;
 		}
 
 		// Cleanup if needed

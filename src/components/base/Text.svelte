@@ -1,68 +1,62 @@
 <script lang="ts">
-    interface BaseProps {
-        placeholder?: string;
-        styles?: string;
-    }
+interface BaseProps {
+	placeholder?: string;
+	styles?: string;
+}
 
-    interface TextInputProps extends BaseProps {
-        inputType: "text" | "password" | "secret";
-        value: string;
-        changeFunc?: (value: string) => void;
-        focusFunc?: (value: string) => void;
-        blurFunc?: (value: string) => void;
-    }
+interface TextInputProps extends BaseProps {
+	inputType: "text" | "password" | "secret";
+	value: string;
+	changeFunc?: (value: string) => void;
+	focusFunc?: (value: string) => void;
+	blurFunc?: (value: string) => void;
+}
 
-    interface NumberInputProps extends BaseProps {
-        inputType: "number";
-        value: number;
-        changeFunc?: (value: number) => void;
-        focusFunc?: (value: number) => void;
-        blurFunc?: (value: number) => void;
-    }
+interface NumberInputProps extends BaseProps {
+	inputType: "number";
+	value: number;
+	changeFunc?: (value: number) => void;
+	focusFunc?: (value: number) => void;
+	blurFunc?: (value: number) => void;
+}
 
-    type Props = TextInputProps | NumberInputProps;
+type Props = TextInputProps | NumberInputProps;
 
-    let {
-        inputType = "text",
-        placeholder = "",
-        styles = "",
-        changeFunc,
-        focusFunc,
-        blurFunc,
-        value = $bindable(),
-    }: Props = $props();
+let {
+	inputType = "text",
+	placeholder = "",
+	styles = "",
+	changeFunc,
+	focusFunc,
+	blurFunc,
+	value = $bindable(),
+}: Props = $props();
 
-    // Type-safe callback helpers
-    const stringChangeFunc = changeFunc as
-        | ((value: string) => void)
-        | undefined;
-    const stringFocusFunc = focusFunc as ((value: string) => void) | undefined;
-    const stringBlurFunc = blurFunc as ((value: string) => void) | undefined;
-    const numberChangeFunc = changeFunc as
-        | ((value: number) => void)
-        | undefined;
-    const numberFocusFunc = focusFunc as ((value: number) => void) | undefined;
-    const numberBlurFunc = blurFunc as ((value: number) => void) | undefined;
+// Type-safe callback helpers
+const stringChangeFunc = changeFunc as ((value: string) => void) | undefined;
+const stringFocusFunc = focusFunc as ((value: string) => void) | undefined;
+const stringBlurFunc = blurFunc as ((value: string) => void) | undefined;
+const numberChangeFunc = changeFunc as ((value: number) => void) | undefined;
+const numberFocusFunc = focusFunc as ((value: number) => void) | undefined;
+const numberBlurFunc = blurFunc as ((value: number) => void) | undefined;
 
-    let isFocused = $state(false);
+let isFocused = $state(false);
 
-    /**
-     * Masks a secret value for display.
-     * Shows first 3 chars + "..." + last 3 chars for longer values.
-     * e.g., "sk-abc123xyz" -> "sk-...xyz"
-     */
-    function maskSecret(val: string): string {
-        if (!val || val.length <= 9) return val;
-        const prefix = val.slice(0, 3);
-        const suffix = val.slice(-4);
-        return `${prefix}...${suffix}`;
-    }
+/**
+ * Masks a secret value for display.
+ * Shows first 3 chars + "..." + last 3 chars for longer values.
+ * e.g., "sk-abc123xyz" -> "sk-...xyz"
+ */
+function maskSecret(val: string): string {
+	if (!val || val.length <= 9) return val;
+	const prefix = val.slice(0, 3);
+	const suffix = val.slice(-4);
+	return `${prefix}...${suffix}`;
+}
 
-    const displayValue = $derived(
-        inputType === "secret" && !isFocused && typeof value === "string"
-            ? maskSecret(value)
-            : value,
-    );
+const displayValue = $derived(
+	inputType === "secret" && !isFocused && typeof value === "string" ? maskSecret(value) : value,
+);
 </script>
 
 {#if inputType === "text" || inputType === "password"}

@@ -1,20 +1,22 @@
-import SecondBrainPlugin, { type PluginData, type SearchAlgorithm } from "../main";
 import { normalizePath } from "obsidian";
 import { DEFAULT_SETTINGS } from "../constants/defaults";
+import SecondBrainPlugin, { type PluginData, type SearchAlgorithm } from "../main";
 import {
 	AddEmbedModelError,
 	AddGenModelError,
+	type EmbedModelConfig,
+	type EmbedProviders,
+	type GenModelConfig,
+	type GenProviders,
+	type GetStoredProviderAuth,
+	type ProviderAuth,
 	SetEmbedModelError,
 	SetGenModelError,
-	type EmbedProviders,
-	type GenProviders,
-	type GetProviderAuth,
-	type EmbedModelConfig,
-	type GenModelConfig,
 } from "../types/providers";
+import type { RegisteredProvider } from "../types/providers";
+import { getSecret, listSecrets, setSecret } from "../utils/secretStorage";
 import type { UUIDv7 } from "../utils/uuid7Validator";
 import type { ChatModel } from "./chatStore.svelte";
-import { type RegisteredProvider } from "../types/providers";
 
 export class PluginDataStore {
 	#data: PluginData;
@@ -326,20 +328,89 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
-	getProviderAuthParams(provider: RegisteredProvider): GetProviderAuth<typeof provider> {
-		//TODO check runtime validity
+	/**
+	 * Get stored provider auth params (contains apiKeyId, not actual apiKey)
+	 */
+	getStoredProviderAuthParams(provider: RegisteredProvider): GetStoredProviderAuth<typeof provider> {
 		return this.#data.providerConfig[provider].providerAuth;
 	}
 
-	setProviderAuthParam<T extends RegisteredProvider, K extends keyof GetProviderAuth<T>>(
+	/**
+	 * Get resolved provider auth params with actual secrets from SecretStorage
+	 */
+	getResolvedProviderAuth(provider: RegisteredProvider): ProviderAuth {
+		const stored = this.#data.providerConfig[provider].providerAuth;
+		const resolved: ProviderAuth = { ...stored };
+
+		// Resolve apiKeyId to actual apiKey
+		if (stored.apiKeyId) {
+			const secret = getSecret(this._plugin.app, stored.apiKeyId);
+			if (secret) {
+				resolved.apiKey = secret;
+			}
+		}
+
+		// Remove apiKeyId from resolved (it's not needed at runtime)
+		// biome-ignore lint/performance/noDelete: Intentional cleanup of stored-only field
+		delete (resolved as { apiKeyId?: string }).apiKeyId;
+
+		return resolved;
+	}
+
+	/**
+	 * Set a stored auth parameter (for non-secret fields like baseUrl)
+	 */
+	setStoredAuthParam<T extends RegisteredProvider, K extends keyof GetStoredProviderAuth<T>>(
 		provider: T,
 		key: K,
-		value: GetProviderAuth<T>[K],
+		value: GetStoredProviderAuth<T>[K],
 	): void {
 		const newAuth = { ...this.#data.providerConfig[provider].providerAuth };
-		newAuth[key] = value;
+		(newAuth as Record<string, unknown>)[key as string] = value;
 		this.#data.providerConfig[provider].providerAuth = newAuth;
 		this.saveSettings();
+	}
+
+	/**
+	 * Create a new secret and assign it to a provider
+	 * @param provider - The provider to assign the secret to
+	 * @param secretId - The ID for the secret (lowercase alphanumeric with dashes, max 64 chars)
+	 * @param secretValue - The actual secret value
+	 */
+	createAndAssignSecret(provider: RegisteredProvider, secretId: string, secretValue: string): void {
+		setSecret(this._plugin.app, secretId, secretValue);
+		this.setStoredAuthParam(
+			provider,
+			"apiKeyId" as keyof GetStoredProviderAuth<typeof provider>,
+			secretId as never,
+		);
+	}
+
+	/**
+	 * Assign an existing secret to a provider
+	 */
+	assignSecretToProvider(provider: RegisteredProvider, secretId: string): void {
+		this.setStoredAuthParam(
+			provider,
+			"apiKeyId" as keyof GetStoredProviderAuth<typeof provider>,
+			secretId as never,
+		);
+	}
+
+	/**
+	 * Get the actual API key from SecretStorage
+	 */
+	getProviderApiKey(provider: RegisteredProvider): string | null {
+		const stored = this.#data.providerConfig[provider].providerAuth;
+		if (!stored.apiKeyId) return null;
+		return getSecret(this._plugin.app, stored.apiKeyId);
+	}
+
+	/**
+	 * List all available secrets
+	 */
+	listAvailableSecrets(): string[] {
+		return listSecrets(this._plugin.app);
 	}
 
 	// --- Embed Model Management (Map-based) ---
