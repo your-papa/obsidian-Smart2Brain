@@ -26,7 +26,7 @@ export const DEFAULT_PROVIDER_CONFIGS: ProviderConfigs = {
 	OpenAI: {
 		isConfigured: false,
 		providerAuth: {
-			apiKey: "",
+			apiKeyId: "",
 		},
 		embedModels: new Map([
 			["text-embedding-ada-002", { similarityThreshold: 0.75 }],
@@ -45,7 +45,7 @@ export const DEFAULT_PROVIDER_CONFIGS: ProviderConfigs = {
 	Anthropic: {
 		isConfigured: false,
 		providerAuth: {
-			apiKey: "",
+			apiKeyId: "",
 		},
 		embedModels: new Map(),
 		genModels: new Map([
@@ -58,7 +58,7 @@ export const DEFAULT_PROVIDER_CONFIGS: ProviderConfigs = {
 	CustomOpenAI: {
 		isConfigured: false,
 		providerAuth: {
-			apiKey: "",
+			apiKeyId: "",
 			baseUrl: "",
 		},
 		embedModels: new Map([["text-embedding-ada-002", { similarityThreshold: 0.75 }]]),

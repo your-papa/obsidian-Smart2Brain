@@ -1,13 +1,12 @@
 <script lang="ts">
-    import { icon } from "../../utils/utils";
+import { icon } from "../../utils/utils";
 
-    interface Props {
-        size?: { width?: number; height?: number };
-        className?: string;
-    }
+interface Props {
+	size?: { width?: number; height?: number };
+	className?: string;
+}
 
-    const { size = { width: 16, height: 16 }, className = "" }: Props =
-        $props();
+const { size = { width: 16, height: 16 }, className = "" }: Props = $props();
 </script>
 
 <div

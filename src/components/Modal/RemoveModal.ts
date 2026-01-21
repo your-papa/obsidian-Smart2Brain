@@ -4,9 +4,6 @@ import { mount } from "svelte";
 
 export class RemoveModal extends Modal {
 	component: RemoveComponent;
-	constructor(app: App) {
-		super(app);
-	}
 
 	onOpen() {
 		mount(RemoveComponent, {

@@ -1,0 +1,87 @@
+{
+	"$schema": "https://btca.dev/btca.schema.json",
+	"resources": [
+		{
+			"name": "svelte",
+			"type": "git",
+			"url": "https://github.com/sveltejs/svelte.dev",
+			"branch": "main",
+			"searchPath": "apps/svelte.dev/content",
+			"specialNotes": "Svelte 5 docs. Focus on runes ($state, $derived, $effect), components, and reactivity."
+		},
+		{
+			"name": "tailwindcss",
+			"type": "git",
+			"url": "https://github.com/tailwindlabs/tailwindcss.com",
+			"branch": "main",
+			"searchPath": "src/docs",
+			"specialNotes": "Tailwind CSS v3 documentation."
+		},
+		{
+			"name": "langchainjs",
+			"type": "git",
+			"url": "https://github.com/langchain-ai/langchainjs",
+			"branch": "main",
+			"searchPath": "docs/core_docs/docs",
+			"specialNotes": "LangChain.js docs. Covers chains, agents, LangGraph, and integrations."
+		},
+		{
+			"name": "bitsUi",
+			"type": "git",
+			"url": "https://github.com/huntabyte/bits-ui",
+			"branch": "main",
+			"searchPath": "docs/src/lib/content",
+			"specialNotes": "Bits UI headless component library for Svelte 5."
+		},
+		{
+			"name": "runed",
+			"type": "git",
+			"url": "https://github.com/svecosystem/runed",
+			"branch": "main",
+			"searchPath": "sites/docs/src/lib/content",
+			"specialNotes": "Runed utilities for Svelte 5 runes."
+		},
+		{
+			"name": "zod",
+			"type": "git",
+			"url": "https://github.com/colinhacks/zod",
+			"branch": "main",
+			"searchPath": "packages/docs/content",
+			"specialNotes": "Zod v4 schema validation library."
+		},
+		{
+			"name": "tanstackQuery",
+			"type": "git",
+			"url": "https://github.com/TanStack/query",
+			"branch": "main",
+			"searchPath": "docs",
+			"specialNotes": "TanStack Query docs. Focus on Svelte Query integration."
+		},
+		{
+			"name": "obsidian",
+			"type": "git",
+			"url": "https://github.com/obsidianmd/obsidian-api",
+			"branch": "master",
+			"specialNotes": "Obsidian plugin API types and documentation."
+		},
+		{
+			"name": "dexie",
+			"type": "git",
+			"url": "https://github.com/dexie/dexie.js",
+			"branch": "master",
+			"searchPath": "docs",
+			"specialNotes": "Dexie.js IndexedDB wrapper documentation."
+		},
+		{
+			"name": "biome",
+			"type": "git",
+			"url": "https://github.com/biomejs/website",
+			"branch": "main",
+			"searchPath": "src/content/docs",
+			"specialNotes": "Biome linter and formatter documentation."
+		}
+	],
+	"model": "claude-sonnet-4-5-20250929",
+	"provider": "sap-ai-proxy",
+	"providerTimeoutMs": 300000
+}

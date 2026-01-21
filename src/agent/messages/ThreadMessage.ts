@@ -10,9 +10,7 @@ export interface ThreadMessageJsonContent {
 	data: unknown;
 }
 
-export type ThreadMessageContent =
-	| ThreadMessageTextContent
-	| ThreadMessageJsonContent;
+export type ThreadMessageContent = ThreadMessageTextContent | ThreadMessageJsonContent;
 
 export interface ThreadMessageToolCall {
 	id: string;
@@ -42,25 +40,18 @@ export function normalizeThreadMessages(messages: unknown[]): ThreadMessage[] {
 		.filter((message): message is ThreadMessage => Boolean(message));
 }
 
-export function getMessageText(
-	message: ThreadMessage | undefined,
-): string | undefined {
+export function getMessageText(message: ThreadMessage | undefined): string | undefined {
 	if (!message || !Array.isArray(message.content)) {
 		return undefined;
 	}
 	const textSegments = message.content
-		.filter(
-			(segment): segment is ThreadMessageTextContent => segment.type === "text",
-		)
+		.filter((segment): segment is ThreadMessageTextContent => segment.type === "text")
 		.map((segment) => segment.text.trim())
 		.filter((segment) => segment.length > 0);
 	return textSegments.length > 0 ? textSegments.join("\n") : undefined;
 }
 
-function normalizeThreadMessage(
-	message: unknown,
-	index: number,
-): ThreadMessage | undefined {
+function normalizeThreadMessage(message: unknown, index: number): ThreadMessage | undefined {
 	if (isThreadMessage(message)) {
 		return message;
 	}
@@ -77,17 +68,13 @@ function normalizeThreadMessage(
 		if (typeof obj.type === "string") {
 			const role = mapLangChainTypeToRole(obj.type);
 			return {
-				id:
-					typeof obj.id === "string" && obj.id ? obj.id : createMessageId(index),
+				id: typeof obj.id === "string" && obj.id ? obj.id : createMessageId(index),
 				role,
 				content: buildContentSegments(obj.content),
 				toolCalls: parseToolCalls(obj.tool_calls ?? obj.toolCalls),
-				toolCallId:
-					typeof obj.tool_call_id === "string" ? obj.tool_call_id : undefined,
+				toolCallId: typeof obj.tool_call_id === "string" ? obj.tool_call_id : undefined,
 				toolName: typeof obj.name === "string" ? obj.name : undefined,
-				metadata: isPlainObject(obj.metadata)
-					? (obj.metadata as Record<string, unknown>)
-					: undefined,
+				metadata: isPlainObject(obj.metadata) ? (obj.metadata as Record<string, unknown>) : undefined,
 				raw: message,
 			};
 		}
@@ -113,9 +100,7 @@ interface SerializedLangChainMessage {
 	kwargs: Record<string, unknown>;
 }
 
-function isSerializedLangChainMessage(
-	value: unknown,
-): value is SerializedLangChainMessage {
+function isSerializedLangChainMessage(value: unknown): value is SerializedLangChainMessage {
 	if (!isPlainObject(value)) {
 		return false;
 	}
@@ -125,10 +110,7 @@ function isSerializedLangChainMessage(
 	return isPlainObject((value as { kwargs: unknown }).kwargs);
 }
 
-function fromSerializedLangChainMessage(
-	message: SerializedLangChainMessage,
-	index: number,
-): ThreadMessage {
+function fromSerializedLangChainMessage(message: SerializedLangChainMessage, index: number): ThreadMessage {
 	const className = readLangChainClassName(message.id);
 	const kwargs = message.kwargs ?? {};
 	const role = mapClassNameToRole(className);
@@ -140,8 +122,7 @@ function fromSerializedLangChainMessage(
 			getPlainObject(kwargs.additional_kwargs)?.function_call ??
 			kwargs.tool_calls) as unknown,
 	);
-	const toolCallId =
-		typeof kwargs.tool_call_id === "string" ? kwargs.tool_call_id : undefined;
+	const toolCallId = typeof kwargs.tool_call_id === "string" ? kwargs.tool_call_id : undefined;
 	const toolName = typeof kwargs.name === "string" ? kwargs.name : undefined;
 	const messageId =
 		(typeof kwargs.id === "string" && kwargs.id) ||
@@ -163,24 +144,14 @@ function fromSerializedLangChainMessage(
 	return normalized;
 }
 
-function fromRoleContentObject(
-	value: Record<string, unknown>,
-	index: number,
-): ThreadMessage {
+function fromRoleContentObject(value: Record<string, unknown>, index: number): ThreadMessage {
 	const role = mapFreeformRole(String(value.role));
 	const content = buildContentSegments(value.content);
-	const metadata = isPlainObject(value.metadata)
-		? (value.metadata as Record<string, unknown>)
-		: undefined;
+	const metadata = isPlainObject(value.metadata) ? (value.metadata as Record<string, unknown>) : undefined;
 	const toolCalls = parseToolCalls(value.toolCalls ?? value.tool_calls);
-	const toolCallId =
-		typeof value.toolCallId === "string" ? value.toolCallId : undefined;
-	const toolName =
-		typeof value.toolName === "string" ? value.toolName : undefined;
-	const messageId =
-		typeof value.id === "string" && value.id.length > 0
-			? value.id
-			: createMessageId(index);
+	const toolCallId = typeof value.toolCallId === "string" ? value.toolCallId : undefined;
+	const toolName = typeof value.toolName === "string" ? value.toolName : undefined;
+	const messageId = typeof value.id === "string" && value.id.length > 0 ? value.id : createMessageId(index);
 	return {
 		id: messageId,
 		role,
@@ -217,10 +188,7 @@ function appendContent(value: unknown, segments: ThreadMessageContent[]): void {
 		return;
 	}
 	if (isPlainObject(value)) {
-		if (
-			typeof value.text === "string" &&
-			(value.type === "text" || typeof value.type === "undefined")
-		) {
+		if (typeof value.text === "string" && (value.type === "text" || typeof value.type === "undefined")) {
 			segments.push({ type: "text", text: value.text });
 			return;
 		}
@@ -228,9 +196,7 @@ function appendContent(value: unknown, segments: ThreadMessageContent[]): void {
 	segments.push({ type: "json", data: value });
 }
 
-function buildMetadata(
-	kwargs: Record<string, unknown>,
-): Record<string, unknown> | undefined {
+function buildMetadata(kwargs: Record<string, unknown>): Record<string, unknown> | undefined {
 	const metadata: Record<string, unknown> = {};
 	if (isPlainObject(kwargs.metadata)) {
 		Object.assign(metadata, kwargs.metadata as Record<string, unknown>);
@@ -250,9 +216,7 @@ function buildMetadata(
 
 function extractTimestamp(kwargs: Record<string, unknown>): number | undefined {
 	const response = getPlainObject(kwargs.response_metadata);
-	const value =
-		(response?.created_at as string | undefined) ??
-		(kwargs.created_at as string | undefined);
+	const value = (response?.created_at as string | undefined) ?? (kwargs.created_at as string | undefined);
 	if (typeof value === "string") {
 		const time = Date.parse(value);
 		if (!Number.isNaN(time)) {
@@ -262,9 +226,7 @@ function extractTimestamp(kwargs: Record<string, unknown>): number | undefined {
 	return undefined;
 }
 
-function parseToolCalls(
-	value: unknown,
-): ThreadMessageToolCall[] | undefined {
+function parseToolCalls(value: unknown): ThreadMessageToolCall[] | undefined {
 	if (!Array.isArray(value)) {
 		return undefined;
 	}
@@ -274,10 +236,7 @@ function parseToolCalls(
 	return toolCalls.length > 0 ? toolCalls : undefined;
 }
 
-function parseToolCall(
-	value: unknown,
-	index: number,
-): ThreadMessageToolCall | undefined {
+function parseToolCall(value: unknown, index: number): ThreadMessageToolCall | undefined {
 	if (!isPlainObject(value)) {
 		return undefined;
 	}
@@ -291,16 +250,13 @@ function parseToolCall(
 		(typeof functionCall?.name === "string" && functionCall.name) ||
 		(typeof value.name === "string" && value.name) ||
 		"tool";
-	const args = parseToolArguments(
-		functionCall?.arguments ?? value.arguments ?? value.args,
-	);
+	const args = parseToolArguments(functionCall?.arguments ?? value.arguments ?? value.args);
 
 	return {
 		id,
 		name,
 		arguments: args,
-		description:
-			typeof value.description === "string" ? value.description : undefined,
+		description: typeof value.description === "string" ? value.description : undefined,
 	};
 }
 
@@ -350,12 +306,7 @@ function mapClassNameToRole(className: string | undefined): ThreadMessageRole {
 
 function mapFreeformRole(role: string): ThreadMessageRole {
 	const normalized = role.toLowerCase();
-	if (
-		normalized === "user" ||
-		normalized === "assistant" ||
-		normalized === "system" ||
-		normalized === "tool"
-	) {
+	if (normalized === "user" || normalized === "assistant" || normalized === "system" || normalized === "tool") {
 		return normalized;
 	}
 	return normalized === "function" ? "tool" : "assistant";
@@ -390,10 +341,7 @@ function readLangChainClassName(identifier: unknown): string | undefined {
 	if (typeof identifier === "string") {
 		return identifier.split(":").pop();
 	}
-	if (
-		Array.isArray(identifier) &&
-		typeof identifier[identifier.length - 1] === "string"
-	) {
+	if (Array.isArray(identifier) && typeof identifier[identifier.length - 1] === "string") {
 		return identifier[identifier.length - 1] as string;
 	}
 	return undefined;
@@ -411,17 +359,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function getPlainObject(
-	value: unknown,
-): Record<string, unknown> | undefined {
+function getPlainObject(value: unknown): Record<string, unknown> | undefined {
 	return isPlainObject(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 function createMessageId(index: number): string {
-	if (
-		typeof globalThis.crypto !== "undefined" &&
-		"randomUUID" in globalThis.crypto
-	) {
+	if (typeof globalThis.crypto !== "undefined" && "randomUUID" in globalThis.crypto) {
 		return globalThis.crypto.randomUUID();
 	}
 	return `msg_${index}_${Math.random().toString(36).slice(2, 10)}`;

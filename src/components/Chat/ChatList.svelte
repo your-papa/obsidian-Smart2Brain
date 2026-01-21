@@ -1,59 +1,52 @@
 <script lang="ts">
-    import { onMount } from "svelte";
-    import Button from "../base/Button.svelte";
-    import type {
-        ChatPreview,
-        CurrentSession,
-        Messenger,
-    } from "../../stores/chatStore.svelte";
-    import { icon } from "../../utils/utils";
-    import type { UUIDv7 } from "../../utils/uuid7Validator";
+import { onMount } from "svelte";
+import Button from "../base/Button.svelte";
+import type { ChatPreview, CurrentSession, Messenger } from "../../stores/chatStore.svelte";
+import { icon } from "../../utils/utils";
+import type { UUIDv7 } from "../../utils/uuid7Validator";
 
-    interface props {
-        messenger: Messenger;
-        currentSession: CurrentSession;
-    }
+interface props {
+	messenger: Messenger;
+	currentSession: CurrentSession;
+}
 
-    const { messenger, currentSession }: props = $props();
+const { messenger, currentSession }: props = $props();
 
-    let chats: ChatPreview[] = $state([]);
-    let hoveredChatId: string | null = $state(null);
+let chats: ChatPreview[] = $state([]);
+let hoveredChatId: string | null = $state(null);
 
-    export function formatDDMMYY_HHMM(d: Date): string {
-        const parts = new Intl.DateTimeFormat("de-DE", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-        }).formatToParts(d);
+export function formatDDMMYY_HHMM(d: Date): string {
+	const parts = new Intl.DateTimeFormat("de-DE", {
+		day: "2-digit",
+		month: "2-digit",
+		year: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
+		hour12: false,
+	}).formatToParts(d);
 
-        const byType = Object.fromEntries(parts.map((p) => [p.type, p.value]));
-        return `${byType.day}.${byType.month}.${byType.year} ${byType.hour}:${byType.minute}`;
-    }
+	const byType = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+	return `${byType.day}.${byType.month}.${byType.year} ${byType.hour}:${byType.minute}`;
+}
 
-    async function activateNewSession(chatId: UUIDv7) {
-        const session = await messenger.ensureSession(chatId);
-        currentSession.session = session;
-    }
+async function activateNewSession(chatId: UUIDv7) {
+	const session = await messenger.ensureSession(chatId);
+	currentSession.session = session;
+}
 
-    async function deleteChat(chatId: UUIDv7) {
-        const deleted = await messenger.deleteChat(chatId);
-        if (deleted) {
-            chats = chats.filter((c) => c.id !== chatId);
-            if (
-                currentSession.session &&
-                currentSession.session.chatId === chatId
-            ) {
-                currentSession.session = null;
-            }
-        }
-    }
+async function deleteChat(chatId: UUIDv7) {
+	const deleted = await messenger.deleteChat(chatId);
+	if (deleted) {
+		chats = chats.filter((c) => c.id !== chatId);
+		if (currentSession.session && currentSession.session.chatId === chatId) {
+			currentSession.session = null;
+		}
+	}
+}
 
-    onMount(async () => {
-        chats = await messenger.listChats();
-    });
+onMount(async () => {
+	chats = await messenger.listChats();
+});
 </script>
 
 <div class="flex flex-col mt-auto mb-4 gap-1">

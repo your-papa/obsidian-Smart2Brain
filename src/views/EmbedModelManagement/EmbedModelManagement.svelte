@@ -1,59 +1,53 @@
 <script lang="ts">
-    import type { EmbedModelConfig } from "../../types/providers";
-    import type { EmbedModelManagementModal } from "./EmbedModelManagement";
-    import type { EmbedProviders } from "../../types/providers";
-    import { getData } from "../../stores/dataStore.svelte";
-    import Button from "../../components/base/Button.svelte";
-    import SettingContainer from "../../components/Settings/SettingContainer.svelte";
-    import { createQuery } from "@tanstack/svelte-query";
-    import { getPlugin } from "../../stores/state.svelte";
-    import type SecondBrainPlugin from "../../main";
-    import Dropdown from "../../components/base/Dropdown.svelte";
-    import Text from "../../components/base/Text.svelte";
+import type { EmbedModelConfig } from "../../types/providers";
+import type { EmbedModelManagementModal } from "./EmbedModelManagement";
+import type { EmbedProviders } from "../../types/providers";
+import { getData } from "../../stores/dataStore.svelte";
+import Button from "../../components/base/Button.svelte";
+import SettingContainer from "../../components/Settings/SettingContainer.svelte";
+import { createQuery } from "@tanstack/svelte-query";
+import { getPlugin } from "../../stores/state.svelte";
+import type SecondBrainPlugin from "../../main";
+import Dropdown from "../../components/base/Dropdown.svelte";
+import Text from "../../components/base/Text.svelte";
 
-    interface Props {
-        modal: EmbedModelManagementModal;
-        provider: EmbedProviders;
-        config?: EmbedModelConfig;
-    }
+interface Props {
+	modal: EmbedModelManagementModal;
+	provider: EmbedProviders;
+	config?: EmbedModelConfig;
+}
 
-    const embedModelSettings = {
-        keys: ["similarityThreshold"] as (keyof EmbedModelConfig)[],
-        defaults: {
-            similarityThreshold: 0.7,
-        } as EmbedModelConfig,
-    };
+const embedModelSettings = {
+	keys: ["similarityThreshold"] as (keyof EmbedModelConfig)[],
+	defaults: {
+		similarityThreshold: 0.7,
+	} as EmbedModelConfig,
+};
 
-    let { modal, provider, config }: Props = $props();
+let { modal, provider, config }: Props = $props();
 
-    const plugin: SecondBrainPlugin = getPlugin();
-    const data = getData();
+const plugin: SecondBrainPlugin = getPlugin();
+const data = getData();
 
-    const query = createQuery(() => ({
-        queryKey: ["models", provider],
-        queryFn: async () => {
-            return await plugin.providerRegistry[provider].getModels();
-        },
-    }));
+const query = createQuery(() => ({
+	queryKey: ["models", provider],
+	queryFn: async () => {
+		return await plugin.providerRegistry[provider].getModels();
+	},
+}));
 
-    let { data: models, isPending, isError } = $derived(query);
+let { data: models, isPending, isError } = $derived(query);
 
-    let embedModels: Map<string, EmbedModelConfig> = $derived(
-        data.getEmbedModels(provider),
-    );
+let embedModels: Map<string, EmbedModelConfig> = $derived(data.getEmbedModels(provider));
 
-    let configuredModels: string[] = $derived(Array.from(embedModels.keys()));
-    let selectedModel = $derived(
-        !isPending && !isError && models ? models[0] : configuredModels[0],
-    );
+let configuredModels: string[] = $derived(Array.from(embedModels.keys()));
+let selectedModel = $derived(!isPending && !isError && models ? models[0] : configuredModels[0]);
 
-    let unconfiguredModels: string[] = $derived(
-        models?.filter((model) => !configuredModels.includes(model)) ?? [],
-    );
+let unconfiguredModels: string[] = $derived(models?.filter((model) => !configuredModels.includes(model)) ?? []);
 
-    let embedConfig: EmbedModelConfig = $state(embedModelSettings.defaults);
+let embedConfig: EmbedModelConfig = $state(embedModelSettings.defaults);
 
-    const isModelConfigured = () => configuredModels.includes(selectedModel);
+const isModelConfigured = () => configuredModels.includes(selectedModel);
 </script>
 
 <div class="modal-content">

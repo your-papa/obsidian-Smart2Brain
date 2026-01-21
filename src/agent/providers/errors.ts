@@ -9,20 +9,13 @@ export class ProviderNotFoundError extends ProviderRegistryError {
 
 export class ModelNotFoundError extends ProviderRegistryError {
 	constructor(provider: string, model: string, type: "chat" | "embedding") {
-		super(
-			`Model "${model}" not found for ${type} models in provider "${provider}".`,
-		);
+		super(`Model "${model}" not found for ${type} models in provider "${provider}".`);
 		this.name = "ModelNotFoundError";
 	}
 }
 
 export class ProviderAuthError extends ProviderRegistryError {
-	constructor(
-		provider: string,
-		status: number,
-		code?: string,
-		message?: string,
-	) {
+	constructor(provider: string, status: number, code?: string, message?: string) {
 		const detail = message ? `: ${message}` : "";
 		super(
 			`Authentication failed for provider "${provider}" with status ${status}${detail}${code ? ` (${code})` : ""}.`,

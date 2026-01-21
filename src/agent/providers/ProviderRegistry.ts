@@ -25,10 +25,7 @@ interface InternalProviderDefinition {
 export class ProviderRegistry {
 	private readonly providers = new Map<string, InternalProviderDefinition>();
 
-	async registerProvider(
-		name: string,
-		definition: ProviderDefinition | Promise<ProviderDefinition>,
-	): Promise<this> {
+	async registerProvider(name: string, definition: ProviderDefinition | Promise<ProviderDefinition>): Promise<this> {
 		const resolvedDefinition = await definition;
 		const key = ProviderRegistry.normalizeName(name);
 		const existing =
@@ -53,14 +50,9 @@ export class ProviderRegistry {
 		const mergedDefinition: InternalProviderDefinition = {
 			chatModels,
 			embeddingModels,
-			defaultChatModel:
-				resolvedDefinition.defaultChatModel ??
-				existing.defaultChatModel ??
-				firstKey(chatModels),
+			defaultChatModel: resolvedDefinition.defaultChatModel ?? existing.defaultChatModel ?? firstKey(chatModels),
 			defaultEmbeddingModel:
-				resolvedDefinition.defaultEmbeddingModel ??
-				existing.defaultEmbeddingModel ??
-				firstKey(embeddingModels),
+				resolvedDefinition.defaultEmbeddingModel ?? existing.defaultEmbeddingModel ?? firstKey(embeddingModels),
 		};
 
 		this.providers.set(key, mergedDefinition);
@@ -83,11 +75,7 @@ export class ProviderRegistry {
 		return Object.keys(this.getProvider(provider).embeddingModels);
 	}
 
-	async getChatModel(
-		provider: string,
-		model?: string,
-		options?: ModelOptions,
-	): Promise<BaseChatModel> {
+	async getChatModel(provider: string, model?: string, options?: ModelOptions): Promise<BaseChatModel> {
 		const providerDef = this.getProvider(provider);
 		const modelName = model ?? providerDef.defaultChatModel;
 		if (!modelName) {
@@ -100,11 +88,7 @@ export class ProviderRegistry {
 		return factory(options);
 	}
 
-	async getEmbeddingModel(
-		provider: string,
-		model?: string,
-		options?: ModelOptions,
-	): Promise<EmbeddingsInterface> {
+	async getEmbeddingModel(provider: string, model?: string, options?: ModelOptions): Promise<EmbeddingsInterface> {
 		const providerDef = this.getProvider(provider);
 		const modelName = model ?? providerDef.defaultEmbeddingModel;
 		if (!modelName) {
@@ -118,31 +102,19 @@ export class ProviderRegistry {
 	}
 
 	useOpenAI(options?: BuiltInProviderOptions): Promise<this> {
-		return this.registerProvider(
-			"openai",
-			createOpenAIProviderDefinition(options),
-		);
+		return this.registerProvider("openai", createOpenAIProviderDefinition(options));
 	}
 
 	useAnthropic(options?: BuiltInProviderOptions): Promise<this> {
-		return this.registerProvider(
-			"anthropic",
-			createAnthropicProviderDefinition(options),
-		);
+		return this.registerProvider("anthropic", createAnthropicProviderDefinition(options));
 	}
 
 	useOllama(options?: BuiltInProviderOptions): Promise<this> {
-		return this.registerProvider(
-			"ollama",
-			createOllamaProviderDefinition(options),
-		);
+		return this.registerProvider("ollama", createOllamaProviderDefinition(options));
 	}
 
 	useSapAICore(options?: SapAICoreProviderOptions): Promise<this> {
-		return this.registerProvider(
-			"sap-ai-core",
-			createSapAICoreProviderDefinition(options),
-		);
+		return this.registerProvider("sap-ai-core", createSapAICoreProviderDefinition(options));
 	}
 
 	private getProvider(name: string): InternalProviderDefinition {

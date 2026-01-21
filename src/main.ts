@@ -4,7 +4,7 @@ import Log from "./logging";
 import "./styles.css";
 import SettingsTab from "./views/Settings/Settings";
 import type { ProviderConfigs } from "./types/providers";
-import { createData, PluginDataStore } from "./stores/dataStore.svelte";
+import { createData, type PluginDataStore } from "./stores/dataStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/Chat/Chat";
 import { AgentManager } from "./agent/AgentManager";
@@ -72,9 +72,7 @@ export default class SecondBrainPlugin extends Plugin {
 			throw Error("Cannot localize plugin directory.");
 		}
 
-		this.addRibbonIcon("message-square", "New Chat", () =>
-			this.createNewChat(),
-		);
+		this.addRibbonIcon("message-square", "New Chat", () => this.createNewChat());
 
 		this.addCommand({
 			id: "open-chat",

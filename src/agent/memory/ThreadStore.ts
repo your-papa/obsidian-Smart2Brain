@@ -38,16 +38,11 @@ export function createSnapshot(params: ThreadSnapshotInit): ThreadSnapshot {
 	};
 }
 
-function isPlainRecord(
-	value: unknown,
-): Record<string, unknown> | undefined {
+function isPlainRecord(value: unknown): Record<string, unknown> | undefined {
 	if (!value || typeof value !== "object") {
 		return undefined;
 	}
-	if (
-		Object.getPrototypeOf(value) !== Object.prototype &&
-		Object.getPrototypeOf(value) !== null
-	) {
+	if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
 		return undefined;
 	}
 	return value as Record<string, unknown>;
