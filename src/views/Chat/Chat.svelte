@@ -12,11 +12,25 @@ const messenger = getMessenger();
 
 let isInputFocused = $state(false);
 let messageContainer: ReturnType<typeof MessageContainer>;
+let input: ReturnType<typeof Input>;
+let lastSessionId: string | null = null;
+
+$effect(() => {
+	const sessionId = messenger?.session?.id ?? null;
+	if (!sessionId || sessionId === lastSessionId) return;
+	lastSessionId = sessionId;
+	input?.focusEditor();
+});
 </script>
 
 <QueryClientProvider client={plugin.queryClient}>
     <div class="chat-root h-full flex flex-col">
         <MessageContainer bind:this={messageContainer} messenger={messenger!!} {isInputFocused} />
-        <Input messenger={messenger!!} onFocusChange={(focused) => isInputFocused = focused} onMessageSent={() => messageContainer.scrollToLatestMessage()} />
+        <Input
+            bind:this={input}
+            messenger={messenger!!}
+            onFocusChange={(focused) => isInputFocused = focused}
+            onMessageSent={() => messageContainer.scrollToLatestMessage()}
+        />
     </div>
 </QueryClientProvider>
