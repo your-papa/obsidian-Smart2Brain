@@ -2,6 +2,7 @@ import { Notice, type TFile } from "obsidian";
 import type { ThreadHistory } from "../agent/Agent";
 import type { AgentManager } from "../agent/AgentManager";
 import type { ThreadMessage } from "../agent/messages/ThreadMessage";
+import type { GenModelConfig, RegisteredProvider } from "../types/providers";
 import type { ThreadError } from "../types/shared";
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { getData } from "./dataStore.svelte";
@@ -50,7 +51,7 @@ export interface AssistantMessage {
 	nerd_stats?: {
 		tokensPerSecond: number;
 		retrievedDocsNum: number;
-		genModelConfig: any;
+		genModelConfig: GenModelConfig;
 	};
 	errorCode?: string;
 }
@@ -71,8 +72,8 @@ export interface ChatPreview {
 
 export interface ChatModel {
 	model: string;
-	provider: any;
-	modelConfig: any;
+	provider: RegisteredProvider;
+	modelConfig: Partial<GenModelConfig>;
 }
 
 /**
@@ -87,6 +88,35 @@ export interface ChatRecord {
  * ThreadMessage to MessagePair conversion
  * ---------------------------------------------------------------------------*/
 
+/** Type for content items that have a type property */
+interface ContentWithType {
+	type: string;
+	text?: string;
+}
+
+/**
+ * Extended ThreadMessage type that includes snake_case variants
+ * that may come from LangChain or other sources
+ */
+interface ExtendedThreadMessage extends ThreadMessage {
+	tool_call_id?: string;
+	tool_calls?: Array<{
+		id: string;
+		name: string;
+		arguments?: unknown;
+		input?: unknown;
+	}>;
+	status?: string;
+}
+
+/** Raw tool call structure from various sources */
+interface RawToolCall {
+	id: string;
+	name: string;
+	arguments?: unknown;
+	input?: unknown;
+}
+
 /**
  * Extracts text content from a ThreadMessage content field.
  * Handles both string content and array of content objects.
@@ -97,7 +127,7 @@ function extractTextContent(content: ThreadMessage["content"]): string {
 		return content
 			.filter(
 				(c): c is { type: "text"; text: string } =>
-					typeof c === "object" && c !== null && (c as any).type === "text",
+					typeof c === "object" && c !== null && (c as ContentWithType).type === "text",
 			)
 			.map((c) => c.text)
 			.join("");
@@ -134,11 +164,12 @@ function buildToolOutputsMap(
 ): Map<string, { content: unknown; status: ToolCallStatus }> {
 	const toolOutputs = new Map<string, { content: unknown; status: ToolCallStatus }>();
 	for (const msg of threadMessages) {
-		const toolCallId = (msg as any).tool_call_id || (msg as any).toolCallId;
+		const extMsg = msg as ExtendedThreadMessage;
+		const toolCallId = extMsg.tool_call_id || extMsg.toolCallId;
 		if (msg.role === "tool" && toolCallId) {
 			toolOutputs.set(toolCallId, {
 				content: msg.content,
-				status: (msg as any).status === "error" ? "failed" : "completed",
+				status: extMsg.status === "error" ? "failed" : "completed",
 			});
 		}
 	}
@@ -156,12 +187,13 @@ export function threadMessageToAssistantMessage(
 ): AssistantMessage {
 	const textContent = extractTextContent(msg.content);
 
-	// Extract tool calls if present
-	const rawToolCalls = (msg as any).tool_calls || (msg as any).toolCalls;
+	// Extract tool calls if present - check both camelCase and snake_case variants
+	const extMsg = msg as ExtendedThreadMessage;
+	const rawToolCalls = extMsg.tool_calls || extMsg.toolCalls;
 	let toolCalls: ToolCallState[] | undefined;
 
 	if (Array.isArray(rawToolCalls) && rawToolCalls.length > 0) {
-		toolCalls = rawToolCalls.map((tc: any) => {
+		toolCalls = rawToolCalls.map((tc: RawToolCall) => {
 			const toolOutput = toolOutputs?.get(tc.id);
 			return {
 				id: tc.id,
@@ -244,6 +276,9 @@ export function threadMessagesToMessagePairs(threadMessages: ThreadMessage[], er
 	// Filter to just user and assistant messages
 	const conversationMessages = threadMessages.filter((msg) => msg.role === "user" || msg.role === "assistant");
 
+	// Track remaining errors locally to avoid reassigning parameter
+	let remainingErrors = errorCount;
+
 	let i = 0;
 	while (i < conversationMessages.length) {
 		const msg = conversationMessages[i];
@@ -266,9 +301,9 @@ export function threadMessagesToMessagePairs(threadMessages: ThreadMessage[], er
 			const hasNoResponse = assistantMessages.length === 0;
 			let state: AssistantState;
 
-			if (hasNoResponse && errorCount > 0) {
+			if (hasNoResponse && remainingErrors > 0) {
 				state = AssistantState.error;
-				errorCount--;
+				remainingErrors--;
 			} else if (hasNoResponse) {
 				state = AssistantState.cancelled;
 			} else {

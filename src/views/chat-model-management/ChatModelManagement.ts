@@ -1,8 +1,8 @@
-import { App, Modal } from "obsidian";
-import type { GenModelConfig, GenProviders } from "../../types/providers";
+import { Modal } from "obsidian";
 import { mount } from "svelte";
-import type SecondBrainPlugin from "../../main";
 import ModalProvider from "../../lib/QueryClientProvider.svelte";
+import type SecondBrainPlugin from "../../main";
+import type { GenModelConfig, GenProviders } from "../../types/providers";
 import ChatModelManagementComponent from "./ChatModelManagement.svelte";
 
 export class ChatModelManagementModal extends Modal {

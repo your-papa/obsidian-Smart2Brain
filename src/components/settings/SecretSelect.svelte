@@ -1,8 +1,8 @@
 <script lang="ts">
 import { Tooltip } from "bits-ui";
 import { Notice } from "obsidian";
-import { getPlugin } from "../../stores/state.svelte";
 import { listSecrets } from "../../lib/secretStorage";
+import { getPlugin } from "../../stores/state.svelte";
 import { AddSecretModal } from "../modal/AddSecretModal";
 import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
@@ -106,7 +106,7 @@ let selectedValue = $derived(secrets.includes(value) ? value : (secrets[0] ?? ""
 			dropdown={dropdownOptions}
 			selected={selectedValue}
 			onSelect={handleSelect}
-			style="flex-1"
+			class="flex-1"
 		/>
 	{:else}
 		<span class="text-[--text-muted] text-sm">No secrets available</span>

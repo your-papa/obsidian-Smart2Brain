@@ -1,6 +1,6 @@
-import { App, Modal } from "obsidian";
-import ExcludeFoldersComponent from "./ExcludeFoldersModal.svelte";
+import { Modal } from "obsidian";
 import { mount } from "svelte";
+import ExcludeFoldersComponent from "./ExcludeFoldersModal.svelte";
 
 export class ExcludeFoldersModal extends Modal {
 	component!: ExcludeFoldersComponent;

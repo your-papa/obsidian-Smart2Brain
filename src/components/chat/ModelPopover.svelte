@@ -81,13 +81,13 @@ let customAnchor: HTMLElement | undefined = $state();
 			>
 				<div class="flex flex-col mx-2 my-4">
 					{#each models.availableModels as model}
-						<button
-							class="flex flex-row items-center gap-2 p-2 rounded-lg hover:bg-[--background-modifier-hover] border-none bg-transparent text-left cursor-pointer"
-							onclick={() => {
-								isOpen = false;
-								data.setDefaultChatModel(model);
-							}}
-						>
+					<button
+						class="!flex !flex-row !items-center !gap-2 !p-2 !rounded-lg hover:!bg-[--background-modifier-hover] !border-none !bg-transparent !text-left !cursor-pointer !shadow-none !text-[--text-normal]"
+						onclick={() => {
+							isOpen = false;
+							data.setDefaultChatModel(model);
+						}}
+					>
 							{#if model.provider === "OpenAI"}
 								<OpenAILogo style="fill: var(--text-normal)" height={16} width={16} />
 							{:else if model.provider === "Anthropic"}
@@ -109,7 +109,7 @@ let customAnchor: HTMLElement | undefined = $state();
 				<button
 					onclick={models.refetchModels}
 					aria-label="refetch available models"
-					class="flex flex-row w-fit m-1 ml-auto py-1 px-2 rounded-md gap-1 hover:bg-[--background-modifier-hover] border-none bg-transparent cursor-pointer"
+					class="!flex !flex-row !w-fit !m-1 !ml-auto !py-1 !px-2 !rounded-md !gap-1 hover:!bg-[--background-modifier-hover] !border-none !bg-transparent !cursor-pointer !shadow-none !text-[--text-normal]"
 				>
 					<div class="self-center">Refetch</div>
 					<Icon name="refresh-cw" size="s" />
