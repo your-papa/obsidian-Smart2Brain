@@ -42,8 +42,9 @@ QUERY
 \`\`\`
 The chat interface will render this automatically.
 
-${hasChartsPlugin
-    ? `## 3. Displaying Charts
+${
+	hasChartsPlugin
+		? `## 3. Displaying Charts
 You can create charts using \`dataviewjs\`. The user has the \`obsidian-charts\` plugin installed, so you can output a \`dataviewjs\` code block that uses \`window.renderChart\`.
 **Important**: \`window.renderChart\` takes exactly two arguments: the chart data object and the container element. The chart data object must follow the standard Chart.js format (type, data, options). Use Obsidian CSS variables (e.g., \`var(--interactive-accent)\`) for chart colors to match the theme.
 
@@ -69,8 +70,8 @@ const chartData = {
 window.renderChart(chartData, this.container);
 \`\`\`
 The chat interface will render this chart automatically.`
-    : ""
-  }
+		: ""
+}
 
 ## ${hasChartsPlugin ? "4" : "3"}. Math/LaTeX
 Supports MathJax rendering.

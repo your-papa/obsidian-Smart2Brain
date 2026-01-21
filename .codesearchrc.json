@@ -1,0 +1,34 @@
+{
+	"provider": {
+		"sap-ai-proxy": {
+			"npm": "@ai-sdk/openai-compatible",
+			"name": "SAP Proxy",
+			"options": {
+				"baseURL": "http://localhost:3030/v1"
+			},
+			"models": {
+				"text-embedding-3-small": {
+					"name": "Text Embedding 3 Small",
+					"dimensions": 1536
+				}
+			}
+		}
+	},
+	"defaultProvider": "sap-ai-proxy/text-embedding-3-small",
+	"indexPath": ".codesearch",
+	"include": ["**/*.ts", "**/*.js", "**/*.svelte", "**/*.json", "**/*.md"],
+	"exclude": ["node_modules/**", ".git/**", "dist/**", ".codesearch/**", "*.lock", "bun.lock"],
+	"chunking": {
+		"strategy": "ast",
+		"maxChunkSize": 1000,
+		"overlap": 100
+	},
+	"watch": {
+		"debounceMs": 500,
+		"concurrency": 5,
+		"smartWait": true,
+		"maxWaitMs": 5000,
+		"recheckMs": 500,
+		"maxChecks": 10
+	}
+}

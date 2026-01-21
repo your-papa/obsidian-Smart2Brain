@@ -1,10 +1,10 @@
 <script lang="ts">
-    interface props {
-        size?: string | number;
-        color?: string;
-    }
+interface props {
+	size?: string | number;
+	color?: string;
+}
 
-    const { size = 24, color = "currentColor" }: props = $props();
+const { size = 24, color = "currentColor" }: props = $props();
 </script>
 
 <svg

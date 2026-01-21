@@ -1,27 +1,21 @@
-import { type BuiltInProviderOptions } from "../agent/providers/types";
+import type { BuiltInProviderOptions, StoredProviderOptions } from "../agent/providers/types";
 
 // Re-export for convenience
-export type { BuiltInProviderOptions };
+export type { BuiltInProviderOptions, StoredProviderOptions };
 
 // Define these locally since they're not exported from the current papa-ts version
-export type RegisteredProvider =
-	| "OpenAI"
-	| "Ollama"
-	| "CustomOpenAI"
-	| "Anthropic";
+export type RegisteredProvider = "OpenAI" | "Ollama" | "CustomOpenAI" | "Anthropic";
 
 export type RegisteredGenProvider = RegisteredProvider;
 
 export type RegisteredEmbedProvider = RegisteredProvider;
 
-export const registeredProviders = [
-	"OpenAI",
-	"Ollama",
-	"CustomOpenAI",
-	"Anthropic",
-] as const;
+export const registeredProviders = ["OpenAI", "Ollama", "CustomOpenAI", "Anthropic"] as const;
 
-// Provider auth is stored as BuiltInProviderOptions (apiKey, baseUrl, headers, etc.)
+// Provider auth stored in data.json uses StoredProviderOptions (apiKeyId instead of apiKey)
+export type StoredProviderAuth = StoredProviderOptions;
+
+// Runtime provider auth with actual secret values
 export type ProviderAuth = BuiltInProviderOptions;
 
 type FieldKind = "text" | "password" | "textarea";
@@ -33,10 +27,7 @@ export type FieldMeta = {
 	helper?: string;
 };
 
-export const providerFieldMeta: Record<
-	RegisteredProvider,
-	Record<string, FieldMeta>
-> = {
+export const providerFieldMeta: Record<RegisteredProvider, Record<string, FieldMeta>> = {
 	OpenAI: {
 		apiKey: { label: "API Key", required: true, kind: "password" },
 		baseUrl: {
@@ -105,9 +96,9 @@ type GenModelSettings = {
 	genModels: Map<string, GenModelConfig>;
 };
 
-// All providers use BuiltInProviderOptions for auth storage
-type ProviderAuthMap = {
-	[K in RegisteredProvider]: BuiltInProviderOptions;
+// All providers use StoredProviderOptions for persistence (apiKeyId instead of apiKey)
+type StoredProviderAuthMap = {
+	[K in RegisteredProvider]: StoredProviderOptions;
 };
 
 type ConfigurationState = {
@@ -115,19 +106,16 @@ type ConfigurationState = {
 };
 
 // Helper type to determine if a provider supports embedding
-type SupportsEmbedding<T extends RegisteredProvider> =
-	T extends RegisteredEmbedProvider ? true : false;
+type SupportsEmbedding<T extends RegisteredProvider> = T extends RegisteredEmbedProvider ? true : false;
 
 // Helper type to determine if a provider supports generation
-type SupportsGeneration<T extends RegisteredProvider> =
-	T extends RegisteredGenProvider ? true : false;
+type SupportsGeneration<T extends RegisteredProvider> = T extends RegisteredGenProvider ? true : false;
 
 // Create the configuration type for each provider based on its capabilities
-type ProviderConfiguration<T extends RegisteredProvider> =
-	ConfigurationState & {
-		providerAuth: ProviderAuthMap[T];
-	} & (T extends RegisteredEmbedProvider ? EmbedModelSettings : {}) &
-		(T extends RegisteredGenProvider ? GenModelSettings : {});
+type ProviderConfiguration<T extends RegisteredProvider> = ConfigurationState & {
+	providerAuth: StoredProviderAuthMap[T];
+} & (T extends RegisteredEmbedProvider ? EmbedModelSettings : Record<string, never>) &
+	(T extends RegisteredGenProvider ? GenModelSettings : Record<string, never>);
 
 // Generate a mapped type that includes all registered providers
 export type AllProviderConfigs = {
@@ -137,9 +125,7 @@ export type AllProviderConfigs = {
 // Utility type to ensure completeness - this will cause a TypeScript error
 // if any registered provider is missing from our configuration
 type EnsureAllProvidersIncluded = {
-	[K in (typeof registeredProviders)[number]]: K extends keyof AllProviderConfigs
-		? true
-		: false;
+	[K in (typeof registeredProviders)[number]]: K extends keyof AllProviderConfigs ? true : false;
 };
 
 // Type guard to check if all providers are properly configured
@@ -149,10 +135,9 @@ type ValidateProviderConfigs<T> = T extends AllProviderConfigs ? T : never;
 export type ProviderConfigs = ValidateProviderConfigs<AllProviderConfigs>;
 
 // Utility types for accessing specific provider configurations
-export type GetProviderConfig<T extends RegisteredProvider> =
-	AllProviderConfigs[T];
+export type GetProviderConfig<T extends RegisteredProvider> = AllProviderConfigs[T];
 
-export type GetProviderAuth<T extends RegisteredProvider> = ProviderAuthMap[T];
+export type GetStoredProviderAuth<T extends RegisteredProvider> = StoredProviderAuthMap[T];
 
 // Type to get all providers that support embedding
 export type EmbedProviders = {
@@ -175,43 +160,33 @@ export type GenProvidersConfig = {
 
 // Utility function type for runtime validation
 export type ProviderConfigValidator = {
-	[K in RegisteredProvider]: (
-		config: unknown,
-	) => config is GetProviderConfig<K>;
+	[K in RegisteredProvider]: (config: unknown) => config is GetProviderConfig<K>;
 };
 
 export class SetEmbedModelError extends Error {
 	constructor(model: string, provider: string) {
-		super(
-			`Model "${model}" does not exist in embedModels for provider "${provider}".`,
-		);
+		super(`Model "${model}" does not exist in embedModels for provider "${provider}".`);
 		this.name = "SetEmbedModelError";
 	}
 }
 
 export class AddEmbedModelError extends Error {
 	constructor(model: string, provider: string) {
-		super(
-			`Model "${model}" already exist in embedModels for provider "${provider}".`,
-		);
+		super(`Model "${model}" already exist in embedModels for provider "${provider}".`);
 		this.name = "AddEmbedModelError";
 	}
 }
 
 export class SetGenModelError extends Error {
 	constructor(model: string, provider: string) {
-		super(
-			`Model "${model}" does not exist in genModels for provider "${provider}".`,
-		);
+		super(`Model "${model}" does not exist in genModels for provider "${provider}".`);
 		this.name = "SetGEnModelError";
 	}
 }
 
 export class AddGenModelError extends Error {
 	constructor(model: string, provider: string) {
-		super(
-			`Model "${model}" already exist in genModels for provider "${provider}".`,
-		);
+		super(`Model "${model}" already exist in genModels for provider "${provider}".`);
 		this.name = "AddGenModelError";
 	}
 }

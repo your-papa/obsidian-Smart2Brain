@@ -27,3 +27,8 @@ workspace.json
 *.sw?
 .envrc
 .direnv/*
+# Codesearch index
+.codesearch
+
+# btca cache
+.btca

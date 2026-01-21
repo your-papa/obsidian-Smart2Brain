@@ -1,21 +1,14 @@
 <script lang="ts">
-    interface Props {
-        name: string;
-        isHeading?: boolean;
-        class?: string;
-        desc?: string;
-        isDisabled?: boolean;
-        children?: import("svelte").Snippet;
-    }
+interface Props {
+	name: string;
+	isHeading?: boolean;
+	class?: string;
+	desc?: string;
+	isDisabled?: boolean;
+	children?: import("svelte").Snippet;
+}
 
-    let {
-        name,
-        isHeading = false,
-        desc = "",
-        isDisabled = false,
-        children,
-        class: className = "",
-    }: Props = $props();
+let { name, isHeading = false, desc = "", isDisabled = false, children, class: className = "" }: Props = $props();
 </script>
 
 <div

@@ -1,4 +1,4 @@
-import { App, Modal } from "obsidian";
+import { type App, Modal } from "obsidian";
 import ConfirmComponent from "./ConfirmModal.svelte";
 import { get } from "svelte/store";
 import type { PluginDataKey } from "../../main";

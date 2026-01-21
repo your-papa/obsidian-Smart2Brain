@@ -1,66 +1,66 @@
 <script lang="ts">
-    import { onMount } from "svelte";
-    import SettingContainer from "../Settings/SettingContainer.svelte";
-    import ButtonComponent from "../base/Button.svelte";
-    import { getData } from "../../stores/dataStore.svelte";
-    import type { ExcludeFoldersModal } from "./ExcludeFoldersModal";
-    import Button from "../base/Button.svelte";
-    import Dropdown from "../base/Dropdown.svelte";
-    import Toggle from "../base/Toggle.svelte";
-    import { prepareFuzzySearch, TAbstractFile } from "obsidian";
-    import FolderSuggest from "./FolderSuggest.svelte";
-    import { getPlugin } from "../../stores/state.svelte";
+import { onMount } from "svelte";
+import SettingContainer from "../Settings/SettingContainer.svelte";
+import ButtonComponent from "../base/Button.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import type { ExcludeFoldersModal } from "./ExcludeFoldersModal";
+import Button from "../base/Button.svelte";
+import Dropdown from "../base/Dropdown.svelte";
+import Toggle from "../base/Toggle.svelte";
+import { prepareFuzzySearch, type TAbstractFile } from "obsidian";
+import FolderSuggest from "./FolderSuggest.svelte";
+import { getPlugin } from "../../stores/state.svelte";
 
-    interface Props {
-        modal: ExcludeFoldersModal;
-    }
+interface Props {
+	modal: ExcludeFoldersModal;
+}
 
-    const plugin = getPlugin();
+const plugin = getPlugin();
 
-    const data = getData();
+const data = getData();
 
-    const suggestionLength: number = 100;
+const suggestionLength: number = 100;
 
-    let { modal }: Props = $props();
+let { modal }: Props = $props();
 
-    //TODO: Finish implementing modes
+//TODO: Finish implementing modes
 
-    export const modes = ["File/Folder", "Filetyp"] as const;
+export const modes = ["File/Folder", "Filetyp"] as const;
 
-    let exclusionMode: (typeof modes)[number] = $state("File/Folder");
+let exclusionMode: (typeof modes)[number] = $state("File/Folder");
 
-    function matchFilesFolders(query: string): TAbstractFile[] {
-        let allFiles = plugin.app.vault.getAllLoadedFiles();
+function matchFilesFolders(query: string): TAbstractFile[] {
+	let allFiles = plugin.app.vault.getAllLoadedFiles();
 
-        if (!query) {
-            return allFiles.slice(0, 10);
-        }
+	if (!query) {
+		return allFiles.slice(0, 10);
+	}
 
-        const fuzzySearch = prepareFuzzySearch(query);
+	const fuzzySearch = prepareFuzzySearch(query);
 
-        const matches = allFiles
-            .map((file) => ({
-                file,
-                match: fuzzySearch(file.path),
-            }))
-            .filter((item) => item.match)
-            .sort((a, b) => b.match!.score - a.match!.score)
-            .map((item) => item.file);
+	const matches = allFiles
+		.map((file) => ({
+			file,
+			match: fuzzySearch(file.path),
+		}))
+		.filter((item) => item.match)
+		.sort((a, b) => b.match?.score - a.match?.score)
+		.map((item) => item.file);
 
-        return matches;
-    }
+	return matches;
+}
 
-    function addExcludeFolder(folder: string) {
-        if (folder.trim()) {
-            data.addIndexList(folder.trim());
-            papaState.set("settings-change");
-        }
-    }
+function addExcludeFolder(folder: string) {
+	if (folder.trim()) {
+		data.addIndexList(folder.trim());
+		papaState.set("settings-change");
+	}
+}
 
-    function removeExcludeFolder(folder: string) {
-        data.removeIndexList(folder);
-        papaState.set("settings-change");
-    }
+function removeExcludeFolder(folder: string) {
+	data.removeIndexList(folder);
+	papaState.set("settings-change");
+}
 </script>
 
 <div class="modal-title">

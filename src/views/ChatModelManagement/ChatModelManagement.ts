@@ -11,11 +11,7 @@ export class ChatModelManagementModal extends Modal {
 	private provider!: GenProviders;
 	private config?: GenModelConfig;
 
-	constructor(
-		plugin: SecondBrainPlugin,
-		provider: GenProviders,
-		config?: GenModelConfig,
-	) {
+	constructor(plugin: SecondBrainPlugin, provider: GenProviders, config?: GenModelConfig) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.setTitle(`${provider} Chat Model Management`);

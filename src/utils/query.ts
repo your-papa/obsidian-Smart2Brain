@@ -1,9 +1,9 @@
 import { createQuery } from "@tanstack/svelte-query";
 import { QueryClient } from "@tanstack/svelte-query";
-import type { RegisteredProvider } from "../types/providers";
-import { getPlugin } from "../stores/state.svelte";
-import { getData } from "../stores/dataStore.svelte";
 import type { ValidationResult } from "../agent/AgentManager";
+import { getData } from "../stores/dataStore.svelte";
+import { getPlugin } from "../stores/state.svelte";
+import type { RegisteredProvider } from "../types/providers";
 
 // Create a global QueryClient instance
 const queryClient = new QueryClient({
@@ -39,10 +39,9 @@ export function createProviderStateQuery(provider: () => RegisteredProvider) {
 		queryKey: ["provider", provider()],
 		queryFn: async () => {
 			const providerName = provider();
-			const auth = await plugin.agentManager.testProviderConfig(
-				providerName,
-				data.getProviderAuthParams(providerName),
-			);
+			// Resolve secrets from SecretStorage
+			const resolvedAuth = data.getResolvedProviderAuth(providerName);
+			const auth = await plugin.agentManager.testProviderConfig(providerName, resolvedAuth);
 
 			// Only fetch models if auth succeeded
 			const models = auth.success ? await plugin.agentManager.getAvailableModels(providerName) : [];
@@ -80,10 +79,9 @@ export function createAuthStateQuery(provider: () => RegisteredProvider) {
 	return createQuery<ValidationResult>(() => ({
 		queryKey: ["authState", provider()],
 		queryFn: async () => {
-			const res = await plugin.agentManager.testProviderConfig(
-				provider(),
-				data.getProviderAuthParams(provider()),
-			);
+			// Resolve secrets from SecretStorage
+			const resolvedAuth = data.getResolvedProviderAuth(provider());
+			const res = await plugin.agentManager.testProviderConfig(provider(), resolvedAuth);
 			return res;
 		},
 	}));

@@ -1,11 +1,11 @@
 <script lang="ts">
-    import { chatLayout } from "../../stores/state.svelte";
+import { chatLayout } from "../../stores/state.svelte";
 
-    interface Props {
-        progress?: number; // Progress value from 0 to 100
-    }
+interface Props {
+	progress?: number; // Progress value from 0 to 100
+}
 
-    let { progress = 0 }: Props = $props();
+let { progress = 0 }: Props = $props();
 </script>
 
 <progress

@@ -1,36 +1,27 @@
 <script lang="ts">
-    import { t } from "svelte-i18n";
-    import {
-        type RegisteredProvider,
-        registeredProviders,
-    } from "../../types/providers";
-    import SettingContainer from "./SettingContainer.svelte";
-    import Button from "../base/Button.svelte";
-    import { getPlugin } from "../../stores/state.svelte";
-    import { getData } from "../../stores/dataStore.svelte";
-    import { ProviderSetupModal } from "../../views/ProviderSetup/ProviderSetup";
-    import Dropdown from "../base/Dropdown.svelte";
-    import { Accordion } from "bits-ui";
-    import ConfiguredProvider from "./ConfiguredProvider.svelte";
+import { t } from "svelte-i18n";
+import { type RegisteredProvider, registeredProviders } from "../../types/providers";
+import SettingContainer from "./SettingContainer.svelte";
+import Button from "../base/Button.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import { ProviderSetupModal } from "../../views/ProviderSetup/ProviderSetup";
+import Dropdown from "../base/Dropdown.svelte";
+import { Accordion } from "bits-ui";
+import ConfiguredProvider from "./ConfiguredProvider.svelte";
 
-    const data = getData();
-    const plugin = getPlugin();
+const data = getData();
+const plugin = getPlugin();
 
-    let configuredProviders = $derived(data.getConfiguredProviders());
-    let unconfiguredProviders = $derived(
-        registeredProviders.filter(
-            (provider) => !configuredProviders.includes(provider),
-        ),
-    );
-    let selectedProvider: RegisteredProvider | undefined = $derived(
-        unconfiguredProviders[0] || undefined,
-    );
+let configuredProviders = $derived(data.getConfiguredProviders());
+let unconfiguredProviders = $derived(registeredProviders.filter((provider) => !configuredProviders.includes(provider)));
+let selectedProvider: RegisteredProvider | undefined = $derived(unconfiguredProviders[0] || undefined);
 
-    let activeProvider: RegisteredProvider | undefined = $state(undefined);
+let activeProvider: RegisteredProvider | undefined = $state(undefined);
 
-    const onAccordionClick = (provider: RegisteredProvider) => {
-        activeProvider = activeProvider === provider ? undefined : provider;
-    };
+const onAccordionClick = (provider: RegisteredProvider) => {
+	activeProvider = activeProvider === provider ? undefined : provider;
+};
 </script>
 
 <Accordion.Root type="single" bind:value={activeProvider}>

@@ -1,19 +1,14 @@
 <script lang="ts">
-    import { icon } from "../../utils/utils";
+import { icon } from "../../utils/utils";
 
-    interface Props {
-        name: string;
-        class?: string;
-        size?: number | string;
-        onclick?: () => void;
-    }
+interface Props {
+	name: string;
+	class?: string;
+	size?: number | string;
+	onclick?: () => void;
+}
 
-    const {
-        name,
-        class: className,
-        size = "var(--icon-s)",
-        onclick,
-    }: Props = $props();
+const { name, class: className, size = "var(--icon-s)", onclick }: Props = $props();
 </script>
 
 <div

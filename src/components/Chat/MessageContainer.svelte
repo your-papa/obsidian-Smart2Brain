@@ -27,7 +27,7 @@ export async function scrollToLatestMessage() {
 	await tick();
 	if (messages && messages.length > 0 && scrollContainer) {
 		const latestPair = messages[messages.length - 1];
-		const messageElement = messageRefs.get(latestPair.id + "-user");
+		const messageElement = messageRefs.get(`${latestPair.id}-user`);
 
 		if (messageElement && scrollContainer) {
 			const containerTop = scrollContainer.getBoundingClientRect().top;
