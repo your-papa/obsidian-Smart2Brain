@@ -1,11 +1,15 @@
 <script lang="ts">
-interface Props {
-	size?: number;
-	color?: string;
-	strokeWidth?: number;
-}
+	interface Props {
+		size?: number;
+		color?: string;
+		strokeWidth?: number;
+	}
 
-const { size = 18, color = "var(--text-accent)", strokeWidth = 2 }: Props = $props();
+	const {
+		size = 18,
+		color = "var(--text-accent)",
+		strokeWidth = 2,
+	}: Props = $props();
 </script>
 
 <div
