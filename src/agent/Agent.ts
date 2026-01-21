@@ -1,19 +1,20 @@
-import { createAgent, type ReactAgent } from "langchain";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { StreamEvent } from "@langchain/core/tracers/log_stream";
 import type { BaseCheckpointSaver, CheckpointTuple } from "@langchain/langgraph";
 import { MemorySaver } from "@langchain/langgraph";
+import { type ReactAgent, createAgent } from "langchain";
 import { Notice } from "obsidian";
 
+import { getData } from "../stores/dataStore.svelte";
+import type { ThreadError } from "../types/shared";
+import Logger from "../utils/logging";
+import { type ThreadSnapshot, type ThreadStore, createSnapshot } from "./memory/ThreadStore";
+import { type ThreadMessage, getMessageText, normalizeThreadMessages } from "./messages/ThreadMessage";
 import type { ProviderRegistry } from "./providers/ProviderRegistry";
 import { ProviderEndpointError, ProviderNotFoundError } from "./providers/errors";
 import type { ModelOptions } from "./providers/types";
 import type { Telemetry } from "./telemetry/Telemetry";
-import { createSnapshot, type ThreadSnapshot, type ThreadStore } from "./memory/ThreadStore";
-import { getMessageText, normalizeThreadMessages, type ThreadMessage } from "./messages/ThreadMessage";
-import { getData } from "../stores/dataStore.svelte";
-import Logger from "../logging";
 
 export interface ChooseModelParams {
 	provider: string;
@@ -36,11 +37,6 @@ export interface AgentResult {
 	messages: ThreadMessage[];
 	response?: unknown;
 	raw: unknown;
-}
-
-export interface ThreadError {
-	message: string;
-	name?: string;
 }
 
 export interface ThreadHistory extends ThreadSnapshot {
