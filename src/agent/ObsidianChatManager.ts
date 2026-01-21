@@ -1,16 +1,16 @@
+import type { RunnableConfig } from "@langchain/core/runnables";
 import {
 	BaseCheckpointSaver,
 	type Checkpoint,
+	type CheckpointListOptions,
 	type CheckpointMetadata,
 	type CheckpointTuple,
 	type PendingWrite,
-	type CheckpointListOptions,
 } from "@langchain/langgraph-checkpoint";
-import type { RunnableConfig } from "@langchain/core/runnables";
-import { Plugin, debounce, TFile, normalizePath, type DataAdapter } from "obsidian";
+import { type DataAdapter, Plugin, TFile, debounce, normalizePath } from "obsidian";
 import type SecondBrainPlugin from "../main";
-import type { ThreadStore, ThreadSnapshot } from "./memory/ThreadStore";
 import { getData } from "../stores/dataStore.svelte";
+import type { ThreadSnapshot, ThreadStore } from "./memory/ThreadStore";
 
 interface CheckpointEntry {
 	checkpoint: Checkpoint;
@@ -60,7 +60,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	}
 
 	private getIndexPath(): string {
-		const configDir = (this.plugin.app.vault as any).configDir || ".obsidian";
+		// configDir is an internal Obsidian API property
+		const vault = this.plugin.app.vault as { configDir?: string };
+		const configDir = vault.configDir || ".obsidian";
 		return `${configDir}/plugins/${this.plugin.manifest.id}/data/threads.json`;
 	}
 
@@ -71,7 +73,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		}
 
 		// Ensure plugin data dir for index
-		const dataDir = `${(this.plugin.app.vault as any).configDir || ".obsidian"}/plugins/${this.plugin.manifest.id}/data`;
+		const vault = this.plugin.app.vault as { configDir?: string };
+		const dataDir = `${vault.configDir || ".obsidian"}/plugins/${this.plugin.manifest.id}/data`;
 		if (!(await this.adapter.exists(dataDir))) {
 			await this.adapter.mkdir(dataDir);
 		}
@@ -368,7 +371,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 				checkpoint: entry.checkpoint,
 				metadata: entry.metadata,
 				parentConfig: entry.parentConfig,
-				pendingWrites: pendingWrites as any,
+				// Type assertion needed due to LangGraph checkpoint type variance
+				pendingWrites: pendingWrites as unknown as CheckpointTuple["pendingWrites"],
 			};
 		}
 
@@ -392,7 +396,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			checkpoint: entry.checkpoint,
 			metadata: entry.metadata,
 			parentConfig: entry.parentConfig,
-			pendingWrites: pendingWrites as any,
+			// Type assertion needed due to LangGraph checkpoint type variance
+			pendingWrites: pendingWrites as unknown as CheckpointTuple["pendingWrites"],
 		};
 	}
 
@@ -449,7 +454,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 				checkpoint: entry.checkpoint,
 				metadata: entry.metadata,
 				parentConfig: entry.parentConfig,
-				pendingWrites: (threadData.writes[key] || []) as any,
+				// Type assertion needed due to LangGraph checkpoint type variance
+				pendingWrites: (threadData.writes[key] || []) as unknown as CheckpointTuple["pendingWrites"],
 			};
 
 			if (options?.limit && --options.limit <= 0) break;

@@ -1,15 +1,10 @@
 import { Notice, normalizePath } from "obsidian";
+import { createObsidianFetch } from "../lib/obsidianFetch";
+import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
-import { createExecuteDataviewTool } from "../tools/executeDataview";
-import { createGetAllTagsTool } from "../tools/getAllTags";
-import { createGetPropertiesTool } from "../tools/getProperties";
-import { createReadNoteTool } from "../tools/readNote";
-import { createSearchNotesTool } from "../tools/searchNotes";
 import type { RegisteredProvider } from "../types/providers";
-import { createObsidianFetch } from "../utils/obsidianFetch";
-import { invalidateProviderState } from "../utils/query";
 import { createThreadId } from "../utils/threadId";
 import { Agent, type ChooseModelParams, type ThreadHistory } from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
@@ -23,10 +18,29 @@ import {
 } from "./providers";
 import { ProviderRegistry } from "./providers/ProviderRegistry";
 import { LangSmithTelemetry, type Telemetry } from "./telemetry";
+import { createExecuteDataviewTool } from "./tools/executeDataview";
+import { createGetAllTagsTool } from "./tools/getAllTags";
+import { createGetPropertiesTool } from "./tools/getProperties";
+import { createReadNoteTool } from "./tools/readNote";
+import { createSearchNotesTool } from "./tools/searchNotes";
 
-export type ValidationResult = { success: true } | { success: false; message: string };
+import type { StructuredToolInterface } from "@langchain/core/tools";
+import { TFile } from "obsidian";
 
-declare const MultiServerMCPClient: any;
+/** Result of provider authentication validation */
+export type AuthValidationResult = { success: true } | { success: false; message: string };
+
+/** MCP Client interface for loading tools from MCP servers */
+interface MCPClient {
+	getTools(): Promise<StructuredToolInterface[]>;
+}
+
+/** MCP Client constructor type */
+interface MCPClientConstructor {
+	new (servers: Record<string, unknown>): MCPClient;
+}
+
+declare const MultiServerMCPClient: MCPClientConstructor;
 
 /**
  * Maps the UI ChatModel type to papa-ts ChooseModelParams.
@@ -86,9 +100,12 @@ export class AgentManager {
 
 	/**
 	 * Tests and configures a provider on the actual registry.
-	 * Returns a ValidationResult indicating success or failure with a message.
+	 * Returns an AuthValidationResult indicating success or failure with a message.
 	 */
-	async testProviderConfig(provider: RegisteredProvider, options: BuiltInProviderOptions): Promise<ValidationResult> {
+	async testProviderConfig(
+		provider: RegisteredProvider,
+		options: BuiltInProviderOptions,
+	): Promise<AuthValidationResult> {
 		try {
 			await this.configureProviderOnRegistry(this.registry, provider, options);
 			return { success: true };
@@ -138,7 +155,13 @@ export class AgentManager {
 		const getPropertiesTool = createGetPropertiesTool(this.plugin.app);
 		const readNoteTool = createReadNoteTool(this.plugin.app);
 
-		const tools: any[] = [searchNotesTool, getAllTagsTool, executeDataviewTool, getPropertiesTool, readNoteTool];
+		const tools: StructuredToolInterface[] = [
+			searchNotesTool,
+			getAllTagsTool,
+			executeDataviewTool,
+			getPropertiesTool,
+			readNoteTool,
+		];
 
 		// Load MCP tools if configured (use getData())
 		const data = getData();
@@ -147,9 +170,10 @@ export class AgentManager {
 				console.log("Smart Second Brain: Initializing MCP client...", data.mcpServers);
 
 				// HACK: Monkey patch the global fetch for the entire lifecycle
-				if (!(window as any)._originalFetch) {
-					(window as any)._originalFetch = window.fetch;
-					window.fetch = createObsidianFetch((window as any)._originalFetch) as any;
+				const windowWithFetch = window as Window & { _originalFetch?: typeof fetch };
+				if (!windowWithFetch._originalFetch) {
+					windowWithFetch._originalFetch = window.fetch;
+					window.fetch = createObsidianFetch(windowWithFetch._originalFetch);
 				}
 
 				try {
@@ -260,7 +284,7 @@ export class AgentManager {
 				toolName: string;
 				output: unknown;
 		  }
-		| { type: "result"; result: any },
+		| { type: "result"; result: unknown },
 		void,
 		unknown
 	> {
@@ -407,9 +431,10 @@ export class AgentManager {
 
 	cleanup(): void {
 		// Restore original fetch if it was patched
-		if ((window as any)._originalFetch) {
-			window.fetch = (window as any)._originalFetch;
-			(window as any)._originalFetch = undefined;
+		const windowWithFetch = window as Window & { _originalFetch?: typeof fetch };
+		if (windowWithFetch._originalFetch) {
+			window.fetch = windowWithFetch._originalFetch;
+			windowWithFetch._originalFetch = undefined;
 		}
 
 		// Cleanup if needed
@@ -456,8 +481,8 @@ export class AgentManager {
 		const path = normalizePath(`${folder}/${latestThread.threadId}.chat`);
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 
-		if (file) {
-			await this.plugin.app.workspace.getLeaf(false).openFile(file as any);
+		if (file && file instanceof TFile) {
+			await this.plugin.app.workspace.getLeaf(false).openFile(file);
 		} else {
 			await this.createNewChat();
 		}
