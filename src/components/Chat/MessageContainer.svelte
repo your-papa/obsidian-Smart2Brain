@@ -1,102 +1,166 @@
 <script lang="ts">
-import { icon } from "../../utils/utils";
-import MarkdownRenderer from "../base/MarkdownRenderer.svelte";
-import { AssistantState, type AssistantMessage, type ChatModel, type Messenger } from "../../stores/chatStore.svelte";
-import Dots from "../../utils/Dots.svelte";
-import ToolCallsSection from "./ToolCallsSection.svelte";
-import { Notice } from "obsidian";
-import type { UUIDv7 } from "../../utils/uuid7Validator";
-import Logo from "../Logos/Logo.svelte";
-import { tick } from "svelte";
+    import { icon } from "../../utils/utils";
+    import MarkdownRenderer from "../base/MarkdownRenderer.svelte";
+    import {
+        AssistantState,
+        type AssistantMessage,
+        type ChatModel,
+        type Messenger,
+    } from "../../stores/chatStore.svelte";
+    import Dots from "../../utils/Dots.svelte";
+    import CircularLoader from "../base/CircularLoader.svelte";
+    import ToolCallsSection from "./ToolCallsSection.svelte";
+    import { Notice } from "obsidian";
+    import type { UUIDv7 } from "../../utils/uuid7Validator";
+    import Logo from "../Logos/Logo.svelte";
+    import { tick } from "svelte";
 
-interface Props {
-	messenger: Messenger;
-	isInputFocused?: boolean;
-}
+    interface Props {
+        messenger: Messenger;
+        isInputFocused?: boolean;
+    }
 
-const { messenger, isInputFocused = false }: Props = $props();
+    const { messenger, isInputFocused = false }: Props = $props();
 
-const messages = $derived.by(() => {
-	return messenger.session?.messages;
-});
+    const messages = $derived.by(() => {
+        return messenger.session?.messages;
+    });
 
-let scrollContainer: HTMLDivElement | undefined = $state();
-const messageRefs = new Map<string, HTMLDivElement>();
+    let scrollContainer: HTMLDivElement | undefined = $state();
+    const messageRefs = new Map<string, HTMLDivElement>();
 
-export async function scrollToLatestMessage() {
-	await tick();
-	if (messages && messages.length > 0 && scrollContainer) {
-		const latestPair = messages[messages.length - 1];
-		const messageElement = messageRefs.get(`${latestPair.id}-user`);
+    export async function scrollToLatestMessage() {
+        await tick();
+        if (messages && messages.length > 0 && scrollContainer) {
+            const latestPair = messages[messages.length - 1];
+            const messageElement = messageRefs.get(`${latestPair.id}-user`);
 
-		if (messageElement && scrollContainer) {
-			const containerTop = scrollContainer.getBoundingClientRect().top;
-			const messageTop = messageElement.getBoundingClientRect().top;
-			const currentScroll = scrollContainer.scrollTop;
+            if (messageElement && scrollContainer) {
+                const containerTop =
+                    scrollContainer.getBoundingClientRect().top;
+                const messageTop = messageElement.getBoundingClientRect().top;
+                const currentScroll = scrollContainer.scrollTop;
 
-			// Calculate scroll position to place message at top of container
-			const targetScroll = currentScroll + (messageTop - containerTop);
+                // Calculate scroll position to place message at top of container
+                const targetScroll =
+                    currentScroll + (messageTop - containerTop);
 
-			scrollContainer.scrollTo({
-				top: targetScroll,
-				behavior: "smooth",
-			});
-		}
-	}
-}
+                scrollContainer.scrollTo({
+                    top: targetScroll,
+                    behavior: "smooth",
+                });
+            }
+        }
+    }
 
-// Svelte action to register message refs
-function registerMessageRef(node: HTMLDivElement, id: string) {
-	messageRefs.set(id, node);
-	return {
-		destroy() {
-			messageRefs.delete(id);
-		},
-	};
-}
+    // Svelte action to register message refs
+    function registerMessageRef(node: HTMLDivElement, id: string) {
+        messageRefs.set(id, node);
+        return {
+            destroy() {
+                messageRefs.delete(id);
+            },
+        };
+    }
 
-function renderAssitantAnswer(assistantAnswer: AssistantMessage) {
-	if (assistantAnswer.state === AssistantState.cancelled) {
-		return "> [!Warning] stopped by user";
-	}
-	if (assistantAnswer.state === AssistantState.error) {
-		return "> [!Error] an error occured";
-	}
-	return assistantAnswer.content;
-}
+    function renderAssitantAnswer(assistantAnswer: AssistantMessage) {
+        if (assistantAnswer.state === AssistantState.cancelled) {
+            return "> [!Warning] stopped by user";
+        }
+        if (assistantAnswer.state === AssistantState.error) {
+            return "> [!Error] an error occured";
+        }
+        return assistantAnswer.content;
+    }
 
-async function copyToClipboard(content: string) {
-	await navigator.clipboard.writeText(content);
-	new Notice("Copied to Clipboard");
-}
+    function getOpenDataviewFenceStart(content: string): number | null {
+        const fenceRegex = /```(\w+)?/g;
+        let inFence = false;
+        let fenceLang = "";
+        let fenceStart = -1;
+        let match: RegExpExecArray | null;
 
-async function redoMessage(messageId: UUIDv7, model: ChatModel) {
-	console.log("todo resend");
-}
+        while ((match = fenceRegex.exec(content)) !== null) {
+            if (!inFence) {
+                inFence = true;
+                fenceLang = (match[1] ?? "").toLowerCase();
+                fenceStart = match.index;
+            } else {
+                inFence = false;
+                fenceLang = "";
+                fenceStart = -1;
+            }
+        }
 
-async function branchOff(messageId: UUIDv7) {
-	console.log("todo branch off");
-}
+        if (inFence && (fenceLang === "dataview" || fenceLang === "dataviewjs")) {
+            return fenceStart;
+        }
+        return null;
+    }
 
-// Track which message pairs have their tools open
-let toolsOpenState: Record<string, boolean> = $state({});
+    function getRenderableAssistantContent(assistantAnswer: AssistantMessage) {
+        const content = renderAssitantAnswer(assistantAnswer) ?? "";
+        const isStreaming = assistantAnswer.state === AssistantState.streaming;
+        if (!isStreaming || !assistantAnswer.content) {
+            return { content, showLoading: false, renderContent: true };
+        }
 
-function getToolsOpen(messageId: string, assistantMessage: AssistantMessage): boolean {
-	// Default: open if no content yet, closed if content exists
-	if (toolsOpenState[messageId] === undefined) {
-		return !assistantMessage.content || assistantMessage.content.length === 0;
-	}
-	return toolsOpenState[messageId];
-}
+        const openFenceStart = getOpenDataviewFenceStart(content);
+        if (openFenceStart === null) {
+            return { content, showLoading: false, renderContent: true };
+        }
 
-function setToolsOpen(messageId: string, open: boolean) {
-	toolsOpenState[messageId] = open;
-}
+        const visibleContent = content.slice(0, openFenceStart);
+        const hasRenderableContent = visibleContent.trim().length > 0;
+
+        return {
+            content: visibleContent,
+            showLoading: true,
+            renderContent: hasRenderableContent,
+        };
+    }
+
+    async function copyToClipboard(content: string) {
+        await navigator.clipboard.writeText(content);
+        new Notice("Copied to Clipboard");
+    }
+
+    async function redoMessage(messageId: UUIDv7, model: ChatModel) {
+        console.log("todo resend");
+    }
+
+    async function branchOff(messageId: UUIDv7) {
+        console.log("todo branch off");
+    }
+
+    // Track which message pairs have their tools open
+    let toolsOpenState: Record<string, boolean> = $state({});
+
+    function getToolsOpen(
+        messageId: string,
+        assistantMessage: AssistantMessage,
+    ): boolean {
+        // Default: open if no content yet, closed if content exists
+        if (toolsOpenState[messageId] === undefined) {
+            return (
+                !assistantMessage.content ||
+                assistantMessage.content.length === 0
+            );
+        }
+        return toolsOpenState[messageId];
+    }
+
+    function setToolsOpen(messageId: string, open: boolean) {
+        toolsOpenState[messageId] = open;
+    }
 </script>
 
 <div class="relative flex-1 min-h-0 z-20">
     <!-- Scrollable messages area -->
-    <div bind:this={scrollContainer} class="scroll-container h-full overflow-y-auto px-2 py-4">
+    <div
+        bind:this={scrollContainer}
+        class="scroll-container h-full overflow-y-auto px-2 py-4"
+    >
         <div class="w-full max-w-[--file-line-width] mx-auto h-full">
             {#if !messages || messages.length === 0}
                 <!-- Empty state with logo -->
@@ -186,10 +250,16 @@ function setToolsOpen(messageId: string, open: boolean) {
                                     color={"var(--text-accent)"}
                                 />
                             {:else if messagePair.assistantMessage.content || messagePair.assistantMessage.state === AssistantState.cancelled || messagePair.assistantMessage.state === AssistantState.error}
-                                <MarkdownRenderer
-                                    content={renderAssitantAnswer(messagePair.assistantMessage)}
-                                    class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
-                                />
+                                {@const renderInfo = getRenderableAssistantContent(messagePair.assistantMessage)}
+                                {#if renderInfo.renderContent}
+                                    <MarkdownRenderer
+                                        content={renderInfo.content}
+                                        class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
+                                    />
+                                {/if}
+                                {#if renderInfo.showLoading}
+                                    <CircularLoader size={18} />
+                                {/if}
                             {:else if messagePair.assistantMessage.state === AssistantState.idle || messagePair.assistantMessage.state === AssistantState.streaming}
                                 <!-- Show loading dots only if streaming and no content yet (and no tool calls) -->
                                 {#if !messagePair.assistantMessage.toolCalls?.length}
