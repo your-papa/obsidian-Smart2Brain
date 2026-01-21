@@ -1,16 +1,14 @@
-import { getPlugin } from "./state.svelte";
-import { getData } from "./dataStore.svelte";
 import { Notice, type TFile } from "obsidian";
-import { genUUIDv7, dateFromUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
+import type { ThreadHistory } from "../agent/Agent";
 import type { AgentManager } from "../agent/AgentManager";
 import type { ThreadMessage } from "../agent/messages/ThreadMessage";
-import type { ThreadHistory } from "../agent/Agent";
+import type { ThreadError } from "../types/shared";
+import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
+import { getData } from "./dataStore.svelte";
+import { getPlugin } from "./state.svelte";
 
-/** Error info from a failed thread run */
-export interface ThreadError {
-	message: string;
-	name?: string;
-}
+// Re-export for backward compatibility
+export type { ThreadError };
 
 /* -----------------------------------------------------------------------------
  * Shared Types
