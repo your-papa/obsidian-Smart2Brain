@@ -27,6 +27,12 @@ let files: File[] = $state([]);
 
 const models = useAvailableModels();
 
+export function focusEditor() {
+	requestAnimationFrame(() => {
+		markdownEditor?.focus();
+	});
+}
+
 onMount(() => {
 	// Initialize the markdown editor once the container is ready
 	if (editorContainer) {
@@ -47,6 +53,7 @@ function initializeEditor() {
 		value: inputValue,
 		placeholder: "Type a message...",
 		cls: "chat-markdown-editor",
+		enterVimInsertMode: true,
 		onChange: (value) => {
 			inputValue = value;
 		},
