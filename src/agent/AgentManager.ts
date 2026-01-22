@@ -9,7 +9,7 @@ import { createThreadId } from "../utils/threadId";
 import { Agent, type ChooseModelParams, type ThreadHistory } from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
-import { createSystemPrompt } from "./prompts";
+import { BASE_SYSTEM_PROMPT } from "./prompts";
 import {
 	type BuiltInProviderOptions,
 	ProviderAuthError,
@@ -63,6 +63,51 @@ export class AgentManager {
 		this.plugin = plugin;
 		this.chatManager = new ObsidianChatManager(plugin);
 		this.registry = new ProviderRegistry();
+	}
+
+	/**
+	 * Check if an Obsidian plugin is installed and enabled.
+	 * Special case: "math-latex" is always considered installed (built-in rendering).
+	 */
+	isPluginInstalled(pluginId: string): boolean {
+		if (pluginId === "math-latex") return true; // Built-in capability
+		// @ts-ignore - Obsidian plugin API
+		return Boolean(this.plugin.app.plugins?.enabledPlugins?.has(pluginId));
+	}
+
+	/**
+	 * Get list of installed plugins from the supported extensions.
+	 */
+	getInstalledPluginIds(): string[] {
+		const pluginData = getData();
+		return Object.keys(pluginData.pluginPromptExtensions).filter((id) => this.isPluginInstalled(id));
+	}
+
+	/**
+	 * Assembles the full system prompt from base prompt + enabled plugin extensions.
+	 * Only includes extensions for plugins that are both enabled AND installed.
+	 */
+	assembleSystemPrompt(): string {
+		const pluginData = getData();
+		let prompt = pluginData.systemPrompt || BASE_SYSTEM_PROMPT;
+
+		// Append enabled extensions for installed plugins
+		for (const [pluginId, ext] of Object.entries(pluginData.pluginPromptExtensions)) {
+			if (ext.enabled && this.isPluginInstalled(pluginId) && ext.prompt?.trim()) {
+				prompt += "\n\n" + ext.prompt;
+			}
+		}
+
+		return prompt;
+	}
+
+	/**
+	 * Updates the agent's system prompt by reassembling from current settings.
+	 * Call this after changing base prompt or plugin extensions.
+	 */
+	updateSystemPrompt(): void {
+		const assembledPrompt = this.assembleSystemPrompt();
+		this.agent?.setPrompt(assembledPrompt);
 	}
 
 	/**
@@ -250,12 +295,8 @@ export class AgentManager {
 			telemetry,
 		});
 
-		// Check for available plugins to adjust prompt capabilities
-		// @ts-ignore - Dynamic access to plugins
-		const hasChartsPlugin = this.plugin.app.plugins?.enabledPlugins?.has("obsidian-charts");
-
-		// Set prompt
-		this.agent.setPrompt(createSystemPrompt(hasChartsPlugin));
+		// Set assembled prompt (base + enabled plugin extensions)
+		this.agent.setPrompt(this.assembleSystemPrompt());
 
 		const defaultModel = pluginData.getDefaultChatModel();
 		if (defaultModel) {
