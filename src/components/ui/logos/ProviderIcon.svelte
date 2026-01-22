@@ -1,23 +1,22 @@
 <script lang="ts">
 import { AnthropicLogo, OllamaLogo, OpenAILogo } from "@selemondev/svgl-svelte";
 import type { Component } from "svelte";
-import type { RegisteredProvider } from "../../../types/providers";
 import GenericAIIcon from "./GenericAIIcon.svelte";
 
 interface Props {
 	size?: { width?: number; height?: number };
 	className?: string;
-	providerName: RegisteredProvider;
+	providerName: string;
 }
 
 const { size, className, providerName }: Props = $props();
 
 // biome-ignore lint/suspicious/noExplicitAny: Logo components have varying prop types
-const logoMap: Record<RegisteredProvider, Component<Record<string, unknown>>> = {
-	OpenAI: OpenAILogo as Component<Record<string, unknown>>,
-	CustomOpenAI: GenericAIIcon as Component<Record<string, unknown>>,
-	Anthropic: AnthropicLogo as Component<Record<string, unknown>>,
-	Ollama: OllamaLogo as Component<Record<string, unknown>>,
+const logoMap: Record<string, Component<Record<string, unknown>>> = {
+	openai: OpenAILogo as Component<Record<string, unknown>>,
+	"sap-ai-core": GenericAIIcon as Component<Record<string, unknown>>,
+	anthropic: AnthropicLogo as Component<Record<string, unknown>>,
+	ollama: OllamaLogo as Component<Record<string, unknown>>,
 };
 </script>
 

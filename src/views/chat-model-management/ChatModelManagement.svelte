@@ -3,37 +3,35 @@ import SettingContainer from "../../components/settings/SettingContainer.svelte"
 import Button from "../../components/ui/Button.svelte";
 import Dropdown from "../../components/ui/Dropdown.svelte";
 import Text from "../../components/ui/Text.svelte";
-import { createModelListQuery, invalidateProviderState } from "../../lib/query";
-import type SecondBrainPlugin from "../../main";
+import { createModelDiscoveryQuery, invalidateProviderState } from "../../lib/query";
+import type { ChatModelConfig } from "../../providers/types";
 import { getData } from "../../stores/dataStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import type { GenModelConfig, GenProviders } from "../../types/providers";
 import type { ChatModelManagementModal } from "./ChatModelManagement";
 
 interface Props {
 	modal: ChatModelManagementModal;
-	provider: GenProviders;
-	config?: GenModelConfig;
+	provider: string;
+	config?: ChatModelConfig;
 }
 
 const chatModelSettings = {
-	keys: ["contextWindow", "temperature"] as (keyof GenModelConfig)[],
+	keys: ["contextWindow", "temperature"] as (keyof ChatModelConfig)[],
 	defaults: {
 		contextWindow: 8600,
 		temperature: 0.2,
-	} as GenModelConfig,
+	} as ChatModelConfig,
 };
 
 let { modal, provider, config }: Props = $props();
 
-const plugin: SecondBrainPlugin = getPlugin();
 const data = getData();
 
-const query = createModelListQuery(() => provider);
+const query = createModelDiscoveryQuery(() => provider);
 
-let { data: models, isPending, isError } = $derived(query);
+let { data: discoveredModels, isPending, isError } = $derived(query);
+let models = $derived(discoveredModels?.chat ?? []);
 
-let genModels = $derived.by<Map<string, GenModelConfig>>(() => {
+let genModels = $derived.by<Map<string, ChatModelConfig>>(() => {
 	const confGenModels = data.getGenModels(provider);
 
 	const allowedKeys = new Set(
@@ -46,13 +44,13 @@ let genModels = $derived.by<Map<string, GenModelConfig>>(() => {
 });
 
 let configuredModels: string[] = $derived(
-	models?.filter((model) => Array.from(data.getGenModels(provider).keys()).includes(model)) ?? [],
+	models.filter((model: string) => Array.from(data.getGenModels(provider).keys()).includes(model)),
 );
-let selectedModel = $derived(!isPending && !isError && models ? models[0] : configuredModels[0]);
+let selectedModel = $derived(!isPending && !isError && models.length > 0 ? models[0] : configuredModels[0]);
 
-let unconfiguredModels: string[] = $derived(models?.filter((model) => !configuredModels.includes(model)) ?? []);
+let unconfiguredModels: string[] = $derived(models.filter((model: string) => !configuredModels.includes(model)));
 
-let genModelConfig: GenModelConfig = $state(chatModelSettings.defaults);
+let genModelConfig: ChatModelConfig = $state(chatModelSettings.defaults);
 const isModelConfigured: () => boolean = () => configuredModels.includes(selectedModel!);
 
 function handleDeleteModel(modelName: string) {
@@ -145,8 +143,8 @@ function handleSaveModel() {
         <SettingContainer name={key} desc={key}>
             <Text
                 inputType="number"
-                bind:value={genModelConfig[key]}
-                placeholder={chatModelSettings.defaults[key].toString()}
+                bind:value={genModelConfig[key] as number}
+                placeholder={chatModelSettings.defaults[key]?.toString() ?? ""}
             />
         </SettingContainer>
     {/each}

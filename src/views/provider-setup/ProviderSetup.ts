@@ -1,16 +1,15 @@
 import { App, Modal } from "obsidian";
-import ProviderSetupComponent from "./ProviderSetup.svelte";
-import ModalProvider from "../../lib/QueryClientProvider.svelte";
 import { mount } from "svelte";
-import type { RegisteredProvider } from "../../types/providers";
+import ModalProvider from "../../lib/QueryClientProvider.svelte";
 import type SecondBrainPlugin from "../../main";
+import ProviderSetupComponent from "./ProviderSetup.svelte";
 
 export class ProviderSetupModal extends Modal {
 	component!: ProviderSetupComponent;
 	plugin: SecondBrainPlugin;
-	selectedProvider: RegisteredProvider;
+	selectedProvider: string;
 
-	constructor(plugin: SecondBrainPlugin, selectedProvider: RegisteredProvider) {
+	constructor(plugin: SecondBrainPlugin, selectedProvider: string) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.setTitle(`Setup ${selectedProvider}`);
@@ -22,7 +21,7 @@ export class ProviderSetupModal extends Modal {
 			ModalProvider<{
 				modal: ProviderSetupModal;
 				plugin: SecondBrainPlugin;
-				selectedProvider: RegisteredProvider;
+				selectedProvider: string;
 			}>,
 			{
 				target: this.contentEl,

@@ -3,15 +3,9 @@ import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
 import ProviderIcon from "../../components/ui/logos/ProviderIcon.svelte";
+import type { ChatModelConfig, EmbedModelConfig } from "../../providers/types";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
-import type {
-	EmbedModelConfig,
-	EmbedProviders,
-	GenModelConfig,
-	GenProviders,
-	RegisteredProvider,
-} from "../../types/providers";
 import { ChatModelManagementModal } from "../../views/chat-model-management/ChatModelManagement";
 import { EmbedModelManagementModal } from "../../views/embed-model-management/EmbedModelManagement";
 
@@ -21,20 +15,20 @@ const plugin = getPlugin();
 let configuredProviders = $derived(data.getConfiguredProviders());
 
 // Helper to check if provider supports generation
-function isGenProvider(provider: RegisteredProvider): provider is GenProviders {
-	const genProviders: RegisteredProvider[] = ["OpenAI", "CustomOpenAI", "Ollama", "Anthropic"];
+function isGenProvider(provider: string): boolean {
+	const genProviders: string[] = ["openai", "ollama", "anthropic", "sap-ai-core"];
 	return genProviders.includes(provider);
 }
 
 // Helper to check if provider supports embedding
-function isEmbedProvider(provider: RegisteredProvider): provider is EmbedProviders {
-	const embedProviders: RegisteredProvider[] = ["OpenAI", "CustomOpenAI", "Ollama"];
+function isEmbedProvider(provider: string): boolean {
+	const embedProviders: string[] = ["openai", "ollama"];
 	return embedProviders.includes(provider);
 }
 
 // Get all chat models grouped by provider
 let chatModelsByProvider = $derived.by(() => {
-	const result: { provider: GenProviders; models: Map<string, GenModelConfig> }[] = [];
+	const result: { provider: string; models: Map<string, ChatModelConfig> }[] = [];
 	for (const provider of configuredProviders) {
 		if (isGenProvider(provider)) {
 			const models = data.getGenModels(provider);
@@ -48,7 +42,7 @@ let chatModelsByProvider = $derived.by(() => {
 
 // Get all embed models grouped by provider
 let embedModelsByProvider = $derived.by(() => {
-	const result: { provider: EmbedProviders; models: Map<string, EmbedModelConfig> }[] = [];
+	const result: { provider: string; models: Map<string, EmbedModelConfig> }[] = [];
 	for (const provider of configuredProviders) {
 		if (isEmbedProvider(provider)) {
 			const models = data.getEmbedModels(provider);

@@ -4,7 +4,7 @@ import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
-import type { RegisteredProvider } from "../types/providers";
+
 import { createThreadId } from "../utils/threadId";
 import { Agent, type ChooseModelParams, type ThreadHistory } from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
@@ -24,8 +24,41 @@ import { createGetPropertiesTool } from "./tools/getProperties";
 import { createReadNoteTool } from "./tools/readNote";
 import { createSearchNotesTool } from "./tools/searchNotes";
 
+// New provider system imports
+import {
+	type BuiltInProviderId,
+	ProviderAuthError as NewProviderAuthError,
+	ProviderEndpointError as NewProviderEndpointError,
+	type RuntimeAuthState,
+	type RuntimeFieldBasedAuthState,
+	getBuiltInProvider,
+	isBuiltInProvider,
+} from "../providers/index";
+
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { TFile } from "obsidian";
+
+/**
+ * Converts BuiltInProviderOptions to RuntimeFieldBasedAuthState.
+ */
+function convertToRuntimeAuthState(options: BuiltInProviderOptions): RuntimeFieldBasedAuthState {
+	const values: Record<string, string> = {};
+
+	if (options.apiKey) {
+		values.apiKey = options.apiKey;
+	}
+	if (options.baseUrl) {
+		values.baseUrl = options.baseUrl;
+	}
+	if (options.headers) {
+		values.headers = typeof options.headers === "string" ? options.headers : JSON.stringify(options.headers);
+	}
+
+	return {
+		type: "field-based",
+		values,
+	};
+}
 
 /** Result of provider authentication validation */
 export type AuthValidationResult = { success: true } | { success: false; message: string };
@@ -105,7 +138,7 @@ export class AgentManager {
 		// Append enabled extensions for enabled plugins
 		for (const [pluginId, ext] of Object.entries(pluginData.pluginPromptExtensions)) {
 			if (ext.enabled && this.isPluginEnabled(pluginId) && ext.prompt?.trim()) {
-				prompt += "\n\n" + ext.prompt;
+				prompt += `\n\n${ext.prompt}`;
 			}
 		}
 
@@ -122,54 +155,118 @@ export class AgentManager {
 	}
 
 	/**
+	 * Get available models for a provider by discovering them from the API.
+	 * @returns Array of available chat model names
+	 */
+	async getAvailableModels(providerId: string): Promise<string[]> {
+		try {
+			if (!providerId) return [];
+
+			// First, try to get models from the runtime registry
+			// (these are models that have been configured and validated)
+			if (this.registry.hasProvider(providerId)) {
+				return this.registry.listChatModels(providerId);
+			}
+
+			// Use model discovery from provider definition
+			const providerDef = getBuiltInProvider(providerId);
+			if (providerDef) {
+				const pluginData = getData();
+				const resolvedAuth = pluginData.getResolvedAuthState(providerId);
+				if (!resolvedAuth) {
+					return [];
+				}
+
+				try {
+					const discovered = await providerDef.discoverModels(resolvedAuth);
+					return discovered.chat;
+				} catch (error) {
+					console.warn(`Model discovery failed for ${providerId}:`, error);
+					return [];
+				}
+			}
+
+			return [];
+		} catch (error) {
+			console.error("Smart Second Brain: Error fetching available models", error);
+			return [];
+		}
+	}
+
+	/**
 	 * Configures a specific provider on the given registry.
 	 */
 	private async configureProviderOnRegistry(
 		registry: ProviderRegistry,
-		provider: RegisteredProvider,
+		providerId: string,
 		options: BuiltInProviderOptions,
 	): Promise<void> {
-		switch (provider) {
-			case "OpenAI":
+		const providerDef = getBuiltInProvider(providerId);
+
+		if (!providerDef) {
+			throw new Error(`Unknown provider: ${providerId}`);
+		}
+
+		// Use registry methods based on provider ID
+		switch (providerId) {
+			case "openai":
 				await registry.useOpenAI(options);
 				break;
-			case "CustomOpenAI":
-				await registry.useOpenAI(options);
-				break;
-			case "Anthropic":
+			case "anthropic":
 				await registry.useAnthropic(options);
 				break;
-			case "Ollama":
+			case "ollama":
 				await registry.useOllama(options);
 				break;
+			case "sap-ai-core":
+				// SAP AI Core uses OpenAI-compatible API
+				await registry.useOpenAI(options);
+				break;
 			default:
-				throw new Error(`Unsupported provider: ${provider}`);
+				throw new Error(`Unsupported provider: ${providerId}`);
 		}
 	}
 
 	/**
 	 * Configures a provider on the main registry.
 	 */
-	private async configureRegistry(provider: RegisteredProvider, options: BuiltInProviderOptions): Promise<void> {
+	private async configureRegistry(provider: string, options: BuiltInProviderOptions): Promise<void> {
 		await this.configureProviderOnRegistry(this.registry, provider, options);
 	}
 
 	/**
 	 * Tests and configures a provider on the actual registry.
 	 * Returns an AuthValidationResult indicating success or failure with a message.
+	 *
+	 * This method now uses the new provider's validateAuth method for validation,
+	 * which provides more accurate error messages and consistent validation logic.
 	 */
-	async testProviderConfig(
-		provider: RegisteredProvider,
-		options: BuiltInProviderOptions,
-	): Promise<AuthValidationResult> {
+	/**
+	 * @deprecated Use validateProviderAuth() with new provider IDs instead.
+	 */
+	async testProviderConfig(providerId: string, options: BuiltInProviderOptions): Promise<AuthValidationResult> {
+		const providerDef = getBuiltInProvider(providerId);
+
+		if (!providerDef) {
+			return { success: false, message: `Unknown provider: ${providerId}` };
+		}
+
+		const authState = convertToRuntimeAuthState(options);
+
 		try {
-			await this.configureProviderOnRegistry(this.registry, provider, options);
+			const validationResult = await providerDef.validateAuth(authState);
+
+			if (!validationResult.valid) {
+				return { success: false, message: validationResult.error };
+			}
+
+			await this.configureProviderOnRegistry(this.registry, providerId, options);
 			return { success: true };
 		} catch (error) {
-			if (error instanceof ProviderAuthError) {
+			if (error instanceof NewProviderAuthError || error instanceof ProviderAuthError) {
 				return { success: false, message: "Invalid API key" };
 			}
-			if (error instanceof ProviderEndpointError) {
+			if (error instanceof NewProviderEndpointError || error instanceof ProviderEndpointError) {
 				return {
 					success: false,
 					message: "Invalid base URL or endpoint unreachable",
@@ -178,10 +275,56 @@ export class AgentManager {
 			if (error instanceof ProviderRegistryError) {
 				return { success: false, message: error.message };
 			}
+			if (error instanceof Error) {
+				return { success: false, message: error.message };
+			}
 			return {
 				success: false,
 				message: "Provider configuration failed",
 			};
+		}
+	}
+
+	/**
+	 * Validates provider authentication using the new provider ID system.
+	 *
+	 * This method accepts new lowercase provider IDs (e.g., "openai", "anthropic")
+	 * and RuntimeAuthState directly, without requiring legacy type conversions.
+	 *
+	 * @param providerId - The provider ID (e.g., "openai", "anthropic", "ollama")
+	 * @param auth - The runtime auth state with resolved secrets
+	 * @returns AuthValidationResult indicating success or failure
+	 */
+	async validateProviderAuth(providerId: string, auth: RuntimeAuthState): Promise<AuthValidationResult> {
+		// Get provider definition
+		const providerDef = getBuiltInProvider(providerId);
+
+		if (!providerDef) {
+			return { success: false, message: `Unknown provider: ${providerId}` };
+		}
+
+		try {
+			const validationResult = await providerDef.validateAuth(auth);
+
+			if (!validationResult.valid) {
+				return { success: false, message: validationResult.error };
+			}
+
+			return { success: true };
+		} catch (error) {
+			if (error instanceof NewProviderAuthError || error instanceof ProviderAuthError) {
+				return { success: false, message: "Invalid API key" };
+			}
+			if (error instanceof NewProviderEndpointError || error instanceof ProviderEndpointError) {
+				return { success: false, message: "Invalid base URL or endpoint unreachable" };
+			}
+			if (error instanceof ProviderRegistryError) {
+				return { success: false, message: error.message };
+			}
+			if (error instanceof Error) {
+				return { success: false, message: error.message };
+			}
+			return { success: false, message: "Provider configuration failed" };
 		}
 	}
 
@@ -410,22 +553,6 @@ export class AgentManager {
 			if (signal?.aborted) {
 				console.log("Smart Second Brain: Stream aborted by user");
 			}
-		}
-	}
-
-	async getAvailableModels(providerName: RegisteredProvider): Promise<string[]> {
-		try {
-			if (!providerName) return [];
-
-			// Provider might be configured but not connected (e.g., Ollama not running)
-			if (!this.registry.hasProvider(providerName)) {
-				return [];
-			}
-
-			return this.registry.listChatModels(providerName);
-		} catch (error) {
-			console.error("Smart Second Brain: Error fetching available models", error);
-			return [];
 		}
 	}
 

@@ -1,6 +1,5 @@
+import { BUILT_IN_PROVIDER_IDS } from "../providers/index";
 import type { PluginData } from "../types/plugin";
-import { type RegisteredProvider, registeredProviders } from "../types/providers";
-import type { GetProviderConfig, GetStoredProviderAuth, ProviderConfigs } from "../types/providers";
 import { DEFAULT_PROVIDER_CONFIGS, DEFAULT_SETTINGS } from "./dataStore.svelte";
 
 // Language type for assistant language selection
@@ -266,10 +265,16 @@ function validateModelMap<T>(
 /**
  * Validates the provider auth configuration
  */
-function validateProviderAuth<T extends RegisteredProvider>(provider: T, value: unknown): ValidationResult {
+function validateProviderAuth(provider: string, value: unknown): ValidationResult {
 	const errors: string[] = [];
 	const warnings: string[] = [];
 	const validatedAuth: Record<string, string> = {};
+
+	const defaultConfig = DEFAULT_PROVIDER_CONFIGS[provider as keyof typeof DEFAULT_PROVIDER_CONFIGS];
+	if (!defaultConfig) {
+		warnings.push(`Unknown provider ${provider}, skipping auth validation.`);
+		return { isValid: true, errors, warnings, data: {} };
+	}
 
 	if (!value || typeof value !== "object") {
 		warnings.push(`Provider auth for ${provider} is missing or invalid, using defaults.`);
@@ -277,12 +282,12 @@ function validateProviderAuth<T extends RegisteredProvider>(provider: T, value: 
 			isValid: true,
 			errors,
 			warnings,
-			data: { ...DEFAULT_PROVIDER_CONFIGS[provider].providerAuth },
+			data: { ...defaultConfig.providerAuth },
 		};
 	}
 
 	const config = value as Record<string, unknown>;
-	const defaultAuth = DEFAULT_PROVIDER_CONFIGS[provider].providerAuth;
+	const defaultAuth = defaultConfig.providerAuth;
 
 	// Validate each auth field
 	for (const [key, defaultValue] of Object.entries(defaultAuth)) {
@@ -303,16 +308,22 @@ function validateProviderAuth<T extends RegisteredProvider>(provider: T, value: 
 		isValid: true,
 		errors,
 		warnings,
-		data: validatedAuth as GetStoredProviderAuth<T>,
+		data: validatedAuth,
 	};
 }
 
 /**
  * Validates a single provider configuration
  */
-function validateProviderConfig<T extends RegisteredProvider>(provider: T, value: unknown): ValidationResult {
+function validateProviderConfig(provider: string, value: unknown): ValidationResult {
 	const errors: string[] = [];
 	const warnings: string[] = [];
+
+	const defaultConfig = DEFAULT_PROVIDER_CONFIGS[provider as keyof typeof DEFAULT_PROVIDER_CONFIGS];
+	if (!defaultConfig) {
+		warnings.push(`Unknown provider ${provider}, skipping.`);
+		return { isValid: true, errors, warnings, data: null };
+	}
 
 	if (!value || typeof value !== "object") {
 		errors.push(`Provider config for ${provider} must be an object`);
@@ -320,13 +331,12 @@ function validateProviderConfig<T extends RegisteredProvider>(provider: T, value
 			isValid: true,
 			errors,
 			warnings: [...warnings, `Using default config for ${provider}`],
-			data: DEFAULT_PROVIDER_CONFIGS[provider],
+			data: defaultConfig,
 		};
 	}
 
-	const config = value as any;
-	const defaultConfig = DEFAULT_PROVIDER_CONFIGS[provider];
-	const validatedConfig: any = {};
+	const config = value as Record<string, unknown>;
+	const validatedConfig: Record<string, unknown> = {};
 
 	// Validate isConfigured
 	const configuredValidation = validateBoolean(config.isConfigured, `${provider}.isConfigured`, false);
@@ -368,7 +378,7 @@ function validateProviderConfig<T extends RegisteredProvider>(provider: T, value
 		isValid: true,
 		errors: [],
 		warnings,
-		data: validatedConfig as GetProviderConfig<T>,
+		data: validatedConfig,
 	};
 }
 
@@ -378,7 +388,7 @@ function validateProviderConfig<T extends RegisteredProvider>(provider: T, value
 function validateProviderConfigs(value: unknown): ValidationResult {
 	const errors: string[] = [];
 	const warnings: string[] = [];
-	const validatedConfigs: ProviderConfigs = {} as ProviderConfigs;
+	const validatedConfigs: typeof DEFAULT_PROVIDER_CONFIGS = {} as typeof DEFAULT_PROVIDER_CONFIGS;
 
 	if (!value || typeof value !== "object") {
 		warnings.push("Provider config is missing or invalid, using defaults");
@@ -390,18 +400,19 @@ function validateProviderConfigs(value: unknown): ValidationResult {
 		};
 	}
 
-	const configs = value as any;
+	const configs = value as Record<string, unknown>;
 
 	// Validate each registered provider
-	for (const provider of registeredProviders) {
+	for (const provider of BUILT_IN_PROVIDER_IDS) {
 		const validation = validateProviderConfig(provider, configs[provider]);
-		if (validation.isValid) {
-			validatedConfigs[provider] = validation.data;
+		if (validation.isValid && validation.data) {
+			(validatedConfigs as Record<string, unknown>)[provider] = validation.data;
 			warnings.push(...validation.warnings);
 		} else {
 			errors.push(...validation.errors);
 			warnings.push(`Using default config for ${provider} due to validation errors`);
-			validatedConfigs[provider] = DEFAULT_PROVIDER_CONFIGS[provider];
+			(validatedConfigs as Record<string, unknown>)[provider] =
+				DEFAULT_PROVIDER_CONFIGS[provider as keyof typeof DEFAULT_PROVIDER_CONFIGS];
 		}
 	}
 
@@ -409,7 +420,7 @@ function validateProviderConfigs(value: unknown): ValidationResult {
 		isValid: true, // We can always fall back to defaults
 		errors,
 		warnings,
-		data: validatedConfigs as ProviderConfigs,
+		data: validatedConfigs,
 	};
 }
 

@@ -1,8 +1,32 @@
+import type { BuiltInProviderId, ChatModelConfig, EmbedModelConfig } from "../providers/index";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import type { UUIDv7 } from "../utils/uuid7Validator";
-import type { ProviderConfigs } from "./providers";
 
 export type SearchAlgorithm = "grep" | "omnisearch" | "embeddings";
+
+/**
+ * Legacy provider auth stored format.
+ */
+interface LegacyStoredProviderAuth {
+	apiKeyId?: string;
+	baseUrl?: string;
+	headers?: Record<string, string>;
+}
+
+/**
+ * Legacy provider configuration structure.
+ */
+interface LegacyProviderConfig {
+	isConfigured: boolean;
+	providerAuth: LegacyStoredProviderAuth;
+	embedModels: Map<string, EmbedModelConfig>;
+	genModels: Map<string, ChatModelConfig>;
+}
+
+/**
+ * Provider configurations for all built-in providers.
+ */
+export type ProviderConfigs = Record<BuiltInProviderId, LegacyProviderConfig>;
 
 /**
  * Configuration for a plugin-specific prompt extension.

@@ -85,19 +85,19 @@ function onValueChange(v: string) {
                             label={opt.label}
                         >
                             {#snippet children({ selected })}
-                                {#if opt.chatModel.provider === "OpenAI"}
+                                {#if opt.chatModel.provider === "openai"}
                                     <OpenAILogo
                                         style={"fill: var(--text-normal)"}
                                         height={16}
                                         width={16}
                                     />
-                                {:else if opt.chatModel.provider === "Anthropic"}
+                                {:else if opt.chatModel.provider === "anthropic"}
                                     <AnthropicLogo
                                         style={"fill: var(--text-normal)"}
                                         height={16}
                                         width={16}
                                     />
-                                {:else if opt.chatModel.provider === "Ollama"}
+                                {:else if opt.chatModel.provider === "ollama"}
                                     <OllamaLogo
                                         style={"fill: var(--text-normal)"}
                                         height={16}

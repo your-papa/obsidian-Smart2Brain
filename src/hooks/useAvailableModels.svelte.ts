@@ -2,7 +2,6 @@ import { createProviderStateQuery, invalidateAllProviders } from "../lib/query";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
 import { getPlugin } from "../stores/state.svelte";
-import type { RegisteredProvider } from "../types/providers";
 
 export interface ModelOption {
 	value: string;
@@ -29,10 +28,11 @@ export class AvailableModels {
 		const out: ChatModel[] = [];
 		this.#providers.forEach((provider, idx) => {
 			const state = this.#providerQueries[idx]?.data;
-			const models: string[] = state?.models ?? [];
+			// models is now DiscoveredModels { chat: string[], embedding: string[] }
+			const discoveredModels = state?.models?.chat ?? [];
 			const confModels = this.#data.getGenModels(provider);
 			for (const [modelName, modelConfig] of confModels.entries()) {
-				if (models.includes(modelName)) {
+				if (discoveredModels.includes(modelName)) {
 					out.push({ model: modelName, provider, modelConfig });
 				}
 			}
@@ -42,7 +42,7 @@ export class AvailableModels {
 
 	// Providers that are configured but not available (auth failed)
 	#unavailableProviders = $derived.by(() => {
-		const unavailable: RegisteredProvider[] = [];
+		const unavailable: string[] = [];
 		this.#providers.forEach((provider, idx) => {
 			const state = this.#providerQueries[idx]?.data;
 			if (state && !state.auth.success) {
@@ -61,7 +61,7 @@ export class AvailableModels {
 		})),
 	);
 
-	get providers(): RegisteredProvider[] {
+	get providers(): string[] {
 		return this.#providers;
 	}
 
@@ -81,7 +81,7 @@ export class AvailableModels {
 		return this.#modelOptions;
 	}
 
-	get unavailableProviders(): RegisteredProvider[] {
+	get unavailableProviders(): string[] {
 		return this.#unavailableProviders;
 	}
 

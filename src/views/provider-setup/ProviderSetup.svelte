@@ -1,19 +1,18 @@
 <script lang="ts">
+import { mount, onMount } from "svelte";
 import AuthConfigFields from "../../components/settings/AuthConfigFields.svelte";
 import Button from "../../components/ui/Button.svelte";
-import type { ProviderSetupModal } from "./ProviderSetup";
-import { getData } from "../../stores/dataStore.svelte";
-import type SecondBrainPlugin from "../../main";
 import ProviderIcon from "../../components/ui/logos/ProviderIcon.svelte";
-import { mount, onMount } from "svelte";
-import { icon } from "../../utils/utils";
-import type { RegisteredProvider } from "../../types/providers";
 import { createAuthStateQuery, invalidateProviderState } from "../../lib/query";
+import type SecondBrainPlugin from "../../main";
+import { getData } from "../../stores/dataStore.svelte";
+import { icon } from "../../utils/utils";
+import type { ProviderSetupModal } from "./ProviderSetup";
 
 interface Props {
 	modal: ProviderSetupModal;
 	plugin: SecondBrainPlugin;
-	selectedProvider: RegisteredProvider;
+	selectedProvider: string;
 }
 
 const { modal, plugin, selectedProvider }: Props = $props();
@@ -23,7 +22,7 @@ const data = getData();
 const query = createAuthStateQuery(() => selectedProvider);
 
 function handleAddProvider() {
-	data.toggleProviderIsConfigured(selectedProvider);
+	data.setProviderConfigured(selectedProvider, true);
 	invalidateProviderState(selectedProvider);
 	modal.close();
 }
