@@ -4,7 +4,7 @@
 		OllamaLogo,
 		OpenAILogo,
 	} from "@selemondev/svgl-svelte";
-	import type { TFolder } from "obsidian";
+	import { Notice, type TFolder } from "obsidian";
 	import { t } from "svelte-i18n";
 	import { ExcludeFoldersModal } from "../../components/modal/ExcludeFoldersModal";
 	import FolderSuggest from "../../components/modal/FolderSuggest.svelte";
@@ -44,13 +44,31 @@
 		modal.open();
 	}
 
-	function toggleExtension(pluginId: string, enabled: boolean) {
-		pluginData.setPluginExtensionEnabled(pluginId, enabled);
+	function toggleExtension(pluginId: string, newEnabled: boolean) {
+		const installed = plugin.agentManager?.isPluginInstalled(pluginId) ?? false;
+		const enabled = plugin.agentManager?.isPluginEnabled(pluginId) ?? false;
+		const ext = pluginData.getPluginExtension(pluginId);
+		const displayName = ext?.displayName ?? pluginId;
+
+		if (!installed) {
+			new Notice(`Please install the ${displayName} plugin first.`);
+			return;
+		}
+		if (!enabled) {
+			new Notice(`Please enable the ${displayName} plugin in Obsidian settings first.`);
+			return;
+		}
+
+		pluginData.setPluginExtensionEnabled(pluginId, newEnabled);
 		plugin.agentManager?.updateSystemPrompt();
 	}
 
 	function isPluginInstalled(pluginId: string): boolean {
 		return plugin.agentManager?.isPluginInstalled(pluginId) ?? false;
+	}
+
+	function isPluginEnabled(pluginId: string): boolean {
+		return plugin.agentManager?.isPluginEnabled(pluginId) ?? false;
 	}
 
 	function suggestFolders(): TFolder[] {
@@ -294,24 +312,29 @@
 	</div>
 	{#each pluginExtensions as ext (ext.pluginId)}
 		{@const installed = isPluginInstalled(ext.pluginId)}
+		{@const enabled = isPluginEnabled(ext.pluginId)}
 		<div class="plugin-extension-item">
 			<div class="plugin-extension-info">
 				<div class="plugin-extension-header">
 					<span class="plugin-extension-name">{ext.displayName}</span>
-					{#if installed}
-						<span class="plugin-extension-badge installed"
-							>Installed</span
-						>
-					{:else}
+					{#if !installed}
 						<span class="plugin-extension-badge not-installed"
 							>Not installed</span
+						>
+					{:else if !enabled}
+						<span class="plugin-extension-badge not-enabled"
+							>Not enabled</span
+						>
+					{:else}
+						<span class="plugin-extension-badge enabled"
+							>Enabled</span
 						>
 					{/if}
 				</div>
 			</div>
 			<div class="plugin-extension-controls">
 				<Toggle
-					isToggled={ext.enabled}
+					isToggled={ext.enabled && enabled}
 					changeFunc={() =>
 						toggleExtension(ext.pluginId, !ext.enabled)}
 				/>
@@ -403,11 +426,12 @@
 		font-weight: 500;
 	}
 
-	.plugin-extension-badge.installed {
+	.plugin-extension-badge.enabled {
 		background: var(--background-modifier-success);
 		color: var(--text-on-accent);
 	}
 
+	.plugin-extension-badge.not-enabled,
 	.plugin-extension-badge.not-installed {
 		background: var(--background-modifier-border);
 		color: var(--text-muted);

@@ -72,7 +72,9 @@ function handleResetToDefault() {
 	<p class="plugin-extension-description">
 		Customize the prompt instructions for the {displayName} plugin.
 		{#if !plugin.agentManager.isPluginInstalled(pluginId)}
-			<span class="text-[--text-warning]">(Plugin not installed)</span>
+			<span class="text-[--text-error]">(Plugin not installed)</span>
+		{:else if !plugin.agentManager.isPluginEnabled(pluginId)}
+			<span class="text-[--text-warning]">(Plugin not enabled)</span>
 		{/if}
 	</p>
 	<div
