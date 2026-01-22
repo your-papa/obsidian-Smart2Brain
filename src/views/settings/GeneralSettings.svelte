@@ -45,7 +45,8 @@
 	}
 
 	function toggleExtension(pluginId: string, newEnabled: boolean) {
-		const installed = plugin.agentManager?.isPluginInstalled(pluginId) ?? false;
+		const installed =
+			plugin.agentManager?.isPluginInstalled(pluginId) ?? false;
 		const enabled = plugin.agentManager?.isPluginEnabled(pluginId) ?? false;
 		const ext = pluginData.getPluginExtension(pluginId);
 		const displayName = ext?.displayName ?? pluginId;
@@ -55,7 +56,9 @@
 			return;
 		}
 		if (!enabled) {
-			new Notice(`Please enable the ${displayName} plugin in Obsidian settings first.`);
+			new Notice(
+				`Please enable the ${displayName} plugin in Obsidian settings first.`,
+			);
 			return;
 		}
 
