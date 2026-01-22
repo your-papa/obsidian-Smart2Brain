@@ -74,6 +74,13 @@
 		return plugin.agentManager?.isPluginEnabled(pluginId) ?? false;
 	}
 
+	function openPluginPage(pluginId: string) {
+		// math-latex is built-in, no plugin page
+		if (pluginId === "math-latex") return;
+		// Open the community plugins page for this plugin
+		window.open(`obsidian://show-plugin?id=${pluginId}`);
+	}
+
 	function suggestFolders(): TFolder[] {
 		return plugin.app.vault.getAllFolders(true);
 	}
@@ -321,13 +328,21 @@
 				<div class="plugin-extension-header">
 					<span class="plugin-extension-name">{ext.displayName}</span>
 					{#if !installed}
-						<span class="plugin-extension-badge not-installed"
-							>Not installed</span
+						<button
+							class="plugin-extension-badge not-installed clickable"
+							onclick={() => openPluginPage(ext.pluginId)}
+							title="Click to install"
 						>
+							Not installed
+						</button>
 					{:else if !enabled}
-						<span class="plugin-extension-badge not-enabled"
-							>Not enabled</span
+						<button
+							class="plugin-extension-badge not-enabled clickable"
+							onclick={() => openPluginPage(ext.pluginId)}
+							title="Click to enable"
 						>
+							Not enabled
+						</button>
 					{:else}
 						<span class="plugin-extension-badge enabled"
 							>Enabled</span
@@ -438,6 +453,17 @@
 	.plugin-extension-badge.not-installed {
 		background: var(--background-modifier-border);
 		color: var(--text-muted);
+	}
+
+	.plugin-extension-badge.clickable {
+		cursor: pointer;
+		border: none;
+		transition: opacity 0.15s ease;
+	}
+
+	.plugin-extension-badge.clickable:hover {
+		opacity: 0.8;
+		text-decoration: underline;
 	}
 
 	.plugin-extension-controls {
