@@ -120,28 +120,100 @@ The chat supports MathJax rendering.
 - **IMPORTANT**: Do NOT wrap the math in markdown code blocks (like \`\`\`latex or \`). The renderer needs the raw $ or $$ delimiters to detect and render the math.`;
 
 /**
+ * Default prompt extension for TaskNotes plugin.
+ * TaskNotes is a task management plugin where each task is a separate Markdown note.
+ */
+export const DEFAULT_TASKNOTES_PROMPT = `# TaskNotes Integration
+The user has the TaskNotes plugin installed. TaskNotes follows a "one note per task" principle where each task is a Markdown file with structured YAML frontmatter.
+
+## Task Structure
+Tasks are stored as individual Markdown notes with YAML frontmatter properties:
+\`\`\`yaml
+title: "Complete documentation"
+status: "in-progress"        # Common: todo, in-progress, done, cancelled
+due: "2024-01-20"            # ISO date format
+priority: "high"             # Common: low, medium, high, critical
+contexts: ["work"]           # Tags/contexts for the task
+projects: ["[[Website Redesign]]"]  # Linked projects (wiki links)
+timeEstimate: 120            # Minutes
+timeEntries:                 # Time tracking entries
+  - startTime: "2024-01-15T10:30:00Z"
+    endTime: "2024-01-15T11:15:00Z"
+\`\`\`
+
+## Recurring Tasks
+Recurring tasks use RRULE format:
+\`\`\`yaml
+title: "Weekly meeting"
+recurrence: "FREQ=WEEKLY;BYDAY=MO"
+complete_instances: ["2024-01-08"]  # Per-instance completion tracking
+\`\`\`
+
+## Querying Tasks
+TaskNotes integrates with Dataview. Use Dataview queries to list and filter tasks:
+
+### List overdue tasks
+\`\`\`dataview
+TABLE status, due, priority
+FROM "TaskNotes"
+WHERE status != "done" AND due < date(today)
+SORT due asc
+LIMIT 10
+\`\`\`
+
+### List tasks by priority
+\`\`\`dataview
+TABLE status, due, contexts
+FROM "TaskNotes"
+WHERE status = "todo" AND priority = "high"
+SORT due asc
+LIMIT 10
+\`\`\`
+
+### List tasks for a project
+\`\`\`dataview
+TABLE status, due, priority
+FROM "TaskNotes"
+WHERE contains(projects, "[[Project Name]]")
+SORT priority desc, due asc
+LIMIT 10
+\`\`\`
+
+## Tips
+- Task files are typically stored in a \`TaskNotes\` folder (configurable by user)
+- Use \`get_properties\` to discover the actual property names used (they may be customized)
+- Use \`search_notes\` with terms like "task", "todo", or the TaskNotes folder to find task notes
+- When creating task-related queries, verify the folder structure and property names first`;
+
+/**
  * Registry of supported plugins with their default prompt extensions.
  * pluginId must match the Obsidian plugin ID used in app.plugins.enabledPlugins
  */
 export const DEFAULT_PLUGIN_EXTENSIONS: Record<string, PluginPromptExtension> = {
-  dataview: {
-    pluginId: "dataview",
-    displayName: "Dataview",
-    enabled: true,
-    prompt: DEFAULT_DATAVIEW_PROMPT,
-  },
-  "obsidian-charts": {
-    pluginId: "obsidian-charts",
-    displayName: "Obsidian Charts",
-    enabled: true,
-    prompt: DEFAULT_CHARTS_PROMPT,
-  },
-  "math-latex": {
-    pluginId: "math-latex",
-    displayName: "Math / LaTeX",
-    enabled: true,
-    prompt: DEFAULT_MATH_PROMPT,
-  },
+	dataview: {
+		pluginId: "dataview",
+		displayName: "Dataview",
+		enabled: true,
+		prompt: DEFAULT_DATAVIEW_PROMPT,
+	},
+	"obsidian-charts": {
+		pluginId: "obsidian-charts",
+		displayName: "Obsidian Charts",
+		enabled: true,
+		prompt: DEFAULT_CHARTS_PROMPT,
+	},
+	"math-latex": {
+		pluginId: "math-latex",
+		displayName: "Math / LaTeX",
+		enabled: true,
+		prompt: DEFAULT_MATH_PROMPT,
+	},
+	tasknotes: {
+		pluginId: "tasknotes",
+		displayName: "TaskNotes",
+		enabled: true,
+		prompt: DEFAULT_TASKNOTES_PROMPT,
+	},
 };
 
 /**
@@ -149,13 +221,13 @@ export const DEFAULT_PLUGIN_EXTENSIONS: Record<string, PluginPromptExtension> = 
  * @deprecated Use assembleSystemPrompt() from AgentManager instead.
  */
 export const createSystemPrompt = (hasChartsPlugin: boolean) => {
-  let prompt = BASE_SYSTEM_PROMPT;
-  prompt += "\n\n" + DEFAULT_DATAVIEW_PROMPT;
-  if (hasChartsPlugin) {
-    prompt += "\n\n" + DEFAULT_CHARTS_PROMPT;
-  }
-  prompt += "\n\n" + DEFAULT_MATH_PROMPT;
-  return prompt;
+	let prompt = BASE_SYSTEM_PROMPT;
+	prompt += `\n\n${DEFAULT_DATAVIEW_PROMPT}`;
+	if (hasChartsPlugin) {
+		prompt += `\n\n${DEFAULT_CHARTS_PROMPT}`;
+	}
+	prompt += `\n\n${DEFAULT_MATH_PROMPT}`;
+	return prompt;
 };
 
 export const AGENT_SYSTEM_PROMPT = createSystemPrompt(false);
