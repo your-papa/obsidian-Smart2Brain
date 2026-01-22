@@ -4,8 +4,25 @@ import type { ProviderConfigs } from "./providers";
 
 export type SearchAlgorithm = "grep" | "omnisearch" | "embeddings";
 
+/**
+ * Configuration for a plugin-specific prompt extension.
+ * These are appended to the base system prompt when the plugin is installed and enabled.
+ */
+export interface PluginPromptExtension {
+	/** Internal plugin ID (e.g., "dataview", "obsidian-charts") */
+	pluginId: string;
+	/** Display name shown in settings (e.g., "Dataview") */
+	displayName: string;
+	/** Whether this extension is enabled by the user */
+	enabled: boolean;
+	/** The prompt content for this plugin */
+	prompt: string;
+}
+
 export interface PluginData {
 	providerConfig: ProviderConfigs;
+	systemPrompt: string;
+	pluginPromptExtensions: Record<string, PluginPromptExtension>;
 	initialAssistantMessageContent: string;
 	isUsingRag: boolean;
 	isGeneratingChatTitle: boolean;

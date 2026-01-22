@@ -1,5 +1,6 @@
 import { normalizePath } from "obsidian";
-import SecondBrainPlugin, { type PluginData, type SearchAlgorithm } from "../main";
+import { BASE_SYSTEM_PROMPT, DEFAULT_PLUGIN_EXTENSIONS } from "../agent/prompts";
+import SecondBrainPlugin, { type PluginData, type PluginPromptExtension, type SearchAlgorithm } from "../main";
 import {
 	AddEmbedModelError,
 	AddGenModelError,
@@ -84,6 +85,8 @@ export const DEFAULT_PROVIDER_CONFIGS: ProviderConfigs = {
 
 export const DEFAULT_SETTINGS: PluginData = {
 	providerConfig: DEFAULT_PROVIDER_CONFIGS,
+	systemPrompt: BASE_SYSTEM_PROMPT,
+	pluginPromptExtensions: structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
 	isUsingRag: false,
 	isGeneratingChatTitle: false,
 	defaultChatModel: null,
@@ -192,6 +195,55 @@ export class PluginDataStore {
 	set initialAssistantMessageContent(val: string) {
 		this.#data.initialAssistantMessageContent = val;
 		this.saveSettings();
+	}
+
+	get systemPrompt() {
+		return this.#data.systemPrompt;
+	}
+	set systemPrompt(val: string) {
+		this.#data.systemPrompt = val;
+		this.saveSettings();
+	}
+
+	// --- Plugin Prompt Extensions ---
+
+	get pluginPromptExtensions(): Record<string, PluginPromptExtension> {
+		return this.#data.pluginPromptExtensions;
+	}
+
+	getPluginExtension(pluginId: string): PluginPromptExtension | undefined {
+		return this.#data.pluginPromptExtensions[pluginId];
+	}
+
+	setPluginExtensionEnabled(pluginId: string, enabled: boolean): void {
+		if (this.#data.pluginPromptExtensions[pluginId]) {
+			this.#data.pluginPromptExtensions[pluginId].enabled = enabled;
+			this.saveSettings();
+		}
+	}
+
+	setPluginExtensionPrompt(pluginId: string, prompt: string): void {
+		if (this.#data.pluginPromptExtensions[pluginId]) {
+			this.#data.pluginPromptExtensions[pluginId].prompt = prompt;
+			this.saveSettings();
+		}
+	}
+
+	updatePluginExtension(pluginId: string, updates: Partial<PluginPromptExtension>): void {
+		if (this.#data.pluginPromptExtensions[pluginId]) {
+			this.#data.pluginPromptExtensions[pluginId] = {
+				...this.#data.pluginPromptExtensions[pluginId],
+				...updates,
+			};
+			this.saveSettings();
+		}
+	}
+
+	resetPluginExtensionToDefault(pluginId: string): void {
+		if (DEFAULT_PLUGIN_EXTENSIONS[pluginId]) {
+			this.#data.pluginPromptExtensions[pluginId] = structuredClone(DEFAULT_PLUGIN_EXTENSIONS[pluginId]);
+			this.saveSettings();
+		}
 	}
 
 	get isUsingRag() {
@@ -602,6 +654,23 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		...DEFAULT_SETTINGS,
 		...rawData,
 	};
+
+	// Migration: if user has no pluginPromptExtensions, use defaults
+	if (!rawData?.pluginPromptExtensions) {
+		mergedData.pluginPromptExtensions = structuredClone(DEFAULT_PLUGIN_EXTENSIONS);
+	} else {
+		// Merge with defaults to pick up any new plugins added in updates
+		mergedData.pluginPromptExtensions = {
+			...structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
+			...rawData.pluginPromptExtensions,
+		};
+	}
+
+	// Migration: if user has old full systemPrompt, reset to base prompt
+	// (Their customizations are likely in the old format)
+	if (!rawData?.systemPrompt) {
+		mergedData.systemPrompt = BASE_SYSTEM_PROMPT;
+	}
 
 	_pluginDataStore = new PluginDataStore(plugin, mergedData);
 	return _pluginDataStore;
