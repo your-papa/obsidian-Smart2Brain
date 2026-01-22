@@ -11,7 +11,7 @@ import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import SettingsTab from "./views/settings/Settings";
 
 // Re-export types for backward compatibility
-export type { PluginData, SearchAlgorithm, PluginDataKey } from "./types/plugin";
+export type { PluginData, PluginPromptExtension, SearchAlgorithm, PluginDataKey } from "./types/plugin";
 
 export default class SecondBrainPlugin extends Plugin {
 	agentManager!: AgentManager;
