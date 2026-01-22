@@ -66,21 +66,32 @@ export class AgentManager {
 	}
 
 	/**
-	 * Check if an Obsidian plugin is installed and enabled.
+	 * Check if an Obsidian plugin is installed (may or may not be enabled).
 	 * Special case: "math-latex" is always considered installed (built-in rendering).
 	 */
 	isPluginInstalled(pluginId: string): boolean {
+		if (pluginId === "math-latex") return true; // Built-in capability
+		// @ts-ignore - Obsidian plugin API
+		// manifests contains all installed plugins, plugins only contains enabled ones
+		return Boolean(this.plugin.app.plugins?.manifests?.[pluginId]);
+	}
+
+	/**
+	 * Check if an Obsidian plugin is enabled (installed and active).
+	 * Special case: "math-latex" is always considered enabled (built-in rendering).
+	 */
+	isPluginEnabled(pluginId: string): boolean {
 		if (pluginId === "math-latex") return true; // Built-in capability
 		// @ts-ignore - Obsidian plugin API
 		return Boolean(this.plugin.app.plugins?.enabledPlugins?.has(pluginId));
 	}
 
 	/**
-	 * Get list of installed plugins from the supported extensions.
+	 * Get list of enabled plugins from the supported extensions.
 	 */
-	getInstalledPluginIds(): string[] {
+	getEnabledPluginIds(): string[] {
 		const pluginData = getData();
-		return Object.keys(pluginData.pluginPromptExtensions).filter((id) => this.isPluginInstalled(id));
+		return Object.keys(pluginData.pluginPromptExtensions).filter((id) => this.isPluginEnabled(id));
 	}
 
 	/**
@@ -91,9 +102,9 @@ export class AgentManager {
 		const pluginData = getData();
 		let prompt = pluginData.systemPrompt || BASE_SYSTEM_PROMPT;
 
-		// Append enabled extensions for installed plugins
+		// Append enabled extensions for enabled plugins
 		for (const [pluginId, ext] of Object.entries(pluginData.pluginPromptExtensions)) {
-			if (ext.enabled && this.isPluginInstalled(pluginId) && ext.prompt?.trim()) {
+			if (ext.enabled && this.isPluginEnabled(pluginId) && ext.prompt?.trim()) {
 				prompt += "\n\n" + ext.prompt;
 			}
 		}
