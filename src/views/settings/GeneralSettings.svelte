@@ -343,10 +343,6 @@
 						>
 							Not enabled
 						</button>
-					{:else}
-						<span class="plugin-extension-badge enabled"
-							>Enabled</span
-						>
 					{/if}
 				</div>
 			</div>
@@ -442,11 +438,6 @@
 		border-radius: 4px;
 		text-transform: uppercase;
 		font-weight: 500;
-	}
-
-	.plugin-extension-badge.enabled {
-		background: var(--background-modifier-success);
-		color: var(--text-on-accent);
 	}
 
 	.plugin-extension-badge.not-enabled,
