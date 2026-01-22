@@ -105,7 +105,7 @@ export class AgentManager {
 		// Append enabled extensions for enabled plugins
 		for (const [pluginId, ext] of Object.entries(pluginData.pluginPromptExtensions)) {
 			if (ext.enabled && this.isPluginEnabled(pluginId) && ext.prompt?.trim()) {
-				prompt += "\n\n" + ext.prompt;
+				prompt += `\n\n${ext.prompt}`;
 			}
 		}
 
