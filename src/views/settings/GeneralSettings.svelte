@@ -1,177 +1,166 @@
 <script lang="ts">
-	import {
-		AnthropicLogo,
-		OllamaLogo,
-		OpenAILogo,
-	} from "@selemondev/svgl-svelte";
-	import { Notice, type TFolder } from "obsidian";
-	import { t } from "svelte-i18n";
-	import { ExcludeFoldersModal } from "../../components/modal/ExcludeFoldersModal";
-	import FolderSuggest from "../../components/modal/FolderSuggest.svelte";
-	import { PluginExtensionModal } from "../../components/modal/PluginExtensionModal";
-	import { SystemPromptModal } from "../../components/modal/SystemPromptModal";
-	import SettingGroup from "../../components/settings/SettingGroup.svelte";
-	import SettingItem from "../../components/settings/SettingItem.svelte";
-	import Button from "../../components/ui/Button.svelte";
-	import Dropdown from "../../components/ui/Dropdown.svelte";
-	import Icon from "../../components/ui/Icon.svelte";
-	import IconButton from "../../components/ui/IconButton.svelte";
-	import SearchableDropdown from "../../components/ui/SearchableDropdown.svelte";
-	import Text from "../../components/ui/Text.svelte";
-	import Toggle from "../../components/ui/Toggle.svelte";
-	import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
-	import type { SearchAlgorithm } from "../../main";
-	import type { ChatModel } from "../../stores/chatStore.svelte";
-	import { getData } from "../../stores/dataStore.svelte";
-	import { getPlugin } from "../../stores/state.svelte";
+import { AnthropicLogo, OllamaLogo, OpenAILogo } from "@selemondev/svgl-svelte";
+import { Notice, type TFolder } from "obsidian";
+import { t } from "svelte-i18n";
+import { ExcludeFoldersModal } from "../../components/modal/ExcludeFoldersModal";
+import FolderSuggest from "../../components/modal/FolderSuggest.svelte";
+import { PluginExtensionModal } from "../../components/modal/PluginExtensionModal";
+import { SystemPromptModal } from "../../components/modal/SystemPromptModal";
+import SettingGroup from "../../components/settings/SettingGroup.svelte";
+import SettingItem from "../../components/settings/SettingItem.svelte";
+import Button from "../../components/ui/Button.svelte";
+import Dropdown from "../../components/ui/Dropdown.svelte";
+import Icon from "../../components/ui/Icon.svelte";
+import IconButton from "../../components/ui/IconButton.svelte";
+import SearchableDropdown from "../../components/ui/SearchableDropdown.svelte";
+import Text from "../../components/ui/Text.svelte";
+import Toggle from "../../components/ui/Toggle.svelte";
+import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
+import type { SearchAlgorithm } from "../../main";
+import type { ChatModel } from "../../stores/chatStore.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
 
-	const pluginData = getData();
-	const plugin = getPlugin();
-	const models = useAvailableModels();
+const pluginData = getData();
+const plugin = getPlugin();
+const models = useAvailableModels();
 
-	let fuzzySuggestModel = new ExcludeFoldersModal(plugin.app);
-	let systemPromptModal = new SystemPromptModal(plugin);
+let fuzzySuggestModel = new ExcludeFoldersModal(plugin.app);
+let systemPromptModal = new SystemPromptModal(plugin);
 
-	// Plugin extensions - reactive list
-	const pluginExtensions = $derived(
-		Object.values(pluginData.pluginPromptExtensions),
-	);
+// Plugin extensions - reactive list
+const pluginExtensions = $derived(Object.values(pluginData.pluginPromptExtensions));
 
-	function openExtensionModal(pluginId: string) {
-		const modal = new PluginExtensionModal(plugin, pluginId, () => {
-			plugin.agentManager?.updateSystemPrompt();
-		});
-		modal.open();
-	}
-
-	function toggleExtension(pluginId: string, newEnabled: boolean) {
-		const installed =
-			plugin.agentManager?.isPluginInstalled(pluginId) ?? false;
-		const enabled = plugin.agentManager?.isPluginEnabled(pluginId) ?? false;
-		const ext = pluginData.getPluginExtension(pluginId);
-		const displayName = ext?.displayName ?? pluginId;
-
-		if (!installed) {
-			new Notice(`Please install the ${displayName} plugin first.`);
-			return;
-		}
-		if (!enabled) {
-			new Notice(
-				`Please enable the ${displayName} plugin in Obsidian settings first.`,
-			);
-			return;
-		}
-
-		pluginData.setPluginExtensionEnabled(pluginId, newEnabled);
+function openExtensionModal(pluginId: string) {
+	const modal = new PluginExtensionModal(plugin, pluginId, () => {
 		plugin.agentManager?.updateSystemPrompt();
+	});
+	modal.open();
+}
+
+function toggleExtension(pluginId: string, newEnabled: boolean) {
+	const installed = plugin.agentManager?.isPluginInstalled(pluginId) ?? false;
+	const enabled = plugin.agentManager?.isPluginEnabled(pluginId) ?? false;
+	const ext = pluginData.getPluginExtension(pluginId);
+	const displayName = ext?.displayName ?? pluginId;
+
+	if (!installed) {
+		new Notice(`Please install the ${displayName} plugin first.`);
+		return;
+	}
+	if (!enabled) {
+		new Notice(`Please enable the ${displayName} plugin in Obsidian settings first.`);
+		return;
 	}
 
-	function isPluginInstalled(pluginId: string): boolean {
-		return plugin.agentManager?.isPluginInstalled(pluginId) ?? false;
+	pluginData.setPluginExtensionEnabled(pluginId, newEnabled);
+	plugin.agentManager?.updateSystemPrompt();
+}
+
+function isPluginInstalled(pluginId: string): boolean {
+	return plugin.agentManager?.isPluginInstalled(pluginId) ?? false;
+}
+
+function isPluginEnabled(pluginId: string): boolean {
+	return plugin.agentManager?.isPluginEnabled(pluginId) ?? false;
+}
+
+function openPluginPage(pluginId: string) {
+	// math-latex is built-in, no plugin page
+	if (pluginId === "math-latex") return;
+	// Open the community plugins page for this plugin
+	window.open(`obsidian://show-plugin?id=${pluginId}`);
+}
+
+function suggestFolders(): TFolder[] {
+	return plugin.app.vault.getAllFolders(true);
+}
+
+// Check if Omnisearch plugin is installed
+const isOmnisearchInstalled = $derived(
+	// @ts-ignore - Obsidian plugin API
+	!!plugin.app.plugins?.getPlugin?.("omnisearch"),
+);
+
+// Search algorithm options
+const searchAlgorithmOptions: {
+	display: string;
+	value: SearchAlgorithm;
+	disabled?: boolean;
+}[] = $derived([
+	{ display: $t("settings.search_algorithm.grep"), value: "grep" },
+	{
+		display: isOmnisearchInstalled
+			? $t("settings.search_algorithm.omnisearch")
+			: $t("settings.search_algorithm.omnisearch_not_installed"),
+		value: "omnisearch",
+		disabled: !isOmnisearchInstalled,
+	},
+	{
+		display: $t("settings.search_algorithm.embeddings"),
+		value: "embeddings",
+		disabled: true,
+	},
+]);
+
+// Use $derived to read from store - no local state sync needed
+let selectedSearchAlgorithm = $derived(pluginData.searchAlgorithm);
+
+// Handle search algorithm change with validation
+function handleSearchAlgorithmChange(value: SearchAlgorithm) {
+	if (value === "omnisearch" && !isOmnisearchInstalled) {
+		console.warn("Omnisearch selected but plugin not available, switching to grep");
+		pluginData.searchAlgorithm = "grep";
+		return;
 	}
+	pluginData.searchAlgorithm = value;
+}
 
-	function isPluginEnabled(pluginId: string): boolean {
-		return plugin.agentManager?.isPluginEnabled(pluginId) ?? false;
-	}
+// Model dropdown options - grouped by provider
+const modelOptions = $derived(
+	models.modelOptions.map((opt) => ({
+		label: opt.label,
+		value: opt.value,
+		group: opt.chatModel.provider,
+		chatModel: opt.chatModel,
+	})),
+);
 
-	function openPluginPage(pluginId: string) {
-		// math-latex is built-in, no plugin page
-		if (pluginId === "math-latex") return;
-		// Open the community plugins page for this plugin
-		window.open(`obsidian://show-plugin?id=${pluginId}`);
-	}
+// Track selected model value
+let selectedModelValue = $state<string>("");
 
-	function suggestFolders(): TFolder[] {
-		return plugin.app.vault.getAllFolders(true);
-	}
+// Initialize from stored default chat model
+let _initialized = $state(false);
+$effect(() => {
+	if (_initialized) return;
+	const opts = models.modelOptions;
+	if (!opts.length) return;
 
-	// Check if Omnisearch plugin is installed
-	const isOmnisearchInstalled = $derived(
-		// @ts-ignore - Obsidian plugin API
-		!!plugin.app.plugins?.getPlugin?.("omnisearch"),
-	);
-
-	// Search algorithm options
-	const searchAlgorithmOptions: {
-		display: string;
-		value: SearchAlgorithm;
-		disabled?: boolean;
-	}[] = $derived([
-		{ display: $t("settings.search_algorithm.grep"), value: "grep" },
-		{
-			display: isOmnisearchInstalled
-				? $t("settings.search_algorithm.omnisearch")
-				: $t("settings.search_algorithm.omnisearch_not_installed"),
-			value: "omnisearch",
-			disabled: !isOmnisearchInstalled,
-		},
-		{
-			display: $t("settings.search_algorithm.embeddings"),
-			value: "embeddings",
-			disabled: true,
-		},
-	]);
-
-	// Use $derived to read from store - no local state sync needed
-	let selectedSearchAlgorithm = $derived(pluginData.searchAlgorithm);
-
-	// Handle search algorithm change with validation
-	function handleSearchAlgorithmChange(value: SearchAlgorithm) {
-		if (value === "omnisearch" && !isOmnisearchInstalled) {
-			console.warn(
-				"Omnisearch selected but plugin not available, switching to grep",
-			);
-			pluginData.searchAlgorithm = "grep";
+	const sel = pluginData.getDefaultChatModel();
+	if (sel) {
+		const key = `${sel.provider}:${sel.model}`;
+		if (opts.some((o) => o.value === key)) {
+			selectedModelValue = key;
+			_initialized = true;
 			return;
 		}
-		pluginData.searchAlgorithm = value;
 	}
+	selectedModelValue = opts[0].value;
+	pluginData.setDefaultChatModel(opts[0].chatModel as ChatModel);
+	_initialized = true;
+});
 
-	// Model dropdown options - grouped by provider
-	const modelOptions = $derived(
-		models.modelOptions.map((opt) => ({
-			label: opt.label,
-			value: opt.value,
-			group: opt.chatModel.provider,
-			chatModel: opt.chatModel,
-		})),
-	);
+function handleModelSelect(value: string) {
+	selectedModelValue = value;
+	const opt = models.modelOptions.find((o) => o.value === value);
+	if (opt) pluginData.setDefaultChatModel(opt.chatModel as ChatModel);
+}
 
-	// Track selected model value
-	let selectedModelValue = $state<string>("");
-
-	// Initialize from stored default chat model
-	let _initialized = $state(false);
-	$effect(() => {
-		if (_initialized) return;
-		const opts = models.modelOptions;
-		if (!opts.length) return;
-
-		const sel = pluginData.getDefaultChatModel();
-		if (sel) {
-			const key = `${sel.provider}:${sel.model}`;
-			if (opts.some((o) => o.value === key)) {
-				selectedModelValue = key;
-				_initialized = true;
-				return;
-			}
-		}
-		selectedModelValue = opts[0].value;
-		pluginData.setDefaultChatModel(opts[0].chatModel as ChatModel);
-		_initialized = true;
-	});
-
-	function handleModelSelect(value: string) {
-		selectedModelValue = value;
-		const opt = models.modelOptions.find((o) => o.value === value);
-		if (opt) pluginData.setDefaultChatModel(opt.chatModel as ChatModel);
-	}
-
-	// Helper to get provider from value
-	function getProvider(value: string): string {
-		const opt = models.modelOptions.find((o) => o.value === value);
-		return opt?.chatModel.provider ?? "";
-	}
+// Helper to get provider from value
+function getProvider(value: string): string {
+	const opt = models.modelOptions.find((o) => o.value === value);
+	return opt?.chatModel.provider ?? "";
+}
 </script>
 
 <!-- Chat Settings -->
