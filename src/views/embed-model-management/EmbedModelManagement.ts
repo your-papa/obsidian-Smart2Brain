@@ -2,7 +2,7 @@ import { Modal } from "obsidian";
 import { mount } from "svelte";
 import ModalProvider from "../../lib/QueryClientProvider.svelte";
 import type SecondBrainPlugin from "../../main";
-import type { EmbedModelConfig } from "../../providers/types";
+import type { EmbedModelConfig } from "../../providers/index";
 import EmbedModelManagementComponent from "./EmbedModelManagement.svelte";
 
 export class EmbedModelManagementModal extends Modal {

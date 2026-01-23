@@ -17,7 +17,7 @@ import Toggle from "../../components/ui/Toggle.svelte";
 import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import type { SearchAlgorithm } from "../../main";
-import { getProvider } from "../../providers/index";
+import { getProviderDefinition } from "../../providers/index";
 import type { ChatModel } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
@@ -222,33 +222,33 @@ function getProviderId(value: string): string {
 				placeholder="Select a model"
 				searchPlaceholder="Search models..."
 			>
-				{#snippet renderGroupHeader({ group })}
-					{@const providerDef = getProvider(group, [])}
-					{@const Logo = (providerDef && "logo" in providerDef && providerDef.logo) ? providerDef.logo : GenericAIIcon}
-					<div class="flex items-center gap-2">
-						<Logo width={12} height={12} class="text-[--text-muted]" />
-						<span>{group}</span>
-					</div>
-				{/snippet}
+			{#snippet renderGroupHeader({ group })}
+				{@const providerDef = getProviderDefinition(group, pluginData.getAllCustomProviderMeta())}
+				{@const Logo = (providerDef && "logo" in providerDef && providerDef.logo) ? providerDef.logo : GenericAIIcon}
+				<div class="flex items-center gap-2">
+					<Logo width={12} height={12} class="text-[--text-muted]" />
+					<span>{providerDef?.displayName ?? group}</span>
+				</div>
+			{/snippet}
 
-				{#snippet renderOption({ option, selected })}
-					<span class="flex-1">{option.label}</span>
-					{#if selected}
-						<Icon
-							name="check"
-							size="xs"
-							class="text-[--text-accent]"
-						/>
-					{/if}
-				{/snippet}
+			{#snippet renderOption({ option, selected })}
+				<span class="flex-1">{option.label}</span>
+				{#if selected}
+					<Icon
+						name="check"
+						size="xs"
+						class="text-[--text-accent]"
+					/>
+				{/if}
+			{/snippet}
 
-				{#snippet renderSelected({ option })}
-					{@const providerId = getProviderId(option.value)}
-					{@const providerDef = getProvider(providerId, [])}
-					{@const Logo = (providerDef && "logo" in providerDef && providerDef.logo) ? providerDef.logo : GenericAIIcon}
-					<Logo width={14} height={14} />
-					<span>{option.label}</span>
-				{/snippet}
+			{#snippet renderSelected({ option })}
+				{@const providerId = getProviderId(option.value)}
+				{@const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta())}
+				{@const Logo = (providerDef && "logo" in providerDef && providerDef.logo) ? providerDef.logo : GenericAIIcon}
+				<Logo width={14} height={14} />
+				<span>{option.label}</span>
+			{/snippet}
 			</SearchableDropdown>
 		{/if}
 	</SettingItem>

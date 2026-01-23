@@ -6,8 +6,7 @@ import Button from "../../components/ui/Button.svelte";
 import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
 import { createAuthStateQuery, invalidateProviderState } from "../../lib/query";
 import type SecondBrainPlugin from "../../main";
-import { getProvider } from "../../providers/index";
-import type { LogoProps } from "../../providers/types";
+import { type LogoProps, getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import { icon } from "../../utils/utils";
 import type { ProviderSetupModal } from "./ProviderSetup";
@@ -32,8 +31,7 @@ function handleAddProvider() {
 
 // Get the logo component for the provider
 function getProviderLogo(): Component<LogoProps> {
-	const customProviders = data.getCustomProviders().map((cp) => cp.definition);
-	const provider = getProvider(selectedProvider, customProviders);
+	const provider = getProviderDefinition(selectedProvider, data.getAllCustomProviderMeta());
 	if (provider && "logo" in provider && provider.logo) {
 		return provider.logo;
 	}

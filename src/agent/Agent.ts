@@ -7,8 +7,8 @@ import { type ReactAgent, createAgent } from "langchain";
 import { Notice } from "obsidian";
 
 import { ProviderEndpointError, ProviderNotFoundError } from "../providers/errors";
+import type { ChatModelConfig } from "../providers/index";
 import type { ProviderRegistry } from "../providers/registry";
-import type { ChatModelConfig } from "../providers/types";
 import { getData } from "../stores/dataStore.svelte";
 import type { ThreadError } from "../types/shared";
 import Logger from "../utils/logging";
@@ -142,7 +142,7 @@ export class Agent {
 		// Create a LangChain instance for this provider + model
 		let instance: BaseChatModel;
 		try {
-			instance = this.registry.getChatInstance(provider, chatModel, options);
+			instance = this.registry.createChatInstance(provider, chatModel, options);
 		} catch (error) {
 			if (error instanceof ProviderNotFoundError) {
 				getData().setDefaultChatModel(null);

@@ -2,25 +2,12 @@ import { normalizePath } from "obsidian";
 import { BASE_SYSTEM_PROMPT, DEFAULT_PLUGIN_EXTENSIONS } from "../agent/prompts";
 import { getSecret, listSecrets, setSecret } from "../lib/secretStorage";
 import SecondBrainPlugin, { type PluginData, type PluginPromptExtension, type SearchAlgorithm } from "../main";
-import type { ProviderConfigs } from "../types/plugin";
 import type { UUIDv7 } from "../utils/uuid7Validator";
 import type { ChatModel } from "./chatStore.svelte";
 
 // Provider system types
-import type {
-	ChatModelConfig,
-	EmbedModelConfig,
-	RuntimeAuthState,
-	StoredAuthState,
-	StoredCustomProviderDefinition,
-	StoredFieldBasedAuthState,
-} from "../providers/index";
-import {
-	BUILT_IN_PROVIDER_IDS,
-	type BuiltInProviderId,
-	getBuiltInProvider,
-	isBuiltInProvider,
-} from "../providers/index";
+import type { AuthObject, ChatModelConfig, CustomProviderMeta, EmbedModelConfig } from "../providers/index";
+import { BUILT_IN_PROVIDER_IDS, type BuiltInProviderId } from "../providers/index";
 
 // ============================================================================
 // Error Classes
@@ -55,17 +42,28 @@ export class SetGenModelError extends Error {
 }
 
 // ============================================================================
-// New Provider State Types (for unified provider system)
+// Provider State Types (Unified)
 // ============================================================================
 
 /**
+ * Stored auth state with secret IDs (not resolved secrets).
+ * Secret values are stored in SecretStorage, we only keep IDs here.
+ */
+export interface StoredAuthState {
+	/** Non-secret auth values (e.g., baseUrl) */
+	values: Record<string, string>;
+	/** Secret IDs for fields stored in SecretStorage (e.g., apiKey) */
+	secretIds: Record<string, string>;
+}
+
+/**
  * State for a single provider stored in data.json.
- * This is the new unified structure for all providers.
+ * Unified structure for ALL providers (built-in and custom).
  */
 export interface StoredProviderState {
 	/** Whether the provider is configured and enabled */
 	isConfigured: boolean;
-	/** Authentication state (field-based or OAuth) */
+	/** Authentication state with secret IDs */
 	auth: StoredAuthState;
 	/** Chat model configurations keyed by model ID */
 	chatModels: Record<string, ChatModelConfig>;
@@ -73,39 +71,16 @@ export interface StoredProviderState {
 	embedModels: Record<string, EmbedModelConfig>;
 }
 
-/**
- * Storage structure for custom provider definitions + state.
- * Custom providers store both their definition and state together.
- */
-export interface StoredCustomProvider {
-	/** The custom provider definition (id, displayName, baseProviderId, etc.) */
-	definition: StoredCustomProviderDefinition;
-	/** The provider state (isConfigured, auth, models) */
-	state: StoredProviderState;
-}
-
-/**
- * New provider configuration storage structure.
- * Separates built-in and custom providers.
- */
-export interface StoredProvidersConfig {
-	/** Built-in provider states keyed by provider ID */
-	builtIn: Record<BuiltInProviderId, StoredProviderState>;
-	/** Custom provider definitions and states */
-	custom: StoredCustomProvider[];
-}
-
 // ============================================================================
 // Default Provider States (New System)
 // ============================================================================
 
 /**
- * Creates default auth state for field-based authentication.
+ * Creates default auth state.
  * All fields start empty (no default values).
  */
-function createDefaultFieldBasedAuth(): StoredFieldBasedAuthState {
+function createDefaultAuth(): StoredAuthState {
 	return {
-		type: "field-based",
 		values: {},
 		secretIds: {},
 	};
@@ -118,7 +93,7 @@ function createDefaultFieldBasedAuth(): StoredFieldBasedAuthState {
 export const DEFAULT_BUILTIN_PROVIDER_STATES: Record<BuiltInProviderId, StoredProviderState> = {
 	openai: {
 		isConfigured: false,
-		auth: createDefaultFieldBasedAuth(),
+		auth: createDefaultAuth(),
 		chatModels: {
 			"chatgpt-4o-latest": { contextWindow: 128000, temperature: 0.4 },
 			"gpt-4.1-mini-2025-04-14": { contextWindow: 1047576, temperature: 0.4 },
@@ -134,7 +109,7 @@ export const DEFAULT_BUILTIN_PROVIDER_STATES: Record<BuiltInProviderId, StoredPr
 	},
 	anthropic: {
 		isConfigured: false,
-		auth: createDefaultFieldBasedAuth(),
+		auth: createDefaultAuth(),
 		chatModels: {
 			"claude-3-haiku-20240307": { contextWindow: 200000, temperature: 0.5 },
 			"claude-3-sonnet-20240229": { contextWindow: 200000, temperature: 0.5 },
@@ -146,7 +121,6 @@ export const DEFAULT_BUILTIN_PROVIDER_STATES: Record<BuiltInProviderId, StoredPr
 	ollama: {
 		isConfigured: false,
 		auth: {
-			type: "field-based",
 			values: {
 				baseUrl: "http://localhost:11434",
 			},
@@ -168,73 +142,19 @@ export const DEFAULT_BUILTIN_PROVIDER_STATES: Record<BuiltInProviderId, StoredPr
 			"mxbai-embed-large": { similarityThreshold: 0.5 },
 		},
 	},
-};
-
-/**
- * Default providers config for the new system.
- */
-export const DEFAULT_PROVIDERS_CONFIG: StoredProvidersConfig = {
-	builtIn: DEFAULT_BUILTIN_PROVIDER_STATES,
-	custom: [],
-};
-
-export const DEFAULT_PROVIDER_CONFIGS: ProviderConfigs = {
-	ollama: {
+	openrouter: {
 		isConfigured: false,
-		providerAuth: {
-			baseUrl: "http://localhost:11434",
-		},
-		embedModels: new Map([
-			["nomic-embed-text", { similarityThreshold: 0.5 }],
-			["mxbai-embed-large", { similarityThreshold: 0.5 }],
-		]),
-		genModels: new Map([
-			["llama2", { temperature: 0.5, contextWindow: 4096 }],
-			["llama2-uncensored", { temperature: 0.5, contextWindow: 4096 }],
-			["mistral", { temperature: 0.5, contextWindow: 8000 }],
-			["mistral-openorca", { temperature: 0.5, contextWindow: 8000 }],
-			["gemma", { temperature: 0.5, contextWindow: 8000 }],
-			["mixtral", { temperature: 0.5, contextWindow: 32000 }],
-			["dolphin-mixtral", { temperature: 0.5, contextWindow: 32000 }],
-			["phi", { temperature: 0.5, contextWindow: 2048 }],
-			["llama3.1", { temperature: 0.5, contextWindow: 8192 }],
-		]),
-	},
-	openai: {
-		isConfigured: false,
-		providerAuth: {
-			apiKeyId: "",
-		},
-		embedModels: new Map([
-			["text-embedding-ada-002", { similarityThreshold: 0.75 }],
-			["text-embedding-3-large", { similarityThreshold: 0.5 }],
-			["text-embedding-3-small", { similarityThreshold: 0.5 }],
-		]),
-		genModels: new Map([
-			["chatgpt-4o-latest", { temperature: 0.4, contextWindow: 128000 }],
-			["gpt-4.1-mini-2025-04-14", { temperature: 0.4, contextWindow: 1047576 }],
-			["gpt-4.1", { temperature: 0.2, contextWindow: 1047576 }],
-			["o4-mini", { temperature: 0.2, contextWindow: 200000 }],
-			["o1", { temperature: 0.2, contextWindow: 200000 }],
-		]),
-	},
-	anthropic: {
-		isConfigured: false,
-		providerAuth: {
-			apiKeyId: "",
-		},
-		embedModels: new Map(),
-		genModels: new Map([
-			["claude-3-haiku-20240307", { temperature: 0.5, contextWindow: 200000 }],
-			["claude-3-sonnet-20240229", { temperature: 0.5, contextWindow: 200000 }],
-			["claude-3-opus-20240229", { temperature: 0.5, contextWindow: 200000 }],
-			["claude-3-5-sonnet-20241022", { temperature: 0.5, contextWindow: 200000 }],
-		]),
+		auth: createDefaultAuth(),
+		chatModels: {},
+		embedModels: {},
 	},
 };
 
 export const DEFAULT_SETTINGS: PluginData = {
-	providerConfig: DEFAULT_PROVIDER_CONFIGS,
+	// Unified provider config - all providers keyed by ID (built-in pre-populated)
+	providerConfig: DEFAULT_BUILTIN_PROVIDER_STATES as Record<string, StoredProviderState>,
+	// Custom provider metadata - only for custom providers
+	customProviderMeta: {},
 	systemPrompt: BASE_SYSTEM_PROMPT,
 	pluginPromptExtensions: structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
 	isUsingRag: false,
@@ -266,56 +186,20 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 export class PluginDataStore {
 	#data: PluginData;
-	#customProviders: StoredCustomProvider[];
 	private _plugin: SecondBrainPlugin;
 
-	constructor(plugin: SecondBrainPlugin, initialData: PluginData & { customProviders?: StoredCustomProvider[] }) {
+	constructor(plugin: SecondBrainPlugin, initialData: PluginData) {
 		this._plugin = plugin;
-		// Restore Maps from plain object shapes (after persistence serialization)
-		for (const cfg of Object.values(initialData.providerConfig) as unknown as Record<string, unknown>[]) {
-			if (cfg && "embedModels" in cfg && cfg.embedModels && !(cfg.embedModels instanceof Map)) {
-				cfg.embedModels = new Map(Object.entries(cfg.embedModels as Record<string, unknown>));
-			}
-			if (cfg && "genModels" in cfg && cfg.genModels && !(cfg.genModels instanceof Map)) {
-				cfg.genModels = new Map(Object.entries(cfg.genModels as Record<string, unknown>));
-			}
-		}
 		this.#data = $state(initialData);
-		// Initialize custom providers from saved data
-		this.#customProviders = $state(initialData.customProviders ?? []);
 	}
 
 	/**
 	 * Persist current settings.
-	 * We need to serialize Maps (embedModels / genModels) because Obsidian (JSON) persistence
-	 * will turn Map instances into empty objects `{}` otherwise, losing data.
-	 * Also we always snapshot the $state to avoid saving reactive proxies.
+	 * Snapshots the $state to avoid saving reactive proxies.
 	 */
 	private async saveSettings() {
 		const snap = $state.snapshot(this.#data);
-
-		// Deep(ish) clone with Map -> plain object conversion
-		const plain: Record<string, unknown> = {
-			...snap,
-			providerConfig: {},
-			// Include custom providers in saved data
-			customProviders: $state.snapshot(this.#customProviders),
-		};
-
-		for (const [provider, cfg] of Object.entries(snap.providerConfig)) {
-			const cloned: Record<string, unknown> = { ...cfg };
-
-			if ("embedModels" in cfg && cfg.embedModels instanceof Map) {
-				cloned.embedModels = Object.fromEntries(cfg.embedModels);
-			}
-			if ("genModels" in cfg && cfg.genModels instanceof Map) {
-				cloned.genModels = Object.fromEntries(cfg.genModels);
-			}
-
-			(plain.providerConfig as Record<string, unknown>)[provider] = cloned;
-		}
-
-		await this._plugin.saveData(plain);
+		await this._plugin.saveData(snap);
 	}
 
 	getLastActiveChatId(): UUIDv7 | null {
@@ -332,16 +216,31 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
+	/**
+	 * Get all configured provider IDs.
+	 * Returns IDs of providers where isConfigured is true.
+	 */
 	getConfiguredProviders(): string[] {
 		return Object.entries(this.#data.providerConfig)
-			.filter(([_, conf]) => conf.isConfigured)
-			.map(([provider]) => provider);
+			.filter(([_, state]) => state.isConfigured)
+			.map(([id]) => id);
 	}
 
+	/**
+	 * Get all available provider IDs (configured or not).
+	 * This is simply all keys in providerConfig.
+	 */
+	getAllProviderIds(): string[] {
+		return Object.keys(this.#data.providerConfig);
+	}
+
+	/**
+	 * Get all configured models across all configured providers.
+	 */
 	getAllConfiguredModels(): string[] {
-		return this.getConfiguredProviders().flatMap((provider) => {
-			const config = this.#data.providerConfig[provider as BuiltInProviderId];
-			return config ? Array.from(config.genModels.keys()) : [];
+		return this.getConfiguredProviders().flatMap((providerId) => {
+			const config = this.#data.providerConfig[providerId];
+			return config ? Object.keys(config.chatModels) : [];
 		});
 	}
 
@@ -547,7 +446,7 @@ export class PluginDataStore {
 	get mcpServers() {
 		return this.#data.mcpServers;
 	}
-	set mcpServers(val: Record<string, any>) {
+	set mcpServers(val: Record<string, unknown>) {
 		this.#data.mcpServers = val;
 		this.saveSettings();
 	}
@@ -612,12 +511,12 @@ export class PluginDataStore {
 
 	// Get/set isConfigured for a provider
 	getProviderIsConfigured(provider: string): boolean {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
+		const config = this.#data.providerConfig[provider];
 		return config?.isConfigured ?? false;
 	}
 
 	toggleProviderIsConfigured(provider: string) {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
+		const config = this.#data.providerConfig[provider];
 		if (!config) return;
 
 		const wasConfigured = config.isConfigured;
@@ -635,38 +534,67 @@ export class PluginDataStore {
 	}
 
 	/**
-	 * Get stored provider auth params (contains apiKeyId, not actual apiKey)
+	 * Get stored provider auth params.
+	 * Returns auth values and secret IDs (not resolved secrets).
 	 */
 	getStoredProviderAuthParams(provider: string): {
 		apiKeyId?: string;
 		baseUrl?: string;
 		headers?: Record<string, string>;
 	} {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
-		return config?.providerAuth ?? {};
+		const config = this.#data.providerConfig[provider];
+		if (!config) return {};
+
+		const auth = config.auth;
+		const result: { apiKeyId?: string; baseUrl?: string; headers?: Record<string, string> } = {};
+
+		if (auth.secretIds.apiKey) {
+			result.apiKeyId = auth.secretIds.apiKey;
+		}
+		if (auth.values.baseUrl) {
+			result.baseUrl = auth.values.baseUrl;
+		}
+		if (auth.values.headers) {
+			try {
+				result.headers = JSON.parse(auth.values.headers);
+			} catch {
+				// ignore parse errors
+			}
+		}
+		return result;
 	}
 
 	/**
 	 * Get resolved provider auth params with actual secrets from SecretStorage
 	 */
 	getResolvedProviderAuth(provider: string): { apiKey?: string; baseUrl?: string; headers?: Record<string, string> } {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
+		const config = this.#data.providerConfig[provider];
 		if (!config) return {};
 
-		const stored = config.providerAuth;
-		const resolved: { apiKey?: string; baseUrl?: string; headers?: Record<string, string> } = { ...stored };
+		const auth = config.auth;
+		const resolved: { apiKey?: string; baseUrl?: string; headers?: Record<string, string> } = {};
 
-		// Resolve apiKeyId to actual apiKey
-		if (stored.apiKeyId) {
-			const secret = getSecret(this._plugin.app, stored.apiKeyId);
+		// Resolve apiKey secret
+		if (auth.secretIds.apiKey) {
+			const secret = getSecret(this._plugin.app, auth.secretIds.apiKey);
 			if (secret) {
 				resolved.apiKey = secret;
 			}
 		}
 
-		// Remove apiKeyId from resolved (it's not needed at runtime)
-		// biome-ignore lint/performance/noDelete: Intentional cleanup of stored-only field
-		delete (resolved as { apiKeyId?: string }).apiKeyId;
+		// Copy baseUrl
+		if (auth.values.baseUrl) {
+			resolved.baseUrl = auth.values.baseUrl;
+		}
+
+		// Parse headers
+		if (auth.values.headers) {
+			try {
+				resolved.headers = JSON.parse(auth.values.headers);
+			} catch {
+				// ignore parse errors
+			}
+		}
 
 		return resolved;
 	}
@@ -675,12 +603,16 @@ export class PluginDataStore {
 	 * Set a stored auth parameter (for non-secret fields like baseUrl)
 	 */
 	setStoredAuthParam(provider: string, key: string, value: unknown): void {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
+		const config = this.#data.providerConfig[provider];
 		if (!config) return;
 
-		const newAuth = { ...config.providerAuth };
-		(newAuth as Record<string, unknown>)[key] = value;
-		config.providerAuth = newAuth;
+		if (key === "apiKeyId") {
+			// Store as secret ID
+			config.auth.secretIds.apiKey = value as string;
+		} else {
+			// Store as value
+			config.auth.values[key] = value as string;
+		}
 		this.saveSettings();
 	}
 
@@ -703,12 +635,12 @@ export class PluginDataStore {
 	 * Get the actual API key from SecretStorage
 	 */
 	getProviderApiKey(provider: string): string | null {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
+		const config = this.#data.providerConfig[provider];
 		if (!config) return null;
 
-		const stored = config.providerAuth;
-		if (!stored.apiKeyId) return null;
-		return getSecret(this._plugin.app, stored.apiKeyId);
+		const secretId = config.auth.secretIds.apiKey;
+		if (!secretId) return null;
+		return getSecret(this._plugin.app, secretId);
 	}
 
 	/**
@@ -718,82 +650,67 @@ export class PluginDataStore {
 		return listSecrets(this._plugin.app);
 	}
 
-	// --- Embed Model Management (Map-based) ---
+	// --- Embed Model Management (Record-based) ---
 
-	getEmbedModels(provider: string): Map<string, EmbedModelConfig> {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
-		return config?.embedModels ?? new Map();
+	getEmbedModels(provider: string): Record<string, EmbedModelConfig> {
+		const config = this.#data.providerConfig[provider];
+		return config?.embedModels ?? {};
 	}
 
 	addEmbedModel(provider: string, modelName: string, conf: EmbedModelConfig) {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
+		const config = this.#data.providerConfig[provider];
 		if (!config) return;
-		const current = config.embedModels;
-		if (current.has(modelName)) throw new AddEmbedModelError(provider, modelName);
-		// Reassign a new Map to ensure reactivity + easier change detection
-		const next = new Map(current);
-		next.set(modelName, conf);
-		config.embedModels = next;
+		if (modelName in config.embedModels) throw new AddEmbedModelError(provider, modelName);
+		config.embedModels = { ...config.embedModels, [modelName]: conf };
 		this.saveSettings();
 	}
 
 	updateEmbedModel(provider: string, modelName: string, conf: EmbedModelConfig) {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
+		const config = this.#data.providerConfig[provider];
 		if (!config) return;
-		const current = config.embedModels;
-		if (!current.has(modelName)) throw new SetEmbedModelError(provider, modelName);
-		const next = new Map(current);
-		next.set(modelName, conf);
-		config.embedModels = next;
+		if (!(modelName in config.embedModels)) throw new SetEmbedModelError(provider, modelName);
+		config.embedModels = { ...config.embedModels, [modelName]: conf };
 		this.saveSettings();
 	}
 
 	deleteEmbedModel(provider: string, modelName: string) {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
+		const config = this.#data.providerConfig[provider];
 		if (!config) return;
-		const current = config.embedModels;
-		if (!current.has(modelName)) throw new SetEmbedModelError(provider, modelName);
-		const next = new Map(current);
-		next.delete(modelName);
-		config.embedModels = next;
+		if (!(modelName in config.embedModels)) throw new SetEmbedModelError(provider, modelName);
+		const { [modelName]: _, ...rest } = config.embedModels;
+		config.embedModels = rest;
 		this.saveSettings();
 	}
 
-	getGenModels(provider: string): Map<string, ChatModelConfig> {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
-		return config?.genModels ?? new Map();
+	// --- Chat Model Management (Record-based) ---
+
+	getChatModels(provider: string): Record<string, ChatModelConfig> {
+		const config = this.#data.providerConfig[provider];
+		return config?.chatModels ?? {};
 	}
 
-	addGenModel(provider: string, modelName: string, conf: ChatModelConfig) {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
+	addChatModel(provider: string, modelName: string, conf: ChatModelConfig) {
+		const config = this.#data.providerConfig[provider];
 		if (!config) return;
-		const current = config.genModels;
-		if (current.has(modelName)) throw new AddGenModelError(provider, modelName);
-		const next = new Map(current);
-		next.set(modelName, conf);
-		config.genModels = next;
+		if (modelName in config.chatModels) throw new AddGenModelError(provider, modelName);
+		config.chatModels = { ...config.chatModels, [modelName]: conf };
 		this.saveSettings();
 	}
 
-	updateGenModel(provider: string, modelName: string, conf: ChatModelConfig) {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
+	updateChatModel(provider: string, modelName: string, conf: ChatModelConfig) {
+		const config = this.#data.providerConfig[provider];
 		if (!config) return;
-		const current = config.genModels;
-		if (!current.has(modelName)) throw new SetGenModelError(provider, modelName);
-		const next = new Map(current);
-		next.set(modelName, conf);
-		config.genModels = next;
+		if (!(modelName in config.chatModels)) throw new SetGenModelError(provider, modelName);
+		config.chatModels = { ...config.chatModels, [modelName]: conf };
 		this.saveSettings();
 	}
 
-	deleteGenModel(provider: string, modelName: string) {
-		const config = this.#data.providerConfig[provider as BuiltInProviderId];
+	deleteChatModel(provider: string, modelName: string) {
+		const config = this.#data.providerConfig[provider];
 		if (!config) return;
-		const current = config.genModels;
-		if (!current.has(modelName)) throw new SetGenModelError(provider, modelName);
-		const next = new Map(current);
-		next.delete(modelName);
-		config.genModels = next;
+		if (!(modelName in config.chatModels)) throw new SetGenModelError(provider, modelName);
+		const { [modelName]: _, ...rest } = config.chatModels;
+		config.chatModels = rest;
 
 		// Clear default model if the deleted model was the default
 		const defaultModel = this.#data.defaultChatModel;
@@ -804,39 +721,104 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
-	// Get/set genModels (if present)
-	getProviderGenModels<K extends keyof PluginData["providerConfig"]>(provider: K): Record<string, any> | undefined {
-		return (this.#data.providerConfig[provider] as any).genModels;
+	// Legacy aliases for backward compatibility
+	getGenModels(provider: string): Record<string, ChatModelConfig> {
+		return this.getChatModels(provider);
 	}
-	setProviderGenModels<K extends keyof PluginData["providerConfig"]>(provider: K, value: Record<string, any>) {
-		if ("genModels" in this.#data.providerConfig[provider]) {
-			(this.#data.providerConfig[provider] as any).genModels = value;
+
+	addGenModel(provider: string, modelName: string, conf: ChatModelConfig) {
+		return this.addChatModel(provider, modelName, conf);
+	}
+
+	updateGenModel(provider: string, modelName: string, conf: ChatModelConfig) {
+		return this.updateChatModel(provider, modelName, conf);
+	}
+
+	deleteGenModel(provider: string, modelName: string) {
+		return this.deleteChatModel(provider, modelName);
+	}
+
+	// Get/set chatModels
+	getProviderChatModels(provider: string): Record<string, ChatModelConfig> | undefined {
+		const config = this.#data.providerConfig[provider];
+		return config?.chatModels;
+	}
+
+	setProviderChatModels(provider: string, value: Record<string, ChatModelConfig>) {
+		const config = this.#data.providerConfig[provider];
+		if (config) {
+			config.chatModels = value;
 			this.saveSettings();
 		}
 	}
 
+	// Legacy aliases
+	getProviderGenModels(provider: string): Record<string, ChatModelConfig> | undefined {
+		return this.getProviderChatModels(provider);
+	}
+
+	setProviderGenModels(provider: string, value: Record<string, ChatModelConfig>) {
+		return this.setProviderChatModels(provider, value);
+	}
+
 	// ============================================================================
-	// New Provider System Methods
+	// Provider System Methods
 	// ============================================================================
 
 	/**
-	 * Get list of configured provider IDs (new system).
-	 * Returns IDs of both built-in and custom providers that are configured.
+	 * Validates if a provider ID is a built-in provider.
 	 */
-	getConfiguredProviderIds(): string[] {
-		const result: string[] = [];
+	isBuiltInProviderId(providerId: string): providerId is BuiltInProviderId {
+		return (BUILT_IN_PROVIDER_IDS as readonly string[]).includes(providerId);
+	}
 
-		// Check built-in providers
-		for (const [providerId, config] of Object.entries(this.#data.providerConfig)) {
-			if (config.isConfigured && this.isBuiltInProviderId(providerId)) {
-				result.push(providerId);
+	/**
+	 * Check if a provider ID is a custom provider.
+	 */
+	isCustomProvider(providerId: string): boolean {
+		return providerId in this.#data.customProviderMeta;
+	}
+
+	/**
+	 * Get stored auth state for a provider.
+	 * Returns the stored auth state with secret IDs (not resolved secrets).
+	 */
+	getStoredAuthState(providerId: string): StoredAuthState | undefined {
+		const config = this.#data.providerConfig[providerId];
+		return config?.auth;
+	}
+
+	/**
+	 * Get resolved auth state for a provider.
+	 * Resolves secret IDs to actual secret values and returns AuthObject.
+	 */
+	getResolvedAuthState(providerId: string): AuthObject | undefined {
+		const stored = this.getStoredAuthState(providerId);
+		if (!stored) return undefined;
+
+		const result: AuthObject = {};
+
+		// Copy non-secret values
+		if (stored.values.baseUrl) {
+			result.baseUrl = stored.values.baseUrl;
+		}
+
+		// Parse headers if present
+		if (stored.values.headers) {
+			try {
+				result.headers = JSON.parse(stored.values.headers);
+			} catch {
+				// ignore parse errors
 			}
 		}
 
-		// Add configured custom providers
-		for (const customProvider of this.#customProviders) {
-			if (customProvider.state.isConfigured) {
-				result.push(customProvider.definition.id);
+		// Resolve secret IDs to actual values
+		for (const [fieldName, secretId] of Object.entries(stored.secretIds)) {
+			const secretValue = getSecret(this._plugin.app, secretId as string);
+			if (secretValue) {
+				if (fieldName === "apiKey") {
+					result.apiKey = secretValue;
+				}
 			}
 		}
 
@@ -844,313 +826,167 @@ export class PluginDataStore {
 	}
 
 	/**
-	 * Validates if a provider ID is a built-in provider.
-	 */
-	private isBuiltInProviderId(providerId: string): providerId is BuiltInProviderId {
-		return (BUILT_IN_PROVIDER_IDS as readonly string[]).includes(providerId);
-	}
-
-	/**
-	 * Get stored auth state for a provider (new system).
-	 * Returns the stored auth state with secret IDs (not resolved secrets).
-	 *
-	 * @param providerId - The provider ID (e.g., "openai", "anthropic")
-	 * @returns The stored auth state, or undefined if provider not found
-	 */
-	getStoredAuthState(providerId: string): StoredAuthState | undefined {
-		// Check if it's a built-in provider
-		if (this.isBuiltInProviderId(providerId)) {
-			const config = this.#data.providerConfig[providerId];
-			if (!config) return undefined;
-			return this.convertLegacyAuthToStoredState(config.providerAuth);
-		}
-
-		// Check custom providers
-		const customProvider = this.#customProviders.find((p) => p.definition.id === providerId);
-		if (customProvider) {
-			return customProvider.state.auth;
-		}
-
-		return undefined;
-	}
-
-	/**
-	 * Converts legacy provider auth to new StoredAuthState format.
-	 */
-	private convertLegacyAuthToStoredState(legacyAuth: {
-		apiKeyId?: string;
-		baseUrl?: string;
-		headers?: Record<string, string>;
-	}): StoredFieldBasedAuthState {
-		const values: Record<string, string> = {};
-		const secretIds: Record<string, string> = {};
-
-		// Extract known fields from legacy auth
-		const auth = legacyAuth as {
-			apiKeyId?: string;
-			baseUrl?: string;
-			headers?: Record<string, string>;
-		};
-
-		if (auth.apiKeyId) {
-			secretIds.apiKey = auth.apiKeyId;
-		}
-
-		if (auth.baseUrl) {
-			values.baseUrl = auth.baseUrl;
-		}
-
-		if (auth.headers) {
-			// Store headers as JSON string for backward compatibility
-			values.headers = JSON.stringify(auth.headers);
-		}
-
-		return {
-			type: "field-based",
-			values,
-			secretIds,
-		};
-	}
-
-	/**
-	 * Get resolved auth state for a provider (new system).
-	 * Resolves secret IDs to actual secret values.
-	 *
-	 * @param providerId - The provider ID (e.g., "openai", "anthropic")
-	 * @returns The resolved runtime auth state, or undefined if provider not found
-	 */
-	getResolvedAuthState(providerId: string): RuntimeAuthState | undefined {
-		const stored = this.getStoredAuthState(providerId);
-		if (!stored) return undefined;
-
-		if (stored.type === "field-based") {
-			// Resolve secret IDs to actual values
-			const values: Record<string, string> = { ...stored.values };
-
-			for (const [fieldName, secretId] of Object.entries(stored.secretIds)) {
-				const secretValue = getSecret(this._plugin.app, secretId);
-				if (secretValue) {
-					values[fieldName] = secretValue;
-				}
-			}
-
-			return {
-				type: "field-based",
-				values,
-			};
-		}
-
-		// OAuth tokens are passed through as-is
-		return stored;
-	}
-
-	/**
-	 * Check if a provider is configured (new system).
-	 *
-	 * @param providerId - The provider ID (e.g., "openai", "anthropic")
-	 * @returns true if the provider is configured, false otherwise
+	 * Check if a provider is configured.
 	 */
 	isProviderConfigured(providerId: string): boolean {
-		if (this.isBuiltInProviderId(providerId)) {
-			return this.#data.providerConfig[providerId].isConfigured;
-		}
-
-		// Check custom providers
-		const customProvider = this.#customProviders.find((p) => p.definition.id === providerId);
-		if (customProvider) {
-			return customProvider.state.isConfigured;
-		}
-
-		return false;
+		const config = this.#data.providerConfig[providerId];
+		return config?.isConfigured ?? false;
 	}
 
 	/**
-	 * Set provider configured status (new system).
-	 *
-	 * @param providerId - The provider ID (e.g., "openai", "anthropic")
-	 * @param isConfigured - Whether the provider should be marked as configured
+	 * Set provider configured status.
 	 */
 	setProviderConfigured(providerId: string, isConfigured: boolean): void {
-		if (this.isBuiltInProviderId(providerId)) {
-			const wasConfigured = this.#data.providerConfig[providerId].isConfigured;
-			this.#data.providerConfig[providerId].isConfigured = isConfigured;
+		const config = this.#data.providerConfig[providerId];
+		if (!config) return;
 
-			// If disabling and it was the default model's provider, clear default
-			if (wasConfigured && !isConfigured) {
-				const defaultModel = this.#data.defaultChatModel;
-				if (defaultModel && defaultModel.provider === providerId) {
-					this.#data.defaultChatModel = null;
-				}
+		const wasConfigured = config.isConfigured;
+		config.isConfigured = isConfigured;
+
+		// If disabling and it was the default model's provider, clear default
+		if (wasConfigured && !isConfigured) {
+			const defaultModel = this.#data.defaultChatModel;
+			if (defaultModel && defaultModel.provider === providerId) {
+				this.#data.defaultChatModel = null;
 			}
-
-			this.saveSettings();
-			return;
 		}
 
-		// Handle custom providers
-		const customProvider = this.#customProviders.find((p) => p.definition.id === providerId);
-		if (customProvider) {
-			customProvider.state.isConfigured = isConfigured;
-			this.saveSettings();
-		}
+		this.saveSettings();
 	}
 
 	/**
-	 * Set a stored auth field value (new system).
+	 * Set a stored auth field value.
 	 * For non-secret fields, stores the value directly.
 	 * For secret fields, creates/updates the secret in SecretStorage.
-	 *
-	 * @param providerId - The provider ID
-	 * @param fieldName - The field name (e.g., "apiKey", "baseUrl")
-	 * @param value - The value to store
-	 * @param isSecret - Whether this field should be stored as a secret
 	 */
 	setProviderAuthField(providerId: string, fieldName: string, value: string, isSecret: boolean): void {
-		if (this.isBuiltInProviderId(providerId)) {
-			if (isSecret) {
-				// Store in SecretStorage and save the ID
-				const secretId = `${providerId}-${fieldName}`;
-				setSecret(this._plugin.app, secretId, value);
-				this.setStoredAuthParam(providerId, "apiKeyId", secretId);
-			} else {
-				// Store directly in providerAuth
-				this.setStoredAuthParam(providerId, fieldName, value);
-			}
-			return;
-		}
+		const config = this.#data.providerConfig[providerId];
+		if (!config) return;
 
-		// Handle custom providers
-		const customProvider = this.#customProviders.find((p) => p.definition.id === providerId);
-		if (customProvider && customProvider.state.auth.type === "field-based") {
-			if (isSecret) {
-				const secretId = `${providerId}-${fieldName}`;
-				setSecret(this._plugin.app, secretId, value);
-				customProvider.state.auth.secretIds[fieldName] = secretId;
-			} else {
-				customProvider.state.auth.values[fieldName] = value;
-			}
-			this.saveSettings();
+		if (isSecret) {
+			// Store in SecretStorage and save the ID
+			const secretId = `${providerId}-${fieldName}`;
+			setSecret(this._plugin.app, secretId, value);
+			config.auth.secretIds[fieldName] = secretId;
+		} else {
+			// Store directly
+			config.auth.values[fieldName] = value;
 		}
+		this.saveSettings();
 	}
 
 	/**
-	 * Assign an existing secret ID to a provider field (new system).
+	 * Assign an existing secret ID to a provider field.
 	 * Unlike setProviderAuthField, this doesn't create a new secret - it just
 	 * stores the reference to an existing secret.
-	 *
-	 * @param providerId - The provider ID (e.g., "openai", "anthropic")
-	 * @param fieldName - The field name (e.g., "apiKey")
-	 * @param secretId - The ID of the existing secret to assign
 	 */
 	assignSecretIdToProviderField(providerId: string, fieldName: string, secretId: string): void {
-		if (this.isBuiltInProviderId(providerId)) {
-			// For built-in providers, the apiKey secret ID is stored as apiKeyId
-			this.setStoredAuthParam(providerId, "apiKeyId", secretId);
-			return;
-		}
+		const config = this.#data.providerConfig[providerId];
+		if (!config) return;
 
-		// Handle custom providers
-		const customProvider = this.#customProviders.find((p) => p.definition.id === providerId);
-		if (customProvider && customProvider.state.auth.type === "field-based") {
-			customProvider.state.auth.secretIds[fieldName] = secretId;
-			this.saveSettings();
-		}
+		config.auth.secretIds[fieldName] = secretId;
+		this.saveSettings();
 	}
 
 	// ============================================================================
-	// Custom Provider CRUD Methods
+	// Custom Provider Meta Methods
 	// ============================================================================
 
 	/**
-	 * Get all custom providers.
-	 *
-	 * @returns Array of stored custom providers
+	 * Get custom provider metadata.
 	 */
-	getCustomProviders(): StoredCustomProvider[] {
-		return this.#customProviders;
+	getCustomProviderMeta(providerId: string): CustomProviderMeta | undefined {
+		return this.#data.customProviderMeta[providerId];
 	}
 
 	/**
-	 * Get a custom provider by ID.
-	 *
-	 * @param providerId - The provider ID
-	 * @returns The custom provider, or undefined if not found
+	 * Get all custom provider metadata.
 	 */
-	getCustomProvider(providerId: string): StoredCustomProvider | undefined {
-		return this.#customProviders.find((p) => p.definition.id === providerId);
+	getAllCustomProviderMeta(): Record<string, CustomProviderMeta> {
+		return this.#data.customProviderMeta;
+	}
+
+	/**
+	 * Get all custom provider IDs.
+	 */
+	getCustomProviderIds(): string[] {
+		return Object.keys(this.#data.customProviderMeta);
 	}
 
 	/**
 	 * Add a new custom provider.
+	 * Creates both the metadata entry and the provider state.
 	 *
-	 * @param provider - The custom provider to add
+	 * @param id - Unique provider ID
+	 * @param meta - Provider metadata (displayName, supportsEmbeddings)
 	 * @throws Error if provider ID already exists or conflicts with built-in
 	 */
-	async addCustomProvider(provider: StoredCustomProvider): Promise<void> {
-		const providerId = provider.definition.id;
-
+	async addCustomProvider(id: string, meta: CustomProviderMeta): Promise<void> {
 		// Check if ID conflicts with built-in providers
-		if (isBuiltInProvider(providerId)) {
-			throw new Error(`Cannot use built-in provider ID "${providerId}" for custom provider`);
+		if (this.isBuiltInProviderId(id)) {
+			throw new Error(`Cannot use built-in provider ID "${id}" for custom provider`);
 		}
 
-		// Check if ID already exists in custom providers
-		if (this.#customProviders.some((p) => p.definition.id === providerId)) {
-			throw new Error(`Custom provider with ID "${providerId}" already exists`);
+		// Check if ID already exists
+		if (id in this.#data.providerConfig) {
+			throw new Error(`Provider with ID "${id}" already exists`);
 		}
 
-		this.#customProviders.push(provider);
+		// Add metadata
+		this.#data.customProviderMeta[id] = meta;
+
+		// Add provider state (custom providers are created as configured)
+		this.#data.providerConfig[id] = {
+			isConfigured: true,
+			auth: { values: {}, secretIds: {} },
+			chatModels: {},
+			embedModels: {},
+		};
+
 		await this.saveSettings();
 	}
 
 	/**
-	 * Update an existing custom provider.
+	 * Update custom provider metadata.
 	 *
-	 * @param providerId - The provider ID to update
-	 * @param updates - Partial updates to apply
-	 * @throws Error if provider not found
+	 * @throws Error if provider not found or not a custom provider
 	 */
-	async updateCustomProvider(providerId: string, updates: Partial<StoredCustomProvider>): Promise<void> {
-		const index = this.#customProviders.findIndex((p) => p.definition.id === providerId);
-		if (index === -1) {
+	async updateCustomProviderMeta(providerId: string, updates: Partial<CustomProviderMeta>): Promise<void> {
+		if (!this.isCustomProvider(providerId)) {
 			throw new Error(`Custom provider with ID "${providerId}" not found`);
 		}
 
-		const existing = this.#customProviders[index];
-
-		// Update definition if provided (but preserve the original ID)
-		if (updates.definition) {
-			existing.definition = {
-				...existing.definition,
-				...updates.definition,
-				id: providerId, // Preserve original ID
-			};
-		}
-
-		// Update state if provided
-		if (updates.state) {
-			existing.state = {
-				...existing.state,
-				...updates.state,
-			};
-		}
+		this.#data.customProviderMeta[providerId] = {
+			...this.#data.customProviderMeta[providerId],
+			...updates,
+		};
 
 		await this.saveSettings();
 	}
 
 	/**
 	 * Delete a custom provider.
+	 * Removes both the metadata and provider state.
 	 *
-	 * @param providerId - The provider ID to delete
-	 * @throws Error if provider not found
+	 * @throws Error if provider not found or not a custom provider
 	 */
 	async deleteCustomProvider(providerId: string): Promise<void> {
-		const index = this.#customProviders.findIndex((p) => p.definition.id === providerId);
-		if (index === -1) {
+		if (!this.isCustomProvider(providerId)) {
 			throw new Error(`Custom provider with ID "${providerId}" not found`);
 		}
 
-		this.#customProviders.splice(index, 1);
+		// Remove metadata
+		delete this.#data.customProviderMeta[providerId];
+
+		// Remove provider state
+		delete this.#data.providerConfig[providerId];
+
+		// Clear default model if it was from this provider
+		const defaultModel = this.#data.defaultChatModel;
+		if (defaultModel && defaultModel.provider === providerId) {
+			this.#data.defaultChatModel = null;
+		}
+
 		await this.saveSettings();
 	}
 }

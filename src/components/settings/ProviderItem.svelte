@@ -2,11 +2,9 @@
 import { Accordion } from "bits-ui";
 import type { Component } from "svelte";
 import { createProviderStateQuery, invalidateProviderState } from "../../lib/query";
-import { getProvider } from "../../providers/index";
-import type { LogoProps } from "../../providers/types";
+import { type LogoProps, getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import Button from "../ui/Button.svelte";
-import Toggle from "../ui/Toggle.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import AuthConfigFields from "./AuthConfigFields.svelte";
 import SettingItem from "./SettingItem.svelte";
@@ -20,11 +18,8 @@ const { provider, onAccordionClick }: Props = $props();
 
 const data = getData();
 
-// Get custom providers for provider lookup (stored format without runtime methods)
-let customProviders = $derived(data.getCustomProviders().map((cp) => cp.definition));
-
-// Get provider definition from registry
-let providerDefinition = $derived(getProvider(provider, customProviders));
+// Get provider definition
+let providerDefinition = $derived(getProviderDefinition(provider, data.getAllCustomProviderMeta()));
 
 // Check if provider is configured using new system
 let isConfigured = $derived(data.isProviderConfigured(provider));
@@ -55,40 +50,6 @@ let Logo: Component<LogoProps> = $derived.by(() => {
 		return providerDefinition.logo;
 	}
 	return GenericAIIcon;
-});
-
-// Advanced options state
-let showAdvanced = $state(false);
-
-// Check if provider has any optional auth fields
-let hasOptionalFields = $derived(() => {
-	if (providerDefinition?.auth.type !== "field-based") return false;
-	return Object.values(providerDefinition.auth.fields).some((field) => field.required === false);
-});
-
-// Check if any optional fields have configured values
-let hasOptionalFieldsConfigured = $derived(() => {
-	if (!hasOptionalFields()) return false;
-	const storedAuth = data.getStoredAuthState(provider);
-	if (!storedAuth || storedAuth.type !== "field-based") return false;
-
-	const authFields = providerDefinition?.auth.type === "field-based" ? providerDefinition.auth.fields : null;
-	if (!authFields) return false;
-
-	// Check if any optional field has a value in either values or secretIds
-	return Object.entries(authFields).some(([fieldKey, field]) => {
-		if (field.required !== false) return false;
-		const hasValue = storedAuth.values[fieldKey] && storedAuth.values[fieldKey] !== "";
-		const hasSecretId = storedAuth.secretIds[fieldKey] && storedAuth.secretIds[fieldKey] !== "";
-		return hasValue || hasSecretId;
-	});
-});
-
-// Auto-expand advanced when optional fields have configured values
-$effect(() => {
-	if (hasOptionalFieldsConfigured()) {
-		showAdvanced = true;
-	}
 });
 </script>
 
@@ -166,15 +127,8 @@ $effect(() => {
 		{/if}
 		{/if}
 
-		<!-- Advanced options toggle -->
-		{#if hasOptionalFields()}
-			<SettingItem name="Advanced Options" desc="Show optional configuration fields">
-				<Toggle bind:checked={showAdvanced} />
-			</SettingItem>
-		{/if}
-
-		<!-- Auth configuration fields -->
-		<AuthConfigFields {provider} {showAdvanced} />
+		<!-- Auth configuration fields (includes advanced toggle) -->
+		<AuthConfigFields {provider} />
 
 		{#if !isConfigured}
 			<!-- Add provider button for unconfigured providers -->

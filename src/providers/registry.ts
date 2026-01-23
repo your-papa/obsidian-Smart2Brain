@@ -1,124 +1,286 @@
 /**
- * Provider Registry
+ * Provider Registry (Singleton)
  *
- * Tracks which providers are configured and their authentication state.
- * Delegates to provider definitions for creating LangChain instances.
+ * Runtime registry that manages configured providers.
+ * - Stores configured providers with their definition and auth
+ * - Creates LangChain instances on demand
+ * - Single source of truth for runtime provider access
+ *
+ * The registry only contains CONFIGURED providers.
+ * Settings (dataStore) remains the persistent source of truth.
  */
 
 import type { EmbeddingsInterface } from "@langchain/core/embeddings";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import type {
+	AuthObject,
+	AuthValidationResult,
+	BaseProviderDefinition,
+	ChatModelConfig,
+	CustomProviderMeta,
+} from "../types/provider/index";
 import { ProviderNotFoundError } from "./errors";
-import { getBuiltInProvider } from "./index";
-import type { ChatModelConfig, RuntimeAuthState } from "./types";
+import { getBuiltInProvider, isBuiltInProvider } from "./index";
+import { createOpenAICompatibleProvider } from "./openai-compatible";
 
 /**
- * Internal state for a registered provider.
+ * Entry for a configured provider in the registry.
  */
 interface RegisteredProvider {
-	auth: RuntimeAuthState;
+	definition: BaseProviderDefinition;
+	auth: AuthObject;
 }
 
 /**
- * Registry for configured providers.
+ * Singleton registry for configured providers.
  *
- * Tracks which providers are configured with their auth state.
- * Uses provider definitions to create LangChain instances on demand.
+ * Only contains providers that are configured and ready to use.
+ * Use `getRegistry()` to access the singleton instance.
  */
-export class ProviderRegistry {
+class ProviderRegistry {
+	private static instance: ProviderRegistry | null = null;
+
+	/** Configured providers with their definition and auth */
 	private readonly providers = new Map<string, RegisteredProvider>();
 
+	/** Custom provider metadata (needed to recreate definitions) */
+	private readonly customMeta = new Map<string, CustomProviderMeta>();
+
+	private constructor() {
+		// Private constructor for singleton
+	}
+
 	/**
-	 * Registers a provider with its authentication state.
+	 * Gets the singleton instance.
 	 */
-	registerProvider(name: string, auth: RuntimeAuthState): this {
-		const key = ProviderRegistry.normalizeName(name);
-		this.providers.set(key, { auth });
-		return this;
+	static getInstance(): ProviderRegistry {
+		if (!ProviderRegistry.instance) {
+			ProviderRegistry.instance = new ProviderRegistry();
+		}
+		return ProviderRegistry.instance;
+	}
+
+	/**
+	 * Resets the singleton instance (for testing).
+	 */
+	static resetInstance(): void {
+		ProviderRegistry.instance = null;
+	}
+
+	// =========================================================================
+	// Registration
+	// =========================================================================
+
+	/**
+	 * Registers a configured provider.
+	 *
+	 * @param id - Provider ID
+	 * @param definition - Provider definition
+	 * @param auth - Resolved authentication object
+	 */
+	register(id: string, definition: BaseProviderDefinition, auth: AuthObject): void {
+		this.providers.set(id, { definition, auth });
+	}
+
+	/**
+	 * Registers a custom provider with its metadata.
+	 * Creates the definition from metadata using OpenAI-compatible factory.
+	 *
+	 * @param id - Provider ID
+	 * @param meta - Custom provider metadata
+	 * @param auth - Resolved authentication object
+	 */
+	registerCustom(id: string, meta: CustomProviderMeta, auth: AuthObject): void {
+		this.customMeta.set(id, meta);
+		const definition = createOpenAICompatibleProvider({ id, ...meta });
+		this.providers.set(id, { definition, auth });
 	}
 
 	/**
 	 * Unregisters a provider.
 	 */
-	unregisterProvider(name: string): this {
-		const key = ProviderRegistry.normalizeName(name);
-		this.providers.delete(key);
-		return this;
+	unregister(id: string): void {
+		this.providers.delete(id);
+		this.customMeta.delete(id);
 	}
 
 	/**
-	 * Checks if a provider is registered.
+	 * Clears all registered providers.
 	 */
-	hasProvider(name: string): boolean {
-		return this.providers.has(ProviderRegistry.normalizeName(name));
+	clear(): void {
+		this.providers.clear();
+		this.customMeta.clear();
+	}
+
+	// =========================================================================
+	// Queries
+	// =========================================================================
+
+	/**
+	 * Checks if a provider is registered (configured).
+	 */
+	has(id: string): boolean {
+		return this.providers.has(id);
 	}
 
 	/**
-	 * Lists all registered provider names.
+	 * Gets a provider definition.
+	 * Returns undefined if not registered.
 	 */
-	listProviders(): string[] {
+	get(id: string): BaseProviderDefinition | undefined {
+		return this.providers.get(id)?.definition;
+	}
+
+	/**
+	 * Gets auth for a registered provider.
+	 * Returns undefined if not registered.
+	 */
+	getAuth(id: string): AuthObject | undefined {
+		return this.providers.get(id)?.auth;
+	}
+
+	/**
+	 * Updates auth for a registered provider.
+	 * Does nothing if provider is not registered.
+	 */
+	updateAuth(id: string, auth: AuthObject): void {
+		const entry = this.providers.get(id);
+		if (entry) {
+			entry.auth = auth;
+		}
+	}
+
+	/**
+	 * Lists all registered provider IDs.
+	 */
+	list(): string[] {
 		return Array.from(this.providers.keys());
 	}
 
 	/**
-	 * Gets the auth state for a registered provider.
+	 * Checks if a provider ID is a custom provider.
+	 */
+	isCustom(id: string): boolean {
+		return this.customMeta.has(id);
+	}
+
+	/**
+	 * Gets custom provider metadata.
+	 */
+	getCustomMeta(id: string): CustomProviderMeta | undefined {
+		return this.customMeta.get(id);
+	}
+
+	// =========================================================================
+	// Delegated Operations
+	// =========================================================================
+
+	/**
+	 * Validates auth for a provider.
+	 *
+	 * @param id - Provider ID (must be registered)
 	 * @throws ProviderNotFoundError if provider is not registered
 	 */
-	getAuth(name: string): RuntimeAuthState {
-		const key = ProviderRegistry.normalizeName(name);
-		const provider = this.providers.get(key);
-		if (!provider) {
-			throw new ProviderNotFoundError(name);
+	async validateAuth(id: string): Promise<AuthValidationResult> {
+		const entry = this.providers.get(id);
+		if (!entry) {
+			throw new ProviderNotFoundError(id);
 		}
-		return provider.auth;
+		return entry.definition.validateAuth(entry.auth);
 	}
 
 	/**
-	 * Creates a LangChain chat instance for the given provider and model.
-	 * Delegates to the provider definition's createChatInstance method.
+	 * Discovers available models for a provider.
 	 *
-	 * @param providerId - The provider ID (e.g., "openai", "anthropic", "ollama")
-	 * @param modelId - The model ID (e.g., "gpt-4o", "claude-3-5-sonnet-20241022")
-	 * @param options - Optional model configuration (temperature, contextWindow, etc.)
-	 * @throws ProviderNotFoundError if provider is not registered or not found
+	 * @param id - Provider ID (must be registered)
+	 * @throws ProviderNotFoundError if provider is not registered
 	 */
-	getChatInstance(providerId: string, modelId: string, options?: Partial<ChatModelConfig>): BaseChatModel {
-		const auth = this.getAuth(providerId);
-		const providerDef = getBuiltInProvider(providerId);
-
-		if (!providerDef) {
-			throw new ProviderNotFoundError(providerId);
+	async discoverModels(id: string): Promise<string[]> {
+		const entry = this.providers.get(id);
+		if (!entry) {
+			throw new ProviderNotFoundError(id);
 		}
-
-		return providerDef.createChatInstance(auth, modelId, options);
+		return entry.definition.discoverModels(entry.auth);
 	}
 
 	/**
-	 * Creates a LangChain embedding instance for the given provider and model.
-	 * Delegates to the provider definition's createEmbeddingInstance method.
+	 * Creates a LangChain chat instance.
 	 *
-	 * @param providerId - The provider ID (e.g., "openai", "ollama")
-	 * @param modelId - The model ID (e.g., "text-embedding-3-small", "nomic-embed-text")
-	 * @throws ProviderNotFoundError if provider is not registered, not found, or doesn't support embeddings
+	 * @param id - Provider ID (must be registered)
+	 * @param modelId - Model ID
+	 * @param options - Optional model configuration
+	 * @throws ProviderNotFoundError if provider is not registered
 	 */
-	getEmbeddingInstance(providerId: string, modelId: string): EmbeddingsInterface {
-		const auth = this.getAuth(providerId);
-		const providerDef = getBuiltInProvider(providerId);
-
-		if (!providerDef) {
-			throw new ProviderNotFoundError(providerId);
+	createChatInstance(id: string, modelId: string, options?: Partial<ChatModelConfig>): BaseChatModel {
+		const entry = this.providers.get(id);
+		if (!entry) {
+			throw new ProviderNotFoundError(id);
 		}
-
-		if (!providerDef.createEmbeddingInstance) {
-			throw new Error(`Provider "${providerId}" does not support embeddings`);
-		}
-
-		return providerDef.createEmbeddingInstance(auth, modelId);
+		return entry.definition.createChatInstance(entry.auth, modelId, options);
 	}
 
 	/**
-	 * Normalizes provider names to lowercase.
+	 * Creates a LangChain embedding instance.
+	 *
+	 * @param id - Provider ID (must be registered)
+	 * @param modelId - Model ID
+	 * @throws ProviderNotFoundError if provider is not registered
+	 * @throws Error if provider doesn't support embeddings
 	 */
-	private static normalizeName(name: string): string {
-		return name.trim().toLowerCase();
+	createEmbeddingInstance(id: string, modelId: string): EmbeddingsInterface {
+		const entry = this.providers.get(id);
+		if (!entry) {
+			throw new ProviderNotFoundError(id);
+		}
+		if (!entry.definition.createEmbeddingInstance) {
+			throw new Error(`Provider "${id}" does not support embeddings`);
+		}
+		return entry.definition.createEmbeddingInstance(entry.auth, modelId);
+	}
+
+	// =========================================================================
+	// Static Helpers (don't require registration)
+	// =========================================================================
+
+	/**
+	 * Gets a provider definition without requiring registration.
+	 * Useful for settings UI before a provider is configured.
+	 *
+	 * @param id - Provider ID
+	 * @param customMeta - Custom provider metadata (if custom provider)
+	 */
+	static getDefinition(
+		id: string,
+		customMeta?: Record<string, CustomProviderMeta>,
+	): BaseProviderDefinition | undefined {
+		// Check built-in first
+		if (isBuiltInProvider(id)) {
+			return getBuiltInProvider(id);
+		}
+
+		// Check custom
+		const meta = customMeta?.[id];
+		if (meta) {
+			return createOpenAICompatibleProvider({ id, ...meta });
+		}
+
+		return undefined;
 	}
 }
+
+/**
+ * Gets the singleton provider registry instance.
+ */
+export function getRegistry(): ProviderRegistry {
+	return ProviderRegistry.getInstance();
+}
+
+/**
+ * Resets the registry (for testing).
+ */
+export function resetRegistry(): void {
+	ProviderRegistry.resetInstance();
+}
+
+// Also export the class for type usage
+export { ProviderRegistry };

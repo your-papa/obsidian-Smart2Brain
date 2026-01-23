@@ -4,7 +4,7 @@ import Button from "../../components/ui/Button.svelte";
 import Dropdown from "../../components/ui/Dropdown.svelte";
 import Text from "../../components/ui/Text.svelte";
 import { createModelDiscoveryQuery } from "../../lib/query";
-import type { EmbedModelConfig } from "../../providers/types";
+import type { EmbedModelConfig } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import type { EmbedModelManagementModal } from "./EmbedModelManagement";
 
@@ -28,11 +28,11 @@ const data = getData();
 const query = createModelDiscoveryQuery(() => provider);
 
 let { data: discoveredModels, isPending, isError } = $derived(query);
-let models = $derived(discoveredModels?.embedding ?? []);
+let models = $derived(discoveredModels ?? []);
 
-let embedModels: Map<string, EmbedModelConfig> = $derived(data.getEmbedModels(provider));
+let embedModels: Record<string, EmbedModelConfig> = $derived(data.getEmbedModels(provider));
 
-let configuredModels: string[] = $derived(Array.from(embedModels.keys()));
+let configuredModels: string[] = $derived(Object.keys(embedModels));
 let selectedModel = $derived(!isPending && !isError && models ? models[0] : configuredModels[0]);
 
 let unconfiguredModels: string[] = $derived(models?.filter((model: string) => !configuredModels.includes(model)) ?? []);
@@ -57,11 +57,11 @@ const isModelConfigured = () => configuredModels.includes(selectedModel);
     <div
         class="grid p-3 gap-2 grid-cols-2 border-solid border-x-0 border-t border-b-0 border-[--background-modifier-border]"
     >
-        {#each embedModels as embedModel}
+        {#each Object.entries(embedModels) as [modelName, modelConfig]}
             <div class="community-item">
-                <span>{embedModel[0]}</span>
+                <span>{modelName}</span>
                 <span class="text-muted text-xs pt-1 leading-tight"
-                    >{embedModel[1].similarityThreshold}</span
+                    >{modelConfig.similarityThreshold}</span
                 >
             </div>
         {/each}
@@ -96,7 +96,7 @@ const isModelConfigured = () => configuredModels.includes(selectedModel);
                 onSelect={(model: string) => {
                     selectedModel = model;
                     if (isModelConfigured())
-                        embedConfig = embedModels.get(selectedModel)!;
+                        embedConfig = embedModels[selectedModel];
                     else embedConfig = embedModelSettings.defaults;
                 }}
                 style={"!max-w-40"}

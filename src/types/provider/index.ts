@@ -5,38 +5,29 @@
  */
 
 // Model configuration types
-export type { ChatModelConfig, EmbedModelConfig } from "./models.ts";
+export type { ChatModelConfig, EmbedModelConfig } from "./models";
 
 // Auth types
 export type {
-	StandardAuthFieldKey,
+	AuthObjectKey,
 	AuthFieldDefinition,
-	FieldBasedAuth,
-	OAuthTokens,
-	OAuthAuth,
-	AuthMethod,
-} from "./auth.ts";
-
-// Stored state types
-export type { StoredFieldBasedAuthState, StoredOAuthAuthState, StoredAuthState } from "./stored.ts";
-
-// Runtime types
-export type {
-	RuntimeFieldBasedAuthState,
-	RuntimeOAuthAuthState,
-	RuntimeAuthState,
-} from "./runtime.ts";
+	AuthObject,
+	RequiredAuthField,
+	OptionalAuthField,
+	ProviderAuthConfig,
+} from "./auth";
 
 // Provider definition types
 export type {
 	LogoProps,
-	ProviderCapabilities,
 	ProviderSetupInstructions,
 	AuthValidationResult,
-	DiscoveredModels,
 	BaseProviderDefinition,
-	BuiltInProviderDefinition,
-	CustomProviderDefinition,
-	ProviderDefinition,
-	StoredCustomProviderDefinition,
-} from "./definition.ts";
+	EmbeddingProviderDefinition,
+} from "./definition";
+
+// Provider definition type guard
+export { isEmbeddingProvider } from "./definition";
+
+// Stored provider types
+export type { CustomProviderMeta } from "./stored";

@@ -2,7 +2,7 @@ import { Notice, type TFile } from "obsidian";
 import type { ThreadHistory } from "../agent/Agent";
 import type { AgentManager } from "../agent/AgentManager";
 import type { ThreadMessage } from "../agent/messages/ThreadMessage";
-import type { ChatModelConfig } from "../providers/types";
+import type { ChatModelConfig } from "../providers/index";
 import type { ThreadError } from "../types/shared";
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { getData } from "./dataStore.svelte";

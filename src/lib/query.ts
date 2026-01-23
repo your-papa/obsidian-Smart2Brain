@@ -1,8 +1,7 @@
 import { createQuery } from "@tanstack/svelte-query";
 import { QueryClient } from "@tanstack/svelte-query";
 import type { AuthValidationResult } from "../agent/AgentManager";
-import { getBuiltInProvider } from "../providers";
-import type { DiscoveredModels } from "../providers/types";
+import { getProviderDefinition } from "../providers";
 import { getData } from "../stores/dataStore.svelte";
 import { getPlugin } from "../stores/state.svelte";
 
@@ -10,7 +9,7 @@ import { getPlugin } from "../stores/state.svelte";
  * Query functions for provider state management.
  *
  * These functions use the new provider ID system (lowercase IDs like "openai", "anthropic").
- * Auth state is resolved using dataStore.getResolvedAuthState() which returns RuntimeAuthState.
+ * Auth state is resolved using dataStore.getResolvedAuthState() which returns AuthObject.
  */
 
 // Create a global QueryClient instance
@@ -31,13 +30,8 @@ export function getQueryClient() {
 
 export interface ProviderState {
 	auth: AuthValidationResult;
-	models: DiscoveredModels;
+	models: string[];
 }
-
-/**
- * Empty models result used when discovery fails or is not available.
- */
-const EMPTY_MODELS: DiscoveredModels = { chat: [], embedding: [] };
 
 /**
  * Combined query for provider auth state and available models.
@@ -54,13 +48,14 @@ export function createProviderStateQuery(provider: () => string) {
 		queryKey: ["provider", provider()],
 		queryFn: async () => {
 			const providerId = provider();
+
 			// Get resolved auth state (with secrets resolved)
 			const resolvedAuth = data.getResolvedAuthState(providerId);
 
 			if (!resolvedAuth) {
 				return {
 					auth: { success: false, message: `No auth configuration found for ${providerId}` },
-					models: EMPTY_MODELS,
+					models: [],
 				};
 			}
 
@@ -69,27 +64,27 @@ export function createProviderStateQuery(provider: () => string) {
 
 			// Only fetch models if auth succeeded
 			if (!auth.success) {
-				return { auth, models: EMPTY_MODELS };
+				return { auth, models: [] };
 			}
 
 			// Get provider definition for model discovery
-			// TODO: Add support for custom providers once StoredCustomProvider -> CustomProviderDefinition conversion is implemented
-			const providerDef = getBuiltInProvider(providerId);
+			const providerDef = getProviderDefinition(providerId, data.getAllCustomProviderMeta());
+
 			if (!providerDef) {
-				return { auth, models: EMPTY_MODELS };
+				return { auth, models: [] };
 			}
 
 			// Discover models from the provider's API
 			try {
-				const discovered = await providerDef.discoverModels(resolvedAuth);
-				return { auth, models: discovered };
+				const models = await providerDef.discoverModels(resolvedAuth);
+				return { auth, models };
 			} catch (error) {
 				// Model discovery failed - return error and empty models
 				const errorMessage = error instanceof Error ? error.message : String(error);
 				console.warn(`Model discovery failed for ${providerId}:`, errorMessage);
 				return {
 					auth: { success: false, message: `Model discovery failed: ${errorMessage}` },
-					models: EMPTY_MODELS,
+					models: [],
 				};
 			}
 		},
@@ -118,7 +113,6 @@ export function invalidateAllProviders() {
 	});
 }
 
-// Legacy exports for backward compatibility
 /**
  * Query for provider auth state only (without models).
  *
@@ -162,14 +156,14 @@ export function invalidateAuthState(provider: string) {
 }
 
 /**
- * Query for model discovery - returns all available models (chat and embedding).
+ * Query for model discovery - returns all available models.
  *
  * @param provider - Function returning the provider ID (e.g., "openai", "anthropic")
  */
 export function createModelDiscoveryQuery(provider: () => string) {
 	const data = getData();
 
-	return createQuery<DiscoveredModels>(() => ({
+	return createQuery<string[]>(() => ({
 		queryKey: ["models", provider()],
 		queryFn: async () => {
 			const providerId = provider();
@@ -177,13 +171,13 @@ export function createModelDiscoveryQuery(provider: () => string) {
 			// Get resolved auth state (with secrets resolved)
 			const resolvedAuth = data.getResolvedAuthState(providerId);
 			if (!resolvedAuth) {
-				return EMPTY_MODELS;
+				return [];
 			}
 
 			// Get provider definition for model discovery
-			const providerDef = getBuiltInProvider(providerId);
+			const providerDef = getProviderDefinition(providerId, data.getAllCustomProviderMeta());
 			if (!providerDef) {
-				return EMPTY_MODELS;
+				return [];
 			}
 
 			// Discover models from the provider's API
@@ -191,7 +185,7 @@ export function createModelDiscoveryQuery(provider: () => string) {
 				return await providerDef.discoverModels(resolvedAuth);
 			} catch (error) {
 				console.warn(`Model discovery failed for ${providerId}:`, error);
-				return EMPTY_MODELS;
+				return [];
 			}
 		},
 	}));

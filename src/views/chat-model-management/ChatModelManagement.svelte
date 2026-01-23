@@ -4,7 +4,7 @@ import Button from "../../components/ui/Button.svelte";
 import Dropdown from "../../components/ui/Dropdown.svelte";
 import Text from "../../components/ui/Text.svelte";
 import { createModelDiscoveryQuery, invalidateProviderState } from "../../lib/query";
-import type { ChatModelConfig } from "../../providers/types";
+import type { ChatModelConfig } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import type { ChatModelManagementModal } from "./ChatModelManagement";
 
@@ -29,9 +29,9 @@ const data = getData();
 const query = createModelDiscoveryQuery(() => provider);
 
 let { data: discoveredModels, isPending, isError } = $derived(query);
-let models = $derived(discoveredModels?.chat ?? []);
+let models = $derived(discoveredModels ?? []);
 
-let genModels = $derived.by<Map<string, ChatModelConfig>>(() => {
+let genModels = $derived.by<Record<string, ChatModelConfig>>(() => {
 	const confGenModels = data.getGenModels(provider);
 
 	const allowedKeys = new Set(
@@ -40,11 +40,11 @@ let genModels = $derived.by<Map<string, ChatModelConfig>>(() => {
 
 	if (allowedKeys.size === 0) return confGenModels;
 
-	return new Map(Array.from(confGenModels.entries()).filter(([key]) => allowedKeys.has(key)));
+	return Object.fromEntries(Object.entries(confGenModels).filter(([key]) => allowedKeys.has(key)));
 });
 
 let configuredModels: string[] = $derived(
-	models.filter((model: string) => Array.from(data.getGenModels(provider).keys()).includes(model)),
+	models.filter((model: string) => Object.keys(data.getGenModels(provider)).includes(model)),
 );
 let selectedModel = $derived(!isPending && !isError && models.length > 0 ? models[0] : configuredModels[0]);
 
@@ -83,21 +83,21 @@ function handleSaveModel() {
     <div
         class="grid p-3 gap-2 grid-cols-3 border-solid border-x-0 border-t border-b-0 border-[--background-modifier-border]"
     >
-        {#each genModels as genModel}
+        {#each Object.entries(genModels) as [modelName, modelConfig]}
             <div class="community-item">
                 <div class="flex items-center">
-                    <span>{genModel[0]}</span>
+                    <span>{modelName}</span>
                     <Button
                         styles={"ml-auto hover:text-[--text-error]"}
                         iconId="trash"
-                        onClick={() => handleDeleteModel(genModel[0])}
+                        onClick={() => handleDeleteModel(modelName)}
                     />
                 </div>
                 <span class="text-muted text-xs pt-1 leading-tight"
-                    >{genModel[1].contextWindow}</span
+                    >{modelConfig.contextWindow}</span
                 >
                 <span class="text-muted text-xs pt-1 leading-tight"
-                    >{genModel[1].temperature}</span
+                    >{modelConfig.temperature}</span
                 >
             </div>
         {/each}
@@ -131,7 +131,7 @@ function handleSaveModel() {
                 onSelect={(model: string) => {
                     selectedModel = model;
                     if (isModelConfigured())
-                        genModelConfig = genModels.get(selectedModel)!;
+                        genModelConfig = genModels[selectedModel];
                     else genModelConfig = chatModelSettings.defaults;
                 }}
                 style={"!max-w-40"}

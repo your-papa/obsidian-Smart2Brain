@@ -13,6 +13,7 @@ import {
 	builtInProviders,
 	ollamaProvider,
 	openaiProvider,
+	openrouterProvider,
 } from "../../../src/providers/builtin/index.ts";
 import type { BuiltInProviderDefinition } from "../../../src/providers/types.ts";
 
@@ -35,6 +36,12 @@ describe("builtin/index barrel export", () => {
 			expect(ollamaProvider.id).toBe("ollama");
 			expect(ollamaProvider.isBuiltIn).toBe(true);
 		});
+
+		it("exports openrouterProvider", () => {
+			expect(openrouterProvider).toBeDefined();
+			expect(openrouterProvider.id).toBe("openrouter");
+			expect(openrouterProvider.isBuiltIn).toBe(true);
+		});
 	});
 
 	describe("builtInProviders record", () => {
@@ -44,14 +51,15 @@ describe("builtin/index barrel export", () => {
 		});
 
 		it("contains all built-in providers", () => {
-			expect(Object.keys(builtInProviders)).toHaveLength(3);
-			expect(Object.keys(builtInProviders).sort()).toEqual(["anthropic", "ollama", "openai"]);
+			expect(Object.keys(builtInProviders)).toHaveLength(4);
+			expect(Object.keys(builtInProviders).sort()).toEqual(["anthropic", "ollama", "openai", "openrouter"]);
 		});
 
 		it("maps provider ids to provider definitions", () => {
 			expect(builtInProviders.openai).toBe(openaiProvider);
 			expect(builtInProviders.anthropic).toBe(anthropicProvider);
 			expect(builtInProviders.ollama).toBe(ollamaProvider);
+			expect(builtInProviders.openrouter).toBe(openrouterProvider);
 		});
 
 		it("each provider id matches the key", () => {
@@ -73,7 +81,6 @@ describe("builtin/index barrel export", () => {
 				expect(typeof provider.displayName).toBe("string");
 				expect(typeof provider.auth).toBe("object");
 				expect(typeof provider.capabilities).toBe("object");
-				expect(typeof provider.createRuntimeDefinition).toBe("function");
 				expect(typeof provider.validateAuth).toBe("function");
 
 				// isBuiltIn must be true for BuiltInProviderDefinition
@@ -108,6 +115,12 @@ describe("builtin/index barrel export", () => {
 			expect(builtInProviders.ollama.capabilities.embedding).toBe(true);
 			expect(builtInProviders.ollama.capabilities.modelDiscovery).toBe(true);
 		});
+
+		it("openrouter supports chat and modelDiscovery (no embedding)", () => {
+			expect(builtInProviders.openrouter.capabilities.chat).toBe(true);
+			expect(builtInProviders.openrouter.capabilities.embedding).toBe(false);
+			expect(builtInProviders.openrouter.capabilities.modelDiscovery).toBe(true);
+		});
 	});
 
 	describe("provider lookup by id", () => {
@@ -124,6 +137,11 @@ describe("builtin/index barrel export", () => {
 		it("can look up ollama provider by id", () => {
 			const provider = builtInProviders.ollama;
 			expect(provider.displayName).toBe("Ollama");
+		});
+
+		it("can look up openrouter provider by id", () => {
+			const provider = builtInProviders.openrouter;
+			expect(provider.displayName).toBe("OpenRouter");
 		});
 
 		it("returns undefined for non-existent provider id", () => {

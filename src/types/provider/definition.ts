@@ -7,9 +7,8 @@
 import type { EmbeddingsInterface } from "@langchain/core/embeddings";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { Component } from "svelte";
-import type { AuthMethod } from "./auth.ts";
+import type { AuthObject, ProviderAuthConfig } from "./auth.ts";
 import type { ChatModelConfig } from "./models.ts";
-import type { RuntimeAuthState } from "./runtime.ts";
 
 /**
  * Props for provider logo components.
@@ -18,20 +17,6 @@ export interface LogoProps {
 	width?: number;
 	height?: number;
 	class?: string;
-}
-
-/**
- * Declares what features a provider supports.
- */
-export interface ProviderCapabilities {
-	/** Whether this provider supports chat/completion models. */
-	chat: boolean;
-
-	/** Whether this provider supports embedding models. */
-	embedding: boolean;
-
-	/** Whether this provider can discover models via API. */
-	modelDiscovery: boolean;
 }
 
 /**
@@ -54,17 +39,6 @@ export interface ProviderSetupInstructions {
 export type AuthValidationResult = { valid: true } | { valid: false; error: string };
 
 /**
- * Result of discovering models from a provider's API.
- */
-export interface DiscoveredModels {
-	/** Available chat model IDs discovered from the provider's API. */
-	chat: string[];
-
-	/** Available embedding model IDs discovered from the provider's API. */
-	embedding: string[];
-}
-
-/**
  * Base interface for all provider definitions.
  */
 export interface BaseProviderDefinition {
@@ -80,60 +54,34 @@ export interface BaseProviderDefinition {
 	/** Instructions for setting up this provider. */
 	setupInstructions: ProviderSetupInstructions;
 
-	/** Authentication configuration for this provider. */
-	auth: AuthMethod;
-
-	/** What features this provider supports. */
-	capabilities: ProviderCapabilities;
+	/** Authentication field definitions for this provider. At least one field must be required. */
+	auth: ProviderAuthConfig;
 
 	/** Creates a LangChain chat instance (e.g., ChatOpenAI, ChatAnthropic, ChatOllama). */
-	createChatInstance: (auth: RuntimeAuthState, modelId: string, options?: Partial<ChatModelConfig>) => BaseChatModel;
-
-	/** Creates a LangChain embedding instance (optional - not all providers support embeddings). */
-	createEmbeddingInstance?: (auth: RuntimeAuthState, modelId: string) => EmbeddingsInterface;
+	createChatInstance: (auth: AuthObject, modelId: string, options?: Partial<ChatModelConfig>) => BaseChatModel;
 
 	/** Validates authentication credentials for this provider. */
-	validateAuth: (auth: RuntimeAuthState) => Promise<AuthValidationResult>;
+	validateAuth: (auth: AuthObject) => Promise<AuthValidationResult>;
 
 	/** Discovers available models from the provider's API. */
-	discoverModels: (auth: RuntimeAuthState) => Promise<DiscoveredModels>;
+	discoverModels: (auth: AuthObject) => Promise<string[]>;
+
+	/** Creates a LangChain embedding instance (optional - use EmbeddingProviderDefinition for type safety). */
+	createEmbeddingInstance?: (auth: AuthObject, modelId: string) => EmbeddingsInterface;
 }
 
 /**
- * Built-in provider definition for providers shipped with the plugin.
+ * Interface for providers that support embedding models.
+ * Extends BaseProviderDefinition with required createEmbeddingInstance method.
  */
-export interface BuiltInProviderDefinition extends BaseProviderDefinition {
-	/** Discriminator indicating this is a built-in provider. */
-	isBuiltIn: true;
+export interface EmbeddingProviderDefinition extends BaseProviderDefinition {
+	/** Creates a LangChain embedding instance. */
+	createEmbeddingInstance: (auth: AuthObject, modelId: string) => EmbeddingsInterface;
 }
 
 /**
- * Custom provider definition for providers created by users.
+ * Type guard to check if a provider supports embeddings.
  */
-export interface CustomProviderDefinition extends BaseProviderDefinition {
-	/** Discriminator indicating this is a custom (user-created) provider. */
-	isBuiltIn: false;
-
-	/** The base provider template this custom provider is based on. */
-	baseProviderId: string;
-
-	/** Unix timestamp when this custom provider was created. */
-	createdAt: number;
+export function isEmbeddingProvider(provider: BaseProviderDefinition): provider is EmbeddingProviderDefinition {
+	return typeof provider.createEmbeddingInstance === "function";
 }
-
-/**
- * Union type for any provider definition (built-in or custom).
- */
-export type ProviderDefinition = BuiltInProviderDefinition | CustomProviderDefinition;
-
-/**
- * Custom provider definition without runtime methods.
- *
- * This type represents what's actually stored in data.json for custom providers.
- * Runtime methods (createChatInstance, createEmbeddingInstance, validateAuth, discoverModels) and
- * logo component are provided by the base provider template at runtime, not stored.
- */
-export type StoredCustomProviderDefinition = Omit<
-	CustomProviderDefinition,
-	"createChatInstance" | "createEmbeddingInstance" | "validateAuth" | "discoverModels" | "logo"
->;

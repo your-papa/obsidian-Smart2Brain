@@ -20,14 +20,12 @@ import { createSearchNotesTool } from "./tools/searchNotes";
 
 // New provider system imports
 import {
-	type BuiltInProviderId,
+	type AuthObject,
 	ProviderAuthError as NewProviderAuthError,
 	ProviderEndpointError as NewProviderEndpointError,
-	type RuntimeAuthState,
-	type RuntimeFieldBasedAuthState,
-	getBuiltInProvider,
-	isBuiltInProvider,
+	getProviderDefinition,
 } from "../providers/index";
+import { getRegistry } from "../providers/registry";
 
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { TFile } from "obsidian";
@@ -43,25 +41,22 @@ interface BuiltInProviderOptions {
 }
 
 /**
- * Converts BuiltInProviderOptions to RuntimeFieldBasedAuthState.
+ * Converts BuiltInProviderOptions to AuthObject.
  */
-function convertToRuntimeAuthState(options: BuiltInProviderOptions): RuntimeFieldBasedAuthState {
-	const values: Record<string, string> = {};
+function convertToAuthObject(options: BuiltInProviderOptions): AuthObject {
+	const auth: AuthObject = {};
 
 	if (options.apiKey) {
-		values.apiKey = options.apiKey;
+		auth.apiKey = options.apiKey;
 	}
 	if (options.baseUrl) {
-		values.baseUrl = options.baseUrl;
+		auth.baseUrl = options.baseUrl;
 	}
 	if (options.headers) {
-		values.headers = typeof options.headers === "string" ? options.headers : JSON.stringify(options.headers);
+		auth.headers = typeof options.headers === "string" ? JSON.parse(options.headers) : options.headers;
 	}
 
-	return {
-		type: "field-based",
-		values,
-	};
+	return auth;
 }
 
 /** Result of provider authentication validation */
@@ -94,12 +89,15 @@ export class AgentManager {
 	private plugin: SecondBrainPlugin;
 	private agent: Agent | null = null;
 	private chatManager: ObsidianChatManager;
-	private registry: ProviderRegistry;
 
 	constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
 		this.chatManager = new ObsidianChatManager(plugin);
-		this.registry = new ProviderRegistry();
+	}
+
+	/** Get the singleton registry instance */
+	private get registry(): ProviderRegistry {
+		return getRegistry();
 	}
 
 	/**
@@ -166,10 +164,10 @@ export class AgentManager {
 		try {
 			if (!providerId) return [];
 
-			// Use model discovery from provider definition
-			const providerDef = getBuiltInProvider(providerId);
+			const pluginData = getData();
+			const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+
 			if (providerDef) {
-				const pluginData = getData();
 				const resolvedAuth = pluginData.getResolvedAuthState(providerId);
 				if (!resolvedAuth) {
 					return [];
@@ -177,7 +175,7 @@ export class AgentManager {
 
 				try {
 					const discovered = await providerDef.discoverModels(resolvedAuth);
-					return discovered.chat;
+					return discovered;
 				} catch (error) {
 					console.warn(`Model discovery failed for ${providerId}:`, error);
 					return [];
@@ -192,45 +190,49 @@ export class AgentManager {
 	}
 
 	/**
-	 * Configures a provider on the registry with its auth state.
+	 * Registers a provider on the registry with its auth state.
 	 */
-	private configureProvider(providerId: string, options: BuiltInProviderOptions): void {
-		const providerDef = getBuiltInProvider(providerId);
+	private registerProvider(providerId: string, auth: AuthObject): void {
+		const pluginData = getData();
+		const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
 
 		if (!providerDef) {
 			throw new Error(`Unknown provider: ${providerId}`);
 		}
 
-		this.registry.registerProvider(providerId, convertToRuntimeAuthState(options));
+		// Check if it's a custom provider
+		const customMeta = pluginData.getCustomProviderMeta(providerId);
+		if (customMeta) {
+			this.registry.registerCustom(providerId, customMeta, auth);
+		} else {
+			this.registry.register(providerId, providerDef, auth);
+		}
 	}
 
 	/**
-	 * Tests and configures a provider on the actual registry.
+	 * Tests and registers a provider on the actual registry.
 	 * Returns an AuthValidationResult indicating success or failure with a message.
 	 *
-	 * This method now uses the new provider's validateAuth method for validation,
-	 * which provides more accurate error messages and consistent validation logic.
-	 */
-	/**
 	 * @deprecated Use validateProviderAuth() with new provider IDs instead.
 	 */
 	async testProviderConfig(providerId: string, options: BuiltInProviderOptions): Promise<AuthValidationResult> {
-		const providerDef = getBuiltInProvider(providerId);
+		const pluginData = getData();
+		const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
 
 		if (!providerDef) {
 			return { success: false, message: `Unknown provider: ${providerId}` };
 		}
 
-		const authState = convertToRuntimeAuthState(options);
+		const auth = convertToAuthObject(options);
 
 		try {
-			const validationResult = await providerDef.validateAuth(authState);
+			const validationResult = await providerDef.validateAuth(auth);
 
 			if (!validationResult.valid) {
 				return { success: false, message: validationResult.error };
 			}
 
-			this.configureProvider(providerId, options);
+			this.registerProvider(providerId, auth);
 			return { success: true };
 		} catch (error) {
 			if (error instanceof NewProviderAuthError || error instanceof ProviderAuthError) {
@@ -258,16 +260,13 @@ export class AgentManager {
 	/**
 	 * Validates provider authentication using the new provider ID system.
 	 *
-	 * This method accepts new lowercase provider IDs (e.g., "openai", "anthropic")
-	 * and RuntimeAuthState directly, without requiring legacy type conversions.
-	 *
 	 * @param providerId - The provider ID (e.g., "openai", "anthropic", "ollama")
 	 * @param auth - The runtime auth state with resolved secrets
 	 * @returns AuthValidationResult indicating success or failure
 	 */
-	async validateProviderAuth(providerId: string, auth: RuntimeAuthState): Promise<AuthValidationResult> {
-		// Get provider definition
-		const providerDef = getBuiltInProvider(providerId);
+	async validateProviderAuth(providerId: string, auth: AuthObject): Promise<AuthValidationResult> {
+		const pluginData = getData();
+		const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
 
 		if (!providerDef) {
 			return { success: false, message: `Unknown provider: ${providerId}` };
@@ -379,22 +378,24 @@ export class AgentManager {
 		// Cleanup existing agent if any
 		this.agent = null;
 
-		// Reset registry for fresh configuration
-		this.registry = new ProviderRegistry();
+		// Clear and re-register all configured providers
+		this.registry.clear();
 
 		const pluginData = getData();
 
-		// Configure all providers - use for...of to properly await each
+		// Register all configured providers
 		const configuredProviders = pluginData.getConfiguredProviders();
 		const unavailableProviders: string[] = [];
-		for (const provider of configuredProviders) {
-			// Resolve secrets from SecretStorage to get actual API keys
-			const options = pluginData.getResolvedProviderAuth(provider);
+		for (const providerId of configuredProviders) {
+			// Resolve secrets from SecretStorage to get actual auth
+			const auth = pluginData.getResolvedAuthState(providerId);
+			if (!auth) continue;
+
 			try {
-				this.configureProvider(provider, options);
+				this.registerProvider(providerId, auth);
 			} catch (error) {
 				if (error instanceof ProviderEndpointError) {
-					unavailableProviders.push(provider);
+					unavailableProviders.push(providerId);
 					continue;
 				}
 				throw error;
@@ -405,7 +406,7 @@ export class AgentManager {
 			new Notice(`Cannot connect to: ${unavailableProviders.join(", ")}. Check that the service is running.`);
 		}
 
-		console.log(this.registry);
+		console.log("[AgentManager] Registry initialized with providers:", this.registry.list());
 
 		// Configure Telemetry (use getData())
 		const telemetry = this.configureTelemetry();

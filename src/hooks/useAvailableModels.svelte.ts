@@ -28,10 +28,10 @@ export class AvailableModels {
 		const out: ChatModel[] = [];
 		this.#providers.forEach((provider, idx) => {
 			const state = this.#providerQueries[idx]?.data;
-			// models is now DiscoveredModels { chat: string[], embedding: string[] }
-			const discoveredModels = state?.models?.chat ?? [];
+			// models is now string[]
+			const discoveredModels = state?.models ?? [];
 			const confModels = this.#data.getGenModels(provider);
-			for (const [modelName, modelConfig] of confModels.entries()) {
+			for (const [modelName, modelConfig] of Object.entries(confModels)) {
 				if (discoveredModels.includes(modelName)) {
 					out.push({ model: modelName, provider, modelConfig });
 				}

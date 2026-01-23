@@ -1,32 +1,9 @@
-import type { BuiltInProviderId, ChatModelConfig, EmbedModelConfig } from "../providers/index";
 import type { ChatModel } from "../stores/chatStore.svelte";
+import type { StoredProviderState } from "../stores/dataStore.svelte";
+import type { CustomProviderMeta } from "../types/provider/index";
 import type { UUIDv7 } from "../utils/uuid7Validator";
 
 export type SearchAlgorithm = "grep" | "omnisearch" | "embeddings";
-
-/**
- * Legacy provider auth stored format.
- */
-interface LegacyStoredProviderAuth {
-	apiKeyId?: string;
-	baseUrl?: string;
-	headers?: Record<string, string>;
-}
-
-/**
- * Legacy provider configuration structure.
- */
-interface LegacyProviderConfig {
-	isConfigured: boolean;
-	providerAuth: LegacyStoredProviderAuth;
-	embedModels: Map<string, EmbedModelConfig>;
-	genModels: Map<string, ChatModelConfig>;
-}
-
-/**
- * Provider configurations for all built-in providers.
- */
-export type ProviderConfigs = Record<BuiltInProviderId, LegacyProviderConfig>;
 
 /**
  * Configuration for a plugin-specific prompt extension.
@@ -44,7 +21,10 @@ export interface PluginPromptExtension {
 }
 
 export interface PluginData {
-	providerConfig: ProviderConfigs;
+	/** All provider states - built-in (pre-populated) + custom (user-created) */
+	providerConfig: Record<string, StoredProviderState>;
+	/** Extra metadata ONLY for custom providers (displayName, supportsEmbeddings) */
+	customProviderMeta: Record<string, CustomProviderMeta>;
 	systemPrompt: string;
 	pluginPromptExtensions: Record<string, PluginPromptExtension>;
 	initialAssistantMessageContent: string;
