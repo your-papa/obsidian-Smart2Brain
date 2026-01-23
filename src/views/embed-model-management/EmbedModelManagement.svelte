@@ -1,19 +1,16 @@
 <script lang="ts">
-import { createQuery } from "@tanstack/svelte-query";
 import SettingContainer from "../../components/settings/SettingContainer.svelte";
 import Button from "../../components/ui/Button.svelte";
 import Dropdown from "../../components/ui/Dropdown.svelte";
 import Text from "../../components/ui/Text.svelte";
-import type SecondBrainPlugin from "../../main";
+import { createModelDiscoveryQuery } from "../../lib/query";
+import type { EmbedModelConfig } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import type { EmbedModelConfig } from "../../types/providers";
-import type { EmbedProviders } from "../../types/providers";
 import type { EmbedModelManagementModal } from "./EmbedModelManagement";
 
 interface Props {
 	modal: EmbedModelManagementModal;
-	provider: EmbedProviders;
+	provider: string;
 	config?: EmbedModelConfig;
 }
 
@@ -26,25 +23,19 @@ const embedModelSettings = {
 
 let { modal, provider, config }: Props = $props();
 
-const plugin: SecondBrainPlugin = getPlugin();
 const data = getData();
 
-const query = createQuery(() => ({
-	queryKey: ["models", provider],
-	queryFn: async (): Promise<string[]> => {
-		// TODO: Implement provider registry for fetching available models
-		return [];
-	},
-}));
+const query = createModelDiscoveryQuery(() => provider);
 
-let { data: models, isPending, isError } = $derived(query);
+let { data: discoveredModels, isPending, isError } = $derived(query);
+let models = $derived(discoveredModels ?? []);
 
-let embedModels: Map<string, EmbedModelConfig> = $derived(data.getEmbedModels(provider));
+let embedModels: Record<string, EmbedModelConfig> = $derived(data.getEmbedModels(provider));
 
-let configuredModels: string[] = $derived(Array.from(embedModels.keys()));
+let configuredModels: string[] = $derived(Object.keys(embedModels));
 let selectedModel = $derived(!isPending && !isError && models ? models[0] : configuredModels[0]);
 
-let unconfiguredModels: string[] = $derived(models?.filter((model) => !configuredModels.includes(model)) ?? []);
+let unconfiguredModels: string[] = $derived(models?.filter((model: string) => !configuredModels.includes(model)) ?? []);
 
 let embedConfig: EmbedModelConfig = $state(embedModelSettings.defaults);
 
@@ -66,11 +57,11 @@ const isModelConfigured = () => configuredModels.includes(selectedModel);
     <div
         class="grid p-3 gap-2 grid-cols-2 border-solid border-x-0 border-t border-b-0 border-[--background-modifier-border]"
     >
-        {#each embedModels as embedModel}
+        {#each Object.entries(embedModels) as [modelName, modelConfig]}
             <div class="community-item">
-                <span>{embedModel[0]}</span>
+                <span>{modelName}</span>
                 <span class="text-muted text-xs pt-1 leading-tight"
-                    >{embedModel[1].similarityThreshold}</span
+                    >{modelConfig.similarityThreshold}</span
                 >
             </div>
         {/each}
@@ -105,7 +96,7 @@ const isModelConfigured = () => configuredModels.includes(selectedModel);
                 onSelect={(model: string) => {
                     selectedModel = model;
                     if (isModelConfigured())
-                        embedConfig = embedModels.get(selectedModel)!;
+                        embedConfig = embedModels[selectedModel];
                     else embedConfig = embedModelSettings.defaults;
                 }}
                 style={"!max-w-40"}

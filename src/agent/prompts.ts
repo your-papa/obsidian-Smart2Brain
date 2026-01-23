@@ -124,24 +124,24 @@ The chat supports MathJax rendering.
  * pluginId must match the Obsidian plugin ID used in app.plugins.enabledPlugins
  */
 export const DEFAULT_PLUGIN_EXTENSIONS: Record<string, PluginPromptExtension> = {
-  dataview: {
-    pluginId: "dataview",
-    displayName: "Dataview",
-    enabled: true,
-    prompt: DEFAULT_DATAVIEW_PROMPT,
-  },
-  "obsidian-charts": {
-    pluginId: "obsidian-charts",
-    displayName: "Obsidian Charts",
-    enabled: true,
-    prompt: DEFAULT_CHARTS_PROMPT,
-  },
-  "math-latex": {
-    pluginId: "math-latex",
-    displayName: "Math / LaTeX",
-    enabled: true,
-    prompt: DEFAULT_MATH_PROMPT,
-  },
+	dataview: {
+		pluginId: "dataview",
+		displayName: "Dataview",
+		enabled: true,
+		prompt: DEFAULT_DATAVIEW_PROMPT,
+	},
+	"obsidian-charts": {
+		pluginId: "obsidian-charts",
+		displayName: "Obsidian Charts",
+		enabled: true,
+		prompt: DEFAULT_CHARTS_PROMPT,
+	},
+	"math-latex": {
+		pluginId: "math-latex",
+		displayName: "Math / LaTeX",
+		enabled: true,
+		prompt: DEFAULT_MATH_PROMPT,
+	},
 };
 
 /**
@@ -149,13 +149,13 @@ export const DEFAULT_PLUGIN_EXTENSIONS: Record<string, PluginPromptExtension> = 
  * @deprecated Use assembleSystemPrompt() from AgentManager instead.
  */
 export const createSystemPrompt = (hasChartsPlugin: boolean) => {
-  let prompt = BASE_SYSTEM_PROMPT;
-  prompt += "\n\n" + DEFAULT_DATAVIEW_PROMPT;
-  if (hasChartsPlugin) {
-    prompt += "\n\n" + DEFAULT_CHARTS_PROMPT;
-  }
-  prompt += "\n\n" + DEFAULT_MATH_PROMPT;
-  return prompt;
+	let prompt = BASE_SYSTEM_PROMPT;
+	prompt += `\n\n${DEFAULT_DATAVIEW_PROMPT}`;
+	if (hasChartsPlugin) {
+		prompt += `\n\n${DEFAULT_CHARTS_PROMPT}`;
+	}
+	prompt += `\n\n${DEFAULT_MATH_PROMPT}`;
+	return prompt;
 };
 
 export const AGENT_SYSTEM_PROMPT = createSystemPrompt(false);

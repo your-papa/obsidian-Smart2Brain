@@ -4,19 +4,13 @@ import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
-import type { RegisteredProvider } from "../types/providers";
+
+import { ProviderAuthError, ProviderEndpointError, ProviderRegistry, ProviderRegistryError } from "../providers/index";
 import { createThreadId } from "../utils/threadId";
 import { Agent, type ChooseModelParams, type ThreadHistory } from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
 import { BASE_SYSTEM_PROMPT } from "./prompts";
-import {
-	type BuiltInProviderOptions,
-	ProviderAuthError,
-	ProviderEndpointError,
-	ProviderRegistryError,
-} from "./providers";
-import { ProviderRegistry } from "./providers/ProviderRegistry";
 import { LangSmithTelemetry, type Telemetry } from "./telemetry";
 import { createExecuteDataviewTool } from "./tools/executeDataview";
 import { createGetAllTagsTool } from "./tools/getAllTags";
@@ -24,8 +18,46 @@ import { createGetPropertiesTool } from "./tools/getProperties";
 import { createReadNoteTool } from "./tools/readNote";
 import { createSearchNotesTool } from "./tools/searchNotes";
 
+// New provider system imports
+import {
+	type AuthObject,
+	ProviderAuthError as NewProviderAuthError,
+	ProviderEndpointError as NewProviderEndpointError,
+	getProviderDefinition,
+} from "../providers/index";
+import { getRegistry } from "../providers/registry";
+
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { TFile } from "obsidian";
+
+/**
+ * Legacy options type for built-in providers.
+ * Used for backward compatibility with existing code.
+ */
+interface BuiltInProviderOptions {
+	apiKey?: string;
+	baseUrl?: string;
+	headers?: string | Record<string, string>;
+}
+
+/**
+ * Converts BuiltInProviderOptions to AuthObject.
+ */
+function convertToAuthObject(options: BuiltInProviderOptions): AuthObject {
+	const auth: AuthObject = {};
+
+	if (options.apiKey) {
+		auth.apiKey = options.apiKey;
+	}
+	if (options.baseUrl) {
+		auth.baseUrl = options.baseUrl;
+	}
+	if (options.headers) {
+		auth.headers = typeof options.headers === "string" ? JSON.parse(options.headers) : options.headers;
+	}
+
+	return auth;
+}
 
 /** Result of provider authentication validation */
 export type AuthValidationResult = { success: true } | { success: false; message: string };
@@ -57,12 +89,15 @@ export class AgentManager {
 	private plugin: SecondBrainPlugin;
 	private agent: Agent | null = null;
 	private chatManager: ObsidianChatManager;
-	private registry: ProviderRegistry;
 
 	constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
 		this.chatManager = new ObsidianChatManager(plugin);
-		this.registry = new ProviderRegistry();
+	}
+
+	/** Get the singleton registry instance */
+	private get registry(): ProviderRegistry {
+		return getRegistry();
 	}
 
 	/**
@@ -105,7 +140,7 @@ export class AgentManager {
 		// Append enabled extensions for enabled plugins
 		for (const [pluginId, ext] of Object.entries(pluginData.pluginPromptExtensions)) {
 			if (ext.enabled && this.isPluginEnabled(pluginId) && ext.prompt?.trim()) {
-				prompt += "\n\n" + ext.prompt;
+				prompt += `\n\n${ext.prompt}`;
 			}
 		}
 
@@ -122,54 +157,88 @@ export class AgentManager {
 	}
 
 	/**
-	 * Configures a specific provider on the given registry.
+	 * Get available models for a provider by discovering them from the API.
+	 * @returns Array of available chat model names
 	 */
-	private async configureProviderOnRegistry(
-		registry: ProviderRegistry,
-		provider: RegisteredProvider,
-		options: BuiltInProviderOptions,
-	): Promise<void> {
-		switch (provider) {
-			case "OpenAI":
-				await registry.useOpenAI(options);
-				break;
-			case "CustomOpenAI":
-				await registry.useOpenAI(options);
-				break;
-			case "Anthropic":
-				await registry.useAnthropic(options);
-				break;
-			case "Ollama":
-				await registry.useOllama(options);
-				break;
-			default:
-				throw new Error(`Unsupported provider: ${provider}`);
+	async getAvailableModels(providerId: string): Promise<string[]> {
+		try {
+			if (!providerId) return [];
+
+			const pluginData = getData();
+			const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+
+			if (providerDef) {
+				const resolvedAuth = pluginData.getResolvedAuthState(providerId);
+				if (!resolvedAuth) {
+					return [];
+				}
+
+				try {
+					const discovered = await providerDef.discoverModels(resolvedAuth);
+					return discovered;
+				} catch (error) {
+					console.warn(`Model discovery failed for ${providerId}:`, error);
+					return [];
+				}
+			}
+
+			return [];
+		} catch (error) {
+			console.error("Smart Second Brain: Error fetching available models", error);
+			return [];
 		}
 	}
 
 	/**
-	 * Configures a provider on the main registry.
+	 * Registers a provider on the registry with its auth state.
 	 */
-	private async configureRegistry(provider: RegisteredProvider, options: BuiltInProviderOptions): Promise<void> {
-		await this.configureProviderOnRegistry(this.registry, provider, options);
+	private registerProvider(providerId: string, auth: AuthObject): void {
+		const pluginData = getData();
+		const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+
+		if (!providerDef) {
+			throw new Error(`Unknown provider: ${providerId}`);
+		}
+
+		// Check if it's a custom provider
+		const customMeta = pluginData.getCustomProviderMeta(providerId);
+		if (customMeta) {
+			this.registry.registerCustom(providerId, customMeta, auth);
+		} else {
+			this.registry.register(providerId, providerDef, auth);
+		}
 	}
 
 	/**
-	 * Tests and configures a provider on the actual registry.
+	 * Tests and registers a provider on the actual registry.
 	 * Returns an AuthValidationResult indicating success or failure with a message.
+	 *
+	 * @deprecated Use validateProviderAuth() with new provider IDs instead.
 	 */
-	async testProviderConfig(
-		provider: RegisteredProvider,
-		options: BuiltInProviderOptions,
-	): Promise<AuthValidationResult> {
+	async testProviderConfig(providerId: string, options: BuiltInProviderOptions): Promise<AuthValidationResult> {
+		const pluginData = getData();
+		const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+
+		if (!providerDef) {
+			return { success: false, message: `Unknown provider: ${providerId}` };
+		}
+
+		const auth = convertToAuthObject(options);
+
 		try {
-			await this.configureProviderOnRegistry(this.registry, provider, options);
+			const validationResult = await providerDef.validateAuth(auth);
+
+			if (!validationResult.valid) {
+				return { success: false, message: validationResult.error };
+			}
+
+			this.registerProvider(providerId, auth);
 			return { success: true };
 		} catch (error) {
-			if (error instanceof ProviderAuthError) {
+			if (error instanceof NewProviderAuthError || error instanceof ProviderAuthError) {
 				return { success: false, message: "Invalid API key" };
 			}
-			if (error instanceof ProviderEndpointError) {
+			if (error instanceof NewProviderEndpointError || error instanceof ProviderEndpointError) {
 				return {
 					success: false,
 					message: "Invalid base URL or endpoint unreachable",
@@ -178,10 +247,53 @@ export class AgentManager {
 			if (error instanceof ProviderRegistryError) {
 				return { success: false, message: error.message };
 			}
+			if (error instanceof Error) {
+				return { success: false, message: error.message };
+			}
 			return {
 				success: false,
 				message: "Provider configuration failed",
 			};
+		}
+	}
+
+	/**
+	 * Validates provider authentication using the new provider ID system.
+	 *
+	 * @param providerId - The provider ID (e.g., "openai", "anthropic", "ollama")
+	 * @param auth - The runtime auth state with resolved secrets
+	 * @returns AuthValidationResult indicating success or failure
+	 */
+	async validateProviderAuth(providerId: string, auth: AuthObject): Promise<AuthValidationResult> {
+		const pluginData = getData();
+		const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+
+		if (!providerDef) {
+			return { success: false, message: `Unknown provider: ${providerId}` };
+		}
+
+		try {
+			const validationResult = await providerDef.validateAuth(auth);
+
+			if (!validationResult.valid) {
+				return { success: false, message: validationResult.error };
+			}
+
+			return { success: true };
+		} catch (error) {
+			if (error instanceof NewProviderAuthError || error instanceof ProviderAuthError) {
+				return { success: false, message: "Invalid API key" };
+			}
+			if (error instanceof NewProviderEndpointError || error instanceof ProviderEndpointError) {
+				return { success: false, message: "Invalid base URL or endpoint unreachable" };
+			}
+			if (error instanceof ProviderRegistryError) {
+				return { success: false, message: error.message };
+			}
+			if (error instanceof Error) {
+				return { success: false, message: error.message };
+			}
+			return { success: false, message: "Provider configuration failed" };
 		}
 	}
 
@@ -266,22 +378,24 @@ export class AgentManager {
 		// Cleanup existing agent if any
 		this.agent = null;
 
-		// Reset registry for fresh configuration
-		this.registry = new ProviderRegistry();
+		// Clear and re-register all configured providers
+		this.registry.clear();
 
 		const pluginData = getData();
 
-		// Configure all providers - use for...of to properly await each
+		// Register all configured providers
 		const configuredProviders = pluginData.getConfiguredProviders();
 		const unavailableProviders: string[] = [];
-		for (const provider of configuredProviders) {
-			// Resolve secrets from SecretStorage to get actual API keys
-			const options = pluginData.getResolvedProviderAuth(provider);
+		for (const providerId of configuredProviders) {
+			// Resolve secrets from SecretStorage to get actual auth
+			const auth = pluginData.getResolvedAuthState(providerId);
+			if (!auth) continue;
+
 			try {
-				await this.configureRegistry(provider, options);
+				this.registerProvider(providerId, auth);
 			} catch (error) {
 				if (error instanceof ProviderEndpointError) {
-					unavailableProviders.push(provider);
+					unavailableProviders.push(providerId);
 					continue;
 				}
 				throw error;
@@ -292,7 +406,7 @@ export class AgentManager {
 			new Notice(`Cannot connect to: ${unavailableProviders.join(", ")}. Check that the service is running.`);
 		}
 
-		console.log(this.registry);
+		console.log("[AgentManager] Registry initialized with providers:", this.registry.list());
 
 		// Configure Telemetry (use getData())
 		const telemetry = this.configureTelemetry();
@@ -410,22 +524,6 @@ export class AgentManager {
 			if (signal?.aborted) {
 				console.log("Smart Second Brain: Stream aborted by user");
 			}
-		}
-	}
-
-	async getAvailableModels(providerName: RegisteredProvider): Promise<string[]> {
-		try {
-			if (!providerName) return [];
-
-			// Provider might be configured but not connected (e.g., Ollama not running)
-			if (!this.registry.hasProvider(providerName)) {
-				return [];
-			}
-
-			return this.registry.listChatModels(providerName);
-		} catch (error) {
-			console.error("Smart Second Brain: Error fetching available models", error);
-			return [];
 		}
 	}
 

@@ -88,15 +88,15 @@ let customAnchor: HTMLElement | undefined = $state();
 							data.setDefaultChatModel(model);
 						}}
 					>
-							{#if model.provider === "OpenAI"}
-								<OpenAILogo style="fill: var(--text-normal)" height={16} width={16} />
-							{:else if model.provider === "Anthropic"}
-								<AnthropicLogo style="fill: var(--text-normal)" height={16} width={16} />
-							{:else if model.provider === "Ollama"}
-								<OllamaLogo style="fill: var(--text-normal)" height={16} width={16} />
-							{:else}
-								<Icon name="sparkles" size="s" />
-							{/if}
+						{#if model.provider === "openai"}
+							<OpenAILogo style="fill: var(--text-normal)" height={16} width={16} />
+						{:else if model.provider === "anthropic"}
+							<AnthropicLogo style="fill: var(--text-normal)" height={16} width={16} />
+						{:else if model.provider === "ollama"}
+							<OllamaLogo style="fill: var(--text-normal)" height={16} width={16} />
+						{:else}
+							<Icon name="sparkles" size="s" />
+						{/if}
 
 							<div>{model.model}</div>
 						</button>

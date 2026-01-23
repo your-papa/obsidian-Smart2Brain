@@ -6,20 +6,20 @@ import { MemorySaver } from "@langchain/langgraph";
 import { type ReactAgent, createAgent } from "langchain";
 import { Notice } from "obsidian";
 
+import { ProviderEndpointError, ProviderNotFoundError } from "../providers/errors";
+import type { ChatModelConfig } from "../providers/index";
+import type { ProviderRegistry } from "../providers/registry";
 import { getData } from "../stores/dataStore.svelte";
 import type { ThreadError } from "../types/shared";
 import Logger from "../utils/logging";
 import { type ThreadSnapshot, type ThreadStore, createSnapshot } from "./memory/ThreadStore";
 import { type ThreadMessage, getMessageText, normalizeThreadMessages } from "./messages/ThreadMessage";
-import type { ProviderRegistry } from "./providers/ProviderRegistry";
-import { ProviderEndpointError, ProviderNotFoundError } from "./providers/errors";
-import type { ModelOptions } from "./providers/types";
 import type { Telemetry } from "./telemetry/Telemetry";
 
 export interface ChooseModelParams {
 	provider: string;
-	chatModel?: string;
-	options?: ModelOptions;
+	chatModel: string;
+	options?: Partial<ChatModelConfig>;
 }
 
 export interface AgentRunOptions {
@@ -99,7 +99,7 @@ interface SelectedModel {
 	provider: string;
 	name: string;
 	instance: BaseChatModel;
-	options?: ModelOptions;
+	options?: Partial<ChatModelConfig>;
 }
 
 export class Agent {
@@ -138,9 +138,11 @@ export class Agent {
 
 	async chooseModel(params: ChooseModelParams): Promise<void> {
 		const { provider, chatModel, options } = params;
+
+		// Create a LangChain instance for this provider + model
 		let instance: BaseChatModel;
 		try {
-			instance = await this.registry.getChatModel(provider, chatModel, options);
+			instance = this.registry.createChatInstance(provider, chatModel, options);
 		} catch (error) {
 			if (error instanceof ProviderNotFoundError) {
 				getData().setDefaultChatModel(null);
@@ -149,17 +151,14 @@ export class Agent {
 			}
 			throw error;
 		}
-		const modelName = chatModel ?? this.registry.listChatModels(provider)[0];
-		if (!modelName) {
-			throw new Error(`No chat models registered for provider "${provider}".`);
-		}
+
 		this.selectedModel = {
 			provider,
-			name: modelName,
+			name: chatModel,
 			instance,
 			options,
 		};
-		Logger.debug("agent.chooseModel", { provider, modelName, options });
+		Logger.debug("agent.chooseModel", { provider, chatModel, options });
 		this.dirty = true;
 	}
 

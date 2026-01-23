@@ -32,3 +32,5 @@ workspace.json
 
 # btca cache
 .btca
+
+.opencode

@@ -1,19 +1,20 @@
 <script lang="ts">
+import type { Component } from "svelte";
+import { mount, onMount } from "svelte";
 import AuthConfigFields from "../../components/settings/AuthConfigFields.svelte";
 import Button from "../../components/ui/Button.svelte";
-import type { ProviderSetupModal } from "./ProviderSetup";
-import { getData } from "../../stores/dataStore.svelte";
-import type SecondBrainPlugin from "../../main";
-import ProviderIcon from "../../components/ui/logos/ProviderIcon.svelte";
-import { mount, onMount } from "svelte";
-import { icon } from "../../utils/utils";
-import type { RegisteredProvider } from "../../types/providers";
+import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
 import { createAuthStateQuery, invalidateProviderState } from "../../lib/query";
+import type SecondBrainPlugin from "../../main";
+import { type LogoProps, getProviderDefinition } from "../../providers/index";
+import { getData } from "../../stores/dataStore.svelte";
+import { icon } from "../../utils/utils";
+import type { ProviderSetupModal } from "./ProviderSetup";
 
 interface Props {
 	modal: ProviderSetupModal;
 	plugin: SecondBrainPlugin;
-	selectedProvider: RegisteredProvider;
+	selectedProvider: string;
 }
 
 const { modal, plugin, selectedProvider }: Props = $props();
@@ -23,9 +24,18 @@ const data = getData();
 const query = createAuthStateQuery(() => selectedProvider);
 
 function handleAddProvider() {
-	data.toggleProviderIsConfigured(selectedProvider);
+	data.setProviderConfigured(selectedProvider, true);
 	invalidateProviderState(selectedProvider);
 	modal.close();
+}
+
+// Get the logo component for the provider
+function getProviderLogo(): Component<LogoProps> {
+	const provider = getProviderDefinition(selectedProvider, data.getAllCustomProviderMeta());
+	if (provider && "logo" in provider && provider.logo) {
+		return provider.logo;
+	}
+	return GenericAIIcon;
 }
 
 // Function to create and append the header element
@@ -44,15 +54,13 @@ function appendHeaderElement() {
 	});
 
 	if (header) {
-		mount(ProviderIcon, {
+		const Logo = getProviderLogo();
+		mount(Logo, {
 			target: header,
 			anchor: title,
 			props: {
-				providerName: selectedProvider,
-				size: {
-					height: 32,
-					width: 32,
-				},
+				width: 32,
+				height: 32,
 			},
 		});
 

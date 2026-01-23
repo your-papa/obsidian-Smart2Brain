@@ -20,10 +20,9 @@
 		{
 			"name": "langchainjs",
 			"type": "git",
-			"url": "https://github.com/langchain-ai/langchainjs",
+			"url": "https://github.com/langchain-ai/docs",
 			"branch": "main",
-			"searchPath": "docs/core_docs/docs",
-			"specialNotes": "LangChain.js docs. Covers chains, agents, LangGraph, and integrations."
+			"specialNotes": "LangChain docs (covers both Python and JS). Focus on JS examples in src/oss/langchain. Covers agents, RAG, tools, and integrations."
 		},
 		{
 			"name": "bitsUi",

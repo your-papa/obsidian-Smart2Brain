@@ -1,12 +1,10 @@
-import type { RegisteredProvider } from "../types/providers";
-import type SecondBrainPlugin from "../main";
 import { createQuery } from "@tanstack/svelte-query";
+import type SecondBrainPlugin from "../main";
 
-export const providerState: Record<RegisteredProvider, boolean> = $state({
-	OpenAI: false,
-	Ollama: false,
-	CustomOpenAI: false,
-	Anthropic: false,
+export const providerState: Record<string, boolean> = $state({
+	openai: false,
+	ollama: false,
+	anthropic: false,
 });
 
 let isChatInSidebar: boolean = $state(true);
@@ -37,7 +35,7 @@ export function getPlugin(): SecondBrainPlugin {
 }
 
 // Deprecated: use createModelListQuery in utils/query
-export function modelQuery(provider: RegisteredProvider, plugin: SecondBrainPlugin) {
+export function modelQuery(provider: string, plugin: SecondBrainPlugin) {
 	return createQuery(() => ({
 		queryKey: ["models", provider],
 		queryFn: async () => {

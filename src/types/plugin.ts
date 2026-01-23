@@ -1,6 +1,7 @@
 import type { ChatModel } from "../stores/chatStore.svelte";
+import type { StoredProviderState } from "../stores/dataStore.svelte";
+import type { CustomProviderMeta } from "../types/provider/index";
 import type { UUIDv7 } from "../utils/uuid7Validator";
-import type { ProviderConfigs } from "./providers";
 
 export type SearchAlgorithm = "grep" | "omnisearch" | "embeddings";
 
@@ -20,7 +21,10 @@ export interface PluginPromptExtension {
 }
 
 export interface PluginData {
-	providerConfig: ProviderConfigs;
+	/** All provider states - built-in (pre-populated) + custom (user-created) */
+	providerConfig: Record<string, StoredProviderState>;
+	/** Extra metadata ONLY for custom providers (displayName, supportsEmbeddings) */
+	customProviderMeta: Record<string, CustomProviderMeta>;
 	systemPrompt: string;
 	pluginPromptExtensions: Record<string, PluginPromptExtension>;
 	initialAssistantMessageContent: string;

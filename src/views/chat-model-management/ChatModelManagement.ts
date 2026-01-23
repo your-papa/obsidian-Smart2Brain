@@ -2,16 +2,16 @@ import { Modal } from "obsidian";
 import { mount } from "svelte";
 import ModalProvider from "../../lib/QueryClientProvider.svelte";
 import type SecondBrainPlugin from "../../main";
-import type { GenModelConfig, GenProviders } from "../../types/providers";
+import type { ChatModelConfig } from "../../providers/index";
 import ChatModelManagementComponent from "./ChatModelManagement.svelte";
 
 export class ChatModelManagementModal extends Modal {
 	private component!: ChatModelManagementComponent;
 	private plugin: SecondBrainPlugin;
-	private provider!: GenProviders;
-	private config?: GenModelConfig;
+	private provider!: string;
+	private config?: ChatModelConfig;
 
-	constructor(plugin: SecondBrainPlugin, provider: GenProviders, config?: GenModelConfig) {
+	constructor(plugin: SecondBrainPlugin, provider: string, config?: ChatModelConfig) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.setTitle(`${provider} Chat Model Management`);
@@ -23,8 +23,8 @@ export class ChatModelManagementModal extends Modal {
 		this.component = mount(
 			ModalProvider<{
 				modal: ChatModelManagementModal;
-				provider: GenProviders;
-				config?: GenModelConfig;
+				provider: string;
+				config?: ChatModelConfig;
 			}>,
 			{
 				target: this.contentEl,
