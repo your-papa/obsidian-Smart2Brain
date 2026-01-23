@@ -2,26 +2,20 @@
  * Provider helper utilities
  *
  * This file contains utility functions for the provider system:
- * - AUTH_FIELD_TEMPLATES: Canonical definitions for common auth fields
+ * - AUTH_FIELD_TEMPLATES: Canonical definitions for standard auth fields
  * - buildFieldBasedAuth: Builds FieldBasedAuth from templates and requirements
  * - validateCustomProviderId: Validates custom provider IDs
  * - parseHeadersJson: Parses JSON headers strings
  */
 
-import type { AuthFieldDefinition, FieldBasedAuth } from "./types";
+import type { AuthFieldDefinition, FieldBasedAuth, StandardAuthFieldKey } from "./types";
 
 // ============================================================================
 // Auth Field Templates
 // ============================================================================
 
 /**
- * Known auth field types that have canonical definitions.
- * Each field type has a predefined label, kind, and placeholder.
- */
-export type AuthFieldType = "apiKey" | "baseUrl" | "headers";
-
-/**
- * Canonical template definitions for common authentication fields.
+ * Canonical template definitions for standard authentication fields.
  *
  * These templates define the immutable properties of each field type:
  * - label: Display label in the UI
@@ -32,7 +26,7 @@ export type AuthFieldType = "apiKey" | "baseUrl" | "headers";
  * - required: Whether the field must be filled
  * - Optionally override label/placeholder for provider-specific text
  */
-export const AUTH_FIELD_TEMPLATES: Record<AuthFieldType, Omit<AuthFieldDefinition, "required">> = {
+export const AUTH_FIELD_TEMPLATES: Record<StandardAuthFieldKey, Omit<AuthFieldDefinition, "required">> = {
 	apiKey: {
 		label: "API Key",
 		kind: "secret",
@@ -72,7 +66,8 @@ export interface AuthFieldRequirements {
 }
 
 /**
- * Map of field types to their provider-specific requirements.
+ * Map of ALL standard field types to their provider-specific requirements.
+ * ALL three fields (apiKey, baseUrl, headers) MUST be specified.
  *
  * @example OpenAI requirements
  * ```typescript
@@ -83,31 +78,16 @@ export interface AuthFieldRequirements {
  * };
  * ```
  *
- * @example Ollama requirements (no API key)
+ * @example Ollama requirements
  * ```typescript
  * const ollamaRequirements: AuthRequirementsMap = {
- *   baseUrl: { required: true, placeholder: "http://localhost:11434" },
+ *   apiKey: { required: false },
+ *   baseUrl: { required: true, label: "Server URL", placeholder: "http://localhost:11434" },
+ *   headers: { required: false },
  * };
  * ```
  */
-export type AuthRequirementsMap = Partial<Record<AuthFieldType, AuthFieldRequirements>>;
-
-/**
- * Options for building field-based auth configuration.
- */
-export interface BuildFieldBasedAuthOptions {
-	/**
-	 * Requirements for standard auth fields (apiKey, baseUrl, headers).
-	 * These fields use the canonical templates with provider-specific overrides.
-	 */
-	fields?: AuthRequirementsMap;
-
-	/**
-	 * Custom fields that don't use templates.
-	 * Use this for provider-specific fields like SAP's resourceGroup.
-	 */
-	customFields?: Record<string, AuthFieldDefinition>;
-}
+export type AuthRequirementsMap = Record<StandardAuthFieldKey, AuthFieldRequirements>;
 
 // ============================================================================
 // buildFieldBasedAuth
@@ -120,10 +100,12 @@ export interface BuildFieldBasedAuthOptions {
  * requirements to create the final auth configuration. This eliminates duplication
  * across providers while allowing customization where needed.
  *
- * @param options - Provider-specific field requirements (can be AuthRequirementsMap or BuildFieldBasedAuthOptions)
- * @returns A complete FieldBasedAuth configuration
+ * ALL three standard fields (apiKey, baseUrl, headers) MUST be specified.
  *
- * @example OpenAI provider (simple form)
+ * @param requirements - Provider-specific requirements for ALL standard fields
+ * @returns A complete FieldBasedAuth configuration with all standard fields
+ *
+ * @example OpenAI provider
  * ```typescript
  * const auth = buildFieldBasedAuth({
  *   apiKey: { required: true },
@@ -132,53 +114,30 @@ export interface BuildFieldBasedAuthOptions {
  * });
  * ```
  *
- * @example SAP AI Core (with custom field)
+ * @example Ollama provider
  * ```typescript
  * const auth = buildFieldBasedAuth({
- *   fields: {
- *     apiKey: { required: true, label: "API Token" },
- *     baseUrl: { required: true, label: "Deployment URL" },
- *   },
- *   customFields: {
- *     resourceGroup: {
- *       label: "Resource Group",
- *       kind: "text",
- *       required: false,
- *       placeholder: "default",
- *     },
- *   },
+ *   apiKey: { required: false },
+ *   baseUrl: { required: true, label: "Server URL", placeholder: "http://localhost:11434" },
+ *   headers: { required: false },
  * });
  * ```
  */
-export function buildFieldBasedAuth(options: AuthRequirementsMap | BuildFieldBasedAuthOptions): FieldBasedAuth {
-	const fields: Record<string, AuthFieldDefinition> = {};
+export function buildFieldBasedAuth(requirements: AuthRequirementsMap): FieldBasedAuth {
+	const fields = {} as Record<StandardAuthFieldKey, AuthFieldDefinition>;
 
-	// Determine if we're using the simple form (AuthRequirementsMap) or the extended form (BuildFieldBasedAuthOptions)
-	const isExtendedForm = "fields" in options || "customFields" in options;
-	const requirements = isExtendedForm ? ((options as BuildFieldBasedAuthOptions).fields ?? {}) : options;
-	const customFields = isExtendedForm ? (options as BuildFieldBasedAuthOptions).customFields : undefined;
+	// Build all standard fields from templates
+	for (const fieldKey of ["apiKey", "baseUrl", "headers"] as const) {
+		const template = AUTH_FIELD_TEMPLATES[fieldKey];
+		const fieldRequirements = requirements[fieldKey];
 
-	// Build fields from templates
-	for (const [fieldType, fieldRequirements] of Object.entries(requirements)) {
-		const template = AUTH_FIELD_TEMPLATES[fieldType as AuthFieldType];
-		if (!template) {
-			throw new Error(`Unknown auth field type: ${fieldType}`);
-		}
-
-		fields[fieldType] = {
+		fields[fieldKey] = {
 			...template,
 			required: fieldRequirements.required,
 			// Allow provider-specific overrides
 			...(fieldRequirements.label !== undefined && { label: fieldRequirements.label }),
 			...(fieldRequirements.placeholder !== undefined && { placeholder: fieldRequirements.placeholder }),
 		};
-	}
-
-	// Add custom fields (if any)
-	if (customFields) {
-		for (const [fieldId, fieldDef] of Object.entries(customFields)) {
-			fields[fieldId] = fieldDef;
-		}
 	}
 
 	return {

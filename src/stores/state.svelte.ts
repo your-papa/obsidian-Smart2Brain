@@ -5,7 +5,6 @@ export const providerState: Record<string, boolean> = $state({
 	openai: false,
 	ollama: false,
 	anthropic: false,
-	"sap-ai-core": false,
 });
 
 let isChatInSidebar: boolean = $state(true);

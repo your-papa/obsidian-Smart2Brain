@@ -14,7 +14,6 @@ const { size, className, providerName }: Props = $props();
 // biome-ignore lint/suspicious/noExplicitAny: Logo components have varying prop types
 const logoMap: Record<string, Component<Record<string, unknown>>> = {
 	openai: OpenAILogo as Component<Record<string, unknown>>,
-	"sap-ai-core": GenericAIIcon as Component<Record<string, unknown>>,
 	anthropic: AnthropicLogo as Component<Record<string, unknown>>,
 	ollama: OllamaLogo as Component<Record<string, unknown>>,
 };

@@ -20,7 +20,6 @@ import {
 	listAllProviderIds,
 	ollamaProvider,
 	openaiProvider,
-	sapAiCoreProvider,
 } from "../../src/providers/index.ts";
 import type { CustomProviderDefinition } from "../../src/providers/types.ts";
 
@@ -33,10 +32,17 @@ function createCustomProvider(id: string, displayName: string): CustomProviderDe
 		baseProviderId: "openai-compatible",
 		createdAt: Date.now(),
 		setupInstructions: { steps: [] },
-		auth: { type: "field-based", fields: {} },
+		auth: {
+			type: "field-based",
+			fields: {
+				apiKey: { label: "API Key", kind: "secret", required: true },
+				baseUrl: { label: "Base URL", kind: "text", required: false },
+				headers: { label: "Custom Headers", kind: "textarea", required: false },
+			},
+		},
 		capabilities: { chat: true, embedding: false, modelDiscovery: false },
-		createRuntimeDefinition: async (_auth, modelIds) => ({
-			chatModels: Object.fromEntries(modelIds.chat.map((modelId) => [modelId, async () => ({}) as unknown])),
+		createRuntimeDefinition: async (_auth) => ({
+			chatModels: {},
 			embeddingModels: {},
 		}),
 		validateAuth: async () => ({ valid: true }),
@@ -51,11 +57,10 @@ describe("Provider Registry", () => {
 			expect(BUILT_IN_PROVIDER_IDS.length).toBeGreaterThan(0);
 		});
 
-		it("should include openai, anthropic, ollama, sap-ai-core", () => {
+		it("should include openai, anthropic, ollama", () => {
 			expect(BUILT_IN_PROVIDER_IDS).toContain("openai");
 			expect(BUILT_IN_PROVIDER_IDS).toContain("anthropic");
 			expect(BUILT_IN_PROVIDER_IDS).toContain("ollama");
-			expect(BUILT_IN_PROVIDER_IDS).toContain("sap-ai-core");
 		});
 	});
 
@@ -81,14 +86,6 @@ describe("Provider Registry", () => {
 			expect(provider).toBeDefined();
 			expect(provider?.id).toBe("ollama");
 			expect(provider?.displayName).toBe("Ollama");
-			expect(provider?.isBuiltIn).toBe(true);
-		});
-
-		it("should return provider for 'sap-ai-core' id", () => {
-			const provider = getBuiltInProvider("sap-ai-core");
-			expect(provider).toBeDefined();
-			expect(provider?.id).toBe("sap-ai-core");
-			expect(provider?.displayName).toBe("SAP AI Core");
 			expect(provider?.isBuiltIn).toBe(true);
 		});
 
@@ -119,10 +116,6 @@ describe("Provider Registry", () => {
 
 		it("should return true for 'ollama'", () => {
 			expect(isBuiltInProvider("ollama")).toBe(true);
-		});
-
-		it("should return true for 'sap-ai-core'", () => {
-			expect(isBuiltInProvider("sap-ai-core")).toBe(true);
 		});
 
 		it("should return false for unknown provider ID", () => {
@@ -206,7 +199,6 @@ describe("Provider Registry", () => {
 			expect(ids).toContain("openai");
 			expect(ids).toContain("anthropic");
 			expect(ids).toContain("ollama");
-			expect(ids).toContain("sap-ai-core");
 		});
 
 		it("should include custom provider IDs", () => {
@@ -227,7 +219,6 @@ describe("Provider Registry", () => {
 			expect(ids).toContain("openai");
 			expect(ids).toContain("anthropic");
 			expect(ids).toContain("ollama");
-			expect(ids).toContain("sap-ai-core");
 
 			// Custom provider
 			expect(ids).toContain("my-custom");
@@ -264,7 +255,6 @@ describe("Provider Registry", () => {
 			expect(builtInProviders.openai).toBeDefined();
 			expect(builtInProviders.anthropic).toBeDefined();
 			expect(builtInProviders.ollama).toBeDefined();
-			expect(builtInProviders["sap-ai-core"]).toBeDefined();
 		});
 
 		it("should export individual provider definitions", () => {
@@ -274,8 +264,6 @@ describe("Provider Registry", () => {
 			expect(anthropicProvider.id).toBe("anthropic");
 			expect(ollamaProvider).toBeDefined();
 			expect(ollamaProvider.id).toBe("ollama");
-			expect(sapAiCoreProvider).toBeDefined();
-			expect(sapAiCoreProvider.id).toBe("sap-ai-core");
 		});
 
 		it("getBuiltInProvider should return real provider implementations (not stubs)", () => {
@@ -295,7 +283,6 @@ describe("Provider Registry", () => {
 			expect(builtInProviders.openai).toBe(getBuiltInProvider("openai"));
 			expect(builtInProviders.anthropic).toBe(getBuiltInProvider("anthropic"));
 			expect(builtInProviders.ollama).toBe(getBuiltInProvider("ollama"));
-			expect(builtInProviders["sap-ai-core"]).toBe(getBuiltInProvider("sap-ai-core"));
 		});
 	});
 
@@ -309,7 +296,6 @@ describe("Provider Registry", () => {
 			const customProvider = createCustomOpenAICompatibleProvider({
 				id: "test-provider",
 				displayName: "Test Provider",
-				defaultBaseUrl: "https://api.test.com/v1",
 			});
 
 			expect(customProvider.id).toBe("test-provider");

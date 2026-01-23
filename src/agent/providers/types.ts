@@ -64,12 +64,3 @@ export interface StoredProviderOptions extends StoredProviderApiConfig {
 	defaultChatModel?: string;
 	defaultEmbeddingModel?: string;
 }
-
-export interface SapAICoreModelEntry extends BuiltInProviderModelMapEntry {}
-
-export interface SapAICoreProviderOptions extends ProviderApiConfigOptions {
-	chatModels?: Record<string, SapAICoreModelEntry>;
-	embeddingModels?: Record<string, SapAICoreModelEntry>;
-	defaultChatModel?: string;
-	defaultEmbeddingModel?: string;
-}

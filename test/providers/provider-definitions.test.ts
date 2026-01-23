@@ -31,6 +31,19 @@ describe("BaseProviderDefinition", () => {
 						label: "API Key",
 						kind: "secret",
 						required: true,
+						placeholder: "sk-...",
+					},
+					baseUrl: {
+						label: "Base URL",
+						kind: "text",
+						required: false,
+						placeholder: "https://api.openai.com/v1",
+					},
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
 					},
 				},
 			},
@@ -58,7 +71,16 @@ describe("BaseProviderDefinition", () => {
 			setupInstructions: { steps: [] },
 			auth: {
 				type: "field-based",
-				fields: {},
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
 			},
 			capabilities: { chat: true, embedding: false, modelDiscovery: false },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
@@ -75,7 +97,19 @@ describe("BaseProviderDefinition", () => {
 			id: "openai",
 			displayName: "OpenAI",
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: {
 				chat: true,
 				embedding: true,
@@ -96,7 +130,19 @@ describe("BaseProviderDefinition", () => {
 			id: "openai",
 			displayName: "OpenAI",
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: true, modelDiscovery: true },
 			createRuntimeDefinition: async (auth: RuntimeAuthState) => {
 				// Factory should capture auth credentials
@@ -135,7 +181,14 @@ describe("BaseProviderDefinition", () => {
 			auth: {
 				type: "field-based",
 				fields: {
-					apiKey: { label: "API Key", kind: "secret", required: true },
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
 				},
 			},
 			capabilities: { chat: true, embedding: true, modelDiscovery: true },
@@ -217,6 +270,12 @@ describe("BaseProviderDefinition", () => {
 						required: false,
 						placeholder: "https://api.openai.com/v1",
 					},
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
 				},
 			},
 			capabilities: {
@@ -255,6 +314,19 @@ describe("BaseProviderDefinition", () => {
 						label: "API Key",
 						kind: "secret",
 						required: true,
+						placeholder: "sk-...",
+					},
+					baseUrl: {
+						label: "Base URL",
+						kind: "text",
+						required: false,
+						placeholder: "https://...",
+					},
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
 					},
 				},
 			},
@@ -275,7 +347,7 @@ describe("BaseProviderDefinition", () => {
 	});
 
 	it("should support Ollama-style provider definition (no API key required)", () => {
-		// Ollama provider - baseUrl is primary, no API key
+		// Ollama provider - baseUrl is primary, apiKey not required
 		const ollamaProvider: BaseProviderDefinition = {
 			id: "ollama",
 			displayName: "Ollama",
@@ -293,11 +365,23 @@ describe("BaseProviderDefinition", () => {
 			auth: {
 				type: "field-based",
 				fields: {
+					apiKey: {
+						label: "API Key",
+						kind: "secret",
+						required: false,
+						placeholder: "Optional",
+					},
 					baseUrl: {
 						label: "Base URL",
 						kind: "text",
 						required: true,
 						placeholder: "http://localhost:11434",
+					},
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
 					},
 				},
 			},
@@ -314,7 +398,7 @@ describe("BaseProviderDefinition", () => {
 		expect(ollamaProvider.id).toBe("ollama");
 		expect(ollamaProvider.auth.type).toBe("field-based");
 		if (ollamaProvider.auth.type === "field-based") {
-			expect(ollamaProvider.auth.fields.apiKey).toBeUndefined();
+			expect(ollamaProvider.auth.fields.apiKey.required).toBe(false);
 			expect(ollamaProvider.auth.fields.baseUrl.required).toBe(true);
 			expect(ollamaProvider.auth.fields.baseUrl.placeholder).toBe("http://localhost:11434");
 		}
@@ -397,6 +481,19 @@ describe("BaseProviderDefinition", () => {
 						label: "API Key",
 						kind: "secret",
 						required: true,
+						placeholder: "sk-...",
+					},
+					baseUrl: {
+						label: "Base URL",
+						kind: "text",
+						required: false,
+						placeholder: "https://...",
+					},
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
 					},
 				},
 			},
@@ -435,19 +532,31 @@ describe("BaseProviderDefinition", () => {
 	});
 
 	it("should use id as lowercase identifier without spaces", () => {
-		// Provider IDs should be lowercase, no spaces (like "openai", "anthropic", "sap-ai-core")
+		// Provider IDs should be lowercase, no spaces (like "openai", "anthropic", "my-provider")
 		const provider: BaseProviderDefinition = {
-			id: "sap-ai-core",
-			displayName: "SAP AI Core",
+			id: "my-provider",
+			displayName: "My Provider",
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: false, modelDiscovery: false },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
 			discoverModels: async () => ({ chat: [], embedding: [] }),
 		};
 
-		expect(provider.id).toBe("sap-ai-core");
+		expect(provider.id).toBe("my-provider");
 		// ID should be lowercase
 		expect(provider.id).toBe(provider.id.toLowerCase());
 		// ID should not contain spaces
@@ -457,17 +566,29 @@ describe("BaseProviderDefinition", () => {
 	it("should use displayName as human-readable name", () => {
 		// displayName is what users see in the UI
 		const provider: BaseProviderDefinition = {
-			id: "sap-ai-core",
-			displayName: "SAP AI Core",
+			id: "my-provider",
+			displayName: "My Provider",
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: false, modelDiscovery: false },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
 			discoverModels: async () => ({ chat: [], embedding: [] }),
 		};
 
-		expect(provider.displayName).toBe("SAP AI Core");
+		expect(provider.displayName).toBe("My Provider");
 		// displayName can have spaces and mixed case
 		expect(provider.displayName.includes(" ")).toBe(true);
 	});
@@ -479,7 +600,19 @@ describe("BaseProviderDefinition", () => {
 			id: "test",
 			displayName: "Test",
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: false, modelDiscovery: false },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -497,7 +630,19 @@ describe("BaseProviderDefinition", () => {
 			id: "openai",
 			displayName: "OpenAI",
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: true, modelDiscovery: true },
 			createRuntimeDefinition: async (auth: RuntimeAuthState) => {
 				// Auth is captured in the closure
@@ -565,7 +710,19 @@ describe("BaseProviderDefinition", () => {
 			id: "test",
 			displayName: "Test",
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: false, modelDiscovery: false },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			discoverModels: async () => ({ chat: [], embedding: [] }),
@@ -640,10 +797,13 @@ describe("BuiltInProviderDefinition", () => {
 			auth: {
 				type: "field-based",
 				fields: {
-					apiKey: {
-						label: "API Key",
-						kind: "secret",
-						required: true,
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
 					},
 				},
 			},
@@ -670,7 +830,19 @@ describe("BuiltInProviderDefinition", () => {
 			displayName: "Anthropic",
 			isBuiltIn: true, // Must be literal `true`
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: false, modelDiscovery: false },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -696,7 +868,14 @@ describe("BuiltInProviderDefinition", () => {
 			auth: {
 				type: "field-based",
 				fields: {
-					apiKey: { label: "API Key", kind: "secret", required: true },
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
 				},
 			},
 			capabilities: { chat: true, embedding: true, modelDiscovery: true },
@@ -725,7 +904,19 @@ describe("BuiltInProviderDefinition", () => {
 			displayName: "OpenAI",
 			isBuiltIn: true,
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: true, modelDiscovery: true },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -757,7 +948,19 @@ describe("BuiltInProviderDefinition", () => {
 			displayName: "Anthropic",
 			isBuiltIn: true,
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: false, modelDiscovery: false }, // No model discovery
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -799,6 +1002,13 @@ describe("BuiltInProviderDefinition", () => {
 						label: "Base URL",
 						kind: "text",
 						required: false,
+						placeholder: "https://api.openai.com/v1",
+					},
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
 					},
 				},
 			},
@@ -861,10 +1071,13 @@ describe("BuiltInProviderDefinition", () => {
 			auth: {
 				type: "field-based",
 				fields: {
-					apiKey: {
-						label: "API Key",
-						kind: "secret",
-						required: true,
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
 					},
 				},
 			},
@@ -899,11 +1112,23 @@ describe("BuiltInProviderDefinition", () => {
 			auth: {
 				type: "field-based",
 				fields: {
+					apiKey: {
+						label: "API Key",
+						kind: "secret",
+						required: false,
+						placeholder: "Optional",
+					},
 					baseUrl: {
 						label: "Base URL",
 						kind: "text",
 						required: true,
 						placeholder: "http://localhost:11434",
+					},
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
 					},
 				},
 			},
@@ -925,11 +1150,11 @@ describe("BuiltInProviderDefinition", () => {
 		expect(ollamaProvider.capabilities.modelDiscovery).toBe(true);
 		expect(ollamaProvider.discoverModels).toBeDefined();
 
-		// Ollama uses baseUrl as main auth field (no API key)
+		// Ollama uses baseUrl as main auth field (apiKey not required)
 		if (ollamaProvider.auth.type === "field-based") {
 			expect(ollamaProvider.auth.fields.baseUrl).toBeDefined();
 			expect(ollamaProvider.auth.fields.baseUrl.required).toBe(true);
-			expect(ollamaProvider.auth.fields.apiKey).toBeUndefined();
+			expect(ollamaProvider.auth.fields.apiKey.required).toBe(false);
 		}
 
 		// Test discoverModels
@@ -942,46 +1167,6 @@ describe("BuiltInProviderDefinition", () => {
 			expect(discovered.chat).toContain("llama3.1");
 			expect(discovered.embedding).toContain("nomic-embed-text");
 		}
-	});
-
-	it("should support SAP AI Core-style built-in provider", () => {
-		// SAP AI Core example
-		const sapProvider: BuiltInProviderDefinition = {
-			id: "sap-ai-core",
-			displayName: "SAP AI Core",
-			isBuiltIn: true,
-			setupInstructions: {
-				steps: ["Configure your SAP AI Core service binding", "Enter the credentials below"],
-			},
-			auth: {
-				type: "field-based",
-				fields: {
-					apiKey: {
-						label: "API Key",
-						kind: "secret",
-						required: true,
-					},
-					baseUrl: {
-						label: "Base URL",
-						kind: "text",
-						required: true,
-					},
-				},
-			},
-			capabilities: {
-				chat: true,
-				embedding: true,
-				modelDiscovery: false,
-			},
-			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
-			validateAuth: async () => ({ valid: true }),
-			discoverModels: async () => ({ chat: [], embedding: [] }),
-		};
-
-		expect(sapProvider.id).toBe("sap-ai-core");
-		expect(sapProvider.displayName).toBe("SAP AI Core");
-		expect(sapProvider.isBuiltIn).toBe(true);
-		expect(sapProvider.capabilities.modelDiscovery).toBe(false);
 	});
 
 	it("should support OAuth-based built-in provider (GitHub Copilot style)", async () => {
@@ -1048,7 +1233,19 @@ describe("BuiltInProviderDefinition", () => {
 			displayName: "Test",
 			isBuiltIn: true,
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: true, modelDiscovery: true },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -1086,7 +1283,19 @@ describe("BuiltInProviderDefinition", () => {
 			displayName: "OpenAI",
 			isBuiltIn: true, // Literal true
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: true, modelDiscovery: true },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -1109,7 +1318,19 @@ describe("BuiltInProviderDefinition", () => {
 			displayName: "OpenAI",
 			isBuiltIn: true,
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: true, modelDiscovery: true },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -1129,7 +1350,19 @@ describe("BuiltInProviderDefinition", () => {
 				displayName: "OpenAI",
 				isBuiltIn: true,
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: true, modelDiscovery: true },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1140,7 +1373,19 @@ describe("BuiltInProviderDefinition", () => {
 				displayName: "Anthropic",
 				isBuiltIn: true,
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: false, modelDiscovery: false },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1161,7 +1406,19 @@ describe("BuiltInProviderDefinition", () => {
 				displayName: "OpenAI",
 				isBuiltIn: true,
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: true, modelDiscovery: true },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1172,7 +1429,19 @@ describe("BuiltInProviderDefinition", () => {
 				displayName: "Anthropic",
 				isBuiltIn: true,
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: false, modelDiscovery: false },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1201,11 +1470,23 @@ describe("CustomProviderDefinition", () => {
 			auth: {
 				type: "field-based",
 				fields: {
+					apiKey: {
+						label: "API Key",
+						kind: "secret",
+						required: false,
+						placeholder: "Optional",
+					},
 					baseUrl: {
 						label: "Base URL",
 						kind: "text",
 						required: true,
 						placeholder: "http://localhost:8000/v1",
+					},
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
 					},
 				},
 			},
@@ -1236,7 +1517,19 @@ describe("CustomProviderDefinition", () => {
 			baseProviderId: "openai-compatible",
 			createdAt: Date.now(),
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: true, modelDiscovery: false },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -1262,7 +1555,19 @@ describe("CustomProviderDefinition", () => {
 				baseProviderId: "openai-compatible",
 				createdAt: 1704067200000,
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: true, modelDiscovery: false },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1275,7 +1580,19 @@ describe("CustomProviderDefinition", () => {
 				baseProviderId: "openai-compatible",
 				createdAt: 1704153600000,
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: true, modelDiscovery: false },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1298,7 +1615,19 @@ describe("CustomProviderDefinition", () => {
 				baseProviderId: "openai-compatible",
 				createdAt: 1704153600000, // Later
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: false, modelDiscovery: false },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1311,7 +1640,19 @@ describe("CustomProviderDefinition", () => {
 				baseProviderId: "openai-compatible",
 				createdAt: 1704067200000, // Earlier
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: false, modelDiscovery: false },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1335,7 +1676,19 @@ describe("ProviderDefinition", () => {
 			displayName: "OpenAI",
 			isBuiltIn: true,
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: true, modelDiscovery: true },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -1349,7 +1702,19 @@ describe("ProviderDefinition", () => {
 			baseProviderId: "openai-compatible",
 			createdAt: Date.now(),
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: true, modelDiscovery: false },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -1368,7 +1733,19 @@ describe("ProviderDefinition", () => {
 				displayName: "OpenAI",
 				isBuiltIn: true,
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: true, modelDiscovery: true },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1381,7 +1758,19 @@ describe("ProviderDefinition", () => {
 				baseProviderId: "openai-compatible",
 				createdAt: Date.now(),
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: false, modelDiscovery: false },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1414,7 +1803,19 @@ describe("ProviderDefinition", () => {
 				displayName: "OpenAI",
 				isBuiltIn: true,
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: true, modelDiscovery: true },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1425,7 +1826,19 @@ describe("ProviderDefinition", () => {
 				displayName: "Anthropic",
 				isBuiltIn: true,
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: false, modelDiscovery: false },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1438,7 +1851,19 @@ describe("ProviderDefinition", () => {
 				baseProviderId: "openai-compatible",
 				createdAt: Date.now(),
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: false, modelDiscovery: false },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1470,7 +1895,19 @@ describe("ProviderDefinition", () => {
 			displayName: "OpenAI",
 			isBuiltIn: true,
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: true, modelDiscovery: true },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -1484,7 +1921,19 @@ describe("ProviderDefinition", () => {
 			baseProviderId: "openai-compatible",
 			createdAt: Date.now(),
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: false, modelDiscovery: false },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -1504,7 +1953,19 @@ describe("ProviderDefinition", () => {
 			displayName: "OpenAI",
 			isBuiltIn: true,
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: true, modelDiscovery: true },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -1518,7 +1979,19 @@ describe("ProviderDefinition", () => {
 			baseProviderId: "openai-compatible",
 			createdAt: Date.now(),
 			setupInstructions: { steps: [] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: false, modelDiscovery: false },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),
@@ -1540,7 +2013,19 @@ describe("ProviderDefinition", () => {
 				baseProviderId: "openai-compatible",
 				createdAt: Date.now(),
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: false, modelDiscovery: false },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1551,7 +2036,19 @@ describe("ProviderDefinition", () => {
 				displayName: "OpenAI",
 				isBuiltIn: true,
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: true, modelDiscovery: true },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1562,7 +2059,19 @@ describe("ProviderDefinition", () => {
 				displayName: "Anthropic",
 				isBuiltIn: true,
 				setupInstructions: { steps: [] },
-				auth: { type: "field-based", fields: {} },
+				auth: {
+					type: "field-based",
+					fields: {
+						apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+						baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+						headers: {
+							label: "Custom Headers",
+							kind: "textarea",
+							required: false,
+							placeholder: '{"key": "value"}',
+						},
+					},
+				},
 				capabilities: { chat: true, embedding: false, modelDiscovery: false },
 				createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 				validateAuth: async () => ({ valid: true }),
@@ -1590,7 +2099,19 @@ describe("ProviderDefinition", () => {
 			displayName: "Some Provider",
 			isBuiltIn: true,
 			setupInstructions: { steps: ["Step 1"] },
-			auth: { type: "field-based", fields: {} },
+			auth: {
+				type: "field-based",
+				fields: {
+					apiKey: { label: "API Key", kind: "secret", required: true, placeholder: "sk-..." },
+					baseUrl: { label: "Base URL", kind: "text", required: false, placeholder: "https://..." },
+					headers: {
+						label: "Custom Headers",
+						kind: "textarea",
+						required: false,
+						placeholder: '{"key": "value"}',
+					},
+				},
+			},
 			capabilities: { chat: true, embedding: false, modelDiscovery: false },
 			createRuntimeDefinition: async (_auth) => ({ chatModels: {}, embeddingModels: {} }),
 			validateAuth: async () => ({ valid: true }),

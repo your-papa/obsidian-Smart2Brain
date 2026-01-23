@@ -13,7 +13,6 @@ import {
 	builtInProviders,
 	ollamaProvider,
 	openaiProvider,
-	sapAiCoreProvider,
 } from "../../../src/providers/builtin/index.ts";
 import type { BuiltInProviderDefinition } from "../../../src/providers/types.ts";
 
@@ -36,12 +35,6 @@ describe("builtin/index barrel export", () => {
 			expect(ollamaProvider.id).toBe("ollama");
 			expect(ollamaProvider.isBuiltIn).toBe(true);
 		});
-
-		it("exports sapAiCoreProvider", () => {
-			expect(sapAiCoreProvider).toBeDefined();
-			expect(sapAiCoreProvider.id).toBe("sap-ai-core");
-			expect(sapAiCoreProvider.isBuiltIn).toBe(true);
-		});
 	});
 
 	describe("builtInProviders record", () => {
@@ -51,15 +44,14 @@ describe("builtin/index barrel export", () => {
 		});
 
 		it("contains all built-in providers", () => {
-			expect(Object.keys(builtInProviders)).toHaveLength(4);
-			expect(Object.keys(builtInProviders).sort()).toEqual(["anthropic", "ollama", "openai", "sap-ai-core"]);
+			expect(Object.keys(builtInProviders)).toHaveLength(3);
+			expect(Object.keys(builtInProviders).sort()).toEqual(["anthropic", "ollama", "openai"]);
 		});
 
 		it("maps provider ids to provider definitions", () => {
 			expect(builtInProviders.openai).toBe(openaiProvider);
 			expect(builtInProviders.anthropic).toBe(anthropicProvider);
 			expect(builtInProviders.ollama).toBe(ollamaProvider);
-			expect(builtInProviders["sap-ai-core"]).toBe(sapAiCoreProvider);
 		});
 
 		it("each provider id matches the key", () => {
@@ -116,12 +108,6 @@ describe("builtin/index barrel export", () => {
 			expect(builtInProviders.ollama.capabilities.embedding).toBe(true);
 			expect(builtInProviders.ollama.capabilities.modelDiscovery).toBe(true);
 		});
-
-		it("sap-ai-core supports chat, embedding, and modelDiscovery", () => {
-			expect(builtInProviders["sap-ai-core"].capabilities.chat).toBe(true);
-			expect(builtInProviders["sap-ai-core"].capabilities.embedding).toBe(true);
-			expect(builtInProviders["sap-ai-core"].capabilities.modelDiscovery).toBe(true);
-		});
 	});
 
 	describe("provider lookup by id", () => {
@@ -138,11 +124,6 @@ describe("builtin/index barrel export", () => {
 		it("can look up ollama provider by id", () => {
 			const provider = builtInProviders.ollama;
 			expect(provider.displayName).toBe("Ollama");
-		});
-
-		it("can look up sap-ai-core provider by id", () => {
-			const provider = builtInProviders["sap-ai-core"];
-			expect(provider.displayName).toBe("SAP AI Core");
 		});
 
 		it("returns undefined for non-existent provider id", () => {

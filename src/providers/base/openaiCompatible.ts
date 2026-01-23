@@ -176,8 +176,7 @@ export async function discoverOpenAIModels(auth: RuntimeFieldBasedAuthState): Pr
 	const payload = (await response.json()) as OpenAIModelResponse;
 	const resources = Array.isArray(payload.data) ? payload.data : [];
 
-	const chatModels: string[] = [];
-	const embeddingModels: string[] = [];
+	const models: string[] = [];
 
 	for (const resource of resources) {
 		const id = typeof resource?.id === "string" ? resource.id.trim() : undefined;
@@ -185,40 +184,11 @@ export async function discoverOpenAIModels(auth: RuntimeFieldBasedAuthState): Pr
 			continue;
 		}
 
-		if (isEmbeddingModel(id)) {
-			embeddingModels.push(id);
-			continue;
-		}
-
-		if (isExcludedModel(id)) {
-			continue;
-		}
-
-		chatModels.push(id);
+		models.push(id);
 	}
 
-	return { chat: chatModels, embedding: embeddingModels };
-}
-
-/**
- * Checks if a model is an embedding model based on its name.
- */
-function isEmbeddingModel(modelId: string): boolean {
-	const normalized = modelId.toLowerCase();
-	return normalized.includes("embedding") || normalized.includes("embed");
-}
-
-/**
- * Checks if a model should be excluded from the list (moderation, audio, etc.).
- */
-function isExcludedModel(modelId: string): boolean {
-	const normalized = modelId.toLowerCase();
-	return (
-		normalized.includes("moderation") ||
-		normalized.includes("audio") ||
-		normalized.includes("whisper") ||
-		normalized.includes("tts")
-	);
+	// Return all models in both arrays - let users choose which model to use for each purpose
+	return { chat: models, embedding: models };
 }
 
 /**

@@ -24,7 +24,7 @@ import type {
  * List of all built-in provider IDs.
  * Derived from the builtInProviders record to ensure consistency.
  */
-export const BUILT_IN_PROVIDER_IDS = ["openai", "anthropic", "ollama", "sap-ai-core"] as const;
+export const BUILT_IN_PROVIDER_IDS = ["openai", "anthropic", "ollama"] as const;
 
 /**
  * Type representing valid built-in provider IDs.
@@ -119,7 +119,7 @@ export function getProvider(
  * @example
  * ```typescript
  * const ids = listAllProviderIds(customProviders);
- * // ["openai", "anthropic", "ollama", "sap-ai-core", "my-custom"]
+ * // ["openai", "anthropic", "ollama", "my-custom"]
  * ```
  */
 export function listAllProviderIds(customProviders: StoredCustomProviderDefinition[]): string[] {
@@ -140,6 +140,7 @@ export type {
 	CustomProviderDefinition,
 	StoredCustomProviderDefinition,
 	BaseProviderDefinition,
+	StandardAuthFieldKey,
 	AuthMethod,
 	FieldBasedAuth,
 	OAuthAuth,
@@ -179,7 +180,6 @@ export {
 	openaiProvider,
 	anthropicProvider,
 	ollamaProvider,
-	sapAiCoreProvider,
 } from "./builtin/index";
 
 // Re-export custom provider factory

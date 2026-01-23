@@ -45,13 +45,14 @@ function createCustomProvider(
 		auth: {
 			type: "field-based",
 			fields: {
-				apiKey: { label: "API Key", kind: "secret", primary: true, required: true },
-				baseUrl: { label: "Base URL", kind: "text", primary: true, required: true },
+				apiKey: { label: "API Key", kind: "secret", required: true },
+				baseUrl: { label: "Base URL", kind: "text", required: false },
+				headers: { label: "Custom Headers", kind: "textarea", required: false },
 			},
 		},
 		capabilities: { chat: true, embedding: false, modelDiscovery: false },
-		createRuntimeDefinition: async (_auth, modelIds) => ({
-			chatModels: Object.fromEntries(modelIds.chat.map((modelId) => [modelId, async () => ({}) as unknown])),
+		createRuntimeDefinition: async (_auth) => ({
+			chatModels: {},
 			embeddingModels: {},
 		}),
 		validateAuth: async () => validateResult,
@@ -226,8 +227,7 @@ describe("AgentManager Provider Integration", () => {
 					},
 				};
 
-				const modelIds = { chat: ["gpt-4o", "gpt-4o-mini"], embedding: ["text-embedding-3-small"] };
-				const runtimeDef = await provider.createRuntimeDefinition(auth, modelIds);
+				const runtimeDef = await provider.createRuntimeDefinition(auth);
 
 				expect(runtimeDef).toBeDefined();
 				expect(runtimeDef.chatModels).toBeDefined();
@@ -248,15 +248,13 @@ describe("AgentManager Provider Integration", () => {
 					},
 				};
 
-				const modelIds = { chat: ["gpt-4o", "gpt-4o-mini"], embedding: ["text-embedding-3-small"] };
-				const runtimeDef = await provider.createRuntimeDefinition(auth, modelIds);
+				const runtimeDef = await provider.createRuntimeDefinition(auth);
 
-				// Should have chat models
-				expect(Object.keys(runtimeDef.chatModels)).toContain("gpt-4o");
-				expect(Object.keys(runtimeDef.chatModels)).toContain("gpt-4o-mini");
+				// Should have chat models (providers define their own models now)
+				expect(Object.keys(runtimeDef.chatModels).length).toBeGreaterThan(0);
 
 				// Should have embedding models
-				expect(Object.keys(runtimeDef.embeddingModels)).toContain("text-embedding-3-small");
+				expect(Object.keys(runtimeDef.embeddingModels).length).toBeGreaterThan(0);
 			}
 		});
 
@@ -272,8 +270,7 @@ describe("AgentManager Provider Integration", () => {
 					},
 				};
 
-				const modelIds = { chat: ["claude-3-5-sonnet-20241022"], embedding: [] };
-				const runtimeDef = await provider.createRuntimeDefinition(auth, modelIds);
+				const runtimeDef = await provider.createRuntimeDefinition(auth);
 
 				expect(runtimeDef).toBeDefined();
 				expect(runtimeDef.chatModels).toBeDefined();
@@ -293,12 +290,12 @@ describe("AgentManager Provider Integration", () => {
 				},
 			};
 
-			const modelIds = { chat: ["custom-model"], embedding: [] };
-			const runtimeDef = await customProvider.createRuntimeDefinition(auth, modelIds);
+			const runtimeDef = await customProvider.createRuntimeDefinition(auth);
 
 			expect(runtimeDef).toBeDefined();
 			expect(runtimeDef.chatModels).toBeDefined();
-			expect(Object.keys(runtimeDef.chatModels)).toContain("custom-model");
+			// Custom provider's mock returns empty chatModels
+			expect(Object.keys(runtimeDef.chatModels)).toHaveLength(0);
 		});
 	});
 
@@ -375,7 +372,6 @@ describe("AgentManager Provider Integration", () => {
 			expect(ids).toContain("openai");
 			expect(ids).toContain("anthropic");
 			expect(ids).toContain("ollama");
-			expect(ids).toContain("sap-ai-core");
 		});
 
 		it("should include custom provider IDs", () => {
@@ -402,7 +398,6 @@ describe("AgentManager Provider Integration", () => {
 			expect(isBuiltInProvider("openai")).toBe(true);
 			expect(isBuiltInProvider("anthropic")).toBe(true);
 			expect(isBuiltInProvider("ollama")).toBe(true);
-			expect(isBuiltInProvider("sap-ai-core")).toBe(true);
 		});
 
 		it("should return false for custom provider IDs", () => {
@@ -419,7 +414,7 @@ describe("AgentManager Provider Integration", () => {
 describe("Provider ID Mapping (Legacy to New)", () => {
 	/**
 	 * The old system used PascalCase provider names: "OpenAI", "Anthropic", "Ollama", "CustomOpenAI"
-	 * The new system uses lowercase with dashes: "openai", "anthropic", "ollama", "sap-ai-core"
+	 * The new system uses lowercase with dashes: "openai", "anthropic", "ollama"
 	 *
 	 * This documents the mapping between the two systems during migration.
 	 */

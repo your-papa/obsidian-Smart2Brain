@@ -10,6 +10,7 @@ export type {
 	ChatModelConfig,
 	EmbedModelConfig,
 	// Auth types
+	StandardAuthFieldKey,
 	AuthFieldDefinition,
 	FieldBasedAuth,
 	OAuthTokens,

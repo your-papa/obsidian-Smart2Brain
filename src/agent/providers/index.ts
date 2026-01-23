@@ -11,8 +11,6 @@ export type {
 	BuiltInProviderModelMap,
 	BuiltInProviderModelMapEntry,
 	ProviderApiConfigOptions,
-	SapAICoreModelEntry,
-	SapAICoreProviderOptions,
 } from "./types";
 
 // Errors
@@ -29,4 +27,3 @@ export {
 export { createOpenAIProviderDefinition } from "./openai";
 export { createAnthropicProviderDefinition } from "./anthropic";
 export { createOllamaProviderDefinition } from "./ollama";
-export { createSapAICoreProviderDefinition } from "./sapAICore";

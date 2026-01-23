@@ -23,12 +23,6 @@ vi.mock("../../src/lib/i18n.ts", () => ({
 	t: (key: string) => key,
 }));
 
-// Mock SAP AI SDK (dynamically imported)
-vi.mock("@sap-ai-sdk/langchain", () => ({
-	AzureOpenAiChatClient: vi.fn(),
-	AzureOpenAiEmbeddingClient: vi.fn(),
-}));
-
 // Mock LangChain providers
 vi.mock("@langchain/openai", () => ({
 	ChatOpenAI: vi.fn().mockImplementation(() => ({ invoke: vi.fn() })),
@@ -99,18 +93,9 @@ function createStoredCustomProvider(overrides: Partial<StoredCustomProvider> = {
 		auth: {
 			type: "field-based",
 			fields: {
-				apiKey: {
-					label: "API Key",
-					kind: "secret",
-					primary: true,
-					required: true,
-				},
-				baseUrl: {
-					label: "Base URL",
-					kind: "text",
-					primary: true,
-					required: true,
-				},
+				apiKey: { label: "API Key", kind: "secret", required: true },
+				baseUrl: { label: "Base URL", kind: "text", required: false },
+				headers: { label: "Custom Headers", kind: "textarea", required: false },
 			},
 		},
 		capabilities: {
@@ -175,7 +160,14 @@ describe("PluginDataStore - Custom Provider CRUD", () => {
 					baseProviderId: "openai",
 					createdAt: 1000,
 					setupInstructions: { steps: ["Step 1"] },
-					auth: { type: "field-based", fields: {} },
+					auth: {
+						type: "field-based",
+						fields: {
+							apiKey: { label: "API Key", kind: "secret", required: true },
+							baseUrl: { label: "Base URL", kind: "text", required: false },
+							headers: { label: "Custom Headers", kind: "textarea", required: false },
+						},
+					},
 					capabilities: { chat: true, embedding: false, modelDiscovery: false },
 				},
 			});
@@ -188,7 +180,14 @@ describe("PluginDataStore - Custom Provider CRUD", () => {
 					baseProviderId: "openai",
 					createdAt: 2000,
 					setupInstructions: { steps: ["Step 2"] },
-					auth: { type: "field-based", fields: {} },
+					auth: {
+						type: "field-based",
+						fields: {
+							apiKey: { label: "API Key", kind: "secret", required: true },
+							baseUrl: { label: "Base URL", kind: "text", required: false },
+							headers: { label: "Custom Headers", kind: "textarea", required: false },
+						},
+					},
 					capabilities: { chat: true, embedding: true, modelDiscovery: false },
 				},
 			});
@@ -238,7 +237,14 @@ describe("PluginDataStore - Custom Provider CRUD", () => {
 					baseProviderId: "openai",
 					createdAt: Date.now(),
 					setupInstructions: { steps: [] },
-					auth: { type: "field-based", fields: {} },
+					auth: {
+						type: "field-based",
+						fields: {
+							apiKey: { label: "API Key", kind: "secret", required: true },
+							baseUrl: { label: "Base URL", kind: "text", required: false },
+							headers: { label: "Custom Headers", kind: "textarea", required: false },
+						},
+					},
 					capabilities: { chat: true, embedding: true, modelDiscovery: false },
 				},
 			});

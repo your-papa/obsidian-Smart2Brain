@@ -6,7 +6,7 @@
  * - NO embedding models (Anthropic doesn't offer embeddings)
  * - Model discovery via Anthropic API (/v1/models)
  *
- * Authentication: Field-based with apiKey only (required)
+ * Authentication: Field-based with apiKey (required), baseUrl (optional), headers (optional)
  */
 
 import { createAnthropicChatModel, discoverAnthropicModels, validateAnthropicAuth } from "../base/anthropicRuntime";
@@ -72,6 +72,8 @@ export const anthropicProvider: BuiltInProviderDefinition = {
 	// =========================================================================
 	auth: buildFieldBasedAuth({
 		apiKey: { required: true, placeholder: "sk-ant-..." },
+		baseUrl: { required: false },
+		headers: { required: false },
 	}),
 
 	// =========================================================================

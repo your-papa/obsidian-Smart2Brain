@@ -146,8 +146,7 @@ export async function discoverOllamaModels(auth: RuntimeFieldBasedAuthState): Pr
 	const payload = (await response.json()) as OllamaTagsResponse;
 	const models = Array.isArray(payload.models) ? payload.models : [];
 
-	const chatModels: string[] = [];
-	const embeddingModels: string[] = [];
+	const modelNames: string[] = [];
 
 	for (const model of models) {
 		const name = typeof model?.name === "string" ? model.name.trim() : undefined;
@@ -155,15 +154,11 @@ export async function discoverOllamaModels(auth: RuntimeFieldBasedAuthState): Pr
 			continue;
 		}
 
-		if (isEmbeddingModel(name)) {
-			embeddingModels.push(name);
-			continue;
-		}
-
-		chatModels.push(name);
+		modelNames.push(name);
 	}
 
-	return { chat: chatModels, embedding: embeddingModels };
+	// Return all models in both arrays - let users choose which model to use for each purpose
+	return { chat: modelNames, embedding: modelNames };
 }
 
 /**
@@ -235,14 +230,6 @@ export async function validateOllamaConnection(auth: RuntimeFieldBasedAuthState)
  */
 function sanitizeBaseUrl(url: string): string {
 	return url.replace(/\/+$/, "");
-}
-
-/**
- * Checks if a model is an embedding model based on its name.
- */
-function isEmbeddingModel(modelId: string): boolean {
-	const normalized = modelId.toLowerCase();
-	return normalized.includes("embedding") || normalized.includes("embed");
 }
 
 /**

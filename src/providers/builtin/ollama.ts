@@ -6,7 +6,7 @@
  * - Embedding models (nomic-embed-text, mxbai-embed-large, etc.)
  * - Model discovery via Ollama API (/api/tags)
  *
- * Authentication: Field-based with baseUrl only (no API key required)
+ * Authentication: Field-based with all three fields (apiKey optional, baseUrl required, headers optional)
  * Ollama runs locally on the user's machine, defaulting to http://localhost:11434
  */
 
@@ -79,7 +79,9 @@ export const ollamaProvider: BuiltInProviderDefinition = {
 	// Auth Configuration
 	// =========================================================================
 	auth: buildFieldBasedAuth({
+		apiKey: { required: false },
 		baseUrl: { required: true, label: "Server URL", placeholder: "http://localhost:11434" },
+		headers: { required: false },
 	}),
 
 	// =========================================================================

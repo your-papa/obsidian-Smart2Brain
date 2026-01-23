@@ -4,7 +4,7 @@
  * Tests cover:
  * - Provider identity (id, displayName, isBuiltIn)
  * - Setup instructions (steps, link)
- * - Auth configuration (field-based with apiKey only)
+ * - Auth configuration (field-based with apiKey required, baseUrl/headers optional)
  * - Capabilities (chat: true, embedding: false, modelDiscovery: true)
  * - createRuntimeDefinition function
  * - validateAuth function
@@ -113,10 +113,20 @@ describe("Anthropic Provider Definition", () => {
 		});
 
 		describe("field count", () => {
-			it("should only have apiKey field (no baseUrl, no headers)", () => {
+			it("should have all three standard auth fields", () => {
 				const auth = anthropicProvider.auth as FieldBasedAuth;
 				const fieldKeys = Object.keys(auth.fields);
-				expect(fieldKeys).toEqual(["apiKey"]);
+				expect(fieldKeys).toContain("apiKey");
+				expect(fieldKeys).toContain("baseUrl");
+				expect(fieldKeys).toContain("headers");
+				expect(fieldKeys).toHaveLength(3);
+			});
+
+			it("should have apiKey as required, baseUrl and headers as optional", () => {
+				const auth = anthropicProvider.auth as FieldBasedAuth;
+				expect(auth.fields.apiKey.required).toBe(true);
+				expect(auth.fields.baseUrl.required).toBe(false);
+				expect(auth.fields.headers.required).toBe(false);
 			});
 		});
 	});

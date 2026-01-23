@@ -16,7 +16,7 @@ let configuredProviders = $derived(data.getConfiguredProviders());
 
 // Helper to check if provider supports generation
 function isGenProvider(provider: string): boolean {
-	const genProviders: string[] = ["openai", "ollama", "anthropic", "sap-ai-core"];
+	const genProviders: string[] = ["openai", "ollama", "anthropic"];
 	return genProviders.includes(provider);
 }
 

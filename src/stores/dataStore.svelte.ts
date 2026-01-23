@@ -168,20 +168,6 @@ export const DEFAULT_BUILTIN_PROVIDER_STATES: Record<BuiltInProviderId, StoredPr
 			"mxbai-embed-large": { similarityThreshold: 0.5 },
 		},
 	},
-	"sap-ai-core": {
-		isConfigured: false,
-		auth: createDefaultFieldBasedAuth(),
-		chatModels: {
-			"gpt-4o": { contextWindow: 128000, temperature: 0.7 },
-			"gpt-4": { contextWindow: 8192, temperature: 0.7 },
-			"gpt-35-turbo": { contextWindow: 16384, temperature: 0.7 },
-		},
-		embedModels: {
-			"text-embedding-ada-002": { similarityThreshold: 0.75 },
-			"text-embedding-3-small": { similarityThreshold: 0.5 },
-			"text-embedding-3-large": { similarityThreshold: 0.5 },
-		},
-	},
 };
 
 /**
@@ -244,15 +230,6 @@ export const DEFAULT_PROVIDER_CONFIGS: ProviderConfigs = {
 			["claude-3-opus-20240229", { temperature: 0.5, contextWindow: 200000 }],
 			["claude-3-5-sonnet-20241022", { temperature: 0.5, contextWindow: 200000 }],
 		]),
-	},
-	"sap-ai-core": {
-		isConfigured: false,
-		providerAuth: {
-			apiKeyId: "",
-			baseUrl: "",
-		},
-		embedModels: new Map([["text-embedding-ada-002", { similarityThreshold: 0.75 }]]),
-		genModels: new Map([["gpt-4o", { temperature: 0.5, contextWindow: 128000 }]]),
 	},
 };
 

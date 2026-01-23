@@ -5,12 +5,22 @@
  */
 
 /**
+ * Standard authentication field keys that ALL field-based providers must define.
+ * Each provider decides whether each field is `required: true` or `required: false`.
+ *
+ * - apiKey: API key or token for authentication
+ * - baseUrl: Base URL for the API endpoint
+ * - headers: Custom headers for API requests
+ */
+export type StandardAuthFieldKey = "apiKey" | "baseUrl" | "headers";
+
+/**
  * Definition for a single authentication field in a provider's auth config.
  * Used to dynamically render auth forms in the settings UI.
  *
  * Visibility is determined by `required`:
- * - Required fields are always visible
- * - Optional fields are hidden behind an "Advanced" toggle
+ * - Required fields (`required: true`) are always visible
+ * - Optional fields (`required: false`) are shown in "Advanced Options"
  */
 export interface AuthFieldDefinition {
 	/**
@@ -43,10 +53,15 @@ export interface AuthFieldDefinition {
  * Field-based authentication configuration.
  * Used for providers that require API keys, tokens, or other field-based auth.
  *
- * This is the most common auth method:
+ * All field-based providers MUST define all three standard fields (apiKey, baseUrl, headers).
+ * Each provider decides if a field is `required: true` or `required: false`:
+ * - Required fields are always visible in the settings UI
+ * - Optional fields are shown in "Advanced Options"
+ *
+ * Examples:
  * - OpenAI: apiKey (required), baseUrl (optional), headers (optional)
- * - Anthropic: apiKey (required)
- * - Ollama: baseUrl (required, no API key)
+ * - Anthropic: apiKey (required), baseUrl (optional), headers (optional)
+ * - Ollama: apiKey (optional), baseUrl (required), headers (optional)
  */
 export interface FieldBasedAuth {
 	/**
@@ -56,11 +71,13 @@ export interface FieldBasedAuth {
 	type: "field-based";
 
 	/**
-	 * Authentication field definitions keyed by field ID.
-	 * The key (e.g., "apiKey", "baseUrl") is used as the storage key
-	 * and to access the field's value programmatically.
+	 * Authentication field definitions for all standard fields.
+	 * All three fields (apiKey, baseUrl, headers) MUST be defined.
+	 * The `required` property on each field determines visibility:
+	 * - `required: true` → Always visible
+	 * - `required: false` → Shown in "Advanced Options"
 	 */
-	fields: Record<string, AuthFieldDefinition>;
+	fields: Record<StandardAuthFieldKey, AuthFieldDefinition>;
 }
 
 /**

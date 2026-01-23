@@ -9,6 +9,7 @@ export type { ChatModelConfig, EmbedModelConfig } from "./models.ts";
 
 // Auth types
 export type {
+	StandardAuthFieldKey,
 	AuthFieldDefinition,
 	FieldBasedAuth,
 	OAuthTokens,

@@ -168,7 +168,6 @@ describe("validateCustomProviderId", () => {
 				"fireworks-ai",
 				"deepseek",
 				"mistral",
-				"sap-ai-core",
 			];
 
 			for (const id of validIds) {

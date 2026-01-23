@@ -9,13 +9,11 @@ import type { BuiltInProviderDefinition } from "../types";
 import { anthropicProvider } from "./anthropic";
 import { ollamaProvider } from "./ollama";
 import { openaiProvider } from "./openai";
-import { sapAiCoreProvider } from "./sapAiCore";
 
 // Re-export individual providers for direct import
 export { openaiProvider } from "./openai";
 export { anthropicProvider } from "./anthropic";
 export { ollamaProvider } from "./ollama";
-export { sapAiCoreProvider } from "./sapAiCore";
 
 /**
  * Record of all built-in providers, keyed by provider id.
@@ -32,5 +30,4 @@ export const builtInProviders: Record<string, BuiltInProviderDefinition> = {
 	[openaiProvider.id]: openaiProvider,
 	[anthropicProvider.id]: anthropicProvider,
 	[ollamaProvider.id]: ollamaProvider,
-	[sapAiCoreProvider.id]: sapAiCoreProvider,
 };

@@ -1,19 +1,17 @@
-import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { EmbeddingsInterface } from "@langchain/core/embeddings";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { createAnthropicProviderDefinition } from "./anthropic";
+import { ModelNotFoundError, ProviderNotFoundError } from "./errors";
+import { firstKey } from "./helpers";
+import { createOllamaProviderDefinition } from "./ollama";
+import { createOpenAIProviderDefinition } from "./openai";
 import type {
 	BuiltInProviderOptions,
 	ChatModelFactory,
 	EmbeddingModelFactory,
 	ModelOptions,
 	ProviderDefinition,
-	SapAICoreProviderOptions,
 } from "./types";
-import { ModelNotFoundError, ProviderNotFoundError } from "./errors";
-import { firstKey } from "./helpers";
-import { createOpenAIProviderDefinition } from "./openai";
-import { createAnthropicProviderDefinition } from "./anthropic";
-import { createOllamaProviderDefinition } from "./ollama";
-import { createSapAICoreProviderDefinition } from "./sapAICore";
 
 interface InternalProviderDefinition {
 	chatModels: Record<string, ChatModelFactory>;
@@ -111,10 +109,6 @@ export class ProviderRegistry {
 
 	useOllama(options?: BuiltInProviderOptions): Promise<this> {
 		return this.registerProvider("ollama", createOllamaProviderDefinition(options));
-	}
-
-	useSapAICore(options?: SapAICoreProviderOptions): Promise<this> {
-		return this.registerProvider("sap-ai-core", createSapAICoreProviderDefinition(options));
 	}
 
 	private getProvider(name: string): InternalProviderDefinition {

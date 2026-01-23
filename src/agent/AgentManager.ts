@@ -218,10 +218,6 @@ export class AgentManager {
 			case "ollama":
 				await registry.useOllama(options);
 				break;
-			case "sap-ai-core":
-				// SAP AI Core uses OpenAI-compatible API
-				await registry.useOpenAI(options);
-				break;
 			default:
 				throw new Error(`Unsupported provider: ${providerId}`);
 		}

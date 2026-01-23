@@ -4,6 +4,7 @@ import { createProviderStateQuery, invalidateProviderState } from "../../lib/que
 import { getProvider } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import Button from "../ui/Button.svelte";
+import Toggle from "../ui/Toggle.svelte";
 import ProviderIcon from "../ui/logos/ProviderIcon.svelte";
 import AuthConfigFields from "./AuthConfigFields.svelte";
 import SettingItem from "./SettingItem.svelte";
@@ -44,6 +45,40 @@ let instructions = $derived(providerDefinition?.setupInstructions);
 
 // Get display name for the provider
 let displayName = $derived(providerDefinition?.displayName ?? provider);
+
+// Advanced options state
+let showAdvanced = $state(false);
+
+// Check if provider has any optional auth fields
+let hasOptionalFields = $derived(() => {
+	if (providerDefinition?.auth.type !== "field-based") return false;
+	return Object.values(providerDefinition.auth.fields).some((field) => field.required === false);
+});
+
+// Check if any optional fields have configured values
+let hasOptionalFieldsConfigured = $derived(() => {
+	if (!hasOptionalFields()) return false;
+	const storedAuth = data.getStoredAuthState(provider);
+	if (!storedAuth || storedAuth.type !== "field-based") return false;
+
+	const authFields = providerDefinition?.auth.type === "field-based" ? providerDefinition.auth.fields : null;
+	if (!authFields) return false;
+
+	// Check if any optional field has a value in either values or secretIds
+	return Object.entries(authFields).some(([fieldKey, field]) => {
+		if (field.required !== false) return false;
+		const hasValue = storedAuth.values[fieldKey] && storedAuth.values[fieldKey] !== "";
+		const hasSecretId = storedAuth.secretIds[fieldKey] && storedAuth.secretIds[fieldKey] !== "";
+		return hasValue || hasSecretId;
+	});
+});
+
+// Auto-expand advanced when optional fields have configured values
+$effect(() => {
+	if (hasOptionalFieldsConfigured()) {
+		showAdvanced = true;
+	}
+});
 </script>
 
 <Accordion.Item
@@ -120,8 +155,15 @@ let displayName = $derived(providerDefinition?.displayName ?? provider);
 		{/if}
 		{/if}
 
+		<!-- Advanced options toggle -->
+		{#if hasOptionalFields()}
+			<SettingItem name="Advanced Options" desc="Show optional configuration fields">
+				<Toggle bind:checked={showAdvanced} />
+			</SettingItem>
+		{/if}
+
 		<!-- Auth configuration fields -->
-		<AuthConfigFields {provider} />
+		<AuthConfigFields {provider} {showAdvanced} />
 
 		{#if !isConfigured}
 			<!-- Add provider button for unconfigured providers -->

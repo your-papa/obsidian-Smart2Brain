@@ -1,4 +1,6 @@
 import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { ProviderAuthError, ProviderEndpointError, ProviderImportError } from "./errors";
+import { createChatFactories, createEmbeddingFactories, firstKey } from "./helpers";
 import type {
 	BuiltInProviderModelMap,
 	BuiltInProviderModelMapEntry,
@@ -7,8 +9,6 @@ import type {
 	EmbeddingModelFactory,
 	ProviderDefinition,
 } from "./types";
-import { ProviderAuthError, ProviderEndpointError, ProviderImportError } from "./errors";
-import { createChatFactories, createEmbeddingFactories, firstKey } from "./helpers";
 
 const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
@@ -145,8 +145,7 @@ async function fetchOpenAIModels(options?: BuiltInProviderOptions): Promise<{
 		throw new Error("OpenAI did not return any models for the provided credentials.");
 	}
 
-	const chatModels: BuiltInProviderModelMap = {};
-	const embeddingModels: BuiltInProviderModelMap = {};
+	const models: BuiltInProviderModelMap = {};
 
 	for (const resource of resources) {
 		const id = typeof resource?.id === "string" ? resource.id.trim() : undefined;
@@ -154,42 +153,19 @@ async function fetchOpenAIModels(options?: BuiltInProviderOptions): Promise<{
 			continue;
 		}
 
-		if (isEmbeddingModel(id)) {
-			embeddingModels[id] = id;
-			continue;
-		}
-
-		if (isExcludedModel(id)) {
-			continue;
-		}
-
-		chatModels[id] = id;
+		models[id] = id;
 	}
 
-	if (!Object.keys(chatModels).length) {
-		throw new Error("OpenAI did not return any chat-capable models. Specify options.chatModels to override.");
+	if (!Object.keys(models).length) {
+		throw new Error("OpenAI did not return any models. Specify options.chatModels to override.");
 	}
 
-	return { chatModels, embeddingModels };
+	// Return all models in both maps - let users choose which model to use for each purpose
+	return { chatModels: models, embeddingModels: models };
 }
 
 function sanitizeBaseUrl(url: string): string {
 	return url.replace(/\/+$/, "");
-}
-
-function isEmbeddingModel(modelId: string): boolean {
-	const normalized = modelId.toLowerCase();
-	return normalized.includes("embedding") || normalized.includes("embed");
-}
-
-function isExcludedModel(modelId: string): boolean {
-	const normalized = modelId.toLowerCase();
-	return (
-		normalized.includes("moderation") ||
-		normalized.includes("audio") ||
-		normalized.includes("whisper") ||
-		normalized.includes("tts")
-	);
 }
 
 function buildOpenAIClientOptions(options?: BuiltInProviderOptions): Record<string, unknown> {

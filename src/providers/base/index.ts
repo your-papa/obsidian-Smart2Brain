@@ -20,10 +20,3 @@ export {
 	discoverOllamaModels,
 	validateOllamaConnection,
 } from "./ollamaRuntime";
-
-export {
-	createSapAiCoreChatModel,
-	createSapAiCoreEmbeddingModel,
-	discoverSapAiCoreModels,
-	validateSapAiCoreAuth,
-} from "./sapAiCoreRuntime";

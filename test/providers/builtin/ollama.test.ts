@@ -4,7 +4,7 @@
  * Tests cover:
  * - Provider identity (id, displayName, isBuiltIn)
  * - Setup instructions (steps, link)
- * - Auth configuration (field-based with baseUrl only, no apiKey)
+ * - Auth configuration (field-based with apiKey, baseUrl, headers)
  * - Capabilities (chat: true, embedding: true, modelDiscovery: true)
  * - createRuntimeDefinition function
  * - validateAuth function
@@ -125,15 +125,25 @@ describe("Ollama Provider Definition", () => {
 		});
 
 		describe("field count", () => {
-			it("should only have baseUrl field (no apiKey)", () => {
+			it("should have all three standard auth fields", () => {
 				const auth = ollamaProvider.auth as FieldBasedAuth;
 				const fieldKeys = Object.keys(auth.fields);
-				expect(fieldKeys).toEqual(["baseUrl"]);
+				expect(fieldKeys).toContain("apiKey");
+				expect(fieldKeys).toContain("baseUrl");
+				expect(fieldKeys).toContain("headers");
+				expect(fieldKeys.length).toBe(3);
 			});
 
-			it("should NOT have apiKey field (Ollama does not require API key)", () => {
+			it("should have apiKey as optional (not required)", () => {
 				const auth = ollamaProvider.auth as FieldBasedAuth;
-				expect(auth.fields.apiKey).toBeUndefined();
+				expect(auth.fields.apiKey).toBeDefined();
+				expect(auth.fields.apiKey.required).toBe(false);
+			});
+
+			it("should have headers as optional (not required)", () => {
+				const auth = ollamaProvider.auth as FieldBasedAuth;
+				expect(auth.fields.headers).toBeDefined();
+				expect(auth.fields.headers.required).toBe(false);
 			});
 		});
 	});
