@@ -1,13 +1,27 @@
 <script lang="ts">
+import type { Component } from "svelte";
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
-import ProviderIcon from "../../components/ui/logos/ProviderIcon.svelte";
-import type { ChatModelConfig, EmbedModelConfig } from "../../providers/types";
+import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
+import { getProvider } from "../../providers/index";
+import type { ChatModelConfig, EmbedModelConfig, LogoProps } from "../../providers/types";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { ChatModelManagementModal } from "../../views/chat-model-management/ChatModelManagement";
 import { EmbedModelManagementModal } from "../../views/embed-model-management/EmbedModelManagement";
+
+// Helper to get logo for a provider
+function getProviderLogo(providerId: string): Component<LogoProps> {
+	const customProviders = getData()
+		.getCustomProviders()
+		.map((cp) => cp.definition);
+	const provider = getProvider(providerId, customProviders);
+	if (provider && "logo" in provider && provider.logo) {
+		return provider.logo;
+	}
+	return GenericAIIcon;
+}
 
 const data = getData();
 const plugin = getPlugin();
@@ -61,9 +75,10 @@ let embedModelsByProvider = $derived.by(() => {
 		<SettingItem name="" desc="No chat models configured. Configure a provider first, then add chat models." />
 	{:else}
 		{#each chatModelsByProvider as { provider, models }}
+			{@const Logo = getProviderLogo(provider)}
 			<div class="setting-item mod-toggle flex-col items-start gap-2">
 				<div class="flex items-center gap-2 w-full">
-					<ProviderIcon providerName={provider} size={{ width: 16, height: 16 }} />
+					<Logo width={16} height={16} />
 					<span class="font-medium">{provider}</span>
 					<div class="ml-auto">
 						<Button
@@ -96,9 +111,10 @@ let embedModelsByProvider = $derived.by(() => {
 		/>
 	{:else}
 		{#each embedModelsByProvider as { provider, models }}
+			{@const Logo = getProviderLogo(provider)}
 			<div class="setting-item mod-toggle flex-col items-start gap-2">
 				<div class="flex items-center gap-2 w-full">
-					<ProviderIcon providerName={provider} size={{ width: 16, height: 16 }} />
+					<Logo width={16} height={16} />
 					<span class="font-medium">{provider}</span>
 					<div class="ml-auto">
 						<Button

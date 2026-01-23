@@ -102,6 +102,22 @@ export class ProviderEndpointError extends ProviderRegistryError {
 }
 
 /**
+ * Error thrown when a provider is not registered in the registry.
+ *
+ * @example
+ * ```typescript
+ * throw new ProviderNotFoundError("custom-provider");
+ * // → "No provider registered with name "custom-provider"."
+ * ```
+ */
+export class ProviderNotFoundError extends ProviderRegistryError {
+	constructor(provider: string) {
+		super(`No provider registered with name "${provider}".`);
+		this.name = "ProviderNotFoundError";
+	}
+}
+
+/**
  * Error thrown when a requested model is not found in a provider.
  *
  * This error is thrown when:

@@ -1,10 +1,13 @@
 <script lang="ts">
+import type { Component } from "svelte";
 import { mount, onMount } from "svelte";
 import AuthConfigFields from "../../components/settings/AuthConfigFields.svelte";
 import Button from "../../components/ui/Button.svelte";
-import ProviderIcon from "../../components/ui/logos/ProviderIcon.svelte";
+import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
 import { createAuthStateQuery, invalidateProviderState } from "../../lib/query";
 import type SecondBrainPlugin from "../../main";
+import { getProvider } from "../../providers/index";
+import type { LogoProps } from "../../providers/types";
 import { getData } from "../../stores/dataStore.svelte";
 import { icon } from "../../utils/utils";
 import type { ProviderSetupModal } from "./ProviderSetup";
@@ -27,6 +30,16 @@ function handleAddProvider() {
 	modal.close();
 }
 
+// Get the logo component for the provider
+function getProviderLogo(): Component<LogoProps> {
+	const customProviders = data.getCustomProviders().map((cp) => cp.definition);
+	const provider = getProvider(selectedProvider, customProviders);
+	if (provider && "logo" in provider && provider.logo) {
+		return provider.logo;
+	}
+	return GenericAIIcon;
+}
+
 // Function to create and append the header element
 function appendHeaderElement() {
 	const title = modal.titleEl;
@@ -43,15 +56,13 @@ function appendHeaderElement() {
 	});
 
 	if (header) {
-		mount(ProviderIcon, {
+		const Logo = getProviderLogo();
+		mount(Logo, {
 			target: header,
 			anchor: title,
 			props: {
-				providerName: selectedProvider,
-				size: {
-					height: 32,
-					width: 32,
-				},
+				width: 32,
+				height: 32,
 			},
 		});
 

@@ -25,14 +25,11 @@ export type {
 	RuntimeFieldBasedAuthState,
 	RuntimeOAuthAuthState,
 	RuntimeAuthState,
-	ModelOptions,
-	ChatModelFactory,
-	EmbeddingModelFactory,
-	RuntimeProviderDefinition,
 } from "./runtime.ts";
 
 // Provider definition types
 export type {
+	LogoProps,
 	ProviderCapabilities,
 	ProviderSetupInstructions,
 	AuthValidationResult,

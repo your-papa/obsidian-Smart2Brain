@@ -10,38 +10,75 @@
  * Ollama runs locally on the user's machine, defaulting to http://localhost:11434
  */
 
-import {
-	createOllamaChatModel,
-	createOllamaEmbeddingModel,
-	discoverOllamaModels,
-	validateOllamaConnection,
-} from "../base/ollamaRuntime";
+import { ChatOllama, OllamaEmbeddings } from "@langchain/ollama";
+import OllamaLogo from "../../components/ui/logos/OllamaLogo.svelte";
+import { ProviderAuthError, ProviderEndpointError } from "../errors";
 import { buildFieldBasedAuth } from "../helpers";
 import type {
 	AuthValidationResult,
 	BuiltInProviderDefinition,
 	ChatModelConfig,
-	ChatModelFactory,
 	DiscoveredModels,
-	EmbeddingModelFactory,
-	ModelOptions,
 	RuntimeAuthState,
 	RuntimeFieldBasedAuthState,
-	RuntimeProviderDefinition,
 } from "../types";
 
-/**
- * Default chat models available for Ollama.
- * These are common models that users might have installed.
- * Users can discover their actual installed models via model discovery.
- */
-const DEFAULT_CHAT_MODELS = ["llama3.1", "llama3.1:70b", "mistral", "codellama", "gemma2"];
+// =============================================================================
+// Helper Functions
+// =============================================================================
 
 /**
- * Default embedding models available for Ollama.
- * These are common embedding models that users might have installed.
+ * Removes trailing slashes from a URL.
+ * @param url - The URL to sanitize
+ * @returns URL with trailing slashes removed
  */
-const DEFAULT_EMBEDDING_MODELS = ["nomic-embed-text", "mxbai-embed-large"];
+function sanitizeBaseUrl(url: string): string {
+	return url.replace(/\/+$/, "");
+}
+
+/**
+ * Safely reads response text, returning undefined on error.
+ */
+async function safeReadText(response: Response): Promise<string | undefined> {
+	try {
+		return await response.text();
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Converts an error to a ProviderEndpointError.
+ */
+function toEndpointError(error: unknown): Error {
+	if (error instanceof ProviderEndpointError) {
+		return error;
+	}
+	const message = error instanceof Error ? error.message : String(error);
+	return new ProviderEndpointError("ollama", message);
+}
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/**
+ * Ollama API tags response structure.
+ */
+interface OllamaTagsResponse {
+	models?: OllamaModelResource[];
+}
+
+/**
+ * Ollama API model resource structure.
+ */
+interface OllamaModelResource {
+	name?: string;
+}
+
+// =============================================================================
+// Provider Definition
+// =============================================================================
 
 /**
  * Ollama built-in provider definition.
@@ -57,6 +94,7 @@ export const ollamaProvider: BuiltInProviderDefinition = {
 	// =========================================================================
 	id: "ollama",
 	displayName: "Ollama",
+	logo: OllamaLogo,
 	isBuiltIn: true,
 
 	// =========================================================================
@@ -98,42 +136,66 @@ export const ollamaProvider: BuiltInProviderDefinition = {
 	// =========================================================================
 
 	/**
-	 * Creates the runtime provider definition with model factories.
+	 * Creates a LangChain ChatOllama instance.
 	 *
-	 * The factories capture the auth state in closures so models can be
-	 * created without re-passing credentials.
+	 * @param auth - Runtime authentication state with resolved values (baseUrl required)
+	 * @param modelId - The model ID (e.g., "llama3.1", "mistral")
+	 * @param options - Optional model configuration (temperature, contextWindow, etc.)
+	 * @returns ChatOllama instance configured with auth and model
 	 */
-	createRuntimeDefinition: async (auth: RuntimeAuthState): Promise<RuntimeProviderDefinition> => {
+	createChatInstance: (auth: RuntimeAuthState, modelId: string, options?: Partial<ChatModelConfig>): ChatOllama => {
 		if (auth.type !== "field-based") {
 			throw new Error("Ollama provider requires field-based authentication");
 		}
 
 		const fieldAuth = auth as RuntimeFieldBasedAuthState;
-
-		// Create chat model factories
-		const chatModels: Record<string, ChatModelFactory> = {};
-		for (const modelId of DEFAULT_CHAT_MODELS) {
-			chatModels[modelId] = async (options?: ModelOptions) => {
-				// Cast ModelOptions to ChatModelConfig if provided
-				const chatConfig = options as ChatModelConfig | undefined;
-				return createOllamaChatModel(modelId, fieldAuth, chatConfig);
-			};
-		}
-
-		// Create embedding model factories
-		const embeddingModels: Record<string, EmbeddingModelFactory> = {};
-		for (const modelId of DEFAULT_EMBEDDING_MODELS) {
-			embeddingModels[modelId] = async () => {
-				return createOllamaEmbeddingModel(modelId, fieldAuth);
-			};
-		}
-
-		return {
-			chatModels,
-			embeddingModels,
-			defaultChatModel: "llama3.1",
-			defaultEmbeddingModel: "nomic-embed-text",
+		const config: Record<string, unknown> = {
+			model: modelId,
 		};
+
+		// Add baseUrl configuration if provided and not empty
+		const baseUrl = fieldAuth.values.baseUrl;
+		if (baseUrl && baseUrl.trim() !== "") {
+			config.baseUrl = sanitizeBaseUrl(baseUrl);
+		}
+
+		// Add temperature if provided
+		if (options?.temperature !== undefined) {
+			config.temperature = options.temperature;
+		}
+
+		// Add contextWindow as numCtx (Ollama-specific parameter)
+		if (options?.contextWindow !== undefined) {
+			config.numCtx = options.contextWindow;
+		}
+
+		return new ChatOllama(config);
+	},
+
+	/**
+	 * Creates a LangChain OllamaEmbeddings instance.
+	 *
+	 * @param auth - Runtime authentication state with resolved values (baseUrl required)
+	 * @param modelId - The model ID (e.g., "nomic-embed-text")
+	 * @returns OllamaEmbeddings instance configured with auth and model
+	 */
+	createEmbeddingInstance: (auth: RuntimeAuthState, modelId: string): OllamaEmbeddings => {
+		if (auth.type !== "field-based") {
+			throw new Error("Ollama provider requires field-based authentication");
+		}
+
+		const fieldAuth = auth as RuntimeFieldBasedAuthState;
+		const config: Record<string, unknown> = {
+			model: modelId,
+		};
+
+		// Add baseUrl configuration if provided and not empty
+		const baseUrl = fieldAuth.values.baseUrl;
+		if (baseUrl && baseUrl.trim() !== "") {
+			config.baseUrl = sanitizeBaseUrl(baseUrl);
+		}
+
+		return new OllamaEmbeddings(config);
 	},
 
 	/**
@@ -141,6 +203,23 @@ export const ollamaProvider: BuiltInProviderDefinition = {
 	 *
 	 * For Ollama, this checks if the server is reachable.
 	 * There's no API key to validate - just a connection test.
+	 *
+	 * @param auth - Runtime authentication state with resolved values (baseUrl optional)
+	 * @returns Promise resolving to AuthValidationResult ({ valid: true } or { valid: false, error: string })
+	 *
+	 * @example
+	 * ```typescript
+	 * const auth: RuntimeFieldBasedAuthState = {
+	 *   type: "field-based",
+	 *   values: { baseUrl: "http://localhost:11434" },
+	 * };
+	 * const result = await ollamaProvider.validateAuth(auth);
+	 * if (result.valid) {
+	 *   console.log("Ollama server is reachable!");
+	 * } else {
+	 *   console.error("Connection failed:", result.error);
+	 * }
+	 * ```
 	 */
 	validateAuth: async (auth: RuntimeAuthState): Promise<AuthValidationResult> => {
 		// Check auth type
@@ -149,22 +228,115 @@ export const ollamaProvider: BuiltInProviderDefinition = {
 		}
 
 		const fieldAuth = auth as RuntimeFieldBasedAuthState;
+		const baseUrl = fieldAuth.values.baseUrl?.trim();
+		if (!baseUrl) {
+			return { valid: false, error: "Server URL is required" };
+		}
+		const sanitizedUrl = sanitizeBaseUrl(baseUrl);
 
-		// Delegate to base runtime for connection validation
-		// Ollama doesn't require an API key, so we just check if the server is reachable
-		return validateOllamaConnection(fieldAuth);
+		let response: Response;
+		try {
+			response = await globalThis.fetch(`${sanitizedUrl}/api/tags`, {
+				method: "GET",
+				headers: {
+					"Content-Type": "application/json",
+				},
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return { valid: false, error: `Connection failed: ${message}` };
+		}
+
+		if (response.ok) {
+			return { valid: true };
+		}
+
+		// Handle error response
+		const errorBody = await safeReadText(response);
+
+		// Build error message
+		if (response.status === 401 || response.status === 403) {
+			const detail = errorBody || `Authentication failed (${response.status})`;
+			return { valid: false, error: detail };
+		}
+
+		// Other errors
+		const detail = errorBody || `Request failed with status ${response.status}`;
+		return { valid: false, error: detail };
 	},
 
 	/**
 	 * Discovers available models from Ollama API.
 	 *
-	 * Delegates to the base runtime's discoverOllamaModels function.
+	 * Makes a GET request to /api/tags endpoint and returns all models.
+	 * Models are returned in both chat and embedding arrays - users choose
+	 * which model to use for each purpose.
+	 *
+	 * @param auth - Runtime authentication state with resolved values (baseUrl optional)
+	 * @returns Promise resolving to DiscoveredModels with chat and embedding arrays
+	 * @throws ProviderAuthError if authentication fails (401, 403)
+	 * @throws ProviderEndpointError if network request fails
+	 *
+	 * @example
+	 * ```typescript
+	 * const auth: RuntimeFieldBasedAuthState = {
+	 *   type: "field-based",
+	 *   values: { baseUrl: "http://localhost:11434" },
+	 * };
+	 * const models = await ollamaProvider.discoverModels(auth);
+	 * // models.chat = ["llama3.1", "mistral", ...]
+	 * // models.embedding = ["nomic-embed-text", ...]
+	 * ```
 	 */
 	discoverModels: async (auth: RuntimeAuthState): Promise<DiscoveredModels> => {
 		if (auth.type !== "field-based") {
 			throw new Error("Ollama provider requires field-based authentication");
 		}
 
-		return discoverOllamaModels(auth as RuntimeFieldBasedAuthState);
+		const fieldAuth = auth as RuntimeFieldBasedAuthState;
+		const baseUrl = fieldAuth.values.baseUrl?.trim();
+		if (!baseUrl) {
+			throw new Error("Ollama base URL is required");
+		}
+		const sanitizedUrl = sanitizeBaseUrl(baseUrl);
+
+		let response: Response;
+		try {
+			response = await globalThis.fetch(`${sanitizedUrl}/api/tags`, {
+				method: "GET",
+				headers: {
+					"Content-Type": "application/json",
+				},
+			});
+		} catch (error) {
+			throw toEndpointError(error);
+		}
+
+		if (!response.ok) {
+			const errorBody = await safeReadText(response);
+			if (response.status === 401 || response.status === 403) {
+				throw new ProviderAuthError("ollama", response.status, undefined, errorBody);
+			}
+			throw new Error(
+				`Ollama model discovery failed with status ${response.status}${errorBody ? `: ${errorBody}` : ""}`,
+			);
+		}
+
+		const payload = (await response.json()) as OllamaTagsResponse;
+		const models = Array.isArray(payload.models) ? payload.models : [];
+
+		const modelNames: string[] = [];
+
+		for (const model of models) {
+			const name = typeof model?.name === "string" ? model.name.trim() : undefined;
+			if (!name) {
+				continue;
+			}
+
+			modelNames.push(name);
+		}
+
+		// Return all models in both arrays - let users choose which model to use for each purpose
+		return { chat: modelNames, embedding: modelNames };
 	},
 };

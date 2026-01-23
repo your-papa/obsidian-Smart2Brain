@@ -5,18 +5,12 @@ import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
 
+import { ProviderAuthError, ProviderEndpointError, ProviderRegistry, ProviderRegistryError } from "../providers/index";
 import { createThreadId } from "../utils/threadId";
 import { Agent, type ChooseModelParams, type ThreadHistory } from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
 import { BASE_SYSTEM_PROMPT } from "./prompts";
-import {
-	type BuiltInProviderOptions,
-	ProviderAuthError,
-	ProviderEndpointError,
-	ProviderRegistryError,
-} from "./providers";
-import { ProviderRegistry } from "./providers/ProviderRegistry";
 import { LangSmithTelemetry, type Telemetry } from "./telemetry";
 import { createExecuteDataviewTool } from "./tools/executeDataview";
 import { createGetAllTagsTool } from "./tools/getAllTags";
@@ -37,6 +31,16 @@ import {
 
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { TFile } from "obsidian";
+
+/**
+ * Legacy options type for built-in providers.
+ * Used for backward compatibility with existing code.
+ */
+interface BuiltInProviderOptions {
+	apiKey?: string;
+	baseUrl?: string;
+	headers?: string | Record<string, string>;
+}
 
 /**
  * Converts BuiltInProviderOptions to RuntimeFieldBasedAuthState.
@@ -162,12 +166,6 @@ export class AgentManager {
 		try {
 			if (!providerId) return [];
 
-			// First, try to get models from the runtime registry
-			// (these are models that have been configured and validated)
-			if (this.registry.hasProvider(providerId)) {
-				return this.registry.listChatModels(providerId);
-			}
-
 			// Use model discovery from provider definition
 			const providerDef = getBuiltInProvider(providerId);
 			if (providerDef) {
@@ -194,40 +192,16 @@ export class AgentManager {
 	}
 
 	/**
-	 * Configures a specific provider on the given registry.
+	 * Configures a provider on the registry with its auth state.
 	 */
-	private async configureProviderOnRegistry(
-		registry: ProviderRegistry,
-		providerId: string,
-		options: BuiltInProviderOptions,
-	): Promise<void> {
+	private configureProvider(providerId: string, options: BuiltInProviderOptions): void {
 		const providerDef = getBuiltInProvider(providerId);
 
 		if (!providerDef) {
 			throw new Error(`Unknown provider: ${providerId}`);
 		}
 
-		// Use registry methods based on provider ID
-		switch (providerId) {
-			case "openai":
-				await registry.useOpenAI(options);
-				break;
-			case "anthropic":
-				await registry.useAnthropic(options);
-				break;
-			case "ollama":
-				await registry.useOllama(options);
-				break;
-			default:
-				throw new Error(`Unsupported provider: ${providerId}`);
-		}
-	}
-
-	/**
-	 * Configures a provider on the main registry.
-	 */
-	private async configureRegistry(provider: string, options: BuiltInProviderOptions): Promise<void> {
-		await this.configureProviderOnRegistry(this.registry, provider, options);
+		this.registry.registerProvider(providerId, convertToRuntimeAuthState(options));
 	}
 
 	/**
@@ -256,7 +230,7 @@ export class AgentManager {
 				return { success: false, message: validationResult.error };
 			}
 
-			await this.configureProviderOnRegistry(this.registry, providerId, options);
+			this.configureProvider(providerId, options);
 			return { success: true };
 		} catch (error) {
 			if (error instanceof NewProviderAuthError || error instanceof ProviderAuthError) {
@@ -417,7 +391,7 @@ export class AgentManager {
 			// Resolve secrets from SecretStorage to get actual API keys
 			const options = pluginData.getResolvedProviderAuth(provider);
 			try {
-				await this.configureRegistry(provider, options);
+				this.configureProvider(provider, options);
 			} catch (error) {
 				if (error instanceof ProviderEndpointError) {
 					unavailableProviders.push(provider);

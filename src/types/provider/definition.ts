@@ -4,8 +4,21 @@
  * Types for defining providers (built-in and custom).
  */
 
+import type { EmbeddingsInterface } from "@langchain/core/embeddings";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import type { Component } from "svelte";
 import type { AuthMethod } from "./auth.ts";
-import type { RuntimeAuthState, RuntimeProviderDefinition } from "./runtime.ts";
+import type { ChatModelConfig } from "./models.ts";
+import type { RuntimeAuthState } from "./runtime.ts";
+
+/**
+ * Props for provider logo components.
+ */
+export interface LogoProps {
+	width?: number;
+	height?: number;
+	class?: string;
+}
 
 /**
  * Declares what features a provider supports.
@@ -61,6 +74,9 @@ export interface BaseProviderDefinition {
 	/** Human-readable name for the provider. */
 	displayName: string;
 
+	/** Optional logo component for displaying the provider's icon. */
+	logo?: Component<LogoProps>;
+
 	/** Instructions for setting up this provider. */
 	setupInstructions: ProviderSetupInstructions;
 
@@ -70,8 +86,11 @@ export interface BaseProviderDefinition {
 	/** What features this provider supports. */
 	capabilities: ProviderCapabilities;
 
-	/** Creates a runtime provider definition from authentication state. */
-	createRuntimeDefinition: (auth: RuntimeAuthState) => Promise<RuntimeProviderDefinition>;
+	/** Creates a LangChain chat instance (e.g., ChatOpenAI, ChatAnthropic, ChatOllama). */
+	createChatInstance: (auth: RuntimeAuthState, modelId: string, options?: Partial<ChatModelConfig>) => BaseChatModel;
+
+	/** Creates a LangChain embedding instance (optional - not all providers support embeddings). */
+	createEmbeddingInstance?: (auth: RuntimeAuthState, modelId: string) => EmbeddingsInterface;
 
 	/** Validates authentication credentials for this provider. */
 	validateAuth: (auth: RuntimeAuthState) => Promise<AuthValidationResult>;
@@ -111,10 +130,10 @@ export type ProviderDefinition = BuiltInProviderDefinition | CustomProviderDefin
  * Custom provider definition without runtime methods.
  *
  * This type represents what's actually stored in data.json for custom providers.
- * Runtime methods (createRuntimeDefinition, validateAuth, discoverModels) are
- * provided by the base provider template at runtime, not stored.
+ * Runtime methods (createChatInstance, createEmbeddingInstance, validateAuth, discoverModels) and
+ * logo component are provided by the base provider template at runtime, not stored.
  */
 export type StoredCustomProviderDefinition = Omit<
 	CustomProviderDefinition,
-	"createRuntimeDefinition" | "validateAuth" | "discoverModels"
+	"createChatInstance" | "createEmbeddingInstance" | "validateAuth" | "discoverModels" | "logo"
 >;

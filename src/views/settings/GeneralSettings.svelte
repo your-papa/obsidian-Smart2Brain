@@ -1,5 +1,4 @@
 <script lang="ts">
-import { AnthropicLogo, OllamaLogo, OpenAILogo } from "@selemondev/svgl-svelte";
 import { Notice, type TFolder } from "obsidian";
 import { t } from "svelte-i18n";
 import { ExcludeFoldersModal } from "../../components/modal/ExcludeFoldersModal";
@@ -15,8 +14,10 @@ import IconButton from "../../components/ui/IconButton.svelte";
 import SearchableDropdown from "../../components/ui/SearchableDropdown.svelte";
 import Text from "../../components/ui/Text.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
+import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import type { SearchAlgorithm } from "../../main";
+import { getProvider } from "../../providers/index";
 import type { ChatModel } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
@@ -156,8 +157,8 @@ function handleModelSelect(value: string) {
 	if (opt) pluginData.setDefaultChatModel(opt.chatModel as ChatModel);
 }
 
-// Helper to get provider from value
-function getProvider(value: string): string {
+// Helper to get provider ID from model value
+function getProviderId(value: string): string {
 	const opt = models.modelOptions.find((o) => o.value === value);
 	return opt?.chatModel.provider ?? "";
 }
@@ -222,32 +223,10 @@ function getProvider(value: string): string {
 				searchPlaceholder="Search models..."
 			>
 				{#snippet renderGroupHeader({ group })}
+					{@const providerDef = getProvider(group, [])}
+					{@const Logo = (providerDef && "logo" in providerDef && providerDef.logo) ? providerDef.logo : GenericAIIcon}
 					<div class="flex items-center gap-2">
-						{#if group === "OpenAI"}
-							<OpenAILogo
-								style="fill: var(--text-muted)"
-								height={12}
-								width={12}
-							/>
-						{:else if group === "Anthropic"}
-							<AnthropicLogo
-								style="fill: var(--text-muted)"
-								height={12}
-								width={12}
-							/>
-						{:else if group === "Ollama"}
-							<OllamaLogo
-								style="fill: var(--text-muted)"
-								height={12}
-								width={12}
-							/>
-						{:else}
-							<Icon
-								name="sparkles"
-								size="xs"
-								class="text-[--text-muted]"
-							/>
-						{/if}
+						<Logo width={12} height={12} class="text-[--text-muted]" />
 						<span>{group}</span>
 					</div>
 				{/snippet}
@@ -264,28 +243,10 @@ function getProvider(value: string): string {
 				{/snippet}
 
 				{#snippet renderSelected({ option })}
-					{@const provider = getProvider(option.value)}
-					{#if provider === "OpenAI"}
-						<OpenAILogo
-							style="fill: var(--text-normal)"
-							height={14}
-							width={14}
-						/>
-					{:else if provider === "Anthropic"}
-						<AnthropicLogo
-							style="fill: var(--text-normal)"
-							height={14}
-							width={14}
-						/>
-					{:else if provider === "Ollama"}
-						<OllamaLogo
-							style="fill: var(--text-normal)"
-							height={14}
-							width={14}
-						/>
-					{:else}
-						<Icon name="sparkles" size="xs" />
-					{/if}
+					{@const providerId = getProviderId(option.value)}
+					{@const providerDef = getProvider(providerId, [])}
+					{@const Logo = (providerDef && "logo" in providerDef && providerDef.logo) ? providerDef.logo : GenericAIIcon}
+					<Logo width={14} height={14} />
 					<span>{option.label}</span>
 				{/snippet}
 			</SearchableDropdown>

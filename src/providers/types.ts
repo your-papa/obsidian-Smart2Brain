@@ -24,10 +24,6 @@ export type {
 	RuntimeFieldBasedAuthState,
 	RuntimeOAuthAuthState,
 	RuntimeAuthState,
-	ModelOptions,
-	ChatModelFactory,
-	EmbeddingModelFactory,
-	RuntimeProviderDefinition,
 	// Provider definitions
 	ProviderCapabilities,
 	ProviderSetupInstructions,
@@ -38,4 +34,6 @@ export type {
 	CustomProviderDefinition,
 	ProviderDefinition,
 	StoredCustomProviderDefinition,
+	// Logo props
+	LogoProps,
 } from "../types/provider/index.ts";

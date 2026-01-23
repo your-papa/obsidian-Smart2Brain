@@ -150,7 +150,6 @@ export type {
 	ProviderSetupInstructions,
 	AuthValidationResult,
 	DiscoveredModels,
-	RuntimeProviderDefinition,
 	RuntimeAuthState,
 	RuntimeFieldBasedAuthState,
 	RuntimeOAuthAuthState,
@@ -159,17 +158,20 @@ export type {
 	StoredOAuthAuthState,
 	ChatModelConfig,
 	EmbedModelConfig,
-	ChatModelFactory,
-	EmbeddingModelFactory,
-	ModelOptions,
 } from "./types";
 
 // Re-export errors
 export {
+	ProviderRegistryError,
 	ProviderAuthError,
 	ProviderEndpointError,
+	ProviderNotFoundError,
 	ModelNotFoundError,
+	ProviderImportError,
 } from "./errors";
+
+// Re-export registry
+export { ProviderRegistry } from "./registry";
 
 // Re-export helpers
 export { validateCustomProviderId, parseHeadersJson } from "./helpers";

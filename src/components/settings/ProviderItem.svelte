@@ -1,11 +1,13 @@
 <script lang="ts">
 import { Accordion } from "bits-ui";
+import type { Component } from "svelte";
 import { createProviderStateQuery, invalidateProviderState } from "../../lib/query";
 import { getProvider } from "../../providers/index";
+import type { LogoProps } from "../../providers/types";
 import { getData } from "../../stores/dataStore.svelte";
 import Button from "../ui/Button.svelte";
 import Toggle from "../ui/Toggle.svelte";
-import ProviderIcon from "../ui/logos/ProviderIcon.svelte";
+import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import AuthConfigFields from "./AuthConfigFields.svelte";
 import SettingItem from "./SettingItem.svelte";
 
@@ -45,6 +47,15 @@ let instructions = $derived(providerDefinition?.setupInstructions);
 
 // Get display name for the provider
 let displayName = $derived(providerDefinition?.displayName ?? provider);
+
+// Get the logo component for the provider (fallback to GenericAIIcon)
+// Logo is only available on BuiltInProviderDefinition, not StoredCustomProviderDefinition
+let Logo: Component<LogoProps> = $derived.by(() => {
+	if (providerDefinition && "logo" in providerDefinition && providerDefinition.logo) {
+		return providerDefinition.logo;
+	}
+	return GenericAIIcon;
+});
 
 // Advanced options state
 let showAdvanced = $state(false);
@@ -90,7 +101,7 @@ $effect(() => {
 		class="sync-exclude-folder setting-item-heading w-[-webkit-fill-available] !mr-0"
 	>
 		<div class="sync-exclude-folder-name flex items-center gap-2">
-			<ProviderIcon providerName={provider} size={{ width: 16, height: 16 }} />
+			<Logo width={16} height={16} />
 			<span>{displayName}</span>
 			{#if isConfigured}
 				{#if query.data?.auth.success}

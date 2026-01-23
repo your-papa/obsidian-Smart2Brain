@@ -9,39 +9,83 @@
  * Authentication: Field-based with apiKey (required), baseUrl (optional), headers (optional)
  */
 
-import { createAnthropicChatModel, discoverAnthropicModels, validateAnthropicAuth } from "../base/anthropicRuntime";
+import { ChatAnthropic } from "@langchain/anthropic";
+import AnthropicLogo from "../../components/ui/logos/AnthropicLogo.svelte";
+import { ProviderAuthError, ProviderEndpointError } from "../errors";
 import { buildFieldBasedAuth } from "../helpers";
 import type {
 	AuthValidationResult,
 	BuiltInProviderDefinition,
 	ChatModelConfig,
-	ChatModelFactory,
 	DiscoveredModels,
-	ModelOptions,
 	RuntimeAuthState,
 	RuntimeFieldBasedAuthState,
-	RuntimeProviderDefinition,
 } from "../types";
 
+// =============================================================================
+// Constants
+// =============================================================================
+
+/** Default base URL for Anthropic API */
+const ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com";
+
+/** Anthropic API version header value */
+const ANTHROPIC_API_VERSION = "2023-06-01";
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
 /**
- * Default chat models available for Anthropic.
- * These are used to create the initial runtime definition.
- * Note: Anthropic doesn't support model discovery, so these are fixed.
+ * Safely reads response text, returning undefined on error.
  */
-const DEFAULT_CHAT_MODELS = [
-	"claude-3-5-sonnet-20241022",
-	"claude-3-5-haiku-20241022",
-	"claude-3-opus-20240229",
-	"claude-3-sonnet-20240229",
-	"claude-3-haiku-20240307",
-];
+async function safeReadText(response: Response): Promise<string | undefined> {
+	try {
+		return await response.text();
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Converts a fetch error to a ProviderEndpointError.
+ */
+function toEndpointError(error: unknown): ProviderEndpointError {
+	if (error instanceof Error) {
+		return new ProviderEndpointError("anthropic", error.message);
+	}
+	return new ProviderEndpointError("anthropic", String(error));
+}
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/**
+ * Response structure for Anthropic's /v1/models endpoint.
+ */
+interface AnthropicModelResponse {
+	data: Array<{
+		id: string;
+		created_at?: string;
+		display_name?: string;
+		type?: string;
+	}>;
+	has_more?: boolean;
+	first_id?: string;
+	last_id?: string;
+}
+
+// =============================================================================
+// Provider Definition
+// =============================================================================
 
 /**
  * Anthropic built-in provider definition.
  *
  * Implements BuiltInProviderDefinition with:
  * - Field-based auth (apiKey required only)
- * - Limited capabilities (chat only, no embedding, no model discovery)
+ * - Limited capabilities (chat only, no embedding, with model discovery)
  * - Runtime factories using @langchain/anthropic
  */
 export const anthropicProvider: BuiltInProviderDefinition = {
@@ -50,6 +94,7 @@ export const anthropicProvider: BuiltInProviderDefinition = {
 	// =========================================================================
 	id: "anthropic",
 	displayName: "Anthropic",
+	logo: AnthropicLogo,
 	isBuiltIn: true,
 
 	// =========================================================================
@@ -90,41 +135,45 @@ export const anthropicProvider: BuiltInProviderDefinition = {
 	// =========================================================================
 
 	/**
-	 * Creates the runtime provider definition with model factories.
+	 * Creates a LangChain ChatAnthropic instance.
 	 *
-	 * The factories capture the auth state in closures so models can be
-	 * created without re-passing credentials.
+	 * @param auth - Runtime authentication state with resolved secrets
+	 * @param modelId - The model ID (e.g., "claude-3-5-sonnet-20241022")
+	 * @param options - Optional model configuration (temperature, etc.)
+	 * @returns ChatAnthropic instance configured with auth and model
 	 */
-	createRuntimeDefinition: async (auth: RuntimeAuthState): Promise<RuntimeProviderDefinition> => {
+	createChatInstance: (
+		auth: RuntimeAuthState,
+		modelId: string,
+		options?: Partial<ChatModelConfig>,
+	): ChatAnthropic => {
 		if (auth.type !== "field-based") {
 			throw new Error("Anthropic provider requires field-based authentication");
 		}
 
 		const fieldAuth = auth as RuntimeFieldBasedAuthState;
+		const config: Record<string, unknown> = {
+			model: modelId,
+			apiKey: fieldAuth.values.apiKey,
+		};
 
-		// Create chat model factories
-		const chatModels: Record<string, ChatModelFactory> = {};
-		for (const modelId of DEFAULT_CHAT_MODELS) {
-			chatModels[modelId] = async (options?: ModelOptions) => {
-				// Cast ModelOptions to ChatModelConfig if provided
-				const chatConfig = options as ChatModelConfig | undefined;
-				return createAnthropicChatModel(modelId, fieldAuth, chatConfig);
-			};
+		// Add temperature if provided
+		if (options?.temperature !== undefined) {
+			config.temperature = options.temperature;
 		}
 
-		return {
-			chatModels,
-			embeddingModels: {}, // Anthropic doesn't support embeddings
-			defaultChatModel: "claude-3-5-sonnet-20241022",
-			// No defaultEmbeddingModel - Anthropic doesn't support embeddings
-		};
+		return new ChatAnthropic(config);
 	},
 
 	/**
 	 * Validates authentication credentials.
 	 *
-	 * First checks that required fields are present, then delegates to
-	 * the base runtime's validateAnthropicAuth for API-level validation.
+	 * Makes a POST request to the /v1/messages endpoint with a minimal payload
+	 * to verify the API key is valid. This is the standard Anthropic endpoint
+	 * for chat completions.
+	 *
+	 * @param auth - Runtime authentication state with resolved secrets
+	 * @returns Promise resolving to AuthValidationResult ({ valid: true } or { valid: false, error: string })
 	 */
 	validateAuth: async (auth: RuntimeAuthState): Promise<AuthValidationResult> => {
 		// Check auth type
@@ -140,20 +189,133 @@ export const anthropicProvider: BuiltInProviderDefinition = {
 			return { valid: false, error: "API key is required" };
 		}
 
-		// Delegate to base runtime for API validation
-		return validateAnthropicAuth(fieldAuth);
+		let response: Response;
+		try {
+			response = await globalThis.fetch(`${ANTHROPIC_DEFAULT_BASE_URL}/v1/messages`, {
+				method: "POST",
+				headers: {
+					"x-api-key": apiKey,
+					"anthropic-version": ANTHROPIC_API_VERSION,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					model: "claude-3-5-sonnet-20241022",
+					max_tokens: 1,
+					messages: [{ role: "user", content: "hi" }],
+				}),
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return { valid: false, error: `Connection failed: ${message}` };
+		}
+
+		if (response.ok) {
+			return { valid: true };
+		}
+
+		// Handle error response
+		const errorBody = await safeReadText(response);
+		let errorType: string | undefined;
+		let errorMessage: string | undefined;
+		try {
+			const parsed = errorBody
+				? (JSON.parse(errorBody) as {
+						error?: { type?: string; message?: string };
+					})
+				: undefined;
+			errorType = parsed?.error?.type;
+			errorMessage = parsed?.error?.message;
+		} catch {
+			// ignore parse errors
+		}
+
+		// Build error message
+		if (response.status === 401 || response.status === 403 || errorType === "authentication_error") {
+			const detail = errorMessage || `Authentication failed (${response.status})`;
+			return { valid: false, error: detail };
+		}
+
+		// Other errors
+		const detail = errorMessage || errorBody || `Request failed with status ${response.status}`;
+		return { valid: false, error: detail };
 	},
 
 	/**
 	 * Discovers available models from Anthropic API.
 	 *
-	 * Delegates to the base runtime's discoverAnthropicModels function.
+	 * Makes a GET request to /v1/models endpoint to list available models.
+	 * All Anthropic models are chat models - they don't offer embedding models.
+	 *
+	 * @param auth - Runtime authentication state with resolved secrets
+	 * @returns Promise resolving to DiscoveredModels with chat array and empty embedding array
+	 * @throws ProviderAuthError if authentication fails (401, 403)
+	 * @throws ProviderEndpointError if network request fails
+	 * @throws Error if API key is missing
 	 */
 	discoverModels: async (auth: RuntimeAuthState): Promise<DiscoveredModels> => {
 		if (auth.type !== "field-based") {
 			throw new Error("Anthropic provider requires field-based authentication");
 		}
 
-		return discoverAnthropicModels(auth as RuntimeFieldBasedAuthState);
+		const fieldAuth = auth as RuntimeFieldBasedAuthState;
+		const apiKey = fieldAuth.values.apiKey?.trim();
+		if (!apiKey) {
+			throw new Error("Anthropic model discovery requires an API key.");
+		}
+
+		let response: Response;
+		try {
+			response = await globalThis.fetch(`${ANTHROPIC_DEFAULT_BASE_URL}/v1/models`, {
+				method: "GET",
+				headers: {
+					"x-api-key": apiKey,
+					"anthropic-version": ANTHROPIC_API_VERSION,
+					"Content-Type": "application/json",
+				},
+			});
+		} catch (error) {
+			throw toEndpointError(error);
+		}
+
+		if (!response.ok) {
+			const errorBody = await safeReadText(response);
+			let errorType: string | undefined;
+			let errorMessage: string | undefined;
+			try {
+				const parsed = errorBody
+					? (JSON.parse(errorBody) as {
+							error?: { type?: string; message?: string };
+						})
+					: undefined;
+				errorType = parsed?.error?.type;
+				errorMessage = parsed?.error?.message;
+			} catch {
+				// ignore parse errors
+			}
+
+			if (response.status === 401 || response.status === 403 || errorType === "authentication_error") {
+				throw new ProviderAuthError("anthropic", response.status, errorType, errorMessage);
+			}
+			throw new Error(
+				`Anthropic model discovery failed with status ${response.status}${errorBody ? `: ${errorBody}` : ""}`,
+			);
+		}
+
+		const payload = (await response.json()) as AnthropicModelResponse;
+		const resources = Array.isArray(payload.data) ? payload.data : [];
+
+		const chatModels: string[] = [];
+
+		for (const resource of resources) {
+			const id = typeof resource?.id === "string" ? resource.id.trim() : undefined;
+			if (!id) {
+				continue;
+			}
+			// All Anthropic models are chat models
+			chatModels.push(id);
+		}
+
+		// Anthropic doesn't offer embedding models
+		return { chat: chatModels, embedding: [] };
 	},
 };

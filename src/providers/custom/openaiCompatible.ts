@@ -5,10 +5,12 @@
  * Used for providers like Azure OpenAI, local LLM servers, and other OpenAI-compatible endpoints.
  */
 
-import { discoverOpenAIModels, validateOpenAIAuth } from "../base/openaiCompatible";
+import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { ProviderAuthError, ProviderEndpointError } from "../errors";
 import { buildFieldBasedAuth, validateCustomProviderId } from "../helpers";
 import type {
 	AuthValidationResult,
+	ChatModelConfig,
 	CustomProviderDefinition,
 	DiscoveredModels,
 	FieldBasedAuth,
@@ -16,7 +18,6 @@ import type {
 	ProviderSetupInstructions,
 	RuntimeAuthState,
 	RuntimeFieldBasedAuthState,
-	RuntimeProviderDefinition,
 } from "../types";
 
 // ============================================================================
@@ -98,6 +99,43 @@ const DEFAULT_CAPABILITIES: ProviderCapabilities = {
 };
 
 // ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Removes trailing slashes from a URL.
+ */
+function sanitizeBaseUrl(url: string): string {
+	return url.replace(/\/+$/, "");
+}
+
+/**
+ * Safely reads response text, returning undefined on error.
+ */
+async function safeReadText(response: Response): Promise<string | undefined> {
+	try {
+		return await response.text();
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * OpenAI API models response structure.
+ */
+interface OpenAIModelResponse {
+	data?: OpenAIModelResource[];
+}
+
+/**
+ * OpenAI API model resource structure.
+ */
+interface OpenAIModelResource {
+	id?: string;
+	object?: string;
+}
+
+// ============================================================================
 // Factory Function
 // ============================================================================
 
@@ -113,27 +151,6 @@ const DEFAULT_CAPABILITIES: ProviderCapabilities = {
  * @param options - Configuration options for the custom provider
  * @returns A CustomProviderDefinition ready for use
  * @throws Error if the provider ID is invalid
- *
- * @example Basic usage
- * ```typescript
- * const provider = createCustomOpenAICompatibleProvider({
- *   id: "local-llm",
- *   displayName: "Local LLM Server",
- *   apiKeyRequired: false,
- * });
- * ```
- *
- * @example Azure OpenAI
- * ```typescript
- * const provider = createCustomOpenAICompatibleProvider({
- *   id: "azure-openai",
- *   displayName: "Azure OpenAI",
- *   setupInstructions: {
- *     steps: ["Get your Azure OpenAI endpoint and key"],
- *     link: { url: "https://portal.azure.com", text: "Azure Portal" },
- *   },
- * });
- * ```
  */
 export function createCustomOpenAICompatibleProvider(
 	options: CreateCustomOpenAICompatibleProviderOptions,
@@ -176,7 +193,8 @@ export function createCustomOpenAICompatibleProvider(
 		capabilities: capabilities ?? DEFAULT_CAPABILITIES,
 
 		// Runtime methods
-		createRuntimeDefinition: createRuntimeDefinitionFactory(),
+		createChatInstance: createChatInstanceFactory(),
+		createEmbeddingInstance: createEmbeddingInstanceFactory(),
 		validateAuth: createValidateAuthFactory(apiKeyRequired),
 		discoverModels: createDiscoverModelsFactory(),
 	};
@@ -185,7 +203,7 @@ export function createCustomOpenAICompatibleProvider(
 }
 
 // ============================================================================
-// Helper Functions
+// Auth Configuration
 // ============================================================================
 
 /**
@@ -199,25 +217,80 @@ function buildAuthConfig(apiKeyRequired: boolean): FieldBasedAuth {
 	});
 }
 
+// ============================================================================
+// Instance Creation Factories
+// ============================================================================
+
 /**
- * Creates the createRuntimeDefinition method for the custom provider.
- *
- * Custom providers don't create factories at this level - the ProviderRegistry
- * is responsible for creating factories using base runtime functions.
- * This method returns an empty structure that will be populated by the registry.
- *
- * Note: Auth validation is handled by validateAuth, not here.
+ * Creates the createChatInstance method for the custom provider.
  */
-function createRuntimeDefinitionFactory() {
-	return async (_auth: RuntimeAuthState): Promise<RuntimeProviderDefinition> => {
-		// Custom providers start with empty model factories
-		// Users add models manually through the UI, which populates the data store
-		return {
-			chatModels: {},
-			embeddingModels: {},
+function createChatInstanceFactory() {
+	return (auth: RuntimeAuthState, modelId: string, options?: Partial<ChatModelConfig>): ChatOpenAI => {
+		if (auth.type !== "field-based") {
+			throw new Error("Custom OpenAI-compatible provider requires field-based authentication");
+		}
+
+		const fieldAuth = auth as RuntimeFieldBasedAuthState;
+		const config: Record<string, unknown> = {
+			model: modelId,
 		};
+
+		// Add API key if provided
+		if (fieldAuth.values.apiKey) {
+			config.apiKey = fieldAuth.values.apiKey;
+		}
+
+		// Add baseUrl configuration (required for custom providers)
+		const baseUrl = fieldAuth.values.baseUrl;
+		if (baseUrl && baseUrl.trim() !== "") {
+			config.configuration = {
+				baseURL: sanitizeBaseUrl(baseUrl),
+			};
+		}
+
+		// Add temperature if provided
+		if (options?.temperature !== undefined) {
+			config.temperature = options.temperature;
+		}
+
+		return new ChatOpenAI(config);
 	};
 }
+
+/**
+ * Creates the createEmbeddingInstance method for the custom provider.
+ */
+function createEmbeddingInstanceFactory() {
+	return (auth: RuntimeAuthState, modelId: string): OpenAIEmbeddings => {
+		if (auth.type !== "field-based") {
+			throw new Error("Custom OpenAI-compatible provider requires field-based authentication");
+		}
+
+		const fieldAuth = auth as RuntimeFieldBasedAuthState;
+		const config: Record<string, unknown> = {
+			model: modelId,
+		};
+
+		// Add API key if provided
+		if (fieldAuth.values.apiKey) {
+			config.apiKey = fieldAuth.values.apiKey;
+		}
+
+		// Add baseUrl configuration (required for custom providers)
+		const baseUrl = fieldAuth.values.baseUrl;
+		if (baseUrl && baseUrl.trim() !== "") {
+			config.configuration = {
+				baseURL: sanitizeBaseUrl(baseUrl),
+			};
+		}
+
+		return new OpenAIEmbeddings(config);
+	};
+}
+
+// ============================================================================
+// Validation Factories
+// ============================================================================
 
 /**
  * Creates the validateAuth method for the custom provider.
@@ -248,17 +321,77 @@ function createValidateAuthFactory(apiKeyRequired: boolean) {
 			return validateConnectionOnly(baseUrl);
 		}
 
-		// Delegate to base runtime for API validation
-		return validateOpenAIAuth(fieldAuth);
+		// Validate with API key
+		return validateOpenAICompatibleAuth(fieldAuth);
 	};
 }
 
 /**
+ * Validates OpenAI-compatible authentication credentials.
+ */
+async function validateOpenAICompatibleAuth(auth: RuntimeFieldBasedAuthState): Promise<AuthValidationResult> {
+	const apiKey = auth.values.apiKey?.trim();
+	if (!apiKey) {
+		return { valid: false, error: "API key is required" };
+	}
+
+	const baseUrl = auth.values.baseUrl?.trim();
+	if (!baseUrl) {
+		return { valid: false, error: "Base URL is required" };
+	}
+
+	const sanitizedUrl = sanitizeBaseUrl(baseUrl);
+
+	let response: Response;
+	try {
+		response = await globalThis.fetch(`${sanitizedUrl}/models`, {
+			method: "GET",
+			headers: {
+				Authorization: `Bearer ${apiKey}`,
+				"Content-Type": "application/json",
+			},
+		});
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return { valid: false, error: `Connection failed: ${message}` };
+	}
+
+	if (response.ok) {
+		return { valid: true };
+	}
+
+	// Handle error response
+	const errorBody = await safeReadText(response);
+	let errorCode: string | undefined;
+	let errorMessage: string | undefined;
+	try {
+		const parsed = errorBody
+			? (JSON.parse(errorBody) as {
+					error?: { code?: string; message?: string };
+				})
+			: undefined;
+		errorCode = parsed?.error?.code;
+		errorMessage = parsed?.error?.message;
+	} catch {
+		// ignore parse errors
+	}
+
+	// Build error message
+	if (response.status === 401 || response.status === 403 || errorCode === "invalid_api_key") {
+		const detail = errorMessage || `Authentication failed (${response.status})`;
+		return { valid: false, error: detail };
+	}
+
+	// Other errors
+	const detail = errorMessage || errorBody || `Request failed with status ${response.status}`;
+	return { valid: false, error: detail };
+}
+
+/**
  * Validates connection to an endpoint without API key.
- * Makes a simple request to check if the server is reachable.
  */
 async function validateConnectionOnly(baseUrl: string): Promise<AuthValidationResult> {
-	const sanitizedUrl = baseUrl.replace(/\/+$/, "");
+	const sanitizedUrl = sanitizeBaseUrl(baseUrl);
 
 	try {
 		const response = await globalThis.fetch(`${sanitizedUrl}/models`, {
@@ -275,8 +408,6 @@ async function validateConnectionOnly(baseUrl: string): Promise<AuthValidationRe
 		// Some servers may return 401 without auth, but that's expected
 		// We just want to verify the server is reachable
 		if (response.status === 401 || response.status === 403) {
-			// Server is reachable but requires auth - but we said API key is not required
-			// This is a configuration issue, but we'll allow it
 			return { valid: true };
 		}
 
@@ -287,11 +418,12 @@ async function validateConnectionOnly(baseUrl: string): Promise<AuthValidationRe
 	}
 }
 
+// ============================================================================
+// Model Discovery
+// ============================================================================
+
 /**
  * Creates the discoverModels method for the custom provider.
- *
- * Custom OpenAI-compatible providers use the same model discovery
- * as the built-in OpenAI provider (GET /models endpoint).
  */
 function createDiscoverModelsFactory() {
 	return async (auth: RuntimeAuthState): Promise<DiscoveredModels> => {
@@ -299,7 +431,78 @@ function createDiscoverModelsFactory() {
 			throw new Error("Custom OpenAI-compatible provider requires field-based authentication");
 		}
 
-		// Use OpenAI-compatible model discovery
-		return discoverOpenAIModels(auth as RuntimeFieldBasedAuthState);
+		const fieldAuth = auth as RuntimeFieldBasedAuthState;
+		return discoverOpenAICompatibleModels(fieldAuth);
 	};
+}
+
+/**
+ * Discovers available models from an OpenAI-compatible API.
+ */
+async function discoverOpenAICompatibleModels(auth: RuntimeFieldBasedAuthState): Promise<DiscoveredModels> {
+	const apiKey = auth.values.apiKey;
+	const baseUrl = auth.values.baseUrl?.trim();
+
+	if (!baseUrl) {
+		throw new Error("Base URL is required for model discovery");
+	}
+
+	const sanitizedUrl = sanitizeBaseUrl(baseUrl);
+
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+
+	if (apiKey) {
+		headers.Authorization = `Bearer ${apiKey}`;
+	}
+
+	let response: Response;
+	try {
+		response = await globalThis.fetch(`${sanitizedUrl}/models`, {
+			method: "GET",
+			headers,
+		});
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new ProviderEndpointError("custom-openai", message);
+	}
+
+	if (!response.ok) {
+		const errorBody = await safeReadText(response);
+		let errorCode: string | undefined;
+		let errorMessage: string | undefined;
+		try {
+			const parsed = errorBody
+				? (JSON.parse(errorBody) as {
+						error?: { code?: string; message?: string };
+					})
+				: undefined;
+			errorCode = parsed?.error?.code;
+			errorMessage = parsed?.error?.message;
+		} catch {
+			// ignore parse errors
+		}
+
+		if (response.status === 401 || response.status === 403 || errorCode === "invalid_api_key") {
+			throw new ProviderAuthError("custom-openai", response.status, errorCode, errorMessage);
+		}
+		throw new Error(`Model discovery failed with status ${response.status}${errorBody ? `: ${errorBody}` : ""}`);
+	}
+
+	const payload = (await response.json()) as OpenAIModelResponse;
+	const resources = Array.isArray(payload.data) ? payload.data : [];
+
+	const models: string[] = [];
+
+	for (const resource of resources) {
+		const id = typeof resource?.id === "string" ? resource.id.trim() : undefined;
+		if (!id) {
+			continue;
+		}
+		models.push(id);
+	}
+
+	// Return all models in both arrays - let users choose which model to use for each purpose
+	return { chat: models, embedding: models };
 }
