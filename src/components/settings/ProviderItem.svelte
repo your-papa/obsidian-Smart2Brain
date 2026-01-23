@@ -1,25 +1,30 @@
 <script lang="ts">
 import { Accordion } from "bits-ui";
-import { getData } from "../../stores/dataStore.svelte";
-import type { RegisteredProvider } from "../../types/providers";
+import type { Component } from "svelte";
 import { createProviderStateQuery, invalidateProviderState } from "../../lib/query";
+import { type LogoProps, getProviderDefinition } from "../../providers/index";
+import { getData } from "../../stores/dataStore.svelte";
 import Button from "../ui/Button.svelte";
-import ProviderIcon from "../ui/logos/ProviderIcon.svelte";
+import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import AuthConfigFields from "./AuthConfigFields.svelte";
 import SettingItem from "./SettingItem.svelte";
 
 interface Props {
-	provider: RegisteredProvider;
-	onAccordionClick: (provider: RegisteredProvider) => void;
+	provider: string;
+	onAccordionClick: (provider: string) => void;
 }
 
 const { provider, onAccordionClick }: Props = $props();
 
 const data = getData();
 
-// Check if provider is configured
-let isConfigured = $derived(data.getConfiguredProviders().includes(provider));
+// Get provider definition
+let providerDefinition = $derived(getProviderDefinition(provider, data.getAllCustomProviderMeta()));
 
+// Check if provider is configured using new system
+let isConfigured = $derived(data.isProviderConfigured(provider));
+
+// Query for provider state (auth + models)
 const query = createProviderStateQuery(() => provider);
 
 function refetch() {
@@ -27,52 +32,25 @@ function refetch() {
 }
 
 function handleToggleProvider() {
-	data.toggleProviderIsConfigured(provider);
+	const newConfiguredState = !isConfigured;
+	data.setProviderConfigured(provider, newConfiguredState);
 	invalidateProviderState(provider);
 }
 
-// Provider-specific setup instructions
-const providerInstructions: Record<RegisteredProvider, { steps: string[]; link?: { url: string; text: string } }> = {
-	OpenAI: {
-		steps: [
-			"Create an API key from OpenAI's Dashboard",
-			"Ensure your OpenAI account has credits loaded",
-			"Paste the API key below (starts with 'sk-')",
-		],
-		link: {
-			url: "https://platform.openai.com/api-keys",
-			text: "OpenAI Dashboard",
-		},
-	},
-	Anthropic: {
-		steps: [
-			"Create an API key from Anthropic's Console",
-			"Ensure your account has credits available",
-			"Paste the API key below",
-		],
-		link: {
-			url: "https://console.anthropic.com/settings/keys",
-			text: "Anthropic Console",
-		},
-	},
-	Ollama: {
-		steps: [
-			"Install Ollama on your machine",
-			"Start the Ollama server (usually runs on localhost:11434)",
-			"Enter the base URL below (default: http://localhost:11434)",
-		],
-		link: { url: "https://ollama.ai", text: "Ollama Website" },
-	},
-	CustomOpenAI: {
-		steps: [
-			"Enter the base URL of your OpenAI-compatible API",
-			"Provide the API key if required by your provider",
-			"Configure any custom headers if needed",
-		],
-	},
-};
+// Get setup instructions from provider definition
+let instructions = $derived(providerDefinition?.setupInstructions);
 
-let instructions = $derived(providerInstructions[provider]);
+// Get display name for the provider
+let displayName = $derived(providerDefinition?.displayName ?? provider);
+
+// Get the logo component for the provider (fallback to GenericAIIcon)
+// Logo is only available on BuiltInProviderDefinition, not StoredCustomProviderDefinition
+let Logo: Component<LogoProps> = $derived.by(() => {
+	if (providerDefinition && "logo" in providerDefinition && providerDefinition.logo) {
+		return providerDefinition.logo;
+	}
+	return GenericAIIcon;
+});
 </script>
 
 <Accordion.Item
@@ -84,8 +62,8 @@ let instructions = $derived(providerInstructions[provider]);
 		class="sync-exclude-folder setting-item-heading w-[-webkit-fill-available] !mr-0"
 	>
 		<div class="sync-exclude-folder-name flex items-center gap-2">
-			<ProviderIcon providerName={provider} size={{ width: 16, height: 16 }} />
-			<span>{provider}</span>
+			<Logo width={16} height={16} />
+			<span>{displayName}</span>
 			{#if isConfigured}
 				{#if query.data?.auth.success}
 					<Button
@@ -135,6 +113,7 @@ let instructions = $derived(providerInstructions[provider]);
 					<!-- Empty control slot -->
 				{/snippet}
 			</SettingItem>
+			{#if instructions}
 			<div class="setting-item-description text-sm px-4 pb-2">
 				<ul class="list-disc pl-4 space-y-1">
 					{#each instructions.steps as step}
@@ -146,8 +125,9 @@ let instructions = $derived(providerInstructions[provider]);
 				{/if}
 			</div>
 		{/if}
+		{/if}
 
-		<!-- Auth configuration fields -->
+		<!-- Auth configuration fields (includes advanced toggle) -->
 		<AuthConfigFields {provider} />
 
 		{#if !isConfigured}

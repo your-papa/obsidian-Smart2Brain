@@ -2,16 +2,16 @@ import { Modal } from "obsidian";
 import { mount } from "svelte";
 import ModalProvider from "../../lib/QueryClientProvider.svelte";
 import type SecondBrainPlugin from "../../main";
-import type { EmbedModelConfig, EmbedProviders } from "../../types/providers";
+import type { EmbedModelConfig } from "../../providers/index";
 import EmbedModelManagementComponent from "./EmbedModelManagement.svelte";
 
 export class EmbedModelManagementModal extends Modal {
 	private component!: EmbedModelManagementComponent;
 	private plugin: SecondBrainPlugin;
-	private provider!: EmbedProviders;
+	private provider!: string;
 	private config?: EmbedModelConfig;
 
-	constructor(plugin: SecondBrainPlugin, provider: EmbedProviders, config?: EmbedModelConfig) {
+	constructor(plugin: SecondBrainPlugin, provider: string, config?: EmbedModelConfig) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.setTitle(`${provider} Embed Model Management`);
@@ -23,7 +23,7 @@ export class EmbedModelManagementModal extends Modal {
 		this.component = mount(
 			ModalProvider<{
 				modal: EmbedModelManagementModal;
-				provider: EmbedProviders;
+				provider: string;
 				config?: EmbedModelConfig;
 			}>,
 			{

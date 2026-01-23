@@ -2,7 +2,7 @@ import { Notice, type TFile } from "obsidian";
 import type { ThreadHistory } from "../agent/Agent";
 import type { AgentManager } from "../agent/AgentManager";
 import type { ThreadMessage } from "../agent/messages/ThreadMessage";
-import type { GenModelConfig, RegisteredProvider } from "../types/providers";
+import type { ChatModelConfig } from "../providers/index";
 import type { ThreadError } from "../types/shared";
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { getData } from "./dataStore.svelte";
@@ -51,7 +51,7 @@ export interface AssistantMessage {
 	nerd_stats?: {
 		tokensPerSecond: number;
 		retrievedDocsNum: number;
-		genModelConfig: GenModelConfig;
+		genModelConfig: ChatModelConfig;
 	};
 	errorCode?: string;
 }
@@ -72,8 +72,8 @@ export interface ChatPreview {
 
 export interface ChatModel {
 	model: string;
-	provider: RegisteredProvider;
-	modelConfig: Partial<GenModelConfig>;
+	provider: string;
+	modelConfig: Partial<ChatModelConfig>;
 }
 
 /**
