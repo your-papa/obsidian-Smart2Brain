@@ -1,12 +1,16 @@
 import type { App } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import { getData } from "../../stores/dataStore.svelte";
 
 /**
  * Tool for retrieving properties (frontmatter) from Obsidian.
  * Can retrieve all unique property keys across the vault, or properties for a specific note.
  */
 export function createGetPropertiesTool(app: App) {
+	const pluginData = getData();
+	const toolConfig = pluginData.getToolConfig("get_properties");
+
 	const getPropertiesFn = async ({ note_name }: { note_name?: string }) => {
 		if (note_name) {
 			// Search for the file
@@ -34,12 +38,12 @@ export function createGetPropertiesTool(app: App) {
 		for (const file of files) {
 			const cache = app.metadataCache.getFileCache(file);
 			if (cache?.frontmatter) {
-				Object.keys(cache.frontmatter).forEach((key) => {
+				for (const key of Object.keys(cache.frontmatter)) {
 					// "position" is internal Obsidian metadata
 					if (key !== "position") {
 						allKeys.add(key);
 					}
-				});
+				}
 			}
 		}
 
@@ -53,8 +57,9 @@ export function createGetPropertiesTool(app: App) {
 	};
 
 	return tool(getPropertiesFn, {
-		name: "get_properties",
+		name: toolConfig?.name ?? "get_properties",
 		description:
+			toolConfig?.description ??
 			"Retrieve properties (frontmatter) from Obsidian. Omit 'note_name' to list all available property keys in the vault.",
 		schema: z.object({
 			note_name: z

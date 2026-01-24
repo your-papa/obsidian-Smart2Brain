@@ -4,6 +4,7 @@ import DebuggingSettings from "./DebuggingSettings.svelte";
 import GeneralSettings from "./GeneralSettings.svelte";
 import ModelsSettings from "./ModelsSettings.svelte";
 import ProvidersSettings from "./ProvidersSettings.svelte";
+import ToolsSettings from "./ToolsSettings.svelte";
 
 let activeTab = $state("general");
 </script>
@@ -31,6 +32,12 @@ let activeTab = $state("general");
 			Models
 		</Tabs.Trigger>
 		<Tabs.Trigger
+			value="tools"
+			class="px-4 py-1.5 text-sm font-medium rounded transition-colors data-[state=active]:bg-[--interactive-accent] data-[state=active]:text-[--text-on-accent] data-[state=inactive]:bg-[--background-secondary] data-[state=inactive]:hover:bg-[--background-modifier-hover]"
+		>
+			Tools
+		</Tabs.Trigger>
+		<Tabs.Trigger
 			value="debugging"
 			class="px-4 py-1.5 text-sm font-medium rounded transition-colors data-[state=active]:bg-[--interactive-accent] data-[state=active]:text-[--text-on-accent] data-[state=inactive]:bg-[--background-secondary] data-[state=inactive]:hover:bg-[--background-modifier-hover]"
 		>
@@ -48,6 +55,10 @@ let activeTab = $state("general");
 
 	<Tabs.Content value="models">
 		<ModelsSettings />
+	</Tabs.Content>
+
+	<Tabs.Content value="tools">
+		<ToolsSettings />
 	</Tabs.Content>
 
 	<Tabs.Content value="debugging">

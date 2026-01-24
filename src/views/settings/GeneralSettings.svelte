@@ -8,7 +8,6 @@ import { SystemPromptModal } from "../../components/modal/SystemPromptModal";
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
-import Dropdown from "../../components/ui/Dropdown.svelte";
 import Icon from "../../components/ui/Icon.svelte";
 import IconButton from "../../components/ui/IconButton.svelte";
 import SearchableDropdown from "../../components/ui/SearchableDropdown.svelte";
@@ -16,7 +15,6 @@ import Text from "../../components/ui/Text.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
 import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
-import type { SearchAlgorithm } from "../../main";
 import { getProviderDefinition } from "../../providers/index";
 import type { ChatModel } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
@@ -75,46 +73,6 @@ function openPluginPage(pluginId: string) {
 
 function suggestFolders(): TFolder[] {
 	return plugin.app.vault.getAllFolders(true);
-}
-
-// Check if Omnisearch plugin is installed
-const isOmnisearchInstalled = $derived(
-	// @ts-ignore - Obsidian plugin API
-	!!plugin.app.plugins?.getPlugin?.("omnisearch"),
-);
-
-// Search algorithm options
-const searchAlgorithmOptions: {
-	display: string;
-	value: SearchAlgorithm;
-	disabled?: boolean;
-}[] = $derived([
-	{ display: $t("settings.search_algorithm.grep"), value: "grep" },
-	{
-		display: isOmnisearchInstalled
-			? $t("settings.search_algorithm.omnisearch")
-			: $t("settings.search_algorithm.omnisearch_not_installed"),
-		value: "omnisearch",
-		disabled: !isOmnisearchInstalled,
-	},
-	{
-		display: $t("settings.search_algorithm.embeddings"),
-		value: "embeddings",
-		disabled: true,
-	},
-]);
-
-// Use $derived to read from store - no local state sync needed
-let selectedSearchAlgorithm = $derived(pluginData.searchAlgorithm);
-
-// Handle search algorithm change with validation
-function handleSearchAlgorithmChange(value: SearchAlgorithm) {
-	if (value === "omnisearch" && !isOmnisearchInstalled) {
-		console.warn("Omnisearch selected but plugin not available, switching to grep");
-		pluginData.searchAlgorithm = "grep";
-		return;
-	}
-	pluginData.searchAlgorithm = value;
 }
 
 // Model dropdown options - grouped by provider
@@ -314,18 +272,6 @@ function getProviderId(value: string): string {
 
 <!-- RAG Settings -->
 <SettingGroup heading="RAG Settings">
-	<SettingItem
-		name={$t("settings.search_algorithm.title")}
-		desc={$t("settings.search_algorithm.desc")}
-	>
-		<Dropdown
-			type="options"
-			dropdown={searchAlgorithmOptions}
-			selected={selectedSearchAlgorithm}
-			onSelect={handleSearchAlgorithmChange}
-		/>
-	</SettingItem>
-
 	<SettingItem
 		name={$t("settings.autostart")}
 		desc={$t("settings.autostart_desc")}
