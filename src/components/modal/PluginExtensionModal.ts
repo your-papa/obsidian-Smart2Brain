@@ -1,19 +1,35 @@
 import { Modal } from "obsidian";
 import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";
+import type { PluginPromptExtension } from "../../main";
 import PluginExtensionModalComponent from "./PluginExtensionModal.svelte";
+
+/**
+ * Custom accessors for agent-specific plugin extension editing
+ */
+export interface PluginExtensionAccessors {
+	getExtension: () => PluginPromptExtension | undefined;
+	updateExtension: (updates: Partial<PluginPromptExtension>) => void;
+}
 
 export class PluginExtensionModal extends Modal {
 	private component: ReturnType<typeof PluginExtensionModalComponent> | null = null;
 	private plugin: SecondBrainPlugin;
 	private pluginId: string;
 	private onSave: () => void;
+	private accessors?: PluginExtensionAccessors;
 
-	constructor(plugin: SecondBrainPlugin, pluginId: string, onSave: () => void) {
+	constructor(
+		plugin: SecondBrainPlugin,
+		pluginId: string,
+		onSave: () => void,
+		accessors?: PluginExtensionAccessors,
+	) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.pluginId = pluginId;
 		this.onSave = onSave;
+		this.accessors = accessors;
 	}
 
 	onOpen() {
@@ -38,6 +54,7 @@ export class PluginExtensionModal extends Modal {
 				plugin: this.plugin,
 				pluginId: this.pluginId,
 				onSave: this.onSave,
+				accessors: this.accessors,
 			},
 		});
 	}

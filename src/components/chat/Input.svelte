@@ -6,6 +6,7 @@ import { EmbeddableMarkdownEditor } from "../../lib/editor";
 import { MessageState, type Messenger } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
+import AgentPopover from "./AgentPopover.svelte";
 import ModelPopover from "./ModelPopover.svelte";
 
 interface Props {
@@ -193,8 +194,10 @@ function removeAttachedFile(file: File) {
             id="chat-view-user-input-element"
         ></div>
 
-        <!-- Actions row: model, attachment, send -->
-        <div class="flex items-center">
+        <!-- Actions row: agent, model, attachment, send -->
+        <div class="flex items-center gap-2">
+            <AgentPopover />
+            <div class="w-px h-4 bg-[--background-modifier-border]"></div>
             <ModelPopover />
             <input
                 type="file"

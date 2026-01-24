@@ -12,6 +12,9 @@ import SettingsTab from "./views/settings/Settings";
 
 // Re-export types for backward compatibility
 export type {
+	AgentColor,
+	AgentConfig,
+	AgentsConfig,
 	BuiltInToolId,
 	DataviewQuerySettings,
 	MCPHTTPServerConfig,

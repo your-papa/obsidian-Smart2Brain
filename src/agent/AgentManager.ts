@@ -120,14 +120,21 @@ export class AgentManager {
 
 	/**
 	 * Assembles the full system prompt from base prompt + enabled plugin extensions.
+	 * Uses the currently selected agent's configuration.
 	 * Only includes extensions for plugins that are both enabled AND installed.
 	 */
 	assembleSystemPrompt(): string {
 		const pluginData = getData();
-		let prompt = pluginData.systemPrompt || BASE_SYSTEM_PROMPT;
+		const selectedAgent = pluginData.getSelectedAgent();
+
+		// Use selected agent's prompt, fallback to legacy data, then default
+		let prompt = selectedAgent?.systemPrompt || pluginData.systemPrompt || BASE_SYSTEM_PROMPT;
+
+		// Get plugin extensions from the selected agent or legacy data
+		const extensions = selectedAgent?.pluginPromptExtensions ?? pluginData.pluginPromptExtensions;
 
 		// Append enabled extensions for enabled plugins
-		for (const [pluginId, ext] of Object.entries(pluginData.pluginPromptExtensions)) {
+		for (const [pluginId, ext] of Object.entries(extensions)) {
 			if (ext.enabled && this.isPluginEnabled(pluginId) && ext.prompt?.trim()) {
 				prompt += `\n\n${ext.prompt}`;
 			}
@@ -307,27 +314,41 @@ export class AgentManager {
 
 	private async bindTools(agent: Agent) {
 		const data = getData();
+		const selectedAgent = data.getSelectedAgent();
 		const tools: StructuredToolInterface[] = [];
 
+		// Helper to check if tool is enabled for the selected agent
+		const isToolEnabled = (toolId: "search_notes" | "read_note" | "get_all_tags" | "get_properties" | "execute_dataview_query"): boolean => {
+			// Check selected agent's tools config first, fallback to legacy
+			if (selectedAgent?.toolsConfig) {
+				return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
+			}
+			return data.isToolEnabled(toolId);
+		};
+
 		// Add built-in tools based on configuration
-		if (data.isToolEnabled("search_notes")) {
+		if (isToolEnabled("search_notes")) {
 			tools.push(createSearchNotesTool(this.plugin.app));
 		}
-		if (data.isToolEnabled("get_all_tags")) {
+		if (isToolEnabled("get_all_tags")) {
 			tools.push(createGetAllTagsTool(this.plugin.app));
 		}
-		if (data.isToolEnabled("execute_dataview_query")) {
+		if (isToolEnabled("execute_dataview_query")) {
 			tools.push(createExecuteDataviewTool(this.plugin.app));
 		}
-		if (data.isToolEnabled("get_properties")) {
+		if (isToolEnabled("get_properties")) {
 			tools.push(createGetPropertiesTool(this.plugin.app));
 		}
-		if (data.isToolEnabled("read_note")) {
+		if (isToolEnabled("read_note")) {
 			tools.push(createReadNoteTool(this.plugin.app));
 		}
 
+		// Get MCP servers from selected agent or legacy data
+		const mcpServers = selectedAgent?.mcpServers
+			? data.getAgentMCPServersForClient(selectedAgent.id)
+			: data.getMCPServersForClient();
+
 		// Load MCP tools if configured (only enabled servers)
-		const mcpServers = data.getMCPServersForClient();
 		if (mcpServers && Object.keys(mcpServers).length > 0) {
 			try {
 				// Type assertion needed as getMCPServersForClient returns Record<string, unknown>
@@ -421,9 +442,11 @@ export class AgentManager {
 		// Set assembled prompt (base + enabled plugin extensions)
 		this.agent.setPrompt(this.assembleSystemPrompt());
 
-		const defaultModel = pluginData.getDefaultChatModel();
-		if (defaultModel) {
-			await this.agent.chooseModel(toChooseModelParams(defaultModel));
+		// Get model from selected agent or fallback to legacy default
+		const selectedAgent = pluginData.getSelectedAgent();
+		const chatModel = selectedAgent?.chatModel ?? pluginData.getDefaultChatModel();
+		if (chatModel) {
+			await this.agent.chooseModel(toChooseModelParams(chatModel));
 		}
 
 		// Bind tools
@@ -453,10 +476,13 @@ export class AgentManager {
 		unknown
 	> {
 		const agent = await this.ensureAgent();
+		const pluginData = getData();
 
-		const defaultModel = getData().getDefaultChatModel();
-		if (defaultModel) {
-			await agent.chooseModel(toChooseModelParams(defaultModel));
+		// Get model from selected agent or fallback to legacy default
+		const selectedAgent = pluginData.getSelectedAgent();
+		const chatModel = selectedAgent?.chatModel ?? pluginData.getDefaultChatModel();
+		if (chatModel) {
+			await agent.chooseModel(toChooseModelParams(chatModel));
 		} else {
 			throw new Error("No chat model configured");
 		}
@@ -506,8 +532,7 @@ export class AgentManager {
 
 			// Handle connection errors (e.g., Ollama server not running)
 			if (error instanceof ProviderEndpointError) {
-				const model = getData().getDefaultChatModel();
-				const provider = model?.provider;
+				const provider = chatModel?.provider;
 				if (provider) {
 					invalidateProviderState(provider);
 				}

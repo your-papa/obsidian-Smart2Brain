@@ -4,20 +4,35 @@ import { EmbeddableMarkdownEditor } from "../../lib/editor";
 import type SecondBrainPlugin from "../../main";
 import { getData } from "../../stores/dataStore.svelte";
 import Button from "../ui/Button.svelte";
-import type { SystemPromptModal } from "./SystemPromptModal";
+import type { SystemPromptAccessors, SystemPromptModal } from "./SystemPromptModal";
 
 interface Props {
 	modal: SystemPromptModal;
 	plugin: SecondBrainPlugin;
+	accessors?: SystemPromptAccessors;
 }
 
-const { modal, plugin }: Props = $props();
+const { modal, plugin, accessors }: Props = $props();
 const pluginData = getData();
 
 // biome-ignore lint/style/useConst: Svelte bind:this requires let
 let editorContainer: HTMLDivElement | undefined = $state();
 let editor: EmbeddableMarkdownEditor | undefined = $state();
-let promptValue = $state(pluginData.systemPrompt);
+
+// Use custom accessor if provided, otherwise use global pluginData
+function getPrompt(): string {
+	return accessors?.getPrompt() ?? pluginData.systemPrompt;
+}
+
+function setPrompt(prompt: string): void {
+	if (accessors?.setPrompt) {
+		accessors.setPrompt(prompt);
+	} else {
+		pluginData.systemPrompt = prompt;
+	}
+}
+
+let promptValue = $state(getPrompt());
 
 onMount(() => {
 	if (editorContainer) {
@@ -31,7 +46,7 @@ onDestroy(() => {
 
 function initializeEditor() {
 	if (!editorContainer) return;
-	promptValue = pluginData.systemPrompt;
+	promptValue = getPrompt();
 	editor = new EmbeddableMarkdownEditor(plugin.app, editorContainer, {
 		value: promptValue,
 		placeholder: "Define the system prompt for the assistant...",
@@ -43,7 +58,7 @@ function initializeEditor() {
 }
 
 function handleSave() {
-	pluginData.systemPrompt = promptValue;
+	setPrompt(promptValue);
 	plugin.agentManager?.updateSystemPrompt();
 	modal.close();
 }
