@@ -17,17 +17,18 @@ import Dropdown from "../ui/Dropdown.svelte";
 import Icon from "../ui/Icon.svelte";
 import Text from "../ui/Text.svelte";
 import Toggle from "../ui/Toggle.svelte";
-import type { MCPServerModal } from "./MCPServerModal";
+import type { MCPServerModal, MCPServerModalCallback } from "./MCPServerModal";
 
 interface Props {
 	modal: MCPServerModal;
 	plugin: SecondBrainPlugin;
 	serverId: string | null;
 	existingConfig: MCPServerConfig | null;
-	onSave: () => void;
+	onSave: MCPServerModalCallback;
+	skipGlobalSave?: boolean;
 }
 
-const { modal, plugin, serverId, existingConfig, onSave }: Props = $props();
+const { modal, plugin, serverId, existingConfig, onSave, skipGlobalSave = false }: Props = $props();
 const pluginData = getData();
 
 const isEditing = !!serverId && !!existingConfig;
@@ -213,20 +214,26 @@ function handleSave() {
 		};
 	}
 
-	// If editing and ID changed, delete old entry
-	if (isEditing && serverId && newServerId !== serverId) {
-		pluginData.deleteMCPServer(serverId);
+	// If not skipping global save, handle the data store operations
+	if (!skipGlobalSave) {
+		// If editing and ID changed, delete old entry
+		if (isEditing && serverId && newServerId !== serverId) {
+			pluginData.deleteMCPServer(serverId);
+		}
+		pluginData.setMCPServer(newServerId, config);
 	}
 
-	pluginData.setMCPServer(newServerId, config);
-	onSave();
+	onSave(newServerId, config);
 	modal.close();
 }
 
 function handleDelete() {
-	if (serverId) {
-		pluginData.deleteMCPServer(serverId);
-		onSave();
+	if (serverId && existingConfig) {
+		if (!skipGlobalSave) {
+			pluginData.deleteMCPServer(serverId);
+		}
+		// Pass the deleted server info to callback with enabled: false to indicate deletion
+		onSave(serverId, { ...existingConfig, enabled: false });
 		modal.close();
 	}
 }

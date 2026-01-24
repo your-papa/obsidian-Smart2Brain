@@ -3,13 +3,23 @@ import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";
 import SystemPromptModalComponent from "./SystemPromptModal.svelte";
 
+/**
+ * Custom accessors for agent-specific system prompt editing
+ */
+export interface SystemPromptAccessors {
+	getPrompt: () => string;
+	setPrompt: (prompt: string) => void;
+}
+
 export class SystemPromptModal extends Modal {
 	private component: ReturnType<typeof SystemPromptModalComponent> | null = null;
 	private plugin: SecondBrainPlugin;
+	private accessors?: SystemPromptAccessors;
 
-	constructor(plugin: SecondBrainPlugin) {
+	constructor(plugin: SecondBrainPlugin, accessors?: SystemPromptAccessors) {
 		super(plugin.app);
 		this.plugin = plugin;
+		this.accessors = accessors;
 		this.setTitle("System Prompt");
 	}
 
@@ -33,6 +43,7 @@ export class SystemPromptModal extends Modal {
 			props: {
 				modal: this,
 				plugin: this.plugin,
+				accessors: this.accessors,
 			},
 		});
 	}

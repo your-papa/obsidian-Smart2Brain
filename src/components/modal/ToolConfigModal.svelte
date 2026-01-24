@@ -8,20 +8,33 @@ import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
 import Text from "../ui/Text.svelte";
 import TextArea from "../ui/TextArea.svelte";
-import type { ToolConfigModal } from "./ToolConfigModal";
+import type { ToolConfigAccessors, ToolConfigModal } from "./ToolConfigModal";
 
 interface Props {
 	modal: ToolConfigModal;
 	plugin: SecondBrainPlugin;
 	toolId: BuiltInToolId;
 	onSave: () => void;
+	accessors?: ToolConfigAccessors;
 }
 
-const { modal, plugin, toolId, onSave }: Props = $props();
+const { modal, plugin, toolId, onSave, accessors }: Props = $props();
 const pluginData = getData();
 
-// Get current tool config
-const toolConfig = $derived(pluginData.getToolConfig(toolId));
+// Get current tool config - use custom accessor if provided
+function getToolConfig(): ToolConfig | undefined {
+	return accessors?.getToolConfig() ?? pluginData.getToolConfig(toolId);
+}
+
+function updateToolConfig(config: Partial<ToolConfig>): void {
+	if (accessors?.updateToolConfig) {
+		accessors.updateToolConfig(config);
+	} else {
+		pluginData.updateToolConfig(toolId, config);
+	}
+}
+
+const toolConfig = $derived(getToolConfig());
 const defaultConfig = DEFAULT_TOOLS_CONFIG[toolId];
 
 // Editable state
@@ -113,7 +126,7 @@ function handleSave() {
 		};
 	}
 
-	pluginData.updateToolConfig(toolId, updatedConfig);
+	updateToolConfig(updatedConfig);
 	onSave();
 	modal.close();
 }
