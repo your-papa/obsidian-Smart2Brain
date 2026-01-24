@@ -2,6 +2,8 @@ import { normalizePath } from "obsidian";
 import { BASE_SYSTEM_PROMPT, DEFAULT_PLUGIN_EXTENSIONS } from "../agent/prompts";
 import { getSecret, listSecrets, setSecret } from "../lib/secretStorage";
 import SecondBrainPlugin, {
+	type AgentConfig,
+	type AgentsConfig,
 	type BuiltInToolId,
 	type MCPServerConfig,
 	type MCPServersConfig,
@@ -11,7 +13,7 @@ import SecondBrainPlugin, {
 	type ToolConfig,
 	type ToolsConfig,
 } from "../main";
-import type { UUIDv7 } from "../utils/uuid7Validator";
+import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 import type { ChatModel } from "./chatStore.svelte";
 
 // Provider system types
@@ -159,6 +161,16 @@ export const DEFAULT_BUILTIN_PROVIDER_STATES: Record<BuiltInProviderId, StoredPr
 	},
 };
 
+// ============================================================================
+// Default Agent Configuration
+// ============================================================================
+
+/**
+ * ID for the default agent that is always present.
+ * This agent cannot be deleted.
+ */
+export const DEFAULT_AGENT_ID = "default-agent";
+
 /**
  * Default configuration for all built-in tools.
  * All tools are enabled by default with standard names and descriptions.
@@ -205,39 +217,89 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 	},
 };
 
+/**
+ * Creates a new agent configuration with default values.
+ * @param id - The unique ID for the agent (defaults to a new UUID)
+ * @param name - The display name for the agent (defaults to "New Agent")
+ */
+export function createDefaultAgentConfig(id?: string, name?: string): AgentConfig {
+	return {
+		id: id ?? genUUIDv7(),
+		name: name ?? "New Agent",
+		chatModel: null,
+		systemPrompt: BASE_SYSTEM_PROMPT,
+		pluginPromptExtensions: structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
+		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
+		mcpServers: {},
+	};
+}
+
+/**
+ * Creates the default agent that is always present.
+ */
+function createDefaultAgent(): AgentConfig {
+	return {
+		id: DEFAULT_AGENT_ID,
+		name: "Default Agent",
+		chatModel: null,
+		systemPrompt: BASE_SYSTEM_PROMPT,
+		pluginPromptExtensions: structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
+		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
+		mcpServers: {},
+	};
+}
+
 export const DEFAULT_SETTINGS: PluginData = {
 	// Unified provider config - all providers keyed by ID (built-in pre-populated)
 	providerConfig: DEFAULT_BUILTIN_PROVIDER_STATES as Record<string, StoredProviderState>,
 	// Custom provider metadata - only for custom providers
 	customProviderMeta: {},
-	// Tool configuration - all enabled by default
+
+	// Agent configuration (new)
+	agents: {
+		[DEFAULT_AGENT_ID]: createDefaultAgent(),
+	},
+	defaultAgentId: DEFAULT_AGENT_ID,
+	selectedAgentId: DEFAULT_AGENT_ID,
+
+	// Legacy fields (kept for migration compatibility)
 	toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 	systemPrompt: BASE_SYSTEM_PROMPT,
 	pluginPromptExtensions: structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
+	defaultChatModel: null,
+	mcpServers: {},
+
+	// Chat settings
 	isUsingRag: false,
 	isGeneratingChatTitle: false,
-	defaultChatModel: null,
 	retrieveTopK: 100,
 	assistantLanguage: "en",
 	initialAssistantMessageContent: "Hi",
 	defaultChatName: "New Chat",
 	targetFolder: "Chats",
+
+	// File filtering
 	excludeFF: ["Chats", ".excalidraw.md"],
 	includeFF: [],
 	isExcluding: true,
+
+	// UI state
 	isQuickSettingsOpen: true,
 	isVerbose: false,
 	hideIncognitoWarning: false,
 	isAutostart: false,
 	isChatComfy: false,
 	isOnboarded: false,
+	lastActiveChatId: null,
+
+	// Debugging & telemetry
 	enableLangSmith: false,
 	langSmithApiKey: "",
 	langSmithProject: "obsidian-agent",
 	langSmithEndpoint: "https://api.smith.langchain.com",
-	mcpServers: {},
 	debuggingLangchainKey: "",
-	lastActiveChatId: null,
+
+	// Other
 	searchAlgorithm: "grep",
 };
 
@@ -592,6 +654,349 @@ export class PluginDataStore {
 		}
 
 		return result;
+	}
+
+	// ============================================================================
+	// Agent Configuration Methods
+	// ============================================================================
+
+	/**
+	 * Get all agent configurations.
+	 */
+	get agents(): AgentsConfig {
+		return this.#data.agents;
+	}
+
+	/**
+	 * Get all agent IDs.
+	 */
+	getAgentIds(): string[] {
+		return Object.keys(this.#data.agents);
+	}
+
+	/**
+	 * Get a specific agent configuration by ID.
+	 */
+	getAgent(agentId: string): AgentConfig | undefined {
+		return this.#data.agents[agentId];
+	}
+
+	/**
+	 * Get the default agent ID, or null if using "last selected" behavior.
+	 */
+	get defaultAgentId(): string | null {
+		return this.#data.defaultAgentId;
+	}
+
+	/**
+	 * Get the currently selected agent ID.
+	 */
+	get selectedAgentId(): string {
+		return this.#data.selectedAgentId;
+	}
+
+	/**
+	 * Set the currently selected agent ID.
+	 */
+	set selectedAgentId(agentId: string) {
+		if (this.#data.agents[agentId]) {
+			this.#data.selectedAgentId = agentId;
+			this.saveSettings();
+		}
+	}
+
+	/**
+	 * Get the currently selected agent configuration.
+	 */
+	getSelectedAgent(): AgentConfig {
+		const agent = this.#data.agents[this.#data.selectedAgentId];
+		// Fallback to default agent if selected agent doesn't exist
+		return agent ?? this.#data.agents[DEFAULT_AGENT_ID];
+	}
+
+	/**
+	 * Get the default agent configuration.
+	 * If no default is set (null), returns the built-in default agent.
+	 */
+	getDefaultAgent(): AgentConfig {
+		if (this.#data.defaultAgentId) {
+			return this.#data.agents[this.#data.defaultAgentId];
+		}
+		// Fallback to built-in default agent when no default is set
+		return this.#data.agents[DEFAULT_AGENT_ID];
+	}
+
+	/**
+	 * Set the default agent ID, or null to use "last selected" behavior.
+	 * @param agentId - The ID of the agent to set as default, or null to clear
+	 * @throws Error if agent doesn't exist (when agentId is not null)
+	 */
+	setDefaultAgentId(agentId: string | null): void {
+		if (agentId !== null && !this.#data.agents[agentId]) {
+			throw new Error(`Agent with ID "${agentId}" not found`);
+		}
+		this.#data.defaultAgentId = agentId;
+		this.saveSettings();
+	}
+
+	/**
+	 * Clear the default agent, enabling "last selected" behavior.
+	 */
+	clearDefaultAgent(): void {
+		this.#data.defaultAgentId = null;
+		this.saveSettings();
+	}
+
+	/**
+	 * Create a new agent with default configuration.
+	 * @param name - Display name for the agent
+	 * @returns The created agent configuration
+	 */
+	createAgent(name: string): AgentConfig {
+		const agent = createDefaultAgentConfig(undefined, name);
+		this.#data.agents = {
+			...this.#data.agents,
+			[agent.id]: agent,
+		};
+		this.saveSettings();
+		return agent;
+	}
+
+	/**
+	 * Update an existing agent configuration.
+	 * @param agentId - The ID of the agent to update
+	 * @param updates - Partial agent configuration to merge
+	 * @throws Error if agent doesn't exist
+	 */
+	updateAgent(agentId: string, updates: Partial<Omit<AgentConfig, "id">>): void {
+		const agent = this.#data.agents[agentId];
+		if (!agent) {
+			throw new Error(`Agent with ID "${agentId}" not found`);
+		}
+
+		this.#data.agents = {
+			...this.#data.agents,
+			[agentId]: {
+				...agent,
+				...updates,
+			},
+		};
+		this.saveSettings();
+	}
+
+	/**
+	 * Delete an agent.
+	 * Cannot delete the default agent.
+	 * @param agentId - The ID of the agent to delete
+	 * @throws Error if agent doesn't exist or is the default agent
+	 */
+	deleteAgent(agentId: string): void {
+		if (agentId === DEFAULT_AGENT_ID) {
+			throw new Error("Cannot delete the built-in default agent");
+		}
+		if (!this.#data.agents[agentId]) {
+			throw new Error(`Agent with ID "${agentId}" not found`);
+		}
+
+		const { [agentId]: _, ...rest } = this.#data.agents;
+		this.#data.agents = rest;
+
+		// If deleted agent was selected, switch to the default agent (or built-in default)
+		if (this.#data.selectedAgentId === agentId) {
+			this.#data.selectedAgentId = this.#data.defaultAgentId ?? DEFAULT_AGENT_ID;
+		}
+
+		// If deleted agent was the user's default, clear the default (use last selected)
+		if (this.#data.defaultAgentId === agentId) {
+			this.#data.defaultAgentId = null;
+		}
+
+		this.saveSettings();
+	}
+
+	/**
+	 * Duplicate an existing agent with a new name.
+	 * @param agentId - The ID of the agent to duplicate
+	 * @param newName - Name for the duplicated agent
+	 * @returns The newly created agent configuration
+	 */
+	duplicateAgent(agentId: string, newName: string): AgentConfig {
+		const sourceAgent = this.#data.agents[agentId];
+		if (!sourceAgent) {
+			throw new Error(`Agent with ID "${agentId}" not found`);
+		}
+
+		// Use JSON parse/stringify for deep copy (safe for serializable config data)
+		const clonedAgent = JSON.parse(JSON.stringify(sourceAgent)) as AgentConfig;
+		const newAgent: AgentConfig = {
+			...clonedAgent,
+			id: genUUIDv7(),
+			name: newName,
+		};
+
+		this.#data.agents = {
+			...this.#data.agents,
+			[newAgent.id]: newAgent,
+		};
+		this.saveSettings();
+		return newAgent;
+	}
+
+	// --- Agent-specific Tool Configuration ---
+
+	/**
+	 * Check if a specific tool is enabled for an agent.
+	 */
+	isAgentToolEnabled(agentId: string, toolId: BuiltInToolId): boolean {
+		const agent = this.#data.agents[agentId];
+		return agent?.toolsConfig[toolId]?.enabled ?? true;
+	}
+
+	/**
+	 * Toggle tool enabled state for an agent.
+	 */
+	toggleAgentToolEnabled(agentId: string, toolId: BuiltInToolId): void {
+		const agent = this.#data.agents[agentId];
+		if (agent?.toolsConfig[toolId]) {
+			agent.toolsConfig[toolId].enabled = !agent.toolsConfig[toolId].enabled;
+			this.saveSettings();
+		}
+	}
+
+	/**
+	 * Update tool configuration for an agent.
+	 */
+	updateAgentToolConfig(agentId: string, toolId: BuiltInToolId, config: Partial<ToolConfig>): void {
+		const agent = this.#data.agents[agentId];
+		if (agent?.toolsConfig[toolId]) {
+			agent.toolsConfig[toolId] = {
+				...agent.toolsConfig[toolId],
+				...config,
+			};
+			this.saveSettings();
+		}
+	}
+
+	// --- Agent-specific MCP Server Configuration ---
+
+	/**
+	 * Get MCP servers for a specific agent.
+	 */
+	getAgentMCPServers(agentId: string): MCPServersConfig {
+		return this.#data.agents[agentId]?.mcpServers ?? {};
+	}
+
+	/**
+	 * Set MCP server for an agent.
+	 */
+	setAgentMCPServer(agentId: string, serverId: string, config: MCPServerConfig): void {
+		const agent = this.#data.agents[agentId];
+		if (agent) {
+			agent.mcpServers = {
+				...agent.mcpServers,
+				[serverId]: config,
+			};
+			this.saveSettings();
+		}
+	}
+
+	/**
+	 * Delete MCP server from an agent.
+	 */
+	deleteAgentMCPServer(agentId: string, serverId: string): void {
+		const agent = this.#data.agents[agentId];
+		if (agent) {
+			const { [serverId]: _, ...rest } = agent.mcpServers;
+			agent.mcpServers = rest;
+			this.saveSettings();
+		}
+	}
+
+	/**
+	 * Toggle MCP server enabled state for an agent.
+	 */
+	toggleAgentMCPServerEnabled(agentId: string, serverId: string): void {
+		const agent = this.#data.agents[agentId];
+		const server = agent?.mcpServers[serverId];
+		if (agent && server) {
+			agent.mcpServers = {
+				...agent.mcpServers,
+				[serverId]: { ...server, enabled: !server.enabled },
+			};
+			this.saveSettings();
+		}
+	}
+
+	/**
+	 * Convert agent's MCP config to the format expected by MultiServerMCPClient.
+	 * Only includes enabled servers.
+	 */
+	getAgentMCPServersForClient(agentId: string): Record<string, unknown> {
+		const agent = this.#data.agents[agentId];
+		if (!agent) return {};
+
+		const result: Record<string, unknown> = {};
+
+		for (const [id, config] of Object.entries(agent.mcpServers)) {
+			if (!config.enabled) continue;
+
+			if (config.transport === "stdio") {
+				result[id] = {
+					transport: "stdio",
+					command: config.command,
+					args: config.args,
+					...(config.env && Object.keys(config.env).length > 0 && { env: config.env }),
+				};
+			} else if (config.transport === "http") {
+				result[id] = {
+					transport: "http",
+					url: config.url,
+					...(config.headers && Object.keys(config.headers).length > 0 && { headers: config.headers }),
+				};
+			} else if (config.transport === "sse") {
+				result[id] = {
+					transport: "sse",
+					url: config.url,
+					...(config.headers && Object.keys(config.headers).length > 0 && { headers: config.headers }),
+				};
+			}
+		}
+
+		return result;
+	}
+
+	// --- Agent-specific Plugin Prompt Extensions ---
+
+	/**
+	 * Get plugin prompt extensions for a specific agent.
+	 */
+	getAgentPluginExtensions(agentId: string): Record<string, PluginPromptExtension> {
+		return this.#data.agents[agentId]?.pluginPromptExtensions ?? {};
+	}
+
+	/**
+	 * Set plugin extension enabled state for an agent.
+	 */
+	setAgentPluginExtensionEnabled(agentId: string, pluginId: string, enabled: boolean): void {
+		const agent = this.#data.agents[agentId];
+		if (agent?.pluginPromptExtensions[pluginId]) {
+			agent.pluginPromptExtensions[pluginId].enabled = enabled;
+			this.saveSettings();
+		}
+	}
+
+	/**
+	 * Update plugin extension for an agent.
+	 */
+	updateAgentPluginExtension(agentId: string, pluginId: string, updates: Partial<PluginPromptExtension>): void {
+		const agent = this.#data.agents[agentId];
+		if (agent?.pluginPromptExtensions[pluginId]) {
+			agent.pluginPromptExtensions[pluginId] = {
+				...agent.pluginPromptExtensions[pluginId],
+				...updates,
+			};
+			this.saveSettings();
+		}
 	}
 
 	get debuggingLangchainKey() {
@@ -1226,6 +1631,83 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 	// (Their customizations are likely in the old format)
 	if (!rawData?.systemPrompt) {
 		mergedData.systemPrompt = BASE_SYSTEM_PROMPT;
+	}
+
+	// ============================================================================
+	// Agent Migration: Migrate legacy fields to agents system
+	// ============================================================================
+
+	// If user has no agents configured, create default agent from legacy fields
+	if (!rawData?.agents || Object.keys(rawData.agents).length === 0) {
+		// Create default agent with user's existing configuration
+		const defaultAgent: AgentConfig = {
+			id: DEFAULT_AGENT_ID,
+			name: "Default Agent",
+			chatModel: rawData?.defaultChatModel ?? null,
+			systemPrompt: mergedData.systemPrompt,
+			pluginPromptExtensions: structuredClone(mergedData.pluginPromptExtensions),
+			toolsConfig: structuredClone(mergedData.toolsConfig),
+			mcpServers: rawData?.mcpServers ? structuredClone(rawData.mcpServers) : {},
+		};
+
+		mergedData.agents = {
+			[DEFAULT_AGENT_ID]: defaultAgent,
+		};
+		mergedData.defaultAgentId = DEFAULT_AGENT_ID;
+		mergedData.selectedAgentId = DEFAULT_AGENT_ID;
+	} else {
+		// Ensure default agent exists (in case it was somehow deleted)
+		if (!mergedData.agents[DEFAULT_AGENT_ID]) {
+			mergedData.agents[DEFAULT_AGENT_ID] = createDefaultAgent();
+		}
+
+		// Ensure all agents have the required fields (migration for new agent fields)
+		for (const agentId of Object.keys(mergedData.agents)) {
+			const agent = mergedData.agents[agentId];
+
+			// Ensure toolsConfig exists and has all tools
+			if (!agent.toolsConfig) {
+				agent.toolsConfig = structuredClone(DEFAULT_TOOLS_CONFIG);
+			} else {
+				agent.toolsConfig = {
+					...structuredClone(DEFAULT_TOOLS_CONFIG),
+					...agent.toolsConfig,
+				};
+			}
+
+			// Ensure pluginPromptExtensions exists and has all plugins
+			if (!agent.pluginPromptExtensions) {
+				agent.pluginPromptExtensions = structuredClone(DEFAULT_PLUGIN_EXTENSIONS);
+			} else {
+				agent.pluginPromptExtensions = {
+					...structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
+					...agent.pluginPromptExtensions,
+				};
+			}
+
+			// Ensure mcpServers exists
+			if (!agent.mcpServers) {
+				agent.mcpServers = {};
+			}
+
+			// Ensure systemPrompt exists
+			if (!agent.systemPrompt) {
+				agent.systemPrompt = BASE_SYSTEM_PROMPT;
+			}
+		}
+
+		// Ensure defaultAgentId is valid (null is valid for "last selected" behavior)
+		if (
+			mergedData.defaultAgentId !== null &&
+			!mergedData.agents[mergedData.defaultAgentId]
+		) {
+			// Default agent was deleted, clear it (use last selected)
+			mergedData.defaultAgentId = null;
+		}
+		// Ensure selectedAgentId is valid
+		if (!mergedData.selectedAgentId || !mergedData.agents[mergedData.selectedAgentId]) {
+			mergedData.selectedAgentId = mergedData.defaultAgentId ?? DEFAULT_AGENT_ID;
+		}
 	}
 
 	_pluginDataStore = new PluginDataStore(plugin, mergedData);

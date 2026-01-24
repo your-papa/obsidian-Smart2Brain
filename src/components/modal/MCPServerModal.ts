@@ -4,30 +4,46 @@ import type SecondBrainPlugin from "../../main";
 import type { MCPServerConfig } from "../../main";
 import MCPServerModalComponent from "./MCPServerModal.svelte";
 
+/**
+ * Callback signature for MCPServerModal
+ * @param serverId - The server ID that was saved
+ * @param config - The server configuration that was saved
+ */
+export type MCPServerModalCallback = (serverId: string, config: MCPServerConfig) => void;
+
+export interface MCPServerModalOptions {
+	/** If true, don't save to global pluginData.mcpServers (for agent-specific configs) */
+	skipGlobalSave?: boolean;
+}
+
 export class MCPServerModal extends Modal {
 	private component: ReturnType<typeof MCPServerModalComponent> | null = null;
 	private plugin: SecondBrainPlugin;
 	private serverId: string | null;
 	private existingConfig: MCPServerConfig | null;
-	private onSave: () => void;
+	private onSave: MCPServerModalCallback;
+	private options: MCPServerModalOptions;
 
 	/**
 	 * @param plugin - The plugin instance
 	 * @param serverId - The server ID to edit, or null for a new server
 	 * @param existingConfig - The existing config if editing, or null for new
-	 * @param onSave - Callback when saved
+	 * @param onSave - Callback when saved, receives serverId and config
+	 * @param options - Additional options
 	 */
 	constructor(
 		plugin: SecondBrainPlugin,
 		serverId: string | null,
 		existingConfig: MCPServerConfig | null,
-		onSave: () => void,
+		onSave: MCPServerModalCallback,
+		options: MCPServerModalOptions = {},
 	) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.serverId = serverId;
 		this.existingConfig = existingConfig;
 		this.onSave = onSave;
+		this.options = options;
 	}
 
 	onOpen() {
@@ -54,6 +70,7 @@ export class MCPServerModal extends Modal {
 				serverId: this.serverId,
 				existingConfig: this.existingConfig,
 				onSave: this.onSave,
+				skipGlobalSave: this.options.skipGlobalSave ?? false,
 			},
 		});
 	}

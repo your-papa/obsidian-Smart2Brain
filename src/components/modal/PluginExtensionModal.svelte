@@ -3,21 +3,36 @@ import { onDestroy, onMount } from "svelte";
 import { DEFAULT_PLUGIN_EXTENSIONS } from "../../agent/prompts";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
 import type SecondBrainPlugin from "../../main";
+import type { PluginPromptExtension } from "../../main";
 import { getData } from "../../stores/dataStore.svelte";
 import Button from "../ui/Button.svelte";
-import type { PluginExtensionModal } from "./PluginExtensionModal";
+import type { PluginExtensionAccessors, PluginExtensionModal } from "./PluginExtensionModal";
 
 interface Props {
 	modal: PluginExtensionModal;
 	plugin: SecondBrainPlugin;
 	pluginId: string;
 	onSave: () => void;
+	accessors?: PluginExtensionAccessors;
 }
 
-const { modal, plugin, pluginId, onSave }: Props = $props();
+const { modal, plugin, pluginId, onSave, accessors }: Props = $props();
 const pluginData = getData();
 
-const extension = $derived(pluginData.getPluginExtension(pluginId));
+// Use custom accessor if provided, otherwise use global pluginData
+function getExtension(): PluginPromptExtension | undefined {
+	return accessors?.getExtension() ?? pluginData.getPluginExtension(pluginId);
+}
+
+function updateExtension(updates: Partial<PluginPromptExtension>): void {
+	if (accessors?.updateExtension) {
+		accessors.updateExtension(updates);
+	} else {
+		pluginData.updatePluginExtension(pluginId, updates);
+	}
+}
+
+const extension = $derived(getExtension());
 const displayName = $derived(extension?.displayName ?? pluginId);
 const hasDefault = $derived(!!DEFAULT_PLUGIN_EXTENSIONS[pluginId]);
 
@@ -40,7 +55,7 @@ onDestroy(() => {
 
 function initializeEditor() {
 	if (!editorContainer) return;
-	const ext = pluginData.getPluginExtension(pluginId);
+	const ext = getExtension();
 	if (!ext) return;
 	promptValue = ext.prompt;
 	editor = new EmbeddableMarkdownEditor(plugin.app, editorContainer, {
@@ -54,15 +69,16 @@ function initializeEditor() {
 }
 
 function handleSave() {
-	pluginData.setPluginExtensionPrompt(pluginId, promptValue);
+	updateExtension({ prompt: promptValue });
 	onSave();
 	modal.close();
 }
 
 function handleResetToDefault() {
 	if (hasDefault) {
-		pluginData.resetPluginExtensionToDefault(pluginId);
-		promptValue = DEFAULT_PLUGIN_EXTENSIONS[pluginId].prompt;
+		const defaultExt = DEFAULT_PLUGIN_EXTENSIONS[pluginId];
+		updateExtension({ prompt: defaultExt.prompt });
+		promptValue = defaultExt.prompt;
 		editor?.setValue(promptValue);
 	}
 }

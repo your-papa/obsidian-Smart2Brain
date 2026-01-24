@@ -148,39 +148,129 @@ export interface PluginPromptExtension {
 	prompt: string;
 }
 
+// ============================================================================
+// Agent Configuration Types
+// ============================================================================
+
+/**
+ * Configuration for an individual agent.
+ * Each agent can have its own model, prompts, and tool configurations.
+ */
+export interface AgentConfig {
+	/** Unique identifier for the agent */
+	id: string;
+	/** Display name for the agent */
+	name: string;
+	/** Selected chat model for this agent */
+	chatModel: import("../stores/chatStore.svelte").ChatModel | null;
+	/** Base system prompt for this agent */
+	systemPrompt: string;
+	/** Plugin-specific prompt extensions for this agent */
+	pluginPromptExtensions: Record<string, PluginPromptExtension>;
+	/** Configuration for built-in tools */
+	toolsConfig: ToolsConfig;
+	/** MCP server configurations for this agent */
+	mcpServers: MCPServersConfig;
+	/** Optional color for visual identification (uses Obsidian theme colors) */
+	color?: AgentColor;
+}
+
+/**
+ * Available colors for agents, matching Obsidian's theme color variables.
+ */
+export type AgentColor =
+	| "red"
+	| "orange"
+	| "yellow"
+	| "green"
+	| "cyan"
+	| "blue"
+	| "purple"
+	| "pink";
+
+/**
+ * Record of agent configurations keyed by agent ID
+ */
+export type AgentsConfig = Record<string, AgentConfig>;
+
 export interface PluginData {
 	/** All provider states - built-in (pre-populated) + custom (user-created) */
 	providerConfig: Record<string, StoredProviderState>;
 	/** Extra metadata ONLY for custom providers (displayName, supportsEmbeddings) */
 	customProviderMeta: Record<string, CustomProviderMeta>;
-	/** Configuration for built-in agent tools */
+
+	// ============================================================================
+	// Agent Configuration (New)
+	// ============================================================================
+
+	/** All agent configurations keyed by agent ID */
+	agents: AgentsConfig;
+	/** ID of the default agent, or null if using "last selected" behavior */
+	defaultAgentId: string | null;
+	/** ID of the currently selected/active agent */
+	selectedAgentId: string;
+
+	// ============================================================================
+	// Legacy fields (kept for migration, will be migrated to default agent)
+	// ============================================================================
+
+	/** @deprecated Use agents[agentId].toolsConfig instead */
 	toolsConfig: ToolsConfig;
+	/** @deprecated Use agents[agentId].systemPrompt instead */
 	systemPrompt: string;
+	/** @deprecated Use agents[agentId].pluginPromptExtensions instead */
 	pluginPromptExtensions: Record<string, PluginPromptExtension>;
+	/** @deprecated Use agents[agentId].chatModel instead */
+	defaultChatModel: ChatModel | null;
+	/** @deprecated Use agents[agentId].mcpServers instead */
+	mcpServers: MCPServersConfig;
+
+	// ============================================================================
+	// Chat Settings
+	// ============================================================================
+
 	initialAssistantMessageContent: string;
 	isUsingRag: boolean;
 	isGeneratingChatTitle: boolean;
-	defaultChatModel: ChatModel | null;
 	retrieveTopK: number;
 	assistantLanguage: "de" | "en";
+	defaultChatName: string;
+	targetFolder: string;
+
+	// ============================================================================
+	// File Filtering
+	// ============================================================================
+
 	excludeFF: Array<string>;
 	includeFF: Array<string>;
 	isExcluding: boolean;
-	defaultChatName: string;
-	targetFolder: string;
+
+	// ============================================================================
+	// UI State
+	// ============================================================================
+
 	isChatComfy: boolean;
 	isOnboarded: boolean;
+	isQuickSettingsOpen: boolean;
+	hideIncognitoWarning: boolean;
+	isAutostart: boolean;
+	lastActiveChatId: UUIDv7 | null;
+
+	// ============================================================================
+	// Debugging & Telemetry
+	// ============================================================================
+
 	debuggingLangchainKey: string;
 	enableLangSmith: boolean;
 	langSmithApiKey: string;
 	langSmithProject: string;
 	langSmithEndpoint: string;
-	mcpServers: MCPServersConfig;
-	isQuickSettingsOpen: boolean;
 	isVerbose: boolean;
-	hideIncognitoWarning: boolean;
-	isAutostart: boolean;
-	lastActiveChatId: UUIDv7 | null;
+
+	// ============================================================================
+	// Other
+	// ============================================================================
+
 	searchAlgorithm: SearchAlgorithm;
 }
 
