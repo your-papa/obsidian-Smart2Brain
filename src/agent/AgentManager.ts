@@ -28,6 +28,7 @@ import {
 import { getRegistry } from "../providers/registry";
 
 import type { StructuredToolInterface } from "@langchain/core/tools";
+import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { TFile } from "obsidian";
 
 /**
@@ -61,18 +62,6 @@ function convertToAuthObject(options: BuiltInProviderOptions): AuthObject {
 
 /** Result of provider authentication validation */
 export type AuthValidationResult = { success: true } | { success: false; message: string };
-
-/** MCP Client interface for loading tools from MCP servers */
-interface MCPClient {
-	getTools(): Promise<StructuredToolInterface[]>;
-}
-
-/** MCP Client constructor type */
-interface MCPClientConstructor {
-	new (servers: Record<string, unknown>): MCPClient;
-}
-
-declare const MultiServerMCPClient: MCPClientConstructor;
 
 /**
  * Maps the UI ChatModel type to papa-ts ChooseModelParams.
@@ -317,25 +306,34 @@ export class AgentManager {
 	}
 
 	private async bindTools(agent: Agent) {
-		const searchNotesTool = createSearchNotesTool(this.plugin.app);
-		const getAllTagsTool = createGetAllTagsTool(this.plugin.app);
-		const executeDataviewTool = createExecuteDataviewTool(this.plugin.app);
-		const getPropertiesTool = createGetPropertiesTool(this.plugin.app);
-		const readNoteTool = createReadNoteTool(this.plugin.app);
-
-		const tools: StructuredToolInterface[] = [
-			searchNotesTool,
-			getAllTagsTool,
-			executeDataviewTool,
-			getPropertiesTool,
-			readNoteTool,
-		];
-
-		// Load MCP tools if configured (use getData())
 		const data = getData();
-		if (data.mcpServers && Object.keys(data.mcpServers).length > 0) {
+		const tools: StructuredToolInterface[] = [];
+
+		// Add built-in tools based on configuration
+		if (data.isToolEnabled("search_notes")) {
+			tools.push(createSearchNotesTool(this.plugin.app));
+		}
+		if (data.isToolEnabled("get_all_tags")) {
+			tools.push(createGetAllTagsTool(this.plugin.app));
+		}
+		if (data.isToolEnabled("execute_dataview_query")) {
+			tools.push(createExecuteDataviewTool(this.plugin.app));
+		}
+		if (data.isToolEnabled("get_properties")) {
+			tools.push(createGetPropertiesTool(this.plugin.app));
+		}
+		if (data.isToolEnabled("read_note")) {
+			tools.push(createReadNoteTool(this.plugin.app));
+		}
+
+		// Load MCP tools if configured (only enabled servers)
+		const mcpServers = data.getMCPServersForClient();
+		if (mcpServers && Object.keys(mcpServers).length > 0) {
 			try {
-				console.log("Smart Second Brain: Initializing MCP client...", data.mcpServers);
+				// Type assertion needed as getMCPServersForClient returns Record<string, unknown>
+				// but we know it produces the correct shape for MultiServerMCPClient
+				const mcpConfig = { mcpServers } as ConstructorParameters<typeof MultiServerMCPClient>[0];
+				console.log("Smart Second Brain: Initializing MCP client...", mcpConfig);
 
 				// HACK: Monkey patch the global fetch for the entire lifecycle
 				const windowWithFetch = window as Window & { _originalFetch?: typeof fetch };
@@ -345,7 +343,7 @@ export class AgentManager {
 				}
 
 				try {
-					const mcpClient = new MultiServerMCPClient(data.mcpServers);
+					const mcpClient = new MultiServerMCPClient(mcpConfig);
 					const mcpTools = await mcpClient.getTools();
 					console.log(`Smart Second Brain: Loaded ${mcpTools.length} MCP tools`);
 					tools.push(...mcpTools);
@@ -577,6 +575,16 @@ export class AgentManager {
 		} catch (error) {
 			console.error(`Error generating title for thread ${threadId}:`, error);
 		}
+	}
+
+	/**
+	 * Reinitialize the agent with updated settings.
+	 * Call this when tool configuration or MCP servers change.
+	 */
+	async reinitialize(): Promise<void> {
+		console.log("Smart Second Brain: Reinitializing agent with updated settings...");
+		await this.initialize();
+		console.log("Smart Second Brain: Agent reinitialized successfully");
 	}
 
 	cleanup(): void {

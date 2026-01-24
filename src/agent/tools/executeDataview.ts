@@ -1,6 +1,7 @@
 import type { App } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import { getData } from "../../stores/dataStore.svelte";
 
 // Interface for Dataview API
 interface DataviewAPI {
@@ -11,6 +12,9 @@ interface DataviewAPI {
  * Tool for executing Obsidian Dataview queries
  */
 export function createExecuteDataviewTool(app: App) {
+	const pluginData = getData();
+	const toolConfig = pluginData.getToolConfig("execute_dataview_query");
+
 	const executeDataviewFn = async ({
 		query,
 	}: {
@@ -38,8 +42,9 @@ export function createExecuteDataviewTool(app: App) {
 	};
 
 	return tool(executeDataviewFn, {
-		name: "execute_dataview_query",
+		name: toolConfig?.name ?? "execute_dataview_query",
 		description:
+			toolConfig?.description ??
 			"Execute an Obsidian Dataview query (DQL) and return the results in Markdown format. Use this to query notes, metadata, tags, and more using the Dataview Query Language. Example: 'LIST FROM \"Daily Notes\"'",
 		schema: z.object({
 			query: z.string().describe("The Dataview Query Language (DQL) query string"),

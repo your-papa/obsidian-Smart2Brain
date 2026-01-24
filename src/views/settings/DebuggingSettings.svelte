@@ -4,14 +4,10 @@ import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
 import Text from "../../components/ui/Text.svelte";
-import TextArea from "../../components/ui/TextArea.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 
 const pluginData = getData();
-
-// MCP servers JSON editing buffer
-let mcpServersText = $state(JSON.stringify(pluginData.mcpServers ?? {}, null, 2));
 </script>
 
 <!-- Data Management -->
@@ -68,21 +64,6 @@ let mcpServersText = $state(JSON.stringify(pluginData.mcpServers ?? {}, null, 2)
 
 <!-- Advanced -->
 <SettingGroup heading="Advanced">
-	<SettingItem name="MCP Servers" desc="JSON configuration for Model Context Protocol servers">
-		<TextArea
-			class="w-full h-32"
-			bind:value={mcpServersText}
-			onblur={() => {
-				try {
-					const parsed = JSON.parse(mcpServersText || "{}");
-					pluginData.mcpServers = parsed;
-				} catch (e) {
-					console.warn("Invalid MCP servers JSON", e);
-				}
-			}}
-		/>
-	</SettingItem>
-
 	<SettingItem name={$t("settings.verbose")} desc={$t("settings.verbose_desc")}>
 		<Toggle
 			isToggled={pluginData.isVerbose}

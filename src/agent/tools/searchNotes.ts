@@ -140,18 +140,29 @@ async function performSearch(app: App, query: string, algorithm: SearchAlgorithm
  * Uses the search algorithm configured in plugin settings
  */
 export function createSearchNotesTool(app: App) {
+	const pluginData = getData();
+	const toolConfig = pluginData.getToolConfig("search_notes");
+	const settings = toolConfig?.settings as { algorithm?: SearchAlgorithm; maxResults?: number } | undefined;
+	const maxResults = settings?.maxResults ?? 10;
+
 	const searchFn = async ({ query }: { query: string }): Promise<string> => {
-		const pluginData = getData();
-		const algorithm = pluginData.searchAlgorithm;
+		// Re-fetch config for each call in case it changed
+		const currentConfig = pluginData.getToolConfig("search_notes");
+		const currentSettings = currentConfig?.settings as
+			| { algorithm?: SearchAlgorithm; maxResults?: number }
+			| undefined;
+		const algorithm = currentSettings?.algorithm ?? "grep";
+		const limit = currentSettings?.maxResults ?? maxResults;
 
 		const results = await performSearch(app, query, algorithm);
+		const limitedResults = results.slice(0, limit);
 
-		if (results.length === 0) {
+		if (limitedResults.length === 0) {
 			return `No notes found matching "${query}". Try a different search term.`;
 		}
 
 		// Format results
-		const formattedResults = results
+		const formattedResults = limitedResults
 			.map((result, index) => {
 				const metadataStr = result.frontmatter ? `\nProperties: ${JSON.stringify(result.frontmatter)}` : "";
 				const scoreStr = result.score !== undefined ? ` [score: ${result.score.toFixed(2)}]` : "";
@@ -161,13 +172,14 @@ export function createSearchNotesTool(app: App) {
 
 		const algorithmLabel =
 			algorithm === "omnisearch" ? "Omnisearch" : algorithm === "embeddings" ? "Embeddings" : "Grep";
-		return `Found ${results.length} note(s) matching "${query}" using ${algorithmLabel}. Use the execute_dataview_query tool to retrieve content or perform analysis if needed.\n\n${formattedResults}`;
+		return `Found ${limitedResults.length} note(s) matching "${query}" using ${algorithmLabel}.\n\n${formattedResults}`;
 	};
 
 	return tool(searchFn, {
-		name: "search_notes",
+		name: toolConfig?.name ?? "search_notes",
 		description:
-			"Search through your Obsidian notes by keyword. Returns matching file names and metadata (properties/frontmatter) but NO content. Use this to identify relevant notes before using other tools like execute_dataview_query.",
+			toolConfig?.description ??
+			"Search through your Obsidian notes by keyword. Returns matching file names and metadata (properties/frontmatter) but NO content. Use this to identify relevant notes before using other tools.",
 		schema: z.object({
 			query: z.string().describe("The search query to find in note names and content"),
 		}),

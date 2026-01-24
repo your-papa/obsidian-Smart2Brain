@@ -1,7 +1,16 @@
 import { normalizePath } from "obsidian";
 import { BASE_SYSTEM_PROMPT, DEFAULT_PLUGIN_EXTENSIONS } from "../agent/prompts";
 import { getSecret, listSecrets, setSecret } from "../lib/secretStorage";
-import SecondBrainPlugin, { type PluginData, type PluginPromptExtension, type SearchAlgorithm } from "../main";
+import SecondBrainPlugin, {
+	type BuiltInToolId,
+	type MCPServerConfig,
+	type MCPServersConfig,
+	type PluginData,
+	type PluginPromptExtension,
+	type SearchAlgorithm,
+	type ToolConfig,
+	type ToolsConfig,
+} from "../main";
 import type { UUIDv7 } from "../utils/uuid7Validator";
 import type { ChatModel } from "./chatStore.svelte";
 
@@ -150,11 +159,59 @@ export const DEFAULT_BUILTIN_PROVIDER_STATES: Record<BuiltInProviderId, StoredPr
 	},
 };
 
+/**
+ * Default configuration for all built-in tools.
+ * All tools are enabled by default with standard names and descriptions.
+ */
+export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
+	search_notes: {
+		enabled: true,
+		name: "search_notes",
+		description:
+			"Search through your Obsidian notes by keyword. Returns matching file names and metadata (properties/frontmatter) but NO content. Use this to identify relevant notes before using other tools.",
+		settings: {
+			algorithm: "grep",
+			maxResults: 10,
+		},
+	},
+	read_note: {
+		enabled: true,
+		name: "read_note",
+		description:
+			"Read the full content of a specific note by its file path. Use this after finding a relevant note with search_notes.",
+		settings: {
+			maxContentLength: 0,
+		},
+	},
+	get_all_tags: {
+		enabled: true,
+		name: "get_all_tags",
+		description: "Retrieve a list of all tags used in the Obsidian vault. Returns a sorted list of unique tags.",
+	},
+	get_properties: {
+		enabled: true,
+		name: "get_properties",
+		description:
+			"Retrieve properties (frontmatter) from Obsidian. Omit 'note_name' to list all available property keys in the vault.",
+	},
+	execute_dataview_query: {
+		enabled: true,
+		name: "execute_dataview_query",
+		description:
+			"Execute an Obsidian Dataview query (DQL) and return the results in Markdown format. Use this to query notes, metadata, tags, and more using the Dataview Query Language.",
+		settings: {
+			includeMetadata: true,
+		},
+	},
+};
+
 export const DEFAULT_SETTINGS: PluginData = {
 	// Unified provider config - all providers keyed by ID (built-in pre-populated)
 	providerConfig: DEFAULT_BUILTIN_PROVIDER_STATES as Record<string, StoredProviderState>,
 	// Custom provider metadata - only for custom providers
 	customProviderMeta: {},
+	// Tool configuration - all enabled by default
+	toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 	systemPrompt: BASE_SYSTEM_PROMPT,
 	pluginPromptExtensions: structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
 	isUsingRag: false,
@@ -443,12 +500,98 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
-	get mcpServers() {
+	// --- MCP Servers Configuration ---
+
+	get mcpServers(): MCPServersConfig {
 		return this.#data.mcpServers;
 	}
-	set mcpServers(val: Record<string, unknown>) {
+
+	set mcpServers(val: MCPServersConfig) {
 		this.#data.mcpServers = val;
 		this.saveSettings();
+	}
+
+	/**
+	 * Get all MCP server IDs.
+	 */
+	getMCPServerIds(): string[] {
+		return Object.keys(this.#data.mcpServers);
+	}
+
+	/**
+	 * Get configuration for a specific MCP server.
+	 */
+	getMCPServer(serverId: string): MCPServerConfig | undefined {
+		return this.#data.mcpServers[serverId];
+	}
+
+	/**
+	 * Add or update an MCP server configuration.
+	 */
+	setMCPServer(serverId: string, config: MCPServerConfig): void {
+		this.#data.mcpServers = {
+			...this.#data.mcpServers,
+			[serverId]: config,
+		};
+		this.saveSettings();
+	}
+
+	/**
+	 * Delete an MCP server configuration.
+	 */
+	deleteMCPServer(serverId: string): void {
+		const { [serverId]: _, ...rest } = this.#data.mcpServers;
+		this.#data.mcpServers = rest;
+		this.saveSettings();
+	}
+
+	/**
+	 * Toggle enabled state for an MCP server.
+	 */
+	toggleMCPServerEnabled(serverId: string): void {
+		const server = this.#data.mcpServers[serverId];
+		if (server) {
+			this.#data.mcpServers = {
+				...this.#data.mcpServers,
+				[serverId]: { ...server, enabled: !server.enabled },
+			};
+			this.saveSettings();
+		}
+	}
+
+	/**
+	 * Convert typed MCP config to the format expected by MultiServerMCPClient.
+	 * Only includes enabled servers.
+	 */
+	getMCPServersForClient(): Record<string, unknown> {
+		const result: Record<string, unknown> = {};
+
+		for (const [id, config] of Object.entries(this.#data.mcpServers)) {
+			if (!config.enabled) continue;
+
+			if (config.transport === "stdio") {
+				result[id] = {
+					transport: "stdio",
+					command: config.command,
+					args: config.args,
+					...(config.env && Object.keys(config.env).length > 0 && { env: config.env }),
+				};
+			} else if (config.transport === "http") {
+				result[id] = {
+					transport: "http",
+					url: config.url,
+					...(config.headers && Object.keys(config.headers).length > 0 && { headers: config.headers }),
+				};
+			} else if (config.transport === "sse") {
+				result[id] = {
+					transport: "sse",
+					url: config.url,
+					...(config.headers && Object.keys(config.headers).length > 0 && { headers: config.headers }),
+				};
+			}
+		}
+
+		return result;
 	}
 
 	get debuggingLangchainKey() {
@@ -497,6 +640,59 @@ export class PluginDataStore {
 	set searchAlgorithm(val: SearchAlgorithm) {
 		this.#data.searchAlgorithm = val;
 		this.saveSettings();
+	}
+
+	// --- Tools Configuration ---
+
+	get toolsConfig(): ToolsConfig {
+		return this.#data.toolsConfig;
+	}
+
+	/**
+	 * Check if a specific tool is enabled.
+	 */
+	isToolEnabled(toolId: BuiltInToolId): boolean {
+		return this.#data.toolsConfig[toolId]?.enabled ?? true;
+	}
+
+	/**
+	 * Set the enabled state for a specific tool.
+	 */
+	setToolEnabled(toolId: BuiltInToolId, enabled: boolean): void {
+		if (this.#data.toolsConfig[toolId]) {
+			this.#data.toolsConfig[toolId].enabled = enabled;
+			this.saveSettings();
+		}
+	}
+
+	/**
+	 * Toggle the enabled state for a specific tool.
+	 */
+	toggleToolEnabled(toolId: BuiltInToolId): void {
+		if (this.#data.toolsConfig[toolId]) {
+			this.#data.toolsConfig[toolId].enabled = !this.#data.toolsConfig[toolId].enabled;
+			this.saveSettings();
+		}
+	}
+
+	/**
+	 * Get the configuration for a specific tool.
+	 */
+	getToolConfig(toolId: BuiltInToolId): ToolConfig | undefined {
+		return this.#data.toolsConfig[toolId];
+	}
+
+	/**
+	 * Update the configuration for a specific tool.
+	 */
+	updateToolConfig(toolId: BuiltInToolId, config: Partial<ToolConfig>): void {
+		if (this.#data.toolsConfig[toolId]) {
+			this.#data.toolsConfig[toolId] = {
+				...this.#data.toolsConfig[toolId],
+				...config,
+			};
+			this.saveSettings();
+		}
 	}
 
 	getDefaultChatModel(): ChatModel | null {
@@ -1012,6 +1208,17 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		mergedData.pluginPromptExtensions = {
 			...structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
 			...rawData.pluginPromptExtensions,
+		};
+	}
+
+	// Migration: if user has no toolsConfig, use defaults
+	if (!rawData?.toolsConfig) {
+		mergedData.toolsConfig = structuredClone(DEFAULT_TOOLS_CONFIG);
+	} else {
+		// Merge with defaults to pick up any new tools added in updates
+		mergedData.toolsConfig = {
+			...structuredClone(DEFAULT_TOOLS_CONFIG),
+			...rawData.toolsConfig,
 		};
 	}
 
