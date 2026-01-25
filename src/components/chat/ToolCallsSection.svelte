@@ -38,7 +38,7 @@ function formatToolOutput(output: unknown): string {
 	if (output === null || output === undefined) return "";
 	if (typeof output === "string") return output;
 
-	// If it's an array (ThreadMessage content format)
+	// If it's an array (LangChain ContentBlock format)
 	if (Array.isArray(output)) {
 		const textItems = output
 			.map((item: unknown) => {

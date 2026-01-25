@@ -1,4 +1,12 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import {
+	AIMessage,
+	type BaseMessage,
+	HumanMessage,
+	SystemMessage,
+	ToolMessage,
+	isAIMessage,
+} from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { StreamEvent } from "@langchain/core/tracers/log_stream";
 import type { BaseCheckpointSaver, CheckpointTuple } from "@langchain/langgraph";
@@ -13,7 +21,6 @@ import { getData } from "../stores/dataStore.svelte";
 import type { ThreadError } from "../types/shared";
 import Logger from "../utils/logging";
 import { type ThreadSnapshot, type ThreadStore, createSnapshot } from "./memory/ThreadStore";
-import { type ThreadMessage, getMessageText, normalizeThreadMessages } from "./messages/ThreadMessage";
 import type { Telemetry } from "./telemetry/Telemetry";
 
 export interface ChooseModelParams {
@@ -34,13 +41,13 @@ export interface AgentResult {
 	runId: string;
 	threadId: string;
 	durationMs: number;
-	messages: ThreadMessage[];
+	messages: BaseMessage[];
 	response?: unknown;
 	raw: unknown;
 }
 
 export interface ThreadHistory extends ThreadSnapshot {
-	messages: ThreadMessage[];
+	messages: BaseMessage[];
 	/** If the last run errored, this will contain the error details */
 	lastError?: ThreadError;
 	/** Count of errors in the thread (for detecting multiple errored messages) */
@@ -90,7 +97,7 @@ export type AgentStreamChunk =
 	  }
 	| {
 			type: "checkpoint_message";
-			message: ThreadMessage;
+			message: BaseMessage;
 			runId: string;
 			threadId: string;
 	  };
@@ -532,7 +539,7 @@ export class Agent {
 		return this.agentRunnable;
 	}
 
-	private extractMessagesFromResult(result: unknown): ThreadMessage[] {
+	private extractMessagesFromResult(result: unknown): BaseMessage[] {
 		if (!result || typeof result !== "object" || !("messages" in result)) {
 			return [];
 		}
@@ -540,10 +547,11 @@ export class Agent {
 		if (!Array.isArray(messages)) {
 			return [];
 		}
-		return normalizeThreadMessages(messages);
+		// Messages from agent.invoke() should be BaseMessage instances, but normalize just in case
+		return this.normalizeMessages(messages);
 	}
 
-	private extractMessagesFromCheckpoint(tuple: CheckpointTuple): ThreadMessage[] {
+	private extractMessagesFromCheckpoint(tuple: CheckpointTuple): BaseMessage[] {
 		const channelValues = tuple.checkpoint?.channel_values as Record<string, unknown> | undefined;
 		if (!channelValues) {
 			return [];
@@ -552,7 +560,171 @@ export class Agent {
 		if (!Array.isArray(messages)) {
 			return [];
 		}
-		return normalizeThreadMessages(messages);
+		// Convert serialized messages to BaseMessage instances
+		return this.normalizeMessages(messages);
+	}
+
+	/**
+	 * Converts various message formats to proper BaseMessage instances.
+	 * Handles:
+	 * - Already instantiated BaseMessage objects (have _getType method)
+	 * - Serialized LangChain format: { id: [...], kwargs: {...} }
+	 * - StoredMessage format: { type: string, data: {...} }
+	 * - Plain objects with type field: { type: "human" | "ai" | ... }
+	 */
+	private normalizeMessages(messages: unknown[]): BaseMessage[] {
+		const result: BaseMessage[] = [];
+
+		for (const msg of messages) {
+			if (!msg || typeof msg !== "object") continue;
+
+			const normalized = this.normalizeMessage(msg as Record<string, unknown>);
+			if (normalized) {
+				result.push(normalized);
+			}
+		}
+
+		return result;
+	}
+
+	private normalizeMessage(msg: Record<string, unknown>): BaseMessage | undefined {
+		// Check if it's already a BaseMessage instance (has _getType method)
+		if (typeof (msg as { _getType?: unknown })._getType === "function") {
+			return msg as unknown as BaseMessage;
+		}
+
+		// Handle serialized LangChain format: { id: [...], kwargs: {...} }
+		if ("kwargs" in msg && typeof msg.kwargs === "object" && msg.kwargs !== null) {
+			return this.convertSerializedLangChainMessage(msg);
+		}
+
+		// Handle StoredMessage format: { type: string, data: { content: string, ... } }
+		if (typeof msg.type === "string" && msg.data && typeof msg.data === "object") {
+			const data = msg.data as Record<string, unknown>;
+			return this.convertPlainMessage(msg.type as string, {
+				...data,
+				type: msg.type,
+			});
+		}
+
+		// Handle plain object with type field (human, ai, system, tool)
+		if (typeof msg.type === "string") {
+			return this.convertPlainMessage(msg.type, msg);
+		}
+
+		return undefined;
+	}
+
+	private convertSerializedLangChainMessage(msg: Record<string, unknown>): BaseMessage | undefined {
+		const kwargs = msg.kwargs as Record<string, unknown>;
+		const content = this.extractContent(kwargs);
+		const id = typeof kwargs.id === "string" ? kwargs.id : undefined;
+
+		// Determine type from class name in id array
+		const className = this.readLangChainClassName(msg.id);
+
+		switch (className) {
+			case "HumanMessage":
+			case "HumanMessageChunk":
+				return new HumanMessage({ content, id });
+			case "AIMessage":
+			case "AIMessageChunk": {
+				const toolCalls = this.extractToolCalls(kwargs);
+				return new AIMessage({ content, id, tool_calls: toolCalls });
+			}
+			case "SystemMessage":
+				return new SystemMessage({ content, id });
+			case "ToolMessage": {
+				const toolCallId = typeof kwargs.tool_call_id === "string" ? kwargs.tool_call_id : "";
+				return new ToolMessage({ content, tool_call_id: toolCallId, id });
+			}
+			default:
+				// Default to AIMessage for unknown types
+				return new AIMessage({ content, id });
+		}
+	}
+
+	private convertPlainMessage(type: string, msg: Record<string, unknown>): BaseMessage | undefined {
+		const content = this.extractContent(msg);
+		const id = typeof msg.id === "string" ? msg.id : undefined;
+
+		switch (type.toLowerCase()) {
+			case "human":
+			case "humanmessage":
+				return new HumanMessage({ content, id });
+			case "ai":
+			case "aimessage": {
+				const toolCalls = this.extractToolCalls(msg);
+				return new AIMessage({ content, id, tool_calls: toolCalls });
+			}
+			case "system":
+			case "systemmessage":
+				return new SystemMessage({ content, id });
+			case "tool":
+			case "toolmessage": {
+				const toolCallId = typeof msg.tool_call_id === "string" ? msg.tool_call_id : "";
+				return new ToolMessage({ content, tool_call_id: toolCallId, id });
+			}
+			default:
+				return undefined;
+		}
+	}
+
+	private extractContent(obj: Record<string, unknown>): string {
+		const content = obj.content;
+		if (typeof content === "string") return content;
+		if (Array.isArray(content)) {
+			return content
+				.map((c) => {
+					if (typeof c === "string") return c;
+					if (c && typeof c === "object" && typeof (c as { text?: unknown }).text === "string") {
+						return (c as { text: string }).text;
+					}
+					return "";
+				})
+				.join("");
+		}
+		return "";
+	}
+
+	private extractToolCalls(obj: Record<string, unknown>): { id: string; name: string; args: Record<string, unknown> }[] | undefined {
+		return this.parseToolCalls(obj.tool_calls);
+	}
+
+	private parseToolCalls(toolCalls: unknown): { id: string; name: string; args: Record<string, unknown> }[] | undefined {
+		if (!Array.isArray(toolCalls) || toolCalls.length === 0) return undefined;
+
+		return toolCalls
+			.filter((tc): tc is Record<string, unknown> => tc && typeof tc === "object")
+			.map((tc) => ({
+				id: typeof tc.id === "string" ? tc.id : "",
+				name: typeof tc.name === "string" ? tc.name : "",
+				args: this.parseToolArgs(tc.args ?? tc.arguments),
+			}));
+	}
+
+	private parseToolArgs(args: unknown): Record<string, unknown> {
+		if (typeof args === "string") {
+			try {
+				return JSON.parse(args) as Record<string, unknown>;
+			} catch {
+				return {};
+			}
+		}
+		if (args && typeof args === "object" && !Array.isArray(args)) {
+			return args as Record<string, unknown>;
+		}
+		return {};
+	}
+
+	private readLangChainClassName(identifier: unknown): string | undefined {
+		if (typeof identifier === "string") {
+			return identifier.split(":").pop();
+		}
+		if (Array.isArray(identifier) && typeof identifier[identifier.length - 1] === "string") {
+			return identifier[identifier.length - 1] as string;
+		}
+		return undefined;
 	}
 
 	private extractOutputFromEvent(event: StreamEvent): unknown | undefined {
@@ -563,7 +735,7 @@ export class Agent {
 		return undefined;
 	}
 
-	private extractMessagesFromEvent(event: StreamEvent): ThreadMessage[] {
+	private extractMessagesFromEvent(event: StreamEvent): BaseMessage[] {
 		// Check final output first (most complete state, includes tool calls)
 		const output = this.extractOutputFromEvent(event);
 		if (output) {
@@ -576,7 +748,7 @@ export class Agent {
 		if (dataOutput && typeof dataOutput === "object" && "messages" in dataOutput) {
 			const messages = (dataOutput as { messages?: unknown }).messages;
 			if (Array.isArray(messages)) {
-				return normalizeThreadMessages(messages);
+				return messages.filter((msg): msg is BaseMessage => msg && typeof msg === "object");
 			}
 		}
 
@@ -588,20 +760,15 @@ export class Agent {
 
 		// Check if chunk itself is an array of messages
 		if (Array.isArray(chunk)) {
-			return normalizeThreadMessages(chunk);
+			return chunk.filter((msg): msg is BaseMessage => msg && typeof msg === "object");
 		}
 
 		// Check if chunk contains a messages array
 		if ("messages" in chunk) {
 			const messages = (chunk as { messages?: unknown }).messages;
 			if (Array.isArray(messages)) {
-				return normalizeThreadMessages(messages);
+				return messages.filter((msg): msg is BaseMessage => msg && typeof msg === "object");
 			}
-		}
-
-		// Check if chunk is a single message object (common during token streaming)
-		if ("content" in chunk || "role" in chunk || "lc" in chunk || "kwargs" in chunk) {
-			return normalizeThreadMessages([chunk]);
 		}
 
 		return [];
@@ -679,15 +846,16 @@ export class Agent {
 		);
 	}
 
-	private extractResponse(messages: ThreadMessage[]): unknown {
+	private extractResponse(messages: BaseMessage[]): unknown {
 		if (messages.length === 0) {
 			return undefined;
 		}
 		const last = messages[messages.length - 1];
-		return getMessageText(last) ?? last.content;
+		// Use BaseMessage.text getter to extract text content
+		return last.text || last.content;
 	}
 
-	private async persistThreadMetadata(threadId: string, runId: string, messages: ThreadMessage[]): Promise<void> {
+	private async persistThreadMetadata(threadId: string, runId: string, messages: BaseMessage[]): Promise<void> {
 		if (!this.threadStore) {
 			return;
 		}
@@ -696,12 +864,16 @@ export class Agent {
 		metadata.lastRunId = runId;
 		metadata.model = this.selectedModel?.name;
 		const lastMessage = messages[messages.length - 1];
-		const preview = getMessageText(lastMessage);
+		// Use BaseMessage.text getter to extract text content
+		const preview = lastMessage?.text;
 		if (preview) {
 			metadata.lastMessagePreview = preview.slice(0, 200);
 		}
-		if (lastMessage?.role) {
-			metadata.lastMessageRole = lastMessage.role;
+		// Map LangChain type to role for metadata
+		if (lastMessage?.getType) {
+			const lcType = lastMessage.getType();
+			const role = lcType === "human" ? "user" : lcType === "ai" ? "assistant" : lcType;
+			metadata.lastMessageRole = role;
 		}
 		await this.threadStore.write(
 			createSnapshot({
@@ -762,7 +934,7 @@ ${userMessage}`;
 	 * Reads the latest checkpoint and extracts the last assistant message.
 	 * Used to ensure UI stays in sync with persisted state after streaming.
 	 */
-	private async getLastAssistantMessageFromCheckpoint(threadId: string): Promise<ThreadMessage | undefined> {
+	private async getLastAssistantMessageFromCheckpoint(threadId: string): Promise<BaseMessage | undefined> {
 		const tuple = await this.safeGetCheckpointTuple(threadId);
 		if (!tuple) {
 			return undefined;
@@ -773,9 +945,9 @@ ${userMessage}`;
 			return undefined;
 		}
 
-		// Find the last assistant message
+		// Find the last AI message (assistant)
 		for (let i = messages.length - 1; i >= 0; i--) {
-			if (messages[i].role === "assistant") {
+			if (isAIMessage(messages[i])) {
 				return messages[i];
 			}
 		}

@@ -12,10 +12,12 @@ const data = getData();
 // Don't destructure - access properties directly to maintain reactivity
 const models = useAvailableModels();
 
-// Derive the effective selected model - uses default if valid, otherwise first available
+const selectedAgent = $derived.by(() => data.getSelectedAgent());
+
+// Derive the effective selected model - uses agent model if valid, otherwise fallback
 const selectedModel = $derived.by(() => {
 	const list = models.availableModels;
-	const sel = data.getDefaultChatModel();
+	const sel = selectedAgent?.chatModel ?? data.getDefaultChatModel();
 
 	if (sel && list.length > 0) {
 		const found = list.find((m: ChatModel) => m.provider === sel.provider && m.model === sel.model);
@@ -31,9 +33,9 @@ $effect(() => {
 	if (_initialized) return;
 	if (!models.availableModels.length) return;
 
-	const sel = data.getDefaultChatModel();
-	if (!sel) {
-		data.setDefaultChatModel(models.availableModels[0]);
+	const sel = selectedAgent?.chatModel ?? data.getDefaultChatModel();
+	if (!sel && selectedAgent) {
+		data.updateAgent(selectedAgent.id, { chatModel: models.availableModels[0] });
 	}
 	_initialized = true;
 });
@@ -85,7 +87,9 @@ let customAnchor: HTMLElement | undefined = $state();
 						class="!flex !flex-row !items-center !gap-2 !p-2 !rounded-lg hover:!bg-[--background-modifier-hover] !border-none !bg-transparent !text-left !cursor-pointer !shadow-none !text-[--text-normal]"
 						onclick={() => {
 							isOpen = false;
-							data.setDefaultChatModel(model);
+							if (selectedAgent) {
+								data.updateAgent(selectedAgent.id, { chatModel: model });
+							}
 						}}
 					>
 						{#if model.provider === "openai"}

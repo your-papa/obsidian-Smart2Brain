@@ -1,7 +1,14 @@
+import {
+	type AIMessage,
+	type BaseMessage,
+	type ToolMessage,
+	isAIMessage,
+	isHumanMessage,
+	isToolMessage,
+} from "@langchain/core/messages";
 import { Notice, type TFile } from "obsidian";
-import type { ThreadHistory } from "../agent/Agent";
+import type { AgentStreamChunk, ThreadHistory } from "../agent/Agent";
 import type { AgentManager } from "../agent/AgentManager";
-import type { ThreadMessage } from "../agent/messages/ThreadMessage";
 import type { ChatModelConfig } from "../providers/index";
 import type { ThreadError } from "../types/shared";
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
@@ -85,54 +92,15 @@ export interface ChatRecord {
 }
 
 /* -----------------------------------------------------------------------------
- * ThreadMessage to MessagePair conversion
+ * BaseMessage to MessagePair conversion
  * ---------------------------------------------------------------------------*/
 
-/** Type for content items that have a type property */
-interface ContentWithType {
-	type: string;
-	text?: string;
-}
-
 /**
- * Extended ThreadMessage type that includes snake_case variants
- * that may come from LangChain or other sources
+ * Extracts text content from a BaseMessage.
+ * Uses the .text getter which handles string and ContentBlock[] formats.
  */
-interface ExtendedThreadMessage extends ThreadMessage {
-	tool_call_id?: string;
-	tool_calls?: Array<{
-		id: string;
-		name: string;
-		arguments?: unknown;
-		input?: unknown;
-	}>;
-	status?: string;
-}
-
-/** Raw tool call structure from various sources */
-interface RawToolCall {
-	id: string;
-	name: string;
-	arguments?: unknown;
-	input?: unknown;
-}
-
-/**
- * Extracts text content from a ThreadMessage content field.
- * Handles both string content and array of content objects.
- */
-function extractTextContent(content: ThreadMessage["content"]): string {
-	if (typeof content === "string") return content;
-	if (Array.isArray(content)) {
-		return content
-			.filter(
-				(c): c is { type: "text"; text: string } =>
-					typeof c === "object" && c !== null && (c as ContentWithType).type === "text",
-			)
-			.map((c) => c.text)
-			.join("");
-	}
-	return "";
+function extractTextContent(message: BaseMessage): string {
+	return message.text || "";
 }
 
 /**
@@ -160,49 +128,54 @@ function normalizeToolInput(raw: unknown): Record<string, unknown> {
  * Builds a map of tool outputs from tool messages.
  */
 function buildToolOutputsMap(
-	threadMessages: ThreadMessage[],
+	messages: BaseMessage[],
 ): Map<string, { content: unknown; status: ToolCallStatus }> {
 	const toolOutputs = new Map<string, { content: unknown; status: ToolCallStatus }>();
-	for (const msg of threadMessages) {
-		const extMsg = msg as ExtendedThreadMessage;
-		const toolCallId = extMsg.tool_call_id || extMsg.toolCallId;
-		if (msg.role === "tool" && toolCallId) {
-			toolOutputs.set(toolCallId, {
-				content: msg.content,
-				status: extMsg.status === "error" ? "failed" : "completed",
-			});
+	for (const msg of messages) {
+		if (isToolMessage(msg)) {
+			const toolMsg = msg as ToolMessage;
+			const toolCallId = toolMsg.tool_call_id;
+			if (toolCallId) {
+				toolOutputs.set(toolCallId, {
+					content: toolMsg.content,
+					status: toolMsg.status === "error" ? "failed" : "completed",
+				});
+			}
 		}
 	}
 	return toolOutputs;
 }
 
 /**
- * Converts a single assistant ThreadMessage to an AssistantMessage.
+ * Converts a single AI BaseMessage to an AssistantMessage.
  * Used to sync UI with checkpoint state after streaming, and reused in batch conversion.
  */
-export function threadMessageToAssistantMessage(
-	msg: ThreadMessage,
+export function baseMessageToAssistantMessage(
+	msg: BaseMessage,
 	toolOutputs?: Map<string, { content: unknown; status: ToolCallStatus }>,
 	stateOverride?: AssistantState,
 ): AssistantMessage {
-	const textContent = extractTextContent(msg.content);
+	const textContent = extractTextContent(msg);
 
-	// Extract tool calls if present - check both camelCase and snake_case variants
-	const extMsg = msg as ExtendedThreadMessage;
-	const rawToolCalls = extMsg.tool_calls || extMsg.toolCalls;
+	// Extract tool calls if present (only on AIMessage)
 	let toolCalls: ToolCallState[] | undefined;
 
-	if (Array.isArray(rawToolCalls) && rawToolCalls.length > 0) {
-		toolCalls = rawToolCalls.map((tc: RawToolCall) => {
-			const toolOutput = toolOutputs?.get(tc.id);
-			return {
-				id: tc.id,
-				name: tc.name,
-				input: normalizeToolInput(tc.arguments || tc.input),
-				status: toolOutput?.status ?? "completed",
-				output: toolOutput?.content,
-			};
-		});
+	if (isAIMessage(msg)) {
+		const aiMsg = msg as AIMessage;
+		const rawToolCalls = aiMsg.tool_calls;
+
+		if (Array.isArray(rawToolCalls) && rawToolCalls.length > 0) {
+			toolCalls = rawToolCalls.map((tc) => {
+				const toolOutput = toolOutputs?.get(tc.id || "");
+				return {
+					id: tc.id || "",
+					name: tc.name,
+					input: normalizeToolInput(tc.args),
+					status: toolOutput?.status ?? "completed",
+					output: toolOutput?.content,
+				};
+			});
+		}
 	}
 
 	return {
@@ -213,11 +186,11 @@ export function threadMessageToAssistantMessage(
 }
 
 /**
- * Merges multiple assistant ThreadMessages into a single AssistantMessage.
+ * Merges multiple AI BaseMessages into a single AssistantMessage.
  * Combines tool calls from all messages and uses the last non-empty text content.
  */
 function mergeAssistantMessages(
-	assistantMessages: ThreadMessage[],
+	assistantMessages: BaseMessage[],
 	toolOutputs: Map<string, { content: unknown; status: ToolCallStatus }>,
 	stateOverride?: AssistantState,
 ): AssistantMessage {
@@ -229,7 +202,7 @@ function mergeAssistantMessages(
 	}
 
 	if (assistantMessages.length === 1) {
-		return threadMessageToAssistantMessage(assistantMessages[0], toolOutputs, stateOverride);
+		return baseMessageToAssistantMessage(assistantMessages[0], toolOutputs, stateOverride);
 	}
 
 	// Merge multiple assistant messages
@@ -237,7 +210,7 @@ function mergeAssistantMessages(
 	const allToolCalls: ToolCallState[] = [];
 
 	for (const msg of assistantMessages) {
-		const converted = threadMessageToAssistantMessage(msg, toolOutputs);
+		const converted = baseMessageToAssistantMessage(msg, toolOutputs);
 
 		// Use the last non-empty content
 		if (converted.content.trim()) {
@@ -258,7 +231,7 @@ function mergeAssistantMessages(
 }
 
 /**
- * Converts an array of ThreadMessage (from papa-ts/LangGraph) into MessagePair[] for UI rendering.
+ * Converts an array of BaseMessage (from LangGraph) into MessagePair[] for UI rendering.
  *
  * This function:
  * 1. Pairs user messages with their corresponding assistant responses
@@ -267,14 +240,14 @@ function mergeAssistantMessages(
  * 4. Uses UUIDv7 for message pair IDs (with timestamp extraction capability)
  * 5. Uses errorCount to distinguish error state from cancelled state
  */
-export function threadMessagesToMessagePairs(threadMessages: ThreadMessage[], errorCount = 0): MessagePair[] {
-	if (!threadMessages || threadMessages.length === 0) return [];
+export function baseMessagesToMessagePairs(messages: BaseMessage[], errorCount = 0): MessagePair[] {
+	if (!messages || messages.length === 0) return [];
 
 	const messagePairs: MessagePair[] = [];
-	const toolOutputs = buildToolOutputsMap(threadMessages);
+	const toolOutputs = buildToolOutputsMap(messages);
 
-	// Filter to just user and assistant messages
-	const conversationMessages = threadMessages.filter((msg) => msg.role === "user" || msg.role === "assistant");
+	// Filter to just user (human) and assistant (ai) messages
+	const conversationMessages = messages.filter((msg) => isHumanMessage(msg) || isAIMessage(msg));
 
 	// Track remaining errors locally to avoid reassigning parameter
 	let remainingErrors = errorCount;
@@ -283,16 +256,16 @@ export function threadMessagesToMessagePairs(threadMessages: ThreadMessage[], er
 	while (i < conversationMessages.length) {
 		const msg = conversationMessages[i];
 
-		if (msg.role === "user") {
+		if (isHumanMessage(msg)) {
 			// Start a new pair with user message
-			const userContent = extractTextContent(msg.content);
-			// ThreadMessages from LangGraph use UUIDv4, not UUIDv7 - generate fresh UUIDv7
+			const userContent = extractTextContent(msg);
+			// Generate fresh UUIDv7 for the pair
 			const pairId = genUUIDv7();
 
 			// Look ahead for assistant response(s)
-			const assistantMessages: ThreadMessage[] = [];
+			const assistantMessages: BaseMessage[] = [];
 			let j = i + 1;
-			while (j < conversationMessages.length && conversationMessages[j].role === "assistant") {
+			while (j < conversationMessages.length && isAIMessage(conversationMessages[j])) {
 				assistantMessages.push(conversationMessages[j]);
 				j++;
 			}
@@ -324,7 +297,7 @@ export function threadMessagesToMessagePairs(threadMessages: ThreadMessage[], er
 			messagePairs.push({
 				id: pairId,
 				userMessage: { content: "" },
-				assistantMessage: threadMessageToAssistantMessage(msg, toolOutputs),
+				assistantMessage: baseMessageToAssistantMessage(msg, toolOutputs),
 			});
 			i++;
 		}
@@ -344,17 +317,12 @@ export function getMessagePairTimestamp(pair: MessagePair): Date {
  * Streaming Types
  * ---------------------------------------------------------------------------*/
 
-type StreamChunk =
-	| { type: "token"; token: string }
-	| { type: "tool_start"; toolCallId: string; toolName: string; input: unknown }
-	| { type: "tool_end"; toolCallId: string; toolName: string; output: unknown }
-	| { type: "result"; result?: unknown }
-	| { type: "checkpoint_message"; message: ThreadMessage };
+// Use AgentStreamChunk from Agent.ts - no need to duplicate the type
 
 /* -----------------------------------------------------------------------------
  * ChatSession
  *  - Ephemeral per-chat runtime state (streaming, abort, reactive messages)
- *  - Converts ThreadMessages to MessagePairs on load, then works with MessagePairs only
+ *  - Converts BaseMessages to MessagePairs on load, then works with MessagePairs only
  * ---------------------------------------------------------------------------*/
 
 export class ChatSession {
@@ -369,10 +337,10 @@ export class ChatSession {
 	// Reactive UI state
 	messageState = $state<MessageState>(MessageState.idle);
 
-	constructor(id: string, threadMessages: ThreadMessage[], errorCount = 0) {
+	constructor(id: string, langchainMessages: BaseMessage[], errorCount = 0) {
 		this.id = id;
-		// Convert once on load, then drop the raw ThreadMessages
-		this.messages = threadMessagesToMessagePairs(threadMessages, errorCount);
+		// Convert once on load, then drop the raw BaseMessages
+		this.messages = baseMessagesToMessagePairs(langchainMessages, errorCount);
 	}
 
 	/** Public snapshot (immutable-ish) */
@@ -397,7 +365,8 @@ export class ChatSession {
 		const pairId = genUUIDv7();
 
 		// Capture the current model at send time
-		const currentModel = getData().getDefaultChatModel() ?? undefined;
+		const selectedAgent = getData().getSelectedAgent();
+		const currentModel = selectedAgent?.chatModel ?? getData().getDefaultChatModel() ?? undefined;
 
 		const pair: MessagePair = {
 			id: pairId,
@@ -477,7 +446,7 @@ export class ChatSession {
 				userContent,
 				String(this.id),
 				signal,
-			) as AsyncIterable<StreamChunk>;
+			) as AsyncIterable<AgentStreamChunk>;
 
 			const assistantMsg = pair.assistantMessage;
 
@@ -538,7 +507,7 @@ export class ChatSession {
 
 				// Sync UI with persisted checkpoint state
 				if (chunk.type === "checkpoint_message") {
-					const checkpointAssistant = threadMessageToAssistantMessage(chunk.message);
+					const checkpointAssistant = baseMessageToAssistantMessage(chunk.message);
 					// Preserve the streaming state, update content and tool calls from checkpoint
 					pair.assistantMessage.content = checkpointAssistant.content;
 					pair.assistantMessage.toolCalls = checkpointAssistant.toolCalls;
