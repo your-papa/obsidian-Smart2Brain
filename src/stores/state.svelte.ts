@@ -34,6 +34,19 @@ export function getPlugin(): SecondBrainPlugin {
 	return _plugin;
 }
 
+// Settings tab navigation - allows other components to request a specific tab
+let _pendingSettingsTab: string | null = $state(null);
+
+export function requestSettingsTab(tab: string) {
+	_pendingSettingsTab = tab;
+}
+
+export function consumePendingSettingsTab(): string | null {
+	const tab = _pendingSettingsTab;
+	_pendingSettingsTab = null;
+	return tab;
+}
+
 // Deprecated: use createModelListQuery in utils/query
 export function modelQuery(provider: string, plugin: SecondBrainPlugin) {
 	return createQuery(() => ({
