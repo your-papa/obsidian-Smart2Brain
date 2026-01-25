@@ -4,41 +4,40 @@ import { Popover, Separator } from "bits-ui";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import type { ChatModel } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
 import Icon from "../ui/Icon.svelte";
-import IconButton from "../ui/IconButton.svelte";
 
 const data = getData();
+const plugin = getPlugin();
 
 // Don't destructure - access properties directly to maintain reactivity
 const models = useAvailableModels();
 
-const selectedAgent = $derived.by(() => data.getSelectedAgent());
+// Get the selected agent reactively
+const selectedAgent = $derived(data.getSelectedAgent());
 
-// Derive the effective selected model - uses agent model if valid, otherwise fallback
+// Derive the effective selected model from the selected agent
 const selectedModel = $derived.by(() => {
 	const list = models.availableModels;
-	const sel = selectedAgent?.chatModel ?? data.getDefaultChatModel();
+	const agentModel = selectedAgent?.chatModel;
 
-	if (sel && list.length > 0) {
-		const found = list.find((m: ChatModel) => m.provider === sel.provider && m.model === sel.model);
+	if (agentModel && list.length > 0) {
+		const found = list.find((m: ChatModel) => m.provider === agentModel.provider && m.model === agentModel.model);
 		if (found) return found;
 	}
 
 	return list.length > 0 ? list[0] : null;
 });
 
-// Initialize default model on first load if not set
-let _initialized = $state(false);
-$effect(() => {
-	if (_initialized) return;
-	if (!models.availableModels.length) return;
-
-	const sel = selectedAgent?.chatModel ?? data.getDefaultChatModel();
-	if (!sel && selectedAgent) {
-		data.updateAgent(selectedAgent.id, { chatModel: models.availableModels[0] });
-	}
-	_initialized = true;
-});
+// Update the agent's model when user selects a different one
+function selectModel(model: ChatModel) {
+	const agentId = data.selectedAgentId;
+	data.updateAgent(agentId, { chatModel: model });
+	// Reinitialize the agent with the new model
+	plugin.agentManager?.reinitialize().catch((error) => {
+		console.error("Failed to update agent model:", error);
+	});
+}
 
 let isOpen = $state(false);
 let customAnchor: HTMLElement | undefined = $state();
@@ -87,9 +86,7 @@ let customAnchor: HTMLElement | undefined = $state();
 						class="!flex !flex-row !items-center !gap-2 !p-2 !rounded-lg hover:!bg-[--background-modifier-hover] !border-none !bg-transparent !text-left !cursor-pointer !shadow-none !text-[--text-normal]"
 						onclick={() => {
 							isOpen = false;
-							if (selectedAgent) {
-								data.updateAgent(selectedAgent.id, { chatModel: model });
-							}
+							selectModel(model);
 						}}
 					>
 						{#if model.provider === "openai"}
