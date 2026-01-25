@@ -74,6 +74,12 @@ export type AgentStreamChunk =
 			threadId: string;
 	  }
 	| {
+			type: "reasoning_token";
+			token: string;
+			runId: string;
+			threadId: string;
+	  }
+	| {
 			type: "tool_start";
 			toolCallId: string;
 			toolName: string;
@@ -320,6 +326,17 @@ export class Agent {
 						threadId,
 					};
 					continue;
+				}
+
+				// Handle reasoning token streaming (thinking/reasoning content)
+				const reasoningToken = this.extractReasoningFromEvent(event);
+				if (reasoningToken) {
+					yield {
+						type: "reasoning_token",
+						token: reasoningToken,
+						runId,
+						threadId,
+					};
 				}
 
 				// Handle token streaming
@@ -687,11 +704,15 @@ export class Agent {
 		return "";
 	}
 
-	private extractToolCalls(obj: Record<string, unknown>): { id: string; name: string; args: Record<string, unknown> }[] | undefined {
+	private extractToolCalls(
+		obj: Record<string, unknown>,
+	): { id: string; name: string; args: Record<string, unknown> }[] | undefined {
 		return this.parseToolCalls(obj.tool_calls);
 	}
 
-	private parseToolCalls(toolCalls: unknown): { id: string; name: string; args: Record<string, unknown> }[] | undefined {
+	private parseToolCalls(
+		toolCalls: unknown,
+	): { id: string; name: string; args: Record<string, unknown> }[] | undefined {
 		if (!Array.isArray(toolCalls) || toolCalls.length === 0) return undefined;
 
 		return toolCalls
@@ -784,6 +805,157 @@ export class Agent {
 		}
 		const token = this.normalizeContentToString(chunk);
 		return token && token.length > 0 ? token : undefined;
+	}
+
+	/**
+	 * Extracts reasoning/thinking tokens from a streaming event.
+	 *
+	 * Follows LangChain's native pattern as documented at:
+	 * https://docs.langchain.com/oss/javascript/langchain/models#reasoning
+	 *
+	 * Native pattern:
+	 * ```typescript
+	 * for await (const chunk of stream) {
+	 *   for (const block of chunk.contentBlocks) {
+	 *     if (block.type === "reasoning") {
+	 *       console.log(`Reasoning: ${block.reasoning}`);
+	 *     }
+	 *   }
+	 * }
+	 * ```
+	 *
+	 * Note: Some providers (e.g., DeepSeek R1 via OpenRouter) may not yet normalize
+	 * reasoning into contentBlocks. Fallbacks are provided for these cases.
+	 */
+	private extractReasoningFromEvent(event: StreamEvent): string | undefined {
+		if (!event.event.endsWith("_stream")) {
+			return undefined;
+		}
+		const chunk = event.data?.chunk;
+		if (typeof chunk === "undefined" || chunk === null) {
+			return undefined;
+		}
+
+		const chunkObj = chunk as Record<string, unknown>;
+
+		// LangChain native way: Access contentBlocks property directly
+		// Reference: https://docs.langchain.com/oss/javascript/langchain/models#reasoning
+		// The chunk should be an AIMessageChunk with contentBlocks property
+		const contentBlocks = chunkObj.contentBlocks ?? chunkObj.content_blocks;
+
+		// LangChain native pattern: Filter contentBlocks for reasoning type
+		// This is the standard way per LangChain docs
+		if (Array.isArray(contentBlocks)) {
+			const reasoningParts: string[] = [];
+			for (const block of contentBlocks) {
+				// Native LangChain format: { type: "reasoning", reasoning: "..." }
+				const reasoning = this.extractReasoningFromContentBlock(block);
+				if (reasoning) {
+					reasoningParts.push(reasoning);
+				}
+			}
+			if (reasoningParts.length > 0) {
+				return reasoningParts.join("");
+			}
+		}
+
+		// =====================================================================
+		// Fallbacks for providers that don't yet normalize reasoning into contentBlocks
+		// These are temporary until LangChain fully supports all providers
+		// =====================================================================
+
+		// Fallback 1: Check raw content array for reasoning blocks
+		// Some providers may put reasoning blocks directly in content array
+		if (Array.isArray(chunkObj.content)) {
+			const reasoningParts: string[] = [];
+			for (const block of chunkObj.content) {
+				const reasoning = this.extractReasoningFromContentBlock(block);
+				if (reasoning) {
+					reasoningParts.push(reasoning);
+				}
+			}
+			if (reasoningParts.length > 0) {
+				return reasoningParts.join("");
+			}
+		}
+
+		// Check response_metadata for reasoning (OpenRouter/DeepSeek might put it here)
+		const responseMetadata = chunkObj.response_metadata as Record<string, unknown> | undefined;
+		if (responseMetadata?.reasoning || responseMetadata?.reasoning_content) {
+			const reasoning = (responseMetadata.reasoning || responseMetadata.reasoning_content) as string;
+			if (reasoning) {
+				return reasoning;
+			}
+		}
+
+		// Check lc_kwargs for reasoning (LangChain internal structure)
+		const lcKwargs = chunkObj.lc_kwargs as Record<string, unknown> | undefined;
+		if (lcKwargs) {
+			// Check for reasoning_content in lc_kwargs
+			if (lcKwargs.reasoning_content) {
+				const reasoning = lcKwargs.reasoning_content as string;
+				if (reasoning) {
+					return reasoning;
+				}
+			}
+
+			// Check additional_kwargs inside lc_kwargs
+			const additionalKwargsInLc = lcKwargs.additional_kwargs as Record<string, unknown> | undefined;
+			if (additionalKwargsInLc?.reasoning_content) {
+				const reasoning = additionalKwargsInLc.reasoning_content as string;
+				if (reasoning) {
+					return reasoning;
+				}
+			}
+		}
+
+		// Fallback 2: Check additional_kwargs.reasoning_content
+		// DeepSeek R1 and OpenAI o1 may put reasoning here before LangChain normalizes it
+		// TODO: Remove this fallback once LangChain normalizes these providers
+		const additionalKwargs = chunkObj.additional_kwargs as Record<string, unknown> | undefined;
+		if (additionalKwargs?.reasoning_content && typeof additionalKwargs.reasoning_content === "string") {
+			return additionalKwargs.reasoning_content as string;
+		}
+
+		// Also check direct reasoning_content on chunk (some providers)
+		if (chunkObj.reasoning_content && typeof chunkObj.reasoning_content === "string") {
+			return chunkObj.reasoning_content as string;
+		}
+
+		return undefined;
+	}
+
+	/**
+	 * Extracts reasoning from a LangChain content block.
+	 *
+	 * Follows LangChain's native format as documented:
+	 * https://docs.langchain.com/oss/javascript/langchain/models#reasoning
+	 *
+	 * Native format: { type: "reasoning", reasoning: "..." }
+	 *
+	 * Also handles provider-specific formats (e.g., Anthropic's "thinking") for backward compatibility.
+	 */
+	private extractReasoningFromContentBlock(block: unknown): string | undefined {
+		if (!block || typeof block !== "object") {
+			return undefined;
+		}
+
+		const b = block as Record<string, unknown>;
+		const blockType = b.type;
+
+		// LangChain native format: { type: "reasoning", reasoning: "..." }
+		// This is the standard format per LangChain documentation
+		if (blockType === "reasoning" && typeof b.reasoning === "string") {
+			return b.reasoning;
+		}
+
+		// Provider-specific format: Anthropic uses { type: "thinking", thinking: "..." }
+		// This is a temporary compatibility layer until all providers use the native format
+		if (blockType === "thinking" && typeof b.thinking === "string") {
+			return b.thinking;
+		}
+
+		return undefined;
 	}
 
 	private normalizeContentToString(value: unknown): string | undefined {

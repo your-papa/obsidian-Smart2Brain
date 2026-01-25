@@ -55,6 +55,8 @@ export interface AssistantMessage {
 	state: AssistantState;
 	content: string;
 	toolCalls?: ToolCallState[];
+	/** Reasoning/thinking content from models that support it (e.g., Claude's extended thinking, o1 reasoning) */
+	reasoningContent?: string;
 	nerd_stats?: {
 		tokensPerSecond: number;
 		retrievedDocsNum: number;
@@ -104,6 +106,81 @@ function extractTextContent(message: BaseMessage): string {
 }
 
 /**
+ * Extracts reasoning from a LangChain content block.
+ * Handles the standard ContentBlock.Reasoning format: { type: "reasoning", reasoning: string }
+ * Also handles provider-specific formats for backward compatibility.
+ */
+function extractReasoningFromContentBlock(block: unknown): string | undefined {
+	if (!block || typeof block !== "object") {
+		return undefined;
+	}
+
+	const b = block as Record<string, unknown>;
+	const blockType = b.type;
+
+	// LangChain standard format: { type: "reasoning", reasoning: "..." }
+	if (blockType === "reasoning" && typeof b.reasoning === "string") {
+		return b.reasoning;
+	}
+
+	// Anthropic format: { type: "thinking", thinking: "..." }
+	if (blockType === "thinking" && typeof b.thinking === "string") {
+		return b.thinking;
+	}
+
+	return undefined;
+}
+
+/**
+ * Extracts reasoning/thinking content from a BaseMessage.
+ * Uses LangChain's normalized contentBlocks interface for model-agnostic access.
+ */
+function extractReasoningContent(message: BaseMessage): string | undefined {
+	// Try LangChain's normalized contentBlocks interface first (if available)
+	const msgAny = message as unknown as { contentBlocks?: unknown[]; content_blocks?: unknown[] };
+	const contentBlocks = msgAny.contentBlocks ?? msgAny.content_blocks;
+
+	if (Array.isArray(contentBlocks)) {
+		const reasoningParts: string[] = [];
+		for (const block of contentBlocks) {
+			const reasoning = extractReasoningFromContentBlock(block);
+			if (reasoning) {
+				reasoningParts.push(reasoning);
+			}
+		}
+		if (reasoningParts.length > 0) {
+			return reasoningParts.join("\n\n");
+		}
+	}
+
+	// Fallback: Check raw content array for reasoning blocks
+	const content = message.content;
+	if (Array.isArray(content)) {
+		const reasoningParts: string[] = [];
+		for (const block of content) {
+			const reasoning = extractReasoningFromContentBlock(block);
+			if (reasoning) {
+				reasoningParts.push(reasoning);
+			}
+		}
+		if (reasoningParts.length > 0) {
+			return reasoningParts.join("\n\n");
+		}
+	}
+
+	// Fallback: Check additional_kwargs.reasoning_content (DeepSeek R1, OpenAI o1)
+	if (isAIMessage(message)) {
+		const aiMsg = message as AIMessage;
+		const additionalKwargs = aiMsg.additional_kwargs as Record<string, unknown> | undefined;
+		if (additionalKwargs?.reasoning_content && typeof additionalKwargs.reasoning_content === "string") {
+			return additionalKwargs.reasoning_content;
+		}
+	}
+
+	return undefined;
+}
+
+/**
  * Parses tool call arguments into a normalized object format.
  */
 function normalizeToolInput(raw: unknown): Record<string, unknown> {
@@ -127,9 +204,7 @@ function normalizeToolInput(raw: unknown): Record<string, unknown> {
 /**
  * Builds a map of tool outputs from tool messages.
  */
-function buildToolOutputsMap(
-	messages: BaseMessage[],
-): Map<string, { content: unknown; status: ToolCallStatus }> {
+function buildToolOutputsMap(messages: BaseMessage[]): Map<string, { content: unknown; status: ToolCallStatus }> {
 	const toolOutputs = new Map<string, { content: unknown; status: ToolCallStatus }>();
 	for (const msg of messages) {
 		if (isToolMessage(msg)) {
@@ -156,6 +231,7 @@ export function baseMessageToAssistantMessage(
 	stateOverride?: AssistantState,
 ): AssistantMessage {
 	const textContent = extractTextContent(msg);
+	const reasoningContent = extractReasoningContent(msg);
 
 	// Extract tool calls if present (only on AIMessage)
 	let toolCalls: ToolCallState[] | undefined;
@@ -182,6 +258,7 @@ export function baseMessageToAssistantMessage(
 		state: stateOverride ?? AssistantState.success,
 		content: textContent,
 		toolCalls,
+		reasoningContent,
 	};
 }
 
@@ -207,6 +284,7 @@ function mergeAssistantMessages(
 
 	// Merge multiple assistant messages
 	let finalContent = "";
+	let finalReasoningContent: string | undefined;
 	const allToolCalls: ToolCallState[] = [];
 
 	for (const msg of assistantMessages) {
@@ -215,6 +293,11 @@ function mergeAssistantMessages(
 		// Use the last non-empty content
 		if (converted.content.trim()) {
 			finalContent = converted.content;
+		}
+
+		// Use the last non-empty reasoning content
+		if (converted.reasoningContent?.trim()) {
+			finalReasoningContent = converted.reasoningContent;
 		}
 
 		// Collect all tool calls
@@ -227,6 +310,7 @@ function mergeAssistantMessages(
 		state: stateOverride ?? AssistantState.success,
 		content: finalContent,
 		toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+		reasoningContent: finalReasoningContent,
 	};
 }
 
@@ -401,6 +485,14 @@ export class ChatSession {
 		message.content += token;
 	}
 
+	private appendReasoningToken(message: AssistantMessage, token: string) {
+		if (!token) return;
+		if (!message.reasoningContent) {
+			message.reasoningContent = "";
+		}
+		message.reasoningContent += token;
+	}
+
 	private normalizeToolInput(raw: unknown): Record<string, unknown> {
 		if (raw === undefined || raw === null) return {};
 		if (typeof raw === "string") {
@@ -453,6 +545,11 @@ export class ChatSession {
 			for await (const chunk of stream) {
 				if (chunk.type === "token") {
 					this.appendToken(assistantMsg, chunk.token);
+					continue;
+				}
+
+				if (chunk.type === "reasoning_token") {
+					this.appendReasoningToken(assistantMsg, chunk.token);
 					continue;
 				}
 

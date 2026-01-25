@@ -1697,10 +1697,7 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		}
 
 		// Ensure defaultAgentId is valid (null is valid for "last selected" behavior)
-		if (
-			mergedData.defaultAgentId !== null &&
-			!mergedData.agents[mergedData.defaultAgentId]
-		) {
+		if (mergedData.defaultAgentId !== null && !mergedData.agents[mergedData.defaultAgentId]) {
 			// Default agent was deleted, clear it (use last selected)
 			mergedData.defaultAgentId = null;
 		}

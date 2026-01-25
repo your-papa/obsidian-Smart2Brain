@@ -19,12 +19,7 @@ export class PluginExtensionModal extends Modal {
 	private onSave: () => void;
 	private accessors?: PluginExtensionAccessors;
 
-	constructor(
-		plugin: SecondBrainPlugin,
-		pluginId: string,
-		onSave: () => void,
-		accessors?: PluginExtensionAccessors,
-	) {
+	constructor(plugin: SecondBrainPlugin, pluginId: string, onSave: () => void, accessors?: PluginExtensionAccessors) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.pluginId = pluginId;

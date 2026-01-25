@@ -61,7 +61,7 @@ const agentDropdownOptions = $derived(
 			value: id,
 			display: agent ? `${agent.name}${isDefault ? " (Default)" : ""}` : id,
 		};
-	})
+	}),
 );
 
 // Auto-apply changes by reinitializing the agent
@@ -178,20 +178,23 @@ function openSystemPromptModal() {
 // Plugin Extensions
 // ============================================================================
 
-const pluginExtensions = $derived(
-	selectedAgent ? Object.values(selectedAgent.pluginPromptExtensions) : []
-);
+const pluginExtensions = $derived(selectedAgent ? Object.values(selectedAgent.pluginPromptExtensions) : []);
 
 function openExtensionModal(pluginId: string) {
 	if (!selectedAgent) return;
-	const modal = new PluginExtensionModal(plugin, pluginId, () => {
-		applyChanges();
-	}, {
-		getExtension: () => selectedAgent?.pluginPromptExtensions[pluginId],
-		updateExtension: (updates) => {
-			pluginData.updateAgentPluginExtension(selectedAgentId, pluginId, updates);
+	const modal = new PluginExtensionModal(
+		plugin,
+		pluginId,
+		() => {
+			applyChanges();
 		},
-	});
+		{
+			getExtension: () => selectedAgent?.pluginPromptExtensions[pluginId],
+			updateExtension: (updates) => {
+				pluginData.updateAgentPluginExtension(selectedAgentId, pluginId, updates);
+			},
+		},
+	);
 	modal.open();
 }
 
@@ -302,15 +305,20 @@ function getToolEnabled(toolId: BuiltInToolId): boolean {
 }
 
 function openToolConfig(toolId: BuiltInToolId) {
-	const modal = new ToolConfigModal(plugin, toolId, () => {
-		applyChanges();
-	}, {
-		agentId: selectedAgentId,
-		getToolConfig: () => selectedAgent?.toolsConfig[toolId],
-		updateToolConfig: (config) => {
-			pluginData.updateAgentToolConfig(selectedAgentId, toolId, config);
+	const modal = new ToolConfigModal(
+		plugin,
+		toolId,
+		() => {
+			applyChanges();
 		},
-	});
+		{
+			agentId: selectedAgentId,
+			getToolConfig: () => selectedAgent?.toolsConfig[toolId],
+			updateToolConfig: (config) => {
+				pluginData.updateAgentToolConfig(selectedAgentId, toolId, config);
+			},
+		},
+	);
 	modal.open();
 }
 

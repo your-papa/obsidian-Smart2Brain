@@ -318,7 +318,9 @@ export class AgentManager {
 		const tools: StructuredToolInterface[] = [];
 
 		// Helper to check if tool is enabled for the selected agent
-		const isToolEnabled = (toolId: "search_notes" | "read_note" | "get_all_tags" | "get_properties" | "execute_dataview_query"): boolean => {
+		const isToolEnabled = (
+			toolId: "search_notes" | "read_note" | "get_all_tags" | "get_properties" | "execute_dataview_query",
+		): boolean => {
 			// Check selected agent's tools config first, fallback to legacy
 			if (selectedAgent?.toolsConfig) {
 				return selectedAgent.toolsConfig[toolId]?.enabled ?? true;

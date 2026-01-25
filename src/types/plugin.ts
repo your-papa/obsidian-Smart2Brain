@@ -178,15 +178,7 @@ export interface AgentConfig {
 /**
  * Available colors for agents, matching Obsidian's theme color variables.
  */
-export type AgentColor =
-	| "red"
-	| "orange"
-	| "yellow"
-	| "green"
-	| "cyan"
-	| "blue"
-	| "purple"
-	| "pink";
+export type AgentColor = "red" | "orange" | "yellow" | "green" | "cyan" | "blue" | "purple" | "pink";
 
 /**
  * Record of agent configurations keyed by agent ID

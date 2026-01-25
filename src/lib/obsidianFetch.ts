@@ -3,11 +3,11 @@ import { requestUrl, type RequestUrlParam } from "obsidian";
 /**
  * Creates a custom fetch implementation that uses Obsidian's requestUrl
  * to bypass CORS restrictions in the plugin environment.
- * 
+ *
  * Strategy:
  * 1. Always try native fetch first - this supports streaming which is needed for LLM APIs
  * 2. Fall back to Obsidian's requestUrl if native fetch fails (CORS errors, etc.)
- * 
+ *
  * Note: LLM APIs (OpenAI, Anthropic, etc.) have proper CORS headers and work with native fetch.
  * MCP servers may not have CORS headers, so they fall back to requestUrl.
  */

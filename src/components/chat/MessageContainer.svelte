@@ -8,6 +8,7 @@ import Dots from "../ui/Dots.svelte";
 import IconButton from "../ui/IconButton.svelte";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 import Logo from "../ui/logos/Logo.svelte";
+import ReasoningSection from "./ReasoningSection.svelte";
 import ToolCallsSection from "./ToolCallsSection.svelte";
 
 interface Props {
@@ -141,6 +142,21 @@ function getToolsOpen(messageId: string, assistantMessage: AssistantMessage): bo
 function setToolsOpen(messageId: string, open: boolean) {
 	toolsOpenState[messageId] = open;
 }
+
+// Track which message pairs have their reasoning open
+let reasoningOpenState: Record<string, boolean> = $state({});
+
+function getReasoningOpen(messageId: string, assistantMessage: AssistantMessage): boolean {
+	// Default: open while streaming (to show thinking progress), closed after completion
+	if (reasoningOpenState[messageId] === undefined) {
+		return assistantMessage.state === AssistantState.streaming;
+	}
+	return reasoningOpenState[messageId];
+}
+
+function setReasoningOpen(messageId: string, open: boolean) {
+	reasoningOpenState[messageId] = open;
+}
 </script>
 
 <div class="relative flex-1 min-h-0 z-20">
@@ -203,6 +219,16 @@ function setToolsOpen(messageId: string, open: boolean) {
 					</div>
 					<div class:min-h-[95%]={index === messages.length - 1}>
 						<div class="group flex flex-col px-2 gap-3 mb-2 w-full">
+							<!-- Reasoning Section (collapsible) -->
+							{#if messagePair.assistantMessage.reasoningContent}
+								<ReasoningSection
+									content={messagePair.assistantMessage.reasoningContent}
+									isStreaming={messagePair.assistantMessage.state === AssistantState.streaming && !messagePair.assistantMessage.content}
+									isOpen={getReasoningOpen(messagePair.id, messagePair.assistantMessage)}
+									onToggle={(open) => setReasoningOpen(messagePair.id, open)}
+								/>
+							{/if}
+
 							<!-- Tools Section (collapsible) -->
 							{#if messagePair.assistantMessage.toolCalls?.length}
 								<ToolCallsSection

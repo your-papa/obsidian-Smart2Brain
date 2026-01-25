@@ -25,6 +25,21 @@ export interface ChatModelConfig {
 	 * Also used by our UI to show context usage.
 	 */
 	contextWindow: number;
+
+	/**
+	 * Enable extended thinking/reasoning for models that support it.
+	 * When enabled, the model will show its reasoning process.
+	 * Defaults to true for Anthropic models.
+	 */
+	enableThinking?: boolean;
+
+	/**
+	 * Budget in tokens for extended thinking.
+	 * Controls how much thinking the model is allowed to do.
+	 * Only applies when enableThinking is true.
+	 * Defaults to 10000 tokens.
+	 */
+	thinkingBudget?: number;
 }
 
 /**

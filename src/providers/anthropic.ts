@@ -123,6 +123,20 @@ export const anthropicProvider: BaseProviderDefinition = {
 			config.temperature = options.temperature;
 		}
 
+		// Enable extended thinking for models that support it
+		// Supported models: claude-sonnet-4-5, claude-sonnet-4, claude-haiku-4-5, claude-opus-4-5, claude-opus-4-1, claude-opus-4
+		// This allows Claude to show its reasoning process
+		// Budget tokens controls how much thinking is allowed (minimum: 1024, default: 10000)
+		const supportsThinking =
+			modelId.includes("sonnet-4") || modelId.includes("haiku-4-5") || modelId.includes("opus-4");
+
+		if (supportsThinking && options?.enableThinking !== false) {
+			config.thinking = {
+				type: "enabled",
+				budget_tokens: Math.max(1024, options?.thinkingBudget ?? 10000),
+			};
+		}
+
 		return new ChatAnthropic(config);
 	},
 

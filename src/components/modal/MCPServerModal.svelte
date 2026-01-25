@@ -57,9 +57,7 @@ let envVars = $state(
 );
 
 // HTTP/SSE-specific fields (shared URL and headers)
-let url = $state(
-	((existingConfig as MCPHTTPServerConfig | MCPSSEServerConfig)?.url ?? ""),
-);
+let url = $state((existingConfig as MCPHTTPServerConfig | MCPSSEServerConfig)?.url ?? "");
 let headers = $state(
 	Object.entries((existingConfig as MCPHTTPServerConfig | MCPSSEServerConfig)?.headers ?? {})
 		.map(([k, v]) => `${k}: ${v}`)
