@@ -1,12 +1,15 @@
 <script lang="ts">
 import { Tabs } from "bits-ui";
+import { consumePendingSettingsTab } from "../../stores/state.svelte";
 import AgentsSettings from "./AgentsSettings.svelte";
 import DebuggingSettings from "./DebuggingSettings.svelte";
 import GeneralSettings from "./GeneralSettings.svelte";
 import ModelsSettings from "./ModelsSettings.svelte";
 import ProvidersSettings from "./ProvidersSettings.svelte";
 
-let activeTab = $state("general");
+// Check if there's a pending tab request (e.g., from "Manage Agents" button)
+const pendingTab = consumePendingSettingsTab();
+let activeTab = $state(pendingTab ?? "general");
 </script>
 
 <Tabs.Root bind:value={activeTab}>
