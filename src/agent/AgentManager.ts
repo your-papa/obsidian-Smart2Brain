@@ -628,7 +628,15 @@ export class AgentManager {
 		const threadId = createThreadId();
 		const now = Date.now();
 
-		const folder = getData().targetFolder;
+		const data = getData();
+		const folder = data.targetFolder;
+
+		// Reset to default agent if one is set
+		if (data.defaultAgentId && data.selectedAgentId !== data.defaultAgentId) {
+			data.selectedAgentId = data.defaultAgentId;
+			// Reinitialize with the default agent's configuration
+			await this.reinitialize();
+		}
 
 		// Ensure folder exists
 		if (!(await this.plugin.app.vault.adapter.exists(folder))) {
