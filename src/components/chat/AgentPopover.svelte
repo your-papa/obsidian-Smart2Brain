@@ -2,7 +2,7 @@
 import { Popover, Separator } from "bits-ui";
 import type { AgentConfig } from "../../main";
 import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
+import { getPlugin, requestSettingsTab } from "../../stores/state.svelte";
 import Icon from "../ui/Icon.svelte";
 
 const data = getData();
@@ -30,7 +30,8 @@ function selectAgent(agent: AgentConfig) {
 }
 
 function openAgentSettings() {
-	// Open settings to the Agents tab
+	// Request the Agents tab before opening settings
+	requestSettingsTab("agents");
 	const app = plugin.app as unknown as {
 		setting?: { open: () => void; openTabById: (id: string) => void };
 	};
