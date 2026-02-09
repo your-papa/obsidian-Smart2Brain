@@ -21,10 +21,9 @@ interface Props {
 const { modal, plugin, toolId, onSave, accessors }: Props = $props();
 const pluginData = getData();
 
-// Get current tool config - use custom accessor if provided
-function getToolConfig(): ToolConfig | undefined {
-	return accessors?.getToolConfig() ?? pluginData.getToolConfig(toolId);
-}
+// Capture initial values at component creation (props don't change for modals)
+const defaultConfig = DEFAULT_TOOLS_CONFIG[toolId];
+const initialToolConfig = accessors?.getToolConfig() ?? pluginData.getToolConfig(toolId);
 
 function updateToolConfig(config: Partial<ToolConfig>): void {
 	if (accessors?.updateToolConfig) {
@@ -34,31 +33,28 @@ function updateToolConfig(config: Partial<ToolConfig>): void {
 	}
 }
 
-const toolConfig = $derived(getToolConfig());
-const defaultConfig = DEFAULT_TOOLS_CONFIG[toolId];
-
-// Editable state
-let name = $state(toolConfig?.name ?? defaultConfig.name);
-let description = $state(toolConfig?.description ?? defaultConfig.description);
+// Editable state - initialized from captured initial values
+let name = $state(initialToolConfig?.name ?? defaultConfig.name);
+let description = $state(initialToolConfig?.description ?? defaultConfig.description);
 
 // Tool-specific settings
 let searchAlgorithm = $state<SearchAlgorithm>(
-	(toolConfig?.settings as { algorithm?: SearchAlgorithm })?.algorithm ??
+	(initialToolConfig?.settings as { algorithm?: SearchAlgorithm })?.algorithm ??
 		(defaultConfig.settings as { algorithm?: SearchAlgorithm })?.algorithm ??
 		"grep",
 );
 let maxResults = $state(
-	(toolConfig?.settings as { maxResults?: number })?.maxResults ??
+	(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
 		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
 		10,
 );
 let maxContentLength = $state(
-	(toolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
+	(initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
 		(defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
 		0,
 );
 let includeMetadata = $state(
-	(toolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
+	(initialToolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
 		(defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
 		true,
 );

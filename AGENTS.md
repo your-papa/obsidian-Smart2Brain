@@ -151,3 +151,49 @@ This project uses Svelte 5 with runes (`$state`, `$derived`, `$effect`).
 2. Handle state changes at the source (e.g., in dataStore methods) rather than reacting in UI
 3. Use `untrack()` if you must update state in effects to prevent infinite loops
 4. Treat `$effect` as an escape hatch, not a primary tool
+
+## Svelte 5 Runes - $state with Props
+
+When initializing `$state()` from props, you'll get `state_referenced_locally` warnings because `$state()` only captures the initial value.
+
+### Anti-pattern (causes warning):
+```svelte
+<script>
+  interface Props { initialValue: string }
+  const { initialValue } = $props();
+  
+  // Warning: This reference only captures the initial value
+  let value = $state(initialValue);
+</script>
+```
+
+### Fix for modals/one-time components:
+For components like modals where props don't change after creation, capture initial values explicitly:
+
+```svelte
+<script>
+  interface Props { initialValue: string }
+  const { initialValue } = $props();
+  
+  // Capture at creation - makes intent clear, no warning
+  const capturedInitial = initialValue;
+  let value = $state(capturedInitial);
+</script>
+```
+
+### Fix for reactive components:
+For components that need to react to prop changes, use `$derived` or `$effect`:
+
+```svelte
+<script>
+  interface Props { externalValue: string }
+  const { externalValue } = $props();
+  
+  // Option 1: Read-only derived value
+  const value = $derived(externalValue);
+  
+  // Option 2: Editable state that syncs with prop
+  let value = $state(externalValue);
+  $effect(() => { value = externalValue; });
+</script>
+```

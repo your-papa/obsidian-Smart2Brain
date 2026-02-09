@@ -6,8 +6,8 @@ import { createObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
 import type {
 	MCPHTTPServerConfig,
-	MCPServerConfig,
 	MCPSSEServerConfig,
+	MCPServerConfig,
 	MCPStdioServerConfig,
 	MCPTransportType,
 } from "../../main";
@@ -31,11 +31,9 @@ interface Props {
 const { modal, plugin, serverId, existingConfig, onSave, skipGlobalSave = false }: Props = $props();
 const pluginData = getData();
 
+// Capture initial values at component creation (props don't change for modals)
 const isEditing = !!serverId && !!existingConfig;
-
-// Form state - just use name, derive ID from it
-let name = $state(existingConfig?.displayName ?? "");
-let enabled = $state(existingConfig?.enabled ?? true);
+const initialConfig = existingConfig;
 
 // Generate server ID from name (lowercase, replace spaces/special chars with dashes)
 function generateServerId(input: string): string {
@@ -45,23 +43,25 @@ function generateServerId(input: string): string {
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "");
 }
-let transport = $state<MCPTransportType>(existingConfig?.transport ?? "http");
+
+// Form state - initialized from captured initial values
+let name = $state(initialConfig?.displayName ?? "");
+let enabled = $state(initialConfig?.enabled ?? true);
+let transport = $state<MCPTransportType>(initialConfig?.transport ?? "http");
 
 // stdio-specific fields
-let command = $state((existingConfig as MCPStdioServerConfig)?.command ?? "");
-let args = $state((existingConfig as MCPStdioServerConfig)?.args?.join(" ") ?? "");
+let command = $state((initialConfig as MCPStdioServerConfig)?.command ?? "");
+let args = $state((initialConfig as MCPStdioServerConfig)?.args?.join(" ") ?? "");
 let envVars = $state(
-	Object.entries((existingConfig as MCPStdioServerConfig)?.env ?? {})
+	Object.entries((initialConfig as MCPStdioServerConfig)?.env ?? {})
 		.map(([k, v]) => `${k}=${v}`)
 		.join("\n"),
 );
 
 // HTTP/SSE-specific fields (shared URL and headers)
-let url = $state(
-	((existingConfig as MCPHTTPServerConfig | MCPSSEServerConfig)?.url ?? ""),
-);
+let url = $state((initialConfig as MCPHTTPServerConfig | MCPSSEServerConfig)?.url ?? "");
 let headers = $state(
-	Object.entries((existingConfig as MCPHTTPServerConfig | MCPSSEServerConfig)?.headers ?? {})
+	Object.entries((initialConfig as MCPHTTPServerConfig | MCPSSEServerConfig)?.headers ?? {})
 		.map(([k, v]) => `${k}: ${v}`)
 		.join("\n"),
 );
