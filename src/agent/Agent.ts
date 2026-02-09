@@ -29,12 +29,32 @@ export interface ChooseModelParams {
 	options?: Partial<ChatModelConfig>;
 }
 
+/** Options for a normal query (new message in thread) */
 export interface AgentRunOptions {
 	query: string;
 	threadId?: string;
 	metadata?: Record<string, unknown>;
 	configurable?: Record<string, unknown>;
 	signal?: AbortSignal;
+}
+
+/** Options for editing a message (forks from checkpoint with new user message) */
+export interface AgentEditOptions {
+	query: string;
+	threadId: string;
+	checkpointId: string;
+	signal?: AbortSignal;
+	metadata?: Record<string, unknown>;
+	configurable?: Record<string, unknown>;
+}
+
+/** Options for regenerating a response from a checkpoint (no new user message) */
+export interface AgentRegenerateOptions {
+	threadId: string;
+	checkpointId: string;
+	signal?: AbortSignal;
+	metadata?: Record<string, unknown>;
+	configurable?: Record<string, unknown>;
 }
 
 export interface AgentResult {
@@ -52,6 +72,14 @@ export interface ThreadHistory extends ThreadSnapshot {
 	lastError?: ThreadError;
 	/** Count of errors in the thread (for detecting multiple errored messages) */
 	errorCount?: number;
+}
+
+export interface CheckpointHistoryItem {
+	checkpointId: string;
+	messages: BaseMessage[];
+	step: number;
+	/** Parent checkpoint ID for building branch trees */
+	parentCheckpointId?: string;
 }
 
 export interface AgentOptions {
@@ -257,17 +285,16 @@ export class Agent {
 			version: "v2" as const,
 		} as StreamEventsConfig;
 
-		const stream = agent.streamEvents(
-			{
-				messages: [
-					{
-						role: "user",
-						content: query,
-					},
-				],
-			},
-			streamConfig,
-		);
+		const input = {
+			messages: [
+				{
+					role: "user",
+					content: query,
+				},
+			],
+		};
+
+		const stream = agent.streamEvents(input, streamConfig);
 
 		let rawResult: unknown;
 		// Track tool calls in progress to correlate start/end events
@@ -417,6 +444,366 @@ export class Agent {
 		}
 	}
 
+	/**
+	 * Edit a message by forking from a checkpoint with a new user message.
+	 * This creates a new branch from the given checkpoint.
+	 */
+	async *editFromCheckpoint(options: AgentEditOptions): AsyncGenerator<AgentStreamChunk> {
+		const { query, threadId, checkpointId } = options;
+		if (!this.selectedModel) {
+			throw new Error("No model selected. Call chooseModel() before editFromCheckpoint().");
+		}
+
+		if (!query || query.trim().length === 0) {
+			throw new Error("Query must be a non-empty string.");
+		}
+
+		if (!checkpointId) {
+			throw new Error("checkpointId is required for editing.");
+		}
+
+		const agent = await this.ensureAgent();
+		const runId = this.generateId();
+		const startedAt = new Date();
+		Logger.debug("agent.editFromCheckpoint.start", {
+			runId,
+			threadId,
+			checkpointId,
+			provider: this.selectedModel.provider,
+			model: this.selectedModel.name,
+			queryPreview: query.slice(0, 200),
+		});
+
+		type StreamEventsConfig = Parameters<AgentRunnable["streamEvents"]>[1];
+		const streamConfig = {
+			...this.buildRunnableConfig(options, threadId, checkpointId),
+			version: "v2" as const,
+		} as StreamEventsConfig;
+
+		const input = {
+			messages: [
+				{
+					role: "user",
+					content: query,
+				},
+			],
+		};
+
+		const stream = agent.streamEvents(input, streamConfig);
+
+		let rawResult: unknown;
+		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
+
+		try {
+			for await (const event of stream) {
+				if (options.signal?.aborted) {
+					Logger.debug("agent.editFromCheckpoint.aborted", { runId, threadId });
+					break;
+				}
+
+				if (event.event === "on_tool_start") {
+					const toolCallId = event.run_id;
+					const toolName = event.name ?? "unknown_tool";
+					const toolInput = event.data?.input ?? {};
+
+					pendingToolCalls.set(toolCallId, { name: toolName, input: toolInput });
+					Logger.debug("agent.editFromCheckpoint.tool_start", { runId, toolCallId, toolName });
+
+					yield {
+						type: "tool_start",
+						toolCallId,
+						toolName,
+						input: toolInput,
+						runId,
+						threadId,
+					};
+					continue;
+				}
+
+				if (event.event === "on_tool_end") {
+					const toolCallId = event.run_id;
+					const pending = pendingToolCalls.get(toolCallId);
+					const toolName = pending?.name ?? event.name ?? "unknown_tool";
+					const output = event.data?.output ?? {};
+
+					pendingToolCalls.delete(toolCallId);
+					Logger.debug("agent.editFromCheckpoint.tool_end", { runId, toolCallId, toolName });
+
+					yield {
+						type: "tool_end",
+						toolCallId,
+						toolName,
+						output,
+						runId,
+						threadId,
+					};
+					continue;
+				}
+
+				const token = this.extractTokenFromEvent(event);
+				if (token) {
+					yield {
+						type: "token",
+						token,
+						runId,
+						threadId,
+					};
+				}
+
+				const output = this.extractOutputFromEvent(event);
+				if (output) {
+					rawResult = output;
+				}
+			}
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") {
+				Logger.debug("agent.editFromCheckpoint.aborted", { runId, threadId });
+				return;
+			}
+
+			if (error instanceof TypeError && error.message.includes("fetch")) {
+				const provider = this.selectedModel?.provider ?? "unknown";
+				Logger.debug("agent.editFromCheckpoint.error", { runId, message: `Connection failed to ${provider}` });
+				throw new ProviderEndpointError(provider, "Connection refused - service may not be running");
+			}
+
+			Logger.debug("agent.editFromCheckpoint.error", {
+				runId,
+				message: error instanceof Error ? error.message : String(error),
+			});
+			throw error;
+		} finally {
+			Logger.debug("agent.editFromCheckpoint.cleanup", { runId, threadId });
+		}
+
+		if (options.signal?.aborted) {
+			return;
+		}
+
+		if (!rawResult) {
+			throw new Error("Agent edit completed without producing a final output.");
+		}
+
+		const finishedAt = new Date();
+		const messages = this.extractMessagesFromResult(rawResult);
+		await this.persistThreadMetadata(threadId, runId, messages);
+
+		const result: AgentResult = {
+			runId,
+			threadId,
+			durationMs: finishedAt.getTime() - startedAt.getTime(),
+			messages,
+			response: this.extractResponse(messages),
+			raw: rawResult,
+		};
+
+		await this.telemetry?.onRunComplete?.(result);
+		Logger.debug("agent.editFromCheckpoint.complete", {
+			runId,
+			durationMs: result.durationMs,
+			responsePreview:
+				typeof result.response === "string" ? (result.response as string).slice(0, 200) : undefined,
+		});
+
+		yield {
+			type: "result",
+			result,
+			runId,
+			threadId,
+		};
+
+		const checkpointMessage = await this.getLastAssistantMessageFromCheckpoint(threadId);
+		if (checkpointMessage) {
+			Logger.debug("agent.editFromCheckpoint.checkpoint_message", {
+				runId,
+				threadId,
+				messageId: checkpointMessage.id,
+			});
+			yield {
+				type: "checkpoint_message",
+				message: checkpointMessage,
+				runId,
+				threadId,
+			};
+		}
+	}
+
+	/**
+	 * Regenerate an AI response from a checkpoint without adding a new user message.
+	 * This forks from the given checkpoint and generates a new response.
+	 */
+	async *regenerateFromCheckpoint(options: AgentRegenerateOptions): AsyncGenerator<AgentStreamChunk> {
+		const { threadId, checkpointId } = options;
+		if (!this.selectedModel) {
+			throw new Error("No model selected. Call chooseModel() before regenerateFromCheckpoint().");
+		}
+
+		if (!checkpointId) {
+			throw new Error("checkpointId is required for regeneration.");
+		}
+
+		const agent = await this.ensureAgent();
+		const runId = this.generateId();
+		const startedAt = new Date();
+		Logger.debug("agent.regenerateFromCheckpoint.start", {
+			runId,
+			threadId,
+			checkpointId,
+			provider: this.selectedModel.provider,
+			model: this.selectedModel.name,
+		});
+
+		type StreamEventsConfig = Parameters<AgentRunnable["streamEvents"]>[1];
+		const streamConfig = {
+			...this.buildRunnableConfig(options, threadId, checkpointId),
+			version: "v2" as const,
+		} as StreamEventsConfig;
+
+		// Pass null to continue from checkpoint without adding a new message
+		const input = null;
+
+		const stream = agent.streamEvents(input, streamConfig);
+
+		let rawResult: unknown;
+		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
+
+		try {
+			for await (const event of stream) {
+				if (options.signal?.aborted) {
+					Logger.debug("agent.regenerateFromCheckpoint.aborted", { runId, threadId });
+					break;
+				}
+
+				if (event.event === "on_tool_start") {
+					const toolCallId = event.run_id;
+					const toolName = event.name ?? "unknown_tool";
+					const toolInput = event.data?.input ?? {};
+
+					pendingToolCalls.set(toolCallId, { name: toolName, input: toolInput });
+					Logger.debug("agent.regenerateFromCheckpoint.tool_start", { runId, toolCallId, toolName });
+
+					yield {
+						type: "tool_start",
+						toolCallId,
+						toolName,
+						input: toolInput,
+						runId,
+						threadId,
+					};
+					continue;
+				}
+
+				if (event.event === "on_tool_end") {
+					const toolCallId = event.run_id;
+					const pending = pendingToolCalls.get(toolCallId);
+					const toolName = pending?.name ?? event.name ?? "unknown_tool";
+					const output = event.data?.output ?? {};
+
+					pendingToolCalls.delete(toolCallId);
+					Logger.debug("agent.regenerateFromCheckpoint.tool_end", { runId, toolCallId, toolName });
+
+					yield {
+						type: "tool_end",
+						toolCallId,
+						toolName,
+						output,
+						runId,
+						threadId,
+					};
+					continue;
+				}
+
+				const token = this.extractTokenFromEvent(event);
+				if (token) {
+					yield {
+						type: "token",
+						token,
+						runId,
+						threadId,
+					};
+				}
+
+				const output = this.extractOutputFromEvent(event);
+				if (output) {
+					rawResult = output;
+				}
+			}
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") {
+				Logger.debug("agent.regenerateFromCheckpoint.aborted", { runId, threadId });
+				return;
+			}
+
+			if (error instanceof TypeError && error.message.includes("fetch")) {
+				const provider = this.selectedModel?.provider ?? "unknown";
+				Logger.debug("agent.regenerateFromCheckpoint.error", {
+					runId,
+					message: `Connection failed to ${provider}`,
+				});
+				throw new ProviderEndpointError(provider, "Connection refused - service may not be running");
+			}
+
+			Logger.debug("agent.regenerateFromCheckpoint.error", {
+				runId,
+				message: error instanceof Error ? error.message : String(error),
+			});
+			throw error;
+		} finally {
+			Logger.debug("agent.regenerateFromCheckpoint.cleanup", { runId, threadId });
+		}
+
+		if (options.signal?.aborted) {
+			return;
+		}
+
+		if (!rawResult) {
+			throw new Error("Agent regeneration completed without producing a final output.");
+		}
+
+		const finishedAt = new Date();
+		const messages = this.extractMessagesFromResult(rawResult);
+		await this.persistThreadMetadata(threadId, runId, messages);
+
+		const result: AgentResult = {
+			runId,
+			threadId,
+			durationMs: finishedAt.getTime() - startedAt.getTime(),
+			messages,
+			response: this.extractResponse(messages),
+			raw: rawResult,
+		};
+
+		await this.telemetry?.onRunComplete?.(result);
+		Logger.debug("agent.regenerateFromCheckpoint.complete", {
+			runId,
+			durationMs: result.durationMs,
+			responsePreview:
+				typeof result.response === "string" ? (result.response as string).slice(0, 200) : undefined,
+		});
+
+		yield {
+			type: "result",
+			result,
+			runId,
+			threadId,
+		};
+
+		const checkpointMessage = await this.getLastAssistantMessageFromCheckpoint(threadId);
+		if (checkpointMessage) {
+			Logger.debug("agent.regenerateFromCheckpoint.checkpoint_message", {
+				runId,
+				threadId,
+				messageId: checkpointMessage.id,
+			});
+			yield {
+				type: "checkpoint_message",
+				message: checkpointMessage,
+				runId,
+				threadId,
+			};
+		}
+	}
+
 	async getThreadHistory(threadId: string): Promise<ThreadHistory | undefined> {
 		const [metadata, tuple] = await Promise.all([
 			this.threadStore?.read(threadId),
@@ -447,6 +834,40 @@ export class Agent {
 			lastError,
 			errorCount,
 		};
+	}
+
+	/**
+	 * Gets all checkpoints for a thread with their messages and step numbers.
+	 * Used for building the checkpoint-to-message mapping for regenerate/edit operations.
+	 */
+	async getCheckpointHistory(threadId: string): Promise<CheckpointHistoryItem[]> {
+		const results: CheckpointHistoryItem[] = [];
+
+		const config = { configurable: { thread_id: threadId } };
+
+		for await (const tuple of this.checkpointer.list(config)) {
+			const checkpointId = tuple.config.configurable?.checkpoint_id as string | undefined;
+			if (!checkpointId) continue;
+
+			const messages = this.extractMessagesFromCheckpoint(tuple);
+			const step = (tuple.metadata?.step as number) ?? 0;
+			const parentCheckpointId = tuple.parentConfig?.configurable?.checkpoint_id as string | undefined;
+
+			results.push({ checkpointId, messages, step, parentCheckpointId });
+		}
+
+		return results;
+	}
+
+	/**
+	 * Gets messages for a specific checkpoint.
+	 * Used for switching to a different branch.
+	 */
+	async getCheckpointMessages(threadId: string, checkpointId: string): Promise<BaseMessage[]> {
+		const config = { configurable: { thread_id: threadId, checkpoint_id: checkpointId } };
+		const tuple = await this.checkpointer.getTuple(config);
+		if (!tuple) return [];
+		return this.extractMessagesFromCheckpoint(tuple);
 	}
 
 	/**
@@ -507,11 +928,17 @@ export class Agent {
 		return { lastError, errorCount };
 	}
 
-	private buildRunnableConfig(options: AgentRunOptions, threadId: string): RunnableConfig {
+	private buildRunnableConfig(
+		options: { signal?: AbortSignal; metadata?: Record<string, unknown>; configurable?: Record<string, unknown> },
+		threadId: string,
+		checkpointId?: string,
+	): RunnableConfig {
 		const callbacks = this.telemetry?.getCallbacks?.();
 		return {
 			configurable: {
 				thread_id: threadId,
+				// If checkpointId is provided, include it to fork from that checkpoint
+				...(checkpointId ? { checkpoint_id: checkpointId } : {}),
 				...(options.configurable ?? {}),
 			},
 			metadata: options.metadata,
@@ -618,7 +1045,17 @@ export class Agent {
 	private convertSerializedLangChainMessage(msg: Record<string, unknown>): BaseMessage | undefined {
 		const kwargs = msg.kwargs as Record<string, unknown>;
 		const content = this.extractContent(kwargs);
-		const id = typeof kwargs.id === "string" ? kwargs.id : undefined;
+		// ID can be a string or an array like ["langchain", "schema", "HumanMessage", "uuid"]
+		let id: string | undefined;
+		if (typeof kwargs.id === "string") {
+			id = kwargs.id;
+		} else if (Array.isArray(kwargs.id) && kwargs.id.length > 0) {
+			// Take the last element which should be the UUID
+			const lastElement = kwargs.id[kwargs.id.length - 1];
+			if (typeof lastElement === "string") {
+				id = lastElement;
+			}
+		}
 
 		// Determine type from class name in id array
 		const className = this.readLangChainClassName(msg.id);
@@ -687,11 +1124,15 @@ export class Agent {
 		return "";
 	}
 
-	private extractToolCalls(obj: Record<string, unknown>): { id: string; name: string; args: Record<string, unknown> }[] | undefined {
+	private extractToolCalls(
+		obj: Record<string, unknown>,
+	): { id: string; name: string; args: Record<string, unknown> }[] | undefined {
 		return this.parseToolCalls(obj.tool_calls);
 	}
 
-	private parseToolCalls(toolCalls: unknown): { id: string; name: string; args: Record<string, unknown> }[] | undefined {
+	private parseToolCalls(
+		toolCalls: unknown,
+	): { id: string; name: string; args: Record<string, unknown> }[] | undefined {
 		if (!Array.isArray(toolCalls) || toolCalls.length === 0) return undefined;
 
 		return toolCalls

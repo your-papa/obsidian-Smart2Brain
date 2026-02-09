@@ -1,3 +1,4 @@
+import type { BaseMessage } from "@langchain/core/messages";
 import { Notice, normalizePath } from "obsidian";
 import { createObsidianFetch } from "../lib/obsidianFetch";
 import { invalidateProviderState } from "../lib/query";
@@ -7,7 +8,7 @@ import { getData } from "../stores/dataStore.svelte";
 
 import { ProviderAuthError, ProviderEndpointError, ProviderRegistry, ProviderRegistryError } from "../providers/index";
 import { createThreadId } from "../utils/threadId";
-import { Agent, type ChooseModelParams, type ThreadHistory } from "./Agent";
+import { Agent, type CheckpointHistoryItem, type ChooseModelParams, type ThreadHistory } from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
 import { BASE_SYSTEM_PROMPT } from "./prompts";
@@ -318,7 +319,9 @@ export class AgentManager {
 		const tools: StructuredToolInterface[] = [];
 
 		// Helper to check if tool is enabled for the selected agent
-		const isToolEnabled = (toolId: "search_notes" | "read_note" | "get_all_tags" | "get_properties" | "execute_dataview_query"): boolean => {
+		const isToolEnabled = (
+			toolId: "search_notes" | "read_note" | "get_all_tags" | "get_properties" | "execute_dataview_query",
+		): boolean => {
 			// Check selected agent's tools config first, fallback to legacy
 			if (selectedAgent?.toolsConfig) {
 				return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
@@ -550,6 +553,200 @@ export class AgentManager {
 		}
 	}
 
+	/**
+	 * Edit a message by forking from a checkpoint with a new user message.
+	 * This creates a new branch from the given checkpoint.
+	 */
+	async *editFromCheckpoint(
+		query: string,
+		threadId: string,
+		checkpointId: string,
+		signal?: AbortSignal,
+	): AsyncGenerator<
+		| { type: "token"; token: string }
+		| {
+				type: "tool_start";
+				toolCallId: string;
+				toolName: string;
+				input: unknown;
+		  }
+		| {
+				type: "tool_end";
+				toolCallId: string;
+				toolName: string;
+				output: unknown;
+		  }
+		| { type: "result"; result: unknown },
+		void,
+		unknown
+	> {
+		const agent = await this.ensureAgent();
+		const pluginData = getData();
+
+		const selectedAgent = pluginData.getSelectedAgent();
+		const chatModel = selectedAgent?.chatModel ?? pluginData.getDefaultChatModel();
+		if (chatModel) {
+			await agent.chooseModel(toChooseModelParams(chatModel));
+		} else {
+			throw new Error("No chat model configured");
+		}
+
+		try {
+			for await (const chunk of agent.editFromCheckpoint({
+				query,
+				threadId,
+				checkpointId,
+				signal,
+			})) {
+				if (signal?.aborted) {
+					break;
+				}
+				switch (chunk.type) {
+					case "token":
+						yield { type: "token", token: chunk.token };
+						break;
+					case "tool_start":
+						yield {
+							type: "tool_start",
+							toolCallId: chunk.toolCallId,
+							toolName: chunk.toolName,
+							input: chunk.input,
+						};
+						break;
+					case "tool_end":
+						yield {
+							type: "tool_end",
+							toolCallId: chunk.toolCallId,
+							toolName: chunk.toolName,
+							output: chunk.output,
+						};
+						break;
+					case "result":
+						yield { type: "result", result: chunk.result };
+						break;
+					default:
+						break;
+				}
+			}
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") {
+				return;
+			}
+
+			if (error instanceof ProviderEndpointError) {
+				const provider = chatModel?.provider;
+				if (provider) {
+					invalidateProviderState(provider);
+				}
+				new Notice(error.message);
+				throw error;
+			}
+
+			console.error("Smart Second Brain: Error editing message", error);
+			throw error;
+		} finally {
+			if (signal?.aborted) {
+				console.log("Smart Second Brain: Edit aborted by user");
+			}
+		}
+	}
+
+	/**
+	 * Regenerate an AI response from a checkpoint without adding a new user message.
+	 * This creates a new branch from the given checkpoint.
+	 */
+	async *regenerateFromCheckpoint(
+		threadId: string,
+		checkpointId: string,
+		signal?: AbortSignal,
+	): AsyncGenerator<
+		| { type: "token"; token: string }
+		| {
+				type: "tool_start";
+				toolCallId: string;
+				toolName: string;
+				input: unknown;
+		  }
+		| {
+				type: "tool_end";
+				toolCallId: string;
+				toolName: string;
+				output: unknown;
+		  }
+		| { type: "result"; result: unknown },
+		void,
+		unknown
+	> {
+		const agent = await this.ensureAgent();
+		const pluginData = getData();
+
+		const selectedAgent = pluginData.getSelectedAgent();
+		const chatModel = selectedAgent?.chatModel ?? pluginData.getDefaultChatModel();
+		if (chatModel) {
+			await agent.chooseModel(toChooseModelParams(chatModel));
+		} else {
+			throw new Error("No chat model configured");
+		}
+
+		try {
+			for await (const chunk of agent.regenerateFromCheckpoint({
+				threadId,
+				checkpointId,
+				signal,
+			})) {
+				if (signal?.aborted) {
+					break;
+				}
+				switch (chunk.type) {
+					case "token":
+						yield { type: "token", token: chunk.token };
+						break;
+					case "tool_start":
+						yield {
+							type: "tool_start",
+							toolCallId: chunk.toolCallId,
+							toolName: chunk.toolName,
+							input: chunk.input,
+						};
+						break;
+					case "tool_end":
+						yield {
+							type: "tool_end",
+							toolCallId: chunk.toolCallId,
+							toolName: chunk.toolName,
+							output: chunk.output,
+						};
+						break;
+					case "result":
+						yield { type: "result", result: chunk.result };
+						break;
+					default:
+						break;
+				}
+			}
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") {
+				return;
+			}
+
+			if (error instanceof ProviderEndpointError) {
+				const provider = chatModel?.provider;
+				if (provider) {
+					invalidateProviderState(provider);
+				}
+				new Notice(error.message);
+				throw error;
+			}
+
+			console.error("Smart Second Brain: Error regenerating response", error);
+			throw error;
+		} finally {
+			if (signal?.aborted) {
+				console.log("Smart Second Brain: Regeneration aborted by user");
+			}
+		}
+	}
+
 	async getThreadHistory(threadId: string): Promise<ThreadHistory | null> {
 		try {
 			// Try to use agent if available to get history from checkpoint (more robust)
@@ -568,6 +765,16 @@ export class AgentManager {
 			console.error("Smart Second Brain: Error fetching thread history", error);
 			return null;
 		}
+	}
+
+	async getCheckpointHistory(threadId: string): Promise<CheckpointHistoryItem[]> {
+		const agent = await this.ensureAgent();
+		return agent.getCheckpointHistory(threadId);
+	}
+
+	async getCheckpointMessages(threadId: string, checkpointId: string): Promise<BaseMessage[]> {
+		const agent = await this.ensureAgent();
+		return agent.getCheckpointMessages(threadId, checkpointId);
 	}
 
 	async getAllThreads(): Promise<ThreadSnapshot[]> {
