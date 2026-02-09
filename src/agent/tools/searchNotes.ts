@@ -1,8 +1,8 @@
-import { type App, TFile } from "obsidian";
 import { tool } from "@langchain/core/tools";
+import { type App, TFile } from "obsidian";
 import { z } from "zod";
-import { getData } from "../../stores/dataStore.svelte";
 import type { SearchAlgorithm } from "../../main";
+import { getData } from "../../stores/dataStore.svelte";
 
 interface SearchResult {
 	path: string;
@@ -71,9 +71,11 @@ function getOmnisearchApi(app: App): OmnisearchApi | null {
 	// @ts-ignore - Obsidian plugin API
 	const omnisearchPlugin = app.plugins?.getPlugin?.("omnisearch");
 	if (!omnisearchPlugin) {
+		console.debug("[search_notes] Omnisearch plugin not available.");
 		return null;
 	}
 	// @ts-ignore - Omnisearch exposes its API
+	console.debug("[search_notes] Omnisearch plugin detected.");
 	return omnisearchPlugin.api ?? null;
 }
 
@@ -88,6 +90,7 @@ async function omnisearchSearch(app: App, query: string): Promise<SearchResult[]
 	}
 
 	try {
+		console.debug("[search_notes] Using Omnisearch for query:", query);
 		const searchResults = await api.search(query);
 		const results: SearchResult[] = [];
 
@@ -125,6 +128,7 @@ async function embeddingsSearch(app: App, query: string): Promise<SearchResult[]
  * Performs search using the configured algorithm
  */
 async function performSearch(app: App, query: string, algorithm: SearchAlgorithm): Promise<SearchResult[]> {
+	console.debug("[search_notes] Algorithm selected:", algorithm);
 	switch (algorithm) {
 		case "omnisearch":
 			return omnisearchSearch(app, query);
@@ -141,18 +145,27 @@ async function performSearch(app: App, query: string, algorithm: SearchAlgorithm
  */
 export function createSearchNotesTool(app: App) {
 	const pluginData = getData();
-	const toolConfig = pluginData.getToolConfig("search_notes");
+	const getSearchNotesConfig = (): ReturnType<typeof pluginData.getToolConfig> => {
+		const selectedAgent = pluginData.getSelectedAgent();
+		return selectedAgent?.toolsConfig?.search_notes ?? pluginData.getToolConfig("search_notes");
+	};
+	const toolConfig = getSearchNotesConfig();
 	const settings = toolConfig?.settings as { algorithm?: SearchAlgorithm; maxResults?: number } | undefined;
 	const maxResults = settings?.maxResults ?? 10;
 
 	const searchFn = async ({ query }: { query: string }): Promise<string> => {
 		// Re-fetch config for each call in case it changed
-		const currentConfig = pluginData.getToolConfig("search_notes");
+		const currentConfig = getSearchNotesConfig();
 		const currentSettings = currentConfig?.settings as
 			| { algorithm?: SearchAlgorithm; maxResults?: number }
 			| undefined;
 		const algorithm = currentSettings?.algorithm ?? "grep";
 		const limit = currentSettings?.maxResults ?? maxResults;
+
+		console.debug("[search_notes] Configured settings:", {
+			algorithm,
+			maxResults: limit,
+		});
 
 		const results = await performSearch(app, query, algorithm);
 		const limitedResults = results.slice(0, limit);
