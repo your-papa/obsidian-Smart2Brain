@@ -63,12 +63,54 @@ export interface AssistantMessage {
 	errorCode?: string;
 }
 
+/**
+ * Information about branches at a given checkpoint.
+ * Used for navigating between alternative conversation paths.
+ */
+export interface BranchInfo {
+	/** 1-based index of the current branch */
+	currentIndex: number;
+	/** Total number of sibling branches at this fork point */
+	totalBranches: number;
+	/** Ordered list of sibling checkpoint IDs (the leaf/tip of each branch to navigate to) */
+	siblingCheckpointIds: string[];
+	/** The checkpoint ID where the fork occurred */
+	forkPointId: string;
+	/** The immediate child checkpoint of the fork point (first checkpoint in this branch after fork) */
+	forkChildId: string;
+}
+
 export interface MessagePair {
 	id: UUIDv7;
 	userMessage: UserMessage;
 	assistantMessage: AssistantMessage;
 	/** The model used to generate the assistant response */
 	model?: ChatModel;
+
+	/**
+	 * Checkpoint ID where this HumanMessage is the last message.
+	 * Fork from here to REGENERATE the AI response.
+	 */
+	regenerateFromCheckpointId?: string;
+
+	/**
+	 * Checkpoint ID where the PREVIOUS AIMessage is the last message.
+	 * Fork from here to EDIT the user message.
+	 * Undefined for the first message pair (no ancestor).
+	 */
+	editFromCheckpointId?: string;
+
+	/**
+	 * Branch info for the human message (edit branches).
+	 * Shows how many times this user turn was edited.
+	 */
+	userBranchInfo?: BranchInfo;
+
+	/**
+	 * Branch info for the AI response (regenerate branches).
+	 * Shows how many times this response was regenerated.
+	 */
+	assistantBranchInfo?: BranchInfo;
 }
 
 export interface ChatPreview {
@@ -89,6 +131,336 @@ export interface ChatModel {
 export interface ChatRecord {
 	id: string;
 	messages: MessagePair[];
+}
+
+/* -----------------------------------------------------------------------------
+ * Checkpoint Mapping for Branching
+ * ---------------------------------------------------------------------------*/
+
+export interface CheckpointMessageMapping {
+	/**
+	 * LangChain HumanMessage ID -> checkpoint where this human message is LAST
+	 * Used for: REGENERATE
+	 */
+	humanLastCheckpoints: Map<string, string>;
+
+	/**
+	 * LangChain HumanMessage ID -> checkpoint where the PREVIOUS AI message is LAST
+	 * Used for: EDIT
+	 */
+	aiBeforeHumanCheckpoints: Map<string, string>;
+
+	/**
+	 * LangChain HumanMessage ID -> checkpoint where the AI response to this human message is LAST
+	 * Used for: Looking up branch info for regenerate branches
+	 */
+	aiAfterHumanCheckpoints: Map<string, string>;
+
+	/**
+	 * Checkpoint ID -> BranchInfo for navigation between sibling branches
+	 */
+	branchInfoMap: Map<string, BranchInfo>;
+
+	/**
+	 * Set of checkpoint IDs that are the first human message in a branch (edit fork entry points).
+	 * Only these checkpoints should show user branch navigation.
+	 */
+	editForkEntryCheckpoints: Set<string>;
+
+	/**
+	 * The root/initial checkpoint ID (step -1 or earliest checkpoint)
+	 * Used for editing the first message
+	 */
+	rootCheckpointId?: string;
+}
+
+/**
+ * Builds checkpoint mapping from checkpoint history for branching operations.
+ */
+export function buildCheckpointMessageMapping(
+	checkpoints: Array<{
+		checkpointId: string;
+		messages: BaseMessage[];
+		step: number;
+		parentCheckpointId?: string;
+	}>,
+	targetCheckpointId?: string,
+): CheckpointMessageMapping {
+	const humanLastCheckpoints = new Map<string, string>();
+	const aiBeforeHumanCheckpoints = new Map<string, string>();
+	const aiAfterHumanCheckpoints = new Map<string, string>();
+	const branchInfoMap = new Map<string, BranchInfo>();
+
+	// Find the root checkpoint (earliest step, typically step -1)
+	let rootCheckpointId: string | undefined;
+	let minStep = Number.POSITIVE_INFINITY;
+	for (const { checkpointId, step } of checkpoints) {
+		if (step < minStep) {
+			minStep = step;
+			rootCheckpointId = checkpointId;
+		}
+	}
+
+	// Build parent -> children map for branch calculation
+	const childrenByParent = new Map<string, string[]>();
+	const checkpointChildren = new Map<string, string[]>();
+	for (const { checkpointId, parentCheckpointId } of checkpoints) {
+		if (parentCheckpointId) {
+			const siblings = childrenByParent.get(parentCheckpointId) || [];
+			siblings.push(checkpointId);
+			childrenByParent.set(parentCheckpointId, siblings);
+
+			const children = checkpointChildren.get(parentCheckpointId) || [];
+			children.push(checkpointId);
+			checkpointChildren.set(parentCheckpointId, children);
+		}
+	}
+
+	// Find the tip (leaf) checkpoint for a given checkpoint by following the latest child
+	function findBranchTip(startCheckpointId: string): string {
+		let current = startCheckpointId;
+		let children = checkpointChildren.get(current);
+		while (children && children.length > 0) {
+			const sorted = [...children].sort();
+			current = sorted[sorted.length - 1];
+			children = checkpointChildren.get(current);
+		}
+		return current;
+	}
+
+	// Get all descendants of a checkpoint
+	function getAllDescendants(startId: string): string[] {
+		const descendants: string[] = [];
+		const queue = [startId];
+		while (queue.length > 0) {
+			const current = queue.shift();
+			if (!current) continue;
+			descendants.push(current);
+			const children = checkpointChildren.get(current) || [];
+			queue.push(...children);
+		}
+		return descendants;
+	}
+
+	// Build checkpoint ID -> messages lookup for finding first human message in branch
+	const checkpointMessagesMap = new Map<string, BaseMessage[]>();
+	for (const { checkpointId, messages } of checkpoints) {
+		checkpointMessagesMap.set(checkpointId, messages);
+	}
+
+	// Find the first human message checkpoint in a branch starting from forkChildId
+	function findFirstHumanInBranch(startId: string): string | null {
+		const queue = [startId];
+		const visited = new Set<string>();
+		while (queue.length > 0) {
+			const current = queue.shift();
+			if (!current || visited.has(current)) continue;
+			visited.add(current);
+
+			const msgs = checkpointMessagesMap.get(current);
+			const lastMsg = msgs?.at(-1);
+			if (lastMsg && isHumanMessage(lastMsg)) {
+				return current;
+			}
+
+			// Follow children (sorted by checkpoint ID for determinism)
+			const children = checkpointChildren.get(current) || [];
+			queue.push(...[...children].sort());
+		}
+		return null;
+	}
+
+	console.log("[buildCheckpointMessageMapping] childrenByParent:", [...childrenByParent.entries()]);
+
+	// Track which checkpoints are the entry point for edit forks (first human message in branch)
+	const editForkEntryCheckpoints = new Set<string>();
+
+	// Build checkpoint -> depth map for sorting forks
+	const checkpointDepth = new Map<string, number>();
+	const checkpointParent = new Map<string, string | undefined>();
+	for (const { checkpointId, parentCheckpointId } of checkpoints) {
+		checkpointParent.set(checkpointId, parentCheckpointId);
+	}
+	function getDepth(cpId: string): number {
+		const cached = checkpointDepth.get(cpId);
+		if (cached !== undefined) return cached;
+		const parent = checkpointParent.get(cpId);
+		const depth = parent ? getDepth(parent) + 1 : 0;
+		checkpointDepth.set(cpId, depth);
+		return depth;
+	}
+	for (const { checkpointId } of checkpoints) {
+		getDepth(checkpointId);
+	}
+
+	// Get fork points (parents with multiple children) sorted by depth descending
+	// This ensures deeper forks are processed last, so their branchInfo wins
+	const forkPoints = [...childrenByParent.entries()]
+		.filter(([_, children]) => children.length > 1)
+		.sort((a, b) => getDepth(a[0]) - getDepth(b[0])); // ascending = shallower first
+
+	// Calculate branch info for each fork point and propagate to descendants
+	// Forks are processed from shallowest to deepest, so deeper forks overwrite and win
+	for (const [forkPointId, children] of forkPoints) {
+		console.log(
+			"[buildCheckpointMessageMapping] FORK found at:",
+			forkPointId,
+			"depth:",
+			getDepth(forkPointId),
+			"children:",
+			children,
+		);
+		const sortedChildren = [...children].sort();
+		const branchTips = sortedChildren.map((childId) => findBranchTip(childId));
+
+		// Determine if this is an "edit fork" (fork from AI/root) or "regenerate fork" (fork from human)
+		// Edit forks: fork point has AI message as last (or no messages for root)
+		// Regenerate forks: fork point has human message as last
+		const forkPointMessages = checkpointMessagesMap.get(forkPointId);
+		const forkPointLastMessage = forkPointMessages?.at(-1);
+		const isEditFork = !forkPointLastMessage || !isHumanMessage(forkPointLastMessage);
+
+		for (let i = 0; i < sortedChildren.length; i++) {
+			const childId = sortedChildren[i];
+			const branchInfo: BranchInfo = {
+				currentIndex: i + 1,
+				totalBranches: sortedChildren.length,
+				siblingCheckpointIds: branchTips,
+				forkPointId: forkPointId,
+				forkChildId: childId, // The immediate child of the fork point
+			};
+
+			// Only mark edit entry points for edit forks (not regenerate forks)
+			if (isEditFork) {
+				const firstHumanCheckpoint = findFirstHumanInBranch(childId);
+				if (firstHumanCheckpoint) {
+					editForkEntryCheckpoints.add(firstHumanCheckpoint);
+				}
+			}
+
+			// Assign branch info to all descendants of this branch
+			const allInBranch = getAllDescendants(childId);
+			for (const cpId of allInBranch) {
+				branchInfoMap.set(cpId, branchInfo);
+			}
+		}
+	}
+
+	console.log("[buildCheckpointMessageMapping] branchInfoMap size:", branchInfoMap.size);
+
+	// Build the set of checkpoints in target branch path if specified
+	const targetBranchPath = targetCheckpointId ? buildBranchPath(checkpoints, targetCheckpointId) : null;
+
+	// Sort by step and filter to relevant branch
+	const sorted = [...checkpoints].sort((a, b) => a.step - b.step);
+	const filtered = targetBranchPath
+		? sorted.filter((cp) => targetBranchPath.has(cp.checkpointId))
+		: filterToLatestBranch(sorted, childrenByParent);
+
+	let lastAiCheckpointId: string | undefined;
+	let lastHumanMessageId: string | undefined;
+
+	console.log("[buildCheckpointMessageMapping] filtered checkpoints:", filtered.length);
+
+	for (const { checkpointId, messages } of filtered) {
+		const lastMessage = messages.at(-1);
+		console.log(
+			"[buildCheckpointMessageMapping] checkpoint:",
+			checkpointId,
+			"lastMessage type:",
+			lastMessage?.constructor?.name,
+			"lastMessage.id:",
+			lastMessage?.id,
+		);
+
+		if (!lastMessage || isAIMessage(lastMessage)) {
+			lastAiCheckpointId = checkpointId;
+
+			// If we have a pending human message, this AI checkpoint is its response
+			if (lastHumanMessageId && lastMessage && isAIMessage(lastMessage)) {
+				aiAfterHumanCheckpoints.set(lastHumanMessageId, checkpointId);
+				lastHumanMessageId = undefined;
+			}
+		} else if (isHumanMessage(lastMessage)) {
+			const humanMessageId = lastMessage.id;
+			console.log("[buildCheckpointMessageMapping] found HumanMessage with id:", humanMessageId);
+			if (humanMessageId) {
+				humanLastCheckpoints.set(humanMessageId, checkpointId);
+
+				if (lastAiCheckpointId) {
+					aiBeforeHumanCheckpoints.set(humanMessageId, lastAiCheckpointId);
+				}
+
+				lastHumanMessageId = humanMessageId;
+			}
+		}
+	}
+
+	console.log(
+		"[buildCheckpointMessageMapping] result - humanLastCheckpoints:",
+		[...humanLastCheckpoints.entries()],
+		"rootCheckpointId:",
+		rootCheckpointId,
+	);
+
+	console.log("[buildCheckpointMessageMapping] editForkEntryCheckpoints:", [...editForkEntryCheckpoints]);
+
+	return {
+		humanLastCheckpoints,
+		aiBeforeHumanCheckpoints,
+		aiAfterHumanCheckpoints,
+		branchInfoMap,
+		editForkEntryCheckpoints,
+		rootCheckpointId,
+	};
+}
+
+function buildBranchPath(
+	checkpoints: Array<{ checkpointId: string; parentCheckpointId?: string }>,
+	targetCheckpointId: string,
+): Set<string> {
+	const checkpointMap = new Map<string, string | undefined>();
+	for (const { checkpointId, parentCheckpointId } of checkpoints) {
+		checkpointMap.set(checkpointId, parentCheckpointId);
+	}
+
+	const path = new Set<string>();
+	let current: string | undefined = targetCheckpointId;
+
+	while (current) {
+		path.add(current);
+		current = checkpointMap.get(current);
+	}
+
+	return path;
+}
+
+function filterToLatestBranch(
+	sortedCheckpoints: Array<{
+		checkpointId: string;
+		messages: BaseMessage[];
+		step: number;
+		parentCheckpointId?: string;
+	}>,
+	childrenByParent: Map<string, string[]>,
+): typeof sortedCheckpoints {
+	const latestAtFork = new Set<string>();
+
+	for (const [_parent, children] of childrenByParent) {
+		const sorted = [...children].sort();
+		const latest = sorted[sorted.length - 1];
+		if (latest) {
+			latestAtFork.add(latest);
+		}
+	}
+
+	return sortedCheckpoints.filter((cp) => {
+		const siblings = childrenByParent.get(cp.parentCheckpointId || "");
+		if (!siblings || siblings.length <= 1) {
+			return true;
+		}
+		return latestAtFork.has(cp.checkpointId);
+	});
 }
 
 /* -----------------------------------------------------------------------------
@@ -127,9 +499,7 @@ function normalizeToolInput(raw: unknown): Record<string, unknown> {
 /**
  * Builds a map of tool outputs from tool messages.
  */
-function buildToolOutputsMap(
-	messages: BaseMessage[],
-): Map<string, { content: unknown; status: ToolCallStatus }> {
+function buildToolOutputsMap(messages: BaseMessage[]): Map<string, { content: unknown; status: ToolCallStatus }> {
 	const toolOutputs = new Map<string, { content: unknown; status: ToolCallStatus }>();
 	for (const msg of messages) {
 		if (isToolMessage(msg)) {
@@ -239,8 +609,13 @@ function mergeAssistantMessages(
  * 3. Merges consecutive assistant messages (tool calls + final response)
  * 4. Uses UUIDv7 for message pair IDs (with timestamp extraction capability)
  * 5. Uses errorCount to distinguish error state from cancelled state
+ * 6. Populates branching checkpoint IDs and branch info when checkpointMapping is provided
  */
-export function baseMessagesToMessagePairs(messages: BaseMessage[], errorCount = 0): MessagePair[] {
+export function baseMessagesToMessagePairs(
+	messages: BaseMessage[],
+	errorCount = 0,
+	checkpointMapping?: CheckpointMessageMapping,
+): MessagePair[] {
 	if (!messages || messages.length === 0) return [];
 
 	const messagePairs: MessagePair[] = [];
@@ -259,6 +634,13 @@ export function baseMessagesToMessagePairs(messages: BaseMessage[], errorCount =
 		if (isHumanMessage(msg)) {
 			// Start a new pair with user message
 			const userContent = extractTextContent(msg);
+			const humanMessageId = msg.id;
+			console.log(
+				"[baseMessagesToMessagePairs] humanMessageId:",
+				humanMessageId,
+				"hasMapping:",
+				!!checkpointMapping,
+			);
 			// Generate fresh UUIDv7 for the pair
 			const pairId = genUUIDv7();
 
@@ -283,10 +665,65 @@ export function baseMessagesToMessagePairs(messages: BaseMessage[], errorCount =
 				state = AssistantState.success;
 			}
 
+			// Build checkpoint IDs and branch info from mapping
+			let regenerateFromCheckpointId: string | undefined;
+			let editFromCheckpointId: string | undefined;
+			let userBranchInfo: BranchInfo | undefined;
+			let assistantBranchInfo: BranchInfo | undefined;
+
+			if (checkpointMapping) {
+				if (humanMessageId) {
+					// Checkpoint where this human message is last -> fork from here to REGENERATE
+					regenerateFromCheckpointId = checkpointMapping.humanLastCheckpoints.get(humanMessageId);
+
+					// Checkpoint where previous AI message is last -> fork from here to EDIT
+					// For first message, use rootCheckpointId since there's no previous AI
+					editFromCheckpointId =
+						checkpointMapping.aiBeforeHumanCheckpoints.get(humanMessageId) ??
+						checkpointMapping.rootCheckpointId;
+
+					// Branch info for user message (edit branches)
+					// Only show on the FIRST human message in a branch (the one right after the fork)
+					if (
+						regenerateFromCheckpointId &&
+						checkpointMapping.editForkEntryCheckpoints.has(regenerateFromCheckpointId)
+					) {
+						const humanBranchInfo = checkpointMapping.branchInfoMap.get(regenerateFromCheckpointId);
+						if (humanBranchInfo) {
+							// Update editFromCheckpointId to the actual fork point
+							editFromCheckpointId = humanBranchInfo.forkPointId;
+							userBranchInfo = humanBranchInfo;
+						}
+					}
+
+					// Branch info for AI response (regenerate branches)
+					// Show only if the AI checkpoint is in a branch that forked from regenerateFromCheckpointId
+					const aiCheckpointId = checkpointMapping.aiAfterHumanCheckpoints.get(humanMessageId);
+					if (aiCheckpointId && regenerateFromCheckpointId) {
+						const aiBranchInfo = checkpointMapping.branchInfoMap.get(aiCheckpointId);
+						// Only show if the fork happened at the human message checkpoint (regenerate fork)
+						if (aiBranchInfo && aiBranchInfo.forkPointId === regenerateFromCheckpointId) {
+							assistantBranchInfo = aiBranchInfo;
+						}
+					}
+				} else {
+					// No humanMessageId - this is the first message, use rootCheckpointId for edit
+					console.log(
+						"[baseMessagesToMessagePairs] No humanMessageId, using rootCheckpointId:",
+						checkpointMapping.rootCheckpointId,
+					);
+					editFromCheckpointId = checkpointMapping.rootCheckpointId;
+				}
+			}
+
 			messagePairs.push({
 				id: pairId,
 				userMessage: { content: userContent },
 				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state),
+				regenerateFromCheckpointId,
+				editFromCheckpointId,
+				userBranchInfo,
+				assistantBranchInfo,
 			});
 
 			i = j;
@@ -337,10 +774,22 @@ export class ChatSession {
 	// Reactive UI state
 	messageState = $state<MessageState>(MessageState.idle);
 
-	constructor(id: string, langchainMessages: BaseMessage[], errorCount = 0) {
+	// Branching support
+	private checkpointMapping: CheckpointMessageMapping | undefined;
+	private onNeedReload: (() => Promise<void>) | undefined;
+
+	constructor(
+		id: string,
+		langchainMessages: BaseMessage[],
+		errorCount = 0,
+		checkpointMapping?: CheckpointMessageMapping,
+		onNeedReload?: () => Promise<void>,
+	) {
 		this.id = id;
+		this.checkpointMapping = checkpointMapping;
+		this.onNeedReload = onNeedReload;
 		// Convert once on load, then drop the raw BaseMessages
-		this.messages = baseMessagesToMessagePairs(langchainMessages, errorCount);
+		this.messages = baseMessagesToMessagePairs(langchainMessages, errorCount, checkpointMapping);
 	}
 
 	/** Public snapshot (immutable-ish) */
@@ -392,6 +841,66 @@ export class ChatSession {
 		this.abortController.abort();
 	}
 
+	/**
+	 * Edit a user message and get a new AI response.
+	 * This creates a new branch from the checkpoint before the original message.
+	 */
+	async editMessage(pairId: UUIDv7, newContent: string): Promise<void> {
+		const pair = this.findPair(pairId);
+		if (!pair) {
+			throw new Error("Message pair not found");
+		}
+
+		// Get the checkpoint to fork from for editing
+		const checkpointId = pair.editFromCheckpointId;
+		console.log("[ChatSession.editMessage] pairId:", pairId, "checkpointId:", checkpointId, "pair:", pair);
+		if (!checkpointId) {
+			throw new Error(
+				"Cannot edit: no checkpoint available for this message. Checkpoint mapping may not be loaded.",
+			);
+		}
+
+		// Update the user message content in the UI
+		pair.userMessage.content = newContent;
+		pair.userMessage.attachments = undefined; // Clear attachments on edit
+
+		// Reset assistant state for the new response
+		pair.assistantMessage.state = AssistantState.idle;
+		pair.assistantMessage.content = "";
+		pair.assistantMessage.toolCalls = undefined;
+
+		// Stream the edited response
+		await this.processEditReply(pairId, newContent, checkpointId);
+	}
+
+	/**
+	 * Regenerate the AI response for a message without re-sending the user message.
+	 * This creates a new branch from the checkpoint after the user message.
+	 */
+	async regenerateResponse(pairId: UUIDv7): Promise<void> {
+		const pair = this.findPair(pairId);
+		if (!pair) {
+			throw new Error("Message pair not found");
+		}
+
+		// Get the checkpoint to fork from for regeneration
+		const checkpointId = pair.regenerateFromCheckpointId;
+		console.log("[ChatSession.regenerateResponse] pairId:", pairId, "checkpointId:", checkpointId, "pair:", pair);
+		if (!checkpointId) {
+			throw new Error(
+				"Cannot regenerate: no checkpoint available for this message. Checkpoint mapping may not be loaded.",
+			);
+		}
+
+		// Reset assistant state for the new response
+		pair.assistantMessage.state = AssistantState.idle;
+		pair.assistantMessage.content = "";
+		pair.assistantMessage.toolCalls = undefined;
+
+		// Stream the regenerated response
+		await this.processRegenerateReply(pairId, checkpointId);
+	}
+
 	/* -----------------------------------------------------------------------
 	 * Streaming logic
 	 * ---------------------------------------------------------------------*/
@@ -419,110 +928,155 @@ export class ChatSession {
 		return { value: raw };
 	}
 
-	private async processAssistantReply(pairId: UUIDv7, userContent: string) {
+	/**
+	 * Core streaming handler - processes any stream and updates the message pair.
+	 */
+	private async runStream(
+		pairId: UUIDv7,
+		getStream: (signal: AbortSignal) => AsyncIterable<AgentStreamChunk>,
+		options?: { generateTitle?: string; reloadAfter?: boolean },
+	) {
 		const pair = this.findPair(pairId);
 		if (!pair) return;
 
-		// Create AbortController for this streaming session
 		this.abortController = new AbortController();
 		const signal = this.abortController.signal;
 
 		try {
 			this.messageState = MessageState.answering;
-
-			// Mark streaming started
 			pair.assistantMessage.state = AssistantState.streaming;
 
-			const plugin = getPlugin();
-
-			// Generate chat title in parallel with streaming (on first message only)
-			if (this.messages.length === 1 && getData().isGeneratingChatTitle) {
-				plugin.agentManager.generateThreadTitleFromUserMessage(String(this.id), userContent).catch((err) => {
-					console.warn("[ChatSession] Failed to generate chat title:", err);
-				});
-			}
-
-			const stream = plugin.agentManager.streamQuery(
-				userContent,
-				String(this.id),
-				signal,
-			) as AsyncIterable<AgentStreamChunk>;
-
-			const assistantMsg = pair.assistantMessage;
-
-			for await (const chunk of stream) {
-				if (chunk.type === "token") {
-					this.appendToken(assistantMsg, chunk.token);
-					continue;
-				}
-
-				if (chunk.type === "tool_start") {
-					// Add a new tool call in "running" state
-					if (!assistantMsg.toolCalls) assistantMsg.toolCalls = [];
-					assistantMsg.toolCalls.push({
-						id: chunk.toolCallId,
-						name: chunk.toolName,
-						input: this.normalizeToolInput(chunk.input),
-						status: "running",
+			// Generate chat title in parallel if requested
+			if (options?.generateTitle && this.messages.length === 1 && getData().isGeneratingChatTitle) {
+				const plugin = getPlugin();
+				plugin.agentManager
+					.generateThreadTitleFromUserMessage(String(this.id), options.generateTitle)
+					.catch((err) => {
+						console.warn("[ChatSession] Failed to generate chat title:", err);
 					});
-					continue;
-				}
-
-				if (chunk.type === "tool_end") {
-					// Find the tool call and mark it completed with output
-					if (assistantMsg.toolCalls) {
-						const tc = assistantMsg.toolCalls.find((t) => t.id === chunk.toolCallId);
-						if (tc) {
-							tc.status = "completed";
-							tc.output = chunk.output;
-						} else {
-							// Tool call wasn't found (shouldn't happen, but handle gracefully)
-							assistantMsg.toolCalls.push({
-								id: chunk.toolCallId,
-								name: chunk.toolName,
-								input: {},
-								status: "completed",
-								output: chunk.output,
-							});
-						}
-					} else {
-						// No tool calls array yet (shouldn't happen, but handle gracefully)
-						assistantMsg.toolCalls = [
-							{
-								id: chunk.toolCallId,
-								name: chunk.toolName,
-								input: {},
-								status: "completed",
-								output: chunk.output,
-							},
-						];
-					}
-					continue;
-				}
-
-				// For result chunks, stream is complete but wait for checkpoint_message
-				if (chunk.type === "result") {
-					continue;
-				}
-
-				// Sync UI with persisted checkpoint state
-				if (chunk.type === "checkpoint_message") {
-					const checkpointAssistant = baseMessageToAssistantMessage(chunk.message);
-					// Preserve the streaming state, update content and tool calls from checkpoint
-					pair.assistantMessage.content = checkpointAssistant.content;
-					pair.assistantMessage.toolCalls = checkpointAssistant.toolCalls;
-					break;
-				}
 			}
 
+			await this.consumeStream(pair.assistantMessage, getStream(signal));
 			pair.assistantMessage.state = AssistantState.success;
+
+			if (options?.reloadAfter && this.onNeedReload) {
+				await this.onNeedReload();
+			}
 		} catch (err) {
-			const failedState: AssistantState = this.cancelled ? AssistantState.cancelled : AssistantState.error;
-			pair.assistantMessage.state = failedState;
+			pair.assistantMessage.state = this.cancelled ? AssistantState.cancelled : AssistantState.error;
 		} finally {
 			this.abortController = null;
 			this.cancelled = false;
 			this.messageState = MessageState.idle;
+		}
+	}
+
+	/** Process assistant reply for a normal query (new message in thread). */
+	private async processAssistantReply(pairId: UUIDv7, userContent: string) {
+		const plugin = getPlugin();
+		await this.runStream(
+			pairId,
+			(signal) =>
+				plugin.agentManager.streamQuery(
+					userContent,
+					String(this.id),
+					signal,
+				) as AsyncIterable<AgentStreamChunk>,
+			{ generateTitle: userContent, reloadAfter: true },
+		);
+	}
+
+	/** Process assistant reply for an edit (forks from checkpoint with new user message). */
+	private async processEditReply(pairId: UUIDv7, userContent: string, checkpointId: string) {
+		const plugin = getPlugin();
+		await this.runStream(
+			pairId,
+			(signal) =>
+				plugin.agentManager.editFromCheckpoint(
+					userContent,
+					String(this.id),
+					checkpointId,
+					signal,
+				) as AsyncIterable<AgentStreamChunk>,
+			{ reloadAfter: true },
+		);
+	}
+
+	/** Process assistant reply for regeneration (no new user message, continues from checkpoint). */
+	private async processRegenerateReply(pairId: UUIDv7, checkpointId: string) {
+		const plugin = getPlugin();
+		await this.runStream(
+			pairId,
+			(signal) =>
+				plugin.agentManager.regenerateFromCheckpoint(
+					String(this.id),
+					checkpointId,
+					signal,
+				) as AsyncIterable<AgentStreamChunk>,
+			{ reloadAfter: true },
+		);
+	}
+
+	/**
+	 * Shared stream consumption logic for both normal queries and regeneration.
+	 */
+	private async consumeStream(assistantMsg: AssistantMessage, stream: AsyncIterable<AgentStreamChunk>) {
+		for await (const chunk of stream) {
+			if (chunk.type === "token") {
+				this.appendToken(assistantMsg, chunk.token);
+				continue;
+			}
+
+			if (chunk.type === "tool_start") {
+				if (!assistantMsg.toolCalls) assistantMsg.toolCalls = [];
+				assistantMsg.toolCalls.push({
+					id: chunk.toolCallId,
+					name: chunk.toolName,
+					input: this.normalizeToolInput(chunk.input),
+					status: "running",
+				});
+				continue;
+			}
+
+			if (chunk.type === "tool_end") {
+				if (assistantMsg.toolCalls) {
+					const tc = assistantMsg.toolCalls.find((t) => t.id === chunk.toolCallId);
+					if (tc) {
+						tc.status = "completed";
+						tc.output = chunk.output;
+					} else {
+						assistantMsg.toolCalls.push({
+							id: chunk.toolCallId,
+							name: chunk.toolName,
+							input: {},
+							status: "completed",
+							output: chunk.output,
+						});
+					}
+				} else {
+					assistantMsg.toolCalls = [
+						{
+							id: chunk.toolCallId,
+							name: chunk.toolName,
+							input: {},
+							status: "completed",
+							output: chunk.output,
+						},
+					];
+				}
+				continue;
+			}
+
+			if (chunk.type === "result") {
+				continue;
+			}
+
+			if (chunk.type === "checkpoint_message") {
+				const checkpointAssistant = baseMessageToAssistantMessage(chunk.message);
+				assistantMsg.content = checkpointAssistant.content;
+				assistantMsg.toolCalls = checkpointAssistant.toolCalls;
+				break;
+			}
 		}
 	}
 }
@@ -553,13 +1107,87 @@ export class Messenger {
 
 	/* ---------------- Chat Creation / Metadata ---------------- */
 
-	async loadSession(file: TFile) {
+	async loadSession(file: TFile, targetCheckpointId?: string) {
 		const id = this.deriveThreadId(file);
 		if (!id) throw new Error("Invalid thread ID");
+
+		// Get thread history and checkpoint data
 		const history = await this.#agentManager.getThreadHistory(id);
-		// Cast to access lastError and errorCount properties (available after papa-ts rebuild)
+		const checkpointHistory = await this.#agentManager.getCheckpointHistory(id);
+
+		console.log("[Messenger.loadSession] threadId:", id, "checkpointHistory.length:", checkpointHistory.length);
+
+		// Build checkpoint mapping for branching support
+		const checkpointMapping =
+			checkpointHistory.length > 0
+				? buildCheckpointMessageMapping(checkpointHistory, targetCheckpointId)
+				: undefined;
+
+		console.log("[Messenger.loadSession] checkpointMapping:", checkpointMapping);
+
+		// Create reload callback for this file
+		const onNeedReload = async () => {
+			await this.reloadSession();
+		};
+
+		// Cast to access lastError and errorCount properties
 		const historyWithError = history as (ThreadHistory & { lastError?: ThreadError; errorCount?: number }) | null;
-		this.session = new ChatSession(id, historyWithError?.messages || [], historyWithError?.errorCount || 0);
+
+		this.session = new ChatSession(
+			id,
+			historyWithError?.messages || [],
+			historyWithError?.errorCount || 0,
+			checkpointMapping,
+			onNeedReload,
+		);
+	}
+
+	/** Reload the current session to update branch info after edit/regenerate */
+	async reloadSession(): Promise<void> {
+		if (!this.session) {
+			throw new Error("No active session to reload");
+		}
+
+		const id = this.session.id;
+		const history = await this.#agentManager.getThreadHistory(id);
+		const checkpointHistory = await this.#agentManager.getCheckpointHistory(id);
+
+		const checkpointMapping =
+			checkpointHistory.length > 0 ? buildCheckpointMessageMapping(checkpointHistory) : undefined;
+
+		const historyWithError = history as (ThreadHistory & { lastError?: ThreadError; errorCount?: number }) | null;
+
+		// Replace the session with updated data
+		this.session = new ChatSession(
+			id,
+			historyWithError?.messages || [],
+			historyWithError?.errorCount || 0,
+			checkpointMapping,
+			async () => this.reloadSession(),
+		);
+	}
+
+	/** Switch to a different branch by loading from a specific checkpoint */
+	async switchToBranch(checkpointId: string): Promise<void> {
+		// Need to get the thread ID and file from current session
+		if (!this.session) {
+			throw new Error("No active session");
+		}
+
+		const threadId = this.session.id;
+		const messages = await this.#agentManager.getCheckpointMessages(threadId, checkpointId);
+		const checkpointHistory = await this.#agentManager.getCheckpointHistory(threadId);
+
+		const checkpointMapping =
+			checkpointHistory.length > 0 ? buildCheckpointMessageMapping(checkpointHistory, checkpointId) : undefined;
+
+		this.session = new ChatSession(
+			threadId,
+			messages,
+			0, // Reset error count when switching branches
+			checkpointMapping,
+			async () => this.reloadSession(),
+		);
 	}
 
 	/* ---------------- Sending Messages ---------------- */
