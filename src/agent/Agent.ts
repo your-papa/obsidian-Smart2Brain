@@ -80,6 +80,8 @@ export interface CheckpointHistoryItem {
 	step: number;
 	/** Parent checkpoint ID for building branch trees */
 	parentCheckpointId?: string;
+	/** Optional checkpoint timestamp for deterministic ordering/tie-breaking */
+	ts?: string;
 }
 
 export interface AgentOptions {
@@ -852,8 +854,9 @@ export class Agent {
 			const messages = this.extractMessagesFromCheckpoint(tuple);
 			const step = (tuple.metadata?.step as number) ?? 0;
 			const parentCheckpointId = tuple.parentConfig?.configurable?.checkpoint_id as string | undefined;
+			const ts = tuple.checkpoint?.ts as string | undefined;
 
-			results.push({ checkpointId, messages, step, parentCheckpointId });
+			results.push({ checkpointId, messages, step, parentCheckpointId, ts });
 		}
 
 		return results;
@@ -868,6 +871,25 @@ export class Agent {
 		const tuple = await this.checkpointer.getTuple(config);
 		if (!tuple) return [];
 		return this.extractMessagesFromCheckpoint(tuple);
+	}
+
+	/**
+	 * Gets the latest checkpoint ID for a thread.
+	 * Used by UI reloads to stay on the branch that just finished streaming.
+	 */
+	async getLatestCheckpointId(threadId: string): Promise<string | undefined> {
+		try {
+			const tuple = await this.checkpointer.getTuple({
+				configurable: { thread_id: threadId },
+			});
+			return tuple?.config?.configurable?.checkpoint_id as string | undefined;
+		} catch (error) {
+			Logger.debug("agent.getLatestCheckpointId.error", {
+				threadId,
+				message: error instanceof Error ? error.message : String(error),
+			});
+			return undefined;
+		}
 	}
 
 	/**

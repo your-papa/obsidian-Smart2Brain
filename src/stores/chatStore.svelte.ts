@@ -1,13 +1,14 @@
 import {
 	type AIMessage,
 	type BaseMessage,
+	HumanMessage,
 	type ToolMessage,
 	isAIMessage,
 	isHumanMessage,
 	isToolMessage,
 } from "@langchain/core/messages";
-import { Notice, type TFile } from "obsidian";
-import type { AgentStreamChunk, ThreadHistory } from "../agent/Agent";
+import { type TFile } from "obsidian";
+import type { AgentStreamChunk, CheckpointHistoryItem, ThreadHistory } from "../agent/Agent";
 import type { AgentManager } from "../agent/AgentManager";
 import type { ChatModelConfig } from "../providers/index";
 import type { ThreadError } from "../types/shared";
@@ -17,6 +18,13 @@ import { getPlugin } from "./state.svelte";
 
 // Re-export for backward compatibility
 export type { ThreadError };
+
+const CHECKPOINT_DEBUG = false;
+
+function checkpointDebug(event: string, details: Record<string, unknown>): void {
+	if (!CHECKPOINT_DEBUG) return;
+	console.log(`[chatStore.checkpoint] ${event}`, details);
+}
 
 /* -----------------------------------------------------------------------------
  * Shared Types
@@ -94,7 +102,7 @@ export interface MessagePair {
 	regenerateFromCheckpointId?: string;
 
 	/**
-	 * Checkpoint ID where the PREVIOUS AIMessage is the last message.
+	 * Checkpoint ID where the PREVIOUS AI message is the last message.
 	 * Fork from here to EDIT the user message.
 	 * Undefined for the first message pair (no ancestor).
 	 */
@@ -134,7 +142,313 @@ export interface ChatRecord {
 }
 
 /* -----------------------------------------------------------------------------
- * Checkpoint Mapping for Branching
+ * Canonical Checkpoint Graph Model
+ * ---------------------------------------------------------------------------*/
+
+export interface CheckpointNode {
+	checkpointId: string;
+	parentCheckpointId?: string;
+	step: number;
+	messages: BaseMessage[];
+	children: string[];
+	ts?: string;
+}
+
+export interface CheckpointGraphState {
+	nodes: Map<string, CheckpointNode>;
+	rootCheckpointId?: string;
+	activeCheckpointId?: string;
+	lastPersistedActiveCheckpointId?: string;
+}
+
+interface ActiveCheckpointResolution {
+	checkpointId?: string;
+	source: "session" | "persisted" | "explicit" | "fallback" | "none";
+}
+
+interface PostRunResolution {
+	newIds: string[];
+	parentCheckpointId?: string;
+	newActiveCheckpointId?: string;
+}
+
+interface CheckpointSortShape {
+	checkpointId: string;
+	step: number;
+	ts?: string;
+}
+
+function parseCheckpointTs(ts?: string): number {
+	if (!ts) return 0;
+	const value = Date.parse(ts);
+	return Number.isFinite(value) ? value : 0;
+}
+
+function comparePathOrder(a: CheckpointSortShape, b: CheckpointSortShape): number {
+	if (a.step !== b.step) return a.step - b.step;
+	const tsA = parseCheckpointTs(a.ts);
+	const tsB = parseCheckpointTs(b.ts);
+	if (tsA !== tsB) return tsA - tsB;
+	return a.checkpointId.localeCompare(b.checkpointId);
+}
+
+function compareNewest(a: CheckpointSortShape, b: CheckpointSortShape): number {
+	const tsA = parseCheckpointTs(a.ts);
+	const tsB = parseCheckpointTs(b.ts);
+	if (tsA !== tsB) return tsB - tsA;
+	if (a.step !== b.step) return b.step - a.step;
+	return a.checkpointId.localeCompare(b.checkpointId);
+}
+
+function getPathToRoot(graph: CheckpointGraphState, checkpointId: string): string[] {
+	const path: string[] = [];
+	const visited = new Set<string>();
+	let current: string | undefined = checkpointId;
+
+	while (current && !visited.has(current)) {
+		path.push(current);
+		visited.add(current);
+		current = graph.nodes.get(current)?.parentCheckpointId;
+	}
+
+	return path.reverse();
+}
+
+function isCheckpointValid(graph: CheckpointGraphState, checkpointId?: string): checkpointId is string {
+	return !!checkpointId && graph.nodes.has(checkpointId);
+}
+
+function getCheckpointDepth(graph: CheckpointGraphState, checkpointId: string): number {
+	let depth = 0;
+	let current: string | undefined = checkpointId;
+	const visited = new Set<string>();
+
+	while (current && !visited.has(current)) {
+		visited.add(current);
+		current = graph.nodes.get(current)?.parentCheckpointId;
+		if (current) depth += 1;
+	}
+
+	return depth;
+}
+
+function isDescendantOf(graph: CheckpointGraphState, checkpointId: string, ancestorId: string): boolean {
+	let current: string | undefined = checkpointId;
+	const visited = new Set<string>();
+
+	while (current && !visited.has(current)) {
+		if (current === ancestorId) return true;
+		visited.add(current);
+		current = graph.nodes.get(current)?.parentCheckpointId;
+	}
+
+	return false;
+}
+
+function getAllDescendants(graph: CheckpointGraphState, startId: string): string[] {
+	const result: string[] = [];
+	const queue: string[] = [startId];
+	const visited = new Set<string>();
+
+	while (queue.length > 0) {
+		const current = queue.shift();
+		if (!current || visited.has(current)) continue;
+		visited.add(current);
+		result.push(current);
+		const node = graph.nodes.get(current);
+		if (!node) continue;
+		queue.push(...node.children);
+	}
+
+	return result;
+}
+
+function findFirstHumanInBranch(graph: CheckpointGraphState, startId: string): string | undefined {
+	const queue: string[] = [startId];
+	const visited = new Set<string>();
+
+	while (queue.length > 0) {
+		const current = queue.shift();
+		if (!current || visited.has(current)) continue;
+		visited.add(current);
+
+		const node = graph.nodes.get(current);
+		if (!node) continue;
+		const lastMessage = node.messages.at(-1);
+		if (lastMessage && isHumanMessage(lastMessage)) {
+			return current;
+		}
+
+		const sortedChildren = [...node.children].sort((a, b) => a.localeCompare(b));
+		queue.push(...sortedChildren);
+	}
+
+	return undefined;
+}
+
+function findDeterministicTipFrom(graph: CheckpointGraphState, startId: string): string {
+	let current = startId;
+
+	while (true) {
+		const node = graph.nodes.get(current);
+		if (!node || node.children.length === 0) {
+			return current;
+		}
+
+		const bestChild = [...node.children]
+			.map((id) => graph.nodes.get(id))
+			.filter((child): child is CheckpointNode => !!child)
+			.sort(compareNewest)
+			.at(0);
+
+		if (!bestChild) {
+			return current;
+		}
+
+		current = bestChild.checkpointId;
+	}
+}
+
+export function buildCheckpointGraph(checkpoints: CheckpointHistoryItem[]): CheckpointGraphState {
+	const nodes = new Map<string, CheckpointNode>();
+
+	for (const checkpoint of checkpoints) {
+		nodes.set(checkpoint.checkpointId, {
+			checkpointId: checkpoint.checkpointId,
+			parentCheckpointId: checkpoint.parentCheckpointId,
+			step: checkpoint.step,
+			messages: checkpoint.messages,
+			children: [],
+			ts: checkpoint.ts,
+		});
+	}
+
+	// Some stored histories can contain multiple first-turn checkpoints with no parent.
+	// Treat them as siblings branching from a single canonical root to keep lineage connected.
+	const detachedRoots = [...nodes.values()].filter((node) => !node.parentCheckpointId);
+	const canonicalRoot = [...detachedRoots].sort(comparePathOrder)[0];
+	if (canonicalRoot && detachedRoots.length > 1) {
+		for (const node of detachedRoots) {
+			if (node.checkpointId === canonicalRoot.checkpointId) continue;
+			node.parentCheckpointId = canonicalRoot.checkpointId;
+		}
+	}
+
+	for (const node of nodes.values()) {
+		const parentId = node.parentCheckpointId;
+		if (!parentId) continue;
+		const parent = nodes.get(parentId);
+		if (!parent) continue;
+		parent.children.push(node.checkpointId);
+	}
+
+	for (const node of nodes.values()) {
+		node.children.sort((a, b) => a.localeCompare(b));
+	}
+
+	let rootCheckpointId: string | undefined;
+	const rootCandidates = [...nodes.values()].filter((node) => !node.parentCheckpointId || !nodes.has(node.parentCheckpointId));
+
+	if (rootCandidates.length > 0) {
+		rootCheckpointId = [...rootCandidates].sort(comparePathOrder)[0]?.checkpointId;
+	} else if (nodes.size > 0) {
+		rootCheckpointId = [...nodes.values()].sort(comparePathOrder)[0]?.checkpointId;
+	}
+
+	return {
+		nodes,
+		rootCheckpointId,
+	};
+}
+
+function resolveFallbackCheckpoint(graph: CheckpointGraphState, fromCheckpointId?: string): string | undefined {
+	if (graph.nodes.size === 0) return undefined;
+
+	if (fromCheckpointId && graph.nodes.has(fromCheckpointId)) {
+		return findDeterministicTipFrom(graph, fromCheckpointId);
+	}
+
+	if (graph.rootCheckpointId && graph.nodes.has(graph.rootCheckpointId)) {
+		return findDeterministicTipFrom(graph, graph.rootCheckpointId);
+	}
+
+	const first = [...graph.nodes.values()].sort(comparePathOrder)[0];
+	return first?.checkpointId;
+}
+
+function resolveActiveCheckpointId(
+	graph: CheckpointGraphState,
+	options: {
+		sessionActiveCheckpointId?: string;
+		persistedCheckpointId?: string;
+		explicitTargetCheckpointId?: string;
+	},
+): ActiveCheckpointResolution {
+	if (graph.nodes.size === 0) {
+		return { source: "none" };
+	}
+
+	const { sessionActiveCheckpointId, persistedCheckpointId, explicitTargetCheckpointId } = options;
+
+	if (isCheckpointValid(graph, sessionActiveCheckpointId)) {
+		return { checkpointId: sessionActiveCheckpointId, source: "session" };
+	}
+
+	if (isCheckpointValid(graph, persistedCheckpointId)) {
+		return { checkpointId: persistedCheckpointId, source: "persisted" };
+	}
+
+	if (isCheckpointValid(graph, explicitTargetCheckpointId)) {
+		return { checkpointId: explicitTargetCheckpointId, source: "explicit" };
+	}
+
+	const fallbackSeed = sessionActiveCheckpointId ?? persistedCheckpointId ?? explicitTargetCheckpointId;
+	const fallbackCheckpointId = resolveFallbackCheckpoint(graph, fallbackSeed);
+	return {
+		checkpointId: fallbackCheckpointId,
+		source: fallbackCheckpointId ? "fallback" : "none",
+	};
+}
+
+function resolvePostRunCheckpointSelection(
+	graph: CheckpointGraphState,
+	beforeSet: Set<string>,
+	parentCheckpointId?: string,
+): PostRunResolution {
+	const newIds = [...graph.nodes.keys()].filter((id) => !beforeSet.has(id));
+
+	const eligible =
+		parentCheckpointId && graph.nodes.has(parentCheckpointId)
+			? newIds.filter((id) => isDescendantOf(graph, id, parentCheckpointId))
+			: newIds;
+
+	if (eligible.length === 0) {
+		return {
+			newIds,
+			parentCheckpointId,
+		};
+	}
+
+	const sorted = [...eligible]
+		.map((id) => graph.nodes.get(id))
+		.filter((node): node is CheckpointNode => !!node)
+		.sort((a, b) => {
+			const depthDiff = getCheckpointDepth(graph, b.checkpointId) - getCheckpointDepth(graph, a.checkpointId);
+			if (depthDiff !== 0) return depthDiff;
+			const tsDiff = parseCheckpointTs(b.ts) - parseCheckpointTs(a.ts);
+			if (tsDiff !== 0) return tsDiff;
+			return a.checkpointId.localeCompare(b.checkpointId);
+		});
+
+	return {
+		newIds,
+		parentCheckpointId,
+		newActiveCheckpointId: sorted[0]?.checkpointId,
+	};
+}
+
+/* -----------------------------------------------------------------------------
+ * Checkpoint Mapping for Branching (Derived Utility)
  * ---------------------------------------------------------------------------*/
 
 export interface CheckpointMessageMapping {
@@ -174,247 +488,107 @@ export interface CheckpointMessageMapping {
 	rootCheckpointId?: string;
 }
 
-/**
- * Builds checkpoint mapping from checkpoint history for branching operations.
- */
-export function buildCheckpointMessageMapping(
-	checkpoints: Array<{
-		checkpointId: string;
-		messages: BaseMessage[];
-		step: number;
-		parentCheckpointId?: string;
-	}>,
-	targetCheckpointId?: string,
+function buildDerivedBranchInfo(graph: CheckpointGraphState): {
+	branchInfoMap: Map<string, BranchInfo>;
+	editForkEntryCheckpoints: Set<string>;
+} {
+	const branchInfoMap = new Map<string, BranchInfo>();
+	const editForkEntryCheckpoints = new Set<string>();
+
+	const forkPoints = [...graph.nodes.values()]
+		.filter((node) => node.children.length > 1)
+		.sort(comparePathOrder);
+
+	for (const forkPoint of forkPoints) {
+		const sortedChildren = [...forkPoint.children].sort((a, b) => a.localeCompare(b));
+		const branchTips = sortedChildren.map((childId) => findDeterministicTipFrom(graph, childId));
+		const forkLastMessage = forkPoint.messages.at(-1);
+		const isEditFork = !forkLastMessage || !isHumanMessage(forkLastMessage);
+
+		for (let index = 0; index < sortedChildren.length; index++) {
+			const childId = sortedChildren[index];
+			const branchInfo: BranchInfo = {
+				currentIndex: index + 1,
+				totalBranches: sortedChildren.length,
+				siblingCheckpointIds: branchTips,
+				forkPointId: forkPoint.checkpointId,
+				forkChildId: childId,
+			};
+
+			if (isEditFork) {
+				const firstHumanCheckpointId = findFirstHumanInBranch(graph, childId);
+				if (firstHumanCheckpointId) {
+					editForkEntryCheckpoints.add(firstHumanCheckpointId);
+				}
+			}
+
+			const descendants = getAllDescendants(graph, childId);
+			for (const checkpointId of descendants) {
+				branchInfoMap.set(checkpointId, branchInfo);
+			}
+		}
+	}
+
+	return { branchInfoMap, editForkEntryCheckpoints };
+}
+
+function buildCheckpointMessageMappingFromGraph(
+	graph: CheckpointGraphState,
+	activeCheckpointId?: string,
 ): CheckpointMessageMapping {
 	const humanLastCheckpoints = new Map<string, string>();
 	const aiBeforeHumanCheckpoints = new Map<string, string>();
 	const aiAfterHumanCheckpoints = new Map<string, string>();
-	const branchInfoMap = new Map<string, BranchInfo>();
 
-	// Find the root checkpoint (earliest step, typically step -1)
-	let rootCheckpointId: string | undefined;
-	let minStep = Number.POSITIVE_INFINITY;
-	for (const { checkpointId, step } of checkpoints) {
-		if (step < minStep) {
-			minStep = step;
-			rootCheckpointId = checkpointId;
-		}
+	const { branchInfoMap, editForkEntryCheckpoints } = buildDerivedBranchInfo(graph);
+
+	if (!activeCheckpointId || !graph.nodes.has(activeCheckpointId)) {
+		return {
+			humanLastCheckpoints,
+			aiBeforeHumanCheckpoints,
+			aiAfterHumanCheckpoints,
+			branchInfoMap,
+			editForkEntryCheckpoints,
+			rootCheckpointId: graph.rootCheckpointId,
+		};
 	}
 
-	// Build parent -> children map for branch calculation
-	const childrenByParent = new Map<string, string[]>();
-	const checkpointChildren = new Map<string, string[]>();
-	for (const { checkpointId, parentCheckpointId } of checkpoints) {
-		if (parentCheckpointId) {
-			const siblings = childrenByParent.get(parentCheckpointId) || [];
-			siblings.push(checkpointId);
-			childrenByParent.set(parentCheckpointId, siblings);
-
-			const children = checkpointChildren.get(parentCheckpointId) || [];
-			children.push(checkpointId);
-			checkpointChildren.set(parentCheckpointId, children);
-		}
-	}
-
-	// Find the tip (leaf) checkpoint for a given checkpoint by following the latest child
-	function findBranchTip(startCheckpointId: string): string {
-		let current = startCheckpointId;
-		let children = checkpointChildren.get(current);
-		while (children && children.length > 0) {
-			const sorted = [...children].sort();
-			current = sorted[sorted.length - 1];
-			children = checkpointChildren.get(current);
-		}
-		return current;
-	}
-
-	// Get all descendants of a checkpoint
-	function getAllDescendants(startId: string): string[] {
-		const descendants: string[] = [];
-		const queue = [startId];
-		while (queue.length > 0) {
-			const current = queue.shift();
-			if (!current) continue;
-			descendants.push(current);
-			const children = checkpointChildren.get(current) || [];
-			queue.push(...children);
-		}
-		return descendants;
-	}
-
-	// Build checkpoint ID -> messages lookup for finding first human message in branch
-	const checkpointMessagesMap = new Map<string, BaseMessage[]>();
-	for (const { checkpointId, messages } of checkpoints) {
-		checkpointMessagesMap.set(checkpointId, messages);
-	}
-
-	// Find the first human message checkpoint in a branch starting from forkChildId
-	function findFirstHumanInBranch(startId: string): string | null {
-		const queue = [startId];
-		const visited = new Set<string>();
-		while (queue.length > 0) {
-			const current = queue.shift();
-			if (!current || visited.has(current)) continue;
-			visited.add(current);
-
-			const msgs = checkpointMessagesMap.get(current);
-			const lastMsg = msgs?.at(-1);
-			if (lastMsg && isHumanMessage(lastMsg)) {
-				return current;
-			}
-
-			// Follow children (sorted by checkpoint ID for determinism)
-			const children = checkpointChildren.get(current) || [];
-			queue.push(...[...children].sort());
-		}
-		return null;
-	}
-
-	console.log("[buildCheckpointMessageMapping] childrenByParent:", [...childrenByParent.entries()]);
-
-	// Track which checkpoints are the entry point for edit forks (first human message in branch)
-	const editForkEntryCheckpoints = new Set<string>();
-
-	// Build checkpoint -> depth map for sorting forks
-	const checkpointDepth = new Map<string, number>();
-	const checkpointParent = new Map<string, string | undefined>();
-	const visitingDepth = new Set<string>();
-	for (const { checkpointId, parentCheckpointId } of checkpoints) {
-		checkpointParent.set(checkpointId, parentCheckpointId);
-	}
-	function getDepth(cpId: string): number {
-		const cached = checkpointDepth.get(cpId);
-		if (cached !== undefined) return cached;
-		if (visitingDepth.has(cpId)) {
-			console.warn("[buildCheckpointMessageMapping] cycle detected in checkpoint parent chain", { checkpointId: cpId });
-			return 0;
-		}
-		visitingDepth.add(cpId);
-		let depth = 0;
-		try {
-			const parent = checkpointParent.get(cpId);
-			depth = parent ? getDepth(parent) + 1 : 0;
-		} finally {
-			visitingDepth.delete(cpId);
-		}
-		checkpointDepth.set(cpId, depth);
-		return depth;
-	}
-	for (const { checkpointId } of checkpoints) {
-		getDepth(checkpointId);
-	}
-
-	// Get fork points (parents with multiple children) sorted by depth descending
-	// This ensures deeper forks are processed last, so their branchInfo wins
-	const forkPoints = [...childrenByParent.entries()]
-		.filter(([_, children]) => children.length > 1)
-		.sort((a, b) => getDepth(a[0]) - getDepth(b[0])); // ascending = shallower first
-
-	// Calculate branch info for each fork point and propagate to descendants
-	// Forks are processed from shallowest to deepest, so deeper forks overwrite and win
-	for (const [forkPointId, children] of forkPoints) {
-		console.log(
-			"[buildCheckpointMessageMapping] FORK found at:",
-			forkPointId,
-			"depth:",
-			getDepth(forkPointId),
-			"children:",
-			children,
-		);
-		const sortedChildren = [...children].sort();
-		const branchTips = sortedChildren.map((childId) => findBranchTip(childId));
-
-		// Determine if this is an "edit fork" (fork from AI/root) or "regenerate fork" (fork from human)
-		// Edit forks: fork point has AI message as last (or no messages for root)
-		// Regenerate forks: fork point has human message as last
-		const forkPointMessages = checkpointMessagesMap.get(forkPointId);
-		const forkPointLastMessage = forkPointMessages?.at(-1);
-		const isEditFork = !forkPointLastMessage || !isHumanMessage(forkPointLastMessage);
-
-		for (let i = 0; i < sortedChildren.length; i++) {
-			const childId = sortedChildren[i];
-			const branchInfo: BranchInfo = {
-				currentIndex: i + 1,
-				totalBranches: sortedChildren.length,
-				siblingCheckpointIds: branchTips,
-				forkPointId: forkPointId,
-				forkChildId: childId, // The immediate child of the fork point
-			};
-
-			// Only mark edit entry points for edit forks (not regenerate forks)
-			if (isEditFork) {
-				const firstHumanCheckpoint = findFirstHumanInBranch(childId);
-				if (firstHumanCheckpoint) {
-					editForkEntryCheckpoints.add(firstHumanCheckpoint);
-				}
-			}
-
-			// Assign branch info to all descendants of this branch
-			const allInBranch = getAllDescendants(childId);
-			for (const cpId of allInBranch) {
-				branchInfoMap.set(cpId, branchInfo);
-			}
-		}
-	}
-
-	console.log("[buildCheckpointMessageMapping] branchInfoMap size:", branchInfoMap.size);
-
-	// Build the set of checkpoints in target branch path if specified
-	const targetBranchPath = targetCheckpointId ? buildBranchPath(checkpoints, targetCheckpointId) : null;
-
-	// Sort by step and filter to relevant branch
-	const sorted = [...checkpoints].sort((a, b) => a.step - b.step);
-	const filtered = targetBranchPath
-		? sorted.filter((cp) => targetBranchPath.has(cp.checkpointId))
-		: filterToLatestBranch(sorted, childrenByParent);
+	const activePath = getPathToRoot(graph, activeCheckpointId)
+		.map((checkpointId) => graph.nodes.get(checkpointId))
+		.filter((node): node is CheckpointNode => !!node)
+		.sort(comparePathOrder);
 
 	let lastAiCheckpointId: string | undefined;
-	let lastHumanMessageId: string | undefined;
+	let pendingHumanMessageId: string | undefined;
 
-	console.log("[buildCheckpointMessageMapping] filtered checkpoints:", filtered.length);
-
-	for (const { checkpointId, messages } of filtered) {
-		const lastMessage = messages.at(-1);
-		console.log(
-			"[buildCheckpointMessageMapping] checkpoint:",
-			checkpointId,
-			"lastMessage type:",
-			lastMessage?.constructor?.name,
-			"lastMessage.id:",
-			lastMessage?.id,
-		);
+	for (const node of activePath) {
+		const lastMessage = node.messages.at(-1);
 
 		if (!lastMessage || isAIMessage(lastMessage)) {
-			lastAiCheckpointId = checkpointId;
+			lastAiCheckpointId = node.checkpointId;
 
-			// If we have a pending human message, this AI checkpoint is its response
-			if (lastHumanMessageId && lastMessage && isAIMessage(lastMessage)) {
-				aiAfterHumanCheckpoints.set(lastHumanMessageId, checkpointId);
-				lastHumanMessageId = undefined;
+			if (pendingHumanMessageId && lastMessage && isAIMessage(lastMessage)) {
+				aiAfterHumanCheckpoints.set(pendingHumanMessageId, node.checkpointId);
+				pendingHumanMessageId = undefined;
 			}
-		} else if (isHumanMessage(lastMessage)) {
-			const humanMessageId = lastMessage.id;
-			console.log("[buildCheckpointMessageMapping] found HumanMessage with id:", humanMessageId);
-			if (humanMessageId) {
-				humanLastCheckpoints.set(humanMessageId, checkpointId);
-
-				if (lastAiCheckpointId) {
-					aiBeforeHumanCheckpoints.set(humanMessageId, lastAiCheckpointId);
-				}
-
-				lastHumanMessageId = humanMessageId;
-			}
+			continue;
 		}
+
+		if (!isHumanMessage(lastMessage)) {
+			continue;
+		}
+
+		const humanMessageId = lastMessage.id;
+		if (!humanMessageId) {
+			continue;
+		}
+
+		humanLastCheckpoints.set(humanMessageId, node.checkpointId);
+		if (lastAiCheckpointId) {
+			aiBeforeHumanCheckpoints.set(humanMessageId, lastAiCheckpointId);
+		}
+		pendingHumanMessageId = humanMessageId;
 	}
-
-	console.log(
-		"[buildCheckpointMessageMapping] result - humanLastCheckpoints:",
-		[...humanLastCheckpoints.entries()],
-		"rootCheckpointId:",
-		rootCheckpointId,
-	);
-
-	console.log("[buildCheckpointMessageMapping] editForkEntryCheckpoints:", [...editForkEntryCheckpoints]);
 
 	return {
 		humanLastCheckpoints,
@@ -422,56 +596,27 @@ export function buildCheckpointMessageMapping(
 		aiAfterHumanCheckpoints,
 		branchInfoMap,
 		editForkEntryCheckpoints,
-		rootCheckpointId,
+		rootCheckpointId: graph.rootCheckpointId,
 	};
 }
 
-function buildBranchPath(
-	checkpoints: Array<{ checkpointId: string; parentCheckpointId?: string }>,
-	targetCheckpointId: string,
-): Set<string> {
-	const checkpointMap = new Map<string, string | undefined>();
-	for (const { checkpointId, parentCheckpointId } of checkpoints) {
-		checkpointMap.set(checkpointId, parentCheckpointId);
+export function deriveMessagePairsFromActiveCheckpoint(
+	graph: CheckpointGraphState,
+	activeCheckpointId: string | undefined,
+	errorCount = 0,
+	bootstrapMessages: BaseMessage[] = [],
+): MessagePair[] {
+	if (!activeCheckpointId || !graph.nodes.has(activeCheckpointId)) {
+		return baseMessagesToMessagePairs(bootstrapMessages, errorCount);
 	}
 
-	const path = new Set<string>();
-	let current: string | undefined = targetCheckpointId;
-
-	while (current) {
-		path.add(current);
-		current = checkpointMap.get(current);
+	const activeNode = graph.nodes.get(activeCheckpointId);
+	if (!activeNode) {
+		return baseMessagesToMessagePairs(bootstrapMessages, errorCount);
 	}
 
-	return path;
-}
-
-function filterToLatestBranch(
-	sortedCheckpoints: Array<{
-		checkpointId: string;
-		messages: BaseMessage[];
-		step: number;
-		parentCheckpointId?: string;
-	}>,
-	childrenByParent: Map<string, string[]>,
-): typeof sortedCheckpoints {
-	const latestAtFork = new Set<string>();
-
-	for (const [_parent, children] of childrenByParent) {
-		const sorted = [...children].sort();
-		const latest = sorted[sorted.length - 1];
-		if (latest) {
-			latestAtFork.add(latest);
-		}
-	}
-
-	return sortedCheckpoints.filter((cp) => {
-		const siblings = childrenByParent.get(cp.parentCheckpointId || "");
-		if (!siblings || siblings.length <= 1) {
-			return true;
-		}
-		return latestAtFork.has(cp.checkpointId);
-	});
+	const checkpointMapping = buildCheckpointMessageMappingFromGraph(graph, activeCheckpointId);
+	return baseMessagesToMessagePairs(activeNode.messages, errorCount, checkpointMapping);
 }
 
 /* -----------------------------------------------------------------------------
@@ -646,13 +791,6 @@ export function baseMessagesToMessagePairs(
 			// Start a new pair with user message
 			const userContent = extractTextContent(msg);
 			const humanMessageId = msg.id;
-			console.log(
-				"[baseMessagesToMessagePairs] humanMessageId:",
-				humanMessageId,
-				"hasMapping:",
-				!!checkpointMapping,
-			);
-			// Generate fresh UUIDv7 for the pair
 			const pairId = genUUIDv7();
 
 			// Look ahead for assistant response(s)
@@ -690,8 +828,7 @@ export function baseMessagesToMessagePairs(
 					// Checkpoint where previous AI message is last -> fork from here to EDIT
 					// For first message, use rootCheckpointId since there's no previous AI
 					editFromCheckpointId =
-						checkpointMapping.aiBeforeHumanCheckpoints.get(humanMessageId) ??
-						checkpointMapping.rootCheckpointId;
+						checkpointMapping.aiBeforeHumanCheckpoints.get(humanMessageId) ?? checkpointMapping.rootCheckpointId;
 
 					// Branch info for user message (edit branches)
 					// Only show on the FIRST human message in a branch (the one right after the fork)
@@ -719,10 +856,6 @@ export function baseMessagesToMessagePairs(
 					}
 				} else {
 					// No humanMessageId - this is the first message, use rootCheckpointId for edit
-					console.log(
-						"[baseMessagesToMessagePairs] No humanMessageId, using rootCheckpointId:",
-						checkpointMapping.rootCheckpointId,
-					);
 					editFromCheckpointId = checkpointMapping.rootCheckpointId;
 				}
 			}
@@ -762,20 +895,20 @@ export function getMessagePairTimestamp(pair: MessagePair): Date {
 }
 
 /* -----------------------------------------------------------------------------
- * Streaming Types
- * ---------------------------------------------------------------------------*/
-
-// Use AgentStreamChunk from Agent.ts - no need to duplicate the type
-
-/* -----------------------------------------------------------------------------
  * ChatSession
- *  - Ephemeral per-chat runtime state (streaming, abort, reactive messages)
- *  - Converts BaseMessages to MessagePairs on load, then works with MessagePairs only
+ *  - Canonical source: checkpoint graph + one active checkpoint ID
+ *  - MessagePair[] is always derived from the active checkpoint branch
  * ---------------------------------------------------------------------------*/
+
+interface ChatSessionOptions {
+	graphState: CheckpointGraphState;
+	errorCount: number;
+	bootstrapMessages?: BaseMessage[];
+	onNeedReload?: () => Promise<void>;
+}
 
 export class ChatSession {
 	readonly id: string;
-	// In-memory MessagePairs for UI
 	messages: MessagePair[] = $state<MessagePair[]>([]);
 
 	// Streaming / lifecycle
@@ -785,22 +918,18 @@ export class ChatSession {
 	// Reactive UI state
 	messageState = $state<MessageState>(MessageState.idle);
 
-	// Branching support
-	private checkpointMapping: CheckpointMessageMapping | undefined;
+	private graphState: CheckpointGraphState;
+	private errorCount: number;
+	private bootstrapMessages: BaseMessage[];
 	private onNeedReload: (() => Promise<void>) | undefined;
 
-	constructor(
-		id: string,
-		langchainMessages: BaseMessage[],
-		errorCount = 0,
-		checkpointMapping?: CheckpointMessageMapping,
-		onNeedReload?: () => Promise<void>,
-	) {
+	constructor(id: string, options: ChatSessionOptions) {
 		this.id = id;
-		this.checkpointMapping = checkpointMapping;
-		this.onNeedReload = onNeedReload;
-		// Convert once on load, then drop the raw BaseMessages
-		this.messages = baseMessagesToMessagePairs(langchainMessages, errorCount, checkpointMapping);
+		this.graphState = options.graphState;
+		this.errorCount = options.errorCount;
+		this.bootstrapMessages = options.bootstrapMessages ?? [];
+		this.onNeedReload = options.onNeedReload;
+		this.rebuildMessagePairs();
 	}
 
 	/** Public snapshot (immutable-ish) */
@@ -811,9 +940,86 @@ export class ChatSession {
 		};
 	}
 
+	getActiveCheckpointId(): string | undefined {
+		return this.graphState.activeCheckpointId;
+	}
+
+	setLastPersistedActiveCheckpointId(checkpointId?: string): void {
+		this.graphState.lastPersistedActiveCheckpointId = checkpointId;
+	}
+
+	applyGraphState(graphState: CheckpointGraphState, errorCount: number, bootstrapMessages?: BaseMessage[]): void {
+		this.graphState = graphState;
+		this.errorCount = errorCount;
+		if (bootstrapMessages) {
+			this.bootstrapMessages = bootstrapMessages;
+		}
+		this.rebuildMessagePairs();
+	}
+
+	private rebuildMessagePairs(): void {
+		this.messages = deriveMessagePairsFromActiveCheckpoint(
+			this.graphState,
+			this.graphState.activeCheckpointId,
+			this.errorCount,
+			this.bootstrapMessages,
+		);
+	}
+
 	/** Find a message pair by id */
 	private findPair(id: UUIDv7): MessagePair | undefined {
 		return this.messages.find((m) => m.id === id);
+	}
+
+	private cloneGraphState(): CheckpointGraphState {
+		const nodes = new Map<string, CheckpointNode>();
+		for (const [checkpointId, node] of this.graphState.nodes.entries()) {
+			nodes.set(checkpointId, {
+				...node,
+				children: [...node.children],
+				messages: [...node.messages],
+			});
+		}
+		return {
+			nodes,
+			rootCheckpointId: this.graphState.rootCheckpointId,
+			activeCheckpointId: this.graphState.activeCheckpointId,
+			lastPersistedActiveCheckpointId: this.graphState.lastPersistedActiveCheckpointId,
+		};
+	}
+
+	private applyOptimisticFork(parentCheckpointId: string, messages: BaseMessage[]): MessagePair {
+		const parentNode = this.graphState.nodes.get(parentCheckpointId);
+		if (!parentNode) {
+			throw new Error("Cannot create optimistic fork: parent checkpoint not found");
+		}
+
+		const optimisticCheckpointId = `optimistic-${genUUIDv7()}`;
+		const nextGraph = this.cloneGraphState();
+
+		const optimisticNode: CheckpointNode = {
+			checkpointId: optimisticCheckpointId,
+			parentCheckpointId,
+			step: parentNode.step + 1,
+			messages,
+			children: [],
+			ts: new Date().toISOString(),
+		};
+
+		nextGraph.nodes.set(optimisticCheckpointId, optimisticNode);
+		const nextParent = nextGraph.nodes.get(parentCheckpointId);
+		if (nextParent && !nextParent.children.includes(optimisticCheckpointId)) {
+			nextParent.children.push(optimisticCheckpointId);
+			nextParent.children.sort((a, b) => a.localeCompare(b));
+		}
+		nextGraph.activeCheckpointId = optimisticCheckpointId;
+
+		this.applyGraphState(nextGraph, this.errorCount);
+		const optimisticPair = this.messages.at(-1);
+		if (!optimisticPair) {
+			throw new Error("Optimistic fork failed: no message pair derived");
+		}
+		return optimisticPair;
 	}
 
 	/**
@@ -864,24 +1070,32 @@ export class ChatSession {
 
 		// Get the checkpoint to fork from for editing
 		const checkpointId = pair.editFromCheckpointId;
-		console.log("[ChatSession.editMessage] pairId:", pairId, "checkpointId:", checkpointId, "pair:", pair);
 		if (!checkpointId) {
 			throw new Error(
-				"Cannot edit: no checkpoint available for this message. Checkpoint mapping may not be loaded.",
+				"Cannot edit: no checkpoint available for this message. Checkpoint graph may not be loaded.",
 			);
 		}
 
-		// Update the user message content in the UI
-		pair.userMessage.content = newContent;
-		pair.userMessage.attachments = undefined; // Clear attachments on edit
-
-		// Reset assistant state for the new response
-		pair.assistantMessage.state = AssistantState.idle;
-		pair.assistantMessage.content = "";
-		pair.assistantMessage.toolCalls = undefined;
+		const parentMessages = this.graphState.nodes.get(checkpointId)?.messages ?? [];
+		const optimisticMessages = [
+			...parentMessages,
+			new HumanMessage({
+				content: newContent,
+				id: genUUIDv7(),
+			}),
+		];
+		const optimisticPair = this.applyOptimisticFork(checkpointId, optimisticMessages);
+		optimisticPair.userMessage.content = newContent;
+		optimisticPair.userMessage.attachments = undefined;
+		optimisticPair.assistantMessage.state = AssistantState.idle;
+		optimisticPair.assistantMessage.content = "";
+		optimisticPair.assistantMessage.toolCalls = undefined;
+		optimisticPair.userBranchInfo = undefined;
+		optimisticPair.assistantBranchInfo = undefined;
+		optimisticPair.regenerateFromCheckpointId = undefined;
 
 		// Stream the edited response
-		await this.processEditReply(pairId, newContent, checkpointId);
+		await this.processEditReply(optimisticPair.id, newContent, checkpointId);
 	}
 
 	/**
@@ -896,20 +1110,21 @@ export class ChatSession {
 
 		// Get the checkpoint to fork from for regeneration
 		const checkpointId = pair.regenerateFromCheckpointId;
-		console.log("[ChatSession.regenerateResponse] pairId:", pairId, "checkpointId:", checkpointId, "pair:", pair);
 		if (!checkpointId) {
 			throw new Error(
-				"Cannot regenerate: no checkpoint available for this message. Checkpoint mapping may not be loaded.",
+				"Cannot regenerate: no checkpoint available for this message. Checkpoint graph may not be loaded.",
 			);
 		}
 
-		// Reset assistant state for the new response
-		pair.assistantMessage.state = AssistantState.idle;
-		pair.assistantMessage.content = "";
-		pair.assistantMessage.toolCalls = undefined;
+		const parentMessages = this.graphState.nodes.get(checkpointId)?.messages ?? [];
+		const optimisticPair = this.applyOptimisticFork(checkpointId, [...parentMessages]);
+		optimisticPair.assistantMessage.state = AssistantState.idle;
+		optimisticPair.assistantMessage.content = "";
+		optimisticPair.assistantMessage.toolCalls = undefined;
+		optimisticPair.assistantBranchInfo = undefined;
 
 		// Stream the regenerated response
-		await this.processRegenerateReply(pairId, checkpointId);
+		await this.processRegenerateReply(optimisticPair.id, checkpointId);
 	}
 
 	/* -----------------------------------------------------------------------
@@ -939,13 +1154,55 @@ export class ChatSession {
 		return { value: raw };
 	}
 
+	private async persistLastViewedCheckpoint(checkpointId?: string): Promise<void> {
+		if (!checkpointId) return;
+		await getPlugin().agentManager.setLastViewedCheckpoint(this.id, checkpointId);
+		this.graphState.lastPersistedActiveCheckpointId = checkpointId;
+	}
+
+	private async syncGraphAfterRun(parentCheckpointId: string | undefined, beforeSet: Set<string>): Promise<void> {
+		const agentManager = getPlugin().agentManager;
+		const checkpointHistory = await agentManager.getCheckpointHistory(this.id);
+		const nextGraph = buildCheckpointGraph(checkpointHistory);
+		nextGraph.lastPersistedActiveCheckpointId = this.graphState.lastPersistedActiveCheckpointId;
+
+		const postRunResolution = resolvePostRunCheckpointSelection(nextGraph, beforeSet, parentCheckpointId);
+		let resolvedActiveCheckpointId = postRunResolution.newActiveCheckpointId;
+
+		if (!resolvedActiveCheckpointId) {
+			const fallbackResolution = resolveActiveCheckpointId(nextGraph, {
+				sessionActiveCheckpointId: this.graphState.activeCheckpointId,
+				persistedCheckpointId: this.graphState.lastPersistedActiveCheckpointId,
+			});
+			resolvedActiveCheckpointId = fallbackResolution.checkpointId;
+		}
+
+		nextGraph.activeCheckpointId = resolvedActiveCheckpointId;
+
+		checkpointDebug("post_run_selection", {
+			parentCheckpointId,
+			beforeCount: beforeSet.size,
+			newIds: postRunResolution.newIds,
+			newActiveCheckpointId: postRunResolution.newActiveCheckpointId,
+			resolvedActiveCheckpointId,
+		});
+
+		this.applyGraphState(nextGraph, this.errorCount);
+		await this.persistLastViewedCheckpoint(resolvedActiveCheckpointId);
+	}
+
 	/**
 	 * Core streaming handler - processes any stream and updates the message pair.
 	 */
 	private async runStream(
 		pairId: UUIDv7,
 		getStream: (signal: AbortSignal) => AsyncIterable<AgentStreamChunk>,
-		options?: { generateTitle?: string; reloadAfter?: boolean },
+		options: {
+			generateTitle?: string;
+			reloadAfter?: boolean;
+			parentCheckpointId?: string;
+			beforeCheckpointIds: Set<string>;
+		},
 	) {
 		const pair = this.findPair(pairId);
 		if (!pair) return;
@@ -958,7 +1215,7 @@ export class ChatSession {
 			pair.assistantMessage.state = AssistantState.streaming;
 
 			// Generate chat title in parallel if requested
-			if (options?.generateTitle && this.messages.length === 1 && getData().isGeneratingChatTitle) {
+			if (options.generateTitle && this.messages.length === 1 && getData().isGeneratingChatTitle) {
 				const plugin = getPlugin();
 				plugin.agentManager
 					.generateThreadTitleFromUserMessage(String(this.id), options.generateTitle)
@@ -970,10 +1227,12 @@ export class ChatSession {
 			await this.consumeStream(pair.assistantMessage, getStream(signal));
 			pair.assistantMessage.state = AssistantState.success;
 
-			if (options?.reloadAfter && this.onNeedReload) {
+			await this.syncGraphAfterRun(options.parentCheckpointId, options.beforeCheckpointIds);
+
+			if (options.reloadAfter && this.onNeedReload) {
 				await this.onNeedReload();
 			}
-		} catch (err) {
+		} catch (_err) {
 			pair.assistantMessage.state = this.cancelled ? AssistantState.cancelled : AssistantState.error;
 		} finally {
 			this.abortController = null;
@@ -985,21 +1244,38 @@ export class ChatSession {
 	/** Process assistant reply for a normal query (new message in thread). */
 	private async processAssistantReply(pairId: UUIDv7, userContent: string) {
 		const plugin = getPlugin();
+		const beforeCheckpointIds = new Set(this.graphState.nodes.keys());
+		const parentCheckpointId = this.graphState.activeCheckpointId ?? this.graphState.rootCheckpointId;
+
+		checkpointDebug("send.parent", {
+			threadId: this.id,
+			parentCheckpointId,
+			activeCheckpointId: this.graphState.activeCheckpointId,
+		});
+
 		await this.runStream(
 			pairId,
 			(signal) =>
 				plugin.agentManager.streamQuery(
 					userContent,
 					String(this.id),
+					this.graphState.activeCheckpointId,
 					signal,
 				) as AsyncIterable<AgentStreamChunk>,
-			{ generateTitle: userContent, reloadAfter: true },
+			{ generateTitle: userContent, reloadAfter: true, parentCheckpointId, beforeCheckpointIds },
 		);
 	}
 
 	/** Process assistant reply for an edit (forks from checkpoint with new user message). */
 	private async processEditReply(pairId: UUIDv7, userContent: string, checkpointId: string) {
 		const plugin = getPlugin();
+		const beforeCheckpointIds = new Set(this.graphState.nodes.keys());
+
+		checkpointDebug("edit.parent", {
+			threadId: this.id,
+			parentCheckpointId: checkpointId,
+		});
+
 		await this.runStream(
 			pairId,
 			(signal) =>
@@ -1009,13 +1285,20 @@ export class ChatSession {
 					checkpointId,
 					signal,
 				) as AsyncIterable<AgentStreamChunk>,
-			{ reloadAfter: true },
+			{ reloadAfter: true, parentCheckpointId: checkpointId, beforeCheckpointIds },
 		);
 	}
 
 	/** Process assistant reply for regeneration (no new user message, continues from checkpoint). */
 	private async processRegenerateReply(pairId: UUIDv7, checkpointId: string) {
 		const plugin = getPlugin();
+		const beforeCheckpointIds = new Set(this.graphState.nodes.keys());
+
+		checkpointDebug("regenerate.parent", {
+			threadId: this.id,
+			parentCheckpointId: checkpointId,
+		});
+
 		await this.runStream(
 			pairId,
 			(signal) =>
@@ -1024,7 +1307,7 @@ export class ChatSession {
 					checkpointId,
 					signal,
 				) as AsyncIterable<AgentStreamChunk>,
-			{ reloadAfter: true },
+			{ reloadAfter: true, parentCheckpointId: checkpointId, beforeCheckpointIds },
 		);
 	}
 
@@ -1095,7 +1378,7 @@ export class ChatSession {
 /* -----------------------------------------------------------------------------
  * Messenger
  *  - Orchestrates sessions
- *  - Uses granular persistence APIs
+ *  - Uses graph-first checkpoint loading/reloading/navigation
  * ---------------------------------------------------------------------------*/
 export class Messenger {
 	session: ChatSession | null = $state(null);
@@ -1116,89 +1399,124 @@ export class Messenger {
 		return threadId;
 	};
 
+	private getLastViewedCheckpointId(history: ThreadHistory | null): string | undefined {
+		const candidate = history?.metadata?.lastViewedCheckpointId;
+		return typeof candidate === "string" && candidate.length > 0 ? candidate : undefined;
+	}
+
+	private async persistLastViewedCheckpoint(threadId: string, checkpointId?: string): Promise<void> {
+		if (!checkpointId) return;
+		await this.#agentManager.setLastViewedCheckpoint(threadId, checkpointId);
+		this.session?.setLastPersistedActiveCheckpointId(checkpointId);
+	}
+
 	/* ---------------- Chat Creation / Metadata ---------------- */
 
 	async loadSession(file: TFile, targetCheckpointId?: string) {
 		const id = this.deriveThreadId(file);
 		if (!id) throw new Error("Invalid thread ID");
 
-		// Get thread history and checkpoint data
-		const history = await this.#agentManager.getThreadHistory(id);
-		const checkpointHistory = await this.#agentManager.getCheckpointHistory(id);
+		const [history, checkpointHistory] = await Promise.all([
+			this.#agentManager.getThreadHistory(id),
+			this.#agentManager.getCheckpointHistory(id),
+		]);
 
-		console.log("[Messenger.loadSession] threadId:", id, "checkpointHistory.length:", checkpointHistory.length);
+		const savedCheckpointId = this.getLastViewedCheckpointId(history);
+		const graph = buildCheckpointGraph(checkpointHistory);
+		const resolution = resolveActiveCheckpointId(graph, {
+			persistedCheckpointId: savedCheckpointId,
+			explicitTargetCheckpointId: targetCheckpointId,
+		});
 
-		// Build checkpoint mapping for branching support
-		const checkpointMapping =
-			checkpointHistory.length > 0
-				? buildCheckpointMessageMapping(checkpointHistory, targetCheckpointId)
-				: undefined;
+		graph.activeCheckpointId = resolution.checkpointId;
+		graph.lastPersistedActiveCheckpointId = savedCheckpointId;
 
-		console.log("[Messenger.loadSession] checkpointMapping:", checkpointMapping);
+		checkpointDebug("load.resolve", {
+			threadId: id,
+			source: resolution.source,
+			resolvedCheckpointId: resolution.checkpointId,
+			sessionCheckpointId: undefined,
+			savedCheckpointId,
+			targetCheckpointId,
+		});
 
-		// Create reload callback for this file
-		const onNeedReload = async () => {
-			await this.reloadSession();
-		};
-
-		// Cast to access lastError and errorCount properties
 		const historyWithError = history as (ThreadHistory & { lastError?: ThreadError; errorCount?: number }) | null;
+		const bootstrapMessages = historyWithError?.messages || [];
 
-		this.session = new ChatSession(
-			id,
-			historyWithError?.messages || [],
-			historyWithError?.errorCount || 0,
-			checkpointMapping,
-			onNeedReload,
-		);
+		this.session = new ChatSession(id, {
+			graphState: graph,
+			errorCount: historyWithError?.errorCount || 0,
+			bootstrapMessages,
+			onNeedReload: async () => this.reloadSession(),
+		});
+
+		await this.persistLastViewedCheckpoint(id, resolution.checkpointId);
 	}
 
-	/** Reload the current session to update branch info after edit/regenerate */
-	async reloadSession(): Promise<void> {
+	/** Reload the current session while preserving valid in-memory active checkpoint precedence. */
+	async reloadSession(targetCheckpointId?: string): Promise<void> {
 		if (!this.session) {
 			throw new Error("No active session to reload");
 		}
 
 		const id = this.session.id;
-		const history = await this.#agentManager.getThreadHistory(id);
-		const checkpointHistory = await this.#agentManager.getCheckpointHistory(id);
+		const sessionCheckpointId = this.session.getActiveCheckpointId();
 
-		const checkpointMapping =
-			checkpointHistory.length > 0 ? buildCheckpointMessageMapping(checkpointHistory) : undefined;
+		const [history, checkpointHistory] = await Promise.all([
+			this.#agentManager.getThreadHistory(id),
+			this.#agentManager.getCheckpointHistory(id),
+		]);
+
+		const savedCheckpointId = this.getLastViewedCheckpointId(history);
+		const graph = buildCheckpointGraph(checkpointHistory);
+		const resolution = resolveActiveCheckpointId(graph, {
+			sessionActiveCheckpointId: sessionCheckpointId,
+			persistedCheckpointId: savedCheckpointId,
+			explicitTargetCheckpointId: targetCheckpointId,
+		});
+
+		graph.activeCheckpointId = resolution.checkpointId;
+		graph.lastPersistedActiveCheckpointId = savedCheckpointId;
+
+		checkpointDebug("reload.resolve", {
+			threadId: id,
+			source: resolution.source,
+			resolvedCheckpointId: resolution.checkpointId,
+			sessionCheckpointId,
+			savedCheckpointId,
+			targetCheckpointId,
+		});
 
 		const historyWithError = history as (ThreadHistory & { lastError?: ThreadError; errorCount?: number }) | null;
+		this.session.applyGraphState(graph, historyWithError?.errorCount || 0, historyWithError?.messages || []);
 
-		// Replace the session with updated data
-		this.session = new ChatSession(
-			id,
-			historyWithError?.messages || [],
-			historyWithError?.errorCount || 0,
-			checkpointMapping,
-			async () => this.reloadSession(),
-		);
+		await this.persistLastViewedCheckpoint(id, resolution.checkpointId);
 	}
 
-	/** Switch to a different branch by loading from a specific checkpoint */
+	/** Switch to a different branch by activating a specific checkpoint directly. */
 	async switchToBranch(checkpointId: string): Promise<void> {
-		// Need to get the thread ID and file from current session
 		if (!this.session) {
 			throw new Error("No active session");
 		}
 
 		const threadId = this.session.id;
-		const messages = await this.#agentManager.getCheckpointMessages(threadId, checkpointId);
-		const checkpointHistory = await this.#agentManager.getCheckpointHistory(threadId);
+		const [history, checkpointHistory] = await Promise.all([
+			this.#agentManager.getThreadHistory(threadId),
+			this.#agentManager.getCheckpointHistory(threadId),
+		]);
 
-		const checkpointMapping =
-			checkpointHistory.length > 0 ? buildCheckpointMessageMapping(checkpointHistory, checkpointId) : undefined;
+		const graph = buildCheckpointGraph(checkpointHistory);
+		if (!graph.nodes.has(checkpointId)) {
+			throw new Error("Cannot switch branch: checkpoint does not exist");
+		}
 
-		this.session = new ChatSession(
-			threadId,
-			messages,
-			0, // Reset error count when switching branches
-			checkpointMapping,
-			async () => this.reloadSession(),
-		);
+		graph.activeCheckpointId = checkpointId;
+		graph.lastPersistedActiveCheckpointId = this.getLastViewedCheckpointId(history);
+
+		const historyWithError = history as (ThreadHistory & { lastError?: ThreadError; errorCount?: number }) | null;
+		this.session.applyGraphState(graph, historyWithError?.errorCount || 0, historyWithError?.messages || []);
+
+		await this.persistLastViewedCheckpoint(threadId, checkpointId);
 	}
 
 	/* ---------------- Sending Messages ---------------- */

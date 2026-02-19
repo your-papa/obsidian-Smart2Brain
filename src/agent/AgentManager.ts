@@ -459,6 +459,7 @@ export class AgentManager {
 	async *streamQuery(
 		query: string,
 		threadId = "default-thread",
+		checkpointId?: string,
 		signal?: AbortSignal,
 	): AsyncGenerator<
 		| { type: "token"; token: string }
@@ -494,6 +495,7 @@ export class AgentManager {
 			for await (const chunk of agent.streamTokens({
 				query,
 				threadId,
+				configurable: checkpointId ? { checkpoint_id: checkpointId } : undefined,
 				signal,
 			})) {
 				// Check if aborted before yielding
@@ -775,6 +777,11 @@ export class AgentManager {
 	async getCheckpointMessages(threadId: string, checkpointId: string): Promise<BaseMessage[]> {
 		const agent = await this.ensureAgent();
 		return agent.getCheckpointMessages(threadId, checkpointId);
+	}
+
+	async getLatestCheckpointId(threadId: string): Promise<string | undefined> {
+		const agent = await this.ensureAgent();
+		return agent.getLatestCheckpointId(threadId);
 	}
 
 	async getAllThreads(): Promise<ThreadSnapshot[]> {
