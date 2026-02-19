@@ -8,21 +8,8 @@ import Dots from "../ui/Dots.svelte";
 import IconButton from "../ui/IconButton.svelte";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 import Logo from "../ui/logos/Logo.svelte";
-<<<<<<< ours
-<<<<<<< ours
 import BranchNavigator from "./BranchNavigator.svelte";
 import ChatEditor from "./ChatEditor.svelte";
-import CollapsibleUserBubble from "./CollapsibleUserBubble.svelte";
-||||||| ancestor
-=======
-import BranchNavigator from "./BranchNavigator.svelte";
-import ChatEditor from "./ChatEditor.svelte";
->>>>>>> theirs
-||||||| ancestor
-=======
-import BranchNavigator from "./BranchNavigator.svelte";
-import ChatEditor from "./ChatEditor.svelte";
->>>>>>> theirs
 import ToolCallsSection from "./ToolCallsSection.svelte";
 
 interface Props {
@@ -214,181 +201,6 @@ function setToolsOpen(messageId: string, open: boolean) {
 						use:registerMessageRef={messagePair.id + "-user"}
 						class="group mr-2 flex flex-col items-end gap-2 mb-2"
 					>
-<<<<<<< ours
-<<<<<<< ours
-						{#if editingMessageId === messagePair.id}
-							<!-- Edit Mode -->
-							<div class="w-full max-w-[80%] rounded-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2">
-								<ChatEditor
-									initialValue={messagePair.userMessage.content}
-									placeholder="Edit your message..."
-									onSubmit={(content) => submitEdit(messagePair.id, content)}
-									onCancel={cancelEdit}
-									minHeight="40px"
-									maxHeight="200px"
-								/>
-								<div class="flex justify-end gap-1 mt-2 text-xs text-text-muted">
-									<span>Press <kbd class="px-1 py-0.5 rounded bg-background-modifier-hover font-mono">Enter</kbd> to save</span>
-									<span class="mx-1">|</span>
-									<span>Press <kbd class="px-1 py-0.5 rounded bg-background-modifier-hover font-mono">Esc</kbd> to cancel</span>
-								</div>
-							</div>
-						{:else}
-							<!-- Display Mode -->
-							<CollapsibleUserBubble
-								content={messagePair.userMessage.content}
-								class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2"
-							/>
-						{/if}
-
-						<!-- User message actions and branch navigator -->
-						<div class="flex flex-row items-center gap-2">
-							{#if editingMessageId !== messagePair.id}
-								<div
-									class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-								>
-									{#if messagePair.userBranchInfo}
-										<BranchNavigator
-											branchInfo={messagePair.userBranchInfo}
-											onNavigate={handleBranchNavigate}
-										/>
-									{/if}
-									<IconButton
-										icon="edit"
-										label="Edit message"
-										class="hover:text-[--text-accent]"
-										onclick={() => startEdit(messagePair)}
-									/>
-									<IconButton
-										icon="copy"
-										label="Copy message"
-										class="hover:text-[--text-accent]"
-										onclick={() => copyToClipboard(messagePair.userMessage.content)}
-									/>
-								</div>
-							{/if}
-||||||| ancestor
-						<MarkdownRenderer
-							content={messagePair.userMessage.content}
-							class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2 [&>p]:m-0"
-						/>
-
-						<div
-							class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-						>
-						<IconButton
-							icon="refresh-cw"
-							label="Redo message"
-							class="hover:text-[--text-accent]"
-							onclick={() => console.log("redo Message")}
-						/>
-						<IconButton
-							icon="split"
-							label="Branch off"
-							class="hover:text-[--text-accent]"
-							onclick={() => console.log("split")}
-						/>
-						<IconButton
-							icon="edit"
-							label="Edit message"
-							class="hover:text-[--text-accent]"
-							onclick={() => console.log("edit")}
-						/>
-						<IconButton
-							icon="copy"
-							label="Copy message"
-							class="hover:text-[--text-accent]"
-							onclick={() => copyToClipboard(messagePair.userMessage.content)}
-						/>
-=======
-						{#if editingMessageId === messagePair.id}
-							<!-- Edit Mode -->
-							<div class="w-full max-w-[80%] rounded-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2">
-								<ChatEditor
-									initialValue={messagePair.userMessage.content}
-									placeholder="Edit your message..."
-									onSubmit={(content) => submitEdit(messagePair.id, content)}
-									onCancel={cancelEdit}
-									minHeight="40px"
-									maxHeight="200px"
-								/>
-								<div class="flex justify-end gap-1 mt-2 text-xs text-text-muted">
-									<span>Press <kbd class="px-1 py-0.5 rounded bg-background-modifier-hover font-mono">Enter</kbd> to save</span>
-									<span class="mx-1">|</span>
-									<span>Press <kbd class="px-1 py-0.5 rounded bg-background-modifier-hover font-mono">Esc</kbd> to cancel</span>
-								</div>
-							</div>
-						{:else}
-							<!-- Display Mode -->
-							<MarkdownRenderer
-								content={messagePair.userMessage.content}
-								class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2 [&>p]:m-0"
-							/>
-						{/if}
-
-						<!-- User message actions and branch navigator -->
-						<div class="flex flex-row items-center gap-2">
-							<!-- Branch Navigator for user message (edit branches) -->
-							{#if messagePair.userBranchInfo}
-								<BranchNavigator
-									branchInfo={messagePair.userBranchInfo}
-									onNavigate={handleBranchNavigate}
-								/>
-							{/if}
-
-							{#if editingMessageId !== messagePair.id}
-								<div
-									class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-								>
-									<IconButton
-										icon="edit"
-										label="Edit message"
-										class="hover:text-[--text-accent]"
-										onclick={() => startEdit(messagePair)}
-									/>
-									<IconButton
-										icon="copy"
-										label="Copy message"
-										class="hover:text-[--text-accent]"
-										onclick={() => copyToClipboard(messagePair.userMessage.content)}
-									/>
-								</div>
-							{/if}
->>>>>>> theirs
-||||||| ancestor
-						<MarkdownRenderer
-							content={messagePair.userMessage.content}
-							class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2 [&>p]:m-0"
-						/>
-
-						<div
-							class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-						>
-						<IconButton
-							icon="refresh-cw"
-							label="Redo message"
-							class="hover:text-[--text-accent]"
-							onclick={() => console.log("redo Message")}
-						/>
-						<IconButton
-							icon="split"
-							label="Branch off"
-							class="hover:text-[--text-accent]"
-							onclick={() => console.log("split")}
-						/>
-						<IconButton
-							icon="edit"
-							label="Edit message"
-							class="hover:text-[--text-accent]"
-							onclick={() => console.log("edit")}
-						/>
-						<IconButton
-							icon="copy"
-							label="Copy message"
-							class="hover:text-[--text-accent]"
-							onclick={() => copyToClipboard(messagePair.userMessage.content)}
-						/>
-=======
 						{#if editingMessageId === messagePair.id}
 							<!-- Edit Mode -->
 							<div class="w-full max-w-[80%] rounded-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2">
@@ -440,7 +252,6 @@ function setToolsOpen(messageId: string, open: boolean) {
 									/>
 								</div>
 							{/if}
->>>>>>> theirs
 						</div>
 					</div>
 
@@ -477,113 +288,8 @@ function setToolsOpen(messageId: string, open: boolean) {
 								{/if}
 							{/if}
 
-<<<<<<< ours
-<<<<<<< ours
-								<!-- Assistant message actions and branch navigator -->
-								{#if !(messagePair.assistantMessage.state === AssistantState.streaming)}
-									<div class="flex flex-row items-center gap-2">
-										<div
-											class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-										>
-											{#if messagePair.assistantBranchInfo}
-												<BranchNavigator
-													branchInfo={messagePair.assistantBranchInfo}
-													onNavigate={handleBranchNavigate}
-												/>
-											{/if}
-											<IconButton
-												icon="copy"
-												label="Copy response"
-											class="hover:text-[--text-accent]"
-											onclick={() => copyToClipboard(messagePair.assistantMessage.content)}
-										/>
-										<IconButton
-											icon="refresh-cw"
-											label="Regenerate response"
-											class="hover:text-[--text-accent]"
-											onclick={() => regenerateResponse(messagePair.id)}
-										/>
-									</div>
-||||||| ancestor
-||||||| ancestor
-=======
-							<!-- Assistant message actions and branch navigator -->
->>>>>>> theirs
-							{#if !(messagePair.assistantMessage.state === AssistantState.streaming)}
-<<<<<<< ours
-								<div
-									class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-								>
-								<IconButton
-									icon="copy"
-									label="Copy response"
-									class="hover:text-[--text-accent]"
-									onclick={() => copyToClipboard(messagePair.assistantMessage.content)}
-								/>
-								<IconButton
-									icon="split"
-									label="Branch off"
-									class="hover:text-[--text-accent]"
-									onclick={() => branchOff(messagePair.id)}
-								/>
-								<IconButton
-									icon="refresh-cw"
-									label="Redo message"
-									class="hover:text-[--text-accent]"
-									onclick={() => console.log("redo Message")}
-								/>
-=======
 							<!-- Assistant message actions and branch navigator -->
 							{#if !(messagePair.assistantMessage.state === AssistantState.streaming)}
-								<div class="flex flex-row items-center gap-2">
-									<!-- Branch Navigator for assistant message (regenerate branches) -->
-									{#if messagePair.assistantBranchInfo}
-										<BranchNavigator
-											branchInfo={messagePair.assistantBranchInfo}
-											onNavigate={handleBranchNavigate}
-										/>
-									{/if}
-
-									<div
-										class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-									>
-										<IconButton
-											icon="copy"
-											label="Copy response"
-											class="hover:text-[--text-accent]"
-											onclick={() => copyToClipboard(messagePair.assistantMessage.content)}
-										/>
-										<IconButton
-											icon="refresh-cw"
-											label="Regenerate response"
-											class="hover:text-[--text-accent]"
-											onclick={() => regenerateResponse(messagePair.id)}
-										/>
-									</div>
->>>>>>> theirs
-||||||| ancestor
-								<div
-									class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-								>
-								<IconButton
-									icon="copy"
-									label="Copy response"
-									class="hover:text-[--text-accent]"
-									onclick={() => copyToClipboard(messagePair.assistantMessage.content)}
-								/>
-								<IconButton
-									icon="split"
-									label="Branch off"
-									class="hover:text-[--text-accent]"
-									onclick={() => branchOff(messagePair.id)}
-								/>
-								<IconButton
-									icon="refresh-cw"
-									label="Redo message"
-									class="hover:text-[--text-accent]"
-									onclick={() => console.log("redo Message")}
-								/>
-=======
 								<div class="flex flex-row items-center gap-2">
 									<div
 										class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
@@ -607,7 +313,6 @@ function setToolsOpen(messageId: string, open: boolean) {
 											onclick={() => regenerateResponse(messagePair.id)}
 										/>
 									</div>
->>>>>>> theirs
 								</div>
 							{/if}
 						</div>
