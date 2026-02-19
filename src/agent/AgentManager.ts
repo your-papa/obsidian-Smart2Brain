@@ -786,6 +786,29 @@ export class AgentManager {
 		await this.chatManager.delete(threadId);
 	}
 
+	async setLastViewedCheckpoint(threadId: string, checkpointId: string): Promise<void> {
+		const snapshot = await this.chatManager.read(threadId, true);
+		if (!snapshot) return;
+
+		const currentLastViewed = snapshot.metadata?.lastViewedCheckpointId;
+		if (currentLastViewed === checkpointId) {
+			return;
+		}
+
+		const metadata = {
+			...(snapshot.metadata ?? {}),
+			lastViewedCheckpointId: checkpointId,
+		};
+
+		await this.chatManager.write({
+			threadId: snapshot.threadId,
+			title: snapshot.title,
+			metadata,
+			createdAt: snapshot.createdAt,
+			updatedAt: snapshot.updatedAt,
+		});
+	}
+
 	/**
 	 * Generate a title for a thread using only the user's first message.
 	 * This can run in parallel with streaming since it doesn't need the AI response.
@@ -862,7 +885,7 @@ export class AgentManager {
 		};
 
 		// Create file directly and open it
-		const file = await this.plugin.app.vault.create(path, JSON.stringify(initialData, null, 2));
+		const file = await this.plugin.app.vault.create(path, `${JSON.stringify(initialData)}\n`);
 		await this.plugin.app.workspace.getLeaf(false).openFile(file);
 	}
 
