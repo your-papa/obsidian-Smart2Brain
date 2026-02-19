@@ -278,14 +278,25 @@ export function buildCheckpointMessageMapping(
 	// Build checkpoint -> depth map for sorting forks
 	const checkpointDepth = new Map<string, number>();
 	const checkpointParent = new Map<string, string | undefined>();
+	const visitingDepth = new Set<string>();
 	for (const { checkpointId, parentCheckpointId } of checkpoints) {
 		checkpointParent.set(checkpointId, parentCheckpointId);
 	}
 	function getDepth(cpId: string): number {
 		const cached = checkpointDepth.get(cpId);
 		if (cached !== undefined) return cached;
-		const parent = checkpointParent.get(cpId);
-		const depth = parent ? getDepth(parent) + 1 : 0;
+		if (visitingDepth.has(cpId)) {
+			console.warn("[buildCheckpointMessageMapping] cycle detected in checkpoint parent chain", { checkpointId: cpId });
+			return 0;
+		}
+		visitingDepth.add(cpId);
+		let depth = 0;
+		try {
+			const parent = checkpointParent.get(cpId);
+			depth = parent ? getDepth(parent) + 1 : 0;
+		} finally {
+			visitingDepth.delete(cpId);
+		}
 		checkpointDepth.set(cpId, depth);
 		return depth;
 	}
