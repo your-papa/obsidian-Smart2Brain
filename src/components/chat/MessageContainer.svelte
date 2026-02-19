@@ -228,18 +228,16 @@ function setToolsOpen(messageId: string, open: boolean) {
 
 						<!-- User message actions and branch navigator -->
 						<div class="flex flex-row items-center gap-2">
-							<!-- Branch Navigator for user message (edit branches) -->
-							{#if messagePair.userBranchInfo}
-								<BranchNavigator
-									branchInfo={messagePair.userBranchInfo}
-									onNavigate={handleBranchNavigate}
-								/>
-							{/if}
-
 							{#if editingMessageId !== messagePair.id}
 								<div
-									class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+									class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
 								>
+									{#if messagePair.userBranchInfo}
+										<BranchNavigator
+											branchInfo={messagePair.userBranchInfo}
+											onNavigate={handleBranchNavigate}
+										/>
+									{/if}
 									<IconButton
 										icon="edit"
 										label="Edit message"
@@ -293,17 +291,15 @@ function setToolsOpen(messageId: string, open: boolean) {
 							<!-- Assistant message actions and branch navigator -->
 							{#if !(messagePair.assistantMessage.state === AssistantState.streaming)}
 								<div class="flex flex-row items-center gap-2">
-									<!-- Branch Navigator for assistant message (regenerate branches) -->
-									{#if messagePair.assistantBranchInfo}
-										<BranchNavigator
-											branchInfo={messagePair.assistantBranchInfo}
-											onNavigate={handleBranchNavigate}
-										/>
-									{/if}
-
 									<div
-										class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+										class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
 									>
+										{#if messagePair.assistantBranchInfo}
+											<BranchNavigator
+												branchInfo={messagePair.assistantBranchInfo}
+												onNavigate={handleBranchNavigate}
+											/>
+										{/if}
 										<IconButton
 											icon="copy"
 											label="Copy response"
