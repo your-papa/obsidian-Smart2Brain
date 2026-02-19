@@ -1,13 +1,15 @@
 <script lang="ts">
 import { Notice } from "obsidian";
 import { tick } from "svelte";
-import { type AssistantMessage, AssistantState, type ChatModel, type Messenger } from "../../stores/chatStore.svelte";
+import { type AssistantMessage, AssistantState, type MessagePair, type Messenger } from "../../stores/chatStore.svelte";
 import type { UUIDv7 } from "../../utils/uuid7Validator";
 import CircularLoader from "../ui/CircularLoader.svelte";
 import Dots from "../ui/Dots.svelte";
 import IconButton from "../ui/IconButton.svelte";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 import Logo from "../ui/logos/Logo.svelte";
+import BranchNavigator from "./BranchNavigator.svelte";
+import ChatEditor from "./ChatEditor.svelte";
 import ToolCallsSection from "./ToolCallsSection.svelte";
 
 interface Props {
@@ -20,6 +22,45 @@ const { messenger, isInputFocused = false }: Props = $props();
 const messages = $derived.by(() => {
 	return messenger.session?.messages;
 });
+
+// Edit mode state
+let editingMessageId: UUIDv7 | null = $state(null);
+
+function startEdit(messagePair: MessagePair) {
+	editingMessageId = messagePair.id;
+}
+
+function cancelEdit() {
+	editingMessageId = null;
+}
+
+async function submitEdit(messageId: UUIDv7, newContent: string) {
+	editingMessageId = null;
+	try {
+		await messenger.session?.editMessage(messageId, newContent);
+	} catch (error) {
+		console.error("[MessageContainer] Edit failed:", error);
+		new Notice(`Edit failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+	}
+}
+
+async function regenerateResponse(messageId: UUIDv7) {
+	try {
+		await messenger.session?.regenerateResponse(messageId);
+	} catch (error) {
+		console.error("[MessageContainer] Regenerate failed:", error);
+		new Notice(`Regenerate failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+	}
+}
+
+async function handleBranchNavigate(checkpointId: string) {
+	try {
+		await messenger.switchToBranch(checkpointId);
+	} catch (error) {
+		console.error("[MessageContainer] Branch switch failed:", error);
+		new Notice(`Branch switch failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+	}
+}
 
 let scrollContainer: HTMLDivElement | undefined = $state();
 const messageRefs = new Map<string, HTMLDivElement>();
@@ -119,14 +160,6 @@ async function copyToClipboard(content: string) {
 	new Notice("Copied to Clipboard");
 }
 
-async function redoMessage(messageId: UUIDv7, model: ChatModel) {
-	console.log("todo resend");
-}
-
-async function branchOff(messageId: UUIDv7) {
-	console.log("todo branch off");
-}
-
 // Track which message pairs have their tools open
 let toolsOpenState: Record<string, boolean> = $state({});
 
@@ -163,44 +196,66 @@ function setToolsOpen(messageId: string, open: boolean) {
 				</div>
 			{:else}
 				{#each messages as messagePair, index}
+					<!-- User Message -->
 					<div
 						use:registerMessageRef={messagePair.id + "-user"}
 						class="group mr-2 flex flex-col items-end gap-2 mb-2"
 					>
-						<MarkdownRenderer
-							content={messagePair.userMessage.content}
-							class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2 [&>p]:m-0"
-						/>
+						{#if editingMessageId === messagePair.id}
+							<!-- Edit Mode -->
+							<div class="w-full max-w-[80%] rounded-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2">
+								<ChatEditor
+									initialValue={messagePair.userMessage.content}
+									placeholder="Edit your message..."
+									onSubmit={(content) => submitEdit(messagePair.id, content)}
+									onCancel={cancelEdit}
+									minHeight="40px"
+									maxHeight="200px"
+								/>
+								<div class="flex justify-end gap-1 mt-2 text-xs text-text-muted">
+									<span>Press <kbd class="px-1 py-0.5 rounded bg-background-modifier-hover font-mono">Enter</kbd> to save</span>
+									<span class="mx-1">|</span>
+									<span>Press <kbd class="px-1 py-0.5 rounded bg-background-modifier-hover font-mono">Esc</kbd> to cancel</span>
+								</div>
+							</div>
+						{:else}
+							<!-- Display Mode -->
+							<MarkdownRenderer
+								content={messagePair.userMessage.content}
+								class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2 [&>p]:m-0"
+							/>
+						{/if}
 
-						<div
-							class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-						>
-						<IconButton
-							icon="refresh-cw"
-							label="Redo message"
-							class="hover:text-[--text-accent]"
-							onclick={() => console.log("redo Message")}
-						/>
-						<IconButton
-							icon="split"
-							label="Branch off"
-							class="hover:text-[--text-accent]"
-							onclick={() => console.log("split")}
-						/>
-						<IconButton
-							icon="edit"
-							label="Edit message"
-							class="hover:text-[--text-accent]"
-							onclick={() => console.log("edit")}
-						/>
-						<IconButton
-							icon="copy"
-							label="Copy message"
-							class="hover:text-[--text-accent]"
-							onclick={() => copyToClipboard(messagePair.userMessage.content)}
-						/>
+						<!-- User message actions and branch navigator -->
+						<div class="flex flex-row items-center gap-2">
+							{#if editingMessageId !== messagePair.id}
+								<div
+									class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+								>
+									{#if messagePair.userBranchInfo}
+										<BranchNavigator
+											branchInfo={messagePair.userBranchInfo}
+											onNavigate={handleBranchNavigate}
+										/>
+									{/if}
+									<IconButton
+										icon="edit"
+										label="Edit message"
+										class="hover:text-[--text-accent]"
+										onclick={() => startEdit(messagePair)}
+									/>
+									<IconButton
+										icon="copy"
+										label="Copy message"
+										class="hover:text-[--text-accent]"
+										onclick={() => copyToClipboard(messagePair.userMessage.content)}
+									/>
+								</div>
+							{/if}
 						</div>
 					</div>
+
+					<!-- Assistant Message -->
 					<div class:min-h-[95%]={index === messages.length - 1}>
 						<div class="group flex flex-col px-2 gap-3 mb-2 w-full">
 							<!-- Tools Section (collapsible) -->
@@ -233,28 +288,31 @@ function setToolsOpen(messageId: string, open: boolean) {
 								{/if}
 							{/if}
 
+							<!-- Assistant message actions and branch navigator -->
 							{#if !(messagePair.assistantMessage.state === AssistantState.streaming)}
-								<div
-									class="flex flex-row gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-								>
-								<IconButton
-									icon="copy"
-									label="Copy response"
-									class="hover:text-[--text-accent]"
-									onclick={() => copyToClipboard(messagePair.assistantMessage.content)}
-								/>
-								<IconButton
-									icon="split"
-									label="Branch off"
-									class="hover:text-[--text-accent]"
-									onclick={() => branchOff(messagePair.id)}
-								/>
-								<IconButton
-									icon="refresh-cw"
-									label="Redo message"
-									class="hover:text-[--text-accent]"
-									onclick={() => console.log("redo Message")}
-								/>
+								<div class="flex flex-row items-center gap-2">
+									<div
+										class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+									>
+										{#if messagePair.assistantBranchInfo}
+											<BranchNavigator
+												branchInfo={messagePair.assistantBranchInfo}
+												onNavigate={handleBranchNavigate}
+											/>
+										{/if}
+										<IconButton
+											icon="copy"
+											label="Copy response"
+											class="hover:text-[--text-accent]"
+											onclick={() => copyToClipboard(messagePair.assistantMessage.content)}
+										/>
+										<IconButton
+											icon="refresh-cw"
+											label="Regenerate response"
+											class="hover:text-[--text-accent]"
+											onclick={() => regenerateResponse(messagePair.id)}
+										/>
+									</div>
 								</div>
 							{/if}
 						</div>

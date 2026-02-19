@@ -54,6 +54,45 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 	// --- File System Helpers ---
 
+	private parseNdjsonObject<T>(content: string, context: string): T {
+		const records = content
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.filter((line) => line.length > 0);
+
+		if (records.length !== 1) {
+			throw new Error(`Invalid NDJSON format for ${context}: expected 1 record, found ${records.length}`);
+		}
+
+		return JSON.parse(records[0]) as T;
+	}
+
+	private getCheckpointTimestamp(entry: CheckpointEntry): number {
+		const ts = entry.checkpoint?.ts;
+		if (typeof ts !== "string") return 0;
+		const parsed = Date.parse(ts);
+		return Number.isNaN(parsed) ? 0 : parsed;
+	}
+
+	private getCheckpointStep(entry: CheckpointEntry): number {
+		const step = entry.metadata?.step;
+		return typeof step === "number" ? step : Number.NEGATIVE_INFINITY;
+	}
+
+	private getSortedCheckpointIds(threadData: ThreadData): string[] {
+		return Object.entries(threadData.checkpoints)
+			.sort((a, b) => {
+				const tsDiff = this.getCheckpointTimestamp(b[1]) - this.getCheckpointTimestamp(a[1]);
+				if (tsDiff !== 0) return tsDiff;
+
+				const stepDiff = this.getCheckpointStep(b[1]) - this.getCheckpointStep(a[1]);
+				if (stepDiff !== 0) return stepDiff;
+
+				return b[0].localeCompare(a[0]);
+			})
+			.map(([id]) => id);
+	}
+
 	private getChatFolder(): string {
 		const data = getData();
 		return data.targetFolder;
@@ -172,7 +211,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 			try {
 				const content = await this.adapter.read(file);
-				const data = JSON.parse(content) as ThreadData;
+				const data = this.parseNdjsonObject<ThreadData>(content, file);
 				if (data?.threadId) {
 					// Cache path
 					this.filePathCache.set(data.threadId, file);
@@ -199,7 +238,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		const indexPath = this.getIndexPath();
 		const snapshots = Array.from(this.threadIndex.values());
 		try {
-			await this.adapter.write(indexPath, JSON.stringify(snapshots, null, 2));
+			await this.adapter.write(indexPath, JSON.stringify(snapshots));
 		} catch (e) {
 			console.error("Error saving chat index:", e);
 		}
@@ -223,7 +262,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		try {
 			if (await this.adapter.exists(path)) {
 				const content = await this.adapter.read(path);
-				const data = JSON.parse(content) as ThreadData;
+				const data = this.parseNdjsonObject<ThreadData>(content, path);
 				this.storage.set(threadId, data);
 				return data;
 			}
@@ -256,7 +295,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		const path = await this.resolveFilePath(threadId);
 
 		try {
-			await this.adapter.write(path, JSON.stringify(data, null, 2));
+			await this.adapter.write(path, `${JSON.stringify(data)}\n`);
 
 			// Update index
 			this.threadIndex.set(threadId, {
@@ -379,10 +418,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		const checkpoints = Object.values(threadData.checkpoints);
 		if (checkpoints.length === 0) return undefined;
 
-		// Find latest by getting keys and sorting (could rely on insertion order if reliable, but timestamps/keys are safer)
-		// We use lex sort on keys (checkpoint_ids are usually lex-sortable uuids or similar)
-		const keys = Object.keys(threadData.checkpoints).sort().reverse();
-		const latestId = keys[0];
+		const sortedCheckpointIds = this.getSortedCheckpointIds(threadData);
+		const latestId = sortedCheckpointIds[0];
+		if (!latestId) return undefined;
 		const entry = threadData.checkpoints[latestId];
 
 		// Collect writes from the latest checkpoint AND any error writes from subsequent checkpoints
@@ -438,13 +476,21 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		const threadData = await this.ensureThreadLoaded(threadId);
 		if (!threadData) return;
 
-		const keys = Object.keys(threadData.checkpoints).sort().reverse();
+		const sortedCheckpointIds = this.getSortedCheckpointIds(threadData);
+		if (sortedCheckpointIds.length === 0) return;
 
-		for (const key of keys) {
-			const entry = threadData.checkpoints[key];
-			if (options?.before?.configurable?.checkpoint_id && key >= options.before.configurable.checkpoint_id) {
-				continue;
+		const beforeId = options?.before?.configurable?.checkpoint_id;
+		let keysToIterate = sortedCheckpointIds;
+		if (typeof beforeId === "string") {
+			const beforeIndex = sortedCheckpointIds.indexOf(beforeId);
+			if (beforeIndex < 0) {
+				return;
 			}
+			keysToIterate = sortedCheckpointIds.slice(beforeIndex + 1);
+		}
+
+		for (const key of keysToIterate) {
+			const entry = threadData.checkpoints[key];
 
 			yield {
 				config: {
