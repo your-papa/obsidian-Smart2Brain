@@ -288,14 +288,22 @@ function findFirstHumanInBranch(graph: CheckpointGraphState, startId: string): s
 
 function findDeterministicTipFrom(graph: CheckpointGraphState, startId: string): string {
 	let current = startId;
+	const visited = new Set<string>();
 
 	while (true) {
+		if (visited.has(current)) {
+			checkpointDebug("cycle.detected.tip_traversal", { checkpointId: current, startId });
+			return current;
+		}
+		visited.add(current);
+
 		const node = graph.nodes.get(current);
 		if (!node || node.children.length === 0) {
 			return current;
 		}
 
 		const bestChild = [...node.children]
+			.filter((id) => !visited.has(id))
 			.map((id) => graph.nodes.get(id))
 			.filter((child): child is CheckpointNode => !!child)
 			.sort(compareNewest)
