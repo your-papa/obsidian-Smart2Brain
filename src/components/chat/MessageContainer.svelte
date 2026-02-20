@@ -10,6 +10,7 @@ import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 import Logo from "../ui/logos/Logo.svelte";
 import BranchNavigator from "./BranchNavigator.svelte";
 import ChatEditor from "./ChatEditor.svelte";
+import CollapsibleUserBubble from "./CollapsibleUserBubble.svelte";
 import ToolCallsSection from "./ToolCallsSection.svelte";
 
 interface Props {
@@ -220,9 +221,9 @@ function setToolsOpen(messageId: string, open: boolean) {
 							</div>
 						{:else}
 							<!-- Display Mode -->
-							<MarkdownRenderer
+							<CollapsibleUserBubble
 								content={messagePair.userMessage.content}
-								class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2 [&>p]:m-0"
+								class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2"
 							/>
 						{/if}
 
