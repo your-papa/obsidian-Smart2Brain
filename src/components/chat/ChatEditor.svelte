@@ -40,12 +40,9 @@ const {
 	autoFocus = true,
 }: Props = $props();
 
-// Capture initial value at creation time (for modals/one-time components)
-const capturedInitial = initialValue;
-
 let editorContainer: HTMLDivElement | undefined = $state();
 let markdownEditor: EmbeddableMarkdownEditor | undefined = $state();
-let inputValue = $state(capturedInitial);
+let inputValue = $state("");
 
 export function focus() {
 	requestAnimationFrame(() => {
@@ -68,6 +65,9 @@ export function setValue(value: string) {
 }
 
 onMount(() => {
+	// Initialize once from props when component mounts.
+	inputValue = initialValue;
+
 	if (editorContainer) {
 		initializeEditor();
 	}
