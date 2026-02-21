@@ -22,6 +22,16 @@ export class App {
 	vault = new Vault();
 	workspace = new Workspace();
 	metadataCache = new MetadataCache();
+	// Community plugins API
+	plugins = {
+		manifests: {} as Record<string, unknown>,
+		enabledPlugins: new Set<string>(),
+	};
+	// Internal (core) plugins API
+	internalPlugins = {
+		plugins: {} as Record<string, { enabled: boolean; instance?: unknown }>,
+		getPluginById: vi.fn().mockReturnValue(null),
+	};
 }
 
 export class Vault {

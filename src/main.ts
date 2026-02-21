@@ -4,6 +4,7 @@ import Log from "./utils/logging";
 import "./styles.css";
 import { AgentManager } from "./agent/AgentManager";
 import { getQueryClient } from "./lib/query";
+import { SkillsService } from "./skills";
 import { createMessenger } from "./stores/chatStore.svelte";
 import { type PluginDataStore, createData } from "./stores/dataStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
@@ -14,6 +15,7 @@ import SettingsTab from "./views/settings/Settings";
 export type {
 	AgentColor,
 	AgentConfig,
+	AgentSkillState,
 	AgentsConfig,
 	BuiltInToolId,
 	DataviewQuerySettings,
@@ -25,10 +27,14 @@ export type {
 	MCPTransportType,
 	PluginData,
 	PluginDataKey,
-	PluginPromptExtension,
 	ReadNoteSettings,
 	SearchAlgorithm,
 	SearchNotesSettings,
+	Skill,
+	SkillDisplayInfo,
+	SkillEnableState,
+	SkillFrontmatter,
+	SkillMetadata,
 	ToolConfig,
 	ToolsConfig,
 	ToolSpecificSettings,
@@ -36,12 +42,17 @@ export type {
 
 export default class SecondBrainPlugin extends Plugin {
 	agentManager!: AgentManager;
+	skillsService!: SkillsService;
 	queryClient = getQueryClient();
 	pluginData!: PluginDataStore;
 
 	async onload() {
 		setPlugin(this);
 		this.pluginData = await createData(this);
+
+		// Initialize Skills Service (Agent Skills spec)
+		this.skillsService = new SkillsService(this);
+		await this.skillsService.initialize();
 
 		// Register file-based chat view and .chat extension (v2 ChatView)
 		// const VIEW_TYPE = "my-view";

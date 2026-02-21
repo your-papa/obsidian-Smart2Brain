@@ -27,7 +27,7 @@ export class SystemPromptModal extends Modal {
 		// Set modal dimensions directly - more reliable than CSS selectors
 		this.modalEl.style.width = "min(1200px, 94vw)";
 		this.modalEl.style.maxWidth = "94vw";
-		this.modalEl.style.height = "70vh";
+		this.modalEl.style.height = "85vh";
 		this.modalEl.style.display = "flex";
 		this.modalEl.style.flexDirection = "column";
 
