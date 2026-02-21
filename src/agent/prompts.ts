@@ -1,8 +1,8 @@
-import type { PluginPromptExtension } from "../types/plugin";
+import type { PluginSkill } from "../types/plugin";
 
 /**
  * Base system prompt - core instructions without plugin-specific content.
- * Plugin extensions are appended at runtime based on what's installed and enabled.
+ * Skills are appended at runtime based on what's installed and enabled.
  */
 export const BASE_SYSTEM_PROMPT = `# Role
 You are a privacy-aware assistant integrated into Obsidian. You help users search and understand their notes.
@@ -120,10 +120,10 @@ The chat supports MathJax rendering.
 - **IMPORTANT**: Do NOT wrap the math in markdown code blocks (like \`\`\`latex or \`). The renderer needs the raw $ or $$ delimiters to detect and render the math.`;
 
 /**
- * Registry of supported plugins with their default prompt extensions.
+ * Registry of supported plugins with their default skills.
  * pluginId must match the Obsidian plugin ID used in app.plugins.enabledPlugins
  */
-export const DEFAULT_PLUGIN_EXTENSIONS: Record<string, PluginPromptExtension> = {
+export const DEFAULT_SKILLS: Record<string, PluginSkill> = {
 	dataview: {
 		pluginId: "dataview",
 		displayName: "Dataview",

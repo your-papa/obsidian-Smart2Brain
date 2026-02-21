@@ -134,19 +134,114 @@ export interface ToolConfig {
 export type ToolsConfig = Record<BuiltInToolId, ToolConfig>;
 
 /**
- * Configuration for a plugin-specific prompt extension.
+ * Configuration for a plugin-specific skill.
  * These are appended to the base system prompt when the plugin is installed and enabled.
+ * Following Anthropic's open standard, these are called "skills" rather than "extensions".
+ * @deprecated Use file-based skills with SkillFrontmatter instead. Kept for migration.
  */
-export interface PluginPromptExtension {
-	/** Internal plugin ID (e.g., "dataview", "obsidian-charts") */
+export interface PluginSkill {
+	/** Internal plugin ID (e.g., "dataview", "obsidian-charts") or unique custom ID */
 	pluginId: string;
 	/** Display name shown in settings (e.g., "Dataview") */
 	displayName: string;
-	/** Whether this extension is enabled by the user */
+	/** Whether this skill is enabled by the user */
 	enabled: boolean;
 	/** The prompt content for this plugin */
 	prompt: string;
+	/** Whether this is a custom user-defined skill (not tied to a plugin) */
+	isCustom?: boolean;
+	/** Skill category: core, plugin, or custom */
+	category?: SkillCategory;
+	/** Obsidian Core plugin ID this skill is linked to */
+	corePluginId?: string;
+	/** Obsidian Community plugin ID this skill is linked to */
+	linkedPluginId?: string;
 }
+
+// ============================================================================
+// Agent Skills Specification Types (https://agentskills.io/specification)
+// ============================================================================
+
+/**
+ * Skill category for organizing skills in the UI.
+ * - "core": Based on Obsidian Core plugins (e.g., Canvas, Bases, Math/LaTeX)
+ * - "plugin": Based on Obsidian Community plugins (e.g., Dataview, Charts)
+ * - "custom": User-defined skills not tied to any plugin
+ */
+export type SkillCategory = "core" | "plugin" | "custom";
+
+/**
+ * YAML frontmatter for a SKILL.md file per Agent Skills spec.
+ * @see https://agentskills.io/specification
+ */
+export interface SkillFrontmatter {
+	/**
+	 * Skill identifier. Must be 1-64 characters, lowercase alphanumeric + hyphens.
+	 * Must not start/end with hyphen or contain consecutive hyphens.
+	 * Must match the parent directory name.
+	 */
+	name: string;
+	/**
+	 * Description of what the skill does and when to use it.
+	 * Must be 1-1024 characters. Used for skill matching/activation.
+	 */
+	description: string;
+	/** Optional license name or reference to bundled LICENSE file */
+	license?: string;
+	/**
+	 * Optional environment requirements (intended product, system packages, network access).
+	 * Max 500 characters.
+	 */
+	compatibility?: string;
+	/** Optional arbitrary key-value metadata */
+	metadata?: Record<string, string>;
+	/**
+	 * Optional space-delimited list of pre-approved tools.
+	 * Experimental per spec.
+	 */
+	allowedTools?: string;
+}
+
+/**
+ * Skill metadata loaded during discovery phase.
+ * Contains only frontmatter + path for efficient context usage (~50-100 tokens per skill).
+ */
+export interface SkillMetadata {
+	/** Parsed frontmatter from SKILL.md */
+	frontmatter: SkillFrontmatter;
+	/** Absolute path to the skill directory */
+	path: string;
+	/**
+	 * Whether this skill is linked to an Obsidian community plugin (e.g., "dataview").
+	 * If set, skill is only active when the plugin is installed and enabled.
+	 */
+	linkedPluginId?: string;
+	/**
+	 * Skill category for UI grouping and behavior.
+	 * Extracted from frontmatter.metadata.category or inferred from linkedPluginId/corePluginId.
+	 */
+	category?: SkillCategory;
+	/**
+	 * Obsidian Core plugin ID this skill is linked to (e.g., "canvas", "bases").
+	 * If set, skill is only active when the core plugin is enabled.
+	 */
+	corePluginId?: string;
+}
+
+/**
+ * Full skill loaded during activation phase.
+ * Contains metadata + full markdown body content for injection into system prompt.
+ */
+export interface Skill extends SkillMetadata {
+	/** Full markdown body content (after frontmatter) */
+	content: string;
+}
+
+/**
+ * Enable/disable state for skills per agent.
+ * Stored in data.json - only boolean state, not full content.
+ */
+export type SkillEnableState = Record<string, boolean>;
 
 // ============================================================================
 // Agent Configuration Types
@@ -165,8 +260,8 @@ export interface AgentConfig {
 	chatModel: import("../stores/chatStore.svelte").ChatModel | null;
 	/** Base system prompt for this agent */
 	systemPrompt: string;
-	/** Plugin-specific prompt extensions for this agent */
-	pluginPromptExtensions: Record<string, PluginPromptExtension>;
+	/** Plugin-specific skills for this agent */
+	skills: Record<string, PluginSkill>;
 	/** Configuration for built-in tools */
 	toolsConfig: ToolsConfig;
 	/** MCP server configurations for this agent */
@@ -210,8 +305,8 @@ export interface PluginData {
 	toolsConfig: ToolsConfig;
 	/** @deprecated Use agents[agentId].systemPrompt instead */
 	systemPrompt: string;
-	/** @deprecated Use agents[agentId].pluginPromptExtensions instead */
-	pluginPromptExtensions: Record<string, PluginPromptExtension>;
+	/** @deprecated Use agents[agentId].skills instead */
+	skills: Record<string, PluginSkill>;
 	/** @deprecated Use agents[agentId].chatModel instead */
 	defaultChatModel: ChatModel | null;
 	/** @deprecated Use agents[agentId].mcpServers instead */

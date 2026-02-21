@@ -16,6 +16,7 @@ import { LangSmithTelemetry, type Telemetry } from "./telemetry";
 import { createExecuteDataviewTool } from "./tools/executeDataview";
 import { createGetAllTagsTool } from "./tools/getAllTags";
 import { createGetPropertiesTool } from "./tools/getProperties";
+import { createLoadSkillTool } from "./tools/loadSkill";
 import { createReadNoteTool } from "./tools/readNote";
 import { createSearchNotesTool } from "./tools/searchNotes";
 
@@ -102,7 +103,7 @@ export class AgentManager {
 	}
 
 	/**
-	 * Check if an Obsidian plugin is enabled (installed and active).
+	 * Check if an Obsidian community plugin is enabled (installed and active).
 	 * Special case: "math-latex" is always considered enabled (built-in rendering).
 	 */
 	isPluginEnabled(pluginId: string): boolean {
@@ -112,44 +113,68 @@ export class AgentManager {
 	}
 
 	/**
-	 * Get list of enabled plugins from the supported extensions.
+	 * Check if an Obsidian core (internal) plugin is enabled.
+	 * Uses undocumented internal API - may need updates with Obsidian changes.
+	 * @param pluginId - Core plugin ID (e.g., "canvas", "bases")
 	 */
-	getEnabledPluginIds(): string[] {
-		const pluginData = getData();
-		return Object.keys(pluginData.pluginPromptExtensions).filter((id) => this.isPluginEnabled(id));
+	isInternalPluginEnabled(pluginId: string): boolean {
+		// @ts-ignore - Obsidian internal plugin API (not in official types)
+		const internalPlugins = this.plugin.app.internalPlugins;
+		return Boolean(internalPlugins?.plugins?.[pluginId]?.enabled);
 	}
 
 	/**
-	 * Assembles the full system prompt from base prompt + enabled plugin extensions.
-	 * Uses the currently selected agent's configuration.
-	 * Only includes extensions for plugins that are both enabled AND installed.
+	 * Get list of enabled plugins from the supported skills.
 	 */
-	assembleSystemPrompt(): string {
+	getEnabledPluginIds(): string[] {
+		const pluginData = getData();
+		return Object.keys(pluginData.skills).filter((id) => this.isPluginEnabled(id));
+	}
+
+	/**
+	 * Assembles the full system prompt from base prompt + enabled skills.
+	 * Uses the currently selected agent's configuration.
+	 * Only includes skills for plugins that are both enabled AND installed.
+	 */
+	async assembleSystemPrompt(): Promise<string> {
 		const pluginData = getData();
 		const selectedAgent = pluginData.getSelectedAgent();
 
-		// Use selected agent's prompt, fallback to legacy data, then default
+		// Use selected agent's prompt, fallback to default
 		let prompt = selectedAgent?.systemPrompt || pluginData.systemPrompt || BASE_SYSTEM_PROMPT;
 
-		// Get plugin extensions from the selected agent or legacy data
-		const extensions = selectedAgent?.pluginPromptExtensions ?? pluginData.pluginPromptExtensions;
-
-		// Append enabled extensions for enabled plugins
-		for (const [pluginId, ext] of Object.entries(extensions)) {
-			if (ext.enabled && this.isPluginEnabled(pluginId) && ext.prompt?.trim()) {
-				prompt += `\n\n${ext.prompt}`;
-			}
+		const skillsService = this.plugin.skillsService;
+		if (!skillsService?.isDiscovered()) {
+			return prompt;
 		}
 
+		// Build enable state from agent's skill configuration
+		// Skills default to enabled unless explicitly disabled by the agent
+		const agentSkills = selectedAgent?.skills ?? {};
+		const enableState: Record<string, boolean> = {};
+		for (const [name] of skillsService.getCachedSkills()) {
+			// Check agent's skill settings, default to enabled if not specified
+			enableState[name] = agentSkills[name]?.enabled ?? true;
+		}
+
+		// Add available skills context XML (for skill discovery via load_skill tool)
+		const contextXml = skillsService.generateContextXml(enableState);
+		if (contextXml) {
+			prompt += `\n\n${contextXml}`;
+			// Add instruction for dynamic skill loading
+			prompt += `\n\n# Skills\nThe above available_skills section lists skills that can help you with specific tasks. When you need detailed instructions for a skill, use the \`load_skill\` tool with the skill name to retrieve the full instructions. Only load skills when you actually need them for a task.`;
+		}
+
+		console.log(`[AgentManager] Final system prompt length: ${prompt.length} chars`);
 		return prompt;
 	}
 
 	/**
 	 * Updates the agent's system prompt by reassembling from current settings.
-	 * Call this after changing base prompt or plugin extensions.
+	 * Call this after changing base prompt or skills.
 	 */
-	updateSystemPrompt(): void {
-		const assembledPrompt = this.assembleSystemPrompt();
+	async updateSystemPrompt(): Promise<void> {
+		const assembledPrompt = await this.assembleSystemPrompt();
 		this.agent?.setPrompt(assembledPrompt);
 	}
 
@@ -346,6 +371,14 @@ export class AgentManager {
 			tools.push(createReadNoteTool(this.plugin.app));
 		}
 
+		// Add load_skill tool if skillsService is available and has skills
+		if (this.plugin.skillsService?.isDiscovered()) {
+			const skillsCache = this.plugin.skillsService.getCachedSkills();
+			if (skillsCache.size > 0) {
+				tools.push(createLoadSkillTool(this.plugin.skillsService));
+			}
+		}
+
 		// Get MCP servers from selected agent or legacy data
 		const mcpServers = selectedAgent?.mcpServers
 			? data.getAgentMCPServersForClient(selectedAgent.id)
@@ -442,8 +475,8 @@ export class AgentManager {
 			telemetry,
 		});
 
-		// Set assembled prompt (base + enabled plugin extensions)
-		this.agent.setPrompt(this.assembleSystemPrompt());
+		// Set assembled prompt (base + enabled skills)
+		this.agent.setPrompt(await this.assembleSystemPrompt());
 
 		// Get model from selected agent or fallback to legacy default
 		const selectedAgent = pluginData.getSelectedAgent();
@@ -464,17 +497,17 @@ export class AgentManager {
 	): AsyncGenerator<
 		| { type: "token"; token: string }
 		| {
-				type: "tool_start";
-				toolCallId: string;
-				toolName: string;
-				input: unknown;
-		  }
+			type: "tool_start";
+			toolCallId: string;
+			toolName: string;
+			input: unknown;
+		}
 		| {
-				type: "tool_end";
-				toolCallId: string;
-				toolName: string;
-				output: unknown;
-		  }
+			type: "tool_end";
+			toolCallId: string;
+			toolName: string;
+			output: unknown;
+		}
 		| { type: "result"; result: unknown },
 		void,
 		unknown
@@ -567,17 +600,17 @@ export class AgentManager {
 	): AsyncGenerator<
 		| { type: "token"; token: string }
 		| {
-				type: "tool_start";
-				toolCallId: string;
-				toolName: string;
-				input: unknown;
-		  }
+			type: "tool_start";
+			toolCallId: string;
+			toolName: string;
+			input: unknown;
+		}
 		| {
-				type: "tool_end";
-				toolCallId: string;
-				toolName: string;
-				output: unknown;
-		  }
+			type: "tool_end";
+			toolCallId: string;
+			toolName: string;
+			output: unknown;
+		}
 		| { type: "result"; result: unknown },
 		void,
 		unknown
@@ -664,17 +697,17 @@ export class AgentManager {
 	): AsyncGenerator<
 		| { type: "token"; token: string }
 		| {
-				type: "tool_start";
-				toolCallId: string;
-				toolName: string;
-				input: unknown;
-		  }
+			type: "tool_start";
+			toolCallId: string;
+			toolName: string;
+			input: unknown;
+		}
 		| {
-				type: "tool_end";
-				toolCallId: string;
-				toolName: string;
-				output: unknown;
-		  }
+			type: "tool_end";
+			toolCallId: string;
+			toolName: string;
+			output: unknown;
+		}
 		| { type: "result"; result: unknown },
 		void,
 		unknown

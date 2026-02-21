@@ -37,18 +37,6 @@ Use multiple `-r` flags to query multiple resources at once:
 bunx btca ask -r svelte -r bitsUi -q "How do I create accessible dialog components?"
 ```
 
-## codesearch
-
-**Prefer codesearch over grep/glob** for finding code in this repository. It uses semantic search to find relevant code.
-
-### Usage
-
-```bash
-bunx codesearch search "<question>"
-```
-
-Only use the `search` command. Do not use `index`, `watch`, `init`, or `stats` commands.
-
 ## Custom Components
 
 **Use project components over standard HTML elements.** This project has custom Obsidian-styled components in `src/components/`.

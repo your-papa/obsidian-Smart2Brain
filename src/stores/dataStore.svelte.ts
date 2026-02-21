@@ -1,5 +1,5 @@
 import { normalizePath } from "obsidian";
-import { BASE_SYSTEM_PROMPT, DEFAULT_PLUGIN_EXTENSIONS } from "../agent/prompts";
+import { BASE_SYSTEM_PROMPT, DEFAULT_SKILLS } from "../agent/prompts";
 import { getSecret, listSecrets, setSecret } from "../lib/secretStorage";
 import SecondBrainPlugin, {
 	type AgentConfig,
@@ -8,7 +8,7 @@ import SecondBrainPlugin, {
 	type MCPServerConfig,
 	type MCPServersConfig,
 	type PluginData,
-	type PluginPromptExtension,
+	type PluginSkill,
 	type SearchAlgorithm,
 	type ToolConfig,
 	type ToolsConfig,
@@ -228,7 +228,7 @@ export function createDefaultAgentConfig(id?: string, name?: string): AgentConfi
 		name: name ?? "New Agent",
 		chatModel: null,
 		systemPrompt: BASE_SYSTEM_PROMPT,
-		pluginPromptExtensions: structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
+		skills: structuredClone(DEFAULT_SKILLS),
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
 	};
@@ -243,7 +243,7 @@ function createDefaultAgent(): AgentConfig {
 		name: "Default Agent",
 		chatModel: null,
 		systemPrompt: BASE_SYSTEM_PROMPT,
-		pluginPromptExtensions: structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
+		skills: structuredClone(DEFAULT_SKILLS),
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
 	};
@@ -265,7 +265,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	// Legacy fields (kept for migration compatibility)
 	toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 	systemPrompt: BASE_SYSTEM_PROMPT,
-	pluginPromptExtensions: structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
+	skills: structuredClone(DEFAULT_SKILLS),
 	defaultChatModel: null,
 	mcpServers: {},
 
@@ -379,43 +379,43 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
-	// --- Plugin Prompt Extensions ---
+	// --- Skills ---
 
-	get pluginPromptExtensions(): Record<string, PluginPromptExtension> {
-		return this.#data.pluginPromptExtensions;
+	get skills(): Record<string, PluginSkill> {
+		return this.#data.skills;
 	}
 
-	getPluginExtension(pluginId: string): PluginPromptExtension | undefined {
-		return this.#data.pluginPromptExtensions[pluginId];
+	getSkill(pluginId: string): PluginSkill | undefined {
+		return this.#data.skills[pluginId];
 	}
 
-	setPluginExtensionEnabled(pluginId: string, enabled: boolean): void {
-		if (this.#data.pluginPromptExtensions[pluginId]) {
-			this.#data.pluginPromptExtensions[pluginId].enabled = enabled;
+	setSkillEnabled(pluginId: string, enabled: boolean): void {
+		if (this.#data.skills[pluginId]) {
+			this.#data.skills[pluginId].enabled = enabled;
 			this.saveSettings();
 		}
 	}
 
-	setPluginExtensionPrompt(pluginId: string, prompt: string): void {
-		if (this.#data.pluginPromptExtensions[pluginId]) {
-			this.#data.pluginPromptExtensions[pluginId].prompt = prompt;
+	setSkillPrompt(pluginId: string, prompt: string): void {
+		if (this.#data.skills[pluginId]) {
+			this.#data.skills[pluginId].prompt = prompt;
 			this.saveSettings();
 		}
 	}
 
-	updatePluginExtension(pluginId: string, updates: Partial<PluginPromptExtension>): void {
-		if (this.#data.pluginPromptExtensions[pluginId]) {
-			this.#data.pluginPromptExtensions[pluginId] = {
-				...this.#data.pluginPromptExtensions[pluginId],
+	updateSkill(pluginId: string, updates: Partial<PluginSkill>): void {
+		if (this.#data.skills[pluginId]) {
+			this.#data.skills[pluginId] = {
+				...this.#data.skills[pluginId],
 				...updates,
 			};
 			this.saveSettings();
 		}
 	}
 
-	resetPluginExtensionToDefault(pluginId: string): void {
-		if (DEFAULT_PLUGIN_EXTENSIONS[pluginId]) {
-			this.#data.pluginPromptExtensions[pluginId] = structuredClone(DEFAULT_PLUGIN_EXTENSIONS[pluginId]);
+	resetSkillToDefault(pluginId: string): void {
+		if (DEFAULT_SKILLS[pluginId]) {
+			this.#data.skills[pluginId] = structuredClone(DEFAULT_SKILLS[pluginId]);
 			this.saveSettings();
 		}
 	}
@@ -506,7 +506,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch (_) {
 			// ignore
@@ -965,38 +965,84 @@ export class PluginDataStore {
 		return result;
 	}
 
-	// --- Agent-specific Plugin Prompt Extensions ---
+	// --- Agent-specific Skills ---
 
 	/**
-	 * Get plugin prompt extensions for a specific agent.
+	 * Get skills for a specific agent.
 	 */
-	getAgentPluginExtensions(agentId: string): Record<string, PluginPromptExtension> {
-		return this.#data.agents[agentId]?.pluginPromptExtensions ?? {};
+	getAgentSkills(agentId: string): Record<string, PluginSkill> {
+		return this.#data.agents[agentId]?.skills ?? {};
 	}
 
 	/**
-	 * Set plugin extension enabled state for an agent.
+	 * Set skill enabled state for an agent.
+	 * Creates a minimal skill entry if it doesn't exist (for file-based skills).
 	 */
-	setAgentPluginExtensionEnabled(agentId: string, pluginId: string, enabled: boolean): void {
+	setAgentSkillEnabled(agentId: string, pluginId: string, enabled: boolean): void {
 		const agent = this.#data.agents[agentId];
-		if (agent?.pluginPromptExtensions[pluginId]) {
-			agent.pluginPromptExtensions[pluginId].enabled = enabled;
-			this.saveSettings();
+		if (!agent) return;
+
+		if (agent.skills[pluginId]) {
+			agent.skills[pluginId].enabled = enabled;
+		} else {
+			// Create a minimal skill entry for file-based skills
+			agent.skills[pluginId] = {
+				pluginId,
+				displayName: pluginId,
+				prompt: "",
+				enabled,
+				isCustom: true,
+			};
 		}
+		this.saveSettings();
 	}
 
 	/**
-	 * Update plugin extension for an agent.
+	 * Update skill for an agent.
 	 */
-	updateAgentPluginExtension(agentId: string, pluginId: string, updates: Partial<PluginPromptExtension>): void {
+	updateAgentSkill(agentId: string, pluginId: string, updates: Partial<PluginSkill>): void {
 		const agent = this.#data.agents[agentId];
-		if (agent?.pluginPromptExtensions[pluginId]) {
-			agent.pluginPromptExtensions[pluginId] = {
-				...agent.pluginPromptExtensions[pluginId],
+		if (agent?.skills[pluginId]) {
+			agent.skills[pluginId] = {
+				...agent.skills[pluginId],
 				...updates,
 			};
 			this.saveSettings();
 		}
+	}
+
+	/**
+	 * Add a new custom skill for an agent.
+	 * @returns The generated skill ID
+	 */
+	addAgentSkill(agentId: string, skill: Omit<PluginSkill, "pluginId" | "isCustom">): string {
+		const agent = this.#data.agents[agentId];
+		if (!agent) return "";
+
+		const skillId = `custom-${genUUIDv7()}`;
+		agent.skills[skillId] = {
+			...skill,
+			pluginId: skillId,
+			isCustom: true,
+		};
+		this.saveSettings();
+		return skillId;
+	}
+
+	/**
+	 * Delete a custom skill from an agent.
+	 * Only custom skills can be deleted; built-in skills are preserved.
+	 */
+	deleteAgentSkill(agentId: string, pluginId: string): boolean {
+		const agent = this.#data.agents[agentId];
+		if (!agent?.skills[pluginId]) return false;
+
+		// Only allow deleting custom skills
+		if (!agent.skills[pluginId].isCustom) return false;
+
+		delete agent.skills[pluginId];
+		this.saveSettings();
+		return true;
 	}
 
 	get debuggingLangchainKey() {
@@ -1605,14 +1651,14 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		...rawData,
 	};
 
-	// Migration: if user has no pluginPromptExtensions, use defaults
-	if (!rawData?.pluginPromptExtensions) {
-		mergedData.pluginPromptExtensions = structuredClone(DEFAULT_PLUGIN_EXTENSIONS);
+	// Migration: if user has no skills, use defaults
+	if (!rawData?.skills) {
+		mergedData.skills = structuredClone(DEFAULT_SKILLS);
 	} else {
 		// Merge with defaults to pick up any new plugins added in updates
-		mergedData.pluginPromptExtensions = {
-			...structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
-			...rawData.pluginPromptExtensions,
+		mergedData.skills = {
+			...structuredClone(DEFAULT_SKILLS),
+			...rawData.skills,
 		};
 	}
 
@@ -1645,7 +1691,7 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 			name: "Default Agent",
 			chatModel: rawData?.defaultChatModel ?? null,
 			systemPrompt: mergedData.systemPrompt,
-			pluginPromptExtensions: structuredClone(mergedData.pluginPromptExtensions),
+			skills: structuredClone(mergedData.skills),
 			toolsConfig: structuredClone(mergedData.toolsConfig),
 			mcpServers: rawData?.mcpServers ? structuredClone(rawData.mcpServers) : {},
 		};
@@ -1675,13 +1721,13 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 				};
 			}
 
-			// Ensure pluginPromptExtensions exists and has all plugins
-			if (!agent.pluginPromptExtensions) {
-				agent.pluginPromptExtensions = structuredClone(DEFAULT_PLUGIN_EXTENSIONS);
+			// Ensure skills exists and has all plugins
+			if (!agent.skills) {
+				agent.skills = structuredClone(DEFAULT_SKILLS);
 			} else {
-				agent.pluginPromptExtensions = {
-					...structuredClone(DEFAULT_PLUGIN_EXTENSIONS),
-					...agent.pluginPromptExtensions,
+				agent.skills = {
+					...structuredClone(DEFAULT_SKILLS),
+					...agent.skills,
 				};
 			}
 
