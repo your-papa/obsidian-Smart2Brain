@@ -1,30 +1,25 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { DEFAULT_SKILLS } from "../../agent/prompts";
+  import { getBundledSkill } from "../../skills";
   import { EmbeddableMarkdownEditor } from "../../lib/editor";
   import type SecondBrainPlugin from "../../main";
-  import type { PluginSkill } from "../../main";
-  import { getData } from "../../stores/dataStore.svelte";
   import { slugifySkillName, validateSkillName, validateDescription } from "../../skills";
-  import type { Skill, SkillMetadata } from "../../types/plugin";
+  import type { Skill } from "../../types/plugin";
   import Button from "../ui/Button.svelte";
   import Text from "../ui/Text.svelte";
-  import type { SkillAccessors, SkillModal } from "./SkillModal";
+  import type { SkillModal } from "./SkillModal";
 
   interface Props {
     modal: SkillModal;
     plugin: SecondBrainPlugin;
     pluginId: string;
     onSave: () => void;
-    accessors?: SkillAccessors;
   }
 
-  const { modal, plugin, pluginId, onSave, accessors }: Props = $props();
-  const pluginData = getData();
+  const { modal, plugin, pluginId, onSave }: Props = $props();
 
   // File-based skill data (loaded from SkillsService)
   let fileBasedSkill = $state<Skill | null>(null);
-  let isFileBasedSkill = $state(false);
   let originalSkillName = $state("");
 
   // Editable fields
@@ -54,41 +49,27 @@
 
   const isValid = $derived(validation().valid);
 
-  // Use custom accessor if provided, otherwise use global pluginData
-  function getLegacySkill(): PluginSkill | undefined {
-    return accessors?.getSkill() ?? pluginData.getSkill(pluginId);
-  }
-
-  function updateLegacySkill(updates: Partial<PluginSkill>): void {
-    if (accessors?.updateSkill) {
-      accessors.updateSkill(updates);
-    } else {
-      pluginData.updateSkill(pluginId, updates);
-    }
-  }
-
-  const legacySkill = $derived(getLegacySkill());
+  // Display name from file-based skill or fallback to pluginId
   const displayName = $derived(
     fileBasedSkill?.frontmatter.metadata?.displayName ??
       fileBasedSkill?.frontmatter.name ??
-      legacySkill?.displayName ??
       pluginId,
   );
-  const hasDefault = $derived(!!DEFAULT_SKILLS[pluginId]);
-  const isCustomSkill = $derived(legacySkill?.isCustom ?? false);
+  
+  // Check if this skill has a bundled default
+  const hasBundledDefault = $derived(!!getBundledSkill(pluginId));
 
   let editorContainer: HTMLDivElement | undefined = $state();
   let editor: EmbeddableMarkdownEditor | undefined = $state();
   let promptValue = $state("");
 
   onMount(async () => {
-    // Try to load from file-based skills first
+    // Load file-based skill
     const skillsService = plugin.skillsService;
     if (skillsService?.isDiscovered()) {
       const skillMetadata = skillsService.getCachedSkills().get(pluginId);
       if (skillMetadata) {
         fileBasedSkill = await skillsService.loadSkill(pluginId);
-        isFileBasedSkill = true;
         originalSkillName = pluginId;
 
         // Initialize editable fields from loaded skill
@@ -112,16 +93,9 @@
   });
 
   function initializeEditor() {
-    if (!editorContainer) return;
+    if (!editorContainer || !fileBasedSkill) return;
 
-    // Use file-based skill content if available, otherwise legacy
-    if (isFileBasedSkill && fileBasedSkill) {
-      promptValue = fileBasedSkill.content;
-    } else {
-      const ext = getLegacySkill();
-      if (!ext) return;
-      promptValue = ext.prompt;
-    }
+    promptValue = fileBasedSkill.content;
 
     editor = new EmbeddableMarkdownEditor(plugin.app, editorContainer, {
       value: promptValue,
@@ -139,113 +113,99 @@
       return;
     }
 
-    // Save to file
-    if (isFileBasedSkill && fileBasedSkill) {
-      const newSlug = editSlug;
-      const nameChanged = newSlug !== originalSkillName;
-
-      // If name changed, delete the old skill first
-      if (nameChanged) {
-        await plugin.skillsService.deleteSkill(originalSkillName);
-      }
-
-      // Save with updated frontmatter
-      const result = await plugin.skillsService.saveSkill({
-        frontmatter: {
-          ...fileBasedSkill.frontmatter,
-          name: newSlug,
-          description: editDescription.trim(),
-          metadata: {
-            ...fileBasedSkill.frontmatter.metadata,
-            displayName: editName.trim(),
-          },
-        },
-        content: promptValue,
-      });
-
-      if (!result.valid) {
-        validationError = result.errors[0]?.message || "Failed to save skill";
-        return;
-      }
-
-      // Re-discover to update cache
-      await plugin.skillsService.discoverSkills();
+    if (!fileBasedSkill) {
+      validationError = "No skill loaded";
+      return;
     }
+
+    const newSlug = editSlug;
+    const nameChanged = newSlug !== originalSkillName;
+
+    // If name changed, delete the old skill first
+    if (nameChanged) {
+      await plugin.skillsService.deleteSkill(originalSkillName);
+    }
+
+    // Save with updated frontmatter
+    const result = await plugin.skillsService.saveSkill({
+      frontmatter: {
+        ...fileBasedSkill.frontmatter,
+        name: newSlug,
+        description: editDescription.trim(),
+        metadata: {
+          ...fileBasedSkill.frontmatter.metadata,
+          displayName: editName.trim(),
+        },
+      },
+      content: promptValue,
+    });
+
+    if (!result.valid) {
+      validationError = result.errors[0]?.message || "Failed to save skill";
+      return;
+    }
+
+    // Re-discover to update cache
+    await plugin.skillsService.discoverSkills();
 
     onSave();
     modal.close();
   }
 
   async function handleResetToDefault() {
-    if (hasDefault) {
-      promptValue = DEFAULT_SKILLS[pluginId].prompt;
-      editor?.setValue(promptValue);
+    if (!hasBundledDefault || !fileBasedSkill) return;
+    
+    const { parseFrontmatter } = await import("../../skills");
+    const bundled = getBundledSkill(pluginId);
+    if (!bundled) return;
 
-      // If file-based, also reset the file using bundled content
-      if (isFileBasedSkill && fileBasedSkill) {
-        const { getBundledSkill, parseFrontmatter } = await import("../../skills");
-        const bundled = getBundledSkill(pluginId);
-        if (bundled) {
-          // Parse the bundled content to get frontmatter and body
-          const parsed = parseFrontmatter(bundled.content);
-          if (parsed.frontmatter.name && parsed.frontmatter.description) {
-            await plugin.skillsService.saveSkill({
-              frontmatter: parsed.frontmatter as typeof fileBasedSkill.frontmatter,
-              content: parsed.body,
-            });
-            await plugin.skillsService.discoverSkills();
-            // Update editor with reset content
-            promptValue = parsed.body;
-            editor?.setValue(promptValue);
-          }
-        }
-      }
+    // Parse the bundled content to get frontmatter and body
+    const parsed = parseFrontmatter(bundled.content);
+    if (parsed.frontmatter.name && parsed.frontmatter.description) {
+      await plugin.skillsService.saveSkill({
+        frontmatter: parsed.frontmatter as typeof fileBasedSkill.frontmatter,
+        content: parsed.body,
+      });
+      await plugin.skillsService.discoverSkills();
+      
+      // Update editor with reset content
+      promptValue = parsed.body;
+      editor?.setValue(promptValue);
+      
+      // Update editable fields
+      editName = parsed.frontmatter.metadata?.displayName ?? parsed.frontmatter.name;
+      editDescription = parsed.frontmatter.description;
     }
   }
 </script>
 
 <div class="skill-modal-content">
-  {#if isFileBasedSkill}
-    <div class="skill-field">
-      <label class="skill-label">Skill Name</label>
-      <Text
-        inputType="text"
-        value={editName}
-        placeholder="e.g., Code Review, Writing Style"
-        changeFunc={(val) => (editName = val)}
-      />
-      {#if editSlug && editSlug !== editName.toLowerCase()}
-        <p class="skill-hint">Will be saved as: {editSlug}</p>
-      {/if}
-    </div>
+  <div class="skill-field">
+    <label class="skill-label">Skill Name</label>
+    <Text
+      inputType="text"
+      value={editName}
+      placeholder="e.g., Code Review, Writing Style"
+      changeFunc={(val) => (editName = val)}
+    />
+    {#if editSlug && editSlug !== editName.toLowerCase()}
+      <p class="skill-hint">Will be saved as: {editSlug}</p>
+    {/if}
+  </div>
 
-    <div class="skill-field">
-      <label class="skill-label">Description</label>
-      <Text
-        inputType="text"
-        value={editDescription}
-        placeholder="Describe when to use this skill..."
-        changeFunc={(val) => (editDescription = val)}
-      />
-      <p class="skill-field-description">
-        A short description of what this skill does. The agent uses this to decide when to load the
-        full instructions.
-      </p>
-    </div>
-  {:else}
-    <p class="skill-description">
-      {#if isCustomSkill}
-        Edit the instructions for your custom skill "{displayName}".
-      {:else}
-        Customize the prompt instructions for the {displayName} plugin.
-        {#if !plugin.agentManager.isPluginInstalled(pluginId)}
-          <span class="text-[--text-error]">(Plugin not installed)</span>
-        {:else if !plugin.agentManager.isPluginEnabled(pluginId)}
-          <span class="text-[--text-warning]">(Plugin not enabled)</span>
-        {/if}
-      {/if}
+  <div class="skill-field">
+    <label class="skill-label">Description</label>
+    <Text
+      inputType="text"
+      value={editDescription}
+      placeholder="Describe when to use this skill..."
+      changeFunc={(val) => (editDescription = val)}
+    />
+    <p class="skill-field-description">
+      A short description of what this skill does. The agent uses this to decide when to load the
+      full instructions.
     </p>
-  {/if}
+  </div>
 
   <div class="skill-field flex-1">
     <label class="skill-label">Instructions</label>
@@ -257,7 +217,7 @@
   {/if}
 
   <div class="skill-actions">
-    {#if hasDefault}
+    {#if hasBundledDefault}
       <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
     {/if}
     <div class="flex-1"></div>
@@ -266,7 +226,7 @@
       buttonText="Save"
       cta={true}
       onClick={handleSave}
-      disabled={isFileBasedSkill && !isValid}
+      disabled={!isValid}
     />
   </div>
 </div>

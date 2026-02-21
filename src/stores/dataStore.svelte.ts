@@ -1,14 +1,14 @@
 import { normalizePath } from "obsidian";
-import { BASE_SYSTEM_PROMPT, DEFAULT_SKILLS } from "../agent/prompts";
+import { BASE_SYSTEM_PROMPT } from "../agent/prompts";
 import { getSecret, listSecrets, setSecret } from "../lib/secretStorage";
 import SecondBrainPlugin, {
 	type AgentConfig,
+	type AgentSkillState,
 	type AgentsConfig,
 	type BuiltInToolId,
 	type MCPServerConfig,
 	type MCPServersConfig,
 	type PluginData,
-	type PluginSkill,
 	type SearchAlgorithm,
 	type ToolConfig,
 	type ToolsConfig,
@@ -228,7 +228,7 @@ export function createDefaultAgentConfig(id?: string, name?: string): AgentConfi
 		name: name ?? "New Agent",
 		chatModel: null,
 		systemPrompt: BASE_SYSTEM_PROMPT,
-		skills: structuredClone(DEFAULT_SKILLS),
+		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
 	};
@@ -243,7 +243,7 @@ function createDefaultAgent(): AgentConfig {
 		name: "Default Agent",
 		chatModel: null,
 		systemPrompt: BASE_SYSTEM_PROMPT,
-		skills: structuredClone(DEFAULT_SKILLS),
+		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
 	};
@@ -265,7 +265,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	// Legacy fields (kept for migration compatibility)
 	toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 	systemPrompt: BASE_SYSTEM_PROMPT,
-	skills: structuredClone(DEFAULT_SKILLS),
+	skills: {},
 	defaultChatModel: null,
 	mcpServers: {},
 
@@ -379,45 +379,23 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
-	// --- Skills ---
+	// --- Skills (Legacy - use agent-specific methods) ---
 
-	get skills(): Record<string, PluginSkill> {
+	get skills(): Record<string, AgentSkillState> {
 		return this.#data.skills;
 	}
 
-	getSkill(pluginId: string): PluginSkill | undefined {
-		return this.#data.skills[pluginId];
+	getSkill(skillId: string): AgentSkillState | undefined {
+		return this.#data.skills[skillId];
 	}
 
-	setSkillEnabled(pluginId: string, enabled: boolean): void {
-		if (this.#data.skills[pluginId]) {
-			this.#data.skills[pluginId].enabled = enabled;
-			this.saveSettings();
+	setSkillEnabled(skillId: string, enabled: boolean): void {
+		if (this.#data.skills[skillId]) {
+			this.#data.skills[skillId].enabled = enabled;
+		} else {
+			this.#data.skills[skillId] = { enabled };
 		}
-	}
-
-	setSkillPrompt(pluginId: string, prompt: string): void {
-		if (this.#data.skills[pluginId]) {
-			this.#data.skills[pluginId].prompt = prompt;
-			this.saveSettings();
-		}
-	}
-
-	updateSkill(pluginId: string, updates: Partial<PluginSkill>): void {
-		if (this.#data.skills[pluginId]) {
-			this.#data.skills[pluginId] = {
-				...this.#data.skills[pluginId],
-				...updates,
-			};
-			this.saveSettings();
-		}
-	}
-
-	resetSkillToDefault(pluginId: string): void {
-		if (DEFAULT_SKILLS[pluginId]) {
-			this.#data.skills[pluginId] = structuredClone(DEFAULT_SKILLS[pluginId]);
-			this.saveSettings();
-		}
+		this.saveSettings();
 	}
 
 	get isUsingRag() {
@@ -968,79 +946,32 @@ export class PluginDataStore {
 	// --- Agent-specific Skills ---
 
 	/**
-	 * Get skills for a specific agent.
+	 * Get skill enable states for a specific agent.
 	 */
-	getAgentSkills(agentId: string): Record<string, PluginSkill> {
+	getAgentSkills(agentId: string): Record<string, AgentSkillState> {
 		return this.#data.agents[agentId]?.skills ?? {};
 	}
 
 	/**
 	 * Set skill enabled state for an agent.
-	 * Creates a minimal skill entry if it doesn't exist (for file-based skills).
+	 * Creates a minimal skill entry if it doesn't exist.
 	 */
-	setAgentSkillEnabled(agentId: string, pluginId: string, enabled: boolean): void {
+	setAgentSkillEnabled(agentId: string, skillId: string, enabled: boolean): void {
 		const agent = this.#data.agents[agentId];
 		if (!agent) return;
 
-		if (agent.skills[pluginId]) {
-			agent.skills[pluginId].enabled = enabled;
-		} else {
-			// Create a minimal skill entry for file-based skills
-			agent.skills[pluginId] = {
-				pluginId,
-				displayName: pluginId,
-				prompt: "",
-				enabled,
-				isCustom: true,
-			};
-		}
+		agent.skills[skillId] = { enabled };
 		this.saveSettings();
 	}
 
 	/**
-	 * Update skill for an agent.
+	 * Delete a skill entry from an agent (only removes enable state, file-based skills remain).
 	 */
-	updateAgentSkill(agentId: string, pluginId: string, updates: Partial<PluginSkill>): void {
+	deleteAgentSkillEntry(agentId: string, skillId: string): boolean {
 		const agent = this.#data.agents[agentId];
-		if (agent?.skills[pluginId]) {
-			agent.skills[pluginId] = {
-				...agent.skills[pluginId],
-				...updates,
-			};
-			this.saveSettings();
-		}
-	}
+		if (!agent?.skills[skillId]) return false;
 
-	/**
-	 * Add a new custom skill for an agent.
-	 * @returns The generated skill ID
-	 */
-	addAgentSkill(agentId: string, skill: Omit<PluginSkill, "pluginId" | "isCustom">): string {
-		const agent = this.#data.agents[agentId];
-		if (!agent) return "";
-
-		const skillId = `custom-${genUUIDv7()}`;
-		agent.skills[skillId] = {
-			...skill,
-			pluginId: skillId,
-			isCustom: true,
-		};
-		this.saveSettings();
-		return skillId;
-	}
-
-	/**
-	 * Delete a custom skill from an agent.
-	 * Only custom skills can be deleted; built-in skills are preserved.
-	 */
-	deleteAgentSkill(agentId: string, pluginId: string): boolean {
-		const agent = this.#data.agents[agentId];
-		if (!agent?.skills[pluginId]) return false;
-
-		// Only allow deleting custom skills
-		if (!agent.skills[pluginId].isCustom) return false;
-
-		delete agent.skills[pluginId];
+		delete agent.skills[skillId];
 		this.saveSettings();
 		return true;
 	}
@@ -1651,15 +1582,9 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		...rawData,
 	};
 
-	// Migration: if user has no skills, use defaults
+	// Migration: skills are now just enable states (file-based content)
 	if (!rawData?.skills) {
-		mergedData.skills = structuredClone(DEFAULT_SKILLS);
-	} else {
-		// Merge with defaults to pick up any new plugins added in updates
-		mergedData.skills = {
-			...structuredClone(DEFAULT_SKILLS),
-			...rawData.skills,
-		};
+		mergedData.skills = {};
 	}
 
 	// Migration: if user has no toolsConfig, use defaults
@@ -1721,14 +1646,9 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 				};
 			}
 
-			// Ensure skills exists and has all plugins
+			// Ensure skills exists (migration - now just enable states)
 			if (!agent.skills) {
-				agent.skills = structuredClone(DEFAULT_SKILLS);
-			} else {
-				agent.skills = {
-					...structuredClone(DEFAULT_SKILLS),
-					...agent.skills,
-				};
+				agent.skills = {};
 			}
 
 			// Ensure mcpServers exists

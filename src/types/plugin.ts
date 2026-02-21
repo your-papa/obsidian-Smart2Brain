@@ -134,28 +134,33 @@ export interface ToolConfig {
 export type ToolsConfig = Record<BuiltInToolId, ToolConfig>;
 
 /**
- * Configuration for a plugin-specific skill.
- * These are appended to the base system prompt when the plugin is installed and enabled.
- * Following Anthropic's open standard, these are called "skills" rather than "extensions".
- * @deprecated Use file-based skills with SkillFrontmatter instead. Kept for migration.
+ * Agent's skill enable state. Only stores whether the skill is enabled.
+ * Skill content and metadata come from file-based skills via SkillsService.
  */
-export interface PluginSkill {
-	/** Internal plugin ID (e.g., "dataview", "obsidian-charts") or unique custom ID */
-	pluginId: string;
-	/** Display name shown in settings (e.g., "Dataview") */
-	displayName: string;
-	/** Whether this skill is enabled by the user */
+export interface AgentSkillState {
+	/** Whether this skill is enabled for the agent */
 	enabled: boolean;
-	/** The prompt content for this plugin */
-	prompt: string;
-	/** Whether this is a custom user-defined skill (not tied to a plugin) */
-	isCustom?: boolean;
-	/** Skill category: core, plugin, or custom */
-	category?: SkillCategory;
-	/** Obsidian Core plugin ID this skill is linked to */
-	corePluginId?: string;
-	/** Obsidian Community plugin ID this skill is linked to */
+}
+
+/**
+ * Display information for a skill in the UI.
+ * Combines metadata from SkillsService with enable state from agent config.
+ */
+export interface SkillDisplayInfo {
+	/** Unique skill identifier (matches SKILL.md name) */
+	id: string;
+	/** Display name shown in settings */
+	displayName: string;
+	/** Description of the skill */
+	description: string;
+	/** Whether this skill is enabled */
+	enabled: boolean;
+	/** Skill category */
+	category: SkillCategory;
+	/** Linked community plugin ID (if any) */
 	linkedPluginId?: string;
+	/** Linked core plugin ID (if any) */
+	corePluginId?: string;
 }
 
 // ============================================================================
@@ -260,8 +265,8 @@ export interface AgentConfig {
 	chatModel: import("../stores/chatStore.svelte").ChatModel | null;
 	/** Base system prompt for this agent */
 	systemPrompt: string;
-	/** Plugin-specific skills for this agent */
-	skills: Record<string, PluginSkill>;
+	/** Skill enable states for this agent (skill name -> state) */
+	skills: Record<string, AgentSkillState>;
 	/** Configuration for built-in tools */
 	toolsConfig: ToolsConfig;
 	/** MCP server configurations for this agent */
@@ -306,7 +311,7 @@ export interface PluginData {
 	/** @deprecated Use agents[agentId].systemPrompt instead */
 	systemPrompt: string;
 	/** @deprecated Use agents[agentId].skills instead */
-	skills: Record<string, PluginSkill>;
+	skills: Record<string, AgentSkillState>;
 	/** @deprecated Use agents[agentId].chatModel instead */
 	defaultChatModel: ChatModel | null;
 	/** @deprecated Use agents[agentId].mcpServers instead */

@@ -1,30 +1,19 @@
 import { Modal } from "obsidian";
 import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";
-import type { PluginSkill } from "../../main";
 import SkillModalComponent from "./SkillModal.svelte";
-
-/**
- * Custom accessors for agent-specific skill editing
- */
-export interface SkillAccessors {
-    getSkill: () => PluginSkill | undefined;
-    updateSkill: (updates: Partial<PluginSkill>) => void;
-}
 
 export class SkillModal extends Modal {
     private component: ReturnType<typeof SkillModalComponent> | null = null;
     private plugin: SecondBrainPlugin;
     private pluginId: string;
     private onSave: () => void;
-    private accessors?: SkillAccessors;
 
-    constructor(plugin: SecondBrainPlugin, pluginId: string, onSave: () => void, accessors?: SkillAccessors) {
+    constructor(plugin: SecondBrainPlugin, pluginId: string, onSave: () => void) {
         super(plugin.app);
         this.plugin = plugin;
         this.pluginId = pluginId;
         this.onSave = onSave;
-        this.accessors = accessors;
     }
 
     onOpen() {
@@ -49,7 +38,6 @@ export class SkillModal extends Modal {
                 plugin: this.plugin,
                 pluginId: this.pluginId,
                 onSave: this.onSave,
-                accessors: this.accessors,
             },
         });
     }

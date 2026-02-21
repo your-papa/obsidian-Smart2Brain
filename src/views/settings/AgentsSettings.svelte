@@ -24,7 +24,7 @@
     AgentConfig,
     BuiltInToolId,
     MCPServerConfig,
-    PluginSkill,
+    SkillDisplayInfo,
   } from "../../main";
   import { getProviderDefinition } from "../../providers/index";
   import type { ChatModel } from "../../stores/chatStore.svelte";
@@ -204,8 +204,8 @@
     const cachedSkills = skillsService.getCachedSkills();
     const agentSkills = selectedAgent?.skills ?? {};
 
-    // Convert file-based skills to PluginSkill format for UI compatibility
-    const result: PluginSkill[] = [];
+    // Convert file-based skills to SkillDisplayInfo format for UI
+    const result: SkillDisplayInfo[] = [];
     for (const [skillName, metadata] of cachedSkills) {
       const agentState = agentSkills[skillName];
       const displayName = metadata.frontmatter.metadata?.displayName ?? metadata.frontmatter.name;
@@ -214,11 +214,10 @@
       const corePluginId = metadata.corePluginId;
 
       result.push({
-        pluginId: skillName,
+        id: skillName,
         displayName,
-        prompt: "", // Content is loaded on-demand from files
+        description: metadata.frontmatter.description,
         enabled: agentState?.enabled ?? true,
-        isCustom: category === "custom",
         category,
         corePluginId,
         linkedPluginId: linkedPlugin,
@@ -253,12 +252,6 @@
         refreshSkillsList();
         applyChanges();
       },
-      {
-        getSkill: () => selectedAgent?.skills[pluginId],
-        updateSkill: (updates) => {
-          pluginData.updateAgentSkill(selectedAgentId, pluginId, updates);
-        },
-      },
     );
     modal.open();
   }
@@ -271,15 +264,15 @@
     modal.open();
   }
 
-  function toggleSkill(pluginId: string, newEnabled: boolean) {
-    const skill = skills.find((s) => s.pluginId === pluginId);
+  function toggleSkill(skillId: string, newEnabled: boolean) {
+    const skill = skills.find((s) => s.id === skillId);
     if (!skill) return;
 
     // Check plugin installation for linked skills
-    if (skill.isCustom === false) {
+    if (skill.category !== "custom") {
       // This is a plugin-linked skill, check installation
       const skillsService = plugin.skillsService;
-      const metadata = skillsService?.getCachedSkills().get(pluginId);
+      const metadata = skillsService?.getCachedSkills().get(skillId);
       const linkedPlugin = metadata?.linkedPluginId;
 
       if (linkedPlugin) {
@@ -297,16 +290,16 @@
       }
     }
 
-    pluginData.setAgentSkillEnabled(selectedAgentId, pluginId, newEnabled);
+    pluginData.setAgentSkillEnabled(selectedAgentId, skillId, newEnabled);
     applyChanges();
   }
 
-  async function deleteSkill(pluginId: string) {
-    const skill = skills.find((s) => s.pluginId === pluginId);
-    if (!skill?.isCustom) return;
+  async function deleteSkill(skillId: string) {
+    const skill = skills.find((s) => s.id === skillId);
+    if (!skill || skill.category !== "custom") return;
 
     // Delete from file system via SkillsService
-    await plugin.skillsService?.deleteSkill(pluginId);
+    await plugin.skillsService?.deleteSkill(skillId);
     await refreshSkillsList();
     applyChanges();
   }
@@ -326,7 +319,7 @@
   /**
    * Check if a skill's required plugin (community or core) is available.
    */
-  function isSkillPluginAvailable(skill: PluginSkill): boolean {
+  function isSkillPluginAvailable(skill: SkillDisplayInfo): boolean {
     if (skill.corePluginId) {
       return isInternalPluginEnabled(skill.corePluginId);
     }
@@ -339,7 +332,7 @@
   /**
    * Check if a skill's required plugin is installed (community plugins only).
    */
-  function isSkillPluginInstalled(skill: PluginSkill): boolean {
+  function isSkillPluginInstalled(skill: SkillDisplayInfo): boolean {
     if (skill.corePluginId) {
       return true; // Core plugins are always "installed"
     }
@@ -764,7 +757,7 @@
               <span class="skill-category-title">Core Skills</span>
               <span class="skill-category-badge">Based on Obsidian Core Plugins</span>
             </div>
-            {#each coreSkills as ext (ext.pluginId)}
+            {#each coreSkills as ext (ext.id)}
               {@const pluginAvailable = isSkillPluginAvailable(ext)}
               <div class="skill-item">
                 <div class="skill-info">
@@ -783,12 +776,12 @@
                 <div class="skill-controls">
                   <Toggle
                     isToggled={ext.enabled && pluginAvailable}
-                    changeFunc={() => toggleSkill(ext.pluginId, !ext.enabled)}
+                    changeFunc={() => toggleSkill(ext.id, !ext.enabled)}
                   />
                   <IconButton
                     icon="pencil"
                     label="Edit {ext.displayName} prompt"
-                    onclick={() => openSkillModal(ext.pluginId)}
+                    onclick={() => openSkillModal(ext.id)}
                   />
                 </div>
               </div>
@@ -803,7 +796,7 @@
               <span class="skill-category-title">Plugin Skills</span>
               <span class="skill-category-badge">Based on Community Plugins</span>
             </div>
-            {#each pluginSkills as ext (ext.pluginId)}
+            {#each pluginSkills as ext (ext.id)}
               {@const installed = isSkillPluginInstalled(ext)}
               {@const pluginAvailable = isSkillPluginAvailable(ext)}
               <div class="skill-item">
@@ -813,7 +806,7 @@
                     {#if !installed}
                       <button
                         class="skill-badge not-installed clickable"
-                        onclick={() => openPluginPage(ext.linkedPluginId ?? ext.pluginId)}
+                        onclick={() => openPluginPage(ext.linkedPluginId ?? ext.id)}
                         title="Click to install"
                       >
                         Not installed
@@ -821,7 +814,7 @@
                     {:else if !pluginAvailable}
                       <button
                         class="skill-badge not-enabled clickable"
-                        onclick={() => openPluginPage(ext.linkedPluginId ?? ext.pluginId)}
+                        onclick={() => openPluginPage(ext.linkedPluginId ?? ext.id)}
                         title="Click to enable"
                       >
                         Not enabled
@@ -832,12 +825,12 @@
                 <div class="skill-controls">
                   <Toggle
                     isToggled={ext.enabled && pluginAvailable}
-                    changeFunc={() => toggleSkill(ext.pluginId, !ext.enabled)}
+                    changeFunc={() => toggleSkill(ext.id, !ext.enabled)}
                   />
                   <IconButton
                     icon="pencil"
                     label="Edit {ext.displayName} prompt"
-                    onclick={() => openSkillModal(ext.pluginId)}
+                    onclick={() => openSkillModal(ext.id)}
                   />
                 </div>
               </div>
@@ -851,7 +844,7 @@
             <span class="skill-category-title">Custom Skills</span>
             <span class="skill-category-badge">User-defined</span>
           </div>
-          {#each customSkills as ext (ext.pluginId)}
+          {#each customSkills as ext (ext.id)}
             <div class="skill-item">
               <div class="skill-info">
                 <div class="skill-header">
@@ -862,16 +855,16 @@
                 <IconButton
                   icon="trash"
                   label="Delete {ext.displayName}"
-                  onclick={() => deleteSkill(ext.pluginId)}
+                  onclick={() => deleteSkill(ext.id)}
                 />
                 <Toggle
                   isToggled={ext.enabled}
-                  changeFunc={() => toggleSkill(ext.pluginId, !ext.enabled)}
+                  changeFunc={() => toggleSkill(ext.id, !ext.enabled)}
                 />
                 <IconButton
                   icon="pencil"
                   label="Edit {ext.displayName} prompt"
-                  onclick={() => openSkillModal(ext.pluginId)}
+                  onclick={() => openSkillModal(ext.id)}
                 />
               </div>
             </div>

@@ -57,8 +57,8 @@ function parseFrontmatter(content: string): { frontmatter: Partial<SkillFrontmat
             // Check if we've exited metadata block (non-indented line)
             if (line.match(/^[a-z]/)) {
                 inMetadata = false;
-            } else if (line.match(/^\s+\w+:/)) {
-                const match = line.match(/^\s+(\w+):\s*"?(.+?)"?\s*$/);
+            } else if (line.match(/^\s+[\w-]+:/)) {
+                const match = line.match(/^\s+([\w-]+):\s*"?(.+?)"?\s*$/);
                 if (match) {
                     metadata[match[1]] = match[2];
                 }
@@ -279,7 +279,6 @@ export class SkillsService {
                 // After validation, frontmatter.name is guaranteed to exist
                 const skillName = frontmatter.name as string;
                 const { category, linkedPluginId, corePluginId } = this.extractSkillLinks(
-                    skillName,
                     frontmatter.metadata,
                 );
 
@@ -374,7 +373,6 @@ export class SkillsService {
 
             // Update cache
             const { category, linkedPluginId, corePluginId } = this.extractSkillLinks(
-                skill.frontmatter.name,
                 skill.frontmatter.metadata,
             );
 
@@ -515,31 +513,17 @@ export class SkillsService {
     }
 
     /**
-     * Extract skill links and category from skill name and metadata.
+     * Extract skill links and category from metadata.
      * Determines linkedPluginId, corePluginId, and category.
      */
     private extractSkillLinks(
-        skillName: string,
         metadata?: Record<string, string>,
     ): { category: SkillCategory; linkedPluginId?: string; corePluginId?: string } {
-        // First check metadata for explicit values
         const metaCategory = metadata?.category as SkillCategory | undefined;
-        const metaLinkedPlugin = metadata?.linkedPlugin;
-        const metaCorePluginId = metadata?.corePluginId;
+        const linkedPluginId = metadata?.linkedPlugin;
+        const corePluginId = metadata?.corePluginId;
 
-        // Determine linkedPluginId
-        let linkedPluginId: string | undefined;
-        if (metaLinkedPlugin) {
-            linkedPluginId = metaLinkedPlugin;
-        } else {
-            // Fallback to legacy detection
-            linkedPluginId = this.detectLinkedPlugin(skillName);
-        }
-
-        // Determine corePluginId
-        const corePluginId = metaCorePluginId;
-
-        // Determine category
+        // Determine category from metadata or infer from plugin IDs
         let category: SkillCategory;
         if (metaCategory && ["core", "plugin", "custom"].includes(metaCategory)) {
             category = metaCategory;
@@ -552,16 +536,6 @@ export class SkillsService {
         }
 
         return { category, linkedPluginId, corePluginId };
-    }
-
-    /**
-     * Detect if a skill is linked to an Obsidian plugin.
-     * Convention: skill names matching known plugin IDs are linked.
-     * @deprecated Use metadata.linkedPlugin instead
-     */
-    private detectLinkedPlugin(skillName: string): string | undefined {
-        const linkedPlugins = ["dataview", "obsidian-charts"];
-        return linkedPlugins.includes(skillName) ? skillName : undefined;
     }
 
     /**

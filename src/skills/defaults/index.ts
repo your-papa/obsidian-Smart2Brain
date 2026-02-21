@@ -76,8 +76,8 @@ function parseFrontmatter(content: string): {
       // Check if we've exited metadata block (non-indented line)
       if (line.match(/^[a-z]/)) {
         inMetadata = false;
-      } else if (line.match(/^\s+\w+:/)) {
-        const match = line.match(/^\s+(\w+):\s*"?(.+?)"?\s*$/);
+      } else if (line.match(/^\s+[\w-]+:/)) {
+        const match = line.match(/^\s+([\w-]+):\s*"?(.+?)"?\s*$/);
         if (match) {
           const key = match[1];
           const value = match[2].replace(/^["']|["']$/g, "");
