@@ -4,6 +4,7 @@ import type { AuthValidationResult } from "../agent/AgentManager";
 import { getProviderDefinition } from "../providers";
 import { getData } from "../stores/dataStore.svelte";
 import { getPlugin } from "../stores/state.svelte";
+import { Logger } from "../utils/logging";
 
 /**
  * Query functions for provider state management.
@@ -81,7 +82,7 @@ export function createProviderStateQuery(provider: () => string) {
 			} catch (error) {
 				// Model discovery failed - return error and empty models
 				const errorMessage = error instanceof Error ? error.message : String(error);
-				console.warn(`Model discovery failed for ${providerId}:`, errorMessage);
+				Logger.warn(`Model discovery failed for ${providerId}:`, errorMessage);
 				return {
 					auth: { success: false, message: `Model discovery failed: ${errorMessage}` },
 					models: [],
@@ -184,7 +185,7 @@ export function createModelDiscoveryQuery(provider: () => string) {
 			try {
 				return await providerDef.discoverModels(resolvedAuth);
 			} catch (error) {
-				console.warn(`Model discovery failed for ${providerId}:`, error);
+				Logger.warn(`Model discovery failed for ${providerId}:`, error);
 				return [];
 			}
 		},

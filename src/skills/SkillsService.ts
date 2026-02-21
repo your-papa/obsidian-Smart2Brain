@@ -5,7 +5,7 @@
 
 import type { DataAdapter, Plugin } from "obsidian";
 import type { Skill, SkillCategory, SkillEnableState, SkillFrontmatter, SkillMetadata } from "../types/plugin";
-import Log from "../utils/logging";
+import { Logger as Log } from "../utils/logging";
 import { BUNDLED_SKILLS } from "./defaults";
 import { validateFrontmatter, type ValidationResult } from "./validation";
 
@@ -278,9 +278,7 @@ export class SkillsService {
 
                 // After validation, frontmatter.name is guaranteed to exist
                 const skillName = frontmatter.name as string;
-                const { category, linkedPluginId, corePluginId } = this.extractSkillLinks(
-                    frontmatter.metadata,
-                );
+                const { category, linkedPluginId, corePluginId } = this.extractSkillLinks(frontmatter.metadata);
 
                 const metadata: SkillMetadata = {
                     frontmatter: frontmatter as SkillFrontmatter,
@@ -372,9 +370,7 @@ export class SkillsService {
             await this.adapter.write(skillPath, content);
 
             // Update cache
-            const { category, linkedPluginId, corePluginId } = this.extractSkillLinks(
-                skill.frontmatter.metadata,
-            );
+            const { category, linkedPluginId, corePluginId } = this.extractSkillLinks(skill.frontmatter.metadata);
 
             const metadata: SkillMetadata = {
                 frontmatter: skill.frontmatter,
@@ -516,9 +512,11 @@ export class SkillsService {
      * Extract skill links and category from metadata.
      * Determines linkedPluginId, corePluginId, and category.
      */
-    private extractSkillLinks(
-        metadata?: Record<string, string>,
-    ): { category: SkillCategory; linkedPluginId?: string; corePluginId?: string } {
+    private extractSkillLinks(metadata?: Record<string, string>): {
+        category: SkillCategory;
+        linkedPluginId?: string;
+        corePluginId?: string;
+    } {
         const metaCategory = metadata?.category as SkillCategory | undefined;
         const linkedPluginId = metadata?.linkedPlugin;
         const corePluginId = metadata?.corePluginId;

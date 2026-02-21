@@ -113,14 +113,14 @@ const defaultProperties: Required<MarkdownEditorProps> = {
 	cls: "",
 	placeholder: "",
 	onEnter: () => false,
-	onEscape: () => { },
+	onEscape: () => {},
 	onTab: () => false,
-	onSubmit: () => { },
-	onBlur: () => { },
-	onFocus: () => { },
-	onPaste: () => { },
-	onChange: () => { },
-	onKeyup: () => { },
+	onSubmit: () => {},
+	onBlur: () => {},
+	onFocus: () => {},
+	onPaste: () => {},
+	onChange: () => {},
+	onKeyup: () => {},
 	extensions: [],
 	enterVimInsertMode: false,
 };
@@ -170,7 +170,7 @@ export class EmbeddableMarkdownEditor {
 		// @ts-expect-error - Constructor signature differs from abstract class
 		this.baseEditor = new EditorClass(app, container, {
 			app,
-			onMarkdownScroll: () => { },
+			onMarkdownScroll: () => {},
 			getMode: () => "source",
 		});
 
@@ -178,7 +178,7 @@ export class EmbeddableMarkdownEditor {
 		this.baseEditor.owner.editor = this.baseEditor.editor;
 		// Add syncScroll stub to prevent errors when scrolling
 		// @ts-expect-error - Adding missing method expected by internal editor
-		this.baseEditor.owner.syncScroll = () => { };
+		this.baseEditor.owner.syncScroll = () => {};
 
 		// IMPORTANT: From Obsidian 1.5.8+, must explicitly set value
 		this.baseEditor.set(options.value || "");

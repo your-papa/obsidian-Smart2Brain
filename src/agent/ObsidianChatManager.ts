@@ -11,6 +11,7 @@ import { type DataAdapter, Plugin, TFile, debounce, normalizePath } from "obsidi
 import type SecondBrainPlugin from "../main";
 import { getData } from "../stores/dataStore.svelte";
 import type { ThreadSnapshot, ThreadStore } from "./memory/ThreadStore";
+import { Logger } from "../utils/logging";
 
 interface CheckpointEntry {
 	checkpoint: Checkpoint;
@@ -162,7 +163,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 				}
 			}
 		} catch (e) {
-			console.error(`Error searching for file with threadId ${threadId}:`, e);
+			Logger.error(`Error searching for file with threadId ${threadId}:`, e);
 		}
 
 		// Fallback to default path (will be created there if writing)
@@ -185,13 +186,13 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 				this.threadIndex.clear();
 				snapshots.forEach((s) => this.threadIndex.set(s.threadId, s));
 				this.indexLoaded = true;
-				console.log(`ObsidianChatManager: Loaded index with ${this.threadIndex.size} threads`);
+				Logger.log(`ObsidianChatManager: Loaded index with ${this.threadIndex.size} threads`);
 			} else {
-				console.log("ObsidianChatManager: Index missing, rebuilding...");
+				Logger.log("ObsidianChatManager: Index missing, rebuilding...");
 				await this.rebuildIndex();
 			}
 		} catch (e) {
-			console.error("Error loading chat index:", e);
+			Logger.error("Error loading chat index:", e);
 		}
 	}
 
@@ -226,7 +227,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 					});
 				}
 			} catch (e) {
-				console.error(`Failed to read ${file} during index rebuild:`, e);
+				Logger.error(`Failed to read ${file} during index rebuild:`, e);
 			}
 		}
 
@@ -240,7 +241,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		try {
 			await this.adapter.write(indexPath, JSON.stringify(snapshots));
 		} catch (e) {
-			console.error("Error saving chat index:", e);
+			Logger.error("Error saving chat index:", e);
 		}
 	}
 
@@ -267,7 +268,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 				return data;
 			}
 		} catch (e) {
-			console.error(`Error loading thread ${threadId}:`, e);
+			Logger.error(`Error loading thread ${threadId}:`, e);
 		}
 		return undefined;
 	}
@@ -307,7 +308,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			});
 			this.saveIndexDebounced();
 		} catch (e) {
-			console.error(`Error saving thread ${threadId}:`, e);
+			Logger.error(`Error saving thread ${threadId}:`, e);
 		}
 	}
 
@@ -602,7 +603,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 				await this.adapter.remove(path);
 			}
 		} catch (e) {
-			console.error(`Error deleting thread ${threadId}:`, e);
+			Logger.error(`Error deleting thread ${threadId}:`, e);
 		}
 	}
 
@@ -624,7 +625,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			const file = this.plugin.app.vault.getAbstractFileByPath(oldPath);
 
 			if (!file || !(file instanceof TFile)) {
-				console.warn(`renameChatFile: File not found: ${oldPath}`);
+				Logger.warn(`renameChatFile: File not found: ${oldPath}`);
 				return;
 			}
 
@@ -638,7 +639,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			const newPath = normalizePath(`${folder}/${newFileName}`);
 
 			if (await this.adapter.exists(newPath)) {
-				console.warn(`renameChatFile: Target file already exists: ${newPath}`);
+				Logger.warn(`renameChatFile: Target file already exists: ${newPath}`);
 				return;
 			}
 
@@ -646,9 +647,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 			// Update cache with new path
 			this.filePathCache.set(threadId, newPath);
-			console.log(`renameChatFile: Successfully renamed to ${newPath}`);
+			Logger.log(`renameChatFile: Successfully renamed to ${newPath}`);
 		} catch (error) {
-			console.error(`Error renaming chat file for thread ${threadId}:`, error);
+			Logger.error(`Error renaming chat file for thread ${threadId}:`, error);
 		}
 	}
 }

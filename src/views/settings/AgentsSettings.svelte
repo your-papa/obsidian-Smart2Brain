@@ -30,6 +30,7 @@
   import type { ChatModel } from "../../stores/chatStore.svelte";
   import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
   import { getPlugin } from "../../stores/state.svelte";
+  import { Logger } from "../../utils/logging";
 
   const pluginData = getData();
   const plugin = getPlugin();
@@ -77,7 +78,7 @@
     try {
       await plugin.agentManager.reinitialize();
     } catch (error) {
-      console.error("Failed to reinitialize agent:", error);
+      Logger.error("Failed to reinitialize agent:", error);
     }
   }
 
@@ -245,14 +246,10 @@
 
   function openSkillModal(pluginId: string) {
     if (!selectedAgent) return;
-    const modal = new SkillModal(
-      plugin,
-      pluginId,
-      () => {
-        refreshSkillsList();
-        applyChanges();
-      },
-    );
+    const modal = new SkillModal(plugin, pluginId, () => {
+      refreshSkillsList();
+      applyChanges();
+    });
     modal.open();
   }
 

@@ -8,6 +8,7 @@ import { getData } from "../stores/dataStore.svelte";
 
 import { ProviderAuthError, ProviderEndpointError, ProviderRegistry, ProviderRegistryError } from "../providers/index";
 import { createThreadId } from "../utils/threadId";
+import { Logger } from "../utils/logging";
 import { Agent, type CheckpointHistoryItem, type ChooseModelParams, type ThreadHistory } from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
@@ -162,10 +163,11 @@ export class AgentManager {
 		if (contextXml) {
 			prompt += `\n\n${contextXml}`;
 			// Add instruction for dynamic skill loading
-			prompt += `\n\n# Skills\nThe above available_skills section lists skills that can help you with specific tasks. When you need detailed instructions for a skill, use the \`load_skill\` tool with the skill name to retrieve the full instructions. Only load skills when you actually need them for a task.`;
+			prompt +=
+				"\n\n# Skills\nThe above available_skills section lists skills that can help you with specific tasks. When you need detailed instructions for a skill, use the `load_skill` tool with the skill name to retrieve the full instructions. Only load skills when you actually need them for a task.";
 		}
 
-		console.log(`[AgentManager] Final system prompt length: ${prompt.length} chars`);
+		Logger.log(`[AgentManager] Final system prompt length: ${prompt.length} chars`);
 		return prompt;
 	}
 
@@ -199,14 +201,14 @@ export class AgentManager {
 					const discovered = await providerDef.discoverModels(resolvedAuth);
 					return discovered;
 				} catch (error) {
-					console.warn(`Model discovery failed for ${providerId}:`, error);
+					Logger.warn(`Model discovery failed for ${providerId}:`, error);
 					return [];
 				}
 			}
 
 			return [];
 		} catch (error) {
-			console.error("Smart Second Brain: Error fetching available models", error);
+			Logger.error("Error fetching available models", error);
 			return [];
 		}
 	}
@@ -329,10 +331,10 @@ export class AgentManager {
 					endpoint: data.langSmithEndpoint || "https://api.smith.langchain.com",
 					flushOnComplete: true,
 				});
-				console.log("Smart Second Brain: LangSmith telemetry enabled");
+				Logger.info("LangSmith telemetry enabled");
 				return telemetry;
 			} catch (e) {
-				console.error("Smart Second Brain: Failed to initialize LangSmith telemetry", e);
+				Logger.error("Failed to initialize LangSmith telemetry", e);
 			}
 		}
 		return undefined;
@@ -390,7 +392,7 @@ export class AgentManager {
 				// Type assertion needed as getMCPServersForClient returns Record<string, unknown>
 				// but we know it produces the correct shape for MultiServerMCPClient
 				const mcpConfig = { mcpServers } as ConstructorParameters<typeof MultiServerMCPClient>[0];
-				console.log("Smart Second Brain: Initializing MCP client...", mcpConfig);
+				Logger.log("Initializing MCP client...", mcpConfig);
 
 				// HACK: Monkey patch the global fetch for the entire lifecycle
 				const windowWithFetch = window as Window & { _originalFetch?: typeof fetch };
@@ -402,13 +404,13 @@ export class AgentManager {
 				try {
 					const mcpClient = new MultiServerMCPClient(mcpConfig);
 					const mcpTools = await mcpClient.getTools();
-					console.log(`Smart Second Brain: Loaded ${mcpTools.length} MCP tools`);
+					Logger.log(`Loaded ${mcpTools.length} MCP tools`);
 					tools.push(...mcpTools);
 				} catch (e) {
-					console.error("Failed to get MCP tools", e);
+					Logger.error("Failed to get MCP tools", e);
 				}
 			} catch (error) {
-				console.error("Smart Second Brain: Failed to load MCP tools", error);
+				Logger.error("Failed to load MCP tools", error);
 			}
 		}
 
@@ -461,7 +463,7 @@ export class AgentManager {
 			new Notice(`Cannot connect to: ${unavailableProviders.join(", ")}. Check that the service is running.`);
 		}
 
-		console.log("[AgentManager] Registry initialized with providers:", this.registry.list());
+		Logger.log("[AgentManager] Registry initialized with providers:", this.registry.list());
 
 		// Configure Telemetry (use getData())
 		const telemetry = this.configureTelemetry();
@@ -578,12 +580,12 @@ export class AgentManager {
 				throw error;
 			}
 
-			console.error("Smart Second Brain: Error streaming query", error);
+			Logger.error("Error streaming query", error);
 			throw error;
 		} finally {
 			// Cleanup logging - stream completed or aborted
 			if (signal?.aborted) {
-				console.log("Smart Second Brain: Stream aborted by user");
+				Logger.log("Stream aborted by user");
 			}
 		}
 	}
@@ -677,11 +679,11 @@ export class AgentManager {
 				throw error;
 			}
 
-			console.error("Smart Second Brain: Error editing message", error);
+			Logger.error("Error editing message", error);
 			throw error;
 		} finally {
 			if (signal?.aborted) {
-				console.log("Smart Second Brain: Edit aborted by user");
+				Logger.log("Edit aborted by user");
 			}
 		}
 	}
@@ -773,11 +775,11 @@ export class AgentManager {
 				throw error;
 			}
 
-			console.error("Smart Second Brain: Error regenerating response", error);
+			Logger.error("Error regenerating response", error);
 			throw error;
 		} finally {
 			if (signal?.aborted) {
-				console.log("Smart Second Brain: Regeneration aborted by user");
+				Logger.log("Regeneration aborted by user");
 			}
 		}
 	}
@@ -792,12 +794,12 @@ export class AgentManager {
 						return history;
 					}
 				} catch (e) {
-					console.warn("Failed to get history from agent", e);
+					Logger.warn("Failed to get history from agent", e);
 				}
 			}
 			return null;
 		} catch (error) {
-			console.error("Smart Second Brain: Error fetching thread history", error);
+			Logger.error("Error fetching thread history", error);
 			return null;
 		}
 	}
@@ -855,7 +857,7 @@ export class AgentManager {
 	 */
 	async generateThreadTitleFromUserMessage(threadId: string, userMessage: string): Promise<void> {
 		const agent = await this.ensureAgent().catch((e) => {
-			console.warn("Agent not initialized, cannot generate title");
+			Logger.warn("Agent not initialized, cannot generate title");
 			return null;
 		});
 
@@ -864,11 +866,11 @@ export class AgentManager {
 		try {
 			const title = await agent.generateTitle(userMessage);
 			if (title) {
-				console.log(`Generated title for thread ${threadId}: "${title}"`);
+				Logger.log(`Generated title for thread ${threadId}: "${title}"`);
 				await this.chatManager.renameChatFile(threadId, title);
 			}
 		} catch (error) {
-			console.error(`Error generating title for thread ${threadId}:`, error);
+			Logger.error(`Error generating title for thread ${threadId}:`, error);
 		}
 	}
 
@@ -877,9 +879,9 @@ export class AgentManager {
 	 * Call this when tool configuration or MCP servers change.
 	 */
 	async reinitialize(): Promise<void> {
-		console.log("Smart Second Brain: Reinitializing agent with updated settings...");
+		Logger.log("Reinitializing agent with updated settings...");
 		await this.initialize();
-		console.log("Smart Second Brain: Agent reinitialized successfully");
+		Logger.log("Agent reinitialized successfully");
 	}
 
 	cleanup(): void {

@@ -1,67 +1,67 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
-  import { EmbeddableMarkdownEditor } from "../../lib/editor";
-  import type SecondBrainPlugin from "../../main";
-  import { getData } from "../../stores/dataStore.svelte";
-  import Button from "../ui/Button.svelte";
-  import type { SystemPromptAccessors, SystemPromptModal } from "./SystemPromptModal";
+import { onDestroy, onMount } from "svelte";
+import { EmbeddableMarkdownEditor } from "../../lib/editor";
+import type SecondBrainPlugin from "../../main";
+import { getData } from "../../stores/dataStore.svelte";
+import Button from "../ui/Button.svelte";
+import type { SystemPromptAccessors, SystemPromptModal } from "./SystemPromptModal";
 
-  interface Props {
-    modal: SystemPromptModal;
-    plugin: SecondBrainPlugin;
-    accessors?: SystemPromptAccessors;
-  }
+interface Props {
+	modal: SystemPromptModal;
+	plugin: SecondBrainPlugin;
+	accessors?: SystemPromptAccessors;
+}
 
-  const { modal, plugin, accessors }: Props = $props();
-  const pluginData = getData();
+const { modal, plugin, accessors }: Props = $props();
+const pluginData = getData();
 
-  // biome-ignore lint/style/useConst: Svelte bind:this requires let
-  let editorContainer: HTMLDivElement | undefined = $state();
-  let editor: EmbeddableMarkdownEditor | undefined = $state();
+// biome-ignore lint/style/useConst: Svelte bind:this requires let
+let editorContainer: HTMLDivElement | undefined = $state();
+let editor: EmbeddableMarkdownEditor | undefined = $state();
 
-  // Use custom accessor if provided, otherwise use global pluginData
-  function getPrompt(): string {
-    return accessors?.getPrompt() ?? pluginData.systemPrompt;
-  }
+// Use custom accessor if provided, otherwise use global pluginData
+function getPrompt(): string {
+	return accessors?.getPrompt() ?? pluginData.systemPrompt;
+}
 
-  function setPrompt(prompt: string): void {
-    if (accessors?.setPrompt) {
-      accessors.setPrompt(prompt);
-    } else {
-      pluginData.systemPrompt = prompt;
-    }
-  }
+function setPrompt(prompt: string): void {
+	if (accessors?.setPrompt) {
+		accessors.setPrompt(prompt);
+	} else {
+		pluginData.systemPrompt = prompt;
+	}
+}
 
-  let promptValue = $state(getPrompt());
+let promptValue = $state(getPrompt());
 
-  onMount(() => {
-    if (editorContainer) {
-      initializeEditor();
-    }
-  });
+onMount(() => {
+	if (editorContainer) {
+		initializeEditor();
+	}
+});
 
-  onDestroy(() => {
-    editor?.destroy();
-  });
+onDestroy(() => {
+	editor?.destroy();
+});
 
-  function initializeEditor() {
-    if (!editorContainer) return;
-    promptValue = getPrompt();
-    editor = new EmbeddableMarkdownEditor(plugin.app, editorContainer, {
-      value: promptValue,
-      placeholder: "Define the system prompt for the assistant...",
-      cls: "system-prompt-editor",
-      onChange: (value) => {
-        promptValue = value;
-      },
-    });
-  }
+function initializeEditor() {
+	if (!editorContainer) return;
+	promptValue = getPrompt();
+	editor = new EmbeddableMarkdownEditor(plugin.app, editorContainer, {
+		value: promptValue,
+		placeholder: "Define the system prompt for the assistant...",
+		cls: "system-prompt-editor",
+		onChange: (value) => {
+			promptValue = value;
+		},
+	});
+}
 
-  async function handleSave() {
-    setPrompt(promptValue);
-    await plugin.agentManager?.updateSystemPrompt();
-    modal.close();
-  }
+async function handleSave() {
+	setPrompt(promptValue);
+	await plugin.agentManager?.updateSystemPrompt();
+	modal.close();
+}
 </script>
 
 <div class="system-prompt-modal-content">

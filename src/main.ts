@@ -1,8 +1,9 @@
 import { Plugin } from "obsidian";
 import "./lib/i18n";
-import Log from "./utils/logging";
+import { Logger as Log } from "./utils/logging";
 import "./styles.css";
 import { AgentManager } from "./agent/AgentManager";
+import { SearchModal } from "./components/modal/SearchModal";
 import { getQueryClient } from "./lib/query";
 import { SkillsService } from "./skills";
 import { createMessenger } from "./stores/chatStore.svelte";
@@ -10,6 +11,7 @@ import { type PluginDataStore, createData } from "./stores/dataStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import SettingsTab from "./views/settings/Settings";
+import { VectorStoreService } from "./vectorstore";
 
 // Re-export types for backward compatibility
 export type {
@@ -19,6 +21,7 @@ export type {
 	AgentsConfig,
 	BuiltInToolId,
 	DataviewQuerySettings,
+	DefaultEmbedModel,
 	MCPHTTPServerConfig,
 	MCPServerConfig,
 	MCPServersConfig,
@@ -43,6 +46,7 @@ export type {
 export default class SecondBrainPlugin extends Plugin {
 	agentManager!: AgentManager;
 	skillsService!: SkillsService;
+	vectorStoreService!: VectorStoreService;
 	queryClient = getQueryClient();
 	pluginData!: PluginDataStore;
 
@@ -53,6 +57,9 @@ export default class SecondBrainPlugin extends Plugin {
 		// Initialize Skills Service (Agent Skills spec)
 		this.skillsService = new SkillsService(this);
 		await this.skillsService.initialize();
+
+		// Initialize Vector Store Service for embeddings search
+		this.vectorStoreService = await VectorStoreService.initialize(this);
 
 		// Register file-based chat view and .chat extension (v2 ChatView)
 		// const VIEW_TYPE = "my-view";
@@ -89,6 +96,13 @@ export default class SecondBrainPlugin extends Plugin {
 			callback: async () => await this.agentManager.createNewChat(),
 		});
 
+		this.addCommand({
+			id: "search-notes",
+			name: "Search Notes",
+			icon: "search",
+			callback: () => new SearchModal(this.app).open(),
+		});
+
 		this.addSettingTab(new SettingsTab(this));
 
 		// Initialize Agent Manager (v2)
@@ -100,6 +114,7 @@ export default class SecondBrainPlugin extends Plugin {
 
 	async onunload() {
 		Log.info("Unloading plugin");
+		if (this.vectorStoreService) await this.vectorStoreService.cleanup();
 		if (this.agentManager) this.agentManager.cleanup();
 	}
 

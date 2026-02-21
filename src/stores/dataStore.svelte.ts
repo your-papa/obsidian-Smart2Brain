@@ -6,6 +6,7 @@ import SecondBrainPlugin, {
 	type AgentSkillState,
 	type AgentsConfig,
 	type BuiltInToolId,
+	type DefaultEmbedModel,
 	type MCPServerConfig,
 	type MCPServersConfig,
 	type PluginData,
@@ -181,10 +182,6 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		name: "search_notes",
 		description:
 			"Search through your Obsidian notes by keyword. Returns matching file names and metadata (properties/frontmatter) but NO content. Use this to identify relevant notes before using other tools.",
-		settings: {
-			algorithm: "grep",
-			maxResults: 10,
-		},
 	},
 	read_note: {
 		enabled: true,
@@ -301,6 +298,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 	// Other
 	searchAlgorithm: "grep",
+	defaultEmbedModel: null,
 };
 
 export class PluginDataStore {
@@ -1021,6 +1019,14 @@ export class PluginDataStore {
 	}
 	set searchAlgorithm(val: SearchAlgorithm) {
 		this.#data.searchAlgorithm = val;
+		this.saveSettings();
+	}
+
+	get defaultEmbedModel() {
+		return this.#data.defaultEmbedModel;
+	}
+	set defaultEmbedModel(val: DefaultEmbedModel | null) {
+		this.#data.defaultEmbedModel = val;
 		this.saveSettings();
 	}
 
