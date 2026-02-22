@@ -18,6 +18,7 @@ import type {
 	ChatModelConfig,
 	EmbeddingProviderDefinition,
 } from "../types/provider/index";
+import { fetchOllamaModelsInfo } from "./ollamaModels";
 
 // =============================================================================
 // Helper Functions
@@ -200,8 +201,16 @@ export const ollamaProvider: EmbeddingProviderDefinition = {
 		const payload = (await response.json()) as OllamaTagsResponse;
 		const models = Array.isArray(payload.models) ? payload.models : [];
 
-		return models
+		const modelNames = models
 			.map((m) => m.name)
 			.filter((name): name is string => typeof name === "string" && name.trim() !== "");
+
+		// Fetch and cache model metadata in the background
+		// This populates the cache for the modal without blocking
+		fetchOllamaModelsInfo(baseUrl, modelNames).catch((err) => {
+			console.warn("Failed to fetch Ollama model metadata:", err);
+		});
+
+		return modelNames;
 	},
 };

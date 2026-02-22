@@ -63,7 +63,7 @@ export class AvailableModels {
 	// Combined query for each provider (auth + models together)
 	#providerQueries = $derived(this.#providers.map((provider) => createProviderStateQuery(() => provider)));
 
-	// Compute available models from all providers - now returns ALL discovered models
+	// Compute available models from all providers - excludes embedding models
 	#availableModels = $derived.by(() => {
 		const out: ChatModel[] = [];
 		this.#providers.forEach((provider, idx) => {
@@ -72,6 +72,11 @@ export class AvailableModels {
 			const discoveredModels = state?.models ?? [];
 
 			for (const modelName of discoveredModels) {
+				// Skip embedding models - they shouldn't appear in chat model selection
+				if (isLikelyEmbeddingModel(modelName)) {
+					continue;
+				}
+
 				// Use default config - will be enriched from models.dev at runtime
 				out.push({
 					model: modelName,
@@ -94,16 +99,30 @@ export class AvailableModels {
 			}
 
 			const state = this.#providerQueries[idx]?.data;
-			const discoveredModels = state?.models ?? [];
 
-			for (const modelName of discoveredModels) {
-				// Filter embedding models by name heuristics
-				if (isLikelyEmbeddingModel(modelName)) {
+			// Use dedicated embedding models if provider supports discoverEmbeddingModels
+			// Otherwise, fall back to heuristic filtering on all models
+			const embeddingModelNames = state?.embeddingModels;
+			if (embeddingModelNames && embeddingModelNames.length > 0) {
+				// Provider has dedicated embedding model discovery
+				for (const modelName of embeddingModelNames) {
 					out.push({
 						model: modelName,
 						provider,
 						modelConfig: { similarityThreshold: 0.7 },
 					});
+				}
+			} else {
+				// Fall back to heuristic filtering
+				const discoveredModels = state?.models ?? [];
+				for (const modelName of discoveredModels) {
+					if (isLikelyEmbeddingModel(modelName)) {
+						out.push({
+							model: modelName,
+							provider,
+							modelConfig: { similarityThreshold: 0.7 },
+						});
+					}
 				}
 			}
 		});

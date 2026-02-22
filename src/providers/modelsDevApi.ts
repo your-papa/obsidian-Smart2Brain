@@ -182,57 +182,11 @@ export function lookupModelInfoSync(
  * @param modelId The model identifier (e.g., "gpt-4o", "claude-3-5-sonnet")
  * @returns Model info if found, null otherwise
  */
-export async function lookupModelInfo(
-	providerId: string,
-	modelId: string,
-): Promise<ModelsDevModelInfo | null> {
+export async function lookupModelInfo(providerId: string, modelId: string): Promise<ModelsDevModelInfo | null> {
 	const data = await fetchModelsDevData();
 	if (!data) return null;
 
-	// Get potential provider IDs to search
-	const providerIds = PROVIDER_ID_MAP[providerId] ?? [providerId];
-
-	// Search in mapped providers
-	for (const pid of providerIds) {
-		const provider = data[pid];
-		if (provider?.models) {
-			// Direct match
-			if (provider.models[modelId]) {
-				return provider.models[modelId];
-			}
-
-			// Try with provider prefix (e.g., "openai/gpt-4o")
-			const prefixedId = `${pid}/${modelId}`;
-			if (provider.models[prefixedId]) {
-				return provider.models[prefixedId];
-			}
-
-			// Try partial match (model ID might be a substring)
-			for (const [key, value] of Object.entries(provider.models)) {
-				if (key.endsWith(`/${modelId}`) || key === modelId) {
-					return value;
-				}
-			}
-		}
-	}
-
-	// Search across all providers for the model ID
-	for (const provider of Object.values(data)) {
-		if (provider.models) {
-			if (provider.models[modelId]) {
-				return provider.models[modelId];
-			}
-
-			// Check for prefixed variants
-			for (const [key, value] of Object.entries(provider.models)) {
-				if (key.endsWith(`/${modelId}`) || key.split("/").pop() === modelId) {
-					return value;
-				}
-			}
-		}
-	}
-
-	return null;
+	return lookupModelInfoSync(data, providerId, modelId);
 }
 
 /**
@@ -274,12 +228,7 @@ export function isEmbeddingModel(info: ModelsDevModelInfo): boolean {
 	const id = info.id?.toLowerCase() ?? "";
 	const family = info.family?.toLowerCase() ?? "";
 
-	return (
-		name.includes("embed") ||
-		id.includes("embed") ||
-		family.includes("embed") ||
-		family === "text-embedding"
-	);
+	return name.includes("embed") || id.includes("embed") || family.includes("embed") || family === "text-embedding";
 }
 
 /**

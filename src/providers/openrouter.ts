@@ -6,21 +6,23 @@
  *
  * This provider supports:
  * - Chat models from various providers via OpenRouter
+ * - Embedding models (filtered by name heuristics)
  * - Model discovery via OpenRouter API
- * - NO embedding models
  *
  * Authentication: apiKey (required)
  */
 
-import { ChatOpenAI } from "@langchain/openai";
+import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { requestUrl } from "obsidian";
 import GenericAIIcon from "../components/ui/logos/GenericAIIcon.svelte";
 import type {
 	AuthObject,
 	AuthValidationResult,
-	BaseProviderDefinition,
+	EmbeddingProviderDefinition,
 	ChatModelConfig,
 } from "../types/provider/index";
 import OpenRouterLogo from "../components/ui/logos/OpenRouterLogo.svelte";
+import { populateOpenRouterCache, type OpenRouterModelInfo } from "./openrouterModels";
 
 // =============================================================================
 // Constants
@@ -49,7 +51,7 @@ async function safeReadText(response: Response): Promise<string | undefined> {
 // =============================================================================
 
 interface OpenRouterModelResponse {
-	data?: Array<{ id?: string }>;
+	data?: OpenRouterModelInfo[];
 }
 
 // =============================================================================
@@ -59,9 +61,9 @@ interface OpenRouterModelResponse {
 /**
  * OpenRouter built-in provider definition.
  *
- * Supports chat models only (no embeddings).
+ * Supports chat and embedding models.
  */
-export const openrouterProvider: BaseProviderDefinition = {
+export const openrouterProvider: EmbeddingProviderDefinition = {
 	// =========================================================================
 	// Identity
 	// =========================================================================
@@ -123,6 +125,23 @@ export const openrouterProvider: BaseProviderDefinition = {
 		}
 
 		return new ChatOpenAI(config);
+	},
+
+	createEmbeddingInstance: (auth: AuthObject, modelId: string) => {
+		const config: Record<string, unknown> = {
+			model: modelId,
+			apiKey: auth.apiKey,
+			configuration: {
+				baseURL: OPENROUTER_BASE_URL,
+			},
+		};
+
+		// Add custom headers if provided
+		if (auth.headers && Object.keys(auth.headers).length > 0) {
+			(config.configuration as Record<string, unknown>).defaultHeaders = auth.headers;
+		}
+
+		return new OpenAIEmbeddings(config);
 	},
 
 	validateAuth: async (auth: AuthObject): Promise<AuthValidationResult> => {
@@ -206,6 +225,69 @@ export const openrouterProvider: BaseProviderDefinition = {
 		const payload = (await response.json()) as OpenRouterModelResponse;
 		const resources = Array.isArray(payload.data) ? payload.data : [];
 
+		// Populate the metadata cache with full model info
+		populateOpenRouterCache(resources);
+
 		return resources.map((r) => r.id).filter((id): id is string => typeof id === "string" && id.trim() !== "");
+	},
+
+	discoverEmbeddingModels: async (auth: AuthObject): Promise<string[]> => {
+		if (!auth.apiKey?.trim()) {
+			throw new Error("OpenRouter embedding model discovery requires an API key.");
+		}
+
+		const headers: Record<string, string> = {
+			Authorization: `Bearer ${auth.apiKey}`,
+			"Content-Type": "application/json",
+		};
+
+		// Add custom headers if provided
+		if (auth.headers) {
+			Object.assign(headers, auth.headers);
+		}
+
+		// Use Obsidian's requestUrl to bypass CORS for the dedicated embeddings models endpoint
+		try {
+			const response = await requestUrl({
+				url: `${OPENROUTER_BASE_URL}/embeddings/models`,
+				method: "GET",
+				headers,
+			});
+
+			const payload = response.json as OpenRouterModelResponse;
+			const resources = Array.isArray(payload.data) ? payload.data : [];
+			return resources.map((r) => r.id).filter((id): id is string => typeof id === "string" && id.trim() !== "");
+		} catch (error) {
+			// If the dedicated endpoint fails, fall back to filtering all models
+			const response = await globalThis.fetch(`${OPENROUTER_BASE_URL}/models`, {
+				method: "GET",
+				headers,
+			});
+
+			if (!response.ok) {
+				const errorBody = await safeReadText(response);
+				throw new Error(`Embedding model discovery failed: ${errorBody || response.statusText}`);
+			}
+
+			const payload = (await response.json()) as OpenRouterModelResponse;
+			const resources = Array.isArray(payload.data) ? payload.data : [];
+
+			// Filter to embedding models by name patterns
+			return resources
+				.map((r) => r.id)
+				.filter((id): id is string => {
+					if (typeof id !== "string" || !id.trim()) return false;
+					const lower = id.toLowerCase();
+					return (
+						lower.includes("embed") ||
+						lower.includes("bge-") ||
+						lower.includes("voyage") ||
+						lower.includes("e5-") ||
+						lower.includes("gte-") ||
+						lower.includes("nomic-") ||
+						lower.includes("-embedding")
+					);
+				});
+		}
 	},
 };
