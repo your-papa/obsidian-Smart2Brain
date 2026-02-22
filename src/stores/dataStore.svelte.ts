@@ -6,6 +6,7 @@ import SecondBrainPlugin, {
 	type AgentSkillState,
 	type AgentsConfig,
 	type BuiltInToolId,
+	type DefaultEmbedModel,
 	type MCPServerConfig,
 	type MCPServersConfig,
 	type PluginData,
@@ -15,6 +16,7 @@ import SecondBrainPlugin, {
 } from "../main";
 import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 import type { ChatModel } from "./chatStore.svelte";
+import type { VectorStoreBackend } from "../vectorstore/types";
 
 // Provider system types
 import type { AuthObject, ChatModelConfig, CustomProviderMeta, EmbedModelConfig } from "../providers/index";
@@ -182,7 +184,6 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		description:
 			"Search through your Obsidian notes by keyword. Returns matching file names and metadata (properties/frontmatter) but NO content. Use this to identify relevant notes before using other tools.",
 		settings: {
-			algorithm: "grep",
 			maxResults: 10,
 		},
 	},
@@ -300,7 +301,9 @@ export const DEFAULT_SETTINGS: PluginData = {
 	debuggingLangchainKey: "",
 
 	// Other
-	searchAlgorithm: "grep",
+	searchAlgorithm: "lexical",
+	defaultEmbedModel: null,
+	vectorStoreBackend: "hnsw",
 };
 
 export class PluginDataStore {
@@ -484,7 +487,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => { });
+				this._plugin.app.vault.createFolder(normalized).catch(() => {});
 			}
 		} catch (_) {
 			// ignore
@@ -1021,6 +1024,22 @@ export class PluginDataStore {
 	}
 	set searchAlgorithm(val: SearchAlgorithm) {
 		this.#data.searchAlgorithm = val;
+		this.saveSettings();
+	}
+
+	get defaultEmbedModel() {
+		return this.#data.defaultEmbedModel;
+	}
+	set defaultEmbedModel(val: DefaultEmbedModel | null) {
+		this.#data.defaultEmbedModel = val;
+		this.saveSettings();
+	}
+
+	get vectorStoreBackend(): VectorStoreBackend {
+		return this.#data.vectorStoreBackend ?? "hnsw";
+	}
+	set vectorStoreBackend(val: VectorStoreBackend) {
+		this.#data.vectorStoreBackend = val;
 		this.saveSettings();
 	}
 

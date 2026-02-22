@@ -2,8 +2,19 @@ import type { ChatModel } from "../stores/chatStore.svelte";
 import type { StoredProviderState } from "../stores/dataStore.svelte";
 import type { CustomProviderMeta } from "../types/provider/index";
 import type { UUIDv7 } from "../utils/uuid7Validator";
+import type { VectorStoreBackend } from "../vectorstore/types";
 
-export type SearchAlgorithm = "grep" | "omnisearch" | "embeddings";
+export type SearchAlgorithm = "lexical" | "embeddings" | "hybrid";
+
+/**
+ * Configuration for the default embedding model used for vector search.
+ */
+export interface DefaultEmbedModel {
+	/** Provider ID (e.g., "openai", "ollama") */
+	provider: string;
+	/** Model ID (e.g., "text-embedding-3-small") */
+	model: string;
+}
 
 // ============================================================================
 // MCP Server Configuration Types
@@ -83,8 +94,6 @@ export type BuiltInToolId = "search_notes" | "read_note" | "get_all_tags" | "get
  * Tool-specific settings for search_notes tool
  */
 export interface SearchNotesSettings {
-	/** Search algorithm to use */
-	algorithm: SearchAlgorithm;
 	/** Maximum number of results to return */
 	maxResults: number;
 }
@@ -364,6 +373,19 @@ export interface PluginData {
 	// ============================================================================
 
 	searchAlgorithm: SearchAlgorithm;
+
+	/**
+	 * Default embedding model for vector-based search.
+	 * When null, embeddings search is disabled.
+	 */
+	defaultEmbedModel: DefaultEmbedModel | null;
+
+	/**
+	 * Vector store backend for similarity search.
+	 * - "indexeddb": Brute-force cosine similarity (O(n), simple, reliable)
+	 * - "hnsw": Approximate nearest neighbor (O(log n), faster for large vaults)
+	 */
+	vectorStoreBackend: VectorStoreBackend;
 }
 
 export type PluginDataKey = keyof PluginData;

@@ -1,142 +1,207 @@
 import { tool } from "@langchain/core/tools";
-import { type App, TFile } from "obsidian";
+import type { App } from "obsidian";
 import { z } from "zod";
 import type { SearchAlgorithm } from "../../main";
 import { getData } from "../../stores/dataStore.svelte";
+import { getVectorStoreService, isVectorStoreInitialized, type SearchFilter } from "../../vectorstore";
+import { Logger } from "../../utils/logging";
 
-interface SearchResult {
+export interface SearchResult {
 	path: string;
 	name: string;
 	frontmatter?: Record<string, unknown>;
+	tags?: string[];
 	score?: number;
 }
 
 /**
- * Performs a simple grep-like search through all markdown files
+ * Calculate title boost based on how well query matches the note title.
+ * Returns a boost factor between 0 and titleBoostMax.
  */
-async function grepSearch(app: App, query: string): Promise<SearchResult[]> {
-	const queryLower = query.toLowerCase();
-	const markdownFiles = app.vault.getMarkdownFiles();
-	const results: SearchResult[] = [];
+function calculateTitleBoost(query: string, noteName: string, titleBoostMax: number): number {
+	const queryTerms = query
+		.toLowerCase()
+		.split(/\s+/)
+		.filter((term) => term.length > 2);
+	const titleLower = noteName.toLowerCase();
 
-	for (const file of markdownFiles) {
-		const name = file.basename;
-		const path = file.path;
-		const nameMatch = name.toLowerCase().includes(queryLower);
+	if (queryTerms.length === 0) return 0;
 
-		try {
-			const content = await app.vault.read(file);
-			const contentLower = content.toLowerCase();
-			const contentMatch = contentLower.includes(queryLower);
+	// Check for exact match (highest boost)
+	if (titleLower === query.toLowerCase()) {
+		return titleBoostMax;
+	}
 
-			if (nameMatch || contentMatch) {
-				const cache = app.metadataCache.getFileCache(file);
-				const frontmatter = cache?.frontmatter;
+	// Check for title containing full query
+	if (titleLower.includes(query.toLowerCase())) {
+		return titleBoostMax * 0.8;
+	}
 
-				results.push({
-					path,
-					name,
-					frontmatter,
-				});
+	// Count how many query terms appear in title
+	const matchingTerms = queryTerms.filter((term) => titleLower.includes(term));
+	const matchRatio = matchingTerms.length / queryTerms.length;
 
-				if (results.length >= 10) {
-					break;
-				}
-			}
-		} catch (error) {
-			console.error(`Error reading file ${path}:`, error);
+	return titleBoostMax * matchRatio * 0.6;
+}
+
+/**
+ * Hybrid search combining semantic and lexical search using Reciprocal Rank Fusion.
+ * Runs both searches in parallel and merges results.
+ */
+async function hybridSearch(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
+	const k = 60; // RRF constant (standard value)
+	const titleBoostMax = 0.03; // Max title boost (roughly equivalent to being in top 3 in both searches)
+
+	// Run semantic and lexical search in parallel
+	const [semanticResults, lexicalResults] = await Promise.all([
+		embeddingsSearch(app, query, filter),
+		getLexicalResults(app, query, filter),
+	]);
+
+	// Build RRF score map
+	const scoreMap = new Map<string, { result: SearchResult; score: number }>();
+
+	// Add semantic results with RRF scores
+	semanticResults.forEach((result, rank) => {
+		const rrfScore = 1 / (k + rank + 1);
+		const existing = scoreMap.get(result.path);
+		if (existing) {
+			existing.score += rrfScore;
+		} else {
+			scoreMap.set(result.path, { result, score: rrfScore });
 		}
-	}
+	});
 
-	return results;
-}
-
-/**
- * Omnisearch plugin API interface
- */
-interface OmnisearchApi {
-	search: (query: string) => Promise<
-		Array<{
-			path: string;
-			basename: string;
-			score: number;
-		}>
-	>;
-}
-
-/**
- * Gets the Omnisearch plugin API if available
- */
-function getOmnisearchApi(app: App): OmnisearchApi | null {
-	// @ts-ignore - Obsidian plugin API
-	const omnisearchPlugin = app.plugins?.getPlugin?.("omnisearch");
-	if (!omnisearchPlugin) {
-		console.debug("[search_notes] Omnisearch plugin not available.");
-		return null;
-	}
-	// @ts-ignore - Omnisearch exposes its API
-	console.debug("[search_notes] Omnisearch plugin detected.");
-	return omnisearchPlugin.api ?? null;
-}
-
-/**
- * Performs search using Omnisearch plugin
- */
-async function omnisearchSearch(app: App, query: string): Promise<SearchResult[]> {
-	const api = getOmnisearchApi(app);
-	if (!api) {
-		console.warn("Omnisearch plugin not available, falling back to grep search");
-		return grepSearch(app, query);
-	}
-
-	try {
-		console.debug("[search_notes] Using Omnisearch for query:", query);
-		const searchResults = await api.search(query);
-		const results: SearchResult[] = [];
-
-		for (const result of searchResults.slice(0, 10)) {
-			const file = app.vault.getAbstractFileByPath(result.path);
-			if (!file || !(file instanceof TFile)) continue;
-
-			const cache = app.metadataCache.getFileCache(file);
-			const frontmatter = cache?.frontmatter;
-
-			results.push({
-				path: result.path,
-				name: result.basename,
-				frontmatter,
-				score: result.score,
-			});
+	// Add lexical results with RRF scores
+	lexicalResults.forEach((result, rank) => {
+		const rrfScore = 1 / (k + rank + 1);
+		const existing = scoreMap.get(result.path);
+		if (existing) {
+			existing.score += rrfScore;
+		} else {
+			scoreMap.set(result.path, { result, score: rrfScore });
 		}
+	});
 
-		return results;
-	} catch (error) {
-		console.error("Omnisearch search failed, falling back to grep:", error);
-		return grepSearch(app, query);
+	// Apply title boost to all results
+	for (const entry of scoreMap.values()) {
+		const titleBoost = calculateTitleBoost(query, entry.result.name, titleBoostMax);
+		entry.score += titleBoost;
 	}
+
+	// Sort by combined RRF score and return
+	return Array.from(scoreMap.values())
+		.sort((a, b) => b.score - a.score)
+		.map(({ result, score }) => ({ ...result, score }));
 }
 
 /**
- * Placeholder for future embeddings-based search
+ * Get lexical search results using MiniSearch (TF-IDF based).
  */
-async function embeddingsSearch(app: App, query: string): Promise<SearchResult[]> {
-	console.warn("Embeddings search not yet implemented, falling back to grep search");
-	return grepSearch(app, query);
+async function getLexicalResults(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
+	if (!isVectorStoreInitialized()) {
+		Logger.warn("VectorStore not initialized for lexical search");
+		return [];
+	}
+
+	const vectorStore = getVectorStoreService();
+	const results = await vectorStore.lexicalSearch(query, 100, filter);
+
+	return results.map((r) => ({
+		path: r.path,
+		name: r.name,
+		frontmatter: r.frontmatter,
+		tags: r.tags,
+		score: r.score,
+	}));
 }
 
 /**
- * Performs search using the configured algorithm
+ * Embeddings-based semantic search using the VectorStoreService
  */
-async function performSearch(app: App, query: string, algorithm: SearchAlgorithm): Promise<SearchResult[]> {
-	console.debug("[search_notes] Algorithm selected:", algorithm);
+async function embeddingsSearch(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
+	if (!isVectorStoreInitialized()) {
+		Logger.warn("VectorStore not initialized for embeddings search");
+		return [];
+	}
+
+	const vectorStore = getVectorStoreService();
+	const pluginData = getData();
+
+	// Get similarity threshold from the configured embed model
+	const defaultModel = pluginData.defaultEmbedModel;
+	let threshold = 0;
+	if (defaultModel) {
+		const embedModels = pluginData.getEmbedModels(defaultModel.provider);
+		const modelConfig = embedModels[defaultModel.model];
+		threshold = modelConfig?.similarityThreshold ?? 0;
+	}
+
+	const results = await vectorStore.search(query, 100, threshold, filter);
+
+	return results.map((r) => ({
+		path: r.path,
+		name: r.name,
+		frontmatter: r.frontmatter,
+		tags: r.tags,
+		score: r.score,
+	}));
+}
+
+/**
+ * Performs search using the configured algorithm with optional filtering.
+ * If query is empty but filter is provided, returns filtered documents without search.
+ */
+export async function performSearch(
+	app: App,
+	query: string,
+	algorithm: SearchAlgorithm,
+	filter?: SearchFilter,
+): Promise<SearchResult[]> {
+	Logger.debug("[search_notes] Algorithm selected:", algorithm, "Filter:", filter);
+
+	// Handle filter-only queries (no search term)
+	if (!query.trim() && filter) {
+		return browseWithFilter(filter);
+	}
+
+	// Require a search term if no filter
+	if (!query.trim()) {
+		return [];
+	}
+
 	switch (algorithm) {
-		case "omnisearch":
-			return omnisearchSearch(app, query);
+		case "lexical":
+			return getLexicalResults(app, query, filter);
 		case "embeddings":
-			return embeddingsSearch(app, query);
+			return embeddingsSearch(app, query, filter);
+		case "hybrid":
+			return hybridSearch(app, query, filter);
 		default:
-			return grepSearch(app, query);
+			return getLexicalResults(app, query, filter);
 	}
+}
+
+/**
+ * Browse documents with filter only (no search query).
+ * Returns documents matching the filter criteria.
+ */
+async function browseWithFilter(filter: SearchFilter): Promise<SearchResult[]> {
+	if (!isVectorStoreInitialized()) {
+		Logger.warn("VectorStore not initialized for browse");
+		return [];
+	}
+
+	const vectorStore = getVectorStoreService();
+	const results = await vectorStore.browseDocuments(100, filter);
+
+	return results.map((r) => ({
+		path: r.path,
+		name: r.name,
+		frontmatter: r.frontmatter,
+		tags: r.tags,
+		score: r.score,
+	}));
 }
 
 /**
@@ -150,24 +215,37 @@ export function createSearchNotesTool(app: App) {
 		return selectedAgent?.toolsConfig?.search_notes ?? pluginData.getToolConfig("search_notes");
 	};
 	const toolConfig = getSearchNotesConfig();
-	const settings = toolConfig?.settings as { algorithm?: SearchAlgorithm; maxResults?: number } | undefined;
-	const maxResults = settings?.maxResults ?? 10;
 
-	const searchFn = async ({ query }: { query: string }): Promise<string> => {
-		// Re-fetch config for each call in case it changed
+	const searchFn = async ({
+		query,
+		pathPrefix,
+		tags,
+	}: {
+		query: string;
+		pathPrefix?: string;
+		tags?: string[];
+	}): Promise<string> => {
+		// Get fresh config each call to pick up any changes
 		const currentConfig = getSearchNotesConfig();
-		const currentSettings = currentConfig?.settings as
-			| { algorithm?: SearchAlgorithm; maxResults?: number }
-			| undefined;
-		const algorithm = currentSettings?.algorithm ?? "grep";
-		const limit = currentSettings?.maxResults ?? maxResults;
+		const algorithm = pluginData.searchAlgorithm;
+		const limit = (currentConfig?.settings as { maxResults?: number })?.maxResults ?? 10;
 
-		console.debug("[search_notes] Configured settings:", {
+		// Build filter from parameters
+		const filter: SearchFilter | undefined =
+			pathPrefix || tags?.length
+				? {
+					pathPrefixes: pathPrefix ? [pathPrefix] : undefined,
+					tags: tags,
+				}
+				: undefined;
+
+		Logger.debug("[search_notes] Configured settings:", {
 			algorithm,
 			maxResults: limit,
+			filter,
 		});
 
-		const results = await performSearch(app, query, algorithm);
+		const results = await performSearch(app, query, algorithm, filter);
 		const limitedResults = results.slice(0, limit);
 
 		if (limitedResults.length === 0) {
@@ -184,7 +262,13 @@ export function createSearchNotesTool(app: App) {
 			.join("\n\n");
 
 		const algorithmLabel =
-			algorithm === "omnisearch" ? "Omnisearch" : algorithm === "embeddings" ? "Embeddings" : "Grep";
+			algorithm === "lexical"
+				? "Lexical (TF-IDF)"
+				: algorithm === "embeddings"
+					? "Embeddings"
+					: algorithm === "hybrid"
+						? "Hybrid"
+						: "Lexical";
 		return `Found ${limitedResults.length} note(s) matching "${query}" using ${algorithmLabel}.\n\n${formattedResults}`;
 	};
 
@@ -195,6 +279,16 @@ export function createSearchNotesTool(app: App) {
 			"Search through your Obsidian notes by keyword. Returns matching file names and metadata (properties/frontmatter) but NO content. Use this to identify relevant notes before using other tools.",
 		schema: z.object({
 			query: z.string().describe("The search query to find in note names and content"),
+			pathPrefix: z
+				.string()
+				.optional()
+				.describe("Optional folder path prefix to restrict search (e.g., 'projects/' or 'work/notes/')"),
+			tags: z
+				.array(z.string())
+				.optional()
+				.describe(
+					"Optional tags to filter by (e.g., ['#project', '#active']). Documents must have at least one of these tags.",
+				),
 		}),
 	});
 }

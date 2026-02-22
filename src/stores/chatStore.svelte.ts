@@ -15,6 +15,7 @@ import type { ThreadError } from "../types/shared";
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { getData } from "./dataStore.svelte";
 import { getPlugin } from "./state.svelte";
+import { Logger } from "../utils/logging";
 
 // Re-export for backward compatibility
 export type { ThreadError };
@@ -23,7 +24,7 @@ const CHECKPOINT_DEBUG = false;
 
 function checkpointDebug(event: string, details: Record<string, unknown>): void {
 	if (!CHECKPOINT_DEBUG) return;
-	console.log(`[chatStore.checkpoint] ${event}`, details);
+	Logger.log(`[chatStore.checkpoint] ${event}`, details);
 }
 
 /* -----------------------------------------------------------------------------
@@ -355,7 +356,9 @@ export function buildCheckpointGraph(checkpoints: CheckpointHistoryItem[]): Chec
 	}
 
 	let rootCheckpointId: string | undefined;
-	const rootCandidates = [...nodes.values()].filter((node) => !node.parentCheckpointId || !nodes.has(node.parentCheckpointId));
+	const rootCandidates = [...nodes.values()].filter(
+		(node) => !node.parentCheckpointId || !nodes.has(node.parentCheckpointId),
+	);
 
 	if (rootCandidates.length > 0) {
 		rootCheckpointId = [...rootCandidates].sort(comparePathOrder)[0]?.checkpointId;
@@ -503,9 +506,7 @@ function buildDerivedBranchInfo(graph: CheckpointGraphState): {
 	const branchInfoMap = new Map<string, BranchInfo>();
 	const editForkEntryCheckpoints = new Set<string>();
 
-	const forkPoints = [...graph.nodes.values()]
-		.filter((node) => node.children.length > 1)
-		.sort(comparePathOrder);
+	const forkPoints = [...graph.nodes.values()].filter((node) => node.children.length > 1).sort(comparePathOrder);
 
 	for (const forkPoint of forkPoints) {
 		const sortedChildren = [...forkPoint.children].sort((a, b) => a.localeCompare(b));
@@ -836,7 +837,8 @@ export function baseMessagesToMessagePairs(
 					// Checkpoint where previous AI message is last -> fork from here to EDIT
 					// For first message, use rootCheckpointId since there's no previous AI
 					editFromCheckpointId =
-						checkpointMapping.aiBeforeHumanCheckpoints.get(humanMessageId) ?? checkpointMapping.rootCheckpointId;
+						checkpointMapping.aiBeforeHumanCheckpoints.get(humanMessageId) ??
+						checkpointMapping.rootCheckpointId;
 
 					// Branch info for user message (edit branches)
 					// Only show on the FIRST human message in a branch (the one right after the fork)
@@ -1228,7 +1230,7 @@ export class ChatSession {
 				plugin.agentManager
 					.generateThreadTitleFromUserMessage(String(this.id), options.generateTitle)
 					.catch((err) => {
-						console.warn("[ChatSession] Failed to generate chat title:", err);
+						Logger.warn("[ChatSession] Failed to generate chat title:", err);
 					});
 			}
 

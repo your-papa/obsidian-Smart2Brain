@@ -1,8 +1,9 @@
 export enum LogLvl {
 	DEBUG = 1,
 	INFO = 2,
-	ERROR = 3,
-	DISABLED = 4,
+	WARN = 3,
+	ERROR = 4,
+	DISABLED = 5,
 }
 
 class Logger {
@@ -16,8 +17,16 @@ class Logger {
 		if (Logger.logLevel <= LogLvl.DEBUG) console.debug("[S2B]", ...args);
 	}
 
+	static log(...args: unknown[]) {
+		if (Logger.logLevel <= LogLvl.INFO) console.log("[S2B]", ...args);
+	}
+
 	static info(...args: unknown[]) {
 		if (Logger.logLevel <= LogLvl.INFO) console.info("[S2B]", ...args);
+	}
+
+	static warn(...args: unknown[]) {
+		if (Logger.logLevel <= LogLvl.WARN) console.warn("[S2B]", ...args);
 	}
 
 	static error(...args: unknown[]) {
@@ -25,4 +34,4 @@ class Logger {
 	}
 }
 
-export default Logger;
+export { Logger };

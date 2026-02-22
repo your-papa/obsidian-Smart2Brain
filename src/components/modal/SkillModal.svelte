@@ -1,182 +1,178 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
-  import { getBundledSkill } from "../../skills";
-  import { EmbeddableMarkdownEditor } from "../../lib/editor";
-  import type SecondBrainPlugin from "../../main";
-  import { slugifySkillName, validateSkillName, validateDescription } from "../../skills";
-  import type { Skill } from "../../types/plugin";
-  import Button from "../ui/Button.svelte";
-  import Text from "../ui/Text.svelte";
-  import type { SkillModal } from "./SkillModal";
+import { onDestroy, onMount } from "svelte";
+import { getBundledSkill } from "../../skills";
+import { EmbeddableMarkdownEditor } from "../../lib/editor";
+import type SecondBrainPlugin from "../../main";
+import { slugifySkillName, validateSkillName, validateDescription } from "../../skills";
+import type { Skill } from "../../types/plugin";
+import Button from "../ui/Button.svelte";
+import Text from "../ui/Text.svelte";
+import type { SkillModal } from "./SkillModal";
 
-  interface Props {
-    modal: SkillModal;
-    plugin: SecondBrainPlugin;
-    pluginId: string;
-    onSave: () => void;
-  }
+interface Props {
+	modal: SkillModal;
+	plugin: SecondBrainPlugin;
+	pluginId: string;
+	onSave: () => void;
+}
 
-  const { modal, plugin, pluginId, onSave }: Props = $props();
+const { modal, plugin, pluginId, onSave }: Props = $props();
 
-  // File-based skill data (loaded from SkillsService)
-  let fileBasedSkill = $state<Skill | null>(null);
-  let originalSkillName = $state("");
+// File-based skill data (loaded from SkillsService)
+let fileBasedSkill = $state<Skill | null>(null);
+let originalSkillName = $state("");
 
-  // Editable fields
-  let editName = $state("");
-  let editDescription = $state("");
-  let validationError = $state("");
+// Editable fields
+let editName = $state("");
+let editDescription = $state("");
+let validationError = $state("");
 
-  // Generate slug from display name
-  const editSlug = $derived(slugifySkillName(editName));
+// Generate slug from display name
+const editSlug = $derived(slugifySkillName(editName));
 
-  // Validate per Agent Skills spec
-  const validation = $derived(() => {
-    if (!editName.trim()) return { valid: false, error: "Name is required" };
+// Validate per Agent Skills spec
+const validation = $derived(() => {
+	if (!editName.trim()) return { valid: false, error: "Name is required" };
 
-    const nameResult = validateSkillName(editSlug);
-    if (!nameResult.valid) {
-      return { valid: false, error: nameResult.errors[0]?.message || "Invalid name" };
-    }
+	const nameResult = validateSkillName(editSlug);
+	if (!nameResult.valid) {
+		return { valid: false, error: nameResult.errors[0]?.message || "Invalid name" };
+	}
 
-    const descResult = validateDescription(editDescription);
-    if (!descResult.valid) {
-      return { valid: false, error: descResult.errors[0]?.message || "Description is required" };
-    }
+	const descResult = validateDescription(editDescription);
+	if (!descResult.valid) {
+		return { valid: false, error: descResult.errors[0]?.message || "Description is required" };
+	}
 
-    return { valid: true, error: "" };
-  });
+	return { valid: true, error: "" };
+});
 
-  const isValid = $derived(validation().valid);
+const isValid = $derived(validation().valid);
 
-  // Display name from file-based skill or fallback to pluginId
-  const displayName = $derived(
-    fileBasedSkill?.frontmatter.metadata?.displayName ??
-      fileBasedSkill?.frontmatter.name ??
-      pluginId,
-  );
-  
-  // Check if this skill has a bundled default
-  const hasBundledDefault = $derived(!!getBundledSkill(pluginId));
+// Display name from file-based skill or fallback to pluginId
+const displayName = $derived(
+	fileBasedSkill?.frontmatter.metadata?.displayName ?? fileBasedSkill?.frontmatter.name ?? pluginId,
+);
 
-  let editorContainer: HTMLDivElement | undefined = $state();
-  let editor: EmbeddableMarkdownEditor | undefined = $state();
-  let promptValue = $state("");
+// Check if this skill has a bundled default
+const hasBundledDefault = $derived(!!getBundledSkill(pluginId));
 
-  onMount(async () => {
-    // Load file-based skill
-    const skillsService = plugin.skillsService;
-    if (skillsService?.isDiscovered()) {
-      const skillMetadata = skillsService.getCachedSkills().get(pluginId);
-      if (skillMetadata) {
-        fileBasedSkill = await skillsService.loadSkill(pluginId);
-        originalSkillName = pluginId;
+let editorContainer: HTMLDivElement | undefined = $state();
+let editor: EmbeddableMarkdownEditor | undefined = $state();
+let promptValue = $state("");
 
-        // Initialize editable fields from loaded skill
-        editName =
-          fileBasedSkill?.frontmatter.metadata?.displayName ??
-          fileBasedSkill?.frontmatter.name ??
-          pluginId;
-        editDescription = fileBasedSkill?.frontmatter.description ?? "";
-      }
-    }
+onMount(async () => {
+	// Load file-based skill
+	const skillsService = plugin.skillsService;
+	if (skillsService?.isDiscovered()) {
+		const skillMetadata = skillsService.getCachedSkills().get(pluginId);
+		if (skillMetadata) {
+			fileBasedSkill = await skillsService.loadSkill(pluginId);
+			originalSkillName = pluginId;
 
-    if (editorContainer) {
-      initializeEditor();
-    }
-    // Set modal title
-    modal.setTitle(`Edit: ${displayName}`);
-  });
+			// Initialize editable fields from loaded skill
+			editName =
+				fileBasedSkill?.frontmatter.metadata?.displayName ?? fileBasedSkill?.frontmatter.name ?? pluginId;
+			editDescription = fileBasedSkill?.frontmatter.description ?? "";
+		}
+	}
 
-  onDestroy(() => {
-    editor?.destroy();
-  });
+	if (editorContainer) {
+		initializeEditor();
+	}
+	// Set modal title
+	modal.setTitle(`Edit: ${displayName}`);
+});
 
-  function initializeEditor() {
-    if (!editorContainer || !fileBasedSkill) return;
+onDestroy(() => {
+	editor?.destroy();
+});
 
-    promptValue = fileBasedSkill.content;
+function initializeEditor() {
+	if (!editorContainer || !fileBasedSkill) return;
 
-    editor = new EmbeddableMarkdownEditor(plugin.app, editorContainer, {
-      value: promptValue,
-      placeholder: `Enter instructions for ${displayName}...`,
-      cls: "skill-editor",
-      onChange: (value) => {
-        promptValue = value;
-      },
-    });
-  }
+	promptValue = fileBasedSkill.content;
 
-  async function handleSave() {
-    if (!isValid) {
-      validationError = validation().error;
-      return;
-    }
+	editor = new EmbeddableMarkdownEditor(plugin.app, editorContainer, {
+		value: promptValue,
+		placeholder: `Enter instructions for ${displayName}...`,
+		cls: "skill-editor",
+		onChange: (value) => {
+			promptValue = value;
+		},
+	});
+}
 
-    if (!fileBasedSkill) {
-      validationError = "No skill loaded";
-      return;
-    }
+async function handleSave() {
+	if (!isValid) {
+		validationError = validation().error;
+		return;
+	}
 
-    const newSlug = editSlug;
-    const nameChanged = newSlug !== originalSkillName;
+	if (!fileBasedSkill) {
+		validationError = "No skill loaded";
+		return;
+	}
 
-    // If name changed, delete the old skill first
-    if (nameChanged) {
-      await plugin.skillsService.deleteSkill(originalSkillName);
-    }
+	const newSlug = editSlug;
+	const nameChanged = newSlug !== originalSkillName;
 
-    // Save with updated frontmatter
-    const result = await plugin.skillsService.saveSkill({
-      frontmatter: {
-        ...fileBasedSkill.frontmatter,
-        name: newSlug,
-        description: editDescription.trim(),
-        metadata: {
-          ...fileBasedSkill.frontmatter.metadata,
-          displayName: editName.trim(),
-        },
-      },
-      content: promptValue,
-    });
+	// If name changed, delete the old skill first
+	if (nameChanged) {
+		await plugin.skillsService.deleteSkill(originalSkillName);
+	}
 
-    if (!result.valid) {
-      validationError = result.errors[0]?.message || "Failed to save skill";
-      return;
-    }
+	// Save with updated frontmatter
+	const result = await plugin.skillsService.saveSkill({
+		frontmatter: {
+			...fileBasedSkill.frontmatter,
+			name: newSlug,
+			description: editDescription.trim(),
+			metadata: {
+				...fileBasedSkill.frontmatter.metadata,
+				displayName: editName.trim(),
+			},
+		},
+		content: promptValue,
+	});
 
-    // Re-discover to update cache
-    await plugin.skillsService.discoverSkills();
+	if (!result.valid) {
+		validationError = result.errors[0]?.message || "Failed to save skill";
+		return;
+	}
 
-    onSave();
-    modal.close();
-  }
+	// Re-discover to update cache
+	await plugin.skillsService.discoverSkills();
 
-  async function handleResetToDefault() {
-    if (!hasBundledDefault || !fileBasedSkill) return;
-    
-    const { parseFrontmatter } = await import("../../skills");
-    const bundled = getBundledSkill(pluginId);
-    if (!bundled) return;
+	onSave();
+	modal.close();
+}
 
-    // Parse the bundled content to get frontmatter and body
-    const parsed = parseFrontmatter(bundled.content);
-    if (parsed.frontmatter.name && parsed.frontmatter.description) {
-      await plugin.skillsService.saveSkill({
-        frontmatter: parsed.frontmatter as typeof fileBasedSkill.frontmatter,
-        content: parsed.body,
-      });
-      await plugin.skillsService.discoverSkills();
-      
-      // Update editor with reset content
-      promptValue = parsed.body;
-      editor?.setValue(promptValue);
-      
-      // Update editable fields
-      editName = parsed.frontmatter.metadata?.displayName ?? parsed.frontmatter.name;
-      editDescription = parsed.frontmatter.description;
-    }
-  }
+async function handleResetToDefault() {
+	if (!hasBundledDefault || !fileBasedSkill) return;
+
+	const { parseFrontmatter } = await import("../../skills");
+	const bundled = getBundledSkill(pluginId);
+	if (!bundled) return;
+
+	// Parse the bundled content to get frontmatter and body
+	const parsed = parseFrontmatter(bundled.content);
+	if (parsed.frontmatter.name && parsed.frontmatter.description) {
+		await plugin.skillsService.saveSkill({
+			frontmatter: parsed.frontmatter as typeof fileBasedSkill.frontmatter,
+			content: parsed.body,
+		});
+		await plugin.skillsService.discoverSkills();
+
+		// Update editor with reset content
+		promptValue = parsed.body;
+		editor?.setValue(promptValue);
+
+		// Update editable fields
+		editName = parsed.frontmatter.metadata?.displayName ?? parsed.frontmatter.name;
+		editDescription = parsed.frontmatter.description;
+	}
+}
 </script>
 
 <div class="skill-modal-content">

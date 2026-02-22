@@ -132,11 +132,12 @@
 	"settings": {
 		"search_algorithm": {
 			"title": "Search Algorithm",
-			"desc": "Choose the search algorithm for retrieving notes. Omnisearch requires the Omnisearch plugin to be installed.",
-			"grep": "Simple Grep",
-			"omnisearch": "Omnisearch",
-			"omnisearch_not_installed": "Omnisearch (not installed)",
-			"embeddings": "Embeddings (coming soon)"
+			"desc": "Choose the search algorithm for retrieving notes.",
+			"lexical": "Lexical (TF-IDF)",
+			"embeddings": "Semantic (embeddings)",
+			"embeddings_not_configured": "Semantic (configure model first)",
+			"hybrid": "Hybrid (semantic + lexical)",
+			"hybrid_not_configured": "Hybrid (configure embedding model first)"
 		},
 		"excludeff": "Exclude files and folders",
 		"excludeff_desc": "These files and folders won't be embedded and not be used for generating answers.",
@@ -167,8 +168,6 @@
 		"relaunch": "Relaunch",
 		"autostart": "Autostart",
 		"autostart_desc": "Automatically start the Smart Second Brain when Obsidian starts.",
-		"num_docs_retrieve": "Documents to retrieve",
-		"num_docs_retrieve_desc": "The maximum amount of documents to retrieve from your vault. Note that documents are not equivalent to notes.",
 		"debugging": "Debugging",
 		"langsmith_key": "Langsmith API Key",
 		"langsmith_key_desc": "Provide a Langsmith API Key if you want to trace and evaluate the internals of your Smart Second Brain.",

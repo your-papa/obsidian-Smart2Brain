@@ -24,13 +24,13 @@ const MAX_DESCRIPTION_LENGTH = 1024;
 const MAX_COMPATIBILITY_LENGTH = 500;
 
 export interface ValidationError {
-    field: string;
-    message: string;
+	field: string;
+	message: string;
 }
 
 export interface ValidationResult {
-    valid: boolean;
-    errors: ValidationError[];
+	valid: boolean;
+	errors: ValidationError[];
 }
 
 /**
@@ -39,29 +39,29 @@ export interface ValidationResult {
  * @returns Validation result with any errors
  */
 export function validateSkillName(name: string): ValidationResult {
-    const errors: ValidationError[] = [];
+	const errors: ValidationError[] = [];
 
-    if (!name || name.length === 0) {
-        errors.push({ field: "name", message: "Name is required" });
-        return { valid: false, errors };
-    }
+	if (!name || name.length === 0) {
+		errors.push({ field: "name", message: "Name is required" });
+		return { valid: false, errors };
+	}
 
-    if (name.length > MAX_NAME_LENGTH) {
-        errors.push({
-            field: "name",
-            message: `Name must be at most ${MAX_NAME_LENGTH} characters (got ${name.length})`,
-        });
-    }
+	if (name.length > MAX_NAME_LENGTH) {
+		errors.push({
+			field: "name",
+			message: `Name must be at most ${MAX_NAME_LENGTH} characters (got ${name.length})`,
+		});
+	}
 
-    if (!SKILL_NAME_REGEX.test(name)) {
-        errors.push({
-            field: "name",
-            message:
-                "Name must be lowercase alphanumeric with hyphens, cannot start/end with hyphen or have consecutive hyphens",
-        });
-    }
+	if (!SKILL_NAME_REGEX.test(name)) {
+		errors.push({
+			field: "name",
+			message:
+				"Name must be lowercase alphanumeric with hyphens, cannot start/end with hyphen or have consecutive hyphens",
+		});
+	}
 
-    return { valid: errors.length === 0, errors };
+	return { valid: errors.length === 0, errors };
 }
 
 /**
@@ -70,21 +70,21 @@ export function validateSkillName(name: string): ValidationResult {
  * @returns Validation result with any errors
  */
 export function validateDescription(description: string): ValidationResult {
-    const errors: ValidationError[] = [];
+	const errors: ValidationError[] = [];
 
-    if (!description || description.trim().length === 0) {
-        errors.push({ field: "description", message: "Description is required" });
-        return { valid: false, errors };
-    }
+	if (!description || description.trim().length === 0) {
+		errors.push({ field: "description", message: "Description is required" });
+		return { valid: false, errors };
+	}
 
-    if (description.length > MAX_DESCRIPTION_LENGTH) {
-        errors.push({
-            field: "description",
-            message: `Description must be at most ${MAX_DESCRIPTION_LENGTH} characters (got ${description.length})`,
-        });
-    }
+	if (description.length > MAX_DESCRIPTION_LENGTH) {
+		errors.push({
+			field: "description",
+			message: `Description must be at most ${MAX_DESCRIPTION_LENGTH} characters (got ${description.length})`,
+		});
+	}
 
-    return { valid: errors.length === 0, errors };
+	return { valid: errors.length === 0, errors };
 }
 
 /**
@@ -93,16 +93,16 @@ export function validateDescription(description: string): ValidationResult {
  * @returns Validation result with any errors
  */
 export function validateCompatibility(compatibility: string | undefined): ValidationResult {
-    const errors: ValidationError[] = [];
+	const errors: ValidationError[] = [];
 
-    if (compatibility && compatibility.length > MAX_COMPATIBILITY_LENGTH) {
-        errors.push({
-            field: "compatibility",
-            message: `Compatibility must be at most ${MAX_COMPATIBILITY_LENGTH} characters (got ${compatibility.length})`,
-        });
-    }
+	if (compatibility && compatibility.length > MAX_COMPATIBILITY_LENGTH) {
+		errors.push({
+			field: "compatibility",
+			message: `Compatibility must be at most ${MAX_COMPATIBILITY_LENGTH} characters (got ${compatibility.length})`,
+		});
+	}
 
-    return { valid: errors.length === 0, errors };
+	return { valid: errors.length === 0, errors };
 }
 
 /**
@@ -112,16 +112,16 @@ export function validateCompatibility(compatibility: string | undefined): Valida
  * @returns Validation result with any errors
  */
 export function validateNameMatchesDirectory(name: string, directoryName: string): ValidationResult {
-    const errors: ValidationError[] = [];
+	const errors: ValidationError[] = [];
 
-    if (name !== directoryName) {
-        errors.push({
-            field: "name",
-            message: `Skill name "${name}" must match directory name "${directoryName}"`,
-        });
-    }
+	if (name !== directoryName) {
+		errors.push({
+			field: "name",
+			message: `Skill name "${name}" must match directory name "${directoryName}"`,
+		});
+	}
 
-    return { valid: errors.length === 0, errors };
+	return { valid: errors.length === 0, errors };
 }
 
 /**
@@ -131,28 +131,28 @@ export function validateNameMatchesDirectory(name: string, directoryName: string
  * @returns Validation result with all errors
  */
 export function validateFrontmatter(frontmatter: Partial<SkillFrontmatter>, directoryName?: string): ValidationResult {
-    const allErrors: ValidationError[] = [];
+	const allErrors: ValidationError[] = [];
 
-    // Required fields
-    const nameResult = validateSkillName(frontmatter.name ?? "");
-    allErrors.push(...nameResult.errors);
+	// Required fields
+	const nameResult = validateSkillName(frontmatter.name ?? "");
+	allErrors.push(...nameResult.errors);
 
-    const descResult = validateDescription(frontmatter.description ?? "");
-    allErrors.push(...descResult.errors);
+	const descResult = validateDescription(frontmatter.description ?? "");
+	allErrors.push(...descResult.errors);
 
-    // Optional fields
-    if (frontmatter.compatibility !== undefined) {
-        const compatResult = validateCompatibility(frontmatter.compatibility);
-        allErrors.push(...compatResult.errors);
-    }
+	// Optional fields
+	if (frontmatter.compatibility !== undefined) {
+		const compatResult = validateCompatibility(frontmatter.compatibility);
+		allErrors.push(...compatResult.errors);
+	}
 
-    // Directory match check
-    if (directoryName && frontmatter.name) {
-        const dirResult = validateNameMatchesDirectory(frontmatter.name, directoryName);
-        allErrors.push(...dirResult.errors);
-    }
+	// Directory match check
+	if (directoryName && frontmatter.name) {
+		const dirResult = validateNameMatchesDirectory(frontmatter.name, directoryName);
+		allErrors.push(...dirResult.errors);
+	}
 
-    return { valid: allErrors.length === 0, errors: allErrors };
+	return { valid: allErrors.length === 0, errors: allErrors };
 }
 
 /**
@@ -161,11 +161,11 @@ export function validateFrontmatter(frontmatter: Partial<SkillFrontmatter>, dire
  * @returns Valid skill name slug
  */
 export function slugifySkillName(displayName: string): string {
-    return displayName
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9]+/g, "-") // Replace non-alphanumeric with hyphens
-        .replace(/^-+|-+$/g, "") // Remove leading/trailing hyphens
-        .replace(/-{2,}/g, "-") // Replace consecutive hyphens
-        .slice(0, MAX_NAME_LENGTH);
+	return displayName
+		.toLowerCase()
+		.trim()
+		.replace(/[^a-z0-9]+/g, "-") // Replace non-alphanumeric with hyphens
+		.replace(/^-+|-+$/g, "") // Remove leading/trailing hyphens
+		.replace(/-{2,}/g, "-") // Replace consecutive hyphens
+		.slice(0, MAX_NAME_LENGTH);
 }

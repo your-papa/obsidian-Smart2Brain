@@ -3,6 +3,7 @@ import { Notice } from "obsidian";
 import { tick } from "svelte";
 import { type AssistantMessage, AssistantState, type MessagePair, type Messenger } from "../../stores/chatStore.svelte";
 import type { UUIDv7 } from "../../utils/uuid7Validator";
+import { Logger } from "../../utils/logging";
 import CircularLoader from "../ui/CircularLoader.svelte";
 import Dots from "../ui/Dots.svelte";
 import IconButton from "../ui/IconButton.svelte";
@@ -40,7 +41,7 @@ async function submitEdit(messageId: UUIDv7, newContent: string) {
 	try {
 		await messenger.session?.editMessage(messageId, newContent);
 	} catch (error) {
-		console.error("[MessageContainer] Edit failed:", error);
+		Logger.error("[MessageContainer] Edit failed:", error);
 		new Notice(`Edit failed: ${error instanceof Error ? error.message : "Unknown error"}`);
 	}
 }
@@ -49,7 +50,7 @@ async function regenerateResponse(messageId: UUIDv7) {
 	try {
 		await messenger.session?.regenerateResponse(messageId);
 	} catch (error) {
-		console.error("[MessageContainer] Regenerate failed:", error);
+		Logger.error("[MessageContainer] Regenerate failed:", error);
 		new Notice(`Regenerate failed: ${error instanceof Error ? error.message : "Unknown error"}`);
 	}
 }
@@ -58,7 +59,7 @@ async function handleBranchNavigate(checkpointId: string) {
 	try {
 		await messenger.switchToBranch(checkpointId);
 	} catch (error) {
-		console.error("[MessageContainer] Branch switch failed:", error);
+		Logger.error("[MessageContainer] Branch switch failed:", error);
 		new Notice(`Branch switch failed: ${error instanceof Error ? error.message : "Unknown error"}`);
 	}
 }
@@ -178,193 +179,187 @@ function setToolsOpen(messageId: string, open: boolean) {
 </script>
 
 <div class="relative flex-1 min-h-0 z-20">
-	<!-- Scrollable messages area -->
-	<div bind:this={scrollContainer} class="scroll-container h-full overflow-y-auto px-2 py-4">
-		<div class="w-full max-w-[--file-line-width] mx-auto h-full">
-			{#if !messages || messages.length === 0}
-				<!-- Empty state with logo -->
-				<div class="flex flex-col items-center justify-center h-full">
-					<div
-						class="logo-container h-[80px] w-[80px] items-center justify-center transition-transform duration-150 ease-out"
-						class:input-focused={isInputFocused}
-					>
-						<Logo />
-					</div>
-					<p class="text-lg mb-1">Start a new conversation</p>
-					<p class="text-sm opacity-70">
-						Ask me anything about your notes.
-					</p>
-				</div>
-			{:else}
-				{#each messages as messagePair, index}
-					<!-- User Message -->
-					<div
-						use:registerMessageRef={messagePair.id + "-user"}
-						class="group mr-2 flex flex-col items-end gap-2 mb-2"
-					>
-						{#if editingMessageId === messagePair.id}
-							<!-- Edit Mode -->
-							<div class="w-full max-w-[80%] rounded-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2">
-								<ChatEditor
-									initialValue={messagePair.userMessage.content}
-									placeholder="Edit your message..."
-									onSubmit={(content) => submitEdit(messagePair.id, content)}
-									onCancel={cancelEdit}
-									minHeight="40px"
-									maxHeight="200px"
-								/>
-								<div class="flex justify-end gap-1 mt-2 text-xs text-text-muted">
-									<span>Press <kbd class="px-1 py-0.5 rounded bg-background-modifier-hover font-mono">Enter</kbd> to save</span>
-									<span class="mx-1">|</span>
-									<span>Press <kbd class="px-1 py-0.5 rounded bg-background-modifier-hover font-mono">Esc</kbd> to cancel</span>
-								</div>
-							</div>
-						{:else}
-							<!-- Display Mode -->
-							<CollapsibleUserBubble
-								content={messagePair.userMessage.content}
-								class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2"
-							/>
-						{/if}
+  <!-- Scrollable messages area -->
+  <div bind:this={scrollContainer} class="scroll-container h-full overflow-y-auto px-2 py-4">
+    <div class="w-full max-w-[--file-line-width] mx-auto h-full">
+      {#if !messages || messages.length === 0}
+        <!-- Empty state with logo -->
+        <div class="flex flex-col items-center justify-center h-full">
+          <div
+            class="logo-container h-[80px] w-[80px] items-center justify-center transition-transform duration-150 ease-out"
+            class:input-focused={isInputFocused}
+          >
+            <Logo />
+          </div>
+          <p class="text-lg mb-1">Start a new conversation</p>
+          <p class="text-sm opacity-70">Ask me anything about your notes.</p>
+        </div>
+      {:else}
+        {#each messages as messagePair, index}
+          <!-- User Message -->
+          <div
+            use:registerMessageRef={messagePair.id + "-user"}
+            class="group mr-2 flex flex-col items-end gap-2 mb-2"
+          >
+            {#if editingMessageId === messagePair.id}
+              <!-- Edit Mode -->
+              <div
+                class="w-full max-w-[80%] rounded-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2"
+              >
+                <ChatEditor
+                  initialValue={messagePair.userMessage.content}
+                  placeholder="Edit your message..."
+                  onSubmit={(content) => submitEdit(messagePair.id, content)}
+                  onCancel={cancelEdit}
+                  minHeight="40px"
+                  maxHeight="200px"
+                />
+                <div class="flex justify-end gap-1 mt-2 text-xs text-text-muted">
+                  <span
+                    >Press <kbd class="px-1 py-0.5 rounded bg-background-modifier-hover font-mono"
+                      >Enter</kbd
+                    > to save</span
+                  >
+                  <span class="mx-1">|</span>
+                  <span
+                    >Press <kbd class="px-1 py-0.5 rounded bg-background-modifier-hover font-mono"
+                      >Esc</kbd
+                    > to cancel</span
+                  >
+                </div>
+              </div>
+            {:else}
+              <!-- Display Mode -->
+              <CollapsibleUserBubble
+                content={messagePair.userMessage.content}
+                class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2"
+              />
+            {/if}
 
-						<!-- User message actions and branch navigator -->
-						<div class="flex flex-row items-center gap-2">
-							{#if editingMessageId !== messagePair.id}
-								<div
-									class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-								>
-									{#if messagePair.userBranchInfo}
-										<BranchNavigator
-											branchInfo={messagePair.userBranchInfo}
-											onNavigate={handleBranchNavigate}
-										/>
-									{/if}
-									<IconButton
-										icon="edit"
-										label="Edit message"
-										class="hover:text-[--text-accent]"
-										onclick={() => startEdit(messagePair)}
-									/>
-									<IconButton
-										icon="copy"
-										label="Copy message"
-										class="hover:text-[--text-accent]"
-										onclick={() => copyToClipboard(messagePair.userMessage.content)}
-									/>
-								</div>
-							{/if}
-						</div>
-					</div>
+            <!-- User message actions and branch navigator -->
+            <div class="flex flex-row items-center gap-2">
+              {#if editingMessageId !== messagePair.id}
+                <div
+                  class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+                >
+                  {#if messagePair.userBranchInfo}
+                    <BranchNavigator
+                      branchInfo={messagePair.userBranchInfo}
+                      onNavigate={handleBranchNavigate}
+                    />
+                  {/if}
+                  <IconButton
+                    icon="edit"
+                    label="Edit message"
+                    class="hover:text-[--text-accent]"
+                    onclick={() => startEdit(messagePair)}
+                  />
+                  <IconButton
+                    icon="copy"
+                    label="Copy message"
+                    class="hover:text-[--text-accent]"
+                    onclick={() => copyToClipboard(messagePair.userMessage.content)}
+                  />
+                </div>
+              {/if}
+            </div>
+          </div>
 
-					<!-- Assistant Message -->
-					<div class:min-h-[95%]={index === messages.length - 1}>
-						<div class="group flex flex-col px-2 gap-3 mb-2 w-full">
-							<!-- Tools Section (collapsible) -->
-							{#if messagePair.assistantMessage.toolCalls?.length}
-								<ToolCallsSection
-									toolCalls={messagePair.assistantMessage.toolCalls}
-									isOpen={getToolsOpen(messagePair.id, messagePair.assistantMessage)}
-									onToggle={(open) => setToolsOpen(messagePair.id, open)}
-								/>
-							{/if}
+          <!-- Assistant Message -->
+          <div class:min-h-[95%]={index === messages.length - 1}>
+            <div class="group flex flex-col px-2 gap-3 mb-2 w-full">
+              <!-- Tools Section (collapsible) -->
+              {#if messagePair.assistantMessage.toolCalls?.length}
+                <ToolCallsSection
+                  toolCalls={messagePair.assistantMessage.toolCalls}
+                  isOpen={getToolsOpen(messagePair.id, messagePair.assistantMessage)}
+                  onToggle={(open) => setToolsOpen(messagePair.id, open)}
+                />
+              {/if}
 
-							<!-- Content Section -->
-							{#if messagePair.assistantMessage.state === AssistantState.streaming && !messagePair.assistantMessage.content}
-								<Dots size={"35"} color={"var(--text-accent)"} />
-							{:else if messagePair.assistantMessage.content || messagePair.assistantMessage.state === AssistantState.cancelled || messagePair.assistantMessage.state === AssistantState.error}
-								{@const renderInfo = getRenderableAssistantContent(messagePair.assistantMessage)}
-								{#if renderInfo.renderContent}
-									<MarkdownRenderer
-										content={renderInfo.content}
-										class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
-									/>
-								{/if}
-								{#if renderInfo.showLoading}
-									<CircularLoader size={18} />
-								{/if}
-							{:else if messagePair.assistantMessage.state === AssistantState.idle || messagePair.assistantMessage.state === AssistantState.streaming}
-								<!-- Show loading dots only if streaming and no content yet (and no tool calls) -->
-								{#if !messagePair.assistantMessage.toolCalls?.length}
-									<Dots size={"50"} color={"var(--text-accent)"} />
-								{/if}
-							{/if}
+              <!-- Content Section -->
+              {#if messagePair.assistantMessage.state === AssistantState.streaming && !messagePair.assistantMessage.content}
+                <Dots size={"35"} color={"var(--text-accent)"} />
+              {:else if messagePair.assistantMessage.content || messagePair.assistantMessage.state === AssistantState.cancelled || messagePair.assistantMessage.state === AssistantState.error}
+                {@const renderInfo = getRenderableAssistantContent(messagePair.assistantMessage)}
+                {#if renderInfo.renderContent}
+                  <MarkdownRenderer
+                    content={renderInfo.content}
+                    class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
+                  />
+                {/if}
+                {#if renderInfo.showLoading}
+                  <CircularLoader size={18} />
+                {/if}
+              {:else if messagePair.assistantMessage.state === AssistantState.idle || messagePair.assistantMessage.state === AssistantState.streaming}
+                <!-- Show loading dots only if streaming and no content yet (and no tool calls) -->
+                {#if !messagePair.assistantMessage.toolCalls?.length}
+                  <Dots size={"50"} color={"var(--text-accent)"} />
+                {/if}
+              {/if}
 
-							<!-- Assistant message actions and branch navigator -->
-							{#if !(messagePair.assistantMessage.state === AssistantState.streaming)}
-								<div class="flex flex-row items-center gap-2">
-									<div
-										class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-									>
-										{#if messagePair.assistantBranchInfo}
-											<BranchNavigator
-												branchInfo={messagePair.assistantBranchInfo}
-												onNavigate={handleBranchNavigate}
-											/>
-										{/if}
-										<IconButton
-											icon="copy"
-											label="Copy response"
-											class="hover:text-[--text-accent]"
-											onclick={() => copyToClipboard(messagePair.assistantMessage.content)}
-										/>
-										<IconButton
-											icon="refresh-cw"
-											label="Regenerate response"
-											class="hover:text-[--text-accent]"
-											onclick={() => regenerateResponse(messagePair.id)}
-										/>
-									</div>
-								</div>
-							{/if}
-						</div>
-					</div>
-				{/each}
-			{/if}
-		</div>
-	</div>
+              <!-- Assistant message actions and branch navigator -->
+              {#if !(messagePair.assistantMessage.state === AssistantState.streaming)}
+                <div class="flex flex-row items-center gap-2">
+                  <div
+                    class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+                  >
+                    {#if messagePair.assistantBranchInfo}
+                      <BranchNavigator
+                        branchInfo={messagePair.assistantBranchInfo}
+                        onNavigate={handleBranchNavigate}
+                      />
+                    {/if}
+                    <IconButton
+                      icon="copy"
+                      label="Copy response"
+                      class="hover:text-[--text-accent]"
+                      onclick={() => copyToClipboard(messagePair.assistantMessage.content)}
+                    />
+                    <IconButton
+                      icon="refresh-cw"
+                      label="Regenerate response"
+                      class="hover:text-[--text-accent]"
+                      onclick={() => regenerateResponse(messagePair.id)}
+                    />
+                  </div>
+                </div>
+              {/if}
+            </div>
+          </div>
+        {/each}
+      {/if}
+    </div>
+  </div>
 </div>
 
 <style>
-	.scroll-container {
-		/* Enable native elastic/rubber-band scrolling on macOS/iOS */
-		-webkit-overflow-scrolling: touch;
-		/* Allow the container to have its own scroll bounce */
-		overscroll-behavior: contain;
-	}
+  .scroll-container {
+    /* Enable native elastic/rubber-band scrolling on macOS/iOS */
+    -webkit-overflow-scrolling: touch;
+    /* Allow the container to have its own scroll bounce */
+    overscroll-behavior: contain;
+  }
 
-	.logo-container :global(svg) {
-		width: 100%;
-		height: 100%;
-		fill: var(--text-faint);
-		stroke: var(--text-faint);
-		transition:
-			fill 0.15s ease-out,
-			stroke 0.15s ease-out,
-			filter 0.15s ease-out;
-	}
+  .logo-container :global(svg) {
+    width: 100%;
+    height: 100%;
+    fill: var(--text-faint);
+    stroke: var(--text-faint);
+    transition:
+      fill 0.15s ease-out,
+      stroke 0.15s ease-out,
+      filter 0.15s ease-out;
+  }
 
-	.logo-container.input-focused {
-		transform: translateY(-2px) scale(1.02);
-	}
+  .logo-container.input-focused {
+    transform: translateY(-2px) scale(1.02);
+  }
 
-	.logo-container.input-focused :global(svg) {
-		fill: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
-		stroke: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
-		filter: drop-shadow(
-				0 0 8px
-					color-mix(
-						in srgb,
-						var(--interactive-accent) 30%,
-						transparent
-					)
-			)
-			drop-shadow(
-				0 4px 10px
-					color-mix(
-						in srgb,
-						var(--interactive-accent) 18%,
-						transparent
-					)
-			);
-	}
+  .logo-container.input-focused :global(svg) {
+    fill: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
+    stroke: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
+    filter: drop-shadow(0 0 8px color-mix(in srgb, var(--interactive-accent) 30%, transparent))
+      drop-shadow(0 4px 10px color-mix(in srgb, var(--interactive-accent) 18%, transparent));
+  }
 </style>

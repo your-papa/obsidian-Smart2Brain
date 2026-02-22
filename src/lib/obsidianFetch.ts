@@ -1,4 +1,5 @@
 import { requestUrl, type RequestUrlParam } from "obsidian";
+import { Logger } from "../utils/logging";
 
 /**
  * Creates a custom fetch implementation that uses Obsidian's requestUrl
@@ -122,7 +123,7 @@ export function createObsidianFetch(
 				headers: response.headers as Record<string, string>,
 			});
 		} catch (error) {
-			console.error("Obsidian fetch proxy error:", error);
+			Logger.error("Obsidian fetch proxy error:", error);
 			throw error;
 		}
 	};
