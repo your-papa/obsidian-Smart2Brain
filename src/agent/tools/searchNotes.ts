@@ -1,5 +1,5 @@
 import { tool } from "@langchain/core/tools";
-import { type App, TFile } from "obsidian";
+import type { App } from "obsidian";
 import { z } from "zod";
 import type { SearchAlgorithm } from "../../main";
 import { getData } from "../../stores/dataStore.svelte";
@@ -12,65 +12,6 @@ export interface SearchResult {
 	frontmatter?: Record<string, unknown>;
 	tags?: string[];
 	score?: number;
-}
-
-/**
- * Performs a simple grep-like search through all markdown files.
- * Used as fallback when VectorStoreService is not initialized.
- */
-async function grepSearch(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
-	const queryLower = query.toLowerCase();
-	const markdownFiles = app.vault.getMarkdownFiles();
-	const results: SearchResult[] = [];
-
-	for (const file of markdownFiles) {
-		// Apply path filter
-		if (filter?.pathPrefixes?.length) {
-			const matchesPath = filter.pathPrefixes.some((prefix) => file.path.startsWith(prefix));
-			if (!matchesPath) continue;
-		}
-
-		const name = file.basename;
-		const path = file.path;
-		const nameMatch = name.toLowerCase().includes(queryLower);
-
-		try {
-			const content = await app.vault.read(file);
-			const contentLower = content.toLowerCase();
-			const contentMatch = contentLower.includes(queryLower);
-
-			if (nameMatch || contentMatch) {
-				const cache = app.metadataCache.getFileCache(file);
-				const frontmatter = cache?.frontmatter;
-
-				// Apply tag filter
-				if (filter?.tags?.length) {
-					const docTags = frontmatter?.tags
-						? Array.isArray(frontmatter.tags)
-							? frontmatter.tags.map((t: string) => (t.startsWith("#") ? t : `#${t}`))
-							: [`#${frontmatter.tags}`]
-						: [];
-					const normalizedFilterTags = filter.tags.map((t) => (t.startsWith("#") ? t : `#${t}`));
-					const hasMatch = normalizedFilterTags.some((tag) => docTags.includes(tag));
-					if (!hasMatch) continue;
-				}
-
-				results.push({
-					path,
-					name,
-					frontmatter,
-				});
-
-				if (results.length >= 20) {
-					break;
-				}
-			}
-		} catch (error) {
-			Logger.error(`Error reading file ${path}:`, error);
-		}
-	}
-
-	return results;
 }
 
 /**
@@ -156,29 +97,23 @@ async function hybridSearch(app: App, query: string, filter?: SearchFilter): Pro
 
 /**
  * Get lexical search results using MiniSearch (TF-IDF based).
- * Falls back to grep if VectorStoreService not initialized.
  */
 async function getLexicalResults(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
 	if (!isVectorStoreInitialized()) {
-		Logger.warn("VectorStore not initialized, falling back to grep search");
-		return grepSearch(app, query, filter);
+		Logger.warn("VectorStore not initialized for lexical search");
+		return [];
 	}
 
-	try {
-		const vectorStore = getVectorStoreService();
-		const results = await vectorStore.lexicalSearch(query, 100, filter);
+	const vectorStore = getVectorStoreService();
+	const results = await vectorStore.lexicalSearch(query, 100, filter);
 
-		return results.map((r) => ({
-			path: r.path,
-			name: r.name,
-			frontmatter: r.frontmatter,
-			tags: r.tags,
-			score: r.score,
-		}));
-	} catch (error) {
-		Logger.error("Lexical search failed, falling back to grep:", error);
-		return grepSearch(app, query, filter);
-	}
+	return results.map((r) => ({
+		path: r.path,
+		name: r.name,
+		frontmatter: r.frontmatter,
+		tags: r.tags,
+		score: r.score,
+	}));
 }
 
 /**
@@ -186,41 +121,36 @@ async function getLexicalResults(app: App, query: string, filter?: SearchFilter)
  */
 async function embeddingsSearch(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
 	if (!isVectorStoreInitialized()) {
-		Logger.warn("VectorStore not initialized, falling back to grep search");
-		return grepSearch(app, query);
+		Logger.warn("VectorStore not initialized for embeddings search");
+		return [];
 	}
 
-	try {
-		const vectorStore = getVectorStoreService();
-		const pluginData = getData();
+	const vectorStore = getVectorStoreService();
+	const pluginData = getData();
 
-		// Get similarity threshold from the configured embed model
-		const defaultModel = pluginData.defaultEmbedModel;
-		let threshold = 0;
-		if (defaultModel) {
-			const embedModels = pluginData.getEmbedModels(defaultModel.provider);
-			const modelConfig = embedModels[defaultModel.model];
-			threshold = modelConfig?.similarityThreshold ?? 0;
-		}
-
-		const results = await vectorStore.search(query, 100, threshold, filter);
-
-		// Convert to SearchResult format (already compatible)
-		return results.map((r) => ({
-			path: r.path,
-			name: r.name,
-			frontmatter: r.frontmatter,
-			tags: r.tags,
-			score: r.score,
-		}));
-	} catch (error) {
-		Logger.error("Embeddings search failed, falling back to grep:", error);
-		return grepSearch(app, query);
+	// Get similarity threshold from the configured embed model
+	const defaultModel = pluginData.defaultEmbedModel;
+	let threshold = 0;
+	if (defaultModel) {
+		const embedModels = pluginData.getEmbedModels(defaultModel.provider);
+		const modelConfig = embedModels[defaultModel.model];
+		threshold = modelConfig?.similarityThreshold ?? 0;
 	}
+
+	const results = await vectorStore.search(query, 100, threshold, filter);
+
+	return results.map((r) => ({
+		path: r.path,
+		name: r.name,
+		frontmatter: r.frontmatter,
+		tags: r.tags,
+		score: r.score,
+	}));
 }
 
 /**
  * Performs search using the configured algorithm with optional filtering.
+ * If query is empty but filter is provided, returns filtered documents without search.
  */
 export async function performSearch(
 	app: App,
@@ -229,6 +159,17 @@ export async function performSearch(
 	filter?: SearchFilter,
 ): Promise<SearchResult[]> {
 	Logger.debug("[search_notes] Algorithm selected:", algorithm, "Filter:", filter);
+
+	// Handle filter-only queries (no search term)
+	if (!query.trim() && filter) {
+		return browseWithFilter(filter);
+	}
+
+	// Require a search term if no filter
+	if (!query.trim()) {
+		return [];
+	}
+
 	switch (algorithm) {
 		case "lexical":
 			return getLexicalResults(app, query, filter);
@@ -239,6 +180,28 @@ export async function performSearch(
 		default:
 			return getLexicalResults(app, query, filter);
 	}
+}
+
+/**
+ * Browse documents with filter only (no search query).
+ * Returns documents matching the filter criteria.
+ */
+async function browseWithFilter(filter: SearchFilter): Promise<SearchResult[]> {
+	if (!isVectorStoreInitialized()) {
+		Logger.warn("VectorStore not initialized for browse");
+		return [];
+	}
+
+	const vectorStore = getVectorStoreService();
+	const results = await vectorStore.browseDocuments(100, filter);
+
+	return results.map((r) => ({
+		path: r.path,
+		name: r.name,
+		frontmatter: r.frontmatter,
+		tags: r.tags,
+		score: r.score,
+	}));
 }
 
 /**
@@ -271,9 +234,9 @@ export function createSearchNotesTool(app: App) {
 		const filter: SearchFilter | undefined =
 			pathPrefix || tags?.length
 				? {
-						pathPrefixes: pathPrefix ? [pathPrefix] : undefined,
-						tags: tags,
-					}
+					pathPrefixes: pathPrefix ? [pathPrefix] : undefined,
+					tags: tags,
+				}
 				: undefined;
 
 		Logger.debug("[search_notes] Configured settings:", {
