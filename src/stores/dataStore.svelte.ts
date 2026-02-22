@@ -16,6 +16,7 @@ import SecondBrainPlugin, {
 } from "../main";
 import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 import type { ChatModel } from "./chatStore.svelte";
+import type { VectorStoreBackend } from "../vectorstore/types";
 
 // Provider system types
 import type { AuthObject, ChatModelConfig, CustomProviderMeta, EmbedModelConfig } from "../providers/index";
@@ -299,6 +300,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	// Other
 	searchAlgorithm: "grep",
 	defaultEmbedModel: null,
+	vectorStoreBackend: "hnsw",
 };
 
 export class PluginDataStore {
@@ -1027,6 +1029,14 @@ export class PluginDataStore {
 	}
 	set defaultEmbedModel(val: DefaultEmbedModel | null) {
 		this.#data.defaultEmbedModel = val;
+		this.saveSettings();
+	}
+
+	get vectorStoreBackend(): VectorStoreBackend {
+		return this.#data.vectorStoreBackend ?? "hnsw";
+	}
+	set vectorStoreBackend(val: VectorStoreBackend) {
+		this.#data.vectorStoreBackend = val;
 		this.saveSettings();
 	}
 

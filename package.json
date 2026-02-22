@@ -49,6 +49,7 @@
 		"bits-ui": "^2.15.4",
 		"browserslist": "^4.28.1",
 		"caniuse-lite": "^1.0.30001765",
+		"hnsw": "^1.1.1",
 		"i18next": "^23.16.8",
 		"langchain": "^1.2.10",
 		"langsmith": "^0.4.7",

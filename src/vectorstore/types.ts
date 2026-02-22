@@ -121,3 +121,107 @@ export const INDEX_FILE_PATH = "vectorstore/index.msgpack";
 
 /** Debounce delay for file sync (5 minutes in ms) */
 export const SYNC_DEBOUNCE_MS = 5 * 60 * 1000;
+
+/**
+ * Result from a vector similarity search (internal use).
+ * Contains the document and its similarity score.
+ */
+export interface ScoredDocument {
+    doc: DocumentVector;
+    score: number;
+}
+
+/**
+ * Available vector store backends.
+ */
+export type VectorStoreBackend = "indexeddb" | "hnsw";
+
+/**
+ * Abstract interface for vector store backends.
+ * Both IndexedDB (brute-force) and HNSW implementations conform to this interface.
+ */
+export interface VectorStore {
+    /**
+     * Open the database connection.
+     */
+    open(): Promise<void>;
+
+    /**
+     * Close the database connection.
+     */
+    close(): Promise<void>;
+
+    /**
+     * Get the current provider ID.
+     */
+    readonly providerId: string | null;
+
+    /**
+     * Get the current model ID.
+     */
+    readonly modelId: string | null;
+
+    /**
+     * Set the metadata for this index.
+     */
+    setMetadata(providerId: string, modelId: string, version: number): Promise<void>;
+
+    /**
+     * Get the current index metadata.
+     */
+    getMetadata(): Promise<IndexMetadata | null>;
+
+    /**
+     * Add or update a document in the store.
+     */
+    upsert(doc: DocumentVector): Promise<void>;
+
+    /**
+     * Remove a document by path.
+     */
+    remove(path: string): Promise<void>;
+
+    /**
+     * Get a document by path.
+     */
+    getByPath(path: string): Promise<DocumentVector | undefined>;
+
+    /**
+     * Check if a document exists and get its mtime.
+     */
+    getDocumentMtime(path: string): Promise<number | undefined>;
+
+    /**
+     * Get all documents.
+     */
+    getAll(): Promise<DocumentVector[]>;
+
+    /**
+     * Get all documents as serialized format (for MessagePack).
+     */
+    getAllSerialized(): Promise<SerializedDocument[]>;
+
+    /**
+     * Bulk insert documents (for loading from file).
+     */
+    bulkPut(docs: DocumentVector[]): Promise<void>;
+
+    /**
+     * Clear all documents from the store.
+     */
+    clear(): Promise<void>;
+
+    /**
+     * Get the number of documents in the store.
+     */
+    count(): Promise<number>;
+
+    /**
+     * Search for similar vectors.
+     * @param queryVector The query vector to search for
+     * @param topK Maximum number of results to return
+     * @param threshold Minimum similarity score (0-1)
+     * @returns Array of documents with their similarity scores
+     */
+    search(queryVector: Float32Array, topK: number, threshold?: number): Promise<ScoredDocument[]>;
+}

@@ -2,6 +2,7 @@ import type { ChatModel } from "../stores/chatStore.svelte";
 import type { StoredProviderState } from "../stores/dataStore.svelte";
 import type { CustomProviderMeta } from "../types/provider/index";
 import type { UUIDv7 } from "../utils/uuid7Validator";
+import type { VectorStoreBackend } from "../vectorstore/types";
 
 export type SearchAlgorithm = "grep" | "omnisearch" | "embeddings" | "hybrid";
 
@@ -378,6 +379,13 @@ export interface PluginData {
 	 * When null, embeddings search is disabled.
 	 */
 	defaultEmbedModel: DefaultEmbedModel | null;
+
+	/**
+	 * Vector store backend for similarity search.
+	 * - "indexeddb": Brute-force cosine similarity (O(n), simple, reliable)
+	 * - "hnsw": Approximate nearest neighbor (O(log n), faster for large vaults)
+	 */
+	vectorStoreBackend: VectorStoreBackend;
 }
 
 export type PluginDataKey = keyof PluginData;

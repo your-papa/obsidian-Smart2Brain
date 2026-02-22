@@ -6,8 +6,15 @@
  * Avoids Dexie to prevent version conflicts with Obsidian's internal Dexie.
  */
 
-import { DEXIE_DB_NAME, type DocumentVector, type IndexMetadata, type SerializedDocument } from "./types";
-import { toFloat32Array, toNumberArray } from "./similarity";
+import {
+    DEXIE_DB_NAME,
+    type DocumentVector,
+    type IndexMetadata,
+    type ScoredDocument,
+    type SerializedDocument,
+    type VectorStore,
+} from "./types";
+import { cosineSimilarity, toFloat32Array, toNumberArray } from "./similarity";
 
 /**
  * Internal representation stored in IndexedDB.
@@ -39,8 +46,9 @@ const METADATA_STORE = "metadata";
 
 /**
  * Native IndexedDB-backed vector store for fast runtime access.
+ * Uses brute-force cosine similarity search (O(n) complexity).
  */
-export class IndexedDBVectorStore {
+export class IndexedDBVectorStore implements VectorStore {
     private db: IDBDatabase | null = null;
     private _providerId: string | null = null;
     private _modelId: string | null = null;
@@ -381,5 +389,29 @@ export class IndexedDBVectorStore {
             vector: toFloat32Array(stored.vector),
             chunkIndex: stored.chunkIndex,
         };
+    }
+
+    /**
+     * Search for similar vectors using brute-force cosine similarity.
+     * O(n) complexity - scans all documents.
+     */
+    async search(queryVector: Float32Array, topK: number, threshold?: number): Promise<ScoredDocument[]> {
+        const docs = await this.getAll();
+        const results: ScoredDocument[] = [];
+
+        for (const doc of docs) {
+            const score = cosineSimilarity(queryVector, doc.vector);
+            results.push({ doc, score });
+        }
+
+        // Sort by score descending
+        results.sort((a, b) => b.score - a.score);
+
+        // Apply threshold if provided
+        const effectiveThreshold = threshold ?? 0;
+        const filtered = results.filter((r) => r.score >= effectiveThreshold);
+
+        // Return top K
+        return filtered.slice(0, topK);
     }
 }

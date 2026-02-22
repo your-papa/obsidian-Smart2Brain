@@ -10,7 +10,7 @@ import type { EmbeddingsInterface } from "@langchain/core/embeddings";
 import type SecondBrainPlugin from "../main";
 import { getData } from "../stores/dataStore.svelte";
 import { getRegistry } from "../providers/registry";
-import { IndexedDBVectorStore } from "./IndexedDBVectorStore";
+import { createVectorStore } from "./index";
 import { FileSyncManager } from "./FileSyncManager";
 import {
     INDEX_FILE_PATH,
@@ -19,6 +19,7 @@ import {
     type DocumentVector,
     type IndexingProgress,
     type VectorSearchResult,
+    type VectorStore,
 } from "./types";
 import { cosineSimilarity, toFloat32Array } from "./similarity";
 import { Logger } from "../utils/logging";
@@ -67,7 +68,7 @@ export function isVectorStoreInitialized(): boolean {
  */
 export class VectorStoreService {
     private plugin: SecondBrainPlugin;
-    private store: IndexedDBVectorStore;
+    private store: VectorStore;
     private syncManager: FileSyncManager;
     private embeddings: EmbeddingsInterface | null = null;
     private isInitialized = false;
@@ -89,7 +90,11 @@ export class VectorStoreService {
 
     private constructor(plugin: SecondBrainPlugin) {
         this.plugin = plugin;
-        this.store = new IndexedDBVectorStore();
+        
+        // Create vector store backend based on user setting
+        const backend = getData()?.vectorStoreBackend ?? "hnsw";
+        this.store = createVectorStore(backend);
+        Logger.log(`[VectorStore] Using ${backend} backend`);
 
         // Get plugin data directory path
         const vault = plugin.app.vault as { configDir?: string };
@@ -793,6 +798,7 @@ export class VectorStoreService {
 
     /**
      * Search for similar documents.
+     * Delegates to the underlying vector store backend (IndexedDB or HNSW).
      */
     async search(query: string, topK: number, threshold?: number): Promise<VectorSearchResult[]> {
         // Ensure index is ready
@@ -811,28 +817,12 @@ export class VectorStoreService {
             const queryVector = await embeddings.embedQuery(query);
             const queryVectorTyped = new Float32Array(queryVector);
 
-            // Get all documents and compute similarities
-            const docs = await this.store.getAll();
-            const results: Array<{ doc: DocumentVector; score: number }> = [];
-
-            for (const doc of docs) {
-                const score = cosineSimilarity(queryVectorTyped, doc.vector);
-                results.push({ doc, score });
-            }
-
-            // Sort by score descending
-            results.sort((a, b) => b.score - a.score);
-
-            // Apply threshold if provided
-            const effectiveThreshold = threshold ?? 0;
-            const filtered = results.filter((r) => r.score >= effectiveThreshold);
-
-            // Take top K
-            const topResults = filtered.slice(0, topK);
+            // Delegate search to the backend (IndexedDB brute-force or HNSW ANN)
+            const results = await this.store.search(queryVectorTyped, topK, threshold);
 
             // Convert to SearchResult format
             const { metadataCache } = this.plugin.app;
-            return topResults.map((r) => {
+            return results.map((r) => {
                 const file = this.plugin.app.vault.getAbstractFileByPath(r.doc.path);
                 const cache = file instanceof TFile ? metadataCache.getFileCache(file) : null;
 
