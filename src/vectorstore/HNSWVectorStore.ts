@@ -331,6 +331,7 @@ export class HNSWVectorStore implements VectorStore {
 		const doc = await this.getByPath(path);
 		if (doc) {
 			await this.removeFromHNSW(doc.id);
+			await this.removeIdMapping(doc.id);
 		}
 
 		return new Promise((resolve, reject) => {
