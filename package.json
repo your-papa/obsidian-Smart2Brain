@@ -53,6 +53,7 @@
 		"i18next": "^23.16.8",
 		"langchain": "^1.2.10",
 		"langsmith": "^0.4.7",
+		"minisearch": "^7.2.0",
 		"runed": "^0.37.1",
 		"svelte-i18n": "^4.0.1",
 		"uuid": "^11.1.0",

@@ -4,7 +4,7 @@ import type { CustomProviderMeta } from "../types/provider/index";
 import type { UUIDv7 } from "../utils/uuid7Validator";
 import type { VectorStoreBackend } from "../vectorstore/types";
 
-export type SearchAlgorithm = "grep" | "omnisearch" | "embeddings" | "hybrid";
+export type SearchAlgorithm = "lexical" | "embeddings" | "hybrid";
 
 /**
  * Configuration for the default embedding model used for vector search.

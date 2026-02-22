@@ -183,6 +183,9 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		name: "search_notes",
 		description:
 			"Search through your Obsidian notes by keyword. Returns matching file names and metadata (properties/frontmatter) but NO content. Use this to identify relevant notes before using other tools.",
+		settings: {
+			maxResults: 10,
+		},
 	},
 	read_note: {
 		enabled: true,
@@ -298,7 +301,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	debuggingLangchainKey: "",
 
 	// Other
-	searchAlgorithm: "grep",
+	searchAlgorithm: "lexical",
 	defaultEmbedModel: null,
 	vectorStoreBackend: "hnsw",
 };
@@ -484,7 +487,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch (_) {
 			// ignore

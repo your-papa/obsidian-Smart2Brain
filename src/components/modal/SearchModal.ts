@@ -115,7 +115,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
                 const results = await performSearch(this.app, searchQuery, algorithm, filter);
                 // Only update if query hasn't changed and modal is still open
                 if (rawQuery === this.currentQuery && !this.isClosed) {
-                    this.searchResults = results.slice(0, pluginData.retrieveTopK);
+                    this.searchResults = results.slice(0, 20);
                     this.lastSearchedQuery = rawQuery;
                     // @ts-ignore - updateSuggestions is a protected method
                     this.updateSuggestions();

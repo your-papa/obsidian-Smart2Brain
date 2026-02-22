@@ -15,14 +15,21 @@ export interface SearchResult {
 }
 
 /**
- * Performs a simple grep-like search through all markdown files
+ * Performs a simple grep-like search through all markdown files.
+ * Used as fallback when VectorStoreService is not initialized.
  */
-async function grepSearch(app: App, query: string): Promise<SearchResult[]> {
+async function grepSearch(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
 	const queryLower = query.toLowerCase();
 	const markdownFiles = app.vault.getMarkdownFiles();
 	const results: SearchResult[] = [];
 
 	for (const file of markdownFiles) {
+		// Apply path filter
+		if (filter?.pathPrefixes?.length) {
+			const matchesPath = filter.pathPrefixes.some((prefix) => file.path.startsWith(prefix));
+			if (!matchesPath) continue;
+		}
+
 		const name = file.basename;
 		const path = file.path;
 		const nameMatch = name.toLowerCase().includes(queryLower);
@@ -36,13 +43,25 @@ async function grepSearch(app: App, query: string): Promise<SearchResult[]> {
 				const cache = app.metadataCache.getFileCache(file);
 				const frontmatter = cache?.frontmatter;
 
+				// Apply tag filter
+				if (filter?.tags?.length) {
+					const docTags = frontmatter?.tags
+						? Array.isArray(frontmatter.tags)
+							? frontmatter.tags.map((t: string) => (t.startsWith("#") ? t : `#${t}`))
+							: [`#${frontmatter.tags}`]
+						: [];
+					const normalizedFilterTags = filter.tags.map((t) => (t.startsWith("#") ? t : `#${t}`));
+					const hasMatch = normalizedFilterTags.some((tag) => docTags.includes(tag));
+					if (!hasMatch) continue;
+				}
+
 				results.push({
 					path,
 					name,
 					frontmatter,
 				});
 
-				if (results.length >= 10) {
+				if (results.length >= 20) {
 					break;
 				}
 			}
@@ -52,71 +71,6 @@ async function grepSearch(app: App, query: string): Promise<SearchResult[]> {
 	}
 
 	return results;
-}
-
-/**
- * Omnisearch plugin API interface
- */
-interface OmnisearchApi {
-	search: (query: string) => Promise<
-		Array<{
-			path: string;
-			basename: string;
-			score: number;
-		}>
-	>;
-}
-
-/**
- * Gets the Omnisearch plugin API if available
- */
-function getOmnisearchApi(app: App): OmnisearchApi | null {
-	// @ts-ignore - Obsidian plugin API
-	const omnisearchPlugin = app.plugins?.getPlugin?.("omnisearch");
-	if (!omnisearchPlugin) {
-		Logger.debug("[search_notes] Omnisearch plugin not available.");
-		return null;
-	}
-	// @ts-ignore - Omnisearch exposes its API
-	Logger.debug("[search_notes] Omnisearch plugin detected.");
-	return omnisearchPlugin.api ?? null;
-}
-
-/**
- * Performs search using Omnisearch plugin
- */
-async function omnisearchSearch(app: App, query: string): Promise<SearchResult[]> {
-	const api = getOmnisearchApi(app);
-	if (!api) {
-		Logger.warn("Omnisearch plugin not available, falling back to grep search");
-		return grepSearch(app, query);
-	}
-
-	try {
-		Logger.debug("[search_notes] Using Omnisearch for query:", query);
-		const searchResults = await api.search(query);
-		const results: SearchResult[] = [];
-
-		for (const result of searchResults.slice(0, 10)) {
-			const file = app.vault.getAbstractFileByPath(result.path);
-			if (!file || !(file instanceof TFile)) continue;
-
-			const cache = app.metadataCache.getFileCache(file);
-			const frontmatter = cache?.frontmatter;
-
-			results.push({
-				path: result.path,
-				name: result.basename,
-				frontmatter,
-				score: result.score,
-			});
-		}
-
-		return results;
-	} catch (error) {
-		Logger.error("Omnisearch search failed, falling back to grep:", error);
-		return grepSearch(app, query);
-	}
 }
 
 /**
@@ -201,51 +155,31 @@ async function hybridSearch(app: App, query: string, filter?: SearchFilter): Pro
 }
 
 /**
- * Get lexical search results - uses Omnisearch if available, otherwise grep.
- * Applies path/tag filters when not using embeddings search.
+ * Get lexical search results using MiniSearch (TF-IDF based).
+ * Falls back to grep if VectorStoreService not initialized.
  */
 async function getLexicalResults(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
-	const api = getOmnisearchApi(app);
-	let results: SearchResult[];
-	if (api) {
-		results = await omnisearchSearch(app, query);
-	} else {
-		results = await grepSearch(app, query);
+	if (!isVectorStoreInitialized()) {
+		Logger.warn("VectorStore not initialized, falling back to grep search");
+		return grepSearch(app, query, filter);
 	}
 
-	// Apply filters to lexical results (since they don't support native filtering)
-	if (filter?.pathPrefixes?.length || filter?.tags?.length) {
-		results = results.filter((result) => {
-			// Path filter
-			if (filter.pathPrefixes?.length) {
-				const matchesPath = filter.pathPrefixes.some((prefix) => result.path.startsWith(prefix));
-				if (!matchesPath) return false;
-			}
+	try {
+		const vectorStore = getVectorStoreService();
+		const pluginData = getData();
+		const results = await vectorStore.lexicalSearch(query, 100, filter);
 
-			// Tag filter (using frontmatter tags)
-			if (filter.tags?.length && result.frontmatter?.tags) {
-				const docTags = Array.isArray(result.frontmatter.tags)
-					? result.frontmatter.tags.map((t: string) => (t.startsWith("#") ? t : `#${t}`))
-					: [`#${result.frontmatter.tags}`];
-				const normalizedFilterTags = filter.tags.map((t) => (t.startsWith("#") ? t : `#${t}`));
-
-				if (filter.requireAllTags) {
-					const hasAllTags = normalizedFilterTags.every((tag) => docTags.includes(tag));
-					if (!hasAllTags) return false;
-				} else {
-					const hasAnyTag = normalizedFilterTags.some((tag) => docTags.includes(tag));
-					if (!hasAnyTag) return false;
-				}
-			} else if (filter.tags?.length) {
-				// Document has no tags but filter requires tags
-				return false;
-			}
-
-			return true;
-		});
+		return results.map((r) => ({
+			path: r.path,
+			name: r.name,
+			frontmatter: r.frontmatter,
+			tags: r.tags,
+			score: r.score,
+		}));
+	} catch (error) {
+		Logger.error("Lexical search failed, falling back to grep:", error);
+		return grepSearch(app, query, filter);
 	}
-
-	return results;
 }
 
 /**
@@ -270,7 +204,7 @@ async function embeddingsSearch(app: App, query: string, filter?: SearchFilter):
 			threshold = modelConfig?.similarityThreshold ?? 0;
 		}
 
-		const results = await vectorStore.search(query, pluginData.retrieveTopK, threshold, filter);
+		const results = await vectorStore.search(query, 100, threshold, filter);
 
 		// Convert to SearchResult format (already compatible)
 		return results.map((r) => ({
@@ -297,7 +231,7 @@ export async function performSearch(
 ): Promise<SearchResult[]> {
 	Logger.debug("[search_notes] Algorithm selected:", algorithm, "Filter:", filter);
 	switch (algorithm) {
-		case "omnisearch":
+		case "lexical":
 			return getLexicalResults(app, query, filter);
 		case "embeddings":
 			return embeddingsSearch(app, query, filter);
@@ -329,9 +263,10 @@ export function createSearchNotesTool(app: App) {
 		pathPrefix?: string;
 		tags?: string[];
 	}): Promise<string> => {
-		// Always use global search settings
+		// Get fresh config each call to pick up any changes
+		const currentConfig = getSearchNotesConfig();
 		const algorithm = pluginData.searchAlgorithm;
-		const limit = pluginData.retrieveTopK;
+		const limit = (currentConfig?.settings as { maxResults?: number })?.maxResults ?? 10;
 
 		// Build filter from parameters
 		const filter: SearchFilter | undefined =
@@ -365,13 +300,13 @@ export function createSearchNotesTool(app: App) {
 			.join("\n\n");
 
 		const algorithmLabel =
-			algorithm === "omnisearch"
-				? "Omnisearch"
+			algorithm === "lexical"
+				? "Lexical (TF-IDF)"
 				: algorithm === "embeddings"
 					? "Embeddings"
 					: algorithm === "hybrid"
 						? "Hybrid"
-						: "Grep";
+						: "Lexical";
 		return `Found ${limitedResults.length} note(s) matching "${query}" using ${algorithmLabel}.\n\n${formattedResults}`;
 	};
 

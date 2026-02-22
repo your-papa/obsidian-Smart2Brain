@@ -6,12 +6,10 @@
 	"settings": {
 		"search_algorithm": {
 			"title": "Suchalgorithmus",
-			"desc": "Wähle den Suchalgorithmus zum Abrufen von Notizen. Omnisearch erfordert, dass das Omnisearch-Plugin installiert ist.",
-			"grep": "Einfache Suche (Grep)",
-			"omnisearch": "Omnisearch",
-			"omnisearch_not_installed": "Omnisearch (nicht installiert)",
-			"embeddings": "Embeddings (semantische Suche)",
-			"embeddings_not_configured": "Embeddings (Model zuerst konfigurieren)",
+			"desc": "Wähle den Suchalgorithmus zum Abrufen von Notizen.",
+			"lexical": "Lexikalisch (TF-IDF)",
+			"embeddings": "Semantisch (Embeddings)",
+			"embeddings_not_configured": "Semantisch (Model zuerst konfigurieren)",
 			"hybrid": "Hybrid (semantisch + lexikalisch)",
 			"hybrid_not_configured": "Hybrid (Embedding-Model zuerst konfigurieren)"
 		}

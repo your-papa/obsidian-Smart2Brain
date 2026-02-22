@@ -10,23 +10,23 @@
  */
 
 export {
-    VectorStoreService,
-    getVectorStoreService,
-    isVectorStoreInitialized,
+	VectorStoreService,
+	getVectorStoreService,
+	isVectorStoreInitialized,
 } from "./VectorStoreService";
 
 export type {
-    DefaultEmbedModel,
-    DocumentVector,
-    IndexMetadata,
-    IndexingProgress,
-    ScoredDocument,
-    SearchFilter,
-    SerializedDocument,
-    SerializedIndex,
-    VectorSearchResult,
-    VectorStore,
-    VectorStoreBackend,
+	DefaultEmbedModel,
+	DocumentVector,
+	IndexMetadata,
+	IndexingProgress,
+	ScoredDocument,
+	SearchFilter,
+	SerializedDocument,
+	SerializedIndex,
+	VectorSearchResult,
+	VectorStore,
+	VectorStoreBackend,
 } from "./types";
 
 export { cosineSimilarity, normalize, dotProduct } from "./similarity";
@@ -45,11 +45,11 @@ import { HNSWVectorStore } from "./HNSWVectorStore";
  * @returns A VectorStore instance
  */
 export function createVectorStore(backend: VectorStoreBackend): VectorStore {
-    switch (backend) {
-        case "hnsw":
-            return new HNSWVectorStore();
-        case "indexeddb":
-        default:
-            return new IndexedDBVectorStore();
-    }
+	switch (backend) {
+		case "hnsw":
+			return new HNSWVectorStore();
+		case "indexeddb":
+		default:
+			return new IndexedDBVectorStore();
+	}
 }

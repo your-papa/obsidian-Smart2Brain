@@ -1,100 +1,112 @@
 <script lang="ts">
-import { onMount } from "svelte";
-import type SecondBrainPlugin from "../../main";
-import type { BuiltInToolId, ToolConfig } from "../../main";
-import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
-import Button from "../ui/Button.svelte";
-import Text from "../ui/Text.svelte";
-import TextArea from "../ui/TextArea.svelte";
-import type { ToolConfigAccessors, ToolConfigModal } from "./ToolConfigModal";
+  import { onMount } from "svelte";
+  import type SecondBrainPlugin from "../../main";
+  import type { BuiltInToolId, ToolConfig } from "../../main";
+  import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
+  import Button from "../ui/Button.svelte";
+  import Text from "../ui/Text.svelte";
+  import TextArea from "../ui/TextArea.svelte";
+  import type { ToolConfigAccessors, ToolConfigModal } from "./ToolConfigModal";
 
-interface Props {
-	modal: ToolConfigModal;
-	plugin: SecondBrainPlugin;
-	toolId: BuiltInToolId;
-	onSave: () => void;
-	accessors?: ToolConfigAccessors;
-}
+  interface Props {
+    modal: ToolConfigModal;
+    plugin: SecondBrainPlugin;
+    toolId: BuiltInToolId;
+    onSave: () => void;
+    accessors?: ToolConfigAccessors;
+  }
 
-const { modal, plugin, toolId, onSave, accessors }: Props = $props();
-const pluginData = getData();
+  const { modal, plugin, toolId, onSave, accessors }: Props = $props();
+  const pluginData = getData();
 
-// Capture initial values at component creation (props don't change for modals)
-const defaultConfig = DEFAULT_TOOLS_CONFIG[toolId];
-const initialToolConfig = accessors?.getToolConfig() ?? pluginData.getToolConfig(toolId);
+  // Capture initial values at component creation (props don't change for modals)
+  const defaultConfig = DEFAULT_TOOLS_CONFIG[toolId];
+  const initialToolConfig = accessors?.getToolConfig() ?? pluginData.getToolConfig(toolId);
 
-function updateToolConfig(config: Partial<ToolConfig>): void {
-	if (accessors?.updateToolConfig) {
-		accessors.updateToolConfig(config);
-	} else {
-		pluginData.updateToolConfig(toolId, config);
-	}
-}
+  function updateToolConfig(config: Partial<ToolConfig>): void {
+    if (accessors?.updateToolConfig) {
+      accessors.updateToolConfig(config);
+    } else {
+      pluginData.updateToolConfig(toolId, config);
+    }
+  }
 
-// Editable state - initialized from captured initial values
-let name = $state(initialToolConfig?.name ?? defaultConfig.name);
-let description = $state(initialToolConfig?.description ?? defaultConfig.description);
+  // Editable state - initialized from captured initial values
+  let name = $state(initialToolConfig?.name ?? defaultConfig.name);
+  let description = $state(initialToolConfig?.description ?? defaultConfig.description);
 
-// Tool-specific settings
-let maxContentLength = $state(
-	(initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
-		(defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
-		0,
-);
-let includeMetadata = $state(
-	(initialToolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
-		(defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
-		true,
-);
+  // Tool-specific settings
+  let maxContentLength = $state(
+    (initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
+      (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
+      0,
+  );
+  let includeMetadata = $state(
+    (initialToolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
+      (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
+      true,
+  );
+  let maxResults = $state(
+    (initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
+      (defaultConfig.settings as { maxResults?: number })?.maxResults ??
+      10,
+  );
 
-// Tool display names for the modal title
-const toolDisplayNames: Record<BuiltInToolId, string> = {
-	search_notes: "Search Notes",
-	read_note: "Read Note",
-	get_all_tags: "Get All Tags",
-	get_properties: "Get Properties",
-	execute_dataview_query: "Execute Dataview Query",
-};
+  // Tool display names for the modal title
+  const toolDisplayNames: Record<BuiltInToolId, string> = {
+    search_notes: "Search Notes",
+    read_note: "Read Note",
+    get_all_tags: "Get All Tags",
+    get_properties: "Get Properties",
+    execute_dataview_query: "Execute Dataview Query",
+  };
 
-onMount(() => {
-	modal.setTitle(`Configure: ${toolDisplayNames[toolId]}`);
-});
+  onMount(() => {
+    modal.setTitle(`Configure: ${toolDisplayNames[toolId]}`);
+  });
 
-function handleSave() {
-	// Build updated config
-	const updatedConfig: Partial<ToolConfig> = {
-		name,
-		description,
-	};
+  function handleSave() {
+    // Build updated config
+    const updatedConfig: Partial<ToolConfig> = {
+      name,
+      description,
+    };
 
-	// Add tool-specific settings
-	if (toolId === "read_note") {
-		updatedConfig.settings = {
-			maxContentLength,
-		};
-	} else if (toolId === "execute_dataview_query") {
-		updatedConfig.settings = {
-			includeMetadata,
-		};
-	}
+    // Add tool-specific settings
+    if (toolId === "search_notes") {
+      updatedConfig.settings = {
+        maxResults,
+      };
+    } else if (toolId === "read_note") {
+      updatedConfig.settings = {
+        maxContentLength,
+      };
+    } else if (toolId === "execute_dataview_query") {
+      updatedConfig.settings = {
+        includeMetadata,
+      };
+    }
 
-	updateToolConfig(updatedConfig);
-	onSave();
-	modal.close();
-}
+    updateToolConfig(updatedConfig);
+    onSave();
+    modal.close();
+  }
 
-function handleResetToDefault() {
-	name = defaultConfig.name;
-	description = defaultConfig.description;
+  function handleResetToDefault() {
+    name = defaultConfig.name;
+    description = defaultConfig.description;
 
-	if (toolId === "read_note" && defaultConfig.settings) {
-		const settings = defaultConfig.settings as { maxContentLength: number };
-		maxContentLength = settings.maxContentLength;
-	} else if (toolId === "execute_dataview_query" && defaultConfig.settings) {
-		const settings = defaultConfig.settings as { includeMetadata: boolean };
-		includeMetadata = settings.includeMetadata;
-	}
-}
+    if (toolId === "search_notes" && defaultConfig.settings) {
+      const settings = defaultConfig.settings as { maxResults: number };
+      maxResults = settings.maxResults;
+    } else if (toolId === "read_note" && defaultConfig.settings) {
+      const settings = defaultConfig.settings as { maxContentLength: number };
+      maxContentLength = settings.maxContentLength;
+    } else if (toolId === "execute_dataview_query" && defaultConfig.settings) {
+      const settings = defaultConfig.settings as { includeMetadata: boolean };
+      includeMetadata = settings.includeMetadata;
+    }
+  }
 </script>
 
 <div class="tool-config-modal-content">
@@ -125,7 +137,22 @@ function handleResetToDefault() {
   </div>
 
   <!-- Tool-specific settings -->
-  {#if toolId === "read_note"}
+  {#if toolId === "search_notes"}
+    <div class="tool-config-section">
+      <h4 class="tool-config-section-title">Search Settings</h4>
+
+      <div class="tool-config-field">
+        <label class="tool-config-label">Max Notes to Return</label>
+        <p class="tool-config-description">Maximum number of notes to return to the AI agent.</p>
+        <Text
+          inputType="number"
+          value={maxResults}
+          placeholder="10"
+          onblur={(v) => (maxResults = Number.parseInt(String(v)) || 10)}
+        />
+      </div>
+    </div>
+  {:else if toolId === "read_note"}
     <div class="tool-config-section">
       <h4 class="tool-config-section-title">Read Settings</h4>
 
