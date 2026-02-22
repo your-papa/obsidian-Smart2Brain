@@ -1,19 +1,19 @@
 <script lang="ts">
-  import type { TFolder } from "obsidian";
-  import FolderSuggest from "../../components/modal/FolderSuggest.svelte";
-  import SettingGroup from "../../components/settings/SettingGroup.svelte";
-  import SettingItem from "../../components/settings/SettingItem.svelte";
-  import Text from "../../components/ui/Text.svelte";
-  import Toggle from "../../components/ui/Toggle.svelte";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
+import type { TFolder } from "obsidian";
+import FolderSuggest from "../../components/modal/FolderSuggest.svelte";
+import SettingGroup from "../../components/settings/SettingGroup.svelte";
+import SettingItem from "../../components/settings/SettingItem.svelte";
+import Text from "../../components/ui/Text.svelte";
+import Toggle from "../../components/ui/Toggle.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
 
-  const pluginData = getData();
-  const plugin = getPlugin();
+const pluginData = getData();
+const plugin = getPlugin();
 
-  function suggestFolders(): TFolder[] {
-    return plugin.app.vault.getAllFolders(true);
-  }
+function suggestFolders(): TFolder[] {
+	return plugin.app.vault.getAllFolders(true);
+}
 </script>
 
 <!-- Chat Settings -->

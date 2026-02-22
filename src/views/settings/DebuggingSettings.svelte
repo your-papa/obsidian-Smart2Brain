@@ -1,14 +1,14 @@
 <script lang="ts">
-  import { t } from "svelte-i18n";
-  import SettingGroup from "../../components/settings/SettingGroup.svelte";
-  import SettingItem from "../../components/settings/SettingItem.svelte";
-  import Button from "../../components/ui/Button.svelte";
-  import Text from "../../components/ui/Text.svelte";
-  import Toggle from "../../components/ui/Toggle.svelte";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { Logger } from "../../utils/logging";
+import { t } from "svelte-i18n";
+import SettingGroup from "../../components/settings/SettingGroup.svelte";
+import SettingItem from "../../components/settings/SettingItem.svelte";
+import Button from "../../components/ui/Button.svelte";
+import Text from "../../components/ui/Text.svelte";
+import Toggle from "../../components/ui/Toggle.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import { Logger } from "../../utils/logging";
 
-  const pluginData = getData();
+const pluginData = getData();
 </script>
 
 <!-- Data Management -->

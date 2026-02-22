@@ -499,17 +499,17 @@ export class AgentManager {
 	): AsyncGenerator<
 		| { type: "token"; token: string }
 		| {
-			type: "tool_start";
-			toolCallId: string;
-			toolName: string;
-			input: unknown;
-		}
+				type: "tool_start";
+				toolCallId: string;
+				toolName: string;
+				input: unknown;
+		  }
 		| {
-			type: "tool_end";
-			toolCallId: string;
-			toolName: string;
-			output: unknown;
-		}
+				type: "tool_end";
+				toolCallId: string;
+				toolName: string;
+				output: unknown;
+		  }
 		| { type: "result"; result: unknown },
 		void,
 		unknown
@@ -602,17 +602,17 @@ export class AgentManager {
 	): AsyncGenerator<
 		| { type: "token"; token: string }
 		| {
-			type: "tool_start";
-			toolCallId: string;
-			toolName: string;
-			input: unknown;
-		}
+				type: "tool_start";
+				toolCallId: string;
+				toolName: string;
+				input: unknown;
+		  }
 		| {
-			type: "tool_end";
-			toolCallId: string;
-			toolName: string;
-			output: unknown;
-		}
+				type: "tool_end";
+				toolCallId: string;
+				toolName: string;
+				output: unknown;
+		  }
 		| { type: "result"; result: unknown },
 		void,
 		unknown
@@ -699,17 +699,17 @@ export class AgentManager {
 	): AsyncGenerator<
 		| { type: "token"; token: string }
 		| {
-			type: "tool_start";
-			toolCallId: string;
-			toolName: string;
-			input: unknown;
-		}
+				type: "tool_start";
+				toolCallId: string;
+				toolName: string;
+				input: unknown;
+		  }
 		| {
-			type: "tool_end";
-			toolCallId: string;
-			toolName: string;
-			output: unknown;
-		}
+				type: "tool_end";
+				toolCallId: string;
+				toolName: string;
+				output: unknown;
+		  }
 		| { type: "result"; result: unknown },
 		void,
 		unknown

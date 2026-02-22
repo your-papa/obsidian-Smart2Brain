@@ -1,77 +1,73 @@
 <script lang="ts">
-  import { Tooltip } from "bits-ui";
-  import { Notice } from "obsidian";
-  import { listSecrets } from "../../lib/secretStorage";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { Logger } from "../../utils/logging";
-  import { AddSecretModal } from "../modal/AddSecretModal";
-  import Button from "../ui/Button.svelte";
-  import Dropdown from "../ui/Dropdown.svelte";
+import { Tooltip } from "bits-ui";
+import { Notice } from "obsidian";
+import { listSecrets } from "../../lib/secretStorage";
+import { getPlugin } from "../../stores/state.svelte";
+import { Logger } from "../../utils/logging";
+import { AddSecretModal } from "../modal/AddSecretModal";
+import Button from "../ui/Button.svelte";
+import Dropdown from "../ui/Dropdown.svelte";
 
-  interface Props {
-    value: string;
-    onChange: (secretId: string) => void;
-  }
+interface Props {
+	value: string;
+	onChange: (secretId: string) => void;
+}
 
-  const { value, onChange }: Props = $props();
+const { value, onChange }: Props = $props();
 
-  const plugin = getPlugin();
+const plugin = getPlugin();
 
-  // Get list of available secrets
-  let secrets = $state<string[]>([]);
-  let hasNotifiedMissing = $state(false);
+// Get list of available secrets
+let secrets = $state<string[]>([]);
+let hasNotifiedMissing = $state(false);
 
-  function refreshSecrets() {
-    try {
-      secrets = listSecrets(plugin.app);
-    } catch (e) {
-      Logger.error("Failed to list secrets:", e);
-      secrets = [];
-    }
-  }
+function refreshSecrets() {
+	try {
+		secrets = listSecrets(plugin.app);
+	} catch (e) {
+		Logger.error("Failed to list secrets:", e);
+		secrets = [];
+	}
+}
 
-  // Initial load
-  refreshSecrets();
+// Initial load
+refreshSecrets();
 
-  // Check if configured secret is missing and notify user
-  let secretMissing = $derived(
-    value && value.length > 0 && secrets.length > 0 && !secrets.includes(value),
-  );
+// Check if configured secret is missing and notify user
+let secretMissing = $derived(value && value.length > 0 && secrets.length > 0 && !secrets.includes(value));
 
-  $effect(() => {
-    if (secretMissing && !hasNotifiedMissing) {
-      new Notice(
-        `Secret "${value}" not found in Obsidian Keychain. Please select or create a new secret.`,
-      );
-      hasNotifiedMissing = true;
-    }
-  });
+$effect(() => {
+	if (secretMissing && !hasNotifiedMissing) {
+		new Notice(`Secret "${value}" not found in Obsidian Keychain. Please select or create a new secret.`);
+		hasNotifiedMissing = true;
+	}
+});
 
-  // Handle dropdown selection
-  function handleSelect(secretId: string) {
-    hasNotifiedMissing = false;
-    onChange(secretId);
-  }
+// Handle dropdown selection
+function handleSelect(secretId: string) {
+	hasNotifiedMissing = false;
+	onChange(secretId);
+}
 
-  // Open modal to add a new secret
-  function handleAddSecret() {
-    new AddSecretModal(plugin, (newSecretId) => {
-      refreshSecrets();
-      hasNotifiedMissing = false;
-      onChange(newSecretId);
-    }).open();
-  }
+// Open modal to add a new secret
+function handleAddSecret() {
+	new AddSecretModal(plugin, (newSecretId) => {
+		refreshSecrets();
+		hasNotifiedMissing = false;
+		onChange(newSecretId);
+	}).open();
+}
 
-  // Dropdown options
-  let dropdownOptions = $derived(
-    secrets.map((secretId) => ({
-      display: secretId,
-      value: secretId,
-    })),
-  );
+// Dropdown options
+let dropdownOptions = $derived(
+	secrets.map((secretId) => ({
+		display: secretId,
+		value: secretId,
+	})),
+);
 
-  // Selected value - fallback to first secret if configured one is missing
-  let selectedValue = $derived(secrets.includes(value) ? value : (secrets[0] ?? ""));
+// Selected value - fallback to first secret if configured one is missing
+let selectedValue = $derived(secrets.includes(value) ? value : (secrets[0] ?? ""));
 </script>
 
 <div class="flex items-center gap-2">

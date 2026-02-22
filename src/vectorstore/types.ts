@@ -78,8 +78,37 @@ export interface VectorSearchResult {
     path: string;
     name: string;
     frontmatter?: Record<string, unknown>;
+    /** Tags from the document (frontmatter + inline) */
+    tags?: string[];
     /** Cosine similarity score (0-1, higher is more similar) */
     score: number;
+}
+
+/**
+ * Filter options for vector search.
+ * All filters are optional and combined with AND logic.
+ */
+export interface SearchFilter {
+    /**
+     * Filter by path prefix(es).
+     * Documents must match at least one of the provided path prefixes.
+     * Example: ["folder/subfolder", "another/path"] matches docs in either location.
+     */
+    pathPrefixes?: string[];
+
+    /**
+     * Filter by tag(s).
+     * Documents must have at least one of the provided tags.
+     * Tags should include the # prefix (e.g., "#project", "#todo").
+     */
+    tags?: string[];
+
+    /**
+     * Require ALL tags instead of ANY tag.
+     * When true, documents must have all specified tags.
+     * Default: false (match any tag).
+     */
+    requireAllTags?: boolean;
 }
 
 /**

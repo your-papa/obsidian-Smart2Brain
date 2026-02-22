@@ -3,13 +3,14 @@ import { type App, TFile } from "obsidian";
 import { z } from "zod";
 import type { SearchAlgorithm } from "../../main";
 import { getData } from "../../stores/dataStore.svelte";
-import { getVectorStoreService, isVectorStoreInitialized } from "../../vectorstore";
+import { getVectorStoreService, isVectorStoreInitialized, type SearchFilter } from "../../vectorstore";
 import { Logger } from "../../utils/logging";
 
 export interface SearchResult {
 	path: string;
 	name: string;
 	frontmatter?: Record<string, unknown>;
+	tags?: string[];
 	score?: number;
 }
 
@@ -123,7 +124,10 @@ async function omnisearchSearch(app: App, query: string): Promise<SearchResult[]
  * Returns a boost factor between 0 and titleBoostMax.
  */
 function calculateTitleBoost(query: string, noteName: string, titleBoostMax: number): number {
-	const queryTerms = query.toLowerCase().split(/\s+/).filter(term => term.length > 2);
+	const queryTerms = query
+		.toLowerCase()
+		.split(/\s+/)
+		.filter((term) => term.length > 2);
 	const titleLower = noteName.toLowerCase();
 
 	if (queryTerms.length === 0) return 0;
@@ -139,7 +143,7 @@ function calculateTitleBoost(query: string, noteName: string, titleBoostMax: num
 	}
 
 	// Count how many query terms appear in title
-	const matchingTerms = queryTerms.filter(term => titleLower.includes(term));
+	const matchingTerms = queryTerms.filter((term) => titleLower.includes(term));
 	const matchRatio = matchingTerms.length / queryTerms.length;
 
 	return titleBoostMax * matchRatio * 0.6;
@@ -149,14 +153,14 @@ function calculateTitleBoost(query: string, noteName: string, titleBoostMax: num
  * Hybrid search combining semantic and lexical search using Reciprocal Rank Fusion.
  * Runs both searches in parallel and merges results.
  */
-async function hybridSearch(app: App, query: string): Promise<SearchResult[]> {
+async function hybridSearch(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
 	const k = 60; // RRF constant (standard value)
 	const titleBoostMax = 0.03; // Max title boost (roughly equivalent to being in top 3 in both searches)
 
 	// Run semantic and lexical search in parallel
 	const [semanticResults, lexicalResults] = await Promise.all([
-		embeddingsSearch(app, query),
-		getLexicalResults(app, query),
+		embeddingsSearch(app, query, filter),
+		getLexicalResults(app, query, filter),
 	]);
 
 	// Build RRF score map
@@ -197,20 +201,57 @@ async function hybridSearch(app: App, query: string): Promise<SearchResult[]> {
 }
 
 /**
- * Get lexical search results - uses Omnisearch if available, otherwise grep
+ * Get lexical search results - uses Omnisearch if available, otherwise grep.
+ * Applies path/tag filters when not using embeddings search.
  */
-async function getLexicalResults(app: App, query: string): Promise<SearchResult[]> {
+async function getLexicalResults(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
 	const api = getOmnisearchApi(app);
+	let results: SearchResult[];
 	if (api) {
-		return omnisearchSearch(app, query);
+		results = await omnisearchSearch(app, query);
+	} else {
+		results = await grepSearch(app, query);
 	}
-	return grepSearch(app, query);
+
+	// Apply filters to lexical results (since they don't support native filtering)
+	if (filter?.pathPrefixes?.length || filter?.tags?.length) {
+		results = results.filter((result) => {
+			// Path filter
+			if (filter.pathPrefixes?.length) {
+				const matchesPath = filter.pathPrefixes.some((prefix) => result.path.startsWith(prefix));
+				if (!matchesPath) return false;
+			}
+
+			// Tag filter (using frontmatter tags)
+			if (filter.tags?.length && result.frontmatter?.tags) {
+				const docTags = Array.isArray(result.frontmatter.tags)
+					? result.frontmatter.tags.map((t: string) => (t.startsWith("#") ? t : `#${t}`))
+					: [`#${result.frontmatter.tags}`];
+				const normalizedFilterTags = filter.tags.map((t) => (t.startsWith("#") ? t : `#${t}`));
+
+				if (filter.requireAllTags) {
+					const hasAllTags = normalizedFilterTags.every((tag) => docTags.includes(tag));
+					if (!hasAllTags) return false;
+				} else {
+					const hasAnyTag = normalizedFilterTags.some((tag) => docTags.includes(tag));
+					if (!hasAnyTag) return false;
+				}
+			} else if (filter.tags?.length) {
+				// Document has no tags but filter requires tags
+				return false;
+			}
+
+			return true;
+		});
+	}
+
+	return results;
 }
 
 /**
  * Embeddings-based semantic search using the VectorStoreService
  */
-async function embeddingsSearch(app: App, query: string): Promise<SearchResult[]> {
+async function embeddingsSearch(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
 	if (!isVectorStoreInitialized()) {
 		Logger.warn("VectorStore not initialized, falling back to grep search");
 		return grepSearch(app, query);
@@ -229,13 +270,14 @@ async function embeddingsSearch(app: App, query: string): Promise<SearchResult[]
 			threshold = modelConfig?.similarityThreshold ?? 0;
 		}
 
-		const results = await vectorStore.search(query, pluginData.retrieveTopK, threshold);
+		const results = await vectorStore.search(query, pluginData.retrieveTopK, threshold, filter);
 
 		// Convert to SearchResult format (already compatible)
 		return results.map((r) => ({
 			path: r.path,
 			name: r.name,
 			frontmatter: r.frontmatter,
+			tags: r.tags,
 			score: r.score,
 		}));
 	} catch (error) {
@@ -245,19 +287,24 @@ async function embeddingsSearch(app: App, query: string): Promise<SearchResult[]
 }
 
 /**
- * Performs search using the configured algorithm
+ * Performs search using the configured algorithm with optional filtering.
  */
-export async function performSearch(app: App, query: string, algorithm: SearchAlgorithm): Promise<SearchResult[]> {
-	Logger.debug("[search_notes] Algorithm selected:", algorithm);
+export async function performSearch(
+	app: App,
+	query: string,
+	algorithm: SearchAlgorithm,
+	filter?: SearchFilter,
+): Promise<SearchResult[]> {
+	Logger.debug("[search_notes] Algorithm selected:", algorithm, "Filter:", filter);
 	switch (algorithm) {
 		case "omnisearch":
-			return omnisearchSearch(app, query);
+			return getLexicalResults(app, query, filter);
 		case "embeddings":
-			return embeddingsSearch(app, query);
+			return embeddingsSearch(app, query, filter);
 		case "hybrid":
-			return hybridSearch(app, query);
+			return hybridSearch(app, query, filter);
 		default:
-			return grepSearch(app, query);
+			return getLexicalResults(app, query, filter);
 	}
 }
 
@@ -273,17 +320,35 @@ export function createSearchNotesTool(app: App) {
 	};
 	const toolConfig = getSearchNotesConfig();
 
-	const searchFn = async ({ query }: { query: string }): Promise<string> => {
+	const searchFn = async ({
+		query,
+		pathPrefix,
+		tags,
+	}: {
+		query: string;
+		pathPrefix?: string;
+		tags?: string[];
+	}): Promise<string> => {
 		// Always use global search settings
 		const algorithm = pluginData.searchAlgorithm;
 		const limit = pluginData.retrieveTopK;
 
+		// Build filter from parameters
+		const filter: SearchFilter | undefined =
+			pathPrefix || tags?.length
+				? {
+					pathPrefixes: pathPrefix ? [pathPrefix] : undefined,
+					tags: tags,
+				}
+				: undefined;
+
 		Logger.debug("[search_notes] Configured settings:", {
 			algorithm,
 			maxResults: limit,
+			filter,
 		});
 
-		const results = await performSearch(app, query, algorithm);
+		const results = await performSearch(app, query, algorithm, filter);
 		const limitedResults = results.slice(0, limit);
 
 		if (limitedResults.length === 0) {
@@ -317,6 +382,16 @@ export function createSearchNotesTool(app: App) {
 			"Search through your Obsidian notes by keyword. Returns matching file names and metadata (properties/frontmatter) but NO content. Use this to identify relevant notes before using other tools.",
 		schema: z.object({
 			query: z.string().describe("The search query to find in note names and content"),
+			pathPrefix: z
+				.string()
+				.optional()
+				.describe("Optional folder path prefix to restrict search (e.g., 'projects/' or 'work/notes/')"),
+			tags: z
+				.array(z.string())
+				.optional()
+				.describe(
+					"Optional tags to filter by (e.g., ['#project', '#active']). Documents must have at least one of these tags.",
+				),
 		}),
 	});
 }

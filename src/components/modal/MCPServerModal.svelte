@@ -1,350 +1,341 @@
 <script lang="ts">
-  import { MultiServerMCPClient } from "@langchain/mcp-adapters";
-  import { Notice } from "obsidian";
-  import { onMount } from "svelte";
-  import { createObsidianFetch } from "../../lib/obsidianFetch";
-  import type SecondBrainPlugin from "../../main";
-  import type {
-    MCPHTTPServerConfig,
-    MCPSSEServerConfig,
-    MCPServerConfig,
-    MCPStdioServerConfig,
-    MCPTransportType,
-  } from "../../main";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { Logger } from "../../utils/logging";
-  import Button from "../ui/Button.svelte";
-  import Dropdown from "../ui/Dropdown.svelte";
-  import Icon from "../ui/Icon.svelte";
-  import Text from "../ui/Text.svelte";
-  import Toggle from "../ui/Toggle.svelte";
-  import type { MCPServerModal, MCPServerModalCallback } from "./MCPServerModal";
+import { MultiServerMCPClient } from "@langchain/mcp-adapters";
+import { Notice } from "obsidian";
+import { onMount } from "svelte";
+import { createObsidianFetch } from "../../lib/obsidianFetch";
+import type SecondBrainPlugin from "../../main";
+import type {
+	MCPHTTPServerConfig,
+	MCPSSEServerConfig,
+	MCPServerConfig,
+	MCPStdioServerConfig,
+	MCPTransportType,
+} from "../../main";
+import { getData } from "../../stores/dataStore.svelte";
+import { Logger } from "../../utils/logging";
+import Button from "../ui/Button.svelte";
+import Dropdown from "../ui/Dropdown.svelte";
+import Icon from "../ui/Icon.svelte";
+import Text from "../ui/Text.svelte";
+import Toggle from "../ui/Toggle.svelte";
+import type { MCPServerModal, MCPServerModalCallback } from "./MCPServerModal";
 
-  interface Props {
-    modal: MCPServerModal;
-    plugin: SecondBrainPlugin;
-    serverId: string | null;
-    existingConfig: MCPServerConfig | null;
-    onSave: MCPServerModalCallback;
-    skipGlobalSave?: boolean;
-  }
+interface Props {
+	modal: MCPServerModal;
+	plugin: SecondBrainPlugin;
+	serverId: string | null;
+	existingConfig: MCPServerConfig | null;
+	onSave: MCPServerModalCallback;
+	skipGlobalSave?: boolean;
+}
 
-  const {
-    modal,
-    plugin,
-    serverId,
-    existingConfig,
-    onSave,
-    skipGlobalSave = false,
-  }: Props = $props();
-  const pluginData = getData();
+const { modal, plugin, serverId, existingConfig, onSave, skipGlobalSave = false }: Props = $props();
+const pluginData = getData();
 
-  // Capture initial values at component creation (props don't change for modals)
-  const isEditing = !!serverId && !!existingConfig;
-  const initialConfig = existingConfig;
+// Capture initial values at component creation (props don't change for modals)
+const isEditing = !!serverId && !!existingConfig;
+const initialConfig = existingConfig;
 
-  // Generate server ID from name (lowercase, replace spaces/special chars with dashes)
-  function generateServerId(input: string): string {
-    return input
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-  }
+// Generate server ID from name (lowercase, replace spaces/special chars with dashes)
+function generateServerId(input: string): string {
+	return input
+		.toLowerCase()
+		.trim()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "");
+}
 
-  // Form state - initialized from captured initial values
-  let name = $state(initialConfig?.displayName ?? "");
-  let enabled = $state(initialConfig?.enabled ?? true);
-  let transport = $state<MCPTransportType>(initialConfig?.transport ?? "http");
+// Form state - initialized from captured initial values
+let name = $state(initialConfig?.displayName ?? "");
+let enabled = $state(initialConfig?.enabled ?? true);
+let transport = $state<MCPTransportType>(initialConfig?.transport ?? "http");
 
-  // stdio-specific fields
-  let command = $state((initialConfig as MCPStdioServerConfig)?.command ?? "");
-  let args = $state((initialConfig as MCPStdioServerConfig)?.args?.join(" ") ?? "");
-  let envVars = $state(
-    Object.entries((initialConfig as MCPStdioServerConfig)?.env ?? {})
-      .map(([k, v]) => `${k}=${v}`)
-      .join("\n"),
-  );
+// stdio-specific fields
+let command = $state((initialConfig as MCPStdioServerConfig)?.command ?? "");
+let args = $state((initialConfig as MCPStdioServerConfig)?.args?.join(" ") ?? "");
+let envVars = $state(
+	Object.entries((initialConfig as MCPStdioServerConfig)?.env ?? {})
+		.map(([k, v]) => `${k}=${v}`)
+		.join("\n"),
+);
 
-  // HTTP/SSE-specific fields (shared URL and headers)
-  let url = $state((initialConfig as MCPHTTPServerConfig | MCPSSEServerConfig)?.url ?? "");
-  let headers = $state(
-    Object.entries((initialConfig as MCPHTTPServerConfig | MCPSSEServerConfig)?.headers ?? {})
-      .map(([k, v]) => `${k}: ${v}`)
-      .join("\n"),
-  );
+// HTTP/SSE-specific fields (shared URL and headers)
+let url = $state((initialConfig as MCPHTTPServerConfig | MCPSSEServerConfig)?.url ?? "");
+let headers = $state(
+	Object.entries((initialConfig as MCPHTTPServerConfig | MCPSSEServerConfig)?.headers ?? {})
+		.map(([k, v]) => `${k}: ${v}`)
+		.join("\n"),
+);
 
-  // Test connection state
-  let isTesting = $state(false);
-  let testError = $state<string | null>(null);
-  let discoveredTools = $state<{ name: string; description?: string }[]>([]);
-  let testSuccess = $state(false);
+// Test connection state
+let isTesting = $state(false);
+let testError = $state<string | null>(null);
+let discoveredTools = $state<{ name: string; description?: string }[]>([]);
+let testSuccess = $state(false);
 
-  // Transport options
-  const transportOptions = [
-    { display: "Remote Server (HTTP)", value: "http" as MCPTransportType },
-    { display: "Local Command (stdio)", value: "stdio" as MCPTransportType },
-    { display: "Remote Server (SSE) - Legacy", value: "sse" as MCPTransportType },
-  ];
+// Transport options
+const transportOptions = [
+	{ display: "Remote Server (HTTP)", value: "http" as MCPTransportType },
+	{ display: "Local Command (stdio)", value: "stdio" as MCPTransportType },
+	{ display: "Remote Server (SSE) - Legacy", value: "sse" as MCPTransportType },
+];
 
-  onMount(() => {
-    modal.setTitle(
-      isEditing ? `Edit MCP Server: ${existingConfig?.displayName}` : "Add MCP Server",
-    );
-  });
+onMount(() => {
+	modal.setTitle(isEditing ? `Edit MCP Server: ${existingConfig?.displayName}` : "Add MCP Server");
+});
 
-  function parseArgs(input: string): string[] {
-    // Split by spaces, but respect quoted strings
-    const result: string[] = [];
-    let current = "";
-    let inQuote = false;
-    let quoteChar = "";
+function parseArgs(input: string): string[] {
+	// Split by spaces, but respect quoted strings
+	const result: string[] = [];
+	let current = "";
+	let inQuote = false;
+	let quoteChar = "";
 
-    for (const char of input) {
-      if ((char === '"' || char === "'") && !inQuote) {
-        inQuote = true;
-        quoteChar = char;
-      } else if (char === quoteChar && inQuote) {
-        inQuote = false;
-        quoteChar = "";
-      } else if (char === " " && !inQuote) {
-        if (current) {
-          result.push(current);
-          current = "";
-        }
-      } else {
-        current += char;
-      }
-    }
-    if (current) {
-      result.push(current);
-    }
-    return result;
-  }
+	for (const char of input) {
+		if ((char === '"' || char === "'") && !inQuote) {
+			inQuote = true;
+			quoteChar = char;
+		} else if (char === quoteChar && inQuote) {
+			inQuote = false;
+			quoteChar = "";
+		} else if (char === " " && !inQuote) {
+			if (current) {
+				result.push(current);
+				current = "";
+			}
+		} else {
+			current += char;
+		}
+	}
+	if (current) {
+		result.push(current);
+	}
+	return result;
+}
 
-  function parseEnvVars(input: string): Record<string, string> {
-    const result: Record<string, string> = {};
-    for (const line of input.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.includes("=")) continue;
-      const eqIndex = trimmed.indexOf("=");
-      const key = trimmed.slice(0, eqIndex).trim();
-      const value = trimmed.slice(eqIndex + 1).trim();
-      if (key) {
-        result[key] = value;
-      }
-    }
-    return result;
-  }
+function parseEnvVars(input: string): Record<string, string> {
+	const result: Record<string, string> = {};
+	for (const line of input.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed || !trimmed.includes("=")) continue;
+		const eqIndex = trimmed.indexOf("=");
+		const key = trimmed.slice(0, eqIndex).trim();
+		const value = trimmed.slice(eqIndex + 1).trim();
+		if (key) {
+			result[key] = value;
+		}
+	}
+	return result;
+}
 
-  function parseHeaders(input: string): Record<string, string> {
-    const result: Record<string, string> = {};
-    for (const line of input.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.includes(":")) continue;
-      const colonIndex = trimmed.indexOf(":");
-      const key = trimmed.slice(0, colonIndex).trim();
-      const value = trimmed.slice(colonIndex + 1).trim();
-      if (key) {
-        result[key] = value;
-      }
-    }
-    return result;
-  }
+function parseHeaders(input: string): Record<string, string> {
+	const result: Record<string, string> = {};
+	for (const line of input.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed || !trimmed.includes(":")) continue;
+		const colonIndex = trimmed.indexOf(":");
+		const key = trimmed.slice(0, colonIndex).trim();
+		const value = trimmed.slice(colonIndex + 1).trim();
+		if (key) {
+			result[key] = value;
+		}
+	}
+	return result;
+}
 
-  function validateForm(): string | null {
-    if (!name.trim()) {
-      return "Name is required";
-    }
+function validateForm(): string | null {
+	if (!name.trim()) {
+		return "Name is required";
+	}
 
-    const newServerId = generateServerId(name);
-    if (!newServerId) {
-      return "Name must contain at least one letter or number";
-    }
+	const newServerId = generateServerId(name);
+	if (!newServerId) {
+		return "Name must contain at least one letter or number";
+	}
 
-    // Check for duplicate ID (only when creating new or changing name)
-    if (!isEditing || newServerId !== serverId) {
-      if (pluginData.getMCPServer(newServerId)) {
-        return "A server with this name already exists";
-      }
-    }
+	// Check for duplicate ID (only when creating new or changing name)
+	if (!isEditing || newServerId !== serverId) {
+		if (pluginData.getMCPServer(newServerId)) {
+			return "A server with this name already exists";
+		}
+	}
 
-    if (transport === "stdio") {
-      if (!command.trim()) {
-        return "Command is required for stdio transport";
-      }
-    } else if (transport === "http" || transport === "sse") {
-      if (!url.trim()) {
-        return "URL is required for HTTP/SSE transport";
-      }
-      try {
-        new URL(url.trim());
-      } catch {
-        return "Invalid URL format";
-      }
-    }
+	if (transport === "stdio") {
+		if (!command.trim()) {
+			return "Command is required for stdio transport";
+		}
+	} else if (transport === "http" || transport === "sse") {
+		if (!url.trim()) {
+			return "URL is required for HTTP/SSE transport";
+		}
+		try {
+			new URL(url.trim());
+		} catch {
+			return "Invalid URL format";
+		}
+	}
 
-    return null;
-  }
+	return null;
+}
 
-  function handleSave() {
-    const error = validateForm();
-    if (error) {
-      new Notice(error);
-      return;
-    }
+function handleSave() {
+	const error = validateForm();
+	if (error) {
+		new Notice(error);
+		return;
+	}
 
-    const newServerId = generateServerId(name);
+	const newServerId = generateServerId(name);
 
-    let config: MCPServerConfig;
-    if (transport === "stdio") {
-      config = {
-        displayName: name.trim(),
-        transport: "stdio",
-        enabled,
-        command: command.trim(),
-        args: parseArgs(args),
-        env: parseEnvVars(envVars),
-      };
-    } else if (transport === "http") {
-      config = {
-        displayName: name.trim(),
-        transport: "http",
-        enabled,
-        url: url.trim(),
-        headers: parseHeaders(headers),
-      };
-    } else {
-      config = {
-        displayName: name.trim(),
-        transport: "sse",
-        enabled,
-        url: url.trim(),
-        headers: parseHeaders(headers),
-      };
-    }
+	let config: MCPServerConfig;
+	if (transport === "stdio") {
+		config = {
+			displayName: name.trim(),
+			transport: "stdio",
+			enabled,
+			command: command.trim(),
+			args: parseArgs(args),
+			env: parseEnvVars(envVars),
+		};
+	} else if (transport === "http") {
+		config = {
+			displayName: name.trim(),
+			transport: "http",
+			enabled,
+			url: url.trim(),
+			headers: parseHeaders(headers),
+		};
+	} else {
+		config = {
+			displayName: name.trim(),
+			transport: "sse",
+			enabled,
+			url: url.trim(),
+			headers: parseHeaders(headers),
+		};
+	}
 
-    // If not skipping global save, handle the data store operations
-    if (!skipGlobalSave) {
-      // If editing and ID changed, delete old entry
-      if (isEditing && serverId && newServerId !== serverId) {
-        pluginData.deleteMCPServer(serverId);
-      }
-      pluginData.setMCPServer(newServerId, config);
-    }
+	// If not skipping global save, handle the data store operations
+	if (!skipGlobalSave) {
+		// If editing and ID changed, delete old entry
+		if (isEditing && serverId && newServerId !== serverId) {
+			pluginData.deleteMCPServer(serverId);
+		}
+		pluginData.setMCPServer(newServerId, config);
+	}
 
-    onSave(newServerId, config);
-    modal.close();
-  }
+	onSave(newServerId, config);
+	modal.close();
+}
 
-  function handleDelete() {
-    if (serverId && existingConfig) {
-      if (!skipGlobalSave) {
-        pluginData.deleteMCPServer(serverId);
-      }
-      // Pass the deleted server info to callback with enabled: false to indicate deletion
-      onSave(serverId, { ...existingConfig, enabled: false });
-      modal.close();
-    }
-  }
+function handleDelete() {
+	if (serverId && existingConfig) {
+		if (!skipGlobalSave) {
+			pluginData.deleteMCPServer(serverId);
+		}
+		// Pass the deleted server info to callback with enabled: false to indicate deletion
+		onSave(serverId, { ...existingConfig, enabled: false });
+		modal.close();
+	}
+}
 
-  /**
-   * Build a config object for testing from current form state
-   */
-  function buildTestConfig() {
-    const testServerId = "test-server";
+/**
+ * Build a config object for testing from current form state
+ */
+function buildTestConfig() {
+	const testServerId = "test-server";
 
-    if (transport === "stdio") {
-      return {
-        mcpServers: {
-          [testServerId]: {
-            transport: "stdio" as const,
-            command: command.trim(),
-            args: parseArgs(args),
-            env: parseEnvVars(envVars),
-          },
-        },
-      };
-    }
-    if (transport === "http") {
-      return {
-        mcpServers: {
-          [testServerId]: {
-            transport: "http" as const,
-            url: url.trim(),
-            headers: parseHeaders(headers),
-          },
-        },
-      };
-    }
-    // SSE (legacy)
-    return {
-      mcpServers: {
-        [testServerId]: {
-          transport: "sse" as const,
-          url: url.trim(),
-          headers: parseHeaders(headers),
-        },
-      },
-    };
-  }
+	if (transport === "stdio") {
+		return {
+			mcpServers: {
+				[testServerId]: {
+					transport: "stdio" as const,
+					command: command.trim(),
+					args: parseArgs(args),
+					env: parseEnvVars(envVars),
+				},
+			},
+		};
+	}
+	if (transport === "http") {
+		return {
+			mcpServers: {
+				[testServerId]: {
+					transport: "http" as const,
+					url: url.trim(),
+					headers: parseHeaders(headers),
+				},
+			},
+		};
+	}
+	// SSE (legacy)
+	return {
+		mcpServers: {
+			[testServerId]: {
+				transport: "sse" as const,
+				url: url.trim(),
+				headers: parseHeaders(headers),
+			},
+		},
+	};
+}
 
-  /**
-   * Test the MCP server connection and discover tools
-   */
-  async function handleTestConnection() {
-    // Validate form first
-    const error = validateForm();
-    if (error) {
-      new Notice(error);
-      return;
-    }
+/**
+ * Test the MCP server connection and discover tools
+ */
+async function handleTestConnection() {
+	// Validate form first
+	const error = validateForm();
+	if (error) {
+		new Notice(error);
+		return;
+	}
 
-    // Reset state
-    isTesting = true;
-    testError = null;
-    discoveredTools = [];
-    testSuccess = false;
+	// Reset state
+	isTesting = true;
+	testError = null;
+	discoveredTools = [];
+	testSuccess = false;
 
-    try {
-      // Patch fetch for CORS bypass (same as in AgentManager)
-      const windowWithFetch = window as Window & { _originalFetch?: typeof fetch };
-      const needsPatch = !windowWithFetch._originalFetch;
+	try {
+		// Patch fetch for CORS bypass (same as in AgentManager)
+		const windowWithFetch = window as Window & { _originalFetch?: typeof fetch };
+		const needsPatch = !windowWithFetch._originalFetch;
 
-      if (needsPatch) {
-        windowWithFetch._originalFetch = window.fetch;
-        window.fetch = createObsidianFetch(windowWithFetch._originalFetch);
-      }
+		if (needsPatch) {
+			windowWithFetch._originalFetch = window.fetch;
+			window.fetch = createObsidianFetch(windowWithFetch._originalFetch);
+		}
 
-      try {
-        const config = buildTestConfig();
-        Logger.log("Testing MCP connection with config:", config);
+		try {
+			const config = buildTestConfig();
+			Logger.log("Testing MCP connection with config:", config);
 
-        const mcpClient = new MultiServerMCPClient(config);
-        const tools = await mcpClient.getTools();
+			const mcpClient = new MultiServerMCPClient(config);
+			const tools = await mcpClient.getTools();
 
-        discoveredTools = tools.map((t) => ({
-          name: t.name,
-          description: (t as { description?: string }).description,
-        }));
-        testSuccess = true;
+			discoveredTools = tools.map((t) => ({
+				name: t.name,
+				description: (t as { description?: string }).description,
+			}));
+			testSuccess = true;
 
-        new Notice(`Connection successful! Found ${tools.length} tool(s).`);
-      } finally {
-        // Restore original fetch if we patched it
-        if (needsPatch && windowWithFetch._originalFetch) {
-          window.fetch = windowWithFetch._originalFetch;
-          windowWithFetch._originalFetch = undefined;
-        }
-      }
-    } catch (err) {
-      Logger.error("MCP connection test failed:", err);
-      testError = err instanceof Error ? err.message : "Connection failed";
-      new Notice(`Connection failed: ${testError}`);
-    } finally {
-      isTesting = false;
-    }
-  }
+			new Notice(`Connection successful! Found ${tools.length} tool(s).`);
+		} finally {
+			// Restore original fetch if we patched it
+			if (needsPatch && windowWithFetch._originalFetch) {
+				window.fetch = windowWithFetch._originalFetch;
+				windowWithFetch._originalFetch = undefined;
+			}
+		}
+	} catch (err) {
+		Logger.error("MCP connection test failed:", err);
+		testError = err instanceof Error ? err.message : "Connection failed";
+		new Notice(`Connection failed: ${testError}`);
+	} finally {
+		isTesting = false;
+	}
+}
 </script>
 
 <div class="mcp-modal-content">

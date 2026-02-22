@@ -21,6 +21,7 @@ export type {
     IndexMetadata,
     IndexingProgress,
     ScoredDocument,
+    SearchFilter,
     SerializedDocument,
     SerializedIndex,
     VectorSearchResult,

@@ -1,39 +1,39 @@
 <script lang="ts">
-  import { Combobox } from "bits-ui";
-  import type { TFile } from "obsidian";
-  import { Logger } from "../../utils/logging";
+import { Combobox } from "bits-ui";
+import type { TFile } from "obsidian";
+import { Logger } from "../../utils/logging";
 
-  interface Props {
-    customAnchor: HTMLElement;
-    isOpen: boolean;
-    files: TFile[];
-    searchQuery: string;
-    comboInputRef?: HTMLInputElement | null;
-    onFileSelect: (fileName: string) => void;
-  }
+interface Props {
+	customAnchor: HTMLElement;
+	isOpen: boolean;
+	files: TFile[];
+	searchQuery: string;
+	comboInputRef?: HTMLInputElement | null;
+	onFileSelect: (fileName: string) => void;
+}
 
-  let {
-    customAnchor,
-    isOpen = $bindable(false),
-    files,
-    searchQuery,
-    comboInputRef = $bindable<HTMLInputElement | null>(null),
-    onFileSelect,
-  }: Props = $props();
+let {
+	customAnchor,
+	isOpen = $bindable(false),
+	files,
+	searchQuery,
+	comboInputRef = $bindable<HTMLInputElement | null>(null),
+	onFileSelect,
+}: Props = $props();
 
-  let searchValue = $state("");
+let searchValue = $state("");
 
-  function handleValueChange(newVal: string) {
-    if (newVal) {
-      onFileSelect(newVal);
-    }
-  }
+function handleValueChange(newVal: string) {
+	if (newVal) {
+		onFileSelect(newVal);
+	}
+}
 
-  const filteredFiles = $derived(
-    searchQuery === ""
-      ? files
-      : files.filter((file) => file.basename.toLowerCase().includes(searchQuery.toLowerCase())),
-  );
+const filteredFiles = $derived(
+	searchQuery === ""
+		? files
+		: files.filter((file) => file.basename.toLowerCase().includes(searchQuery.toLowerCase())),
+);
 </script>
 
 <Combobox.Root type="single" bind:open={isOpen} onValueChange={handleValueChange}>

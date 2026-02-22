@@ -98,39 +98,39 @@ export type AgentStreamOptions = AgentRunOptions;
 
 export type AgentStreamChunk =
 	| {
-		type: "token";
-		token: string;
-		runId: string;
-		threadId: string;
-	}
+			type: "token";
+			token: string;
+			runId: string;
+			threadId: string;
+	  }
 	| {
-		type: "tool_start";
-		toolCallId: string;
-		toolName: string;
-		input: unknown;
-		runId: string;
-		threadId: string;
-	}
+			type: "tool_start";
+			toolCallId: string;
+			toolName: string;
+			input: unknown;
+			runId: string;
+			threadId: string;
+	  }
 	| {
-		type: "tool_end";
-		toolCallId: string;
-		toolName: string;
-		output: unknown;
-		runId: string;
-		threadId: string;
-	}
+			type: "tool_end";
+			toolCallId: string;
+			toolName: string;
+			output: unknown;
+			runId: string;
+			threadId: string;
+	  }
 	| {
-		type: "result";
-		result: AgentResult;
-		runId: string;
-		threadId: string;
-	}
+			type: "result";
+			result: AgentResult;
+			runId: string;
+			threadId: string;
+	  }
 	| {
-		type: "checkpoint_message";
-		message: BaseMessage;
-		runId: string;
-		threadId: string;
-	};
+			type: "checkpoint_message";
+			message: BaseMessage;
+			runId: string;
+			threadId: string;
+	  };
 
 interface SelectedModel {
 	provider: string;
@@ -820,10 +820,10 @@ export class Agent {
 		const baseSnapshot = metadata
 			? { ...metadata }
 			: createSnapshot({
-				threadId,
-				updatedAt: checkpointTimestamp,
-				createdAt: checkpointTimestamp,
-			});
+					threadId,
+					updatedAt: checkpointTimestamp,
+					createdAt: checkpointTimestamp,
+				});
 		const messages = tuple ? this.extractMessagesFromCheckpoint(tuple) : [];
 		const { lastError, errorCount } = tuple
 			? this.extractErrorsFromCheckpoint(tuple)
@@ -1303,9 +1303,9 @@ export class Agent {
 	private isAgentOutputCandidate(value: unknown): value is { messages: unknown[] } {
 		return Boolean(
 			value &&
-			typeof value === "object" &&
-			"messages" in (value as Record<string, unknown>) &&
-			Array.isArray((value as { messages?: unknown }).messages),
+				typeof value === "object" &&
+				"messages" in (value as Record<string, unknown>) &&
+				Array.isArray((value as { messages?: unknown }).messages),
 		);
 	}
 

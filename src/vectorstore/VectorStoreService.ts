@@ -5,7 +5,7 @@
  * Manages indexing, search, and synchronization between IndexedDB and file storage.
  */
 
-import { Notice, TFile } from "obsidian";
+import { Notice, TFile, getAllTags } from "obsidian";
 import type { EmbeddingsInterface } from "@langchain/core/embeddings";
 import type SecondBrainPlugin from "../main";
 import { getData } from "../stores/dataStore.svelte";
@@ -18,6 +18,7 @@ import {
     type DefaultEmbedModel,
     type DocumentVector,
     type IndexingProgress,
+    type SearchFilter,
     type VectorSearchResult,
     type VectorStore,
 } from "./types";
@@ -90,7 +91,7 @@ export class VectorStoreService {
 
     private constructor(plugin: SecondBrainPlugin) {
         this.plugin = plugin;
-        
+
         // Create vector store backend based on user setting
         const backend = getData()?.vectorStoreBackend ?? "hnsw";
         this.store = createVectorStore(backend);
@@ -209,7 +210,10 @@ export class VectorStoreService {
      * Validate index completeness and update missing/stale entries.
      * Called either on startup (if provider ready) or on first search.
      */
-    private async validateIndexCompleteness(embeddings: EmbeddingsInterface, defaultModel: DefaultEmbedModel): Promise<void> {
+    private async validateIndexCompleteness(
+        embeddings: EmbeddingsInterface,
+        defaultModel: DefaultEmbedModel,
+    ): Promise<void> {
         // Skip if already validated this session
         if (this._hasValidatedThisSession) {
             return;
@@ -222,7 +226,7 @@ export class VectorStoreService {
         const allVaultFiles = vault.getMarkdownFiles();
 
         // Filter files based on exclusion settings
-        const vaultFiles = allVaultFiles.filter(file => this.shouldIndexFile(file));
+        const vaultFiles = allVaultFiles.filter((file) => this.shouldIndexFile(file));
 
         // Get all indexed paths with their mtimes
         const indexedDocs = await this.store.getAll();
@@ -262,7 +266,9 @@ export class VectorStoreService {
             return;
         }
 
-        Logger.log(`[VectorStore] Found ${missingFiles.length} missing, ${staleFiles.length} stale, ${orphanedPaths.length} orphaned`);
+        Logger.log(
+            `[VectorStore] Found ${missingFiles.length} missing, ${staleFiles.length} stale, ${orphanedPaths.length} orphaned`,
+        );
 
         // Remove orphaned entries first
         if (orphanedPaths.length > 0) {
@@ -310,7 +316,7 @@ export class VectorStoreService {
                 const batch = validFiles.slice(i, i + batchSize);
 
                 try {
-                    const texts = batch.map(entry => entry.contentWithTitle);
+                    const texts = batch.map((entry) => entry.contentWithTitle);
                     const vectors = await embeddings.embedDocuments(texts);
 
                     for (let j = 0; j < batch.length; j++) {
@@ -565,7 +571,7 @@ export class VectorStoreService {
         const batchSize = this.getBatchSize(model.provider);
 
         // Filter files based on exclusion/inclusion settings
-        const files = allFiles.filter(file => this.shouldIndexFile(file));
+        const files = allFiles.filter((file) => this.shouldIndexFile(file));
         const excludedCount = allFiles.length - files.length;
 
         // Initialize progress
@@ -630,7 +636,7 @@ export class VectorStoreService {
 
                 try {
                     // Generate embeddings for the batch
-                    const texts = batch.map(entry => entry.contentWithTitle);
+                    const texts = batch.map((entry) => entry.contentWithTitle);
                     const vectors = await embeddings.embedDocuments(texts);
 
                     // Store each document
@@ -653,7 +659,10 @@ export class VectorStoreService {
                     this.updateNotice(notice);
                 } catch (error) {
                     // If batch fails, fall back to individual processing for this batch
-                    Logger.warn(`[VectorStore] Batch ${Math.floor(i / batchSize) + 1} failed, falling back to sequential:`, error);
+                    Logger.warn(
+                        `[VectorStore] Batch ${Math.floor(i / batchSize) + 1} failed, falling back to sequential:`,
+                        error,
+                    );
 
                     for (const entry of batch) {
                         try {
@@ -741,13 +750,13 @@ export class VectorStoreService {
         const isExcluding = pluginData.isExcluding;
 
         // Check if file path matches any pattern in the list
-        const matchesPattern = indexList.some(pattern =>
-            file.path.startsWith(pattern) || file.path.includes(`/${pattern}`)
+        const matchesPattern = indexList.some(
+            (pattern) => file.path.startsWith(pattern) || file.path.includes(`/${pattern}`),
         );
 
         // If excluding (blacklist): include file if it does NOT match
         // If including (whitelist): include file if it DOES match (or if list is empty)
-        return isExcluding ? !matchesPattern : (indexList.length === 0 || matchesPattern);
+        return isExcluding ? !matchesPattern : indexList.length === 0 || matchesPattern;
     }
 
     /**
@@ -797,10 +806,20 @@ export class VectorStoreService {
     }
 
     /**
-     * Search for similar documents.
+     * Search for similar documents with optional filtering.
      * Delegates to the underlying vector store backend (IndexedDB or HNSW).
+     *
+     * @param query Text query to search for
+     * @param topK Maximum number of results to return
+     * @param threshold Minimum similarity score (0-1)
+     * @param filter Optional filters for path prefixes and tags
      */
-    async search(query: string, topK: number, threshold?: number): Promise<VectorSearchResult[]> {
+    async search(
+        query: string,
+        topK: number,
+        threshold?: number,
+        filter?: SearchFilter,
+    ): Promise<VectorSearchResult[]> {
         // Ensure index is ready
         const isReady = await this.ensureIndex();
         if (!isReady) {
@@ -817,22 +836,60 @@ export class VectorStoreService {
             const queryVector = await embeddings.embedQuery(query);
             const queryVectorTyped = new Float32Array(queryVector);
 
-            // Delegate search to the backend (IndexedDB brute-force or HNSW ANN)
-            const results = await this.store.search(queryVectorTyped, topK, threshold);
+            // Request more results if filtering, to ensure we get enough after filtering
+            const hasFilters = filter?.pathPrefixes?.length || filter?.tags?.length;
+            const searchTopK = hasFilters ? topK * 3 : topK;
 
-            // Convert to SearchResult format
+            // Delegate search to the backend (IndexedDB brute-force or HNSW ANN)
+            const results = await this.store.search(queryVectorTyped, searchTopK, threshold);
+
+            // Convert to SearchResult format with filtering
             const { metadataCache } = this.plugin.app;
-            return results.map((r) => {
+            const filteredResults: VectorSearchResult[] = [];
+
+            for (const r of results) {
+                // Apply path prefix filter
+                if (filter?.pathPrefixes?.length) {
+                    const matchesPath = filter.pathPrefixes.some((prefix) => r.doc.path.startsWith(prefix));
+                    if (!matchesPath) continue;
+                }
+
+                // Get file metadata for tag filtering
                 const file = this.plugin.app.vault.getAbstractFileByPath(r.doc.path);
                 const cache = file instanceof TFile ? metadataCache.getFileCache(file) : null;
 
-                return {
+                // Extract all tags (frontmatter + inline)
+                const docTags = cache ? (getAllTags(cache) ?? []) : [];
+
+                // Apply tag filter
+                if (filter?.tags?.length) {
+                    const normalizedFilterTags = filter.tags.map((t) => (t.startsWith("#") ? t : `#${t}`));
+                    const normalizedDocTags = docTags.map((t) => (t.startsWith("#") ? t : `#${t}`));
+
+                    if (filter.requireAllTags) {
+                        // All tags must be present
+                        const hasAllTags = normalizedFilterTags.every((tag) => normalizedDocTags.includes(tag));
+                        if (!hasAllTags) continue;
+                    } else {
+                        // At least one tag must be present
+                        const hasAnyTag = normalizedFilterTags.some((tag) => normalizedDocTags.includes(tag));
+                        if (!hasAnyTag) continue;
+                    }
+                }
+
+                filteredResults.push({
                     path: r.doc.path,
                     name: r.doc.path.replace(/.*\//, "").replace(/\.md$/, ""),
                     frontmatter: cache?.frontmatter,
+                    tags: docTags,
                     score: r.score,
-                };
-            });
+                });
+
+                // Stop once we have enough results
+                if (filteredResults.length >= topK) break;
+            }
+
+            return filteredResults;
         } catch (error) {
             Logger.error("[VectorStore] Search failed:", error);
             return [];

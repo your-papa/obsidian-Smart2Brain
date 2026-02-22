@@ -1,68 +1,68 @@
 <script lang="ts">
-  import SettingItem from "../../components/settings/SettingItem.svelte";
-  import Button from "../../components/ui/Button.svelte";
-  import Text from "../../components/ui/Text.svelte";
-  import Toggle from "../../components/ui/Toggle.svelte";
-  import type SecondBrainPlugin from "../../main";
-  import type { CustomProviderMeta } from "../../providers/index";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { Logger } from "../../utils/logging";
-  import type { CustomProviderSetupModal } from "./CustomProviderSetup";
+import SettingItem from "../../components/settings/SettingItem.svelte";
+import Button from "../../components/ui/Button.svelte";
+import Text from "../../components/ui/Text.svelte";
+import Toggle from "../../components/ui/Toggle.svelte";
+import type SecondBrainPlugin from "../../main";
+import type { CustomProviderMeta } from "../../providers/index";
+import { getData } from "../../stores/dataStore.svelte";
+import { Logger } from "../../utils/logging";
+import type { CustomProviderSetupModal } from "./CustomProviderSetup";
 
-  interface Props {
-    modal: CustomProviderSetupModal;
-    plugin: SecondBrainPlugin;
-  }
+interface Props {
+	modal: CustomProviderSetupModal;
+	plugin: SecondBrainPlugin;
+}
 
-  const { modal, plugin }: Props = $props();
+const { modal, plugin }: Props = $props();
 
-  const data = getData();
+const data = getData();
 
-  // Form state
-  let displayName = $state("");
-  let supportsEmbeddings = $state(false);
-  let baseUrl = $state("");
-  let apiKey = $state("");
+// Form state
+let displayName = $state("");
+let supportsEmbeddings = $state(false);
+let baseUrl = $state("");
+let apiKey = $state("");
 
-  // Validation
-  let isValid = $derived(displayName.trim() !== "" && baseUrl.trim() !== "");
+// Validation
+let isValid = $derived(displayName.trim() !== "" && baseUrl.trim() !== "");
 
-  // Generate a UUID for the custom provider
-  function generateId(): string {
-    return crypto.randomUUID();
-  }
+// Generate a UUID for the custom provider
+function generateId(): string {
+	return crypto.randomUUID();
+}
 
-  async function handleAddProvider() {
-    if (!isValid) return;
+async function handleAddProvider() {
+	if (!isValid) return;
 
-    const providerId = generateId();
-    Logger.log("[CustomProviderSetup] Adding provider:", {
-      providerId,
-      displayName,
-      baseUrl,
-      hasApiKey: !!apiKey.trim(),
-      supportsEmbeddings,
-    });
+	const providerId = generateId();
+	Logger.log("[CustomProviderSetup] Adding provider:", {
+		providerId,
+		displayName,
+		baseUrl,
+		hasApiKey: !!apiKey.trim(),
+		supportsEmbeddings,
+	});
 
-    // Create the custom provider metadata
-    const meta: CustomProviderMeta = {
-      displayName: displayName.trim(),
-      supportsEmbeddings,
-    };
+	// Create the custom provider metadata
+	const meta: CustomProviderMeta = {
+		displayName: displayName.trim(),
+		supportsEmbeddings,
+	};
 
-    // Add the custom provider (creates both meta and state)
-    await data.addCustomProvider(providerId, meta);
+	// Add the custom provider (creates both meta and state)
+	await data.addCustomProvider(providerId, meta);
 
-    // Set the base URL
-    data.setProviderAuthField(providerId, "baseUrl", baseUrl.trim(), false);
+	// Set the base URL
+	data.setProviderAuthField(providerId, "baseUrl", baseUrl.trim(), false);
 
-    // If API key provided, store it as a secret
-    if (apiKey.trim()) {
-      data.setProviderAuthField(providerId, "apiKey", apiKey.trim(), true);
-    }
+	// If API key provided, store it as a secret
+	if (apiKey.trim()) {
+		data.setProviderAuthField(providerId, "apiKey", apiKey.trim(), true);
+	}
 
-    modal.close();
-  }
+	modal.close();
+}
 </script>
 
 <div class="modal-content">

@@ -1,11 +1,64 @@
 import { type App, SuggestModal, TFile, debounce } from "obsidian";
 import { performSearch, type SearchResult } from "../../agent/tools/searchNotes";
 import { getData } from "../../stores/dataStore.svelte";
+import type { SearchFilter } from "../../vectorstore";
 import { Logger } from "../../utils/logging";
+
+interface ParsedQuery {
+    query: string;
+    filter?: SearchFilter;
+}
+
+/**
+ * Parse search query for filter syntax:
+ * - path:folder/subfolder/ - filter by path prefix
+ * - tag:#tagname or tag:tagname - filter by tag (can use multiple)
+ *
+ * Example: "path:projects/ tag:#active my search query"
+ */
+function parseQueryWithFilters(rawQuery: string): ParsedQuery {
+    const pathPrefixes: string[] = [];
+    const tags: string[] = [];
+
+    // Extract path: prefixes
+    const pathRegex = /path:(\S+)/gi;
+    let pathMatch: RegExpExecArray | null;
+    while ((pathMatch = pathRegex.exec(rawQuery)) !== null) {
+        pathPrefixes.push(pathMatch[1]);
+    }
+
+    // Extract tag: prefixes
+    const tagRegex = /tag:(#?\S+)/gi;
+    let tagMatch: RegExpExecArray | null;
+    while ((tagMatch = tagRegex.exec(rawQuery)) !== null) {
+        const tag = tagMatch[1].startsWith("#") ? tagMatch[1] : `#${tagMatch[1]}`;
+        tags.push(tag);
+    }
+
+    // Remove filter syntax from query
+    const cleanQuery = rawQuery
+        .replace(/path:\S+/gi, "")
+        .replace(/tag:\S+/gi, "")
+        .trim();
+
+    const filter: SearchFilter | undefined =
+        pathPrefixes.length > 0 || tags.length > 0
+            ? {
+                pathPrefixes: pathPrefixes.length > 0 ? pathPrefixes : undefined,
+                tags: tags.length > 0 ? tags : undefined,
+            }
+            : undefined;
+
+    return { query: cleanQuery, filter };
+}
 
 /**
  * Search modal that provides a popup search experience using the configured search algorithm.
  * Similar to Obsidian's native search or Omnisearch.
+ *
+ * Supports filter syntax:
+ * - path:folder/ to filter by path prefix
+ * - tag:#tagname to filter by tag
  */
 export class SearchModal extends SuggestModal<SearchResult> {
     private searchResults: SearchResult[] = [];
@@ -16,7 +69,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 
     constructor(app: App) {
         super(app);
-        this.setPlaceholder("Search notes...");
+        this.setPlaceholder("Search notes... (path:folder/ tag:#tag)");
         this.setInstructions([
             { command: "↑↓", purpose: "Navigate" },
             { command: "↵", purpose: "Open note" },
@@ -37,11 +90,11 @@ export class SearchModal extends SuggestModal<SearchResult> {
      * Debounced search to avoid too many API calls during typing
      */
     private debouncedSearch = debounce(
-        async (query: string) => {
+        async (rawQuery: string) => {
             // Abort if modal was closed
             if (this.isClosed) return;
 
-            if (!query.trim()) {
+            if (!rawQuery.trim()) {
                 this.searchResults = [];
                 // @ts-ignore - updateSuggestions is a protected method
                 this.updateSuggestions();
@@ -52,12 +105,18 @@ export class SearchModal extends SuggestModal<SearchResult> {
             const pluginData = getData();
             const algorithm = pluginData.searchAlgorithm;
 
+            // Parse query for filter syntax
+            const { query, filter } = parseQueryWithFilters(rawQuery);
+
+            // If we only have filters and no actual query, use a broad search
+            const searchQuery = query.trim() || "*";
+
             try {
-                const results = await performSearch(this.app, query, algorithm);
+                const results = await performSearch(this.app, searchQuery, algorithm, filter);
                 // Only update if query hasn't changed and modal is still open
-                if (query === this.currentQuery && !this.isClosed) {
+                if (rawQuery === this.currentQuery && !this.isClosed) {
                     this.searchResults = results.slice(0, pluginData.retrieveTopK);
-                    this.lastSearchedQuery = query;
+                    this.lastSearchedQuery = rawQuery;
                     // @ts-ignore - updateSuggestions is a protected method
                     this.updateSuggestions();
                 }
@@ -114,9 +173,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 
         // Tags from frontmatter (if available)
         if (result.frontmatter?.tags) {
-            const tags = Array.isArray(result.frontmatter.tags)
-                ? result.frontmatter.tags
-                : [result.frontmatter.tags];
+            const tags = Array.isArray(result.frontmatter.tags) ? result.frontmatter.tags : [result.frontmatter.tags];
             if (tags.length > 0) {
                 const tagsContainer = container.createDiv({ cls: "ssb-search-result-tags" });
                 for (const tag of tags.slice(0, 3)) {

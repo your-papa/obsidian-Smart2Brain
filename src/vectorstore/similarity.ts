@@ -15,30 +15,30 @@
  * @returns Similarity score between -1 and 1 (1 = identical, 0 = orthogonal, -1 = opposite)
  */
 export function cosineSimilarity(a: Float32Array | number[], b: Float32Array | number[]): number {
-    if (a.length !== b.length) {
-        throw new Error(`Vector dimension mismatch: ${a.length} vs ${b.length}`);
-    }
+	if (a.length !== b.length) {
+		throw new Error(`Vector dimension mismatch: ${a.length} vs ${b.length}`);
+	}
 
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
+	let dotProduct = 0;
+	let normA = 0;
+	let normB = 0;
 
-    for (let i = 0; i < a.length; i++) {
-        const ai = a[i];
-        const bi = b[i];
-        dotProduct += ai * bi;
-        normA += ai * ai;
-        normB += bi * bi;
-    }
+	for (let i = 0; i < a.length; i++) {
+		const ai = a[i];
+		const bi = b[i];
+		dotProduct += ai * bi;
+		normA += ai * ai;
+		normB += bi * bi;
+	}
 
-    const magnitude = Math.sqrt(normA) * Math.sqrt(normB);
+	const magnitude = Math.sqrt(normA) * Math.sqrt(normB);
 
-    // Handle zero vectors
-    if (magnitude === 0) {
-        return 0;
-    }
+	// Handle zero vectors
+	if (magnitude === 0) {
+		return 0;
+	}
 
-    return dotProduct / magnitude;
+	return dotProduct / magnitude;
 }
 
 /**
@@ -49,24 +49,24 @@ export function cosineSimilarity(a: Float32Array | number[], b: Float32Array | n
  * @returns New Float32Array with unit length
  */
 export function normalize(vector: Float32Array | number[]): Float32Array {
-    let sumSquares = 0;
-    for (let i = 0; i < vector.length; i++) {
-        sumSquares += vector[i] * vector[i];
-    }
+	let sumSquares = 0;
+	for (let i = 0; i < vector.length; i++) {
+		sumSquares += vector[i] * vector[i];
+	}
 
-    const magnitude = Math.sqrt(sumSquares);
+	const magnitude = Math.sqrt(sumSquares);
 
-    // Handle zero vector
-    if (magnitude === 0) {
-        return new Float32Array(vector.length);
-    }
+	// Handle zero vector
+	if (magnitude === 0) {
+		return new Float32Array(vector.length);
+	}
 
-    const normalized = new Float32Array(vector.length);
-    for (let i = 0; i < vector.length; i++) {
-        normalized[i] = vector[i] / magnitude;
-    }
+	const normalized = new Float32Array(vector.length);
+	for (let i = 0; i < vector.length; i++) {
+		normalized[i] = vector[i] / magnitude;
+	}
 
-    return normalized;
+	return normalized;
 }
 
 /**
@@ -79,15 +79,15 @@ export function normalize(vector: Float32Array | number[]): Float32Array {
  * @returns Dot product (same as cosine similarity for unit vectors)
  */
 export function dotProduct(a: Float32Array | number[], b: Float32Array | number[]): number {
-    if (a.length !== b.length) {
-        throw new Error(`Vector dimension mismatch: ${a.length} vs ${b.length}`);
-    }
+	if (a.length !== b.length) {
+		throw new Error(`Vector dimension mismatch: ${a.length} vs ${b.length}`);
+	}
 
-    let sum = 0;
-    for (let i = 0; i < a.length; i++) {
-        sum += a[i] * b[i];
-    }
-    return sum;
+	let sum = 0;
+	for (let i = 0; i < a.length; i++) {
+		sum += a[i] * b[i];
+	}
+	return sum;
 }
 
 /**
@@ -95,7 +95,7 @@ export function dotProduct(a: Float32Array | number[], b: Float32Array | number[
  * Used when loading vectors from serialized storage.
  */
 export function toFloat32Array(arr: number[]): Float32Array {
-    return new Float32Array(arr);
+	return new Float32Array(arr);
 }
 
 /**
@@ -103,5 +103,5 @@ export function toFloat32Array(arr: number[]): Float32Array {
  * Used when serializing vectors to storage.
  */
 export function toNumberArray(arr: Float32Array): number[] {
-    return Array.from(arr);
+	return Array.from(arr);
 }
