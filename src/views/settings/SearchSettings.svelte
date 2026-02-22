@@ -1,19 +1,16 @@
 <script lang="ts">
 import { onMount, onDestroy } from "svelte";
-import type { TFolder } from "obsidian";
 import { t } from "svelte-i18n";
-import type { Component } from "svelte";
 import { ExcludeFoldersModal } from "../../components/modal/ExcludeFoldersModal";
+import { ModelSelectionModal } from "../../components/modal/ModelSelectionModal";
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
 import Dropdown from "../../components/ui/Dropdown.svelte";
 import ProgressBar from "../../components/ui/ProgressBar.svelte";
-import Text from "../../components/ui/Text.svelte";
 import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
 import type { SearchAlgorithm } from "../../main";
-import { getProviderDefinition, isEmbeddingProvider } from "../../providers/index";
-import type { EmbedModelConfig, LogoProps } from "../../providers/index";
+import { getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { isVectorStoreInitialized, getVectorStoreService, type IndexingProgress } from "../../vectorstore";
@@ -74,84 +71,32 @@ async function rebuildIndex() {
 	indexStats = await service.getStats();
 }
 
-// Helper to get logo for a provider
-function getProviderLogo(providerId: string): Component<LogoProps> {
-	const provider = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
-	if (provider && "logo" in provider && provider.logo) {
-		return provider.logo;
-	}
-	return GenericAIIcon;
-}
-
-// Helper to get display name for a provider
-function getProviderDisplayName(providerId: string): string {
-	const provider = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
-	return provider?.displayName ?? providerId;
-}
-
-const configuredProviders = $derived(pluginData.getConfiguredProviders());
-
-// Helper to check if provider supports embedding
-function isEmbedProvider(providerId: string): boolean {
-	const provider = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
-	if (!provider) return false;
-	return isEmbeddingProvider(provider);
-}
-
-// Get all embed models grouped by provider
-const embedModelsByProvider = $derived.by(() => {
-	const result: { provider: string; models: Record<string, EmbedModelConfig> }[] = [];
-	for (const provider of configuredProviders) {
-		if (isEmbedProvider(provider)) {
-			const models = pluginData.getEmbedModels(provider);
-			if (Object.keys(models).length > 0) {
-				result.push({ provider, models });
-			}
-		}
-	}
-	return result;
+// Get display info for current embedding model
+const currentEmbedModelDisplay = $derived.by(() => {
+	if (!pluginData.defaultEmbedModel) return null;
+	const provider = pluginData.defaultEmbedModel.provider;
+	const model = pluginData.defaultEmbedModel.model;
+	const providerDef = getProviderDefinition(provider, pluginData.getAllCustomProviderMeta());
+	return {
+		model,
+		providerName: providerDef?.displayName ?? provider,
+		logo: providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon,
+	};
 });
 
-// Build dropdown options for default embed model selection (grouped by provider)
-const embedModelDropdownGroups = $derived.by(() => {
-	const groups: { label: string; options: { display: string; value: string }[] }[] = [];
+function openEmbedModelSelectionModal() {
+	const currentSelection = pluginData.defaultEmbedModel
+		? { provider: pluginData.defaultEmbedModel.provider, model: pluginData.defaultEmbedModel.model }
+		: null;
 
-	// Add "None" option as first group
-	groups.push({
-		label: "Default",
-		options: [{ display: "None (disable semantic search)", value: "" }],
+	const modal = new ModelSelectionModal(plugin, "embedding", currentSelection, (selected) => {
+		if (selected) {
+			pluginData.defaultEmbedModel = { provider: selected.provider, model: selected.model };
+		} else {
+			pluginData.defaultEmbedModel = null;
+		}
 	});
-
-	for (const { provider, models } of embedModelsByProvider) {
-		const displayName = getProviderDisplayName(provider);
-		const options = Object.keys(models).map((modelId) => ({
-			display: modelId,
-			value: `${provider}::${modelId}`,
-		}));
-		if (options.length > 0) {
-			groups.push({ label: displayName, options });
-		}
-	}
-
-	return groups;
-});
-
-// Current default embed model as a serialized string "provider::model" or ""
-const defaultEmbedModelValue = $derived(
-	pluginData.defaultEmbedModel
-		? `${pluginData.defaultEmbedModel.provider}::${pluginData.defaultEmbedModel.model}`
-		: "",
-);
-
-function handleDefaultEmbedModelChange(value: string) {
-	if (!value) {
-		pluginData.defaultEmbedModel = null;
-	} else {
-		const [provider, model] = value.split("::");
-		if (provider && model) {
-			pluginData.defaultEmbedModel = { provider, model };
-		}
-	}
+	modal.open();
 }
 
 // Check if embeddings are configured
@@ -214,15 +159,20 @@ const indexHeading = $derived.by(() => {
 {#if pluginData.searchAlgorithm !== "lexical"}
   <SettingGroup heading="Embedding Model">
     <SettingItem
-      name="Default Embedding Model"
+      name="Embedding Model"
       desc="Select the model for semantic search. Required for Embeddings and Hybrid search algorithms."
     >
-      <Dropdown
-        type="groups"
-        dropdown={embedModelDropdownGroups}
-        selected={defaultEmbedModelValue}
-        onSelect={handleDefaultEmbedModelChange}
-      />
+      <Button onClick={openEmbedModelSelectionModal}>
+        {#if currentEmbedModelDisplay}
+          {@const Logo = currentEmbedModelDisplay.logo}
+          <div class="flex items-center gap-2">
+            <Logo width={14} height={14} />
+            <span>{currentEmbedModelDisplay.model}</span>
+          </div>
+        {:else}
+          <span class="text-[--text-muted]">Select embedding model</span>
+        {/if}
+      </Button>
     </SettingItem>
   </SettingGroup>
 {/if}

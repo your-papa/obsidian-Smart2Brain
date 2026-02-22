@@ -102,7 +102,7 @@ export class MiniSearchService {
         }
 
         return new Promise((resolve) => {
-            const transaction = this.db!.transaction(STORE_NAME, "readonly");
+            const transaction = this.db?.transaction(STORE_NAME, "readonly");
             const store = transaction.objectStore(STORE_NAME);
             const request = store.get(INDEX_KEY);
 
@@ -154,7 +154,7 @@ export class MiniSearchService {
         const paths = Array.from(this.documentPaths);
 
         return new Promise((resolve, reject) => {
-            const transaction = this.db!.transaction(STORE_NAME, "readwrite");
+            const transaction = this.db?.transaction(STORE_NAME, "readwrite");
             const store = transaction.objectStore(STORE_NAME);
             const request = store.put({ json, paths }, INDEX_KEY);
 

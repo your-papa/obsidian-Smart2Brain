@@ -347,7 +347,7 @@ export class VectorStoreService {
                         notice.setMessage(`Updating index: ${indexed}/${filesToIndex.length}`);
                     }
                 } catch (error) {
-                    Logger.error(`[VectorStore] Batch validation indexing failed:`, error);
+                    Logger.error("[VectorStore] Batch validation indexing failed:", error);
                     // Fall back to sequential for this batch
                     for (const entry of batch) {
                         try {
