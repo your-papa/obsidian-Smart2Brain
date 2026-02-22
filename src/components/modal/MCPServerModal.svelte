@@ -12,6 +12,7 @@ import type {
 	MCPTransportType,
 } from "../../main";
 import { getData } from "../../stores/dataStore.svelte";
+import { Logger } from "../../utils/logging";
 import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
 import Icon from "../ui/Icon.svelte";
@@ -308,7 +309,7 @@ async function handleTestConnection() {
 
 		try {
 			const config = buildTestConfig();
-			console.log("Testing MCP connection with config:", config);
+			Logger.log("Testing MCP connection with config:", config);
 
 			const mcpClient = new MultiServerMCPClient(config);
 			const tools = await mcpClient.getTools();
@@ -328,7 +329,7 @@ async function handleTestConnection() {
 			}
 		}
 	} catch (err) {
-		console.error("MCP connection test failed:", err);
+		Logger.error("MCP connection test failed:", err);
 		testError = err instanceof Error ? err.message : "Connection failed";
 		new Notice(`Connection failed: ${testError}`);
 	} finally {
@@ -338,301 +339,317 @@ async function handleTestConnection() {
 </script>
 
 <div class="mcp-modal-content">
-	<!-- Name -->
-	<div class="mcp-field">
-		<label class="mcp-label">Name</label>
-		<p class="mcp-description">A name for this MCP server</p>
-		<Text inputType="text" value={name} placeholder="My MCP Server" onblur={(v) => (name = v)} />
-	</div>
+  <!-- Name -->
+  <div class="mcp-field">
+    <label class="mcp-label">Name</label>
+    <p class="mcp-description">A name for this MCP server</p>
+    <Text inputType="text" value={name} placeholder="My MCP Server" onblur={(v) => (name = v)} />
+  </div>
 
-	<!-- Enabled Toggle -->
-	<div class="mcp-field mcp-field-row">
-		<div>
-			<label class="mcp-label">Enabled</label>
-			<p class="mcp-description">Whether this server is active and provides tools</p>
-		</div>
-		<Toggle isToggled={enabled} changeFunc={() => (enabled = !enabled)} />
-	</div>
+  <!-- Enabled Toggle -->
+  <div class="mcp-field mcp-field-row">
+    <div>
+      <label class="mcp-label">Enabled</label>
+      <p class="mcp-description">Whether this server is active and provides tools</p>
+    </div>
+    <Toggle isToggled={enabled} changeFunc={() => (enabled = !enabled)} />
+  </div>
 
-	<!-- Transport Type -->
-	<div class="mcp-field">
-		<label class="mcp-label">Transport Type</label>
-		<p class="mcp-description">How to connect to the MCP server</p>
-		<Dropdown type="options" dropdown={transportOptions} selected={transport} onSelect={(v) => (transport = v)} />
-	</div>
+  <!-- Transport Type -->
+  <div class="mcp-field">
+    <label class="mcp-label">Transport Type</label>
+    <p class="mcp-description">How to connect to the MCP server</p>
+    <Dropdown
+      type="options"
+      dropdown={transportOptions}
+      selected={transport}
+      onSelect={(v) => (transport = v)}
+    />
+  </div>
 
-	<!-- stdio-specific fields -->
-	{#if transport === "stdio"}
-		<div class="mcp-section">
-			<h4 class="mcp-section-title">Command Configuration</h4>
+  <!-- stdio-specific fields -->
+  {#if transport === "stdio"}
+    <div class="mcp-section">
+      <h4 class="mcp-section-title">Command Configuration</h4>
 
-			<div class="mcp-field">
-				<label class="mcp-label">Command</label>
-				<p class="mcp-description">The executable to run (e.g., npx, node, python)</p>
-				<Text inputType="text" value={command} placeholder="npx" onblur={(v) => (command = v)} />
-			</div>
+      <div class="mcp-field">
+        <label class="mcp-label">Command</label>
+        <p class="mcp-description">The executable to run (e.g., npx, node, python)</p>
+        <Text inputType="text" value={command} placeholder="npx" onblur={(v) => (command = v)} />
+      </div>
 
-			<div class="mcp-field">
-				<label class="mcp-label">Arguments</label>
-				<p class="mcp-description">Command arguments, space-separated (use quotes for args with spaces)</p>
-				<Text
-					inputType="text"
-					value={args}
-					placeholder="-y @anthropic/mcp-server-filesystem /path/to/dir"
-					onblur={(v) => (args = v)}
-				/>
-			</div>
+      <div class="mcp-field">
+        <label class="mcp-label">Arguments</label>
+        <p class="mcp-description">
+          Command arguments, space-separated (use quotes for args with spaces)
+        </p>
+        <Text
+          inputType="text"
+          value={args}
+          placeholder="-y @anthropic/mcp-server-filesystem /path/to/dir"
+          onblur={(v) => (args = v)}
+        />
+      </div>
 
-			<div class="mcp-field">
-				<label class="mcp-label">Environment Variables (optional)</label>
-				<p class="mcp-description">One per line in KEY=VALUE format</p>
-				<textarea class="mcp-textarea" bind:value={envVars} placeholder="API_KEY=your-key&#10;DEBUG=true"></textarea>
-			</div>
-		</div>
-	{/if}
+      <div class="mcp-field">
+        <label class="mcp-label">Environment Variables (optional)</label>
+        <p class="mcp-description">One per line in KEY=VALUE format</p>
+        <textarea
+          class="mcp-textarea"
+          bind:value={envVars}
+          placeholder="API_KEY=your-key&#10;DEBUG=true"
+        ></textarea>
+      </div>
+    </div>
+  {/if}
 
-	<!-- HTTP/SSE-specific fields -->
-	{#if transport === "http" || transport === "sse"}
-		<div class="mcp-section">
-			<h4 class="mcp-section-title">Server Configuration</h4>
+  <!-- HTTP/SSE-specific fields -->
+  {#if transport === "http" || transport === "sse"}
+    <div class="mcp-section">
+      <h4 class="mcp-section-title">Server Configuration</h4>
 
-			{#if transport === "sse"}
-				<div class="mcp-warning">
-					SSE transport may have CORS issues in Obsidian. Consider using HTTP transport instead.
-				</div>
-			{/if}
+      {#if transport === "sse"}
+        <div class="mcp-warning">
+          SSE transport may have CORS issues in Obsidian. Consider using HTTP transport instead.
+        </div>
+      {/if}
 
-			<div class="mcp-field">
-				<label class="mcp-label">Server URL</label>
-				<p class="mcp-description">The URL of the MCP server</p>
-				<Text inputType="text" value={url} placeholder="https://mcp.example.com/mcp" onblur={(v) => (url = v)} />
-			</div>
+      <div class="mcp-field">
+        <label class="mcp-label">Server URL</label>
+        <p class="mcp-description">The URL of the MCP server</p>
+        <Text
+          inputType="text"
+          value={url}
+          placeholder="https://mcp.example.com/mcp"
+          onblur={(v) => (url = v)}
+        />
+      </div>
 
-			<div class="mcp-field">
-				<label class="mcp-label">Headers (optional)</label>
-				<p class="mcp-description">One per line in Header-Name: value format</p>
-				<textarea
-					class="mcp-textarea"
-					bind:value={headers}
-					placeholder="Authorization: Bearer token&#10;X-Custom-Header: value"
-				></textarea>
-			</div>
-		</div>
-	{/if}
+      <div class="mcp-field">
+        <label class="mcp-label">Headers (optional)</label>
+        <p class="mcp-description">One per line in Header-Name: value format</p>
+        <textarea
+          class="mcp-textarea"
+          bind:value={headers}
+          placeholder="Authorization: Bearer token&#10;X-Custom-Header: value"
+        ></textarea>
+      </div>
+    </div>
+  {/if}
 
-	<!-- Test Results -->
-	{#if testSuccess && discoveredTools.length > 0}
-		<div class="mcp-test-results success">
-			<div class="mcp-test-header">
-				<Icon name="check-circle" />
-				<span>Connection successful - {discoveredTools.length} tool(s) available</span>
-			</div>
-			<div class="mcp-tools-list">
-				{#each discoveredTools as tool (tool.name)}
-					<div class="mcp-tool-item">
-						<span class="mcp-tool-name">{tool.name}</span>
-						{#if tool.description}
-							<span class="mcp-tool-desc">{tool.description}</span>
-						{/if}
-					</div>
-				{/each}
-			</div>
-		</div>
-	{:else if testSuccess && discoveredTools.length === 0}
-		<div class="mcp-test-results warning">
-			<div class="mcp-test-header">
-				<Icon name="alert-triangle" />
-				<span>Connected but no tools found</span>
-			</div>
-		</div>
-	{:else if testError}
-		<div class="mcp-test-results error">
-			<div class="mcp-test-header">
-				<Icon name="x-circle" />
-				<span>Connection failed</span>
-			</div>
-			<p class="mcp-test-error">{testError}</p>
-		</div>
-	{/if}
+  <!-- Test Results -->
+  {#if testSuccess && discoveredTools.length > 0}
+    <div class="mcp-test-results success">
+      <div class="mcp-test-header">
+        <Icon name="check-circle" />
+        <span>Connection successful - {discoveredTools.length} tool(s) available</span>
+      </div>
+      <div class="mcp-tools-list">
+        {#each discoveredTools as tool (tool.name)}
+          <div class="mcp-tool-item">
+            <span class="mcp-tool-name">{tool.name}</span>
+            {#if tool.description}
+              <span class="mcp-tool-desc">{tool.description}</span>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    </div>
+  {:else if testSuccess && discoveredTools.length === 0}
+    <div class="mcp-test-results warning">
+      <div class="mcp-test-header">
+        <Icon name="alert-triangle" />
+        <span>Connected but no tools found</span>
+      </div>
+    </div>
+  {:else if testError}
+    <div class="mcp-test-results error">
+      <div class="mcp-test-header">
+        <Icon name="x-circle" />
+        <span>Connection failed</span>
+      </div>
+      <p class="mcp-test-error">{testError}</p>
+    </div>
+  {/if}
 
-	<!-- Actions -->
-	<div class="mcp-actions">
-		{#if isEditing}
-			<Button buttonText="Delete" styles="mod-warning" onClick={handleDelete} />
-		{/if}
-		<Button
-			buttonText={isTesting ? "Testing..." : "Test Connection"}
-			onClick={handleTestConnection}
-			disabled={isTesting}
-		/>
-		<div class="flex-1"></div>
-		<Button buttonText="Cancel" onClick={() => modal.close()} />
-		<Button buttonText={isEditing ? "Save" : "Add Server"} cta={true} onClick={handleSave} />
-	</div>
+  <!-- Actions -->
+  <div class="mcp-actions">
+    {#if isEditing}
+      <Button buttonText="Delete" styles="mod-warning" onClick={handleDelete} />
+    {/if}
+    <Button
+      buttonText={isTesting ? "Testing..." : "Test Connection"}
+      onClick={handleTestConnection}
+      disabled={isTesting}
+    />
+    <div class="flex-1"></div>
+    <Button buttonText="Cancel" onClick={() => modal.close()} />
+    <Button buttonText={isEditing ? "Save" : "Add Server"} cta={true} onClick={handleSave} />
+  </div>
 </div>
 
 <style>
-	.mcp-modal-content {
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-		padding: 8px 0;
-	}
+  .mcp-modal-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 8px 0;
+  }
 
-	.mcp-field {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
+  .mcp-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
 
-	.mcp-field-row {
-		flex-direction: row;
-		align-items: center;
-		justify-content: space-between;
-	}
+  .mcp-field-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
 
-	.mcp-label {
-		font-weight: 500;
-		font-size: 0.95rem;
-	}
+  .mcp-label {
+    font-weight: 500;
+    font-size: 0.95rem;
+  }
 
-	.mcp-description {
-		font-size: 0.85rem;
-		color: var(--text-muted);
-		margin: 0 0 4px 0;
-	}
+  .mcp-description {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin: 0 0 4px 0;
+  }
 
-	.mcp-section {
-		border-top: 1px solid var(--background-modifier-border);
-		padding-top: 16px;
-	}
+  .mcp-section {
+    border-top: 1px solid var(--background-modifier-border);
+    padding-top: 16px;
+  }
 
-	.mcp-section-title {
-		font-weight: 600;
-		font-size: 0.9rem;
-		margin: 0 0 12px 0;
-		color: var(--text-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
+  .mcp-section-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin: 0 0 12px 0;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
 
-	.mcp-warning {
-		padding: 8px 12px;
-		margin-bottom: 12px;
-		border-radius: 4px;
-		background: rgba(var(--color-yellow-rgb, 255, 193, 7), 0.15);
-		border: 1px solid var(--text-warning, #ffc107);
-		color: var(--text-warning, #ffc107);
-		font-size: 0.85rem;
-	}
+  .mcp-warning {
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    border-radius: 4px;
+    background: rgba(var(--color-yellow-rgb, 255, 193, 7), 0.15);
+    border: 1px solid var(--text-warning, #ffc107);
+    color: var(--text-warning, #ffc107);
+    font-size: 0.85rem;
+  }
 
-	.mcp-textarea {
-		width: 100%;
-		min-height: 80px;
-		padding: 8px 12px;
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 4px;
-		background: var(--background-secondary);
-		color: var(--text-normal);
-		font-family: var(--font-monospace);
-		font-size: 0.9rem;
-		resize: vertical;
-	}
+  .mcp-textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: 8px 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    font-family: var(--font-monospace);
+    font-size: 0.9rem;
+    resize: vertical;
+  }
 
-	.mcp-textarea:focus {
-		outline: none;
-		border-color: var(--interactive-accent);
-		box-shadow: 0 0 0 1px var(--interactive-accent);
-	}
+  .mcp-textarea:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 1px var(--interactive-accent);
+  }
 
-	.mcp-actions {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		border-top: 1px solid var(--background-modifier-border);
-		padding-top: 16px;
-		margin-top: 8px;
-	}
+  .mcp-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-top: 1px solid var(--background-modifier-border);
+    padding-top: 16px;
+    margin-top: 8px;
+  }
 
-	/* Test Results Styles */
-	.mcp-test-results {
-		padding: 12px;
-		border-radius: 6px;
-		border: 1px solid var(--background-modifier-border);
-	}
+  /* Test Results Styles */
+  .mcp-test-results {
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid var(--background-modifier-border);
+  }
 
-	.mcp-test-results.success {
-		background: rgba(var(--color-green-rgb, 76, 175, 80), 0.1);
-		border-color: var(--text-success, #4caf50);
-	}
+  .mcp-test-results.success {
+    background: rgba(var(--color-green-rgb, 76, 175, 80), 0.1);
+    border-color: var(--text-success, #4caf50);
+  }
 
-	.mcp-test-results.warning {
-		background: rgba(var(--color-yellow-rgb, 255, 193, 7), 0.1);
-		border-color: var(--text-warning, #ffc107);
-	}
+  .mcp-test-results.warning {
+    background: rgba(var(--color-yellow-rgb, 255, 193, 7), 0.1);
+    border-color: var(--text-warning, #ffc107);
+  }
 
-	.mcp-test-results.error {
-		background: rgba(var(--color-red-rgb, 244, 67, 54), 0.1);
-		border-color: var(--text-error, #f44336);
-	}
+  .mcp-test-results.error {
+    background: rgba(var(--color-red-rgb, 244, 67, 54), 0.1);
+    border-color: var(--text-error, #f44336);
+  }
 
-	.mcp-test-header {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		font-weight: 500;
-	}
+  .mcp-test-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 500;
+  }
 
-	.mcp-test-results.success .mcp-test-header {
-		color: var(--text-success, #4caf50);
-	}
+  .mcp-test-results.success .mcp-test-header {
+    color: var(--text-success, #4caf50);
+  }
 
-	.mcp-test-results.warning .mcp-test-header {
-		color: var(--text-warning, #ffc107);
-	}
+  .mcp-test-results.warning .mcp-test-header {
+    color: var(--text-warning, #ffc107);
+  }
 
-	.mcp-test-results.error .mcp-test-header {
-		color: var(--text-error, #f44336);
-	}
+  .mcp-test-results.error .mcp-test-header {
+    color: var(--text-error, #f44336);
+  }
 
-	.mcp-test-error {
-		margin: 8px 0 0 0;
-		font-size: 0.85rem;
-		color: var(--text-muted);
-		font-family: var(--font-monospace);
-	}
+  .mcp-test-error {
+    margin: 8px 0 0 0;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-family: var(--font-monospace);
+  }
 
-	.mcp-tools-list {
-		margin-top: 12px;
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-		max-height: 200px;
-		overflow-y: auto;
-	}
+  .mcp-tools-list {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
 
-	.mcp-tool-item {
-		display: flex;
-		flex-direction: column;
-		padding: 8px;
-		background: var(--background-secondary);
-		border-radius: 4px;
-	}
+  .mcp-tool-item {
+    display: flex;
+    flex-direction: column;
+    padding: 8px;
+    background: var(--background-secondary);
+    border-radius: 4px;
+  }
 
-	.mcp-tool-name {
-		font-weight: 500;
-		font-family: var(--font-monospace);
-		font-size: 0.9rem;
-	}
+  .mcp-tool-name {
+    font-weight: 500;
+    font-family: var(--font-monospace);
+    font-size: 0.9rem;
+  }
 
-	.mcp-tool-desc {
-		font-size: 0.8rem;
-		color: var(--text-muted);
-		margin-top: 2px;
-		display: -webkit-box;
-		line-clamp: 2;
-		-webkit-line-clamp: 2;
-		-webkit-box-orient: vertical;
-		overflow: hidden;
-	}
+  .mcp-tool-desc {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+    display: -webkit-box;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 </style>

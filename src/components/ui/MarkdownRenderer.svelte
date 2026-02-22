@@ -1,6 +1,7 @@
 <script lang="ts">
 import { Keymap, MarkdownRenderer, Notice, type View, loadMathJax } from "obsidian";
 import { getPlugin } from "../../stores/state.svelte";
+import { Logger } from "../../utils/logging";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 
 interface Props {
@@ -107,7 +108,7 @@ async function openTagSearch(tag: string): Promise<boolean> {
 
 		// Ensure we have a valid search leaf
 		if (!searchLeaf || !searchView) {
-			console.warn("[MarkdownRenderer] No search leaf available");
+			Logger.warn("[MarkdownRenderer] No search leaf available");
 			return false;
 		}
 
@@ -126,7 +127,7 @@ async function openTagSearch(tag: string): Promise<boolean> {
 				searchView.startSearch();
 			}
 		} else {
-			console.warn("[MarkdownRenderer] Could not find method to set search query");
+			Logger.warn("[MarkdownRenderer] Could not find method to set search query");
 			new Notice("Search pane opened but could not set tag query");
 			return false;
 		}
@@ -137,7 +138,7 @@ async function openTagSearch(tag: string): Promise<boolean> {
 
 		return true;
 	} catch (error) {
-		console.error("[MarkdownRenderer] Error opening search pane with tag:", error);
+		Logger.error("[MarkdownRenderer] Error opening search pane with tag:", error);
 		new Notice(`Failed to open search pane for tag: ${tag}`);
 		return false;
 	}
@@ -267,9 +268,9 @@ $effect(() => {
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-    bind:this={container}
-    class={className}
-    onclick={handleClick}
-    onmouseover={handleMouseOver}
-    onmouseout={handleMouseOut}
+  bind:this={container}
+  class={className}
+  onclick={handleClick}
+  onmouseover={handleMouseOver}
+  onmouseout={handleMouseOut}
 ></div>

@@ -1,5 +1,6 @@
 import { getPlugin } from "../stores/state.svelte";
 import { getSecret, isValidSecretId, listSecrets, setSecret } from "../lib/secretStorage";
+import { Logger } from "../utils/logging";
 
 /**
  * Composable for managing secrets in the UI
@@ -12,14 +13,14 @@ export function useSecrets() {
 		try {
 			secrets = listSecrets(plugin.app);
 		} catch (e) {
-			console.error("Failed to list secrets:", e);
+			Logger.error("Failed to list secrets:", e);
 			secrets = [];
 		}
 	}
 
 	function saveSecret(id: string, value: string): boolean {
 		if (!isValidSecretId(id)) {
-			console.error("Invalid secret ID. Use only lowercase letters, numbers and dashes. Max 64 chars.");
+			Logger.error("Invalid secret ID. Use only lowercase letters, numbers and dashes. Max 64 chars.");
 			return false;
 		}
 		setSecret(plugin.app, id, value);

@@ -1,195 +1,190 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
-  import { EmbeddableMarkdownEditor } from "../../lib/editor";
-  import type SecondBrainPlugin from "../../main";
-  import {
-    slugifySkillName,
-    validateSkillName,
-    validateDescription,
-    parseFrontmatter,
-  } from "../../skills";
-  import { createObsidianFetch } from "../../lib/obsidianFetch";
-  import Button from "../ui/Button.svelte";
-  import Text from "../ui/Text.svelte";
-  import type { AddSkillModal } from "./AddSkillModal";
+import { onDestroy } from "svelte";
+import { EmbeddableMarkdownEditor } from "../../lib/editor";
+import type SecondBrainPlugin from "../../main";
+import { slugifySkillName, validateSkillName, validateDescription, parseFrontmatter } from "../../skills";
+import { createObsidianFetch } from "../../lib/obsidianFetch";
+import Button from "../ui/Button.svelte";
+import Text from "../ui/Text.svelte";
+import type { AddSkillModal } from "./AddSkillModal";
 
-  interface Props {
-    modal: AddSkillModal;
-    plugin: SecondBrainPlugin;
-    agentId: string;
-    onSave: (skillId: string) => void | Promise<void>;
-  }
+interface Props {
+	modal: AddSkillModal;
+	plugin: SecondBrainPlugin;
+	agentId: string;
+	onSave: (skillId: string) => void | Promise<void>;
+}
 
-  const { modal, plugin, agentId, onSave }: Props = $props();
+const { modal, plugin, agentId, onSave }: Props = $props();
 
-  // Mode: "create" or "import"
-  type Mode = "create" | "import";
-  let mode = $state<Mode>("create");
+// Mode: "create" or "import"
+type Mode = "create" | "import";
+let mode = $state<Mode>("create");
 
-  let skillName = $state("");
-  let skillDescription = $state("");
-  let promptValue = $state("");
-  let validationError = $state("");
+let skillName = $state("");
+let skillDescription = $state("");
+let promptValue = $state("");
+let validationError = $state("");
 
-  // Import mode state
-  let importUrl = $state("");
-  let importLoading = $state(false);
-  let importError = $state("");
+// Import mode state
+let importUrl = $state("");
+let importLoading = $state(false);
+let importError = $state("");
 
-  let editor: EmbeddableMarkdownEditor | undefined = $state();
+let editor: EmbeddableMarkdownEditor | undefined = $state();
 
-  // Generate slug from display name
-  const skillSlug = $derived(slugifySkillName(skillName));
+// Generate slug from display name
+const skillSlug = $derived(slugifySkillName(skillName));
 
-  // Validate per Agent Skills spec
-  const validation = $derived(() => {
-    if (!skillName.trim()) return { valid: false, error: "Name is required" };
+// Validate per Agent Skills spec
+const validation = $derived(() => {
+	if (!skillName.trim()) return { valid: false, error: "Name is required" };
 
-    const nameResult = validateSkillName(skillSlug);
-    if (!nameResult.valid) {
-      return { valid: false, error: nameResult.errors[0]?.message || "Invalid name" };
-    }
+	const nameResult = validateSkillName(skillSlug);
+	if (!nameResult.valid) {
+		return { valid: false, error: nameResult.errors[0]?.message || "Invalid name" };
+	}
 
-    const descResult = validateDescription(skillDescription);
-    if (!descResult.valid) {
-      return { valid: false, error: descResult.errors[0]?.message || "Description is required" };
-    }
+	const descResult = validateDescription(skillDescription);
+	if (!descResult.valid) {
+		return { valid: false, error: descResult.errors[0]?.message || "Description is required" };
+	}
 
-    return { valid: true, error: "" };
-  });
+	return { valid: true, error: "" };
+});
 
-  const isValid = $derived(validation().valid);
+const isValid = $derived(validation().valid);
 
-  // Track if we have pending content to load into editor
-  let pendingEditorContent = $state<string | null>(null);
+// Track if we have pending content to load into editor
+let pendingEditorContent = $state<string | null>(null);
 
-  // Svelte action to manage editor lifecycle with the DOM element
-  function editorAction(node: HTMLDivElement) {
-    // Create editor when element mounts
-    const initialValue = pendingEditorContent ?? promptValue;
-    editor = new EmbeddableMarkdownEditor(plugin.app, node, {
-      value: initialValue,
-      placeholder: "Enter instructions for this skill...",
-      cls: "skill-editor",
-      onChange: (value) => {
-        promptValue = value;
-      },
-    });
-    // Clear pending content after using it
-    if (pendingEditorContent !== null) {
-      pendingEditorContent = null;
-    }
+// Svelte action to manage editor lifecycle with the DOM element
+function editorAction(node: HTMLDivElement) {
+	// Create editor when element mounts
+	const initialValue = pendingEditorContent ?? promptValue;
+	editor = new EmbeddableMarkdownEditor(plugin.app, node, {
+		value: initialValue,
+		placeholder: "Enter instructions for this skill...",
+		cls: "skill-editor",
+		onChange: (value) => {
+			promptValue = value;
+		},
+	});
+	// Clear pending content after using it
+	if (pendingEditorContent !== null) {
+		pendingEditorContent = null;
+	}
 
-    return {
-      destroy() {
-        editor?.destroy();
-        editor = undefined;
-      },
-    };
-  }
+	return {
+		destroy() {
+			editor?.destroy();
+			editor = undefined;
+		},
+	};
+}
 
-  onDestroy(() => {
-    editor?.destroy();
-  });
+onDestroy(() => {
+	editor?.destroy();
+});
 
-  /**
-   * Convert a GitHub URL to raw content URL.
-   * Supports: github.com blob URLs, raw.githubusercontent.com
-   */
-  function toRawGitHubUrl(url: string): string {
-    // Already a raw URL
-    if (url.includes("raw.githubusercontent.com")) {
-      return url;
-    }
-    // Convert github.com/owner/repo/blob/branch/path to raw URL
-    const blobMatch = url.match(/github\.com\/([^\/]+)\/([^\/]+)\/blob\/([^\/]+)\/(.+)/);
-    if (blobMatch) {
-      const [, owner, repo, branch, path] = blobMatch;
-      return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
-    }
-    return url;
-  }
+/**
+ * Convert a GitHub URL to raw content URL.
+ * Supports: github.com blob URLs, raw.githubusercontent.com
+ */
+function toRawGitHubUrl(url: string): string {
+	// Already a raw URL
+	if (url.includes("raw.githubusercontent.com")) {
+		return url;
+	}
+	// Convert github.com/owner/repo/blob/branch/path to raw URL
+	const blobMatch = url.match(/github\.com\/([^\/]+)\/([^\/]+)\/blob\/([^\/]+)\/(.+)/);
+	if (blobMatch) {
+		const [, owner, repo, branch, path] = blobMatch;
+		return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+	}
+	return url;
+}
 
-  async function handleImport() {
-    if (!importUrl.trim()) {
-      importError = "Please enter a URL";
-      return;
-    }
+async function handleImport() {
+	if (!importUrl.trim()) {
+		importError = "Please enter a URL";
+		return;
+	}
 
-    importLoading = true;
-    importError = "";
+	importLoading = true;
+	importError = "";
 
-    try {
-      const rawUrl = toRawGitHubUrl(importUrl.trim());
-      const obsidianFetch = createObsidianFetch(fetch);
-      const response = await obsidianFetch(rawUrl);
+	try {
+		const rawUrl = toRawGitHubUrl(importUrl.trim());
+		const obsidianFetch = createObsidianFetch(fetch);
+		const response = await obsidianFetch(rawUrl);
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
-      }
+		if (!response.ok) {
+			throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
+		}
 
-      const content = await response.text();
+		const content = await response.text();
 
-      // Parse the SKILL.md content
-      const { frontmatter, body } = parseFrontmatter(content);
+		// Parse the SKILL.md content
+		const { frontmatter, body } = parseFrontmatter(content);
 
-      if (!frontmatter.name || !frontmatter.description) {
-        throw new Error("Invalid SKILL.md: missing name or description in frontmatter");
-      }
+		if (!frontmatter.name || !frontmatter.description) {
+			throw new Error("Invalid SKILL.md: missing name or description in frontmatter");
+		}
 
-      // Populate fields
-      skillName = frontmatter.metadata?.displayName ?? frontmatter.name;
-      skillDescription = frontmatter.description;
-      promptValue = body;
+		// Populate fields
+		skillName = frontmatter.metadata?.displayName ?? frontmatter.name;
+		skillDescription = frontmatter.description;
+		promptValue = body;
 
-      // Switch to create mode to allow editing
-      mode = "create";
-      importUrl = "";
+		// Switch to create mode to allow editing
+		mode = "create";
+		importUrl = "";
 
-      // Set pending content - $effect will initialize editor and set content
-      pendingEditorContent = body;
-    } catch (err) {
-      importError = err instanceof Error ? err.message : "Failed to import skill";
-    } finally {
-      importLoading = false;
-    }
-  }
+		// Set pending content - $effect will initialize editor and set content
+		pendingEditorContent = body;
+	} catch (err) {
+		importError = err instanceof Error ? err.message : "Failed to import skill";
+	} finally {
+		importLoading = false;
+	}
+}
 
-  function openSkillsMarketplace() {
-    window.open("https://skillsmp.com/", "_blank");
-  }
+function openSkillsMarketplace() {
+	window.open("https://skillsmp.com/", "_blank");
+}
 
-  async function handleSave() {
-    if (!isValid) {
-      validationError = validation().error;
-      return;
-    }
+async function handleSave() {
+	if (!isValid) {
+		validationError = validation().error;
+		return;
+	}
 
-    // Save skill using SkillsService (file-based)
-    const skillsService = plugin.skillsService;
-    const result = await skillsService.saveSkill({
-      frontmatter: {
-        name: skillSlug,
-        description: skillDescription.trim(),
-        metadata: {
-          displayName: skillName.trim(),
-        },
-      },
-      content: promptValue,
-    });
+	// Save skill using SkillsService (file-based)
+	const skillsService = plugin.skillsService;
+	const result = await skillsService.saveSkill({
+		frontmatter: {
+			name: skillSlug,
+			description: skillDescription.trim(),
+			metadata: {
+				displayName: skillName.trim(),
+			},
+		},
+		content: promptValue,
+	});
 
-    if (!result.valid) {
-      validationError = result.errors[0]?.message || "Failed to save skill";
-      return;
-    }
+	if (!result.valid) {
+		validationError = result.errors[0]?.message || "Failed to save skill";
+		return;
+	}
 
-    // Re-discover skills to update cache
-    await skillsService.discoverSkills();
+	// Re-discover skills to update cache
+	await skillsService.discoverSkills();
 
-    // Call onSave and wait for it to complete (agent reinitialization)
-    await onSave(skillSlug);
-    modal.close();
-  }
+	// Call onSave and wait for it to complete (agent reinitialization)
+	await onSave(skillSlug);
+	modal.close();
+}
 </script>
 
 <div class="add-skill-modal-content">

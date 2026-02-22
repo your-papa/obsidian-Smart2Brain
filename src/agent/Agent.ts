@@ -19,7 +19,7 @@ import type { ChatModelConfig } from "../providers/index";
 import type { ProviderRegistry } from "../providers/registry";
 import { getData } from "../stores/dataStore.svelte";
 import type { ThreadError } from "../types/shared";
-import Logger from "../utils/logging";
+import { Logger } from "../utils/logging";
 import { type ThreadSnapshot, type ThreadStore, createSnapshot } from "./memory/ThreadStore";
 import type { Telemetry } from "./telemetry/Telemetry";
 
