@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Hide scrollbar utility */
+.scrollbar-hide {
+	scrollbar-width: none; /* Firefox */
+	-ms-overflow-style: none; /* IE/Edge */
+}
+.scrollbar-hide::-webkit-scrollbar {
+	display: none; /* Chrome/Safari/Opera */
+}
+
 :root {
 	--icon-xs: 0.75rem;
 	--icon-sm: 1rem;

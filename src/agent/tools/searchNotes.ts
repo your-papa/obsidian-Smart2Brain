@@ -234,9 +234,9 @@ export function createSearchNotesTool(app: App) {
 		const filter: SearchFilter | undefined =
 			pathPrefix || tags?.length
 				? {
-					pathPrefixes: pathPrefix ? [pathPrefix] : undefined,
-					tags: tags,
-				}
+						pathPrefixes: pathPrefix ? [pathPrefix] : undefined,
+						tags: tags,
+					}
 				: undefined;
 
 		Logger.debug("[search_notes] Configured settings:", {

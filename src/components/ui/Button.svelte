@@ -1,4 +1,5 @@
 <script lang="ts">
+import type { Snippet } from "svelte";
 import { icon } from "../../utils/utils";
 interface Props {
 	onClick?: (event: MouseEvent) => void;
@@ -10,6 +11,7 @@ interface Props {
 	cta?: boolean;
 	style?: string;
 	stopPropagation?: boolean;
+	children?: Snippet;
 }
 
 let {
@@ -22,6 +24,7 @@ let {
 	tooltip = undefined,
 	style = undefined,
 	stopPropagation = false,
+	children,
 }: Props = $props();
 
 function handleClick(event: MouseEvent) {
@@ -45,6 +48,6 @@ function handleClick(event: MouseEvent) {
         class:mod-cta={cta}
         class={styles}
         onclick={handleClick}
-        aria-label={tooltip}>{buttonText}</button
+        aria-label={tooltip}>{#if children}{@render children()}{:else}{buttonText}{/if}</button
     >
 {/if}

@@ -1,7 +1,7 @@
 import { createQuery } from "@tanstack/svelte-query";
 import { QueryClient } from "@tanstack/svelte-query";
 import type { AuthValidationResult } from "../agent/AgentManager";
-import { getProviderDefinition } from "../providers";
+import { getProviderDefinition, isEmbeddingProvider } from "../providers";
 import { getData } from "../stores/dataStore.svelte";
 import { getPlugin } from "../stores/state.svelte";
 import { Logger } from "../utils/logging";
@@ -32,6 +32,7 @@ export function getQueryClient() {
 export interface ProviderState {
 	auth: AuthValidationResult;
 	models: string[];
+	embeddingModels?: string[];
 }
 
 /**
@@ -78,7 +79,19 @@ export function createProviderStateQuery(provider: () => string) {
 			// Discover models from the provider's API
 			try {
 				const models = await providerDef.discoverModels(resolvedAuth);
-				return { auth, models };
+
+				// If provider supports embedding model discovery, fetch those separately
+				let embeddingModels: string[] | undefined;
+				if (isEmbeddingProvider(providerDef) && providerDef.discoverEmbeddingModels) {
+					try {
+						embeddingModels = await providerDef.discoverEmbeddingModels(resolvedAuth);
+					} catch (error) {
+						Logger.warn(`Embedding model discovery failed for ${providerId}:`, error);
+						// Fall back to undefined - will use heuristic filtering
+					}
+				}
+
+				return { auth, models, embeddingModels };
 			} catch (error) {
 				// Model discovery failed - return error and empty models
 				const errorMessage = error instanceof Error ? error.message : String(error);

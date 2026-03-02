@@ -13,21 +13,21 @@ export type { DefaultEmbedModel } from "../types/plugin";
  * Uses Float32Array for memory efficiency during runtime.
  */
 export interface DocumentVector {
-    /** Unique identifier - uses file path as ID */
-    id: string;
-    /** Path to the markdown file in the vault */
-    path: string;
-    /** File modification time (Unix timestamp ms) for change detection */
-    mtime: number;
-    /** MD5 hash of content for change detection */
-    checksum: string;
-    /** Embedding vector as Float32Array for efficient computation */
-    vector: Float32Array;
-    /**
-     * Chunk index within the document (for future chunking support).
-     * If undefined, the document is embedded as a single chunk.
-     */
-    chunkIndex?: number;
+	/** Unique identifier - uses file path as ID */
+	id: string;
+	/** Path to the markdown file in the vault */
+	path: string;
+	/** File modification time (Unix timestamp ms) for change detection */
+	mtime: number;
+	/** MD5 hash of content for change detection */
+	checksum: string;
+	/** Embedding vector as Float32Array for efficient computation */
+	vector: Float32Array;
+	/**
+	 * Chunk index within the document (for future chunking support).
+	 * If undefined, the document is embedded as a single chunk.
+	 */
+	chunkIndex?: number;
 }
 
 /**
@@ -35,13 +35,13 @@ export interface DocumentVector {
  * Uses number[] instead of Float32Array for JSON/MessagePack compatibility.
  */
 export interface SerializedDocument {
-    id: string;
-    path: string;
-    mtime: number;
-    checksum: string;
-    /** Vector as number array for serialization */
-    vector: number[];
-    chunkIndex?: number;
+	id: string;
+	path: string;
+	mtime: number;
+	checksum: string;
+	/** Vector as number array for serialization */
+	vector: number[];
+	chunkIndex?: number;
 }
 
 /**
@@ -49,16 +49,16 @@ export interface SerializedDocument {
  * Written to disk as MessagePack binary.
  */
 export interface SerializedIndex {
-    /** Schema version for migration support */
-    version: number;
-    /** Provider ID that generated these embeddings */
-    providerId: string;
-    /** Model ID that generated these embeddings */
-    modelId: string;
-    /** All indexed documents with their vectors */
-    documents: SerializedDocument[];
-    /** Last time the index was updated (Unix timestamp ms) */
-    lastUpdated: number;
+	/** Schema version for migration support */
+	version: number;
+	/** Provider ID that generated these embeddings */
+	providerId: string;
+	/** Model ID that generated these embeddings */
+	modelId: string;
+	/** All indexed documents with their vectors */
+	documents: SerializedDocument[];
+	/** Last time the index was updated (Unix timestamp ms) */
+	lastUpdated: number;
 }
 
 /**
@@ -66,11 +66,11 @@ export interface SerializedIndex {
  * Used for quick checks without loading all vectors.
  */
 export interface IndexMetadata {
-    version: number;
-    providerId: string;
-    modelId: string;
-    documentCount: number;
-    lastUpdated: number;
+	version: number;
+	providerId: string;
+	modelId: string;
+	documentCount: number;
+	lastUpdated: number;
 }
 
 /**
@@ -78,13 +78,13 @@ export interface IndexMetadata {
  * Compatible with the existing SearchResult interface in searchNotes.ts.
  */
 export interface VectorSearchResult {
-    path: string;
-    name: string;
-    frontmatter?: Record<string, unknown>;
-    /** Tags from the document (frontmatter + inline) */
-    tags?: string[];
-    /** Cosine similarity score (0-1, higher is more similar) */
-    score: number;
+	path: string;
+	name: string;
+	frontmatter?: Record<string, unknown>;
+	/** Tags from the document (frontmatter + inline) */
+	tags?: string[];
+	/** Cosine similarity score (0-1, higher is more similar) */
+	score: number;
 }
 
 /**
@@ -92,26 +92,26 @@ export interface VectorSearchResult {
  * All filters are optional and combined with AND logic.
  */
 export interface SearchFilter {
-    /**
-     * Filter by path prefix(es).
-     * Documents must match at least one of the provided path prefixes.
-     * Example: ["folder/subfolder", "another/path"] matches docs in either location.
-     */
-    pathPrefixes?: string[];
+	/**
+	 * Filter by path prefix(es).
+	 * Documents must match at least one of the provided path prefixes.
+	 * Example: ["folder/subfolder", "another/path"] matches docs in either location.
+	 */
+	pathPrefixes?: string[];
 
-    /**
-     * Filter by tag(s).
-     * Documents must have at least one of the provided tags.
-     * Tags should include the # prefix (e.g., "#project", "#todo").
-     */
-    tags?: string[];
+	/**
+	 * Filter by tag(s).
+	 * Documents must have at least one of the provided tags.
+	 * Tags should include the # prefix (e.g., "#project", "#todo").
+	 */
+	tags?: string[];
 
-    /**
-     * Require ALL tags instead of ANY tag.
-     * When true, documents must have all specified tags.
-     * Default: false (match any tag).
-     */
-    requireAllTags?: boolean;
+	/**
+	 * Require ALL tags instead of ANY tag.
+	 * When true, documents must have all specified tags.
+	 * Default: false (match any tag).
+	 */
+	requireAllTags?: boolean;
 }
 
 /**
@@ -119,18 +119,18 @@ export interface SearchFilter {
  * Used for UI feedback.
  */
 export interface IndexingProgress {
-    /** Whether indexing is currently in progress */
-    isIndexing: boolean;
-    /** Total number of files to index */
-    total: number;
-    /** Number of files indexed so far */
-    indexed: number;
-    /** Number of files skipped (too large, errors) */
-    skipped: number;
-    /** Current file being indexed (for display) */
-    currentFile: string | null;
-    /** Progress percentage (0-100) */
-    percentage: number;
+	/** Whether indexing is currently in progress */
+	isIndexing: boolean;
+	/** Total number of files to index */
+	total: number;
+	/** Number of files indexed so far */
+	indexed: number;
+	/** Number of files skipped (too large, errors) */
+	skipped: number;
+	/** Current file being indexed (for display) */
+	currentFile: string | null;
+	/** Progress percentage (0-100) */
+	percentage: number;
 }
 
 /** Current schema version for the serialized index */
@@ -150,8 +150,8 @@ export const SYNC_DEBOUNCE_MS = 5 * 60 * 1000;
  * Contains the document and its similarity score.
  */
 export interface ScoredDocument {
-    doc: DocumentVector;
-    score: number;
+	doc: DocumentVector;
+	score: number;
 }
 
 /**
@@ -164,87 +164,87 @@ export type VectorStoreBackend = "indexeddb" | "hnsw";
  * Both IndexedDB (brute-force) and HNSW implementations conform to this interface.
  */
 export interface VectorStore {
-    /**
-     * Open the database connection.
-     */
-    open(): Promise<void>;
+	/**
+	 * Open the database connection.
+	 */
+	open(): Promise<void>;
 
-    /**
-     * Close the database connection.
-     */
-    close(): Promise<void>;
+	/**
+	 * Close the database connection.
+	 */
+	close(): Promise<void>;
 
-    /**
-     * Get the current provider ID.
-     */
-    readonly providerId: string | null;
+	/**
+	 * Get the current provider ID.
+	 */
+	readonly providerId: string | null;
 
-    /**
-     * Get the current model ID.
-     */
-    readonly modelId: string | null;
+	/**
+	 * Get the current model ID.
+	 */
+	readonly modelId: string | null;
 
-    /**
-     * Set the metadata for this index.
-     */
-    setMetadata(providerId: string, modelId: string, version: number): Promise<void>;
+	/**
+	 * Set the metadata for this index.
+	 */
+	setMetadata(providerId: string, modelId: string, version: number): Promise<void>;
 
-    /**
-     * Get the current index metadata.
-     */
-    getMetadata(): Promise<IndexMetadata | null>;
+	/**
+	 * Get the current index metadata.
+	 */
+	getMetadata(): Promise<IndexMetadata | null>;
 
-    /**
-     * Add or update a document in the store.
-     */
-    upsert(doc: DocumentVector): Promise<void>;
+	/**
+	 * Add or update a document in the store.
+	 */
+	upsert(doc: DocumentVector): Promise<void>;
 
-    /**
-     * Remove a document by path.
-     */
-    remove(path: string): Promise<void>;
+	/**
+	 * Remove a document by path.
+	 */
+	remove(path: string): Promise<void>;
 
-    /**
-     * Get a document by path.
-     */
-    getByPath(path: string): Promise<DocumentVector | undefined>;
+	/**
+	 * Get a document by path.
+	 */
+	getByPath(path: string): Promise<DocumentVector | undefined>;
 
-    /**
-     * Check if a document exists and get its mtime.
-     */
-    getDocumentMtime(path: string): Promise<number | undefined>;
+	/**
+	 * Check if a document exists and get its mtime.
+	 */
+	getDocumentMtime(path: string): Promise<number | undefined>;
 
-    /**
-     * Get all documents.
-     */
-    getAll(): Promise<DocumentVector[]>;
+	/**
+	 * Get all documents.
+	 */
+	getAll(): Promise<DocumentVector[]>;
 
-    /**
-     * Get all documents as serialized format (for MessagePack).
-     */
-    getAllSerialized(): Promise<SerializedDocument[]>;
+	/**
+	 * Get all documents as serialized format (for MessagePack).
+	 */
+	getAllSerialized(): Promise<SerializedDocument[]>;
 
-    /**
-     * Bulk insert documents (for loading from file).
-     */
-    bulkPut(docs: DocumentVector[]): Promise<void>;
+	/**
+	 * Bulk insert documents (for loading from file).
+	 */
+	bulkPut(docs: DocumentVector[]): Promise<void>;
 
-    /**
-     * Clear all documents from the store.
-     */
-    clear(): Promise<void>;
+	/**
+	 * Clear all documents from the store.
+	 */
+	clear(): Promise<void>;
 
-    /**
-     * Get the number of documents in the store.
-     */
-    count(): Promise<number>;
+	/**
+	 * Get the number of documents in the store.
+	 */
+	count(): Promise<number>;
 
-    /**
-     * Search for similar vectors.
-     * @param queryVector The query vector to search for
-     * @param topK Maximum number of results to return
-     * @param threshold Minimum similarity score (0-1)
-     * @returns Array of documents with their similarity scores
-     */
-    search(queryVector: Float32Array, topK: number, threshold?: number): Promise<ScoredDocument[]>;
+	/**
+	 * Search for similar vectors.
+	 * @param queryVector The query vector to search for
+	 * @param topK Maximum number of results to return
+	 * @param threshold Minimum similarity score (0-1)
+	 * @returns Array of documents with their similarity scores
+	 */
+	search(queryVector: Float32Array, topK: number, threshold?: number): Promise<ScoredDocument[]>;
 }
