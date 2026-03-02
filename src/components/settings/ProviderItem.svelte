@@ -1,5 +1,6 @@
 <script lang="ts">
 import { Accordion } from "bits-ui";
+import { Notice } from "obsidian";
 import type { Component } from "svelte";
 import { createProviderStateQuery, invalidateProviderState } from "../../lib/query";
 import { type LogoProps, getProviderDefinition } from "../../providers/index";
@@ -23,6 +24,7 @@ let providerDefinition = $derived(getProviderDefinition(provider, data.getAllCus
 
 // Check if provider is configured using new system
 let isConfigured = $derived(data.isProviderConfigured(provider));
+let isCustomProvider = $derived(data.isCustomProvider(provider));
 
 // Query for provider state (auth + models)
 const query = createProviderStateQuery(() => provider);
@@ -31,10 +33,22 @@ function refetch() {
 	invalidateProviderState(provider);
 }
 
-function handleToggleProvider() {
-	const newConfiguredState = !isConfigured;
-	data.setProviderConfigured(provider, newConfiguredState);
+function handleAddProvider() {
+	data.setProviderConfigured(provider, true);
 	invalidateProviderState(provider);
+}
+
+async function handleRemoveProvider() {
+	try {
+		if (isCustomProvider) {
+			await data.deleteCustomProvider(provider);
+		} else {
+			data.setProviderConfigured(provider, false);
+		}
+		invalidateProviderState(provider);
+	} catch (error) {
+		new Notice(error instanceof Error ? error.message : "Failed to remove provider");
+	}
 }
 
 // Get setup instructions from provider definition
@@ -88,13 +102,13 @@ let Logo: Component<LogoProps> = $derived.by(() => {
 				</span>
 			{/if}
 		</div>
-		{#if isConfigured}
+		{#if isConfigured || isCustomProvider}
 			<Button
 				iconId="trash"
 				styles="hover:text-[--text-error]"
 				stopPropagation={true}
 				tooltip="Remove provider"
-				onClick={handleToggleProvider}
+				onClick={() => void handleRemoveProvider()}
 			/>
 		{/if}
 		<Button
@@ -147,14 +161,14 @@ let Logo: Component<LogoProps> = $derived.by(() => {
 							{/if}
 						</div>
 					{/if}
-					<Button
-						buttonText="Add Provider"
-						cta={true}
-						disabled={!query.data?.auth.success}
-						onClick={handleToggleProvider}
-					/>
-				</div>
-			</SettingItem>
+						<Button
+							buttonText="Add Provider"
+							cta={true}
+							disabled={!query.data?.auth.success}
+							onClick={handleAddProvider}
+						/>
+					</div>
+				</SettingItem>
 		{/if}
 	</Accordion.Content>
 </Accordion.Item>
