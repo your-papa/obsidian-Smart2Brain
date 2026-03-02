@@ -159,7 +159,7 @@ export async function fetchOllamaModelsInfo(
 	// Check if cache is still valid for this base URL
 	if (cachedResponse && cachedResponse.baseUrl === baseUrl && Date.now() - cachedResponse.timestamp < CACHE_TTL_MS) {
 		// Return cached models, but fetch any missing ones
-		const missing = modelNames.filter((name) => !cachedResponse!.models.has(name));
+		const missing = modelNames.filter((name) => !cachedResponse?.models.has(name));
 		if (missing.length === 0) {
 			return cachedResponse.models;
 		}
