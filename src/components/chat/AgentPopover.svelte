@@ -1,45 +1,45 @@
 <script lang="ts">
-import { Popover, Separator } from "bits-ui";
-import type { AgentConfig } from "../../main";
-import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
-import { getPlugin, requestSettingsTab } from "../../stores/state.svelte";
-import { Logger } from "../../utils/logging";
-import Icon from "../ui/Icon.svelte";
+  import { Popover, Separator } from "bits-ui";
+  import type { AgentConfig } from "../../main";
+  import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
+  import { getPlugin, requestSettingsTab } from "../../stores/state.svelte";
+  import { Logger } from "../../utils/logging";
+  import Icon from "../ui/Icon.svelte";
 
-const data = getData();
-const plugin = getPlugin();
+  const data = getData();
+  const plugin = getPlugin();
 
-// Get all agents reactively
-const agents = $derived(Object.values(data.agents));
+  // Get all agents reactively
+  const agents = $derived(Object.values(data.agents));
 
-// Get currently selected agent
-const selectedAgent = $derived(data.getSelectedAgent());
+  // Get currently selected agent
+  const selectedAgent = $derived(data.getSelectedAgent());
 
-// Check if agent selection actually makes a difference (more than one agent)
-const hasMultipleAgents = $derived(agents.length > 1);
+  // Check if agent selection actually makes a difference (more than one agent)
+  const hasMultipleAgents = $derived(agents.length > 1);
 
-let isOpen = $state(false);
-let customAnchor: HTMLElement | undefined = $state();
+  let isOpen = $state(false);
+  let customAnchor: HTMLElement | undefined = $state();
 
-function selectAgent(agent: AgentConfig) {
-	data.selectedAgentId = agent.id;
-	isOpen = false;
-	// Reinitialize the agent with the new config
-	plugin.agentManager?.reinitialize().catch((error) => {
-		Logger.error("Failed to switch agent:", error);
-	});
-}
+  function selectAgent(agent: AgentConfig) {
+    data.selectedAgentId = agent.id;
+    isOpen = false;
+    // Reinitialize the agent with the new config
+    plugin.agentManager?.reinitialize().catch((error) => {
+      Logger.error("Failed to switch agent:", error);
+    });
+  }
 
-function openAgentSettings() {
-	// Request the Agents tab before opening settings
-	requestSettingsTab("agents");
-	const app = plugin.app as unknown as {
-		setting?: { open: () => void; openTabById: (id: string) => void };
-	};
-	app.setting?.open();
-	app.setting?.openTabById("smart-second-brain");
-	isOpen = false;
-}
+  function openAgentSettings() {
+    // Request the Agents tab before opening settings
+    requestSettingsTab("agents");
+    const app = plugin.app as unknown as {
+      setting?: { open: () => void; openTabById: (id: string) => void };
+    };
+    app.setting?.open();
+    app.setting?.openTabById("smart-second-brain");
+    isOpen = false;
+  }
 </script>
 
 {#if agents.length === 0}
@@ -76,7 +76,7 @@ function openAgentSettings() {
     <Popover.Root bind:open={isOpen}>
       <Popover.Portal>
         <Popover.Content
-          class="bg-[--background-primary] rounded-md border-[--background-modifier-border] border-solid shadow-md min-w-[180px] max-w-[280px]"
+          class="bg-[--background-primary] rounded-md border-[--background-modifier-border] border-solid shadow-md min-w-[180px] max-w-[280px] z-[var(--layer-popover)]"
           {customAnchor}
           sideOffset={8}
           side="top"

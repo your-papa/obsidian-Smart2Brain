@@ -386,6 +386,12 @@ export interface PluginData {
 	 * - "hnsw": Approximate nearest neighbor (O(log n), faster for large vaults)
 	 */
 	vectorStoreBackend: VectorStoreBackend;
+
+	/**
+	 * User's favorite models for quick access.
+	 * Each entry is a {provider, model} pair.
+	 */
+	favoriteModels: Array<{ provider: string; model: string }>;
 }
 
 export type PluginDataKey = keyof PluginData;

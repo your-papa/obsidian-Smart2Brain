@@ -77,6 +77,9 @@ export interface BaseProviderDefinition {
 export interface EmbeddingProviderDefinition extends BaseProviderDefinition {
 	/** Creates a LangChain embedding instance. */
 	createEmbeddingInstance: (auth: AuthObject, modelId: string) => EmbeddingsInterface;
+
+	/** Discovers available embedding models (optional - falls back to heuristic filtering if not provided). */
+	discoverEmbeddingModels?: (auth: AuthObject) => Promise<string[]>;
 }
 
 /**

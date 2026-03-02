@@ -144,7 +144,7 @@ export class HNSWVectorStore implements VectorStore {
 		if (!this.db) return;
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(ID_MAPPING_STORE, "readonly");
+			const tx = this.db?.transaction(ID_MAPPING_STORE, "readonly");
 			const store = tx.objectStore(ID_MAPPING_STORE);
 			const request = store.getAll();
 
@@ -178,7 +178,7 @@ export class HNSWVectorStore implements VectorStore {
 		if (numericId === undefined) return;
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(ID_MAPPING_STORE, "readwrite");
+			const tx = this.db?.transaction(ID_MAPPING_STORE, "readwrite");
 			const store = tx.objectStore(ID_MAPPING_STORE);
 			const request = store.delete(numericId);
 
@@ -335,7 +335,7 @@ export class HNSWVectorStore implements VectorStore {
 		}
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(DOCUMENTS_STORE, "readwrite");
+			const tx = this.db?.transaction(DOCUMENTS_STORE, "readwrite");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const index = store.index("path");
 			const request = index.openCursor(IDBKeyRange.only(path));
@@ -363,7 +363,7 @@ export class HNSWVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(DOCUMENTS_STORE, "readonly");
+			const tx = this.db?.transaction(DOCUMENTS_STORE, "readonly");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const index = store.index("path");
 			const request = index.get(path);
@@ -435,7 +435,7 @@ export class HNSWVectorStore implements VectorStore {
 
 		// Store all documents in IndexedDB with numeric IDs
 		await new Promise<void>((resolve, reject) => {
-			const tx = this.db!.transaction([DOCUMENTS_STORE, ID_MAPPING_STORE], "readwrite");
+			const tx = this.db?.transaction([DOCUMENTS_STORE, ID_MAPPING_STORE], "readwrite");
 			const docStore = tx.objectStore(DOCUMENTS_STORE);
 			const mappingStore = tx.objectStore(ID_MAPPING_STORE);
 
@@ -511,7 +511,7 @@ export class HNSWVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(DOCUMENTS_STORE, "readonly");
+			const tx = this.db?.transaction(DOCUMENTS_STORE, "readonly");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const request = store.count();
 
@@ -588,7 +588,7 @@ export class HNSWVectorStore implements VectorStore {
 		if (!this.db) return null;
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(DOCUMENTS_STORE, "readonly");
+			const tx = this.db?.transaction(DOCUMENTS_STORE, "readonly");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const request = store.get(id);
 
@@ -601,7 +601,7 @@ export class HNSWVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(METADATA_STORE, "readonly");
+			const tx = this.db?.transaction(METADATA_STORE, "readonly");
 			const store = tx.objectStore(METADATA_STORE);
 			const request = store.get("metadata");
 
@@ -614,7 +614,7 @@ export class HNSWVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(storeName, "readwrite");
+			const tx = this.db?.transaction(storeName, "readwrite");
 			const store = tx.objectStore(storeName);
 			const request = store.put(value);
 
@@ -628,7 +628,7 @@ export class HNSWVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(DOCUMENTS_STORE, "readonly");
+			const tx = this.db?.transaction(DOCUMENTS_STORE, "readonly");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const request = store.getAll();
 
@@ -641,7 +641,7 @@ export class HNSWVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(storeName, "readwrite");
+			const tx = this.db?.transaction(storeName, "readwrite");
 			const store = tx.objectStore(storeName);
 			const request = store.clear();
 

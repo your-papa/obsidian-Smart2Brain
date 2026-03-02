@@ -304,6 +304,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	searchAlgorithm: "lexical",
 	defaultEmbedModel: null,
 	vectorStoreBackend: "hnsw",
+	favoriteModels: [],
 };
 
 export class PluginDataStore {
@@ -487,7 +488,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch (_) {
 			// ignore
@@ -1040,6 +1041,29 @@ export class PluginDataStore {
 	}
 	set vectorStoreBackend(val: VectorStoreBackend) {
 		this.#data.vectorStoreBackend = val;
+		this.saveSettings();
+	}
+
+	// --- Favorite Models ---
+
+	get favoriteModels(): Array<{ provider: string; model: string }> {
+		return this.#data.favoriteModels ?? [];
+	}
+
+	isFavoriteModel(provider: string, model: string): boolean {
+		return this.#data.favoriteModels?.some((f) => f.provider === provider && f.model === model) ?? false;
+	}
+
+	toggleFavoriteModel(provider: string, model: string): void {
+		if (!this.#data.favoriteModels) {
+			this.#data.favoriteModels = [];
+		}
+		const idx = this.#data.favoriteModels.findIndex((f) => f.provider === provider && f.model === model);
+		if (idx >= 0) {
+			this.#data.favoriteModels.splice(idx, 1);
+		} else {
+			this.#data.favoriteModels.push({ provider, model });
+		}
 		this.saveSettings();
 	}
 

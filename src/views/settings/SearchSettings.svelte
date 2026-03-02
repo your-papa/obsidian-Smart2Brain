@@ -1,198 +1,146 @@
 <script lang="ts">
-import { onMount, onDestroy } from "svelte";
-import type { TFolder } from "obsidian";
-import { t } from "svelte-i18n";
-import type { Component } from "svelte";
-import { ExcludeFoldersModal } from "../../components/modal/ExcludeFoldersModal";
-import SettingGroup from "../../components/settings/SettingGroup.svelte";
-import SettingItem from "../../components/settings/SettingItem.svelte";
-import Button from "../../components/ui/Button.svelte";
-import Dropdown from "../../components/ui/Dropdown.svelte";
-import ProgressBar from "../../components/ui/ProgressBar.svelte";
-import Text from "../../components/ui/Text.svelte";
-import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
-import type { SearchAlgorithm } from "../../main";
-import { getProviderDefinition, isEmbeddingProvider } from "../../providers/index";
-import type { EmbedModelConfig, LogoProps } from "../../providers/index";
-import { getData } from "../../stores/dataStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import { isVectorStoreInitialized, getVectorStoreService, type IndexingProgress } from "../../vectorstore";
+  import { Notice } from "obsidian";
+  import { onMount, onDestroy } from "svelte";
+  import { t } from "svelte-i18n";
+  import { ExcludeFoldersModal } from "../../components/modal/ExcludeFoldersModal";
+  import { ModelSelectionModal } from "../../components/modal/ModelSelectionModal";
+  import SettingGroup from "../../components/settings/SettingGroup.svelte";
+  import SettingItem from "../../components/settings/SettingItem.svelte";
+  import Button from "../../components/ui/Button.svelte";
+  import Dropdown from "../../components/ui/Dropdown.svelte";
+  import ProgressBar from "../../components/ui/ProgressBar.svelte";
+  import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
+  import type { SearchAlgorithm } from "../../main";
+  import { getProviderDefinition } from "../../providers/index";
+  import { getData } from "../../stores/dataStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
+  import {
+    isVectorStoreInitialized,
+    getVectorStoreService,
+    type IndexingProgress,
+  } from "../../vectorstore";
 
-const pluginData = getData();
-const plugin = getPlugin();
+  const pluginData = getData();
+  const plugin = getPlugin();
 
-const fuzzySuggestModel = new ExcludeFoldersModal(plugin.app);
+  const fuzzySuggestModel = new ExcludeFoldersModal(plugin.app);
 
-// Index status state
-let indexStats = $state<{
-	documentCount: number;
-	lexicalDocumentCount: number;
-	providerId: string | null;
-	modelId: string | null;
-	isReady: boolean;
-} | null>(null);
+  // Index status state
+  let indexStats = $state<{
+    documentCount: number;
+    lexicalDocumentCount: number;
+    providerId: string | null;
+    modelId: string | null;
+    isReady: boolean;
+  } | null>(null);
 
-let indexProgress = $state<IndexingProgress>({
-	isIndexing: false,
-	total: 0,
-	indexed: 0,
-	skipped: 0,
-	currentFile: null,
-	percentage: 0,
-});
+  let indexProgress = $state<IndexingProgress>({
+    isIndexing: false,
+    total: 0,
+    indexed: 0,
+    skipped: 0,
+    currentFile: null,
+    percentage: 0,
+  });
 
-let unsubscribeProgress: (() => void) | null = null;
+  let unsubscribeProgress: (() => void) | null = null;
 
-// Load index stats and subscribe to progress updates
-onMount(async () => {
-	if (isVectorStoreInitialized()) {
-		const service = getVectorStoreService();
-		indexStats = await service.getStats();
-		indexProgress = service.getProgress();
-		unsubscribeProgress = service.onProgress((progress) => {
-			const wasIndexing = indexProgress.isIndexing;
-			indexProgress = progress;
-			// Refresh stats when indexing completes
-			if (!progress.isIndexing && wasIndexing) {
-				service.getStats().then((stats) => {
-					indexStats = stats;
-				});
-			}
-		});
-	}
-});
+  // Load index stats and subscribe to progress updates
+  onMount(async () => {
+    if (isVectorStoreInitialized()) {
+      const service = getVectorStoreService();
+      indexStats = await service.getStats();
+      indexProgress = service.getProgress();
+      unsubscribeProgress = service.onProgress((progress) => {
+        const wasIndexing = indexProgress.isIndexing;
+        indexProgress = progress;
+        // Refresh stats when indexing completes
+        if (!progress.isIndexing && wasIndexing) {
+          service.getStats().then((stats) => {
+            indexStats = stats;
+          });
+        }
+      });
+    }
+  });
 
-onDestroy(() => {
-	unsubscribeProgress?.();
-});
+  onDestroy(() => {
+    unsubscribeProgress?.();
+  });
 
-// Rebuild the index
-async function rebuildIndex() {
-	if (!isVectorStoreInitialized()) return;
-	const service = getVectorStoreService();
-	await service.rebuildIndex();
-	indexStats = await service.getStats();
-}
+  // Rebuild the index
+  async function rebuildIndex() {
+    if (!isVectorStoreInitialized()) return;
+    const service = getVectorStoreService();
+    await service.rebuildIndex();
+    indexStats = await service.getStats();
+  }
 
-// Helper to get logo for a provider
-function getProviderLogo(providerId: string): Component<LogoProps> {
-	const provider = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
-	if (provider && "logo" in provider && provider.logo) {
-		return provider.logo;
-	}
-	return GenericAIIcon;
-}
+  // Get display info for current embedding model
+  const currentEmbedModelDisplay = $derived.by(() => {
+    if (!pluginData.defaultEmbedModel) return null;
+    const provider = pluginData.defaultEmbedModel.provider;
+    const model = pluginData.defaultEmbedModel.model;
+    const providerDef = getProviderDefinition(provider, pluginData.getAllCustomProviderMeta());
+    return {
+      model,
+      providerName: providerDef?.displayName ?? provider,
+      logo:
+        providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon,
+    };
+  });
 
-// Helper to get display name for a provider
-function getProviderDisplayName(providerId: string): string {
-	const provider = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
-	return provider?.displayName ?? providerId;
-}
+  function openEmbedModelSelectionModal() {
+    const currentSelection = pluginData.defaultEmbedModel
+      ? {
+          provider: pluginData.defaultEmbedModel.provider,
+          model: pluginData.defaultEmbedModel.model,
+        }
+      : null;
 
-const configuredProviders = $derived(pluginData.getConfiguredProviders());
+    const modal = new ModelSelectionModal(plugin, "embedding", currentSelection, (selected) => {
+      if (selected) {
+        const isNewModel =
+          !currentSelection ||
+          currentSelection.provider !== selected.provider ||
+          currentSelection.model !== selected.model;
 
-// Helper to check if provider supports embedding
-function isEmbedProvider(providerId: string): boolean {
-	const provider = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
-	if (!provider) return false;
-	return isEmbeddingProvider(provider);
-}
+        pluginData.defaultEmbedModel = { provider: selected.provider, model: selected.model };
 
-// Get all embed models grouped by provider
-const embedModelsByProvider = $derived.by(() => {
-	const result: { provider: string; models: Record<string, EmbedModelConfig> }[] = [];
-	for (const provider of configuredProviders) {
-		if (isEmbedProvider(provider)) {
-			const models = pluginData.getEmbedModels(provider);
-			if (Object.keys(models).length > 0) {
-				result.push({ provider, models });
-			}
-		}
-	}
-	return result;
-});
+        if (isNewModel) {
+          new Notice(
+            "Embedding model changed. Rebuild the index for the new model to take effect.",
+            8000,
+          );
+        }
+      }
+    });
+    modal.open();
+  }
 
-// Build dropdown options for default embed model selection (grouped by provider)
-const embedModelDropdownGroups = $derived.by(() => {
-	const groups: { label: string; options: { display: string; value: string }[] }[] = [];
+  // Search algorithm options
+  const searchAlgorithmOptions: {
+    display: string;
+    value: SearchAlgorithm;
+  }[] = $derived([
+    { display: $t("settings.search_algorithm.lexical"), value: "lexical" },
+    { display: $t("settings.search_algorithm.embeddings"), value: "embeddings" },
+    { display: $t("settings.search_algorithm.hybrid"), value: "hybrid" },
+  ]);
 
-	// Add "None" option as first group
-	groups.push({
-		label: "Default",
-		options: [{ display: "None (disable semantic search)", value: "" }],
-	});
-
-	for (const { provider, models } of embedModelsByProvider) {
-		const displayName = getProviderDisplayName(provider);
-		const options = Object.keys(models).map((modelId) => ({
-			display: modelId,
-			value: `${provider}::${modelId}`,
-		}));
-		if (options.length > 0) {
-			groups.push({ label: displayName, options });
-		}
-	}
-
-	return groups;
-});
-
-// Current default embed model as a serialized string "provider::model" or ""
-const defaultEmbedModelValue = $derived(
-	pluginData.defaultEmbedModel
-		? `${pluginData.defaultEmbedModel.provider}::${pluginData.defaultEmbedModel.model}`
-		: "",
-);
-
-function handleDefaultEmbedModelChange(value: string) {
-	if (!value) {
-		pluginData.defaultEmbedModel = null;
-	} else {
-		const [provider, model] = value.split("::");
-		if (provider && model) {
-			pluginData.defaultEmbedModel = { provider, model };
-		}
-	}
-}
-
-// Check if embeddings are configured
-const isEmbeddingsConfigured = $derived(pluginData.defaultEmbedModel !== null);
-
-// Search algorithm options
-const searchAlgorithmOptions: {
-	display: string;
-	value: SearchAlgorithm;
-	disabled?: boolean;
-}[] = $derived([
-	{ display: $t("settings.search_algorithm.lexical"), value: "lexical" },
-	{
-		display: isEmbeddingsConfigured
-			? $t("settings.search_algorithm.embeddings")
-			: $t("settings.search_algorithm.embeddings_not_configured"),
-		value: "embeddings",
-		disabled: !isEmbeddingsConfigured,
-	},
-	{
-		display: isEmbeddingsConfigured
-			? $t("settings.search_algorithm.hybrid")
-			: $t("settings.search_algorithm.hybrid_not_configured"),
-		value: "hybrid",
-		disabled: !isEmbeddingsConfigured,
-	},
-]);
-
-// Dynamic index heading based on selected algorithm
-const indexHeading = $derived.by(() => {
-	switch (pluginData.searchAlgorithm) {
-		case "lexical":
-			return "Lexical Index";
-		case "embeddings":
-			return "Semantic Index";
-		case "hybrid":
-			return "Search Index";
-		default:
-			return "Search Index";
-	}
-});
+  // Dynamic index heading based on selected algorithm
+  const indexHeading = $derived.by(() => {
+    switch (pluginData.searchAlgorithm) {
+      case "lexical":
+        return "Lexical Index";
+      case "embeddings":
+        return "Semantic Index";
+      case "hybrid":
+        return "Search Index";
+      default:
+        return "Search Index";
+    }
+  });
 </script>
 
 <!-- Search Algorithm -->
@@ -208,24 +156,27 @@ const indexHeading = $derived.by(() => {
       onSelect={(v) => (pluginData.searchAlgorithm = v)}
     />
   </SettingItem>
-</SettingGroup>
 
-<!-- Embedding Model (only shown when semantic search is needed) -->
-{#if pluginData.searchAlgorithm !== "lexical"}
-  <SettingGroup heading="Embedding Model">
+  <!-- Embedding Model (only shown when semantic search is needed) -->
+  {#if pluginData.searchAlgorithm !== "lexical"}
     <SettingItem
-      name="Default Embedding Model"
+      name="Embedding Model"
       desc="Select the model for semantic search. Required for Embeddings and Hybrid search algorithms."
     >
-      <Dropdown
-        type="groups"
-        dropdown={embedModelDropdownGroups}
-        selected={defaultEmbedModelValue}
-        onSelect={handleDefaultEmbedModelChange}
-      />
+      <Button onClick={openEmbedModelSelectionModal}>
+        {#if currentEmbedModelDisplay}
+          {@const Logo = currentEmbedModelDisplay.logo}
+          <div class="flex items-center gap-2">
+            <Logo width={14} height={14} />
+            <span>{currentEmbedModelDisplay.model}</span>
+          </div>
+        {:else}
+          <span class="text-[--text-muted]">Select embedding model</span>
+        {/if}
+      </Button>
     </SettingItem>
-  </SettingGroup>
-{/if}
+  {/if}
+</SettingGroup>
 
 <!-- Index Section -->
 <SettingGroup heading={indexHeading}>
@@ -286,7 +237,7 @@ const indexHeading = $derived.by(() => {
   {:else}
     <SettingItem
       name="Index Status"
-      desc="Configure a default embedding model to enable semantic search."
+      desc="Select an embedding model above to enable semantic search indexing."
     />
   {/if}
 

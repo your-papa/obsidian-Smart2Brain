@@ -1,9 +1,11 @@
 <script lang="ts">
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
-import { Notice } from "obsidian";
+import { Notice, type TFolder } from "obsidian";
 import { onMount } from "svelte";
 import { AddSkillModal } from "../../components/modal/AddSkillModal";
+import FolderSuggest from "../../components/modal/FolderSuggest.svelte";
 import { MCPServerModal } from "../../components/modal/MCPServerModal";
+import { ModelSelectionModal } from "../../components/modal/ModelSelectionModal";
 import { SkillModal } from "../../components/modal/SkillModal";
 import { SystemPromptModal } from "../../components/modal/SystemPromptModal";
 import { ToolConfigModal } from "../../components/modal/ToolConfigModal";
@@ -13,7 +15,6 @@ import Button from "../../components/ui/Button.svelte";
 import Dropdown from "../../components/ui/Dropdown.svelte";
 import Icon from "../../components/ui/Icon.svelte";
 import IconButton from "../../components/ui/IconButton.svelte";
-import SearchableDropdown from "../../components/ui/SearchableDropdown.svelte";
 import Text from "../../components/ui/Text.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
 import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
@@ -29,6 +30,11 @@ import { Logger } from "../../utils/logging";
 const pluginData = getData();
 const plugin = getPlugin();
 const models = useAvailableModels();
+
+// Helper to get all folders for folder suggestion
+function suggestFolders(): TFolder[] {
+	return plugin.app.vault.getAllFolders(true);
+}
 
 // Available agent colors matching Obsidian theme
 const AGENT_COLORS: { value: AgentColor | "none"; label: string; cssVar: string }[] = [
@@ -148,6 +154,39 @@ let selectedModelValue = $derived.by(() => {
 	if (!selectedAgent?.chatModel) return "";
 	return `${selectedAgent.chatModel.provider}:${selectedAgent.chatModel.model}`;
 });
+
+// Get display info for current model
+const currentModelDisplay = $derived.by(() => {
+	if (!selectedAgent?.chatModel) return null;
+	const provider = selectedAgent.chatModel.provider;
+	const model = selectedAgent.chatModel.model;
+	const providerDef = getProviderDefinition(provider, pluginData.getAllCustomProviderMeta());
+	return {
+		model,
+		providerName: providerDef?.displayName ?? provider,
+		logo: providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon,
+	};
+});
+
+function openModelSelectionModal() {
+	if (!selectedAgentId) return;
+	const currentSelection = selectedAgent?.chatModel
+		? { provider: selectedAgent.chatModel.provider, model: selectedAgent.chatModel.model }
+		: null;
+
+	const modal = new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
+		if (selected && selectedAgentId) {
+			const chatModel: ChatModel = {
+				provider: selected.provider,
+				model: selected.model,
+				modelConfig: { contextWindow: 128000 }, // Default, will be enriched from models.dev
+			};
+			pluginData.updateAgent(selectedAgentId, { chatModel });
+			applyChanges();
+		}
+	});
+	modal.open();
+}
 
 function handleModelSelect(value: string) {
 	const opt = models.modelOptions.find((o) => o.value === value);
@@ -602,6 +641,40 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
 </script>
 
 <div class="agents-settings">
+  <!-- Chat Settings (global, not per-agent) -->
+  <SettingGroup heading="Chat Settings">
+    <SettingItem name="Chats Folder" desc="Folder to store chat files and related data">
+      <FolderSuggest
+        app={plugin.app}
+        value={pluginData.targetFolder}
+        placeholder="Chats"
+        suggestionFn={(q) =>
+          suggestFolders().filter((f) => f.path.toLowerCase().includes(q.toLowerCase()))}
+        onSelected={(path: string) => (pluginData.targetFolder = path)}
+        onSubmit={(path: string) => (pluginData.targetFolder = path)}
+      />
+    </SettingItem>
+
+    <SettingItem name="Chat Name" desc="Default name for new chats">
+      <Text
+        inputType="text"
+        placeholder="New Chat"
+        value={pluginData.defaultChatName}
+        onblur={(value: string) => (pluginData.defaultChatName = value)}
+      />
+    </SettingItem>
+
+    <SettingItem
+      name="Generate Chat Title"
+      desc="Automatically generate chat title based on the first message (uses API)"
+    >
+      <Toggle
+        isToggled={pluginData.isGeneratingChatTitle}
+        changeFunc={() => pluginData.toggleGeneratingChatTitle()}
+      />
+    </SettingItem>
+  </SettingGroup>
+
   <!-- Agent Selector Header -->
   <div class="agent-selector-header">
     <div class="agent-selector-row">
@@ -678,49 +751,17 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
               iconId="settings"
             />
           {:else}
-            <SearchableDropdown
-              options={modelOptions}
-              selected={selectedModelValue}
-              onSelect={handleModelSelect}
-              placeholder="Select a model"
-              searchPlaceholder="Search models..."
-            >
-              {#snippet renderGroupHeader({ group })}
-                {@const providerDef = getProviderDefinition(
-                  group,
-                  pluginData.getAllCustomProviderMeta(),
-                )}
-                {@const Logo =
-                  providerDef && "logo" in providerDef && providerDef.logo
-                    ? providerDef.logo
-                    : GenericAIIcon}
+            <Button onClick={openModelSelectionModal}>
+              {#if currentModelDisplay}
+                {@const Logo = currentModelDisplay.logo}
                 <div class="flex items-center gap-2">
-                  <Logo width={12} height={12} class="text-[--text-muted]" />
-                  <span>{providerDef?.displayName ?? group}</span>
+                  <Logo width={14} height={14} />
+                  <span>{currentModelDisplay.model}</span>
                 </div>
-              {/snippet}
-
-              {#snippet renderOption({ option, selected })}
-                <span class="flex-1">{option.label}</span>
-                {#if selected}
-                  <Icon name="check" size="xs" class="text-[--text-accent]" />
-                {/if}
-              {/snippet}
-
-              {#snippet renderSelected({ option })}
-                {@const providerId = getProviderId(option.value)}
-                {@const providerDef = getProviderDefinition(
-                  providerId,
-                  pluginData.getAllCustomProviderMeta(),
-                )}
-                {@const Logo =
-                  providerDef && "logo" in providerDef && providerDef.logo
-                    ? providerDef.logo
-                    : GenericAIIcon}
-                <Logo width={14} height={14} />
-                <span>{option.label}</span>
-              {/snippet}
-            </SearchableDropdown>
+              {:else}
+                <span class="text-[--text-muted]">Select a model</span>
+              {/if}
+            </Button>
           {/if}
         </SettingItem>
 

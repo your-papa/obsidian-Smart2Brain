@@ -48,7 +48,6 @@ export function createVectorStore(backend: VectorStoreBackend): VectorStore {
 	switch (backend) {
 		case "hnsw":
 			return new HNSWVectorStore();
-		case "indexeddb":
 		default:
 			return new IndexedDBVectorStore();
 	}

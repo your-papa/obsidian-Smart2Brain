@@ -180,7 +180,7 @@ export class IndexedDBVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(DOCUMENTS_STORE, "readwrite");
+			const tx = this.db?.transaction(DOCUMENTS_STORE, "readwrite");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const index = store.index("path");
 			const request = index.openCursor(IDBKeyRange.only(path));
@@ -208,7 +208,7 @@ export class IndexedDBVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(DOCUMENTS_STORE, "readonly");
+			const tx = this.db?.transaction(DOCUMENTS_STORE, "readonly");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const index = store.index("path");
 			const request = index.get(path);
@@ -263,7 +263,7 @@ export class IndexedDBVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(DOCUMENTS_STORE, "readwrite");
+			const tx = this.db?.transaction(DOCUMENTS_STORE, "readwrite");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 
 			for (const doc of docs) {
@@ -302,7 +302,7 @@ export class IndexedDBVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(DOCUMENTS_STORE, "readonly");
+			const tx = this.db?.transaction(DOCUMENTS_STORE, "readonly");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const request = store.count();
 
@@ -319,7 +319,7 @@ export class IndexedDBVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(METADATA_STORE, "readonly");
+			const tx = this.db?.transaction(METADATA_STORE, "readonly");
 			const store = tx.objectStore(METADATA_STORE);
 			const request = store.get("metadata");
 
@@ -332,7 +332,7 @@ export class IndexedDBVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(storeName, "readwrite");
+			const tx = this.db?.transaction(storeName, "readwrite");
 			const store = tx.objectStore(storeName);
 			const request = store.put(value);
 
@@ -346,7 +346,7 @@ export class IndexedDBVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(DOCUMENTS_STORE, "readonly");
+			const tx = this.db?.transaction(DOCUMENTS_STORE, "readonly");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const request = store.getAll();
 
@@ -359,7 +359,7 @@ export class IndexedDBVectorStore implements VectorStore {
 		if (!this.db) throw new Error("Database not open");
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db!.transaction(storeName, "readwrite");
+			const tx = this.db?.transaction(storeName, "readwrite");
 			const store = tx.objectStore(storeName);
 			const request = store.clear();
 
