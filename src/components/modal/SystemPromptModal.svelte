@@ -1,5 +1,6 @@
 <script lang="ts">
 import { onDestroy, onMount } from "svelte";
+import { BASE_SYSTEM_PROMPT } from "../../agent/prompts";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
 import type SecondBrainPlugin from "../../main";
 import { getData } from "../../stores/dataStore.svelte";
@@ -32,7 +33,11 @@ function setPrompt(prompt: string): void {
 	}
 }
 
-let promptValue = $state(getPrompt());
+const initialPromptValue = getPrompt();
+let promptValue = $state(initialPromptValue);
+const isDirty = $derived(promptValue !== initialPromptValue);
+const isAtDefault = $derived(promptValue === BASE_SYSTEM_PROMPT);
+const showResetToDefault = $derived(!isAtDefault);
 
 onMount(() => {
 	if (editorContainer) {
@@ -62,6 +67,11 @@ async function handleSave() {
 	await plugin.agentManager?.updateSystemPrompt();
 	modal.close();
 }
+
+function handleResetToDefault() {
+	promptValue = BASE_SYSTEM_PROMPT;
+	editor?.setValue(BASE_SYSTEM_PROMPT);
+}
 </script>
 
 <div class="system-prompt-modal-content">
@@ -69,7 +79,13 @@ async function handleSave() {
   <div bind:this={editorContainer} class="system-prompt-editor-container"></div>
   <div class="system-prompt-actions">
     <Button buttonText="Cancel" onClick={() => modal.close()} />
-    <Button buttonText="Save" cta={true} onClick={handleSave} />
+    <div class="flex-1"></div>
+    {#if showResetToDefault}
+      <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
+    {/if}
+    {#if isDirty}
+      <Button buttonText="Save" cta={true} onClick={handleSave} />
+    {/if}
   </div>
 </div>
 
@@ -130,7 +146,7 @@ async function handleSave() {
   .system-prompt-actions {
     flex-shrink: 0;
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
     gap: 8px;
     margin-top: 16px;
   }
