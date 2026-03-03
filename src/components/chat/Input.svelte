@@ -278,6 +278,12 @@
 
   async function onFileAttachment(event: Event) {
     const input = event.target as HTMLInputElement;
+    if (savingFiles) {
+      new Notice("Please wait for the current attachments to finish saving.");
+      input.value = "";
+      return;
+    }
+
     const fileList = input.files;
     if (!fileList || fileList.length === 0) return;
     await processFiles([...fileList]);
@@ -377,6 +383,11 @@
     dragCounter = 0;
     dragMessage = "Drop files here";
     dragHasIssue = false;
+
+    if (savingFiles) {
+      new Notice("Please wait for the current attachments to finish saving.");
+      return;
+    }
 
     const files = event.dataTransfer?.files;
     if (!files || files.length === 0) return;

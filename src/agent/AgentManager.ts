@@ -121,7 +121,7 @@ async function toChooseModelParams(model: ChatModel): Promise<ChooseModelParams>
 		try {
 			const resolvedSupportsVision = await resolveVisionSupport(model.provider, model.model);
 			options.supportsVision = resolvedSupportsVision;
-			model.modelConfig.supportsVision = resolvedSupportsVision;
+			// Persist resolved capability via store update helper (avoid mutating model reference directly).
 			persistResolvedVisionSupport(model, resolvedSupportsVision);
 		} catch {
 			// Non-critical: default to false if all lookups fail
