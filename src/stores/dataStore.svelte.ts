@@ -191,7 +191,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "read_note",
 		description:
-			"Read the full content of a specific note by its file path. Use this after finding a relevant note with search_notes.",
+			"Read the full content of a specific note by file path or Obsidian wiki link (e.g., [[Daily Note]] or [[folder/note]]).",
 		settings: {
 			maxContentLength: 0,
 		},

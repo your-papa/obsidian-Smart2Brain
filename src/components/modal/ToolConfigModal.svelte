@@ -52,6 +52,70 @@ let maxResults = $state(
 		10,
 );
 
+interface ToolConfigSnapshot {
+  name: string;
+  description: string;
+  maxContentLength: number;
+  includeMetadata: boolean;
+  maxResults: number;
+}
+
+const initialSnapshot: ToolConfigSnapshot = {
+  name: initialToolConfig?.name ?? defaultConfig.name,
+  description: initialToolConfig?.description ?? defaultConfig.description,
+  maxContentLength:
+    (initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
+    (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
+    0,
+  includeMetadata:
+    (initialToolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
+    (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
+    true,
+  maxResults:
+    (initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
+    (defaultConfig.settings as { maxResults?: number })?.maxResults ??
+    10,
+};
+
+const defaultSnapshot: ToolConfigSnapshot = {
+  name: defaultConfig.name,
+  description: defaultConfig.description,
+  maxContentLength: (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ?? 0,
+  includeMetadata: (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ?? true,
+  maxResults: (defaultConfig.settings as { maxResults?: number })?.maxResults ?? 10,
+};
+
+function snapshotKey(snapshot: ToolConfigSnapshot): string {
+  return JSON.stringify(snapshot);
+}
+
+const initialSnapshotKey = snapshotKey(initialSnapshot);
+const defaultSnapshotKey = snapshotKey(defaultSnapshot);
+
+const isDirty = $derived.by(() => {
+  const currentSnapshot: ToolConfigSnapshot = {
+    name,
+    description,
+    maxContentLength,
+    includeMetadata,
+    maxResults,
+  };
+  return snapshotKey(currentSnapshot) !== initialSnapshotKey;
+});
+
+const isAtDefault = $derived.by(() => {
+  const currentSnapshot: ToolConfigSnapshot = {
+    name,
+    description,
+    maxContentLength,
+    includeMetadata,
+    maxResults,
+  };
+  return snapshotKey(currentSnapshot) === defaultSnapshotKey;
+});
+
+const showResetToDefault = $derived(!isAtDefault);
+
 // Tool display names for the modal title
 const toolDisplayNames: Record<BuiltInToolId, string> = {
 	search_notes: "Search Notes",
@@ -186,10 +250,14 @@ function handleResetToDefault() {
 
   <!-- Actions -->
   <div class="tool-config-actions">
-    <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
-    <div class="flex-1"></div>
     <Button buttonText="Cancel" onClick={() => modal.close()} />
-    <Button buttonText="Save" cta={true} onClick={handleSave} />
+    <div class="flex-1"></div>
+    {#if showResetToDefault}
+      <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
+    {/if}
+    {#if isDirty}
+      <Button buttonText="Save" cta={true} onClick={handleSave} />
+    {/if}
   </div>
 </div>
 

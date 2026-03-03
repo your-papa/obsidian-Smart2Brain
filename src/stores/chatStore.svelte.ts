@@ -53,6 +53,7 @@ export interface ToolCallState {
 	input: Record<string, unknown>;
 	status: ToolCallStatus;
 	output?: unknown;
+	preamble?: string;
 }
 
 export interface UserMessage {
@@ -661,6 +662,17 @@ function normalizeToolInput(raw: unknown): Record<string, unknown> {
 	return { value: raw };
 }
 
+function attachPreambleToFirstToolCall(toolCalls: ToolCallState[] | undefined, preamble: string): void {
+	if (!toolCalls || toolCalls.length === 0) return;
+	const trimmed = preamble.trim();
+	if (!trimmed) return;
+
+	const firstTool = toolCalls[0];
+	firstTool.preamble = firstTool.preamble
+		? `${firstTool.preamble.trimEnd()}\n\n${trimmed}`
+		: trimmed;
+}
+
 /**
  * Builds a map of tool outputs from tool messages.
  */
@@ -736,16 +748,17 @@ function mergeAssistantMessages(
 		};
 	}
 
-	if (assistantMessages.length === 1) {
-		return baseMessageToAssistantMessage(assistantMessages[0], toolOutputs, stateOverride);
-	}
-
 	// Merge multiple assistant messages
 	let finalContent = "";
 	const allToolCalls: ToolCallState[] = [];
 
 	for (const msg of assistantMessages) {
 		const converted = baseMessageToAssistantMessage(msg, toolOutputs);
+
+		if (converted.toolCalls?.length && converted.content.trim()) {
+			attachPreambleToFirstToolCall(converted.toolCalls, converted.content);
+			converted.content = "";
+		}
 
 		// Use the last non-empty content
 		if (converted.content.trim()) {
@@ -1190,11 +1203,6 @@ export class ChatSession {
 	 * Streaming logic
 	 * ---------------------------------------------------------------------*/
 
-	private appendToken(message: AssistantMessage, token: string) {
-		if (!token) return;
-		message.content += token;
-	}
-
 	private normalizeToolInput(raw: unknown): Record<string, unknown> {
 		if (raw === undefined || raw === null) return {};
 		if (typeof raw === "string") {
@@ -1375,19 +1383,30 @@ export class ChatSession {
 	 * Shared stream consumption logic for both normal queries and regeneration.
 	 */
 	private async consumeStream(assistantMsg: AssistantMessage, stream: AsyncIterable<AgentStreamChunk>) {
+		let tokenBuffer = "";
+		let hasSeenToolCall = false;
+
 		for await (const chunk of stream) {
 			if (chunk.type === "token") {
-				this.appendToken(assistantMsg, chunk.token);
+				if (!chunk.token) continue;
+				tokenBuffer += chunk.token;
+				assistantMsg.content = hasSeenToolCall ? tokenBuffer.trimStart() : tokenBuffer;
 				continue;
 			}
 
 			if (chunk.type === "tool_start") {
+				hasSeenToolCall = true;
+				const preamble = tokenBuffer;
+				tokenBuffer = "";
+				assistantMsg.content = "";
+
 				if (!assistantMsg.toolCalls) assistantMsg.toolCalls = [];
 				assistantMsg.toolCalls.push({
 					id: chunk.toolCallId,
 					name: chunk.toolName,
 					input: this.normalizeToolInput(chunk.input),
 					status: "running",
+					preamble: preamble.trim() || undefined,
 				});
 				continue;
 			}
@@ -1422,15 +1441,24 @@ export class ChatSession {
 			}
 
 			if (chunk.type === "result") {
+				assistantMsg.content = hasSeenToolCall ? tokenBuffer.trim() : tokenBuffer;
 				continue;
 			}
 
 			if (chunk.type === "checkpoint_message") {
 				const checkpointAssistant = baseMessageToAssistantMessage(chunk.message);
+				if (checkpointAssistant.toolCalls?.length && checkpointAssistant.content.trim()) {
+					attachPreambleToFirstToolCall(checkpointAssistant.toolCalls, checkpointAssistant.content);
+					checkpointAssistant.content = "";
+				}
 				assistantMsg.content = checkpointAssistant.content;
 				assistantMsg.toolCalls = checkpointAssistant.toolCalls;
 				break;
 			}
+		}
+
+		if (!assistantMsg.content) {
+			assistantMsg.content = hasSeenToolCall ? tokenBuffer.trim() : tokenBuffer;
 		}
 	}
 }
