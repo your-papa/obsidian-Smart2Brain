@@ -1,8 +1,8 @@
 import { extractText, getDocumentProxy } from "unpdf";
 
 export interface PdfExtractResult {
-	text: string;
-	totalPages: number;
+    text: string;
+    totalPages: number;
 }
 
 /**
@@ -13,7 +13,7 @@ export interface PdfExtractResult {
  * @returns Extracted text and total page count
  */
 export async function extractTextFromPdf(data: Uint8Array): Promise<PdfExtractResult> {
-	const pdf = await getDocumentProxy(data);
-	const { totalPages, text } = await extractText(pdf, { mergePages: true });
-	return { text: text as string, totalPages };
+    const pdf = await getDocumentProxy(data);
+    const { totalPages, text } = await extractText(pdf, { mergePages: true });
+    return { text: text as string, totalPages };
 }

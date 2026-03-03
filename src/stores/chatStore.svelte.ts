@@ -1041,6 +1041,12 @@ export class ChatSession {
 	async sendMessage(content: string, attachments?: ChatAttachment[]): Promise<UUIDv7> {
 		const pairId = genUUIDv7();
 
+		// Relocate any attachments saved under the temporary _pending directory
+		// to the real thread-specific directory now that we have a session ID.
+		if (attachments?.length) {
+			await this.relocatePendingAttachments(attachments);
+		}
+
 		// Capture the current model at send time
 		const selectedAgent = getData().getSelectedAgent();
 		const currentModel = selectedAgent?.chatModel ?? getData().getDefaultChatModel() ?? undefined;
@@ -1058,6 +1064,41 @@ export class ChatSession {
 		void this.processAssistantReply(pairId, content, attachments);
 
 		return pairId;
+	}
+
+	/**
+	 * Moves attachments from the temporary `_pending` directory to the real
+	 * thread-specific directory. Mutates the attachment objects in place so
+	 * that their vaultPath references stay correct for the rest of the pipeline.
+	 */
+	private async relocatePendingAttachments(attachments: ChatAttachment[]): Promise<void> {
+		const pending = attachments.filter((a) => a.vaultPath.includes("/_pending/"));
+		if (pending.length === 0) return;
+
+		const adapter = getPlugin().app.vault.adapter;
+		const chatFolder = getData().targetFolder;
+		const destDir = `${chatFolder}/attachments/${this.id}`;
+
+		try {
+			if (!(await adapter.exists(destDir))) {
+				await adapter.mkdir(destDir);
+			}
+			for (const att of pending) {
+				const fileName = att.vaultPath.split("/").pop();
+				if (!fileName) continue;
+				const newPath = `${destDir}/${fileName}`;
+				// Copy then remove — rename() may fail across directories on some platforms
+				const data = await adapter.readBinary(att.vaultPath);
+				await adapter.writeBinary(newPath, data);
+				await adapter.remove(att.vaultPath).catch(() => { });
+				att.vaultPath = newPath;
+			}
+			// Best-effort cleanup of the now-empty _pending directory
+			const pendingDir = `${chatFolder}/attachments/_pending`;
+			adapter.rmdir(pendingDir, false).catch(() => { });
+		} catch (e) {
+			Logger.warn("Failed to relocate pending attachments, continuing with temporary paths", e);
+		}
 	}
 
 	/** Abort current streaming (if any) */

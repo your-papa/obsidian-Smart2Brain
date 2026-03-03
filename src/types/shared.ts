@@ -29,9 +29,11 @@ export const SUPPORTED_IMAGE_MIMES = ["image/png", "image/jpeg", "image/gif", "i
 export const SUPPORTED_PDF_MIME = "application/pdf" as const;
 export const SUPPORTED_ATTACHMENT_MIMES = [...SUPPORTED_IMAGE_MIMES, SUPPORTED_PDF_MIME] as const;
 
-/** File extensions considered images for vault file detection */
-export const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
+/** File extensions considered images for vault file detection and LLM vision APIs.
+ * Only includes formats accepted by major providers (OpenAI, Anthropic, etc.).
+ * SVG and BMP are intentionally excluded — they are not supported by vision APIs. */
+export const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 /** File extensions considered PDFs */
 export const PDF_EXTENSIONS = new Set(["pdf"]);
 /** File extensions considered plain-text documents */
-export const TEXT_EXTENSIONS = new Set(["md", "txt", "csv"]);
+export const TEXT_EXTENSIONS = new Set(["md", "txt", "csv", "json"]);
