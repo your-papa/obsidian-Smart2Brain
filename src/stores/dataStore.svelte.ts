@@ -278,7 +278,6 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 	// Chat settings
 	isUsingRag: false,
-	isGeneratingChatTitle: false,
 	retrieveTopK: 100,
 	assistantLanguage: "en",
 	initialAssistantMessageContent: "Hi",
@@ -438,15 +437,6 @@ export class PluginDataStore {
 
 	toggleIsExcluding() {
 		this.#data.isExcluding = !this.#data.isExcluding;
-	}
-
-	toggleGeneratingChatTitle() {
-		this.#data.isGeneratingChatTitle = !this.#data.isGeneratingChatTitle;
-		this.saveSettings();
-	}
-
-	get isGeneratingChatTitle(): boolean {
-		return this.#data.isGeneratingChatTitle;
 	}
 
 	get indexList() {

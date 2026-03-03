@@ -332,7 +332,6 @@ export interface PluginData {
 
 	initialAssistantMessageContent: string;
 	isUsingRag: boolean;
-	isGeneratingChatTitle: boolean;
 	retrieveTopK: number;
 	assistantLanguage: "de" | "en";
 	defaultChatName: string;

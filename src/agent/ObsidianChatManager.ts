@@ -7,7 +7,7 @@ import {
 	type CheckpointTuple,
 	type PendingWrite,
 } from "@langchain/langgraph-checkpoint";
-import { type DataAdapter, Plugin, TFile, debounce, normalizePath } from "obsidian";
+import { type DataAdapter, TFile, debounce, normalizePath } from "obsidian";
 import type SecondBrainPlugin from "../main";
 import { getData } from "../stores/dataStore.svelte";
 import type { ThreadSnapshot, ThreadStore } from "./memory/ThreadStore";
@@ -136,8 +136,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		}
 
 		// If not found, search for it (renamed files)
-		// Look for: "{Title} - {Timestamp}.chat"
-		// Timestamp is usually the part after "Chat " in the threadId
+		// Legacy format: "{Title} - {Timestamp}.chat"
 		let timestampPart = "";
 		if (threadId.startsWith("Chat ")) {
 			timestampPart = threadId.substring(5);
@@ -159,6 +158,17 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 					if (timestampPart && file.endsWith(` - ${timestampPart}.chat`)) {
 						this.filePathCache.set(threadId, file);
 						return file;
+					}
+
+					try {
+						const content = await this.adapter.read(file);
+						const parsed = this.parseNdjsonObject<ThreadData>(content, file);
+						if (parsed.threadId === threadId) {
+							this.filePathCache.set(threadId, file);
+							return file;
+						}
+					} catch {
+						// Ignore malformed files while searching.
 					}
 				}
 			}
@@ -633,6 +643,29 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			.substring(0, 100);
 	}
 
+	private async getUniqueTitlePath(folder: string, baseTitle: string, currentPath: string): Promise<{
+		title: string;
+		path: string;
+		fileName: string;
+	}> {
+		let index = 1;
+		while (true) {
+			const title = index === 1 ? baseTitle : `${baseTitle} (${index})`;
+			const fileName = `${title}.chat`;
+			const path = normalizePath(`${folder}/${fileName}`);
+
+			if (path === currentPath) {
+				return { title, path, fileName };
+			}
+
+			if (!(await this.adapter.exists(path))) {
+				return { title, path, fileName };
+			}
+
+			index += 1;
+		}
+	}
+
 	async renameChatFile(threadId: string, title: string): Promise<void> {
 		if (!title || !title.trim()) return;
 
@@ -645,21 +678,39 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 				return;
 			}
 
-			const sanitizedTitle = this.sanitizeFileName(title);
-			const dateTimePart = threadId.startsWith("Chat ") ? threadId.substring(5) : threadId;
-			const newFileName = `${sanitizedTitle} - ${dateTimePart}.chat`;
-
-			if (file.name === newFileName) return;
-
+			const sanitizedTitle = this.sanitizeFileName(title) || "Chat";
 			const folder = this.getChatFolder();
-			const newPath = normalizePath(`${folder}/${newFileName}`);
+			const currentPath = normalizePath(oldPath);
+			const uniqueTarget = await this.getUniqueTitlePath(folder, sanitizedTitle, currentPath);
+			const newFileName = uniqueTarget.fileName;
+			const newPath = uniqueTarget.path;
 
-			if (await this.adapter.exists(newPath)) {
-				Logger.warn(`renameChatFile: Target file already exists: ${newPath}`);
-				return;
+			if (file.name !== newFileName) {
+				await this.plugin.app.fileManager.renameFile(file, newPath);
 			}
 
-			await this.plugin.app.fileManager.renameFile(file, newPath);
+			const now = Date.now();
+			const loaded = await this.ensureThreadLoaded(threadId);
+			if (loaded) {
+				loaded.title = uniqueTarget.title;
+				loaded.updatedAt = now;
+				this.saveDebounced(threadId);
+			}
+
+			const indexed = this.threadIndex.get(threadId);
+			if (indexed) {
+				indexed.title = uniqueTarget.title;
+				indexed.updatedAt = now;
+			} else if (loaded) {
+				this.threadIndex.set(threadId, {
+					threadId: loaded.threadId,
+					title: loaded.title,
+					metadata: loaded.metadata,
+					createdAt: loaded.createdAt,
+					updatedAt: loaded.updatedAt,
+				});
+			}
+			this.saveIndexDebounced();
 
 			// Update cache with new path
 			this.filePathCache.set(threadId, newPath);
@@ -667,5 +718,40 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		} catch (error) {
 			Logger.error(`Error renaming chat file for thread ${threadId}:`, error);
 		}
+	}
+
+	async reassignThreadId(currentThreadId: string, nextThreadId: string): Promise<boolean> {
+		if (!currentThreadId || !nextThreadId || currentThreadId === nextThreadId) {
+			return false;
+		}
+
+		const currentPath = await this.resolveFilePath(currentThreadId);
+		const loaded = await this.ensureThreadLoaded(currentThreadId);
+		if (!loaded) {
+			return false;
+		}
+
+		const now = Date.now();
+		loaded.threadId = nextThreadId;
+		loaded.updatedAt = now;
+
+		this.storage.delete(currentThreadId);
+		this.storage.set(nextThreadId, loaded);
+
+		this.filePathCache.delete(currentThreadId);
+		this.filePathCache.set(nextThreadId, currentPath);
+
+		const currentIndex = this.threadIndex.get(currentThreadId);
+		this.threadIndex.delete(currentThreadId);
+		this.threadIndex.set(nextThreadId, {
+			threadId: nextThreadId,
+			title: currentIndex?.title ?? loaded.title,
+			metadata: currentIndex?.metadata ?? loaded.metadata,
+			createdAt: currentIndex?.createdAt ?? loaded.createdAt,
+			updatedAt: now,
+		});
+
+		await this.saveThread(nextThreadId);
+		return true;
 	}
 }

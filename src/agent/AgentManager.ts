@@ -38,7 +38,6 @@ import { getRegistry } from "../providers/registry";
 
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
-
 /**
  * Legacy options type for built-in providers.
  * Used for backward compatibility with existing code.
@@ -998,6 +997,7 @@ export class AgentManager {
 
 		const data = getData();
 		const folder = data.targetFolder;
+		const defaultChatName = data.defaultChatName?.trim() || "New Chat";
 
 		// Reset to default agent if one is set
 		if (data.defaultAgentId && data.selectedAgentId !== data.defaultAgentId) {
@@ -1011,20 +1011,65 @@ export class AgentManager {
 			await this.plugin.app.vault.createFolder(folder);
 		}
 
-		const path = normalizePath(`${folder}/${threadId}.chat`);
+		const defaultPath = normalizePath(`${folder}/${defaultChatName}.chat`);
 
 		// Initialize with valid thread data structure
+		const draftThreadId = defaultChatName;
 		const initialData = {
-			threadId,
+			threadId: draftThreadId,
 			createdAt: now,
 			updatedAt: now,
 			checkpoints: {},
 			writes: {},
 		};
 
+		if (await this.plugin.app.vault.adapter.exists(defaultPath)) {
+			const existing = this.plugin.app.vault.getAbstractFileByPath(defaultPath);
+			if (existing && existing instanceof TFile) {
+				let shouldReplace = false;
+				try {
+					const raw = await this.plugin.app.vault.read(existing);
+					const parsed = JSON.parse(raw) as {
+						checkpoints?: Record<string, unknown>;
+						writes?: Record<string, unknown>;
+					};
+
+					const checkpointCount = Object.keys(parsed.checkpoints ?? {}).length;
+					const writeCount = Object.keys(parsed.writes ?? {}).length;
+					shouldReplace = checkpointCount === 0 && writeCount === 0;
+				} catch {
+					shouldReplace = false;
+				}
+
+				if (shouldReplace) {
+					await this.plugin.app.vault.modify(existing, `${JSON.stringify(initialData)}\n`);
+					await this.chatManager.rebuildIndex();
+					await this.plugin.app.workspace.getLeaf(false).openFile(existing);
+					return;
+				}
+			}
+		}
+
+		const fallbackPath = normalizePath(`${folder}/${threadId}.chat`);
+		const createPath = (await this.plugin.app.vault.adapter.exists(defaultPath)) ? fallbackPath : defaultPath;
+		const createThreadIdValue = createPath === defaultPath ? draftThreadId : threadId;
+
 		// Create file directly and open it
-		const file = await this.plugin.app.vault.create(path, `${JSON.stringify(initialData)}\n`);
+		const file = await this.plugin.app.vault.create(
+			createPath,
+			`${JSON.stringify({ ...initialData, threadId: createThreadIdValue })}\n`,
+		);
+		await this.chatManager.rebuildIndex();
 		await this.plugin.app.workspace.getLeaf(false).openFile(file);
+	}
+
+	async promoteDraftThread(currentThreadId: string): Promise<string | null> {
+		const nextThreadId = createThreadId();
+		const reassigned = await this.chatManager.reassignThreadId(currentThreadId, nextThreadId);
+		if (!reassigned) {
+			return null;
+		}
+		return nextThreadId;
 	}
 
 	async openLatestChat(): Promise<void> {

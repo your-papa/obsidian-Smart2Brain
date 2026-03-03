@@ -932,7 +932,7 @@ interface ChatSessionOptions {
 }
 
 export class ChatSession {
-	readonly id: string;
+	id: string;
 	messages: MessagePair[] = $state<MessagePair[]>([]);
 
 	// Streaming / lifecycle
@@ -1052,6 +1052,13 @@ export class ChatSession {
 	 *  - Kick off streaming process
 	 */
 	async sendMessage(content: string, attachments?: ChatAttachment[]): Promise<UUIDv7> {
+		const defaultChatName = getData().defaultChatName?.trim() || "New Chat";
+		if (this.messages.length === 0 && this.id === defaultChatName) {
+			const promotedThreadId = await getPlugin().agentManager.promoteDraftThread(this.id);
+			if (promotedThreadId) {
+				this.id = promotedThreadId;
+			}
+		}
 		const pairId = genUUIDv7();
 
 		// Relocate any attachments saved under the temporary _pending directory
@@ -1281,8 +1288,8 @@ export class ChatSession {
 			this.messageState = MessageState.answering;
 			pair.assistantMessage.state = AssistantState.streaming;
 
-			// Generate chat title in parallel if requested
-			if (options.generateTitle && this.messages.length === 1 && getData().isGeneratingChatTitle) {
+			// Generate chat title in parallel for the first user message
+			if (options.generateTitle && this.messages.length === 1) {
 				const plugin = getPlugin();
 				plugin.agentManager
 					.generateThreadTitleFromUserMessage(String(this.id), options.generateTitle)
@@ -1476,7 +1483,22 @@ export class Messenger {
 		this.#agentManager = agentManager;
 	}
 
-	deriveThreadId = (file: TFile): string | null => {
+	private async deriveThreadId(file: TFile): Promise<string | null> {
+		const defaultChatName = getData().defaultChatName?.trim() || "New Chat";
+		if (file.basename === defaultChatName) {
+			return defaultChatName;
+		}
+
+		try {
+			const content = await getPlugin().app.vault.read(file);
+			const parsed = JSON.parse(content) as { threadId?: unknown };
+			if (typeof parsed.threadId === "string" && parsed.threadId.trim().length > 0) {
+				return parsed.threadId;
+			}
+		} catch {
+			// Fall back to legacy filename-based derivation below.
+		}
+
 		let threadId = file.basename;
 		if (threadId.includes(" - ")) {
 			const parts = threadId.split(" - ");
@@ -1485,7 +1507,7 @@ export class Messenger {
 		}
 		if (!threadId || threadId === "New Chat") return null;
 		return threadId;
-	};
+	}
 
 	private getLastViewedCheckpointId(history: ThreadHistory | null): string | undefined {
 		const candidate = history?.metadata?.lastViewedCheckpointId;
@@ -1501,7 +1523,7 @@ export class Messenger {
 	/* ---------------- Chat Creation / Metadata ---------------- */
 
 	async loadSession(file: TFile, targetCheckpointId?: string) {
-		const id = this.deriveThreadId(file);
+		const id = await this.deriveThreadId(file);
 		if (!id) throw new Error("Invalid thread ID");
 
 		const [history, checkpointHistory] = await Promise.all([
