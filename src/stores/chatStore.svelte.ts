@@ -1083,22 +1083,28 @@ export class ChatSession {
 			if (!(await adapter.exists(destDir))) {
 				await adapter.mkdir(destDir);
 			}
-			for (const att of pending) {
+		} catch (e) {
+			Logger.warn("Failed to create attachment destination directory", e);
+			return;
+		}
+
+		for (const att of pending) {
+			try {
 				const fileName = att.vaultPath.split("/").pop();
 				if (!fileName) continue;
 				const newPath = `${destDir}/${fileName}`;
-				// Copy then remove — rename() may fail across directories on some platforms
 				const data = await adapter.readBinary(att.vaultPath);
 				await adapter.writeBinary(newPath, data);
-				await adapter.remove(att.vaultPath).catch(() => { });
+				await adapter.remove(att.vaultPath).catch(() => {});
 				att.vaultPath = newPath;
+			} catch (e) {
+				Logger.warn(`Failed to relocate attachment ${att.name}`, e);
 			}
-			// Best-effort cleanup of the now-empty _pending directory
-			const pendingDir = `${chatFolder}/attachments/_pending`;
-			adapter.rmdir(pendingDir, false).catch(() => { });
-		} catch (e) {
-			Logger.warn("Failed to relocate pending attachments, continuing with temporary paths", e);
 		}
+
+		// Best-effort cleanup of the now-empty _pending directory
+		const pendingDir = `${chatFolder}/attachments/_pending`;
+		adapter.rmdir(pendingDir, false).catch(() => {});
 	}
 
 	/** Abort current streaming (if any) */

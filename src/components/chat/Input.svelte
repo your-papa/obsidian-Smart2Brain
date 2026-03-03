@@ -72,6 +72,13 @@
     for (const url of previewUrls.values()) {
       URL.revokeObjectURL(url);
     }
+    // Remove any unsent attachment files from the vault
+    if (attachments.length > 0) {
+      const adapter = getPlugin().app.vault.adapter;
+      for (const att of attachments) {
+        adapter.remove(att.vaultPath).catch(() => {});
+      }
+    }
   });
 
   function initializeEditor() {
