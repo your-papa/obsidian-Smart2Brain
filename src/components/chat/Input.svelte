@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Notice } from "obsidian";
+  import { Notice, normalizePath } from "obsidian";
   import { onDestroy, onMount } from "svelte";
   import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
   import { EmbeddableMarkdownEditor } from "../../lib/editor";
@@ -185,7 +185,7 @@
     const chatFolder = data.targetFolder;
     // Use a stable temp directory when no session exists yet.
     // sendMessage() will relocate these files once a thread ID is assigned.
-    const attachDir = `${chatFolder}/attachments/${threadId ?? "_pending"}`;
+    const attachDir = normalizePath(`${chatFolder}/attachments/${threadId ?? "_pending"}`);
 
     try {
       // Ensure attachment directory exists
@@ -229,7 +229,7 @@
         }
 
         const uniqueName = `${genUUIDv7()}.${ext}`;
-        const vaultPath = `${attachDir}/${uniqueName}`;
+        const vaultPath = normalizePath(`${attachDir}/${uniqueName}`);
 
         // Read file as ArrayBuffer and save to vault
         const buffer = await file.arrayBuffer();

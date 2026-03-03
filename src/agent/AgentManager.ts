@@ -1,5 +1,5 @@
 import type { BaseMessage } from "@langchain/core/messages";
-import { Notice, normalizePath } from "obsidian";
+import { Notice, normalizePath, TFile } from "obsidian";
 import { createObsidianFetch } from "../lib/obsidianFetch";
 import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
@@ -38,7 +38,6 @@ import { getRegistry } from "../providers/registry";
 
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
-import { TFile } from "obsidian";
 
 /**
  * Legacy options type for built-in providers.
@@ -72,6 +71,44 @@ function convertToAuthObject(options: BuiltInProviderOptions): AuthObject {
 /** Result of provider authentication validation */
 export type AuthValidationResult = { success: true } | { success: false; message: string };
 
+function persistResolvedVisionSupport(model: ChatModel, supportsVision: boolean): void {
+	const data = getData();
+	const selectedAgent = data.getSelectedAgent();
+	const selectedModel = selectedAgent?.chatModel;
+
+	if (
+		selectedModel?.provider === model.provider &&
+		selectedModel.model === model.model &&
+		selectedModel.modelConfig.supportsVision === undefined
+	) {
+		data.updateAgent(selectedAgent.id, {
+			chatModel: {
+				...selectedModel,
+				modelConfig: {
+					...selectedModel.modelConfig,
+					supportsVision,
+				},
+			},
+		});
+		return;
+	}
+
+	const defaultModel = data.getDefaultChatModel();
+	if (
+		defaultModel?.provider === model.provider &&
+		defaultModel.model === model.model &&
+		defaultModel.modelConfig.supportsVision === undefined
+	) {
+		data.setDefaultChatModel({
+			...defaultModel,
+			modelConfig: {
+				...defaultModel.modelConfig,
+				supportsVision,
+			},
+		});
+	}
+}
+
 /**
  * Maps the UI ChatModel type to papa-ts ChooseModelParams.
  * Enriches supportsVision from provider-native APIs first (Ollama, OpenRouter),
@@ -83,7 +120,10 @@ async function toChooseModelParams(model: ChatModel): Promise<ChooseModelParams>
 	// If supportsVision is not explicitly set, resolve it from provider APIs
 	if (options.supportsVision === undefined) {
 		try {
-			options.supportsVision = await resolveVisionSupport(model.provider, model.model);
+			const resolvedSupportsVision = await resolveVisionSupport(model.provider, model.model);
+			options.supportsVision = resolvedSupportsVision;
+			model.modelConfig.supportsVision = resolvedSupportsVision;
+			persistResolvedVisionSupport(model, resolvedSupportsVision);
 		} catch {
 			// Non-critical: default to false if all lookups fail
 		}

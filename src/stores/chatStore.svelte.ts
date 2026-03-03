@@ -7,7 +7,7 @@ import {
 	isHumanMessage,
 	isToolMessage,
 } from "@langchain/core/messages";
-import { type TFile } from "obsidian";
+import { normalizePath, type TFile } from "obsidian";
 import type { AgentStreamChunk, CheckpointHistoryItem, ThreadHistory } from "../agent/Agent";
 import type { AgentManager } from "../agent/AgentManager";
 import type { ChatModelConfig } from "../providers/index";
@@ -1073,12 +1073,12 @@ export class ChatSession {
 	 */
 	private async relocatePendingAttachments(attachments: ChatAttachment[]): Promise<void> {
 		const chatFolder = getData().targetFolder;
-		const pendingPrefix = `${chatFolder}/attachments/_pending/`;
+		const pendingPrefix = normalizePath(`${chatFolder}/attachments/_pending/`);
 		const pending = attachments.filter((a) => a.vaultPath.startsWith(pendingPrefix));
 		if (pending.length === 0) return;
 
 		const adapter = getPlugin().app.vault.adapter;
-		const destDir = `${chatFolder}/attachments/${this.id}`;
+		const destDir = normalizePath(`${chatFolder}/attachments/${this.id}`);
 
 		try {
 			if (!(await adapter.exists(destDir))) {
@@ -1093,7 +1093,7 @@ export class ChatSession {
 			try {
 				const fileName = att.vaultPath.split("/").pop();
 				if (!fileName) continue;
-				const newPath = `${destDir}/${fileName}`;
+				const newPath = normalizePath(`${destDir}/${fileName}`);
 				const data = await adapter.readBinary(att.vaultPath);
 				await adapter.writeBinary(newPath, data);
 				await adapter.remove(att.vaultPath).catch(() => { });
@@ -1104,7 +1104,7 @@ export class ChatSession {
 		}
 
 		// Best-effort cleanup of the now-empty _pending directory
-		const pendingDir = `${chatFolder}/attachments/_pending`;
+		const pendingDir = normalizePath(`${chatFolder}/attachments/_pending`);
 		adapter.rmdir(pendingDir, false).catch(() => { });
 	}
 

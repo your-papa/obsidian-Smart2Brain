@@ -36,7 +36,7 @@ export function isPdfExtension(ext: string): boolean {
 }
 
 /**
- * Checks if a file extension is a supported plain-text document (.md, .txt, .csv).
+ * Checks if a file extension is a supported plain-text document (.md, .txt, .csv, .json).
  */
 export function isTextExtension(ext: string): boolean {
     return TEXT_EXTENSIONS.has(ext.toLowerCase());
