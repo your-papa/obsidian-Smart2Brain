@@ -435,7 +435,8 @@ const TOOLS: ToolInfo[] = [
 	{
 		id: "read_attachment",
 		defaultName: "Read Attachment",
-		defaultDescription: "Read images and PDFs from the vault. Images require a vision-capable model.",
+    defaultDescription:
+      "Read PDFs and text files (.md, .txt, .csv, .json) from the vault. PDFs return extracted text; text files return raw content. Images must be attached directly in chat for visual analysis.",
 	},
 ];
 

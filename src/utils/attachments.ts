@@ -66,11 +66,19 @@ export function resolveVaultFile(app: App, path: string): TFile | null {
     const file = app.vault.getAbstractFileByPath(path);
     if (file instanceof TFile) return file;
 
-    // Try finding by basename (for wiki-link style references)
-    const allFiles = app.vault.getFiles();
     const basename = path.split("/").pop() ?? path;
-    const match = allFiles.find((f) => f.name === basename || f.basename === basename.replace(/\.[^.]+$/, ""));
-    return match ?? null;
+    const hasExtension = basename.includes(".");
+    const allFiles = app.vault.getFiles();
+
+    if (hasExtension) {
+        // For extension-bearing inputs, only match exact filenames (avoid cross-extension fallback).
+        const exactNameMatch = allFiles.find((f) => f.name === basename);
+        return exactNameMatch ?? null;
+    }
+
+    // Extension-less references (e.g., ![[report]]) can match by basename.
+    const basenameMatch = allFiles.find((f) => f.basename === basename);
+    return basenameMatch ?? null;
 }
 
 /**

@@ -58,6 +58,9 @@ export function getWikiLinkAtCursor(text: string, cursor: number): WikiLinkConte
  * Extracts embedded image/PDF file references from markdown content.
  * Matches both wiki-link embeds `![[file.png]]` and standard markdown embeds `![alt](file.png)`.
  *
+ * Note: This helper is intentionally exported for upcoming attachment auto-detection
+ * in the chat composer and is not yet wired into current runtime flows.
+ *
  * @returns Array of vault-relative file paths for image/PDF files
  */
 export function extractMediaEmbeds(markdown: string): string[] {

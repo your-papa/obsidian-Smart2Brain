@@ -311,7 +311,9 @@
         continue;
       }
 
-      const hasSupportedPrefix = SUPPORTED_DRAG_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix));
+      const hasSupportedPrefix = SUPPORTED_DRAG_MIME_PREFIXES.some((prefix) =>
+        mime.startsWith(prefix),
+      );
       if (!SUPPORTED_DRAG_MIMES.has(mime) && !hasSupportedPrefix) {
         hasClearlyUnsupported = true;
       }

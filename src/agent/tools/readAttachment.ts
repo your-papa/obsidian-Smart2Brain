@@ -10,6 +10,14 @@ import {
 } from "../../utils/attachments";
 import { extractTextFromPdf } from "../../utils/pdfExtractor";
 
+const MAX_PDF_CHARS = 180_000;
+const MAX_TEXT_CHARS = 120_000;
+
+function truncateContent(content: string, maxChars: number): string {
+    if (content.length <= maxChars) return content;
+    return `${content.slice(0, maxChars)}\n\n[...truncated ${content.length - maxChars} characters to fit context limits...]`;
+}
+
 /**
  * Tool for reading PDFs and text documents from the vault.
  *
@@ -51,12 +59,14 @@ export function createReadAttachmentTool(app: App) {
                     return `PDF "${file.name}" contains ${totalPages} page(s) but no extractable text. The PDF may contain only images/scans.`;
                 }
 
-                return `Content of PDF "${file.name}" (${totalPages} pages):\n\n${text}`;
+                const truncated = truncateContent(text, MAX_PDF_CHARS);
+                return `Content of PDF "${file.name}" (${totalPages} pages):\n\n${truncated}`;
             }
 
             if (isTextExtension(ext)) {
                 const content = await app.vault.read(file);
-                return `Content of "${file.name}":\n\n${content}`;
+                const truncated = truncateContent(content, MAX_TEXT_CHARS);
+                return `Content of "${file.name}":\n\n${truncated}`;
             }
 
             return `Error: Unsupported file type ".${ext}". This tool supports PDFs and text documents (md, txt, csv, json). For images, ask the user to attach them directly in the chat input.`;
