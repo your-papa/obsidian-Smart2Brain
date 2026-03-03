@@ -5,8 +5,13 @@ import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
+import type { BuiltInToolId } from "../types/plugin";
+import { lookupModelInfo } from "../providers/modelsDevApi";
+import { fetchOllamaModelsInfo } from "../providers/ollamaModels";
+import { extractCapabilities as extractOpenRouterCapabilities, fetchOpenRouterModels } from "../providers/openrouterModels";
 
 import { ProviderAuthError, ProviderEndpointError, ProviderRegistry, ProviderRegistryError } from "../providers/index";
+import type { ChatAttachment } from "../types/shared";
 import { createThreadId } from "../utils/threadId";
 import { Logger } from "../utils/logging";
 import { Agent, type CheckpointHistoryItem, type ChooseModelParams, type ThreadHistory } from "./Agent";
@@ -19,6 +24,7 @@ import { createGetAllTagsTool } from "./tools/getAllTags";
 import { createGetPropertiesTool } from "./tools/getProperties";
 import { createLoadSkillTool } from "./tools/loadSkill";
 import { createReadNoteTool } from "./tools/readNote";
+import { createReadAttachmentTool } from "./tools/readAttachment";
 import { createSearchNotesTool } from "./tools/searchNotes";
 
 // New provider system imports
@@ -68,13 +74,58 @@ export type AuthValidationResult = { success: true } | { success: false; message
 
 /**
  * Maps the UI ChatModel type to papa-ts ChooseModelParams.
+ * Enriches supportsVision from provider-native APIs first (Ollama, OpenRouter),
+ * then falls back to models.dev for other providers.
  */
-function toChooseModelParams(model: ChatModel): ChooseModelParams {
+async function toChooseModelParams(model: ChatModel): Promise<ChooseModelParams> {
+	const options = { ...model.modelConfig };
+
+	// If supportsVision is not explicitly set, resolve it from provider APIs
+	if (options.supportsVision === undefined) {
+		try {
+			options.supportsVision = await resolveVisionSupport(model.provider, model.model);
+		} catch {
+			// Non-critical: default to false if all lookups fail
+		}
+	}
+
 	return {
 		provider: model.provider,
 		chatModel: model.model,
-		options: model.modelConfig,
+		options,
 	};
+}
+
+/**
+ * Resolves vision support from provider-native APIs.
+ * Priority: Ollama /api/show → OpenRouter /api/v1/models → models.dev fallback
+ */
+async function resolveVisionSupport(providerId: string, modelId: string): Promise<boolean> {
+	// 1. Ollama: use /api/show capabilities (cached)
+	if (providerId === "ollama") {
+		const data = getData();
+		const auth = data.getResolvedAuthState("ollama");
+		if (auth?.baseUrl) {
+			const models = await fetchOllamaModelsInfo(auth.baseUrl, [modelId]);
+			const info = models.get(modelId);
+			if (info) return info.supportsVision ?? false;
+		}
+	}
+
+	// 2. OpenRouter: derive vision from architecture.input_modalities (cached)
+	if (providerId === "openrouter") {
+		const models = await fetchOpenRouterModels();
+		if (models) {
+			const info = models.get(modelId);
+			if (info) return extractOpenRouterCapabilities(info).supportsVision;
+		}
+	}
+
+	// 3. Fallback: models.dev for other providers (OpenAI, Anthropic, etc.)
+	const mdInfo = await lookupModelInfo(providerId, modelId);
+	if (mdInfo) return mdInfo.attachment ?? false;
+
+	return false;
 }
 
 export class AgentManager {
@@ -346,9 +397,7 @@ export class AgentManager {
 		const tools: StructuredToolInterface[] = [];
 
 		// Helper to check if tool is enabled for the selected agent
-		const isToolEnabled = (
-			toolId: "search_notes" | "read_note" | "get_all_tags" | "get_properties" | "execute_dataview_query",
-		): boolean => {
+		const isToolEnabled = (toolId: BuiltInToolId): boolean => {
 			// Check selected agent's tools config first, fallback to legacy
 			if (selectedAgent?.toolsConfig) {
 				return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
@@ -371,6 +420,16 @@ export class AgentManager {
 		}
 		if (isToolEnabled("read_note")) {
 			tools.push(createReadNoteTool(this.plugin.app));
+		}
+
+		// Add read_attachment tool (always enabled alongside read_note, checks vision at call time)
+		if (isToolEnabled("read_attachment")) {
+			tools.push(
+				createReadAttachmentTool(this.plugin.app, {
+					supportsVision: () => this.agent?.supportsVision ?? false,
+					getProviderId: () => this.agent?.currentProvider ?? "",
+				}),
+			);
 		}
 
 		// Add load_skill tool if skillsService is available and has skills
@@ -484,7 +543,7 @@ export class AgentManager {
 		const selectedAgent = pluginData.getSelectedAgent();
 		const chatModel = selectedAgent?.chatModel ?? pluginData.getDefaultChatModel();
 		if (chatModel) {
-			await this.agent.chooseModel(toChooseModelParams(chatModel));
+			await this.agent.chooseModel(await toChooseModelParams(chatModel));
 		}
 
 		// Bind tools
@@ -496,6 +555,7 @@ export class AgentManager {
 		threadId = "default-thread",
 		checkpointId?: string,
 		signal?: AbortSignal,
+		attachments?: ChatAttachment[],
 	): AsyncGenerator<
 		| { type: "token"; token: string }
 		| {
@@ -521,7 +581,7 @@ export class AgentManager {
 		const selectedAgent = pluginData.getSelectedAgent();
 		const chatModel = selectedAgent?.chatModel ?? pluginData.getDefaultChatModel();
 		if (chatModel) {
-			await agent.chooseModel(toChooseModelParams(chatModel));
+			await agent.chooseModel(await toChooseModelParams(chatModel));
 		} else {
 			throw new Error("No chat model configured");
 		}
@@ -532,6 +592,7 @@ export class AgentManager {
 				threadId,
 				configurable: checkpointId ? { checkpoint_id: checkpointId } : undefined,
 				signal,
+				attachments,
 			})) {
 				// Check if aborted before yielding
 				if (signal?.aborted) {
@@ -623,7 +684,7 @@ export class AgentManager {
 		const selectedAgent = pluginData.getSelectedAgent();
 		const chatModel = selectedAgent?.chatModel ?? pluginData.getDefaultChatModel();
 		if (chatModel) {
-			await agent.chooseModel(toChooseModelParams(chatModel));
+			await agent.chooseModel(await toChooseModelParams(chatModel));
 		} else {
 			throw new Error("No chat model configured");
 		}
@@ -720,7 +781,7 @@ export class AgentManager {
 		const selectedAgent = pluginData.getSelectedAgent();
 		const chatModel = selectedAgent?.chatModel ?? pluginData.getDefaultChatModel();
 		if (chatModel) {
-			await agent.chooseModel(toChooseModelParams(chatModel));
+			await agent.chooseModel(await toChooseModelParams(chatModel));
 		} else {
 			throw new Error("No chat model configured");
 		}

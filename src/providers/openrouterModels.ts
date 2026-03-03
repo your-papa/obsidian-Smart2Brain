@@ -30,6 +30,10 @@ export interface OpenRouterPricing {
 export interface OpenRouterArchitecture {
 	/** Model modality (e.g., "text->text", "text+image->text") */
 	modality?: string;
+	/** Input modalities (e.g., ["text", "image", "file"]) */
+	input_modalities?: string[];
+	/** Output modalities (e.g., ["text"]) */
+	output_modalities?: string[];
 	/** Tokenizer used */
 	tokenizer?: string;
 	/** Instruction type (e.g., "chat", "completion") */
@@ -69,15 +73,8 @@ export interface OpenRouterModelInfo {
 	/** When the model was created in OpenRouter */
 	created?: number;
 
-	// Capability flags
-	/** Whether model supports function/tool calling */
-	supports_tool_calls?: boolean;
-	/** Whether model supports vision (image input) */
-	supports_vision?: boolean;
-	/** Whether model is a reasoning model */
-	supports_reasoning?: boolean;
-	/** Whether model supports structured output */
-	supports_structured_output?: boolean;
+	/** Supported API parameters (e.g., "tools", "reasoning", "structured_outputs") */
+	supported_parameters?: string[];
 
 	/** Per-request limits */
 	per_request_limits?: {
@@ -220,7 +217,8 @@ export function formatCostPerMillion(costPerToken?: string): string {
 }
 
 /**
- * Extract capabilities from model info
+ * Derive capabilities from OpenRouter model info.
+ * The API encodes capabilities via `architecture.input_modalities` and `supported_parameters`.
  */
 export function extractCapabilities(info: OpenRouterModelInfo): {
 	supportsToolCalls: boolean;
@@ -228,11 +226,17 @@ export function extractCapabilities(info: OpenRouterModelInfo): {
 	supportsReasoning: boolean;
 	supportsStructuredOutput: boolean;
 } {
+	const params = info.supported_parameters ?? [];
+	const inputModalities = info.architecture?.input_modalities ?? [];
+
 	return {
-		supportsToolCalls: info.supports_tool_calls ?? false,
-		supportsVision: info.supports_vision ?? false,
-		supportsReasoning: info.supports_reasoning ?? false,
-		supportsStructuredOutput: info.supports_structured_output ?? false,
+		supportsToolCalls: params.includes("tools"),
+		supportsVision: inputModalities.includes("image"),
+		supportsReasoning:
+			params.includes("reasoning") ||
+			params.includes("include_reasoning") ||
+			params.includes("reasoning_effort"),
+		supportsStructuredOutput: params.includes("structured_outputs"),
 	};
 }
 

@@ -1,0 +1,92 @@
+import { type App, TFile } from "obsidian";
+import { IMAGE_EXTENSIONS, PDF_EXTENSIONS, TEXT_EXTENSIONS } from "../types/shared";
+
+/**
+ * Determines MIME type from file extension.
+ */
+export function mimeFromExtension(ext: string): string {
+	const lower = ext.toLowerCase();
+	const mimeMap: Record<string, string> = {
+		png: "image/png",
+		jpg: "image/jpeg",
+		jpeg: "image/jpeg",
+		gif: "image/gif",
+		webp: "image/webp",
+		bmp: "image/bmp",
+		svg: "image/svg+xml",
+		pdf: "application/pdf",
+		md: "text/markdown",
+		txt: "text/plain",
+		csv: "text/csv",
+	};
+	return mimeMap[lower] ?? "application/octet-stream";
+}
+
+/**
+ * Checks if a file extension is a supported image type.
+ */
+export function isImageExtension(ext: string): boolean {
+	return IMAGE_EXTENSIONS.has(ext.toLowerCase());
+}
+
+/**
+ * Checks if a file extension is PDF.
+ */
+export function isPdfExtension(ext: string): boolean {
+	return PDF_EXTENSIONS.has(ext.toLowerCase());
+}
+
+/**
+ * Checks if a file extension is a supported plain-text document (.md, .txt, .csv).
+ */
+export function isTextExtension(ext: string): boolean {
+	return TEXT_EXTENSIONS.has(ext.toLowerCase());
+}
+
+/**
+ * Converts an ArrayBuffer to a base64 data URI string.
+ */
+export function toBase64DataUri(buffer: ArrayBuffer, mimeType: string): string {
+	const bytes = new Uint8Array(buffer);
+	let binary = "";
+	for (let i = 0; i < bytes.length; i++) {
+		binary += String.fromCharCode(bytes[i]);
+	}
+	const base64 = btoa(binary);
+	return `data:${mimeType};base64,${base64}`;
+}
+
+/**
+ * Converts an ArrayBuffer to a raw base64 string (no data URI prefix).
+ */
+export function toBase64(buffer: ArrayBuffer): string {
+	const bytes = new Uint8Array(buffer);
+	let binary = "";
+	for (let i = 0; i < bytes.length; i++) {
+		binary += String.fromCharCode(bytes[i]);
+	}
+	return btoa(binary);
+}
+
+/**
+ * Resolves a vault path to a TFile, handling both exact paths and basename-only references.
+ * Obsidian wiki-links like ![[image.png]] may omit the folder path.
+ */
+export function resolveVaultFile(app: App, path: string): TFile | null {
+	// Try exact path first
+	const file = app.vault.getAbstractFileByPath(path);
+	if (file instanceof TFile) return file;
+
+	// Try finding by basename (for wiki-link style references)
+	const allFiles = app.vault.getFiles();
+	const basename = path.split("/").pop() ?? path;
+	const match = allFiles.find((f) => f.name === basename || f.basename === basename.replace(/\.[^.]+$/, ""));
+	return match ?? null;
+}
+
+/**
+ * Reads a vault file as binary and returns the ArrayBuffer.
+ */
+export async function readVaultBinary(app: App, file: TFile): Promise<ArrayBuffer> {
+	return app.vault.readBinary(file);
+}

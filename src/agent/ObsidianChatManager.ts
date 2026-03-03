@@ -596,7 +596,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		this.filePathCache.delete(threadId);
 		this.saveIndexDebounced();
 
-		// Remove from disk
+		// Remove chat file from disk
 		const path = await this.resolveFilePath(threadId);
 		try {
 			if (await this.adapter.exists(path)) {
@@ -604,6 +604,22 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			}
 		} catch (e) {
 			Logger.error(`Error deleting thread ${threadId}:`, e);
+		}
+
+		// Remove attachment directory if it exists
+		const attachDir = normalizePath(`${this.getChatFolder()}/attachments/${threadId}`);
+		try {
+			if (await this.adapter.exists(attachDir)) {
+				const listing = await this.adapter.list(attachDir);
+				// Delete all files in the attachment directory
+				for (const file of listing.files) {
+					await this.adapter.remove(file);
+				}
+				// Remove the directory itself
+				await this.adapter.rmdir(attachDir, true);
+			}
+		} catch (e) {
+			Logger.error(`Error deleting attachments for thread ${threadId}:`, e);
 		}
 	}
 

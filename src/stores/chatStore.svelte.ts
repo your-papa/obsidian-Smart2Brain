@@ -11,7 +11,7 @@ import { type TFile } from "obsidian";
 import type { AgentStreamChunk, CheckpointHistoryItem, ThreadHistory } from "../agent/Agent";
 import type { AgentManager } from "../agent/AgentManager";
 import type { ChatModelConfig } from "../providers/index";
-import type { ThreadError } from "../types/shared";
+import type { ChatAttachment, ThreadError } from "../types/shared";
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { getData } from "./dataStore.svelte";
 import { getPlugin } from "./state.svelte";
@@ -57,7 +57,7 @@ export interface ToolCallState {
 
 export interface UserMessage {
 	content: string;
-	attachments?: File[];
+	attachments?: ChatAttachment[];
 }
 
 export interface AssistantMessage {
@@ -800,6 +800,7 @@ export function baseMessagesToMessagePairs(
 			// Start a new pair with user message
 			const userContent = extractTextContent(msg);
 			const humanMessageId = msg.id;
+			const attachments = (msg.additional_kwargs?.attachments as ChatAttachment[] | undefined) ?? undefined;
 			const pairId = genUUIDv7();
 
 			// Look ahead for assistant response(s)
@@ -872,7 +873,7 @@ export function baseMessagesToMessagePairs(
 
 			messagePairs.push({
 				id: pairId,
-				userMessage: { content: userContent },
+				userMessage: { content: userContent, attachments },
 				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state),
 				regenerateFromCheckpointId,
 				editFromCheckpointId,
@@ -1037,7 +1038,7 @@ export class ChatSession {
 	 *  - Create MessagePair with idle assistant
 	 *  - Kick off streaming process
 	 */
-	async sendMessage(content: string, attachments?: File[]): Promise<UUIDv7> {
+	async sendMessage(content: string, attachments?: ChatAttachment[]): Promise<UUIDv7> {
 		const pairId = genUUIDv7();
 
 		// Capture the current model at send time
@@ -1053,8 +1054,8 @@ export class ChatSession {
 
 		this.messages.push(pair);
 
-		// Stream assistant reply
-		void this.processAssistantReply(pairId, content);
+		// Stream assistant reply (pass attachments so they reach the agent)
+		void this.processAssistantReply(pairId, content, attachments);
 
 		return pairId;
 	}
@@ -1252,7 +1253,7 @@ export class ChatSession {
 	}
 
 	/** Process assistant reply for a normal query (new message in thread). */
-	private async processAssistantReply(pairId: UUIDv7, userContent: string) {
+	private async processAssistantReply(pairId: UUIDv7, userContent: string, attachments?: ChatAttachment[]) {
 		const plugin = getPlugin();
 		const beforeCheckpointIds = new Set(this.graphState.nodes.keys());
 		const parentCheckpointId = this.graphState.activeCheckpointId ?? this.graphState.rootCheckpointId;
@@ -1271,6 +1272,7 @@ export class ChatSession {
 					String(this.id),
 					this.graphState.activeCheckpointId,
 					signal,
+					attachments,
 				) as AsyncIterable<AgentStreamChunk>,
 			{ generateTitle: userContent, reloadAfter: true, parentCheckpointId, beforeCheckpointIds },
 		);
@@ -1531,7 +1533,7 @@ export class Messenger {
 
 	/* ---------------- Sending Messages ---------------- */
 
-	async sendMessage(content: string, attachments?: File[]): Promise<string> {
+	async sendMessage(content: string, attachments?: ChatAttachment[]): Promise<string> {
 		if (!this.session) {
 			throw new Error("No active session");
 		}

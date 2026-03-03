@@ -179,7 +179,10 @@ function openModelSelectionModal() {
 			const chatModel: ChatModel = {
 				provider: selected.provider,
 				model: selected.model,
-				modelConfig: { contextWindow: 128000 }, // Default, will be enriched from models.dev
+				modelConfig: {
+					contextWindow: 128000, // Default, will be enriched from models.dev
+					supportsVision: selected.supportsVision,
+				},
 			};
 			pluginData.updateAgent(selectedAgentId, { chatModel });
 			applyChanges();
@@ -428,6 +431,11 @@ const TOOLS: ToolInfo[] = [
 			id: "dataview",
 			name: "Dataview",
 		},
+	},
+	{
+		id: "read_attachment",
+		defaultName: "Read Attachment",
+		defaultDescription: "Read images and PDFs from the vault. Images require a vision-capable model.",
 	},
 ];
 

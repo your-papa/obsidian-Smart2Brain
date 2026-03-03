@@ -216,6 +216,12 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 			includeMetadata: true,
 		},
 	},
+	read_attachment: {
+		enabled: true,
+		name: "read_attachment",
+		description:
+			"Read an image or PDF file from the vault. Images are returned as base64 data URIs (requires vision-capable model). PDFs are returned as extracted text.",
+	},
 };
 
 /**

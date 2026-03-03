@@ -232,6 +232,7 @@ function setToolsOpen(messageId: string, open: boolean) {
               <!-- Display Mode -->
               <CollapsibleUserBubble
                 content={messagePair.userMessage.content}
+                attachments={messagePair.userMessage.attachments}
                 class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2"
               />
             {/if}
