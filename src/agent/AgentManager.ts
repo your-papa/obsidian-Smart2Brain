@@ -732,6 +732,7 @@ export class AgentManager {
 		threadId: string,
 		checkpointId: string,
 		signal?: AbortSignal,
+		attachments?: ChatAttachment[],
 	): AsyncGenerator<
 		| { type: "token"; token: string }
 		| {
@@ -762,12 +763,15 @@ export class AgentManager {
 		}
 
 		try {
-			for await (const chunk of agent.editFromCheckpoint({
+			const editOptions = {
 				query,
 				threadId,
 				checkpointId,
 				signal,
-			})) {
+				attachments,
+			} as Parameters<Agent["editFromCheckpoint"]>[0];
+
+			for await (const chunk of agent.editFromCheckpoint(editOptions)) {
 				if (signal?.aborted) {
 					break;
 				}
@@ -1108,6 +1112,10 @@ export class AgentManager {
 			return null;
 		}
 		return nextThreadId;
+	}
+
+	async getAttachmentDirectory(threadId: string): Promise<string> {
+		return this.chatManager.getAttachmentDirectory(threadId);
 	}
 
 	async openLatestChat(): Promise<void> {

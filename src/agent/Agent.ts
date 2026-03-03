@@ -59,6 +59,7 @@ export interface AgentEditOptions {
 	threadId: string;
 	checkpointId: string;
 	signal?: AbortSignal;
+	attachments?: ChatAttachment[];
 	metadata?: Record<string, unknown>;
 	configurable?: Record<string, unknown>;
 }
@@ -656,13 +657,11 @@ export class Agent {
 			version: "v2" as const,
 		} as StreamEventsConfig;
 
+		const messageContent = await this.buildMessageContent(query, options.attachments);
+		const humanMessage = this.createHumanMessage(messageContent, options.attachments);
+
 		const input = {
-			messages: [
-				{
-					role: "user",
-					content: query,
-				},
-			],
+			messages: [humanMessage],
 		};
 
 		const stream = agent.streamEvents(input, streamConfig);

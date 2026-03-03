@@ -1094,11 +1094,20 @@ export class ChatSession {
 	private async relocatePendingAttachments(attachments: ChatAttachment[]): Promise<void> {
 		const chatFolder = getData().targetFolder;
 		const pendingPrefix = normalizePath(`${chatFolder}/attachments/_pending/`);
-		const pending = attachments.filter((a) => a.vaultPath.startsWith(pendingPrefix));
+		const defaultChatName = getData().defaultChatName?.trim() || "New Chat";
+		const legacyDraftPrefix = normalizePath(`${chatFolder}/attachments/${defaultChatName}/`);
+		const pending = attachments.filter(
+			(a) => a.vaultPath.startsWith(pendingPrefix) || a.vaultPath.startsWith(legacyDraftPrefix),
+		);
 		if (pending.length === 0) return;
 
 		const adapter = getPlugin().app.vault.adapter;
-		const destDir = normalizePath(`${chatFolder}/attachments/${this.id}`);
+		let destDir = normalizePath(`${chatFolder}/attachments/${this.id}`);
+		try {
+			destDir = normalizePath(await getPlugin().agentManager.getAttachmentDirectory(this.id));
+		} catch (e) {
+			Logger.warn("Failed to resolve title-based attachment directory, falling back to thread id directory", e);
+		}
 
 		try {
 			if (!(await adapter.exists(destDir))) {
@@ -1122,9 +1131,13 @@ export class ChatSession {
 			}
 		}
 
-		// Best-effort cleanup of the now-empty _pending directory
+		// Best-effort cleanup of temporary draft directories
 		const pendingDir = normalizePath(`${chatFolder}/attachments/_pending`);
 		adapter.rmdir(pendingDir, false).catch(() => { });
+		const legacyDraftDir = normalizePath(`${chatFolder}/attachments/${defaultChatName}`);
+		if (legacyDraftDir !== pendingDir) {
+			adapter.rmdir(legacyDraftDir, false).catch(() => { });
+		}
 	}
 
 	/** Abort current streaming (if any) */
@@ -1136,6 +1149,29 @@ export class ChatSession {
 		this.abortController.abort();
 	}
 
+	private resolveEditAttachments(pair: MessagePair): ChatAttachment[] | undefined {
+		if (pair.userMessage.attachments?.length) {
+			return pair.userMessage.attachments;
+		}
+
+		const checkpointId = pair.regenerateFromCheckpointId;
+		if (!checkpointId) {
+			return undefined;
+		}
+
+		const node = this.graphState.nodes.get(checkpointId);
+		const lastMessage = node?.messages.at(-1);
+		if (!lastMessage || !isHumanMessage(lastMessage)) {
+			return undefined;
+		}
+
+		const recovered = (lastMessage.additional_kwargs?.attachments as ChatAttachment[] | undefined)?.filter(
+			(att) => Boolean(att?.name && att?.mimeType && att?.vaultPath),
+		);
+
+		return recovered?.length ? recovered : undefined;
+	}
+
 	/**
 	 * Edit a user message and get a new AI response.
 	 * This creates a new branch from the checkpoint before the original message.
@@ -1145,6 +1181,8 @@ export class ChatSession {
 		if (!pair) {
 			throw new Error("Message pair not found");
 		}
+
+		const attachments = this.resolveEditAttachments(pair);
 
 		// Get the checkpoint to fork from for editing
 		const checkpointId = pair.editFromCheckpointId;
@@ -1160,11 +1198,12 @@ export class ChatSession {
 			new HumanMessage({
 				content: newContent,
 				id: genUUIDv7(),
+				additional_kwargs: attachments?.length ? { attachments } : undefined,
 			}),
 		];
 		const optimisticPair = this.applyOptimisticFork(checkpointId, optimisticMessages);
 		optimisticPair.userMessage.content = newContent;
-		optimisticPair.userMessage.attachments = undefined;
+		optimisticPair.userMessage.attachments = attachments;
 		optimisticPair.assistantMessage.state = AssistantState.idle;
 		optimisticPair.assistantMessage.content = "";
 		optimisticPair.assistantMessage.toolCalls = undefined;
@@ -1173,7 +1212,7 @@ export class ChatSession {
 		optimisticPair.regenerateFromCheckpointId = undefined;
 
 		// Stream the edited response
-		await this.processEditReply(optimisticPair.id, newContent, checkpointId);
+		await this.processEditReply(optimisticPair.id, newContent, checkpointId, attachments);
 	}
 
 	/**
@@ -1341,7 +1380,12 @@ export class ChatSession {
 	}
 
 	/** Process assistant reply for an edit (forks from checkpoint with new user message). */
-	private async processEditReply(pairId: UUIDv7, userContent: string, checkpointId: string) {
+	private async processEditReply(
+		pairId: UUIDv7,
+		userContent: string,
+		checkpointId: string,
+		attachments?: ChatAttachment[],
+	) {
 		const plugin = getPlugin();
 		const beforeCheckpointIds = new Set(this.graphState.nodes.keys());
 
@@ -1358,6 +1402,7 @@ export class ChatSession {
 					String(this.id),
 					checkpointId,
 					signal,
+					attachments,
 				) as AsyncIterable<AgentStreamChunk>,
 			{ reloadAfter: true, parentCheckpointId: checkpointId, beforeCheckpointIds },
 		);

@@ -1,6 +1,6 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import type { ChatAttachment } from "../../types/shared";
-  import { toBase64DataUri } from "../../utils/attachments";
   import { getPlugin } from "../../stores/state.svelte";
 
   interface Props {
@@ -11,14 +11,27 @@
 
   let previewUrls = $state<Map<string, string>>(new Map());
 
+  onDestroy(() => {
+    for (const url of previewUrls.values()) {
+      URL.revokeObjectURL(url);
+    }
+  });
+
   $effect(() => {
     const imgs = attachments.filter((a) => a.mimeType.startsWith("image/"));
-    if (imgs.length === 0) return;
+    if (imgs.length === 0) {
+      for (const url of previewUrls.values()) {
+        URL.revokeObjectURL(url);
+      }
+      previewUrls = new Map();
+      return;
+    }
 
     const app = getPlugin()?.app;
     if (!app) return;
 
     let cancelled = false;
+    let committed = false;
     const newUrls = new Map<string, string>();
     const pending: Promise<void>[] = [];
 
@@ -29,7 +42,8 @@
             const file = app.vault.getFileByPath(att.vaultPath);
             if (!file) return;
             const buf = await app.vault.readBinary(file);
-            newUrls.set(att.vaultPath, toBase64DataUri(buf, att.mimeType));
+            const blob = new Blob([buf], { type: att.mimeType });
+            newUrls.set(att.vaultPath, URL.createObjectURL(blob));
           } catch {
             // File may have been deleted
           }
@@ -39,12 +53,25 @@
 
     Promise.all(pending).then(() => {
       if (!cancelled) {
+        for (const url of previewUrls.values()) {
+          URL.revokeObjectURL(url);
+        }
         previewUrls = newUrls;
+        committed = true;
+      } else {
+        for (const url of newUrls.values()) {
+          URL.revokeObjectURL(url);
+        }
       }
     });
 
     return () => {
       cancelled = true;
+      if (!committed) {
+        for (const url of newUrls.values()) {
+          URL.revokeObjectURL(url);
+        }
+      }
     };
   });
 </script>

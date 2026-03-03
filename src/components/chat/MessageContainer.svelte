@@ -17,6 +17,7 @@
   import BranchNavigator from "./BranchNavigator.svelte";
   import ChatEditor from "./ChatEditor.svelte";
   import CollapsibleUserBubble from "./CollapsibleUserBubble.svelte";
+  import UserAttachmentFiles from "./UserAttachmentFiles.svelte";
   import UserAttachmentImages from "./UserAttachmentImages.svelte";
   import ToolCallsSection from "./ToolCallsSection.svelte";
 
@@ -211,6 +212,20 @@
           >
             {#if editingMessageId === messagePair.id}
               <!-- Edit Mode -->
+              {#if messagePair.userMessage.attachments?.some((a) => a.mimeType.startsWith("image/"))}
+                <UserAttachmentImages
+                  attachments={messagePair.userMessage.attachments.filter((a) =>
+                    a.mimeType.startsWith("image/"),
+                  )}
+                />
+              {/if}
+              {#if messagePair.userMessage.attachments?.some((a) => !a.mimeType.startsWith("image/"))}
+                <UserAttachmentFiles
+                  attachments={messagePair.userMessage.attachments.filter((a) =>
+                    !a.mimeType.startsWith("image/"),
+                  )}
+                />
+              {/if}
               <div
                 class="w-full max-w-[80%] rounded-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2"
               >
@@ -242,6 +257,13 @@
                 <UserAttachmentImages
                   attachments={messagePair.userMessage.attachments.filter((a) =>
                     a.mimeType.startsWith("image/"),
+                  )}
+                />
+              {/if}
+              {#if messagePair.userMessage.attachments?.some((a) => !a.mimeType.startsWith("image/"))}
+                <UserAttachmentFiles
+                  attachments={messagePair.userMessage.attachments.filter((a) =>
+                    !a.mimeType.startsWith("image/"),
                   )}
                 />
               {/if}

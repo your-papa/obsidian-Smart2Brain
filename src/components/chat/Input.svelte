@@ -8,7 +8,6 @@
   import { icon } from "../../utils/utils";
   import type { ChatAttachment } from "../../types/shared";
   import { mimeFromExtension } from "../../utils/attachments";
-  import { genUUIDv7 } from "../../utils/uuid7Validator";
   import { getData } from "../../stores/dataStore.svelte";
   import AgentPopover from "./AgentPopover.svelte";
   import ModelPopover from "./ModelPopover.svelte";
@@ -185,6 +184,39 @@
     onMessageSent?.();
   }
 
+  function sanitizeAttachmentFileName(fileName: string): string {
+    const sanitized = fileName.replace(/[<>:"/\\|?*]/g, "-").trim();
+    return sanitized.length > 0 ? sanitized : "attachment";
+  }
+
+  async function getUniqueAttachmentPath(
+    attachDir: string,
+    fileName: string,
+  ): Promise<{ vaultPath: string; storedName: string }> {
+    const adapter = getPlugin().app.vault.adapter;
+    const safeName = sanitizeAttachmentFileName(fileName);
+
+    const dotIndex = safeName.lastIndexOf(".");
+    const hasExtension = dotIndex > 0 && dotIndex < safeName.length - 1;
+    const baseName = hasExtension ? safeName.slice(0, dotIndex) : safeName;
+    const extension = hasExtension ? safeName.slice(dotIndex) : "";
+
+    let attempt = 1;
+    while (attempt < 10_000) {
+      const storedName =
+        attempt === 1 ? safeName : `${baseName} (${attempt})${extension}`;
+      const vaultPath = normalizePath(`${attachDir}/${storedName}`);
+
+      if (!(await adapter.exists(vaultPath))) {
+        return { vaultPath, storedName };
+      }
+
+      attempt++;
+    }
+
+    throw new Error("Unable to allocate a unique attachment filename.");
+  }
+
   /** Shared logic: save File objects to vault and add as attachments */
   async function processFiles(files: File[]) {
     if (files.length === 0) return;
@@ -193,11 +225,15 @@
     const plugin = getPlugin();
     const data = getData();
     const threadId = messenger.session?.id;
+    const defaultChatName = data.defaultChatName?.trim() || "New Chat";
     const chatFolder = data.targetFolder;
     const baseAttachDir = normalizePath(`${chatFolder}/attachments`);
     // Use a stable temp directory when no session exists yet.
     // sendMessage() will relocate these files once a thread ID is assigned.
-    const attachDir = normalizePath(`${chatFolder}/attachments/${threadId ?? "_pending"}`);
+    const isDraftThread = !threadId || threadId === defaultChatName;
+    const attachDir = isDraftThread
+      ? normalizePath(`${chatFolder}/attachments/_pending`)
+      : normalizePath(await plugin.agentManager.getAttachmentDirectory(threadId));
 
     try {
       // Ensure attachment base directory and thread-specific directory exist
@@ -243,8 +279,7 @@
           continue;
         }
 
-        const uniqueName = `${genUUIDv7()}.${ext}`;
-        const vaultPath = normalizePath(`${attachDir}/${uniqueName}`);
+        const { vaultPath } = await getUniqueAttachmentPath(attachDir, file.name);
 
         // Read file as ArrayBuffer and save to vault
         const buffer = await file.arrayBuffer();
