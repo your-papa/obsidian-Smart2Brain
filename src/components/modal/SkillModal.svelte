@@ -1,6 +1,6 @@
 <script lang="ts">
 import { onDestroy, onMount } from "svelte";
-import { getBundledSkill } from "../../skills";
+import { getBundledSkill, parseFrontmatter } from "../../skills";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
 import type SecondBrainPlugin from "../../main";
 import { slugifySkillName, validateSkillName, validateDescription } from "../../skills";
@@ -60,6 +60,30 @@ const hasBundledDefault = $derived(!!getBundledSkill(pluginId));
 let editorContainer: HTMLDivElement | undefined = $state();
 let editor: EmbeddableMarkdownEditor | undefined = $state();
 let promptValue = $state("");
+let initialName = $state("");
+let initialDescription = $state("");
+let initialPrompt = $state("");
+let bundledDefaultName = $state("");
+let bundledDefaultDescription = $state("");
+let bundledDefaultPrompt = $state("");
+let hasParsedBundledDefault = $state(false);
+
+const isDirty = $derived(
+  editName !== initialName ||
+    editDescription !== initialDescription ||
+    promptValue !== initialPrompt,
+);
+
+const isAtBundledDefault = $derived(
+  hasParsedBundledDefault &&
+    editName === bundledDefaultName &&
+    editDescription === bundledDefaultDescription &&
+    promptValue === bundledDefaultPrompt,
+);
+
+const showResetToDefault = $derived(
+  hasBundledDefault && hasParsedBundledDefault && !isAtBundledDefault,
+);
 
 onMount(async () => {
 	// Load file-based skill
@@ -74,6 +98,20 @@ onMount(async () => {
 			editName =
 				fileBasedSkill?.frontmatter.metadata?.displayName ?? fileBasedSkill?.frontmatter.name ?? pluginId;
 			editDescription = fileBasedSkill?.frontmatter.description ?? "";
+      initialName = editName;
+      initialDescription = editDescription;
+      initialPrompt = fileBasedSkill?.content ?? "";
+
+      const bundled = getBundledSkill(pluginId);
+      if (bundled) {
+        const parsed = parseFrontmatter(bundled.content);
+        if (parsed.frontmatter.name && parsed.frontmatter.description) {
+          bundledDefaultName = parsed.frontmatter.metadata?.displayName ?? parsed.frontmatter.name;
+          bundledDefaultDescription = parsed.frontmatter.description;
+          bundledDefaultPrompt = parsed.body;
+          hasParsedBundledDefault = true;
+        }
+      }
 		}
 	}
 
@@ -149,29 +187,11 @@ async function handleSave() {
 }
 
 async function handleResetToDefault() {
-	if (!hasBundledDefault || !fileBasedSkill) return;
-
-	const { parseFrontmatter } = await import("../../skills");
-	const bundled = getBundledSkill(pluginId);
-	if (!bundled) return;
-
-	// Parse the bundled content to get frontmatter and body
-	const parsed = parseFrontmatter(bundled.content);
-	if (parsed.frontmatter.name && parsed.frontmatter.description) {
-		await plugin.skillsService.saveSkill({
-			frontmatter: parsed.frontmatter as typeof fileBasedSkill.frontmatter,
-			content: parsed.body,
-		});
-		await plugin.skillsService.discoverSkills();
-
-		// Update editor with reset content
-		promptValue = parsed.body;
-		editor?.setValue(promptValue);
-
-		// Update editable fields
-		editName = parsed.frontmatter.metadata?.displayName ?? parsed.frontmatter.name;
-		editDescription = parsed.frontmatter.description;
-	}
+  if (!hasBundledDefault || !hasParsedBundledDefault) return;
+  editName = bundledDefaultName;
+  editDescription = bundledDefaultDescription;
+  promptValue = bundledDefaultPrompt;
+  editor?.setValue(bundledDefaultPrompt);
 }
 </script>
 
@@ -213,17 +233,19 @@ async function handleResetToDefault() {
   {/if}
 
   <div class="skill-actions">
-    {#if hasBundledDefault}
+    <Button buttonText="Cancel" onClick={() => modal.close()} />
+    <div class="flex-1"></div>
+    {#if showResetToDefault}
       <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
     {/if}
-    <div class="flex-1"></div>
-    <Button buttonText="Cancel" onClick={() => modal.close()} />
-    <Button
-      buttonText="Save"
-      cta={true}
-      onClick={handleSave}
-      disabled={!isValid}
-    />
+    {#if isDirty}
+      <Button
+        buttonText="Save"
+        cta={true}
+        onClick={handleSave}
+        disabled={!isValid}
+      />
+    {/if}
   </div>
 </div>
 
