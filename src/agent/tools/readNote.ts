@@ -3,6 +3,71 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { getData } from "../../stores/dataStore.svelte";
 
+function extractLinkPath(input: string): string {
+	const trimmed = input.trim();
+	const inner = trimmed.startsWith("[[") && trimmed.endsWith("]]") ? trimmed.slice(2, -2).trim() : trimmed;
+	const withoutAlias = inner.split("|")[0]?.trim() ?? "";
+	const withoutHeading = withoutAlias.split("#")[0]?.trim() ?? "";
+	return withoutHeading;
+}
+
+function tryExactFilePath(app: App, path: string): TFile | null {
+	const exact = app.vault.getAbstractFileByPath(path);
+	if (exact instanceof TFile) {
+		return exact;
+	}
+
+	if (!path.endsWith(".md")) {
+		const withMd = app.vault.getAbstractFileByPath(`${path}.md`);
+		if (withMd instanceof TFile) {
+			return withMd;
+		}
+	}
+
+	return null;
+}
+
+function resolveNoteFile(app: App, pathOrWikiLink: string): { file: TFile | null; error?: string } {
+	const linkPath = extractLinkPath(pathOrWikiLink);
+	if (!linkPath) {
+		return { file: null, error: "Error: Path is empty. Provide a note path or wiki link like [[Note Name]]." };
+	}
+
+	const exact = tryExactFilePath(app, linkPath);
+	if (exact) {
+		return { file: exact };
+	}
+
+	const linkResolved =
+		app.metadataCache.getFirstLinkpathDest(linkPath, "") ??
+		(linkPath.endsWith(".md")
+			? app.metadataCache.getFirstLinkpathDest(linkPath.slice(0, -3), "")
+			: app.metadataCache.getFirstLinkpathDest(`${linkPath}.md`, ""));
+
+	if (linkResolved instanceof TFile) {
+		return { file: linkResolved };
+	}
+
+	const normalizedTarget = linkPath.toLowerCase();
+	const markdownFiles = app.vault.getMarkdownFiles();
+	const basenameMatches = markdownFiles.filter((file) => file.basename.toLowerCase() === normalizedTarget);
+
+	if (basenameMatches.length === 1) {
+		return { file: basenameMatches[0] };
+	}
+
+	if (basenameMatches.length > 1) {
+		const matchList = basenameMatches.slice(0, 5).map((file) => `- ${file.path}`).join("\n");
+		const suffix = basenameMatches.length > 5 ? "\n- ..." : "";
+		return {
+			file: null,
+			error: `Error: Wiki link "${linkPath}" is ambiguous. Use a full path.\nPossible matches:\n${matchList}${suffix}`,
+		};
+	}
+
+	return { file: null, error: `Error: File not found for "${pathOrWikiLink}"` };
+}
+
 /**
  * Tool for reading the content of a specific note
  */
@@ -12,15 +77,12 @@ export function createReadNoteTool(app: App) {
 	const settings = toolConfig?.settings as { maxContentLength?: number } | undefined;
 
 	const readNoteFn = async ({ path }: { path: string }): Promise<string> => {
-		const file = app.vault.getAbstractFileByPath(path);
-
-		if (!file) {
-			return `Error: File not found at path "${path}"`;
+		const resolved = resolveNoteFile(app, path);
+		if (!resolved.file) {
+			return resolved.error ?? `Error: File not found for "${path}"`;
 		}
 
-		if (!(file instanceof TFile)) {
-			return `Error: Path "${path}" is not a file`;
-		}
+		const file = resolved.file;
 
 		try {
 			let content = await app.vault.read(file);
@@ -44,9 +106,11 @@ export function createReadNoteTool(app: App) {
 		name: toolConfig?.name ?? "read_note",
 		description:
 			toolConfig?.description ??
-			"Read the full content of a specific note by its file path. Use this after finding a relevant note with search_notes.",
+			"Read the full content of a specific note by file path or Obsidian wiki link (e.g., [[Daily Note]] or [[folder/note]]).",
 		schema: z.object({
-			path: z.string().describe("The full file path of the note to read (e.g., 'folder/note.md')"),
+			path: z
+				.string()
+				.describe("Note reference as full path (e.g., 'folder/note.md') or wiki link (e.g., '[[Note Name]]')."),
 		}),
 	});
 }
