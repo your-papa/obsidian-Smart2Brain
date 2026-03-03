@@ -6,27 +6,19 @@ import {
     isImageExtension,
     isPdfExtension,
     isTextExtension,
-    mimeFromExtension,
     resolveVaultFile,
-    toBase64DataUri,
 } from "../../utils/attachments";
 import { extractTextFromPdf } from "../../utils/pdfExtractor";
 
-interface ReadAttachmentContext {
-    /** Returns true if the currently selected model supports vision/image input */
-    supportsVision: () => boolean;
-    /** Returns the current provider ID (e.g., "anthropic", "openai") */
-    getProviderId: () => string;
-}
-
 /**
- * Tool for reading images, PDFs, and text documents from the vault.
+ * Tool for reading PDFs and text documents from the vault.
  *
- * - Images: returns a base64 data URI (if model supports vision) or an error message
  * - PDFs: returns extracted text content (via unpdf) for all providers
- * - Text files (.md, .txt, .csv): returns the raw text content
+ * - Text files (.md, .txt, .csv, .json): returns the raw text content
+ * - Images: not supported here — users should attach images directly in chat
+ *   for proper multimodal processing via vision-capable models.
  */
-export function createReadAttachmentTool(app: App, context: ReadAttachmentContext) {
+export function createReadAttachmentTool(app: App) {
     const pluginData = getData();
     const toolConfig = pluginData.getToolConfig("read_attachment");
 
@@ -45,16 +37,7 @@ export function createReadAttachmentTool(app: App, context: ReadAttachmentContex
 
         try {
             if (isImageExtension(ext)) {
-                if (!context.supportsVision()) {
-                    return `Error: The currently selected model does not support vision/image input. Cannot process image "${path}". Please ask the user to switch to a vision-capable model (e.g., GPT-4o, Claude Sonnet, or an Ollama model with vision support).`;
-                }
-
-                const buffer = await app.vault.readBinary(file);
-                const mime = mimeFromExtension(ext);
-                const dataUri = toBase64DataUri(buffer, mime);
-
-                // Return as a structured string the agent can relay
-                return `[Image loaded: ${file.name} (${mime}, ${Math.round(buffer.byteLength / 1024)}KB)]\n\nData URI: ${dataUri}`;
+                return `Cannot read image "${file.name}" through this tool. Images must be attached directly in the chat input for visual analysis. Ask the user to attach the image in their next message, or describe what you need from the image so the user can help.`;
             }
 
             if (isPdfExtension(ext)) {
@@ -76,7 +59,7 @@ export function createReadAttachmentTool(app: App, context: ReadAttachmentContex
                 return `Content of "${file.name}":\n\n${content}`;
             }
 
-            return `Error: Unsupported file type ".${ext}". This tool supports images (png, jpg, jpeg, gif, webp), PDFs, and text documents (md, txt, csv, json).`;
+            return `Error: Unsupported file type ".${ext}". This tool supports PDFs and text documents (md, txt, csv, json). For images, ask the user to attach them directly in the chat input.`;
         } catch (error) {
             return `Error reading file "${path}": ${error instanceof Error ? error.message : String(error)}`;
         }
@@ -86,7 +69,7 @@ export function createReadAttachmentTool(app: App, context: ReadAttachmentContex
         name: toolConfig?.name ?? "read_attachment",
         description:
             toolConfig?.description ??
-            "Read an image, PDF, or text file from the vault. For images, returns the image data (requires a vision-capable model). For PDFs, extracts and returns the text content. For text files (.md, .txt, .csv, .json), returns the raw content. Use this when you encounter media embeds like ![[image.png]], ![[document.pdf]], or ![[notes.md]] in notes and need to analyze their content.",
+            "Read a PDF or text file from the vault. For PDFs, extracts and returns the text content. For text files (.md, .txt, .csv, .json), returns the raw content. Use this when you encounter media embeds like ![[document.pdf]] or ![[notes.md]] in notes. Does NOT support images — images must be attached directly in the chat input by the user for visual analysis.",
         schema: z.object({
             path: z.string().describe("The file path of the file to read (e.g., 'attachments/photo.png', 'docs/report.pdf', 'notes/readme.md', or just 'data.csv')"),
         }),

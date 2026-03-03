@@ -1095,7 +1095,7 @@ export class ChatSession {
 				const newPath = `${destDir}/${fileName}`;
 				const data = await adapter.readBinary(att.vaultPath);
 				await adapter.writeBinary(newPath, data);
-				await adapter.remove(att.vaultPath).catch(() => {});
+				await adapter.remove(att.vaultPath).catch(() => { });
 				att.vaultPath = newPath;
 			} catch (e) {
 				Logger.warn(`Failed to relocate attachment ${att.name}`, e);
@@ -1104,7 +1104,7 @@ export class ChatSession {
 
 		// Best-effort cleanup of the now-empty _pending directory
 		const pendingDir = `${chatFolder}/attachments/_pending`;
-		adapter.rmdir(pendingDir, false).catch(() => {});
+		adapter.rmdir(pendingDir, false).catch(() => { });
 	}
 
 	/** Abort current streaming (if any) */

@@ -424,12 +424,7 @@ export class AgentManager {
 
 		// Add read_attachment tool (always enabled alongside read_note, checks vision at call time)
 		if (isToolEnabled("read_attachment")) {
-			tools.push(
-				createReadAttachmentTool(this.plugin.app, {
-					supportsVision: () => this.agent?.supportsVision ?? false,
-					getProviderId: () => this.agent?.currentProvider ?? "",
-				}),
-			);
+			tools.push(createReadAttachmentTool(this.plugin.app));
 		}
 
 		// Add load_skill tool if skillsService is available and has skills
