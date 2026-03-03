@@ -194,12 +194,16 @@
     const data = getData();
     const threadId = messenger.session?.id;
     const chatFolder = data.targetFolder;
+    const baseAttachDir = normalizePath(`${chatFolder}/attachments`);
     // Use a stable temp directory when no session exists yet.
     // sendMessage() will relocate these files once a thread ID is assigned.
     const attachDir = normalizePath(`${chatFolder}/attachments/${threadId ?? "_pending"}`);
 
     try {
-      // Ensure attachment directory exists
+      // Ensure attachment base directory and thread-specific directory exist
+      if (!(await plugin.app.vault.adapter.exists(baseAttachDir))) {
+        await plugin.app.vault.adapter.mkdir(baseAttachDir);
+      }
       if (!(await plugin.app.vault.adapter.exists(attachDir))) {
         await plugin.app.vault.adapter.mkdir(attachDir);
       }

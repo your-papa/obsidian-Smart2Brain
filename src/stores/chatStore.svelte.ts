@@ -1105,8 +1105,7 @@ export class ChatSession {
 				await adapter.mkdir(destDir);
 			}
 		} catch (e) {
-			Logger.warn("Failed to create attachment destination directory", e);
-			return;
+			Logger.warn("Failed to create attachment destination directory, proceeding with _pending paths", e);
 		}
 
 		for (const att of pending) {

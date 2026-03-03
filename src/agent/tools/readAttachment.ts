@@ -6,7 +6,7 @@ import {
     isImageExtension,
     isPdfExtension,
     isTextExtension,
-    resolveVaultFile,
+    resolveVaultFileDetailed,
 } from "../../utils/attachments";
 import { extractTextFromPdf } from "../../utils/pdfExtractor";
 
@@ -31,11 +31,19 @@ export function createReadAttachmentTool(app: App) {
     const toolConfig = pluginData.getToolConfig("read_attachment");
 
     const readAttachmentFn = async ({ path }: { path: string }): Promise<string> => {
-        const file = resolveVaultFile(app, path);
+        const resolved = resolveVaultFileDetailed(app, path);
 
-        if (!file) {
+        if (resolved.status === "ambiguous") {
+            const candidates = resolved.candidates.slice(0, 5).join(", ");
+            const suffix = resolved.candidates.length > 5 ? `, and ${resolved.candidates.length - 5} more` : "";
+            return `Error: Multiple files match "${path}". Please use a more specific path. Matches: ${candidates}${suffix}.`;
+        }
+
+        if (resolved.status === "not_found") {
             return `Error: File not found at path "${path}". Make sure the path is correct (e.g., "attachments/image.png" or just "image.png").`;
         }
+
+        const file = resolved.file;
 
         if (!(file instanceof TFile)) {
             return `Error: Path "${path}" is not a file`;

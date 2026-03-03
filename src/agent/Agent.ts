@@ -222,18 +222,26 @@ export class Agent {
 
 		const contentParts: MessageContentComplex[] = [{ type: "text", text: query }];
 		const hasImages = attachments.some((a) => a.mimeType.startsWith("image/"));
+		const skipImagesForNonVisionModel = hasImages && !this.supportsVision;
+		let addedImageSkipNotice = false;
 
-		// Check vision capability for image attachments
-		if (hasImages && !this.supportsVision) {
-			throw new Error(
-				"The selected model does not support vision/image input. Please switch to a vision-capable model (e.g., GPT-4o, Claude Sonnet, or an Ollama vision model) to send images.",
-			);
-		}
+		// For non-vision models, skip image attachments but continue processing other supported files.
 
 		const app = getPlugin().app;
 
 		for (const attachment of attachments) {
 			if (attachment.mimeType.startsWith("image/")) {
+				if (skipImagesForNonVisionModel) {
+					if (!addedImageSkipNotice) {
+						contentParts.push({
+							type: "text",
+							text: "[Image attachments were skipped because the selected model does not support vision. Switch to a vision-capable model to analyze images.]",
+						});
+						addedImageSkipNotice = true;
+					}
+					continue;
+				}
+
 				// Read image from vault and encode as base64 data URI
 				const file = app.vault.getAbstractFileByPath(attachment.vaultPath);
 				if (!(file instanceof TFile)) {

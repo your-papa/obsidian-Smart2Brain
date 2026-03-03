@@ -70,6 +70,13 @@ function convertToAuthObject(options: BuiltInProviderOptions): AuthObject {
 /** Result of provider authentication validation */
 export type AuthValidationResult = { success: true } | { success: false; message: string };
 
+const resolvedVisionSupportCache = new Map<string, boolean>();
+const inflightVisionSupportRequests = new Map<string, Promise<boolean>>();
+
+function getVisionSupportCacheKey(providerId: string, modelId: string): string {
+	return `${providerId}::${modelId}`;
+}
+
 function persistResolvedVisionSupport(model: ChatModel, supportsVision: boolean): void {
 	const data = getData();
 	const selectedAgent = data.getSelectedAgent();
@@ -115,11 +122,16 @@ function persistResolvedVisionSupport(model: ChatModel, supportsVision: boolean)
  */
 async function toChooseModelParams(model: ChatModel): Promise<ChooseModelParams> {
 	const options = { ...model.modelConfig };
+	const cacheKey = getVisionSupportCacheKey(model.provider, model.model);
+
+	if (options.supportsVision !== undefined) {
+		resolvedVisionSupportCache.set(cacheKey, options.supportsVision);
+	}
 
 	// If supportsVision is not explicitly set, resolve it from provider APIs
 	if (options.supportsVision === undefined) {
 		try {
-			const resolvedSupportsVision = await resolveVisionSupport(model.provider, model.model);
+			const resolvedSupportsVision = await resolveVisionSupportCached(model.provider, model.model);
 			options.supportsVision = resolvedSupportsVision;
 			// Persist resolved capability via store update helper (avoid mutating model reference directly).
 			persistResolvedVisionSupport(model, resolvedSupportsVision);
@@ -133,6 +145,32 @@ async function toChooseModelParams(model: ChatModel): Promise<ChooseModelParams>
 		chatModel: model.model,
 		options,
 	};
+}
+
+async function resolveVisionSupportCached(providerId: string, modelId: string): Promise<boolean> {
+	const cacheKey = getVisionSupportCacheKey(providerId, modelId);
+
+	const cached = resolvedVisionSupportCache.get(cacheKey);
+	if (cached !== undefined) {
+		return cached;
+	}
+
+	const inflight = inflightVisionSupportRequests.get(cacheKey);
+	if (inflight) {
+		return inflight;
+	}
+
+	const request = resolveVisionSupport(providerId, modelId)
+		.then((supportsVision) => {
+			resolvedVisionSupportCache.set(cacheKey, supportsVision);
+			return supportsVision;
+		})
+		.finally(() => {
+			inflightVisionSupportRequests.delete(cacheKey);
+		});
+
+	inflightVisionSupportRequests.set(cacheKey, request);
+	return request;
 }
 
 /**
