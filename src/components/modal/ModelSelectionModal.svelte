@@ -11,6 +11,7 @@
   import {
     fetchOpenRouterModels,
     lookupOpenRouterModelSync,
+    extractCapabilities as extractOpenRouterCapabilities,
     formatCostPerMillion,
     type OpenRouterModelInfo,
   } from "../../providers/openrouterModels";
@@ -237,15 +238,16 @@
     if (providerId === "openrouter" && openRouterData) {
       const orInfo = lookupOpenRouterModelSync(openRouterData, modelId);
       if (orInfo) {
+        const caps = extractOpenRouterCapabilities(orInfo);
         return {
           name: orInfo.name,
           contextLength: orInfo.context_length,
           inputCost: orInfo.pricing?.prompt,
           outputCost: orInfo.pricing?.completion,
-          supportsToolCalls: orInfo.supports_tool_calls,
-          supportsVision: orInfo.supports_vision,
-          supportsReasoning: orInfo.supports_reasoning,
-          supportsStructuredOutput: orInfo.supports_structured_output,
+          supportsToolCalls: caps.supportsToolCalls,
+          supportsVision: caps.supportsVision,
+          supportsReasoning: caps.supportsReasoning,
+          supportsStructuredOutput: caps.supportsStructuredOutput,
         };
       }
     }
@@ -310,7 +312,8 @@
 
   // Handle model selection
   function handleSelect(provider: string, model: string) {
-    onSelect({ provider, model });
+    const info = getModelInfo(provider, model);
+    onSelect({ provider, model, supportsVision: info?.supportsVision });
   }
 </script>
 

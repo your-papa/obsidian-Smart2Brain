@@ -25,6 +25,13 @@ export interface ChatModelConfig {
 	 * Also used by our UI to show context usage.
 	 */
 	contextWindow: number;
+
+	/**
+	 * Whether the model supports vision (image input).
+	 * Populated from provider metadata (OpenRouter, Ollama, models.dev).
+	 * Used at runtime to determine if images can be sent to the model.
+	 */
+	supportsVision?: boolean;
 }
 
 /**
