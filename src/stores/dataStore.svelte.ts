@@ -216,6 +216,12 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 			includeMetadata: true,
 		},
 	},
+	read_attachment: {
+		enabled: true,
+		name: "read_attachment",
+		description:
+			"Read a PDF or text file from the vault. PDFs are returned as extracted text; text files (.md, .txt, .csv, .json) are returned as raw content. Images are not supported by this tool and should be attached directly in chat.",
+	},
 };
 
 /**

@@ -8,6 +8,7 @@ export type ModelType = "chat" | "embedding";
 export interface SelectedModel {
 	provider: string;
 	model: string;
+	supportsVision?: boolean;
 }
 
 export class ModelSelectionModal extends Modal {

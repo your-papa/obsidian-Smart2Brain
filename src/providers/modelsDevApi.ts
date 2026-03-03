@@ -197,12 +197,14 @@ export function extractChatModelConfig(info: ModelsDevModelInfo): {
 	supportsToolCalls: boolean;
 	supportsReasoning: boolean;
 	supportsStructuredOutput: boolean;
+	supportsVision: boolean;
 } {
 	return {
 		contextWindow: info.limit?.context ?? 128000,
 		supportsToolCalls: info.tool_call ?? false,
 		supportsReasoning: info.reasoning ?? false,
 		supportsStructuredOutput: info.structured_output ?? false,
+		supportsVision: info.attachment ?? false,
 	};
 }
 

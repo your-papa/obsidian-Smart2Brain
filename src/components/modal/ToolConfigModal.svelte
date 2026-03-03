@@ -123,6 +123,7 @@ const toolDisplayNames: Record<BuiltInToolId, string> = {
 	get_all_tags: "Get All Tags",
 	get_properties: "Get Properties",
 	execute_dataview_query: "Execute Dataview Query",
+	read_attachment: "Read Attachment",
 };
 
 onMount(() => {

@@ -7,21 +7,34 @@ import {
 	ToolMessage,
 	isAIMessage,
 } from "@langchain/core/messages";
+import type { MessageContentComplex } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { StreamEvent } from "@langchain/core/tracers/log_stream";
 import type { BaseCheckpointSaver, CheckpointTuple } from "@langchain/langgraph";
 import { MemorySaver } from "@langchain/langgraph";
 import { type ReactAgent, createAgent } from "langchain";
-import { Notice } from "obsidian";
+import { Notice, TFile } from "obsidian";
 
 import { ProviderEndpointError, ProviderNotFoundError } from "../providers/errors";
 import type { ChatModelConfig } from "../providers/index";
 import type { ProviderRegistry } from "../providers/registry";
 import { getData } from "../stores/dataStore.svelte";
-import type { ThreadError } from "../types/shared";
+import { getPlugin } from "../stores/state.svelte";
+import type { ChatAttachment, ThreadError } from "../types/shared";
+import { toBase64DataUri } from "../utils/attachments";
+import { extractTextFromPdf } from "../utils/pdfExtractor";
 import { Logger } from "../utils/logging";
 import { type ThreadSnapshot, type ThreadStore, createSnapshot } from "./memory/ThreadStore";
 import type { Telemetry } from "./telemetry/Telemetry";
+
+const MAX_IMAGE_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+const MAX_TEXT_ATTACHMENT_CHARS = 120_000;
+const MAX_PDF_EXTRACT_CHARS = 180_000;
+
+function truncateContent(content: string, maxChars: number): string {
+	if (content.length <= maxChars) return content;
+	return `${content.slice(0, maxChars)}\n\n[...truncated ${content.length - maxChars} characters to fit context limits...]`;
+}
 
 export interface ChooseModelParams {
 	provider: string;
@@ -36,6 +49,8 @@ export interface AgentRunOptions {
 	metadata?: Record<string, unknown>;
 	configurable?: Record<string, unknown>;
 	signal?: AbortSignal;
+	/** Optional attachments (images, PDFs) to include in the message */
+	attachments?: ChatAttachment[];
 }
 
 /** Options for editing a message (forks from checkpoint with new user message) */
@@ -44,6 +59,7 @@ export interface AgentEditOptions {
 	threadId: string;
 	checkpointId: string;
 	signal?: AbortSignal;
+	attachments?: ChatAttachment[];
 	metadata?: Record<string, unknown>;
 	configurable?: Record<string, unknown>;
 }
@@ -98,39 +114,39 @@ export type AgentStreamOptions = AgentRunOptions;
 
 export type AgentStreamChunk =
 	| {
-			type: "token";
-			token: string;
-			runId: string;
-			threadId: string;
-	  }
+		type: "token";
+		token: string;
+		runId: string;
+		threadId: string;
+	}
 	| {
-			type: "tool_start";
-			toolCallId: string;
-			toolName: string;
-			input: unknown;
-			runId: string;
-			threadId: string;
-	  }
+		type: "tool_start";
+		toolCallId: string;
+		toolName: string;
+		input: unknown;
+		runId: string;
+		threadId: string;
+	}
 	| {
-			type: "tool_end";
-			toolCallId: string;
-			toolName: string;
-			output: unknown;
-			runId: string;
-			threadId: string;
-	  }
+		type: "tool_end";
+		toolCallId: string;
+		toolName: string;
+		output: unknown;
+		runId: string;
+		threadId: string;
+	}
 	| {
-			type: "result";
-			result: AgentResult;
-			runId: string;
-			threadId: string;
-	  }
+		type: "result";
+		result: AgentResult;
+		runId: string;
+		threadId: string;
+	}
 	| {
-			type: "checkpoint_message";
-			message: BaseMessage;
-			runId: string;
-			threadId: string;
-	  };
+		type: "checkpoint_message";
+		message: BaseMessage;
+		runId: string;
+		threadId: string;
+	};
 
 interface SelectedModel {
 	provider: string;
@@ -173,6 +189,155 @@ export class Agent {
 		this.dirty = true;
 	}
 
+	/**
+	 * Returns whether the currently selected model supports vision/image input.
+	 */
+	get supportsVision(): boolean {
+		return this.selectedModel?.options?.supportsVision ?? false;
+	}
+
+	/**
+	 * Returns the current provider ID.
+	 */
+	get currentProvider(): string {
+		return this.selectedModel?.provider ?? "";
+	}
+
+	/**
+	 * Builds the message content for a HumanMessage, supporting multimodal attachments.
+	 *
+	 * - If no attachments: returns the plain query string
+	 * - If attachments with vision support: returns an array of content blocks
+	 *   (text + image_url for images, inline text for .md/.txt/.csv/.json)
+	 * - PDFs via OpenRouter: sent as base64 data URL using `type: "file"` (native processing)
+	 * - PDFs via other providers: text extracted locally via unpdf
+	 * - Images without vision: throws an error
+	 */
+	private async buildMessageContent(
+		query: string,
+		attachments?: ChatAttachment[],
+	): Promise<string | MessageContentComplex[]> {
+		if (!attachments || attachments.length === 0) {
+			return query;
+		}
+
+		const contentParts: MessageContentComplex[] = [{ type: "text", text: query }];
+		const hasImages = attachments.some((a) => a.mimeType.startsWith("image/"));
+		const skipImagesForNonVisionModel = hasImages && !this.supportsVision;
+		let addedImageSkipNotice = false;
+
+		// For non-vision models, skip image attachments but continue processing other supported files.
+
+		const app = getPlugin().app;
+
+		for (const attachment of attachments) {
+			if (attachment.mimeType.startsWith("image/")) {
+				if (skipImagesForNonVisionModel) {
+					if (!addedImageSkipNotice) {
+						contentParts.push({
+							type: "text",
+							text: "[Image attachments were skipped because the selected model does not support vision. Switch to a vision-capable model to analyze images.]",
+						});
+						addedImageSkipNotice = true;
+					}
+					continue;
+				}
+
+				// Read image from vault and encode as base64 data URI
+				const file = app.vault.getAbstractFileByPath(attachment.vaultPath);
+				if (!(file instanceof TFile)) {
+					contentParts.push({
+						type: "text",
+						text: `[Image "${attachment.name}" not found at ${attachment.vaultPath}]`,
+					});
+					continue;
+				}
+				const buffer = await app.vault.readBinary(file);
+				if (buffer.byteLength > MAX_IMAGE_ATTACHMENT_BYTES) {
+					throw new Error(
+						`Image attachment "${attachment.name}" exceeds the 15 MB size limit. Please attach a smaller image.`,
+					);
+				}
+				const dataUri = toBase64DataUri(buffer, attachment.mimeType);
+				contentParts.push({
+					type: "image_url",
+					image_url: { url: dataUri },
+				});
+			} else if (attachment.mimeType === "application/pdf") {
+				const file = app.vault.getAbstractFileByPath(attachment.vaultPath);
+				if (!(file instanceof TFile)) {
+					contentParts.push({
+						type: "text",
+						text: `[PDF "${attachment.name}" not found at ${attachment.vaultPath}]`,
+					});
+					continue;
+				}
+				const buffer = await app.vault.readBinary(file);
+
+				if (this.currentProvider === "openrouter") {
+					// OpenRouter: send PDF as base64 data URL via native file content type.
+					// OpenRouter processes it server-side (native model support or pdf-text fallback).
+					const dataUri = toBase64DataUri(buffer, "application/pdf");
+					contentParts.push({
+						type: "file",
+						file: {
+							filename: attachment.name,
+							file_data: dataUri,
+						},
+					} as unknown as MessageContentComplex);
+				} else {
+					// Other providers: extract text locally via unpdf
+					const data = new Uint8Array(buffer);
+					try {
+						const { text, totalPages } = await extractTextFromPdf(data);
+						if (text.trim()) {
+							const truncated = truncateContent(text, MAX_PDF_EXTRACT_CHARS);
+							contentParts.push({
+								type: "text",
+								text: `--- PDF: ${attachment.name} (${totalPages} pages) ---\n${truncated}\n--- End PDF ---`,
+							});
+						} else {
+							contentParts.push({
+								type: "text",
+								text: `[PDF "${attachment.name}" contains ${totalPages} page(s) but no extractable text. It may contain only images/scans.]`,
+							});
+						}
+					} catch (error) {
+						contentParts.push({
+							type: "text",
+							text: `[Error extracting text from PDF "${attachment.name}": ${error instanceof Error ? error.message : String(error)}]`,
+						});
+					}
+				}
+			} else {
+				// For text/json files, read as text
+				const file = app.vault.getAbstractFileByPath(attachment.vaultPath);
+				if (!(file instanceof TFile)) {
+					contentParts.push({
+						type: "text",
+						text: `[File "${attachment.name}" not found at ${attachment.vaultPath}]`,
+					});
+					continue;
+				}
+				try {
+					const content = await app.vault.read(file);
+					const truncated = truncateContent(content, MAX_TEXT_ATTACHMENT_CHARS);
+					contentParts.push({
+						type: "text",
+						text: `--- File: ${attachment.name} ---\n${truncated}\n--- End File ---`,
+					});
+				} catch (error) {
+					contentParts.push({
+						type: "text",
+						text: `[Error reading "${attachment.name}": ${error instanceof Error ? error.message : String(error)}]`,
+					});
+				}
+			}
+		}
+
+		return contentParts;
+	}
+
 	async chooseModel(params: ChooseModelParams): Promise<void> {
 		const { provider, chatModel, options } = params;
 
@@ -199,14 +364,31 @@ export class Agent {
 		this.dirty = true;
 	}
 
+	/**
+	 * Creates a HumanMessage with optional attachment metadata in additional_kwargs.
+	 * Attachment metadata is stored so it can be reconstructed from checkpoints.
+	 * Uses the object form so that multimodal content arrays (MessageContentComplex[])
+	 * are correctly assigned to BaseMessage.content instead of being silently dropped.
+	 */
+	private createHumanMessage(
+		content: string | MessageContentComplex[],
+		attachments?: ChatAttachment[],
+	): HumanMessage {
+		const additional_kwargs = attachments?.length ? { attachments } : undefined;
+		// Cast content — the HumanMessage constructor handles both string and
+		// MessageContentComplex[] at runtime, but the TS types are overly strict.
+		return new HumanMessage({ content: content as string, additional_kwargs });
+	}
+
 	async run(options: AgentRunOptions): Promise<AgentResult> {
 		const { query } = options;
+		const hasAttachments = Boolean(options.attachments?.length);
 		if (!this.selectedModel) {
 			throw new Error("No model selected. Call chooseModel() before run().");
 		}
 
-		if (!query || query.trim().length === 0) {
-			throw new Error("Query must be a non-empty string.");
+		if ((!query || query.trim().length === 0) && !hasAttachments) {
+			throw new Error("Query must be a non-empty string when no attachments are provided.");
 		}
 
 		const agent = await this.ensureAgent();
@@ -223,15 +405,12 @@ export class Agent {
 
 		const invokeConfig = this.buildRunnableConfig(options, threadId);
 
+		const normalizedQuery = query.trim().length > 0 ? query : "Please analyze the attached files.";
+		const messageContent = await this.buildMessageContent(normalizedQuery, options.attachments);
+		const humanMessage = this.createHumanMessage(messageContent, options.attachments);
+
 		const rawResult = await agent.invoke(
-			{
-				messages: [
-					{
-						role: "user",
-						content: query,
-					},
-				],
-			},
+			{ messages: [humanMessage] },
 			invokeConfig,
 		);
 
@@ -261,12 +440,13 @@ export class Agent {
 
 	async *streamTokens(options: AgentStreamOptions): AsyncGenerator<AgentStreamChunk> {
 		const { query } = options;
+		const hasAttachments = Boolean(options.attachments?.length);
 		if (!this.selectedModel) {
 			throw new Error("No model selected. Call chooseModel() before streamTokens().");
 		}
 
-		if (!query || query.trim().length === 0) {
-			throw new Error("Query must be a non-empty string.");
+		if ((!query || query.trim().length === 0) && !hasAttachments) {
+			throw new Error("Query must be a non-empty string when no attachments are provided.");
 		}
 
 		const agent = await this.ensureAgent();
@@ -287,16 +467,11 @@ export class Agent {
 			version: "v2" as const,
 		} as StreamEventsConfig;
 
-		const input = {
-			messages: [
-				{
-					role: "user",
-					content: query,
-				},
-			],
-		};
+		const normalizedQuery = query.trim().length > 0 ? query : "Please analyze the attached files.";
+		const messageContent = await this.buildMessageContent(normalizedQuery, options.attachments);
+		const humanMessage = this.createHumanMessage(messageContent, options.attachments);
 
-		const stream = agent.streamEvents(input, streamConfig);
+		const stream = agent.streamEvents({ messages: [humanMessage] }, streamConfig);
 
 		let rawResult: unknown;
 		// Track tool calls in progress to correlate start/end events
@@ -482,13 +657,11 @@ export class Agent {
 			version: "v2" as const,
 		} as StreamEventsConfig;
 
+		const messageContent = await this.buildMessageContent(query, options.attachments);
+		const humanMessage = this.createHumanMessage(messageContent, options.attachments);
+
 		const input = {
-			messages: [
-				{
-					role: "user",
-					content: query,
-				},
-			],
+			messages: [humanMessage],
 		};
 
 		const stream = agent.streamEvents(input, streamConfig);
@@ -820,10 +993,10 @@ export class Agent {
 		const baseSnapshot = metadata
 			? { ...metadata }
 			: createSnapshot({
-					threadId,
-					updatedAt: checkpointTimestamp,
-					createdAt: checkpointTimestamp,
-				});
+				threadId,
+				updatedAt: checkpointTimestamp,
+				createdAt: checkpointTimestamp,
+			});
 		const messages = tuple ? this.extractMessagesFromCheckpoint(tuple) : [];
 		const { lastError, errorCount } = tuple
 			? this.extractErrorsFromCheckpoint(tuple)
@@ -1082,24 +1255,29 @@ export class Agent {
 		// Determine type from class name in id array
 		const className = this.readLangChainClassName(msg.id);
 
+		// Cast content — constructors handle both string and MessageContentComplex[] at runtime
+		const c = content as string;
+
 		switch (className) {
 			case "HumanMessage":
-			case "HumanMessageChunk":
-				return new HumanMessage({ content, id });
+			case "HumanMessageChunk": {
+				const additional_kwargs = (kwargs.additional_kwargs as Record<string, unknown>) ?? undefined;
+				return new HumanMessage({ content: c, id, additional_kwargs });
+			}
 			case "AIMessage":
 			case "AIMessageChunk": {
 				const toolCalls = this.extractToolCalls(kwargs);
-				return new AIMessage({ content, id, tool_calls: toolCalls });
+				return new AIMessage({ content: c, id, tool_calls: toolCalls });
 			}
 			case "SystemMessage":
-				return new SystemMessage({ content, id });
+				return new SystemMessage({ content: c, id });
 			case "ToolMessage": {
 				const toolCallId = typeof kwargs.tool_call_id === "string" ? kwargs.tool_call_id : "";
-				return new ToolMessage({ content, tool_call_id: toolCallId, id });
+				return new ToolMessage({ content: c, tool_call_id: toolCallId, id });
 			}
 			default:
 				// Default to AIMessage for unknown types
-				return new AIMessage({ content, id });
+				return new AIMessage({ content: c, id });
 		}
 	}
 
@@ -1107,32 +1285,45 @@ export class Agent {
 		const content = this.extractContent(msg);
 		const id = typeof msg.id === "string" ? msg.id : undefined;
 
+		// Cast content — constructors handle both string and MessageContentComplex[] at runtime
+		const c = content as string;
+
 		switch (type.toLowerCase()) {
 			case "human":
-			case "humanmessage":
-				return new HumanMessage({ content, id });
+			case "humanmessage": {
+				const additional_kwargs = (msg.additional_kwargs as Record<string, unknown>) ?? undefined;
+				return new HumanMessage({ content: c, id, additional_kwargs });
+			}
 			case "ai":
 			case "aimessage": {
 				const toolCalls = this.extractToolCalls(msg);
-				return new AIMessage({ content, id, tool_calls: toolCalls });
+				return new AIMessage({ content: c, id, tool_calls: toolCalls });
 			}
 			case "system":
 			case "systemmessage":
-				return new SystemMessage({ content, id });
+				return new SystemMessage({ content: c, id });
 			case "tool":
 			case "toolmessage": {
 				const toolCallId = typeof msg.tool_call_id === "string" ? msg.tool_call_id : "";
-				return new ToolMessage({ content, tool_call_id: toolCallId, id });
+				return new ToolMessage({ content: c, tool_call_id: toolCallId, id });
 			}
 			default:
 				return undefined;
 		}
 	}
 
-	private extractContent(obj: Record<string, unknown>): string {
+	private extractContent(obj: Record<string, unknown>): string | MessageContentComplex[] {
 		const content = obj.content;
 		if (typeof content === "string") return content;
 		if (Array.isArray(content)) {
+			// If content has non-text items (e.g. image_url), preserve the full array
+			const hasNonTextItems = content.some(
+				(c) => c && typeof c === "object" && (c as { type?: unknown }).type !== "text",
+			);
+			if (hasNonTextItems) {
+				return content as MessageContentComplex[];
+			}
+			// Text-only arrays can be joined into a single string
 			return content
 				.map((c) => {
 					if (typeof c === "string") return c;
@@ -1303,9 +1494,9 @@ export class Agent {
 	private isAgentOutputCandidate(value: unknown): value is { messages: unknown[] } {
 		return Boolean(
 			value &&
-				typeof value === "object" &&
-				"messages" in (value as Record<string, unknown>) &&
-				Array.isArray((value as { messages?: unknown }).messages),
+			typeof value === "object" &&
+			"messages" in (value as Record<string, unknown>) &&
+			Array.isArray((value as { messages?: unknown }).messages),
 		);
 	}
 
