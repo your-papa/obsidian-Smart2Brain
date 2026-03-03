@@ -41,6 +41,8 @@
   /** Drag-and-drop state */
   let isDragging = $state(false);
   let dragCounter = 0;
+  let dragMessage = $state("Drop files here");
+  let dragHasIssue = $state(false);
 
   const ACCEPTED_EXTENSIONS = new Set([
     "txt",
@@ -53,6 +55,15 @@
     "gif",
     "webp",
     "pdf",
+  ]);
+
+  const SUPPORTED_DRAG_MIME_PREFIXES = ["image/"];
+  const SUPPORTED_DRAG_MIMES = new Set([
+    "application/pdf",
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
   ]);
 
   const models = useAvailableModels();
@@ -274,18 +285,76 @@
     input.value = "";
   }
 
+  function getDragFeedback(dataTransfer?: DataTransfer): {
+    message: string;
+    hasIssue: boolean;
+    shouldBlockDrop: boolean;
+  } {
+    if (!dataTransfer) {
+      return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
+    }
+
+    const fileItems = Array.from(dataTransfer.items ?? []).filter((item) => item.kind === "file");
+    if (fileItems.length === 0) {
+      return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
+    }
+
+    let hasImage = false;
+    let hasClearlyUnsupported = false;
+
+    for (const item of fileItems) {
+      const mime = item.type.toLowerCase();
+      if (!mime) continue;
+
+      if (mime.startsWith("image/")) {
+        hasImage = true;
+        continue;
+      }
+
+      const hasSupportedPrefix = SUPPORTED_DRAG_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix));
+      if (!SUPPORTED_DRAG_MIMES.has(mime) && !hasSupportedPrefix) {
+        hasClearlyUnsupported = true;
+      }
+    }
+
+    if (hasImage && selectedModelSupportsVision === false) {
+      const modelName = selectedChatModel?.model ?? "current model";
+      return {
+        message: `Images are not supported by ${modelName}. Switch to a vision-capable model.`,
+        hasIssue: true,
+        shouldBlockDrop: true,
+      };
+    }
+
+    if (hasClearlyUnsupported) {
+      return {
+        message: "Some files may be unsupported (accepted: txt, md, csv, json, images, pdf).",
+        hasIssue: true,
+        shouldBlockDrop: false,
+      };
+    }
+
+    return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
+  }
+
   function onDragEnter(event: DragEvent) {
     event.preventDefault();
     dragCounter++;
     if (event.dataTransfer?.types.includes("Files")) {
       isDragging = true;
+      const feedback = getDragFeedback(event.dataTransfer);
+      dragMessage = feedback.message;
+      dragHasIssue = feedback.hasIssue;
     }
   }
 
   function onDragOver(event: DragEvent) {
     event.preventDefault();
     if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "copy";
+      const feedback = getDragFeedback(event.dataTransfer);
+      dragMessage = feedback.message;
+      dragHasIssue = feedback.hasIssue;
+      event.dataTransfer.dropEffect = feedback.shouldBlockDrop ? "none" : "copy";
     }
   }
 
@@ -295,6 +364,8 @@
     if (dragCounter <= 0) {
       isDragging = false;
       dragCounter = 0;
+      dragMessage = "Drop files here";
+      dragHasIssue = false;
     }
   }
 
@@ -302,6 +373,8 @@
     event.preventDefault();
     isDragging = false;
     dragCounter = 0;
+    dragMessage = "Drop files here";
+    dragHasIssue = false;
 
     const files = event.dataTransfer?.files;
     if (!files || files.length === 0) return;
@@ -364,14 +437,16 @@
   >
     {#if isDragging}
       <div
-        class="flex items-center justify-center gap-2 py-4 text-[--text-accent] text-sm font-medium"
+        class="flex items-center justify-center gap-2 py-4 text-sm font-medium {dragHasIssue
+          ? 'text-[--text-error]'
+          : 'text-[--text-accent]'}"
       >
         <div
           class="w-[--icon-s] h-[--icon-s]"
           style="--icon-size: var(--icon-s)"
-          use:icon={"upload"}
+          use:icon={dragHasIssue ? "alert-triangle" : "upload"}
         ></div>
-        <span>Drop files here</span>
+        <span>{dragMessage}</span>
       </div>
     {/if}
     <div class="flex flex-row flex-wrap gap-2">
