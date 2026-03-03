@@ -198,7 +198,9 @@ export class Agent {
 	 *
 	 * - If no attachments: returns the plain query string
 	 * - If attachments with vision support: returns an array of content blocks
-	 *   (text + image_url for images, text extraction for PDFs, inline text for .md/.txt/.csv)
+	 *   (text + image_url for images, inline text for .md/.txt/.csv/.json)
+	 * - PDFs via OpenRouter: sent as base64 data URL using `type: "file"` (native processing)
+	 * - PDFs via other providers: text extracted locally via unpdf
 	 * - Images without vision: throws an error
 	 */
 	private async buildMessageContent(
@@ -239,7 +241,6 @@ export class Agent {
 					image_url: { url: dataUri },
 				});
 			} else if (attachment.mimeType === "application/pdf") {
-				// PDF handling: extract text for all providers
 				const file = app.vault.getAbstractFileByPath(attachment.vaultPath);
 				if (!file) {
 					contentParts.push({
@@ -249,26 +250,40 @@ export class Agent {
 					continue;
 				}
 				const buffer = await app.vault.readBinary(file as TFile);
-				const data = new Uint8Array(buffer);
 
-				try {
-					const { text, totalPages } = await extractTextFromPdf(data);
-					if (text.trim()) {
+				if (this.currentProvider === "openrouter") {
+					// OpenRouter: send PDF as base64 data URL via native file content type.
+					// OpenRouter processes it server-side (native model support or pdf-text fallback).
+					const dataUri = toBase64DataUri(buffer, "application/pdf");
+					contentParts.push({
+						type: "file",
+						file: {
+							filename: attachment.name,
+							file_data: dataUri,
+						},
+					} as unknown as MessageContentComplex);
+				} else {
+					// Other providers: extract text locally via unpdf
+					const data = new Uint8Array(buffer);
+					try {
+						const { text, totalPages } = await extractTextFromPdf(data);
+						if (text.trim()) {
+							contentParts.push({
+								type: "text",
+								text: `--- PDF: ${attachment.name} (${totalPages} pages) ---\n${text}\n--- End PDF ---`,
+							});
+						} else {
+							contentParts.push({
+								type: "text",
+								text: `[PDF "${attachment.name}" contains ${totalPages} page(s) but no extractable text. It may contain only images/scans.]`,
+							});
+						}
+					} catch (error) {
 						contentParts.push({
 							type: "text",
-							text: `--- PDF: ${attachment.name} (${totalPages} pages) ---\n${text}\n--- End PDF ---`,
-						});
-					} else {
-						contentParts.push({
-							type: "text",
-							text: `[PDF "${attachment.name}" contains ${totalPages} page(s) but no extractable text. It may contain only images/scans.]`,
+							text: `[Error extracting text from PDF "${attachment.name}": ${error instanceof Error ? error.message : String(error)}]`,
 						});
 					}
-				} catch (error) {
-					contentParts.push({
-						type: "text",
-						text: `[Error extracting text from PDF "${attachment.name}": ${error instanceof Error ? error.message : String(error)}]`,
-					});
 				}
 			} else {
 				// For text/json files, read as text
