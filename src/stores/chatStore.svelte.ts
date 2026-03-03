@@ -1072,11 +1072,12 @@ export class ChatSession {
 	 * that their vaultPath references stay correct for the rest of the pipeline.
 	 */
 	private async relocatePendingAttachments(attachments: ChatAttachment[]): Promise<void> {
-		const pending = attachments.filter((a) => a.vaultPath.includes("/_pending/"));
+		const chatFolder = getData().targetFolder;
+		const pendingPrefix = `${chatFolder}/attachments/_pending/`;
+		const pending = attachments.filter((a) => a.vaultPath.startsWith(pendingPrefix));
 		if (pending.length === 0) return;
 
 		const adapter = getPlugin().app.vault.adapter;
-		const chatFolder = getData().targetFolder;
 		const destDir = `${chatFolder}/attachments/${this.id}`;
 
 		try {

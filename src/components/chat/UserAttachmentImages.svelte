@@ -18,6 +18,7 @@
     const app = getPlugin()?.app;
     if (!app) return;
 
+    let cancelled = false;
     const newUrls = new Map<string, string>();
     const pending: Promise<void>[] = [];
 
@@ -37,8 +38,14 @@
     }
 
     Promise.all(pending).then(() => {
-      previewUrls = newUrls;
+      if (!cancelled) {
+        previewUrls = newUrls;
+      }
     });
+
+    return () => {
+      cancelled = true;
+    };
   });
 </script>
 

@@ -27,6 +27,15 @@ import { Logger } from "../utils/logging";
 import { type ThreadSnapshot, type ThreadStore, createSnapshot } from "./memory/ThreadStore";
 import type { Telemetry } from "./telemetry/Telemetry";
 
+const MAX_IMAGE_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+const MAX_TEXT_ATTACHMENT_CHARS = 120_000;
+const MAX_PDF_EXTRACT_CHARS = 180_000;
+
+function truncateContent(content: string, maxChars: number): string {
+	if (content.length <= maxChars) return content;
+	return `${content.slice(0, maxChars)}\n\n[...truncated ${content.length - maxChars} characters to fit context limits...]`;
+}
+
 export interface ChooseModelParams {
 	provider: string;
 	chatModel: string;
@@ -227,14 +236,19 @@ export class Agent {
 			if (attachment.mimeType.startsWith("image/")) {
 				// Read image from vault and encode as base64 data URI
 				const file = app.vault.getAbstractFileByPath(attachment.vaultPath);
-				if (!file) {
+				if (!(file instanceof TFile)) {
 					contentParts.push({
 						type: "text",
 						text: `[Image "${attachment.name}" not found at ${attachment.vaultPath}]`,
 					});
 					continue;
 				}
-				const buffer = await app.vault.readBinary(file as TFile);
+				const buffer = await app.vault.readBinary(file);
+				if (buffer.byteLength > MAX_IMAGE_ATTACHMENT_BYTES) {
+					throw new Error(
+						`Image attachment "${attachment.name}" exceeds the 15 MB size limit. Please attach a smaller image.`,
+					);
+				}
 				const dataUri = toBase64DataUri(buffer, attachment.mimeType);
 				contentParts.push({
 					type: "image_url",
@@ -242,14 +256,14 @@ export class Agent {
 				});
 			} else if (attachment.mimeType === "application/pdf") {
 				const file = app.vault.getAbstractFileByPath(attachment.vaultPath);
-				if (!file) {
+				if (!(file instanceof TFile)) {
 					contentParts.push({
 						type: "text",
 						text: `[PDF "${attachment.name}" not found at ${attachment.vaultPath}]`,
 					});
 					continue;
 				}
-				const buffer = await app.vault.readBinary(file as TFile);
+				const buffer = await app.vault.readBinary(file);
 
 				if (this.currentProvider === "openrouter") {
 					// OpenRouter: send PDF as base64 data URL via native file content type.
@@ -268,9 +282,10 @@ export class Agent {
 					try {
 						const { text, totalPages } = await extractTextFromPdf(data);
 						if (text.trim()) {
+							const truncated = truncateContent(text, MAX_PDF_EXTRACT_CHARS);
 							contentParts.push({
 								type: "text",
-								text: `--- PDF: ${attachment.name} (${totalPages} pages) ---\n${text}\n--- End PDF ---`,
+								text: `--- PDF: ${attachment.name} (${totalPages} pages) ---\n${truncated}\n--- End PDF ---`,
 							});
 						} else {
 							contentParts.push({
@@ -288,7 +303,7 @@ export class Agent {
 			} else {
 				// For text/json files, read as text
 				const file = app.vault.getAbstractFileByPath(attachment.vaultPath);
-				if (!file) {
+				if (!(file instanceof TFile)) {
 					contentParts.push({
 						type: "text",
 						text: `[File "${attachment.name}" not found at ${attachment.vaultPath}]`,
@@ -296,10 +311,11 @@ export class Agent {
 					continue;
 				}
 				try {
-					const content = await app.vault.read(file as TFile);
+					const content = await app.vault.read(file);
+					const truncated = truncateContent(content, MAX_TEXT_ATTACHMENT_CHARS);
 					contentParts.push({
 						type: "text",
-						text: `--- File: ${attachment.name} ---\n${content}\n--- End File ---`,
+						text: `--- File: ${attachment.name} ---\n${truncated}\n--- End File ---`,
 					});
 				} catch (error) {
 					contentParts.push({
@@ -357,12 +373,13 @@ export class Agent {
 
 	async run(options: AgentRunOptions): Promise<AgentResult> {
 		const { query } = options;
+		const hasAttachments = Boolean(options.attachments?.length);
 		if (!this.selectedModel) {
 			throw new Error("No model selected. Call chooseModel() before run().");
 		}
 
-		if (!query || query.trim().length === 0) {
-			throw new Error("Query must be a non-empty string.");
+		if ((!query || query.trim().length === 0) && !hasAttachments) {
+			throw new Error("Query must be a non-empty string when no attachments are provided.");
 		}
 
 		const agent = await this.ensureAgent();
@@ -379,7 +396,8 @@ export class Agent {
 
 		const invokeConfig = this.buildRunnableConfig(options, threadId);
 
-		const messageContent = await this.buildMessageContent(query, options.attachments);
+		const normalizedQuery = query.trim().length > 0 ? query : "Please analyze the attached files.";
+		const messageContent = await this.buildMessageContent(normalizedQuery, options.attachments);
 		const humanMessage = this.createHumanMessage(messageContent, options.attachments);
 
 		const rawResult = await agent.invoke(
@@ -413,12 +431,13 @@ export class Agent {
 
 	async *streamTokens(options: AgentStreamOptions): AsyncGenerator<AgentStreamChunk> {
 		const { query } = options;
+		const hasAttachments = Boolean(options.attachments?.length);
 		if (!this.selectedModel) {
 			throw new Error("No model selected. Call chooseModel() before streamTokens().");
 		}
 
-		if (!query || query.trim().length === 0) {
-			throw new Error("Query must be a non-empty string.");
+		if ((!query || query.trim().length === 0) && !hasAttachments) {
+			throw new Error("Query must be a non-empty string when no attachments are provided.");
 		}
 
 		const agent = await this.ensureAgent();
@@ -439,7 +458,8 @@ export class Agent {
 			version: "v2" as const,
 		} as StreamEventsConfig;
 
-		const messageContent = await this.buildMessageContent(query, options.attachments);
+		const normalizedQuery = query.trim().length > 0 ? query : "Please analyze the attached files.";
+		const messageContent = await this.buildMessageContent(normalizedQuery, options.attachments);
 		const humanMessage = this.createHumanMessage(messageContent, options.attachments);
 
 		const stream = agent.streamEvents({ messages: [humanMessage] }, streamConfig);

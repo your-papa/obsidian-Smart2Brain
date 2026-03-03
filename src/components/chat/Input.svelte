@@ -22,6 +22,9 @@
   const acceptedFileTypes =
     ".txt, .md, .csv, .json, .png, .jpg, .jpeg, .gif, .webp, .pdf, image/png, image/jpeg, image/gif, image/webp, application/pdf, text/plain, text/markdown, text/csv";
 
+  const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB per file
+  const MAX_TOTAL_ATTACHMENTS_BYTES = 25 * 1024 * 1024; // 25 MB per message
+
   const { messenger, onFocusChange, onMessageSent }: Props = $props();
 
   // biome-ignore lint/style/useConst: Svelte bind:this requires let
@@ -30,6 +33,7 @@
   let inputValue = $state("");
 
   let attachments: ChatAttachment[] = $state([]);
+  let attachmentSizes: Map<string, number> = $state(new Map());
   /** Object URLs for image previews (cleaned up on destroy) */
   let previewUrls: Map<string, string> = $state(new Map());
   /** Tracks files currently being saved to vault */
@@ -52,6 +56,18 @@
   ]);
 
   const models = useAvailableModels();
+
+  const selectedChatModel = $derived.by(() => {
+    const selectedAgent = getData().getSelectedAgent();
+    return selectedAgent?.chatModel ?? getData().getDefaultChatModel();
+  });
+
+  const selectedModelSupportsVision = $derived.by(() => {
+    const supportsVision = selectedChatModel?.modelConfig?.supportsVision;
+    return supportsVision;
+  });
+
+  const canSendMessage = $derived(inputValue.trim().length > 0 || attachments.length > 0);
 
   export function focusEditor() {
     requestAnimationFrame(() => {
@@ -101,17 +117,23 @@
         }
 
         // Regular Enter: send message
-        if (inputValue.trim().length !== 0) {
+        if (savingFiles) {
+          new Notice("Please wait for attachments to finish saving");
+        } else if (canSendMessage) {
           sendMessage();
         } else {
-          new Notice("Your second brain does not understand empty messages");
+          new Notice("Add text or attach a file before sending");
         }
         return true;
       },
       onSubmit: () => {
         // Mod+Enter: send message
-        if (inputValue.trim().length !== 0) {
+        if (savingFiles) {
+          new Notice("Please wait for attachments to finish saving");
+        } else if (canSendMessage) {
           sendMessage();
+        } else {
+          new Notice("Add text or attach a file before sending");
         }
       },
       onFocus: () => {
@@ -129,8 +151,20 @@
   }
 
   function sendMessage() {
-    messenger.sendMessage(inputValue, attachments.length > 0 ? [...attachments] : undefined);
+    if (savingFiles) {
+      new Notice("Please wait for attachments to finish saving");
+      return;
+    }
+    if (!canSendMessage) {
+      new Notice("Add text or attach a file before sending");
+      return;
+    }
+
+    const contentToSend =
+      inputValue.trim().length > 0 ? inputValue : "Please analyze the attached files.";
+    messenger.sendMessage(contentToSend, attachments.length > 0 ? [...attachments] : undefined);
     attachments = [];
+    attachmentSizes = new Map();
     for (const url of previewUrls.values()) {
       URL.revokeObjectURL(url);
     }
@@ -160,10 +194,37 @@
       }
 
       let count = 0;
+      let warnedUnknownVision = false;
+      let totalBytes = [...attachmentSizes.values()].reduce((sum, size) => sum + size, 0);
+
       for (const file of files) {
         const ext = file.name.split(".").pop()?.toLowerCase() ?? "bin";
         if (!ACCEPTED_EXTENSIONS.has(ext)) {
           new Notice(`Unsupported file type: .${ext}`);
+          continue;
+        }
+
+        const isImage = ["png", "jpg", "jpeg", "gif", "webp"].includes(ext);
+        if (isImage && selectedModelSupportsVision === false) {
+          const modelName = selectedChatModel?.model ?? "the selected model";
+          new Notice(
+            `Image attachments require a vision-capable model. Switch models to attach images (current: ${modelName}).`,
+          );
+          continue;
+        }
+
+        if (isImage && selectedModelSupportsVision === undefined && !warnedUnknownVision) {
+          warnedUnknownVision = true;
+          new Notice("Model vision support is unknown; image analysis may fail for this model.");
+        }
+
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          new Notice(`File too large: ${file.name} exceeds 15 MB per-file limit.`);
+          continue;
+        }
+
+        if (totalBytes + file.size > MAX_TOTAL_ATTACHMENTS_BYTES) {
+          new Notice("Total attachment size exceeds 25 MB limit for one message.");
           continue;
         }
 
@@ -173,6 +234,7 @@
         // Read file as ArrayBuffer and save to vault
         const buffer = await file.arrayBuffer();
         await plugin.app.vault.adapter.writeBinary(vaultPath, buffer);
+        totalBytes += file.size;
 
         const mime = mimeFromExtension(ext);
         const attachment: ChatAttachment = {
@@ -181,6 +243,8 @@
           vaultPath,
         };
         attachments.push(attachment);
+        attachmentSizes.set(vaultPath, file.size);
+        attachmentSizes = new Map(attachmentSizes);
         count++;
 
         // Create preview URL for images
@@ -250,6 +314,8 @@
       attachments.splice(idx, 1);
       attachments = [...attachments];
     }
+    attachmentSizes.delete(attachment.vaultPath);
+    attachmentSizes = new Map(attachmentSizes);
     // Clean up preview URL
     const url = previewUrls.get(attachment.vaultPath);
     if (url) {
@@ -393,7 +459,7 @@
       <div class="ml-auto">
         {#if !messenger.session || messenger.session.messageState === MessageState.idle}
           <button
-            disabled={inputValue.trim().length === 0}
+            disabled={!canSendMessage || savingFiles}
             aria-label="send message"
             title="Send message"
             onclick={sendMessage}
