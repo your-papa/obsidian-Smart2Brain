@@ -281,7 +281,6 @@ export const DEFAULT_SETTINGS: PluginData = {
 	retrieveTopK: 100,
 	assistantLanguage: "en",
 	initialAssistantMessageContent: "Hi",
-	defaultChatName: "New Chat",
 	targetFolder: "Chats",
 
 	// File filtering
@@ -462,14 +461,6 @@ export class PluginDataStore {
 			if (this.#data.includeFF.includes(val)) return;
 			this.#data.includeFF.push(val);
 		}
-		this.saveSettings();
-	}
-
-	get defaultChatName() {
-		return this.#data.defaultChatName;
-	}
-	set defaultChatName(val: string) {
-		this.#data.defaultChatName = val;
 		this.saveSettings();
 	}
 

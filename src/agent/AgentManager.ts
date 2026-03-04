@@ -12,7 +12,7 @@ import { extractCapabilities as extractOpenRouterCapabilities, fetchOpenRouterMo
 
 import { ProviderAuthError, ProviderEndpointError, ProviderRegistry, ProviderRegistryError } from "../providers/index";
 import type { ChatAttachment } from "../types/shared";
-import { createThreadId } from "../utils/threadId";
+import { createThreadId, NEW_CHAT_NAME } from "../utils/threadId";
 import { Logger } from "../utils/logging";
 import { Agent, type CheckpointHistoryItem, type ChooseModelParams, type ThreadHistory } from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
@@ -1039,7 +1039,7 @@ export class AgentManager {
 
 		const data = getData();
 		const folder = data.targetFolder;
-		const defaultChatName = data.defaultChatName?.trim() || "New Chat";
+		const defaultChatName = NEW_CHAT_NAME;
 
 		// Reset to default agent if one is set
 		if (data.defaultAgentId && data.selectedAgentId !== data.defaultAgentId) {

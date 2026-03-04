@@ -8,6 +8,7 @@
   import { icon } from "../../utils/utils";
   import type { ChatAttachment } from "../../types/shared";
   import { mimeFromExtension } from "../../utils/attachments";
+  import { NEW_CHAT_NAME } from "../../utils/threadId";
   import { getData } from "../../stores/dataStore.svelte";
   import AgentPopover from "./AgentPopover.svelte";
   import ModelPopover from "./ModelPopover.svelte";
@@ -203,8 +204,7 @@
 
     let attempt = 1;
     while (attempt < 10_000) {
-      const storedName =
-        attempt === 1 ? safeName : `${baseName} (${attempt})${extension}`;
+      const storedName = attempt === 1 ? safeName : `${baseName} (${attempt})${extension}`;
       const vaultPath = normalizePath(`${attachDir}/${storedName}`);
 
       if (!(await adapter.exists(vaultPath))) {
@@ -225,12 +225,11 @@
     const plugin = getPlugin();
     const data = getData();
     const threadId = messenger.session?.id;
-    const defaultChatName = data.defaultChatName?.trim() || "New Chat";
     const chatFolder = data.targetFolder;
     const baseAttachDir = normalizePath(`${chatFolder}/attachments`);
     // Use a stable temp directory when no session exists yet.
     // sendMessage() will relocate these files once a thread ID is assigned.
-    const isDraftThread = !threadId || threadId === defaultChatName;
+    const isDraftThread = !threadId || threadId === NEW_CHAT_NAME;
     const attachDir = isDraftThread
       ? normalizePath(`${chatFolder}/attachments/_pending`)
       : normalizePath(await plugin.agentManager.getAttachmentDirectory(threadId));

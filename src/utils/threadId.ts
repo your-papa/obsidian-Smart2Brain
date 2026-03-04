@@ -1,3 +1,5 @@
+export const NEW_CHAT_NAME = "New Chat";
+
 export function createThreadId(): string {
 	const now = new Date();
 	const year = now.getFullYear();
