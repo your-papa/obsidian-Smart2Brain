@@ -13,30 +13,9 @@ import type { AgentManager } from "../agent/AgentManager";
 import type { ChatModelConfig } from "../providers/index";
 import type { ChatAttachment, ThreadError } from "../types/shared";
 import { NEW_CHAT_NAME } from "../utils/threadId";
-<<<<<<< ours
-<<<<<<< ours
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { DEFAULT_AGENT_ID, getData } from "./dataStore.svelte";
-||||||| ancestor
-import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { getData } from "./dataStore.svelte";
-=======
-import {
-	type UUIDv7,
-	dateFromUUIDv7,
-	genUUIDv7,
-} from "../utils/uuid7Validator";
-||||||| ancestor
-import {
-	type UUIDv7,
-	dateFromUUIDv7,
-	genUUIDv7,
-} from "../utils/uuid7Validator";
-=======
-import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
->>>>>>> theirs
-import { getData } from "./dataStore.svelte";
->>>>>>> theirs
 import { getPlugin } from "./state.svelte";
 import { Logger } from "../utils/logging";
 
@@ -1035,28 +1014,8 @@ export function baseMessagesToMessagePairs(
 			messagePairs.push({
 				id: pairId,
 				userMessage: { content: userContent, attachments },
-<<<<<<< ours
-<<<<<<< ours
 				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state),
 				generation: deriveGenerationFromAssistantMessages(assistantMessages),
-||||||| ancestor
-				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state),
-=======
-				assistantMessage: mergeAssistantMessages(
-					assistantMessages,
-					toolOutputs,
-					state,
-				),
->>>>>>> theirs
-||||||| ancestor
-				assistantMessage: mergeAssistantMessages(
-					assistantMessages,
-					toolOutputs,
-					state,
-				),
-=======
-				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state),
->>>>>>> theirs
 				regenerateFromCheckpointId,
 				editFromCheckpointId,
 				userBranchInfo,
@@ -1746,15 +1705,7 @@ export class Messenger {
 		} catch {
 			return null;
 		}
-<<<<<<< ours
 		return null;
-||||||| ancestor
-		if (!threadId || threadId === "New Chat") return null;
-		return threadId;
-=======
-		if (!threadId || threadId === NEW_CHAT_NAME) return null;
-		return threadId;
->>>>>>> theirs
 	}
 
 	private getLastViewedCheckpointId(history: ThreadHistory | null): string | undefined {

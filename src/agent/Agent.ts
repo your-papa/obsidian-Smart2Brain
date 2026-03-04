@@ -1291,7 +1291,6 @@ export class Agent {
 			case "AIMessage":
 			case "AIMessageChunk": {
 				const toolCalls = this.extractToolCalls(kwargs);
-<<<<<<< ours
 				return new AIMessage({
 					content,
 					id,
@@ -1299,11 +1298,6 @@ export class Agent {
 					additional_kwargs: additionalKwargs ?? {},
 					response_metadata: responseMetadata ?? {},
 				});
-||||||| ancestor
-				return new AIMessage({ content, id, tool_calls: toolCalls });
-=======
-				return new AIMessage({ content: c, id, tool_calls: toolCalls });
->>>>>>> theirs
 			}
 			case "SystemMessage":
 				return new SystemMessage({ content: c, id });
@@ -1313,18 +1307,12 @@ export class Agent {
 			}
 			default:
 				// Default to AIMessage for unknown types
-<<<<<<< ours
 				return new AIMessage({
 					content,
 					id,
 					additional_kwargs: additionalKwargs ?? {},
 					response_metadata: responseMetadata ?? {},
 				});
-||||||| ancestor
-				return new AIMessage({ content, id });
-=======
-				return new AIMessage({ content: c, id });
->>>>>>> theirs
 		}
 	}
 
@@ -1346,7 +1334,6 @@ export class Agent {
 			case "ai":
 			case "aimessage": {
 				const toolCalls = this.extractToolCalls(msg);
-<<<<<<< ours
 				return new AIMessage({
 					content,
 					id,
@@ -1354,11 +1341,6 @@ export class Agent {
 					additional_kwargs: additionalKwargs ?? {},
 					response_metadata: responseMetadata ?? {},
 				});
-||||||| ancestor
-				return new AIMessage({ content, id, tool_calls: toolCalls });
-=======
-				return new AIMessage({ content: c, id, tool_calls: toolCalls });
->>>>>>> theirs
 			}
 			case "system":
 			case "systemmessage":
@@ -1373,7 +1355,6 @@ export class Agent {
 		}
 	}
 
-<<<<<<< ours
 	private asPlainRecord(value: unknown): Record<string, unknown> | undefined {
 		if (!value || typeof value !== "object" || Array.isArray(value)) {
 			return undefined;
@@ -1382,11 +1363,6 @@ export class Agent {
 	}
 
 	private extractContent(obj: Record<string, unknown>): string {
-||||||| ancestor
-	private extractContent(obj: Record<string, unknown>): string {
-=======
-	private extractContent(obj: Record<string, unknown>): string | MessageContentComplex[] {
->>>>>>> theirs
 		const content = obj.content;
 		if (typeof content === "string") return content;
 		if (Array.isArray(content)) {

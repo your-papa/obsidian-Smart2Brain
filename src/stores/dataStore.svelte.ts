@@ -1110,9 +1110,6 @@ export class PluginDataStore {
 		const { [modelName]: _, ...rest } = config.chatModels;
 		config.chatModels = rest;
 
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
 		for (const agent of Object.values(this.#data.agents)) {
 			if (
 				agent.chatModel &&
@@ -1123,19 +1120,6 @@ export class PluginDataStore {
 			}
 		}
 
-||||||| ancestor
-		for (const agent of Object.values(this.#data.agents)) {
-			if (
-				agent.chatModel &&
-				agent.chatModel.provider === provider &&
-				agent.chatModel.name === modelName
-			) {
-				agent.chatModel = null;
-			}
-		}
-
-=======
->>>>>>> theirs
 		this.saveSettings();
 	}
 
@@ -1150,46 +1134,8 @@ export class PluginDataStore {
 		if (config) {
 			config.chatModels = value;
 			this.saveSettings();
-||||||| ancestor
-		this.saveSettings();
-	}
-
-	// Get/set chatModels
-	getProviderChatModels(provider: string): Record<string, ChatModelConfig> | undefined {
-		const config = this.#data.providerConfig[provider];
-		return config?.chatModels;
-	}
-
-	setProviderChatModels(provider: string, value: Record<string, ChatModelConfig>) {
-		const config = this.#data.providerConfig[provider];
-		if (config) {
-			config.chatModels = value;
-			this.saveSettings();
-=======
-		for (const agent of Object.values(this.#data.agents)) {
-			if (
-				agent.chatModel &&
-				agent.chatModel.provider === provider &&
-				agent.chatModel.name === modelName
-			) {
-				agent.chatModel = null;
-			}
->>>>>>> theirs
 		}
 
-||||||| ancestor
-		for (const agent of Object.values(this.#data.agents)) {
-			if (
-				agent.chatModel &&
-				agent.chatModel.provider === provider &&
-				agent.chatModel.name === modelName
-			) {
-				agent.chatModel = null;
-			}
-		}
-
-=======
->>>>>>> theirs
 		this.saveSettings();
 	}
 

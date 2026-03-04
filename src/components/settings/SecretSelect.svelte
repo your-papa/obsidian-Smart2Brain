@@ -103,7 +103,6 @@ let selectedValue = $derived(secrets.includes(value) ? value : "");
     </Tooltip.Root>
   </Tooltip.Provider>
 
-<<<<<<< ours
   <Dropdown
     type="options"
     dropdown={dropdownOptions}
@@ -111,29 +110,4 @@ let selectedValue = $derived(secrets.includes(value) ? value : "");
     onSelect={handleSelect}
     class="flex-1"
   />
-||||||| ancestor
-  {#if secrets.length > 0}
-    <Dropdown
-      type="options"
-      dropdown={dropdownOptions}
-      selected={selectedValue}
-      onSelect={handleSelect}
-      class="flex-1"
-    />
-  {:else}
-    <span class="text-[--text-muted] text-sm">No secrets available</span>
-  {/if}
-=======
-  {#if secrets.length > 0}
-    <Dropdown
-      type="options"
-      dropdown={dropdownOptions}
-      selected={selectedValue}
-      onchange={handleSelect}
-      class="flex-1"
-    />
-  {:else}
-    <span class="text-[--text-muted] text-sm">No secrets available</span>
-  {/if}
->>>>>>> theirs
 </div>

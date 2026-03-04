@@ -37,31 +37,6 @@ import { getRegistry } from "../providers/registry";
 
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-||||||| ancestor
-/**
- * Legacy options type for built-in providers.
- * Used for backward compatibility with existing code.
- */
-interface BuiltInProviderOptions {
-	apiKey?: string;
-	baseUrl?: string;
-	headers?: string | Record<string, string>;
-}
-||||||| ancestor
-/**
- * Legacy options type for built-in providers.
- * Used for backward compatibility with existing code.
- */
-interface BuiltInProviderOptions {
-	apiKey?: string;
-	baseUrl?: string;
-	headers?: string | Record<string, string>;
-}
-=======
->>>>>>> theirs
 
 /** Result of provider authentication validation */
 export type AuthValidationResult = { success: true } | { success: false; message: string };
@@ -82,19 +57,6 @@ const inflightVisionSupportRequests = new Map<string, Promise<boolean>>();
 function getVisionSupportCacheKey(providerId: string, modelId: string): string {
 	return `${providerId}::${modelId}`;
 }
-=======
-||||||| ancestor
-=======
-/**
- * Legacy options type for built-in providers.
- * Used for backward compatibility with existing code.
- */
-interface BuiltInProviderOptions {
-	apiKey?: string;
-	baseUrl?: string;
-	headers?: string | Record<string, string>;
-}
->>>>>>> theirs
 
 /**
  * Converts BuiltInProviderOptions to AuthObject.
@@ -114,7 +76,6 @@ function convertToAuthObject(options: BuiltInProviderOptions): AuthObject {
 
 	return auth;
 }
->>>>>>> theirs
 
 function persistResolvedVisionSupport(model: ChatModel, supportsVision: boolean): void {
 	const data = getData();
@@ -386,7 +347,6 @@ export class AgentManager {
 		}
 	}
 
-<<<<<<< ours
 	private buildRunMetadata(
 		agentId: string,
 		agentName: string,
@@ -401,59 +361,6 @@ export class AgentManager {
 	}
 
 	/**
-||||||| ancestor
-	/**
-	 * Tests and registers a provider on the actual registry.
-	 * Returns an AuthValidationResult indicating success or failure with a message.
-	 *
-	 * @deprecated Use validateProviderAuth() with new provider IDs instead.
-	 */
-	async testProviderConfig(providerId: string, options: BuiltInProviderOptions): Promise<AuthValidationResult> {
-		const pluginData = getData();
-		const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
-
-		if (!providerDef) {
-			return { success: false, message: `Unknown provider: ${providerId}` };
-		}
-
-		const auth = convertToAuthObject(options);
-
-		try {
-			const validationResult = await providerDef.validateAuth(auth);
-
-			if (!validationResult.valid) {
-				return { success: false, message: validationResult.error };
-			}
-
-			this.registerProvider(providerId, auth);
-			return { success: true };
-		} catch (error) {
-			if (error instanceof NewProviderAuthError || error instanceof ProviderAuthError) {
-				return { success: false, message: "Invalid API key" };
-			}
-			if (error instanceof NewProviderEndpointError || error instanceof ProviderEndpointError) {
-				return {
-					success: false,
-					message: "Invalid base URL or endpoint unreachable",
-				};
-			}
-			if (error instanceof ProviderRegistryError) {
-				return { success: false, message: error.message };
-			}
-			if (error instanceof Error) {
-				return { success: false, message: error.message };
-			}
-			return {
-				success: false,
-				message: "Provider configuration failed",
-			};
-		}
-	}
-
-	/**
-=======
-	/**
->>>>>>> theirs
 	 * Validates provider authentication using the new provider ID system.
 	 *
 	 * @param providerId - The provider ID (e.g., "openai", "anthropic", "ollama")
@@ -517,53 +424,11 @@ export class AgentManager {
 		const selectedAgent = data.getSelectedAgent();
 		const tools: StructuredToolInterface[] = [];
 
-<<<<<<< ours
-<<<<<<< ours
 		// Helper to check if tool is enabled for the selected agent
 		const isToolEnabled = (
 			toolId: "search_notes" | "read_note" | "get_all_tags" | "get_properties" | "execute_dataview_query",
 		): boolean => {
 			return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
-||||||| ancestor
-		// Helper to check if tool is enabled for the selected agent
-		const isToolEnabled = (
-			toolId: "search_notes" | "read_note" | "get_all_tags" | "get_properties" | "execute_dataview_query",
-		): boolean => {
-			// Check selected agent's tools config first, fallback to legacy
-			if (selectedAgent?.toolsConfig) {
-				return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
-			}
-			return data.isToolEnabled(toolId);
-=======
-		const isToolEnabled = (toolId: BuiltInToolId): boolean => {
-||||||| ancestor
-		const isToolEnabled = (toolId: BuiltInToolId): boolean => {
-=======
-		// Helper to check if tool is enabled for the selected agent
-<<<<<<< ours
-		const isToolEnabled = (
-			toolId: "search_notes" | "read_note" | "get_all_tags" | "get_properties" | "execute_dataview_query",
-		): boolean => {
->>>>>>> theirs
-			// Check selected agent's tools config first, fallback to legacy
-			if (selectedAgent?.toolsConfig) {
-				return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
-			}
-			return data.isToolEnabled(toolId);
->>>>>>> theirs
-||||||| ancestor
-		const isToolEnabled = (
-			toolId: "search_notes" | "read_note" | "get_all_tags" | "get_properties" | "execute_dataview_query",
-		): boolean => {
-			// Check selected agent's tools config first, fallback to legacy
-			if (selectedAgent?.toolsConfig) {
-				return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
-			}
-			return data.isToolEnabled(toolId);
-=======
-		const isToolEnabled = (toolId: BuiltInToolId): boolean => {
-			return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
->>>>>>> theirs
 		};
 
 		// Add built-in tools based on configuration
@@ -687,24 +552,6 @@ export class AgentManager {
 		// Set assembled prompt (base + enabled skills)
 		this.agent.setPrompt(await this.assembleSystemPrompt());
 
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-||||||| ancestor
-		// Get model from selected agent or fallback to legacy default
-=======
-		// Get model from selected agent
->>>>>>> theirs
-||||||| ancestor
-		// Get model from selected agent
-=======
-		// Get model from selected agent or fallback to legacy default
->>>>>>> theirs
-||||||| ancestor
-		// Get model from selected agent or fallback to legacy default
-=======
-		// Get model from selected agent
->>>>>>> theirs
 		const selectedAgent = pluginData.getSelectedAgent();
 		const chatModel = selectedAgent.chatModel;
 		if (chatModel) {
@@ -725,24 +572,6 @@ export class AgentManager {
 		const agent = await this.ensureAgent();
 		const pluginData = getData();
 
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-||||||| ancestor
-		// Get model from selected agent or fallback to legacy default
-=======
-		// Get model from selected agent
->>>>>>> theirs
-||||||| ancestor
-		// Get model from selected agent
-=======
-		// Get model from selected agent or fallback to legacy default
->>>>>>> theirs
-||||||| ancestor
-		// Get model from selected agent or fallback to legacy default
-=======
-		// Get model from selected agent
->>>>>>> theirs
 		const selectedAgent = pluginData.getSelectedAgent();
 		const chatModel = selectedAgent.chatModel;
 		if (chatModel) {

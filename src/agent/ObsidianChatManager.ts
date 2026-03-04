@@ -143,19 +143,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			return defaultPath;
 		}
 
-<<<<<<< ours
 		// If not found, search for it (renamed files)
-||||||| ancestor
-		// If not found, search for it (renamed files)
-		// Legacy format: "{Title} - {Timestamp}.chat"
-		let timestampPart = "";
-		if (threadId.startsWith("Chat ")) {
-			timestampPart = threadId.substring(5);
-		}
-
-=======
-		// If not found at the canonical path, scan existing chat files by stored threadId
->>>>>>> theirs
 		try {
 			if (await this.adapter.exists(folder)) {
 				const result = await this.adapter.list(folder);

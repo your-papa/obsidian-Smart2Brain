@@ -9,15 +9,8 @@ import type {
 	MCPServerConfig,
 	MCPStdioServerConfig,
 	MCPTransportType,
-<<<<<<< ours
 } from "../../types/plugin";
 import { getData } from "../../stores/dataStore.svelte";
-||||||| ancestor
-} from "../../main";
-import { getData } from "../../stores/dataStore.svelte";
-=======
-} from "../../main";
->>>>>>> theirs
 import { Logger } from "../../utils/logging";
 import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";

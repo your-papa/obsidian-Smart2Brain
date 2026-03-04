@@ -6,45 +6,6 @@
     HydratedEmbeddingModelMetadata,
   } from "../../types/modelMetadata";
   import { getProviderDefinition } from "../../providers/index";
-<<<<<<< ours
-||||||| ancestor
-  import {
-    fetchModelsDevData,
-    lookupModelInfoSync,
-    type ModelsDevModelInfo,
-  } from "../../providers/modelsDevApi";
-  import {
-    fetchOpenRouterModels,
-    lookupOpenRouterModelSync,
-    formatCostPerMillion,
-    type OpenRouterModelInfo,
-  } from "../../providers/openrouterModels";
-  import {
-    getOllamaModelsCache,
-    lookupOllamaModelSync,
-    formatParameterSize,
-    type OllamaModelInfo,
-  } from "../../providers/ollamaModels";
-=======
-  import {
-    fetchModelsDevData,
-    lookupModelInfoSync,
-    type ModelsDevModelInfo,
-  } from "../../providers/modelsDevApi";
-  import {
-    fetchOpenRouterModels,
-    lookupOpenRouterModelSync,
-    extractCapabilities as extractOpenRouterCapabilities,
-    formatCostPerMillion,
-    type OpenRouterModelInfo,
-  } from "../../providers/openrouterModels";
-  import {
-    getOllamaModelsCache,
-    lookupOllamaModelSync,
-    formatParameterSize,
-    type OllamaModelInfo,
-  } from "../../providers/ollamaModels";
->>>>>>> theirs
   import { getData } from "../../stores/dataStore.svelte";
   import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
   import AnthropicLogo from "../ui/logos/AnthropicLogo.svelte";
@@ -210,7 +171,6 @@
     return GenericAIIcon;
   }
 
-<<<<<<< ours
   // Format cost (per 1M tokens)
   function formatCost(costPer1M?: number): string {
     if (costPer1M === undefined) return "—";
@@ -219,74 +179,6 @@
     if (costPer1M < 1) return `$${costPer1M.toFixed(2)}`;
     return `$${costPer1M.toFixed(2)}`;
   }
-||||||| ancestor
-  // Get unified model metadata - OpenRouter API for OpenRouter, Ollama for Ollama, models.dev for others
-  type UnifiedModelInfo = {
-    name?: string;
-    contextLength?: number;
-    inputCost?: string;
-    outputCost?: string;
-    supportsToolCalls?: boolean;
-    supportsVision?: boolean;
-    supportsReasoning?: boolean;
-    supportsStructuredOutput?: boolean;
-    // Ollama-specific fields
-    parameterSize?: string;
-    quantization?: string;
-  };
-
-  function getModelInfo(providerId: string, modelId: string): UnifiedModelInfo | null {
-    // For OpenRouter, use the native API data (more comprehensive)
-    if (providerId === "openrouter" && openRouterData) {
-      const orInfo = lookupOpenRouterModelSync(openRouterData, modelId);
-      if (orInfo) {
-        return {
-          name: orInfo.name,
-          contextLength: orInfo.context_length,
-          inputCost: orInfo.pricing?.prompt,
-          outputCost: orInfo.pricing?.completion,
-          supportsToolCalls: orInfo.supports_tool_calls,
-          supportsVision: orInfo.supports_vision,
-          supportsReasoning: orInfo.supports_reasoning,
-          supportsStructuredOutput: orInfo.supports_structured_output,
-        };
-      }
-    }
-=======
-  // Get unified model metadata - OpenRouter API for OpenRouter, Ollama for Ollama, models.dev for others
-  type UnifiedModelInfo = {
-    name?: string;
-    contextLength?: number;
-    inputCost?: string;
-    outputCost?: string;
-    supportsToolCalls?: boolean;
-    supportsVision?: boolean;
-    supportsReasoning?: boolean;
-    supportsStructuredOutput?: boolean;
-    // Ollama-specific fields
-    parameterSize?: string;
-    quantization?: string;
-  };
-
-  function getModelInfo(providerId: string, modelId: string): UnifiedModelInfo | null {
-    // For OpenRouter, use the native API data (more comprehensive)
-    if (providerId === "openrouter" && openRouterData) {
-      const orInfo = lookupOpenRouterModelSync(openRouterData, modelId);
-      if (orInfo) {
-        const caps = extractOpenRouterCapabilities(orInfo);
-        return {
-          name: orInfo.name,
-          contextLength: orInfo.context_length,
-          inputCost: orInfo.pricing?.prompt,
-          outputCost: orInfo.pricing?.completion,
-          supportsToolCalls: caps.supportsToolCalls,
-          supportsVision: caps.supportsVision,
-          supportsReasoning: caps.supportsReasoning,
-          supportsStructuredOutput: caps.supportsStructuredOutput,
-        };
-      }
-    }
->>>>>>> theirs
 
   function formatTokenLimit(tokens?: number): string {
     if (!tokens) return "—";
@@ -312,17 +204,8 @@
   }
 
   // Handle model selection
-<<<<<<< ours
   function handleSelect(provider: string, variantKey: string) {
     onSelect({ provider, model: variantKey });
-||||||| ancestor
-  function handleSelect(provider: string, model: string) {
-    onSelect({ provider, model });
-=======
-  function handleSelect(provider: string, model: string) {
-    const info = getModelInfo(provider, model);
-    onSelect({ provider, model, supportsVision: info?.supportsVision });
->>>>>>> theirs
   }
 </script>
 
