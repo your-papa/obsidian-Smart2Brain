@@ -1,4 +1,3 @@
-import type { ChatModel } from "../stores/chatStore.svelte";
 import type { StoredProviderState } from "../stores/dataStore.svelte";
 import type { CustomProviderMeta } from "../types/provider/index";
 import type { UUIDv7 } from "../utils/uuid7Validator";
@@ -24,9 +23,8 @@ export interface DefaultEmbedModel {
  * Transport type for MCP servers
  * - stdio: Local processes (recommended)
  * - http: Streamable HTTP (recommended for remote servers)
- * - sse: Server-Sent Events (legacy, may have CORS issues in Obsidian)
  */
-export type MCPTransportType = "stdio" | "http" | "sse";
+export type MCPTransportType = "stdio" | "http";
 
 /**
  * Base configuration shared by all MCP server types
@@ -65,20 +63,9 @@ export interface MCPHTTPServerConfig extends MCPServerBaseConfig {
 }
 
 /**
- * Configuration for SSE-based MCP servers (legacy, may have CORS issues)
- */
-export interface MCPSSEServerConfig extends MCPServerBaseConfig {
-	transport: "sse";
-	/** URL of the SSE server */
-	url: string;
-	/** Optional headers for authentication */
-	headers?: Record<string, string>;
-}
-
-/**
  * Union type for all MCP server configurations
  */
-export type MCPServerConfig = MCPStdioServerConfig | MCPHTTPServerConfig | MCPSSEServerConfig;
+export type MCPServerConfig = MCPStdioServerConfig | MCPHTTPServerConfig;
 
 /**
  * Record of MCP server configurations keyed by server ID
@@ -310,21 +297,6 @@ export interface PluginData {
 	defaultAgentId: string | null;
 	/** ID of the currently selected/active agent */
 	selectedAgentId: string;
-
-	// ============================================================================
-	// Legacy fields (kept for migration, will be migrated to default agent)
-	// ============================================================================
-
-	/** @deprecated Use agents[agentId].toolsConfig instead */
-	toolsConfig: ToolsConfig;
-	/** @deprecated Use agents[agentId].systemPrompt instead */
-	systemPrompt: string;
-	/** @deprecated Use agents[agentId].skills instead */
-	skills: Record<string, AgentSkillState>;
-	/** @deprecated Use agents[agentId].chatModel instead */
-	defaultChatModel: ChatModel | null;
-	/** @deprecated Use agents[agentId].mcpServers instead */
-	mcpServers: MCPServersConfig;
 
 	// ============================================================================
 	// Chat Settings

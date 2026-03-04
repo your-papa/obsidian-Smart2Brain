@@ -524,7 +524,9 @@
         pluginData.setAgentMCPServer(selectedAgentId, serverId, config);
         applyChanges();
       },
-      { skipGlobalSave: true },
+      {
+        hasServer: (serverId: string) => Boolean(selectedAgent?.mcpServers[serverId]),
+      },
     );
     modal.open();
   }
@@ -549,7 +551,9 @@
           }
           applyChanges();
         },
-        { skipGlobalSave: true },
+        {
+          hasServer: (candidateId: string) => Boolean(selectedAgent?.mcpServers[candidateId]),
+        },
       );
       modal.open();
     }
@@ -577,21 +581,10 @@
         },
       };
     }
-    if (config.transport === "http") {
-      return {
-        mcpServers: {
-          [serverId]: {
-            transport: "http" as const,
-            url: config.url,
-            headers: config.headers,
-          },
-        },
-      };
-    }
     return {
       mcpServers: {
         [serverId]: {
-          transport: "sse" as const,
+          transport: "http" as const,
           url: config.url,
           headers: config.headers,
         },
@@ -682,7 +675,7 @@
           type="options"
           dropdown={agentDropdownOptions}
           selected={selectedAgentId}
-          onSelect={(id) => (selectedAgentId = id)}
+          onchange={(id) => (selectedAgentId = id)}
         />
       </div>
       <div class="agent-actions">
@@ -804,8 +797,8 @@
                 </div>
                 <div class="skill-controls">
                   <Toggle
-                    isToggled={ext.enabled && pluginAvailable}
-                    changeFunc={() => toggleSkill(ext.id, !ext.enabled)}
+                    checked={ext.enabled && pluginAvailable}
+                    onchange={() => toggleSkill(ext.id, !ext.enabled)}
                   />
                   <IconButton
                     icon="pencil"
@@ -853,8 +846,8 @@
                 </div>
                 <div class="skill-controls">
                   <Toggle
-                    isToggled={ext.enabled && pluginAvailable}
-                    changeFunc={() => toggleSkill(ext.id, !ext.enabled)}
+                    checked={ext.enabled && pluginAvailable}
+                    onchange={() => toggleSkill(ext.id, !ext.enabled)}
                   />
                   <IconButton
                     icon="pencil"
@@ -887,8 +880,8 @@
                   onclick={() => deleteSkill(ext.id)}
                 />
                 <Toggle
-                  isToggled={ext.enabled}
-                  changeFunc={() => toggleSkill(ext.id, !ext.enabled)}
+                  checked={ext.enabled}
+                  onchange={() => toggleSkill(ext.id, !ext.enabled)}
                 />
                 <IconButton
                   icon="pencil"
@@ -945,8 +938,8 @@
                 onclick={() => openToolConfig(tool.id)}
               />
               <Toggle
-                isToggled={enabled && pluginAvailable}
-                changeFunc={() => handleToolToggle(tool.id)}
+                checked={enabled && pluginAvailable}
+                onchange={() => handleToolToggle(tool.id)}
                 disabled={!pluginAvailable}
               />
             </div>
@@ -978,9 +971,7 @@
                       <span class="mcp-server-badge {config.transport}">
                         {config.transport === "stdio"
                           ? "Local"
-                          : config.transport === "http"
-                            ? "HTTP"
-                            : "SSE"}
+                          : "HTTP"}
                       </span>
                       <button
                         class="mcp-tools-badge"
@@ -1011,7 +1002,7 @@
                     <div class="mcp-server-details">
                       {#if config.transport === "stdio"}
                         <code>{config.command} {config.args.join(" ")}</code>
-                      {:else if config.transport === "http" || config.transport === "sse"}
+                      {:else if config.transport === "http"}
                         <code>{config.url}</code>
                       {/if}
                     </div>
@@ -1053,8 +1044,8 @@
                       onclick={() => openEditMCPServer(serverId)}
                     />
                     <Toggle
-                      isToggled={config.enabled}
-                      changeFunc={() => toggleMCPServer(serverId)}
+                      checked={config.enabled}
+                      onchange={() => toggleMCPServer(serverId)}
                     />
                   </div>
                 </div>

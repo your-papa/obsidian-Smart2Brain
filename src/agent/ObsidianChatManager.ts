@@ -136,30 +136,12 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			return defaultPath;
 		}
 
-		// If not found, search for it (renamed files)
-		// Legacy format: "{Title} - {Timestamp}.chat"
-		let timestampPart = "";
-		if (threadId.startsWith("Chat ")) {
-			timestampPart = threadId.substring(5);
-		}
-
+		// If not found at the canonical path, scan existing chat files by stored threadId
 		try {
 			if (await this.adapter.exists(folder)) {
 				const result = await this.adapter.list(folder);
 				for (const file of result.files) {
 					if (!file.endsWith(".chat")) continue;
-
-					// Check if file contains threadId (legacy check)
-					if (file.includes(threadId)) {
-						this.filePathCache.set(threadId, file);
-						return file;
-					}
-
-					// Check for renamed files with matching timestamp
-					if (timestampPart && file.endsWith(` - ${timestampPart}.chat`)) {
-						this.filePathCache.set(threadId, file);
-						return file;
-					}
 
 					try {
 						const content = await this.adapter.read(file);
@@ -177,7 +159,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			Logger.error(`Error searching for file with threadId ${threadId}:`, e);
 		}
 
-		// Fallback to default path (will be created there if writing)
+		// Use default path (it will be created there when writing)
 		this.filePathCache.set(threadId, defaultPath);
 		return defaultPath;
 	}

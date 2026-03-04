@@ -1,11 +1,4 @@
-import { createQuery } from "@tanstack/svelte-query";
 import type SecondBrainPlugin from "../main";
-
-export const providerState: Record<string, boolean> = $state({
-	openai: false,
-	ollama: false,
-	anthropic: false,
-});
 
 let isChatInSidebar: boolean = $state(true);
 
@@ -47,12 +40,3 @@ export function consumePendingSettingsTab(): string | null {
 	return tab;
 }
 
-// Deprecated: use createModelListQuery in utils/query
-export function modelQuery(provider: string, plugin: SecondBrainPlugin) {
-	return createQuery(() => ({
-		queryKey: ["models", provider],
-		queryFn: async () => {
-			return await ["Models"];
-		},
-	}));
-}

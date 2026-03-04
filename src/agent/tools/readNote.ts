@@ -73,7 +73,8 @@ function resolveNoteFile(app: App, pathOrWikiLink: string): { file: TFile | null
  */
 export function createReadNoteTool(app: App) {
 	const pluginData = getData();
-	const toolConfig = pluginData.getToolConfig("read_note");
+	const getReadNoteConfig = () => pluginData.getSelectedAgent().toolsConfig.read_note;
+	const toolConfig = getReadNoteConfig();
 	const settings = toolConfig?.settings as { maxContentLength?: number } | undefined;
 
 	const readNoteFn = async ({ path }: { path: string }): Promise<string> => {
@@ -88,7 +89,7 @@ export function createReadNoteTool(app: App) {
 			let content = await app.vault.read(file);
 
 			// Apply max content length if configured
-			const currentConfig = pluginData.getToolConfig("read_note");
+			const currentConfig = getReadNoteConfig();
 			const currentSettings = currentConfig?.settings as { maxContentLength?: number } | undefined;
 			const maxLength = currentSettings?.maxContentLength ?? settings?.maxContentLength ?? 0;
 

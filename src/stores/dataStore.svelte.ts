@@ -15,7 +15,6 @@ import SecondBrainPlugin, {
 	type ToolsConfig,
 } from "../main";
 import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
-import type { ChatModel } from "./chatStore.svelte";
 import type { VectorStoreBackend } from "../vectorstore/types";
 
 // Provider system types
@@ -33,10 +32,10 @@ export class AddEmbedModelError extends Error {
 	}
 }
 
-export class AddGenModelError extends Error {
+export class AddChatModelError extends Error {
 	constructor(provider: string, modelName: string) {
-		super(`Gen model "${modelName}" already exists for provider "${provider}"`);
-		this.name = "AddGenModelError";
+		super(`Chat model "${modelName}" already exists for provider "${provider}"`);
+		this.name = "AddChatModelError";
 	}
 }
 
@@ -47,10 +46,10 @@ export class SetEmbedModelError extends Error {
 	}
 }
 
-export class SetGenModelError extends Error {
+export class SetChatModelError extends Error {
 	constructor(provider: string, modelName: string) {
-		super(`Gen model "${modelName}" not found for provider "${provider}"`);
-		this.name = "SetGenModelError";
+		super(`Chat model "${modelName}" not found for provider "${provider}"`);
+		this.name = "SetChatModelError";
 	}
 }
 
@@ -269,13 +268,6 @@ export const DEFAULT_SETTINGS: PluginData = {
 	defaultAgentId: DEFAULT_AGENT_ID,
 	selectedAgentId: DEFAULT_AGENT_ID,
 
-	// Legacy fields (kept for migration compatibility)
-	toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
-	systemPrompt: BASE_SYSTEM_PROMPT,
-	skills: {},
-	defaultChatModel: null,
-	mcpServers: {},
-
 	// Chat settings
 	isUsingRag: false,
 	retrieveTopK: 100,
@@ -376,33 +368,6 @@ export class PluginDataStore {
 	}
 	set initialAssistantMessageContent(val: string) {
 		this.#data.initialAssistantMessageContent = val;
-		this.saveSettings();
-	}
-
-	get systemPrompt() {
-		return this.#data.systemPrompt;
-	}
-	set systemPrompt(val: string) {
-		this.#data.systemPrompt = val;
-		this.saveSettings();
-	}
-
-	// --- Skills (Legacy - use agent-specific methods) ---
-
-	get skills(): Record<string, AgentSkillState> {
-		return this.#data.skills;
-	}
-
-	getSkill(skillId: string): AgentSkillState | undefined {
-		return this.#data.skills[skillId];
-	}
-
-	setSkillEnabled(skillId: string, enabled: boolean): void {
-		if (this.#data.skills[skillId]) {
-			this.#data.skills[skillId].enabled = enabled;
-		} else {
-			this.#data.skills[skillId] = { enabled };
-		}
 		this.saveSettings();
 	}
 
@@ -531,99 +496,6 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
-	// --- MCP Servers Configuration ---
-
-	get mcpServers(): MCPServersConfig {
-		return this.#data.mcpServers;
-	}
-
-	set mcpServers(val: MCPServersConfig) {
-		this.#data.mcpServers = val;
-		this.saveSettings();
-	}
-
-	/**
-	 * Get all MCP server IDs.
-	 */
-	getMCPServerIds(): string[] {
-		return Object.keys(this.#data.mcpServers);
-	}
-
-	/**
-	 * Get configuration for a specific MCP server.
-	 */
-	getMCPServer(serverId: string): MCPServerConfig | undefined {
-		return this.#data.mcpServers[serverId];
-	}
-
-	/**
-	 * Add or update an MCP server configuration.
-	 */
-	setMCPServer(serverId: string, config: MCPServerConfig): void {
-		this.#data.mcpServers = {
-			...this.#data.mcpServers,
-			[serverId]: config,
-		};
-		this.saveSettings();
-	}
-
-	/**
-	 * Delete an MCP server configuration.
-	 */
-	deleteMCPServer(serverId: string): void {
-		const { [serverId]: _, ...rest } = this.#data.mcpServers;
-		this.#data.mcpServers = rest;
-		this.saveSettings();
-	}
-
-	/**
-	 * Toggle enabled state for an MCP server.
-	 */
-	toggleMCPServerEnabled(serverId: string): void {
-		const server = this.#data.mcpServers[serverId];
-		if (server) {
-			this.#data.mcpServers = {
-				...this.#data.mcpServers,
-				[serverId]: { ...server, enabled: !server.enabled },
-			};
-			this.saveSettings();
-		}
-	}
-
-	/**
-	 * Convert typed MCP config to the format expected by MultiServerMCPClient.
-	 * Only includes enabled servers.
-	 */
-	getMCPServersForClient(): Record<string, unknown> {
-		const result: Record<string, unknown> = {};
-
-		for (const [id, config] of Object.entries(this.#data.mcpServers)) {
-			if (!config.enabled) continue;
-
-			if (config.transport === "stdio") {
-				result[id] = {
-					transport: "stdio",
-					command: config.command,
-					args: config.args,
-					...(config.env && Object.keys(config.env).length > 0 && { env: config.env }),
-				};
-			} else if (config.transport === "http") {
-				result[id] = {
-					transport: "http",
-					url: config.url,
-					...(config.headers && Object.keys(config.headers).length > 0 && { headers: config.headers }),
-				};
-			} else if (config.transport === "sse") {
-				result[id] = {
-					transport: "sse",
-					url: config.url,
-					...(config.headers && Object.keys(config.headers).length > 0 && { headers: config.headers }),
-				};
-			}
-		}
-
-		return result;
-	}
 
 	// ============================================================================
 	// Agent Configuration Methods
@@ -916,15 +788,9 @@ export class PluginDataStore {
 					args: config.args,
 					...(config.env && Object.keys(config.env).length > 0 && { env: config.env }),
 				};
-			} else if (config.transport === "http") {
+			} else {
 				result[id] = {
 					transport: "http",
-					url: config.url,
-					...(config.headers && Object.keys(config.headers).length > 0 && { headers: config.headers }),
-				};
-			} else if (config.transport === "sse") {
-				result[id] = {
-					transport: "sse",
 					url: config.url,
 					...(config.headers && Object.keys(config.headers).length > 0 && { headers: config.headers }),
 				};
@@ -1054,69 +920,6 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
-	// --- Tools Configuration ---
-
-	get toolsConfig(): ToolsConfig {
-		return this.#data.toolsConfig;
-	}
-
-	/**
-	 * Check if a specific tool is enabled.
-	 */
-	isToolEnabled(toolId: BuiltInToolId): boolean {
-		return this.#data.toolsConfig[toolId]?.enabled ?? true;
-	}
-
-	/**
-	 * Set the enabled state for a specific tool.
-	 */
-	setToolEnabled(toolId: BuiltInToolId, enabled: boolean): void {
-		if (this.#data.toolsConfig[toolId]) {
-			this.#data.toolsConfig[toolId].enabled = enabled;
-			this.saveSettings();
-		}
-	}
-
-	/**
-	 * Toggle the enabled state for a specific tool.
-	 */
-	toggleToolEnabled(toolId: BuiltInToolId): void {
-		if (this.#data.toolsConfig[toolId]) {
-			this.#data.toolsConfig[toolId].enabled = !this.#data.toolsConfig[toolId].enabled;
-			this.saveSettings();
-		}
-	}
-
-	/**
-	 * Get the configuration for a specific tool.
-	 */
-	getToolConfig(toolId: BuiltInToolId): ToolConfig | undefined {
-		return this.#data.toolsConfig[toolId];
-	}
-
-	/**
-	 * Update the configuration for a specific tool.
-	 */
-	updateToolConfig(toolId: BuiltInToolId, config: Partial<ToolConfig>): void {
-		if (this.#data.toolsConfig[toolId]) {
-			this.#data.toolsConfig[toolId] = {
-				...this.#data.toolsConfig[toolId],
-				...config,
-			};
-			this.saveSettings();
-		}
-	}
-
-	getDefaultChatModel(): ChatModel | null {
-		return this.#data.defaultChatModel;
-	}
-
-	//TODO some check here?
-	setDefaultChatModel(model: ChatModel | null) {
-		this.#data.defaultChatModel = model;
-		this.saveSettings();
-	}
-
 	// Get/set isConfigured for a provider
 	getProviderIsConfigured(provider: string): boolean {
 		const config = this.#data.providerConfig[provider];
@@ -1129,14 +932,6 @@ export class PluginDataStore {
 
 		const wasConfigured = config.isConfigured;
 		config.isConfigured = !wasConfigured;
-
-		// If disabling this provider and it's the default model's provider, clear default model
-		if (wasConfigured) {
-			const defaultModel = this.#data.defaultChatModel;
-			if (defaultModel && defaultModel.provider === provider) {
-				this.#data.defaultChatModel = null;
-			}
-		}
 
 		this.saveSettings();
 	}
@@ -1258,7 +1053,7 @@ export class PluginDataStore {
 		return listSecrets(this._plugin.app);
 	}
 
-	// --- Embed Model Management (Record-based) ---
+	// --- Embedding Model Management (Record-based) ---
 
 	getEmbedModels(provider: string): Record<string, EmbedModelConfig> {
 		const config = this.#data.providerConfig[provider];
@@ -1300,7 +1095,7 @@ export class PluginDataStore {
 	addChatModel(provider: string, modelName: string, conf: ChatModelConfig) {
 		const config = this.#data.providerConfig[provider];
 		if (!config) return;
-		if (modelName in config.chatModels) throw new AddGenModelError(provider, modelName);
+		if (modelName in config.chatModels) throw new AddChatModelError(provider, modelName);
 		config.chatModels = { ...config.chatModels, [modelName]: conf };
 		this.saveSettings();
 	}
@@ -1308,7 +1103,7 @@ export class PluginDataStore {
 	updateChatModel(provider: string, modelName: string, conf: ChatModelConfig) {
 		const config = this.#data.providerConfig[provider];
 		if (!config) return;
-		if (!(modelName in config.chatModels)) throw new SetGenModelError(provider, modelName);
+		if (!(modelName in config.chatModels)) throw new SetChatModelError(provider, modelName);
 		config.chatModels = { ...config.chatModels, [modelName]: conf };
 		this.saveSettings();
 	}
@@ -1316,34 +1111,11 @@ export class PluginDataStore {
 	deleteChatModel(provider: string, modelName: string) {
 		const config = this.#data.providerConfig[provider];
 		if (!config) return;
-		if (!(modelName in config.chatModels)) throw new SetGenModelError(provider, modelName);
+		if (!(modelName in config.chatModels)) throw new SetChatModelError(provider, modelName);
 		const { [modelName]: _, ...rest } = config.chatModels;
 		config.chatModels = rest;
 
-		// Clear default model if the deleted model was the default
-		const defaultModel = this.#data.defaultChatModel;
-		if (defaultModel && defaultModel.provider === provider && defaultModel.model === modelName) {
-			this.#data.defaultChatModel = null;
-		}
-
 		this.saveSettings();
-	}
-
-	// Legacy aliases for backward compatibility
-	getGenModels(provider: string): Record<string, ChatModelConfig> {
-		return this.getChatModels(provider);
-	}
-
-	addGenModel(provider: string, modelName: string, conf: ChatModelConfig) {
-		return this.addChatModel(provider, modelName, conf);
-	}
-
-	updateGenModel(provider: string, modelName: string, conf: ChatModelConfig) {
-		return this.updateChatModel(provider, modelName, conf);
-	}
-
-	deleteGenModel(provider: string, modelName: string) {
-		return this.deleteChatModel(provider, modelName);
 	}
 
 	// Get/set chatModels
@@ -1358,15 +1130,6 @@ export class PluginDataStore {
 			config.chatModels = value;
 			this.saveSettings();
 		}
-	}
-
-	// Legacy aliases
-	getProviderGenModels(provider: string): Record<string, ChatModelConfig> | undefined {
-		return this.getProviderChatModels(provider);
-	}
-
-	setProviderGenModels(provider: string, value: Record<string, ChatModelConfig>) {
-		return this.setProviderChatModels(provider, value);
 	}
 
 	// ============================================================================
@@ -1451,11 +1214,12 @@ export class PluginDataStore {
 		const wasConfigured = config.isConfigured;
 		config.isConfigured = isConfigured;
 
-		// If disabling and it was the default model's provider, clear default
+		// If disabling, clear any agent chat model using that provider
 		if (wasConfigured && !isConfigured) {
-			const defaultModel = this.#data.defaultChatModel;
-			if (defaultModel && defaultModel.provider === providerId) {
-				this.#data.defaultChatModel = null;
+			for (const agent of Object.values(this.#data.agents)) {
+				if (agent.chatModel?.provider === providerId) {
+					agent.chatModel = null;
+				}
 			}
 		}
 
@@ -1589,12 +1353,6 @@ export class PluginDataStore {
 		// Remove provider state
 		delete this.#data.providerConfig[providerId];
 
-		// Clear default model if it was from this provider
-		const defaultModel = this.#data.defaultChatModel;
-		if (defaultModel && defaultModel.provider === providerId) {
-			this.#data.defaultChatModel = null;
-		}
-
 		await this.saveSettings();
 	}
 }
@@ -1612,57 +1370,20 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		...rawData,
 	};
 
-	// Migration: skills are now just enable states (file-based content)
-	if (!rawData?.skills) {
-		mergedData.skills = {};
-	}
-
-	// Migration: if user has no toolsConfig, use defaults
-	if (!rawData?.toolsConfig) {
-		mergedData.toolsConfig = structuredClone(DEFAULT_TOOLS_CONFIG);
-	} else {
-		// Merge with defaults to pick up any new tools added in updates
-		mergedData.toolsConfig = {
-			...structuredClone(DEFAULT_TOOLS_CONFIG),
-			...rawData.toolsConfig,
-		};
-	}
-
-	// Migration: if user has old full systemPrompt, reset to base prompt
-	// (Their customizations are likely in the old format)
-	if (!rawData?.systemPrompt) {
-		mergedData.systemPrompt = BASE_SYSTEM_PROMPT;
-	}
-
-	// ============================================================================
-	// Agent Migration: Migrate legacy fields to agents system
-	// ============================================================================
-
-	// If user has no agents configured, create default agent from legacy fields
+	// Ensure at least one agent exists
 	if (!rawData?.agents || Object.keys(rawData.agents).length === 0) {
-		// Create default agent with user's existing configuration
-		const defaultAgent: AgentConfig = {
-			id: DEFAULT_AGENT_ID,
-			name: "Default Agent",
-			chatModel: rawData?.defaultChatModel ?? null,
-			systemPrompt: mergedData.systemPrompt,
-			skills: structuredClone(mergedData.skills),
-			toolsConfig: structuredClone(mergedData.toolsConfig),
-			mcpServers: rawData?.mcpServers ? structuredClone(rawData.mcpServers) : {},
-		};
-
 		mergedData.agents = {
-			[DEFAULT_AGENT_ID]: defaultAgent,
+			[DEFAULT_AGENT_ID]: createDefaultAgent(),
 		};
 		mergedData.defaultAgentId = DEFAULT_AGENT_ID;
 		mergedData.selectedAgentId = DEFAULT_AGENT_ID;
 	} else {
-		// Ensure default agent exists (in case it was somehow deleted)
+		// Ensure the built-in default agent key always exists
 		if (!mergedData.agents[DEFAULT_AGENT_ID]) {
 			mergedData.agents[DEFAULT_AGENT_ID] = createDefaultAgent();
 		}
 
-		// Ensure all agents have the required fields (migration for new agent fields)
+		// Normalize all agents to include required fields
 		for (const agentId of Object.keys(mergedData.agents)) {
 			const agent = mergedData.agents[agentId];
 
@@ -1676,7 +1397,7 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 				};
 			}
 
-			// Ensure skills exists (migration - now just enable states)
+			// Ensure skills exists
 			if (!agent.skills) {
 				agent.skills = {};
 			}

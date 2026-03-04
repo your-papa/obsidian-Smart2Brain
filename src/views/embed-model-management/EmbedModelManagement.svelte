@@ -14,7 +14,7 @@ interface Props {
 	config?: EmbedModelConfig;
 }
 
-const embedModelSettings = {
+const embeddingModelSettings = {
 	keys: ["similarityThreshold"] as (keyof EmbedModelConfig)[],
 	defaults: {
 		similarityThreshold: 0.7,
@@ -30,14 +30,14 @@ const query = createModelDiscoveryQuery(() => provider);
 let { data: discoveredModels, isPending, isError } = $derived(query);
 let models = $derived(discoveredModels ?? []);
 
-let embedModels: Record<string, EmbedModelConfig> = $derived(data.getEmbedModels(provider));
+let embeddingModels: Record<string, EmbedModelConfig> = $derived(data.getEmbedModels(provider));
 
-let configuredModels: string[] = $derived(Object.keys(embedModels));
+let configuredModels: string[] = $derived(Object.keys(embeddingModels));
 let selectedModel = $derived(!isPending && !isError && models ? models[0] : configuredModels[0]);
 
 let unconfiguredModels: string[] = $derived(models?.filter((model: string) => !configuredModels.includes(model)) ?? []);
 
-let embedConfig: EmbedModelConfig = $state(embedModelSettings.defaults);
+let embeddingConfig: EmbedModelConfig = $state(embeddingModelSettings.defaults);
 
 const isModelConfigured = () => configuredModels.includes(selectedModel);
 </script>
@@ -57,7 +57,7 @@ const isModelConfigured = () => configuredModels.includes(selectedModel);
     <div
         class="grid p-3 gap-2 grid-cols-2 border-solid border-x-0 border-t border-b-0 border-[--background-modifier-border]"
     >
-        {#each Object.entries(embedModels) as [modelName, modelConfig]}
+        {#each Object.entries(embeddingModels) as [modelName, modelConfig]}
             <div class="community-item">
                 <span>{modelName}</span>
                 <span class="text-muted text-xs pt-1 leading-tight"
@@ -68,7 +68,7 @@ const isModelConfigured = () => configuredModels.includes(selectedModel);
     </div>
 
     <SettingContainer
-        name={"Embed Model Management"}
+        name={"Embedding Model Management"}
         desc={"Select and configure embedding models"}
     >
         {#if isPending}
@@ -93,23 +93,23 @@ const isModelConfigured = () => configuredModels.includes(selectedModel);
                         })),
                     },
                 ]}
-                onSelect={(model: string) => {
+                onchange={(model: string) => {
                     selectedModel = model;
                     if (isModelConfigured())
-                        embedConfig = embedModels[selectedModel];
-                    else embedConfig = embedModelSettings.defaults;
+                        embeddingConfig = embeddingModels[selectedModel];
+                    else embeddingConfig = embeddingModelSettings.defaults;
                 }}
                 style={"!max-w-40"}
             />
         {/if}
     </SettingContainer>
 
-    {#each embedModelSettings.keys as key}
+    {#each embeddingModelSettings.keys as key}
         <SettingContainer name={key} desc={key}>
             <Text
                 inputType="number"
-                bind:value={embedConfig[key]}
-                placeholder={embedModelSettings.defaults[key].toString()}
+                bind:value={embeddingConfig[key]}
+                placeholder={embeddingModelSettings.defaults[key].toString()}
             />
         </SettingContainer>
     {/each}
@@ -121,7 +121,7 @@ const isModelConfigured = () => configuredModels.includes(selectedModel);
         buttonText={isModelConfigured() ? "Update" : "Add"}
         onClick={() =>
             selectedModel &&
-            data.addEmbedModel(provider, selectedModel, embedConfig)}
+            data.addEmbedModel(provider, selectedModel, embeddingConfig)}
     />
     <Button buttonText="Cancel" onClick={() => modal.close()} />
 </div>

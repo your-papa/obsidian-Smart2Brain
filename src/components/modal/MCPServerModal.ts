@@ -11,9 +11,8 @@ import MCPServerModalComponent from "./MCPServerModal.svelte";
  */
 export type MCPServerModalCallback = (serverId: string, config: MCPServerConfig) => void;
 
-export interface MCPServerModalOptions {
-	/** If true, don't save to global pluginData.mcpServers (for agent-specific configs) */
-	skipGlobalSave?: boolean;
+export interface MCPServerAccessors {
+	hasServer: (serverId: string) => boolean;
 }
 
 export class MCPServerModal extends Modal {
@@ -22,28 +21,28 @@ export class MCPServerModal extends Modal {
 	private serverId: string | null;
 	private existingConfig: MCPServerConfig | null;
 	private onSave: MCPServerModalCallback;
-	private options: MCPServerModalOptions;
+	private accessors: MCPServerAccessors;
 
 	/**
 	 * @param plugin - The plugin instance
 	 * @param serverId - The server ID to edit, or null for a new server
 	 * @param existingConfig - The existing config if editing, or null for new
 	 * @param onSave - Callback when saved, receives serverId and config
-	 * @param options - Additional options
+	 * @param accessors - Helper accessors for agent-scoped server data
 	 */
 	constructor(
 		plugin: SecondBrainPlugin,
 		serverId: string | null,
 		existingConfig: MCPServerConfig | null,
 		onSave: MCPServerModalCallback,
-		options: MCPServerModalOptions = {},
+		accessors: MCPServerAccessors,
 	) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.serverId = serverId;
 		this.existingConfig = existingConfig;
 		this.onSave = onSave;
-		this.options = options;
+		this.accessors = accessors;
 	}
 
 	onOpen() {
@@ -70,7 +69,7 @@ export class MCPServerModal extends Modal {
 				serverId: this.serverId,
 				existingConfig: this.existingConfig,
 				onSave: this.onSave,
-				skipGlobalSave: this.options.skipGlobalSave ?? false,
+				accessors: this.accessors,
 			},
 		});
 	}

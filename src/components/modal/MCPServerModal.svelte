@@ -6,19 +6,17 @@ import { createObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
 import type {
 	MCPHTTPServerConfig,
-	MCPSSEServerConfig,
 	MCPServerConfig,
 	MCPStdioServerConfig,
 	MCPTransportType,
 } from "../../main";
-import { getData } from "../../stores/dataStore.svelte";
 import { Logger } from "../../utils/logging";
 import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
 import Icon from "../ui/Icon.svelte";
 import Text from "../ui/Text.svelte";
 import Toggle from "../ui/Toggle.svelte";
-import type { MCPServerModal, MCPServerModalCallback } from "./MCPServerModal";
+import type { MCPServerAccessors, MCPServerModal, MCPServerModalCallback } from "./MCPServerModal";
 
 interface Props {
 	modal: MCPServerModal;
@@ -26,7 +24,7 @@ interface Props {
 	serverId: string | null;
 	existingConfig: MCPServerConfig | null;
 	onSave: MCPServerModalCallback;
-	skipGlobalSave?: boolean;
+  accessors: MCPServerAccessors;
 }
 
 const {
@@ -35,9 +33,8 @@ const {
   serverId: capturedServerId,
   existingConfig: capturedExistingConfig,
   onSave,
-  skipGlobalSave = false,
+  accessors,
 }: Props = $props();
-const pluginData = getData();
 
 // Capture initial values at component creation (props don't change for modals)
 const isEditing = (() => !!capturedServerId && !!capturedExistingConfig)();
@@ -66,10 +63,10 @@ let envVars = $state(
 		.join("\n"),
 );
 
-// HTTP/SSE-specific fields (shared URL and headers)
-let url = $state((initialConfig as MCPHTTPServerConfig | MCPSSEServerConfig)?.url ?? "");
+// HTTP-specific fields
+let url = $state((initialConfig as MCPHTTPServerConfig)?.url ?? "");
 let headers = $state(
-	Object.entries((initialConfig as MCPHTTPServerConfig | MCPSSEServerConfig)?.headers ?? {})
+  Object.entries((initialConfig as MCPHTTPServerConfig)?.headers ?? {})
 		.map(([k, v]) => `${k}: ${v}`)
 		.join("\n"),
 );
@@ -84,11 +81,10 @@ let testSuccess = $state(false);
 const transportOptions = [
 	{ display: "Remote Server (HTTP)", value: "http" as MCPTransportType },
 	{ display: "Local Command (stdio)", value: "stdio" as MCPTransportType },
-	{ display: "Remote Server (SSE) - Legacy", value: "sse" as MCPTransportType },
 ];
 
 onMount(() => {
-  modal.setTitle(isEditing ? `Edit MCP Server: ${capturedExistingConfig?.displayName}` : "Add MCP Server");
+	modal.setTitle(isEditing ? `Edit MCP Server: ${capturedExistingConfig?.displayName}` : "Add MCP Server");
 });
 
 function parseArgs(input: string): string[] {
@@ -160,20 +156,20 @@ function validateForm(): string | null {
 		return "Name must contain at least one letter or number";
 	}
 
-	// Check for duplicate ID (only when creating new or changing name)
+  // Check for duplicate ID (only when creating new or changing name)
   if (!isEditing || newServerId !== capturedServerId) {
-		if (pluginData.getMCPServer(newServerId)) {
+    if (accessors.hasServer(newServerId)) {
 			return "A server with this name already exists";
 		}
 	}
 
-	if (transport === "stdio") {
+  if (transport === "stdio") {
 		if (!command.trim()) {
 			return "Command is required for stdio transport";
 		}
-	} else if (transport === "http" || transport === "sse") {
+  } else {
 		if (!url.trim()) {
-			return "URL is required for HTTP/SSE transport";
+      return "URL is required for HTTP transport";
 		}
 		try {
 			new URL(url.trim());
@@ -204,31 +200,14 @@ function handleSave() {
 			args: parseArgs(args),
 			env: parseEnvVars(envVars),
 		};
-	} else if (transport === "http") {
-		config = {
-			displayName: name.trim(),
-			transport: "http",
-			enabled,
-			url: url.trim(),
-			headers: parseHeaders(headers),
-		};
-	} else {
-		config = {
-			displayName: name.trim(),
-			transport: "sse",
-			enabled,
-			url: url.trim(),
-			headers: parseHeaders(headers),
-		};
-	}
-
-	// If not skipping global save, handle the data store operations
-	if (!skipGlobalSave) {
-		// If editing and ID changed, delete old entry
-    if (isEditing && capturedServerId && newServerId !== capturedServerId) {
-      pluginData.deleteMCPServer(capturedServerId);
-		}
-		pluginData.setMCPServer(newServerId, config);
+  } else {
+    config = {
+      displayName: name.trim(),
+      transport: "http",
+      enabled,
+      url: url.trim(),
+      headers: parseHeaders(headers),
+    };
 	}
 
 	onSave(newServerId, config);
@@ -237,9 +216,6 @@ function handleSave() {
 
 function handleDelete() {
   if (capturedServerId && capturedExistingConfig) {
-		if (!skipGlobalSave) {
-      pluginData.deleteMCPServer(capturedServerId);
-		}
 		// Pass the deleted server info to callback with enabled: false to indicate deletion
     onSave(capturedServerId, { ...capturedExistingConfig, enabled: false });
 		modal.close();
@@ -275,11 +251,11 @@ function buildTestConfig() {
 			},
 		};
 	}
-	// SSE (legacy)
+
 	return {
 		mcpServers: {
 			[testServerId]: {
-				transport: "sse" as const,
+        transport: "http" as const,
 				url: url.trim(),
 				headers: parseHeaders(headers),
 			},
@@ -365,7 +341,7 @@ async function handleTestConnection() {
       <label class="mcp-label" for="mcp-server-enabled">Enabled</label>
       <p class="mcp-description">Whether this server is active and provides tools</p>
     </div>
-    <Toggle id="mcp-server-enabled" isToggled={enabled} changeFunc={() => (enabled = !enabled)} />
+    <Toggle id="mcp-server-enabled" checked={enabled} onchange={(checked) => (enabled = checked)} />
   </div>
 
   <!-- Transport Type -->
@@ -377,7 +353,7 @@ async function handleTestConnection() {
       type="options"
       dropdown={transportOptions}
       selected={transport}
-      onSelect={(v) => (transport = v)}
+      onchange={(v) => (transport = v)}
     />
   </div>
 
@@ -425,16 +401,10 @@ async function handleTestConnection() {
     </div>
   {/if}
 
-  <!-- HTTP/SSE-specific fields -->
-  {#if transport === "http" || transport === "sse"}
+  <!-- HTTP-specific fields -->
+  {#if transport === "http"}
     <div class="mcp-section">
       <h4 class="mcp-section-title">Server Configuration</h4>
-
-      {#if transport === "sse"}
-        <div class="mcp-warning">
-          SSE transport may have CORS issues in Obsidian. Consider using HTTP transport instead.
-        </div>
-      {/if}
 
       <div class="mcp-field">
         <label class="mcp-label" for="mcp-server-url">Server URL</label>
@@ -555,16 +525,6 @@ async function handleTestConnection() {
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-  }
-
-  .mcp-warning {
-    padding: 8px 12px;
-    margin-bottom: 12px;
-    border-radius: 4px;
-    background: rgba(var(--color-yellow-rgb, 255, 193, 7), 0.15);
-    border: 1px solid var(--text-warning, #ffc107);
-    color: var(--text-warning, #ffc107);
-    font-size: 0.85rem;
   }
 
   .mcp-textarea {

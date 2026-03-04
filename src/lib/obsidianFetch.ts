@@ -18,6 +18,12 @@ export function createObsidianFetch(
 	return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
 		const url = input.toString();
 
+		const toPlainArrayBuffer = (view: ArrayBufferView): ArrayBuffer => {
+			const copy = new Uint8Array(view.byteLength);
+			copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+			return copy.buffer;
+		};
+
 		// Try using the original fetch first to support streaming
 		// LLM APIs have proper CORS headers and need native fetch for streaming
 		if (originalFetch) {
@@ -52,19 +58,11 @@ export function createObsidianFetch(
 		if (init?.body && typeof init.body !== "string") {
 			// Handle Uint8Array specifically (common in node/browser buffers)
 			if (init.body instanceof Uint8Array) {
-				// If it's a view on a larger buffer, we need to slice it
-				if (init.body.byteLength !== init.body.buffer.byteLength) {
-					requestBody = init.body.buffer.slice(
-						init.body.byteOffset,
-						init.body.byteOffset + init.body.byteLength,
-					);
-				} else {
-					requestBody = init.body.buffer;
-				}
+				requestBody = toPlainArrayBuffer(init.body);
 			}
 			// Handle generic ArrayBufferView
 			else if (ArrayBuffer.isView(init.body)) {
-				requestBody = init.body.buffer.slice(init.body.byteOffset, init.body.byteOffset + init.body.byteLength);
+				requestBody = toPlainArrayBuffer(init.body);
 			}
 			// Handle raw ArrayBuffer
 			else if (init.body instanceof ArrayBuffer) {

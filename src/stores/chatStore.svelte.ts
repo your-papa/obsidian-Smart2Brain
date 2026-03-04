@@ -69,7 +69,7 @@ export interface AssistantMessage {
 	nerd_stats?: {
 		tokensPerSecond: number;
 		retrievedDocsNum: number;
-		genModelConfig: ChatModelConfig;
+		chatModelConfig: ChatModelConfig;
 	};
 	errorCode?: string;
 }
@@ -1070,7 +1070,7 @@ export class ChatSession {
 
 		// Capture the current model at send time
 		const selectedAgent = getData().getSelectedAgent();
-		const currentModel = selectedAgent?.chatModel ?? getData().getDefaultChatModel() ?? undefined;
+		const currentModel = selectedAgent.chatModel ?? undefined;
 
 		const pair: MessagePair = {
 			id: pairId,
@@ -1095,11 +1095,7 @@ export class ChatSession {
 	private async relocatePendingAttachments(attachments: ChatAttachment[]): Promise<void> {
 		const chatFolder = getData().targetFolder;
 		const pendingPrefix = normalizePath(`${chatFolder}/attachments/_pending/`);
-		const defaultChatName = NEW_CHAT_NAME;
-		const legacyDraftPrefix = normalizePath(`${chatFolder}/attachments/${defaultChatName}/`);
-		const pending = attachments.filter(
-			(a) => a.vaultPath.startsWith(pendingPrefix) || a.vaultPath.startsWith(legacyDraftPrefix),
-		);
+		const pending = attachments.filter((a) => a.vaultPath.startsWith(pendingPrefix));
 		if (pending.length === 0) return;
 
 		const adapter = getPlugin().app.vault.adapter;
@@ -1132,13 +1128,9 @@ export class ChatSession {
 			}
 		}
 
-		// Best-effort cleanup of temporary draft directories
+		// Best-effort cleanup of the temporary _pending directory
 		const pendingDir = normalizePath(`${chatFolder}/attachments/_pending`);
 		adapter.rmdir(pendingDir, false).catch(() => { });
-		const legacyDraftDir = normalizePath(`${chatFolder}/attachments/${defaultChatName}`);
-		if (legacyDraftDir !== pendingDir) {
-			adapter.rmdir(legacyDraftDir, false).catch(() => { });
-		}
 	}
 
 	/** Abort current streaming (if any) */
