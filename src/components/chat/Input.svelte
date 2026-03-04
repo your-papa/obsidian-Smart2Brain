@@ -453,16 +453,8 @@
 </script>
 
 <div
-  class="chat-input-container w-full max-w-[--file-line-width] mx-auto bg-background-primary flex flex-col relative isolate gap-1"
+  class="chat-input-container w-full max-w-[--file-line-width] mx-auto flex flex-col relative isolate gap-1"
 >
-  <button
-    class="clickable-icon flex flex-row items-center gap-1 ml-auto"
-    onclick={async () => await getPlugin().agentManager.createNewChat()}
-  >
-    <div class="h-icon-xs" use:icon={"plus"} style="--icon-size: var(--icon-xs)"></div>
-    <div class="text-xs">New Chat</div>
-  </button>
-
   {#if models.hasUnavailableProviders}
     <button
       class="flex flex-row items-center gap-1.5 px-2 py-1 rounded-md bg-[--background-modifier-error] text-[--text-on-accent] text-xs cursor-pointer border-none"
@@ -581,7 +573,15 @@
         ></div>
         <div class="text-xs">Attach</div>
       </label>
-      <div class="ml-auto">
+      <div class="ml-auto flex items-center gap-2">
+        <button
+          class="clickable-icon flex flex-row items-center gap-0.5"
+          onclick={async () => await getPlugin().agentManager.createNewChat()}
+          title="New Chat"
+        >
+          <div class="h-icon-xs" use:icon={"plus"} style="--icon-size: var(--icon-xs)"></div>
+          <div class="text-xs">New Chat</div>
+        </button>
         {#if !messenger.session || messenger.session.messageState === MessageState.idle}
           <button
             disabled={!canSendMessage || savingFiles}
@@ -611,20 +611,8 @@
 </div>
 
 <style>
-  /* Gradient fade above input - requires pseudo-element */
-  .chat-input-container::before {
-    content: "";
-    position: absolute;
-    top: -20px;
-    left: 0;
-    right: 0;
-    height: 20px;
-    background: linear-gradient(
-      to bottom,
-      transparent,
-      color-mix(in srgb, var(--background-primary) 80%, transparent)
-    );
-    pointer-events: none;
+  .chat-input-container {
+    background: transparent !important;
   }
 
   /* Complex box-shadow with color-mix - requires CSS */
