@@ -1405,7 +1405,7 @@ export class Agent {
 				"callbacks" in wrapper ||
 				"tags" in wrapper;
 
-			if ("input" in wrapper && (hasRunnableMetadata || Object.keys(wrapper).length === 1)) {
+			if ("input" in wrapper && hasRunnableMetadata) {
 				input = wrapper.input;
 			} else if ("args" in wrapper && Object.keys(wrapper).length === 1) {
 				input = wrapper.args;

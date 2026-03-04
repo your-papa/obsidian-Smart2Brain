@@ -140,6 +140,22 @@
 
     if (hasGroupIds) {
       for (const event of rawEvents) {
+        // tool_end events never create a new step — they only update an existing tool
+        // across all steps (the aiMessageId on tool_end may differ from tool_start when
+        // the first tool call in a stream has no preamble and lastAiMessageId was still
+        // undefined at tool_start time). Creating a step here would leave empty steps.
+        if (event.type === "tool_end") {
+          for (const s of steps) {
+            const tool = s.tools.find((t) => t.id === event.toolCallId);
+            if (tool) {
+              tool.status = event.status ?? "completed";
+              tool.output = event.output;
+              break;
+            }
+          }
+          continue;
+        }
+
         const groupId = event.aiMessageId ?? "unknown";
 
         if (!stepByGroup.has(groupId)) {
@@ -162,16 +178,6 @@
             input: event.input,
             status: "running",
           });
-        } else if (event.type === "tool_end") {
-          // Find the matching tool across all steps and update it
-          for (const s of steps) {
-            const tool = s.tools.find((t) => t.id === event.toolCallId);
-            if (tool) {
-              tool.status = event.status ?? "completed";
-              tool.output = event.output;
-              break;
-            }
-          }
         }
       }
     } else {
