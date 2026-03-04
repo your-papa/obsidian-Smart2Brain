@@ -1550,7 +1550,7 @@ export class ChatSession {
 				continue;
 			}
 
-				if (chunk.type === "tool_end") {
+			if (chunk.type === "tool_end") {
 				// Track whether this tool_end is orphaned (no prior tool_start in the stream).
 				// An orphan occurs when the agent emits tool_end without a preceding tool_start,
 				// e.g. when a checkpoint restores mid-tool execution.
