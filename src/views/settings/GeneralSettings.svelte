@@ -72,8 +72,8 @@ function handleAddCustomProvider() {
     desc="Enable LangSmith telemetry for debugging and tracing"
   >
     <Toggle
-      isToggled={pluginData.enableLangSmith}
-      changeFunc={() => (pluginData.enableLangSmith = !pluginData.enableLangSmith)}
+      checked={pluginData.enableLangSmith}
+      onchange={(checked) => (pluginData.enableLangSmith = checked)}
     />
   </SettingItem>
 
@@ -108,8 +108,8 @@ function handleAddCustomProvider() {
 
   <SettingItem name={$t("settings.verbose")} desc={$t("settings.verbose_desc")}>
     <Toggle
-      isToggled={pluginData.isVerbose}
-      changeFunc={() => (pluginData.isVerbose = !pluginData.isVerbose)}
+      checked={pluginData.isVerbose}
+      onchange={(checked) => (pluginData.isVerbose = checked)}
     />
   </SettingItem>
 </SettingGroup>

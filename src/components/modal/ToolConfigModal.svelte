@@ -2,7 +2,7 @@
 import { onMount } from "svelte";
 import type SecondBrainPlugin from "../../main";
 import type { BuiltInToolId, ToolConfig } from "../../main";
-import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
+import { DEFAULT_TOOLS_CONFIG } from "../../stores/dataStore.svelte";
 import Button from "../ui/Button.svelte";
 import Text from "../ui/Text.svelte";
 import TextArea from "../ui/TextArea.svelte";
@@ -13,7 +13,7 @@ interface Props {
 	plugin: SecondBrainPlugin;
 	toolId: BuiltInToolId;
 	onSave: () => void;
-	accessors?: ToolConfigAccessors;
+  accessors: ToolConfigAccessors;
 }
 
 const {
@@ -23,19 +23,13 @@ const {
   onSave,
   accessors: capturedAccessors,
 }: Props = $props();
-const pluginData = getData();
 
 // Capture initial values at component creation (props don't change for modals)
 const defaultConfig = (() => DEFAULT_TOOLS_CONFIG[capturedToolId])();
-const initialToolConfig =
-  (() => capturedAccessors?.getToolConfig() ?? pluginData.getToolConfig(capturedToolId))();
+const initialToolConfig = (() => capturedAccessors.getToolConfig())();
 
 function updateToolConfig(config: Partial<ToolConfig>): void {
-  if (capturedAccessors?.updateToolConfig) {
-    capturedAccessors.updateToolConfig(config);
-	} else {
-    pluginData.updateToolConfig(capturedToolId, config);
-	}
+	capturedAccessors.updateToolConfig(config);
 }
 
 // Editable state - initialized from captured initial values

@@ -347,7 +347,9 @@ export class Agent {
 			instance = this.registry.createChatInstance(provider, chatModel, options);
 		} catch (error) {
 			if (error instanceof ProviderNotFoundError) {
-				getData().setDefaultChatModel(null);
+				const data = getData();
+				const selectedAgent = data.getSelectedAgent();
+				data.updateAgent(selectedAgent.id, { chatModel: null });
 				new Notice(`Provider "${provider}" is no longer available. Please select a new model.`);
 				throw error;
 			}

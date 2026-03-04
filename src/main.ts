@@ -25,7 +25,6 @@ export type {
 	MCPHTTPServerConfig,
 	MCPServerConfig,
 	MCPServersConfig,
-	MCPSSEServerConfig,
 	MCPStdioServerConfig,
 	MCPTransportType,
 	PluginData,

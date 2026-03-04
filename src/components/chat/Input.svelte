@@ -69,7 +69,7 @@
 
   const selectedChatModel = $derived.by(() => {
     const selectedAgent = getData().getSelectedAgent();
-    return selectedAgent?.chatModel ?? getData().getDefaultChatModel();
+    return selectedAgent.chatModel;
   });
 
   const selectedModelSupportsVision = $derived.by(() => {

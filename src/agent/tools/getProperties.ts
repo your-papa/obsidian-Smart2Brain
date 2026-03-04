@@ -9,7 +9,7 @@ import { getData } from "../../stores/dataStore.svelte";
  */
 export function createGetPropertiesTool(app: App) {
 	const pluginData = getData();
-	const toolConfig = pluginData.getToolConfig("get_properties");
+	const toolConfig = pluginData.getSelectedAgent().toolsConfig.get_properties;
 
 	const getPropertiesFn = async ({ note_name }: { note_name?: string }) => {
 		if (note_name) {

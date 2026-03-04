@@ -10,9 +10,6 @@ interface BaseProps {
 interface TextInputProps extends BaseProps {
 	inputType: "text" | "password" | "secret";
 	value: string;
-	changeFunc?: (value: string) => void;
-	focusFunc?: (value: string) => void;
-	blurFunc?: (value: string) => void;
 	onchange?: (value: string) => void;
 	onfocus?: (value: string) => void;
 	onblur?: (value: string) => void;
@@ -21,9 +18,6 @@ interface TextInputProps extends BaseProps {
 interface NumberInputProps extends BaseProps {
 	inputType: "number";
 	value: number;
-	changeFunc?: (value: number) => void;
-	focusFunc?: (value: number) => void;
-	blurFunc?: (value: number) => void;
 	onchange?: (value: number) => void;
 	onfocus?: (value: number) => void;
 	onblur?: (value: number) => void;
@@ -38,9 +32,6 @@ let {
 	styles = "",
 	class: className = "",
 	disabled = false,
-	changeFunc,
-	focusFunc,
-	blurFunc,
 	onchange,
 	onfocus,
 	onblur,
@@ -50,29 +41,23 @@ let {
 // Combined class
 const inputClass = $derived(`${styles} ${className}`.trim());
 
-// Type-safe callback helpers - support both old and new API
+// Type-safe callback helpers
 function handleStringChange(val: string) {
-	(changeFunc as ((v: string) => void) | undefined)?.(val);
 	(onchange as ((v: string) => void) | undefined)?.(val);
 }
 function handleStringFocus(val: string) {
-	(focusFunc as ((v: string) => void) | undefined)?.(val);
 	(onfocus as ((v: string) => void) | undefined)?.(val);
 }
 function handleStringBlur(val: string) {
-	(blurFunc as ((v: string) => void) | undefined)?.(val);
 	(onblur as ((v: string) => void) | undefined)?.(val);
 }
 function handleNumberChange(val: number) {
-	(changeFunc as ((v: number) => void) | undefined)?.(val);
 	(onchange as ((v: number) => void) | undefined)?.(val);
 }
 function handleNumberFocus(val: number) {
-	(focusFunc as ((v: number) => void) | undefined)?.(val);
 	(onfocus as ((v: number) => void) | undefined)?.(val);
 }
 function handleNumberBlur(val: number) {
-	(blurFunc as ((v: number) => void) | undefined)?.(val);
 	(onblur as ((v: number) => void) | undefined)?.(val);
 }
 

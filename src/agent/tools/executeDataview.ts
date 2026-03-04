@@ -13,7 +13,7 @@ interface DataviewAPI {
  */
 export function createExecuteDataviewTool(app: App) {
 	const pluginData = getData();
-	const toolConfig = pluginData.getToolConfig("execute_dataview_query");
+	const toolConfig = pluginData.getSelectedAgent().toolsConfig.execute_dataview_query;
 
 	const executeDataviewFn = async ({
 		query,

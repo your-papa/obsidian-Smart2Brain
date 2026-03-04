@@ -203,7 +203,7 @@ async function handleResetToDefault() {
       inputType="text"
       value={editName}
       placeholder="e.g., Code Review, Writing Style"
-      changeFunc={(val) => (editName = val)}
+      onchange={(val) => (editName = val)}
     />
     {#if editSlug && editSlug !== editName.toLowerCase()}
       <p class="skill-hint">Will be saved as: {editSlug}</p>
@@ -217,7 +217,7 @@ async function handleResetToDefault() {
       inputType="text"
       value={editDescription}
       placeholder="Describe when to use this skill..."
-      changeFunc={(val) => (editDescription = val)}
+      onchange={(val) => (editDescription = val)}
     />
     <p class="skill-field-description">
       A short description of what this skill does. The agent uses this to decide when to load the

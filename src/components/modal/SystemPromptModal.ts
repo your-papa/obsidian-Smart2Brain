@@ -14,9 +14,9 @@ export interface SystemPromptAccessors {
 export class SystemPromptModal extends Modal {
 	private component: ReturnType<typeof SystemPromptModalComponent> | null = null;
 	private plugin: SecondBrainPlugin;
-	private accessors?: SystemPromptAccessors;
+	private accessors: SystemPromptAccessors;
 
-	constructor(plugin: SecondBrainPlugin, accessors?: SystemPromptAccessors) {
+	constructor(plugin: SecondBrainPlugin, accessors: SystemPromptAccessors) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.accessors = accessors;

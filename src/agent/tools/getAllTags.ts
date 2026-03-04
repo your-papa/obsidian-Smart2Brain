@@ -8,7 +8,7 @@ import { getData } from "../../stores/dataStore.svelte";
  */
 export function createGetAllTagsTool(app: App) {
 	const pluginData = getData();
-	const toolConfig = pluginData.getToolConfig("get_all_tags");
+	const toolConfig = pluginData.getSelectedAgent().toolsConfig.get_all_tags;
 
 	const getTagsFn = async (): Promise<string> => {
 		const files = app.vault.getMarkdownFiles();

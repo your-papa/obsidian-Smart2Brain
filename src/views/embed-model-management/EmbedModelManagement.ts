@@ -14,7 +14,7 @@ export class EmbedModelManagementModal extends Modal {
 	constructor(plugin: SecondBrainPlugin, provider: string, config?: EmbedModelConfig) {
 		super(plugin.app);
 		this.plugin = plugin;
-		this.setTitle(`${provider} Embed Model Management`);
+		this.setTitle(`${provider} Embedding Model Management`);
 		this.provider = provider;
 		this.config = config;
 	}

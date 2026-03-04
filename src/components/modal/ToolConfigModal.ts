@@ -18,9 +18,9 @@ export class ToolConfigModal extends Modal {
 	private plugin: SecondBrainPlugin;
 	private toolId: BuiltInToolId;
 	private onSave: () => void;
-	private accessors?: ToolConfigAccessors;
+	private accessors: ToolConfigAccessors;
 
-	constructor(plugin: SecondBrainPlugin, toolId: BuiltInToolId, onSave: () => void, accessors?: ToolConfigAccessors) {
+	constructor(plugin: SecondBrainPlugin, toolId: BuiltInToolId, onSave: () => void, accessors: ToolConfigAccessors) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.toolId = toolId;

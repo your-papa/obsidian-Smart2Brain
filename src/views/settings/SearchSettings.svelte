@@ -153,7 +153,7 @@
       type="options"
       dropdown={searchAlgorithmOptions}
       selected={pluginData.searchAlgorithm}
-      onSelect={(v) => (pluginData.searchAlgorithm = v)}
+      onchange={(v) => (pluginData.searchAlgorithm = v)}
     />
   </SettingItem>
 

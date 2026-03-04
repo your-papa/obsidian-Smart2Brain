@@ -12,7 +12,6 @@ type DropdownGroup<T> = {
 
 type DropdownProps<T> = {
 	id?: string;
-	onSelect?: (selected: T) => void;
 	onchange?: (selected: T) => void;
 	selected?: T;
 	disabled?: boolean;
@@ -23,7 +22,6 @@ type DropdownProps<T> = {
 let {
 	id,
 	dropdown,
-	onSelect,
 	onchange,
 	selected = $bindable(),
 	disabled = false,
@@ -37,7 +35,6 @@ let groups = $derived(type === "groups" ? (dropdown as DropdownGroup<T>[]) : und
 let options = $derived(type === "options" ? (dropdown as DropdownOption<T>[]) : undefined);
 
 function handleChange() {
-	onSelect?.(selected as T);
 	onchange?.(selected as T);
 }
 </script>
