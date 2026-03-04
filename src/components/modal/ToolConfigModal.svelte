@@ -16,18 +16,25 @@ interface Props {
 	accessors?: ToolConfigAccessors;
 }
 
-const { modal, plugin, toolId, onSave, accessors }: Props = $props();
+const {
+  modal,
+  plugin,
+  toolId: capturedToolId,
+  onSave,
+  accessors: capturedAccessors,
+}: Props = $props();
 const pluginData = getData();
 
 // Capture initial values at component creation (props don't change for modals)
-const defaultConfig = DEFAULT_TOOLS_CONFIG[toolId];
-const initialToolConfig = accessors?.getToolConfig() ?? pluginData.getToolConfig(toolId);
+const defaultConfig = (() => DEFAULT_TOOLS_CONFIG[capturedToolId])();
+const initialToolConfig =
+  (() => capturedAccessors?.getToolConfig() ?? pluginData.getToolConfig(capturedToolId))();
 
 function updateToolConfig(config: Partial<ToolConfig>): void {
-	if (accessors?.updateToolConfig) {
-		accessors.updateToolConfig(config);
+  if (capturedAccessors?.updateToolConfig) {
+    capturedAccessors.updateToolConfig(config);
 	} else {
-		pluginData.updateToolConfig(toolId, config);
+    pluginData.updateToolConfig(capturedToolId, config);
 	}
 }
 
@@ -127,7 +134,7 @@ const toolDisplayNames: Record<BuiltInToolId, string> = {
 };
 
 onMount(() => {
-	modal.setTitle(`Configure: ${toolDisplayNames[toolId]}`);
+  modal.setTitle(`Configure: ${toolDisplayNames[capturedToolId]}`);
 });
 
 function handleSave() {
@@ -138,15 +145,15 @@ function handleSave() {
 	};
 
 	// Add tool-specific settings
-	if (toolId === "search_notes") {
+  if (capturedToolId === "search_notes") {
 		updatedConfig.settings = {
 			maxResults,
 		};
-	} else if (toolId === "read_note") {
+  } else if (capturedToolId === "read_note") {
 		updatedConfig.settings = {
 			maxContentLength,
 		};
-	} else if (toolId === "execute_dataview_query") {
+  } else if (capturedToolId === "execute_dataview_query") {
 		updatedConfig.settings = {
 			includeMetadata,
 		};
@@ -161,13 +168,13 @@ function handleResetToDefault() {
 	name = defaultConfig.name;
 	description = defaultConfig.description;
 
-	if (toolId === "search_notes" && defaultConfig.settings) {
+  if (capturedToolId === "search_notes" && defaultConfig.settings) {
 		const settings = defaultConfig.settings as { maxResults: number };
 		maxResults = settings.maxResults;
-	} else if (toolId === "read_note" && defaultConfig.settings) {
+  } else if (capturedToolId === "read_note" && defaultConfig.settings) {
 		const settings = defaultConfig.settings as { maxContentLength: number };
 		maxContentLength = settings.maxContentLength;
-	} else if (toolId === "execute_dataview_query" && defaultConfig.settings) {
+  } else if (capturedToolId === "execute_dataview_query" && defaultConfig.settings) {
 		const settings = defaultConfig.settings as { includeMetadata: boolean };
 		includeMetadata = settings.includeMetadata;
 	}
@@ -177,9 +184,10 @@ function handleResetToDefault() {
 <div class="tool-config-modal-content">
   <!-- Tool Name -->
   <div class="tool-config-field">
-    <label class="tool-config-label">Tool Name</label>
+    <label class="tool-config-label" for="tool-config-name">Tool Name</label>
     <p class="tool-config-description">The name the AI agent sees for this tool. Use snake_case.</p>
     <Text
+      id="tool-config-name"
       inputType="text"
       value={name}
       placeholder={defaultConfig.name}
@@ -189,11 +197,12 @@ function handleResetToDefault() {
 
   <!-- Tool Description -->
   <div class="tool-config-field">
-    <label class="tool-config-label">Tool Description</label>
+    <label class="tool-config-label" for="tool-config-description">Tool Description</label>
     <p class="tool-config-description">
       Describe what the tool does. The AI uses this to decide when to use the tool.
     </p>
     <TextArea
+      id="tool-config-description"
       class="w-full h-24"
       value={description}
       placeholder={defaultConfig.description}
@@ -202,14 +211,15 @@ function handleResetToDefault() {
   </div>
 
   <!-- Tool-specific settings -->
-  {#if toolId === "search_notes"}
+  {#if capturedToolId === "search_notes"}
     <div class="tool-config-section">
       <h4 class="tool-config-section-title">Search Settings</h4>
 
       <div class="tool-config-field">
-        <label class="tool-config-label">Max Notes to Return</label>
+        <label class="tool-config-label" for="tool-config-max-results">Max Notes to Return</label>
         <p class="tool-config-description">Maximum number of notes to return to the AI agent.</p>
         <Text
+          id="tool-config-max-results"
           inputType="number"
           value={maxResults}
           placeholder="10"
@@ -217,14 +227,15 @@ function handleResetToDefault() {
         />
       </div>
     </div>
-  {:else if toolId === "read_note"}
+  {:else if capturedToolId === "read_note"}
     <div class="tool-config-section">
       <h4 class="tool-config-section-title">Read Settings</h4>
 
       <div class="tool-config-field">
-        <label class="tool-config-label">Max Content Length</label>
+        <label class="tool-config-label" for="tool-config-max-content-length">Max Content Length</label>
         <p class="tool-config-description">Maximum characters to return. Set to 0 for unlimited.</p>
         <Text
+          id="tool-config-max-content-length"
           inputType="number"
           value={maxContentLength}
           placeholder="0"
@@ -232,14 +243,15 @@ function handleResetToDefault() {
         />
       </div>
     </div>
-  {:else if toolId === "execute_dataview_query"}
+  {:else if capturedToolId === "execute_dataview_query"}
     <div class="tool-config-section">
       <h4 class="tool-config-section-title">Dataview Settings</h4>
 
       <div class="tool-config-field">
-        <label class="tool-config-label">Include Metadata</label>
+        <label class="tool-config-label" for="tool-config-include-metadata">Include Metadata</label>
         <p class="tool-config-description">Include file metadata in query results.</p>
         <input
+          id="tool-config-include-metadata"
           type="checkbox"
           checked={includeMetadata}
           onchange={(e) => (includeMetadata = e.currentTarget.checked)}

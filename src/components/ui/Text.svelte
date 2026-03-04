@@ -1,5 +1,6 @@
 <script lang="ts">
 interface BaseProps {
+	id?: string;
 	placeholder?: string;
 	styles?: string;
 	class?: string;
@@ -32,6 +33,7 @@ type Props = TextInputProps | NumberInputProps;
 
 let {
 	inputType = "text",
+	id,
 	placeholder = "",
 	styles = "",
 	class: className = "",
@@ -95,6 +97,7 @@ const displayValue = $derived(
 
 {#if inputType === "text" || inputType === "password"}
 	<input
+		{id}
 		bind:value
 		class={inputClass}
 		type={inputType}
@@ -107,6 +110,7 @@ const displayValue = $derived(
 	/>
 {:else if inputType === "secret"}
 	<input
+		{id}
 		class={inputClass}
 		type="text"
 		spellcheck="false"
@@ -129,6 +133,7 @@ const displayValue = $derived(
 	/>
 {:else if inputType === "number"}
 	<input
+		{id}
 		type="number"
 		class={inputClass}
 		spellcheck="false"

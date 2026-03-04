@@ -1,5 +1,6 @@
 <script lang="ts">
 interface Props {
+	id?: string;
 	value?: string;
 	placeholder?: string;
 	rows?: number;
@@ -10,6 +11,7 @@ interface Props {
 }
 
 let {
+	id,
 	value = $bindable(""),
 	placeholder = "",
 	rows = 4,
@@ -21,6 +23,7 @@ let {
 </script>
 
 <textarea
+	{id}
 	bind:value
 	{placeholder}
 	{rows}

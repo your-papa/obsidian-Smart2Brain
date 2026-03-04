@@ -15,6 +15,8 @@
   import Dropdown from "../../components/ui/Dropdown.svelte";
   import Icon from "../../components/ui/Icon.svelte";
   import IconButton from "../../components/ui/IconButton.svelte";
+  import Text from "../../components/ui/Text.svelte";
+  import Toggle from "../../components/ui/Toggle.svelte";
   import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
   import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
   import { createObsidianFetch } from "../../lib/obsidianFetch";

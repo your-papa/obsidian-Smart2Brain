@@ -142,9 +142,10 @@ export class HNSWVectorStore implements VectorStore {
 
 	private async loadIdMappings(): Promise<void> {
 		if (!this.db) return;
+		const db = this.db;
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db?.transaction(ID_MAPPING_STORE, "readonly");
+			const tx = db.transaction(ID_MAPPING_STORE, "readonly");
 			const store = tx.objectStore(ID_MAPPING_STORE);
 			const request = store.getAll();
 
@@ -173,12 +174,13 @@ export class HNSWVectorStore implements VectorStore {
 
 	private async removeIdMapping(stringId: string): Promise<void> {
 		if (!this.db) return;
+		const db = this.db;
 
 		const numericId = this.idToNumeric.get(stringId);
 		if (numericId === undefined) return;
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db?.transaction(ID_MAPPING_STORE, "readwrite");
+			const tx = db.transaction(ID_MAPPING_STORE, "readwrite");
 			const store = tx.objectStore(ID_MAPPING_STORE);
 			const request = store.delete(numericId);
 
@@ -326,7 +328,7 @@ export class HNSWVectorStore implements VectorStore {
 	 * Remove a document by path.
 	 */
 	async remove(path: string): Promise<void> {
-		if (!this.db) throw new Error("Database not open");
+		const db = this.requireDb();
 
 		const doc = await this.getByPath(path);
 		if (doc) {
@@ -335,7 +337,7 @@ export class HNSWVectorStore implements VectorStore {
 		}
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db?.transaction(DOCUMENTS_STORE, "readwrite");
+			const tx = db.transaction(DOCUMENTS_STORE, "readwrite");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const index = store.index("path");
 			const request = index.openCursor(IDBKeyRange.only(path));
@@ -360,10 +362,10 @@ export class HNSWVectorStore implements VectorStore {
 	 * Get a document by path.
 	 */
 	async getByPath(path: string): Promise<DocumentVector | undefined> {
-		if (!this.db) throw new Error("Database not open");
+		const db = this.requireDb();
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db?.transaction(DOCUMENTS_STORE, "readonly");
+			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const index = store.index("path");
 			const request = index.get(path);
@@ -416,7 +418,7 @@ export class HNSWVectorStore implements VectorStore {
 	 * Rebuilds the HNSW index from scratch for efficiency.
 	 */
 	async bulkPut(docs: DocumentVector[]): Promise<void> {
-		if (!this.db) throw new Error("Database not open");
+		const db = this.requireDb();
 
 		// Initialize dimensions from first document
 		if (docs.length > 0 && !this.dimensions) {
@@ -435,7 +437,7 @@ export class HNSWVectorStore implements VectorStore {
 
 		// Store all documents in IndexedDB with numeric IDs
 		await new Promise<void>((resolve, reject) => {
-			const tx = this.db?.transaction([DOCUMENTS_STORE, ID_MAPPING_STORE], "readwrite");
+			const tx = db.transaction([DOCUMENTS_STORE, ID_MAPPING_STORE], "readwrite");
 			const docStore = tx.objectStore(DOCUMENTS_STORE);
 			const mappingStore = tx.objectStore(ID_MAPPING_STORE);
 
@@ -508,10 +510,10 @@ export class HNSWVectorStore implements VectorStore {
 	 * Get the number of documents in the store.
 	 */
 	async count(): Promise<number> {
-		if (!this.db) throw new Error("Database not open");
+		const db = this.requireDb();
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db?.transaction(DOCUMENTS_STORE, "readonly");
+			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const request = store.count();
 
@@ -584,11 +586,17 @@ export class HNSWVectorStore implements VectorStore {
 	// Private helpers
 	// =========================================================================
 
+	private requireDb(): IDBDatabase {
+		if (!this.db) throw new Error("Database not open");
+		return this.db;
+	}
+
 	private async getById(id: string): Promise<StoredDocument | null> {
 		if (!this.db) return null;
+		const db = this.db;
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db?.transaction(DOCUMENTS_STORE, "readonly");
+			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const request = store.get(id);
 
@@ -598,10 +606,10 @@ export class HNSWVectorStore implements VectorStore {
 	}
 
 	private async getMetadataInternal(): Promise<StoredMetadata | null> {
-		if (!this.db) throw new Error("Database not open");
+		const db = this.requireDb();
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db?.transaction(METADATA_STORE, "readonly");
+			const tx = db.transaction(METADATA_STORE, "readonly");
 			const store = tx.objectStore(METADATA_STORE);
 			const request = store.get("metadata");
 
@@ -611,10 +619,10 @@ export class HNSWVectorStore implements VectorStore {
 	}
 
 	private async putInStore<T>(storeName: string, value: T): Promise<void> {
-		if (!this.db) throw new Error("Database not open");
+		const db = this.requireDb();
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db?.transaction(storeName, "readwrite");
+			const tx = db.transaction(storeName, "readwrite");
 			const store = tx.objectStore(storeName);
 			const request = store.put(value);
 
@@ -625,10 +633,10 @@ export class HNSWVectorStore implements VectorStore {
 	}
 
 	private async getAllStored(): Promise<StoredDocument[]> {
-		if (!this.db) throw new Error("Database not open");
+		const db = this.requireDb();
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db?.transaction(DOCUMENTS_STORE, "readonly");
+			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const request = store.getAll();
 
@@ -638,10 +646,10 @@ export class HNSWVectorStore implements VectorStore {
 	}
 
 	private async clearStore(storeName: string): Promise<void> {
-		if (!this.db) throw new Error("Database not open");
+		const db = this.requireDb();
 
 		return new Promise((resolve, reject) => {
-			const tx = this.db?.transaction(storeName, "readwrite");
+			const tx = db.transaction(storeName, "readwrite");
 			const store = tx.objectStore(storeName);
 			const request = store.clear();
 

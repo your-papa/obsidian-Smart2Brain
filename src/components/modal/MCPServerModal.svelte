@@ -29,12 +29,19 @@ interface Props {
 	skipGlobalSave?: boolean;
 }
 
-const { modal, plugin, serverId, existingConfig, onSave, skipGlobalSave = false }: Props = $props();
+const {
+  modal,
+  plugin,
+  serverId: capturedServerId,
+  existingConfig: capturedExistingConfig,
+  onSave,
+  skipGlobalSave = false,
+}: Props = $props();
 const pluginData = getData();
 
 // Capture initial values at component creation (props don't change for modals)
-const isEditing = !!serverId && !!existingConfig;
-const initialConfig = existingConfig;
+const isEditing = (() => !!capturedServerId && !!capturedExistingConfig)();
+const initialConfig = (() => capturedExistingConfig)();
 
 // Generate server ID from name (lowercase, replace spaces/special chars with dashes)
 function generateServerId(input: string): string {
@@ -81,7 +88,7 @@ const transportOptions = [
 ];
 
 onMount(() => {
-	modal.setTitle(isEditing ? `Edit MCP Server: ${existingConfig?.displayName}` : "Add MCP Server");
+  modal.setTitle(isEditing ? `Edit MCP Server: ${capturedExistingConfig?.displayName}` : "Add MCP Server");
 });
 
 function parseArgs(input: string): string[] {
@@ -154,7 +161,7 @@ function validateForm(): string | null {
 	}
 
 	// Check for duplicate ID (only when creating new or changing name)
-	if (!isEditing || newServerId !== serverId) {
+  if (!isEditing || newServerId !== capturedServerId) {
 		if (pluginData.getMCPServer(newServerId)) {
 			return "A server with this name already exists";
 		}
@@ -218,8 +225,8 @@ function handleSave() {
 	// If not skipping global save, handle the data store operations
 	if (!skipGlobalSave) {
 		// If editing and ID changed, delete old entry
-		if (isEditing && serverId && newServerId !== serverId) {
-			pluginData.deleteMCPServer(serverId);
+    if (isEditing && capturedServerId && newServerId !== capturedServerId) {
+      pluginData.deleteMCPServer(capturedServerId);
 		}
 		pluginData.setMCPServer(newServerId, config);
 	}
@@ -229,12 +236,12 @@ function handleSave() {
 }
 
 function handleDelete() {
-	if (serverId && existingConfig) {
+  if (capturedServerId && capturedExistingConfig) {
 		if (!skipGlobalSave) {
-			pluginData.deleteMCPServer(serverId);
+      pluginData.deleteMCPServer(capturedServerId);
 		}
 		// Pass the deleted server info to callback with enabled: false to indicate deletion
-		onSave(serverId, { ...existingConfig, enabled: false });
+    onSave(capturedServerId, { ...capturedExistingConfig, enabled: false });
 		modal.close();
 	}
 }
@@ -341,25 +348,32 @@ async function handleTestConnection() {
 <div class="mcp-modal-content">
   <!-- Name -->
   <div class="mcp-field">
-    <label class="mcp-label">Name</label>
+    <label class="mcp-label" for="mcp-server-name">Name</label>
     <p class="mcp-description">A name for this MCP server</p>
-    <Text inputType="text" value={name} placeholder="My MCP Server" onblur={(v) => (name = v)} />
+    <Text
+      id="mcp-server-name"
+      inputType="text"
+      value={name}
+      placeholder="My MCP Server"
+      onblur={(v) => (name = v)}
+    />
   </div>
 
   <!-- Enabled Toggle -->
   <div class="mcp-field mcp-field-row">
     <div>
-      <label class="mcp-label">Enabled</label>
+      <label class="mcp-label" for="mcp-server-enabled">Enabled</label>
       <p class="mcp-description">Whether this server is active and provides tools</p>
     </div>
-    <Toggle isToggled={enabled} changeFunc={() => (enabled = !enabled)} />
+    <Toggle id="mcp-server-enabled" isToggled={enabled} changeFunc={() => (enabled = !enabled)} />
   </div>
 
   <!-- Transport Type -->
   <div class="mcp-field">
-    <label class="mcp-label">Transport Type</label>
+    <label class="mcp-label" for="mcp-server-transport">Transport Type</label>
     <p class="mcp-description">How to connect to the MCP server</p>
     <Dropdown
+      id="mcp-server-transport"
       type="options"
       dropdown={transportOptions}
       selected={transport}
@@ -373,17 +387,24 @@ async function handleTestConnection() {
       <h4 class="mcp-section-title">Command Configuration</h4>
 
       <div class="mcp-field">
-        <label class="mcp-label">Command</label>
+        <label class="mcp-label" for="mcp-server-command">Command</label>
         <p class="mcp-description">The executable to run (e.g., npx, node, python)</p>
-        <Text inputType="text" value={command} placeholder="npx" onblur={(v) => (command = v)} />
+        <Text
+          id="mcp-server-command"
+          inputType="text"
+          value={command}
+          placeholder="npx"
+          onblur={(v) => (command = v)}
+        />
       </div>
 
       <div class="mcp-field">
-        <label class="mcp-label">Arguments</label>
+        <label class="mcp-label" for="mcp-server-arguments">Arguments</label>
         <p class="mcp-description">
           Command arguments, space-separated (use quotes for args with spaces)
         </p>
         <Text
+          id="mcp-server-arguments"
           inputType="text"
           value={args}
           placeholder="-y @anthropic/mcp-server-filesystem /path/to/dir"
@@ -392,9 +413,10 @@ async function handleTestConnection() {
       </div>
 
       <div class="mcp-field">
-        <label class="mcp-label">Environment Variables (optional)</label>
+        <label class="mcp-label" for="mcp-server-env">Environment Variables (optional)</label>
         <p class="mcp-description">One per line in KEY=VALUE format</p>
         <textarea
+          id="mcp-server-env"
           class="mcp-textarea"
           bind:value={envVars}
           placeholder="API_KEY=your-key&#10;DEBUG=true"
@@ -415,9 +437,10 @@ async function handleTestConnection() {
       {/if}
 
       <div class="mcp-field">
-        <label class="mcp-label">Server URL</label>
+        <label class="mcp-label" for="mcp-server-url">Server URL</label>
         <p class="mcp-description">The URL of the MCP server</p>
         <Text
+          id="mcp-server-url"
           inputType="text"
           value={url}
           placeholder="https://mcp.example.com/mcp"
@@ -426,9 +449,10 @@ async function handleTestConnection() {
       </div>
 
       <div class="mcp-field">
-        <label class="mcp-label">Headers (optional)</label>
+        <label class="mcp-label" for="mcp-server-headers">Headers (optional)</label>
         <p class="mcp-description">One per line in Header-Name: value format</p>
         <textarea
+          id="mcp-server-headers"
           class="mcp-textarea"
           bind:value={headers}
           placeholder="Authorization: Bearer token&#10;X-Custom-Header: value"

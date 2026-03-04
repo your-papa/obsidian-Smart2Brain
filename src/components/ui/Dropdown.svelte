@@ -11,6 +11,7 @@ type DropdownGroup<T> = {
 };
 
 type DropdownProps<T> = {
+	id?: string;
 	onSelect?: (selected: T) => void;
 	onchange?: (selected: T) => void;
 	selected?: T;
@@ -20,6 +21,7 @@ type DropdownProps<T> = {
 } & ({ type: "options"; dropdown: DropdownOption<T>[] } | { type: "groups"; dropdown: DropdownGroup<T>[] });
 
 let {
+	id,
 	dropdown,
 	onSelect,
 	onchange,
@@ -41,6 +43,7 @@ function handleChange() {
 </script>
 
 <select
+	{id}
 	class="dropdown {className}"
 	{style}
 	bind:value={selected}
