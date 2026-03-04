@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Popover } from "bits-ui";
   import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
+  import { extractVendor, logUnclassifiedModelsInfo } from "../../lib/modelVendorClassification";
   import { getProviderDefinition } from "../../providers/index";
   import type { ChatModel } from "../../stores/chatStore.svelte";
   import { getData } from "../../stores/dataStore.svelte";
@@ -10,6 +11,7 @@
   import AnthropicLogo from "../ui/logos/AnthropicLogo.svelte";
   import OpenAILogo from "../ui/logos/OpenAILogo.svelte";
   import GoogleLogo from "../ui/logos/GoogleLogo.svelte";
+  import MicrosoftLogo from "../ui/logos/MicrosoftLogo.svelte";
   import MetaLogo from "../ui/logos/MetaLogo.svelte";
   import DeepSeekLogo from "../ui/logos/DeepSeekLogo.svelte";
   import MistralLogo from "../ui/logos/MistralLogo.svelte";
@@ -20,51 +22,20 @@
   const data = getData();
   const plugin = getPlugin();
   const models = useAvailableModels();
+  const openRouterModels = $derived(models.openRouterModels);
 
   // AI vendor definitions for filtering (excludes routing/local providers like Ollama, OpenRouter)
   const AI_VENDORS = [
     { id: "openai", name: "OpenAI", logo: OpenAILogo },
     { id: "anthropic", name: "Anthropic", logo: AnthropicLogo },
     { id: "google", name: "Google", logo: GoogleLogo },
+    { id: "microsoft", name: "Microsoft", logo: MicrosoftLogo },
     { id: "meta-llama", name: "Meta", logo: MetaLogo },
     { id: "deepseek", name: "DeepSeek", logo: DeepSeekLogo },
     { id: "x-ai", name: "xAI", logo: XAILogo },
     { id: "mistralai", name: "Mistral", logo: MistralLogo },
     { id: "qwen", name: "Qwen", logo: QwenLogo },
   ] as const;
-
-  // Map Ollama model name patterns to vendors
-  const OLLAMA_VENDOR_PATTERNS: [RegExp, string][] = [
-    [/^llama/i, "meta-llama"],
-    [/^codellama/i, "meta-llama"],
-    [/^mistral/i, "mistralai"],
-    [/^mixtral/i, "mistralai"],
-    [/^codestral/i, "mistralai"],
-    [/^gemma/i, "google"],
-    [/^deepseek/i, "deepseek"],
-    [/^qwen/i, "qwen"],
-  ];
-
-  // Extract the AI vendor from a model (for OpenRouter: "openai/gpt-4o" → "openai")
-  function extractVendor(model: ChatModel): string | null {
-    // For OpenRouter models, extract from model ID prefix
-    if (model.provider === "openrouter" && model.model.includes("/")) {
-      return model.model.split("/")[0];
-    }
-    // For native providers, use the provider ID
-    if (["openai", "anthropic"].includes(model.provider)) {
-      return model.provider;
-    }
-    // For Ollama models, try to infer from model name
-    if (model.provider === "ollama") {
-      for (const [pattern, vendor] of OLLAMA_VENDOR_PATTERNS) {
-        if (pattern.test(model.model)) {
-          return vendor;
-        }
-      }
-    }
-    return null;
-  }
 
   // Get the selected agent reactively
   const selectedAgent = $derived(data.getSelectedAgent());
@@ -82,6 +53,28 @@
     }
 
     return list.length > 0 ? list[0] : null;
+  });
+
+  function toClassifiableModel(
+    model: ChatModel,
+  ): { provider: string; model: string; family?: string; families?: string[] } {
+    if (model.provider !== "ollama") {
+      return { provider: model.provider, model: model.model };
+    }
+
+    const families = models.getOllamaModelFamilies(model.model);
+    return {
+      provider: model.provider,
+      model: model.model,
+      family: families[0],
+      families,
+    };
+  }
+
+  const classifiableModels = $derived(models.availableModels.map((model) => toClassifiableModel(model)));
+
+  $effect(() => {
+    logUnclassifiedModelsInfo("model-popover", classifiableModels, openRouterModels);
   });
 
   // Update the agent's model when user selects a different one
@@ -127,8 +120,8 @@
   // Get available vendors based on current models
   const availableVendors = $derived.by(() => {
     const vendorSet = new Set<string>();
-    for (const model of models.availableModels) {
-      const vendor = extractVendor(model);
+    for (const model of classifiableModels) {
+      const vendor = extractVendor(model, openRouterModels);
       if (vendor) vendorSet.add(vendor);
     }
     return AI_VENDORS.filter((v) => vendorSet.has(v.id));
@@ -169,7 +162,9 @@
       result = result
         .map(({ provider, models: providerModels }) => ({
           provider,
-          models: providerModels.filter((m) => extractVendor(m) === selectedVendor),
+          models: providerModels.filter(
+            (m) => extractVendor(toClassifiableModel(m), openRouterModels) === selectedVendor,
+          ),
         }))
         .filter(({ models: providerModels }) => providerModels.length > 0);
     }
@@ -183,6 +178,7 @@
           models: providerModels.filter(
             (m) =>
               m.model.toLowerCase().includes(query) ||
+              getModelDisplayName(m).toLowerCase().includes(query) ||
               provider.toLowerCase().includes(query) ||
               getProviderDisplayName(provider).toLowerCase().includes(query),
           ),
@@ -212,12 +208,16 @@
     return selectedModel?.provider === model.provider && selectedModel?.model === model.model;
   }
 
-  // Get display name for model - strip vendor prefix when a vendor is selected
-  function getModelDisplayName(modelId: string): string {
-    if (selectedVendor && modelId.includes("/")) {
-      return modelId.split("/").slice(1).join("/");
+  // Get display name for model - hydrated display name first, then fallback logic
+  function getModelDisplayName(model: ChatModel): string {
+    const hydrated = models.hydratedChatModelsByKey.get(`${model.provider}:${model.model}`);
+    if (hydrated?.displayName) {
+      return hydrated.displayName;
     }
-    return modelId;
+    if (selectedVendor && model.model.includes("/")) {
+      return model.model.split("/").slice(1).join("/");
+    }
+    return model.model;
   }
 
   // Handle model selection
@@ -250,7 +250,7 @@
       <Logo width={14} height={14} />
     {/if}
     <div class="text-[--text-normal] self-center text-sm">
-      {selectedModel?.model ?? "Select model"}
+      {selectedModel ? getModelDisplayName(selectedModel) : "Select model"}
     </div>
     {#if isOpen}
       <Icon name="chevron-up" size="xs" />
@@ -379,7 +379,7 @@
                         class:bg-[--background-modifier-hover]={isSelected(model)}
                         onclick={() => handleSelect(model)}
                       >
-                        <span class="truncate">{getModelDisplayName(model.model)}</span>
+                        <span class="truncate">{getModelDisplayName(model)}</span>
                         {#if isSelected(model)}
                           <Icon name="check" size="xs" />
                         {/if}

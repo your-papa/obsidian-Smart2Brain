@@ -1,19 +1,20 @@
 import { normalizePath } from "obsidian";
 import { BASE_SYSTEM_PROMPT } from "../agent/prompts";
 import { getSecret, listSecrets, setSecret } from "../lib/secretStorage";
-import SecondBrainPlugin, {
-	type AgentConfig,
-	type AgentSkillState,
-	type AgentsConfig,
-	type BuiltInToolId,
-	type DefaultEmbedModel,
-	type MCPServerConfig,
-	type MCPServersConfig,
-	type PluginData,
-	type SearchAlgorithm,
-	type ToolConfig,
-	type ToolsConfig,
-} from "../main";
+import type SecondBrainPlugin from "../main";
+import type {
+	AgentConfig,
+	AgentSkillState,
+	AgentsConfig,
+	BuiltInToolId,
+	DefaultEmbedModel,
+	MCPServerConfig,
+	MCPServersConfig,
+	PluginData,
+	SearchAlgorithm,
+	ToolConfig,
+	ToolsConfig,
+} from "../types/plugin";
 import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 import type { VectorStoreBackend } from "../vectorstore/types";
 
@@ -1109,6 +1110,86 @@ export class PluginDataStore {
 		const { [modelName]: _, ...rest } = config.chatModels;
 		config.chatModels = rest;
 
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+		for (const agent of Object.values(this.#data.agents)) {
+			if (
+				agent.chatModel &&
+				agent.chatModel.provider === provider &&
+				agent.chatModel.model === modelName
+			) {
+				agent.chatModel = null;
+			}
+		}
+
+||||||| ancestor
+		for (const agent of Object.values(this.#data.agents)) {
+			if (
+				agent.chatModel &&
+				agent.chatModel.provider === provider &&
+				agent.chatModel.name === modelName
+			) {
+				agent.chatModel = null;
+			}
+		}
+
+=======
+>>>>>>> theirs
+		this.saveSettings();
+	}
+
+	// Get/set chatModels
+	getProviderChatModels(provider: string): Record<string, ChatModelConfig> | undefined {
+		const config = this.#data.providerConfig[provider];
+		return config?.chatModels;
+	}
+
+	setProviderChatModels(provider: string, value: Record<string, ChatModelConfig>) {
+		const config = this.#data.providerConfig[provider];
+		if (config) {
+			config.chatModels = value;
+			this.saveSettings();
+||||||| ancestor
+		this.saveSettings();
+	}
+
+	// Get/set chatModels
+	getProviderChatModels(provider: string): Record<string, ChatModelConfig> | undefined {
+		const config = this.#data.providerConfig[provider];
+		return config?.chatModels;
+	}
+
+	setProviderChatModels(provider: string, value: Record<string, ChatModelConfig>) {
+		const config = this.#data.providerConfig[provider];
+		if (config) {
+			config.chatModels = value;
+			this.saveSettings();
+=======
+		for (const agent of Object.values(this.#data.agents)) {
+			if (
+				agent.chatModel &&
+				agent.chatModel.provider === provider &&
+				agent.chatModel.name === modelName
+			) {
+				agent.chatModel = null;
+			}
+>>>>>>> theirs
+		}
+
+||||||| ancestor
+		for (const agent of Object.values(this.#data.agents)) {
+			if (
+				agent.chatModel &&
+				agent.chatModel.provider === provider &&
+				agent.chatModel.name === modelName
+			) {
+				agent.chatModel = null;
+			}
+		}
+
+=======
+>>>>>>> theirs
 		this.saveSettings();
 	}
 
@@ -1250,7 +1331,11 @@ export class PluginDataStore {
 		const config = this.#data.providerConfig[providerId];
 		if (!config) return;
 
-		config.auth.secretIds[fieldName] = secretId;
+		if (!secretId.trim()) {
+			delete config.auth.secretIds[fieldName];
+		} else {
+			config.auth.secretIds[fieldName] = secretId;
+		}
 		this.saveSettings();
 	}
 

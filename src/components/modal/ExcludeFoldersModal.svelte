@@ -91,12 +91,20 @@ function removeExcludeFolder(folder: string) {
         desc="If enabled files choosen will be excluded from the indexing. Otherwise all files will be excluded by default and only choosen files will be used for indexing."
     >
         <Toggle
+<<<<<<< ours
+            checked={data.isExcluding}
+            onchange={() => data.toggleIsExcluding()}
+||||||| ancestor
+            isToggled={data.isExcluding}
+            changeFunc={() => data.toggleIsExcluding}
+=======
             checked={data.isExcluding}
             onchange={(checked) => {
                 if (checked !== data.isExcluding) {
                     data.toggleIsExcluding();
                 }
             }}
+>>>>>>> theirs
         />
     </SettingContainer>
 

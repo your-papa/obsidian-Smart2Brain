@@ -32,6 +32,13 @@ interface ThreadData {
 	writes: Record<string, PendingWrite[]>; // checkpoint_id -> writes
 }
 
+interface GenerationMetadata {
+	agentId?: string;
+	agentName?: string;
+	provider?: string;
+	model?: string;
+}
+
 export class ObsidianChatManager extends BaseCheckpointSaver {
 	private plugin: SecondBrainPlugin;
 	private adapter: DataAdapter;
@@ -136,7 +143,19 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			return defaultPath;
 		}
 
+<<<<<<< ours
+		// If not found, search for it (renamed files)
+||||||| ancestor
+		// If not found, search for it (renamed files)
+		// Legacy format: "{Title} - {Timestamp}.chat"
+		let timestampPart = "";
+		if (threadId.startsWith("Chat ")) {
+			timestampPart = threadId.substring(5);
+		}
+
+=======
 		// If not found at the canonical path, scan existing chat files by stored threadId
+>>>>>>> theirs
 		try {
 			if (await this.adapter.exists(folder)) {
 				const result = await this.adapter.list(folder);
@@ -504,6 +523,130 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		}
 	}
 
+	private isRecord(value: unknown): value is Record<string, unknown> {
+		return typeof value === "object" && value !== null && !Array.isArray(value);
+	}
+
+	private readString(record: Record<string, unknown>, key: string): string | undefined {
+		const value = record[key];
+		return typeof value === "string" && value.length > 0 ? value : undefined;
+	}
+
+	private extractGenerationMetadata(metadata: unknown): GenerationMetadata {
+		if (!this.isRecord(metadata)) return {};
+		return {
+			agentId: this.readString(metadata, "agent_id"),
+			agentName: this.readString(metadata, "agent_name"),
+			provider: this.readString(metadata, "model_provider"),
+			model: this.readString(metadata, "model"),
+		};
+	}
+
+	private getCheckpointMessages(checkpoint: unknown): unknown[] {
+		if (!this.isRecord(checkpoint)) return [];
+		const channelValues = checkpoint.channel_values;
+		if (!this.isRecord(channelValues)) return [];
+		const messages = channelValues.messages;
+		return Array.isArray(messages) ? messages : [];
+	}
+
+	private getParentMessageCount(threadData: ThreadData, config: RunnableConfig): number {
+		const parentCheckpointId = config.configurable?.checkpoint_id;
+		if (typeof parentCheckpointId !== "string" || parentCheckpointId.length === 0) {
+			return 0;
+		}
+		const parentCheckpoint = threadData.checkpoints[parentCheckpointId]?.checkpoint;
+		return this.getCheckpointMessages(parentCheckpoint).length;
+	}
+
+	private isAiSerializedMessage(message: Record<string, unknown>): boolean {
+		if (typeof message.role === "string" && message.role.toLowerCase() === "assistant") {
+			return true;
+		}
+
+		if (typeof message.type === "string") {
+			const type = message.type.toLowerCase();
+			if (type === "ai" || type === "aimessage" || type === "aimessagechunk") {
+				return true;
+			}
+		}
+
+		const identifier = message.id;
+		if (Array.isArray(identifier) && typeof identifier[identifier.length - 1] === "string") {
+			const className = (identifier[identifier.length - 1] as string).toLowerCase();
+			return className === "aimessage" || className === "aimessagechunk";
+		}
+
+		if (typeof identifier === "string") {
+			const className = identifier.split(":").pop()?.toLowerCase();
+			return className === "aimessage" || className === "aimessagechunk";
+		}
+
+		return false;
+	}
+
+	private getOrCreateResponseMetadata(message: Record<string, unknown>): Record<string, unknown> | undefined {
+		if (this.isRecord(message.kwargs)) {
+			const kwargs = message.kwargs;
+			if (!this.isRecord(kwargs.response_metadata)) {
+				kwargs.response_metadata = {};
+			}
+			return this.isRecord(kwargs.response_metadata) ? kwargs.response_metadata : undefined;
+		}
+
+		if (this.isRecord(message.data)) {
+			const data = message.data;
+			if (!this.isRecord(data.response_metadata)) {
+				data.response_metadata = {};
+			}
+			return this.isRecord(data.response_metadata) ? data.response_metadata : undefined;
+		}
+
+		if (!this.isRecord(message.response_metadata)) {
+			message.response_metadata = {};
+		}
+		return this.isRecord(message.response_metadata) ? message.response_metadata : undefined;
+	}
+
+	private annotateCheckpointMessagesWithGeneration(
+		checkpoint: unknown,
+		parentMessageCount: number,
+		generation: GenerationMetadata,
+	): void {
+		const messages = this.getCheckpointMessages(checkpoint);
+		if (messages.length === 0) return;
+		const startIndex = Math.max(0, Math.min(parentMessageCount, messages.length));
+		const hasMetadata =
+			Boolean(generation.agentId) ||
+			Boolean(generation.agentName) ||
+			Boolean(generation.provider) ||
+			Boolean(generation.model);
+		if (!hasMetadata) return;
+
+		for (let i = startIndex; i < messages.length; i++) {
+			const message = messages[i];
+			if (!this.isRecord(message) || !this.isAiSerializedMessage(message)) {
+				continue;
+			}
+
+			const responseMetadata = this.getOrCreateResponseMetadata(message);
+			if (!responseMetadata) continue;
+
+			if (generation.agentId) {
+				responseMetadata.agent_id = generation.agentId;
+			}
+			if (generation.agentName) {
+				responseMetadata.agent_name = generation.agentName;
+			}
+			if (!this.readString(responseMetadata, "model_provider") && generation.provider) {
+				responseMetadata.model_provider = generation.provider;
+			}
+			if (!this.readString(responseMetadata, "model") && generation.model) {
+				responseMetadata.model = generation.model;
+			}
+		}
+	}
+
 	async put(
 		config: RunnableConfig,
 		checkpoint: Checkpoint,
@@ -523,6 +666,13 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		// Sanitize to plain JSON
 		const plainCheckpoint = JSON.parse(JSON.stringify(checkpoint));
 		const plainMetadata = JSON.parse(JSON.stringify(metadata));
+		const parentMessageCount = this.getParentMessageCount(threadData, config);
+		const generation = this.extractGenerationMetadata(config.metadata);
+		this.annotateCheckpointMessagesWithGeneration(
+			plainCheckpoint,
+			parentMessageCount,
+			generation,
+		);
 
 		threadData.checkpoints[checkpointId] = {
 			checkpoint: plainCheckpoint,

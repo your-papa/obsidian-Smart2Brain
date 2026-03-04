@@ -1,12 +1,26 @@
 <script lang="ts">
 interface Props {
+<<<<<<< ours
+||||||| ancestor
+	isToggled?: boolean;
+=======
 	id?: string;
+>>>>>>> theirs
 	checked?: boolean;
 	disabled?: boolean;
 	onchange?: (checked: boolean) => void;
 }
 
+<<<<<<< ours
+let { checked = $bindable(false), disabled = false, onchange }: Props = $props();
+||||||| ancestor
+let { isToggled, checked = $bindable(false), disabled = false, changeFunc, onchange }: Props = $props();
+
+// Support both old API (isToggled/changeFunc) and new API (checked/onchange)
+const isChecked = $derived(isToggled ?? checked);
+=======
 let { id, checked = $bindable(false), disabled = false, onchange }: Props = $props();
+>>>>>>> theirs
 
 function handleChange() {
 	const newValue = !checked;
@@ -31,8 +45,23 @@ function handleKeydown(e: KeyboardEvent) {
 -->
 <label
 	class="checkbox-container"
+<<<<<<< ours
 	class:is-enabled={checked}
+	tabindex={disabled ? -1 : 0}
+	onkeydown={handleKeydown}
+||||||| ancestor
+	class:is-enabled={isChecked}
+	tabindex={disabled ? -1 : 0}
+	onkeydown={handleKeydown}
+=======
+	class:is-enabled={checked}
+>>>>>>> theirs
 >
+<<<<<<< ours
+	<input type="checkbox" tabindex={-1} {checked} {disabled} onchange={handleChange} />
+||||||| ancestor
+	<input type="checkbox" tabindex={-1} checked={isChecked} {disabled} onchange={handleChange} />
+=======
 	<input
 		{id}
 		type="checkbox"
@@ -42,4 +71,5 @@ function handleKeydown(e: KeyboardEvent) {
 		onchange={handleChange}
 		onkeydown={handleKeydown}
 	/>
+>>>>>>> theirs
 </label>

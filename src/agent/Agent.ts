@@ -1262,6 +1262,8 @@ export class Agent {
 	private convertSerializedLangChainMessage(msg: Record<string, unknown>): BaseMessage | undefined {
 		const kwargs = msg.kwargs as Record<string, unknown>;
 		const content = this.extractContent(kwargs);
+		const additionalKwargs = this.asPlainRecord(kwargs.additional_kwargs);
+		const responseMetadata = this.asPlainRecord(kwargs.response_metadata);
 		// ID can be a string or an array like ["langchain", "schema", "HumanMessage", "uuid"]
 		let id: string | undefined;
 		if (typeof kwargs.id === "string") {
@@ -1289,7 +1291,19 @@ export class Agent {
 			case "AIMessage":
 			case "AIMessageChunk": {
 				const toolCalls = this.extractToolCalls(kwargs);
+<<<<<<< ours
+				return new AIMessage({
+					content,
+					id,
+					tool_calls: toolCalls,
+					additional_kwargs: additionalKwargs ?? {},
+					response_metadata: responseMetadata ?? {},
+				});
+||||||| ancestor
+				return new AIMessage({ content, id, tool_calls: toolCalls });
+=======
 				return new AIMessage({ content: c, id, tool_calls: toolCalls });
+>>>>>>> theirs
 			}
 			case "SystemMessage":
 				return new SystemMessage({ content: c, id });
@@ -1299,13 +1313,26 @@ export class Agent {
 			}
 			default:
 				// Default to AIMessage for unknown types
+<<<<<<< ours
+				return new AIMessage({
+					content,
+					id,
+					additional_kwargs: additionalKwargs ?? {},
+					response_metadata: responseMetadata ?? {},
+				});
+||||||| ancestor
+				return new AIMessage({ content, id });
+=======
 				return new AIMessage({ content: c, id });
+>>>>>>> theirs
 		}
 	}
 
 	private convertPlainMessage(type: string, msg: Record<string, unknown>): BaseMessage | undefined {
 		const content = this.extractContent(msg);
 		const id = typeof msg.id === "string" ? msg.id : undefined;
+		const additionalKwargs = this.asPlainRecord(msg.additional_kwargs);
+		const responseMetadata = this.asPlainRecord(msg.response_metadata);
 
 		// Cast content — constructors handle both string and MessageContentComplex[] at runtime
 		const c = content as string;
@@ -1319,7 +1346,19 @@ export class Agent {
 			case "ai":
 			case "aimessage": {
 				const toolCalls = this.extractToolCalls(msg);
+<<<<<<< ours
+				return new AIMessage({
+					content,
+					id,
+					tool_calls: toolCalls,
+					additional_kwargs: additionalKwargs ?? {},
+					response_metadata: responseMetadata ?? {},
+				});
+||||||| ancestor
+				return new AIMessage({ content, id, tool_calls: toolCalls });
+=======
 				return new AIMessage({ content: c, id, tool_calls: toolCalls });
+>>>>>>> theirs
 			}
 			case "system":
 			case "systemmessage":
@@ -1334,7 +1373,20 @@ export class Agent {
 		}
 	}
 
+<<<<<<< ours
+	private asPlainRecord(value: unknown): Record<string, unknown> | undefined {
+		if (!value || typeof value !== "object" || Array.isArray(value)) {
+			return undefined;
+		}
+		return value as Record<string, unknown>;
+	}
+
+	private extractContent(obj: Record<string, unknown>): string {
+||||||| ancestor
+	private extractContent(obj: Record<string, unknown>): string {
+=======
 	private extractContent(obj: Record<string, unknown>): string | MessageContentComplex[] {
+>>>>>>> theirs
 		const content = obj.content;
 		if (typeof content === "string") return content;
 		if (Array.isArray(content)) {

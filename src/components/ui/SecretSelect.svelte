@@ -5,7 +5,6 @@ import { listSecrets } from "../../lib/secretStorage";
 import { getPlugin } from "../../stores/state.svelte";
 import { Logger } from "../../utils/logging";
 import { AddSecretModal } from "../settings/AddSecretModal";
-import Button from "./Button.svelte";
 import Dropdown from "./Dropdown.svelte";
 
 interface Props {
@@ -60,14 +59,17 @@ function handleAddSecret() {
 
 // Dropdown options
 let dropdownOptions = $derived(
-	secrets.map((secretId) => ({
-		display: secretId,
-		value: secretId,
-	})),
+	[
+		{ display: "(Nothing selected)", value: "" },
+		...secrets.map((secretId) => ({
+			display: secretId,
+			value: secretId,
+		})),
+	],
 );
 
-// Selected value - fallback to first secret if configured one is missing
-let selectedValue = $derived(secrets.includes(value) ? value : (secrets[0] ?? ""));
+// Selected value - never auto-fallback to first secret
+let selectedValue = $derived(secrets.includes(value) ? value : "");
 </script>
 
 <div class="flex items-center gap-2">
@@ -101,6 +103,27 @@ let selectedValue = $derived(secrets.includes(value) ? value : (secrets[0] ?? ""
     </Tooltip.Root>
   </Tooltip.Provider>
 
+<<<<<<< ours
+  <Dropdown
+    type="options"
+    dropdown={dropdownOptions}
+    selected={selectedValue}
+    onSelect={handleSelect}
+    class="flex-1"
+  />
+||||||| ancestor
+  {#if secrets.length > 0}
+    <Dropdown
+      type="options"
+      dropdown={dropdownOptions}
+      selected={selectedValue}
+      onSelect={handleSelect}
+      class="flex-1"
+    />
+  {:else}
+    <span class="text-[--text-muted] text-sm">No secrets available</span>
+  {/if}
+=======
   {#if secrets.length > 0}
     <Dropdown
       type="options"
@@ -112,4 +135,5 @@ let selectedValue = $derived(secrets.includes(value) ? value : (secrets[0] ?? ""
   {:else}
     <span class="text-[--text-muted] text-sm">No secrets available</span>
   {/if}
+>>>>>>> theirs
 </div>

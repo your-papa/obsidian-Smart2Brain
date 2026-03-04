@@ -8,6 +8,10 @@
 import { Notice, TFile, getAllTags } from "obsidian";
 import type { EmbeddingsInterface } from "@langchain/core/embeddings";
 import type SecondBrainPlugin from "../main";
+import { hydrateEmbeddingModel } from "../lib/modelMetadataNormalizer";
+import { fetchModelsDevData } from "../providers/modelsDevApi";
+import { getOllamaModelsCache } from "../providers/ollamaModels";
+import { fetchOpenRouterModels } from "../providers/openrouterModels";
 import { getData } from "../stores/dataStore.svelte";
 import { getRegistry } from "../providers/registry";
 import { createVectorStore } from "./index";
@@ -26,14 +30,11 @@ import {
 import { cosineSimilarity, toFloat32Array } from "./similarity";
 import { Logger } from "../utils/logging";
 
-/** Default context window for embedding models (8k tokens) */
-const DEFAULT_EMBED_CONTEXT_WINDOW = 8191;
+/** Default max input tokens for embedding models when metadata is unavailable */
+const DEFAULT_EMBED_MAX_INPUT_TOKENS = 8191;
 
 /** Approximate chars per token for rough estimation */
 const CHARS_PER_TOKEN = 4;
-
-/** Maximum content length before skipping (rough estimate) */
-const MAX_CONTENT_LENGTH = DEFAULT_EMBED_CONTEXT_WINDOW * CHARS_PER_TOKEN;
 
 /**
  * Batch sizes for embedding providers.
@@ -79,6 +80,13 @@ export class VectorStoreService {
 	private currentProviderId: string | null = null;
 	private currentModelId: string | null = null;
 	private _hasValidatedThisSession = false;
+	private maxInputTokensCache:
+		| {
+				provider: string;
+				model: string;
+				maxInputTokens: number;
+		  }
+		| null = null;
 
 	// Progress tracking
 	private _progress: IndexingProgress = {
@@ -181,6 +189,53 @@ export class VectorStoreService {
 			Logger.error("[VectorStore] Initialization failed:", error);
 			throw error;
 		}
+	}
+
+	private async getEmbeddingMaxInputTokens(defaultModel: DefaultEmbedModel | null): Promise<number> {
+		if (!defaultModel) {
+			return DEFAULT_EMBED_MAX_INPUT_TOKENS;
+		}
+
+		if (
+			this.maxInputTokensCache &&
+			this.maxInputTokensCache.provider === defaultModel.provider &&
+			this.maxInputTokensCache.model === defaultModel.model
+		) {
+			return this.maxInputTokensCache.maxInputTokens;
+		}
+
+		const [modelsDevData, openRouterData] = await Promise.all([
+			fetchModelsDevData(),
+			defaultModel.provider === "openrouter" ? fetchOpenRouterModels() : Promise.resolve(null),
+		]);
+
+		const ollamaData =
+			defaultModel.provider === "ollama"
+				? (() => {
+						const ollamaAuth = getData().getResolvedProviderAuth("ollama");
+						if (!ollamaAuth?.baseUrl) return null;
+						return getOllamaModelsCache(ollamaAuth.baseUrl);
+					})()
+				: null;
+
+		const metadata = hydrateEmbeddingModel(defaultModel.provider, defaultModel.model, {
+			modelsDevData,
+			openRouterData,
+			ollamaData,
+		});
+
+		this.maxInputTokensCache = {
+			provider: defaultModel.provider,
+			model: defaultModel.model,
+			maxInputTokens: metadata.maxInputTokens,
+		};
+
+		return metadata.maxInputTokens;
+	}
+
+	private async getMaxEmbeddingContentLength(defaultModel: DefaultEmbedModel | null): Promise<number> {
+		const maxInputTokens = await this.getEmbeddingMaxInputTokens(defaultModel);
+		return maxInputTokens * CHARS_PER_TOKEN;
 	}
 
 	/**
@@ -303,18 +358,19 @@ export class VectorStoreService {
 				contentWithTitle: string;
 			}
 			const validFiles: FileEntry[] = [];
+			const maxContentLength = await this.getMaxEmbeddingContentLength(defaultModel);
 
-			for (const file of filesToIndex) {
-				try {
-					const content = await vault.cachedRead(file);
-					if (content.length <= MAX_CONTENT_LENGTH) {
-						const contentWithTitle = `# ${file.basename}\n\n${content}`;
-						validFiles.push({ file, content, contentWithTitle });
+				for (const file of filesToIndex) {
+					try {
+						const content = await vault.cachedRead(file);
+						if (content.length <= maxContentLength) {
+							const contentWithTitle = `# ${file.basename}\n\n${content}`;
+							validFiles.push({ file, content, contentWithTitle });
+						}
+					} catch (error) {
+						Logger.error(`[VectorStore] Failed to read ${file.path}:`, error);
 					}
-				} catch (error) {
-					Logger.error(`[VectorStore] Failed to read ${file.path}:`, error);
 				}
-			}
 
 			// Process in batches
 			for (let i = 0; i < validFiles.length; i += batchSize) {
@@ -615,17 +671,18 @@ export class VectorStoreService {
 				contentWithTitle: string;
 			}
 
-			const validFiles: FileEntry[] = [];
+				const validFiles: FileEntry[] = [];
+				const maxContentLength = await this.getMaxEmbeddingContentLength(model);
 
 			for (const file of files) {
 				try {
-					const content = await vault.cachedRead(file);
+						const content = await vault.cachedRead(file);
 
-					// Skip files that are too large
-					if (content.length > MAX_CONTENT_LENGTH) {
-						this.updateProgress({ skipped: this._progress.skipped + 1 });
-						continue;
-					}
+						// Skip files that are too large
+						if (content.length > maxContentLength) {
+							this.updateProgress({ skipped: this._progress.skipped + 1 });
+							continue;
+						}
 
 					// Prepend title to content for better semantic matching
 					const contentWithTitle = `# ${file.basename}\n\n${content}`;
@@ -795,9 +852,11 @@ export class VectorStoreService {
 
 		try {
 			const content = await this.plugin.app.vault.cachedRead(file);
+			const defaultModel = this.getDefaultEmbedModel();
+			const maxContentLength = await this.getMaxEmbeddingContentLength(defaultModel);
 
 			// Skip files that are too large
-			if (content.length > MAX_CONTENT_LENGTH) {
+			if (content.length > maxContentLength) {
 				Logger.log(`[VectorStore] Skipping ${file.path}: too large`);
 				return;
 			}
@@ -968,6 +1027,15 @@ export class VectorStoreService {
 		}
 
 		try {
+			const defaultModel = this.getDefaultEmbedModel();
+			const maxContentLength = await this.getMaxEmbeddingContentLength(defaultModel);
+			if (query.length > maxContentLength) {
+				Logger.warn(
+					`[VectorStore] Query too large for embedding model (${query.length} chars > ${maxContentLength} chars)`,
+				);
+				return [];
+			}
+
 			// Embed the query
 			const queryVector = await embeddings.embedQuery(query);
 			const queryVectorTyped = new Float32Array(queryVector);

@@ -6,6 +6,7 @@ import { createProviderStateQuery, invalidateProviderState } from "../../lib/que
 import { type LogoProps, getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import Button from "../ui/Button.svelte";
+import CircularLoader from "../ui/CircularLoader.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import AuthConfigFields from "./AuthConfigFields.svelte";
 import SettingItem from "./SettingItem.svelte";
@@ -28,6 +29,7 @@ let isCustomProvider = $derived(data.isCustomProvider(provider));
 
 // Query for provider state (auth + models)
 const query = createProviderStateQuery(() => provider);
+let isCheckingAuth = $derived(query.isPending || query.isFetching);
 
 function refetch() {
 	invalidateProviderState(provider);
@@ -79,7 +81,14 @@ let Logo: Component<LogoProps> = $derived.by(() => {
 			<Logo width={16} height={16} />
 			<span>{displayName}</span>
 			{#if isConfigured}
-				{#if query.data?.auth.success}
+				{#if isCheckingAuth}
+					<div
+						class="flex items-center gap-1 text-[--text-muted]"
+						title="Checking authentication"
+					>
+						<CircularLoader size={12} color="var(--text-muted)" />
+					</div>
+				{:else if query.data?.auth.success}
 					<Button
 						iconId="check"
 						styles="text-[--background-modifier-success]"
@@ -148,7 +157,12 @@ let Logo: Component<LogoProps> = $derived.by(() => {
 			<!-- Add provider button for unconfigured providers -->
 			<SettingItem name="" desc="">
 				<div class="flex items-center gap-2">
-					{#if query.data !== undefined}
+					{#if isCheckingAuth}
+						<div class="flex items-center gap-2 text-sm mr-auto text-[--text-muted]">
+							<CircularLoader size={14} color="var(--text-muted)" />
+							<span>Checking API key...</span>
+						</div>
+					{:else if query.data !== undefined}
 						<div
 							class="flex items-center gap-2 text-sm mr-auto"
 							class:text-[--text-success]={query.data.auth.success}
@@ -164,7 +178,7 @@ let Logo: Component<LogoProps> = $derived.by(() => {
 						<Button
 							buttonText="Add Provider"
 							cta={true}
-							disabled={!query.data?.auth.success}
+							disabled={isCheckingAuth || !query.data?.auth.success}
 							onClick={handleAddProvider}
 						/>
 					</div>

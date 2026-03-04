@@ -23,6 +23,7 @@
 
     // Query for provider auth state
     const query = createAuthStateQuery(() => provider);
+    let isCheckingAuth = $derived(query.isPending || query.isFetching);
 
     // Get provider definition using the function from providers/index
     let providerDefinition = $derived(
@@ -102,7 +103,10 @@
     function getFieldStyles(fieldKey: string): string {
         const value = getFieldValue(fieldKey);
         if (value === "") return "";
-        return query.data?.success
+        if (isCheckingAuth || !query.data) {
+            return "";
+        }
+        return query.data.success
             ? "!border-[--background-modifier-success]"
             : "!border-[--background-modifier-error]";
     }

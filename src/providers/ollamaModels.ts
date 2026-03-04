@@ -52,6 +52,8 @@ export interface OllamaModelInfo {
 	name: string;
 	/** Model family (e.g., "llama", "mistral") */
 	family?: string;
+	/** Additional family aliases returned by Ollama */
+	families?: string[];
 	/** Parameter size (e.g., "8.0B", "70B") */
 	parameterSize?: string;
 	/** Quantization level (e.g., "Q4_0", "Q8_0") */
@@ -130,7 +132,8 @@ async function fetchModelInfo(baseUrl: string, modelName: string): Promise<Ollam
 
 		return {
 			name: modelName,
-			family: data.details?.family,
+			family: data.details?.family ?? data.details?.families?.[0],
+			families: data.details?.families,
 			parameterSize: data.details?.parameter_size,
 			quantization: data.details?.quantization_level,
 			contextLength,

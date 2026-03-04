@@ -20,7 +20,13 @@ import Toggle from "../../components/ui/Toggle.svelte";
 import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
-import type { AgentColor, AgentConfig, BuiltInToolId, MCPServerConfig, SkillDisplayInfo } from "../../main";
+import type {
+	AgentColor,
+	AgentConfig,
+	BuiltInToolId,
+	MCPServerConfig,
+	SkillDisplayInfo,
+} from "../../types/plugin";
 import { getProviderDefinition } from "../../providers/index";
 import type { ChatModel } from "../../stores/chatStore.svelte";
 import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";

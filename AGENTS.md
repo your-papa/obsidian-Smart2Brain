@@ -1,25 +1,22 @@
-# AGENTS.md
-
-## Critical Rules
+# Critical Rules
 
 - **ONLY use `bun`** - never npm/yarn
 - **NEVER run dev/build commands** (`bun dev`, `bun build`)
 - **ALWAYS use svelte 5 syntax, no legacy**
 
-### Root Commands
 
-- Type check: `bun run check`
-- Format: `bun run format`
-- Lint: `bun run lint`
-- Test: `bun test`
+## When to use `$effect`
+- DOM manipulation (canvas, animations)
+- Third-party library integration
+- Cleanup operations (timers, event listeners)
+- One-time initialization
+- Browser-only operations (analytics, logging)
 
-## Code Style
+## When to AVOID `$effect`
+- **State synchronization** - Don't use `$effect` to sync state between variables
+- **Computed values** - Use `$derived` instead
 
-- **Runtime**: Bun only. No Node.js, npm, pnpm, vite, dotenv.
-- **TypeScript**: Strict mode enabled. Biome target.
-- **Imports**: External packages first, then local.
-
-## btca
+# btca
 
 When you need up-to-date information about technologies used in this project, use btca to query source repositories directly.
 
@@ -37,37 +34,11 @@ Use multiple `-r` flags to query multiple resources at once:
 bunx btca ask -r svelte -r bitsUi -q "How do I create accessible dialog components?"
 ```
 
-## Custom Components
+# Custom Components
 
 **Use project components over standard HTML elements.** This project has custom Obsidian-styled components in `src/components/`.
 
-### Base Components (`src/components/base/`)
-
-| Component | Use instead of |
-|-----------|----------------|
-| `Button.svelte` | `<button>` |
-| `Toggle.svelte` | `<input type="checkbox">` |
-| `Dropdown.svelte` | `<select>` |
-| `Text.svelte` | `<input type="text">` / `<input type="number">` |
-| `Slider.svelte` | `<input type="range">` |
-| `Icon.svelte` | manual icon rendering |
-| `MarkdownRenderer.svelte` | raw HTML for markdown |
-| `Suggestion.svelte` | custom autocomplete |
-| `FilePopover.svelte` | file selection UI |
-| `ProgressBar.svelte` / `ProgressCircle.svelte` | progress indicators |
-| `LoadingAnimation.svelte` / `DotAnimation.svelte` | loading states |
-
-### Settings Components (`src/components/Settings/`)
-
-| Component | Purpose |
-|-----------|---------|
-| `SettingContainer.svelte` | Wrapper for settings rows (name, description, control) |
-| `ConfiguredProvider.svelte` | Provider configuration accordion |
-| `ProviderSetup.svelte` | Provider setup flow |
-| `AuthConfigFields.svelte` | Authentication fields |
-| `ConfirmModal.svelte` | Confirmation dialogs |
-
-### SettingContainer Usage
+## SettingContainer Usage
 
 **Every form control in settings must be wrapped in a `SettingContainer`.** This ensures consistent Obsidian-style layout with name, description, and control aligned properly.
 
@@ -97,91 +68,4 @@ For action buttons without a label, use empty strings:
         <Button buttonText="Cancel" onClick={handleCancel} />
     </div>
 </SettingContainer>
-```
-
-## Svelte 5 Runes - $effect Best Practices
-
-This project uses Svelte 5 with runes (`$state`, `$derived`, `$effect`).
-
-### When to use `$effect`
-- DOM manipulation (canvas, animations)
-- Third-party library integration
-- Cleanup operations (timers, event listeners)
-- One-time initialization
-- Browser-only operations (analytics, logging)
-
-### When to AVOID `$effect`
-- **State synchronization** - Don't use `$effect` to sync state between variables
-- **Computed values** - Use `$derived` instead
-
-### Anti-pattern (avoid):
-```svelte
-<script>
-  let count = $state(0);
-  let doubled = $state();
-
-  $effect(() => {
-    doubled = count * 2; // Don't mutate state in effects
-  });
-</script>
-```
-
-### Correct pattern:
-```svelte
-<script>
-  let count = $state(0);
-  let doubled = $derived(count * 2); // Use $derived for computed values
-</script>
-```
-
-### Key rules:
-1. Prefer `$derived` over `$effect` for computed values
-2. Handle state changes at the source (e.g., in dataStore methods) rather than reacting in UI
-3. Use `untrack()` if you must update state in effects to prevent infinite loops
-4. Treat `$effect` as an escape hatch, not a primary tool
-
-## Svelte 5 Runes - $state with Props
-
-When initializing `$state()` from props, you'll get `state_referenced_locally` warnings because `$state()` only captures the initial value.
-
-### Anti-pattern (causes warning):
-```svelte
-<script>
-  interface Props { initialValue: string }
-  const { initialValue } = $props();
-  
-  // Warning: This reference only captures the initial value
-  let value = $state(initialValue);
-</script>
-```
-
-### Fix for modals/one-time components:
-For components like modals where props don't change after creation, capture initial values explicitly:
-
-```svelte
-<script>
-  interface Props { initialValue: string }
-  const { initialValue } = $props();
-  
-  // Capture at creation - makes intent clear, no warning
-  const capturedInitial = initialValue;
-  let value = $state(capturedInitial);
-</script>
-```
-
-### Fix for reactive components:
-For components that need to react to prop changes, use `$derived` or `$effect`:
-
-```svelte
-<script>
-  interface Props { externalValue: string }
-  const { externalValue } = $props();
-  
-  // Option 1: Read-only derived value
-  const value = $derived(externalValue);
-  
-  // Option 2: Editable state that syncs with prop
-  let value = $state(externalValue);
-  $effect(() => { value = externalValue; });
-</script>
 ```
