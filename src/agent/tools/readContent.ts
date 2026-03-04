@@ -185,7 +185,7 @@ function formatElement(el: ExcalidrawElement): string {
     }
 
     // Text content
-    const text = (el.rawText ?? el.text ?? el.label?.text ?? "").trim();
+    const text = (el.rawText || el.text || el.label?.text || "").trim();
     if (text) {
         parts.push(`  Text: "${text}"`);
     }
