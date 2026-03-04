@@ -178,11 +178,10 @@
     Object.fromEntries(
       untrack(() => messages ?? []).map((p) => {
         const a = p.assistantMessage;
-        const finished =
-          a.state !== AssistantState.streaming && a.state !== AssistantState.idle;
+        const finished = a.state !== AssistantState.streaming && a.state !== AssistantState.idle;
         return [p.id, finished && (a.toolCalls?.length ?? 0) > 0 ? true : undefined];
-      })
-    )
+      }),
+    ),
   );
 
   $effect(() => {

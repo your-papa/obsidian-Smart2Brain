@@ -486,58 +486,58 @@
     />
   {/if}
 {:else}
-<div class="tool-timeline" class:tool-timeline-highlight-all={hoveringFinalControl}>
-  {#if showProcessingDot}
-    <div class="tool-step step-only">
-      <div class="tool-step-rail">
-        <div class="tool-step-dot dot-running"></div>
+  <div class="tool-timeline" class:tool-timeline-highlight-all={hoveringFinalControl}>
+    {#if showProcessingDot}
+      <div class="tool-step step-only">
+        <div class="tool-step-rail">
+          <div class="tool-step-dot dot-running"></div>
+        </div>
+        <div class="tool-step-content"></div>
       </div>
-      <div class="tool-step-content"></div>
-    </div>
-  {/if}
+    {/if}
 
-  {#each steps as step, stepIdx (step.id)}
-    {@const expanded = isStepExpanded(step.id)}
-    {@render stepRow(step, stepIdx, effectiveTotal, expanded, collapsed)}
-  {/each}
+    {#each steps as step, stepIdx (step.id)}
+      {@const expanded = isStepExpanded(step.id)}
+      {@render stepRow(step, stepIdx, effectiveTotal, expanded, collapsed)}
+    {/each}
 
-  {#if showAnswerStep}
-    <div
-      class="tool-step step-last"
-      class:step-first={steps.length === 0}
-      class:step-only={effectiveTotal === 1}
-    >
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
+    {#if showAnswerStep}
       <div
-        class="tool-step-rail"
-        class:tool-step-rail-clickable={collapsed && steps.length > 0}
-        onclick={collapsed && steps.length > 0 ? toggleAllPreviousSteps : undefined}
-        onmouseenter={() => {
-          if (collapsed && steps.length > 0) hoveringFinalControl = true;
-        }}
-        onmouseleave={() => {
-          hoveringFinalControl = false;
-        }}
+        class="tool-step step-last"
+        class:step-first={steps.length === 0}
+        class:step-only={effectiveTotal === 1}
       >
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div
-          class="tool-step-dot"
-          class:dot-running={isStreaming}
-          class:dot-failed={!isStreaming && isError}
-          class:dot-done={!isStreaming && !isError}
-        ></div>
+          class="tool-step-rail"
+          class:tool-step-rail-clickable={collapsed && steps.length > 0}
+          onclick={collapsed && steps.length > 0 ? toggleAllPreviousSteps : undefined}
+          onmouseenter={() => {
+            if (collapsed && steps.length > 0) hoveringFinalControl = true;
+          }}
+          onmouseleave={() => {
+            hoveringFinalControl = false;
+          }}
+        >
+          <div
+            class="tool-step-dot"
+            class:dot-running={isStreaming}
+            class:dot-failed={!isStreaming && isError}
+            class:dot-done={!isStreaming && !isError}
+          ></div>
+        </div>
+        <div class="tool-step-content">
+          {#if answerContent}
+            <MarkdownRenderer
+              content={answerContent}
+              class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
+            />
+          {/if}
+        </div>
       </div>
-      <div class="tool-step-content">
-        {#if answerContent}
-          <MarkdownRenderer
-            content={answerContent}
-            class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
-          />
-        {/if}
-      </div>
-    </div>
-  {/if}
-</div>
+    {/if}
+  </div>
 {/if}
 
 <style>

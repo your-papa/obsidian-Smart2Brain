@@ -791,7 +791,7 @@ export function baseMessageToAssistantMessage(
 		state: stateOverride ?? AssistantState.success,
 		content: textContent,
 		toolCalls,
-		assistantTimeline: buildTimelineFromToolCalls(toolCalls),
+		assistantTimeline: buildTimelineFromToolCalls(toolCalls, msg.id),
 	};
 }
 
@@ -1535,17 +1535,24 @@ export class ChatSession {
 			}
 
 			if (chunk.type === "tool_end") {
+				// Determine tool completion status up-front so both ToolCallState
+				// and the timeline event use the same value.  During streaming the
+				// on_tool_end event does not carry a status flag, so we default to
+				// "completed".  The checkpoint_message handler below reconciles the
+				// final status from ToolMessage.status (which does distinguish errors).
+				const resolvedStatus: ToolCallStatus = "completed";
+
 				if (assistantMsg.toolCalls) {
 					const tc = assistantMsg.toolCalls.find((t) => t.id === chunk.toolCallId);
 					if (tc) {
-						tc.status = "completed";
+						tc.status = resolvedStatus;
 						tc.output = chunk.output;
 					} else {
 						assistantMsg.toolCalls.push({
 							id: chunk.toolCallId,
 							name: chunk.toolName,
 							input: {},
-							status: "completed",
+							status: resolvedStatus,
 							output: chunk.output,
 						});
 					}
@@ -1555,17 +1562,11 @@ export class ChatSession {
 							id: chunk.toolCallId,
 							name: chunk.toolName,
 							input: {},
-							status: "completed",
+							status: resolvedStatus,
 							output: chunk.output,
 						},
 					];
 				}
-
-				// Derive status from the ToolCallState that was just updated so that the
-				// timeline always reflects the real status. If future logic sets tc.status
-				// to "failed" based on output inspection, this pick-up is automatic.
-				const resolvedStatus =
-					assistantMsg.toolCalls?.find((tc) => tc.id === chunk.toolCallId)?.status ?? "completed";
 
 				assistantMsg.assistantTimeline.push({
 					id: `end-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,

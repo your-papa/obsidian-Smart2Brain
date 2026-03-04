@@ -21,7 +21,7 @@ import {
 import type { ChatAttachment } from "../types/shared";
 import { createThreadId, NEW_CHAT_NAME } from "../utils/threadId";
 import { Logger } from "../utils/logging";
-import { Agent, type CheckpointHistoryItem, type ChooseModelParams, type ThreadHistory } from "./Agent";
+import { Agent, type AgentStreamChunk, type CheckpointHistoryItem, type ChooseModelParams, type ThreadHistory } from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
 import { BASE_SYSTEM_PROMPT } from "./prompts";
@@ -40,6 +40,16 @@ import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 
 /** Result of provider authentication validation */
 export type AuthValidationResult = { success: true } | { success: false; message: string };
+
+/**
+ * Chunk type yielded by AgentManager generator methods.
+ * Derived from the canonical AgentStreamChunk to stay in sync automatically.
+ */
+export type AgentManagerStreamChunk =
+	| { type: "token"; token: string }
+	| Pick<Extract<AgentStreamChunk, { type: "tool_start" }>, "type" | "toolCallId" | "toolName" | "input" | "aiMessageId">
+	| Pick<Extract<AgentStreamChunk, { type: "tool_end" }>, "type" | "toolCallId" | "toolName" | "output" | "aiMessageId">
+	| { type: "result"; result: unknown };
 
 const resolvedVisionSupportCache = new Map<string, boolean>();
 const inflightVisionSupportRequests = new Map<string, Promise<boolean>>();
@@ -525,26 +535,7 @@ export class AgentManager {
 		checkpointId?: string,
 		signal?: AbortSignal,
 		attachments?: ChatAttachment[],
-	): AsyncGenerator<
-		| { type: "token"; token: string }
-		| {
-			type: "tool_start";
-			toolCallId: string;
-			toolName: string;
-			input: unknown;
-			aiMessageId?: string;
-		}
-		| {
-			type: "tool_end";
-			toolCallId: string;
-			toolName: string;
-			output: unknown;
-			aiMessageId?: string;
-		}
-		| { type: "result"; result: unknown },
-		void,
-		unknown
-	> {
+	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		const agent = await this.ensureAgent();
 		const pluginData = getData();
 
@@ -634,26 +625,7 @@ export class AgentManager {
 		checkpointId: string,
 		signal?: AbortSignal,
 		attachments?: ChatAttachment[],
-	): AsyncGenerator<
-		| { type: "token"; token: string }
-		| {
-			type: "tool_start";
-			toolCallId: string;
-			toolName: string;
-			input: unknown;
-			aiMessageId?: string;
-		}
-		| {
-			type: "tool_end";
-			toolCallId: string;
-			toolName: string;
-			output: unknown;
-			aiMessageId?: string;
-		}
-		| { type: "result"; result: unknown },
-		void,
-		unknown
-	> {
+	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		const agent = await this.ensureAgent();
 		const pluginData = getData();
 
@@ -738,26 +710,7 @@ export class AgentManager {
 		threadId: string,
 		checkpointId: string,
 		signal?: AbortSignal,
-	): AsyncGenerator<
-		| { type: "token"; token: string }
-		| {
-			type: "tool_start";
-			toolCallId: string;
-			toolName: string;
-			input: unknown;
-			aiMessageId?: string;
-		}
-		| {
-			type: "tool_end";
-			toolCallId: string;
-			toolName: string;
-			output: unknown;
-			aiMessageId?: string;
-		}
-		| { type: "result"; result: unknown },
-		void,
-		unknown
-	> {
+	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		const agent = await this.ensureAgent();
 		const pluginData = getData();
 
