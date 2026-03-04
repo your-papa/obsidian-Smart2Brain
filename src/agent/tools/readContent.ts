@@ -1,11 +1,47 @@
 import { type App, TFile } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { getData } from "../../stores/dataStore.svelte";
+import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
 import { isImageExtension, isPdfExtension, isTextExtension, resolveVaultFileDetailed } from "../../utils/attachments";
 import { extractTextFromPdf } from "../../utils/pdfExtractor";
 
 const MAX_PDF_CHARS = 180_000;
+
+// Minimal interface for the Excalidraw plugin API
+interface ExcalidrawAutomate {
+    getSceneFromFile(file: TFile): Promise<{
+        elements: ExcalidrawElement[];
+        appState: unknown;
+    }>;
+}
+
+interface ExcalidrawElement {
+    id?: string;
+    type: string;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    angle?: number;
+    text?: string;
+    rawText?: string;
+    isDeleted?: boolean;
+    strokeColor?: string;
+    backgroundColor?: string;
+    groupIds?: string[];
+    boundElements?: Array<{ id: string; type: string }>;
+    containerId?: string | null;
+    startBinding?: { elementId: string } | null;
+    endBinding?: { elementId: string } | null;
+    frameId?: string | null;
+    link?: string | null;
+    label?: { text?: string } | null;
+    points?: Array<[number, number]>;
+}
+
+interface ExcalidrawPlugin {
+    ea?: ExcalidrawAutomate;
+}
 
 function truncateContent(content: string, maxChars: number): string {
     if (content.length <= maxChars) return content;
@@ -90,7 +126,9 @@ function resolveAnyFile(app: App, rawPath: string): { file: TFile | null; error?
         return { file: null, error: "Error: Path is empty. Provide a file path or wiki link." };
     }
 
-    const isMarkdownLike = !linkPath.includes(".") || linkPath.toLowerCase().endsWith(".md");
+    const normalizedPath = linkPath.toLowerCase();
+    const isExcalidrawLink = normalizedPath.endsWith(".excalidraw");
+    const isMarkdownLike = !linkPath.includes(".") || normalizedPath.endsWith(".md") || isExcalidrawLink;
     if (isMarkdownLike) {
         const resolvedMarkdown = resolveMarkdownNote(app, linkPath);
         if (resolvedMarkdown.file) {
@@ -121,8 +159,186 @@ function resolveAnyFile(app: App, rawPath: string): { file: TFile | null; error?
     return { file: resolved.file };
 }
 
+function isExcalidrawFile(file: TFile): boolean {
+    return file.path.endsWith(".excalidraw.md") || file.extension.toLowerCase() === "excalidraw";
+}
+
+/**
+ * Format a single Excalidraw element into a human-readable description.
+ */
+function formatElement(el: ExcalidrawElement): string {
+    const parts: string[] = [];
+
+    // Type and id
+    const label = el.type.charAt(0).toUpperCase() + el.type.slice(1);
+    parts.push(`- **${label}**${el.id ? ` (${el.id})` : ""}`);
+
+    // Position and dimensions
+    if (el.x != null && el.y != null) {
+        parts.push(`  Position: (${Math.round(el.x)}, ${Math.round(el.y)})`);
+    }
+    if (el.width != null && el.height != null) {
+        parts.push(`  Size: ${Math.round(el.width)}×${Math.round(el.height)}`);
+    }
+    if (el.angle != null && el.angle !== 0) {
+        parts.push(`  Rotation: ${Math.round((el.angle * 180) / Math.PI)}°`);
+    }
+
+    // Text content
+    const text = (el.rawText ?? el.text ?? "").trim();
+    if (text) {
+        parts.push(`  Text: "${text}"`);
+    }
+
+    // Link
+    if (el.link) {
+        parts.push(`  Link: ${el.link}`);
+    }
+
+    // Connections (arrows/lines)
+    if (el.startBinding?.elementId || el.endBinding?.elementId) {
+        const from = el.startBinding?.elementId ?? "none";
+        const to = el.endBinding?.elementId ?? "none";
+        parts.push(`  Connects: ${from} → ${to}`);
+    }
+
+    // Container reference (text inside a shape)
+    if (el.containerId) {
+        parts.push(`  Inside container: ${el.containerId}`);
+    }
+
+    // Bound elements (shapes that contain text or have arrows)
+    if (el.boundElements?.length) {
+        const refs = el.boundElements.map((b) => `${b.id} (${b.type})`).join(", ");
+        parts.push(`  Bound elements: ${refs}`);
+    }
+
+    // Frame membership
+    if (el.frameId) {
+        parts.push(`  In frame: ${el.frameId}`);
+    }
+
+    // Group membership
+    if (el.groupIds?.length) {
+        parts.push(`  Groups: ${el.groupIds.join(", ")}`);
+    }
+
+    // Colors (only if non-default)
+    if (el.strokeColor && el.strokeColor !== "#1e1e1e" && el.strokeColor !== "#000000") {
+        parts.push(`  Stroke: ${el.strokeColor}`);
+    }
+    if (el.backgroundColor && el.backgroundColor !== "transparent") {
+        parts.push(`  Fill: ${el.backgroundColor}`);
+    }
+
+    return parts.join("\n");
+}
+
+/**
+ * Build a scene summary from an array of Excalidraw elements.
+ * Includes element types, positions, dimensions, text, and connections.
+ */
+function formatSceneDescription(elements: ExcalidrawElement[]): string {
+    const activeElements = elements.filter((el) => !el.isDeleted);
+    if (activeElements.length === 0) return "";
+
+    // Count by type
+    const typeCounts = new Map<string, number>();
+    for (const el of activeElements) {
+        typeCounts.set(el.type, (typeCounts.get(el.type) ?? 0) + 1);
+    }
+    const summary = [...typeCounts.entries()]
+        .map(([type, count]) => `${count} ${type}${count > 1 ? "s" : ""}`)
+        .join(", ");
+
+    const lines: string[] = [];
+    lines.push(`Scene summary: ${activeElements.length} elements (${summary})\n`);
+    lines.push("## Elements\n");
+
+    for (const el of activeElements) {
+        lines.push(formatElement(el));
+    }
+
+    return lines.join("\n");
+}
+
+/**
+ * Parse Excalidraw JSON from file content (from %% comment block or ```json code block).
+ * Returns the full elements array, or an empty array if parsing fails.
+ */
+function parseExcalidrawElements(content: string): ExcalidrawElement[] {
+    // Try %% comment block first (canonical data source)
+    const commentMatch = content.match(/%%\n([\s\S]*?)\n%%/);
+    let jsonStr = commentMatch?.[1];
+
+    // Fall back to ```json code block
+    if (!jsonStr) {
+        const codeBlockMatch = content.match(/```json\s*\n([\s\S]*?)\n```/);
+        jsonStr = codeBlockMatch?.[1];
+    }
+
+    if (!jsonStr) return [];
+
+    try {
+        const parsed = JSON.parse(jsonStr);
+        const elements = parsed?.elements ?? parsed;
+        if (!Array.isArray(elements)) return [];
+        return elements as ExcalidrawElement[];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Try using the Excalidraw plugin API to get scene elements.
+ * Returns null if the plugin is not available or the API call fails.
+ */
+async function getElementsViaPluginApi(app: App, file: TFile): Promise<ExcalidrawElement[] | null> {
+    try {
+        // @ts-ignore - Dynamic access to plugins
+        const excalidrawPlugin = app.plugins?.plugins?.["obsidian-excalidraw-plugin"] as ExcalidrawPlugin | undefined;
+        const ea = excalidrawPlugin?.ea;
+        if (!ea?.getSceneFromFile) return null;
+
+        const scene = await ea.getSceneFromFile(file);
+        if (!scene?.elements?.length) return null;
+
+        return scene.elements;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Read and describe the full content of an Excalidraw drawing file.
+ * Includes all element types, positions, dimensions, text, and connections.
+ * Strategy: try plugin API first, then parse JSON from file content.
+ */
+async function readExcalidrawContent(app: App, file: TFile, maxLength: number): Promise<string> {
+    // Tier 1: Try the Excalidraw plugin API
+    const apiElements = await getElementsViaPluginApi(app, file);
+    if (apiElements?.length) {
+        const description = formatSceneDescription(apiElements);
+        const result = maxLength > 0 ? truncateContent(description, maxLength) : description;
+        return `Content of Excalidraw drawing "${file.path}" (extracted via plugin API):\n\n${result}`;
+    }
+
+    // Tier 2: Parse the file content directly
+    const content = await app.vault.read(file);
+    const elements = parseExcalidrawElements(content);
+
+    if (elements.length > 0) {
+        const description = formatSceneDescription(elements);
+        const result = maxLength > 0 ? truncateContent(description, maxLength) : description;
+        return `Content of Excalidraw drawing "${file.path}":\n\n${result}`;
+    }
+
+    return `Excalidraw drawing "${file.path}" contains no elements. The drawing appears to be empty.`;
+}
+
 export function createReadContentTool(app: App) {
     const pluginData = getData();
+    const defaultToolConfig = DEFAULT_TOOLS_CONFIG.read_content;
     const getToolConfig = () => pluginData.getSelectedAgent().toolsConfig.read_content;
 
     const readContentFn = async ({ path }: { path: string }): Promise<string> => {
@@ -152,6 +368,13 @@ export function createReadContentTool(app: App) {
                 return `Content of PDF "${file.name}" (${totalPages} pages):\n\n${truncated}`;
             }
 
+            if (isExcalidrawFile(file)) {
+                const currentConfig = getToolConfig();
+                const settings = currentConfig?.settings as { maxContentLength?: number } | undefined;
+                const maxLength = settings?.maxContentLength ?? 0;
+                return await readExcalidrawContent(app, file, maxLength);
+            }
+
             if (isTextExtension(ext)) {
                 const content = await app.vault.read(file);
                 const currentConfig = getToolConfig();
@@ -174,10 +397,8 @@ export function createReadContentTool(app: App) {
     const toolConfig = getToolConfig();
 
     return tool(readContentFn, {
-        name: toolConfig?.name ?? "read_content",
-        description:
-            toolConfig?.description ??
-            "Read the full content of notes and vault files by path or wiki link (e.g., [[Daily Note]] or ![[report.pdf]]). Supports markdown and text files (.md, .txt, .csv, .json), and extracts text from PDFs. Images are not supported and must be attached directly in chat.",
+        name: toolConfig?.name ?? defaultToolConfig.name,
+        description: toolConfig?.description ?? defaultToolConfig.description,
         schema: z.object({
             path: z
                 .string()
