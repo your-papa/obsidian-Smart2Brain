@@ -186,11 +186,11 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 			maxResults: 10,
 		},
 	},
-	read_note: {
+	read_content: {
 		enabled: true,
-		name: "read_note",
+		name: "read_content",
 		description:
-			"Read the full content of a specific note by file path or Obsidian wiki link (e.g., [[Daily Note]] or [[folder/note]]).",
+			"Read the full content of notes and vault files by path or wiki link (e.g., [[Daily Note]] or ![[report.pdf]]). Supports markdown/text files (.md, .txt, .csv, .json) and extracts text from PDFs. Images must be attached directly in chat.",
 		settings: {
 			maxContentLength: 0,
 		},
@@ -214,12 +214,6 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		settings: {
 			includeMetadata: true,
 		},
-	},
-	read_attachment: {
-		enabled: true,
-		name: "read_attachment",
-		description:
-			"Read a PDF or text file from the vault. PDFs are returned as extracted text; text files (.md, .txt, .csv, .json) are returned as raw content. Images are not supported by this tool and should be attached directly in chat.",
 	},
 };
 
@@ -1386,6 +1380,9 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		// Normalize all agents to include required fields
 		for (const agentId of Object.keys(mergedData.agents)) {
 			const agent = mergedData.agents[agentId];
+			const legacyTools = (agent.toolsConfig ?? {}) as Record<string, ToolConfig | undefined>;
+			const legacyReadNote = legacyTools.read_note;
+			const legacyReadAttachment = legacyTools.read_attachment;
 
 			// Ensure toolsConfig exists and has all tools
 			if (!agent.toolsConfig) {
@@ -1396,6 +1393,44 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 					...agent.toolsConfig,
 				};
 			}
+
+			const currentReadContent = agent.toolsConfig.read_content;
+			const legacyMaxContentLength =
+				(legacyReadNote?.settings as { maxContentLength?: number } | undefined)?.maxContentLength ??
+				(currentReadContent.settings as { maxContentLength?: number } | undefined)?.maxContentLength ??
+				0;
+
+			let mergedReadContentEnabled = currentReadContent.enabled ?? true;
+			if (legacyReadNote && legacyReadAttachment) {
+				mergedReadContentEnabled = (legacyReadNote.enabled ?? true) && (legacyReadAttachment.enabled ?? true);
+			} else if (legacyReadNote) {
+				mergedReadContentEnabled = legacyReadNote.enabled ?? true;
+			} else if (legacyReadAttachment) {
+				mergedReadContentEnabled = legacyReadAttachment.enabled ?? true;
+			}
+
+			const mergedReadContentName =
+				currentReadContent.name === DEFAULT_TOOLS_CONFIG.read_content.name
+					? legacyReadNote?.name || legacyReadAttachment?.name || currentReadContent.name
+					: currentReadContent.name;
+
+			const mergedReadContentDescription =
+				currentReadContent.description === DEFAULT_TOOLS_CONFIG.read_content.description
+					? legacyReadNote?.description || legacyReadAttachment?.description || currentReadContent.description
+					: currentReadContent.description;
+
+			agent.toolsConfig.read_content = {
+				...currentReadContent,
+				enabled: mergedReadContentEnabled,
+				name: mergedReadContentName,
+				description: mergedReadContentDescription,
+				settings: {
+					maxContentLength: legacyMaxContentLength,
+				},
+			};
+
+			delete (agent.toolsConfig as Record<string, ToolConfig | undefined>).read_note;
+			delete (agent.toolsConfig as Record<string, ToolConfig | undefined>).read_attachment;
 
 			// Ensure skills exists
 			if (!agent.skills) {

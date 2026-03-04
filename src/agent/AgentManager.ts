@@ -30,8 +30,7 @@ import { createExecuteDataviewTool } from "./tools/executeDataview";
 import { createGetAllTagsTool } from "./tools/getAllTags";
 import { createGetPropertiesTool } from "./tools/getProperties";
 import { createLoadSkillTool } from "./tools/loadSkill";
-import { createReadNoteTool } from "./tools/readNote";
-import { createReadAttachmentTool } from "./tools/readAttachment";
+import { createReadContentTool } from "./tools/readContent";
 import { createSearchNotesTool } from "./tools/searchNotes";
 
 import { getRegistry } from "../providers/registry";
@@ -401,13 +400,8 @@ export class AgentManager {
 		if (isToolEnabled("get_properties")) {
 			tools.push(createGetPropertiesTool(this.plugin.app));
 		}
-		if (isToolEnabled("read_note")) {
-			tools.push(createReadNoteTool(this.plugin.app));
-		}
-
-		// Add read_attachment tool (always enabled alongside read_note, checks vision at call time)
-		if (isToolEnabled("read_attachment")) {
-			tools.push(createReadAttachmentTool(this.plugin.app));
+		if (isToolEnabled("read_content")) {
+			tools.push(createReadContentTool(this.plugin.app));
 		}
 
 		// Add load_skill tool if skillsService is available and has skills
