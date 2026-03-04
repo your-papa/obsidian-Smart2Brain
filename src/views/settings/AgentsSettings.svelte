@@ -417,9 +417,10 @@
         "Search through your Obsidian notes by keyword. Returns matching file names and metadata.",
     },
     {
-      id: "read_note",
-      defaultName: "Read Note",
-      defaultDescription: "Read the full content of a specific note by its file path.",
+      id: "read_content",
+      defaultName: "Read Content",
+      defaultDescription:
+        "Read notes and vault files by path or wiki link. Supports markdown/text files and PDF text extraction. Images must be attached in chat.",
     },
     {
       id: "get_all_tags",
@@ -440,12 +441,6 @@
         id: "dataview",
         name: "Dataview",
       },
-    },
-    {
-      id: "read_attachment",
-      defaultName: "Read Attachment",
-      defaultDescription:
-        "Read PDFs and text files (.md, .txt, .csv, .json) from the vault. PDFs return extracted text; text files return raw content. Images must be attached directly in chat for visual analysis.",
     },
   ];
 
@@ -879,10 +874,7 @@
                   label="Delete {ext.displayName}"
                   onclick={() => deleteSkill(ext.id)}
                 />
-                <Toggle
-                  checked={ext.enabled}
-                  onchange={() => toggleSkill(ext.id, !ext.enabled)}
-                />
+                <Toggle checked={ext.enabled} onchange={() => toggleSkill(ext.id, !ext.enabled)} />
                 <IconButton
                   icon="pencil"
                   label="Edit {ext.displayName} prompt"
@@ -969,9 +961,7 @@
                     <div class="mcp-server-header">
                       <span class="mcp-server-name">{config.displayName}</span>
                       <span class="mcp-server-badge {config.transport}">
-                        {config.transport === "stdio"
-                          ? "Local"
-                          : "HTTP"}
+                        {config.transport === "stdio" ? "Local" : "HTTP"}
                       </span>
                       <button
                         class="mcp-tools-badge"
@@ -1043,10 +1033,7 @@
                       label="Edit {config.displayName}"
                       onclick={() => openEditMCPServer(serverId)}
                     />
-                    <Toggle
-                      checked={config.enabled}
-                      onchange={() => toggleMCPServer(serverId)}
-                    />
+                    <Toggle checked={config.enabled} onchange={() => toggleMCPServer(serverId)} />
                   </div>
                 </div>
               {/if}

@@ -1,178 +1,179 @@
 <script lang="ts">
-import { onMount } from "svelte";
-import type SecondBrainPlugin from "../../main";
-import type { BuiltInToolId, ToolConfig } from "../../main";
-import { DEFAULT_TOOLS_CONFIG } from "../../stores/dataStore.svelte";
-import Button from "../ui/Button.svelte";
-import Text from "../ui/Text.svelte";
-import TextArea from "../ui/TextArea.svelte";
-import type { ToolConfigAccessors, ToolConfigModal } from "./ToolConfigModal";
+  import { onMount } from "svelte";
+  import type SecondBrainPlugin from "../../main";
+  import type { BuiltInToolId, ToolConfig } from "../../main";
+  import { DEFAULT_TOOLS_CONFIG } from "../../stores/dataStore.svelte";
+  import Button from "../ui/Button.svelte";
+  import Text from "../ui/Text.svelte";
+  import TextArea from "../ui/TextArea.svelte";
+  import type { ToolConfigAccessors, ToolConfigModal } from "./ToolConfigModal";
 
-interface Props {
-	modal: ToolConfigModal;
-	plugin: SecondBrainPlugin;
-	toolId: BuiltInToolId;
-	onSave: () => void;
-  accessors: ToolConfigAccessors;
-}
+  interface Props {
+    modal: ToolConfigModal;
+    plugin: SecondBrainPlugin;
+    toolId: BuiltInToolId;
+    onSave: () => void;
+    accessors: ToolConfigAccessors;
+  }
 
-const {
-  modal,
-  plugin,
-  toolId: capturedToolId,
-  onSave,
-  accessors: capturedAccessors,
-}: Props = $props();
+  const {
+    modal,
+    plugin,
+    toolId: capturedToolId,
+    onSave,
+    accessors: capturedAccessors,
+  }: Props = $props();
 
-// Capture initial values at component creation (props don't change for modals)
-const defaultConfig = (() => DEFAULT_TOOLS_CONFIG[capturedToolId])();
-const initialToolConfig = (() => capturedAccessors.getToolConfig())();
+  // Capture initial values at component creation (props don't change for modals)
+  const defaultConfig = (() => DEFAULT_TOOLS_CONFIG[capturedToolId])();
+  const initialToolConfig = (() => capturedAccessors.getToolConfig())();
 
-function updateToolConfig(config: Partial<ToolConfig>): void {
-	capturedAccessors.updateToolConfig(config);
-}
+  function updateToolConfig(config: Partial<ToolConfig>): void {
+    capturedAccessors.updateToolConfig(config);
+  }
 
-// Editable state - initialized from captured initial values
-let name = $state(initialToolConfig?.name ?? defaultConfig.name);
-let description = $state(initialToolConfig?.description ?? defaultConfig.description);
+  // Editable state - initialized from captured initial values
+  let name = $state(initialToolConfig?.name ?? defaultConfig.name);
+  let description = $state(initialToolConfig?.description ?? defaultConfig.description);
 
-// Tool-specific settings
-let maxContentLength = $state(
-	(initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
-		(defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
-		0,
-);
-let includeMetadata = $state(
-	(initialToolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
-		(defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
-		true,
-);
-let maxResults = $state(
-	(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
-		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
-		10,
-);
-
-interface ToolConfigSnapshot {
-  name: string;
-  description: string;
-  maxContentLength: number;
-  includeMetadata: boolean;
-  maxResults: number;
-}
-
-const initialSnapshot: ToolConfigSnapshot = {
-  name: initialToolConfig?.name ?? defaultConfig.name,
-  description: initialToolConfig?.description ?? defaultConfig.description,
-  maxContentLength:
+  // Tool-specific settings
+  let maxContentLength = $state(
     (initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
-    (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
-    0,
-  includeMetadata:
+      (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
+      0,
+  );
+  let includeMetadata = $state(
     (initialToolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
-    (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
-    true,
-  maxResults:
+      (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
+      true,
+  );
+  let maxResults = $state(
     (initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
-    (defaultConfig.settings as { maxResults?: number })?.maxResults ??
-    10,
-};
+      (defaultConfig.settings as { maxResults?: number })?.maxResults ??
+      10,
+  );
 
-const defaultSnapshot: ToolConfigSnapshot = {
-  name: defaultConfig.name,
-  description: defaultConfig.description,
-  maxContentLength: (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ?? 0,
-  includeMetadata: (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ?? true,
-  maxResults: (defaultConfig.settings as { maxResults?: number })?.maxResults ?? 10,
-};
+  interface ToolConfigSnapshot {
+    name: string;
+    description: string;
+    maxContentLength: number;
+    includeMetadata: boolean;
+    maxResults: number;
+  }
 
-function snapshotKey(snapshot: ToolConfigSnapshot): string {
-  return JSON.stringify(snapshot);
-}
-
-const initialSnapshotKey = snapshotKey(initialSnapshot);
-const defaultSnapshotKey = snapshotKey(defaultSnapshot);
-
-const isDirty = $derived.by(() => {
-  const currentSnapshot: ToolConfigSnapshot = {
-    name,
-    description,
-    maxContentLength,
-    includeMetadata,
-    maxResults,
+  const initialSnapshot: ToolConfigSnapshot = {
+    name: initialToolConfig?.name ?? defaultConfig.name,
+    description: initialToolConfig?.description ?? defaultConfig.description,
+    maxContentLength:
+      (initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
+      (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
+      0,
+    includeMetadata:
+      (initialToolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
+      (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
+      true,
+    maxResults:
+      (initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
+      (defaultConfig.settings as { maxResults?: number })?.maxResults ??
+      10,
   };
-  return snapshotKey(currentSnapshot) !== initialSnapshotKey;
-});
 
-const isAtDefault = $derived.by(() => {
-  const currentSnapshot: ToolConfigSnapshot = {
-    name,
-    description,
-    maxContentLength,
-    includeMetadata,
-    maxResults,
+  const defaultSnapshot: ToolConfigSnapshot = {
+    name: defaultConfig.name,
+    description: defaultConfig.description,
+    maxContentLength:
+      (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ?? 0,
+    includeMetadata:
+      (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ?? true,
+    maxResults: (defaultConfig.settings as { maxResults?: number })?.maxResults ?? 10,
   };
-  return snapshotKey(currentSnapshot) === defaultSnapshotKey;
-});
 
-const showResetToDefault = $derived(!isAtDefault);
+  function snapshotKey(snapshot: ToolConfigSnapshot): string {
+    return JSON.stringify(snapshot);
+  }
 
-// Tool display names for the modal title
-const toolDisplayNames: Record<BuiltInToolId, string> = {
-	search_notes: "Search Notes",
-	read_note: "Read Note",
-	get_all_tags: "Get All Tags",
-	get_properties: "Get Properties",
-	execute_dataview_query: "Execute Dataview Query",
-	read_attachment: "Read Attachment",
-};
+  const initialSnapshotKey = snapshotKey(initialSnapshot);
+  const defaultSnapshotKey = snapshotKey(defaultSnapshot);
 
-onMount(() => {
-  modal.setTitle(`Configure: ${toolDisplayNames[capturedToolId]}`);
-});
+  const isDirty = $derived.by(() => {
+    const currentSnapshot: ToolConfigSnapshot = {
+      name,
+      description,
+      maxContentLength,
+      includeMetadata,
+      maxResults,
+    };
+    return snapshotKey(currentSnapshot) !== initialSnapshotKey;
+  });
 
-function handleSave() {
-	// Build updated config
-	const updatedConfig: Partial<ToolConfig> = {
-		name,
-		description,
-	};
+  const isAtDefault = $derived.by(() => {
+    const currentSnapshot: ToolConfigSnapshot = {
+      name,
+      description,
+      maxContentLength,
+      includeMetadata,
+      maxResults,
+    };
+    return snapshotKey(currentSnapshot) === defaultSnapshotKey;
+  });
 
-	// Add tool-specific settings
-  if (capturedToolId === "search_notes") {
-		updatedConfig.settings = {
-			maxResults,
-		};
-  } else if (capturedToolId === "read_note") {
-		updatedConfig.settings = {
-			maxContentLength,
-		};
-  } else if (capturedToolId === "execute_dataview_query") {
-		updatedConfig.settings = {
-			includeMetadata,
-		};
-	}
+  const showResetToDefault = $derived(!isAtDefault);
 
-	updateToolConfig(updatedConfig);
-	onSave();
-	modal.close();
-}
+  // Tool display names for the modal title
+  const toolDisplayNames: Record<BuiltInToolId, string> = {
+    search_notes: "Search Notes",
+    read_content: "Read Content",
+    get_all_tags: "Get All Tags",
+    get_properties: "Get Properties",
+    execute_dataview_query: "Execute Dataview Query",
+  };
 
-function handleResetToDefault() {
-	name = defaultConfig.name;
-	description = defaultConfig.description;
+  onMount(() => {
+    modal.setTitle(`Configure: ${toolDisplayNames[capturedToolId]}`);
+  });
 
-  if (capturedToolId === "search_notes" && defaultConfig.settings) {
-		const settings = defaultConfig.settings as { maxResults: number };
-		maxResults = settings.maxResults;
-  } else if (capturedToolId === "read_note" && defaultConfig.settings) {
-		const settings = defaultConfig.settings as { maxContentLength: number };
-		maxContentLength = settings.maxContentLength;
-  } else if (capturedToolId === "execute_dataview_query" && defaultConfig.settings) {
-		const settings = defaultConfig.settings as { includeMetadata: boolean };
-		includeMetadata = settings.includeMetadata;
-	}
-}
+  function handleSave() {
+    // Build updated config
+    const updatedConfig: Partial<ToolConfig> = {
+      name,
+      description,
+    };
+
+    // Add tool-specific settings
+    if (capturedToolId === "search_notes") {
+      updatedConfig.settings = {
+        maxResults,
+      };
+    } else if (capturedToolId === "read_content") {
+      updatedConfig.settings = {
+        maxContentLength,
+      };
+    } else if (capturedToolId === "execute_dataview_query") {
+      updatedConfig.settings = {
+        includeMetadata,
+      };
+    }
+
+    updateToolConfig(updatedConfig);
+    onSave();
+    modal.close();
+  }
+
+  function handleResetToDefault() {
+    name = defaultConfig.name;
+    description = defaultConfig.description;
+
+    if (capturedToolId === "search_notes" && defaultConfig.settings) {
+      const settings = defaultConfig.settings as { maxResults: number };
+      maxResults = settings.maxResults;
+    } else if (capturedToolId === "read_content" && defaultConfig.settings) {
+      const settings = defaultConfig.settings as { maxContentLength: number };
+      maxContentLength = settings.maxContentLength;
+    } else if (capturedToolId === "execute_dataview_query" && defaultConfig.settings) {
+      const settings = defaultConfig.settings as { includeMetadata: boolean };
+      includeMetadata = settings.includeMetadata;
+    }
+  }
 </script>
 
 <div class="tool-config-modal-content">
@@ -221,12 +222,14 @@ function handleResetToDefault() {
         />
       </div>
     </div>
-  {:else if capturedToolId === "read_note"}
+  {:else if capturedToolId === "read_content"}
     <div class="tool-config-section">
       <h4 class="tool-config-section-title">Read Settings</h4>
 
       <div class="tool-config-field">
-        <label class="tool-config-label" for="tool-config-max-content-length">Max Content Length</label>
+        <label class="tool-config-label" for="tool-config-max-content-length"
+          >Max Content Length</label
+        >
         <p class="tool-config-description">Maximum characters to return. Set to 0 for unlimited.</p>
         <Text
           id="tool-config-max-content-length"

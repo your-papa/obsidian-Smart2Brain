@@ -75,7 +75,7 @@ export type MCPServersConfig = Record<string, MCPServerConfig>;
 /**
  * Available built-in tool identifiers
  */
-export type BuiltInToolId = "search_notes" | "read_note" | "get_all_tags" | "get_properties" | "execute_dataview_query" | "read_attachment";
+export type BuiltInToolId = "search_notes" | "read_content" | "get_all_tags" | "get_properties" | "execute_dataview_query";
 
 /**
  * Tool-specific settings for search_notes tool
@@ -86,7 +86,7 @@ export interface SearchNotesSettings {
 }
 
 /**
- * Tool-specific settings for read_note tool
+ * Tool-specific settings for read_content tool
  */
 export interface ReadNoteSettings {
 	/** Maximum content length to return (0 = unlimited) */
