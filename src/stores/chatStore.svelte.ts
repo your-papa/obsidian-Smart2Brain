@@ -1573,13 +1573,19 @@ export class ChatSession {
 					];
 				}
 
+				// Derive status from the ToolCallState that was just updated so that the
+				// timeline always reflects the real status. If future logic sets tc.status
+				// to "failed" based on output inspection, this pick-up is automatic.
+				const resolvedStatus =
+					assistantMsg.toolCalls?.find((tc) => tc.id === chunk.toolCallId)?.status ?? "completed";
+
 				assistantMsg.assistantTimeline.push({
 					id: `end-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
 					type: "tool_end",
 					toolCallId: chunk.toolCallId,
 					toolName: chunk.toolName,
 					output: chunk.output,
-					status: "completed",
+					status: resolvedStatus,
 					aiMessageId: chunk.aiMessageId,
 				});
 				continue;

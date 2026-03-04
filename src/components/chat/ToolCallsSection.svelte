@@ -209,32 +209,18 @@
 
   function buildStepsFromToolCalls(calls: ToolCallState[] | undefined): TimelineStep[] {
     if (!calls || calls.length === 0) return [];
-
-    // Convert flat tool calls into events — all in one group since we lack message boundaries
-    const events: AssistantTimelineEvent[] = [];
+    const step: TimelineStep = { id: "step-0", preambles: [], tools: [] };
     for (const tc of calls) {
-      if (tc.preamble?.trim()) {
-        events.push({ id: `p-${tc.id}`, type: "preamble", content: tc.preamble.trim() });
-      }
-      events.push({
-        id: `s-${tc.id}`,
-        type: "tool_start",
-        toolCallId: tc.id,
-        toolName: tc.name,
+      if (tc.preamble?.trim()) step.preambles.push(tc.preamble.trim());
+      step.tools.push({
+        id: tc.id,
+        name: tc.name,
         input: tc.input,
-        status: "running",
-      });
-      events.push({
-        id: `e-${tc.id}`,
-        type: "tool_end",
-        toolCallId: tc.id,
-        toolName: tc.name,
         output: tc.output,
         status: tc.status,
       });
     }
-
-    return buildStepsFromEvents(events);
+    return [step];
   }
 
   /* ── Step helpers ── */
@@ -283,9 +269,11 @@
   const visibleToolCalls = $derived(toolCalls ?? []);
   const overallStatus = $derived(getOverallStatus(visibleToolCalls));
 
-  // Show answer as a final timeline step when there's content or tools finished streaming
+  // Show answer as a final timeline step when there's content or tools finished streaming.
+  // Guard with steps.length > 0 so that during initial processing (no tool-call steps yet)
+  // showProcessingDot takes over instead of the answer step pre-empting it.
   const showAnswerStep = $derived(
-    !!(answerContent || (isStreaming && overallStatus === "completed")),
+    !!(answerContent || (isStreaming && overallStatus === "completed" && steps.length > 0)),
   );
   // Show a lone processing dot when nothing has arrived yet
   const showProcessingDot = $derived(!!isProcessing && steps.length === 0 && !showAnswerStep);
