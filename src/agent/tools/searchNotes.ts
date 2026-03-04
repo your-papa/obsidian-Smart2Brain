@@ -210,10 +210,7 @@ async function browseWithFilter(filter: SearchFilter): Promise<SearchResult[]> {
  */
 export function createSearchNotesTool(app: App) {
 	const pluginData = getData();
-	const getSearchNotesConfig = (): ReturnType<typeof pluginData.getToolConfig> => {
-		const selectedAgent = pluginData.getSelectedAgent();
-		return selectedAgent?.toolsConfig?.search_notes ?? pluginData.getToolConfig("search_notes");
-	};
+	const getSearchNotesConfig = () => pluginData.getSelectedAgent().toolsConfig.search_notes;
 	const toolConfig = getSearchNotesConfig();
 
 	const searchFn = async ({

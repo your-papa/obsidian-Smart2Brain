@@ -219,7 +219,7 @@ async function handleSave() {
         inputType="text"
         value={importUrl}
         placeholder="https://github.com/owner/repo/blob/main/skills/my-skill/SKILL.md"
-        changeFunc={(val) => (importUrl = val)}
+        onchange={(val) => (importUrl = val)}
       />
       <p class="add-skill-description">
         Paste a GitHub URL to a SKILL.md file. Supports github.com and raw.githubusercontent.com
@@ -252,7 +252,7 @@ async function handleSave() {
         inputType="text"
         value={skillName}
         placeholder="e.g., Code Review, Writing Style"
-        changeFunc={(val) => (skillName = val)}
+        onchange={(val) => (skillName = val)}
       />
       {#if skillSlug && skillSlug !== skillName.toLowerCase()}
         <p class="add-skill-hint">Will be saved as: {skillSlug}</p>
@@ -266,7 +266,7 @@ async function handleSave() {
         inputType="text"
         value={skillDescription}
         placeholder="Describe when to use this skill..."
-        changeFunc={(val) => (skillDescription = val)}
+        onchange={(val) => (skillDescription = val)}
       />
       <p class="add-skill-description">
         A short description of what this skill does and when to use it.

@@ -3,33 +3,26 @@ import { onDestroy, onMount } from "svelte";
 import { BASE_SYSTEM_PROMPT } from "../../agent/prompts";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
 import type SecondBrainPlugin from "../../main";
-import { getData } from "../../stores/dataStore.svelte";
 import Button from "../ui/Button.svelte";
 import type { SystemPromptAccessors, SystemPromptModal } from "./SystemPromptModal";
 
 interface Props {
 	modal: SystemPromptModal;
 	plugin: SecondBrainPlugin;
-	accessors?: SystemPromptAccessors;
+  accessors: SystemPromptAccessors;
 }
 
 const { modal, plugin, accessors }: Props = $props();
-const pluginData = getData();
 
 let editorContainer: HTMLDivElement | undefined = $state();
 let editor: EmbeddableMarkdownEditor | undefined = $state();
 
-// Use custom accessor if provided, otherwise use global pluginData
 function getPrompt(): string {
-	return accessors?.getPrompt() ?? pluginData.systemPrompt;
+  return accessors.getPrompt();
 }
 
 function setPrompt(prompt: string): void {
-	if (accessors?.setPrompt) {
-		accessors.setPrompt(prompt);
-	} else {
-		pluginData.systemPrompt = prompt;
-	}
+  accessors.setPrompt(prompt);
 }
 
 const initialPromptValue = getPrompt();

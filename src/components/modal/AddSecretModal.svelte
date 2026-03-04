@@ -82,7 +82,7 @@ function openKeychainSettings() {
 			placeholder="my-api-key"
 			value={secretId}
 			styles={secretId.length > 0 && !isValidId ? "!border-[--background-modifier-error]" : ""}
-			blurFunc={(value) => (secretId = value)}
+			onblur={(value) => (secretId = value)}
 		/>
 	</SettingContainer>
 
@@ -91,7 +91,7 @@ function openKeychainSettings() {
 			inputType="password"
 			placeholder="sk-..."
 			value={secretValue}
-			blurFunc={(value) => (secretValue = value)}
+			onblur={(value) => (secretValue = value)}
 		/>
 	</SettingContainer>
 

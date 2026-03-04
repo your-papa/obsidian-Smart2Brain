@@ -31,40 +31,40 @@ const query = createModelDiscoveryQuery(() => provider);
 let { data: discoveredModels, isPending, isError } = $derived(query);
 let models = $derived(discoveredModels ?? []);
 
-let genModels = $derived.by<Record<string, ChatModelConfig>>(() => {
-	const confGenModels = data.getGenModels(provider);
+let chatModels = $derived.by<Record<string, ChatModelConfig>>(() => {
+	const configuredChatModels = data.getChatModels(provider);
 
 	const allowedKeys = new Set(
 		(models ?? []).map((m: string | { key?: string }) => (typeof m === "string" ? m : m?.key)).filter(Boolean),
 	);
 
-	if (allowedKeys.size === 0) return confGenModels;
+    if (allowedKeys.size === 0) return configuredChatModels;
 
-	return Object.fromEntries(Object.entries(confGenModels).filter(([key]) => allowedKeys.has(key)));
+    return Object.fromEntries(Object.entries(configuredChatModels).filter(([key]) => allowedKeys.has(key)));
 });
 
 let configuredModels: string[] = $derived(
-	models.filter((model: string) => Object.keys(data.getGenModels(provider)).includes(model)),
+    models.filter((model: string) => Object.keys(data.getChatModels(provider)).includes(model)),
 );
 let selectedModel = $derived(!isPending && !isError && models.length > 0 ? models[0] : configuredModels[0]);
 
 let unconfiguredModels: string[] = $derived(models.filter((model: string) => !configuredModels.includes(model)));
 
-let genModelConfig: ChatModelConfig = $state(chatModelSettings.defaults);
+let chatModelConfig: ChatModelConfig = $state(chatModelSettings.defaults);
 const isModelConfigured: () => boolean = () =>
     selectedModel !== undefined && configuredModels.includes(selectedModel);
 
 function handleDeleteModel(modelName: string) {
-	data.deleteGenModel(provider, modelName);
+    data.deleteChatModel(provider, modelName);
 	invalidateProviderState(provider);
 }
 
 function handleSaveModel() {
 	if (!selectedModel) return;
 	if (isModelConfigured()) {
-		data.updateGenModel(provider, selectedModel, genModelConfig);
+        data.updateChatModel(provider, selectedModel, chatModelConfig);
 	} else {
-		data.addGenModel(provider, selectedModel, genModelConfig);
+        data.addChatModel(provider, selectedModel, chatModelConfig);
 	}
 	invalidateProviderState(provider);
 }
@@ -84,7 +84,7 @@ function handleSaveModel() {
     <div
         class="grid p-3 gap-2 grid-cols-3 border-solid border-x-0 border-t border-b-0 border-[--background-modifier-border]"
     >
-        {#each Object.entries(genModels) as [modelName, modelConfig]}
+        {#each Object.entries(chatModels) as [modelName, modelConfig]}
             <div class="community-item">
                 <div class="flex items-center">
                     <span>{modelName}</span>
@@ -129,11 +129,11 @@ function handleSaveModel() {
                         ),
                     },
                 ]}
-                onSelect={(model: string) => {
+                onchange={(model: string) => {
                     selectedModel = model;
                     if (isModelConfigured())
-                        genModelConfig = genModels[selectedModel];
-                    else genModelConfig = chatModelSettings.defaults;
+                        chatModelConfig = chatModels[selectedModel];
+                    else chatModelConfig = chatModelSettings.defaults;
                 }}
                 style={"!max-w-40"}
             />
@@ -144,7 +144,7 @@ function handleSaveModel() {
         <SettingContainer name={key} desc={key}>
             <Text
                 inputType="number"
-                bind:value={genModelConfig[key] as number}
+                bind:value={chatModelConfig[key] as number}
                 placeholder={chatModelSettings.defaults[key]?.toString() ?? ""}
             />
         </SettingContainer>

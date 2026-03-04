@@ -10,7 +10,14 @@ import { lookupModelInfo } from "../providers/modelsDevApi";
 import { fetchOllamaModelsInfo } from "../providers/ollamaModels";
 import { extractCapabilities as extractOpenRouterCapabilities, fetchOpenRouterModels } from "../providers/openrouterModels";
 
-import { ProviderAuthError, ProviderEndpointError, ProviderRegistry, ProviderRegistryError } from "../providers/index";
+import {
+	ProviderAuthError,
+	ProviderEndpointError,
+	ProviderRegistry,
+	ProviderRegistryError,
+	type AuthObject,
+	getProviderDefinition,
+} from "../providers/index";
 import type { ChatAttachment } from "../types/shared";
 import { createThreadId, NEW_CHAT_NAME } from "../utils/threadId";
 import { Logger } from "../utils/logging";
@@ -27,45 +34,10 @@ import { createReadNoteTool } from "./tools/readNote";
 import { createReadAttachmentTool } from "./tools/readAttachment";
 import { createSearchNotesTool } from "./tools/searchNotes";
 
-// New provider system imports
-import {
-	type AuthObject,
-	ProviderAuthError as NewProviderAuthError,
-	ProviderEndpointError as NewProviderEndpointError,
-	getProviderDefinition,
-} from "../providers/index";
 import { getRegistry } from "../providers/registry";
 
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
-/**
- * Legacy options type for built-in providers.
- * Used for backward compatibility with existing code.
- */
-interface BuiltInProviderOptions {
-	apiKey?: string;
-	baseUrl?: string;
-	headers?: string | Record<string, string>;
-}
-
-/**
- * Converts BuiltInProviderOptions to AuthObject.
- */
-function convertToAuthObject(options: BuiltInProviderOptions): AuthObject {
-	const auth: AuthObject = {};
-
-	if (options.apiKey) {
-		auth.apiKey = options.apiKey;
-	}
-	if (options.baseUrl) {
-		auth.baseUrl = options.baseUrl;
-	}
-	if (options.headers) {
-		auth.headers = typeof options.headers === "string" ? JSON.parse(options.headers) : options.headers;
-	}
-
-	return auth;
-}
 
 /** Result of provider authentication validation */
 export type AuthValidationResult = { success: true } | { success: false; message: string };
@@ -80,7 +52,7 @@ function getVisionSupportCacheKey(providerId: string, modelId: string): string {
 function persistResolvedVisionSupport(model: ChatModel, supportsVision: boolean): void {
 	const data = getData();
 	const selectedAgent = data.getSelectedAgent();
-	const selectedModel = selectedAgent?.chatModel;
+	const selectedModel = selectedAgent.chatModel;
 
 	if (
 		selectedModel?.provider === model.provider &&
@@ -94,22 +66,6 @@ function persistResolvedVisionSupport(model: ChatModel, supportsVision: boolean)
 					...selectedModel.modelConfig,
 					supportsVision,
 				},
-			},
-		});
-		return;
-	}
-
-	const defaultModel = data.getDefaultChatModel();
-	if (
-		defaultModel?.provider === model.provider &&
-		defaultModel.model === model.model &&
-		defaultModel.modelConfig.supportsVision === undefined
-	) {
-		data.setDefaultChatModel({
-			...defaultModel,
-			modelConfig: {
-				...defaultModel.modelConfig,
-				supportsVision,
 			},
 		});
 	}
@@ -257,7 +213,10 @@ export class AgentManager {
 	 */
 	getEnabledPluginIds(): string[] {
 		const pluginData = getData();
-		return Object.keys(pluginData.skills).filter((id) => this.isPluginEnabled(id));
+		const selectedAgent = pluginData.getSelectedAgent();
+		return Object.keys(selectedAgent.skills)
+			.filter((id) => selectedAgent.skills[id]?.enabled)
+			.filter((id) => this.isPluginEnabled(id));
 	}
 
 	/**
@@ -269,8 +228,7 @@ export class AgentManager {
 		const pluginData = getData();
 		const selectedAgent = pluginData.getSelectedAgent();
 
-		// Use selected agent's prompt, fallback to default
-		let prompt = selectedAgent?.systemPrompt || pluginData.systemPrompt || BASE_SYSTEM_PROMPT;
+		let prompt = selectedAgent.systemPrompt || BASE_SYSTEM_PROMPT;
 
 		const skillsService = this.plugin.skillsService;
 		if (!skillsService?.isDiscovered()) {
@@ -279,7 +237,7 @@ export class AgentManager {
 
 		// Build enable state from agent's skill configuration
 		// Skills default to enabled unless explicitly disabled by the agent
-		const agentSkills = selectedAgent?.skills ?? {};
+		const agentSkills = selectedAgent.skills;
 		const enableState: Record<string, boolean> = {};
 		for (const [name] of skillsService.getCachedSkills()) {
 			// Check agent's skill settings, default to enabled if not specified
@@ -362,54 +320,6 @@ export class AgentManager {
 	}
 
 	/**
-	 * Tests and registers a provider on the actual registry.
-	 * Returns an AuthValidationResult indicating success or failure with a message.
-	 *
-	 * @deprecated Use validateProviderAuth() with new provider IDs instead.
-	 */
-	async testProviderConfig(providerId: string, options: BuiltInProviderOptions): Promise<AuthValidationResult> {
-		const pluginData = getData();
-		const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
-
-		if (!providerDef) {
-			return { success: false, message: `Unknown provider: ${providerId}` };
-		}
-
-		const auth = convertToAuthObject(options);
-
-		try {
-			const validationResult = await providerDef.validateAuth(auth);
-
-			if (!validationResult.valid) {
-				return { success: false, message: validationResult.error };
-			}
-
-			this.registerProvider(providerId, auth);
-			return { success: true };
-		} catch (error) {
-			if (error instanceof NewProviderAuthError || error instanceof ProviderAuthError) {
-				return { success: false, message: "Invalid API key" };
-			}
-			if (error instanceof NewProviderEndpointError || error instanceof ProviderEndpointError) {
-				return {
-					success: false,
-					message: "Invalid base URL or endpoint unreachable",
-				};
-			}
-			if (error instanceof ProviderRegistryError) {
-				return { success: false, message: error.message };
-			}
-			if (error instanceof Error) {
-				return { success: false, message: error.message };
-			}
-			return {
-				success: false,
-				message: "Provider configuration failed",
-			};
-		}
-	}
-
-	/**
 	 * Validates provider authentication using the new provider ID system.
 	 *
 	 * @param providerId - The provider ID (e.g., "openai", "anthropic", "ollama")
@@ -433,10 +343,10 @@ export class AgentManager {
 
 			return { success: true };
 		} catch (error) {
-			if (error instanceof NewProviderAuthError || error instanceof ProviderAuthError) {
+			if (error instanceof ProviderAuthError) {
 				return { success: false, message: "Invalid API key" };
 			}
-			if (error instanceof NewProviderEndpointError || error instanceof ProviderEndpointError) {
+			if (error instanceof ProviderEndpointError) {
 				return { success: false, message: "Invalid base URL or endpoint unreachable" };
 			}
 			if (error instanceof ProviderRegistryError) {
@@ -475,11 +385,7 @@ export class AgentManager {
 
 		// Helper to check if tool is enabled for the selected agent
 		const isToolEnabled = (toolId: BuiltInToolId): boolean => {
-			// Check selected agent's tools config first, fallback to legacy
-			if (selectedAgent?.toolsConfig) {
-				return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
-			}
-			return data.isToolEnabled(toolId);
+			return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
 		};
 
 		// Add built-in tools based on configuration
@@ -512,10 +418,7 @@ export class AgentManager {
 			}
 		}
 
-		// Get MCP servers from selected agent or legacy data
-		const mcpServers = selectedAgent?.mcpServers
-			? data.getAgentMCPServersForClient(selectedAgent.id)
-			: data.getMCPServersForClient();
+		const mcpServers = data.getAgentMCPServersForClient(selectedAgent.id);
 
 		// Load MCP tools if configured (only enabled servers)
 		if (mcpServers && Object.keys(mcpServers).length > 0) {
@@ -611,9 +514,9 @@ export class AgentManager {
 		// Set assembled prompt (base + enabled skills)
 		this.agent.setPrompt(await this.assembleSystemPrompt());
 
-		// Get model from selected agent or fallback to legacy default
+		// Get model from selected agent
 		const selectedAgent = pluginData.getSelectedAgent();
-		const chatModel = selectedAgent?.chatModel ?? pluginData.getDefaultChatModel();
+		const chatModel = selectedAgent.chatModel;
 		if (chatModel) {
 			await this.agent.chooseModel(await toChooseModelParams(chatModel));
 		}
@@ -649,9 +552,9 @@ export class AgentManager {
 		const agent = await this.ensureAgent();
 		const pluginData = getData();
 
-		// Get model from selected agent or fallback to legacy default
+		// Get model from selected agent
 		const selectedAgent = pluginData.getSelectedAgent();
-		const chatModel = selectedAgent?.chatModel ?? pluginData.getDefaultChatModel();
+		const chatModel = selectedAgent.chatModel;
 		if (chatModel) {
 			await agent.chooseModel(await toChooseModelParams(chatModel));
 		} else {
@@ -755,7 +658,7 @@ export class AgentManager {
 		const pluginData = getData();
 
 		const selectedAgent = pluginData.getSelectedAgent();
-		const chatModel = selectedAgent?.chatModel ?? pluginData.getDefaultChatModel();
+		const chatModel = selectedAgent.chatModel;
 		if (chatModel) {
 			await agent.chooseModel(await toChooseModelParams(chatModel));
 		} else {
@@ -855,7 +758,7 @@ export class AgentManager {
 		const pluginData = getData();
 
 		const selectedAgent = pluginData.getSelectedAgent();
-		const chatModel = selectedAgent?.chatModel ?? pluginData.getDefaultChatModel();
+		const chatModel = selectedAgent.chatModel;
 		if (chatModel) {
 			await agent.chooseModel(await toChooseModelParams(chatModel));
 		} else {

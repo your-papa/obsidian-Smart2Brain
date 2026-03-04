@@ -28,7 +28,7 @@ function truncateContent(content: string, maxChars: number): string {
  */
 export function createReadAttachmentTool(app: App) {
     const pluginData = getData();
-    const toolConfig = pluginData.getToolConfig("read_attachment");
+    const toolConfig = pluginData.getSelectedAgent().toolsConfig.read_attachment;
 
     const readAttachmentFn = async ({ path }: { path: string }): Promise<string> => {
         const resolved = resolveVaultFileDetailed(app, path);

@@ -106,7 +106,7 @@ let selectedValue = $derived(secrets.includes(value) ? value : (secrets[0] ?? ""
       type="options"
       dropdown={dropdownOptions}
       selected={selectedValue}
-      onSelect={handleSelect}
+      onchange={handleSelect}
       class="flex-1"
     />
   {:else}
