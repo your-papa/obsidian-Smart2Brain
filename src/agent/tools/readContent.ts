@@ -319,8 +319,10 @@ async function readExcalidrawContent(app: App, file: TFile, maxLength: number): 
     const apiElements = await getElementsViaPluginApi(app, file);
     if (apiElements?.length) {
         const description = formatSceneDescription(apiElements);
-        const result = maxLength > 0 ? truncateContent(description, maxLength) : description;
-        return `Content of Excalidraw drawing "${file.path}" (extracted via plugin API):\n\n${result}`;
+        if (description) {
+            const result = maxLength > 0 ? truncateContent(description, maxLength) : description;
+            return `Content of Excalidraw drawing "${file.path}" (extracted via plugin API):\n\n${result}`;
+        }
     }
 
     // Tier 2: Parse the file content directly
@@ -329,8 +331,10 @@ async function readExcalidrawContent(app: App, file: TFile, maxLength: number): 
 
     if (elements.length > 0) {
         const description = formatSceneDescription(elements);
-        const result = maxLength > 0 ? truncateContent(description, maxLength) : description;
-        return `Content of Excalidraw drawing "${file.path}":\n\n${result}`;
+        if (description) {
+            const result = maxLength > 0 ? truncateContent(description, maxLength) : description;
+            return `Content of Excalidraw drawing "${file.path}":\n\n${result}`;
+        }
     }
 
     return `Excalidraw drawing "${file.path}" contains no elements. The drawing appears to be empty.`;

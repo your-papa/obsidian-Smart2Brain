@@ -1429,8 +1429,8 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 				},
 			};
 
-			(agent.toolsConfig as Record<string, ToolConfig | undefined>).read_note = undefined;
-			(agent.toolsConfig as Record<string, ToolConfig | undefined>).read_attachment = undefined;
+			delete (agent.toolsConfig as Record<string, ToolConfig | undefined>).read_note;
+			delete (agent.toolsConfig as Record<string, ToolConfig | undefined>).read_attachment;
 
 			// Ensure skills exists
 			if (!agent.skills) {
