@@ -124,6 +124,8 @@ export type AgentStreamChunk =
 		toolCallId: string;
 		toolName: string;
 		input: unknown;
+		/** The id of the AI message that produced this tool call. */
+		aiMessageId?: string;
 		runId: string;
 		threadId: string;
 	}
@@ -132,6 +134,8 @@ export type AgentStreamChunk =
 		toolCallId: string;
 		toolName: string;
 		output: unknown;
+		/** The id of the AI message that produced this tool call. */
+		aiMessageId?: string;
 		runId: string;
 		threadId: string;
 	}
@@ -478,6 +482,8 @@ export class Agent {
 		let rawResult: unknown;
 		// Track tool calls in progress to correlate start/end events
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
+		// Track the current AI message id from chat model stream chunks
+		let lastAiMessageId: string | undefined;
 
 		try {
 			for await (const event of stream) {
@@ -491,7 +497,7 @@ export class Agent {
 				if (event.event === "on_tool_start") {
 					const toolCallId = event.run_id;
 					const toolName = event.name ?? "unknown_tool";
-					const input = event.data?.input ?? {};
+					const input = this.normalizeStreamToolInput(event.data?.input);
 
 					pendingToolCalls.set(toolCallId, { name: toolName, input });
 					Logger.debug("agent.streamTokens.tool_start", { runId, toolCallId, toolName });
@@ -501,6 +507,7 @@ export class Agent {
 						toolCallId,
 						toolName,
 						input,
+						aiMessageId: lastAiMessageId,
 						runId,
 						threadId,
 					};
@@ -522,15 +529,18 @@ export class Agent {
 						toolCallId,
 						toolName,
 						output,
+						aiMessageId: lastAiMessageId,
 						runId,
 						threadId,
 					};
 					continue;
 				}
 
-				// Handle token streaming
+				// Handle token streaming — also capture AI message id from chunks
 				const token = this.extractTokenFromEvent(event);
 				if (token) {
+					const chunkId = this.extractAiMessageIdFromEvent(event);
+					if (chunkId) lastAiMessageId = chunkId;
 					yield {
 						type: "token",
 						token,
@@ -670,6 +680,7 @@ export class Agent {
 
 		let rawResult: unknown;
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
+		let lastAiMessageId: string | undefined;
 
 		try {
 			for await (const event of stream) {
@@ -681,7 +692,7 @@ export class Agent {
 				if (event.event === "on_tool_start") {
 					const toolCallId = event.run_id;
 					const toolName = event.name ?? "unknown_tool";
-					const toolInput = event.data?.input ?? {};
+					const toolInput = this.normalizeStreamToolInput(event.data?.input);
 
 					pendingToolCalls.set(toolCallId, { name: toolName, input: toolInput });
 					Logger.debug("agent.editFromCheckpoint.tool_start", { runId, toolCallId, toolName });
@@ -691,6 +702,7 @@ export class Agent {
 						toolCallId,
 						toolName,
 						input: toolInput,
+						aiMessageId: lastAiMessageId,
 						runId,
 						threadId,
 					};
@@ -711,6 +723,7 @@ export class Agent {
 						toolCallId,
 						toolName,
 						output,
+						aiMessageId: lastAiMessageId,
 						runId,
 						threadId,
 					};
@@ -719,6 +732,8 @@ export class Agent {
 
 				const token = this.extractTokenFromEvent(event);
 				if (token) {
+					const chunkId = this.extractAiMessageIdFromEvent(event);
+					if (chunkId) lastAiMessageId = chunkId;
 					yield {
 						type: "token",
 						token,
@@ -843,6 +858,7 @@ export class Agent {
 
 		let rawResult: unknown;
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
+		let lastAiMessageId: string | undefined;
 
 		try {
 			for await (const event of stream) {
@@ -854,7 +870,7 @@ export class Agent {
 				if (event.event === "on_tool_start") {
 					const toolCallId = event.run_id;
 					const toolName = event.name ?? "unknown_tool";
-					const toolInput = event.data?.input ?? {};
+					const toolInput = this.normalizeStreamToolInput(event.data?.input);
 
 					pendingToolCalls.set(toolCallId, { name: toolName, input: toolInput });
 					Logger.debug("agent.regenerateFromCheckpoint.tool_start", { runId, toolCallId, toolName });
@@ -864,6 +880,7 @@ export class Agent {
 						toolCallId,
 						toolName,
 						input: toolInput,
+						aiMessageId: lastAiMessageId,
 						runId,
 						threadId,
 					};
@@ -884,6 +901,7 @@ export class Agent {
 						toolCallId,
 						toolName,
 						output,
+						aiMessageId: lastAiMessageId,
 						runId,
 						threadId,
 					};
@@ -892,6 +910,8 @@ export class Agent {
 
 				const token = this.extractTokenFromEvent(event);
 				if (token) {
+					const chunkId = this.extractAiMessageIdFromEvent(event);
+					if (chunkId) lastAiMessageId = chunkId;
 					yield {
 						type: "token",
 						token,
@@ -1373,6 +1393,38 @@ export class Agent {
 		return {};
 	}
 
+	private normalizeStreamToolInput(rawInput: unknown): unknown {
+		let input = rawInput;
+
+		if (input && typeof input === "object" && !Array.isArray(input)) {
+			const wrapper = input as Record<string, unknown>;
+			const hasRunnableMetadata =
+				"config" in wrapper ||
+				"kwargs" in wrapper ||
+				"metadata" in wrapper ||
+				"callbacks" in wrapper ||
+				"tags" in wrapper;
+
+			if ("input" in wrapper && (hasRunnableMetadata || Object.keys(wrapper).length === 1)) {
+				input = wrapper.input;
+			} else if ("args" in wrapper && Object.keys(wrapper).length === 1) {
+				input = wrapper.args;
+			} else if ("arguments" in wrapper && Object.keys(wrapper).length === 1) {
+				input = wrapper.arguments;
+			}
+		}
+
+		if (typeof input === "string") {
+			try {
+				return JSON.parse(input);
+			} catch {
+				return input;
+			}
+		}
+
+		return input ?? {};
+	}
+
 	private readLangChainClassName(identifier: unknown): string | undefined {
 		if (typeof identifier === "string") {
 			return identifier.split(":").pop();
@@ -1428,6 +1480,19 @@ export class Agent {
 		}
 
 		return [];
+	}
+
+	/**
+	 * Extracts the AI message id from a chat model stream event.
+	 * AIMessageChunk objects carry an `id` field set by the provider.
+	 */
+	private extractAiMessageIdFromEvent(event: StreamEvent): string | undefined {
+		if (!event.event.endsWith("_stream")) return undefined;
+		const chunk = event.data?.chunk;
+		if (chunk && typeof chunk === "object" && typeof (chunk as { id?: unknown }).id === "string") {
+			return (chunk as { id: string }).id;
+		}
+		return undefined;
 	}
 
 	private extractTokenFromEvent(event: StreamEvent): string | undefined {
