@@ -1550,13 +1550,19 @@ export class ChatSession {
 				continue;
 			}
 
-			if (chunk.type === "tool_end") {
+				if (chunk.type === "tool_end") {
+				// Track whether this tool_end is orphaned (no prior tool_start in the stream).
+				// An orphan occurs when the agent emits tool_end without a preceding tool_start,
+				// e.g. when a checkpoint restores mid-tool execution.
+				let isOrphanedToolEnd = false;
+
 				if (assistantMsg.toolCalls) {
 					const tc = assistantMsg.toolCalls.find((t) => t.id === chunk.toolCallId);
 					if (tc) {
 						tc.status = "completed";
 						tc.output = chunk.output;
 					} else {
+						isOrphanedToolEnd = true;
 						assistantMsg.toolCalls.push({
 							id: chunk.toolCallId,
 							name: chunk.toolName,
@@ -1566,6 +1572,7 @@ export class ChatSession {
 						});
 					}
 				} else {
+					isOrphanedToolEnd = true;
 					assistantMsg.toolCalls = [
 						{
 							id: chunk.toolCallId,
@@ -1582,6 +1589,23 @@ export class ChatSession {
 				// to "failed" based on output inspection, this pick-up is automatic.
 				const resolvedStatus =
 					assistantMsg.toolCalls?.find((tc) => tc.id === chunk.toolCallId)?.status ?? "completed";
+
+				// For orphaned tool_ends, inject a synthetic tool_start first so that
+				// buildStepsFromEvents (hasGroupIds branch) can create a tool entry to
+				// match against. Without this, the tool_end is silently dropped and the
+				// tool never appears in any step, causing getSummaryText to count it while
+				// the timeline renders nothing.
+				if (isOrphanedToolEnd) {
+					assistantMsg.assistantTimeline.push({
+						id: `start-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
+						type: "tool_start",
+						toolCallId: chunk.toolCallId,
+						toolName: chunk.toolName,
+						input: {},
+						status: "running",
+						aiMessageId: chunk.aiMessageId,
+					});
+				}
 
 				assistantMsg.assistantTimeline.push({
 					id: `end-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
@@ -1607,15 +1631,17 @@ export class ChatSession {
 					checkpointAssistant.content = "";
 					checkpointAssistant.assistantTimeline = buildTimelineFromToolCalls(checkpointAssistant.toolCalls, chunk.message.id);
 				}
+				// Only sync toolCalls and content from the checkpoint; preserve the
+				// streaming-built aiMessageId-annotated timeline.
 				assistantMsg.content = checkpointAssistant.content;
 				assistantMsg.toolCalls = checkpointAssistant.toolCalls;
-				// Only overwrite the streaming-built timeline when the checkpoint actually
-				// provides one (i.e. tool calls + trailing content triggered the rebuild).
-				// Without this guard, checkpointAssistant.assistantTimeline is undefined
-				// for the common case of tool calls with no preamble, which would erase
-				// the correctly aiMessageId-annotated streaming timeline and cause the
-				// post-loop fallback to rebuild without IDs, collapsing all steps into one.
-				if (checkpointAssistant.assistantTimeline) {
+				// Only overwrite the timeline when the checkpoint triggered a preamble
+				// rebuild (i.e., attachPreambleToFirstToolCall ran and set a new timeline
+				// with the correct msg.id).  Do NOT overwrite with the id-free default
+				// timeline produced by baseMessageToAssistantMessage — that would erase the
+				// correctly aiMessageId-annotated streaming timeline, causing buildStepsFromEvents
+				// to see hasGroupIds=false and collapse all steps into a single "step-0".
+				if (checkpointAssistant.assistantTimeline?.some((e) => e.aiMessageId !== undefined)) {
 					assistantMsg.assistantTimeline = checkpointAssistant.assistantTimeline;
 				}
 				break;

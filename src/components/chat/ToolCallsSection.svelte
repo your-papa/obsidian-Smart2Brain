@@ -247,15 +247,14 @@
     return step.tools.some((t) => t.status === "failed");
   }
 
-  function getOverallStatus(calls: ToolCallState[] | undefined): "running" | "completed" {
-    if (!calls || calls.length === 0) return "completed";
-    return calls.some((t) => t.status === "running") ? "running" : "completed";
+  function getOverallStatus(stepsArg: TimelineStep[]): "running" | "completed" {
+    return stepsArg.some(isStepRunning) ? "running" : "completed";
   }
 
-  function getSummaryText(calls: ToolCallState[] | undefined): string {
-    if (!calls || calls.length === 0) return "";
-    const count = calls.length;
-    if (getOverallStatus(calls) === "running") return "Running tools…";
+  function getSummaryText(stepsArg: TimelineStep[]): string {
+    const count = stepsArg.reduce((n, s) => n + s.tools.length, 0);
+    if (count === 0) return "";
+    if (getOverallStatus(stepsArg) === "running") return "Running tools\u2026";
     return `Used ${count} tool${count === 1 ? "" : "s"}`;
   }
 
@@ -266,8 +265,7 @@
       ? buildStepsFromEvents(assistantTimeline)
       : buildStepsFromToolCalls(toolCalls),
   );
-  const visibleToolCalls = $derived(toolCalls ?? []);
-  const overallStatus = $derived(getOverallStatus(visibleToolCalls));
+  const overallStatus = $derived(getOverallStatus(steps));
 
   // Show answer as a final timeline step when there's content or tools finished streaming.
   // Guard with steps.length > 0 so that during initial processing (no tool-call steps yet)
