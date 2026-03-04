@@ -213,8 +213,9 @@ async function handleSave() {
   {#if mode === "import"}
     <!-- Import Mode -->
     <div class="add-skill-field">
-      <label class="add-skill-label">SKILL.md URL</label>
+      <label class="add-skill-label" for="add-skill-import-url">SKILL.md URL</label>
       <Text
+        id="add-skill-import-url"
         inputType="text"
         value={importUrl}
         placeholder="https://github.com/owner/repo/blob/main/skills/my-skill/SKILL.md"
@@ -245,8 +246,9 @@ async function handleSave() {
   {:else}
     <!-- Create Mode -->
     <div class="add-skill-field">
-      <label class="add-skill-label">Skill Name</label>
+      <label class="add-skill-label" for="add-skill-name">Skill Name</label>
       <Text
+        id="add-skill-name"
         inputType="text"
         value={skillName}
         placeholder="e.g., Code Review, Writing Style"
@@ -258,8 +260,9 @@ async function handleSave() {
     </div>
 
     <div class="add-skill-field">
-      <label class="add-skill-label">Description</label>
+      <label class="add-skill-label" for="add-skill-description">Description</label>
       <Text
+        id="add-skill-description"
         inputType="text"
         value={skillDescription}
         placeholder="Describe when to use this skill..."
@@ -271,7 +274,7 @@ async function handleSave() {
     </div>
 
     <div class="add-skill-field flex-1">
-      <label class="add-skill-label">Instructions</label>
+      <div class="add-skill-label">Instructions</div>
       <p class="add-skill-description">
         Define the behavior and capabilities for this skill. These instructions will be appended to
         the system prompt when the skill is enabled.

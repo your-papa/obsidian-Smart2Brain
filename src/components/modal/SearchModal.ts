@@ -22,15 +22,17 @@ function parseQueryWithFilters(rawQuery: string): ParsedQuery {
 
 	// Extract path: prefixes
 	const pathRegex = /path:(\S+)/gi;
-	let pathMatch: RegExpExecArray | null;
-	while ((pathMatch = pathRegex.exec(rawQuery)) !== null) {
+	for (;;) {
+		const pathMatch = pathRegex.exec(rawQuery);
+		if (!pathMatch) break;
 		pathPrefixes.push(pathMatch[1]);
 	}
 
 	// Extract tag: prefixes
 	const tagRegex = /tag:(#?\S+)/gi;
-	let tagMatch: RegExpExecArray | null;
-	while ((tagMatch = tagRegex.exec(rawQuery)) !== null) {
+	for (;;) {
+		const tagMatch = tagRegex.exec(rawQuery);
+		if (!tagMatch) break;
 		const tag = tagMatch[1].startsWith("#") ? tagMatch[1] : `#${tagMatch[1]}`;
 		tags.push(tag);
 	}

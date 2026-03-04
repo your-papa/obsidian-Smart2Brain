@@ -96,13 +96,14 @@ export class MiniSearchService {
 	 * @returns true if index was loaded, false if no stored index exists
 	 */
 	async loadFromStorage(): Promise<boolean> {
-		if (!this.db) {
+		const db = this.db;
+		if (!db) {
 			Logger.warn("[MiniSearch] Database not open, cannot load index");
 			return false;
 		}
 
 		return new Promise((resolve) => {
-			const transaction = this.db?.transaction(STORE_NAME, "readonly");
+			const transaction = db.transaction(STORE_NAME, "readonly");
 			const store = transaction.objectStore(STORE_NAME);
 			const request = store.get(INDEX_KEY);
 
@@ -145,7 +146,8 @@ export class MiniSearchService {
 	 * Save the index to IndexedDB.
 	 */
 	async saveToStorage(): Promise<void> {
-		if (!this.db) {
+		const db = this.db;
+		if (!db) {
 			Logger.warn("[MiniSearch] Database not open, cannot save index");
 			return;
 		}
@@ -154,7 +156,7 @@ export class MiniSearchService {
 		const paths = Array.from(this.documentPaths);
 
 		return new Promise((resolve, reject) => {
-			const transaction = this.db?.transaction(STORE_NAME, "readwrite");
+			const transaction = db.transaction(STORE_NAME, "readwrite");
 			const store = transaction.objectStore(STORE_NAME);
 			const request = store.put({ json, paths }, INDEX_KEY);
 

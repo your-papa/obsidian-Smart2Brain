@@ -27,7 +27,7 @@
 		"build": "vite build --mode production",
 		"check": "svelte-check --tsconfig ./tsconfig.json",
 		"format": "biome format --write ./src",
-		"lint": "biome lint --apply-unsafe ./src",
+		"lint": "biome lint --write --unsafe ./src",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:coverage": "vitest run --coverage"

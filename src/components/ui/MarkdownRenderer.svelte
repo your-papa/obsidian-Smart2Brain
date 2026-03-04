@@ -225,19 +225,19 @@ function normalizeLinks(containerEl: HTMLElement) {
 	}
 
 	// Normalize internal links
-	containerEl.querySelectorAll("a.internal-link").forEach((a) => {
+	for (const a of containerEl.querySelectorAll("a.internal-link")) {
 		const link = a as HTMLAnchorElement;
 		link.removeAttribute("target");
 		link.removeAttribute("rel");
 		link.style.cursor = "pointer";
-	});
+	}
 
 	// External links: open in new tab safely
-	containerEl.querySelectorAll("a:not(.internal-link)").forEach((a) => {
+	for (const a of containerEl.querySelectorAll("a:not(.internal-link)")) {
 		const link = a as HTMLAnchorElement;
 		link.target = "_blank";
 		link.rel = "noopener";
-	});
+	}
 }
 
 // Render markdown when content changes
@@ -267,6 +267,7 @@ $effect(() => {
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- svelte-ignore a11y_mouse_events_have_key_events -->
 <div
   bind:this={container}
   class={className}

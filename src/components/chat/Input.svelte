@@ -27,7 +27,6 @@
 
   const { messenger, onFocusChange, onMessageSent }: Props = $props();
 
-  // biome-ignore lint/style/useConst: Svelte bind:this requires let
   let editorContainer: HTMLDivElement | undefined = $state();
   let markdownEditor: EmbeddableMarkdownEditor | undefined = $state();
   let inputValue = $state("");

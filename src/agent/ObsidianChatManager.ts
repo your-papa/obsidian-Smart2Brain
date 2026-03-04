@@ -123,7 +123,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	private async resolveFilePath(threadId: string): Promise<string> {
 		// Check cache first
 		if (this.filePathCache.has(threadId)) {
-			return this.filePathCache.get(threadId)!;
+			const cachedPath = this.filePathCache.get(threadId);
+			if (cachedPath) return cachedPath;
 		}
 
 		const folder = this.getChatFolder();
@@ -194,7 +195,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 				const content = await this.adapter.read(indexPath);
 				const snapshots = JSON.parse(content) as ThreadSnapshot[];
 				this.threadIndex.clear();
-				snapshots.forEach((s) => this.threadIndex.set(s.threadId, s));
+				for (const snapshot of snapshots) {
+					this.threadIndex.set(snapshot.threadId, snapshot);
+				}
 				this.indexLoaded = true;
 				Logger.log(`ObsidianChatManager: Loaded index with ${this.threadIndex.size} threads`);
 			} else {
@@ -550,8 +553,10 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 		// Update index cache immediately
 		if (this.threadIndex.has(threadId)) {
-			const snap = this.threadIndex.get(threadId)!;
-			snap.updatedAt = threadData.updatedAt;
+			const snap = this.threadIndex.get(threadId);
+			if (snap) {
+				snap.updatedAt = threadData.updatedAt;
+			}
 		} else {
 			this.threadIndex.set(threadId, {
 				threadId: threadData.threadId,
@@ -594,7 +599,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		this.saveDebounced(threadId);
 
 		if (this.threadIndex.has(threadId)) {
-			this.threadIndex.get(threadId)!.updatedAt = threadData.updatedAt;
+			const snapshot = this.threadIndex.get(threadId);
+			if (!snapshot) return;
+			snapshot.updatedAt = threadData.updatedAt;
 			this.saveIndexDebounced();
 		}
 	}

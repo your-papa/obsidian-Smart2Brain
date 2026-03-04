@@ -35,7 +35,7 @@ export function createObsidianFetch(
 
 		const method = init?.method || "GET";
 		const headers = (init?.headers as Record<string, string>) || {};
-		const body = init?.body as string;
+		const body = init?.body;
 
 		// Convert Headers object to record if needed
 		if (init?.headers instanceof Headers) {
@@ -47,7 +47,7 @@ export function createObsidianFetch(
 		// If the body is a byte array (Uint8Array), requestUrl expects it as an ArrayBuffer
 		// However, for multipart/form-data or gzipped content, we might need special handling
 
-		let requestBody = body;
+		let requestBody: RequestUrlParam["body"] = typeof body === "string" ? body : undefined;
 		// Check if body exists and is NOT a string (so it's likely binary)
 		if (init?.body && typeof init.body !== "string") {
 			// Handle Uint8Array specifically (common in node/browser buffers)
@@ -57,33 +57,34 @@ export function createObsidianFetch(
 					requestBody = init.body.buffer.slice(
 						init.body.byteOffset,
 						init.body.byteOffset + init.body.byteLength,
-					) as any;
+					);
 				} else {
-					requestBody = init.body.buffer as any;
+					requestBody = init.body.buffer;
 				}
 			}
 			// Handle generic ArrayBufferView
 			else if (ArrayBuffer.isView(init.body)) {
-				requestBody = init.body.buffer as any;
+				requestBody = init.body.buffer.slice(init.body.byteOffset, init.body.byteOffset + init.body.byteLength);
 			}
 			// Handle raw ArrayBuffer
 			else if (init.body instanceof ArrayBuffer) {
-				requestBody = init.body as any;
+				requestBody = init.body;
 			}
 			// Handle Blob
 			else if (init.body instanceof Blob) {
-				requestBody = (await init.body.arrayBuffer()) as any;
+				requestBody = await init.body.arrayBuffer();
 			}
 			// Handle ReadableStream
 			else if (init.body instanceof ReadableStream) {
 				// We need to read the stream into an ArrayBuffer
 				const reader = init.body.getReader();
-				const chunks = [];
+				const chunks: Uint8Array[] = [];
 				let totalLength = 0;
 
 				while (true) {
 					const { done, value } = await reader.read();
 					if (done) break;
+					if (!(value instanceof Uint8Array)) continue;
 					chunks.push(value);
 					totalLength += value.length;
 				}
@@ -96,7 +97,7 @@ export function createObsidianFetch(
 					offset += chunk.length;
 				}
 
-				requestBody = result.buffer as any;
+				requestBody = result.buffer;
 			}
 		}
 

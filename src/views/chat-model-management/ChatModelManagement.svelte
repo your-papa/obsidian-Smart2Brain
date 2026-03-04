@@ -51,7 +51,8 @@ let selectedModel = $derived(!isPending && !isError && models.length > 0 ? model
 let unconfiguredModels: string[] = $derived(models.filter((model: string) => !configuredModels.includes(model)));
 
 let genModelConfig: ChatModelConfig = $state(chatModelSettings.defaults);
-const isModelConfigured: () => boolean = () => configuredModels.includes(selectedModel!);
+const isModelConfigured: () => boolean = () =>
+    selectedModel !== undefined && configuredModels.includes(selectedModel);
 
 function handleDeleteModel(modelName: string) {
 	data.deleteGenModel(provider, modelName);

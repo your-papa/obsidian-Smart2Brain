@@ -6,32 +6,30 @@ export enum LogLvl {
 	DISABLED = 5,
 }
 
-class Logger {
-	private static logLevel = LogLvl.DEBUG;
+let logLevel = LogLvl.DEBUG;
 
-	static setLogLevel(logLevel: LogLvl) {
-		Logger.logLevel = logLevel;
-	}
+export const Logger = {
+	setLogLevel(level: LogLvl) {
+		logLevel = level;
+	},
 
-	static debug(...args: unknown[]) {
-		if (Logger.logLevel <= LogLvl.DEBUG) console.debug("[S2B]", ...args);
-	}
+	debug(...args: unknown[]) {
+		if (logLevel <= LogLvl.DEBUG) console.debug("[S2B]", ...args);
+	},
 
-	static log(...args: unknown[]) {
-		if (Logger.logLevel <= LogLvl.INFO) console.log("[S2B]", ...args);
-	}
+	log(...args: unknown[]) {
+		if (logLevel <= LogLvl.INFO) console.log("[S2B]", ...args);
+	},
 
-	static info(...args: unknown[]) {
-		if (Logger.logLevel <= LogLvl.INFO) console.info("[S2B]", ...args);
-	}
+	info(...args: unknown[]) {
+		if (logLevel <= LogLvl.INFO) console.info("[S2B]", ...args);
+	},
 
-	static warn(...args: unknown[]) {
-		if (Logger.logLevel <= LogLvl.WARN) console.warn("[S2B]", ...args);
-	}
+	warn(...args: unknown[]) {
+		if (logLevel <= LogLvl.WARN) console.warn("[S2B]", ...args);
+	},
 
-	static error(...args: unknown[]) {
-		if (Logger.logLevel <= LogLvl.ERROR) console.error("[S2B]", ...args);
-	}
-}
-
-export { Logger };
+	error(...args: unknown[]) {
+		if (logLevel <= LogLvl.ERROR) console.error("[S2B]", ...args);
+	},
+};

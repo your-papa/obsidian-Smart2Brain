@@ -16,7 +16,6 @@ interface Props {
 const { modal, plugin, accessors }: Props = $props();
 const pluginData = getData();
 
-// biome-ignore lint/style/useConst: Svelte bind:this requires let
 let editorContainer: HTMLDivElement | undefined = $state();
 let editor: EmbeddableMarkdownEditor | undefined = $state();
 

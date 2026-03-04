@@ -197,8 +197,9 @@ async function handleResetToDefault() {
 
 <div class="skill-modal-content">
   <div class="skill-field">
-    <label class="skill-label">Skill Name</label>
+    <label class="skill-label" for="skill-modal-name">Skill Name</label>
     <Text
+      id="skill-modal-name"
       inputType="text"
       value={editName}
       placeholder="e.g., Code Review, Writing Style"
@@ -210,8 +211,9 @@ async function handleResetToDefault() {
   </div>
 
   <div class="skill-field">
-    <label class="skill-label">Description</label>
+    <label class="skill-label" for="skill-modal-description">Description</label>
     <Text
+      id="skill-modal-description"
       inputType="text"
       value={editDescription}
       placeholder="Describe when to use this skill..."
@@ -224,7 +226,7 @@ async function handleResetToDefault() {
   </div>
 
   <div class="skill-field flex-1">
-    <label class="skill-label">Instructions</label>
+    <div class="skill-label">Instructions</div>
     <div bind:this={editorContainer} class="skill-editor-container"></div>
   </div>
 
@@ -255,13 +257,6 @@ async function handleResetToDefault() {
     flex-direction: column;
     flex: 1;
     min-height: 0;
-  }
-
-  .skill-description {
-    flex-shrink: 0;
-    margin: 0 0 12px 0;
-    color: var(--text-muted);
-    font-size: var(--font-ui-small);
   }
 
   .skill-field {
