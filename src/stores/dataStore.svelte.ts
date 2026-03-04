@@ -190,7 +190,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "read_content",
 		description:
-			"Read the full content of notes and vault files by path or wiki link (e.g., [[Daily Note]] or ![[report.pdf]]). Supports markdown/text files (.md, .txt, .csv, .json) and extracts text from PDFs. Images must be attached directly in chat.",
+			"Read the full content of notes and vault files by path or wiki link (e.g., [[Daily Note]] or ![[report.pdf]]). Supports markdown/text files (.md, .txt, .csv, .json), extracts text from PDFs, and reads Excalidraw drawings (.excalidraw.md) including all elements with their types, positions, dimensions, text content, and connections. Images must be attached directly in chat.",
 		settings: {
 			maxContentLength: 0,
 		},
