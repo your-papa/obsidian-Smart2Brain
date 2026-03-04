@@ -251,13 +251,6 @@
     return stepsArg.some(isStepRunning) ? "running" : "completed";
   }
 
-  function getSummaryText(stepsArg: TimelineStep[]): string {
-    const count = stepsArg.reduce((n, s) => n + s.tools.length, 0);
-    if (count === 0) return "";
-    if (getOverallStatus(stepsArg) === "running") return "Running tools\u2026";
-    return `Used ${count} tool${count === 1 ? "" : "s"}`;
-  }
-
   /* ── Derived state ── */
 
   const steps = $derived(
