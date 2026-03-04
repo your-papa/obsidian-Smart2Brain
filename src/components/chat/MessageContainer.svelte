@@ -9,8 +9,6 @@
   } from "../../stores/chatStore.svelte";
   import type { UUIDv7 } from "../../utils/uuid7Validator";
   import { Logger } from "../../utils/logging";
-  import CircularLoader from "../ui/CircularLoader.svelte";
-  import Dots from "../ui/Dots.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
   import Logo from "../ui/logos/Logo.svelte";
@@ -171,25 +169,30 @@
     new Notice("Copied to Clipboard");
   }
 
-  // Track which message pairs have their tools open
-  let toolsOpenState: Record<string, boolean> = $state({});
+  let timelineCollapsed: Record<string, boolean> = $state({});
 
-  function getToolsOpen(messageId: string, assistantMessage: AssistantMessage): boolean {
-    // Default: open if no content yet, closed if content exists
-    if (toolsOpenState[messageId] === undefined) {
-      return !assistantMessage.content || assistantMessage.content.length === 0;
+  $effect(() => {
+    const messageList = messages ?? [];
+    for (const messagePair of messageList) {
+      const assistantMessage = messagePair.assistantMessage;
+      const hasToolCalls = (assistantMessage.toolCalls?.length ?? 0) > 0;
+      const streamFinished =
+        assistantMessage.state !== AssistantState.streaming &&
+        assistantMessage.state !== AssistantState.idle;
+
+      if (hasToolCalls && streamFinished && timelineCollapsed[messagePair.id] === undefined) {
+        timelineCollapsed[messagePair.id] = true;
+      }
     }
-    return toolsOpenState[messageId];
-  }
-
-  function setToolsOpen(messageId: string, open: boolean) {
-    toolsOpenState[messageId] = open;
-  }
+  });
 </script>
 
 <div class="relative flex-1 min-h-0 z-20">
   <!-- Scrollable messages area -->
-  <div bind:this={scrollContainer} class="scroll-container h-full overflow-y-auto px-2 py-4">
+  <div
+    bind:this={scrollContainer}
+    class="scroll-container h-full overflow-y-auto overflow-x-clip px-2 py-4"
+  >
     <div class="w-full max-w-[--file-line-width] mx-auto h-full">
       {#if !messages || messages.length === 0}
         <!-- Empty state with logo -->
@@ -212,7 +215,7 @@
           >
             {#if editingMessageId === messagePair.id}
               <!-- Edit Mode -->
-              {#if messagePair.userMessage.attachments?.some((a) => a.mimeType.startsWith("image/"))}
+              {#if messagePair.userMessage.attachments?.some( (a) => a.mimeType.startsWith("image/"), )}
                 <UserAttachmentImages
                   attachments={messagePair.userMessage.attachments.filter((a) =>
                     a.mimeType.startsWith("image/"),
@@ -221,8 +224,8 @@
               {/if}
               {#if messagePair.userMessage.attachments?.some((a) => !a.mimeType.startsWith("image/"))}
                 <UserAttachmentFiles
-                  attachments={messagePair.userMessage.attachments.filter((a) =>
-                    !a.mimeType.startsWith("image/"),
+                  attachments={messagePair.userMessage.attachments.filter(
+                    (a) => !a.mimeType.startsWith("image/"),
                   )}
                 />
               {/if}
@@ -262,8 +265,8 @@
               {/if}
               {#if messagePair.userMessage.attachments?.some((a) => !a.mimeType.startsWith("image/"))}
                 <UserAttachmentFiles
-                  attachments={messagePair.userMessage.attachments.filter((a) =>
-                    !a.mimeType.startsWith("image/"),
+                  attachments={messagePair.userMessage.attachments.filter(
+                    (a) => !a.mimeType.startsWith("image/"),
                   )}
                 />
               {/if}
@@ -306,33 +309,35 @@
           <!-- Assistant Message -->
           <div class:min-h-[95%]={index === messages.length - 1}>
             <div class="group flex flex-col px-2 gap-3 mb-2 w-full">
-              <!-- Tools Section (collapsible) -->
-              {#if messagePair.assistantMessage.toolCalls?.length}
+              {#if messagePair.assistantMessage.toolCalls?.length || ((messagePair.assistantMessage.state === AssistantState.idle || messagePair.assistantMessage.state === AssistantState.streaming) && !messagePair.assistantMessage.content && !messagePair.assistantMessage.toolCalls?.length)}
+                <!-- Tools + Answer integrated in timeline (or processing dot) -->
+                {@const renderInfo = getRenderableAssistantContent(messagePair.assistantMessage)}
+                {@const isAssistantProcessing =
+                  (messagePair.assistantMessage.state === AssistantState.idle ||
+                    messagePair.assistantMessage.state === AssistantState.streaming) &&
+                  !messagePair.assistantMessage.content &&
+                  !messagePair.assistantMessage.toolCalls?.length}
                 <ToolCallsSection
                   toolCalls={messagePair.assistantMessage.toolCalls}
-                  isOpen={getToolsOpen(messagePair.id, messagePair.assistantMessage)}
-                  onToggle={(open) => setToolsOpen(messagePair.id, open)}
+                  assistantTimeline={messagePair.assistantMessage.assistantTimeline}
+                  collapsed={timelineCollapsed[messagePair.id] ?? false}
+                  answerContent={renderInfo.renderContent && renderInfo.content
+                    ? renderInfo.content
+                    : undefined}
+                  isStreaming={messagePair.assistantMessage.state === AssistantState.streaming}
+                  isError={messagePair.assistantMessage.state === AssistantState.error}
+                  isProcessing={isAssistantProcessing}
                 />
-              {/if}
-
-              <!-- Content Section -->
-              {#if messagePair.assistantMessage.state === AssistantState.streaming && !messagePair.assistantMessage.content}
-                <Dots size={"35"} color={"var(--text-accent)"} />
-              {:else if messagePair.assistantMessage.content || messagePair.assistantMessage.state === AssistantState.cancelled || messagePair.assistantMessage.state === AssistantState.error}
-                {@const renderInfo = getRenderableAssistantContent(messagePair.assistantMessage)}
-                {#if renderInfo.renderContent}
-                  <MarkdownRenderer
-                    content={renderInfo.content}
-                    class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
-                  />
-                {/if}
-                {#if renderInfo.showLoading}
-                  <CircularLoader size={18} />
-                {/if}
-              {:else if messagePair.assistantMessage.state === AssistantState.idle || messagePair.assistantMessage.state === AssistantState.streaming}
-                <!-- Show loading dots only if streaming and no content yet (and no tool calls) -->
-                {#if !messagePair.assistantMessage.toolCalls?.length}
-                  <Dots size={"50"} color={"var(--text-accent)"} />
+              {:else}
+                <!-- Content Section (no tool calls) -->
+                {#if messagePair.assistantMessage.content || messagePair.assistantMessage.state === AssistantState.cancelled || messagePair.assistantMessage.state === AssistantState.error}
+                  {@const renderInfo = getRenderableAssistantContent(messagePair.assistantMessage)}
+                  {#if renderInfo.renderContent}
+                    <MarkdownRenderer
+                      content={renderInfo.content}
+                      class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
+                    />
+                  {/if}
                 {/if}
               {/if}
 

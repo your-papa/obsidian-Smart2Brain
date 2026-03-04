@@ -57,6 +57,21 @@ export interface ToolCallState {
 	preamble?: string;
 }
 
+export type AssistantTimelineEventType = "preamble" | "tool_start" | "tool_end";
+
+export interface AssistantTimelineEvent {
+	id: string;
+	type: AssistantTimelineEventType;
+	toolCallId?: string;
+	toolName?: string;
+	content?: string;
+	input?: Record<string, unknown>;
+	output?: unknown;
+	status?: ToolCallStatus;
+	/** The id of the AI message that produced this event. Groups events from the same AI message. */
+	aiMessageId?: string;
+}
+
 export interface UserMessage {
 	content: string;
 	attachments?: ChatAttachment[];
@@ -66,6 +81,7 @@ export interface AssistantMessage {
 	state: AssistantState;
 	content: string;
 	toolCalls?: ToolCallState[];
+	assistantTimeline?: AssistantTimelineEvent[];
 	nerd_stats?: {
 		tokensPerSecond: number;
 		retrievedDocsNum: number;
@@ -674,6 +690,49 @@ function attachPreambleToFirstToolCall(toolCalls: ToolCallState[] | undefined, p
 		: trimmed;
 }
 
+function buildTimelineFromToolCalls(
+	toolCalls: ToolCallState[] | undefined,
+	aiMessageId?: string,
+): AssistantTimelineEvent[] | undefined {
+	if (!toolCalls || toolCalls.length === 0) return undefined;
+
+	const events: AssistantTimelineEvent[] = [];
+	for (const toolCall of toolCalls) {
+		if (toolCall.preamble?.trim()) {
+			events.push({
+				id: `preamble-${toolCall.id}`,
+				type: "preamble",
+				toolCallId: toolCall.id,
+				toolName: toolCall.name,
+				content: toolCall.preamble.trim(),
+				aiMessageId,
+			});
+		}
+
+		events.push({
+			id: `start-${toolCall.id}`,
+			type: "tool_start",
+			toolCallId: toolCall.id,
+			toolName: toolCall.name,
+			input: toolCall.input,
+			status: "running",
+			aiMessageId,
+		});
+
+		events.push({
+			id: `end-${toolCall.id}`,
+			type: "tool_end",
+			toolCallId: toolCall.id,
+			toolName: toolCall.name,
+			output: toolCall.output,
+			status: toolCall.status,
+			aiMessageId,
+		});
+	}
+
+	return events.length > 0 ? events : undefined;
+}
+
 /**
  * Builds a map of tool outputs from tool messages.
  */
@@ -730,6 +789,7 @@ export function baseMessageToAssistantMessage(
 		state: stateOverride ?? AssistantState.success,
 		content: textContent,
 		toolCalls,
+		assistantTimeline: buildTimelineFromToolCalls(toolCalls),
 	};
 }
 
@@ -749,9 +809,10 @@ function mergeAssistantMessages(
 		};
 	}
 
-	// Merge multiple assistant messages
+	// Merge multiple assistant messages — each AI message identified by its native id
 	let finalContent = "";
 	const allToolCalls: ToolCallState[] = [];
+	const allTimelineEvents: AssistantTimelineEvent[] = [];
 
 	for (const msg of assistantMessages) {
 		const converted = baseMessageToAssistantMessage(msg, toolOutputs);
@@ -766,9 +827,11 @@ function mergeAssistantMessages(
 			finalContent = converted.content;
 		}
 
-		// Collect all tool calls
+		// Collect all tool calls and build timeline with the AI message's native id
 		if (converted.toolCalls) {
 			allToolCalls.push(...converted.toolCalls);
+			const events = buildTimelineFromToolCalls(converted.toolCalls, msg.id);
+			if (events) allTimelineEvents.push(...events);
 		}
 	}
 
@@ -776,6 +839,7 @@ function mergeAssistantMessages(
 		state: stateOverride ?? AssistantState.success,
 		content: finalContent,
 		toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+		assistantTimeline: allTimelineEvents.length > 0 ? allTimelineEvents : undefined,
 	};
 }
 
@@ -1319,7 +1383,11 @@ export class ChatSession {
 			this.messageState = MessageState.answering;
 			pair.assistantMessage.state = AssistantState.streaming;
 
-			// Generate chat title in parallel for the first user message
+			const streamPromise = this.consumeStream(pair.assistantMessage, getStream(signal));
+
+			// Generate chat title in parallel for the first user message.
+			// Start stream consumption first so non-parallel local providers (e.g., Ollama)
+			// prioritize the assistant response before title generation.
 			if (options.generateTitle && this.messages.length === 1) {
 				const plugin = getPlugin();
 				plugin.agentManager
@@ -1329,7 +1397,7 @@ export class ChatSession {
 					});
 			}
 
-			await this.consumeStream(pair.assistantMessage, getStream(signal));
+			await streamPromise;
 			pair.assistantMessage.state = AssistantState.success;
 
 			await this.syncGraphAfterRun(options.parentCheckpointId, options.beforeCheckpointIds);
@@ -1430,6 +1498,8 @@ export class ChatSession {
 		let tokenBuffer = "";
 		let hasSeenToolCall = false;
 
+		if (!assistantMsg.assistantTimeline) assistantMsg.assistantTimeline = [];
+
 		for await (const chunk of stream) {
 			if (chunk.type === "token") {
 				if (!chunk.token) continue;
@@ -1451,6 +1521,27 @@ export class ChatSession {
 					input: this.normalizeToolInput(chunk.input),
 					status: "running",
 					preamble: preamble.trim() || undefined,
+				});
+
+				if (preamble.trim()) {
+					assistantMsg.assistantTimeline.push({
+						id: `preamble-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
+						type: "preamble",
+						toolCallId: chunk.toolCallId,
+						toolName: chunk.toolName,
+						content: preamble.trim(),
+						aiMessageId: chunk.aiMessageId,
+					});
+				}
+
+				assistantMsg.assistantTimeline.push({
+					id: `start-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
+					type: "tool_start",
+					toolCallId: chunk.toolCallId,
+					toolName: chunk.toolName,
+					input: this.normalizeToolInput(chunk.input),
+					status: "running",
+					aiMessageId: chunk.aiMessageId,
 				});
 				continue;
 			}
@@ -1481,6 +1572,16 @@ export class ChatSession {
 						},
 					];
 				}
+
+				assistantMsg.assistantTimeline.push({
+					id: `end-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
+					type: "tool_end",
+					toolCallId: chunk.toolCallId,
+					toolName: chunk.toolName,
+					output: chunk.output,
+					status: "completed",
+					aiMessageId: chunk.aiMessageId,
+				});
 				continue;
 			}
 
@@ -1494,15 +1595,21 @@ export class ChatSession {
 				if (checkpointAssistant.toolCalls?.length && checkpointAssistant.content.trim()) {
 					attachPreambleToFirstToolCall(checkpointAssistant.toolCalls, checkpointAssistant.content);
 					checkpointAssistant.content = "";
+					checkpointAssistant.assistantTimeline = buildTimelineFromToolCalls(checkpointAssistant.toolCalls, chunk.message.id);
 				}
 				assistantMsg.content = checkpointAssistant.content;
 				assistantMsg.toolCalls = checkpointAssistant.toolCalls;
+				assistantMsg.assistantTimeline = checkpointAssistant.assistantTimeline;
 				break;
 			}
 		}
 
 		if (!assistantMsg.content) {
 			assistantMsg.content = hasSeenToolCall ? tokenBuffer.trim() : tokenBuffer;
+		}
+
+		if (!assistantMsg.assistantTimeline?.length) {
+			assistantMsg.assistantTimeline = buildTimelineFromToolCalls(assistantMsg.toolCalls);
 		}
 	}
 }

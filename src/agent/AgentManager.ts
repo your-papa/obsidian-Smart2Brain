@@ -532,12 +532,14 @@ export class AgentManager {
 			toolCallId: string;
 			toolName: string;
 			input: unknown;
+			aiMessageId?: string;
 		}
 		| {
 			type: "tool_end";
 			toolCallId: string;
 			toolName: string;
 			output: unknown;
+			aiMessageId?: string;
 		}
 		| { type: "result"; result: unknown },
 		void,
@@ -577,6 +579,7 @@ export class AgentManager {
 							toolCallId: chunk.toolCallId,
 							toolName: chunk.toolName,
 							input: chunk.input,
+							aiMessageId: chunk.aiMessageId,
 						};
 						break;
 					case "tool_end":
@@ -585,6 +588,7 @@ export class AgentManager {
 							toolCallId: chunk.toolCallId,
 							toolName: chunk.toolName,
 							output: chunk.output,
+							aiMessageId: chunk.aiMessageId,
 						};
 						break;
 					case "result":
@@ -637,12 +641,14 @@ export class AgentManager {
 			toolCallId: string;
 			toolName: string;
 			input: unknown;
+			aiMessageId?: string;
 		}
 		| {
 			type: "tool_end";
 			toolCallId: string;
 			toolName: string;
 			output: unknown;
+			aiMessageId?: string;
 		}
 		| { type: "result"; result: unknown },
 		void,
@@ -682,6 +688,7 @@ export class AgentManager {
 							toolCallId: chunk.toolCallId,
 							toolName: chunk.toolName,
 							input: chunk.input,
+							aiMessageId: chunk.aiMessageId,
 						};
 						break;
 					case "tool_end":
@@ -690,6 +697,7 @@ export class AgentManager {
 							toolCallId: chunk.toolCallId,
 							toolName: chunk.toolName,
 							output: chunk.output,
+							aiMessageId: chunk.aiMessageId,
 						};
 						break;
 					case "result":
@@ -737,12 +745,14 @@ export class AgentManager {
 			toolCallId: string;
 			toolName: string;
 			input: unknown;
+			aiMessageId?: string;
 		}
 		| {
 			type: "tool_end";
 			toolCallId: string;
 			toolName: string;
 			output: unknown;
+			aiMessageId?: string;
 		}
 		| { type: "result"; result: unknown },
 		void,
@@ -778,6 +788,7 @@ export class AgentManager {
 							toolCallId: chunk.toolCallId,
 							toolName: chunk.toolName,
 							input: chunk.input,
+							aiMessageId: chunk.aiMessageId,
 						};
 						break;
 					case "tool_end":
@@ -786,6 +797,7 @@ export class AgentManager {
 							toolCallId: chunk.toolCallId,
 							toolName: chunk.toolName,
 							output: chunk.output,
+							aiMessageId: chunk.aiMessageId,
 						};
 						break;
 					case "result":
