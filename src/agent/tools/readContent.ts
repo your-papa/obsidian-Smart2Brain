@@ -185,7 +185,7 @@ function formatElement(el: ExcalidrawElement): string {
     }
 
     // Text content
-    const text = (el.rawText ?? el.text ?? "").trim();
+    const text = (el.rawText ?? el.text ?? el.label?.text ?? "").trim();
     if (text) {
         parts.push(`  Text: "${text}"`);
     }
@@ -268,7 +268,7 @@ function formatSceneDescription(elements: ExcalidrawElement[]): string {
  */
 function parseExcalidrawElements(content: string): ExcalidrawElement[] {
     // Try %% comment block first (canonical data source)
-    const commentMatch = content.match(/%%\n([\s\S]*?)\n%%/);
+    const commentMatch = content.match(/%%\r?\n([\s\S]*?)\r?\n%%/);
     let jsonStr = commentMatch?.[1];
 
     // Fall back to ```json code block
