@@ -675,7 +675,25 @@ function normalizeToolInput(raw: unknown): Record<string, unknown> {
 		}
 	}
 	if (Array.isArray(raw)) return { value: raw };
-	if (typeof raw === "object") return raw as Record<string, unknown>;
+	if (typeof raw === "object") {
+		const obj = raw as Record<string, unknown>;
+		// Unwrap single-key { input: ... } LangChain wrapper
+		if (Object.keys(obj).length === 1 && "input" in obj && obj.input != null) {
+			const inner = obj.input;
+			if (typeof inner === "object" && !Array.isArray(inner)) {
+				return inner as Record<string, unknown>;
+			}
+			if (typeof inner === "string") {
+				try {
+					const parsed = JSON.parse(inner);
+					if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+						return parsed as Record<string, unknown>;
+					}
+				} catch { /* not JSON */ }
+			}
+		}
+		return obj;
+	}
 	return { value: raw };
 }
 
@@ -1306,21 +1324,7 @@ export class ChatSession {
 	 * ---------------------------------------------------------------------*/
 
 	private normalizeToolInput(raw: unknown): Record<string, unknown> {
-		if (raw === undefined || raw === null) return {};
-		if (typeof raw === "string") {
-			try {
-				const parsed = JSON.parse(raw);
-				if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-					return parsed as Record<string, unknown>;
-				}
-				return { value: parsed };
-			} catch {
-				return { input: raw };
-			}
-		}
-		if (Array.isArray(raw)) return { value: raw };
-		if (typeof raw === "object") return raw as Record<string, unknown>;
-		return { value: raw };
+		return normalizeToolInput(raw);
 	}
 
 	private async persistLastViewedCheckpoint(checkpointId?: string): Promise<void> {
@@ -1605,7 +1609,15 @@ export class ChatSession {
 				}
 				assistantMsg.content = checkpointAssistant.content;
 				assistantMsg.toolCalls = checkpointAssistant.toolCalls;
-				assistantMsg.assistantTimeline = checkpointAssistant.assistantTimeline;
+				// Only overwrite the streaming-built timeline when the checkpoint actually
+				// provides one (i.e. tool calls + trailing content triggered the rebuild).
+				// Without this guard, checkpointAssistant.assistantTimeline is undefined
+				// for the common case of tool calls with no preamble, which would erase
+				// the correctly aiMessageId-annotated streaming timeline and cause the
+				// post-loop fallback to rebuild without IDs, collapsing all steps into one.
+				if (checkpointAssistant.assistantTimeline) {
+					assistantMsg.assistantTimeline = checkpointAssistant.assistantTimeline;
+				}
 				break;
 			}
 		}

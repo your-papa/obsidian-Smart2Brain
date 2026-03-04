@@ -230,7 +230,7 @@
   }
 
   function getCollapsedStepLabel(step: TimelineStep): string {
-    if (step.tools.length === 0) return "0 tools";
+    if (step.tools.length === 0) return step.preambles.length > 0 ? "Thinking…" : "0 tools";
 
     const groupedCounts = new Map<string, number>();
     for (const tool of step.tools) {
