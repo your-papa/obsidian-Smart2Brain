@@ -1485,9 +1485,12 @@ export class Agent {
 	/**
 	 * Extracts the AI message id from a chat model stream event.
 	 * AIMessageChunk objects carry an `id` field set by the provider.
+	 * Only `on_chat_model_stream` events carry an AIMessageChunk; other `*_stream`
+	 * events (e.g. `on_tool_stream`) carry different chunk types whose `id` field
+	 * is unrelated (e.g. the tool-call ID) and must not overwrite `lastAiMessageId`.
 	 */
 	private extractAiMessageIdFromEvent(event: StreamEvent): string | undefined {
-		if (!event.event.endsWith("_stream")) return undefined;
+		if (event.event !== "on_chat_model_stream") return undefined;
 		const chunk = event.data?.chunk;
 		if (chunk && typeof chunk === "object" && typeof (chunk as { id?: unknown }).id === "string") {
 			return (chunk as { id: string }).id;

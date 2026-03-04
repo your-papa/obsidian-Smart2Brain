@@ -169,16 +169,23 @@
     new Notice("Copied to Clipboard");
   }
 
-  let timelineCollapsed: Record<string, boolean> = $state({});
+  let timelineCollapsed: Record<string, boolean | undefined> = $state({});
 
   $effect(() => {
     const messageList = messages ?? [];
     for (const messagePair of messageList) {
       const assistantMessage = messagePair.assistantMessage;
       const hasToolCalls = (assistantMessage.toolCalls?.length ?? 0) > 0;
-      const streamFinished =
-        assistantMessage.state !== AssistantState.streaming &&
-        assistantMessage.state !== AssistantState.idle;
+      const isStreaming =
+        assistantMessage.state === AssistantState.streaming ||
+        assistantMessage.state === AssistantState.idle;
+      const streamFinished = !isStreaming;
+
+      // Clear the collapsed state when a new stream starts so the timeline
+      // expands automatically during regeneration, matching first-run behaviour.
+      if (isStreaming && timelineCollapsed[messagePair.id] !== undefined) {
+        timelineCollapsed[messagePair.id] = undefined;
+      }
 
       if (hasToolCalls && streamFinished && timelineCollapsed[messagePair.id] === undefined) {
         timelineCollapsed[messagePair.id] = true;
