@@ -27,14 +27,7 @@
 		"build": "vite build --mode production",
 		"check": "svelte-check --tsconfig ./tsconfig.json",
 		"format": "biome format --write ./src",
-<<<<<<< ours
-		"lint": "biome lint --apply-unsafe ./src",
-		"compare:models": "bun run scripts/compare-openrouter-model-metadata.ts",
-||||||| ancestor
-		"lint": "biome lint --apply-unsafe ./src",
-=======
 		"lint": "biome lint --write --unsafe ./src",
->>>>>>> theirs
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:coverage": "vitest run --coverage"
