@@ -12,6 +12,7 @@ import type { AgentStreamChunk, CheckpointHistoryItem, ThreadHistory } from "../
 import type { AgentManager } from "../agent/AgentManager";
 import type { ChatModelConfig } from "../providers/index";
 import type { ChatAttachment, ThreadError } from "../types/shared";
+import { NEW_CHAT_NAME } from "../utils/threadId";
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { getData } from "./dataStore.svelte";
 import { getPlugin } from "./state.svelte";
@@ -1052,7 +1053,7 @@ export class ChatSession {
 	 *  - Kick off streaming process
 	 */
 	async sendMessage(content: string, attachments?: ChatAttachment[]): Promise<UUIDv7> {
-		const defaultChatName = getData().defaultChatName?.trim() || "New Chat";
+		const defaultChatName = NEW_CHAT_NAME;
 		if (this.messages.length === 0 && this.id === defaultChatName) {
 			const promotedThreadId = await getPlugin().agentManager.promoteDraftThread(this.id);
 			if (promotedThreadId) {
@@ -1094,7 +1095,7 @@ export class ChatSession {
 	private async relocatePendingAttachments(attachments: ChatAttachment[]): Promise<void> {
 		const chatFolder = getData().targetFolder;
 		const pendingPrefix = normalizePath(`${chatFolder}/attachments/_pending/`);
-		const defaultChatName = getData().defaultChatName?.trim() || "New Chat";
+		const defaultChatName = NEW_CHAT_NAME;
 		const legacyDraftPrefix = normalizePath(`${chatFolder}/attachments/${defaultChatName}/`);
 		const pending = attachments.filter(
 			(a) => a.vaultPath.startsWith(pendingPrefix) || a.vaultPath.startsWith(legacyDraftPrefix),
@@ -1528,7 +1529,7 @@ export class Messenger {
 	}
 
 	private async deriveThreadId(file: TFile): Promise<string | null> {
-		const defaultChatName = getData().defaultChatName?.trim() || "New Chat";
+		const defaultChatName = NEW_CHAT_NAME;
 		if (file.basename === defaultChatName) {
 			return defaultChatName;
 		}
@@ -1549,7 +1550,7 @@ export class Messenger {
 			const dateTimePart = parts[parts.length - 1];
 			threadId = `Chat ${dateTimePart}`;
 		}
-		if (!threadId || threadId === "New Chat") return null;
+		if (!threadId || threadId === NEW_CHAT_NAME) return null;
 		return threadId;
 	}
 

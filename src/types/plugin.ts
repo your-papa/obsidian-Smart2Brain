@@ -334,7 +334,6 @@ export interface PluginData {
 	isUsingRag: boolean;
 	retrieveTopK: number;
 	assistantLanguage: "de" | "en";
-	defaultChatName: string;
 	targetFolder: string;
 
 	// ============================================================================
