@@ -660,6 +660,8 @@ function extractTextContent(message: BaseMessage): string {
 
 /**
  * Parses tool call arguments into a normalized object format.
+ * NOTE: LangChain envelope unwrapping (e.g. single-key `{ input: … }`) is handled
+ * upstream by Agent.normalizeStreamToolInput — this function only coerces types.
  */
 function normalizeToolInput(raw: unknown): Record<string, unknown> {
 	if (raw === undefined || raw === null) return {};
@@ -675,25 +677,7 @@ function normalizeToolInput(raw: unknown): Record<string, unknown> {
 		}
 	}
 	if (Array.isArray(raw)) return { value: raw };
-	if (typeof raw === "object") {
-		const obj = raw as Record<string, unknown>;
-		// Unwrap single-key { input: ... } LangChain wrapper
-		if (Object.keys(obj).length === 1 && "input" in obj && obj.input != null) {
-			const inner = obj.input;
-			if (typeof inner === "object" && !Array.isArray(inner)) {
-				return inner as Record<string, unknown>;
-			}
-			if (typeof inner === "string") {
-				try {
-					const parsed = JSON.parse(inner);
-					if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-						return parsed as Record<string, unknown>;
-					}
-				} catch { /* not JSON */ }
-			}
-		}
-		return obj;
-	}
+	if (typeof raw === "object") return raw as Record<string, unknown>;
 	return { value: raw };
 }
 
@@ -1551,18 +1535,12 @@ export class ChatSession {
 			}
 
 			if (chunk.type === "tool_end") {
-				// Track whether this tool_end is orphaned (no prior tool_start in the stream).
-				// An orphan occurs when the agent emits tool_end without a preceding tool_start,
-				// e.g. when a checkpoint restores mid-tool execution.
-				let isOrphanedToolEnd = false;
-
 				if (assistantMsg.toolCalls) {
 					const tc = assistantMsg.toolCalls.find((t) => t.id === chunk.toolCallId);
 					if (tc) {
 						tc.status = "completed";
 						tc.output = chunk.output;
 					} else {
-						isOrphanedToolEnd = true;
 						assistantMsg.toolCalls.push({
 							id: chunk.toolCallId,
 							name: chunk.toolName,
@@ -1572,7 +1550,6 @@ export class ChatSession {
 						});
 					}
 				} else {
-					isOrphanedToolEnd = true;
 					assistantMsg.toolCalls = [
 						{
 							id: chunk.toolCallId,
@@ -1589,23 +1566,6 @@ export class ChatSession {
 				// to "failed" based on output inspection, this pick-up is automatic.
 				const resolvedStatus =
 					assistantMsg.toolCalls?.find((tc) => tc.id === chunk.toolCallId)?.status ?? "completed";
-
-				// For orphaned tool_ends, inject a synthetic tool_start first so that
-				// buildStepsFromEvents (hasGroupIds branch) can create a tool entry to
-				// match against. Without this, the tool_end is silently dropped and the
-				// tool never appears in any step, causing getSummaryText to count it while
-				// the timeline renders nothing.
-				if (isOrphanedToolEnd) {
-					assistantMsg.assistantTimeline.push({
-						id: `start-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
-						type: "tool_start",
-						toolCallId: chunk.toolCallId,
-						toolName: chunk.toolName,
-						input: {},
-						status: "running",
-						aiMessageId: chunk.aiMessageId,
-					});
-				}
 
 				assistantMsg.assistantTimeline.push({
 					id: `end-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
@@ -1631,19 +1591,9 @@ export class ChatSession {
 					checkpointAssistant.content = "";
 					checkpointAssistant.assistantTimeline = buildTimelineFromToolCalls(checkpointAssistant.toolCalls, chunk.message.id);
 				}
-				// Only sync toolCalls and content from the checkpoint; preserve the
-				// streaming-built aiMessageId-annotated timeline.
 				assistantMsg.content = checkpointAssistant.content;
 				assistantMsg.toolCalls = checkpointAssistant.toolCalls;
-				// Only overwrite the timeline when the checkpoint triggered a preamble
-				// rebuild (i.e., attachPreambleToFirstToolCall ran and set a new timeline
-				// with the correct msg.id).  Do NOT overwrite with the id-free default
-				// timeline produced by baseMessageToAssistantMessage — that would erase the
-				// correctly aiMessageId-annotated streaming timeline, causing buildStepsFromEvents
-				// to see hasGroupIds=false and collapse all steps into a single "step-0".
-				if (checkpointAssistant.assistantTimeline?.some((e) => e.aiMessageId !== undefined)) {
-					assistantMsg.assistantTimeline = checkpointAssistant.assistantTimeline;
-				}
+				assistantMsg.assistantTimeline = checkpointAssistant.assistantTimeline;
 				break;
 			}
 		}

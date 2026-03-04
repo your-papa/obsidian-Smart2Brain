@@ -279,6 +279,12 @@
     steps.length + (showAnswerStep ? 1 : 0) + (showProcessingDot ? 1 : 0),
   );
 
+  // When content is streaming but no tool-call steps have arrived yet, render the
+  // answer inline (no timeline dot/rail) so the layout matches the plain-text
+  // MarkdownRenderer that takes over once streaming completes.  This prevents a
+  // visible layout jump when the stream ends and the else-branch mounts.
+  const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && showAnswerStep);
+
   // Reset per-step expand state when collapse state changes (new stream starts)
   $effect(() => {
     if (!collapsed) expandedSteps = {};
@@ -469,6 +475,17 @@
   </div>
 {/snippet}
 
+{#if noTimelineWrap}
+  <!-- Inline rendering: content streaming with no tool-call steps yet.
+       Renders identical to the completed plain-MarkdownRenderer path so there
+       is no layout shift when streaming ends and the else-branch takes over. -->
+  {#if answerContent}
+    <MarkdownRenderer
+      content={answerContent}
+      class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
+    />
+  {/if}
+{:else}
 <div class="tool-timeline" class:tool-timeline-highlight-all={hoveringFinalControl}>
   {#if showProcessingDot}
     <div class="tool-step step-only">
@@ -521,6 +538,7 @@
     </div>
   {/if}
 </div>
+{/if}
 
 <style>
   /* ── Timeline container ── */

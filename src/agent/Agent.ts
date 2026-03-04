@@ -536,15 +536,11 @@ export class Agent {
 					continue;
 				}
 
-				// Capture AI message id unconditionally — must happen even for tool-only AI
-				// messages that emit no text token, so that on_tool_start/end events below
-				// receive the correct aiMessageId rather than stale or undefined.
-				const chunkId = this.extractAiMessageIdFromEvent(event);
-				if (chunkId) lastAiMessageId = chunkId;
-
-				// Handle token streaming
+				// Handle token streaming — also capture AI message id from chunks
 				const token = this.extractTokenFromEvent(event);
 				if (token) {
+					const chunkId = this.extractAiMessageIdFromEvent(event);
+					if (chunkId) lastAiMessageId = chunkId;
 					yield {
 						type: "token",
 						token,
@@ -734,11 +730,10 @@ export class Agent {
 					continue;
 				}
 
-				const chunkId = this.extractAiMessageIdFromEvent(event);
-				if (chunkId) lastAiMessageId = chunkId;
-
 				const token = this.extractTokenFromEvent(event);
 				if (token) {
+					const chunkId = this.extractAiMessageIdFromEvent(event);
+					if (chunkId) lastAiMessageId = chunkId;
 					yield {
 						type: "token",
 						token,
@@ -913,11 +908,10 @@ export class Agent {
 					continue;
 				}
 
-				const chunkId = this.extractAiMessageIdFromEvent(event);
-				if (chunkId) lastAiMessageId = chunkId;
-
 				const token = this.extractTokenFromEvent(event);
 				if (token) {
+					const chunkId = this.extractAiMessageIdFromEvent(event);
+					if (chunkId) lastAiMessageId = chunkId;
 					yield {
 						type: "token",
 						token,
@@ -1493,7 +1487,7 @@ export class Agent {
 	 * AIMessageChunk objects carry an `id` field set by the provider.
 	 */
 	private extractAiMessageIdFromEvent(event: StreamEvent): string | undefined {
-		if (event.event !== "on_chat_model_stream") return undefined;
+		if (!event.event.endsWith("_stream")) return undefined;
 		const chunk = event.data?.chunk;
 		if (chunk && typeof chunk === "object" && typeof (chunk as { id?: unknown }).id === "string") {
 			return (chunk as { id: string }).id;

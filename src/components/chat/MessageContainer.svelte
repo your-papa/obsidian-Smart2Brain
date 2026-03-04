@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Notice } from "obsidian";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import {
     type AssistantMessage,
     AssistantState,
@@ -169,7 +169,21 @@
     new Notice("Copied to Clipboard");
   }
 
-  let timelineCollapsed: Record<string, boolean | undefined> = $state({});
+  // Pre-populate so the very first render is already correct for history messages,
+  // preventing a one-frame flash where completed timelines appear expanded before
+  // the $effect below runs and collapses them.
+  // Capture the initial snapshot via untrack() — ongoing message state changes
+  // are handled by the $effect; we only need this for messages loaded from history.
+  let timelineCollapsed: Record<string, boolean | undefined> = $state(
+    Object.fromEntries(
+      untrack(() => messages ?? []).map((p) => {
+        const a = p.assistantMessage;
+        const finished =
+          a.state !== AssistantState.streaming && a.state !== AssistantState.idle;
+        return [p.id, finished && (a.toolCalls?.length ?? 0) > 0 ? true : undefined];
+      })
+    )
+  );
 
   $effect(() => {
     const messageList = messages ?? [];
@@ -316,8 +330,11 @@
           <!-- Assistant Message -->
           <div class:min-h-[95%]={index === messages.length - 1}>
             <div class="group flex flex-col px-2 gap-3 mb-2 w-full">
-              {#if messagePair.assistantMessage.toolCalls?.length || ((messagePair.assistantMessage.state === AssistantState.idle || messagePair.assistantMessage.state === AssistantState.streaming) && !messagePair.assistantMessage.content && !messagePair.assistantMessage.toolCalls?.length)}
-                <!-- Tools + Answer integrated in timeline (or processing dot) -->
+              {#if messagePair.assistantMessage.toolCalls?.length || (messagePair.assistantMessage.assistantTimeline?.length ?? 0) > 0 || messagePair.assistantMessage.state === AssistantState.idle || messagePair.assistantMessage.state === AssistantState.streaming}
+                <!-- Tools + Answer integrated in timeline (or processing dot).
+                     Keep ToolCallsSection mounted during all streaming/idle states so that
+                     the component never unmounts mid-stream, preventing the jarring flash
+                     where preamble content appears as plain text before the timeline builds. -->
                 {@const renderInfo = getRenderableAssistantContent(messagePair.assistantMessage)}
                 {@const isAssistantProcessing =
                   (messagePair.assistantMessage.state === AssistantState.idle ||
@@ -336,7 +353,7 @@
                   isProcessing={isAssistantProcessing}
                 />
               {:else}
-                <!-- Content Section (no tool calls) -->
+                <!-- Content Section: only reached for completed messages with no tool calls / timeline -->
                 {#if messagePair.assistantMessage.content || messagePair.assistantMessage.state === AssistantState.cancelled || messagePair.assistantMessage.state === AssistantState.error}
                   {@const renderInfo = getRenderableAssistantContent(messagePair.assistantMessage)}
                   {#if renderInfo.renderContent}
