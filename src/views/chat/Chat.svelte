@@ -10,7 +10,6 @@ const plugin = getPlugin();
 
 const messenger = getMessenger();
 
-let isInputFocused = $state(false);
 let messageContainer: ReturnType<typeof MessageContainer>;
 let input: ReturnType<typeof Input>;
 let lastSessionId: string | null = null;
@@ -25,12 +24,24 @@ $effect(() => {
 
 <QueryClientProvider client={plugin.queryClient}>
     <div class="chat-root h-full flex flex-col">
-        <MessageContainer bind:this={messageContainer} messenger={messenger!!} {isInputFocused} />
+        <MessageContainer bind:this={messageContainer} messenger={messenger!!} />
         <Input
             bind:this={input}
             messenger={messenger!!}
-            onFocusChange={(focused) => isInputFocused = focused}
             onMessageSent={() => messageContainer.scrollToLatestMessage()}
         />
     </div>
 </QueryClientProvider>
+
+<style>
+  :global(.chat-root:has(.chat-input-wrapper:focus-within) .logo-container) {
+    transform: translateY(-2px) scale(1.02);
+  }
+
+  :global(.chat-root:has(.chat-input-wrapper:focus-within) .logo-container svg) {
+    fill: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
+    stroke: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
+    filter: drop-shadow(0 0 8px color-mix(in srgb, var(--interactive-accent) 30%, transparent))
+      drop-shadow(0 4px 10px color-mix(in srgb, var(--interactive-accent) 18%, transparent));
+  }
+</style>

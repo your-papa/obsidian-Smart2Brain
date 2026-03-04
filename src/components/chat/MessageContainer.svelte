@@ -21,10 +21,9 @@
 
   interface Props {
     messenger: Messenger;
-    isInputFocused?: boolean;
   }
 
-  const { messenger, isInputFocused = false }: Props = $props();
+  const { messenger }: Props = $props();
 
   const messages = $derived.by(() => {
     return messenger.session?.messages;
@@ -218,8 +217,7 @@
         <!-- Empty state with logo -->
         <div class="flex flex-col items-center justify-center h-full">
           <div
-            class="logo-container h-[80px] w-[80px] items-center justify-center transition-transform duration-150 ease-out"
-            class:input-focused={isInputFocused}
+            class="logo-container h-[80px] w-[80px] items-center justify-center transition-all duration-150 ease-out"
           >
             <Logo />
           </div>
@@ -412,20 +410,5 @@
     height: 100%;
     fill: var(--text-faint);
     stroke: var(--text-faint);
-    transition:
-      fill 0.15s ease-out,
-      stroke 0.15s ease-out,
-      filter 0.15s ease-out;
-  }
-
-  .logo-container.input-focused {
-    transform: translateY(-2px) scale(1.02);
-  }
-
-  .logo-container.input-focused :global(svg) {
-    fill: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
-    stroke: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
-    filter: drop-shadow(0 0 8px color-mix(in srgb, var(--interactive-accent) 30%, transparent))
-      drop-shadow(0 4px 10px color-mix(in srgb, var(--interactive-accent) 18%, transparent));
   }
 </style>
