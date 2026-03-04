@@ -791,14 +791,14 @@
                   </div>
                 </div>
                 <div class="skill-controls">
-                  <Toggle
-                    checked={ext.enabled && pluginAvailable}
-                    onchange={() => toggleSkill(ext.id, !ext.enabled)}
-                  />
                   <IconButton
                     icon="pencil"
                     label="Edit {ext.displayName} prompt"
                     onclick={() => openSkillModal(ext.id)}
+                  />
+                  <Toggle
+                    checked={ext.enabled && pluginAvailable}
+                    onchange={() => toggleSkill(ext.id, !ext.enabled)}
                   />
                 </div>
               </div>
@@ -840,14 +840,14 @@
                   </div>
                 </div>
                 <div class="skill-controls">
-                  <Toggle
-                    checked={ext.enabled && pluginAvailable}
-                    onchange={() => toggleSkill(ext.id, !ext.enabled)}
-                  />
                   <IconButton
                     icon="pencil"
                     label="Edit {ext.displayName} prompt"
                     onclick={() => openSkillModal(ext.id)}
+                  />
+                  <Toggle
+                    checked={ext.enabled && pluginAvailable}
+                    onchange={() => toggleSkill(ext.id, !ext.enabled)}
                   />
                 </div>
               </div>
@@ -874,12 +874,12 @@
                   label="Delete {ext.displayName}"
                   onclick={() => deleteSkill(ext.id)}
                 />
-                <Toggle checked={ext.enabled} onchange={() => toggleSkill(ext.id, !ext.enabled)} />
                 <IconButton
                   icon="pencil"
                   label="Edit {ext.displayName} prompt"
                   onclick={() => openSkillModal(ext.id)}
                 />
+                <Toggle checked={ext.enabled} onchange={() => toggleSkill(ext.id, !ext.enabled)} />
               </div>
             </div>
           {/each}
