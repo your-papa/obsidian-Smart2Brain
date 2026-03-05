@@ -294,9 +294,8 @@
                   <div class="model-main">
                     <div class="model-info">
                       <div class="model-name">{model.displayName}</div>
-                      {@const variantKeyDisplay = getVariantKeyDisplay(model)}
-                      {#if model.displayName !== variantKeyDisplay}
-                        <div class="model-description">{variantKeyDisplay}</div>
+                      {#if model.displayName !== getVariantKeyDisplay(model)}
+                        <div class="model-description">{getVariantKeyDisplay(model)}</div>
                       {/if}
                     </div>
                     <div class="model-actions">

@@ -15,7 +15,6 @@ import type { ChatAttachment, ThreadError } from "../types/shared";
 import { NEW_CHAT_NAME } from "../utils/threadId";
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { DEFAULT_AGENT_ID, getData } from "./dataStore.svelte";
-import { getData } from "./dataStore.svelte";
 import { getPlugin } from "./state.svelte";
 import { Logger } from "../utils/logging";
 

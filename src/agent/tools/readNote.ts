@@ -73,7 +73,7 @@ function resolveNoteFile(app: App, pathOrWikiLink: string): { file: TFile | null
  */
 export function createReadNoteTool(app: App) {
 	const pluginData = getData();
-	const toolConfig = pluginData.getSelectedAgentToolConfig("read_note");
+	const toolConfig = pluginData.getSelectedAgent().toolsConfig.read_content;
 	const settings = toolConfig?.settings as { maxContentLength?: number } | undefined;
 
 	const readNoteFn = async ({ path }: { path: string }): Promise<string> => {
@@ -88,7 +88,7 @@ export function createReadNoteTool(app: App) {
 			let content = await app.vault.read(file);
 
 			// Apply max content length if configured
-				const currentConfig = pluginData.getSelectedAgentToolConfig("read_note");
+			const currentConfig = pluginData.getSelectedAgent().toolsConfig.read_content;
 			const currentSettings = currentConfig?.settings as { maxContentLength?: number } | undefined;
 			const maxLength = currentSettings?.maxContentLength ?? settings?.maxContentLength ?? 0;
 
@@ -103,7 +103,7 @@ export function createReadNoteTool(app: App) {
 	};
 
 	return tool(readNoteFn, {
-		name: toolConfig?.name ?? "read_note",
+		name: toolConfig?.name ?? "read_content",
 		description:
 			toolConfig?.description ??
 			"Read the full content of a specific note by file path or Obsidian wiki link (e.g., [[Daily Note]] or [[folder/note]]).",

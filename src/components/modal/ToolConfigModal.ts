@@ -48,7 +48,6 @@ export class ToolConfigModal extends Modal {
 			target: this.contentEl,
 			props: {
 				modal: this,
-				plugin: this.plugin,
 				toolId: this.toolId,
 				onSave: this.onSave,
 				accessors: this.accessors,

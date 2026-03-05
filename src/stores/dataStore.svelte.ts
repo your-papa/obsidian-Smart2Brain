@@ -1135,22 +1135,6 @@ export class PluginDataStore {
 			config.chatModels = value;
 			this.saveSettings();
 		}
-
-		this.saveSettings();
-	}
-
-	// Get/set chatModels
-	getProviderChatModels(provider: string): Record<string, ChatModelConfig> | undefined {
-		const config = this.#data.providerConfig[provider];
-		return config?.chatModels;
-	}
-
-	setProviderChatModels(provider: string, value: Record<string, ChatModelConfig>) {
-		const config = this.#data.providerConfig[provider];
-		if (config) {
-			config.chatModels = value;
-			this.saveSettings();
-		}
 	}
 
 	// ============================================================================

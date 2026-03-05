@@ -107,7 +107,7 @@ let selectedValue = $derived(secrets.includes(value) ? value : "");
     type="options"
     dropdown={dropdownOptions}
     selected={selectedValue}
-    onSelect={handleSelect}
+    onchange={handleSelect}
     class="flex-1"
   />
 </div>

@@ -1292,7 +1292,7 @@ export class Agent {
 			case "AIMessageChunk": {
 				const toolCalls = this.extractToolCalls(kwargs);
 				return new AIMessage({
-					content,
+					content: c,
 					id,
 					tool_calls: toolCalls,
 					additional_kwargs: additionalKwargs ?? {},
@@ -1308,7 +1308,7 @@ export class Agent {
 			default:
 				// Default to AIMessage for unknown types
 				return new AIMessage({
-					content,
+					content: c,
 					id,
 					additional_kwargs: additionalKwargs ?? {},
 					response_metadata: responseMetadata ?? {},
@@ -1335,7 +1335,7 @@ export class Agent {
 			case "aimessage": {
 				const toolCalls = this.extractToolCalls(msg);
 				return new AIMessage({
-					content,
+					content: c,
 					id,
 					tool_calls: toolCalls,
 					additional_kwargs: additionalKwargs ?? {},
@@ -1362,7 +1362,7 @@ export class Agent {
 		return value as Record<string, unknown>;
 	}
 
-	private extractContent(obj: Record<string, unknown>): string {
+	private extractContent(obj: Record<string, unknown>): string | MessageContentComplex[] {
 		const content = obj.content;
 		if (typeof content === "string") return content;
 		if (Array.isArray(content)) {

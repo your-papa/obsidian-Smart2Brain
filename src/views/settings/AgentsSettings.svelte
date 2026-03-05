@@ -416,9 +416,10 @@ const TOOLS: ToolInfo[] = [
 		defaultDescription: "Search through your Obsidian notes by keyword. Returns matching file names and metadata.",
 	},
 	{
-		id: "read_note",
-		defaultName: "Read Note",
-		defaultDescription: "Read the full content of a specific note by its file path.",
+		id: "read_content",
+		defaultName: "Read Content",
+		defaultDescription:
+			"Read notes and vault files by path or wiki link. Supports markdown/text files and PDF text extraction. Images must be attached in chat.",
 	},
 	{
 		id: "get_all_tags",
@@ -516,7 +517,7 @@ function openAddMCPServer() {
 			pluginData.setAgentMCPServer(selectedAgentId, serverId, config);
 			applyChanges();
 		},
-		{ skipGlobalSave: true },
+		{ hasServer: (serverId: string) => Boolean(selectedAgent?.mcpServers[serverId]) },
 	);
 	modal.open();
 }
@@ -541,7 +542,7 @@ function openEditMCPServer(serverId: string) {
 				}
 				applyChanges();
 			},
-			{ skipGlobalSave: true },
+			{ hasServer: (candidateId: string) => Boolean(selectedAgent?.mcpServers[candidateId]) },
 		);
 		modal.open();
 	}

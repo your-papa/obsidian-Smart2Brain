@@ -28,6 +28,8 @@ function handleKeydown(e: KeyboardEvent) {
   </label>
   The ::before pseudo-element on .checkbox-container creates the toggle knob
 -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <label
 	class="checkbox-container"
 	class:is-enabled={checked}

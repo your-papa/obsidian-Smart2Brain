@@ -342,7 +342,7 @@ async function handleTestConnection() {
       <label class="mcp-label" for="mcp-server-enabled">Enabled</label>
       <p class="mcp-description">Whether this server is active and provides tools</p>
     </div>
-    <Toggle id="mcp-server-enabled" checked={enabled} onchange={(checked) => (enabled = checked)} />
+    <Toggle checked={enabled} onchange={(checked) => (enabled = checked)} />
   </div>
 
   <!-- Transport Type -->

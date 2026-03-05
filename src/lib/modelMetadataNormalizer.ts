@@ -3,7 +3,10 @@ import {
 	formatParameterSize,
 	type OllamaModelInfo,
 } from "../providers/ollamaModels";
-import type { OpenRouterModelInfo } from "../providers/openrouterModels";
+import {
+	extractCapabilities as extractOpenRouterCapabilities,
+	type OpenRouterModelInfo,
+} from "../providers/openrouterModels";
 import type {
 	HydratedChatModelMetadata,
 	HydratedEmbeddingModelMetadata,
@@ -59,13 +62,9 @@ function buildDisplayName(
 	provider: string,
 	variantKey: string,
 	nameFromMetadata: string | undefined,
-	paramSize: string | undefined,
+	_paramSize: string | undefined,
 ): string {
 	const baseName = nameFromMetadata || variantKey;
-	if (provider === "ollama" && variantKey.endsWith(":latest") && paramSize) {
-		const sizeToken = paramSize.toLowerCase();
-		return variantKey.replace(/:latest$/i, `-${sizeToken}`);
-	}
 	if (provider === "ollama") {
 		return baseName.replace(/:latest$/i, "");
 	}
@@ -127,6 +126,7 @@ export function hydrateChatModel(
 	const inputUsdPer1M = toUsdPer1MFromPerToken(openRouter?.pricing?.prompt);
 	const outputUsdPer1M = toUsdPer1MFromPerToken(openRouter?.pricing?.completion);
 	const hasPricing = inputUsdPer1M !== undefined || outputUsdPer1M !== undefined;
+	const openRouterCapabilities = openRouter ? extractOpenRouterCapabilities(openRouter) : undefined;
 
 	return {
 		kind: "chat",
@@ -139,18 +139,18 @@ export function hydrateChatModel(
 		temperature: sourceData.temperature,
 		capabilities: {
 			toolCalls:
-				openRouter?.supports_tool_calls ??
+				openRouterCapabilities?.supportsToolCalls ??
 				ollama?.supportsTools ??
 				modelsDev?.tool_call ??
 				undefined,
 			vision:
-				openRouter?.supports_vision ??
+				openRouterCapabilities?.supportsVision ??
 				ollama?.supportsVision ??
 				modelsDev?.attachment ??
 				undefined,
-			reasoning: openRouter?.supports_reasoning ?? modelsDev?.reasoning ?? undefined,
+			reasoning: openRouterCapabilities?.supportsReasoning ?? modelsDev?.reasoning ?? undefined,
 			structuredOutput:
-				openRouter?.supports_structured_output ??
+				openRouterCapabilities?.supportsStructuredOutput ??
 				modelsDev?.structured_output ??
 				undefined,
 		},

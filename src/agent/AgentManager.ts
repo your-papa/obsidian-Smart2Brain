@@ -58,25 +58,6 @@ function getVisionSupportCacheKey(providerId: string, modelId: string): string {
 	return `${providerId}::${modelId}`;
 }
 
-/**
- * Converts BuiltInProviderOptions to AuthObject.
- */
-function convertToAuthObject(options: BuiltInProviderOptions): AuthObject {
-	const auth: AuthObject = {};
-
-	if (options.apiKey) {
-		auth.apiKey = options.apiKey;
-	}
-	if (options.baseUrl) {
-		auth.baseUrl = options.baseUrl;
-	}
-	if (options.headers) {
-		auth.headers = typeof options.headers === "string" ? JSON.parse(options.headers) : options.headers;
-	}
-
-	return auth;
-}
-
 function persistResolvedVisionSupport(model: ChatModel, supportsVision: boolean): void {
 	const data = getData();
 	const selectedAgent = data.getSelectedAgent();
@@ -231,9 +212,20 @@ export class AgentManager {
 	 * @param pluginId - Core plugin ID (e.g., "canvas", "bases")
 	 */
 	isInternalPluginEnabled(pluginId: string): boolean {
+		if (pluginId === "math-latex") return true;
 		// @ts-ignore - Obsidian internal plugin API (not in official types)
 		const internalPlugins = this.plugin.app.internalPlugins;
-		return Boolean(internalPlugins?.plugins?.[pluginId]?.enabled);
+		if (!internalPlugins) return false;
+
+		// @ts-ignore - internal API
+		const pluginById = internalPlugins.getPluginById?.(pluginId);
+		if (pluginById) {
+			// @ts-ignore - internal API
+			return Boolean(pluginById.enabled);
+		}
+
+		// @ts-ignore - internal API
+		return Boolean(internalPlugins.plugins?.[pluginId]?.enabled);
 	}
 
 	/**
@@ -425,9 +417,7 @@ export class AgentManager {
 		const tools: StructuredToolInterface[] = [];
 
 		// Helper to check if tool is enabled for the selected agent
-		const isToolEnabled = (
-			toolId: "search_notes" | "read_note" | "get_all_tags" | "get_properties" | "execute_dataview_query",
-		): boolean => {
+		const isToolEnabled = (toolId: BuiltInToolId): boolean => {
 			return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
 		};
 
