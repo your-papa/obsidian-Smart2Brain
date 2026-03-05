@@ -1,38 +1,23 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import type SecondBrainPlugin from "../../main";
   import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
+  import { extractVendor, logUnclassifiedModelsInfo } from "../../lib/modelVendorClassification";
+  import type {
+    HydratedChatModelMetadata,
+    HydratedEmbeddingModelMetadata,
+  } from "../../types/modelMetadata";
   import { getProviderDefinition } from "../../providers/index";
-  import {
-    fetchModelsDevData,
-    lookupModelInfoSync,
-    type ModelsDevModelInfo,
-  } from "../../providers/modelsDevApi";
-  import {
-    fetchOpenRouterModels,
-    lookupOpenRouterModelSync,
-    extractCapabilities as extractOpenRouterCapabilities,
-    formatCostPerMillion,
-    type OpenRouterModelInfo,
-  } from "../../providers/openrouterModels";
-  import {
-    getOllamaModelsCache,
-    lookupOllamaModelSync,
-    formatParameterSize,
-    type OllamaModelInfo,
-  } from "../../providers/ollamaModels";
   import { getData } from "../../stores/dataStore.svelte";
   import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
   import AnthropicLogo from "../ui/logos/AnthropicLogo.svelte";
   import OpenAILogo from "../ui/logos/OpenAILogo.svelte";
   import GoogleLogo from "../ui/logos/GoogleLogo.svelte";
+  import MicrosoftLogo from "../ui/logos/MicrosoftLogo.svelte";
   import MetaLogo from "../ui/logos/MetaLogo.svelte";
   import DeepSeekLogo from "../ui/logos/DeepSeekLogo.svelte";
   import MistralLogo from "../ui/logos/MistralLogo.svelte";
   import QwenLogo from "../ui/logos/QwenLogo.svelte";
   import XAILogo from "../ui/logos/XAILogo.svelte";
   import Icon from "../ui/Icon.svelte";
-  import Text from "../ui/Text.svelte";
   import type { ModelSelectionModal, ModelType, SelectedModel } from "./ModelSelectionModal";
 
   // AI vendor definitions for filtering (excludes routing/local providers like Ollama, OpenRouter)
@@ -40,6 +25,7 @@
     { id: "openai", name: "OpenAI", logo: OpenAILogo },
     { id: "anthropic", name: "Anthropic", logo: AnthropicLogo },
     { id: "google", name: "Google", logo: GoogleLogo },
+    { id: "microsoft", name: "Microsoft", logo: MicrosoftLogo },
     { id: "meta-llama", name: "Meta", logo: MetaLogo },
     { id: "deepseek", name: "DeepSeek", logo: DeepSeekLogo },
     { id: "x-ai", name: "xAI", logo: XAILogo },
@@ -47,97 +33,61 @@
     { id: "qwen", name: "Qwen", logo: QwenLogo },
   ] as const;
 
-  type SimpleModel = { provider: string; model: string };
-
-  // Map Ollama model name patterns to vendors
-  const OLLAMA_VENDOR_PATTERNS: [RegExp, string][] = [
-    [/^llama/i, "meta-llama"],
-    [/^codellama/i, "meta-llama"],
-    [/^mistral/i, "mistralai"],
-    [/^mixtral/i, "mistralai"],
-    [/^codestral/i, "mistralai"],
-    [/^gemma/i, "google"],
-    [/^deepseek/i, "deepseek"],
-    [/^qwen/i, "qwen"],
-  ];
-
-  // Extract the AI vendor from a model (for OpenRouter: "openai/gpt-4o" → "openai")
-  function extractVendor(model: SimpleModel): string | null {
-    // For OpenRouter models, extract from model ID prefix
-    if (model.provider === "openrouter" && model.model.includes("/")) {
-      return model.model.split("/")[0];
-    }
-    // For native providers, use the provider ID
-    if (["openai", "anthropic"].includes(model.provider)) {
-      return model.provider;
-    }
-    // For Ollama models, try to infer from model name
-    if (model.provider === "ollama") {
-      for (const [pattern, vendor] of OLLAMA_VENDOR_PATTERNS) {
-        if (pattern.test(model.model)) {
-          return vendor;
-        }
-      }
-    }
-    return null;
-  }
-
   interface Props {
     modal: ModelSelectionModal;
-    plugin: SecondBrainPlugin;
     modelType: ModelType;
     currentSelection: SelectedModel | null;
     onSelect: (model: SelectedModel | null) => void;
   }
 
-  const { modal, plugin, modelType, currentSelection, onSelect }: Props = $props();
+  const { modal, modelType, currentSelection, onSelect }: Props = $props();
 
   const pluginData = getData();
   const availableModels = useAvailableModels();
+  const openRouterModels = $derived(availableModels.openRouterModels);
 
   let searchQuery = $state("");
   let selectedVendor = $state<string | null>(null);
   let showFavorites = $state(false);
-  let modelsDevData = $state<Awaited<ReturnType<typeof fetchModelsDevData>>>(null);
-  let openRouterData = $state<Awaited<ReturnType<typeof fetchOpenRouterModels>>>(null);
-  let ollamaData = $state<Map<string, OllamaModelInfo> | null>(null);
   let searchInputEl: HTMLInputElement | undefined = $state();
 
-  // Fetch metadata on mount (in parallel)
-  onMount(async () => {
-    const [modelsDevResult, openRouterResult] = await Promise.all([
-      fetchModelsDevData(),
-      fetchOpenRouterModels(),
-    ]);
-    modelsDevData = modelsDevResult;
-    openRouterData = openRouterResult;
+  type HydratedModel = HydratedChatModelMetadata | HydratedEmbeddingModelMetadata;
 
-    // Get Ollama cache (already populated during model discovery)
-    const ollamaAuth = pluginData.getResolvedProviderAuth("ollama");
-    if (ollamaAuth?.baseUrl) {
-      ollamaData = getOllamaModelsCache(ollamaAuth.baseUrl);
+  // Get hydrated models based on type
+  const models = $derived(
+    modelType === "chat"
+      ? availableModels.hydratedChatModels
+      : availableModels.hydratedEmbeddingModels,
+  );
+
+  function toClassifiableModel(
+    model: HydratedModel,
+  ): { provider: string; model: string; family?: string; families?: string[] } {
+    if (model.provider !== "ollama") {
+      return { provider: model.provider, model: model.variantKey };
     }
+    const families = availableModels.getOllamaModelFamilies(model.variantKey);
+    return {
+      provider: model.provider,
+      model: model.variantKey,
+      family: families[0],
+      families,
+    };
+  }
 
-    // Focus search input
+  const classifiableModels = $derived(models.map((model) => toClassifiableModel(model)));
+
+  $effect(() => {
+    logUnclassifiedModelsInfo("model-selection-modal", classifiableModels, openRouterModels);
+  });
+
+  $effect(() => {
     searchInputEl?.focus();
   });
 
-  // Get models based on type
-  const models = $derived(
-    modelType === "chat"
-      ? availableModels.availableModels.map((m) => ({
-          provider: m.provider,
-          model: m.model,
-        }))
-      : availableModels.availableEmbedModels.map((m) => ({
-          provider: m.provider,
-          model: m.model,
-        })),
-  );
-
   // Group models by provider
   const modelsByProvider = $derived.by(() => {
-    const grouped = new Map<string, { provider: string; model: string }[]>();
+    const grouped = new Map<string, HydratedModel[]>();
 
     for (const model of models) {
       const existing = grouped.get(model.provider) ?? [];
@@ -155,7 +105,7 @@
   const availableVendors = $derived.by(() => {
     const vendorSet = new Set<string>();
     for (const model of models) {
-      const vendor = extractVendor(model);
+      const vendor = extractVendor(toClassifiableModel(model), openRouterModels);
       if (vendor) vendorSet.add(vendor);
     }
     return AI_VENDORS.filter((v) => vendorSet.has(v.id));
@@ -170,7 +120,7 @@
       result = result
         .map(({ provider, models }) => ({
           provider,
-          models: models.filter((m) => pluginData.isFavoriteModel(m.provider, m.model)),
+          models: models.filter((m) => pluginData.isFavoriteModel(m.provider, m.variantKey)),
         }))
         .filter(({ models }) => models.length > 0);
     }
@@ -180,7 +130,9 @@
       result = result
         .map(({ provider, models }) => ({
           provider,
-          models: models.filter((m) => extractVendor(m) === selectedVendor),
+          models: models.filter(
+            (m) => extractVendor(toClassifiableModel(m), openRouterModels) === selectedVendor,
+          ),
         }))
         .filter(({ models }) => models.length > 0);
     }
@@ -193,7 +145,8 @@
           provider,
           models: models.filter(
             (m) =>
-              m.model.toLowerCase().includes(query) ||
+              m.displayName.toLowerCase().includes(query) ||
+              m.variantKey.toLowerCase().includes(query) ||
               provider.toLowerCase().includes(query) ||
               getProviderDisplayName(provider).toLowerCase().includes(query),
           ),
@@ -218,102 +171,41 @@
     return GenericAIIcon;
   }
 
-  // Get unified model metadata - OpenRouter API for OpenRouter, Ollama for Ollama, models.dev for others
-  type UnifiedModelInfo = {
-    name?: string;
-    contextLength?: number;
-    inputCost?: string;
-    outputCost?: string;
-    supportsToolCalls?: boolean;
-    supportsVision?: boolean;
-    supportsReasoning?: boolean;
-    supportsStructuredOutput?: boolean;
-    // Ollama-specific fields
-    parameterSize?: string;
-    quantization?: string;
-  };
-
-  function getModelInfo(providerId: string, modelId: string): UnifiedModelInfo | null {
-    // For OpenRouter, use the native API data (more comprehensive)
-    if (providerId === "openrouter" && openRouterData) {
-      const orInfo = lookupOpenRouterModelSync(openRouterData, modelId);
-      if (orInfo) {
-        const caps = extractOpenRouterCapabilities(orInfo);
-        return {
-          name: orInfo.name,
-          contextLength: orInfo.context_length,
-          inputCost: orInfo.pricing?.prompt,
-          outputCost: orInfo.pricing?.completion,
-          supportsToolCalls: caps.supportsToolCalls,
-          supportsVision: caps.supportsVision,
-          supportsReasoning: caps.supportsReasoning,
-          supportsStructuredOutput: caps.supportsStructuredOutput,
-        };
-      }
-    }
-
-    // For Ollama, use the local API data
-    if (providerId === "ollama" && ollamaData) {
-      const olInfo = lookupOllamaModelSync(ollamaData, modelId);
-      if (olInfo) {
-        return {
-          name: olInfo.name,
-          contextLength: olInfo.contextLength,
-          supportsToolCalls: olInfo.supportsTools,
-          supportsVision: olInfo.supportsVision,
-          parameterSize: olInfo.parameterSize,
-          quantization: olInfo.quantization,
-        };
-      }
-    }
-
-    // Fallback to models.dev for other providers
-    if (!modelsDevData) return null;
-    const mdInfo = lookupModelInfoSync(modelsDevData, providerId, modelId);
-    if (mdInfo) {
-      return {
-        name: mdInfo.name,
-        contextLength: mdInfo.limit?.context,
-        // models.dev uses per-million pricing, convert back for consistency
-        inputCost:
-          mdInfo.cost?.input !== undefined ? String(mdInfo.cost.input / 1_000_000) : undefined,
-        outputCost:
-          mdInfo.cost?.output !== undefined ? String(mdInfo.cost.output / 1_000_000) : undefined,
-        supportsToolCalls: mdInfo.tool_call,
-        supportsVision: mdInfo.attachment,
-        supportsReasoning: mdInfo.reasoning,
-        supportsStructuredOutput: mdInfo.structured_output,
-      };
-    }
-    return null;
+  // Format cost (per 1M tokens)
+  function formatCost(costPer1M?: number): string {
+    if (costPer1M === undefined) return "—";
+    if (costPer1M === 0) return "Free";
+    if (costPer1M < 0.01) return `$${costPer1M.toFixed(4)}`;
+    if (costPer1M < 1) return `$${costPer1M.toFixed(2)}`;
+    return `$${costPer1M.toFixed(2)}`;
   }
 
-  // Format cost using OpenRouter's per-token format
-  function formatCost(costPerToken?: string): string {
-    return formatCostPerMillion(costPerToken);
+  function formatTokenLimit(tokens?: number): string {
+    if (!tokens) return "—";
+    if (tokens >= 1_000_000) {
+      return `${(tokens / 1_000_000).toFixed(1)}M`;
+    }
+    if (tokens >= 1_000) {
+      return `${Math.round(tokens / 1_000)}K`;
+    }
+    return tokens.toString();
   }
 
-  // Format context window size
-  function formatContextWindow(context?: number): string {
-    if (!context) return "—";
-    if (context >= 1_000_000) {
-      return `${(context / 1_000_000).toFixed(1)}M`;
+  function getVariantKeyDisplay(model: HydratedModel): string {
+    if (model.provider === "ollama") {
+      return model.variantKey.replace(/:latest$/i, "");
     }
-    if (context >= 1_000) {
-      return `${Math.round(context / 1_000)}K`;
-    }
-    return context.toString();
+    return model.variantKey;
   }
 
   // Check if model is currently selected
-  function isSelected(provider: string, model: string): boolean {
-    return currentSelection?.provider === provider && currentSelection?.model === model;
+  function isSelected(provider: string, variantKey: string): boolean {
+    return currentSelection?.provider === provider && currentSelection?.model === variantKey;
   }
 
   // Handle model selection
-  function handleSelect(provider: string, model: string) {
-    const info = getModelInfo(provider, model);
-    onSelect({ provider, model, supportsVision: info?.supportsVision });
+  function handleSelect(provider: string, variantKey: string) {
+    onSelect({ provider, model: variantKey });
   }
 </script>
 
@@ -389,22 +281,21 @@
             </div>
 
             <div class="provider-models">
-              {#each models as { provider: p, model } (`${p}::${model}`)}
-                {@const info = getModelInfo(p, model)}
-                {@const isFavorite = pluginData.isFavoriteModel(p, model)}
+              {#each models as model (`${model.provider}::${model.variantKey}`)}
+                {@const isFavorite = pluginData.isFavoriteModel(model.provider, model.variantKey)}
                 <div
                   role="button"
                   tabindex="0"
                   class="model-card"
-                  class:selected={isSelected(p, model)}
-                  onclick={() => handleSelect(p, model)}
-                  onkeydown={(e) => e.key === "Enter" && handleSelect(p, model)}
+                  class:selected={isSelected(model.provider, model.variantKey)}
+                  onclick={() => handleSelect(model.provider, model.variantKey)}
+                  onkeydown={(e) => e.key === "Enter" && handleSelect(model.provider, model.variantKey)}
                 >
                   <div class="model-main">
                     <div class="model-info">
-                      <div class="model-name">{model}</div>
-                      {#if info?.name && info.name !== model}
-                        <div class="model-description">{info.name}</div>
+                      <div class="model-name">{model.displayName}</div>
+                      {#if model.displayName !== getVariantKeyDisplay(model)}
+                        <div class="model-description">{getVariantKeyDisplay(model)}</div>
                       {/if}
                     </div>
                     <div class="model-actions">
@@ -414,13 +305,13 @@
                         class:is-favorite={isFavorite}
                         onclick={(e) => {
                           e.stopPropagation();
-                          pluginData.toggleFavoriteModel(p, model);
+                          pluginData.toggleFavoriteModel(model.provider, model.variantKey);
                         }}
                         title={isFavorite ? "Remove from favorites" : "Add to favorites"}
                       >
                         <Icon name="star" size="sm" />
                       </button>
-                      {#if isSelected(p, model)}
+                      {#if isSelected(model.provider, model.variantKey)}
                         <span class="check-icon">✓</span>
                       {/if}
                     </div>
@@ -428,41 +319,49 @@
 
                   <!-- Metadata row -->
                   <div class="model-meta">
-                    <!-- Context window -->
-                    <span class="meta-tag" title="Context window">
-                      {formatContextWindow(info?.contextLength)} ctx
-                    </span>
+                    {#if model.kind === "chat"}
+                      <span class="meta-tag" title="Context window">
+                        {formatTokenLimit(model.contextWindow)} ctx
+                      </span>
+                    {:else}
+                      <span class="meta-tag" title="Max input tokens">
+                        {formatTokenLimit(model.maxInputTokens)} max input
+                      </span>
+                    {/if}
 
-                    <!-- Ollama-specific: Parameter size and quantization -->
-                    {#if info?.parameterSize}
+                    {#if model.paramSize}
                       <span class="meta-tag" title="Parameter size">
-                        {formatParameterSize(info.parameterSize)}
+                        {model.paramSize}
                       </span>
                     {/if}
-                    {#if info?.quantization}
+                    {#if model.quantization}
                       <span class="meta-tag" title="Quantization level">
-                        {info.quantization}
+                        {model.quantization}
                       </span>
                     {/if}
 
-                    <!-- Cost (not applicable for local models) -->
-                    {#if info?.inputCost !== undefined || info?.outputCost !== undefined}
+                    {#if model.kind === "chat" && (model.pricing?.inputUsdPer1M !== undefined || model.pricing?.outputUsdPer1M !== undefined)}
                       <span class="meta-tag" title="Cost per 1M tokens (in/out)">
-                        {formatCost(info?.inputCost)}/{formatCost(info?.outputCost)}
+                        {formatCost(model.pricing?.inputUsdPer1M)}/{formatCost(model.pricing?.outputUsdPer1M)}
                       </span>
                     {/if}
 
-                    <!-- Capabilities -->
-                    {#if info?.supportsToolCalls}
+                    {#if model.kind === "embedding" && model.pricing?.inputUsdPer1M !== undefined}
+                      <span class="meta-tag" title="Cost per 1M input tokens">
+                        {formatCost(model.pricing.inputUsdPer1M)}
+                      </span>
+                    {/if}
+
+                    {#if model.kind === "chat" && model.capabilities.toolCalls}
                       <span class="meta-tag capability" title="Tool calling">Tools</span>
                     {/if}
-                    {#if info?.supportsReasoning}
+                    {#if model.kind === "chat" && model.capabilities.reasoning}
                       <span class="meta-tag capability" title="Reasoning">Reasoning</span>
                     {/if}
-                    {#if info?.supportsVision}
+                    {#if model.kind === "chat" && model.capabilities.vision}
                       <span class="meta-tag capability" title="Vision/Attachments">Vision</span>
                     {/if}
-                    {#if info?.supportsStructuredOutput}
+                    {#if model.kind === "chat" && model.capabilities.structuredOutput}
                       <span class="meta-tag capability" title="Structured output">JSON</span>
                     {/if}
                   </div>

@@ -10,7 +10,7 @@
   import Dropdown from "../../components/ui/Dropdown.svelte";
   import ProgressBar from "../../components/ui/ProgressBar.svelte";
   import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
-  import type { SearchAlgorithm } from "../../main";
+  import type { SearchAlgorithm } from "../../types/plugin";
   import { getProviderDefinition } from "../../providers/index";
   import { getData } from "../../stores/dataStore.svelte";
   import { getPlugin } from "../../stores/state.svelte";

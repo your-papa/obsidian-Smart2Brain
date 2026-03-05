@@ -52,12 +52,11 @@ export class ModelSelectionModal extends Modal {
 
 		this.component = mount(ModelSelectionModalComponent, {
 			target: this.contentEl,
-			props: {
-				modal: this,
-				plugin: this.plugin,
-				modelType: this.modelType,
-				currentSelection: this.currentSelection,
-				onSelect: (model: SelectedModel | null) => {
+				props: {
+					modal: this,
+					modelType: this.modelType,
+					currentSelection: this.currentSelection,
+					onSelect: (model: SelectedModel | null) => {
 					this.onSelect(model);
 					this.close();
 				},

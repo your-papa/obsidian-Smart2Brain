@@ -159,42 +159,41 @@ export const openrouterProvider: EmbeddingProviderDefinition = {
 			Object.assign(headers, auth.headers);
 		}
 
-		let response: Response;
 		try {
-			response = await globalThis.fetch(`${OPENROUTER_BASE_URL}/models`, {
+			const response = await requestUrl({
+				url: `${OPENROUTER_BASE_URL}/key`,
 				method: "GET",
 				headers,
+				throw: false,
 			});
+
+			if (response.status >= 200 && response.status < 300) {
+				return { valid: true };
+			}
+
+			let errorMessage: string | undefined;
+			try {
+				const parsed = response.json as { error?: { message?: string }; message?: string };
+				errorMessage = parsed?.error?.message ?? parsed?.message;
+			} catch {
+				// ignore parse errors
+			}
+
+			if (response.status === 401 || response.status === 403) {
+				return {
+					valid: false,
+					error: errorMessage || `Authentication failed (${response.status})`,
+				};
+			}
+
+			return {
+				valid: false,
+				error: errorMessage || response.text || `Request failed with status ${response.status}`,
+			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			return { valid: false, error: `Connection failed: ${message}` };
 		}
-
-		if (response.ok) {
-			return { valid: true };
-		}
-
-		// Handle error response
-		const errorBody = await safeReadText(response);
-		let errorMessage: string | undefined;
-		try {
-			const parsed = errorBody ? (JSON.parse(errorBody) as { error?: { message?: string } }) : undefined;
-			errorMessage = parsed?.error?.message;
-		} catch {
-			// ignore parse errors
-		}
-
-		if (response.status === 401 || response.status === 403) {
-			return {
-				valid: false,
-				error: errorMessage || `Authentication failed (${response.status})`,
-			};
-		}
-
-		return {
-			valid: false,
-			error: errorMessage || errorBody || `Request failed with status ${response.status}`,
-		};
 	},
 
 	discoverModels: async (auth: AuthObject): Promise<string[]> => {

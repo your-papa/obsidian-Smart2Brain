@@ -1,9 +1,26 @@
 import { createProviderStateQuery, invalidateAllProviders } from "../lib/query";
+import {
+	hydrateChatModel,
+	hydrateEmbeddingModel,
+} from "../lib/modelMetadataNormalizer";
+import { fetchModelsDevData, type ModelsDevApiResponse } from "../providers/modelsDevApi";
+import {
+	getOllamaModelsCache,
+	type OllamaModelInfo,
+} from "../providers/ollamaModels";
+import {
+	fetchOpenRouterModels,
+	type OpenRouterModelInfo,
+} from "../providers/openrouterModels";
 import { getProviderDefinition, isEmbeddingProvider } from "../providers/index";
 import type { EmbedModelConfig } from "../providers/index";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
 import { getPlugin } from "../stores/state.svelte";
+import type {
+	HydratedChatModelMetadata,
+	HydratedEmbeddingModelMetadata,
+} from "../types/modelMetadata";
 
 export interface ModelOption {
 	value: string;
@@ -56,6 +73,34 @@ function isLikelyEmbeddingModel(modelName: string): boolean {
 export class AvailableModels {
 	#data = getData();
 	#plugin = getPlugin();
+	#modelsDevData = $state<ModelsDevApiResponse | null>(null);
+	#openRouterData = $state<Map<string, OpenRouterModelInfo> | null>(null);
+	#metadataLoadStarted = false;
+
+	constructor() {
+		void this.#loadMetadataSources();
+	}
+
+	async #loadMetadataSources(): Promise<void> {
+		if (this.#metadataLoadStarted) {
+			return;
+		}
+		this.#metadataLoadStarted = true;
+		const [modelsDevData, openRouterData] = await Promise.all([
+			fetchModelsDevData(),
+			fetchOpenRouterModels(),
+		]);
+		this.#modelsDevData = modelsDevData;
+		this.#openRouterData = openRouterData;
+	}
+
+	#getOllamaData(): Map<string, OllamaModelInfo> | null {
+		const auth = this.#data.getResolvedProviderAuth("ollama");
+		if (!auth?.baseUrl) {
+			return null;
+		}
+		return getOllamaModelsCache(auth.baseUrl);
+	}
 
 	// Reactive providers list - reads from reactive $state in dataStore
 	#providers = $derived(this.#data.getConfiguredProviders());
@@ -141,11 +186,51 @@ export class AvailableModels {
 		return unavailable;
 	});
 
+	#hydratedChatModels = $derived.by(() => {
+		const ollamaData = this.#getOllamaData();
+		return this.#availableModels.map((model) =>
+			hydrateChatModel(model.provider, model.model, {
+				modelsDevData: this.#modelsDevData,
+				openRouterData: this.#openRouterData,
+				ollamaData,
+				temperature: model.modelConfig.temperature,
+			}),
+		);
+	});
+
+	#hydratedChatModelsByKey = $derived.by(() => {
+		const out = new Map<string, HydratedChatModelMetadata>();
+		for (const model of this.#hydratedChatModels) {
+			out.set(`${model.provider}:${model.variantKey}`, model);
+		}
+		return out;
+	});
+
+	#hydratedEmbeddingModels = $derived.by(() => {
+		const ollamaData = this.#getOllamaData();
+		return this.#availableEmbedModels.map((model) =>
+			hydrateEmbeddingModel(model.provider, model.model, {
+				modelsDevData: this.#modelsDevData,
+				openRouterData: this.#openRouterData,
+				ollamaData,
+				similarityThresholdDefault: model.modelConfig.similarityThreshold,
+			}),
+		);
+	});
+
+	#hydratedEmbeddingModelsByKey = $derived.by(() => {
+		const out = new Map<string, HydratedEmbeddingModelMetadata>();
+		for (const model of this.#hydratedEmbeddingModels) {
+			out.set(`${model.provider}:${model.variantKey}`, model);
+		}
+		return out;
+	});
+
 	// Model options formatted for dropdowns/selects
 	#modelOptions = $derived.by(() =>
 		this.#availableModels.map((m) => ({
 			value: `${m.provider}:${m.model}`,
-			label: m.model,
+			label: this.#hydratedChatModelsByKey.get(`${m.provider}:${m.model}`)?.displayName ?? m.model,
 			chatModel: m,
 		})),
 	);
@@ -154,7 +239,9 @@ export class AvailableModels {
 	#embedModelOptions = $derived.by(() =>
 		this.#availableEmbedModels.map((m) => ({
 			value: `${m.provider}::${m.model}`,
-			label: m.model,
+			label:
+				this.#hydratedEmbeddingModelsByKey.get(`${m.provider}:${m.model}`)?.displayName ??
+				m.model,
 			embedModel: m,
 		})),
 	);
@@ -179,6 +266,14 @@ export class AvailableModels {
 		return this.#modelOptions;
 	}
 
+	get hydratedChatModels(): HydratedChatModelMetadata[] {
+		return this.#hydratedChatModels;
+	}
+
+	get hydratedChatModelsByKey(): Map<string, HydratedChatModelMetadata> {
+		return this.#hydratedChatModelsByKey;
+	}
+
 	get availableEmbedModels(): EmbedModel[] {
 		return this.#availableEmbedModels;
 	}
@@ -189,6 +284,51 @@ export class AvailableModels {
 
 	get embedModelOptions(): EmbedModelOption[] {
 		return this.#embedModelOptions;
+	}
+
+	get hydratedEmbeddingModels(): HydratedEmbeddingModelMetadata[] {
+		return this.#hydratedEmbeddingModels;
+	}
+
+	get hydratedEmbeddingModelsByKey(): Map<string, HydratedEmbeddingModelMetadata> {
+		return this.#hydratedEmbeddingModelsByKey;
+	}
+
+	get openRouterModels(): Map<string, OpenRouterModelInfo> | null {
+		return this.#openRouterData;
+	}
+
+	getOllamaModelInfo(modelId: string): OllamaModelInfo | undefined {
+		const ollamaData = this.#getOllamaData();
+		return ollamaData?.get(modelId);
+	}
+
+	getOllamaModelFamilies(modelId: string): string[] {
+		const info = this.getOllamaModelInfo(modelId);
+		const families = new Set<string>();
+		if (info?.family) {
+			families.add(info.family);
+		}
+		for (const family of info?.families ?? []) {
+			if (family) {
+				families.add(family);
+			}
+		}
+		// Fallback to the variant base when Ollama details are missing.
+		// This still relies on OpenRouter data for lab inference.
+		const variantBase = modelId.split(":")[0]?.trim();
+		if (variantBase) {
+			families.add(variantBase);
+			const withoutNumericSuffix = variantBase.replace(/-\d+[a-z]*$/i, "");
+			if (withoutNumericSuffix && withoutNumericSuffix !== variantBase) {
+				families.add(withoutNumericSuffix);
+			}
+			const [firstSegment] = variantBase.split("-", 1);
+			if (firstSegment && firstSegment !== variantBase) {
+				families.add(firstSegment);
+			}
+		}
+		return Array.from(families);
 	}
 
 	get unavailableProviders(): string[] {

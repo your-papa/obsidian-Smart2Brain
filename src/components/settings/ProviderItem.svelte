@@ -1,10 +1,12 @@
 <script lang="ts">
 import { Accordion } from "bits-ui";
+import { Notice } from "obsidian";
 import type { Component } from "svelte";
 import { createProviderStateQuery, invalidateProviderState } from "../../lib/query";
 import { type LogoProps, getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import Button from "../ui/Button.svelte";
+import CircularLoader from "../ui/CircularLoader.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import AuthConfigFields from "./AuthConfigFields.svelte";
 import SettingItem from "./SettingItem.svelte";
@@ -23,18 +25,32 @@ let providerDefinition = $derived(getProviderDefinition(provider, data.getAllCus
 
 // Check if provider is configured using new system
 let isConfigured = $derived(data.isProviderConfigured(provider));
+let isCustomProvider = $derived(data.isCustomProvider(provider));
 
 // Query for provider state (auth + models)
 const query = createProviderStateQuery(() => provider);
+let isCheckingAuth = $derived(query.isPending || query.isFetching);
 
 function refetch() {
 	invalidateProviderState(provider);
 }
 
-function handleToggleProvider() {
-	const newConfiguredState = !isConfigured;
-	data.setProviderConfigured(provider, newConfiguredState);
+function handleAddProvider() {
+	data.setProviderConfigured(provider, true);
 	invalidateProviderState(provider);
+}
+
+async function handleRemoveProvider() {
+	try {
+		if (isCustomProvider) {
+			await data.deleteCustomProvider(provider);
+		} else {
+			data.setProviderConfigured(provider, false);
+		}
+		invalidateProviderState(provider);
+	} catch (error) {
+		new Notice(error instanceof Error ? error.message : "Failed to remove provider");
+	}
 }
 
 // Get setup instructions from provider definition
@@ -65,7 +81,14 @@ let Logo: Component<LogoProps> = $derived.by(() => {
 			<Logo width={16} height={16} />
 			<span>{displayName}</span>
 			{#if isConfigured}
-				{#if query.data?.auth.success}
+				{#if isCheckingAuth}
+					<div
+						class="flex items-center gap-1 text-[--text-muted]"
+						title="Checking authentication"
+					>
+						<CircularLoader size={12} color="var(--text-muted)" />
+					</div>
+				{:else if query.data?.auth.success}
 					<Button
 						iconId="check"
 						styles="text-[--background-modifier-success]"
@@ -88,13 +111,13 @@ let Logo: Component<LogoProps> = $derived.by(() => {
 				</span>
 			{/if}
 		</div>
-		{#if isConfigured}
+		{#if isConfigured || isCustomProvider}
 			<Button
 				iconId="trash"
 				styles="hover:text-[--text-error]"
 				stopPropagation={true}
 				tooltip="Remove provider"
-				onClick={handleToggleProvider}
+				onClick={() => void handleRemoveProvider()}
 			/>
 		{/if}
 		<Button
@@ -134,7 +157,12 @@ let Logo: Component<LogoProps> = $derived.by(() => {
 			<!-- Add provider button for unconfigured providers -->
 			<SettingItem name="" desc="">
 				<div class="flex items-center gap-2">
-					{#if query.data !== undefined}
+					{#if isCheckingAuth}
+						<div class="flex items-center gap-2 text-sm mr-auto text-[--text-muted]">
+							<CircularLoader size={14} color="var(--text-muted)" />
+							<span>Checking API key...</span>
+						</div>
+					{:else if query.data !== undefined}
 						<div
 							class="flex items-center gap-2 text-sm mr-auto"
 							class:text-[--text-success]={query.data.auth.success}
@@ -147,14 +175,14 @@ let Logo: Component<LogoProps> = $derived.by(() => {
 							{/if}
 						</div>
 					{/if}
-					<Button
-						buttonText="Add Provider"
-						cta={true}
-						disabled={!query.data?.auth.success}
-						onClick={handleToggleProvider}
-					/>
-				</div>
-			</SettingItem>
+						<Button
+							buttonText="Add Provider"
+							cta={true}
+							disabled={isCheckingAuth || !query.data?.auth.success}
+							onClick={handleAddProvider}
+						/>
+					</div>
+				</SettingItem>
 		{/if}
 	</Accordion.Content>
 </Accordion.Item>

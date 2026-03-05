@@ -1,7 +1,7 @@
 import { tool } from "@langchain/core/tools";
 import type { App } from "obsidian";
 import { z } from "zod";
-import type { SearchAlgorithm } from "../../main";
+import type { SearchAlgorithm } from "../../types/plugin";
 import { getData } from "../../stores/dataStore.svelte";
 import { getVectorStoreService, isVectorStoreInitialized, type SearchFilter } from "../../vectorstore";
 import { Logger } from "../../utils/logging";

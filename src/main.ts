@@ -13,35 +13,6 @@ import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import SettingsTab from "./views/settings/Settings";
 import { VectorStoreService } from "./vectorstore";
 
-// Re-export types for backward compatibility
-export type {
-	AgentColor,
-	AgentConfig,
-	AgentSkillState,
-	AgentsConfig,
-	BuiltInToolId,
-	DataviewQuerySettings,
-	DefaultEmbedModel,
-	MCPHTTPServerConfig,
-	MCPServerConfig,
-	MCPServersConfig,
-	MCPStdioServerConfig,
-	MCPTransportType,
-	PluginData,
-	PluginDataKey,
-	ReadNoteSettings,
-	SearchAlgorithm,
-	SearchNotesSettings,
-	Skill,
-	SkillDisplayInfo,
-	SkillEnableState,
-	SkillFrontmatter,
-	SkillMetadata,
-	ToolConfig,
-	ToolsConfig,
-	ToolSpecificSettings,
-} from "./types/plugin";
-
 export default class SecondBrainPlugin extends Plugin {
 	agentManager!: AgentManager;
 	skillsService!: SkillsService;

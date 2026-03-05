@@ -58,6 +58,8 @@ export interface OpenRouterTopProvider {
 export interface OpenRouterModelInfo {
 	/** Model ID (e.g., "openai/gpt-4o") */
 	id: string;
+	/** Canonical model slug when provided by OpenRouter (often base model lineage) */
+	canonical_slug?: string;
 	/** Display name */
 	name: string;
 	/** Model description */
