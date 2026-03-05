@@ -17,6 +17,7 @@ import type {
 } from "../types/plugin";
 import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 import type { VectorStoreBackend } from "../vectorstore/types";
+import { type SmartGraphSettings, DEFAULT_SMART_GRAPH_SETTINGS } from "../types/graph";
 
 // Provider system types
 import type { AuthObject, ChatModelConfig, CustomProviderMeta, EmbedModelConfig } from "../providers/index";
@@ -296,6 +297,9 @@ export const DEFAULT_SETTINGS: PluginData = {
 	defaultEmbedModel: null,
 	vectorStoreBackend: "hnsw",
 	favoriteModels: [],
+
+	// Smart Graph View
+	smartGraphSettings: DEFAULT_SMART_GRAPH_SETTINGS,
 };
 
 export class PluginDataStore {
@@ -889,6 +893,16 @@ export class PluginDataStore {
 	}
 	set vectorStoreBackend(val: VectorStoreBackend) {
 		this.#data.vectorStoreBackend = val;
+		this.saveSettings();
+	}
+
+	// --- Smart Graph Settings ---
+
+	get smartGraphSettings(): SmartGraphSettings {
+		return this.#data.smartGraphSettings ?? DEFAULT_SMART_GRAPH_SETTINGS;
+	}
+	set smartGraphSettings(val: SmartGraphSettings) {
+		this.#data.smartGraphSettings = val;
 		this.saveSettings();
 	}
 

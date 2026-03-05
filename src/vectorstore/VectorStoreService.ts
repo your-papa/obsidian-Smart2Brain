@@ -1132,6 +1132,14 @@ export class VectorStoreService {
 	}
 
 	/**
+	 * Get all document vectors from the store.
+	 * Used by Smart Graph View for semantic clustering.
+	 */
+	async getAllDocumentVectors(): Promise<DocumentVector[]> {
+		return this.store.getAll();
+	}
+
+	/**
 	 * Get the current index stats.
 	 */
 	async getStats(): Promise<{

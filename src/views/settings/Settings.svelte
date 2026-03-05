@@ -1,13 +1,14 @@
 <script lang="ts">
-import { Tabs } from "bits-ui";
-import { consumePendingSettingsTab } from "../../stores/state.svelte";
-import AgentsSettings from "./AgentsSettings.svelte";
-import GeneralSettings from "./GeneralSettings.svelte";
-import SearchSettings from "./SearchSettings.svelte";
+  import { Tabs } from "bits-ui";
+  import { consumePendingSettingsTab } from "../../stores/state.svelte";
+  import AgentsSettings from "./AgentsSettings.svelte";
+  import GeneralSettings from "./GeneralSettings.svelte";
+  import GraphSettings from "./GraphSettings.svelte";
+  import SearchSettings from "./SearchSettings.svelte";
 
-// Check if there's a pending tab request (e.g., from "Manage Agents" button)
-const pendingTab = consumePendingSettingsTab();
-let activeTab = $state(pendingTab ?? "general");
+  // Check if there's a pending tab request (e.g., from "Manage Agents" button)
+  const pendingTab = consumePendingSettingsTab();
+  let activeTab = $state(pendingTab ?? "general");
 </script>
 
 <Tabs.Root bind:value={activeTab}>
@@ -32,6 +33,12 @@ let activeTab = $state(pendingTab ?? "general");
     >
       Agents
     </Tabs.Trigger>
+    <Tabs.Trigger
+      value="graph"
+      class="px-4 py-1.5 text-sm font-medium rounded transition-colors data-[state=active]:bg-[--interactive-accent] data-[state=active]:text-[--text-on-accent] data-[state=inactive]:bg-[--background-secondary] data-[state=inactive]:hover:bg-[--background-modifier-hover]"
+    >
+      Graph
+    </Tabs.Trigger>
   </Tabs.List>
 
   <Tabs.Content value="general">
@@ -44,5 +51,9 @@ let activeTab = $state(pendingTab ?? "general");
 
   <Tabs.Content value="agents">
     <AgentsSettings />
+  </Tabs.Content>
+
+  <Tabs.Content value="graph">
+    <GraphSettings />
   </Tabs.Content>
 </Tabs.Root>
