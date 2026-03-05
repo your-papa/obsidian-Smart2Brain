@@ -168,10 +168,24 @@
     new Notice("Copied to Clipboard");
   }
 
+  function getGenerationLabel(messagePair: MessagePair): string | null {
+    const generation = messagePair.generation;
+    if (!generation) return null;
+
+    const agentLabel = generation.agentName ?? generation.agentId;
+    const modelLabel =
+      generation.provider && generation.model
+        ? `${generation.provider}/${generation.model}`
+        : generation.model ?? generation.provider;
+
+    if (agentLabel && modelLabel) return `${agentLabel} · ${modelLabel}`;
+    return agentLabel ?? modelLabel ?? null;
+  }
+
   // Pre-populate so the very first render is already correct for history messages,
   // preventing a one-frame flash where completed timelines appear expanded before
   // the $effect below runs and collapses them.
-  // Capture the initial snapshot via untrack() — ongoing message state changes
+  // Capture the initial snapshot via untrack() - ongoing message state changes
   // are handled by the $effect; we only need this for messages loaded from history.
   let timelineCollapsed: Record<string, boolean | undefined> = $state(
     Object.fromEntries(
@@ -386,6 +400,11 @@
                       class="hover:text-[--text-accent]"
                       onclick={() => regenerateResponse(messagePair.id)}
                     />
+                    {#if getGenerationLabel(messagePair)}
+                      <span class="generation-label text-sm font-semibold">
+                        {getGenerationLabel(messagePair)}
+                      </span>
+                    {/if}
                   </div>
                 </div>
               {/if}
@@ -410,5 +429,10 @@
     height: 100%;
     fill: var(--text-faint);
     stroke: var(--text-faint);
+  }
+
+  .generation-label {
+    color: var(--text-accent);
+    white-space: nowrap;
   }
 </style>

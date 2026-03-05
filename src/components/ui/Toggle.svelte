@@ -1,12 +1,11 @@
 <script lang="ts">
 interface Props {
-	id?: string;
 	checked?: boolean;
 	disabled?: boolean;
 	onchange?: (checked: boolean) => void;
 }
 
-let { id, checked = $bindable(false), disabled = false, onchange }: Props = $props();
+let { checked = $bindable(false), disabled = false, onchange }: Props = $props();
 
 function handleChange() {
 	const newValue = !checked;
@@ -29,17 +28,13 @@ function handleKeydown(e: KeyboardEvent) {
   </label>
   The ::before pseudo-element on .checkbox-container creates the toggle knob
 -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <label
 	class="checkbox-container"
 	class:is-enabled={checked}
+	tabindex={disabled ? -1 : 0}
+	onkeydown={handleKeydown}
 >
-	<input
-		{id}
-		type="checkbox"
-		tabindex={disabled ? -1 : 0}
-		checked={checked}
-		{disabled}
-		onchange={handleChange}
-		onkeydown={handleKeydown}
-	/>
+	<input type="checkbox" tabindex={-1} {checked} {disabled} onchange={handleChange} />
 </label>

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Popover, Separator } from "bits-ui";
-  import type { AgentConfig } from "../../main";
+  import type { AgentConfig } from "../../types/plugin";
   import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
   import { getPlugin, requestSettingsTab } from "../../stores/state.svelte";
   import { Logger } from "../../utils/logging";

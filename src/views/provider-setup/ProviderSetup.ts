@@ -43,6 +43,3 @@ export class ProviderSetupModal extends Modal {
 		contentEl.empty();
 	}
 }
-
-// Export for backwards compatibility
-export const ProviderSetup = ProviderSetupModal;

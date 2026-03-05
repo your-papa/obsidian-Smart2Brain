@@ -116,6 +116,95 @@ const PROVIDER_ID_MAP: Record<string, string[]> = {
 	// Custom providers may match various providers in models.dev
 };
 
+function normalizeModelToken(value: string): string {
+	let token = value.toLowerCase().trim();
+	if (token.includes("/")) {
+		token = token.split("/").pop() ?? token;
+	}
+
+	token = token
+		.replace(/:latest$/i, "")
+		.replace(/:free$/i, "")
+		.replace(/:([0-9.]+[a-z]+)$/i, "-$1")
+		.replace(/[^a-z0-9]/g, "");
+
+	return token;
+}
+
+function levenshteinDistance(a: string, b: string): number {
+	if (a === b) return 0;
+	if (a.length === 0) return b.length;
+	if (b.length === 0) return a.length;
+
+	const prev = new Array<number>(b.length + 1);
+	const curr = new Array<number>(b.length + 1);
+
+	for (let j = 0; j <= b.length; j++) {
+		prev[j] = j;
+	}
+
+	for (let i = 1; i <= a.length; i++) {
+		curr[0] = i;
+		for (let j = 1; j <= b.length; j++) {
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			curr[j] = Math.min(
+				prev[j] + 1,
+				curr[j - 1] + 1,
+				prev[j - 1] + cost,
+			);
+		}
+
+		for (let j = 0; j <= b.length; j++) {
+			prev[j] = curr[j];
+		}
+	}
+
+	return prev[b.length];
+}
+
+function findNormalizedOrFuzzyModelMatch(
+	models: Record<string, ModelsDevModelInfo>,
+	modelId: string,
+): ModelsDevModelInfo | null {
+	const target = normalizeModelToken(modelId);
+	if (!target) return null;
+
+	let bestMatch: { value: ModelsDevModelInfo; distance: number; score: number } | null = null;
+
+	for (const [key, value] of Object.entries(models)) {
+		const candidates = [key, value.id, value.name];
+		for (const candidate of candidates) {
+			if (!candidate) continue;
+			const normalized = normalizeModelToken(candidate);
+			if (!normalized) continue;
+
+			if (normalized === target) {
+				return value;
+			}
+
+			if (Math.abs(normalized.length - target.length) > 2) {
+				continue;
+			}
+
+			const prefixLen = Math.min(3, normalized.length, target.length);
+			if (prefixLen > 0 && normalized.slice(0, prefixLen) !== target.slice(0, prefixLen)) {
+				continue;
+			}
+
+			const distance = levenshteinDistance(target, normalized);
+			const maxLen = Math.max(target.length, normalized.length);
+			const score = distance / maxLen;
+			if (distance <= 2 && score <= 0.2) {
+				if (!bestMatch || distance < bestMatch.distance || score < bestMatch.score) {
+					bestMatch = { value, distance, score };
+				}
+			}
+		}
+	}
+
+	return bestMatch?.value ?? null;
+}
+
 /**
  * Synchronous lookup of model metadata from cached models.dev data
  *
@@ -153,6 +242,11 @@ export function lookupModelInfoSync(
 					return value;
 				}
 			}
+
+			const normalizedMatch = findNormalizedOrFuzzyModelMatch(provider.models, modelId);
+			if (normalizedMatch) {
+				return normalizedMatch;
+			}
 		}
 	}
 
@@ -168,6 +262,11 @@ export function lookupModelInfoSync(
 				if (key.endsWith(`/${modelId}`) || key.split("/").pop() === modelId) {
 					return value;
 				}
+			}
+
+			const normalizedMatch = findNormalizedOrFuzzyModelMatch(provider.models, modelId);
+			if (normalizedMatch) {
+				return normalizedMatch;
 			}
 		}
 	}

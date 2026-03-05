@@ -212,9 +212,20 @@ export class AgentManager {
 	 * @param pluginId - Core plugin ID (e.g., "canvas", "bases")
 	 */
 	isInternalPluginEnabled(pluginId: string): boolean {
+		if (pluginId === "math-latex") return true;
 		// @ts-ignore - Obsidian internal plugin API (not in official types)
 		const internalPlugins = this.plugin.app.internalPlugins;
-		return Boolean(internalPlugins?.plugins?.[pluginId]?.enabled);
+		if (!internalPlugins) return false;
+
+		// @ts-ignore - internal API
+		const pluginById = internalPlugins.getPluginById?.(pluginId);
+		if (pluginById) {
+			// @ts-ignore - internal API
+			return Boolean(pluginById.enabled);
+		}
+
+		// @ts-ignore - internal API
+		return Boolean(internalPlugins.plugins?.[pluginId]?.enabled);
 	}
 
 	/**
@@ -326,6 +337,19 @@ export class AgentManager {
 		} else {
 			this.registry.register(providerId, providerDef, auth);
 		}
+	}
+
+	private buildRunMetadata(
+		agentId: string,
+		agentName: string,
+		chatModel: ChatModel,
+	): Record<string, unknown> {
+		return {
+			agent_id: agentId,
+			agent_name: agentName,
+			model_provider: chatModel.provider,
+			model: chatModel.model,
+		};
 	}
 
 	/**
@@ -518,7 +542,6 @@ export class AgentManager {
 		// Set assembled prompt (base + enabled skills)
 		this.agent.setPrompt(await this.assembleSystemPrompt());
 
-		// Get model from selected agent
 		const selectedAgent = pluginData.getSelectedAgent();
 		const chatModel = selectedAgent.chatModel;
 		if (chatModel) {
@@ -539,7 +562,6 @@ export class AgentManager {
 		const agent = await this.ensureAgent();
 		const pluginData = getData();
 
-		// Get model from selected agent
 		const selectedAgent = pluginData.getSelectedAgent();
 		const chatModel = selectedAgent.chatModel;
 		if (chatModel) {
@@ -547,11 +569,13 @@ export class AgentManager {
 		} else {
 			throw new Error("No chat model configured");
 		}
+		const runMetadata = this.buildRunMetadata(selectedAgent.id, selectedAgent.name, chatModel);
 
 		try {
 			for await (const chunk of agent.streamTokens({
 				query,
 				threadId,
+				metadata: runMetadata,
 				configurable: checkpointId ? { checkpoint_id: checkpointId } : undefined,
 				signal,
 				attachments,
@@ -636,12 +660,14 @@ export class AgentManager {
 		} else {
 			throw new Error("No chat model configured");
 		}
+		const runMetadata = this.buildRunMetadata(selectedAgent.id, selectedAgent.name, chatModel);
 
 		try {
 			const editOptions = {
 				query,
 				threadId,
 				checkpointId,
+				metadata: runMetadata,
 				signal,
 				attachments,
 			} as Parameters<Agent["editFromCheckpoint"]>[0];
@@ -721,11 +747,13 @@ export class AgentManager {
 		} else {
 			throw new Error("No chat model configured");
 		}
+		const runMetadata = this.buildRunMetadata(selectedAgent.id, selectedAgent.name, chatModel);
 
 		try {
 			for await (const chunk of agent.regenerateFromCheckpoint({
 				threadId,
 				checkpointId,
+				metadata: runMetadata,
 				signal,
 			})) {
 				if (signal?.aborted) {

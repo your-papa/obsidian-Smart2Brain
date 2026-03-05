@@ -1,7 +1,7 @@
 import { Modal } from "obsidian";
 import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";
-import type { BuiltInToolId, ToolConfig } from "../../main";
+import type { BuiltInToolId, ToolConfig } from "../../types/plugin";
 import ToolConfigModalComponent from "./ToolConfigModal.svelte";
 
 /**
@@ -48,7 +48,6 @@ export class ToolConfigModal extends Modal {
 			target: this.contentEl,
 			props: {
 				modal: this,
-				plugin: this.plugin,
 				toolId: this.toolId,
 				onSave: this.onSave,
 				accessors: this.accessors,

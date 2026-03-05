@@ -1,5 +1,6 @@
 <script lang="ts">
 import SettingItem from "../../components/settings/SettingItem.svelte";
+import SecretSelect from "../../components/settings/SecretSelect.svelte";
 import Button from "../../components/ui/Button.svelte";
 import Text from "../../components/ui/Text.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
@@ -22,7 +23,7 @@ const data = getData();
 let displayName = $state("");
 let supportsEmbeddings = $state(false);
 let baseUrl = $state("");
-let apiKey = $state("");
+let apiKeySecretId = $state("");
 
 // Validation
 let isValid = $derived(displayName.trim() !== "" && baseUrl.trim() !== "");
@@ -40,7 +41,7 @@ async function handleAddProvider() {
 		providerId,
 		displayName,
 		baseUrl,
-		hasApiKey: !!apiKey.trim(),
+		hasApiKey: !!apiKeySecretId.trim(),
 		supportsEmbeddings,
 	});
 
@@ -56,9 +57,9 @@ async function handleAddProvider() {
 	// Set the base URL
 	data.setProviderAuthField(providerId, "baseUrl", baseUrl.trim(), false);
 
-	// If API key provided, store it as a secret
-	if (apiKey.trim()) {
-		data.setProviderAuthField(providerId, "apiKey", apiKey.trim(), true);
+	// If a secret is selected, store the secret ID reference
+	if (apiKeySecretId.trim()) {
+		data.assignSecretIdToProviderField(providerId, "apiKey", apiKeySecretId.trim());
 	}
 
 	modal.close();
@@ -82,8 +83,8 @@ async function handleAddProvider() {
     <Text inputType="text" bind:value={baseUrl} placeholder="http://localhost:11434" />
   </SettingItem>
 
-  <SettingItem name="API Key" desc="API key for authentication (optional)">
-    <Text inputType="password" bind:value={apiKey} placeholder="sk-..." />
+  <SettingItem name="API Key" desc="Select a Keychain secret for authentication (optional)">
+    <SecretSelect value={apiKeySecretId} onChange={(secretId: string) => (apiKeySecretId = secretId)} />
   </SettingItem>
 
   <SettingItem name="Supports Embeddings" desc="Enable if this provider supports embedding models">

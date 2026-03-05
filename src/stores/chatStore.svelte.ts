@@ -14,7 +14,7 @@ import type { ChatModelConfig } from "../providers/index";
 import type { ChatAttachment, ThreadError } from "../types/shared";
 import { NEW_CHAT_NAME } from "../utils/threadId";
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
-import { getData } from "./dataStore.svelte";
+import { DEFAULT_AGENT_ID, getData } from "./dataStore.svelte";
 import { getPlugin } from "./state.svelte";
 import { Logger } from "../utils/logging";
 
@@ -113,6 +113,8 @@ export interface MessagePair {
 	assistantMessage: AssistantMessage;
 	/** The model used to generate the assistant response */
 	model?: ChatModel;
+	/** Generation metadata persisted with the assistant message */
+	generation?: MessageGeneration;
 
 	/**
 	 * Checkpoint ID where this HumanMessage is the last message.
@@ -150,6 +152,13 @@ export interface ChatModel {
 	model: string;
 	provider: string;
 	modelConfig: Partial<ChatModelConfig>;
+}
+
+export interface MessageGeneration {
+	agentId?: string;
+	agentName?: string;
+	provider?: string;
+	model?: string;
 }
 
 /**
@@ -681,6 +690,56 @@ function normalizeToolInput(raw: unknown): Record<string, unknown> {
 	return { value: raw };
 }
 
+function readGenerationField(source: Record<string, unknown>, key: string): string | undefined {
+	const value = source[key];
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function extractGenerationFromMetadata(rawMetadata: unknown): MessageGeneration | undefined {
+	if (!rawMetadata || typeof rawMetadata !== "object" || Array.isArray(rawMetadata)) {
+		return undefined;
+	}
+	const metadata = rawMetadata as Record<string, unknown>;
+	const generation: MessageGeneration = {
+		agentId: readGenerationField(metadata, "agent_id"),
+		agentName: readGenerationField(metadata, "agent_name"),
+		provider: readGenerationField(metadata, "model_provider"),
+		model: readGenerationField(metadata, "model"),
+	};
+	if (!generation.agentId && !generation.agentName && !generation.provider && !generation.model) {
+		return undefined;
+	}
+	return generation;
+}
+
+function extractGenerationFromAssistantMessage(msg: BaseMessage): MessageGeneration | undefined {
+	if (!isAIMessage(msg)) return undefined;
+	const aiMessage = msg as AIMessage & { response_metadata?: unknown };
+	return extractGenerationFromMetadata(aiMessage.response_metadata);
+}
+
+function mergeGeneration(
+	current: MessageGeneration | undefined,
+	next: MessageGeneration | undefined,
+): MessageGeneration | undefined {
+	if (!current) return next;
+	if (!next) return current;
+	return {
+		agentId: next.agentId ?? current.agentId,
+		agentName: next.agentName ?? current.agentName,
+		provider: next.provider ?? current.provider,
+		model: next.model ?? current.model,
+	};
+}
+
+function deriveGenerationFromAssistantMessages(messages: BaseMessage[]): MessageGeneration | undefined {
+	let generation: MessageGeneration | undefined;
+	for (const msg of messages) {
+		generation = mergeGeneration(generation, extractGenerationFromAssistantMessage(msg));
+	}
+	return generation;
+}
+
 function attachPreambleToFirstToolCall(toolCalls: ToolCallState[] | undefined, preamble: string): void {
 	if (!toolCalls || toolCalls.length === 0) return;
 	const trimmed = preamble.trim();
@@ -955,6 +1014,7 @@ export function baseMessagesToMessagePairs(
 				id: pairId,
 				userMessage: { content: userContent, attachments },
 				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state),
+				generation: deriveGenerationFromAssistantMessages(assistantMessages),
 				regenerateFromCheckpointId,
 				editFromCheckpointId,
 				userBranchInfo,
@@ -970,6 +1030,7 @@ export function baseMessagesToMessagePairs(
 				id: pairId,
 				userMessage: { content: "" },
 				assistantMessage: baseMessageToAssistantMessage(msg, toolOutputs),
+				generation: extractGenerationFromAssistantMessage(msg),
 			});
 			i++;
 		}
@@ -1143,6 +1204,12 @@ export class ChatSession {
 			userMessage: { content, attachments },
 			assistantMessage: { state: AssistantState.idle, content: "" },
 			model: currentModel,
+			generation: {
+				agentId: selectedAgent.id,
+				agentName: selectedAgent.name,
+				provider: currentModel?.provider,
+				model: currentModel?.model,
+			},
 		};
 
 		this.messages.push(pair);
@@ -1635,17 +1702,9 @@ export class Messenger {
 				return parsed.threadId;
 			}
 		} catch {
-			// Fall back to legacy filename-based derivation below.
+			return null;
 		}
-
-		let threadId = file.basename;
-		if (threadId.includes(" - ")) {
-			const parts = threadId.split(" - ");
-			const dateTimePart = parts[parts.length - 1];
-			threadId = `Chat ${dateTimePart}`;
-		}
-		if (!threadId || threadId === NEW_CHAT_NAME) return null;
-		return threadId;
+		return null;
 	}
 
 	private getLastViewedCheckpointId(history: ThreadHistory | null): string | undefined {
@@ -1657,6 +1716,97 @@ export class Messenger {
 		if (!checkpointId) return;
 		await this.#agentManager.setLastViewedCheckpoint(threadId, checkpointId);
 		this.session?.setLastPersistedActiveCheckpointId(checkpointId);
+	}
+
+	private getDefaultAgentForFallback() {
+		const data = getData();
+		const defaultAgentId = data.defaultAgentId ?? DEFAULT_AGENT_ID;
+		return data.getAgent(defaultAgentId) ?? data.getAgent(DEFAULT_AGENT_ID) ?? data.getSelectedAgent();
+	}
+
+	private getModelConfigForSelection(
+		agentChatModel: ChatModel | null,
+		provider: string,
+		model: string,
+	): Partial<ChatModelConfig> {
+		if (agentChatModel && agentChatModel.provider === provider && agentChatModel.model === model) {
+			return agentChatModel.modelConfig;
+		}
+		return agentChatModel?.modelConfig ?? { contextWindow: 128000 };
+	}
+
+	private async restoreSelectionFromLoadedMessages(
+		graph: CheckpointGraphState,
+		activeCheckpointId: string | undefined,
+		errorCount: number,
+		bootstrapMessages: BaseMessage[],
+	): Promise<void> {
+		const data = getData();
+		const messagePairs = deriveMessagePairsFromActiveCheckpoint(
+			graph,
+			activeCheckpointId,
+			errorCount,
+			bootstrapMessages,
+		);
+		const lastPair = messagePairs.at(-1);
+		const generation = lastPair?.generation;
+
+		const fallbackAgent = this.getDefaultAgentForFallback();
+		let nextAgentId = fallbackAgent.id;
+		let nextModel: ChatModel | null = fallbackAgent.chatModel ?? null;
+
+		const hasGenerationModel = Boolean(generation?.provider && generation?.model);
+		if (hasGenerationModel) {
+			let generatedAgent = generation?.agentId ? data.getAgent(generation.agentId) : undefined;
+			if (!generatedAgent) {
+				const candidates = Object.values(data.agents).filter(
+					(agent) =>
+						agent.chatModel?.provider === generation!.provider &&
+						agent.chatModel?.model === generation!.model,
+				);
+				if (candidates.length === 1) {
+					generatedAgent = candidates[0];
+				} else if (candidates.length > 1) {
+					generatedAgent = candidates.find((agent) => agent.id === data.defaultAgentId) ?? candidates[0];
+				}
+			}
+
+			if (generatedAgent) {
+				nextAgentId = generatedAgent.id;
+				nextModel = {
+					provider: generation!.provider!,
+					model: generation!.model!,
+					modelConfig: this.getModelConfigForSelection(
+						generatedAgent.chatModel,
+						generation!.provider!,
+						generation!.model!,
+					),
+				};
+			}
+		}
+
+		let changed = false;
+		if (data.selectedAgentId !== nextAgentId) {
+			data.selectedAgentId = nextAgentId;
+			changed = true;
+		}
+
+		const selectedAgent = data.getAgent(nextAgentId);
+		if (selectedAgent) {
+			const currentModel = selectedAgent.chatModel;
+			const modelChanged =
+				(currentModel?.provider ?? null) !== (nextModel?.provider ?? null) ||
+				(currentModel?.model ?? null) !== (nextModel?.model ?? null);
+
+			if (modelChanged) {
+				data.updateAgent(nextAgentId, { chatModel: nextModel });
+				changed = true;
+			}
+		}
+
+		if (changed) {
+			await this.#agentManager.reinitialize();
+		}
 	}
 
 	/* ---------------- Chat Creation / Metadata ---------------- */
@@ -1691,10 +1841,18 @@ export class Messenger {
 
 		const historyWithError = history as (ThreadHistory & { lastError?: ThreadError; errorCount?: number }) | null;
 		const bootstrapMessages = historyWithError?.messages || [];
+		const errorCount = historyWithError?.errorCount || 0;
+
+		await this.restoreSelectionFromLoadedMessages(
+			graph,
+			resolution.checkpointId,
+			errorCount,
+			bootstrapMessages,
+		);
 
 		this.session = new ChatSession(id, {
 			graphState: graph,
-			errorCount: historyWithError?.errorCount || 0,
+			errorCount,
 			bootstrapMessages,
 			onNeedReload: async () => this.reloadSession(),
 		});

@@ -92,11 +92,7 @@ function removeExcludeFolder(folder: string) {
     >
         <Toggle
             checked={data.isExcluding}
-            onchange={(checked) => {
-                if (checked !== data.isExcluding) {
-                    data.toggleIsExcluding();
-                }
-            }}
+            onchange={() => data.toggleIsExcluding()}
         />
     </SettingContainer>
 

@@ -1,7 +1,7 @@
 import { Modal } from "obsidian";
 import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";
-import type { MCPServerConfig } from "../../main";
+import type { MCPServerConfig } from "../../types/plugin";
 import MCPServerModalComponent from "./MCPServerModal.svelte";
 
 /**
