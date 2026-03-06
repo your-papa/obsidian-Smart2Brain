@@ -317,15 +317,14 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
 
       // Create LLM instance — disable thinking/reasoning for speed
       const registry = getRegistry();
-      const baseLlm = registry.createChatInstance(
-        chatModelConfig.provider,
-        chatModelConfig.model,
-        { ...chatModelConfig.modelConfig },
-      );
+      const baseLlm = registry.createChatInstance(chatModelConfig.provider, chatModelConfig.model, {
+        ...chatModelConfig.modelConfig,
+      });
       // Disable extended thinking/reasoning for providers that support it
-      const llm = "bind" in baseLlm && typeof baseLlm.bind === "function"
-        ? (baseLlm as any).bind({ thinking: { type: "disabled" }, reasoning: false })
-        : baseLlm;
+      const llm =
+        "bind" in baseLlm && typeof baseLlm.bind === "function"
+          ? (baseLlm as any).bind({ thinking: { type: "disabled" }, reasoning: false })
+          : baseLlm;
 
       const response = await llm.invoke([new HumanMessage(prompt)]);
       const text =
@@ -384,7 +383,8 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
       onRevealFile={handleRevealFile}
       onFocusCluster={handleFocusCluster}
       onToggleWikiLinks={() => handleSettingsChange({ showWikiLinks: !settings.showWikiLinks })}
-      onToggleSemanticEdges={() => handleSettingsChange({ showSemanticEdges: !settings.showSemanticEdges })}
+      onToggleSemanticEdges={() =>
+        handleSettingsChange({ showSemanticEdges: !settings.showSemanticEdges })}
     />
   {/if}
 

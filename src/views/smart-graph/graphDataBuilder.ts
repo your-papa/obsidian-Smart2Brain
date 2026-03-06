@@ -175,8 +175,9 @@ export function buildGraphStructure(
     }
 
     // Overlay wiki link edges from Obsidian's resolved links
-    {
+    if (settings.showWikiLinks) {
         const resolvedLinks = app.metadataCache.resolvedLinks;
+        const wikiEdgeSet = new Set<string>();
 
         for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
             if (!filteredPathSet.has(sourcePath)) continue;
@@ -185,14 +186,9 @@ export function buildGraphStructure(
                 if (!filteredPathSet.has(targetPath)) continue;
                 if (sourcePath === targetPath) continue;
 
-                // Check if a wiki edge already exists in this direction
-                const exists = edges.some(
-                    (e) =>
-                        e.type === "wiki" &&
-                        ((e.source === sourcePath && e.target === targetPath) ||
-                            (e.source === targetPath && e.target === sourcePath)),
-                );
-                if (!exists) {
+                const ek = sourcePath < targetPath ? `${sourcePath}\0${targetPath}` : `${targetPath}\0${sourcePath}`;
+                if (!wikiEdgeSet.has(ek)) {
+                    wikiEdgeSet.add(ek);
                     edges.push({
                         source: sourcePath,
                         target: targetPath,

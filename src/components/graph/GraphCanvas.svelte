@@ -285,31 +285,31 @@
     // Uses pre-split arrays (built in setupSimulation) to avoid filtering every frame.
 
     if (showWikiLinks) {
-    for (const link of wikiSimLinks) {
-      const source = link.source as SimNode;
-      const target = link.target as SimNode;
+      for (const link of wikiSimLinks) {
+        const source = link.source as SimNode;
+        const target = link.target as SimNode;
 
-      if (source.x == null || source.y == null || target.x == null || target.y == null) continue;
+        if (source.x == null || source.y == null || target.x == null || target.y == null) continue;
 
-      // Dim edges outside focused cluster
-      const inFocus =
-        focusedCluster == null ||
-        source.cluster === focusedCluster ||
-        target.cluster === focusedCluster;
+        // Dim edges outside focused cluster
+        const inFocus =
+          focusedCluster == null ||
+          source.cluster === focusedCluster ||
+          target.cluster === focusedCluster;
 
-      const isHighlighted =
-        hoveredNode && (source.id === hoveredNode.id || target.id === hoveredNode.id);
+        const isHighlighted =
+          hoveredNode && (source.id === hoveredNode.id || target.id === hoveredNode.id);
 
-      ctx.beginPath();
-      ctx.setLineDash([]);
-      ctx.moveTo(source.x, source.y);
-      ctx.lineTo(target.x, target.y);
-      ctx.strokeStyle = isHighlighted ? c.accent : c.textFaint;
-      ctx.lineWidth = isHighlighted ? 2 / transform.scale : 1 / transform.scale;
-      ctx.globalAlpha = !inFocus ? 0.05 : isHighlighted ? 0.9 : 0.45;
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
+        ctx.beginPath();
+        ctx.setLineDash([]);
+        ctx.moveTo(source.x, source.y);
+        ctx.lineTo(target.x, target.y);
+        ctx.strokeStyle = isHighlighted ? c.accent : c.textFaint;
+        ctx.lineWidth = isHighlighted ? 2 / transform.scale : 1 / transform.scale;
+        ctx.globalAlpha = !inFocus ? 0.05 : isHighlighted ? 0.9 : 0.45;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
     } // end showWikiLinks
 
     if (showSemanticEdges) {
