@@ -14,7 +14,7 @@ import { getAllTags } from "obsidian";
 
 import type { DocumentVector } from "../../vectorstore/types";
 import { cosineSimilarity } from "../../vectorstore/similarity";
-import { kMeans, suggestK } from "../../utils/clustering";
+import { kMeans, suggestK, type KMeansResult } from "../../utils/clustering";
 import { project2D } from "../../utils/projection";
 import { type GraphData, type GraphEdge, type GraphNode, generateClusterColors, type SmartGraphSettings } from "../../types/graph";
 
@@ -108,17 +108,28 @@ export function buildGraphStructure(
 
     // Extract vectors
     const vectors = filtered.map((doc) => doc.vector);
+    const n = filtered.length;
+
+    // Compute upper-triangle similarity cache (symmetric; n*(n-1)/2 evaluations)
+    const simCache = new Float32Array(n * n);
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+            const s = cosineSimilarity(vectors[i], vectors[j]);
+            simCache[i * n + j] = s;
+            simCache[j * n + i] = s;
+        }
+    }
 
     // Build semantic nearest-neighbor edges
     const edges: GraphEdge[] = [];
-    const neighborCount = Math.min(settings.semanticNeighbors, filtered.length - 1);
+    const neighborCount = Math.min(settings.semanticNeighbors, n - 1);
     const filteredPathSet = new Set(filtered.map((d) => d.path));
 
-    for (let i = 0; i < filtered.length; i++) {
+    for (let i = 0; i < n; i++) {
         const similarities: { index: number; score: number }[] = [];
-        for (let j = 0; j < filtered.length; j++) {
+        for (let j = 0; j < n; j++) {
             if (i === j) continue;
-            const score = cosineSimilarity(vectors[i], vectors[j]);
+            const score = simCache[i * n + j];
             if (score >= settings.similarityThreshold) {
                 similarities.push({ index: j, score });
             }
@@ -146,11 +157,11 @@ export function buildGraphStructure(
         edgeSet.add(key);
     }
 
-    // Reverse direction edges
-    for (let j = 0; j < filtered.length; j++) {
+    // Reverse direction edges (use cached similarities)
+    for (let j = 0; j < n; j++) {
         const similarities: { index: number; score: number }[] = [];
         for (let i = 0; i < j; i++) {
-            const score = cosineSimilarity(vectors[j], vectors[i]);
+            const score = simCache[j * n + i];
             if (score >= settings.similarityThreshold) {
                 similarities.push({ index: i, score });
             }
@@ -284,11 +295,18 @@ export function computeClusters(
         return { clusterMap: new Map(), k: 0 };
     }
 
-    const k = settings.autoK
-        ? suggestK(vectors, 2, Math.min(10, Math.floor(vectors.length / 2)))
-        : Math.min(settings.defaultK, vectors.length - 1);
+    let k: number;
+    let clusterResult: KMeansResult;
 
-    const clusterResult = kMeans(vectors, Math.max(1, k));
+    if (settings.autoK) {
+        const suggested = suggestK(vectors, 2, Math.min(10, Math.floor(vectors.length / 2)));
+        k = suggested.k;
+        clusterResult = suggested.result;
+    } else {
+        k = Math.min(settings.defaultK, vectors.length - 1);
+        clusterResult = kMeans(vectors, Math.max(1, k));
+    }
+
     const clusterColors = generateClusterColors(Math.max(1, k), themeColors);
 
     const clusterMap = new Map<string, ClusterAssignment>();

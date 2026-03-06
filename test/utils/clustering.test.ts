@@ -149,20 +149,20 @@ describe("silhouetteScore", () => {
 
 describe("suggestK", () => {
     it("should return 1 for single point", () => {
-        const k = suggestK([randomVector(4)]);
+        const { k } = suggestK([randomVector(4)]);
         expect(k).toBe(1);
     });
 
     it("should return a valid K within range", () => {
         const vectors = Array.from({ length: 30 }, (_, i) => randomVector(8, i));
-        const k = suggestK(vectors, 2, 8);
+        const { k } = suggestK(vectors, 2, 8);
         expect(k).toBeGreaterThanOrEqual(2);
         expect(k).toBeLessThanOrEqual(8);
     });
 
     it("should not exceed half the data size", () => {
         const vectors = Array.from({ length: 6 }, (_, i) => randomVector(4, i));
-        const k = suggestK(vectors, 2, 10);
+        const { k } = suggestK(vectors, 2, 10);
         expect(k).toBeLessThanOrEqual(3);
     });
 });

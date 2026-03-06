@@ -1118,7 +1118,6 @@
    */
   function clusterCohesionForce(
     nodes: SimNode[],
-    _initialCentroids: Map<number, { x: number; y: number }>,
     strength: number,
   ) {
     let _strength = strength;
@@ -1232,7 +1231,6 @@
     }
 
     // Compute per-cluster centroids in 2D for cluster cohesion force
-    const clusterCentroids = computeClusterCentroids(simNodes);
 
     simulation = forceSimulation<SimNode>(simNodes)
       .force(
@@ -1246,7 +1244,7 @@
       .force("center", forceCenter(0, 0))
       .force("gravityX", forceX<SimNode>(0).strength(0.08))
       .force("gravityY", forceY<SimNode>(0).strength(0.08))
-      .force("cluster", clusterCohesionForce(simNodes, clusterCentroids, 0.15))
+      .force("cluster", clusterCohesionForce(simNodes, 0.15))
       .force(
         "collide",
         forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),

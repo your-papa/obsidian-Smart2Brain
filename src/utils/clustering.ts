@@ -264,36 +264,48 @@ export function silhouetteScore(vectors: Float32Array[], labels: number[], maxSa
 
 /**
  * Auto-suggest the optimal K for K-Means using silhouette analysis.
- * Tests multiple K values and returns the one with the highest silhouette score.
+ * Tests multiple K values and returns the one with the highest silhouette score,
+ * along with the corresponding KMeansResult to avoid redundant re-clustering.
  *
  * @param vectors The data points to cluster
  * @param minK Minimum K to test (default: 2)
  * @param maxK Maximum K to test (default: 10)
- * @returns The suggested optimal K
+ * @returns The suggested optimal K and its KMeansResult
  */
-export function suggestK(vectors: Float32Array[], minK = 2, maxK = 10): number {
+export function suggestK(vectors: Float32Array[], minK = 2, maxK = 10): { k: number; result: KMeansResult } {
     const n = vectors.length;
 
-    if (n < 2) return 1;
+    if (n < 2) return { k: 1, result: kMeans(vectors, 1) };
 
     // Adjust maxK based on data size
     const effectiveMaxK = Math.min(maxK, Math.floor(n / 2), n - 1);
     const effectiveMinK = Math.min(minK, effectiveMaxK);
 
-    if (effectiveMinK >= effectiveMaxK) return effectiveMinK;
+    if (effectiveMinK >= effectiveMaxK) {
+        return { k: effectiveMinK, result: kMeans(vectors, effectiveMinK) };
+    }
 
     let bestK = effectiveMinK;
     let bestScore = -1;
+    let bestResult = kMeans(vectors, effectiveMinK);
 
-    for (let k = effectiveMinK; k <= effectiveMaxK; k++) {
+    {
+        const score = silhouetteScore(vectors, bestResult.labels);
+        if (score > bestScore) {
+            bestScore = score;
+        }
+    }
+
+    for (let k = effectiveMinK + 1; k <= effectiveMaxK; k++) {
         const result = kMeans(vectors, k);
         const score = silhouetteScore(vectors, result.labels);
 
         if (score > bestScore) {
             bestScore = score;
             bestK = k;
+            bestResult = result;
         }
     }
 
-    return bestK;
+    return { k: bestK, result: bestResult };
 }
