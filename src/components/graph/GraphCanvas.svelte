@@ -22,12 +22,15 @@
     labelZoomThreshold?: number;
     discoveryMode?: boolean;
     showSemanticEdges?: boolean;
+    showWikiLinks?: boolean;
     focusedCluster?: number | null;
     clusterLabels?: Record<number, string>;
     isLabeling?: boolean;
     onNodeClick?: (path: string) => void;
     onRevealFile?: (path: string) => void;
     onFocusCluster?: (cluster: number) => void;
+    onToggleWikiLinks?: () => void;
+    onToggleSemanticEdges?: () => void;
   }
 
   let {
@@ -38,12 +41,15 @@
     labelZoomThreshold = 2.5,
     discoveryMode = false,
     showSemanticEdges = true,
+    showWikiLinks = true,
     focusedCluster = null,
     clusterLabels = {},
     isLabeling = false,
     onNodeClick,
     onRevealFile,
     onFocusCluster,
+    onToggleWikiLinks,
+    onToggleSemanticEdges,
   }: Props = $props();
 
   let canvasEl: HTMLCanvasElement;
@@ -60,6 +66,10 @@
 
   // Pinned nodes: nodes with fixed positions (fx/fy set)
   let pinnedNodes: Set<string> = new Set();
+
+  // Track whether we need an initial fit-to-view after first simulation setup
+  let needsInitialFit = true;
+  let initialFitTickCount = 0;
 
   // Simulation reference
   let simulation: ReturnType<typeof forceSimulation<SimNode>> | null = null;
@@ -90,6 +100,15 @@
     cluster: number;
   }> = [];
 
+  // Edge legend hit areas for click detection (screen space)
+  let edgeLegendHitAreas: Array<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    type: "wiki" | "semantic";
+  }> = [];
+
   // Labeling animation loop
   let labelAnimFrameId: number | null = null;
 
@@ -114,6 +133,9 @@
   // Edge lookup map: "nodeA\0nodeB" → SimLink (built once in setupSimulation)
   // Enables O(1) edge weight lookups for hover labels instead of O(n) scan.
   let edgeLookup: Map<string, SimLink> = new Map();
+
+  // Node ID → SimNode map for O(1) lookups (built once in setupSimulation)
+  let simNodeMap: Map<string, SimNode> = new Map();
 
   function edgeKey(a: string, b: string): string {
     return a < b ? `${a}\0${b}` : `${b}\0${a}`;
@@ -262,6 +284,7 @@
     // This lets users spot new semantic connections that don't exist as wiki links.
     // Uses pre-split arrays (built in setupSimulation) to avoid filtering every frame.
 
+    if (showWikiLinks) {
     for (const link of wikiSimLinks) {
       const source = link.source as SimNode;
       const target = link.target as SimNode;
@@ -287,6 +310,7 @@
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
+    } // end showWikiLinks
 
     if (showSemanticEdges) {
       for (const link of semanticSimLinks) {
@@ -312,12 +336,12 @@
         ctx.strokeStyle = isHighlighted ? c.accent : c.graphLine;
         ctx.lineWidth = isHighlighted
           ? 2 / transform.scale
-          : Math.max(0.5, link.weight * 3) / transform.scale;
+          : Math.max(0.8, link.weight * 3) / transform.scale;
         ctx.globalAlpha = !inFocus
-          ? 0.03
+          ? 0.05
           : isHighlighted
             ? 0.9
-            : Math.min(0.15 + link.weight * 0.3, 0.6);
+            : Math.min(0.25 + link.weight * 0.35, 0.9);
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
@@ -418,7 +442,7 @@
       const neighborIds = adjacency.get(hoveredNode.id);
       if (neighborIds) {
         for (const nid of neighborIds) {
-          const sn = simNodes.find((n) => n.id === nid);
+          const sn = simNodeMap.get(nid);
           if (sn) nodesToLabel.push(sn);
         }
       }
@@ -484,13 +508,16 @@
 
       const lx = 16;
       const ly = canvasEl.height / dpr - 40;
+      const rowH = 18;
 
       ctx.font = `${11}px ${c.font}`;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
-      ctx.globalAlpha = 0.7;
+
+      edgeLegendHitAreas = [];
 
       // Wiki link line (solid)
+      ctx.globalAlpha = showWikiLinks ? 0.7 : 0.25;
       ctx.beginPath();
       ctx.setLineDash([]);
       ctx.moveTo(lx, ly);
@@ -502,8 +529,23 @@
       ctx.fillStyle = c.textMuted;
       ctx.fillText("Wiki link", lx + 34, ly);
 
+      if (!showWikiLinks) {
+        // Strikethrough
+        const textW = ctx.measureText("Wiki link").width;
+        ctx.beginPath();
+        ctx.moveTo(lx + 34, ly);
+        ctx.lineTo(lx + 34 + textW, ly);
+        ctx.strokeStyle = c.textMuted;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        ctx.stroke();
+      }
+
+      edgeLegendHitAreas.push({ x: lx, y: ly - rowH / 2, w: 120, h: rowH, type: "wiki" });
+
       // Semantic line (dashed)
-      const row2Y = ly + 18;
+      const row2Y = ly + rowH;
+      ctx.globalAlpha = showSemanticEdges ? 0.7 : 0.25;
       ctx.beginPath();
       ctx.setLineDash([4, 4]);
       ctx.moveTo(lx, row2Y);
@@ -515,6 +557,19 @@
       ctx.setLineDash([]);
       ctx.fillStyle = c.textMuted;
       ctx.fillText("Semantic", lx + 34, row2Y);
+
+      if (!showSemanticEdges) {
+        // Strikethrough
+        const textW = ctx.measureText("Semantic").width;
+        ctx.beginPath();
+        ctx.moveTo(lx + 34, row2Y);
+        ctx.lineTo(lx + 34 + textW, row2Y);
+        ctx.strokeStyle = c.textMuted;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      edgeLegendHitAreas.push({ x: lx, y: row2Y - rowH / 2, w: 120, h: rowH, type: "semantic" });
 
       ctx.globalAlpha = 1;
       ctx.restore();
@@ -838,19 +893,37 @@
           render();
         }
       } else {
-        const node = findNodeAt(x, y);
-        if (node !== hoveredNode) {
-          hoveredNode = node;
-          hoveredEdge = null;
-          canvasEl.style.cursor = node ? "pointer" : "grab";
-          render();
-        } else if (!node) {
-          // No node hovered — check edges
-          const edge = findEdgeAt(x, y);
-          if (edge !== hoveredEdge) {
-            hoveredEdge = edge;
-            canvasEl.style.cursor = edge ? "crosshair" : "grab";
+        // Check edge legend hit areas
+        let overEdgeLegend = false;
+        for (const area of edgeLegendHitAreas) {
+          if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
+            overEdgeLegend = true;
+            break;
+          }
+        }
+
+        if (overEdgeLegend) {
+          canvasEl.style.cursor = "pointer";
+          if (hoveredNode || hoveredEdge) {
+            hoveredNode = null;
+            hoveredEdge = null;
             render();
+          }
+        } else {
+          const node = findNodeAt(x, y);
+          if (node !== hoveredNode) {
+            hoveredNode = node;
+            hoveredEdge = null;
+            canvasEl.style.cursor = node ? "pointer" : "grab";
+            render();
+          } else if (!node) {
+            // No node hovered — check edges
+            const edge = findEdgeAt(x, y);
+            if (edge !== hoveredEdge) {
+              hoveredEdge = edge;
+              canvasEl.style.cursor = edge ? "crosshair" : "grab";
+              render();
+            }
           }
         }
       }
@@ -876,6 +949,19 @@
     const rect = canvasEl.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    // Check edge legend hit areas (screen space)
+    for (const area of edgeLegendHitAreas) {
+      if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
+        if (area.type === "wiki") {
+          onToggleWikiLinks?.();
+        } else {
+          onToggleSemanticEdges?.();
+        }
+        render();
+        return;
+      }
+    }
 
     // Check cluster legend hit areas first (screen space)
     for (const area of clusterLegendHitAreas) {
@@ -981,7 +1067,7 @@
         .setTitle(isPinned ? "Unpin node" : "Pin node")
         .setIcon(isPinned ? "pin-off" : "pin")
         .onClick(() => {
-          const simNode = simNodes.find((n) => n.id === node.id);
+          const simNode = simNodeMap.get(node.id);
           if (!simNode) return;
 
           if (isPinned) {
@@ -1110,13 +1196,13 @@
     for (const id of pinnedNodes) {
       if (!nodeIds.has(id)) pinnedNodes.delete(id);
     }
-    const nodeMap = new Map(simNodes.map((n) => [n.id, n]));
+    simNodeMap = new Map(simNodes.map((n) => [n.id, n]));
 
     simLinks = data.edges
-      .filter((e) => nodeMap.has(e.source) && nodeMap.has(e.target))
+      .filter((e) => simNodeMap.has(e.source) && simNodeMap.has(e.target))
       .map((e) => ({
-        source: nodeMap.get(e.source)!,
-        target: nodeMap.get(e.target)!,
+        source: simNodeMap.get(e.source)!,
+        target: simNodeMap.get(e.target)!,
         weight: e.weight,
         type: e.type,
       }));
@@ -1166,6 +1252,15 @@
         forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
       )
       .on("tick", () => {
+        // Auto fit-to-view after a few ticks on first load
+        if (needsInitialFit) {
+          initialFitTickCount++;
+          if (initialFitTickCount >= 10) {
+            needsInitialFit = false;
+            initialFitTickCount = 0;
+            fitToView();
+          }
+        }
         render();
       })
       .alphaDecay(0.02)
@@ -1174,6 +1269,7 @@
     // If nodes already had positions, start with low alpha for gentle transition
     if (oldPositions.size > 0) {
       simulation.alpha(0.3);
+      needsInitialFit = false;
     }
   }
 

@@ -91,14 +91,6 @@
     onSettingsChange({ projectionMethod: val });
   }
 
-  function handleShowWikiLinksChange(checked: boolean) {
-    onSettingsChange({ showWikiLinks: checked });
-  }
-
-  function handleShowSemanticEdgesChange(checked: boolean) {
-    onSettingsChange({ showSemanticEdges: checked });
-  }
-
   function handleDiscoveryModeChange(checked: boolean) {
     onSettingsChange({ discoveryMode: checked });
   }
@@ -375,14 +367,6 @@
             showValue={true}
             oncommit={handleNeighborsChange}
           />
-        </SettingContainer>
-
-        <SettingContainer name="Wiki links" desc="Overlay explicit note links">
-          <Toggle checked={settings.showWikiLinks} onchange={handleShowWikiLinksChange} />
-        </SettingContainer>
-
-        <SettingContainer name="Semantic" desc="Show similarity edges">
-          <Toggle checked={settings.showSemanticEdges} onchange={handleShowSemanticEdgesChange} />
         </SettingContainer>
       {/if}
 

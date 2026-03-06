@@ -104,6 +104,8 @@ export interface SmartGraphSettings {
     showSemanticEdges: boolean;
     /** Chat model used for LLM-powered graph features (e.g., cluster labeling) */
     graphChatModel: import("../stores/chatStore.svelte").ChatModel | null;
+    /** Whether to automatically generate cluster labels after clustering */
+    autoLabelClusters: boolean;
 }
 
 /**
@@ -124,6 +126,7 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
     discoveryMode: false,
     showSemanticEdges: true,
     graphChatModel: null,
+    autoLabelClusters: false,
 };
 
 /**

@@ -89,6 +89,16 @@
       {/if}
     </div>
   </SettingItem>
+
+  <SettingItem
+    name="Auto Label Clusters"
+    desc="Automatically generate cluster labels using the selected model after each clustering."
+  >
+    <Toggle
+      checked={pluginData.smartGraphSettings.autoLabelClusters}
+      onchange={(v) => updateSetting("autoLabelClusters", v)}
+    />
+  </SettingItem>
 </SettingGroup>
 
 <!-- Projection & Clustering -->

@@ -148,6 +148,12 @@
         clusterMap = result.clusterMap;
         suggestedK = settings.autoK ? result.k : null;
         clusterLabels = {};
+
+        // Auto-label clusters if enabled and a chat model is configured
+        if (settings.autoLabelClusters && settings.graphChatModel) {
+          // Fire-and-forget; handleLabelClusters manages its own isLabeling state
+          handleLabelClusters();
+        }
       }
 
       graphData = applyClusterMap(rawGraph, clusterMap);
@@ -174,7 +180,6 @@
     settings.showOrphans;
     settings.similarityThreshold;
     settings.semanticNeighbors;
-    settings.showWikiLinks;
 
     // Avoid tracking reads inside rebuildGraph (clusterMap, cachedVectors, etc.)
     untrack(() => {
@@ -310,13 +315,17 @@ ${promptBody}
 Respond with ONLY a JSON object mapping cluster number to label, no markdown fences:
 {${sortedClusterIds.map((id) => `"${id}": "..."`).join(", ")}}`;
 
-      // Create LLM instance and invoke
+      // Create LLM instance — disable thinking/reasoning for speed
       const registry = getRegistry();
-      const llm = registry.createChatInstance(
+      const baseLlm = registry.createChatInstance(
         chatModelConfig.provider,
         chatModelConfig.model,
-        chatModelConfig.modelConfig,
+        { ...chatModelConfig.modelConfig },
       );
+      // Disable extended thinking/reasoning for providers that support it
+      const llm = "bind" in baseLlm && typeof baseLlm.bind === "function"
+        ? (baseLlm as any).bind({ thinking: { type: "disabled" }, reasoning: false })
+        : baseLlm;
 
       const response = await llm.invoke([new HumanMessage(prompt)]);
       const text =
@@ -367,12 +376,15 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
       labelZoomThreshold={settings.labelZoomThreshold}
       discoveryMode={settings.discoveryMode}
       showSemanticEdges={settings.showSemanticEdges}
+      showWikiLinks={settings.showWikiLinks}
       {focusedCluster}
       {clusterLabels}
       {isLabeling}
       onNodeClick={handleNodeClick}
       onRevealFile={handleRevealFile}
       onFocusCluster={handleFocusCluster}
+      onToggleWikiLinks={() => handleSettingsChange({ showWikiLinks: !settings.showWikiLinks })}
+      onToggleSemanticEdges={() => handleSettingsChange({ showSemanticEdges: !settings.showSemanticEdges })}
     />
   {/if}
 

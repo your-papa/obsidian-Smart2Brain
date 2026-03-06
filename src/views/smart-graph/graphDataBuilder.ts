@@ -47,9 +47,9 @@ export interface GraphFilter {
 function passesFilter(app: App, file: TFile, filter?: GraphFilter): boolean {
     if (!filter) return true;
 
-    // Folder filter
+    // Folder filter (append "/" so "Work" doesn't match "Workshop/")
     if (filter.folders && filter.folders.length > 0) {
-        const inFolder = filter.folders.some((f) => file.path.startsWith(f));
+        const inFolder = filter.folders.some((f) => file.path.startsWith(f.endsWith("/") ? f : `${f}/`));
         if (!inFolder) return false;
     }
 
@@ -97,7 +97,7 @@ export function buildGraphStructure(
     if (filter?.folders?.length || filter?.tags?.length) {
         filtered = documents.filter((doc) => {
             const file = app.vault.getAbstractFileByPath(doc.path);
-            if (!file || !(file instanceof (app.vault.getMarkdownFiles()[0]?.constructor ?? Object))) return false;
+            if (!file || !("extension" in file)) return false;
             return passesFilter(app, file as TFile, filter);
         });
     }
@@ -139,6 +139,13 @@ export function buildGraphStructure(
         }
     }
 
+    // Build a set of existing edge pairs for O(1) dedup lookups
+    const edgeSet = new Set<string>();
+    for (const e of edges) {
+        const key = e.source < e.target ? `${e.source}\0${e.target}` : `${e.target}\0${e.source}`;
+        edgeSet.add(key);
+    }
+
     // Reverse direction edges
     for (let j = 0; j < filtered.length; j++) {
         const similarities: { index: number; score: number }[] = [];
@@ -152,15 +159,14 @@ export function buildGraphStructure(
         const topN = similarities.slice(0, neighborCount);
 
         for (const neighbor of topN) {
-            const exists = edges.some(
-                (e) =>
-                    (e.source === filtered[neighbor.index].path && e.target === filtered[j].path) ||
-                    (e.source === filtered[j].path && e.target === filtered[neighbor.index].path),
-            );
-            if (!exists) {
+            const a = filtered[neighbor.index].path;
+            const b = filtered[j].path;
+            const key = a < b ? `${a}\0${b}` : `${b}\0${a}`;
+            if (!edgeSet.has(key)) {
+                edgeSet.add(key);
                 edges.push({
-                    source: filtered[neighbor.index].path,
-                    target: filtered[j].path,
+                    source: a,
+                    target: b,
                     weight: neighbor.score,
                     type: "semantic",
                 });
@@ -169,7 +175,7 @@ export function buildGraphStructure(
     }
 
     // Overlay wiki link edges from Obsidian's resolved links
-    if (settings.showWikiLinks) {
+    {
         const resolvedLinks = app.metadataCache.resolvedLinks;
 
         for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
