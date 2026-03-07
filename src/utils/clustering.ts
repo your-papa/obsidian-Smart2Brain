@@ -286,15 +286,8 @@ export function suggestK(vectors: Float32Array[], minK = 2, maxK = 10): { k: num
     }
 
     let bestK = effectiveMinK;
-    let bestScore = -1;
     let bestResult = kMeans(vectors, effectiveMinK);
-
-    {
-        const score = silhouetteScore(vectors, bestResult.labels);
-        if (score > bestScore) {
-            bestScore = score;
-        }
-    }
+    let bestScore = silhouetteScore(vectors, bestResult.labels);
 
     for (let k = effectiveMinK + 1; k <= effectiveMaxK; k++) {
         const result = kMeans(vectors, k);

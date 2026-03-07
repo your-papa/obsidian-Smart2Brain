@@ -20,11 +20,11 @@ import type { ProjectionMethod } from "../types/graph";
  * @param spread  - Scale factor for output coordinates (default 500)
  * @returns Array of { x, y } coordinates, one per input vector
  */
-export function project2D(
+export async function project2D(
 	vectors: (Float32Array | number[])[],
 	method: ProjectionMethod = "umap",
 	spread = 500,
-): { x: number; y: number }[] {
+): Promise<{ x: number; y: number }[]> {
 	switch (method) {
 		case "umap":
 			return umap2D(vectors, spread);
@@ -120,10 +120,10 @@ export function pca2D(
  * @param spread  - Scale factor for output coordinates (default 500)
  * @returns Array of { x, y } coordinates, one per input vector
  */
-export function umap2D(
+export async function umap2D(
 	vectors: (Float32Array | number[])[],
 	spread = 500,
-): { x: number; y: number }[] {
+): Promise<{ x: number; y: number }[]> {
 	const n = vectors.length;
 
 	if (n === 0) return [];
@@ -169,7 +169,17 @@ export function umap2D(
 		distanceFn: cosineDistanceFn,
 	});
 
-	const embedding = umap.fit(data);
+	// Use incremental fitting to yield to the event loop periodically,
+	// preventing UI freezes on large vaults.
+	const totalEpochs = umap.initializeFit(data);
+	const yieldInterval = 50;
+	for (let epoch = 0; epoch < totalEpochs; epoch++) {
+		umap.step();
+		if ((epoch + 1) % yieldInterval === 0) {
+			await new Promise<void>((r) => setTimeout(r, 0));
+		}
+	}
+	const embedding = umap.getEmbedding();
 
 	const raw = embedding.map((point: number[]) => ({
 		x: point[0],

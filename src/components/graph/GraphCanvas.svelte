@@ -1116,10 +1116,7 @@
    * Custom d3-force that gently pulls each node toward its cluster's 2D centroid.
    * The centroid is recomputed every tick so it tracks the moving average.
    */
-  function clusterCohesionForce(
-    nodes: SimNode[],
-    strength: number,
-  ) {
+  function clusterCohesionForce(nodes: SimNode[], strength: number) {
     let _strength = strength;
 
     function force(alpha: number) {

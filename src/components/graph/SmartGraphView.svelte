@@ -29,7 +29,7 @@
   const data = getData();
 
   // Graph state
-  let settings: SmartGraphSettings = $state({
+  let settings: SmartGraphSettings = $derived({
     ...DEFAULT_SMART_GRAPH_SETTINGS,
     ...(data.smartGraphSettings ?? {}),
   });
@@ -128,7 +128,7 @@
         graphData: rawGraph,
         filteredDocs,
         vectors,
-      } = buildGraphStructure(plugin.app, documents, settings, filter);
+      } = await buildGraphStructure(plugin.app, documents, settings, filter);
 
       // Detect whether the filtered document set changed
       const currentPaths = new Set(filteredDocs.map((d) => d.path));
@@ -192,9 +192,7 @@
 
   // Handlers
   function handleSettingsChange(partial: Partial<SmartGraphSettings>) {
-    settings = { ...settings, ...partial };
-    // Persist to data store
-    data.smartGraphSettings = settings;
+    data.smartGraphSettings = { ...settings, ...partial };
   }
 
   function handleFolderFilterChange(folders: string[]) {

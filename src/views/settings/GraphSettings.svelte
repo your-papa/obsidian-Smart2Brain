@@ -143,11 +143,11 @@
 <SettingGroup heading="Edges & Connectivity">
   <SettingItem
     name="Similarity Threshold"
-    desc="Minimum cosine similarity for semantic edges (0–1)."
+    desc="Minimum cosine similarity for semantic edges (0.1–1)."
   >
     <RangeSlider
       value={pluginData.smartGraphSettings.similarityThreshold}
-      min={0}
+      min={0.1}
       max={1}
       step={0.05}
       showValue

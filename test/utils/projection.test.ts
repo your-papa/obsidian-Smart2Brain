@@ -125,23 +125,23 @@ describe("pca2D", () => {
 });
 
 describe("umap2D", () => {
-    it("returns empty array for empty input", () => {
-        expect(umap2D([])).toEqual([]);
+    it("returns empty array for empty input", async () => {
+        expect(await umap2D([])).toEqual([]);
     });
 
-    it("returns origin for a single vector", () => {
-        const result = umap2D([new Float32Array([1, 2, 3])]);
+    it("returns origin for a single vector", async () => {
+        const result = await umap2D([new Float32Array([1, 2, 3])]);
         expect(result).toEqual([{ x: 0, y: 0 }]);
     });
 
-    it("produces finite 2D coordinates", () => {
+    it("produces finite 2D coordinates", async () => {
         const vectors = [
             new Float32Array([1, 0, 0, 0]),
             new Float32Array([0, 1, 0, 0]),
             new Float32Array([0, 0, 1, 0]),
             new Float32Array([0, 0, 0, 1]),
         ];
-        const result = umap2D(vectors);
+        const result = await umap2D(vectors);
         expect(result).toHaveLength(4);
         for (const c of result) {
             expect(Number.isFinite(c.x)).toBe(true);
@@ -149,7 +149,7 @@ describe("umap2D", () => {
         }
     });
 
-    it("places similar vectors closer than dissimilar vectors", () => {
+    it("places similar vectors closer than dissimilar vectors", async () => {
         // Use larger groups for UMAP to have enough signal
         const groupA = [
             new Float32Array([1, 0.1, 0, 0, 0, 0, 0, 0]),
@@ -164,7 +164,7 @@ describe("umap2D", () => {
             new Float32Array([0, 0, 0, 0, 0.95, 0.05, 0, 0]),
         ];
 
-        const result = umap2D([...groupA, ...groupB]);
+        const result = await umap2D([...groupA, ...groupB]);
         expect(result).toHaveLength(8);
 
         // Compute average within-group and between-group distances
@@ -191,7 +191,7 @@ describe("umap2D", () => {
         expect(avgBetween).toBeGreaterThan(avgWithinA);
     });
 
-    it("respects the spread parameter", () => {
+    it("respects the spread parameter", async () => {
         const vectors = [
             new Float32Array([1, 0, 0, 0]),
             new Float32Array([0, 1, 0, 0]),
@@ -199,21 +199,21 @@ describe("umap2D", () => {
             new Float32Array([0, 0, 0, 1]),
             new Float32Array([1, 1, 0, 0]),
         ];
-        const smallSpread = umap2D(vectors, 100);
+        const smallSpread = await umap2D(vectors, 100);
         const maxSmall = Math.max(...smallSpread.map((c) => Math.max(Math.abs(c.x), Math.abs(c.y))));
         // Max coordinate should be within spread range
         expect(maxSmall).toBeLessThanOrEqual(100 + 1);
         expect(maxSmall).toBeGreaterThan(0);
     });
 
-    it("falls back to PCA for very small datasets", () => {
+    it("falls back to PCA for very small datasets", async () => {
         const vectors = [
             new Float32Array([1, 0, 0]),
             new Float32Array([0, 1, 0]),
             new Float32Array([0, 0, 1]),
         ];
         // Should not throw for n < 4, falls back to PCA
-        const result = umap2D(vectors);
+        const result = await umap2D(vectors);
         expect(result).toHaveLength(3);
         for (const c of result) {
             expect(Number.isFinite(c.x)).toBe(true);
@@ -229,7 +229,7 @@ describe("project2D", () => {
         new Float32Array([0, 0, 1, 0]),
     ];
 
-    it("uses UMAP by default", () => {
+    it("uses UMAP by default", async () => {
         const vectors = [
             new Float32Array([1, 0, 0, 0]),
             new Float32Array([0, 1, 0, 0]),
@@ -237,7 +237,7 @@ describe("project2D", () => {
             new Float32Array([0, 0, 0, 1]),
             new Float32Array([1, 1, 0, 0]),
         ];
-        const result = project2D(vectors);
+        const result = await project2D(vectors);
         expect(result).toHaveLength(5);
         for (const c of result) {
             expect(Number.isFinite(c.x)).toBe(true);
@@ -245,18 +245,18 @@ describe("project2D", () => {
         }
     });
 
-    it("dispatches to PCA when specified", () => {
-        const result = project2D(vectors, "pca");
+    it("dispatches to PCA when specified", async () => {
+        const result = await project2D(vectors, "pca");
         expect(result).toHaveLength(3);
         // PCA is deterministic - calling twice should give same result
-        const result2 = project2D(vectors, "pca");
+        const result2 = await project2D(vectors, "pca");
         for (let i = 0; i < result.length; i++) {
             expect(result[i].x).toBeCloseTo(result2[i].x, 10);
             expect(result[i].y).toBeCloseTo(result2[i].y, 10);
         }
     });
 
-    it("dispatches to UMAP when specified", () => {
+    it("dispatches to UMAP when specified", async () => {
         const vectors = [
             new Float32Array([1, 0, 0, 0]),
             new Float32Array([0, 1, 0, 0]),
@@ -264,7 +264,7 @@ describe("project2D", () => {
             new Float32Array([0, 0, 0, 1]),
             new Float32Array([1, 1, 0, 0]),
         ];
-        const result = project2D(vectors, "umap");
+        const result = await project2D(vectors, "umap");
         expect(result).toHaveLength(5);
         for (const c of result) {
             expect(Number.isFinite(c.x)).toBe(true);

@@ -83,15 +83,15 @@ export interface GraphStructureResult {
  * Does NOT run K-Means — use {@link computeClusters} and {@link applyClusterMap}
  * to add cluster assignments separately.
  */
-export function buildGraphStructure(
+export async function buildGraphStructure(
     app: App,
     documents: DocumentVector[],
     settings: Pick<
         SmartGraphSettings,
-        "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod" | "showWikiLinks"
+        "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod"
     >,
     filter?: GraphFilter,
-): GraphStructureResult {
+): Promise<GraphStructureResult> {
     // Filter documents by folder/tag if specified
     let filtered = documents;
     if (filter?.folders?.length || filter?.tags?.length) {
@@ -110,13 +110,15 @@ export function buildGraphStructure(
     const vectors = filtered.map((doc) => doc.vector);
     const n = filtered.length;
 
-    // Compute upper-triangle similarity cache (symmetric; n*(n-1)/2 evaluations)
-    const simCache = new Float32Array(n * n);
+    // Packed upper-triangle similarity cache — n*(n-1)/2 entries instead of n².
+    // triIdx(lo, hi) maps a canonical pair (lo < hi) to a flat index.
+    const triSize = (n * (n - 1)) / 2;
+    const simCache = new Float32Array(triSize);
+    const triIdx = (lo: number, hi: number): number => lo * (2 * n - lo - 1) / 2 + (hi - lo - 1);
+    const simGet = (a: number, b: number): number => a < b ? simCache[triIdx(a, b)] : simCache[triIdx(b, a)];
     for (let i = 0; i < n; i++) {
         for (let j = i + 1; j < n; j++) {
-            const s = cosineSimilarity(vectors[i], vectors[j]);
-            simCache[i * n + j] = s;
-            simCache[j * n + i] = s;
+            simCache[triIdx(i, j)] = cosineSimilarity(vectors[i], vectors[j]);
         }
     }
 
@@ -129,7 +131,7 @@ export function buildGraphStructure(
         const similarities: { index: number; score: number }[] = [];
         for (let j = 0; j < n; j++) {
             if (i === j) continue;
-            const score = simCache[i * n + j];
+            const score = simGet(i, j);
             if (score >= settings.similarityThreshold) {
                 similarities.push({ index: j, score });
             }
@@ -161,7 +163,7 @@ export function buildGraphStructure(
     for (let j = 0; j < n; j++) {
         const similarities: { index: number; score: number }[] = [];
         for (let i = 0; i < j; i++) {
-            const score = simCache[j * n + i];
+            const score = simGet(j, i);
             if (score >= settings.similarityThreshold) {
                 similarities.push({ index: i, score });
             }
@@ -186,7 +188,7 @@ export function buildGraphStructure(
     }
 
     // Overlay wiki link edges from Obsidian's resolved links
-    if (settings.showWikiLinks) {
+    {
         const resolvedLinks = app.metadataCache.resolvedLinks;
         const wikiEdgeSet = new Set<string>();
 
@@ -232,7 +234,7 @@ export function buildGraphStructure(
     }
 
     // Project vectors into 2D so positions reflect semantic similarity
-    const positions = project2D(vectors, settings.projectionMethod);
+    const positions = await project2D(vectors, settings.projectionMethod);
 
     // Create nodes — cluster/color intentionally omitted (applied later)
     const nodes: GraphNode[] = [];
@@ -352,17 +354,17 @@ export function applyClusterMap(
  * Equivalent to calling {@link buildGraphStructure} then {@link computeClusters}
  * then {@link applyClusterMap}.
  */
-export function buildGraph(
+export async function buildGraph(
     app: App,
     documents: DocumentVector[],
     settings: Pick<
         SmartGraphSettings,
-        "defaultK" | "autoK" | "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod" | "showWikiLinks"
+        "defaultK" | "autoK" | "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod"
     >,
     filter?: GraphFilter,
     themeColors?: string[],
-): GraphData {
-    const { graphData, filteredDocs, vectors } = buildGraphStructure(app, documents, settings, filter);
+): Promise<GraphData> {
+    const { graphData, filteredDocs, vectors } = await buildGraphStructure(app, documents, settings, filter);
     const { clusterMap } = computeClusters(filteredDocs, vectors, settings, themeColors);
     return applyClusterMap(graphData, clusterMap);
 }
