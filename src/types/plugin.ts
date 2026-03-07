@@ -76,7 +76,7 @@ export type MCPServersConfig = Record<string, MCPServerConfig>;
 /**
  * Available built-in tool identifiers
  */
-export type BuiltInToolId = "search_notes" | "read_content" | "get_all_tags" | "get_properties" | "execute_dataview_query";
+export type BuiltInToolId = "search_notes" | "read_content" | "get_all_tags" | "get_properties" | "execute_dataview_query" | "create_note" | "update_note" | "edit_note" | "delete_note";
 
 /**
  * Tool-specific settings for search_notes tool

@@ -111,3 +111,75 @@
 .smart-graph-container .view-content {
 	padding: 0;
 }
+/* Inline diff decorations — word-level (edit view) */
+.ssb-diff-word-removed {
+	background-color: rgba(220, 50, 47, 0.25);
+	border-radius: 2px;
+	padding: 0 1px;
+}
+
+.ssb-diff-word-added {
+	background-color: rgba(0, 180, 0, 0.25);
+	border-radius: 2px;
+	padding: 0 1px;
+	font-weight: 600;
+}
+
+/* Action bar for pending change accept/reject buttons */
+.ssb-diff-action-bar-widget,
+.ssb-diff-actions-bar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 8px;
+	background-color: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	margin: 4px 0;
+}
+
+.ssb-diff-actions-label {
+	font-size: var(--font-smaller);
+	color: var(--text-muted);
+	flex: 1;
+}
+
+.ssb-diff-accept-btn,
+.ssb-diff-reject-btn {
+	font-size: var(--font-smallest);
+	padding: 2px 12px;
+	border-radius: 4px;
+	cursor: pointer;
+	border: 1px solid var(--background-modifier-border);
+}
+
+.ssb-diff-accept-btn {
+	background-color: rgba(0, 180, 0, 0.2);
+	color: var(--text-normal);
+}
+
+.ssb-diff-accept-btn:hover {
+	background-color: rgba(0, 180, 0, 0.35);
+}
+
+.ssb-diff-reject-btn {
+	background-color: rgba(220, 50, 47, 0.2);
+	color: var(--text-normal);
+}
+
+.ssb-diff-reject-btn:hover {
+	background-color: rgba(220, 50, 47, 0.35);
+}
+
+.ssb-reading-diff-word-removed {
+	background-color: rgba(220, 50, 47, 0.25);
+	border-radius: 2px;
+	padding: 0 1px;
+}
+
+.ssb-reading-diff-word-added {
+	background-color: rgba(0, 180, 0, 0.25);
+	border-radius: 2px;
+	padding: 0 1px;
+	font-weight: 600;
+}

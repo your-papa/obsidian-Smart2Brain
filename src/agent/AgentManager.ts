@@ -13,6 +13,7 @@ import { extractCapabilities as extractOpenRouterCapabilities, fetchOpenRouterMo
 import {
 	ProviderAuthError,
 	ProviderEndpointError,
+	ProviderNotFoundError,
 	ProviderRegistry,
 	ProviderRegistryError,
 	type AuthObject,
@@ -32,6 +33,11 @@ import { createGetPropertiesTool } from "./tools/getProperties";
 import { createLoadSkillTool } from "./tools/loadSkill";
 import { createReadContentTool } from "./tools/readContent";
 import { createSearchNotesTool } from "./tools/searchNotes";
+import { createCreateNoteTool } from "./tools/createNote";
+import { createUpdateNoteTool } from "./tools/updateNote";
+import { createEditNoteTool } from "./tools/editNote";
+import { createDeleteNoteTool } from "./tools/deleteNote";
+import { setCurrentThreadId } from "./tools/runContext";
 
 import { getRegistry } from "../providers/registry";
 
@@ -171,9 +177,9 @@ async function resolveVisionSupport(providerId: string, modelId: string): Promis
 }
 
 export class AgentManager {
-	private plugin: SecondBrainPlugin;
+	private readonly plugin: SecondBrainPlugin;
 	private agent: Agent | null = null;
-	private chatManager: ObsidianChatManager;
+	private readonly chatManager: ObsidianChatManager;
 
 	constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
@@ -421,21 +427,21 @@ export class AgentManager {
 			return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
 		};
 
-		// Add built-in tools based on configuration
-		if (isToolEnabled("search_notes")) {
-			tools.push(createSearchNotesTool(this.plugin.app));
-		}
-		if (isToolEnabled("get_all_tags")) {
-			tools.push(createGetAllTagsTool(this.plugin.app));
-		}
-		if (isToolEnabled("execute_dataview_query")) {
-			tools.push(createExecuteDataviewTool(this.plugin.app));
-		}
-		if (isToolEnabled("get_properties")) {
-			tools.push(createGetPropertiesTool(this.plugin.app));
-		}
-		if (isToolEnabled("read_content")) {
-			tools.push(createReadContentTool(this.plugin.app));
+		// Built-in tool registry: maps tool IDs to their factory functions
+		const builtInTools: [BuiltInToolId, () => StructuredToolInterface][] = [
+			["search_notes", () => createSearchNotesTool(this.plugin.app)],
+			["get_all_tags", () => createGetAllTagsTool(this.plugin.app)],
+			["execute_dataview_query", () => createExecuteDataviewTool(this.plugin.app)],
+			["get_properties", () => createGetPropertiesTool(this.plugin.app)],
+			["read_content", () => createReadContentTool(this.plugin.app)],
+			["create_note", () => createCreateNoteTool(this.plugin.app)],
+			["update_note", () => createUpdateNoteTool(this.plugin.app)],
+			["edit_note", () => createEditNoteTool(this.plugin.app)],
+			["delete_note", () => createDeleteNoteTool(this.plugin.app)],
+		];
+
+		for (const [toolId, factory] of builtInTools) {
+			if (isToolEnabled(toolId)) tools.push(factory());
 		}
 
 		// Add load_skill tool if skillsService is available and has skills
@@ -446,37 +452,37 @@ export class AgentManager {
 			}
 		}
 
-		const mcpServers = data.getAgentMCPServersForClient(selectedAgent.id);
-
-		// Load MCP tools if configured (only enabled servers)
-		if (mcpServers && Object.keys(mcpServers).length > 0) {
-			try {
-				// Type assertion needed as getMCPServersForClient returns Record<string, unknown>
-				// but we know it produces the correct shape for MultiServerMCPClient
-				const mcpConfig = { mcpServers } as ConstructorParameters<typeof MultiServerMCPClient>[0];
-				Logger.log("Initializing MCP client...", mcpConfig);
-
-				// HACK: Monkey patch the global fetch for the entire lifecycle
-				const windowWithFetch = window as Window & { _originalFetch?: typeof fetch };
-				if (!windowWithFetch._originalFetch) {
-					windowWithFetch._originalFetch = window.fetch;
-					window.fetch = createObsidianFetch(windowWithFetch._originalFetch);
-				}
-
-				try {
-					const mcpClient = new MultiServerMCPClient(mcpConfig);
-					const mcpTools = await mcpClient.getTools();
-					Logger.log(`Loaded ${mcpTools.length} MCP tools`);
-					tools.push(...mcpTools);
-				} catch (e) {
-					Logger.error("Failed to get MCP tools", e);
-				}
-			} catch (error) {
-				Logger.error("Failed to load MCP tools", error);
-			}
-		}
-
+		await this.loadMCPTools(tools, data.getAgentMCPServersForClient(selectedAgent.id));
 		agent.bindTools(tools);
+	}
+
+	private async loadMCPTools(
+		tools: StructuredToolInterface[],
+		mcpServers: Record<string, unknown> | undefined,
+	): Promise<void> {
+		if (!mcpServers || Object.keys(mcpServers).length === 0) return;
+
+		try {
+			const mcpConfig = { mcpServers } as ConstructorParameters<typeof MultiServerMCPClient>[0];
+			Logger.log("Initializing MCP client...", mcpConfig);
+
+			const globalWithFetch = globalThis as typeof globalThis & { _originalFetch?: typeof fetch };
+			if (!globalWithFetch._originalFetch) {
+				globalWithFetch._originalFetch = globalThis.fetch;
+				globalThis.fetch = createObsidianFetch(globalWithFetch._originalFetch);
+			}
+
+			try {
+				const mcpClient = new MultiServerMCPClient(mcpConfig);
+				const mcpTools = await mcpClient.getTools();
+				Logger.log(`Loaded ${mcpTools.length} MCP tools`);
+				tools.push(...mcpTools);
+			} catch (e) {
+				Logger.error("Failed to get MCP tools", e);
+			}
+		} catch (error) {
+			Logger.error("Failed to load MCP tools", error);
+		}
 	}
 
 	private async ensureAgent(): Promise<Agent> {
@@ -490,23 +496,11 @@ export class AgentManager {
 		return this.agent;
 	}
 
-	async initialize(): Promise<void> {
-		// Load chats
-		await this.chatManager.load();
-
-		// Cleanup existing agent if any
-		this.agent = null;
-
-		// Clear and re-register all configured providers
-		this.registry.clear();
-
+	private registerConfiguredProviders(): string[] {
 		const pluginData = getData();
-
-		// Register all configured providers
 		const configuredProviders = pluginData.getConfiguredProviders();
 		const unavailableProviders: string[] = [];
 		for (const providerId of configuredProviders) {
-			// Resolve secrets from SecretStorage to get actual auth
 			const auth = pluginData.getResolvedAuthState(providerId);
 			if (!auth) continue;
 
@@ -520,6 +514,20 @@ export class AgentManager {
 				throw error;
 			}
 		}
+		return unavailableProviders;
+	}
+
+	async initialize(): Promise<void> {
+		// Load chats
+		await this.chatManager.load();
+
+		// Cleanup existing agent if any
+		this.agent = null;
+
+		// Clear and re-register all configured providers
+		this.registry.clear();
+
+		const unavailableProviders = this.registerConfiguredProviders();
 
 		if (unavailableProviders.length > 0) {
 			new Notice(`Cannot connect to: ${unavailableProviders.join(", ")}. Check that the service is running.`);
@@ -542,14 +550,90 @@ export class AgentManager {
 		// Set assembled prompt (base + enabled skills)
 		this.agent.setPrompt(await this.assembleSystemPrompt());
 
+		const pluginData = getData();
 		const selectedAgent = pluginData.getSelectedAgent();
 		const chatModel = selectedAgent.chatModel;
 		if (chatModel) {
-			await this.agent.chooseModel(await toChooseModelParams(chatModel));
+			try {
+				await this.agent.chooseModel(await toChooseModelParams(chatModel));
+			} catch (error) {
+				if (error instanceof ProviderNotFoundError) {
+					Logger.warn(`[AgentManager] Provider "${chatModel.provider}" not registered, skipping model selection`);
+				} else {
+					throw error;
+				}
+			}
 		}
 
 		// Bind tools
 		await this.bindTools(this.agent);
+	}
+
+	private mapChunk(chunk: AgentStreamChunk): AgentManagerStreamChunk | null {
+		switch (chunk.type) {
+			case "token":
+				return { type: "token", token: chunk.token };
+			case "tool_start":
+				return {
+					type: "tool_start",
+					toolCallId: chunk.toolCallId,
+					toolName: chunk.toolName,
+					input: chunk.input,
+					aiMessageId: chunk.aiMessageId,
+				};
+			case "tool_end":
+				return {
+					type: "tool_end",
+					toolCallId: chunk.toolCallId,
+					toolName: chunk.toolName,
+					output: chunk.output,
+					aiMessageId: chunk.aiMessageId,
+				};
+			case "result":
+				return { type: "result", result: chunk.result };
+			default:
+				return null;
+		}
+	}
+
+	private async *dispatchStream(
+		stream: AsyncGenerator<AgentStreamChunk>,
+		signal: AbortSignal | undefined,
+		chatModel: ChatModel,
+		errorContext: string,
+	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
+		try {
+			for await (const chunk of stream) {
+				if (signal?.aborted) break;
+				const mapped = this.mapChunk(chunk);
+				if (mapped) yield mapped;
+			}
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") return;
+
+			if (error instanceof ProviderEndpointError) {
+				const provider = chatModel?.provider;
+				if (provider) invalidateProviderState(provider);
+				new Notice(error.message);
+				throw error;
+			}
+
+			Logger.error(errorContext, error);
+			throw error;
+		} finally {
+			if (signal?.aborted) Logger.log(`${errorContext} - aborted by user`);
+		}
+	}
+
+	private async prepareAgentForStream(): Promise<{ agent: Agent; chatModel: ChatModel; runMetadata: Record<string, unknown> }> {
+		const agent = await this.ensureAgent();
+		const pluginData = getData();
+		const selectedAgent = pluginData.getSelectedAgent();
+		const chatModel = selectedAgent.chatModel;
+		if (!chatModel) throw new Error("No chat model configured");
+		await agent.chooseModel(await toChooseModelParams(chatModel));
+		const runMetadata = this.buildRunMetadata(selectedAgent.id, selectedAgent.name, chatModel);
+		return { agent, chatModel, runMetadata };
 	}
 
 	async *streamQuery(
@@ -559,83 +643,25 @@ export class AgentManager {
 		signal?: AbortSignal,
 		attachments?: ChatAttachment[],
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
-		const agent = await this.ensureAgent();
-		const pluginData = getData();
-
-		const selectedAgent = pluginData.getSelectedAgent();
-		const chatModel = selectedAgent.chatModel;
-		if (chatModel) {
-			await agent.chooseModel(await toChooseModelParams(chatModel));
-		} else {
-			throw new Error("No chat model configured");
-		}
-		const runMetadata = this.buildRunMetadata(selectedAgent.id, selectedAgent.name, chatModel);
-
+		setCurrentThreadId(threadId);
 		try {
-			for await (const chunk of agent.streamTokens({
-				query,
-				threadId,
-				metadata: runMetadata,
-				configurable: checkpointId ? { checkpoint_id: checkpointId } : undefined,
+			const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
+
+			yield* this.dispatchStream(
+				agent.streamTokens({
+					query,
+					threadId,
+					metadata: runMetadata,
+					configurable: checkpointId ? { checkpoint_id: checkpointId } : undefined,
+					signal,
+					attachments,
+				}),
 				signal,
-				attachments,
-			})) {
-				// Check if aborted before yielding
-				if (signal?.aborted) {
-					break;
-				}
-				switch (chunk.type) {
-					case "token":
-						yield { type: "token", token: chunk.token };
-						break;
-					case "tool_start":
-						yield {
-							type: "tool_start",
-							toolCallId: chunk.toolCallId,
-							toolName: chunk.toolName,
-							input: chunk.input,
-							aiMessageId: chunk.aiMessageId,
-						};
-						break;
-					case "tool_end":
-						yield {
-							type: "tool_end",
-							toolCallId: chunk.toolCallId,
-							toolName: chunk.toolName,
-							output: chunk.output,
-							aiMessageId: chunk.aiMessageId,
-						};
-						break;
-					case "result":
-						yield { type: "result", result: chunk.result };
-						break;
-					default:
-						break;
-				}
-			}
-		} catch (error) {
-			// Don't log abort errors as they're expected during cancellation
-			if (error instanceof Error && error.name === "AbortError") {
-				return;
-			}
-
-			// Handle connection errors (e.g., Ollama server not running)
-			if (error instanceof ProviderEndpointError) {
-				const provider = chatModel?.provider;
-				if (provider) {
-					invalidateProviderState(provider);
-				}
-				new Notice(error.message);
-				throw error;
-			}
-
-			Logger.error("Error streaming query", error);
-			throw error;
+				chatModel,
+				"Error streaming query",
+			);
 		} finally {
-			// Cleanup logging - stream completed or aborted
-			if (signal?.aborted) {
-				Logger.log("Stream aborted by user");
-			}
+			setCurrentThreadId(null);
 		}
 	}
 
@@ -650,82 +676,21 @@ export class AgentManager {
 		signal?: AbortSignal,
 		attachments?: ChatAttachment[],
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
-		const agent = await this.ensureAgent();
-		const pluginData = getData();
+		const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
 
-		const selectedAgent = pluginData.getSelectedAgent();
-		const chatModel = selectedAgent.chatModel;
-		if (chatModel) {
-			await agent.chooseModel(await toChooseModelParams(chatModel));
-		} else {
-			throw new Error("No chat model configured");
-		}
-		const runMetadata = this.buildRunMetadata(selectedAgent.id, selectedAgent.name, chatModel);
-
-		try {
-			const editOptions = {
+		yield* this.dispatchStream(
+			agent.editFromCheckpoint({
 				query,
 				threadId,
 				checkpointId,
 				metadata: runMetadata,
 				signal,
 				attachments,
-			} as Parameters<Agent["editFromCheckpoint"]>[0];
-
-			for await (const chunk of agent.editFromCheckpoint(editOptions)) {
-				if (signal?.aborted) {
-					break;
-				}
-				switch (chunk.type) {
-					case "token":
-						yield { type: "token", token: chunk.token };
-						break;
-					case "tool_start":
-						yield {
-							type: "tool_start",
-							toolCallId: chunk.toolCallId,
-							toolName: chunk.toolName,
-							input: chunk.input,
-							aiMessageId: chunk.aiMessageId,
-						};
-						break;
-					case "tool_end":
-						yield {
-							type: "tool_end",
-							toolCallId: chunk.toolCallId,
-							toolName: chunk.toolName,
-							output: chunk.output,
-							aiMessageId: chunk.aiMessageId,
-						};
-						break;
-					case "result":
-						yield { type: "result", result: chunk.result };
-						break;
-					default:
-						break;
-				}
-			}
-		} catch (error) {
-			if (error instanceof Error && error.name === "AbortError") {
-				return;
-			}
-
-			if (error instanceof ProviderEndpointError) {
-				const provider = chatModel?.provider;
-				if (provider) {
-					invalidateProviderState(provider);
-				}
-				new Notice(error.message);
-				throw error;
-			}
-
-			Logger.error("Error editing message", error);
-			throw error;
-		} finally {
-			if (signal?.aborted) {
-				Logger.log("Edit aborted by user");
-			}
-		}
+			} as Parameters<Agent["editFromCheckpoint"]>[0]),
+			signal,
+			chatModel,
+			"Error editing message",
+		);
 	}
 
 	/**
@@ -737,78 +702,19 @@ export class AgentManager {
 		checkpointId: string,
 		signal?: AbortSignal,
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
-		const agent = await this.ensureAgent();
-		const pluginData = getData();
+		const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
 
-		const selectedAgent = pluginData.getSelectedAgent();
-		const chatModel = selectedAgent.chatModel;
-		if (chatModel) {
-			await agent.chooseModel(await toChooseModelParams(chatModel));
-		} else {
-			throw new Error("No chat model configured");
-		}
-		const runMetadata = this.buildRunMetadata(selectedAgent.id, selectedAgent.name, chatModel);
-
-		try {
-			for await (const chunk of agent.regenerateFromCheckpoint({
+		yield* this.dispatchStream(
+			agent.regenerateFromCheckpoint({
 				threadId,
 				checkpointId,
 				metadata: runMetadata,
 				signal,
-			})) {
-				if (signal?.aborted) {
-					break;
-				}
-				switch (chunk.type) {
-					case "token":
-						yield { type: "token", token: chunk.token };
-						break;
-					case "tool_start":
-						yield {
-							type: "tool_start",
-							toolCallId: chunk.toolCallId,
-							toolName: chunk.toolName,
-							input: chunk.input,
-							aiMessageId: chunk.aiMessageId,
-						};
-						break;
-					case "tool_end":
-						yield {
-							type: "tool_end",
-							toolCallId: chunk.toolCallId,
-							toolName: chunk.toolName,
-							output: chunk.output,
-							aiMessageId: chunk.aiMessageId,
-						};
-						break;
-					case "result":
-						yield { type: "result", result: chunk.result };
-						break;
-					default:
-						break;
-				}
-			}
-		} catch (error) {
-			if (error instanceof Error && error.name === "AbortError") {
-				return;
-			}
-
-			if (error instanceof ProviderEndpointError) {
-				const provider = chatModel?.provider;
-				if (provider) {
-					invalidateProviderState(provider);
-				}
-				new Notice(error.message);
-				throw error;
-			}
-
-			Logger.error("Error regenerating response", error);
-			throw error;
-		} finally {
-			if (signal?.aborted) {
-				Logger.log("Regeneration aborted by user");
-			}
-		}
+			}),
+			signal,
+			chatModel,
+			"Error regenerating response",
+		);
 	}
 
 	async getThreadHistory(threadId: string): Promise<ThreadHistory | null> {
@@ -865,7 +771,7 @@ export class AgentManager {
 		}
 
 		const metadata = {
-			...(snapshot.metadata ?? {}),
+			...snapshot.metadata,
 			lastViewedCheckpointId: checkpointId,
 		};
 
@@ -913,14 +819,27 @@ export class AgentManager {
 
 	cleanup(): void {
 		// Restore original fetch if it was patched
-		const windowWithFetch = window as Window & { _originalFetch?: typeof fetch };
-		if (windowWithFetch._originalFetch) {
-			window.fetch = windowWithFetch._originalFetch;
-			windowWithFetch._originalFetch = undefined;
+		const globalWithFetch = globalThis as typeof globalThis & { _originalFetch?: typeof fetch };
+		if (globalWithFetch._originalFetch) {
+			globalThis.fetch = globalWithFetch._originalFetch;
+			globalWithFetch._originalFetch = undefined;
 		}
 
 		// Cleanup if needed
 		this.agent = null;
+	}
+
+	private async isEmptyChat(file: TFile): Promise<boolean> {
+		try {
+			const raw = await this.plugin.app.vault.read(file);
+			const parsed = JSON.parse(raw) as {
+				checkpoints?: Record<string, unknown>;
+				writes?: Record<string, unknown>;
+			};
+			return Object.keys(parsed.checkpoints ?? {}).length === 0 && Object.keys(parsed.writes ?? {}).length === 0;
+		} catch {
+			return false;
+		}
 	}
 
 	async createNewChat(): Promise<void> {
@@ -934,7 +853,6 @@ export class AgentManager {
 		// Reset to default agent if one is set
 		if (data.defaultAgentId && data.selectedAgentId !== data.defaultAgentId) {
 			data.selectedAgentId = data.defaultAgentId;
-			// Reinitialize with the default agent's configuration
 			await this.reinitialize();
 		}
 
@@ -944,8 +862,6 @@ export class AgentManager {
 		}
 
 		const defaultPath = normalizePath(`${folder}/${defaultChatName}.chat`);
-
-		// Initialize with valid thread data structure
 		const draftThreadId = defaultChatName;
 		const initialData = {
 			threadId: draftThreadId,
@@ -957,28 +873,11 @@ export class AgentManager {
 
 		if (await this.plugin.app.vault.adapter.exists(defaultPath)) {
 			const existing = this.plugin.app.vault.getAbstractFileByPath(defaultPath);
-			if (existing && existing instanceof TFile) {
-				let shouldReplace = false;
-				try {
-					const raw = await this.plugin.app.vault.read(existing);
-					const parsed = JSON.parse(raw) as {
-						checkpoints?: Record<string, unknown>;
-						writes?: Record<string, unknown>;
-					};
-
-					const checkpointCount = Object.keys(parsed.checkpoints ?? {}).length;
-					const writeCount = Object.keys(parsed.writes ?? {}).length;
-					shouldReplace = checkpointCount === 0 && writeCount === 0;
-				} catch {
-					shouldReplace = false;
-				}
-
-				if (shouldReplace) {
-					await this.plugin.app.vault.modify(existing, `${JSON.stringify(initialData)}\n`);
-					await this.chatManager.rebuildIndex();
-					await this.plugin.app.workspace.getLeaf(false).openFile(existing);
-					return;
-				}
+			if (existing instanceof TFile && await this.isEmptyChat(existing)) {
+				await this.plugin.app.vault.modify(existing, `${JSON.stringify(initialData)}\n`);
+				await this.chatManager.rebuildIndex();
+				await this.plugin.app.workspace.getLeaf(false).openFile(existing);
+				return;
 			}
 		}
 
@@ -986,7 +885,6 @@ export class AgentManager {
 		const createPath = (await this.plugin.app.vault.adapter.exists(defaultPath)) ? fallbackPath : defaultPath;
 		const createThreadIdValue = createPath === defaultPath ? draftThreadId : threadId;
 
-		// Create file directly and open it
 		const file = await this.plugin.app.vault.create(
 			createPath,
 			`${JSON.stringify({ ...initialData, threadId: createThreadIdValue })}\n`,

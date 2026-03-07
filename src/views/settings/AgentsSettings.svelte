@@ -440,6 +440,21 @@ const TOOLS: ToolInfo[] = [
 			name: "Dataview",
 		},
 	},
+	{
+		id: "create_note",
+		defaultName: "Create Note",
+		defaultDescription: "Create a new markdown note in the vault. Changes are staged for user approval before being applied.",
+	},
+	{
+		id: "update_note",
+		defaultName: "Update Note",
+		defaultDescription: "Update an existing markdown note in the vault. Changes are staged for user approval before being applied.",
+	},
+	{
+		id: "delete_note",
+		defaultName: "Delete Note",
+		defaultDescription: "Delete a markdown note from the vault. Changes are staged for user approval before being applied.",
+	},
 ];
 
 function getToolDisplayName(toolId: BuiltInToolId): string {

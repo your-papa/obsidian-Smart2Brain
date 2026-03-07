@@ -149,12 +149,12 @@ const defaultProperties: Required<MarkdownEditorProps> = {
  * ```
  */
 export class EmbeddableMarkdownEditor {
-	private baseEditor: ScrollableMarkdownEditor;
-	private options: Required<MarkdownEditorProps>;
-	private scope: Scope;
+	private readonly baseEditor: ScrollableMarkdownEditor;
+	private readonly options: Required<MarkdownEditorProps>;
+	private readonly scope: Scope;
 	private hasEnteredVimInsertMode = false;
-	private app: App;
-	private containerEl: HTMLElement;
+	private readonly app: App;
+	private readonly containerEl: HTMLElement;
 
 	constructor(app: App, container: HTMLElement, options: Partial<MarkdownEditorProps> = {}) {
 		this.app = app;
@@ -314,7 +314,7 @@ export class EmbeddableMarkdownEditor {
 
 				// Access the Vim API from Obsidian's CodeMirrorAdapter
 				// @ts-expect-error - Using internal API
-				const Vim = window.CodeMirrorAdapter?.Vim;
+				const Vim = (globalThis as Record<string, unknown>).CodeMirrorAdapter?.Vim;
 				if (!Vim) return;
 
 				// Get the CM5 adapter

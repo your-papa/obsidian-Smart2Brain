@@ -78,6 +78,181 @@ export interface GraphStructureResult {
     vectors: Float32Array[];
 }
 
+// ============================================================================
+// Helper functions (extracted to reduce cognitive complexity)
+// ============================================================================
+
+interface SimilarityCache {
+    get(a: number, b: number): number;
+}
+
+function filterDocuments(app: App, documents: DocumentVector[], filter?: GraphFilter): DocumentVector[] {
+    if (!filter?.folders?.length && !filter?.tags?.length) return documents;
+    return documents.filter((doc) => {
+        const file = app.vault.getAbstractFileByPath(doc.path);
+        if (!file || !("extension" in file)) return false;
+        return passesFilter(app, file as TFile, filter);
+    });
+}
+
+function buildSimilarityCache(vectors: Float32Array[], n: number): SimilarityCache {
+    const triSize = (n * (n - 1)) / 2;
+    const cache = new Float32Array(triSize);
+    const triIdx = (lo: number, hi: number): number => lo * (2 * n - lo - 1) / 2 + (hi - lo - 1);
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+            cache[triIdx(i, j)] = cosineSimilarity(vectors[i], vectors[j]);
+        }
+    }
+    return {
+        get: (a: number, b: number): number => a < b ? cache[triIdx(a, b)] : cache[triIdx(b, a)],
+    };
+}
+
+function edgeKey(a: string, b: string): string {
+    return a < b ? `${a}\0${b}` : `${b}\0${a}`;
+}
+
+function getTopNeighbors(
+    nodeIdx: number,
+    simCache: SimilarityCache,
+    n: number,
+    threshold: number,
+    maxNeighbors: number,
+    startIdx = 0,
+    endIdx = n,
+): { index: number; score: number }[] {
+    const similarities: { index: number; score: number }[] = [];
+    for (let j = startIdx; j < endIdx; j++) {
+        if (j === nodeIdx) continue;
+        const score = simCache.get(nodeIdx, j);
+        if (score >= threshold) {
+            similarities.push({ index: j, score });
+        }
+    }
+    similarities.sort((a, b) => b.score - a.score);
+    return similarities.slice(0, maxNeighbors);
+}
+
+function buildSemanticEdges(
+    filtered: DocumentVector[],
+    simCache: SimilarityCache,
+    n: number,
+    settings: Pick<SmartGraphSettings, "semanticNeighbors" | "similarityThreshold">,
+): GraphEdge[] {
+    const edges: GraphEdge[] = [];
+    const neighborCount = Math.min(settings.semanticNeighbors, n - 1);
+    const edgeSet = new Set<string>();
+
+    // Forward pass
+    for (let i = 0; i < n; i++) {
+        for (const neighbor of getTopNeighbors(i, simCache, n, settings.similarityThreshold, neighborCount)) {
+            if (i >= neighbor.index) continue;
+            const key = edgeKey(filtered[i].path, filtered[neighbor.index].path);
+            edgeSet.add(key);
+            edges.push({ source: filtered[i].path, target: filtered[neighbor.index].path, weight: neighbor.score, type: "semantic" });
+        }
+    }
+
+    // Reverse pass
+    for (let j = 0; j < n; j++) {
+        for (const neighbor of getTopNeighbors(j, simCache, n, settings.similarityThreshold, neighborCount, 0, j)) {
+            const key = edgeKey(filtered[neighbor.index].path, filtered[j].path);
+            if (edgeSet.has(key)) continue;
+            edgeSet.add(key);
+            edges.push({ source: filtered[neighbor.index].path, target: filtered[j].path, weight: neighbor.score, type: "semantic" });
+        }
+    }
+
+    return edges;
+}
+
+function mergeWikiEdge(edges: GraphEdge[], existingEdgeSet: Set<string>, wikiEdge: GraphEdge, ek: string): void {
+    if (existingEdgeSet.has(ek)) {
+        const idx = edges.findIndex((e) => edgeKey(e.source, e.target) === ek);
+        if (idx !== -1) edges[idx] = wikiEdge;
+    } else {
+        edges.push(wikiEdge);
+    }
+}
+
+function overlayWikiEdges(app: App, edges: GraphEdge[], filteredPathSet: Set<string>): void {
+    const resolvedLinks = app.metadataCache.resolvedLinks;
+    const wikiEdgeSet = new Set<string>();
+    const existingEdgeSet = new Set<string>();
+    for (const e of edges) {
+        existingEdgeSet.add(edgeKey(e.source, e.target));
+    }
+
+    for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
+        if (!filteredPathSet.has(sourcePath)) continue;
+        for (const [targetPath, count] of Object.entries(targets)) {
+            if (!filteredPathSet.has(targetPath) || sourcePath === targetPath) continue;
+            const ek = edgeKey(sourcePath, targetPath);
+            if (wikiEdgeSet.has(ek)) continue;
+            wikiEdgeSet.add(ek);
+            mergeWikiEdge(edges, existingEdgeSet, { source: sourcePath, target: targetPath, weight: count, type: "wiki" }, ek);
+        }
+    }
+}
+
+function computeDegreeAndDiscovery(
+    edges: GraphEdge[],
+    settings: Pick<SmartGraphSettings, "showWikiLinks" | "showSemanticEdges">,
+): { degreeMap: Map<string, number>; hasSemanticEdge: Set<string>; hasWikiEdge: Set<string> } {
+    const degreeMap = new Map<string, number>();
+    const hasSemanticEdge = new Set<string>();
+    const hasWikiEdge = new Set<string>();
+
+    for (const edge of edges) {
+        const isVisibleWiki = edge.type === "wiki" && settings.showWikiLinks;
+        const isVisibleSemantic = edge.type === "semantic" && settings.showSemanticEdges;
+
+        if (isVisibleWiki || isVisibleSemantic) {
+            degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
+            degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
+        }
+
+        if (isVisibleSemantic) {
+            hasSemanticEdge.add(edge.source);
+            hasSemanticEdge.add(edge.target);
+        } else if (isVisibleWiki) {
+            hasWikiEdge.add(edge.source);
+            hasWikiEdge.add(edge.target);
+        }
+    }
+
+    return { degreeMap, hasSemanticEdge, hasWikiEdge };
+}
+
+function createGraphNodes(
+    filtered: DocumentVector[],
+    positions: { x: number; y: number }[],
+    degreeMap: Map<string, number>,
+    hasSemanticEdge: Set<string>,
+    hasWikiEdge: Set<string>,
+    settings: Pick<SmartGraphSettings, "showOrphans">,
+): GraphNode[] {
+    const nodes: GraphNode[] = [];
+    for (let i = 0; i < filtered.length; i++) {
+        const doc = filtered[i];
+        const degree = degreeMap.get(doc.path) ?? 0;
+        if (!settings.showOrphans && degree === 0) continue;
+        const label = doc.path.replace(/\.md$/, "").split("/").pop() ?? doc.path;
+        nodes.push({
+            id: doc.path,
+            path: doc.path,
+            label,
+            x: positions[i].x,
+            y: positions[i].y,
+            degree,
+            highlighted: false,
+            discoverable: hasSemanticEdge.has(doc.path) && !hasWikiEdge.has(doc.path),
+        });
+    }
+    return nodes;
+}
+
 /**
  * Build graph structure: filtering, edges, positions, degree, discovery flags.
  * Does NOT run K-Means — use {@link computeClusters} and {@link applyClusterMap}
@@ -93,14 +268,7 @@ export async function buildGraphStructure(
     filter?: GraphFilter,
 ): Promise<GraphStructureResult> {
     // Filter documents by folder/tag if specified
-    let filtered = documents;
-    if (filter?.folders?.length || filter?.tags?.length) {
-        filtered = documents.filter((doc) => {
-            const file = app.vault.getAbstractFileByPath(doc.path);
-            if (!file || !("extension" in file)) return false;
-            return passesFilter(app, file as TFile, filter);
-        });
-    }
+    const filtered = filterDocuments(app, documents, filter);
 
     if (filtered.length === 0) {
         return { graphData: { nodes: [], edges: [] }, filteredDocs: [], vectors: [] };
@@ -110,161 +278,22 @@ export async function buildGraphStructure(
     const vectors = filtered.map((doc) => doc.vector);
     const n = filtered.length;
 
-    // Packed upper-triangle similarity cache — n*(n-1)/2 entries instead of n².
-    // triIdx(lo, hi) maps a canonical pair (lo < hi) to a flat index.
-    const triSize = (n * (n - 1)) / 2;
-    const simCache = new Float32Array(triSize);
-    const triIdx = (lo: number, hi: number): number => lo * (2 * n - lo - 1) / 2 + (hi - lo - 1);
-    const simGet = (a: number, b: number): number => a < b ? simCache[triIdx(a, b)] : simCache[triIdx(b, a)];
-    for (let i = 0; i < n; i++) {
-        for (let j = i + 1; j < n; j++) {
-            simCache[triIdx(i, j)] = cosineSimilarity(vectors[i], vectors[j]);
-        }
-    }
+    // Build similarity cache and edge list
+    const simCache = buildSimilarityCache(vectors, n);
+    const edges = buildSemanticEdges(filtered, simCache, n, settings);
 
-    // Build semantic nearest-neighbor edges
-    const edges: GraphEdge[] = [];
-    const neighborCount = Math.min(settings.semanticNeighbors, n - 1);
+    // Overlay wiki link edges
     const filteredPathSet = new Set(filtered.map((d) => d.path));
+    overlayWikiEdges(app, edges, filteredPathSet);
 
-    for (let i = 0; i < n; i++) {
-        const similarities: { index: number; score: number }[] = [];
-        for (let j = 0; j < n; j++) {
-            if (i === j) continue;
-            const score = simGet(i, j);
-            if (score >= settings.similarityThreshold) {
-                similarities.push({ index: j, score });
-            }
-        }
+    // Compute degree and discovery info
+    const { degreeMap, hasSemanticEdge, hasWikiEdge } = computeDegreeAndDiscovery(edges, settings);
 
-        similarities.sort((a, b) => b.score - a.score);
-        const topN = similarities.slice(0, neighborCount);
-
-        for (const neighbor of topN) {
-            if (i < neighbor.index) {
-                edges.push({
-                    source: filtered[i].path,
-                    target: filtered[neighbor.index].path,
-                    weight: neighbor.score,
-                    type: "semantic",
-                });
-            }
-        }
-    }
-
-    // Build a set of existing edge pairs for O(1) dedup lookups
-    const edgeSet = new Set<string>();
-    for (const e of edges) {
-        const key = e.source < e.target ? `${e.source}\0${e.target}` : `${e.target}\0${e.source}`;
-        edgeSet.add(key);
-    }
-
-    // Reverse direction edges (use cached similarities)
-    for (let j = 0; j < n; j++) {
-        const similarities: { index: number; score: number }[] = [];
-        for (let i = 0; i < j; i++) {
-            const score = simGet(j, i);
-            if (score >= settings.similarityThreshold) {
-                similarities.push({ index: i, score });
-            }
-        }
-        similarities.sort((a, b) => b.score - a.score);
-        const topN = similarities.slice(0, neighborCount);
-
-        for (const neighbor of topN) {
-            const a = filtered[neighbor.index].path;
-            const b = filtered[j].path;
-            const key = a < b ? `${a}\0${b}` : `${b}\0${a}`;
-            if (!edgeSet.has(key)) {
-                edgeSet.add(key);
-                edges.push({
-                    source: a,
-                    target: b,
-                    weight: neighbor.score,
-                    type: "semantic",
-                });
-            }
-        }
-    }
-
-    // Overlay wiki link edges from Obsidian's resolved links
-    {
-        const resolvedLinks = app.metadataCache.resolvedLinks;
-        const wikiEdgeSet = new Set<string>();
-
-        for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
-            if (!filteredPathSet.has(sourcePath)) continue;
-
-            for (const [targetPath, count] of Object.entries(targets)) {
-                if (!filteredPathSet.has(targetPath)) continue;
-                if (sourcePath === targetPath) continue;
-
-                const ek = sourcePath < targetPath ? `${sourcePath}\0${targetPath}` : `${targetPath}\0${sourcePath}`;
-                if (!wikiEdgeSet.has(ek)) {
-                    wikiEdgeSet.add(ek);
-                    const wikiEdge: GraphEdge = { source: sourcePath, target: targetPath, weight: count, type: "wiki" };
-                    if (edgeSet.has(ek)) {
-                        // Wiki link trumps semantic edge — replace it
-                        const idx = edges.findIndex((e) => {
-                            const key = e.source < e.target ? `${e.source}\0${e.target}` : `${e.target}\0${e.source}`;
-                            return key === ek;
-                        });
-                        if (idx !== -1) edges[idx] = wikiEdge;
-                    } else {
-                        edges.push(wikiEdge);
-                    }
-                }
-            }
-        }
-    }
-
-    // Create degree map counting only visible edge types
-    const degreeMap = new Map<string, number>();
-    for (const edge of edges) {
-        if (edge.type === "wiki" && !settings.showWikiLinks) continue;
-        if (edge.type === "semantic" && !settings.showSemanticEdges) continue;
-        degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
-        degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
-    }
-
-    // Discovery mode: identify nodes with semantic edges but zero wiki edges
-    // Only count visible edge types so stats match what the user sees
-    const hasSemanticEdge = new Set<string>();
-    const hasWikiEdge = new Set<string>();
-    for (const edge of edges) {
-        if (edge.type === "semantic" && settings.showSemanticEdges) {
-            hasSemanticEdge.add(edge.source);
-            hasSemanticEdge.add(edge.target);
-        } else if (edge.type === "wiki" && settings.showWikiLinks) {
-            hasWikiEdge.add(edge.source);
-            hasWikiEdge.add(edge.target);
-        }
-    }
-
-    // Project vectors into 2D so positions reflect semantic similarity
+    // Project into 2D
     const positions = await project2D(vectors, settings.projectionMethod);
 
-    // Create nodes — cluster/color intentionally omitted (applied later)
-    const nodes: GraphNode[] = [];
-    for (let i = 0; i < filtered.length; i++) {
-        const doc = filtered[i];
-        const degree = degreeMap.get(doc.path) ?? 0;
-
-        if (!settings.showOrphans && degree === 0) continue;
-
-        const label = doc.path.replace(/\.md$/, "").split("/").pop() ?? doc.path;
-
-        nodes.push({
-            id: doc.path,
-            path: doc.path,
-            label,
-            x: positions[i].x,
-            y: positions[i].y,
-            degree,
-            highlighted: false,
-            discoverable: hasSemanticEdge.has(doc.path) && !hasWikiEdge.has(doc.path),
-        });
-    }
+    // Create nodes
+    const nodes = createGraphNodes(filtered, positions, degreeMap, hasSemanticEdge, hasWikiEdge, settings);
 
     // Filter edges to only include edges with valid nodes
     const nodeIds = new Set(nodes.map((n) => n.id));

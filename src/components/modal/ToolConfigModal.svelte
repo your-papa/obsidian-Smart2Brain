@@ -120,6 +120,9 @@ const toolDisplayNames: Record<BuiltInToolId, string> = {
 	get_all_tags: "Get All Tags",
 	get_properties: "Get Properties",
 	execute_dataview_query: "Execute Dataview Query",
+	create_note: "Create Note",
+	update_note: "Update Note",
+	delete_note: "Delete Note",
 };
 
 onMount(() => {
