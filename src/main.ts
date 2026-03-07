@@ -10,6 +10,7 @@ import { createMessenger } from "./stores/chatStore.svelte";
 import { type PluginDataStore, createData } from "./stores/dataStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
+import { SmartGraphView, VIEW_TYPE_SMART_GRAPH } from "./views/smart-graph/SmartGraphView";
 import SettingsTab from "./views/settings/Settings";
 import { VectorStoreService } from "./vectorstore";
 
@@ -43,6 +44,9 @@ export default class SecondBrainPlugin extends Plugin {
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
 		this.registerExtensions(["chat"], VIEW_TYPE_CHAT);
 
+		// Register Smart Graph view
+		this.registerView(VIEW_TYPE_SMART_GRAPH, (leaf) => new SmartGraphView(leaf, this));
+
 		const { isVerbose, isAutostart } = this.pluginData;
 
 		if (this.manifest.dir === undefined) {
@@ -51,6 +55,7 @@ export default class SecondBrainPlugin extends Plugin {
 		}
 
 		this.addRibbonIcon("message-square", "New Chat", () => this.createNewChat());
+		this.addRibbonIcon("git-fork", "Smart Graph", () => this.activateSmartGraphView());
 
 		this.addCommand({
 			id: "open-chat",
@@ -71,6 +76,13 @@ export default class SecondBrainPlugin extends Plugin {
 			name: "Search Notes",
 			icon: "search",
 			callback: () => new SearchModal(this.app).open(),
+		});
+
+		this.addCommand({
+			id: "open-smart-graph",
+			name: "Open Smart Graph",
+			icon: "git-fork",
+			callback: () => this.activateSmartGraphView(),
 		});
 
 		this.addSettingTab(new SettingsTab(this));
@@ -94,5 +106,24 @@ export default class SecondBrainPlugin extends Plugin {
 
 	async openLatestChat() {
 		return this.agentManager.openLatestChat();
+	}
+
+	async activateSmartGraphView() {
+		const { workspace } = this.app;
+
+		// Check if the view is already open
+		let leaf = workspace.getLeavesOfType(VIEW_TYPE_SMART_GRAPH)[0];
+
+		if (!leaf) {
+			// Open in a new tab in the main editor area
+			const newLeaf = workspace.getLeaf("tab");
+			await newLeaf.setViewState({
+				type: VIEW_TYPE_SMART_GRAPH,
+				active: true,
+			});
+			leaf = newLeaf;
+		}
+
+		workspace.revealLeaf(leaf);
 	}
 }

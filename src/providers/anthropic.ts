@@ -123,6 +123,13 @@ export const anthropicProvider: BaseProviderDefinition = {
 			config.temperature = options.temperature;
 		}
 
+		// Forward Anthropic-specific `thinking` config when provided (e.g. to
+		// disable extended thinking for lightweight tasks like cluster labeling).
+		const extra = options as Record<string, unknown> | undefined;
+		if (extra?.thinking !== undefined) {
+			config.thinking = extra.thinking;
+		}
+
 		return new ChatAnthropic(config);
 	},
 
