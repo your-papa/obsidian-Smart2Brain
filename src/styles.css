@@ -101,3 +101,13 @@
 	text-align: center;
 	color: var(--text-muted);
 }
+
+/* Smart Graph View */
+.smart-graph-container {
+	padding: 0 !important;
+	overflow: hidden;
+}
+
+.smart-graph-container .view-content {
+	padding: 0;
+}

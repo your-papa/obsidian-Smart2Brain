@@ -2,6 +2,7 @@ import type { StoredProviderState } from "../stores/dataStore.svelte";
 import type { CustomProviderMeta } from "../types/provider/index";
 import type { UUIDv7 } from "../utils/uuid7Validator";
 import type { VectorStoreBackend } from "../vectorstore/types";
+import type { SmartGraphSettings } from "./graph";
 
 export type SearchAlgorithm = "lexical" | "embeddings" | "hybrid";
 
@@ -362,6 +363,11 @@ export interface PluginData {
 	 * Each entry is a {provider, model} pair.
 	 */
 	favoriteModels: Array<{ provider: string; model: string }>;
+
+	/**
+	 * Settings for the Smart Graph View.
+	 */
+	smartGraphSettings: SmartGraphSettings;
 }
 
 export type PluginDataKey = keyof PluginData;
