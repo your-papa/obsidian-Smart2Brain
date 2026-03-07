@@ -1236,7 +1236,10 @@
         forceLink<SimNode, SimLink>(simLinks)
           .id((d) => d.id)
           .distance(linkDistance)
-          .strength((l) => Math.min(l.weight * 0.5, 1)),
+          .strength((l) => {
+            if (l.type === "wiki") return 0.5;
+            return Math.min(l.weight * 0.5, 0.5);
+          }),
       )
       .force("charge", forceManyBody().strength(chargeStrength).distanceMax(3000))
       .force("center", forceCenter(0, 0))

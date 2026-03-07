@@ -202,12 +202,17 @@ export async function buildGraphStructure(
                 const ek = sourcePath < targetPath ? `${sourcePath}\0${targetPath}` : `${targetPath}\0${sourcePath}`;
                 if (!wikiEdgeSet.has(ek)) {
                     wikiEdgeSet.add(ek);
-                    edges.push({
-                        source: sourcePath,
-                        target: targetPath,
-                        weight: count,
-                        type: "wiki",
-                    });
+                    const wikiEdge: GraphEdge = { source: sourcePath, target: targetPath, weight: count, type: "wiki" };
+                    if (edgeSet.has(ek)) {
+                        // Wiki link trumps semantic edge — replace it
+                        const idx = edges.findIndex((e) => {
+                            const key = e.source < e.target ? `${e.source}\0${e.target}` : `${e.target}\0${e.source}`;
+                            return key === ek;
+                        });
+                        if (idx !== -1) edges[idx] = wikiEdge;
+                    } else {
+                        edges.push(wikiEdge);
+                    }
                 }
             }
         }

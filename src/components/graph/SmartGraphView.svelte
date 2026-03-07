@@ -191,6 +191,8 @@
     settings.showOrphans;
     settings.similarityThreshold;
     settings.semanticNeighbors;
+    settings.showWikiLinks;
+    settings.showSemanticEdges;
 
     // Debounce: schedule a rebuild and clean up on re-trigger
     const timer = setTimeout(() => {
@@ -271,6 +273,7 @@
    * Groups nodes by cluster, reads note content snippets, and sends a single batched prompt.
    */
   async function handleLabelClusters() {
+    if (isLabeling) return;
     const chatModelConfig = settings.graphChatModel;
 
     if (!chatModelConfig) {
