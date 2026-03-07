@@ -5,6 +5,7 @@
   import { getPlugin } from "../../stores/state.svelte";
   import { getData } from "../../stores/dataStore.svelte";
   import { getRegistry } from "../../providers/registry";
+  import type { ChatModelConfig } from "../../providers/index";
   import { getVectorStoreService, isVectorStoreInitialized } from "../../vectorstore";
   import {
     type GraphData,
@@ -57,6 +58,9 @@
   // Canvas ref
   let canvasComponent: GraphCanvas | undefined = $state(undefined);
 
+  // Build generation counter to discard stale async results
+  let buildGeneration = 0;
+
   /** Resolve the current theme colour palette from CSS variables. */
   function resolveThemeColors(): string[] {
     const style = getComputedStyle(document.body);
@@ -102,6 +106,7 @@
    * cluster colours.
    */
   async function rebuildGraph() {
+    const gen = ++buildGeneration;
     isLoading = true;
 
     const filter: GraphFilter = {
@@ -119,6 +124,8 @@
       const vectorService = getVectorStoreService();
       const documents = await vectorService.getAllDocumentVectors();
 
+      if (gen !== buildGeneration) return;
+
       if (documents.length === 0) {
         graphData = { nodes: [], edges: [] };
         return;
@@ -129,6 +136,8 @@
         filteredDocs,
         vectors,
       } = await buildGraphStructure(plugin.app, documents, settings, filter);
+
+      if (gen !== buildGeneration) return;
 
       // Detect whether the filtered document set changed
       const currentPaths = new Set(filteredDocs.map((d) => d.path));
@@ -161,7 +170,9 @@
       console.error("[SmartGraph] Error building graph:", err);
       graphData = { nodes: [], edges: [] };
     } finally {
-      isLoading = false;
+      if (gen === buildGeneration) {
+        isLoading = false;
+      }
     }
   }
 
@@ -170,7 +181,7 @@
     displayData = searchQuery ? applySearchHighlight(graphData, searchQuery) : graphData;
   });
 
-  // Build graph on filter/settings changes
+  // Build graph on filter/settings changes (debounced to avoid rapid-fire builds)
   // Note: projectionMethod, defaultK, and autoK are intentionally excluded —
   // they only take effect when the user presses the Apply button.
   $effect(() => {
@@ -181,10 +192,14 @@
     settings.similarityThreshold;
     settings.semanticNeighbors;
 
-    // Avoid tracking reads inside rebuildGraph (clusterMap, cachedVectors, etc.)
-    untrack(() => {
-      rebuildGraph();
-    });
+    // Debounce: schedule a rebuild and clean up on re-trigger
+    const timer = setTimeout(() => {
+      untrack(() => {
+        rebuildGraph();
+      });
+    }, 300);
+
+    return () => clearTimeout(timer);
   });
 
   // Load filter options on mount
@@ -313,15 +328,28 @@ ${promptBody}
 Respond with ONLY a JSON object mapping cluster number to label, no markdown fences:
 {${sortedClusterIds.map((id) => `"${id}": "..."`).join(", ")}}`;
 
-      // Create LLM instance — disable thinking/reasoning for speed
+      // Create LLM instance — disable extended thinking/reasoning for speed.
+      // This is best-effort: each provider handles these hints differently,
+      // and providers that don't recognise the keys will silently ignore them.
       const registry = getRegistry();
-      const baseLlm = registry.createChatInstance(chatModelConfig.provider, chatModelConfig.model, {
+      const provider = chatModelConfig.provider;
+
+      const modelOptions: Partial<ChatModelConfig> & Record<string, unknown> = {
         ...chatModelConfig.modelConfig,
-      });
-      // Disable extended thinking/reasoning for providers that support it
+      };
+
+      // Anthropic: `thinking` must be set at construction time, not via bind()
+      if (provider === "anthropic") {
+        modelOptions.thinking = { type: "disabled" };
+      }
+
+      const baseLlm = registry.createChatInstance(provider, chatModelConfig.model, modelOptions);
+
+      // For non-Anthropic providers that may support reasoning params (e.g.
+      // OpenRouter exposes `reasoning`), use bind() as a best-effort hint.
       const llm =
-        "bind" in baseLlm && typeof baseLlm.bind === "function"
-          ? (baseLlm as any).bind({ thinking: { type: "disabled" }, reasoning: false })
+        provider !== "anthropic" && "bind" in baseLlm && typeof baseLlm.bind === "function"
+          ? (baseLlm as any).bind({ reasoning: false })
           : baseLlm;
 
       const response = await llm.invoke([new HumanMessage(prompt)]);

@@ -212,6 +212,9 @@
                 {folder}
               </button>
             {/each}
+            {#if availableFolders.length > 15}
+              <span class="filter-overflow">+{availableFolders.length - 15} more…</span>
+            {/if}
           </div>
         </div>
       {/if}
@@ -230,6 +233,9 @@
                 {tag}
               </button>
             {/each}
+            {#if availableTags.length > 15}
+              <span class="filter-overflow">+{availableTags.length - 15} more…</span>
+            {/if}
           </div>
         </div>
       {/if}
@@ -661,5 +667,12 @@
     background: var(--interactive-accent);
     color: var(--text-on-accent);
     border-color: var(--interactive-accent);
+  }
+
+  .filter-overflow {
+    font-size: 11px;
+    color: var(--text-faint);
+    padding: 2px 4px;
+    align-self: center;
   }
 </style>

@@ -88,7 +88,7 @@ export async function buildGraphStructure(
     documents: DocumentVector[],
     settings: Pick<
         SmartGraphSettings,
-        "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod"
+        "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod" | "showWikiLinks" | "showSemanticEdges"
     >,
     filter?: GraphFilter,
 ): Promise<GraphStructureResult> {
@@ -213,21 +213,24 @@ export async function buildGraphStructure(
         }
     }
 
-    // Create degree map (count all edge types)
+    // Create degree map counting only visible edge types
     const degreeMap = new Map<string, number>();
     for (const edge of edges) {
+        if (edge.type === "wiki" && !settings.showWikiLinks) continue;
+        if (edge.type === "semantic" && !settings.showSemanticEdges) continue;
         degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
         degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
     }
 
     // Discovery mode: identify nodes with semantic edges but zero wiki edges
+    // Only count visible edge types so stats match what the user sees
     const hasSemanticEdge = new Set<string>();
     const hasWikiEdge = new Set<string>();
     for (const edge of edges) {
-        if (edge.type === "semantic") {
+        if (edge.type === "semantic" && settings.showSemanticEdges) {
             hasSemanticEdge.add(edge.source);
             hasSemanticEdge.add(edge.target);
-        } else if (edge.type === "wiki") {
+        } else if (edge.type === "wiki" && settings.showWikiLinks) {
             hasWikiEdge.add(edge.source);
             hasWikiEdge.add(edge.target);
         }
@@ -359,7 +362,7 @@ export async function buildGraph(
     documents: DocumentVector[],
     settings: Pick<
         SmartGraphSettings,
-        "defaultK" | "autoK" | "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod"
+        "defaultK" | "autoK" | "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod" | "showWikiLinks" | "showSemanticEdges"
     >,
     filter?: GraphFilter,
     themeColors?: string[],
