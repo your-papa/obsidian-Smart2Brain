@@ -267,13 +267,14 @@
     const ctx = canvasEl.getContext("2d");
     if (!ctx) return;
 
-    const width = canvasEl.width;
-    const height = canvasEl.height;
+    const dpr = window.devicePixelRatio || 1;
+    const width = canvasEl.width / dpr;
+    const height = canvasEl.height / dpr;
 
     // Resolve theme CSS variables (Canvas 2D can't use var() directly)
     const c = resolveThemeColors();
 
-    // Clear
+    // Clear (use logical pixel dimensions — context is already DPR-scaled)
     ctx.clearRect(0, 0, width, height);
 
     ctx.save();
