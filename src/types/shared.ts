@@ -63,6 +63,9 @@ export interface PendingNoteUpdate {
 	originalContent: string;
 	/** Proposed new content */
 	newContent: string;
+	/** Snapshot of originalContent before any group-level accepts mutated it.
+	 *  Set on the first `acceptChangeGroup` call so `rejectAll` can restore the file. */
+	initialOriginalContent?: string;
 }
 
 /** A staged note deletion */

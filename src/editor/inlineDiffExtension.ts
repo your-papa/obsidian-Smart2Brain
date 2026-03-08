@@ -353,8 +353,8 @@ export const inlineDiffPlugin = ViewPlugin.fromClass(
 
         update(update: ViewUpdate) {
             if (update.docChanged) {
-                // Map existing decorations through user edits to preserve positions
-                this.decorations = this.decorations.map(update.changes);
+                // Rebuild decorations so the consistency check filters out stale groups
+                this.decorations = buildDecorations(this.view);
             }
         }
 

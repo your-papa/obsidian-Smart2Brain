@@ -315,6 +315,7 @@ export function readingViewDiffPostProcessor(el: HTMLElement, ctx: MarkdownPostP
             // Insert action bar at top if not already present
             if (!el.querySelector(".ssb-diff-actions-bar")) {
                 const groupIndex = computeGroupIndexForSection(changes, origLineStart, origLineEnd);
+                if (groupIndex === -1) return; // no matched group — don't show misleading action buttons
                 const actionBar = createReadingDiffActionBar(entry.id, groupIndex);
                 el.insertBefore(actionBar, el.firstChild);
             }

@@ -88,15 +88,17 @@
       if (failures.length === 0) {
         new Notice(`Applied all ${pendingCount} changes`);
       } else {
-        new Notice(`Applied ${pendingCount - failures.length} changes, ${failures.length} failed: ${failures.join(", ")}`);
+        new Notice(
+          `Applied ${pendingCount - failures.length} changes, ${failures.length} failed: ${failures.join(", ")}`,
+        );
       }
     } catch (e) {
       new Notice(`Error applying changes: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  function handleRejectAll() {
-    store.rejectAll(threadId);
+  async function handleRejectAll() {
+    await store.rejectAll(threadId);
     new Notice("Rejected all pending changes");
   }
 </script>

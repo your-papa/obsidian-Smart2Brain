@@ -124,8 +124,24 @@ export class PendingChangesStore {
         return isExcluding ? !matchesPattern : indexList.length === 0 || matchesPattern;
     }
 
-    /** Stage a new pending change. Returns the entry ID. */
+    /** Stage a new pending change. Returns the entry ID.
+     *  If a pending update already exists for the same path and thread, the older entry is
+     *  auto-rejected so only the latest proposal is active. */
     addChange(change: PendingChange, toolCallId: string, threadId: string): string {
+        // Supersede any existing pending entry for the same path+thread
+        if (change.type === "update") {
+            for (const existing of this.#entries) {
+                if (
+                    existing.status === "pending" &&
+                    existing.threadId === threadId &&
+                    existing.change.path === change.path &&
+                    existing.change.type === "update"
+                ) {
+                    existing.status = "rejected";
+                }
+            }
+        }
+
         const id = genUUIDv7();
         const entry: PendingChangeEntry = {
             id,
@@ -203,12 +219,21 @@ export class PendingChangesStore {
 
         this.#processingGroups.add(entryId);
         try {
+            // Snapshot the original content before any group mutations
+            change.initialOriginalContent ??= change.originalContent;
+
             const changes = diffLines(change.originalContent, change.newContent);
             const newVaultContent = buildPartialContent(changes, groupIndex, true);
 
             const file = this.#plugin.app.vault.getAbstractFileByPath(change.path);
             if (!(file instanceof TFile)) return;
 
+            const currentContent = await this.#plugin.app.vault.read(file);
+            if (currentContent !== change.originalContent) {
+                throw new Error(
+                    `File "${change.path}" was modified externally. Please review before accepting.`,
+                );
+            }
             await this.#plugin.app.vault.modify(file, newVaultContent);
 
             change.originalContent = newVaultContent;
@@ -264,10 +289,21 @@ export class PendingChangesStore {
         return failures;
     }
 
-    /** Reject all pending changes for a thread. */
-    rejectAll(threadId: string): void {
+    /** Reject all pending changes for a thread, reverting any partially-applied group writes. */
+    async rejectAll(threadId: string): Promise<void> {
         const pending = this.#entries.filter((e) => e.threadId === threadId && e.status === "pending");
         for (const entry of pending) {
+            // Revert vault file if groups were partially accepted
+            if (entry.change.type === "update" && entry.change.initialOriginalContent !== undefined) {
+                try {
+                    const file = this.#plugin.app.vault.getAbstractFileByPath(entry.change.path);
+                    if (file instanceof TFile) {
+                        await this.#plugin.app.vault.modify(file, entry.change.initialOriginalContent);
+                    }
+                } catch (e) {
+                    Logger.error(`[PendingChanges] Failed to revert ${entry.change.path}:`, e);
+                }
+            }
             entry.status = "rejected";
         }
         this.scheduleSave();
