@@ -72,6 +72,7 @@ export class PendingChangesStore {
     #entries: PendingChangeEntry[] = $state([]);
     readonly #plugin: SecondBrainPlugin;
     #saveTimer: ReturnType<typeof setTimeout> | null = null;
+    readonly #processingGroups = new Set<string>();
 
     constructor(plugin: SecondBrainPlugin) {
         this.#plugin = plugin;
@@ -191,34 +192,43 @@ export class PendingChangesStore {
 
     /** Accept a single diff group within a pending update. */
     async acceptChangeGroup(entryId: string, groupIndex: number): Promise<void> {
+        if (this.#processingGroups.has(entryId)) return;
         const entry = this.#entries.find((e) => e.id === entryId);
         if (entry?.status !== "pending") return;
 
         const change = entry.change;
         if (change.type !== "update") return;
 
-        const changes = diffLines(change.originalContent, change.newContent);
-        const newVaultContent = buildPartialContent(changes, groupIndex, true);
+        this.#processingGroups.add(entryId);
+        try {
+            const changes = diffLines(change.originalContent, change.newContent);
+            const newVaultContent = buildPartialContent(changes, groupIndex, true);
 
-        const file = this.#plugin.app.vault.getAbstractFileByPath(change.path);
-        if (!(file instanceof TFile)) return;
+            const file = this.#plugin.app.vault.getAbstractFileByPath(change.path);
+            if (!(file instanceof TFile)) return;
 
-        await this.#plugin.app.vault.modify(file, newVaultContent);
+            await this.#plugin.app.vault.modify(file, newVaultContent);
 
-        change.originalContent = newVaultContent;
-        if (change.originalContent === change.newContent) {
-            entry.status = "accepted";
+            change.originalContent = newVaultContent;
+            if (change.originalContent === change.newContent) {
+                entry.status = "accepted";
+            }
+
+            this.scheduleSave();
+            // Dispatch immediately so in-memory consumers (PendingChangesBar) update,
+            // then again after delays so the editor decorations rebuild against the new document.
+            const notify = () => document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
+            notify();
+            setTimeout(notify, 100);
+            setTimeout(notify, 500);
+        } finally {
+            this.#processingGroups.delete(entryId);
         }
-
-        this.scheduleSave();
-        // Delay events so the editor has time to sync with vault content
-        const notify = () => document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
-        setTimeout(notify, 100);
-        setTimeout(notify, 500);
     }
 
     /** Reject a single diff group within a pending update. */
     rejectChangeGroup(entryId: string, groupIndex: number): void {
+        if (this.#processingGroups.has(entryId)) return;
         const entry = this.#entries.find((e) => e.id === entryId);
         if (entry?.status !== "pending") return;
 

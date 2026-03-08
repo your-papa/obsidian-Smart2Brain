@@ -86,16 +86,9 @@
     <!-- Summary bar -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="pcb-summary"
-      onclick={() => (isExpanded = !isExpanded)}
-    >
+    <div class="pcb-summary" onclick={() => (isExpanded = !isExpanded)}>
       <div class="pcb-summary-left">
-        <div
-          class="pcb-icon"
-          use:icon={"file-diff"}
-          style="--icon-size: var(--icon-xs)"
-        ></div>
+        <div class="pcb-icon" use:icon={"file-diff"} style="--icon-size: var(--icon-xs)"></div>
         <span class="pcb-count">
           {pendingCount} pending change{pendingCount !== 1 ? "s" : ""}
         </span>
@@ -103,7 +96,10 @@
       <div class="pcb-summary-right">
         <button
           class="pcb-action pcb-action-accept"
-          onclick={(e) => { e.stopPropagation(); handleAcceptAll(); }}
+          onclick={(e) => {
+            e.stopPropagation();
+            handleAcceptAll();
+          }}
           title="Accept all changes"
           type="button"
         >
@@ -112,17 +108,17 @@
         </button>
         <button
           class="pcb-action pcb-action-reject"
-          onclick={(e) => { e.stopPropagation(); handleRejectAll(); }}
+          onclick={(e) => {
+            e.stopPropagation();
+            handleRejectAll();
+          }}
           title="Reject all changes"
           type="button"
         >
           <div use:icon={"x"} style="--icon-size: 12px"></div>
           <span>Reject All</span>
         </button>
-        <div
-          class="pcb-chevron"
-          class:pcb-chevron-open={isExpanded}
-        >▸</div>
+        <div class="pcb-chevron" class:pcb-chevron-open={isExpanded}>▸</div>
       </div>
     </div>
 
@@ -133,10 +129,7 @@
           <div class="pcb-entry">
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div
-              class="pcb-entry-header"
-              onclick={() => toggleExpand(entry.id)}
-            >
+            <div class="pcb-entry-header" onclick={() => toggleExpand(entry.id)}>
               <div class="pcb-entry-left">
                 <span class="pcb-badge {changeTypeBadgeClass(entry.change.type)}">
                   {changeTypeLabel(entry)}
@@ -146,7 +139,10 @@
               <div class="pcb-entry-actions">
                 <button
                   class="pcb-action-icon pcb-action-accept"
-                  onclick={(e) => { e.stopPropagation(); handleAccept(entry); }}
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    handleAccept(entry);
+                  }}
                   title="Accept change"
                   type="button"
                 >
@@ -154,16 +150,16 @@
                 </button>
                 <button
                   class="pcb-action-icon pcb-action-reject"
-                  onclick={(e) => { e.stopPropagation(); handleReject(entry); }}
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    handleReject(entry);
+                  }}
                   title="Reject change"
                   type="button"
                 >
                   <div use:icon={"x"} style="--icon-size: 12px"></div>
                 </button>
-                <div
-                  class="pcb-chevron"
-                  class:pcb-chevron-open={expandedIds[entry.id]}
-                >▸</div>
+                <div class="pcb-chevron" class:pcb-chevron-open={expandedIds[entry.id]}>▸</div>
               </div>
             </div>
 
