@@ -174,8 +174,7 @@ export class PendingChangesStore {
         } else if (change.type === "update") {
             const file = app.vault.getAbstractFileByPath(change.path);
             if (!(file instanceof TFile)) {
-                Logger.error(`[PendingChanges] Cannot apply update — file not found: ${change.path}`);
-                return;
+                throw new TypeError(`Cannot apply update — file not found: ${change.path}`);
             }
             // Conflict detection: compare current content with staged original
             const currentContent = await app.vault.read(file);
@@ -188,8 +187,7 @@ export class PendingChangesStore {
         } else if (change.type === "delete") {
             const file = app.vault.getAbstractFileByPath(change.path);
             if (!(file instanceof TFile)) {
-                Logger.error(`[PendingChanges] Cannot apply delete — file not found: ${change.path}`);
-                return;
+                throw new TypeError(`Cannot apply delete — file not found: ${change.path}`);
             }
             await app.vault.trash(file, true);
         }

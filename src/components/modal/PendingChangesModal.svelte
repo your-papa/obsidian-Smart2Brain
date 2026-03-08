@@ -83,13 +83,14 @@
   }
 
   async function handleAcceptAll() {
+    const count = pendingCount;
     try {
       const failures = await store.acceptAll(threadId);
       if (failures.length === 0) {
-        new Notice(`Applied all ${pendingCount} changes`);
+        new Notice(`Applied all ${count} changes`);
       } else {
         new Notice(
-          `Applied ${pendingCount - failures.length} changes, ${failures.length} failed: ${failures.join(", ")}`,
+          `Applied ${count - failures.length} changes, ${failures.length} failed: ${failures.join(", ")}`,
         );
       }
     } catch (e) {
