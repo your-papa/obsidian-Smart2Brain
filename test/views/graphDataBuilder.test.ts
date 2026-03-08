@@ -105,10 +105,13 @@ describe("buildGraph", () => {
         const docs = [
             createMockDocumentVector("a.md", [1, 0.9, 0, 0]),
             createMockDocumentVector("b.md", [0.9, 1, 0, 0]),
+            createMockDocumentVector("c.md", [0, 0, 1, 0]),
         ];
-        const app = createMockApp({ "a.md": { "b.md": 1 } }, ["a.md", "b.md"]);
+        const app = createMockApp({ "a.md": { "b.md": 1 } }, ["a.md", "b.md", "c.md"]);
         const result = await buildGraph(app, docs, {
             ...defaultSettings,
+            showWikiLinks: true,
+            showSemanticEdges: true,
             semanticNeighbors: 2,
             similarityThreshold: 0,
         });

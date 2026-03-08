@@ -16,7 +16,9 @@
   const threadId = $derived(messenger.session?.id);
   const pendingEntries = $derived.by(() => {
     void store.revision;
-    return threadId ? store.getEntriesForThread(threadId).filter((e) => e.status === "pending") : [];
+    return threadId
+      ? store.getEntriesForThread(threadId).filter((e) => e.status === "pending")
+      : [];
   });
   const pendingCount = $derived(pendingEntries.length);
 

@@ -13,42 +13,13 @@ import {
 	BUILT_IN_PROVIDER_IDS,
 	anthropicProvider,
 	builtInProviders,
-	createCustomOpenAICompatibleProvider,
+	createOpenAICompatibleProvider,
 	getBuiltInProvider,
-	getProvider,
+	getProviderDefinition,
 	isBuiltInProvider,
-	listAllProviderIds,
 	ollamaProvider,
 	openaiProvider,
 } from "../../src/providers/index.ts";
-import type { CustomProviderDefinition } from "../../src/providers/types.ts";
-
-// Helper to create minimal custom provider for tests
-function createCustomProvider(id: string, displayName: string): CustomProviderDefinition {
-	return {
-		id,
-		displayName,
-		isBuiltIn: false,
-		baseProviderId: "openai-compatible",
-		createdAt: Date.now(),
-		setupInstructions: { steps: [] },
-		auth: {
-			type: "field-based",
-			fields: {
-				apiKey: { label: "API Key", kind: "secret", required: true },
-				baseUrl: { label: "Base URL", kind: "text", required: false },
-				headers: { label: "Custom Headers", kind: "textarea", required: false },
-			},
-		},
-		capabilities: { chat: true, embedding: false, modelDiscovery: false },
-		createRuntimeDefinition: async (_auth) => ({
-			chatModels: {},
-			embeddingModels: {},
-		}),
-		validateAuth: async () => ({ valid: true }),
-		discoverModels: async () => ({ chat: [], embedding: [] }),
-	};
-}
 
 describe("Provider Registry", () => {
 	describe("BUILT_IN_PROVIDER_IDS", () => {
@@ -70,7 +41,6 @@ describe("Provider Registry", () => {
 			expect(provider).toBeDefined();
 			expect(provider?.id).toBe("openai");
 			expect(provider?.displayName).toBe("OpenAI");
-			expect(provider?.isBuiltIn).toBe(true);
 		});
 
 		it("should return provider for 'anthropic' id", () => {
@@ -78,7 +48,6 @@ describe("Provider Registry", () => {
 			expect(provider).toBeDefined();
 			expect(provider?.id).toBe("anthropic");
 			expect(provider?.displayName).toBe("Anthropic");
-			expect(provider?.isBuiltIn).toBe(true);
 		});
 
 		it("should return provider for 'ollama' id", () => {
@@ -86,7 +55,6 @@ describe("Provider Registry", () => {
 			expect(provider).toBeDefined();
 			expect(provider?.id).toBe("ollama");
 			expect(provider?.displayName).toBe("Ollama");
-			expect(provider?.isBuiltIn).toBe(true);
 		});
 
 		it("should return undefined for unknown provider ID", () => {
@@ -136,112 +104,30 @@ describe("Provider Registry", () => {
 		});
 	});
 
-	describe("getProvider", () => {
+	describe("getProviderDefinition", () => {
 		it("should return built-in provider when no custom providers exist", () => {
-			const provider = getProvider("openai", []);
+			const provider = getProviderDefinition("openai", {});
 			expect(provider).toBeDefined();
 			expect(provider?.id).toBe("openai");
-			expect(provider?.isBuiltIn).toBe(true);
-		});
-
-		it("should return built-in provider when custom providers exist but ID is built-in", () => {
-			const customProviders = [createCustomProvider("my-custom", "My Custom")];
-			const provider = getProvider("openai", customProviders);
-			expect(provider).toBeDefined();
-			expect(provider?.id).toBe("openai");
-			expect(provider?.isBuiltIn).toBe(true);
-		});
-
-		it("should return custom provider when it exists", () => {
-			const customProviders = [createCustomProvider("my-custom", "My Custom Provider")];
-			const provider = getProvider("my-custom", customProviders);
-			expect(provider).toBeDefined();
-			expect(provider?.id).toBe("my-custom");
-			expect(provider?.displayName).toBe("My Custom Provider");
-			expect(provider?.isBuiltIn).toBe(false);
-		});
-
-		it("should return correct custom provider from multiple custom providers", () => {
-			const customProviders = [
-				createCustomProvider("custom-1", "Custom One"),
-				createCustomProvider("custom-2", "Custom Two"),
-				createCustomProvider("custom-3", "Custom Three"),
-			];
-			const provider = getProvider("custom-2", customProviders);
-			expect(provider?.id).toBe("custom-2");
-			expect(provider?.displayName).toBe("Custom Two");
 		});
 
 		it("should return undefined for unknown provider ID", () => {
-			const provider = getProvider("unknown", []);
+			const provider = getProviderDefinition("unknown", {});
 			expect(provider).toBeUndefined();
 		});
 
-		it("should return undefined for unknown ID even with custom providers", () => {
-			const customProviders = [createCustomProvider("my-custom", "My Custom")];
-			const provider = getProvider("unknown", customProviders);
-			expect(provider).toBeUndefined();
+		it("should return custom provider when it exists", () => {
+			const customMeta = { "my-custom": { displayName: "My Custom", supportsEmbeddings: false } };
+			const provider = getProviderDefinition("my-custom", customMeta);
+			expect(provider).toBeDefined();
+			expect(provider?.id).toBe("my-custom");
+			expect(provider?.displayName).toBe("My Custom");
 		});
 
-		it("should prefer built-in provider if ID matches both (shouldn't happen in practice)", () => {
-			// This tests the case where someone creates a custom provider with a built-in ID
-			// The function should still return the built-in provider
-			const customProviders = [createCustomProvider("openai", "Fake OpenAI")];
-			const provider = getProvider("openai", customProviders);
-			expect(provider?.isBuiltIn).toBe(true);
-			expect(provider?.displayName).toBe("OpenAI"); // Should be built-in, not custom
-		});
-	});
-
-	describe("listAllProviderIds", () => {
-		it("should include all built-in provider IDs when no custom providers", () => {
-			const ids = listAllProviderIds([]);
-			expect(ids).toContain("openai");
-			expect(ids).toContain("anthropic");
-			expect(ids).toContain("ollama");
-		});
-
-		it("should include custom provider IDs", () => {
-			const customProviders = [
-				createCustomProvider("custom-1", "Custom One"),
-				createCustomProvider("custom-2", "Custom Two"),
-			];
-			const ids = listAllProviderIds(customProviders);
-			expect(ids).toContain("custom-1");
-			expect(ids).toContain("custom-2");
-		});
-
-		it("should include both built-in and custom provider IDs", () => {
-			const customProviders = [createCustomProvider("my-custom", "My Custom")];
-			const ids = listAllProviderIds(customProviders);
-
-			// Built-in providers
-			expect(ids).toContain("openai");
-			expect(ids).toContain("anthropic");
-			expect(ids).toContain("ollama");
-
-			// Custom provider
-			expect(ids).toContain("my-custom");
-		});
-
-		it("should return unique IDs (no duplicates)", () => {
-			const customProviders = [createCustomProvider("custom-1", "Custom One")];
-			const ids = listAllProviderIds(customProviders);
-			const uniqueIds = [...new Set(ids)];
-			expect(ids.length).toBe(uniqueIds.length);
-		});
-
-		it("should handle empty custom providers array", () => {
-			const ids = listAllProviderIds([]);
-			expect(ids.length).toBe(BUILT_IN_PROVIDER_IDS.length);
-		});
-
-		it("should not include duplicate if custom provider has same ID as built-in (edge case)", () => {
-			// Edge case: custom provider with same ID as built-in shouldn't duplicate
-			const customProviders = [createCustomProvider("openai", "Fake OpenAI")];
-			const ids = listAllProviderIds(customProviders);
-			const openaiCount = ids.filter((id) => id === "openai").length;
-			expect(openaiCount).toBe(1); // Should only appear once
+		it("should prefer built-in provider if ID matches both", () => {
+			const customMeta = { openai: { displayName: "Fake OpenAI", supportsEmbeddings: false } };
+			const provider = getProviderDefinition("openai", customMeta);
+			expect(provider?.displayName).toBe("OpenAI");
 		});
 	});
 
@@ -272,11 +158,8 @@ describe("Provider Registry", () => {
 			// Real OpenAI provider has detailed setup instructions
 			expect(openai?.setupInstructions.steps.length).toBeGreaterThan(1);
 			// Real OpenAI provider has apiKey and baseUrl auth fields
-			expect(openai?.auth.type).toBe("field-based");
-			if (openai?.auth.type === "field-based") {
-				expect(openai.auth.fields.apiKey).toBeDefined();
-				expect(openai.auth.fields.baseUrl).toBeDefined();
-			}
+			expect(openai?.auth.apiKey).toBeDefined();
+			expect(openai?.auth.baseUrl).toBeDefined();
 		});
 
 		it("builtInProviders record should match getBuiltInProvider results", () => {
@@ -287,21 +170,9 @@ describe("Provider Registry", () => {
 	});
 
 	describe("Re-exported custom provider factory", () => {
-		it("should export createCustomOpenAICompatibleProvider factory", () => {
-			expect(createCustomOpenAICompatibleProvider).toBeDefined();
-			expect(typeof createCustomOpenAICompatibleProvider).toBe("function");
-		});
-
-		it("createCustomOpenAICompatibleProvider should create valid custom provider", () => {
-			const customProvider = createCustomOpenAICompatibleProvider({
-				id: "test-provider",
-				displayName: "Test Provider",
-			});
-
-			expect(customProvider.id).toBe("test-provider");
-			expect(customProvider.displayName).toBe("Test Provider");
-			expect(customProvider.isBuiltIn).toBe(false);
-			expect(customProvider.baseProviderId).toBe("openai");
+		it("should export createOpenAICompatibleProvider factory", () => {
+			expect(createOpenAICompatibleProvider).toBeDefined();
+			expect(typeof createOpenAICompatibleProvider).toBe("function");
 		});
 	});
 });
