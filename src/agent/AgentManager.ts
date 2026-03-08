@@ -34,7 +34,6 @@ import { createLoadSkillTool } from "./tools/loadSkill";
 import { createReadContentTool } from "./tools/readContent";
 import { createSearchNotesTool } from "./tools/searchNotes";
 import { createCreateNoteTool } from "./tools/createNote";
-import { createUpdateNoteTool } from "./tools/updateNote";
 import { createEditNoteTool } from "./tools/editNote";
 import { createDeleteNoteTool } from "./tools/deleteNote";
 import { setCurrentThreadId } from "./tools/runContext";
@@ -435,7 +434,6 @@ export class AgentManager {
 			["get_properties", () => createGetPropertiesTool(this.plugin.app)],
 			["read_content", () => createReadContentTool(this.plugin.app)],
 			["create_note", () => createCreateNoteTool(this.plugin.app)],
-			["update_note", () => createUpdateNoteTool(this.plugin.app)],
 			["edit_note", () => createEditNoteTool(this.plugin.app)],
 			["delete_note", () => createDeleteNoteTool(this.plugin.app)],
 		];

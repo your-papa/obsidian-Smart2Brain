@@ -43,7 +43,7 @@ export function createEditNoteTool(app: App) {
                 const { oldText, newText } = edits[i];
                 const idx = content.indexOf(oldText);
                 if (idx === -1) {
-                    return `Error in edit ${i + 1}: Could not find the specified text in "${file.path}". Make sure oldText matches exactly (including whitespace and newlines).`;
+                    return `Error in edit ${i + 1}: Could not find the specified text in "${file.path}". Make sure oldText matches exactly (including whitespace and newlines).${i > 0 ? " Note: edits are applied sequentially — previous edits may have changed the file content, so this oldText must match the content AFTER earlier edits were applied." : ""}`;
                 }
                 // Ensure unique match
                 if (content.includes(oldText, idx + 1)) {
@@ -66,7 +66,7 @@ export function createEditNoteTool(app: App) {
         {
             name: "edit_note",
             description:
-                "Make targeted edits to an existing markdown note using search-and-replace. Each edit specifies the exact text to find (oldText) and its replacement (newText). Much more efficient than update_note for small changes since you only provide the specific parts to change, not the entire file. The change is staged for user approval with a diff view.",
+                "Make targeted edits to an existing markdown note using search-and-replace. Each edit specifies the exact text to find (oldText) and its replacement (newText). You only provide the specific parts to change, not the entire file. The change is staged for user approval with a diff view.",
             schema: z.object({
                 path: z
                     .string()

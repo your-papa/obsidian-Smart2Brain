@@ -16,7 +16,10 @@
   const { modal, plugin, threadId }: Props = $props();
   const store = getPendingChangesStore();
 
-  let entries = $derived(store.getEntriesForThread(threadId));
+  let entries = $derived.by(() => {
+    void store.revision;
+    return store.getEntriesForThread(threadId);
+  });
   let pendingCount = $derived(entries.filter((e) => e.status === "pending").length);
   let expandedIds: Record<string, boolean> = $state({});
 

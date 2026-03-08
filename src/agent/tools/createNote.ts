@@ -20,7 +20,7 @@ export function createCreateNoteTool(app: App) {
 
 			const existing = app.vault.getAbstractFileByPath(normalized);
 			if (existing) {
-				return `Error: A file already exists at "${normalized}". Use the update_note tool to modify existing files.`;
+				return `Error: A file already exists at "${normalized}". Use the edit_note tool to modify existing files.`;
 			}
 
 			const toolCallId = runManager?.runId ?? "unknown";

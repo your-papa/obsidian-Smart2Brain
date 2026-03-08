@@ -19,9 +19,14 @@
     return diffLines(change.originalContent, change.newContent);
   });
 
-  function lineNumbers(
-    changes: Change[],
-  ): { oldLine: number; newLine: number; entries: LineEntry[] }[] {
+  interface LineEntry {
+    type: "added" | "removed" | "context";
+    content: string;
+    oldLineNo?: number;
+    newLineNo?: number;
+  }
+
+  function computeLines(changes: Change[]): LineEntry[] {
     let oldLine = 1;
     let newLine = 1;
     const result: LineEntry[] = [];
@@ -46,17 +51,10 @@
       }
     }
 
-    return [{ oldLine: 1, newLine: 1, entries: result }];
+    return result;
   }
 
-  interface LineEntry {
-    type: "added" | "removed" | "context";
-    content: string;
-    oldLineNo?: number;
-    newLineNo?: number;
-  }
-
-  const lines = $derived(lineNumbers(hunks)[0]?.entries ?? []);
+  const lines = $derived(computeLines(hunks));
 </script>
 
 <div class="ssb-diff-view">

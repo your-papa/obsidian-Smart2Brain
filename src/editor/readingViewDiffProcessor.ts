@@ -76,8 +76,17 @@ function buildLineMapper(
     }
 
     return (currentLine: number): number | null => {
-        for (const seg of segments) {
-            if (currentLine >= seg.currentStart && currentLine < seg.currentStart + seg.count) {
+        // Binary search for the segment containing currentLine
+        let lo = 0;
+        let hi = segments.length - 1;
+        while (lo <= hi) {
+            const mid = (lo + hi) >>> 1;
+            const seg = segments[mid];
+            if (currentLine < seg.currentStart) {
+                hi = mid - 1;
+            } else if (currentLine >= seg.currentStart + seg.count) {
+                lo = mid + 1;
+            } else {
                 if (seg.type === "added") return null;
                 return seg.originalStart + (currentLine - seg.currentStart);
             }

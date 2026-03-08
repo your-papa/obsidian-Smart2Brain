@@ -1,5 +1,6 @@
-import { normalizePath, TFile } from "obsidian";
+import { type EventRef, normalizePath, TFile } from "obsidian";
 import { type Change, diffLines } from "diff";
+import { z } from "zod";
 import type SecondBrainPlugin from "../main";
 import type { PendingChange, PendingChangeEntry } from "../types/shared";
 import { genUUIDv7 } from "../utils/uuid7Validator";
@@ -8,6 +9,29 @@ import { getData } from "./dataStore.svelte";
 
 const SAVE_DEBOUNCE_MS = 1000;
 const STORAGE_FILE = "data/pending-changes.json";
+
+const pendingChangeSchema = z.discriminatedUnion("type", [
+    z.object({ type: z.literal("create"), path: z.string(), content: z.string() }),
+    z.object({
+        type: z.literal("update"),
+        path: z.string(),
+        originalContent: z.string(),
+        newContent: z.string(),
+        initialOriginalContent: z.string().optional(),
+    }),
+    z.object({ type: z.literal("delete"), path: z.string(), originalContent: z.string() }),
+]);
+
+const pendingChangeEntrySchema = z.object({
+    id: z.string(),
+    change: pendingChangeSchema,
+    status: z.enum(["pending", "accepted", "rejected"]),
+    toolCallId: z.string(),
+    threadId: z.string(),
+    createdAt: z.number(),
+});
+
+const pendingChangesArraySchema = z.array(pendingChangeEntrySchema);
 
 let _store: PendingChangesStore | null = null;
 
@@ -70,9 +94,13 @@ export function initPendingChangesStore(store: PendingChangesStore): void {
 
 export class PendingChangesStore {
     #entries: PendingChangeEntry[] = $state([]);
+    #revision = $state(0);
     readonly #plugin: SecondBrainPlugin;
     #saveTimer: ReturnType<typeof setTimeout> | null = null;
     readonly #processingGroups = new Set<string>();
+    readonly #fileLocks = new Map<string, Promise<void>>();
+    #isBatchProcessing = false;
+    #renameHandler: EventRef | null = null;
 
     constructor(plugin: SecondBrainPlugin) {
         this.#plugin = plugin;
@@ -84,12 +112,29 @@ export class PendingChangesStore {
             try {
                 const raw = await this.#plugin.app.vault.adapter.read(path);
                 const parsed = JSON.parse(raw);
-                this.#entries = Array.isArray(parsed) ? parsed as PendingChangeEntry[] : [];
+                const result = pendingChangesArraySchema.safeParse(parsed);
+                if (result.success) {
+                    this.#entries = result.data as PendingChangeEntry[];
+                } else {
+                    Logger.error("[PendingChanges] Invalid data in pending-changes.json, discarding malformed entries", result.error);
+                    // Salvage valid entries if the array itself parsed
+                    if (Array.isArray(parsed)) {
+                        this.#entries = parsed.filter(
+                            (item) => pendingChangeEntrySchema.safeParse(item).success,
+                        ) as PendingChangeEntry[];
+                    } else {
+                        this.#entries = [];
+                    }
+                }
             } catch (e) {
                 Logger.error("[PendingChanges] Failed to parse pending-changes.json, starting with empty list", e);
                 this.#entries = [];
             }
         }
+        this.#renameHandler = this.#plugin.app.vault.on("rename", (file, oldPath) => {
+            this.#handleFileRename(oldPath, file.path);
+        });
+        this.#plugin.registerEvent(this.#renameHandler);
     }
 
     private get storagePath(): string {
@@ -109,6 +154,16 @@ export class PendingChangesStore {
         }
         const snapshot = $state.snapshot(this.#entries);
         await this.#plugin.app.vault.adapter.write(path, JSON.stringify(snapshot, null, 2));
+    }
+
+    /** Reactive revision counter – read this inside `$derived` to track store mutations. */
+    get revision(): number {
+        return this.#revision;
+    }
+
+    private notifyChange(): void {
+        this.#revision++;
+        document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
     }
 
     /** Check if a vault path is allowed by include/exclude filter settings. */
@@ -153,7 +208,7 @@ export class PendingChangesStore {
         };
         this.#entries.push(entry);
         this.scheduleSave();
-        document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
+        this.notifyChange();
         return id;
     }
 
@@ -194,7 +249,7 @@ export class PendingChangesStore {
 
         entry.status = "accepted";
         this.scheduleSave();
-        document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
+        this.notifyChange();
     }
 
     /** Reject a pending change (no vault modification). */
@@ -203,7 +258,26 @@ export class PendingChangesStore {
         if (entry?.status !== "pending") return;
         entry.status = "rejected";
         this.scheduleSave();
-        document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
+        this.notifyChange();
+    }
+
+    /** Acquire a per-file lock to serialize vault writes for the same path. */
+    private async withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
+        // Wait for any in-flight operation on this file to finish
+        const existing = this.#fileLocks.get(filePath);
+        if (existing) await existing;
+
+        let resolve: () => void;
+        const lock = new Promise<void>((r) => { resolve = r; });
+        this.#fileLocks.set(filePath, lock);
+        try {
+            return await fn();
+        } finally {
+            resolve!();
+            if (this.#fileLocks.get(filePath) === lock) {
+                this.#fileLocks.delete(filePath);
+            }
+        }
     }
 
     /** Accept a single diff group within a pending update. */
@@ -217,35 +291,32 @@ export class PendingChangesStore {
 
         this.#processingGroups.add(entryId);
         try {
-            // Snapshot the original content before any group mutations
-            change.initialOriginalContent ??= change.originalContent;
+            await this.withFileLock(change.path, async () => {
+                // Snapshot the original content before any group mutations
+                change.initialOriginalContent ??= change.originalContent;
 
-            const changes = diffLines(change.originalContent, change.newContent);
-            const newVaultContent = buildPartialContent(changes, groupIndex, true);
+                const changes = diffLines(change.originalContent, change.newContent);
+                const newVaultContent = buildPartialContent(changes, groupIndex, true);
 
-            const file = this.#plugin.app.vault.getAbstractFileByPath(change.path);
-            if (!(file instanceof TFile)) return;
+                const file = this.#plugin.app.vault.getAbstractFileByPath(change.path);
+                if (!(file instanceof TFile)) return;
 
-            const currentContent = await this.#plugin.app.vault.read(file);
-            if (currentContent !== change.originalContent) {
-                throw new Error(
-                    `File "${change.path}" was modified externally. Please review before accepting.`,
-                );
-            }
-            await this.#plugin.app.vault.modify(file, newVaultContent);
+                const currentContent = await this.#plugin.app.vault.read(file);
+                if (currentContent !== change.originalContent) {
+                    throw new Error(
+                        `File "${change.path}" was modified externally. Please review before accepting.`,
+                    );
+                }
+                await this.#plugin.app.vault.modify(file, newVaultContent);
 
-            change.originalContent = newVaultContent;
-            if (change.originalContent === change.newContent) {
-                entry.status = "accepted";
-            }
+                change.originalContent = newVaultContent;
+                if (change.originalContent === change.newContent) {
+                    entry.status = "accepted";
+                }
+            });
 
             this.scheduleSave();
-            // Dispatch immediately so in-memory consumers (PendingChangesBar) update,
-            // then again after delays so the editor decorations rebuild against the new document.
-            const notify = () => document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
-            notify();
-            setTimeout(notify, 100);
-            setTimeout(notify, 500);
+            this.notifyChange();
         } finally {
             this.#processingGroups.delete(entryId);
         }
@@ -269,22 +340,29 @@ export class PendingChangesStore {
         }
 
         this.scheduleSave();
-        document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
+        this.notifyChange();
     }
 
     /** Accept all pending changes for a thread. Returns paths that failed. */
     async acceptAll(threadId: string): Promise<string[]> {
-        const pending = this.#entries.filter((e) => e.threadId === threadId && e.status === "pending");
-        const failures: string[] = [];
-        for (const entry of pending) {
-            try {
-                await this.acceptChange(entry.id);
-            } catch (e) {
-                Logger.error(`[PendingChanges] Failed to accept ${entry.change.path}:`, e);
-                failures.push(entry.change.path);
+        if (this.#isBatchProcessing) return ["Batch operation already in progress"];
+        this.#isBatchProcessing = true;
+        try {
+            // Snapshot the list before iterating to avoid picking up entries added mid-loop
+            const pending = [...this.#entries.filter((e) => e.threadId === threadId && e.status === "pending")];
+            const failures: string[] = [];
+            for (const entry of pending) {
+                try {
+                    await this.acceptChange(entry.id);
+                } catch (e) {
+                    Logger.error(`[PendingChanges] Failed to accept ${entry.change.path}:`, e);
+                    failures.push(entry.change.path);
+                }
             }
+            return failures;
+        } finally {
+            this.#isBatchProcessing = false;
         }
-        return failures;
     }
 
     /** Reject all pending changes for a thread, reverting any partially-applied group writes. */
@@ -305,7 +383,7 @@ export class PendingChangesStore {
             entry.status = "rejected";
         }
         this.scheduleSave();
-        document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
+        this.notifyChange();
     }
 
     /** Get all entries for a thread. */
@@ -367,6 +445,22 @@ export class PendingChangesStore {
     removeThread(threadId: string): void {
         this.#entries = this.#entries.filter((e) => e.threadId !== threadId);
         this.scheduleSave();
+    }
+
+    /** Update entry paths when a vault file is renamed. */
+    #handleFileRename(oldPath: string, newPath: string): void {
+        let changed = false;
+        for (const entry of this.#entries) {
+            if (entry.status !== "pending") continue;
+            if (entry.change.path === oldPath) {
+                entry.change.path = newPath;
+                changed = true;
+            }
+        }
+        if (changed) {
+            this.scheduleSave();
+            this.notifyChange();
+        }
     }
 
     cleanup(): void {

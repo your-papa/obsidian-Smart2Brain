@@ -222,17 +222,11 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		description:
 			"Create a new markdown note in the vault. The change is staged for user approval — it will NOT be applied until the user accepts it.",
 	},
-	update_note: {
-		enabled: true,
-		name: "update_note",
-		description:
-			"Update the content of an existing markdown note by replacing the entire file. The change is staged for user approval with a diff view — it will NOT be applied until the user accepts it. Prefer edit_note for small changes.",
-	},
 	edit_note: {
 		enabled: true,
 		name: "edit_note",
 		description:
-			"Make targeted search-and-replace edits to an existing markdown note. More efficient than update_note for small changes — you only provide the specific parts to change. The change is staged for user approval with a diff view.",
+			"Make targeted search-and-replace edits to an existing markdown note. You only provide the specific parts to change. The change is staged for user approval with a diff view.",
 	},
 	delete_note: {
 		enabled: true,

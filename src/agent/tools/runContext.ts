@@ -5,9 +5,17 @@
  * LangChain tool signature.
  */
 
+import { Logger } from "../../utils/logging";
+
 let _currentThreadId: string | null = null;
 
 export function setCurrentThreadId(threadId: string | null): void {
+    if (threadId !== null && _currentThreadId !== null && _currentThreadId !== threadId) {
+        Logger.warn(
+            `[runContext] Overwriting active threadId "${_currentThreadId}" with "${threadId}". ` +
+            "This may indicate overlapping agent runs.",
+        );
+    }
     _currentThreadId = threadId;
 }
 
