@@ -37,6 +37,11 @@
   const plugin = getPlugin();
   const models = useAvailableModels();
 
+  const diffViewModeOptions = [
+    { display: "Two Pane (rendered markdown)", value: "two-pane" as const },
+    { display: "Word Diff (inline text)", value: "word-diff" as const },
+  ];
+
   // Helper to get all folders for folder suggestion
   function suggestFolders(): TFolder[] {
     return plugin.app.vault.getAllFolders(true);
@@ -676,6 +681,15 @@
           suggestFolders().filter((f) => f.path.toLowerCase().includes(q.toLowerCase()))}
         onSelected={(path: string) => (pluginData.targetFolder = path)}
         onSubmit={(path: string) => (pluginData.targetFolder = path)}
+      />
+    </SettingItem>
+
+    <SettingItem name="Diff View Mode" desc="How pending changes are displayed in reading view">
+      <Dropdown
+        type="options"
+        dropdown={diffViewModeOptions}
+        selected={pluginData.diffViewMode}
+        onchange={(v) => (pluginData.diffViewMode = v)}
       />
     </SettingItem>
   </SettingGroup>

@@ -4,7 +4,7 @@ import { Logger as Log } from "./utils/logging";
 import "./styles.css";
 import { AgentManager } from "./agent/AgentManager";
 import { inlineDiffPlugin } from "./editor/inlineDiffExtension";
-import { readingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
+import { createReadingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
 import { SearchModal } from "./components/modal/SearchModal";
 import { getQueryClient } from "./lib/query";
 import { SkillsService } from "./skills";
@@ -104,7 +104,7 @@ export default class SecondBrainPlugin extends Plugin {
 		this.registerEditorExtension(inlineDiffPlugin);
 
 		// Register reading view diff highlighting
-		this.registerMarkdownPostProcessor(readingViewDiffPostProcessor);
+		this.registerMarkdownPostProcessor(createReadingViewDiffPostProcessor(this));
 
 		// Re-render reading views when pending changes update
 		const refreshReadingViews = () => {

@@ -1,42 +1,48 @@
 <script lang="ts">
-import { Accordion } from "bits-ui";
-import { t } from "svelte-i18n";
-import ProviderItem from "../../components/settings/ProviderItem.svelte";
-import SettingGroup from "../../components/settings/SettingGroup.svelte";
-import SettingItem from "../../components/settings/SettingItem.svelte";
-import Button from "../../components/ui/Button.svelte";
-import Text from "../../components/ui/Text.svelte";
-import Toggle from "../../components/ui/Toggle.svelte";
-import { getData } from "../../stores/dataStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import { Logger } from "../../utils/logging";
-import { CustomProviderSetupModal } from "../custom-provider-setup/CustomProviderSetup";
+  import { Accordion } from "bits-ui";
+  import { t } from "svelte-i18n";
+  import ProviderItem from "../../components/settings/ProviderItem.svelte";
+  import SettingGroup from "../../components/settings/SettingGroup.svelte";
+  import SettingItem from "../../components/settings/SettingItem.svelte";
+  import Button from "../../components/ui/Button.svelte";
+  import Dropdown from "../../components/ui/Dropdown.svelte";
+  import Text from "../../components/ui/Text.svelte";
+  import Toggle from "../../components/ui/Toggle.svelte";
+  import { getData } from "../../stores/dataStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
+  import { Logger } from "../../utils/logging";
+  import { CustomProviderSetupModal } from "../custom-provider-setup/CustomProviderSetup";
 
-const pluginData = getData();
-const plugin = getPlugin();
+  const pluginData = getData();
+  const plugin = getPlugin();
 
-// Provider management state
-let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
-let activeProvider: string | undefined = $state(undefined);
+  const diffViewModeOptions = [
+    { display: "Two Pane (rendered markdown)", value: "two-pane" as const },
+    { display: "Word Diff (inline text)", value: "word-diff" as const },
+  ];
 
-const onAccordionClick = (providerId: string) => {
-	activeProvider = activeProvider === providerId ? undefined : providerId;
-};
+  // Provider management state
+  let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
+  let activeProvider: string | undefined = $state(undefined);
 
-// Sort providers: configured first, then unconfigured
-let sortedProviders = $derived(
-	pluginData.getAllProviderIds().sort((a: string, b: string) => {
-		const aConfigured = configuredProviderIds.includes(a);
-		const bConfigured = configuredProviderIds.includes(b);
-		if (aConfigured && !bConfigured) return -1;
-		if (!aConfigured && bConfigured) return 1;
-		return 0;
-	}),
-);
+  const onAccordionClick = (providerId: string) => {
+    activeProvider = activeProvider === providerId ? undefined : providerId;
+  };
 
-function handleAddCustomProvider() {
-	new CustomProviderSetupModal(plugin).open();
-}
+  // Sort providers: configured first, then unconfigured
+  let sortedProviders = $derived(
+    pluginData.getAllProviderIds().sort((a: string, b: string) => {
+      const aConfigured = configuredProviderIds.includes(a);
+      const bConfigured = configuredProviderIds.includes(b);
+      if (aConfigured && !bConfigured) return -1;
+      if (!aConfigured && bConfigured) return 1;
+      return 0;
+    }),
+  );
+
+  function handleAddCustomProvider() {
+    new CustomProviderSetupModal(plugin).open();
+  }
 </script>
 
 <!-- Providers -->
@@ -49,6 +55,18 @@ function handleAddCustomProvider() {
 
   <SettingItem name="Custom Provider" desc="Add an OpenAI-compatible API endpoint">
     <Button buttonText="Add Custom Provider" onClick={handleAddCustomProvider} />
+  </SettingItem>
+</SettingGroup>
+
+<!-- Chat Settings -->
+<SettingGroup heading="Chat">
+  <SettingItem name="Diff View Mode" desc="How pending changes are displayed in reading view">
+    <Dropdown
+      type="options"
+      dropdown={diffViewModeOptions}
+      selected={pluginData.diffViewMode}
+      onchange={(v) => (pluginData.diffViewMode = v)}
+    />
   </SettingItem>
 </SettingGroup>
 

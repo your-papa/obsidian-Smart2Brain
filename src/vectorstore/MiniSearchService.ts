@@ -183,9 +183,10 @@ export class MiniSearchService {
 			clearTimeout(this.saveTimeout);
 		}
 
-		this.saveTimeout = setTimeout(async () => {
-			await this.saveToStorage();
-		}, 5000); // 5 second debounce
+		this.saveTimeout = setTimeout(
+			() => void this.saveToStorage().catch((e) => Logger.error("[MiniSearch] Scheduled save failed:", e)),
+			5000, // 5 second debounce
+		);
 	}
 
 	/**

@@ -8,6 +8,7 @@ import type {
 	AgentsConfig,
 	BuiltInToolId,
 	DefaultEmbedModel,
+	DiffViewMode,
 	MCPServerConfig,
 	MCPServersConfig,
 	PluginData,
@@ -317,6 +318,9 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 	// Smart Graph View
 	smartGraphSettings: DEFAULT_SMART_GRAPH_SETTINGS,
+
+	// Diff view
+	diffViewMode: "two-pane",
 };
 
 export class PluginDataStore {
@@ -920,6 +924,16 @@ export class PluginDataStore {
 	}
 	set smartGraphSettings(val: SmartGraphSettings) {
 		this.#data.smartGraphSettings = val;
+		this.saveSettings();
+	}
+
+	// --- Diff View Mode ---
+
+	get diffViewMode(): DiffViewMode {
+		return this.#data.diffViewMode ?? "two-pane";
+	}
+	set diffViewMode(val: DiffViewMode) {
+		this.#data.diffViewMode = val;
 		this.saveSettings();
 	}
 

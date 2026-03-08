@@ -1061,7 +1061,7 @@ interface ChatSessionOptions {
 }
 
 export class ChatSession {
-	id: string;
+	id = $state<string>("");
 	messages: MessagePair[] = $state<MessagePair[]>([]);
 
 	// Streaming / lifecycle

@@ -2,6 +2,7 @@ import { type App, normalizePath } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
+import { genUUIDv7 } from "../../utils/uuid7Validator";
 import { getCurrentThreadId } from "./runContext";
 
 export function createCreateNoteTool(app: App) {
@@ -23,7 +24,7 @@ export function createCreateNoteTool(app: App) {
 				return `Error: A file already exists at "${normalized}". Use the edit_note tool to modify existing files.`;
 			}
 
-			const toolCallId = runManager?.runId ?? "unknown";
+			const toolCallId = runManager?.runId ?? genUUIDv7();
 			const threadId = getCurrentThreadId();
 
 			store.addChange(

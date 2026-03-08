@@ -282,6 +282,8 @@ export type AgentColor = "red" | "orange" | "yellow" | "green" | "cyan" | "blue"
  */
 export type AgentsConfig = Record<string, AgentConfig>;
 
+export type DiffViewMode = "word-diff" | "two-pane";
+
 export interface PluginData {
 	/** All provider states - built-in (pre-populated) + custom (user-created) */
 	providerConfig: Record<string, StoredProviderState>;
@@ -368,6 +370,13 @@ export interface PluginData {
 	 * Settings for the Smart Graph View.
 	 */
 	smartGraphSettings: SmartGraphSettings;
+
+	/**
+	 * Diff visualization mode in reading view.
+	 * - "two-pane": Stacked original/new with rendered markdown (default)
+	 * - "word-diff": Inline word-level diff (plain text)
+	 */
+	diffViewMode: DiffViewMode;
 }
 
 export type PluginDataKey = keyof PluginData;

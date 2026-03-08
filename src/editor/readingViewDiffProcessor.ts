@@ -1,7 +1,10 @@
 import type { Change } from "diff";
-import type { MarkdownPostProcessorContext } from "obsidian";
+import { MarkdownRenderer, setIcon, type MarkdownPostProcessorContext, type Plugin } from "obsidian";
 import { diffLines, diffWords } from "diff";
 import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
+import { getData } from "../stores/dataStore.svelte";
+import type { DiffViewMode } from "../types/plugin";
+import type { PendingChangeEntry } from "../types/shared";
 
 /** Count lines in a diff part value. */
 function countPartLines(value: string): number {
@@ -95,28 +98,16 @@ function buildLineMapper(
     };
 }
 
-/** Accumulator for extracting section-relevant text from a diff. */
-interface SectionAccumulator {
-    oldLine: number;
+/** Result of extracting section-relevant text from a diff. */
+interface SectionExtraction {
+    /** Unchanged lines in the section before the first change. */
+    prefixText: string;
+    /** Original text of the changed lines only. */
     sectionOld: string;
+    /** New text of the changed lines only. */
     sectionNew: string;
-}
-
-/** Collect lines from a removed/unchanged part that fall within a section range. */
-function collectLinesForSection(
-    lines: string[],
-    acc: SectionAccumulator,
-    lineStart: number,
-    lineEnd: number,
-    includeInNew: boolean,
-): void {
-    for (const line of lines) {
-        if (acc.oldLine >= lineStart && acc.oldLine <= lineEnd) {
-            acc.sectionOld += `${line}\n`;
-            if (includeInNew) acc.sectionNew += `${line}\n`;
-        }
-        acc.oldLine++;
-    }
+    /** Unchanged lines in the section after the last change. */
+    suffixText: string;
 }
 
 /** Render word-level diff spans into a container element. */
@@ -136,9 +127,94 @@ function renderWordDiff(el: HTMLElement, oldText: string, newText: string): void
     }
 }
 
+/** Accumulator for building a SectionExtraction. */
+interface ExtractionState {
+    prefixText: string;
+    sectionOld: string;
+    sectionNew: string;
+    suffixText: string;
+    oldLine: number;
+    seenChange: boolean;
+}
+
+/** Process a removed diff part, collecting lines within the section range. */
+function processRemovedPart(lines: string[], lineStart: number, lineEnd: number, state: ExtractionState): void {
+    for (const line of lines) {
+        if (state.oldLine >= lineStart && state.oldLine <= lineEnd) {
+            state.seenChange = true;
+            state.sectionOld += `${line}\n`;
+        }
+        state.oldLine++;
+    }
+}
+
+/** Process an unchanged diff part, routing lines to prefix or suffix. */
+function processUnchangedPart(lines: string[], lineStart: number, lineEnd: number, state: ExtractionState): void {
+    for (const line of lines) {
+        if (state.oldLine >= lineStart && state.oldLine <= lineEnd) {
+            if (state.seenChange) {
+                state.suffixText += `${line}\n`;
+            } else {
+                state.prefixText += `${line}\n`;
+            }
+        }
+        state.oldLine++;
+    }
+}
+
+/**
+ * Extract the old and new section text from the line-level diff,
+ * separating unchanged prefix/suffix lines from the actual changed content.
+ */
+function extractSectionTexts(
+    changes: Change[],
+    lineStart: number,
+    lineEnd: number,
+): SectionExtraction {
+    const state: ExtractionState = {
+        prefixText: "", sectionOld: "", sectionNew: "", suffixText: "",
+        oldLine: 0, seenChange: false,
+    };
+
+    for (const part of changes) {
+        if (part.value === "") continue;
+        const partLines = part.value.replace(/\n$/, "").split("\n");
+
+        if (part.removed) {
+            processRemovedPart(partLines, lineStart, lineEnd, state);
+        } else if (part.added) {
+            const insertionPoint = Math.max(0, state.oldLine - 1);
+            if (insertionPoint >= lineStart && insertionPoint <= lineEnd) {
+                state.seenChange = true;
+                state.sectionNew += part.value;
+            }
+        } else {
+            processUnchangedPart(partLines, lineStart, lineEnd, state);
+        }
+    }
+
+    return {
+        prefixText: state.prefixText,
+        sectionOld: state.sectionOld,
+        sectionNew: state.sectionNew,
+        suffixText: state.suffixText,
+    };
+}
+
+/** Append unchanged text as a div to a parent element. */
+function appendContextText(parent: HTMLElement, text: string, className: string): void {
+    if (!text) return;
+    const div = document.createElement("div");
+    div.className = className;
+    div.textContent = text.trimEnd();
+    parent.appendChild(div);
+}
+
 /**
  * Extract section-relevant text from the line-level diff, then apply
- * word-level diffing and replace the section element's content inline.
+ * word-level diffing. Unchanged prefix/suffix lines within the section
+ * are preserved as separate elements so the action bar and diff content
+ * only cover the actual change.
  */
 function applyInlineWordDiff(
     el: HTMLElement,
@@ -146,29 +222,75 @@ function applyInlineWordDiff(
     lineStart: number,
     lineEnd: number,
 ): void {
-    const acc: SectionAccumulator = { oldLine: 0, sectionOld: "", sectionNew: "" };
+    const { prefixText, sectionOld, sectionNew, suffixText } = extractSectionTexts(changes, lineStart, lineEnd);
+    if (sectionOld === sectionNew) return;
 
-    for (const part of changes) {
-        if (part.value === "") continue;
-        const partLines = part.value.replace(/\n$/, "").split("\n");
+    el.empty();
+    appendContextText(el, prefixText, "ssb-diff-context");
 
-        if (part.removed) {
-            collectLinesForSection(partLines, acc, lineStart, lineEnd, false);
-        } else if (part.added) {
-            const insertionPoint = Math.max(0, acc.oldLine - 1);
-            if (insertionPoint >= lineStart && insertionPoint <= lineEnd) {
-                acc.sectionNew += part.value;
-            }
-        } else {
-            collectLinesForSection(partLines, acc, lineStart, lineEnd, true);
-        }
-    }
+    const diffContent = document.createElement("div");
+    diffContent.className = "ssb-diff-content";
+    renderWordDiff(diffContent, sectionOld, sectionNew);
+    el.appendChild(diffContent);
 
-    if (acc.sectionOld === acc.sectionNew) return;
-    renderWordDiff(el, acc.sectionOld, acc.sectionNew);
+    appendContextText(el, suffixText, "ssb-diff-context");
 }
 
-function createReadingDiffActionBar(entryId: string, groupIndex: number): HTMLElement {
+/**
+ * Render a two-pane stacked diff: the original section (red tint) on top,
+ * the new section (green tint) below, both rendered as full markdown.
+ */
+async function applyTwoPaneDiff(
+    el: HTMLElement,
+    changes: Change[],
+    lineStart: number,
+    lineEnd: number,
+    sourcePath: string,
+    plugin: Plugin,
+): Promise<void> {
+    const { prefixText, sectionOld, sectionNew, suffixText } = extractSectionTexts(changes, lineStart, lineEnd);
+    if (sectionOld === sectionNew) return;
+
+    el.empty();
+    appendContextText(el, prefixText, "ssb-diff-context");
+
+    const diffContent = document.createElement("div");
+    diffContent.className = "ssb-diff-content";
+
+    const container = document.createElement("div");
+    container.className = "ssb-diff-two-pane";
+
+    const oldPane = document.createElement("div");
+    oldPane.className = "ssb-diff-pane-removed";
+    await MarkdownRenderer.render(plugin.app, sectionOld.trimEnd(), oldPane, sourcePath, plugin);
+    container.appendChild(oldPane);
+
+    const newPane = document.createElement("div");
+    newPane.className = "ssb-diff-pane-added";
+    await MarkdownRenderer.render(plugin.app, sectionNew.trimEnd(), newPane, sourcePath, plugin);
+    container.appendChild(newPane);
+
+    diffContent.appendChild(container);
+    el.appendChild(diffContent);
+
+    appendContextText(el, suffixText, "ssb-diff-context");
+}
+
+/** Context needed to re-render a diff section in a different mode. */
+interface DiffRenderContext {
+    changes: Change[];
+    origLineStart: number;
+    origLineEnd: number;
+    filePath: string;
+    plugin: Plugin;
+}
+
+function createReadingDiffActionBar(
+    entryId: string,
+    groupIndex: number,
+    sectionEl: HTMLElement,
+    renderCtx: DiffRenderContext,
+): HTMLElement {
     const bar = document.createElement("div");
     bar.className = "ssb-diff-actions-bar";
 
@@ -176,6 +298,30 @@ function createReadingDiffActionBar(entryId: string, groupIndex: number): HTMLEl
     label.className = "ssb-diff-actions-label";
     label.textContent = "Pending change";
     bar.appendChild(label);
+
+    // Toggle view mode icon (visible on hover via CSS)
+    const toggleBtn = document.createElement("button");
+    toggleBtn.className = "ssb-diff-toggle-btn";
+    toggleBtn.setAttribute("aria-label", "Toggle diff view");
+    let currentMode: DiffViewMode;
+    try {
+        currentMode = getData().diffViewMode;
+    } catch {
+        currentMode = "word-diff";
+    }
+    setIcon(toggleBtn, currentMode === "word-diff" ? "columns-2" : "file-diff");
+    toggleBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+            const data = getData();
+            data.diffViewMode = data.diffViewMode === "word-diff" ? "two-pane" : "word-diff";
+        } catch {
+            /* data store not initialized */
+        }
+        document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
+    });
+    bar.appendChild(toggleBtn);
 
     const acceptBtn = document.createElement("button");
     acceptBtn.className = "ssb-diff-accept-btn";
@@ -206,6 +352,52 @@ function createReadingDiffActionBar(entryId: string, groupIndex: number): HTMLEl
     bar.appendChild(rejectBtn);
 
     return bar;
+}
+
+/** Re-render only the diff content of a section element, preserving the action bar and context. */
+function rerenderDiffContent(
+    el: HTMLElement,
+    ctx: DiffRenderContext,
+    mode: DiffViewMode,
+): void {
+    // Remove only the diff content container — keep action bar and context text
+    const oldDiffContent = el.querySelector(".ssb-diff-content");
+    if (!oldDiffContent) return;
+    const insertBefore = oldDiffContent.nextSibling;
+    oldDiffContent.remove();
+
+    const { sectionOld, sectionNew } = extractSectionTexts(ctx.changes, ctx.origLineStart, ctx.origLineEnd);
+    if (sectionOld === sectionNew) return;
+
+    const diffContent = document.createElement("div");
+    diffContent.className = "ssb-diff-content";
+
+    if (mode === "word-diff") {
+        renderWordDiff(diffContent, sectionOld, sectionNew);
+    } else {
+        const container = document.createElement("div");
+        container.className = "ssb-diff-two-pane";
+
+        const oldPane = document.createElement("div");
+        oldPane.className = "ssb-diff-pane-removed";
+        const newPane = document.createElement("div");
+        newPane.className = "ssb-diff-pane-added";
+
+        container.appendChild(oldPane);
+        container.appendChild(newPane);
+        diffContent.appendChild(container);
+
+        void Promise.all([
+            MarkdownRenderer.render(ctx.plugin.app, sectionOld.trimEnd(), oldPane, ctx.filePath, ctx.plugin),
+            MarkdownRenderer.render(ctx.plugin.app, sectionNew.trimEnd(), newPane, ctx.filePath, ctx.plugin),
+        ]);
+    }
+
+    if (insertBefore) {
+        insertBefore.before(diffContent);
+    } else {
+        el.appendChild(diffContent);
+    }
 }
 
 /**
@@ -275,26 +467,49 @@ function computeGroupIndexForSection(
     return -1;
 }
 
-/**
- * Markdown post-processor that highlights sections in reading view
- * when they overlap with pending update changes, and adds accept/reject buttons.
- */
-export function readingViewDiffPostProcessor(el: HTMLElement, ctx: MarkdownPostProcessorContext) {
-    const filePath = ctx.sourcePath;
-    if (!filePath) return;
-
-    let store: ReturnType<typeof getPendingChangesStore>;
+/** Apply the configured diff visualization to an affected section. */
+function applyDiff(
+    el: HTMLElement,
+    changes: Change[],
+    origLineStart: number,
+    origLineEnd: number,
+    filePath: string,
+    plugin: Plugin,
+): void {
+    let mode: DiffViewMode = "word-diff";
     try {
-        store = getPendingChangesStore();
+        mode = getData().diffViewMode;
     } catch {
-        return;
+        // Data store not ready yet — fall back to word-diff
     }
+    if (mode === "word-diff") {
+        applyInlineWordDiff(el, changes, origLineStart, origLineEnd);
+    } else {
+        applyTwoPaneDiff(el, changes, origLineStart, origLineEnd, filePath, plugin).catch(() => {
+            // Two-pane rendering failed — fall back to word-diff
+            applyInlineWordDiff(el, changes, origLineStart, origLineEnd);
+        });
+    }
+}
 
-    const pendingUpdates = store.getPendingUpdatesForPath(filePath);
-    if (pendingUpdates.length === 0) return;
+/** Check if a section overlaps affected lines and return true if it does. */
+function sectionHasAffectedLine(affectedLines: Set<number>, origLineStart: number, origLineEnd: number): boolean {
+    for (let line = origLineStart; line <= origLineEnd; line++) {
+        if (affectedLines.has(line)) return true;
+    }
+    return false;
+}
 
-    const entry = pendingUpdates.at(-1);
-    if (!entry) return;
+/**
+ * Core logic for processing a section element for diff highlighting.
+ */
+function processSection(
+    el: HTMLElement,
+    entry: PendingChangeEntry,
+    plugin: Plugin,
+    filePath: string,
+    sectionInfo: { text: string; lineStart: number; lineEnd: number },
+): void {
     const change = entry.change;
     if (change.type !== "update") return;
 
@@ -302,33 +517,72 @@ export function readingViewDiffPostProcessor(el: HTMLElement, ctx: MarkdownPostP
     const affectedLines = computeOriginalAffectedLines(change.originalContent, change.newContent);
     if (affectedLines.size === 0) return;
 
-    const sectionInfo = ctx.getSectionInfo(el);
-    if (!sectionInfo) return;
-
-    const { lineStart, lineEnd } = sectionInfo;
-
-    // Map section line numbers from current-content-space to originalContent-space
     const mapLine = buildLineMapper(change.originalContent, sectionInfo.text);
-    const origLineStart = mapLine(lineStart);
-    const origLineEnd = mapLine(lineEnd);
+    const origLineStart = mapLine(sectionInfo.lineStart);
+    const origLineEnd = mapLine(sectionInfo.lineEnd);
 
-    // Skip sections in user-added/edited regions
     if (origLineStart === null || origLineEnd === null) return;
+    if (!sectionHasAffectedLine(affectedLines, origLineStart, origLineEnd)) return;
 
-    // Check if any affected line falls within this section's original range
-    for (let line = origLineStart; line <= origLineEnd; line++) {
-        if (affectedLines.has(line)) {
-            // Replace section content with inline word-diff (using original-space line range)
-            applyInlineWordDiff(el, changes, origLineStart, origLineEnd);
+    applyDiff(el, changes, origLineStart, origLineEnd, filePath, plugin);
 
-            // Insert action bar at top if not already present
-            if (!el.querySelector(".ssb-diff-actions-bar")) {
-                const groupIndex = computeGroupIndexForSection(changes, origLineStart, origLineEnd);
-                if (groupIndex === -1) return; // no matched group — don't show misleading action buttons
-                const actionBar = createReadingDiffActionBar(entry.id, groupIndex);
-                el.insertBefore(actionBar, el.firstChild);
+    if (!el.querySelector(".ssb-diff-actions-bar")) {
+        const groupIndex = computeGroupIndexForSection(changes, origLineStart, origLineEnd);
+        if (groupIndex === -1) return;
+        const renderCtx: DiffRenderContext = { changes, origLineStart, origLineEnd, filePath, plugin };
+        const actionBar = createReadingDiffActionBar(entry.id, groupIndex, el, renderCtx);
+        const diffContent = el.querySelector(".ssb-diff-content");
+        if (diffContent) {
+            diffContent.before(actionBar);
+        } else {
+            el.insertBefore(actionBar, el.firstChild);
+        }
+
+        // Sync with global mode changes (e.g. toggled from edit view or another section)
+        const syncHandler = () => {
+            if (!el.isConnected) {
+                document.removeEventListener("ssb-pending-changes-updated", syncHandler);
+                return;
             }
+            let mode: DiffViewMode = "word-diff";
+            try { mode = getData().diffViewMode; } catch { /* */ }
+            const toggleBtn = el.querySelector<HTMLElement>(".ssb-diff-toggle-btn");
+            if (toggleBtn) setIcon(toggleBtn, mode === "word-diff" ? "columns-2" : "file-diff");
+            rerenderDiffContent(el, renderCtx, mode);
+        };
+        document.addEventListener("ssb-pending-changes-updated", syncHandler);
+    }
+}
+
+/**
+ * Create a factory for the reading-view diff post-processor.
+ * The plugin instance is captured so MarkdownRenderer can be used for two-pane diffs.
+ */
+export function createReadingViewDiffPostProcessor(plugin: Plugin) {
+    return (el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
+        const filePath = ctx.sourcePath;
+        if (!filePath) return;
+
+        let store: ReturnType<typeof getPendingChangesStore>;
+        try {
+            store = getPendingChangesStore();
+        } catch {
             return;
         }
-    }
+
+        const pendingUpdates = store.getPendingUpdatesForPath(filePath);
+        if (pendingUpdates.length === 0) return;
+
+        const entry = pendingUpdates.at(-1);
+        if (!entry) return;
+
+        const sectionInfo = ctx.getSectionInfo(el);
+        if (!sectionInfo) return;
+
+        try {
+            processSection(el, entry, plugin, filePath, sectionInfo);
+        } catch {
+            // Silently recover — don't break Obsidian's rendering pipeline
+        }
+    };
 }

@@ -3,6 +3,7 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { resolveVaultFileDetailed } from "../../utils/attachments";
+import { genUUIDv7 } from "../../utils/uuid7Validator";
 import { getCurrentThreadId } from "./runContext";
 
 export function createDeleteNoteTool(app: App) {
@@ -37,7 +38,7 @@ export function createDeleteNoteTool(app: App) {
 
             const originalContent = await app.vault.read(file);
             const threadId = getCurrentThreadId();
-            const toolCallId = runManager?.runId ?? "unknown";
+            const toolCallId = runManager?.runId ?? genUUIDv7();
 
             store.addChange(
                 { type: "delete", path: file.path, originalContent },

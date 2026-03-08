@@ -119,10 +119,12 @@
 }
 
 .ssb-diff-word-added {
+	display: inline;
 	background-color: rgba(0, 180, 0, 0.25);
 	border-radius: 2px;
 	padding: 0 1px;
 	font-weight: 600;
+	white-space: pre-wrap;
 }
 
 /* Action bar for pending change accept/reject buttons */
@@ -151,6 +153,29 @@
 	border-radius: 4px;
 	cursor: pointer;
 	border: 1px solid var(--background-modifier-border);
+}
+
+.ssb-diff-toggle-btn {
+	opacity: 0;
+	transition: opacity 0.15s ease;
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: var(--text-muted);
+	padding: 2px;
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+}
+
+.ssb-diff-toggle-btn:hover {
+	color: var(--text-normal);
+	background-color: var(--background-modifier-hover);
+}
+
+.ssb-diff-actions-bar:hover .ssb-diff-toggle-btn,
+.ssb-diff-action-bar-widget:hover .ssb-diff-toggle-btn {
+	opacity: 1;
 }
 
 .ssb-diff-accept-btn {
@@ -182,4 +207,51 @@
 	border-radius: 2px;
 	padding: 0 1px;
 	font-weight: 600;
+}
+
+/* Two-pane stacked diff (reading view) */
+.ssb-diff-two-pane {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	border-radius: 4px;
+	overflow: hidden;
+	border: 1px solid var(--background-modifier-border);
+}
+
+.ssb-diff-pane-removed,
+.ssb-diff-pane-added {
+	padding: 4px 12px;
+}
+
+.ssb-diff-pane-removed > *:first-child,
+.ssb-diff-pane-added > *:first-child {
+	margin-top: 0;
+}
+
+.ssb-diff-pane-removed > *:last-child,
+.ssb-diff-pane-added > *:last-child {
+	margin-bottom: 0;
+}
+
+.ssb-diff-pane-removed {
+	background-color: rgba(220, 50, 47, 0.1);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ssb-diff-pane-added {
+	background-color: rgba(0, 180, 0, 0.1);
+}
+
+/* Edit view two-pane container */
+.ssb-diff-edit-two-pane-container {
+	margin: 4px 0;
+}
+
+.ssb-diff-two-pane pre {
+	margin: 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+	font-family: var(--font-monospace);
+	font-size: var(--font-smaller);
 }

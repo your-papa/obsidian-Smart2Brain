@@ -135,7 +135,11 @@ export class PendingChangesStore {
             this.#handleFileRename(oldPath, file.path);
         });
         this.#plugin.registerEvent(this.#renameHandler);
-        this.notifyChange();
+
+        // Trigger re-renders for any reading views already rendered before the store loaded
+        if (this.#entries.length > 0) {
+            this.notifyChange();
+        }
     }
 
     private get storagePath(): string {
@@ -144,7 +148,10 @@ export class PendingChangesStore {
 
     private scheduleSave(): void {
         if (this.#saveTimer) clearTimeout(this.#saveTimer);
-        this.#saveTimer = setTimeout(() => this.saveToDisk(), SAVE_DEBOUNCE_MS);
+        this.#saveTimer = setTimeout(
+            () => void this.saveToDisk().catch((e) => Logger.error("[PendingChanges] Failed to save:", e)),
+            SAVE_DEBOUNCE_MS,
+        );
     }
 
     private async saveToDisk(): Promise<void> {
@@ -220,33 +227,36 @@ export class PendingChangesStore {
 
         const app = this.#plugin.app;
         const change = entry.change;
+        const normalizedPath = normalizePath(change.path);
 
-        if (change.type === "create") {
-            const dir = change.path.substring(0, change.path.lastIndexOf("/"));
-            if (dir && !(await app.vault.adapter.exists(dir))) {
-                await app.vault.createFolder(dir);
+        await this.withFileLock(normalizedPath, async () => {
+            if (change.type === "create") {
+                const dir = normalizedPath.substring(0, normalizedPath.lastIndexOf("/"));
+                if (dir && !(await app.vault.adapter.exists(dir))) {
+                    await app.vault.createFolder(dir);
+                }
+                await app.vault.create(normalizedPath, change.content);
+            } else if (change.type === "update") {
+                const file = app.vault.getAbstractFileByPath(normalizedPath);
+                if (!(file instanceof TFile)) {
+                    throw new TypeError(`Cannot apply update — file not found: ${change.path}`);
+                }
+                // Conflict detection: compare current content with staged original
+                const currentContent = await app.vault.read(file);
+                if (currentContent !== change.originalContent) {
+                    throw new Error(
+                        `File "${change.path}" was modified after the change was proposed. Please review and try again.`,
+                    );
+                }
+                await app.vault.modify(file, change.newContent);
+            } else if (change.type === "delete") {
+                const file = app.vault.getAbstractFileByPath(normalizedPath);
+                if (!(file instanceof TFile)) {
+                    throw new TypeError(`Cannot apply delete — file not found: ${change.path}`);
+                }
+                await app.vault.trash(file, true);
             }
-            await app.vault.create(normalizePath(change.path), change.content);
-        } else if (change.type === "update") {
-            const file = app.vault.getAbstractFileByPath(change.path);
-            if (!(file instanceof TFile)) {
-                throw new TypeError(`Cannot apply update — file not found: ${change.path}`);
-            }
-            // Conflict detection: compare current content with staged original
-            const currentContent = await app.vault.read(file);
-            if (currentContent !== change.originalContent) {
-                throw new Error(
-                    `File "${change.path}" was modified after the change was proposed. Please review and try again.`,
-                );
-            }
-            await app.vault.modify(file, change.newContent);
-        } else if (change.type === "delete") {
-            const file = app.vault.getAbstractFileByPath(change.path);
-            if (!(file instanceof TFile)) {
-                throw new TypeError(`Cannot apply delete — file not found: ${change.path}`);
-            }
-            await app.vault.trash(file, true);
-        }
+        });
 
         entry.status = "accepted";
         this.scheduleSave();
@@ -438,16 +448,24 @@ export class PendingChangesStore {
 
     /** Remove all resolved (accepted/rejected) entries for a thread. */
     cleanupResolved(threadId: string): void {
+        const beforeLength = this.#entries.length;
         this.#entries = this.#entries.filter(
             (e) => e.threadId !== threadId || e.status === "pending",
         );
         this.scheduleSave();
+        if (this.#entries.length !== beforeLength) {
+            this.notifyChange();
+        }
     }
 
     /** Remove all entries for a thread (e.g., when thread is deleted). */
     removeThread(threadId: string): void {
+        const beforeLength = this.#entries.length;
         this.#entries = this.#entries.filter((e) => e.threadId !== threadId);
         this.scheduleSave();
+        if (this.#entries.length !== beforeLength) {
+            this.notifyChange();
+        }
     }
 
     /** Update entry paths when a vault file is renamed. */
@@ -471,7 +489,7 @@ export class PendingChangesStore {
             clearTimeout(this.#saveTimer);
             this.#saveTimer = null;
             // Flush any pending writes so data isn't lost on unload
-            void this.saveToDisk();
+            void this.saveToDisk().catch((e) => Logger.error("[PendingChanges] Failed to save on cleanup:", e));
         }
         _store = null;
     }
