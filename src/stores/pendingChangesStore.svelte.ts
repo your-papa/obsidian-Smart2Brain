@@ -135,6 +135,7 @@ export class PendingChangesStore {
             this.#handleFileRename(oldPath, file.path);
         });
         this.#plugin.registerEvent(this.#renameHandler);
+        this.notifyChange();
     }
 
     private get storagePath(): string {
