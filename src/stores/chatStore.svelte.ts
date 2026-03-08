@@ -1759,20 +1759,23 @@ export class Messenger {
 			}
 		}
 
+		// When an agent is found, return its stored chatModel rather than
+		// constructing one from the generation's provider/model fields.
+		// The generation metadata comes from LLM response_metadata which can
+		// contain incorrect values (e.g. @langchain/openai hardcodes
+		// model_provider: "openai" even when used with OpenRouter).
 		if (generatedAgent) {
 			return {
 				agentId: generatedAgent.id,
-				model: {
-					provider,
-					model,
-					modelConfig: this.getModelConfigForSelection(generatedAgent.chatModel, provider, model),
-				},
+				model: generatedAgent.chatModel ?? null,
 			};
 		}
 
-		// Provider is still configured but no agent has this exact model.
-		// Use the generation's model with the fallback agent instead of
-		// discarding it, which would leave the agent with a stale/null chatModel.
+		// No agent matched — check if the generation's provider is still configured.
+		// Only apply the generation's model if the provider is actually available,
+		// otherwise fall back to the agent's stored model to avoid overwriting
+		// with an unconfigured provider (e.g. "openai" from response_metadata
+		// when the actual provider is "openrouter").
 		if (data.getConfiguredProviders().includes(provider)) {
 			return {
 				agentId: fallbackAgent.id,
