@@ -22,7 +22,7 @@
   import UserAttachmentImages from "./UserAttachmentImages.svelte";
   import ToolCallsSection from "./ToolCallsSection.svelte";
 
-  const WRITE_TOOL_NAMES = new Set(["create_note", "update_note", "delete_note"]);
+  const WRITE_TOOL_NAMES = new Set(["create_note", "update_note", "delete_note", "edit_note"]);
 
   interface Props {
     messenger: Messenger;

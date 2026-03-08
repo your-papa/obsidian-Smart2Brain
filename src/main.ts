@@ -123,6 +123,7 @@ export default class SecondBrainPlugin extends Plugin {
 		Log.info("Unloading plugin");
 		if (this.vectorStoreService) void this.vectorStoreService.cleanup();
 		if (this.agentManager) this.agentManager.cleanup();
+		if (this.pendingChangesStore) this.pendingChangesStore.cleanup();
 	}
 
 	async createNewChat() {

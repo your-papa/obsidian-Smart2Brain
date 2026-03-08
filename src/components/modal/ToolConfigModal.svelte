@@ -123,6 +123,7 @@ const toolDisplayNames: Record<BuiltInToolId, string> = {
 	create_note: "Create Note",
 	update_note: "Update Note",
 	delete_note: "Delete Note",
+	edit_note: "Edit Note",
 };
 
 onMount(() => {

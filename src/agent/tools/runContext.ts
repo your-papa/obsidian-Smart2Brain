@@ -8,12 +8,12 @@
 let _currentThreadId: string | null = null;
 
 export function setCurrentThreadId(threadId: string | null): void {
-	_currentThreadId = threadId;
+    _currentThreadId = threadId;
 }
 
 export function getCurrentThreadId(): string {
-	if (!_currentThreadId) {
-		throw new Error("No active agent run — cannot determine threadId");
-	}
-	return _currentThreadId;
+    if (!_currentThreadId) {
+        throw new Error("No active agent run — cannot determine threadId");
+    }
+    return _currentThreadId;
 }

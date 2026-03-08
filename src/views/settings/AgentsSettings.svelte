@@ -455,6 +455,11 @@ const TOOLS: ToolInfo[] = [
 		defaultName: "Delete Note",
 		defaultDescription: "Delete a markdown note from the vault. Changes are staged for user approval before being applied.",
 	},
+	{
+		id: "edit_note",
+		defaultName: "Edit Note",
+		defaultDescription: "Make targeted search-and-replace edits to an existing markdown note. Changes are staged for user approval before being applied.",
+	},
 ];
 
 function getToolDisplayName(toolId: BuiltInToolId): string {
