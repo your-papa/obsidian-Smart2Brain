@@ -14,6 +14,13 @@
 export type ProjectionMethod = "pca" | "umap";
 
 /**
+ * Clustering algorithm used for grouping document embeddings.
+ * - "kmeans": K-Means with cosine distance (requires specifying K or auto-K)
+ * - "hdbscan": Hierarchical Density-Based Spatial Clustering (auto-detects cluster count)
+ */
+export type ClusteringAlgorithm = "kmeans" | "hdbscan";
+
+/**
  * The type of relationship an edge represents.
  * - "wiki": An explicit wiki link between notes in Obsidian
  * - "semantic": An inferred similarity edge from embedding cosine similarity
@@ -106,6 +113,12 @@ export interface SmartGraphSettings {
     graphChatModel: import("../stores/chatStore.svelte").ChatModel | null;
     /** Whether to automatically generate cluster labels after clustering */
     autoLabelClusters: boolean;
+    /** Clustering algorithm to use */
+    clusteringAlgorithm: import("./graph").ClusteringAlgorithm;
+    /** Minimum cluster size for HDBSCAN */
+    minClusterSize: number;
+    /** Whether to run d3-force simulation (false = show raw projection positions) */
+    useForceLayout: boolean;
 }
 
 /**
@@ -127,6 +140,9 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
     showSemanticEdges: true,
     graphChatModel: null,
     autoLabelClusters: false,
+    clusteringAlgorithm: "kmeans",
+    minClusterSize: 5,
+    useForceLayout: true,
 };
 
 /**

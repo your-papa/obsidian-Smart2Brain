@@ -23,6 +23,7 @@
     discoveryMode?: boolean;
     showSemanticEdges?: boolean;
     showWikiLinks?: boolean;
+    useForceLayout?: boolean;
     focusedCluster?: number | null;
     clusterLabels?: Record<number, string>;
     isLabeling?: boolean;
@@ -42,6 +43,7 @@
     discoveryMode = false,
     showSemanticEdges = true,
     showWikiLinks = true,
+    useForceLayout = true,
     focusedCluster = null,
     clusterLabels = {},
     isLabeling = false,
@@ -1174,16 +1176,19 @@
     // Create mutable copies for d3-force
     simNodes = data.nodes.map((n) => {
       const sn: SimNode = { ...n };
-      // Restore previous positions if the node existed before
-      const old = oldPositions.get(n.id);
-      if (old) {
-        sn.x = old.x;
-        sn.y = old.y;
-      }
-      // Restore pinned state
-      if (pinnedNodes.has(n.id) && old) {
-        sn.fx = old.x;
-        sn.fy = old.y;
+      // When force layout is active, restore previous positions for smooth transitions.
+      // When off, always use the fresh projection coordinates from graphData.
+      if (useForceLayout) {
+        const old = oldPositions.get(n.id);
+        if (old) {
+          sn.x = old.x;
+          sn.y = old.y;
+        }
+        // Restore pinned state
+        if (pinnedNodes.has(n.id) && old) {
+          sn.fx = old.x;
+          sn.fy = old.y;
+        }
       }
       return sn;
     });
@@ -1226,6 +1231,15 @@
       if (!existing || link.weight > existing.weight) {
         edgeLookup.set(ek, link);
       }
+    }
+
+    // When force layout is disabled, use raw projection positions and render once
+    if (!useForceLayout) {
+      needsInitialFit = true;
+      initialFitTickCount = 0;
+      fitToView();
+      render();
+      return;
     }
 
     // Compute per-cluster centroids in 2D for cluster cohesion force
@@ -1288,7 +1302,7 @@
 
   // Hot-update force parameters without full rebuild
   $effect(() => {
-    if (!simulation) return;
+    if (!simulation || !useForceLayout) return;
     const _charge = chargeStrength;
     const _link = linkDistance;
     const _nodeSize = nodeSize;

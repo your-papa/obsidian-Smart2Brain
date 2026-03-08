@@ -14,8 +14,7 @@ import { getAllTags } from "obsidian";
 
 import type { DocumentVector } from "../../vectorstore/types";
 import { cosineSimilarity } from "../../vectorstore/similarity";
-import { kMeans, suggestK, type KMeansResult } from "../../utils/clustering";
-import { project2D } from "../../utils/projection";
+import { kMeansAsync, suggestKAsync, hdbscanAsync, project2DAsync } from "../../utils/computeWorkerManager";
 import { type GraphData, type GraphEdge, type GraphNode, generateClusterColors, type SmartGraphSettings } from "../../types/graph";
 
 // ============================================================================
@@ -242,7 +241,7 @@ export async function buildGraphStructure(
     }
 
     // Project vectors into 2D so positions reflect semantic similarity
-    const positions = await project2D(vectors, settings.projectionMethod);
+    const positions = await project2DAsync(vectors, settings.projectionMethod);
 
     // Create nodes — cluster/color intentionally omitted (applied later)
     const nodes: GraphNode[] = [];
@@ -290,38 +289,69 @@ export interface ClusterResult {
 }
 
 /**
- * Compute K-Means cluster assignments for the given vectors.
+ * Compute cluster assignments for the given vectors using the configured algorithm.
  *
  * @returns A map from document path to its cluster number and display colour,
  *          plus the K that was used.
  */
-export function computeClusters(
+export async function computeClusters(
     filteredDocs: DocumentVector[],
     vectors: Float32Array[],
-    settings: Pick<SmartGraphSettings, "defaultK" | "autoK">,
+    settings: Pick<SmartGraphSettings, "defaultK" | "autoK" | "clusteringAlgorithm" | "minClusterSize">,
     themeColors?: string[],
-): ClusterResult {
+    graphData?: GraphData,
+): Promise<ClusterResult> {
     if (filteredDocs.length === 0 || vectors.length === 0) {
         return { clusterMap: new Map(), k: 0 };
     }
 
     let k: number;
-    let clusterResult: KMeansResult;
+    let clusterLabels: number[];
 
-    if (settings.autoK) {
-        const suggested = suggestK(vectors, 2, Math.min(10, Math.floor(vectors.length / 2)));
+    if (settings.clusteringAlgorithm === "hdbscan") {
+        // HDBSCAN works best on low-dimensional data. When projected 2D
+        // positions are available, cluster on those with Euclidean distance
+        // so that clusters match the visual layout the user sees.
+        let hdbVectors = vectors;
+        let metric: "cosine" | "euclidean" = "cosine";
+
+        if (graphData && graphData.nodes.length > 0) {
+            const pathToPos = new Map<string, { x: number; y: number }>();
+            for (const node of graphData.nodes) {
+                pathToPos.set(node.id, { x: node.x, y: node.y });
+            }
+
+            const positions: Float32Array[] = [];
+            for (const doc of filteredDocs) {
+                const pos = pathToPos.get(doc.path);
+                if (pos) {
+                    positions.push(new Float32Array([pos.x, pos.y]));
+                } else {
+                    positions.push(new Float32Array([0, 0]));
+                }
+            }
+            hdbVectors = positions;
+            metric = "euclidean";
+        }
+
+        const result = await hdbscanAsync(hdbVectors, settings.minClusterSize, undefined, metric);
+        k = result.numClusters;
+        clusterLabels = result.labels;
+    } else if (settings.autoK) {
+        const suggested = await suggestKAsync(vectors, 2, Math.min(10, Math.floor(vectors.length / 2)));
         k = suggested.k;
-        clusterResult = suggested.result;
+        clusterLabels = suggested.result.labels;
     } else {
         k = Math.min(settings.defaultK, vectors.length - 1);
-        clusterResult = kMeans(vectors, Math.max(1, k));
+        const clusterResult = await kMeansAsync(vectors, Math.max(1, k));
+        clusterLabels = clusterResult.labels;
     }
 
     const clusterColors = generateClusterColors(Math.max(1, k), themeColors);
 
     const clusterMap = new Map<string, ClusterAssignment>();
     for (let i = 0; i < filteredDocs.length; i++) {
-        const cluster = clusterResult.labels[i];
+        const cluster = clusterLabels[i];
         clusterMap.set(filteredDocs[i].path, {
             cluster,
             color: clusterColors[cluster % clusterColors.length],
@@ -367,13 +397,13 @@ export async function buildGraph(
     documents: DocumentVector[],
     settings: Pick<
         SmartGraphSettings,
-        "defaultK" | "autoK" | "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod" | "showWikiLinks" | "showSemanticEdges"
+        "defaultK" | "autoK" | "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod" | "showWikiLinks" | "showSemanticEdges" | "clusteringAlgorithm" | "minClusterSize"
     >,
     filter?: GraphFilter,
     themeColors?: string[],
 ): Promise<GraphData> {
     const { graphData, filteredDocs, vectors } = await buildGraphStructure(app, documents, settings, filter);
-    const { clusterMap } = computeClusters(filteredDocs, vectors, settings, themeColors);
+    const { clusterMap } = await computeClusters(filteredDocs, vectors, settings, themeColors, graphData);
     return applyClusterMap(graphData, clusterMap);
 }
 

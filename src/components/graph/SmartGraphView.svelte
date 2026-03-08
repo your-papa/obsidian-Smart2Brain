@@ -45,6 +45,7 @@
   let clusterMap: Map<string, ClusterAssignment> = $state(new Map());
   let cachedFilteredDocs: DocumentVector[] = [];
   let cachedVectors: Float32Array[] = [];
+  let cachedRawGraph: GraphData = { nodes: [], edges: [] };
 
   // Filter state
   let selectedFolders: string[] = $state([]);
@@ -149,11 +150,13 @@
       // Cache for use by handleRecluster / handleLabelClusters
       cachedFilteredDocs = filteredDocs;
       cachedVectors = vectors;
+      cachedRawGraph = rawGraph;
 
       // Recluster when: first build, or document set changed
       if (clusterMap.size === 0 || docSetChanged) {
         const themeColors = resolveThemeColors();
-        const result = computeClusters(filteredDocs, vectors, settings, themeColors);
+        const result = await computeClusters(filteredDocs, vectors, settings, themeColors, rawGraph);
+        if (gen !== buildGeneration) return;
         clusterMap = result.clusterMap;
         suggestedK = settings.autoK ? result.k : null;
         clusterLabels = {};
@@ -405,6 +408,7 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
       discoveryMode={settings.discoveryMode}
       showSemanticEdges={settings.showSemanticEdges}
       showWikiLinks={settings.showWikiLinks}
+      useForceLayout={settings.useForceLayout}
       {focusedCluster}
       {clusterLabels}
       {isLabeling}

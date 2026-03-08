@@ -5,7 +5,7 @@
   import Dropdown from "../ui/Dropdown.svelte";
   import Search from "../ui/Search.svelte";
   import SettingContainer from "../settings/SettingContainer.svelte";
-  import type { ProjectionMethod, SmartGraphSettings } from "../../types/graph";
+  import type { ProjectionMethod, ClusteringAlgorithm, SmartGraphSettings } from "../../types/graph";
 
   interface Props {
     settings: SmartGraphSettings;
@@ -75,16 +75,27 @@
   let appliedAutoK: boolean = $state(settings.autoK);
   // svelte-ignore state_referenced_locally
   let appliedDefaultK: number = $state(settings.defaultK);
+  // svelte-ignore state_referenced_locally
+  let appliedClusteringAlgorithm: ClusteringAlgorithm = $state(settings.clusteringAlgorithm);
+  // svelte-ignore state_referenced_locally
+  let appliedMinClusterSize: number = $state(settings.minClusterSize);
 
   let projectionDirty = $derived(
     settings.projectionMethod !== appliedProjection ||
       settings.autoK !== appliedAutoK ||
-      (!settings.autoK && settings.defaultK !== appliedDefaultK),
+      (!settings.autoK && settings.defaultK !== appliedDefaultK) ||
+      settings.clusteringAlgorithm !== appliedClusteringAlgorithm ||
+      (settings.clusteringAlgorithm === "hdbscan" && settings.minClusterSize !== appliedMinClusterSize),
   );
 
   const projectionOptions = [
     { display: "UMAP", value: "umap" as ProjectionMethod },
     { display: "PCA", value: "pca" as ProjectionMethod },
+  ];
+
+  const clusteringAlgorithmOptions = [
+    { display: "K-Means", value: "kmeans" as ClusteringAlgorithm },
+    { display: "HDBSCAN", value: "hdbscan" as ClusteringAlgorithm },
   ];
 
   function handleProjectionChange(val: ProjectionMethod) {
@@ -101,6 +112,14 @@
 
   function handleAutoKChange(checked: boolean) {
     onSettingsChange({ autoK: checked });
+  }
+
+  function handleClusteringAlgorithmChange(val: ClusteringAlgorithm) {
+    onSettingsChange({ clusteringAlgorithm: val });
+  }
+
+  function handleMinClusterSizeChange(val: number) {
+    onSettingsChange({ minClusterSize: val });
   }
 
   function handleShowOrphansChange(checked: boolean) {
@@ -291,25 +310,47 @@
           />
         </SettingContainer>
 
-        <SettingContainer name="Auto K" desc="Automatically determine number of clusters">
-          <Toggle checked={settings.autoK} onchange={handleAutoKChange} />
+        <SettingContainer name="Algorithm" desc="Clustering method">
+          <Dropdown
+            type="options"
+            dropdown={clusteringAlgorithmOptions}
+            selected={settings.clusteringAlgorithm}
+            onchange={handleClusteringAlgorithmChange}
+          />
         </SettingContainer>
 
-        {#if !settings.autoK}
-          <SettingContainer name="Clusters (K)" desc="Number of semantic clusters">
+        {#if settings.clusteringAlgorithm === "kmeans"}
+          <SettingContainer name="Auto K" desc="Automatically determine number of clusters">
+            <Toggle checked={settings.autoK} onchange={handleAutoKChange} />
+          </SettingContainer>
+
+          {#if !settings.autoK}
+            <SettingContainer name="Clusters (K)" desc="Number of semantic clusters">
+              <RangeSlider
+                value={settings.defaultK}
+                min={2}
+                max={20}
+                step={1}
+                showValue={true}
+                oncommit={handleKChange}
+              />
+            </SettingContainer>
+          {:else if suggestedK !== null}
+            <div class="graph-info">
+              Auto K: <strong>{suggestedK}</strong> clusters
+            </div>
+          {/if}
+        {:else if settings.clusteringAlgorithm === "hdbscan"}
+          <SettingContainer name="Min cluster size" desc="Min points to form a cluster">
             <RangeSlider
-              value={settings.defaultK}
+              value={settings.minClusterSize}
               min={2}
-              max={20}
+              max={50}
               step={1}
               showValue={true}
-              oncommit={handleKChange}
+              oncommit={handleMinClusterSizeChange}
             />
           </SettingContainer>
-        {:else if suggestedK !== null}
-          <div class="graph-info">
-            Auto K: <strong>{suggestedK}</strong> clusters
-          </div>
         {/if}
 
         {#if projectionDirty && onApplyProjection}
@@ -322,6 +363,8 @@
                 appliedProjection = settings.projectionMethod;
                 appliedAutoK = settings.autoK;
                 appliedDefaultK = settings.defaultK;
+                appliedClusteringAlgorithm = settings.clusteringAlgorithm;
+                appliedMinClusterSize = settings.minClusterSize;
               }}
               tooltip="Apply projection & clustering changes"
               disabled={isLoading}
@@ -399,7 +442,15 @@
       </button>
 
       {#if sectionOpen.layout}
-        <SettingContainer name="Node size" desc="Base radius of nodes">
+        <SettingContainer name="Force layout" desc="Run physics simulation (off = raw projection)">
+          <Toggle
+            checked={settings.useForceLayout}
+            onchange={(v) => onSettingsChange({ useForceLayout: v })}
+          />
+        </SettingContainer>
+
+        {#if settings.useForceLayout}
+          <SettingContainer name="Node size" desc="Base radius of nodes">
           <RangeSlider
             value={settings.nodeSize}
             min={2}
@@ -442,6 +493,7 @@
             oncommit={handleLabelZoomChange}
           />
         </SettingContainer>
+        {/if}
       {/if}
 
       <!-- Display -->

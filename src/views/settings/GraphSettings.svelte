@@ -7,7 +7,7 @@
   import RangeSlider from "../../components/ui/RangeSlider.svelte";
   import Toggle from "../../components/ui/Toggle.svelte";
   import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
-  import type { ProjectionMethod } from "../../types/graph";
+  import type { ProjectionMethod, ClusteringAlgorithm } from "../../types/graph";
   import { getProviderDefinition } from "../../providers/index";
   import { getData } from "../../stores/dataStore.svelte";
   import { getPlugin } from "../../stores/state.svelte";
@@ -27,6 +27,12 @@
   const projectionOptions: { display: string; value: ProjectionMethod }[] = [
     { display: "UMAP", value: "umap" },
     { display: "PCA", value: "pca" },
+  ];
+
+  // Clustering algorithm options
+  const clusteringAlgorithmOptions: { display: string; value: ClusteringAlgorithm }[] = [
+    { display: "K-Means", value: "kmeans" },
+    { display: "HDBSCAN", value: "hdbscan" },
   ];
 
   // Chat model display info
@@ -116,24 +122,52 @@
   </SettingItem>
 
   <SettingItem
-    name="Auto K"
-    desc="Automatically determine the number of clusters via silhouette score."
+    name="Clustering Algorithm"
+    desc="K-Means requires specifying K. HDBSCAN auto-detects clusters based on density."
   >
-    <Toggle
-      checked={pluginData.smartGraphSettings.autoK}
-      onchange={(v) => updateSetting("autoK", v)}
+    <Dropdown
+      type="options"
+      dropdown={clusteringAlgorithmOptions}
+      selected={pluginData.smartGraphSettings.clusteringAlgorithm}
+      onchange={(v) => updateSetting("clusteringAlgorithm", v)}
     />
   </SettingItem>
 
-  {#if !pluginData.smartGraphSettings.autoK}
-    <SettingItem name="Number of Clusters" desc="Fixed number of clusters for K-Means.">
+  {#if pluginData.smartGraphSettings.clusteringAlgorithm === "kmeans"}
+    <SettingItem
+      name="Auto K"
+      desc="Automatically determine the number of clusters via silhouette score."
+    >
+      <Toggle
+        checked={pluginData.smartGraphSettings.autoK}
+        onchange={(v) => updateSetting("autoK", v)}
+      />
+    </SettingItem>
+
+    {#if !pluginData.smartGraphSettings.autoK}
+      <SettingItem name="Number of Clusters" desc="Fixed number of clusters for K-Means.">
+        <RangeSlider
+          value={pluginData.smartGraphSettings.defaultK}
+          min={2}
+          max={20}
+          step={1}
+          showValue
+          oncommit={(v) => updateSetting("defaultK", v)}
+        />
+      </SettingItem>
+    {/if}
+  {:else if pluginData.smartGraphSettings.clusteringAlgorithm === "hdbscan"}
+    <SettingItem
+      name="Min Cluster Size"
+      desc="Minimum number of points required to form a cluster. Smaller values find more clusters."
+    >
       <RangeSlider
-        value={pluginData.smartGraphSettings.defaultK}
+        value={pluginData.smartGraphSettings.minClusterSize}
         min={2}
-        max={20}
+        max={50}
         step={1}
         showValue
-        oncommit={(v) => updateSetting("defaultK", v)}
+        oncommit={(v) => updateSetting("minClusterSize", v)}
       />
     </SettingItem>
   {/if}
@@ -183,6 +217,16 @@
 
 <!-- Layout -->
 <SettingGroup heading="Layout">
+  <SettingItem
+    name="Force Layout"
+    desc="Run physics simulation to arrange nodes. When off, shows raw projection positions."
+  >
+    <Toggle
+      checked={pluginData.smartGraphSettings.useForceLayout}
+      onchange={(v) => updateSetting("useForceLayout", v)}
+    />
+  </SettingItem>
+
   <SettingItem name="Node Size" desc="Base radius of graph nodes in pixels.">
     <RangeSlider
       value={pluginData.smartGraphSettings.nodeSize}
