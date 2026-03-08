@@ -84,8 +84,12 @@
 
   async function handleAcceptAll() {
     try {
-      await store.acceptAll(threadId);
-      new Notice(`Applied all ${pendingCount} changes`);
+      const failures = await store.acceptAll(threadId);
+      if (failures.length === 0) {
+        new Notice(`Applied all ${pendingCount} changes`);
+      } else {
+        new Notice(`Applied ${pendingCount - failures.length} changes, ${failures.length} failed: ${failures.join(", ")}`);
+      }
     } catch (e) {
       new Notice(`Error applying changes: ${e instanceof Error ? e.message : String(e)}`);
     }

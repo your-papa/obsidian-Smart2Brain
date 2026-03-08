@@ -83,8 +83,8 @@ export class PendingChangesStore {
         if (await this.#plugin.app.vault.adapter.exists(path)) {
             try {
                 const raw = await this.#plugin.app.vault.adapter.read(path);
-                const parsed = JSON.parse(raw) as PendingChangeEntry[];
-                this.#entries = parsed;
+                const parsed = JSON.parse(raw);
+                this.#entries = Array.isArray(parsed) ? parsed as PendingChangeEntry[] : [];
             } catch (e) {
                 Logger.error("[PendingChanges] Failed to parse pending-changes.json, starting with empty list", e);
                 this.#entries = [];
@@ -164,7 +164,9 @@ export class PendingChangesStore {
             // Conflict detection: compare current content with staged original
             const currentContent = await app.vault.read(file);
             if (currentContent !== change.originalContent) {
-                Logger.warn(`[PendingChanges] File ${change.path} was modified since the change was proposed`);
+                throw new Error(
+                    `File "${change.path}" was modified after the change was proposed. Please review and try again.`,
+                );
             }
             await app.vault.modify(file, change.newContent);
         } else if (change.type === "delete") {
@@ -247,12 +249,19 @@ export class PendingChangesStore {
         document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
     }
 
-    /** Accept all pending changes for a thread. */
-    async acceptAll(threadId: string): Promise<void> {
+    /** Accept all pending changes for a thread. Returns paths that failed. */
+    async acceptAll(threadId: string): Promise<string[]> {
         const pending = this.#entries.filter((e) => e.threadId === threadId && e.status === "pending");
+        const failures: string[] = [];
         for (const entry of pending) {
-            await this.acceptChange(entry.id);
+            try {
+                await this.acceptChange(entry.id);
+            } catch (e) {
+                Logger.error(`[PendingChanges] Failed to accept ${entry.change.path}:`, e);
+                failures.push(entry.change.path);
+            }
         }
+        return failures;
     }
 
     /** Reject all pending changes for a thread. */
@@ -330,6 +339,8 @@ export class PendingChangesStore {
         if (this.#saveTimer) {
             clearTimeout(this.#saveTimer);
             this.#saveTimer = null;
+            // Flush any pending writes so data isn't lost on unload
+            void this.saveToDisk();
         }
         _store = null;
     }
