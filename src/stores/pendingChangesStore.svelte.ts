@@ -372,10 +372,12 @@ export class PendingChangesStore {
             // Revert vault file if groups were partially accepted
             if (entry.change.type === "update" && entry.change.initialOriginalContent !== undefined) {
                 try {
-                    const file = this.#plugin.app.vault.getAbstractFileByPath(entry.change.path);
-                    if (file instanceof TFile) {
-                        await this.#plugin.app.vault.modify(file, entry.change.initialOriginalContent);
-                    }
+                    await this.withFileLock(entry.change.path, async () => {
+                        const file = this.#plugin.app.vault.getAbstractFileByPath(entry.change.path);
+                        if (file instanceof TFile) {
+                            await this.#plugin.app.vault.modify(file, entry.change.initialOriginalContent!);
+                        }
+                    });
                 } catch (e) {
                     Logger.error(`[PendingChanges] Failed to revert ${entry.change.path}:`, e);
                 }
