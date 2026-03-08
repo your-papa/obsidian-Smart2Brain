@@ -676,21 +676,26 @@ export class AgentManager {
 		signal?: AbortSignal,
 		attachments?: ChatAttachment[],
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
-		const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
+		setCurrentThreadId(threadId);
+		try {
+			const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
 
-		yield* this.dispatchStream(
-			agent.editFromCheckpoint({
-				query,
-				threadId,
-				checkpointId,
-				metadata: runMetadata,
+			yield* this.dispatchStream(
+				agent.editFromCheckpoint({
+					query,
+					threadId,
+					checkpointId,
+					metadata: runMetadata,
+					signal,
+					attachments,
+				} as Parameters<Agent["editFromCheckpoint"]>[0]),
 				signal,
-				attachments,
-			} as Parameters<Agent["editFromCheckpoint"]>[0]),
-			signal,
-			chatModel,
-			"Error editing message",
-		);
+				chatModel,
+				"Error editing message",
+			);
+		} finally {
+			setCurrentThreadId(null);
+		}
 	}
 
 	/**
@@ -702,19 +707,24 @@ export class AgentManager {
 		checkpointId: string,
 		signal?: AbortSignal,
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
-		const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
+		setCurrentThreadId(threadId);
+		try {
+			const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
 
-		yield* this.dispatchStream(
-			agent.regenerateFromCheckpoint({
-				threadId,
-				checkpointId,
-				metadata: runMetadata,
+			yield* this.dispatchStream(
+				agent.regenerateFromCheckpoint({
+					threadId,
+					checkpointId,
+					metadata: runMetadata,
+					signal,
+				}),
 				signal,
-			}),
-			signal,
-			chatModel,
-			"Error regenerating response",
-		);
+				chatModel,
+				"Error regenerating response",
+			);
+		} finally {
+			setCurrentThreadId(null);
+		}
 	}
 
 	async getThreadHistory(threadId: string): Promise<ThreadHistory | null> {

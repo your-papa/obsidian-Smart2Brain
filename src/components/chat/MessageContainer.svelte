@@ -7,12 +7,9 @@
     type MessagePair,
     type Messenger,
   } from "../../stores/chatStore.svelte";
-  import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
   import type { UUIDv7 } from "../../utils/uuid7Validator";
   import { Logger } from "../../utils/logging";
   import IconButton from "../ui/IconButton.svelte";
-  import { PendingChangesModal } from "../modal/PendingChangesModal";
   import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
   import Logo from "../ui/logos/Logo.svelte";
   import BranchNavigator from "./BranchNavigator.svelte";
@@ -21,8 +18,6 @@
   import UserAttachmentFiles from "./UserAttachmentFiles.svelte";
   import UserAttachmentImages from "./UserAttachmentImages.svelte";
   import ToolCallsSection from "./ToolCallsSection.svelte";
-
-  const WRITE_TOOL_NAMES = new Set(["create_note", "update_note", "delete_note", "edit_note"]);
 
   interface Props {
     messenger: Messenger;
@@ -173,25 +168,6 @@
     new Notice("Copied to Clipboard");
   }
 
-  function hasWriteToolCalls(messagePair: MessagePair): boolean {
-    const timeline = messagePair.assistantMessage.assistantTimeline;
-    if (timeline) {
-      return timeline.some((e) => e.type === "tool_start" && e.toolName && WRITE_TOOL_NAMES.has(e.toolName));
-    }
-    const calls = messagePair.assistantMessage.toolCalls;
-    if (calls) {
-      return calls.some((tc) => WRITE_TOOL_NAMES.has(tc.name));
-    }
-    return false;
-  }
-
-  function openPendingChangesModal() {
-    const threadId = messenger.session?.id;
-    if (!threadId) return;
-    const plugin = getPlugin();
-    new PendingChangesModal(plugin, threadId).open();
-  }
-
   function getGenerationLabel(messagePair: MessagePair): string | null {
     const generation = messagePair.generation;
     if (!generation) return null;
@@ -200,7 +176,7 @@
     const modelLabel =
       generation.provider && generation.model
         ? `${generation.provider}/${generation.model}`
-        : generation.model ?? generation.provider;
+        : (generation.model ?? generation.provider);
 
     if (agentLabel && modelLabel) return `${agentLabel} · ${modelLabel}`;
     return agentLabel ?? modelLabel ?? null;
@@ -410,14 +386,6 @@
                       <BranchNavigator
                         branchInfo={messagePair.assistantBranchInfo}
                         onNavigate={handleBranchNavigate}
-                      />
-                    {/if}
-                    {#if hasWriteToolCalls(messagePair)}
-                      <IconButton
-                        icon="file-diff"
-                        label="Review changes"
-                        class="hover:text-[--text-accent]"
-                        onclick={() => openPendingChangesModal()}
                       />
                     {/if}
                     <IconButton
