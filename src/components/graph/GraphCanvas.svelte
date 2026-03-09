@@ -24,6 +24,8 @@
     showSemanticEdges?: boolean;
     showWikiLinks?: boolean;
     useForceLayout?: boolean;
+    transitionTargets?: Map<string, { x: number; y: number }> | null;
+    onTransitionEnd?: () => void;
     focusedCluster?: number | null;
     clusterLabels?: Record<number, string>;
     isLabeling?: boolean;
@@ -44,6 +46,8 @@
     showSemanticEdges = true,
     showWikiLinks = true,
     useForceLayout = true,
+    transitionTargets = null,
+    onTransitionEnd,
     focusedCluster = null,
     clusterLabels = {},
     isLabeling = false,
@@ -63,8 +67,13 @@
   // Interaction state
   let hoveredNode: GraphNode | null = $state(null);
   let draggedNode: GraphNode | null = $state(null);
+  let hasDragged = false;
   let isPanning = $state(false);
   let panStart = { x: 0, y: 0 };
+
+  // Non-reactive drag reference — directly mutates the d3 SimNode's fx/fy
+  // without going through Svelte's $state proxy
+  let dragSimNode: SimNode | null = null;
 
   // Pinned nodes: nodes with fixed positions (fx/fy set)
   let pinnedNodes: Set<string> = new Set();
@@ -86,6 +95,15 @@
   // Pre-split edge arrays – built once in setupSimulation, reused every frame
   let wikiSimLinks: SimLink[] = [];
   let semanticSimLinks: SimLink[] = [];
+
+  // Edge fade-in: edges start invisible and fade to full opacity after each
+  // setupSimulation call, providing a smooth crossfade on mode/data changes.
+  let edgeFadeAlpha = 1;
+  const EDGE_FADE_RATE = 0.04; // reaches 1 in 25 ticks (~0.4s at 60fps)
+
+  // When true, the next setupSimulation call skips disruptive effects
+  // (edge fade reset, fitToView) for a seamless data swap.
+  let skipNextSetupEffects = false;
 
   // Adjacency map: nodeId → Set of connected node ids (O(1) hover lookup)
   let adjacency: Map<string, Set<string>> = new Map();
@@ -287,6 +305,11 @@
     // This lets users spot new semantic connections that don't exist as wiki links.
     // Uses pre-split arrays (built in setupSimulation) to avoid filtering every frame.
 
+    // Advance edge fade-in (smooth crossfade on mode / data changes)
+    if (edgeFadeAlpha < 1) {
+      edgeFadeAlpha = Math.min(1, edgeFadeAlpha + EDGE_FADE_RATE);
+    }
+
     if (showWikiLinks) {
       for (const link of wikiSimLinks) {
         const source = link.source as SimNode;
@@ -309,7 +332,7 @@
         ctx.lineTo(target.x, target.y);
         ctx.strokeStyle = isHighlighted ? c.accent : c.textFaint;
         ctx.lineWidth = isHighlighted ? 2 / transform.scale : 1 / transform.scale;
-        ctx.globalAlpha = !inFocus ? 0.05 : isHighlighted ? 0.9 : 0.45;
+        ctx.globalAlpha = (!inFocus ? 0.05 : isHighlighted ? 0.9 : 0.45) * edgeFadeAlpha;
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
@@ -340,11 +363,9 @@
         ctx.lineWidth = isHighlighted
           ? 2 / transform.scale
           : Math.max(0.8, link.weight * 3) / transform.scale;
-        ctx.globalAlpha = !inFocus
-          ? 0.05
-          : isHighlighted
-            ? 0.9
-            : Math.min(0.25 + link.weight * 0.35, 0.9);
+        ctx.globalAlpha =
+          (!inFocus ? 0.05 : isHighlighted ? 0.9 : Math.min(0.25 + link.weight * 0.35, 0.9)) *
+          edgeFadeAlpha;
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
@@ -420,7 +441,7 @@
     const showAllLabels = labelZoomThreshold > 0 && transform.scale >= labelZoomThreshold;
 
     if (showAllLabels && !hoveredNode) {
-      const fontSize = Math.max(10 / transform.scale, 6);
+      const fontSize = Math.max(8 / transform.scale, 5);
       ctx.font = `${fontSize}px ${c.font}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
@@ -450,7 +471,7 @@
         }
       }
 
-      const fontSize = Math.max(12 / transform.scale, 8);
+      const fontSize = Math.max(10 / transform.scale, 6);
       ctx.font = `${fontSize}px ${c.font}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
@@ -483,7 +504,7 @@
       const highlighted = simNodes.filter((n) => n.highlighted);
 
       if (highlighted.length > 0 && highlighted.length < 50) {
-        const fontSize = Math.max(11 / transform.scale, 7);
+        const fontSize = Math.max(9 / transform.scale, 5);
         ctx.font = `${fontSize}px ${c.font}`;
         ctx.textAlign = "center";
         ctx.textBaseline = "bottom";
@@ -837,7 +858,8 @@
   // Event handlers
   // ============================================================================
 
-  function handleMouseDown(e: MouseEvent) {
+  function handleMouseDown(e: PointerEvent) {
+    e.preventDefault(); // Prevent native drag on canvas
     const rect = canvasEl.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -846,12 +868,16 @@
 
     if (node) {
       // Start dragging a node
+      const sn = simNodeMap.get(node.id);
+      if (!sn) return;
       draggedNode = node;
-      if (simulation) {
-        simulation.alphaTarget(0.3).restart();
-        (node as SimNode).fx = node.x;
-        (node as SimNode).fy = node.y;
-      }
+      dragSimNode = sn;
+      hasDragged = false;
+      simulation?.alphaTarget(0.3).restart();
+      sn.fx = sn.x;
+      sn.fy = sn.y;
+      // Capture pointer so drag continues even outside canvas
+      canvasEl.setPointerCapture(e.pointerId);
     } else {
       // Start panning
       isPanning = true;
@@ -859,16 +885,17 @@
     }
   }
 
-  function handleMouseMove(e: MouseEvent) {
+  function handleMouseMove(e: PointerEvent) {
     const rect = canvasEl.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    if (draggedNode) {
+    if (dragSimNode) {
       // Drag node
+      hasDragged = true;
       const graphPos = screenToGraph(x, y);
-      (draggedNode as SimNode).fx = graphPos.x;
-      (draggedNode as SimNode).fy = graphPos.y;
+      dragSimNode.fx = graphPos.x;
+      dragSimNode.fy = graphPos.y;
       render();
     } else if (isPanning) {
       // Pan
@@ -933,22 +960,26 @@
     }
   }
 
-  function handleMouseUp(_e: MouseEvent) {
-    if (draggedNode) {
-      if (simulation) {
-        simulation.alphaTarget(0);
-        // Keep pinned nodes fixed; unpin others
-        if (!pinnedNodes.has(draggedNode.id)) {
-          (draggedNode as SimNode).fx = null;
-          (draggedNode as SimNode).fy = null;
-        }
+  function handleMouseUp(_e: PointerEvent) {
+    if (dragSimNode) {
+      simulation?.alphaTarget(0);
+      if (!pinnedNodes.has(dragSimNode.id)) {
+        dragSimNode.fx = null;
+        dragSimNode.fy = null;
       }
       draggedNode = null;
+      dragSimNode = null;
     }
     isPanning = false;
   }
 
   function handleClick(e: MouseEvent) {
+    // Ignore clicks that were actually drags
+    if (hasDragged) {
+      hasDragged = false;
+      return;
+    }
+
     const rect = canvasEl.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -1005,17 +1036,7 @@
   function handleMouseLeave() {
     hoveredNode = null;
     hoveredEdge = null;
-    if (draggedNode) {
-      if (simulation) {
-        // Respect pinned state: only release fx/fy for unpinned nodes
-        if (!pinnedNodes.has(draggedNode.id)) {
-          (draggedNode as SimNode).fx = null;
-          (draggedNode as SimNode).fy = null;
-        }
-        simulation.alphaTarget(0);
-      }
-      draggedNode = null;
-    }
+    // Drag continues via pointer capture — only cancel pan
     isPanning = false;
     render();
   }
@@ -1083,9 +1104,7 @@
             simNode.fy = simNode.y;
           }
 
-          if (simulation) {
-            simulation.alpha(0.1).restart();
-          }
+          simulation?.alpha(0.1).restart();
           render();
         }),
     );
@@ -1173,22 +1192,18 @@
       }
     }
 
-    // Create mutable copies for d3-force
+    // Create mutable copies for d3-force.
+    // Always start from old positions when available so transitions are smooth.
     simNodes = data.nodes.map((n) => {
       const sn: SimNode = { ...n };
-      // When force layout is active, restore previous positions for smooth transitions.
-      // When off, always use the fresh projection coordinates from graphData.
-      if (useForceLayout) {
-        const old = oldPositions.get(n.id);
-        if (old) {
-          sn.x = old.x;
-          sn.y = old.y;
-        }
-        // Restore pinned state
-        if (pinnedNodes.has(n.id) && old) {
-          sn.fx = old.x;
-          sn.fy = old.y;
-        }
+      const old = oldPositions.get(n.id);
+      if (old) {
+        sn.x = old.x;
+        sn.y = old.y;
+      }
+      if (useForceLayout && pinnedNodes.has(n.id) && old) {
+        sn.fx = old.x;
+        sn.fy = old.y;
       }
       return sn;
     });
@@ -1233,14 +1248,107 @@
       }
     }
 
-    // When force layout is disabled, use raw projection positions and render once
-    if (!useForceLayout) {
-      needsInitialFit = true;
-      initialFitTickCount = 0;
-      fitToView();
-      render();
+    // Start edge fade-in when the edge set changes (skip on smooth data swap)
+    const isSmooth = skipNextSetupEffects;
+    if (isSmooth) skipNextSetupEffects = false;
+    if (!isSmooth) edgeFadeAlpha = 0;
+
+    // When force layout is disabled, create a minimal simulation that pins
+    // nodes at their projection coordinates. This keeps the render loop alive
+    // for zoom/pan/drag interaction without applying any layout forces.
+    if (!useForceLayout && !transitionTargets) {
+      // If nodes had previous positions, animate to new projection coordinates
+      const shouldAnimate = oldPositions.size > 0 && !isSmooth;
+
+      if (shouldAnimate) {
+        // Build target map from the original graph data positions
+        const projTargets = new Map<string, { x: number; y: number }>();
+        for (const n of data.nodes) {
+          if (n.x != null && n.y != null) {
+            projTargets.set(n.id, { x: n.x, y: n.y });
+          }
+        }
+        const normalized = normalizeTargetsToView(simNodes, projTargets);
+
+        simulation = forceSimulation<SimNode>(simNodes)
+          .force(
+            "targetX",
+            forceX<SimNode>((d) => normalized.get(d.id)?.x ?? d.x ?? 0).strength(0.08),
+          )
+          .force(
+            "targetY",
+            forceY<SimNode>((d) => normalized.get(d.id)?.y ?? d.y ?? 0).strength(0.08),
+          )
+          .force(
+            "collide",
+            forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
+          )
+          .on("tick", () => render())
+          .on("end", () => {
+            // Once settled, pin nodes at their final positions
+            for (const sn of simNodes) {
+              const t = normalized.get(sn.id);
+              if (t) {
+                sn.x = t.x;
+                sn.y = t.y;
+              }
+              sn.fx = sn.x;
+              sn.fy = sn.y;
+            }
+            fitToView();
+            render();
+          })
+          .alphaDecay(0.02)
+          .velocityDecay(0.35);
+
+        needsInitialFit = false;
+      } else {
+        // First load or smooth swap: pin nodes at projection coordinates
+        for (const sn of simNodes) {
+          sn.fx = sn.x;
+          sn.fy = sn.y;
+        }
+
+        simulation = forceSimulation<SimNode>(simNodes)
+          .force(
+            "collide",
+            forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
+          )
+          .on("tick", () => {
+            if (needsInitialFit) {
+              initialFitTickCount++;
+              if (
+                initialFitTickCount === 5 ||
+                (initialFitTickCount > 5 && initialFitTickCount % 15 === 0)
+              ) {
+                fitToView();
+              }
+              if (simulation && simulation.alpha() < 0.1) {
+                needsInitialFit = false;
+                initialFitTickCount = 0;
+                fitToView();
+              }
+            }
+            render();
+          })
+          .alphaDecay(0.05)
+          .velocityDecay(0.4);
+
+        if (!isSmooth) {
+          needsInitialFit = true;
+          initialFitTickCount = 0;
+        } else {
+          simulation.alpha(0.05);
+          needsInitialFit = false;
+        }
+      }
+
       return;
     }
+
+    // Transition mode: handled by a separate $effect that injects
+    // forceX/forceY into the existing simulation (see below).
+    // setupSimulation only creates the normal force-directed layout.
 
     // Compute per-cluster centroids in 2D for cluster cohesion force
 
@@ -1265,10 +1373,19 @@
         forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
       )
       .on("tick", () => {
-        // Auto fit-to-view after a few ticks on first load
+        // Continuously fit-to-view during initial settling so the graph
+        // tracks the shrinking bounding box as nodes converge.
         if (needsInitialFit) {
           initialFitTickCount++;
-          if (initialFitTickCount >= 10) {
+          // Start fitting at tick 5, then re-fit every 15 ticks until
+          // alpha drops below 0.1 (simulation nearly settled).
+          if (
+            initialFitTickCount === 5 ||
+            (initialFitTickCount > 5 && initialFitTickCount % 15 === 0)
+          ) {
+            fitToView();
+          }
+          if (simulation && simulation.alpha() < 0.1) {
             needsInitialFit = false;
             initialFitTickCount = 0;
             fitToView();
@@ -1281,15 +1398,16 @@
 
     // If nodes already had positions, start with low alpha for gentle transition
     if (oldPositions.size > 0) {
-      simulation.alpha(0.3);
+      simulation.alpha(isSmooth ? 0.05 : 0.3);
       needsInitialFit = false;
     }
   }
 
-  // React to graphData changes
+  // React to graphData or useForceLayout changes
   $effect(() => {
-    // Access graphData to track it
+    // Access reactive dependencies
     const data = graphData;
+    const _forceLayout = useForceLayout;
     setupSimulation(data);
 
     return () => {
@@ -1300,9 +1418,124 @@
     };
   });
 
+  /**
+   * Rescale target positions so they occupy the same bounding region as the
+   * current node positions. This prevents jarring jumps when coordinate
+   * spaces differ (e.g. UMAP output range vs d3-force layout range).
+   */
+  function normalizeTargetsToView(
+    nodes: SimNode[],
+    targets: Map<string, { x: number; y: number }>,
+  ): Map<string, { x: number; y: number }> {
+    let cMinX = Infinity;
+    let cMaxX = -Infinity;
+    let cMinY = Infinity;
+    let cMaxY = -Infinity;
+    for (const node of nodes) {
+      if (node.x != null && node.y != null) {
+        if (node.x < cMinX) cMinX = node.x;
+        if (node.x > cMaxX) cMaxX = node.x;
+        if (node.y < cMinY) cMinY = node.y;
+        if (node.y > cMaxY) cMaxY = node.y;
+      }
+    }
+
+    let tMinX = Infinity;
+    let tMaxX = -Infinity;
+    let tMinY = Infinity;
+    let tMaxY = -Infinity;
+    for (const { x, y } of targets.values()) {
+      if (x < tMinX) tMinX = x;
+      if (x > tMaxX) tMaxX = x;
+      if (y < tMinY) tMinY = y;
+      if (y > tMaxY) tMaxY = y;
+    }
+
+    const cCx = (cMinX + cMaxX) / 2;
+    const cCy = (cMinY + cMaxY) / 2;
+    const cSpan = Math.max(cMaxX - cMinX, cMaxY - cMinY) || 1;
+
+    const tCx = (tMinX + tMaxX) / 2;
+    const tCy = (tMinY + tMaxY) / 2;
+    const tSpan = Math.max(tMaxX - tMinX, tMaxY - tMinY) || 1;
+
+    const scale = cSpan / tSpan;
+
+    const normalized = new Map<string, { x: number; y: number }>();
+    for (const [id, { x, y }] of targets) {
+      normalized.set(id, {
+        x: (x - tCx) * scale + cCx,
+        y: (y - tCy) * scale + cCy,
+      });
+    }
+    return normalized;
+  }
+
+  // Animate nodes from current positions to transition targets by injecting
+  // forceX/forceY into the *existing* d3 simulation (no data swap needed).
+  $effect(() => {
+    const targets = transitionTargets;
+    if (!targets || targets.size === 0) return;
+
+    // Rescale targets into the current graph coordinate space
+    const normalized = normalizeTargetsToView(simNodes, targets);
+
+    // Strip wiki-layout forces; keep only position-targeting + collision
+    simulation!.force("link", null);
+    simulation!.force("charge", null);
+    simulation!.force("center", null);
+    simulation!.force("gravityX", null);
+    simulation!.force("gravityY", null);
+    simulation!.force("cluster", null);
+
+    simulation!.force(
+      "targetX",
+      forceX<SimNode>((d) => normalized.get(d.id)?.x ?? d.x ?? 0).strength(0.08),
+    );
+    simulation!.force(
+      "targetY",
+      forceY<SimNode>((d) => normalized.get(d.id)?.y ?? d.y ?? 0).strength(0.08),
+    );
+
+    // Unpin all nodes so the transition forces can move them
+    for (const sn of simNodes) {
+      sn.fx = null;
+      sn.fy = null;
+    }
+
+    needsInitialFit = false;
+    let transitionTickCount = 0;
+    simulation!.alphaDecay(0.02).velocityDecay(0.35).alpha(1).restart();
+
+    // Replace the existing tick handler with one that progressively fits
+    simulation!.on("tick", () => {
+      transitionTickCount++;
+      // Progressively fit to view as nodes converge
+      if (
+        transitionTickCount === 5 ||
+        (transitionTickCount > 5 && transitionTickCount % 15 === 0)
+      ) {
+        fitToView();
+      }
+      render();
+    });
+
+    simulation!.on("end", () => {
+      for (const node of simNodes) {
+        const t = normalized.get(node.id);
+        if (t) {
+          node.x = t.x;
+          node.y = t.y;
+        }
+      }
+      render();
+      onTransitionEnd?.();
+    });
+  });
+
   // Hot-update force parameters without full rebuild
   $effect(() => {
-    if (!simulation || !useForceLayout) return;
+    if (!simulation) return;
     const _charge = chargeStrength;
     const _link = linkDistance;
     const _nodeSize = nodeSize;
@@ -1335,6 +1568,9 @@
   onMount(() => {
     resizeCanvas();
 
+    // Register wheel handler as non-passive so preventDefault() works
+    canvasEl.addEventListener("wheel", handleWheel, { passive: false });
+
     const resizeObserver = new ResizeObserver(() => {
       resizeCanvas();
     });
@@ -1345,6 +1581,7 @@
     document.body.addEventListener("css-change", handleCssChange);
 
     return () => {
+      canvasEl.removeEventListener("wheel", handleWheel);
       resizeObserver.disconnect();
       document.body.removeEventListener("css-change", handleCssChange);
       if (animFrameId != null) cancelAnimationFrame(animFrameId);
@@ -1381,11 +1618,11 @@
 
     const graphWidth = maxX - minX || 1;
     const graphHeight = maxY - minY || 1;
-    const padding = 60;
+    const padding = 20;
 
     const scaleX = (rect.width - padding * 2) / graphWidth;
     const scaleY = (rect.height - padding * 2) / graphHeight;
-    const targetScale = Math.min(scaleX, scaleY, 2);
+    const targetScale = Math.min(scaleX, scaleY, 4);
 
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
@@ -1422,16 +1659,52 @@
 
     animFrameId = requestAnimationFrame(step);
   }
+
+  /**
+   * Return the current simulation positions of all nodes.
+   */
+  export function getNodePositions(): Map<string, { x: number; y: number }> {
+    const positions = new Map<string, { x: number; y: number }>();
+    for (const node of simNodes) {
+      if (node.x != null && node.y != null) {
+        positions.set(node.id, { x: node.x, y: node.y });
+      }
+    }
+    return positions;
+  }
+
+  /**
+   * Tell the canvas that the next graphData change is a cosmetic swap
+   * (e.g. adding edges/colors after a transition) — skip fitToView and
+   * edge-fade so the graph stays visually stable.
+   */
+  export function prepareDataSwap() {
+    skipNextSetupEffects = true;
+  }
+
+  /**
+   * Update node colors and cluster assignments in-place on the running
+   * simulation nodes. Triggers a re-render without rebuilding the simulation.
+   */
+  export function updateNodeAppearance(updates: Map<string, { color?: string; cluster?: number }>) {
+    for (const node of simNodes) {
+      const u = updates.get(node.id);
+      if (u) {
+        if (u.color !== undefined) node.color = u.color;
+        if (u.cluster !== undefined) node.cluster = u.cluster;
+      }
+    }
+    render();
+  }
 </script>
 
 <div class="graph-canvas-container" bind:this={containerEl}>
   <canvas
     bind:this={canvasEl}
-    onmousedown={handleMouseDown}
-    onmousemove={handleMouseMove}
-    onmouseup={handleMouseUp}
+    onpointerdown={handleMouseDown}
+    onpointermove={handleMouseMove}
+    onpointerup={handleMouseUp}
     onclick={handleClick}
-    onwheel={handleWheel}
     onmouseleave={handleMouseLeave}
     oncontextmenu={handleContextMenu}
   ></canvas>
@@ -1448,6 +1721,7 @@
   canvas {
     display: block;
     cursor: grab;
+    touch-action: none; /* Required for pointer capture to work */
   }
 
   canvas:active {

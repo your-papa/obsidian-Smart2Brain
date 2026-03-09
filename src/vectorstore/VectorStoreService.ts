@@ -102,9 +102,12 @@ export class VectorStoreService {
 	private constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
 
+		// Use appId to scope IndexedDB databases per-vault (unique hash per vault)
+		const vaultId = (plugin.app as unknown as { appId: string }).appId;
+
 		// Create vector store backend based on user setting
 		const backend = getData()?.vectorStoreBackend ?? "hnsw";
-		this.store = createVectorStore(backend);
+		this.store = createVectorStore(backend, vaultId);
 		Logger.log(`[VectorStore] Using ${backend} backend`);
 
 		// Get plugin data directory path
@@ -113,7 +116,7 @@ export class VectorStoreService {
 		const filePath = `${configDir}/plugins/${plugin.manifest.id}/data/${INDEX_FILE_PATH}`;
 
 		this.syncManager = new FileSyncManager(plugin.app.vault.adapter, filePath);
-		this.miniSearch = new MiniSearchService();
+		this.miniSearch = new MiniSearchService(vaultId);
 	}
 
 	/**

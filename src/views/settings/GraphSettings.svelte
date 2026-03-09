@@ -217,16 +217,6 @@
 
 <!-- Layout -->
 <SettingGroup heading="Layout">
-  <SettingItem
-    name="Force Layout"
-    desc="Run physics simulation to arrange nodes. When off, shows raw projection positions."
-  >
-    <Toggle
-      checked={pluginData.smartGraphSettings.useForceLayout}
-      onchange={(v) => updateSetting("useForceLayout", v)}
-    />
-  </SettingItem>
-
   <SettingItem name="Node Size" desc="Base radius of graph nodes in pixels.">
     <RangeSlider
       value={pluginData.smartGraphSettings.nodeSize}

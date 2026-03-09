@@ -8,20 +8,22 @@
 
 import { kMeans, suggestK, hdbscan } from "./clustering";
 import type { HDBSCANResult } from "./clustering";
-import { project2D } from "./projection";
+import { project2D, reduceDimensions } from "./projection";
 import type { ProjectionMethod } from "../types/graph";
 
 export type ComputeWorkerRequest =
     | { id: number; type: "kMeans"; vectors: number[][]; k: number; maxIterations?: number }
     | { id: number; type: "suggestK"; vectors: number[][]; minK?: number; maxK?: number }
     | { id: number; type: "hdbscan"; vectors: number[][]; minClusterSize: number; minSamples?: number; metric?: "cosine" | "euclidean" }
-    | { id: number; type: "project2D"; vectors: number[][]; method?: ProjectionMethod; spread?: number };
+    | { id: number; type: "project2D"; vectors: number[][]; method?: ProjectionMethod; spread?: number }
+    | { id: number; type: "reduceDimensions"; vectors: number[][]; method?: ProjectionMethod; targetDim?: number };
 
 export type ComputeWorkerResponse =
     | { id: number; type: "kMeans"; result: { labels: number[]; centroids: number[][]; iterations: number } }
     | { id: number; type: "suggestK"; result: { k: number; labels: number[]; centroids: number[][]; iterations: number } }
     | { id: number; type: "hdbscan"; result: HDBSCANResult }
     | { id: number; type: "project2D"; result: { x: number; y: number }[] }
+    | { id: number; type: "reduceDimensions"; result: number[][] }
     | { id: number; type: "error"; error: string };
 
 /**
@@ -84,6 +86,17 @@ globalThis.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
                     id: msg.id,
                     type: "project2D",
                     result,
+                };
+                globalThis.postMessage(response);
+                break;
+            }
+            case "reduceDimensions": {
+                const vectors = toFloat32Arrays(msg.vectors);
+                const result = await reduceDimensions(vectors, msg.method, msg.targetDim);
+                const response: ComputeWorkerResponse = {
+                    id: msg.id,
+                    type: "reduceDimensions",
+                    result: result.map((v) => Array.from(v)),
                 };
                 globalThis.postMessage(response);
                 break;

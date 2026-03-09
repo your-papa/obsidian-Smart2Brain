@@ -8,7 +8,7 @@
  */
 
 import { kMeans, suggestK, hdbscan, type KMeansResult, type HDBSCANResult } from "./clustering";
-import { project2D } from "./projection";
+import { project2D, reduceDimensions } from "./projection";
 import type { ProjectionMethod } from "../types/graph";
 import type { ComputeWorkerRequest, ComputeWorkerResponse } from "./computeWorker";
 import ComputeWorkerConstructor from "./computeWorker?worker&inline";
@@ -107,6 +107,13 @@ function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse |
                 result,
             }));
         }
+        case "reduceDimensions": {
+            return reduceDimensions(toF32(request.vectors), request.method, request.targetDim).then((result) => ({
+                id: request.id,
+                type: "reduceDimensions" as const,
+                result: result.map((v) => Array.from(v)),
+            }));
+        }
     }
 }
 
@@ -189,6 +196,22 @@ export async function project2DAsync(
         spread,
     });
     return resp.result;
+}
+
+export async function reduceDimensionsAsync(
+    vectors: Float32Array[],
+    method: ProjectionMethod = "pca",
+    targetDim?: number,
+): Promise<Float32Array[]> {
+    const id = ++requestId;
+    const resp = await postRequest<Extract<ComputeWorkerResponse, { type: "reduceDimensions" }>>({
+        id,
+        type: "reduceDimensions",
+        vectors: toTransferable(vectors),
+        method,
+        targetDim,
+    });
+    return resp.result.map((v) => new Float32Array(v));
 }
 
 /**

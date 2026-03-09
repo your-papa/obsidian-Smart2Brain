@@ -21,6 +21,24 @@ export type ProjectionMethod = "pca" | "umap";
 export type ClusteringAlgorithm = "kmeans" | "hdbscan";
 
 /**
+ * Graph display mode.
+ * - "wiki": Force-directed layout using only wiki link edges (initial view)
+ * - "smart": Projected positions from embedding-based clustering
+ */
+export type GraphMode = "wiki" | "smart";
+
+/**
+ * A user-defined color group that assigns a color to nodes matching a query.
+ * Query matching: path prefix (folder), or tag (starts with #).
+ */
+export interface ColorGroup {
+    /** Query string: folder path prefix or #tag */
+    query: string;
+    /** CSS color value */
+    color: string;
+}
+
+/**
  * The type of relationship an edge represents.
  * - "wiki": An explicit wiki link between notes in Obsidian
  * - "semantic": An inferred similarity edge from embedding cosine similarity
@@ -117,8 +135,10 @@ export interface SmartGraphSettings {
     clusteringAlgorithm: import("./graph").ClusteringAlgorithm;
     /** Minimum cluster size for HDBSCAN */
     minClusterSize: number;
-    /** Whether to run d3-force simulation (false = show raw projection positions) */
+    /** Use force-directed layout instead of 2D projection in smart mode */
     useForceLayout: boolean;
+    /** User-defined color groups for the wiki graph mode */
+    colorGroups: ColorGroup[];
 }
 
 /**
@@ -142,7 +162,8 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
     autoLabelClusters: false,
     clusteringAlgorithm: "kmeans",
     minClusterSize: 5,
-    useForceLayout: true,
+    useForceLayout: false,
+    colorGroups: [],
 };
 
 /**
@@ -168,7 +189,7 @@ export function parseHSL(color: string): [number, number, number] {
     const s = color.trim();
 
     // hsl(H, S%, L%)
-    const hslMatch = s.match(/^hsla?\(\s*([\d.]+)[\s,]+([\d.]+)%?[\s,]+([\d.]+)%?/i);
+    const hslMatch = /^hsla?\(\s*([\d.]+)[\s,]+([\d.]+)%?[\s,]+([\d.]+)%?/i.exec(s);
     if (hslMatch) {
         return [Math.round(Number(hslMatch[1])) % 360, Math.round(Number(hslMatch[2])), Math.round(Number(hslMatch[3]))];
     }
@@ -177,15 +198,15 @@ export function parseHSL(color: string): [number, number, number] {
     let g = 0;
     let b = 0;
 
-    const hexMatch = s.match(/^#([\da-f]{3,8})$/i);
+    const hexMatch = /^#([\da-f]{3,8})$/i.exec(s);
     if (hexMatch) {
         let hex = hexMatch[1];
         if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
-        r = parseInt(hex.slice(0, 2), 16) / 255;
-        g = parseInt(hex.slice(2, 4), 16) / 255;
-        b = parseInt(hex.slice(4, 6), 16) / 255;
+        r = Number.parseInt(hex.slice(0, 2), 16) / 255;
+        g = Number.parseInt(hex.slice(2, 4), 16) / 255;
+        b = Number.parseInt(hex.slice(4, 6), 16) / 255;
     } else {
-        const rgbMatch = s.match(/^rgba?\(\s*([\d.]+)\s*[,/\s]\s*([\d.]+)\s*[,/\s]\s*([\d.]+)/i);
+        const rgbMatch = /^rgba?\(\s*([\d.]+)\s*[,/\s]\s*([\d.]+)\s*[,/\s]\s*([\d.]+)/i.exec(s);
         if (rgbMatch) {
             r = Number(rgbMatch[1]) / 255;
             g = Number(rgbMatch[2]) / 255;
