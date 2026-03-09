@@ -1,14 +1,17 @@
-import { Plugin } from "obsidian";
+import { MarkdownView, Plugin } from "obsidian";
 import "./lib/i18n";
 import { Logger as Log } from "./utils/logging";
 import "./styles.css";
 import { AgentManager } from "./agent/AgentManager";
+import { inlineDiffPlugin } from "./editor/inlineDiffExtension";
+import { createReadingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
 import { terminateWorker as terminateClusteringWorker } from "./utils/computeWorkerManager";
 import { SearchModal } from "./components/modal/SearchModal";
 import { getQueryClient } from "./lib/query";
 import { SkillsService } from "./skills";
 import { createMessenger } from "./stores/chatStore.svelte";
 import { type PluginDataStore, createData } from "./stores/dataStore.svelte";
+import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingChangesStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import { SmartGraphView, VIEW_TYPE_SMART_GRAPH } from "./views/smart-graph/SmartGraphView";
@@ -19,6 +22,7 @@ export default class SecondBrainPlugin extends Plugin {
 	agentManager!: AgentManager;
 	skillsService!: SkillsService;
 	vectorStoreService!: VectorStoreService;
+	pendingChangesStore!: PendingChangesStore;
 	queryClient = getQueryClient();
 	pluginData!: PluginDataStore;
 
@@ -48,11 +52,9 @@ export default class SecondBrainPlugin extends Plugin {
 		// Register Smart Graph view
 		this.registerView(VIEW_TYPE_SMART_GRAPH, (leaf) => new SmartGraphView(leaf, this));
 
-		const { isVerbose, isAutostart } = this.pluginData;
-
 		if (this.manifest.dir === undefined) {
 			this.unload();
-			throw Error("Cannot localize plugin directory.");
+			throw new Error("Cannot localize plugin directory.");
 		}
 
 		this.addRibbonIcon("message-square", "New Chat", () => this.createNewChat());
@@ -93,12 +95,36 @@ export default class SecondBrainPlugin extends Plugin {
 		await this.agentManager.initialize();
 
 		createMessenger(this.agentManager);
+
+		// Initialize Pending Changes Store for write tool staging
+		this.pendingChangesStore = new PendingChangesStore(this);
+		initPendingChangesStore(this.pendingChangesStore);
+		await this.pendingChangesStore.load();
+
+		// Register inline diff decorations in the editor
+		this.registerEditorExtension(inlineDiffPlugin);
+
+		// Register reading view diff highlighting
+		this.registerMarkdownPostProcessor(createReadingViewDiffPostProcessor(this));
+
+		// Re-render reading views when pending changes update
+		const refreshReadingViews = () => {
+			for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+				const view = leaf.view;
+				if (view instanceof MarkdownView) {
+					view.previewMode?.rerender(true);
+				}
+			}
+		};
+		document.addEventListener("ssb-pending-changes-updated", refreshReadingViews);
+		this.register(() => document.removeEventListener("ssb-pending-changes-updated", refreshReadingViews));
 	}
 
-	async onunload() {
+	onunload() {
 		Log.info("Unloading plugin");
-		if (this.vectorStoreService) await this.vectorStoreService.cleanup();
+		if (this.vectorStoreService) void this.vectorStoreService.cleanup();
 		if (this.agentManager) this.agentManager.cleanup();
+		if (this.pendingChangesStore) this.pendingChangesStore.cleanup();
 		terminateClusteringWorker();
 	}
 

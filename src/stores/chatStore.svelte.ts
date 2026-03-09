@@ -12,6 +12,7 @@ import type { AgentStreamChunk, CheckpointHistoryItem, ThreadHistory } from "../
 import type { AgentManager } from "../agent/AgentManager";
 import type { ChatModelConfig } from "../providers/index";
 import type { ChatAttachment, ThreadError } from "../types/shared";
+import type { AgentConfig } from "../types/plugin";
 import { NEW_CHAT_NAME } from "../utils/threadId";
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { DEFAULT_AGENT_ID, getData } from "./dataStore.svelte";
@@ -1060,7 +1061,7 @@ interface ChatSessionOptions {
 }
 
 export class ChatSession {
-	id: string;
+	id = $state<string>("");
 	messages: MessagePair[] = $state<MessagePair[]>([]);
 
 	// Streaming / lifecycle
@@ -1735,6 +1736,60 @@ export class Messenger {
 		return agentChatModel?.modelConfig ?? { contextWindow: 128000 };
 	}
 
+	private resolveAgentFromGeneration(
+		generation: MessageGeneration,
+		fallbackAgent: AgentConfig,
+	): { agentId: string; model: ChatModel | null } {
+		const data = getData();
+		const provider = generation.provider!;
+		const model = generation.model!;
+
+		// Try to find the agent by ID first
+		let generatedAgent = generation.agentId ? data.getAgent(generation.agentId) : undefined;
+
+		// Fall back to matching by provider+model
+		if (!generatedAgent) {
+			const candidates = Object.values(data.agents).filter(
+				(agent) => agent.chatModel?.provider === provider && agent.chatModel?.model === model,
+			);
+			if (candidates.length === 1) {
+				generatedAgent = candidates[0];
+			} else if (candidates.length > 1) {
+				generatedAgent = candidates.find((agent) => agent.id === data.defaultAgentId) ?? candidates[0];
+			}
+		}
+
+		// When an agent is found, return its stored chatModel rather than
+		// constructing one from the generation's provider/model fields.
+		// The generation metadata comes from LLM response_metadata which can
+		// contain incorrect values (e.g. @langchain/openai hardcodes
+		// model_provider: "openai" even when used with OpenRouter).
+		if (generatedAgent) {
+			return {
+				agentId: generatedAgent.id,
+				model: generatedAgent.chatModel ?? null,
+			};
+		}
+
+		// No agent matched — check if the generation's provider is still configured.
+		// Only apply the generation's model if the provider is actually available,
+		// otherwise fall back to the agent's stored model to avoid overwriting
+		// with an unconfigured provider (e.g. "openai" from response_metadata
+		// when the actual provider is "openrouter").
+		if (data.getConfiguredProviders().includes(provider)) {
+			return {
+				agentId: fallbackAgent.id,
+				model: {
+					provider,
+					model,
+					modelConfig: this.getModelConfigForSelection(fallbackAgent.chatModel, provider, model),
+				},
+			};
+		}
+
+		return { agentId: fallbackAgent.id, model: fallbackAgent.chatModel ?? null };
+	}
+
 	private async restoreSelectionFromLoadedMessages(
 		graph: CheckpointGraphState,
 		activeCheckpointId: string | undefined,
@@ -1755,34 +1810,10 @@ export class Messenger {
 		let nextAgentId = fallbackAgent.id;
 		let nextModel: ChatModel | null = fallbackAgent.chatModel ?? null;
 
-		const hasGenerationModel = Boolean(generation?.provider && generation?.model);
-		if (hasGenerationModel) {
-			let generatedAgent = generation?.agentId ? data.getAgent(generation.agentId) : undefined;
-			if (!generatedAgent) {
-				const candidates = Object.values(data.agents).filter(
-					(agent) =>
-						agent.chatModel?.provider === generation!.provider &&
-						agent.chatModel?.model === generation!.model,
-				);
-				if (candidates.length === 1) {
-					generatedAgent = candidates[0];
-				} else if (candidates.length > 1) {
-					generatedAgent = candidates.find((agent) => agent.id === data.defaultAgentId) ?? candidates[0];
-				}
-			}
-
-			if (generatedAgent) {
-				nextAgentId = generatedAgent.id;
-				nextModel = {
-					provider: generation!.provider!,
-					model: generation!.model!,
-					modelConfig: this.getModelConfigForSelection(
-						generatedAgent.chatModel,
-						generation!.provider!,
-						generation!.model!,
-					),
-				};
-			}
+		if (generation?.provider && generation?.model) {
+			const resolved = this.resolveAgentFromGeneration(generation, fallbackAgent);
+			nextAgentId = resolved.agentId;
+			nextModel = resolved.model;
 		}
 
 		let changed = false;

@@ -8,6 +8,7 @@ import type {
 	AgentsConfig,
 	BuiltInToolId,
 	DefaultEmbedModel,
+	DiffViewMode,
 	MCPServerConfig,
 	MCPServersConfig,
 	PluginData,
@@ -20,8 +21,14 @@ import type { VectorStoreBackend } from "../vectorstore/types";
 import { type SmartGraphSettings, DEFAULT_SMART_GRAPH_SETTINGS } from "../types/graph";
 
 // Provider system types
-import type { AuthObject, ChatModelConfig, CustomProviderMeta, EmbedModelConfig } from "../providers/index";
-import { BUILT_IN_PROVIDER_IDS, type BuiltInProviderId } from "../providers/index";
+import {
+	BUILT_IN_PROVIDER_IDS,
+	type AuthObject,
+	type BuiltInProviderId,
+	type ChatModelConfig,
+	type CustomProviderMeta,
+	type EmbedModelConfig,
+} from "../providers/index";
 
 // ============================================================================
 // Error Classes
@@ -208,6 +215,14 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		description:
 			"Retrieve properties (frontmatter) from Obsidian. Omit 'note_name' to list all available property keys in the vault.",
 	},
+	execute_javascript: {
+		enabled: true,
+		name: "execute_javascript",
+		description:
+			"Execute isolated JavaScript for calculations and data transformation. Pass structured data via the input field, use return for the final value, and use console.log for intermediate output.",
+		promptGuidance:
+			"Use this for calculations, reshaping JSON, filtering arrays, parsing structured text, or other logic-heavy transformations. The code runs in an isolated worker without Obsidian APIs, so do not use it for note edits or vault access.",
+	},
 	execute_dataview_query: {
 		enabled: true,
 		name: "execute_dataview_query",
@@ -215,6 +230,18 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 			"Execute an Obsidian Dataview query (DQL) and return the results in Markdown format. Use this to query notes, metadata, tags, and more using the Dataview Query Language.",
 		settings: {
 			includeMetadata: true,
+		},
+	},
+	manage_notes: {
+		enabled: true,
+		name: "manage_notes",
+		description:
+			"Create, update, delete, or move markdown notes in one staged batch. Use targeted search-and-replace edits for updates and batch related note operations together.",
+		settings: {
+			allowCreate: true,
+			allowUpdate: true,
+			allowDelete: true,
+			allowMove: true,
 		},
 	},
 };
@@ -300,11 +327,14 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 	// Smart Graph View
 	smartGraphSettings: DEFAULT_SMART_GRAPH_SETTINGS,
+
+	// Diff view
+	diffViewMode: "two-pane",
 };
 
 export class PluginDataStore {
 	#data: PluginData;
-	private _plugin: SecondBrainPlugin;
+	private readonly _plugin: SecondBrainPlugin;
 
 	constructor(plugin: SecondBrainPlugin, initialData: PluginData) {
 		this._plugin = plugin;
@@ -439,9 +469,9 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => { });
+				this._plugin.app.vault.createFolder(normalized).catch(() => {});
 			}
-		} catch (_) {
+		} catch {
 			// ignore
 		}
 		this.saveSettings();
@@ -494,7 +524,6 @@ export class PluginDataStore {
 		this.#data.langSmithEndpoint = val;
 		this.saveSettings();
 	}
-
 
 	// ============================================================================
 	// Agent Configuration Methods
@@ -667,7 +696,7 @@ export class PluginDataStore {
 		}
 
 		// Use JSON parse/stringify for deep copy (safe for serializable config data)
-		const clonedAgent = JSON.parse(JSON.stringify(sourceAgent)) as AgentConfig;
+		const clonedAgent = structuredClone(sourceAgent);
 		const newAgent: AgentConfig = {
 			...clonedAgent,
 			id: genUUIDv7(),
@@ -906,6 +935,16 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
+	// --- Diff View Mode ---
+
+	get diffViewMode(): DiffViewMode {
+		return this.#data.diffViewMode ?? "two-pane";
+	}
+	set diffViewMode(val: DiffViewMode) {
+		this.#data.diffViewMode = val;
+		this.saveSettings();
+	}
+
 	// --- Favorite Models ---
 
 	get favoriteModels(): Array<{ provider: string; model: string }> {
@@ -1125,11 +1164,7 @@ export class PluginDataStore {
 		config.chatModels = rest;
 
 		for (const agent of Object.values(this.#data.agents)) {
-			if (
-				agent.chatModel &&
-				agent.chatModel.provider === provider &&
-				agent.chatModel.model === modelName
-			) {
+			if (agent.chatModel?.provider === provider && agent.chatModel.model === modelName) {
 				agent.chatModel = null;
 			}
 		}
@@ -1204,7 +1239,7 @@ export class PluginDataStore {
 
 		// Resolve secret IDs to actual values
 		for (const [fieldName, secretId] of Object.entries(stored.secretIds)) {
-			const secretValue = getSecret(this._plugin.app, secretId as string);
+			const secretValue = getSecret(this._plugin.app, secretId);
 			if (secretValue) {
 				if (fieldName === "apiKey") {
 					result.apiKey = secretValue;
@@ -1275,10 +1310,10 @@ export class PluginDataStore {
 		const config = this.#data.providerConfig[providerId];
 		if (!config) return;
 
-		if (!secretId.trim()) {
-			delete config.auth.secretIds[fieldName];
-		} else {
+		if (secretId.trim()) {
 			config.auth.secretIds[fieldName] = secretId;
+		} else {
+			delete config.auth.secretIds[fieldName];
 		}
 		this.saveSettings();
 	}
@@ -1382,110 +1417,126 @@ export class PluginDataStore {
 
 let _pluginDataStore: PluginDataStore | null = null;
 
+function migrateReadContentTool(agent: AgentConfig): void {
+	const legacyTools = (agent.toolsConfig ?? {}) as Record<string, ToolConfig | undefined>;
+	const legacyReadNote = legacyTools.read_note;
+	const legacyReadAttachment = legacyTools.read_attachment;
+
+	const currentReadContent = agent.toolsConfig.read_content;
+	const legacyMaxContentLength =
+		(legacyReadNote?.settings as { maxContentLength?: number } | undefined)?.maxContentLength ??
+		(currentReadContent.settings as { maxContentLength?: number } | undefined)?.maxContentLength ??
+		0;
+
+	let mergedReadContentEnabled = currentReadContent.enabled ?? true;
+	if (legacyReadNote && legacyReadAttachment) {
+		mergedReadContentEnabled = (legacyReadNote.enabled ?? true) && (legacyReadAttachment.enabled ?? true);
+	} else if (legacyReadNote) {
+		mergedReadContentEnabled = legacyReadNote.enabled ?? true;
+	} else if (legacyReadAttachment) {
+		mergedReadContentEnabled = legacyReadAttachment.enabled ?? true;
+	}
+
+	const mergedReadContentName =
+		currentReadContent.name === DEFAULT_TOOLS_CONFIG.read_content.name
+			? legacyReadNote?.name || legacyReadAttachment?.name || currentReadContent.name
+			: currentReadContent.name;
+
+	const mergedReadContentDescription =
+		currentReadContent.description === DEFAULT_TOOLS_CONFIG.read_content.description
+			? legacyReadNote?.description || legacyReadAttachment?.description || currentReadContent.description
+			: currentReadContent.description;
+
+	agent.toolsConfig.read_content = {
+		...currentReadContent,
+		enabled: mergedReadContentEnabled,
+		name: mergedReadContentName,
+		description: mergedReadContentDescription,
+		settings: { maxContentLength: legacyMaxContentLength },
+	};
+
+	delete (agent.toolsConfig as Record<string, ToolConfig | undefined>).read_note;
+	delete (agent.toolsConfig as Record<string, ToolConfig | undefined>).read_attachment;
+}
+
+function migrateManageNotesTool(agent: AgentConfig): void {
+	const legacyTools = agent.toolsConfig as Record<string, ToolConfig | undefined>;
+	const legacyCreate = legacyTools.create_note;
+	const legacyEdit = legacyTools.edit_note;
+	const legacyDelete = legacyTools.delete_note;
+	const currentManageNotes = agent.toolsConfig.manage_notes;
+	const currentSettings =
+		(currentManageNotes.settings as
+			| { allowCreate?: boolean; allowUpdate?: boolean; allowDelete?: boolean; allowMove?: boolean }
+			| undefined) ?? {};
+	const hasLegacyWriteTools = Boolean(legacyCreate || legacyEdit || legacyDelete);
+
+	agent.toolsConfig.manage_notes = {
+		...currentManageNotes,
+		enabled: hasLegacyWriteTools
+			? Boolean(legacyCreate?.enabled || legacyEdit?.enabled || legacyDelete?.enabled)
+			: (currentManageNotes.enabled ?? true),
+		settings: {
+			allowCreate: currentSettings.allowCreate ?? legacyCreate?.enabled ?? true,
+			allowUpdate: currentSettings.allowUpdate ?? legacyEdit?.enabled ?? true,
+			allowDelete: currentSettings.allowDelete ?? legacyDelete?.enabled ?? true,
+			allowMove: currentSettings.allowMove ?? true,
+		},
+	};
+
+	delete legacyTools.create_note;
+	delete legacyTools.edit_note;
+	delete legacyTools.delete_note;
+}
+
+function normalizeAgent(agent: AgentConfig): void {
+	// Ensure toolsConfig exists and has all tools
+	if (agent.toolsConfig) {
+		agent.toolsConfig = { ...structuredClone(DEFAULT_TOOLS_CONFIG), ...agent.toolsConfig };
+	} else {
+		agent.toolsConfig = structuredClone(DEFAULT_TOOLS_CONFIG);
+	}
+
+	migrateReadContentTool(agent);
+	migrateManageNotesTool(agent);
+
+	agent.skills ??= {};
+	agent.mcpServers ??= {};
+	agent.systemPrompt ??= BASE_SYSTEM_PROMPT;
+}
+
+function normalizeAgents(mergedData: PluginData): void {
+	if (!mergedData.agents[DEFAULT_AGENT_ID]) {
+		mergedData.agents[DEFAULT_AGENT_ID] = createDefaultAgent();
+	}
+	for (const agentId of Object.keys(mergedData.agents)) {
+		normalizeAgent(mergedData.agents[agentId]);
+	}
+	// Ensure defaultAgentId is valid
+	if (mergedData.defaultAgentId !== null && !mergedData.agents[mergedData.defaultAgentId]) {
+		mergedData.defaultAgentId = null;
+	}
+	if (!mergedData.selectedAgentId || !mergedData.agents[mergedData.selectedAgentId]) {
+		mergedData.selectedAgentId = mergedData.defaultAgentId ?? DEFAULT_AGENT_ID;
+	}
+}
+
 export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataStore> {
 	if (_pluginDataStore) return _pluginDataStore;
 
 	const rawData = await plugin.loadData();
 
-	// Merge raw data with defaults (no validation during active development)
 	const mergedData: PluginData = {
 		...DEFAULT_SETTINGS,
 		...rawData,
 	};
 
-	// Ensure at least one agent exists
 	if (!rawData?.agents || Object.keys(rawData.agents).length === 0) {
-		mergedData.agents = {
-			[DEFAULT_AGENT_ID]: createDefaultAgent(),
-		};
+		mergedData.agents = { [DEFAULT_AGENT_ID]: createDefaultAgent() };
 		mergedData.defaultAgentId = DEFAULT_AGENT_ID;
 		mergedData.selectedAgentId = DEFAULT_AGENT_ID;
 	} else {
-		// Ensure the built-in default agent key always exists
-		if (!mergedData.agents[DEFAULT_AGENT_ID]) {
-			mergedData.agents[DEFAULT_AGENT_ID] = createDefaultAgent();
-		}
-
-		// Normalize all agents to include required fields
-		for (const agentId of Object.keys(mergedData.agents)) {
-			const agent = mergedData.agents[agentId];
-			const legacyTools = (agent.toolsConfig ?? {}) as Record<string, ToolConfig | undefined>;
-			const legacyReadNote = legacyTools.read_note;
-			const legacyReadAttachment = legacyTools.read_attachment;
-
-			// Ensure toolsConfig exists and has all tools
-			if (!agent.toolsConfig) {
-				agent.toolsConfig = structuredClone(DEFAULT_TOOLS_CONFIG);
-			} else {
-				agent.toolsConfig = {
-					...structuredClone(DEFAULT_TOOLS_CONFIG),
-					...agent.toolsConfig,
-				};
-			}
-
-			const currentReadContent = agent.toolsConfig.read_content;
-			const legacyMaxContentLength =
-				(legacyReadNote?.settings as { maxContentLength?: number } | undefined)?.maxContentLength ??
-				(currentReadContent.settings as { maxContentLength?: number } | undefined)?.maxContentLength ??
-				0;
-
-			let mergedReadContentEnabled = currentReadContent.enabled ?? true;
-			if (legacyReadNote && legacyReadAttachment) {
-				mergedReadContentEnabled = (legacyReadNote.enabled ?? true) && (legacyReadAttachment.enabled ?? true);
-			} else if (legacyReadNote) {
-				mergedReadContentEnabled = legacyReadNote.enabled ?? true;
-			} else if (legacyReadAttachment) {
-				mergedReadContentEnabled = legacyReadAttachment.enabled ?? true;
-			}
-
-			const mergedReadContentName =
-				currentReadContent.name === DEFAULT_TOOLS_CONFIG.read_content.name
-					? legacyReadNote?.name || legacyReadAttachment?.name || currentReadContent.name
-					: currentReadContent.name;
-
-			const mergedReadContentDescription =
-				currentReadContent.description === DEFAULT_TOOLS_CONFIG.read_content.description
-					? legacyReadNote?.description || legacyReadAttachment?.description || currentReadContent.description
-					: currentReadContent.description;
-
-			agent.toolsConfig.read_content = {
-				...currentReadContent,
-				enabled: mergedReadContentEnabled,
-				name: mergedReadContentName,
-				description: mergedReadContentDescription,
-				settings: {
-					maxContentLength: legacyMaxContentLength,
-				},
-			};
-
-			delete (agent.toolsConfig as Record<string, ToolConfig | undefined>).read_note;
-			delete (agent.toolsConfig as Record<string, ToolConfig | undefined>).read_attachment;
-
-			// Ensure skills exists
-			if (!agent.skills) {
-				agent.skills = {};
-			}
-
-			// Ensure mcpServers exists
-			if (!agent.mcpServers) {
-				agent.mcpServers = {};
-			}
-
-			// Ensure systemPrompt exists
-			if (!agent.systemPrompt) {
-				agent.systemPrompt = BASE_SYSTEM_PROMPT;
-			}
-		}
-
-		// Ensure defaultAgentId is valid (null is valid for "last selected" behavior)
-		if (mergedData.defaultAgentId !== null && !mergedData.agents[mergedData.defaultAgentId]) {
-			// Default agent was deleted, clear it (use last selected)
-			mergedData.defaultAgentId = null;
-		}
-		// Ensure selectedAgentId is valid
-		if (!mergedData.selectedAgentId || !mergedData.agents[mergedData.selectedAgentId]) {
-			mergedData.selectedAgentId = mergedData.defaultAgentId ?? DEFAULT_AGENT_ID;
-		}
+		normalizeAgents(mergedData);
 	}
 
 	_pluginDataStore = new PluginDataStore(plugin, mergedData);
@@ -1493,6 +1544,6 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 }
 
 export function getData(): PluginDataStore {
-	if (!_pluginDataStore) throw Error("Plugin does not exist");
+	if (!_pluginDataStore) throw new Error("Plugin does not exist");
 	return _pluginDataStore;
 }

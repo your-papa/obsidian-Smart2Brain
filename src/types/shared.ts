@@ -37,3 +37,70 @@ export const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 export const PDF_EXTENSIONS = new Set(["pdf"]);
 /** File extensions considered plain-text documents */
 export const TEXT_EXTENSIONS = new Set(["md", "txt", "csv", "json"]);
+
+// ============================================================================
+// Pending Changes (Staged Write Operations)
+// ============================================================================
+
+/** Status of a pending change proposed by the agent */
+export type PendingChangeStatus = "pending" | "accepted" | "rejected";
+
+/** A staged note creation */
+export interface PendingNoteCreate {
+	type: "create";
+	/** Vault-relative path for the new file */
+	path: string;
+	/** Full markdown content to write */
+	content: string;
+}
+
+/** A staged note update */
+export interface PendingNoteUpdate {
+	type: "update";
+	/** Vault-relative path of the existing file */
+	path: string;
+	/** Content of the file before the proposed change */
+	originalContent: string;
+	/** Proposed new content */
+	newContent: string;
+	/** Snapshot of originalContent before any group-level accepts mutated it.
+	 *  Set on the first `acceptChangeGroup` call so `rejectAll` can restore the file. */
+	initialOriginalContent?: string;
+}
+
+/** A staged note deletion */
+export interface PendingNoteDelete {
+	type: "delete";
+	/** Vault-relative path of the file to delete */
+	path: string;
+	/** Content of the file at the time of the proposal (for diff display) */
+	originalContent: string;
+}
+
+/** A staged note move */
+export interface PendingNoteMove {
+	type: "move";
+	/** Current vault-relative path of the file */
+	path: string;
+	/** Target vault-relative path after the move */
+	newPath: string;
+}
+
+/** Discriminated union of all pending change types */
+export type PendingChange = PendingNoteCreate | PendingNoteUpdate | PendingNoteDelete | PendingNoteMove;
+
+/** A single pending change entry with metadata */
+export interface PendingChangeEntry {
+	/** Unique ID for this change */
+	id: string;
+	/** The proposed change */
+	change: PendingChange;
+	/** Current status */
+	status: PendingChangeStatus;
+	/** ID of the tool call that created this change */
+	toolCallId: string;
+	/** Thread ID this change belongs to */
+	threadId: string;
+	/** Timestamp when the change was proposed */
+	createdAt: number;
+}

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { buildGraph, applySearchHighlight } from "../../src/views/smart-graph/graphDataBuilder";
+import {
+    buildGraph,
+    buildWikiGraph,
+    applyColorGroups,
+    applySearchHighlight,
+} from "../../src/views/smart-graph/graphDataBuilder";
 import type { App, CachedMetadata, TFile } from "obsidian";
 import type { DocumentVector } from "../../src/vectorstore/types";
 
@@ -105,10 +110,13 @@ describe("buildGraph", () => {
         const docs = [
             createMockDocumentVector("a.md", [1, 0.9, 0, 0]),
             createMockDocumentVector("b.md", [0.9, 1, 0, 0]),
+            createMockDocumentVector("c.md", [0, 0, 1, 0]),
         ];
-        const app = createMockApp({ "a.md": { "b.md": 1 } }, ["a.md", "b.md"]);
+        const app = createMockApp({ "a.md": { "b.md": 1 } }, ["a.md", "b.md", "c.md"]);
         const result = await buildGraph(app, docs, {
             ...defaultSettings,
+            showWikiLinks: true,
+            showSemanticEdges: true,
             semanticNeighbors: 2,
             similarityThreshold: 0,
         });
@@ -208,6 +216,64 @@ describe("buildGraph", () => {
         const app = createMockApp({}, ["folder/My Note.md"]);
         const result = await buildGraph(app, docs, defaultSettings);
         expect(result.nodes[0].label).toBe("My Note");
+    });
+});
+
+describe("buildWikiGraph", () => {
+    it("should create wiki nodes from vault markdown files without vectors", () => {
+        const app = createMockApp(
+            { "a.md": { "b.md": 1 }, "b.md": { "c.md": 1 } },
+            ["a.md", "b.md", "c.md"],
+        );
+
+        const result = buildWikiGraph(app, { showOrphans: true });
+
+        expect(result.graphData.nodes).toHaveLength(3);
+        expect(result.graphData.edges).toHaveLength(2);
+        expect(result.filteredPaths).toEqual(["a.md", "b.md", "c.md"]);
+    });
+
+    it("should respect folder and tag filters for wiki mode", () => {
+        const app = createMockApp(
+            { "Work/a.md": { "Work/b.md": 1 }, "Ideas/c.md": { "Work/a.md": 1 } },
+            ["Work/a.md", "Work/b.md", "Ideas/c.md"],
+            { "Work/a.md": ["#focus"], "Work/b.md": ["#focus"], "Ideas/c.md": ["#other"] },
+        );
+
+        const result = buildWikiGraph(
+            app,
+            { showOrphans: true },
+            { folders: ["Work"], tags: ["#focus"] },
+        );
+
+        expect(result.graphData.nodes.map((n) => n.id).sort()).toEqual(["Work/a.md", "Work/b.md"]);
+        expect(result.graphData.edges).toHaveLength(1);
+    });
+});
+
+describe("applyColorGroups", () => {
+    it("should color wiki nodes by first matching folder or tag rule", () => {
+        const app = createMockApp(
+            {},
+            ["Work/a.md", "Ideas/b.md"],
+            { "Work/a.md": ["#focus"], "Ideas/b.md": ["#focus"] },
+        );
+
+        const graphData = {
+            nodes: [
+                { id: "Work/a.md", path: "Work/a.md", label: "a", x: 0, y: 0 },
+                { id: "Ideas/b.md", path: "Ideas/b.md", label: "b", x: 0, y: 0 },
+            ],
+            edges: [],
+        };
+
+        const result = applyColorGroups(app, graphData, [
+            { query: "#focus", color: "#ff0000" },
+            { query: "Work", color: "#00ff00" },
+        ]);
+
+        expect(result.nodes[0].color).toBe("#ff0000");
+        expect(result.nodes[1].color).toBe("#ff0000");
     });
 });
 

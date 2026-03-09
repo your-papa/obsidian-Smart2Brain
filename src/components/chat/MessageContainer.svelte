@@ -176,7 +176,7 @@
     const modelLabel =
       generation.provider && generation.model
         ? `${generation.provider}/${generation.model}`
-        : generation.model ?? generation.provider;
+        : (generation.model ?? generation.provider);
 
     if (agentLabel && modelLabel) return `${agentLabel} · ${modelLabel}`;
     return agentLabel ?? modelLabel ?? null;
