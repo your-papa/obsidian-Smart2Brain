@@ -1,168 +1,238 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
-  import type { BuiltInToolId, ToolConfig } from "../../types/plugin";
-  import Button from "../ui/Button.svelte";
-  import Text from "../ui/Text.svelte";
-  import TextArea from "../ui/TextArea.svelte";
-  import Toggle from "../ui/Toggle.svelte";
-  import type { ToolConfigAccessors, ToolConfigModal } from "./ToolConfigModal";
+import { onMount } from "svelte";
+import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
+import type { BuiltInToolId, ToolConfig } from "../../types/plugin";
+import Button from "../ui/Button.svelte";
+import Text from "../ui/Text.svelte";
+import TextArea from "../ui/TextArea.svelte";
+import Toggle from "../ui/Toggle.svelte";
+import type { ToolConfigAccessors, ToolConfigModal } from "./ToolConfigModal";
 
-  interface Props {
-    modal: ToolConfigModal;
-    toolId: BuiltInToolId;
-    onSave: () => void;
-    accessors?: ToolConfigAccessors;
-  }
+interface Props {
+	modal: ToolConfigModal;
+	toolId: BuiltInToolId;
+	onSave: () => void;
+	accessors?: ToolConfigAccessors;
+}
 
-  const { modal, toolId, onSave, accessors }: Props = $props();
-  const pluginData = getData();
+const { modal, toolId, onSave, accessors }: Props = $props();
+const pluginData = getData();
 
-  const capturedToolId = (() => toolId)();
-  const defaultConfig = DEFAULT_TOOLS_CONFIG[capturedToolId];
-  const initialToolConfig = (() => accessors?.getToolConfig() ?? defaultConfig)();
+const capturedToolId = (() => toolId)();
+const defaultConfig = DEFAULT_TOOLS_CONFIG[capturedToolId];
+const initialToolConfig = (() => accessors?.getToolConfig() ?? defaultConfig)();
 
-  function updateToolConfig(config: Partial<ToolConfig>): void {
-    if (accessors?.updateToolConfig) {
-      accessors.updateToolConfig(config);
-      return;
-    }
-    pluginData.updateAgentToolConfig(pluginData.selectedAgentId, capturedToolId, config);
-  }
+function updateToolConfig(config: Partial<ToolConfig>): void {
+	if (accessors?.updateToolConfig) {
+		accessors.updateToolConfig(config);
+		return;
+	}
+	pluginData.updateAgentToolConfig(pluginData.selectedAgentId, capturedToolId, config);
+}
 
-  let name = $state(initialToolConfig?.name ?? defaultConfig.name);
-  let description = $state(initialToolConfig?.description ?? defaultConfig.description);
-  let maxContentLength = $state(
-    (initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
-      (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
-      0,
-  );
-  let includeMetadata = $state(
-    (initialToolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
-      (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
-      true,
-  );
-  let maxResults = $state(
-    (initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
-      (defaultConfig.settings as { maxResults?: number })?.maxResults ??
-      10,
-  );
+let name = $state(initialToolConfig?.name ?? defaultConfig.name);
+let description = $state(initialToolConfig?.description ?? defaultConfig.description);
+let promptGuidance = $state(initialToolConfig?.promptGuidance ?? defaultConfig.promptGuidance ?? "");
+let maxContentLength = $state(
+	(initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
+		(defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
+		0,
+);
+let includeMetadata = $state(
+	(initialToolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
+		(defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
+		true,
+);
+let maxResults = $state(
+	(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
+		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
+		10,
+);
+let allowCreate = $state(
+	(initialToolConfig?.settings as { allowCreate?: boolean })?.allowCreate ??
+		(defaultConfig.settings as { allowCreate?: boolean })?.allowCreate ??
+		true,
+);
+let allowUpdate = $state(
+	(initialToolConfig?.settings as { allowUpdate?: boolean })?.allowUpdate ??
+		(defaultConfig.settings as { allowUpdate?: boolean })?.allowUpdate ??
+		true,
+);
+let allowDelete = $state(
+	(initialToolConfig?.settings as { allowDelete?: boolean })?.allowDelete ??
+		(defaultConfig.settings as { allowDelete?: boolean })?.allowDelete ??
+		true,
+);
+let allowMove = $state(
+	(initialToolConfig?.settings as { allowMove?: boolean })?.allowMove ??
+		(defaultConfig.settings as { allowMove?: boolean })?.allowMove ??
+		true,
+);
 
-  interface ToolConfigSnapshot {
-    name: string;
-    description: string;
-    maxContentLength: number;
-    includeMetadata: boolean;
-    maxResults: number;
-  }
+interface ToolConfigSnapshot {
+	name: string;
+	description: string;
+	promptGuidance: string;
+	maxContentLength: number;
+	includeMetadata: boolean;
+	maxResults: number;
+	allowCreate: boolean;
+	allowUpdate: boolean;
+	allowDelete: boolean;
+	allowMove: boolean;
+}
 
-  const initialSnapshot: ToolConfigSnapshot = {
-    name: initialToolConfig?.name ?? defaultConfig.name,
-    description: initialToolConfig?.description ?? defaultConfig.description,
-    maxContentLength:
-      (initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
-      (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
-      0,
-    includeMetadata:
-      (initialToolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
-      (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
-      true,
-    maxResults:
-      (initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
-      (defaultConfig.settings as { maxResults?: number })?.maxResults ??
-      10,
-  };
+const initialSnapshot: ToolConfigSnapshot = {
+	name: initialToolConfig?.name ?? defaultConfig.name,
+	description: initialToolConfig?.description ?? defaultConfig.description,
+	promptGuidance: initialToolConfig?.promptGuidance ?? defaultConfig.promptGuidance ?? "",
+	maxContentLength:
+		(initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
+		(defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
+		0,
+	includeMetadata:
+		(initialToolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
+		(defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
+		true,
+	maxResults:
+		(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
+		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
+		10,
+	allowCreate:
+		(initialToolConfig?.settings as { allowCreate?: boolean })?.allowCreate ??
+		(defaultConfig.settings as { allowCreate?: boolean })?.allowCreate ??
+		true,
+	allowUpdate:
+		(initialToolConfig?.settings as { allowUpdate?: boolean })?.allowUpdate ??
+		(defaultConfig.settings as { allowUpdate?: boolean })?.allowUpdate ??
+		true,
+	allowDelete:
+		(initialToolConfig?.settings as { allowDelete?: boolean })?.allowDelete ??
+		(defaultConfig.settings as { allowDelete?: boolean })?.allowDelete ??
+		true,
+	allowMove:
+		(initialToolConfig?.settings as { allowMove?: boolean })?.allowMove ??
+		(defaultConfig.settings as { allowMove?: boolean })?.allowMove ??
+		true,
+};
 
-  const defaultSnapshot: ToolConfigSnapshot = {
-    name: defaultConfig.name,
-    description: defaultConfig.description,
-    maxContentLength:
-      (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ?? 0,
-    includeMetadata:
-      (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ?? true,
-    maxResults: (defaultConfig.settings as { maxResults?: number })?.maxResults ?? 10,
-  };
+const defaultSnapshot: ToolConfigSnapshot = {
+	name: defaultConfig.name,
+	description: defaultConfig.description,
+	promptGuidance: defaultConfig.promptGuidance ?? "",
+	maxContentLength: (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ?? 0,
+	includeMetadata: (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ?? true,
+	maxResults: (defaultConfig.settings as { maxResults?: number })?.maxResults ?? 10,
+	allowCreate: (defaultConfig.settings as { allowCreate?: boolean })?.allowCreate ?? true,
+	allowUpdate: (defaultConfig.settings as { allowUpdate?: boolean })?.allowUpdate ?? true,
+	allowDelete: (defaultConfig.settings as { allowDelete?: boolean })?.allowDelete ?? true,
+	allowMove: (defaultConfig.settings as { allowMove?: boolean })?.allowMove ?? true,
+};
 
-  function snapshotKey(snapshot: ToolConfigSnapshot): string {
-    return JSON.stringify(snapshot);
-  }
+function snapshotKey(snapshot: ToolConfigSnapshot): string {
+	return JSON.stringify(snapshot);
+}
 
-  const initialSnapshotKey = snapshotKey(initialSnapshot);
-  const defaultSnapshotKey = snapshotKey(defaultSnapshot);
+const initialSnapshotKey = snapshotKey(initialSnapshot);
+const defaultSnapshotKey = snapshotKey(defaultSnapshot);
 
-  const isDirty = $derived.by(() => {
-    const currentSnapshot: ToolConfigSnapshot = {
-      name,
-      description,
-      maxContentLength,
-      includeMetadata,
-      maxResults,
-    };
-    return snapshotKey(currentSnapshot) !== initialSnapshotKey;
-  });
+const isDirty = $derived.by(() => {
+	const currentSnapshot: ToolConfigSnapshot = {
+		name,
+		description,
+		promptGuidance,
+		maxContentLength,
+		includeMetadata,
+		maxResults,
+		allowCreate,
+		allowUpdate,
+		allowDelete,
+		allowMove,
+	};
+	return snapshotKey(currentSnapshot) !== initialSnapshotKey;
+});
 
-  const isAtDefault = $derived.by(() => {
-    const currentSnapshot: ToolConfigSnapshot = {
-      name,
-      description,
-      maxContentLength,
-      includeMetadata,
-      maxResults,
-    };
-    return snapshotKey(currentSnapshot) === defaultSnapshotKey;
-  });
+const isAtDefault = $derived.by(() => {
+	const currentSnapshot: ToolConfigSnapshot = {
+		name,
+		description,
+		promptGuidance,
+		maxContentLength,
+		includeMetadata,
+		maxResults,
+		allowCreate,
+		allowUpdate,
+		allowDelete,
+		allowMove,
+	};
+	return snapshotKey(currentSnapshot) === defaultSnapshotKey;
+});
 
-  const showResetToDefault = $derived(!isAtDefault);
+const showResetToDefault = $derived(!isAtDefault);
 
-  const toolDisplayNames: Record<BuiltInToolId, string> = {
-    search_notes: "Search Notes",
-    read_content: "Read Content",
-    get_all_tags: "Get All Tags",
-    get_properties: "Get Properties",
-    execute_dataview_query: "Execute Dataview Query",
-    create_note: "Create Note",
-    delete_note: "Delete Note",
-    edit_note: "Edit Note",
-  };
+const toolDisplayNames: Record<BuiltInToolId, string> = {
+	search_notes: "Search Notes",
+	read_content: "Read Content",
+	get_all_tags: "Get All Tags",
+	get_properties: "Get Properties",
+	execute_javascript: "Execute JavaScript",
+	execute_dataview_query: "Execute Dataview Query",
+	manage_notes: "Manage Notes",
+};
 
-  onMount(() => {
-    modal.setTitle(`Configure: ${toolDisplayNames[capturedToolId]}`);
-  });
+onMount(() => {
+	modal.setTitle(`Configure: ${toolDisplayNames[capturedToolId]}`);
+});
 
-  function handleSave() {
-    const updatedConfig: Partial<ToolConfig> = {
-      name,
-      description,
-    };
+function handleSave() {
+	const updatedConfig: Partial<ToolConfig> = {
+		name,
+		description,
+		promptGuidance: promptGuidance.trim(),
+	};
 
-    if (capturedToolId === "search_notes") {
-      updatedConfig.settings = { maxResults };
-    } else if (capturedToolId === "read_content") {
-      updatedConfig.settings = { maxContentLength };
-    } else if (capturedToolId === "execute_dataview_query") {
-      updatedConfig.settings = { includeMetadata };
-    }
+	if (capturedToolId === "search_notes") {
+		updatedConfig.settings = { maxResults };
+	} else if (capturedToolId === "read_content") {
+		updatedConfig.settings = { maxContentLength };
+	} else if (capturedToolId === "execute_dataview_query") {
+		updatedConfig.settings = { includeMetadata };
+	} else if (capturedToolId === "manage_notes") {
+		updatedConfig.settings = { allowCreate, allowUpdate, allowDelete, allowMove };
+	}
 
-    updateToolConfig(updatedConfig);
-    onSave();
-    modal.close();
-  }
+	updateToolConfig(updatedConfig);
+	onSave();
+	modal.close();
+}
 
-  function handleResetToDefault() {
-    name = defaultConfig.name;
-    description = defaultConfig.description;
+function handleResetToDefault() {
+	name = defaultConfig.name;
+	description = defaultConfig.description;
+	promptGuidance = defaultConfig.promptGuidance ?? "";
 
-    if (capturedToolId === "search_notes" && defaultConfig.settings) {
-      const settings = defaultConfig.settings as { maxResults: number };
-      maxResults = settings.maxResults;
-    } else if (capturedToolId === "read_content" && defaultConfig.settings) {
-      const settings = defaultConfig.settings as { maxContentLength: number };
-      maxContentLength = settings.maxContentLength;
-    } else if (capturedToolId === "execute_dataview_query" && defaultConfig.settings) {
-      const settings = defaultConfig.settings as { includeMetadata: boolean };
-      includeMetadata = settings.includeMetadata;
-    }
-  }
+	if (capturedToolId === "search_notes" && defaultConfig.settings) {
+		const settings = defaultConfig.settings as { maxResults: number };
+		maxResults = settings.maxResults;
+	} else if (capturedToolId === "read_content" && defaultConfig.settings) {
+		const settings = defaultConfig.settings as { maxContentLength: number };
+		maxContentLength = settings.maxContentLength;
+	} else if (capturedToolId === "execute_dataview_query" && defaultConfig.settings) {
+		const settings = defaultConfig.settings as { includeMetadata: boolean };
+		includeMetadata = settings.includeMetadata;
+	} else if (capturedToolId === "manage_notes" && defaultConfig.settings) {
+		const settings = defaultConfig.settings as {
+			allowCreate: boolean;
+			allowUpdate: boolean;
+			allowDelete: boolean;
+			allowMove: boolean;
+		};
+		allowCreate = settings.allowCreate;
+		allowUpdate = settings.allowUpdate;
+		allowDelete = settings.allowDelete;
+		allowMove = settings.allowMove;
+	}
+}
 </script>
 
 <div class="tool-config-modal-content">
@@ -189,6 +259,21 @@
       value={description}
       placeholder={defaultConfig.description}
       onblur={(v) => (description = v)}
+    />
+  </div>
+
+  <div class="tool-config-field">
+    <label class="tool-config-label" for="tool-config-prompt-guidance">Prompt Guidance</label>
+    <p class="tool-config-description">
+      Optional vault-specific guidance injected into the assembled system prompt when this tool is
+      enabled.
+    </p>
+    <TextArea
+      id="tool-config-prompt-guidance"
+      class="w-full h-24"
+      value={promptGuidance}
+      placeholder="Optional guidance for how the agent should use this tool..."
+      onblur={(v) => (promptGuidance = v)}
     />
   </div>
 
@@ -231,6 +316,30 @@
         <div class="tool-config-label">Include Metadata</div>
         <p class="tool-config-description">Include file metadata in query results.</p>
         <Toggle checked={includeMetadata} onchange={(checked) => (includeMetadata = checked)} />
+      </div>
+    </div>
+  {:else if capturedToolId === "manage_notes"}
+    <div class="tool-config-section">
+      <h4 class="tool-config-section-title">Allowed Operations</h4>
+      <div class="tool-config-field">
+        <div class="tool-config-label">Allow Create</div>
+        <p class="tool-config-description">Permit the agent to propose new markdown notes.</p>
+        <Toggle checked={allowCreate} onchange={(checked) => (allowCreate = checked)} />
+      </div>
+      <div class="tool-config-field">
+        <div class="tool-config-label">Allow Update</div>
+        <p class="tool-config-description">Permit targeted edits to existing markdown notes.</p>
+        <Toggle checked={allowUpdate} onchange={(checked) => (allowUpdate = checked)} />
+      </div>
+      <div class="tool-config-field">
+        <div class="tool-config-label">Allow Delete</div>
+        <p class="tool-config-description">Permit the agent to propose note deletions.</p>
+        <Toggle checked={allowDelete} onchange={(checked) => (allowDelete = checked)} />
+      </div>
+      <div class="tool-config-field">
+        <div class="tool-config-label">Allow Move</div>
+        <p class="tool-config-description">Permit renaming or relocating markdown notes.</p>
+        <Toggle checked={allowMove} onchange={(checked) => (allowMove = checked)} />
       </div>
     </div>
   {/if}

@@ -127,6 +127,23 @@
 	white-space: pre-wrap;
 }
 
+.ssb-diff-edit-word-container,
+.ssb-diff-edit-two-pane-container {
+	margin: 4px 0;
+}
+
+.ssb-diff-edit-word-preview {
+	padding: 8px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	background-color: var(--background-primary-alt);
+	font-family: var(--font-text);
+	font-size: var(--font-ui-small);
+	line-height: 1.6;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
 /* Action bar for pending change accept/reject buttons */
 .ssb-diff-action-bar-widget,
 .ssb-diff-actions-bar {
@@ -175,6 +192,11 @@
 
 .ssb-diff-actions-bar:hover .ssb-diff-toggle-btn,
 .ssb-diff-action-bar-widget:hover .ssb-diff-toggle-btn {
+	opacity: 1;
+}
+
+.ssb-diff-edit-word-container .ssb-diff-toggle-btn,
+.ssb-diff-edit-two-pane-container .ssb-diff-toggle-btn {
 	opacity: 1;
 }
 
@@ -241,11 +263,6 @@
 
 .ssb-diff-pane-added {
 	background-color: rgba(0, 180, 0, 0.1);
-}
-
-/* Edit view two-pane container */
-.ssb-diff-edit-two-pane-container {
-	margin: 4px 0;
 }
 
 .ssb-diff-two-pane pre {

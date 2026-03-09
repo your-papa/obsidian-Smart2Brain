@@ -8,7 +8,10 @@ import { getData } from "../stores/dataStore.svelte";
 import type { BuiltInToolId } from "../types/plugin";
 import { lookupModelInfo } from "../providers/modelsDevApi";
 import { fetchOllamaModelsInfo } from "../providers/ollamaModels";
-import { extractCapabilities as extractOpenRouterCapabilities, fetchOpenRouterModels } from "../providers/openrouterModels";
+import {
+	extractCapabilities as extractOpenRouterCapabilities,
+	fetchOpenRouterModels,
+} from "../providers/openrouterModels";
 
 import {
 	ProviderAuthError,
@@ -22,20 +25,25 @@ import {
 import type { ChatAttachment } from "../types/shared";
 import { createThreadId, NEW_CHAT_NAME } from "../utils/threadId";
 import { Logger } from "../utils/logging";
-import { Agent, type AgentStreamChunk, type CheckpointHistoryItem, type ChooseModelParams, type ThreadHistory } from "./Agent";
+import {
+	Agent,
+	type AgentStreamChunk,
+	type CheckpointHistoryItem,
+	type ChooseModelParams,
+	type ThreadHistory,
+} from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
 import { BASE_SYSTEM_PROMPT } from "./prompts";
 import { LangSmithTelemetry, type Telemetry } from "./telemetry";
 import { createExecuteDataviewTool } from "./tools/executeDataview";
+import { createExecuteJavaScriptTool } from "./tools/executeJavaScript";
 import { createGetAllTagsTool } from "./tools/getAllTags";
 import { createGetPropertiesTool } from "./tools/getProperties";
 import { createLoadSkillTool } from "./tools/loadSkill";
+import { createManageNotesTool } from "./tools/manageNotes";
 import { createReadContentTool } from "./tools/readContent";
 import { createSearchNotesTool } from "./tools/searchNotes";
-import { createCreateNoteTool } from "./tools/createNote";
-import { createEditNoteTool } from "./tools/editNote";
-import { createDeleteNoteTool } from "./tools/deleteNote";
 import { setCurrentThreadId } from "./tools/runContext";
 
 import { getRegistry } from "../providers/registry";
@@ -52,8 +60,14 @@ export type AuthValidationResult = { success: true } | { success: false; message
  */
 export type AgentManagerStreamChunk =
 	| { type: "token"; token: string }
-	| Pick<Extract<AgentStreamChunk, { type: "tool_start" }>, "type" | "toolCallId" | "toolName" | "input" | "aiMessageId">
-	| Pick<Extract<AgentStreamChunk, { type: "tool_end" }>, "type" | "toolCallId" | "toolName" | "output" | "aiMessageId">
+	| Pick<
+			Extract<AgentStreamChunk, { type: "tool_start" }>,
+			"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
+	  >
+	| Pick<
+			Extract<AgentStreamChunk, { type: "tool_end" }>,
+			"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
+	  >
 	| { type: "result"; result: unknown };
 
 const resolvedVisionSupportCache = new Map<string, boolean>();
@@ -254,6 +268,33 @@ export class AgentManager {
 		const selectedAgent = pluginData.getSelectedAgent();
 
 		let prompt = selectedAgent.systemPrompt || BASE_SYSTEM_PROMPT;
+		const enabledTools = Object.entries(selectedAgent.toolsConfig).filter(([, config]) => config.enabled);
+		const hasWriteTools = enabledTools.some(([toolId]) => toolId === "manage_notes");
+		const toolGuidelines = enabledTools
+			.map(([toolId, config]) => ({
+				toolId,
+				name: config.name,
+				guidance: config.promptGuidance?.trim() ?? "",
+			}))
+			.filter((tool) => tool.guidance.length > 0);
+
+		if (hasWriteTools) {
+			prompt +=
+				"\n\n# Write Tool Guidelines\n- All write operations (create, update, delete, move) are staged for user approval. Never say a change has already been applied.\n- Modify only what the user asked for and preserve surrounding content.\n- Prefer batching related write operations so the user can review them together.\n- Prefer targeted edits over full rewrites unless a full rewrite is clearly necessary.";
+		} else {
+			prompt +=
+				"\n\n# Capabilities\n- No write tools are currently enabled.\n- Do not claim you can modify notes.\n- If the user asks for edits, explain the change you would make instead.";
+		}
+
+		if (toolGuidelines.length > 0) {
+			const guidelinesSection = toolGuidelines
+				.map(
+					(tool) =>
+						`## ${tool.name}\n- Tool ID: \`${tool.toolId}\`\n- ${tool.guidance.split("\n").join("\n- ")}`,
+				)
+				.join("\n\n");
+			prompt += `\n\n# Tool Guidelines\n${guidelinesSection}`;
+		}
 
 		const skillsService = this.plugin.skillsService;
 		if (!skillsService?.isDiscovered()) {
@@ -272,10 +313,9 @@ export class AgentManager {
 		// Add available skills context XML (for skill discovery via load_skill tool)
 		const contextXml = skillsService.generateContextXml(enableState);
 		if (contextXml) {
-			prompt += `\n\n${contextXml}`;
-			// Add instruction for dynamic skill loading
 			prompt +=
-				"\n\n# Skills\nThe above available_skills section lists skills that can help you with specific tasks. When you need detailed instructions for a skill, use the `load_skill` tool with the skill name to retrieve the full instructions. Only load skills when you actually need them for a task.";
+				"\n\n# Skills\nThe following available_skills section lists skills that can help you with specific tasks. When you need detailed instructions for a skill, use the `load_skill` tool with the skill name to retrieve the full instructions. Only load skills when you actually need them for a task.";
+			prompt += `\n\n${contextXml}`;
 		}
 
 		Logger.log(`[AgentManager] Final system prompt length: ${prompt.length} chars`);
@@ -344,11 +384,7 @@ export class AgentManager {
 		}
 	}
 
-	private buildRunMetadata(
-		agentId: string,
-		agentName: string,
-		chatModel: ChatModel,
-	): Record<string, unknown> {
+	private buildRunMetadata(agentId: string, agentName: string, chatModel: ChatModel): Record<string, unknown> {
 		return {
 			agent_id: agentId,
 			agent_name: agentName,
@@ -430,12 +466,11 @@ export class AgentManager {
 		const builtInTools: [BuiltInToolId, () => StructuredToolInterface][] = [
 			["search_notes", () => createSearchNotesTool(this.plugin.app)],
 			["get_all_tags", () => createGetAllTagsTool(this.plugin.app)],
+			["execute_javascript", () => createExecuteJavaScriptTool()],
 			["execute_dataview_query", () => createExecuteDataviewTool(this.plugin.app)],
 			["get_properties", () => createGetPropertiesTool(this.plugin.app)],
 			["read_content", () => createReadContentTool(this.plugin.app)],
-			["create_note", () => createCreateNoteTool(this.plugin.app)],
-			["edit_note", () => createEditNoteTool(this.plugin.app)],
-			["delete_note", () => createDeleteNoteTool(this.plugin.app)],
+			["manage_notes", () => createManageNotesTool(this.plugin.app)],
 		];
 
 		for (const [toolId, factory] of builtInTools) {
@@ -556,7 +591,9 @@ export class AgentManager {
 				await this.agent.chooseModel(await toChooseModelParams(chatModel));
 			} catch (error) {
 				if (error instanceof ProviderNotFoundError) {
-					Logger.warn(`[AgentManager] Provider "${chatModel.provider}" not registered, skipping model selection`);
+					Logger.warn(
+						`[AgentManager] Provider "${chatModel.provider}" not registered, skipping model selection`,
+					);
 				} else {
 					throw error;
 				}
@@ -623,7 +660,11 @@ export class AgentManager {
 		}
 	}
 
-	private async prepareAgentForStream(): Promise<{ agent: Agent; chatModel: ChatModel; runMetadata: Record<string, unknown> }> {
+	private async prepareAgentForStream(): Promise<{
+		agent: Agent;
+		chatModel: ChatModel;
+		runMetadata: Record<string, unknown>;
+	}> {
 		const agent = await this.ensureAgent();
 		const pluginData = getData();
 		const selectedAgent = pluginData.getSelectedAgent();
@@ -881,7 +922,7 @@ export class AgentManager {
 
 		if (await this.plugin.app.vault.adapter.exists(defaultPath)) {
 			const existing = this.plugin.app.vault.getAbstractFileByPath(defaultPath);
-			if (existing instanceof TFile && await this.isEmptyChat(existing)) {
+			if (existing instanceof TFile && (await this.isEmptyChat(existing))) {
 				await this.plugin.app.vault.modify(existing, `${JSON.stringify(initialData)}\n`);
 				await this.chatManager.rebuildIndex();
 				await this.plugin.app.workspace.getLeaf(false).openFile(existing);

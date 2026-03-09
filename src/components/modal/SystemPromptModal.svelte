@@ -9,45 +9,49 @@ import type { SystemPromptAccessors, SystemPromptModal } from "./SystemPromptMod
 interface Props {
 	modal: SystemPromptModal;
 	plugin: SecondBrainPlugin;
-  accessors: SystemPromptAccessors;
+	accessors: SystemPromptAccessors;
+	description: string;
+	readOnly: boolean;
 }
 
-const { modal, plugin, accessors }: Props = $props();
+const { modal, plugin, accessors, description, readOnly }: Props = $props();
 
 let editorContainer: HTMLDivElement | undefined = $state();
 let editor: EmbeddableMarkdownEditor | undefined = $state();
-
-function getPrompt(): string {
-  return accessors.getPrompt();
-}
-
-function setPrompt(prompt: string): void {
-  accessors.setPrompt(prompt);
-}
-
-const initialPromptValue = getPrompt();
-let promptValue = $state(initialPromptValue);
+let initialPromptValue = $state("");
+let promptValue = $state("");
+let isLoading = $state(true);
 const isDirty = $derived(promptValue !== initialPromptValue);
 const isAtDefault = $derived(promptValue === BASE_SYSTEM_PROMPT);
 const showResetToDefault = $derived(!isAtDefault);
 
 onMount(() => {
-	if (editorContainer) {
-		initializeEditor();
+	if (readOnly) {
+		void loadPrompt();
+		return;
 	}
+
+	void initializeEditor();
 });
 
 onDestroy(() => {
 	editor?.destroy();
 });
 
-function initializeEditor() {
+async function loadPrompt() {
+	promptValue = await accessors.getPrompt();
+	initialPromptValue = promptValue;
+	isLoading = false;
+}
+
+async function initializeEditor() {
 	if (!editorContainer) return;
-	promptValue = getPrompt();
+	await loadPrompt();
 	editor = new EmbeddableMarkdownEditor(plugin.app, editorContainer, {
 		value: promptValue,
 		placeholder: "Define the system prompt for the assistant...",
 		cls: "system-prompt-editor",
+		editable: true,
 		onChange: (value) => {
 			promptValue = value;
 		},
@@ -55,7 +59,7 @@ function initializeEditor() {
 }
 
 async function handleSave() {
-	setPrompt(promptValue);
+	accessors.setPrompt?.(promptValue);
 	await plugin.agentManager?.updateSystemPrompt();
 	modal.close();
 }
@@ -67,15 +71,32 @@ function handleResetToDefault() {
 </script>
 
 <div class="system-prompt-modal-content">
-  <p class="system-prompt-description">Customize the system instructions used for every chat.</p>
-  <div bind:this={editorContainer} class="system-prompt-editor-container"></div>
+  <p class="system-prompt-description">{description}</p>
+  {#if readOnly}
+    <div class="system-prompt-preview-container">
+      {#if isLoading}
+        <div class="system-prompt-loading">Loading prompt…</div>
+      {:else}
+        <pre class="system-prompt-preview">{promptValue}</pre>
+      {/if}
+    </div>
+  {:else}
+    <div bind:this={editorContainer} class="system-prompt-editor-container">
+      {#if isLoading}
+        <div class="system-prompt-loading">Loading prompt…</div>
+      {/if}
+    </div>
+  {/if}
   <div class="system-prompt-actions">
-    <Button buttonText="Cancel" onClick={() => modal.close()} />
+    <Button buttonText={readOnly ? "Close" : "Cancel"} onClick={() => modal.close()} />
     <div class="flex-1"></div>
-    {#if showResetToDefault}
+    {#if !readOnly && accessors.viewFinalPrompt}
+      <Button buttonText="View Final" onClick={accessors.viewFinalPrompt} />
+    {/if}
+    {#if !readOnly && showResetToDefault}
       <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
     {/if}
-    {#if isDirty}
+    {#if !readOnly && isDirty}
       <Button buttonText="Save" cta={true} onClick={handleSave} />
     {/if}
   </div>
@@ -101,6 +122,36 @@ function handleResetToDefault() {
     min-height: 0; /* Required for flex child to shrink below content */
     overflow-y: auto;
     border-radius: 12px;
+  }
+
+  .system-prompt-preview-container {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+
+  .system-prompt-preview {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-monospace);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--text-normal);
+    user-select: text;
+  }
+
+  .system-prompt-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
   }
 
   .system-prompt-editor-container :global(.cm-editor) {

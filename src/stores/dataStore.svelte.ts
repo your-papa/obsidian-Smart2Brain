@@ -21,7 +21,14 @@ import type { VectorStoreBackend } from "../vectorstore/types";
 import { type SmartGraphSettings, DEFAULT_SMART_GRAPH_SETTINGS } from "../types/graph";
 
 // Provider system types
-import { BUILT_IN_PROVIDER_IDS, type AuthObject, type BuiltInProviderId, type ChatModelConfig, type CustomProviderMeta, type EmbedModelConfig } from "../providers/index";
+import {
+	BUILT_IN_PROVIDER_IDS,
+	type AuthObject,
+	type BuiltInProviderId,
+	type ChatModelConfig,
+	type CustomProviderMeta,
+	type EmbedModelConfig,
+} from "../providers/index";
 
 // ============================================================================
 // Error Classes
@@ -208,6 +215,14 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		description:
 			"Retrieve properties (frontmatter) from Obsidian. Omit 'note_name' to list all available property keys in the vault.",
 	},
+	execute_javascript: {
+		enabled: true,
+		name: "execute_javascript",
+		description:
+			"Execute isolated JavaScript for calculations and data transformation. Pass structured data via the input field, use return for the final value, and use console.log for intermediate output.",
+		promptGuidance:
+			"Use this for calculations, reshaping JSON, filtering arrays, parsing structured text, or other logic-heavy transformations. The code runs in an isolated worker without Obsidian APIs, so do not use it for note edits or vault access.",
+	},
 	execute_dataview_query: {
 		enabled: true,
 		name: "execute_dataview_query",
@@ -217,23 +232,17 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 			includeMetadata: true,
 		},
 	},
-	create_note: {
+	manage_notes: {
 		enabled: true,
-		name: "create_note",
+		name: "manage_notes",
 		description:
-			"Create a new markdown note in the vault. The change is staged for user approval — it will NOT be applied until the user accepts it.",
-	},
-	edit_note: {
-		enabled: true,
-		name: "edit_note",
-		description:
-			"Make targeted search-and-replace edits to an existing markdown note. You only provide the specific parts to change. The change is staged for user approval with a diff view.",
-	},
-	delete_note: {
-		enabled: true,
-		name: "delete_note",
-		description:
-			"Delete an existing markdown note from the vault. The change is staged for user approval — it will NOT be applied until the user accepts it.",
+			"Create, update, delete, or move markdown notes in one staged batch. Use targeted search-and-replace edits for updates and batch related note operations together.",
+		settings: {
+			allowCreate: true,
+			allowUpdate: true,
+			allowDelete: true,
+			allowMove: true,
+		},
 	},
 };
 
@@ -460,7 +469,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => { });
+				this._plugin.app.vault.createFolder(normalized).catch(() => {});
 			}
 		} catch {
 			// ignore
@@ -515,7 +524,6 @@ export class PluginDataStore {
 		this.#data.langSmithEndpoint = val;
 		this.saveSettings();
 	}
-
 
 	// ============================================================================
 	// Agent Configuration Methods
@@ -1156,10 +1164,7 @@ export class PluginDataStore {
 		config.chatModels = rest;
 
 		for (const agent of Object.values(this.#data.agents)) {
-			if (
-				agent.chatModel?.provider === provider &&
-				agent.chatModel.model === modelName
-			) {
+			if (agent.chatModel?.provider === provider && agent.chatModel.model === modelName) {
 				agent.chatModel = null;
 			}
 		}
@@ -1454,6 +1459,36 @@ function migrateReadContentTool(agent: AgentConfig): void {
 	delete (agent.toolsConfig as Record<string, ToolConfig | undefined>).read_attachment;
 }
 
+function migrateManageNotesTool(agent: AgentConfig): void {
+	const legacyTools = agent.toolsConfig as Record<string, ToolConfig | undefined>;
+	const legacyCreate = legacyTools.create_note;
+	const legacyEdit = legacyTools.edit_note;
+	const legacyDelete = legacyTools.delete_note;
+	const currentManageNotes = agent.toolsConfig.manage_notes;
+	const currentSettings =
+		(currentManageNotes.settings as
+			| { allowCreate?: boolean; allowUpdate?: boolean; allowDelete?: boolean; allowMove?: boolean }
+			| undefined) ?? {};
+	const hasLegacyWriteTools = Boolean(legacyCreate || legacyEdit || legacyDelete);
+
+	agent.toolsConfig.manage_notes = {
+		...currentManageNotes,
+		enabled: hasLegacyWriteTools
+			? Boolean(legacyCreate?.enabled || legacyEdit?.enabled || legacyDelete?.enabled)
+			: (currentManageNotes.enabled ?? true),
+		settings: {
+			allowCreate: currentSettings.allowCreate ?? legacyCreate?.enabled ?? true,
+			allowUpdate: currentSettings.allowUpdate ?? legacyEdit?.enabled ?? true,
+			allowDelete: currentSettings.allowDelete ?? legacyDelete?.enabled ?? true,
+			allowMove: currentSettings.allowMove ?? true,
+		},
+	};
+
+	delete legacyTools.create_note;
+	delete legacyTools.edit_note;
+	delete legacyTools.delete_note;
+}
+
 function normalizeAgent(agent: AgentConfig): void {
 	// Ensure toolsConfig exists and has all tools
 	if (agent.toolsConfig) {
@@ -1463,6 +1498,7 @@ function normalizeAgent(agent: AgentConfig): void {
 	}
 
 	migrateReadContentTool(agent);
+	migrateManageNotesTool(agent);
 
 	agent.skills ??= {};
 	agent.mcpServers ??= {};

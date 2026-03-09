@@ -1,391 +1,472 @@
 <script lang="ts">
-  import { untrack } from "svelte";
-  import { getAllTags, Notice } from "obsidian";
-  import { HumanMessage } from "@langchain/core/messages";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { getRegistry } from "../../providers/registry";
-  import type { ChatModelConfig } from "../../providers/index";
-  import { getVectorStoreService, isVectorStoreInitialized } from "../../vectorstore";
-  import {
-    type GraphData,
-    type SmartGraphSettings,
-    DEFAULT_SMART_GRAPH_SETTINGS,
-    THEME_COLOR_VARS,
-  } from "../../types/graph";
-  import {
-    buildGraphStructure,
-    computeClusters,
-    applyClusterMap,
-    applySearchHighlight,
-    type GraphFilter,
-    type ClusterAssignment,
-  } from "../../views/smart-graph/graphDataBuilder";
-  import type { DocumentVector } from "../../vectorstore/types";
-  import LoadingAnimation from "../ui/LoadingAnimation.svelte";
-  import GraphCanvas from "./GraphCanvas.svelte";
-  import GraphControls from "./GraphControls.svelte";
+import { untrack } from "svelte";
+import { getAllTags, Notice } from "obsidian";
+import { HumanMessage } from "@langchain/core/messages";
+import { getPlugin } from "../../stores/state.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import { getRegistry } from "../../providers/registry";
+import type { ChatModelConfig } from "../../providers/index";
+import { getVectorStoreService, isVectorStoreInitialized } from "../../vectorstore";
+import {
+	type GraphData,
+	type GraphMode,
+	type SmartGraphSettings,
+	DEFAULT_SMART_GRAPH_SETTINGS,
+	THEME_COLOR_VARS,
+} from "../../types/graph";
+import {
+	buildWikiGraph,
+	buildGraphStructure,
+	computeClusters,
+	applyClusterMap,
+	applyColorGroups,
+	applySearchHighlight,
+	type GraphFilter,
+	type ClusterAssignment,
+} from "../../views/smart-graph/graphDataBuilder";
+import type { DocumentVector } from "../../vectorstore/types";
+import LoadingAnimation from "../ui/LoadingAnimation.svelte";
+import GraphCanvas from "./GraphCanvas.svelte";
+import GraphControls from "./GraphControls.svelte";
 
-  const plugin = getPlugin();
-  const data = getData();
+const plugin = getPlugin();
+const data = getData();
 
-  // Graph state
-  let settings: SmartGraphSettings = $derived({
-    ...DEFAULT_SMART_GRAPH_SETTINGS,
-    ...(data.smartGraphSettings ?? {}),
-  });
-  let graphData: GraphData = $state({ nodes: [], edges: [] });
-  let displayData: GraphData = $state({ nodes: [], edges: [] });
-  let isLoading = $state(false);
-  let suggestedK: number | null = $state(null);
-  let clusterLabels: Record<number, string> = $state({});
-  let isLabeling = $state(false);
+// Graph state
+let settings: SmartGraphSettings = $derived({
+	...DEFAULT_SMART_GRAPH_SETTINGS,
+	...(data.smartGraphSettings ?? {}),
+});
+let graphData: GraphData = $state({ nodes: [], edges: [] });
+let displayData: GraphData = $state({ nodes: [], edges: [] });
+let graphMode: GraphMode = $state("wiki");
+let isTransitioning = $state(false);
+let isLoading = $state(false);
+let suggestedK: number | null = $state(null);
+let clusterLabels: Record<number, string> = $state({});
+let isLabeling = $state(false);
 
-  // Cluster state — persisted across edge/layout rebuilds
-  let clusterMap: Map<string, ClusterAssignment> = $state(new Map());
-  let cachedFilteredDocs: DocumentVector[] = [];
-  let cachedVectors: Float32Array[] = [];
+// Cluster state — persisted across edge/layout rebuilds
+let clusterMap: Map<string, ClusterAssignment> = $state(new Map());
+let cachedFilteredDocs: DocumentVector[] = [];
+let cachedVectors: Float32Array[] = [];
 
-  // Filter state
-  let selectedFolders: string[] = $state([]);
-  let selectedTags: string[] = $state([]);
-  let searchQuery = $state("");
+// Filter state
+let selectedFolders: string[] = $state([]);
+let selectedTags: string[] = $state([]);
+let searchQuery = $state("");
 
-  // Available filters
-  let availableFolders: string[] = $state([]);
-  let availableTags: string[] = $state([]);
+// Available filters
+let availableFolders: string[] = $state([]);
+let availableTags: string[] = $state([]);
 
-  // Canvas ref
-  let canvasComponent: GraphCanvas | undefined = $state(undefined);
+// Canvas ref
+let canvasComponent: GraphCanvas | undefined = $state(undefined);
 
-  // Build generation counter to discard stale async results
-  let buildGeneration = 0;
+// Build generation counter to discard stale async results
+let buildGeneration = 0;
 
-  /** Resolve the current theme colour palette from CSS variables. */
-  function resolveThemeColors(): string[] {
-    const style = getComputedStyle(document.body);
-    return THEME_COLOR_VARS.map((v) => style.getPropertyValue(v).trim()).filter(Boolean);
-  }
+function getFilter(): GraphFilter {
+	return {
+		folders: selectedFolders.length > 0 ? selectedFolders : undefined,
+		tags: selectedTags.length > 0 ? selectedTags : undefined,
+		searchQuery: searchQuery || undefined,
+	};
+}
 
-  /**
-   * Gather available folder and tag options from the vault.
-   */
-  function loadFilterOptions() {
-    // Folders: Get unique top-level and second-level folders
-    const folders = new Set<string>();
-    for (const file of plugin.app.vault.getMarkdownFiles()) {
-      const parts = file.path.split("/");
-      if (parts.length > 1) {
-        folders.add(parts[0]);
-        if (parts.length > 2) {
-          folders.add(`${parts[0]}/${parts[1]}`);
-        }
-      }
-    }
-    availableFolders = [...folders].sort();
+/** Resolve the current theme colour palette from CSS variables. */
+function resolveThemeColors(): string[] {
+	const style = getComputedStyle(document.body);
+	return THEME_COLOR_VARS.map((v) => style.getPropertyValue(v).trim()).filter(Boolean);
+}
 
-    // Tags: Get all unique tags from the vault
-    const tags = new Set<string>();
-    for (const file of plugin.app.vault.getMarkdownFiles()) {
-      const cache = plugin.app.metadataCache.getFileCache(file);
-      if (cache) {
-        const fileTags = getAllTags(cache) ?? [];
-        for (const tag of fileTags) {
-          tags.add(tag);
-        }
-      }
-    }
-    availableTags = [...tags].sort();
-  }
+/**
+ * Gather available folder and tag options from the vault.
+ */
+function loadFilterOptions() {
+	// Folders: Get unique top-level and second-level folders
+	const folders = new Set<string>();
+	for (const file of plugin.app.vault.getMarkdownFiles()) {
+		const parts = file.path.split("/");
+		if (parts.length > 1) {
+			folders.add(parts[0]);
+			if (parts.length > 2) {
+				folders.add(`${parts[0]}/${parts[1]}`);
+			}
+		}
+	}
+	availableFolders = [...folders].sort();
 
-  /**
-   * Build the graph structure (edges, positions, degree) and apply cluster
-   * assignments. Clusters are only recomputed when the document set changes
-   * (e.g. filter change) or on the very first build. Otherwise the existing
-   * clusterMap is reused so that adjusting edge/layout settings keeps stable
-   * cluster colours.
-   */
-  async function rebuildGraph() {
-    const gen = ++buildGeneration;
-    isLoading = true;
+	// Tags: Get all unique tags from the vault
+	const tags = new Set<string>();
+	for (const file of plugin.app.vault.getMarkdownFiles()) {
+		const cache = plugin.app.metadataCache.getFileCache(file);
+		if (cache) {
+			const fileTags = getAllTags(cache) ?? [];
+			for (const tag of fileTags) {
+				tags.add(tag);
+			}
+		}
+	}
+	availableTags = [...tags].sort();
+}
 
-    const filter: GraphFilter = {
-      folders: selectedFolders.length > 0 ? selectedFolders : undefined,
-      tags: selectedTags.length > 0 ? selectedTags : undefined,
-      searchQuery: searchQuery || undefined,
-    };
+/**
+ * Build the graph structure (edges, positions, degree) and apply cluster
+ * assignments. Clusters are only recomputed when the document set changes
+ * (e.g. filter change) or on the very first build. Otherwise the existing
+ * clusterMap is reused so that adjusting edge/layout settings keeps stable
+ * cluster colours.
+ */
+function buildWikiModeGraph(filter: GraphFilter): GraphData {
+	const { graphData: wikiGraphData } = buildWikiGraph(plugin.app, settings, filter);
+	return applyColorGroups(plugin.app, wikiGraphData, settings.colorGroups);
+}
 
-    try {
-      if (!isVectorStoreInitialized()) {
-        graphData = { nodes: [], edges: [] };
-        return;
-      }
+async function buildSmartModeGraph(
+	gen: number,
+	filter: GraphFilter,
+): Promise<{
+	graphData: GraphData;
+	shouldAutoLabel: boolean;
+}> {
+	if (!isVectorStoreInitialized()) {
+		return { graphData: { nodes: [], edges: [] }, shouldAutoLabel: false };
+	}
 
-      const vectorService = getVectorStoreService();
-      const documents = await vectorService.getAllDocumentVectors();
+	const vectorService = getVectorStoreService();
+	const documents = await vectorService.getAllDocumentVectors();
 
-      if (gen !== buildGeneration) return;
+	if (gen !== buildGeneration || documents.length === 0) {
+		return { graphData: { nodes: [], edges: [] }, shouldAutoLabel: false };
+	}
 
-      if (documents.length === 0) {
-        graphData = { nodes: [], edges: [] };
-        return;
-      }
+	const {
+		graphData: rawGraph,
+		filteredDocs,
+		vectors,
+		reducedVectors,
+	} = await buildGraphStructure(plugin.app, documents, settings, filter);
 
-      const {
-        graphData: rawGraph,
-        filteredDocs,
-        vectors,
-      } = await buildGraphStructure(plugin.app, documents, settings, filter);
+	if (gen !== buildGeneration) {
+		return { graphData: { nodes: [], edges: [] }, shouldAutoLabel: false };
+	}
 
-      if (gen !== buildGeneration) return;
+	// Detect whether the filtered document set changed
+	const currentPaths = new Set(filteredDocs.map((d) => d.path));
+	const clusterPaths = new Set(clusterMap.keys());
+	const docSetChanged =
+		currentPaths.size !== clusterPaths.size || [...currentPaths].some((p) => !clusterPaths.has(p));
 
-      // Detect whether the filtered document set changed
-      const currentPaths = new Set(filteredDocs.map((d) => d.path));
-      const clusterPaths = new Set(clusterMap.keys());
-      const docSetChanged =
-        currentPaths.size !== clusterPaths.size ||
-        [...currentPaths].some((p) => !clusterPaths.has(p));
+	// Cache for future smart-mode rebuilds / labeling
+	cachedFilteredDocs = filteredDocs;
+	cachedVectors = vectors;
 
-      // Cache for use by handleRecluster / handleLabelClusters
-      cachedFilteredDocs = filteredDocs;
-      cachedVectors = vectors;
+	let activeClusterMap = clusterMap;
+	let shouldAutoLabel = false;
+	if (clusterMap.size === 0 || docSetChanged) {
+		const themeColors = resolveThemeColors();
+		const result = await computeClusters(filteredDocs, vectors, settings, themeColors, undefined, reducedVectors);
 
-      // Recluster when: first build, or document set changed
-      if (clusterMap.size === 0 || docSetChanged) {
-        const themeColors = resolveThemeColors();
-        const result = computeClusters(filteredDocs, vectors, settings, themeColors);
-        clusterMap = result.clusterMap;
-        suggestedK = settings.autoK ? result.k : null;
-        clusterLabels = {};
+		if (gen !== buildGeneration) {
+			return { graphData: { nodes: [], edges: [] }, shouldAutoLabel: false };
+		}
 
-        // Auto-label clusters if enabled and a chat model is configured
-        if (settings.autoLabelClusters && settings.graphChatModel) {
-          // Fire-and-forget; handleLabelClusters manages its own isLabeling state
-          handleLabelClusters();
-        }
-      }
+		clusterMap = result.clusterMap;
+		activeClusterMap = result.clusterMap;
+		suggestedK = settings.autoK ? result.k : null;
+		clusterLabels = {};
+		shouldAutoLabel = settings.autoLabelClusters && !!settings.graphChatModel;
+	}
 
-      graphData = applyClusterMap(rawGraph, clusterMap);
-    } catch (err) {
-      console.error("[SmartGraph] Error building graph:", err);
-      graphData = { nodes: [], edges: [] };
-    } finally {
-      if (gen === buildGeneration) {
-        isLoading = false;
-      }
-    }
-  }
+	return {
+		graphData: applyClusterMap(rawGraph, activeClusterMap),
+		shouldAutoLabel,
+	};
+}
 
-  // Apply search highlighting as a derived transformation
-  $effect(() => {
-    displayData = searchQuery ? applySearchHighlight(graphData, searchQuery) : graphData;
-  });
+async function rebuildGraph(targetMode: GraphMode = graphMode) {
+	const gen = ++buildGeneration;
+	isLoading = true;
+	const filter = getFilter();
 
-  // Build graph on filter/settings changes (debounced to avoid rapid-fire builds)
-  // Note: projectionMethod, defaultK, and autoK are intentionally excluded —
-  // they only take effect when the user presses the Apply button.
-  $effect(() => {
-    // Track reactive dependencies (edge, layout, filter settings)
-    selectedFolders;
-    selectedTags;
-    settings.showOrphans;
-    settings.similarityThreshold;
-    settings.semanticNeighbors;
-    settings.showWikiLinks;
-    settings.showSemanticEdges;
+	try {
+		if (targetMode === "wiki") {
+			const nextGraphData = buildWikiModeGraph(filter);
+			if (gen !== buildGeneration) return;
+			graphMode = "wiki";
+			focusedCluster = null;
+			graphData = nextGraphData;
+			return;
+		}
 
-    // Debounce: schedule a rebuild and clean up on re-trigger
-    const timer = setTimeout(() => {
-      untrack(() => {
-        rebuildGraph();
-      });
-    }, 300);
+		const { graphData: nextGraphData, shouldAutoLabel } = await buildSmartModeGraph(gen, filter);
+		if (gen !== buildGeneration) return;
 
-    return () => clearTimeout(timer);
-  });
+		graphMode = "smart";
+		graphData = nextGraphData;
 
-  // Load filter options on mount
-  loadFilterOptions();
+		if (shouldAutoLabel) {
+			// Fire-and-forget; handleLabelClusters manages its own isLabeling state.
+			void handleLabelClusters(nextGraphData, gen);
+		}
+	} catch (err) {
+		console.error("[SmartGraph] Error building graph:", err);
+		graphData = { nodes: [], edges: [] };
+	} finally {
+		if (gen === buildGeneration) {
+			isLoading = false;
+		}
+	}
+}
 
-  // Handlers
-  function handleSettingsChange(partial: Partial<SmartGraphSettings>) {
-    data.smartGraphSettings = { ...settings, ...partial };
-  }
+// Apply search highlighting as a derived transformation
+$effect(() => {
+	displayData = searchQuery ? applySearchHighlight(graphData, searchQuery) : graphData;
+});
 
-  function handleFolderFilterChange(folders: string[]) {
-    selectedFolders = folders;
-  }
+// Build graph on filter/settings changes (debounced to avoid rapid-fire builds)
+// Note: projectionMethod, defaultK, and autoK are intentionally excluded —
+// they only take effect when the user presses the Apply button.
+$effect(() => {
+	// Track reactive dependencies (edge, layout, filter settings)
+	graphMode;
+	selectedFolders;
+	selectedTags;
+	settings.showOrphans;
+	settings.colorGroups;
 
-  function handleTagFilterChange(tags: string[]) {
-    selectedTags = tags;
-  }
+	if (graphMode === "smart") {
+		settings.similarityThreshold;
+		settings.semanticNeighbors;
+		settings.showWikiLinks;
+		settings.showSemanticEdges;
+	}
 
-  function handleSearchChange(query: string) {
-    searchQuery = query;
-  }
+	// Debounce: schedule a rebuild and clean up on re-trigger
+	const timer = setTimeout(() => {
+		untrack(() => {
+			void rebuildGraph();
+		});
+	}, 300);
 
-  function handleFitToView() {
-    canvasComponent?.fitToView();
-  }
+	return () => clearTimeout(timer);
+});
 
-  function handleRefresh() {
-    loadFilterOptions();
-    // Force full recluster on refresh by clearing stored assignments
-    clusterMap = new Map();
-    rebuildGraph();
-  }
+// Load filter options on mount
+loadFilterOptions();
 
-  /**
-   * Apply projection & clustering changes.
-   * Forces a full rebuild with fresh clusters using the current projection
-   * method and K settings.
-   */
-  function handleApplyProjection() {
-    clusterMap = new Map();
-    rebuildGraph();
-  }
+// Handlers
+function handleSettingsChange(partial: Partial<SmartGraphSettings>) {
+	data.smartGraphSettings = { ...settings, ...partial };
+}
 
-  function handleNodeClick(path: string) {
-    plugin.app.workspace.openLinkText(path, "", false);
-  }
+function handleFolderFilterChange(folders: string[]) {
+	selectedFolders = folders;
+}
 
-  function handleRevealFile(path: string) {
-    const file = plugin.app.vault.getAbstractFileByPath(path);
-    if (file) {
-      // Reveal in Obsidian's file explorer
-      const explorer = plugin.app.workspace.getLeavesOfType("file-explorer")[0];
-      if (explorer) {
-        (explorer.view as any).revealInFolder?.(file);
-      }
-    }
-  }
+function handleTagFilterChange(tags: string[]) {
+	selectedTags = tags;
+}
 
-  // Cluster focus state
-  let focusedCluster: number | null = $state(null);
+function handleSearchChange(query: string) {
+	searchQuery = query;
+}
 
-  function handleFocusCluster(cluster: number) {
-    // Toggle: if already focused on this cluster, clear focus
-    focusedCluster = focusedCluster === cluster ? null : cluster;
-  }
+function handleFitToView() {
+	canvasComponent?.fitToView();
+}
 
-  /**
-   * Generate thematic labels for each cluster using the user's configured chat model.
-   * Groups nodes by cluster, reads note content snippets, and sends a single batched prompt.
-   */
-  async function handleLabelClusters() {
-    if (isLabeling) return;
-    const chatModelConfig = settings.graphChatModel;
+function handleRefresh() {
+	loadFilterOptions();
+	if (graphMode === "smart") {
+		// Force full recluster on refresh by clearing stored assignments
+		clusterMap = new Map();
+	}
+	void rebuildGraph();
+}
 
-    if (!chatModelConfig) {
-      new Notice("No graph chat model configured. Set one in Settings → Graph.");
-      return;
-    }
+/**
+ * Apply projection & clustering changes.
+ * Forces a full rebuild with fresh clusters using the current projection
+ * method and K settings.
+ */
+function handleApplyProjection() {
+	clusterMap = new Map();
+	if (graphMode === "smart") {
+		void rebuildGraph("smart");
+	}
+}
 
-    isLabeling = true;
+async function handleSmartCluster() {
+	if (graphMode === "smart" || isTransitioning) return;
+	if (!isVectorStoreInitialized()) {
+		new Notice("Smart Graph requires indexed embeddings. Build the vector store first.");
+		return;
+	}
 
-    try {
-      // Group nodes by cluster
-      const clusters = new Map<number, typeof graphData.nodes>();
-      for (const node of graphData.nodes) {
-        if (node.cluster == null) continue;
-        const group = clusters.get(node.cluster) ?? [];
-        group.push(node);
-        clusters.set(node.cluster, group);
-      }
+	isTransitioning = true;
+	try {
+		await rebuildGraph("smart");
+	} finally {
+		isTransitioning = false;
+	}
+}
 
-      if (clusters.size === 0) {
-        new Notice("No clusters found.");
-        return;
-      }
+async function handleBackToWiki() {
+	if (graphMode === "wiki" || isTransitioning) return;
 
-      // Build prompt with top 10 notes per cluster (by degree)
-      let promptBody = "";
-      const sortedClusterIds = [...clusters.keys()].sort((a, b) => a - b);
+	isTransitioning = true;
+	try {
+		await rebuildGraph("wiki");
+	} finally {
+		isTransitioning = false;
+	}
+}
 
-      for (const clusterId of sortedClusterIds) {
-        const nodes = clusters.get(clusterId)!;
-        // Take top 10 by degree
-        const topNodes = [...nodes].sort((a, b) => (b.degree ?? 0) - (a.degree ?? 0)).slice(0, 10);
+function handleNodeClick(path: string) {
+	plugin.app.workspace.openLinkText(path, "", false);
+}
 
-        promptBody += `\nCluster ${clusterId} (${nodes.length} notes):\n`;
+function handleRevealFile(path: string) {
+	const file = plugin.app.vault.getAbstractFileByPath(path);
+	if (file) {
+		// Reveal in Obsidian's file explorer
+		const explorer = plugin.app.workspace.getLeavesOfType("file-explorer")[0];
+		if (explorer) {
+			(explorer.view as any).revealInFolder?.(file);
+		}
+	}
+}
 
-        for (const node of topNodes) {
-          let snippet = "";
-          try {
-            const file = plugin.app.vault.getAbstractFileByPath(node.path);
-            if (file && "extension" in file) {
-              const content = await plugin.app.vault.cachedRead(file as any);
-              snippet = content.slice(0, 200).replace(/\n/g, " ").trim();
-            }
-          } catch {
-            // Skip unreadable files
-          }
-          const title = node.label;
-          promptBody += snippet ? `- "${title}" — ${snippet}\n` : `- "${title}"\n`;
-        }
-      }
+// Cluster focus state
+let focusedCluster: number | null = $state(null);
 
-      const prompt = `You are labeling clusters of notes in a knowledge graph.
+function handleFocusCluster(cluster: number) {
+	// Toggle: if already focused on this cluster, clear focus
+	focusedCluster = focusedCluster === cluster ? null : cluster;
+}
+
+/**
+ * Generate thematic labels for each cluster using the user's configured chat model.
+ * Groups nodes by cluster, reads note content snippets, and sends a single batched prompt.
+ */
+async function handleLabelClusters(sourceGraphData: GraphData = graphData, sourceGeneration = buildGeneration) {
+	if (isLabeling) return;
+	const chatModelConfig = settings.graphChatModel;
+
+	if (!chatModelConfig) {
+		new Notice("No graph chat model configured. Set one in Settings → Graph.");
+		return;
+	}
+
+	isLabeling = true;
+
+	try {
+		// Group nodes by cluster
+		const clusters = new Map<number, typeof sourceGraphData.nodes>();
+		for (const node of sourceGraphData.nodes) {
+			if (node.cluster == null) continue;
+			const group = clusters.get(node.cluster) ?? [];
+			group.push(node);
+			clusters.set(node.cluster, group);
+		}
+
+		if (clusters.size === 0) {
+			new Notice("No clusters found.");
+			return;
+		}
+
+		// Build prompt with top 10 notes per cluster (by degree)
+		let promptBody = "";
+		const sortedClusterIds = [...clusters.keys()].sort((a, b) => a - b);
+
+		for (const clusterId of sortedClusterIds) {
+			const nodes = clusters.get(clusterId)!;
+			// Take top 10 by degree
+			const topNodes = [...nodes].sort((a, b) => (b.degree ?? 0) - (a.degree ?? 0)).slice(0, 10);
+
+			promptBody += `\nCluster ${clusterId} (${nodes.length} notes):\n`;
+
+			for (const node of topNodes) {
+				let snippet = "";
+				try {
+					const file = plugin.app.vault.getAbstractFileByPath(node.path);
+					if (file && "extension" in file) {
+						const content = await plugin.app.vault.cachedRead(file as any);
+						snippet = content.slice(0, 200).replace(/\n/g, " ").trim();
+					}
+				} catch {
+					// Skip unreadable files
+				}
+				const title = node.label;
+				promptBody += snippet ? `- "${title}" — ${snippet}\n` : `- "${title}"\n`;
+			}
+		}
+
+		const prompt = `You are labeling clusters of notes in a knowledge graph.
 For each cluster below, generate a short label (2-4 words) that captures the common theme of the notes.
 ${promptBody}
 Respond with ONLY a JSON object mapping cluster number to label, no markdown fences:
 {${sortedClusterIds.map((id) => `"${id}": "..."`).join(", ")}}`;
 
-      // Create LLM instance — disable extended thinking/reasoning for speed.
-      // This is best-effort: each provider handles these hints differently,
-      // and providers that don't recognise the keys will silently ignore them.
-      const registry = getRegistry();
-      const provider = chatModelConfig.provider;
+		// Create LLM instance — disable extended thinking/reasoning for speed.
+		// This is best-effort: each provider handles these hints differently,
+		// and providers that don't recognise the keys will silently ignore them.
+		const registry = getRegistry();
+		const provider = chatModelConfig.provider;
 
-      const modelOptions: Partial<ChatModelConfig> & Record<string, unknown> = {
-        ...chatModelConfig.modelConfig,
-      };
+		const modelOptions: Partial<ChatModelConfig> & Record<string, unknown> = {
+			...chatModelConfig.modelConfig,
+		};
 
-      // Anthropic: `thinking` must be set at construction time, not via bind()
-      if (provider === "anthropic") {
-        modelOptions.thinking = { type: "disabled" };
-      }
+		// Anthropic: `thinking` must be set at construction time, not via bind()
+		if (provider === "anthropic") {
+			modelOptions.thinking = { type: "disabled" };
+		}
 
-      const baseLlm = registry.createChatInstance(provider, chatModelConfig.model, modelOptions);
+		const baseLlm = registry.createChatInstance(provider, chatModelConfig.model, modelOptions);
 
-      // For non-Anthropic providers that may support reasoning params (e.g.
-      // OpenRouter exposes `reasoning`), use bind() as a best-effort hint.
-      const llm =
-        provider !== "anthropic" && "bind" in baseLlm && typeof baseLlm.bind === "function"
-          ? (baseLlm as any).bind({ reasoning: false })
-          : baseLlm;
+		// For non-Anthropic providers that may support reasoning params (e.g.
+		// OpenRouter exposes `reasoning`), use bind() as a best-effort hint.
+		const llm =
+			provider !== "anthropic" && "bind" in baseLlm && typeof baseLlm.bind === "function"
+				? (baseLlm as any).bind({ reasoning: false })
+				: baseLlm;
 
-      const response = await llm.invoke([new HumanMessage(prompt)]);
-      const text =
-        typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+		const response = await llm.invoke([new HumanMessage(prompt)]);
 
-      // Parse JSON response — strip markdown fences if present
-      const jsonStr = text
-        .replace(/^```(?:json)?\s*/i, "")
-        .replace(/\s*```$/i, "")
-        .trim();
-      const parsed = JSON.parse(jsonStr) as Record<string, string>;
+		if (sourceGeneration !== buildGeneration) {
+			return;
+		}
 
-      // Convert string keys to number keys
-      const labels: Record<number, string> = {};
-      for (const [key, value] of Object.entries(parsed)) {
-        const num = Number.parseInt(key, 10);
-        if (!Number.isNaN(num) && typeof value === "string") {
-          labels[num] = value;
-        }
-      }
+		const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
 
-      clusterLabels = labels;
-      new Notice(`Generated labels for ${Object.keys(labels).length} clusters`);
-    } catch (err) {
-      console.error("[SmartGraph] Error generating cluster labels:", err);
-      new Notice(
-        `Failed to generate cluster labels: ${err instanceof Error ? err.message : "Unknown error"}`,
-      );
-    } finally {
-      isLabeling = false;
-    }
-  }
+		// Parse JSON response — strip markdown fences if present
+		const jsonStr = text
+			.replace(/^```(?:json)?\s*/i, "")
+			.replace(/\s*```$/i, "")
+			.trim();
+		const parsed = JSON.parse(jsonStr) as Record<string, string>;
+
+		// Convert string keys to number keys
+		const labels: Record<number, string> = {};
+		for (const [key, value] of Object.entries(parsed)) {
+			const num = Number.parseInt(key, 10);
+			if (!Number.isNaN(num) && typeof value === "string") {
+				labels[num] = value;
+			}
+		}
+
+		clusterLabels = labels;
+		new Notice(`Generated labels for ${Object.keys(labels).length} clusters`);
+	} catch (err) {
+		console.error("[SmartGraph] Error generating cluster labels:", err);
+		new Notice(`Failed to generate cluster labels: ${err instanceof Error ? err.message : "Unknown error"}`);
+	} finally {
+		isLabeling = false;
+	}
+}
 </script>
 
 <div class="smart-graph-view">
@@ -403,8 +484,9 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
       chargeStrength={settings.chargeStrength}
       labelZoomThreshold={settings.labelZoomThreshold}
       discoveryMode={settings.discoveryMode}
-      showSemanticEdges={settings.showSemanticEdges}
-      showWikiLinks={settings.showWikiLinks}
+      showSemanticEdges={graphMode === "smart" ? settings.showSemanticEdges : false}
+      showWikiLinks={graphMode === "wiki" ? true : settings.showWikiLinks}
+      useForceLayout={graphMode === "wiki" ? true : settings.useForceLayout}
       {focusedCluster}
       {clusterLabels}
       {isLabeling}
@@ -421,6 +503,8 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
     {settings}
     {suggestedK}
     {isLoading}
+    {graphMode}
+    {isTransitioning}
     nodeCount={displayData.nodes.length}
     edgeCount={displayData.edges.length}
     {availableFolders}
@@ -435,7 +519,9 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
     onFitToView={handleFitToView}
     onRefresh={handleRefresh}
     onApplyProjection={handleApplyProjection}
-    onLabelClusters={handleLabelClusters}
+    onSmartCluster={handleSmartCluster}
+    onBackToWiki={handleBackToWiki}
+    onLabelClusters={graphMode === "smart" ? handleLabelClusters : undefined}
     {isLabeling}
   />
 </div>

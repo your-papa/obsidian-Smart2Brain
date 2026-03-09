@@ -1,94 +1,98 @@
 <script lang="ts">
-  import { Notice } from "obsidian";
-  import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
-  import type { Messenger } from "../../stores/chatStore.svelte";
-  import type { PendingChangeEntry } from "../../types/shared";
-  import DiffView from "../ui/DiffView.svelte";
-  import { icon } from "../../utils/utils";
+import { Notice } from "obsidian";
+import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
+import type { Messenger } from "../../stores/chatStore.svelte";
+import type { PendingChangeEntry } from "../../types/shared";
+import DiffView from "../ui/DiffView.svelte";
+import { icon } from "../../utils/utils";
 
-  interface Props {
-    messenger: Messenger;
-  }
+interface Props {
+	messenger: Messenger;
+}
 
-  const { messenger }: Props = $props();
-  const store = getPendingChangesStore();
+const { messenger }: Props = $props();
+const store = getPendingChangesStore();
 
-  const threadId = $derived(messenger.session?.id);
-  const pendingEntries = $derived.by(() => {
-    void store.revision;
-    return threadId
-      ? store.getEntriesForThread(threadId).filter((e) => e.status === "pending")
-      : [];
-  });
-  const pendingCount = $derived(pendingEntries.length);
+const threadId = $derived(messenger.session?.id);
+const pendingEntries = $derived.by(() => {
+	void store.revision;
+	return threadId ? store.getEntriesForThread(threadId).filter((e) => e.status === "pending") : [];
+});
+const pendingCount = $derived(pendingEntries.length);
 
-  let isExpanded = $state(false);
-  let expandedIds: Record<string, boolean> = $state({});
+let isExpanded = $state(false);
+let expandedIds: Record<string, boolean> = $state({});
 
-  function toggleExpand(id: string) {
-    expandedIds[id] = !expandedIds[id];
-  }
+function toggleExpand(id: string) {
+	expandedIds[id] = !expandedIds[id];
+}
 
-  function changeTypeLabel(entry: PendingChangeEntry): string {
-    switch (entry.change.type) {
-      case "create":
-        return "Create";
-      case "update":
-        return "Update";
-      case "delete":
-        return "Delete";
-    }
-  }
+function changeTypeLabel(entry: PendingChangeEntry): string {
+	switch (entry.change.type) {
+		case "create":
+			return "Create";
+		case "update":
+			return "Update";
+		case "delete":
+			return "Delete";
+		case "move":
+			return "Move";
+	}
+}
 
-  function changeTypeBadgeClass(type: string): string {
-    switch (type) {
-      case "create":
-        return "badge-create";
-      case "update":
-        return "badge-update";
-      case "delete":
-        return "badge-delete";
-      default:
-        return "";
-    }
-  }
+function changeTypeBadgeClass(type: string): string {
+	switch (type) {
+		case "create":
+			return "badge-create";
+		case "update":
+			return "badge-update";
+		case "delete":
+			return "badge-delete";
+		case "move":
+			return "badge-update";
+		default:
+			return "";
+	}
+}
 
-  async function handleAccept(entry: PendingChangeEntry) {
-    try {
-      await store.acceptChange(entry.id);
-      new Notice(`Applied: ${entry.change.path}`);
-    } catch (e) {
-      new Notice(`Failed to apply change: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
+function changePathLabel(entry: PendingChangeEntry): string {
+	return entry.change.type === "move" ? `${entry.change.path} -> ${entry.change.newPath}` : entry.change.path;
+}
 
-  function handleReject(entry: PendingChangeEntry) {
-    store.rejectChange(entry.id);
-    new Notice(`Rejected: ${entry.change.path}`);
-  }
+async function handleAccept(entry: PendingChangeEntry) {
+	try {
+		await store.acceptChange(entry.id);
+		new Notice(`Applied: ${changePathLabel(entry)}`);
+	} catch (e) {
+		new Notice(`Failed to apply change: ${e instanceof Error ? e.message : String(e)}`);
+	}
+}
 
-  async function handleAcceptAll() {
-    if (!threadId) return;
-    const count = pendingCount;
-    try {
-      const failures = await store.acceptAll(threadId);
-      if (failures.length === 0) {
-        new Notice(`Applied all ${count} changes`);
-      } else {
-        new Notice(
-          `Applied ${count - failures.length} changes, ${failures.length} failed: ${failures.join(", ")}`,
-        );
-      }
-    } catch (e) {
-      new Notice(`Error applying changes: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
+function handleReject(entry: PendingChangeEntry) {
+	store.rejectChange(entry.id);
+	new Notice(`Rejected: ${changePathLabel(entry)}`);
+}
 
-  async function handleRejectAll() {
-    if (!threadId) return;
-    await store.rejectAll(threadId);
-    new Notice("Rejected all pending changes");
-  }
+async function handleAcceptAll() {
+	if (!threadId) return;
+	const count = pendingCount;
+	try {
+		const failures = await store.acceptAll(threadId);
+		if (failures.length === 0) {
+			new Notice(`Applied all ${count} changes`);
+		} else {
+			new Notice(`Applied ${count - failures.length} changes, ${failures.length} failed: ${failures.join(", ")}`);
+		}
+	} catch (e) {
+		new Notice(`Error applying changes: ${e instanceof Error ? e.message : String(e)}`);
+	}
+}
+
+async function handleRejectAll() {
+	if (!threadId) return;
+	await store.rejectAll(threadId);
+	new Notice("Rejected all pending changes");
+}
 </script>
 
 {#if pendingCount > 0}
@@ -144,7 +148,7 @@
                 <span class="pcb-badge {changeTypeBadgeClass(entry.change.type)}">
                   {changeTypeLabel(entry)}
                 </span>
-                <span class="pcb-path">{entry.change.path}</span>
+                <span class="pcb-path">{changePathLabel(entry)}</span>
               </div>
               <div class="pcb-entry-actions">
                 <button

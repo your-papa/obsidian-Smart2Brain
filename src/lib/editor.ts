@@ -1,4 +1,4 @@
-import { EditorSelection, type Extension, Prec, StateEffect } from "@codemirror/state";
+import { EditorSelection, EditorState, type Extension, Prec, StateEffect } from "@codemirror/state";
 import { EditorView, type ViewUpdate, keymap, placeholder, tooltips } from "@codemirror/view";
 import { type App, type Constructor, Scope, type TFile } from "obsidian";
 
@@ -75,6 +75,8 @@ function resolveEditorPrototype(app: App): Constructor<ScrollableMarkdownEditor>
 }
 
 export interface MarkdownEditorProps {
+	/** Whether the editor is editable */
+	editable?: boolean;
 	/** Initial cursor position */
 	cursorLocation?: { anchor: number; head: number };
 	/** Initial text content */
@@ -108,6 +110,7 @@ export interface MarkdownEditorProps {
 }
 
 const defaultProperties: Required<MarkdownEditorProps> = {
+	editable: true,
 	cursorLocation: undefined as unknown as { anchor: number; head: number },
 	value: "",
 	cls: "",
@@ -226,6 +229,12 @@ export class EmbeddableMarkdownEditor {
 		// Set up update handler and add our extensions to the live editor
 		this.setupUpdateHandler();
 		this.addKeyboardExtensions();
+
+		if (!this.options.editable) {
+			this.baseEditor.editor.cm.dispatch({
+				effects: StateEffect.appendConfig.of([EditorState.readOnly.of(true), EditorView.editable.of(false)]),
+			});
+		}
 	}
 
 	/**

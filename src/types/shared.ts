@@ -77,8 +77,17 @@ export interface PendingNoteDelete {
 	originalContent: string;
 }
 
+/** A staged note move */
+export interface PendingNoteMove {
+	type: "move";
+	/** Current vault-relative path of the file */
+	path: string;
+	/** Target vault-relative path after the move */
+	newPath: string;
+}
+
 /** Discriminated union of all pending change types */
-export type PendingChange = PendingNoteCreate | PendingNoteUpdate | PendingNoteDelete;
+export type PendingChange = PendingNoteCreate | PendingNoteUpdate | PendingNoteDelete | PendingNoteMove;
 
 /** A single pending change entry with metadata */
 export interface PendingChangeEntry {
