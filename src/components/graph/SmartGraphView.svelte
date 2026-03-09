@@ -10,16 +10,13 @@
   import {
     type GraphData,
     type SmartGraphSettings,
-    type GraphMode,
     DEFAULT_SMART_GRAPH_SETTINGS,
     THEME_COLOR_VARS,
   } from "../../types/graph";
   import {
     buildGraphStructure,
-    buildWikiGraph,
     computeClusters,
     applyClusterMap,
-    applyColorGroups,
     applySearchHighlight,
     type GraphFilter,
     type ClusterAssignment,
@@ -44,34 +41,10 @@
   let clusterLabels: Record<number, string> = $state({});
   let isLabeling = $state(false);
 
-  // Graph mode: "wiki" = force-directed wiki links, "smart" = projected clusters
-  let graphMode: GraphMode = $state("wiki");
-  let isTransitioning = $state(false);
-  let transitionTargets: Map<string, { x: number; y: number }> | null = $state(null);
-
-  // Smart graph pre-computed in the background for instant transition
-  let precomputedSmartData: {
-    graph: GraphData;
-    targets: Map<string, { x: number; y: number }>;
-    clusterMap: Map<string, ClusterAssignment>;
-    suggestedK: number | null;
-    filteredDocs: DocumentVector[];
-    vectors: Float32Array[];
-    reducedVectors: Float32Array[];
-    rawGraph: GraphData;
-  } | null = $state(null);
-  let isPrecomputing = $state(false);
-  let precomputeGeneration = 0;
-
-  // Graph data to swap in after the position transition completes
-  let pendingSmartGraph: GraphData | null = null;
-
   // Cluster state — persisted across edge/layout rebuilds
   let clusterMap: Map<string, ClusterAssignment> = $state(new Map());
   let cachedFilteredDocs: DocumentVector[] = [];
   let cachedVectors: Float32Array[] = [];
-  let cachedReducedVectors: Float32Array[] = [];
-  let cachedRawGraph: GraphData = { nodes: [], edges: [] };
 
   // Filter state
   let selectedFolders: string[] = $state([]);
@@ -87,11 +60,6 @@
 
   // Build generation counter to discard stale async results
   let buildGeneration = 0;
-
-  // When true, the next rebuild $effect schedule is skipped.
-  // Used by handleTransitionEnd/handleBackToWiki to prevent a redundant
-  // rebuildGraph() triggered by the graphMode change.
-  let suppressNextRebuild = false;
 
   /** Resolve the current theme colour palette from CSS variables. */
   function resolveThemeColors(): string[] {
@@ -131,9 +99,11 @@
   }
 
   /**
-   * Build the graph. In "wiki" mode, builds a wiki-link-only graph with
-   * d3-force layout. In "smart" mode, runs the full reduce → cluster → project
-   * pipeline. Clusters are only recomputed when the document set changes.
+   * Build the graph structure (edges, positions, degree) and apply cluster
+   * assignments. Clusters are only recomputed when the document set changes
+   * (e.g. filter change) or on the very first build. Otherwise the existing
+   * clusterMap is reused so that adjusting edge/layout settings keeps stable
+   * cluster colours.
    */
   async function rebuildGraph() {
     const gen = ++buildGeneration;
@@ -161,69 +131,41 @@
         return;
       }
 
-      if (graphMode === "wiki") {
-        // Wiki-only mode: force-directed layout with wiki link edges only
-        const result = buildWikiGraph(plugin.app, documents, settings, filter);
-        if (gen !== buildGeneration) return;
+      const {
+        graphData: rawGraph,
+        filteredDocs,
+        vectors,
+      } = await buildGraphStructure(plugin.app, documents, settings, filter);
 
-        cachedFilteredDocs = result.filteredDocs;
-        cachedVectors = result.vectors;
-        cachedReducedVectors = [];
-        cachedRawGraph = result.graphData;
-        clusterMap = new Map();
-        suggestedK = null;
+      if (gen !== buildGeneration) return;
+
+      // Detect whether the filtered document set changed
+      const currentPaths = new Set(filteredDocs.map((d) => d.path));
+      const clusterPaths = new Set(clusterMap.keys());
+      const docSetChanged =
+        currentPaths.size !== clusterPaths.size ||
+        [...currentPaths].some((p) => !clusterPaths.has(p));
+
+      // Cache for use by handleRecluster / handleLabelClusters
+      cachedFilteredDocs = filteredDocs;
+      cachedVectors = vectors;
+
+      // Recluster when: first build, or document set changed
+      if (clusterMap.size === 0 || docSetChanged) {
+        const themeColors = resolveThemeColors();
+        const result = computeClusters(filteredDocs, vectors, settings, themeColors);
+        clusterMap = result.clusterMap;
+        suggestedK = settings.autoK ? result.k : null;
         clusterLabels = {};
 
-        // Apply color groups
-        graphData = applyColorGroups(plugin.app, result.graphData, settings.colorGroups);
-
-        // Pre-compute smart graph in the background so the transition is instant
-        precomputedSmartData = null;
-        precomputeSmartGraph();
-      } else {
-        // Smart mode: full pipeline
-        const {
-          graphData: rawGraph,
-          filteredDocs,
-          vectors,
-          reducedVectors,
-        } = await buildGraphStructure(plugin.app, documents, settings, filter);
-
-        if (gen !== buildGeneration) return;
-
-        const currentPaths = new Set(filteredDocs.map((d) => d.path));
-        const clusterPaths = new Set(clusterMap.keys());
-        const docSetChanged =
-          currentPaths.size !== clusterPaths.size ||
-          [...currentPaths].some((p) => !clusterPaths.has(p));
-
-        cachedFilteredDocs = filteredDocs;
-        cachedVectors = vectors;
-        cachedReducedVectors = reducedVectors;
-        cachedRawGraph = rawGraph;
-
-        if (clusterMap.size === 0 || docSetChanged) {
-          const themeColors = resolveThemeColors();
-          const result = await computeClusters(
-            filteredDocs,
-            vectors,
-            settings,
-            themeColors,
-            rawGraph,
-            reducedVectors,
-          );
-          if (gen !== buildGeneration) return;
-          clusterMap = result.clusterMap;
-          suggestedK = settings.autoK ? result.k : null;
-          clusterLabels = {};
-
-          if (settings.autoLabelClusters && settings.graphChatModel) {
-            handleLabelClusters();
-          }
+        // Auto-label clusters if enabled and a chat model is configured
+        if (settings.autoLabelClusters && settings.graphChatModel) {
+          // Fire-and-forget; handleLabelClusters manages its own isLabeling state
+          handleLabelClusters();
         }
-
-        graphData = applyClusterMap(rawGraph, clusterMap);
       }
+
+      graphData = applyClusterMap(rawGraph, clusterMap);
     } catch (err) {
       console.error("[SmartGraph] Error building graph:", err);
       graphData = { nodes: [], edges: [] };
@@ -239,95 +181,22 @@
     displayData = searchQuery ? applySearchHighlight(graphData, searchQuery) : graphData;
   });
 
-  /**
-   * Pre-compute the smart clustering graph in the background so the
-   * wiki → smart transition feels instant when the user clicks the button.
-   */
-  async function precomputeSmartGraph() {
-    if (isPrecomputing) return;
-    isPrecomputing = true;
-    const gen = ++precomputeGeneration;
-
-    try {
-      if (!isVectorStoreInitialized()) return;
-
-      const vectorService = getVectorStoreService();
-      const documents = await vectorService.getAllDocumentVectors();
-      if (documents.length === 0 || gen !== precomputeGeneration) return;
-
-      const filter: GraphFilter = {
-        folders: selectedFolders.length > 0 ? selectedFolders : undefined,
-        tags: selectedTags.length > 0 ? selectedTags : undefined,
-        searchQuery: searchQuery || undefined,
-      };
-
-      const {
-        graphData: rawGraph,
-        filteredDocs,
-        vectors,
-        reducedVectors,
-      } = await buildGraphStructure(plugin.app, documents, settings, filter);
-      if (gen !== precomputeGeneration) return;
-
-      const themeColors = resolveThemeColors();
-      const result = await computeClusters(
-        filteredDocs,
-        vectors,
-        settings,
-        themeColors,
-        rawGraph,
-        reducedVectors,
-      );
-      if (gen !== precomputeGeneration) return;
-
-      const clusteredGraph = applyClusterMap(rawGraph, result.clusterMap);
-      const targets = new Map<string, { x: number; y: number }>();
-      for (const node of clusteredGraph.nodes) {
-        targets.set(node.id, { x: node.x, y: node.y });
-      }
-
-      precomputedSmartData = {
-        graph: clusteredGraph,
-        targets,
-        clusterMap: result.clusterMap,
-        suggestedK: settings.autoK ? result.k : null,
-        filteredDocs,
-        vectors,
-        reducedVectors,
-        rawGraph,
-      };
-    } catch (err) {
-      console.error("[SmartGraph] Error pre-computing smart graph:", err);
-    } finally {
-      if (gen === precomputeGeneration) {
-        isPrecomputing = false;
-      }
-    }
-  }
-
   // Build graph on filter/settings changes (debounced to avoid rapid-fire builds)
+  // Note: projectionMethod, defaultK, and autoK are intentionally excluded —
+  // they only take effect when the user presses the Apply button.
   $effect(() => {
-    // Track reactive dependencies (filter settings + color groups)
+    // Track reactive dependencies (edge, layout, filter settings)
     selectedFolders;
     selectedTags;
     settings.showOrphans;
-    settings.colorGroups;
-
-    // In smart mode, also track edge-related settings
-    if (graphMode === "smart") {
-      settings.similarityThreshold;
-      settings.semanticNeighbors;
-      settings.showWikiLinks;
-      settings.showSemanticEdges;
-    }
+    settings.similarityThreshold;
+    settings.semanticNeighbors;
+    settings.showWikiLinks;
+    settings.showSemanticEdges;
 
     // Debounce: schedule a rebuild and clean up on re-trigger
     const timer = setTimeout(() => {
       untrack(() => {
-        if (suppressNextRebuild) {
-          suppressNextRebuild = false;
-          return;
-        }
         rebuildGraph();
       });
     }, 300);
@@ -361,214 +230,19 @@
 
   function handleRefresh() {
     loadFilterOptions();
+    // Force full recluster on refresh by clearing stored assignments
     clusterMap = new Map();
     rebuildGraph();
   }
 
   /**
-   * Apply projection & clustering changes (smart mode only).
-   * Forces a full rebuild with fresh clusters.
+   * Apply projection & clustering changes.
+   * Forces a full rebuild with fresh clusters using the current projection
+   * method and K settings.
    */
   function handleApplyProjection() {
     clusterMap = new Map();
     rebuildGraph();
-  }
-
-  /**
-   * Transition from wiki mode to smart clustering mode.
-   * Uses pre-computed data if available; otherwise computes on demand.
-   * Sets only transitionTargets — graphData stays unchanged so the existing
-   * d3 simulation keeps running while nodes animate to projected positions.
-   */
-  async function handleSmartClustering() {
-    if (isTransitioning) return;
-
-    // Helper: kick off the position transition using computed data
-    const startTransition = (smartData: NonNullable<typeof precomputedSmartData>) => {
-      cachedFilteredDocs = smartData.filteredDocs;
-      cachedVectors = smartData.vectors;
-      cachedReducedVectors = smartData.reducedVectors;
-      cachedRawGraph = smartData.rawGraph;
-      clusterMap = smartData.clusterMap;
-      suggestedK = smartData.suggestedK;
-      clusterLabels = {};
-
-      if (settings.useForceLayout) {
-        // Force layout mode: skip position animation, directly swap data
-        // with cluster colors and let d3-force arrange nodes naturally.
-        suppressNextRebuild = true;
-        canvasComponent?.prepareDataSwap();
-        graphMode = "smart";
-        graphData = smartData.graph;
-      } else {
-        // Store the smart graph to apply after the transition finishes
-        pendingSmartGraph = smartData.graph;
-
-        // Apply cluster colors immediately so they animate with the transition
-        const colorUpdates = new Map<string, { color?: string; cluster?: number }>();
-        for (const [id, assignment] of smartData.clusterMap) {
-          colorUpdates.set(id, { color: assignment.color, cluster: assignment.cluster });
-        }
-        canvasComponent?.updateNodeAppearance(colorUpdates);
-
-        // Switch mode immediately so controls/UI update instantly.
-        // suppressNextRebuild prevents the rebuild $effect from firing.
-        // isTransitioning keeps useForceLayout=true so setupSimulation
-        // $effect doesn't re-fire either.
-        isTransitioning = true;
-        suppressNextRebuild = true;
-        graphMode = "smart";
-
-        // Set transitionTargets — graphData stays as wiki graph so nodes
-        // keep their current positions and the simulation can animate them
-        transitionTargets = smartData.targets;
-      }
-
-      if (settings.autoLabelClusters && settings.graphChatModel) {
-        handleLabelClusters();
-      }
-    };
-
-    // Use pre-computed data for an instant transition
-    if (precomputedSmartData) {
-      startTransition(precomputedSmartData);
-      return;
-    }
-
-    // Fall back to computing on demand (shows loading indicator)
-    if (isLoading) return;
-    isLoading = true;
-
-    try {
-      if (!isVectorStoreInitialized()) return;
-
-      const vectorService = getVectorStoreService();
-      const documents = await vectorService.getAllDocumentVectors();
-      if (documents.length === 0) return;
-
-      const filter: GraphFilter = {
-        folders: selectedFolders.length > 0 ? selectedFolders : undefined,
-        tags: selectedTags.length > 0 ? selectedTags : undefined,
-        searchQuery: searchQuery || undefined,
-      };
-
-      const {
-        graphData: rawGraph,
-        filteredDocs,
-        vectors,
-        reducedVectors,
-      } = await buildGraphStructure(plugin.app, documents, settings, filter);
-
-      const themeColors = resolveThemeColors();
-      const result = await computeClusters(
-        filteredDocs,
-        vectors,
-        settings,
-        themeColors,
-        rawGraph,
-        reducedVectors,
-      );
-
-      const clusteredGraph = applyClusterMap(rawGraph, result.clusterMap);
-      const targets = new Map<string, { x: number; y: number }>();
-      for (const node of clusteredGraph.nodes) {
-        targets.set(node.id, { x: node.x, y: node.y });
-      }
-
-      startTransition({
-        graph: clusteredGraph,
-        targets,
-        clusterMap: result.clusterMap,
-        suggestedK: settings.autoK ? result.k : null,
-        filteredDocs,
-        vectors,
-        reducedVectors,
-        rawGraph,
-      });
-    } catch (err) {
-      console.error("[SmartGraph] Error during smart clustering:", err);
-    } finally {
-      isLoading = false;
-    }
-  }
-
-  /**
-   * Called when the d3 transition animation finishes.
-   * Applies the pending smart graph (edges, colors) and finalises mode switch.
-   */
-  function handleTransitionEnd() {
-    transitionTargets = null;
-
-    if (pendingSmartGraph) {
-      // Read back positions AND degrees from the running simulation so the
-      // swap does not cause node size or position jumps.
-      const positions = canvasComponent?.getNodePositions();
-      const wikiDegrees = new Map<string, number>();
-      for (const node of graphData.nodes) {
-        wikiDegrees.set(node.id, node.degree ?? 0);
-      }
-
-      for (const node of pendingSmartGraph.nodes) {
-        const pos = positions?.get(node.id);
-        if (pos) {
-          node.x = pos.x;
-          node.y = pos.y;
-        }
-        // Keep wiki-era degree so getNodeRadius() produces the same size
-        const wd = wikiDegrees.get(node.id);
-        if (wd !== undefined) {
-          node.degree = wd;
-        }
-      }
-
-      // Tell canvas to skip fitToView/edge-fade on the next data swap
-      canvasComponent?.prepareDataSwap();
-      // Swap data first while isTransitioning is still true (keeps
-      // useForceLayout stable so only one setupSimulation fires).
-      graphData = pendingSmartGraph;
-      pendingSmartGraph = null;
-    }
-
-    // Clear isTransitioning last — this flips useForceLayout to its
-    // final value, but graphData is already the smart graph.
-    isTransitioning = false;
-  }
-
-  /**
-   * Go back to wiki graph mode.
-   * Builds the wiki graph synchronously from cached data to avoid an async gap,
-   * then lets the d3 force simulation smoothly rearrange nodes from their
-   * cluster positions into the wiki-link-driven layout.
-   */
-  function handleBackToWiki() {
-    if (isTransitioning) return;
-    isTransitioning = true;
-
-    // Build wiki graph synchronously from cached docs (already filtered)
-    const docs = cachedFilteredDocs.length > 0 ? cachedFilteredDocs : [];
-    const wikiResult = buildWikiGraph(plugin.app, docs, settings);
-    const wikiGraph = applyColorGroups(plugin.app, wikiResult.graphData, settings.colorGroups);
-
-    // Suppress the scheduled rebuild — we're already providing the correct data.
-    suppressNextRebuild = true;
-    graphMode = "wiki";
-    clusterMap = new Map();
-    clusterLabels = {};
-    suggestedK = null;
-    focusedCluster = null;
-
-    // Set graph data – triggers setupSimulation which preserves old positions
-    // and starts a gentle force simulation (alpha 0.3)
-    graphData = wikiGraph;
-
-    // Pre-compute smart graph again for the next transition
-    precomputedSmartData = null;
-    precomputeSmartGraph();
-
-    // Clear transition state after force simulation settles (~2s)
-    setTimeout(() => {
-      isTransitioning = false;
-    }, 2000);
   }
 
   function handleNodeClick(path: string) {
@@ -731,9 +405,6 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
       discoveryMode={settings.discoveryMode}
       showSemanticEdges={settings.showSemanticEdges}
       showWikiLinks={settings.showWikiLinks}
-      useForceLayout={graphMode === "wiki" || settings.useForceLayout || isTransitioning}
-      {transitionTargets}
-      onTransitionEnd={handleTransitionEnd}
       {focusedCluster}
       {clusterLabels}
       {isLabeling}
@@ -750,8 +421,6 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
     {settings}
     {suggestedK}
     {isLoading}
-    {graphMode}
-    {isTransitioning}
     nodeCount={displayData.nodes.length}
     edgeCount={displayData.edges.length}
     {availableFolders}
@@ -766,8 +435,6 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
     onFitToView={handleFitToView}
     onRefresh={handleRefresh}
     onApplyProjection={handleApplyProjection}
-    onSmartCluster={handleSmartClustering}
-    onBackToWiki={handleBackToWiki}
     onLabelClusters={handleLabelClusters}
     {isLabeling}
   />

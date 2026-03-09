@@ -478,20 +478,35 @@ function buildDecorations(view: EditorView): DecorationSet {
 
 export const inlineDiffPlugin = ViewPlugin.fromClass(
     class {
-        decorations: DecorationSet;
+        decorations: DecorationSet = Decoration.none;
         private readonly refreshHandler: () => void;
         private readonly view: EditorView;
+        private initialized = false;
 
         constructor(view: EditorView) {
             this.view = view;
-            this.decorations = buildDecorations(view);
+            // Don't call buildDecorations during construction or the first
+            // synchronous update — editorInfoField may not be ready yet and
+            // causes "Failed to open" errors in Obsidian.
+            // Schedule the first build for the next frame.
             this.refreshHandler = () => {
                 this.view.dispatch({ effects: refreshPendingChanges.of(null) });
             };
             document.addEventListener("ssb-pending-changes-updated", this.refreshHandler);
+            requestAnimationFrame(() => {
+                if (!this.initialized) {
+                    this.initialized = true;
+                    try {
+                        this.view.dispatch({ effects: refreshPendingChanges.of(null) });
+                    } catch {
+                        /* view may already be destroyed */
+                    }
+                }
+            });
         }
 
         update(update: ViewUpdate) {
+            if (!this.initialized) return;
             if (
                 update.docChanged ||
                 update.transactions.some((tr) => tr.effects.some((e) => e.is(refreshPendingChanges)))
