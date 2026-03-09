@@ -1,15 +1,15 @@
 {
-  "assistant_language": "Assistent Sprache",
-  "excludeff": "Ausschließen von Dateien und Ordnern",
-  "incognito_mode": "Inkognito-Modus",
-  "init_s2b": "Smart Second Brain initialisieren",
-  "settings": {
-    "search_algorithm": {
-      "title": "Suchalgorithmus",
-      "desc": "Wähle den Suchalgorithmus zum Abrufen von Notizen.",
-      "lexical": "Lexikalisch (TF-IDF)",
-      "embeddings": "Semantisch (Embeddings)",
-      "hybrid": "Hybrid (semantisch + lexikalisch)"
-    }
-  }
+	"assistant_language": "Assistent Sprache",
+	"excludeff": "Ausschließen von Dateien und Ordnern",
+	"incognito_mode": "Inkognito-Modus",
+	"init_s2b": "Smart Second Brain initialisieren",
+	"settings": {
+		"search_algorithm": {
+			"title": "Suchalgorithmus",
+			"desc": "Wähle den Suchalgorithmus zum Abrufen von Notizen.",
+			"lexical": "Lexikalisch (TF-IDF)",
+			"embeddings": "Semantisch (Embeddings)",
+			"hybrid": "Hybrid (semantisch + lexikalisch)"
+		}
+	}
 }

@@ -1,79 +1,79 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
-  import type { ChatAttachment } from "../../types/shared";
-  import { getPlugin } from "../../stores/state.svelte";
+import { onDestroy } from "svelte";
+import type { ChatAttachment } from "../../types/shared";
+import { getPlugin } from "../../stores/state.svelte";
 
-  interface Props {
-    attachments: ChatAttachment[];
-  }
+interface Props {
+	attachments: ChatAttachment[];
+}
 
-  const { attachments }: Props = $props();
+const { attachments }: Props = $props();
 
-  let previewUrls = $state<Map<string, string>>(new Map());
+let previewUrls = $state<Map<string, string>>(new Map());
 
-  onDestroy(() => {
-    for (const url of previewUrls.values()) {
-      URL.revokeObjectURL(url);
-    }
-  });
+onDestroy(() => {
+	for (const url of previewUrls.values()) {
+		URL.revokeObjectURL(url);
+	}
+});
 
-  $effect(() => {
-    const imgs = attachments.filter((a) => a.mimeType.startsWith("image/"));
-    if (imgs.length === 0) {
-      for (const url of previewUrls.values()) {
-        URL.revokeObjectURL(url);
-      }
-      previewUrls = new Map();
-      return;
-    }
+$effect(() => {
+	const imgs = attachments.filter((a) => a.mimeType.startsWith("image/"));
+	if (imgs.length === 0) {
+		for (const url of previewUrls.values()) {
+			URL.revokeObjectURL(url);
+		}
+		previewUrls = new Map();
+		return;
+	}
 
-    const app = getPlugin()?.app;
-    if (!app) return;
+	const app = getPlugin()?.app;
+	if (!app) return;
 
-    let cancelled = false;
-    let committed = false;
-    const newUrls = new Map<string, string>();
-    const pending: Promise<void>[] = [];
+	let cancelled = false;
+	let committed = false;
+	const newUrls = new Map<string, string>();
+	const pending: Promise<void>[] = [];
 
-    for (const att of imgs) {
-      pending.push(
-        (async () => {
-          try {
-            const file = app.vault.getFileByPath(att.vaultPath);
-            if (!file) return;
-            const buf = await app.vault.readBinary(file);
-            const blob = new Blob([buf], { type: att.mimeType });
-            newUrls.set(att.vaultPath, URL.createObjectURL(blob));
-          } catch {
-            // File may have been deleted
-          }
-        })(),
-      );
-    }
+	for (const att of imgs) {
+		pending.push(
+			(async () => {
+				try {
+					const file = app.vault.getFileByPath(att.vaultPath);
+					if (!file) return;
+					const buf = await app.vault.readBinary(file);
+					const blob = new Blob([buf], { type: att.mimeType });
+					newUrls.set(att.vaultPath, URL.createObjectURL(blob));
+				} catch {
+					// File may have been deleted
+				}
+			})(),
+		);
+	}
 
-    Promise.all(pending).then(() => {
-      if (!cancelled) {
-        for (const url of previewUrls.values()) {
-          URL.revokeObjectURL(url);
-        }
-        previewUrls = newUrls;
-        committed = true;
-      } else {
-        for (const url of newUrls.values()) {
-          URL.revokeObjectURL(url);
-        }
-      }
-    });
+	Promise.all(pending).then(() => {
+		if (!cancelled) {
+			for (const url of previewUrls.values()) {
+				URL.revokeObjectURL(url);
+			}
+			previewUrls = newUrls;
+			committed = true;
+		} else {
+			for (const url of newUrls.values()) {
+				URL.revokeObjectURL(url);
+			}
+		}
+	});
 
-    return () => {
-      cancelled = true;
-      if (!committed) {
-        for (const url of newUrls.values()) {
-          URL.revokeObjectURL(url);
-        }
-      }
-    };
-  });
+	return () => {
+		cancelled = true;
+		if (!committed) {
+			for (const url of newUrls.values()) {
+				URL.revokeObjectURL(url);
+			}
+		}
+	};
+});
 </script>
 
 <div class="flex flex-wrap gap-2 justify-end">

@@ -1,44 +1,44 @@
 <script lang="ts">
-  import { useResizeObserver } from "runed";
-  import type { ChatAttachment } from "../../types/shared";
-  import IconButton from "../ui/IconButton.svelte";
-  import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
+import { useResizeObserver } from "runed";
+import type { ChatAttachment } from "../../types/shared";
+import IconButton from "../ui/IconButton.svelte";
+import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 
-  interface Props {
-    content: string;
-    attachments?: ChatAttachment[];
-    class?: string;
-  }
+interface Props {
+	content: string;
+	attachments?: ChatAttachment[];
+	class?: string;
+}
 
-  const { content, attachments, class: className = "" }: Props = $props();
+const { content, attachments, class: className = "" }: Props = $props();
 
-  const COLLAPSED_HEIGHT = 96; // ~4 lines at 24px line-height
+const COLLAPSED_HEIGHT = 96; // ~4 lines at 24px line-height
 
-  let isExpanded = $state(false);
-  let contentEl: HTMLElement | null = $state(null);
-  let isTruncated = $state(false);
+let isExpanded = $state(false);
+let contentEl: HTMLElement | null = $state(null);
+let isTruncated = $state(false);
 
-  // Check if content exceeds collapsed height when element resizes
-  useResizeObserver(
-    () => contentEl,
-    () => {
-      if (contentEl) {
-        isTruncated = contentEl.scrollHeight > COLLAPSED_HEIGHT;
-      }
-    },
-  );
+// Check if content exceeds collapsed height when element resizes
+useResizeObserver(
+	() => contentEl,
+	() => {
+		if (contentEl) {
+			isTruncated = contentEl.scrollHeight > COLLAPSED_HEIGHT;
+		}
+	},
+);
 
-  function handleClick(evt: MouseEvent) {
-    // Don't toggle if clicking a link
-    const target = evt.target as HTMLElement;
-    if (target.closest("a")) {
-      return;
-    }
+function handleClick(evt: MouseEvent) {
+	// Don't toggle if clicking a link
+	const target = evt.target as HTMLElement;
+	if (target.closest("a")) {
+		return;
+	}
 
-    if (isTruncated) {
-      isExpanded = !isExpanded;
-    }
-  }
+	if (isTruncated) {
+		isExpanded = !isExpanded;
+	}
+}
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->

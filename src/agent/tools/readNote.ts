@@ -57,7 +57,10 @@ function resolveNoteFile(app: App, pathOrWikiLink: string): { file: TFile | null
 	}
 
 	if (basenameMatches.length > 1) {
-		const matchList = basenameMatches.slice(0, 5).map((file) => `- ${file.path}`).join("\n");
+		const matchList = basenameMatches
+			.slice(0, 5)
+			.map((file) => `- ${file.path}`)
+			.join("\n");
 		const suffix = basenameMatches.length > 5 ? "\n- ..." : "";
 		return {
 			file: null,

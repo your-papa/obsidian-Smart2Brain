@@ -114,43 +114,43 @@ export type AgentStreamOptions = AgentRunOptions;
 
 export type AgentStreamChunk =
 	| {
-		type: "token";
-		token: string;
-		runId: string;
-		threadId: string;
-	}
+			type: "token";
+			token: string;
+			runId: string;
+			threadId: string;
+	  }
 	| {
-		type: "tool_start";
-		toolCallId: string;
-		toolName: string;
-		input: unknown;
-		/** The id of the AI message that produced this tool call. */
-		aiMessageId?: string;
-		runId: string;
-		threadId: string;
-	}
+			type: "tool_start";
+			toolCallId: string;
+			toolName: string;
+			input: unknown;
+			/** The id of the AI message that produced this tool call. */
+			aiMessageId?: string;
+			runId: string;
+			threadId: string;
+	  }
 	| {
-		type: "tool_end";
-		toolCallId: string;
-		toolName: string;
-		output: unknown;
-		/** The id of the AI message that produced this tool call. */
-		aiMessageId?: string;
-		runId: string;
-		threadId: string;
-	}
+			type: "tool_end";
+			toolCallId: string;
+			toolName: string;
+			output: unknown;
+			/** The id of the AI message that produced this tool call. */
+			aiMessageId?: string;
+			runId: string;
+			threadId: string;
+	  }
 	| {
-		type: "result";
-		result: AgentResult;
-		runId: string;
-		threadId: string;
-	}
+			type: "result";
+			result: AgentResult;
+			runId: string;
+			threadId: string;
+	  }
 	| {
-		type: "checkpoint_message";
-		message: BaseMessage;
-		runId: string;
-		threadId: string;
-	};
+			type: "checkpoint_message";
+			message: BaseMessage;
+			runId: string;
+			threadId: string;
+	  };
 
 interface SelectedModel {
 	provider: string;
@@ -415,10 +415,7 @@ export class Agent {
 		const messageContent = await this.buildMessageContent(normalizedQuery, options.attachments);
 		const humanMessage = this.createHumanMessage(messageContent, options.attachments);
 
-		const rawResult = await agent.invoke(
-			{ messages: [humanMessage] },
-			invokeConfig,
-		);
+		const rawResult = await agent.invoke({ messages: [humanMessage] }, invokeConfig);
 
 		const finishedAt = new Date();
 		const messages = this.extractMessagesFromResult(rawResult);
@@ -1015,10 +1012,10 @@ export class Agent {
 		const baseSnapshot = metadata
 			? { ...metadata }
 			: createSnapshot({
-				threadId,
-				updatedAt: checkpointTimestamp,
-				createdAt: checkpointTimestamp,
-			});
+					threadId,
+					updatedAt: checkpointTimestamp,
+					createdAt: checkpointTimestamp,
+				});
 		const messages = tuple ? this.extractMessagesFromCheckpoint(tuple) : [];
 		const { lastError, errorCount } = tuple
 			? this.extractErrorsFromCheckpoint(tuple)
@@ -1589,9 +1586,9 @@ export class Agent {
 	private isAgentOutputCandidate(value: unknown): value is { messages: unknown[] } {
 		return Boolean(
 			value &&
-			typeof value === "object" &&
-			"messages" in (value as Record<string, unknown>) &&
-			Array.isArray((value as { messages?: unknown }).messages),
+				typeof value === "object" &&
+				"messages" in (value as Record<string, unknown>) &&
+				Array.isArray((value as { messages?: unknown }).messages),
 		);
 	}
 

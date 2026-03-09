@@ -33,4 +33,3 @@ export interface HydratedEmbeddingModelMetadata extends ModelIdentity {
 }
 
 export type HydratedModelMetadata = HydratedChatModelMetadata | HydratedEmbeddingModelMetadata;
-

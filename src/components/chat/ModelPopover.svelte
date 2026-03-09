@@ -1,230 +1,231 @@
 <script lang="ts">
-  import { Popover } from "bits-ui";
-  import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
-  import { extractVendor, logUnclassifiedModelsInfo } from "../../lib/modelVendorClassification";
-  import { getProviderDefinition } from "../../providers/index";
-  import type { ChatModel } from "../../stores/chatStore.svelte";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { Logger } from "../../utils/logging";
-  import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
-  import AnthropicLogo from "../ui/logos/AnthropicLogo.svelte";
-  import OpenAILogo from "../ui/logos/OpenAILogo.svelte";
-  import GoogleLogo from "../ui/logos/GoogleLogo.svelte";
-  import MicrosoftLogo from "../ui/logos/MicrosoftLogo.svelte";
-  import MetaLogo from "../ui/logos/MetaLogo.svelte";
-  import DeepSeekLogo from "../ui/logos/DeepSeekLogo.svelte";
-  import MistralLogo from "../ui/logos/MistralLogo.svelte";
-  import QwenLogo from "../ui/logos/QwenLogo.svelte";
-  import XAILogo from "../ui/logos/XAILogo.svelte";
-  import Icon from "../ui/Icon.svelte";
+import { Popover } from "bits-ui";
+import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
+import { extractVendor, logUnclassifiedModelsInfo } from "../../lib/modelVendorClassification";
+import { getProviderDefinition } from "../../providers/index";
+import type { ChatModel } from "../../stores/chatStore.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { Logger } from "../../utils/logging";
+import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
+import AnthropicLogo from "../ui/logos/AnthropicLogo.svelte";
+import OpenAILogo from "../ui/logos/OpenAILogo.svelte";
+import GoogleLogo from "../ui/logos/GoogleLogo.svelte";
+import MicrosoftLogo from "../ui/logos/MicrosoftLogo.svelte";
+import MetaLogo from "../ui/logos/MetaLogo.svelte";
+import DeepSeekLogo from "../ui/logos/DeepSeekLogo.svelte";
+import MistralLogo from "../ui/logos/MistralLogo.svelte";
+import QwenLogo from "../ui/logos/QwenLogo.svelte";
+import XAILogo from "../ui/logos/XAILogo.svelte";
+import Icon from "../ui/Icon.svelte";
 
-  const data = getData();
-  const plugin = getPlugin();
-  const models = useAvailableModels();
-  const openRouterModels = $derived(models.openRouterModels);
+const data = getData();
+const plugin = getPlugin();
+const models = useAvailableModels();
+const openRouterModels = $derived(models.openRouterModels);
 
-  // AI vendor definitions for filtering (excludes routing/local providers like Ollama, OpenRouter)
-  const AI_VENDORS = [
-    { id: "openai", name: "OpenAI", logo: OpenAILogo },
-    { id: "anthropic", name: "Anthropic", logo: AnthropicLogo },
-    { id: "google", name: "Google", logo: GoogleLogo },
-    { id: "microsoft", name: "Microsoft", logo: MicrosoftLogo },
-    { id: "meta-llama", name: "Meta", logo: MetaLogo },
-    { id: "deepseek", name: "DeepSeek", logo: DeepSeekLogo },
-    { id: "x-ai", name: "xAI", logo: XAILogo },
-    { id: "mistralai", name: "Mistral", logo: MistralLogo },
-    { id: "qwen", name: "Qwen", logo: QwenLogo },
-  ] as const;
+// AI vendor definitions for filtering (excludes routing/local providers like Ollama, OpenRouter)
+const AI_VENDORS = [
+	{ id: "openai", name: "OpenAI", logo: OpenAILogo },
+	{ id: "anthropic", name: "Anthropic", logo: AnthropicLogo },
+	{ id: "google", name: "Google", logo: GoogleLogo },
+	{ id: "microsoft", name: "Microsoft", logo: MicrosoftLogo },
+	{ id: "meta-llama", name: "Meta", logo: MetaLogo },
+	{ id: "deepseek", name: "DeepSeek", logo: DeepSeekLogo },
+	{ id: "x-ai", name: "xAI", logo: XAILogo },
+	{ id: "mistralai", name: "Mistral", logo: MistralLogo },
+	{ id: "qwen", name: "Qwen", logo: QwenLogo },
+] as const;
 
-  // Get the selected agent reactively
-  const selectedAgent = $derived(data.getSelectedAgent());
+// Get the selected agent reactively
+const selectedAgent = $derived(data.getSelectedAgent());
 
-  // Derive the effective selected model from the selected agent
-  const selectedModel = $derived.by(() => {
-    const list = models.availableModels;
-    const agentModel = selectedAgent?.chatModel;
+// Derive the effective selected model from the selected agent
+const selectedModel = $derived.by(() => {
+	const list = models.availableModels;
+	const agentModel = selectedAgent?.chatModel;
 
-    if (agentModel && list.length > 0) {
-      const found = list.find(
-        (m: ChatModel) => m.provider === agentModel.provider && m.model === agentModel.model,
-      );
-      if (found) return found;
-    }
+	if (agentModel && list.length > 0) {
+		const found = list.find((m: ChatModel) => m.provider === agentModel.provider && m.model === agentModel.model);
+		if (found) return found;
+	}
 
-    return list.length > 0 ? list[0] : null;
-  });
+	return list.length > 0 ? list[0] : null;
+});
 
-  function toClassifiableModel(
-    model: ChatModel,
-  ): { provider: string; model: string; family?: string; families?: string[] } {
-    if (model.provider !== "ollama") {
-      return { provider: model.provider, model: model.model };
-    }
+function toClassifiableModel(model: ChatModel): {
+	provider: string;
+	model: string;
+	family?: string;
+	families?: string[];
+} {
+	if (model.provider !== "ollama") {
+		return { provider: model.provider, model: model.model };
+	}
 
-    const families = models.getOllamaModelFamilies(model.model);
-    return {
-      provider: model.provider,
-      model: model.model,
-      family: families[0],
-      families,
-    };
-  }
+	const families = models.getOllamaModelFamilies(model.model);
+	return {
+		provider: model.provider,
+		model: model.model,
+		family: families[0],
+		families,
+	};
+}
 
-  const classifiableModels = $derived(models.availableModels.map((model) => toClassifiableModel(model)));
+const classifiableModels = $derived(models.availableModels.map((model) => toClassifiableModel(model)));
 
-  $effect(() => {
-    logUnclassifiedModelsInfo("model-popover", classifiableModels, openRouterModels);
-  });
+$effect(() => {
+	logUnclassifiedModelsInfo("model-popover", classifiableModels, openRouterModels);
+});
 
-  // Update the agent's model when user selects a different one
-  function selectModel(model: ChatModel) {
-    const agentId = data.selectedAgentId;
-    data.updateAgent(agentId, { chatModel: model });
-    plugin.agentManager?.reinitialize().catch((error) => {
-      Logger.error("Failed to update agent model:", error);
-    });
-  }
+// Update the agent's model when user selects a different one
+function selectModel(model: ChatModel) {
+	const agentId = data.selectedAgentId;
+	data.updateAgent(agentId, { chatModel: model });
+	plugin.agentManager?.reinitialize().catch((error) => {
+		Logger.error("Failed to update agent model:", error);
+	});
+}
 
-  let isOpen = $state(false);
-  let searchQuery = $state("");
-  let selectedVendor = $state<string | null>(null);
-  let showFavorites = $state(false);
-  let customAnchor: HTMLElement | undefined = $state();
-  let searchInputEl: HTMLInputElement | undefined = $state();
-  let vendorSidebarEl: HTMLDivElement | undefined = $state();
-  let canScrollDown = $state(false);
+let isOpen = $state(false);
+let searchQuery = $state("");
+let selectedVendor = $state<string | null>(null);
+let showFavorites = $state(false);
+let customAnchor: HTMLElement | undefined = $state();
+let searchInputEl: HTMLInputElement | undefined = $state();
+let vendorSidebarEl: HTMLDivElement | undefined = $state();
+let canScrollDown = $state(false);
 
-  // Check if vendor sidebar can scroll down
-  function updateScrollIndicator() {
-    if (vendorSidebarEl) {
-      const { scrollTop, scrollHeight, clientHeight } = vendorSidebarEl;
-      canScrollDown = scrollHeight > clientHeight && scrollTop + clientHeight < scrollHeight - 5;
-    }
-  }
+// Check if vendor sidebar can scroll down
+function updateScrollIndicator() {
+	if (vendorSidebarEl) {
+		const { scrollTop, scrollHeight, clientHeight } = vendorSidebarEl;
+		canScrollDown = scrollHeight > clientHeight && scrollTop + clientHeight < scrollHeight - 5;
+	}
+}
 
-  // Reset search and filter when popover opens
-  $effect(() => {
-    if (isOpen) {
-      searchQuery = "";
-      selectedVendor = null;
-      showFavorites = false;
-      // Focus search input after popover fully renders (needs delay for bits-ui)
-      setTimeout(() => {
-        searchInputEl?.focus();
-        updateScrollIndicator();
-      }, 50);
-    }
-  });
+// Reset search and filter when popover opens
+$effect(() => {
+	if (isOpen) {
+		searchQuery = "";
+		selectedVendor = null;
+		showFavorites = false;
+		// Focus search input after popover fully renders (needs delay for bits-ui)
+		setTimeout(() => {
+			searchInputEl?.focus();
+			updateScrollIndicator();
+		}, 50);
+	}
+});
 
-  // Get available vendors based on current models
-  const availableVendors = $derived.by(() => {
-    const vendorSet = new Set<string>();
-    for (const model of classifiableModels) {
-      const vendor = extractVendor(model, openRouterModels);
-      if (vendor) vendorSet.add(vendor);
-    }
-    return AI_VENDORS.filter((v) => vendorSet.has(v.id));
-  });
+// Get available vendors based on current models
+const availableVendors = $derived.by(() => {
+	const vendorSet = new Set<string>();
+	for (const model of classifiableModels) {
+		const vendor = extractVendor(model, openRouterModels);
+		if (vendor) vendorSet.add(vendor);
+	}
+	return AI_VENDORS.filter((v) => vendorSet.has(v.id));
+});
 
-  // Group models by provider
-  const modelsByProvider = $derived.by(() => {
-    const grouped = new Map<string, ChatModel[]>();
+// Group models by provider
+const modelsByProvider = $derived.by(() => {
+	const grouped = new Map<string, ChatModel[]>();
 
-    for (const model of models.availableModels) {
-      const existing = grouped.get(model.provider) ?? [];
-      existing.push(model);
-      grouped.set(model.provider, existing);
-    }
+	for (const model of models.availableModels) {
+		const existing = grouped.get(model.provider) ?? [];
+		existing.push(model);
+		grouped.set(model.provider, existing);
+	}
 
-    return Array.from(grouped.entries()).map(([provider, providerModels]) => ({
-      provider,
-      models: providerModels,
-    }));
-  });
+	return Array.from(grouped.entries()).map(([provider, providerModels]) => ({
+		provider,
+		models: providerModels,
+	}));
+});
 
-  // Filter models by search query, vendor, and favorites
-  const filteredModelsByProvider = $derived.by(() => {
-    let result = modelsByProvider;
+// Filter models by search query, vendor, and favorites
+const filteredModelsByProvider = $derived.by(() => {
+	let result = modelsByProvider;
 
-    // Filter by favorites if selected
-    if (showFavorites) {
-      result = result
-        .map(({ provider, models: providerModels }) => ({
-          provider,
-          models: providerModels.filter((m) => data.isFavoriteModel(m.provider, m.model)),
-        }))
-        .filter(({ models: providerModels }) => providerModels.length > 0);
-    }
+	// Filter by favorites if selected
+	if (showFavorites) {
+		result = result
+			.map(({ provider, models: providerModels }) => ({
+				provider,
+				models: providerModels.filter((m) => data.isFavoriteModel(m.provider, m.model)),
+			}))
+			.filter(({ models: providerModels }) => providerModels.length > 0);
+	}
 
-    // Filter by vendor if one is selected
-    if (selectedVendor) {
-      result = result
-        .map(({ provider, models: providerModels }) => ({
-          provider,
-          models: providerModels.filter(
-            (m) => extractVendor(toClassifiableModel(m), openRouterModels) === selectedVendor,
-          ),
-        }))
-        .filter(({ models: providerModels }) => providerModels.length > 0);
-    }
+	// Filter by vendor if one is selected
+	if (selectedVendor) {
+		result = result
+			.map(({ provider, models: providerModels }) => ({
+				provider,
+				models: providerModels.filter(
+					(m) => extractVendor(toClassifiableModel(m), openRouterModels) === selectedVendor,
+				),
+			}))
+			.filter(({ models: providerModels }) => providerModels.length > 0);
+	}
 
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      result = result
-        .map(({ provider, models: providerModels }) => ({
-          provider,
-          models: providerModels.filter(
-            (m) =>
-              m.model.toLowerCase().includes(query) ||
-              getModelDisplayName(m).toLowerCase().includes(query) ||
-              provider.toLowerCase().includes(query) ||
-              getProviderDisplayName(provider).toLowerCase().includes(query),
-          ),
-        }))
-        .filter(({ models: providerModels }) => providerModels.length > 0);
-    }
+	// Filter by search query
+	if (searchQuery.trim()) {
+		const query = searchQuery.toLowerCase();
+		result = result
+			.map(({ provider, models: providerModels }) => ({
+				provider,
+				models: providerModels.filter(
+					(m) =>
+						m.model.toLowerCase().includes(query) ||
+						getModelDisplayName(m).toLowerCase().includes(query) ||
+						provider.toLowerCase().includes(query) ||
+						getProviderDisplayName(provider).toLowerCase().includes(query),
+				),
+			}))
+			.filter(({ models: providerModels }) => providerModels.length > 0);
+	}
 
-    return result;
-  });
+	return result;
+});
 
-  // Get provider info
-  function getProviderDisplayName(providerId: string): string {
-    const provider = getProviderDefinition(providerId, data.getAllCustomProviderMeta());
-    return provider?.displayName ?? providerId;
-  }
+// Get provider info
+function getProviderDisplayName(providerId: string): string {
+	const provider = getProviderDefinition(providerId, data.getAllCustomProviderMeta());
+	return provider?.displayName ?? providerId;
+}
 
-  function getProviderLogo(providerId: string) {
-    const provider = getProviderDefinition(providerId, data.getAllCustomProviderMeta());
-    if (provider && "logo" in provider && provider.logo) {
-      return provider.logo;
-    }
-    return GenericAIIcon;
-  }
+function getProviderLogo(providerId: string) {
+	const provider = getProviderDefinition(providerId, data.getAllCustomProviderMeta());
+	if (provider && "logo" in provider && provider.logo) {
+		return provider.logo;
+	}
+	return GenericAIIcon;
+}
 
-  // Check if model is currently selected
-  function isSelected(model: ChatModel): boolean {
-    return selectedModel?.provider === model.provider && selectedModel?.model === model.model;
-  }
+// Check if model is currently selected
+function isSelected(model: ChatModel): boolean {
+	return selectedModel?.provider === model.provider && selectedModel?.model === model.model;
+}
 
-  // Get display name for model - hydrated display name first, then fallback logic
-  function getModelDisplayName(model: ChatModel): string {
-    const hydrated = models.hydratedChatModelsByKey.get(`${model.provider}:${model.model}`);
-    if (hydrated?.displayName) {
-      return hydrated.displayName;
-    }
-    if (selectedVendor && model.model.includes("/")) {
-      return model.model.split("/").slice(1).join("/");
-    }
-    return model.model;
-  }
+// Get display name for model - hydrated display name first, then fallback logic
+function getModelDisplayName(model: ChatModel): string {
+	const hydrated = models.hydratedChatModelsByKey.get(`${model.provider}:${model.model}`);
+	if (hydrated?.displayName) {
+		return hydrated.displayName;
+	}
+	if (selectedVendor && model.model.includes("/")) {
+		return model.model.split("/").slice(1).join("/");
+	}
+	return model.model;
+}
 
-  // Handle model selection
-  function handleSelect(model: ChatModel) {
-    isOpen = false;
-    selectModel(model);
-  }
+// Handle model selection
+function handleSelect(model: ChatModel) {
+	isOpen = false;
+	selectModel(model);
+}
 </script>
 
 {#if !models.hasProviders || !models.hasModels}

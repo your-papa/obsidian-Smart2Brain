@@ -1,212 +1,210 @@
 <script lang="ts">
-  import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
-  import { extractVendor, logUnclassifiedModelsInfo } from "../../lib/modelVendorClassification";
-  import type {
-    HydratedChatModelMetadata,
-    HydratedEmbeddingModelMetadata,
-  } from "../../types/modelMetadata";
-  import { getProviderDefinition } from "../../providers/index";
-  import { getData } from "../../stores/dataStore.svelte";
-  import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
-  import AnthropicLogo from "../ui/logos/AnthropicLogo.svelte";
-  import OpenAILogo from "../ui/logos/OpenAILogo.svelte";
-  import GoogleLogo from "../ui/logos/GoogleLogo.svelte";
-  import MicrosoftLogo from "../ui/logos/MicrosoftLogo.svelte";
-  import MetaLogo from "../ui/logos/MetaLogo.svelte";
-  import DeepSeekLogo from "../ui/logos/DeepSeekLogo.svelte";
-  import MistralLogo from "../ui/logos/MistralLogo.svelte";
-  import QwenLogo from "../ui/logos/QwenLogo.svelte";
-  import XAILogo from "../ui/logos/XAILogo.svelte";
-  import Icon from "../ui/Icon.svelte";
-  import type { ModelSelectionModal, ModelType, SelectedModel } from "./ModelSelectionModal";
+import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
+import { extractVendor, logUnclassifiedModelsInfo } from "../../lib/modelVendorClassification";
+import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../../types/modelMetadata";
+import { getProviderDefinition } from "../../providers/index";
+import { getData } from "../../stores/dataStore.svelte";
+import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
+import AnthropicLogo from "../ui/logos/AnthropicLogo.svelte";
+import OpenAILogo from "../ui/logos/OpenAILogo.svelte";
+import GoogleLogo from "../ui/logos/GoogleLogo.svelte";
+import MicrosoftLogo from "../ui/logos/MicrosoftLogo.svelte";
+import MetaLogo from "../ui/logos/MetaLogo.svelte";
+import DeepSeekLogo from "../ui/logos/DeepSeekLogo.svelte";
+import MistralLogo from "../ui/logos/MistralLogo.svelte";
+import QwenLogo from "../ui/logos/QwenLogo.svelte";
+import XAILogo from "../ui/logos/XAILogo.svelte";
+import Icon from "../ui/Icon.svelte";
+import type { ModelSelectionModal, ModelType, SelectedModel } from "./ModelSelectionModal";
 
-  // AI vendor definitions for filtering (excludes routing/local providers like Ollama, OpenRouter)
-  const AI_VENDORS = [
-    { id: "openai", name: "OpenAI", logo: OpenAILogo },
-    { id: "anthropic", name: "Anthropic", logo: AnthropicLogo },
-    { id: "google", name: "Google", logo: GoogleLogo },
-    { id: "microsoft", name: "Microsoft", logo: MicrosoftLogo },
-    { id: "meta-llama", name: "Meta", logo: MetaLogo },
-    { id: "deepseek", name: "DeepSeek", logo: DeepSeekLogo },
-    { id: "x-ai", name: "xAI", logo: XAILogo },
-    { id: "mistralai", name: "Mistral", logo: MistralLogo },
-    { id: "qwen", name: "Qwen", logo: QwenLogo },
-  ] as const;
+// AI vendor definitions for filtering (excludes routing/local providers like Ollama, OpenRouter)
+const AI_VENDORS = [
+	{ id: "openai", name: "OpenAI", logo: OpenAILogo },
+	{ id: "anthropic", name: "Anthropic", logo: AnthropicLogo },
+	{ id: "google", name: "Google", logo: GoogleLogo },
+	{ id: "microsoft", name: "Microsoft", logo: MicrosoftLogo },
+	{ id: "meta-llama", name: "Meta", logo: MetaLogo },
+	{ id: "deepseek", name: "DeepSeek", logo: DeepSeekLogo },
+	{ id: "x-ai", name: "xAI", logo: XAILogo },
+	{ id: "mistralai", name: "Mistral", logo: MistralLogo },
+	{ id: "qwen", name: "Qwen", logo: QwenLogo },
+] as const;
 
-  interface Props {
-    modal: ModelSelectionModal;
-    modelType: ModelType;
-    currentSelection: SelectedModel | null;
-    onSelect: (model: SelectedModel | null) => void;
-  }
+interface Props {
+	modal: ModelSelectionModal;
+	modelType: ModelType;
+	currentSelection: SelectedModel | null;
+	onSelect: (model: SelectedModel | null) => void;
+}
 
-  const { modal, modelType, currentSelection, onSelect }: Props = $props();
+const { modal, modelType, currentSelection, onSelect }: Props = $props();
 
-  const pluginData = getData();
-  const availableModels = useAvailableModels();
-  const openRouterModels = $derived(availableModels.openRouterModels);
+const pluginData = getData();
+const availableModels = useAvailableModels();
+const openRouterModels = $derived(availableModels.openRouterModels);
 
-  let searchQuery = $state("");
-  let selectedVendor = $state<string | null>(null);
-  let showFavorites = $state(false);
-  let searchInputEl: HTMLInputElement | undefined = $state();
+let searchQuery = $state("");
+let selectedVendor = $state<string | null>(null);
+let showFavorites = $state(false);
+let searchInputEl: HTMLInputElement | undefined = $state();
 
-  type HydratedModel = HydratedChatModelMetadata | HydratedEmbeddingModelMetadata;
+type HydratedModel = HydratedChatModelMetadata | HydratedEmbeddingModelMetadata;
 
-  // Get hydrated models based on type
-  const models = $derived(
-    modelType === "chat"
-      ? availableModels.hydratedChatModels
-      : availableModels.hydratedEmbeddingModels,
-  );
+// Get hydrated models based on type
+const models = $derived(
+	modelType === "chat" ? availableModels.hydratedChatModels : availableModels.hydratedEmbeddingModels,
+);
 
-  function toClassifiableModel(
-    model: HydratedModel,
-  ): { provider: string; model: string; family?: string; families?: string[] } {
-    if (model.provider !== "ollama") {
-      return { provider: model.provider, model: model.variantKey };
-    }
-    const families = availableModels.getOllamaModelFamilies(model.variantKey);
-    return {
-      provider: model.provider,
-      model: model.variantKey,
-      family: families[0],
-      families,
-    };
-  }
+function toClassifiableModel(model: HydratedModel): {
+	provider: string;
+	model: string;
+	family?: string;
+	families?: string[];
+} {
+	if (model.provider !== "ollama") {
+		return { provider: model.provider, model: model.variantKey };
+	}
+	const families = availableModels.getOllamaModelFamilies(model.variantKey);
+	return {
+		provider: model.provider,
+		model: model.variantKey,
+		family: families[0],
+		families,
+	};
+}
 
-  const classifiableModels = $derived(models.map((model) => toClassifiableModel(model)));
+const classifiableModels = $derived(models.map((model) => toClassifiableModel(model)));
 
-  $effect(() => {
-    logUnclassifiedModelsInfo("model-selection-modal", classifiableModels, openRouterModels);
-  });
+$effect(() => {
+	logUnclassifiedModelsInfo("model-selection-modal", classifiableModels, openRouterModels);
+});
 
-  $effect(() => {
-    searchInputEl?.focus();
-  });
+$effect(() => {
+	searchInputEl?.focus();
+});
 
-  // Group models by provider
-  const modelsByProvider = $derived.by(() => {
-    const grouped = new Map<string, HydratedModel[]>();
+// Group models by provider
+const modelsByProvider = $derived.by(() => {
+	const grouped = new Map<string, HydratedModel[]>();
 
-    for (const model of models) {
-      const existing = grouped.get(model.provider) ?? [];
-      existing.push(model);
-      grouped.set(model.provider, existing);
-    }
+	for (const model of models) {
+		const existing = grouped.get(model.provider) ?? [];
+		existing.push(model);
+		grouped.set(model.provider, existing);
+	}
 
-    return Array.from(grouped.entries()).map(([provider, models]) => ({
-      provider,
-      models,
-    }));
-  });
+	return Array.from(grouped.entries()).map(([provider, models]) => ({
+		provider,
+		models,
+	}));
+});
 
-  // Get available vendors based on current models
-  const availableVendors = $derived.by(() => {
-    const vendorSet = new Set<string>();
-    for (const model of models) {
-      const vendor = extractVendor(toClassifiableModel(model), openRouterModels);
-      if (vendor) vendorSet.add(vendor);
-    }
-    return AI_VENDORS.filter((v) => vendorSet.has(v.id));
-  });
+// Get available vendors based on current models
+const availableVendors = $derived.by(() => {
+	const vendorSet = new Set<string>();
+	for (const model of models) {
+		const vendor = extractVendor(toClassifiableModel(model), openRouterModels);
+		if (vendor) vendorSet.add(vendor);
+	}
+	return AI_VENDORS.filter((v) => vendorSet.has(v.id));
+});
 
-  // Filter models by search query, vendor, and favorites
-  const filteredModelsByProvider = $derived.by(() => {
-    let result = modelsByProvider;
+// Filter models by search query, vendor, and favorites
+const filteredModelsByProvider = $derived.by(() => {
+	let result = modelsByProvider;
 
-    // Filter by favorites if selected
-    if (showFavorites) {
-      result = result
-        .map(({ provider, models }) => ({
-          provider,
-          models: models.filter((m) => pluginData.isFavoriteModel(m.provider, m.variantKey)),
-        }))
-        .filter(({ models }) => models.length > 0);
-    }
+	// Filter by favorites if selected
+	if (showFavorites) {
+		result = result
+			.map(({ provider, models }) => ({
+				provider,
+				models: models.filter((m) => pluginData.isFavoriteModel(m.provider, m.variantKey)),
+			}))
+			.filter(({ models }) => models.length > 0);
+	}
 
-    // Filter by vendor if one is selected
-    if (selectedVendor) {
-      result = result
-        .map(({ provider, models }) => ({
-          provider,
-          models: models.filter(
-            (m) => extractVendor(toClassifiableModel(m), openRouterModels) === selectedVendor,
-          ),
-        }))
-        .filter(({ models }) => models.length > 0);
-    }
+	// Filter by vendor if one is selected
+	if (selectedVendor) {
+		result = result
+			.map(({ provider, models }) => ({
+				provider,
+				models: models.filter(
+					(m) => extractVendor(toClassifiableModel(m), openRouterModels) === selectedVendor,
+				),
+			}))
+			.filter(({ models }) => models.length > 0);
+	}
 
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      result = result
-        .map(({ provider, models }) => ({
-          provider,
-          models: models.filter(
-            (m) =>
-              m.displayName.toLowerCase().includes(query) ||
-              m.variantKey.toLowerCase().includes(query) ||
-              provider.toLowerCase().includes(query) ||
-              getProviderDisplayName(provider).toLowerCase().includes(query),
-          ),
-        }))
-        .filter(({ models }) => models.length > 0);
-    }
+	// Filter by search query
+	if (searchQuery.trim()) {
+		const query = searchQuery.toLowerCase();
+		result = result
+			.map(({ provider, models }) => ({
+				provider,
+				models: models.filter(
+					(m) =>
+						m.displayName.toLowerCase().includes(query) ||
+						m.variantKey.toLowerCase().includes(query) ||
+						provider.toLowerCase().includes(query) ||
+						getProviderDisplayName(provider).toLowerCase().includes(query),
+				),
+			}))
+			.filter(({ models }) => models.length > 0);
+	}
 
-    return result;
-  });
+	return result;
+});
 
-  // Get provider info
-  function getProviderDisplayName(providerId: string): string {
-    const provider = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
-    return provider?.displayName ?? providerId;
-  }
+// Get provider info
+function getProviderDisplayName(providerId: string): string {
+	const provider = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+	return provider?.displayName ?? providerId;
+}
 
-  function getProviderLogo(providerId: string) {
-    const provider = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
-    if (provider && "logo" in provider && provider.logo) {
-      return provider.logo;
-    }
-    return GenericAIIcon;
-  }
+function getProviderLogo(providerId: string) {
+	const provider = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+	if (provider && "logo" in provider && provider.logo) {
+		return provider.logo;
+	}
+	return GenericAIIcon;
+}
 
-  // Format cost (per 1M tokens)
-  function formatCost(costPer1M?: number): string {
-    if (costPer1M === undefined) return "—";
-    if (costPer1M === 0) return "Free";
-    if (costPer1M < 0.01) return `$${costPer1M.toFixed(4)}`;
-    if (costPer1M < 1) return `$${costPer1M.toFixed(2)}`;
-    return `$${costPer1M.toFixed(2)}`;
-  }
+// Format cost (per 1M tokens)
+function formatCost(costPer1M?: number): string {
+	if (costPer1M === undefined) return "—";
+	if (costPer1M === 0) return "Free";
+	if (costPer1M < 0.01) return `$${costPer1M.toFixed(4)}`;
+	if (costPer1M < 1) return `$${costPer1M.toFixed(2)}`;
+	return `$${costPer1M.toFixed(2)}`;
+}
 
-  function formatTokenLimit(tokens?: number): string {
-    if (!tokens) return "—";
-    if (tokens >= 1_000_000) {
-      return `${(tokens / 1_000_000).toFixed(1)}M`;
-    }
-    if (tokens >= 1_000) {
-      return `${Math.round(tokens / 1_000)}K`;
-    }
-    return tokens.toString();
-  }
+function formatTokenLimit(tokens?: number): string {
+	if (!tokens) return "—";
+	if (tokens >= 1_000_000) {
+		return `${(tokens / 1_000_000).toFixed(1)}M`;
+	}
+	if (tokens >= 1_000) {
+		return `${Math.round(tokens / 1_000)}K`;
+	}
+	return tokens.toString();
+}
 
-  function getVariantKeyDisplay(model: HydratedModel): string {
-    if (model.provider === "ollama") {
-      return model.variantKey.replace(/:latest$/i, "");
-    }
-    return model.variantKey;
-  }
+function getVariantKeyDisplay(model: HydratedModel): string {
+	if (model.provider === "ollama") {
+		return model.variantKey.replace(/:latest$/i, "");
+	}
+	return model.variantKey;
+}
 
-  // Check if model is currently selected
-  function isSelected(provider: string, variantKey: string): boolean {
-    return currentSelection?.provider === provider && currentSelection?.model === variantKey;
-  }
+// Check if model is currently selected
+function isSelected(provider: string, variantKey: string): boolean {
+	return currentSelection?.provider === provider && currentSelection?.model === variantKey;
+}
 
-  // Handle model selection
-  function handleSelect(provider: string, variantKey: string) {
-    onSelect({ provider, model: variantKey });
-  }
+// Handle model selection
+function handleSelect(provider: string, variantKey: string) {
+	onSelect({ provider, model: variantKey });
+}
 </script>
 
 <div class="model-selection-container">

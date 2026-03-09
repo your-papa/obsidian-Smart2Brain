@@ -69,21 +69,17 @@ let bundledDefaultPrompt = $state("");
 let hasParsedBundledDefault = $state(false);
 
 const isDirty = $derived(
-  editName !== initialName ||
-    editDescription !== initialDescription ||
-    promptValue !== initialPrompt,
+	editName !== initialName || editDescription !== initialDescription || promptValue !== initialPrompt,
 );
 
 const isAtBundledDefault = $derived(
-  hasParsedBundledDefault &&
-    editName === bundledDefaultName &&
-    editDescription === bundledDefaultDescription &&
-    promptValue === bundledDefaultPrompt,
+	hasParsedBundledDefault &&
+		editName === bundledDefaultName &&
+		editDescription === bundledDefaultDescription &&
+		promptValue === bundledDefaultPrompt,
 );
 
-const showResetToDefault = $derived(
-  hasBundledDefault && hasParsedBundledDefault && !isAtBundledDefault,
-);
+const showResetToDefault = $derived(hasBundledDefault && hasParsedBundledDefault && !isAtBundledDefault);
 
 onMount(async () => {
 	// Load file-based skill
@@ -98,20 +94,20 @@ onMount(async () => {
 			editName =
 				fileBasedSkill?.frontmatter.metadata?.displayName ?? fileBasedSkill?.frontmatter.name ?? pluginId;
 			editDescription = fileBasedSkill?.frontmatter.description ?? "";
-      initialName = editName;
-      initialDescription = editDescription;
-      initialPrompt = fileBasedSkill?.content ?? "";
+			initialName = editName;
+			initialDescription = editDescription;
+			initialPrompt = fileBasedSkill?.content ?? "";
 
-      const bundled = getBundledSkill(pluginId);
-      if (bundled) {
-        const parsed = parseFrontmatter(bundled.content);
-        if (parsed.frontmatter.name && parsed.frontmatter.description) {
-          bundledDefaultName = parsed.frontmatter.metadata?.displayName ?? parsed.frontmatter.name;
-          bundledDefaultDescription = parsed.frontmatter.description;
-          bundledDefaultPrompt = parsed.body;
-          hasParsedBundledDefault = true;
-        }
-      }
+			const bundled = getBundledSkill(pluginId);
+			if (bundled) {
+				const parsed = parseFrontmatter(bundled.content);
+				if (parsed.frontmatter.name && parsed.frontmatter.description) {
+					bundledDefaultName = parsed.frontmatter.metadata?.displayName ?? parsed.frontmatter.name;
+					bundledDefaultDescription = parsed.frontmatter.description;
+					bundledDefaultPrompt = parsed.body;
+					hasParsedBundledDefault = true;
+				}
+			}
 		}
 	}
 
@@ -187,11 +183,11 @@ async function handleSave() {
 }
 
 async function handleResetToDefault() {
-  if (!hasBundledDefault || !hasParsedBundledDefault) return;
-  editName = bundledDefaultName;
-  editDescription = bundledDefaultDescription;
-  promptValue = bundledDefaultPrompt;
-  editor?.setValue(bundledDefaultPrompt);
+	if (!hasBundledDefault || !hasParsedBundledDefault) return;
+	editName = bundledDefaultName;
+	editDescription = bundledDefaultDescription;
+	promptValue = bundledDefaultPrompt;
+	editor?.setValue(bundledDefaultPrompt);
 }
 </script>
 

@@ -226,8 +226,8 @@ $effect(() => {
 });
 
 // Build graph on filter/settings changes (debounced to avoid rapid-fire builds)
-// Note: projectionMethod, defaultK, and autoK are intentionally excluded —
-// they only take effect when the user presses the Apply button.
+// Note: projectionMethod, UMAP parameters, defaultK, and autoK are
+// intentionally excluded — they only take effect when the user presses Apply.
 $effect(() => {
 	// Track reactive dependencies (edge, layout, filter settings)
 	graphMode;

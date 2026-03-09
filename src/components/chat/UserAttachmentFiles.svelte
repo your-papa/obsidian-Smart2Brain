@@ -1,43 +1,43 @@
 <script lang="ts">
-  import { Keymap } from "obsidian";
-  import type { ChatAttachment } from "../../types/shared";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
+import { Keymap } from "obsidian";
+import type { ChatAttachment } from "../../types/shared";
+import { getPlugin } from "../../stores/state.svelte";
+import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 
-  interface Props {
-    attachments: ChatAttachment[];
-  }
+interface Props {
+	attachments: ChatAttachment[];
+}
 
-  const { attachments }: Props = $props();
+const { attachments }: Props = $props();
 
-  const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
+const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
 
-  function iconNameForAttachment(att: ChatAttachment): string {
-    if (att.mimeType === "application/pdf") return "📄";
-    if (att.mimeType === "application/json") return "🧩";
-    if (att.mimeType.startsWith("text/")) return "📝";
-    return "📎";
-  }
+function iconNameForAttachment(att: ChatAttachment): string {
+	if (att.mimeType === "application/pdf") return "📄";
+	if (att.mimeType === "application/json") return "🧩";
+	if (att.mimeType.startsWith("text/")) return "📝";
+	return "📎";
+}
 
-  function onAttachmentClick(evt: MouseEvent, attachment: ChatAttachment): void {
-    evt.preventDefault();
-    evt.stopPropagation();
-    getPlugin().app.workspace.openLinkText(attachment.vaultPath, sourcePath, Keymap.isModEvent(evt));
-  }
+function onAttachmentClick(evt: MouseEvent, attachment: ChatAttachment): void {
+	evt.preventDefault();
+	evt.stopPropagation();
+	getPlugin().app.workspace.openLinkText(attachment.vaultPath, sourcePath, Keymap.isModEvent(evt));
+}
 
-  function onAttachmentHover(evt: Event, attachment: ChatAttachment): void {
-    const target = evt.currentTarget;
-    if (!(target instanceof HTMLElement)) return;
+function onAttachmentHover(evt: Event, attachment: ChatAttachment): void {
+	const target = evt.currentTarget;
+	if (!(target instanceof HTMLElement)) return;
 
-    getPlugin().app.workspace.trigger("hover-link", {
-      event: evt,
-      source: VIEW_TYPE_CHAT,
-      hoverParent: getPlugin(),
-      targetEl: target,
-      linktext: attachment.vaultPath,
-      sourcePath,
-    });
-  }
+	getPlugin().app.workspace.trigger("hover-link", {
+		event: evt,
+		source: VIEW_TYPE_CHAT,
+		hoverParent: getPlugin(),
+		targetEl: target,
+		linktext: attachment.vaultPath,
+		sourcePath,
+	});
+}
 </script>
 
 {#if attachments.length > 0}

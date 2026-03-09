@@ -1,311 +1,294 @@
 <script lang="ts">
-  import type {
-    AssistantTimelineEvent,
-    ToolCallState,
-    ToolCallStatus,
-  } from "../../stores/chatStore.svelte";
-  import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
+import type { AssistantTimelineEvent, ToolCallState, ToolCallStatus } from "../../stores/chatStore.svelte";
+import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 
-  interface Props {
-    toolCalls?: ToolCallState[];
-    assistantTimeline?: AssistantTimelineEvent[];
-    collapsed: boolean;
-    answerContent?: string;
-    isStreaming?: boolean;
-    isError?: boolean;
-    isProcessing?: boolean;
-  }
+interface Props {
+	toolCalls?: ToolCallState[];
+	assistantTimeline?: AssistantTimelineEvent[];
+	collapsed: boolean;
+	answerContent?: string;
+	isStreaming?: boolean;
+	isError?: boolean;
+	isProcessing?: boolean;
+}
 
-  const {
-    toolCalls,
-    assistantTimeline,
-    collapsed,
-    answerContent,
-    isStreaming,
-    isError,
-    isProcessing,
-  }: Props = $props();
+const { toolCalls, assistantTimeline, collapsed, answerContent, isStreaming, isError, isProcessing }: Props = $props();
 
-  let expandedSteps: Record<string, boolean> = $state({});
-  let hoveringFinalControl = $state(false);
+let expandedSteps: Record<string, boolean> = $state({});
+let hoveringFinalControl = $state(false);
 
-  /* ── Formatters ── */
+/* ── Formatters ── */
 
-  function formatToolName(name: string): string {
-    if (!name) return "Unknown Tool";
-    return name
-      .replace(/_/g, " ")
-      .replace(/([a-z])([A-Z])/g, "$1 $2")
-      .replace(/\b\w/g, (c) => c.toUpperCase());
-  }
+function formatToolName(name: string): string {
+	if (!name) return "Unknown Tool";
+	return name
+		.replace(/_/g, " ")
+		.replace(/([a-z])([A-Z])/g, "$1 $2")
+		.replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
-  function formatValue(value: unknown): string {
-    if (value === null || value === undefined) return "null";
-    if (typeof value === "string") return value;
-    if (typeof value === "object") return JSON.stringify(value, null, 2);
-    return String(value);
-  }
+function formatValue(value: unknown): string {
+	if (value === null || value === undefined) return "null";
+	if (typeof value === "string") return value;
+	if (typeof value === "object") return JSON.stringify(value, null, 2);
+	return String(value);
+}
 
-  function formatToolInput(
-    input: Record<string, unknown> | null | undefined,
-  ): { key: string; value: unknown }[] {
-    if (!input || typeof input !== "object" || Array.isArray(input)) return [];
-    return Object.entries(input).map(([key, value]) => ({ key, value }));
-  }
+function formatToolInput(input: Record<string, unknown> | null | undefined): { key: string; value: unknown }[] {
+	if (!input || typeof input !== "object" || Array.isArray(input)) return [];
+	return Object.entries(input).map(([key, value]) => ({ key, value }));
+}
 
-  function hasToolInputValue(value: unknown): boolean {
-    if (value === null || value === undefined) return false;
-    if (typeof value === "string") return value.trim().length > 0;
-    if (Array.isArray(value)) return value.length > 0;
-    if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
-    return true;
-  }
+function hasToolInputValue(value: unknown): boolean {
+	if (value === null || value === undefined) return false;
+	if (typeof value === "string") return value.trim().length > 0;
+	if (Array.isArray(value)) return value.length > 0;
+	if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
+	return true;
+}
 
-  function formatInlineValue(value: unknown): string {
-    if (typeof value === "string") return value;
-    if (typeof value === "number" || typeof value === "boolean") return String(value);
-    if (Array.isArray(value)) return `[${value.length} item${value.length === 1 ? "" : "s"}]`;
-    if (typeof value === "object" && value !== null) {
-      const keys = Object.keys(value as Record<string, unknown>);
-      if (keys.length === 1) return `{${keys[0]}}`;
-      return `{${keys.length} keys}`;
-    }
-    return formatValue(value);
-  }
+function formatInlineValue(value: unknown): string {
+	if (typeof value === "string") return value;
+	if (typeof value === "number" || typeof value === "boolean") return String(value);
+	if (Array.isArray(value)) return `[${value.length} item${value.length === 1 ? "" : "s"}]`;
+	if (typeof value === "object" && value !== null) {
+		const keys = Object.keys(value as Record<string, unknown>);
+		if (keys.length === 1) return `{${keys[0]}}`;
+		return `{${keys.length} keys}`;
+	}
+	return formatValue(value);
+}
 
-  function getToolInputPreview(
-    input: Record<string, unknown> | null | undefined,
-    maxItems = 2,
-  ): { visibleEntries: { key: string; value: string }[]; hiddenCount: number } {
-    const entries = formatToolInput(input).filter((entry) => hasToolInputValue(entry.value));
-    const visibleEntries = entries.slice(0, maxItems).map(({ key, value }) => ({
-      key,
-      value: formatInlineValue(value),
-    }));
+function getToolInputPreview(
+	input: Record<string, unknown> | null | undefined,
+	maxItems = 2,
+): { visibleEntries: { key: string; value: string }[]; hiddenCount: number } {
+	const entries = formatToolInput(input).filter((entry) => hasToolInputValue(entry.value));
+	const visibleEntries = entries.slice(0, maxItems).map(({ key, value }) => ({
+		key,
+		value: formatInlineValue(value),
+	}));
 
-    return {
-      visibleEntries,
-      hiddenCount: Math.max(0, entries.length - visibleEntries.length),
-    };
-  }
+	return {
+		visibleEntries,
+		hiddenCount: Math.max(0, entries.length - visibleEntries.length),
+	};
+}
 
-  function formatToolOutput(output: unknown): string {
-    if (output === null || output === undefined) return "";
-    if (typeof output === "string") return output;
-    if (Array.isArray(output)) {
-      const textItems = output
-        .map((item: unknown) => {
-          if (item && typeof item === "object") {
-            const obj = item as Record<string, unknown>;
-            if (obj.type === "text" && obj.text !== undefined) return String(obj.text);
-            if (obj.type === "json" && obj.data !== undefined)
-              return JSON.stringify(obj.data, null, 2);
-          }
-          return "";
-        })
-        .filter((text: string) => text !== "")
-        .join("\n");
-      if (textItems) return textItems;
-    }
-    if (typeof output === "object") {
-      const obj = output as Record<string, unknown>;
-      if (obj.type === "text" && obj.text !== undefined) return String(obj.text);
-      if (obj.content !== undefined) return formatToolOutput(obj.content);
-    }
-    return JSON.stringify(output, null, 2);
-  }
+function formatToolOutput(output: unknown): string {
+	if (output === null || output === undefined) return "";
+	if (typeof output === "string") return output;
+	if (Array.isArray(output)) {
+		const textItems = output
+			.map((item: unknown) => {
+				if (item && typeof item === "object") {
+					const obj = item as Record<string, unknown>;
+					if (obj.type === "text" && obj.text !== undefined) return String(obj.text);
+					if (obj.type === "json" && obj.data !== undefined) return JSON.stringify(obj.data, null, 2);
+				}
+				return "";
+			})
+			.filter((text: string) => text !== "")
+			.join("\n");
+		if (textItems) return textItems;
+	}
+	if (typeof output === "object") {
+		const obj = output as Record<string, unknown>;
+		if (obj.type === "text" && obj.text !== undefined) return String(obj.text);
+		if (obj.content !== undefined) return formatToolOutput(obj.content);
+	}
+	return JSON.stringify(output, null, 2);
+}
 
-  /* ── Unified tool call model ── */
+/* ── Unified tool call model ── */
 
-  interface UnifiedToolCall {
-    id: string;
-    name: string;
-    input?: Record<string, unknown>;
-    output?: unknown;
-    status: ToolCallStatus;
-  }
+interface UnifiedToolCall {
+	id: string;
+	name: string;
+	input?: Record<string, unknown>;
+	output?: unknown;
+	status: ToolCallStatus;
+}
 
-  interface TimelineStep {
-    id: string;
-    preambles: string[];
-    tools: UnifiedToolCall[];
-  }
+interface TimelineStep {
+	id: string;
+	preambles: string[];
+	tools: UnifiedToolCall[];
+}
 
-  function buildStepsFromEvents(rawEvents: AssistantTimelineEvent[]): TimelineStep[] {
-    const steps: TimelineStep[] = [];
-    const stepByGroup = new Map<string, TimelineStep>();
+function buildStepsFromEvents(rawEvents: AssistantTimelineEvent[]): TimelineStep[] {
+	const steps: TimelineStep[] = [];
+	const stepByGroup = new Map<string, TimelineStep>();
 
-    // If events have aiMessageId, group by it; otherwise fall back to single-step heuristic
-    const hasGroupIds = rawEvents.some((e) => e.aiMessageId !== undefined);
+	// If events have aiMessageId, group by it; otherwise fall back to single-step heuristic
+	const hasGroupIds = rawEvents.some((e) => e.aiMessageId !== undefined);
 
-    if (hasGroupIds) {
-      for (const event of rawEvents) {
-        // tool_end events never create a new step — they only update an existing tool
-        // across all steps (the aiMessageId on tool_end may differ from tool_start when
-        // the first tool call in a stream has no preamble and lastAiMessageId was still
-        // undefined at tool_start time). Creating a step here would leave empty steps.
-        if (event.type === "tool_end") {
-          for (const s of steps) {
-            const tool = s.tools.find((t) => t.id === event.toolCallId);
-            if (tool) {
-              tool.status = event.status ?? "completed";
-              tool.output = event.output;
-              break;
-            }
-          }
-          continue;
-        }
+	if (hasGroupIds) {
+		for (const event of rawEvents) {
+			// tool_end events never create a new step — they only update an existing tool
+			// across all steps (the aiMessageId on tool_end may differ from tool_start when
+			// the first tool call in a stream has no preamble and lastAiMessageId was still
+			// undefined at tool_start time). Creating a step here would leave empty steps.
+			if (event.type === "tool_end") {
+				for (const s of steps) {
+					const tool = s.tools.find((t) => t.id === event.toolCallId);
+					if (tool) {
+						tool.status = event.status ?? "completed";
+						tool.output = event.output;
+						break;
+					}
+				}
+				continue;
+			}
 
-        const groupId = event.aiMessageId ?? "unknown";
+			const groupId = event.aiMessageId ?? "unknown";
 
-        if (!stepByGroup.has(groupId)) {
-          const step: TimelineStep = {
-            id: `step-${groupId}`,
-            preambles: [],
-            tools: [],
-          };
-          stepByGroup.set(groupId, step);
-          steps.push(step);
-        }
-        const step = stepByGroup.get(groupId)!;
+			if (!stepByGroup.has(groupId)) {
+				const step: TimelineStep = {
+					id: `step-${groupId}`,
+					preambles: [],
+					tools: [],
+				};
+				stepByGroup.set(groupId, step);
+				steps.push(step);
+			}
+			const step = stepByGroup.get(groupId)!;
 
-        if (event.type === "preamble" && event.content?.trim()) {
-          step.preambles.push(event.content.trim());
-        } else if (event.type === "tool_start") {
-          step.tools.push({
-            id: event.toolCallId ?? "",
-            name: event.toolName ?? "Unknown",
-            input: event.input,
-            status: "running",
-          });
-        }
-      }
-    } else {
-      // Fallback: all events belong to one step (no boundary info available)
-      const step: TimelineStep = { id: "step-0", preambles: [], tools: [] };
-      for (const event of rawEvents) {
-        if (event.type === "preamble" && event.content?.trim()) {
-          step.preambles.push(event.content.trim());
-        } else if (event.type === "tool_start") {
-          step.tools.push({
-            id: event.toolCallId ?? "",
-            name: event.toolName ?? "Unknown",
-            input: event.input,
-            status: "running",
-          });
-        } else if (event.type === "tool_end") {
-          const tool = step.tools.find((t) => t.id === event.toolCallId);
-          if (tool) {
-            tool.status = event.status ?? "completed";
-            tool.output = event.output;
-          }
-        }
-      }
-      if (step.tools.length > 0 || step.preambles.length > 0) steps.push(step);
-    }
+			if (event.type === "preamble" && event.content?.trim()) {
+				step.preambles.push(event.content.trim());
+			} else if (event.type === "tool_start") {
+				step.tools.push({
+					id: event.toolCallId ?? "",
+					name: event.toolName ?? "Unknown",
+					input: event.input,
+					status: "running",
+				});
+			}
+		}
+	} else {
+		// Fallback: all events belong to one step (no boundary info available)
+		const step: TimelineStep = { id: "step-0", preambles: [], tools: [] };
+		for (const event of rawEvents) {
+			if (event.type === "preamble" && event.content?.trim()) {
+				step.preambles.push(event.content.trim());
+			} else if (event.type === "tool_start") {
+				step.tools.push({
+					id: event.toolCallId ?? "",
+					name: event.toolName ?? "Unknown",
+					input: event.input,
+					status: "running",
+				});
+			} else if (event.type === "tool_end") {
+				const tool = step.tools.find((t) => t.id === event.toolCallId);
+				if (tool) {
+					tool.status = event.status ?? "completed";
+					tool.output = event.output;
+				}
+			}
+		}
+		if (step.tools.length > 0 || step.preambles.length > 0) steps.push(step);
+	}
 
-    return steps;
-  }
+	return steps;
+}
 
-  function buildStepsFromToolCalls(calls: ToolCallState[] | undefined): TimelineStep[] {
-    if (!calls || calls.length === 0) return [];
-    const step: TimelineStep = { id: "step-0", preambles: [], tools: [] };
-    for (const tc of calls) {
-      if (tc.preamble?.trim()) step.preambles.push(tc.preamble.trim());
-      step.tools.push({
-        id: tc.id,
-        name: tc.name,
-        input: tc.input,
-        output: tc.output,
-        status: tc.status,
-      });
-    }
-    return [step];
-  }
+function buildStepsFromToolCalls(calls: ToolCallState[] | undefined): TimelineStep[] {
+	if (!calls || calls.length === 0) return [];
+	const step: TimelineStep = { id: "step-0", preambles: [], tools: [] };
+	for (const tc of calls) {
+		if (tc.preamble?.trim()) step.preambles.push(tc.preamble.trim());
+		step.tools.push({
+			id: tc.id,
+			name: tc.name,
+			input: tc.input,
+			output: tc.output,
+			status: tc.status,
+		});
+	}
+	return [step];
+}
 
-  /* ── Step helpers ── */
+/* ── Step helpers ── */
 
-  function isStepRunning(step: TimelineStep): boolean {
-    return step.tools.some((t) => t.status === "running");
-  }
+function isStepRunning(step: TimelineStep): boolean {
+	return step.tools.some((t) => t.status === "running");
+}
 
-  function getCollapsedStepLabel(step: TimelineStep): string {
-    if (step.tools.length === 0) return step.preambles.length > 0 ? "Thinking…" : "0 tools";
+function getCollapsedStepLabel(step: TimelineStep): string {
+	if (step.tools.length === 0) return step.preambles.length > 0 ? "Thinking…" : "0 tools";
 
-    const groupedCounts = new Map<string, number>();
-    for (const tool of step.tools) {
-      const formattedName = formatToolName(tool.name);
-      groupedCounts.set(formattedName, (groupedCounts.get(formattedName) ?? 0) + 1);
-    }
+	const groupedCounts = new Map<string, number>();
+	for (const tool of step.tools) {
+		const formattedName = formatToolName(tool.name);
+		groupedCounts.set(formattedName, (groupedCounts.get(formattedName) ?? 0) + 1);
+	}
 
-    return Array.from(groupedCounts.entries())
-      .map(([name, count]) => (count > 1 ? `${name} (${count})` : name))
-      .join(", ");
-  }
+	return Array.from(groupedCounts.entries())
+		.map(([name, count]) => (count > 1 ? `${name} (${count})` : name))
+		.join(", ");
+}
 
-  function hasStepFailure(step: TimelineStep): boolean {
-    return step.tools.some((t) => t.status === "failed");
-  }
+function hasStepFailure(step: TimelineStep): boolean {
+	return step.tools.some((t) => t.status === "failed");
+}
 
-  function getOverallStatus(stepsArg: TimelineStep[]): "running" | "completed" {
-    return stepsArg.some(isStepRunning) ? "running" : "completed";
-  }
+function getOverallStatus(stepsArg: TimelineStep[]): "running" | "completed" {
+	return stepsArg.some(isStepRunning) ? "running" : "completed";
+}
 
-  /* ── Derived state ── */
+/* ── Derived state ── */
 
-  const steps = $derived(
-    assistantTimeline && assistantTimeline.length > 0
-      ? buildStepsFromEvents(assistantTimeline)
-      : buildStepsFromToolCalls(toolCalls),
-  );
-  const overallStatus = $derived(getOverallStatus(steps));
+const steps = $derived(
+	assistantTimeline && assistantTimeline.length > 0
+		? buildStepsFromEvents(assistantTimeline)
+		: buildStepsFromToolCalls(toolCalls),
+);
+const overallStatus = $derived(getOverallStatus(steps));
 
-  // Show answer as a final timeline step when there's content or tools finished streaming.
-  // Guard with steps.length > 0 so that during initial processing (no tool-call steps yet)
-  // showProcessingDot takes over instead of the answer step pre-empting it.
-  const showAnswerStep = $derived(
-    !!(answerContent || (isStreaming && overallStatus === "completed" && steps.length > 0)),
-  );
-  // Show a lone processing dot when nothing has arrived yet
-  const showProcessingDot = $derived(!!isProcessing && steps.length === 0 && !showAnswerStep);
-  const effectiveTotal = $derived(
-    steps.length + (showAnswerStep ? 1 : 0) + (showProcessingDot ? 1 : 0),
-  );
+// Show answer as a final timeline step when there's content or tools finished streaming.
+// Guard with steps.length > 0 so that during initial processing (no tool-call steps yet)
+// showProcessingDot takes over instead of the answer step pre-empting it.
+const showAnswerStep = $derived(
+	!!(answerContent || (isStreaming && overallStatus === "completed" && steps.length > 0)),
+);
+// Show a lone processing dot when nothing has arrived yet
+const showProcessingDot = $derived(!!isProcessing && steps.length === 0 && !showAnswerStep);
+const effectiveTotal = $derived(steps.length + (showAnswerStep ? 1 : 0) + (showProcessingDot ? 1 : 0));
 
-  // When content is streaming but no tool-call steps have arrived yet, render the
-  // answer inline (no timeline dot/rail) so the layout matches the plain-text
-  // MarkdownRenderer that takes over once streaming completes.  This prevents a
-  // visible layout jump when the stream ends and the else-branch mounts.
-  const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && showAnswerStep);
+// When content is streaming but no tool-call steps have arrived yet, render the
+// answer inline (no timeline dot/rail) so the layout matches the plain-text
+// MarkdownRenderer that takes over once streaming completes.  This prevents a
+// visible layout jump when the stream ends and the else-branch mounts.
+const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && showAnswerStep);
 
-  // Reset per-step expand state when collapse state changes (new stream starts)
-  $effect(() => {
-    if (!collapsed) expandedSteps = {};
-  });
+// Reset per-step expand state when collapse state changes (new stream starts)
+$effect(() => {
+	if (!collapsed) expandedSteps = {};
+});
 
-  function handleStepRailClick(stepId: string) {
-    expandedSteps[stepId] = !expandedSteps[stepId];
-  }
+function handleStepRailClick(stepId: string) {
+	expandedSteps[stepId] = !expandedSteps[stepId];
+}
 
-  function isStepExpanded(stepId: string): boolean {
-    return !collapsed || !!expandedSteps[stepId];
-  }
+function isStepExpanded(stepId: string): boolean {
+	return !collapsed || !!expandedSteps[stepId];
+}
 
-  function toggleAllPreviousSteps() {
-    if (!collapsed || steps.length === 0) return;
+function toggleAllPreviousSteps() {
+	if (!collapsed || steps.length === 0) return;
 
-    const areAllExpanded = steps.every((step) => !!expandedSteps[step.id]);
-    if (areAllExpanded) {
-      expandedSteps = {};
-      return;
-    }
+	const areAllExpanded = steps.every((step) => !!expandedSteps[step.id]);
+	if (areAllExpanded) {
+		expandedSteps = {};
+		return;
+	}
 
-    const nextExpanded: Record<string, boolean> = {};
-    for (const step of steps) {
-      nextExpanded[step.id] = true;
-    }
-    expandedSteps = nextExpanded;
-  }
+	const nextExpanded: Record<string, boolean> = {};
+	for (const step of steps) {
+		nextExpanded[step.id] = true;
+	}
+	expandedSteps = nextExpanded;
+}
 </script>
 
 {#snippet stepRow(

@@ -38,33 +38,32 @@ let chatModels = $derived.by<Record<string, ChatModelConfig>>(() => {
 		(models ?? []).map((m: string | { key?: string }) => (typeof m === "string" ? m : m?.key)).filter(Boolean),
 	);
 
-    if (allowedKeys.size === 0) return configuredChatModels;
+	if (allowedKeys.size === 0) return configuredChatModels;
 
-    return Object.fromEntries(Object.entries(configuredChatModels).filter(([key]) => allowedKeys.has(key)));
+	return Object.fromEntries(Object.entries(configuredChatModels).filter(([key]) => allowedKeys.has(key)));
 });
 
 let configuredModels: string[] = $derived(
-    models.filter((model: string) => Object.keys(data.getChatModels(provider)).includes(model)),
+	models.filter((model: string) => Object.keys(data.getChatModels(provider)).includes(model)),
 );
 let selectedModel = $derived(!isPending && !isError && models.length > 0 ? models[0] : configuredModels[0]);
 
 let unconfiguredModels: string[] = $derived(models.filter((model: string) => !configuredModels.includes(model)));
 
 let chatModelConfig: ChatModelConfig = $state(chatModelSettings.defaults);
-const isModelConfigured: () => boolean = () =>
-    selectedModel !== undefined && configuredModels.includes(selectedModel);
+const isModelConfigured: () => boolean = () => selectedModel !== undefined && configuredModels.includes(selectedModel);
 
 function handleDeleteModel(modelName: string) {
-    data.deleteChatModel(provider, modelName);
+	data.deleteChatModel(provider, modelName);
 	invalidateProviderState(provider);
 }
 
 function handleSaveModel() {
 	if (!selectedModel) return;
 	if (isModelConfigured()) {
-        data.updateChatModel(provider, selectedModel, chatModelConfig);
+		data.updateChatModel(provider, selectedModel, chatModelConfig);
 	} else {
-        data.addChatModel(provider, selectedModel, chatModelConfig);
+		data.addChatModel(provider, selectedModel, chatModelConfig);
 	}
 	invalidateProviderState(provider);
 }

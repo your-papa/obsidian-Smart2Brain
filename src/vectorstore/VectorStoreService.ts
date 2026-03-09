@@ -80,13 +80,11 @@ export class VectorStoreService {
 	private currentProviderId: string | null = null;
 	private currentModelId: string | null = null;
 	private _hasValidatedThisSession = false;
-	private maxInputTokensCache:
-		| {
-			provider: string;
-			model: string;
-			maxInputTokens: number;
-		}
-		| null = null;
+	private maxInputTokensCache: {
+		provider: string;
+		model: string;
+		maxInputTokens: number;
+	} | null = null;
 
 	// Progress tracking
 	private _progress: IndexingProgress = {
@@ -215,10 +213,10 @@ export class VectorStoreService {
 		const ollamaData =
 			defaultModel.provider === "ollama"
 				? (() => {
-					const ollamaAuth = getData().getResolvedProviderAuth("ollama");
-					if (!ollamaAuth?.baseUrl) return null;
-					return getOllamaModelsCache(ollamaAuth.baseUrl);
-				})()
+						const ollamaAuth = getData().getResolvedProviderAuth("ollama");
+						if (!ollamaAuth?.baseUrl) return null;
+						return getOllamaModelsCache(ollamaAuth.baseUrl);
+					})()
 				: null;
 
 		const metadata = hydrateEmbeddingModel(defaultModel.provider, defaultModel.model, {
