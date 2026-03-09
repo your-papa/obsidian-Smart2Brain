@@ -101,6 +101,12 @@
   let edgeFadeAlpha = 1;
   const EDGE_FADE_RATE = 0.04; // reaches 1 in 25 ticks (~0.4s at 60fps)
 
+  // Smooth hover highlighting: per-node alpha lerps toward target on each frame.
+  // 0 = fully dimmed, 1 = fully visible. Drives node, edge, and label opacity.
+  let hoverAlphas: Map<string, number> = new Map();
+  let hoverAnimFrameId: number | null = null;
+  const HOVER_LERP_SPEED = 0.06; // per-frame blend factor (~250ms to settle)
+
   // When true, the next setupSimulation call skips disruptive effects
   // (edge fade reset, fitToView) for a seamless data swap.
   let skipNextSetupEffects = false;
@@ -326,13 +332,18 @@
         const isHighlighted =
           hoveredNode && (source.id === hoveredNode.id || target.id === hoveredNode.id);
 
+        // Use the smoother of the two endpoint alphas for edge dimming
+        const edgeHoverAlpha = hoveredNode
+          ? Math.max(hoverAlphas.get(source.id) ?? 0.85, hoverAlphas.get(target.id) ?? 0.85)
+          : 1;
+
         ctx.beginPath();
         ctx.setLineDash([]);
         ctx.moveTo(source.x, source.y);
         ctx.lineTo(target.x, target.y);
         ctx.strokeStyle = isHighlighted ? c.accent : c.textFaint;
         ctx.lineWidth = isHighlighted ? 2 / transform.scale : 1 / transform.scale;
-        ctx.globalAlpha = (!inFocus ? 0.05 : isHighlighted ? 0.9 : 0.45) * edgeFadeAlpha;
+        ctx.globalAlpha = (!inFocus ? 0.05 : isHighlighted ? 0.9 : 0.45) * edgeFadeAlpha * (isHighlighted ? 1 : edgeHoverAlpha / 0.85);
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
@@ -354,6 +365,10 @@
         const isHighlighted =
           hoveredNode && (source.id === hoveredNode.id || target.id === hoveredNode.id);
 
+        const edgeHoverAlpha = hoveredNode
+          ? Math.max(hoverAlphas.get(source.id) ?? 0.85, hoverAlphas.get(target.id) ?? 0.85)
+          : 1;
+
         ctx.beginPath();
         const dash = 4 / transform.scale;
         ctx.setLineDash([dash, dash]);
@@ -365,12 +380,45 @@
           : Math.max(0.8, link.weight * 3) / transform.scale;
         ctx.globalAlpha =
           (!inFocus ? 0.05 : isHighlighted ? 0.9 : Math.min(0.25 + link.weight * 0.35, 0.9)) *
-          edgeFadeAlpha;
+          edgeFadeAlpha * (isHighlighted ? 1 : edgeHoverAlpha / 0.85);
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
     } // end showSemanticEdges
     ctx.setLineDash([]);
+
+    // ── Smooth hover alpha interpolation ──────────────────────
+    // Compute target alpha for each node and lerp toward it.
+    // This produces a smooth dim/brighten effect on hover.
+    let hoverSettled = true;
+
+    for (const node of simNodes) {
+      let target: number;
+      if (node.highlighted || hoveredNode?.id === node.id || draggedNode?.id === node.id) {
+        target = 1;
+      } else if (focusedCluster != null && node.cluster !== focusedCluster) {
+        target = 0.1;
+      } else if (hoveredNode) {
+        const isConnected = adjacency.get(hoveredNode.id)?.has(node.id) ?? false;
+        target = isConnected ? 1 : 0.15;
+      } else {
+        target = 0.85;
+      }
+
+      const prev = hoverAlphas.get(node.id) ?? 0.85;
+      const next = prev + (target - prev) * HOVER_LERP_SPEED;
+      const final = Math.abs(next - target) < 0.01 ? target : next;
+      hoverAlphas.set(node.id, final);
+      if (final !== target) hoverSettled = false;
+    }
+
+    // Schedule another frame if alphas haven't settled yet
+    if (!hoverSettled && hoverAnimFrameId == null) {
+      hoverAnimFrameId = requestAnimationFrame(() => {
+        hoverAnimFrameId = null;
+        render();
+      });
+    }
 
     // Draw nodes
     for (const node of simNodes) {
@@ -379,6 +427,7 @@
       const radius = getNodeRadius(node);
       const isHovered = hoveredNode?.id === node.id;
       const isDragged = draggedNode?.id === node.id;
+      const alpha = hoverAlphas.get(node.id) ?? 0.85;
 
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
@@ -386,22 +435,10 @@
       // Fill
       if (node.highlighted) {
         ctx.fillStyle = c.accent;
-        ctx.globalAlpha = 1;
-      } else if (isHovered || isDragged) {
-        ctx.fillStyle = node.color ?? c.graphNode;
-        ctx.globalAlpha = 1;
-      } else if (focusedCluster != null && node.cluster !== focusedCluster) {
-        // Dim nodes outside the focused cluster
-        ctx.fillStyle = node.color ?? c.graphNode;
-        ctx.globalAlpha = 0.1;
-      } else if (hoveredNode) {
-        // Dim non-connected nodes when hovering (O(1) adjacency lookup)
-        const isConnected = adjacency.get(hoveredNode.id)?.has(node.id) ?? false;
-        ctx.fillStyle = node.color ?? c.graphNode;
-        ctx.globalAlpha = isConnected ? 1 : 0.15;
+        ctx.globalAlpha = alpha;
       } else {
         ctx.fillStyle = node.color ?? c.graphNode;
-        ctx.globalAlpha = 0.85;
+        ctx.globalAlpha = alpha;
       }
 
       ctx.fill();
@@ -437,88 +474,50 @@
       }
     }
 
-    // Show all labels when zoomed in past threshold
+    // ── Unified label rendering ──────────────────────────────
+    // One pass determines label text, style, and opacity per node.
+    // Priority: hover context → zoom labels → search highlights.
     const showAllLabels = labelZoomThreshold > 0 && transform.scale >= labelZoomThreshold;
+    const zoomLabelOpacity = showAllLabels
+      ? Math.min(1, (transform.scale - labelZoomThreshold) / labelZoomThreshold)
+      : 0;
+    const hovId = hoveredNode?.id ?? null;
+    const hoverNeighbors = hovId ? adjacency.get(hovId) : undefined;
 
-    if (showAllLabels && !hoveredNode) {
-      const fontSize = Math.max(8 / transform.scale, 5);
-      ctx.font = `${fontSize}px ${c.font}`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "bottom";
+    const fontSize = Math.max(6 / transform.scale, 3.5);
+    ctx.font = `${fontSize}px ${c.font}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
 
-      for (const node of simNodes) {
-        if (node.x == null || node.y == null) continue;
-        const radius = getNodeRadius(node);
-        const labelY = node.y - radius - 3 / transform.scale;
+    for (const node of simNodes) {
+      if (node.x == null || node.y == null) continue;
+      const radius = getNodeRadius(node);
+      const labelY = node.y - radius - 3 / transform.scale;
+      const nodeAlpha = hoverAlphas.get(node.id) ?? 0.85;
 
-        ctx.fillStyle = node.highlighted ? c.textAccent : c.textNormal;
-        ctx.globalAlpha = node.highlighted ? 1 : 0.85;
-        ctx.fillText(node.label, node.x, labelY);
+      if (hovId && node.id === hovId) {
+        // Hovered node: always show, full opacity
+        ctx.fillStyle = c.textNormal;
         ctx.globalAlpha = 1;
+        ctx.fillText(node.label, node.x, labelY);
+      } else if (hovId && hoverNeighbors?.has(node.id)) {
+        // Neighbor of hovered node
+        ctx.fillStyle = c.textMuted;
+        ctx.globalAlpha = nodeAlpha;
+        ctx.fillText(node.label, node.x, labelY);
+      } else if (showAllLabels) {
+        // Zoom labels: visible for all remaining nodes
+        ctx.fillStyle = node.highlighted ? c.textAccent : c.textNormal;
+        ctx.globalAlpha = nodeAlpha * zoomLabelOpacity;
+        ctx.fillText(node.label, node.x, labelY);
+      } else if (node.highlighted && !hovId) {
+        // Search highlights: only when not hovering and not zoomed in
+        ctx.fillStyle = c.textAccent;
+        ctx.globalAlpha = 1;
+        ctx.fillText(node.label, node.x, labelY);
       }
     }
-
-    // Draw labels for hovered node and its neighbors
-    if (hoveredNode && hoveredNode.x != null && hoveredNode.y != null) {
-      const nodesToLabel: SimNode[] = [hoveredNode as SimNode];
-
-      // Find connected nodes via adjacency map (O(1) lookup)
-      const neighborIds = adjacency.get(hoveredNode.id);
-      if (neighborIds) {
-        for (const nid of neighborIds) {
-          const sn = simNodeMap.get(nid);
-          if (sn) nodesToLabel.push(sn);
-        }
-      }
-
-      const fontSize = Math.max(10 / transform.scale, 6);
-      ctx.font = `${fontSize}px ${c.font}`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "bottom";
-
-      for (const node of nodesToLabel) {
-        if (node.x == null || node.y == null) continue;
-        const radius = getNodeRadius(node);
-        const labelY = node.y - radius - 4 / transform.scale;
-
-        // Show similarity to hovered node for neighbors
-        if (node.id !== hoveredNode.id) {
-          // O(1) edge weight lookup
-          const link = edgeLookup.get(edgeKey(hoveredNode.id, node.id));
-          const simLabel = link
-            ? link.type === "semantic"
-              ? ` (${link.weight.toFixed(2)})`
-              : " (wiki)"
-            : "";
-          ctx.fillStyle = c.textMuted;
-          ctx.fillText(`${node.label}${simLabel}`, node.x, labelY);
-        } else {
-          ctx.fillStyle = c.textNormal;
-          ctx.fillText(node.label, node.x, labelY);
-        }
-      }
-    }
-
-    // Draw labels for highlighted (search) nodes even without hover
-    if (!hoveredNode && !showAllLabels) {
-      const highlighted = simNodes.filter((n) => n.highlighted);
-
-      if (highlighted.length > 0 && highlighted.length < 50) {
-        const fontSize = Math.max(9 / transform.scale, 5);
-        ctx.font = `${fontSize}px ${c.font}`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "bottom";
-
-        for (const node of highlighted) {
-          if (node.x == null || node.y == null) continue;
-          const radius = getNodeRadius(node);
-          const labelY = node.y - radius - 3 / transform.scale;
-
-          ctx.fillStyle = c.textAccent;
-          ctx.fillText(node.label, node.x, labelY);
-        }
-      }
-    }
+    ctx.globalAlpha = 1;
 
     ctx.restore();
 
@@ -893,6 +892,8 @@
     if (dragSimNode) {
       // Drag node
       hasDragged = true;
+      hoveredNode = null;
+      hoveredEdge = null;
       const graphPos = screenToGraph(x, y);
       dragSimNode.fx = graphPos.x;
       dragSimNode.fy = graphPos.y;
@@ -1585,6 +1586,7 @@
       resizeObserver.disconnect();
       document.body.removeEventListener("css-change", handleCssChange);
       if (animFrameId != null) cancelAnimationFrame(animFrameId);
+      if (hoverAnimFrameId != null) cancelAnimationFrame(hoverAnimFrameId);
       if (simulation) {
         simulation.stop();
         simulation = null;

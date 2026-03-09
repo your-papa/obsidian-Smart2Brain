@@ -605,8 +605,8 @@
           <RangeSlider
             value={Math.round(settings.labelZoomThreshold * 10)}
             min={0}
-            max={50}
-            step={5}
+            max={20}
+            step={1}
             showValue={true}
             oncommit={handleLabelZoomChange}
           />
