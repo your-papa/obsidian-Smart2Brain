@@ -451,6 +451,7 @@ export class SkillsService {
 			lines.push("  <skill>");
 			lines.push(`    <name>${this.escapeXml(name)}</name>`);
 			lines.push(`    <description>${this.escapeXml(metadata.frontmatter.description)}</description>`);
+			lines.push(`    <location>${this.escapeXml(metadata.path)}</location>`);
 			lines.push("  </skill>");
 		}
 

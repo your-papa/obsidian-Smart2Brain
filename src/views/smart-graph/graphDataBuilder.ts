@@ -14,8 +14,21 @@ import { getAllTags } from "obsidian";
 
 import type { DocumentVector } from "../../vectorstore/types";
 import { cosineSimilarity } from "../../vectorstore/similarity";
-import { kMeansAsync, suggestKAsync, hdbscanAsync, project2DAsync, reduceDimensionsAsync } from "../../utils/computeWorkerManager";
-import { type GraphData, type GraphEdge, type GraphNode, generateClusterColors, type SmartGraphSettings, type ColorGroup } from "../../types/graph";
+import {
+	kMeansAsync,
+	suggestKAsync,
+	hdbscanAsync,
+	project2DAsync,
+	reduceDimensionsAsync,
+} from "../../utils/computeWorkerManager";
+import {
+	type GraphData,
+	type GraphEdge,
+	type GraphNode,
+	generateClusterColors,
+	type SmartGraphSettings,
+	type ColorGroup,
+} from "../../types/graph";
 
 // ============================================================================
 // Cluster Assignment
@@ -23,8 +36,8 @@ import { type GraphData, type GraphEdge, type GraphNode, generateClusterColors, 
 
 /** Per-node cluster assignment with its display colour. */
 export interface ClusterAssignment {
-    cluster: number;
-    color: string;
+	cluster: number;
+	color: string;
 }
 
 // ============================================================================
@@ -32,35 +45,35 @@ export interface ClusterAssignment {
 // ============================================================================
 
 export interface GraphFilter {
-    /** Only include files under these folder paths */
-    folders?: string[];
-    /** Only include files with these tags (any match) */
-    tags?: string[];
-    /** Search query to highlight matching nodes */
-    searchQuery?: string;
+	/** Only include files under these folder paths */
+	folders?: string[];
+	/** Only include files with these tags (any match) */
+	tags?: string[];
+	/** Search query to highlight matching nodes */
+	searchQuery?: string;
 }
 
 /**
  * Check whether a file passes the given folder/tag filters.
  */
 function passesFilter(app: App, file: TFile, filter?: GraphFilter): boolean {
-    if (!filter) return true;
+	if (!filter) return true;
 
-    // Folder filter (append "/" so "Work" doesn't match "Workshop/")
-    if (filter.folders && filter.folders.length > 0) {
-        const inFolder = filter.folders.some((f) => file.path.startsWith(f.endsWith("/") ? f : `${f}/`));
-        if (!inFolder) return false;
-    }
+	// Folder filter (append "/" so "Work" doesn't match "Workshop/")
+	if (filter.folders && filter.folders.length > 0) {
+		const inFolder = filter.folders.some((f) => file.path.startsWith(f.endsWith("/") ? f : `${f}/`));
+		if (!inFolder) return false;
+	}
 
-    // Tag filter
-    if (filter.tags && filter.tags.length > 0) {
-        const cache = app.metadataCache.getFileCache(file);
-        const fileTags = cache ? (getAllTags(cache) ?? []) : [];
-        const hasTag = filter.tags.some((t) => fileTags.includes(t));
-        if (!hasTag) return false;
-    }
+	// Tag filter
+	if (filter.tags && filter.tags.length > 0) {
+		const cache = app.metadataCache.getFileCache(file);
+		const fileTags = cache ? (getAllTags(cache) ?? []) : [];
+		const hasTag = filter.tags.some((t) => fileTags.includes(t));
+		if (!hasTag) return false;
+	}
 
-    return true;
+	return true;
 }
 
 // ============================================================================
@@ -69,14 +82,204 @@ function passesFilter(app: App, file: TFile, filter?: GraphFilter): boolean {
 
 /** Result of building the graph structure without cluster assignments. */
 export interface GraphStructureResult {
-    /** Graph data with nodes that have NO cluster/color set yet. */
-    graphData: GraphData;
-    /** The filtered documents used (needed for clustering later). */
-    filteredDocs: DocumentVector[];
-    /** Embedding vectors aligned with filteredDocs. */
-    vectors: Float32Array[];
-    /** Reduced vectors (PCA pre-clustering) — used for clustering. */
-    reducedVectors: Float32Array[];
+	/** Graph data with nodes that have NO cluster/color set yet. */
+	graphData: GraphData;
+	/** The filtered documents used (needed for clustering later). */
+	filteredDocs: DocumentVector[];
+	/** Embedding vectors aligned with filteredDocs. */
+	vectors: Float32Array[];
+	/** Reduced vectors (PCA pre-clustering) — used for clustering. */
+	reducedVectors: Float32Array[];
+}
+
+// ============================================================================
+// Helper functions (extracted to reduce cognitive complexity)
+// ============================================================================
+
+interface SimilarityCache {
+	get(a: number, b: number): number;
+}
+
+function filterDocuments(app: App, documents: DocumentVector[], filter?: GraphFilter): DocumentVector[] {
+	if (!filter?.folders?.length && !filter?.tags?.length) return documents;
+	return documents.filter((doc) => {
+		const file = app.vault.getAbstractFileByPath(doc.path);
+		if (!file || !("extension" in file)) return false;
+		return passesFilter(app, file as TFile, filter);
+	});
+}
+
+function buildSimilarityCache(vectors: Float32Array[], n: number): SimilarityCache {
+	const triSize = (n * (n - 1)) / 2;
+	const cache = new Float32Array(triSize);
+	const triIdx = (lo: number, hi: number): number => (lo * (2 * n - lo - 1)) / 2 + (hi - lo - 1);
+	for (let i = 0; i < n; i++) {
+		for (let j = i + 1; j < n; j++) {
+			cache[triIdx(i, j)] = cosineSimilarity(vectors[i], vectors[j]);
+		}
+	}
+	return {
+		get: (a: number, b: number): number => (a < b ? cache[triIdx(a, b)] : cache[triIdx(b, a)]),
+	};
+}
+
+function edgeKey(a: string, b: string): string {
+	return a < b ? `${a}\0${b}` : `${b}\0${a}`;
+}
+
+function getTopNeighbors(
+	nodeIdx: number,
+	simCache: SimilarityCache,
+	n: number,
+	threshold: number,
+	maxNeighbors: number,
+	startIdx = 0,
+	endIdx = n,
+): { index: number; score: number }[] {
+	const similarities: { index: number; score: number }[] = [];
+	for (let j = startIdx; j < endIdx; j++) {
+		if (j === nodeIdx) continue;
+		const score = simCache.get(nodeIdx, j);
+		if (score >= threshold) {
+			similarities.push({ index: j, score });
+		}
+	}
+	similarities.sort((a, b) => b.score - a.score);
+	return similarities.slice(0, maxNeighbors);
+}
+
+function buildSemanticEdges(
+	filtered: DocumentVector[],
+	simCache: SimilarityCache,
+	n: number,
+	settings: Pick<SmartGraphSettings, "semanticNeighbors" | "similarityThreshold">,
+): GraphEdge[] {
+	const edges: GraphEdge[] = [];
+	const neighborCount = Math.min(settings.semanticNeighbors, n - 1);
+	const edgeSet = new Set<string>();
+
+	// Forward pass
+	for (let i = 0; i < n; i++) {
+		for (const neighbor of getTopNeighbors(i, simCache, n, settings.similarityThreshold, neighborCount)) {
+			if (i >= neighbor.index) continue;
+			const key = edgeKey(filtered[i].path, filtered[neighbor.index].path);
+			edgeSet.add(key);
+			edges.push({
+				source: filtered[i].path,
+				target: filtered[neighbor.index].path,
+				weight: neighbor.score,
+				type: "semantic",
+			});
+		}
+	}
+
+	// Reverse pass
+	for (let j = 0; j < n; j++) {
+		for (const neighbor of getTopNeighbors(j, simCache, n, settings.similarityThreshold, neighborCount, 0, j)) {
+			const key = edgeKey(filtered[neighbor.index].path, filtered[j].path);
+			if (edgeSet.has(key)) continue;
+			edgeSet.add(key);
+			edges.push({
+				source: filtered[neighbor.index].path,
+				target: filtered[j].path,
+				weight: neighbor.score,
+				type: "semantic",
+			});
+		}
+	}
+
+	return edges;
+}
+
+function mergeWikiEdge(edges: GraphEdge[], existingEdgeSet: Set<string>, wikiEdge: GraphEdge, ek: string): void {
+	if (existingEdgeSet.has(ek)) {
+		const idx = edges.findIndex((e) => edgeKey(e.source, e.target) === ek);
+		if (idx !== -1) edges[idx] = wikiEdge;
+	} else {
+		edges.push(wikiEdge);
+	}
+}
+
+function overlayWikiEdges(app: App, edges: GraphEdge[], filteredPathSet: Set<string>): void {
+	const resolvedLinks = app.metadataCache.resolvedLinks;
+	const wikiEdgeSet = new Set<string>();
+	const existingEdgeSet = new Set<string>();
+	for (const e of edges) {
+		existingEdgeSet.add(edgeKey(e.source, e.target));
+	}
+
+	for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
+		if (!filteredPathSet.has(sourcePath)) continue;
+		for (const [targetPath, count] of Object.entries(targets)) {
+			if (!filteredPathSet.has(targetPath) || sourcePath === targetPath) continue;
+			const ek = edgeKey(sourcePath, targetPath);
+			if (wikiEdgeSet.has(ek)) continue;
+			wikiEdgeSet.add(ek);
+			mergeWikiEdge(
+				edges,
+				existingEdgeSet,
+				{ source: sourcePath, target: targetPath, weight: count, type: "wiki" },
+				ek,
+			);
+		}
+	}
+}
+
+function computeDegreeAndDiscovery(
+	edges: GraphEdge[],
+	settings: Pick<SmartGraphSettings, "showWikiLinks" | "showSemanticEdges">,
+): { degreeMap: Map<string, number>; hasSemanticEdge: Set<string>; hasWikiEdge: Set<string> } {
+	const degreeMap = new Map<string, number>();
+	const hasSemanticEdge = new Set<string>();
+	const hasWikiEdge = new Set<string>();
+
+	for (const edge of edges) {
+		const isVisibleWiki = edge.type === "wiki" && settings.showWikiLinks;
+		const isVisibleSemantic = edge.type === "semantic" && settings.showSemanticEdges;
+
+		if (isVisibleWiki || isVisibleSemantic) {
+			degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
+			degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
+		}
+
+		if (isVisibleSemantic) {
+			hasSemanticEdge.add(edge.source);
+			hasSemanticEdge.add(edge.target);
+		} else if (isVisibleWiki) {
+			hasWikiEdge.add(edge.source);
+			hasWikiEdge.add(edge.target);
+		}
+	}
+
+	return { degreeMap, hasSemanticEdge, hasWikiEdge };
+}
+
+function createGraphNodes(
+	filtered: DocumentVector[],
+	positions: { x: number; y: number }[],
+	degreeMap: Map<string, number>,
+	hasSemanticEdge: Set<string>,
+	hasWikiEdge: Set<string>,
+	settings: Pick<SmartGraphSettings, "showOrphans">,
+): GraphNode[] {
+	const nodes: GraphNode[] = [];
+	for (let i = 0; i < filtered.length; i++) {
+		const doc = filtered[i];
+		const degree = degreeMap.get(doc.path) ?? 0;
+		if (!settings.showOrphans && degree === 0) continue;
+		const label = doc.path.replace(/\.md$/, "").split("/").pop() ?? doc.path;
+		nodes.push({
+			id: doc.path,
+			path: doc.path,
+			label,
+			x: positions[i].x,
+			y: positions[i].y,
+			degree,
+			highlighted: false,
+			discoverable: hasSemanticEdge.has(doc.path) && !hasWikiEdge.has(doc.path),
+		});
+	}
+	return nodes;
 }
 
 /**
@@ -85,205 +288,60 @@ export interface GraphStructureResult {
  * to add cluster assignments separately.
  */
 export async function buildGraphStructure(
-    app: App,
-    documents: DocumentVector[],
-    settings: Pick<
-        SmartGraphSettings,
-        "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod" | "showWikiLinks" | "showSemanticEdges"
-    >,
-    filter?: GraphFilter,
+	app: App,
+	documents: DocumentVector[],
+	settings: Pick<
+		SmartGraphSettings,
+		| "semanticNeighbors"
+		| "similarityThreshold"
+		| "showOrphans"
+		| "projectionMethod"
+		| "showWikiLinks"
+		| "showSemanticEdges"
+	>,
+	filter?: GraphFilter,
 ): Promise<GraphStructureResult> {
-    // Filter documents by folder/tag if specified
-    let filtered = documents;
-    if (filter?.folders?.length || filter?.tags?.length) {
-        filtered = documents.filter((doc) => {
-            const file = app.vault.getAbstractFileByPath(doc.path);
-            if (!file || !("extension" in file)) return false;
-            return passesFilter(app, file as TFile, filter);
-        });
-    }
+	// Filter documents by folder/tag if specified
+	const filtered = filterDocuments(app, documents, filter);
 
-    if (filtered.length === 0) {
-        return { graphData: { nodes: [], edges: [] }, filteredDocs: [], vectors: [], reducedVectors: [] };
-    }
+	if (filtered.length === 0) {
+		return { graphData: { nodes: [], edges: [] }, filteredDocs: [], vectors: [], reducedVectors: [] };
+	}
 
-    // Extract vectors
-    const vectors = filtered.map((doc) => doc.vector);
-    const n = filtered.length;
+	// Extract vectors
+	const vectors = filtered.map((doc) => doc.vector);
+	const n = filtered.length;
 
-    // Packed upper-triangle similarity cache — n*(n-1)/2 entries instead of n².
-    // triIdx(lo, hi) maps a canonical pair (lo < hi) to a flat index.
-    const triSize = (n * (n - 1)) / 2;
-    const simCache = new Float32Array(triSize);
-    const triIdx = (lo: number, hi: number): number => lo * (2 * n - lo - 1) / 2 + (hi - lo - 1);
-    const simGet = (a: number, b: number): number => a < b ? simCache[triIdx(a, b)] : simCache[triIdx(b, a)];
-    for (let i = 0; i < n; i++) {
-        for (let j = i + 1; j < n; j++) {
-            simCache[triIdx(i, j)] = cosineSimilarity(vectors[i], vectors[j]);
-        }
-    }
+	// Build similarity cache and edge list
+	const simCache = buildSimilarityCache(vectors, n);
+	const edges = buildSemanticEdges(filtered, simCache, n, settings);
 
-    // Build semantic nearest-neighbor edges
-    const edges: GraphEdge[] = [];
-    const neighborCount = Math.min(settings.semanticNeighbors, n - 1);
-    const filteredPathSet = new Set(filtered.map((d) => d.path));
+	// Overlay wiki link edges
+	const filteredPathSet = new Set(filtered.map((d) => d.path));
+	overlayWikiEdges(app, edges, filteredPathSet);
 
-    for (let i = 0; i < n; i++) {
-        const similarities: { index: number; score: number }[] = [];
-        for (let j = 0; j < n; j++) {
-            if (i === j) continue;
-            const score = simGet(i, j);
-            if (score >= settings.similarityThreshold) {
-                similarities.push({ index: j, score });
-            }
-        }
+	// Compute degree and discovery info
+	const { degreeMap, hasSemanticEdge, hasWikiEdge } = computeDegreeAndDiscovery(edges, settings);
 
-        similarities.sort((a, b) => b.score - a.score);
-        const topN = similarities.slice(0, neighborCount);
+	// Reduce dimensionality for clustering and projection performance.
+	const reducedVectors = await reduceDimensionsAsync(vectors, settings.projectionMethod);
 
-        for (const neighbor of topN) {
-            if (i < neighbor.index) {
-                edges.push({
-                    source: filtered[i].path,
-                    target: filtered[neighbor.index].path,
-                    weight: neighbor.score,
-                    type: "semantic",
-                });
-            }
-        }
-    }
+	// Project reduced vectors into 2D
+	const positions = await project2DAsync(reducedVectors, settings.projectionMethod);
 
-    // Build a set of existing edge pairs for O(1) dedup lookups
-    const edgeSet = new Set<string>();
-    for (const e of edges) {
-        const key = e.source < e.target ? `${e.source}\0${e.target}` : `${e.target}\0${e.source}`;
-        edgeSet.add(key);
-    }
+	// Create nodes
+	const nodes = createGraphNodes(filtered, positions, degreeMap, hasSemanticEdge, hasWikiEdge, settings);
 
-    // Reverse direction edges (use cached similarities)
-    for (let j = 0; j < n; j++) {
-        const similarities: { index: number; score: number }[] = [];
-        for (let i = 0; i < j; i++) {
-            const score = simGet(j, i);
-            if (score >= settings.similarityThreshold) {
-                similarities.push({ index: i, score });
-            }
-        }
-        similarities.sort((a, b) => b.score - a.score);
-        const topN = similarities.slice(0, neighborCount);
+	// Filter edges to only include edges with valid nodes
+	const nodeIds = new Set(nodes.map((n) => n.id));
+	const filteredEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
 
-        for (const neighbor of topN) {
-            const a = filtered[neighbor.index].path;
-            const b = filtered[j].path;
-            const key = a < b ? `${a}\0${b}` : `${b}\0${a}`;
-            if (!edgeSet.has(key)) {
-                edgeSet.add(key);
-                edges.push({
-                    source: a,
-                    target: b,
-                    weight: neighbor.score,
-                    type: "semantic",
-                });
-            }
-        }
-    }
-
-    // Overlay wiki link edges from Obsidian's resolved links
-    {
-        const resolvedLinks = app.metadataCache.resolvedLinks;
-        const wikiEdgeSet = new Set<string>();
-
-        for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
-            if (!filteredPathSet.has(sourcePath)) continue;
-
-            for (const [targetPath, count] of Object.entries(targets)) {
-                if (!filteredPathSet.has(targetPath)) continue;
-                if (sourcePath === targetPath) continue;
-
-                const ek = sourcePath < targetPath ? `${sourcePath}\0${targetPath}` : `${targetPath}\0${sourcePath}`;
-                if (!wikiEdgeSet.has(ek)) {
-                    wikiEdgeSet.add(ek);
-                    const wikiEdge: GraphEdge = { source: sourcePath, target: targetPath, weight: count, type: "wiki" };
-                    if (edgeSet.has(ek)) {
-                        // Wiki link trumps semantic edge — replace it
-                        const idx = edges.findIndex((e) => {
-                            const key = e.source < e.target ? `${e.source}\0${e.target}` : `${e.target}\0${e.source}`;
-                            return key === ek;
-                        });
-                        if (idx !== -1) edges[idx] = wikiEdge;
-                    } else {
-                        edges.push(wikiEdge);
-                    }
-                }
-            }
-        }
-    }
-
-    // Create degree map counting only wiki edges so node sizes stay
-    // consistent between wiki and smart modes (semantic edges are dense
-    // and would inflate degree/radius disproportionately).
-    const degreeMap = new Map<string, number>();
-    for (const edge of edges) {
-        if (edge.type !== "wiki") continue;
-        degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
-        degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
-    }
-
-    // Discovery mode: identify nodes with semantic edges but zero wiki edges
-    // Only count visible edge types so stats match what the user sees
-    const hasSemanticEdge = new Set<string>();
-    const hasWikiEdge = new Set<string>();
-    for (const edge of edges) {
-        if (edge.type === "semantic" && settings.showSemanticEdges) {
-            hasSemanticEdge.add(edge.source);
-            hasSemanticEdge.add(edge.target);
-        } else if (edge.type === "wiki" && settings.showWikiLinks) {
-            hasWikiEdge.add(edge.source);
-            hasWikiEdge.add(edge.target);
-        }
-    }
-
-    // Reduce dimensionality for clustering and projection performance.
-    // An intermediate space (e.g. 50 dims) preserves enough structure for
-    // meaningful clusters while being much cheaper than the original space.
-    // Uses the same algorithm as the final 2D projection for consistency.
-    const reducedVectors = await reduceDimensionsAsync(vectors, settings.projectionMethod);
-
-    // Project reduced vectors into 2D so positions reflect semantic similarity
-    const positions = await project2DAsync(reducedVectors, settings.projectionMethod);
-
-    // Create nodes — cluster/color intentionally omitted (applied later)
-    const nodes: GraphNode[] = [];
-    for (let i = 0; i < filtered.length; i++) {
-        const doc = filtered[i];
-        const degree = degreeMap.get(doc.path) ?? 0;
-
-        if (!settings.showOrphans && degree === 0) continue;
-
-        const label = doc.path.replace(/\.md$/, "").split("/").pop() ?? doc.path;
-
-        nodes.push({
-            id: doc.path,
-            path: doc.path,
-            label,
-            x: positions[i].x,
-            y: positions[i].y,
-            degree,
-            highlighted: false,
-            discoverable: hasSemanticEdge.has(doc.path) && !hasWikiEdge.has(doc.path),
-        });
-    }
-
-    // Filter edges to only include edges with valid nodes
-    const nodeIds = new Set(nodes.map((n) => n.id));
-    const filteredEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
-
-    return {
-        graphData: { nodes, edges: filteredEdges },
-        filteredDocs: filtered,
-        vectors,
-        reducedVectors,
-    };
+	return {
+		graphData: { nodes, edges: filteredEdges },
+		filteredDocs: filtered,
+		vectors,
+		reducedVectors,
+	};
 }
 
 // ============================================================================
@@ -292,10 +350,10 @@ export async function buildGraphStructure(
 
 /** Result of computing cluster assignments. */
 export interface ClusterResult {
-    /** Map from document path → cluster assignment (index + colour). */
-    clusterMap: Map<string, ClusterAssignment>;
-    /** The actual K used (useful when autoK is enabled). */
-    k: number;
+	/** Map from document path → cluster assignment (index + colour). */
+	clusterMap: Map<string, ClusterAssignment>;
+	/** The actual K used (useful when autoK is enabled). */
+	k: number;
 }
 
 /**
@@ -308,52 +366,50 @@ export interface ClusterResult {
  *          plus the K that was used.
  */
 export async function computeClusters(
-    filteredDocs: DocumentVector[],
-    vectors: Float32Array[],
-    settings: Pick<SmartGraphSettings, "defaultK" | "autoK" | "clusteringAlgorithm" | "minClusterSize">,
-    themeColors?: string[],
-    _graphData?: GraphData,
-    reducedVectors?: Float32Array[],
+	filteredDocs: DocumentVector[],
+	vectors: Float32Array[],
+	settings: Pick<SmartGraphSettings, "defaultK" | "autoK" | "clusteringAlgorithm" | "minClusterSize">,
+	themeColors?: string[],
+	_graphData?: GraphData,
+	reducedVectors?: Float32Array[],
 ): Promise<ClusterResult> {
-    if (filteredDocs.length === 0 || vectors.length === 0) {
-        return { clusterMap: new Map(), k: 0 };
-    }
+	if (filteredDocs.length === 0 || vectors.length === 0) {
+		return { clusterMap: new Map(), k: 0 };
+	}
 
-    // Prefer reduced vectors for clustering — they retain enough structure
-    // for meaningful clusters while avoiding the curse of dimensionality.
-    const clusterVectors = reducedVectors?.length === vectors.length
-        ? reducedVectors
-        : vectors;
+	// Prefer reduced vectors for clustering — they retain enough structure
+	// for meaningful clusters while avoiding the curse of dimensionality.
+	const clusterVectors = reducedVectors?.length === vectors.length ? reducedVectors : vectors;
 
-    let k: number;
-    let clusterLabels: number[];
+	let k: number;
+	let clusterLabels: number[];
 
-    if (settings.clusteringAlgorithm === "hdbscan") {
-        const result = await hdbscanAsync(clusterVectors, settings.minClusterSize, undefined, "euclidean");
-        k = result.numClusters;
-        clusterLabels = result.labels;
-    } else if (settings.autoK) {
-        const suggested = await suggestKAsync(clusterVectors, 2, Math.min(10, Math.floor(clusterVectors.length / 2)));
-        k = suggested.k;
-        clusterLabels = suggested.result.labels;
-    } else {
-        k = Math.min(settings.defaultK, clusterVectors.length - 1);
-        const clusterResult = await kMeansAsync(clusterVectors, Math.max(1, k));
-        clusterLabels = clusterResult.labels;
-    }
+	if (settings.clusteringAlgorithm === "hdbscan") {
+		const result = await hdbscanAsync(clusterVectors, settings.minClusterSize, undefined, "euclidean");
+		k = result.numClusters;
+		clusterLabels = result.labels;
+	} else if (settings.autoK) {
+		const suggested = await suggestKAsync(clusterVectors, 2, Math.min(10, Math.floor(clusterVectors.length / 2)));
+		k = suggested.k;
+		clusterLabels = suggested.result.labels;
+	} else {
+		k = Math.min(settings.defaultK, clusterVectors.length - 1);
+		const clusterResult = await kMeansAsync(clusterVectors, Math.max(1, k));
+		clusterLabels = clusterResult.labels;
+	}
 
-    const clusterColors = generateClusterColors(Math.max(1, k), themeColors);
+	const clusterColors = generateClusterColors(Math.max(1, k), themeColors);
 
-    const clusterMap = new Map<string, ClusterAssignment>();
-    for (let i = 0; i < filteredDocs.length; i++) {
-        const cluster = clusterLabels[i];
-        clusterMap.set(filteredDocs[i].path, {
-            cluster,
-            color: clusterColors[cluster % clusterColors.length],
-        });
-    }
+	const clusterMap = new Map<string, ClusterAssignment>();
+	for (let i = 0; i < filteredDocs.length; i++) {
+		const cluster = clusterLabels[i];
+		clusterMap.set(filteredDocs[i].path, {
+			cluster,
+			color: clusterColors[cluster % clusterColors.length],
+		});
+	}
 
-    return { clusterMap, k };
+	return { clusterMap, k };
 }
 
 /**
@@ -362,20 +418,20 @@ export async function computeClusters(
  * Nodes without a mapping keep cluster undefined and receive a neutral fallback color.
  */
 export function applyClusterMap(
-    graphData: GraphData,
-    clusterMap: Map<string, ClusterAssignment>,
-    fallbackColor = "hsl(0, 0%, 50%)",
+	graphData: GraphData,
+	clusterMap: Map<string, ClusterAssignment>,
+	fallbackColor = "hsl(0, 0%, 50%)",
 ): GraphData {
-    return {
-        ...graphData,
-        nodes: graphData.nodes.map((node) => {
-            const assignment = clusterMap.get(node.id);
-            if (assignment) {
-                return { ...node, cluster: assignment.cluster, color: assignment.color };
-            }
-            return { ...node, cluster: undefined, color: fallbackColor };
-        }),
-    };
+	return {
+		...graphData,
+		nodes: graphData.nodes.map((node) => {
+			const assignment = clusterMap.get(node.id);
+			if (assignment) {
+				return { ...node, cluster: assignment.cluster, color: assignment.color };
+			}
+			return { ...node, cluster: undefined, color: fallbackColor };
+		}),
+	};
 }
 
 // ============================================================================
@@ -384,9 +440,8 @@ export function applyClusterMap(
 
 /** Result of building a wiki-link-only graph (no semantic edges / projection). */
 export interface WikiGraphResult {
-    graphData: GraphData;
-    filteredDocs: DocumentVector[];
-    vectors: Float32Array[];
+	graphData: GraphData;
+	filteredPaths: string[];
 }
 
 /**
@@ -395,73 +450,68 @@ export interface WikiGraphResult {
  * are positioned by d3-force.
  */
 export function buildWikiGraph(
-    app: App,
-    documents: DocumentVector[],
-    settings: Pick<SmartGraphSettings, "showOrphans">,
-    filter?: GraphFilter,
+	app: App,
+	settings: Pick<SmartGraphSettings, "showOrphans">,
+	filter?: GraphFilter,
 ): WikiGraphResult {
-    let filtered = documents;
-    if (filter?.folders?.length || filter?.tags?.length) {
-        filtered = documents.filter((doc) => {
-            const file = app.vault.getAbstractFileByPath(doc.path);
-            if (!file || !("extension" in file)) return false;
-            return passesFilter(app, file as TFile, filter);
-        });
-    }
+	let filteredFiles = app.vault.getMarkdownFiles();
+	if (filter?.folders?.length || filter?.tags?.length) {
+		filteredFiles = filteredFiles.filter((file) => passesFilter(app, file, filter));
+	}
 
-    if (filtered.length === 0) {
-        return { graphData: { nodes: [], edges: [] }, filteredDocs: [], vectors: [] };
-    }
+	if (filteredFiles.length === 0) {
+		return { graphData: { nodes: [], edges: [] }, filteredPaths: [] };
+	}
 
-    const vectors = filtered.map((doc) => doc.vector);
-    const filteredPathSet = new Set(filtered.map((d) => d.path));
+	const filteredPaths = filteredFiles.map((file) => file.path);
+	const filteredPathSet = new Set(filteredPaths);
 
-    // Build wiki edges from Obsidian's resolved links
-    const edges: GraphEdge[] = [];
-    const resolvedLinks = app.metadataCache.resolvedLinks;
-    const wikiEdgeSet = new Set<string>();
+	// Build wiki edges from Obsidian's resolved links
+	const edges: GraphEdge[] = [];
+	const resolvedLinks = app.metadataCache.resolvedLinks;
+	const wikiEdgeSet = new Set<string>();
 
-    for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
-        if (!filteredPathSet.has(sourcePath)) continue;
-        for (const [targetPath, count] of Object.entries(targets)) {
-            if (!filteredPathSet.has(targetPath)) continue;
-            if (sourcePath === targetPath) continue;
-            const ek = sourcePath < targetPath ? `${sourcePath}\0${targetPath}` : `${targetPath}\0${sourcePath}`;
-            if (!wikiEdgeSet.has(ek)) {
-                wikiEdgeSet.add(ek);
-                edges.push({ source: sourcePath, target: targetPath, weight: count, type: "wiki" });
-            }
-        }
-    }
+	for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
+		if (!filteredPathSet.has(sourcePath)) continue;
+		for (const [targetPath, count] of Object.entries(targets)) {
+			if (!filteredPathSet.has(targetPath)) continue;
+			if (sourcePath === targetPath) continue;
+			const ek = sourcePath < targetPath ? `${sourcePath}\0${targetPath}` : `${targetPath}\0${sourcePath}`;
+			if (!wikiEdgeSet.has(ek)) {
+				wikiEdgeSet.add(ek);
+				edges.push({ source: sourcePath, target: targetPath, weight: count, type: "wiki" });
+			}
+		}
+	}
 
-    // Degree map
-    const degreeMap = new Map<string, number>();
-    for (const edge of edges) {
-        degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
-        degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
-    }
+	// Degree map
+	const degreeMap = new Map<string, number>();
+	for (const edge of edges) {
+		degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
+		degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
+	}
 
-    // Create nodes with no position (d3-force will place them)
-    const nodes: GraphNode[] = [];
-    for (const doc of filtered) {
-        const degree = degreeMap.get(doc.path) ?? 0;
-        if (!settings.showOrphans && degree === 0) continue;
-        const label = doc.path.replace(/\.md$/, "").split("/").pop() ?? doc.path;
-        nodes.push({
-            id: doc.path,
-            path: doc.path,
-            label,
-            x: 0,
-            y: 0,
-            degree,
-            highlighted: false,
-        });
-    }
+	// Create nodes with no position (d3-force will place them)
+	const nodes: GraphNode[] = [];
+	for (const file of filteredFiles) {
+		const degree = degreeMap.get(file.path) ?? 0;
+		if (!settings.showOrphans && degree === 0) continue;
+		const label = file.path.replace(/\.md$/, "").split("/").pop() ?? file.path;
+		nodes.push({
+			id: file.path,
+			path: file.path,
+			label,
+			x: 0,
+			y: 0,
+			degree,
+			highlighted: false,
+		});
+	}
 
-    const nodeIds = new Set(nodes.map((n) => n.id));
-    const filteredEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
+	const nodeIds = new Set(nodes.map((n) => n.id));
+	const filteredEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
 
-    return { graphData: { nodes, edges: filteredEdges }, filteredDocs: filtered, vectors };
+	return { graphData: { nodes, edges: filteredEdges }, filteredPaths };
 }
 
 // ============================================================================
@@ -474,41 +524,37 @@ export function buildWikiGraph(
  * - All other queries match as a path prefix (folder).
  */
 function matchesColorGroup(app: App, path: string, group: ColorGroup): boolean {
-    const q = group.query.trim();
-    if (!q) return false;
-    if (q.startsWith("#")) {
-        const file = app.vault.getAbstractFileByPath(path);
-        if (!file || !("extension" in file)) return false;
-        const cache = app.metadataCache.getFileCache(file as TFile);
-        const tags = cache ? (getAllTags(cache) ?? []) : [];
-        return tags.includes(q);
-    }
-    // Folder / path prefix
-    const prefix = q.endsWith("/") ? q : `${q}/`;
-    return path.startsWith(prefix);
+	const q = group.query.trim();
+	if (!q) return false;
+	if (q.startsWith("#")) {
+		const file = app.vault.getAbstractFileByPath(path);
+		if (!file || !("extension" in file)) return false;
+		const cache = app.metadataCache.getFileCache(file as TFile);
+		const tags = cache ? (getAllTags(cache) ?? []) : [];
+		return tags.includes(q);
+	}
+	// Folder / path prefix
+	const prefix = q.endsWith("/") ? q : `${q}/`;
+	return path.startsWith(prefix);
 }
 
 /**
  * Apply user-defined color groups to graph nodes.
  * First matching group wins; unmatched nodes keep their existing color.
  */
-export function applyColorGroups(
-    app: App,
-    graphData: GraphData,
-    colorGroups: ColorGroup[],
-): GraphData {
-    if (colorGroups.length === 0) return graphData;
-    return {
-        ...graphData,
-        nodes: graphData.nodes.map((node) => {
-            for (const group of colorGroups) {
-                if (matchesColorGroup(app, node.path, group)) {
-                    return { ...node, color: group.color };
-                }
-            }
-            return node;
-        }),
-    };
+export function applyColorGroups(app: App, graphData: GraphData, colorGroups: ColorGroup[]): GraphData {
+	if (colorGroups.length === 0) return graphData;
+	return {
+		...graphData,
+		nodes: graphData.nodes.map((node) => {
+			for (const group of colorGroups) {
+				if (matchesColorGroup(app, node.path, group)) {
+					return { ...node, color: group.color };
+				}
+			}
+			return node;
+		}),
+	};
 }
 
 // ============================================================================
@@ -521,18 +567,39 @@ export function applyColorGroups(
  * then {@link applyClusterMap}.
  */
 export async function buildGraph(
-    app: App,
-    documents: DocumentVector[],
-    settings: Pick<
-        SmartGraphSettings,
-        "defaultK" | "autoK" | "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod" | "showWikiLinks" | "showSemanticEdges" | "clusteringAlgorithm" | "minClusterSize"
-    >,
-    filter?: GraphFilter,
-    themeColors?: string[],
+	app: App,
+	documents: DocumentVector[],
+	settings: Pick<
+		SmartGraphSettings,
+		| "defaultK"
+		| "autoK"
+		| "semanticNeighbors"
+		| "similarityThreshold"
+		| "showOrphans"
+		| "projectionMethod"
+		| "showWikiLinks"
+		| "showSemanticEdges"
+		| "clusteringAlgorithm"
+		| "minClusterSize"
+	>,
+	filter?: GraphFilter,
+	themeColors?: string[],
 ): Promise<GraphData> {
-    const { graphData, filteredDocs, vectors, reducedVectors } = await buildGraphStructure(app, documents, settings, filter);
-    const { clusterMap } = await computeClusters(filteredDocs, vectors, settings, themeColors, graphData, reducedVectors);
-    return applyClusterMap(graphData, clusterMap);
+	const { graphData, filteredDocs, vectors, reducedVectors } = await buildGraphStructure(
+		app,
+		documents,
+		settings,
+		filter,
+	);
+	const { clusterMap } = await computeClusters(
+		filteredDocs,
+		vectors,
+		settings,
+		themeColors,
+		graphData,
+		reducedVectors,
+	);
+	return applyClusterMap(graphData, clusterMap);
 }
 
 /**
@@ -540,19 +607,19 @@ export async function buildGraph(
  * Nodes whose label matches the query get `highlighted = true`.
  */
 export function applySearchHighlight(data: GraphData, query: string): GraphData {
-    if (!query.trim()) {
-        return {
-            ...data,
-            nodes: data.nodes.map((n) => ({ ...n, highlighted: false })),
-        };
-    }
+	if (!query.trim()) {
+		return {
+			...data,
+			nodes: data.nodes.map((n) => ({ ...n, highlighted: false })),
+		};
+	}
 
-    const lower = query.toLowerCase();
-    return {
-        ...data,
-        nodes: data.nodes.map((n) => ({
-            ...n,
-            highlighted: n.label.toLowerCase().includes(lower) || n.path.toLowerCase().includes(lower),
-        })),
-    };
+	const lower = query.toLowerCase();
+	return {
+		...data,
+		nodes: data.nodes.map((n) => ({
+			...n,
+			highlighted: n.label.toLowerCase().includes(lower) || n.path.toLowerCase().includes(lower),
+		})),
+	};
 }

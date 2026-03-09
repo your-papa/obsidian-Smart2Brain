@@ -76,7 +76,14 @@ export type MCPServersConfig = Record<string, MCPServerConfig>;
 /**
  * Available built-in tool identifiers
  */
-export type BuiltInToolId = "search_notes" | "read_content" | "get_all_tags" | "get_properties" | "execute_dataview_query";
+export type BuiltInToolId =
+	| "search_notes"
+	| "read_content"
+	| "get_all_tags"
+	| "get_properties"
+	| "execute_javascript"
+	| "execute_dataview_query"
+	| "manage_notes";
 
 /**
  * Tool-specific settings for search_notes tool
@@ -103,12 +110,27 @@ export interface DataviewQuerySettings {
 }
 
 /**
+ * Tool-specific settings for manage_notes tool
+ */
+export interface ManageNotesSettings {
+	/** Whether note creation operations are allowed */
+	allowCreate: boolean;
+	/** Whether note update operations are allowed */
+	allowUpdate: boolean;
+	/** Whether note deletion operations are allowed */
+	allowDelete: boolean;
+	/** Whether note move operations are allowed */
+	allowMove: boolean;
+}
+
+/**
  * Union type of all tool-specific settings
  */
 export type ToolSpecificSettings =
 	| SearchNotesSettings
 	| ReadNoteSettings
 	| DataviewQuerySettings
+	| ManageNotesSettings
 	| Record<string, never>;
 
 /**
@@ -121,6 +143,8 @@ export interface ToolConfig {
 	name: string;
 	/** Custom description for the tool (shown to the AI agent) */
 	description: string;
+	/** Optional prompt-only guidance injected into the assembled system prompt when this tool is enabled */
+	promptGuidance?: string;
 	/** Tool-specific settings */
 	settings?: ToolSpecificSettings;
 }
@@ -282,6 +306,8 @@ export type AgentColor = "red" | "orange" | "yellow" | "green" | "cyan" | "blue"
  */
 export type AgentsConfig = Record<string, AgentConfig>;
 
+export type DiffViewMode = "word-diff" | "two-pane";
+
 export interface PluginData {
 	/** All provider states - built-in (pre-populated) + custom (user-created) */
 	providerConfig: Record<string, StoredProviderState>;
@@ -368,6 +394,13 @@ export interface PluginData {
 	 * Settings for the Smart Graph View.
 	 */
 	smartGraphSettings: SmartGraphSettings;
+
+	/**
+	 * Diff visualization mode in reading view.
+	 * - "two-pane": Stacked original/new with rendered markdown (default)
+	 * - "word-diff": Inline word-level diff (plain text)
+	 */
+	diffViewMode: DiffViewMode;
 }
 
 export type PluginDataKey = keyof PluginData;

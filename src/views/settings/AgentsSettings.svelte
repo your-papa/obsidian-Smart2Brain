@@ -20,13 +20,7 @@ import Toggle from "../../components/ui/Toggle.svelte";
 import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
-import type {
-	AgentColor,
-	AgentConfig,
-	BuiltInToolId,
-	MCPServerConfig,
-	SkillDisplayInfo,
-} from "../../types/plugin";
+import type { AgentColor, AgentConfig, BuiltInToolId, MCPServerConfig, SkillDisplayInfo } from "../../types/plugin";
 import { getProviderDefinition } from "../../providers/index";
 import type { ChatModel } from "../../stores/chatStore.svelte";
 import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
@@ -36,6 +30,11 @@ import { Logger } from "../../utils/logging";
 const pluginData = getData();
 const plugin = getPlugin();
 const models = useAvailableModels();
+
+const diffViewModeOptions = [
+	{ display: "Two Pane (rendered markdown)", value: "two-pane" as const },
+	{ display: "Word Diff (inline text)", value: "word-diff" as const },
+];
 
 // Helper to get all folders for folder suggestion
 function suggestFolders(): TFolder[] {
@@ -213,14 +212,34 @@ function getProviderId(value: string): string {
 
 function openSystemPromptModal() {
 	if (!selectedAgent) return;
-	// Create a custom modal that edits the agent's system prompt
 	const modal = new SystemPromptModal(plugin, {
 		getPrompt: () => selectedAgent?.systemPrompt ?? "",
 		setPrompt: (prompt: string) => {
 			pluginData.updateAgent(selectedAgentId, { systemPrompt: prompt });
 			applyChanges();
 		},
+		viewFinalPrompt: () => {
+			modal.close();
+			openRenderedSystemPromptModal();
+		},
 	});
+	modal.open();
+}
+
+function openRenderedSystemPromptModal() {
+	if (!selectedAgent) return;
+	const modal = new SystemPromptModal(
+		plugin,
+		{
+			getPrompt: async () => plugin.agentManager.assembleSystemPrompt(),
+		},
+		{
+			title: "Final System Prompt",
+			description:
+				"Preview the fully assembled system prompt after dynamic tool guidance and skills are injected.",
+			readOnly: true,
+		},
+	);
 	modal.open();
 }
 
@@ -432,6 +451,12 @@ const TOOLS: ToolInfo[] = [
 		defaultDescription: "Retrieve frontmatter properties from notes or list all property keys in the vault.",
 	},
 	{
+		id: "execute_javascript",
+		defaultName: "Execute JavaScript",
+		defaultDescription:
+			"Run isolated JavaScript for calculations and data transformation. Use return for the final value and console.log for intermediate output.",
+	},
+	{
 		id: "execute_dataview_query",
 		defaultName: "Execute Dataview Query",
 		defaultDescription: "Execute Obsidian Dataview queries (DQL) and return results.",
@@ -439,6 +464,12 @@ const TOOLS: ToolInfo[] = [
 			id: "dataview",
 			name: "Dataview",
 		},
+	},
+	{
+		id: "manage_notes",
+		defaultName: "Manage Notes",
+		defaultDescription:
+			"Create, update, or delete markdown notes in one staged batch. Related note operations can be proposed together for user approval.",
 	},
 ];
 
@@ -655,6 +686,15 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
           suggestFolders().filter((f) => f.path.toLowerCase().includes(q.toLowerCase()))}
         onSelected={(path: string) => (pluginData.targetFolder = path)}
         onSubmit={(path: string) => (pluginData.targetFolder = path)}
+      />
+    </SettingItem>
+
+    <SettingItem name="Diff View Mode" desc="How pending changes are displayed in reading view">
+      <Dropdown
+        type="options"
+        dropdown={diffViewModeOptions}
+        selected={pluginData.diffViewMode}
+        onchange={(v) => (pluginData.diffViewMode = v)}
       />
     </SettingItem>
   </SettingGroup>

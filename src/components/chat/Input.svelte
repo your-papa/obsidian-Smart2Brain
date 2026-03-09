@@ -12,6 +12,7 @@
   import { getData } from "../../stores/dataStore.svelte";
   import AgentPopover from "./AgentPopover.svelte";
   import ModelPopover from "./ModelPopover.svelte";
+  import PendingChangesBar from "./PendingChangesBar.svelte";
 
   interface Props {
     messenger: Messenger;
@@ -466,6 +467,7 @@
       <div class="h-icon-xs" use:icon={"refresh-cw"} style="--icon-size: var(--icon-xs)"></div>
     </button>
   {/if}
+  <PendingChangesBar {messenger} />
   <!-- Input wrapper with glow effect -->
   <div
     class="chat-input-wrapper flex flex-col gap-3 bg-background-secondary border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isDragging
