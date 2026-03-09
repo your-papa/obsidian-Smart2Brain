@@ -59,6 +59,12 @@ const defaultSettings = {
     similarityThreshold: 0.3,
     showOrphans: true,
     projectionMethod: "pca" as const,
+    umapNeighbors: 15,
+    umapMinDist: 0.1,
+    showWikiLinks: true,
+    showSemanticEdges: true,
+    clusteringAlgorithm: "kmeans" as const,
+    minClusterSize: 5,
 };
 
 describe("buildGraph", () => {

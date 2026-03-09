@@ -1,75 +1,71 @@
 <script lang="ts">
-  import { ModelSelectionModal } from "../../components/modal/ModelSelectionModal";
-  import SettingGroup from "../../components/settings/SettingGroup.svelte";
-  import SettingItem from "../../components/settings/SettingItem.svelte";
-  import Button from "../../components/ui/Button.svelte";
-  import Dropdown from "../../components/ui/Dropdown.svelte";
-  import RangeSlider from "../../components/ui/RangeSlider.svelte";
-  import Toggle from "../../components/ui/Toggle.svelte";
-  import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
-  import type { ProjectionMethod, ClusteringAlgorithm } from "../../types/graph";
-  import { getProviderDefinition } from "../../providers/index";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
+import { ModelSelectionModal } from "../../components/modal/ModelSelectionModal";
+import SettingGroup from "../../components/settings/SettingGroup.svelte";
+import SettingItem from "../../components/settings/SettingItem.svelte";
+import Button from "../../components/ui/Button.svelte";
+import Dropdown from "../../components/ui/Dropdown.svelte";
+import RangeSlider from "../../components/ui/RangeSlider.svelte";
+import Toggle from "../../components/ui/Toggle.svelte";
+import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
+import type { ProjectionMethod, ClusteringAlgorithm } from "../../types/graph";
+import { getProviderDefinition } from "../../providers/index";
+import { getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
 
-  const pluginData = getData();
-  const plugin = getPlugin();
+const pluginData = getData();
+const plugin = getPlugin();
 
-  // Helper to update a single graph setting field
-  function updateSetting<K extends keyof typeof pluginData.smartGraphSettings>(
-    key: K,
-    value: (typeof pluginData.smartGraphSettings)[K],
-  ) {
-    pluginData.smartGraphSettings = { ...pluginData.smartGraphSettings, [key]: value };
-  }
+// Helper to update a single graph setting field
+function updateSetting<K extends keyof typeof pluginData.smartGraphSettings>(
+	key: K,
+	value: (typeof pluginData.smartGraphSettings)[K],
+) {
+	pluginData.smartGraphSettings = { ...pluginData.smartGraphSettings, [key]: value };
+}
 
-  // Projection method options
-  const projectionOptions: { display: string; value: ProjectionMethod }[] = [
-    { display: "UMAP", value: "umap" },
-    { display: "PCA", value: "pca" },
-  ];
+// Projection method options
+const projectionOptions: { display: string; value: ProjectionMethod }[] = [
+	{ display: "UMAP", value: "umap" },
+	{ display: "PCA", value: "pca" },
+];
 
-  // Clustering algorithm options
-  const clusteringAlgorithmOptions: { display: string; value: ClusteringAlgorithm }[] = [
-    { display: "K-Means", value: "kmeans" },
-    { display: "HDBSCAN", value: "hdbscan" },
-  ];
+// Clustering algorithm options
+const clusteringAlgorithmOptions: { display: string; value: ClusteringAlgorithm }[] = [
+	{ display: "K-Means", value: "kmeans" },
+	{ display: "HDBSCAN", value: "hdbscan" },
+];
 
-  // Chat model display info
-  const currentModelDisplay = $derived.by(() => {
-    const model = pluginData.smartGraphSettings.graphChatModel;
-    if (!model) return null;
-    const providerDef = getProviderDefinition(
-      model.provider,
-      pluginData.getAllCustomProviderMeta(),
-    );
-    return {
-      model: model.model,
-      providerName: providerDef?.displayName ?? model.provider,
-      logo:
-        providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon,
-    };
-  });
+// Chat model display info
+const currentModelDisplay = $derived.by(() => {
+	const model = pluginData.smartGraphSettings.graphChatModel;
+	if (!model) return null;
+	const providerDef = getProviderDefinition(model.provider, pluginData.getAllCustomProviderMeta());
+	return {
+		model: model.model,
+		providerName: providerDef?.displayName ?? model.provider,
+		logo: providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon,
+	};
+});
 
-  function openModelSelectionModal() {
-    const current = pluginData.smartGraphSettings.graphChatModel;
-    const currentSelection = current ? { provider: current.provider, model: current.model } : null;
+function openModelSelectionModal() {
+	const current = pluginData.smartGraphSettings.graphChatModel;
+	const currentSelection = current ? { provider: current.provider, model: current.model } : null;
 
-    const modal = new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
-      if (selected) {
-        updateSetting("graphChatModel", {
-          provider: selected.provider,
-          model: selected.model,
-          modelConfig: {},
-        });
-      }
-    });
-    modal.open();
-  }
+	const modal = new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
+		if (selected) {
+			updateSetting("graphChatModel", {
+				provider: selected.provider,
+				model: selected.model,
+				modelConfig: {},
+			});
+		}
+	});
+	modal.open();
+}
 
-  function clearModel() {
-    updateSetting("graphChatModel", null);
-  }
+function clearModel() {
+	updateSetting("graphChatModel", null);
+}
 </script>
 
 <!-- LLM Model -->
@@ -120,6 +116,36 @@
       onchange={(v) => updateSetting("projectionMethod", v)}
     />
   </SettingItem>
+
+  {#if pluginData.smartGraphSettings.projectionMethod === "umap"}
+    <SettingItem
+      name="UMAP Neighbors"
+      desc="How many nearby points UMAP considers when building the projection."
+    >
+      <RangeSlider
+        value={pluginData.smartGraphSettings.umapNeighbors}
+        min={3}
+        max={50}
+        step={1}
+        showValue
+        oncommit={(v) => updateSetting("umapNeighbors", v)}
+      />
+    </SettingItem>
+
+    <SettingItem
+      name="UMAP Min Dist"
+      desc="Minimum distance between embedded points. Lower values allow tighter clusters."
+    >
+      <RangeSlider
+        value={pluginData.smartGraphSettings.umapMinDist}
+        min={0}
+        max={0.99}
+        step={0.01}
+        showValue
+        oncommit={(v) => updateSetting("umapMinDist", v)}
+      />
+    </SettingItem>
+  {/if}
 
   <SettingItem
     name="Clustering Algorithm"

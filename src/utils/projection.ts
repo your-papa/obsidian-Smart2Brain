@@ -13,6 +13,11 @@ import { UMAP } from "umap-js";
 
 import type { ProjectionMethod } from "../types/graph";
 
+export interface UMAPOptions {
+	nNeighbors?: number;
+	minDist?: number;
+}
+
 /** Seeded PRNG (mulberry32) for deterministic UMAP results. */
 function seededRandom(seed = 42): () => number {
 	let s = seed | 0;
@@ -41,6 +46,19 @@ function umapCosineDistance(a: number[], b: number[]): number {
 
 /** Default number of components for intermediate dimensionality reduction. */
 const DEFAULT_REDUCE_DIM = 50;
+const DEFAULT_UMAP_NEIGHBORS = 15;
+const DEFAULT_UMAP_MIN_DIST = 0.1;
+
+function clampUMAPNeighbors(n: number, requested?: number): number {
+	const fallback = Math.max(3, Math.min(DEFAULT_UMAP_NEIGHBORS, n - 1));
+	if (requested == null || !Number.isFinite(requested)) return fallback;
+	return Math.max(3, Math.min(Math.round(requested), n - 1));
+}
+
+function clampUMAPMinDist(requested?: number): number {
+	if (requested == null || !Number.isFinite(requested)) return DEFAULT_UMAP_MIN_DIST;
+	return Math.max(0, Math.min(requested, 0.99));
+}
 
 /**
  * Reduce high-dimensional vectors to an intermediate dimensionality.
@@ -58,10 +76,11 @@ export async function reduceDimensions(
 	vectors: (Float32Array | number[])[],
 	method: ProjectionMethod = "pca",
 	targetDim = DEFAULT_REDUCE_DIM,
+	umapOptions?: UMAPOptions,
 ): Promise<Float32Array[]> {
 	switch (method) {
 		case "umap":
-			return umapReduce(vectors, targetDim);
+			return umapReduce(vectors, targetDim, umapOptions);
 		case "pca":
 			return pcaReduce(vectors, targetDim);
 		default:
@@ -83,6 +102,7 @@ export async function reduceDimensions(
 export async function umapReduce(
 	vectors: (Float32Array | number[])[],
 	targetDim = DEFAULT_REDUCE_DIM,
+	umapOptions?: UMAPOptions,
 ): Promise<Float32Array[]> {
 	const n = vectors.length;
 	if (n === 0) return [];
@@ -104,17 +124,15 @@ export async function umapReduce(
 	}
 
 	// Convert to number[][] as required by umap-js
-	const data: number[][] = vectors.map((v) =>
-		v instanceof Float32Array ? Array.from(v) : v,
-	);
+	const data: number[][] = vectors.map((v) => (v instanceof Float32Array ? Array.from(v) : v));
 
-	const nNeighbors = Math.max(3, Math.min(15, n - 1));
+	const nNeighbors = clampUMAPNeighbors(n, umapOptions?.nNeighbors);
 	const nEpochs = Math.min(500, Math.max(200, n * 2));
 
 	const umap = new UMAP({
 		nComponents: targetDim,
 		nNeighbors,
-		minDist: 0.1,
+		minDist: clampUMAPMinDist(umapOptions?.minDist),
 		spread: 1,
 		nEpochs,
 		distanceFn: umapCosineDistance,
@@ -145,10 +163,7 @@ export async function umapReduce(
  * @param targetDim - Number of principal components to keep (default 50)
  * @returns Array of Float32Array with reduced dimensionality
  */
-export function pcaReduce(
-	vectors: (Float32Array | number[])[],
-	targetDim = DEFAULT_REDUCE_DIM,
-): Float32Array[] {
+export function pcaReduce(vectors: (Float32Array | number[])[], targetDim = DEFAULT_REDUCE_DIM): Float32Array[] {
 	const n = vectors.length;
 	if (n === 0) return [];
 
@@ -244,10 +259,11 @@ export async function project2D(
 	vectors: (Float32Array | number[])[],
 	method: ProjectionMethod = "umap",
 	spread = 500,
+	umapOptions?: UMAPOptions,
 ): Promise<{ x: number; y: number }[]> {
 	switch (method) {
 		case "umap":
-			return umap2D(vectors, spread);
+			return umap2D(vectors, spread, umapOptions);
 		case "pca":
 			return pca2D(vectors, spread);
 		default:
@@ -262,10 +278,7 @@ export async function project2D(
  * @param spread  - Scale factor for output coordinates (default 500)
  * @returns Array of { x, y } coordinates, one per input vector
  */
-export function pca2D(
-	vectors: (Float32Array | number[])[],
-	spread = 500,
-): { x: number; y: number }[] {
+export function pca2D(vectors: (Float32Array | number[])[], spread = 500): { x: number; y: number }[] {
 	const n = vectors.length;
 
 	if (n === 0) return [];
@@ -331,10 +344,9 @@ export function pca2D(
  * Project high-dimensional vectors into 2D via UMAP.
  *
  * UMAP preserves both local and global structure better than PCA.
- * Parameters are tuned for knowledge-graph-style visualization:
- * - nNeighbors: 15 (balances local vs global focus)
- * - minDist: 0.1 (allows tight clusters)
- * - nEpochs: scales with n (more points = more epochs, capped at 500)
+ * Parameters are tuned for knowledge-graph-style visualization and support
+ * caller-provided UMAP options for neighborhood size and minimum distance.
+ * Epoch count still scales with n (capped at 500).
  *
  * @param vectors - Array of embedding vectors (Float32Array or number[])
  * @param spread  - Scale factor for output coordinates (default 500)
@@ -343,6 +355,7 @@ export function pca2D(
 export async function umap2D(
 	vectors: (Float32Array | number[])[],
 	spread = 500,
+	umapOptions?: UMAPOptions,
 ): Promise<{ x: number; y: number }[]> {
 	const n = vectors.length;
 
@@ -350,17 +363,15 @@ export async function umap2D(
 	if (n === 1) return [{ x: 0, y: 0 }];
 
 	// Convert Float32Arrays to number[][] as required by umap-js
-	const data: number[][] = vectors.map((v) =>
-		v instanceof Float32Array ? Array.from(v) : v,
-	);
+	const data: number[][] = vectors.map((v) => (v instanceof Float32Array ? Array.from(v) : v));
 
 	// UMAP requires nNeighbors < n; fall back to PCA for too-small datasets
 	if (n < 4) {
 		return pca2D(vectors, spread);
 	}
 
-	// Scale nNeighbors with data: at least 3, at most 15, strictly less than n
-	const nNeighbors = Math.max(3, Math.min(15, n - 1));
+	// Clamp neighbor count to UMAP's requirements: at least 3 and strictly less than n.
+	const nNeighbors = clampUMAPNeighbors(n, umapOptions?.nNeighbors);
 
 	// Scale epochs: small datasets converge quickly, large ones need more
 	const nEpochs = Math.min(500, Math.max(200, n * 2));
@@ -368,7 +379,7 @@ export async function umap2D(
 	const umap = new UMAP({
 		nComponents: 2,
 		nNeighbors,
-		minDist: 0.1,
+		minDist: clampUMAPMinDist(umapOptions?.minDist),
 		spread: 1,
 		nEpochs,
 		distanceFn: umapCosineDistance,
@@ -398,11 +409,7 @@ export async function umap2D(
 /**
  * Power iteration to find the dominant eigenvector of a symmetric matrix.
  */
-function powerIteration(
-	matrix: Float64Array,
-	n: number,
-	maxIter: number,
-): Float64Array {
+function powerIteration(matrix: Float64Array, n: number, maxIter: number): Float64Array {
 	const v = new Float64Array(n);
 
 	// Deterministic initialization: use index-based seeding
@@ -442,11 +449,7 @@ function powerIteration(
 /**
  * Compute the Rayleigh quotient: vᵀMv / vᵀv
  */
-function rayleighQuotient(
-	matrix: Float64Array,
-	v: Float64Array,
-	n: number,
-): number {
+function rayleighQuotient(matrix: Float64Array, v: Float64Array, n: number): number {
 	let numerator = 0;
 	for (let i = 0; i < n; i++) {
 		let Mv_i = 0;
@@ -471,10 +474,7 @@ function normalize(v: Float64Array): void {
 /**
  * Scale coordinates to fit within [-spread, spread] while preserving aspect ratio.
  */
-function normalizeCoordinates(
-	coords: { x: number; y: number }[],
-	spread: number,
-): { x: number; y: number }[] {
+function normalizeCoordinates(coords: { x: number; y: number }[], spread: number): { x: number; y: number }[] {
 	if (coords.length === 0) return [];
 
 	let maxAbs = 0;

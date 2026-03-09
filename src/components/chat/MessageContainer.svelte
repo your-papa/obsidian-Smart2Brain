@@ -1,223 +1,215 @@
 <script lang="ts">
-  import { Notice } from "obsidian";
-  import { tick, untrack } from "svelte";
-  import {
-    type AssistantMessage,
-    AssistantState,
-    type MessagePair,
-    type Messenger,
-  } from "../../stores/chatStore.svelte";
-  import type { UUIDv7 } from "../../utils/uuid7Validator";
-  import { Logger } from "../../utils/logging";
-  import IconButton from "../ui/IconButton.svelte";
-  import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
-  import Logo from "../ui/logos/Logo.svelte";
-  import BranchNavigator from "./BranchNavigator.svelte";
-  import ChatEditor from "./ChatEditor.svelte";
-  import CollapsibleUserBubble from "./CollapsibleUserBubble.svelte";
-  import UserAttachmentFiles from "./UserAttachmentFiles.svelte";
-  import UserAttachmentImages from "./UserAttachmentImages.svelte";
-  import ToolCallsSection from "./ToolCallsSection.svelte";
+import { Notice } from "obsidian";
+import { tick, untrack } from "svelte";
+import { type AssistantMessage, AssistantState, type MessagePair, type Messenger } from "../../stores/chatStore.svelte";
+import type { UUIDv7 } from "../../utils/uuid7Validator";
+import { Logger } from "../../utils/logging";
+import IconButton from "../ui/IconButton.svelte";
+import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
+import Logo from "../ui/logos/Logo.svelte";
+import BranchNavigator from "./BranchNavigator.svelte";
+import ChatEditor from "./ChatEditor.svelte";
+import CollapsibleUserBubble from "./CollapsibleUserBubble.svelte";
+import UserAttachmentFiles from "./UserAttachmentFiles.svelte";
+import UserAttachmentImages from "./UserAttachmentImages.svelte";
+import ToolCallsSection from "./ToolCallsSection.svelte";
 
-  interface Props {
-    messenger: Messenger;
-  }
+interface Props {
+	messenger: Messenger;
+}
 
-  const { messenger }: Props = $props();
+const { messenger }: Props = $props();
 
-  const messages = $derived.by(() => {
-    return messenger.session?.messages;
-  });
+const messages = $derived.by(() => {
+	return messenger.session?.messages;
+});
 
-  // Edit mode state
-  let editingMessageId: UUIDv7 | null = $state(null);
+// Edit mode state
+let editingMessageId: UUIDv7 | null = $state(null);
 
-  function startEdit(messagePair: MessagePair) {
-    editingMessageId = messagePair.id;
-  }
+function startEdit(messagePair: MessagePair) {
+	editingMessageId = messagePair.id;
+}
 
-  function cancelEdit() {
-    editingMessageId = null;
-  }
+function cancelEdit() {
+	editingMessageId = null;
+}
 
-  async function submitEdit(messageId: UUIDv7, newContent: string) {
-    editingMessageId = null;
-    try {
-      await messenger.session?.editMessage(messageId, newContent);
-    } catch (error) {
-      Logger.error("[MessageContainer] Edit failed:", error);
-      new Notice(`Edit failed: ${error instanceof Error ? error.message : "Unknown error"}`);
-    }
-  }
+async function submitEdit(messageId: UUIDv7, newContent: string) {
+	editingMessageId = null;
+	try {
+		await messenger.session?.editMessage(messageId, newContent);
+	} catch (error) {
+		Logger.error("[MessageContainer] Edit failed:", error);
+		new Notice(`Edit failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+	}
+}
 
-  async function regenerateResponse(messageId: UUIDv7) {
-    try {
-      await messenger.session?.regenerateResponse(messageId);
-    } catch (error) {
-      Logger.error("[MessageContainer] Regenerate failed:", error);
-      new Notice(`Regenerate failed: ${error instanceof Error ? error.message : "Unknown error"}`);
-    }
-  }
+async function regenerateResponse(messageId: UUIDv7) {
+	try {
+		await messenger.session?.regenerateResponse(messageId);
+	} catch (error) {
+		Logger.error("[MessageContainer] Regenerate failed:", error);
+		new Notice(`Regenerate failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+	}
+}
 
-  async function handleBranchNavigate(checkpointId: string) {
-    try {
-      await messenger.switchToBranch(checkpointId);
-    } catch (error) {
-      Logger.error("[MessageContainer] Branch switch failed:", error);
-      new Notice(
-        `Branch switch failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
-    }
-  }
+async function handleBranchNavigate(checkpointId: string) {
+	try {
+		await messenger.switchToBranch(checkpointId);
+	} catch (error) {
+		Logger.error("[MessageContainer] Branch switch failed:", error);
+		new Notice(`Branch switch failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+	}
+}
 
-  let scrollContainer: HTMLDivElement | undefined = $state();
-  const messageRefs = new Map<string, HTMLDivElement>();
+let scrollContainer: HTMLDivElement | undefined = $state();
+const messageRefs = new Map<string, HTMLDivElement>();
 
-  export async function scrollToLatestMessage() {
-    await tick();
-    if (messages && messages.length > 0 && scrollContainer) {
-      const latestPair = messages[messages.length - 1];
-      const messageElement = messageRefs.get(`${latestPair.id}-user`);
+export async function scrollToLatestMessage() {
+	await tick();
+	if (messages && messages.length > 0 && scrollContainer) {
+		const latestPair = messages[messages.length - 1];
+		const messageElement = messageRefs.get(`${latestPair.id}-user`);
 
-      if (messageElement && scrollContainer) {
-        const containerTop = scrollContainer.getBoundingClientRect().top;
-        const messageTop = messageElement.getBoundingClientRect().top;
-        const currentScroll = scrollContainer.scrollTop;
+		if (messageElement && scrollContainer) {
+			const containerTop = scrollContainer.getBoundingClientRect().top;
+			const messageTop = messageElement.getBoundingClientRect().top;
+			const currentScroll = scrollContainer.scrollTop;
 
-        // Calculate scroll position to place message at top of container
-        const targetScroll = currentScroll + (messageTop - containerTop);
+			// Calculate scroll position to place message at top of container
+			const targetScroll = currentScroll + (messageTop - containerTop);
 
-        scrollContainer.scrollTo({
-          top: targetScroll,
-          behavior: "smooth",
-        });
-      }
-    }
-  }
+			scrollContainer.scrollTo({
+				top: targetScroll,
+				behavior: "smooth",
+			});
+		}
+	}
+}
 
-  // Svelte action to register message refs
-  function registerMessageRef(node: HTMLDivElement, id: string) {
-    messageRefs.set(id, node);
-    return {
-      destroy() {
-        messageRefs.delete(id);
-      },
-    };
-  }
+// Svelte action to register message refs
+function registerMessageRef(node: HTMLDivElement, id: string) {
+	messageRefs.set(id, node);
+	return {
+		destroy() {
+			messageRefs.delete(id);
+		},
+	};
+}
 
-  function renderAssitantAnswer(assistantAnswer: AssistantMessage) {
-    if (assistantAnswer.state === AssistantState.cancelled) {
-      return "> [!Warning] stopped by user";
-    }
-    if (assistantAnswer.state === AssistantState.error) {
-      return "> [!Error] an error occured";
-    }
-    return assistantAnswer.content;
-  }
+function renderAssitantAnswer(assistantAnswer: AssistantMessage) {
+	if (assistantAnswer.state === AssistantState.cancelled) {
+		return "> [!Warning] stopped by user";
+	}
+	if (assistantAnswer.state === AssistantState.error) {
+		return "> [!Error] an error occured";
+	}
+	return assistantAnswer.content;
+}
 
-  function getOpenDataviewFenceStart(content: string): number | null {
-    const fenceRegex = /```(\w+)?/g;
-    let inFence = false;
-    let fenceLang = "";
-    let fenceStart = -1;
-    let match = fenceRegex.exec(content);
+function getOpenDataviewFenceStart(content: string): number | null {
+	const fenceRegex = /```(\w+)?/g;
+	let inFence = false;
+	let fenceLang = "";
+	let fenceStart = -1;
+	let match = fenceRegex.exec(content);
 
-    while (match !== null) {
-      if (!inFence) {
-        inFence = true;
-        fenceLang = (match[1] ?? "").toLowerCase();
-        fenceStart = match.index;
-      } else {
-        inFence = false;
-        fenceLang = "";
-        fenceStart = -1;
-      }
-      match = fenceRegex.exec(content);
-    }
+	while (match !== null) {
+		if (!inFence) {
+			inFence = true;
+			fenceLang = (match[1] ?? "").toLowerCase();
+			fenceStart = match.index;
+		} else {
+			inFence = false;
+			fenceLang = "";
+			fenceStart = -1;
+		}
+		match = fenceRegex.exec(content);
+	}
 
-    if (inFence && (fenceLang === "dataview" || fenceLang === "dataviewjs")) {
-      return fenceStart;
-    }
-    return null;
-  }
+	if (inFence && (fenceLang === "dataview" || fenceLang === "dataviewjs")) {
+		return fenceStart;
+	}
+	return null;
+}
 
-  function getRenderableAssistantContent(assistantAnswer: AssistantMessage) {
-    const content = renderAssitantAnswer(assistantAnswer) ?? "";
-    const isStreaming = assistantAnswer.state === AssistantState.streaming;
-    if (!isStreaming || !assistantAnswer.content) {
-      return { content, showLoading: false, renderContent: true };
-    }
+function getRenderableAssistantContent(assistantAnswer: AssistantMessage) {
+	const content = renderAssitantAnswer(assistantAnswer) ?? "";
+	const isStreaming = assistantAnswer.state === AssistantState.streaming;
+	if (!isStreaming || !assistantAnswer.content) {
+		return { content, showLoading: false, renderContent: true };
+	}
 
-    const openFenceStart = getOpenDataviewFenceStart(content);
-    if (openFenceStart === null) {
-      return { content, showLoading: false, renderContent: true };
-    }
+	const openFenceStart = getOpenDataviewFenceStart(content);
+	if (openFenceStart === null) {
+		return { content, showLoading: false, renderContent: true };
+	}
 
-    const visibleContent = content.slice(0, openFenceStart);
-    const hasRenderableContent = visibleContent.trim().length > 0;
+	const visibleContent = content.slice(0, openFenceStart);
+	const hasRenderableContent = visibleContent.trim().length > 0;
 
-    return {
-      content: visibleContent,
-      showLoading: true,
-      renderContent: hasRenderableContent,
-    };
-  }
+	return {
+		content: visibleContent,
+		showLoading: true,
+		renderContent: hasRenderableContent,
+	};
+}
 
-  async function copyToClipboard(content: string) {
-    await navigator.clipboard.writeText(content);
-    new Notice("Copied to Clipboard");
-  }
+async function copyToClipboard(content: string) {
+	await navigator.clipboard.writeText(content);
+	new Notice("Copied to Clipboard");
+}
 
-  function getGenerationLabel(messagePair: MessagePair): string | null {
-    const generation = messagePair.generation;
-    if (!generation) return null;
+function getGenerationLabel(messagePair: MessagePair): string | null {
+	const generation = messagePair.generation;
+	if (!generation) return null;
 
-    const agentLabel = generation.agentName ?? generation.agentId;
-    const modelLabel =
-      generation.provider && generation.model
-        ? `${generation.provider}/${generation.model}`
-        : (generation.model ?? generation.provider);
+	const agentLabel = generation.agentName ?? generation.agentId;
+	const modelLabel =
+		generation.provider && generation.model
+			? `${generation.provider}/${generation.model}`
+			: (generation.model ?? generation.provider);
 
-    if (agentLabel && modelLabel) return `${agentLabel} · ${modelLabel}`;
-    return agentLabel ?? modelLabel ?? null;
-  }
+	if (agentLabel && modelLabel) return `${agentLabel} · ${modelLabel}`;
+	return agentLabel ?? modelLabel ?? null;
+}
 
-  // Pre-populate so the very first render is already correct for history messages,
-  // preventing a one-frame flash where completed timelines appear expanded before
-  // the $effect below runs and collapses them.
-  // Capture the initial snapshot via untrack() - ongoing message state changes
-  // are handled by the $effect; we only need this for messages loaded from history.
-  let timelineCollapsed: Record<string, boolean | undefined> = $state(
-    Object.fromEntries(
-      untrack(() => messages ?? []).map((p) => {
-        const a = p.assistantMessage;
-        const finished = a.state !== AssistantState.streaming && a.state !== AssistantState.idle;
-        return [p.id, finished && (a.toolCalls?.length ?? 0) > 0 ? true : undefined];
-      }),
-    ),
-  );
+// Pre-populate so the very first render is already correct for history messages,
+// preventing a one-frame flash where completed timelines appear expanded before
+// the $effect below runs and collapses them.
+// Capture the initial snapshot via untrack() - ongoing message state changes
+// are handled by the $effect; we only need this for messages loaded from history.
+let timelineCollapsed: Record<string, boolean | undefined> = $state(
+	Object.fromEntries(
+		untrack(() => messages ?? []).map((p) => {
+			const a = p.assistantMessage;
+			const finished = a.state !== AssistantState.streaming && a.state !== AssistantState.idle;
+			return [p.id, finished && (a.toolCalls?.length ?? 0) > 0 ? true : undefined];
+		}),
+	),
+);
 
-  $effect(() => {
-    const messageList = messages ?? [];
-    for (const messagePair of messageList) {
-      const assistantMessage = messagePair.assistantMessage;
-      const hasToolCalls = (assistantMessage.toolCalls?.length ?? 0) > 0;
-      const isStreaming =
-        assistantMessage.state === AssistantState.streaming ||
-        assistantMessage.state === AssistantState.idle;
-      const streamFinished = !isStreaming;
+$effect(() => {
+	const messageList = messages ?? [];
+	for (const messagePair of messageList) {
+		const assistantMessage = messagePair.assistantMessage;
+		const hasToolCalls = (assistantMessage.toolCalls?.length ?? 0) > 0;
+		const isStreaming =
+			assistantMessage.state === AssistantState.streaming || assistantMessage.state === AssistantState.idle;
+		const streamFinished = !isStreaming;
 
-      // Clear the collapsed state when a new stream starts so the timeline
-      // expands automatically during regeneration, matching first-run behaviour.
-      if (isStreaming && timelineCollapsed[messagePair.id] !== undefined) {
-        timelineCollapsed[messagePair.id] = undefined;
-      }
+		// Clear the collapsed state when a new stream starts so the timeline
+		// expands automatically during regeneration, matching first-run behaviour.
+		if (isStreaming && timelineCollapsed[messagePair.id] !== undefined) {
+			timelineCollapsed[messagePair.id] = undefined;
+		}
 
-      if (hasToolCalls && streamFinished && timelineCollapsed[messagePair.id] === undefined) {
-        timelineCollapsed[messagePair.id] = true;
-      }
-    }
-  });
+		if (hasToolCalls && streamFinished && timelineCollapsed[messagePair.id] === undefined) {
+			timelineCollapsed[messagePair.id] = true;
+		}
+	}
+});
 </script>
 
 <div class="relative flex-1 min-h-0 z-20">

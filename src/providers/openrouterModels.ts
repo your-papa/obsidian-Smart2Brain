@@ -235,9 +235,7 @@ export function extractCapabilities(info: OpenRouterModelInfo): {
 		supportsToolCalls: params.includes("tools"),
 		supportsVision: inputModalities.includes("image"),
 		supportsReasoning:
-			params.includes("reasoning") ||
-			params.includes("include_reasoning") ||
-			params.includes("reasoning_effort"),
+			params.includes("reasoning") || params.includes("include_reasoning") || params.includes("reasoning_effort"),
 		supportsStructuredOutput: params.includes("structured_outputs"),
 	};
 }

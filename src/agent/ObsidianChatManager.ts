@@ -656,11 +656,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		const plainMetadata = JSON.parse(JSON.stringify(metadata));
 		const parentMessageCount = this.getParentMessageCount(threadData, config);
 		const generation = this.extractGenerationMetadata(config.metadata);
-		this.annotateCheckpointMessagesWithGeneration(
-			plainCheckpoint,
-			parentMessageCount,
-			generation,
-		);
+		this.annotateCheckpointMessagesWithGeneration(plainCheckpoint, parentMessageCount, generation);
 
 		threadData.checkpoints[checkpointId] = {
 			checkpoint: plainCheckpoint,
@@ -804,7 +800,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 			for (const [key, child] of Object.entries(node)) {
 				if (key === "vaultPath" && typeof child === "string" && child.startsWith(oldPrefix)) {
-					(node as Record<string, unknown>)[key] = normalizePath(`${newPrefix}${child.slice(oldPrefix.length)}`);
+					(node as Record<string, unknown>)[key] = normalizePath(
+						`${newPrefix}${child.slice(oldPrefix.length)}`,
+					);
 					changed = true;
 					continue;
 				}
@@ -840,13 +838,13 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			const target = normalizePath(`${newDir}/${basename}`);
 			const data = await this.adapter.readBinary(file);
 			if (await this.adapter.exists(target)) {
-				await this.adapter.remove(target).catch(() => { });
+				await this.adapter.remove(target).catch(() => {});
 			}
 			await this.adapter.writeBinary(target, data);
-			await this.adapter.remove(file).catch(() => { });
+			await this.adapter.remove(file).catch(() => {});
 		}
 
-		await this.adapter.rmdir(oldDir, false).catch(() => { });
+		await this.adapter.rmdir(oldDir, false).catch(() => {});
 		return true;
 	}
 
@@ -857,7 +855,11 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		return this.getAttachmentDirByName(dirName);
 	}
 
-	private async getUniqueTitlePath(folder: string, baseTitle: string, currentPath: string): Promise<{
+	private async getUniqueTitlePath(
+		folder: string,
+		baseTitle: string,
+		currentPath: string,
+	): Promise<{
 		title: string;
 		path: string;
 		fileName: string;

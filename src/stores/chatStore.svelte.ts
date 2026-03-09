@@ -747,9 +747,7 @@ function attachPreambleToFirstToolCall(toolCalls: ToolCallState[] | undefined, p
 	if (!trimmed) return;
 
 	const firstTool = toolCalls[0];
-	firstTool.preamble = firstTool.preamble
-		? `${firstTool.preamble.trimEnd()}\n\n${trimmed}`
-		: trimmed;
+	firstTool.preamble = firstTool.preamble ? `${firstTool.preamble.trimEnd()}\n\n${trimmed}` : trimmed;
 }
 
 function buildTimelineFromToolCalls(
@@ -1255,7 +1253,7 @@ export class ChatSession {
 				const newPath = normalizePath(`${destDir}/${fileName}`);
 				const data = await adapter.readBinary(att.vaultPath);
 				await adapter.writeBinary(newPath, data);
-				await adapter.remove(att.vaultPath).catch(() => { });
+				await adapter.remove(att.vaultPath).catch(() => {});
 				att.vaultPath = newPath;
 			} catch (e) {
 				Logger.warn(`Failed to relocate attachment ${att.name}`, e);
@@ -1264,7 +1262,7 @@ export class ChatSession {
 
 		// Best-effort cleanup of the temporary _pending directory
 		const pendingDir = normalizePath(`${chatFolder}/attachments/_pending`);
-		adapter.rmdir(pendingDir, false).catch(() => { });
+		adapter.rmdir(pendingDir, false).catch(() => {});
 	}
 
 	/** Abort current streaming (if any) */
@@ -1292,8 +1290,8 @@ export class ChatSession {
 			return undefined;
 		}
 
-		const recovered = (lastMessage.additional_kwargs?.attachments as ChatAttachment[] | undefined)?.filter(
-			(att) => Boolean(att?.name && att?.mimeType && att?.vaultPath),
+		const recovered = (lastMessage.additional_kwargs?.attachments as ChatAttachment[] | undefined)?.filter((att) =>
+			Boolean(att?.name && att?.mimeType && att?.vaultPath),
 		);
 
 		return recovered?.length ? recovered : undefined;
@@ -1658,7 +1656,10 @@ export class ChatSession {
 				if (checkpointAssistant.toolCalls?.length && checkpointAssistant.content.trim()) {
 					attachPreambleToFirstToolCall(checkpointAssistant.toolCalls, checkpointAssistant.content);
 					checkpointAssistant.content = "";
-					checkpointAssistant.assistantTimeline = buildTimelineFromToolCalls(checkpointAssistant.toolCalls, chunk.message.id);
+					checkpointAssistant.assistantTimeline = buildTimelineFromToolCalls(
+						checkpointAssistant.toolCalls,
+						chunk.message.id,
+					);
 				}
 				assistantMsg.content = checkpointAssistant.content;
 				assistantMsg.toolCalls = checkpointAssistant.toolCalls;
@@ -1874,12 +1875,7 @@ export class Messenger {
 		const bootstrapMessages = historyWithError?.messages || [];
 		const errorCount = historyWithError?.errorCount || 0;
 
-		await this.restoreSelectionFromLoadedMessages(
-			graph,
-			resolution.checkpointId,
-			errorCount,
-			bootstrapMessages,
-		);
+		await this.restoreSelectionFromLoadedMessages(graph, resolution.checkpointId, errorCount, bootstrapMessages);
 
 		this.session = new ChatSession(id, {
 			graphState: graph,

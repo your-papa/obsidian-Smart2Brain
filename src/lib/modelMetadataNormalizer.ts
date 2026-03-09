@@ -1,16 +1,10 @@
 import { lookupModelInfoSync, type ModelsDevApiResponse } from "../providers/modelsDevApi";
-import {
-	formatParameterSize,
-	type OllamaModelInfo,
-} from "../providers/ollamaModels";
+import { formatParameterSize, type OllamaModelInfo } from "../providers/ollamaModels";
 import {
 	extractCapabilities as extractOpenRouterCapabilities,
 	type OpenRouterModelInfo,
 } from "../providers/openrouterModels";
-import type {
-	HydratedChatModelMetadata,
-	HydratedEmbeddingModelMetadata,
-} from "../types/modelMetadata";
+import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../types/modelMetadata";
 
 const DEFAULT_CHAT_CONTEXT_WINDOW = 128000;
 const DEFAULT_EMBEDDING_MAX_INPUT_TOKENS = 8191;
@@ -81,14 +75,9 @@ function lookupMetadata(
 	modelsDev?: ReturnType<typeof lookupModelInfoSync>;
 } {
 	const openRouter =
-		provider === "openrouter" && sourceData.openRouterData
-			? sourceData.openRouterData.get(variantKey)
-			: undefined;
+		provider === "openrouter" && sourceData.openRouterData ? sourceData.openRouterData.get(variantKey) : undefined;
 
-	const ollama =
-		provider === "ollama" && sourceData.ollamaData
-			? sourceData.ollamaData.get(variantKey)
-			: undefined;
+	const ollama = provider === "ollama" && sourceData.ollamaData ? sourceData.ollamaData.get(variantKey) : undefined;
 
 	const modelsDev = sourceData.modelsDevData
 		? lookupModelInfoSync(sourceData.modelsDevData, provider, variantKey)
@@ -102,11 +91,7 @@ export function hydrateChatModel(
 	variantKey: string,
 	sourceData: ModelHydrationSourceData = {},
 ): HydratedChatModelMetadata {
-	const { openRouter, ollama, modelsDev } = lookupMetadata(
-		provider,
-		variantKey,
-		sourceData,
-	);
+	const { openRouter, ollama, modelsDev } = lookupMetadata(provider, variantKey, sourceData);
 	const paramSize = normalizeParamSize(ollama?.parameterSize);
 	const quantization = ollama?.quantization;
 
@@ -118,10 +103,7 @@ export function hydrateChatModel(
 	);
 
 	const contextWindow =
-		openRouter?.context_length ||
-		ollama?.contextLength ||
-		modelsDev?.limit?.context ||
-		DEFAULT_CHAT_CONTEXT_WINDOW;
+		openRouter?.context_length || ollama?.contextLength || modelsDev?.limit?.context || DEFAULT_CHAT_CONTEXT_WINDOW;
 
 	const inputUsdPer1M = toUsdPer1MFromPerToken(openRouter?.pricing?.prompt);
 	const outputUsdPer1M = toUsdPer1MFromPerToken(openRouter?.pricing?.completion);
@@ -139,20 +121,12 @@ export function hydrateChatModel(
 		temperature: sourceData.temperature,
 		capabilities: {
 			toolCalls:
-				openRouterCapabilities?.supportsToolCalls ??
-				ollama?.supportsTools ??
-				modelsDev?.tool_call ??
-				undefined,
+				openRouterCapabilities?.supportsToolCalls ?? ollama?.supportsTools ?? modelsDev?.tool_call ?? undefined,
 			vision:
-				openRouterCapabilities?.supportsVision ??
-				ollama?.supportsVision ??
-				modelsDev?.attachment ??
-				undefined,
+				openRouterCapabilities?.supportsVision ?? ollama?.supportsVision ?? modelsDev?.attachment ?? undefined,
 			reasoning: openRouterCapabilities?.supportsReasoning ?? modelsDev?.reasoning ?? undefined,
 			structuredOutput:
-				openRouterCapabilities?.supportsStructuredOutput ??
-				modelsDev?.structured_output ??
-				undefined,
+				openRouterCapabilities?.supportsStructuredOutput ?? modelsDev?.structured_output ?? undefined,
 		},
 		pricing: hasPricing ? { inputUsdPer1M, outputUsdPer1M } : undefined,
 	};
@@ -163,11 +137,7 @@ export function hydrateEmbeddingModel(
 	variantKey: string,
 	sourceData: ModelHydrationSourceData = {},
 ): HydratedEmbeddingModelMetadata {
-	const { openRouter, ollama, modelsDev } = lookupMetadata(
-		provider,
-		variantKey,
-		sourceData,
-	);
+	const { openRouter, ollama, modelsDev } = lookupMetadata(provider, variantKey, sourceData);
 	const paramSize = normalizeParamSize(ollama?.parameterSize);
 	const quantization = ollama?.quantization;
 
@@ -179,11 +149,9 @@ export function hydrateEmbeddingModel(
 	);
 
 	const maxInputFromOpenRouter =
-		toNumber(openRouter?.per_request_limits?.prompt_tokens) ||
-		openRouter?.context_length;
+		toNumber(openRouter?.per_request_limits?.prompt_tokens) || openRouter?.context_length;
 
-	const providerDefaultMaxInputTokens =
-		DEFAULT_EMBED_MAX_INPUT_TOKENS_BY_PROVIDER[provider];
+	const providerDefaultMaxInputTokens = DEFAULT_EMBED_MAX_INPUT_TOKENS_BY_PROVIDER[provider];
 
 	const maxInputTokens =
 		maxInputFromOpenRouter ||
@@ -204,8 +172,7 @@ export function hydrateEmbeddingModel(
 		quantization,
 		maxInputTokens,
 		dimensions: ollama?.embeddingLength,
-		similarityThresholdDefault:
-			sourceData.similarityThresholdDefault ?? DEFAULT_SIMILARITY_THRESHOLD,
+		similarityThresholdDefault: sourceData.similarityThresholdDefault ?? DEFAULT_SIMILARITY_THRESHOLD,
 		pricing: inputUsdPer1M !== undefined ? { inputUsdPer1M } : undefined,
 	};
 }

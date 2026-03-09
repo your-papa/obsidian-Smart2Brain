@@ -4,12 +4,7 @@ import { Notice } from "obsidian";
 import { onMount } from "svelte";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
-import type {
-	MCPHTTPServerConfig,
-	MCPServerConfig,
-	MCPStdioServerConfig,
-	MCPTransportType,
-} from "../../types/plugin";
+import type { MCPHTTPServerConfig, MCPServerConfig, MCPStdioServerConfig, MCPTransportType } from "../../types/plugin";
 import { getData } from "../../stores/dataStore.svelte";
 import { Logger } from "../../utils/logging";
 import Button from "../ui/Button.svelte";
@@ -25,16 +20,16 @@ interface Props {
 	serverId: string | null;
 	existingConfig: MCPServerConfig | null;
 	onSave: MCPServerModalCallback;
-  accessors: MCPServerAccessors;
+	accessors: MCPServerAccessors;
 }
 
 const {
-  modal,
-  plugin,
-  serverId: capturedServerId,
-  existingConfig: capturedExistingConfig,
-  onSave,
-  accessors,
+	modal,
+	plugin,
+	serverId: capturedServerId,
+	existingConfig: capturedExistingConfig,
+	onSave,
+	accessors,
 }: Props = $props();
 
 // Capture initial values at component creation (props don't change for modals)
@@ -67,7 +62,7 @@ let envVars = $state(
 // HTTP-specific fields
 let url = $state((initialConfig as MCPHTTPServerConfig)?.url ?? "");
 let headers = $state(
-  Object.entries((initialConfig as MCPHTTPServerConfig)?.headers ?? {})
+	Object.entries((initialConfig as MCPHTTPServerConfig)?.headers ?? {})
 		.map(([k, v]) => `${k}: ${v}`)
 		.join("\n"),
 );
@@ -157,20 +152,20 @@ function validateForm(): string | null {
 		return "Name must contain at least one letter or number";
 	}
 
-  // Check for duplicate ID (only when creating new or changing name)
-  if (!isEditing || newServerId !== capturedServerId) {
-    if (accessors.hasServer(newServerId)) {
+	// Check for duplicate ID (only when creating new or changing name)
+	if (!isEditing || newServerId !== capturedServerId) {
+		if (accessors.hasServer(newServerId)) {
 			return "A server with this name already exists";
 		}
 	}
 
-  if (transport === "stdio") {
+	if (transport === "stdio") {
 		if (!command.trim()) {
 			return "Command is required for stdio transport";
 		}
-  } else {
+	} else {
 		if (!url.trim()) {
-      return "URL is required for HTTP transport";
+			return "URL is required for HTTP transport";
 		}
 		try {
 			new URL(url.trim());
@@ -201,14 +196,14 @@ function handleSave() {
 			args: parseArgs(args),
 			env: parseEnvVars(envVars),
 		};
-  } else {
-    config = {
-      displayName: name.trim(),
-      transport: "http",
-      enabled,
-      url: url.trim(),
-      headers: parseHeaders(headers),
-    };
+	} else {
+		config = {
+			displayName: name.trim(),
+			transport: "http",
+			enabled,
+			url: url.trim(),
+			headers: parseHeaders(headers),
+		};
 	}
 
 	onSave(newServerId, config);
@@ -216,9 +211,9 @@ function handleSave() {
 }
 
 function handleDelete() {
-  if (capturedServerId && capturedExistingConfig) {
+	if (capturedServerId && capturedExistingConfig) {
 		// Pass the deleted server info to callback with enabled: false to indicate deletion
-    onSave(capturedServerId, { ...capturedExistingConfig, enabled: false });
+		onSave(capturedServerId, { ...capturedExistingConfig, enabled: false });
 		modal.close();
 	}
 }
@@ -256,7 +251,7 @@ function buildTestConfig() {
 	return {
 		mcpServers: {
 			[testServerId]: {
-        transport: "http" as const,
+				transport: "http" as const,
 				url: url.trim(),
 				headers: parseHeaders(headers),
 			},

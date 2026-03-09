@@ -93,10 +93,9 @@ export function extractVendor(
 	}
 
 	if (model.provider === "ollama") {
-		const candidateFamilies = [
-			model.family,
-			...(model.families ?? []),
-		].filter((family): family is string => typeof family === "string" && family.length > 0);
+		const candidateFamilies = [model.family, ...(model.families ?? [])].filter(
+			(family): family is string => typeof family === "string" && family.length > 0,
+		);
 		if (candidateFamilies.length === 0) return null;
 		return inferOllamaVendorFromOpenRouter(candidateFamilies, openRouterModels);
 	}

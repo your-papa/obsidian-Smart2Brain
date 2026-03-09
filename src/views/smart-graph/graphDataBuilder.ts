@@ -296,6 +296,8 @@ export async function buildGraphStructure(
 		| "similarityThreshold"
 		| "showOrphans"
 		| "projectionMethod"
+		| "umapNeighbors"
+		| "umapMinDist"
 		| "showWikiLinks"
 		| "showSemanticEdges"
 	>,
@@ -324,10 +326,16 @@ export async function buildGraphStructure(
 	const { degreeMap, hasSemanticEdge, hasWikiEdge } = computeDegreeAndDiscovery(edges, settings);
 
 	// Reduce dimensionality for clustering and projection performance.
-	const reducedVectors = await reduceDimensionsAsync(vectors, settings.projectionMethod);
+	const reducedVectors = await reduceDimensionsAsync(vectors, settings.projectionMethod, undefined, {
+		nNeighbors: settings.umapNeighbors,
+		minDist: settings.umapMinDist,
+	});
 
 	// Project reduced vectors into 2D
-	const positions = await project2DAsync(reducedVectors, settings.projectionMethod);
+	const positions = await project2DAsync(reducedVectors, settings.projectionMethod, undefined, {
+		nNeighbors: settings.umapNeighbors,
+		minDist: settings.umapMinDist,
+	});
 
 	// Create nodes
 	const nodes = createGraphNodes(filtered, positions, degreeMap, hasSemanticEdge, hasWikiEdge, settings);
@@ -577,6 +585,8 @@ export async function buildGraph(
 		| "similarityThreshold"
 		| "showOrphans"
 		| "projectionMethod"
+		| "umapNeighbors"
+		| "umapMinDist"
 		| "showWikiLinks"
 		| "showSemanticEdges"
 		| "clusteringAlgorithm"

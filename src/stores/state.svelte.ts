@@ -39,4 +39,3 @@ export function consumePendingSettingsTab(): string | null {
 	_pendingSettingsTab = null;
 	return tab;
 }
-

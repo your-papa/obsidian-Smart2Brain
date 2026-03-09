@@ -1,26 +1,14 @@
 import { createProviderStateQuery, invalidateAllProviders } from "../lib/query";
-import {
-	hydrateChatModel,
-	hydrateEmbeddingModel,
-} from "../lib/modelMetadataNormalizer";
+import { hydrateChatModel, hydrateEmbeddingModel } from "../lib/modelMetadataNormalizer";
 import { fetchModelsDevData, type ModelsDevApiResponse } from "../providers/modelsDevApi";
-import {
-	getOllamaModelsCache,
-	type OllamaModelInfo,
-} from "../providers/ollamaModels";
-import {
-	fetchOpenRouterModels,
-	type OpenRouterModelInfo,
-} from "../providers/openrouterModels";
+import { getOllamaModelsCache, type OllamaModelInfo } from "../providers/ollamaModels";
+import { fetchOpenRouterModels, type OpenRouterModelInfo } from "../providers/openrouterModels";
 import { getProviderDefinition, isEmbeddingProvider } from "../providers/index";
 import type { EmbedModelConfig } from "../providers/index";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
 import { getPlugin } from "../stores/state.svelte";
-import type {
-	HydratedChatModelMetadata,
-	HydratedEmbeddingModelMetadata,
-} from "../types/modelMetadata";
+import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../types/modelMetadata";
 
 export interface ModelOption {
 	value: string;
@@ -86,10 +74,7 @@ export class AvailableModels {
 			return;
 		}
 		this.#metadataLoadStarted = true;
-		const [modelsDevData, openRouterData] = await Promise.all([
-			fetchModelsDevData(),
-			fetchOpenRouterModels(),
-		]);
+		const [modelsDevData, openRouterData] = await Promise.all([fetchModelsDevData(), fetchOpenRouterModels()]);
 		this.#modelsDevData = modelsDevData;
 		this.#openRouterData = openRouterData;
 	}
@@ -239,9 +224,7 @@ export class AvailableModels {
 	#embedModelOptions = $derived.by(() =>
 		this.#availableEmbedModels.map((m) => ({
 			value: `${m.provider}::${m.model}`,
-			label:
-				this.#hydratedEmbeddingModelsByKey.get(`${m.provider}:${m.model}`)?.displayName ??
-				m.model,
+			label: this.#hydratedEmbeddingModelsByKey.get(`${m.provider}:${m.model}`)?.displayName ?? m.model,
 			embedModel: m,
 		})),
 	);

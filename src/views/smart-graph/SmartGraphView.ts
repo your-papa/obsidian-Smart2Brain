@@ -6,40 +6,40 @@ import SmartGraphViewComponent from "../../components/graph/SmartGraphView.svelt
 export const VIEW_TYPE_SMART_GRAPH = "smart-second-brain-graph";
 
 export class SmartGraphView extends ItemView {
-    plugin: SecondBrainPlugin;
-    component: ReturnType<typeof mount> | null = null;
+	plugin: SecondBrainPlugin;
+	component: ReturnType<typeof mount> | null = null;
 
-    constructor(leaf: WorkspaceLeaf, plugin: SecondBrainPlugin) {
-        super(leaf);
-        this.plugin = plugin;
-    }
+	constructor(leaf: WorkspaceLeaf, plugin: SecondBrainPlugin) {
+		super(leaf);
+		this.plugin = plugin;
+	}
 
-    getViewType(): string {
-        return VIEW_TYPE_SMART_GRAPH;
-    }
+	getViewType(): string {
+		return VIEW_TYPE_SMART_GRAPH;
+	}
 
-    getDisplayText(): string {
-        return "Smart Graph";
-    }
+	getDisplayText(): string {
+		return "Smart Graph";
+	}
 
-    getIcon(): string {
-        return "git-fork";
-    }
+	getIcon(): string {
+		return "git-fork";
+	}
 
-    async onOpen(): Promise<void> {
-        this.contentEl.empty();
-        this.contentEl.addClass("smart-graph-container");
+	async onOpen(): Promise<void> {
+		this.contentEl.empty();
+		this.contentEl.addClass("smart-graph-container");
 
-        this.component = mount(SmartGraphViewComponent, {
-            target: this.contentEl,
-            props: {},
-        });
-    }
+		this.component = mount(SmartGraphViewComponent, {
+			target: this.contentEl,
+			props: {},
+		});
+	}
 
-    async onClose(): Promise<void> {
-        if (this.component) {
-            unmount(this.component);
-            this.component = null;
-        }
-    }
+	async onClose(): Promise<void> {
+		if (this.component) {
+			unmount(this.component);
+			this.component = null;
+		}
+	}
 }

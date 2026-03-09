@@ -58,15 +58,13 @@ function handleAddSecret() {
 }
 
 // Dropdown options
-let dropdownOptions = $derived(
-	[
-		{ display: "(Nothing selected)", value: "" },
-		...secrets.map((secretId) => ({
-			display: secretId,
-			value: secretId,
-		})),
-	],
-);
+let dropdownOptions = $derived([
+	{ display: "(Nothing selected)", value: "" },
+	...secrets.map((secretId) => ({
+		display: secretId,
+		value: secretId,
+	})),
+]);
 
 // Selected value - never auto-fallback to first secret
 let selectedValue = $derived(secrets.includes(value) ? value : "");

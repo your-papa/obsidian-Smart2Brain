@@ -1,115 +1,99 @@
 <script lang="ts">
-    import { createAuthStateQuery, invalidateAuthState } from "../../lib/query";
-    import {
-        type AuthFieldDefinition,
-        getProviderDefinition,
-    } from "../../providers/index";
-    import { getData } from "../../stores/dataStore.svelte";
-    import Text from "../ui/Text.svelte";
-    import Toggle from "../ui/Toggle.svelte";
-    import SecretSelect from "./SecretSelect.svelte";
-    import SettingItem from "./SettingItem.svelte";
+import { createAuthStateQuery, invalidateAuthState } from "../../lib/query";
+import { type AuthFieldDefinition, getProviderDefinition } from "../../providers/index";
+import { getData } from "../../stores/dataStore.svelte";
+import Text from "../ui/Text.svelte";
+import Toggle from "../ui/Toggle.svelte";
+import SecretSelect from "./SecretSelect.svelte";
+import SettingItem from "./SettingItem.svelte";
 
-    interface Props {
-        provider: string;
-    }
+interface Props {
+	provider: string;
+}
 
-    const { provider }: Props = $props();
+const { provider }: Props = $props();
 
-    const data = getData();
+const data = getData();
 
-    // Local state for advanced toggle
-    let showAdvanced = $state(false);
+// Local state for advanced toggle
+let showAdvanced = $state(false);
 
-    // Query for provider auth state
-    const query = createAuthStateQuery(() => provider);
-    let isCheckingAuth = $derived(query.isPending || query.isFetching);
+// Query for provider auth state
+const query = createAuthStateQuery(() => provider);
+let isCheckingAuth = $derived(query.isPending || query.isFetching);
 
-    // Get provider definition using the function from providers/index
-    let providerDefinition = $derived(
-        getProviderDefinition(provider, data.getAllCustomProviderMeta()),
-    );
+// Get provider definition using the function from providers/index
+let providerDefinition = $derived(getProviderDefinition(provider, data.getAllCustomProviderMeta()));
 
-    // Get stored auth state for this provider
-    let storedAuth = $derived(data.getStoredAuthState(provider));
+// Get stored auth state for this provider
+let storedAuth = $derived(data.getStoredAuthState(provider));
 
-    // Get auth fields from provider definition
-    let authFields = $derived(providerDefinition?.auth ?? null);
+// Get auth fields from provider definition
+let authFields = $derived(providerDefinition?.auth ?? null);
 
-    // Split fields into required and optional
-    let requiredFields = $derived((): [string, AuthFieldDefinition][] => {
-        if (!authFields) return [];
-        return (
-            Object.entries(authFields) as [string, AuthFieldDefinition][]
-        ).filter(([_, field]) => field.required);
-    });
+// Split fields into required and optional
+let requiredFields = $derived((): [string, AuthFieldDefinition][] => {
+	if (!authFields) return [];
+	return (Object.entries(authFields) as [string, AuthFieldDefinition][]).filter(([_, field]) => field.required);
+});
 
-    let optionalFields = $derived((): [string, AuthFieldDefinition][] => {
-        if (!authFields) return [];
-        return (
-            Object.entries(authFields) as [string, AuthFieldDefinition][]
-        ).filter(([_, field]) => !field.required);
-    });
+let optionalFields = $derived((): [string, AuthFieldDefinition][] => {
+	if (!authFields) return [];
+	return (Object.entries(authFields) as [string, AuthFieldDefinition][]).filter(([_, field]) => !field.required);
+});
 
-    let hasOptionalFields = $derived(optionalFields().length > 0);
+let hasOptionalFields = $derived(optionalFields().length > 0);
 
-    // Auto-expand advanced when optional fields have configured values
-    $effect(() => {
-        if (!storedAuth || !authFields) return;
+// Auto-expand advanced when optional fields have configured values
+$effect(() => {
+	if (!storedAuth || !authFields) return;
 
-        for (const [fieldKey, field] of Object.entries(authFields) as [
-            string,
-            AuthFieldDefinition,
-        ][]) {
-            if (!field.required) {
-                const hasValue =
-                    storedAuth.values[fieldKey] ||
-                    storedAuth.secretIds[fieldKey];
-                if (hasValue) {
-                    showAdvanced = true;
-                    break;
-                }
-            }
-        }
-    });
+	for (const [fieldKey, field] of Object.entries(authFields) as [string, AuthFieldDefinition][]) {
+		if (!field.required) {
+			const hasValue = storedAuth.values[fieldKey] || storedAuth.secretIds[fieldKey];
+			if (hasValue) {
+				showAdvanced = true;
+				break;
+			}
+		}
+	}
+});
 
-    // Get the current value for a field from stored auth
-    function getFieldValue(fieldKey: string): string {
-        if (!storedAuth) return "";
+// Get the current value for a field from stored auth
+function getFieldValue(fieldKey: string): string {
+	if (!storedAuth) return "";
 
-        // For secret fields, return the secret ID (not the actual secret value)
-        // The SecretSelect component will use this to show the correct selection
-        if (storedAuth.secretIds[fieldKey]) {
-            return storedAuth.secretIds[fieldKey];
-        }
+	// For secret fields, return the secret ID (not the actual secret value)
+	// The SecretSelect component will use this to show the correct selection
+	if (storedAuth.secretIds[fieldKey]) {
+		return storedAuth.secretIds[fieldKey];
+	}
 
-        // For non-secret fields, return the stored value
-        return storedAuth.values[fieldKey] ?? "";
-    }
+	// For non-secret fields, return the stored value
+	return storedAuth.values[fieldKey] ?? "";
+}
 
-    // Handle secret selection/change (for secret fields)
-    function handleSecretChange(fieldKey: string, secretId: string) {
-        data.assignSecretIdToProviderField(provider, fieldKey, secretId);
-        invalidateAuthState(provider);
-    }
+// Handle secret selection/change (for secret fields)
+function handleSecretChange(fieldKey: string, secretId: string) {
+	data.assignSecretIdToProviderField(provider, fieldKey, secretId);
+	invalidateAuthState(provider);
+}
 
-    // Handle text/textarea field changes (for non-secret fields)
-    function handleFieldChange(fieldKey: string, value: string) {
-        data.setProviderAuthField(provider, fieldKey, value, false);
-        invalidateAuthState(provider);
-    }
+// Handle text/textarea field changes (for non-secret fields)
+function handleFieldChange(fieldKey: string, value: string) {
+	data.setProviderAuthField(provider, fieldKey, value, false);
+	invalidateAuthState(provider);
+}
 
-    // Get validation state styling for a field
-    function getFieldStyles(fieldKey: string): string {
-        const value = getFieldValue(fieldKey);
-        if (value === "") return "";
-        if (isCheckingAuth || !query.data) {
-            return "";
-        }
-        return query.data.success
-            ? "!border-[--background-modifier-success]"
-            : "!border-[--background-modifier-error]";
-    }
+// Get validation state styling for a field
+function getFieldStyles(fieldKey: string): string {
+	const value = getFieldValue(fieldKey);
+	if (value === "") return "";
+	if (isCheckingAuth || !query.data) {
+		return "";
+	}
+	return query.data.success ? "!border-[--background-modifier-success]" : "!border-[--background-modifier-error]";
+}
 </script>
 
 {#snippet fieldRenderer(fieldKey: string, field: AuthFieldDefinition)}

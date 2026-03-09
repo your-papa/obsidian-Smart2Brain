@@ -203,7 +203,12 @@ export class HNSWVectorStore implements VectorStore {
 		if (!this.dimensions) return;
 
 		// Create HNSW index with IndexedDB persistence
-		this.hnswIndex = await HNSWWithDB.create(this.M, this.efConstruction, `${this.dbName}-hnsw-index`, this.efSearch);
+		this.hnswIndex = await HNSWWithDB.create(
+			this.M,
+			this.efConstruction,
+			`${this.dbName}-hnsw-index`,
+			this.efSearch,
+		);
 
 		// Load existing index if available
 		try {
