@@ -1,16 +1,236 @@
 /**
- * Dimensionality reduction for projecting embeddings into 2D.
+ * Dimensionality reduction for projecting embeddings.
  *
  * Supports multiple algorithms:
  * - PCA: Fast linear projection via Gram matrix (X·Xᵀ, n×n)
  * - UMAP: Non-linear projection preserving local + global structure
  *
- * The resulting 2D coordinates place semantically similar notes near each other.
+ * Includes both intermediate reduction (high-dim → medium-dim for clustering)
+ * and final 2D projection for visualization.
  */
 
 import { UMAP } from "umap-js";
 
 import type { ProjectionMethod } from "../types/graph";
+
+/** Seeded PRNG (mulberry32) for deterministic UMAP results. */
+function seededRandom(seed = 42): () => number {
+	let s = seed | 0;
+	return () => {
+		s = (s + 0x6d2b79f5) | 0;
+		let t = Math.imul(s ^ (s >>> 15), 1 | s);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+/** Cosine distance for UMAP: 1 - cos(a, b). */
+function umapCosineDistance(a: number[], b: number[]): number {
+	let dot = 0;
+	let normA = 0;
+	let normB = 0;
+	for (let i = 0; i < a.length; i++) {
+		dot += a[i] * b[i];
+		normA += a[i] * a[i];
+		normB += b[i] * b[i];
+	}
+	const denom = Math.sqrt(normA) * Math.sqrt(normB);
+	if (denom < 1e-15) return 1;
+	return 1 - dot / denom;
+}
+
+/** Default number of components for intermediate dimensionality reduction. */
+const DEFAULT_REDUCE_DIM = 50;
+
+/**
+ * Reduce high-dimensional vectors to an intermediate dimensionality.
+ *
+ * Dispatches to PCA or UMAP based on `method`. Meant as a preprocessing step
+ * before clustering: keeps enough structure for meaningful clusters while
+ * being far cheaper than the original space.
+ *
+ * @param vectors   - Array of embedding vectors (Float32Array or number[])
+ * @param method    - Reduction algorithm: "pca" (fast) or "umap" (better structure)
+ * @param targetDim - Number of components to keep (default 50)
+ * @returns Array of Float32Array with reduced dimensionality
+ */
+export async function reduceDimensions(
+	vectors: (Float32Array | number[])[],
+	method: ProjectionMethod = "pca",
+	targetDim = DEFAULT_REDUCE_DIM,
+): Promise<Float32Array[]> {
+	switch (method) {
+		case "umap":
+			return umapReduce(vectors, targetDim);
+		case "pca":
+			return pcaReduce(vectors, targetDim);
+		default:
+			return pcaReduce(vectors, targetDim);
+	}
+}
+
+/**
+ * Reduce high-dimensional vectors to an intermediate dimensionality via UMAP.
+ *
+ * UMAP preserves non-linear relationships better than PCA, producing a
+ * reduced space where density-based clustering (HDBSCAN) works particularly
+ * well. Slower than PCA but produces higher-quality clustering input.
+ *
+ * @param vectors   - Array of embedding vectors (Float32Array or number[])
+ * @param targetDim - Number of UMAP components to keep (default 50)
+ * @returns Array of Float32Array with reduced dimensionality
+ */
+export async function umapReduce(
+	vectors: (Float32Array | number[])[],
+	targetDim = DEFAULT_REDUCE_DIM,
+): Promise<Float32Array[]> {
+	const n = vectors.length;
+	if (n === 0) return [];
+
+	const d = vectors[0].length;
+
+	// No reduction needed if already low-dimensional
+	if (d <= targetDim) {
+		return vectors.map((v) => new Float32Array(v));
+	}
+
+	if (n === 1) {
+		return [new Float32Array(targetDim)];
+	}
+
+	// UMAP needs nNeighbors < n; fall back to PCA for tiny datasets
+	if (n < 4) {
+		return pcaReduce(vectors, targetDim);
+	}
+
+	// Convert to number[][] as required by umap-js
+	const data: number[][] = vectors.map((v) =>
+		v instanceof Float32Array ? Array.from(v) : v,
+	);
+
+	const nNeighbors = Math.max(3, Math.min(15, n - 1));
+	const nEpochs = Math.min(500, Math.max(200, n * 2));
+
+	const umap = new UMAP({
+		nComponents: targetDim,
+		nNeighbors,
+		minDist: 0.1,
+		spread: 1,
+		nEpochs,
+		distanceFn: umapCosineDistance,
+		random: seededRandom(),
+	});
+
+	const totalEpochs = umap.initializeFit(data);
+	const yieldInterval = 50;
+	for (let epoch = 0; epoch < totalEpochs; epoch++) {
+		umap.step();
+		if ((epoch + 1) % yieldInterval === 0) {
+			await new Promise<void>((r) => setTimeout(r, 0));
+		}
+	}
+	const embedding = umap.getEmbedding();
+
+	return embedding.map((point: number[]) => new Float32Array(point));
+}
+
+/**
+ * Reduce high-dimensional vectors to an intermediate dimensionality via PCA.
+ *
+ * Fast linear projection that preserves the directions of greatest variance.
+ * If the input dimensionality is already ≤ targetDim, returns copies of the
+ * original vectors (no-op).
+ *
+ * @param vectors   - Array of embedding vectors (Float32Array or number[])
+ * @param targetDim - Number of principal components to keep (default 50)
+ * @returns Array of Float32Array with reduced dimensionality
+ */
+export function pcaReduce(
+	vectors: (Float32Array | number[])[],
+	targetDim = DEFAULT_REDUCE_DIM,
+): Float32Array[] {
+	const n = vectors.length;
+	if (n === 0) return [];
+
+	const d = vectors[0].length;
+
+	// No reduction needed if already low-dimensional
+	if (d <= targetDim) {
+		return vectors.map((v) => new Float32Array(v));
+	}
+
+	if (n === 1) {
+		// Single vector — just zero-pad to targetDim
+		return [new Float32Array(targetDim)];
+	}
+
+	// Clamp to max extractable components (n-1 from Gram matrix)
+	const nComponents = Math.min(targetDim, n - 1);
+
+	// 1. Compute the mean vector
+	const mean = new Float64Array(d);
+	for (const v of vectors) {
+		for (let j = 0; j < d; j++) mean[j] += v[j];
+	}
+	for (let j = 0; j < d; j++) mean[j] /= n;
+
+	// 2. Center the data
+	const centered: Float64Array[] = vectors.map((v) => {
+		const c = new Float64Array(d);
+		for (let j = 0; j < d; j++) c[j] = v[j] - mean[j];
+		return c;
+	});
+
+	// 3. Gram matrix K = X·Xᵀ (n × n)
+	const K = new Float64Array(n * n);
+	for (let i = 0; i < n; i++) {
+		for (let j = i; j < n; j++) {
+			let dot = 0;
+			for (let k = 0; k < d; k++) dot += centered[i][k] * centered[j][k];
+			K[i * n + j] = dot;
+			K[j * n + i] = dot;
+		}
+	}
+
+	// 4. Extract top-nComponents eigenvectors via power iteration + deflation
+	const eigenvectors: Float64Array[] = [];
+	const eigenvalues: number[] = [];
+
+	for (let c = 0; c < nComponents; c++) {
+		const v = powerIteration(K, n, 200);
+		const lambda = rayleighQuotient(K, v, n);
+
+		if (lambda < 1e-10) break; // remaining components have near-zero variance
+
+		eigenvectors.push(v);
+		eigenvalues.push(lambda);
+
+		// Deflate: K ← K − λ·v·vᵀ
+		for (let i = 0; i < n; i++) {
+			for (let j = 0; j < n; j++) {
+				K[i * n + j] -= lambda * v[i] * v[j];
+			}
+		}
+	}
+
+	const actualDim = eigenvectors.length;
+	if (actualDim === 0) {
+		// Degenerate case — all zero variance
+		return vectors.map(() => new Float32Array(nComponents));
+	}
+
+	// 5. Project: coordinate j of sample i = sqrt(λⱼ) · vⱼ[i]
+	const result: Float32Array[] = [];
+	for (let i = 0; i < n; i++) {
+		const reduced = new Float32Array(nComponents);
+		for (let j = 0; j < actualDim; j++) {
+			reduced[j] = eigenvectors[j][i] * Math.sqrt(eigenvalues[j]);
+		}
+		result.push(reduced);
+	}
+
+	return result;
+}
 
 /**
  * Project high-dimensional vectors into 2D using the specified method.
@@ -145,28 +365,14 @@ export async function umap2D(
 	// Scale epochs: small datasets converge quickly, large ones need more
 	const nEpochs = Math.min(500, Math.max(200, n * 2));
 
-	// Cosine distance: 1 - cos(x, y). Aligns UMAP neighborhoods with K-Means clustering.
-	const cosineDistanceFn = (a: number[], b: number[]): number => {
-		let dot = 0;
-		let normA = 0;
-		let normB = 0;
-		for (let i = 0; i < a.length; i++) {
-			dot += a[i] * b[i];
-			normA += a[i] * a[i];
-			normB += b[i] * b[i];
-		}
-		const denom = Math.sqrt(normA) * Math.sqrt(normB);
-		if (denom < 1e-15) return 1;
-		return 1 - dot / denom;
-	};
-
 	const umap = new UMAP({
 		nComponents: 2,
 		nNeighbors,
 		minDist: 0.1,
-		spread: 1.0,
+		spread: 1,
 		nEpochs,
-		distanceFn: cosineDistanceFn,
+		distanceFn: umapCosineDistance,
+		random: seededRandom(),
 	});
 
 	// Use incremental fitting to yield to the event loop periodically,

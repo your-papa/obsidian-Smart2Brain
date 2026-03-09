@@ -52,13 +52,18 @@ export class IndexedDBVectorStore implements VectorStore {
 	private db: IDBDatabase | null = null;
 	private _providerId: string | null = null;
 	private _modelId: string | null = null;
+	private readonly dbName: string;
+
+	constructor(vaultId: string) {
+		this.dbName = `${DEXIE_DB_NAME}-${vaultId}`;
+	}
 
 	/**
 	 * Open the database connection.
 	 */
 	async open(): Promise<void> {
 		return new Promise((resolve, reject) => {
-			const request = indexedDB.open(DEXIE_DB_NAME, DB_VERSION);
+			const request = indexedDB.open(this.dbName, DB_VERSION);
 
 			request.onerror = () => reject(request.error);
 

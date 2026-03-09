@@ -3,6 +3,7 @@ import "./lib/i18n";
 import { Logger as Log } from "./utils/logging";
 import "./styles.css";
 import { AgentManager } from "./agent/AgentManager";
+import { terminateWorker as terminateClusteringWorker } from "./utils/computeWorkerManager";
 import { SearchModal } from "./components/modal/SearchModal";
 import { getQueryClient } from "./lib/query";
 import { SkillsService } from "./skills";
@@ -98,6 +99,7 @@ export default class SecondBrainPlugin extends Plugin {
 		Log.info("Unloading plugin");
 		if (this.vectorStoreService) await this.vectorStoreService.cleanup();
 		if (this.agentManager) this.agentManager.cleanup();
+		terminateClusteringWorker();
 	}
 
 	async createNewChat() {

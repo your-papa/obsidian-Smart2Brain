@@ -9,7 +9,7 @@
 import MiniSearch, { type SearchResult as MiniSearchResult } from "minisearch";
 import { Logger } from "../utils/logging";
 
-const DB_NAME = "ssb-minisearch";
+const DB_NAME_PREFIX = "ssb-minisearch";
 const DB_VERSION = 1;
 const STORE_NAME = "index";
 const INDEX_KEY = "main";
@@ -37,8 +37,10 @@ export class MiniSearchService {
 	private isDirty = false;
 	private saveTimeout: ReturnType<typeof setTimeout> | null = null;
 	private documentPaths = new Set<string>();
+	private readonly dbName: string;
 
-	constructor() {
+	constructor(vaultId: string) {
+		this.dbName = `${DB_NAME_PREFIX}-${vaultId}`;
 		this.index = this.createIndex();
 	}
 
@@ -70,7 +72,7 @@ export class MiniSearchService {
 	 */
 	async open(): Promise<void> {
 		return new Promise((resolve, reject) => {
-			const request = indexedDB.open(DB_NAME, DB_VERSION);
+			const request = indexedDB.open(this.dbName, DB_VERSION);
 
 			request.onerror = () => {
 				Logger.error("[MiniSearch] Failed to open database:", request.error);
