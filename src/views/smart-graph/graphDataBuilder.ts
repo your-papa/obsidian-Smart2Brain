@@ -14,9 +14,8 @@ import { getAllTags } from "obsidian";
 
 import type { DocumentVector } from "../../vectorstore/types";
 import { cosineSimilarity } from "../../vectorstore/similarity";
-import { kMeans, suggestK, type KMeansResult } from "../../utils/clustering";
-import { project2D } from "../../utils/projection";
-import { type GraphData, type GraphEdge, type GraphNode, generateClusterColors, type SmartGraphSettings } from "../../types/graph";
+import { kMeansAsync, suggestKAsync, hdbscanAsync, project2DAsync, reduceDimensionsAsync } from "../../utils/computeWorkerManager";
+import { type GraphData, type GraphEdge, type GraphNode, generateClusterColors, type SmartGraphSettings, type ColorGroup } from "../../types/graph";
 
 // ============================================================================
 // Cluster Assignment
@@ -76,6 +75,8 @@ export interface GraphStructureResult {
     filteredDocs: DocumentVector[];
     /** Embedding vectors aligned with filteredDocs. */
     vectors: Float32Array[];
+    /** Reduced vectors (PCA pre-clustering) — used for clustering. */
+    reducedVectors: Float32Array[];
 }
 
 // ============================================================================
@@ -271,7 +272,7 @@ export async function buildGraphStructure(
     const filtered = filterDocuments(app, documents, filter);
 
     if (filtered.length === 0) {
-        return { graphData: { nodes: [], edges: [] }, filteredDocs: [], vectors: [] };
+        return { graphData: { nodes: [], edges: [] }, filteredDocs: [], vectors: [], reducedVectors: [] };
     }
 
     // Extract vectors
@@ -289,8 +290,11 @@ export async function buildGraphStructure(
     // Compute degree and discovery info
     const { degreeMap, hasSemanticEdge, hasWikiEdge } = computeDegreeAndDiscovery(edges, settings);
 
-    // Project into 2D
-    const positions = await project2D(vectors, settings.projectionMethod);
+    // Reduce dimensionality for clustering and projection performance.
+    const reducedVectors = await reduceDimensionsAsync(vectors, settings.projectionMethod);
+
+    // Project reduced vectors into 2D
+    const positions = await project2DAsync(reducedVectors, settings.projectionMethod);
 
     // Create nodes
     const nodes = createGraphNodes(filtered, positions, degreeMap, hasSemanticEdge, hasWikiEdge, settings);
@@ -303,6 +307,7 @@ export async function buildGraphStructure(
         graphData: { nodes, edges: filteredEdges },
         filteredDocs: filtered,
         vectors,
+        reducedVectors,
     };
 }
 
@@ -319,38 +324,54 @@ export interface ClusterResult {
 }
 
 /**
- * Compute K-Means cluster assignments for the given vectors.
+/**
+ * Compute cluster assignments using the configured algorithm.
+ * Clustering runs on the reduced (PCA) vectors when available, which sit in a
+ * sweet-spot dimensionality for density-based and centroid-based algorithms.
  *
  * @returns A map from document path to its cluster number and display colour,
  *          plus the K that was used.
  */
-export function computeClusters(
+export async function computeClusters(
     filteredDocs: DocumentVector[],
     vectors: Float32Array[],
-    settings: Pick<SmartGraphSettings, "defaultK" | "autoK">,
+    settings: Pick<SmartGraphSettings, "defaultK" | "autoK" | "clusteringAlgorithm" | "minClusterSize">,
     themeColors?: string[],
-): ClusterResult {
+    _graphData?: GraphData,
+    reducedVectors?: Float32Array[],
+): Promise<ClusterResult> {
     if (filteredDocs.length === 0 || vectors.length === 0) {
         return { clusterMap: new Map(), k: 0 };
     }
 
-    let k: number;
-    let clusterResult: KMeansResult;
+    // Prefer reduced vectors for clustering — they retain enough structure
+    // for meaningful clusters while avoiding the curse of dimensionality.
+    const clusterVectors = reducedVectors?.length === vectors.length
+        ? reducedVectors
+        : vectors;
 
-    if (settings.autoK) {
-        const suggested = suggestK(vectors, 2, Math.min(10, Math.floor(vectors.length / 2)));
+    let k: number;
+    let clusterLabels: number[];
+
+    if (settings.clusteringAlgorithm === "hdbscan") {
+        const result = await hdbscanAsync(clusterVectors, settings.minClusterSize, undefined, "euclidean");
+        k = result.numClusters;
+        clusterLabels = result.labels;
+    } else if (settings.autoK) {
+        const suggested = await suggestKAsync(clusterVectors, 2, Math.min(10, Math.floor(clusterVectors.length / 2)));
         k = suggested.k;
-        clusterResult = suggested.result;
+        clusterLabels = suggested.result.labels;
     } else {
-        k = Math.min(settings.defaultK, vectors.length - 1);
-        clusterResult = kMeans(vectors, Math.max(1, k));
+        k = Math.min(settings.defaultK, clusterVectors.length - 1);
+        const clusterResult = await kMeansAsync(clusterVectors, Math.max(1, k));
+        clusterLabels = clusterResult.labels;
     }
 
     const clusterColors = generateClusterColors(Math.max(1, k), themeColors);
 
     const clusterMap = new Map<string, ClusterAssignment>();
     for (let i = 0; i < filteredDocs.length; i++) {
-        const cluster = clusterResult.labels[i];
+        const cluster = clusterLabels[i];
         clusterMap.set(filteredDocs[i].path, {
             cluster,
             color: clusterColors[cluster % clusterColors.length],
@@ -383,6 +404,139 @@ export function applyClusterMap(
 }
 
 // ============================================================================
+// Wiki-only graph (initial Obsidian-like view)
+// ============================================================================
+
+/** Result of building a wiki-link-only graph (no semantic edges / projection). */
+export interface WikiGraphResult {
+    graphData: GraphData;
+    filteredDocs: DocumentVector[];
+    vectors: Float32Array[];
+}
+
+/**
+ * Build a graph using only Obsidian wiki-link edges (no semantic edges,
+ * no dimensionality reduction, no projection). Nodes start at (0,0) and
+ * are positioned by d3-force.
+ */
+export function buildWikiGraph(
+    app: App,
+    documents: DocumentVector[],
+    settings: Pick<SmartGraphSettings, "showOrphans">,
+    filter?: GraphFilter,
+): WikiGraphResult {
+    let filtered = documents;
+    if (filter?.folders?.length || filter?.tags?.length) {
+        filtered = documents.filter((doc) => {
+            const file = app.vault.getAbstractFileByPath(doc.path);
+            if (!file || !("extension" in file)) return false;
+            return passesFilter(app, file as TFile, filter);
+        });
+    }
+
+    if (filtered.length === 0) {
+        return { graphData: { nodes: [], edges: [] }, filteredDocs: [], vectors: [] };
+    }
+
+    const vectors = filtered.map((doc) => doc.vector);
+    const filteredPathSet = new Set(filtered.map((d) => d.path));
+
+    // Build wiki edges from Obsidian's resolved links
+    const edges: GraphEdge[] = [];
+    const resolvedLinks = app.metadataCache.resolvedLinks;
+    const wikiEdgeSet = new Set<string>();
+
+    for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
+        if (!filteredPathSet.has(sourcePath)) continue;
+        for (const [targetPath, count] of Object.entries(targets)) {
+            if (!filteredPathSet.has(targetPath)) continue;
+            if (sourcePath === targetPath) continue;
+            const ek = sourcePath < targetPath ? `${sourcePath}\0${targetPath}` : `${targetPath}\0${sourcePath}`;
+            if (!wikiEdgeSet.has(ek)) {
+                wikiEdgeSet.add(ek);
+                edges.push({ source: sourcePath, target: targetPath, weight: count, type: "wiki" });
+            }
+        }
+    }
+
+    // Degree map
+    const degreeMap = new Map<string, number>();
+    for (const edge of edges) {
+        degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
+        degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
+    }
+
+    // Create nodes with no position (d3-force will place them)
+    const nodes: GraphNode[] = [];
+    for (const doc of filtered) {
+        const degree = degreeMap.get(doc.path) ?? 0;
+        if (!settings.showOrphans && degree === 0) continue;
+        const label = doc.path.replace(/\.md$/, "").split("/").pop() ?? doc.path;
+        nodes.push({
+            id: doc.path,
+            path: doc.path,
+            label,
+            x: 0,
+            y: 0,
+            degree,
+            highlighted: false,
+        });
+    }
+
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const filteredEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
+
+    return { graphData: { nodes, edges: filteredEdges }, filteredDocs: filtered, vectors };
+}
+
+// ============================================================================
+// Color groups
+// ============================================================================
+
+/**
+ * Check whether a file matches a color group query.
+ * - Queries starting with `#` match tags.
+ * - All other queries match as a path prefix (folder).
+ */
+function matchesColorGroup(app: App, path: string, group: ColorGroup): boolean {
+    const q = group.query.trim();
+    if (!q) return false;
+    if (q.startsWith("#")) {
+        const file = app.vault.getAbstractFileByPath(path);
+        if (!file || !("extension" in file)) return false;
+        const cache = app.metadataCache.getFileCache(file as TFile);
+        const tags = cache ? (getAllTags(cache) ?? []) : [];
+        return tags.includes(q);
+    }
+    // Folder / path prefix
+    const prefix = q.endsWith("/") ? q : `${q}/`;
+    return path.startsWith(prefix);
+}
+
+/**
+ * Apply user-defined color groups to graph nodes.
+ * First matching group wins; unmatched nodes keep their existing color.
+ */
+export function applyColorGroups(
+    app: App,
+    graphData: GraphData,
+    colorGroups: ColorGroup[],
+): GraphData {
+    if (colorGroups.length === 0) return graphData;
+    return {
+        ...graphData,
+        nodes: graphData.nodes.map((node) => {
+            for (const group of colorGroups) {
+                if (matchesColorGroup(app, node.path, group)) {
+                    return { ...node, color: group.color };
+                }
+            }
+            return node;
+        }),
+    };
+}
+
+// ============================================================================
 // Convenience: build + cluster in one call (used by Refresh / initial load)
 // ============================================================================
 
@@ -396,13 +550,13 @@ export async function buildGraph(
     documents: DocumentVector[],
     settings: Pick<
         SmartGraphSettings,
-        "defaultK" | "autoK" | "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod" | "showWikiLinks" | "showSemanticEdges"
+        "defaultK" | "autoK" | "semanticNeighbors" | "similarityThreshold" | "showOrphans" | "projectionMethod" | "showWikiLinks" | "showSemanticEdges" | "clusteringAlgorithm" | "minClusterSize"
     >,
     filter?: GraphFilter,
     themeColors?: string[],
 ): Promise<GraphData> {
-    const { graphData, filteredDocs, vectors } = await buildGraphStructure(app, documents, settings, filter);
-    const { clusterMap } = computeClusters(filteredDocs, vectors, settings, themeColors);
+    const { graphData, filteredDocs, vectors, reducedVectors } = await buildGraphStructure(app, documents, settings, filter);
+    const { clusterMap } = await computeClusters(filteredDocs, vectors, settings, themeColors, graphData, reducedVectors);
     return applyClusterMap(graphData, clusterMap);
 }
 

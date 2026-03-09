@@ -22,6 +22,7 @@ export class App {
 	vault = new Vault();
 	workspace = new Workspace();
 	metadataCache = new MetadataCache();
+	appId = "test-vault-id";
 	// Community plugins API
 	plugins = {
 		manifests: {} as Record<string, unknown>,
@@ -42,6 +43,7 @@ export class Vault {
 	};
 	getAbstractFileByPath = vi.fn();
 	getFiles = vi.fn().mockReturnValue([]);
+	getName = vi.fn().mockReturnValue("test-vault");
 	read = vi.fn().mockResolvedValue("");
 	modify = vi.fn().mockResolvedValue(undefined);
 	create = vi.fn().mockResolvedValue(new TFile());

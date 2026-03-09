@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kMeans, silhouetteScore, suggestK } from "../../src/utils/clustering";
+import { kMeans, silhouetteScore, suggestK, hdbscan } from "../../src/utils/clustering";
 
 /**
  * Helper to create a random Float32Array vector.
@@ -164,5 +164,104 @@ describe("suggestK", () => {
         const vectors = Array.from({ length: 6 }, (_, i) => randomVector(4, i));
         const { k } = suggestK(vectors, 2, 10);
         expect(k).toBeLessThanOrEqual(3);
+    });
+});
+
+describe("hdbscan", () => {
+    it("should return empty result for empty input", () => {
+        const result = hdbscan([], 3);
+        expect(result.labels).toEqual([]);
+        expect(result.numClusters).toBe(0);
+    });
+
+    it("should handle a single point", () => {
+        const result = hdbscan([randomVector(4)], 2);
+        expect(result.labels).toEqual([0]);
+        expect(result.numClusters).toBe(1);
+    });
+
+    it("should handle fewer points than minClusterSize", () => {
+        const vectors = [randomVector(4, 1), randomVector(4, 2), randomVector(4, 3)];
+        const result = hdbscan(vectors, 5);
+        expect(result.labels).toHaveLength(3);
+        expect(result.numClusters).toBe(1);
+        // All assigned to cluster 0
+        for (const label of result.labels) {
+            expect(label).toBe(0);
+        }
+    });
+
+    it("should assign all vectors to a cluster (no noise in output)", () => {
+        const vectors = Array.from({ length: 20 }, (_, i) => randomVector(8, i));
+        const result = hdbscan(vectors, 3);
+        expect(result.labels).toHaveLength(20);
+        for (const label of result.labels) {
+            expect(label).toBeGreaterThanOrEqual(0);
+        }
+    });
+
+    it("should find clusters in well-separated data", () => {
+        const center1 = new Float32Array([10, 0, 0, 0]);
+        const center2 = new Float32Array([0, 10, 0, 0]);
+        const center3 = new Float32Array([0, 0, 10, 0]);
+
+        const cluster1 = createCluster(center1, 15, 0.3, 100);
+        const cluster2 = createCluster(center2, 15, 0.3, 200);
+        const cluster3 = createCluster(center3, 15, 0.3, 300);
+
+        const vectors = [...cluster1, ...cluster2, ...cluster3];
+        const result = hdbscan(vectors, 5);
+
+        expect(result.labels).toHaveLength(45);
+        expect(result.numClusters).toBe(3);
+
+        // Points within the same original group should all share one label
+        const labels1 = new Set(result.labels.slice(0, 15));
+        const labels2 = new Set(result.labels.slice(15, 30));
+        const labels3 = new Set(result.labels.slice(30, 45));
+        expect(labels1.size).toBe(1);
+        expect(labels2.size).toBe(1);
+        expect(labels3.size).toBe(1);
+        // And the three cluster labels should be distinct
+        const allLabels = new Set([...labels1, ...labels2, ...labels3]);
+        expect(allLabels.size).toBe(3);
+    });
+
+    it("should return at least 1 cluster for any valid input", () => {
+        const vectors = Array.from({ length: 10 }, (_, i) => randomVector(4, i));
+        const result = hdbscan(vectors, 3);
+        expect(result.numClusters).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should find clusters in 2D data with euclidean metric", () => {
+        // Simulate projected 2D positions with 3 well-separated groups
+        const group1 = Array.from({ length: 15 }, (_, i) => {
+            const x = Math.sin((100 + i) * 9301 + 233280) * 0.5;
+            const y = Math.sin((100 + i) * 49297 + 233280) * 0.5;
+            return new Float32Array([10 + x, 10 + y]);
+        });
+        const group2 = Array.from({ length: 15 }, (_, i) => {
+            const x = Math.sin((200 + i) * 9301 + 233280) * 0.5;
+            const y = Math.sin((200 + i) * 49297 + 233280) * 0.5;
+            return new Float32Array([-10 + x, 10 + y]);
+        });
+        const group3 = Array.from({ length: 15 }, (_, i) => {
+            const x = Math.sin((300 + i) * 9301 + 233280) * 0.5;
+            const y = Math.sin((300 + i) * 49297 + 233280) * 0.5;
+            return new Float32Array([0 + x, -10 + y]);
+        });
+
+        const vectors = [...group1, ...group2, ...group3];
+        const result = hdbscan(vectors, 5, undefined, "euclidean");
+
+        expect(result.numClusters).toBe(3);
+        // Each original group should map to exactly one cluster label
+        const labels1 = new Set(result.labels.slice(0, 15));
+        const labels2 = new Set(result.labels.slice(15, 30));
+        const labels3 = new Set(result.labels.slice(30, 45));
+        expect(labels1.size).toBe(1);
+        expect(labels2.size).toBe(1);
+        expect(labels3.size).toBe(1);
+        expect(new Set([...labels1, ...labels2, ...labels3]).size).toBe(3);
     });
 });

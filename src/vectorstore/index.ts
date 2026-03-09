@@ -44,11 +44,11 @@ import { HNSWVectorStore } from "./HNSWVectorStore";
  * @param backend The backend to use: 'indexeddb' (brute-force) or 'hnsw' (ANN)
  * @returns A VectorStore instance
  */
-export function createVectorStore(backend: VectorStoreBackend): VectorStore {
+export function createVectorStore(backend: VectorStoreBackend, vaultId: string): VectorStore {
 	switch (backend) {
 		case "hnsw":
-			return new HNSWVectorStore();
+			return new HNSWVectorStore(vaultId);
 		default:
-			return new IndexedDBVectorStore();
+			return new IndexedDBVectorStore(vaultId);
 	}
 }

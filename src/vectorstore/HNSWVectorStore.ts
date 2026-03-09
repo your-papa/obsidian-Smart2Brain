@@ -21,7 +21,7 @@ import {
 } from "./types";
 import { cosineSimilarity, toFloat32Array, toNumberArray } from "./similarity";
 
-const DB_NAME = "smart-second-brain-hnsw";
+const DB_NAME_PREFIX = "ssb-hnsw";
 const DOCUMENTS_STORE = "documents";
 const METADATA_STORE = "metadata";
 const ID_MAPPING_STORE = "id_mapping";
@@ -74,6 +74,7 @@ export class HNSWVectorStore implements VectorStore {
 	private _modelId: string | null = null;
 	private dimensions: number | null = null;
 	private nextHnswId = 0;
+	private readonly dbName: string;
 
 	// ID mappings (string ID <-> numeric HNSW ID)
 	private idToNumeric: Map<string, number> = new Map();
@@ -83,6 +84,10 @@ export class HNSWVectorStore implements VectorStore {
 	private readonly M = 16; // Number of connections per node
 	private readonly efConstruction = 200; // Construction time accuracy
 	private readonly efSearch = 100; // Search time accuracy
+
+	constructor(vaultId: string) {
+		this.dbName = `${DB_NAME_PREFIX}-${vaultId}`;
+	}
 
 	/**
 	 * Open the database connection and initialize HNSW index.
@@ -106,7 +111,7 @@ export class HNSWVectorStore implements VectorStore {
 
 	private async openIndexedDB(): Promise<void> {
 		return new Promise((resolve, reject) => {
-			const request = indexedDB.open(DB_NAME, DB_VERSION);
+			const request = indexedDB.open(this.dbName, DB_VERSION);
 
 			request.onerror = () => reject(request.error);
 
@@ -198,7 +203,7 @@ export class HNSWVectorStore implements VectorStore {
 		if (!this.dimensions) return;
 
 		// Create HNSW index with IndexedDB persistence
-		this.hnswIndex = await HNSWWithDB.create(this.M, this.efConstruction, `${DB_NAME}-hnsw-index`, this.efSearch);
+		this.hnswIndex = await HNSWWithDB.create(this.M, this.efConstruction, `${this.dbName}-hnsw-index`, this.efSearch);
 
 		// Load existing index if available
 		try {
@@ -497,7 +502,7 @@ export class HNSWVectorStore implements VectorStore {
 			this.hnswIndex = await HNSWWithDB.create(
 				this.M,
 				this.efConstruction,
-				`${DB_NAME}-hnsw-index`,
+				`${this.dbName}-hnsw-index`,
 				this.efSearch,
 			);
 		}

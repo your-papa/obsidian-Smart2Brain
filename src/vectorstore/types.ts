@@ -137,7 +137,7 @@ export interface IndexingProgress {
 export const INDEX_VERSION = 1;
 
 /** Database name for Dexie/IndexedDB */
-export const DEXIE_DB_NAME = "smart-second-brain-vectorstore";
+export const DEXIE_DB_NAME = "ssb-vectorstore";
 
 /** Path to the serialized index file (relative to plugin data dir) */
 export const INDEX_FILE_PATH = "vectorstore/index.msgpack";

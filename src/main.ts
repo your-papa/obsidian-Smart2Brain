@@ -5,6 +5,7 @@ import "./styles.css";
 import { AgentManager } from "./agent/AgentManager";
 import { inlineDiffPlugin } from "./editor/inlineDiffExtension";
 import { createReadingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
+import { terminateWorker as terminateClusteringWorker } from "./utils/computeWorkerManager";
 import { SearchModal } from "./components/modal/SearchModal";
 import { getQueryClient } from "./lib/query";
 import { SkillsService } from "./skills";
@@ -124,6 +125,7 @@ export default class SecondBrainPlugin extends Plugin {
 		if (this.vectorStoreService) void this.vectorStoreService.cleanup();
 		if (this.agentManager) this.agentManager.cleanup();
 		if (this.pendingChangesStore) this.pendingChangesStore.cleanup();
+		terminateClusteringWorker();
 	}
 
 	async createNewChat() {

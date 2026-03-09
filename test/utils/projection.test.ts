@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pca2D, umap2D, project2D } from "../../src/utils/projection";
+import { pca2D, umap2D, project2D, pcaReduce, umapReduce, reduceDimensions } from "../../src/utils/projection";
 
 describe("pca2D", () => {
     it("returns empty array for empty input", () => {
@@ -269,6 +269,203 @@ describe("project2D", () => {
         for (const c of result) {
             expect(Number.isFinite(c.x)).toBe(true);
             expect(Number.isFinite(c.y)).toBe(true);
+        }
+    });
+});
+
+describe("pcaReduce", () => {
+    it("returns empty array for empty input", () => {
+        expect(pcaReduce([])).toEqual([]);
+    });
+
+    it("returns a zero vector for a single input", () => {
+        const result = pcaReduce([new Float32Array([1, 2, 3, 4, 5])], 3);
+        expect(result).toHaveLength(1);
+        expect(result[0].length).toBe(3);
+    });
+
+    it("returns copies when input dim <= targetDim (no-op)", () => {
+        const vectors = [
+            new Float32Array([1, 2, 3]),
+            new Float32Array([4, 5, 6]),
+        ];
+        const result = pcaReduce(vectors, 5);
+        expect(result).toHaveLength(2);
+        expect(result[0].length).toBe(3); // original dim, not targetDim
+        // Values should match
+        for (let i = 0; i < 3; i++) {
+            expect(result[0][i]).toBeCloseTo(vectors[0][i]);
+            expect(result[1][i]).toBeCloseTo(vectors[1][i]);
+        }
+    });
+
+    it("reduces dimensionality to targetDim", () => {
+        const dim = 100;
+        const vectors: Float32Array[] = [];
+        for (let i = 0; i < 20; i++) {
+            const v = new Float32Array(dim);
+            for (let j = 0; j < dim; j++) v[j] = Math.sin(i * 0.5 + j * 0.1);
+            vectors.push(v);
+        }
+        const result = pcaReduce(vectors, 10);
+        expect(result).toHaveLength(20);
+        for (const v of result) {
+            expect(v.length).toBe(10);
+            for (let j = 0; j < v.length; j++) {
+                expect(Number.isFinite(v[j])).toBe(true);
+            }
+        }
+    });
+
+    it("preserves group structure after reduction", () => {
+        const dim = 64;
+        // Group A: vectors pointing in one direction
+        const groupA: Float32Array[] = [];
+        for (let i = 0; i < 5; i++) {
+            const v = new Float32Array(dim);
+            v[0] = 1 + i * 0.05;
+            v[1] = 0.5 + i * 0.02;
+            groupA.push(v);
+        }
+        // Group B: vectors pointing in a different direction
+        const groupB: Float32Array[] = [];
+        for (let i = 0; i < 5; i++) {
+            const v = new Float32Array(dim);
+            v[30] = 1 + i * 0.05;
+            v[31] = 0.5 + i * 0.02;
+            groupB.push(v);
+        }
+
+        const all = [...groupA, ...groupB];
+        const reduced = pcaReduce(all, 10);
+
+        // Within-group distances should be smaller than between-group distances
+        function eucDist(a: Float32Array, b: Float32Array): number {
+            let sum = 0;
+            for (let i = 0; i < a.length; i++) sum += (a[i] - b[i]) ** 2;
+            return Math.sqrt(sum);
+        }
+
+        const withinA = eucDist(reduced[0], reduced[4]);
+        const withinB = eucDist(reduced[5], reduced[9]);
+        const between = eucDist(reduced[0], reduced[5]);
+
+        expect(between).toBeGreaterThan(withinA);
+        expect(between).toBeGreaterThan(withinB);
+    });
+
+    it("clamps to n-1 components when n < targetDim", () => {
+        const vectors = [
+            new Float32Array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            new Float32Array([0, 1, 0, 0, 0, 0, 0, 0, 0, 0]),
+            new Float32Array([0, 0, 1, 0, 0, 0, 0, 0, 0, 0]),
+        ];
+        // 3 samples, targetDim=5 → can extract at most 2 components
+        const result = pcaReduce(vectors, 5);
+        expect(result).toHaveLength(3);
+        // Output dim = min(targetDim, n-1) = min(5, 2) = 2
+        expect(result[0].length).toBe(2);
+        for (const v of result) {
+            for (let j = 0; j < v.length; j++) {
+                expect(Number.isFinite(v[j])).toBe(true);
+            }
+        }
+    });
+
+    it("produces deterministic results", () => {
+        const vectors = [
+            new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+            new Float32Array([8, 7, 6, 5, 4, 3, 2, 1]),
+            new Float32Array([2, 3, 4, 5, 6, 7, 8, 9]),
+        ];
+        const r1 = pcaReduce(vectors, 3);
+        const r2 = pcaReduce(vectors, 3);
+        for (let i = 0; i < r1.length; i++) {
+            for (let j = 0; j < r1[i].length; j++) {
+                expect(r1[i][j]).toBeCloseTo(r2[i][j], 10);
+            }
+        }
+    });
+});
+
+describe("umapReduce", () => {
+    it("returns empty array for empty input", async () => {
+        expect(await umapReduce([])).toEqual([]);
+    });
+
+    it("returns a zero vector for a single input", async () => {
+        const result = await umapReduce([new Float32Array([1, 2, 3, 4, 5])], 3);
+        expect(result).toHaveLength(1);
+        expect(result[0].length).toBe(3);
+    });
+
+    it("returns copies when input dim <= targetDim (no-op)", async () => {
+        const vectors = [
+            new Float32Array([1, 2, 3]),
+            new Float32Array([4, 5, 6]),
+        ];
+        const result = await umapReduce(vectors, 5);
+        expect(result).toHaveLength(2);
+        expect(result[0].length).toBe(3);
+    });
+
+    it("reduces dimensionality to targetDim", async () => {
+        const dim = 20;
+        const targetDim = 5;
+        const vectors: Float32Array[] = [];
+        for (let i = 0; i < 10; i++) {
+            const v = new Float32Array(dim);
+            for (let j = 0; j < dim; j++) v[j] = Math.sin(i * 0.5 + j * 0.1);
+            vectors.push(v);
+        }
+        const result = await umapReduce(vectors, targetDim);
+        expect(result).toHaveLength(10);
+        for (const v of result) {
+            expect(v.length).toBe(targetDim);
+            for (let j = 0; j < v.length; j++) {
+                expect(Number.isFinite(v[j])).toBe(true);
+            }
+        }
+    });
+
+    it("falls back to PCA for very small datasets", async () => {
+        const vectors = [
+            new Float32Array([1, 0, 0, 0, 0, 0, 0, 0]),
+            new Float32Array([0, 1, 0, 0, 0, 0, 0, 0]),
+            new Float32Array([0, 0, 1, 0, 0, 0, 0, 0]),
+        ];
+        // n=3 < 4 → falls back to PCA
+        const result = await umapReduce(vectors, 3);
+        expect(result).toHaveLength(3);
+        for (const v of result) {
+            expect(Number.isFinite(v[0])).toBe(true);
+        }
+    });
+});
+
+describe("reduceDimensions", () => {
+    const vectors = [
+        new Float32Array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+        new Float32Array([0, 1, 0, 0, 0, 0, 0, 0, 0, 0]),
+        new Float32Array([0, 0, 1, 0, 0, 0, 0, 0, 0, 0]),
+        new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 0, 0]),
+        new Float32Array([1, 1, 0, 0, 0, 0, 0, 0, 0, 0]),
+    ];
+
+    it("dispatches to PCA by default", async () => {
+        const result = await reduceDimensions(vectors, "pca", 3);
+        expect(result).toHaveLength(5);
+        expect(result[0].length).toBe(3);
+    });
+
+    it("dispatches to UMAP when specified", async () => {
+        const result = await reduceDimensions(vectors, "umap", 3);
+        expect(result).toHaveLength(5);
+        expect(result[0].length).toBe(3);
+        for (const v of result) {
+            for (let j = 0; j < v.length; j++) {
+                expect(Number.isFinite(v[j])).toBe(true);
+            }
         }
     });
 });
