@@ -4,13 +4,24 @@
   import RangeSlider from "../ui/RangeSlider.svelte";
   import Dropdown from "../ui/Dropdown.svelte";
   import Search from "../ui/Search.svelte";
+  import Text from "../ui/Text.svelte";
+  import ColorPicker from "../ui/ColorPicker.svelte";
   import SettingContainer from "../settings/SettingContainer.svelte";
-  import type { ProjectionMethod, SmartGraphSettings } from "../../types/graph";
+  import type {
+    ProjectionMethod,
+    ClusteringAlgorithm,
+    SmartGraphSettings,
+    GraphMode,
+    ColorGroup,
+  } from "../../types/graph";
+  import { THEME_COLOR_VARS } from "../../types/graph";
 
   interface Props {
     settings: SmartGraphSettings;
     suggestedK: number | null;
     isLoading: boolean;
+    graphMode: GraphMode;
+    isTransitioning: boolean;
     nodeCount: number;
     edgeCount: number;
     availableFolders: string[];
@@ -25,6 +36,8 @@
     onFitToView: () => void;
     onRefresh: () => void;
     onApplyProjection?: () => void;
+    onSmartCluster?: () => void;
+    onBackToWiki?: () => void;
     onLabelClusters?: () => void;
     isLabeling?: boolean;
   }
@@ -33,6 +46,8 @@
     settings,
     suggestedK,
     isLoading,
+    graphMode,
+    isTransitioning,
     nodeCount,
     edgeCount,
     availableFolders,
@@ -47,6 +62,8 @@
     onFitToView,
     onRefresh,
     onApplyProjection,
+    onSmartCluster,
+    onBackToWiki,
     onLabelClusters,
     isLabeling = false,
   }: Props = $props();
@@ -60,6 +77,7 @@
 
   // Per-section collapse state
   let sectionOpen: Record<string, boolean> = $state({
+    colorGroups: false,
     projection: true,
     edges: true,
     layout: false,
@@ -75,16 +93,31 @@
   let appliedAutoK: boolean = $state(settings.autoK);
   // svelte-ignore state_referenced_locally
   let appliedDefaultK: number = $state(settings.defaultK);
+  // svelte-ignore state_referenced_locally
+  let appliedClusteringAlgorithm: ClusteringAlgorithm = $state(settings.clusteringAlgorithm);
+  // svelte-ignore state_referenced_locally
+  let appliedMinClusterSize: number = $state(settings.minClusterSize);
+  // svelte-ignore state_referenced_locally
+  let appliedUseForceLayout: boolean = $state(settings.useForceLayout);
 
   let projectionDirty = $derived(
     settings.projectionMethod !== appliedProjection ||
       settings.autoK !== appliedAutoK ||
-      (!settings.autoK && settings.defaultK !== appliedDefaultK),
+      (!settings.autoK && settings.defaultK !== appliedDefaultK) ||
+      settings.clusteringAlgorithm !== appliedClusteringAlgorithm ||
+      (settings.clusteringAlgorithm === "hdbscan" &&
+        settings.minClusterSize !== appliedMinClusterSize) ||
+      settings.useForceLayout !== appliedUseForceLayout,
   );
 
   const projectionOptions = [
     { display: "UMAP", value: "umap" as ProjectionMethod },
     { display: "PCA", value: "pca" as ProjectionMethod },
+  ];
+
+  const clusteringAlgorithmOptions = [
+    { display: "K-Means", value: "kmeans" as ClusteringAlgorithm },
+    { display: "HDBSCAN", value: "hdbscan" as ClusteringAlgorithm },
   ];
 
   function handleProjectionChange(val: ProjectionMethod) {
@@ -101,6 +134,14 @@
 
   function handleAutoKChange(checked: boolean) {
     onSettingsChange({ autoK: checked });
+  }
+
+  function handleClusteringAlgorithmChange(val: ClusteringAlgorithm) {
+    onSettingsChange({ clusteringAlgorithm: val });
+  }
+
+  function handleMinClusterSizeChange(val: number) {
+    onSettingsChange({ minClusterSize: val });
   }
 
   function handleShowOrphansChange(checked: boolean) {
@@ -152,18 +193,62 @@
     onTagFilterChange([]);
     onSearchChange("");
   }
+
+  // Color group handlers
+  function addColorGroup() {
+    const style = getComputedStyle(document.body);
+    const defaultColor = style.getPropertyValue(THEME_COLOR_VARS[0]).trim() || "#e93147";
+    const updated: ColorGroup[] = [...settings.colorGroups, { query: "", color: defaultColor }];
+    onSettingsChange({ colorGroups: updated });
+  }
+
+  function removeColorGroup(index: number) {
+    const updated = settings.colorGroups.filter((_: ColorGroup, i: number) => i !== index);
+    onSettingsChange({ colorGroups: updated });
+  }
+
+  function updateColorGroupQuery(index: number, query: string) {
+    const updated = settings.colorGroups.map((g: ColorGroup, i: number) =>
+      i === index ? { ...g, query } : g,
+    );
+    onSettingsChange({ colorGroups: updated });
+  }
+
+  function updateColorGroupColor(index: number, color: string) {
+    const updated = settings.colorGroups.map((g: ColorGroup, i: number) =>
+      i === index ? { ...g, color } : g,
+    );
+    onSettingsChange({ colorGroups: updated });
+  }
 </script>
 
 <div class="graph-toolbar">
   <!-- Action icons -->
   <Button iconId="maximize" onClick={onFitToView} tooltip="Fit graph to view" />
   <Button iconId="refresh-cw" onClick={onRefresh} tooltip="Rebuild graph" />
-  {#if onLabelClusters}
+  {#if graphMode === "wiki" && !isTransitioning && onSmartCluster}
+    <Button
+      cta
+      iconId="brain"
+      onClick={onSmartCluster}
+      tooltip="Smart Clustering: group notes by semantic similarity"
+      disabled={isLoading}
+    />
+  {/if}
+  {#if (graphMode === "smart" || isTransitioning) && onBackToWiki}
+    <Button
+      iconId="undo-2"
+      onClick={onBackToWiki}
+      tooltip="Back to wiki graph"
+      disabled={isLoading || isTransitioning}
+    />
+  {/if}
+  {#if (graphMode === "smart" || isTransitioning) && onLabelClusters}
     <Button
       iconId="tags"
       onClick={onLabelClusters}
       tooltip={isLabeling ? "Labeling…" : "Generate cluster labels with LLM"}
-      disabled={isLabeling || isLoading}
+      disabled={isLabeling || isLoading || isTransitioning}
     />
   {/if}
   <!-- Filter toggle -->
@@ -254,126 +339,210 @@
       <div class="graph-stats">
         <span class="graph-stat">{nodeCount} nodes</span>
         <span class="graph-stat">{edgeCount} edges</span>
+        <span class="graph-stat mode-badge"
+          >{graphMode === "wiki" && !isTransitioning ? "Wiki" : "Smart"}</span
+        >
         {#if isLoading}
           <span class="graph-stat loading">Computing...</span>
         {/if}
       </div>
 
-      <!-- Projection & Clustering -->
-      <button
-        type="button"
-        class="section-header"
-        onclick={() => (sectionOpen.projection = !sectionOpen.projection)}
-      >
-        <span>Projection & Clustering</span>
-        <svg
-          class="section-chevron"
-          class:open={sectionOpen.projection}
-          xmlns="http://www.w3.org/2000/svg"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
+      <!-- Color Groups (wiki mode only) -->
+      {#if graphMode === "wiki"}
+        <button
+          type="button"
+          class="section-header"
+          onclick={() => (sectionOpen.colorGroups = !sectionOpen.colorGroups)}
         >
-      </button>
+          <span>Color Groups</span>
+          <svg
+            class="section-chevron"
+            class:open={sectionOpen.colorGroups}
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
+          >
+        </button>
 
-      {#if sectionOpen.projection}
-        <SettingContainer name="Projection" desc="2D layout algorithm">
-          <Dropdown
-            type="options"
-            dropdown={projectionOptions}
-            selected={settings.projectionMethod}
-            onchange={handleProjectionChange}
-          />
-        </SettingContainer>
-
-        <SettingContainer name="Auto K" desc="Automatically determine number of clusters">
-          <Toggle checked={settings.autoK} onchange={handleAutoKChange} />
-        </SettingContainer>
-
-        {#if !settings.autoK}
-          <SettingContainer name="Clusters (K)" desc="Number of semantic clusters">
-            <RangeSlider
-              value={settings.defaultK}
-              min={2}
-              max={20}
-              step={1}
-              showValue={true}
-              oncommit={handleKChange}
-            />
-          </SettingContainer>
-        {:else if suggestedK !== null}
-          <div class="graph-info">
-            Auto K: <strong>{suggestedK}</strong> clusters
-          </div>
-        {/if}
-
-        {#if projectionDirty && onApplyProjection}
+        {#if sectionOpen.colorGroups}
+          {#each settings.colorGroups as group, i}
+            <div class="color-group-row">
+              <ColorPicker value={group.color} onchange={(c) => updateColorGroupColor(i, c)} />
+              <Text
+                inputType="text"
+                value={group.query}
+                placeholder="folder/ or #tag"
+                onchange={(v) => updateColorGroupQuery(i, v)}
+              />
+              <Button iconId="x" onClick={() => removeColorGroup(i)} tooltip="Remove group" />
+            </div>
+          {/each}
           <div class="apply-bar">
-            <Button
-              cta
-              buttonText="Apply"
-              onClick={() => {
-                onApplyProjection();
-                appliedProjection = settings.projectionMethod;
-                appliedAutoK = settings.autoK;
-                appliedDefaultK = settings.defaultK;
-              }}
-              tooltip="Apply projection & clustering changes"
-              disabled={isLoading}
-            />
+            <Button iconId="plus" buttonText="Add group" onClick={addColorGroup} />
           </div>
         {/if}
       {/if}
 
-      <!-- Edges & Connectivity -->
-      <button
-        type="button"
-        class="section-header"
-        onclick={() => (sectionOpen.edges = !sectionOpen.edges)}
-      >
-        <span>Edges & Connectivity</span>
-        <svg
-          class="section-chevron"
-          class:open={sectionOpen.edges}
-          xmlns="http://www.w3.org/2000/svg"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
+      <!-- Projection & Clustering (smart mode only) -->
+      {#if graphMode === "smart"}
+        <button
+          type="button"
+          class="section-header"
+          onclick={() => (sectionOpen.projection = !sectionOpen.projection)}
         >
-      </button>
+          <span>Projection & Clustering</span>
+          <svg
+            class="section-chevron"
+            class:open={sectionOpen.projection}
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
+          >
+        </button>
 
-      {#if sectionOpen.edges}
-        <SettingContainer name="Similarity" desc="Minimum similarity for edges (%)">
-          <RangeSlider
-            value={Math.round(settings.similarityThreshold * 100)}
-            min={10}
-            max={90}
-            step={5}
-            showValue={true}
-            oncommit={handleThresholdChange}
-          />
-        </SettingContainer>
+        {#if sectionOpen.projection}
+          <SettingContainer
+            name="Force layout"
+            desc="Use force-directed layout instead of 2D projection"
+          >
+            <Toggle
+              checked={settings.useForceLayout}
+              onchange={(val) => onSettingsChange({ useForceLayout: val })}
+            />
+          </SettingContainer>
 
-        <SettingContainer name="Neighbors" desc="Max neighbors per node">
-          <RangeSlider
-            value={settings.semanticNeighbors}
-            min={1}
-            max={15}
-            step={1}
-            showValue={true}
-            oncommit={handleNeighborsChange}
-          />
-        </SettingContainer>
+          {#if !settings.useForceLayout}
+            <SettingContainer name="Projection" desc="2D layout algorithm">
+              <Dropdown
+                type="options"
+                dropdown={projectionOptions}
+                selected={settings.projectionMethod}
+                onchange={handleProjectionChange}
+              />
+            </SettingContainer>
+          {/if}
+
+          <SettingContainer name="Algorithm" desc="Clustering method">
+            <Dropdown
+              type="options"
+              dropdown={clusteringAlgorithmOptions}
+              selected={settings.clusteringAlgorithm}
+              onchange={handleClusteringAlgorithmChange}
+            />
+          </SettingContainer>
+
+          {#if settings.clusteringAlgorithm === "kmeans"}
+            <SettingContainer name="Auto K" desc="Automatically determine number of clusters">
+              <Toggle checked={settings.autoK} onchange={handleAutoKChange} />
+            </SettingContainer>
+
+            {#if !settings.autoK}
+              <SettingContainer name="Clusters (K)" desc="Number of semantic clusters">
+                <RangeSlider
+                  value={settings.defaultK}
+                  min={2}
+                  max={20}
+                  step={1}
+                  showValue={true}
+                  oncommit={handleKChange}
+                />
+              </SettingContainer>
+            {:else if suggestedK !== null}
+              <div class="graph-info">
+                Auto K: <strong>{suggestedK}</strong> clusters
+              </div>
+            {/if}
+          {:else if settings.clusteringAlgorithm === "hdbscan"}
+            <SettingContainer name="Min cluster size" desc="Min points to form a cluster">
+              <RangeSlider
+                value={settings.minClusterSize}
+                min={2}
+                max={50}
+                step={1}
+                showValue={true}
+                oncommit={handleMinClusterSizeChange}
+              />
+            </SettingContainer>
+          {/if}
+
+          {#if projectionDirty && onApplyProjection}
+            <div class="apply-bar">
+              <Button
+                cta
+                buttonText="Apply"
+                onClick={() => {
+                  onApplyProjection();
+                  appliedProjection = settings.projectionMethod;
+                  appliedAutoK = settings.autoK;
+                  appliedDefaultK = settings.defaultK;
+                  appliedClusteringAlgorithm = settings.clusteringAlgorithm;
+                  appliedMinClusterSize = settings.minClusterSize;
+                  appliedUseForceLayout = settings.useForceLayout;
+                }}
+                tooltip="Apply projection & clustering changes"
+                disabled={isLoading}
+              />
+            </div>
+          {/if}
+        {/if}
+
+        <!-- Edges & Connectivity (smart mode only) -->
+        <button
+          type="button"
+          class="section-header"
+          onclick={() => (sectionOpen.edges = !sectionOpen.edges)}
+        >
+          <span>Edges & Connectivity</span>
+          <svg
+            class="section-chevron"
+            class:open={sectionOpen.edges}
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
+          >
+        </button>
+
+        {#if sectionOpen.edges}
+          <SettingContainer name="Similarity" desc="Minimum similarity for edges (%)">
+            <RangeSlider
+              value={Math.round(settings.similarityThreshold * 100)}
+              min={10}
+              max={90}
+              step={5}
+              showValue={true}
+              oncommit={handleThresholdChange}
+            />
+          </SettingContainer>
+
+          <SettingContainer name="Neighbors" desc="Max neighbors per node">
+            <RangeSlider
+              value={settings.semanticNeighbors}
+              min={1}
+              max={15}
+              step={1}
+              showValue={true}
+              oncommit={handleNeighborsChange}
+            />
+          </SettingContainer>
+        {/if}
       {/if}
 
       <!-- Layout -->
@@ -436,8 +605,8 @@
           <RangeSlider
             value={Math.round(settings.labelZoomThreshold * 10)}
             min={0}
-            max={50}
-            step={5}
+            max={20}
+            step={1}
             showValue={true}
             oncommit={handleLabelZoomChange}
           />
@@ -674,5 +843,28 @@
     color: var(--text-faint);
     padding: 2px 4px;
     align-self: center;
+  }
+
+  .mode-badge {
+    font-weight: 600;
+    color: var(--text-accent);
+  }
+
+  .color-group-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+  }
+
+  .color-group-row :global(input[type="color"]) {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+
+  .color-group-row :global(input[type="text"]) {
+    flex: 1;
+    min-width: 0;
   }
 </style>
