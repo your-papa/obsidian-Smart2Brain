@@ -82,10 +82,10 @@ export class VectorStoreService {
 	private _hasValidatedThisSession = false;
 	private maxInputTokensCache:
 		| {
-				provider: string;
-				model: string;
-				maxInputTokens: number;
-		  }
+			provider: string;
+			model: string;
+			maxInputTokens: number;
+		}
 		| null = null;
 
 	// Progress tracking
@@ -215,10 +215,10 @@ export class VectorStoreService {
 		const ollamaData =
 			defaultModel.provider === "ollama"
 				? (() => {
-						const ollamaAuth = getData().getResolvedProviderAuth("ollama");
-						if (!ollamaAuth?.baseUrl) return null;
-						return getOllamaModelsCache(ollamaAuth.baseUrl);
-					})()
+					const ollamaAuth = getData().getResolvedProviderAuth("ollama");
+					if (!ollamaAuth?.baseUrl) return null;
+					return getOllamaModelsCache(ollamaAuth.baseUrl);
+				})()
 				: null;
 
 		const metadata = hydrateEmbeddingModel(defaultModel.provider, defaultModel.model, {
@@ -363,17 +363,17 @@ export class VectorStoreService {
 			const validFiles: FileEntry[] = [];
 			const maxContentLength = await this.getMaxEmbeddingContentLength(defaultModel);
 
-				for (const file of filesToIndex) {
-					try {
-						const content = await vault.cachedRead(file);
-						if (content.length <= maxContentLength) {
-							const contentWithTitle = `# ${file.basename}\n\n${content}`;
-							validFiles.push({ file, content, contentWithTitle });
-						}
-					} catch (error) {
-						Logger.error(`[VectorStore] Failed to read ${file.path}:`, error);
+			for (const file of filesToIndex) {
+				try {
+					const content = await vault.cachedRead(file);
+					if (content.length <= maxContentLength) {
+						const contentWithTitle = `# ${file.basename}\n\n${content}`;
+						validFiles.push({ file, content, contentWithTitle });
 					}
+				} catch (error) {
+					Logger.error(`[VectorStore] Failed to read ${file.path}:`, error);
 				}
+			}
 
 			// Process in batches
 			for (let i = 0; i < validFiles.length; i += batchSize) {
@@ -674,18 +674,18 @@ export class VectorStoreService {
 				contentWithTitle: string;
 			}
 
-				const validFiles: FileEntry[] = [];
-				const maxContentLength = await this.getMaxEmbeddingContentLength(model);
+			const validFiles: FileEntry[] = [];
+			const maxContentLength = await this.getMaxEmbeddingContentLength(model);
 
 			for (const file of files) {
 				try {
-						const content = await vault.cachedRead(file);
+					const content = await vault.cachedRead(file);
 
-						// Skip files that are too large
-						if (content.length > maxContentLength) {
-							this.updateProgress({ skipped: this._progress.skipped + 1 });
-							continue;
-						}
+					// Skip files that are too large
+					if (content.length > maxContentLength) {
+						this.updateProgress({ skipped: this._progress.skipped + 1 });
+						continue;
+					}
 
 					// Prepend title to content for better semantic matching
 					const contentWithTitle = `# ${file.basename}\n\n${content}`;

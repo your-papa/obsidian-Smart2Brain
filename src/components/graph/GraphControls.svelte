@@ -7,7 +7,13 @@
   import Text from "../ui/Text.svelte";
   import ColorPicker from "../ui/ColorPicker.svelte";
   import SettingContainer from "../settings/SettingContainer.svelte";
-  import type { ProjectionMethod, ClusteringAlgorithm, SmartGraphSettings, GraphMode, ColorGroup } from "../../types/graph";
+  import type {
+    ProjectionMethod,
+    ClusteringAlgorithm,
+    SmartGraphSettings,
+    GraphMode,
+    ColorGroup,
+  } from "../../types/graph";
   import { THEME_COLOR_VARS } from "../../types/graph";
 
   interface Props {
@@ -99,7 +105,8 @@
       settings.autoK !== appliedAutoK ||
       (!settings.autoK && settings.defaultK !== appliedDefaultK) ||
       settings.clusteringAlgorithm !== appliedClusteringAlgorithm ||
-      (settings.clusteringAlgorithm === "hdbscan" && settings.minClusterSize !== appliedMinClusterSize) ||
+      (settings.clusteringAlgorithm === "hdbscan" &&
+        settings.minClusterSize !== appliedMinClusterSize) ||
       settings.useForceLayout !== appliedUseForceLayout,
   );
 
@@ -201,12 +208,16 @@
   }
 
   function updateColorGroupQuery(index: number, query: string) {
-    const updated = settings.colorGroups.map((g: ColorGroup, i: number) => (i === index ? { ...g, query } : g));
+    const updated = settings.colorGroups.map((g: ColorGroup, i: number) =>
+      i === index ? { ...g, query } : g,
+    );
     onSettingsChange({ colorGroups: updated });
   }
 
   function updateColorGroupColor(index: number, color: string) {
-    const updated = settings.colorGroups.map((g: ColorGroup, i: number) => (i === index ? { ...g, color } : g));
+    const updated = settings.colorGroups.map((g: ColorGroup, i: number) =>
+      i === index ? { ...g, color } : g,
+    );
     onSettingsChange({ colorGroups: updated });
   }
 </script>
@@ -328,7 +339,9 @@
       <div class="graph-stats">
         <span class="graph-stat">{nodeCount} nodes</span>
         <span class="graph-stat">{edgeCount} edges</span>
-        <span class="graph-stat mode-badge">{graphMode === "wiki" && !isTransitioning ? "Wiki" : "Smart"}</span>
+        <span class="graph-stat mode-badge"
+          >{graphMode === "wiki" && !isTransitioning ? "Wiki" : "Smart"}</span
+        >
         {#if isLoading}
           <span class="graph-stat loading">Computing...</span>
         {/if}
@@ -336,44 +349,44 @@
 
       <!-- Color Groups (wiki mode only) -->
       {#if graphMode === "wiki"}
-      <button
-        type="button"
-        class="section-header"
-        onclick={() => (sectionOpen.colorGroups = !sectionOpen.colorGroups)}
-      >
-        <span>Color Groups</span>
-        <svg
-          class="section-chevron"
-          class:open={sectionOpen.colorGroups}
-          xmlns="http://www.w3.org/2000/svg"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
+        <button
+          type="button"
+          class="section-header"
+          onclick={() => (sectionOpen.colorGroups = !sectionOpen.colorGroups)}
         >
-      </button>
+          <span>Color Groups</span>
+          <svg
+            class="section-chevron"
+            class:open={sectionOpen.colorGroups}
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
+          >
+        </button>
 
-      {#if sectionOpen.colorGroups}
-        {#each settings.colorGroups as group, i}
-          <div class="color-group-row">
-            <ColorPicker value={group.color} onchange={(c) => updateColorGroupColor(i, c)} />
-            <Text
-              inputType="text"
-              value={group.query}
-              placeholder="folder/ or #tag"
-              onchange={(v) => updateColorGroupQuery(i, v)}
-            />
-            <Button iconId="x" onClick={() => removeColorGroup(i)} tooltip="Remove group" />
+        {#if sectionOpen.colorGroups}
+          {#each settings.colorGroups as group, i}
+            <div class="color-group-row">
+              <ColorPicker value={group.color} onchange={(c) => updateColorGroupColor(i, c)} />
+              <Text
+                inputType="text"
+                value={group.query}
+                placeholder="folder/ or #tag"
+                onchange={(v) => updateColorGroupQuery(i, v)}
+              />
+              <Button iconId="x" onClick={() => removeColorGroup(i)} tooltip="Remove group" />
+            </div>
+          {/each}
+          <div class="apply-bar">
+            <Button iconId="plus" buttonText="Add group" onClick={addColorGroup} />
           </div>
-        {/each}
-        <div class="apply-bar">
-          <Button iconId="plus" buttonText="Add group" onClick={addColorGroup} />
-        </div>
-      {/if}
+        {/if}
       {/if}
 
       <!-- Projection & Clustering (smart mode only) -->
@@ -400,7 +413,10 @@
         </button>
 
         {#if sectionOpen.projection}
-          <SettingContainer name="Force layout" desc="Use force-directed layout instead of 2D projection">
+          <SettingContainer
+            name="Force layout"
+            desc="Use force-directed layout instead of 2D projection"
+          >
             <Toggle
               checked={settings.useForceLayout}
               onchange={(val) => onSettingsChange({ useForceLayout: val })}
@@ -408,14 +424,14 @@
           </SettingContainer>
 
           {#if !settings.useForceLayout}
-          <SettingContainer name="Projection" desc="2D layout algorithm">
-            <Dropdown
-              type="options"
-              dropdown={projectionOptions}
-              selected={settings.projectionMethod}
-              onchange={handleProjectionChange}
-            />
-          </SettingContainer>
+            <SettingContainer name="Projection" desc="2D layout algorithm">
+              <Dropdown
+                type="options"
+                dropdown={projectionOptions}
+                selected={settings.projectionMethod}
+                onchange={handleProjectionChange}
+              />
+            </SettingContainer>
           {/if}
 
           <SettingContainer name="Algorithm" desc="Clustering method">
@@ -552,7 +568,7 @@
       </button>
 
       {#if sectionOpen.layout}
-          <SettingContainer name="Node size" desc="Base radius of nodes">
+        <SettingContainer name="Node size" desc="Base radius of nodes">
           <RangeSlider
             value={settings.nodeSize}
             min={2}

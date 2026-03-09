@@ -219,11 +219,12 @@ export async function buildGraphStructure(
         }
     }
 
-    // Create degree map counting only visible edge types
+    // Create degree map counting only wiki edges so node sizes stay
+    // consistent between wiki and smart modes (semantic edges are dense
+    // and would inflate degree/radius disproportionately).
     const degreeMap = new Map<string, number>();
     for (const edge of edges) {
-        if (edge.type === "wiki" && !settings.showWikiLinks) continue;
-        if (edge.type === "semantic" && !settings.showSemanticEdges) continue;
+        if (edge.type !== "wiki") continue;
         degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
         degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
     }
