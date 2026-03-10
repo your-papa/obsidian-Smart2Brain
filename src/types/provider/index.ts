@@ -12,6 +12,8 @@ export type {
 	AuthObjectKey,
 	AuthFieldDefinition,
 	AuthObject,
+	CodexSession,
+	OpenAIAuthMode,
 	RequiredAuthField,
 	OptionalAuthField,
 	ProviderAuthConfig,

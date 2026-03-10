@@ -865,6 +865,13 @@ export class VectorStoreService {
 		if (!indexId) {
 			const defaultModel = this.getDefaultEmbedModel();
 			if (!defaultModel) return null;
+			if (!data.isProviderEmbeddingAvailable(defaultModel.provider)) {
+				Logger.warn(
+					"[VectorStore] Embeddings unavailable for provider in current auth mode",
+					defaultModel.provider,
+				);
+				return null;
+			}
 			// Legacy path
 			const inst = this.instances.values().next().value;
 			if (!inst) return null;
@@ -874,6 +881,10 @@ export class VectorStoreService {
 		if (!inst) return null;
 		const model = this.getModelForInstance(inst);
 		if (!model) return null;
+		if (!data.isProviderEmbeddingAvailable(model.provider)) {
+			Logger.warn("[VectorStore] Embeddings unavailable for provider in current auth mode", model.provider);
+			return null;
+		}
 		return this.getEmbeddingsForInstance(inst, model);
 	}
 
@@ -898,7 +909,7 @@ export class VectorStoreService {
 
 		const embeddings = this.getEmbeddingsForInstance(inst, model);
 		if (!embeddings) {
-			new Notice("Failed to initialize embedding model. Check your settings.");
+			new Notice("Failed to initialize embedding model. OpenAI Codex sign-in does not support embeddings.");
 			return false;
 		}
 

@@ -685,7 +685,6 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
 	return mcpServerTools[serverId];
 }
 </script>
-
 <div class="agents-settings">
   <!-- Chat Settings (global, not per-agent) -->
   <SettingGroup heading="Chat Settings">
@@ -775,826 +774,916 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
           </div>
         </SettingItem>
 
-        <SettingItem
-          name="Default Agent"
-          desc={pluginData.defaultAgentId === null
-            ? "No default set. New chats use the last selected agent."
-            : "The default agent is used for new chats."}
-        >
-          {#if selectedAgentId === pluginData.defaultAgentId}
-            <Button buttonText="Clear Default" onClick={clearDefaultAgent} />
-          {:else}
-            <Button buttonText="Set as Default" onClick={setAsDefaultAgent} />
-          {/if}
-        </SettingItem>
-
-        <SettingItem name="Chat Model" desc="AI model for this agent">
-          {#if !models.hasProviders || !models.hasModels}
-            <Button
-              onClick={models.openSettings}
-              buttonText={!models.hasProviders ? "Configure Provider" : "Configure Models"}
-              iconId="settings"
-            />
-          {:else}
-            <Button onClick={openModelSelectionModal}>
-              {#if currentModelDisplay}
-                {@const Logo = currentModelDisplay.logo}
-                <div class="flex items-center gap-2">
-                  <Logo width={14} height={14} />
-                  <span>{currentModelDisplay.model}</span>
-                </div>
-              {:else}
-                <span class="text-[--text-muted]">Select a model</span>
-              {/if}
-            </Button>
-          {/if}
-        </SettingItem>
-
-        <SettingItem
-          name="Base System Prompt"
-          desc="Customize the base system instructions for this agent"
-        >
-          <Button buttonText="Edit Prompt" onClick={openSystemPromptModal} />
-        </SettingItem>
-      </SettingGroup>
-
-      <!-- Skills -->
-      <SettingGroup heading="Skills">
-        <div class="setting-item-description mb-3">
-          Skills are loaded dynamically based on their description—only the relevant skill's full
-          instructions are injected into the system prompt when needed.
-        </div>
-
-        <!-- Core Skills -->
-        {#if coreSkills.length > 0}
-          <div class="skill-category">
-            <div class="skill-category-header">
-              <span class="skill-category-title">Core Skills</span>
-              <span class="skill-category-badge">Based on Obsidian Core Plugins</span>
-            </div>
-            {#each coreSkills as ext (ext.id)}
-              {@const pluginAvailable = isSkillPluginAvailable(ext)}
-              <div class="skill-item">
-                <div class="skill-info">
-                  <div class="skill-header">
-                    <span class="skill-name">{ext.displayName}</span>
-                    {#if !pluginAvailable}
-                      <span
-                        class="skill-badge not-enabled"
-                        title="Enable this core plugin in Obsidian settings"
-                      >
-                        Core plugin disabled
-                      </span>
+                <SettingItem
+                    name="Default Agent"
+                    desc={pluginData.defaultAgentId === null
+                        ? "No default set. New chats use the last selected agent."
+                        : "The default agent is used for new chats."}
+                >
+                    {#if selectedAgentId === pluginData.defaultAgentId}
+                        <Button
+                            buttonText="Clear Default"
+                            onClick={clearDefaultAgent}
+                        />
+                    {:else}
+                        <Button
+                            buttonText="Set as Default"
+                            onClick={setAsDefaultAgent}
+                        />
                     {/if}
-                  </div>
-                </div>
-                <div class="skill-controls">
-                  <IconButton
-                    icon="pencil"
-                    label="Edit {ext.displayName} prompt"
-                    onclick={() => openSkillModal(ext.id)}
-                  />
-                  <Toggle
-                    checked={ext.enabled && pluginAvailable}
-                    onchange={() => toggleSkill(ext.id, !ext.enabled)}
-                  />
-                </div>
-              </div>
-            {/each}
-          </div>
-        {/if}
+                </SettingItem>
 
-        <!-- Plugin Skills -->
-        {#if pluginSkills.length > 0}
-          <div class="skill-category">
-            <div class="skill-category-header">
-              <span class="skill-category-title">Plugin Skills</span>
-              <span class="skill-category-badge">Based on Community Plugins</span>
-            </div>
-            {#each pluginSkills as ext (ext.id)}
-              {@const installed = isSkillPluginInstalled(ext)}
-              {@const pluginAvailable = isSkillPluginAvailable(ext)}
-              <div class="skill-item">
-                <div class="skill-info">
-                  <div class="skill-header">
-                    <span class="skill-name">{ext.displayName}</span>
-                    {#if !installed}
-                      <button
-                        class="skill-badge not-installed clickable"
-                        onclick={() => openPluginPage(ext.linkedPluginId ?? ext.id)}
-                        title="Click to install"
-                      >
-                        Not installed
-                      </button>
-                    {:else if !pluginAvailable}
-                      <button
-                        class="skill-badge not-enabled clickable"
-                        onclick={() => openPluginPage(ext.linkedPluginId ?? ext.id)}
-                        title="Click to enable"
-                      >
-                        Not enabled
-                      </button>
+                <SettingItem name="Chat Model" desc="AI model for this agent">
+                    {#if !models.hasProviders || !models.hasModels}
+                        <Button
+                            onClick={models.openSettings}
+                            buttonText={!models.hasProviders
+                                ? "Configure Provider"
+                                : "Configure Models"}
+                            iconId="settings"
+                        />
+                    {:else}
+                        <Button onClick={openModelSelectionModal}>
+                            {#if currentModelDisplay}
+                                {@const Logo = currentModelDisplay.logo}
+                                <div class="flex items-center gap-2">
+                                    <Logo width={14} height={14} />
+                                    <span>{currentModelDisplay.model}</span>
+                                </div>
+                            {:else}
+                                <span class="text-[--text-muted]"
+                                    >Select a model</span
+                                >
+                            {/if}
+                        </Button>
                     {/if}
-                  </div>
-                </div>
-                <div class="skill-controls">
-                  <IconButton
-                    icon="pencil"
-                    label="Edit {ext.displayName} prompt"
-                    onclick={() => openSkillModal(ext.id)}
-                  />
-                  <Toggle
-                    checked={ext.enabled && pluginAvailable}
-                    onchange={() => toggleSkill(ext.id, !ext.enabled)}
-                  />
-                </div>
-              </div>
-            {/each}
-          </div>
-        {/if}
+                </SettingItem>
 
-        <!-- Custom Skills -->
-        <div class="skill-category">
-          <div class="skill-category-header">
-            <span class="skill-category-title">Custom Skills</span>
-            <span class="skill-category-badge">User-defined</span>
-          </div>
-          {#each customSkills as ext (ext.id)}
-            <div class="skill-item">
-              <div class="skill-info">
-                <div class="skill-header">
-                  <span class="skill-name">{ext.displayName}</span>
-                </div>
-              </div>
-              <div class="skill-controls">
-                <IconButton
-                  icon="trash"
-                  label="Delete {ext.displayName}"
-                  onclick={() => deleteSkill(ext.id)}
-                />
-                <IconButton
-                  icon="pencil"
-                  label="Edit {ext.displayName} prompt"
-                  onclick={() => openSkillModal(ext.id)}
-                />
-                <Toggle checked={ext.enabled} onchange={() => toggleSkill(ext.id, !ext.enabled)} />
-              </div>
-            </div>
-          {/each}
-          {#if customSkills.length === 0}
-            <div class="skill-empty-state">No custom skills yet</div>
-          {/if}
-          <div class="skill-add-container">
-            <Button buttonText="Add Custom Skill" onClick={openAddSkillModal} />
-          </div>
-        </div>
-      </SettingGroup>
-
-      <!-- Built-in Tools -->
-      <SettingGroup heading="Built-in Tools">
-        <div class="setting-item-description mb-3">
-          Enable or disable specific tools that this agent can use. Click the settings icon to
-          customize.
-        </div>
-
-        {#each TOOLS as tool (tool.id)}
-          {@const enabled = getToolEnabled(tool.id)}
-          {@const hasPluginDep = !!tool.requiresPlugin}
-          {@const pluginAvailable =
-            !tool.requiresPlugin || isPluginInstalled(tool.requiresPlugin.id)}
-          {@const displayName = getToolDisplayName(tool.id)}
-          {@const description = getToolDescription(tool.id)}
-
-          <div class="tool-item">
-            <div class="tool-info">
-              <div class="tool-header">
-                <span class="tool-name">{displayName}</span>
-                {#if hasPluginDep && !pluginAvailable}
-                  <button
-                    class="tool-badge not-installed clickable"
-                    onclick={() => openPluginPage(tool.requiresPlugin!.id)}
-                    title="Click to install {tool.requiresPlugin!.name}"
-                  >
-                    Requires {tool.requiresPlugin!.name}
-                  </button>
-                {/if}
-              </div>
-              <div class="tool-description">{description}</div>
-            </div>
-            <div class="tool-controls">
-              <IconButton
-                icon="settings"
-                label="Configure {displayName}"
-                onclick={() => openToolConfig(tool.id)}
-              />
-              <Toggle
-                checked={enabled && pluginAvailable}
-                onchange={() => handleToolToggle(tool.id)}
-                disabled={!pluginAvailable}
-              />
-            </div>
-          </div>
-        {/each}
-      </SettingGroup>
-
-      <!-- MCP Servers -->
-      <SettingGroup heading="MCP Servers">
-        <div class="setting-item-description mb-3">
-          MCP (Model Context Protocol) servers extend this agent with external tools.
-        </div>
-
-        <div class="mcp-add-button">
-          <Button buttonText="Add MCP Server" iconId="plus" onClick={openAddMCPServer} />
-        </div>
-
-        {#if mcpServerIds.length > 0}
-          <div class="mcp-servers-list">
-            {#each mcpServerIds as serverId (serverId)}
-              {@const config = getMCPServerConfig(serverId)}
-              {@const toolsState = getServerToolsState(serverId)}
-              {@const isExpanded = expandedServerId === serverId}
-              {#if config}
-                <div class="mcp-server-item" class:expanded={isExpanded}>
-                  <div class="mcp-server-info">
-                    <div class="mcp-server-header">
-                      <span class="mcp-server-name">{config.displayName}</span>
-                      <span class="mcp-server-badge {config.transport}">
-                        {config.transport === "stdio" ? "Local" : "HTTP"}
-                      </span>
-                      <button
-                        class="mcp-tools-badge"
-                        class:loading={toolsState?.loading}
-                        class:error={toolsState?.error}
-                        class:has-tools={toolsState?.tools && toolsState.tools.length > 0}
-                        onclick={() => toggleToolsList(serverId)}
-                        title={toolsState?.error ??
-                          (toolsState?.tools
-                            ? `${toolsState.tools.length} tools available`
-                            : "Click to load tools")}
-                      >
-                        {#if toolsState?.loading}
-                          <Icon name="loader" size="xs" />
-                          <span>...</span>
-                        {:else if toolsState?.error}
-                          <Icon name="alert-circle" size="xs" />
-                          <span>Error</span>
-                        {:else if toolsState?.tools}
-                          <Icon name="wrench" size="xs" />
-                          <span>{toolsState.tools.length} tools</span>
-                        {:else}
-                          <Icon name="wrench" size="xs" />
-                          <span>Load tools</span>
-                        {/if}
-                      </button>
-                    </div>
-                    <div class="mcp-server-details">
-                      {#if config.transport === "stdio"}
-                        <code>{config.command} {config.args.join(" ")}</code>
-                      {:else if config.transport === "http"}
-                        <code>{config.url}</code>
-                      {/if}
-                    </div>
-
-                    {#if isExpanded && toolsState}
-                      <div class="mcp-tools-list">
-                        {#if toolsState.loading}
-                          <div class="mcp-tools-loading">Loading tools...</div>
-                        {:else if toolsState.error}
-                          <div class="mcp-tools-error">
-                            <Icon name="alert-circle" size="s" />
-                            <span>{toolsState.error}</span>
-                            <button
-                              class="mcp-tools-retry"
-                              onclick={() => fetchServerTools(serverId)}
-                            >
-                              Retry
-                            </button>
-                          </div>
-                        {:else if toolsState.tools.length === 0}
-                          <div class="mcp-tools-empty">No tools available</div>
-                        {:else}
-                          {#each toolsState.tools as tool (tool.name)}
-                            <div class="mcp-tool-item">
-                              <span class="mcp-tool-name">{tool.name}</span>
-                              {#if tool.description}
-                                <span class="mcp-tool-desc">{tool.description}</span>
-                              {/if}
-                            </div>
-                          {/each}
-                        {/if}
-                      </div>
-                    {/if}
-                  </div>
-                  <div class="mcp-server-controls">
-                    <IconButton
-                      icon="pencil"
-                      label="Edit {config.displayName}"
-                      onclick={() => openEditMCPServer(serverId)}
+                <SettingItem
+                    name="Base System Prompt"
+                    desc="Customize the base system instructions for this agent"
+                >
+                    <Button
+                        buttonText="Edit Prompt"
+                        onClick={openSystemPromptModal}
                     />
-                    <Toggle checked={config.enabled} onchange={() => toggleMCPServer(serverId)} />
-                  </div>
+                </SettingItem>
+            </SettingGroup>
+
+            <!-- Skills -->
+            <SettingGroup heading="Skills">
+                <div class="setting-item-description mb-3">
+                    Skills are loaded dynamically based on their
+                    description—only the relevant skill's full instructions are
+                    injected into the system prompt when needed.
                 </div>
-              {/if}
-            {/each}
-          </div>
+
+                <!-- Core Skills -->
+                {#if coreSkills.length > 0}
+                    <div class="skill-category">
+                        <div class="skill-category-header">
+                            <span class="skill-category-title">Core Skills</span
+                            >
+                            <span class="skill-category-badge"
+                                >Based on Obsidian Core Plugins</span
+                            >
+                        </div>
+                        {#each coreSkills as ext (ext.id)}
+                            {@const pluginAvailable =
+                                isSkillPluginAvailable(ext)}
+                            <div class="skill-item">
+                                <div class="skill-info">
+                                    <div class="skill-header">
+                                        <span class="skill-name"
+                                            >{ext.displayName}</span
+                                        >
+                                        {#if !pluginAvailable}
+                                            <span
+                                                class="text-[0.7rem] px-1.5 py-0.5 rounded uppercase font-medium bg-[--background-modifier-border] text-[--text-muted]"
+                                                title="Enable this core plugin in Obsidian settings"
+                                            >
+                                                Core plugin disabled
+                                            </span>
+                                        {/if}
+                                    </div>
+                                </div>
+                                <div class="skill-controls">
+                                    <IconButton
+                                        icon="pencil"
+                                        label="Edit {ext.displayName} prompt"
+                                        onclick={() => openSkillModal(ext.id)}
+                                    />
+                                    <Toggle
+                                        checked={ext.enabled && pluginAvailable}
+                                        onchange={() =>
+                                            toggleSkill(ext.id, !ext.enabled)}
+                                    />
+                                </div>
+                            </div>
+                        {/each}
+                    </div>
+                {/if}
+
+                <!-- Plugin Skills -->
+                {#if pluginSkills.length > 0}
+                    <div class="skill-category">
+                        <div class="skill-category-header">
+                            <span class="skill-category-title"
+                                >Plugin Skills</span
+                            >
+                            <span class="skill-category-badge"
+                                >Based on Community Plugins</span
+                            >
+                        </div>
+                        {#each pluginSkills as ext (ext.id)}
+                            {@const installed = isSkillPluginInstalled(ext)}
+                            {@const pluginAvailable =
+                                isSkillPluginAvailable(ext)}
+                            <div class="skill-item">
+                                <div class="skill-info">
+                                    <div class="skill-header">
+                                        <span class="skill-name"
+                                            >{ext.displayName}</span
+                                        >
+                                        {#if !installed}
+                                            <button
+                                                class="text-[0.7rem] px-1.5 py-0.5 rounded uppercase font-medium bg-[--background-modifier-border] text-[--text-muted] cursor-pointer border-none transition-opacity duration-150 hover:opacity-80 hover:underline"
+                                                onclick={() =>
+                                                    openPluginPage(
+                                                        ext.linkedPluginId ??
+                                                            ext.id,
+                                                    )}
+                                                title="Click to install"
+                                            >
+                                                Not installed
+                                            </button>
+                                        {:else if !pluginAvailable}
+                                            <button
+                                                class="text-[0.7rem] px-1.5 py-0.5 rounded uppercase font-medium bg-[--background-modifier-border] text-[--text-muted] cursor-pointer border-none transition-opacity duration-150 hover:opacity-80 hover:underline"
+                                                onclick={() =>
+                                                    openPluginPage(
+                                                        ext.linkedPluginId ??
+                                                            ext.id,
+                                                    )}
+                                                title="Click to enable"
+                                            >
+                                                Not enabled
+                                            </button>
+                                        {/if}
+                                    </div>
+                                </div>
+                                <div class="skill-controls">
+                                    <IconButton
+                                        icon="pencil"
+                                        label="Edit {ext.displayName} prompt"
+                                        onclick={() => openSkillModal(ext.id)}
+                                    />
+                                    <Toggle
+                                        checked={ext.enabled && pluginAvailable}
+                                        onchange={() =>
+                                            toggleSkill(ext.id, !ext.enabled)}
+                                    />
+                                </div>
+                            </div>
+                        {/each}
+                    </div>
+                {/if}
+
+                <!-- Custom Skills -->
+                <div class="skill-category">
+                    <div class="skill-category-header">
+                        <span class="skill-category-title">Custom Skills</span>
+                        <span class="skill-category-badge">User-defined</span>
+                    </div>
+                    {#each customSkills as ext (ext.id)}
+                        <div class="skill-item">
+                            <div class="skill-info">
+                                <div class="skill-header">
+                                    <span class="skill-name"
+                                        >{ext.displayName}</span
+                                    >
+                                </div>
+                            </div>
+                            <div class="skill-controls">
+                                <IconButton
+                                    icon="trash"
+                                    label="Delete {ext.displayName}"
+                                    onclick={() => deleteSkill(ext.id)}
+                                />
+                                <IconButton
+                                    icon="pencil"
+                                    label="Edit {ext.displayName} prompt"
+                                    onclick={() => openSkillModal(ext.id)}
+                                />
+                                <Toggle
+                                    checked={ext.enabled}
+                                    onchange={() =>
+                                        toggleSkill(ext.id, !ext.enabled)}
+                                />
+                            </div>
+                        </div>
+                    {/each}
+                    {#if customSkills.length === 0}
+                        <div class="skill-empty-state">
+                            No custom skills yet
+                        </div>
+                    {/if}
+                    <div class="skill-add-container">
+                        <Button
+                            buttonText="Add Custom Skill"
+                            onClick={openAddSkillModal}
+                        />
+                    </div>
+                </div>
+            </SettingGroup>
+
+            <!-- Built-in Tools -->
+            <SettingGroup heading="Built-in Tools">
+                <div class="setting-item-description mb-3">
+                    Enable or disable specific tools that this agent can use.
+                    Click the settings icon to customize.
+                </div>
+
+                {#each TOOLS as tool (tool.id)}
+                    {@const enabled = getToolEnabled(tool.id)}
+                    {@const hasPluginDep = !!tool.requiresPlugin}
+                    {@const pluginAvailable =
+                        !tool.requiresPlugin ||
+                        isPluginInstalled(tool.requiresPlugin.id)}
+                    {@const displayName = getToolDisplayName(tool.id)}
+                    {@const description = getToolDescription(tool.id)}
+
+                    <div class="tool-item">
+                        <div class="tool-info">
+                            <div class="tool-header">
+                                <span class="tool-name">{displayName}</span>
+                                {#if hasPluginDep && !pluginAvailable}
+                                    <button
+                                        class="tool-badge not-installed clickable"
+                                        onclick={() =>
+                                            openPluginPage(
+                                                tool.requiresPlugin!.id,
+                                            )}
+                                        title="Click to install {tool
+                                            .requiresPlugin!.name}"
+                                    >
+                                        Requires {tool.requiresPlugin!.name}
+                                    </button>
+                                {/if}
+                            </div>
+                            <div class="tool-description">{description}</div>
+                        </div>
+                        <div class="tool-controls">
+                            <IconButton
+                                icon="settings"
+                                label="Configure {displayName}"
+                                onclick={() => openToolConfig(tool.id)}
+                            />
+                            <Toggle
+                                checked={enabled && pluginAvailable}
+                                onchange={() => handleToolToggle(tool.id)}
+                                disabled={!pluginAvailable}
+                            />
+                        </div>
+                    </div>
+                {/each}
+            </SettingGroup>
+
+            <!-- MCP Servers -->
+            <SettingGroup heading="MCP Servers">
+                <div class="setting-item-description mb-3">
+                    MCP (Model Context Protocol) servers extend this agent with
+                    external tools.
+                </div>
+
+                <div class="mcp-add-button">
+                    <Button
+                        buttonText="Add MCP Server"
+                        iconId="plus"
+                        onClick={openAddMCPServer}
+                    />
+                </div>
+
+                {#if mcpServerIds.length > 0}
+                    <div class="mcp-servers-list">
+                        {#each mcpServerIds as serverId (serverId)}
+                            {@const config = getMCPServerConfig(serverId)}
+                            {@const toolsState = getServerToolsState(serverId)}
+                            {@const isExpanded = expandedServerId === serverId}
+                            {#if config}
+                                <div
+                                    class="mcp-server-item"
+                                    class:expanded={isExpanded}
+                                >
+                                    <div class="mcp-server-info">
+                                        <div class="mcp-server-header">
+                                            <span class="mcp-server-name"
+                                                >{config.displayName}</span
+                                            >
+                                            <span
+                                                class="mcp-server-badge {config.transport}"
+                                            >
+                                                {config.transport === "stdio"
+                                                    ? "Local"
+                                                    : "HTTP"}
+                                            </span>
+                                            <button
+                                                class="mcp-tools-badge"
+                                                class:loading={toolsState?.loading}
+                                                class:error={toolsState?.error}
+                                                class:has-tools={toolsState?.tools &&
+                                                    toolsState.tools.length > 0}
+                                                onclick={() =>
+                                                    toggleToolsList(serverId)}
+                                                title={toolsState?.error ??
+                                                    (toolsState?.tools
+                                                        ? `${toolsState.tools.length} tools available`
+                                                        : "Click to load tools")}
+                                            >
+                                                {#if toolsState?.loading}
+                                                    <Icon
+                                                        name="loader"
+                                                        size="xs"
+                                                    />
+                                                    <span>...</span>
+                                                {:else if toolsState?.error}
+                                                    <Icon
+                                                        name="alert-circle"
+                                                        size="xs"
+                                                    />
+                                                    <span>Error</span>
+                                                {:else if toolsState?.tools}
+                                                    <Icon
+                                                        name="wrench"
+                                                        size="xs"
+                                                    />
+                                                    <span
+                                                        >{toolsState.tools
+                                                            .length} tools</span
+                                                    >
+                                                {:else}
+                                                    <Icon
+                                                        name="wrench"
+                                                        size="xs"
+                                                    />
+                                                    <span>Load tools</span>
+                                                {/if}
+                                            </button>
+                                        </div>
+                                        <div class="mcp-server-details">
+                                            {#if config.transport === "stdio"}
+                                                <code
+                                                    >{config.command}
+                                                    {config.args.join(
+                                                        " ",
+                                                    )}</code
+                                                >
+                                            {:else if config.transport === "http"}
+                                                <code>{config.url}</code>
+                                            {/if}
+                                        </div>
+
+                                        {#if isExpanded && toolsState}
+                                            <div class="mcp-tools-list">
+                                                {#if toolsState.loading}
+                                                    <div
+                                                        class="mcp-tools-loading"
+                                                    >
+                                                        Loading tools...
+                                                    </div>
+                                                {:else if toolsState.error}
+                                                    <div
+                                                        class="mcp-tools-error"
+                                                    >
+                                                        <Icon
+                                                            name="alert-circle"
+                                                            size="s"
+                                                        />
+                                                        <span
+                                                            >{toolsState.error}</span
+                                                        >
+                                                        <button
+                                                            class="mcp-tools-retry"
+                                                            onclick={() =>
+                                                                fetchServerTools(
+                                                                    serverId,
+                                                                )}
+                                                        >
+                                                            Retry
+                                                        </button>
+                                                    </div>
+                                                {:else if toolsState.tools.length === 0}
+                                                    <div
+                                                        class="mcp-tools-empty"
+                                                    >
+                                                        No tools available
+                                                    </div>
+                                                {:else}
+                                                    {#each toolsState.tools as tool (tool.name)}
+                                                        <div
+                                                            class="mcp-tool-item"
+                                                        >
+                                                            <span
+                                                                class="mcp-tool-name"
+                                                                >{tool.name}</span
+                                                            >
+                                                            {#if tool.description}
+                                                                <span
+                                                                    class="mcp-tool-desc"
+                                                                    >{tool.description}</span
+                                                                >
+                                                            {/if}
+                                                        </div>
+                                                    {/each}
+                                                {/if}
+                                            </div>
+                                        {/if}
+                                    </div>
+                                    <div class="mcp-server-controls">
+                                        <IconButton
+                                            icon="pencil"
+                                            label="Edit {config.displayName}"
+                                            onclick={() =>
+                                                openEditMCPServer(serverId)}
+                                        />
+                                        <Toggle
+                                            checked={config.enabled}
+                                            onchange={() =>
+                                                toggleMCPServer(serverId)}
+                                        />
+                                    </div>
+                                </div>
+                            {/if}
+                        {/each}
+                    </div>
+                {:else}
+                    <div class="mcp-empty-state">
+                        <p>No MCP servers configured for this agent.</p>
+                    </div>
+                {/if}
+            </SettingGroup>
         {:else}
-          <div class="mcp-empty-state">
-            <p>No MCP servers configured for this agent.</p>
-          </div>
+            <div class="no-agent-selected">
+                <p>No agent selected.</p>
+            </div>
         {/if}
-      </SettingGroup>
-    {:else}
-      <div class="no-agent-selected">
-        <p>No agent selected.</p>
-      </div>
-    {/if}
-  </div>
+    </div>
 </div>
 
 <style>
-  .agents-settings {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  /* Agent Selector Header */
-  .agent-selector-header {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--background-modifier-border);
-  }
-
-  .agent-selector-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .agent-dropdown-wrapper {
-    min-width: 180px;
-  }
-
-  .agent-actions {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-  }
-
-  /* Agent Editor Content */
-  .agent-editor-content {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .no-agent-selected {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 200px;
-    color: var(--text-muted);
-  }
-
-  /* Color Picker */
-  .color-picker {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-  }
-
-  .color-swatch {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    background-color: var(--swatch-color);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.15s ease;
-    padding: 0;
-    color: white;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  }
-
-  .color-swatch:hover {
-    transform: scale(1.1);
-  }
-
-  .color-swatch.selected {
-    border-color: var(--text-normal);
-    box-shadow: 0 0 0 2px var(--background-primary);
-  }
-
-  .color-swatch.none {
-    background: linear-gradient(
-      135deg,
-      var(--background-secondary) 45%,
-      var(--background-modifier-border) 45%,
-      var(--background-modifier-border) 55%,
-      var(--background-secondary) 55%
-    );
-    color: var(--text-muted);
-  }
-
-  /* Skills */
-  .skill-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 0;
-  }
-
-  .skill-info {
-    flex: 1;
-  }
-
-  .skill-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .skill-name {
-    font-weight: 500;
-  }
-
-  .skill-badge {
-    font-size: 0.7rem;
-    padding: 2px 6px;
-    border-radius: 4px;
-    text-transform: uppercase;
-    font-weight: 500;
-  }
-
-  .skill-badge.not-enabled,
-  .skill-badge.not-installed {
-    background: var(--background-modifier-border);
-    color: var(--text-muted);
-  }
-
-  .skill-badge.clickable {
-    cursor: pointer;
-    border: none;
-    transition: opacity 0.15s ease;
-  }
-
-  .skill-badge.clickable:hover {
-    opacity: 0.8;
-    text-decoration: underline;
-  }
-
-  .skill-badge.custom {
-    background: var(--interactive-accent);
-    color: var(--text-on-accent);
-  }
-
-  .skill-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .skill-add-container {
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--background-modifier-border);
-  }
-
-  /* Skill Categories */
-  .skill-category {
-    margin-bottom: 20px;
-    padding-bottom: 8px;
-  }
-
-  .skill-category:last-child {
-    margin-bottom: 0;
-  }
-
-  .skill-category-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 8px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--background-modifier-border);
-  }
-
-  .skill-category-title {
-    font-weight: 600;
-    font-size: 0.95rem;
-    color: var(--text-normal);
-  }
-
-  .skill-category-badge {
-    font-size: 0.65rem;
-    padding: 2px 6px;
-    border-radius: 4px;
-    background: var(--background-secondary);
-    color: var(--text-muted);
-    text-transform: uppercase;
-    font-weight: 500;
-  }
-
-  .skill-empty-state {
-    padding: 16px;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 0.9rem;
-    font-style: italic;
-  }
-
-  /* Tools Styles */
-  .tool-item {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    padding: 12px 0;
-    border-bottom: 1px solid var(--background-modifier-border);
-    gap: 16px;
-  }
-
-  .tool-item:last-child {
-    border-bottom: none;
-  }
-
-  .tool-info {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .tool-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .tool-name {
-    font-weight: 500;
-  }
-
-  .tool-description {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    margin-top: 4px;
-    display: -webkit-box;
-    line-clamp: 2;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .tool-badge {
-    font-size: 0.7rem;
-    padding: 2px 6px;
-    border-radius: 4px;
-    text-transform: uppercase;
-    font-weight: 500;
-  }
-
-  .tool-badge.not-installed {
-    background: var(--background-modifier-border);
-    color: var(--text-muted);
-  }
-
-  .tool-badge.clickable {
-    cursor: pointer;
-    border: none;
-    transition: opacity 0.15s ease;
-  }
-
-  .tool-badge.clickable:hover {
-    opacity: 0.8;
-    text-decoration: underline;
-  }
-
-  .tool-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-  }
-
-  /* MCP Servers Styles */
-  .mcp-add-button {
-    margin-bottom: 16px;
-  }
-
-  .mcp-servers-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-  }
-
-  .mcp-server-item {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    padding: 12px 0;
-    border-bottom: 1px solid var(--background-modifier-border);
-    gap: 16px;
-  }
-
-  .mcp-server-item:last-child {
-    border-bottom: none;
-  }
-
-  .mcp-server-info {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .mcp-server-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .mcp-server-name {
-    font-weight: 500;
-  }
-
-  .mcp-server-badge {
-    font-size: 0.65rem;
-    padding: 2px 6px;
-    border-radius: 4px;
-    text-transform: uppercase;
-    font-weight: 500;
-  }
-
-  .mcp-server-badge.stdio {
-    background: rgba(var(--color-green-rgb, 76, 175, 80), 0.2);
-    color: var(--text-success, #4caf50);
-  }
-
-  .mcp-server-badge.http {
-    background: rgba(var(--color-blue-rgb, 33, 150, 243), 0.2);
-    color: var(--text-accent, #2196f3);
-  }
-
-  .mcp-server-badge.sse {
-    background: rgba(var(--color-yellow-rgb, 255, 193, 7), 0.2);
-    color: var(--text-warning, #ffc107);
-  }
-
-  .mcp-server-details {
-    margin-top: 4px;
-  }
-
-  .mcp-server-details code {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    background: var(--background-secondary);
-    padding: 2px 6px;
-    border-radius: 4px;
-    display: inline-block;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .mcp-server-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-  }
-
-  .mcp-empty-state {
-    padding: 16px;
-    text-align: center;
-    color: var(--text-muted);
-    background: var(--background-secondary);
-    border-radius: 8px;
-  }
-
-  .mcp-empty-state p {
-    margin: 0;
-  }
-
-  /* Tools badge */
-  .mcp-tools-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.7rem;
-    padding: 2px 8px;
-    border-radius: 10px;
-    border: 1px solid var(--background-modifier-border);
-    background: var(--background-secondary);
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .mcp-tools-badge:hover {
-    background: var(--background-modifier-hover);
-    border-color: var(--text-muted);
-  }
-
-  .mcp-tools-badge.loading {
-    opacity: 0.7;
-  }
-
-  .mcp-tools-badge.has-tools {
-    background: rgba(var(--color-green-rgb, 76, 175, 80), 0.15);
-    border-color: var(--text-success, #4caf50);
-    color: var(--text-success, #4caf50);
-  }
-
-  .mcp-tools-badge.error {
-    background: rgba(var(--color-red-rgb, 244, 67, 54), 0.15);
-    border-color: var(--text-error, #f44336);
-    color: var(--text-error, #f44336);
-  }
-
-  /* Expanded tools list */
-  .mcp-tools-list {
-    margin-top: 12px;
-    padding: 12px;
-    background: var(--background-secondary);
-    border-radius: 6px;
-    max-height: 300px;
-    overflow-y: auto;
-  }
-
-  .mcp-tools-loading,
-  .mcp-tools-empty {
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 0.85rem;
-    padding: 8px;
-  }
-
-  .mcp-tools-error {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-error, #f44336);
-    font-size: 0.85rem;
-    padding: 8px;
-  }
-
-  .mcp-tools-retry {
-    margin-left: auto;
-    padding: 4px 12px;
-    font-size: 0.75rem;
-    border-radius: 4px;
-    border: 1px solid var(--background-modifier-border);
-    background: var(--background-primary);
-    color: var(--text-normal);
-    cursor: pointer;
-  }
-
-  .mcp-tools-retry:hover {
-    background: var(--background-modifier-hover);
-  }
-
-  .mcp-tool-item {
-    display: flex;
-    flex-direction: column;
-    padding: 8px;
-    margin-bottom: 4px;
-    background: var(--background-primary);
-    border-radius: 4px;
-  }
-
-  .mcp-tool-item:last-child {
-    margin-bottom: 0;
-  }
-
-  .mcp-tool-name {
-    font-weight: 500;
-    font-family: var(--font-monospace);
-    font-size: 0.85rem;
-  }
-
-  .mcp-tool-desc {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    margin-top: 2px;
-    display: -webkit-box;
-    line-clamp: 2;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  /* Utilities */
-  .text-muted {
-    color: var(--text-muted);
-  }
-
-  .text-sm {
-    font-size: 0.85rem;
-  }
-
-  .mb-3 {
-    margin-bottom: 12px;
-  }
+    .agents-settings {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    /* Agent Selector Header */
+    .agent-selector-header {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--background-modifier-border);
+    }
+
+    .agent-selector-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .agent-dropdown-wrapper {
+        min-width: 180px;
+    }
+
+    .agent-actions {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+    }
+
+    /* Agent Editor Content */
+    .agent-editor-content {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .no-agent-selected {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 200px;
+        color: var(--text-muted);
+    }
+
+    /* Color Picker */
+    .color-picker {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+    }
+
+    .color-swatch {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        border: 2px solid transparent;
+        background-color: var(--swatch-color);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s ease;
+        padding: 0;
+        color: white;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+
+    .color-swatch:hover {
+        transform: scale(1.1);
+    }
+
+    .color-swatch.selected {
+        border-color: var(--text-normal);
+        box-shadow: 0 0 0 2px var(--background-primary);
+    }
+
+    .color-swatch.none {
+        background: linear-gradient(
+            135deg,
+            var(--background-secondary) 45%,
+            var(--background-modifier-border) 45%,
+            var(--background-modifier-border) 55%,
+            var(--background-secondary) 55%
+        );
+        color: var(--text-muted);
+    }
+
+    /* Skills */
+    .skill-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 0;
+    }
+
+    .skill-info {
+        flex: 1;
+    }
+
+    .skill-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .skill-name {
+        font-weight: 500;
+    }
+
+    .skill-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .skill-add-container {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--background-modifier-border);
+    }
+
+    /* Skill Categories */
+    .skill-category {
+        margin-bottom: 20px;
+        padding-bottom: 8px;
+    }
+
+    .skill-category:last-child {
+        margin-bottom: 0;
+    }
+
+    .skill-category-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--background-modifier-border);
+    }
+
+    .skill-category-title {
+        font-weight: 600;
+        font-size: 0.95rem;
+        color: var(--text-normal);
+    }
+
+    .skill-category-badge {
+        font-size: 0.65rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: var(--background-secondary);
+        color: var(--text-muted);
+        text-transform: uppercase;
+        font-weight: 500;
+    }
+
+    .skill-empty-state {
+        padding: 16px;
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+        font-style: italic;
+    }
+
+    /* Tools Styles */
+    .tool-item {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--background-modifier-border);
+        gap: 16px;
+    }
+
+    .tool-item:last-child {
+        border-bottom: none;
+    }
+
+    .tool-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .tool-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .tool-name {
+        font-weight: 500;
+    }
+
+    .tool-description {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        margin-top: 4px;
+        display: -webkit-box;
+        line-clamp: 2;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .tool-badge {
+        font-size: 0.7rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        font-weight: 500;
+    }
+
+    .tool-badge.not-installed {
+        background: var(--background-modifier-border);
+        color: var(--text-muted);
+    }
+
+    .tool-badge.clickable {
+        cursor: pointer;
+        border: none;
+        transition: opacity 0.15s ease;
+    }
+
+    .tool-badge.clickable:hover {
+        opacity: 0.8;
+        text-decoration: underline;
+    }
+
+    .tool-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+    }
+
+    /* MCP Servers Styles */
+    .mcp-add-button {
+        margin-bottom: 16px;
+    }
+
+    .mcp-servers-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+    }
+
+    .mcp-server-item {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--background-modifier-border);
+        gap: 16px;
+    }
+
+    .mcp-server-item:last-child {
+        border-bottom: none;
+    }
+
+    .mcp-server-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .mcp-server-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .mcp-server-name {
+        font-weight: 500;
+    }
+
+    .mcp-server-badge {
+        font-size: 0.65rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        font-weight: 500;
+    }
+
+    .mcp-server-badge.stdio {
+        background: rgba(var(--color-green-rgb, 76, 175, 80), 0.2);
+        color: var(--text-success, #4caf50);
+    }
+
+    .mcp-server-badge.http {
+        background: rgba(var(--color-blue-rgb, 33, 150, 243), 0.2);
+        color: var(--text-accent, #2196f3);
+    }
+
+    .mcp-server-badge.sse {
+        background: rgba(var(--color-yellow-rgb, 255, 193, 7), 0.2);
+        color: var(--text-warning, #ffc107);
+    }
+
+    .mcp-server-details {
+        margin-top: 4px;
+    }
+
+    .mcp-server-details code {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        background: var(--background-secondary);
+        padding: 2px 6px;
+        border-radius: 4px;
+        display: inline-block;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .mcp-server-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+    }
+
+    .mcp-empty-state {
+        padding: 16px;
+        text-align: center;
+        color: var(--text-muted);
+        background: var(--background-secondary);
+        border-radius: 8px;
+    }
+
+    .mcp-empty-state p {
+        margin: 0;
+    }
+
+    /* Tools badge */
+    .mcp-tools-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.7rem;
+        padding: 2px 8px;
+        border-radius: 10px;
+        border: 1px solid var(--background-modifier-border);
+        background: var(--background-secondary);
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+
+    .mcp-tools-badge:hover {
+        background: var(--background-modifier-hover);
+        border-color: var(--text-muted);
+    }
+
+    .mcp-tools-badge.loading {
+        opacity: 0.7;
+    }
+
+    .mcp-tools-badge.has-tools {
+        background: rgba(var(--color-green-rgb, 76, 175, 80), 0.15);
+        border-color: var(--text-success, #4caf50);
+        color: var(--text-success, #4caf50);
+    }
+
+    .mcp-tools-badge.error {
+        background: rgba(var(--color-red-rgb, 244, 67, 54), 0.15);
+        border-color: var(--text-error, #f44336);
+        color: var(--text-error, #f44336);
+    }
+
+    /* Expanded tools list */
+    .mcp-tools-list {
+        margin-top: 12px;
+        padding: 12px;
+        background: var(--background-secondary);
+        border-radius: 6px;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .mcp-tools-loading,
+    .mcp-tools-empty {
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 0.85rem;
+        padding: 8px;
+    }
+
+    .mcp-tools-error {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-error, #f44336);
+        font-size: 0.85rem;
+        padding: 8px;
+    }
+
+    .mcp-tools-retry {
+        margin-left: auto;
+        padding: 4px 12px;
+        font-size: 0.75rem;
+        border-radius: 4px;
+        border: 1px solid var(--background-modifier-border);
+        background: var(--background-primary);
+        color: var(--text-normal);
+        cursor: pointer;
+    }
+
+    .mcp-tools-retry:hover {
+        background: var(--background-modifier-hover);
+    }
+
+    .mcp-tool-item {
+        display: flex;
+        flex-direction: column;
+        padding: 8px;
+        margin-bottom: 4px;
+        background: var(--background-primary);
+        border-radius: 4px;
+    }
+
+    .mcp-tool-item:last-child {
+        margin-bottom: 0;
+    }
+
+    .mcp-tool-name {
+        font-weight: 500;
+        font-family: var(--font-monospace);
+        font-size: 0.85rem;
+    }
+
+    .mcp-tool-desc {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        margin-top: 2px;
+        display: -webkit-box;
+        line-clamp: 2;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    /* Utilities */
+    .text-muted {
+        color: var(--text-muted);
+    }
+
+    .text-sm {
+        font-size: 0.85rem;
+    }
+
+    .mb-3 {
+        margin-bottom: 12px;
+    }
 </style>

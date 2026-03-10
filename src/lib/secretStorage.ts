@@ -25,6 +25,15 @@ export function setSecret(app: App, id: string, value: string): void {
 }
 
 /**
+ * Clear a secret by its ID.
+ * Obsidian's SecretStorage API does not currently expose deletion,
+ * so we overwrite the value with an empty string and treat that as absent.
+ */
+export function removeSecret(app: App, id: string): void {
+	app.secretStorage.setSecret(id, "");
+}
+
+/**
  * List all secret IDs from SecretStorage
  */
 export function listSecrets(app: App): string[] {

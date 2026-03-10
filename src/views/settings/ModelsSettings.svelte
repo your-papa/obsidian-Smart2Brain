@@ -38,6 +38,9 @@ function isGenProvider(providerId: string): boolean {
 
 // Helper to check if provider supports embedding
 function isEmbedProvider(providerId: string): boolean {
+	if (!data.isProviderEmbeddingAvailable(providerId)) {
+		return false;
+	}
 	const provider = getProviderDefinition(providerId, data.getAllCustomProviderMeta());
 	if (!provider) return false;
 	return isEmbeddingProvider(provider);

@@ -2,11 +2,18 @@
 import type { Component } from "svelte";
 import { mount, onMount } from "svelte";
 import AuthConfigFields from "../../components/settings/AuthConfigFields.svelte";
+import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
+import Dropdown from "../../components/ui/Dropdown.svelte";
 import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
-import { createAuthStateQuery, invalidateProviderState } from "../../lib/query";
+import { createAuthStateQuery, invalidateAuthState, invalidateProviderState } from "../../lib/query";
 import type SecondBrainPlugin from "../../main";
 import { type LogoProps, getProviderDefinition } from "../../providers/index";
+import {
+	clearOpenAICodexSession,
+	getStoredOpenAICodexSession,
+	signInWithOpenAICodex,
+} from "../../providers/openaiCodex";
 import { getData } from "../../stores/dataStore.svelte";
 import { icon } from "../../utils/utils";
 import type { ProviderSetupModal } from "./ProviderSetup";
@@ -22,11 +29,38 @@ const { modal, plugin, selectedProvider }: Props = $props();
 const data = getData();
 
 const query = createAuthStateQuery(() => selectedProvider);
+const isOpenAI = $derived(selectedProvider === "openai");
+const authMethodOptions = [
+	{ display: "Codex Sign-In", value: "codex" as const },
+	{ display: "API Key", value: "apiKey" as const },
+];
+
+let authMethod = $derived(isOpenAI ? data.getProviderAuthMode(selectedProvider) : "apiKey");
+let isSigningIn = $state(false);
+let codexActionError = $state<string | null>(null);
+let codexSession = $derived(isOpenAI ? getStoredOpenAICodexSession() : undefined);
 
 function handleAddProvider() {
 	data.setProviderConfigured(selectedProvider, true);
 	invalidateProviderState(selectedProvider);
 	modal.close();
+}
+
+async function handleCodexSignIn() {
+	isSigningIn = true;
+	codexActionError = null;
+	try {
+		await signInWithOpenAICodex();
+	} catch (error) {
+		codexActionError = error instanceof Error ? error.message : String(error);
+	} finally {
+		isSigningIn = false;
+	}
+}
+
+function handleCodexDisconnect() {
+	clearOpenAICodexSession();
+	codexActionError = null;
 }
 
 // Get the logo component for the provider
@@ -74,25 +108,68 @@ onMount(() => {
 </script>
 
 <div class="modal-content">
-    <div class="setting-item">
-        <div class="setting-item-description">
-            To use S2B with OpenAI, you need to add an API key. You can do this
-            as follows.
-            <li>
-                Create a key by visiting <a
-                    href="https://platform.openai.com/api-keys"
-                    >OpenAI`s Dashboard</a
-                >
-            </li>
-            <li>Ensure your OpenAI account is loaded up with credtis.</li>
-            <li>
-                Paste the API key below. It should start with '<strong
-                    >sk-</strong
-                >'.
-            </li>
-        </div>
-    </div>
-    <AuthConfigFields provider={selectedProvider} />
+    {#if isOpenAI}
+        <SettingItem
+            name="Auth Method"
+            desc="Choose whether OpenAI uses local ChatGPT/Codex sign-in or a direct API key."
+        >
+            <Dropdown
+                type="options"
+                dropdown={authMethodOptions}
+                selected={authMethod}
+                onchange={(value) => {
+                    data.setProviderAuthMode(selectedProvider, value);
+                    invalidateAuthState(selectedProvider);
+                }}
+            />
+        </SettingItem>
+
+        {#if authMethod === "codex"}
+            <div class="setting-item">
+                <div class="setting-item-description">
+                    Sign in with your ChatGPT/Codex account to use OpenAI chat
+                    models locally. This mode is chat-only: embeddings and RAG
+                    remain available only through OpenAI API-key auth.
+                </div>
+            </div>
+
+            <SettingItem
+                name="ChatGPT Sign-In"
+                desc={codexSession?.accountId
+                    ? `Signed in (${codexSession.accountId})`
+                    : "Open a browser window to complete ChatGPT/Codex authorization."}
+            >
+                <div class="flex gap-2">
+                    <Button
+                        buttonText={codexSession ? "Reconnect" : "Sign in with ChatGPT"}
+                        disabled={isSigningIn}
+                        cta={true}
+                        onClick={() => void handleCodexSignIn()}
+                    />
+                    {#if codexSession}
+                        <Button buttonText="Disconnect" onClick={handleCodexDisconnect} />
+                    {/if}
+                </div>
+            </SettingItem>
+
+            {#if codexActionError}
+                <SettingItem name="Authorization Error" desc={codexActionError} />
+            {/if}
+        {:else}
+            <div class="setting-item">
+                <div class="setting-item-description">
+                    To use S2B with OpenAI via API key, create a key in <a
+                        href="https://platform.openai.com/api-keys"
+                        >OpenAI&apos;s Dashboard</a
+                    >, ensure the account has credits, and select a stored
+                    secret below. The key should start with <strong>sk-</strong>.
+                </div>
+            </div>
+            <AuthConfigFields provider={selectedProvider} />
+        {/if}
+    {:else}
+        <AuthConfigFields provider={selectedProvider} />
+    {/if}
 </div>
 
 <div class="modal-button-container">

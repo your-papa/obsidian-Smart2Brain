@@ -30,6 +30,7 @@ import {
 	type ChatModelConfig,
 	type CustomProviderMeta,
 	type EmbedModelConfig,
+	type OpenAIAuthMode,
 } from "../providers/index";
 
 // ============================================================================
@@ -77,6 +78,8 @@ export interface StoredAuthState {
 	values: Record<string, string>;
 	/** Secret IDs for fields stored in SecretStorage (e.g., apiKey) */
 	secretIds: Record<string, string>;
+	/** Selected auth mode for providers that support multiple login routes */
+	authMode?: OpenAIAuthMode;
 }
 
 /**
@@ -104,10 +107,11 @@ export interface StoredProviderState {
  * Creates default auth state.
  * All fields start empty (no default values).
  */
-function createDefaultAuth(): StoredAuthState {
+function createDefaultAuth(authMode: OpenAIAuthMode = "apiKey"): StoredAuthState {
 	return {
 		values: {},
 		secretIds: {},
+		authMode,
 	};
 }
 
@@ -118,7 +122,7 @@ function createDefaultAuth(): StoredAuthState {
 export const DEFAULT_BUILTIN_PROVIDER_STATES: Record<BuiltInProviderId, StoredProviderState> = {
 	openai: {
 		isConfigured: false,
-		auth: createDefaultAuth(),
+		auth: createDefaultAuth("codex"),
 		chatModels: {
 			"chatgpt-4o-latest": { contextWindow: 128000, temperature: 0.4 },
 			"gpt-4.1-mini-2025-04-14": { contextWindow: 1047576, temperature: 0.4 },
@@ -1501,6 +1505,10 @@ export class PluginDataStore {
 
 		const result: AuthObject = {};
 
+		if (stored.authMode) {
+			result.authMode = stored.authMode;
+		}
+
 		// Copy non-secret values
 		if (stored.values.baseUrl) {
 			result.baseUrl = stored.values.baseUrl;
@@ -1594,6 +1602,27 @@ export class PluginDataStore {
 			delete config.auth.secretIds[fieldName];
 		}
 		this.saveSettings();
+	}
+
+	getProviderAuthMode(providerId: string): OpenAIAuthMode {
+		const config = this.#data.providerConfig[providerId];
+		if (!config) return "apiKey";
+		return config.auth.authMode ?? (providerId === "openai" ? "codex" : "apiKey");
+	}
+
+	setProviderAuthMode(providerId: string, authMode: OpenAIAuthMode): void {
+		const config = this.#data.providerConfig[providerId];
+		if (!config) return;
+		config.auth.authMode = authMode;
+		this.saveSettings();
+	}
+
+	isProviderUsingCodexAuth(providerId: string): boolean {
+		return this.getProviderAuthMode(providerId) === "codex";
+	}
+
+	isProviderEmbeddingAvailable(providerId: string): boolean {
+		return !(providerId === "openai" && this.isProviderUsingCodexAuth(providerId));
 	}
 
 	// ============================================================================

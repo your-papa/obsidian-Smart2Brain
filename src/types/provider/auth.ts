@@ -14,6 +14,8 @@
  */
 export type AuthObjectKey = "apiKey" | "baseUrl" | "headers";
 
+export type OpenAIAuthMode = "apiKey" | "codex";
+
 /**
  * Definition for a single authentication field in a provider's auth config.
  * Used to dynamically render auth forms in the settings UI.
@@ -60,9 +62,18 @@ export interface AuthFieldDefinition {
  * Contains the resolved values for authentication fields.
  */
 export interface AuthObject {
+	authMode?: OpenAIAuthMode;
 	apiKey?: string;
 	baseUrl?: string;
 	headers?: Record<string, string>;
+	codexSession?: CodexSession;
+}
+
+export interface CodexSession {
+	accessToken: string;
+	refreshToken: string;
+	expiresAt: number;
+	accountId?: string;
 }
 
 /**

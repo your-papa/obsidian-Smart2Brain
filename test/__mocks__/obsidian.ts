@@ -23,6 +23,13 @@ export class App {
 	workspace = new Workspace();
 	metadataCache = new MetadataCache();
 	appId = "test-vault-id";
+	secretStorage = {
+		getSecret: vi.fn().mockReturnValue(null),
+		setSecret: vi.fn(),
+		listSecrets: vi.fn().mockReturnValue([]),
+	};
+	loadLocalStorage = vi.fn().mockReturnValue(null);
+	saveLocalStorage = vi.fn();
 	// Community plugins API
 	plugins = {
 		manifests: {} as Record<string, unknown>,

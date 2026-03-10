@@ -128,6 +128,10 @@ export class AvailableModels {
 				return; // Skip non-embedding providers
 			}
 
+			if (!this.#data.isProviderEmbeddingAvailable(provider)) {
+				return;
+			}
+
 			const state = this.#providerQueries[idx]?.data;
 
 			// Use dedicated embedding models if provider supports discoverEmbeddingModels

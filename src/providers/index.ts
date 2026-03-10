@@ -135,6 +135,7 @@ export { createOpenAICompatibleProvider } from "./openai-compatible";
 export type {
 	AuthObject,
 	AuthObjectKey,
+	CodexSession,
 	AuthFieldDefinition,
 	AuthValidationResult,
 	BaseProviderDefinition,
@@ -146,6 +147,7 @@ export type {
 	ProviderAuthConfig,
 	ProviderSetupInstructions,
 	RequiredAuthField,
+	OpenAIAuthMode,
 	OptionalAuthField,
 } from "../types/provider/index";
 
