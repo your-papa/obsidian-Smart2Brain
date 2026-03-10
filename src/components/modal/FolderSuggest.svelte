@@ -1,8 +1,7 @@
 <script lang="ts" generics="T extends TAbstractFile">
-import { AbstractInputSuggest, type App, type TAbstractFile, TFile, TFolder } from "obsidian";
+import { type App, type TAbstractFile } from "obsidian";
 import { onDestroy, onMount } from "svelte";
-import { mount } from "svelte";
-import Suggestion from "../ui/Suggestion.svelte";
+import { FileFolderSuggest } from "./folderSuggest";
 
 interface Props {
 	app: App;
@@ -25,7 +24,7 @@ let {
 }: Props = $props();
 
 let inputEl: HTMLInputElement;
-let suggestInstance: FileFolderSuggest<T>;
+let suggestInstance: FileFolderSuggest;
 
 let inputValue: string = $state("");
 
@@ -33,48 +32,6 @@ let inputValue: string = $state("");
 $effect(() => {
 	inputValue = value;
 });
-
-class FileFolderSuggest<T extends TAbstractFile> extends AbstractInputSuggest<T> {
-	private suggestionCallback: (query: string) => T[];
-	constructor(app: App, inputEl: HTMLInputElement, suggestionFn: (query: string) => T[]) {
-		super(app, inputEl);
-		this.suggestionCallback = suggestionFn;
-		this.limit = 10;
-	}
-
-	protected getSuggestions(query: string): T[] {
-		const suggestions = this.suggestionCallback(query);
-		return suggestions.slice(0, suggestionLength);
-	}
-
-	renderSuggestion(file: T, el: HTMLElement): void {
-		let iconId: string;
-		switch (file.constructor) {
-			case TFolder:
-				iconId = "folder";
-				break;
-			case TFile:
-				iconId = "file";
-				break;
-			default:
-				iconId = "unknown";
-				break;
-		}
-		mount(Suggestion, {
-			target: el,
-			props: {
-				suggestionText: file.path,
-				iconId: iconId,
-			},
-		});
-	}
-
-	selectSuggestion(file: T, evt: MouseEvent | KeyboardEvent): void {
-		onSelected(file.path);
-		inputValue = file.path;
-		this.close();
-	}
-}
 
 function submit(e: KeyboardEvent) {
 	if (e.key === "Enter" && inputValue.trim()) {
@@ -84,7 +41,14 @@ function submit(e: KeyboardEvent) {
 }
 
 onMount(() => {
-	suggestInstance = new FileFolderSuggest(app, inputEl, suggestionFn);
+	suggestInstance = new FileFolderSuggest(app, inputEl, {
+		getSuggestions: suggestionFn,
+		getLimit: () => suggestionLength,
+		onSelect: (path) => {
+			onSelected(path);
+			inputValue = path;
+		},
+	});
 });
 
 onDestroy(() => {
