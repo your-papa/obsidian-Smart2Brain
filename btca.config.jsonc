@@ -1,86 +1,85 @@
 {
   "$schema": "https://btca.dev/btca.schema.json",
+  "providerTimeoutMs": 300000,
   "resources": [
     {
-      "name": "svelte",
       "type": "git",
+      "name": "svelte",
       "url": "https://github.com/sveltejs/svelte.dev",
       "branch": "main",
       "searchPath": "apps/svelte.dev/content",
-      "specialNotes": "Svelte 5 docs. Focus on runes ($state, $derived, $effect), components, and reactivity.",
+      "specialNotes": "Svelte 5 docs. Focus on runes ($state, $derived, $effect), components, and reactivity."
     },
     {
-      "name": "tailwindcss",
       "type": "git",
+      "name": "tailwindcss",
       "url": "https://github.com/tailwindlabs/tailwindcss.com",
       "branch": "main",
       "searchPath": "src/docs",
-      "specialNotes": "Tailwind CSS v3 documentation.",
+      "specialNotes": "Tailwind CSS v3 documentation."
     },
     {
-      "name": "langchainjs",
       "type": "git",
+      "name": "langchainjs",
       "url": "https://github.com/langchain-ai/docs",
       "branch": "main",
-      "specialNotes": "LangChain docs (covers both Python and JS). Focus on JS examples in src/oss/langchain. Covers agents, RAG, tools, and integrations.",
+      "specialNotes": "LangChain docs (covers both Python and JS). Focus on JS examples in src/oss/langchain. Covers agents, RAG, tools, and integrations."
     },
     {
-      "name": "bitsUi",
       "type": "git",
+      "name": "bitsui",
       "url": "https://github.com/huntabyte/bits-ui",
       "branch": "main",
       "searchPath": "docs/src/lib/content",
-      "specialNotes": "Bits UI headless component library for Svelte 5.",
+      "specialNotes": "Bits UI headless component library for Svelte 5."
     },
     {
-      "name": "runed",
       "type": "git",
+      "name": "runed",
       "url": "https://github.com/svecosystem/runed",
       "branch": "main",
       "searchPath": "sites/docs/src/lib/content",
-      "specialNotes": "Runed utilities for Svelte 5 runes.",
+      "specialNotes": "Runed utilities for Svelte 5 runes."
     },
     {
-      "name": "zod",
       "type": "git",
+      "name": "zod",
       "url": "https://github.com/colinhacks/zod",
       "branch": "main",
       "searchPath": "packages/docs/content",
-      "specialNotes": "Zod v4 schema validation library.",
+      "specialNotes": "Zod v4 schema validation library."
     },
     {
-      "name": "tanstackQuery",
       "type": "git",
+      "name": "tanstackQuery",
       "url": "https://github.com/TanStack/query",
       "branch": "main",
       "searchPath": "docs",
-      "specialNotes": "TanStack Query docs. Focus on Svelte Query integration.",
+      "specialNotes": "TanStack Query docs. Focus on Svelte Query integration."
     },
     {
-      "name": "obsidian",
       "type": "git",
+      "name": "obsidian",
       "url": "https://github.com/obsidianmd/obsidian-api",
       "branch": "master",
-      "specialNotes": "Obsidian plugin API types and documentation.",
+      "specialNotes": "Obsidian plugin API types and documentation."
     },
     {
-      "name": "dexie",
       "type": "git",
-      "url": "https://github.com/dexie/dexie.js",
-      "branch": "master",
-      "searchPath": "docs",
-      "specialNotes": "Dexie.js IndexedDB wrapper documentation.",
+      "name": "btca",
+      "url": "https://github.com/davis7dotsh/better-context.git",
+      "branch": "main",
+      "specialNotes": "BTCA CLI and server. Focus on provider configuration, resources, and MCP usage."
     },
     {
+      "type": "git",
       "name": "biome",
-      "type": "git",
       "url": "https://github.com/biomejs/website",
       "branch": "main",
       "searchPath": "src/content/docs",
-      "specialNotes": "Biome linter and formatter documentation.",
-    },
+      "specialNotes": "Biome linter and formatter documentation."
+    }
   ],
-  "model": "claude-sonnet-4-5-20250929",
-  "provider": "sap-ai-proxy",
-  "providerTimeoutMs": 300000,
+  "model": "gpt-5.3-codex-spark",
+  "provider": "openai"
 }
