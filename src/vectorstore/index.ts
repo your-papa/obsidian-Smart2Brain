@@ -18,6 +18,7 @@ export {
 export type {
 	DefaultEmbedModel,
 	DocumentVector,
+	EmbeddingIndexConfig,
 	IndexMetadata,
 	IndexingProgress,
 	ScoredDocument,
@@ -28,6 +29,8 @@ export type {
 	VectorStore,
 	VectorStoreBackend,
 } from "./types";
+
+export { sanitizeIndexId, getIndexFilePath, getDbName } from "./types";
 
 export { cosineSimilarity, normalize, dotProduct } from "./similarity";
 
@@ -42,13 +45,15 @@ import { HNSWVectorStore } from "./HNSWVectorStore";
  * Create a vector store instance for the specified backend.
  *
  * @param backend The backend to use: 'indexeddb' (brute-force) or 'hnsw' (ANN)
+ * @param vaultId The vault identifier for scoping the database
+ * @param indexId Optional index identifier ("provider:model") for multi-index support
  * @returns A VectorStore instance
  */
-export function createVectorStore(backend: VectorStoreBackend, vaultId: string): VectorStore {
+export function createVectorStore(backend: VectorStoreBackend, vaultId: string, indexId?: string): VectorStore {
 	switch (backend) {
 		case "hnsw":
-			return new HNSWVectorStore(vaultId);
+			return new HNSWVectorStore(vaultId, indexId);
 		default:
-			return new IndexedDBVectorStore(vaultId);
+			return new IndexedDBVectorStore(vaultId, indexId);
 	}
 }

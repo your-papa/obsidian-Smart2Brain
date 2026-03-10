@@ -1,8 +1,9 @@
 <script lang="ts">
 import { onMount } from "svelte";
 import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
-import type { BuiltInToolId, ToolConfig } from "../../types/plugin";
+import type { BuiltInToolId, SearchAlgorithm, ToolConfig } from "../../types/plugin";
 import Button from "../ui/Button.svelte";
+import Dropdown from "../ui/Dropdown.svelte";
 import Text from "../ui/Text.svelte";
 import TextArea from "../ui/TextArea.svelte";
 import Toggle from "../ui/Toggle.svelte";
@@ -48,6 +49,11 @@ let maxResults = $state(
 		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
 		10,
 );
+let algorithm = $state<SearchAlgorithm>(
+	(initialToolConfig?.settings as { algorithm?: SearchAlgorithm })?.algorithm ??
+		(defaultConfig.settings as { algorithm?: SearchAlgorithm })?.algorithm ??
+		"lexical",
+);
 let allowCreate = $state(
 	(initialToolConfig?.settings as { allowCreate?: boolean })?.allowCreate ??
 		(defaultConfig.settings as { allowCreate?: boolean })?.allowCreate ??
@@ -76,6 +82,7 @@ interface ToolConfigSnapshot {
 	maxContentLength: number;
 	includeMetadata: boolean;
 	maxResults: number;
+	algorithm: SearchAlgorithm;
 	allowCreate: boolean;
 	allowUpdate: boolean;
 	allowDelete: boolean;
@@ -98,6 +105,10 @@ const initialSnapshot: ToolConfigSnapshot = {
 		(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
 		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
 		10,
+	algorithm:
+		(initialToolConfig?.settings as { algorithm?: SearchAlgorithm })?.algorithm ??
+		(defaultConfig.settings as { algorithm?: SearchAlgorithm })?.algorithm ??
+		"lexical",
 	allowCreate:
 		(initialToolConfig?.settings as { allowCreate?: boolean })?.allowCreate ??
 		(defaultConfig.settings as { allowCreate?: boolean })?.allowCreate ??
@@ -123,6 +134,7 @@ const defaultSnapshot: ToolConfigSnapshot = {
 	maxContentLength: (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ?? 0,
 	includeMetadata: (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ?? true,
 	maxResults: (defaultConfig.settings as { maxResults?: number })?.maxResults ?? 10,
+	algorithm: (defaultConfig.settings as { algorithm?: SearchAlgorithm })?.algorithm ?? "lexical",
 	allowCreate: (defaultConfig.settings as { allowCreate?: boolean })?.allowCreate ?? true,
 	allowUpdate: (defaultConfig.settings as { allowUpdate?: boolean })?.allowUpdate ?? true,
 	allowDelete: (defaultConfig.settings as { allowDelete?: boolean })?.allowDelete ?? true,
@@ -144,6 +156,7 @@ const isDirty = $derived.by(() => {
 		maxContentLength,
 		includeMetadata,
 		maxResults,
+		algorithm,
 		allowCreate,
 		allowUpdate,
 		allowDelete,
@@ -160,6 +173,7 @@ const isAtDefault = $derived.by(() => {
 		maxContentLength,
 		includeMetadata,
 		maxResults,
+		algorithm,
 		allowCreate,
 		allowUpdate,
 		allowDelete,
@@ -192,7 +206,7 @@ function handleSave() {
 	};
 
 	if (capturedToolId === "search_notes") {
-		updatedConfig.settings = { maxResults };
+		updatedConfig.settings = { maxResults, algorithm };
 	} else if (capturedToolId === "read_content") {
 		updatedConfig.settings = { maxContentLength };
 	} else if (capturedToolId === "execute_dataview_query") {
@@ -212,8 +226,9 @@ function handleResetToDefault() {
 	promptGuidance = defaultConfig.promptGuidance ?? "";
 
 	if (capturedToolId === "search_notes" && defaultConfig.settings) {
-		const settings = defaultConfig.settings as { maxResults: number };
+		const settings = defaultConfig.settings as { maxResults: number; algorithm: SearchAlgorithm };
 		maxResults = settings.maxResults;
+		algorithm = settings.algorithm;
 	} else if (capturedToolId === "read_content" && defaultConfig.settings) {
 		const settings = defaultConfig.settings as { maxContentLength: number };
 		maxContentLength = settings.maxContentLength;
@@ -280,6 +295,20 @@ function handleResetToDefault() {
   {#if capturedToolId === "search_notes"}
     <div class="tool-config-section">
       <h4 class="tool-config-section-title">Search Settings</h4>
+      <div class="tool-config-field">
+        <label class="tool-config-label" for="tool-config-algorithm">Search Algorithm</label>
+        <p class="tool-config-description">Choose the search algorithm the agent uses for retrieving notes.</p>
+        <Dropdown
+          id="tool-config-algorithm"
+          type="options"
+          dropdown={[
+            { display: "Lexical (BM25)", value: "lexical" as SearchAlgorithm },
+            { display: "Hybrid (BM25 + semantic)", value: "hybrid" as SearchAlgorithm },
+          ]}
+          selected={algorithm}
+          onchange={(v) => (algorithm = v)}
+        />
+      </div>
       <div class="tool-config-field">
         <label class="tool-config-label" for="tool-config-max-results">Max Notes to Return</label>
         <p class="tool-config-description">Maximum number of notes to return to the AI agent.</p>

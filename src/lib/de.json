@@ -7,9 +7,8 @@
 		"search_algorithm": {
 			"title": "Suchalgorithmus",
 			"desc": "Wähle den Suchalgorithmus zum Abrufen von Notizen.",
-			"lexical": "Lexikalisch (TF-IDF)",
-			"embeddings": "Semantisch (Embeddings)",
-			"hybrid": "Hybrid (semantisch + lexikalisch)"
+			"lexical": "Lexikalisch (BM25)",
+			"hybrid": "Hybrid (BM25 + semantisch)"
 		}
 	}
 }

@@ -96,7 +96,7 @@ async function hybridSearch(app: App, query: string, filter?: SearchFilter): Pro
 }
 
 /**
- * Get lexical search results using MiniSearch (TF-IDF based).
+ * Get lexical search results using MiniSearch (BM25 based).
  */
 async function getLexicalResults(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
 	if (!isVectorStoreInitialized()) {
@@ -173,8 +173,6 @@ export async function performSearch(
 	switch (algorithm) {
 		case "lexical":
 			return getLexicalResults(app, query, filter);
-		case "embeddings":
-			return embeddingsSearch(app, query, filter);
 		case "hybrid":
 			return hybridSearch(app, query, filter);
 		default:
@@ -224,8 +222,9 @@ export function createSearchNotesTool(app: App) {
 	}): Promise<string> => {
 		// Get fresh config each call to pick up any changes
 		const currentConfig = getSearchNotesConfig();
-		const algorithm = pluginData.searchAlgorithm;
-		const limit = (currentConfig?.settings as { maxResults?: number })?.maxResults ?? 10;
+		const settings = currentConfig?.settings as { maxResults?: number; algorithm?: SearchAlgorithm } | undefined;
+		const algorithm: SearchAlgorithm = settings?.algorithm ?? pluginData.searchAlgorithm;
+		const limit = settings?.maxResults ?? 10;
 
 		// Build filter from parameters
 		const filter: SearchFilter | undefined =
@@ -258,14 +257,7 @@ export function createSearchNotesTool(app: App) {
 			})
 			.join("\n\n");
 
-		const algorithmLabel =
-			algorithm === "lexical"
-				? "Lexical (TF-IDF)"
-				: algorithm === "embeddings"
-					? "Embeddings"
-					: algorithm === "hybrid"
-						? "Hybrid"
-						: "Lexical";
+		const algorithmLabel = algorithm === "lexical" ? "Lexical (BM25)" : "Hybrid";
 		return `Found ${limitedResults.length} note(s) matching "${query}" using ${algorithmLabel}.\n\n${formattedResults}`;
 	};
 

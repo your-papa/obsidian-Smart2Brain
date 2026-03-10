@@ -1,13 +1,15 @@
 /**
  * MiniSearch Service
  *
- * Provides TF-IDF based lexical search using MiniSearch library.
+ * Provides BM25 based lexical search using MiniSearch library.
  * Indexes document titles and content for fast full-text search.
  * Persists index to IndexedDB for instant startup.
  */
 
 import MiniSearch, { type SearchResult as MiniSearchResult } from "minisearch";
 import { Logger } from "../utils/logging";
+
+import { getDbName } from "./types";
 
 const DB_NAME_PREFIX = "ssb-minisearch";
 const DB_VERSION = 1;
@@ -29,7 +31,7 @@ interface IndexedDocument {
 
 /**
  * Service for full-text lexical search using MiniSearch.
- * Uses TF-IDF scoring with field boosting (title 2x, content 1x).
+ * Uses BM25 scoring with field boosting (title 2x, content 1x).
  */
 export class MiniSearchService {
 	private index: MiniSearch<IndexedDocument>;
@@ -39,8 +41,8 @@ export class MiniSearchService {
 	private documentPaths = new Set<string>();
 	private readonly dbName: string;
 
-	constructor(vaultId: string) {
-		this.dbName = `${DB_NAME_PREFIX}-${vaultId}`;
+	constructor(vaultId: string, indexId?: string) {
+		this.dbName = getDbName(DB_NAME_PREFIX, vaultId, indexId);
 		this.index = this.createIndex();
 	}
 

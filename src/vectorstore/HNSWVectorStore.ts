@@ -21,6 +21,8 @@ import {
 } from "./types";
 import { cosineSimilarity, toFloat32Array, toNumberArray } from "./similarity";
 
+import { getDbName } from "./types";
+
 const DB_NAME_PREFIX = "ssb-hnsw";
 const DOCUMENTS_STORE = "documents";
 const METADATA_STORE = "metadata";
@@ -85,8 +87,8 @@ export class HNSWVectorStore implements VectorStore {
 	private readonly efConstruction = 200; // Construction time accuracy
 	private readonly efSearch = 100; // Search time accuracy
 
-	constructor(vaultId: string) {
-		this.dbName = `${DB_NAME_PREFIX}-${vaultId}`;
+	constructor(vaultId: string, indexId?: string) {
+		this.dbName = getDbName(DB_NAME_PREFIX, vaultId, indexId);
 	}
 
 	/**

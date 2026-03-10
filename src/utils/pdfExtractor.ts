@@ -1,4 +1,4 @@
-import { extractText, getDocumentProxy } from "unpdf";
+import { loadPdfJs } from "obsidian";
 
 export interface PdfExtractResult {
 	text: string;
@@ -6,14 +6,20 @@ export interface PdfExtractResult {
 }
 
 /**
- * Extracts all text content from a PDF file using unpdf.
- * Works in browser/Electron environments without any additional setup.
+ * Extracts all text content from a PDF file using Obsidian's built-in pdfjs.
  *
  * @param data - PDF file content as Uint8Array
  * @returns Extracted text and total page count
  */
 export async function extractTextFromPdf(data: Uint8Array): Promise<PdfExtractResult> {
-	const pdf = await getDocumentProxy(data);
-	const { totalPages, text } = await extractText(pdf, { mergePages: true });
-	return { text: text as string, totalPages };
+	const pdfjsLib = await loadPdfJs();
+	const pdf = await pdfjsLib.getDocument({ data }).promise;
+	const totalPages = pdf.numPages;
+	const textParts: string[] = [];
+	for (let i = 1; i <= totalPages; i++) {
+		const page = await pdf.getPage(i);
+		const content = await page.getTextContent();
+		textParts.push(content.items.map((item: { str: string }) => item.str).join(""));
+	}
+	return { text: textParts.join("\n"), totalPages };
 }

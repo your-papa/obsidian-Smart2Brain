@@ -1,6 +1,7 @@
 <script lang="ts">
 import { Accordion } from "bits-ui";
 import { t } from "svelte-i18n";
+import { ExcludeFoldersModal } from "../../components/modal/ExcludeFoldersModal";
 import ProviderItem from "../../components/settings/ProviderItem.svelte";
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
@@ -14,6 +15,8 @@ import { CustomProviderSetupModal } from "../custom-provider-setup/CustomProvide
 
 const pluginData = getData();
 const plugin = getPlugin();
+
+const fuzzySuggestModel = new ExcludeFoldersModal(plugin.app);
 
 // Provider management state
 let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
@@ -54,6 +57,13 @@ function handleAddCustomProvider() {
 
 <!-- Data Management -->
 <SettingGroup heading="Data Management">
+  <SettingItem
+    name={$t("settings.excludeff")}
+    desc="These files and folders will be excluded from search, agents, and graph."
+  >
+    <Button onClick={() => fuzzySuggestModel.open()} buttonText="Manage Exclusions" />
+  </SettingItem>
+
   <SettingItem name={$t("settings.clear")} desc={$t("settings.clear_desc")}>
     <Button
       buttonText={$t("settings.clear_label")}
