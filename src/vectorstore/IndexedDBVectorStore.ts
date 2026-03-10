@@ -8,6 +8,7 @@
 
 import {
 	DEXIE_DB_NAME,
+	getDbName,
 	type DocumentVector,
 	type IndexMetadata,
 	type ScoredDocument,
@@ -54,8 +55,8 @@ export class IndexedDBVectorStore implements VectorStore {
 	private _modelId: string | null = null;
 	private readonly dbName: string;
 
-	constructor(vaultId: string) {
-		this.dbName = `${DEXIE_DB_NAME}-${vaultId}`;
+	constructor(vaultId: string, indexId?: string) {
+		this.dbName = getDbName(DEXIE_DB_NAME, vaultId, indexId);
 	}
 
 	/**

@@ -133,9 +133,8 @@
 		"search_algorithm": {
 			"title": "Search Algorithm",
 			"desc": "Choose the search algorithm for retrieving notes.",
-			"lexical": "Lexical (TF-IDF)",
-			"embeddings": "Semantic (embeddings)",
-			"hybrid": "Hybrid (semantic + lexical)"
+			"lexical": "Lexical (BM25)",
+			"hybrid": "Hybrid (BM25 + semantic)"
 		},
 		"excludeff": "Exclude files and folders",
 		"excludeff_desc": "These files and folders won't be embedded and not be used for generating answers.",

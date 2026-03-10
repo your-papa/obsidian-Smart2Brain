@@ -5,8 +5,8 @@
  * Supports both runtime (Dexie/IndexedDB) and serialized (MessagePack file) storage.
  */
 
-// Re-export DefaultEmbedModel from canonical location
-export type { DefaultEmbedModel } from "../types/plugin";
+// Re-export DefaultEmbedModel and EmbeddingIndexConfig from canonical location
+export type { DefaultEmbedModel, EmbeddingIndexConfig } from "../types/plugin";
 
 /**
  * A document with its embedding vector stored in IndexedDB.
@@ -136,14 +136,50 @@ export interface IndexingProgress {
 /** Current schema version for the serialized index */
 export const INDEX_VERSION = 1;
 
-/** Database name for Dexie/IndexedDB */
+/** Database name prefix for IndexedDB backend */
 export const DEXIE_DB_NAME = "ssb-vectorstore";
 
-/** Path to the serialized index file (relative to plugin data dir) */
+/** Legacy path to the serialized index file (relative to plugin data dir) */
 export const INDEX_FILE_PATH = "vectorstore/index.msgpack";
 
 /** Debounce delay for file sync (5 minutes in ms) */
 export const SYNC_DEBOUNCE_MS = 5 * 60 * 1000;
+
+/**
+ * Sanitize a provider:model string into a filesystem/IndexedDB-safe identifier.
+ * Replaces special characters with underscores while preserving readability.
+ */
+export function sanitizeIndexId(provider: string, model: string): string {
+	return `${provider}_${model}`.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+/**
+ * Get the index file path for a specific index ID.
+ * @param indexId The "provider:model" composite key
+ * @returns Path relative to the plugin data dir
+ */
+export function getIndexFilePath(indexId: string): string {
+	const colonIdx = indexId.indexOf(":");
+	const provider = colonIdx >= 0 ? indexId.slice(0, colonIdx) : indexId;
+	const model = colonIdx >= 0 ? indexId.slice(colonIdx + 1) : "";
+	const sanitized = sanitizeIndexId(provider, model);
+	return `vectorstore/${sanitized}/index.msgpack`;
+}
+
+/**
+ * Get the database name for a specific index ID and vault.
+ * @param vaultId The vault identifier
+ * @param indexId Optional "provider:model" composite key. If omitted, returns legacy name.
+ * @returns IndexedDB database name
+ */
+export function getDbName(prefix: string, vaultId: string, indexId?: string): string {
+	if (!indexId) return `${prefix}-${vaultId}`;
+	const colonIdx = indexId.indexOf(":");
+	const provider = colonIdx >= 0 ? indexId.slice(0, colonIdx) : indexId;
+	const model = colonIdx >= 0 ? indexId.slice(colonIdx + 1) : "";
+	const sanitized = sanitizeIndexId(provider, model);
+	return `${prefix}-${vaultId}-${sanitized}`;
+}
 
 /**
  * Result from a vector similarity search (internal use).

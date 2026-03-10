@@ -214,7 +214,7 @@ export class Agent {
 	 * - If attachments with vision support: returns an array of content blocks
 	 *   (text + image_url for images, inline text for .md/.txt/.csv/.json)
 	 * - PDFs via OpenRouter: sent as base64 data URL using `type: "file"` (native processing)
-	 * - PDFs via other providers: text extracted locally via unpdf
+	 * - PDFs via other providers: text extracted locally via Obsidian's built-in pdfjs
 	 * - Images without vision: throws an error
 	 */
 	private async buildMessageContent(
@@ -290,7 +290,7 @@ export class Agent {
 						},
 					} as unknown as MessageContentComplex);
 				} else {
-					// Other providers: extract text locally via unpdf
+					// Other providers: extract text locally
 					const data = new Uint8Array(buffer);
 					try {
 						const { text, totalPages } = await extractTextFromPdf(data);

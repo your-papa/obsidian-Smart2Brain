@@ -1,6 +1,7 @@
-import { type App, SuggestModal, TFile, debounce } from "obsidian";
+import { type App, Platform, SuggestModal, TFile, debounce } from "obsidian";
 import { performSearch, type SearchResult } from "../../agent/tools/searchNotes";
 import { getData } from "../../stores/dataStore.svelte";
+import type { SearchAlgorithm } from "../../types/plugin";
 import type { SearchFilter } from "../../vectorstore";
 import { Logger } from "../../utils/logging";
 
@@ -68,24 +69,148 @@ export class SearchModal extends SuggestModal<SearchResult> {
 	private lastSearchedQuery = "";
 	private isSearching = false;
 	private isClosed = false;
+	private semanticEnabled = false;
+	private glowAnimationId: number | null = null;
+	private borderEl: HTMLElement | null = null;
 
 	constructor(app: App) {
 		super(app);
 		this.setPlaceholder("Search notes... (path:folder/ tag:#tag)");
-		this.setInstructions([
-			{ command: "↑↓", purpose: "Navigate" },
-			{ command: "↵", purpose: "Open note" },
-			{ command: "esc", purpose: "Close" },
-		]);
+		this.updateInstructions();
+
+		// Register Tab to toggle semantic search
+		this.scope.register([], "Tab", (evt) => {
+			evt.preventDefault();
+			this.semanticEnabled = !this.semanticEnabled;
+			this.updateInstructions();
+			if (this.semanticEnabled) {
+				this.startGlowAnimation();
+			} else {
+				this.stopGlowAnimation();
+			}
+			// Re-run search with new algorithm if there's a query
+			if (this.currentQuery.trim()) {
+				this.lastSearchedQuery = ""; // Force re-search
+				this.debouncedSearch(this.currentQuery);
+			}
+			return false;
+		});
 
 		// Add custom class for styling
 		this.modalEl.addClass("ssb-search-modal");
 	}
 
+	private get activeAlgorithm(): SearchAlgorithm {
+		return this.semanticEnabled ? "hybrid" : "lexical";
+	}
+
+	private updateInstructions(): void {
+		const tabKey = Platform.isMacOS ? "⇥" : "Tab";
+		const semanticLabel = this.semanticEnabled ? "semantic: on" : "semantic: off";
+		this.setInstructions([
+			{ command: "↑↓", purpose: "Navigate" },
+			{ command: "↵", purpose: "Open note" },
+			{ command: tabKey, purpose: semanticLabel },
+			{ command: "esc", purpose: "Close" },
+		]);
+	}
+
 	onClose(): void {
 		this.isClosed = true;
+		this.stopGlowAnimation();
 		// Cancel any pending debounced calls
 		this.debouncedSearch.cancel();
+	}
+
+	private startGlowAnimation(): void {
+		if (this.glowAnimationId !== null) return;
+
+		const accent = getComputedStyle(document.body).getPropertyValue("--interactive-accent").trim() || "#7f6df2";
+		const muted =
+			getComputedStyle(document.body).getPropertyValue("--background-modifier-border").trim() || "#363636";
+		const radius = getComputedStyle(this.modalEl).borderRadius || "12px";
+		const borderWidth = 2;
+
+		// Hide the modal's own border so the gradient replaces it
+		this.modalEl.style.setProperty("border-color", "transparent", "important");
+
+		// Create a fixed-position overlay exactly on top of the modal
+		const border = document.createElement("div");
+		const modalRect = this.modalEl.getBoundingClientRect();
+		Object.assign(border.style, {
+			position: "fixed",
+			top: `${modalRect.top}px`,
+			left: `${modalRect.left}px`,
+			width: `${modalRect.width}px`,
+			height: `${modalRect.height}px`,
+			pointerEvents: "none",
+			zIndex: "9999",
+		});
+		document.body.appendChild(border);
+		this.borderEl = border;
+
+		const canvas = document.createElement("canvas");
+		const dpr = window.devicePixelRatio || 1;
+		canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none";
+		border.appendChild(canvas);
+
+		const animate = () => {
+			const rect = this.modalEl.getBoundingClientRect();
+			const w = rect.width;
+			const h = rect.height;
+
+			border.style.top = `${rect.top}px`;
+			border.style.left = `${rect.left}px`;
+			border.style.width = `${w}px`;
+			border.style.height = `${h}px`;
+
+			canvas.width = w * dpr;
+			canvas.height = h * dpr;
+
+			const ctx = canvas.getContext("2d");
+			if (!ctx) return;
+			ctx.scale(dpr, dpr);
+
+			const r = parseFloat(radius) || 12;
+			const angle = ((performance.now() % 2000) / 2000) * Math.PI * 2;
+
+			const cx = w / 2;
+			const cy = h / 2;
+			const grad = ctx.createConicGradient(angle, cx, cy);
+			grad.addColorStop(0, accent);
+			grad.addColorStop(0.25, muted);
+			grad.addColorStop(0.5, accent);
+			grad.addColorStop(0.75, muted);
+			grad.addColorStop(1, accent);
+
+			// Draw ring inward from the modal edges
+			ctx.beginPath();
+			ctx.roundRect(0, 0, w, h, r);
+			ctx.roundRect(
+				borderWidth,
+				borderWidth,
+				w - borderWidth * 2,
+				h - borderWidth * 2,
+				Math.max(0, r - borderWidth),
+			);
+			ctx.fillStyle = grad;
+			ctx.fill("evenodd");
+
+			this.glowAnimationId = requestAnimationFrame(animate);
+		};
+		this.glowAnimationId = requestAnimationFrame(animate);
+	}
+
+	private stopGlowAnimation(): void {
+		if (this.glowAnimationId !== null) {
+			cancelAnimationFrame(this.glowAnimationId);
+			this.glowAnimationId = null;
+		}
+		if (this.borderEl) {
+			this.borderEl.remove();
+			this.borderEl = null;
+		}
+		this.modalEl.style.removeProperty("border-color");
 	}
 
 	/**
@@ -104,8 +229,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 			}
 
 			this.isSearching = true;
-			const pluginData = getData();
-			const algorithm = pluginData.searchAlgorithm;
+			const algorithm = this.activeAlgorithm;
 
 			// Parse query for filter syntax
 			const { query, filter } = parseQueryWithFilters(rawQuery);
@@ -204,16 +328,30 @@ export class SearchModal extends SuggestModal<SearchResult> {
 	}
 
 	/**
+	 * Append a hint encouraging the user to enable semantic search.
+	 * Only shown when semantic is off and an embedding index is configured.
+	 */
+	private appendSemanticHint(): void {
+		if (this.semanticEnabled) return;
+		if (!getData().searchEmbedIndex) return;
+
+		const tabKey = Platform.isMacOS ? "⇥" : "Tab";
+		const hint = this.resultContainerEl.createDiv({ cls: "ssb-search-semantic-hint" });
+		hint.setText(`Press ${tabKey} to enhance results with semantic search`);
+	}
+
+	/**
 	 * Empty state message
 	 */
 	onNoSuggestion(): void {
 		// Clear previous empty state messages
 		this.resultContainerEl.empty();
 		const emptyEl = this.resultContainerEl.createDiv({ cls: "ssb-search-empty" });
-		if (this.isSearching) {
+		if (this.isSearching && this.semanticEnabled) {
 			emptyEl.setText("Searching...");
 		} else if (this.currentQuery.trim()) {
 			emptyEl.setText("No notes found");
+			this.appendSemanticHint();
 		} else {
 			emptyEl.setText("Type to search your notes");
 		}

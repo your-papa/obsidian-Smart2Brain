@@ -102,6 +102,13 @@
 	color: var(--text-muted);
 }
 
+.ssb-search-semantic-hint {
+	padding: 6px 16px;
+	text-align: center;
+	color: var(--text-faint);
+	font-size: var(--font-smallest);
+}
+
 /* Smart Graph View */
 .smart-graph-container {
 	padding: 0 !important;

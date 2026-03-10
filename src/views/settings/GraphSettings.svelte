@@ -1,5 +1,6 @@
 <script lang="ts">
 import { ModelSelectionModal } from "../../components/modal/ModelSelectionModal";
+import EmbeddingIndexSection from "../../components/settings/EmbeddingIndexSection.svelte";
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
@@ -67,6 +68,11 @@ function clearModel() {
 	updateSetting("graphChatModel", null);
 }
 </script>
+
+<!-- Embedding Index for Graph -->
+<SettingGroup>
+  <EmbeddingIndexSection purpose="graph" />
+</SettingGroup>
 
 <!-- LLM Model -->
 <SettingGroup heading="LLM Model">

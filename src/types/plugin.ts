@@ -4,7 +4,7 @@ import type { UUIDv7 } from "../utils/uuid7Validator";
 import type { VectorStoreBackend } from "../vectorstore/types";
 import type { SmartGraphSettings } from "./graph";
 
-export type SearchAlgorithm = "lexical" | "embeddings" | "hybrid";
+export type SearchAlgorithm = "lexical" | "hybrid";
 
 /**
  * Configuration for the default embedding model used for vector search.
@@ -14,6 +14,25 @@ export interface DefaultEmbedModel {
 	provider: string;
 	/** Model ID (e.g., "text-embedding-3-small") */
 	model: string;
+}
+
+/**
+ * Configuration for an embedding index.
+ * Each index is uniquely identified by its provider:model combination.
+ */
+export interface EmbeddingIndexConfig {
+	/** Composite key: "provider:model" */
+	id: string;
+	/** Provider ID (e.g., "openai", "ollama") */
+	provider: string;
+	/** Model ID (e.g., "text-embedding-3-small") */
+	model: string;
+	/** When this index config was first added (Unix timestamp ms) */
+	createdAt: number;
+	/** When this index was last fully built (Unix timestamp ms), null if never built */
+	lastBuiltAt: number | null;
+	/** Cached document count for UI display */
+	documentCount: number;
 }
 
 // ============================================================================
@@ -91,6 +110,8 @@ export type BuiltInToolId =
 export interface SearchNotesSettings {
 	/** Maximum number of results to return */
 	maxResults: number;
+	/** Search algorithm to use */
+	algorithm: SearchAlgorithm;
 }
 
 /**
@@ -374,8 +395,26 @@ export interface PluginData {
 	/**
 	 * Default embedding model for vector-based search.
 	 * When null, embeddings search is disabled.
+	 * @deprecated Use embeddingIndexes + searchEmbedIndex/graphEmbedIndex instead.
+	 * Kept for backward compatibility during migration.
 	 */
 	defaultEmbedModel: DefaultEmbedModel | null;
+
+	/**
+	 * Registry of all known embedding indexes.
+	 * Each index is identified by "provider:model" and stored independently.
+	 */
+	embeddingIndexes: EmbeddingIndexConfig[];
+
+	/**
+	 * Index ID used by search ("provider:model"), or null if not configured.
+	 */
+	searchEmbedIndex: string | null;
+
+	/**
+	 * Index ID used by the graph view ("provider:model"), or null if not configured.
+	 */
+	graphEmbedIndex: string | null;
 
 	/**
 	 * Vector store backend for similarity search.

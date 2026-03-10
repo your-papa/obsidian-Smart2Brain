@@ -9,6 +9,7 @@ import type {
 	BuiltInToolId,
 	DefaultEmbedModel,
 	DiffViewMode,
+	EmbeddingIndexConfig,
 	MCPServerConfig,
 	MCPServersConfig,
 	PluginData,
@@ -193,6 +194,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 			"Search through your Obsidian notes by keyword. Returns matching file names and metadata (properties/frontmatter) but NO content. Use this to identify relevant notes before using other tools.",
 		settings: {
 			maxResults: 10,
+			algorithm: "lexical" as SearchAlgorithm,
 		},
 	},
 	read_content: {
@@ -322,6 +324,9 @@ export const DEFAULT_SETTINGS: PluginData = {
 	// Other
 	searchAlgorithm: "lexical",
 	defaultEmbedModel: null,
+	embeddingIndexes: [],
+	searchEmbedIndex: null,
+	graphEmbedIndex: null,
 	vectorStoreBackend: "hnsw",
 	favoriteModels: [],
 
@@ -910,11 +915,131 @@ export class PluginDataStore {
 	}
 
 	get defaultEmbedModel() {
-		return this.#data.defaultEmbedModel;
+		// Backward-compat: derive from searchEmbedIndex
+		const indexId = this.#data.searchEmbedIndex;
+		if (!indexId) return this.#data.defaultEmbedModel;
+		const config = this.#data.embeddingIndexes.find((i) => i.id === indexId);
+		if (!config) return this.#data.defaultEmbedModel;
+		return { provider: config.provider, model: config.model };
 	}
 	set defaultEmbedModel(val: DefaultEmbedModel | null) {
 		this.#data.defaultEmbedModel = val;
 		this.saveSettings();
+	}
+
+	// --- Embedding Indexes (Multi-Index) ---
+
+	get embeddingIndexes(): EmbeddingIndexConfig[] {
+		return this.#data.embeddingIndexes ?? [];
+	}
+
+	get searchEmbedIndex(): string | null {
+		return this.#data.searchEmbedIndex;
+	}
+
+	get graphEmbedIndex(): string | null {
+		return this.#data.graphEmbedIndex;
+	}
+
+	/**
+	 * Get the index config for the search embed index.
+	 */
+	getSearchEmbedModel(): DefaultEmbedModel | null {
+		const indexId = this.#data.searchEmbedIndex;
+		if (!indexId) return null;
+		const config = this.#data.embeddingIndexes.find((i) => i.id === indexId);
+		return config ? { provider: config.provider, model: config.model } : null;
+	}
+
+	/**
+	 * Get the index config for the graph embed index.
+	 */
+	getGraphEmbedModel(): DefaultEmbedModel | null {
+		const indexId = this.#data.graphEmbedIndex;
+		if (!indexId) return null;
+		const config = this.#data.embeddingIndexes.find((i) => i.id === indexId);
+		return config ? { provider: config.provider, model: config.model } : null;
+	}
+
+	/**
+	 * Set or create the embedding index for search or graph.
+	 * If no index exists for the given provider:model, creates one.
+	 * If the other feature has no index set, auto-shares this one.
+	 */
+	setEmbedIndex(purpose: "search" | "graph", provider: string, model: string): void {
+		const indexId = `${provider}:${model}`;
+
+		// Ensure index config exists
+		const existing = this.#data.embeddingIndexes.find((i) => i.id === indexId);
+		if (!existing) {
+			this.#data.embeddingIndexes.push({
+				id: indexId,
+				provider,
+				model,
+				createdAt: Date.now(),
+				lastBuiltAt: null,
+				documentCount: 0,
+			});
+		}
+
+		// Set the index for the requested purpose
+		if (purpose === "search") {
+			this.#data.searchEmbedIndex = indexId;
+			// Auto-share: if graph has no index, use this one
+			if (!this.#data.graphEmbedIndex) {
+				this.#data.graphEmbedIndex = indexId;
+			}
+		} else {
+			this.#data.graphEmbedIndex = indexId;
+			// Auto-share: if search has no index, use this one
+			if (!this.#data.searchEmbedIndex) {
+				this.#data.searchEmbedIndex = indexId;
+			}
+		}
+
+		// Keep legacy field in sync for backward compat
+		const searchModel = this.getSearchEmbedModel();
+		this.#data.defaultEmbedModel = searchModel;
+
+		this.saveSettings();
+	}
+
+	/**
+	 * Update cached stats for an embedding index.
+	 */
+	updateEmbeddingIndexStats(indexId: string, stats: { lastBuiltAt?: number; documentCount?: number }): void {
+		const config = this.#data.embeddingIndexes.find((i) => i.id === indexId);
+		if (!config) return;
+		if (stats.lastBuiltAt !== undefined) config.lastBuiltAt = stats.lastBuiltAt;
+		if (stats.documentCount !== undefined) config.documentCount = stats.documentCount;
+		this.saveSettings();
+	}
+
+	/**
+	 * Remove an embedding index config and its references.
+	 * Returns false if the index is currently used by the other feature.
+	 */
+	removeEmbeddingIndex(indexId: string): boolean {
+		const usedBySearch = this.#data.searchEmbedIndex === indexId;
+		const usedByGraph = this.#data.graphEmbedIndex === indexId;
+
+		if (usedBySearch) this.#data.searchEmbedIndex = null;
+		if (usedByGraph) this.#data.graphEmbedIndex = null;
+
+		this.#data.embeddingIndexes = this.#data.embeddingIndexes.filter((i) => i.id !== indexId);
+
+		// Keep legacy field in sync
+		this.#data.defaultEmbedModel = this.getSearchEmbedModel();
+
+		this.saveSettings();
+		return true;
+	}
+
+	/**
+	 * Get the EmbeddingIndexConfig for a given index ID.
+	 */
+	getEmbeddingIndex(indexId: string): EmbeddingIndexConfig | undefined {
+		return this.#data.embeddingIndexes.find((i) => i.id === indexId);
 	}
 
 	get vectorStoreBackend(): VectorStoreBackend {
@@ -1537,6 +1662,29 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		mergedData.selectedAgentId = DEFAULT_AGENT_ID;
 	} else {
 		normalizeAgents(mergedData);
+	}
+
+	// Migrate from single defaultEmbedModel to multi-index
+	if (mergedData.defaultEmbedModel && (!mergedData.embeddingIndexes || mergedData.embeddingIndexes.length === 0)) {
+		const { provider, model } = mergedData.defaultEmbedModel;
+		const indexId = `${provider}:${model}`;
+		mergedData.embeddingIndexes = [
+			{
+				id: indexId,
+				provider,
+				model,
+				createdAt: Date.now(),
+				lastBuiltAt: Date.now(), // Assume existing index was built
+				documentCount: 0,
+			},
+		];
+		mergedData.searchEmbedIndex = indexId;
+		mergedData.graphEmbedIndex = indexId;
+	}
+
+	// Migrate removed "embeddings" search algorithm to "hybrid"
+	if ((mergedData.searchAlgorithm as string) === "embeddings") {
+		mergedData.searchAlgorithm = "hybrid";
 	}
 
 	_pluginDataStore = new PluginDataStore(plugin, mergedData);
