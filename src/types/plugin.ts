@@ -2,7 +2,7 @@ import type { StoredProviderState } from "../stores/dataStore.svelte";
 import type { CustomProviderMeta } from "../types/provider/index";
 import type { UUIDv7 } from "../utils/uuid7Validator";
 import type { VectorStoreBackend } from "../vectorstore/types";
-import type { SmartGraphSettings } from "./graph";
+import type { GraphMode, SmartGraphSettings } from "./graph";
 
 export type SearchAlgorithm = "lexical" | "hybrid";
 
@@ -433,6 +433,11 @@ export interface PluginData {
 	 * Settings for the Smart Graph View.
 	 */
 	smartGraphSettings: SmartGraphSettings;
+
+	/**
+	 * Last selected graph mode (wiki or smart).
+	 */
+	lastGraphMode: GraphMode;
 
 	/**
 	 * Diff visualization mode in reading view.
