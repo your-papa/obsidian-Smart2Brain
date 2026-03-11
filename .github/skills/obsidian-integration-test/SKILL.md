@@ -1,7 +1,7 @@
 ---
 name: obsidian-integration-test
-description: 'Run integration tests against a live Obsidian vault using the obsidian CLI. Use for: verifying plugin behavior end-to-end, checking DOM state after commands, asserting no runtime errors, creating/reading/deleting test fixtures in the vault, taking screenshots, inspecting console output. Do NOT use for unit tests or mocked environments.'
-argument-hint: 'Describe the user flow or behavior to verify'
+description: "Run integration tests against a live Obsidian vault using the obsidian CLI. Use for: verifying plugin behavior end-to-end, checking DOM state after commands, asserting no runtime errors, creating/reading/deleting test fixtures in the vault, taking screenshots, inspecting console output. Do NOT use for unit tests or mocked environments."
+argument-hint: "Describe the user flow or behavior to verify"
 ---
 
 # Obsidian CLI Integration Testing
