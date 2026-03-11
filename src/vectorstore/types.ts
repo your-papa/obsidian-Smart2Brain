@@ -136,12 +136,6 @@ export interface IndexingProgress {
 /** Current schema version for the serialized index */
 export const INDEX_VERSION = 1;
 
-/** Database name prefix for IndexedDB backend */
-export const DEXIE_DB_NAME = "ssb-vectorstore";
-
-/** Legacy path to the serialized index file (relative to plugin data dir) */
-export const INDEX_FILE_PATH = "vectorstore/index.msgpack";
-
 /** Debounce delay for file sync (5 minutes in ms) */
 export const SYNC_DEBOUNCE_MS = 5 * 60 * 1000;
 
@@ -191,13 +185,8 @@ export interface ScoredDocument {
 }
 
 /**
- * Available vector store backends.
- */
-export type VectorStoreBackend = "indexeddb" | "hnsw";
-
-/**
  * Abstract interface for vector store backends.
- * Both IndexedDB (brute-force) and HNSW implementations conform to this interface.
+ * HNSW implementation conforms to this interface.
  */
 export interface VectorStore {
 	/**

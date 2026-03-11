@@ -21,16 +21,16 @@ const refreshPendingChanges = StateEffect.define();
  */
 function createEditActionBar(entryId: string, groupIndex: number): HTMLElement {
 	const bar = document.createElement("div");
-	bar.className = "ssb-diff-action-bar-widget";
+	bar.className = "s2b-diff-action-bar-widget";
 
 	const label = document.createElement("span");
-	label.className = "ssb-diff-actions-label";
+	label.className = "s2b-diff-actions-label";
 	label.textContent = "Pending change";
 	bar.appendChild(label);
 
 	// Toggle view mode icon (visible on hover via CSS)
 	const toggleBtn = document.createElement("button");
-	toggleBtn.className = "ssb-diff-toggle-btn";
+	toggleBtn.className = "s2b-diff-toggle-btn";
 	toggleBtn.setAttribute("aria-label", "Toggle diff view");
 	let currentMode: DiffViewMode;
 	try {
@@ -48,12 +48,12 @@ function createEditActionBar(entryId: string, groupIndex: number): HTMLElement {
 		} catch {
 			/* data store not initialized */
 		}
-		document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
+		document.dispatchEvent(new CustomEvent("s2b-pending-changes-updated"));
 	});
 	bar.appendChild(toggleBtn);
 
 	const acceptBtn = document.createElement("button");
-	acceptBtn.className = "ssb-diff-accept-btn";
+	acceptBtn.className = "s2b-diff-accept-btn";
 	acceptBtn.textContent = "Accept";
 	acceptBtn.addEventListener("click", (e) => {
 		e.preventDefault();
@@ -68,7 +68,7 @@ function createEditActionBar(entryId: string, groupIndex: number): HTMLElement {
 	bar.appendChild(acceptBtn);
 
 	const rejectBtn = document.createElement("button");
-	rejectBtn.className = "ssb-diff-reject-btn";
+	rejectBtn.className = "s2b-diff-reject-btn";
 	rejectBtn.textContent = "Reject";
 	rejectBtn.addEventListener("click", (e) => {
 		e.preventDefault();
@@ -92,9 +92,9 @@ function appendWordDiffContent(container: HTMLElement, removedText: string, adde
 		const span = document.createElement("span");
 		span.textContent = part.value;
 		if (part.removed) {
-			span.className = "ssb-diff-word-removed";
+			span.className = "s2b-diff-word-removed";
 		} else if (part.added) {
-			span.className = "ssb-diff-word-added";
+			span.className = "s2b-diff-word-added";
 		}
 		container.appendChild(span);
 	}
@@ -115,12 +115,12 @@ class WordDiffGroupWidget extends WidgetType {
 
 	toDOM(): HTMLElement {
 		const container = document.createElement("div");
-		container.className = "ssb-diff-edit-word-container";
+		container.className = "s2b-diff-edit-word-container";
 
 		container.appendChild(createEditActionBar(this.entryId, this.groupIndex));
 
 		const preview = document.createElement("div");
-		preview.className = "ssb-diff-edit-word-preview";
+		preview.className = "s2b-diff-edit-word-preview";
 		appendWordDiffContent(preview, this.removedText, this.addedText);
 		container.appendChild(preview);
 
@@ -156,16 +156,16 @@ class TwoPaneGroupWidget extends WidgetType {
 
 	toDOM(): HTMLElement {
 		const container = document.createElement("div");
-		container.className = "ssb-diff-edit-two-pane-container";
+		container.className = "s2b-diff-edit-two-pane-container";
 
 		container.appendChild(createEditActionBar(this.entryId, this.groupIndex));
 
 		const panes = document.createElement("div");
-		panes.className = "ssb-diff-two-pane";
+		panes.className = "s2b-diff-two-pane";
 
 		if (this.removedText) {
 			const removed = document.createElement("div");
-			removed.className = "ssb-diff-pane-removed";
+			removed.className = "s2b-diff-pane-removed";
 			const pre = document.createElement("pre");
 			pre.textContent = this.removedText;
 			removed.appendChild(pre);
@@ -174,7 +174,7 @@ class TwoPaneGroupWidget extends WidgetType {
 
 		if (this.addedText) {
 			const added = document.createElement("div");
-			added.className = "ssb-diff-pane-added";
+			added.className = "s2b-diff-pane-added";
 			const pre = document.createElement("pre");
 			pre.textContent = this.addedText;
 			added.appendChild(pre);
@@ -397,7 +397,7 @@ export const inlineDiffPlugin = ViewPlugin.fromClass(
 			this.refreshHandler = () => {
 				this.view.dispatch({ effects: refreshPendingChanges.of(null) });
 			};
-			document.addEventListener("ssb-pending-changes-updated", this.refreshHandler);
+			document.addEventListener("s2b-pending-changes-updated", this.refreshHandler);
 			this.scheduleInitialRefresh();
 		}
 
@@ -435,7 +435,7 @@ export const inlineDiffPlugin = ViewPlugin.fromClass(
 		}
 
 		destroy() {
-			document.removeEventListener("ssb-pending-changes-updated", this.refreshHandler);
+			document.removeEventListener("s2b-pending-changes-updated", this.refreshHandler);
 		}
 	},
 	{

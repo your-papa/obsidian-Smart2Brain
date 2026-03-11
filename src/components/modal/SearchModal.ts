@@ -97,7 +97,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 		});
 
 		// Add custom class for styling
-		this.modalEl.addClass("ssb-search-modal");
+		this.modalEl.addClass("s2b-search-modal");
 	}
 
 	private get activeAlgorithm(): SearchAlgorithm {
@@ -284,32 +284,32 @@ export class SearchModal extends SuggestModal<SearchResult> {
 	 * Render each suggestion item
 	 */
 	renderSuggestion(result: SearchResult, el: HTMLElement): void {
-		const container = el.createDiv({ cls: "ssb-search-result" });
+		const container = el.createDiv({ cls: "s2b-search-result" });
 
 		// Title row
-		const titleRow = container.createDiv({ cls: "ssb-search-result-title" });
-		titleRow.createSpan({ text: result.name, cls: "ssb-search-result-name" });
+		const titleRow = container.createDiv({ cls: "s2b-search-result-title" });
+		titleRow.createSpan({ text: result.name, cls: "s2b-search-result-name" });
 
 		// Path (folder)
 		const pathParts = result.path.split("/");
 		if (pathParts.length > 1) {
 			const folder = pathParts.slice(0, -1).join("/");
-			titleRow.createSpan({ text: folder, cls: "ssb-search-result-path" });
+			titleRow.createSpan({ text: folder, cls: "s2b-search-result-path" });
 		}
 
 		// Score (if available)
 		if (result.score !== undefined) {
 			const scoreText = result.score.toFixed(3);
-			container.createSpan({ text: scoreText, cls: "ssb-search-result-score" });
+			container.createSpan({ text: scoreText, cls: "s2b-search-result-score" });
 		}
 
 		// Tags from frontmatter (if available)
 		if (result.frontmatter?.tags) {
 			const tags = Array.isArray(result.frontmatter.tags) ? result.frontmatter.tags : [result.frontmatter.tags];
 			if (tags.length > 0) {
-				const tagsContainer = container.createDiv({ cls: "ssb-search-result-tags" });
+				const tagsContainer = container.createDiv({ cls: "s2b-search-result-tags" });
 				for (const tag of tags.slice(0, 3)) {
-					tagsContainer.createSpan({ text: `#${tag}`, cls: "ssb-search-result-tag" });
+					tagsContainer.createSpan({ text: `#${tag}`, cls: "s2b-search-result-tag" });
 				}
 			}
 		}
@@ -336,7 +336,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 		if (!getData().searchEmbedIndex) return;
 
 		const tabKey = Platform.isMacOS ? "⇥" : "Tab";
-		const hint = this.resultContainerEl.createDiv({ cls: "ssb-search-semantic-hint" });
+		const hint = this.resultContainerEl.createDiv({ cls: "s2b-search-semantic-hint" });
 		hint.setText(`Press ${tabKey} to enhance results with semantic search`);
 	}
 
@@ -346,7 +346,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 	onNoSuggestion(): void {
 		// Clear previous empty state messages
 		this.resultContainerEl.empty();
-		const emptyEl = this.resultContainerEl.createDiv({ cls: "ssb-search-empty" });
+		const emptyEl = this.resultContainerEl.createDiv({ cls: "s2b-search-empty" });
 		if (this.isSearching && this.semanticEnabled) {
 			emptyEl.setText("Searching...");
 		} else if (this.currentQuery.trim()) {

@@ -1,7 +1,6 @@
 import type { StoredProviderState } from "../stores/dataStore.svelte";
 import type { CustomProviderMeta } from "../types/provider/index";
 import type { UUIDv7 } from "../utils/uuid7Validator";
-import type { VectorStoreBackend } from "../vectorstore/types";
 import type { GraphMode, SmartGraphSettings } from "./graph";
 
 export type SearchAlgorithm = "lexical" | "hybrid";
@@ -416,12 +415,8 @@ export interface PluginData {
 	 */
 	graphEmbedIndex: string | null;
 
-	/**
-	 * Vector store backend for similarity search.
-	 * - "indexeddb": Brute-force cosine similarity (O(n), simple, reliable)
-	 * - "hnsw": Approximate nearest neighbor (O(log n), faster for large vaults)
-	 */
-	vectorStoreBackend: VectorStoreBackend;
+	/** @deprecated Kept for data migration. Always "hnsw". */
+	vectorStoreBackend?: string;
 
 	/**
 	 * User's favorite models for quick access.

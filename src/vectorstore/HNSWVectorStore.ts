@@ -26,7 +26,7 @@ import { Logger } from "../utils/logging";
 
 const LOG_PREFIX = "[VectorStore] [HNSW]";
 
-const DB_NAME_PREFIX = "ssb-hnsw";
+const DB_NAME_PREFIX = "s2b-hnsw";
 const DOCUMENTS_STORE = "documents";
 const METADATA_STORE = "metadata";
 const ID_MAPPING_STORE = "id_mapping";

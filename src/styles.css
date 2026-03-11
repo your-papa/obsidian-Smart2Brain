@@ -48,47 +48,47 @@
 }
 
 /* Search Modal Styles */
-.ssb-search-modal .prompt-results {
+.s2b-search-modal .prompt-results {
 	max-height: 400px;
 }
 
-.ssb-search-result {
+.s2b-search-result {
 	display: flex;
 	flex-direction: column;
 	gap: 2px;
 	padding: 6px 0;
 }
 
-.ssb-search-result-title {
+.s2b-search-result-title {
 	display: flex;
 	align-items: center;
 	gap: 8px;
 }
 
-.ssb-search-result-name {
+.s2b-search-result-name {
 	font-weight: 500;
 	color: var(--text-normal);
 }
 
-.ssb-search-result-path {
+.s2b-search-result-path {
 	font-size: 0.85em;
 	color: var(--text-muted);
 }
 
-.ssb-search-result-score {
+.s2b-search-result-score {
 	font-size: 0.75em;
 	color: var(--text-faint);
 	margin-left: auto;
 	font-family: var(--font-monospace);
 }
 
-.ssb-search-result-tags {
+.s2b-search-result-tags {
 	display: flex;
 	gap: 4px;
 	flex-wrap: wrap;
 }
 
-.ssb-search-result-tag {
+.s2b-search-result-tag {
 	font-size: 0.75em;
 	color: var(--text-accent);
 	background: var(--background-secondary);
@@ -96,13 +96,13 @@
 	border-radius: 4px;
 }
 
-.ssb-search-empty {
+.s2b-search-empty {
 	padding: 16px;
 	text-align: center;
 	color: var(--text-muted);
 }
 
-.ssb-search-semantic-hint {
+.s2b-search-semantic-hint {
 	padding: 6px 16px;
 	text-align: center;
 	color: var(--text-faint);
@@ -119,13 +119,13 @@
 	padding: 0;
 }
 /* Inline diff decorations — word-level (edit view) */
-.ssb-diff-word-removed {
+.s2b-diff-word-removed {
 	background-color: rgba(220, 50, 47, 0.25);
 	border-radius: 2px;
 	padding: 0 1px;
 }
 
-.ssb-diff-word-added {
+.s2b-diff-word-added {
 	display: inline;
 	background-color: rgba(0, 180, 0, 0.25);
 	border-radius: 2px;
@@ -134,12 +134,12 @@
 	white-space: pre-wrap;
 }
 
-.ssb-diff-edit-word-container,
-.ssb-diff-edit-two-pane-container {
+.s2b-diff-edit-word-container,
+.s2b-diff-edit-two-pane-container {
 	margin: 4px 0;
 }
 
-.ssb-diff-edit-word-preview {
+.s2b-diff-edit-word-preview {
 	padding: 8px 12px;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 4px;
@@ -152,8 +152,8 @@
 }
 
 /* Action bar for pending change accept/reject buttons */
-.ssb-diff-action-bar-widget,
-.ssb-diff-actions-bar {
+.s2b-diff-action-bar-widget,
+.s2b-diff-actions-bar {
 	display: flex;
 	align-items: center;
 	gap: 8px;
@@ -164,14 +164,14 @@
 	margin: 4px 0;
 }
 
-.ssb-diff-actions-label {
+.s2b-diff-actions-label {
 	font-size: var(--font-smaller);
 	color: var(--text-muted);
 	flex: 1;
 }
 
-.ssb-diff-accept-btn,
-.ssb-diff-reject-btn {
+.s2b-diff-accept-btn,
+.s2b-diff-reject-btn {
 	font-size: var(--font-smallest);
 	padding: 2px 12px;
 	border-radius: 4px;
@@ -179,7 +179,7 @@
 	border: 1px solid var(--background-modifier-border);
 }
 
-.ssb-diff-toggle-btn {
+.s2b-diff-toggle-btn {
 	opacity: 0;
 	transition: opacity 0.15s ease;
 	background: none;
@@ -192,46 +192,46 @@
 	align-items: center;
 }
 
-.ssb-diff-toggle-btn:hover {
+.s2b-diff-toggle-btn:hover {
 	color: var(--text-normal);
 	background-color: var(--background-modifier-hover);
 }
 
-.ssb-diff-actions-bar:hover .ssb-diff-toggle-btn,
-.ssb-diff-action-bar-widget:hover .ssb-diff-toggle-btn {
+.s2b-diff-actions-bar:hover .s2b-diff-toggle-btn,
+.s2b-diff-action-bar-widget:hover .s2b-diff-toggle-btn {
 	opacity: 1;
 }
 
-.ssb-diff-edit-word-container .ssb-diff-toggle-btn,
-.ssb-diff-edit-two-pane-container .ssb-diff-toggle-btn {
+.s2b-diff-edit-word-container .s2b-diff-toggle-btn,
+.s2b-diff-edit-two-pane-container .s2b-diff-toggle-btn {
 	opacity: 1;
 }
 
-.ssb-diff-accept-btn {
+.s2b-diff-accept-btn {
 	background-color: rgba(0, 180, 0, 0.2);
 	color: var(--text-normal);
 }
 
-.ssb-diff-accept-btn:hover {
+.s2b-diff-accept-btn:hover {
 	background-color: rgba(0, 180, 0, 0.35);
 }
 
-.ssb-diff-reject-btn {
+.s2b-diff-reject-btn {
 	background-color: rgba(220, 50, 47, 0.2);
 	color: var(--text-normal);
 }
 
-.ssb-diff-reject-btn:hover {
+.s2b-diff-reject-btn:hover {
 	background-color: rgba(220, 50, 47, 0.35);
 }
 
-.ssb-reading-diff-word-removed {
+.s2b-reading-diff-word-removed {
 	background-color: rgba(220, 50, 47, 0.25);
 	border-radius: 2px;
 	padding: 0 1px;
 }
 
-.ssb-reading-diff-word-added {
+.s2b-reading-diff-word-added {
 	background-color: rgba(0, 180, 0, 0.25);
 	border-radius: 2px;
 	padding: 0 1px;
@@ -239,7 +239,7 @@
 }
 
 /* Two-pane stacked diff (reading view) */
-.ssb-diff-two-pane {
+.s2b-diff-two-pane {
 	display: flex;
 	flex-direction: column;
 	gap: 0;
@@ -248,31 +248,31 @@
 	border: 1px solid var(--background-modifier-border);
 }
 
-.ssb-diff-pane-removed,
-.ssb-diff-pane-added {
+.s2b-diff-pane-removed,
+.s2b-diff-pane-added {
 	padding: 4px 12px;
 }
 
-.ssb-diff-pane-removed > *:first-child,
-.ssb-diff-pane-added > *:first-child {
+.s2b-diff-pane-removed > *:first-child,
+.s2b-diff-pane-added > *:first-child {
 	margin-top: 0;
 }
 
-.ssb-diff-pane-removed > *:last-child,
-.ssb-diff-pane-added > *:last-child {
+.s2b-diff-pane-removed > *:last-child,
+.s2b-diff-pane-added > *:last-child {
 	margin-bottom: 0;
 }
 
-.ssb-diff-pane-removed {
+.s2b-diff-pane-removed {
 	background-color: rgba(220, 50, 47, 0.1);
 	border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.ssb-diff-pane-added {
+.s2b-diff-pane-added {
 	background-color: rgba(0, 180, 0, 0.1);
 }
 
-.ssb-diff-two-pane pre {
+.s2b-diff-two-pane pre {
 	margin: 0;
 	white-space: pre-wrap;
 	word-break: break-word;

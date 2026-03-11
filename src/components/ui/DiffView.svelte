@@ -60,30 +60,30 @@ function computeLines(changes: Change[]): LineEntry[] {
 const lines = $derived(hunks ? computeLines(hunks) : []);
 </script>
 
-<div class="ssb-diff-view">
+<div class="s2b-diff-view">
   {#if change.type === "move"}
-    <div class="ssb-move-summary">
+    <div class="s2b-move-summary">
       <div><strong>From:</strong> {change.path}</div>
       <div><strong>To:</strong> {change.newPath}</div>
     </div>
   {:else}
-    <div class="ssb-diff-table">
+    <div class="s2b-diff-table">
       {#each lines as line}
         <div
-          class="ssb-diff-line"
-          class:ssb-diff-added={line.type === "added"}
-          class:ssb-diff-removed={line.type === "removed"}
+          class="s2b-diff-line"
+          class:s2b-diff-added={line.type === "added"}
+          class:s2b-diff-removed={line.type === "removed"}
         >
-          <span class="ssb-diff-gutter ssb-diff-gutter-old">
+          <span class="s2b-diff-gutter s2b-diff-gutter-old">
             {line.oldLineNo ?? ""}
           </span>
-          <span class="ssb-diff-gutter ssb-diff-gutter-new">
+          <span class="s2b-diff-gutter s2b-diff-gutter-new">
             {line.newLineNo ?? ""}
           </span>
-          <span class="ssb-diff-marker">
+          <span class="s2b-diff-marker">
             {#if line.type === "added"}+{:else if line.type === "removed"}-{:else}&nbsp;{/if}
           </span>
-          <span class="ssb-diff-content">{line.content}</span>
+          <span class="s2b-diff-content">{line.content}</span>
         </div>
       {/each}
     </div>
@@ -91,7 +91,7 @@ const lines = $derived(hunks ? computeLines(hunks) : []);
 </div>
 
 <style>
-  .ssb-diff-view {
+  .s2b-diff-view {
     border: 1px solid var(--background-modifier-border);
     border-radius: var(--radius-s);
     overflow: auto;
@@ -101,12 +101,12 @@ const lines = $derived(hunks ? computeLines(hunks) : []);
     line-height: 1.5;
   }
 
-  .ssb-diff-table {
+  .s2b-diff-table {
     width: 100%;
     min-width: max-content;
   }
 
-  .ssb-move-summary {
+  .s2b-move-summary {
     padding: 12px 14px;
     display: flex;
     flex-direction: column;
@@ -114,20 +114,20 @@ const lines = $derived(hunks ? computeLines(hunks) : []);
     color: var(--text-normal);
   }
 
-  .ssb-diff-line {
+  .s2b-diff-line {
     display: flex;
     white-space: pre;
   }
 
-  .ssb-diff-added {
+  .s2b-diff-added {
     background-color: hsla(var(--color-green-hsl), 0.15);
   }
 
-  .ssb-diff-removed {
+  .s2b-diff-removed {
     background-color: hsla(var(--color-red-hsl), 0.15);
   }
 
-  .ssb-diff-gutter {
+  .s2b-diff-gutter {
     display: inline-block;
     width: 3.5em;
     text-align: right;
@@ -137,7 +137,7 @@ const lines = $derived(hunks ? computeLines(hunks) : []);
     flex-shrink: 0;
   }
 
-  .ssb-diff-marker {
+  .s2b-diff-marker {
     display: inline-block;
     width: 1.5em;
     text-align: center;
@@ -146,15 +146,15 @@ const lines = $derived(hunks ? computeLines(hunks) : []);
     flex-shrink: 0;
   }
 
-  .ssb-diff-added .ssb-diff-marker {
+  .s2b-diff-added .s2b-diff-marker {
     color: var(--color-green);
   }
 
-  .ssb-diff-removed .ssb-diff-marker {
+  .s2b-diff-removed .s2b-diff-marker {
     color: var(--color-red);
   }
 
-  .ssb-diff-content {
+  .s2b-diff-content {
     flex: 1;
     padding-right: 1em;
   }
