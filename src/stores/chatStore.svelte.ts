@@ -1685,6 +1685,7 @@ export class ChatSession {
  * ---------------------------------------------------------------------------*/
 export class Messenger {
 	session: ChatSession | null = $state(null);
+	pendingInput: string | null = $state(null);
 	#agentManager: AgentManager;
 
 	constructor(agentManager: AgentManager) {

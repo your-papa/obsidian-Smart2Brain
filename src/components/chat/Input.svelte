@@ -82,6 +82,16 @@ onMount(() => {
 	}
 });
 
+// Consume any pending input queued from elsewhere (e.g. graph "Send to Chat")
+$effect(() => {
+	if (messenger.pendingInput && markdownEditor) {
+		const text = messenger.pendingInput;
+		messenger.pendingInput = null;
+		markdownEditor.setValue(text);
+		requestAnimationFrame(() => markdownEditor?.focus());
+	}
+});
+
 onDestroy(() => {
 	markdownEditor?.destroy();
 	// Clean up object URLs

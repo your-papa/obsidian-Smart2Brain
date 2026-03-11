@@ -40,6 +40,9 @@ interface Props {
 	onBackToWiki?: () => void;
 	onLabelClusters?: () => void;
 	isLabeling?: boolean;
+	lassoMode?: boolean;
+	onLassoModeChange?: (active: boolean) => void;
+	selectedCount?: number;
 }
 
 let {
@@ -66,6 +69,9 @@ let {
 	onBackToWiki,
 	onLabelClusters,
 	isLabeling = false,
+	lassoMode = false,
+	onLassoModeChange,
+	selectedCount = 0,
 }: Props = $props();
 
 let isCollapsed = $state(false);
@@ -258,6 +264,13 @@ function updateColorGroupColor(index: number, color: string) {
       disabled={isLabeling || isLoading || isTransitioning}
     />
   {/if}
+  <!-- Lasso selection toggle -->
+  <Button
+    iconId="lasso"
+    tooltip={lassoMode ? "Exit lasso selection" : "Lasso selection (or hold Shift + drag)"}
+    onClick={() => onLassoModeChange?.(!lassoMode)}
+    styles={lassoMode ? "is-active" : ""}
+  />
   <!-- Filter toggle -->
   <div class="toolbar-icon-wrapper">
     <Button
@@ -712,6 +725,11 @@ function updateColorGroupColor(index: number, color: string) {
     border-radius: 50%;
     background: var(--interactive-accent);
     pointer-events: none;
+  }
+
+  :global(.clickable-icon.is-active) {
+    color: var(--interactive-accent);
+    background: var(--interactive-accent-hover);
   }
 
   .graph-filter-panel {
