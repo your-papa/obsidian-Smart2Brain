@@ -167,7 +167,7 @@ export class PendingChangesStore {
 
 	private notifyChange(): void {
 		this.#revision++;
-		document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
+		document.dispatchEvent(new CustomEvent("s2b-pending-changes-updated"));
 	}
 
 	/** Check if a vault path is allowed by include/exclude filter settings. */

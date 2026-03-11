@@ -11,7 +11,7 @@ import { Logger } from "../utils/logging";
 
 import { getDbName } from "./types";
 
-const DB_NAME_PREFIX = "ssb-minisearch";
+const DB_NAME_PREFIX = "s2b-minisearch";
 const DB_VERSION = 1;
 const STORE_NAME = "index";
 const INDEX_KEY = "main";

@@ -116,8 +116,8 @@ export default class SecondBrainPlugin extends Plugin {
 				}
 			}
 		};
-		document.addEventListener("ssb-pending-changes-updated", refreshReadingViews);
-		this.register(() => document.removeEventListener("ssb-pending-changes-updated", refreshReadingViews));
+		document.addEventListener("s2b-pending-changes-updated", refreshReadingViews);
+		this.register(() => document.removeEventListener("s2b-pending-changes-updated", refreshReadingViews));
 	}
 
 	onunload() {

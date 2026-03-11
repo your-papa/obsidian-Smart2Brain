@@ -18,7 +18,7 @@ import type {
 	ToolsConfig,
 } from "../types/plugin";
 import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
-import type { VectorStoreBackend } from "../vectorstore/types";
+
 import { type GraphMode, type SmartGraphSettings, DEFAULT_SMART_GRAPH_SETTINGS } from "../types/graph";
 
 // Provider system types
@@ -327,7 +327,6 @@ export const DEFAULT_SETTINGS: PluginData = {
 	embeddingIndexes: [],
 	searchEmbedIndex: null,
 	graphEmbedIndex: null,
-	vectorStoreBackend: "hnsw",
 	favoriteModels: [],
 
 	// Smart Graph View
@@ -1041,14 +1040,6 @@ export class PluginDataStore {
 	 */
 	getEmbeddingIndex(indexId: string): EmbeddingIndexConfig | undefined {
 		return this.#data.embeddingIndexes.find((i) => i.id === indexId);
-	}
-
-	get vectorStoreBackend(): VectorStoreBackend {
-		return this.#data.vectorStoreBackend ?? "hnsw";
-	}
-	set vectorStoreBackend(val: VectorStoreBackend) {
-		this.#data.vectorStoreBackend = val;
-		this.saveSettings();
 	}
 
 	// --- Smart Graph Settings ---

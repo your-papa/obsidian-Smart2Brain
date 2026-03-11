@@ -116,9 +116,9 @@ function renderWordDiff(el: HTMLElement, oldText: string, newText: string): void
 		const span = document.createElement("span");
 		span.textContent = part.value;
 		if (part.removed) {
-			span.className = "ssb-reading-diff-word-removed";
+			span.className = "s2b-reading-diff-word-removed";
 		} else if (part.added) {
-			span.className = "ssb-reading-diff-word-added";
+			span.className = "s2b-reading-diff-word-added";
 		}
 		el.appendChild(span);
 	}
@@ -218,14 +218,14 @@ function applyInlineWordDiff(el: HTMLElement, changes: Change[], lineStart: numb
 	if (sectionOld === sectionNew) return;
 
 	el.empty();
-	appendContextText(el, prefixText, "ssb-diff-context");
+	appendContextText(el, prefixText, "s2b-diff-context");
 
 	const diffContent = document.createElement("div");
-	diffContent.className = "ssb-diff-content";
+	diffContent.className = "s2b-diff-content";
 	renderWordDiff(diffContent, sectionOld, sectionNew);
 	el.appendChild(diffContent);
 
-	appendContextText(el, suffixText, "ssb-diff-context");
+	appendContextText(el, suffixText, "s2b-diff-context");
 }
 
 /**
@@ -244,28 +244,28 @@ async function applyTwoPaneDiff(
 	if (sectionOld === sectionNew) return;
 
 	el.empty();
-	appendContextText(el, prefixText, "ssb-diff-context");
+	appendContextText(el, prefixText, "s2b-diff-context");
 
 	const diffContent = document.createElement("div");
-	diffContent.className = "ssb-diff-content";
+	diffContent.className = "s2b-diff-content";
 
 	const container = document.createElement("div");
-	container.className = "ssb-diff-two-pane";
+	container.className = "s2b-diff-two-pane";
 
 	const oldPane = document.createElement("div");
-	oldPane.className = "ssb-diff-pane-removed";
+	oldPane.className = "s2b-diff-pane-removed";
 	await MarkdownRenderer.render(plugin.app, sectionOld.trimEnd(), oldPane, sourcePath, plugin);
 	container.appendChild(oldPane);
 
 	const newPane = document.createElement("div");
-	newPane.className = "ssb-diff-pane-added";
+	newPane.className = "s2b-diff-pane-added";
 	await MarkdownRenderer.render(plugin.app, sectionNew.trimEnd(), newPane, sourcePath, plugin);
 	container.appendChild(newPane);
 
 	diffContent.appendChild(container);
 	el.appendChild(diffContent);
 
-	appendContextText(el, suffixText, "ssb-diff-context");
+	appendContextText(el, suffixText, "s2b-diff-context");
 }
 
 /** Context needed to re-render a diff section in a different mode. */
@@ -284,16 +284,16 @@ function createReadingDiffActionBar(
 	renderCtx: DiffRenderContext,
 ): HTMLElement {
 	const bar = document.createElement("div");
-	bar.className = "ssb-diff-actions-bar";
+	bar.className = "s2b-diff-actions-bar";
 
 	const label = document.createElement("span");
-	label.className = "ssb-diff-actions-label";
+	label.className = "s2b-diff-actions-label";
 	label.textContent = "Pending change";
 	bar.appendChild(label);
 
 	// Toggle view mode icon (visible on hover via CSS)
 	const toggleBtn = document.createElement("button");
-	toggleBtn.className = "ssb-diff-toggle-btn";
+	toggleBtn.className = "s2b-diff-toggle-btn";
 	toggleBtn.setAttribute("aria-label", "Toggle diff view");
 	let currentMode: DiffViewMode;
 	try {
@@ -311,12 +311,12 @@ function createReadingDiffActionBar(
 		} catch {
 			/* data store not initialized */
 		}
-		document.dispatchEvent(new CustomEvent("ssb-pending-changes-updated"));
+		document.dispatchEvent(new CustomEvent("s2b-pending-changes-updated"));
 	});
 	bar.appendChild(toggleBtn);
 
 	const acceptBtn = document.createElement("button");
-	acceptBtn.className = "ssb-diff-accept-btn";
+	acceptBtn.className = "s2b-diff-accept-btn";
 	acceptBtn.textContent = "Accept";
 	acceptBtn.addEventListener("click", (e) => {
 		e.preventDefault();
@@ -330,7 +330,7 @@ function createReadingDiffActionBar(
 	bar.appendChild(acceptBtn);
 
 	const rejectBtn = document.createElement("button");
-	rejectBtn.className = "ssb-diff-reject-btn";
+	rejectBtn.className = "s2b-diff-reject-btn";
 	rejectBtn.textContent = "Reject";
 	rejectBtn.addEventListener("click", (e) => {
 		e.preventDefault();
@@ -349,7 +349,7 @@ function createReadingDiffActionBar(
 /** Re-render only the diff content of a section element, preserving the action bar and context. */
 function rerenderDiffContent(el: HTMLElement, ctx: DiffRenderContext, mode: DiffViewMode): void {
 	// Remove only the diff content container — keep action bar and context text
-	const oldDiffContent = el.querySelector(".ssb-diff-content");
+	const oldDiffContent = el.querySelector(".s2b-diff-content");
 	if (!oldDiffContent) return;
 	const insertBefore = oldDiffContent.nextSibling;
 	oldDiffContent.remove();
@@ -358,18 +358,18 @@ function rerenderDiffContent(el: HTMLElement, ctx: DiffRenderContext, mode: Diff
 	if (sectionOld === sectionNew) return;
 
 	const diffContent = document.createElement("div");
-	diffContent.className = "ssb-diff-content";
+	diffContent.className = "s2b-diff-content";
 
 	if (mode === "word-diff") {
 		renderWordDiff(diffContent, sectionOld, sectionNew);
 	} else {
 		const container = document.createElement("div");
-		container.className = "ssb-diff-two-pane";
+		container.className = "s2b-diff-two-pane";
 
 		const oldPane = document.createElement("div");
-		oldPane.className = "ssb-diff-pane-removed";
+		oldPane.className = "s2b-diff-pane-removed";
 		const newPane = document.createElement("div");
-		newPane.className = "ssb-diff-pane-added";
+		newPane.className = "s2b-diff-pane-added";
 
 		container.appendChild(oldPane);
 		container.appendChild(newPane);
@@ -515,12 +515,12 @@ function processSection(
 
 	applyDiff(el, changes, origLineStart, origLineEnd, filePath, plugin);
 
-	if (!el.querySelector(".ssb-diff-actions-bar")) {
+	if (!el.querySelector(".s2b-diff-actions-bar")) {
 		const groupIndex = computeGroupIndexForSection(changes, origLineStart, origLineEnd);
 		if (groupIndex === -1) return;
 		const renderCtx: DiffRenderContext = { changes, origLineStart, origLineEnd, filePath, plugin };
 		const actionBar = createReadingDiffActionBar(entry.id, groupIndex, el, renderCtx);
-		const diffContent = el.querySelector(".ssb-diff-content");
+		const diffContent = el.querySelector(".s2b-diff-content");
 		if (diffContent) {
 			diffContent.before(actionBar);
 		} else {
@@ -530,7 +530,7 @@ function processSection(
 		// Sync with global mode changes (e.g. toggled from edit view or another section)
 		const syncHandler = () => {
 			if (!el.isConnected) {
-				document.removeEventListener("ssb-pending-changes-updated", syncHandler);
+				document.removeEventListener("s2b-pending-changes-updated", syncHandler);
 				return;
 			}
 			let mode: DiffViewMode = "word-diff";
@@ -539,11 +539,11 @@ function processSection(
 			} catch {
 				/* */
 			}
-			const toggleBtn = el.querySelector<HTMLElement>(".ssb-diff-toggle-btn");
+			const toggleBtn = el.querySelector<HTMLElement>(".s2b-diff-toggle-btn");
 			if (toggleBtn) setIcon(toggleBtn, mode === "word-diff" ? "columns-2" : "file-diff");
 			rerenderDiffContent(el, renderCtx, mode);
 		};
-		document.addEventListener("ssb-pending-changes-updated", syncHandler);
+		document.addEventListener("s2b-pending-changes-updated", syncHandler);
 	}
 }
 

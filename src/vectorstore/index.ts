@@ -2,11 +2,8 @@
  * Vector Store Module
  *
  * Provides embedding-based semantic search over vault notes.
- * Uses Dexie/IndexedDB for fast runtime access and MessagePack for sync.
- *
- * Supports pluggable backends:
- * - IndexedDB: Brute-force cosine similarity (O(n), simple, reliable)
- * - HNSW: Approximate nearest neighbor (O(log n), faster for large vaults)
+ * Uses IndexedDB for fast runtime access and MessagePack for file sync.
+ * Uses HNSW (Hierarchical Navigable Small World) for O(log n) approximate nearest neighbor search.
  */
 
 export {
@@ -27,33 +24,24 @@ export type {
 	SerializedIndex,
 	VectorSearchResult,
 	VectorStore,
-	VectorStoreBackend,
 } from "./types";
 
 export { sanitizeIndexId, getIndexFilePath, getDbName } from "./types";
 
 export { cosineSimilarity, normalize, dotProduct } from "./similarity";
 
-export { IndexedDBVectorStore } from "./IndexedDBVectorStore";
 export { HNSWWorkerProxy } from "./HNSWWorkerProxy";
 
-import type { VectorStore, VectorStoreBackend } from "./types";
-import { IndexedDBVectorStore } from "./IndexedDBVectorStore";
+import type { VectorStore } from "./types";
 import { HNSWWorkerProxy } from "./HNSWWorkerProxy";
 
 /**
- * Create a vector store instance for the specified backend.
+ * Create a vector store instance.
  *
- * @param backend The backend to use: 'indexeddb' (brute-force) or 'hnsw' (ANN)
  * @param vaultId The vault identifier for scoping the database
  * @param indexId Optional index identifier ("provider:model") for multi-index support
  * @returns A VectorStore instance
  */
-export function createVectorStore(backend: VectorStoreBackend, vaultId: string, indexId?: string): VectorStore {
-	switch (backend) {
-		case "hnsw":
-			return new HNSWWorkerProxy(vaultId, indexId);
-		default:
-			return new IndexedDBVectorStore(vaultId, indexId);
-	}
+export function createVectorStore(vaultId: string, indexId?: string): VectorStore {
+	return new HNSWWorkerProxy(vaultId, indexId);
 }

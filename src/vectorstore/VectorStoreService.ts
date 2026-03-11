@@ -19,8 +19,6 @@ import { createVectorStore } from "./index";
 import { FileSyncManager } from "./FileSyncManager";
 import { MiniSearchService, type LexicalSearchResult } from "./MiniSearchService";
 import {
-	DEXIE_DB_NAME,
-	INDEX_FILE_PATH,
 	INDEX_VERSION,
 	getDbName,
 	getIndexFilePath,
@@ -30,7 +28,6 @@ import {
 	type SearchFilter,
 	type VectorSearchResult,
 	type VectorStore,
-	type VectorStoreBackend,
 } from "./types";
 import { cosineSimilarity, toFloat32Array } from "./similarity";
 import { Logger } from "../utils/logging";
@@ -104,19 +101,13 @@ export class VectorStoreService {
 	private progressListeners = new Map<string, Set<(progress: IndexingProgress) => void>>();
 	private isInitialized = false;
 	private vaultId: string;
-	private backend: VectorStoreBackend;
 	private configDir: string;
-
-	// Legacy instance for backward compatibility during migration
-	private legacyInstance: IndexInstance | null = null;
 
 	private constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
 		this.vaultId = (plugin.app as unknown as { appId: string }).appId;
-		this.backend = getData()?.vectorStoreBackend ?? "hnsw";
 		const vault = plugin.app.vault as { configDir?: string };
 		this.configDir = vault.configDir || ".obsidian";
-		Logger.log(`[VectorStore] Using ${this.backend} backend`);
 	}
 
 	/** Promise tracking initialization, awaited by cleanup to avoid closing mid-init. */
@@ -126,45 +117,13 @@ export class VectorStoreService {
 	 * Create an IndexInstance for the given index ID.
 	 */
 	private createInstance(indexId: string): IndexInstance {
-		const store = createVectorStore(this.backend, this.vaultId, indexId);
+		const store = createVectorStore(this.vaultId, indexId);
 		const filePath = `${this.configDir}/plugins/${this.plugin.manifest.id}/data/${getIndexFilePath(indexId)}`;
 		const syncManager = new FileSyncManager(this.plugin.app.vault.adapter, filePath);
 		const miniSearch = new MiniSearchService(this.vaultId, indexId);
 
 		return {
 			indexId,
-			store,
-			syncManager,
-			miniSearch,
-			embeddings: null,
-			currentProviderId: null,
-			currentModelId: null,
-			hasValidatedThisSession: false,
-			isIndexing: false,
-			progress: {
-				isIndexing: false,
-				total: 0,
-				indexed: 0,
-				skipped: 0,
-				currentFile: null,
-				percentage: 0,
-			},
-			abortController: null,
-			maxInputTokensCache: null,
-		};
-	}
-
-	/**
-	 * Create a legacy IndexInstance (no indexId suffix) for migration.
-	 */
-	private createLegacyInstance(): IndexInstance {
-		const store = createVectorStore(this.backend, this.vaultId);
-		const filePath = `${this.configDir}/plugins/${this.plugin.manifest.id}/data/${INDEX_FILE_PATH}`;
-		const syncManager = new FileSyncManager(this.plugin.app.vault.adapter, filePath);
-		const miniSearch = new MiniSearchService(this.vaultId);
-
-		return {
-			indexId: "__legacy__",
 			store,
 			syncManager,
 			miniSearch,
@@ -241,16 +200,9 @@ export class VectorStoreService {
 			if (graphIndex) indexIds.add(graphIndex);
 
 			if (indexIds.size > 0) {
-				// Try to migrate from legacy storage for each index
 				for (const indexId of indexIds) {
 					await this.initializeInstance(indexId);
 				}
-			} else if (data.defaultEmbedModel) {
-				// Legacy: no multi-index config yet, but has old defaultEmbedModel
-				// This handles the case where migration in createData hasn't run yet
-				const { provider, model } = data.defaultEmbedModel;
-				const indexId = `${provider}:${model}`;
-				await this.initializeInstance(indexId);
 			}
 
 			// Register vault events
@@ -280,23 +232,8 @@ export class VectorStoreService {
 		await inst.miniSearch.open();
 		await inst.miniSearch.loadFromStorage();
 
-		// Try to load from new per-index file first
-		let serialized = await inst.syncManager.loadFromFile();
-
-		// If no per-index file, try legacy file path for migration
-		if (!serialized && !this.legacyInstance) {
-			this.legacyInstance = this.createLegacyInstance();
-			const legacySerialized = await this.legacyInstance.syncManager.loadFromFile();
-			if (legacySerialized) {
-				const [provider = "", ...modelParts] = indexId.split(":");
-				const model = modelParts.join(":");
-				const modelMatches = legacySerialized.providerId === provider && legacySerialized.modelId === model;
-				if (modelMatches) {
-					serialized = legacySerialized;
-					Logger.log(`[VectorStore] Migrating legacy index to ${indexId}`);
-				}
-			}
-		}
+		// Try to load from per-index file
+		const serialized = await inst.syncManager.loadFromFile();
 
 		if (serialized) {
 			const [provider = "", ...modelParts] = indexId.split(":");
@@ -325,7 +262,7 @@ export class VectorStoreService {
 					`[VectorStore] Loaded ${docs.length} documents for index ${indexId} in ${(performance.now() - initStart).toFixed(1)}ms`,
 				);
 
-				// Save to new per-index location (migration)
+				// Save to per-index file
 				await this.saveInstanceToFile(inst);
 
 				// Validate index against vault after workspace is ready
@@ -386,10 +323,10 @@ export class VectorStoreService {
 		const ollamaData =
 			defaultModel.provider === "ollama"
 				? (() => {
-					const ollamaAuth = getData().getResolvedProviderAuth("ollama");
-					if (!ollamaAuth?.baseUrl) return null;
-					return getOllamaModelsCache(ollamaAuth.baseUrl);
-				})()
+						const ollamaAuth = getData().getResolvedProviderAuth("ollama");
+						if (!ollamaAuth?.baseUrl) return null;
+						return getOllamaModelsCache(ollamaAuth.baseUrl);
+					})()
 				: null;
 
 		const metadata = hydrateEmbeddingModel(defaultModel.provider, defaultModel.model, {
@@ -1056,22 +993,22 @@ export class VectorStoreService {
 		const el = notice.noticeEl;
 		el.empty();
 
-		const container = el.createDiv({ cls: "ssb-indexing-notice" });
+		const container = el.createDiv({ cls: "s2b-indexing-notice" });
 
 		container.createDiv({
-			cls: "ssb-indexing-status",
+			cls: "s2b-indexing-status",
 			text: `Indexing: ${indexed}/${total}${skippedText}`,
 		});
 
-		const progressContainer = container.createDiv({ cls: "ssb-indexing-progress" });
+		const progressContainer = container.createDiv({ cls: "s2b-indexing-progress" });
 		progressContainer.style.cssText =
 			"width: 100%; height: 6px; background: var(--background-modifier-border); border-radius: 3px; overflow: hidden; margin: 8px 0;";
 
-		const progressFill = progressContainer.createDiv({ cls: "ssb-indexing-fill" });
+		const progressFill = progressContainer.createDiv({ cls: "s2b-indexing-fill" });
 		progressFill.style.cssText = `width: ${percentage}%; height: 100%; background: var(--interactive-accent); border-radius: 3px; transition: width 0.2s ease;`;
 
 		container.createDiv({
-			cls: "ssb-indexing-percent",
+			cls: "s2b-indexing-percent",
 			text: `${percentage}%`,
 		});
 	}
@@ -1458,7 +1395,7 @@ export class VectorStoreService {
 		}
 		if (!indexId) {
 			callback({ isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 });
-			return () => { };
+			return () => {};
 		}
 
 		// Register at service level so subscriptions survive instance recreation
@@ -1546,11 +1483,12 @@ export class VectorStoreService {
 			this.instances.delete(indexId);
 		}
 
-		// Delete IndexedDB databases (vector store + MiniSearch)
-		const vectorDbName = getDbName(this.backend === "hnsw" ? "ssb-hnsw" : DEXIE_DB_NAME, this.vaultId, indexId);
-		const miniSearchDbName = getDbName("ssb-minisearch", this.vaultId, indexId);
+		// Delete IndexedDB databases (HNSW + MiniSearch + HNSW internal index)
+		const hnswDbName = getDbName("s2b-hnsw", this.vaultId, indexId);
+		const miniSearchDbName = getDbName("s2b-minisearch", this.vaultId, indexId);
 		try {
-			indexedDB.deleteDatabase(vectorDbName);
+			indexedDB.deleteDatabase(hnswDbName);
+			indexedDB.deleteDatabase(`${hnswDbName}-hnsw-index`);
 			indexedDB.deleteDatabase(miniSearchDbName);
 		} catch (error) {
 			Logger.error(`[VectorStore] Failed to delete IndexedDB databases for ${indexId}:`, error);
@@ -1582,7 +1520,7 @@ export class VectorStoreService {
 		try {
 			// Wait for any in-progress initialization before cleaning up
 			if (this.initPromise) {
-				await this.initPromise.catch(() => { });
+				await this.initPromise.catch(() => {});
 			}
 			for (const inst of this.instances.values()) {
 				await inst.syncManager.flush();
