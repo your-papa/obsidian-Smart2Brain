@@ -351,15 +351,15 @@ function updateColorGroupColor(index: number, color: string) {
 <div class="graph-controls" class:collapsed={isCollapsed}>
   {#if !isCollapsed}
     <div class="graph-controls-header">
-      <h4 class="graph-controls-title">Graph Controls</h4>
+      <h4 class="graph-controls-title" data-testid="graph-controls-title">Graph Controls</h4>
     </div>
 
     <div class="graph-controls-body">
       <!-- Stats bar -->
       <div class="graph-stats">
-        <span class="graph-stat">{nodeCount} nodes</span>
-        <span class="graph-stat">{edgeCount} edges</span>
-        <span class="graph-stat mode-badge"
+        <span class="graph-stat" data-testid="graph-node-count">{nodeCount} nodes</span>
+        <span class="graph-stat" data-testid="graph-edge-count">{edgeCount} edges</span>
+        <span class="graph-stat mode-badge" data-testid="graph-mode-badge"
           >{graphMode === "wiki" && !isTransitioning ? "Wiki" : "Smart"}</span
         >
         {#if isLoading}

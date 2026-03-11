@@ -546,6 +546,7 @@ function removeAttachment(attachment: ChatAttachment) {
       bind:this={editorContainer}
       class="markdown-editor-container w-full min-h-[40px] max-h-[200px] overflow-y-auto"
       id="chat-view-user-input-element"
+      data-testid="message-input"
     ></div>
 
     <!-- Actions row: agent, model, attachment, send -->
@@ -574,6 +575,7 @@ function removeAttachment(attachment: ChatAttachment) {
           class="clickable-icon flex flex-row items-center gap-0.5"
           onclick={async () => await getPlugin().agentManager.createNewChat()}
           title="New Chat"
+          data-testid="new-chat-button"
         >
           <div class="h-icon-xs" use:icon={"plus"} style="--icon-size: var(--icon-xs)"></div>
           <div class="text-xs">New Chat</div>
@@ -584,6 +586,7 @@ function removeAttachment(attachment: ChatAttachment) {
             aria-label="send message"
             title="Send message"
             onclick={sendMessage}
+            data-testid="send-message-button"
             class="h-7 w-7 p-1 rounded-md !bg-text-accent border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             use:icon={"send-horizontal"}
           ></button>

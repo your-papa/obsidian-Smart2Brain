@@ -98,6 +98,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 
 		// Add custom class for styling
 		this.modalEl.addClass("s2b-search-modal");
+		this.modalEl.setAttribute("data-testid", "search-modal");
 	}
 
 	private get activeAlgorithm(): SearchAlgorithm {
