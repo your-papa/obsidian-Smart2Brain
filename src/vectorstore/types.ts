@@ -133,6 +133,28 @@ export interface IndexingProgress {
 	percentage: number;
 }
 
+/** Reasons a file can be skipped during indexing */
+export type SkipReason = "excluded" | "privacy" | "too-large" | "not-indexed" | "read-error" | "embed-error";
+
+/** A file that was skipped during indexing, with its reason */
+export interface SkippedFile {
+	path: string;
+	reason: SkipReason;
+}
+
+/**
+ * Report generated after an indexing run, showing what was indexed
+ * and what was skipped (with reasons).
+ */
+export interface IndexingReport {
+	/** Paths of successfully indexed files */
+	indexedFiles: string[];
+	/** Files that were skipped, grouped by reason */
+	skippedFiles: SkippedFile[];
+	/** When this report was generated */
+	timestamp: number;
+}
+
 /** Current schema version for the serialized index */
 export const INDEX_VERSION = 1;
 

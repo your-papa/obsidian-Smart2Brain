@@ -2,6 +2,7 @@ import { type App, TFile } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { getData } from "../../stores/dataStore.svelte";
+import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 
 function extractLinkPath(input: string): string {
 	const trimmed = input.trim();
@@ -86,6 +87,15 @@ export function createReadNoteTool(app: App) {
 		}
 
 		const file = resolved.file;
+
+		// Privacy check
+		const currentProvider = pluginData.getSelectedAgent().chatModel?.provider;
+		if (currentProvider) {
+			const store = getPendingChangesStore();
+			if (store.shouldBlockFile(file.path, currentProvider)) {
+				return `Error: The file "${file.path}" is marked as private and cannot be processed by the current provider. Switch to a trusted provider or remove the file from the privacy list.`;
+			}
+		}
 
 		try {
 			let content = await app.vault.read(file);

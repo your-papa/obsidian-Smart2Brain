@@ -18,10 +18,13 @@ export type {
 	EmbeddingIndexConfig,
 	IndexMetadata,
 	IndexingProgress,
+	IndexingReport,
 	ScoredDocument,
 	SearchFilter,
 	SerializedDocument,
 	SerializedIndex,
+	SkipReason,
+	SkippedFile,
 	VectorSearchResult,
 	VectorStore,
 } from "./types";

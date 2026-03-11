@@ -13,6 +13,7 @@ import type { AgentManager } from "../agent/AgentManager";
 import type { ChatModelConfig } from "../providers/index";
 import type { ChatAttachment, ThreadError } from "../types/shared";
 import type { AgentConfig } from "../types/plugin";
+import { getPendingChangesStore } from "./pendingChangesStore.svelte";
 import { NEW_CHAT_NAME } from "../utils/threadId";
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { DEFAULT_AGENT_ID, getData } from "./dataStore.svelte";
@@ -1043,6 +1044,44 @@ export function baseMessagesToMessagePairs(
  */
 export function getMessagePairTimestamp(pair: MessagePair): Date {
 	return dateFromUUIDv7(pair.id);
+}
+
+/**
+ * Detect whether the chat history contains references to private notes.
+ * Scans tool call inputs/outputs and user attachments for file paths
+ * that match the privacy list.
+ */
+export function chatHistoryContainsPrivateNotes(messages: MessagePair[]): boolean {
+	const store = getPendingChangesStore();
+	const FILE_TOOLS = new Set(["read_content", "read_note", "manage_notes", "get_properties"]);
+
+	for (const pair of messages) {
+		// Check user attachments
+		if (pair.userMessage.attachments) {
+			for (const attachment of pair.userMessage.attachments) {
+				if (store.isFilePrivate(attachment.vaultPath)) return true;
+			}
+		}
+
+		// Check tool calls in assistant messages
+		if (pair.assistantMessage.toolCalls) {
+			for (const tc of pair.assistantMessage.toolCalls) {
+				if (!FILE_TOOLS.has(tc.name)) continue;
+
+				// Check input paths
+				const inputPath = tc.input?.path ?? tc.input?.note_name;
+				if (typeof inputPath === "string" && store.isFilePrivate(inputPath)) return true;
+
+				// Check output for file paths referenced in tool results
+				if (typeof tc.output === "string") {
+					// Match paths like 'Content of "folder/note.md"' in tool output
+					const pathMatch = tc.output.match(/Content of "([^"]+)"/);
+					if (pathMatch?.[1] && store.isFilePrivate(pathMatch[1])) return true;
+				}
+			}
+		}
+	}
+	return false;
 }
 
 /* -----------------------------------------------------------------------------
