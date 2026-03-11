@@ -22,7 +22,7 @@ $effect(() => {
 </script>
 
 <QueryClientProvider client={plugin.queryClient}>
-	<div class="chat-root h-full flex flex-col">
+	<div class="chat-root h-full flex flex-col" data-testid="chat-root">
 		{#if messenger}
 			<MessageContainer bind:this={messageContainer} {messenger} />
 			<Input

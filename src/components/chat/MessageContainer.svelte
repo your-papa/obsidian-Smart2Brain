@@ -224,6 +224,7 @@ $effect(() => {
         <div class="flex flex-col items-center justify-center h-full">
           <div
             class="logo-container h-[80px] w-[80px] items-center justify-center transition-all duration-150 ease-out"
+            data-testid="chat-logo"
           >
             <Logo />
           </div>

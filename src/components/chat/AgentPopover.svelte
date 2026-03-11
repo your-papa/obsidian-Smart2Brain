@@ -65,12 +65,14 @@ function openAgentSettings() {
     onclick={() => (isOpen = !isOpen)}
     class="clickable-icon flex items-center gap-1"
     title="Select agent"
+    data-testid="agent-select-button"
   >
     <Icon name="bot" size="xs" />
     <span
       class="agent-pill"
       class:has-color={!!selectedAgent?.color}
       style={selectedAgent?.color ? `--pill-color: var(--color-${selectedAgent.color})` : ""}
+      data-testid="agent-pill"
     >
       {selectedAgent?.name ?? "Default Agent"}
     </span>

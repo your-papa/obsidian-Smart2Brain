@@ -29,6 +29,7 @@ export class SmartGraphView extends ItemView {
 	async onOpen(): Promise<void> {
 		this.contentEl.empty();
 		this.contentEl.addClass("smart-graph-container");
+		this.contentEl.setAttribute("data-testid", "smart-graph-view");
 
 		this.component = mount(SmartGraphViewComponent, {
 			target: this.contentEl,
