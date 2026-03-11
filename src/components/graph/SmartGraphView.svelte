@@ -25,7 +25,10 @@ import {
 	type ClusterAssignment,
 } from "../../views/smart-graph/graphDataBuilder";
 import type { DocumentVector } from "../../vectorstore/types";
+import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
+import { getMessenger } from "../../stores/chatStore.svelte";
 import LoadingAnimation from "../ui/LoadingAnimation.svelte";
+import Button from "../ui/Button.svelte";
 import GraphCanvas from "./GraphCanvas.svelte";
 import GraphControls from "./GraphControls.svelte";
 
@@ -62,6 +65,10 @@ let availableTags: string[] = $state([]);
 
 // Canvas ref
 let canvasComponent: GraphCanvas | undefined = $state(undefined);
+
+// Lasso / selection state
+let lassoMode = $state(false);
+let selectedPaths: string[] = $state([]);
 
 // Build generation counter to discard stale async results
 let buildGeneration = 0;
@@ -347,6 +354,55 @@ function handleFocusCluster(cluster: number) {
 	focusedCluster = focusedCluster === cluster ? null : cluster;
 }
 
+function handleSelectionChange(paths: string[]) {
+	selectedPaths = paths;
+}
+
+function handleLassoModeChange(active: boolean) {
+	lassoMode = active;
+	if (!active) {
+		selectedPaths = [];
+		canvasComponent?.clearSelection();
+	}
+}
+
+function handleOpenAllSelected() {
+	for (const path of selectedPaths) {
+		plugin.app.workspace.openLinkText(path, "", "tab");
+	}
+}
+
+async function handleSendToChat() {
+	const paths = selectedPaths;
+	if (paths.length === 0) return;
+
+	// Build wikilink list for the prompt
+	const links = paths.map((p) => `[[${p.replace(/\.md$/, "")}]]`).join(", ");
+	const message = `I selected these ${paths.length} notes from the graph: ${links}\n\nPlease analyze them.`;
+
+	// Ensure a chat is open
+	const { workspace } = plugin.app;
+	const existingLeaf = workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
+	if (!existingLeaf) {
+		await plugin.agentManager.createNewChat();
+	} else {
+		workspace.revealLeaf(existingLeaf);
+	}
+
+	// Queue the message into the chat input (user will send it themselves)
+	const messenger = getMessenger();
+	if (messenger) {
+		messenger.pendingInput = message;
+	} else {
+		new Notice("Chat is not initialized yet. Please open a chat first.");
+	}
+}
+
+function handleClearSelection() {
+	selectedPaths = [];
+	canvasComponent?.clearSelection();
+}
+
 /**
  * Generate thematic labels for each cluster using the user's configured chat model.
  * Groups nodes by cluster, reads note content snippets, and sends a single batched prompt.
@@ -496,7 +552,20 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
       onToggleWikiLinks={() => handleSettingsChange({ showWikiLinks: !settings.showWikiLinks })}
       onToggleSemanticEdges={() =>
         handleSettingsChange({ showSemanticEdges: !settings.showSemanticEdges })}
+      {lassoMode}
+      onSelectionChange={handleSelectionChange}
     />
+  {/if}
+
+  {#if selectedPaths.length > 0}
+    <div class="graph-selection-bar">
+      <span class="selection-count">{selectedPaths.length} notes selected</span>
+      <div class="selection-actions">
+        <Button buttonText="Open All" onClick={handleOpenAllSelected} tooltip="Open all selected notes in new tabs" />
+        <Button buttonText="Send to Chat" onClick={handleSendToChat} tooltip="Send selected notes to chat for analysis" />
+        <Button buttonText="Clear" onClick={handleClearSelection} tooltip="Clear selection" />
+      </div>
+    </div>
   {/if}
 
   <GraphControls
@@ -523,6 +592,9 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
     onBackToWiki={handleBackToWiki}
     onLabelClusters={graphMode === "smart" ? handleLabelClusters : undefined}
     {isLabeling}
+    {lassoMode}
+    onLassoModeChange={handleLassoModeChange}
+    selectedCount={selectedPaths.length}
   />
 </div>
 
@@ -548,5 +620,33 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
   .graph-loading p {
     margin: 0;
     font-size: 14px;
+  }
+
+  .graph-selection-bar {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+    z-index: 12;
+    white-space: nowrap;
+  }
+
+  .selection-count {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-normal);
+  }
+
+  .selection-actions {
+    display: flex;
+    gap: 6px;
   }
 </style>

@@ -34,6 +34,8 @@ interface Props {
 	onFocusCluster?: (cluster: number) => void;
 	onToggleWikiLinks?: () => void;
 	onToggleSemanticEdges?: () => void;
+	lassoMode?: boolean;
+	onSelectionChange?: (paths: string[]) => void;
 }
 
 let {
@@ -56,6 +58,8 @@ let {
 	onFocusCluster,
 	onToggleWikiLinks,
 	onToggleSemanticEdges,
+	lassoMode = false,
+	onSelectionChange,
 }: Props = $props();
 
 let canvasEl: HTMLCanvasElement;
@@ -77,6 +81,12 @@ let dragSimNode: SimNode | null = null;
 
 // Pinned nodes: nodes with fixed positions (fx/fy set)
 let pinnedNodes: Set<string> = new Set();
+
+// Lasso selection state
+let selectedNodes: Set<string> = $state(new Set());
+let isLassoing = $state(false);
+let lassoPoints: Array<{ x: number; y: number }> = [];
+let lassoJustFinished = false;
 
 // Track whether we need an initial fit-to-view after first simulation setup
 let needsInitialFit = true;
@@ -218,6 +228,33 @@ function distToSegment(px: number, py: number, x1: number, y1: number, x2: numbe
 }
 
 /**
+ * Ray-casting point-in-polygon test.
+ * Returns true if (px, py) is inside the polygon defined by `poly`.
+ */
+function pointInPolygon(px: number, py: number, poly: Array<{ x: number; y: number }>): boolean {
+	let inside = false;
+	for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+		const xi = poly[i].x;
+		const yi = poly[i].y;
+		const xj = poly[j].x;
+		const yj = poly[j].y;
+		if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
+			inside = !inside;
+		}
+	}
+	return inside;
+}
+
+/**
+ * Clear the current lasso selection.
+ */
+export function clearSelection() {
+	selectedNodes = new Set();
+	onSelectionChange?.([]);
+	render();
+}
+
+/**
  * Find the edge nearest to the given screen coordinates, if within hit distance.
  */
 function findEdgeAt(screenX: number, screenY: number): SimLink | null {
@@ -320,6 +357,10 @@ function render() {
 			const inFocus =
 				focusedCluster == null || source.cluster === focusedCluster || target.cluster === focusedCluster;
 
+			// Dim edges outside selection
+			const inSelection =
+				selectedNodes.size === 0 || (selectedNodes.has(source.id) && selectedNodes.has(target.id));
+
 			const isHighlighted = hoveredNode && (source.id === hoveredNode.id || target.id === hoveredNode.id);
 
 			// Use the smoother of the two endpoint alphas for edge dimming
@@ -334,7 +375,7 @@ function render() {
 			ctx.strokeStyle = isHighlighted ? c.accent : c.textFaint;
 			ctx.lineWidth = isHighlighted ? 2 / transform.scale : 1 / transform.scale;
 			ctx.globalAlpha =
-				(!inFocus ? 0.05 : isHighlighted ? 0.9 : 0.45) *
+				(!inFocus ? 0.05 : !inSelection ? 0.05 : isHighlighted ? 0.9 : 0.45) *
 				edgeFadeAlpha *
 				(isHighlighted ? 1 : edgeHoverAlpha / 0.85);
 			ctx.stroke();
@@ -353,6 +394,10 @@ function render() {
 			const inFocus =
 				focusedCluster == null || source.cluster === focusedCluster || target.cluster === focusedCluster;
 
+			// Dim edges outside selection
+			const inSelection =
+				selectedNodes.size === 0 || (selectedNodes.has(source.id) && selectedNodes.has(target.id));
+
 			const isHighlighted = hoveredNode && (source.id === hoveredNode.id || target.id === hoveredNode.id);
 
 			const edgeHoverAlpha = hoveredNode
@@ -367,7 +412,13 @@ function render() {
 			ctx.strokeStyle = isHighlighted ? c.accent : c.graphLine;
 			ctx.lineWidth = isHighlighted ? 2 / transform.scale : Math.max(0.8, link.weight * 3) / transform.scale;
 			ctx.globalAlpha =
-				(!inFocus ? 0.05 : isHighlighted ? 0.9 : Math.min(0.25 + link.weight * 0.35, 0.9)) *
+				(!inFocus
+					? 0.05
+					: !inSelection
+						? 0.05
+						: isHighlighted
+							? 0.9
+							: Math.min(0.25 + link.weight * 0.35, 0.9)) *
 				edgeFadeAlpha *
 				(isHighlighted ? 1 : edgeHoverAlpha / 0.85);
 			ctx.stroke();
@@ -380,11 +431,14 @@ function render() {
 	// Compute target alpha for each node and lerp toward it.
 	// This produces a smooth dim/brighten effect on hover.
 	let hoverSettled = true;
+	const hasSelection = selectedNodes.size > 0;
 
 	for (const node of simNodes) {
 		let target: number;
 		if (node.highlighted || hoveredNode?.id === node.id || draggedNode?.id === node.id) {
 			target = 1;
+		} else if (hasSelection && !selectedNodes.has(node.id)) {
+			target = 0.15;
 		} else if (focusedCluster != null && node.cluster !== focusedCluster) {
 			target = 0.1;
 		} else if (hoveredNode) {
@@ -433,8 +487,12 @@ function render() {
 		ctx.fill();
 		ctx.globalAlpha = 1;
 
-		// Stroke for highlighted/hovered nodes
-		if (node.highlighted || isHovered) {
+		// Stroke for highlighted/hovered/selected nodes
+		if (selectedNodes.has(node.id)) {
+			ctx.strokeStyle = c.accent;
+			ctx.lineWidth = 3 / transform.scale;
+			ctx.stroke();
+		} else if (node.highlighted || isHovered) {
 			ctx.strokeStyle = isHovered ? c.textNormal : c.accent;
 			ctx.lineWidth = 2 / transform.scale;
 			ctx.stroke();
@@ -507,6 +565,29 @@ function render() {
 		}
 	}
 	ctx.globalAlpha = 1;
+
+	// ── Lasso path (graph space) ──────────────────────────────
+	if (isLassoing && lassoPoints.length >= 2) {
+		ctx.beginPath();
+		ctx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
+		for (let i = 1; i < lassoPoints.length; i++) {
+			ctx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
+		}
+		ctx.closePath();
+		// Semi-transparent fill
+		ctx.fillStyle = c.accent;
+		ctx.globalAlpha = 0.08;
+		ctx.fill();
+		// Dashed stroke
+		const dash = 4 / transform.scale;
+		ctx.setLineDash([dash, dash]);
+		ctx.strokeStyle = c.accent;
+		ctx.lineWidth = 2 / transform.scale;
+		ctx.globalAlpha = 0.6;
+		ctx.stroke();
+		ctx.setLineDash([]);
+		ctx.globalAlpha = 1;
+	}
 
 	ctx.restore();
 
@@ -841,9 +922,34 @@ function resizeCanvas() {
 
 function handleMouseDown(e: PointerEvent) {
 	e.preventDefault(); // Prevent native drag on canvas
+	containerEl.focus(); // Ensure keyboard events work
 	const rect = canvasEl.getBoundingClientRect();
 	const x = e.clientX - rect.left;
 	const y = e.clientY - rect.top;
+
+	// Shift+click on a node toggles its selection; Shift+drag on empty space starts lasso
+	if (lassoMode || e.shiftKey) {
+		const node = findNodeAt(x, y);
+		if (node && e.shiftKey && !lassoMode) {
+			// Toggle individual node selection
+			const next = new Set(selectedNodes);
+			if (next.has(node.id)) {
+				next.delete(node.id);
+			} else {
+				next.add(node.id);
+			}
+			selectedNodes = next;
+			onSelectionChange?.(simNodes.filter((n) => next.has(n.id)).map((n) => n.path));
+			lassoJustFinished = true; // suppress the subsequent click event
+			render();
+			return;
+		}
+		isLassoing = true;
+		const graphPos = screenToGraph(x, y);
+		lassoPoints = [graphPos];
+		canvasEl.setPointerCapture(e.pointerId);
+		return;
+	}
 
 	const node = findNodeAt(x, y);
 
@@ -871,6 +977,21 @@ function handleMouseMove(e: PointerEvent) {
 	const x = e.clientX - rect.left;
 	const y = e.clientY - rect.top;
 
+	if (isLassoing) {
+		const graphPos = screenToGraph(x, y);
+		// Throttle: only add point if moved at least 3px in screen space from last point
+		const last = lassoPoints[lassoPoints.length - 1];
+		if (last) {
+			const lastSX = last.x * transform.scale + transform.x;
+			const lastSY = last.y * transform.scale + transform.y;
+			const dist = Math.sqrt((x - lastSX) ** 2 + (y - lastSY) ** 2);
+			if (dist < 3) return;
+		}
+		lassoPoints = [...lassoPoints, graphPos];
+		render();
+		return;
+	}
+
 	if (dragSimNode) {
 		// Drag node
 		hasDragged = true;
@@ -882,6 +1003,7 @@ function handleMouseMove(e: PointerEvent) {
 		render();
 	} else if (isPanning) {
 		// Pan
+		hasDragged = true;
 		transform = {
 			...transform,
 			x: e.clientX - panStart.x,
@@ -927,14 +1049,14 @@ function handleMouseMove(e: PointerEvent) {
 				if (node !== hoveredNode) {
 					hoveredNode = node;
 					hoveredEdge = null;
-					canvasEl.style.cursor = node ? "pointer" : "grab";
+					canvasEl.style.cursor = node ? "pointer" : lassoMode ? "crosshair" : "grab";
 					render();
 				} else if (!node) {
 					// No node hovered — check edges
 					const edge = findEdgeAt(x, y);
 					if (edge !== hoveredEdge) {
 						hoveredEdge = edge;
-						canvasEl.style.cursor = edge ? "crosshair" : "grab";
+						canvasEl.style.cursor = edge ? "crosshair" : lassoMode ? "crosshair" : "grab";
 						render();
 					}
 				}
@@ -944,6 +1066,27 @@ function handleMouseMove(e: PointerEvent) {
 }
 
 function handleMouseUp(_e: PointerEvent) {
+	if (isLassoing) {
+		isLassoing = false;
+		lassoJustFinished = true;
+		if (lassoPoints.length >= 3) {
+			// Run point-in-polygon for all sim nodes, merging with existing selection
+			const merged = new Set(selectedNodes);
+			for (const node of simNodes) {
+				if (node.x == null || node.y == null) continue;
+				if (pointInPolygon(node.x, node.y, lassoPoints)) {
+					merged.add(node.id);
+				}
+			}
+			if (merged.size !== selectedNodes.size) {
+				selectedNodes = merged;
+				onSelectionChange?.(simNodes.filter((n) => merged.has(n.id)).map((n) => n.path));
+			}
+		}
+		lassoPoints = [];
+		render();
+		return;
+	}
 	if (dragSimNode) {
 		simulation?.alphaTarget(0);
 		if (!pinnedNodes.has(dragSimNode.id)) {
@@ -957,9 +1100,13 @@ function handleMouseUp(_e: PointerEvent) {
 }
 
 function handleClick(e: MouseEvent) {
-	// Ignore clicks that were actually drags
+	// Ignore clicks that were actually drags or lasso completions
 	if (hasDragged) {
 		hasDragged = false;
+		return;
+	}
+	if (lassoJustFinished) {
+		lassoJustFinished = false;
 		return;
 	}
 
@@ -991,8 +1138,13 @@ function handleClick(e: MouseEvent) {
 
 	const node = findNodeAt(x, y);
 
-	if (node && onNodeClick) {
-		onNodeClick(node.path);
+	if (node) {
+		if (onNodeClick) {
+			onNodeClick(node.path);
+		}
+	} else if (selectedNodes.size > 0) {
+		// Click on empty space clears selection
+		clearSelection();
 	}
 }
 
@@ -1529,6 +1681,24 @@ onMount(() => {
 	// Register wheel handler as non-passive so preventDefault() works
 	canvasEl.addEventListener("wheel", handleWheel, { passive: false });
 
+	// Keyboard handler for Escape to clear selection / exit lasso mode
+	function handleKeyDown(e: KeyboardEvent) {
+		if (e.key === "Escape") {
+			if (isLassoing) {
+				isLassoing = false;
+				lassoPoints = [];
+				render();
+			} else if (selectedNodes.size > 0) {
+				clearSelection();
+			}
+		}
+	}
+	containerEl.addEventListener("keydown", handleKeyDown);
+	// Make container focusable so it receives keyboard events
+	if (!containerEl.hasAttribute("tabindex")) {
+		containerEl.setAttribute("tabindex", "0");
+	}
+
 	const resizeObserver = new ResizeObserver(() => {
 		resizeCanvas();
 	});
@@ -1540,6 +1710,7 @@ onMount(() => {
 
 	return () => {
 		canvasEl.removeEventListener("wheel", handleWheel);
+		containerEl.removeEventListener("keydown", handleKeyDown);
 		resizeObserver.disconnect();
 		document.body.removeEventListener("css-change", handleCssChange);
 		if (animFrameId != null) cancelAnimationFrame(animFrameId);
@@ -1675,6 +1846,7 @@ export function updateNodeAppearance(updates: Map<string, { color?: string; clus
     height: 100%;
     overflow: hidden;
     position: relative;
+    outline: none;
   }
 
   canvas {
