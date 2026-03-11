@@ -22,6 +22,9 @@ import {
 import { cosineSimilarity, toFloat32Array, toNumberArray } from "./similarity";
 
 import { getDbName } from "./types";
+import { Logger } from "../utils/logging";
+
+const LOG_PREFIX = "[VectorStore] [HNSW]";
 
 const DB_NAME_PREFIX = "ssb-hnsw";
 const DOCUMENTS_STORE = "documents";
@@ -84,7 +87,7 @@ export class HNSWVectorStore implements VectorStore {
 
 	// HNSW parameters
 	private readonly M = 16; // Number of connections per node
-	private readonly efConstruction = 200; // Construction time accuracy
+	private readonly efConstruction = 100; // Construction time accuracy (100 is sufficient for <10k docs)
 	private readonly efSearch = 100; // Search time accuracy
 
 	constructor(vaultId: string, indexId?: string) {
@@ -430,6 +433,7 @@ export class HNSWVectorStore implements VectorStore {
 	 * Rebuilds the HNSW index from scratch for efficiency.
 	 */
 	async bulkPut(docs: DocumentVector[]): Promise<void> {
+		const totalStart = performance.now();
 		const db = this.requireDb();
 
 		// Initialize dimensions from first document
@@ -447,7 +451,7 @@ export class HNSWVectorStore implements VectorStore {
 		// Prepare vectors with numeric IDs for HNSW
 		const hnswVectors: Array<{ id: number; vector: number[] }> = [];
 
-		// Store all documents in IndexedDB with numeric IDs
+		// Store all documents in IndexedDB in a single transaction
 		await new Promise<void>((resolve, reject) => {
 			const tx = db.transaction([DOCUMENTS_STORE, ID_MAPPING_STORE], "readwrite");
 			const docStore = tx.objectStore(DOCUMENTS_STORE);
@@ -487,6 +491,7 @@ export class HNSWVectorStore implements VectorStore {
 			await this.hnswIndex.buildIndex(hnswVectors);
 			await this.hnswIndex.saveIndex();
 		}
+		Logger.debug(`${LOG_PREFIX} bulkPut (${docs.length} docs): ${(performance.now() - totalStart).toFixed(1)}ms`);
 	}
 
 	/**
