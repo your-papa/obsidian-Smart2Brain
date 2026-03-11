@@ -2,6 +2,7 @@ import type { App } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { getData } from "../../stores/dataStore.svelte";
+import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 
 /**
  * Tool for retrieving properties (frontmatter) from Obsidian.
@@ -18,6 +19,15 @@ export function createGetPropertiesTool(app: App) {
 
 			if (!file) {
 				return `Note "${note_name}" not found.`;
+			}
+
+			// Privacy check
+			const currentProvider = pluginData.getSelectedAgent().chatModel?.provider;
+			if (currentProvider) {
+				const store = getPendingChangesStore();
+				if (store.shouldBlockFile(file.path, currentProvider)) {
+					return `Error: The file "${file.path}" is marked as private and cannot be processed by the current provider. Switch to a trusted provider or remove the file from the privacy list.`;
+				}
 			}
 
 			const cache = app.metadataCache.getFileCache(file);

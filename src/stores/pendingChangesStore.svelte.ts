@@ -183,6 +183,38 @@ export class PendingChangesStore {
 		return isExcluding ? !matchesPattern : indexList.length === 0 || matchesPattern;
 	}
 
+	/**
+	 * Check if a file is marked as private by the privacy list settings.
+	 * In "mark as private" mode (privacyIsExcluding=true), files matching patterns are private.
+	 * In "mark as public" mode (privacyIsExcluding=false), files NOT matching patterns are private.
+	 */
+	isFilePrivate(filePath: string): boolean {
+		const pluginData = getData();
+		const privacyList = pluginData.privacyList;
+		const isExcluding = pluginData.privacyIsExcluding;
+
+		const matchesPattern = privacyList.some(
+			(pattern: string) => filePath.startsWith(pattern) || filePath.includes(`/${pattern}`),
+		);
+
+		if (isExcluding) {
+			// "Mark as private" mode: matched files ARE private
+			return matchesPattern;
+		}
+		// "Mark as public" mode: non-matched files are private (when list is non-empty)
+		return privacyList.length > 0 && !matchesPattern;
+	}
+
+	/**
+	 * Check if a file should be blocked from a provider.
+	 * Returns true when the file is private AND the provider is NOT trusted.
+	 */
+	shouldBlockFile(filePath: string, providerId: string): boolean {
+		if (!this.isFilePrivate(filePath)) return false;
+		const pluginData = getData();
+		return !pluginData.isProviderTrusted(providerId);
+	}
+
 	/** Stage one or more pending changes. Returns the entry IDs in input order.
 	 *  If a pending update already exists for the same path and thread, the older entry is
 	 *  auto-rejected so only the latest proposal is active. */

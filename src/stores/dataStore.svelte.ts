@@ -91,6 +91,8 @@ export interface StoredProviderState {
 	chatModels: Record<string, ChatModelConfig>;
 	/** Embedding model configurations keyed by model ID */
 	embedModels: Record<string, EmbedModelConfig>;
+	/** Whether this provider is trusted to process private/sensitive files */
+	trustedForPrivateData?: boolean;
 }
 
 // ============================================================================
@@ -128,6 +130,7 @@ export const DEFAULT_BUILTIN_PROVIDER_STATES: Record<BuiltInProviderId, StoredPr
 			"text-embedding-3-large": { similarityThreshold: 0.5 },
 			"text-embedding-3-small": { similarityThreshold: 0.5 },
 		},
+		trustedForPrivateData: false,
 	},
 	anthropic: {
 		isConfigured: false,
@@ -139,6 +142,7 @@ export const DEFAULT_BUILTIN_PROVIDER_STATES: Record<BuiltInProviderId, StoredPr
 			"claude-3-5-sonnet-20241022": { contextWindow: 200000, temperature: 0.5 },
 		},
 		embedModels: {},
+		trustedForPrivateData: false,
 	},
 	ollama: {
 		isConfigured: false,
@@ -163,12 +167,14 @@ export const DEFAULT_BUILTIN_PROVIDER_STATES: Record<BuiltInProviderId, StoredPr
 			"nomic-embed-text": { similarityThreshold: 0.5 },
 			"mxbai-embed-large": { similarityThreshold: 0.5 },
 		},
+		trustedForPrivateData: true,
 	},
 	openrouter: {
 		isConfigured: false,
 		auth: createDefaultAuth(),
 		chatModels: {},
 		embedModels: {},
+		trustedForPrivateData: false,
 	},
 };
 
@@ -304,6 +310,11 @@ export const DEFAULT_SETTINGS: PluginData = {
 	excludeFF: ["Chats", ".excalidraw.md"],
 	includeFF: [],
 	isExcluding: true,
+
+	// Privacy
+	privacyListExclude: [],
+	privacyListInclude: [],
+	privacyIsExcluding: true,
 
 	// UI state
 	isQuickSettingsOpen: true,
@@ -460,6 +471,59 @@ export class PluginDataStore {
 			if (this.#data.includeFF.includes(val)) return;
 			this.#data.includeFF.push(val);
 		}
+		this.saveSettings();
+	}
+
+	// ============================================================================
+	// Privacy List Methods
+	// ============================================================================
+
+	get privacyIsExcluding(): boolean {
+		return this.#data.privacyIsExcluding;
+	}
+
+	togglePrivacyIsExcluding() {
+		this.#data.privacyIsExcluding = !this.#data.privacyIsExcluding;
+		this.saveSettings();
+	}
+
+	get privacyList(): string[] {
+		if (this.#data.privacyIsExcluding) return this.#data.privacyListExclude;
+		return this.#data.privacyListInclude;
+	}
+
+	removePrivacyList(val: string) {
+		if (this.#data.privacyIsExcluding) {
+			if (!this.#data.privacyListExclude.includes(val)) return;
+			this.#data.privacyListExclude.remove(val);
+		} else {
+			if (!this.#data.privacyListInclude.includes(val)) return;
+			this.#data.privacyListInclude.remove(val);
+		}
+		this.saveSettings();
+	}
+
+	addPrivacyList(val: string) {
+		if (this.#data.privacyIsExcluding) {
+			if (this.#data.privacyListExclude.includes(val)) return;
+			this.#data.privacyListExclude.push(val);
+		} else {
+			if (this.#data.privacyListInclude.includes(val)) return;
+			this.#data.privacyListInclude.push(val);
+		}
+		this.saveSettings();
+	}
+
+	/** Check whether a provider is trusted to process private/sensitive files. */
+	isProviderTrusted(providerId: string): boolean {
+		return this.#data.providerConfig[providerId]?.trustedForPrivateData ?? false;
+	}
+
+	/** Set whether a provider is trusted to process private/sensitive files. */
+	setProviderTrusted(providerId: string, trusted: boolean) {
+		const config = this.#data.providerConfig[providerId];
+		if (!config) return;
+		config.trustedForPrivateData = trusted;
 		this.saveSettings();
 	}
 

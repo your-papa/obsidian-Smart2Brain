@@ -2,6 +2,7 @@ import { type App, TFile } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
+import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { isImageExtension, isPdfExtension, isTextExtension, resolveVaultFileDetailed } from "../../utils/attachments";
 import { extractTextFromPdf } from "../../utils/pdfExtractor";
 
@@ -356,6 +357,15 @@ export function createReadContentTool(app: App) {
 
 		const file = resolved.file;
 		const ext = file.extension.toLowerCase();
+
+		// Privacy check
+		const currentProvider = pluginData.getSelectedAgent().chatModel?.provider;
+		if (currentProvider) {
+			const store = getPendingChangesStore();
+			if (store.shouldBlockFile(file.path, currentProvider)) {
+				return `Error: The file "${file.path}" is marked as private and cannot be processed by the current provider. Switch to a trusted provider or remove the file from the privacy list.`;
+			}
+		}
 
 		try {
 			if (isImageExtension(ext)) {

@@ -364,6 +364,17 @@ export interface PluginData {
 	isExcluding: boolean;
 
 	// ============================================================================
+	// Privacy
+	// ============================================================================
+
+	/** Files/folders marked as private ("mark as private" mode) */
+	privacyListExclude: Array<string>;
+	/** Files/folders marked as public ("mark as public" mode — everything else is private) */
+	privacyListInclude: Array<string>;
+	/** When true, patterns in privacyListExclude define private files. When false, patterns in privacyListInclude define non-private files (everything else is private). */
+	privacyIsExcluding: boolean;
+
+	// ============================================================================
 	// UI State
 	// ============================================================================
 

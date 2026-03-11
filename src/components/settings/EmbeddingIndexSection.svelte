@@ -1,6 +1,7 @@
 <script lang="ts">
 import { onDestroy, untrack } from "svelte";
 import { EmbeddingIndexModal } from "../modal/EmbeddingIndexModal";
+import { IndexingReportModal } from "../modal/IndexingReportModal";
 import SettingItem from "./SettingItem.svelte";
 import Button from "../ui/Button.svelte";
 import ProgressBar from "../ui/ProgressBar.svelte";
@@ -80,6 +81,12 @@ function openEmbeddingIndexModal() {
 	modal.open();
 }
 
+function openIndexingReport() {
+	if (!indexId) return;
+	const modal = new IndexingReportModal(plugin, indexId);
+	modal.open();
+}
+
 function cancelIndexing() {
 	if (indexId && isVectorStoreInitialized()) {
 		getVectorStoreService().cancelIndexing(indexId);
@@ -87,36 +94,42 @@ function cancelIndexing() {
 }
 </script>
 
-<SettingItem name="Embedding Index" desc={indexId
-		? indexProgress.isIndexing
-			? `Indexing: ${indexProgress.currentFile ?? "..."}`
-			: documentCount > 0
-				? `${documentCount} notes indexed`
-				: "Index not built yet"
-		: "Choose an embedding model to enable semantic indexing."}>
-		<div class="flex items-center gap-2">
-			{#if indexProgress.isIndexing}
-				<div class="flex flex-col gap-2 min-w-[200px]">
-					<ProgressBar progress={indexProgress.percentage} />
-					<span class="text-xs text-[--text-muted]">
-						{indexProgress.indexed}/{indexProgress.total}
-						{#if indexProgress.skipped > 0}
-							({indexProgress.skipped} skipped)
-						{/if}
-					</span>
-				</div>
-				<Button buttonText="Cancel" onClick={cancelIndexing} />
-			{:else}
-				<Button onClick={openEmbeddingIndexModal}>
-					{#if indexConfig}
-						<div class="flex items-center gap-2">
-							<Logo width={14} height={14} />
-							<span>{indexConfig.model}</span>
-						</div>
-					{:else}
-						<span class="text-[--text-muted]">Select Model</span>
-					{/if}
-				</Button>
-			{/if}
-		</div>
-	</SettingItem>
+<SettingItem
+  name="Embedding Index"
+  desc={indexId
+    ? indexProgress.isIndexing
+      ? `Indexing: ${indexProgress.currentFile ?? "..."}`
+      : documentCount > 0
+        ? `${documentCount} notes indexed`
+        : "Index not built yet"
+    : "Choose an embedding model to enable semantic indexing."}
+>
+  <div class="flex items-center gap-2">
+    {#if indexProgress.isIndexing}
+      <div class="flex flex-col gap-2 min-w-[200px]">
+        <ProgressBar progress={indexProgress.percentage} />
+        <span class="text-xs text-[--text-muted]">
+          {indexProgress.indexed}/{indexProgress.total}
+          {#if indexProgress.skipped > 0}
+            ({indexProgress.skipped} skipped)
+          {/if}
+        </span>
+      </div>
+      <Button buttonText="Cancel" onClick={cancelIndexing} />
+    {:else}
+      {#if indexId && documentCount > 0}
+        <Button iconId="list" tooltip="View indexing details" onClick={openIndexingReport} />
+      {/if}
+      <Button onClick={openEmbeddingIndexModal}>
+        {#if indexConfig}
+          <div class="flex items-center gap-2">
+            <Logo width={14} height={14} />
+            <span>{indexConfig.model}</span>
+          </div>
+        {:else}
+          <span class="text-[--text-muted]">Select Model</span>
+        {/if}
+      </Button>
+    {/if}
+  </div>
+</SettingItem>
