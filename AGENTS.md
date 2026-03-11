@@ -21,8 +21,8 @@ Use multiple `-r` flags to query multiple resources at once:
 bunx btca ask -r svelte -r bitsUi -q "How do I create accessible dialog components?"
 ```
 
-
 ## When to use `$effect`
+
 - DOM manipulation (canvas, animations)
 - Third-party library integration
 - Cleanup operations (timers, event listeners)
@@ -30,6 +30,7 @@ bunx btca ask -r svelte -r bitsUi -q "How do I create accessible dialog componen
 - Browser-only operations (analytics, logging)
 
 ## When to AVOID `$effect`
+
 - **State synchronization** - Don't use `$effect` to sync state between variables
 - **Computed values** - Use `$derived` instead
 
