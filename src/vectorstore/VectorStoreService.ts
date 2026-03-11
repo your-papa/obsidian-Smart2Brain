@@ -119,6 +119,9 @@ export class VectorStoreService {
 		Logger.log(`[VectorStore] Using ${this.backend} backend`);
 	}
 
+	/** Promise tracking initialization, awaited by cleanup to avoid closing mid-init. */
+	private initPromise: Promise<void> | null = null;
+
 	/**
 	 * Create an IndexInstance for the given index ID.
 	 */
@@ -192,9 +195,34 @@ export class VectorStoreService {
 			return instance;
 		}
 
-		instance = new VectorStoreService(plugin);
-		await instance.init();
-		return instance;
+		const service = new VectorStoreService(plugin);
+		service.initPromise = service.init();
+		await service.initPromise;
+		instance = service;
+		return service;
+	}
+
+	/**
+	 * Start VectorStoreService initialization in the background.
+	 * Returns the service immediately for cleanup purposes.
+	 * isVectorStoreInitialized() will return false until init completes.
+	 */
+	static startInitialize(plugin: SecondBrainPlugin): VectorStoreService {
+		if (instance) {
+			Logger.warn("[VectorStore] Already initialized");
+			return instance;
+		}
+
+		const service = new VectorStoreService(plugin);
+		service.initPromise = service
+			.init()
+			.then(() => {
+				instance = service;
+			})
+			.catch((error) => {
+				Logger.error("[VectorStore] Background initialization failed:", error);
+			});
+		return service;
 	}
 
 	/**
@@ -244,6 +272,7 @@ export class VectorStoreService {
 		const existing = this.instances.get(indexId);
 		if (existing) return existing;
 
+		const initStart = performance.now();
 		const inst = this.createInstance(indexId);
 
 		// Open databases
@@ -286,12 +315,15 @@ export class VectorStoreService {
 
 				await inst.store.clear();
 				await inst.store.bulkPut(docs);
+
 				await inst.store.setMetadata(serialized.providerId, serialized.modelId, serialized.version);
 
 				inst.currentProviderId = serialized.providerId;
 				inst.currentModelId = serialized.modelId;
 
-				Logger.log(`[VectorStore] Loaded ${docs.length} documents for index ${indexId}`);
+				Logger.log(
+					`[VectorStore] Loaded ${docs.length} documents for index ${indexId} in ${(performance.now() - initStart).toFixed(1)}ms`,
+				);
 
 				// Save to new per-index location (migration)
 				await this.saveInstanceToFile(inst);
@@ -354,10 +386,10 @@ export class VectorStoreService {
 		const ollamaData =
 			defaultModel.provider === "ollama"
 				? (() => {
-						const ollamaAuth = getData().getResolvedProviderAuth("ollama");
-						if (!ollamaAuth?.baseUrl) return null;
-						return getOllamaModelsCache(ollamaAuth.baseUrl);
-					})()
+					const ollamaAuth = getData().getResolvedProviderAuth("ollama");
+					if (!ollamaAuth?.baseUrl) return null;
+					return getOllamaModelsCache(ollamaAuth.baseUrl);
+				})()
 				: null;
 
 		const metadata = hydrateEmbeddingModel(defaultModel.provider, defaultModel.model, {
@@ -1426,7 +1458,7 @@ export class VectorStoreService {
 		}
 		if (!indexId) {
 			callback({ isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 });
-			return () => {};
+			return () => { };
 		}
 
 		// Register at service level so subscriptions survive instance recreation
@@ -1548,6 +1580,10 @@ export class VectorStoreService {
 	 */
 	async cleanup(): Promise<void> {
 		try {
+			// Wait for any in-progress initialization before cleaning up
+			if (this.initPromise) {
+				await this.initPromise.catch(() => { });
+			}
 			for (const inst of this.instances.values()) {
 				await inst.syncManager.flush();
 				await inst.miniSearch.flush();

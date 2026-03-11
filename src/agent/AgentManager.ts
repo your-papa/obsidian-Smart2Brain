@@ -61,13 +61,13 @@ export type AuthValidationResult = { success: true } | { success: false; message
 export type AgentManagerStreamChunk =
 	| { type: "token"; token: string }
 	| Pick<
-			Extract<AgentStreamChunk, { type: "tool_start" }>,
-			"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
-	  >
+		Extract<AgentStreamChunk, { type: "tool_start" }>,
+		"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
+	>
 	| Pick<
-			Extract<AgentStreamChunk, { type: "tool_end" }>,
-			"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
-	  >
+		Extract<AgentStreamChunk, { type: "tool_end" }>,
+		"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
+	>
 	| { type: "result"; result: unknown };
 
 const resolvedVisionSupportCache = new Map<string, boolean>();
@@ -122,6 +122,30 @@ async function toChooseModelParams(model: ChatModel): Promise<ChooseModelParams>
 		} catch {
 			// Non-critical: default to false if all lookups fail
 		}
+	}
+
+	return {
+		provider: model.provider,
+		chatModel: model.model,
+		options,
+	};
+}
+
+/**
+ * Non-blocking variant of toChooseModelParams for use during initialization.
+ * Uses cached vision support if available, otherwise defaults to false.
+ * Vision support will be properly resolved before actual agent invocation
+ * via the async toChooseModelParams in prepareAgentForStream().
+ */
+function toChooseModelParamsImmediate(model: ChatModel): ChooseModelParams {
+	const options = { ...model.modelConfig };
+	const cacheKey = getVisionSupportCacheKey(model.provider, model.model);
+
+	if (options.supportsVision !== undefined) {
+		resolvedVisionSupportCache.set(cacheKey, options.supportsVision);
+	} else {
+		const cached = resolvedVisionSupportCache.get(cacheKey);
+		options.supportsVision = cached ?? false;
 	}
 
 	return {
@@ -192,6 +216,7 @@ async function resolveVisionSupport(providerId: string, modelId: string): Promis
 export class AgentManager {
 	private readonly plugin: SecondBrainPlugin;
 	private agent: Agent | null = null;
+	private deferredSetup: Promise<void> | null = null;
 	private readonly chatManager: ObsidianChatManager;
 
 	constructor(plugin: SecondBrainPlugin) {
@@ -452,7 +477,7 @@ export class AgentManager {
 		return undefined;
 	}
 
-	private async bindTools(agent: Agent) {
+	private bindBuiltInTools(agent: Agent): StructuredToolInterface[] {
 		const data = getData();
 		const selectedAgent = data.getSelectedAgent();
 		const tools: StructuredToolInterface[] = [];
@@ -485,8 +510,8 @@ export class AgentManager {
 			}
 		}
 
-		await this.loadMCPTools(tools, data.getAgentMCPServersForClient(selectedAgent.id));
 		agent.bindTools(tools);
+		return tools;
 	}
 
 	private async loadMCPTools(
@@ -556,6 +581,7 @@ export class AgentManager {
 
 		// Cleanup existing agent if any
 		this.agent = null;
+		this.deferredSetup = null;
 
 		// Clear and re-register all configured providers
 		this.registry.clear();
@@ -588,7 +614,7 @@ export class AgentManager {
 		const chatModel = selectedAgent.chatModel;
 		if (chatModel) {
 			try {
-				await this.agent.chooseModel(await toChooseModelParams(chatModel));
+				await this.agent.chooseModel(toChooseModelParamsImmediate(chatModel));
 			} catch (error) {
 				if (error instanceof ProviderNotFoundError) {
 					Logger.warn(
@@ -600,8 +626,57 @@ export class AgentManager {
 			}
 		}
 
-		// Bind tools
-		await this.bindTools(this.agent);
+		// Bind built-in tools synchronously
+		const tools = this.bindBuiltInTools(this.agent);
+
+		// Start deferred network operations (vision resolution + MCP tools) in background
+		this.deferredSetup = this.performDeferredSetup(this.agent, chatModel ?? undefined, tools);
+	}
+
+	/**
+	 * Performs network-dependent setup in the background to avoid blocking plugin startup.
+	 * - Resolves vision support from external APIs (Ollama, OpenRouter, models.dev)
+	 * - Loads MCP tools from configured MCP servers
+	 * These are awaited before the first agent invocation via awaitDeferredSetup().
+	 */
+	private async performDeferredSetup(
+		agent: Agent,
+		chatModel: ChatModel | undefined,
+		tools: StructuredToolInterface[],
+	): Promise<void> {
+		const promises: Promise<void>[] = [];
+
+		// Deferred: resolve vision support and persist it
+		if (chatModel && chatModel.modelConfig.supportsVision === undefined) {
+			promises.push(
+				resolveVisionSupportCached(chatModel.provider, chatModel.model)
+					.then((supportsVision) => persistResolvedVisionSupport(chatModel, supportsVision))
+					.catch(() => {
+						// Non-critical: vision defaults to false
+					}),
+			);
+		}
+
+		// Deferred: load MCP tools and rebind
+		const data = getData();
+		const selectedAgent = data.getSelectedAgent();
+		const mcpServers = data.getAgentMCPServersForClient(selectedAgent.id);
+		if (mcpServers && Object.keys(mcpServers).length > 0) {
+			promises.push(
+				this.loadMCPTools(tools, mcpServers).then(() => {
+					agent.bindTools(tools);
+				}),
+			);
+		}
+
+		await Promise.all(promises);
+	}
+
+	private async awaitDeferredSetup(): Promise<void> {
+		if (this.deferredSetup) {
+			await this.deferredSetup;
+			this.deferredSetup = null;
+		}
 	}
 
 	private mapChunk(chunk: AgentStreamChunk): AgentManagerStreamChunk | null {
@@ -666,6 +741,7 @@ export class AgentManager {
 		runMetadata: Record<string, unknown>;
 	}> {
 		const agent = await this.ensureAgent();
+		await this.awaitDeferredSetup();
 		const pluginData = getData();
 		const selectedAgent = pluginData.getSelectedAgent();
 		const chatModel = selectedAgent.chatModel;

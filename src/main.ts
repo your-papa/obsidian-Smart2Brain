@@ -34,8 +34,8 @@ export default class SecondBrainPlugin extends Plugin {
 		this.skillsService = new SkillsService(this);
 		await this.skillsService.initialize();
 
-		// Initialize Vector Store Service for embeddings search
-		this.vectorStoreService = await VectorStoreService.initialize(this);
+		// Initialize Vector Store Service for embeddings search (non-blocking)
+		this.vectorStoreService = VectorStoreService.startInitialize(this);
 
 		// Register file-based chat view and .chat extension (v2 ChatView)
 		// const VIEW_TYPE = "my-view";

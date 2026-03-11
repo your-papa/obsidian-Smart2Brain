@@ -35,11 +35,11 @@ export { sanitizeIndexId, getIndexFilePath, getDbName } from "./types";
 export { cosineSimilarity, normalize, dotProduct } from "./similarity";
 
 export { IndexedDBVectorStore } from "./IndexedDBVectorStore";
-export { HNSWVectorStore } from "./HNSWVectorStore";
+export { HNSWWorkerProxy } from "./HNSWWorkerProxy";
 
 import type { VectorStore, VectorStoreBackend } from "./types";
 import { IndexedDBVectorStore } from "./IndexedDBVectorStore";
-import { HNSWVectorStore } from "./HNSWVectorStore";
+import { HNSWWorkerProxy } from "./HNSWWorkerProxy";
 
 /**
  * Create a vector store instance for the specified backend.
@@ -52,7 +52,7 @@ import { HNSWVectorStore } from "./HNSWVectorStore";
 export function createVectorStore(backend: VectorStoreBackend, vaultId: string, indexId?: string): VectorStore {
 	switch (backend) {
 		case "hnsw":
-			return new HNSWVectorStore(vaultId, indexId);
+			return new HNSWWorkerProxy(vaultId, indexId);
 		default:
 			return new IndexedDBVectorStore(vaultId, indexId);
 	}
