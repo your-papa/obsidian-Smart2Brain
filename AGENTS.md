@@ -1,7 +1,7 @@
 # Critical Rules
 
 - after each implementation run `bun check` and `bun format`
-- after that run `obsidian help dev` to check which commands will help you checking if your implementation is sucessful
+- use the `obsidian` CLI to verify changes in a live vault (reload plugin, inspect DOM, check for errors). See the `obsidian-integration-test` skill for full reference.
 
 # btca
 
