@@ -42,7 +42,7 @@ let settings: SmartGraphSettings = $derived({
 });
 let graphData: GraphData = $state({ nodes: [], edges: [] });
 let displayData: GraphData = $state({ nodes: [], edges: [] });
-let graphMode: GraphMode = $state("wiki");
+let graphMode: GraphMode = $state(data.lastGraphMode);
 let isTransitioning = $state(false);
 let isLoading = $state(false);
 let suggestedK: number | null = $state(null);
@@ -202,6 +202,7 @@ async function rebuildGraph(targetMode: GraphMode = graphMode) {
 			const nextGraphData = buildWikiModeGraph(filter);
 			if (gen !== buildGeneration) return;
 			graphMode = "wiki";
+			data.lastGraphMode = "wiki";
 			focusedCluster = null;
 			graphData = nextGraphData;
 			return;
@@ -211,6 +212,7 @@ async function rebuildGraph(targetMode: GraphMode = graphMode) {
 		if (gen !== buildGeneration) return;
 
 		graphMode = "smart";
+		data.lastGraphMode = "smart";
 		graphData = nextGraphData;
 
 		if (shouldAutoLabel) {
@@ -561,8 +563,16 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
     <div class="graph-selection-bar">
       <span class="selection-count">{selectedPaths.length} notes selected</span>
       <div class="selection-actions">
-        <Button buttonText="Open All" onClick={handleOpenAllSelected} tooltip="Open all selected notes in new tabs" />
-        <Button buttonText="Send to Chat" onClick={handleSendToChat} tooltip="Send selected notes to chat for analysis" />
+        <Button
+          buttonText="Open All"
+          onClick={handleOpenAllSelected}
+          tooltip="Open all selected notes in new tabs"
+        />
+        <Button
+          buttonText="Send to Chat"
+          onClick={handleSendToChat}
+          tooltip="Send selected notes to chat for analysis"
+        />
         <Button buttonText="Clear" onClick={handleClearSelection} tooltip="Clear selection" />
       </div>
     </div>

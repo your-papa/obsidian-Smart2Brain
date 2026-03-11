@@ -19,7 +19,7 @@ import type {
 } from "../types/plugin";
 import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 import type { VectorStoreBackend } from "../vectorstore/types";
-import { type SmartGraphSettings, DEFAULT_SMART_GRAPH_SETTINGS } from "../types/graph";
+import { type GraphMode, type SmartGraphSettings, DEFAULT_SMART_GRAPH_SETTINGS } from "../types/graph";
 
 // Provider system types
 import {
@@ -332,6 +332,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 	// Smart Graph View
 	smartGraphSettings: DEFAULT_SMART_GRAPH_SETTINGS,
+	lastGraphMode: "wiki" as GraphMode,
 
 	// Diff view
 	diffViewMode: "two-pane",
@@ -1057,6 +1058,14 @@ export class PluginDataStore {
 	}
 	set smartGraphSettings(val: SmartGraphSettings) {
 		this.#data.smartGraphSettings = val;
+		this.saveSettings();
+	}
+
+	get lastGraphMode(): GraphMode {
+		return this.#data.lastGraphMode ?? "wiki";
+	}
+	set lastGraphMode(val: GraphMode) {
+		this.#data.lastGraphMode = val;
 		this.saveSettings();
 	}
 
