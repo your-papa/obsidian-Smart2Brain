@@ -2,6 +2,7 @@
 import { Accordion } from "bits-ui";
 import { t } from "svelte-i18n";
 import { ExcludeFoldersModal } from "../../components/modal/ExcludeFoldersModal";
+import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
 import ProviderItem from "../../components/settings/ProviderItem.svelte";
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
@@ -17,6 +18,7 @@ const pluginData = getData();
 const plugin = getPlugin();
 
 const fuzzySuggestModel = new ExcludeFoldersModal(plugin.app);
+const privacyListModal = new PrivacyListModal(plugin.app);
 
 // Provider management state
 let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
@@ -72,6 +74,16 @@ function handleAddCustomProvider() {
         Logger.log("Delete Plugin Data");
       }}
     />
+  </SettingItem>
+</SettingGroup>
+
+<!-- Privacy -->
+<SettingGroup heading="Privacy">
+  <SettingItem
+    name="Privacy List"
+    desc="Manage which files are considered private and blocked from non-trusted providers."
+  >
+    <Button onClick={() => privacyListModal.open()} buttonText="Manage Privacy List" />
   </SettingItem>
 </SettingGroup>
 

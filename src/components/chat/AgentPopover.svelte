@@ -5,6 +5,8 @@ import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
 import { getPlugin, requestSettingsTab } from "../../stores/state.svelte";
 import { Logger } from "../../utils/logging";
 import Icon from "../ui/Icon.svelte";
+import { chatHistoryContainsPrivateNotes, getMessenger } from "../../stores/chatStore.svelte";
+import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
 
 const data = getData();
 const plugin = getPlugin();
@@ -21,7 +23,16 @@ const hasMultipleAgents = $derived(agents.length > 1);
 let isOpen = $state(false);
 let customAnchor: HTMLElement | undefined = $state();
 
-function selectAgent(agent: AgentConfig) {
+async function selectAgent(agent: AgentConfig) {
+	// Check if the agent's provider is non-trusted and chat has private notes
+	const newProvider = agent.chatModel?.provider;
+	if (newProvider && !data.isProviderTrusted(newProvider)) {
+		const messages = getMessenger()?.session?.messages;
+		if (messages && chatHistoryContainsPrivateNotes(messages)) {
+			const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
+			if (!confirmed) return;
+		}
+	}
 	data.selectedAgentId = agent.id;
 	isOpen = false;
 	// Reinitialize the agent with the new config

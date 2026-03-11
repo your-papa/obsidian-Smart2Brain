@@ -144,6 +144,14 @@ function validateExistingMarkdownFile(
 		};
 	}
 
+	// Privacy check
+	const currentProvider = getData().getSelectedAgent().chatModel?.provider;
+	if (currentProvider && store.shouldBlockFile(file.path, currentProvider)) {
+		return {
+			error: `Error in operation ${operationNumber}: The file "${file.path}" is marked as private and cannot be processed by the current provider. Switch to a trusted provider or remove the file from the privacy list.`,
+		};
+	}
+
 	return { file };
 }
 
@@ -225,6 +233,12 @@ export function createManageNotesTool(app: App) {
 
 					if (!store.isPathAllowed(normalizedPath)) {
 						return `Error in operation ${operationNumber}: The path "${normalizedPath}" is excluded by your vault filter settings.`;
+					}
+
+					// Privacy check for create target
+					const currentProvider = getData().getSelectedAgent().chatModel?.provider;
+					if (currentProvider && store.shouldBlockFile(normalizedPath, currentProvider)) {
+						return `Error in operation ${operationNumber}: The path "${normalizedPath}" is in a private area and cannot be processed by the current provider. Switch to a trusted provider or remove the path from the privacy list.`;
 					}
 
 					const existing = app.vault.getAbstractFileByPath(normalizedPath);
@@ -310,6 +324,12 @@ export function createManageNotesTool(app: App) {
 
 				if (!store.isPathAllowed(normalizedNewPath)) {
 					return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is excluded by your vault filter settings.`;
+				}
+
+				// Privacy check for move destination
+				const moveProvider = getData().getSelectedAgent().chatModel?.provider;
+				if (moveProvider && store.shouldBlockFile(normalizedNewPath, moveProvider)) {
+					return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is in a private area and cannot be processed by the current provider. Switch to a trusted provider or remove the path from the privacy list.`;
 				}
 
 				if (result.file.path === normalizedNewPath) {

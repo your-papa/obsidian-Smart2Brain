@@ -3,6 +3,7 @@ import type { App } from "obsidian";
 import { z } from "zod";
 import type { SearchAlgorithm } from "../../types/plugin";
 import { getData } from "../../stores/dataStore.svelte";
+import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { getVectorStoreService, isVectorStoreInitialized, type SearchFilter } from "../../vectorstore";
 import { Logger } from "../../utils/logging";
 
@@ -253,7 +254,18 @@ export function createSearchNotesTool(app: App) {
 			.map((result, index) => {
 				const metadataStr = result.frontmatter ? `\nProperties: ${JSON.stringify(result.frontmatter)}` : "";
 				const scoreStr = result.score !== undefined ? ` [score: ${result.score.toFixed(2)}]` : "";
-				return `${index + 1}. **${result.name}** (${result.path})${scoreStr}${metadataStr}`;
+
+				// Privacy check: mark private files that the current provider cannot access
+				const currentProvider = pluginData.getSelectedAgent().chatModel?.provider;
+				let privacyStr = "";
+				if (currentProvider) {
+					const store = getPendingChangesStore();
+					if (store.shouldBlockFile(result.path, currentProvider)) {
+						privacyStr = " [PRIVATE - content restricted for current provider]";
+					}
+				}
+
+				return `${index + 1}. **${result.name}** (${result.path})${scoreStr}${privacyStr}${metadataStr}`;
 			})
 			.join("\n\n");
 

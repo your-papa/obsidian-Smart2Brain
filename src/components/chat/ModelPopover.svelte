@@ -3,10 +3,11 @@ import { Popover } from "bits-ui";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { extractVendor, logUnclassifiedModelsInfo } from "../../lib/modelVendorClassification";
 import { getProviderDefinition } from "../../providers/index";
-import type { ChatModel } from "../../stores/chatStore.svelte";
+import { type ChatModel, chatHistoryContainsPrivateNotes, getMessenger } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { Logger } from "../../utils/logging";
+import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import AnthropicLogo from "../ui/logos/AnthropicLogo.svelte";
 import OpenAILogo from "../ui/logos/OpenAILogo.svelte";
@@ -222,7 +223,15 @@ function getModelDisplayName(model: ChatModel): string {
 }
 
 // Handle model selection
-function handleSelect(model: ChatModel) {
+async function handleSelect(model: ChatModel) {
+	// Check if switching to a non-trusted provider with private notes in history
+	if (!data.isProviderTrusted(model.provider)) {
+		const messages = getMessenger()?.session?.messages;
+		if (messages && chatHistoryContainsPrivateNotes(messages)) {
+			const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
+			if (!confirmed) return;
+		}
+	}
 	isOpen = false;
 	selectModel(model);
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
 import { onDestroy, untrack } from "svelte";
 import { EmbeddingIndexModal } from "../modal/EmbeddingIndexModal";
+import { IndexingReportModal } from "../modal/IndexingReportModal";
 import SettingItem from "./SettingItem.svelte";
 import Button from "../ui/Button.svelte";
 import ProgressBar from "../ui/ProgressBar.svelte";
@@ -80,6 +81,12 @@ function openEmbeddingIndexModal() {
 	modal.open();
 }
 
+function openIndexingReport() {
+	if (!indexId) return;
+	const modal = new IndexingReportModal(plugin, indexId);
+	modal.open();
+}
+
 function cancelIndexing() {
 	if (indexId && isVectorStoreInitialized()) {
 		getVectorStoreService().cancelIndexing(indexId);
@@ -107,6 +114,9 @@ function cancelIndexing() {
 				</div>
 				<Button buttonText="Cancel" onClick={cancelIndexing} />
 			{:else}
+				{#if indexId && documentCount > 0}
+					<Button iconId="list" tooltip="View indexing details" onClick={openIndexingReport} />
+				{/if}
 				<Button onClick={openEmbeddingIndexModal}>
 					{#if indexConfig}
 						<div class="flex items-center gap-2">

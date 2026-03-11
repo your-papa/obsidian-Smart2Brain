@@ -7,6 +7,7 @@ import { type LogoProps, getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import Button from "../ui/Button.svelte";
 import CircularLoader from "../ui/CircularLoader.svelte";
+import Toggle from "../ui/Toggle.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import AuthConfigFields from "./AuthConfigFields.svelte";
 import SettingItem from "./SettingItem.svelte";
@@ -152,6 +153,16 @@ let Logo: Component<LogoProps> = $derived.by(() => {
 
 		<!-- Auth configuration fields (includes advanced toggle) -->
 		<AuthConfigFields {provider} />
+
+		{#if isConfigured}
+			<!-- Privacy trust toggle for configured providers -->
+			<SettingItem name="Trusted for private data" desc="Allow this provider to process files on your privacy list.">
+				<Toggle
+					checked={data.isProviderTrusted(provider)}
+					onchange={(checked) => data.setProviderTrusted(provider, checked)}
+				/>
+			</SettingItem>
+		{/if}
 
 		{#if !isConfigured}
 			<!-- Add provider button for unconfigured providers -->

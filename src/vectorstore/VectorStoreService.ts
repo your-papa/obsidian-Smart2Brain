@@ -25,7 +25,10 @@ import {
 	type DefaultEmbedModel,
 	type DocumentVector,
 	type IndexingProgress,
+	type IndexingReport,
 	type SearchFilter,
+	type SkipReason,
+	type SkippedFile,
 	type VectorSearchResult,
 	type VectorStore,
 } from "./types";
@@ -92,6 +95,7 @@ interface IndexInstance {
 		model: string;
 		maxInputTokens: number;
 	} | null;
+	report: IndexingReport | null;
 }
 
 /**
@@ -146,6 +150,7 @@ export class VectorStoreService {
 			},
 			abortController: null,
 			maxInputTokensCache: null,
+			report: null,
 		};
 	}
 
@@ -426,7 +431,7 @@ export class VectorStoreService {
 
 		const { vault } = this.plugin.app;
 		const allVaultFiles = vault.getMarkdownFiles();
-		const vaultFiles = allVaultFiles.filter((file) => this.shouldIndexFile(file));
+		const vaultFiles = allVaultFiles.filter((file) => this.shouldIndexFile(file, defaultModel.provider));
 
 		const indexedDocs = await inst.store.getAll();
 		const indexedMap = new Map<string, { mtime: number }>();
@@ -451,6 +456,16 @@ export class VectorStoreService {
 		const orphanedPaths: string[] = [];
 		for (const path of indexedMap.keys()) {
 			if (!vaultPaths.has(path)) orphanedPaths.push(path);
+		}
+
+		// Check if MiniSearch is out of sync with the vector store
+		const miniSearchCount = inst.miniSearch.documentCount;
+		const indexedCount = indexedDocs.length;
+		if (miniSearchCount < indexedCount) {
+			Logger.log(
+				`[VectorStore] MiniSearch out of sync for ${inst.indexId}: ${miniSearchCount} vs ${indexedCount} in store. Rebuilding MiniSearch...`,
+			);
+			await this.rebuildMiniSearch(inst);
 		}
 
 		const totalUpdates = missingFiles.length + staleFiles.length + orphanedPaths.length;
@@ -559,6 +574,7 @@ export class VectorStoreService {
 				} catch (error) {
 					Logger.error("[VectorStore] Batch validation indexing failed:", error);
 					for (const entry of batch) {
+						if (inst.abortController?.signal.aborted) break;
 						try {
 							const vector = await embeddings.embedQuery(entry.contentWithTitle);
 							if (!vector || vector.length === 0) {
@@ -579,6 +595,8 @@ export class VectorStoreService {
 							this.updateInstanceProgress(inst, { indexed: inst.progress.indexed + 1 });
 						} catch (entryError) {
 							Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
+							const reason = entryError instanceof Error ? entryError.message : String(entryError);
+							new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
 							this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
 						}
 					}
@@ -845,14 +863,25 @@ export class VectorStoreService {
 		const { vault } = this.plugin.app;
 		const allFiles = vault.getMarkdownFiles();
 		const batchSize = this.getBatchSize(model.provider);
-		const files = allFiles.filter((file) => this.shouldIndexFile(file));
-		const excludedCount = allFiles.length - files.length;
+
+		// Categorize files by skip reason
+		const files: TFile[] = [];
+		const skippedFiles: SkippedFile[] = [];
+		for (const file of allFiles) {
+			const reason = this.getFileSkipReason(file, model.provider);
+			if (reason) {
+				skippedFiles.push({ path: file.path, reason });
+			} else {
+				files.push(file);
+			}
+		}
+		const indexedFiles: string[] = [];
 
 		this.updateInstanceProgress(inst, {
 			isIndexing: true,
 			total: files.length,
 			indexed: 0,
-			skipped: excludedCount,
+			skipped: skippedFiles.length,
 			currentFile: null,
 			percentage: 0,
 		});
@@ -879,6 +908,7 @@ export class VectorStoreService {
 				try {
 					const content = await vault.cachedRead(file);
 					if (content.length > maxContentLength) {
+						skippedFiles.push({ path: file.path, reason: "too-large" });
 						this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
 						continue;
 					}
@@ -886,6 +916,7 @@ export class VectorStoreService {
 					validFiles.push({ file, content, contentWithTitle });
 				} catch (error) {
 					Logger.error(`[VectorStore] Failed to read ${file.path}:`, error);
+					skippedFiles.push({ path: file.path, reason: "read-error" });
 					this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
 				}
 			}
@@ -913,6 +944,7 @@ export class VectorStoreService {
 					const vectors = await embeddings.embedDocuments(texts);
 					if (!vectors || vectors.length === 0) {
 						Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
+						for (const entry of batch) skippedFiles.push({ path: entry.file.path, reason: "embed-error" });
 						this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + batch.length });
 						this.updateNotice(notice, inst.progress);
 						continue;
@@ -921,6 +953,7 @@ export class VectorStoreService {
 					for (let j = 0; j < batch.length; j++) {
 						if (!vectors[j]) {
 							Logger.error(`[VectorStore] Empty vector for ${batch[j].file.path}`);
+							skippedFiles.push({ path: batch[j].file.path, reason: "embed-error" });
 							continue;
 						}
 						const entry = batch[j];
@@ -933,6 +966,7 @@ export class VectorStoreService {
 						};
 						await inst.store.upsert(doc);
 						inst.miniSearch.addDocument(entry.file.path, entry.file.basename, entry.content);
+						indexedFiles.push(entry.file.path);
 					}
 
 					this.updateInstanceProgress(inst, { indexed: batchEnd });
@@ -944,10 +978,12 @@ export class VectorStoreService {
 					);
 
 					for (const entry of batch) {
+						if (inst.abortController?.signal.aborted) break;
 						try {
 							const vector = await embeddings.embedQuery(entry.contentWithTitle);
 							if (!vector || vector.length === 0) {
 								Logger.error(`[VectorStore] embedQuery returned empty result for ${entry.file.path}`);
+								skippedFiles.push({ path: entry.file.path, reason: "embed-error" });
 								this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
 								continue;
 							}
@@ -960,15 +996,22 @@ export class VectorStoreService {
 							};
 							await inst.store.upsert(doc);
 							inst.miniSearch.addDocument(entry.file.path, entry.file.basename, entry.content);
+							indexedFiles.push(entry.file.path);
 							this.updateInstanceProgress(inst, { indexed: inst.progress.indexed + 1 });
 						} catch (entryError) {
 							Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
+							const reason = entryError instanceof Error ? entryError.message : String(entryError);
+							new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
+							skippedFiles.push({ path: entry.file.path, reason: "embed-error" });
 							this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
 						}
 					}
 					this.updateNotice(notice, inst.progress);
 				}
 			}
+
+			// Save the indexing report
+			inst.report = { indexedFiles, skippedFiles, timestamp: Date.now() };
 
 			await this.saveInstanceToFile(inst);
 
@@ -1027,9 +1070,18 @@ export class VectorStoreService {
 	}
 
 	/**
-	 * Check if a file should be indexed based on exclusion/inclusion settings.
+	 * Check if a file should be indexed based on exclusion/inclusion settings
+	 * and privacy rules. When a provider is specified, private files are
+	 * blocked for untrusted providers.
 	 */
-	private shouldIndexFile(file: TFile): boolean {
+	private shouldIndexFile(file: TFile, provider?: string): boolean {
+		return this.getFileSkipReason(file, provider) === null;
+	}
+
+	/**
+	 * Get the reason a file would be skipped, or null if it should be indexed.
+	 */
+	private getFileSkipReason(file: TFile, provider?: string): SkipReason | null {
 		const pluginData = getData();
 		const indexList = pluginData.indexList;
 		const isExcluding = pluginData.isExcluding;
@@ -1038,7 +1090,21 @@ export class VectorStoreService {
 			(pattern) => file.path.startsWith(pattern) || file.path.includes(`/${pattern}`),
 		);
 
-		return isExcluding ? !matchesPattern : indexList.length === 0 || matchesPattern;
+		const allowed = isExcluding ? !matchesPattern : indexList.length === 0 || matchesPattern;
+		if (!allowed) return "excluded";
+
+		// Privacy check: skip private files for untrusted providers
+		if (provider && !pluginData.isProviderTrusted(provider)) {
+			const privacyList = pluginData.privacyList;
+			const privacyIsExcluding = pluginData.privacyIsExcluding;
+			const matchesPrivacy = privacyList.some(
+				(pattern) => file.path.startsWith(pattern) || file.path.includes(`/${pattern}`),
+			);
+			const isPrivate = privacyIsExcluding ? matchesPrivacy : privacyList.length > 0 && !matchesPrivacy;
+			if (isPrivate) return "privacy";
+		}
+
+		return null;
 	}
 
 	/**
@@ -1050,7 +1116,7 @@ export class VectorStoreService {
 		const embeddings = this.getEmbeddingsForInstance(inst, model);
 		if (!embeddings) return;
 
-		if (!this.shouldIndexFile(file)) {
+		if (!this.shouldIndexFile(file, model.provider)) {
 			Logger.log(`[VectorStore] Skipping ${file.path}: excluded by settings`);
 			return;
 		}
@@ -1068,6 +1134,7 @@ export class VectorStoreService {
 			const vector = await embeddings.embedQuery(contentWithTitle);
 			if (!vector || vector.length === 0) {
 				Logger.error(`[VectorStore] embedQuery returned empty result for ${file.path}`);
+				new Notice(`Failed to embed ${file.basename}: empty result from model`);
 				return;
 			}
 
@@ -1086,6 +1153,8 @@ export class VectorStoreService {
 			Logger.log(`[VectorStore] Indexed: ${file.path} (${inst.indexId})`);
 		} catch (error) {
 			Logger.error(`[VectorStore] Failed to index ${file.path} (${inst.indexId}):`, error);
+			const reason = error instanceof Error ? error.message : String(error);
+			new Notice(`Failed to embed ${file.basename}: ${reason}`);
 		}
 	}
 
@@ -1291,6 +1360,34 @@ export class VectorStoreService {
 		const docs = await inst.store.getAllSerialized();
 		const index = FileSyncManager.createIndex(docs, inst.currentProviderId ?? "", inst.currentModelId ?? "");
 		await inst.syncManager.saveToFile(index);
+		await inst.miniSearch.flush();
+	}
+
+	/**
+	 * Rebuild MiniSearch from vault files that are present in the HNSW store.
+	 * Used when MiniSearch falls out of sync (e.g. IndexedDB data was lost).
+	 */
+	private async rebuildMiniSearch(inst: IndexInstance): Promise<void> {
+		const { vault } = this.plugin.app;
+		const indexedDocs = await inst.store.getAll();
+		const indexedPaths = new Set(indexedDocs.map((d) => d.path));
+
+		inst.miniSearch.clear();
+
+		for (const path of indexedPaths) {
+			const file = vault.getFileByPath(path);
+			if (file instanceof TFile) {
+				try {
+					const content = await vault.cachedRead(file);
+					inst.miniSearch.addDocument(file.path, file.basename, content);
+				} catch (error) {
+					Logger.error(`[VectorStore] Failed to read ${path} for MiniSearch rebuild:`, error);
+				}
+			}
+		}
+
+		await inst.miniSearch.flush();
+		Logger.log(`[VectorStore] Rebuilt MiniSearch for ${inst.indexId}: ${inst.miniSearch.documentCount} documents`);
 	}
 
 	/**
@@ -1389,6 +1486,59 @@ export class VectorStoreService {
 	}
 
 	/**
+	 * Get the indexing report for a specific index.
+	 * If no report exists from the last build, generates one on-demand
+	 * by comparing the current index against all vault files.
+	 */
+	async getReport(indexId?: string): Promise<IndexingReport | null> {
+		const data = getData();
+		const resolvedId = indexId ?? data.searchEmbedIndex;
+		if (!resolvedId) return null;
+
+		const inst = this.instances.get(resolvedId);
+		if (!inst) return null;
+
+		// Return cached report if available
+		if (inst.report) return inst.report;
+
+		// Generate report on-demand from current state
+		return this.generateReport(inst);
+	}
+
+	/**
+	 * Generate an indexing report by comparing the current index state
+	 * against all vault files, classifying each by its status.
+	 */
+	private async generateReport(inst: IndexInstance): Promise<IndexingReport> {
+		const { vault } = this.plugin.app;
+		const allFiles = vault.getMarkdownFiles();
+		const model = this.getModelForInstance(inst);
+		const provider = model?.provider;
+
+		const indexedDocs = await inst.store.getAll();
+		const indexedPaths = new Set(indexedDocs.map((d) => d.path));
+
+		const indexedFiles: string[] = [...indexedPaths];
+		const skippedFiles: SkippedFile[] = [];
+
+		for (const file of allFiles) {
+			if (indexedPaths.has(file.path)) continue;
+
+			const reason = this.getFileSkipReason(file, provider);
+			if (reason) {
+				skippedFiles.push({ path: file.path, reason });
+			} else {
+				// File passed filters but isn't indexed — likely too large or had an error
+				skippedFiles.push({ path: file.path, reason: "too-large" });
+			}
+		}
+
+		const report: IndexingReport = { indexedFiles, skippedFiles, timestamp: Date.now() };
+		inst.report = report;
+		return report;
+	}
+
+	/**
 	 * Check if indexing is in progress for any instance.
 	 */
 	get isIndexing(): boolean {
@@ -1466,6 +1616,7 @@ export class VectorStoreService {
 		const inst = this.instances.get(indexId);
 		if (inst?.abortController) {
 			inst.abortController.abort();
+			new Notice("Cancelling indexing… will stop after the current embedding finishes.");
 		}
 	}
 
