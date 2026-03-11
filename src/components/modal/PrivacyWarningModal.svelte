@@ -13,14 +13,14 @@ let { modal, onConfirm, onCancel }: Props = $props();
 
 <div class="modal-title">Privacy Warning</div>
 <div class="modal-content">
-	<p>
-		Your chat history contains references to <strong>private notes</strong>. The provider you are
-		switching to is <strong>not trusted for private data</strong>.
-	</p>
-	<p>Continuing may expose private note content to this provider.</p>
+  <p>
+    Your chat history contains references to <strong>private notes</strong>. The provider you are
+    switching to is <strong>not trusted for private data</strong>.
+  </p>
+  <p>Continuing may expose private note content to this provider.</p>
 </div>
 
 <div class="modal-button-container">
-	<Button buttonText="Cancel" onClick={onCancel} />
-	<Button buttonText="Continue anyway" styles="mod-warning" onClick={onConfirm} />
+  <Button buttonText="Cancel" onClick={onCancel} />
+  <Button buttonText="Continue anyway" styles="mod-warning" onClick={onConfirm} />
 </div>

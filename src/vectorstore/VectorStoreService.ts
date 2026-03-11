@@ -1528,8 +1528,8 @@ export class VectorStoreService {
 			if (reason) {
 				skippedFiles.push({ path: file.path, reason });
 			} else {
-				// File passed filters but isn't indexed — likely too large or had an error
-				skippedFiles.push({ path: file.path, reason: "too-large" });
+				// File passed filters but isn't indexed yet
+				skippedFiles.push({ path: file.path, reason: "not-indexed" });
 			}
 		}
 

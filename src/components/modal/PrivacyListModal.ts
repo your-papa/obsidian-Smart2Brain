@@ -1,9 +1,9 @@
 import { Modal } from "obsidian";
-import { mount } from "svelte";
+import { mount, unmount } from "svelte";
 import PrivacyListComponent from "./PrivacyListModal.svelte";
 
 export class PrivacyListModal extends Modal {
-	component!: PrivacyListComponent;
+	private component: Record<string, never> | null = null;
 
 	onOpen() {
 		this.component = mount(PrivacyListComponent, {
@@ -15,7 +15,10 @@ export class PrivacyListModal extends Modal {
 	}
 
 	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
+		if (this.component) {
+			unmount(this.component);
+			this.component = null;
+		}
+		this.contentEl.empty();
 	}
 }
