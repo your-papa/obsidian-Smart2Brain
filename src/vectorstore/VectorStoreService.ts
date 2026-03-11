@@ -35,6 +35,9 @@ import { Logger } from "../utils/logging";
 /** Default max input tokens for embedding models when metadata is unavailable */
 const DEFAULT_EMBED_MAX_INPUT_TOKENS = 8191;
 
+/** Debounce delay before re-embedding a modified file (ms) */
+const MODIFY_DEBOUNCE_MS = 5_000;
+
 /** Approximate chars per token for rough estimation */
 const CHARS_PER_TOKEN = 4;
 
@@ -99,6 +102,7 @@ export class VectorStoreService {
 	private plugin: SecondBrainPlugin;
 	private instances: Map<string, IndexInstance> = new Map();
 	private progressListeners = new Map<string, Set<(progress: IndexingProgress) => void>>();
+	private modifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private isInitialized = false;
 	private vaultId: string;
 	private configDir: string;
@@ -621,9 +625,9 @@ export class VectorStoreService {
 		);
 
 		this.plugin.registerEvent(
-			vault.on("modify", async (file) => {
+			vault.on("modify", (file) => {
 				if (file instanceof TFile && file.extension === "md") {
-					await this.handleFileModify(file);
+					this.handleFileModify(file);
 				}
 			}),
 		);
@@ -670,21 +674,30 @@ export class VectorStoreService {
 	}
 
 	/**
-	 * Handle file modification — forward to active instances only.
+	 * Handle file modification — debounce re-embedding until 10s of inactivity.
 	 * Inactive instances are marked for re-validation on next use.
 	 */
-	private async handleFileModify(file: TFile): Promise<void> {
-		for (const inst of this.instances.values()) {
-			if (!this.isActiveIndex(inst.indexId)) {
-				inst.hasValidatedThisSession = false;
-				continue;
-			}
-			if (!inst.embeddings || inst.isIndexing) continue;
-			const storedMtime = await inst.store.getDocumentMtime(file.path);
-			if (storedMtime && storedMtime >= file.stat.mtime) continue;
-			await this.indexDocumentForInstance(inst, file);
-			this.notifyStatsChanged(inst);
-		}
+	private handleFileModify(file: TFile): void {
+		const existing = this.modifyTimers.get(file.path);
+		if (existing) clearTimeout(existing);
+
+		this.modifyTimers.set(
+			file.path,
+			setTimeout(async () => {
+				this.modifyTimers.delete(file.path);
+				for (const inst of this.instances.values()) {
+					if (!this.isActiveIndex(inst.indexId)) {
+						inst.hasValidatedThisSession = false;
+						continue;
+					}
+					if (!inst.embeddings || inst.isIndexing) continue;
+					const storedMtime = await inst.store.getDocumentMtime(file.path);
+					if (storedMtime && storedMtime >= file.stat.mtime) continue;
+					await this.indexDocumentForInstance(inst, file);
+					this.notifyStatsChanged(inst);
+				}
+			}, MODIFY_DEBOUNCE_MS),
+		);
 	}
 
 	/**
@@ -1518,6 +1531,8 @@ export class VectorStoreService {
 	 */
 	async cleanup(): Promise<void> {
 		try {
+			for (const timer of this.modifyTimers.values()) clearTimeout(timer);
+			this.modifyTimers.clear();
 			// Wait for any in-progress initialization before cleaning up
 			if (this.initPromise) {
 				await this.initPromise.catch(() => {});
