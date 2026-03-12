@@ -52,6 +52,26 @@ import { getRegistry } from "../providers/registry";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 
+const URL_REGEX = /https?:\/\/[^\s]+/g;
+const LANGCHAIN_TROUBLESHOOT_REGEX = /\n*Troubleshooting URL: https:\/\/docs\.langchain\.com\S*/g;
+
+/** Create a DocumentFragment with clickable links for any URLs in the text. */
+function createNoticeFragment(text: string): DocumentFragment {
+	const cleaned = text.replace(LANGCHAIN_TROUBLESHOOT_REGEX, "").trim();
+	const frag = document.createDocumentFragment();
+	let lastIndex = 0;
+	for (const match of cleaned.matchAll(URL_REGEX)) {
+		const url = match[0];
+		const index = match.index;
+		if (index > lastIndex) frag.appendText(cleaned.slice(lastIndex, index));
+		const link = frag.createEl("a", { text: url, href: url });
+		link.setAttr("target", "_blank");
+		lastIndex = index + url.length;
+	}
+	if (lastIndex < cleaned.length) frag.appendText(cleaned.slice(lastIndex));
+	return frag;
+}
+
 /** Result of provider authentication validation */
 export type AuthValidationResult = { success: true } | { success: false; message: string };
 
@@ -729,7 +749,9 @@ export class AgentManager {
 				throw error;
 			}
 
+			const message = error instanceof Error ? error.message : String(error);
 			Logger.error(errorContext, error);
+			new Notice(createNoticeFragment(message));
 			throw error;
 		} finally {
 			if (signal?.aborted) Logger.log(`${errorContext} - aborted by user`);
@@ -955,19 +977,6 @@ export class AgentManager {
 		this.agent = null;
 	}
 
-	private async isEmptyChat(file: TFile): Promise<boolean> {
-		try {
-			const raw = await this.plugin.app.vault.read(file);
-			const parsed = JSON.parse(raw) as {
-				checkpoints?: Record<string, unknown>;
-				writes?: Record<string, unknown>;
-			};
-			return Object.keys(parsed.checkpoints ?? {}).length === 0 && Object.keys(parsed.writes ?? {}).length === 0;
-		} catch {
-			return false;
-		}
-	}
-
 	private async openInChatLeaf(file: TFile) {
 		const location = getData().chatOpenLocation;
 		const workspace = this.plugin.app.workspace;
@@ -987,12 +996,10 @@ export class AgentManager {
 	}
 
 	async createNewChat(): Promise<void> {
-		const threadId = createThreadId();
 		const now = Date.now();
 
 		const data = getData();
 		const folder = data.targetFolder;
-		const defaultChatName = NEW_CHAT_NAME;
 
 		// Reset to default agent if one is set
 		if (data.defaultAgentId && data.selectedAgentId !== data.defaultAgentId) {
@@ -1005,34 +1012,22 @@ export class AgentManager {
 			await this.plugin.app.vault.createFolder(folder);
 		}
 
-		const defaultPath = normalizePath(`${folder}/${defaultChatName}.chat`);
-		const draftThreadId = defaultChatName;
+		// Find the next available "New Chat" name (e.g. "New Chat", "New Chat (2)", ...)
+		const { title: draftTitle, path: draftPath } = await this.chatManager.getUniqueTitlePath(
+			folder,
+			NEW_CHAT_NAME,
+			"", // no current path — always create a new file
+		);
+
 		const initialData = {
-			threadId: draftThreadId,
+			threadId: draftTitle,
 			createdAt: now,
 			updatedAt: now,
 			checkpoints: {},
 			writes: {},
 		};
 
-		if (await this.plugin.app.vault.adapter.exists(defaultPath)) {
-			const existing = this.plugin.app.vault.getAbstractFileByPath(defaultPath);
-			if (existing instanceof TFile && (await this.isEmptyChat(existing))) {
-				await this.plugin.app.vault.modify(existing, `${JSON.stringify(initialData)}\n`);
-				await this.chatManager.rebuildIndex();
-				await this.openInChatLeaf(existing);
-				return;
-			}
-		}
-
-		const fallbackPath = normalizePath(`${folder}/${threadId}.chat`);
-		const createPath = (await this.plugin.app.vault.adapter.exists(defaultPath)) ? fallbackPath : defaultPath;
-		const createThreadIdValue = createPath === defaultPath ? draftThreadId : threadId;
-
-		const file = await this.plugin.app.vault.create(
-			createPath,
-			`${JSON.stringify({ ...initialData, threadId: createThreadIdValue })}\n`,
-		);
+		const file = await this.plugin.app.vault.create(draftPath, `${JSON.stringify(initialData)}\n`);
 		await this.chatManager.rebuildIndex();
 		await this.openInChatLeaf(file);
 	}

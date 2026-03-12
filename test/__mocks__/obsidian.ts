@@ -46,7 +46,7 @@ export class Vault {
 	getName = vi.fn().mockReturnValue("test-vault");
 	read = vi.fn().mockResolvedValue("");
 	modify = vi.fn().mockResolvedValue(undefined);
-	create = vi.fn().mockResolvedValue(new TFile());
+	create = vi.fn().mockImplementation(() => Promise.resolve(new TFile()));
 	delete = vi.fn().mockResolvedValue(undefined);
 }
 
@@ -70,7 +70,7 @@ export class TFile {
 	basename = "test";
 	extension = "md";
 	stat = { ctime: Date.now(), mtime: Date.now(), size: 0 };
-	vault = new Vault();
+	vault: unknown = null;
 	parent = null;
 }
 

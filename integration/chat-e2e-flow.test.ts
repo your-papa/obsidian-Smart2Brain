@@ -42,7 +42,8 @@ describe("end-to-end chat flow", () => {
         clearBuffers();
     });
 
-    it("should show the empty state logo before any messages", () => {
+    it("should show the empty state logo before any messages", async () => {
+        await waitForSelector(".logo-container");
         expect(domCount(".logo-container")).toBeGreaterThanOrEqual(1);
     });
 

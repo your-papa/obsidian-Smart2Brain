@@ -766,8 +766,8 @@ export class PluginDataStore {
 			throw new Error(`Agent with ID "${agentId}" not found`);
 		}
 
-		// Use JSON parse/stringify for deep copy (safe for serializable config data)
-		const clonedAgent = structuredClone(sourceAgent);
+		// Use $state.snapshot to unwrap Svelte proxies, then structuredClone for deep copy
+		const clonedAgent = structuredClone($state.snapshot(sourceAgent));
 		const newAgent: AgentConfig = {
 			...clonedAgent,
 			id: genUUIDv7(),
