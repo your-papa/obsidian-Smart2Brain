@@ -111,11 +111,19 @@ export class VectorStoreService {
 	private vaultId: string;
 	private configDir: string;
 
+	/**
+	 * Standalone MiniSearch index that is always populated from vault files,
+	 * independent of embedding providers. Enables BM25 lexical search and
+	 * browse even when no embedding model is configured.
+	 */
+	private standaloneMiniSearch: MiniSearchService;
+
 	private constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
 		this.vaultId = (plugin.app as unknown as { appId: string }).appId;
 		const vault = plugin.app.vault as { configDir?: string };
 		this.configDir = vault.configDir || ".obsidian";
+		this.standaloneMiniSearch = new MiniSearchService(this.vaultId, "__standalone__");
 	}
 
 	/** Promise tracking initialization, awaited by cleanup to avoid closing mid-init. */
@@ -199,6 +207,21 @@ export class VectorStoreService {
 	 */
 	private async init(): Promise<void> {
 		try {
+			// Initialize the standalone MiniSearch for provider-independent lexical search
+			await this.standaloneMiniSearch.open();
+			const loaded = await this.standaloneMiniSearch.loadFromStorage();
+			if (!loaded) {
+				// First run or no persisted index — build from vault files once layout is ready
+				this.plugin.app.workspace.onLayoutReady(() => {
+					void this.buildStandaloneMiniSearch();
+				});
+			} else {
+				// Validate completeness after layout is ready
+				this.plugin.app.workspace.onLayoutReady(() => {
+					void this.validateStandaloneMiniSearch();
+				});
+			}
+
 			const data = getData();
 			const searchIndex = data.searchEmbedIndex;
 			const graphIndex = data.graphEmbedIndex;
@@ -222,6 +245,54 @@ export class VectorStoreService {
 		} catch (error) {
 			Logger.error("[VectorStore] Initialization failed:", error);
 			throw error;
+		}
+	}
+
+	/**
+	 * Build the standalone MiniSearch index from all vault markdown files.
+	 */
+	private async buildStandaloneMiniSearch(): Promise<void> {
+		const { vault } = this.plugin.app;
+		const files = vault.getMarkdownFiles().filter((file) => this.shouldIndexFile(file));
+
+		for (const file of files) {
+			try {
+				const content = await vault.cachedRead(file);
+				this.standaloneMiniSearch.addDocument(file.path, file.basename, content);
+			} catch (error) {
+				Logger.error(`[VectorStore] Failed to read ${file.path} for standalone MiniSearch:`, error);
+			}
+		}
+
+		await this.standaloneMiniSearch.flush();
+		Logger.log(`[VectorStore] Built standalone MiniSearch: ${this.standaloneMiniSearch.documentCount} documents`);
+	}
+
+	/**
+	 * Validate the standalone MiniSearch index against the vault,
+	 * adding any missing files and removing orphaned entries.
+	 */
+	private async validateStandaloneMiniSearch(): Promise<void> {
+		const { vault } = this.plugin.app;
+		const files = vault.getMarkdownFiles().filter((file) => this.shouldIndexFile(file));
+		const vaultPaths = new Set(files.map((f) => f.path));
+
+		let added = 0;
+		for (const file of files) {
+			if (!this.standaloneMiniSearch.hasDocument(file.path)) {
+				try {
+					const content = await vault.cachedRead(file);
+					this.standaloneMiniSearch.addDocument(file.path, file.basename, content);
+					added++;
+				} catch (error) {
+					Logger.error(`[VectorStore] Failed to read ${file.path} for standalone MiniSearch:`, error);
+				}
+			}
+		}
+
+		if (added > 0) {
+			await this.standaloneMiniSearch.flush();
+			Logger.log(`[VectorStore] Standalone MiniSearch: added ${added} missing documents`);
 		}
 	}
 
@@ -680,6 +751,16 @@ export class VectorStoreService {
 	 * Inactive instances are marked for re-validation on next use.
 	 */
 	private async handleFileCreate(file: TFile): Promise<void> {
+		// Always update the standalone MiniSearch
+		if (this.shouldIndexFile(file)) {
+			try {
+				const content = await this.plugin.app.vault.cachedRead(file);
+				this.standaloneMiniSearch.addDocument(file.path, file.basename, content);
+			} catch (error) {
+				Logger.error(`[VectorStore] Failed to add ${file.path} to standalone MiniSearch:`, error);
+			}
+		}
+
 		for (const inst of this.instances.values()) {
 			if (!this.isActiveIndex(inst.indexId)) {
 				inst.hasValidatedThisSession = false;
@@ -703,6 +784,17 @@ export class VectorStoreService {
 			file.path,
 			setTimeout(async () => {
 				this.modifyTimers.delete(file.path);
+
+				// Always update the standalone MiniSearch
+				if (this.shouldIndexFile(file)) {
+					try {
+						const content = await this.plugin.app.vault.cachedRead(file);
+						this.standaloneMiniSearch.addDocument(file.path, file.basename, content);
+					} catch (error) {
+						Logger.error(`[VectorStore] Failed to update ${file.path} in standalone MiniSearch:`, error);
+					}
+				}
+
 				for (const inst of this.instances.values()) {
 					if (!this.isActiveIndex(inst.indexId)) {
 						inst.hasValidatedThisSession = false;
@@ -723,6 +815,9 @@ export class VectorStoreService {
 	 * Inactive instances are marked for re-validation on next use.
 	 */
 	private async handleFileDelete(file: TFile): Promise<void> {
+		// Always update the standalone MiniSearch
+		this.standaloneMiniSearch.removeDocument(file.path);
+
 		for (const inst of this.instances.values()) {
 			if (!this.isActiveIndex(inst.indexId)) {
 				inst.hasValidatedThisSession = false;
@@ -740,6 +835,20 @@ export class VectorStoreService {
 	 * Inactive instances are marked for re-validation on next use.
 	 */
 	private async handleFileRename(file: TFile, oldPath: string): Promise<void> {
+		// Always update the standalone MiniSearch
+		this.standaloneMiniSearch.removeDocument(oldPath);
+		if (this.shouldIndexFile(file)) {
+			try {
+				const content = await this.plugin.app.vault.cachedRead(file);
+				this.standaloneMiniSearch.addDocument(file.path, file.basename, content);
+			} catch (error) {
+				Logger.error(
+					`[VectorStore] Failed to re-add ${file.path} to standalone MiniSearch after rename:`,
+					error,
+				);
+			}
+		}
+
 		for (const inst of this.instances.values()) {
 			if (!this.isActiveIndex(inst.indexId)) {
 				inst.hasValidatedThisSession = false;
@@ -1162,7 +1271,7 @@ export class VectorStoreService {
 	 * Perform lexical (full-text) search using MiniSearch.
 	 */
 	async lexicalSearch(query: string, topK: number, filter?: SearchFilter): Promise<VectorSearchResult[]> {
-		// For lexical search, use the search index's MiniSearch (or first available)
+		// Prefer the search index's MiniSearch, fall back to standalone
 		const data = getData();
 		const indexId = data.searchEmbedIndex;
 		let miniSearch: MiniSearchService | null = null;
@@ -1178,7 +1287,8 @@ export class VectorStoreService {
 			if (firstInst) miniSearch = firstInst.miniSearch;
 		}
 
-		if (!miniSearch) return [];
+		// Fall back to standalone MiniSearch (always available)
+		if (!miniSearch) miniSearch = this.standaloneMiniSearch;
 
 		const results = miniSearch.search(query, topK * (filter ? 3 : 1));
 		return this.applyFilterToLexicalResults(results, topK, filter);
@@ -1188,6 +1298,7 @@ export class VectorStoreService {
 	 * Browse all indexed documents with optional filtering.
 	 */
 	async browseDocuments(topK: number, filter?: SearchFilter): Promise<VectorSearchResult[]> {
+		// Prefer the search index's MiniSearch, fall back to standalone
 		const data = getData();
 		const indexId = data.searchEmbedIndex;
 		let miniSearch: MiniSearchService | null = null;
@@ -1202,7 +1313,8 @@ export class VectorStoreService {
 			if (firstInst) miniSearch = firstInst.miniSearch;
 		}
 
-		if (!miniSearch) return [];
+		// Fall back to standalone MiniSearch (always available)
+		if (!miniSearch) miniSearch = this.standaloneMiniSearch;
 
 		const results = miniSearch.browse(topK * (filter ? 3 : 1));
 		return this.applyFilterToLexicalResults(results, topK, filter);
@@ -1695,6 +1807,11 @@ export class VectorStoreService {
 				inst.miniSearch.close();
 			}
 			this.instances.clear();
+
+			// Clean up the standalone MiniSearch
+			await this.standaloneMiniSearch.flush();
+			this.standaloneMiniSearch.close();
+
 			Logger.log("[VectorStore] Cleanup complete");
 		} catch (error) {
 			Logger.error("[VectorStore] Cleanup failed:", error);
