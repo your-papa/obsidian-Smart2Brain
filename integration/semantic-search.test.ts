@@ -11,7 +11,7 @@ import {
 	sleep,
 	waitForStandaloneMiniSearch,
 } from "./helpers/cli.ts";
-import type {} from "vitest";
+import type { } from "vitest";
 
 const providerAvailable = (() => {
 	try {

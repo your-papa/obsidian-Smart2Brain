@@ -122,7 +122,7 @@ export class VectorStoreService {
 		this.vaultId = (plugin.app as unknown as { appId: string }).appId;
 		const vault = plugin.app.vault as { configDir?: string };
 		this.configDir = vault.configDir || ".obsidian";
-		this.standaloneMiniSearch = new MiniSearchService(this.vaultId, "__standalone__");
+		this.standaloneMiniSearch = new MiniSearchService(this.vaultId);
 	}
 
 	/** Promise tracking initialization, awaited by cleanup to avoid closing mid-init. */
@@ -398,10 +398,10 @@ export class VectorStoreService {
 		const ollamaData =
 			defaultModel.provider === "ollama"
 				? (() => {
-						const ollamaAuth = getData().getResolvedProviderAuth("ollama");
-						if (!ollamaAuth?.baseUrl) return null;
-						return getOllamaModelsCache(ollamaAuth.baseUrl);
-					})()
+					const ollamaAuth = getData().getResolvedProviderAuth("ollama");
+					if (!ollamaAuth?.baseUrl) return null;
+					return getOllamaModelsCache(ollamaAuth.baseUrl);
+				})()
 				: null;
 
 		const metadata = hydrateEmbeddingModel(defaultModel.provider, defaultModel.model, {
@@ -527,6 +527,8 @@ export class VectorStoreService {
 		const totalUpdates = missingFiles.length + staleFiles.length + orphanedPaths.length;
 		if (totalUpdates === 0) {
 			Logger.log(`[VectorStore] Index ${inst.indexId} is up to date`);
+			// Always sync document count to fix stale cached values
+			await this.notifyStatsChanged(inst);
 			return;
 		}
 
@@ -1103,11 +1105,12 @@ export class VectorStoreService {
 
 			await this.saveInstanceToFile(inst);
 
-			// Update cached stats in plugin data
+			// Update cached stats in plugin data using actual store count
+			const actualCount = await inst.store.count();
 			const data = getData();
 			data.updateEmbeddingIndexStats(inst.indexId, {
 				lastBuiltAt: Date.now(),
-				documentCount: inst.progress.indexed,
+				documentCount: actualCount,
 			});
 
 			const { indexed, skipped } = inst.progress;
@@ -1583,7 +1586,7 @@ export class VectorStoreService {
 		}
 		if (!indexId) {
 			callback({ isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 });
-			return () => {};
+			return () => { };
 		}
 
 		// Register at service level so subscriptions survive instance recreation
@@ -1707,7 +1710,7 @@ export class VectorStoreService {
 			this.modifyTimers.clear();
 			// Wait for any in-progress initialization before cleaning up
 			if (this.initPromise) {
-				await this.initPromise.catch(() => {});
+				await this.initPromise.catch(() => { });
 			}
 			for (const inst of this.instances.values()) {
 				await inst.syncManager.flush();
