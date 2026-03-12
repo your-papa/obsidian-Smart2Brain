@@ -1,677 +1,693 @@
 <script lang="ts">
-import { MultiServerMCPClient } from "@langchain/mcp-adapters";
-import { Notice, type TFolder } from "obsidian";
-import { onMount } from "svelte";
-import { AddSkillModal } from "../../components/modal/AddSkillModal";
-import FolderSuggest from "../../components/modal/FolderSuggest.svelte";
-import { MCPServerModal } from "../../components/modal/MCPServerModal";
-import { ModelSelectionModal } from "../../components/modal/ModelSelectionModal";
-import { SkillModal } from "../../components/modal/SkillModal";
-import { SystemPromptModal } from "../../components/modal/SystemPromptModal";
-import { ToolConfigModal } from "../../components/modal/ToolConfigModal";
-import SettingGroup from "../../components/settings/SettingGroup.svelte";
-import SettingItem from "../../components/settings/SettingItem.svelte";
-import Button from "../../components/ui/Button.svelte";
-import Dropdown from "../../components/ui/Dropdown.svelte";
-import Icon from "../../components/ui/Icon.svelte";
-import IconButton from "../../components/ui/IconButton.svelte";
-import Text from "../../components/ui/Text.svelte";
-import Toggle from "../../components/ui/Toggle.svelte";
-import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
-import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
-import { createObsidianFetch } from "../../lib/obsidianFetch";
-import type { AgentColor, AgentConfig, BuiltInToolId, MCPServerConfig, SkillDisplayInfo } from "../../types/plugin";
-import { getProviderDefinition } from "../../providers/index";
-import type { ChatModel } from "../../stores/chatStore.svelte";
-import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import { Logger } from "../../utils/logging";
-
-const pluginData = getData();
-const plugin = getPlugin();
-const models = useAvailableModels();
-
-const diffViewModeOptions = [
-	{ display: "Two Pane (rendered markdown)", value: "two-pane" as const },
-	{ display: "Word Diff (inline text)", value: "word-diff" as const },
-];
-
-// Helper to get all folders for folder suggestion
-function suggestFolders(): TFolder[] {
-	return plugin.app.vault.getAllFolders(true);
-}
-
-// Available agent colors matching Obsidian theme
-const AGENT_COLORS: { value: AgentColor | "none"; label: string; cssVar: string }[] = [
-	{ value: "none", label: "None", cssVar: "" },
-	{ value: "red", label: "Red", cssVar: "--color-red" },
-	{ value: "orange", label: "Orange", cssVar: "--color-orange" },
-	{ value: "yellow", label: "Yellow", cssVar: "--color-yellow" },
-	{ value: "green", label: "Green", cssVar: "--color-green" },
-	{ value: "cyan", label: "Cyan", cssVar: "--color-cyan" },
-	{ value: "blue", label: "Blue", cssVar: "--color-blue" },
-	{ value: "purple", label: "Purple", cssVar: "--color-purple" },
-	{ value: "pink", label: "Pink", cssVar: "--color-pink" },
-];
-
-// Currently selected agent for editing
-let selectedAgentId = $state<string>(DEFAULT_AGENT_ID);
-
-// Get agents object reactively (triggers when agents change)
-let agents = $derived(pluginData.agents);
-
-// Get all agent IDs reactively from the agents object
-let agentIds = $derived(Object.keys(agents));
-
-// Get selected agent config
-let selectedAgent = $derived(agents[selectedAgentId]);
-
-// Dropdown options for agent selector
-const agentDropdownOptions = $derived(
-	agentIds.map((id) => {
-		const agent = agents[id];
-		const isDefault = id === pluginData.defaultAgentId;
-		return {
-			value: id,
-			display: agent ? `${agent.name}${isDefault ? " (Default)" : ""}` : id,
-		};
-	}),
-);
-
-// Auto-apply changes by reinitializing the agent
-async function applyChanges() {
-	try {
-		await plugin.agentManager.reinitialize();
-	} catch (error) {
-		Logger.error("Failed to reinitialize agent:", error);
-	}
-}
-
-// ============================================================================
-// Agent List Functions
-// ============================================================================
-
-function createNewAgent() {
-	const agent = pluginData.createAgent("New Agent");
-	selectedAgentId = agent.id;
-}
-
-function deleteSelectedAgent() {
-	if (selectedAgentId === DEFAULT_AGENT_ID) {
-		new Notice("Cannot delete the built-in default agent");
-		return;
-	}
-	try {
-		pluginData.deleteAgent(selectedAgentId);
-		selectedAgentId = pluginData.defaultAgentId ?? DEFAULT_AGENT_ID;
-		applyChanges();
-	} catch (err) {
-		new Notice(err instanceof Error ? err.message : "Failed to delete agent");
-	}
-}
-
-function duplicateAgent() {
-	if (!selectedAgent) return;
-	const newAgent = pluginData.duplicateAgent(selectedAgentId, `${selectedAgent.name} (Copy)`);
-	selectedAgentId = newAgent.id;
-}
-
-function setAsDefaultAgent() {
-	try {
-		pluginData.setDefaultAgentId(selectedAgentId);
-		new Notice(`${selectedAgent?.name} is now the default agent`);
-	} catch (err) {
-		new Notice(err instanceof Error ? err.message : "Failed to set default agent");
-	}
-}
-
-function clearDefaultAgent() {
-	pluginData.clearDefaultAgent();
-	new Notice("Default cleared. New chats will use the last selected agent.");
-}
-
-// ============================================================================
-// General Settings
-// ============================================================================
-
-function updateAgentName(name: string) {
-	if (!selectedAgentId) return;
-	pluginData.updateAgent(selectedAgentId, { name });
-}
-
-function updateAgentColor(color: AgentColor | "none") {
-	if (!selectedAgentId) return;
-	pluginData.updateAgent(selectedAgentId, { color: color === "none" ? undefined : color });
-}
-
-// Model dropdown options - grouped by provider
-const modelOptions = $derived(
-	models.modelOptions.map((opt) => ({
-		label: opt.label,
-		value: opt.value,
-		group: opt.chatModel.provider,
-		chatModel: opt.chatModel,
-	})),
-);
-
-// Get selected model value for current agent
-let selectedModelValue = $derived.by(() => {
-	if (!selectedAgent?.chatModel) return "";
-	return `${selectedAgent.chatModel.provider}:${selectedAgent.chatModel.model}`;
-});
-
-// Get display info for current model
-const currentModelDisplay = $derived.by(() => {
-	if (!selectedAgent?.chatModel) return null;
-	const provider = selectedAgent.chatModel.provider;
-	const model = selectedAgent.chatModel.model;
-	const providerDef = getProviderDefinition(provider, pluginData.getAllCustomProviderMeta());
-	return {
-		model,
-		providerName: providerDef?.displayName ?? provider,
-		logo: providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon,
-	};
-});
-
-function openModelSelectionModal() {
-	if (!selectedAgentId) return;
-	const currentSelection = selectedAgent?.chatModel
-		? { provider: selectedAgent.chatModel.provider, model: selectedAgent.chatModel.model }
-		: null;
-
-	const modal = new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
-		if (selected && selectedAgentId) {
-			const chatModel: ChatModel = {
-				provider: selected.provider,
-				model: selected.model,
-				modelConfig: { contextWindow: 128000 }, // Default, will be enriched from models.dev
-			};
-			pluginData.updateAgent(selectedAgentId, { chatModel });
-			applyChanges();
-		}
-	});
-	modal.open();
-}
-
-function handleModelSelect(value: string) {
-	const opt = models.modelOptions.find((o) => o.value === value);
-	if (opt && selectedAgentId) {
-		pluginData.updateAgent(selectedAgentId, { chatModel: opt.chatModel as ChatModel });
-		applyChanges();
-	}
-}
-
-function getProviderId(value: string): string {
-	const opt = models.modelOptions.find((o) => o.value === value);
-	return opt?.chatModel.provider ?? "";
-}
-
-// ============================================================================
-// System Prompt
-// ============================================================================
-
-function openSystemPromptModal() {
-	if (!selectedAgent) return;
-	const modal = new SystemPromptModal(plugin, {
-		getPrompt: () => selectedAgent?.systemPrompt ?? "",
-		setPrompt: (prompt: string) => {
-			pluginData.updateAgent(selectedAgentId, { systemPrompt: prompt });
-			applyChanges();
-		},
-		viewFinalPrompt: () => {
-			modal.close();
-			openRenderedSystemPromptModal();
-		},
-	});
-	modal.open();
-}
-
-function openRenderedSystemPromptModal() {
-	if (!selectedAgent) return;
-	const modal = new SystemPromptModal(
-		plugin,
-		{
-			getPrompt: async () => plugin.agentManager.assembleSystemPrompt(),
-		},
-		{
-			title: "Final System Prompt",
-			description:
-				"Preview the fully assembled system prompt after dynamic tool guidance and skills are injected.",
-			readOnly: true,
-		},
-	);
-	modal.open();
-}
-
-// ============================================================================
-// Skills
-// ============================================================================
-
-// Reactive counter to trigger re-fetch of file-based skills
-let skillsRefreshCounter = $state(0);
-
-// Get file-based skills from SkillsService and merge with agent enable state
-const skills = $derived.by(() => {
-	// Depend on refresh counter to trigger re-derivation
-	const _refresh = skillsRefreshCounter;
-
-	const skillsService = plugin.skillsService;
-	if (!skillsService?.isDiscovered()) {
-		return [];
-	}
-
-	const cachedSkills = skillsService.getCachedSkills();
-	const agentSkills = selectedAgent?.skills ?? {};
-
-	// Convert file-based skills to SkillDisplayInfo format for UI
-	const result: SkillDisplayInfo[] = [];
-	for (const [skillName, metadata] of cachedSkills) {
-		const agentState = agentSkills[skillName];
-		const displayName = metadata.frontmatter.metadata?.displayName ?? metadata.frontmatter.name;
-		const linkedPlugin = metadata.linkedPluginId;
-		const category = metadata.category ?? "custom";
-		const corePluginId = metadata.corePluginId;
-
-		result.push({
-			id: skillName,
-			displayName,
-			description: metadata.frontmatter.description,
-			enabled: agentState?.enabled ?? true,
-			category,
-			corePluginId,
-			linkedPluginId: linkedPlugin,
-		});
-	}
-
-	return result;
-});
-
-// Group skills by category
-const coreSkills = $derived(skills.filter((s) => s.category === "core"));
-const pluginSkills = $derived(skills.filter((s) => s.category === "plugin"));
-const customSkills = $derived(skills.filter((s) => s.category === "custom"));
-
-// Refresh skills list from SkillsService
-async function refreshSkillsList() {
-	await plugin.skillsService?.discoverSkills();
-	skillsRefreshCounter++;
-}
-
-onMount(() => {
-	// Initial refresh to ensure skills are loaded
-	refreshSkillsList();
-});
-
-function openSkillModal(pluginId: string) {
-	if (!selectedAgent) return;
-	const modal = new SkillModal(plugin, pluginId, () => {
-		refreshSkillsList();
-		applyChanges();
-	});
-	modal.open();
-}
-
-function openAddSkillModal() {
-	const modal = new AddSkillModal(plugin, selectedAgentId, async () => {
-		await refreshSkillsList();
-		await applyChanges();
-	});
-	modal.open();
-}
-
-function toggleSkill(skillId: string, newEnabled: boolean) {
-	const skill = skills.find((s) => s.id === skillId);
-	if (!skill) return;
-
-	// Check plugin installation for linked skills
-	if (skill.category !== "custom") {
-		// This is a plugin-linked skill, check installation
-		const skillsService = plugin.skillsService;
-		const metadata = skillsService?.getCachedSkills().get(skillId);
-		const linkedPlugin = metadata?.linkedPluginId;
-
-		if (linkedPlugin) {
-			const installed = plugin.agentManager?.isPluginInstalled(linkedPlugin) ?? false;
-			const enabled = plugin.agentManager?.isPluginEnabled(linkedPlugin) ?? false;
-
-			if (!installed) {
-				new Notice(`Please install the ${skill.displayName} plugin first.`);
-				return;
-			}
-			if (!enabled) {
-				new Notice(`Please enable the ${skill.displayName} plugin in Obsidian settings first.`);
-				return;
-			}
-		}
-	}
-
-	pluginData.setAgentSkillEnabled(selectedAgentId, skillId, newEnabled);
-	applyChanges();
-}
-
-async function deleteSkill(skillId: string) {
-	const skill = skills.find((s) => s.id === skillId);
-	if (!skill || skill.category !== "custom") return;
-
-	// Delete from file system via SkillsService
-	await plugin.skillsService?.deleteSkill(skillId);
-	await refreshSkillsList();
-	applyChanges();
-}
-
-function isPluginInstalled(pluginId: string): boolean {
-	return plugin.agentManager?.isPluginInstalled(pluginId) ?? false;
-}
-
-function isPluginEnabled(pluginId: string): boolean {
-	return plugin.agentManager?.isPluginEnabled(pluginId) ?? false;
-}
-
-function isInternalPluginEnabled(pluginId: string): boolean {
-	const checker = plugin.agentManager?.isInternalPluginEnabled;
-	if (typeof checker !== "function") {
-		return false;
-	}
-	return checker.call(plugin.agentManager, pluginId);
-}
-
-/**
- * Check if a skill's required plugin (community or core) is available.
- */
-function isSkillPluginAvailable(skill: SkillDisplayInfo): boolean {
-	if (skill.corePluginId) {
-		return isInternalPluginEnabled(skill.corePluginId);
-	}
-	if (skill.linkedPluginId) {
-		return isPluginEnabled(skill.linkedPluginId);
-	}
-	return true; // Custom skills have no plugin dependency
-}
-
-/**
- * Check if a skill's required plugin is installed (community plugins only).
- */
-function isSkillPluginInstalled(skill: SkillDisplayInfo): boolean {
-	if (skill.corePluginId) {
-		return true; // Core plugins are always "installed"
-	}
-	if (skill.linkedPluginId) {
-		return isPluginInstalled(skill.linkedPluginId);
-	}
-	return true;
-}
-
-/**
- * Get the linked plugin ID for a skill (if any).
- * Returns the linkedPluginId from SkillsService metadata.
- */
-function getSkillLinkedPlugin(skillName: string): string | undefined {
-	return plugin.skillsService?.getCachedSkills().get(skillName)?.linkedPluginId;
-}
-
-function openPluginPage(pluginId: string) {
-	if (pluginId === "math-latex") return;
-	window.open(`obsidian://show-plugin?id=${pluginId}`);
-}
-
-// ============================================================================
-// Built-in Tools
-// ============================================================================
-
-interface ToolInfo {
-	id: BuiltInToolId;
-	defaultName: string;
-	defaultDescription: string;
-	requiresPlugin?: {
-		id: string;
-		name: string;
-	};
-}
-
-const TOOLS: ToolInfo[] = [
-	{
-		id: "search_notes",
-		defaultName: "Search Notes",
-		defaultDescription: "Search through your Obsidian notes by keyword. Returns matching file names and metadata.",
-	},
-	{
-		id: "read_content",
-		defaultName: "Read Content",
-		defaultDescription:
-			"Read notes and vault files by path or wiki link. Supports markdown/text files and PDF text extraction. Images must be attached in chat.",
-	},
-	{
-		id: "get_all_tags",
-		defaultName: "Get All Tags",
-		defaultDescription: "Retrieve a list of all tags used in the vault.",
-	},
-	{
-		id: "get_properties",
-		defaultName: "Get Properties",
-		defaultDescription: "Retrieve frontmatter properties from notes or list all property keys in the vault.",
-	},
-	{
-		id: "execute_javascript",
-		defaultName: "Execute JavaScript",
-		defaultDescription:
-			"Run isolated JavaScript for calculations and data transformation. Use return for the final value and console.log for intermediate output.",
-	},
-	{
-		id: "execute_dataview_query",
-		defaultName: "Execute Dataview Query",
-		defaultDescription: "Execute Obsidian Dataview queries (DQL) and return results.",
-		requiresPlugin: {
-			id: "dataview",
-			name: "Dataview",
-		},
-	},
-	{
-		id: "manage_notes",
-		defaultName: "Manage Notes",
-		defaultDescription:
-			"Create, update, or delete markdown notes in one staged batch. Related note operations can be proposed together for user approval.",
-	},
-];
-
-function getToolDisplayName(toolId: BuiltInToolId): string {
-	const config = selectedAgent?.toolsConfig[toolId];
-	const defaultTool = TOOLS.find((t) => t.id === toolId);
-	const name = config?.name ?? defaultTool?.defaultName ?? toolId;
-	if (name.includes("_")) {
-		return name
-			.split("_")
-			.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-			.join(" ");
-	}
-	return name;
-}
-
-function getToolDescription(toolId: BuiltInToolId): string {
-	const config = selectedAgent?.toolsConfig[toolId];
-	const defaultTool = TOOLS.find((t) => t.id === toolId);
-	return config?.description ?? defaultTool?.defaultDescription ?? "";
-}
-
-function handleToolToggle(toolId: BuiltInToolId) {
-	pluginData.toggleAgentToolEnabled(selectedAgentId, toolId);
-	applyChanges();
-}
-
-function getToolEnabled(toolId: BuiltInToolId): boolean {
-	return pluginData.isAgentToolEnabled(selectedAgentId, toolId);
-}
-
-function openToolConfig(toolId: BuiltInToolId) {
-	const modal = new ToolConfigModal(
-		plugin,
-		toolId,
-		() => {
-			applyChanges();
-		},
-		{
-			agentId: selectedAgentId,
-			getToolConfig: () => selectedAgent?.toolsConfig[toolId],
-			updateToolConfig: (config) => {
-				pluginData.updateAgentToolConfig(selectedAgentId, toolId, config);
-			},
-		},
-	);
-	modal.open();
-}
-
-// ============================================================================
-// MCP Servers
-// ============================================================================
-
-let mcpServerIds = $derived(selectedAgent ? Object.keys(selectedAgent.mcpServers) : []);
-
-interface MCPToolInfo {
-	name: string;
-	description?: string;
-}
-
-interface MCPServerToolsState {
-	loading: boolean;
-	error: string | null;
-	tools: MCPToolInfo[];
-}
-
-let mcpServerTools = $state<Record<string, MCPServerToolsState>>({});
-let expandedServerId = $state<string | null>(null);
-
-function openAddMCPServer() {
-	const modal = new MCPServerModal(
-		plugin,
-		null,
-		null,
-		(serverId: string, config: MCPServerConfig) => {
-			pluginData.setAgentMCPServer(selectedAgentId, serverId, config);
-			applyChanges();
-		},
-		{ hasServer: (serverId: string) => Boolean(selectedAgent?.mcpServers[serverId]) },
-	);
-	modal.open();
-}
-
-function openEditMCPServer(serverId: string) {
-	const config = selectedAgent?.mcpServers[serverId];
-	if (config) {
-		const modal = new MCPServerModal(
-			plugin,
-			serverId,
-			config,
-			(newServerId: string, updatedConfig: MCPServerConfig) => {
-				// If ID changed, delete old entry
-				if (newServerId !== serverId) {
-					pluginData.deleteAgentMCPServer(selectedAgentId, serverId);
-				}
-				// Check if this is a deletion (enabled: false indicates deletion from handleDelete)
-				if (!updatedConfig.enabled && newServerId === serverId) {
-					pluginData.deleteAgentMCPServer(selectedAgentId, serverId);
-				} else {
-					pluginData.setAgentMCPServer(selectedAgentId, newServerId, updatedConfig);
-				}
-				applyChanges();
-			},
-			{ hasServer: (candidateId: string) => Boolean(selectedAgent?.mcpServers[candidateId]) },
-		);
-		modal.open();
-	}
-}
-
-function toggleMCPServer(serverId: string) {
-	pluginData.toggleAgentMCPServerEnabled(selectedAgentId, serverId);
-	applyChanges();
-}
-
-function getMCPServerConfig(serverId: string): MCPServerConfig | undefined {
-	return selectedAgent?.mcpServers[serverId];
-}
-
-function buildMCPConfig(serverId: string, config: MCPServerConfig) {
-	if (config.transport === "stdio") {
-		return {
-			mcpServers: {
-				[serverId]: {
-					transport: "stdio" as const,
-					command: config.command,
-					args: config.args,
-					env: config.env,
-				},
-			},
-		};
-	}
-	if (config.transport === "http") {
-		return {
-			mcpServers: {
-				[serverId]: {
-					transport: "http" as const,
-					url: config.url,
-					headers: config.headers,
-				},
-			},
-		};
-	}
-	throw new Error(`Unsupported MCP transport: ${(config as { transport: string }).transport}`);
-}
-
-async function fetchServerTools(serverId: string) {
-	const config = selectedAgent?.mcpServers[serverId];
-	if (!config) return;
-
-	mcpServerTools[serverId] = { loading: true, error: null, tools: [] };
-
-	try {
-		const windowWithFetch = window as Window & { _originalFetch?: typeof fetch };
-		const needsPatch = !windowWithFetch._originalFetch;
-
-		if (needsPatch) {
-			windowWithFetch._originalFetch = window.fetch;
-			window.fetch = createObsidianFetch(windowWithFetch._originalFetch);
-		}
-
-		try {
-			const mcpConfig = buildMCPConfig(serverId, config);
-			const mcpClient = new MultiServerMCPClient(mcpConfig);
-			const tools = await mcpClient.getTools();
-
-			mcpServerTools[serverId] = {
-				loading: false,
-				error: null,
-				tools: tools.map((t) => ({
-					name: t.name,
-					description: (t as { description?: string }).description,
-				})),
-			};
-		} finally {
-			if (needsPatch && windowWithFetch._originalFetch) {
-				window.fetch = windowWithFetch._originalFetch;
-				windowWithFetch._originalFetch = undefined;
-			}
-		}
-	} catch (err) {
-		mcpServerTools[serverId] = {
-			loading: false,
-			error: err instanceof Error ? err.message : "Failed to fetch tools",
-			tools: [],
-		};
-	}
-}
-
-function toggleToolsList(serverId: string) {
-	if (expandedServerId === serverId) {
-		expandedServerId = null;
-	} else {
-		expandedServerId = serverId;
-		if (!mcpServerTools[serverId] || mcpServerTools[serverId].error) {
-			fetchServerTools(serverId);
-		}
-	}
-}
-
-function getServerToolsState(serverId: string): MCPServerToolsState | undefined {
-	return mcpServerTools[serverId];
-}
+  import { MultiServerMCPClient } from "@langchain/mcp-adapters";
+  import { Notice, type TFolder } from "obsidian";
+  import { onMount } from "svelte";
+  import { AddSkillModal } from "../../components/modal/AddSkillModal";
+  import FolderSuggest from "../../components/modal/FolderSuggest.svelte";
+  import { MCPServerModal } from "../../components/modal/MCPServerModal";
+  import { ModelSelectionModal } from "../../components/modal/ModelSelectionModal";
+  import { SkillModal } from "../../components/modal/SkillModal";
+  import { SystemPromptModal } from "../../components/modal/SystemPromptModal";
+  import { ToolConfigModal } from "../../components/modal/ToolConfigModal";
+  import SettingGroup from "../../components/settings/SettingGroup.svelte";
+  import SettingItem from "../../components/settings/SettingItem.svelte";
+  import Button from "../../components/ui/Button.svelte";
+  import Dropdown from "../../components/ui/Dropdown.svelte";
+  import Icon from "../../components/ui/Icon.svelte";
+  import IconButton from "../../components/ui/IconButton.svelte";
+  import Text from "../../components/ui/Text.svelte";
+  import Toggle from "../../components/ui/Toggle.svelte";
+  import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
+  import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
+  import { createObsidianFetch } from "../../lib/obsidianFetch";
+  import type {
+    AgentColor,
+    AgentConfig,
+    BuiltInToolId,
+    ChatOpenLocation,
+    MCPServerConfig,
+    SkillDisplayInfo,
+  } from "../../types/plugin";
+  import { getProviderDefinition } from "../../providers/index";
+  import type { ChatModel } from "../../stores/chatStore.svelte";
+  import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
+  import { Logger } from "../../utils/logging";
+
+  const pluginData = getData();
+  const plugin = getPlugin();
+  const models = useAvailableModels();
+
+  const diffViewModeOptions = [
+    { display: "Two Pane (rendered markdown)", value: "two-pane" as const },
+    { display: "Word Diff (inline text)", value: "word-diff" as const },
+  ];
+
+  const chatOpenLocationOptions: { display: string; value: ChatOpenLocation }[] = [
+    { display: "Main area (tab)", value: "tab" },
+    { display: "Left sidebar", value: "left" },
+    { display: "Right sidebar", value: "right" },
+  ];
+
+  // Helper to get all folders for folder suggestion
+  function suggestFolders(): TFolder[] {
+    return plugin.app.vault.getAllFolders(true);
+  }
+
+  // Available agent colors matching Obsidian theme
+  const AGENT_COLORS: { value: AgentColor | "none"; label: string; cssVar: string }[] = [
+    { value: "none", label: "None", cssVar: "" },
+    { value: "red", label: "Red", cssVar: "--color-red" },
+    { value: "orange", label: "Orange", cssVar: "--color-orange" },
+    { value: "yellow", label: "Yellow", cssVar: "--color-yellow" },
+    { value: "green", label: "Green", cssVar: "--color-green" },
+    { value: "cyan", label: "Cyan", cssVar: "--color-cyan" },
+    { value: "blue", label: "Blue", cssVar: "--color-blue" },
+    { value: "purple", label: "Purple", cssVar: "--color-purple" },
+    { value: "pink", label: "Pink", cssVar: "--color-pink" },
+  ];
+
+  // Currently selected agent for editing
+  let selectedAgentId = $state<string>(DEFAULT_AGENT_ID);
+
+  // Get agents object reactively (triggers when agents change)
+  let agents = $derived(pluginData.agents);
+
+  // Get all agent IDs reactively from the agents object
+  let agentIds = $derived(Object.keys(agents));
+
+  // Get selected agent config
+  let selectedAgent = $derived(agents[selectedAgentId]);
+
+  // Dropdown options for agent selector
+  const agentDropdownOptions = $derived(
+    agentIds.map((id) => {
+      const agent = agents[id];
+      const isDefault = id === pluginData.defaultAgentId;
+      return {
+        value: id,
+        display: agent ? `${agent.name}${isDefault ? " (Default)" : ""}` : id,
+      };
+    }),
+  );
+
+  // Auto-apply changes by reinitializing the agent
+  async function applyChanges() {
+    try {
+      await plugin.agentManager.reinitialize();
+    } catch (error) {
+      Logger.error("Failed to reinitialize agent:", error);
+    }
+  }
+
+  // ============================================================================
+  // Agent List Functions
+  // ============================================================================
+
+  function createNewAgent() {
+    const agent = pluginData.createAgent("New Agent");
+    selectedAgentId = agent.id;
+  }
+
+  function deleteSelectedAgent() {
+    if (selectedAgentId === DEFAULT_AGENT_ID) {
+      new Notice("Cannot delete the built-in default agent");
+      return;
+    }
+    try {
+      pluginData.deleteAgent(selectedAgentId);
+      selectedAgentId = pluginData.defaultAgentId ?? DEFAULT_AGENT_ID;
+      applyChanges();
+    } catch (err) {
+      new Notice(err instanceof Error ? err.message : "Failed to delete agent");
+    }
+  }
+
+  function duplicateAgent() {
+    if (!selectedAgent) return;
+    const newAgent = pluginData.duplicateAgent(selectedAgentId, `${selectedAgent.name} (Copy)`);
+    selectedAgentId = newAgent.id;
+  }
+
+  function setAsDefaultAgent() {
+    try {
+      pluginData.setDefaultAgentId(selectedAgentId);
+      new Notice(`${selectedAgent?.name} is now the default agent`);
+    } catch (err) {
+      new Notice(err instanceof Error ? err.message : "Failed to set default agent");
+    }
+  }
+
+  function clearDefaultAgent() {
+    pluginData.clearDefaultAgent();
+    new Notice("Default cleared. New chats will use the last selected agent.");
+  }
+
+  // ============================================================================
+  // General Settings
+  // ============================================================================
+
+  function updateAgentName(name: string) {
+    if (!selectedAgentId) return;
+    pluginData.updateAgent(selectedAgentId, { name });
+  }
+
+  function updateAgentColor(color: AgentColor | "none") {
+    if (!selectedAgentId) return;
+    pluginData.updateAgent(selectedAgentId, { color: color === "none" ? undefined : color });
+  }
+
+  // Model dropdown options - grouped by provider
+  const modelOptions = $derived(
+    models.modelOptions.map((opt) => ({
+      label: opt.label,
+      value: opt.value,
+      group: opt.chatModel.provider,
+      chatModel: opt.chatModel,
+    })),
+  );
+
+  // Get selected model value for current agent
+  let selectedModelValue = $derived.by(() => {
+    if (!selectedAgent?.chatModel) return "";
+    return `${selectedAgent.chatModel.provider}:${selectedAgent.chatModel.model}`;
+  });
+
+  // Get display info for current model
+  const currentModelDisplay = $derived.by(() => {
+    if (!selectedAgent?.chatModel) return null;
+    const provider = selectedAgent.chatModel.provider;
+    const model = selectedAgent.chatModel.model;
+    const providerDef = getProviderDefinition(provider, pluginData.getAllCustomProviderMeta());
+    return {
+      model,
+      providerName: providerDef?.displayName ?? provider,
+      logo:
+        providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon,
+    };
+  });
+
+  function openModelSelectionModal() {
+    if (!selectedAgentId) return;
+    const currentSelection = selectedAgent?.chatModel
+      ? { provider: selectedAgent.chatModel.provider, model: selectedAgent.chatModel.model }
+      : null;
+
+    const modal = new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
+      if (selected && selectedAgentId) {
+        const chatModel: ChatModel = {
+          provider: selected.provider,
+          model: selected.model,
+          modelConfig: { contextWindow: 128000 }, // Default, will be enriched from models.dev
+        };
+        pluginData.updateAgent(selectedAgentId, { chatModel });
+        applyChanges();
+      }
+    });
+    modal.open();
+  }
+
+  function handleModelSelect(value: string) {
+    const opt = models.modelOptions.find((o) => o.value === value);
+    if (opt && selectedAgentId) {
+      pluginData.updateAgent(selectedAgentId, { chatModel: opt.chatModel as ChatModel });
+      applyChanges();
+    }
+  }
+
+  function getProviderId(value: string): string {
+    const opt = models.modelOptions.find((o) => o.value === value);
+    return opt?.chatModel.provider ?? "";
+  }
+
+  // ============================================================================
+  // System Prompt
+  // ============================================================================
+
+  function openSystemPromptModal() {
+    if (!selectedAgent) return;
+    const modal = new SystemPromptModal(plugin, {
+      getPrompt: () => selectedAgent?.systemPrompt ?? "",
+      setPrompt: (prompt: string) => {
+        pluginData.updateAgent(selectedAgentId, { systemPrompt: prompt });
+        applyChanges();
+      },
+      viewFinalPrompt: () => {
+        modal.close();
+        openRenderedSystemPromptModal();
+      },
+    });
+    modal.open();
+  }
+
+  function openRenderedSystemPromptModal() {
+    if (!selectedAgent) return;
+    const modal = new SystemPromptModal(
+      plugin,
+      {
+        getPrompt: async () => plugin.agentManager.assembleSystemPrompt(),
+      },
+      {
+        title: "Final System Prompt",
+        description:
+          "Preview the fully assembled system prompt after dynamic tool guidance and skills are injected.",
+        readOnly: true,
+      },
+    );
+    modal.open();
+  }
+
+  // ============================================================================
+  // Skills
+  // ============================================================================
+
+  // Reactive counter to trigger re-fetch of file-based skills
+  let skillsRefreshCounter = $state(0);
+
+  // Get file-based skills from SkillsService and merge with agent enable state
+  const skills = $derived.by(() => {
+    // Depend on refresh counter to trigger re-derivation
+    const _refresh = skillsRefreshCounter;
+
+    const skillsService = plugin.skillsService;
+    if (!skillsService?.isDiscovered()) {
+      return [];
+    }
+
+    const cachedSkills = skillsService.getCachedSkills();
+    const agentSkills = selectedAgent?.skills ?? {};
+
+    // Convert file-based skills to SkillDisplayInfo format for UI
+    const result: SkillDisplayInfo[] = [];
+    for (const [skillName, metadata] of cachedSkills) {
+      const agentState = agentSkills[skillName];
+      const displayName = metadata.frontmatter.metadata?.displayName ?? metadata.frontmatter.name;
+      const linkedPlugin = metadata.linkedPluginId;
+      const category = metadata.category ?? "custom";
+      const corePluginId = metadata.corePluginId;
+
+      result.push({
+        id: skillName,
+        displayName,
+        description: metadata.frontmatter.description,
+        enabled: agentState?.enabled ?? true,
+        category,
+        corePluginId,
+        linkedPluginId: linkedPlugin,
+      });
+    }
+
+    return result;
+  });
+
+  // Group skills by category
+  const coreSkills = $derived(skills.filter((s) => s.category === "core"));
+  const pluginSkills = $derived(skills.filter((s) => s.category === "plugin"));
+  const customSkills = $derived(skills.filter((s) => s.category === "custom"));
+
+  // Refresh skills list from SkillsService
+  async function refreshSkillsList() {
+    await plugin.skillsService?.discoverSkills();
+    skillsRefreshCounter++;
+  }
+
+  onMount(() => {
+    // Initial refresh to ensure skills are loaded
+    refreshSkillsList();
+  });
+
+  function openSkillModal(pluginId: string) {
+    if (!selectedAgent) return;
+    const modal = new SkillModal(plugin, pluginId, () => {
+      refreshSkillsList();
+      applyChanges();
+    });
+    modal.open();
+  }
+
+  function openAddSkillModal() {
+    const modal = new AddSkillModal(plugin, selectedAgentId, async () => {
+      await refreshSkillsList();
+      await applyChanges();
+    });
+    modal.open();
+  }
+
+  function toggleSkill(skillId: string, newEnabled: boolean) {
+    const skill = skills.find((s) => s.id === skillId);
+    if (!skill) return;
+
+    // Check plugin installation for linked skills
+    if (skill.category !== "custom") {
+      // This is a plugin-linked skill, check installation
+      const skillsService = plugin.skillsService;
+      const metadata = skillsService?.getCachedSkills().get(skillId);
+      const linkedPlugin = metadata?.linkedPluginId;
+
+      if (linkedPlugin) {
+        const installed = plugin.agentManager?.isPluginInstalled(linkedPlugin) ?? false;
+        const enabled = plugin.agentManager?.isPluginEnabled(linkedPlugin) ?? false;
+
+        if (!installed) {
+          new Notice(`Please install the ${skill.displayName} plugin first.`);
+          return;
+        }
+        if (!enabled) {
+          new Notice(`Please enable the ${skill.displayName} plugin in Obsidian settings first.`);
+          return;
+        }
+      }
+    }
+
+    pluginData.setAgentSkillEnabled(selectedAgentId, skillId, newEnabled);
+    applyChanges();
+  }
+
+  async function deleteSkill(skillId: string) {
+    const skill = skills.find((s) => s.id === skillId);
+    if (!skill || skill.category !== "custom") return;
+
+    // Delete from file system via SkillsService
+    await plugin.skillsService?.deleteSkill(skillId);
+    await refreshSkillsList();
+    applyChanges();
+  }
+
+  function isPluginInstalled(pluginId: string): boolean {
+    return plugin.agentManager?.isPluginInstalled(pluginId) ?? false;
+  }
+
+  function isPluginEnabled(pluginId: string): boolean {
+    return plugin.agentManager?.isPluginEnabled(pluginId) ?? false;
+  }
+
+  function isInternalPluginEnabled(pluginId: string): boolean {
+    const checker = plugin.agentManager?.isInternalPluginEnabled;
+    if (typeof checker !== "function") {
+      return false;
+    }
+    return checker.call(plugin.agentManager, pluginId);
+  }
+
+  /**
+   * Check if a skill's required plugin (community or core) is available.
+   */
+  function isSkillPluginAvailable(skill: SkillDisplayInfo): boolean {
+    if (skill.corePluginId) {
+      return isInternalPluginEnabled(skill.corePluginId);
+    }
+    if (skill.linkedPluginId) {
+      return isPluginEnabled(skill.linkedPluginId);
+    }
+    return true; // Custom skills have no plugin dependency
+  }
+
+  /**
+   * Check if a skill's required plugin is installed (community plugins only).
+   */
+  function isSkillPluginInstalled(skill: SkillDisplayInfo): boolean {
+    if (skill.corePluginId) {
+      return true; // Core plugins are always "installed"
+    }
+    if (skill.linkedPluginId) {
+      return isPluginInstalled(skill.linkedPluginId);
+    }
+    return true;
+  }
+
+  /**
+   * Get the linked plugin ID for a skill (if any).
+   * Returns the linkedPluginId from SkillsService metadata.
+   */
+  function getSkillLinkedPlugin(skillName: string): string | undefined {
+    return plugin.skillsService?.getCachedSkills().get(skillName)?.linkedPluginId;
+  }
+
+  function openPluginPage(pluginId: string) {
+    if (pluginId === "math-latex") return;
+    window.open(`obsidian://show-plugin?id=${pluginId}`);
+  }
+
+  // ============================================================================
+  // Built-in Tools
+  // ============================================================================
+
+  interface ToolInfo {
+    id: BuiltInToolId;
+    defaultName: string;
+    defaultDescription: string;
+    requiresPlugin?: {
+      id: string;
+      name: string;
+    };
+  }
+
+  const TOOLS: ToolInfo[] = [
+    {
+      id: "search_notes",
+      defaultName: "Search Notes",
+      defaultDescription:
+        "Search through your Obsidian notes by keyword. Returns matching file names and metadata.",
+    },
+    {
+      id: "read_content",
+      defaultName: "Read Content",
+      defaultDescription:
+        "Read notes and vault files by path or wiki link. Supports markdown/text files and PDF text extraction. Images must be attached in chat.",
+    },
+    {
+      id: "get_all_tags",
+      defaultName: "Get All Tags",
+      defaultDescription: "Retrieve a list of all tags used in the vault.",
+    },
+    {
+      id: "get_properties",
+      defaultName: "Get Properties",
+      defaultDescription:
+        "Retrieve frontmatter properties from notes or list all property keys in the vault.",
+    },
+    {
+      id: "execute_javascript",
+      defaultName: "Execute JavaScript",
+      defaultDescription:
+        "Run isolated JavaScript for calculations and data transformation. Use return for the final value and console.log for intermediate output.",
+    },
+    {
+      id: "execute_dataview_query",
+      defaultName: "Execute Dataview Query",
+      defaultDescription: "Execute Obsidian Dataview queries (DQL) and return results.",
+      requiresPlugin: {
+        id: "dataview",
+        name: "Dataview",
+      },
+    },
+    {
+      id: "manage_notes",
+      defaultName: "Manage Notes",
+      defaultDescription:
+        "Create, update, or delete markdown notes in one staged batch. Related note operations can be proposed together for user approval.",
+    },
+  ];
+
+  function getToolDisplayName(toolId: BuiltInToolId): string {
+    const config = selectedAgent?.toolsConfig[toolId];
+    const defaultTool = TOOLS.find((t) => t.id === toolId);
+    const name = config?.name ?? defaultTool?.defaultName ?? toolId;
+    if (name.includes("_")) {
+      return name
+        .split("_")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+    }
+    return name;
+  }
+
+  function getToolDescription(toolId: BuiltInToolId): string {
+    const config = selectedAgent?.toolsConfig[toolId];
+    const defaultTool = TOOLS.find((t) => t.id === toolId);
+    return config?.description ?? defaultTool?.defaultDescription ?? "";
+  }
+
+  function handleToolToggle(toolId: BuiltInToolId) {
+    pluginData.toggleAgentToolEnabled(selectedAgentId, toolId);
+    applyChanges();
+  }
+
+  function getToolEnabled(toolId: BuiltInToolId): boolean {
+    return pluginData.isAgentToolEnabled(selectedAgentId, toolId);
+  }
+
+  function openToolConfig(toolId: BuiltInToolId) {
+    const modal = new ToolConfigModal(
+      plugin,
+      toolId,
+      () => {
+        applyChanges();
+      },
+      {
+        agentId: selectedAgentId,
+        getToolConfig: () => selectedAgent?.toolsConfig[toolId],
+        updateToolConfig: (config) => {
+          pluginData.updateAgentToolConfig(selectedAgentId, toolId, config);
+        },
+      },
+    );
+    modal.open();
+  }
+
+  // ============================================================================
+  // MCP Servers
+  // ============================================================================
+
+  let mcpServerIds = $derived(selectedAgent ? Object.keys(selectedAgent.mcpServers) : []);
+
+  interface MCPToolInfo {
+    name: string;
+    description?: string;
+  }
+
+  interface MCPServerToolsState {
+    loading: boolean;
+    error: string | null;
+    tools: MCPToolInfo[];
+  }
+
+  let mcpServerTools = $state<Record<string, MCPServerToolsState>>({});
+  let expandedServerId = $state<string | null>(null);
+
+  function openAddMCPServer() {
+    const modal = new MCPServerModal(
+      plugin,
+      null,
+      null,
+      (serverId: string, config: MCPServerConfig) => {
+        pluginData.setAgentMCPServer(selectedAgentId, serverId, config);
+        applyChanges();
+      },
+      { hasServer: (serverId: string) => Boolean(selectedAgent?.mcpServers[serverId]) },
+    );
+    modal.open();
+  }
+
+  function openEditMCPServer(serverId: string) {
+    const config = selectedAgent?.mcpServers[serverId];
+    if (config) {
+      const modal = new MCPServerModal(
+        plugin,
+        serverId,
+        config,
+        (newServerId: string, updatedConfig: MCPServerConfig) => {
+          // If ID changed, delete old entry
+          if (newServerId !== serverId) {
+            pluginData.deleteAgentMCPServer(selectedAgentId, serverId);
+          }
+          // Check if this is a deletion (enabled: false indicates deletion from handleDelete)
+          if (!updatedConfig.enabled && newServerId === serverId) {
+            pluginData.deleteAgentMCPServer(selectedAgentId, serverId);
+          } else {
+            pluginData.setAgentMCPServer(selectedAgentId, newServerId, updatedConfig);
+          }
+          applyChanges();
+        },
+        { hasServer: (candidateId: string) => Boolean(selectedAgent?.mcpServers[candidateId]) },
+      );
+      modal.open();
+    }
+  }
+
+  function toggleMCPServer(serverId: string) {
+    pluginData.toggleAgentMCPServerEnabled(selectedAgentId, serverId);
+    applyChanges();
+  }
+
+  function getMCPServerConfig(serverId: string): MCPServerConfig | undefined {
+    return selectedAgent?.mcpServers[serverId];
+  }
+
+  function buildMCPConfig(serverId: string, config: MCPServerConfig) {
+    if (config.transport === "stdio") {
+      return {
+        mcpServers: {
+          [serverId]: {
+            transport: "stdio" as const,
+            command: config.command,
+            args: config.args,
+            env: config.env,
+          },
+        },
+      };
+    }
+    if (config.transport === "http") {
+      return {
+        mcpServers: {
+          [serverId]: {
+            transport: "http" as const,
+            url: config.url,
+            headers: config.headers,
+          },
+        },
+      };
+    }
+    throw new Error(`Unsupported MCP transport: ${(config as { transport: string }).transport}`);
+  }
+
+  async function fetchServerTools(serverId: string) {
+    const config = selectedAgent?.mcpServers[serverId];
+    if (!config) return;
+
+    mcpServerTools[serverId] = { loading: true, error: null, tools: [] };
+
+    try {
+      const windowWithFetch = window as Window & { _originalFetch?: typeof fetch };
+      const needsPatch = !windowWithFetch._originalFetch;
+
+      if (needsPatch) {
+        windowWithFetch._originalFetch = window.fetch;
+        window.fetch = createObsidianFetch(windowWithFetch._originalFetch);
+      }
+
+      try {
+        const mcpConfig = buildMCPConfig(serverId, config);
+        const mcpClient = new MultiServerMCPClient(mcpConfig);
+        const tools = await mcpClient.getTools();
+
+        mcpServerTools[serverId] = {
+          loading: false,
+          error: null,
+          tools: tools.map((t) => ({
+            name: t.name,
+            description: (t as { description?: string }).description,
+          })),
+        };
+      } finally {
+        if (needsPatch && windowWithFetch._originalFetch) {
+          window.fetch = windowWithFetch._originalFetch;
+          windowWithFetch._originalFetch = undefined;
+        }
+      }
+    } catch (err) {
+      mcpServerTools[serverId] = {
+        loading: false,
+        error: err instanceof Error ? err.message : "Failed to fetch tools",
+        tools: [],
+      };
+    }
+  }
+
+  function toggleToolsList(serverId: string) {
+    if (expandedServerId === serverId) {
+      expandedServerId = null;
+    } else {
+      expandedServerId = serverId;
+      if (!mcpServerTools[serverId] || mcpServerTools[serverId].error) {
+        fetchServerTools(serverId);
+      }
+    }
+  }
+
+  function getServerToolsState(serverId: string): MCPServerToolsState | undefined {
+    return mcpServerTools[serverId];
+  }
 </script>
 
 <div class="agents-settings">
@@ -695,6 +711,15 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
         dropdown={diffViewModeOptions}
         selected={pluginData.diffViewMode}
         onchange={(v) => (pluginData.diffViewMode = v)}
+      />
+    </SettingItem>
+
+    <SettingItem name="Open new chat in" desc="Where to open new chat windows">
+      <Dropdown
+        type="options"
+        dropdown={chatOpenLocationOptions}
+        selected={pluginData.chatOpenLocation}
+        onchange={(val) => (pluginData.chatOpenLocation = val)}
       />
     </SettingItem>
   </SettingGroup>

@@ -8,6 +8,7 @@ import type {
 	AgentsConfig,
 	BuiltInToolId,
 	DefaultEmbedModel,
+	ChatOpenLocation,
 	DiffViewMode,
 	EmbeddingIndexConfig,
 	MCPServerConfig,
@@ -323,6 +324,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	isAutostart: false,
 	isChatComfy: false,
 	isOnboarded: false,
+	chatOpenLocation: "tab" as ChatOpenLocation,
 	lastActiveChatId: null,
 
 	// Debugging & telemetry
@@ -538,7 +540,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch {
 			// ignore
@@ -1131,6 +1133,16 @@ export class PluginDataStore {
 	}
 	set diffViewMode(val: DiffViewMode) {
 		this.#data.diffViewMode = val;
+		this.saveSettings();
+	}
+
+	// --- Chat Open Location ---
+
+	get chatOpenLocation(): ChatOpenLocation {
+		return this.#data.chatOpenLocation ?? "tab";
+	}
+	set chatOpenLocation(val: ChatOpenLocation) {
+		this.#data.chatOpenLocation = val;
 		this.saveSettings();
 	}
 
