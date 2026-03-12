@@ -9,6 +9,7 @@ Effective project management balances scope, time, and resources while keeping s
 Agile emphasizes iterative development, continuous feedback, and adaptive planning. Scrum and Kanban are the most widely adopted frameworks.
 
 ### Scrum Essentials
+
 - **Sprint planning** — selecting work items for a 2-week iteration
 - **Daily standups** — brief 15-minute check-ins on progress and blockers
 - **Sprint review** — demonstrating completed work to stakeholders
