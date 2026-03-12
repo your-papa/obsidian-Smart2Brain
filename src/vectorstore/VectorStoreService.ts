@@ -82,7 +82,6 @@ interface IndexInstance {
 	indexId: string;
 	store: VectorStore;
 	syncManager: FileSyncManager;
-	miniSearch: MiniSearchService;
 	embeddings: EmbeddingsInterface | null;
 	currentProviderId: string | null;
 	currentModelId: string | null;
@@ -136,13 +135,11 @@ export class VectorStoreService {
 		const store = createVectorStore(this.vaultId, indexId);
 		const filePath = `${this.configDir}/plugins/${this.plugin.manifest.id}/data/${getIndexFilePath(indexId)}`;
 		const syncManager = new FileSyncManager(this.plugin.app.vault.adapter, filePath);
-		const miniSearch = new MiniSearchService(this.vaultId, indexId);
 
 		return {
 			indexId,
 			store,
 			syncManager,
-			miniSearch,
 			embeddings: null,
 			currentProviderId: null,
 			currentModelId: null,
@@ -309,8 +306,6 @@ export class VectorStoreService {
 
 		// Open databases
 		await inst.store.open();
-		await inst.miniSearch.open();
-		await inst.miniSearch.loadFromStorage();
 
 		// Try to load from per-index file
 		const serialized = await inst.syncManager.loadFromFile();
@@ -529,16 +524,6 @@ export class VectorStoreService {
 			if (!vaultPaths.has(path)) orphanedPaths.push(path);
 		}
 
-		// Check if MiniSearch is out of sync with the vector store
-		const miniSearchCount = inst.miniSearch.documentCount;
-		const indexedCount = indexedDocs.length;
-		if (miniSearchCount < indexedCount) {
-			Logger.log(
-				`[VectorStore] MiniSearch out of sync for ${inst.indexId}: ${miniSearchCount} vs ${indexedCount} in store. Rebuilding MiniSearch...`,
-			);
-			await this.rebuildMiniSearch(inst);
-		}
-
 		const totalUpdates = missingFiles.length + staleFiles.length + orphanedPaths.length;
 		if (totalUpdates === 0) {
 			Logger.log(`[VectorStore] Index ${inst.indexId} is up to date`);
@@ -637,7 +622,6 @@ export class VectorStoreService {
 							vector: new Float32Array(vectors[j]),
 						};
 						await inst.store.upsert(doc);
-						inst.miniSearch.addDocument(entry.file.path, entry.file.basename, entry.content);
 					}
 					indexed += batch.length;
 					this.updateInstanceProgress(inst, { indexed: batchEnd });
@@ -661,7 +645,6 @@ export class VectorStoreService {
 								vector: new Float32Array(vector),
 							};
 							await inst.store.upsert(doc);
-							inst.miniSearch.addDocument(entry.file.path, entry.file.basename, entry.content);
 							indexed++;
 							this.updateInstanceProgress(inst, { indexed: inst.progress.indexed + 1 });
 						} catch (entryError) {
@@ -824,7 +807,6 @@ export class VectorStoreService {
 				continue;
 			}
 			await inst.store.remove(file.path);
-			inst.miniSearch.removeDocument(file.path);
 			this.scheduleInstanceSave(inst);
 			this.notifyStatsChanged(inst);
 		}
@@ -855,7 +837,6 @@ export class VectorStoreService {
 				continue;
 			}
 			await inst.store.remove(oldPath);
-			inst.miniSearch.removeDocument(oldPath);
 			if (inst.embeddings) {
 				await this.indexDocumentForInstance(inst, file);
 			}
@@ -1074,7 +1055,6 @@ export class VectorStoreService {
 							vector: new Float32Array(vectors[j]),
 						};
 						await inst.store.upsert(doc);
-						inst.miniSearch.addDocument(entry.file.path, entry.file.basename, entry.content);
 						indexedFiles.push(entry.file.path);
 					}
 
@@ -1104,7 +1084,6 @@ export class VectorStoreService {
 								vector: new Float32Array(vector),
 							};
 							await inst.store.upsert(doc);
-							inst.miniSearch.addDocument(entry.file.path, entry.file.basename, entry.content);
 							indexedFiles.push(entry.file.path);
 							this.updateInstanceProgress(inst, { indexed: inst.progress.indexed + 1 });
 						} catch (entryError) {
@@ -1256,7 +1235,6 @@ export class VectorStoreService {
 			};
 
 			await inst.store.upsert(doc);
-			inst.miniSearch.addDocument(file.path, file.basename, content);
 			this.scheduleInstanceSave(inst);
 
 			Logger.log(`[VectorStore] Indexed: ${file.path} (${inst.indexId})`);
@@ -1268,29 +1246,10 @@ export class VectorStoreService {
 	}
 
 	/**
-	 * Perform lexical (full-text) search using MiniSearch.
+	 * Perform lexical (full-text) search using the standalone MiniSearch.
 	 */
 	async lexicalSearch(query: string, topK: number, filter?: SearchFilter): Promise<VectorSearchResult[]> {
-		// Prefer the search index's MiniSearch, fall back to standalone
-		const data = getData();
-		const indexId = data.searchEmbedIndex;
-		let miniSearch: MiniSearchService | null = null;
-
-		if (indexId) {
-			const inst = this.instances.get(indexId);
-			if (inst) miniSearch = inst.miniSearch;
-		}
-
-		// Fall back to first instance
-		if (!miniSearch) {
-			const firstInst = this.instances.values().next().value;
-			if (firstInst) miniSearch = firstInst.miniSearch;
-		}
-
-		// Fall back to standalone MiniSearch (always available)
-		if (!miniSearch) miniSearch = this.standaloneMiniSearch;
-
-		const results = miniSearch.search(query, topK * (filter ? 3 : 1));
+		const results = this.standaloneMiniSearch.search(query, topK * (filter ? 3 : 1));
 		return this.applyFilterToLexicalResults(results, topK, filter);
 	}
 
@@ -1298,25 +1257,7 @@ export class VectorStoreService {
 	 * Browse all indexed documents with optional filtering.
 	 */
 	async browseDocuments(topK: number, filter?: SearchFilter): Promise<VectorSearchResult[]> {
-		// Prefer the search index's MiniSearch, fall back to standalone
-		const data = getData();
-		const indexId = data.searchEmbedIndex;
-		let miniSearch: MiniSearchService | null = null;
-
-		if (indexId) {
-			const inst = this.instances.get(indexId);
-			if (inst) miniSearch = inst.miniSearch;
-		}
-
-		if (!miniSearch) {
-			const firstInst = this.instances.values().next().value;
-			if (firstInst) miniSearch = firstInst.miniSearch;
-		}
-
-		// Fall back to standalone MiniSearch (always available)
-		if (!miniSearch) miniSearch = this.standaloneMiniSearch;
-
-		const results = miniSearch.browse(topK * (filter ? 3 : 1));
+		const results = this.standaloneMiniSearch.browse(topK * (filter ? 3 : 1));
 		return this.applyFilterToLexicalResults(results, topK, filter);
 	}
 
@@ -1367,10 +1308,10 @@ export class VectorStoreService {
 	}
 
 	/**
-	 * Search for similar documents with optional filtering.
+	 * Semantic (embedding-based) search for similar documents with optional filtering.
 	 * Uses the search embed index by default.
 	 */
-	async search(
+	async semanticSearch(
 		query: string,
 		topK: number,
 		threshold?: number,
@@ -1472,34 +1413,6 @@ export class VectorStoreService {
 		const docs = await inst.store.getAllSerialized();
 		const index = FileSyncManager.createIndex(docs, inst.currentProviderId ?? "", inst.currentModelId ?? "");
 		await inst.syncManager.saveToFile(index);
-		await inst.miniSearch.flush();
-	}
-
-	/**
-	 * Rebuild MiniSearch from vault files that are present in the HNSW store.
-	 * Used when MiniSearch falls out of sync (e.g. IndexedDB data was lost).
-	 */
-	private async rebuildMiniSearch(inst: IndexInstance): Promise<void> {
-		const { vault } = this.plugin.app;
-		const indexedDocs = await inst.store.getAll();
-		const indexedPaths = new Set(indexedDocs.map((d) => d.path));
-
-		inst.miniSearch.clear();
-
-		for (const path of indexedPaths) {
-			const file = vault.getFileByPath(path);
-			if (file instanceof TFile) {
-				try {
-					const content = await vault.cachedRead(file);
-					inst.miniSearch.addDocument(file.path, file.basename, content);
-				} catch (error) {
-					Logger.error(`[VectorStore] Failed to read ${path} for MiniSearch rebuild:`, error);
-				}
-			}
-		}
-
-		await inst.miniSearch.flush();
-		Logger.log(`[VectorStore] Rebuilt MiniSearch for ${inst.indexId}: ${inst.miniSearch.documentCount} documents`);
 	}
 
 	/**
@@ -1551,7 +1464,7 @@ export class VectorStoreService {
 		const inst = await this.getOrCreateInstance(resolvedId);
 
 		const count = await inst.store.count();
-		const lexicalCount = inst.miniSearch.documentCount;
+		const lexicalCount = this.standaloneMiniSearch.documentCount;
 		const metadata = await inst.store.getMetadata();
 		const model = this.getModelForInstance(inst);
 		const isReady = this.isInitialized && model !== null;
@@ -1752,20 +1665,16 @@ export class VectorStoreService {
 		const inst = this.instances.get(indexId);
 		if (inst) {
 			await inst.syncManager.flush();
-			await inst.miniSearch.flush();
 			await inst.store.clear();
 			await inst.store.close();
-			inst.miniSearch.close();
 			this.instances.delete(indexId);
 		}
 
-		// Delete IndexedDB databases (HNSW + MiniSearch + HNSW internal index)
+		// Delete IndexedDB databases (HNSW + HNSW internal index)
 		const hnswDbName = getDbName("s2b-hnsw", this.vaultId, indexId);
-		const miniSearchDbName = getDbName("s2b-minisearch", this.vaultId, indexId);
 		try {
 			indexedDB.deleteDatabase(hnswDbName);
 			indexedDB.deleteDatabase(`${hnswDbName}-hnsw-index`);
-			indexedDB.deleteDatabase(miniSearchDbName);
 		} catch (error) {
 			Logger.error(`[VectorStore] Failed to delete IndexedDB databases for ${indexId}:`, error);
 		}
@@ -1802,9 +1711,7 @@ export class VectorStoreService {
 			}
 			for (const inst of this.instances.values()) {
 				await inst.syncManager.flush();
-				await inst.miniSearch.flush();
 				await inst.store.close();
-				inst.miniSearch.close();
 			}
 			this.instances.clear();
 

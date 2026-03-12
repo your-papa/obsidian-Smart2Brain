@@ -138,7 +138,7 @@ async function embeddingsSearch(app: App, query: string, filter?: SearchFilter):
 		threshold = modelConfig?.similarityThreshold ?? 0;
 	}
 
-	const results = await vectorStore.search(query, 100, threshold, filter);
+	const results = await vectorStore.semanticSearch(query, 100, threshold, filter);
 
 	return results.map((r) => ({
 		path: r.path,
