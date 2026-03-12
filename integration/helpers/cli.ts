@@ -212,15 +212,21 @@ export function isProviderConfigured(): boolean {
 }
 
 /**
- * Check if a search index (embedding index with MiniSearch) is available.
- * Lexical/hybrid search requires at least one initialized index instance
- * with an indexed MiniSearch. Returns false on a clean vault without providers.
+ * Wait until the standalone MiniSearch (provider-independent BM25 index)
+ * has finished indexing vault files. Call this before any lexical search test.
  */
-export function isSearchIndexAvailable(): boolean {
-	const result = obsidianEval(
-		`(function(){ var vs = ${PLUGIN}.vectorStoreService; if (!vs) return false; var iter = vs.instances ? vs.instances.values() : []; var item = iter.next ? iter.next() : {done:true}; if (item.done) return false; return item.value.miniSearch.documentCount > 0; })()`,
+export async function waitForStandaloneMiniSearch({ timeoutMs = 30_000, intervalMs = 500 } = {}): Promise<void> {
+	await waitForCondition(
+		() => {
+			const raw = obsidianEval(
+				`${PLUGIN}.vectorStoreService.standaloneMiniSearch.documentCount`,
+			);
+			const value = raw.startsWith("=> ") ? raw.slice(3) : raw;
+			return Number.parseInt(value, 10) > 0;
+		},
+		"standalone MiniSearch to be populated",
+		{ timeoutMs, intervalMs },
 	);
-	return result.includes("true");
 }
 
 /**

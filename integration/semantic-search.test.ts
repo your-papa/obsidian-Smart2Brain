@@ -5,33 +5,35 @@ import {
 	createNote,
 	deleteNote,
 	getErrors,
-	isSearchIndexAvailable,
+	isProviderConfigured,
 	obsidianEval,
 	pollEval,
 	sleep,
+	waitForStandaloneMiniSearch,
 } from "./helpers/cli.ts";
 import type {} from "vitest";
 
-const searchIndexAvailable = (() => {
+const providerAvailable = (() => {
 	try {
-		return isSearchIndexAvailable();
+		return isProviderConfigured();
 	} catch {
 		return false;
 	}
 })();
 
 describe("semantic search", () => {
-	beforeAll(() => {
+	beforeAll(async () => {
 		clearBuffers();
+		// Wait for the standalone MiniSearch to finish indexing vault files
+		await waitForStandaloneMiniSearch();
 	});
 
 	afterAll(() => {
 		clearBuffers();
 	});
 
-	// These tests require an embedding index with a populated MiniSearch.
-	// On a clean vault with no provider configured, lexical/hybrid search
-	// returns empty results because MiniSearch is tied to index instances.
+	// Lexical search tests use the standalone MiniSearch which is always
+	// populated from vault files, independent of embedding providers.
 	//
 	// Fixture notes in the test vault:
 	// - "Machine Learning Basics" (algorithms, supervised, neural networks)
@@ -41,7 +43,7 @@ describe("semantic search", () => {
 	// - "Obsidian Plugin Development" (TypeScript, commands, vault API)
 	// - "Project Management Notes" (agile, scrum, technical debt)
 
-	describe.skipIf(!searchIndexAvailable)("lexical search", () => {
+	describe("lexical search", () => {
 		it("should return results for a known term", async () => {
 			const globalKey = "__s2bLexical";
 
@@ -89,7 +91,7 @@ describe("semantic search", () => {
 		});
 	});
 
-	describe.skipIf(!searchIndexAvailable)("hybrid search", () => {
+	describe.skipIf(!providerAvailable)("hybrid search", () => {
 		it("should return results combining semantic and lexical relevance", async () => {
 			const globalKey = "__s2bHybrid";
 
@@ -105,7 +107,7 @@ describe("semantic search", () => {
 		});
 	});
 
-	describe.skipIf(!searchIndexAvailable)("search with dynamically created note", () => {
+	describe("search with dynamically created note", () => {
 		const testNoteName = "Integration Test Dynamic Note";
 		const testContent = "Quantum entanglement allows particles to be correlated across vast distances instantaneously";
 
@@ -134,7 +136,7 @@ describe("semantic search", () => {
 		});
 	});
 
-	describe.skipIf(!searchIndexAvailable)("cross-topic search relevance", () => {
+	describe("cross-topic search relevance", () => {
 		it("should find cooking content when searching for food terms", async () => {
 			const globalKey = "__s2bCooking";
 

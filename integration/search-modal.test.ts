@@ -5,28 +5,21 @@ import {
 	domText,
 	executeCommand,
 	getErrors,
-	isSearchIndexAvailable,
 	obsidian,
 	sleep,
 	waitForCondition,
 	waitForSelector,
+	waitForStandaloneMiniSearch,
 } from "./helpers/cli.ts";
 
-const searchIndexAvailable = (() => {
-	try {
-		return isSearchIndexAvailable();
-	} catch {
-		return false;
-	}
-})();
-
 describe("search modal", () => {
-	// Search results require an embedding index with a populated MiniSearch.
-	// On a clean vault without providers, the modal opens but returns no results.
-	// Fixture notes: "Machine Learning Basics", "Neural Networks Deep Dive", etc.
+	// Search uses the standalone MiniSearch (BM25) which is always available,
+	// even without an embedding provider. Fixture notes in the vault provide
+	// searchable content.
 
-	beforeAll(() => {
+	beforeAll(async () => {
 		clearBuffers();
+		await waitForStandaloneMiniSearch();
 	});
 
 	afterAll(() => {
@@ -48,7 +41,7 @@ describe("search modal", () => {
 		expect(placeholder).toContain("Search notes");
 	});
 
-	it.skipIf(!searchIndexAvailable)("should render search results after typing a query", async () => {
+	it("should render search results after typing a query", async () => {
 		// Type into the search input using CDP
 		obsidian(
 			`dev:cdp method=Input.dispatchKeyEvent params='{"type":"keyDown","key":"M","code":"KeyM","text":"M"}'`,
@@ -70,7 +63,7 @@ describe("search modal", () => {
 		expect(resultCount).toBeGreaterThan(0);
 	});
 
-	it.skipIf(!searchIndexAvailable)("should display result names matching the query", () => {
+	it("should display result names matching the query", () => {
 		const resultName = domText(".s2b-search-result-name");
 		expect(resultName.length).toBeGreaterThan(0);
 	});
