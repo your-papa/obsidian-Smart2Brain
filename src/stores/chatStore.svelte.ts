@@ -14,7 +14,7 @@ import type { ChatModelConfig } from "../providers/index";
 import type { ChatAttachment, ThreadError } from "../types/shared";
 import type { AgentConfig } from "../types/plugin";
 import { getPendingChangesStore } from "./pendingChangesStore.svelte";
-import { NEW_CHAT_NAME } from "../utils/threadId";
+import { isDraftChatName } from "../utils/threadId";
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { DEFAULT_AGENT_ID, getData } from "./dataStore.svelte";
 import { getPlugin } from "./state.svelte";
@@ -1218,8 +1218,7 @@ export class ChatSession {
 	 *  - Kick off streaming process
 	 */
 	async sendMessage(content: string, attachments?: ChatAttachment[]): Promise<UUIDv7> {
-		const defaultChatName = NEW_CHAT_NAME;
-		if (this.messages.length === 0 && this.id === defaultChatName) {
+		if (this.messages.length === 0 && isDraftChatName(this.id)) {
 			const promotedThreadId = await getPlugin().agentManager.promoteDraftThread(this.id);
 			if (promotedThreadId) {
 				this.id = promotedThreadId;
@@ -1732,9 +1731,8 @@ export class Messenger {
 	}
 
 	private async deriveThreadId(file: TFile): Promise<string | null> {
-		const defaultChatName = NEW_CHAT_NAME;
-		if (file.basename === defaultChatName) {
-			return defaultChatName;
+		if (isDraftChatName(file.basename)) {
+			return file.basename;
 		}
 
 		try {

@@ -8,7 +8,7 @@ import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
 import type { ChatAttachment } from "../../types/shared";
 import { mimeFromExtension } from "../../utils/attachments";
-import { NEW_CHAT_NAME } from "../../utils/threadId";
+import { isDraftChatName } from "../../utils/threadId";
 import { getData } from "../../stores/dataStore.svelte";
 import AgentPopover from "./AgentPopover.svelte";
 import ModelPopover from "./ModelPopover.svelte";
@@ -227,7 +227,7 @@ async function processFiles(files: File[]) {
 	const baseAttachDir = normalizePath(`${chatFolder}/attachments`);
 	// Use a stable temp directory when no session exists yet.
 	// sendMessage() will relocate these files once a thread ID is assigned.
-	const isDraftThread = !threadId || threadId === NEW_CHAT_NAME;
+	const isDraftThread = !threadId || isDraftChatName(threadId);
 	const attachDir = isDraftThread
 		? normalizePath(`${chatFolder}/attachments/_pending`)
 		: normalizePath(await plugin.agentManager.getAttachmentDirectory(threadId));

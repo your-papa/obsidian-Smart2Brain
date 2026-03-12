@@ -205,6 +205,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		const result = await this.adapter.list(folder);
 		this.threadIndex.clear();
 		this.filePathCache.clear();
+		this.storage.clear();
 
 		for (const file of result.files) {
 			if (!file.endsWith(".chat")) continue;
@@ -855,7 +856,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		return this.getAttachmentDirByName(dirName);
 	}
 
-	private async getUniqueTitlePath(
+	async getUniqueTitlePath(
 		folder: string,
 		baseTitle: string,
 		currentPath: string,

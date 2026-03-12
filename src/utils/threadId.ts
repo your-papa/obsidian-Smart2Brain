@@ -1,5 +1,12 @@
 export const NEW_CHAT_NAME = "New Chat";
 
+/** Check whether a thread ID represents a draft "New Chat" (e.g. "New Chat", "New Chat (2)"). */
+export function isDraftChatName(name: string): boolean {
+	if (name === NEW_CHAT_NAME) return true;
+	const match = name.match(/^New Chat \((\d+)\)$/);
+	return match !== null && Number(match[1]) >= 2;
+}
+
 export function createThreadId(): string {
 	const now = new Date();
 	const year = now.getFullYear();
