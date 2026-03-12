@@ -157,6 +157,10 @@ export const openaiProvider: EmbeddingProviderDefinition = {
 			config.configuration = {
 				baseURL: sanitizeBaseUrl(auth.baseUrl),
 			};
+			// OpenAI SDK v6 defaults to encoding_format:'base64' which many third-party
+			// providers don't support, causing malformed responses. Use 'float' explicitly
+			// when a custom baseUrl is set (i.e. not targeting OpenAI directly).
+			config.encodingFormat = "float";
 		}
 
 		// Add custom headers if provided

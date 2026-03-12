@@ -255,6 +255,9 @@ export function createOpenAICompatibleProvider(
 					// LangChain's OpenAIEmbeddings requires an apiKey even if the endpoint doesn't need one.
 					// Use the provided key or a placeholder for endpoints that don't require auth.
 					apiKey: auth.apiKey || "not-required",
+					// OpenAI SDK v6 defaults to encoding_format:'base64' which many third-party
+					// providers don't support, causing malformed responses. Use 'float' explicitly.
+					encodingFormat: "float",
 					configuration,
 				};
 

@@ -131,6 +131,9 @@ export const openrouterProvider: EmbeddingProviderDefinition = {
 		const config: Record<string, unknown> = {
 			model: modelId,
 			apiKey: auth.apiKey,
+			// OpenAI SDK v6 defaults to encoding_format:'base64' which many third-party
+			// providers don't support, causing malformed responses. Use 'float' explicitly.
+			encodingFormat: "float",
 			configuration: {
 				baseURL: OPENROUTER_BASE_URL,
 			},
