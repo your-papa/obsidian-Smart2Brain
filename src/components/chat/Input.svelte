@@ -7,12 +7,14 @@ import { MessageState, type Messenger } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
 import type { ChatAttachment } from "../../types/shared";
+import type { VisibleNoteRef } from "../../hooks/useVisibleNotes.svelte";
 import { mimeFromExtension } from "../../utils/attachments";
 import { isDraftChatName } from "../../utils/threadId";
 import { getData } from "../../stores/dataStore.svelte";
 import AgentPopover from "./AgentPopover.svelte";
 import ModelPopover from "./ModelPopover.svelte";
 import PendingChangesBar from "./PendingChangesBar.svelte";
+import VisibleNotesChips from "./VisibleNotesChips.svelte";
 
 interface Props {
 	messenger: Messenger;
@@ -43,6 +45,7 @@ let isDragging = $state(false);
 let dragCounter = 0;
 let dragMessage = $state("Drop files here");
 let dragHasIssue = $state(false);
+let activeVisibleNotes: VisibleNoteRef[] = $state([]);
 
 const ACCEPTED_EXTENSIONS = new Set(["txt", "md", "csv", "json", "png", "jpg", "jpeg", "gif", "webp", "pdf"]);
 
@@ -171,7 +174,11 @@ function sendMessage() {
 	}
 
 	const contentToSend = inputValue.trim().length > 0 ? inputValue : "Please analyze the attached files.";
-	messenger.sendMessage(contentToSend, attachments.length > 0 ? [...attachments] : undefined);
+	messenger.sendMessage(
+		contentToSend,
+		attachments.length > 0 ? [...attachments] : undefined,
+		activeVisibleNotes.length > 0 ? [...activeVisibleNotes] : undefined,
+	);
 	attachments = [];
 	attachmentSizes = new Map();
 	for (const url of previewUrls.values()) {
@@ -473,6 +480,7 @@ function removeAttachment(attachment: ChatAttachment) {
     ondrop={onDrop}
     role="region"
   >
+    <VisibleNotesChips bind:activeNotes={activeVisibleNotes} />
     {#if isDragging}
       <div
         class="flex items-center justify-center gap-2 py-4 text-sm font-medium {dragHasIssue

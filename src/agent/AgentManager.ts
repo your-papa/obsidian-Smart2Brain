@@ -13,6 +13,7 @@ import {
 	extractCapabilities as extractOpenRouterCapabilities,
 	fetchOpenRouterModels,
 } from "../providers/openrouterModels";
+import type { VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 
 import {
 	ProviderAuthError,
@@ -780,6 +781,7 @@ export class AgentManager {
 		checkpointId?: string,
 		signal?: AbortSignal,
 		attachments?: ChatAttachment[],
+		visibleNotes?: VisibleNoteRef[],
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		setCurrentThreadId(threadId);
 		try {
@@ -793,6 +795,7 @@ export class AgentManager {
 					configurable: checkpointId ? { checkpoint_id: checkpointId } : undefined,
 					signal,
 					attachments,
+					visibleNotes,
 				}),
 				signal,
 				chatModel,

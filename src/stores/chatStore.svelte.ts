@@ -15,6 +15,7 @@ import type { ChatAttachment, ThreadError } from "../types/shared";
 import type { AgentConfig } from "../types/plugin";
 import { getPendingChangesStore } from "./pendingChangesStore.svelte";
 import { isDraftChatName } from "../utils/threadId";
+import { formatVisibleNotesContext, type VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { DEFAULT_AGENT_ID, getData } from "./dataStore.svelte";
 import { getPlugin } from "./state.svelte";
@@ -77,6 +78,7 @@ export interface AssistantTimelineEvent {
 export interface UserMessage {
 	content: string;
 	attachments?: ChatAttachment[];
+	visibleNotes?: VisibleNoteRef[];
 }
 
 export interface AssistantMessage {
@@ -937,9 +939,14 @@ export function baseMessagesToMessagePairs(
 
 		if (isHumanMessage(msg)) {
 			// Start a new pair with user message
-			const userContent = extractTextContent(msg);
+			let userContent = extractTextContent(msg);
 			const humanMessageId = msg.id;
 			const attachments = (msg.additional_kwargs?.attachments as ChatAttachment[] | undefined) ?? undefined;
+			const visibleNotes = (msg.additional_kwargs?.visibleNotes as VisibleNoteRef[] | undefined) ?? undefined;
+
+			// Strip the "[Currently visible notes]" block so it doesn't appear in the bubble
+			userContent = userContent.replace(/\n\n\[Currently visible notes\]\n[\s\S]*$/, "");
+
 			const pairId = genUUIDv7();
 
 			// Look ahead for assistant response(s)
@@ -1012,7 +1019,7 @@ export function baseMessagesToMessagePairs(
 
 			messagePairs.push({
 				id: pairId,
-				userMessage: { content: userContent, attachments },
+				userMessage: { content: userContent, attachments, visibleNotes },
 				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state),
 				generation: deriveGenerationFromAssistantMessages(assistantMessages),
 				regenerateFromCheckpointId,
@@ -1217,7 +1224,11 @@ export class ChatSession {
 	 *  - Create MessagePair with idle assistant
 	 *  - Kick off streaming process
 	 */
-	async sendMessage(content: string, attachments?: ChatAttachment[]): Promise<UUIDv7> {
+	async sendMessage(
+		content: string,
+		attachments?: ChatAttachment[],
+		visibleNotes?: VisibleNoteRef[],
+	): Promise<UUIDv7> {
 		if (this.messages.length === 0 && isDraftChatName(this.id)) {
 			const promotedThreadId = await getPlugin().agentManager.promoteDraftThread(this.id);
 			if (promotedThreadId) {
@@ -1238,7 +1249,7 @@ export class ChatSession {
 
 		const pair: MessagePair = {
 			id: pairId,
-			userMessage: { content, attachments },
+			userMessage: { content, attachments, visibleNotes },
 			assistantMessage: { state: AssistantState.idle, content: "" },
 			model: currentModel,
 			generation: {
@@ -1251,8 +1262,8 @@ export class ChatSession {
 
 		this.messages.push(pair);
 
-		// Stream assistant reply (pass attachments so they reach the agent)
-		void this.processAssistantReply(pairId, content, attachments);
+		// Stream assistant reply (pass attachments and visible notes so they reach the agent)
+		void this.processAssistantReply(pairId, content, attachments, visibleNotes);
 
 		return pairId;
 	}
@@ -1506,11 +1517,24 @@ export class ChatSession {
 		}
 	}
 
+	/** Augments the user query with visible notes context from the provided refs. */
+	private augmentWithVisibleNotes(userContent: string, visibleNotes?: VisibleNoteRef[]): string {
+		if (!visibleNotes?.length) return userContent;
+		const ctx = formatVisibleNotesContext(visibleNotes);
+		return ctx ? `${userContent}\n\n${ctx}` : userContent;
+	}
+
 	/** Process assistant reply for a normal query (new message in thread). */
-	private async processAssistantReply(pairId: UUIDv7, userContent: string, attachments?: ChatAttachment[]) {
+	private async processAssistantReply(
+		pairId: UUIDv7,
+		userContent: string,
+		attachments?: ChatAttachment[],
+		visibleNotes?: VisibleNoteRef[],
+	) {
 		const plugin = getPlugin();
 		const beforeCheckpointIds = new Set(this.graphState.nodes.keys());
 		const parentCheckpointId = this.graphState.activeCheckpointId ?? this.graphState.rootCheckpointId;
+		const augmented = this.augmentWithVisibleNotes(userContent, visibleNotes);
 
 		checkpointDebug("send.parent", {
 			threadId: this.id,
@@ -1522,11 +1546,12 @@ export class ChatSession {
 			pairId,
 			(signal) =>
 				plugin.agentManager.streamQuery(
-					userContent,
+					augmented,
 					String(this.id),
 					this.graphState.activeCheckpointId,
 					signal,
 					attachments,
+					visibleNotes,
 				) as AsyncIterable<AgentStreamChunk>,
 			{ generateTitle: userContent, reloadAfter: true, parentCheckpointId, beforeCheckpointIds },
 		);
@@ -1541,6 +1566,7 @@ export class ChatSession {
 	) {
 		const plugin = getPlugin();
 		const beforeCheckpointIds = new Set(this.graphState.nodes.keys());
+		const augmented = this.augmentWithVisibleNotes(userContent);
 
 		checkpointDebug("edit.parent", {
 			threadId: this.id,
@@ -1551,7 +1577,7 @@ export class ChatSession {
 			pairId,
 			(signal) =>
 				plugin.agentManager.editFromCheckpoint(
-					userContent,
+					augmented,
 					String(this.id),
 					checkpointId,
 					signal,
@@ -1993,11 +2019,15 @@ export class Messenger {
 
 	/* ---------------- Sending Messages ---------------- */
 
-	async sendMessage(content: string, attachments?: ChatAttachment[]): Promise<string> {
+	async sendMessage(
+		content: string,
+		attachments?: ChatAttachment[],
+		visibleNotes?: VisibleNoteRef[],
+	): Promise<string> {
 		if (!this.session) {
 			throw new Error("No active session");
 		}
-		return this.session.sendMessage(content, attachments);
+		return this.session.sendMessage(content, attachments, visibleNotes);
 	}
 }
 
