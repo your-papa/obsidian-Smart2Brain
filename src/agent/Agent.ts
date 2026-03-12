@@ -21,6 +21,7 @@ import type { ProviderRegistry } from "../providers/registry";
 import { getData } from "../stores/dataStore.svelte";
 import { getPlugin } from "../stores/state.svelte";
 import type { ChatAttachment, ThreadError } from "../types/shared";
+import type { VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import { toBase64DataUri } from "../utils/attachments";
 import { extractTextFromPdf } from "../utils/pdfExtractor";
 import { Logger } from "../utils/logging";
@@ -51,6 +52,8 @@ export interface AgentRunOptions {
 	signal?: AbortSignal;
 	/** Optional attachments (images, PDFs) to include in the message */
 	attachments?: ChatAttachment[];
+	/** Visible notes refs to persist alongside the message */
+	visibleNotes?: VisibleNoteRef[];
 }
 
 /** Options for editing a message (forks from checkpoint with new user message) */
@@ -60,6 +63,7 @@ export interface AgentEditOptions {
 	checkpointId: string;
 	signal?: AbortSignal;
 	attachments?: ChatAttachment[];
+	visibleNotes?: VisibleNoteRef[];
 	metadata?: Record<string, unknown>;
 	configurable?: Record<string, unknown>;
 }
@@ -379,11 +383,18 @@ export class Agent {
 	private createHumanMessage(
 		content: string | MessageContentComplex[],
 		attachments?: ChatAttachment[],
+		visibleNotes?: VisibleNoteRef[],
 	): HumanMessage {
-		const additional_kwargs = attachments?.length ? { attachments } : undefined;
+		const additional_kwargs: Record<string, unknown> = {};
+		if (attachments?.length) additional_kwargs.attachments = attachments;
+		if (visibleNotes?.length) additional_kwargs.visibleNotes = visibleNotes;
+		const hasKwargs = Object.keys(additional_kwargs).length > 0;
 		// Cast content — the HumanMessage constructor handles both string and
 		// MessageContentComplex[] at runtime, but the TS types are overly strict.
-		return new HumanMessage({ content: content as string, additional_kwargs });
+		return new HumanMessage({
+			content: content as string,
+			additional_kwargs: hasKwargs ? additional_kwargs : undefined,
+		});
 	}
 
 	async run(options: AgentRunOptions): Promise<AgentResult> {
@@ -413,7 +424,7 @@ export class Agent {
 
 		const normalizedQuery = query.trim().length > 0 ? query : "Please analyze the attached files.";
 		const messageContent = await this.buildMessageContent(normalizedQuery, options.attachments);
-		const humanMessage = this.createHumanMessage(messageContent, options.attachments);
+		const humanMessage = this.createHumanMessage(messageContent, options.attachments, options.visibleNotes);
 
 		const rawResult = await agent.invoke({ messages: [humanMessage] }, invokeConfig);
 
@@ -472,7 +483,7 @@ export class Agent {
 
 		const normalizedQuery = query.trim().length > 0 ? query : "Please analyze the attached files.";
 		const messageContent = await this.buildMessageContent(normalizedQuery, options.attachments);
-		const humanMessage = this.createHumanMessage(messageContent, options.attachments);
+		const humanMessage = this.createHumanMessage(messageContent, options.attachments, options.visibleNotes);
 
 		const stream = agent.streamEvents({ messages: [humanMessage] }, streamConfig);
 
@@ -667,7 +678,7 @@ export class Agent {
 		} as StreamEventsConfig;
 
 		const messageContent = await this.buildMessageContent(query, options.attachments);
-		const humanMessage = this.createHumanMessage(messageContent, options.attachments);
+		const humanMessage = this.createHumanMessage(messageContent, options.attachments, options.visibleNotes);
 
 		const input = {
 			messages: [humanMessage],

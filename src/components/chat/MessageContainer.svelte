@@ -13,6 +13,7 @@ import CollapsibleUserBubble from "./CollapsibleUserBubble.svelte";
 import UserAttachmentFiles from "./UserAttachmentFiles.svelte";
 import UserAttachmentImages from "./UserAttachmentImages.svelte";
 import ToolCallsSection from "./ToolCallsSection.svelte";
+import { icon } from "../../utils/utils";
 
 interface Props {
 	messenger: Messenger;
@@ -295,6 +296,16 @@ $effect(() => {
                   )}
                 />
               {/if}
+              {#if messagePair.userMessage.visibleNotes?.length}
+                <div class="visible-notes-history flex flex-row flex-wrap gap-1.5 justify-end">
+                  {#each messagePair.userMessage.visibleNotes as note (note.path)}
+                    <span class="history-note-chip" title={note.path}>
+                      <span class="chip-icon" use:icon={note.icon} style="--icon-size: 12px"></span>
+                      <span>{note.basename}{#if note.context}<span class="chip-context"> · {note.context}</span>{/if}</span>
+                    </span>
+                  {/each}
+                </div>
+              {/if}
               <CollapsibleUserBubble
                 content={messagePair.userMessage.content}
                 attachments={messagePair.userMessage.attachments}
@@ -410,6 +421,30 @@ $effect(() => {
 </div>
 
 <style>
+  .history-note-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    line-height: 1.2;
+    background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+    border-radius: 4px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .history-note-chip .chip-icon {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .history-note-chip .chip-context {
+    opacity: 0.7;
+  }
+
   .scroll-container {
     /* Enable native elastic/rubber-band scrolling on macOS/iOS */
     -webkit-overflow-scrolling: touch;
