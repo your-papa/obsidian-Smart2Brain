@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	clearBuffers,
+	deleteAllChatFiles,
 	domCount,
 	executeCommand,
 	getErrors,
@@ -18,6 +19,7 @@ describe("view registration smoke tests", () => {
 	});
 
 	afterAll(() => {
+		deleteAllChatFiles();
 		clearBuffers();
 	});
 

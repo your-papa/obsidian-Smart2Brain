@@ -33,7 +33,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "setup-vault": "mkdir -p 'integration/Smart2Brain Test Vault/.obsidian/plugins/smart-second-brain' && cd 'integration/Smart2Brain Test Vault/.obsidian/plugins/smart-second-brain' && ln -sf ../../../../../build/smart-second-brain/main.js main.js && ln -sf ../../../../../build/smart-second-brain/styles.css styles.css && ln -sf ../../../../../build/smart-second-brain/manifest.json manifest.json"
   },
   "type": "module",
   "dependencies": {

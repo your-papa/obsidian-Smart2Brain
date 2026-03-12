@@ -1,12 +1,15 @@
 import { execSync } from "node:child_process";
 
+const VAULT_NAME = "Smart2Brain Test Vault";
+
 /**
  * Helper to execute obsidian CLI commands and return trimmed output.
+ * Always targets the test vault by placing vault= before the command.
  * Throws on non-zero exit code unless `ignoreError` is true.
  */
 export function obsidian(cmd: string, { ignoreError = false } = {}): string {
 	try {
-		return execSync(`obsidian ${cmd}`, {
+		return execSync(`obsidian vault="${VAULT_NAME}" ${cmd}`, {
 			encoding: "utf-8",
 			timeout: 30_000,
 		}).trim();
@@ -112,6 +115,20 @@ export function deleteNote(name: string): void {
 }
 
 /**
+ * Delete all .chat files created during tests.
+ */
+export function deleteAllChatFiles(): void {
+	const files = obsidian("files ext=chat", { ignoreError: true });
+	if (!files) return;
+	for (const line of files.split("\n")) {
+		const path = line.trim();
+		if (path && path.endsWith(".chat")) {
+			obsidian(`delete path="${path}"`, { ignoreError: true });
+		}
+	}
+}
+
+/**
  * Reload the plugin after a build.
  */
 export function reloadPlugin(): string {
@@ -190,6 +207,18 @@ export const PLUGIN = 'app.plugins.plugins["smart-second-brain"]';
 export function isProviderConfigured(): boolean {
 	const result = obsidianEval(
 		`${PLUGIN}.pluginData.getConfiguredProviders().length > 0`,
+	);
+	return result.includes("true");
+}
+
+/**
+ * Check if a search index (embedding index with MiniSearch) is available.
+ * Lexical/hybrid search requires at least one initialized index instance
+ * with an indexed MiniSearch. Returns false on a clean vault without providers.
+ */
+export function isSearchIndexAvailable(): boolean {
+	const result = obsidianEval(
+		`(function(){ var vs = ${PLUGIN}.vectorStoreService; if (!vs) return false; var iter = vs.instances ? vs.instances.values() : []; var item = iter.next ? iter.next() : {done:true}; if (item.done) return false; return item.value.miniSearch.documentCount > 0; })()`,
 	);
 	return result.includes("true");
 }

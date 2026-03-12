@@ -26,7 +26,7 @@ describe("agent interaction", () => {
 		clearBuffers();
 	});
 
-	it("should have a chat model configured", () => {
+	it.skipIf(!providerAvailable)("should have a chat model configured", () => {
 		const result = obsidianEval(
 			`(function(){ var a = ${PLUGIN}.pluginData.getSelectedAgent(); return a.chatModel.provider + ":" + a.chatModel.model; })()`,
 		);
@@ -34,7 +34,7 @@ describe("agent interaction", () => {
 		expect(result).not.toContain("undefined");
 	});
 
-	it("should have at least one configured provider", () => {
+	it.skipIf(!providerAvailable)("should have at least one configured provider", () => {
 		const result = obsidianEval(
 			`${PLUGIN}.pluginData.getConfiguredProviders().join(",")`,
 		);
@@ -80,7 +80,7 @@ describe("agent with tool use", () => {
 		const threadId = "test-tools-" + Date.now();
 
 		const result = await pollEval(
-			`(function(){ var am = ${PLUGIN}.agentManager; window.${globalKey} = "pending"; (async function(){ try { var tokens = ""; var tools = []; var toolOutputs = []; for await (var chunk of am.streamQuery("Use the search_notes tool to find notes about stories in my vault", "${threadId}")) { if (chunk.type === "token" && chunk.token) tokens += chunk.token; if (chunk.type === "tool_start") tools.push(chunk.toolName); if (chunk.type === "tool_end") toolOutputs.push({name: chunk.toolName, hasOutput: !!chunk.output}); } window.${globalKey} = JSON.stringify({tokens: tokens, tools: tools, toolOutputs: toolOutputs, tokenLen: tokens.length}); } catch(e) { window.${globalKey} = JSON.stringify({error: e.message}); } })(); return "started"; })()`,
+			`(function(){ var am = ${PLUGIN}.agentManager; window.${globalKey} = "pending"; (async function(){ try { var tokens = ""; var tools = []; var toolOutputs = []; for await (var chunk of am.streamQuery("Use the search_notes tool to find notes about machine learning in my vault", "${threadId}")) { if (chunk.type === "token" && chunk.token) tokens += chunk.token; if (chunk.type === "tool_start") tools.push(chunk.toolName); if (chunk.type === "tool_end") toolOutputs.push({name: chunk.toolName, hasOutput: !!chunk.output}); } window.${globalKey} = JSON.stringify({tokens: tokens, tools: tools, toolOutputs: toolOutputs, tokenLen: tokens.length}); } catch(e) { window.${globalKey} = JSON.stringify({error: e.message}); } })(); return "started"; })()`,
 			globalKey,
 			{ timeoutMs: 90_000, intervalMs: 3_000 },
 		);
