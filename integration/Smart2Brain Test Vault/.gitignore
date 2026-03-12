@@ -1,0 +1,17 @@
+# Obsidian workspace state (user-specific)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/graph.json
+.obsidian/hotkeys.json
+.obsidian/core-plugins.json
+.obsidian/core-plugins-migration.json
+.obsidian/backlink.json
+.obsidian/bookmarks.json
+.obsidian/canvas.json
+
+# Plugin build artifacts (symlinked or copied from build/)
+.obsidian/plugins/smart-second-brain/
+
+# Obsidian cache
+.obsidian/plugins/.obsidian/
+.trash/

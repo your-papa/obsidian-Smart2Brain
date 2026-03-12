@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	clearBuffers,
+	deleteAllChatFiles,
 	disablePlugin,
 	domCount,
 	domText,
@@ -25,6 +26,7 @@ describe("chat view UI", () => {
 	});
 
 	afterAll(() => {
+		deleteAllChatFiles();
 		clearBuffers();
 	});
 

@@ -1,38 +1,35 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	clearBuffers,
-	createNote,
-	deleteNote,
 	domCount,
 	domText,
 	executeCommand,
 	getErrors,
+	isSearchIndexAvailable,
 	obsidian,
 	sleep,
 	waitForCondition,
 	waitForSelector,
 } from "./helpers/cli.ts";
 
-describe("search modal", () => {
-	const testNotes = [
-		{ name: "S2B Search Test Alpha", content: "Alpha content about machine learning and neural networks" },
-		{ name: "S2B Search Test Beta", content: "Beta content about web development and JavaScript frameworks" },
-		{ name: "S2B Search Test Gamma", content: "Gamma content referencing [[S2B Search Test Alpha]] for context" },
-	];
+const searchIndexAvailable = (() => {
+	try {
+		return isSearchIndexAvailable();
+	} catch {
+		return false;
+	}
+})();
 
-	beforeAll(async () => {
+describe("search modal", () => {
+	// Search results require an embedding index with a populated MiniSearch.
+	// On a clean vault without providers, the modal opens but returns no results.
+	// Fixture notes: "Machine Learning Basics", "Neural Networks Deep Dive", etc.
+
+	beforeAll(() => {
 		clearBuffers();
-		for (const note of testNotes) {
-			createNote(note.name, note.content);
-		}
-		// Give the vault index time to pick up the new files
-		await sleep(1000);
 	});
 
 	afterAll(() => {
-		for (const note of testNotes) {
-			deleteNote(note.name);
-		}
 		clearBuffers();
 	});
 
@@ -51,29 +48,29 @@ describe("search modal", () => {
 		expect(placeholder).toContain("Search notes");
 	});
 
-	it("should render search results after typing a query", async () => {
+	it.skipIf(!searchIndexAvailable)("should render search results after typing a query", async () => {
 		// Type into the search input using CDP
 		obsidian(
-			`dev:cdp method=Input.dispatchKeyEvent params='{"type":"keyDown","key":"S","code":"KeyS","text":"S"}'`,
+			`dev:cdp method=Input.dispatchKeyEvent params='{"type":"keyDown","key":"M","code":"KeyM","text":"M"}'`,
 			{ ignoreError: true },
 		);
 		obsidian(
-			`dev:cdp method=Input.insertText params='{"text":"S2B Search Test"}'`,
+			`dev:cdp method=Input.insertText params='{"text":"Machine Learning"}'`,
 			{ ignoreError: true },
 		);
 
-		// Wait for results to appear (debounced search)
+		// Wait for results to appear (debounced search + indexing)
 		await waitForCondition(
 			() => domCount(".s2b-search-result") > 0,
 			"search results to appear",
-			{ timeoutMs: 10_000 },
+			{ timeoutMs: 20_000 },
 		);
 
 		const resultCount = domCount(".s2b-search-result");
 		expect(resultCount).toBeGreaterThan(0);
 	});
 
-	it("should display result names matching the query", () => {
+	it.skipIf(!searchIndexAvailable)("should display result names matching the query", () => {
 		const resultName = domText(".s2b-search-result-name");
 		expect(resultName.length).toBeGreaterThan(0);
 	});

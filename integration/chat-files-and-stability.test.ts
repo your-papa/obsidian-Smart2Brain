@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	clearBuffers,
 	createNote,
+	deleteAllChatFiles,
 	deleteNote,
 	domCount,
 	executeCommand,
@@ -12,13 +13,19 @@ import {
 	waitForCondition,
 	waitForSelector,
 } from "./helpers/cli.ts";
+import type {} from "vitest";
 
 describe(".chat file handling", () => {
-	beforeAll(() => {
+	beforeAll(async () => {
 		clearBuffers();
+		// Create a chat so tests have something to work with
+		executeCommand("smart-second-brain:new-chat");
+		await waitForSelector('[data-type="smart-second-brain-chat"]');
+		await sleep(1000);
 	});
 
 	afterAll(() => {
+		deleteAllChatFiles();
 		clearBuffers();
 	});
 
@@ -105,6 +112,7 @@ describe("plugin reload stability", () => {
 	});
 
 	afterAll(() => {
+		deleteAllChatFiles();
 		clearBuffers();
 	});
 
