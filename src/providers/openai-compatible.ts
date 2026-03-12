@@ -17,6 +17,7 @@ import type {
 	CustomProviderMeta,
 	EmbeddingProviderDefinition,
 } from "../types/provider/index";
+import { createTransportedChatOpenAI } from "./chatProviders";
 
 // =============================================================================
 // Helper Functions
@@ -136,7 +137,7 @@ export function createOpenAICompatibleProvider(
 				chatConfig.temperature = options.temperature;
 			}
 
-			return new ChatOpenAI(chatConfig);
+			return createTransportedChatOpenAI(config.id, chatConfig as ConstructorParameters<typeof ChatOpenAI>[0]);
 		},
 
 		validateAuth: async (auth: AuthObject): Promise<AuthValidationResult> => {

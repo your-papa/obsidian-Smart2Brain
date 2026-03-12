@@ -20,10 +20,16 @@ import type { ChatModelConfig } from "../providers/index";
 import type { ProviderRegistry } from "../providers/registry";
 import { getData } from "../stores/dataStore.svelte";
 import { getPlugin } from "../stores/state.svelte";
-import type { ChatAttachment, ThreadError } from "../types/shared";
 import type { VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../hooks/useSelection.svelte";
 import type { GraphNoteRef } from "../stores/chatStore.svelte";
+import type { ChatAttachment, ThreadError } from "../types/shared";
+import {
+	AiTransportDowngradeRequiredError,
+	findAiTransportDowngradeRequiredError,
+	popAiTransportMode,
+	pushAiTransportMode,
+} from "../lib/aiTransport";
 import { toBase64, toBase64DataUri } from "../utils/attachments";
 import { extractTextFromPdf } from "../utils/pdfExtractor";
 import { Logger } from "../utils/logging";
@@ -187,7 +193,7 @@ export class Agent {
 		this.registry = options.registry;
 		this.telemetry = options.telemetry;
 		this.threadStore = options.threadStore;
-		this.checkpointer = options.checkpointer ?? new MemorySaver();
+		this.checkpointer = this.wrapCheckpointer(options.checkpointer ?? new MemorySaver());
 		this.prompt = options.defaultPrompt ?? "You are a privacy-focused assistant.";
 		Logger.debug("agent.init", {
 			hasTelemetry: Boolean(this.telemetry),
@@ -413,6 +419,41 @@ export class Agent {
 		});
 	}
 
+	private async withAiTransportMode<T>(
+		mode: "default" | "buffered",
+		label: string,
+		operation: () => Promise<T>,
+	): Promise<T> {
+		pushAiTransportMode(mode, label);
+		try {
+			return await operation();
+		} finally {
+			popAiTransportMode(label);
+		}
+	}
+
+	private async invokeBufferedFallback(
+		agent: AgentRunnable,
+		input: unknown,
+		invokeConfig: RunnableConfig,
+		runId: string,
+		threadId: string,
+		context: string,
+		error: AiTransportDowngradeRequiredError,
+	): Promise<unknown> {
+		Logger.debug(`${context}.downgrade`, {
+			runId,
+			threadId,
+			provider: error.providerId,
+			url: error.url,
+			message: error.cause instanceof Error ? error.cause.message : String(error.cause),
+		});
+
+		return this.withAiTransportMode("buffered", `${context}:buffered:${runId}`, async () =>
+			agent.invoke(input as never, invokeConfig),
+		);
+	}
+
 	async run(options: AgentRunOptions): Promise<AgentResult> {
 		const { query } = options;
 		const hasAttachments = Boolean(options.attachments?.length);
@@ -448,7 +489,9 @@ export class Agent {
 			options.graphNotes,
 		);
 
-		const rawResult = await agent.invoke({ messages: [humanMessage] }, invokeConfig);
+		const rawResult = await this.withAiTransportMode("default", `agent.run:${runId}`, async () =>
+			agent.invoke({ messages: [humanMessage] }, invokeConfig),
+		);
 
 		const finishedAt = new Date();
 		const messages = this.extractMessagesFromResult(rawResult);
@@ -498,8 +541,9 @@ export class Agent {
 		});
 
 		type StreamEventsConfig = Parameters<AgentRunnable["streamEvents"]>[1];
+		const invokeConfig = this.buildRunnableConfig(options, threadId);
 		const streamConfig = {
-			...this.buildRunnableConfig(options, threadId),
+			...invokeConfig,
 			version: "v2" as const,
 		} as StreamEventsConfig;
 
@@ -513,14 +557,20 @@ export class Agent {
 			options.graphNotes,
 		);
 
-		const stream = agent.streamEvents({ messages: [humanMessage] }, streamConfig);
+		const transportLabel = `agent.streamTokens:${runId}`;
+		let streamTransportActive = false;
+
+		pushAiTransportMode("default", transportLabel);
+		streamTransportActive = true;
+
+		const streamInput = { messages: [humanMessage] };
+		const stream = agent.streamEvents(streamInput, streamConfig);
 
 		let rawResult: unknown;
 		// Track tool calls in progress to correlate start/end events
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
 		// Track the current AI message id from chat model stream chunks
 		let lastAiMessageId: string | undefined;
-
 		try {
 			for await (const event of stream) {
 				// Check if aborted before processing
@@ -592,25 +642,46 @@ export class Agent {
 				}
 			}
 		} catch (error) {
+			if (streamTransportActive) {
+				popAiTransportMode(transportLabel);
+				streamTransportActive = false;
+			}
+
 			// Don't log or rethrow abort errors - they're expected during cancellation
 			if (error instanceof Error && error.name === "AbortError") {
 				Logger.debug("agent.streamTokens.aborted", { runId, threadId });
 				return;
 			}
 
-			// Wrap connection errors in ProviderEndpointError for consistent handling
-			if (error instanceof TypeError && error.message.includes("fetch")) {
-				const provider = this.selectedModel?.provider ?? "unknown";
-				Logger.debug("agent.streamTokens.error", { runId, message: `Connection failed to ${provider}` });
-				throw new ProviderEndpointError(provider, "Connection refused - service may not be running");
-			}
+			const downgradeError = findAiTransportDowngradeRequiredError(error);
+			if (downgradeError) {
+				rawResult = await this.invokeBufferedFallback(
+					agent,
+					streamInput,
+					invokeConfig,
+					runId,
+					threadId,
+					"agent.streamTokens",
+					downgradeError,
+				);
+			} else {
+				// Wrap connection errors in ProviderEndpointError for consistent handling
+				if (error instanceof TypeError && error.message.includes("fetch")) {
+					const provider = this.selectedModel?.provider ?? "unknown";
+					Logger.debug("agent.streamTokens.error", { runId, message: `Connection failed to ${provider}` });
+					throw new ProviderEndpointError(provider, "Connection refused - service may not be running");
+				}
 
-			Logger.debug("agent.streamTokens.error", {
-				runId,
-				message: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+				Logger.debug("agent.streamTokens.error", {
+					runId,
+					message: error instanceof Error ? error.message : String(error),
+				});
+				throw error;
+			}
 		} finally {
+			if (streamTransportActive) {
+				popAiTransportMode(transportLabel);
+			}
 			Logger.debug("agent.streamTokens.cleanup", { runId, threadId });
 		}
 
@@ -700,8 +771,9 @@ export class Agent {
 		});
 
 		type StreamEventsConfig = Parameters<AgentRunnable["streamEvents"]>[1];
+		const invokeConfig = this.buildRunnableConfig(options, threadId, checkpointId);
 		const streamConfig = {
-			...this.buildRunnableConfig(options, threadId, checkpointId),
+			...invokeConfig,
 			version: "v2" as const,
 		} as StreamEventsConfig;
 
@@ -712,12 +784,17 @@ export class Agent {
 			messages: [humanMessage],
 		};
 
+		const transportLabel = `agent.editFromCheckpoint:${runId}`;
+		let streamTransportActive = false;
+
+		pushAiTransportMode("default", transportLabel);
+		streamTransportActive = true;
+
 		const stream = agent.streamEvents(input, streamConfig);
 
 		let rawResult: unknown;
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
 		let lastAiMessageId: string | undefined;
-
 		try {
 			for await (const event of stream) {
 				if (options.signal?.aborted) {
@@ -784,23 +861,47 @@ export class Agent {
 				}
 			}
 		} catch (error) {
+			if (streamTransportActive) {
+				popAiTransportMode(transportLabel);
+				streamTransportActive = false;
+			}
+
 			if (error instanceof Error && error.name === "AbortError") {
 				Logger.debug("agent.editFromCheckpoint.aborted", { runId, threadId });
 				return;
 			}
 
-			if (error instanceof TypeError && error.message.includes("fetch")) {
-				const provider = this.selectedModel?.provider ?? "unknown";
-				Logger.debug("agent.editFromCheckpoint.error", { runId, message: `Connection failed to ${provider}` });
-				throw new ProviderEndpointError(provider, "Connection refused - service may not be running");
-			}
+			const downgradeError = findAiTransportDowngradeRequiredError(error);
+			if (downgradeError) {
+				rawResult = await this.invokeBufferedFallback(
+					agent,
+					input,
+					invokeConfig,
+					runId,
+					threadId,
+					"agent.editFromCheckpoint",
+					downgradeError,
+				);
+			} else {
+				if (error instanceof TypeError && error.message.includes("fetch")) {
+					const provider = this.selectedModel?.provider ?? "unknown";
+					Logger.debug("agent.editFromCheckpoint.error", {
+						runId,
+						message: `Connection failed to ${provider}`,
+					});
+					throw new ProviderEndpointError(provider, "Connection refused - service may not be running");
+				}
 
-			Logger.debug("agent.editFromCheckpoint.error", {
-				runId,
-				message: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
+				Logger.debug("agent.editFromCheckpoint.error", {
+					runId,
+					message: error instanceof Error ? error.message : String(error),
+				});
+				throw error;
+			}
 		} finally {
+			if (streamTransportActive) {
+				popAiTransportMode(transportLabel);
+			}
 			Logger.debug("agent.editFromCheckpoint.cleanup", { runId, threadId });
 		}
 
@@ -882,20 +983,26 @@ export class Agent {
 		});
 
 		type StreamEventsConfig = Parameters<AgentRunnable["streamEvents"]>[1];
+		const invokeConfig = this.buildRunnableConfig(options, threadId, checkpointId);
 		const streamConfig = {
-			...this.buildRunnableConfig(options, threadId, checkpointId),
+			...invokeConfig,
 			version: "v2" as const,
 		} as StreamEventsConfig;
 
 		// Pass null to continue from checkpoint without adding a new message
 		const input = null;
 
+		const transportLabel = `agent.regenerateFromCheckpoint:${runId}`;
+		let streamTransportActive = false;
+
+		pushAiTransportMode("default", transportLabel);
+		streamTransportActive = true;
+
 		const stream = agent.streamEvents(input, streamConfig);
 
 		let rawResult: unknown;
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
 		let lastAiMessageId: string | undefined;
-
 		try {
 			for await (const event of stream) {
 				if (options.signal?.aborted) {
@@ -962,26 +1069,47 @@ export class Agent {
 				}
 			}
 		} catch (error) {
+			if (streamTransportActive) {
+				popAiTransportMode(transportLabel);
+				streamTransportActive = false;
+			}
+
 			if (error instanceof Error && error.name === "AbortError") {
 				Logger.debug("agent.regenerateFromCheckpoint.aborted", { runId, threadId });
 				return;
 			}
 
-			if (error instanceof TypeError && error.message.includes("fetch")) {
-				const provider = this.selectedModel?.provider ?? "unknown";
+			const downgradeError = findAiTransportDowngradeRequiredError(error);
+			if (downgradeError) {
+				rawResult = await this.invokeBufferedFallback(
+					agent,
+					input,
+					invokeConfig,
+					runId,
+					threadId,
+					"agent.regenerateFromCheckpoint",
+					downgradeError,
+				);
+			} else {
+				if (error instanceof TypeError && error.message.includes("fetch")) {
+					const provider = this.selectedModel?.provider ?? "unknown";
+					Logger.debug("agent.regenerateFromCheckpoint.error", {
+						runId,
+						message: `Connection failed to ${provider}`,
+					});
+					throw new ProviderEndpointError(provider, "Connection refused - service may not be running");
+				}
+
 				Logger.debug("agent.regenerateFromCheckpoint.error", {
 					runId,
-					message: `Connection failed to ${provider}`,
+					message: error instanceof Error ? error.message : String(error),
 				});
-				throw new ProviderEndpointError(provider, "Connection refused - service may not be running");
+				throw error;
 			}
-
-			Logger.debug("agent.regenerateFromCheckpoint.error", {
-				runId,
-				message: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
 		} finally {
+			if (streamTransportActive) {
+				popAiTransportMode(transportLabel);
+			}
 			Logger.debug("agent.regenerateFromCheckpoint.cleanup", { runId, threadId });
 		}
 
@@ -1219,6 +1347,61 @@ export class Agent {
 		return this.agentRunnable;
 	}
 
+	private wrapCheckpointer(checkpointer: BaseCheckpointSaver): BaseCheckpointSaver {
+		const agent = this;
+		return new Proxy(checkpointer, {
+			get(target, prop, receiver) {
+				if (prop === "getTuple") {
+					return async (...args: unknown[]) => {
+						const getTuple = Reflect.get(target, prop, receiver) as (
+							...innerArgs: unknown[]
+						) => Promise<CheckpointTuple | undefined>;
+						const tuple = await getTuple.apply(target, args);
+						return agent.normalizeCheckpointTuple(tuple);
+					};
+				}
+
+				if (prop === "list") {
+					return async function* (...args: unknown[]) {
+						const list = Reflect.get(target, prop, receiver) as (
+							...innerArgs: unknown[]
+						) => AsyncIterable<CheckpointTuple>;
+						for await (const tuple of list.apply(target, args)) {
+							yield agent.normalizeCheckpointTuple(tuple) as CheckpointTuple;
+						}
+					};
+				}
+
+				const value = Reflect.get(target, prop, receiver);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as BaseCheckpointSaver;
+	}
+
+	private normalizeCheckpointTuple(tuple: CheckpointTuple | undefined): CheckpointTuple | undefined {
+		if (!tuple?.checkpoint?.channel_values) {
+			return tuple;
+		}
+
+		const channelValues = tuple.checkpoint.channel_values as Record<string, unknown>;
+		const rawMessages = channelValues.messages;
+		if (!Array.isArray(rawMessages)) {
+			return tuple;
+		}
+
+		const normalizedMessages = this.normalizeMessages(rawMessages);
+		return {
+			...tuple,
+			checkpoint: {
+				...tuple.checkpoint,
+				channel_values: {
+					...channelValues,
+					messages: normalizedMessages,
+				},
+			},
+		} as CheckpointTuple;
+	}
+
 	private extractMessagesFromResult(result: unknown): BaseMessage[] {
 		if (!result || typeof result !== "object" || !("messages" in result)) {
 			return [];
@@ -1270,7 +1453,7 @@ export class Agent {
 	private normalizeMessage(msg: Record<string, unknown>): BaseMessage | undefined {
 		// Check if it's already a BaseMessage instance (has _getType method)
 		if (typeof (msg as { _getType?: unknown })._getType === "function") {
-			return msg as unknown as BaseMessage;
+			return this.normalizeBaseMessageInstance(msg as Record<string, unknown> & { _getType: () => string });
 		}
 
 		// Handle serialized LangChain format: { id: [...], kwargs: {...} }
@@ -1293,6 +1476,33 @@ export class Agent {
 		}
 
 		return undefined;
+	}
+
+	private normalizeBaseMessageInstance(
+		msg: Record<string, unknown> & { _getType: () => string },
+	): BaseMessage | undefined {
+		const messageType = msg._getType();
+		if (messageType === "chat") {
+			const role =
+				typeof msg.role === "string"
+					? msg.role.toLowerCase()
+					: typeof msg.name === "string"
+						? msg.name.toLowerCase()
+						: "assistant";
+
+			if (role === "human" || role === "user") {
+				return this.convertPlainMessage("human", msg);
+			}
+			if (role === "system" || role === "developer") {
+				return this.convertPlainMessage("system", msg);
+			}
+			if (role === "tool") {
+				return this.convertPlainMessage("tool", msg);
+			}
+			return this.convertPlainMessage("ai", msg);
+		}
+
+		return this.convertPlainMessage(messageType, msg) ?? (msg as unknown as BaseMessage);
 	}
 
 	private convertSerializedLangChainMessage(msg: Record<string, unknown>): BaseMessage | undefined {
@@ -1333,6 +1543,17 @@ export class Agent {
 					tool_calls: toolCalls,
 					additional_kwargs: additionalKwargs ?? {},
 					response_metadata: responseMetadata ?? {},
+				});
+			}
+			case "ChatMessage":
+			case "ChatMessageChunk": {
+				const normalizedType = this.normalizeChatMessageType(
+					typeof kwargs.role === "string" ? kwargs.role : undefined,
+					typeof kwargs.name === "string" ? kwargs.name : undefined,
+				);
+				return this.convertPlainMessage(normalizedType, {
+					...kwargs,
+					id,
 				});
 			}
 			case "SystemMessage":
@@ -1386,9 +1607,32 @@ export class Agent {
 				const toolCallId = typeof msg.tool_call_id === "string" ? msg.tool_call_id : "";
 				return new ToolMessage({ content: c, tool_call_id: toolCallId, id });
 			}
+			case "chat":
+			case "chatmessage":
+			case "chatmessagechunk": {
+				const normalizedType = this.normalizeChatMessageType(
+					typeof msg.role === "string" ? msg.role : undefined,
+					typeof msg.name === "string" ? msg.name : undefined,
+				);
+				return this.convertPlainMessage(normalizedType, msg);
+			}
 			default:
 				return undefined;
 		}
+	}
+
+	private normalizeChatMessageType(role: string | undefined, name: string | undefined): string {
+		const normalizedRole = role?.toLowerCase();
+		if (normalizedRole === "human" || normalizedRole === "user") return "human";
+		if (normalizedRole === "system" || normalizedRole === "developer") return "system";
+		if (normalizedRole === "tool") return "tool";
+
+		const normalizedName = name?.toLowerCase();
+		if (normalizedName === "human" || normalizedName === "user") return "human";
+		if (normalizedName === "system" || normalizedName === "developer") return "system";
+		if (normalizedName === "tool") return "tool";
+
+		return "ai";
 	}
 
 	private asPlainRecord(value: unknown): Record<string, unknown> | undefined {
@@ -1426,7 +1670,13 @@ export class Agent {
 	private extractToolCalls(
 		obj: Record<string, unknown>,
 	): { id: string; name: string; args: Record<string, unknown> }[] | undefined {
-		return this.parseToolCalls(obj.tool_calls);
+		const directToolCalls = this.parseToolCalls(obj.tool_calls);
+		if (directToolCalls?.length) {
+			return directToolCalls;
+		}
+
+		const additionalKwargs = this.asPlainRecord(obj.additional_kwargs);
+		return this.parseToolCalls(additionalKwargs?.tool_calls);
 	}
 
 	private parseToolCalls(
@@ -1436,11 +1686,24 @@ export class Agent {
 
 		return toolCalls
 			.filter((tc): tc is Record<string, unknown> => tc && typeof tc === "object")
-			.map((tc) => ({
-				id: typeof tc.id === "string" ? tc.id : "",
-				name: typeof tc.name === "string" ? tc.name : "",
-				args: this.parseToolArgs(tc.args ?? tc.arguments),
-			}));
+			.map((tc) => {
+				const functionPayload =
+					tc.function && typeof tc.function === "object"
+						? (tc.function as Record<string, unknown>)
+						: undefined;
+
+				return {
+					id: typeof tc.id === "string" ? tc.id : "",
+					name:
+						typeof tc.name === "string"
+							? tc.name
+							: typeof functionPayload?.name === "string"
+								? functionPayload.name
+								: "",
+					args: this.parseToolArgs(tc.args ?? tc.arguments ?? functionPayload?.arguments),
+				};
+			})
+			.filter((tc) => tc.name.length > 0);
 	}
 
 	private parseToolArgs(args: unknown): Record<string, unknown> {

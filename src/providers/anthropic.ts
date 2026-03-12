@@ -17,6 +17,7 @@ import type {
 	BaseProviderDefinition,
 	ChatModelConfig,
 } from "../types/provider/index";
+import { createTransportedChatAnthropic } from "./chatProviders";
 
 // =============================================================================
 // Constants
@@ -130,7 +131,7 @@ export const anthropicProvider: BaseProviderDefinition = {
 			config.thinking = extra.thinking;
 		}
 
-		return new ChatAnthropic(config);
+		return createTransportedChatAnthropic("anthropic", config as ConstructorParameters<typeof ChatAnthropic>[0]);
 	},
 
 	validateAuth: async (auth: AuthObject): Promise<AuthValidationResult> => {

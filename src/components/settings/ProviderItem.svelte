@@ -8,11 +8,18 @@ import {
 	getStoredOpenAICodexSession,
 	signInWithOpenAICodex,
 } from "../../providers/openaiCodex";
+import { signInWithOpenRouter } from "../../providers/openrouterOAuth";
 import { type LogoProps, getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
+import { Logger } from "../../utils/logging";
 import Button from "../ui/Button.svelte";
 import CircularLoader from "../ui/CircularLoader.svelte";
+<<<<<<< New base: feat: codex auth flow
 <<<<<<< New base: feat: remove math-latex skill and related references from the codebase
+||||||| Common ancestor
+=======
+import Dropdown from "../ui/Dropdown.svelte";
+>>>>>>> Current commit: feat: provider upgrades
 import Toggle from "../ui/Toggle.svelte";
 ||||||| Common ancestor
 =======
@@ -35,19 +42,18 @@ const authMethodOptions = [
 	{ display: "API Key", value: "apiKey" as const },
 ];
 
-// Get provider definition
 let providerDefinition = $derived(getProviderDefinition(provider, data.getAllCustomProviderMeta()));
 let isOpenAI = $derived(provider === "openai");
+let isOpenRouter = $derived(provider === "openrouter");
 let authMethod = $derived(isOpenAI ? data.getProviderAuthMode(provider) : "apiKey");
 let codexSession = $derived(isOpenAI ? getStoredOpenAICodexSession() : undefined);
 let isSigningIn = $state(false);
 let codexActionError = $state<string | null>(null);
-
-// Check if provider is configured using new system
+let isSigningInOpenRouter = $state(false);
+let openRouterActionError = $state<string | null>(null);
 let isConfigured = $derived(data.isProviderConfigured(provider));
 let isCustomProvider = $derived(data.isCustomProvider(provider));
 
-// Query for provider state (auth + models)
 const query = createProviderStateQuery(() => provider);
 let isCheckingAuth = $derived(query.isPending || query.isFetching);
 
@@ -79,6 +85,27 @@ function handleCodexDisconnect() {
 	invalidateAuthState(provider);
 }
 
+async function handleOpenRouterSignIn() {
+	isSigningInOpenRouter = true;
+	openRouterActionError = null;
+	try {
+		const apiKey = await signInWithOpenRouter();
+		data.setProviderAuthField(provider, "apiKey", apiKey, true);
+		const resolvedAuth = data.getResolvedAuthState(provider);
+		Logger.info("Stored OpenRouter API key after OAuth", {
+			hasApiKey: Boolean(resolvedAuth?.apiKey),
+			prefix: resolvedAuth?.apiKey?.slice(0, 8),
+			length: resolvedAuth?.apiKey?.length,
+		});
+		invalidateAuthState(provider);
+		invalidateProviderState(provider);
+	} catch (error) {
+		openRouterActionError = error instanceof Error ? error.message : String(error);
+	} finally {
+		isSigningInOpenRouter = false;
+	}
+}
+
 async function handleRemoveProvider() {
 	try {
 		if (isCustomProvider) {
@@ -92,14 +119,8 @@ async function handleRemoveProvider() {
 	}
 }
 
-// Get setup instructions from provider definition
 let instructions = $derived(providerDefinition?.setupInstructions);
-
-// Get display name for the provider
 let displayName = $derived(providerDefinition?.displayName ?? provider);
-
-// Get the logo component for the provider (fallback to GenericAIIcon)
-// Logo is only available on BuiltInProviderDefinition, not StoredCustomProviderDefinition
 let Logo: Component<LogoProps> = $derived.by(() => {
 	if (providerDefinition && "logo" in providerDefinition && providerDefinition.logo) {
 		return providerDefinition.logo;
@@ -167,13 +188,17 @@ let Logo: Component<LogoProps> = $derived.by(() => {
     class="setting-items data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down tracking-[-0.01em] w-[-webkit-fill-available] pb-2"
   >
     {#if !isConfigured}
-      <!-- Setup instructions for unconfigured providers -->
       <SettingItem name="Setup Info">
         {#snippet children()}
           <!-- Empty control slot -->
         {/snippet}
       </SettingItem>
-      {#if instructions}
+      {#if isOpenAI && authMethod === "codex"}
+        <div class="setting-item-description text-sm px-4 pb-2">
+          Use your ChatGPT/Codex sign-in for OpenAI chat models. This mode is chat-only, so
+          embeddings and RAG still require the API key route.
+        </div>
+      {:else if instructions}
         <div class="setting-item-description text-sm px-4 pb-2">
           <ul class="list-disc pl-4 space-y-1">
             {#each instructions.steps as step}
@@ -187,11 +212,72 @@ let Logo: Component<LogoProps> = $derived.by(() => {
       {/if}
     {/if}
 
-    <!-- Auth configuration fields (includes advanced toggle) -->
-    <AuthConfigFields {provider} />
+    {#if isOpenAI}
+      <SettingItem
+        name="Auth Method"
+        desc="Choose whether OpenAI uses ChatGPT/Codex sign-in or a direct API key."
+      >
+        <Dropdown
+          type="options"
+          dropdown={authMethodOptions}
+          selected={authMethod}
+          onchange={(value) => {
+            data.setProviderAuthMode(provider, value);
+            codexActionError = null;
+            invalidateAuthState(provider);
+          }}
+        />
+      </SettingItem>
+
+      {#if authMethod === "codex"}
+        <SettingItem
+          name="ChatGPT Sign-In"
+          desc={codexSession?.accountId
+            ? `Signed in (${codexSession.accountId})`
+            : "Open a browser window to complete ChatGPT/Codex authorization."}
+        >
+          <div class="flex items-center gap-2">
+            <Button
+              buttonText={codexSession ? "Reconnect" : "Sign in with ChatGPT"}
+              disabled={isSigningIn}
+              cta={true}
+              onClick={() => void handleCodexSignIn()}
+            />
+            {#if codexSession}
+              <Button buttonText="Disconnect" onClick={handleCodexDisconnect} />
+            {/if}
+          </div>
+        </SettingItem>
+
+        {#if codexActionError}
+          <SettingItem name="Authorization Error" desc={codexActionError} />
+        {/if}
+      {:else}
+        <AuthConfigFields {provider} />
+      {/if}
+    {:else}
+      {#if isOpenRouter}
+        <SettingItem
+          name="OpenRouter Account"
+          desc="Open a guided browser flow to create and store an OpenRouter API key automatically."
+        >
+          <Button
+            buttonText="Sign in with OpenRouter"
+            disabled={isSigningInOpenRouter}
+            cta={true}
+            onClick={() => void handleOpenRouterSignIn()}
+          />
+        </SettingItem>
+
+        {#if openRouterActionError}
+          <SettingItem name="Authorization Error" desc={openRouterActionError} />
+        {/if}
+      {/if}
+
+      <AuthConfigFields {provider} />
+    {/if}
 
     {#if isConfigured}
-      <!-- Privacy trust toggle for configured providers -->
       <SettingItem
         name="Trusted for private data"
         desc="Allow this provider to process files on your privacy list."
@@ -204,13 +290,12 @@ let Logo: Component<LogoProps> = $derived.by(() => {
     {/if}
 
     {#if !isConfigured}
-      <!-- Add provider button for unconfigured providers -->
       <SettingItem name="" desc="">
         <div class="flex items-center gap-2">
           {#if isCheckingAuth}
             <div class="flex items-center gap-2 text-sm mr-auto text-[--text-muted]">
               <CircularLoader size={14} color="var(--text-muted)" />
-              <span>Checking API key...</span>
+              <span>{authMethod === "codex" ? "Checking authorization..." : "Checking API key..."}</span>
             </div>
           {:else if query.data !== undefined}
             <div

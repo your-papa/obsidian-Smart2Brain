@@ -19,6 +19,7 @@ import type {
 	EmbeddingProviderDefinition,
 } from "../types/provider/index";
 import { fetchOllamaModelsInfo } from "./ollamaModels";
+import { createTransportedChatOllama } from "./chatProviders";
 
 // =============================================================================
 // Helper Functions
@@ -132,7 +133,7 @@ export const ollamaProvider: EmbeddingProviderDefinition = {
 			config.numCtx = options.contextWindow;
 		}
 
-		return new ChatOllama(config);
+		return createTransportedChatOllama("ollama", config as ConstructorParameters<typeof ChatOllama>[0]);
 	},
 
 	createEmbeddingInstance: (auth: AuthObject, modelId: string) => {

@@ -21,6 +21,7 @@ import type {
 } from "../types/provider/index";
 import { createOpenAICodexFetch, getValidOpenAICodexSession } from "./openaiCodex";
 import { DEFAULT_BUILTIN_PROVIDER_STATES } from "../stores/dataStore.svelte";
+import { createTransportedChatOpenAI } from "./chatProviders";
 
 // =============================================================================
 // Constants
@@ -124,7 +125,7 @@ export const openaiProvider: EmbeddingProviderDefinition = {
 
 	createChatInstance: (auth: AuthObject, modelId: string, options?: Partial<ChatModelConfig>) => {
 		if (auth.authMode === "codex") {
-			return new ChatOpenAI({
+			return createTransportedChatOpenAI("openai", {
 				model: modelId,
 				apiKey: async () => {
 					const session = await getValidOpenAICodexSession();
@@ -165,7 +166,7 @@ export const openaiProvider: EmbeddingProviderDefinition = {
 			};
 		}
 
-		return new ChatOpenAI(config);
+		return createTransportedChatOpenAI("openai", config as ConstructorParameters<typeof ChatOpenAI>[0]);
 	},
 
 	createEmbeddingInstance: (auth: AuthObject, modelId: string) => {

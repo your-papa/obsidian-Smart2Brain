@@ -23,6 +23,7 @@ import type {
 } from "../types/provider/index";
 import OpenRouterLogo from "../components/ui/logos/OpenRouterLogo.svelte";
 import { populateOpenRouterCache, type OpenRouterModelInfo } from "./openrouterModels";
+import { createTransportedChatOpenAI } from "./chatProviders";
 
 // =============================================================================
 // Constants
@@ -124,7 +125,7 @@ export const openrouterProvider: EmbeddingProviderDefinition = {
 			(config.configuration as Record<string, unknown>).defaultHeaders = auth.headers;
 		}
 
-		return new ChatOpenAI(config);
+		return createTransportedChatOpenAI("openrouter", config as ConstructorParameters<typeof ChatOpenAI>[0]);
 	},
 
 	createEmbeddingInstance: (auth: AuthObject, modelId: string) => {

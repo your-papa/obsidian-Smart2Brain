@@ -115,6 +115,19 @@ function createDefaultAuth(authMode: OpenAIAuthMode = "apiKey"): StoredAuthState
 	};
 }
 
+function toSecretIdSegment(value: string): string {
+	return value
+		.replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+		.replace(/[^a-zA-Z0-9]+/g, "-")
+		.replace(/-+/g, "-")
+		.replace(/^-|-$/g, "")
+		.toLowerCase();
+}
+
+function buildManagedSecretId(providerId: string, fieldName: string): string {
+	return `${toSecretIdSegment(providerId)}-${toSecretIdSegment(fieldName)}`;
+}
+
 /**
  * Default states for all built-in providers.
  * These are used when initializing new installations or migrating.
@@ -1577,7 +1590,7 @@ export class PluginDataStore {
 
 		if (isSecret) {
 			// Store in SecretStorage and save the ID
-			const secretId = `${providerId}-${fieldName}`;
+			const secretId = buildManagedSecretId(providerId, fieldName);
 			setSecret(this._plugin.app, secretId, value);
 			config.auth.secretIds[fieldName] = secretId;
 		} else {

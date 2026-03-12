@@ -7,6 +7,7 @@ import { getData } from "../stores/dataStore.svelte";
 import { getPlugin } from "../stores/state.svelte";
 import type { CodexSession } from "../types/provider";
 import { Logger } from "../utils/logging";
+import { performAiFetch } from "../lib/aiTransport";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER = "https://auth.openai.com";
@@ -557,7 +558,7 @@ export function createOpenAICodexFetch(): typeof fetch {
 		const headers = buildHeaders(headerSource, session.accountId);
 		headers.set("Authorization", `Bearer ${session.accessToken}`);
 
-		return fetch(url, {
+		return performAiFetch("openai-codex", url, {
 			...injectCodexDefaults(init),
 			headers,
 		});
