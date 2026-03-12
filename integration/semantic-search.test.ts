@@ -96,7 +96,7 @@ describe("semantic search", () => {
 			const globalKey = "__s2bHybrid";
 
 			const result = await pollEval(
-				`(function(){ var vs = ${PLUGIN}.vectorStoreService; window.${globalKey} = "pending"; vs.search("machine learning algorithms", 5).then(function(r){ window.${globalKey} = JSON.stringify(r.map(function(d){ return {name:d.name, score:d.score}; })); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: e.message}); }); return "started"; })()`,
+				`(function(){ var vs = ${PLUGIN}.vectorStoreService; window.${globalKey} = "pending"; vs.semanticSearch("machine learning algorithms", 5).then(function(r){ window.${globalKey} = JSON.stringify(r.map(function(d){ return {name:d.name, score:d.score}; })); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: e.message}); }); return "started"; })()`,
 				globalKey,
 				{ timeoutMs: 30_000 },
 			);
