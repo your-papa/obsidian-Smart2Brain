@@ -328,6 +328,8 @@ export type AgentsConfig = Record<string, AgentConfig>;
 
 export type DiffViewMode = "word-diff" | "two-pane";
 
+export type ChatOpenLocation = "tab" | "left" | "right";
+
 export interface PluginData {
 	/** All provider states - built-in (pre-populated) + custom (user-created) */
 	providerConfig: Record<string, StoredProviderState>;
@@ -381,6 +383,7 @@ export interface PluginData {
 	isChatComfy: boolean;
 	isOnboarded: boolean;
 	isQuickSettingsOpen: boolean;
+	chatOpenLocation: ChatOpenLocation;
 	hideIncognitoWarning: boolean;
 	isAutostart: boolean;
 	lastActiveChatId: UUIDv7 | null;

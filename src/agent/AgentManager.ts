@@ -6,6 +6,7 @@ import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
 import type { BuiltInToolId } from "../types/plugin";
+import { VIEW_TYPE_CHAT } from "../views/chat/Chat";
 import { lookupModelInfo } from "../providers/modelsDevApi";
 import { fetchOllamaModelsInfo } from "../providers/ollamaModels";
 import {
@@ -61,13 +62,13 @@ export type AuthValidationResult = { success: true } | { success: false; message
 export type AgentManagerStreamChunk =
 	| { type: "token"; token: string }
 	| Pick<
-			Extract<AgentStreamChunk, { type: "tool_start" }>,
-			"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
-	  >
+		Extract<AgentStreamChunk, { type: "tool_start" }>,
+		"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
+	>
 	| Pick<
-			Extract<AgentStreamChunk, { type: "tool_end" }>,
-			"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
-	  >
+		Extract<AgentStreamChunk, { type: "tool_end" }>,
+		"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
+	>
 	| { type: "result"; result: unknown };
 
 const resolvedVisionSupportCache = new Map<string, boolean>();
@@ -967,6 +968,24 @@ export class AgentManager {
 		}
 	}
 
+	private async openInChatLeaf(file: TFile) {
+		const location = getData().chatOpenLocation;
+		const workspace = this.plugin.app.workspace;
+		let leaf;
+		if (location === "left" || location === "right") {
+			const targetSplit = location === "left" ? workspace.leftSplit : workspace.rightSplit;
+			leaf = workspace.getLeavesOfType(VIEW_TYPE_CHAT).find((l) => l.getRoot() === targetSplit);
+			if (!leaf) {
+				leaf = location === "left" ? workspace.getLeftLeaf(false) : workspace.getRightLeaf(false);
+			}
+		} else {
+			leaf = workspace.getLeaf(false);
+		}
+		if (!leaf) return;
+		await leaf.openFile(file);
+		workspace.revealLeaf(leaf);
+	}
+
 	async createNewChat(): Promise<void> {
 		const threadId = createThreadId();
 		const now = Date.now();
@@ -1001,7 +1020,7 @@ export class AgentManager {
 			if (existing instanceof TFile && (await this.isEmptyChat(existing))) {
 				await this.plugin.app.vault.modify(existing, `${JSON.stringify(initialData)}\n`);
 				await this.chatManager.rebuildIndex();
-				await this.plugin.app.workspace.getLeaf(false).openFile(existing);
+				await this.openInChatLeaf(existing);
 				return;
 			}
 		}
@@ -1015,7 +1034,7 @@ export class AgentManager {
 			`${JSON.stringify({ ...initialData, threadId: createThreadIdValue })}\n`,
 		);
 		await this.chatManager.rebuildIndex();
-		await this.plugin.app.workspace.getLeaf(false).openFile(file);
+		await this.openInChatLeaf(file);
 	}
 
 	async promoteDraftThread(currentThreadId: string): Promise<string | null> {
@@ -1045,7 +1064,7 @@ export class AgentManager {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 
 		if (file && file instanceof TFile) {
-			await this.plugin.app.workspace.getLeaf(false).openFile(file);
+			await this.openInChatLeaf(file);
 		} else {
 			await this.createNewChat();
 		}
