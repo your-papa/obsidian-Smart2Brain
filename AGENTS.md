@@ -2,6 +2,7 @@
 
 - after each implementation run `bun check` and `bun format`
 - use the `obsidian` CLI to verify changes in a live vault (reload plugin, inspect DOM, check for errors). See the `obsidian-integration-test` skill for full reference.
+- when executing `obsidian` CLI commands, always target the testing vault in this repo: `vault="integration/Smart2Brain Test Vault"`. The `vault=` flag must come **first**, before any other flags or subcommands (e.g., `obsidian vault="integration/Smart2Brain Test Vault" dev:reload`). See `integration/helpers/cli.ts` for reference.
 
 # btca
 
