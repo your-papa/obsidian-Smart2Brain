@@ -11,6 +11,7 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI } from "@langchain/openai";
 import { ChatOllama } from "@langchain/ollama";
 import { createAiProviderFetch } from "../lib/aiTransport";
+import { ChatOpenAIResponses, type ChatOpenAIResponsesConfig } from "./langchainOpenAIResponses";
 
 function parseToolArgs(args: unknown): Record<string, unknown> {
 	if (typeof args === "string") {
@@ -236,6 +237,22 @@ export function createTransportedChatOpenAI(
 	};
 
 	return createNormalizedChatModel(new ChatOpenAI(nextConfig));
+}
+
+export function createTransportedChatOpenAIResponses(
+	providerId: string,
+	config: ChatOpenAIResponsesConfig,
+): BaseChatModel {
+	const baseConfig = config ?? {};
+	const nextConfig = {
+		...baseConfig,
+		configuration: {
+			...(baseConfig.configuration ?? {}),
+			fetch: baseConfig.configuration?.fetch ?? createAiProviderFetch(providerId),
+		},
+	};
+
+	return createNormalizedChatModel(new ChatOpenAIResponses(nextConfig));
 }
 
 export function createTransportedChatAnthropic(
