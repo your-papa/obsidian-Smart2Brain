@@ -280,10 +280,8 @@ export class AgentManager {
 
 	/**
 	 * Check if an Obsidian plugin is installed (may or may not be enabled).
-	 * Special case: "math-latex" is always considered installed (built-in rendering).
 	 */
 	isPluginInstalled(pluginId: string): boolean {
-		if (pluginId === "math-latex") return true; // Built-in capability
 		// @ts-ignore - Obsidian plugin API
 		// manifests contains all installed plugins, plugins only contains enabled ones
 		return Boolean(this.plugin.app.plugins?.manifests?.[pluginId]);
@@ -291,10 +289,8 @@ export class AgentManager {
 
 	/**
 	 * Check if an Obsidian community plugin is enabled (installed and active).
-	 * Special case: "math-latex" is always considered enabled (built-in rendering).
 	 */
 	isPluginEnabled(pluginId: string): boolean {
-		if (pluginId === "math-latex") return true; // Built-in capability
 		// @ts-ignore - Obsidian plugin API
 		return Boolean(this.plugin.app.plugins?.enabledPlugins?.has(pluginId));
 	}
@@ -305,7 +301,6 @@ export class AgentManager {
 	 * @param pluginId - Core plugin ID (e.g., "canvas", "bases")
 	 */
 	isInternalPluginEnabled(pluginId: string): boolean {
-		if (pluginId === "math-latex") return true;
 		// @ts-ignore - Obsidian internal plugin API (not in official types)
 		const internalPlugins = this.plugin.app.internalPlugins;
 		if (!internalPlugins) return false;

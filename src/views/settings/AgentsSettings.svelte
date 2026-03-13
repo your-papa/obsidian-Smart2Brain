@@ -423,7 +423,6 @@ function getSkillLinkedPlugin(skillName: string): string | undefined {
 }
 
 function openPluginPage(pluginId: string) {
-	if (pluginId === "math-latex") return;
 	window.open(`obsidian://show-plugin?id=${pluginId}`);
 }
 
