@@ -8,6 +8,7 @@ import { getPlugin } from "../stores/state.svelte";
 import type { CodexSession } from "../types/provider";
 import { Logger } from "../utils/logging";
 import { performAiFetch } from "../lib/aiTransport";
+import { escapeHtml } from "../utils/html";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER = "https://auth.openai.com";
@@ -70,7 +71,7 @@ const htmlError = (error: string) => `<!doctype html>
   <body style="font-family:system-ui,-apple-system,sans-serif;background:#131010;color:#f1ecec;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
     <div style="text-align:center;padding:2rem;">
       <h1 style="color:#fc533a;margin-bottom:1rem;">Authorization Failed</h1>
-      <p>${error}</p>
+      <p>${escapeHtml(error)}</p>
     </div>
   </body>
 </html>`;
@@ -173,7 +174,8 @@ function buildAuthorizeUrl(redirectUri: string, pkce: PkceCodes, state: string):
 }
 
 async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: PkceCodes): Promise<TokenResponse> {
-	const response = await fetch(`${ISSUER}/oauth/token`, {
+	const response = await requestUrl({
+		url: `${ISSUER}/oauth/token`,
 		method: "POST",
 		headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({
@@ -183,15 +185,17 @@ async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: Pk
 			client_id: CLIENT_ID,
 			code_verifier: pkce.verifier,
 		}).toString(),
+		throw: false,
 	});
-	if (!response.ok) {
+	if (response.status < 200 || response.status >= 300) {
 		throw new Error(`Token exchange failed (${response.status})`);
 	}
-	return (await response.json()) as TokenResponse;
+	return response.json as TokenResponse;
 }
 
 async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> {
-	const response = await fetch(`${ISSUER}/oauth/token`, {
+	const response = await requestUrl({
+		url: `${ISSUER}/oauth/token`,
 		method: "POST",
 		headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({
@@ -199,11 +203,12 @@ async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> 
 			refresh_token: refreshToken,
 			client_id: CLIENT_ID,
 		}).toString(),
+		throw: false,
 	});
-	if (!response.ok) {
+	if (response.status < 200 || response.status >= 300) {
 		throw new Error(`Token refresh failed (${response.status})`);
 	}
-	return (await response.json()) as TokenResponse;
+	return response.json as TokenResponse;
 }
 
 function buildCodexSession(tokens: TokenResponse): CodexSession {
@@ -218,12 +223,30 @@ function buildCodexSession(tokens: TokenResponse): CodexSession {
 export function getStoredOpenAICodexSession(): CodexSession | null {
 	const plugin = getPlugin();
 	const raw = plugin.app.loadLocalStorage(CODEX_SESSION_STORAGE_KEY);
-	if (!raw) return null;
-	try {
-		return raw as CodexSession;
-	} catch {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
 		return null;
 	}
+
+	const session = raw as Partial<CodexSession>;
+	if (typeof session.accessToken !== "string" || session.accessToken.trim().length === 0) {
+		return null;
+	}
+	if (typeof session.refreshToken !== "string") {
+		return null;
+	}
+	if (typeof session.expiresAt !== "number" || !Number.isFinite(session.expiresAt)) {
+		return null;
+	}
+	if (session.accountId !== undefined && typeof session.accountId !== "string") {
+		return null;
+	}
+
+	return {
+		accessToken: session.accessToken,
+		refreshToken: session.refreshToken,
+		expiresAt: session.expiresAt,
+		accountId: session.accountId,
+	};
 }
 
 export function saveOpenAICodexSession(session: CodexSession): void {

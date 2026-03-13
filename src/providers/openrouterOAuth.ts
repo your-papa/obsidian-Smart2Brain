@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { requestUrl } from "obsidian";
 import { Logger } from "../utils/logging";
+import { escapeHtml } from "../utils/html";
 
 const OPENROUTER_AUTH_URL = "https://openrouter.ai/auth";
 const OPENROUTER_EXCHANGE_URL = "https://openrouter.ai/api/v1/auth/keys";
@@ -48,7 +49,7 @@ function htmlError(error: string): string {
   <body style="font-family:system-ui,-apple-system,sans-serif;background:#131010;color:#f1ecec;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
     <div style="text-align:center;padding:2rem;">
       <h1 style="color:#fc533a;margin-bottom:1rem;">Authentication Failed</h1>
-      <p>${error}</p>
+      <p>${escapeHtml(error)}</p>
     </div>
   </body>
 </html>`;

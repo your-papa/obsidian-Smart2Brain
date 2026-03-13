@@ -26,9 +26,11 @@ import type { GraphNoteRef } from "../stores/chatStore.svelte";
 import type { ChatAttachment, ThreadError } from "../types/shared";
 import {
 	AiTransportDowngradeRequiredError,
+	type AiTransportContext,
+	createAiTransportContext,
+	enterAiTransportContext,
 	findAiTransportDowngradeRequiredError,
-	popAiTransportMode,
-	pushAiTransportMode,
+	setAiTransportMode,
 } from "../lib/aiTransport";
 import { toBase64, toBase64DataUri } from "../utils/attachments";
 import { extractTextFromPdf } from "../utils/pdfExtractor";
@@ -420,15 +422,20 @@ export class Agent {
 	}
 
 	private async withAiTransportMode<T>(
+		context: AiTransportContext,
 		mode: "default" | "buffered",
 		label: string,
 		operation: () => Promise<T>,
 	): Promise<T> {
-		pushAiTransportMode(mode, label);
+		enterAiTransportContext(context);
+		const previousMode = context.mode;
+		const previousLabel = context.label;
+		setAiTransportMode(context, mode, label);
 		try {
 			return await operation();
 		} finally {
-			popAiTransportMode(label);
+			context.mode = previousMode;
+			context.label = previousLabel;
 		}
 	}
 
@@ -436,6 +443,7 @@ export class Agent {
 		agent: AgentRunnable,
 		input: unknown,
 		invokeConfig: RunnableConfig,
+		transportContext: AiTransportContext,
 		runId: string,
 		threadId: string,
 		context: string,
@@ -449,7 +457,7 @@ export class Agent {
 			message: error.cause instanceof Error ? error.cause.message : String(error.cause),
 		});
 
-		return this.withAiTransportMode("buffered", `${context}:buffered:${runId}`, async () =>
+		return this.withAiTransportMode(transportContext, "buffered", `${context}:buffered:${runId}`, async () =>
 			agent.invoke(input as never, invokeConfig),
 		);
 	}
@@ -489,7 +497,9 @@ export class Agent {
 			options.graphNotes,
 		);
 
-		const rawResult = await this.withAiTransportMode("default", `agent.run:${runId}`, async () =>
+		const transportContext = createAiTransportContext("default", `agent.run:${runId}`);
+		enterAiTransportContext(transportContext);
+		const rawResult = await this.withAiTransportMode(transportContext, "default", `agent.run:${runId}`, async () =>
 			agent.invoke({ messages: [humanMessage] }, invokeConfig),
 		);
 
@@ -558,9 +568,10 @@ export class Agent {
 		);
 
 		const transportLabel = `agent.streamTokens:${runId}`;
+		const transportContext = createAiTransportContext("default", transportLabel);
+		enterAiTransportContext(transportContext);
 		let streamTransportActive = false;
 
-		pushAiTransportMode("default", transportLabel);
 		streamTransportActive = true;
 
 		const streamInput = { messages: [humanMessage] };
@@ -642,10 +653,7 @@ export class Agent {
 				}
 			}
 		} catch (error) {
-			if (streamTransportActive) {
-				popAiTransportMode(transportLabel);
-				streamTransportActive = false;
-			}
+			streamTransportActive = false;
 
 			// Don't log or rethrow abort errors - they're expected during cancellation
 			if (error instanceof Error && error.name === "AbortError") {
@@ -659,6 +667,7 @@ export class Agent {
 					agent,
 					streamInput,
 					invokeConfig,
+					transportContext,
 					runId,
 					threadId,
 					"agent.streamTokens",
@@ -680,7 +689,8 @@ export class Agent {
 			}
 		} finally {
 			if (streamTransportActive) {
-				popAiTransportMode(transportLabel);
+				transportContext.mode = "default";
+				transportContext.label = transportLabel;
 			}
 			Logger.debug("agent.streamTokens.cleanup", { runId, threadId });
 		}
@@ -785,9 +795,10 @@ export class Agent {
 		};
 
 		const transportLabel = `agent.editFromCheckpoint:${runId}`;
+		const transportContext = createAiTransportContext("default", transportLabel);
+		enterAiTransportContext(transportContext);
 		let streamTransportActive = false;
 
-		pushAiTransportMode("default", transportLabel);
 		streamTransportActive = true;
 
 		const stream = agent.streamEvents(input, streamConfig);
@@ -861,10 +872,7 @@ export class Agent {
 				}
 			}
 		} catch (error) {
-			if (streamTransportActive) {
-				popAiTransportMode(transportLabel);
-				streamTransportActive = false;
-			}
+			streamTransportActive = false;
 
 			if (error instanceof Error && error.name === "AbortError") {
 				Logger.debug("agent.editFromCheckpoint.aborted", { runId, threadId });
@@ -877,6 +885,7 @@ export class Agent {
 					agent,
 					input,
 					invokeConfig,
+					transportContext,
 					runId,
 					threadId,
 					"agent.editFromCheckpoint",
@@ -900,7 +909,8 @@ export class Agent {
 			}
 		} finally {
 			if (streamTransportActive) {
-				popAiTransportMode(transportLabel);
+				transportContext.mode = "default";
+				transportContext.label = transportLabel;
 			}
 			Logger.debug("agent.editFromCheckpoint.cleanup", { runId, threadId });
 		}
@@ -993,9 +1003,10 @@ export class Agent {
 		const input = null;
 
 		const transportLabel = `agent.regenerateFromCheckpoint:${runId}`;
+		const transportContext = createAiTransportContext("default", transportLabel);
+		enterAiTransportContext(transportContext);
 		let streamTransportActive = false;
 
-		pushAiTransportMode("default", transportLabel);
 		streamTransportActive = true;
 
 		const stream = agent.streamEvents(input, streamConfig);
@@ -1069,10 +1080,7 @@ export class Agent {
 				}
 			}
 		} catch (error) {
-			if (streamTransportActive) {
-				popAiTransportMode(transportLabel);
-				streamTransportActive = false;
-			}
+			streamTransportActive = false;
 
 			if (error instanceof Error && error.name === "AbortError") {
 				Logger.debug("agent.regenerateFromCheckpoint.aborted", { runId, threadId });
@@ -1085,6 +1093,7 @@ export class Agent {
 					agent,
 					input,
 					invokeConfig,
+					transportContext,
 					runId,
 					threadId,
 					"agent.regenerateFromCheckpoint",
@@ -1108,7 +1117,8 @@ export class Agent {
 			}
 		} finally {
 			if (streamTransportActive) {
-				popAiTransportMode(transportLabel);
+				transportContext.mode = "default";
+				transportContext.label = transportLabel;
 			}
 			Logger.debug("agent.regenerateFromCheckpoint.cleanup", { runId, threadId });
 		}

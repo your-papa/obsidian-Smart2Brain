@@ -1,9 +1,10 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { requestUrl, type RequestUrlParam } from "obsidian";
 import { Logger } from "../utils/logging";
 
-type AiTransportMode = "default" | "buffered";
+export type AiTransportMode = "default" | "buffered";
 
-interface AiTransportContextEntry {
+export interface AiTransportContext {
 	mode: AiTransportMode;
 	label: string;
 }
@@ -13,8 +14,8 @@ interface NormalizedRequest {
 	init: RequestInit;
 }
 
-let executionContextStack: AiTransportContextEntry[] = [];
 let electronNetFetchPromise: Promise<typeof fetch | null> | null = null;
+const aiTransportContextStorage = new AsyncLocalStorage<AiTransportContext>();
 
 type ErrorWithCause = Error & { cause?: unknown };
 
@@ -45,36 +46,30 @@ export function findAiTransportDowngradeRequiredError(error: unknown): AiTranspo
 	return null;
 }
 
-export function pushAiTransportMode(mode: AiTransportMode, label: string): void {
-	const current = executionContextStack[executionContextStack.length - 1];
-	if (current && current.mode !== mode) {
+export function createAiTransportContext(mode: AiTransportMode, label: string): AiTransportContext {
+	return { mode, label };
+}
+
+export function enterAiTransportContext(context: AiTransportContext): void {
+	aiTransportContextStorage.enterWith(context);
+}
+
+export function setAiTransportMode(context: AiTransportContext, mode: AiTransportMode, label: string): void {
+	if (context.mode !== mode) {
 		Logger.debug("aiTransport.mode_overlap", {
-			current: current.label,
+			current: context.label,
 			next: label,
-			currentMode: current.mode,
+			currentMode: context.mode,
 			nextMode: mode,
 		});
 	}
 
-	executionContextStack = [...executionContextStack, { mode, label }];
-}
-
-export function popAiTransportMode(label: string): void {
-	const current = executionContextStack[executionContextStack.length - 1];
-	if (!current) {
-		Logger.warn(`aiTransport.pop called without active context for "${label}"`);
-		return;
-	}
-
-	if (current.label !== label) {
-		Logger.warn(`aiTransport.pop mismatch: expected "${current.label}", received "${label}"`);
-	}
-
-	executionContextStack = executionContextStack.slice(0, -1);
+	context.mode = mode;
+	context.label = label;
 }
 
 function getCurrentMode(): AiTransportMode {
-	return executionContextStack[executionContextStack.length - 1]?.mode ?? "default";
+	return aiTransportContextStorage.getStore()?.mode ?? "default";
 }
 
 async function getElectronNetFetch(): Promise<typeof fetch | null> {
