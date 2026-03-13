@@ -10,6 +10,7 @@
  */
 
 import { ChatAnthropic } from "@langchain/anthropic";
+import { requestUrl } from "obsidian";
 import AnthropicLogo from "../components/ui/logos/AnthropicLogo.svelte";
 import type {
 	AuthObject,
@@ -49,17 +50,6 @@ function buildAnthropicHeaders(auth: AuthObject): Record<string, string> {
 	}
 
 	return headers;
-}
-
-/**
- * Safely reads response text, returning undefined on error.
- */
-async function safeReadText(response: Response): Promise<string | undefined> {
-	try {
-		return await response.text();
-	} catch {
-		return undefined;
-	}
 }
 
 // =============================================================================
@@ -169,46 +159,41 @@ export const anthropicProvider: BaseProviderDefinition = {
 			return { valid: false, error: "API key is required" };
 		}
 
-		let response: Response;
 		try {
 			const baseUrl = sanitizeBaseUrl(auth.baseUrl || ANTHROPIC_DEFAULT_BASE_URL);
-			response = await globalThis.fetch(`${baseUrl}/v1/messages`, {
-				method: "POST",
+			const response = await requestUrl({
+				url: `${baseUrl}/v1/models`,
+				method: "GET",
 				headers: buildAnthropicHeaders(auth),
-				body: JSON.stringify({
-					model: "claude-3-5-sonnet-20241022",
-					max_tokens: 1,
-					messages: [{ role: "user", content: "hi" }],
-				}),
+				throw: false,
 			});
+
+			if (response.status >= 200 && response.status < 300) {
+				return { valid: true };
+			}
+
+			let errorType: string | undefined;
+			let errorMessage: string | undefined;
+			try {
+				const parsed = response.json as { error?: { type?: string; message?: string } };
+				errorType = parsed?.error?.type;
+				errorMessage = parsed?.error?.message;
+			} catch {
+				// ignore parse errors
+			}
+
+			if (response.status === 401 || response.status === 403 || errorType === "authentication_error") {
+				return { valid: false, error: errorMessage || `Authentication failed (${response.status})` };
+			}
+
+			return {
+				valid: false,
+				error: errorMessage || response.text || `Request failed with status ${response.status}`,
+			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			return { valid: false, error: `Connection failed: ${message}` };
 		}
-
-		if (response.ok) {
-			return { valid: true };
-		}
-
-		// Handle error response
-		const errorBody = await safeReadText(response);
-		let errorType: string | undefined;
-		let errorMessage: string | undefined;
-		try {
-			const parsed = errorBody
-				? (JSON.parse(errorBody) as { error?: { type?: string; message?: string } })
-				: undefined;
-			errorType = parsed?.error?.type;
-			errorMessage = parsed?.error?.message;
-		} catch {
-			// ignore parse errors
-		}
-
-		if (response.status === 401 || response.status === 403 || errorType === "authentication_error") {
-			return { valid: false, error: errorMessage || `Authentication failed (${response.status})` };
-		}
-
-		return { valid: false, error: errorMessage || errorBody || `Request failed with status ${response.status}` };
 	},
 
 	discoverModels: async (auth: AuthObject): Promise<string[]> => {
@@ -217,17 +202,18 @@ export const anthropicProvider: BaseProviderDefinition = {
 		}
 
 		const baseUrl = sanitizeBaseUrl(auth.baseUrl || ANTHROPIC_DEFAULT_BASE_URL);
-		const response = await globalThis.fetch(`${baseUrl}/v1/models`, {
+		const response = await requestUrl({
+			url: `${baseUrl}/v1/models`,
 			method: "GET",
 			headers: buildAnthropicHeaders(auth),
+			throw: false,
 		});
 
-		if (!response.ok) {
-			const errorBody = await safeReadText(response);
-			throw new Error(`Model discovery failed: ${errorBody || response.statusText}`);
+		if (response.status < 200 || response.status >= 300) {
+			throw new Error(`Model discovery failed: ${response.text || `status ${response.status}`}`);
 		}
 
-		const payload = (await response.json()) as AnthropicModelResponse;
+		const payload = response.json as AnthropicModelResponse;
 		const resources = Array.isArray(payload.data) ? payload.data : [];
 
 		return resources.map((r) => r.id).filter((id): id is string => typeof id === "string" && id.trim() !== "");
