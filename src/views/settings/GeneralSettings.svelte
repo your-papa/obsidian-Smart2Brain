@@ -7,12 +7,13 @@ import ProviderItem from "../../components/settings/ProviderItem.svelte";
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
+import Dropdown from "../../components/ui/Dropdown.svelte";
 import Text from "../../components/ui/Text.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
+import { getAllProviderTemplates, type ProviderTemplateId } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { Logger } from "../../utils/logging";
-import { CustomProviderSetupModal } from "../custom-provider-setup/CustomProviderSetup";
 
 const pluginData = getData();
 const plugin = getPlugin();
@@ -23,6 +24,17 @@ const privacyListModal = new PrivacyListModal(plugin.app);
 // Provider management state
 let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
 let activeProvider: string | undefined = $state(undefined);
+const providerTemplates = getAllProviderTemplates();
+const providerTemplateOptions = providerTemplates.map((template) => ({
+	display: template.displayName,
+	value: template.id,
+}));
+let selectedTemplateId = $state<ProviderTemplateId>("openai-compatible");
+let newProviderName = $state("OpenAI-Compatible");
+let selectedTemplate = $derived(
+	providerTemplates.find((template) => template.id === selectedTemplateId) ?? providerTemplates[0],
+);
+let canCreateProvider = $derived(newProviderName.trim().length > 0);
 
 const onAccordionClick = (providerId: string) => {
 	activeProvider = activeProvider === providerId ? undefined : providerId;
@@ -39,21 +51,60 @@ let sortedProviders = $derived(
 	}),
 );
 
-function handleAddCustomProvider() {
-	new CustomProviderSetupModal(plugin).open();
+function handleTemplateChange(templateId: string) {
+	selectedTemplateId = templateId as ProviderTemplateId;
+	if (newProviderName.trim().length === 0) {
+		const template = providerTemplates.find((entry) => entry.id === selectedTemplateId);
+		if (template) {
+			newProviderName = template.displayName;
+		}
+	}
+}
+
+async function handleAddProviderInstance() {
+	if (!canCreateProvider) return;
+
+	await pluginData.addProviderInstance(crypto.randomUUID(), {
+		templateId: selectedTemplateId,
+		displayName: newProviderName.trim(),
+	});
+
+	newProviderName = selectedTemplate?.displayName ?? "New Provider";
 }
 </script>
 
 <!-- Providers -->
 <SettingGroup heading="Providers">
-  <Accordion.Root type="single" bind:value={activeProvider}>
-    {#each sortedProviders as provider (provider)}
-      <ProviderItem {provider} {onAccordionClick} />
-    {/each}
-  </Accordion.Root>
+  {#if sortedProviders.length > 0}
+    <Accordion.Root type="single" bind:value={activeProvider}>
+      {#each sortedProviders as provider (provider)}
+        <ProviderItem {provider} {onAccordionClick} />
+      {/each}
+    </Accordion.Root>
+  {:else}
+    <div class="setting-item-description text-sm px-4 pb-2 text-[--text-muted]">
+      No provider instances configured yet.
+    </div>
+  {/if}
 
-  <SettingItem name="Provider Instances" desc="Create a provider instance from a built-in template">
-    <Button buttonText="Add Provider" onClick={handleAddCustomProvider} />
+  <SettingItem
+    name="Add Provider Instance"
+    desc={selectedTemplate?.description ?? "Create a provider instance from one of the built-in templates."}
+  >
+    <div class="flex items-center gap-2 w-full">
+      <Dropdown
+        type="options"
+        dropdown={providerTemplateOptions}
+        selected={selectedTemplateId}
+        onchange={handleTemplateChange}
+      />
+      <Text
+        inputType="text"
+        bind:value={newProviderName}
+        placeholder={selectedTemplate?.displayName ?? "New Provider"}
+      />
+      <Button buttonText="Add" onClick={() => void handleAddProviderInstance()} disabled={!canCreateProvider} />
+    </div>
   </SettingItem>
 </SettingGroup>
 
