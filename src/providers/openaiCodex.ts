@@ -55,6 +55,7 @@ interface PendingOpenAICodexAuth {
 }
 
 let pendingOpenAICodexAuth: PendingOpenAICodexAuth | null = null;
+let pendingOpenAICodexRefresh: Promise<CodexSession | null> | null = null;
 
 const HTML_SUCCESS = `<!doctype html>
 <html>
@@ -235,17 +236,7 @@ export function clearOpenAICodexSession(): void {
 	clearCodexSession();
 }
 
-export async function getValidOpenAICodexSession(forceRefresh = false): Promise<CodexSession | null> {
-	const stored = getStoredOpenAICodexSession();
-	if (!stored?.refreshToken) {
-		return stored;
-	}
-
-	const shouldRefresh = forceRefresh || stored.expiresAt - REFRESH_BUFFER_MS <= Date.now();
-	if (!shouldRefresh) {
-		return stored;
-	}
-
+async function refreshStoredOpenAICodexSession(stored: CodexSession): Promise<CodexSession | null> {
 	try {
 		const refreshed = await refreshAccessToken(stored.refreshToken);
 		const nextSession: CodexSession = {
@@ -260,6 +251,26 @@ export async function getValidOpenAICodexSession(forceRefresh = false): Promise<
 		clearOpenAICodexSession();
 		return null;
 	}
+}
+
+export async function getValidOpenAICodexSession(forceRefresh = false): Promise<CodexSession | null> {
+	const stored = getStoredOpenAICodexSession();
+	if (!stored?.refreshToken) {
+		return stored;
+	}
+
+	const shouldRefresh = forceRefresh || stored.expiresAt - REFRESH_BUFFER_MS <= Date.now();
+	if (!shouldRefresh) {
+		return stored;
+	}
+
+	if (!pendingOpenAICodexRefresh) {
+		pendingOpenAICodexRefresh = refreshStoredOpenAICodexSession(stored).finally(() => {
+			pendingOpenAICodexRefresh = null;
+		});
+	}
+
+	return pendingOpenAICodexRefresh;
 }
 
 async function openBrowser(url: string): Promise<void> {

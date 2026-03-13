@@ -404,6 +404,16 @@ function isAbortError(error: unknown): boolean {
 	return error instanceof Error && error.name === "AbortError";
 }
 
+function looksLikeTransportFailureMessage(message: string): boolean {
+	return (
+		message.includes("failed to fetch") ||
+		message.includes("networkerror") ||
+		message.includes("network error") ||
+		message.includes("cors") ||
+		message.includes("load failed")
+	);
+}
+
 function isTransportFailure(error: unknown): boolean {
 	if (!(error instanceof Error)) {
 		return false;
@@ -414,14 +424,7 @@ function isTransportFailure(error: unknown): boolean {
 	}
 
 	const message = error.message.toLowerCase();
-	return (
-		error.name === "TypeError" ||
-		message.includes("failed to fetch") ||
-		message.includes("networkerror") ||
-		message.includes("network error") ||
-		message.includes("cors") ||
-		message.includes("load failed")
-	);
+	return looksLikeTransportFailureMessage(message);
 }
 
 async function performPrimaryFetch(normalized: NormalizedRequest): Promise<Response> {
