@@ -1,4 +1,5 @@
 import { loadPdfJs } from "obsidian";
+import { PDFDocument } from "pdf-lib";
 
 export interface PdfExtractResult {
 	text: string;
@@ -48,4 +49,38 @@ export async function extractTextFromPdfPages(data: Uint8Array, pages: number[])
 		textParts.push(content.items.map((item: { str: string }) => item.str).join(""));
 	}
 	return { text: textParts.join("\n"), totalPages };
+}
+
+/**
+ * Extracts specific pages from a PDF into a new standalone PDF binary using pdf-lib.
+ *
+ * @param data - PDF file content as Uint8Array
+ * @param pages - Array of 1-indexed page numbers to extract
+ * @returns New PDF as Uint8Array containing only the requested pages, total page count,
+ *          and which pages were actually included (out-of-range pages are skipped)
+ */
+export async function extractPdfPages(
+	data: Uint8Array,
+	pages: number[],
+): Promise<{ pdf: Uint8Array; totalPages: number; includedPages: number[] }> {
+	const srcDoc = await PDFDocument.load(data);
+	const totalPages = srcDoc.getPageCount();
+
+	const validPages = pages.filter((p) => p >= 1 && p <= totalPages);
+	if (validPages.length === 0) {
+		return { pdf: new Uint8Array(0), totalPages, includedPages: [] };
+	}
+
+	const newDoc = await PDFDocument.create();
+	// pdf-lib uses 0-indexed page numbers
+	const copiedPages = await newDoc.copyPages(
+		srcDoc,
+		validPages.map((p) => p - 1),
+	);
+	for (const page of copiedPages) {
+		newDoc.addPage(page);
+	}
+
+	const pdfBytes = await newDoc.save();
+	return { pdf: new Uint8Array(pdfBytes), totalPages, includedPages: validPages };
 }

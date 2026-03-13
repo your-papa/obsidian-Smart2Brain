@@ -1,10 +1,11 @@
 import type { BaseMessage } from "@langchain/core/messages";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { Notice, normalizePath, TFile } from "obsidian";
 import { createObsidianFetch } from "../lib/obsidianFetch";
 import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
-import { getData } from "../stores/dataStore.svelte";
+import { READ_CONTENT_GUIDANCE_DEFAULTS, getData, getReadContentGuidance } from "../stores/dataStore.svelte";
 import type { BuiltInToolId } from "../types/plugin";
 import { VIEW_TYPE_CHAT } from "../views/chat/Chat";
 import { lookupModelInfo } from "../providers/modelsDevApi";
@@ -31,6 +32,7 @@ import { createThreadId, NEW_CHAT_NAME } from "../utils/threadId";
 import { Logger } from "../utils/logging";
 import {
 	Agent,
+	NATIVE_PDF_PROVIDERS,
 	type AgentStreamChunk,
 	type CheckpointHistoryItem,
 	type ChooseModelParams,
@@ -96,6 +98,29 @@ export type AgentManagerStreamChunk =
 
 const resolvedVisionSupportCache = new Map<string, boolean>();
 const inflightVisionSupportRequests = new Map<string, Promise<boolean>>();
+
+/**
+ * Resolves the effective image/PDF processors for read_content.
+ * - undefined: auto-derive from chat model (never explicitly configured)
+ * - null: explicitly disabled by the user
+ * - ChatModel: explicitly set by the user
+ */
+function resolveEffectiveProcessors(
+	settings: { imageProcessor?: ChatModel | null; pdfProcessor?: ChatModel | null } | undefined,
+	chatModel: ChatModel | null,
+): { hasImageProcessor: boolean; hasPdfProcessor: boolean } {
+	const imageProc = settings?.imageProcessor;
+	const pdfProc = settings?.pdfProcessor;
+
+	const chatModelSupportsVision = !!chatModel?.modelConfig?.supportsVision;
+	const chatModelSupportsPdf = chatModelSupportsVision && !!chatModel && NATIVE_PDF_PROVIDERS.has(chatModel.provider);
+
+	return {
+		// undefined = auto-derive, null = explicitly off, ChatModel = explicitly set
+		hasImageProcessor: imageProc !== undefined ? !!imageProc : chatModelSupportsVision,
+		hasPdfProcessor: pdfProc !== undefined ? !!pdfProc : chatModelSupportsPdf,
+	};
+}
 
 function getVisionSupportCacheKey(providerId: string, modelId: string): string {
 	return `${providerId}::${modelId}`;
@@ -320,11 +345,32 @@ export class AgentManager {
 		const enabledTools = Object.entries(selectedAgent.toolsConfig).filter(([, config]) => config.enabled);
 		const hasWriteTools = enabledTools.some(([toolId]) => toolId === "manage_notes");
 		const toolGuidelines = enabledTools
-			.map(([toolId, config]) => ({
-				toolId,
-				name: config.name,
-				guidance: config.promptGuidance?.trim() ?? "",
-			}))
+			.map(([toolId, config]) => {
+				let guidance = config.promptGuidance?.trim() ?? "";
+
+				// Select the appropriate read_content guidance based on effective processors
+				// (explicit config OR auto-derived from chat model). Only override if
+				// guidance matches one of the 4 defaults (user hasn't customized it).
+				if (toolId === "read_content" && guidance.length > 0) {
+					const settings = config.settings as
+						| { imageProcessor?: ChatModel | null; pdfProcessor?: ChatModel | null }
+						| undefined;
+					const { hasImageProcessor, hasPdfProcessor } = resolveEffectiveProcessors(
+						settings,
+						selectedAgent.chatModel,
+					);
+
+					if (READ_CONTENT_GUIDANCE_DEFAULTS.has(guidance)) {
+						guidance = getReadContentGuidance(hasImageProcessor, hasPdfProcessor);
+					}
+				}
+
+				return {
+					toolId,
+					name: config.name,
+					guidance,
+				};
+			})
 			.filter((tool) => tool.guidance.length > 0);
 
 		if (hasWriteTools) {
@@ -501,6 +547,16 @@ export class AgentManager {
 		return undefined;
 	}
 
+	/**
+	 * Returns the chat model as a processor candidate if it supports the requested capability.
+	 * For "image": requires vision support. For "pdf": requires vision + native PDF provider.
+	 */
+	private autoProcessorFromChatModel(chatModel: ChatModel | null, kind: "image" | "pdf"): ChatModel | null {
+		if (!chatModel?.modelConfig?.supportsVision) return null;
+		if (kind === "pdf" && !NATIVE_PDF_PROVIDERS.has(chatModel.provider)) return null;
+		return chatModel;
+	}
+
 	private bindBuiltInTools(agent: Agent): StructuredToolInterface[] {
 		const data = getData();
 		const selectedAgent = data.getSelectedAgent();
@@ -511,6 +567,57 @@ export class AgentManager {
 			return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
 		};
 
+		// Instantiate vision processor models for read_content.
+		// When not explicitly configured, auto-fallback to the chat model if it supports vision.
+		let imageProcessorInstance: BaseChatModel | undefined;
+		let pdfProcessorInstance: BaseChatModel | undefined;
+		const readContentSettings = selectedAgent.toolsConfig.read_content?.settings as
+			| { imageProcessor?: ChatModel | null; pdfProcessor?: ChatModel | null }
+			| undefined;
+
+		// undefined = auto-derive from chat model, null = explicitly disabled, ChatModel = explicitly set
+		const explicitImage = readContentSettings?.imageProcessor;
+		const explicitPdf = readContentSettings?.pdfProcessor;
+		const imageProcessorModel =
+			explicitImage !== undefined
+				? explicitImage
+				: this.autoProcessorFromChatModel(selectedAgent.chatModel, "image");
+		const pdfProcessorModel =
+			explicitPdf !== undefined ? explicitPdf : this.autoProcessorFromChatModel(selectedAgent.chatModel, "pdf");
+
+		if (imageProcessorModel) {
+			try {
+				imageProcessorInstance = this.registry.createChatInstance(
+					imageProcessorModel.provider,
+					imageProcessorModel.model,
+					imageProcessorModel.modelConfig,
+				);
+				Logger.log(
+					"[AgentManager] Image processor initialized:",
+					imageProcessorModel.provider,
+					imageProcessorModel.model,
+				);
+			} catch (e) {
+				Logger.error("[AgentManager] Failed to initialize image processor", e);
+			}
+		}
+		if (pdfProcessorModel) {
+			try {
+				pdfProcessorInstance = this.registry.createChatInstance(
+					pdfProcessorModel.provider,
+					pdfProcessorModel.model,
+					pdfProcessorModel.modelConfig,
+				);
+				Logger.log(
+					"[AgentManager] PDF processor initialized:",
+					pdfProcessorModel.provider,
+					pdfProcessorModel.model,
+				);
+			} catch (e) {
+				Logger.error("[AgentManager] Failed to initialize PDF processor", e);
+			}
+		}
+
 		// Built-in tool registry: maps tool IDs to their factory functions
 		const builtInTools: [BuiltInToolId, () => StructuredToolInterface][] = [
 			["search_notes", () => createSearchNotesTool(this.plugin.app)],
@@ -518,7 +625,10 @@ export class AgentManager {
 			["execute_javascript", () => createExecuteJavaScriptTool()],
 			["execute_dataview_query", () => createExecuteDataviewTool(this.plugin.app)],
 			["get_properties", () => createGetPropertiesTool(this.plugin.app)],
-			["read_content", () => createReadContentTool(this.plugin.app)],
+			[
+				"read_content",
+				() => createReadContentTool(this.plugin.app, imageProcessorInstance, pdfProcessorInstance),
+			],
 			["manage_notes", () => createManageNotesTool(this.plugin.app)],
 		];
 

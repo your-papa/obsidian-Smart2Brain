@@ -7,7 +7,7 @@ import { MessageState, type Messenger } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
 import type { ChatAttachment } from "../../types/shared";
-import type { VisibleNoteRef } from "../../hooks/useVisibleNotes.svelte";
+import type { VisibleNote, VisibleNoteRef } from "../../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../../hooks/useSelection.svelte";
 import type { GraphNoteRef } from "../../stores/chatStore.svelte";
 import { mimeFromExtension } from "../../utils/attachments";
@@ -477,6 +477,76 @@ function removeAttachment(attachment: ChatAttachment) {
 	const plugin = getPlugin();
 	plugin.app.vault.adapter.remove(attachment.vaultPath).catch(() => {});
 }
+
+/** Promote a visible-note chip (PDF/image) to a direct chat attachment. */
+async function promoteVisibleNoteToAttachment(note: VisibleNote) {
+	const plugin = getPlugin();
+	const file = note.file;
+	const ext = file.extension.toLowerCase();
+	const isImage = ["png", "jpg", "jpeg", "gif", "webp"].includes(ext);
+
+	if (isImage && selectedModelSupportsVision === false) {
+		const modelName = selectedChatModel?.model ?? "the selected model";
+		new Notice(
+			`Image attachments require a vision-capable model. Switch models to attach images (current: ${modelName}).`,
+		);
+		return;
+	}
+	if (isImage && selectedModelSupportsVision === undefined) {
+		new Notice("Model vision support is unknown; image analysis may fail for this model.");
+	}
+
+	try {
+		const buffer = await plugin.app.vault.readBinary(file);
+		const size = buffer.byteLength;
+
+		if (size > MAX_FILE_SIZE_BYTES) {
+			new Notice(`File too large: ${file.name} exceeds 15 MB per-file limit.`);
+			return;
+		}
+
+		const totalBytes = [...attachmentSizes.values()].reduce((sum, s) => sum + s, 0);
+		if (totalBytes + size > MAX_TOTAL_ATTACHMENTS_BYTES) {
+			new Notice("Total attachment size exceeds 25 MB limit for one message.");
+			return;
+		}
+
+		const data = getData();
+		const threadId = messenger.session?.id;
+		const chatFolder = data.targetFolder;
+		const baseAttachDir = normalizePath(`${chatFolder}/attachments`);
+		const isDraftThread = !threadId || isDraftChatName(threadId);
+		const attachDir = isDraftThread
+			? normalizePath(`${chatFolder}/attachments/_pending`)
+			: normalizePath(await plugin.agentManager.getAttachmentDirectory(threadId));
+
+		if (!(await plugin.app.vault.adapter.exists(baseAttachDir))) {
+			await plugin.app.vault.adapter.mkdir(baseAttachDir);
+		}
+		if (!(await plugin.app.vault.adapter.exists(attachDir))) {
+			await plugin.app.vault.adapter.mkdir(attachDir);
+		}
+
+		const { vaultPath } = await getUniqueAttachmentPath(attachDir, file.name);
+		await plugin.app.vault.adapter.writeBinary(vaultPath, buffer);
+
+		const mime = mimeFromExtension(ext);
+		const attachment: ChatAttachment = { name: file.name, mimeType: mime, vaultPath };
+		attachments = [...attachments, attachment];
+		attachmentSizes.set(vaultPath, size);
+		attachmentSizes = new Map(attachmentSizes);
+
+		if (mime.startsWith("image/")) {
+			const blob = new Blob([buffer], { type: mime });
+			previewUrls.set(vaultPath, URL.createObjectURL(blob));
+			previewUrls = new Map(previewUrls);
+		}
+
+		new Notice(`Attached ${file.name}`);
+	} catch (error) {
+		new Notice(`Failed to attach file: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
 </script>
 
 <div
@@ -505,7 +575,11 @@ function removeAttachment(attachment: ChatAttachment) {
     ondrop={onDrop}
     role="region"
   >
-    <VisibleNotesChips bind:activeNotes={activeVisibleNotes} excludePath={activeSelection?.path} />
+    <VisibleNotesChips
+      bind:activeNotes={activeVisibleNotes}
+      excludePath={activeSelection?.path}
+      onPromoteToAttachment={promoteVisibleNoteToAttachment}
+    />
     <SelectionChip bind:activeSelection bind:this={selectionChipRef} />
     <GraphNotesChips
       bind:activeGraphNotes
