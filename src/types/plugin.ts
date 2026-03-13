@@ -1,5 +1,5 @@
 import type { StoredProviderState } from "../stores/dataStore.svelte";
-import type { CustomProviderMeta } from "../types/provider/index";
+import type { ProviderInstanceMeta } from "../types/provider/index";
 import type { UUIDv7 } from "../utils/uuid7Validator";
 import type { GraphMode, SmartGraphSettings } from "./graph";
 
@@ -335,10 +335,10 @@ export type DiffViewMode = "word-diff" | "two-pane";
 export type ChatOpenLocation = "tab" | "left" | "right";
 
 export interface PluginData {
-	/** All provider states - built-in (pre-populated) + custom (user-created) */
+	/** All configured provider instances keyed by opaque provider instance ID */
 	providerConfig: Record<string, StoredProviderState>;
-	/** Extra metadata ONLY for custom providers (displayName, supportsEmbeddings) */
-	customProviderMeta: Record<string, CustomProviderMeta>;
+	/** Persisted metadata for configured provider instances */
+	providerMeta: Record<string, ProviderInstanceMeta>;
 
 	// ============================================================================
 	// Agent Configuration (New)

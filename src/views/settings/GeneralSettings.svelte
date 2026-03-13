@@ -52,8 +52,8 @@ function handleAddCustomProvider() {
     {/each}
   </Accordion.Root>
 
-  <SettingItem name="Custom Provider" desc="Add an OpenAI-compatible API endpoint">
-    <Button buttonText="Add Custom Provider" onClick={handleAddCustomProvider} />
+  <SettingItem name="Provider Instances" desc="Create a provider instance from a built-in template">
+    <Button buttonText="Add Provider" onClick={handleAddCustomProvider} />
   </SettingItem>
 </SettingGroup>
 

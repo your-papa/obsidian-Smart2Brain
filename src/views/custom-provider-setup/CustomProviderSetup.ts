@@ -10,7 +10,7 @@ export class CustomProviderSetupModal extends Modal {
 	constructor(plugin: SecondBrainPlugin) {
 		super(plugin.app);
 		this.plugin = plugin;
-		this.titleEl.setText("Add Custom Provider");
+		this.titleEl.setText("Add Provider");
 	}
 
 	onOpen() {

@@ -464,14 +464,7 @@ export class AgentManager {
 		if (!providerDef) {
 			throw new Error(`Unknown provider: ${providerId}`);
 		}
-
-		// Check if it's a custom provider
-		const customMeta = pluginData.getCustomProviderMeta(providerId);
-		if (customMeta) {
-			this.registry.registerCustom(providerId, customMeta, auth);
-		} else {
-			this.registry.register(providerId, providerDef, auth);
-		}
+		this.registry.register(providerId, providerDef, auth);
 	}
 
 	private buildRunMetadata(agentId: string, agentName: string, chatModel: ChatModel): Record<string, unknown> {

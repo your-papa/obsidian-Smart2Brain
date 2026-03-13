@@ -20,8 +20,7 @@ import type {
 	CustomProviderMeta,
 } from "../types/provider/index";
 import { ProviderNotFoundError } from "./errors";
-import { getBuiltInProvider, isBuiltInProvider } from "./index";
-import { createOpenAICompatibleProvider } from "./openai-compatible";
+import { getProviderDefinition } from "./index";
 
 /**
  * Entry for a configured provider in the registry.
@@ -42,9 +41,6 @@ class ProviderRegistry {
 
 	/** Configured providers with their definition and auth */
 	private readonly providers = new Map<string, RegisteredProvider>();
-
-	/** Custom provider metadata (needed to recreate definitions) */
-	private readonly customMeta = new Map<string, CustomProviderMeta>();
 
 	private constructor() {
 		// Private constructor for singleton
@@ -83,25 +79,10 @@ class ProviderRegistry {
 	}
 
 	/**
-	 * Registers a custom provider with its metadata.
-	 * Creates the definition from metadata using OpenAI-compatible factory.
-	 *
-	 * @param id - Provider ID
-	 * @param meta - Custom provider metadata
-	 * @param auth - Resolved authentication object
-	 */
-	registerCustom(id: string, meta: CustomProviderMeta, auth: AuthObject): void {
-		this.customMeta.set(id, meta);
-		const definition = createOpenAICompatibleProvider({ id, ...meta });
-		this.providers.set(id, { definition, auth });
-	}
-
-	/**
 	 * Unregisters a provider.
 	 */
 	unregister(id: string): void {
 		this.providers.delete(id);
-		this.customMeta.delete(id);
 	}
 
 	/**
@@ -109,7 +90,6 @@ class ProviderRegistry {
 	 */
 	clear(): void {
 		this.providers.clear();
-		this.customMeta.clear();
 	}
 
 	// =========================================================================
@@ -155,20 +135,6 @@ class ProviderRegistry {
 	 */
 	list(): string[] {
 		return Array.from(this.providers.keys());
-	}
-
-	/**
-	 * Checks if a provider ID is a custom provider.
-	 */
-	isCustom(id: string): boolean {
-		return this.customMeta.has(id);
-	}
-
-	/**
-	 * Gets custom provider metadata.
-	 */
-	getCustomMeta(id: string): CustomProviderMeta | undefined {
-		return this.customMeta.get(id);
 	}
 
 	// =========================================================================
@@ -253,18 +219,7 @@ class ProviderRegistry {
 		id: string,
 		customMeta?: Record<string, CustomProviderMeta>,
 	): BaseProviderDefinition | undefined {
-		// Check built-in first
-		if (isBuiltInProvider(id)) {
-			return getBuiltInProvider(id);
-		}
-
-		// Check custom
-		const meta = customMeta?.[id];
-		if (meta) {
-			return createOpenAICompatibleProvider({ id, ...meta });
-		}
-
-		return undefined;
+		return getProviderDefinition(id, customMeta);
 	}
 }
 

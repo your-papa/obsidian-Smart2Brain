@@ -32,4 +32,4 @@ export type {
 export { isEmbeddingProvider } from "./definition";
 
 // Stored provider types
-export type { CustomProviderMeta } from "./stored";
+export type { CustomProviderMeta, ProviderInstanceMeta, ProviderTemplateId } from "./stored";

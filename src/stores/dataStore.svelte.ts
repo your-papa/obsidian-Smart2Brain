@@ -24,13 +24,12 @@ import { type GraphMode, type SmartGraphSettings, DEFAULT_SMART_GRAPH_SETTINGS }
 
 // Provider system types
 import {
-	BUILT_IN_PROVIDER_IDS,
 	type AuthObject,
-	type BuiltInProviderId,
 	type ChatModelConfig,
-	type CustomProviderMeta,
 	type EmbedModelConfig,
 	type OpenAIAuthMode,
+	type ProviderInstanceMeta,
+	type ProviderTemplateId,
 } from "../providers/index";
 
 // ============================================================================
@@ -128,73 +127,24 @@ function buildManagedSecretId(providerId: string, fieldName: string): string {
 	return `${toSecretIdSegment(providerId)}-${toSecretIdSegment(fieldName)}`;
 }
 
-/**
- * Default states for all built-in providers.
- * These are used when initializing new installations or migrating.
- */
-export const DEFAULT_BUILTIN_PROVIDER_STATES: Record<BuiltInProviderId, StoredProviderState> = {
-	openai: {
-		isConfigured: false,
-		auth: createDefaultAuth("codex"),
-		chatModels: {
-			"chatgpt-4o-latest": { contextWindow: 128000, temperature: 0.4 },
-			"gpt-4.1-mini-2025-04-14": { contextWindow: 1047576, temperature: 0.4 },
-			"gpt-4.1": { contextWindow: 1047576, temperature: 0.2 },
-			"o4-mini": { contextWindow: 200000, temperature: 0.2 },
-			o1: { contextWindow: 200000, temperature: 0.2 },
-		},
-		embedModels: {
-			"text-embedding-ada-002": { similarityThreshold: 0.75 },
-			"text-embedding-3-large": { similarityThreshold: 0.5 },
-			"text-embedding-3-small": { similarityThreshold: 0.5 },
-		},
-		trustedForPrivateData: false,
-	},
-	anthropic: {
-		isConfigured: false,
-		auth: createDefaultAuth(),
-		chatModels: {
-			"claude-3-haiku-20240307": { contextWindow: 200000, temperature: 0.5 },
-			"claude-3-sonnet-20240229": { contextWindow: 200000, temperature: 0.5 },
-			"claude-3-opus-20240229": { contextWindow: 200000, temperature: 0.5 },
-			"claude-3-5-sonnet-20241022": { contextWindow: 200000, temperature: 0.5 },
-		},
-		embedModels: {},
-		trustedForPrivateData: false,
-	},
-	ollama: {
+function createProviderState(templateId: ProviderTemplateId): StoredProviderState {
+	const baseUrlByTemplate: Partial<Record<ProviderTemplateId, string>> = {
+		"openai-compatible": "https://api.openai.com",
+		ollama: "http://localhost:11434",
+	};
+	const authMode = templateId === "openai-codex" ? "codex" : "apiKey";
+
+	return {
 		isConfigured: false,
 		auth: {
-			values: {
-				baseUrl: "http://localhost:11434",
-			},
-			secretIds: {},
+			...createDefaultAuth(authMode),
+			values: baseUrlByTemplate[templateId] ? { baseUrl: baseUrlByTemplate[templateId] } : {},
 		},
-		chatModels: {
-			llama2: { contextWindow: 4096, temperature: 0.5 },
-			"llama2-uncensored": { contextWindow: 4096, temperature: 0.5 },
-			mistral: { contextWindow: 8000, temperature: 0.5 },
-			"mistral-openorca": { contextWindow: 8000, temperature: 0.5 },
-			gemma: { contextWindow: 8000, temperature: 0.5 },
-			mixtral: { contextWindow: 32000, temperature: 0.5 },
-			"dolphin-mixtral": { contextWindow: 32000, temperature: 0.5 },
-			phi: { contextWindow: 2048, temperature: 0.5 },
-			"llama3.1": { contextWindow: 8192, temperature: 0.5 },
-		},
-		embedModels: {
-			"nomic-embed-text": { similarityThreshold: 0.5 },
-			"mxbai-embed-large": { similarityThreshold: 0.5 },
-		},
-		trustedForPrivateData: true,
-	},
-	openrouter: {
-		isConfigured: false,
-		auth: createDefaultAuth(),
 		chatModels: {},
 		embedModels: {},
-		trustedForPrivateData: false,
-	},
-};
+		trustedForPrivateData: templateId === "ollama",
+	};
+}
 
 // ============================================================================
 // Default Agent Configuration
@@ -382,10 +332,10 @@ function createDefaultAgent(): AgentConfig {
 }
 
 export const DEFAULT_SETTINGS: PluginData = {
-	// Unified provider config - all providers keyed by ID (built-in pre-populated)
-	providerConfig: DEFAULT_BUILTIN_PROVIDER_STATES as Record<string, StoredProviderState>,
-	// Custom provider metadata - only for custom providers
-	customProviderMeta: {},
+	// Configured provider instances keyed by opaque provider instance ID
+	providerConfig: {},
+	// Persisted metadata for configured provider instances
+	providerMeta: {},
 
 	// Agent configuration (new)
 	agents: {
@@ -1485,18 +1435,25 @@ export class PluginDataStore {
 	// Provider System Methods
 	// ============================================================================
 
-	/**
-	 * Validates if a provider ID is a built-in provider.
-	 */
-	isBuiltInProviderId(providerId: string): providerId is BuiltInProviderId {
-		return (BUILT_IN_PROVIDER_IDS as readonly string[]).includes(providerId);
+	getProviderMeta(providerId: string): ProviderInstanceMeta | undefined {
+		return this.#data.providerMeta[providerId];
 	}
 
-	/**
-	 * Check if a provider ID is a custom provider.
-	 */
-	isCustomProvider(providerId: string): boolean {
-		return providerId in this.#data.customProviderMeta;
+	isCustomProvider(_providerId: string): boolean {
+		return false;
+	}
+
+	getAllProviderMeta(): Record<string, ProviderInstanceMeta> {
+		return this.#data.providerMeta;
+	}
+
+	// Temporary compatibility alias while callers migrate away from the old name.
+	getAllCustomProviderMeta(): Record<string, ProviderInstanceMeta> {
+		return this.getAllProviderMeta();
+	}
+
+	getCustomProviderMeta(providerId: string): ProviderInstanceMeta | undefined {
+		return this.getProviderMeta(providerId);
 	}
 
 	/**
@@ -1619,14 +1576,15 @@ export class PluginDataStore {
 
 	getProviderAuthMode(providerId: string): OpenAIAuthMode {
 		const config = this.#data.providerConfig[providerId];
+		const meta = this.#data.providerMeta[providerId];
 		if (!config) return "apiKey";
+		if (meta?.templateId === "openai-codex") {
+			return "codex";
+		}
 		if (config.auth.authMode !== undefined) {
 			return config.auth.authMode;
 		}
-		if (providerId === "openai" && config.auth.secretIds.apiKey) {
-			return "apiKey";
-		}
-		return providerId === "openai" ? "codex" : "apiKey";
+		return "apiKey";
 	}
 
 	setProviderAuthMode(providerId: string, authMode: OpenAIAuthMode): void {
@@ -1637,107 +1595,66 @@ export class PluginDataStore {
 	}
 
 	isProviderUsingCodexAuth(providerId: string): boolean {
-		return this.getProviderAuthMode(providerId) === "codex";
+		return this.getProviderMeta(providerId)?.templateId === "openai-codex";
 	}
 
 	isProviderEmbeddingAvailable(providerId: string): boolean {
-		return !(providerId === "openai" && this.isProviderUsingCodexAuth(providerId));
+		return !this.isProviderUsingCodexAuth(providerId);
 	}
 
-	// ============================================================================
-	// Custom Provider Meta Methods
-	// ============================================================================
-
-	/**
-	 * Get custom provider metadata.
-	 */
-	getCustomProviderMeta(providerId: string): CustomProviderMeta | undefined {
-		return this.#data.customProviderMeta[providerId];
+	getProviderTemplateId(providerId: string): ProviderTemplateId | undefined {
+		return this.#data.providerMeta[providerId]?.templateId;
 	}
 
-	/**
-	 * Get all custom provider metadata.
-	 */
-	getAllCustomProviderMeta(): Record<string, CustomProviderMeta> {
-		return this.#data.customProviderMeta;
-	}
-
-	/**
-	 * Get all custom provider IDs.
-	 */
-	getCustomProviderIds(): string[] {
-		return Object.keys(this.#data.customProviderMeta);
-	}
-
-	/**
-	 * Add a new custom provider.
-	 * Creates both the metadata entry and the provider state.
-	 *
-	 * @param id - Unique provider ID
-	 * @param meta - Provider metadata (displayName, supportsEmbeddings)
-	 * @throws Error if provider ID already exists or conflicts with built-in
-	 */
-	async addCustomProvider(id: string, meta: CustomProviderMeta): Promise<void> {
-		// Check if ID conflicts with built-in providers
-		if (this.isBuiltInProviderId(id)) {
-			throw new Error(`Cannot use built-in provider ID "${id}" for custom provider`);
-		}
-
-		// Check if ID already exists
-		if (id in this.#data.providerConfig) {
+	async addProviderInstance(
+		id: string,
+		meta: ProviderInstanceMeta,
+		{ configured = false }: { configured?: boolean } = {},
+	): Promise<void> {
+		if (id in this.#data.providerConfig || id in this.#data.providerMeta) {
 			throw new Error(`Provider with ID "${id}" already exists`);
 		}
 
-		// Add metadata
-		this.#data.customProviderMeta[id] = meta;
-
-		// Add provider state (custom providers are created as configured)
+		this.#data.providerMeta[id] = meta;
 		this.#data.providerConfig[id] = {
-			isConfigured: true,
-			auth: { values: {}, secretIds: {} },
-			chatModels: {},
-			embedModels: {},
+			...createProviderState(meta.templateId),
+			isConfigured: configured,
 		};
 
 		await this.saveSettings();
 	}
 
-	/**
-	 * Update custom provider metadata.
-	 *
-	 * @throws Error if provider not found or not a custom provider
-	 */
-	async updateCustomProviderMeta(providerId: string, updates: Partial<CustomProviderMeta>): Promise<void> {
-		if (!this.isCustomProvider(providerId)) {
-			throw new Error(`Custom provider with ID "${providerId}" not found`);
+	async updateProviderMeta(providerId: string, updates: Partial<ProviderInstanceMeta>): Promise<void> {
+		const existing = this.#data.providerMeta[providerId];
+		if (!existing) {
+			throw new Error(`Provider with ID "${providerId}" not found`);
 		}
 
-		this.#data.customProviderMeta[providerId] = {
-			...this.#data.customProviderMeta[providerId],
-			...updates,
-		};
+		const nextMeta = { ...existing, ...updates };
+		this.#data.providerMeta[providerId] = nextMeta;
+
+		if (updates.templateId && updates.templateId !== existing.templateId) {
+			this.#data.providerConfig[providerId] = {
+				...createProviderState(nextMeta.templateId),
+				isConfigured: this.#data.providerConfig[providerId]?.isConfigured ?? false,
+			};
+		}
 
 		await this.saveSettings();
 	}
 
-	/**
-	 * Delete a custom provider.
-	 * Removes both the metadata and provider state.
-	 *
-	 * @throws Error if provider not found or not a custom provider
-	 */
-	async deleteCustomProvider(providerId: string): Promise<void> {
-		if (!this.isCustomProvider(providerId)) {
-			throw new Error(`Custom provider with ID "${providerId}" not found`);
+	async deleteProvider(providerId: string): Promise<void> {
+		if (!(providerId in this.#data.providerMeta)) {
+			throw new Error(`Provider with ID "${providerId}" not found`);
 		}
 
-		// Remove metadata
-		delete this.#data.customProviderMeta[providerId];
-
-		// Remove provider state
+		delete this.#data.providerMeta[providerId];
 		delete this.#data.providerConfig[providerId];
-
 		await this.saveSettings();
+	}
+
+	async deleteCustomProvider(providerId: string): Promise<void> {
+		await this.deleteProvider(providerId);
 	}
 }
 
@@ -1856,14 +1773,68 @@ function normalizeAgents(mergedData: PluginData): void {
 	}
 }
 
+function inferTemplateIdFromLegacyProvider(providerId: string, state?: StoredProviderState): ProviderTemplateId {
+	if (providerId === "openai" && state?.auth.authMode === "codex") {
+		return "openai-codex";
+	}
+	if (providerId === "openai") {
+		return "openai-compatible";
+	}
+	if (providerId === "anthropic" || providerId === "ollama" || providerId === "openrouter") {
+		return providerId;
+	}
+	return "openai-compatible";
+}
+
+function migrateLegacyProviders(rawData: unknown): Pick<PluginData, "providerConfig" | "providerMeta"> {
+	const record = (rawData && typeof rawData === "object" ? rawData : {}) as {
+		providerConfig?: Record<string, StoredProviderState>;
+		providerMeta?: Record<string, ProviderInstanceMeta>;
+		customProviderMeta?: Record<string, { displayName?: string }>;
+	};
+
+	if (record.providerMeta) {
+		return {
+			providerConfig: record.providerConfig ?? {},
+			providerMeta: record.providerMeta,
+		};
+	}
+
+	const providerConfig = record.providerConfig ?? {};
+	const legacyMeta = record.customProviderMeta ?? {};
+	const providerMeta: Record<string, ProviderInstanceMeta> = {};
+
+	for (const [providerId, state] of Object.entries(providerConfig)) {
+		const templateId = inferTemplateIdFromLegacyProvider(providerId, state);
+		providerMeta[providerId] = {
+			templateId,
+			displayName:
+				legacyMeta[providerId]?.displayName ??
+				(templateId === "openai-compatible"
+					? "OpenAI"
+					: templateId === "openai-codex"
+						? "OpenAI Codex"
+						: templateId[0]?.toUpperCase() + templateId.slice(1)),
+		};
+	}
+
+	return {
+		providerConfig,
+		providerMeta,
+	};
+}
+
 export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataStore> {
 	if (_pluginDataStore) return _pluginDataStore;
 
 	const rawData = await plugin.loadData();
+	const migratedProviders = migrateLegacyProviders(rawData);
 
 	const mergedData: PluginData = {
 		...DEFAULT_SETTINGS,
 		...rawData,
+		providerConfig: migratedProviders.providerConfig,
+		providerMeta: migratedProviders.providerMeta,
 	};
 
 	if (!rawData?.agents || Object.keys(rawData.agents).length === 0) {

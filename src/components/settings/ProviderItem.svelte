@@ -12,13 +12,12 @@ import { signInWithOpenRouter } from "../../providers/openrouterOAuth";
 import { type LogoProps, getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import { Logger } from "../../utils/logging";
-import Button from "../ui/Button.svelte";
-import CircularLoader from "../ui/CircularLoader.svelte";
-import Dropdown from "../ui/Dropdown.svelte";
-import Toggle from "../ui/Toggle.svelte";
-import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import AuthConfigFields from "./AuthConfigFields.svelte";
 import SettingItem from "./SettingItem.svelte";
+import Button from "../ui/Button.svelte";
+import CircularLoader from "../ui/CircularLoader.svelte";
+import Toggle from "../ui/Toggle.svelte";
+import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 
 interface Props {
 	provider: string;
@@ -28,22 +27,16 @@ interface Props {
 const { provider, onAccordionClick }: Props = $props();
 
 const data = getData();
-const authMethodOptions = [
-	{ display: "Codex Sign-In", value: "codex" as const },
-	{ display: "API Key", value: "apiKey" as const },
-];
-
-let providerDefinition = $derived(getProviderDefinition(provider, data.getAllCustomProviderMeta()));
-let isOpenAI = $derived(provider === "openai");
-let isOpenRouter = $derived(provider === "openrouter");
-let authMethod = $derived(isOpenAI ? data.getProviderAuthMode(provider) : "apiKey");
-let codexSession = $derived(isOpenAI ? getStoredOpenAICodexSession() : undefined);
+let providerDefinition = $derived(getProviderDefinition(provider, data.getAllProviderMeta()));
+let templateId = $derived(data.getProviderTemplateId(provider));
+let isCodex = $derived(templateId === "openai-codex");
+let isOpenRouter = $derived(templateId === "openrouter");
+let codexSession = $state<ReturnType<typeof getStoredOpenAICodexSession>>(null);
 let isSigningIn = $state(false);
 let codexActionError = $state<string | null>(null);
 let isSigningInOpenRouter = $state(false);
 let openRouterActionError = $state<string | null>(null);
 let isConfigured = $derived(data.isProviderConfigured(provider));
-let isCustomProvider = $derived(data.isCustomProvider(provider));
 
 const query = createProviderStateQuery(() => provider);
 let isCheckingAuth = $derived(query.isPending || query.isFetching);
@@ -51,6 +44,14 @@ let isCheckingAuth = $derived(query.isPending || query.isFetching);
 function refetch() {
 	invalidateProviderState(provider);
 }
+
+function syncCodexSession() {
+	codexSession = isCodex ? getStoredOpenAICodexSession() : null;
+}
+
+$effect(() => {
+	syncCodexSession();
+});
 
 function handleAddProvider() {
 	data.setProviderConfigured(provider, true);
@@ -62,6 +63,7 @@ async function handleCodexSignIn() {
 	codexActionError = null;
 	try {
 		await signInWithOpenAICodex();
+		syncCodexSession();
 		invalidateAuthState(provider);
 	} catch (error) {
 		codexActionError = error instanceof Error ? error.message : String(error);
@@ -73,6 +75,7 @@ async function handleCodexSignIn() {
 function handleCodexDisconnect() {
 	clearOpenAICodexSession();
 	codexActionError = null;
+	syncCodexSession();
 	invalidateAuthState(provider);
 }
 
@@ -99,11 +102,7 @@ async function handleOpenRouterSignIn() {
 
 async function handleRemoveProvider() {
 	try {
-		if (isCustomProvider) {
-			await data.deleteCustomProvider(provider);
-		} else {
-			data.setProviderConfigured(provider, false);
-		}
+		await data.deleteProvider(provider);
 		invalidateProviderState(provider);
 	} catch (error) {
 		new Notice(error instanceof Error ? error.message : "Failed to remove provider");
@@ -113,7 +112,7 @@ async function handleRemoveProvider() {
 let instructions = $derived(providerDefinition?.setupInstructions);
 let displayName = $derived(providerDefinition?.displayName ?? provider);
 let Logo: Component<LogoProps> = $derived.by(() => {
-	if (providerDefinition && "logo" in providerDefinition && providerDefinition.logo) {
+	if (providerDefinition?.logo) {
 		return providerDefinition.logo;
 	}
 	return GenericAIIcon;
@@ -159,15 +158,13 @@ let Logo: Component<LogoProps> = $derived.by(() => {
         </span>
       {/if}
     </div>
-    {#if isConfigured || isCustomProvider}
-      <Button
-        iconId="trash"
-        styles="hover:text-[--text-error]"
-        stopPropagation={true}
-        tooltip="Remove provider"
-        onClick={() => void handleRemoveProvider()}
-      />
-    {/if}
+    <Button
+      iconId="trash"
+      styles="hover:text-[--text-error]"
+      stopPropagation={true}
+      tooltip="Remove provider"
+      onClick={() => void handleRemoveProvider()}
+    />
     <Button
       styles="chev inline-flex items-center justify-center transition-transform duration-200"
       iconId="chevron-down"
@@ -179,16 +176,9 @@ let Logo: Component<LogoProps> = $derived.by(() => {
   >
     {#if !isConfigured}
       <SettingItem name="Setup Info">
-        {#snippet children()}
-          <!-- Empty control slot -->
-        {/snippet}
+        {#snippet children()}{/snippet}
       </SettingItem>
-      {#if isOpenAI && authMethod === "codex"}
-        <div class="setting-item-description text-sm px-4 pb-2">
-          Use your ChatGPT/Codex sign-in for OpenAI chat models. This mode is chat-only, so
-          embeddings and RAG still require the API key route.
-        </div>
-      {:else if instructions}
+      {#if instructions}
         <div class="setting-item-description text-sm px-4 pb-2">
           <ul class="list-disc pl-4 space-y-1">
             {#each instructions.steps as step}
@@ -202,48 +192,28 @@ let Logo: Component<LogoProps> = $derived.by(() => {
       {/if}
     {/if}
 
-    {#if isOpenAI}
+    {#if isCodex}
       <SettingItem
-        name="Auth Method"
-        desc="Choose whether OpenAI uses ChatGPT/Codex sign-in or a direct API key."
+        name="ChatGPT Sign-In"
+        desc={codexSession?.accountId
+          ? `Signed in (${codexSession.accountId})`
+          : "Open a browser window to complete ChatGPT/Codex authorization."}
       >
-        <Dropdown
-          type="options"
-          dropdown={authMethodOptions}
-          selected={authMethod}
-          onchange={(value) => {
-            data.setProviderAuthMode(provider, value);
-            codexActionError = null;
-            invalidateAuthState(provider);
-          }}
-        />
+        <div class="flex items-center gap-2">
+          <Button
+            buttonText={codexSession ? "Reconnect" : "Sign in with ChatGPT"}
+            disabled={isSigningIn}
+            cta={true}
+            onClick={() => void handleCodexSignIn()}
+          />
+          {#if codexSession}
+            <Button buttonText="Disconnect" onClick={handleCodexDisconnect} />
+          {/if}
+        </div>
       </SettingItem>
 
-      {#if authMethod === "codex"}
-        <SettingItem
-          name="ChatGPT Sign-In"
-          desc={codexSession?.accountId
-            ? `Signed in (${codexSession.accountId})`
-            : "Open a browser window to complete ChatGPT/Codex authorization."}
-        >
-          <div class="flex items-center gap-2">
-            <Button
-              buttonText={codexSession ? "Reconnect" : "Sign in with ChatGPT"}
-              disabled={isSigningIn}
-              cta={true}
-              onClick={() => void handleCodexSignIn()}
-            />
-            {#if codexSession}
-              <Button buttonText="Disconnect" onClick={handleCodexDisconnect} />
-            {/if}
-          </div>
-        </SettingItem>
-
-        {#if codexActionError}
-          <SettingItem name="Authorization Error" desc={codexActionError} />
-        {/if}
-      {:else}
-        <AuthConfigFields {provider} />
+      {#if codexActionError}
+        <SettingItem name="Authorization Error" desc={codexActionError} />
       {/if}
     {:else}
       {#if isOpenRouter}
@@ -285,7 +255,7 @@ let Logo: Component<LogoProps> = $derived.by(() => {
           {#if isCheckingAuth}
             <div class="flex items-center gap-2 text-sm mr-auto text-[--text-muted]">
               <CircularLoader size={14} color="var(--text-muted)" />
-              <span>{authMethod === "codex" ? "Checking authorization..." : "Checking API key..."}</span>
+              <span>{isCodex ? "Checking authorization..." : "Checking API key..."}</span>
             </div>
           {:else if query.data !== undefined}
             <div

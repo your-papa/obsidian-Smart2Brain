@@ -20,7 +20,6 @@ import type {
 	EmbeddingProviderDefinition,
 } from "../types/provider/index";
 import { createOpenAICodexFetch, getValidOpenAICodexSession } from "./openaiCodex";
-import { DEFAULT_BUILTIN_PROVIDER_STATES } from "../stores/dataStore.svelte";
 import { createTransportedChatOpenAI, createTransportedChatOpenAIResponses } from "./chatProviders";
 
 // =============================================================================
@@ -29,6 +28,7 @@ import { createTransportedChatOpenAI, createTransportedChatOpenAIResponses } fro
 
 /** Default base URL for OpenAI API */
 const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
+const FALLBACK_OPENAI_CHAT_MODELS = ["chatgpt-4o-latest", "gpt-4.1-mini-2025-04-14", "gpt-4.1", "o4-mini", "o1"];
 
 // =============================================================================
 // Helper Functions
@@ -283,10 +283,7 @@ export const openaiProvider: EmbeddingProviderDefinition = {
 			}
 
 			return Array.from(
-				new Set([
-					...Object.keys(DEFAULT_BUILTIN_PROVIDER_STATES.openai.chatModels),
-					...Object.keys(getData().getChatModels("openai")),
-				]),
+				new Set([...FALLBACK_OPENAI_CHAT_MODELS, ...Object.keys(getData().getChatModels("openai"))]),
 			).sort((a, b) => a.localeCompare(b));
 		}
 

@@ -12,7 +12,8 @@ export class ProviderSetupModal extends Modal {
 	constructor(plugin: SecondBrainPlugin, selectedProvider: string) {
 		super(plugin.app);
 		this.plugin = plugin;
-		this.setTitle(`Setup ${selectedProvider}`);
+		const displayName = plugin.pluginData.getProviderMeta(selectedProvider)?.displayName ?? selectedProvider;
+		this.setTitle(`Setup ${displayName}`);
 		this.selectedProvider = selectedProvider;
 	}
 
