@@ -81,6 +81,13 @@ export interface UserMessage {
 	attachments?: ChatAttachment[];
 	visibleNotes?: VisibleNoteRef[];
 	selection?: SelectionRef;
+	graphNotes?: GraphNoteRef[];
+}
+
+/** Serializable reference to a note selected from the Smart Graph. */
+export interface GraphNoteRef {
+	path: string;
+	basename: string;
 }
 
 export interface AssistantMessage {
@@ -673,13 +680,25 @@ function extractTextContent(message: BaseMessage): string {
 	return message.text || "";
 }
 
+/** Formats graph-selected notes into a context block for the agent. */
+export function formatGraphNotesContext(notes: GraphNoteRef[]): string {
+	if (notes.length === 0) return "";
+	const links = notes.map((n) => `- [[${n.path.replace(/\.md$/, "")}]]`);
+	return `[Graph-selected notes]\n${links.join("\n")}`;
+}
+
 /**
- * Strips the augmented context suffix (visible notes + selection) from a message.
+ * Strips the augmented context suffix (visible notes + selection + graph notes) from a message.
  * Reconstructs the exact suffix that was appended by augmentWithVisibleNotes()
  * and removes it by exact string match from the end. This is safe even when user
  * content or selected text contains bracket patterns like "[Selected text from".
  */
-function stripAugmentedSuffix(content: string, visibleNotes?: VisibleNoteRef[], selection?: SelectionRef): string {
+function stripAugmentedSuffix(
+	content: string,
+	visibleNotes?: VisibleNoteRef[],
+	selection?: SelectionRef,
+	graphNotes?: GraphNoteRef[],
+): string {
 	// Reconstruct the exact suffix in the same order it was appended
 	let suffix = "";
 	if (visibleNotes?.length) {
@@ -688,6 +707,10 @@ function stripAugmentedSuffix(content: string, visibleNotes?: VisibleNoteRef[], 
 	}
 	if (selection) {
 		suffix += `\n\n${formatSelectionContext(selection)}`;
+	}
+	if (graphNotes?.length) {
+		const ctx = formatGraphNotesContext(graphNotes);
+		if (ctx) suffix += `\n\n${ctx}`;
 	}
 	if (suffix && content.endsWith(suffix)) {
 		return content.slice(0, -suffix.length);
@@ -968,11 +991,12 @@ export function baseMessagesToMessagePairs(
 			const attachments = (msg.additional_kwargs?.attachments as ChatAttachment[] | undefined) ?? undefined;
 			const visibleNotes = (msg.additional_kwargs?.visibleNotes as VisibleNoteRef[] | undefined) ?? undefined;
 			const selection = (msg.additional_kwargs?.selection as SelectionRef | undefined) ?? undefined;
+			const graphNotes = (msg.additional_kwargs?.graphNotes as GraphNoteRef[] | undefined) ?? undefined;
 
 			// Strip the augmented context blocks by reconstructing the exact suffix
 			// that was appended, then removing it from the end. This is safe even when
 			// user content or selected text contains bracket patterns like "[Selected text from".
-			userContent = stripAugmentedSuffix(userContent, visibleNotes, selection);
+			userContent = stripAugmentedSuffix(userContent, visibleNotes, selection, graphNotes);
 
 			const pairId = genUUIDv7();
 
@@ -1046,7 +1070,7 @@ export function baseMessagesToMessagePairs(
 
 			messagePairs.push({
 				id: pairId,
-				userMessage: { content: userContent, attachments, visibleNotes, selection },
+				userMessage: { content: userContent, attachments, visibleNotes, selection, graphNotes },
 				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state),
 				generation: deriveGenerationFromAssistantMessages(assistantMessages),
 				regenerateFromCheckpointId,
@@ -1256,6 +1280,7 @@ export class ChatSession {
 		attachments?: ChatAttachment[],
 		visibleNotes?: VisibleNoteRef[],
 		selection?: SelectionRef,
+		graphNotes?: GraphNoteRef[],
 	): Promise<UUIDv7> {
 		if (this.messages.length === 0 && isDraftChatName(this.id)) {
 			const promotedThreadId = await getPlugin().agentManager.promoteDraftThread(this.id);
@@ -1277,7 +1302,7 @@ export class ChatSession {
 
 		const pair: MessagePair = {
 			id: pairId,
-			userMessage: { content, attachments, visibleNotes, selection },
+			userMessage: { content, attachments, visibleNotes, selection, graphNotes },
 			assistantMessage: { state: AssistantState.idle, content: "" },
 			model: currentModel,
 			generation: {
@@ -1291,7 +1316,7 @@ export class ChatSession {
 		this.messages.push(pair);
 
 		// Stream assistant reply (pass attachments and visible notes so they reach the agent)
-		void this.processAssistantReply(pairId, content, attachments, visibleNotes, selection);
+		void this.processAssistantReply(pairId, content, attachments, visibleNotes, selection, graphNotes);
 
 		return pairId;
 	}
@@ -1330,7 +1355,7 @@ export class ChatSession {
 				const newPath = normalizePath(`${destDir}/${fileName}`);
 				const data = await adapter.readBinary(att.vaultPath);
 				await adapter.writeBinary(newPath, data);
-				await adapter.remove(att.vaultPath).catch(() => { });
+				await adapter.remove(att.vaultPath).catch(() => {});
 				att.vaultPath = newPath;
 			} catch (e) {
 				Logger.warn(`Failed to relocate attachment ${att.name}`, e);
@@ -1339,7 +1364,7 @@ export class ChatSession {
 
 		// Best-effort cleanup of the temporary _pending directory
 		const pendingDir = normalizePath(`${chatFolder}/attachments/_pending`);
-		adapter.rmdir(pendingDir, false).catch(() => { });
+		adapter.rmdir(pendingDir, false).catch(() => {});
 	}
 
 	/** Abort current streaming (if any) */
@@ -1550,6 +1575,7 @@ export class ChatSession {
 		userContent: string,
 		visibleNotes?: VisibleNoteRef[],
 		selection?: SelectionRef,
+		graphNotes?: GraphNoteRef[],
 	): string {
 		let result = userContent;
 		if (visibleNotes?.length) {
@@ -1558,6 +1584,10 @@ export class ChatSession {
 		}
 		if (selection) {
 			result = `${result}\n\n${formatSelectionContext(selection)}`;
+		}
+		if (graphNotes?.length) {
+			const ctx = formatGraphNotesContext(graphNotes);
+			if (ctx) result = `${result}\n\n${ctx}`;
 		}
 		return result;
 	}
@@ -1569,11 +1599,12 @@ export class ChatSession {
 		attachments?: ChatAttachment[],
 		visibleNotes?: VisibleNoteRef[],
 		selection?: SelectionRef,
+		graphNotes?: GraphNoteRef[],
 	) {
 		const plugin = getPlugin();
 		const beforeCheckpointIds = new Set(this.graphState.nodes.keys());
 		const parentCheckpointId = this.graphState.activeCheckpointId ?? this.graphState.rootCheckpointId;
-		const augmented = this.augmentWithVisibleNotes(userContent, visibleNotes, selection);
+		const augmented = this.augmentWithVisibleNotes(userContent, visibleNotes, selection, graphNotes);
 
 		checkpointDebug("send.parent", {
 			threadId: this.id,
@@ -1592,6 +1623,7 @@ export class ChatSession {
 					attachments,
 					visibleNotes,
 					selection,
+					graphNotes,
 				) as AsyncIterable<AgentStreamChunk>,
 			{ generateTitle: userContent, reloadAfter: true, parentCheckpointId, beforeCheckpointIds },
 		);
@@ -1790,6 +1822,7 @@ export class ChatSession {
 export class Messenger {
 	session: ChatSession | null = $state(null);
 	pendingInput: string | null = $state(null);
+	pendingGraphNotes: string[] | null = $state(null);
 	#agentManager: AgentManager;
 
 	constructor(agentManager: AgentManager) {
@@ -2064,11 +2097,12 @@ export class Messenger {
 		attachments?: ChatAttachment[],
 		visibleNotes?: VisibleNoteRef[],
 		selection?: SelectionRef,
+		graphNotes?: GraphNoteRef[],
 	): Promise<string> {
 		if (!this.session) {
 			throw new Error("No active session");
 		}
-		return this.session.sendMessage(content, attachments, visibleNotes, selection);
+		return this.session.sendMessage(content, attachments, visibleNotes, selection, graphNotes);
 	}
 }
 

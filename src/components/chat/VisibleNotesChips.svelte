@@ -1,43 +1,37 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
-  import {
-    VisibleNotesTracker,
-    toVisibleNoteRefs,
-    type VisibleNoteRef,
-  } from "../../hooks/useVisibleNotes.svelte";
-  import { icon } from "../../utils/utils";
+import { onDestroy } from "svelte";
+import { VisibleNotesTracker, toVisibleNoteRefs, type VisibleNoteRef } from "../../hooks/useVisibleNotes.svelte";
+import { icon } from "../../utils/utils";
 
-  interface Props {
-    /** Bindable: the currently active (non-deactivated) notes as serializable refs. */
-    activeNotes?: VisibleNoteRef[];
-    /** Path to exclude from display (e.g. when a selection chip covers this note). */
-    excludePath?: string;
-  }
+interface Props {
+	/** Bindable: the currently active (non-deactivated) notes as serializable refs. */
+	activeNotes?: VisibleNoteRef[];
+	/** Path to exclude from display (e.g. when a selection chip covers this note). */
+	excludePath?: string;
+}
 
-  let { activeNotes = $bindable([]), excludePath }: Props = $props();
+let { activeNotes = $bindable([]), excludePath }: Props = $props();
 
-  const tracker = new VisibleNotesTracker();
-  let deactivated = $state(new Set<string>());
+const tracker = new VisibleNotesTracker();
+let deactivated = $state(new Set<string>());
 
-  // Keep activeNotes in sync with tracker + deactivated set + excludePath
-  $effect(() => {
-    const active = tracker.notes.filter(
-      (n) => !deactivated.has(n.file.path) && n.file.path !== excludePath,
-    );
-    activeNotes = toVisibleNoteRefs(active);
-  });
+// Keep activeNotes in sync with tracker + deactivated set + excludePath
+$effect(() => {
+	const active = tracker.notes.filter((n) => !deactivated.has(n.file.path) && n.file.path !== excludePath);
+	activeNotes = toVisibleNoteRefs(active);
+});
 
-  function toggle(path: string) {
-    const next = new Set(deactivated);
-    if (next.has(path)) {
-      next.delete(path);
-    } else {
-      next.add(path);
-    }
-    deactivated = next;
-  }
+function toggle(path: string) {
+	const next = new Set(deactivated);
+	if (next.has(path)) {
+		next.delete(path);
+	} else {
+		next.add(path);
+	}
+	deactivated = next;
+}
 
-  onDestroy(() => tracker.destroy());
+onDestroy(() => tracker.destroy());
 </script>
 
 {#if tracker.notes.length > 0}
