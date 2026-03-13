@@ -426,13 +426,18 @@ export async function signInWithOpenAICodex(): Promise<CodexSession> {
 
 	await startOpenAICodexAuthServer(expectedState, pkce, redirectUri);
 
-	Logger.info("OpenAI Codex callback server listening", {
-		redirectUri,
-		healthcheckUri: getHealthcheckUri(),
-	});
-	await verifyCallbackServer();
-	Logger.info("OpenAI Codex callback server healthcheck passed");
-	await openBrowser(authorizeUrl);
+	try {
+		Logger.info("OpenAI Codex callback server listening", {
+			redirectUri,
+			healthcheckUri: getHealthcheckUri(),
+		});
+		await verifyCallbackServer();
+		Logger.info("OpenAI Codex callback server healthcheck passed");
+		await openBrowser(authorizeUrl);
+	} catch (error) {
+		cleanupPendingOpenAICodexAuth();
+		throw error;
+	}
 
 	const session = await new Promise<CodexSession>((resolve, reject) => {
 		if (!pendingOpenAICodexAuth) {

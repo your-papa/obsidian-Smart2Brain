@@ -254,13 +254,18 @@ export async function signInWithOpenRouter(): Promise<string> {
 	const authorizeUrl = buildAuthorizeUrl(redirectUri, codeChallenge);
 
 	await startOpenRouterAuthServer(codeVerifier, redirectUri);
-	Logger.info("OpenRouter callback server listening", {
-		redirectUri,
-		healthcheckUri: getHealthcheckUri(),
-	});
-	await verifyCallbackServer();
-	Logger.info("OpenRouter callback server healthcheck passed");
-	await openBrowser(authorizeUrl);
+	try {
+		Logger.info("OpenRouter callback server listening", {
+			redirectUri,
+			healthcheckUri: getHealthcheckUri(),
+		});
+		await verifyCallbackServer();
+		Logger.info("OpenRouter callback server healthcheck passed");
+		await openBrowser(authorizeUrl);
+	} catch (error) {
+		cleanupPendingOpenRouterAuth();
+		throw error;
+	}
 
 	return new Promise<string>((resolve, reject) => {
 		if (!pendingOpenRouterAuth) {

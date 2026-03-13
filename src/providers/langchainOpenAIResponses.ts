@@ -2,7 +2,9 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import type { ChatOpenAI } from "@langchain/openai";
 
 // LangChain ships the Responses model internally but does not export it from the
-// package root yet. Keep the unstable import isolated to this wrapper.
+// package root yet. Keep the unstable import isolated to this wrapper and tied
+// to the currently vendored package layout. Revisit when @langchain/openai
+// publicly exports ChatOpenAIResponses.
 // @ts-ignore Direct node_modules file import is intentionally local to this wrapper.
 import { ChatOpenAIResponses as InternalChatOpenAIResponses } from "../../node_modules/@langchain/openai/dist/chat_models/responses.js";
 
