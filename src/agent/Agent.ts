@@ -23,6 +23,7 @@ import { getPlugin } from "../stores/state.svelte";
 import type { ChatAttachment, ThreadError } from "../types/shared";
 import type { VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../hooks/useSelection.svelte";
+import type { GraphNoteRef } from "../stores/chatStore.svelte";
 import { toBase64DataUri } from "../utils/attachments";
 import { extractTextFromPdf } from "../utils/pdfExtractor";
 import { Logger } from "../utils/logging";
@@ -57,6 +58,8 @@ export interface AgentRunOptions {
 	visibleNotes?: VisibleNoteRef[];
 	/** Snapshot of user-selected text to persist alongside the message */
 	selection?: SelectionRef;
+	/** Notes selected from the Smart Graph */
+	graphNotes?: GraphNoteRef[];
 }
 
 /** Options for editing a message (forks from checkpoint with new user message) */
@@ -121,43 +124,43 @@ export type AgentStreamOptions = AgentRunOptions;
 
 export type AgentStreamChunk =
 	| {
-		type: "token";
-		token: string;
-		runId: string;
-		threadId: string;
-	}
+			type: "token";
+			token: string;
+			runId: string;
+			threadId: string;
+	  }
 	| {
-		type: "tool_start";
-		toolCallId: string;
-		toolName: string;
-		input: unknown;
-		/** The id of the AI message that produced this tool call. */
-		aiMessageId?: string;
-		runId: string;
-		threadId: string;
-	}
+			type: "tool_start";
+			toolCallId: string;
+			toolName: string;
+			input: unknown;
+			/** The id of the AI message that produced this tool call. */
+			aiMessageId?: string;
+			runId: string;
+			threadId: string;
+	  }
 	| {
-		type: "tool_end";
-		toolCallId: string;
-		toolName: string;
-		output: unknown;
-		/** The id of the AI message that produced this tool call. */
-		aiMessageId?: string;
-		runId: string;
-		threadId: string;
-	}
+			type: "tool_end";
+			toolCallId: string;
+			toolName: string;
+			output: unknown;
+			/** The id of the AI message that produced this tool call. */
+			aiMessageId?: string;
+			runId: string;
+			threadId: string;
+	  }
 	| {
-		type: "result";
-		result: AgentResult;
-		runId: string;
-		threadId: string;
-	}
+			type: "result";
+			result: AgentResult;
+			runId: string;
+			threadId: string;
+	  }
 	| {
-		type: "checkpoint_message";
-		message: BaseMessage;
-		runId: string;
-		threadId: string;
-	};
+			type: "checkpoint_message";
+			message: BaseMessage;
+			runId: string;
+			threadId: string;
+	  };
 
 interface SelectedModel {
 	provider: string;
@@ -388,11 +391,13 @@ export class Agent {
 		attachments?: ChatAttachment[],
 		visibleNotes?: VisibleNoteRef[],
 		selection?: SelectionRef,
+		graphNotes?: GraphNoteRef[],
 	): HumanMessage {
 		const additional_kwargs: Record<string, unknown> = {};
 		if (attachments?.length) additional_kwargs.attachments = attachments;
 		if (visibleNotes?.length) additional_kwargs.visibleNotes = visibleNotes;
 		if (selection) additional_kwargs.selection = selection;
+		if (graphNotes?.length) additional_kwargs.graphNotes = graphNotes;
 		const hasKwargs = Object.keys(additional_kwargs).length > 0;
 		// Cast content — the HumanMessage constructor handles both string and
 		// MessageContentComplex[] at runtime, but the TS types are overly strict.
@@ -434,6 +439,7 @@ export class Agent {
 			options.attachments,
 			options.visibleNotes,
 			options.selection,
+			options.graphNotes,
 		);
 
 		const rawResult = await agent.invoke({ messages: [humanMessage] }, invokeConfig);
@@ -498,6 +504,7 @@ export class Agent {
 			options.attachments,
 			options.visibleNotes,
 			options.selection,
+			options.graphNotes,
 		);
 
 		const stream = agent.streamEvents({ messages: [humanMessage] }, streamConfig);
@@ -1038,10 +1045,10 @@ export class Agent {
 		const baseSnapshot = metadata
 			? { ...metadata }
 			: createSnapshot({
-				threadId,
-				updatedAt: checkpointTimestamp,
-				createdAt: checkpointTimestamp,
-			});
+					threadId,
+					updatedAt: checkpointTimestamp,
+					createdAt: checkpointTimestamp,
+				});
 		const messages = tuple ? this.extractMessagesFromCheckpoint(tuple) : [];
 		const { lastError, errorCount } = tuple
 			? this.extractErrorsFromCheckpoint(tuple)
@@ -1612,9 +1619,9 @@ export class Agent {
 	private isAgentOutputCandidate(value: unknown): value is { messages: unknown[] } {
 		return Boolean(
 			value &&
-			typeof value === "object" &&
-			"messages" in (value as Record<string, unknown>) &&
-			Array.isArray((value as { messages?: unknown }).messages),
+				typeof value === "object" &&
+				"messages" in (value as Record<string, unknown>) &&
+				Array.isArray((value as { messages?: unknown }).messages),
 		);
 	}
 

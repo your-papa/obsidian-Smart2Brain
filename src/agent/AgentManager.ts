@@ -15,6 +15,7 @@ import {
 } from "../providers/openrouterModels";
 import type { VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../hooks/useSelection.svelte";
+import type { GraphNoteRef } from "../stores/chatStore.svelte";
 
 import {
 	ProviderAuthError,
@@ -84,13 +85,13 @@ export type AuthValidationResult = { success: true } | { success: false; message
 export type AgentManagerStreamChunk =
 	| { type: "token"; token: string }
 	| Pick<
-		Extract<AgentStreamChunk, { type: "tool_start" }>,
-		"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
-	>
+			Extract<AgentStreamChunk, { type: "tool_start" }>,
+			"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
+	  >
 	| Pick<
-		Extract<AgentStreamChunk, { type: "tool_end" }>,
-		"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
-	>
+			Extract<AgentStreamChunk, { type: "tool_end" }>,
+			"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
+	  >
 	| { type: "result"; result: unknown };
 
 const resolvedVisionSupportCache = new Map<string, boolean>();
@@ -784,6 +785,7 @@ export class AgentManager {
 		attachments?: ChatAttachment[],
 		visibleNotes?: VisibleNoteRef[],
 		selection?: SelectionRef,
+		graphNotes?: GraphNoteRef[],
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		setCurrentThreadId(threadId);
 		try {
@@ -799,6 +801,7 @@ export class AgentManager {
 					attachments,
 					visibleNotes,
 					selection,
+					graphNotes,
 				}),
 				signal,
 				chatModel,
