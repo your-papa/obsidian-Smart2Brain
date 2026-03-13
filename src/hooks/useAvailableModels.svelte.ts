@@ -123,7 +123,7 @@ export class AvailableModels {
 		const out: EmbedModel[] = [];
 		this.#providers.forEach((provider, idx) => {
 			// Check if this provider supports embeddings
-			const providerDef = getProviderDefinition(provider, this.#data.getAllCustomProviderMeta());
+			const providerDef = getProviderDefinition(provider, this.#data.getAllProviderMeta());
 			if (!providerDef || !isEmbeddingProvider(providerDef)) {
 				return; // Skip non-embedding providers
 			}

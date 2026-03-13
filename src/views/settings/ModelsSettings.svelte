@@ -16,7 +16,7 @@ const plugin = getPlugin();
 
 // Helper to get logo for a provider
 function getProviderLogo(providerId: string): Component<LogoProps> {
-	const provider = getProviderDefinition(providerId, data.getAllCustomProviderMeta());
+	const provider = getProviderDefinition(providerId, data.getAllProviderMeta());
 	if (provider && "logo" in provider && provider.logo) {
 		return provider.logo;
 	}
@@ -25,7 +25,7 @@ function getProviderLogo(providerId: string): Component<LogoProps> {
 
 // Helper to get display name for a provider
 function getProviderDisplayName(providerId: string): string {
-	const provider = getProviderDefinition(providerId, data.getAllCustomProviderMeta());
+	const provider = getProviderDefinition(providerId, data.getAllProviderMeta());
 	return provider?.displayName ?? providerId;
 }
 
@@ -33,7 +33,7 @@ let configuredProviders = $derived(data.getConfiguredProviders());
 
 // Helper to check if provider supports generation (all providers support chat)
 function isGenProvider(providerId: string): boolean {
-	return getProviderDefinition(providerId, data.getAllCustomProviderMeta()) !== undefined;
+	return getProviderDefinition(providerId, data.getAllProviderMeta()) !== undefined;
 }
 
 // Helper to check if provider supports embedding
@@ -41,7 +41,7 @@ function isEmbedProvider(providerId: string): boolean {
 	if (!data.isProviderEmbeddingAvailable(providerId)) {
 		return false;
 	}
-	const provider = getProviderDefinition(providerId, data.getAllCustomProviderMeta());
+	const provider = getProviderDefinition(providerId, data.getAllProviderMeta());
 	if (!provider) return false;
 	return isEmbeddingProvider(provider);
 }

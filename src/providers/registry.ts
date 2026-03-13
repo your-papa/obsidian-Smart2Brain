@@ -17,7 +17,7 @@ import type {
 	AuthValidationResult,
 	BaseProviderDefinition,
 	ChatModelConfig,
-	CustomProviderMeta,
+	ProviderInstanceMeta,
 } from "../types/provider/index";
 import { ProviderNotFoundError } from "./errors";
 import { getProviderDefinition } from "./index";
@@ -213,13 +213,13 @@ class ProviderRegistry {
 	 * Useful for settings UI before a provider is configured.
 	 *
 	 * @param id - Provider ID
-	 * @param customMeta - Custom provider metadata (if custom provider)
+	 * @param providerMeta - Provider instance metadata
 	 */
 	static getDefinition(
 		id: string,
-		customMeta?: Record<string, CustomProviderMeta>,
+		providerMeta?: Record<string, ProviderInstanceMeta>,
 	): BaseProviderDefinition | undefined {
-		return getProviderDefinition(id, customMeta);
+		return getProviderDefinition(id, providerMeta);
 	}
 }
 

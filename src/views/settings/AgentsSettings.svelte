@@ -178,7 +178,7 @@ const currentModelDisplay = $derived.by(() => {
 	if (!selectedAgent?.chatModel) return null;
 	const provider = selectedAgent.chatModel.provider;
 	const model = selectedAgent.chatModel.model;
-	const providerDef = getProviderDefinition(provider, pluginData.getAllCustomProviderMeta());
+	const providerDef = getProviderDefinition(provider, pluginData.getAllProviderMeta());
 	return {
 		model,
 		providerName: providerDef?.displayName ?? provider,

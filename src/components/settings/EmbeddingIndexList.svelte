@@ -51,7 +51,7 @@ function formatDate(timestamp: number | null): string {
   {#each indexes as index (index.id)}
     {@const providerDef = getProviderDefinition(
       index.provider,
-      pluginData.getAllCustomProviderMeta(),
+      pluginData.getAllProviderMeta(),
     )}
     {@const Logo =
       providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon}

@@ -2,9 +2,13 @@ import { createServer } from "node:http";
 import type { Server, IncomingMessage, ServerResponse } from "node:http";
 import { Buffer } from "node:buffer";
 import { requestUrl } from "obsidian";
-import { invalidateAuthState, invalidateProviderState } from "../lib/query";
-import { getData } from "../stores/dataStore.svelte";
 import { getPlugin } from "../stores/state.svelte";
+import {
+	clearCodexSession,
+	getCodexSession,
+	getCodexSessionStorageKey,
+	saveCodexSession,
+} from "../stores/providerRuntime.svelte";
 import type { CodexSession } from "../types/provider";
 import { Logger } from "../utils/logging";
 import { performAiFetch } from "../lib/aiTransport";
@@ -17,7 +21,6 @@ const CALLBACK_PATH = "/auth/callback";
 const HEALTHCHECK_PATH = "/health";
 const CALLBACK_HOST = "localhost";
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
-const CODEX_SESSION_STORAGE_KEY = "openai-codex-session";
 const REFRESH_BUFFER_MS = 60_000;
 const OAUTH_TIMEOUT_MS = 5 * 60_000;
 
@@ -221,48 +224,15 @@ function buildCodexSession(tokens: TokenResponse): CodexSession {
 }
 
 export function getStoredOpenAICodexSession(): CodexSession | null {
-	const plugin = getPlugin();
-	const raw = plugin.app.loadLocalStorage(CODEX_SESSION_STORAGE_KEY);
-	if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-		return null;
-	}
-
-	const session = raw as Partial<CodexSession>;
-	if (typeof session.accessToken !== "string" || session.accessToken.trim().length === 0) {
-		return null;
-	}
-	if (typeof session.refreshToken !== "string") {
-		return null;
-	}
-	if (typeof session.expiresAt !== "number" || !Number.isFinite(session.expiresAt)) {
-		return null;
-	}
-	if (session.accountId !== undefined && typeof session.accountId !== "string") {
-		return null;
-	}
-
-	return {
-		accessToken: session.accessToken,
-		refreshToken: session.refreshToken,
-		expiresAt: session.expiresAt,
-		accountId: session.accountId,
-	};
+	return getCodexSession();
 }
 
 export function saveOpenAICodexSession(session: CodexSession): void {
-	const plugin = getPlugin();
-	const data = getData();
-	plugin.app.saveLocalStorage(CODEX_SESSION_STORAGE_KEY, session);
-	data.setProviderAuthMode("openai", "codex");
-	invalidateAuthState("openai");
-	invalidateProviderState("openai");
+	saveCodexSession(session);
 }
 
 export function clearOpenAICodexSession(): void {
-	const plugin = getPlugin();
-	plugin.app.saveLocalStorage(CODEX_SESSION_STORAGE_KEY, null);
-	invalidateAuthState("openai");
-	invalidateProviderState("openai");
+	clearCodexSession();
 }
 
 export async function getValidOpenAICodexSession(forceRefresh = false): Promise<CodexSession | null> {
@@ -598,5 +568,5 @@ export function getOpenAICodexCallbackOrigin(): string {
 }
 
 export function getOpenAICodexSecretId(): string {
-	return CODEX_SESSION_STORAGE_KEY;
+	return getCodexSessionStorageKey();
 }

@@ -1,5 +1,4 @@
 <script lang="ts">
-import { Accordion } from "bits-ui";
 import { t } from "svelte-i18n";
 import { ExcludeFoldersModal } from "../../components/modal/ExcludeFoldersModal";
 import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
@@ -14,6 +13,7 @@ import { getAllProviderTemplates, type ProviderTemplateId } from "../../provider
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { Logger } from "../../utils/logging";
+import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
 
 const pluginData = getData();
 const plugin = getPlugin();
@@ -23,72 +23,29 @@ const privacyListModal = new PrivacyListModal(plugin.app);
 
 // Provider management state
 let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
-let activeProvider: string | undefined = $state(undefined);
 const providerTemplates = getAllProviderTemplates();
 const providerTemplateOptions = providerTemplates.map((template) => ({
 	display: template.displayName,
 	value: template.id,
 }));
 let selectedTemplateId = $state<ProviderTemplateId>("openai-compatible");
-let newProviderName = $state("OpenAI-Compatible");
 let selectedTemplate = $derived(
 	providerTemplates.find((template) => template.id === selectedTemplateId) ?? providerTemplates[0],
-);
-let canCreateProvider = $derived(newProviderName.trim().length > 0);
-
-const onAccordionClick = (providerId: string) => {
-	activeProvider = activeProvider === providerId ? undefined : providerId;
-};
-
-// Sort providers: configured first, then unconfigured
-let sortedProviders = $derived(
-	pluginData.getAllProviderIds().sort((a: string, b: string) => {
-		const aConfigured = configuredProviderIds.includes(a);
-		const bConfigured = configuredProviderIds.includes(b);
-		if (aConfigured && !bConfigured) return -1;
-		if (!aConfigured && bConfigured) return 1;
-		return 0;
-	}),
 );
 
 function handleTemplateChange(templateId: string) {
 	selectedTemplateId = templateId as ProviderTemplateId;
-	if (newProviderName.trim().length === 0) {
-		const template = providerTemplates.find((entry) => entry.id === selectedTemplateId);
-		if (template) {
-			newProviderName = template.displayName;
-		}
-	}
 }
 
-async function handleAddProviderInstance() {
-	if (!canCreateProvider) return;
-
-	await pluginData.addProviderInstance(crypto.randomUUID(), {
-		templateId: selectedTemplateId,
-		displayName: newProviderName.trim(),
-	});
-
-	newProviderName = selectedTemplate?.displayName ?? "New Provider";
+function handleOpenProviderSetup() {
+	new ProviderSetupModal(plugin, { templateId: selectedTemplateId }).open();
 }
 </script>
 
 <!-- Providers -->
 <SettingGroup heading="Providers">
-  {#if sortedProviders.length > 0}
-    <Accordion.Root type="single" bind:value={activeProvider}>
-      {#each sortedProviders as provider (provider)}
-        <ProviderItem {provider} {onAccordionClick} />
-      {/each}
-    </Accordion.Root>
-  {:else}
-    <div class="setting-item-description text-sm px-4 pb-2 text-[--text-muted]">
-      No provider instances configured yet.
-    </div>
-  {/if}
-
   <SettingItem
-    name="Add Provider Instance"
+    name="Add Provider"
     desc={selectedTemplate?.description ?? "Create a provider instance from one of the built-in templates."}
   >
     <div class="flex items-center gap-2 w-full">
@@ -98,14 +55,19 @@ async function handleAddProviderInstance() {
         selected={selectedTemplateId}
         onchange={handleTemplateChange}
       />
-      <Text
-        inputType="text"
-        bind:value={newProviderName}
-        placeholder={selectedTemplate?.displayName ?? "New Provider"}
-      />
-      <Button buttonText="Add" onClick={() => void handleAddProviderInstance()} disabled={!canCreateProvider} />
+      <Button buttonText="Configure Provider" cta={true} onClick={handleOpenProviderSetup} />
     </div>
   </SettingItem>
+
+  {#if configuredProviderIds.length > 0}
+    {#each configuredProviderIds as provider (provider)}
+      <ProviderItem {provider} />
+    {/each}
+  {:else}
+    <div class="setting-item-description text-sm px-4 pb-2 text-[--text-muted]">
+      No provider instances configured yet.
+    </div>
+  {/if}
 </SettingGroup>
 
 <!-- Data Management -->

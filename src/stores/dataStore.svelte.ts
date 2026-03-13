@@ -129,6 +129,7 @@ function buildManagedSecretId(providerId: string, fieldName: string): string {
 
 function createProviderState(templateId: ProviderTemplateId): StoredProviderState {
 	const baseUrlByTemplate: Partial<Record<ProviderTemplateId, string>> = {
+		anthropic: "https://api.anthropic.com",
 		"openai-compatible": "https://api.openai.com",
 		ollama: "http://localhost:11434",
 	};
@@ -1439,21 +1440,8 @@ export class PluginDataStore {
 		return this.#data.providerMeta[providerId];
 	}
 
-	isCustomProvider(_providerId: string): boolean {
-		return false;
-	}
-
 	getAllProviderMeta(): Record<string, ProviderInstanceMeta> {
 		return this.#data.providerMeta;
-	}
-
-	// Temporary compatibility alias while callers migrate away from the old name.
-	getAllCustomProviderMeta(): Record<string, ProviderInstanceMeta> {
-		return this.getAllProviderMeta();
-	}
-
-	getCustomProviderMeta(providerId: string): ProviderInstanceMeta | undefined {
-		return this.getProviderMeta(providerId);
 	}
 
 	/**
@@ -1606,6 +1594,12 @@ export class PluginDataStore {
 		return this.#data.providerMeta[providerId]?.templateId;
 	}
 
+	getProviderIdsByTemplate(templateId: ProviderTemplateId): string[] {
+		return Object.entries(this.#data.providerMeta)
+			.filter(([_, meta]) => meta.templateId === templateId)
+			.map(([providerId]) => providerId);
+	}
+
 	async addProviderInstance(
 		id: string,
 		meta: ProviderInstanceMeta,
@@ -1651,10 +1645,6 @@ export class PluginDataStore {
 		delete this.#data.providerMeta[providerId];
 		delete this.#data.providerConfig[providerId];
 		await this.saveSettings();
-	}
-
-	async deleteCustomProvider(providerId: string): Promise<void> {
-		await this.deleteProvider(providerId);
 	}
 }
 

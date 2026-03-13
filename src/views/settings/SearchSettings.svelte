@@ -71,7 +71,7 @@ const currentEmbedModelDisplay = $derived.by(() => {
 	if (!pluginData.defaultEmbedModel) return null;
 	const provider = pluginData.defaultEmbedModel.provider;
 	const model = pluginData.defaultEmbedModel.model;
-	const providerDef = getProviderDefinition(provider, pluginData.getAllCustomProviderMeta());
+	const providerDef = getProviderDefinition(provider, pluginData.getAllProviderMeta());
 	return {
 		model,
 		providerName: providerDef?.displayName ?? provider,

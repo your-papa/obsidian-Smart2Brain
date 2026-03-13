@@ -430,7 +430,7 @@ export class AgentManager {
 			if (!providerId) return [];
 
 			const pluginData = getData();
-			const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+			const providerDef = getProviderDefinition(providerId, pluginData.getAllProviderMeta());
 
 			if (providerDef) {
 				const resolvedAuth = pluginData.getResolvedAuthState(providerId);
@@ -459,7 +459,7 @@ export class AgentManager {
 	 */
 	private registerProvider(providerId: string, auth: AuthObject): void {
 		const pluginData = getData();
-		const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+		const providerDef = getProviderDefinition(providerId, pluginData.getAllProviderMeta());
 
 		if (!providerDef) {
 			throw new Error(`Unknown provider: ${providerId}`);
@@ -485,7 +485,7 @@ export class AgentManager {
 	 */
 	async validateProviderAuth(providerId: string, auth: AuthObject): Promise<AuthValidationResult> {
 		const pluginData = getData();
-		const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+		const providerDef = getProviderDefinition(providerId, pluginData.getAllProviderMeta());
 
 		if (!providerDef) {
 			return { success: false, message: `Unknown provider: ${providerId}` };

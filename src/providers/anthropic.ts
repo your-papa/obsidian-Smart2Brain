@@ -6,7 +6,7 @@
  * - NO embedding models (Anthropic doesn't offer embeddings)
  * - Model discovery via Anthropic API (/v1/models)
  *
- * Authentication: apiKey (required), headers (optional)
+ * Authentication: apiKey (required), baseUrl (optional), headers (optional)
  */
 
 import { ChatAnthropic } from "@langchain/anthropic";
@@ -32,6 +32,24 @@ const ANTHROPIC_API_VERSION = "2023-06-01";
 // =============================================================================
 // Helper Functions
 // =============================================================================
+
+function sanitizeBaseUrl(url: string): string {
+	return url.replace(/\/+$/, "");
+}
+
+function buildAnthropicHeaders(auth: AuthObject): Record<string, string> {
+	const headers: Record<string, string> = {
+		"x-api-key": auth.apiKey ?? "",
+		"anthropic-version": ANTHROPIC_API_VERSION,
+		"Content-Type": "application/json",
+	};
+
+	if (auth.headers) {
+		Object.assign(headers, auth.headers);
+	}
+
+	return headers;
+}
 
 /**
  * Safely reads response text, returning undefined on error.
@@ -101,6 +119,13 @@ export const anthropicProvider: BaseProviderDefinition = {
 			required: true,
 			placeholder: "sk-ant-...",
 		},
+		baseUrl: {
+			label: "Base URL",
+			description: "The base URL for the Anthropic-compatible API endpoint",
+			kind: "text",
+			required: false,
+			placeholder: ANTHROPIC_DEFAULT_BASE_URL,
+		},
 		headers: {
 			label: "Custom Headers",
 			description: "Additional headers as JSON (optional)",
@@ -115,9 +140,14 @@ export const anthropicProvider: BaseProviderDefinition = {
 	// =========================================================================
 
 	createChatInstance: (auth: AuthObject, modelId: string, options?: Partial<ChatModelConfig>) => {
+		const resolvedBaseUrl = sanitizeBaseUrl(auth.baseUrl || ANTHROPIC_DEFAULT_BASE_URL);
 		const config: Record<string, unknown> = {
 			model: modelId,
 			apiKey: auth.apiKey,
+			clientOptions: {
+				baseURL: resolvedBaseUrl,
+				defaultHeaders: auth.headers,
+			},
 		};
 
 		if (options?.temperature !== undefined) {
@@ -141,13 +171,10 @@ export const anthropicProvider: BaseProviderDefinition = {
 
 		let response: Response;
 		try {
-			response = await globalThis.fetch(`${ANTHROPIC_DEFAULT_BASE_URL}/v1/messages`, {
+			const baseUrl = sanitizeBaseUrl(auth.baseUrl || ANTHROPIC_DEFAULT_BASE_URL);
+			response = await globalThis.fetch(`${baseUrl}/v1/messages`, {
 				method: "POST",
-				headers: {
-					"x-api-key": auth.apiKey,
-					"anthropic-version": ANTHROPIC_API_VERSION,
-					"Content-Type": "application/json",
-				},
+				headers: buildAnthropicHeaders(auth),
 				body: JSON.stringify({
 					model: "claude-3-5-sonnet-20241022",
 					max_tokens: 1,
@@ -189,13 +216,10 @@ export const anthropicProvider: BaseProviderDefinition = {
 			throw new Error("Anthropic model discovery requires an API key.");
 		}
 
-		const response = await globalThis.fetch(`${ANTHROPIC_DEFAULT_BASE_URL}/v1/models`, {
+		const baseUrl = sanitizeBaseUrl(auth.baseUrl || ANTHROPIC_DEFAULT_BASE_URL);
+		const response = await globalThis.fetch(`${baseUrl}/v1/models`, {
 			method: "GET",
-			headers: {
-				"x-api-key": auth.apiKey,
-				"anthropic-version": ANTHROPIC_API_VERSION,
-				"Content-Type": "application/json",
-			},
+			headers: buildAnthropicHeaders(auth),
 		});
 
 		if (!response.ok) {

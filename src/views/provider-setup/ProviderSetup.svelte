@@ -4,16 +4,14 @@ import { mount, onMount } from "svelte";
 import AuthConfigFields from "../../components/settings/AuthConfigFields.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
+import Text from "../../components/ui/Text.svelte";
 import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
 import { createAuthStateQuery, invalidateAuthState, invalidateProviderState } from "../../lib/query";
 import type SecondBrainPlugin from "../../main";
 import { type LogoProps, getProviderDefinition } from "../../providers/index";
-import {
-	clearOpenAICodexSession,
-	getStoredOpenAICodexSession,
-	signInWithOpenAICodex,
-} from "../../providers/openaiCodex";
+import { clearOpenAICodexSession, signInWithOpenAICodex } from "../../providers/openaiCodex";
 import { getData } from "../../stores/dataStore.svelte";
+import { getCodexSession } from "../../stores/providerRuntime.svelte";
 import { icon } from "../../utils/utils";
 import type { ProviderSetupModal } from "./ProviderSetup";
 
@@ -28,23 +26,33 @@ const data = getData();
 const query = createAuthStateQuery(() => selectedProvider);
 const providerDefinition = $derived(getProviderDefinition(selectedProvider, data.getAllProviderMeta()));
 const templateId = $derived(data.getProviderTemplateId(selectedProvider));
+let providerMeta = $derived(data.getProviderMeta(selectedProvider));
 const isCodex = $derived(templateId === "openai-codex");
 let isSigningIn = $state(false);
 let codexActionError = $state<string | null>(null);
-let codexSession = $state<ReturnType<typeof getStoredOpenAICodexSession>>(null);
-
-function syncCodexSession() {
-	codexSession = isCodex ? getStoredOpenAICodexSession() : null;
-}
+let codexSession = $derived(isCodex ? getCodexSession() : null);
+let displayName = $state("");
 
 $effect(() => {
-	syncCodexSession();
+	displayName = providerMeta?.displayName ?? "";
 });
 
 function handleAddProvider() {
 	data.setProviderConfigured(selectedProvider, true);
 	invalidateProviderState(selectedProvider);
+	modal.markSubmitted();
 	modal.close();
+}
+
+async function handleDisplayNameBlur(nextName: string) {
+	const trimmedName = nextName.trim();
+	if (!trimmedName || trimmedName === providerMeta?.displayName) {
+		displayName = providerMeta?.displayName ?? "";
+		return;
+	}
+
+	await data.updateProviderMeta(selectedProvider, { displayName: trimmedName });
+	displayName = trimmedName;
 }
 
 async function handleCodexSignIn() {
@@ -52,7 +60,6 @@ async function handleCodexSignIn() {
 	codexActionError = null;
 	try {
 		await signInWithOpenAICodex();
-		syncCodexSession();
 		invalidateAuthState(selectedProvider);
 	} catch (error) {
 		codexActionError = error instanceof Error ? error.message : String(error);
@@ -64,7 +71,6 @@ async function handleCodexSignIn() {
 function handleCodexDisconnect() {
 	clearOpenAICodexSession();
 	codexActionError = null;
-	syncCodexSession();
 	invalidateAuthState(selectedProvider);
 }
 
@@ -103,6 +109,15 @@ onMount(() => {
 </script>
 
 <div class="modal-content">
+  <SettingItem name="Provider Name" desc="Name this provider instance so you can distinguish it later.">
+    <Text
+      inputType="text"
+      value={displayName}
+      placeholder={providerDefinition?.displayName ?? "New Provider"}
+      onblur={(value: string) => void handleDisplayNameBlur(value)}
+    />
+  </SettingItem>
+
   {#if isCodex}
     <div class="setting-item">
       <div class="setting-item-description">

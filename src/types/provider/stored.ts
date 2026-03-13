@@ -19,6 +19,3 @@ export interface ProviderInstanceMeta {
 	/** User-visible display name for the configured instance. */
 	displayName: string;
 }
-
-// Temporary compatibility alias while callers migrate from the old custom-provider naming.
-export type CustomProviderMeta = ProviderInstanceMeta;
