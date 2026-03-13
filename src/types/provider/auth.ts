@@ -71,7 +71,7 @@ export interface AuthObject {
 
 export interface CodexSession {
 	accessToken: string;
-	refreshToken: string;
+	refreshToken?: string;
 	expiresAt: number;
 	accountId?: string;
 }

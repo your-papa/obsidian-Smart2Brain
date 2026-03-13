@@ -218,7 +218,7 @@ async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> 
 function buildCodexSession(tokens: TokenResponse): CodexSession {
 	return {
 		accessToken: tokens.access_token,
-		refreshToken: tokens.refresh_token ?? "",
+		refreshToken: tokens.refresh_token,
 		expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
 		accountId: extractAccountId(tokens),
 	};
@@ -237,6 +237,11 @@ export function clearOpenAICodexSession(): void {
 }
 
 async function refreshStoredOpenAICodexSession(stored: CodexSession): Promise<CodexSession | null> {
+	if (!stored.refreshToken) {
+		clearOpenAICodexSession();
+		return null;
+	}
+
 	try {
 		const refreshed = await refreshAccessToken(stored.refreshToken);
 		const nextSession: CodexSession = {
@@ -255,13 +260,18 @@ async function refreshStoredOpenAICodexSession(stored: CodexSession): Promise<Co
 
 export async function getValidOpenAICodexSession(forceRefresh = false): Promise<CodexSession | null> {
 	const stored = getStoredOpenAICodexSession();
-	if (!stored?.refreshToken) {
-		return stored;
+	if (!stored) {
+		return null;
 	}
 
 	const shouldRefresh = forceRefresh || stored.expiresAt - REFRESH_BUFFER_MS <= Date.now();
 	if (!shouldRefresh) {
 		return stored;
+	}
+
+	if (!stored.refreshToken) {
+		clearOpenAICodexSession();
+		return null;
 	}
 
 	if (!pendingOpenAICodexRefresh) {

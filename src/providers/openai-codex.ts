@@ -7,8 +7,36 @@ import type {
 	ChatModelConfig,
 } from "../types/provider/index";
 import { createOpenAICodexFetch, getValidOpenAICodexSession } from "./openaiCodex";
+import { fetchOpenRouterModels, isEmbeddingModel, type OpenRouterModelInfo } from "./openrouterModels";
 
 const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
+
+function isCodexDiscoverableOpenAIModel(model: OpenRouterModelInfo): boolean {
+	if (!model.id.startsWith("openai/")) {
+		return false;
+	}
+
+	if (isEmbeddingModel(model)) {
+		return false;
+	}
+
+	const modelId = model.id.slice("openai/".length).toLowerCase();
+	if (!modelId || modelId.includes(":")) {
+		return false;
+	}
+
+	const outputModalities = model.architecture?.output_modalities ?? [];
+	if (outputModalities.length > 0 && !outputModalities.includes("text")) {
+		return false;
+	}
+
+	return !(
+		modelId.includes("audio") ||
+		modelId.includes("image") ||
+		modelId.includes("deep-research") ||
+		modelId.includes("safeguard")
+	);
+}
 
 export function openAICodexProvider(providerId: string, displayName = "OpenAI Codex"): BaseProviderDefinition {
 	return {
@@ -55,8 +83,19 @@ export function openAICodexProvider(providerId: string, displayName = "OpenAI Co
 			return { valid: true };
 		},
 		discoverModels: async (): Promise<string[]> => {
-			// Reuse the models.dev fallback path already used by the OpenAI provider.
-			return ["gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4.1-mini"];
+			const models = await fetchOpenRouterModels();
+			if (!models) {
+				return [];
+			}
+
+			return Array.from(
+				new Set(
+					Array.from(models.values())
+						.filter(isCodexDiscoverableOpenAIModel)
+						.map((model) => model.id.split("/").pop()?.trim())
+						.filter((modelId): modelId is string => Boolean(modelId)),
+				),
+			).sort((a, b) => a.localeCompare(b));
 		},
 	};
 }

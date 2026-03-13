@@ -19,7 +19,7 @@ function readStoredCodexSession(): CodexSession | null {
 	if (typeof session.accessToken !== "string" || session.accessToken.trim().length === 0) {
 		return null;
 	}
-	if (typeof session.refreshToken !== "string") {
+	if (session.refreshToken !== undefined && typeof session.refreshToken !== "string") {
 		return null;
 	}
 	if (typeof session.expiresAt !== "number" || !Number.isFinite(session.expiresAt)) {
