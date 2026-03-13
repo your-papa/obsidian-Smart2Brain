@@ -1,10 +1,10 @@
-import { type App, TFile } from "obsidian";
+import { type App, TFile, resolveSubpath } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { isImageExtension, isPdfExtension, isTextExtension, resolveVaultFileDetailed } from "../../utils/attachments";
-import { extractTextFromPdf } from "../../utils/pdfExtractor";
+import { extractTextFromPdf, extractTextFromPdfPages } from "../../utils/pdfExtractor";
 
 const MAX_PDF_CHARS = 180_000;
 
@@ -49,7 +49,12 @@ function truncateContent(content: string, maxChars: number): string {
 	return `${content.slice(0, maxChars)}\n\n[...truncated ${content.length - maxChars} characters to fit context limits...]`;
 }
 
-function extractLinkPath(input: string): string {
+interface LinkInfo {
+	path: string;
+	subpath: string;
+}
+
+function extractLinkInfo(input: string): LinkInfo {
 	const trimmed = input.trim();
 	let inner = trimmed;
 
@@ -60,8 +65,18 @@ function extractLinkPath(input: string): string {
 	}
 
 	const withoutAlias = inner.split("|")[0]?.trim() ?? "";
-	const withoutHeading = withoutAlias.split("#")[0]?.trim() ?? "";
-	return withoutHeading;
+	const hashIndex = withoutAlias.indexOf("#");
+	if (hashIndex === -1) {
+		return { path: withoutAlias, subpath: "" };
+	}
+	return {
+		path: withoutAlias.slice(0, hashIndex).trim(),
+		subpath: withoutAlias.slice(hashIndex),
+	};
+}
+
+function extractLinkPath(input: string): string {
+	return extractLinkInfo(input).path;
 }
 
 function tryExactMarkdownPath(app: App, path: string): TFile | null {
@@ -161,6 +176,54 @@ function resolveAnyFile(app: App, rawPath: string): { file: TFile | null; error?
 	}
 
 	return { file: resolved.file };
+}
+
+function parsePdfPageFragment(subpath: string): number | null {
+	if (!subpath) return null;
+	const match = subpath.match(/^#page=(\d+)/);
+	if (!match) return null;
+	return Number.parseInt(match[1], 10);
+}
+
+function extractSubpathContent(
+	app: App,
+	file: TFile,
+	content: string,
+	subpath: string,
+): { text: string; label: string; error?: undefined } | { error: string; text?: undefined; label?: undefined } {
+	const cache = app.metadataCache.getFileCache(file);
+	if (!cache) {
+		return { error: `Error: No cached metadata available for "${file.path}". The file may not be indexed yet.` };
+	}
+
+	const result = resolveSubpath(cache, subpath);
+	if (!result) {
+		const available: string[] = [];
+		if (cache.headings?.length) {
+			available.push(
+				"Headings:\n" + cache.headings.map((h) => `  ${"#".repeat(h.level)} ${h.heading}`).join("\n"),
+			);
+		}
+		if (cache.blocks && Object.keys(cache.blocks).length > 0) {
+			available.push(
+				"Block IDs:\n" +
+					Object.keys(cache.blocks)
+						.map((id) => `  ^${id}`)
+						.join("\n"),
+			);
+		}
+		const availableStr = available.length > 0 ? `\nAvailable targets:\n${available.join("\n")}` : "";
+		return {
+			error: `Error: Could not resolve "${subpath}" in "${file.path}".${availableStr}`,
+		};
+	}
+
+	const startOffset = result.start.offset;
+	const endOffset = result.end?.offset ?? content.length;
+	const text = content.slice(startOffset, endOffset).trim();
+
+	const label = result.type === "heading" ? `section "${subpath.slice(1)}"` : `block ${subpath}`;
+	return { text, label };
 }
 
 function isExcalidrawFile(file: TFile): boolean {
@@ -350,6 +413,7 @@ export function createReadContentTool(app: App) {
 	const getToolConfig = () => pluginData.getSelectedAgent().toolsConfig.read_content;
 
 	const readContentFn = async ({ path }: { path: string }): Promise<string> => {
+		const { subpath } = extractLinkInfo(path);
 		const resolved = resolveAnyFile(app, path);
 		if (!resolved.file) {
 			return resolved.error ?? `Error: File not found for "${path}"`;
@@ -375,6 +439,19 @@ export function createReadContentTool(app: App) {
 			if (isPdfExtension(ext)) {
 				const buffer = await app.vault.readBinary(file);
 				const data = new Uint8Array(buffer);
+
+				const pageNum = parsePdfPageFragment(subpath);
+				if (pageNum != null) {
+					const result = await extractTextFromPdfPages(data, [pageNum]);
+					if (pageNum < 1 || pageNum > result.totalPages) {
+						return `Error: Page ${pageNum} is out of range. PDF "${file.name}" has ${result.totalPages} page(s) (valid range: 1\u2013${result.totalPages}).`;
+					}
+					if (!result.text.trim()) {
+						return `PDF "${file.name}" page ${pageNum} contains no extractable text. The page may contain only images/scans.`;
+					}
+					return `Content of PDF "${file.name}" (page ${pageNum} of ${result.totalPages}):\n\n${result.text}`;
+				}
+
 				const { text, totalPages } = await extractTextFromPdf(data);
 
 				if (!text.trim()) {
@@ -394,6 +471,13 @@ export function createReadContentTool(app: App) {
 
 			if (isTextExtension(ext)) {
 				const content = await app.vault.read(file);
+
+				if (subpath) {
+					const sectionResult = extractSubpathContent(app, file, content, subpath);
+					if (sectionResult.error) return sectionResult.error;
+					return `Content of "${file.path}" (${sectionResult.label}):\n\n${sectionResult.text}`;
+				}
+
 				const currentConfig = getToolConfig();
 				const settings = currentConfig?.settings as { maxContentLength?: number } | undefined;
 				const maxLength = settings?.maxContentLength ?? 0;
@@ -420,7 +504,7 @@ export function createReadContentTool(app: App) {
 			path: z
 				.string()
 				.describe(
-					"File reference as full path or wiki link (e.g., 'folder/note.md', '[[Note Name]]', or '![[docs/report.pdf]]').",
+					"File reference as full path or wiki link. Supports heading fragments (e.g., '[[Note#Section]]'), block references (e.g., '[[Note#^block-id]]'), and PDF page references (e.g., '[[lecture.pdf#page=3]]'). When a fragment is provided, only the referenced section, block, or page is returned.",
 				),
 		}),
 	});

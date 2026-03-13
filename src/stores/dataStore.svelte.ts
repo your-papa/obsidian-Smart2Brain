@@ -208,7 +208,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "read_content",
 		description:
-			"Read the full content of notes and vault files by path or wiki link (e.g., [[Daily Note]] or ![[report.pdf]]). Supports markdown/text files (.md, .txt, .csv, .json), extracts text from PDFs, and reads Excalidraw drawings (.excalidraw.md) including all elements with their types, positions, dimensions, text content, and connections. Images must be attached directly in chat.",
+			"Read content of notes and vault files by path or wiki link. Supports heading fragments (e.g., [[Note#Section]]), block references (e.g., [[Note#^block-id]]), and PDF page references (e.g., [[report.pdf#page=3]]). When a fragment is provided, only the referenced section, block, or page is returned. Also supports full files: markdown/text (.md, .txt, .csv, .json), PDFs, and Excalidraw drawings. Images must be attached directly in chat.",
 		settings: {
 			maxContentLength: 0,
 		},
