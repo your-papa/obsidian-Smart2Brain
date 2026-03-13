@@ -1620,7 +1620,13 @@ export class PluginDataStore {
 	getProviderAuthMode(providerId: string): OpenAIAuthMode {
 		const config = this.#data.providerConfig[providerId];
 		if (!config) return "apiKey";
-		return config.auth.authMode ?? (providerId === "openai" ? "codex" : "apiKey");
+		if (config.auth.authMode !== undefined) {
+			return config.auth.authMode;
+		}
+		if (providerId === "openai" && config.auth.secretIds.apiKey) {
+			return "apiKey";
+		}
+		return providerId === "openai" ? "codex" : "apiKey";
 	}
 
 	setProviderAuthMode(providerId: string, authMode: OpenAIAuthMode): void {
