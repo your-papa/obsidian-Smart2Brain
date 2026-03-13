@@ -279,3 +279,13 @@
 	font-family: var(--font-monospace);
 	font-size: var(--font-smaller);
 }
+
+/* Selection highlight — dim accent background persisted after focus leaves the note */
+.s2b-selection-highlight {
+	background-color: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+	border-radius: 2px;
+}
+
+::highlight(s2b-selection) {
+	background-color: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+}

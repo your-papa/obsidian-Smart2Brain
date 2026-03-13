@@ -1,56 +1,66 @@
 <script lang="ts">
-import { onDestroy } from "svelte";
-import { VisibleNotesTracker, toVisibleNoteRefs, type VisibleNoteRef } from "../../hooks/useVisibleNotes.svelte";
-import { icon } from "../../utils/utils";
+  import { onDestroy } from "svelte";
+  import {
+    VisibleNotesTracker,
+    toVisibleNoteRefs,
+    type VisibleNoteRef,
+  } from "../../hooks/useVisibleNotes.svelte";
+  import { icon } from "../../utils/utils";
 
-interface Props {
-	/** Bindable: the currently active (non-deactivated) notes as serializable refs. */
-	activeNotes?: VisibleNoteRef[];
-}
+  interface Props {
+    /** Bindable: the currently active (non-deactivated) notes as serializable refs. */
+    activeNotes?: VisibleNoteRef[];
+    /** Path to exclude from display (e.g. when a selection chip covers this note). */
+    excludePath?: string;
+  }
 
-let { activeNotes = $bindable([]) }: Props = $props();
+  let { activeNotes = $bindable([]), excludePath }: Props = $props();
 
-const tracker = new VisibleNotesTracker();
-let deactivated = $state(new Set<string>());
+  const tracker = new VisibleNotesTracker();
+  let deactivated = $state(new Set<string>());
 
-// Keep activeNotes in sync with tracker + deactivated set
-$effect(() => {
-	const active = tracker.notes.filter((n) => !deactivated.has(n.file.path));
-	activeNotes = toVisibleNoteRefs(active);
-});
+  // Keep activeNotes in sync with tracker + deactivated set + excludePath
+  $effect(() => {
+    const active = tracker.notes.filter(
+      (n) => !deactivated.has(n.file.path) && n.file.path !== excludePath,
+    );
+    activeNotes = toVisibleNoteRefs(active);
+  });
 
-function toggle(path: string) {
-	const next = new Set(deactivated);
-	if (next.has(path)) {
-		next.delete(path);
-	} else {
-		next.add(path);
-	}
-	deactivated = next;
-}
+  function toggle(path: string) {
+    const next = new Set(deactivated);
+    if (next.has(path)) {
+      next.delete(path);
+    } else {
+      next.add(path);
+    }
+    deactivated = next;
+  }
 
-onDestroy(() => tracker.destroy());
+  onDestroy(() => tracker.destroy());
 </script>
 
 {#if tracker.notes.length > 0}
   <div class="visible-notes-chips flex flex-row flex-wrap gap-1.5 pt-2">
     {#each tracker.notes as note (note.file.path)}
-      <button
-        type="button"
-        class="visible-note-chip"
-        class:deactivated={deactivated.has(note.file.path)}
-        onclick={() => toggle(note.file.path)}
-        title={deactivated.has(note.file.path)
-          ? `${note.file.path} (excluded — click to include)`
-          : `${note.file.path} (included — click to exclude)`}
-      >
-        <div class="chip-icon" use:icon={note.icon} style="--icon-size: 12px"></div>
-        <span
-          >{note.file.basename}{#if note.context}<span class="chip-context">
-              · {note.context}</span
-            >{/if}</span
+      {#if note.file.path !== excludePath}
+        <button
+          type="button"
+          class="visible-note-chip"
+          class:deactivated={deactivated.has(note.file.path)}
+          onclick={() => toggle(note.file.path)}
+          title={deactivated.has(note.file.path)
+            ? `${note.file.path} (excluded — click to include)`
+            : `${note.file.path} (included — click to exclude)`}
         >
-      </button>
+          <div class="chip-icon" use:icon={note.icon} style="--icon-size: 12px"></div>
+          <span
+            >{note.file.basename}{#if note.context}<span class="chip-context">
+                · {note.context}</span
+              >{/if}</span
+          >
+        </button>
+      {/if}
     {/each}
   </div>
 {/if}

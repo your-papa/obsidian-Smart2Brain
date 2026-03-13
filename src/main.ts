@@ -4,6 +4,7 @@ import { Logger as Log } from "./utils/logging";
 import "./styles.css";
 import { AgentManager } from "./agent/AgentManager";
 import { inlineDiffPlugin } from "./editor/inlineDiffExtension";
+import { selectionHighlightPlugin } from "./editor/selectionHighlightExtension";
 import { createReadingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
 import { terminateWorker as terminateClusteringWorker } from "./utils/computeWorkerManager";
 import { SearchModal } from "./components/modal/SearchModal";
@@ -103,6 +104,9 @@ export default class SecondBrainPlugin extends Plugin {
 
 		// Register inline diff decorations in the editor
 		this.registerEditorExtension(inlineDiffPlugin);
+
+		// Register selection highlight persistence (dim accent marks for captured selections)
+		this.registerEditorExtension(selectionHighlightPlugin);
 
 		// Register reading view diff highlighting
 		this.registerMarkdownPostProcessor(createReadingViewDiffPostProcessor(this));
