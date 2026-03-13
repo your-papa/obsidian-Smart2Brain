@@ -61,19 +61,78 @@ function getPdfContext(view: unknown): string | undefined {
 	return undefined;
 }
 
+function getTopVisibleLine(view: MarkdownView): number | undefined {
+	try {
+		const editor = view.editor;
+		if (!editor) return undefined;
+		// Access internal CodeMirror 6 EditorView for scroll-based line detection
+		// biome-ignore lint/suspicious/noExplicitAny: Obsidian internal CM6 API
+		const cm = (editor as any).cm;
+		if (cm?.lineBlockAtHeight && cm?.scrollDOM) {
+			const scrollTop = cm.scrollDOM.scrollTop;
+			// Use top third of visible area so a heading fully on screen is picked up
+			const offset = cm.scrollDOM.clientHeight / 3;
+			const block = cm.lineBlockAtHeight(scrollTop + offset);
+			if (block) {
+				const doc = cm.state?.doc;
+				if (doc) return doc.lineAt(block.from).number - 1; // 0-indexed
+			}
+		}
+	} catch {
+		/* CM internals may change */
+	}
+	// Fallback to cursor position
+	return view.editor?.getCursor()?.line;
+}
+
+function getReadingModeHeading(view: MarkdownView): string | undefined {
+	try {
+		const container = view.previewMode?.containerEl;
+		if (!container) return undefined;
+		const scroller = container.querySelector(".markdown-preview-sizer") ?? container;
+		const headingEls = scroller.querySelectorAll("h1, h2, h3, h4, h5, h6");
+		if (!headingEls.length) return undefined;
+
+		const containerRect = container.getBoundingClientRect();
+		let best: Element | undefined;
+		// Use top third of the visible area as the threshold so a heading
+		// that is fully visible (but not scrolled flush to the top) is picked up.
+		const threshold = containerRect.top + containerRect.height / 3;
+		for (const el of headingEls) {
+			const rect = el.getBoundingClientRect();
+			if (rect.top <= threshold) {
+				best = el;
+			} else {
+				break;
+			}
+		}
+		if (!best) return undefined;
+		const text = best.textContent?.trim();
+		return text ? `§ ${text}` : undefined;
+	} catch {
+		/* safety net */
+	}
+	return undefined;
+}
+
 function getMarkdownContext(view: unknown): string | undefined {
 	try {
 		if (!(view instanceof MarkdownView) || !view.file) return undefined;
+
+		// Reading Mode: use DOM heading positions
+		if (view.getMode() === "preview") {
+			return getReadingModeHeading(view);
+		}
+
+		// Edit Mode: use CM6 scroll position + metadata cache
 		const cache = view.app.metadataCache.getFileCache(view.file);
 		const headings = cache?.headings;
 		if (!headings?.length) return undefined;
 
-		// Use ephemeral scroll / cursor position to pick the nearest heading
-		const cursor = view.editor?.getCursor();
-		if (!cursor) return undefined;
-		const line = cursor.line;
+		const line = getTopVisibleLine(view);
+		if (line == null) return undefined;
 
-		// Walk headings in reverse to find the last one at or before the cursor
+		// Walk headings in reverse to find the last one at or before the visible line
 		for (let i = headings.length - 1; i >= 0; i--) {
 			if (headings[i].position.start.line <= line) {
 				return `§ ${headings[i].heading}`;
