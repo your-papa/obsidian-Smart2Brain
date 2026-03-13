@@ -119,6 +119,10 @@ export interface SearchNotesSettings {
 export interface ReadNoteSettings {
 	/** Maximum content length to return (0 = unlimited) */
 	maxContentLength: number;
+	/** Vision model for images: undefined = auto-derive from chat model, null = disabled, ChatModel = explicit */
+	imageProcessor?: import("../stores/chatStore.svelte").ChatModel | null;
+	/** Vision model for PDFs: undefined = auto-derive from chat model, null = disabled, ChatModel = explicit */
+	pdfProcessor?: import("../stores/chatStore.svelte").ChatModel | null;
 }
 
 /**

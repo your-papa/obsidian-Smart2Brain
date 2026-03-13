@@ -189,6 +189,83 @@ export const DEFAULT_BUILTIN_PROVIDER_STATES: Record<BuiltInProviderId, StoredPr
  */
 export const DEFAULT_AGENT_ID = "default-agent";
 
+const READ_CONTENT_GUIDANCE_SHARED = `When reading a note that contains embedded PDFs (\`![[doc.pdf]]\`) or text files (\`![[notes.md]]\`, \`![[data.csv]]\`), use \`read_content\` to read them.
+When the user attaches files directly in the chat (PDFs, images, or text files), they are included automatically in the message — no need to call \`read_content\` for those. Attached PDFs and images are processed natively by the model, which is more capable than text extraction.
+Text files (.md, .txt, .csv, .json) are returned as-is.
+PDF page references are supported: \`[[report.pdf#page=3]]\` for a single page, \`[[report.pdf#page=1-3,5]]\` for multiple pages or ranges. Only the requested pages are returned.`;
+
+/** No processors: images can't be read, PDFs use text extraction */
+export const READ_CONTENT_GUIDANCE_NONE = `${READ_CONTENT_GUIDANCE_SHARED}
+For images (\`![[image.png]]\` or \`![alt](image.png)\`), \`read_content\` cannot process them visually. Ask the user to attach images directly in the chat input instead.
+PDFs accessed via \`read_content\` are converted to plain text locally. This works for any model but loses layout, images, and formatting. If precise visual understanding matters, suggest the user attach the PDF directly instead.`;
+
+/** Image processor only: images analyzed by vision model, PDFs use text extraction */
+export const READ_CONTENT_GUIDANCE_IMAGE = `${READ_CONTENT_GUIDANCE_SHARED}
+For images (\`![[image.png]]\` or \`![alt](image.png)\`), \`read_content\` analyzes them using a vision model. Use it to read and understand images in notes.
+PDFs accessed via \`read_content\` are converted to plain text locally. This works for any model but loses layout, images, and formatting. If precise visual understanding matters, suggest the user attach the PDF directly instead.`;
+
+/** PDF processor only: images can't be read, PDFs analyzed by vision model */
+export const READ_CONTENT_GUIDANCE_PDF = `${READ_CONTENT_GUIDANCE_SHARED}
+For images (\`![[image.png]]\` or \`![alt](image.png)\`), \`read_content\` cannot process them visually. Ask the user to attach images directly in the chat input instead.
+PDFs accessed via \`read_content\` are analyzed by a vision model with full understanding of charts, tables, diagrams, and visual layout.`;
+
+/** Both processors: images and PDFs analyzed by vision model */
+export const READ_CONTENT_GUIDANCE_BOTH = `${READ_CONTENT_GUIDANCE_SHARED}
+For images (\`![[image.png]]\` or \`![alt](image.png)\`), \`read_content\` analyzes them using a vision model. Use it to read and understand images in notes.
+PDFs accessed via \`read_content\` are analyzed by a vision model with full understanding of charts, tables, diagrams, and visual layout.`;
+
+/** All 4 default guidance variants for matching against user config */
+export const READ_CONTENT_GUIDANCE_DEFAULTS = new Set([
+	READ_CONTENT_GUIDANCE_NONE,
+	READ_CONTENT_GUIDANCE_IMAGE,
+	READ_CONTENT_GUIDANCE_PDF,
+	READ_CONTENT_GUIDANCE_BOTH,
+]);
+
+/**
+ * Returns the appropriate read_content prompt guidance based on processor configuration.
+ */
+export function getReadContentGuidance(hasImageProcessor: boolean, hasPdfProcessor: boolean): string {
+	if (hasImageProcessor && hasPdfProcessor) return READ_CONTENT_GUIDANCE_BOTH;
+	if (hasImageProcessor) return READ_CONTENT_GUIDANCE_IMAGE;
+	if (hasPdfProcessor) return READ_CONTENT_GUIDANCE_PDF;
+	return READ_CONTENT_GUIDANCE_NONE;
+}
+
+// --- read_content tool description variants ---
+
+const READ_CONTENT_DESC_SHARED = "Read content of vault files by path or wiki link.";
+
+/** No processors: images can't be read */
+export const READ_CONTENT_DESC_NONE = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs, and Excalidraw. Images must be attached directly in chat.`;
+
+/** Image processor only */
+export const READ_CONTENT_DESC_IMAGE = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs, images, and Excalidraw.`;
+
+/** PDF processor only */
+export const READ_CONTENT_DESC_PDF = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs (analyzed via vision model), and Excalidraw. Images must be attached directly in chat.`;
+
+/** Both processors */
+export const READ_CONTENT_DESC_BOTH = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs (analyzed via vision model), images, and Excalidraw.`;
+
+/** All 4 default description variants for matching */
+export const READ_CONTENT_DESC_DEFAULTS = new Set([
+	READ_CONTENT_DESC_NONE,
+	READ_CONTENT_DESC_IMAGE,
+	READ_CONTENT_DESC_PDF,
+	READ_CONTENT_DESC_BOTH,
+]);
+
+/**
+ * Returns the appropriate read_content description based on processor configuration.
+ */
+export function getReadContentDescription(hasImageProcessor: boolean, hasPdfProcessor: boolean): string {
+	if (hasImageProcessor && hasPdfProcessor) return READ_CONTENT_DESC_BOTH;
+	if (hasImageProcessor) return READ_CONTENT_DESC_IMAGE;
+	if (hasPdfProcessor) return READ_CONTENT_DESC_PDF;
+	return READ_CONTENT_DESC_NONE;
+}
+
 /**
  * Default configuration for all built-in tools.
  * All tools are enabled by default with standard names and descriptions.
@@ -207,8 +284,8 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 	read_content: {
 		enabled: true,
 		name: "read_content",
-		description:
-			"Read content of notes and vault files by path or wiki link. Supports heading fragments (e.g., [[Note#Section]]), block references (e.g., [[Note#^block-id]]), and PDF page references (e.g., [[report.pdf#page=3]]). When a fragment is provided, only the referenced section, block, or page is returned. Also supports full files: markdown/text (.md, .txt, .csv, .json), PDFs, and Excalidraw drawings. Images must be attached directly in chat.",
+		description: READ_CONTENT_DESC_NONE,
+		promptGuidance: READ_CONTENT_GUIDANCE_NONE,
 		settings: {
 			maxContentLength: 0,
 		},
@@ -1700,6 +1777,15 @@ function normalizeAgent(agent: AgentConfig): void {
 
 	migrateReadContentTool(agent);
 	migrateManageNotesTool(agent);
+
+	// Ensure read_content settings have processor fields
+	const readSettings = agent.toolsConfig.read_content?.settings as
+		| { maxContentLength?: number; imageProcessor?: unknown; pdfProcessor?: unknown }
+		| undefined;
+	if (readSettings) {
+		// Do NOT default imageProcessor/pdfProcessor — undefined means "auto-derive
+		// from chat model", null means "explicitly disabled by user".
+	}
 
 	agent.skills ??= {};
 	agent.mcpServers ??= {};

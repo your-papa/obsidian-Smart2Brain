@@ -24,7 +24,7 @@ import type { ChatAttachment, ThreadError } from "../types/shared";
 import type { VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../hooks/useSelection.svelte";
 import type { GraphNoteRef } from "../stores/chatStore.svelte";
-import { toBase64DataUri } from "../utils/attachments";
+import { toBase64, toBase64DataUri } from "../utils/attachments";
 import { extractTextFromPdf } from "../utils/pdfExtractor";
 import { Logger } from "../utils/logging";
 import { type ThreadSnapshot, type ThreadStore, createSnapshot } from "./memory/ThreadStore";
@@ -33,6 +33,9 @@ import type { Telemetry } from "./telemetry/Telemetry";
 const MAX_IMAGE_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 const MAX_TEXT_ATTACHMENT_CHARS = 120_000;
 const MAX_PDF_EXTRACT_CHARS = 180_000;
+
+/** Providers whose APIs accept native PDF file content blocks. */
+export const NATIVE_PDF_PROVIDERS = new Set(["anthropic", "openai", "openrouter"]);
 
 function truncateContent(content: string, maxChars: number): string {
 	if (content.length <= maxChars) return content;
@@ -223,9 +226,10 @@ export class Agent {
 	 * - If no attachments: returns the plain query string
 	 * - If attachments with vision support: returns an array of content blocks
 	 *   (text + image_url for images, inline text for .md/.txt/.csv/.json)
-	 * - PDFs via OpenRouter: sent as base64 data URL using `type: "file"` (native processing)
-	 * - PDFs via other providers: text extracted locally via Obsidian's built-in pdfjs
-	 * - Images without vision: throws an error
+	 * - PDFs via native providers (Anthropic, OpenAI, OpenRouter): sent as standardized
+	 *   Data.Base64ContentBlock which LangChain auto-converts to each provider's native format
+	 * - PDFs via other providers (Ollama, custom): text extracted locally via Obsidian's pdfjs
+	 * - Images without vision: skipped with notice
 	 */
 	private async buildMessageContent(
 		query: string,
@@ -288,19 +292,21 @@ export class Agent {
 				}
 				const buffer = await app.vault.readBinary(file);
 
-				if (this.currentProvider === "openrouter") {
-					// OpenRouter: send PDF as base64 data URL via native file content type.
-					// OpenRouter processes it server-side (native model support or pdf-text fallback).
-					const dataUri = toBase64DataUri(buffer, "application/pdf");
+				if (NATIVE_PDF_PROVIDERS.has(this.currentProvider)) {
+					// Native PDF: use LangChain's standardized file content block.
+					// LangChain auto-converts to each provider's native format:
+					//   Anthropic → type: "document" with source.type: "base64"
+					//   OpenAI    → type: "file" with file.file_data data URI
+					//   OpenRouter → type: "file" (same as OpenAI, uses ChatOpenAI)
 					contentParts.push({
 						type: "file",
-						file: {
-							filename: attachment.name,
-							file_data: dataUri,
-						},
+						source_type: "base64",
+						data: toBase64(buffer),
+						mime_type: "application/pdf",
+						metadata: { filename: attachment.name },
 					} as unknown as MessageContentComplex);
 				} else {
-					// Other providers: extract text locally
+					// Providers without native PDF support: extract text locally
 					const data = new Uint8Array(buffer);
 					try {
 						const { text, totalPages } = await extractTextFromPdf(data);
