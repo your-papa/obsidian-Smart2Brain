@@ -107,7 +107,7 @@ function parseFrontmatter(content: string): {
 function determineCategory(linkedPluginId?: string, corePluginId?: string): SkillCategory {
 	if (linkedPluginId) return "plugin";
 	if (corePluginId) return "core";
-	return "core"; // Default to core for built-in skills like math-latex
+	return "core";
 }
 
 /**

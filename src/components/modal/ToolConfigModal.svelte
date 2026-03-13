@@ -441,7 +441,9 @@ function handleResetToDefault() {
       <h4 class="tool-config-section-title">Search Settings</h4>
       <div class="tool-config-field">
         <label class="tool-config-label" for="tool-config-algorithm">Search Algorithm</label>
-        <p class="tool-config-description">Choose the search algorithm the agent uses for retrieving notes.</p>
+        <p class="tool-config-description">
+          Choose the search algorithm the agent uses for retrieving notes.
+        </p>
         <Dropdown
           id="tool-config-algorithm"
           type="options"
@@ -485,14 +487,12 @@ function handleResetToDefault() {
     <div class="tool-config-section">
       <h4 class="tool-config-section-title">Vision Processors</h4>
       <p class="tool-config-description" style="margin-bottom: 12px;">
-        Configure how images and PDFs encountered during tool use are processed.
-        Auto uses the chat model if it supports vision.
+        Configure how images and PDFs encountered during tool use are processed. Auto uses the chat
+        model if it supports vision.
       </p>
       <div class="tool-config-field">
         <div class="tool-config-label">Image Processor</div>
-        <p class="tool-config-description">
-          Vision model to analyze images found in notes.
-        </p>
+        <p class="tool-config-description">Vision model to analyze images found in notes.</p>
         <Dropdown
           type="options"
           dropdown={imageProcessorModeOptions}

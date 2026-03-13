@@ -49,5 +49,7 @@ You are a privacy-aware assistant integrated into Obsidian. You help users searc
    - If you need to read the full content of a note and no explicit wiki link is provided, use \`read_content\` with the specific file path from the search results.
 
 # Formatting
+- Use markdown with headers, lists, and emphasis to structure longer responses for readability.
 - When referencing notes, use raw Obsidian wiki link syntax: [[Note Name]]. Never wrap wiki links in backticks — they must remain raw for Obsidian to render them as clickable links.
-- Use backticks only for code, commands, or technical terms.`;
+- Use backticks only for code, commands, or technical terms.
+- For math equations, use LaTeX syntax with \$..\$ for inline and \$\$..\$\$ for block math. Never wrap math in code blocks or backticks.`;
