@@ -23,7 +23,7 @@ const query = createAuthStateQuery(() => provider);
 let isCheckingAuth = $derived(query.isPending || query.isFetching);
 
 // Get provider definition using the function from providers/index
-let providerDefinition = $derived(getProviderDefinition(provider, data.getAllCustomProviderMeta()));
+let providerDefinition = $derived(getProviderDefinition(provider, data.getAllProviderMeta()));
 
 // Get stored auth state for this provider
 let storedAuth = $derived(data.getStoredAuthState(provider));

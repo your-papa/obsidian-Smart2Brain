@@ -157,12 +157,12 @@ const filteredModelsByProvider = $derived.by(() => {
 
 // Get provider info
 function getProviderDisplayName(providerId: string): string {
-	const provider = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+	const provider = getProviderDefinition(providerId, pluginData.getAllProviderMeta());
 	return provider?.displayName ?? providerId;
 }
 
 function getProviderLogo(providerId: string) {
-	const provider = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+	const provider = getProviderDefinition(providerId, pluginData.getAllProviderMeta());
 	if (provider && "logo" in provider && provider.logo) {
 		return provider.logo;
 	}

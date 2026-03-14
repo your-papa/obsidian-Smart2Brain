@@ -24,7 +24,7 @@ const plugin = getPlugin();
 const indexId = $derived(purpose === "search" ? pluginData.searchEmbedIndex : pluginData.graphEmbedIndex);
 const indexConfig = $derived(indexId ? pluginData.getEmbeddingIndex(indexId) : null);
 const providerDef = $derived(
-	indexConfig ? getProviderDefinition(indexConfig.provider, pluginData.getAllCustomProviderMeta()) : null,
+	indexConfig ? getProviderDefinition(indexConfig.provider, pluginData.getAllProviderMeta()) : null,
 );
 const Logo = $derived(providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon);
 // Index progress

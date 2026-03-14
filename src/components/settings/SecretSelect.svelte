@@ -19,6 +19,7 @@ const plugin = getPlugin();
 // Get list of available secrets
 let secrets = $state<string[]>([]);
 let hasNotifiedMissing = $state(false);
+let refreshAttempt = $state(0);
 
 function refreshSecrets() {
 	try {
@@ -32,6 +33,11 @@ function refreshSecrets() {
 // Initial load
 refreshSecrets();
 
+$effect(() => {
+	value;
+	refreshSecrets();
+});
+
 // Check if configured secret is missing and notify user
 let secretMissing = $derived(value && value.length > 0 && secrets.length > 0 && !secrets.includes(value));
 
@@ -42,9 +48,23 @@ $effect(() => {
 	}
 });
 
+$effect(() => {
+	if (!value || !value.length || secrets.includes(value) || refreshAttempt >= 10) {
+		return;
+	}
+
+	const timeout = window.setTimeout(() => {
+		refreshSecrets();
+		refreshAttempt += 1;
+	}, 300);
+
+	return () => window.clearTimeout(timeout);
+});
+
 // Handle dropdown selection
 function handleSelect(secretId: string) {
 	hasNotifiedMissing = false;
+	refreshAttempt = 0;
 	onChange(secretId);
 }
 
@@ -53,6 +73,7 @@ function handleAddSecret() {
 	new AddSecretModal(plugin, (newSecretId) => {
 		refreshSecrets();
 		hasNotifiedMissing = false;
+		refreshAttempt = 0;
 		onChange(newSecretId);
 	}).open();
 }
@@ -101,11 +122,13 @@ let selectedValue = $derived(secrets.includes(value) ? value : "");
     </Tooltip.Root>
   </Tooltip.Provider>
 
-  <Dropdown
-    type="options"
-    dropdown={dropdownOptions}
-    selected={selectedValue}
-    onchange={handleSelect}
-    class="flex-1"
-  />
+  {#key `${selectedValue}:${dropdownOptions.length}:${refreshAttempt}`}
+    <Dropdown
+      type="options"
+      dropdown={dropdownOptions}
+      selected={selectedValue}
+      onchange={handleSelect}
+      class="flex-1"
+    />
+  {/key}
 </div>

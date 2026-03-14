@@ -12,6 +12,8 @@ export type {
 	AuthObjectKey,
 	AuthFieldDefinition,
 	AuthObject,
+	CodexSession,
+	OpenAIAuthMode,
 	RequiredAuthField,
 	OptionalAuthField,
 	ProviderAuthConfig,
@@ -30,4 +32,4 @@ export type {
 export { isEmbeddingProvider } from "./definition";
 
 // Stored provider types
-export type { CustomProviderMeta } from "./stored";
+export type { ProviderInstanceMeta, ProviderTemplateId } from "./stored";

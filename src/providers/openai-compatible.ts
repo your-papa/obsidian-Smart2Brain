@@ -1,105 +1,69 @@
 /**
  * OpenAI-Compatible Provider Factory
  *
- * Creates provider definitions for custom providers that use
+ * Creates provider definitions for configurable providers that use
  * OpenAI-compatible API endpoints.
- *
- * This factory is used for user-defined providers at runtime.
  */
 
-import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { ChatOpenAI } from "@langchain/openai";
 import { requestUrl } from "obsidian";
+import { createTransportedChatOpenAI, createTransportedOpenAIEmbeddings } from "./chatProviders";
+import OpenAILogo from "../components/ui/logos/OpenAILogo.svelte";
 import type {
 	AuthObject,
 	AuthValidationResult,
 	BaseProviderDefinition,
 	ChatModelConfig,
-	CustomProviderMeta,
 	EmbeddingProviderDefinition,
+	LogoProps,
+	ProviderSetupInstructions,
 } from "../types/provider/index";
 
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-/**
- * Removes trailing slashes from a URL.
- */
 function sanitizeBaseUrl(url: string): string {
 	return url.replace(/\/+$/, "");
 }
-
-/**
- * Safely reads response text, returning undefined on error.
- */
-async function safeReadText(response: Response): Promise<string | undefined> {
-	try {
-		return await response.text();
-	} catch {
-		return undefined;
-	}
-}
-
-// =============================================================================
-// API Response Types
-// =============================================================================
 
 interface OpenAIModelResponse {
 	data?: Array<{ id?: string }>;
 }
 
-// =============================================================================
-// Factory Function
-// =============================================================================
+export interface OpenAICompatibleProviderInput {
+	id: string;
+	displayName: string;
+	defaultBaseUrl?: string;
+	logo?: typeof OpenAILogo;
+	setupInstructions?: ProviderSetupInstructions;
+}
 
-/**
- * Input for creating an OpenAI-compatible custom provider.
- * Combines the provider ID with its metadata.
- */
-export type CustomProviderInput = { id: string } & CustomProviderMeta;
-
-/**
- * Creates a BaseProviderDefinition for an OpenAI-compatible custom provider.
- *
- * Custom providers:
- * - Require baseUrl (this is what makes them "custom")
- * - Optionally require apiKey
- * - Optionally support headers
- * - Use OpenAI-compatible /v1/models and /v1/chat/completions endpoints
- *
- * @param config - The provider ID and metadata
- * @returns A BaseProviderDefinition (or EmbeddingProviderDefinition if supportsEmbeddings)
- */
 export function createOpenAICompatibleProvider(
-	config: CustomProviderInput,
+	config: OpenAICompatibleProviderInput,
 ): BaseProviderDefinition | EmbeddingProviderDefinition {
+	const defaultBaseUrl = sanitizeBaseUrl(config.defaultBaseUrl ?? "https://api.openai.com");
 	const baseDefinition: BaseProviderDefinition = {
 		id: config.id,
 		displayName: config.displayName,
-		logo: undefined, // Custom providers use generic icon
-
-		setupInstructions: {
+		logo: config.logo as typeof OpenAILogo | undefined,
+		setupInstructions: config.setupInstructions ?? {
 			steps: [
 				"Enter the base URL for your OpenAI-compatible API endpoint",
-				"Optionally provide an API key if required by the endpoint",
-				"Optionally add custom headers for authentication",
+				"Provide an API key if the endpoint requires authentication",
+				"Optionally add custom headers for authentication or routing",
 			],
 		},
-
 		auth: {
-			baseUrl: {
-				label: "Base URL",
-				description: "The base URL for the OpenAI-compatible API endpoint",
-				kind: "text",
-				required: true,
-				placeholder: "http://localhost:11434",
-			},
 			apiKey: {
 				label: "API Key",
 				description: "API key for authentication (if required)",
 				kind: "secret",
-				required: false,
+				required: true,
 				placeholder: "sk-...",
+			},
+			baseUrl: {
+				label: "Base URL",
+				description: "The base URL for the OpenAI-compatible API endpoint",
+				kind: "text",
+				required: false,
+				placeholder: defaultBaseUrl,
 			},
 			headers: {
 				label: "Custom Headers",
@@ -109,25 +73,18 @@ export function createOpenAICompatibleProvider(
 				placeholder: '{"X-Custom-Header": "value"}',
 			},
 		},
-
 		createChatInstance: (auth: AuthObject, modelId: string, options?: Partial<ChatModelConfig>) => {
-			if (!auth.baseUrl) {
-				throw new Error("Base URL is required for custom providers");
-			}
-
+			const resolvedBaseUrl = sanitizeBaseUrl(auth.baseUrl || defaultBaseUrl);
 			const configuration: Record<string, unknown> = {
-				baseURL: `${sanitizeBaseUrl(auth.baseUrl)}/v1`,
+				baseURL: `${resolvedBaseUrl}/v1`,
 			};
 
-			// Add custom headers if provided
 			if (auth.headers && Object.keys(auth.headers).length > 0) {
 				configuration.defaultHeaders = auth.headers;
 			}
 
 			const chatConfig: Record<string, unknown> = {
 				model: modelId,
-				// LangChain's ChatOpenAI requires an apiKey even if the endpoint doesn't need one.
-				// Use the provided key or a placeholder for endpoints that don't require auth.
 				apiKey: auth.apiKey || "not-required",
 				configuration,
 			};
@@ -136,15 +93,10 @@ export function createOpenAICompatibleProvider(
 				chatConfig.temperature = options.temperature;
 			}
 
-			return new ChatOpenAI(chatConfig);
+			return createTransportedChatOpenAI(config.id, chatConfig as ConstructorParameters<typeof ChatOpenAI>[0]);
 		},
-
 		validateAuth: async (auth: AuthObject): Promise<AuthValidationResult> => {
-			if (!auth.baseUrl) {
-				return { valid: false, error: "Base URL is required" };
-			}
-
-			const apiUrl = `${sanitizeBaseUrl(auth.baseUrl)}/v1`;
+			const apiUrl = `${sanitizeBaseUrl(auth.baseUrl || defaultBaseUrl)}/v1`;
 
 			try {
 				const headers: Record<string, string> = {
@@ -155,12 +107,10 @@ export function createOpenAICompatibleProvider(
 					headers.Authorization = `Bearer ${auth.apiKey}`;
 				}
 
-				// Add custom headers if provided
 				if (auth.headers) {
 					Object.assign(headers, auth.headers);
 				}
 
-				// Use Obsidian's requestUrl to bypass CORS
 				const response = await requestUrl({
 					url: `${apiUrl}/models`,
 					method: "GET",
@@ -172,13 +122,12 @@ export function createOpenAICompatibleProvider(
 					return { valid: true };
 				}
 
-				// Handle error response
 				let errorMessage: string | undefined;
 				try {
 					const parsed = response.json as { error?: { message?: string } };
 					errorMessage = parsed?.error?.message;
 				} catch {
-					// ignore parse errors
+					errorMessage = undefined;
 				}
 
 				if (response.status === 401 || response.status === 403) {
@@ -194,13 +143,8 @@ export function createOpenAICompatibleProvider(
 				return { valid: false, error: `Connection failed: ${message}` };
 			}
 		},
-
 		discoverModels: async (auth: AuthObject): Promise<string[]> => {
-			if (!auth.baseUrl) {
-				throw new Error("Base URL is required for model discovery");
-			}
-
-			const apiUrl = `${sanitizeBaseUrl(auth.baseUrl)}/v1`;
+			const apiUrl = `${sanitizeBaseUrl(auth.baseUrl || defaultBaseUrl)}/v1`;
 			const headers: Record<string, string> = {
 				"Content-Type": "application/json",
 			};
@@ -213,7 +157,6 @@ export function createOpenAICompatibleProvider(
 				Object.assign(headers, auth.headers);
 			}
 
-			// Use Obsidian's requestUrl to bypass CORS
 			const response = await requestUrl({
 				url: `${apiUrl}/models`,
 				method: "GET",
@@ -232,39 +175,26 @@ export function createOpenAICompatibleProvider(
 		},
 	};
 
-	// Add embedding support if configured
-	if (config.supportsEmbeddings) {
-		return {
-			...baseDefinition,
-			createEmbeddingInstance: (auth: AuthObject, modelId: string) => {
-				if (!auth.baseUrl) {
-					throw new Error("Base URL is required for custom providers");
-				}
+	return {
+		...baseDefinition,
+		createEmbeddingInstance: (auth: AuthObject, modelId: string) => {
+			const resolvedBaseUrl = sanitizeBaseUrl(auth.baseUrl || defaultBaseUrl);
+			const configuration: Record<string, unknown> = {
+				baseURL: `${resolvedBaseUrl}/v1`,
+			};
 
-				const configuration: Record<string, unknown> = {
-					baseURL: `${sanitizeBaseUrl(auth.baseUrl)}/v1`,
-				};
+			if (auth.headers && Object.keys(auth.headers).length > 0) {
+				configuration.defaultHeaders = auth.headers;
+			}
 
-				// Add custom headers if provided
-				if (auth.headers && Object.keys(auth.headers).length > 0) {
-					configuration.defaultHeaders = auth.headers;
-				}
+			const embeddingConfig: Record<string, unknown> = {
+				model: modelId,
+				apiKey: auth.apiKey || "not-required",
+				encodingFormat: "float",
+				configuration,
+			};
 
-				const embeddingConfig: Record<string, unknown> = {
-					model: modelId,
-					// LangChain's OpenAIEmbeddings requires an apiKey even if the endpoint doesn't need one.
-					// Use the provided key or a placeholder for endpoints that don't require auth.
-					apiKey: auth.apiKey || "not-required",
-					// OpenAI SDK v6 defaults to encoding_format:'base64' which many third-party
-					// providers don't support, causing malformed responses. Use 'float' explicitly.
-					encodingFormat: "float",
-					configuration,
-				};
-
-				return new OpenAIEmbeddings(embeddingConfig);
-			},
-		} as EmbeddingProviderDefinition;
-	}
-
-	return baseDefinition;
+			return createTransportedOpenAIEmbeddings(config.id, embeddingConfig);
+		},
+	} satisfies EmbeddingProviderDefinition;
 }

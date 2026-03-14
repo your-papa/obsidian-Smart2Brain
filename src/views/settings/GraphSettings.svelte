@@ -40,7 +40,7 @@ const clusteringAlgorithmOptions: { display: string; value: ClusteringAlgorithm 
 const currentModelDisplay = $derived.by(() => {
 	const model = pluginData.smartGraphSettings.graphChatModel;
 	if (!model) return null;
-	const providerDef = getProviderDefinition(model.provider, pluginData.getAllCustomProviderMeta());
+	const providerDef = getProviderDefinition(model.provider, pluginData.getAllProviderMeta());
 	return {
 		model: model.model,
 		providerName: providerDef?.displayName ?? model.provider,

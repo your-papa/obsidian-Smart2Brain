@@ -430,7 +430,7 @@ export class AgentManager {
 			if (!providerId) return [];
 
 			const pluginData = getData();
-			const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+			const providerDef = getProviderDefinition(providerId, pluginData.getAllProviderMeta());
 
 			if (providerDef) {
 				const resolvedAuth = pluginData.getResolvedAuthState(providerId);
@@ -459,19 +459,12 @@ export class AgentManager {
 	 */
 	private registerProvider(providerId: string, auth: AuthObject): void {
 		const pluginData = getData();
-		const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+		const providerDef = getProviderDefinition(providerId, pluginData.getAllProviderMeta());
 
 		if (!providerDef) {
 			throw new Error(`Unknown provider: ${providerId}`);
 		}
-
-		// Check if it's a custom provider
-		const customMeta = pluginData.getCustomProviderMeta(providerId);
-		if (customMeta) {
-			this.registry.registerCustom(providerId, customMeta, auth);
-		} else {
-			this.registry.register(providerId, providerDef, auth);
-		}
+		this.registry.register(providerId, providerDef, auth);
 	}
 
 	private buildRunMetadata(agentId: string, agentName: string, chatModel: ChatModel): Record<string, unknown> {
@@ -492,7 +485,7 @@ export class AgentManager {
 	 */
 	async validateProviderAuth(providerId: string, auth: AuthObject): Promise<AuthValidationResult> {
 		const pluginData = getData();
-		const providerDef = getProviderDefinition(providerId, pluginData.getAllCustomProviderMeta());
+		const providerDef = getProviderDefinition(providerId, pluginData.getAllProviderMeta());
 
 		if (!providerDef) {
 			return { success: false, message: `Unknown provider: ${providerId}` };

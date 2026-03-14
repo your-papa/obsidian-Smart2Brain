@@ -1,5 +1,4 @@
 <script lang="ts">
-import { Accordion } from "bits-ui";
 import { t } from "svelte-i18n";
 import { ExcludeFoldersModal } from "../../components/modal/ExcludeFoldersModal";
 import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
@@ -7,12 +6,14 @@ import ProviderItem from "../../components/settings/ProviderItem.svelte";
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
+import Dropdown from "../../components/ui/Dropdown.svelte";
 import Text from "../../components/ui/Text.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
+import { getAllProviderTemplates, type ProviderTemplateId } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { Logger } from "../../utils/logging";
-import { CustomProviderSetupModal } from "../custom-provider-setup/CustomProviderSetup";
+import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
 
 const pluginData = getData();
 const plugin = getPlugin();
@@ -22,39 +23,51 @@ const privacyListModal = new PrivacyListModal(plugin.app);
 
 // Provider management state
 let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
-let activeProvider: string | undefined = $state(undefined);
-
-const onAccordionClick = (providerId: string) => {
-	activeProvider = activeProvider === providerId ? undefined : providerId;
-};
-
-// Sort providers: configured first, then unconfigured
-let sortedProviders = $derived(
-	pluginData.getAllProviderIds().sort((a: string, b: string) => {
-		const aConfigured = configuredProviderIds.includes(a);
-		const bConfigured = configuredProviderIds.includes(b);
-		if (aConfigured && !bConfigured) return -1;
-		if (!aConfigured && bConfigured) return 1;
-		return 0;
-	}),
+const providerTemplates = getAllProviderTemplates();
+const providerTemplateOptions = providerTemplates.map((template) => ({
+	display: template.displayName,
+	value: template.id,
+}));
+let selectedTemplateId = $state<ProviderTemplateId>("openai-compatible");
+let selectedTemplate = $derived(
+	providerTemplates.find((template) => template.id === selectedTemplateId) ?? providerTemplates[0],
 );
 
-function handleAddCustomProvider() {
-	new CustomProviderSetupModal(plugin).open();
+function handleTemplateChange(templateId: string) {
+	selectedTemplateId = templateId as ProviderTemplateId;
+}
+
+function handleOpenProviderSetup() {
+	new ProviderSetupModal(plugin, { templateId: selectedTemplateId }).open();
 }
 </script>
 
 <!-- Providers -->
 <SettingGroup heading="Providers">
-  <Accordion.Root type="single" bind:value={activeProvider}>
-    {#each sortedProviders as provider (provider)}
-      <ProviderItem {provider} {onAccordionClick} />
-    {/each}
-  </Accordion.Root>
-
-  <SettingItem name="Custom Provider" desc="Add an OpenAI-compatible API endpoint">
-    <Button buttonText="Add Custom Provider" onClick={handleAddCustomProvider} />
+  <SettingItem
+    name="Add Provider"
+    desc={selectedTemplate?.description ?? "Create a provider instance from one of the built-in templates."}
+  >
+    <div class="flex items-center gap-2 w-full">
+      <Dropdown
+        type="options"
+        dropdown={providerTemplateOptions}
+        selected={selectedTemplateId}
+        onchange={handleTemplateChange}
+      />
+      <Button buttonText="Configure Provider" cta={true} onClick={handleOpenProviderSetup} />
+    </div>
   </SettingItem>
+
+  {#if configuredProviderIds.length > 0}
+    {#each configuredProviderIds as provider (provider)}
+      <ProviderItem {provider} />
+    {/each}
+  {:else}
+    <div class="setting-item-description text-sm px-4 pb-2 text-[--text-muted]">
+      No provider instances configured yet.
+    </div>
+  {/if}
 </SettingGroup>
 
 <!-- Data Management -->
