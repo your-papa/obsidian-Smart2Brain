@@ -5,15 +5,17 @@
  */
 
 /**
- * Extra metadata for custom (user-defined) providers.
- * Only stored for custom providers - built-in providers have their metadata in code.
- *
- * This is used by the settings UI to display/edit custom provider info.
+ * Code-defined provider template identifiers.
  */
-export interface CustomProviderMeta {
-	/** User-defined display name for the provider. */
-	displayName: string;
+export type ProviderTemplateId = "openai-compatible" | "openai-codex" | "anthropic" | "ollama" | "openrouter";
 
-	/** Whether this provider supports embedding models. */
-	supportsEmbeddings: boolean;
+/**
+ * Persisted metadata for a configured provider instance.
+ */
+export interface ProviderInstanceMeta {
+	/** The code-defined template backing this provider instance. */
+	templateId: ProviderTemplateId;
+
+	/** User-visible display name for the configured instance. */
+	displayName: string;
 }

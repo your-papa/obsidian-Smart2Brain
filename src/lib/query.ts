@@ -70,7 +70,7 @@ export function createProviderStateQuery(provider: () => string) {
 			}
 
 			// Get provider definition for model discovery
-			const providerDef = getProviderDefinition(providerId, data.getAllCustomProviderMeta());
+			const providerDef = getProviderDefinition(providerId, data.getAllProviderMeta());
 
 			if (!providerDef) {
 				return { auth, models: [] };
@@ -189,7 +189,7 @@ export function createModelDiscoveryQuery(provider: () => string) {
 			}
 
 			// Get provider definition for model discovery
-			const providerDef = getProviderDefinition(providerId, data.getAllCustomProviderMeta());
+			const providerDef = getProviderDefinition(providerId, data.getAllProviderMeta());
 			if (!providerDef) {
 				return [];
 			}

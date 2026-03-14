@@ -12,7 +12,7 @@
  * Authentication: apiKey (required)
  */
 
-import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { ChatOpenAI } from "@langchain/openai";
 import { requestUrl } from "obsidian";
 import GenericAIIcon from "../components/ui/logos/GenericAIIcon.svelte";
 import type {
@@ -23,6 +23,7 @@ import type {
 } from "../types/provider/index";
 import OpenRouterLogo from "../components/ui/logos/OpenRouterLogo.svelte";
 import { populateOpenRouterCache, type OpenRouterModelInfo } from "./openrouterModels";
+import { createTransportedChatOpenAI, createTransportedOpenAIEmbeddings } from "./chatProviders";
 
 // =============================================================================
 // Constants
@@ -124,7 +125,7 @@ export const openrouterProvider: EmbeddingProviderDefinition = {
 			(config.configuration as Record<string, unknown>).defaultHeaders = auth.headers;
 		}
 
-		return new ChatOpenAI(config);
+		return createTransportedChatOpenAI("openrouter", config as ConstructorParameters<typeof ChatOpenAI>[0]);
 	},
 
 	createEmbeddingInstance: (auth: AuthObject, modelId: string) => {
@@ -144,7 +145,7 @@ export const openrouterProvider: EmbeddingProviderDefinition = {
 			(config.configuration as Record<string, unknown>).defaultHeaders = auth.headers;
 		}
 
-		return new OpenAIEmbeddings(config);
+		return createTransportedOpenAIEmbeddings("openrouter", config);
 	},
 
 	validateAuth: async (auth: AuthObject): Promise<AuthValidationResult> => {

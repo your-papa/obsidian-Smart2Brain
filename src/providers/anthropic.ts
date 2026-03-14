@@ -6,10 +6,11 @@
  * - NO embedding models (Anthropic doesn't offer embeddings)
  * - Model discovery via Anthropic API (/v1/models)
  *
- * Authentication: apiKey (required), headers (optional)
+ * Authentication: apiKey (required), baseUrl (optional), headers (optional)
  */
 
 import { ChatAnthropic } from "@langchain/anthropic";
+import { requestUrl } from "obsidian";
 import AnthropicLogo from "../components/ui/logos/AnthropicLogo.svelte";
 import type {
 	AuthObject,
@@ -17,6 +18,7 @@ import type {
 	BaseProviderDefinition,
 	ChatModelConfig,
 } from "../types/provider/index";
+import { createTransportedChatAnthropic } from "./chatProviders";
 
 // =============================================================================
 // Constants
@@ -32,15 +34,22 @@ const ANTHROPIC_API_VERSION = "2023-06-01";
 // Helper Functions
 // =============================================================================
 
-/**
- * Safely reads response text, returning undefined on error.
- */
-async function safeReadText(response: Response): Promise<string | undefined> {
-	try {
-		return await response.text();
-	} catch {
-		return undefined;
+function sanitizeBaseUrl(url: string): string {
+	return url.replace(/\/+$/, "");
+}
+
+function buildAnthropicHeaders(auth: AuthObject): Record<string, string> {
+	const headers: Record<string, string> = {
+		"x-api-key": auth.apiKey ?? "",
+		"anthropic-version": ANTHROPIC_API_VERSION,
+		"Content-Type": "application/json",
+	};
+
+	if (auth.headers) {
+		Object.assign(headers, auth.headers);
 	}
+
+	return headers;
 }
 
 // =============================================================================
@@ -100,6 +109,13 @@ export const anthropicProvider: BaseProviderDefinition = {
 			required: true,
 			placeholder: "sk-ant-...",
 		},
+		baseUrl: {
+			label: "Base URL",
+			description: "The base URL for the Anthropic-compatible API endpoint",
+			kind: "text",
+			required: false,
+			placeholder: ANTHROPIC_DEFAULT_BASE_URL,
+		},
 		headers: {
 			label: "Custom Headers",
 			description: "Additional headers as JSON (optional)",
@@ -114,9 +130,14 @@ export const anthropicProvider: BaseProviderDefinition = {
 	// =========================================================================
 
 	createChatInstance: (auth: AuthObject, modelId: string, options?: Partial<ChatModelConfig>) => {
+		const resolvedBaseUrl = sanitizeBaseUrl(auth.baseUrl || ANTHROPIC_DEFAULT_BASE_URL);
 		const config: Record<string, unknown> = {
 			model: modelId,
 			apiKey: auth.apiKey,
+			clientOptions: {
+				baseURL: resolvedBaseUrl,
+				defaultHeaders: auth.headers,
+			},
 		};
 
 		if (options?.temperature !== undefined) {
@@ -130,7 +151,7 @@ export const anthropicProvider: BaseProviderDefinition = {
 			config.thinking = extra.thinking;
 		}
 
-		return new ChatAnthropic(config);
+		return createTransportedChatAnthropic("anthropic", config as ConstructorParameters<typeof ChatAnthropic>[0]);
 	},
 
 	validateAuth: async (auth: AuthObject): Promise<AuthValidationResult> => {
@@ -138,49 +159,41 @@ export const anthropicProvider: BaseProviderDefinition = {
 			return { valid: false, error: "API key is required" };
 		}
 
-		let response: Response;
 		try {
-			response = await globalThis.fetch(`${ANTHROPIC_DEFAULT_BASE_URL}/v1/messages`, {
-				method: "POST",
-				headers: {
-					"x-api-key": auth.apiKey,
-					"anthropic-version": ANTHROPIC_API_VERSION,
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					model: "claude-3-5-sonnet-20241022",
-					max_tokens: 1,
-					messages: [{ role: "user", content: "hi" }],
-				}),
+			const baseUrl = sanitizeBaseUrl(auth.baseUrl || ANTHROPIC_DEFAULT_BASE_URL);
+			const response = await requestUrl({
+				url: `${baseUrl}/v1/models`,
+				method: "GET",
+				headers: buildAnthropicHeaders(auth),
+				throw: false,
 			});
+
+			if (response.status >= 200 && response.status < 300) {
+				return { valid: true };
+			}
+
+			let errorType: string | undefined;
+			let errorMessage: string | undefined;
+			try {
+				const parsed = response.json as { error?: { type?: string; message?: string } };
+				errorType = parsed?.error?.type;
+				errorMessage = parsed?.error?.message;
+			} catch {
+				// ignore parse errors
+			}
+
+			if (response.status === 401 || response.status === 403 || errorType === "authentication_error") {
+				return { valid: false, error: errorMessage || `Authentication failed (${response.status})` };
+			}
+
+			return {
+				valid: false,
+				error: errorMessage || response.text || `Request failed with status ${response.status}`,
+			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			return { valid: false, error: `Connection failed: ${message}` };
 		}
-
-		if (response.ok) {
-			return { valid: true };
-		}
-
-		// Handle error response
-		const errorBody = await safeReadText(response);
-		let errorType: string | undefined;
-		let errorMessage: string | undefined;
-		try {
-			const parsed = errorBody
-				? (JSON.parse(errorBody) as { error?: { type?: string; message?: string } })
-				: undefined;
-			errorType = parsed?.error?.type;
-			errorMessage = parsed?.error?.message;
-		} catch {
-			// ignore parse errors
-		}
-
-		if (response.status === 401 || response.status === 403 || errorType === "authentication_error") {
-			return { valid: false, error: errorMessage || `Authentication failed (${response.status})` };
-		}
-
-		return { valid: false, error: errorMessage || errorBody || `Request failed with status ${response.status}` };
 	},
 
 	discoverModels: async (auth: AuthObject): Promise<string[]> => {
@@ -188,21 +201,19 @@ export const anthropicProvider: BaseProviderDefinition = {
 			throw new Error("Anthropic model discovery requires an API key.");
 		}
 
-		const response = await globalThis.fetch(`${ANTHROPIC_DEFAULT_BASE_URL}/v1/models`, {
+		const baseUrl = sanitizeBaseUrl(auth.baseUrl || ANTHROPIC_DEFAULT_BASE_URL);
+		const response = await requestUrl({
+			url: `${baseUrl}/v1/models`,
 			method: "GET",
-			headers: {
-				"x-api-key": auth.apiKey,
-				"anthropic-version": ANTHROPIC_API_VERSION,
-				"Content-Type": "application/json",
-			},
+			headers: buildAnthropicHeaders(auth),
+			throw: false,
 		});
 
-		if (!response.ok) {
-			const errorBody = await safeReadText(response);
-			throw new Error(`Model discovery failed: ${errorBody || response.statusText}`);
+		if (response.status < 200 || response.status >= 300) {
+			throw new Error(`Model discovery failed: ${response.text || `status ${response.status}`}`);
 		}
 
-		const payload = (await response.json()) as AnthropicModelResponse;
+		const payload = response.json as AnthropicModelResponse;
 		const resources = Array.isArray(payload.data) ? payload.data : [];
 
 		return resources.map((r) => r.id).filter((id): id is string => typeof id === "string" && id.trim() !== "");

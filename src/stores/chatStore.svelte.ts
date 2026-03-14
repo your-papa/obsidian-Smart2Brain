@@ -791,15 +791,6 @@ function deriveGenerationFromAssistantMessages(messages: BaseMessage[]): Message
 	return generation;
 }
 
-function attachPreambleToFirstToolCall(toolCalls: ToolCallState[] | undefined, preamble: string): void {
-	if (!toolCalls || toolCalls.length === 0) return;
-	const trimmed = preamble.trim();
-	if (!trimmed) return;
-
-	const firstTool = toolCalls[0];
-	firstTool.preamble = firstTool.preamble ? `${firstTool.preamble.trimEnd()}\n\n${trimmed}` : trimmed;
-}
-
 function buildTimelineFromToolCalls(
 	toolCalls: ToolCallState[] | undefined,
 	aiMessageId?: string,
@@ -926,11 +917,6 @@ function mergeAssistantMessages(
 
 	for (const msg of assistantMessages) {
 		const converted = baseMessageToAssistantMessage(msg, toolOutputs);
-
-		if (converted.toolCalls?.length && converted.content.trim()) {
-			attachPreambleToFirstToolCall(converted.toolCalls, converted.content);
-			converted.content = "";
-		}
 
 		// Use the last non-empty content
 		if (converted.content.trim()) {
@@ -1789,14 +1775,6 @@ export class ChatSession {
 
 			if (chunk.type === "checkpoint_message") {
 				const checkpointAssistant = baseMessageToAssistantMessage(chunk.message);
-				if (checkpointAssistant.toolCalls?.length && checkpointAssistant.content.trim()) {
-					attachPreambleToFirstToolCall(checkpointAssistant.toolCalls, checkpointAssistant.content);
-					checkpointAssistant.content = "";
-					checkpointAssistant.assistantTimeline = buildTimelineFromToolCalls(
-						checkpointAssistant.toolCalls,
-						chunk.message.id,
-					);
-				}
 				assistantMsg.content = checkpointAssistant.content;
 				assistantMsg.toolCalls = checkpointAssistant.toolCalls;
 				assistantMsg.assistantTimeline = checkpointAssistant.assistantTimeline;
