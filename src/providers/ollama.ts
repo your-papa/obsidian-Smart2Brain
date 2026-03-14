@@ -10,7 +10,7 @@
  * Ollama runs locally on the user's machine, defaulting to http://localhost:11434
  */
 
-import { ChatOllama, OllamaEmbeddings } from "@langchain/ollama";
+import { ChatOllama } from "@langchain/ollama";
 import OllamaLogo from "../components/ui/logos/OllamaLogo.svelte";
 import type {
 	AuthObject,
@@ -19,7 +19,7 @@ import type {
 	EmbeddingProviderDefinition,
 } from "../types/provider/index";
 import { fetchOllamaModelsInfo } from "./ollamaModels";
-import { createTransportedChatOllama } from "./chatProviders";
+import { createTransportedChatOllama, createTransportedOllamaEmbeddings } from "./chatProviders";
 
 // =============================================================================
 // Helper Functions
@@ -141,7 +141,7 @@ export const ollamaProvider: EmbeddingProviderDefinition = {
 			throw new Error("Ollama requires a server URL");
 		}
 
-		return new OllamaEmbeddings({
+		return createTransportedOllamaEmbeddings("ollama", {
 			model: modelId,
 			baseUrl: sanitizeBaseUrl(auth.baseUrl),
 		});

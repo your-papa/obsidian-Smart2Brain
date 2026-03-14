@@ -8,8 +8,8 @@ import {
 	ToolMessage,
 } from "@langchain/core/messages";
 import { ChatAnthropic } from "@langchain/anthropic";
-import { ChatOpenAI } from "@langchain/openai";
-import { ChatOllama } from "@langchain/ollama";
+import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { ChatOllama, OllamaEmbeddings } from "@langchain/ollama";
 import { createAiProviderFetch } from "../lib/aiTransport";
 import { ChatOpenAIResponses, type ChatOpenAIResponsesConfig } from "./langchainOpenAIResponses";
 
@@ -282,4 +282,30 @@ export function createTransportedChatOllama(
 			fetch: baseConfig.fetch ?? createAiProviderFetch(providerId),
 		}),
 	);
+}
+
+export function createTransportedOpenAIEmbeddings(
+	providerId: string,
+	config: ConstructorParameters<typeof OpenAIEmbeddings>[0],
+): OpenAIEmbeddings {
+	const baseConfig = config ?? {};
+	const configuration = (baseConfig.configuration as Record<string, unknown>) ?? {};
+	return new OpenAIEmbeddings({
+		...baseConfig,
+		configuration: {
+			...configuration,
+			fetch: (configuration.fetch as typeof fetch | undefined) ?? createAiProviderFetch(providerId),
+		},
+	});
+}
+
+export function createTransportedOllamaEmbeddings(
+	providerId: string,
+	config: ConstructorParameters<typeof OllamaEmbeddings>[0],
+): OllamaEmbeddings {
+	const baseConfig = config ?? {};
+	return new OllamaEmbeddings({
+		...baseConfig,
+		fetch: baseConfig.fetch ?? createAiProviderFetch(providerId),
+	});
 }

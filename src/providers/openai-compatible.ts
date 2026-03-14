@@ -5,8 +5,9 @@
  * OpenAI-compatible API endpoints.
  */
 
-import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { ChatOpenAI } from "@langchain/openai";
 import { requestUrl } from "obsidian";
+import { createTransportedChatOpenAI, createTransportedOpenAIEmbeddings } from "./chatProviders";
 import OpenAILogo from "../components/ui/logos/OpenAILogo.svelte";
 import type {
 	AuthObject,
@@ -17,7 +18,6 @@ import type {
 	LogoProps,
 	ProviderSetupInstructions,
 } from "../types/provider/index";
-import { createTransportedChatOpenAI } from "./chatProviders";
 
 function sanitizeBaseUrl(url: string): string {
 	return url.replace(/\/+$/, "");
@@ -194,7 +194,7 @@ export function createOpenAICompatibleProvider(
 				configuration,
 			};
 
-			return new OpenAIEmbeddings(embeddingConfig);
+			return createTransportedOpenAIEmbeddings(config.id, embeddingConfig);
 		},
 	} satisfies EmbeddingProviderDefinition;
 }

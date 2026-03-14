@@ -9,7 +9,7 @@
  * Authentication: apiKey (required), baseUrl (optional), headers (optional)
  */
 
-import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { ChatOpenAI } from "@langchain/openai";
 import { fetchModelsDevData, isEmbeddingModel } from "./modelsDevApi";
 import { getData } from "../stores/dataStore.svelte";
 import OpenAILogo from "../components/ui/logos/OpenAILogo.svelte";
@@ -20,7 +20,11 @@ import type {
 	EmbeddingProviderDefinition,
 } from "../types/provider/index";
 import { createOpenAICodexFetch, getValidOpenAICodexSession } from "./openaiCodex";
-import { createTransportedChatOpenAI, createTransportedChatOpenAIResponses } from "./chatProviders";
+import {
+	createTransportedChatOpenAI,
+	createTransportedChatOpenAIResponses,
+	createTransportedOpenAIEmbeddings,
+} from "./chatProviders";
 
 // =============================================================================
 // Constants
@@ -198,7 +202,7 @@ export const openaiProvider: EmbeddingProviderDefinition = {
 			};
 		}
 
-		return new OpenAIEmbeddings(config);
+		return createTransportedOpenAIEmbeddings("openai", config);
 	},
 
 	validateAuth: async (auth: AuthObject): Promise<AuthValidationResult> => {
