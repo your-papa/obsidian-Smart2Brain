@@ -116,10 +116,20 @@ export function createObsidianFetch(
 		try {
 			const response = await requestUrl(requestParams);
 
+			const responseHeaders: Record<string, string> = {
+				...(response.headers as Record<string, string>),
+			};
+
+			// Obsidian's requestUrl may strip the content-type header from responses.
+			// The OpenAI SDK requires it to parse JSON responses correctly.
+			if (!responseHeaders["content-type"] && !responseHeaders["Content-Type"]) {
+				responseHeaders["content-type"] = "application/json";
+			}
+
 			// Convert Obsidian response to standard Response object
 			return new Response(response.text, {
 				status: response.status,
-				headers: response.headers as Record<string, string>,
+				headers: responseHeaders,
 			});
 		} catch (error) {
 			Logger.error("Obsidian fetch proxy error:", error);

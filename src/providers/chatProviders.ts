@@ -11,6 +11,7 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
 import { ChatOllama, OllamaEmbeddings } from "@langchain/ollama";
 import { createAiProviderFetch } from "../lib/aiTransport";
+import { createObsidianFetch } from "../lib/obsidianFetch";
 import { ChatOpenAIResponses, type ChatOpenAIResponsesConfig } from "./langchainOpenAIResponses";
 
 function parseToolArgs(args: unknown): Record<string, unknown> {
@@ -294,7 +295,7 @@ export function createTransportedOpenAIEmbeddings(
 		...baseConfig,
 		configuration: {
 			...configuration,
-			fetch: (configuration.fetch as typeof fetch | undefined) ?? createAiProviderFetch(providerId),
+			fetch: (configuration.fetch as typeof fetch | undefined) ?? createObsidianFetch(),
 		},
 	});
 }
@@ -306,6 +307,6 @@ export function createTransportedOllamaEmbeddings(
 	const baseConfig = config ?? {};
 	return new OllamaEmbeddings({
 		...baseConfig,
-		fetch: baseConfig.fetch ?? createAiProviderFetch(providerId),
+		fetch: baseConfig.fetch ?? createObsidianFetch(),
 	});
 }

@@ -298,13 +298,21 @@ async function requestUrlFetch(url: string, init: RequestInit): Promise<Response
 		throw: false,
 	});
 
+	const responseHeaders: Record<string, string> = {
+		...(response.headers as Record<string, string>),
+		"x-smart2brain-transport": "requestUrl",
+		"x-smart2brain-execution": "buffered",
+	};
+
+	// Obsidian's requestUrl may strip the content-type header from responses.
+	// The OpenAI SDK requires it to parse JSON responses correctly.
+	if (!responseHeaders["content-type"] && !responseHeaders["Content-Type"]) {
+		responseHeaders["content-type"] = "application/json";
+	}
+
 	return new Response(response.text, {
 		status: response.status,
-		headers: new Headers({
-			...(response.headers as Record<string, string>),
-			"x-smart2brain-transport": "requestUrl",
-			"x-smart2brain-execution": "buffered",
-		}),
+		headers: new Headers(responseHeaders),
 	});
 }
 
