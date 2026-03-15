@@ -16,7 +16,6 @@ import type { GraphData, GraphNode, GraphEdge, EdgeType } from "../../types/grap
 
 interface Props {
 	graphData: GraphData;
-	nodeSize: number;
 	linkDistance: number;
 	chargeStrength?: number;
 	labelZoomThreshold?: number;
@@ -40,7 +39,6 @@ interface Props {
 
 let {
 	graphData,
-	nodeSize,
 	linkDistance,
 	chargeStrength = -150,
 	labelZoomThreshold = 2.5,
@@ -306,7 +304,7 @@ function screenToGraph(screenX: number, screenY: number): { x: number; y: number
  */
 function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 	const { x, y } = screenToGraph(screenX, screenY);
-	const hitRadius = (nodeSize + 4) / transform.scale;
+	const hitRadius = (NODE_BASE_RADIUS + 4) / transform.scale;
 
 	// Search in reverse order (top-most nodes first)
 	for (let i = simNodes.length - 1; i >= 0; i--) {
@@ -322,13 +320,14 @@ function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 	return null;
 }
 
+const NODE_BASE_RADIUS = 1;
+
 /**
  * Get the draw radius for a node based on its degree.
  */
 function getNodeRadius(node: GraphNode): number {
-	const base = nodeSize;
 	const degree = node.degree ?? 0;
-	return base + Math.min(Math.sqrt(degree) * 0.8, base * 1.5);
+	return NODE_BASE_RADIUS + Math.min(Math.log1p(degree) * 0.5, 6);
 }
 
 /**
@@ -393,7 +392,7 @@ function render() {
 			ctx.strokeStyle = isHighlighted ? c.accent : c.textFaint;
 			ctx.lineWidth = isHighlighted ? 2 / transform.scale : 1 / transform.scale;
 			ctx.globalAlpha =
-				(!inFocus ? 0.05 : !inSelection ? 0.05 : isHighlighted ? 0.9 : 0.45) *
+				(!inFocus ? 0.05 : !inSelection ? 0.05 : isHighlighted ? 0.9 : 0.25) *
 				edgeFadeAlpha *
 				(isHighlighted ? 1 : edgeHoverAlpha / 0.85);
 			ctx.stroke();
@@ -438,7 +437,7 @@ function render() {
 						? 0.05
 						: isHighlighted
 							? 0.9
-							: Math.min(0.25 + link.weight * 0.35, 0.9)) *
+							: Math.min(0.15 + link.weight * 0.25, 0.6)) *
 				edgeFadeAlpha *
 				(isHighlighted ? 1 : edgeHoverAlpha / 0.85);
 			ctx.stroke();
@@ -1678,7 +1677,6 @@ $effect(() => {
 	if (!simulation) return;
 	const _charge = chargeStrength;
 	const _link = linkDistance;
-	const _nodeSize = nodeSize;
 
 	const charge = simulation.force("charge") as ReturnType<typeof forceManyBody> | undefined;
 	if (charge) {

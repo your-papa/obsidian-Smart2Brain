@@ -13,6 +13,7 @@ import type {
 	SmartGraphSettings,
 	GraphMode,
 	ColorGroup,
+	GraphData,
 } from "../../types/graph";
 import { THEME_COLOR_VARS } from "../../types/graph";
 
@@ -24,6 +25,7 @@ interface Props {
 	isTransitioning: boolean;
 	nodeCount: number;
 	edgeCount: number;
+	graphData: GraphData;
 	availableFolders: string[];
 	availableTags: string[];
 	selectedFolders: string[];
@@ -53,6 +55,7 @@ let {
 	isTransitioning,
 	nodeCount,
 	edgeCount,
+	graphData,
 	availableFolders,
 	availableTags,
 	selectedFolders,
@@ -76,6 +79,80 @@ let {
 
 let isCollapsed = $state(true);
 let isFilterOpen = $state(false);
+let isInfoOpen = $state(false);
+
+let graphStats = $derived.by(() => {
+	const { nodes, edges } = graphData;
+	if (nodes.length === 0) return null;
+
+	const degrees = nodes.map((n) => n.degree ?? 0);
+	const totalDegree = degrees.reduce((a, b) => a + b, 0);
+	const avgDegree = totalDegree / nodes.length;
+	const maxDegree = Math.max(...degrees);
+	const orphans = degrees.filter((d) => d === 0).length;
+
+	const wikiEdges = edges.filter((e) => e.type === "wiki").length;
+	const semanticEdges = edges.filter((e) => e.type === "semantic").length;
+
+	// Graph density: ratio of actual edges to max possible edges
+	const maxEdges = (nodes.length * (nodes.length - 1)) / 2;
+	const density = maxEdges > 0 ? edges.length / maxEdges : 0;
+
+	// Cluster count
+	const clusters = new Set(nodes.map((n) => n.cluster).filter((c) => c != null));
+
+	// Average shortest path (BFS, sampled for performance)
+	const adj = new Map<string, Set<string>>();
+	for (const n of nodes) adj.set(n.id, new Set());
+	for (const e of edges) {
+		adj.get(e.source)?.add(e.target);
+		adj.get(e.target)?.add(e.source);
+	}
+
+	const sampleSize = Math.min(nodes.length, 50);
+	const sampled =
+		nodes.length <= sampleSize ? nodes : nodes.filter((_, i) => i % Math.ceil(nodes.length / sampleSize) === 0);
+	let totalDist = 0;
+	let pathCount = 0;
+	let maxPath = 0;
+
+	for (const start of sampled) {
+		const dist = new Map<string, number>([[start.id, 0]]);
+		const queue = [start.id];
+		let qi = 0;
+		while (qi < queue.length) {
+			const cur = queue[qi++];
+			const d = dist.get(cur)!;
+			for (const nb of adj.get(cur) ?? []) {
+				if (!dist.has(nb)) {
+					dist.set(nb, d + 1);
+					queue.push(nb);
+				}
+			}
+		}
+		for (const [, d] of dist) {
+			if (d > 0) {
+				totalDist += d;
+				pathCount++;
+				if (d > maxPath) maxPath = d;
+			}
+		}
+	}
+
+	const avgPath = pathCount > 0 ? totalDist / pathCount : 0;
+
+	return {
+		avgDegree,
+		maxDegree,
+		orphans,
+		wikiEdges,
+		semanticEdges,
+		density,
+		clusterCount: clusters.size,
+		avgPath,
+		diameter: maxPath,
+	};
+});
 
 let hasActiveFilters = $derived(selectedFolders.length > 0 || selectedTags.length > 0 || searchQuery.length > 0);
 
@@ -167,10 +244,6 @@ function handleShowOrphansChange(checked: boolean) {
 
 function handleLabelZoomChange(val: number) {
 	onSettingsChange({ labelZoomThreshold: val / 10 });
-}
-
-function handleNodeSizeChange(val: number) {
-	onSettingsChange({ nodeSize: val });
 }
 
 function handleLinkDistanceChange(val: number) {
@@ -271,6 +344,12 @@ function updateColorGroupColor(index: number, color: string) {
     onClick={() => onLassoModeChange?.(!lassoMode)}
     styles={lassoMode ? "is-active" : ""}
   />
+  <!-- Info toggle -->
+  <Button
+    iconId="info"
+    tooltip={isInfoOpen ? "Hide stats" : "Graph statistics"}
+    onClick={() => (isInfoOpen = !isInfoOpen)}
+  />
   <!-- Filter toggle -->
   <div class="toolbar-icon-wrapper">
     <Button
@@ -290,7 +369,45 @@ function updateColorGroupColor(index: number, color: string) {
   />
 </div>
 
-{#if isFilterOpen}
+{#if isInfoOpen && graphStats}
+  <div class="graph-info-card">
+    <h4 class="graph-controls-title">Graph Statistics</h4>
+    <div class="info-grid">
+      <span class="info-label">Nodes</span>
+      <span class="info-value">{nodeCount}</span>
+      <span class="info-label">Edges</span>
+      <span class="info-value">{edgeCount}</span>
+      {#if graphStats.wikiEdges > 0}
+        <span class="info-label">Wiki links</span>
+        <span class="info-value">{graphStats.wikiEdges}</span>
+      {/if}
+      {#if graphStats.semanticEdges > 0}
+        <span class="info-label">Semantic edges</span>
+        <span class="info-value">{graphStats.semanticEdges}</span>
+      {/if}
+      <span class="info-label">Avg connections</span>
+      <span class="info-value">{graphStats.avgDegree.toFixed(1)}</span>
+      <span class="info-label">Max connections</span>
+      <span class="info-value">{graphStats.maxDegree}</span>
+      <span class="info-label">Orphan nodes</span>
+      <span class="info-value">{graphStats.orphans}</span>
+      <span class="info-label">Density</span>
+      <span class="info-value">{(graphStats.density * 100).toFixed(2)}%</span>
+      {#if graphStats.avgPath > 0}
+        <span class="info-label">Avg path length</span>
+        <span class="info-value">{graphStats.avgPath.toFixed(1)}</span>
+        <span class="info-label">Diameter</span>
+        <span class="info-value">{graphStats.diameter}</span>
+      {/if}
+      {#if graphStats.clusterCount > 0}
+        <span class="info-label">Clusters</span>
+        <span class="info-value">{graphStats.clusterCount}</span>
+      {/if}
+    </div>
+  </div>
+{/if}
+
+{#if isFilterOpen}}
   <div class="graph-filter-panel">
     <div class="graph-filter-header">
       <h4 class="graph-controls-title">Filters</h4>
@@ -620,17 +737,6 @@ function updateColorGroupColor(index: number, color: string) {
       </button>
 
       {#if sectionOpen.layout}
-        <SettingContainer name="Node size" desc="Base radius of nodes">
-          <RangeSlider
-            value={settings.nodeSize}
-            min={2}
-            max={16}
-            step={1}
-            showValue={true}
-            oncommit={handleNodeSizeChange}
-          />
-        </SettingContainer>
-
         <SettingContainer name="Link distance" desc="Target distance between linked nodes">
           <RangeSlider
             value={settings.linkDistance}
@@ -730,6 +836,35 @@ function updateColorGroupColor(index: number, color: string) {
   :global(.clickable-icon.is-active) {
     color: var(--interactive-accent);
     background: var(--interactive-accent-hover);
+  }
+
+  .graph-info-card {
+    position: absolute;
+    top: 8px;
+    right: 44px;
+    width: 220px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 12px;
+    z-index: 10;
+  }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 12px;
+    font-size: 12px;
+  }
+
+  .info-label {
+    color: var(--text-muted);
+  }
+
+  .info-value {
+    color: var(--text-normal);
+    font-weight: 500;
+    text-align: right;
   }
 
   .graph-filter-panel {
