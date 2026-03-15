@@ -564,7 +564,6 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
     <GraphCanvas
       bind:this={canvasComponent}
       graphData={displayData}
-      nodeSize={settings.nodeSize}
       linkDistance={settings.linkDistance}
       chargeStrength={settings.chargeStrength}
       labelZoomThreshold={settings.labelZoomThreshold}
@@ -615,6 +614,7 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
     {isTransitioning}
     nodeCount={displayData.nodes.length}
     edgeCount={displayData.edges.length}
+    graphData={displayData}
     {availableFolders}
     {availableTags}
     {selectedFolders}
