@@ -1,4 +1,4 @@
-import { App, Modal } from "obsidian";
+import { Modal } from "obsidian";
 import { mount } from "svelte";
 import ModalProvider from "../../lib/QueryClientProvider.svelte";
 import type SecondBrainPlugin from "../../main";

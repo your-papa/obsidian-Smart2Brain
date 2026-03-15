@@ -26,7 +26,7 @@ interface Props {
 	useForceLayout?: boolean;
 	transitionTargets?: Map<string, { x: number; y: number }> | null;
 	onTransitionEnd?: () => void;
-	focusedCluster?: number | null;
+	focusedClusters?: Set<number>;
 	clusterLabels?: Record<number, string>;
 	isLabeling?: boolean;
 	onNodeClick?: (path: string) => void;
@@ -50,7 +50,7 @@ let {
 	useForceLayout = true,
 	transitionTargets = null,
 	onTransitionEnd,
-	focusedCluster = null,
+	focusedClusters = new Set<number>(),
 	clusterLabels = {},
 	isLabeling = false,
 	onNodeClick,
@@ -255,6 +255,22 @@ export function clearSelection() {
 }
 
 /**
+ * Get paths for all nodes belonging to any of the given clusters.
+ */
+export function getNodePathsForClusters(clusters: Set<number>): string[] {
+	return simNodes.filter((n) => n.cluster != null && clusters.has(n.cluster)).map((n) => n.path);
+}
+
+/**
+ * Select nodes by their paths (e.g. from cluster selection).
+ */
+export function selectNodesByPaths(paths: string[]) {
+	const pathSet = new Set(paths);
+	selectedNodes = new Set(simNodes.filter((n) => pathSet.has(n.path)).map((n) => n.id));
+	render();
+}
+
+/**
  * Find the edge nearest to the given screen coordinates, if within hit distance.
  */
 function findEdgeAt(screenX: number, screenY: number): SimLink | null {
@@ -312,7 +328,7 @@ function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 function getNodeRadius(node: GraphNode): number {
 	const base = nodeSize;
 	const degree = node.degree ?? 0;
-	return base + Math.min(degree * 0.5, base * 2);
+	return base + Math.min(Math.sqrt(degree) * 0.8, base * 1.5);
 }
 
 /**
@@ -353,9 +369,11 @@ function render() {
 
 			if (source.x == null || source.y == null || target.x == null || target.y == null) continue;
 
-			// Dim edges outside focused cluster
+			// Dim edges outside focused clusters
 			const inFocus =
-				focusedCluster == null || source.cluster === focusedCluster || target.cluster === focusedCluster;
+				focusedClusters.size === 0 ||
+				(source.cluster != null && focusedClusters.has(source.cluster)) ||
+				(target.cluster != null && focusedClusters.has(target.cluster));
 
 			// Dim edges outside selection
 			const inSelection =
@@ -390,9 +408,11 @@ function render() {
 
 			if (source.x == null || source.y == null || target.x == null || target.y == null) continue;
 
-			// Dim edges outside focused cluster
+			// Dim edges outside focused clusters
 			const inFocus =
-				focusedCluster == null || source.cluster === focusedCluster || target.cluster === focusedCluster;
+				focusedClusters.size === 0 ||
+				(source.cluster != null && focusedClusters.has(source.cluster)) ||
+				(target.cluster != null && focusedClusters.has(target.cluster));
 
 			// Dim edges outside selection
 			const inSelection =
@@ -439,7 +459,11 @@ function render() {
 			target = 1;
 		} else if (hasSelection && !selectedNodes.has(node.id)) {
 			target = 0.15;
-		} else if (focusedCluster != null && node.cluster !== focusedCluster) {
+		} else if (
+			!hasSelection &&
+			focusedClusters.size > 0 &&
+			(node.cluster == null || !focusedClusters.has(node.cluster))
+		) {
 			target = 0.1;
 		} else if (hoveredNode) {
 			const isConnected = adjacency.get(hoveredNode.id)?.has(node.id) ?? false;
@@ -743,13 +767,14 @@ function render() {
 			for (let i = 0; i < entries.length; i++) {
 				const [cluster, color] = entries[i];
 				const rowY = legendY + padY + i * rowH + rowH / 2;
-				const isFocused = focusedCluster === cluster;
+				const hasFocusedClusters = focusedClusters.size > 0;
+				const isFocused = focusedClusters.has(cluster);
 
 				// Color swatch
 				ctx.beginPath();
 				ctx.roundRect(legendX + padX, rowY - swatchSize / 2, swatchSize, swatchSize, 2);
 				ctx.fillStyle = color;
-				ctx.globalAlpha = isFocused ? 1 : focusedCluster != null ? 0.3 : 0.8;
+				ctx.globalAlpha = isFocused ? 1 : hasFocusedClusters ? 0.3 : 0.8;
 				ctx.fill();
 
 				if (isFocused) {
@@ -760,7 +785,7 @@ function render() {
 
 				// Label — use LLM-generated label if available, else fallback
 				const legendLabel = clusterLabels[cluster] ?? `Cluster ${cluster}`;
-				ctx.globalAlpha = isFocused ? 1 : focusedCluster != null ? 0.4 : 0.7;
+				ctx.globalAlpha = isFocused ? 1 : hasFocusedClusters ? 0.4 : 0.7;
 				ctx.fillStyle = c.textMuted;
 				ctx.fillText(legendLabel, legendX + padX + swatchSize + 6, rowY, legendW - padX - swatchSize - 16);
 				ctx.globalAlpha = 1;
@@ -1130,6 +1155,7 @@ function handleClick(e: MouseEvent) {
 	// Check cluster legend hit areas first (screen space)
 	for (const area of clusterLegendHitAreas) {
 		if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
+			// Toggle this cluster and rebuild selection from all focused clusters
 			onFocusCluster?.(area.cluster);
 			render();
 			return;
