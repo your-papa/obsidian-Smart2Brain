@@ -13,6 +13,7 @@ import CollapsibleUserBubble from "./CollapsibleUserBubble.svelte";
 import UserAttachmentFiles from "./UserAttachmentFiles.svelte";
 import UserAttachmentImages from "./UserAttachmentImages.svelte";
 import ToolCallsSection from "./ToolCallsSection.svelte";
+import Dots from "../ui/Dots.svelte";
 import { icon } from "../../utils/utils";
 
 interface Props {
@@ -109,7 +110,7 @@ function renderAssitantAnswer(assistantAnswer: AssistantMessage) {
 	return assistantAnswer.content;
 }
 
-function getOpenDataviewFenceStart(content: string): number | null {
+function getOpenDataviewFenceStart(content: string): { start: number; lang: string } | null {
 	const fenceRegex = /```(\w+)?/g;
 	let inFence = false;
 	let fenceLang = "";
@@ -129,8 +130,11 @@ function getOpenDataviewFenceStart(content: string): number | null {
 		match = fenceRegex.exec(content);
 	}
 
-	if (inFence && (fenceLang === "dataview" || fenceLang === "dataviewjs")) {
-		return fenceStart;
+	if (
+		inFence &&
+		(fenceLang === "dataview" || fenceLang === "dataviewjs" || fenceLang === "s2b-plot" || fenceLang === "s2b-html")
+	) {
+		return { start: fenceStart, lang: fenceLang };
 	}
 	return null;
 }
@@ -139,20 +143,27 @@ function getRenderableAssistantContent(assistantAnswer: AssistantMessage) {
 	const content = renderAssitantAnswer(assistantAnswer) ?? "";
 	const isStreaming = assistantAnswer.state === AssistantState.streaming;
 	if (!isStreaming || !assistantAnswer.content) {
-		return { content, showLoading: false, renderContent: true };
+		return { content, showLoading: false, loadingLabel: "", renderContent: true };
 	}
 
-	const openFenceStart = getOpenDataviewFenceStart(content);
-	if (openFenceStart === null) {
-		return { content, showLoading: false, renderContent: true };
+	const openFence = getOpenDataviewFenceStart(content);
+	if (openFence === null) {
+		return { content, showLoading: false, loadingLabel: "", renderContent: true };
 	}
 
-	const visibleContent = content.slice(0, openFenceStart);
+	const visibleContent = content.slice(0, openFence.start);
 	const hasRenderableContent = visibleContent.trim().length > 0;
+	const loadingLabel =
+		openFence.lang === "s2b-plot"
+			? "Generating plot…"
+			: openFence.lang === "s2b-html"
+				? "Rendering…"
+				: "Running query…";
 
 	return {
 		content: visibleContent,
 		showLoading: true,
+		loadingLabel,
 		renderContent: hasRenderableContent,
 	};
 }
@@ -405,6 +416,12 @@ $effect(() => {
                   isError={messagePair.assistantMessage.state === AssistantState.error}
                   isProcessing={isAssistantProcessing}
                 />
+                {#if renderInfo.showLoading}
+                  <div class="s2b-fence-loading">
+                    <Dots size={18} color="var(--text-muted)" />
+                    <span>{renderInfo.loadingLabel}</span>
+                  </div>
+                {/if}
               {:else}
                 <!-- Content Section: only reached for completed messages with no tool calls / timeline -->
                 {#if messagePair.assistantMessage.content || messagePair.assistantMessage.state === AssistantState.cancelled || messagePair.assistantMessage.state === AssistantState.error}
@@ -414,6 +431,12 @@ $effect(() => {
                       content={renderInfo.content}
                       class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
                     />
+                  {/if}
+                  {#if renderInfo.showLoading}
+                    <div class="s2b-fence-loading">
+                      <Dots size={18} color="var(--text-muted)" />
+                      <span>{renderInfo.loadingLabel}</span>
+                    </div>
                   {/if}
                 {/if}
               {/if}
@@ -510,5 +533,14 @@ $effect(() => {
   .generation-label {
     color: var(--text-accent);
     white-space: nowrap;
+  }
+
+  .s2b-fence-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
   }
 </style>

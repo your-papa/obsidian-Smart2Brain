@@ -6,6 +6,7 @@ import { AgentManager } from "./agent/AgentManager";
 import { inlineDiffPlugin } from "./editor/inlineDiffExtension";
 import { selectionHighlightPlugin } from "./editor/selectionHighlightExtension";
 import { createReadingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
+import { createHtmlCodeBlockProcessor, createPlotCodeBlockProcessor } from "./components/ui/IframeRenderer";
 import { terminateWorker as terminateClusteringWorker } from "./utils/computeWorkerManager";
 import { SearchModal } from "./components/modal/SearchModal";
 import { getQueryClient } from "./lib/query";
@@ -110,6 +111,10 @@ export default class SecondBrainPlugin extends Plugin {
 
 		// Register reading view diff highlighting
 		this.registerMarkdownPostProcessor(createReadingViewDiffPostProcessor(this));
+
+		// Register sandboxed iframe code block processors
+		this.registerMarkdownCodeBlockProcessor("s2b-plot", createPlotCodeBlockProcessor(this));
+		this.registerMarkdownCodeBlockProcessor("s2b-html", createHtmlCodeBlockProcessor(this));
 
 		// Re-render reading views when pending changes update
 		const refreshReadingViews = () => {

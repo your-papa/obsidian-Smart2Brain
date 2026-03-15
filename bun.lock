@@ -28,6 +28,7 @@
         "langsmith": "^0.4.12",
         "minisearch": "^7.2.0",
         "pdf-lib": "^1.17.1",
+        "plotly.js-gl3d-dist-min": "^3.4.0",
         "runed": "^0.37.1",
         "svelte-i18n": "^4.0.1",
         "umap-js": "^1.4.0",
@@ -771,6 +772,8 @@
     "pirates": ["pirates@4.0.7", "", {}, "sha512-TfySrs/5nm8fQJDcBDuUng3VOUKsd7S+zqvbOTiGXHfxX4wK31ard+hoNuvkicM/2YFzlpDgABOevKSsB4G/FA=="],
 
     "pkce-challenge": ["pkce-challenge@5.0.1", "", {}, "sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ=="],
+
+    "plotly.js-gl3d-dist-min": ["plotly.js-gl3d-dist-min@3.4.0", "", {}, "sha512-y42ZwSkmYIcsVGzjMuh5vN66+EZpG59KG2e/hH3IyGYenBqKuScEUTWCraocowqw0OLRQxgUTugM+L1oQKCbgQ=="],
 
     "postcss": ["postcss@8.5.8", "", { "dependencies": { "nanoid": "^3.3.11", "picocolors": "^1.1.1", "source-map-js": "^1.2.1" } }, "sha512-OW/rX8O/jXnm82Ey1k44pObPtdblfiuWnrd8X7GJ7emImCOstunGbXUpp7HdBrFQX6rJzn3sPT397Wp5aCwCHg=="],
 
