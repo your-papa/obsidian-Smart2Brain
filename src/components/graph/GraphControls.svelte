@@ -74,7 +74,7 @@ let {
 	selectedCount = 0,
 }: Props = $props();
 
-let isCollapsed = $state(false);
+let isCollapsed = $state(true);
 let isFilterOpen = $state(false);
 
 let hasActiveFilters = $derived(selectedFolders.length > 0 || selectedTags.length > 0 || searchQuery.length > 0);

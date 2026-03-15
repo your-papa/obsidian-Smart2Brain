@@ -6,7 +6,7 @@ import { getPlugin } from "../../stores/state.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getRegistry } from "../../providers/registry";
 import type { ChatModelConfig } from "../../providers/index";
-import { getVectorStoreService, isVectorStoreInitialized } from "../../vectorstore";
+import { getVectorStoreService, isVectorStoreInitialized, waitForVectorStore } from "../../vectorstore";
 import {
 	type GraphData,
 	type GraphMode,
@@ -137,7 +137,8 @@ async function buildSmartModeGraph(
 	graphData: GraphData;
 	shouldAutoLabel: boolean;
 }> {
-	if (!isVectorStoreInitialized()) {
+	const ready = await waitForVectorStore();
+	if (!ready) {
 		return { graphData: { nodes: [], edges: [] }, shouldAutoLabel: false };
 	}
 
@@ -203,7 +204,7 @@ async function rebuildGraph(targetMode: GraphMode = graphMode) {
 			if (gen !== buildGeneration) return;
 			graphMode = "wiki";
 			data.lastGraphMode = "wiki";
-			focusedCluster = null;
+			focusedClusters = new Set();
 			graphData = nextGraphData;
 			return;
 		}
@@ -349,11 +350,27 @@ function handleRevealFile(path: string) {
 }
 
 // Cluster focus state
-let focusedCluster: number | null = $state(null);
+let focusedClusters: Set<number> = $state(new Set());
 
 function handleFocusCluster(cluster: number) {
-	// Toggle: if already focused on this cluster, clear focus
-	focusedCluster = focusedCluster === cluster ? null : cluster;
+	// Toggle: add or remove this cluster from the focused set
+	const next = new Set(focusedClusters);
+	if (next.has(cluster)) {
+		next.delete(cluster);
+	} else {
+		next.add(cluster);
+	}
+	focusedClusters = next;
+
+	// Sync selection: select all nodes belonging to any focused cluster
+	if (next.size > 0) {
+		const paths = canvasComponent?.getNodePathsForClusters(next) ?? [];
+		canvasComponent?.selectNodesByPaths(paths);
+		handleSelectionChange(paths);
+	} else {
+		handleSelectionChange([]);
+		canvasComponent?.clearSelection();
+	}
 }
 
 function handleSelectionChange(paths: string[]) {
@@ -407,6 +424,7 @@ async function handleSendToChat() {
 
 function handleClearSelection() {
 	selectedPaths = [];
+	focusedClusters = new Set();
 	canvasComponent?.clearSelection();
 	const messenger = getMessenger();
 	if (messenger) {
@@ -554,7 +572,7 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
       showSemanticEdges={graphMode === "smart" ? settings.showSemanticEdges : false}
       showWikiLinks={graphMode === "wiki" ? true : settings.showWikiLinks}
       useForceLayout={graphMode === "wiki" ? true : settings.useForceLayout}
-      {focusedCluster}
+      focusedClusters={focusedClusters}
       {clusterLabels}
       {isLabeling}
       onNodeClick={handleNodeClick}

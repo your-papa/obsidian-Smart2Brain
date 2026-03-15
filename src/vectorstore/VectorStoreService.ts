@@ -55,6 +55,7 @@ const BATCH_SIZE_OLLAMA = 1; // Sequential for local models — gives per-file p
 const BATCH_SIZE_DEFAULT = 50;
 
 let instance: VectorStoreService | null = null;
+let pendingInitPromise: Promise<void> | null = null;
 
 /**
  * Get the singleton VectorStoreService instance.
@@ -72,6 +73,20 @@ export function getVectorStoreService(): VectorStoreService {
  */
 export function isVectorStoreInitialized(): boolean {
 	return instance !== null;
+}
+
+/**
+ * Wait for the VectorStoreService to finish initializing.
+ * Resolves immediately if already initialized, or waits for the pending init.
+ * Returns true if initialization succeeded, false otherwise.
+ */
+export async function waitForVectorStore(): Promise<boolean> {
+	if (instance) return true;
+	if (pendingInitPromise) {
+		await pendingInitPromise;
+		return instance !== null;
+	}
+	return false;
 }
 
 /**
@@ -187,14 +202,18 @@ export class VectorStoreService {
 		}
 
 		const service = new VectorStoreService(plugin);
-		service.initPromise = service
+		pendingInitPromise = service
 			.init()
 			.then(() => {
 				instance = service;
 			})
 			.catch((error) => {
 				Logger.error("[VectorStore] Background initialization failed:", error);
+			})
+			.finally(() => {
+				pendingInitPromise = null;
 			});
+		service.initPromise = pendingInitPromise;
 		return service;
 	}
 
