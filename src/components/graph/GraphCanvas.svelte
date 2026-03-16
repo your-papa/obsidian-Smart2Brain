@@ -390,7 +390,7 @@ function render() {
 			ctx.moveTo(source.x, source.y);
 			ctx.lineTo(target.x, target.y);
 			ctx.strokeStyle = isHighlighted ? c.accent : c.textFaint;
-			ctx.lineWidth = isHighlighted ? 2 / transform.scale : 1 / transform.scale;
+			ctx.lineWidth = isHighlighted ? 2 / transform.scale : 0.5 / transform.scale;
 			ctx.globalAlpha =
 				(!inFocus ? 0.05 : !inSelection ? 0.05 : isHighlighted ? 0.9 : 0.25) *
 				edgeFadeAlpha *
@@ -429,7 +429,7 @@ function render() {
 			ctx.moveTo(source.x, source.y);
 			ctx.lineTo(target.x, target.y);
 			ctx.strokeStyle = isHighlighted ? c.accent : c.graphLine;
-			ctx.lineWidth = isHighlighted ? 2 / transform.scale : Math.max(0.8, link.weight * 3) / transform.scale;
+			ctx.lineWidth = isHighlighted ? 2 / transform.scale : Math.max(0.5, link.weight * 2) / transform.scale;
 			ctx.globalAlpha =
 				(!inFocus
 					? 0.05
