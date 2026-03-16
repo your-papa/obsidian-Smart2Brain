@@ -571,7 +571,7 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
       showSemanticEdges={graphMode === "smart" ? settings.showSemanticEdges : false}
       showWikiLinks={graphMode === "wiki" ? true : settings.showWikiLinks}
       useForceLayout={graphMode === "wiki" ? true : settings.useForceLayout}
-      focusedClusters={focusedClusters}
+      {focusedClusters}
       {clusterLabels}
       {isLabeling}
       onNodeClick={handleNodeClick}
