@@ -10,6 +10,7 @@ export {
 	VectorStoreService,
 	getVectorStoreService,
 	isVectorStoreInitialized,
+	waitForVectorStore,
 } from "./VectorStoreService";
 
 export type {
