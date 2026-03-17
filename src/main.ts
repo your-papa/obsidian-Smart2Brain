@@ -17,6 +17,8 @@ import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingCh
 import { setPlugin } from "./stores/state.svelte";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import { SmartGraphView, VIEW_TYPE_SMART_GRAPH } from "./views/smart-graph/SmartGraphView";
+import { DynamicView, VIEW_TYPE_DYNAMIC } from "./views/dynamic/DynamicView";
+import { DynamicViewStore, initDynamicViewStore, getDynamicViewStore } from "./stores/dynamicViewStore.svelte";
 import SettingsTab from "./views/settings/Settings";
 import { VectorStoreService } from "./vectorstore";
 
@@ -25,6 +27,7 @@ export default class SecondBrainPlugin extends Plugin {
 	skillsService!: SkillsService;
 	vectorStoreService!: VectorStoreService;
 	pendingChangesStore!: PendingChangesStore;
+	dynamicViewStore!: DynamicViewStore;
 	queryClient = getQueryClient();
 	pluginData!: PluginDataStore;
 
@@ -53,6 +56,10 @@ export default class SecondBrainPlugin extends Plugin {
 
 		// Register Smart Graph view
 		this.registerView(VIEW_TYPE_SMART_GRAPH, (leaf) => new SmartGraphView(leaf, this));
+
+		// Register Dynamic View type (agent-generated persistent views)
+		this.registerView(VIEW_TYPE_DYNAMIC, (leaf) => new DynamicView(leaf, this));
+		this.registerExtensions(["s2b-view"], VIEW_TYPE_DYNAMIC);
 
 		if (this.manifest.dir === undefined) {
 			this.unload();
@@ -90,6 +97,13 @@ export default class SecondBrainPlugin extends Plugin {
 			callback: () => this.activateSmartGraphView(),
 		});
 
+		this.addCommand({
+			id: "open-dynamic-view",
+			name: "Open Dynamic View",
+			icon: "layout-dashboard",
+			callback: () => this.openDynamicViewPicker(),
+		});
+
 		this.addSettingTab(new SettingsTab(this));
 
 		// Initialize Agent Manager (v2)
@@ -102,6 +116,11 @@ export default class SecondBrainPlugin extends Plugin {
 		this.pendingChangesStore = new PendingChangesStore(this);
 		initPendingChangesStore(this.pendingChangesStore);
 		await this.pendingChangesStore.load();
+
+		// Initialize Dynamic View Store
+		this.dynamicViewStore = new DynamicViewStore(this);
+		initDynamicViewStore(this.dynamicViewStore);
+		await this.dynamicViewStore.initialize();
 
 		// Register inline diff decorations in the editor
 		this.registerEditorExtension(inlineDiffPlugin);
@@ -134,6 +153,7 @@ export default class SecondBrainPlugin extends Plugin {
 		if (this.vectorStoreService) void this.vectorStoreService.cleanup();
 		if (this.agentManager) this.agentManager.cleanup();
 		if (this.pendingChangesStore) this.pendingChangesStore.cleanup();
+		if (this.dynamicViewStore) this.dynamicViewStore.cleanup();
 		terminateClusteringWorker();
 	}
 
@@ -162,5 +182,59 @@ export default class SecondBrainPlugin extends Plugin {
 		}
 
 		workspace.revealLeaf(leaf);
+	}
+
+	async activateDynamicView(viewId: string) {
+		const { workspace } = this.app;
+
+		// Check if this specific view is already open
+		for (const leaf of workspace.getLeavesOfType(VIEW_TYPE_DYNAMIC)) {
+			if ((leaf.view as { viewId?: string }).viewId === viewId) {
+				workspace.revealLeaf(leaf);
+				return;
+			}
+		}
+
+		const newLeaf = workspace.getLeaf("tab");
+		await newLeaf.setViewState({
+			type: VIEW_TYPE_DYNAMIC,
+			active: true,
+			state: { viewId },
+		});
+		workspace.revealLeaf(newLeaf);
+	}
+
+	openDynamicViewPicker() {
+		const views = getDynamicViewStore().getAllViews();
+		if (views.length === 0) {
+			new (require("obsidian") as typeof import("obsidian")).Notice(
+				"No dynamic views found. Ask the agent to create one!",
+			);
+			return;
+		}
+
+		const { FuzzySuggestModal } = require("obsidian") as typeof import("obsidian");
+
+		class ViewPickerModal extends FuzzySuggestModal<{ id: string; title: string }> {
+			plugin: SecondBrainPlugin;
+			constructor(plugin: SecondBrainPlugin) {
+				super(plugin.app);
+				this.plugin = plugin;
+				this.setPlaceholder("Pick a dynamic view to open…");
+			}
+			getItems() {
+				return getDynamicViewStore()
+					.getAllViews()
+					.map((v) => ({ id: v.id, title: v.title }));
+			}
+			getItemText(item: { title: string }) {
+				return item.title;
+			}
+			onChooseItem(item: { id: string }) {
+				this.plugin.activateDynamicView(item.id);
+			}
+		}
+
+		new ViewPickerModal(this).open();
 	}
 }

@@ -42,7 +42,7 @@ const THEME_VARS = [
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 /** Read current Obsidian theme CSS vars from the document. */
-function readThemeVars(): Record<string, string> {
+export function readThemeVars(): Record<string, string> {
 	const style = getComputedStyle(document.body);
 	const vars: Record<string, string> = {};
 	for (const name of THEME_VARS) {
@@ -60,7 +60,7 @@ function themeVarsStyle(vars: Record<string, string>): string {
 }
 
 /** Build a CSS block with theme vars + a minimal reset (for HTML fragments). */
-function themeStyleWithReset(vars: Record<string, string>): string {
+export function themeStyleWithReset(vars: Record<string, string>): string {
 	const decls = Object.entries(vars)
 		.map(([k, v]) => `${k}: ${v};`)
 		.join("\n    ");
@@ -77,7 +77,7 @@ function themeStyleWithReset(vars: Record<string, string>): string {
 }
 
 /** Escape </script> inside strings so they don't break the srcdoc. */
-function escapeScript(s: string): string {
+export function escapeScript(s: string): string {
 	return s.replaceAll("</script>", "<\\/script>");
 }
 
@@ -110,7 +110,7 @@ function buildIframe(el: HTMLElement, srcdoc: string, key: string, height = DEFA
  * `<html`), theme vars are injected into the existing `<head>`. Otherwise, it's
  * wrapped in a minimal HTML5 skeleton with theme CSS vars injected.
  */
-function buildHtmlSrcdoc(userHtml: string, themeVars: Record<string, string>): string {
+export function buildHtmlSrcdoc(userHtml: string, themeVars: Record<string, string>): string {
 	const trimmed = userHtml.trimStart();
 
 	if (/^<!doctype|^<html/i.test(trimmed)) {

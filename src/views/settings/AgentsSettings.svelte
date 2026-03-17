@@ -483,6 +483,12 @@ const TOOLS: ToolInfo[] = [
 		defaultDescription:
 			"Create, update, or delete markdown notes in one staged batch. Related note operations can be proposed together for user approval.",
 	},
+	{
+		id: "manage_views",
+		defaultName: "Manage Views",
+		defaultDescription:
+			"Create, update, or delete persistent dynamic views (calendars, dashboards, timelines, etc.) rendered in sandboxed iframes.",
+	},
 ];
 
 function getToolDisplayName(toolId: BuiltInToolId): string {

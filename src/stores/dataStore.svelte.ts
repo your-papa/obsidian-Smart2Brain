@@ -298,6 +298,14 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 			allowMove: true,
 		},
 	},
+	manage_views: {
+		enabled: true,
+		name: "manage_views",
+		description:
+			"Create, update, or delete persistent dynamic views rendered in sandboxed iframes. Views are saved as vault files and can be pinned, moved, and restored across sessions.",
+		promptGuidance:
+			"Use this tool to create interactive visual views (calendars, dashboards, timelines, kanban boards, etc.) that the user can keep open alongside their notes. Views use HTML/CSS/JS and run in a sandboxed iframe. Use the `s2b` bridge API inside the JS to read vault data at runtime: `await s2b.searchNotes(query)`, `await s2b.readContent(path)`, `await s2b.getProperties(path)`, `await s2b.getAllTags()`, `await s2b.listFiles(prefix)`. Write operations: `await s2b.createNote(path, content)`, `await s2b.updateNote(path, content)`, `await s2b.deleteNote(path)`. Use Obsidian CSS variables (e.g. `var(--background-primary)`, `var(--interactive-accent)`) for theme integration.",
+	},
 };
 
 /**

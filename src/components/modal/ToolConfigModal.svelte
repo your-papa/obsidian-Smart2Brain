@@ -309,6 +309,7 @@ const toolDisplayNames: Record<BuiltInToolId, string> = {
 	execute_javascript: "Execute JavaScript",
 	execute_dataview_query: "Execute Dataview Query",
 	manage_notes: "Manage Notes",
+	manage_views: "Manage Views",
 };
 
 onMount(() => {

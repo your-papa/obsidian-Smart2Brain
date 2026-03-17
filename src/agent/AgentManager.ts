@@ -48,6 +48,7 @@ import { createGetAllTagsTool } from "./tools/getAllTags";
 import { createGetPropertiesTool } from "./tools/getProperties";
 import { createLoadSkillTool } from "./tools/loadSkill";
 import { createManageNotesTool } from "./tools/manageNotes";
+import { createManageViewsTool } from "./tools/manageViews";
 import { createReadContentTool } from "./tools/readContent";
 import { createSearchNotesTool } from "./tools/searchNotes";
 import { setCurrentThreadId } from "./tools/runContext";
@@ -618,6 +619,7 @@ export class AgentManager {
 				() => createReadContentTool(this.plugin.app, imageProcessorInstance, pdfProcessorInstance),
 			],
 			["manage_notes", () => createManageNotesTool(this.plugin.app)],
+			["manage_views", () => createManageViewsTool(this.plugin)],
 		];
 
 		for (const [toolId, factory] of builtInTools) {

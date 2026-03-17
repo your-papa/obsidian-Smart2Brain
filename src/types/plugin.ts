@@ -101,7 +101,8 @@ export type BuiltInToolId =
 	| "get_properties"
 	| "execute_javascript"
 	| "execute_dataview_query"
-	| "manage_notes";
+	| "manage_notes"
+	| "manage_views";
 
 /**
  * Tool-specific settings for search_notes tool
