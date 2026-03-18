@@ -1,4 +1,4 @@
-import { MarkdownView, Plugin } from "obsidian";
+import { MarkdownView, Plugin, WorkspaceLeaf } from "obsidian";
 import "./lib/i18n";
 import { Logger as Log } from "./utils/logging";
 import "./styles.css";
@@ -11,7 +11,7 @@ import { SearchModal } from "./components/modal/SearchModal";
 import { getQueryClient } from "./lib/query";
 import { SkillsService } from "./skills";
 import { createMessenger } from "./stores/chatStore.svelte";
-import { type PluginDataStore, createData } from "./stores/dataStore.svelte";
+import { type PluginDataStore, createData, getData } from "./stores/dataStore.svelte";
 import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingChangesStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
@@ -49,6 +49,37 @@ export default class SecondBrainPlugin extends Plugin {
 		});
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
 		this.registerExtensions(["chat"], VIEW_TYPE_CHAT);
+
+		// Intercept .chat file opens so they go directly to the sidebar
+		// without ever replacing the note in the main editor area.
+		const origOpenFile = WorkspaceLeaf.prototype.openFile;
+		const app = this.app;
+		WorkspaceLeaf.prototype.openFile = async function (file, openState) {
+			if (file.extension === "chat") {
+				const location = getData().chatOpenLocation;
+				if (location === "left" || location === "right") {
+					const ws = app.workspace;
+					const root = this.getRoot();
+					if (root !== ws.leftSplit && root !== ws.rightSplit) {
+						const targetSplit = location === "left" ? ws.leftSplit : ws.rightSplit;
+						const sidebarLeaf =
+							ws
+								.getLeavesOfType(VIEW_TYPE_CHAT)
+								.find((l: WorkspaceLeaf) => l.getRoot() === targetSplit) ??
+							(location === "left" ? ws.getLeftLeaf(false) : ws.getRightLeaf(false));
+						if (sidebarLeaf) {
+							await origOpenFile.call(sidebarLeaf, file, openState);
+							ws.revealLeaf(sidebarLeaf);
+							return;
+						}
+					}
+				}
+			}
+			return origOpenFile.call(this, file, openState);
+		};
+		this.register(() => {
+			WorkspaceLeaf.prototype.openFile = origOpenFile;
+		});
 
 		// Register Smart Graph view
 		this.registerView(VIEW_TYPE_SMART_GRAPH, (leaf) => new SmartGraphView(leaf, this));
