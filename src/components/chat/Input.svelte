@@ -1,553 +1,627 @@
 <script lang="ts">
-  import { Notice, normalizePath } from "obsidian";
-  import { onDestroy, onMount } from "svelte";
-  import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
-  import { EmbeddableMarkdownEditor } from "../../lib/editor";
-  import { MessageState, type Messenger } from "../../stores/chatStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { icon } from "../../utils/utils";
-  import type { ChatAttachment } from "../../types/shared";
-  import type { VisibleNote, VisibleNoteRef } from "../../hooks/useVisibleNotes.svelte";
-  import type { SelectionRef } from "../../hooks/useSelection.svelte";
-  import type { GraphNoteRef } from "../../stores/chatStore.svelte";
-  import { mimeFromExtension } from "../../utils/attachments";
-  import { getData } from "../../stores/dataStore.svelte";
-  import AgentPopover from "./AgentPopover.svelte";
-  import ModelPopover from "./ModelPopover.svelte";
-  import PendingChangesBar from "./PendingChangesBar.svelte";
-  import SelectionChip from "./SelectionChip.svelte";
-  import GraphNotesChips from "./GraphNotesChips.svelte";
-  import VisibleNotesChips from "./VisibleNotesChips.svelte";
-  interface Props {
-    messenger: Messenger;
-    onFocusChange?: (focused: boolean) => void;
-    onMessageSent?: () => void;
-  }
-
-  const acceptedFileTypes =
-    ".txt, .md, .csv, .json, .png, .jpg, .jpeg, .gif, .webp, .pdf, image/png, image/jpeg, image/gif, image/webp, application/pdf, text/plain, text/markdown, text/csv";
-
-  const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB per file
-  const MAX_TOTAL_ATTACHMENTS_BYTES = 25 * 1024 * 1024; // 25 MB per message
-
-  const { messenger, onFocusChange, onMessageSent }: Props = $props();
-
-  let editorContainer: HTMLDivElement | undefined = $state();
-  let markdownEditor: EmbeddableMarkdownEditor | undefined = $state();
-  let inputValue = $state("");
-
-  let attachments: ChatAttachment[] = $state([]);
-  let attachmentSizes: Map<string, number> = $state(new Map());
-  /** Object URLs for image previews (cleaned up on destroy) */
-  let previewUrls: Map<string, string> = $state(new Map());
-  /** Tracks files currently being saved to vault */
-  let savingFiles = $state(false);
-  /** Drag-and-drop state */
-  let isDragging = $state(false);
-  let dragCounter = 0;
-  let dragMessage = $state("Drop files here");
-  let dragHasIssue = $state(false);
-  let activeVisibleNotes: VisibleNoteRef[] = $state([]);
-  let activeSelection: SelectionRef | undefined = $state(undefined);
-  let activeGraphNotes: GraphNoteRef[] = $state([]);
-  let pendingGraphPaths: string[] = $state([]);
-  let graphNotesChipRef: { clear: () => void } | undefined = $state(undefined);
-
-  let selectionChipRef: { clearSelection: () => void } | undefined = $state(undefined);
-
-  const ACCEPTED_EXTENSIONS = new Set([
-    "txt",
-    "md",
-    "csv",
-    "json",
-    "png",
-    "jpg",
-    "jpeg",
-    "gif",
-    "webp",
-    "pdf",
-  ]);
-
-  const SUPPORTED_DRAG_MIME_PREFIXES = ["image/"];
-  const SUPPORTED_DRAG_MIMES = new Set([
-    "application/pdf",
-    "text/plain",
-    "text/markdown",
-    "text/csv",
-    "application/json",
-  ]);
-
-  const models = useAvailableModels();
-
-  const selectedChatModel = $derived.by(() => {
-    const selectedAgent = getData().getSelectedAgent();
-    return selectedAgent.chatModel;
-  });
-
-  const selectedModelSupportsVision = $derived.by(() => {
-    const supportsVision = selectedChatModel?.modelConfig?.supportsVision;
-    return supportsVision;
-  });
-
-  const canSendMessage = $derived(inputValue.trim().length > 0 || attachments.length > 0);
-
-  export function focusEditor() {
-    requestAnimationFrame(() => {
-      markdownEditor?.focus();
-    });
-  }
-
-  onMount(() => {
-    // Initialize the markdown editor once the container is ready
-    if (editorContainer) {
-      initializeEditor();
-    }
-  });
-
-  // Consume any pending input queued from elsewhere (e.g. graph "Send to Chat")
-  $effect(() => {
-    if (messenger.pendingInput && markdownEditor) {
-      const text = messenger.pendingInput;
-      messenger.pendingInput = null;
-      markdownEditor.setValue(text);
-      requestAnimationFrame(() => markdownEditor?.focus());
-    }
-  });
-
-  // Consume pending graph notes queued from Smart Graph
-  $effect(() => {
-    if (messenger.pendingGraphNotes !== null) {
-      pendingGraphPaths = messenger.pendingGraphNotes;
-      messenger.pendingGraphNotes = null;
-      if (pendingGraphPaths.length > 0) {
-        requestAnimationFrame(() => markdownEditor?.focus());
-      }
-    }
-  });
-
-  onDestroy(() => {
-    markdownEditor?.destroy();
-    // Clean up object URLs
-    for (const url of previewUrls.values()) {
-      URL.revokeObjectURL(url);
-    }
-    // Remove any unsent attachment files from the vault
-    if (attachments.length > 0) {
-      const adapter = getPlugin().app.vault.adapter;
-      for (const att of attachments) {
-        adapter.remove(att.vaultPath).catch(() => {});
-      }
-    }
-  });
-
-  function initializeEditor() {
-    if (!editorContainer) return;
-
-    const plugin = getPlugin();
-
-    markdownEditor = new EmbeddableMarkdownEditor(plugin.app, editorContainer, {
-      value: inputValue,
-      placeholder: "Type a message...",
-      cls: "chat-markdown-editor",
-      enterVimInsertMode: true,
-      onChange: (value) => {
-        inputValue = value;
-      },
-      onEnter: (_editor, _mod, shift) => {
-        // Shift+Enter: allow newline (return false to use default behavior)
-        if (shift) {
-          return false;
-        }
-
-        // Regular Enter: send message
-        if (savingFiles) {
-          new Notice("Please wait for attachments to finish saving");
-        } else if (canSendMessage) {
-          sendMessage();
-        } else {
-          new Notice("Add text or attach a file before sending");
-        }
-        return true;
-      },
-      onSubmit: () => {
-        // Mod+Enter: send message
-        if (savingFiles) {
-          new Notice("Please wait for attachments to finish saving");
-        } else if (canSendMessage) {
-          sendMessage();
-        } else {
-          new Notice("Add text or attach a file before sending");
-        }
-      },
-      onFocus: () => {
-        onFocusChange?.(true);
-      },
-      onBlur: () => {
-        onFocusChange?.(false);
-      },
-    });
-
-    // Focus the editor after next paint
-    requestAnimationFrame(() => {
-      markdownEditor?.focus();
-    });
-  }
-
-  function sendMessage() {
-    if (savingFiles) {
-      new Notice("Please wait for attachments to finish saving");
-      return;
-    }
-    if (!canSendMessage) {
-      new Notice("Add text or attach a file before sending");
-      return;
-    }
-
-    const contentToSend =
-      inputValue.trim().length > 0 ? inputValue : "Please analyze the attached files.";
-    messenger.sendMessage(
-      contentToSend,
-      attachments.length > 0 ? [...attachments] : undefined,
-      activeVisibleNotes.length > 0 ? [...activeVisibleNotes] : undefined,
-      activeSelection ? { ...activeSelection } : undefined,
-      activeGraphNotes.length > 0 ? [...activeGraphNotes] : undefined,
-    );
-    attachments = [];
-    attachmentSizes = new Map();
-    for (const url of previewUrls.values()) {
-      URL.revokeObjectURL(url);
-    }
-    previewUrls = new Map();
-    selectionChipRef?.clearSelection();
-    graphNotesChipRef?.clear();
-    pendingGraphPaths = [];
-    inputValue = "";
-    markdownEditor?.clear();
-    onMessageSent?.();
-  }
-
-  function sanitizeAttachmentFileName(fileName: string): string {
-    const sanitized = fileName.replace(/[<>:"/\\|?*]/g, "-").trim();
-    return sanitized.length > 0 ? sanitized : "attachment";
-  }
-
-  async function getUniqueAttachmentPath(
-    attachDir: string,
-    fileName: string,
-  ): Promise<{ vaultPath: string; storedName: string }> {
-    const adapter = getPlugin().app.vault.adapter;
-    const safeName = sanitizeAttachmentFileName(fileName);
-
-    const dotIndex = safeName.lastIndexOf(".");
-    const hasExtension = dotIndex > 0 && dotIndex < safeName.length - 1;
-    const baseName = hasExtension ? safeName.slice(0, dotIndex) : safeName;
-    const extension = hasExtension ? safeName.slice(dotIndex) : "";
-
-    let attempt = 1;
-    while (attempt < 10_000) {
-      const storedName = attempt === 1 ? safeName : `${baseName} (${attempt})${extension}`;
-      const vaultPath = normalizePath(`${attachDir}/${storedName}`);
-
-      if (!(await adapter.exists(vaultPath))) {
-        return { vaultPath, storedName };
-      }
-
-      attempt++;
-    }
-
-    throw new Error("Unable to allocate a unique attachment filename.");
-  }
-
-  /** Shared logic: save File objects to vault and add as attachments */
-  async function processFiles(files: File[]) {
-    if (files.length === 0) return;
-
-    savingFiles = true;
-    const plugin = getPlugin();
-    const data = getData();
-    const attachDir = data.resolvedAttachmentFolder;
-
-    try {
-      // Ensure attachment directory exists
-      if (!(await plugin.app.vault.adapter.exists(attachDir))) {
-        await plugin.app.vault.adapter.mkdir(attachDir);
-      }
-
-      let count = 0;
-      let warnedUnknownVision = false;
-      let totalBytes = [...attachmentSizes.values()].reduce((sum, size) => sum + size, 0);
-
-      for (const file of files) {
-        const ext = file.name.split(".").pop()?.toLowerCase() ?? "bin";
-        if (!ACCEPTED_EXTENSIONS.has(ext)) {
-          new Notice(`Unsupported file type: .${ext}`);
-          continue;
-        }
-
-        const isImage = ["png", "jpg", "jpeg", "gif", "webp"].includes(ext);
-        if (isImage && selectedModelSupportsVision === false) {
-          const modelName = selectedChatModel?.model ?? "the selected model";
-          new Notice(
-            `Image attachments require a vision-capable model. Switch models to attach images (current: ${modelName}).`,
-          );
-          continue;
-        }
-
-        if (isImage && selectedModelSupportsVision === undefined && !warnedUnknownVision) {
-          warnedUnknownVision = true;
-          new Notice("Model vision support is unknown; image analysis may fail for this model.");
-        }
-
-        if (file.size > MAX_FILE_SIZE_BYTES) {
-          new Notice(`File too large: ${file.name} exceeds 15 MB per-file limit.`);
-          continue;
-        }
-
-        if (totalBytes + file.size > MAX_TOTAL_ATTACHMENTS_BYTES) {
-          new Notice("Total attachment size exceeds 25 MB limit for one message.");
-          continue;
-        }
-
-        const { vaultPath } = await getUniqueAttachmentPath(attachDir, file.name);
-
-        // Read file as ArrayBuffer and save to vault
-        const buffer = await file.arrayBuffer();
-        await plugin.app.vault.adapter.writeBinary(vaultPath, buffer);
-        totalBytes += file.size;
-
-        const mime = mimeFromExtension(ext);
-        const attachment: ChatAttachment = {
-          name: file.name,
-          mimeType: mime,
-          vaultPath,
-        };
-        attachments.push(attachment);
-        attachmentSizes.set(vaultPath, file.size);
-        attachmentSizes = new Map(attachmentSizes);
-        count++;
-
-        // Create preview URL for images
-        if (mime.startsWith("image/")) {
-          const blob = new Blob([buffer], { type: mime });
-          previewUrls.set(vaultPath, URL.createObjectURL(blob));
-          previewUrls = new Map(previewUrls);
-        }
-      }
-
-      if (count > 0) new Notice(`${count} file(s) attached`);
-    } catch (error) {
-      new Notice(
-        `Failed to attach file: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    } finally {
-      savingFiles = false;
-    }
-  }
-
-  async function onFileAttachment(event: Event) {
-    const input = event.target as HTMLInputElement;
-    if (savingFiles) {
-      new Notice("Please wait for the current attachments to finish saving.");
-      input.value = "";
-      return;
-    }
-
-    const fileList = input.files;
-    if (!fileList || fileList.length === 0) return;
-    await processFiles([...fileList]);
-    // Reset the input so the same file can be re-selected
-    input.value = "";
-  }
-
-  function getDragFeedback(dataTransfer?: DataTransfer): {
-    message: string;
-    hasIssue: boolean;
-    shouldBlockDrop: boolean;
-  } {
-    if (!dataTransfer) {
-      return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
-    }
-
-    const fileItems = Array.from(dataTransfer.items ?? []).filter((item) => item.kind === "file");
-    if (fileItems.length === 0) {
-      return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
-    }
-
-    let hasImage = false;
-    let hasClearlyUnsupported = false;
-
-    for (const item of fileItems) {
-      const mime = item.type.toLowerCase();
-      if (!mime) continue;
-
-      if (mime.startsWith("image/")) {
-        hasImage = true;
-        continue;
-      }
-
-      const hasSupportedPrefix = SUPPORTED_DRAG_MIME_PREFIXES.some((prefix) =>
-        mime.startsWith(prefix),
-      );
-      if (!SUPPORTED_DRAG_MIMES.has(mime) && !hasSupportedPrefix) {
-        hasClearlyUnsupported = true;
-      }
-    }
-
-    if (hasImage && selectedModelSupportsVision === false) {
-      const modelName = selectedChatModel?.model ?? "current model";
-      return {
-        message: `Images are not supported by ${modelName}. Switch to a vision-capable model.`,
-        hasIssue: true,
-        shouldBlockDrop: true,
-      };
-    }
-
-    if (hasClearlyUnsupported) {
-      return {
-        message: "Some files may be unsupported (accepted: txt, md, csv, json, images, pdf).",
-        hasIssue: true,
-        shouldBlockDrop: false,
-      };
-    }
-
-    return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
-  }
-
-  function onDragEnter(event: DragEvent) {
-    event.preventDefault();
-    dragCounter++;
-    if (event.dataTransfer?.types.includes("Files")) {
-      isDragging = true;
-      const feedback = getDragFeedback(event.dataTransfer);
-      dragMessage = feedback.message;
-      dragHasIssue = feedback.hasIssue;
-    }
-  }
-
-  function onDragOver(event: DragEvent) {
-    event.preventDefault();
-    if (event.dataTransfer) {
-      const feedback = getDragFeedback(event.dataTransfer);
-      dragMessage = feedback.message;
-      dragHasIssue = feedback.hasIssue;
-      event.dataTransfer.dropEffect = feedback.shouldBlockDrop ? "none" : "copy";
-    }
-  }
-
-  function onDragLeave(event: DragEvent) {
-    event.preventDefault();
-    dragCounter--;
-    if (dragCounter <= 0) {
-      isDragging = false;
-      dragCounter = 0;
-      dragMessage = "Drop files here";
-      dragHasIssue = false;
-    }
-  }
-
-  async function onDrop(event: DragEvent) {
-    event.preventDefault();
-    isDragging = false;
-    dragCounter = 0;
-    dragMessage = "Drop files here";
-    dragHasIssue = false;
-
-    if (savingFiles) {
-      new Notice("Please wait for the current attachments to finish saving.");
-      return;
-    }
-
-    const files = event.dataTransfer?.files;
-    if (!files || files.length === 0) return;
-    await processFiles([...files]);
-  }
-
-  function removeAttachment(attachment: ChatAttachment) {
-    const idx = attachments.indexOf(attachment);
-    if (idx !== -1) {
-      attachments.splice(idx, 1);
-      attachments = [...attachments];
-    }
-    attachmentSizes.delete(attachment.vaultPath);
-    attachmentSizes = new Map(attachmentSizes);
-    // Clean up preview URL
-    const url = previewUrls.get(attachment.vaultPath);
-    if (url) {
-      URL.revokeObjectURL(url);
-      previewUrls.delete(attachment.vaultPath);
-      previewUrls = new Map(previewUrls);
-    }
-    // Optionally remove the file from vault (it's an unused pre-send attachment)
-    const plugin = getPlugin();
-    plugin.app.vault.adapter.remove(attachment.vaultPath).catch(() => {});
-  }
-
-  /** Promote a visible-note chip (PDF/image) to a direct chat attachment. */
-  async function promoteVisibleNoteToAttachment(note: VisibleNote) {
-    const plugin = getPlugin();
-    const file = note.file;
-    const ext = file.extension.toLowerCase();
-    const isImage = ["png", "jpg", "jpeg", "gif", "webp"].includes(ext);
-
-    if (isImage && selectedModelSupportsVision === false) {
-      const modelName = selectedChatModel?.model ?? "the selected model";
-      new Notice(
-        `Image attachments require a vision-capable model. Switch models to attach images (current: ${modelName}).`,
-      );
-      return;
-    }
-    if (isImage && selectedModelSupportsVision === undefined) {
-      new Notice("Model vision support is unknown; image analysis may fail for this model.");
-    }
-
-    try {
-      const buffer = await plugin.app.vault.readBinary(file);
-      const size = buffer.byteLength;
-
-      if (size > MAX_FILE_SIZE_BYTES) {
-        new Notice(`File too large: ${file.name} exceeds 15 MB per-file limit.`);
-        return;
-      }
-
-      const totalBytes = [...attachmentSizes.values()].reduce((sum, s) => sum + s, 0);
-      if (totalBytes + size > MAX_TOTAL_ATTACHMENTS_BYTES) {
-        new Notice("Total attachment size exceeds 25 MB limit for one message.");
-        return;
-      }
-
-      const data = getData();
-      const attachDir = data.resolvedAttachmentFolder;
-
-      if (!(await plugin.app.vault.adapter.exists(attachDir))) {
-        await plugin.app.vault.adapter.mkdir(attachDir);
-      }
-
-      const { vaultPath } = await getUniqueAttachmentPath(attachDir, file.name);
-      await plugin.app.vault.adapter.writeBinary(vaultPath, buffer);
-
-      const mime = mimeFromExtension(ext);
-      const attachment: ChatAttachment = { name: file.name, mimeType: mime, vaultPath };
-      attachments = [...attachments, attachment];
-      attachmentSizes.set(vaultPath, size);
-      attachmentSizes = new Map(attachmentSizes);
-
-      if (mime.startsWith("image/")) {
-        const blob = new Blob([buffer], { type: mime });
-        previewUrls.set(vaultPath, URL.createObjectURL(blob));
-        previewUrls = new Map(previewUrls);
-      }
-
-      new Notice(`Attached ${file.name}`);
-    } catch (error) {
-      new Notice(
-        `Failed to attach file: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
+import { Notice, normalizePath } from "obsidian";
+import { onDestroy, onMount } from "svelte";
+import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
+import { EmbeddableMarkdownEditor } from "../../lib/editor";
+import { MessageState, type Messenger } from "../../stores/chatStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { icon } from "../../utils/utils";
+import type { ChatAttachment } from "../../types/shared";
+import type { VisibleNote, VisibleNoteRef } from "../../hooks/useVisibleNotes.svelte";
+import type { SelectionRef } from "../../hooks/useSelection.svelte";
+import type { GraphNoteRef } from "../../stores/chatStore.svelte";
+import { mimeFromExtension } from "../../utils/attachments";
+import { getData } from "../../stores/dataStore.svelte";
+import AgentPopover from "./AgentPopover.svelte";
+import ModelPopover from "./ModelPopover.svelte";
+import PendingChangesBar from "./PendingChangesBar.svelte";
+import SelectionChip from "./SelectionChip.svelte";
+import GraphNotesChips from "./GraphNotesChips.svelte";
+import VisibleNotesChips from "./VisibleNotesChips.svelte";
+interface Props {
+	messenger: Messenger;
+	onFocusChange?: (focused: boolean) => void;
+	onMessageSent?: () => void;
+}
+
+const acceptedFileTypes =
+	".txt, .md, .csv, .json, .png, .jpg, .jpeg, .gif, .webp, .pdf, image/png, image/jpeg, image/gif, image/webp, application/pdf, text/plain, text/markdown, text/csv";
+
+const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB per file
+const MAX_TOTAL_ATTACHMENTS_BYTES = 25 * 1024 * 1024; // 25 MB per message
+const FULLSCREEN_TRANSITION_MS = 220;
+
+const { messenger, onFocusChange, onMessageSent }: Props = $props();
+
+let editorContainer: HTMLDivElement | undefined = $state();
+let markdownEditor: EmbeddableMarkdownEditor | undefined = $state();
+let inputValue = $state("");
+
+let attachments: ChatAttachment[] = $state([]);
+let attachmentSizes: Map<string, number> = $state(new Map());
+/** Object URLs for image previews (cleaned up on destroy) */
+let previewUrls: Map<string, string> = $state(new Map());
+/** Tracks files currently being saved to vault */
+let savingFiles = $state(false);
+/** Drag-and-drop state */
+let isDragging = $state(false);
+let dragCounter = 0;
+let dragMessage = $state("Drop files here");
+let dragHasIssue = $state(false);
+let isFullscreen = $state(false);
+let isFullscreenVisible = $state(false);
+let fullscreenNoTransition = $state(false);
+let fullscreenTransitioning = false;
+let fullscreenPlaceholderHeight = $state(0);
+let containerEl: HTMLDivElement | undefined = $state();
+let activeVisibleNotes: VisibleNoteRef[] = $state([]);
+let activeSelection: SelectionRef | undefined = $state(undefined);
+let activeGraphNotes: GraphNoteRef[] = $state([]);
+let pendingGraphPaths: string[] = $state([]);
+let graphNotesChipRef: { clear: () => void } | undefined = $state(undefined);
+
+let selectionChipRef: { clearSelection: () => void } | undefined = $state(undefined);
+
+const ACCEPTED_EXTENSIONS = new Set(["txt", "md", "csv", "json", "png", "jpg", "jpeg", "gif", "webp", "pdf"]);
+
+const SUPPORTED_DRAG_MIME_PREFIXES = ["image/"];
+const SUPPORTED_DRAG_MIMES = new Set([
+	"application/pdf",
+	"text/plain",
+	"text/markdown",
+	"text/csv",
+	"application/json",
+]);
+
+const models = useAvailableModels();
+
+const selectedChatModel = $derived.by(() => {
+	const selectedAgent = getData().getSelectedAgent();
+	return selectedAgent.chatModel;
+});
+
+const selectedModelSupportsVision = $derived.by(() => {
+	const supportsVision = selectedChatModel?.modelConfig?.supportsVision;
+	return supportsVision;
+});
+
+const canSendMessage = $derived(inputValue.trim().length > 0 || attachments.length > 0);
+
+export function focusEditor() {
+	requestAnimationFrame(() => {
+		markdownEditor?.focus();
+	});
+}
+
+onMount(() => {
+	// Initialize the markdown editor once the container is ready
+	if (editorContainer) {
+		initializeEditor();
+	}
+});
+
+// Consume any pending input queued from elsewhere (e.g. graph "Send to Chat")
+$effect(() => {
+	if (messenger.pendingInput && markdownEditor) {
+		const text = messenger.pendingInput;
+		messenger.pendingInput = null;
+		markdownEditor.setValue(text);
+		requestAnimationFrame(() => markdownEditor?.focus());
+	}
+});
+
+// Consume pending graph notes queued from Smart Graph
+$effect(() => {
+	if (messenger.pendingGraphNotes !== null) {
+		pendingGraphPaths = messenger.pendingGraphNotes;
+		messenger.pendingGraphNotes = null;
+		if (pendingGraphPaths.length > 0) {
+			requestAnimationFrame(() => markdownEditor?.focus());
+		}
+	}
+});
+
+onDestroy(() => {
+	markdownEditor?.destroy();
+	// Clean up object URLs
+	for (const url of previewUrls.values()) {
+		URL.revokeObjectURL(url);
+	}
+	// Remove any unsent attachment files from the vault
+	if (attachments.length > 0) {
+		const adapter = getPlugin().app.vault.adapter;
+		for (const att of attachments) {
+			adapter.remove(att.vaultPath).catch(() => {});
+		}
+	}
+});
+
+function initializeEditor() {
+	if (!editorContainer) return;
+
+	const plugin = getPlugin();
+
+	markdownEditor = new EmbeddableMarkdownEditor(plugin.app, editorContainer, {
+		value: inputValue,
+		placeholder: "Type a message...",
+		cls: "chat-markdown-editor",
+		enterVimInsertMode: true,
+		onChange: (value) => {
+			inputValue = value;
+		},
+		onEnter: (_editor, _mod, shift) => {
+			// Shift+Enter: allow newline (return false to use default behavior)
+			if (shift) {
+				return false;
+			}
+
+			// In fullscreen mode, Enter inserts newline; use Mod+Enter to send.
+			if (isFullscreen) {
+				return false;
+			}
+
+			// Regular Enter: send message
+			if (savingFiles) {
+				new Notice("Please wait for attachments to finish saving");
+			} else if (canSendMessage) {
+				sendMessage();
+			} else {
+				new Notice("Add text or attach a file before sending");
+			}
+			return true;
+		},
+		onSubmit: () => {
+			// Mod+Enter: send message
+			if (savingFiles) {
+				new Notice("Please wait for attachments to finish saving");
+			} else if (canSendMessage) {
+				sendMessage();
+			} else {
+				new Notice("Add text or attach a file before sending");
+			}
+		},
+		onFocus: () => {
+			onFocusChange?.(true);
+		},
+		onBlur: () => {
+			onFocusChange?.(false);
+		},
+	});
+
+	// Focus the editor after next paint
+	requestAnimationFrame(() => {
+		markdownEditor?.focus();
+	});
+}
+
+function expandFullscreen() {
+	if (fullscreenTransitioning || isFullscreen) return;
+	fullscreenTransitioning = true;
+	setFullscreenStartInset();
+	fullscreenNoTransition = true;
+	isFullscreen = true;
+	isFullscreenVisible = false;
+	// Double rAF ensures the start geometry is fully painted before transition begins.
+	requestAnimationFrame(() => {
+		requestAnimationFrame(() => {
+			fullscreenNoTransition = false;
+			requestAnimationFrame(() => {
+				isFullscreenVisible = true;
+			});
+			setTimeout(() => {
+				fullscreenTransitioning = false;
+			}, FULLSCREEN_TRANSITION_MS);
+			markdownEditor?.focus();
+		});
+	});
+}
+
+function collapseFullscreen() {
+	if (fullscreenTransitioning || !isFullscreen) return;
+	fullscreenTransitioning = true;
+	isFullscreenVisible = false;
+	setTimeout(() => {
+		isFullscreen = false;
+		fullscreenNoTransition = false;
+		fullscreenPlaceholderHeight = 0;
+		fullscreenTransitioning = false;
+		requestAnimationFrame(() => markdownEditor?.focus());
+	}, FULLSCREEN_TRANSITION_MS);
+}
+
+function setFullscreenStartInset() {
+	if (!containerEl) return;
+	// Use offset geometry from layout engine to avoid subpixel drift during first frame.
+	const top = Math.max(0, containerEl.offsetTop);
+	const left = Math.max(0, containerEl.offsetLeft);
+	const width = Math.max(0, containerEl.offsetWidth);
+	const height = Math.max(0, containerEl.offsetHeight);
+	fullscreenPlaceholderHeight = height;
+
+	containerEl.style.setProperty("--fs-top", `${top}px`);
+	containerEl.style.setProperty("--fs-left", `${left}px`);
+	containerEl.style.setProperty("--fs-width", `${width}px`);
+	containerEl.style.setProperty("--fs-height", `${height}px`);
+}
+
+function toggleFullscreen() {
+	if (isFullscreen) {
+		collapseFullscreen();
+		return;
+	}
+	expandFullscreen();
+}
+
+function sendMessage() {
+	if (savingFiles) {
+		new Notice("Please wait for attachments to finish saving");
+		return;
+	}
+	if (!canSendMessage) {
+		new Notice("Add text or attach a file before sending");
+		return;
+	}
+
+	const contentToSend = inputValue.trim().length > 0 ? inputValue : "Please analyze the attached files.";
+	messenger.sendMessage(
+		contentToSend,
+		attachments.length > 0 ? [...attachments] : undefined,
+		activeVisibleNotes.length > 0 ? [...activeVisibleNotes] : undefined,
+		activeSelection ? { ...activeSelection } : undefined,
+		activeGraphNotes.length > 0 ? [...activeGraphNotes] : undefined,
+	);
+	attachments = [];
+	attachmentSizes = new Map();
+	for (const url of previewUrls.values()) {
+		URL.revokeObjectURL(url);
+	}
+	previewUrls = new Map();
+	selectionChipRef?.clearSelection();
+	graphNotesChipRef?.clear();
+	pendingGraphPaths = [];
+	inputValue = "";
+	markdownEditor?.clear();
+	if (isFullscreen) {
+		collapseFullscreen();
+	}
+	onMessageSent?.();
+}
+
+function sanitizeAttachmentFileName(fileName: string): string {
+	const sanitized = fileName.replace(/[<>:"/\\|?*]/g, "-").trim();
+	return sanitized.length > 0 ? sanitized : "attachment";
+}
+
+async function getUniqueAttachmentPath(
+	attachDir: string,
+	fileName: string,
+): Promise<{ vaultPath: string; storedName: string }> {
+	const adapter = getPlugin().app.vault.adapter;
+	const safeName = sanitizeAttachmentFileName(fileName);
+
+	const dotIndex = safeName.lastIndexOf(".");
+	const hasExtension = dotIndex > 0 && dotIndex < safeName.length - 1;
+	const baseName = hasExtension ? safeName.slice(0, dotIndex) : safeName;
+	const extension = hasExtension ? safeName.slice(dotIndex) : "";
+
+	let attempt = 1;
+	while (attempt < 10_000) {
+		const storedName = attempt === 1 ? safeName : `${baseName} (${attempt})${extension}`;
+		const vaultPath = normalizePath(`${attachDir}/${storedName}`);
+
+		if (!(await adapter.exists(vaultPath))) {
+			return { vaultPath, storedName };
+		}
+
+		attempt++;
+	}
+
+	throw new Error("Unable to allocate a unique attachment filename.");
+}
+
+/** Shared logic: save File objects to vault and add as attachments */
+async function processFiles(files: File[]) {
+	if (files.length === 0) return;
+
+	savingFiles = true;
+	const plugin = getPlugin();
+	const data = getData();
+	const attachDir = data.resolvedAttachmentFolder;
+
+	try {
+		// Ensure attachment directory exists
+		if (!(await plugin.app.vault.adapter.exists(attachDir))) {
+			await plugin.app.vault.adapter.mkdir(attachDir);
+		}
+
+		let count = 0;
+		let warnedUnknownVision = false;
+		let totalBytes = [...attachmentSizes.values()].reduce((sum, size) => sum + size, 0);
+
+		for (const file of files) {
+			const ext = file.name.split(".").pop()?.toLowerCase() ?? "bin";
+			if (!ACCEPTED_EXTENSIONS.has(ext)) {
+				new Notice(`Unsupported file type: .${ext}`);
+				continue;
+			}
+
+			const isImage = ["png", "jpg", "jpeg", "gif", "webp"].includes(ext);
+			if (isImage && selectedModelSupportsVision === false) {
+				const modelName = selectedChatModel?.model ?? "the selected model";
+				new Notice(
+					`Image attachments require a vision-capable model. Switch models to attach images (current: ${modelName}).`,
+				);
+				continue;
+			}
+
+			if (isImage && selectedModelSupportsVision === undefined && !warnedUnknownVision) {
+				warnedUnknownVision = true;
+				new Notice("Model vision support is unknown; image analysis may fail for this model.");
+			}
+
+			if (file.size > MAX_FILE_SIZE_BYTES) {
+				new Notice(`File too large: ${file.name} exceeds 15 MB per-file limit.`);
+				continue;
+			}
+
+			if (totalBytes + file.size > MAX_TOTAL_ATTACHMENTS_BYTES) {
+				new Notice("Total attachment size exceeds 25 MB limit for one message.");
+				continue;
+			}
+
+			const { vaultPath } = await getUniqueAttachmentPath(attachDir, file.name);
+
+			// Read file as ArrayBuffer and save to vault
+			const buffer = await file.arrayBuffer();
+			await plugin.app.vault.adapter.writeBinary(vaultPath, buffer);
+			totalBytes += file.size;
+
+			const mime = mimeFromExtension(ext);
+			const attachment: ChatAttachment = {
+				name: file.name,
+				mimeType: mime,
+				vaultPath,
+			};
+			attachments.push(attachment);
+			attachmentSizes.set(vaultPath, file.size);
+			attachmentSizes = new Map(attachmentSizes);
+			count++;
+
+			// Create preview URL for images
+			if (mime.startsWith("image/")) {
+				const blob = new Blob([buffer], { type: mime });
+				previewUrls.set(vaultPath, URL.createObjectURL(blob));
+				previewUrls = new Map(previewUrls);
+			}
+		}
+
+		if (count > 0) new Notice(`${count} file(s) attached`);
+	} catch (error) {
+		new Notice(`Failed to attach file: ${error instanceof Error ? error.message : String(error)}`);
+	} finally {
+		savingFiles = false;
+	}
+}
+
+async function onFileAttachment(event: Event) {
+	const input = event.target as HTMLInputElement;
+	if (savingFiles) {
+		new Notice("Please wait for the current attachments to finish saving.");
+		input.value = "";
+		return;
+	}
+
+	const fileList = input.files;
+	if (!fileList || fileList.length === 0) return;
+	await processFiles([...fileList]);
+	// Reset the input so the same file can be re-selected
+	input.value = "";
+}
+
+function getDragFeedback(dataTransfer?: DataTransfer): {
+	message: string;
+	hasIssue: boolean;
+	shouldBlockDrop: boolean;
+} {
+	if (!dataTransfer) {
+		return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
+	}
+
+	const fileItems = Array.from(dataTransfer.items ?? []).filter((item) => item.kind === "file");
+	if (fileItems.length === 0) {
+		return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
+	}
+
+	let hasImage = false;
+	let hasClearlyUnsupported = false;
+
+	for (const item of fileItems) {
+		const mime = item.type.toLowerCase();
+		if (!mime) continue;
+
+		if (mime.startsWith("image/")) {
+			hasImage = true;
+			continue;
+		}
+
+		const hasSupportedPrefix = SUPPORTED_DRAG_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix));
+		if (!SUPPORTED_DRAG_MIMES.has(mime) && !hasSupportedPrefix) {
+			hasClearlyUnsupported = true;
+		}
+	}
+
+	if (hasImage && selectedModelSupportsVision === false) {
+		const modelName = selectedChatModel?.model ?? "current model";
+		return {
+			message: `Images are not supported by ${modelName}. Switch to a vision-capable model.`,
+			hasIssue: true,
+			shouldBlockDrop: true,
+		};
+	}
+
+	if (hasClearlyUnsupported) {
+		return {
+			message: "Some files may be unsupported (accepted: txt, md, csv, json, images, pdf).",
+			hasIssue: true,
+			shouldBlockDrop: false,
+		};
+	}
+
+	return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
+}
+
+function onDragEnter(event: DragEvent) {
+	event.preventDefault();
+	dragCounter++;
+	if (event.dataTransfer?.types.includes("Files")) {
+		isDragging = true;
+		const feedback = getDragFeedback(event.dataTransfer);
+		dragMessage = feedback.message;
+		dragHasIssue = feedback.hasIssue;
+	}
+}
+
+function onDragOver(event: DragEvent) {
+	event.preventDefault();
+	if (event.dataTransfer) {
+		const feedback = getDragFeedback(event.dataTransfer);
+		dragMessage = feedback.message;
+		dragHasIssue = feedback.hasIssue;
+		event.dataTransfer.dropEffect = feedback.shouldBlockDrop ? "none" : "copy";
+	}
+}
+
+function onDragLeave(event: DragEvent) {
+	event.preventDefault();
+	dragCounter--;
+	if (dragCounter <= 0) {
+		isDragging = false;
+		dragCounter = 0;
+		dragMessage = "Drop files here";
+		dragHasIssue = false;
+	}
+}
+
+async function onDrop(event: DragEvent) {
+	event.preventDefault();
+	isDragging = false;
+	dragCounter = 0;
+	dragMessage = "Drop files here";
+	dragHasIssue = false;
+
+	if (savingFiles) {
+		new Notice("Please wait for the current attachments to finish saving.");
+		return;
+	}
+
+	const files = event.dataTransfer?.files;
+	if (!files || files.length === 0) return;
+	await processFiles([...files]);
+}
+
+function removeAttachment(attachment: ChatAttachment) {
+	const idx = attachments.indexOf(attachment);
+	if (idx !== -1) {
+		attachments.splice(idx, 1);
+		attachments = [...attachments];
+	}
+	attachmentSizes.delete(attachment.vaultPath);
+	attachmentSizes = new Map(attachmentSizes);
+	// Clean up preview URL
+	const url = previewUrls.get(attachment.vaultPath);
+	if (url) {
+		URL.revokeObjectURL(url);
+		previewUrls.delete(attachment.vaultPath);
+		previewUrls = new Map(previewUrls);
+	}
+	// Optionally remove the file from vault (it's an unused pre-send attachment)
+	const plugin = getPlugin();
+	plugin.app.vault.adapter.remove(attachment.vaultPath).catch(() => {});
+}
+
+/** Promote a visible-note chip (PDF/image) to a direct chat attachment. */
+async function promoteVisibleNoteToAttachment(note: VisibleNote) {
+	const plugin = getPlugin();
+	const file = note.file;
+	const ext = file.extension.toLowerCase();
+	const isImage = ["png", "jpg", "jpeg", "gif", "webp"].includes(ext);
+
+	if (isImage && selectedModelSupportsVision === false) {
+		const modelName = selectedChatModel?.model ?? "the selected model";
+		new Notice(
+			`Image attachments require a vision-capable model. Switch models to attach images (current: ${modelName}).`,
+		);
+		return;
+	}
+	if (isImage && selectedModelSupportsVision === undefined) {
+		new Notice("Model vision support is unknown; image analysis may fail for this model.");
+	}
+
+	try {
+		const buffer = await plugin.app.vault.readBinary(file);
+		const size = buffer.byteLength;
+
+		if (size > MAX_FILE_SIZE_BYTES) {
+			new Notice(`File too large: ${file.name} exceeds 15 MB per-file limit.`);
+			return;
+		}
+
+		const totalBytes = [...attachmentSizes.values()].reduce((sum, s) => sum + s, 0);
+		if (totalBytes + size > MAX_TOTAL_ATTACHMENTS_BYTES) {
+			new Notice("Total attachment size exceeds 25 MB limit for one message.");
+			return;
+		}
+
+		const data = getData();
+		const attachDir = data.resolvedAttachmentFolder;
+
+		if (!(await plugin.app.vault.adapter.exists(attachDir))) {
+			await plugin.app.vault.adapter.mkdir(attachDir);
+		}
+
+		const { vaultPath } = await getUniqueAttachmentPath(attachDir, file.name);
+		await plugin.app.vault.adapter.writeBinary(vaultPath, buffer);
+
+		const mime = mimeFromExtension(ext);
+		const attachment: ChatAttachment = { name: file.name, mimeType: mime, vaultPath };
+		attachments = [...attachments, attachment];
+		attachmentSizes.set(vaultPath, size);
+		attachmentSizes = new Map(attachmentSizes);
+
+		if (mime.startsWith("image/")) {
+			const blob = new Blob([buffer], { type: mime });
+			previewUrls.set(vaultPath, URL.createObjectURL(blob));
+			previewUrls = new Map(previewUrls);
+		}
+
+		new Notice(`Attached ${file.name}`);
+	} catch (error) {
+		new Notice(`Failed to attach file: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
 </script>
 
+{#if isFullscreen}
+	<div
+		class="chat-input-placeholder w-full"
+		style="height: {fullscreenPlaceholderHeight}px;"
+		aria-hidden="true"
+	></div>
+{/if}
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
-  class="chat-input-container w-full max-w-[--file-line-width] mx-auto flex flex-col relative isolate gap-1"
+  bind:this={containerEl}
+	class="chat-input-container w-full flex flex-col relative isolate gap-1 {isFullscreen
+		? `chat-input-fullscreen justify-end ${fullscreenNoTransition ? 'chat-input-fullscreen-no-transition' : ''} ${isFullscreenVisible ? 'chat-input-fullscreen-visible' : ''}`
+		: 'mx-auto max-w-[--file-line-width]'}"
+	role="region"
+  onkeydown={(e) => {
+    if (isFullscreen && e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+			collapseFullscreen();
+    }
+  }}
 >
   {#if models.hasUnavailableProviders}
     <button
@@ -563,15 +637,28 @@
   <PendingChangesBar {messenger} />
   <!-- Input wrapper with glow effect -->
   <div
-    class="chat-input-wrapper flex flex-col gap-3 bg-background-secondary border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isDragging
-      ? 'border-[--interactive-accent]'
-      : ''}"
+    class="chat-input-wrapper flex flex-col gap-3 bg-background-secondary border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isFullscreen
+      ? 'flex-1 min-h-0'
+      : ''} {isDragging ? 'border-[--interactive-accent]' : ''}"
     ondragenter={onDragEnter}
     ondragover={onDragOver}
     ondragleave={onDragLeave}
     ondrop={onDrop}
     role="region"
   >
+    <!-- Fullscreen toggle - top right corner -->
+    <button
+      class="clickable-icon absolute top-1.5 right-1.5 z-10 opacity-0 transition-opacity duration-150"
+      style="pointer-events: auto;"
+      onclick={toggleFullscreen}
+      title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen editor'}
+    >
+      <div
+        class="h-icon-xs"
+        use:icon={isFullscreen ? 'minimize-2' : 'maximize-2'}
+        style="--icon-size: var(--icon-xs)"
+      ></div>
+    </button>
     <VisibleNotesChips
       bind:activeNotes={activeVisibleNotes}
       excludePath={activeSelection?.path}
@@ -654,7 +741,9 @@
     <!-- Markdown Editor Container -->
     <div
       bind:this={editorContainer}
-      class="markdown-editor-container w-full min-h-[40px] max-h-[200px] overflow-y-auto"
+      class="markdown-editor-container w-full overflow-y-auto {isFullscreen
+        ? 'flex-1'
+        : 'min-h-[40px] max-h-[200px]'}"
       id="chat-view-user-input-element"
       data-testid="message-input"
     ></div>
@@ -724,6 +813,43 @@
     background: transparent !important;
   }
 
+  .chat-input-container.chat-input-fullscreen {
+		position: absolute;
+    top: var(--fs-top, 0px);
+    left: var(--fs-left, 0px);
+		width: var(--fs-width, 100%);
+		height: var(--fs-height, 100%);
+		margin: 0 !important;
+    z-index: var(--layer-popover);
+    background: var(--background-primary) !important;
+		padding: 0;
+    max-width: none;
+		opacity: 1;
+		border-radius: 14px;
+		overflow: hidden;
+		transition:
+			top 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+			left 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+			width 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+			height 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+			border-radius 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+			opacity 220ms ease;
+		will-change: top, left, width, height, border-radius;
+  }
+
+	.chat-input-container.chat-input-fullscreen.chat-input-fullscreen-visible {
+		opacity: 1;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		border-radius: 0;
+  }
+
+	.chat-input-container.chat-input-fullscreen.chat-input-fullscreen-no-transition {
+		transition: none !important;
+	}
+
   /* Complex box-shadow with color-mix - requires CSS */
   .chat-input-wrapper {
     box-shadow:
@@ -761,6 +887,12 @@
   .chat-input-wrapper:focus-within::before {
     opacity: 0.22;
     filter: blur(9px);
+  }
+
+  .chat-input-wrapper:hover > .clickable-icon:first-child,
+  .chat-input-wrapper:focus-within > .clickable-icon:first-child,
+  .chat-input-fullscreen .chat-input-wrapper > .clickable-icon:first-child {
+    opacity: 1;
   }
 
   /* Markdown editor styling */
