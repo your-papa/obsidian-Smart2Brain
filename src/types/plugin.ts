@@ -360,6 +360,7 @@ export interface PluginData {
 	retrieveTopK: number;
 	assistantLanguage: "de" | "en";
 	targetFolder: string;
+	attachmentFolder: string;
 
 	// ============================================================================
 	// File Filtering

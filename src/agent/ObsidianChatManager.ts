@@ -58,6 +58,40 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		super();
 		this.plugin = plugin;
 		this.adapter = plugin.app.vault.adapter;
+
+		// When a .chat file is deleted via the Obsidian file explorer (outside the plugin UI),
+		// clean up in-memory caches so stale threads don't appear in the UI.
+		plugin.registerEvent(
+			plugin.app.vault.on("delete", (file) => {
+				if (file instanceof TFile && file.extension === "chat") {
+					this.onChatFileDeleted(file.path);
+				}
+			}),
+		);
+	}
+
+	/**
+	 * Handle external deletion of a .chat file (e.g., via Obsidian file explorer).
+	 * Cleans up in-memory caches so stale threads don't appear in the UI.
+	 * Attachment files are intentionally left in place (matching Obsidian's behavior
+	 * of not deleting embedded images when a note is deleted).
+	 */
+	private onChatFileDeleted(filePath: string): void {
+		// Reverse-lookup threadId from filePathCache
+		let threadId: string | undefined;
+		for (const [id, path] of this.filePathCache) {
+			if (path === filePath) {
+				threadId = id;
+				break;
+			}
+		}
+
+		if (!threadId) return;
+
+		this.storage.delete(threadId);
+		this.threadIndex.delete(threadId);
+		this.filePathCache.delete(threadId);
+		this.saveIndexDebounced();
 	}
 
 	// --- File System Helpers ---
@@ -724,11 +758,6 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	}
 
 	async deleteThread(threadId: string): Promise<void> {
-		const existingSnapshot = this.threadIndex.get(threadId);
-		const titleAttachmentDirName = existingSnapshot?.title?.trim()
-			? this.sanitizeFileName(existingSnapshot.title)
-			: undefined;
-
 		// Remove from memory
 		this.storage.delete(threadId);
 		this.threadIndex.delete(threadId);
@@ -744,26 +773,6 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		} catch (e) {
 			Logger.error(`Error deleting thread ${threadId}:`, e);
 		}
-
-		// Remove attachment directories if they exist
-		const attachDirs = new Set<string>([this.getAttachmentDirByName(threadId)]);
-		if (titleAttachmentDirName) {
-			attachDirs.add(this.getAttachmentDirByName(titleAttachmentDirName));
-		}
-
-		for (const attachDir of attachDirs) {
-			try {
-				if (await this.adapter.exists(attachDir)) {
-					const listing = await this.adapter.list(attachDir);
-					for (const file of listing.files) {
-						await this.adapter.remove(file);
-					}
-					await this.adapter.rmdir(attachDir, true);
-				}
-			} catch (e) {
-				Logger.error(`Error deleting attachments directory ${attachDir} for thread ${threadId}:`, e);
-			}
-		}
 	}
 
 	// --- Utilities ---
@@ -776,84 +785,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			.substring(0, 100);
 	}
 
-	private getAttachmentDirByName(name: string): string {
-		return normalizePath(`${this.getChatFolder()}/attachments/${name}`);
-	}
-
-	private getAttachmentPrefixByName(name: string): string {
-		return `${this.getAttachmentDirByName(name)}/`;
-	}
-
-	private rewriteAttachmentVaultPaths(value: unknown, oldPrefix: string, newPrefix: string): boolean {
-		let changed = false;
-
-		const visit = (node: unknown): void => {
-			if (!node || typeof node !== "object") {
-				return;
-			}
-
-			if (Array.isArray(node)) {
-				for (const item of node) {
-					visit(item);
-				}
-				return;
-			}
-
-			for (const [key, child] of Object.entries(node)) {
-				if (key === "vaultPath" && typeof child === "string" && child.startsWith(oldPrefix)) {
-					(node as Record<string, unknown>)[key] = normalizePath(
-						`${newPrefix}${child.slice(oldPrefix.length)}`,
-					);
-					changed = true;
-					continue;
-				}
-				visit(child);
-			}
-		};
-
-		visit(value);
-		return changed;
-	}
-
-	private async moveAttachmentDirectoryByName(oldName: string, newName: string): Promise<boolean> {
-		if (!oldName || !newName || oldName === newName) {
-			return false;
-		}
-
-		const oldDir = this.getAttachmentDirByName(oldName);
-		const newDir = this.getAttachmentDirByName(newName);
-
-		if (!(await this.adapter.exists(oldDir))) {
-			return false;
-		}
-
-		if (!(await this.adapter.exists(newDir))) {
-			await this.adapter.mkdir(newDir);
-		}
-
-		const listing = await this.adapter.list(oldDir);
-		for (const file of listing.files) {
-			const basename = file.split("/").pop();
-			if (!basename) continue;
-
-			const target = normalizePath(`${newDir}/${basename}`);
-			const data = await this.adapter.readBinary(file);
-			if (await this.adapter.exists(target)) {
-				await this.adapter.remove(target).catch(() => {});
-			}
-			await this.adapter.writeBinary(target, data);
-			await this.adapter.remove(file).catch(() => {});
-		}
-
-		await this.adapter.rmdir(oldDir, false).catch(() => {});
-		return true;
-	}
-
-	async getAttachmentDirectory(threadId: string): Promise<string> {
-		const snapshot = this.threadIndex.get(threadId) ?? (await this.read(threadId, true));
-		const title = snapshot?.title?.trim();
-		const dirName = title ? this.sanitizeFileName(title) : threadId;
-		return this.getAttachmentDirByName(dirName);
+	getAttachmentDirectory(): string {
+		return getData().resolvedAttachmentFolder;
 	}
 
 	async getUniqueTitlePath(
@@ -908,29 +841,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 			const now = Date.now();
 			const loaded = await this.ensureThreadLoaded(threadId);
-			const oldAttachmentName = loaded?.title?.trim() ? this.sanitizeFileName(loaded.title) : threadId;
-			const newAttachmentName = uniqueTarget.title;
-
-			let movedAttachments = false;
-			if (oldAttachmentName !== newAttachmentName) {
-				try {
-					movedAttachments = await this.moveAttachmentDirectoryByName(oldAttachmentName, newAttachmentName);
-				} catch (e) {
-					Logger.warn(
-						`renameChatFile: Failed to move attachments from ${oldAttachmentName} to ${newAttachmentName}`,
-						e,
-					);
-				}
-			}
 
 			if (loaded) {
-				if (movedAttachments) {
-					const oldPrefix = this.getAttachmentPrefixByName(oldAttachmentName);
-					const newPrefix = this.getAttachmentPrefixByName(newAttachmentName);
-					this.rewriteAttachmentVaultPaths(loaded.checkpoints, oldPrefix, newPrefix);
-					this.rewriteAttachmentVaultPaths(loaded.writes, oldPrefix, newPrefix);
-				}
-
 				loaded.title = uniqueTarget.title;
 				loaded.updatedAt = now;
 				this.saveDebounced(threadId);

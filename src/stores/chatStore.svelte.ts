@@ -7,7 +7,7 @@ import {
 	isHumanMessage,
 	isToolMessage,
 } from "@langchain/core/messages";
-import { normalizePath, type TFile } from "obsidian";
+import { type TFile } from "obsidian";
 import type { AgentStreamChunk, CheckpointHistoryItem, ThreadHistory } from "../agent/Agent";
 import type { AgentManager } from "../agent/AgentManager";
 import type { ChatModelConfig } from "../providers/index";
@@ -1276,12 +1276,6 @@ export class ChatSession {
 		}
 		const pairId = genUUIDv7();
 
-		// Relocate any attachments saved under the temporary _pending directory
-		// to the real thread-specific directory now that we have a session ID.
-		if (attachments?.length) {
-			await this.relocatePendingAttachments(attachments);
-		}
-
 		// Capture the current model at send time
 		const selectedAgent = getData().getSelectedAgent();
 		const currentModel = selectedAgent.chatModel ?? undefined;
@@ -1305,52 +1299,6 @@ export class ChatSession {
 		void this.processAssistantReply(pairId, content, attachments, visibleNotes, selection, graphNotes);
 
 		return pairId;
-	}
-
-	/**
-	 * Moves attachments from the temporary `_pending` directory to the real
-	 * thread-specific directory. Mutates the attachment objects in place so
-	 * that their vaultPath references stay correct for the rest of the pipeline.
-	 */
-	private async relocatePendingAttachments(attachments: ChatAttachment[]): Promise<void> {
-		const chatFolder = getData().targetFolder;
-		const pendingPrefix = normalizePath(`${chatFolder}/attachments/_pending/`);
-		const pending = attachments.filter((a) => a.vaultPath.startsWith(pendingPrefix));
-		if (pending.length === 0) return;
-
-		const adapter = getPlugin().app.vault.adapter;
-		let destDir = normalizePath(`${chatFolder}/attachments/${this.id}`);
-		try {
-			destDir = normalizePath(await getPlugin().agentManager.getAttachmentDirectory(this.id));
-		} catch (e) {
-			Logger.warn("Failed to resolve title-based attachment directory, falling back to thread id directory", e);
-		}
-
-		try {
-			if (!(await adapter.exists(destDir))) {
-				await adapter.mkdir(destDir);
-			}
-		} catch (e) {
-			Logger.warn("Failed to create attachment destination directory, proceeding with _pending paths", e);
-		}
-
-		for (const att of pending) {
-			try {
-				const fileName = att.vaultPath.split("/").pop();
-				if (!fileName) continue;
-				const newPath = normalizePath(`${destDir}/${fileName}`);
-				const data = await adapter.readBinary(att.vaultPath);
-				await adapter.writeBinary(newPath, data);
-				await adapter.remove(att.vaultPath).catch(() => {});
-				att.vaultPath = newPath;
-			} catch (e) {
-				Logger.warn(`Failed to relocate attachment ${att.name}`, e);
-			}
-		}
-
-		// Best-effort cleanup of the temporary _pending directory
-		const pendingDir = normalizePath(`${chatFolder}/attachments/_pending`);
-		adapter.rmdir(pendingDir, false).catch(() => {});
 	}
 
 	/** Abort current streaming (if any) */
