@@ -1,24 +1,24 @@
 <script lang="ts">
-  import { QueryClientProvider } from "@tanstack/svelte-query";
-  import Input from "../../components/chat/Input.svelte";
-  import MessageContainer from "../../components/chat/MessageContainer.svelte";
-  import { getMessenger } from "../../stores/chatStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
+import { QueryClientProvider } from "@tanstack/svelte-query";
+import Input from "../../components/chat/Input.svelte";
+import MessageContainer from "../../components/chat/MessageContainer.svelte";
+import { getMessenger } from "../../stores/chatStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
 
-  const plugin = getPlugin();
+const plugin = getPlugin();
 
-  const messenger = getMessenger();
+const messenger = getMessenger();
 
-  let messageContainer = $state<ReturnType<typeof MessageContainer> | undefined>();
-  let input = $state<ReturnType<typeof Input> | undefined>();
-  let lastSessionId: string | null = null;
+let messageContainer = $state<ReturnType<typeof MessageContainer> | undefined>();
+let input = $state<ReturnType<typeof Input> | undefined>();
+let lastSessionId: string | null = null;
 
-  $effect(() => {
-    const sessionId = messenger?.session?.id ?? null;
-    if (!sessionId || sessionId === lastSessionId) return;
-    lastSessionId = sessionId;
-    input?.focusEditor();
-  });
+$effect(() => {
+	const sessionId = messenger?.session?.id ?? null;
+	if (!sessionId || sessionId === lastSessionId) return;
+	lastSessionId = sessionId;
+	input?.focusEditor();
+});
 </script>
 
 <QueryClientProvider client={plugin.queryClient}>

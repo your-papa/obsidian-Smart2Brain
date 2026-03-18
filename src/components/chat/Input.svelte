@@ -6,6 +6,7 @@ import { EmbeddableMarkdownEditor } from "../../lib/editor";
 import { MessageState, type Messenger } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
+import { buildUsageEstimate, estimateContextUsageBreakdown } from "../../utils/tokenEstimator";
 import type { ChatAttachment } from "../../types/shared";
 import type { VisibleNote, VisibleNoteRef } from "../../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../../hooks/useSelection.svelte";
@@ -18,6 +19,7 @@ import PendingChangesBar from "./PendingChangesBar.svelte";
 import SelectionChip from "./SelectionChip.svelte";
 import GraphNotesChips from "./GraphNotesChips.svelte";
 import VisibleNotesChips from "./VisibleNotesChips.svelte";
+import ContextUsageCircle from "./ContextUsageCircle.svelte";
 interface Props {
 	messenger: Messenger;
 	onFocusChange?: (focused: boolean) => void;
@@ -59,6 +61,8 @@ let activeSelection: SelectionRef | undefined = $state(undefined);
 let activeGraphNotes: GraphNoteRef[] = $state([]);
 let pendingGraphPaths: string[] = $state([]);
 let graphNotesChipRef: { clear: () => void } | undefined = $state(undefined);
+let assembledSystemPrompt = $state("");
+let assembledPromptRequestVersion = 0;
 
 let selectionChipRef: { clearSelection: () => void } | undefined = $state(undefined);
 
@@ -75,14 +79,40 @@ const SUPPORTED_DRAG_MIMES = new Set([
 
 const models = useAvailableModels();
 
+const selectedAgent = $derived.by(() => {
+	return getData().getSelectedAgent();
+});
+
 const selectedChatModel = $derived.by(() => {
-	const selectedAgent = getData().getSelectedAgent();
 	return selectedAgent.chatModel;
+});
+
+const selectedAgentPromptSignature = $derived.by(() => {
+	return JSON.stringify({
+		agentId: selectedAgent.id,
+		systemPrompt: selectedAgent.systemPrompt,
+		toolsConfig: selectedAgent.toolsConfig,
+		skills: selectedAgent.skills,
+	});
 });
 
 const selectedModelSupportsVision = $derived.by(() => {
 	const supportsVision = selectedChatModel?.modelConfig?.supportsVision;
 	return supportsVision;
+});
+
+const contextBreakdown = $derived.by(() => {
+	return estimateContextUsageBreakdown(messenger.session?.messages ?? [], inputValue, {
+		systemPrompt: assembledSystemPrompt,
+		pendingAttachmentsCount: attachments.length,
+		pendingVisibleNotesCount: activeVisibleNotes.length,
+		hasPendingSelection: Boolean(activeSelection),
+		pendingGraphNotesCount: activeGraphNotes.length,
+	});
+});
+
+const contextUsage = $derived.by(() => {
+	return buildUsageEstimate(contextBreakdown.totalTokens, selectedChatModel?.modelConfig?.contextWindow);
 });
 
 const canSendMessage = $derived(inputValue.trim().length > 0 || attachments.length > 0);
@@ -108,6 +138,24 @@ $effect(() => {
 		markdownEditor.setValue(text);
 		requestAnimationFrame(() => markdownEditor?.focus());
 	}
+});
+
+// Keep a cached assembled system prompt so estimate matches what is actually sent.
+$effect(() => {
+	const _signature = selectedAgentPromptSignature;
+	assembledSystemPrompt = selectedAgent.systemPrompt ?? "";
+	const requestVersion = ++assembledPromptRequestVersion;
+
+	void (async () => {
+		try {
+			const assembled = await getPlugin().agentManager.assembleSystemPrompt();
+			if (requestVersion === assembledPromptRequestVersion) {
+				assembledSystemPrompt = assembled;
+			}
+		} catch {
+			// Keep base prompt fallback if assembling fails.
+		}
+	})();
 });
 
 // Consume pending graph notes queued from Smart Graph
@@ -770,6 +818,12 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
         <div class="text-xs">Attach</div>
       </label>
       <div class="ml-auto flex items-center gap-2">
+        <ContextUsageCircle
+          usagePercent={contextUsage.usagePercent}
+          used={contextUsage.estimatedUsedTokens}
+          limit={contextUsage.contextWindow}
+					breakdown={contextBreakdown}
+        />
         <button
           class="clickable-icon flex flex-row items-center gap-0.5"
           onclick={async () => await getPlugin().agentManager.createNewChat()}

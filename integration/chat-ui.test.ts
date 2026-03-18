@@ -53,7 +53,7 @@ describe("chat view UI", () => {
 
 	it("should show a model selector with a model name", () => {
 		// The model button contains the model name text
-		const modelText = domText(".chat-input-wrapper .text-\\[--text-normal\\]");
+		const modelText = domText(String.raw`.chat-input-wrapper .text-\[--text-normal\]`);
 		expect(modelText.length).toBeGreaterThan(0);
 	});
 
@@ -69,6 +69,12 @@ describe("chat view UI", () => {
 
 	it("should render a New Chat button in the input area", () => {
 		expect(domCount('[title="New Chat"]')).toBeGreaterThanOrEqual(1);
+	});
+
+	it("should display a context usage indicator in the input area", () => {
+		// The context usage circle is rendered as an SVG with a title attribute
+		const contextIndicators = domCount('div[title*="Context usage"]');
+		expect(contextIndicators).toBeGreaterThanOrEqual(1);
 	});
 
 	it("should not produce errors during rendering", () => {
