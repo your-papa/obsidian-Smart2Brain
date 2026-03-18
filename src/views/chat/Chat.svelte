@@ -1,41 +1,43 @@
 <script lang="ts">
-import { QueryClientProvider } from "@tanstack/svelte-query";
-import Input from "../../components/chat/Input.svelte";
-import MessageContainer from "../../components/chat/MessageContainer.svelte";
-import { getMessenger } from "../../stores/chatStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
+  import { QueryClientProvider } from "@tanstack/svelte-query";
+  import Input from "../../components/chat/Input.svelte";
+  import MessageContainer from "../../components/chat/MessageContainer.svelte";
+  import { getMessenger } from "../../stores/chatStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
 
-const plugin = getPlugin();
+  const plugin = getPlugin();
 
-const messenger = getMessenger();
+  const messenger = getMessenger();
 
-let messageContainer = $state<ReturnType<typeof MessageContainer> | undefined>();
-let input = $state<ReturnType<typeof Input> | undefined>();
-let lastSessionId: string | null = null;
+  let messageContainer = $state<ReturnType<typeof MessageContainer> | undefined>();
+  let input = $state<ReturnType<typeof Input> | undefined>();
+  let lastSessionId: string | null = null;
 
-$effect(() => {
-	const sessionId = messenger?.session?.id ?? null;
-	if (!sessionId || sessionId === lastSessionId) return;
-	lastSessionId = sessionId;
-	input?.focusEditor();
-});
+  $effect(() => {
+    const sessionId = messenger?.session?.id ?? null;
+    if (!sessionId || sessionId === lastSessionId) return;
+    lastSessionId = sessionId;
+    input?.focusEditor();
+  });
 </script>
 
 <QueryClientProvider client={plugin.queryClient}>
-	<div class="chat-root h-full flex flex-col" data-testid="chat-root">
-		{#if messenger}
-			<MessageContainer bind:this={messageContainer} {messenger} />
-			<Input
-				bind:this={input}
-				{messenger}
-				onMessageSent={() => messageContainer?.scrollToLatestMessage()}
-			/>
-		{:else}
-			<div class="flex h-full items-center justify-center p-4 text-center text-sm text-[--text-muted]">
-				Chat session is not available yet. Reopen this view after plugin initialization completes.
-			</div>
-		{/if}
-	</div>
+  <div class="chat-root relative h-full flex flex-col" data-testid="chat-root">
+    {#if messenger}
+      <MessageContainer bind:this={messageContainer} {messenger} />
+      <Input
+        bind:this={input}
+        {messenger}
+        onMessageSent={() => messageContainer?.scrollToLatestMessage()}
+      />
+    {:else}
+      <div
+        class="flex h-full items-center justify-center p-4 text-center text-sm text-[--text-muted]"
+      >
+        Chat session is not available yet. Reopen this view after plugin initialization completes.
+      </div>
+    {/if}
+  </div>
 </QueryClientProvider>
 
 <style>
