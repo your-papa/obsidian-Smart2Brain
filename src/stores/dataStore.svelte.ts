@@ -351,6 +351,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	assistantLanguage: "en",
 	initialAssistantMessageContent: "Hi",
 	targetFolder: "Chats",
+	attachmentFolder: "",
 
 	// File filtering
 	excludeFF: ["Chats", ".excalidraw.md"],
@@ -585,12 +586,48 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch {
 			// ignore
 		}
 		this.saveSettings();
+	}
+
+	get attachmentFolder() {
+		return this.#data.attachmentFolder;
+	}
+	set attachmentFolder(val: string) {
+		this.#data.attachmentFolder = val;
+		this.saveSettings();
+	}
+
+	/**
+	 * Resolves the effective attachment folder:
+	 * 1. User override (`attachmentFolder` setting) if non-empty
+	 * 2. Obsidian's native attachment folder if it's an absolute vault path
+	 * 3. Fallback: `{targetFolder}/attachments`
+	 */
+	get resolvedAttachmentFolder(): string {
+		const userOverride = this.#data.attachmentFolder?.trim();
+		if (userOverride) return normalizePath(userOverride);
+
+		try {
+			// @ts-expect-error — internal Obsidian API
+			const obsidianPath: unknown = this._plugin.app.vault.getConfig("attachmentFolderPath");
+			if (
+				typeof obsidianPath === "string" &&
+				obsidianPath.length > 0 &&
+				obsidianPath !== "." &&
+				!obsidianPath.startsWith("./")
+			) {
+				return normalizePath(obsidianPath);
+			}
+		} catch {
+			// ignore — API may not exist
+		}
+
+		return normalizePath(`${this.#data.targetFolder}/attachments`);
 	}
 
 	get isChatComfy() {
