@@ -418,10 +418,10 @@ export class VectorStoreService {
 		const ollamaData =
 			defaultModel.provider === "ollama"
 				? (() => {
-					const ollamaAuth = getData().getResolvedProviderAuth("ollama");
-					if (!ollamaAuth?.baseUrl) return null;
-					return getOllamaModelsCache(ollamaAuth.baseUrl);
-				})()
+						const ollamaAuth = getData().getResolvedProviderAuth("ollama");
+						if (!ollamaAuth?.baseUrl) return null;
+						return getOllamaModelsCache(ollamaAuth.baseUrl);
+					})()
 				: null;
 
 		const metadata = hydrateEmbeddingModel(defaultModel.provider, defaultModel.model, {
@@ -1617,7 +1617,7 @@ export class VectorStoreService {
 		}
 		if (!indexId) {
 			callback({ isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 });
-			return () => { };
+			return () => {};
 		}
 
 		// Register at service level so subscriptions survive instance recreation
@@ -1741,7 +1741,7 @@ export class VectorStoreService {
 			this.modifyTimers.clear();
 			// Wait for any in-progress initialization before cleaning up
 			if (this.initPromise) {
-				await this.initPromise.catch(() => { });
+				await this.initPromise.catch(() => {});
 			}
 			for (const inst of this.instances.values()) {
 				await inst.syncManager.flush();

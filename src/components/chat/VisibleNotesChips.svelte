@@ -6,86 +6,256 @@ import {
 	type VisibleNote,
 	type VisibleNoteRef,
 } from "../../hooks/useVisibleNotes.svelte";
+import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
-
-const PROMOTABLE_VIEW_TYPES = new Set(["pdf", "image"]);
+import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 
 interface Props {
 	/** Bindable: the currently active (non-deactivated) notes as serializable refs. */
 	activeNotes?: VisibleNoteRef[];
 	/** Path to exclude from display (e.g. when a selection chip covers this note). */
 	excludePath?: string;
-	/** Called when the user promotes a PDF/image chip to a direct attachment. */
-	onPromoteToAttachment?: (note: VisibleNote) => void;
+	/** Current attachment paths so visible notes can toggle between reference and attachment mode. */
+	attachmentPaths?: string[];
+	/** Called when a visible note pill toggles between reference and attachment mode. */
+	onToggleAttachment?: (note: VisibleNote, currentlyAttached: boolean) => void | Promise<void>;
+	/** Optional predicate that controls whether a visible note can be promoted to attachment mode. */
+	canPromoteToAttachment?: (note: VisibleNote) => boolean;
+	/** Reports currently displayed visible note paths so parent can dedupe pills. */
+	onDisplayedPathsChange?: (paths: string[]) => void;
 }
 
-let { activeNotes = $bindable([]), excludePath, onPromoteToAttachment }: Props = $props();
+function linkPathForNote(path: string, viewType: string, context?: string, isAttached = false): string {
+	if (isAttached) return path;
+	if (viewType !== "pdf" || !context) return path;
+	const match = context.match(/^p\.\s+([^/]+)\s*\/\s*/);
+	if (!match) return path;
+	const pageLabel = match[1]?.trim();
+	if (!pageLabel || !/^\d+$/.test(pageLabel)) return path;
+	return `${path}#page=${pageLabel}`;
+}
+
+let {
+	activeNotes = $bindable([]),
+	excludePath,
+	attachmentPaths = [],
+	onToggleAttachment,
+	canPromoteToAttachment,
+	onDisplayedPathsChange,
+}: Props = $props();
 
 const tracker = new VisibleNotesTracker();
-let deactivated = $state(new Set<string>());
+const attachmentPathSet = $derived.by(() => new Set(attachmentPaths));
+const visiblePathSet = $derived.by(() => new Set(tracker.notes.map((n) => n.file.path)));
+let noteMemory = $state(new Map<string, VisibleNote>());
+let activeMarkdownPaths = $state(new Set<string>());
+let activeFilePaths = $state(new Set<string>());
+const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
 
-// Keep activeNotes in sync with tracker + deactivated set + excludePath
 $effect(() => {
-	const active = tracker.notes.filter((n) => !deactivated.has(n.file.path) && n.file.path !== excludePath);
-	activeNotes = toVisibleNoteRefs(active);
+	const next = new Map(noteMemory);
+	let changed = false;
+	for (const note of tracker.notes) {
+		const prev = next.get(note.file.path);
+		if (prev !== note) {
+			next.set(note.file.path, note);
+			changed = true;
+		}
+	}
+	if (changed) {
+		noteMemory = next;
+	}
 });
 
-function toggle(path: string) {
-	const next = new Set(deactivated);
-	if (next.has(path)) {
-		next.delete(path);
-	} else {
-		next.add(path);
+function getRenderableNotes(): VisibleNote[] {
+	const result: VisibleNote[] = [];
+	const included = new Set<string>();
+
+	for (const note of tracker.notes) {
+		if (note.file.path === excludePath) continue;
+		result.push(note);
+		included.add(note.file.path);
 	}
-	deactivated = next;
+
+	for (const path of activeMarkdownPaths) {
+		if (path === excludePath || included.has(path)) continue;
+		const remembered = noteMemory.get(path);
+		if (!remembered) continue;
+		result.push(remembered);
+		included.add(path);
+	}
+
+	for (const path of activeFilePaths) {
+		if (path === excludePath || included.has(path)) continue;
+		const remembered = noteMemory.get(path);
+		if (!remembered) continue;
+		result.push(remembered);
+		included.add(path);
+	}
+
+	for (const path of attachmentPathSet) {
+		if (path === excludePath || included.has(path)) continue;
+		const remembered = noteMemory.get(path);
+		if (!remembered) continue;
+		result.push(remembered);
+		included.add(path);
+	}
+
+	return result;
 }
 
-function promote(event: Event, note: VisibleNote) {
-	event.stopPropagation();
-	// Deactivate the chip so it's excluded from activeNotes
-	const next = new Set(deactivated);
-	next.add(note.file.path);
-	deactivated = next;
-	onPromoteToAttachment?.(note);
+function getDisplayedPaths(): string[] {
+	return getRenderableNotes().map((n) => n.file.path);
+}
+
+// Keep activeNotes in sync with currently visible refs plus hidden markdown refs.
+$effect(() => {
+	const active = tracker.notes.filter((n) => {
+		if (n.file.path === excludePath) return false;
+		if (n.viewType === "markdown") return activeMarkdownPaths.has(n.file.path);
+		return activeFilePaths.has(n.file.path) && !attachmentPathSet.has(n.file.path);
+	});
+	const hiddenPinnedMarkdown = [...activeMarkdownPaths]
+		.filter((path) => !visiblePathSet.has(path) && path !== excludePath)
+		.map((path) => noteMemory.get(path))
+		.filter((note): note is VisibleNote => Boolean(note));
+	const hiddenPinnedFiles = [...activeFilePaths]
+		.filter((path) => !visiblePathSet.has(path) && path !== excludePath && !attachmentPathSet.has(path))
+		.map((path) => noteMemory.get(path))
+		.filter((note): note is VisibleNote => Boolean(note));
+	activeNotes = toVisibleNoteRefs([...active, ...hiddenPinnedMarkdown, ...hiddenPinnedFiles]);
+});
+
+$effect(() => {
+	onDisplayedPathsChange?.(getDisplayedPaths());
+});
+
+function setActiveMarkdown(path: string, value: boolean): void {
+	const next = new Set(activeMarkdownPaths);
+	if (value) {
+		next.add(path);
+	} else {
+		next.delete(path);
+	}
+	activeMarkdownPaths = next;
+}
+
+function setActiveFile(path: string, value: boolean): void {
+	const next = new Set(activeFilePaths);
+	if (value) {
+		next.add(path);
+	} else {
+		next.delete(path);
+	}
+	activeFilePaths = next;
+}
+
+function onPillClick(note: VisibleNote, isHidden: boolean) {
+	const { path } = note.file;
+
+	if (note.viewType === "markdown") {
+		setActiveMarkdown(path, !activeMarkdownPaths.has(path));
+		return;
+	}
+
+	const promotable = canPromoteToAttachment?.(note) ?? true;
+	if (!promotable || !onToggleAttachment) {
+		return;
+	}
+
+	if (attachmentPathSet.has(path)) {
+		setActiveFile(path, false);
+		void onToggleAttachment(note, true);
+		return;
+	}
+
+	if (activeFilePaths.has(path)) {
+		if (isHidden) {
+			setActiveFile(path, false);
+			return;
+		}
+		void onToggleAttachment(note, false);
+		return;
+	}
+
+	if (isHidden) {
+		return;
+	}
+
+	setActiveFile(path, true);
+}
+
+function previewNoteLink(evt: Event, path: string): void {
+	const target = evt.currentTarget;
+	if (!(target instanceof HTMLElement)) return;
+
+	getPlugin().app.workspace.trigger("hover-link", {
+		event: evt,
+		source: VIEW_TYPE_CHAT,
+		hoverParent: getPlugin(),
+		targetEl: target,
+		linktext: path,
+		sourcePath,
+	});
 }
 
 onDestroy(() => tracker.destroy());
 </script>
 
-{#if tracker.notes.length > 0}
-  <div class="visible-notes-chips flex flex-row flex-wrap gap-1.5 pt-2">
-    {#each tracker.notes as note (note.file.path)}
-      {#if note.file.path !== excludePath}
-        {@const isDeactivated = deactivated.has(note.file.path)}
-        <span class="visible-note-chip" class:deactivated={isDeactivated}>
-          <button
-            type="button"
-            class="chip-toggle"
-            onclick={() => toggle(note.file.path)}
-            title={isDeactivated
-              ? `${note.file.path} (excluded — click to include)`
-              : `${note.file.path} (included — click to exclude)`}
+{#if getRenderableNotes().length > 0}
+  <div class="visible-notes-chips inline-flex flex-row flex-wrap gap-1.5">
+	    {#each getRenderableNotes() as note (note.file.path)}
+	      {#if note.file.path !== excludePath}
+	        {@const isAttached = attachmentPathSet.has(note.file.path)}
+	        {@const isHidden = !visiblePathSet.has(note.file.path)}
+	        {@const isMarkdownActive = note.viewType === "markdown" && activeMarkdownPaths.has(note.file.path)}
+	        {@const isFileVisible = note.viewType !== "markdown" && activeFilePaths.has(note.file.path) && !isAttached}
+	        {@const isActive = note.viewType === "markdown" ? isMarkdownActive : isFileVisible || isAttached}
+	        {@const noteLinkPath = linkPathForNote(note.file.path, note.viewType, note.context, isAttached)}
+	        {@const displayContext = isAttached && note.viewType !== "markdown" ? undefined : note.context}
+	        <span
+	          class="visible-note-chip"
+          class:deactivated={!isActive}
+          class:hidden-state={isActive && isHidden}
+          class:attached={isActive && isAttached}
+          class:reference={isActive && note.viewType === "markdown"}
+	        >
+	          <button
+	            type="button"
+	            class="chip-toggle"
+	            onclick={() => onPillClick(note, isHidden)}
+	            onmouseover={(evt) => previewNoteLink(evt, noteLinkPath)}
+	            onfocus={(evt) => previewNoteLink(evt, noteLinkPath)}
+            title={!isActive
+              ? `${note.file.path} (inactive — click to reference)`
+              : note.viewType === "markdown"
+                ? isHidden
+                  ? `${note.file.path} (pinned reference — click to remove)`
+                  : `${note.file.path} (active while visible — click to remove)`
+                : isAttached
+                  ? `${note.file.path} (attached pinned reference — click to remove)`
+                  : isHidden
+                    ? `${note.file.path} (pinned reference — click to remove)`
+                    : `${note.file.path} (pinned reference — click to attach)`}
           >
-            <div class="chip-icon" use:icon={note.icon} style="--icon-size: 12px"></div>
-            <span
-              >{note.file.basename}{#if note.context}<span class="chip-context">
-                  · {note.context}</span
-                >{/if}</span
-            >
-          </button>
-          {#if PROMOTABLE_VIEW_TYPES.has(note.viewType) && onPromoteToAttachment && !isDeactivated}
-            <button
-              type="button"
-              class="promote-btn"
-              title="Attach to message for native provider processing"
-              onclick={(e) => promote(e, note)}
-            >
-              <div use:icon={"paperclip"} style="--icon-size: 10px"></div>
-            </button>
-          {/if}
-        </span>
-      {/if}
-    {/each}
+            {#if !isActive}
+              <div class="chip-icon" use:icon={"eye-off"} style="--icon-size: 12px"></div>
+            {:else if note.viewType !== "markdown" && isAttached}
+              <div class="chip-icon" use:icon={note.viewType === "image" ? "image" : "paperclip"} style="--icon-size: 12px"></div>
+            {:else if note.viewType !== "markdown" && isFileVisible}
+              <div class="chip-icon" use:icon={"eye"} style="--icon-size: 12px"></div>
+	            {:else}
+	              <div class="chip-icon" use:icon={"eye"} style="--icon-size: 12px"></div>
+	            {/if}
+	            <span
+	              >{note.file.basename}{#if displayContext}<span class="chip-context">
+	                  · {displayContext}</span
+	                >{/if}</span
+	            >
+	          </button>
+	        </span>
+	      {/if}
+	    {/each}
   </div>
 {/if}
 
@@ -95,74 +265,90 @@ onDestroy(() => tracker.destroy());
     align-items: center;
     gap: 0;
     font-size: 11px;
-    line-height: 1.2;
-    background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--interactive-accent) 25%, transparent);
-    border-radius: 4px;
+    line-height: 1.15;
+    background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-secondary));
+    border: 1px solid color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+    border-radius: 999px;
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
+      0 1px 2px color-mix(in srgb, black 10%, transparent);
     color: var(--text-normal);
     white-space: nowrap;
     transition:
       background 0.15s ease,
+      transform 0.15s ease,
       opacity 0.15s ease,
-      border-color 0.15s ease;
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
   }
 
   .visible-note-chip:hover {
-    background: color-mix(in srgb, var(--interactive-accent) 20%, transparent);
-    border-color: color-mix(in srgb, var(--interactive-accent) 40%, transparent);
+    background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-secondary));
+    border-color: color-mix(in srgb, var(--interactive-accent) 24%, transparent);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
+      0 3px 8px color-mix(in srgb, black 12%, transparent);
+    transform: translateY(-1px);
   }
 
   .visible-note-chip.deactivated {
     background: var(--background-primary);
-    border-color: var(--background-modifier-border);
+    border-color: color-mix(in srgb, var(--background-modifier-border) 85%, transparent);
     color: var(--text-muted);
-    opacity: 0.5;
+    box-shadow: none;
+    opacity: 0.6;
+  }
+
+  .visible-note-chip.hidden-state {
+    opacity: 0.82;
+  }
+
+  .visible-note-chip.reference {
+    background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-secondary));
+    border-color: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+  }
+
+  .visible-note-chip.attached {
+    background: color-mix(in srgb, var(--color-green) 18%, var(--background-secondary));
+    border-color: color-mix(in srgb, var(--color-green) 20%, transparent);
+  }
+
+  .visible-note-chip:has(.chip-toggle:focus-visible) {
+    outline: none;
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
+      0 0 0 2px color-mix(in srgb, var(--interactive-accent) 28%, transparent),
+      0 3px 8px color-mix(in srgb, black 12%, transparent);
   }
 
   .visible-note-chip.deactivated:hover {
+    transform: none;
     opacity: 0.75;
+    box-shadow: none;
   }
 
   .chip-toggle {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 2px 8px;
+    justify-content: center;
+    padding: 4px 10px;
     background: none;
     border: none;
     color: inherit;
     font: inherit;
     cursor: pointer;
+    border-radius: 999px;
   }
 
   .chip-icon {
     display: flex;
     align-items: center;
     flex-shrink: 0;
+    opacity: 0.9;
   }
 
   .chip-context {
-    opacity: 0.7;
-  }
-
-  .promote-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2px 4px 2px 0;
-    background: none;
-    border: none;
-    border-radius: 3px;
-    color: var(--text-muted);
-    cursor: pointer;
-    opacity: 0.6;
-    transition:
-      opacity 0.15s ease,
-      color 0.15s ease;
-  }
-
-  .promote-btn:hover {
-    opacity: 1;
-    color: var(--interactive-accent);
+    opacity: 0.62;
   }
 </style>

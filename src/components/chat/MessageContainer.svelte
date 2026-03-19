@@ -4,6 +4,8 @@ import { tick, untrack } from "svelte";
 import { type AssistantMessage, AssistantState, type MessagePair, type Messenger } from "../../stores/chatStore.svelte";
 import type { UUIDv7 } from "../../utils/uuid7Validator";
 import { Logger } from "../../utils/logging";
+import { getPlugin } from "../../stores/state.svelte";
+import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import IconButton from "../ui/IconButton.svelte";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 import Logo from "../ui/logos/Logo.svelte";
@@ -19,7 +21,17 @@ interface Props {
 	messenger: Messenger;
 }
 
+function linkPathForReference(path: string, viewType?: string, context?: string): string {
+	if (viewType !== "pdf" || !context) return path;
+	const match = context.match(/^p\.\s+([^/]+)\s*\/\s*/);
+	if (!match) return path;
+	const pageLabel = match[1]?.trim();
+	if (!pageLabel || !/^\d+$/.test(pageLabel)) return path;
+	return `${path}#page=${pageLabel}`;
+}
+
 const { messenger }: Props = $props();
+const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
 
 const messages = $derived.by(() => {
 	return messenger.session?.messages;
@@ -62,6 +74,20 @@ async function handleBranchNavigate(checkpointId: string) {
 		Logger.error("[MessageContainer] Branch switch failed:", error);
 		new Notice(`Branch switch failed: ${error instanceof Error ? error.message : "Unknown error"}`);
 	}
+}
+
+function previewReferencedNote(evt: Event, path: string): void {
+	const target = evt.currentTarget;
+	if (!(target instanceof HTMLElement)) return;
+
+	getPlugin().app.workspace.trigger("hover-link", {
+		event: evt,
+		source: VIEW_TYPE_CHAT,
+		hoverParent: getPlugin(),
+		targetEl: target,
+		linktext: path,
+		sourcePath,
+	});
 }
 
 let scrollContainer: HTMLDivElement | undefined = $state();
@@ -300,7 +326,14 @@ $effect(() => {
                 <div class="visible-notes-history flex flex-row flex-wrap gap-1.5 justify-end">
                   {#if messagePair.userMessage.visibleNotes?.length}
                     {#each messagePair.userMessage.visibleNotes as note (note.path)}
-                      <span class="history-note-chip" title={note.path}>
+                      {@const noteLinkPath = linkPathForReference(note.path, note.viewType, note.context)}
+                      <button
+                        type="button"
+                        class="history-note-chip"
+                        title={noteLinkPath}
+                        onmouseover={(evt) => previewReferencedNote(evt, noteLinkPath)}
+                        onfocus={(evt) => previewReferencedNote(evt, noteLinkPath)}
+                      >
                         <span class="chip-icon" use:icon={note.icon} style="--icon-size: 12px"
                         ></span>
                         <span
@@ -308,38 +341,47 @@ $effect(() => {
                               · {note.context}</span
                             >{/if}</span
                         >
-                      </span>
+                      </button>
                     {/each}
                   {/if}
                   {#if messagePair.userMessage.selection}
-                    <span
+                    {@const selection = messagePair.userMessage.selection}
+                    <button
+                      type="button"
                       class="history-note-chip history-selection-chip"
-                      title="{messagePair.userMessage.selection
-                        .path}\n\n{messagePair.userMessage.selection.text.slice(0, 200)}"
+                      title="{selection.path}\n\n{selection.text.slice(0, 200)}"
+                      onmouseover={(evt) => previewReferencedNote(evt, selection.path)}
+                      onfocus={(evt) => previewReferencedNote(evt, selection.path)}
                     >
                       <span
                         class="chip-icon"
-                        use:icon={messagePair.userMessage.selection.icon}
+                        use:icon={selection.icon}
                         style="--icon-size: 12px"
                       ></span>
                       <span
-                        >{messagePair.userMessage.selection.basename}<span class="chip-context">
-                          · "{messagePair.userMessage.selection.text
+                        >{selection.basename}<span class="chip-context">
+                          · "{selection.text
                             .replace(/\n/g, " ")
-                            .slice(0, 40)}{messagePair.userMessage.selection.text.length > 40
+                            .slice(0, 40)}{selection.text.length > 40
                             ? "…"
                             : ""}"</span
                         ></span
                       >
-                    </span>
+                    </button>
                   {/if}
                   {#if messagePair.userMessage.graphNotes?.length}
                     {#each messagePair.userMessage.graphNotes as gNote (gNote.path)}
-                      <span class="history-note-chip history-graph-chip" title={gNote.path}>
+                      <button
+                        type="button"
+                        class="history-note-chip history-graph-chip"
+                        title={gNote.path}
+                        onmouseover={(evt) => previewReferencedNote(evt, gNote.path)}
+                        onfocus={(evt) => previewReferencedNote(evt, gNote.path)}
+                      >
                         <span class="chip-icon" use:icon={"git-fork"} style="--icon-size: 12px"
                         ></span>
                         <span>{gNote.basename}</span>
-                      </span>
+                      </button>
                     {/each}
                   {/if}
                 </div>
@@ -471,6 +513,10 @@ $effect(() => {
     border-radius: 4px;
     color: var(--text-muted);
     white-space: nowrap;
+    background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+    font: inherit;
+    text-align: left;
+    cursor: default;
   }
 
   .history-note-chip .chip-icon {
