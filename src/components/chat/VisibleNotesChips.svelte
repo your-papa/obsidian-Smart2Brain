@@ -1,4 +1,5 @@
 <script lang="ts">
+import { Keymap } from "obsidian";
 import { onDestroy } from "svelte";
 import {
 	VisibleNotesTracker,
@@ -239,6 +240,17 @@ function onPillClick(note: VisibleNote, isHidden: boolean) {
 	setActiveFile(path, true);
 }
 
+function onPillMouseClick(evt: MouseEvent, note: VisibleNote, isHidden: boolean, noteLinkPath: string): void {
+	if (Keymap.isModEvent(evt)) {
+		evt.preventDefault();
+		evt.stopPropagation();
+		getPlugin().app.workspace.openLinkText(noteLinkPath, sourcePath, true);
+		return;
+	}
+
+	onPillClick(note, isHidden);
+}
+
 function previewNoteLink(evt: Event, path: string): void {
 	const target = evt.currentTarget;
 	if (!(target instanceof HTMLElement)) return;
@@ -277,7 +289,7 @@ onDestroy(() => tracker.destroy());
 	          <button
 	            type="button"
 	            class="chip-toggle"
-	            onclick={() => onPillClick(note, isHidden)}
+	            onclick={(evt) => onPillMouseClick(evt, note, isHidden, noteLinkPath)}
 	            onmouseover={(evt) => previewNoteLink(evt, noteLinkPath)}
 	            onfocus={(evt) => previewNoteLink(evt, noteLinkPath)}
             title={!isActive

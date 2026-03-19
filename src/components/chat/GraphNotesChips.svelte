@@ -1,5 +1,7 @@
 <script lang="ts">
+import { Keymap } from "obsidian";
 import { onDestroy } from "svelte";
+import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
 import type { GraphNoteRef } from "../../stores/chatStore.svelte";
 
@@ -15,6 +17,7 @@ interface Props {
 let { activeGraphNotes = $bindable([]), paths = [] }: Props = $props();
 
 let dismissed = $state(new Set<string>());
+const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
 
 function basename(path: string): string {
 	return BASENAME_RE.exec(path)?.[1] ?? path;
@@ -35,6 +38,17 @@ function toggle(path: string) {
 	dismissed = next;
 }
 
+function onGraphChipClick(evt: MouseEvent, path: string): void {
+	if (Keymap.isModEvent(evt)) {
+		evt.preventDefault();
+		evt.stopPropagation();
+		getPlugin().app.workspace.openLinkText(path, sourcePath, true);
+		return;
+	}
+
+	toggle(path);
+}
+
 /** Clear all graph notes (e.g. after sending a message). */
 export function clear() {
 	dismissed = new Set();
@@ -48,7 +62,7 @@ export function clear() {
         type="button"
         class="graph-note-chip"
         class:deactivated={dismissed.has(path)}
-        onclick={() => toggle(path)}
+        onclick={(evt) => onGraphChipClick(evt, path)}
         title={dismissed.has(path)
           ? `${path} (excluded — click to include)`
           : `${path} (included — click to exclude)`}
