@@ -2,6 +2,7 @@ import { ItemView, type WorkspaceLeaf } from "obsidian";
 import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";
 import SmartGraphViewComponent from "../../components/graph/SmartGraphView.svelte";
+import { getMessenger } from "../../stores/chatStore.svelte";
 
 export const VIEW_TYPE_SMART_GRAPH = "smart-second-brain-graph";
 
@@ -38,6 +39,11 @@ export class SmartGraphView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		const messenger = getMessenger();
+		if (messenger) {
+			messenger.pendingGraphNotes = [];
+		}
+
 		if (this.component) {
 			unmount(this.component);
 			this.component = null;
