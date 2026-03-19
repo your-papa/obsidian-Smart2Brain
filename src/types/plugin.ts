@@ -116,7 +116,7 @@ export interface SearchNotesSettings {
 /**
  * Tool-specific settings for read_content tool
  */
-export interface ReadNoteSettings {
+export interface ReadContentSettings {
 	/** Maximum content length to return (0 = unlimited) */
 	maxContentLength: number;
 	/** Vision model for images: undefined = auto-derive from chat model, null = disabled, ChatModel = explicit */
@@ -152,7 +152,7 @@ export interface ManageNotesSettings {
  */
 export type ToolSpecificSettings =
 	| SearchNotesSettings
-	| ReadNoteSettings
+	| ReadContentSettings
 	| DataviewQuerySettings
 	| ManageNotesSettings
 	| Record<string, never>;

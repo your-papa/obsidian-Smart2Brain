@@ -168,7 +168,7 @@ describe("baseMessageToAssistantMessage", () => {
 	});
 
 	it("should mark failed tool outputs", () => {
-		const msg = aiMsgWithToolCalls("", [{ id: "tc-1", name: "read_note", args: { path: "missing.md" } }]);
+		const msg = aiMsgWithToolCalls("", [{ id: "tc-1", name: "read_content", args: { path: "missing.md" } }]);
 
 		const toolOutputs = new Map([
 			["tc-1", { content: "File not found", status: "failed" as const }],
