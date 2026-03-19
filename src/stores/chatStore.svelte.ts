@@ -1097,7 +1097,7 @@ export function getMessagePairTimestamp(pair: MessagePair): Date {
  */
 export function chatHistoryContainsPrivateNotes(messages: MessagePair[]): boolean {
 	const store = getPendingChangesStore();
-	const FILE_TOOLS = new Set(["read_content", "read_note", "manage_notes", "get_properties"]);
+	const FILE_TOOLS = new Set(["read_content", "manage_notes", "get_properties"]);
 
 	for (const pair of messages) {
 		// Check user attachments

@@ -586,7 +586,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch {
 			// ignore
@@ -1687,78 +1687,6 @@ export class PluginDataStore {
 
 let _pluginDataStore: PluginDataStore | null = null;
 
-function migrateReadContentTool(agent: AgentConfig): void {
-	const legacyTools = (agent.toolsConfig ?? {}) as Record<string, ToolConfig | undefined>;
-	const legacyReadNote = legacyTools.read_note;
-	const legacyReadAttachment = legacyTools.read_attachment;
-
-	const currentReadContent = agent.toolsConfig.read_content;
-	const legacyMaxContentLength =
-		(legacyReadNote?.settings as { maxContentLength?: number } | undefined)?.maxContentLength ??
-		(currentReadContent.settings as { maxContentLength?: number } | undefined)?.maxContentLength ??
-		0;
-
-	let mergedReadContentEnabled = currentReadContent.enabled ?? true;
-	if (legacyReadNote && legacyReadAttachment) {
-		mergedReadContentEnabled = (legacyReadNote.enabled ?? true) && (legacyReadAttachment.enabled ?? true);
-	} else if (legacyReadNote) {
-		mergedReadContentEnabled = legacyReadNote.enabled ?? true;
-	} else if (legacyReadAttachment) {
-		mergedReadContentEnabled = legacyReadAttachment.enabled ?? true;
-	}
-
-	const mergedReadContentName =
-		currentReadContent.name === DEFAULT_TOOLS_CONFIG.read_content.name
-			? legacyReadNote?.name || legacyReadAttachment?.name || currentReadContent.name
-			: currentReadContent.name;
-
-	const mergedReadContentDescription =
-		currentReadContent.description === DEFAULT_TOOLS_CONFIG.read_content.description
-			? legacyReadNote?.description || legacyReadAttachment?.description || currentReadContent.description
-			: currentReadContent.description;
-
-	agent.toolsConfig.read_content = {
-		...currentReadContent,
-		enabled: mergedReadContentEnabled,
-		name: mergedReadContentName,
-		description: mergedReadContentDescription,
-		settings: { maxContentLength: legacyMaxContentLength },
-	};
-
-	delete (agent.toolsConfig as Record<string, ToolConfig | undefined>).read_note;
-	delete (agent.toolsConfig as Record<string, ToolConfig | undefined>).read_attachment;
-}
-
-function migrateManageNotesTool(agent: AgentConfig): void {
-	const legacyTools = agent.toolsConfig as Record<string, ToolConfig | undefined>;
-	const legacyCreate = legacyTools.create_note;
-	const legacyEdit = legacyTools.edit_note;
-	const legacyDelete = legacyTools.delete_note;
-	const currentManageNotes = agent.toolsConfig.manage_notes;
-	const currentSettings =
-		(currentManageNotes.settings as
-			| { allowCreate?: boolean; allowUpdate?: boolean; allowDelete?: boolean; allowMove?: boolean }
-			| undefined) ?? {};
-	const hasLegacyWriteTools = Boolean(legacyCreate || legacyEdit || legacyDelete);
-
-	agent.toolsConfig.manage_notes = {
-		...currentManageNotes,
-		enabled: hasLegacyWriteTools
-			? Boolean(legacyCreate?.enabled || legacyEdit?.enabled || legacyDelete?.enabled)
-			: (currentManageNotes.enabled ?? true),
-		settings: {
-			allowCreate: currentSettings.allowCreate ?? legacyCreate?.enabled ?? true,
-			allowUpdate: currentSettings.allowUpdate ?? legacyEdit?.enabled ?? true,
-			allowDelete: currentSettings.allowDelete ?? legacyDelete?.enabled ?? true,
-			allowMove: currentSettings.allowMove ?? true,
-		},
-	};
-
-	delete legacyTools.create_note;
-	delete legacyTools.edit_note;
-	delete legacyTools.delete_note;
-}
-
 function normalizeAgent(agent: AgentConfig): void {
 	// Ensure toolsConfig exists and has all tools
 	if (agent.toolsConfig) {
@@ -1766,9 +1694,6 @@ function normalizeAgent(agent: AgentConfig): void {
 	} else {
 		agent.toolsConfig = structuredClone(DEFAULT_TOOLS_CONFIG);
 	}
-
-	migrateReadContentTool(agent);
-	migrateManageNotesTool(agent);
 
 	// Ensure read_content settings have processor fields
 	const readSettings = agent.toolsConfig.read_content?.settings as
