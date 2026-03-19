@@ -1,4 +1,4 @@
-import { MarkdownView, Plugin, WorkspaceLeaf } from "obsidian";
+import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import "./lib/i18n";
 import { Logger as Log } from "./utils/logging";
 import "./styles.css";
@@ -10,7 +10,7 @@ import { terminateWorker as terminateClusteringWorker } from "./utils/computeWor
 import { SearchModal } from "./components/modal/SearchModal";
 import { getQueryClient } from "./lib/query";
 import { SkillsService } from "./skills";
-import { createMessenger } from "./stores/chatStore.svelte";
+import { createMessenger, getMessenger } from "./stores/chatStore.svelte";
 import { type PluginDataStore, createData, getData } from "./stores/dataStore.svelte";
 import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingChangesStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
@@ -19,6 +19,19 @@ import { SmartGraphView, VIEW_TYPE_SMART_GRAPH } from "./views/smart-graph/Smart
 import SettingsTab from "./views/settings/Settings";
 import { VectorStoreService } from "./vectorstore";
 
+const SUPPORTED_CHAT_ATTACHMENT_EXTENSIONS = new Set([
+	"txt",
+	"md",
+	"csv",
+	"json",
+	"png",
+	"jpg",
+	"jpeg",
+	"gif",
+	"webp",
+	"pdf",
+]);
+
 export default class SecondBrainPlugin extends Plugin {
 	agentManager!: AgentManager;
 	skillsService!: SkillsService;
@@ -26,6 +39,107 @@ export default class SecondBrainPlugin extends Plugin {
 	pendingChangesStore!: PendingChangesStore;
 	queryClient = getQueryClient();
 	pluginData!: PluginDataStore;
+
+	private getAddToChatMenuLabel(selectedCount: number): string {
+		if (selectedCount <= 1) {
+			return "Add to Chat";
+		}
+		return `Add ${selectedCount} files to Chat`;
+	}
+
+	private registerNotebookNavigatorMenus() {
+		type NavigatorMenuItem = {
+			setTitle(title: string): NavigatorMenuItem;
+			setIcon(icon: string): NavigatorMenuItem;
+			onClick(cb: () => void | Promise<void>): NavigatorMenuItem;
+		};
+
+		type NavigatorFileMenuContext = {
+			file?: unknown;
+			selection?: { files?: unknown[] };
+			addItem?: (cb: (item: NavigatorMenuItem) => void) => void;
+		};
+
+		type NavigatorMenusApi = {
+			registerFileMenu?: (cb: (context: NavigatorFileMenuContext) => void) => (() => void) | void;
+		};
+
+		type NotebookNavigatorApi = {
+			menus?: NavigatorMenusApi;
+		};
+
+		const plugins = (this.app as unknown as { plugins?: { plugins?: Record<string, unknown> } }).plugins;
+		const notebookNavigator = plugins?.plugins?.["notebook-navigator"] as
+			| { api?: NotebookNavigatorApi }
+			| undefined;
+		const registerFileMenu = notebookNavigator?.api?.menus?.registerFileMenu;
+
+		if (typeof registerFileMenu !== "function") {
+			return;
+		}
+
+		const dispose = registerFileMenu((context) => {
+			if (typeof context.addItem !== "function") {
+				return;
+			}
+
+			const selectedFiles = (
+				Array.isArray(context.selection?.files) ? context.selection.files : [context.file]
+			).filter((file): file is TFile => file instanceof TFile);
+
+			if (selectedFiles.length === 0) {
+				return;
+			}
+
+			context.addItem((item) => {
+				item.setTitle(this.getAddToChatMenuLabel(selectedFiles.length))
+					.setIcon("message-square-plus")
+					.onClick(async () => {
+						try {
+							await this.queueFilesForChatAttachment(selectedFiles);
+						} catch (error) {
+							new Notice(
+								`Failed to add files to chat: ${error instanceof Error ? error.message : String(error)}`,
+							);
+						}
+					});
+			});
+		});
+
+		if (typeof dispose === "function") {
+			this.register(dispose);
+		}
+	}
+
+	private getSupportedFiles(files: TFile[]): TFile[] {
+		return files.filter((file) => SUPPORTED_CHAT_ATTACHMENT_EXTENSIONS.has(file.extension.toLowerCase()));
+	}
+
+	private async queueFilesForChatAttachment(files: TFile[]) {
+		const supportedFiles = this.getSupportedFiles(files);
+		if (supportedFiles.length === 0) {
+			new Notice("No supported files selected. Supported: txt, md, csv, json, images, pdf.");
+			return;
+		}
+
+		await this.agentManager.openLatestChat();
+
+		const messenger = getMessenger();
+		if (!messenger) {
+			new Notice("Chat is not initialized yet. Please open chat and try again.");
+			return;
+		}
+
+		const existing = messenger.pendingAttachmentPaths ?? [];
+		const merged = [...existing, ...supportedFiles.map((file) => file.path)];
+		const deduped = [...new Set(merged)];
+		messenger.pendingAttachmentPaths = deduped;
+
+		const skipped = files.length - supportedFiles.length;
+		if (skipped > 0) {
+			new Notice(`Queued ${supportedFiles.length} file(s) for chat. Skipped ${skipped} unsupported file(s).`);
+		}
+	}
 
 	async onload() {
 		setPlugin(this);
@@ -127,6 +241,50 @@ export default class SecondBrainPlugin extends Plugin {
 		await this.agentManager.initialize();
 
 		createMessenger(this.agentManager);
+		this.registerNotebookNavigatorMenus();
+
+		this.registerEvent(
+			this.app.workspace.on("file-menu", (menu, file) => {
+				if (!(file instanceof TFile)) return;
+
+				menu.addItem((item) =>
+					item
+						.setTitle(this.getAddToChatMenuLabel(1))
+						.setIcon("message-square-plus")
+						.onClick(async () => {
+							try {
+								await this.queueFilesForChatAttachment([file]);
+							} catch (error) {
+								new Notice(
+									`Failed to add file to chat: ${error instanceof Error ? error.message : String(error)}`,
+								);
+							}
+						}),
+				);
+			}),
+		);
+
+		this.registerEvent(
+			this.app.workspace.on("files-menu", (menu, files) => {
+				const selectedFiles = files.filter((file): file is TFile => file instanceof TFile);
+				if (selectedFiles.length === 0) return;
+
+				menu.addItem((item) =>
+					item
+						.setTitle(this.getAddToChatMenuLabel(selectedFiles.length))
+						.setIcon("message-square-plus")
+						.onClick(async () => {
+							try {
+								await this.queueFilesForChatAttachment(selectedFiles);
+							} catch (error) {
+								new Notice(
+									`Failed to add files to chat: ${error instanceof Error ? error.message : String(error)}`,
+								);
+							}
+						}),
+				);
+			}),
+		);
 
 		// Initialize Pending Changes Store for write tool staging
 		this.pendingChangesStore = new PendingChangesStore(this);
