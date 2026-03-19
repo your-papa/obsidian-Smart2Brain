@@ -68,6 +68,18 @@ let selectionChipRef: { clearSelection: () => void } | undefined = $state(undefi
 
 const ACCEPTED_EXTENSIONS = new Set(["txt", "md", "csv", "json", "png", "jpg", "jpeg", "gif", "webp", "pdf"]);
 
+const MIME_EXTENSION_MAP: Record<string, string> = {
+	"image/png": "png",
+	"image/jpeg": "jpg",
+	"image/gif": "gif",
+	"image/webp": "webp",
+	"application/pdf": "pdf",
+	"text/plain": "txt",
+	"text/markdown": "md",
+	"text/csv": "csv",
+	"application/json": "json",
+};
+
 const SUPPORTED_DRAG_MIME_PREFIXES = ["image/"];
 const SUPPORTED_DRAG_MIMES = new Set([
 	"application/pdf",
@@ -194,6 +206,9 @@ function initializeEditor() {
 		placeholder: "Type a message...",
 		cls: "chat-markdown-editor",
 		enterVimInsertMode: true,
+		onPaste: (event) => {
+			void onEditorPaste(event);
+		},
 		onChange: (value) => {
 			inputValue = value;
 		},
@@ -340,6 +355,33 @@ function sanitizeAttachmentFileName(fileName: string): string {
 	return sanitized.length > 0 ? sanitized : "attachment";
 }
 
+function extensionFromFile(file: File): string {
+	const namedExt = file.name.split(".").pop()?.toLowerCase();
+	if (namedExt && namedExt.length > 0 && namedExt !== file.name.toLowerCase()) {
+		return namedExt;
+	}
+
+	const mime = file.type.toLowerCase();
+	return MIME_EXTENSION_MAP[mime] ?? "bin";
+}
+
+function withFallbackAttachmentName(file: File, index: number): File {
+	if (file.name.trim().length > 0 && file.name.includes(".")) {
+		return file;
+	}
+
+	const extension = extensionFromFile(file);
+	if (!ACCEPTED_EXTENSIONS.has(extension)) {
+		return file;
+	}
+
+	const fallbackName = `pasted-file-${Date.now()}-${index + 1}.${extension}`;
+	return new File([file], fallbackName, {
+		type: file.type,
+		lastModified: file.lastModified,
+	});
+}
+
 async function getUniqueAttachmentPath(
 	attachDir: string,
 	fileName: string,
@@ -386,8 +428,9 @@ async function processFiles(files: File[]) {
 		let warnedUnknownVision = false;
 		let totalBytes = [...attachmentSizes.values()].reduce((sum, size) => sum + size, 0);
 
-		for (const file of files) {
-			const ext = file.name.split(".").pop()?.toLowerCase() ?? "bin";
+		for (const [index, sourceFile] of files.entries()) {
+			const file = withFallbackAttachmentName(sourceFile, index);
+			const ext = extensionFromFile(file);
 			if (!ACCEPTED_EXTENSIONS.has(ext)) {
 				new Notice(`Unsupported file type: .${ext}`);
 				continue;
@@ -449,6 +492,32 @@ async function processFiles(files: File[]) {
 	} finally {
 		savingFiles = false;
 	}
+}
+
+async function onEditorPaste(event: ClipboardEvent) {
+	const data = event.clipboardData;
+	if (!data) return;
+
+	const fileItems = Array.from(data.items ?? []).filter((item) => item.kind === "file");
+	if (fileItems.length === 0) return;
+
+	const imageFiles: File[] = [];
+	for (const item of fileItems) {
+		const file = item.getAsFile();
+		if (file && file.type.toLowerCase().startsWith("image/")) {
+			imageFiles.push(file);
+		}
+	}
+
+	if (imageFiles.length === 0) return;
+
+	event.preventDefault();
+	if (savingFiles) {
+		new Notice("Please wait for the current attachments to finish saving.");
+		return;
+	}
+
+	await processFiles(imageFiles);
 }
 
 async function onFileAttachment(event: Event) {
