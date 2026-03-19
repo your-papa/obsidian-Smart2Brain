@@ -88,13 +88,13 @@ export type AuthValidationResult = { success: true } | { success: false; message
 export type AgentManagerStreamChunk =
 	| { type: "token"; token: string }
 	| Pick<
-		Extract<AgentStreamChunk, { type: "tool_start" }>,
-		"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
-	>
+			Extract<AgentStreamChunk, { type: "tool_start" }>,
+			"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
+	  >
 	| Pick<
-		Extract<AgentStreamChunk, { type: "tool_end" }>,
-		"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
-	>
+			Extract<AgentStreamChunk, { type: "tool_end" }>,
+			"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
+	  >
 	| { type: "result"; result: unknown };
 
 const resolvedVisionSupportCache = new Map<string, boolean>();

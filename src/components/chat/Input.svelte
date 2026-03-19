@@ -19,6 +19,7 @@ import PendingChangesBar from "./PendingChangesBar.svelte";
 import SelectionChip from "./SelectionChip.svelte";
 import GraphNotesChips from "./GraphNotesChips.svelte";
 import VisibleNotesChips from "./VisibleNotesChips.svelte";
+import DraftAttachmentChips from "./DraftAttachmentChips.svelte";
 import ContextUsageCircle from "./ContextUsageCircle.svelte";
 interface Props {
 	messenger: Messenger;
@@ -59,6 +60,7 @@ let fullscreenTransitioning = false;
 let fullscreenPlaceholderHeight = $state(0);
 let containerEl: HTMLDivElement | undefined = $state();
 let activeVisibleNotes: VisibleNoteRef[] = $state([]);
+let displayedVisibleNotePaths: string[] = $state([]);
 let activeSelection: SelectionRef | undefined = $state(undefined);
 let activeGraphNotes: GraphNoteRef[] = $state([]);
 let pendingGraphPaths: string[] = $state([]);
@@ -503,8 +505,6 @@ async function processFiles(files: File[]) {
 				previewUrls = new Map(previewUrls);
 			}
 		}
-
-		if (count > 0) new Notice(`${count} file(s) attached`);
 	} catch (error) {
 		new Notice(`Failed to attach file: ${error instanceof Error ? error.message : String(error)}`);
 	} finally {
@@ -601,7 +601,6 @@ async function attachVaultFilesByPath(paths: string[]) {
 	}
 
 	if (attachedCount > 0) {
-		new Notice(`${attachedCount} file(s) attached`);
 		requestAnimationFrame(() => markdownEditor?.focus());
 	}
 }
@@ -749,31 +748,51 @@ async function onDrop(event: DragEvent) {
 }
 
 function removeAttachment(attachment: ChatAttachment) {
-	const idx = attachments.indexOf(attachment);
-	if (idx !== -1) {
-		attachments.splice(idx, 1);
-		attachments = [...attachments];
-	}
-	attachmentSizes.delete(attachment.vaultPath);
+	removeAttachmentByPath(attachment.vaultPath);
+}
+
+function removeAttachmentByPath(vaultPath: string) {
+	const attachment = attachments.find((att) => att.vaultPath === vaultPath);
+	if (!attachment) return;
+
+	attachments = attachments.filter((att) => att.vaultPath !== vaultPath);
+	attachmentSizes.delete(vaultPath);
 	attachmentSizes = new Map(attachmentSizes);
 	// Clean up preview URL
-	const url = previewUrls.get(attachment.vaultPath);
+	const url = previewUrls.get(vaultPath);
 	if (url) {
 		URL.revokeObjectURL(url);
-		previewUrls.delete(attachment.vaultPath);
+		previewUrls.delete(vaultPath);
 		previewUrls = new Map(previewUrls);
 	}
 	// Optionally remove the file from vault (it's an unused pre-send attachment)
-	if (managedAttachmentPaths.has(attachment.vaultPath)) {
+	if (managedAttachmentPaths.has(vaultPath)) {
 		const plugin = getPlugin();
-		plugin.app.vault.adapter.remove(attachment.vaultPath).catch(() => {});
-		managedAttachmentPaths.delete(attachment.vaultPath);
+		plugin.app.vault.adapter.remove(vaultPath).catch(() => {});
+		managedAttachmentPaths.delete(vaultPath);
 		managedAttachmentPaths = new Set(managedAttachmentPaths);
 	}
 }
 
-/** Promote a visible-note chip (PDF/image) to a direct chat attachment. */
-async function promoteVisibleNoteToAttachment(note: VisibleNote) {
+function canPromoteVisibleNoteToAttachment(note: VisibleNote): boolean {
+	if (note.viewType === "markdown") {
+		return false;
+	}
+	return ACCEPTED_EXTENSIONS.has(note.file.extension.toLowerCase());
+}
+
+/** Toggle a non-markdown visible note pill between visible-only and attached modes. */
+async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached: boolean) {
+	if (currentlyAttached) {
+		removeAttachmentByPath(note.file.path);
+		return;
+	}
+
+	if (!canPromoteVisibleNoteToAttachment(note)) {
+		new Notice(`Unsupported file type: .${note.file.extension.toLowerCase()}`);
+		return;
+	}
+
 	if (savingFiles) {
 		new Notice("Please wait for the current attachments to finish saving.");
 		return;
@@ -781,10 +800,7 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
 
 	savingFiles = true;
 	try {
-		const attached = await attachVaultFile(note.file);
-		if (attached) {
-			new Notice(`Attached ${note.file.name}`);
-		}
+		await attachVaultFile(note.file);
 	} finally {
 		savingFiles = false;
 	}
@@ -849,66 +865,29 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
         style="--icon-size: var(--icon-xs)"
       ></div>
     </button>
-    <VisibleNotesChips
-      bind:activeNotes={activeVisibleNotes}
-      excludePath={activeSelection?.path}
-      onPromoteToAttachment={promoteVisibleNoteToAttachment}
-    />
-    <SelectionChip bind:activeSelection bind:this={selectionChipRef} />
-    <GraphNotesChips
-      bind:activeGraphNotes
-      paths={pendingGraphPaths}
-      bind:this={graphNotesChipRef}
-    />
-    <div class="flex flex-row flex-wrap gap-2">
-      {#each attachments as attachment}
-        <div class="flex flex-row gap-0.5 items-center bg-[buttonface] rounded-md overflow-hidden">
-          {#if attachment.mimeType.startsWith("image/")}
-            {#if previewUrls.get(attachment.vaultPath)}
-              <img
-                src={previewUrls.get(attachment.vaultPath)}
-                alt={attachment.name}
-                class="w-8 h-8 object-cover rounded-l-md"
-              />
-            {:else}
-              <div
-                class="p-0 flex items-center"
-                use:icon={"image"}
-                style="--icon-size: var(--icon-xs)"
-              ></div>
-            {/if}
-          {:else if attachment.mimeType === "application/pdf"}
-            <div
-              class="p-0 flex items-center"
-              use:icon={"file-text"}
-              style="--icon-size: var(--icon-xs)"
-            ></div>
-          {:else if attachment.mimeType === "application/json"}
-            <div
-              class="p-0 flex items-center"
-              use:icon={"file-json"}
-              style="--icon-size: var(--icon-xs)"
-            ></div>
-          {:else}
-            <div
-              class="p-0 flex items-center"
-              use:icon={"file-text"}
-              style="--icon-size: var(--icon-xs)"
-            ></div>
-          {/if}
-          <div class="text-xs px-1">
-            {attachment.name}
-          </div>
-          <!-- svelte-ignore a11y_click_events_have_key_events -->
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div
-            use:icon={"x"}
-            style="--icon-size: 10px"
-            onclick={() => removeAttachment(attachment)}
-            class="hover:bg-[buttonface] flex items-center justify-center h-4 w-4 bg-white rounded-sm mr-1 my-1"
-          ></div>
-        </div>
-      {/each}
+    <div class="flex flex-row flex-wrap items-start gap-1.5 pt-2">
+      <VisibleNotesChips
+        bind:activeNotes={activeVisibleNotes}
+        excludePath={activeSelection?.path}
+        attachmentPaths={attachments.map((att) => att.vaultPath)}
+        onToggleAttachment={toggleVisibleNoteAttachment}
+        canPromoteToAttachment={canPromoteVisibleNoteToAttachment}
+        onDisplayedPathsChange={(paths) => {
+          displayedVisibleNotePaths = paths;
+        }}
+      />
+      <SelectionChip bind:activeSelection bind:this={selectionChipRef} />
+      <GraphNotesChips
+        bind:activeGraphNotes
+        paths={pendingGraphPaths}
+        bind:this={graphNotesChipRef}
+      />
+      <DraftAttachmentChips
+        attachments={attachments.filter(
+          (attachment) => !displayedVisibleNotePaths.includes(attachment.vaultPath),
+        )}
+        onRemoveAttachment={removeAttachment}
+      />
       {#if savingFiles}
         <div class="text-xs text-text-muted flex items-center">Saving...</div>
       {/if}

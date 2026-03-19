@@ -50,7 +50,7 @@ onDestroy(() => tracker.destroy());
 </script>
 
 {#if tracker.selection && !dismissed}
-  <div class="selection-chip-container flex flex-row flex-wrap gap-1.5 pt-1">
+  <div class="selection-chip-container inline-flex flex-row flex-wrap gap-1.5">
     <button
       type="button"
       class="selection-chip"
@@ -76,29 +76,47 @@ onDestroy(() => tracker.destroy());
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 2px 8px;
+    padding: 4px 10px;
     font-size: 11px;
-    line-height: 1.2;
-    background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--interactive-accent) 25%, transparent);
-    border-radius: 4px;
+    line-height: 1.15;
+    background: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-secondary));
+    border: 1px solid color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+    border-radius: 999px;
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
+      0 1px 2px color-mix(in srgb, black 10%, transparent);
     color: var(--text-normal);
     cursor: pointer;
     transition:
       background 0.15s ease,
-      border-color 0.15s ease;
+      border-color 0.15s ease,
+      transform 0.15s ease,
+      box-shadow 0.15s ease;
     max-width: 100%;
   }
 
   .selection-chip:hover {
-    background: color-mix(in srgb, var(--interactive-accent) 20%, transparent);
-    border-color: color-mix(in srgb, var(--interactive-accent) 40%, transparent);
+    background: color-mix(in srgb, var(--interactive-accent) 20%, var(--background-secondary));
+    border-color: color-mix(in srgb, var(--interactive-accent) 26%, transparent);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
+      0 3px 8px color-mix(in srgb, black 12%, transparent);
+    transform: translateY(-1px);
+  }
+
+  .selection-chip:focus-visible {
+    outline: none;
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
+      0 0 0 2px color-mix(in srgb, var(--interactive-accent) 28%, transparent),
+      0 3px 8px color-mix(in srgb, black 12%, transparent);
   }
 
   .chip-icon {
     display: flex;
     align-items: center;
     flex-shrink: 0;
+    opacity: 0.9;
   }
 
   .chip-label {
@@ -108,7 +126,7 @@ onDestroy(() => tracker.destroy());
   }
 
   .chip-preview {
-    opacity: 0.7;
+    opacity: 0.62;
   }
 
   .chip-warning {
@@ -120,11 +138,17 @@ onDestroy(() => tracker.destroy());
     display: flex;
     align-items: center;
     flex-shrink: 0;
-    opacity: 0.5;
-    transition: opacity 0.15s ease;
+    margin-left: 2px;
+    padding-left: 6px;
+    border-left: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+    opacity: 0.45;
+    transition:
+      opacity 0.15s ease,
+      border-color 0.15s ease;
   }
 
   .selection-chip:hover .chip-close {
     opacity: 1;
+    border-color: color-mix(in srgb, currentColor 22%, transparent);
   }
 </style>

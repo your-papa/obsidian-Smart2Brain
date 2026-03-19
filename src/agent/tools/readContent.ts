@@ -122,9 +122,9 @@ function extractSubpathContent(
 		if (cache.blocks && Object.keys(cache.blocks).length > 0) {
 			available.push(
 				"Block IDs:\n" +
-				Object.keys(cache.blocks)
-					.map((id) => `  ^${id}`)
-					.join("\n"),
+					Object.keys(cache.blocks)
+						.map((id) => `  ^${id}`)
+						.join("\n"),
 			);
 		}
 		const availableStr = available.length > 0 ? `\nAvailable targets:\n${available.join("\n")}` : "";
