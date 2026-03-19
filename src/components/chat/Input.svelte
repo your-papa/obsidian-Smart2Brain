@@ -26,7 +26,16 @@ interface Props {
 	messenger: Messenger;
 	onFocusChange?: (focused: boolean) => void;
 	onMessageSent?: () => void;
+	onDragStateChange?: (state: DragOverlayState) => void;
+	dropTargetMode?: "input" | "view";
+	externalDragActive?: boolean;
 }
+
+type DragOverlayState = {
+	isDragging: boolean;
+	dragMessage: string;
+	dragHasIssue: boolean;
+};
 
 const acceptedFileTypes =
 	".txt, .md, .csv, .json, .png, .jpg, .jpeg, .gif, .webp, .pdf, image/png, image/jpeg, image/gif, image/webp, application/pdf, text/plain, text/markdown, text/csv";
@@ -35,7 +44,14 @@ const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB per file
 const MAX_TOTAL_ATTACHMENTS_BYTES = 25 * 1024 * 1024; // 25 MB per message
 const FULLSCREEN_TRANSITION_MS = 220;
 
-const { messenger, onFocusChange, onMessageSent }: Props = $props();
+const {
+	messenger,
+	onFocusChange,
+	onMessageSent,
+	onDragStateChange,
+	dropTargetMode = "input",
+	externalDragActive = false,
+}: Props = $props();
 
 let editorContainer: HTMLDivElement | undefined = $state();
 let markdownEditor: EmbeddableMarkdownEditor | undefined = $state();
@@ -71,6 +87,8 @@ let assembledSystemPrompt = $state("");
 let assembledPromptRequestVersion = 0;
 
 let selectionChipRef: { clearSelection: () => void } | undefined = $state(undefined);
+
+const DEFAULT_DRAG_MESSAGE = "Drop files here";
 
 const ACCEPTED_EXTENSIONS = new Set(["txt", "md", "csv", "json", "png", "jpg", "jpeg", "gif", "webp", "pdf"]);
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
@@ -135,6 +153,15 @@ const contextUsage = $derived.by(() => {
 });
 
 const canSendMessage = $derived(inputValue.trim().length > 0 || attachments.length > 0);
+const showDragActive = $derived(dropTargetMode === "view" ? externalDragActive : isDragging);
+
+$effect(() => {
+	onDragStateChange?.({
+		isDragging,
+		dragMessage,
+		dragHasIssue,
+	});
+});
 
 export function focusEditor() {
 	requestAnimationFrame(() => {
@@ -660,7 +687,7 @@ function getDragFeedback(dataTransfer?: DataTransfer | null): {
 	shouldBlockDrop: boolean;
 } {
 	if (!dataTransfer) {
-		return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
+		return { message: DEFAULT_DRAG_MESSAGE, hasIssue: false, shouldBlockDrop: false };
 	}
 
 	let hasImage = false;
@@ -685,7 +712,7 @@ function getDragFeedback(dataTransfer?: DataTransfer | null): {
 	} else {
 		const fileItems = Array.from(dataTransfer.items ?? []).filter((item) => item.kind === "file");
 		if (fileItems.length === 0) {
-			return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
+			return { message: DEFAULT_DRAG_MESSAGE, hasIssue: false, shouldBlockDrop: false };
 		}
 
 		for (const item of fileItems) {
@@ -721,10 +748,17 @@ function getDragFeedback(dataTransfer?: DataTransfer | null): {
 		};
 	}
 
-	return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
+	return { message: DEFAULT_DRAG_MESSAGE, hasIssue: false, shouldBlockDrop: false };
 }
 
-function onDragEnter(event: DragEvent) {
+function resetDragState() {
+	isDragging = false;
+	dragCounter = 0;
+	dragMessage = DEFAULT_DRAG_MESSAGE;
+	dragHasIssue = false;
+}
+
+export function handleDragEnter(event: DragEvent) {
 	event.preventDefault();
 	dragCounter++;
 	if (event.dataTransfer?.types.includes("Files") || hasObsidianFileDrag(event.dataTransfer)) {
@@ -735,7 +769,7 @@ function onDragEnter(event: DragEvent) {
 	}
 }
 
-function onDragOver(event: DragEvent) {
+export function handleDragOver(event: DragEvent) {
 	event.preventDefault();
 	if (event.dataTransfer) {
 		const feedback = getDragFeedback(event.dataTransfer);
@@ -745,14 +779,11 @@ function onDragOver(event: DragEvent) {
 	}
 }
 
-function onDragLeave(event: DragEvent) {
+export function handleDragLeave(event: DragEvent) {
 	event.preventDefault();
 	dragCounter--;
 	if (dragCounter <= 0) {
-		isDragging = false;
-		dragCounter = 0;
-		dragMessage = "Drop files here";
-		dragHasIssue = false;
+		resetDragState();
 	}
 }
 
@@ -768,12 +799,9 @@ function mergeVisibleNoteQueue(existing: VisibleNoteRef[], incoming: VisibleNote
 	return [...merged.values()];
 }
 
-async function onDrop(event: DragEvent) {
+export async function handleDrop(event: DragEvent) {
 	event.preventDefault();
-	isDragging = false;
-	dragCounter = 0;
-	dragMessage = "Drop files here";
-	dragHasIssue = false;
+	resetDragState();
 
 	if (savingFiles) {
 		new Notice("Please wait for the current attachments to finish saving.");
@@ -920,11 +948,11 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
   <div
     class="chat-input-wrapper flex flex-col gap-3 bg-background-secondary border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isFullscreen
       ? 'flex-1 min-h-0'
-      : ''} {isDragging ? 'border-[--interactive-accent] chat-input-wrapper-drag-active' : ''}"
-    ondragenter={onDragEnter}
-    ondragover={onDragOver}
-    ondragleave={onDragLeave}
-    ondrop={onDrop}
+      : ''} {showDragActive ? 'border-[--interactive-accent] chat-input-wrapper-drag-active' : ''}"
+    ondragenter={dropTargetMode === "input" ? handleDragEnter : undefined}
+    ondragover={dropTargetMode === "input" ? handleDragOver : undefined}
+    ondragleave={dropTargetMode === "input" ? handleDragLeave : undefined}
+    ondrop={dropTargetMode === "input" ? handleDrop : undefined}
     role="region"
   >
     <!-- Fullscreen toggle - top right corner -->
@@ -1041,7 +1069,7 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
       </div>
     </div>
 
-    {#if isDragging}
+    {#if dropTargetMode === "input" && isDragging}
       <div
         class="absolute inset-0 z-20 rounded-[14px] pointer-events-none flex items-center justify-center gap-2 text-sm font-medium {dragHasIssue
           ? 'text-[--text-error]'

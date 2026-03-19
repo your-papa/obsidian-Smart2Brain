@@ -9,7 +9,9 @@ import {
 	executeCommand,
 	getErrors,
 	obsidian,
+	obsidianEval,
 	sleep,
+	waitForCondition,
 	waitForSelector,
 } from "./helpers/cli.ts";
 
@@ -75,6 +77,40 @@ describe("chat view UI", () => {
 		// The context usage circle is rendered as an SVG with a title attribute
 		const contextIndicators = domCount('div[title*="Context usage"]');
 		expect(contextIndicators).toBeGreaterThanOrEqual(1);
+	});
+
+	it("should show the drop overlay across the chat view on file drag", async () => {
+		obsidianEval(`
+			(() => {
+				const root = document.querySelector('.chat-root');
+				if (!root) return 'missing-root';
+				const dataTransfer = new DataTransfer();
+				dataTransfer.items.add(new File(['hello'], 'drag-test.txt', { type: 'text/plain' }));
+				root.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer }));
+				root.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
+				return 'ok';
+			})()
+		`);
+
+		await waitForCondition(
+			() => domCount('[data-testid="chat-drop-overlay-message"]') > 0,
+			"chat drop overlay to appear",
+		);
+		expect(domText('[data-testid="chat-drop-overlay-message"]')).toBe("Drop files here");
+
+		obsidianEval(`
+			(() => {
+				const root = document.querySelector('.chat-root');
+				if (!root) return 'missing-root';
+				root.dispatchEvent(new DragEvent('dragleave', { bubbles: true, cancelable: true }));
+				return 'ok';
+			})()
+		`);
+
+		await waitForCondition(
+			() => domCount('[data-testid="chat-drop-overlay-message"]') === 0,
+			"chat drop overlay to clear",
+		);
 	});
 
 	it("should not produce errors during rendering", () => {
