@@ -13,6 +13,8 @@ import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 interface Props {
 	/** Bindable: the currently active (non-deactivated) notes as serializable refs. */
 	activeNotes?: VisibleNoteRef[];
+	/** One-shot queued refs to activate as visible/pinned notes. */
+	queuedNotes?: VisibleNoteRef[];
 	/** Path to exclude from display (e.g. when a selection chip covers this note). */
 	excludePath?: string;
 	/** Current attachment paths so visible notes can toggle between reference and attachment mode. */
@@ -23,6 +25,8 @@ interface Props {
 	canPromoteToAttachment?: (note: VisibleNote) => boolean;
 	/** Reports currently displayed visible note paths so parent can dedupe pills. */
 	onDisplayedPathsChange?: (paths: string[]) => void;
+	/** Called after queued notes were consumed. */
+	onQueuedNotesHandled?: () => void;
 }
 
 function linkPathForNote(path: string, viewType: string, context?: string, isAttached = false): string {
@@ -37,11 +41,13 @@ function linkPathForNote(path: string, viewType: string, context?: string, isAtt
 
 let {
 	activeNotes = $bindable([]),
+	queuedNotes = [],
 	excludePath,
 	attachmentPaths = [],
 	onToggleAttachment,
 	canPromoteToAttachment,
 	onDisplayedPathsChange,
+	onQueuedNotesHandled,
 }: Props = $props();
 
 const tracker = new VisibleNotesTracker();
@@ -65,6 +71,54 @@ $effect(() => {
 	if (changed) {
 		noteMemory = next;
 	}
+});
+
+$effect(() => {
+	if (queuedNotes.length === 0) {
+		return;
+	}
+
+	const nextMemory = new Map(noteMemory);
+	let memoryChanged = false;
+	let nextMarkdownPaths = activeMarkdownPaths;
+	let nextFilePaths = activeFilePaths;
+
+	for (const note of queuedNotes) {
+		const file = getPlugin().app.vault.getFileByPath(note.path);
+		if (!file) {
+			continue;
+		}
+
+		if (!nextMemory.has(note.path)) {
+			nextMemory.set(note.path, {
+				file,
+				viewType: note.viewType,
+				context: note.context,
+				icon: note.icon,
+			});
+			memoryChanged = true;
+		}
+
+		if (note.viewType === "markdown") {
+			if (!nextMarkdownPaths.has(note.path)) {
+				nextMarkdownPaths = new Set(nextMarkdownPaths);
+				nextMarkdownPaths.add(note.path);
+			}
+			continue;
+		}
+
+		if (!nextFilePaths.has(note.path)) {
+			nextFilePaths = new Set(nextFilePaths);
+			nextFilePaths.add(note.path);
+		}
+	}
+
+	if (memoryChanged) {
+		noteMemory = nextMemory;
+	}
+	activeMarkdownPaths = nextMarkdownPaths;
+	activeFilePaths = nextFilePaths;
+	onQueuedNotesHandled?.();
 });
 
 function getRenderableNotes(): VisibleNote[] {

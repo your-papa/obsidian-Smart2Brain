@@ -12,6 +12,7 @@ import type { VisibleNote, VisibleNoteRef } from "../../hooks/useVisibleNotes.sv
 import type { SelectionRef } from "../../hooks/useSelection.svelte";
 import type { GraphNoteRef } from "../../stores/chatStore.svelte";
 import { mimeFromExtension } from "../../utils/attachments";
+import { extractObsidianDraggedPaths, hasObsidianFileDrag } from "../../utils/obsidianDrag";
 import { getData } from "../../stores/dataStore.svelte";
 import AgentPopover from "./AgentPopover.svelte";
 import ModelPopover from "./ModelPopover.svelte";
@@ -60,6 +61,7 @@ let fullscreenTransitioning = false;
 let fullscreenPlaceholderHeight = $state(0);
 let containerEl: HTMLDivElement | undefined = $state();
 let activeVisibleNotes: VisibleNoteRef[] = $state([]);
+let queuedVisibleNotes: VisibleNoteRef[] = $state([]);
 let displayedVisibleNotePaths: string[] = $state([]);
 let activeSelection: SelectionRef | undefined = $state(undefined);
 let activeGraphNotes: GraphNoteRef[] = $state([]);
@@ -71,6 +73,7 @@ let assembledPromptRequestVersion = 0;
 let selectionChipRef: { clearSelection: () => void } | undefined = $state(undefined);
 
 const ACCEPTED_EXTENSIONS = new Set(["txt", "md", "csv", "json", "png", "jpg", "jpeg", "gif", "webp", "pdf"]);
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 
 const MIME_EXTENSION_MAP: Record<string, string> = {
 	"image/png": "png",
@@ -587,8 +590,13 @@ async function attachVaultFilesByPath(paths: string[]) {
 	try {
 		for (const path of paths) {
 			const abstract = app.vault.getAbstractFileByPath(path);
-			if (!(abstract instanceof TFile)) {
+			if (!abstract) {
 				new Notice(`File not found: ${path}`);
+				continue;
+			}
+
+			if (!(abstract instanceof TFile)) {
+				new Notice(`Only files can be attached: ${path}`);
 				continue;
 			}
 
@@ -646,7 +654,7 @@ async function onFileAttachment(event: Event) {
 	input.value = "";
 }
 
-function getDragFeedback(dataTransfer?: DataTransfer): {
+function getDragFeedback(dataTransfer?: DataTransfer | null): {
 	message: string;
 	hasIssue: boolean;
 	shouldBlockDrop: boolean;
@@ -655,26 +663,44 @@ function getDragFeedback(dataTransfer?: DataTransfer): {
 		return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
 	}
 
-	const fileItems = Array.from(dataTransfer.items ?? []).filter((item) => item.kind === "file");
-	if (fileItems.length === 0) {
-		return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
-	}
-
 	let hasImage = false;
 	let hasClearlyUnsupported = false;
 
-	for (const item of fileItems) {
-		const mime = item.type.toLowerCase();
-		if (!mime) continue;
+	const draggedVaultFiles = extractObsidianDraggedPaths(dataTransfer)
+		.map((path) => getPlugin().app.vault.getAbstractFileByPath(path))
+		.filter((file): file is TFile => file instanceof TFile);
 
-		if (mime.startsWith("image/")) {
-			hasImage = true;
-			continue;
+	if (draggedVaultFiles.length > 0) {
+		for (const file of draggedVaultFiles) {
+			const extension = file.extension.toLowerCase();
+			if (IMAGE_EXTENSIONS.has(extension)) {
+				hasImage = true;
+				continue;
+			}
+
+			if (!ACCEPTED_EXTENSIONS.has(extension)) {
+				hasClearlyUnsupported = true;
+			}
+		}
+	} else {
+		const fileItems = Array.from(dataTransfer.items ?? []).filter((item) => item.kind === "file");
+		if (fileItems.length === 0) {
+			return { message: "Drop files here", hasIssue: false, shouldBlockDrop: false };
 		}
 
-		const hasSupportedPrefix = SUPPORTED_DRAG_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix));
-		if (!SUPPORTED_DRAG_MIMES.has(mime) && !hasSupportedPrefix) {
-			hasClearlyUnsupported = true;
+		for (const item of fileItems) {
+			const mime = item.type.toLowerCase();
+			if (!mime) continue;
+
+			if (mime.startsWith("image/")) {
+				hasImage = true;
+				continue;
+			}
+
+			const hasSupportedPrefix = SUPPORTED_DRAG_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix));
+			if (!SUPPORTED_DRAG_MIMES.has(mime) && !hasSupportedPrefix) {
+				hasClearlyUnsupported = true;
+			}
 		}
 	}
 
@@ -701,7 +727,7 @@ function getDragFeedback(dataTransfer?: DataTransfer): {
 function onDragEnter(event: DragEvent) {
 	event.preventDefault();
 	dragCounter++;
-	if (event.dataTransfer?.types.includes("Files")) {
+	if (event.dataTransfer?.types.includes("Files") || hasObsidianFileDrag(event.dataTransfer)) {
 		isDragging = true;
 		const feedback = getDragFeedback(event.dataTransfer);
 		dragMessage = feedback.message;
@@ -730,6 +756,18 @@ function onDragLeave(event: DragEvent) {
 	}
 }
 
+function mergeVisibleNoteQueue(existing: VisibleNoteRef[], incoming: VisibleNoteRef[]): VisibleNoteRef[] {
+	if (incoming.length === 0) {
+		return existing;
+	}
+
+	const merged = new Map(existing.map((note) => [note.path, note]));
+	for (const note of incoming) {
+		merged.set(note.path, note);
+	}
+	return [...merged.values()];
+}
+
 async function onDrop(event: DragEvent) {
 	event.preventDefault();
 	isDragging = false;
@@ -739,6 +777,43 @@ async function onDrop(event: DragEvent) {
 
 	if (savingFiles) {
 		new Notice("Please wait for the current attachments to finish saving.");
+		return;
+	}
+
+	const draggedVaultPaths = extractObsidianDraggedPaths(event.dataTransfer);
+	if (draggedVaultPaths.length > 0) {
+		const app = getPlugin().app;
+		const markdownNotes: VisibleNoteRef[] = [];
+		const attachmentPaths: string[] = [];
+
+		for (const path of draggedVaultPaths) {
+			const abstract = app.vault.getAbstractFileByPath(path);
+			if (!(abstract instanceof TFile)) {
+				attachmentPaths.push(path);
+				continue;
+			}
+
+			if (abstract.extension.toLowerCase() === "md") {
+				markdownNotes.push({
+					path: abstract.path,
+					basename: abstract.basename,
+					viewType: "markdown",
+					icon: "file-text",
+				});
+				continue;
+			}
+
+			attachmentPaths.push(path);
+		}
+
+		if (markdownNotes.length > 0) {
+			queuedVisibleNotes = mergeVisibleNoteQueue(queuedVisibleNotes, markdownNotes);
+			requestAnimationFrame(() => markdownEditor?.focus());
+		}
+
+		if (attachmentPaths.length > 0) {
+			await attachVaultFilesByPath(attachmentPaths);
+		}
 		return;
 	}
 
@@ -868,12 +943,16 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
     <div class="flex flex-row flex-wrap items-start gap-1.5 pt-2">
       <VisibleNotesChips
         bind:activeNotes={activeVisibleNotes}
+        queuedNotes={queuedVisibleNotes}
         excludePath={activeSelection?.path}
         attachmentPaths={attachments.map((att) => att.vaultPath)}
         onToggleAttachment={toggleVisibleNoteAttachment}
         canPromoteToAttachment={canPromoteVisibleNoteToAttachment}
         onDisplayedPathsChange={(paths) => {
           displayedVisibleNotePaths = paths;
+        }}
+        onQueuedNotesHandled={() => {
+          queuedVisibleNotes = [];
         }}
       />
       <SelectionChip bind:activeSelection bind:this={selectionChipRef} />
