@@ -47,6 +47,7 @@ import { createExecuteJavaScriptTool } from "./tools/executeJavaScript";
 import { createGetAllTagsTool } from "./tools/getAllTags";
 import { createGetPropertiesTool } from "./tools/getProperties";
 import { createLoadSkillTool } from "./tools/loadSkill";
+import { createListDirectoryTool } from "./tools/listDirectory";
 import { createManageNotesTool } from "./tools/manageNotes";
 import { createReadContentTool } from "./tools/readContent";
 import { createSearchNotesTool } from "./tools/searchNotes";
@@ -87,13 +88,13 @@ export type AuthValidationResult = { success: true } | { success: false; message
 export type AgentManagerStreamChunk =
 	| { type: "token"; token: string }
 	| Pick<
-			Extract<AgentStreamChunk, { type: "tool_start" }>,
-			"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
-	  >
+		Extract<AgentStreamChunk, { type: "tool_start" }>,
+		"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
+	>
 	| Pick<
-			Extract<AgentStreamChunk, { type: "tool_end" }>,
-			"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
-	  >
+		Extract<AgentStreamChunk, { type: "tool_end" }>,
+		"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
+	>
 	| { type: "result"; result: unknown };
 
 const resolvedVisionSupportCache = new Map<string, boolean>();
@@ -609,6 +610,7 @@ export class AgentManager {
 		// Built-in tool registry: maps tool IDs to their factory functions
 		const builtInTools: [BuiltInToolId, () => StructuredToolInterface][] = [
 			["search_notes", () => createSearchNotesTool(this.plugin.app)],
+			["list_directory", () => createListDirectoryTool(this.plugin.app)],
 			["get_all_tags", () => createGetAllTagsTool(this.plugin.app)],
 			["execute_javascript", () => createExecuteJavaScriptTool()],
 			["execute_dataview_query", () => createExecuteDataviewTool(this.plugin.app)],

@@ -15,12 +15,12 @@ import {
 	isPdfExtension,
 	isTextExtension,
 	mimeFromExtension,
-	resolveVaultFileDetailed,
 	toBase64,
 	toBase64DataUri,
 } from "../../utils/attachments";
 import { extractPdfPages, extractTextFromPdf, extractTextFromPdfPages } from "../../utils/pdfExtractor";
 import { Logger } from "../../utils/logging";
+import { extractReferenceInfo, resolveFileReferenceDetailed } from "../../utils/pathResolution";
 
 const MAX_PDF_CHARS = 180_000;
 
@@ -74,135 +74,6 @@ function truncateContent(content: string, maxChars: number): string {
 	return `${content.slice(0, maxChars)}\n\n[...truncated ${content.length - maxChars} characters to fit context limits...]`;
 }
 
-interface LinkInfo {
-	path: string;
-	subpath: string;
-}
-
-function extractLinkInfo(input: string): LinkInfo {
-	const trimmed = input.trim();
-	let inner = trimmed;
-
-	if (trimmed.startsWith("![[") && trimmed.endsWith("]]")) {
-		inner = trimmed.slice(3, -2).trim();
-	} else if (trimmed.startsWith("[[") && trimmed.endsWith("]]")) {
-		inner = trimmed.slice(2, -2).trim();
-	}
-
-	const withoutAlias = inner.split("|")[0]?.trim() ?? "";
-	const hashIndex = withoutAlias.indexOf("#");
-	if (hashIndex === -1) {
-		return { path: withoutAlias, subpath: "" };
-	}
-	return {
-		path: withoutAlias.slice(0, hashIndex).trim(),
-		subpath: withoutAlias.slice(hashIndex),
-	};
-}
-
-function extractLinkPath(input: string): string {
-	return extractLinkInfo(input).path;
-}
-
-function tryExactMarkdownPath(app: App, path: string): TFile | null {
-	const exact = app.vault.getAbstractFileByPath(path);
-	if (exact instanceof TFile) {
-		return exact;
-	}
-
-	if (!path.endsWith(".md")) {
-		const withMd = app.vault.getAbstractFileByPath(`${path}.md`);
-		if (withMd instanceof TFile) {
-			return withMd;
-		}
-	}
-
-	return null;
-}
-
-function resolveMarkdownNote(app: App, pathOrWikiLink: string): { file: TFile | null; error?: string } {
-	const linkPath = extractLinkPath(pathOrWikiLink);
-	if (!linkPath) {
-		return { file: null, error: "Error: Path is empty. Provide a file path or wiki link like [[Note Name]]." };
-	}
-
-	const exact = tryExactMarkdownPath(app, linkPath);
-	if (exact?.extension.toLowerCase() === "md") {
-		return { file: exact };
-	}
-
-	const linkResolved =
-		app.metadataCache.getFirstLinkpathDest(linkPath, "") ??
-		(linkPath.endsWith(".md")
-			? app.metadataCache.getFirstLinkpathDest(linkPath.slice(0, -3), "")
-			: app.metadataCache.getFirstLinkpathDest(`${linkPath}.md`, ""));
-
-	if (linkResolved instanceof TFile && linkResolved.extension.toLowerCase() === "md") {
-		return { file: linkResolved };
-	}
-
-	const normalizedTarget = linkPath.toLowerCase();
-	const markdownFiles = app.vault.getMarkdownFiles();
-	const basenameMatches = markdownFiles.filter((file) => file.basename.toLowerCase() === normalizedTarget);
-
-	if (basenameMatches.length === 1) {
-		return { file: basenameMatches[0] };
-	}
-
-	if (basenameMatches.length > 1) {
-		const matchList = basenameMatches
-			.slice(0, 5)
-			.map((file) => `- ${file.path}`)
-			.join("\n");
-		const suffix = basenameMatches.length > 5 ? "\n- ..." : "";
-		return {
-			file: null,
-			error: `Error: Wiki link "${linkPath}" is ambiguous. Use a full path.\nPossible matches:\n${matchList}${suffix}`,
-		};
-	}
-
-	return { file: null };
-}
-
-function resolveAnyFile(app: App, rawPath: string): { file: TFile | null; error?: string } {
-	const linkPath = extractLinkPath(rawPath);
-	if (!linkPath) {
-		return { file: null, error: "Error: Path is empty. Provide a file path or wiki link." };
-	}
-
-	const normalizedPath = linkPath.toLowerCase();
-	const isExcalidrawLink = normalizedPath.endsWith(".excalidraw");
-	const isMarkdownLike = !linkPath.includes(".") || normalizedPath.endsWith(".md") || isExcalidrawLink;
-	if (isMarkdownLike) {
-		const resolvedMarkdown = resolveMarkdownNote(app, linkPath);
-		if (resolvedMarkdown.file) {
-			return resolvedMarkdown;
-		}
-		if (resolvedMarkdown.error) {
-			return resolvedMarkdown;
-		}
-	}
-
-	const resolved = resolveVaultFileDetailed(app, linkPath);
-	if (resolved.status === "ambiguous") {
-		const candidates = resolved.candidates.slice(0, 5).join(", ");
-		const suffix = resolved.candidates.length > 5 ? `, and ${resolved.candidates.length - 5} more` : "";
-		return {
-			file: null,
-			error: `Error: Multiple files match "${rawPath}". Please use a more specific path. Matches: ${candidates}${suffix}.`,
-		};
-	}
-
-	if (resolved.status === "not_found") {
-		return {
-			file: null,
-			error: `Error: File not found for "${rawPath}"`,
-		};
-	}
-
-	return { file: resolved.file };
-}
-
 /**
  * Parses a PDF page fragment into an array of 1-indexed page numbers.
  * Supports: #page=3, #page=3-5, #page=1,3,5, #page=1-3,7,9-11
@@ -251,9 +122,9 @@ function extractSubpathContent(
 		if (cache.blocks && Object.keys(cache.blocks).length > 0) {
 			available.push(
 				"Block IDs:\n" +
-					Object.keys(cache.blocks)
-						.map((id) => `  ^${id}`)
-						.join("\n"),
+				Object.keys(cache.blocks)
+					.map((id) => `  ^${id}`)
+					.join("\n"),
 			);
 		}
 		const availableStr = available.length > 0 ? `\nAvailable targets:\n${available.join("\n")}` : "";
@@ -457,10 +328,19 @@ export function createReadContentTool(app: App, imageProcessor?: BaseChatModel, 
 	const getToolConfig = () => pluginData.getSelectedAgent().toolsConfig.read_content;
 
 	const readContentFn = async ({ path }: { path: string }): Promise<string> => {
-		const { subpath } = extractLinkInfo(path);
-		const resolved = resolveAnyFile(app, path);
-		if (!resolved.file) {
-			return resolved.error ?? `Error: File not found for "${path}"`;
+		const { subpath, path: normalizedPath } = extractReferenceInfo(path);
+		if (!normalizedPath) {
+			return "Error: Path is empty. Provide a file path or wiki link.";
+		}
+
+		const resolved = resolveFileReferenceDetailed(app, path);
+		if (resolved.status === "not_found") {
+			return `Error: File not found for "${path}"`;
+		}
+		if (resolved.status === "ambiguous") {
+			const candidates = resolved.candidates.slice(0, 5).join(", ");
+			const suffix = resolved.candidates.length > 5 ? `, and ${resolved.candidates.length - 5} more` : "";
+			return `Error: Multiple files match "${path}". Please use a more specific path. Matches: ${candidates}${suffix}.`;
 		}
 
 		const file = resolved.file;

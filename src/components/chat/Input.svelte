@@ -792,24 +792,24 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
 </script>
 
 {#if isFullscreen}
-	<div
-		class="chat-input-placeholder w-full"
-		style="height: {fullscreenPlaceholderHeight}px;"
-		aria-hidden="true"
-	></div>
+  <div
+    class="chat-input-placeholder w-full"
+    style="height: {fullscreenPlaceholderHeight}px;"
+    aria-hidden="true"
+  ></div>
 {/if}
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   bind:this={containerEl}
-	class="chat-input-container w-full flex flex-col relative isolate gap-1 {isFullscreen
-		? `chat-input-fullscreen justify-end ${fullscreenNoTransition ? 'chat-input-fullscreen-no-transition' : ''} ${isFullscreenVisible ? 'chat-input-fullscreen-visible' : ''}`
-		: 'mx-auto max-w-[--file-line-width]'}"
-	role="region"
+  class="chat-input-container w-full flex flex-col relative isolate gap-1 {isFullscreen
+    ? `chat-input-fullscreen justify-end ${fullscreenNoTransition ? 'chat-input-fullscreen-no-transition' : ''} ${isFullscreenVisible ? 'chat-input-fullscreen-visible' : ''}`
+    : 'mx-auto max-w-[--file-line-width]'}"
+  role="region"
   onkeydown={(e) => {
-    if (isFullscreen && e.key === 'Escape') {
+    if (isFullscreen && e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-			collapseFullscreen();
+      collapseFullscreen();
     }
   }}
 >
@@ -829,7 +829,7 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
   <div
     class="chat-input-wrapper flex flex-col gap-3 bg-background-secondary border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isFullscreen
       ? 'flex-1 min-h-0'
-			: ''} {isDragging ? 'border-[--interactive-accent] chat-input-wrapper-drag-active' : ''}"
+      : ''} {isDragging ? 'border-[--interactive-accent] chat-input-wrapper-drag-active' : ''}"
     ondragenter={onDragEnter}
     ondragover={onDragOver}
     ondragleave={onDragLeave}
@@ -841,11 +841,11 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
       class="clickable-icon absolute top-1.5 right-1.5 z-10 opacity-0 transition-opacity duration-150"
       style="pointer-events: auto;"
       onclick={toggleFullscreen}
-      title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen editor'}
+      title={isFullscreen ? "Exit fullscreen (Esc)" : "Fullscreen editor"}
     >
       <div
         class="h-icon-xs"
-        use:icon={isFullscreen ? 'minimize-2' : 'maximize-2'}
+        use:icon={isFullscreen ? "minimize-2" : "maximize-2"}
         style="--icon-size: var(--icon-xs)"
       ></div>
     </button>
@@ -950,7 +950,7 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
           usagePercent={contextUsage.usagePercent}
           used={contextUsage.estimatedUsedTokens}
           limit={contextUsage.contextWindow}
-					breakdown={contextBreakdown}
+          breakdown={contextBreakdown}
         />
         <button
           class="clickable-icon flex flex-row items-center gap-0.5"
@@ -983,20 +983,20 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
       </div>
     </div>
 
-		{#if isDragging}
-			<div
-				class="absolute inset-0 z-20 rounded-[14px] pointer-events-none flex items-center justify-center gap-2 text-sm font-medium {dragHasIssue
-					? 'text-[--text-error]'
-					: 'text-[--text-accent]'}"
-			>
-				<div
-					class="w-[--icon-s] h-[--icon-s]"
-					style="--icon-size: var(--icon-s)"
-					use:icon={dragHasIssue ? "alert-triangle" : "upload"}
-				></div>
-				<span>{dragMessage}</span>
-			</div>
-		{/if}
+    {#if isDragging}
+      <div
+        class="absolute inset-0 z-20 rounded-[14px] pointer-events-none flex items-center justify-center gap-2 text-sm font-medium {dragHasIssue
+          ? 'text-[--text-error]'
+          : 'text-[--text-accent]'}"
+      >
+        <div
+          class="w-[--icon-s] h-[--icon-s]"
+          style="--icon-size: var(--icon-s)"
+          use:icon={dragHasIssue ? "alert-triangle" : "upload"}
+        ></div>
+        <span>{dragMessage}</span>
+      </div>
+    {/if}
   </div>
 
   <!-- Footer -->
@@ -1011,41 +1011,41 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
   }
 
   .chat-input-container.chat-input-fullscreen {
-		position: absolute;
+    position: absolute;
     top: var(--fs-top, 0px);
     left: var(--fs-left, 0px);
-		width: var(--fs-width, 100%);
-		height: var(--fs-height, 100%);
-		margin: 0 !important;
+    width: var(--fs-width, 100%);
+    height: var(--fs-height, 100%);
+    margin: 0 !important;
     z-index: var(--layer-popover);
     background: var(--background-primary) !important;
-		padding: 0;
+    padding: 0;
     max-width: none;
-		opacity: 1;
-		border-radius: 14px;
-		overflow: hidden;
-		transition:
-			top 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-			left 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-			width 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-			height 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-			border-radius 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-			opacity 220ms ease;
-		will-change: top, left, width, height, border-radius;
+    opacity: 1;
+    border-radius: 14px;
+    overflow: hidden;
+    transition:
+      top 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      left 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      width 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      height 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      border-radius 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      opacity 220ms ease;
+    will-change: top, left, width, height, border-radius;
   }
 
-	.chat-input-container.chat-input-fullscreen.chat-input-fullscreen-visible {
-		opacity: 1;
-		top: 0;
-		left: 0;
-		width: 100%;
-		height: 100%;
-		border-radius: 0;
+  .chat-input-container.chat-input-fullscreen.chat-input-fullscreen-visible {
+    opacity: 1;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
   }
 
-	.chat-input-container.chat-input-fullscreen.chat-input-fullscreen-no-transition {
-		transition: none !important;
-	}
+  .chat-input-container.chat-input-fullscreen.chat-input-fullscreen-no-transition {
+    transition: none !important;
+  }
 
   /* Complex box-shadow with color-mix - requires CSS */
   .chat-input-wrapper {
@@ -1086,18 +1086,18 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     filter: blur(9px);
   }
 
-	.chat-input-wrapper-drag-active {
-		background: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-secondary));
-		border-color: color-mix(in srgb, var(--interactive-accent) 82%, white 18%) !important;
-		box-shadow:
-			0 0 0 2px color-mix(in srgb, var(--interactive-accent) 38%, transparent),
-			0 8px 24px color-mix(in srgb, var(--interactive-accent) 24%, transparent);
-	}
+  .chat-input-wrapper-drag-active {
+    background: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-secondary));
+    border-color: color-mix(in srgb, var(--interactive-accent) 82%, white 18%) !important;
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--interactive-accent) 38%, transparent),
+      0 8px 24px color-mix(in srgb, var(--interactive-accent) 24%, transparent);
+  }
 
-	.chat-input-wrapper-drag-active > :not(:last-child) {
-		opacity: 0;
-		visibility: hidden;
-	}
+  .chat-input-wrapper-drag-active > :not(:last-child) {
+    opacity: 0;
+    visibility: hidden;
+  }
 
   .chat-input-wrapper:hover > .clickable-icon:first-child,
   .chat-input-wrapper:focus-within > .clickable-icon:first-child,
