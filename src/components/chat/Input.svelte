@@ -1,5 +1,5 @@
 <script lang="ts">
-import { Notice, normalizePath } from "obsidian";
+import { Notice, TFile, normalizePath } from "obsidian";
 import { onDestroy, onMount } from "svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
@@ -41,6 +41,8 @@ let inputValue = $state("");
 
 let attachments: ChatAttachment[] = $state([]);
 let attachmentSizes: Map<string, number> = $state(new Map());
+/** Tracks attachment files created as temp copies (safe to delete if unsent/removed). */
+let managedAttachmentPaths: Set<string> = $state(new Set());
 /** Object URLs for image previews (cleaned up on destroy) */
 let previewUrls: Map<string, string> = $state(new Map());
 /** Tracks files currently being saved to vault */
@@ -152,6 +154,17 @@ $effect(() => {
 	}
 });
 
+$effect(() => {
+	if (!messenger.pendingAttachmentPaths || messenger.pendingAttachmentPaths.length === 0) {
+		return;
+	}
+
+	const paths = [...messenger.pendingAttachmentPaths];
+	messenger.pendingAttachmentPaths = null;
+
+	void attachVaultFilesByPath(paths);
+});
+
 // Keep a cached assembled system prompt so estimate matches what is actually sent.
 $effect(() => {
 	const _signature = selectedAgentPromptSignature;
@@ -191,7 +204,9 @@ onDestroy(() => {
 	if (attachments.length > 0) {
 		const adapter = getPlugin().app.vault.adapter;
 		for (const att of attachments) {
-			adapter.remove(att.vaultPath).catch(() => {});
+			if (managedAttachmentPaths.has(att.vaultPath)) {
+				adapter.remove(att.vaultPath).catch(() => {});
+			}
 		}
 	}
 });
@@ -335,6 +350,7 @@ function sendMessage() {
 	);
 	attachments = [];
 	attachmentSizes = new Map();
+	managedAttachmentPaths = new Set();
 	for (const url of previewUrls.values()) {
 		URL.revokeObjectURL(url);
 	}
@@ -476,6 +492,8 @@ async function processFiles(files: File[]) {
 			attachments.push(attachment);
 			attachmentSizes.set(vaultPath, file.size);
 			attachmentSizes = new Map(attachmentSizes);
+			managedAttachmentPaths.add(vaultPath);
+			managedAttachmentPaths = new Set(managedAttachmentPaths);
 			count++;
 
 			// Create preview URL for images
@@ -491,6 +509,100 @@ async function processFiles(files: File[]) {
 		new Notice(`Failed to attach file: ${error instanceof Error ? error.message : String(error)}`);
 	} finally {
 		savingFiles = false;
+	}
+}
+
+async function attachVaultFile(file: TFile): Promise<boolean> {
+	const ext = file.extension.toLowerCase();
+
+	if (!ACCEPTED_EXTENSIONS.has(ext)) {
+		new Notice(`Unsupported file type: .${ext}`);
+		return false;
+	}
+
+	const isImage = ["png", "jpg", "jpeg", "gif", "webp"].includes(ext);
+	if (isImage && selectedModelSupportsVision === false) {
+		const modelName = selectedChatModel?.model ?? "the selected model";
+		new Notice(
+			`Image attachments require a vision-capable model. Switch models to attach images (current: ${modelName}).`,
+		);
+		return false;
+	}
+
+	if (isImage && selectedModelSupportsVision === undefined) {
+		new Notice("Model vision support is unknown; image analysis may fail for this model.");
+	}
+
+	try {
+		const size = file.stat.size;
+
+		if (size > MAX_FILE_SIZE_BYTES) {
+			new Notice(`File too large: ${file.name} exceeds 15 MB per-file limit.`);
+			return false;
+		}
+
+		const totalBytes = [...attachmentSizes.values()].reduce((sum, s) => sum + s, 0);
+		if (totalBytes + size > MAX_TOTAL_ATTACHMENTS_BYTES) {
+			new Notice("Total attachment size exceeds 25 MB limit for one message.");
+			return false;
+		}
+
+		if (attachments.some((att) => att.vaultPath === file.path)) {
+			new Notice(`${file.name} is already attached.`);
+			return false;
+		}
+
+		const mime = mimeFromExtension(ext);
+		const attachment: ChatAttachment = { name: file.name, mimeType: mime, vaultPath: file.path };
+		attachments = [...attachments, attachment];
+		attachmentSizes.set(file.path, size);
+		attachmentSizes = new Map(attachmentSizes);
+
+		if (mime.startsWith("image/")) {
+			const buffer = await getPlugin().app.vault.readBinary(file);
+			const blob = new Blob([buffer], { type: mime });
+			previewUrls.set(file.path, URL.createObjectURL(blob));
+			previewUrls = new Map(previewUrls);
+		}
+
+		return true;
+	} catch (error) {
+		new Notice(`Failed to attach file: ${error instanceof Error ? error.message : String(error)}`);
+		return false;
+	}
+}
+
+async function attachVaultFilesByPath(paths: string[]) {
+	if (paths.length === 0) return;
+
+	if (savingFiles) {
+		new Notice("Please wait for the current attachments to finish saving.");
+		return;
+	}
+
+	savingFiles = true;
+	const app = getPlugin().app;
+	let attachedCount = 0;
+
+	try {
+		for (const path of paths) {
+			const abstract = app.vault.getAbstractFileByPath(path);
+			if (!(abstract instanceof TFile)) {
+				new Notice(`File not found: ${path}`);
+				continue;
+			}
+
+			if (await attachVaultFile(abstract)) {
+				attachedCount++;
+			}
+		}
+	} finally {
+		savingFiles = false;
+	}
+
+	if (attachedCount > 0) {
+		new Notice(`${attachedCount} file(s) attached`);
+		requestAnimationFrame(() => markdownEditor?.focus());
 	}
 }
 
@@ -652,68 +764,29 @@ function removeAttachment(attachment: ChatAttachment) {
 		previewUrls = new Map(previewUrls);
 	}
 	// Optionally remove the file from vault (it's an unused pre-send attachment)
-	const plugin = getPlugin();
-	plugin.app.vault.adapter.remove(attachment.vaultPath).catch(() => {});
+	if (managedAttachmentPaths.has(attachment.vaultPath)) {
+		const plugin = getPlugin();
+		plugin.app.vault.adapter.remove(attachment.vaultPath).catch(() => {});
+		managedAttachmentPaths.delete(attachment.vaultPath);
+		managedAttachmentPaths = new Set(managedAttachmentPaths);
+	}
 }
 
 /** Promote a visible-note chip (PDF/image) to a direct chat attachment. */
 async function promoteVisibleNoteToAttachment(note: VisibleNote) {
-	const plugin = getPlugin();
-	const file = note.file;
-	const ext = file.extension.toLowerCase();
-	const isImage = ["png", "jpg", "jpeg", "gif", "webp"].includes(ext);
-
-	if (isImage && selectedModelSupportsVision === false) {
-		const modelName = selectedChatModel?.model ?? "the selected model";
-		new Notice(
-			`Image attachments require a vision-capable model. Switch models to attach images (current: ${modelName}).`,
-		);
+	if (savingFiles) {
+		new Notice("Please wait for the current attachments to finish saving.");
 		return;
 	}
-	if (isImage && selectedModelSupportsVision === undefined) {
-		new Notice("Model vision support is unknown; image analysis may fail for this model.");
-	}
 
+	savingFiles = true;
 	try {
-		const buffer = await plugin.app.vault.readBinary(file);
-		const size = buffer.byteLength;
-
-		if (size > MAX_FILE_SIZE_BYTES) {
-			new Notice(`File too large: ${file.name} exceeds 15 MB per-file limit.`);
-			return;
+		const attached = await attachVaultFile(note.file);
+		if (attached) {
+			new Notice(`Attached ${note.file.name}`);
 		}
-
-		const totalBytes = [...attachmentSizes.values()].reduce((sum, s) => sum + s, 0);
-		if (totalBytes + size > MAX_TOTAL_ATTACHMENTS_BYTES) {
-			new Notice("Total attachment size exceeds 25 MB limit for one message.");
-			return;
-		}
-
-		const data = getData();
-		const attachDir = data.resolvedAttachmentFolder;
-
-		if (!(await plugin.app.vault.adapter.exists(attachDir))) {
-			await plugin.app.vault.adapter.mkdir(attachDir);
-		}
-
-		const { vaultPath } = await getUniqueAttachmentPath(attachDir, file.name);
-		await plugin.app.vault.adapter.writeBinary(vaultPath, buffer);
-
-		const mime = mimeFromExtension(ext);
-		const attachment: ChatAttachment = { name: file.name, mimeType: mime, vaultPath };
-		attachments = [...attachments, attachment];
-		attachmentSizes.set(vaultPath, size);
-		attachmentSizes = new Map(attachmentSizes);
-
-		if (mime.startsWith("image/")) {
-			const blob = new Blob([buffer], { type: mime });
-			previewUrls.set(vaultPath, URL.createObjectURL(blob));
-			previewUrls = new Map(previewUrls);
-		}
-
-		new Notice(`Attached ${file.name}`);
-	} catch (error) {
-		new Notice(`Failed to attach file: ${error instanceof Error ? error.message : String(error)}`);
+	} finally {
+		savingFiles = false;
 	}
 }
 </script>

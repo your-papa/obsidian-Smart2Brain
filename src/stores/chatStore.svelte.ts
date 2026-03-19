@@ -1749,6 +1749,7 @@ export class Messenger {
 	session: ChatSession | null = $state(null);
 	pendingInput: string | null = $state(null);
 	pendingGraphNotes: string[] | null = $state(null);
+	pendingAttachmentPaths: string[] | null = $state(null);
 	#agentManager: AgentManager;
 
 	constructor(agentManager: AgentManager) {
