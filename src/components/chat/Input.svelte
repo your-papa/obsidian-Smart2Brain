@@ -501,15 +501,15 @@ async function onEditorPaste(event: ClipboardEvent) {
 	const fileItems = Array.from(data.items ?? []).filter((item) => item.kind === "file");
 	if (fileItems.length === 0) return;
 
-	const imageFiles: File[] = [];
+	const pastedFiles: File[] = [];
 	for (const item of fileItems) {
 		const file = item.getAsFile();
-		if (file && file.type.toLowerCase().startsWith("image/")) {
-			imageFiles.push(file);
+		if (file) {
+			pastedFiles.push(file);
 		}
 	}
 
-	if (imageFiles.length === 0) return;
+	if (pastedFiles.length === 0) return;
 
 	event.preventDefault();
 	if (savingFiles) {
@@ -517,7 +517,7 @@ async function onEditorPaste(event: ClipboardEvent) {
 		return;
 	}
 
-	await processFiles(imageFiles);
+	await processFiles(pastedFiles);
 }
 
 async function onFileAttachment(event: Event) {
