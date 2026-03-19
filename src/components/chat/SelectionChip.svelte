@@ -1,6 +1,8 @@
 <script lang="ts">
+import { Keymap } from "obsidian";
 import { onDestroy } from "svelte";
 import { SelectionTracker, type SelectionRef } from "../../hooks/useSelection.svelte";
+import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
 
 const PREVIEW_LENGTH = 60;
@@ -14,6 +16,7 @@ let { activeSelection = $bindable(undefined) }: Props = $props();
 
 const tracker = new SelectionTracker();
 let dismissed = $state(false);
+const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
 
 $effect(() => {
 	if (dismissed) {
@@ -35,6 +38,18 @@ function dismiss() {
 	tracker.clear();
 }
 
+function onSelectionClick(evt: MouseEvent): void {
+	if (!tracker.selection) return;
+	if (Keymap.isModEvent(evt)) {
+		evt.preventDefault();
+		evt.stopPropagation();
+		getPlugin().app.workspace.openLinkText(tracker.selection.path, sourcePath, true);
+		return;
+	}
+
+	dismiss();
+}
+
 /** Clear the selection and tracker (e.g. after sending a message). */
 export function clearSelection() {
 	dismiss();
@@ -54,7 +69,7 @@ onDestroy(() => tracker.destroy());
     <button
       type="button"
       class="selection-chip"
-      onclick={dismiss}
+      onclick={onSelectionClick}
       title={`Selected text from ${tracker.selection.path} (click to dismiss)\n\n${tracker.selection.text.slice(0, 200)}`}
     >
       <div class="chip-icon" use:icon={tracker.selection.icon} style="--icon-size: 12px"></div>

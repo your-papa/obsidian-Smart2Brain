@@ -1,4 +1,5 @@
 <script lang="ts">
+import { Keymap } from "obsidian";
 import type { ChatAttachment } from "../../types/shared";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
@@ -30,6 +31,17 @@ function previewAttachment(evt: Event, vaultPath: string): void {
 		sourcePath,
 	});
 }
+
+function onAttachmentClick(evt: MouseEvent, attachment: ChatAttachment): void {
+	if (Keymap.isModEvent(evt)) {
+		evt.preventDefault();
+		evt.stopPropagation();
+		getPlugin().app.workspace.openLinkText(attachment.vaultPath, sourcePath, true);
+		return;
+	}
+
+	onRemoveAttachment(attachment);
+}
 </script>
 
 {#if attachments.length > 0}
@@ -39,7 +51,7 @@ function previewAttachment(evt: Event, vaultPath: string): void {
         type="button"
         class="draft-attachment-chip"
         title={`${attachment.vaultPath} (click to remove attachment)`}
-        onclick={() => onRemoveAttachment(attachment)}
+        onclick={(evt) => onAttachmentClick(evt, attachment)}
         onmouseover={(evt) => previewAttachment(evt, attachment.vaultPath)}
         onfocus={(evt) => previewAttachment(evt, attachment.vaultPath)}
       >
