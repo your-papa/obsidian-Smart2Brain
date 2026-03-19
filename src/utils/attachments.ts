@@ -1,10 +1,11 @@
 import { type App, TFile } from "obsidian";
 import { IMAGE_EXTENSIONS, PDF_EXTENSIONS, TEXT_EXTENSIONS } from "../types/shared";
+import {
+	type ResolveVaultFileResult,
+	resolveVaultFileDetailed as resolveVaultFileDetailedShared,
+} from "./pathResolution";
 
-export type ResolveVaultFileResult =
-	| { status: "found"; file: TFile }
-	| { status: "not_found" }
-	| { status: "ambiguous"; candidates: string[] };
+export type { ResolveVaultFileResult } from "./pathResolution";
 
 /**
  * Determines MIME type from file extension.
@@ -75,39 +76,7 @@ export function resolveVaultFile(app: App, path: string): TFile | null {
  * Resolves a vault path to a TFile with explicit status for not-found vs ambiguous matches.
  */
 export function resolveVaultFileDetailed(app: App, path: string): ResolveVaultFileResult {
-	// Try exact path first
-	const file = app.vault.getAbstractFileByPath(path);
-	if (file instanceof TFile) return { status: "found", file };
-
-	const basename = path.split("/").pop() ?? path;
-	const hasExtension = basename.includes(".");
-	const allFiles = app.vault.getFiles();
-
-	if (hasExtension) {
-		// For extension-bearing inputs, only match exact filenames (avoid cross-extension fallback).
-		// If multiple files share the same name in different folders, treat as ambiguous.
-		const exactNameMatches = allFiles.filter((f) => f.name === basename);
-		if (exactNameMatches.length === 1) return { status: "found", file: exactNameMatches[0] };
-		if (exactNameMatches.length > 1) {
-			return {
-				status: "ambiguous",
-				candidates: exactNameMatches.map((f) => f.path),
-			};
-		}
-		return { status: "not_found" };
-	}
-
-	// Extension-less references (e.g., ![[report]]) can match by basename.
-	// If multiple files share the same basename, treat as ambiguous.
-	const basenameMatches = allFiles.filter((f) => f.basename === basename);
-	if (basenameMatches.length === 1) return { status: "found", file: basenameMatches[0] };
-	if (basenameMatches.length > 1) {
-		return {
-			status: "ambiguous",
-			candidates: basenameMatches.map((f) => f.path),
-		};
-	}
-	return { status: "not_found" };
+	return resolveVaultFileDetailedShared(app, path);
 }
 
 /**

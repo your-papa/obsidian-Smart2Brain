@@ -5,6 +5,7 @@ import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { PendingChange } from "../../types/shared";
 import { resolveVaultFileDetailed } from "../../utils/attachments";
+import { normalizeReferencePath } from "../../utils/pathResolution";
 import { genUUIDv7 } from "../../utils/uuid7Validator";
 import { getCurrentThreadId } from "./runContext";
 
@@ -58,15 +59,6 @@ const manageNotesSchema = z.object({
 
 type ManageNotesInput = z.infer<typeof manageNotesSchema>;
 
-function normalizeNoteReference(path: string): string {
-	return path
-		.replace(/^!?\[\[/, "")
-		.replace(/\]\]$/, "")
-		.split("|")[0]
-		.split("#")[0]
-		.trim();
-}
-
 function getManageNotesSettings(): {
 	allowCreate: boolean;
 	allowUpdate: boolean;
@@ -111,7 +103,7 @@ function validateExistingMarkdownFile(
 	action: "update" | "delete" | "move",
 ): { file: TFile } | { error: string } {
 	const store = getPendingChangesStore();
-	const cleanPath = normalizeNoteReference(path);
+	const cleanPath = normalizeReferencePath(path);
 	const result = resolveVaultFileDetailed(app, cleanPath);
 
 	if (result.status === "not_found") {

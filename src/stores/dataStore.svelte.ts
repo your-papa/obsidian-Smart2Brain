@@ -249,6 +249,12 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 			algorithm: "lexical" as SearchAlgorithm,
 		},
 	},
+	list_directory: {
+		enabled: true,
+		name: "list_directory",
+		description:
+			"List directories and files in the vault. Use this to understand folder structure before searching or editing notes.",
+	},
 	read_content: {
 		enabled: true,
 		name: "read_content",

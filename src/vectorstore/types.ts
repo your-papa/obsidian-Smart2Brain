@@ -94,7 +94,8 @@ export interface VectorSearchResult {
 export interface SearchFilter {
 	/**
 	 * Filter by path prefix(es).
-	 * Documents must match at least one of the provided path prefixes.
+	 * Documents must match at least one of the provided path prefixes with
+	 * folder-boundary-safe matching.
 	 * Example: ["folder/subfolder", "another/path"] matches docs in either location.
 	 */
 	pathPrefixes?: string[];

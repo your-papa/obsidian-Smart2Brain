@@ -34,6 +34,7 @@ import {
 } from "./types";
 import { cosineSimilarity, toFloat32Array } from "./similarity";
 import { Logger } from "../utils/logging";
+import { matchesPathPrefix } from "../utils/pathUtils";
 
 /** Default max input tokens for embedding models when metadata is unavailable */
 const DEFAULT_EMBED_MAX_INPUT_TOKENS = 8191;
@@ -417,10 +418,10 @@ export class VectorStoreService {
 		const ollamaData =
 			defaultModel.provider === "ollama"
 				? (() => {
-						const ollamaAuth = getData().getResolvedProviderAuth("ollama");
-						if (!ollamaAuth?.baseUrl) return null;
-						return getOllamaModelsCache(ollamaAuth.baseUrl);
-					})()
+					const ollamaAuth = getData().getResolvedProviderAuth("ollama");
+					if (!ollamaAuth?.baseUrl) return null;
+					return getOllamaModelsCache(ollamaAuth.baseUrl);
+				})()
 				: null;
 
 		const metadata = hydrateEmbeddingModel(defaultModel.provider, defaultModel.model, {
@@ -1307,7 +1308,7 @@ export class VectorStoreService {
 
 		for (const r of results) {
 			if (filter?.pathPrefixes?.length) {
-				const matchesPath = filter.pathPrefixes.some((prefix) => r.path.startsWith(prefix));
+				const matchesPath = filter.pathPrefixes.some((prefix) => matchesPathPrefix(r.path, prefix));
 				if (!matchesPath) continue;
 			}
 
@@ -1392,7 +1393,7 @@ export class VectorStoreService {
 
 			for (const r of results) {
 				if (filter?.pathPrefixes?.length) {
-					const matchesPath = filter.pathPrefixes.some((prefix) => r.doc.path.startsWith(prefix));
+					const matchesPath = filter.pathPrefixes.some((prefix) => matchesPathPrefix(r.doc.path, prefix));
 					if (!matchesPath) continue;
 				}
 
@@ -1616,7 +1617,7 @@ export class VectorStoreService {
 		}
 		if (!indexId) {
 			callback({ isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 });
-			return () => {};
+			return () => { };
 		}
 
 		// Register at service level so subscriptions survive instance recreation
@@ -1740,7 +1741,7 @@ export class VectorStoreService {
 			this.modifyTimers.clear();
 			// Wait for any in-progress initialization before cleaning up
 			if (this.initPromise) {
-				await this.initPromise.catch(() => {});
+				await this.initPromise.catch(() => { });
 			}
 			for (const inst of this.instances.values()) {
 				await inst.syncManager.flush();

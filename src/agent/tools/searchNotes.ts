@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { SearchAlgorithm } from "../../types/plugin";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
+import { normalizeVaultPath } from "../../utils/pathUtils";
 import { getVectorStoreService, isVectorStoreInitialized, type SearchFilter } from "../../vectorstore";
 import { Logger } from "../../utils/logging";
 
@@ -231,9 +232,9 @@ export function createSearchNotesTool(app: App) {
 		const filter: SearchFilter | undefined =
 			pathPrefix || tags?.length
 				? {
-						pathPrefixes: pathPrefix ? [pathPrefix] : undefined,
-						tags: tags,
-					}
+					pathPrefixes: pathPrefix ? [normalizeVaultPath(pathPrefix)] : undefined,
+					tags: tags,
+				}
 				: undefined;
 
 		Logger.debug("[search_notes] Configured settings:", {
@@ -283,7 +284,9 @@ export function createSearchNotesTool(app: App) {
 			pathPrefix: z
 				.string()
 				.optional()
-				.describe("Optional folder path prefix to restrict search (e.g., 'projects/' or 'work/notes/')"),
+				.describe(
+					"Optional vault folder to restrict search (e.g., 'Projects' or 'Projects/2026'). Matching is folder-boundary safe.",
+				),
 			tags: z
 				.array(z.string())
 				.optional()

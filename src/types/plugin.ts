@@ -96,6 +96,7 @@ export type MCPServersConfig = Record<string, MCPServerConfig>;
  */
 export type BuiltInToolId =
 	| "search_notes"
+	| "list_directory"
 	| "read_content"
 	| "get_all_tags"
 	| "get_properties"
