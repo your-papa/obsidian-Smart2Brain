@@ -756,7 +756,7 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
   <div
     class="chat-input-wrapper flex flex-col gap-3 bg-background-secondary border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isFullscreen
       ? 'flex-1 min-h-0'
-      : ''} {isDragging ? 'border-[--interactive-accent]' : ''}"
+			: ''} {isDragging ? 'border-[--interactive-accent] chat-input-wrapper-drag-active' : ''}"
     ondragenter={onDragEnter}
     ondragover={onDragOver}
     ondragleave={onDragLeave}
@@ -787,20 +787,6 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
       paths={pendingGraphPaths}
       bind:this={graphNotesChipRef}
     />
-    {#if isDragging}
-      <div
-        class="flex items-center justify-center gap-2 py-4 text-sm font-medium {dragHasIssue
-          ? 'text-[--text-error]'
-          : 'text-[--text-accent]'}"
-      >
-        <div
-          class="w-[--icon-s] h-[--icon-s]"
-          style="--icon-size: var(--icon-s)"
-          use:icon={dragHasIssue ? "alert-triangle" : "upload"}
-        ></div>
-        <span>{dragMessage}</span>
-      </div>
-    {/if}
     <div class="flex flex-row flex-wrap gap-2">
       {#each attachments as attachment}
         <div class="flex flex-row gap-0.5 items-center bg-[buttonface] rounded-md overflow-hidden">
@@ -923,6 +909,21 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
         {/if}
       </div>
     </div>
+
+		{#if isDragging}
+			<div
+				class="absolute inset-0 z-20 rounded-[14px] pointer-events-none flex items-center justify-center gap-2 text-sm font-medium {dragHasIssue
+					? 'text-[--text-error]'
+					: 'text-[--text-accent]'}"
+			>
+				<div
+					class="w-[--icon-s] h-[--icon-s]"
+					style="--icon-size: var(--icon-s)"
+					use:icon={dragHasIssue ? "alert-triangle" : "upload"}
+				></div>
+				<span>{dragMessage}</span>
+			</div>
+		{/if}
   </div>
 
   <!-- Footer -->
@@ -1011,6 +1012,19 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     opacity: 0.22;
     filter: blur(9px);
   }
+
+	.chat-input-wrapper-drag-active {
+		background: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-secondary));
+		border-color: color-mix(in srgb, var(--interactive-accent) 82%, white 18%) !important;
+		box-shadow:
+			0 0 0 2px color-mix(in srgb, var(--interactive-accent) 38%, transparent),
+			0 8px 24px color-mix(in srgb, var(--interactive-accent) 24%, transparent);
+	}
+
+	.chat-input-wrapper-drag-active > :not(:last-child) {
+		opacity: 0;
+		visibility: hidden;
+	}
 
   .chat-input-wrapper:hover > .clickable-icon:first-child,
   .chat-input-wrapper:focus-within > .clickable-icon:first-child,
