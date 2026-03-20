@@ -506,6 +506,7 @@ export class Agent {
 		const finishedAt = new Date();
 		const messages = this.extractMessagesFromResult(rawResult);
 		await this.persistThreadMetadata(threadId, runId, messages);
+		await this.flushThreadPersistence(threadId);
 
 		const result: AgentResult = {
 			runId,
@@ -707,6 +708,7 @@ export class Agent {
 		const finishedAt = new Date();
 		const messages = this.extractMessagesFromResult(rawResult);
 		await this.persistThreadMetadata(threadId, runId, messages);
+		await this.flushThreadPersistence(threadId);
 
 		const result: AgentResult = {
 			runId,
@@ -926,6 +928,7 @@ export class Agent {
 		const finishedAt = new Date();
 		const messages = this.extractMessagesFromResult(rawResult);
 		await this.persistThreadMetadata(threadId, runId, messages);
+		await this.flushThreadPersistence(threadId);
 
 		const result: AgentResult = {
 			runId,
@@ -1942,6 +1945,13 @@ export class Agent {
 			}),
 		);
 		Logger.debug("agent.threadStore.write", { threadId, lastRunId: runId });
+	}
+
+	private async flushThreadPersistence(threadId: string): Promise<void> {
+		if (!this.threadStore?.flush) {
+			return;
+		}
+		await this.threadStore.flush(threadId);
 	}
 
 	async generateTitle(userMessage: string): Promise<string | undefined> {

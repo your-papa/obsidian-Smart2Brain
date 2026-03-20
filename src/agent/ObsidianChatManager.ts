@@ -53,6 +53,12 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	private filePathCache: Map<string, string> = new Map();
 
 	private indexLoaded = false;
+	private dirtyThreadVersions: Map<string, number> = new Map();
+	private persistedThreadVersions: Map<string, number> = new Map();
+	private dirtyIndexVersion = 0;
+	private persistedIndexVersion = 0;
+	private inFlightThreadSaves: Map<string, Promise<void>> = new Map();
+	private inFlightIndexSave: Promise<void> | null = null;
 
 	constructor(plugin: SecondBrainPlugin) {
 		super();
@@ -91,6 +97,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		this.storage.delete(threadId);
 		this.threadIndex.delete(threadId);
 		this.filePathCache.delete(threadId);
+		this.markIndexDirty();
 		this.saveIndexDebounced();
 	}
 
@@ -145,6 +152,14 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		const vault = this.plugin.app.vault as { configDir?: string };
 		const configDir = vault.configDir || ".obsidian";
 		return `${configDir}/plugins/${this.plugin.manifest.id}/data/threads.json`;
+	}
+
+	private markThreadDirty(threadId: string): void {
+		this.dirtyThreadVersions.set(threadId, (this.dirtyThreadVersions.get(threadId) ?? 0) + 1);
+	}
+
+	private markIndexDirty(): void {
+		this.dirtyIndexVersion += 1;
 	}
 
 	private async ensureFolder(): Promise<void> {
@@ -273,13 +288,33 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	}
 
 	private async saveIndex() {
+		if (this.inFlightIndexSave) {
+			await this.inFlightIndexSave;
+			if (this.persistedIndexVersion >= this.dirtyIndexVersion) {
+				return;
+			}
+		}
+
 		const indexPath = this.getIndexPath();
 		const snapshots = Array.from(this.threadIndex.values());
-		try {
-			await this.adapter.write(indexPath, JSON.stringify(snapshots));
-		} catch (e) {
-			Logger.error("Error saving chat index:", e);
-		}
+		const targetVersion = this.dirtyIndexVersion;
+		let savePromise: Promise<void> | null = null;
+		savePromise = (async () => {
+			try {
+				await this.adapter.write(indexPath, JSON.stringify(snapshots));
+				if (this.dirtyIndexVersion === targetVersion) {
+					this.persistedIndexVersion = targetVersion;
+				}
+			} catch (e) {
+				Logger.error("Error saving chat index:", e);
+			} finally {
+				if (this.inFlightIndexSave === savePromise) {
+					this.inFlightIndexSave = null;
+				}
+			}
+		})();
+		this.inFlightIndexSave = savePromise;
+		await savePromise;
 	}
 
 	private saveIndexDebounced = debounce(
@@ -326,34 +361,56 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	 **/
 
 	private async saveThread(threadId: string) {
+		const existingSave = this.inFlightThreadSaves.get(threadId);
+		if (existingSave) {
+			await existingSave;
+			if ((this.persistedThreadVersions.get(threadId) ?? 0) >= (this.dirtyThreadVersions.get(threadId) ?? 0)) {
+				return;
+			}
+		}
+
 		const data = this.storage.get(threadId);
 		if (!data) return;
 
 		await this.ensureFolder();
 		const path = await this.resolveFilePath(threadId);
+		const targetVersion = this.dirtyThreadVersions.get(threadId) ?? 0;
 
-		try {
-			await this.adapter.write(path, `${JSON.stringify(data)}\n`);
+		let savePromise: Promise<void> | null = null;
+		savePromise = (async () => {
+			try {
+				await this.adapter.write(path, `${JSON.stringify(data)}\n`);
+				if ((this.dirtyThreadVersions.get(threadId) ?? 0) === targetVersion) {
+					this.persistedThreadVersions.set(threadId, targetVersion);
+				}
 
-			// Update index
-			this.threadIndex.set(threadId, {
-				threadId: data.threadId,
-				title: data.title,
-				metadata: data.metadata,
-				createdAt: data.createdAt,
-				updatedAt: data.updatedAt,
-			});
-			this.saveIndexDebounced();
-		} catch (e) {
-			Logger.error(`Error saving thread ${threadId}:`, e);
-		}
+				// Update index
+				this.threadIndex.set(threadId, {
+					threadId: data.threadId,
+					title: data.title,
+					metadata: data.metadata,
+					createdAt: data.createdAt,
+					updatedAt: data.updatedAt,
+				});
+				this.markIndexDirty();
+				this.saveIndexDebounced();
+			} catch (e) {
+				Logger.error(`Error saving thread ${threadId}:`, e);
+			} finally {
+				if (this.inFlightThreadSaves.get(threadId) === savePromise) {
+					this.inFlightThreadSaves.delete(threadId);
+				}
+			}
+		})();
+		this.inFlightThreadSaves.set(threadId, savePromise);
+		await savePromise;
 	}
 
 	private saveDebounced = debounce(
 		(threadId: string) => {
 			this.saveThread(threadId);
 		},
-		1000,
+		2000,
 		true,
 	);
 
@@ -395,6 +452,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		data.metadata = snapshot.metadata;
 		data.updatedAt = snapshot.updatedAt;
 
+		this.markThreadDirty(snapshot.threadId);
 		this.saveDebounced(snapshot.threadId);
 	}
 
@@ -414,7 +472,26 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			delete: this.delete.bind(this),
 			list: this.listThreads.bind(this),
 			clear: this.clear.bind(this),
+			flush: this.flush.bind(this),
 		};
+	}
+
+	async flush(threadId?: string): Promise<void> {
+		this.saveDebounced.cancel();
+		this.saveIndexDebounced.cancel();
+
+		if (threadId) {
+			await this.saveThread(threadId);
+		} else {
+			const threadIds = new Set<string>([
+				...this.storage.keys(),
+				...this.dirtyThreadVersions.keys(),
+				...this.inFlightThreadSaves.keys(),
+			]);
+			await Promise.all(Array.from(threadIds, (id) => this.saveThread(id)));
+		}
+
+		await this.saveIndex();
 	}
 
 	async clear(): Promise<void> {
@@ -700,6 +777,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		};
 
 		threadData.updatedAt = Date.now();
+		this.markThreadDirty(threadId);
 		this.saveDebounced(threadId);
 
 		// Update index cache immediately
@@ -718,6 +796,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			});
 		}
 		// Persist index changes debounced
+		this.markIndexDirty();
 		this.saveIndexDebounced();
 
 		return {
@@ -747,12 +826,14 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 		threadData.writes[checkpointId].push(...writes);
 		threadData.updatedAt = Date.now();
+		this.markThreadDirty(threadId);
 		this.saveDebounced(threadId);
 
 		if (this.threadIndex.has(threadId)) {
 			const snapshot = this.threadIndex.get(threadId);
 			if (!snapshot) return;
 			snapshot.updatedAt = threadData.updatedAt;
+			this.markIndexDirty();
 			this.saveIndexDebounced();
 		}
 	}
@@ -762,6 +843,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		this.storage.delete(threadId);
 		this.threadIndex.delete(threadId);
 		this.filePathCache.delete(threadId);
+		this.dirtyThreadVersions.delete(threadId);
+		this.persistedThreadVersions.delete(threadId);
+		this.markIndexDirty();
 		this.saveIndexDebounced();
 
 		// Remove chat file from disk
@@ -845,6 +929,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			if (loaded) {
 				loaded.title = uniqueTarget.title;
 				loaded.updatedAt = now;
+				this.markThreadDirty(threadId);
 				this.saveDebounced(threadId);
 			}
 
@@ -861,6 +946,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 					updatedAt: loaded.updatedAt,
 				});
 			}
+			this.markIndexDirty();
 			this.saveIndexDebounced();
 
 			// Update cache with new path
@@ -891,6 +977,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 		this.filePathCache.delete(currentThreadId);
 		this.filePathCache.set(nextThreadId, currentPath);
+		this.dirtyThreadVersions.delete(currentThreadId);
+		this.persistedThreadVersions.delete(currentThreadId);
 
 		const currentIndex = this.threadIndex.get(currentThreadId);
 		this.threadIndex.delete(currentThreadId);
@@ -902,6 +990,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			updatedAt: now,
 		});
 
+		this.markThreadDirty(nextThreadId);
+		this.markIndexDirty();
 		await this.saveThread(nextThreadId);
 		return true;
 	}

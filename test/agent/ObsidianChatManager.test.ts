@@ -170,6 +170,26 @@ describe("ObsidianChatManager", () => {
 			expect(result!.title).toBe("Updated Title");
 			expect(result!.updatedAt).toBe(2000);
 		});
+
+		it("should flush a pending thread snapshot write to disk immediately", async () => {
+			const threadStore = manager.asThreadStore();
+
+			await threadStore.write({
+				threadId: "thread-flush",
+				title: "Flush Me",
+				createdAt: 1000,
+				updatedAt: 2000,
+			});
+
+			expect(plugin.app.vault.adapter.write).not.toHaveBeenCalled();
+
+			await threadStore.flush?.("thread-flush");
+
+			expect(plugin.app.vault.adapter.write).toHaveBeenCalledWith(
+				"Chats/thread-flush.chat",
+				expect.stringContaining('"threadId":"thread-flush"'),
+			);
+		});
 	});
 
 	/* --------------------------------------------------------------------------
@@ -247,6 +267,24 @@ describe("ObsidianChatManager", () => {
 			expect(tuple).toBeDefined();
 			expect(tuple!.pendingWrites).toBeDefined();
 			expect(tuple!.pendingWrites!.length).toBeGreaterThanOrEqual(1);
+		});
+
+		it("should flush pending checkpoint persistence to disk", async () => {
+			await manager.put(
+				{ configurable: { thread_id: "thread-persist", checkpoint_id: "cp-1" } },
+				makeCheckpoint("cp-1", "2024-01-01T00:00:00Z"),
+				makeMetadata(0),
+				{},
+			);
+
+			expect(plugin.app.vault.adapter.write).not.toHaveBeenCalled();
+
+			await manager.flush("thread-persist");
+
+			expect(plugin.app.vault.adapter.write).toHaveBeenCalledWith(
+				"Chats/thread-persist.chat",
+				expect.stringContaining('"cp-1"'),
+			);
 		});
 
 		it("should list checkpoints in order", async () => {
