@@ -33,6 +33,7 @@ import {
 } from "./types";
 import { toFloat32Array } from "./similarity";
 import { Logger } from "../utils/logging";
+import { matchesPathPattern, shouldProcessVaultPath } from "../utils/fileFiltering";
 import { matchesPathPrefix } from "../utils/pathUtils";
 
 /** Default max input tokens for embedding models when metadata is unavailable */
@@ -1098,9 +1099,9 @@ export class VectorStoreService {
 	}
 
 	/**
-	 * Check if a file should be indexed based on exclusion/inclusion settings
-	 * and privacy rules. When a provider is specified, private files are
-	 * blocked for untrusted providers.
+	 * Check if a file should be indexed based on internal filter rules and
+	 * privacy rules. When a provider is specified, private files are blocked
+	 * for untrusted providers.
 	 */
 	private shouldIndexFile(file: TFile, provider?: string): boolean {
 		return this.getFileSkipReason(file, provider) === null;
@@ -1111,23 +1112,13 @@ export class VectorStoreService {
 	 */
 	private getFileSkipReason(file: TFile, provider?: string): SkipReason | null {
 		const pluginData = getData();
-		const indexList = pluginData.indexList;
-		const isExcluding = pluginData.isExcluding;
-
-		const matchesPattern = indexList.some(
-			(pattern) => file.path.startsWith(pattern) || file.path.includes(`/${pattern}`),
-		);
-
-		const allowed = isExcluding ? !matchesPattern : indexList.length === 0 || matchesPattern;
-		if (!allowed) return "excluded";
+		if (!shouldProcessVaultPath(file.path, pluginData.targetFolder)) return "excluded";
 
 		// Privacy check: skip private files for untrusted providers
 		if (provider && !pluginData.isProviderTrusted(provider)) {
 			const privacyList = pluginData.privacyList;
 			const privacyIsExcluding = pluginData.privacyIsExcluding;
-			const matchesPrivacy = privacyList.some(
-				(pattern) => file.path.startsWith(pattern) || file.path.includes(`/${pattern}`),
-			);
+			const matchesPrivacy = privacyList.some((pattern) => matchesPathPattern(file.path, pattern));
 			const isPrivate = privacyIsExcluding ? matchesPrivacy : privacyList.length > 0 && !matchesPrivacy;
 			if (isPrivate) return "privacy";
 		}
@@ -1145,7 +1136,7 @@ export class VectorStoreService {
 		if (!embeddings) return;
 
 		if (!this.shouldIndexFile(file, model.provider)) {
-			Logger.log(`[VectorStore] Skipping ${file.path}: excluded by settings`);
+			Logger.log(`[VectorStore] Skipping ${file.path}: excluded by internal rules`);
 			return;
 		}
 

@@ -5,8 +5,7 @@ vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 // Mock dataStore.svelte to provide getData()
 vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: vi.fn(() => ({
-		indexList: [] as string[],
-		isExcluding: true,
+		targetFolder: "Chats",
 		privacyList: [] as string[],
 		privacyIsExcluding: true,
 		isProviderTrusted: vi.fn(() => false),
@@ -58,9 +57,7 @@ function createMockPlugin() {
 		},
 		registerEvent: vi.fn(),
 		saveData: vi.fn().mockResolvedValue(undefined),
-	} as unknown as Parameters<typeof PendingChangesStore.prototype.load>[0] extends void
-		? never
-		: ConstructorParameters<typeof PendingChangesStore>[0];
+	} as ConstructorParameters<typeof PendingChangesStore>[0];
 }
 
 /* --------------------------------------------------------------------------
@@ -73,7 +70,7 @@ describe("PendingChangesStore", () => {
 
 	beforeEach(() => {
 		plugin = createMockPlugin();
-		store = new PendingChangesStore(plugin as never);
+		store = new PendingChangesStore(plugin);
 	});
 
 	describe("addChanges & getters", () => {
@@ -89,10 +86,10 @@ describe("PendingChangesStore", () => {
 
 			const entry = store.getEntry(ids[0]);
 			expect(entry).toBeDefined();
-			expect(entry!.change.type).toBe("create");
-			expect(entry!.status).toBe("pending");
-			expect(entry!.toolCallId).toBe("tc-1");
-			expect(entry!.threadId).toBe("thread-1");
+			expect(entry?.change.type).toBe("create");
+			expect(entry?.status).toBe("pending");
+			expect(entry?.toolCallId).toBe("tc-1");
+			expect(entry?.threadId).toBe("thread-1");
 		});
 
 		it("should add multiple changes at once", () => {
@@ -123,7 +120,7 @@ describe("PendingChangesStore", () => {
 			// Only the latest should be pending
 			expect(store.getPendingCount("thread-1")).toBe(1);
 			const entry = store.getEntry(id2);
-			expect(entry!.status).toBe("pending");
+			expect(entry?.status).toBe("pending");
 		});
 
 		it("should not auto-reject updates from different threads", () => {
@@ -157,7 +154,7 @@ describe("PendingChangesStore", () => {
 
 			const entry = store.getEntryByToolCallId("tc-unique");
 			expect(entry).toBeDefined();
-			expect(entry!.toolCallId).toBe("tc-unique");
+			expect(entry?.toolCallId).toBe("tc-unique");
 		});
 
 		it("should return pending updates for a specific path", () => {
@@ -188,7 +185,7 @@ describe("PendingChangesStore", () => {
 
 			store.rejectChange(id);
 
-			expect(store.getEntry(id)!.status).toBe("rejected");
+			expect(store.getEntry(id)?.status).toBe("rejected");
 			expect(store.getPendingCount("thread-1")).toBe(0);
 		});
 
@@ -202,7 +199,7 @@ describe("PendingChangesStore", () => {
 			store.rejectChange(id);
 			store.rejectChange(id); // should not throw
 
-			expect(store.getEntry(id)!.status).toBe("rejected");
+			expect(store.getEntry(id)?.status).toBe("rejected");
 		});
 	});
 
@@ -220,7 +217,7 @@ describe("PendingChangesStore", () => {
 
 			await store.acceptChange(id);
 
-			expect(store.getEntry(id)!.status).toBe("accepted");
+			expect(store.getEntry(id)?.status).toBe("accepted");
 			expect(plugin.app.vault.create).toHaveBeenCalledWith("notes/new.md", "Hello");
 		});
 
@@ -242,7 +239,7 @@ describe("PendingChangesStore", () => {
 
 			await store.acceptChange(id);
 
-			expect(store.getEntry(id)!.status).toBe("accepted");
+			expect(store.getEntry(id)?.status).toBe("accepted");
 			expect(plugin.app.vault.modify).toHaveBeenCalledWith(file, "updated content");
 		});
 
@@ -264,7 +261,7 @@ describe("PendingChangesStore", () => {
 			);
 
 			await expect(store.acceptChange(id)).rejects.toThrow("was modified after the change was proposed");
-			expect(store.getEntry(id)!.status).toBe("pending"); // Should remain pending
+			expect(store.getEntry(id)?.status).toBe("pending"); // Should remain pending
 		});
 
 		it("should accept and apply a delete change", async () => {
@@ -279,7 +276,7 @@ describe("PendingChangesStore", () => {
 
 			await store.acceptChange(id);
 
-			expect(store.getEntry(id)!.status).toBe("accepted");
+			expect(store.getEntry(id)?.status).toBe("accepted");
 			expect(plugin.app.vault.trash).toHaveBeenCalledWith(file, true);
 		});
 
@@ -297,7 +294,7 @@ describe("PendingChangesStore", () => {
 
 			await store.acceptChange(id);
 
-			expect(store.getEntry(id)!.status).toBe("accepted");
+			expect(store.getEntry(id)?.status).toBe("accepted");
 			expect(plugin.app.fileManager.renameFile).toHaveBeenCalledWith(file, "new-path.md");
 		});
 	});
@@ -320,7 +317,9 @@ describe("PendingChangesStore", () => {
 			// Reject group 0 (line2 → modified2 change)
 			store.rejectChangeGroup(id, 0);
 
-			const entry = store.getEntry(id)!;
+			const entry = store.getEntry(id);
+			expect(entry).toBeDefined();
+			if (!entry) throw new Error("Expected pending change entry");
 			expect(entry.status).toBe("pending");
 			// After rejecting the first group, the newContent should revert group 0
 			// but keep group 1 (the added4 line)
@@ -342,7 +341,9 @@ describe("PendingChangesStore", () => {
 			// Only one diff group, rejecting it should make newContent == originalContent
 			store.rejectChangeGroup(id, 0);
 
-			const entry = store.getEntry(id)!;
+			const entry = store.getEntry(id);
+			expect(entry).toBeDefined();
+			if (!entry) throw new Error("Expected pending change entry");
 			expect(entry.status).toBe("rejected");
 		});
 
@@ -354,7 +355,7 @@ describe("PendingChangesStore", () => {
 			);
 
 			store.rejectChangeGroup(id, 0);
-			expect(store.getEntry(id)!.status).toBe("pending");
+			expect(store.getEntry(id)?.status).toBe("pending");
 		});
 	});
 
@@ -375,8 +376,8 @@ describe("PendingChangesStore", () => {
 
 			await store.rejectAll("thread-1");
 
-			expect(store.getEntry(ids[0])!.status).toBe("rejected");
-			expect(store.getEntry(ids[1])!.status).toBe("rejected");
+			expect(store.getEntry(ids[0])?.status).toBe("rejected");
+			expect(store.getEntry(ids[1])?.status).toBe("rejected");
 			expect(store.getPendingCount("thread-1")).toBe(0);
 		});
 
@@ -386,7 +387,7 @@ describe("PendingChangesStore", () => {
 
 			await store.rejectAll("thread-1");
 
-			expect(store.getEntry(id2)!.status).toBe("pending");
+			expect(store.getEntry(id2)?.status).toBe("pending");
 		});
 	});
 
@@ -479,7 +480,7 @@ describe("PendingChangesStore", () => {
 
 			expect(store.getEntry(id1)).toBeUndefined();
 			expect(store.getEntry(id2)).toBeDefined();
-			expect(store.getEntry(id2)!.status).toBe("pending");
+			expect(store.getEntry(id2)?.status).toBe("pending");
 		});
 
 		it("removeThread should remove all entries for a thread", () => {
@@ -499,15 +500,14 @@ describe("PendingChangesStore", () => {
 	 * ------------------------------------------------------------------------*/
 
 	describe("path filtering", () => {
-		it("isPathAllowed should allow all when indexList is empty and excluding", () => {
+		it("isPathAllowed should allow normal vault files", () => {
 			expect(store.isPathAllowed("any/path.md")).toBe(true);
 		});
 
-		it("isPathAllowed should exclude matching paths when isExcluding", () => {
+		it("isPathAllowed should exclude internal chat files", () => {
 			const mockGetData = getData as ReturnType<typeof vi.fn>;
 			mockGetData.mockReturnValue({
-				indexList: ["Chats"],
-				isExcluding: true,
+				targetFolder: "Chats",
 				privacyList: [],
 				privacyIsExcluding: true,
 				isProviderTrusted: vi.fn(() => false),
@@ -517,11 +517,14 @@ describe("PendingChangesStore", () => {
 			expect(store.isPathAllowed("Notes/test.md")).toBe(true);
 		});
 
+		it("isPathAllowed should exclude Excalidraw files", () => {
+			expect(store.isPathAllowed("Canvas/diagram.excalidraw.md")).toBe(false);
+		});
+
 		it("isFilePrivate should mark matching files as private when privacyIsExcluding", () => {
 			const mockGetData = getData as ReturnType<typeof vi.fn>;
 			mockGetData.mockReturnValue({
-				indexList: [],
-				isExcluding: true,
+				targetFolder: "Chats",
 				privacyList: ["secret"],
 				privacyIsExcluding: true,
 				isProviderTrusted: vi.fn(() => false),
@@ -534,8 +537,7 @@ describe("PendingChangesStore", () => {
 		it("shouldBlockFile should block private files for untrusted providers", () => {
 			const mockGetData = getData as ReturnType<typeof vi.fn>;
 			mockGetData.mockReturnValue({
-				indexList: [],
-				isExcluding: true,
+				targetFolder: "Chats",
 				privacyList: ["secret"],
 				privacyIsExcluding: true,
 				isProviderTrusted: vi.fn(() => false),
@@ -548,14 +550,26 @@ describe("PendingChangesStore", () => {
 		it("shouldBlockFile should allow private files for trusted providers", () => {
 			const mockGetData = getData as ReturnType<typeof vi.fn>;
 			mockGetData.mockReturnValue({
-				indexList: [],
-				isExcluding: true,
+				targetFolder: "Chats",
 				privacyList: ["secret"],
 				privacyIsExcluding: true,
 				isProviderTrusted: vi.fn(() => true),
 			});
 
 			expect(store.shouldBlockFile("secret/diary.md", "ollama")).toBe(false);
+		});
+
+		it("isFilePrivate should support filetype privacy patterns", () => {
+			const mockGetData = getData as ReturnType<typeof vi.fn>;
+			mockGetData.mockReturnValue({
+				targetFolder: "Chats",
+				privacyList: ["*.pdf"],
+				privacyIsExcluding: true,
+				isProviderTrusted: vi.fn(() => false),
+			});
+
+			expect(store.isFilePrivate("Docs/spec.pdf")).toBe(true);
+			expect(store.isFilePrivate("Docs/spec.md")).toBe(false);
 		});
 	});
 });
