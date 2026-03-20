@@ -43,7 +43,7 @@ async function handleRootDrop(event: DragEvent) {
 
 <QueryClientProvider client={plugin.queryClient}>
   <div
-    class="chat-root relative h-full flex flex-col overflow-hidden"
+    class="chat-root relative h-full flex flex-col gap-4 overflow-hidden"
     data-testid="chat-root"
     role="region"
     ondragenter={handleRootDragEnter}

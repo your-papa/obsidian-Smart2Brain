@@ -186,6 +186,54 @@ const currentModelDisplay = $derived.by(() => {
 	};
 });
 
+const currentSummarizationModelDisplay = $derived.by(() => {
+	if (!selectedAgent?.summarizationModel) return null;
+	const provider = selectedAgent.summarizationModel.provider;
+	const model = selectedAgent.summarizationModel.model;
+	const providerDef = getProviderDefinition(provider, pluginData.getAllProviderMeta());
+	return {
+		model,
+		providerName: providerDef?.displayName ?? provider,
+		logo: providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon,
+	};
+});
+
+function formatContextWindowLabel(tokens: number): string {
+	if (tokens >= 1000) {
+		const rounded = Number.isInteger(tokens / 1000) ? String(tokens / 1000) : (tokens / 1000).toFixed(1);
+		return `${rounded}k`;
+	}
+	return `${tokens}`;
+}
+
+const summarizationContextWindowWarning = $derived.by(() => {
+	const chatContextWindow = selectedAgent?.chatModel?.modelConfig?.contextWindow;
+	const summarizationContextWindow = selectedAgent?.summarizationModel?.modelConfig?.contextWindow;
+
+	if (!chatContextWindow || !summarizationContextWindow) {
+		return null;
+	}
+
+	if (summarizationContextWindow >= chatContextWindow) {
+		return null;
+	}
+
+	return `This summarization model has a smaller context window (${formatContextWindowLabel(summarizationContextWindow)}) than the chat model (${formatContextWindowLabel(chatContextWindow)}), so history compaction may fail earlier.`;
+});
+
+function buildPersistedChatModel(provider: string, model: string, existing?: ChatModel | null): ChatModel {
+	const hydrated = models.hydratedChatModelsByKey.get(`${provider}:${model}`);
+	return {
+		provider,
+		model,
+		modelConfig: {
+			contextWindow: hydrated?.contextWindow ?? existing?.modelConfig?.contextWindow ?? 128000,
+			supportsVision: hydrated?.capabilities.vision ?? existing?.modelConfig?.supportsVision,
+			temperature: existing?.modelConfig?.temperature,
+		},
+	};
+}
+
 function openModelSelectionModal() {
 	if (!selectedAgentId) return;
 	const currentSelection = selectedAgent?.chatModel
@@ -194,11 +242,7 @@ function openModelSelectionModal() {
 
 	const modal = new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
 		if (selected && selectedAgentId) {
-			const chatModel: ChatModel = {
-				provider: selected.provider,
-				model: selected.model,
-				modelConfig: { contextWindow: 128000 }, // Default, will be enriched from models.dev
-			};
+			const chatModel = buildPersistedChatModel(selected.provider, selected.model, selectedAgent?.chatModel);
 			pluginData.updateAgent(selectedAgentId, { chatModel });
 			applyChanges();
 		}
@@ -217,6 +261,35 @@ function handleModelSelect(value: string) {
 function getProviderId(value: string): string {
 	const opt = models.modelOptions.find((o) => o.value === value);
 	return opt?.chatModel.provider ?? "";
+}
+
+function openSummarizationModelSelectionModal() {
+	if (!selectedAgentId) return;
+	const currentSelection = selectedAgent?.summarizationModel
+		? {
+				provider: selectedAgent.summarizationModel.provider,
+				model: selectedAgent.summarizationModel.model,
+			}
+		: null;
+
+	const modal = new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
+		if (selected && selectedAgentId) {
+			const summarizationModel = buildPersistedChatModel(
+				selected.provider,
+				selected.model,
+				selectedAgent?.summarizationModel,
+			);
+			pluginData.updateAgent(selectedAgentId, { summarizationModel });
+			applyChanges();
+		}
+	});
+	modal.open();
+}
+
+function resetSummarizationModel() {
+	if (!selectedAgentId) return;
+	pluginData.updateAgent(selectedAgentId, { summarizationModel: null });
+	applyChanges();
 }
 
 // ============================================================================
@@ -829,6 +902,35 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
               {/if}
             </Button>
           {/if}
+        </SettingItem>
+
+        <SettingItem
+          name="Summarization Model"
+          desc="Model used to compress older chat history when the context window fills up"
+        >
+          <div class="agent-model-setting">
+            <div class="agent-model-setting-controls">
+              <Button onClick={openSummarizationModelSelectionModal}>
+                {#if currentSummarizationModelDisplay}
+                  {@const Logo = currentSummarizationModelDisplay.logo}
+                  <div class="flex items-center gap-2">
+                    <Logo width={14} height={14} />
+                    <span>{currentSummarizationModelDisplay.model}</span>
+                  </div>
+                {:else}
+                  <span>Auto (same as chat model)</span>
+                {/if}
+              </Button>
+              {#if selectedAgent.summarizationModel}
+                <Button buttonText="Reset" onClick={resetSummarizationModel} />
+              {/if}
+            </div>
+            {#if summarizationContextWindowWarning}
+              <div class="agent-model-warning text-sm">
+                {summarizationContextWindowWarning}
+              </div>
+            {/if}
+          </div>
         </SettingItem>
 
         <SettingItem
@@ -1577,6 +1679,29 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  .agent-model-warning {
+    color: var(--text-warning, #ffc107);
+    max-width: 520px;
+    width: 100%;
+    text-align: right;
+  }
+
+  .agent-model-setting {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .agent-model-setting-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+    width: 100%;
   }
 
   /* Utilities */

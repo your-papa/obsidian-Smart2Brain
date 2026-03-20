@@ -12,9 +12,11 @@ interface Props {
 	used: number; // Tokens used (for tooltip)
 	limit?: number; // Context window limit (for tooltip)
 	breakdown: ContextUsageBreakdown;
+	canSummarizeNow?: boolean;
+	onSummarizeNow?: () => void | Promise<void>;
 }
 
-const { usagePercent, used, limit, breakdown }: Props = $props();
+const { usagePercent, used, limit, breakdown, canSummarizeNow = false, onSummarizeNow }: Props = $props();
 
 const radius = 20; // Slightly larger radius for better visibility
 const circumference = 2 * Math.PI * radius;
@@ -57,7 +59,7 @@ const distributionRows = $derived.by(() => {
 			tokens: breakdown.toolTokens,
 			percent: (breakdown.toolTokens / total) * 100,
 		},
-	];
+	].filter((row) => row.tokens > 0);
 });
 
 // Format tooltip text
@@ -144,6 +146,18 @@ const maxContextLabel = $derived.by(() => {
           Draft + pending context: {formatNumber(breakdown.draftAndPendingTokens)}
         </div>
       {/if}
+      <div class="mt-2 text-[11px] text-[--text-muted]">
+        Older context is automatically compacted at about 80% usage.
+      </div>
+      <div class="mt-3 flex justify-end">
+        <button
+          class="text-xs px-2 py-1 rounded border border-solid border-[--background-modifier-border] bg-[--background-secondary] text-[--text-normal] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={!canSummarizeNow}
+          onclick={() => onSummarizeNow?.()}
+        >
+          Summarize now
+        </button>
+      </div>
     </Popover.Content>
   </Popover.Portal>
 </Popover.Root>

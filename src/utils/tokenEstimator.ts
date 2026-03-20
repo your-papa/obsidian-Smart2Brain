@@ -1,4 +1,5 @@
-import type { MessagePair } from "../stores/chatStore.svelte";
+import type { BaseMessage } from "@langchain/core/messages";
+import { isAIMessage, isHumanMessage } from "@langchain/core/messages";
 
 const TOKENS_PER_WORD = 1.3; // Conservative estimate for English text
 const PER_MESSAGE_OVERHEAD = 80; // Separators, metadata, framing
@@ -92,7 +93,7 @@ export interface LiveContextOptions {
  * @returns Estimated usage breakdown
  */
 export function estimateContextUsage(
-	messages: MessagePair[],
+	messages: BaseMessage[],
 	inputValue: string,
 	contextWindow: number | undefined,
 	options: ContextUsageOptions = {},
@@ -102,34 +103,11 @@ export function estimateContextUsage(
 }
 
 export function estimateContextUsageBreakdown(
-	messages: MessagePair[],
+	messages: BaseMessage[],
 	inputValue: string,
 	options: ContextUsageOptions = {},
 ): ContextUsageBreakdown {
-	let humanTokens = 0;
-	let assistantTokens = 0;
-	let toolTokens = 0;
-
-	for (const pair of messages) {
-		humanTokens += estimateUserMessageTokens(pair);
-
-		assistantTokens += estimateTextTokens(pair.assistantMessage.content);
-		assistantTokens += PER_MESSAGE_OVERHEAD;
-
-		if (pair.assistantMessage.toolCalls?.length) {
-			for (const toolCall of pair.assistantMessage.toolCalls) {
-				const payload = [
-					toolCall.name,
-					stringifyForTokenEstimate(toolCall.input),
-					stringifyForTokenEstimate(toolCall.output),
-					toolCall.preamble,
-				]
-					.filter((part): part is string => Boolean(part))
-					.join(" ");
-				toolTokens += estimateTextTokens(payload, TOOL_CALL_OVERHEAD);
-			}
-		}
-	}
+	const { humanTokens, assistantTokens, toolTokens } = estimateBaseMessagePayloadTokens(messages);
 
 	const systemPromptTokens =
 		estimateSystemPromptTokens(options.systemPrompt) +
@@ -157,18 +135,15 @@ export function estimateContextUsageBreakdown(
 /**
  * Estimates stable context usage that does not change on every keystroke.
  */
-export function estimateConversationBaseTokens(messages: MessagePair[], options: BaseContextOptions = {}): number {
-	let totalTokens = 0;
-
-	for (const pair of messages) {
-		totalTokens += estimateUserMessageTokens(pair);
-		totalTokens += estimateAssistantMessageTokens(pair);
-	}
-
-	totalTokens += estimateSystemPromptTokens(options.systemPrompt);
-	totalTokens += estimateAdditionalTextBlockTokens(options.additionalTextBlocks);
-
-	return totalTokens;
+export function estimateConversationBaseTokens(messages: BaseMessage[], options: BaseContextOptions = {}): number {
+	const { humanTokens, assistantTokens, toolTokens } = estimateBaseMessagePayloadTokens(messages);
+	return (
+		humanTokens +
+		assistantTokens +
+		toolTokens +
+		estimateSystemPromptTokens(options.systemPrompt) +
+		estimateAdditionalTextBlockTokens(options.additionalTextBlocks)
+	);
 }
 
 /**
@@ -252,41 +227,61 @@ function estimateAdditionalTextBlockTokens(additionalTextBlocks: string[] | unde
 	return totalTokens;
 }
 
-function estimateUserMessageTokens(pair: MessagePair): number {
-	let totalTokens = 0;
-	totalTokens += estimateTextTokens(pair.userMessage.content);
+function estimateBaseMessagePayloadTokens(messages: BaseMessage[]): {
+	humanTokens: number;
+	assistantTokens: number;
+	toolTokens: number;
+} {
+	let humanTokens = 0;
+	let assistantTokens = 0;
+	let toolTokens = 0;
 
-	if (pair.userMessage.attachments?.length) {
-		totalTokens += pair.userMessage.attachments.length * ATTACHMENT_OVERHEAD;
-	}
-	if (pair.userMessage.visibleNotes?.length) totalTokens += VISIBLE_NOTES_OVERHEAD;
-	if (pair.userMessage.selection) totalTokens += SELECTION_OVERHEAD;
-	if (pair.userMessage.graphNotes?.length) totalTokens += GRAPH_NOTES_OVERHEAD;
+	for (const message of messages) {
+		if (isHumanMessage(message)) {
+			humanTokens += estimateTextTokens(message.text || "");
+			const attachments = message.additional_kwargs?.attachments;
+			if (Array.isArray(attachments)) {
+				humanTokens += attachments.length * ATTACHMENT_OVERHEAD;
+			}
+			if (
+				Array.isArray(message.additional_kwargs?.visibleNotes) &&
+				message.additional_kwargs.visibleNotes.length > 0
+			) {
+				humanTokens += VISIBLE_NOTES_OVERHEAD;
+			}
+			if (message.additional_kwargs?.selection) {
+				humanTokens += SELECTION_OVERHEAD;
+			}
+			if (
+				Array.isArray(message.additional_kwargs?.graphNotes) &&
+				message.additional_kwargs.graphNotes.length > 0
+			) {
+				humanTokens += GRAPH_NOTES_OVERHEAD;
+			}
+			humanTokens += PER_MESSAGE_OVERHEAD;
+			continue;
+		}
 
-	totalTokens += PER_MESSAGE_OVERHEAD;
-	return totalTokens;
-}
+		if (isAIMessage(message)) {
+			assistantTokens += estimateTextTokens(message.text || "");
+			assistantTokens += PER_MESSAGE_OVERHEAD;
 
-function estimateAssistantMessageTokens(pair: MessagePair): number {
-	let totalTokens = 0;
-	totalTokens += estimateTextTokens(pair.assistantMessage.content);
-
-	if (pair.assistantMessage.toolCalls?.length) {
-		for (const toolCall of pair.assistantMessage.toolCalls) {
-			const payload = [
-				toolCall.name,
-				stringifyForTokenEstimate(toolCall.input),
-				stringifyForTokenEstimate(toolCall.output),
-				toolCall.preamble,
-			]
-				.filter((part): part is string => Boolean(part))
-				.join(" ");
-			totalTokens += estimateTextTokens(payload, TOOL_CALL_OVERHEAD);
+			if (message.tool_calls?.length) {
+				for (const toolCall of message.tool_calls) {
+					const payload = [
+						toolCall.name,
+						stringifyForTokenEstimate(toolCall.args),
+						stringifyForTokenEstimate(toolCall.id),
+					]
+						.filter((part): part is string => Boolean(part))
+						.join(" ");
+					toolTokens += estimateTextTokens(payload, TOOL_CALL_OVERHEAD);
+				}
+			}
 		}
 	}
 
-	totalTokens += PER_MESSAGE_OVERHEAD;
-	return totalTokens;
+	return { humanTokens, assistantTokens, toolTokens };
 }
 
 /**

@@ -25,11 +25,13 @@ import {
 	DEFAULT_AGENT_ID,
 	DEFAULT_TOOLS_CONFIG,
 	createDefaultAgentConfig,
+	createData,
 	AddChatModelError,
 	AddEmbedModelError,
 	SetChatModelError,
 	SetEmbedModelError,
 } from "../../src/stores/dataStore.svelte";
+import type { StoredProviderState } from "../../src/stores/dataStore.svelte";
 
 /* --------------------------------------------------------------------------
  * Helpers
@@ -51,9 +53,29 @@ function createMockPlugin() {
 	};
 }
 
+function createProviderState(overrides?: Partial<StoredProviderState>): StoredProviderState {
+	return {
+		isConfigured: false,
+		auth: { values: {}, secretIds: {} },
+		chatModels: {},
+		embedModels: {},
+		trustedForPrivateData: false,
+		...overrides,
+	};
+}
+
 function makeStore(overrides?: Partial<typeof DEFAULT_SETTINGS>) {
 	const plugin = createMockPlugin();
-	const data = structuredClone({ ...DEFAULT_SETTINGS, ...overrides });
+	const data = structuredClone({
+		...DEFAULT_SETTINGS,
+		providerConfig: {
+			openai: createProviderState(),
+			anthropic: createProviderState(),
+			ollama: createProviderState({ trustedForPrivateData: true }),
+			openrouter: createProviderState(),
+		},
+		...overrides,
+	});
 	return { store: new PluginDataStore(plugin as never, data as never), plugin };
 }
 
@@ -67,6 +89,7 @@ describe("createDefaultAgentConfig", () => {
 		expect(agent.id).toBeDefined();
 		expect(agent.name).toBe("New Agent");
 		expect(agent.chatModel).toBeNull();
+		expect(agent.summarizationModel).toBeNull();
 		expect(agent.toolsConfig).toBeDefined();
 		expect(agent.mcpServers).toEqual({});
 	});
@@ -153,9 +176,13 @@ describe("PluginDataStore – Agent CRUD", () => {
 	});
 
 	it("should duplicate an agent", () => {
+		store.updateAgent(DEFAULT_AGENT_ID, {
+			summarizationModel: { provider: "openai", model: "gpt-4o-mini" } as never,
+		});
 		const dupe = store.duplicateAgent(DEFAULT_AGENT_ID, "Copy of Default");
 		expect(dupe.name).toBe("Copy of Default");
 		expect(dupe.id).not.toBe(DEFAULT_AGENT_ID);
+		expect(dupe.summarizationModel).toEqual({ provider: "openai", model: "gpt-4o-mini" });
 	});
 
 	it("should throw when duplicating non-existent agent", () => {
@@ -359,6 +386,41 @@ describe("PluginDataStore – Chat Models", () => {
 
 		store.deleteChatModel("openai", "gpt-4");
 		expect(store.getAgent(DEFAULT_AGENT_ID)!.chatModel).toBeNull();
+	});
+
+	it("should clear agent summarizationModel reference when its model is deleted", () => {
+		store.addChatModel("openai", "gpt-4o-mini", {} as never);
+		store.updateAgent(DEFAULT_AGENT_ID, {
+			summarizationModel: { provider: "openai", model: "gpt-4o-mini" } as never,
+		});
+
+		store.deleteChatModel("openai", "gpt-4o-mini");
+		expect(store.getAgent(DEFAULT_AGENT_ID)!.summarizationModel).toBeNull();
+	});
+});
+
+describe("createData", () => {
+	it("should default missing summarizationModel to null for older saved agents", async () => {
+		const plugin = {
+			...createMockPlugin(),
+			loadData: vi.fn().mockResolvedValue({
+				...structuredClone(DEFAULT_SETTINGS),
+				agents: {
+					[DEFAULT_AGENT_ID]: {
+						id: DEFAULT_AGENT_ID,
+						name: "Default Agent",
+						chatModel: null,
+						systemPrompt: "Legacy prompt",
+						skills: {},
+						toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
+						mcpServers: {},
+					},
+				},
+			}),
+		};
+
+		const store = await createData(plugin as never);
+		expect(store.getAgent(DEFAULT_AGENT_ID)?.summarizationModel).toBeNull();
 	});
 });
 

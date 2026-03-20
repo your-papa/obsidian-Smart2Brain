@@ -7,6 +7,7 @@ import { Logger } from "../../utils/logging";
 import { getPlugin } from "../../stores/state.svelte";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import IconButton from "../ui/IconButton.svelte";
+import DotAnimation from "../ui/DotAnimation.svelte";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 import Logo from "../ui/logos/Logo.svelte";
 import BranchNavigator from "./BranchNavigator.svelte";
@@ -243,7 +244,7 @@ $effect(() => {
   <!-- Scrollable messages area -->
   <div
     bind:this={scrollContainer}
-    class="scroll-container h-full overflow-y-auto overflow-x-clip px-2 py-4"
+    class="scroll-container h-full overflow-y-auto overflow-x-clip px-2 pt-4 pb-8"
   >
     <div class="w-full max-w-[--file-line-width] mx-auto h-full">
       {#if !messages || messages.length === 0}
@@ -260,6 +261,22 @@ $effect(() => {
         </div>
       {:else}
         {#each messages as messagePair, index}
+          {#if messagePair.transcriptEvent?.type === "summarization_marker"}
+            <div
+              class="summary-marker-row flex justify-center my-4"
+              class:mb-12={index === messages.length - 1}
+            >
+              <div
+                class="summary-marker inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs"
+                title={messagePair.transcriptEvent.source === "manual_summarization"
+                  ? "Manual conversation compaction"
+                  : "Automatic conversation compaction"}
+              >
+                <span class="summary-marker-icon" use:icon={"archive"} style="--icon-size: 12px"></span>
+                <span>{messagePair.transcriptEvent.label}</span>
+              </div>
+            </div>
+          {:else}
           <!-- User Message -->
           <div
             use:registerMessageRef={messagePair.id + "-user"}
@@ -423,7 +440,7 @@ $effect(() => {
           </div>
 
           <!-- Assistant Message -->
-          <div class:min-h-[95%]={index === messages.length - 1}>
+          <div class:min-h-[95%]={index === messages.length - 1} class:pb-12={index === messages.length - 1}>
             <div class="group flex flex-col px-2 gap-3 mb-2 w-full">
               {#if messagePair.assistantMessage.toolCalls?.length || (messagePair.assistantMessage.assistantTimeline?.length ?? 0) > 0 || messagePair.assistantMessage.state === AssistantState.idle || messagePair.assistantMessage.state === AssistantState.streaming}
                 <!-- Tools + Answer integrated in timeline (or processing dot).
@@ -493,7 +510,15 @@ $effect(() => {
                 </div>
               {/if}
             </div>
+
+            {#if index === messages.length - 1 && messenger.session?.summarizingHistory}
+              <div class="summarizing-status flex items-center gap-2 text-sm text-text-muted pl-1">
+                <span>Summarizing earlier messages to make room for this reply</span>
+                <span aria-hidden="true"><DotAnimation /></span>
+              </div>
+            {/if}
           </div>
+          {/if}
         {/each}
       {/if}
     </div>
@@ -546,6 +571,17 @@ $effect(() => {
     overscroll-behavior: contain;
   }
 
+  .summary-marker {
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--background-secondary) 80%, transparent);
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 85%, transparent);
+  }
+
+  .summary-marker-icon {
+    display: inline-flex;
+    align-items: center;
+  }
+
   .logo-container :global(svg) {
     width: 100%;
     height: 100%;
@@ -556,5 +592,9 @@ $effect(() => {
   .generation-label {
     color: var(--text-accent);
     white-space: nowrap;
+  }
+
+  .summarizing-status {
+    min-height: 20px;
   }
 </style>
