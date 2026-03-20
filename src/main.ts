@@ -14,6 +14,7 @@ import { createMessenger, getMessenger } from "./stores/chatStore.svelte";
 import { type PluginDataStore, createData, getData } from "./stores/dataStore.svelte";
 import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingChangesStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
+import { LexicalSearchService } from "./search/LexicalSearchService";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import { SmartGraphView, VIEW_TYPE_SMART_GRAPH } from "./views/smart-graph/SmartGraphView";
 import SettingsTab from "./views/settings/Settings";
@@ -35,6 +36,7 @@ const SUPPORTED_CHAT_ATTACHMENT_EXTENSIONS = new Set([
 export default class SecondBrainPlugin extends Plugin {
 	agentManager!: AgentManager;
 	skillsService!: SkillsService;
+	lexicalSearchService!: LexicalSearchService;
 	vectorStoreService!: VectorStoreService;
 	pendingChangesStore!: PendingChangesStore;
 	queryClient = getQueryClient();
@@ -149,6 +151,9 @@ export default class SecondBrainPlugin extends Plugin {
 		this.skillsService = new SkillsService(this);
 		await this.skillsService.initialize();
 
+		// Initialize lexical search for BM25 search and browse (non-blocking)
+		this.lexicalSearchService = LexicalSearchService.startInitialize(this);
+
 		// Initialize Vector Store Service for embeddings search (non-blocking)
 		this.vectorStoreService = VectorStoreService.startInitialize(this);
 
@@ -236,6 +241,14 @@ export default class SecondBrainPlugin extends Plugin {
 
 		this.addSettingTab(new SettingsTab(this));
 
+		this.registerEvent(
+			this.app.workspace.on("file-open", (file) => {
+				if (!(file instanceof TFile)) return;
+				if (file.extension !== "md") return;
+				this.pluginData.recordRecentlyOpenedNote(file.path);
+			}),
+		);
+
 		// Initialize Agent Manager (v2)
 		this.agentManager = new AgentManager(this);
 		await this.agentManager.initialize();
@@ -315,6 +328,7 @@ export default class SecondBrainPlugin extends Plugin {
 
 	onunload() {
 		Log.info("Unloading plugin");
+		if (this.lexicalSearchService) void this.lexicalSearchService.cleanup();
 		if (this.vectorStoreService) void this.vectorStoreService.cleanup();
 		if (this.agentManager) void this.agentManager.cleanup();
 		if (this.pendingChangesStore) this.pendingChangesStore.cleanup();

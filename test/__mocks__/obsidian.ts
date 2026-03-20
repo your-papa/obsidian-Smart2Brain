@@ -34,6 +34,7 @@ export class App {
 	plugins = {
 		manifests: {} as Record<string, unknown>,
 		enabledPlugins: new Set<string>(),
+		plugins: {} as Record<string, unknown>,
 	};
 	// Internal (core) plugins API
 	internalPlugins = {
@@ -182,6 +183,11 @@ export function debounce<T extends (...args: unknown[]) => unknown>(
 	debounced.cancel = () => clearTimeout(timeout);
 	return debounced;
 }
+
+export const setIcon = vi.fn((node: HTMLElement, iconId: string) => {
+	node.innerHTML = `<svg data-icon="${iconId}"></svg>`;
+	node.setAttribute("data-icon", iconId);
+});
 
 export function getAllTags(cache: CachedMetadata | null): string[] {
 	if (!cache) return [];

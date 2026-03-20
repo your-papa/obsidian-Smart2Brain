@@ -5,6 +5,11 @@ import type { GraphMode, SmartGraphSettings } from "./graph";
 
 export type SearchAlgorithm = "lexical" | "hybrid";
 
+export interface RecentNoteEntry {
+	path: string;
+	lastOpenedAt: number;
+}
+
 /**
  * Configuration for the default embedding model used for vector search.
  */
@@ -112,6 +117,14 @@ export interface SearchNotesSettings {
 	maxResults: number;
 	/** Search algorithm to use */
 	algorithm: SearchAlgorithm;
+	/** Whether to include note paths in results */
+	showPath?: boolean;
+	/** Whether to include note tags in results */
+	showTags?: boolean;
+	/** Whether to include match badges in results */
+	showMatchBadges?: boolean;
+	/** Whether to include content snippets and heading context in results */
+	showMatchContext?: boolean;
 }
 
 /**
@@ -412,6 +425,11 @@ export interface PluginData {
 	// ============================================================================
 
 	searchAlgorithm: SearchAlgorithm;
+	searchShowPath: boolean;
+	searchShowTags: boolean;
+	searchShowMatchBadges: boolean;
+	searchShowMatchContext: boolean;
+	recentNotes: RecentNoteEntry[];
 
 	/**
 	 * Default embedding model for vector-based search.

@@ -1,48 +1,271 @@
-import { type App, Platform, SuggestModal, TFile, debounce } from "obsidian";
-import { performSearch, type SearchResult } from "../../agent/tools/searchNotes";
+import { type App, Platform, SuggestModal, TFile, debounce, setIcon } from "obsidian";
+import { getRecentNotes, performSearch, type SearchResult } from "../../agent/tools/searchNotes";
 import { getData } from "../../stores/dataStore.svelte";
 import type { SearchAlgorithm } from "../../types/plugin";
 import type { SearchFilter } from "../../vectorstore";
+import type { SearchMatchBadge } from "../../vectorstore/types";
 import { Logger } from "../../utils/logging";
+import { getSearchResultNoteIcon, getTagIcon } from "../../utils/noteIcons";
 
 interface ParsedQuery {
 	query: string;
 	filter?: SearchFilter;
 }
 
+interface ParsedFilterToken {
+	type: "path" | "tag";
+	value: string;
+	raw: string;
+	start: number;
+	end: number;
+}
+
+function getHighlightTerms(rawQuery: string): string[] {
+	const { query } = parseQueryWithFilters(rawQuery);
+	return Array.from(
+		new Set(
+			query
+				.toLowerCase()
+				.split(/[^\p{L}\p{N}#@_-]+/u)
+				.map((term) => term.trim())
+				.filter((term) => term.length > 1),
+		),
+	).sort((left, right) => right.length - left.length);
+}
+
+function escapeRegExp(text: string): string {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function appendHighlightedText(
+	el: HTMLElement,
+	text: string,
+	terms: string[],
+	highlightClass = "s2b-search-result-highlight",
+): void {
+	if (!terms.length) {
+		el.setText(text);
+		return;
+	}
+
+	const pattern = new RegExp(`(${terms.map((term) => escapeRegExp(term)).join("|")})`, "giu");
+	let lastIndex = 0;
+
+	for (const match of text.matchAll(pattern)) {
+		const start = match.index ?? 0;
+		if (start > lastIndex) {
+			el.appendChild(document.createTextNode(text.slice(lastIndex, start)));
+		}
+
+		const mark = el.createEl("mark", { cls: highlightClass });
+		mark.setText(match[0]);
+		lastIndex = start + match[0].length;
+	}
+
+	if (lastIndex < text.length) {
+		el.appendChild(document.createTextNode(text.slice(lastIndex)));
+	}
+}
+
+function escapeForPattern(text: string): string {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripHeadingPrefix(text: string, heading: string): string {
+	const trimmed = text.trim();
+	if (!trimmed) return trimmed;
+
+	const patterns = [
+		new RegExp(`^#+\\s*${escapeForPattern(heading)}\\s*`, "iu"),
+		new RegExp(`^§\\s*${escapeForPattern(heading)}\\s*[—:-]?\\s*`, "iu"),
+		new RegExp(`^${escapeForPattern(heading)}\\s*[—:-]?\\s*`, "iu"),
+	];
+
+	for (const pattern of patterns) {
+		const stripped = trimmed.replace(pattern, "").trim();
+		if (stripped !== trimmed) {
+			return stripped;
+		}
+	}
+
+	return trimmed;
+}
+
+function getBadgeLabel(badge: SearchMatchBadge): string {
+	switch (badge) {
+		case "title":
+			return "Title";
+		case "alias":
+			return "Alias";
+		case "tag":
+			return "Tag";
+		case "path":
+			return "Path";
+		case "heading":
+			return "Heading";
+		case "content":
+			return "Content";
+		case "semantic":
+			return "Semantic";
+		case "recent":
+			return "Recent";
+	}
+}
+
+function getBadgeIconId(badge: SearchMatchBadge): string {
+	switch (badge) {
+		case "title":
+			return "type";
+		case "alias":
+			return "forward";
+		case "tag":
+			return "tag";
+		case "path":
+			return "folder-tree";
+		case "heading":
+			return "heading";
+		case "content":
+			return "file-text";
+		case "semantic":
+			return "sparkles";
+		case "recent":
+			return "clock-3";
+	}
+}
+
+function normalizeDisplayTags(tags: string[] | undefined): string[] {
+	if (!tags?.length) {
+		return [];
+	}
+
+	return Array.from(
+		new Set(
+			tags
+				.map((tag) => (tag.startsWith("#") ? tag : `#${tag}`))
+				.map((tag) => tag.trim())
+				.filter((tag) => tag.length > 1),
+		),
+	);
+}
+
+function quoteFilterValue(value: string): string {
+	return /\s/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+}
+
+function normalizeTag(tag: string): string {
+	return tag.startsWith("#") ? tag : `#${tag}`;
+}
+
+function pushFilterToken(tokens: ParsedFilterToken[], token: ParsedFilterToken): void {
+	if (token.value.length <= 1) {
+		return;
+	}
+
+	const overlapsExisting = tokens.some((existing) => token.start < existing.end && token.end > existing.start);
+	if (!overlapsExisting) {
+		tokens.push(token);
+	}
+}
+
+function extractFilterTokens(rawQuery: string): ParsedFilterToken[] {
+	const tokenRegex = /(path|tag):(?:"([^"]+)"|'([^']+)'|(\S+))/giu;
+	const bareTagRegex = /(^|\s)(#[^\s"']+)/gu;
+	const barePathRegex = /(^|\s)((?!https?:\/\/)[^\s"'#]+(?:\/[^\s"'#]+)*\/)/gu;
+	const tokens: ParsedFilterToken[] = [];
+
+	for (const match of rawQuery.matchAll(tokenRegex)) {
+		const type = match[1].toLowerCase() as ParsedFilterToken["type"];
+		const value = (match[2] ?? match[3] ?? match[4] ?? "").trim();
+		if (!value) continue;
+
+		pushFilterToken(tokens, {
+			type,
+			value: type === "tag" ? normalizeTag(value) : value,
+			raw: match[0],
+			start: match.index ?? 0,
+			end: (match.index ?? 0) + match[0].length,
+		});
+	}
+
+	for (const match of rawQuery.matchAll(bareTagRegex)) {
+		const value = normalizeTag(match[2]);
+		const leadingWhitespace = match[1]?.length ?? 0;
+		const start = (match.index ?? 0) + leadingWhitespace;
+
+		pushFilterToken(tokens, {
+			type: "tag",
+			value,
+			raw: match[2],
+			start,
+			end: start + match[2].length,
+		});
+	}
+
+	for (const match of rawQuery.matchAll(barePathRegex)) {
+		const value = match[2].trim();
+		const leadingWhitespace = match[1]?.length ?? 0;
+		const start = (match.index ?? 0) + leadingWhitespace;
+
+		pushFilterToken(tokens, {
+			type: "path",
+			value,
+			raw: match[2],
+			start,
+			end: start + match[2].length,
+		});
+	}
+
+	return tokens.sort((left, right) => left.start - right.start);
+}
+
+function stripFilterTokens(rawQuery: string, tokens: ParsedFilterToken[]): string {
+	if (tokens.length === 0) {
+		return rawQuery.trim();
+	}
+
+	let cursor = 0;
+	let remaining = "";
+	for (const token of tokens) {
+		remaining += `${rawQuery.slice(cursor, token.start)} `;
+		cursor = token.end;
+	}
+	remaining += rawQuery.slice(cursor);
+
+	return remaining.replace(/\s+/g, " ").trim();
+}
+
+function buildRawQuery(query: string, filter?: SearchFilter): string {
+	const parts: string[] = [];
+	if (query.trim()) {
+		parts.push(query.trim());
+	}
+
+	for (const pathPrefix of filter?.pathPrefixes ?? []) {
+		parts.push(`path:${quoteFilterValue(pathPrefix)}`);
+	}
+
+	for (const tag of filter?.tags ?? []) {
+		parts.push(`tag:${quoteFilterValue(tag)}`);
+	}
+
+	return parts.join(" ").trim();
+}
+
 /**
  * Parse search query for filter syntax:
  * - path:folder/subfolder/ - filter by path prefix
+ * - path:"folder with spaces/" - quoted path filter
+ * - folder/subfolder/ - shorthand path filter
  * - tag:#tagname or tag:tagname - filter by tag (can use multiple)
+ * - #tagname - shorthand tag filter
  *
  * Example: "path:projects/ tag:#active my search query"
  */
 function parseQueryWithFilters(rawQuery: string): ParsedQuery {
-	const pathPrefixes: string[] = [];
-	const tags: string[] = [];
-
-	// Extract path: prefixes
-	const pathRegex = /path:(\S+)/gi;
-	for (;;) {
-		const pathMatch = pathRegex.exec(rawQuery);
-		if (!pathMatch) break;
-		pathPrefixes.push(pathMatch[1]);
-	}
-
-	// Extract tag: prefixes
-	const tagRegex = /tag:(#?\S+)/gi;
-	for (;;) {
-		const tagMatch = tagRegex.exec(rawQuery);
-		if (!tagMatch) break;
-		const tag = tagMatch[1].startsWith("#") ? tagMatch[1] : `#${tagMatch[1]}`;
-		tags.push(tag);
-	}
-
-	// Remove filter syntax from query
-	const cleanQuery = rawQuery
-		.replace(/path:\S+/gi, "")
-		.replace(/tag:\S+/gi, "")
-		.trim();
+	const tokens = extractFilterTokens(rawQuery);
+	const pathPrefixes = tokens.filter((token) => token.type === "path").map((token) => token.value);
+	const tags = tokens.filter((token) => token.type === "tag").map((token) => token.value);
+	const cleanQuery = stripFilterTokens(rawQuery, tokens);
 
 	const filter: SearchFilter | undefined =
 		pathPrefixes.length > 0 || tags.length > 0
@@ -70,12 +293,14 @@ export class SearchModal extends SuggestModal<SearchResult> {
 	private isSearching = false;
 	private isClosed = false;
 	private semanticEnabled = false;
+	private requireAllTags = false;
 	private glowAnimationId: number | null = null;
 	private borderEl: HTMLElement | null = null;
+	private filterChipsEl: HTMLElement | null = null;
 
 	constructor(app: App) {
 		super(app);
-		this.setPlaceholder("Search notes... (path:folder/ tag:#tag)");
+		this.setPlaceholder("Search notes, use #tag or folder/, or leave empty for recent notes...");
 		this.updateInstructions();
 
 		// Register Tab to toggle semantic search
@@ -116,11 +341,126 @@ export class SearchModal extends SuggestModal<SearchResult> {
 		]);
 	}
 
+	onOpen(): void {
+		super.onOpen();
+		this.ensureFilterChipsEl();
+		this.renderFilterChips(parseQueryWithFilters(this.currentQuery));
+	}
+
 	onClose(): void {
 		this.isClosed = true;
 		this.stopGlowAnimation();
+		this.filterChipsEl?.remove();
+		this.filterChipsEl = null;
 		// Cancel any pending debounced calls
 		this.debouncedSearch.cancel();
+	}
+
+	private ensureFilterChipsEl(): HTMLElement | null {
+		if (this.filterChipsEl?.isConnected) {
+			return this.filterChipsEl;
+		}
+
+		if (!this.resultContainerEl) {
+			return null;
+		}
+
+		this.filterChipsEl = this.modalEl.createDiv({ cls: "s2b-search-filter-bar" });
+		this.resultContainerEl.before(this.filterChipsEl);
+		return this.filterChipsEl;
+	}
+
+	private getInputEl(): HTMLInputElement | null {
+		return this.modalEl.querySelector<HTMLInputElement>(".prompt-input");
+	}
+
+	private setSearchQuery(rawQuery: string): void {
+		this.currentQuery = rawQuery;
+		this.renderFilterChips(parseQueryWithFilters(rawQuery));
+
+		const inputEl = this.getInputEl();
+		if (inputEl && inputEl.value !== rawQuery) {
+			inputEl.value = rawQuery;
+		}
+
+		if (rawQuery.trim() && rawQuery !== this.lastSearchedQuery) {
+			this.debouncedSearch(rawQuery);
+		} else if (!rawQuery.trim()) {
+			this.searchResults = [];
+			this.lastSearchedQuery = "";
+			// @ts-ignore - updateSuggestions is a protected method
+			this.updateSuggestions();
+		}
+	}
+
+	private removeFilterValue(type: "path" | "tag", value: string): void {
+		const parsed = parseQueryWithFilters(this.currentQuery);
+		const nextFilter: SearchFilter = {
+			pathPrefixes:
+				type === "path"
+					? parsed.filter?.pathPrefixes?.filter((pathPrefix) => pathPrefix !== value)
+					: parsed.filter?.pathPrefixes,
+			tags: type === "tag" ? parsed.filter?.tags?.filter((tag) => tag !== value) : parsed.filter?.tags,
+			requireAllTags: this.requireAllTags,
+		};
+
+		if (!nextFilter.tags?.length) {
+			this.requireAllTags = false;
+			nextFilter.requireAllTags = false;
+		}
+
+		this.setSearchQuery(buildRawQuery(parsed.query, nextFilter));
+	}
+
+	private toggleRequireAllTags(): void {
+		this.requireAllTags = !this.requireAllTags;
+		this.renderFilterChips(parseQueryWithFilters(this.currentQuery));
+		if (this.currentQuery.trim()) {
+			this.lastSearchedQuery = "";
+			this.debouncedSearch(this.currentQuery);
+		}
+	}
+
+	private renderFilterChips(parsed: ParsedQuery): void {
+		const chipsEl = this.ensureFilterChipsEl();
+		if (!chipsEl) return;
+
+		chipsEl.empty();
+		const filter = parsed.filter;
+		if (!filter?.pathPrefixes?.length && !filter?.tags?.length) {
+			this.requireAllTags = false;
+			chipsEl.style.display = "none";
+			return;
+		}
+
+		chipsEl.style.display = "flex";
+
+		for (const pathPrefix of filter.pathPrefixes ?? []) {
+			this.createFilterChip(chipsEl, `In ${pathPrefix}`, () => this.removeFilterValue("path", pathPrefix));
+		}
+
+		for (const tag of filter.tags ?? []) {
+			this.createFilterChip(chipsEl, tag, () => this.removeFilterValue("tag", tag));
+		}
+
+		if (filter.tags?.length) {
+			const modeChip = chipsEl.createEl("button", {
+				cls: "s2b-search-filter-chip s2b-search-filter-chip-mode",
+				text: this.requireAllTags ? "Tags: ALL" : "Tags: ANY",
+			}) as HTMLButtonElement;
+			modeChip.type = "button";
+			modeChip.setAttribute("aria-label", "Toggle tag match mode");
+			modeChip.addEventListener("click", () => this.toggleRequireAllTags());
+		}
+	}
+
+	private createFilterChip(container: HTMLElement, label: string, onRemove: () => void): void {
+		const chip = container.createEl("button", { cls: "s2b-search-filter-chip" }) as HTMLButtonElement;
+		chip.type = "button";
+		chip.setAttribute("aria-label", `Remove filter ${label}`);
+		chip.createSpan({ cls: "s2b-search-filter-chip-value", text: label });
+		chip.createSpan({ cls: "s2b-search-filter-chip-remove", text: "×" });
+		chip.addEventListener("click", onRemove);
 	}
 
 	private startGlowAnimation(): void {
@@ -234,9 +574,15 @@ export class SearchModal extends SuggestModal<SearchResult> {
 
 			// Parse query for filter syntax
 			const { query, filter } = parseQueryWithFilters(rawQuery);
+			const effectiveFilter = filter?.tags?.length
+				? {
+						...filter,
+						requireAllTags: this.requireAllTags,
+					}
+				: filter;
 
 			// Skip if no query and no filter
-			if (!query.trim() && !filter) {
+			if (!query.trim() && !effectiveFilter) {
 				this.searchResults = [];
 				this.isSearching = false;
 				// @ts-ignore - updateSuggestions is a protected method
@@ -245,7 +591,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 			}
 
 			try {
-				const results = await performSearch(this.app, query, algorithm, filter);
+				const results = await performSearch(this.app, query, algorithm, effectiveFilter);
 				// Only update if query hasn't changed and modal is still open
 				if (rawQuery === this.currentQuery && !this.isClosed) {
 					this.searchResults = results.slice(0, 20);
@@ -269,12 +615,14 @@ export class SearchModal extends SuggestModal<SearchResult> {
 	 */
 	getSuggestions(query: string): SearchResult[] {
 		this.currentQuery = query;
+		const parsed = parseQueryWithFilters(query);
+		this.renderFilterChips(parsed);
 
 		// Only trigger search if query changed
 		if (query.trim() && query !== this.lastSearchedQuery) {
 			this.debouncedSearch(query);
 		} else if (!query.trim()) {
-			this.searchResults = [];
+			this.searchResults = getRecentNotes(this.app).slice(0, 20);
 			this.lastSearchedQuery = "";
 		}
 
@@ -286,32 +634,100 @@ export class SearchModal extends SuggestModal<SearchResult> {
 	 */
 	renderSuggestion(result: SearchResult, el: HTMLElement): void {
 		const container = el.createDiv({ cls: "s2b-search-result" });
+		const highlightTerms = getHighlightTerms(this.currentQuery);
+		const searchSettings = getData();
+		const showPath = searchSettings.searchShowPath;
+		const showTags = searchSettings.searchShowTags;
+		const showMatchBadges = searchSettings.searchShowMatchBadges;
+		const showMatchContext = searchSettings.searchShowMatchContext;
+		const displayTags = showTags ? normalizeDisplayTags(result.tags) : [];
 
 		// Title row
 		const titleRow = container.createDiv({ cls: "s2b-search-result-title" });
-		titleRow.createSpan({ text: result.name, cls: "s2b-search-result-name" });
+		const titleMeta = titleRow.createDiv({ cls: "s2b-search-result-title-meta" });
+		const noteIcon = getSearchResultNoteIcon(this.app, result.path);
+		if (noteIcon) {
+			const iconEl = titleMeta.createSpan({ cls: "s2b-search-result-note-icon" });
+			iconEl.setAttribute("aria-hidden", "true");
+			noteIcon.render(iconEl);
+		}
+		const titleEl = titleMeta.createSpan({ cls: "s2b-search-result-name" });
+		titleEl.setAttribute("title", result.name);
+		appendHighlightedText(titleEl, result.name, highlightTerms, "s2b-search-result-highlight-title");
 
-		// Path (folder)
 		const pathParts = result.path.split("/");
-		if (pathParts.length > 1) {
-			const folder = pathParts.slice(0, -1).join("/");
-			titleRow.createSpan({ text: folder, cls: "s2b-search-result-path" });
-		}
+		const folder = showPath && pathParts.length > 1 ? pathParts.slice(0, -1).join("/") : "";
+		if (folder || displayTags.length > 0) {
+			const visibleTags = displayTags.slice(0, 3);
+			const hiddenTags = displayTags.slice(visibleTags.length);
+			const titleSecondary = titleMeta.createDiv({ cls: "s2b-search-result-title-secondary" });
 
-		// Score (if available)
-		if (result.score !== undefined) {
-			const scoreText = result.score.toFixed(3);
-			container.createSpan({ text: scoreText, cls: "s2b-search-result-score" });
-		}
+			if (folder) {
+				titleSecondary.createSpan({ text: "•", cls: "s2b-search-result-separator" });
+				const pathEl = titleSecondary.createSpan({ text: folder, cls: "s2b-search-result-path" });
+				pathEl.setAttribute("title", folder);
+			}
 
-		// Tags from frontmatter (if available)
-		if (result.frontmatter?.tags) {
-			const tags = Array.isArray(result.frontmatter.tags) ? result.frontmatter.tags : [result.frontmatter.tags];
-			if (tags.length > 0) {
-				const tagsContainer = container.createDiv({ cls: "s2b-search-result-tags" });
-				for (const tag of tags.slice(0, 3)) {
-					tagsContainer.createSpan({ text: `#${tag}`, cls: "s2b-search-result-tag" });
+			if (displayTags.length > 0) {
+				const tagsContainer = titleSecondary.createDiv({ cls: "s2b-search-result-tags" });
+				for (const tag of visibleTags) {
+					const tagEl = tagsContainer.createSpan({ cls: "s2b-search-result-tag" });
+					const tagIcon = getTagIcon(this.app, tag);
+					if (tagIcon) {
+						tagEl.classList.add(`s2b-search-result-tag-${tagIcon.provider}`);
+						if (tagIcon.color) {
+							tagEl.style.setProperty("--s2b-search-result-tag-accent", tagIcon.color);
+						}
+
+						const tagIconEl = tagEl.createSpan({ cls: "s2b-search-result-tag-icon" });
+						tagIconEl.setAttribute("aria-hidden", "true");
+						tagIcon.render(tagIconEl);
+					}
+
+					tagEl.createSpan({ text: tag, cls: "s2b-search-result-tag-label" });
 				}
+
+				if (hiddenTags.length > 0) {
+					const overflowTagEl = tagsContainer.createSpan({
+						text: `+${hiddenTags.length}`,
+						cls: "s2b-search-result-tag s2b-search-result-tag-overflow",
+					});
+					overflowTagEl.setAttribute("title", hiddenTags.join(", "));
+				}
+			}
+		}
+
+		if (showMatchBadges && result.matchBadges?.length) {
+			const badgesRow = titleRow.createDiv({ cls: "s2b-search-result-badges" });
+			for (const badge of result.matchBadges) {
+				const badgeLabel = getBadgeLabel(badge);
+				const badgeEl = badgesRow.createSpan({
+					cls: `s2b-search-result-badge s2b-search-result-badge-${badge}`,
+				});
+				badgeEl.setAttribute("aria-label", badgeLabel);
+				badgeEl.setAttribute("title", badgeLabel);
+
+				const badgeIconEl = badgeEl.createSpan({ cls: "s2b-search-result-badge-icon" });
+				badgeIconEl.setAttribute("aria-hidden", "true");
+				setIcon(badgeIconEl, getBadgeIconId(badge));
+			}
+		}
+
+		if (showMatchContext && result.matchExplanation) {
+			const explanationRow = container.createDiv({ cls: "s2b-search-result-explanation" });
+
+			if (result.matchExplanation.heading) {
+				const headingEl = explanationRow.createDiv({ cls: "s2b-search-result-heading" });
+				appendHighlightedText(headingEl, `§ ${result.matchExplanation.heading}`, highlightTerms);
+
+				const snippetText = stripHeadingPrefix(result.matchExplanation.text, result.matchExplanation.heading);
+				if (snippetText) {
+					const snippetEl = explanationRow.createDiv({ cls: "s2b-search-result-snippet" });
+					appendHighlightedText(snippetEl, snippetText, highlightTerms);
+				}
+			} else {
+				const snippetEl = explanationRow.createDiv({ cls: "s2b-search-result-snippet" });
+				appendHighlightedText(snippetEl, result.matchExplanation.text, highlightTerms);
 			}
 		}
 	}
@@ -354,7 +770,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 			emptyEl.setText("No notes found");
 			this.appendSemanticHint();
 		} else {
-			emptyEl.setText("Type to search your notes");
+			emptyEl.setText("No recent notes yet. Open a note to see it here, or type to search your notes.");
 		}
 	}
 }

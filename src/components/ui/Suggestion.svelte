@@ -1,17 +1,24 @@
 <script lang="ts">
-import { icon } from "../../utils/utils";
+  import type { App } from "obsidian";
+  import { pathIcon } from "../../utils/noteIcons";
 
-type Props = {
-	suggestionText: string;
-	iconId: string;
-};
+  type Props = {
+    suggestionText: string;
+    iconId: string;
+    app?: App;
+    suggestionPath?: string;
+    iconKind?: "file" | "folder";
+  };
 
-let { suggestionText, iconId }: Props = $props();
+  let { suggestionText, iconId, app, suggestionPath, iconKind = "file" }: Props = $props();
 </script>
 
-    <span class="flex flex-row gap-2">
-        <div use:icon={iconId}></div>
-        <div class="suggestion-title">
-            {suggestionText}
-        </div>
-    </span>
+<span class="flex flex-row gap-2 items-center">
+  <div
+    class="s2b-path-icon"
+    use:pathIcon={{ app, path: suggestionPath, kind: iconKind, fallbackIconId: iconId }}
+  ></div>
+  <div class="suggestion-title">
+    {suggestionText}
+  </div>
+</span>

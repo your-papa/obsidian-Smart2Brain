@@ -12,13 +12,17 @@ import { Logger } from "../utils/logging";
 import { getDbName } from "./types";
 
 const DB_NAME_PREFIX = "s2b-minisearch";
-const DB_VERSION = 1;
+const DB_VERSION = 4;
 const STORE_NAME = "index";
 const INDEX_KEY = "main";
+const STORAGE_SCHEMA_VERSION = 4;
 
 export interface LexicalSearchResult {
 	path: string;
 	name: string;
+	aliases?: string[];
+	tags?: string[];
+	content?: string;
 	score: number;
 }
 
@@ -26,7 +30,15 @@ interface IndexedDocument {
 	id: string;
 	path: string;
 	title: string;
+	aliases: string;
+	tags: string;
+	pathSegments: string;
 	content: string;
+}
+
+interface RankedLexicalResult {
+	result: MiniSearchResult;
+	adjustedScore: number;
 }
 
 /**
@@ -51,11 +63,11 @@ export class MiniSearchService {
 	 */
 	private createIndex(): MiniSearch<IndexedDocument> {
 		return new MiniSearch<IndexedDocument>({
-			fields: ["title", "content"],
-			storeFields: ["path", "title"],
+			fields: ["title", "aliases", "tags", "pathSegments", "content"],
+			storeFields: ["path", "title", "aliases", "tags", "pathSegments", "content"],
 			idField: "id",
 			searchOptions: {
-				boost: { title: 2, content: 1 },
+				boost: { title: 2, aliases: 1.8, tags: 1.5, pathSegments: 1.2, content: 1 },
 				fuzzy: 0.2,
 				prefix: true,
 			},
@@ -113,11 +125,11 @@ export class MiniSearchService {
 
 			request.onsuccess = () => {
 				const data = request.result;
-				if (data?.json) {
+				if (data?.json && data.schemaVersion === STORAGE_SCHEMA_VERSION) {
 					try {
 						this.index = MiniSearch.loadJSON(data.json, {
-							fields: ["title", "content"],
-							storeFields: ["path", "title"],
+							fields: ["title", "aliases", "tags", "pathSegments", "content"],
+							storeFields: ["path", "title", "aliases", "tags", "pathSegments", "content"],
 							idField: "id",
 						});
 						// Rebuild paths set
@@ -162,7 +174,7 @@ export class MiniSearchService {
 		return new Promise((resolve, reject) => {
 			const transaction = db.transaction(STORE_NAME, "readwrite");
 			const store = transaction.objectStore(STORE_NAME);
-			const request = store.put({ json, paths }, INDEX_KEY);
+			const request = store.put({ json, paths, schemaVersion: STORAGE_SCHEMA_VERSION }, INDEX_KEY);
 
 			request.onsuccess = () => {
 				this.isDirty = false;
@@ -213,16 +225,20 @@ export class MiniSearchService {
 	 * @param title Document title (filename without extension)
 	 * @param content Document content
 	 */
-	addDocument(path: string, title: string, content: string): void {
+	addDocument(path: string, title: string, content: string, tags: string[] = []): void {
 		// Remove existing document if present
 		if (this.documentPaths.has(path)) {
 			this.index.discard(path);
 		}
 
+		const aliases = this.extractAliases(content);
 		const doc: IndexedDocument = {
 			id: path,
 			path,
 			title,
+			aliases: aliases.join("\n"),
+			tags: this.normalizeStoredTags(tags).join("\n"),
+			pathSegments: this.extractPathSegments(path).join("\n"),
 			content,
 		};
 
@@ -278,19 +294,266 @@ export class MiniSearchService {
 		}
 
 		const results = this.index.search(query, {
-			boost: { title: 2, content: 1 },
+			boost: { title: 2, aliases: 1.8, tags: 1.5, pathSegments: 1.2, content: 1 },
 			fuzzy: 0.2,
 			prefix: true,
 		});
 
-		return results.slice(0, limit).map((result: MiniSearchResult) => ({
+		const rankedResults = results
+			.map((result): RankedLexicalResult => {
+				const title =
+					(result as MiniSearchResult & { title?: string }).title ||
+					result.id.replace(/\.md$/, "").split("/").pop() ||
+					result.id;
+				const aliases = this.parseStoredAliases((result as MiniSearchResult & { aliases?: string }).aliases);
+				const tags = this.parseStoredList((result as MiniSearchResult & { tags?: string }).tags);
+				const pathSegments = this.parseStoredList(
+					(result as MiniSearchResult & { pathSegments?: string }).pathSegments,
+				);
+
+				return {
+					result,
+					adjustedScore:
+						result.score +
+						this.calculateTitleBoost(query, title) +
+						this.calculateAliasBoost(query, aliases) +
+						this.calculateTagBoost(query, tags) +
+						this.calculatePathBoost(query, pathSegments),
+				};
+			})
+			.sort((left, right) => right.adjustedScore - left.adjustedScore);
+
+		return rankedResults.slice(0, limit).map(({ result, adjustedScore }) => ({
 			path: result.id,
 			name:
 				(result as MiniSearchResult & { title?: string }).title ||
 				result.id.replace(/\.md$/, "").split("/").pop() ||
 				result.id,
-			score: result.score,
+			aliases: this.parseStoredAliases((result as MiniSearchResult & { aliases?: string }).aliases),
+			tags: this.parseStoredList((result as MiniSearchResult & { tags?: string }).tags),
+			content: (result as MiniSearchResult & { content?: string }).content,
+			score: adjustedScore,
 		}));
+	}
+
+	private calculateTagBoost(query: string, tags: string[]): number {
+		const normalizedQuery = query.trim().toLowerCase();
+		if (!normalizedQuery || tags.length === 0) {
+			return 0;
+		}
+
+		let bestBoost = 0;
+		for (const tag of tags) {
+			const normalizedTag = tag.replace(/^#/, "").trim().toLowerCase();
+			if (!normalizedTag) continue;
+
+			if (normalizedTag === normalizedQuery) {
+				bestBoost = Math.max(bestBoost, 55);
+				continue;
+			}
+
+			if (normalizedTag.startsWith(normalizedQuery)) {
+				bestBoost = Math.max(bestBoost, 22);
+				continue;
+			}
+
+			if (normalizedTag.includes(normalizedQuery)) {
+				bestBoost = Math.max(bestBoost, 14);
+			}
+		}
+
+		return bestBoost;
+	}
+
+	private calculatePathBoost(query: string, pathSegments: string[]): number {
+		const normalizedQuery = query.trim().toLowerCase();
+		if (!normalizedQuery || pathSegments.length === 0) {
+			return 0;
+		}
+
+		let bestBoost = 0;
+		for (const segment of pathSegments) {
+			const normalizedSegment = segment.trim().toLowerCase();
+			if (!normalizedSegment) continue;
+
+			if (normalizedSegment === normalizedQuery) {
+				bestBoost = Math.max(bestBoost, 35);
+				continue;
+			}
+
+			if (normalizedSegment.startsWith(normalizedQuery)) {
+				bestBoost = Math.max(bestBoost, 16);
+				continue;
+			}
+
+			if (normalizedSegment.includes(normalizedQuery)) {
+				bestBoost = Math.max(bestBoost, 9);
+			}
+		}
+
+		return bestBoost;
+	}
+
+	private calculateAliasBoost(query: string, aliases: string[]): number {
+		const normalizedQuery = query.trim().toLowerCase();
+		if (!normalizedQuery || aliases.length === 0) {
+			return 0;
+		}
+
+		let bestBoost = 0;
+		for (const alias of aliases) {
+			const normalizedAlias = alias.trim().toLowerCase();
+			if (!normalizedAlias) continue;
+
+			if (normalizedAlias === normalizedQuery) {
+				bestBoost = Math.max(bestBoost, 70);
+				continue;
+			}
+
+			if (normalizedAlias.startsWith(normalizedQuery)) {
+				bestBoost = Math.max(bestBoost, 28);
+				continue;
+			}
+
+			if (normalizedAlias.includes(normalizedQuery)) {
+				bestBoost = Math.max(bestBoost, 18);
+			}
+		}
+
+		return bestBoost;
+	}
+
+	private calculateTitleBoost(query: string, title: string): number {
+		const normalizedQuery = query.trim().toLowerCase();
+		const normalizedTitle = title.trim().toLowerCase();
+		const queryTerms = this.extractQueryTerms(normalizedQuery);
+
+		if (!normalizedQuery || !normalizedTitle || queryTerms.length === 0) {
+			return 0;
+		}
+
+		if (normalizedTitle === normalizedQuery) {
+			return 100;
+		}
+
+		if (normalizedTitle.startsWith(normalizedQuery)) {
+			return 40;
+		}
+
+		if (normalizedTitle.includes(normalizedQuery)) {
+			return 25;
+		}
+
+		const matchingTerms = queryTerms.filter((term) => normalizedTitle.includes(term));
+		if (matchingTerms.length === 0) {
+			return 0;
+		}
+
+		if (matchingTerms.length === queryTerms.length) {
+			return 15;
+		}
+
+		return (matchingTerms.length / queryTerms.length) * 8;
+	}
+
+	private extractQueryTerms(query: string): string[] {
+		return Array.from(
+			new Set(
+				query
+					.split(/[\s\-_.,;:!?'"()\[\]{}<>]+/)
+					.map((term) => term.trim())
+					.filter((term) => term.length > 1),
+			),
+		);
+	}
+
+	private extractAliases(content: string): string[] {
+		const frontmatter = this.extractFrontmatter(content);
+		if (!frontmatter) {
+			return [];
+		}
+
+		const aliases: string[] = [];
+		const lines = frontmatter.split(/\r?\n/);
+
+		for (let index = 0; index < lines.length; index++) {
+			const match = lines[index].match(/^\s*(aliases?|alias):\s*(.*)$/i);
+			if (!match) continue;
+
+			const remainder = match[2].trim();
+			if (remainder.startsWith("[") && remainder.endsWith("]")) {
+				for (const value of remainder.slice(1, -1).split(",")) {
+					const alias = value.trim().replace(/^['"]|['"]$/g, "");
+					if (alias) aliases.push(alias);
+				}
+				continue;
+			}
+
+			if (remainder) {
+				const alias = remainder.replace(/^['"]|['"]$/g, "");
+				if (alias) aliases.push(alias);
+				continue;
+			}
+
+			for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex++) {
+				const itemMatch = lines[nextIndex].match(/^\s*-\s*(.+)$/);
+				if (!itemMatch) break;
+				const alias = itemMatch[1].trim().replace(/^['"]|['"]$/g, "");
+				if (alias) aliases.push(alias);
+				index = nextIndex;
+			}
+		}
+
+		return Array.from(new Set(aliases));
+	}
+
+	private extractPathSegments(path: string): string[] {
+		const segments = path
+			.split("/")
+			.slice(0, -1)
+			.map((segment) => segment.trim())
+			.filter((segment) => segment.length > 0);
+
+		return Array.from(new Set(segments));
+	}
+
+	private extractFrontmatter(content: string): string | undefined {
+		if (!content.startsWith("---\n")) {
+			return undefined;
+		}
+
+		const endOfFrontmatter = content.indexOf("\n---\n", 4);
+		if (endOfFrontmatter === -1) {
+			return undefined;
+		}
+
+		return content.slice(4, endOfFrontmatter);
+	}
+
+	private parseStoredAliases(rawAliases: string | undefined): string[] {
+		return this.parseStoredList(rawAliases);
+	}
+
+	private parseStoredList(rawValue: string | undefined): string[] {
+		if (!rawValue?.trim()) {
+			return [];
+		}
+
+		return rawValue
+			.split(/\r?\n/)
+			.map((value) => value.trim())
+			.filter((value) => value.length > 0);
+	}
+
+	private normalizeStoredTags(tags: string[]): string[] {
+		return Array.from(
+			new Set(
+				tags
+					.map((tag) => tag.replace(/^#/, ""))
+					.map((tag) => tag.trim())
+					.filter((tag) => tag.length > 1),
+			),
+		);
 	}
 
 	/**
