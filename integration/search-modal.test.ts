@@ -325,6 +325,77 @@ describe("search modal", () => {
 		expect(domCount(".s2b-search-result-name .s2b-search-result-highlight-title")).toBeGreaterThan(0);
 	});
 
+	it("should only show the semantic glow while a semantic search is in flight", async () => {
+		expect(
+			obsidianEval(`(() => {
+				const plugin = app.plugins.plugins['smart-second-brain'];
+				if (!plugin?.vectorStoreService) return 'missing-plugin';
+				const service = plugin.vectorStoreService;
+				if (!window.__s2bOriginalSemanticSearch) {
+					window.__s2bOriginalSemanticSearch = service.semanticSearch.bind(service);
+				}
+				service.semanticSearch = async (...args) => {
+					await new Promise((resolve) => setTimeout(resolve, 800));
+					return window.__s2bOriginalSemanticSearch(...args);
+				};
+				return 'patched';
+			})()`),
+		).toContain("patched");
+
+		expect(
+			obsidianEval(`(() => {
+				const modal = document.querySelector('.s2b-search-modal');
+				if (!(modal instanceof HTMLElement)) return 'missing-modal';
+				const event = new KeyboardEvent('keydown', {
+					key: 'Tab',
+					code: 'Tab',
+					bubbles: true,
+					cancelable: true,
+				});
+				modal.dispatchEvent(event);
+				return modal.querySelector('.prompt-instructions')?.textContent ?? 'ok';
+			})()`),
+		).not.toContain("missing");
+
+		obsidianEval(`(() => {
+			const input = document.querySelector('.s2b-search-modal .prompt-input');
+			if (!(input instanceof HTMLInputElement)) return 'missing';
+			input.value = 'machine learning';
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+			return input.value;
+		})()`);
+
+		await waitForCondition(
+			() => domCount('.s2b-search-modal-glow') > 0,
+			"semantic glow to appear during active search",
+			{ timeoutMs: 10_000, intervalMs: 100 },
+		);
+
+		await waitForCondition(
+			() => domCount('.s2b-search-result') > 0,
+			"semantic search results to appear",
+			{ timeoutMs: 20_000 },
+		);
+
+		await waitForCondition(
+			() => domCount('.s2b-search-modal-glow') === 0,
+			"semantic glow to stop once results are rendered",
+			{ timeoutMs: 10_000, intervalMs: 100 },
+		);
+
+		expect(
+			obsidianEval(`(() => {
+				const plugin = app.plugins.plugins['smart-second-brain'];
+				const original = window.__s2bOriginalSemanticSearch;
+				if (plugin?.vectorStoreService && typeof original === 'function') {
+					plugin.vectorStoreService.semanticSearch = original;
+				}
+				delete window.__s2bOriginalSemanticSearch;
+				return 'restored';
+			})()`),
+		).toContain("restored");
+	});
+
 	it("should close without errors when dismissed", async () => {
 		// Press Escape to close
 		obsidian(`dev:cdp method=Input.dispatchKeyEvent params='{"type":"keyDown","key":"Escape","code":"Escape"}'`, {

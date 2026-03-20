@@ -1,13 +1,13 @@
 {
-  "assistant_language": "Assistent Sprache",
-  "incognito_mode": "Inkognito-Modus",
-  "init_s2b": "Smart Second Brain initialisieren",
-  "settings": {
-    "search_algorithm": {
-      "title": "Suchalgorithmus",
-      "desc": "Wähle den Suchalgorithmus zum Abrufen von Notizen.",
-      "lexical": "Lexikalisch (BM25)",
-      "hybrid": "Hybrid (BM25 + semantisch)"
-    }
-  }
+	"assistant_language": "Assistent Sprache",
+	"incognito_mode": "Inkognito-Modus",
+	"init_s2b": "Smart Second Brain initialisieren",
+	"settings": {
+		"search_algorithm": {
+			"title": "Suchalgorithmus",
+			"desc": "Wähle den Suchalgorithmus zum Abrufen von Notizen.",
+			"lexical": "Lexikalisch (BM25)",
+			"hybrid": "Hybrid (BM25 + semantisch)"
+		}
+	}
 }
