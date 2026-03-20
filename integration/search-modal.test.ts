@@ -39,6 +39,12 @@ describe("search modal", () => {
 		"",
 		"This note is about propulsion systems.",
 	].join("\n");
+	const inlineTagOnlyNoteName = "Inline Tag Fixture.md";
+	const inlineTagOnlyNoteContent = [
+		"# Inline Tag Fixture",
+		"",
+		"This note mentions #stealth-inline in the body only.",
+	].join("\n");
 	const pathNoteName = "SpaceOps/Path Fixture.md";
 	const pathNoteContent = ["# Path Fixture", "", "This note is about telemetry and consoles."].join("\n");
 
@@ -51,12 +57,14 @@ describe("search modal", () => {
 		await waitForStandaloneMiniSearch();
 		createNote(aliasNoteName, aliasNoteContent);
 		createNote(tagNoteName, tagNoteContent);
+		createNote(inlineTagOnlyNoteName, inlineTagOnlyNoteContent);
 		createNote(pathNoteName, pathNoteContent);
 	});
 
 	afterAll(() => {
 		deleteNote(aliasNoteName);
 		deleteNote(tagNoteName);
+		deleteNote(inlineTagOnlyNoteName);
 		deleteNote(pathNoteName);
 		clearBuffers();
 	});
@@ -249,9 +257,34 @@ describe("search modal", () => {
 
 		expect(domText('.s2b-search-result-name')).toContain('Tag Fixture');
 		expect(domText('.s2b-search-result-badge')).toContain('Tag');
-		expect(domText('.s2b-search-result-snippet')).toContain('Tag: #orbital-index');
 		expect(domCount('.s2b-search-result-tag')).toBeGreaterThan(0);
 		expect(domText('.s2b-search-result-tags')).toContain('#orbital-index');
+		expect(
+			obsidianEval(`(() => {
+				const firstResult = document.querySelector('.s2b-search-result');
+				return firstResult?.querySelector('.s2b-search-result-snippet')?.textContent ?? '';
+			})()`),
+		).toBe('');
+	});
+
+	it("should keep inline content tags out of the title tag pills", async () => {
+		obsidianEval(`(() => {
+			const input = document.querySelector('.s2b-search-modal .prompt-input');
+			if (!(input instanceof HTMLInputElement)) return 'missing';
+			input.value = 'stealth-inline';
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+			return input.value;
+		})()`);
+
+		await waitForCondition(
+			() => domText('.s2b-search-result-name').includes('Inline Tag Fixture'),
+			"inline tag match to appear",
+			{ timeoutMs: 20_000 },
+		);
+
+		expect(domText('.s2b-search-result-name')).toContain('Inline Tag Fixture');
+		expect(domText('.s2b-search-result-snippet')).toContain('Tag: #stealth-inline');
+		expect(domCount('.s2b-search-result-tag')).toBe(0);
 	});
 
 	it("should show path matches with path badge", async () => {

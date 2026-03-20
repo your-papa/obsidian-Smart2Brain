@@ -148,6 +148,53 @@ function normalizeDisplayTags(tags: string[] | undefined): string[] {
 	);
 }
 
+function getFrontmatterDisplayTags(frontmatter: Record<string, unknown> | undefined): string[] {
+	if (!frontmatter) {
+		return [];
+	}
+
+	const rawTags = frontmatter.tags ?? frontmatter.tag;
+	if (typeof rawTags === "string") {
+		return normalizeDisplayTags(
+			rawTags
+				.split(",")
+				.map((tag) => tag.trim())
+				.filter((tag) => tag.length > 0),
+		);
+	}
+
+	if (Array.isArray(rawTags)) {
+		return normalizeDisplayTags(rawTags.filter((tag): tag is string => typeof tag === "string"));
+	}
+
+	return [];
+}
+
+function getDisplayTagLabel(tag: string): string {
+	return tag.startsWith("#") ? tag.slice(1) : tag;
+}
+
+function getExplanationTag(matchExplanation: SearchResult["matchExplanation"]): string | undefined {
+	if (matchExplanation?.source !== "tag") {
+		return undefined;
+	}
+
+	const match = matchExplanation.text.match(/^Tag:\s*(#\S+)/u);
+	return match?.[1];
+}
+
+function shouldShowMatchExplanation(
+	matchExplanation: SearchResult["matchExplanation"],
+	displayTags: string[],
+): boolean {
+	const explanationTag = getExplanationTag(matchExplanation);
+	if (!explanationTag) {
+		return true;
+	}
+
+	return !displayTags.includes(explanationTag);
+}
+
 function quoteFilterValue(value: string): string {
 	return /\s/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
 }
@@ -640,7 +687,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 		const showTags = searchSettings.searchShowTags;
 		const showMatchBadges = searchSettings.searchShowMatchBadges;
 		const showMatchContext = searchSettings.searchShowMatchContext;
-		const displayTags = showTags ? normalizeDisplayTags(result.tags) : [];
+		const displayTags = showTags ? getFrontmatterDisplayTags(result.frontmatter) : [];
 
 		// Title row
 		const titleRow = container.createDiv({ cls: "s2b-search-result-title" });
@@ -684,7 +731,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 						tagIcon.render(tagIconEl);
 					}
 
-					tagEl.createSpan({ text: tag, cls: "s2b-search-result-tag-label" });
+					tagEl.createSpan({ text: getDisplayTagLabel(tag), cls: "s2b-search-result-tag-label" });
 				}
 
 				if (hiddenTags.length > 0) {
@@ -713,7 +760,11 @@ export class SearchModal extends SuggestModal<SearchResult> {
 			}
 		}
 
-		if (showMatchContext && result.matchExplanation) {
+		if (
+			showMatchContext &&
+			result.matchExplanation &&
+			shouldShowMatchExplanation(result.matchExplanation, displayTags)
+		) {
 			const explanationRow = container.createDiv({ cls: "s2b-search-result-explanation" });
 
 			if (result.matchExplanation.heading) {
