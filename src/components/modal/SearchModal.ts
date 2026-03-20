@@ -355,11 +355,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 			evt.preventDefault();
 			this.semanticEnabled = !this.semanticEnabled;
 			this.updateInstructions();
-			if (this.semanticEnabled) {
-				this.startGlowAnimation();
-			} else {
-				this.stopGlowAnimation();
-			}
+			this.syncGlowAnimation();
 			// Re-run search with new algorithm if there's a query
 			if (this.currentQuery.trim()) {
 				this.lastSearchedQuery = ""; // Force re-search
@@ -375,6 +371,24 @@ export class SearchModal extends SuggestModal<SearchResult> {
 
 	private get activeAlgorithm(): SearchAlgorithm {
 		return this.semanticEnabled ? "hybrid" : "lexical";
+	}
+
+	private syncGlowAnimation(): void {
+		if (this.semanticEnabled && this.isSearching) {
+			this.startGlowAnimation();
+			return;
+		}
+
+		this.stopGlowAnimation();
+	}
+
+	private setSearching(isSearching: boolean): void {
+		if (this.isSearching === isSearching) {
+			return;
+		}
+
+		this.isSearching = isSearching;
+		this.syncGlowAnimation();
 	}
 
 	private updateInstructions(): void {
@@ -435,6 +449,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 		} else if (!rawQuery.trim()) {
 			this.searchResults = [];
 			this.lastSearchedQuery = "";
+			this.setSearching(false);
 			// @ts-ignore - updateSuggestions is a protected method
 			this.updateSuggestions();
 		}
@@ -534,6 +549,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 			pointerEvents: "none",
 			zIndex: "9999",
 		});
+		border.className = "s2b-search-modal-glow";
 		document.body.appendChild(border);
 		this.borderEl = border;
 
@@ -611,12 +627,13 @@ export class SearchModal extends SuggestModal<SearchResult> {
 
 			if (!rawQuery.trim()) {
 				this.searchResults = [];
+				this.setSearching(false);
 				// @ts-ignore - updateSuggestions is a protected method
 				this.updateSuggestions();
 				return;
 			}
 
-			this.isSearching = true;
+			this.setSearching(true);
 			const algorithm = this.activeAlgorithm;
 
 			// Parse query for filter syntax
@@ -631,7 +648,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 			// Skip if no query and no filter
 			if (!query.trim() && !effectiveFilter) {
 				this.searchResults = [];
-				this.isSearching = false;
+				this.setSearching(false);
 				// @ts-ignore - updateSuggestions is a protected method
 				this.updateSuggestions();
 				return;
@@ -650,7 +667,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 				Logger.error("[SearchModal] Search failed:", error);
 				this.searchResults = [];
 			} finally {
-				this.isSearching = false;
+				this.setSearching(false);
 			}
 		},
 		200,

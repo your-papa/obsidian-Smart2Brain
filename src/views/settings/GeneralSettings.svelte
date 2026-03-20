@@ -1,44 +1,43 @@
 <script lang="ts">
-  import { t } from "svelte-i18n";
-  import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
-  import ProviderItem from "../../components/settings/ProviderItem.svelte";
-  import SettingGroup from "../../components/settings/SettingGroup.svelte";
-  import SettingItem from "../../components/settings/SettingItem.svelte";
-  import Button from "../../components/ui/Button.svelte";
-  import Dropdown from "../../components/ui/Dropdown.svelte";
-  import Text from "../../components/ui/Text.svelte";
-  import Toggle from "../../components/ui/Toggle.svelte";
-  import { getAllProviderTemplates, type ProviderTemplateId } from "../../providers/index";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { Logger } from "../../utils/logging";
-  import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
+import { t } from "svelte-i18n";
+import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
+import ProviderItem from "../../components/settings/ProviderItem.svelte";
+import SettingGroup from "../../components/settings/SettingGroup.svelte";
+import SettingItem from "../../components/settings/SettingItem.svelte";
+import Button from "../../components/ui/Button.svelte";
+import Dropdown from "../../components/ui/Dropdown.svelte";
+import Text from "../../components/ui/Text.svelte";
+import Toggle from "../../components/ui/Toggle.svelte";
+import { getAllProviderTemplates, type ProviderTemplateId } from "../../providers/index";
+import { getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { Logger } from "../../utils/logging";
+import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
 
-  const pluginData = getData();
-  const plugin = getPlugin();
+const pluginData = getData();
+const plugin = getPlugin();
 
-  const privacyListModal = new PrivacyListModal(plugin.app);
+const privacyListModal = new PrivacyListModal(plugin.app);
 
-  // Provider management state
-  let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
-  const providerTemplates = getAllProviderTemplates();
-  const providerTemplateOptions = providerTemplates.map((template) => ({
-    display: template.displayName,
-    value: template.id,
-  }));
-  let selectedTemplateId = $state<ProviderTemplateId>("openai-compatible");
-  let selectedTemplate = $derived(
-    providerTemplates.find((template) => template.id === selectedTemplateId) ??
-      providerTemplates[0],
-  );
+// Provider management state
+let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
+const providerTemplates = getAllProviderTemplates();
+const providerTemplateOptions = providerTemplates.map((template) => ({
+	display: template.displayName,
+	value: template.id,
+}));
+let selectedTemplateId = $state<ProviderTemplateId>("openai-compatible");
+let selectedTemplate = $derived(
+	providerTemplates.find((template) => template.id === selectedTemplateId) ?? providerTemplates[0],
+);
 
-  function handleTemplateChange(templateId: string) {
-    selectedTemplateId = templateId as ProviderTemplateId;
-  }
+function handleTemplateChange(templateId: string) {
+	selectedTemplateId = templateId as ProviderTemplateId;
+}
 
-  function handleOpenProviderSetup() {
-    new ProviderSetupModal(plugin, { templateId: selectedTemplateId }).open();
-  }
+function handleOpenProviderSetup() {
+	new ProviderSetupModal(plugin, { templateId: selectedTemplateId }).open();
+}
 </script>
 
 <!-- Providers -->

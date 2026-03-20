@@ -1,60 +1,60 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import type { IndexingReport, SkipReason } from "../../vectorstore/types";
-  import { getVectorStoreService, isVectorStoreInitialized } from "../../vectorstore";
-  import type { IndexingReportModal } from "./IndexingReportModal";
+import { onMount } from "svelte";
+import type { IndexingReport, SkipReason } from "../../vectorstore/types";
+import { getVectorStoreService, isVectorStoreInitialized } from "../../vectorstore";
+import type { IndexingReportModal } from "./IndexingReportModal";
 
-  interface Props {
-    modal: IndexingReportModal;
-    indexId: string;
-  }
+interface Props {
+	modal: IndexingReportModal;
+	indexId: string;
+}
 
-  let { modal, indexId }: Props = $props();
+let { modal, indexId }: Props = $props();
 
-  let report = $state<IndexingReport | null>(null);
-  let loading = $state(true);
-  let activeTab = $state<"indexed" | "skipped">("indexed");
+let report = $state<IndexingReport | null>(null);
+let loading = $state(true);
+let activeTab = $state<"indexed" | "skipped">("indexed");
 
-  const skipReasonLabels: Record<SkipReason, string> = {
-    excluded: "Excluded by internal rules",
-    privacy: "Private (untrusted provider)",
-    "too-large": "Too large for embedding model",
-    "not-indexed": "Not yet indexed",
-    "read-error": "Failed to read file",
-    "embed-error": "Embedding failed",
-  };
+const skipReasonLabels: Record<SkipReason, string> = {
+	excluded: "Excluded by internal rules",
+	privacy: "Private (untrusted provider)",
+	"too-large": "Too large for embedding model",
+	"not-indexed": "Not yet indexed",
+	"read-error": "Failed to read file",
+	"embed-error": "Embedding failed",
+};
 
-  const skipReasonIcons: Record<SkipReason, string> = {
-    excluded: "folder-x",
-    privacy: "shield",
-    "too-large": "file-warning",
-    "not-indexed": "clock",
-    "read-error": "alert-triangle",
-    "embed-error": "zap-off",
-  };
+const skipReasonIcons: Record<SkipReason, string> = {
+	excluded: "folder-x",
+	privacy: "shield",
+	"too-large": "file-warning",
+	"not-indexed": "clock",
+	"read-error": "alert-triangle",
+	"embed-error": "zap-off",
+};
 
-  const skippedByReason = $derived.by(() => {
-    if (!report) return new Map<SkipReason, string[]>();
-    const map = new Map<SkipReason, string[]>();
-    for (const { path, reason } of report.skippedFiles) {
-      if (!map.has(reason)) map.set(reason, []);
-      map.get(reason)!.push(path);
-    }
-    return map;
-  });
+const skippedByReason = $derived.by(() => {
+	if (!report) return new Map<SkipReason, string[]>();
+	const map = new Map<SkipReason, string[]>();
+	for (const { path, reason } of report.skippedFiles) {
+		if (!map.has(reason)) map.set(reason, []);
+		map.get(reason)!.push(path);
+	}
+	return map;
+});
 
-  const totalSkipped = $derived(report?.skippedFiles.length ?? 0);
-  const totalIndexed = $derived(report?.indexedFiles.length ?? 0);
+const totalSkipped = $derived(report?.skippedFiles.length ?? 0);
+const totalIndexed = $derived(report?.indexedFiles.length ?? 0);
 
-  onMount(async () => {
-    if (!isVectorStoreInitialized()) {
-      loading = false;
-      return;
-    }
-    const service = getVectorStoreService();
-    report = await service.getReport(indexId);
-    loading = false;
-  });
+onMount(async () => {
+	if (!isVectorStoreInitialized()) {
+		loading = false;
+		return;
+	}
+	const service = getVectorStoreService();
+	report = await service.getReport(indexId);
+	loading = false;
+});
 </script>
 
 {#if loading}
