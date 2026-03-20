@@ -12,6 +12,7 @@ export interface ThreadStore {
 	delete(threadId: string): Promise<void>;
 	list(): Promise<ThreadSnapshot[]>;
 	clear(): Promise<void>;
+	flush?(threadId?: string): Promise<void>;
 }
 
 export interface ThreadSnapshotInit {

@@ -1074,7 +1074,9 @@ export class AgentManager {
 		Logger.log("Agent reinitialized successfully");
 	}
 
-	cleanup(): void {
+	async cleanup(): Promise<void> {
+		await this.chatManager.flush();
+
 		// Restore original fetch if it was patched
 		const globalWithFetch = globalThis as typeof globalThis & { _originalFetch?: typeof fetch };
 		if (globalWithFetch._originalFetch) {

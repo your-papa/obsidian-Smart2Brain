@@ -170,12 +170,17 @@ export function normalizePath(path: string): string {
 	return path.replace(/\\/g, "/").replace(/\/+/g, "/");
 }
 
-export function debounce<T extends (...args: unknown[]) => unknown>(fn: T, delay: number): T {
+export function debounce<T extends (...args: unknown[]) => unknown>(
+	fn: T,
+	delay: number,
+): T & { cancel: () => void } {
 	let timeout: ReturnType<typeof setTimeout>;
-	return ((...args: unknown[]) => {
+	const debounced = ((...args: unknown[]) => {
 		clearTimeout(timeout);
 		timeout = setTimeout(() => fn(...args), delay);
-	}) as T;
+	}) as T & { cancel: () => void };
+	debounced.cancel = () => clearTimeout(timeout);
+	return debounced;
 }
 
 export function getAllTags(cache: CachedMetadata | null): string[] {
