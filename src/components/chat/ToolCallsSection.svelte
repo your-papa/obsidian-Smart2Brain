@@ -1,294 +1,408 @@
 <script lang="ts">
-import type { AssistantTimelineEvent, ToolCallState, ToolCallStatus } from "../../stores/chatStore.svelte";
-import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
+  import type {
+    AssistantTimelineEvent,
+    ToolCallState,
+    ToolCallStatus,
+  } from "../../stores/chatStore.svelte";
+  import { buildToolOutputRenderModel, type ToolOutputRenderModel } from "./toolOutputRenderModel";
+  import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 
-interface Props {
-	toolCalls?: ToolCallState[];
-	assistantTimeline?: AssistantTimelineEvent[];
-	collapsed: boolean;
-	answerContent?: string;
-	isStreaming?: boolean;
-	isError?: boolean;
-	isProcessing?: boolean;
-}
+  interface Props {
+    toolCalls?: ToolCallState[];
+    assistantTimeline?: AssistantTimelineEvent[];
+    collapsed: boolean;
+    answerContent?: string;
+    isStreaming?: boolean;
+    isError?: boolean;
+    isProcessing?: boolean;
+  }
 
-const { toolCalls, assistantTimeline, collapsed, answerContent, isStreaming, isError, isProcessing }: Props = $props();
+  const {
+    toolCalls,
+    assistantTimeline,
+    collapsed,
+    answerContent,
+    isStreaming,
+    isError,
+    isProcessing,
+  }: Props = $props();
 
-let expandedSteps: Record<string, boolean> = $state({});
-let hoveringFinalControl = $state(false);
+  let expandedSteps: Record<string, boolean> = $state({});
+  let hoveringFinalControl = $state(false);
 
-/* ── Formatters ── */
+  /* ── Formatters ── */
 
-function formatToolName(name: string): string {
-	if (!name) return "Unknown Tool";
-	return name
-		.replace(/_/g, " ")
-		.replace(/([a-z])([A-Z])/g, "$1 $2")
-		.replace(/\b\w/g, (c) => c.toUpperCase());
-}
+  function formatToolName(name: string): string {
+    if (!name) return "Unknown Tool";
+    return name
+      .replace(/_/g, " ")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
 
-function formatValue(value: unknown): string {
-	if (value === null || value === undefined) return "null";
-	if (typeof value === "string") return value;
-	if (typeof value === "object") return JSON.stringify(value, null, 2);
-	return String(value);
-}
+  function formatValue(value: unknown): string {
+    if (value === null || value === undefined) return "null";
+    if (typeof value === "string") return value;
+    if (typeof value === "object") return JSON.stringify(value, null, 2);
+    return String(value);
+  }
 
-function formatToolInput(input: Record<string, unknown> | null | undefined): { key: string; value: unknown }[] {
-	if (!input || typeof input !== "object" || Array.isArray(input)) return [];
-	return Object.entries(input).map(([key, value]) => ({ key, value }));
-}
+  function formatToolInput(
+    input: Record<string, unknown> | null | undefined,
+  ): { key: string; value: unknown }[] {
+    if (!input || typeof input !== "object" || Array.isArray(input)) return [];
+    return Object.entries(input).map(([key, value]) => ({ key, value }));
+  }
 
-function hasToolInputValue(value: unknown): boolean {
-	if (value === null || value === undefined) return false;
-	if (typeof value === "string") return value.trim().length > 0;
-	if (Array.isArray(value)) return value.length > 0;
-	if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
-	return true;
-}
+  function hasToolInputValue(value: unknown): boolean {
+    if (value === null || value === undefined) return false;
+    if (typeof value === "string") return value.trim().length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
+    return true;
+  }
 
-function formatInlineValue(value: unknown): string {
-	if (typeof value === "string") return value;
-	if (typeof value === "number" || typeof value === "boolean") return String(value);
-	if (Array.isArray(value)) return `[${value.length} item${value.length === 1 ? "" : "s"}]`;
-	if (typeof value === "object" && value !== null) {
-		const keys = Object.keys(value as Record<string, unknown>);
-		if (keys.length === 1) return `{${keys[0]}}`;
-		return `{${keys.length} keys}`;
-	}
-	return formatValue(value);
-}
+  function formatInlineValue(value: unknown): string {
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    if (Array.isArray(value)) return `[${value.length} item${value.length === 1 ? "" : "s"}]`;
+    if (typeof value === "object" && value !== null) {
+      const keys = Object.keys(value as Record<string, unknown>);
+      if (keys.length === 1) return `{${keys[0]}}`;
+      return `{${keys.length} keys}`;
+    }
+    return formatValue(value);
+  }
 
-function getToolInputPreview(
-	input: Record<string, unknown> | null | undefined,
-	maxItems = 2,
-): { visibleEntries: { key: string; value: string }[]; hiddenCount: number } {
-	const entries = formatToolInput(input).filter((entry) => hasToolInputValue(entry.value));
-	const visibleEntries = entries.slice(0, maxItems).map(({ key, value }) => ({
-		key,
-		value: formatInlineValue(value),
-	}));
+  function getToolInputPreview(
+    input: Record<string, unknown> | null | undefined,
+    maxItems = 2,
+  ): { visibleEntries: { key: string; value: string }[]; hiddenCount: number } {
+    const entries = formatToolInput(input).filter((entry) => hasToolInputValue(entry.value));
+    const visibleEntries = entries.slice(0, maxItems).map(({ key, value }) => ({
+      key,
+      value: formatInlineValue(value),
+    }));
 
-	return {
-		visibleEntries,
-		hiddenCount: Math.max(0, entries.length - visibleEntries.length),
-	};
-}
+    return {
+      visibleEntries,
+      hiddenCount: Math.max(0, entries.length - visibleEntries.length),
+    };
+  }
 
-function formatToolOutput(output: unknown): string {
-	if (output === null || output === undefined) return "";
-	if (typeof output === "string") return output;
-	if (Array.isArray(output)) {
-		const textItems = output
-			.map((item: unknown) => {
-				if (item && typeof item === "object") {
-					const obj = item as Record<string, unknown>;
-					if (obj.type === "text" && obj.text !== undefined) return String(obj.text);
-					if (obj.type === "json" && obj.data !== undefined) return JSON.stringify(obj.data, null, 2);
-				}
-				return "";
-			})
-			.filter((text: string) => text !== "")
-			.join("\n");
-		if (textItems) return textItems;
-	}
-	if (typeof output === "object") {
-		const obj = output as Record<string, unknown>;
-		if (obj.type === "text" && obj.text !== undefined) return String(obj.text);
-		if (obj.content !== undefined) return formatToolOutput(obj.content);
-	}
-	return JSON.stringify(output, null, 2);
-}
+  function formatRawToolOutput(rawText: string): string {
+    const trimmed = rawText.trim();
+    if (!trimmed) return "";
+    const language = trimmed.startsWith("{") || trimmed.startsWith("[") ? "json" : "text";
+    return `\`\`\`${language}\n${rawText}\n\`\`\``;
+  }
 
-/* ── Unified tool call model ── */
+  function formatBytes(size?: number): string {
+    if (typeof size !== "number" || Number.isNaN(size)) return "-";
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
-interface UnifiedToolCall {
-	id: string;
-	name: string;
-	input?: Record<string, unknown>;
-	output?: unknown;
-	status: ToolCallStatus;
-}
+  function getVisibleItems<T>(
+    items: T[] | undefined,
+    maxItems = 8,
+  ): { visible: T[]; hiddenCount: number } {
+    const visible = (items ?? []).slice(0, maxItems);
+    return {
+      visible,
+      hiddenCount: Math.max(0, (items?.length ?? 0) - visible.length),
+    };
+  }
 
-interface TimelineStep {
-	id: string;
-	preambles: string[];
-	tools: UnifiedToolCall[];
-}
+  function countLines(value: string): number {
+    return value.split(/\r?\n/).length;
+  }
 
-function buildStepsFromEvents(rawEvents: AssistantTimelineEvent[]): TimelineStep[] {
-	const steps: TimelineStep[] = [];
-	const stepByGroup = new Map<string, TimelineStep>();
+  function formatReadContentSource(sourceType: "file" | "pdf" | "excalidraw"): string {
+    if (sourceType === "pdf") return "PDF";
+    if (sourceType === "excalidraw") return "Excalidraw";
+    return "Note";
+  }
 
-	// If events have aiMessageId, group by it; otherwise fall back to single-step heuristic
-	const hasGroupIds = rawEvents.some((e) => e.aiMessageId !== undefined);
+  /* ── Unified tool call model ── */
 
-	if (hasGroupIds) {
-		for (const event of rawEvents) {
-			// tool_end events never create a new step — they only update an existing tool
-			// across all steps (the aiMessageId on tool_end may differ from tool_start when
-			// the first tool call in a stream has no preamble and lastAiMessageId was still
-			// undefined at tool_start time). Creating a step here would leave empty steps.
-			if (event.type === "tool_end") {
-				for (const s of steps) {
-					const tool = s.tools.find((t) => t.id === event.toolCallId);
-					if (tool) {
-						tool.status = event.status ?? "completed";
-						tool.output = event.output;
-						break;
-					}
-				}
-				continue;
-			}
+  interface UnifiedToolCall {
+    id: string;
+    name: string;
+    input?: Record<string, unknown>;
+    output?: unknown;
+    status: ToolCallStatus;
+  }
 
-			const groupId = event.aiMessageId ?? "unknown";
+  interface DirectoryTreeFileView {
+    name: string;
+    path: string;
+    extension?: string;
+    size?: number;
+  }
 
-			if (!stepByGroup.has(groupId)) {
-				const step: TimelineStep = {
-					id: `step-${groupId}`,
-					preambles: [],
-					tools: [],
-				};
-				stepByGroup.set(groupId, step);
-				steps.push(step);
-			}
-			const step = stepByGroup.get(groupId)!;
+  interface DirectoryTreeNodeView {
+    name: string;
+    path: string;
+    folders: DirectoryTreeNodeView[];
+    files: DirectoryTreeFileView[];
+  }
 
-			if (event.type === "preamble" && event.content?.trim()) {
-				step.preambles.push(event.content.trim());
-			} else if (event.type === "tool_start") {
-				step.tools.push({
-					id: event.toolCallId ?? "",
-					name: event.toolName ?? "Unknown",
-					input: event.input,
-					status: "running",
-				});
-			}
-		}
-	} else {
-		// Fallback: all events belong to one step (no boundary info available)
-		const step: TimelineStep = { id: "step-0", preambles: [], tools: [] };
-		for (const event of rawEvents) {
-			if (event.type === "preamble" && event.content?.trim()) {
-				step.preambles.push(event.content.trim());
-			} else if (event.type === "tool_start") {
-				step.tools.push({
-					id: event.toolCallId ?? "",
-					name: event.toolName ?? "Unknown",
-					input: event.input,
-					status: "running",
-				});
-			} else if (event.type === "tool_end") {
-				const tool = step.tools.find((t) => t.id === event.toolCallId);
-				if (tool) {
-					tool.status = event.status ?? "completed";
-					tool.output = event.output;
-				}
-			}
-		}
-		if (step.tools.length > 0 || step.preambles.length > 0) steps.push(step);
-	}
+  interface TimelineStep {
+    id: string;
+    preambles: string[];
+    tools: UnifiedToolCall[];
+  }
 
-	return steps;
-}
+  function buildStepsFromEvents(rawEvents: AssistantTimelineEvent[]): TimelineStep[] {
+    const steps: TimelineStep[] = [];
+    const stepByGroup = new Map<string, TimelineStep>();
 
-function buildStepsFromToolCalls(calls: ToolCallState[] | undefined): TimelineStep[] {
-	if (!calls || calls.length === 0) return [];
-	const step: TimelineStep = { id: "step-0", preambles: [], tools: [] };
-	for (const tc of calls) {
-		if (tc.preamble?.trim()) step.preambles.push(tc.preamble.trim());
-		step.tools.push({
-			id: tc.id,
-			name: tc.name,
-			input: tc.input,
-			output: tc.output,
-			status: tc.status,
-		});
-	}
-	return [step];
-}
+    // If events have aiMessageId, group by it; otherwise fall back to single-step heuristic
+    const hasGroupIds = rawEvents.some((e) => e.aiMessageId !== undefined);
 
-/* ── Step helpers ── */
+    if (hasGroupIds) {
+      for (const event of rawEvents) {
+        // tool_end events never create a new step — they only update an existing tool
+        // across all steps (the aiMessageId on tool_end may differ from tool_start when
+        // the first tool call in a stream has no preamble and lastAiMessageId was still
+        // undefined at tool_start time). Creating a step here would leave empty steps.
+        if (event.type === "tool_end") {
+          for (const s of steps) {
+            const tool = s.tools.find((t) => t.id === event.toolCallId);
+            if (tool) {
+              tool.status = event.status ?? "completed";
+              tool.output = event.output;
+              break;
+            }
+          }
+          continue;
+        }
 
-function isStepRunning(step: TimelineStep): boolean {
-	return step.tools.some((t) => t.status === "running");
-}
+        const groupId = event.aiMessageId ?? "unknown";
 
-function getCollapsedStepLabel(step: TimelineStep): string {
-	if (step.tools.length === 0) return step.preambles.length > 0 ? "Thinking…" : "0 tools";
+        if (!stepByGroup.has(groupId)) {
+          const step: TimelineStep = {
+            id: `step-${groupId}`,
+            preambles: [],
+            tools: [],
+          };
+          stepByGroup.set(groupId, step);
+          steps.push(step);
+        }
+        const step = stepByGroup.get(groupId)!;
 
-	const groupedCounts = new Map<string, number>();
-	for (const tool of step.tools) {
-		const formattedName = formatToolName(tool.name);
-		groupedCounts.set(formattedName, (groupedCounts.get(formattedName) ?? 0) + 1);
-	}
+        if (event.type === "preamble" && event.content?.trim()) {
+          step.preambles.push(event.content.trim());
+        } else if (event.type === "tool_start") {
+          step.tools.push({
+            id: event.toolCallId ?? "",
+            name: event.toolName ?? "Unknown",
+            input: event.input,
+            status: "running",
+          });
+        }
+      }
+    } else {
+      // Fallback: all events belong to one step (no boundary info available)
+      const step: TimelineStep = { id: "step-0", preambles: [], tools: [] };
+      for (const event of rawEvents) {
+        if (event.type === "preamble" && event.content?.trim()) {
+          step.preambles.push(event.content.trim());
+        } else if (event.type === "tool_start") {
+          step.tools.push({
+            id: event.toolCallId ?? "",
+            name: event.toolName ?? "Unknown",
+            input: event.input,
+            status: "running",
+          });
+        } else if (event.type === "tool_end") {
+          const tool = step.tools.find((t) => t.id === event.toolCallId);
+          if (tool) {
+            tool.status = event.status ?? "completed";
+            tool.output = event.output;
+          }
+        }
+      }
+      if (step.tools.length > 0 || step.preambles.length > 0) steps.push(step);
+    }
 
-	return Array.from(groupedCounts.entries())
-		.map(([name, count]) => (count > 1 ? `${name} (${count})` : name))
-		.join(", ");
-}
+    return steps;
+  }
 
-function hasStepFailure(step: TimelineStep): boolean {
-	return step.tools.some((t) => t.status === "failed");
-}
+  function buildStepsFromToolCalls(calls: ToolCallState[] | undefined): TimelineStep[] {
+    if (!calls || calls.length === 0) return [];
+    const step: TimelineStep = { id: "step-0", preambles: [], tools: [] };
+    for (const tc of calls) {
+      if (tc.preamble?.trim()) step.preambles.push(tc.preamble.trim());
+      step.tools.push({
+        id: tc.id,
+        name: tc.name,
+        input: tc.input,
+        output: tc.output,
+        status: tc.status,
+      });
+    }
+    return [step];
+  }
 
-function getOverallStatus(stepsArg: TimelineStep[]): "running" | "completed" {
-	return stepsArg.some(isStepRunning) ? "running" : "completed";
-}
+  function getDirectoryNodeName(path: string, fallback = "/"): string {
+    if (!path || path === "/") return fallback;
+    const segments = path.split("/").filter(Boolean);
+    return segments.at(-1) ?? fallback;
+  }
 
-/* ── Derived state ── */
+  function shouldShowDirectoryTreePath(name: string, path: string): boolean {
+    if (!path || path === "/") return false;
+    return getDirectoryNodeName(path, path) !== name;
+  }
 
-const steps = $derived(
-	assistantTimeline && assistantTimeline.length > 0
-		? buildStepsFromEvents(assistantTimeline)
-		: buildStepsFromToolCalls(toolCalls),
-);
-const overallStatus = $derived(getOverallStatus(steps));
+  function buildDirectoryTreeView(
+    payload: Extract<ToolOutputRenderModel, { kind: "list_directory" }>["payload"],
+  ): DirectoryTreeNodeView {
+    const joinDirectoryPath = (basePath: string, name: string): string => {
+      if (!basePath || basePath === "/") return name;
+      return `${basePath}/${name}`;
+    };
 
-// Show answer as a final timeline step when there's content or tools finished streaming.
-// Guard with steps.length > 0 so that during initial processing (no tool-call steps yet)
-// showProcessingDot takes over instead of the answer step pre-empting it.
-const showAnswerStep = $derived(
-	!!(answerContent || (isStreaming && overallStatus === "completed" && steps.length > 0)),
-);
-// Show a lone processing dot when nothing has arrived yet
-const showProcessingDot = $derived(!!isProcessing && steps.length === 0 && !showAnswerStep);
-const effectiveTotal = $derived(steps.length + (showAnswerStep ? 1 : 0) + (showProcessingDot ? 1 : 0));
+    const normalizeFile = (
+      file: {
+        name?: string;
+        extension?: string;
+        size?: number;
+      },
+      parentPath: string,
+    ): DirectoryTreeFileView => ({
+      name: file.name ?? "Unknown file",
+      path: joinDirectoryPath(parentPath, file.name ?? "Unknown file"),
+      extension: file.extension,
+      size: file.size,
+    });
 
-// When content is streaming but no tool-call steps have arrived yet, render the
-// answer inline (no timeline dot/rail) so the layout matches the plain-text
-// MarkdownRenderer that takes over once streaming completes.  This prevents a
-// visible layout jump when the stream ends and the else-branch mounts.
-const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && showAnswerStep);
+    const fromPayloadTree = (
+      node: unknown,
+      currentPath: string,
+    ): DirectoryTreeNodeView | undefined => {
+      if (!node || typeof node !== "object" || Array.isArray(node)) return undefined;
+      const candidate = node as {
+        folders?: Record<string, unknown>;
+        files?: Array<{ name?: string; extension?: string; size?: number }>;
+      };
+      const folders = Object.entries(candidate.folders ?? {}).map(([folderName, childNode]) => {
+        const childPath = joinDirectoryPath(currentPath, folderName);
+        return (
+          fromPayloadTree(childNode, childPath) ?? {
+            name: folderName,
+            path: childPath,
+            folders: [],
+            files: [],
+          }
+        );
+      });
 
-// Reset per-step expand state when collapse state changes (new stream starts)
-$effect(() => {
-	if (!collapsed) expandedSteps = {};
-});
+      return {
+        name: getDirectoryNodeName(currentPath),
+        path: currentPath,
+        folders,
+        files: (candidate.files ?? []).map((file) => normalizeFile(file, currentPath)),
+      };
+    };
 
-function handleStepRailClick(stepId: string) {
-	expandedSteps[stepId] = !expandedSteps[stepId];
-}
+    const rootPath = payload.root ?? "/";
+    return (
+      fromPayloadTree(payload.tree, rootPath) ?? {
+        name: getDirectoryNodeName(rootPath),
+        path: rootPath,
+        folders: [],
+        files: [],
+      }
+    );
+  }
 
-function isStepExpanded(stepId: string): boolean {
-	return !collapsed || !!expandedSteps[stepId];
-}
+  /* ── Step helpers ── */
 
-function toggleAllPreviousSteps() {
-	if (!collapsed || steps.length === 0) return;
+  function isStepRunning(step: TimelineStep): boolean {
+    return step.tools.some((t) => t.status === "running");
+  }
 
-	const areAllExpanded = steps.every((step) => !!expandedSteps[step.id]);
-	if (areAllExpanded) {
-		expandedSteps = {};
-		return;
-	}
+  function getCollapsedStepLabel(step: TimelineStep): string {
+    if (step.tools.length === 0) return step.preambles.length > 0 ? "Thinking…" : "0 tools";
 
-	const nextExpanded: Record<string, boolean> = {};
-	for (const step of steps) {
-		nextExpanded[step.id] = true;
-	}
-	expandedSteps = nextExpanded;
-}
+    const groupedCounts = new Map<string, number>();
+    for (const tool of step.tools) {
+      const formattedName = formatToolName(tool.name);
+      groupedCounts.set(formattedName, (groupedCounts.get(formattedName) ?? 0) + 1);
+    }
+
+    return Array.from(groupedCounts.entries())
+      .map(([name, count]) => (count > 1 ? `${name} (${count})` : name))
+      .join(", ");
+  }
+
+  function hasStepFailure(step: TimelineStep): boolean {
+    return step.tools.some((t) => t.status === "failed");
+  }
+
+  function getOverallStatus(stepsArg: TimelineStep[]): "running" | "completed" {
+    return stepsArg.some(isStepRunning) ? "running" : "completed";
+  }
+
+  /* ── Derived state ── */
+
+  const steps = $derived(
+    assistantTimeline && assistantTimeline.length > 0
+      ? buildStepsFromEvents(assistantTimeline)
+      : buildStepsFromToolCalls(toolCalls),
+  );
+  const overallStatus = $derived(getOverallStatus(steps));
+
+  // Show answer as a final timeline step when there's content or tools finished streaming.
+  // Guard with steps.length > 0 so that during initial processing (no tool-call steps yet)
+  // showProcessingDot takes over instead of the answer step pre-empting it.
+  const showAnswerStep = $derived(
+    !!(answerContent || (isStreaming && overallStatus === "completed" && steps.length > 0)),
+  );
+  // Show a lone processing dot when nothing has arrived yet
+  const showProcessingDot = $derived(!!isProcessing && steps.length === 0 && !showAnswerStep);
+  const effectiveTotal = $derived(
+    steps.length + (showAnswerStep ? 1 : 0) + (showProcessingDot ? 1 : 0),
+  );
+
+  // When content is streaming but no tool-call steps have arrived yet, render the
+  // answer inline (no timeline dot/rail) so the layout matches the plain-text
+  // MarkdownRenderer that takes over once streaming completes.  This prevents a
+  // visible layout jump when the stream ends and the else-branch mounts.
+  const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && showAnswerStep);
+
+  // Reset per-step expand state when collapse state changes (new stream starts)
+  $effect(() => {
+    if (!collapsed) expandedSteps = {};
+  });
+
+  function handleStepRailClick(stepId: string) {
+    expandedSteps[stepId] = !expandedSteps[stepId];
+  }
+
+  function isStepExpanded(stepId: string): boolean {
+    return !collapsed || !!expandedSteps[stepId];
+  }
+
+  function toggleAllPreviousSteps() {
+    if (!collapsed || steps.length === 0) return;
+
+    const areAllExpanded = steps.every((step) => !!expandedSteps[step.id]);
+    if (areAllExpanded) {
+      expandedSteps = {};
+      return;
+    }
+
+    const nextExpanded: Record<string, boolean> = {};
+    for (const step of steps) {
+      nextExpanded[step.id] = true;
+    }
+    expandedSteps = nextExpanded;
+  }
 </script>
 
 {#snippet stepRow(
@@ -350,6 +464,10 @@ function toggleAllPreviousSteps() {
 
           {#each step.tools as tool (tool.id)}
             {@const inputPreview = getToolInputPreview(tool.input)}
+            {@const outputModel =
+              tool.output !== undefined
+                ? buildToolOutputRenderModel(tool.name, tool.output, tool.input)
+                : undefined}
             <details class="tool-card">
               <summary class="tool-card-header">
                 <span
@@ -430,10 +548,9 @@ function toggleAllPreviousSteps() {
                   <div class="tool-io-section">
                     <div class="tool-io-label">Output</div>
                     <div class="tool-io-output">
-                      <MarkdownRenderer
-                        content={formatToolOutput(tool.output)}
-                        class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.82rem] leading-[1.6] break-words [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-[--background-primary] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.88em] [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-1.5 [&_pre_code]:bg-transparent [&_pre_code]:p-0"
-                      />
+                      {#if outputModel}
+                        {@render outputRenderer(outputModel)}
+                      {/if}
                     </div>
                   </div>
                 {:else if tool.status !== "running"}
@@ -449,6 +566,326 @@ function toggleAllPreviousSteps() {
       </div>
     </div>
   </div>
+{/snippet}
+
+{#snippet directoryTreeNode(node: DirectoryTreeNodeView, depth = 0, isRoot = false)}
+  {#if !isRoot}
+    <div class="tool-output-tree-row tool-output-tree-row-folder" style={`--tree-depth: ${depth};`}>
+      <span class="tool-output-tree-icon">▾</span>
+      <span class="tool-output-tree-name">{node.name}</span>
+      {#if shouldShowDirectoryTreePath(node.name, node.path)}
+        <span class="tool-output-tree-path">{node.path}</span>
+      {/if}
+    </div>
+  {/if}
+
+  {#each node.folders as folder (folder.path)}
+    {@render directoryTreeNode(folder, depth + (isRoot ? 0 : 1))}
+  {/each}
+
+  {#each node.files as file (file.path)}
+    <div
+      class="tool-output-tree-row tool-output-tree-row-file"
+      style={`--tree-depth: ${depth + (isRoot ? 0 : 1)};`}
+    >
+      <span class="tool-output-tree-icon">•</span>
+      <span class="tool-output-tree-name">{file.name}</span>
+      {#if shouldShowDirectoryTreePath(file.name, file.path)}
+        <span class="tool-output-tree-path">{file.path}</span>
+      {/if}
+      <span class="tool-output-tree-meta">{file.extension ?? "-"} · {formatBytes(file.size)}</span>
+    </div>
+  {/each}
+{/snippet}
+
+{#snippet outputBody(model: ToolOutputRenderModel)}
+  {#if model.kind === "markdown"}
+    <MarkdownRenderer
+      content={model.markdown}
+      class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.82rem] leading-[1.6] break-words [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-[--background-primary] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.88em] [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-1.5 [&_pre_code]:bg-transparent [&_pre_code]:p-0"
+    />
+  {:else if model.kind === "scalar"}
+    <div class="tool-output-scalar">{model.value}</div>
+  {:else if model.kind === "keyValue"}
+    <div class="tool-output-kv-list">
+      {#each model.entries as entry (entry.key)}
+        <div class="tool-output-kv-row">
+          <span class="tool-output-kv-key">{entry.key}</span>
+          <span class="tool-output-kv-value">{entry.value}</span>
+        </div>
+      {/each}
+    </div>
+  {:else if model.kind === "list"}
+    <div class="tool-output-list">
+      {#each model.items as item, itemIndex (`list-${itemIndex}`)}
+        <div class="tool-output-list-item">{item}</div>
+      {/each}
+    </div>
+  {:else if model.kind === "table"}
+    <div class="tool-output-table-scroll">
+      <table class="tool-output-table">
+        <thead>
+          <tr>
+            {#each model.columns as column (column)}
+              <th>{column}</th>
+            {/each}
+          </tr>
+        </thead>
+        <tbody>
+          {#each model.rows as row, rowIndex (`row-${rowIndex}`)}
+            <tr>
+              {#each model.columns as column (column)}
+                <td>{row[column]}</td>
+              {/each}
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  {:else if model.kind === "structured"}
+    {#if model.summaryEntries.length > 0}
+      <div class="tool-output-kv-list tool-output-structured-summary">
+        {#each model.summaryEntries as entry (entry.key)}
+          <div class="tool-output-kv-row">
+            <span class="tool-output-kv-key">{entry.key}</span>
+            <span class="tool-output-kv-value">{entry.value}</span>
+          </div>
+        {/each}
+      </div>
+    {/if}
+    {#if model.sections.length > 0}
+      <div class="tool-output-structured-sections">
+        {#each model.sections as section (section.key)}
+          <details class="tool-output-nested-card">
+            <summary class="tool-output-nested-summary">
+              <span>{section.label}</span>
+              <span class="tool-output-nested-meta">{section.summary}</span>
+            </summary>
+            <MarkdownRenderer
+              content={formatRawToolOutput(section.json)}
+              class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.8rem] leading-[1.55] [&_pre]:my-0 [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded"
+            />
+          </details>
+        {/each}
+      </div>
+    {/if}
+  {:else if model.kind === "search_notes"}
+    {@const visibleResults = getVisibleItems(model.payload.results, 6)}
+    <div class="tool-output-metrics">
+      {#if model.payload.query}
+        <span class="tool-output-metric-chip">query: {model.payload.query}</span>
+      {/if}
+      {#if model.payload.algorithm}
+        <span class="tool-output-metric-chip">algorithm: {model.payload.algorithm}</span>
+      {/if}
+      {#if model.payload.totalResults !== undefined}
+        <span class="tool-output-metric-chip">results: {model.payload.totalResults}</span>
+      {/if}
+      {#if model.payload.returnedResults !== undefined}
+        <span class="tool-output-metric-chip">shown: {model.payload.returnedResults}</span>
+      {/if}
+      {#if model.payload.recentOnly}
+        <span class="tool-output-metric-chip">recent only</span>
+      {/if}
+    </div>
+    {#if model.payload.message}
+      <div class="tool-output-message">{model.payload.message}</div>
+    {/if}
+    {#if visibleResults.visible.length > 0}
+      <div class="tool-output-search-results">
+        {#each visibleResults.visible as result, resultIndex (`search-${result.path ?? result.name ?? resultIndex}`)}
+          <div class="tool-output-result-card">
+            <div class="tool-output-result-title-row">
+              <span class="tool-output-result-rank">#{result.rank ?? resultIndex + 1}</span>
+              <span class="tool-output-result-title"
+                >{result.name ?? result.path ?? "Untitled"}</span
+              >
+              {#if result.privacyRestricted}
+                <span class="tool-output-status-badge tool-output-status-badge-warning"
+                  >private</span
+                >
+              {/if}
+            </div>
+            {#if result.path}
+              <div class="tool-output-result-path">{result.path}</div>
+            {/if}
+            {#if result.matchExplanation}
+              <div class="tool-output-result-context">{result.matchExplanation}</div>
+            {/if}
+            {#if (result.tags?.length ?? 0) > 0 || (result.matchBadges?.length ?? 0) > 0}
+              <div class="tool-output-metrics">
+                {#each result.tags ?? [] as tag (tag)}
+                  <span class="tool-output-metric-chip">{tag}</span>
+                {/each}
+                {#each result.matchBadges ?? [] as badge (badge)}
+                  <span class="tool-output-metric-chip tool-output-metric-chip-accent">{badge}</span
+                  >
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+      {#if visibleResults.hiddenCount > 0}
+        <div class="tool-output-truncation-note">+{visibleResults.hiddenCount} more result(s)</div>
+      {/if}
+    {/if}
+  {:else if model.kind === "list_directory"}
+    {@const directoryTree = buildDirectoryTreeView(model.payload)}
+    <div class="tool-output-metrics">
+      <span class="tool-output-metric-chip">root: {model.payload.root ?? "/"}</span>
+      <span class="tool-output-metric-chip">folders: {model.payload.totalFolders ?? 0}</span>
+      <span class="tool-output-metric-chip">files: {model.payload.totalFiles ?? 0}</span>
+      {#if model.payload.recursive}
+        <span class="tool-output-metric-chip">recursive</span>
+      {/if}
+      {#if model.payload.maxDepth !== undefined}
+        <span class="tool-output-metric-chip">max depth: {model.payload.maxDepth}</span>
+      {/if}
+      {#if (model.payload.skippedPrivateFiles ?? 0) > 0}
+        <span class="tool-output-metric-chip tool-output-metric-chip-warning"
+          >skipped private: {model.payload.skippedPrivateFiles}</span
+        >
+      {/if}
+    </div>
+    {#if (model.payload.totalFolders ?? 0) > 0 || (model.payload.totalFiles ?? 0) > 0}
+      <div class="tool-output-group">
+        <div class="tool-output-group-title">Tree</div>
+        <div class="tool-output-tree">
+          {@render directoryTreeNode(directoryTree, 0, true)}
+        </div>
+      </div>
+    {/if}
+  {:else if model.kind === "manage_notes"}
+    <div class="tool-output-metrics">
+      <span class="tool-output-metric-chip">operations: {model.summary.operations}</span>
+      <span class="tool-output-metric-chip">paths: {model.summary.paths}</span>
+      {#each model.summary.breakdown as part (part)}
+        <span class="tool-output-metric-chip tool-output-metric-chip-accent">{part}</span>
+      {/each}
+    </div>
+    <div class="tool-output-message">{model.summary.message}</div>
+  {:else if model.kind === "read_content"}
+    <div class="tool-output-metrics">
+      <span class="tool-output-metric-chip"
+        >{formatReadContentSource(model.payload.sourceType)}</span
+      >
+      <span class="tool-output-metric-chip">{model.payload.target}</span>
+      {#if model.payload.label}
+        <span class="tool-output-metric-chip">{model.payload.label}</span>
+      {/if}
+      {#if model.payload.analysisLabel}
+        <span class="tool-output-metric-chip tool-output-metric-chip-accent"
+          >{model.payload.analysisLabel}</span
+        >
+      {/if}
+      {#if model.payload.truncated}
+        <span class="tool-output-metric-chip tool-output-metric-chip-warning">truncated</span>
+      {/if}
+    </div>
+    <div class="tool-output-read-content-card">
+      <MarkdownRenderer
+        content={model.payload.content}
+        class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.82rem] leading-[1.6] break-words [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-[--background-primary] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.88em] [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-1.5 [&_pre_code]:bg-transparent [&_pre_code]:p-0"
+      />
+    </div>
+  {:else if model.kind === "execute_dataview_query"}
+    <div class="tool-output-metrics">
+      <span class="tool-output-metric-chip">Dataview</span>
+      {#if model.payload.query}
+        <span class="tool-output-metric-chip">query attached</span>
+      {/if}
+      {#if model.payload.state === "empty"}
+        <span class="tool-output-metric-chip tool-output-metric-chip-warning">no results</span>
+      {:else if model.payload.state === "error"}
+        <span class="tool-output-metric-chip tool-output-metric-chip-warning">error</span>
+      {/if}
+    </div>
+    {#if model.payload.query}
+      <details class="tool-output-raw-toggle">
+        <summary class="tool-output-raw-summary">Query</summary>
+        <MarkdownRenderer
+          content={formatRawToolOutput(model.payload.query)}
+          class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.8rem] leading-[1.55] [&_pre]:my-0 [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded"
+        />
+      </details>
+    {/if}
+    <div class="tool-output-read-content-card">
+      <MarkdownRenderer
+        content={model.payload.markdown}
+        class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.82rem] leading-[1.6] break-words [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-[--background-primary] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.88em] [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-1.5 [&_pre_code]:bg-transparent [&_pre_code]:p-0"
+      />
+    </div>
+  {:else if model.kind === "execute_javascript"}
+    <div class="tool-output-metrics">
+      <span class="tool-output-metric-chip">JavaScript</span>
+      {#if model.payload.durationMs !== undefined}
+        <span class="tool-output-metric-chip">{model.payload.durationMs}ms</span>
+      {/if}
+      <span class="tool-output-metric-chip">logs: {model.payload.logs.length}</span>
+      {#if model.payload.state === "error"}
+        <span class="tool-output-metric-chip tool-output-metric-chip-warning">error</span>
+      {:else if model.payload.resultText}
+        <span class="tool-output-metric-chip tool-output-metric-chip-accent">return value</span>
+      {/if}
+    </div>
+    {#if model.payload.errorMessage}
+      <div class="tool-output-message tool-output-message-error">{model.payload.errorMessage}</div>
+    {/if}
+    {#if model.payload.logs.length > 0}
+      <div class="tool-output-group">
+        <div class="tool-output-group-title">Console Output</div>
+        <div class="tool-output-list">
+          {#each model.payload.logs as logEntry, logIndex (`log-${logIndex}`)}
+            <div class="tool-output-list-item tool-output-code-line">{logEntry}</div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+    {#if model.payload.resultText}
+      <div class="tool-output-group">
+        <div class="tool-output-group-title">Return Value</div>
+        <MarkdownRenderer
+          content={formatRawToolOutput(model.payload.resultText)}
+          class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.8rem] leading-[1.55] [&_pre]:my-0 [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded"
+        />
+      </div>
+    {/if}
+    {#if model.payload.code}
+      <details class="tool-output-raw-toggle">
+        <summary class="tool-output-raw-summary">Executed Code</summary>
+        <MarkdownRenderer
+          content={"```javascript\n" + model.payload.code + "\n```"}
+          class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.8rem] leading-[1.55] [&_pre]:my-0 [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded"
+        />
+      </details>
+    {/if}
+    {#if model.payload.inputJson}
+      <details class="tool-output-raw-toggle">
+        <summary class="tool-output-raw-summary">Input</summary>
+        <MarkdownRenderer
+          content={formatRawToolOutput(model.payload.inputJson)}
+          class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.8rem] leading-[1.55] [&_pre]:my-0 [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded"
+        />
+      </details>
+    {/if}
+  {:else}
+    <div class="tool-io-empty">(no output)</div>
+  {/if}
+
+  {#if model.rawText.trim() && model.kind !== "markdown"}
+    <details class="tool-output-raw-toggle">
+      <summary class="tool-output-raw-summary">Raw output</summary>
+      <MarkdownRenderer
+        content={formatRawToolOutput(model.rawText)}
+        class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.8rem] leading-[1.55] [&_pre]:my-0 [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded"
+      />
+    </details>
+  {/if}
+{/snippet}
+
+{#snippet outputRenderer(model: ToolOutputRenderModel)}
+  {@render outputBody(model)}
 {/snippet}
 
 {#if noTimelineWrap}
@@ -945,6 +1382,235 @@ function toggleAllPreviousSteps() {
     background: var(--background-primary);
     overflow-x: auto;
     font-size: 0.82rem;
+  }
+
+  .tool-output-scalar {
+    color: var(--text-normal);
+    font-size: 0.82rem;
+  }
+
+  .tool-output-kv-list,
+  .tool-output-list,
+  .tool-output-search-results,
+  .tool-output-tree,
+  .tool-output-structured-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .tool-output-kv-row,
+  .tool-output-list-item,
+  .tool-output-result-card,
+  .tool-output-message {
+    padding: 7px 8px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--background-secondary) 40%, transparent);
+  }
+
+  .tool-output-kv-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .tool-output-kv-key,
+  .tool-output-group-title,
+  .tool-output-raw-summary {
+    color: var(--text-accent);
+    font-size: 0.74rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .tool-output-kv-value,
+  .tool-output-message,
+  .tool-output-list-item,
+  .tool-output-result-context,
+  .tool-output-result-path,
+  .tool-output-truncation-note {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+  }
+
+  .tool-output-message-error {
+    color: var(--color-red);
+    background: color-mix(in srgb, var(--color-red) 10%, transparent);
+  }
+
+  .tool-output-code-line {
+    font-family: var(--font-monospace);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .tool-output-result-title-row,
+  .tool-output-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .tool-output-result-title-row {
+    align-items: center;
+    margin-bottom: 4px;
+  }
+
+  .tool-output-result-rank,
+  .tool-output-nested-meta {
+    color: var(--text-faint);
+    font-size: 0.74rem;
+    flex-shrink: 0;
+  }
+
+  .tool-output-result-title {
+    color: var(--text-normal);
+    font-weight: 600;
+  }
+
+  .tool-output-tree {
+    gap: 4px;
+  }
+
+  .tool-output-tree-row {
+    display: grid;
+    grid-template-columns: 12px minmax(0, auto) minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 8px;
+    padding: 4px 0 4px calc(var(--tree-depth, 0) * 14px);
+    min-width: 0;
+  }
+
+  .tool-output-tree-row-folder {
+    color: var(--text-normal);
+  }
+
+  .tool-output-tree-row-file {
+    color: var(--text-muted);
+  }
+
+  .tool-output-tree-icon {
+    color: var(--text-faint);
+    font-size: 0.72rem;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  .tool-output-tree-name {
+    min-width: 0;
+    color: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  .tool-output-tree-path {
+    min-width: 0;
+    color: var(--text-faint);
+    font-size: 0.76rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tool-output-tree-meta {
+    color: var(--text-faint);
+    font-size: 0.74rem;
+    white-space: nowrap;
+  }
+
+  .tool-output-result-path {
+    display: block;
+    margin-top: 2px;
+    word-break: break-word;
+  }
+
+  .tool-output-metric-chip,
+  .tool-output-status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+    color: var(--text-muted);
+    font-size: 0.72rem;
+  }
+
+  .tool-output-metric-chip-accent {
+    color: var(--interactive-accent);
+    background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+  }
+
+  .tool-output-metric-chip-warning,
+  .tool-output-status-badge-warning {
+    color: var(--color-orange);
+    background: color-mix(in srgb, var(--color-orange) 12%, transparent);
+  }
+
+  .tool-output-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .tool-output-read-content-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .tool-output-table-scroll {
+    overflow-x: auto;
+  }
+
+  .tool-output-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+  }
+
+  .tool-output-table th,
+  .tool-output-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .tool-output-table th {
+    color: var(--text-faint);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .tool-output-nested-card,
+  .tool-output-raw-toggle {
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--background-secondary) 35%, transparent);
+    overflow: hidden;
+  }
+
+  .tool-output-nested-summary,
+  .tool-output-raw-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 8px;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .tool-output-nested-summary::-webkit-details-marker,
+  .tool-output-raw-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .tool-output-raw-toggle {
+    margin-top: 8px;
   }
 
   .tool-io-empty {

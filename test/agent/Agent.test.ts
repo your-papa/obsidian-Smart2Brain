@@ -101,3 +101,33 @@ describe("Agent summarization middleware", () => {
 		);
 	});
 });
+
+describe("Agent stream tool output normalization", () => {
+	it("unwraps tool-message-like output wrappers", () => {
+		const agent = new Agent({ registry: makeRegistry() as never });
+
+		const output = (
+			agent as unknown as {
+				normalizeStreamToolOutput: (rawOutput: unknown) => unknown;
+			}
+		).normalizeStreamToolOutput({
+			content: [{ type: "text", text: "Found 3 results" }],
+			artifact: { totalResults: 3 },
+			status: "success",
+		});
+
+		expect(output).toEqual([{ type: "text", text: "Found 3 results" }]);
+	});
+
+	it("preserves missing tool output as undefined", () => {
+		const agent = new Agent({ registry: makeRegistry() as never });
+
+		const output = (
+			agent as unknown as {
+				normalizeStreamToolOutput: (rawOutput: unknown) => unknown;
+			}
+		).normalizeStreamToolOutput(undefined);
+
+		expect(output).toBeUndefined();
+	});
+});

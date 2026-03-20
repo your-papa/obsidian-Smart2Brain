@@ -1,140 +1,128 @@
 <script lang="ts">
-  import { Notice } from "obsidian";
-  import type { Modal } from "obsidian";
-  import { onMount } from "svelte";
-  import IconButton from "../ui/IconButton.svelte";
-  import Button from "../ui/Button.svelte";
-  import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
-  import { ModelSelectionModal, type SelectedModel } from "./ModelSelectionModal";
-  import { getProviderDefinition } from "../../providers/index";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { isVectorStoreInitialized, getVectorStoreService } from "../../vectorstore";
+import { Notice } from "obsidian";
+import type { Modal } from "obsidian";
+import { onMount } from "svelte";
+import IconButton from "../ui/IconButton.svelte";
+import Button from "../ui/Button.svelte";
+import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
+import { ModelSelectionModal, type SelectedModel } from "./ModelSelectionModal";
+import { getProviderDefinition } from "../../providers/index";
+import { getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { isVectorStoreInitialized, getVectorStoreService } from "../../vectorstore";
 
-  interface Props {
-    modal: Modal;
-    purpose: "search" | "graph";
-    onSelect: (indexId: string | null) => void;
-  }
+interface Props {
+	modal: Modal;
+	purpose: "search" | "graph";
+	onSelect: (indexId: string | null) => void;
+}
 
-  let { modal, purpose, onSelect }: Props = $props();
+let { modal, purpose, onSelect }: Props = $props();
 
-  const pluginData = getData();
-  const plugin = getPlugin();
+const pluginData = getData();
+const plugin = getPlugin();
 
-  const indexes = $derived(pluginData.embeddingIndexes);
-  const selectedIndexId = $derived(
-    purpose === "search" ? pluginData.searchEmbedIndex : pluginData.graphEmbedIndex,
-  );
-  const semanticFeatureName = $derived(
-    purpose === "search" ? "semantic search" : "semantic graph features",
-  );
-  const isDisabled = $derived(selectedIndexId === null);
+const indexes = $derived(pluginData.embeddingIndexes);
+const selectedIndexId = $derived(purpose === "search" ? pluginData.searchEmbedIndex : pluginData.graphEmbedIndex);
+const semanticFeatureName = $derived(purpose === "search" ? "semantic search" : "semantic graph features");
+const isDisabled = $derived(selectedIndexId === null);
 
-  let storageSizes = $state<Record<string, number>>({});
-  let documentCounts = $state<Record<string, number>>({});
+let storageSizes = $state<Record<string, number>>({});
+let documentCounts = $state<Record<string, number>>({});
 
-  onMount(async () => {
-    if (!isVectorStoreInitialized()) return;
-    const service = getVectorStoreService();
-    for (const index of pluginData.embeddingIndexes) {
-      const [size, stats] = await Promise.all([
-        service.getStorageSize(index.id),
-        service.getStats(index.id),
-      ]);
-      storageSizes[index.id] = size;
-      documentCounts[index.id] = stats.documentCount;
-    }
-  });
+onMount(async () => {
+	if (!isVectorStoreInitialized()) return;
+	const service = getVectorStoreService();
+	for (const index of pluginData.embeddingIndexes) {
+		const [size, stats] = await Promise.all([service.getStorageSize(index.id), service.getStats(index.id)]);
+		storageSizes[index.id] = size;
+		documentCounts[index.id] = stats.documentCount;
+	}
+});
 
-  function formatSize(bytes: number): string {
-    if (bytes === 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    const value = bytes / 1024 ** i;
-    return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
-  }
+function formatSize(bytes: number): string {
+	if (bytes === 0) return "0 B";
+	const units = ["B", "KB", "MB", "GB"];
+	const i = Math.floor(Math.log(bytes) / Math.log(1024));
+	const value = bytes / 1024 ** i;
+	return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
 
-  function handleSelect(indexId: string) {
-    if (indexId === selectedIndexId) return;
-    const idx = pluginData.getEmbeddingIndex(indexId);
-    if (!idx) return;
+function handleSelect(indexId: string) {
+	if (indexId === selectedIndexId) return;
+	const idx = pluginData.getEmbeddingIndex(indexId);
+	if (!idx) return;
 
-    pluginData.setEmbedIndex(purpose, idx.provider, idx.model);
+	pluginData.setEmbedIndex(purpose, idx.provider, idx.model);
 
-    if (isVectorStoreInitialized()) {
-      const service = getVectorStoreService();
-      service.ensureIndex(indexId);
-    }
+	if (isVectorStoreInitialized()) {
+		const service = getVectorStoreService();
+		service.ensureIndex(indexId);
+	}
 
-    onSelect(indexId);
-    modal.close();
-  }
+	onSelect(indexId);
+	modal.close();
+}
 
-  function handleDisable() {
-    if (selectedIndexId === null) return;
+function handleDisable() {
+	if (selectedIndexId === null) return;
 
-    pluginData.clearEmbedIndex(purpose);
-    onSelect(null);
-    modal.close();
-  }
+	pluginData.clearEmbedIndex(purpose);
+	onSelect(null);
+	modal.close();
+}
 
-  async function handleDelete(indexId: string) {
-    if (!isVectorStoreInitialized()) return;
-    const service = getVectorStoreService();
-    await service.deleteIndex(indexId);
-  }
+async function handleDelete(indexId: string) {
+	if (!isVectorStoreInitialized()) return;
+	const service = getVectorStoreService();
+	await service.deleteIndex(indexId);
+}
 
-  function handleAddModel() {
-    let currentSelection: SelectedModel | null = null;
-    if (selectedIndexId) {
-      const sepIdx = selectedIndexId.indexOf(":");
-      if (sepIdx > 0) {
-        currentSelection = {
-          provider: selectedIndexId.substring(0, sepIdx),
-          model: selectedIndexId.substring(sepIdx + 1),
-        };
-      }
-    }
+function handleAddModel() {
+	let currentSelection: SelectedModel | null = null;
+	if (selectedIndexId) {
+		const sepIdx = selectedIndexId.indexOf(":");
+		if (sepIdx > 0) {
+			currentSelection = {
+				provider: selectedIndexId.substring(0, sepIdx),
+				model: selectedIndexId.substring(sepIdx + 1),
+			};
+		}
+	}
 
-    // Close this modal first to avoid stacked backdrops
-    modal.close();
+	// Close this modal first to avoid stacked backdrops
+	modal.close();
 
-    // Defer opening the next modal to let Obsidian finish tearing down this one
-    setTimeout(() => {
-      const selectionModal = new ModelSelectionModal(
-        plugin,
-        "embedding",
-        currentSelection,
-        (selected) => {
-          if (selected) {
-            pluginData.setEmbedIndex(purpose, selected.provider, selected.model);
-            const newIndexId = `${selected.provider}:${selected.model}`;
+	// Defer opening the next modal to let Obsidian finish tearing down this one
+	setTimeout(() => {
+		const selectionModal = new ModelSelectionModal(plugin, "embedding", currentSelection, (selected) => {
+			if (selected) {
+				pluginData.setEmbedIndex(purpose, selected.provider, selected.model);
+				const newIndexId = `${selected.provider}:${selected.model}`;
 
-            if (isVectorStoreInitialized()) {
-              const service = getVectorStoreService();
-              service.ensureIndex(newIndexId);
-            }
+				if (isVectorStoreInitialized()) {
+					const service = getVectorStoreService();
+					service.ensureIndex(newIndexId);
+				}
 
-            onSelect(newIndexId);
-          }
-        },
-      );
-      selectionModal.open();
-    }, 0);
-  }
+				onSelect(newIndexId);
+			}
+		});
+		selectionModal.open();
+	}, 0);
+}
 
-  function formatDate(timestamp: number | null): string {
-    if (!timestamp) return "Never built";
-    return new Date(timestamp).toLocaleDateString();
-  }
+function formatDate(timestamp: number | null): string {
+	if (!timestamp) return "Never built";
+	return new Date(timestamp).toLocaleDateString();
+}
 
-  function usedBy(indexId: string): string[] {
-    const purposes: string[] = [];
-    if (pluginData.searchEmbedIndex === indexId) purposes.push("Search");
-    if (pluginData.graphEmbedIndex === indexId) purposes.push("Graph");
-    return purposes;
-  }
+function usedBy(indexId: string): string[] {
+	const purposes: string[] = [];
+	if (pluginData.searchEmbedIndex === indexId) purposes.push("Search");
+	if (pluginData.graphEmbedIndex === indexId) purposes.push("Graph");
+	return purposes;
+}
 </script>
 
 <div class="flex flex-col gap-2 p-4">

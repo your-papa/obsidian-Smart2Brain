@@ -677,7 +677,7 @@ export class Agent {
 					const toolCallId = event.run_id;
 					const pending = pendingToolCalls.get(toolCallId);
 					const toolName = pending?.name ?? event.name ?? "unknown_tool";
-					const output = event.data?.output ?? {};
+					const output = this.normalizeStreamToolOutput(event.data?.output);
 
 					pendingToolCalls.delete(toolCallId);
 					Logger.debug("agent.streamTokens.tool_end", { runId, toolCallId, toolName });
@@ -906,7 +906,7 @@ export class Agent {
 					const toolCallId = event.run_id;
 					const pending = pendingToolCalls.get(toolCallId);
 					const toolName = pending?.name ?? event.name ?? "unknown_tool";
-					const output = event.data?.output ?? {};
+					const output = this.normalizeStreamToolOutput(event.data?.output);
 
 					pendingToolCalls.delete(toolCallId);
 					Logger.debug("agent.editFromCheckpoint.tool_end", { runId, toolCallId, toolName });
@@ -1115,7 +1115,7 @@ export class Agent {
 					const toolCallId = event.run_id;
 					const pending = pendingToolCalls.get(toolCallId);
 					const toolName = pending?.name ?? event.name ?? "unknown_tool";
-					const output = event.data?.output ?? {};
+					const output = this.normalizeStreamToolOutput(event.data?.output);
 
 					pendingToolCalls.delete(toolCallId);
 					Logger.debug("agent.regenerateFromCheckpoint.tool_end", { runId, toolCallId, toolName });
@@ -1831,6 +1831,43 @@ export class Agent {
 		}
 
 		return input ?? {};
+	}
+
+	private normalizeStreamToolOutput(rawOutput: unknown): unknown {
+		if (rawOutput === null || rawOutput === undefined) {
+			return undefined;
+		}
+
+		if (rawOutput && typeof rawOutput === "object" && !Array.isArray(rawOutput)) {
+			const wrapper = rawOutput as Record<string, unknown>;
+			const keys = Object.keys(wrapper);
+
+			if (
+				"content" in wrapper &&
+				(keys.length === 1 ||
+					keys.every((key) =>
+						[
+							"content",
+							"artifact",
+							"status",
+							"tool_call_id",
+							"name",
+							"type",
+							"id",
+							"additional_kwargs",
+							"response_metadata",
+						].includes(key),
+					))
+			) {
+				return wrapper.content;
+			}
+
+			if ("output" in wrapper && keys.length === 1) {
+				return wrapper.output;
+			}
+		}
+
+		return rawOutput;
 	}
 
 	private readLangChainClassName(identifier: unknown): string | undefined {
