@@ -3,8 +3,21 @@ import { setIcon } from "obsidian";
 
 const ICONIZE_PLUGIN_ID = "obsidian-icon-folder";
 const ICONIC_PLUGIN_ID = "iconic";
+const ICONIC_COLOR_VARIABLES = new Map<string, string>([
+	["red", "--color-red"],
+	["orange", "--color-orange"],
+	["yellow", "--color-yellow"],
+	["green", "--color-green"],
+	["cyan", "--color-cyan"],
+	["blue", "--color-blue"],
+	["purple", "--color-purple"],
+	["pink", "--color-pink"],
+	["gray", "--color-base-70"],
+]);
 
 type CommunityPlugins = Record<string, unknown>;
+
+const colorResolutionElement = document.createElement("div");
 
 interface IconizeApi {
 	setIconForNode(iconName: string, node: HTMLElement, color?: string): void;
@@ -102,6 +115,22 @@ function clearNode(node: HTMLElement): void {
 	node.replaceChildren();
 }
 
+export function resolveIconColor(color?: string): string | undefined {
+	if (!color) {
+		return undefined;
+	}
+
+	const bodyStyle = globalThis.getComputedStyle(document.body);
+	const thematicVariable = ICONIC_COLOR_VARIABLES.get(color);
+	const cssColor = thematicVariable ? bodyStyle.getPropertyValue(thematicVariable).trim() : color;
+	if (!cssColor) {
+		return undefined;
+	}
+
+	colorResolutionElement.style.color = cssColor;
+	return colorResolutionElement.style.color || cssColor;
+}
+
 function renderBasicIcon(node: HTMLElement, iconName: string, color?: string): void {
 	clearNode(node);
 	node.classList.remove("s2b-search-result-note-icon-emoji");
@@ -113,8 +142,9 @@ function renderBasicIcon(node: HTMLElement, iconName: string, color?: string): v
 		setIcon(node, iconName);
 	}
 
-	if (color) {
-		node.style.color = color;
+	const resolvedColor = resolveIconColor(color);
+	if (resolvedColor) {
+		node.style.color = resolvedColor;
 	} else {
 		node.style.removeProperty("color");
 	}
