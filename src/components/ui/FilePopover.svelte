@@ -1,39 +1,42 @@
 <script lang="ts">
-import { Combobox } from "bits-ui";
-import type { TFile } from "obsidian";
-import { Logger } from "../../utils/logging";
+  import { Combobox } from "bits-ui";
+  import type { App, TFile } from "obsidian";
+  import { pathIcon } from "../../utils/noteIcons";
+  import { Logger } from "../../utils/logging";
 
-interface Props {
-	customAnchor: HTMLElement;
-	isOpen: boolean;
-	files: TFile[];
-	searchQuery: string;
-	comboInputRef?: HTMLInputElement | null;
-	onFileSelect: (fileName: string) => void;
-}
+  interface Props {
+    app?: App;
+    customAnchor: HTMLElement;
+    isOpen: boolean;
+    files: TFile[];
+    searchQuery: string;
+    comboInputRef?: HTMLInputElement | null;
+    onFileSelect: (fileName: string) => void;
+  }
 
-let {
-	customAnchor,
-	isOpen = $bindable(false),
-	files,
-	searchQuery,
-	comboInputRef = $bindable<HTMLInputElement | null>(null),
-	onFileSelect,
-}: Props = $props();
+  let {
+    app,
+    customAnchor,
+    isOpen = $bindable(false),
+    files,
+    searchQuery,
+    comboInputRef = $bindable<HTMLInputElement | null>(null),
+    onFileSelect,
+  }: Props = $props();
 
-let searchValue = $state("");
+  let searchValue = $state("");
 
-function handleValueChange(newVal: string) {
-	if (newVal) {
-		onFileSelect(newVal);
-	}
-}
+  function handleValueChange(newVal: string) {
+    if (newVal) {
+      onFileSelect(newVal);
+    }
+  }
 
-const filteredFiles = $derived(
-	searchQuery === ""
-		? files
-		: files.filter((file) => file.basename.toLowerCase().includes(searchQuery.toLowerCase())),
-);
+  const filteredFiles = $derived(
+    searchQuery === ""
+      ? files
+      : files.filter((file) => file.basename.toLowerCase().includes(searchQuery.toLowerCase())),
+  );
 </script>
 
 <Combobox.Root type="single" bind:open={isOpen} onValueChange={handleValueChange}>
@@ -58,12 +61,18 @@ const filteredFiles = $derived(
           label={file.basename}
         >
           {#snippet children({ selected })}
-            <div class="suggestion-content">
-              <div class="suggestion-title">
-                {file.basename}
-              </div>
-              <div class="suggestion-note">
-                {file.parent?.path}
+            <div class="suggestion-content flex items-center gap-2">
+              <div
+                class="s2b-path-icon"
+                use:pathIcon={{ app, path: file.path, kind: "file", fallbackIconId: "file" }}
+              ></div>
+              <div>
+                <div class="suggestion-title">
+                  {file.basename}
+                </div>
+                <div class="suggestion-note">
+                  {file.parent?.path}
+                </div>
               </div>
             </div>
           {/snippet}

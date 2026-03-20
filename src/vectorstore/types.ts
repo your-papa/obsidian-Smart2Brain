@@ -83,9 +83,21 @@ export interface VectorSearchResult {
 	frontmatter?: Record<string, unknown>;
 	/** Tags from the document (frontmatter + inline) */
 	tags?: string[];
+	/** Match explanation metadata for UI rendering */
+	matchExplanation?: SearchMatchExplanation;
+	/** Ranked match signals shown as reason badges in the UI */
+	matchBadges?: SearchMatchBadge[];
 	/** Cosine similarity score (0-1, higher is more similar) */
 	score: number;
 }
+
+export interface SearchMatchExplanation {
+	source: "title" | "alias" | "tag" | "heading" | "content";
+	text: string;
+	heading?: string;
+}
+
+export type SearchMatchBadge = "title" | "alias" | "tag" | "path" | "heading" | "content" | "semantic" | "recent";
 
 /**
  * Filter options for vector search.

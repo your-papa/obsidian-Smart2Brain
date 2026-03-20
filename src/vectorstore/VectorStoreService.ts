@@ -17,7 +17,6 @@ import { getData } from "../stores/dataStore.svelte";
 import { getRegistry } from "../providers/registry";
 import { createVectorStore } from "./index";
 import { FileSyncManager } from "./FileSyncManager";
-import { MiniSearchService, type LexicalSearchResult } from "./MiniSearchService";
 import {
 	INDEX_VERSION,
 	getDbName,
@@ -32,7 +31,7 @@ import {
 	type VectorSearchResult,
 	type VectorStore,
 } from "./types";
-import { cosineSimilarity, toFloat32Array } from "./similarity";
+import { toFloat32Array } from "./similarity";
 import { Logger } from "../utils/logging";
 import { matchesPathPrefix } from "../utils/pathUtils";
 
@@ -56,6 +55,7 @@ const BATCH_SIZE_OLLAMA = 1; // Sequential for local models — gives per-file p
 const BATCH_SIZE_DEFAULT = 50;
 
 let instance: VectorStoreService | null = null;
+let pendingInstance: VectorStoreService | null = null;
 let pendingInitPromise: Promise<void> | null = null;
 
 /**
@@ -118,27 +118,19 @@ interface IndexInstance {
  * Manages multiple indexes, one per embedding model.
  */
 export class VectorStoreService {
-	private plugin: SecondBrainPlugin;
-	private instances: Map<string, IndexInstance> = new Map();
-	private progressListeners = new Map<string, Set<(progress: IndexingProgress) => void>>();
-	private modifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private readonly plugin: SecondBrainPlugin;
+	private readonly instances: Map<string, IndexInstance> = new Map();
+	private readonly progressListeners = new Map<string, Set<(progress: IndexingProgress) => void>>();
+	private readonly modifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private isInitialized = false;
-	private vaultId: string;
-	private configDir: string;
-
-	/**
-	 * Standalone MiniSearch index that is always populated from vault files,
-	 * independent of embedding providers. Enables BM25 lexical search and
-	 * browse even when no embedding model is configured.
-	 */
-	private standaloneMiniSearch: MiniSearchService;
+	private readonly vaultId: string;
+	private readonly configDir: string;
 
 	private constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
 		this.vaultId = (plugin.app as unknown as { appId: string }).appId;
 		const vault = plugin.app.vault as { configDir?: string };
 		this.configDir = vault.configDir || ".obsidian";
-		this.standaloneMiniSearch = new MiniSearchService(this.vaultId);
 	}
 
 	/** Promise tracking initialization, awaited by cleanup to avoid closing mid-init. */
@@ -184,11 +176,26 @@ export class VectorStoreService {
 			return instance;
 		}
 
+		if (pendingInstance) {
+			Logger.warn("[VectorStore] Initialization already in progress");
+			if (pendingInitPromise) {
+				await pendingInitPromise;
+			}
+			return instance ?? pendingInstance;
+		}
+
 		const service = new VectorStoreService(plugin);
+		pendingInstance = service;
 		service.initPromise = service.init();
-		await service.initPromise;
-		instance = service;
-		return service;
+		try {
+			await service.initPromise;
+			instance = service;
+			return service;
+		} finally {
+			if (pendingInstance === service) {
+				pendingInstance = null;
+			}
+		}
 	}
 
 	/**
@@ -202,16 +209,28 @@ export class VectorStoreService {
 			return instance;
 		}
 
+		if (pendingInstance) {
+			Logger.warn("[VectorStore] Initialization already in progress");
+			return pendingInstance;
+		}
+
 		const service = new VectorStoreService(plugin);
+		pendingInstance = service;
 		pendingInitPromise = service
 			.init()
 			.then(() => {
 				instance = service;
 			})
 			.catch((error) => {
+				if (instance === service) {
+					instance = null;
+				}
 				Logger.error("[VectorStore] Background initialization failed:", error);
 			})
 			.finally(() => {
+				if (pendingInstance === service) {
+					pendingInstance = null;
+				}
 				pendingInitPromise = null;
 			});
 		service.initPromise = pendingInitPromise;
@@ -224,21 +243,6 @@ export class VectorStoreService {
 	 */
 	private async init(): Promise<void> {
 		try {
-			// Initialize the standalone MiniSearch for provider-independent lexical search
-			await this.standaloneMiniSearch.open();
-			const loaded = await this.standaloneMiniSearch.loadFromStorage();
-			if (!loaded) {
-				// First run or no persisted index — build from vault files once layout is ready
-				this.plugin.app.workspace.onLayoutReady(() => {
-					void this.buildStandaloneMiniSearch();
-				});
-			} else {
-				// Validate completeness after layout is ready
-				this.plugin.app.workspace.onLayoutReady(() => {
-					void this.validateStandaloneMiniSearch();
-				});
-			}
-
 			const data = getData();
 			const searchIndex = data.searchEmbedIndex;
 			const graphIndex = data.graphEmbedIndex;
@@ -265,57 +269,6 @@ export class VectorStoreService {
 		}
 	}
 
-	/**
-	 * Build the standalone MiniSearch index from all vault markdown files.
-	 */
-	private async buildStandaloneMiniSearch(): Promise<void> {
-		const { vault } = this.plugin.app;
-		const files = vault.getMarkdownFiles().filter((file) => this.shouldIndexFile(file));
-
-		for (const file of files) {
-			try {
-				const content = await vault.cachedRead(file);
-				this.standaloneMiniSearch.addDocument(file.path, file.basename, content);
-			} catch (error) {
-				Logger.error(`[VectorStore] Failed to read ${file.path} for standalone MiniSearch:`, error);
-			}
-		}
-
-		await this.standaloneMiniSearch.flush();
-		Logger.log(`[VectorStore] Built standalone MiniSearch: ${this.standaloneMiniSearch.documentCount} documents`);
-	}
-
-	/**
-	 * Validate the standalone MiniSearch index against the vault,
-	 * adding any missing files and removing orphaned entries.
-	 */
-	private async validateStandaloneMiniSearch(): Promise<void> {
-		const { vault } = this.plugin.app;
-		const files = vault.getMarkdownFiles().filter((file) => this.shouldIndexFile(file));
-		const vaultPaths = new Set(files.map((f) => f.path));
-
-		let added = 0;
-		for (const file of files) {
-			if (!this.standaloneMiniSearch.hasDocument(file.path)) {
-				try {
-					const content = await vault.cachedRead(file);
-					this.standaloneMiniSearch.addDocument(file.path, file.basename, content);
-					added++;
-				} catch (error) {
-					Logger.error(`[VectorStore] Failed to read ${file.path} for standalone MiniSearch:`, error);
-				}
-			}
-		}
-
-		if (added > 0) {
-			await this.standaloneMiniSearch.flush();
-			Logger.log(`[VectorStore] Standalone MiniSearch: added ${added} missing documents`);
-		}
-	}
-
-	/**
-	 * Initialize a single index instance: open databases, load from file.
-	 */
 	private async initializeInstance(indexId: string): Promise<IndexInstance> {
 		// Return existing if already open
 		const existing = this.instances.get(indexId);
@@ -403,8 +356,7 @@ export class VectorStoreService {
 		}
 
 		if (
-			inst.maxInputTokensCache &&
-			inst.maxInputTokensCache.provider === defaultModel.provider &&
+			inst.maxInputTokensCache?.provider === defaultModel.provider &&
 			inst.maxInputTokensCache.model === defaultModel.model
 		) {
 			return inst.maxInputTokensCache.maxInputTokens;
@@ -756,16 +708,6 @@ export class VectorStoreService {
 	 * Inactive instances are marked for re-validation on next use.
 	 */
 	private async handleFileCreate(file: TFile): Promise<void> {
-		// Always update the standalone MiniSearch
-		if (this.shouldIndexFile(file)) {
-			try {
-				const content = await this.plugin.app.vault.cachedRead(file);
-				this.standaloneMiniSearch.addDocument(file.path, file.basename, content);
-			} catch (error) {
-				Logger.error(`[VectorStore] Failed to add ${file.path} to standalone MiniSearch:`, error);
-			}
-		}
-
 		for (const inst of this.instances.values()) {
 			if (!this.isActiveIndex(inst.indexId)) {
 				inst.hasValidatedThisSession = false;
@@ -790,16 +732,6 @@ export class VectorStoreService {
 			setTimeout(async () => {
 				this.modifyTimers.delete(file.path);
 
-				// Always update the standalone MiniSearch
-				if (this.shouldIndexFile(file)) {
-					try {
-						const content = await this.plugin.app.vault.cachedRead(file);
-						this.standaloneMiniSearch.addDocument(file.path, file.basename, content);
-					} catch (error) {
-						Logger.error(`[VectorStore] Failed to update ${file.path} in standalone MiniSearch:`, error);
-					}
-				}
-
 				for (const inst of this.instances.values()) {
 					if (!this.isActiveIndex(inst.indexId)) {
 						inst.hasValidatedThisSession = false;
@@ -820,9 +752,6 @@ export class VectorStoreService {
 	 * Inactive instances are marked for re-validation on next use.
 	 */
 	private async handleFileDelete(file: TFile): Promise<void> {
-		// Always update the standalone MiniSearch
-		this.standaloneMiniSearch.removeDocument(file.path);
-
 		for (const inst of this.instances.values()) {
 			if (!this.isActiveIndex(inst.indexId)) {
 				inst.hasValidatedThisSession = false;
@@ -839,20 +768,6 @@ export class VectorStoreService {
 	 * Inactive instances are marked for re-validation on next use.
 	 */
 	private async handleFileRename(file: TFile, oldPath: string): Promise<void> {
-		// Always update the standalone MiniSearch
-		this.standaloneMiniSearch.removeDocument(oldPath);
-		if (this.shouldIndexFile(file)) {
-			try {
-				const content = await this.plugin.app.vault.cachedRead(file);
-				this.standaloneMiniSearch.addDocument(file.path, file.basename, content);
-			} catch (error) {
-				Logger.error(
-					`[VectorStore] Failed to re-add ${file.path} to standalone MiniSearch after rename:`,
-					error,
-				);
-			}
-		}
-
 		for (const inst of this.instances.values()) {
 			if (!this.isActiveIndex(inst.indexId)) {
 				inst.hasValidatedThisSession = false;
@@ -867,15 +782,6 @@ export class VectorStoreService {
 	}
 
 	/**
-	 * Get the configured default embedding model.
-	 * @deprecated Use getModelForInstance or getSearchEmbedModel/getGraphEmbedModel instead.
-	 */
-	private getDefaultEmbedModel(): DefaultEmbedModel | null {
-		const data = getData();
-		return data.defaultEmbedModel;
-	}
-
-	/**
 	 * Get or create the embeddings instance for the search index.
 	 * @deprecated Use getEmbeddingsForInstance instead.
 	 */
@@ -883,7 +789,7 @@ export class VectorStoreService {
 		const data = getData();
 		const indexId = data.searchEmbedIndex;
 		if (!indexId) {
-			const defaultModel = this.getDefaultEmbedModel();
+			const defaultModel = data.defaultEmbedModel;
 			if (!defaultModel) return null;
 			if (!data.isProviderEmbeddingAvailable(defaultModel.provider)) {
 				Logger.warn(
@@ -1146,11 +1052,11 @@ export class VectorStoreService {
 
 			const { indexed, skipped } = inst.progress;
 			const cancelled = inst.abortController?.signal.aborted;
-			notice.setMessage(
-				cancelled
-					? `Indexing cancelled (${indexed} notes indexed so far)`
-					: `✓ Indexed ${indexed} notes${skipped > 0 ? `, ${skipped} skipped` : ""}`,
-			);
+			const skippedText = skipped > 0 ? `, ${skipped} skipped` : "";
+			const noticeMessage = cancelled
+				? `Indexing cancelled (${indexed} notes indexed so far)`
+				: `✓ Indexed ${indexed} notes${skippedText}`;
+			notice.setMessage(noticeMessage);
 			setTimeout(() => notice.hide(), 3000);
 
 			Logger.log(`[VectorStore] Full index complete for ${inst.indexId}: ${indexed} indexed, ${skipped} skipped`);
@@ -1280,68 +1186,6 @@ export class VectorStoreService {
 	}
 
 	/**
-	 * Perform lexical (full-text) search using the standalone MiniSearch.
-	 */
-	async lexicalSearch(query: string, topK: number, filter?: SearchFilter): Promise<VectorSearchResult[]> {
-		const results = this.standaloneMiniSearch.search(query, topK * (filter ? 3 : 1));
-		return this.applyFilterToLexicalResults(results, topK, filter);
-	}
-
-	/**
-	 * Browse all indexed documents with optional filtering.
-	 */
-	async browseDocuments(topK: number, filter?: SearchFilter): Promise<VectorSearchResult[]> {
-		const results = this.standaloneMiniSearch.browse(topK * (filter ? 3 : 1));
-		return this.applyFilterToLexicalResults(results, topK, filter);
-	}
-
-	/**
-	 * Apply filters to lexical/browse results.
-	 */
-	private applyFilterToLexicalResults(
-		results: LexicalSearchResult[],
-		topK: number,
-		filter?: SearchFilter,
-	): VectorSearchResult[] {
-		const { metadataCache } = this.plugin.app;
-		const filteredResults: VectorSearchResult[] = [];
-
-		for (const r of results) {
-			if (filter?.pathPrefixes?.length) {
-				const matchesPath = filter.pathPrefixes.some((prefix) => matchesPathPrefix(r.path, prefix));
-				if (!matchesPath) continue;
-			}
-
-			const file = this.plugin.app.vault.getAbstractFileByPath(r.path);
-			const cache = file instanceof TFile ? metadataCache.getFileCache(file) : null;
-			const docTags = cache ? (getAllTags(cache) ?? []) : [];
-
-			if (filter?.tags?.length) {
-				const normalizedFilterTags = filter.tags.map((t) => (t.startsWith("#") ? t : `#${t}`));
-				const normalizedDocTags = docTags.map((t) => (t.startsWith("#") ? t : `#${t}`));
-
-				if (filter.requireAllTags) {
-					if (!normalizedFilterTags.every((tag) => normalizedDocTags.includes(tag))) continue;
-				} else {
-					if (!normalizedFilterTags.some((tag) => normalizedDocTags.includes(tag))) continue;
-				}
-			}
-
-			filteredResults.push({
-				path: r.path,
-				name: r.name,
-				frontmatter: cache?.frontmatter,
-				tags: docTags,
-				score: r.score,
-			});
-
-			if (filteredResults.length >= topK) break;
-		}
-
-		return filteredResults;
-	}
-
-	/**
 	 * Semantic (embedding-based) search for similar documents with optional filtering.
 	 * Uses the search embed index by default.
 	 */
@@ -1403,12 +1247,12 @@ export class VectorStoreService {
 
 				if (filter?.tags?.length) {
 					const normalizedFilterTags = filter.tags.map((t) => (t.startsWith("#") ? t : `#${t}`));
-					const normalizedDocTags = docTags.map((t) => (t.startsWith("#") ? t : `#${t}`));
+					const normalizedDocTags = new Set(docTags.map((t) => (t.startsWith("#") ? t : `#${t}`)));
 
 					if (filter.requireAllTags) {
-						if (!normalizedFilterTags.every((tag) => normalizedDocTags.includes(tag))) continue;
-					} else {
-						if (!normalizedFilterTags.some((tag) => normalizedDocTags.includes(tag))) continue;
+						if (!normalizedFilterTags.every((tag) => normalizedDocTags.has(tag))) continue;
+					} else if (!normalizedFilterTags.some((tag) => normalizedDocTags.has(tag))) {
+						continue;
 					}
 				}
 
@@ -1417,6 +1261,7 @@ export class VectorStoreService {
 					name: r.doc.path.replace(/.*\//, "").replace(/\.md$/, ""),
 					frontmatter: cache?.frontmatter,
 					tags: docTags,
+					matchBadges: ["semantic"],
 					score: r.score,
 				});
 
@@ -1455,7 +1300,7 @@ export class VectorStoreService {
 	private hashContent(content: string): string {
 		let hash = 5381;
 		for (let i = 0; i < content.length; i++) {
-			hash = (hash * 33) ^ content.charCodeAt(i);
+			hash = (hash * 33) ^ (content.codePointAt(i) ?? 0);
 		}
 		return (hash >>> 0).toString(16);
 	}
@@ -1477,7 +1322,6 @@ export class VectorStoreService {
 	 */
 	async getStats(indexId?: string): Promise<{
 		documentCount: number;
-		lexicalDocumentCount: number;
 		providerId: string | null;
 		modelId: string | null;
 		isReady: boolean;
@@ -1488,7 +1332,6 @@ export class VectorStoreService {
 		if (!resolvedId) {
 			return {
 				documentCount: 0,
-				lexicalDocumentCount: 0,
 				providerId: null,
 				modelId: null,
 				isReady: false,
@@ -1498,14 +1341,12 @@ export class VectorStoreService {
 		const inst = await this.getOrCreateInstance(resolvedId);
 
 		const count = await inst.store.count();
-		const lexicalCount = this.standaloneMiniSearch.documentCount;
 		const metadata = await inst.store.getMetadata();
 		const model = this.getModelForInstance(inst);
 		const isReady = this.isInitialized && model !== null;
 
 		return {
 			documentCount: count,
-			lexicalDocumentCount: lexicalCount,
 			providerId: metadata?.providerId ?? inst.currentProviderId,
 			modelId: metadata?.modelId ?? inst.currentModelId,
 			isReady,
@@ -1749,15 +1590,12 @@ export class VectorStoreService {
 			}
 			this.instances.clear();
 
-			// Clean up the standalone MiniSearch
-			await this.standaloneMiniSearch.flush();
-			this.standaloneMiniSearch.close();
-
 			Logger.log("[VectorStore] Cleanup complete");
 		} catch (error) {
 			Logger.error("[VectorStore] Cleanup failed:", error);
 		}
 
 		instance = null;
+		pendingInstance = null;
 	}
 }

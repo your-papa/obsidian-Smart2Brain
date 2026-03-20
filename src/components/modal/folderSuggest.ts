@@ -9,12 +9,14 @@ interface FolderSuggestOptions {
 }
 
 export class FileFolderSuggest extends AbstractInputSuggest<TAbstractFile> {
+	private readonly appRef: App;
 	private readonly getSuggestionList: (query: string) => TAbstractFile[];
 	private readonly getLimitValue: () => number;
 	private readonly handleSelect: (path: string) => void;
 
 	constructor(app: App, inputEl: HTMLInputElement, options: FolderSuggestOptions) {
 		super(app, inputEl);
+		this.appRef = app;
 		this.getSuggestionList = options.getSuggestions;
 		this.getLimitValue = options.getLimit;
 		this.handleSelect = options.onSelect;
@@ -33,8 +35,11 @@ export class FileFolderSuggest extends AbstractInputSuggest<TAbstractFile> {
 		mount(Suggestion, {
 			target: el,
 			props: {
+				app: this.appRef,
 				suggestionText: file.path,
+				suggestionPath: file.path,
 				iconId,
+				iconKind: file instanceof TFolder ? "folder" : "file",
 			},
 		});
 	}

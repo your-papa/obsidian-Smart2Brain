@@ -14,6 +14,7 @@ import type {
 	MCPServerConfig,
 	MCPServersConfig,
 	PluginData,
+	RecentNoteEntry,
 	SearchAlgorithm,
 	ToolConfig,
 	ToolsConfig,
@@ -243,7 +244,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "search_notes",
 		description:
-			"Search through your Obsidian notes by keyword. Returns matching file names and metadata (properties/frontmatter) but NO content. Use this to identify relevant notes before using other tools.",
+			"Search through your Obsidian notes by keyword. Returns structured JSON with matching note names plus optional paths, tags, match badges, and short match snippets depending on settings. Use this to identify relevant notes before reading them.",
 		settings: {
 			maxResults: 10,
 			algorithm: "lexical" as SearchAlgorithm,
@@ -305,6 +306,8 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		},
 	},
 };
+
+const MAX_RECENT_NOTES = 20;
 
 /**
  * Creates a new agent configuration with default values.
@@ -390,6 +393,11 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 	// Other
 	searchAlgorithm: "lexical",
+	searchShowPath: true,
+	searchShowTags: true,
+	searchShowMatchBadges: true,
+	searchShowMatchContext: true,
+	recentNotes: [],
 	defaultEmbedModel: null,
 	embeddingIndexes: [],
 	searchEmbedIndex: null,
@@ -1067,6 +1075,52 @@ export class PluginDataStore {
 	}
 	set searchAlgorithm(val: SearchAlgorithm) {
 		this.#data.searchAlgorithm = val;
+		this.saveSettings();
+	}
+
+	get searchShowPath() {
+		return this.#data.searchShowPath;
+	}
+	set searchShowPath(val: boolean) {
+		this.#data.searchShowPath = val;
+		this.saveSettings();
+	}
+
+	get searchShowTags() {
+		return this.#data.searchShowTags;
+	}
+	set searchShowTags(val: boolean) {
+		this.#data.searchShowTags = val;
+		this.saveSettings();
+	}
+
+	get searchShowMatchBadges() {
+		return this.#data.searchShowMatchBadges;
+	}
+	set searchShowMatchBadges(val: boolean) {
+		this.#data.searchShowMatchBadges = val;
+		this.saveSettings();
+	}
+
+	get searchShowMatchContext() {
+		return this.#data.searchShowMatchContext;
+	}
+	set searchShowMatchContext(val: boolean) {
+		this.#data.searchShowMatchContext = val;
+		this.saveSettings();
+	}
+
+	get recentNotes(): RecentNoteEntry[] {
+		return [...(this.#data.recentNotes ?? [])].sort((left, right) => right.lastOpenedAt - left.lastOpenedAt);
+	}
+
+	recordRecentlyOpenedNote(path: string): void {
+		const normalizedPath = normalizePath(path);
+		const existing = (this.#data.recentNotes ?? []).filter((entry) => entry.path !== normalizedPath);
+		this.#data.recentNotes = [{ path: normalizedPath, lastOpenedAt: Date.now() }, ...existing].slice(
+			0,
+			MAX_RECENT_NOTES,
+		);
 		this.saveSettings();
 	}
 
