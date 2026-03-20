@@ -1,16 +1,16 @@
 <script lang="ts">
-  import type { App } from "obsidian";
-  import { pathIcon } from "../../utils/noteIcons";
+import type { App } from "obsidian";
+import { pathIcon } from "../../utils/noteIcons";
 
-  type Props = {
-    suggestionText: string;
-    iconId: string;
-    app?: App;
-    suggestionPath?: string;
-    iconKind?: "file" | "folder";
-  };
+type Props = {
+	suggestionText: string;
+	iconId: string;
+	app?: App;
+	suggestionPath?: string;
+	iconKind?: "file" | "folder";
+};
 
-  let { suggestionText, iconId, app, suggestionPath, iconKind = "file" }: Props = $props();
+let { suggestionText, iconId, app, suggestionPath, iconKind = "file" }: Props = $props();
 </script>
 
 <span class="flex flex-row gap-2 items-center">

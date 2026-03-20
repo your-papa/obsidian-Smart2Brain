@@ -100,8 +100,8 @@
 .s2b-search-result {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
-	padding: 8px 0;
+	gap: 3px;
+	padding: 5px 0;
 }
 
 .s2b-search-result-title {
@@ -246,7 +246,8 @@
 	padding: 0;
 	border-radius: 0;
 	background: transparent;
-	color: var(--text-muted);
+	color: var(--text-faint);
+	opacity: 0.78;
 	border: none;
 }
 
@@ -266,36 +267,36 @@
 }
 
 .s2b-search-result-badge-title {
-	color: var(--text-accent);
+	color: inherit;
 }
 
 .s2b-search-result-badge-alias {
-	color: color-mix(in srgb, var(--interactive-accent) 65%, var(--text-normal));
+	color: inherit;
 }
 
 .s2b-search-result-badge-tag {
-	color: var(--text-accent);
+	color: inherit;
 }
 
 .s2b-search-result-badge-path {
-	color: var(--text-muted);
+	color: inherit;
 }
 
 .s2b-search-result-badge-heading {
-	color: color-mix(in srgb, var(--text-accent) 70%, var(--text-normal));
+	color: inherit;
 }
 
 .s2b-search-result-badge-content {
-	color: var(--text-faint);
-	opacity: 0.72;
+	color: inherit;
+	opacity: 0.56;
 }
 
 .s2b-search-result-badge-semantic {
-	color: color-mix(in srgb, var(--interactive-accent) 75%, var(--text-normal));
+	color: inherit;
 }
 
 .s2b-search-result-badge-recent {
-	color: color-mix(in srgb, var(--color-orange) 78%, var(--text-normal));
+	color: inherit;
 }
 
 .s2b-search-result-tags {
@@ -311,13 +312,14 @@
 	--s2b-search-result-tag-accent: var(--text-accent);
 	display: inline-flex;
 	align-items: center;
+	justify-content: center;
 	gap: 4px;
 	font-size: 0.72em;
 	line-height: 1;
 	color: var(--s2b-search-result-tag-accent);
-	background: color-mix(in srgb, var(--s2b-search-result-tag-accent) 12%, var(--background-secondary));
+	background: color-mix(in srgb, var(--s2b-search-result-tag-accent) 8%, var(--background-secondary));
 	border: 1px solid color-mix(in srgb, var(--s2b-search-result-tag-accent) 18%, var(--background-modifier-border));
-	padding: 3px 8px;
+	padding: 2px 8px;
 	border-radius: 999px;
 	white-space: nowrap;
 }
@@ -341,7 +343,11 @@
 }
 
 .s2b-search-result-tag-label {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	line-height: 1;
+	min-height: var(--icon-xs);
 }
 
 .s2b-search-result-tag-overflow {
