@@ -1,58 +1,33 @@
 import { describe, it, expect, vi } from "vitest";
+import { AIMessage, HumanMessage } from "@langchain/core/messages";
 
 vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 
-import { estimateContextUsage, formatContextUsage, type UsageEstimate } from "../../src/utils/tokenEstimator";
+import {
+    estimateContextUsage,
+    estimateContextUsageBreakdown,
+    formatContextUsage,
+    type UsageEstimate,
+} from "../../src/utils/tokenEstimator";
 
-// Define minimal test types to avoid importing chatStore which depends on obsidian
-interface UserMessage {
-    content: string;
-    attachments?: { size: number; name: string }[];
-    visibleNotes?: { path: string; basename: string }[];
-    selection?: { text: string; file: string };
-    graphNotes?: { path: string; basename: string }[];
+function createConversation(userContent: string, assistantContent: string) {
+    return [new HumanMessage(userContent), new AIMessage(assistantContent)];
 }
 
-interface AssistantMessage {
-    state: number;
-    content: string;
-}
-
-interface MessagePair {
-    id: string;
-    userMessage: UserMessage;
-    assistantMessage: AssistantMessage;
-}
-
-function createMessagePair(userContent: string, assistantContent: string): MessagePair {
-    return {
-        id: "msg-1",
-        userMessage: {
-            content: userContent,
-        },
-        assistantMessage: {
-            state: 2, // AssistantState.success
-            content: assistantContent,
-        },
-    };
-}
-
-function createMessagePairWithAttachments(
+function createConversationWithAttachments(
     userContent: string,
     assistantContent: string,
     attachmentCount: number,
-): MessagePair {
-    return {
-        id: "msg-1",
-        userMessage: {
+) {
+    return [
+        new HumanMessage({
             content: userContent,
-            attachments: new Array(attachmentCount).fill({ size: 1000, name: "file.pdf" }),
-        },
-        assistantMessage: {
-            state: 2, // AssistantState.success
-            content: assistantContent,
-        },
-    };
+            additional_kwargs: {
+                attachments: new Array(attachmentCount).fill({ size: 1000, name: "file.pdf" }),
+            },
+        }),
+        new AIMessage(assistantContent),
+    ];
 }
 
 describe("tokenEstimator", () => {
@@ -66,8 +41,8 @@ describe("tokenEstimator", () => {
         });
 
         it("should estimate tokens from a single message pair", () => {
-            const messages = [createMessagePair("hello world", "goodbye world")];
-            const result = estimateContextUsage(messages as any, "", 128000);
+            const messages = createConversation("hello world", "goodbye world");
+            const result = estimateContextUsage(messages, "", 128000);
 
             // "hello world" = 2 words * 1.3 = 2.6 ≈ 3 tokens
             // "goodbye world" = 2 words * 1.3 = 2.6 ≈ 3 tokens
@@ -78,8 +53,8 @@ describe("tokenEstimator", () => {
         });
 
         it("should include draft text in estimation", () => {
-            const messages = [createMessagePair("hello", "hi")];
-            const result = estimateContextUsage(messages as any, "what is this", 128000);
+            const messages = createConversation("hello", "hi");
+            const result = estimateContextUsage(messages, "what is this", 128000);
 
             // hello = 1 word * 1.3 ≈ 2 tokens (rounded up)
             // hi = 1 word * 1.3 ≈ 2 tokens (rounded up)
@@ -92,16 +67,16 @@ describe("tokenEstimator", () => {
         });
 
         it("should ignore empty draft text", () => {
-            const messages = [createMessagePair("hello", "hi")];
-            const result1 = estimateContextUsage(messages as any, "", 128000);
-            const result2 = estimateContextUsage(messages as any, "   ", 128000);
+            const messages = createConversation("hello", "hi");
+            const result1 = estimateContextUsage(messages, "", 128000);
+            const result2 = estimateContextUsage(messages, "   ", 128000);
 
             expect(result1.estimatedUsedTokens).toBe(result2.estimatedUsedTokens);
         });
 
         it("should account for attachment overhead", () => {
-            const messages = [createMessagePairWithAttachments("hello", "hi", 2)];
-            const result = estimateContextUsage(messages as any, "", 128000);
+            const messages = createConversationWithAttachments("hello", "hi", 2);
+            const result = estimateContextUsage(messages, "", 128000);
 
             // 2 attachments * 200 tokens each = 400
             // Plus other content: ~164 (hello + hi + message overheads)
@@ -111,16 +86,20 @@ describe("tokenEstimator", () => {
         });
 
         it("should include visible notes overhead when present", () => {
-            const pair = createMessagePair("hello", "hi") as any;
-            pair.userMessage.visibleNotes = [{ path: "note1.md", basename: "note1" }];
-            const messages = [pair];
+            const messages = [
+                new HumanMessage({
+                    content: "hello",
+                    additional_kwargs: { visibleNotes: [{ path: "note1.md", basename: "note1" }] },
+                }),
+                new AIMessage("hi"),
+            ];
 
             const resultWithoutNotes = estimateContextUsage(
-                [createMessagePair("hello", "hi")] as any,
+                createConversation("hello", "hi"),
                 "",
                 128000,
             );
-            const resultWithNotes = estimateContextUsage(messages as any, "", 128000);
+            const resultWithNotes = estimateContextUsage(messages, "", 128000);
 
             // Difference should be around 100 tokens for visible notes
             expect(resultWithNotes.estimatedUsedTokens - resultWithoutNotes.estimatedUsedTokens).toBe(
@@ -129,16 +108,20 @@ describe("tokenEstimator", () => {
         });
 
         it("should include selection overhead when present", () => {
-            const pair = createMessagePair("hello", "hi") as any;
-            pair.userMessage.selection = { text: "selected text", file: "note.md" };
-            const messages = [pair];
+            const messages = [
+                new HumanMessage({
+                    content: "hello",
+                    additional_kwargs: { selection: { text: "selected text", file: "note.md" } },
+                }),
+                new AIMessage("hi"),
+            ];
 
             const resultWithoutSelection = estimateContextUsage(
-                [createMessagePair("hello", "hi")] as any,
+                createConversation("hello", "hi"),
                 "",
                 128000,
             );
-            const resultWithSelection = estimateContextUsage(messages as any, "", 128000);
+            const resultWithSelection = estimateContextUsage(messages, "", 128000);
 
             // Difference should be around 50 tokens for selection
             expect(resultWithSelection.estimatedUsedTokens - resultWithoutSelection.estimatedUsedTokens).toBe(
@@ -147,16 +130,20 @@ describe("tokenEstimator", () => {
         });
 
         it("should include graph notes overhead when present", () => {
-            const pair = createMessagePair("hello", "hi") as any;
-            pair.userMessage.graphNotes = [{ path: "note1.md", basename: "note1" }];
-            const messages = [pair];
+            const messages = [
+                new HumanMessage({
+                    content: "hello",
+                    additional_kwargs: { graphNotes: [{ path: "note1.md", basename: "note1" }] },
+                }),
+                new AIMessage("hi"),
+            ];
 
             const resultWithoutGraphNotes = estimateContextUsage(
-                [createMessagePair("hello", "hi")] as any,
+                createConversation("hello", "hi"),
                 "",
                 128000,
             );
-            const resultWithGraphNotes = estimateContextUsage(messages as any, "", 128000);
+            const resultWithGraphNotes = estimateContextUsage(messages, "", 128000);
 
             // Difference should be around 100 tokens for graph notes
             expect(
@@ -164,22 +151,43 @@ describe("tokenEstimator", () => {
             ).toBe(100);
         });
 
+        it("should include summarized checkpoint messages in the normal human token bucket", () => {
+            const messages = [
+                new HumanMessage({
+                    content: "Previous conversation summary\n\nImportant prior decisions.",
+                    additional_kwargs: { lc_source: "summarization" },
+                }),
+                new HumanMessage("hello"),
+                new AIMessage("hi"),
+            ];
+            const breakdown = estimateContextUsageBreakdown(messages, "", {});
+
+            expect(breakdown.humanTokens).toBeGreaterThan(0);
+            expect(breakdown.totalTokens).toBe(
+                breakdown.systemPromptTokens +
+                    breakdown.humanTokens +
+                    breakdown.assistantTokens +
+                    breakdown.toolTokens +
+                    breakdown.draftAndPendingTokens,
+            );
+        });
+
         it("should clamp usage percent to [0, 100]", () => {
-            const messages = [createMessagePair("hello world", "hi there")];
+            const messages = createConversation("hello world", "hi there");
 
             // Small context window to exceed 100%
-            const resultOver = estimateContextUsage(messages as any, "", 100);
+            const resultOver = estimateContextUsage(messages, "", 100);
             expect(resultOver.usagePercent).toBeLessThanOrEqual(100);
             expect(resultOver.usagePercent).toBeGreaterThan(0);
 
             // Ensure it's not clamped when under 100%
-            const resultUnder = estimateContextUsage(messages as any, "", 128000);
+            const resultUnder = estimateContextUsage(messages, "", 128000);
             expect(resultUnder.usagePercent).toBeLessThan(100);
         });
 
         it("should handle undefined context window", () => {
-            const messages = [createMessagePair("hello world", "hi there")];
-            const result = estimateContextUsage(messages as any, "", undefined);
+            const messages = createConversation("hello world", "hi there");
+            const result = estimateContextUsage(messages, "", undefined);
 
             expect(result.contextWindow).toBeUndefined();
             expect(result.usagePercent).toBe(0);
@@ -188,11 +196,11 @@ describe("tokenEstimator", () => {
 
         it("should handle long conversations with multiple message pairs", () => {
             const messages = [
-                createMessagePair("first message", "first response"),
-                createMessagePair("second message", "second response"),
-                createMessagePair("third message", "third response"),
+                ...createConversation("first message", "first response"),
+                ...createConversation("second message", "second response"),
+                ...createConversation("third message", "third response"),
             ];
-            const result = estimateContextUsage(messages as any, "", 128000);
+            const result = estimateContextUsage(messages, "", 128000);
 
             // Should accumulate tokens from all three pairs
             expect(result.estimatedUsedTokens).toBeGreaterThan(300); // At least 3 * ~100
@@ -201,16 +209,16 @@ describe("tokenEstimator", () => {
 
         it("should handle very long text content", () => {
             const longText = new Array(1000).fill("word").join(" ");
-            const messages = [createMessagePair(longText, "short response")];
-            const result = estimateContextUsage(messages as any, "", 128000);
+            const messages = createConversation(longText, "short response");
+            const result = estimateContextUsage(messages, "", 128000);
 
             // long text (1000 words) * 1.3 ≈ 1300 tokens + overhead
             expect(result.estimatedUsedTokens).toBeGreaterThan(1000);
         });
 
         it("should handle empty content strings gracefully", () => {
-            const messages = [createMessagePair("", "")];
-            const result = estimateContextUsage(messages as any, "", 128000);
+            const messages = createConversation("", "");
+            const result = estimateContextUsage(messages, "", 128000);
 
             // Only message overhead: 80 + 80 = 160
             expect(result.estimatedUsedTokens).toBe(160);
@@ -255,19 +263,24 @@ describe("tokenEstimator", () => {
         });
 
         it("should include assistant tool call payloads in the estimate", () => {
-            const pairWithToolCall = createMessagePair("plan this", "working on it") as any;
-            pairWithToolCall.assistantMessage.toolCalls = [
-                {
-                    id: "tc-1",
-                    name: "read_content",
-                    input: { path: "note.md" },
-                    status: "completed",
-                    output: { content: "some long output from tool" },
-                },
-            ];
-
-            const withoutToolCall = estimateContextUsage([createMessagePair("plan this", "working on it")] as any, "", 128000);
-            const withToolCall = estimateContextUsage([pairWithToolCall] as any, "", 128000);
+            const withoutToolCall = estimateContextUsage(createConversation("plan this", "working on it"), "", 128000);
+            const withToolCall = estimateContextUsage(
+                [
+                    new HumanMessage("plan this"),
+                    new AIMessage({
+                        content: "working on it",
+                        tool_calls: [
+                            {
+                                id: "tc-1",
+                                name: "read_content",
+                                args: { path: "note.md" },
+                            },
+                        ],
+                    }),
+                ],
+                "",
+                128000,
+            );
 
             expect(withToolCall.estimatedUsedTokens).toBeGreaterThan(withoutToolCall.estimatedUsedTokens);
         });

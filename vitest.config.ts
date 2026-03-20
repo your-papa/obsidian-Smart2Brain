@@ -40,6 +40,7 @@ export default defineConfig({
 		alias: {
 			// Mock obsidian for tests - the module is only available at runtime in Obsidian
 			obsidian: new URL("./test/__mocks__/obsidian.ts", import.meta.url).pathname,
+			electron: new URL("./test/__mocks__/electron.ts", import.meta.url).pathname,
 			// Mock SAP AI SDK - optional dependency
 			"@sap-ai-sdk/langchain": new URL("./test/__mocks__/sap-ai-sdk.ts", import.meta.url).pathname,
 		},

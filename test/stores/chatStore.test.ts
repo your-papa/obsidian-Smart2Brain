@@ -297,6 +297,60 @@ describe("baseMessagesToMessagePairs", () => {
 		expect(pairs[0].userMessage.attachments![0].name).toBe("test.pdf");
 	});
 
+	it("should hide synthetic summarization messages from the transcript", () => {
+		const summary = new HumanMessage({
+			content: "Previous conversation summary\n\nUser asked about project scope.",
+			id: "summary-1",
+			additional_kwargs: { lc_source: "summarization" },
+		});
+		const msgs = [summary, humanMsg("What did we decide?"), aiMsg("We decided to ship summarization.")];
+		const pairs = baseMessagesToMessagePairs(msgs);
+
+		expect(pairs).toHaveLength(2);
+		expect(pairs[0].transcriptEvent?.type).toBe("summarization_marker");
+		expect(pairs[0].transcriptEvent?.source).toBe("summarization");
+		expect(pairs[1].userMessage.content).toBe("What did we decide?");
+		expect(pairs[1].assistantMessage.content).toBe("We decided to ship summarization.");
+	});
+
+	it("should hide manual summarization maintenance turns from the transcript", () => {
+		const maintenance = new HumanMessage({
+			content: "Summarize older conversation history now.",
+			id: "maintenance-1",
+			additional_kwargs: { lc_source: "manual_summarization" },
+		});
+		const msgs = [humanMsg("Hello"), aiMsg("Hi"), maintenance, aiMsg("Context compacted."), humanMsg("Continue"), aiMsg("Done")];
+		const pairs = baseMessagesToMessagePairs(msgs);
+
+		expect(pairs).toHaveLength(3);
+		expect(pairs[0].userMessage.content).toBe("Hello");
+		expect(pairs[0].assistantMessage.content).toBe("Hi");
+		expect(pairs[1].transcriptEvent?.type).toBe("summarization_marker");
+		expect(pairs[1].transcriptEvent?.source).toBe("manual_summarization");
+		expect(pairs[2].userMessage.content).toBe("Continue");
+		expect(pairs[2].assistantMessage.content).toBe("Done");
+	});
+
+	it("should collapse adjacent summarization sources into a single transcript marker", () => {
+		const autoSummary = new HumanMessage({
+			content: "Previous conversation summary",
+			id: "summary-1",
+			additional_kwargs: { lc_source: "summarization" },
+		});
+		const manualSummary = new HumanMessage({
+			content: "Context compacted",
+			id: "summary-2",
+			additional_kwargs: { lc_source: "manual_summarization" },
+		});
+		const msgs = [humanMsg("Hello"), aiMsg("Hi"), autoSummary, aiMsg("Summary A"), manualSummary, aiMsg("Summary B")];
+		const pairs = baseMessagesToMessagePairs(msgs);
+
+		expect(pairs).toHaveLength(2);
+		expect(pairs[1].transcriptEvent?.type).toBe("summarization_marker");
+		expect(pairs[1].transcriptEvent?.source).toBe("manual_summarization");
+		expect(pairs[1].transcriptEvent?.label).toBe("Conversation compacted here");
+	});
+
 	it("should assign unique UUIDv7 IDs to each pair", () => {
 		const msgs = [
 			humanMsg("A"),

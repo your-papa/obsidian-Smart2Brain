@@ -316,6 +316,7 @@ export function createDefaultAgentConfig(id?: string, name?: string): AgentConfi
 		id: id ?? genUUIDv7(),
 		name: name ?? "New Agent",
 		chatModel: null,
+		summarizationModel: null,
 		systemPrompt: BASE_SYSTEM_PROMPT,
 		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
@@ -331,6 +332,7 @@ function createDefaultAgent(): AgentConfig {
 		id: DEFAULT_AGENT_ID,
 		name: "Default Agent",
 		chatModel: null,
+		summarizationModel: null,
 		systemPrompt: BASE_SYSTEM_PROMPT,
 		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
@@ -1456,6 +1458,9 @@ export class PluginDataStore {
 			if (agent.chatModel?.provider === provider && agent.chatModel.model === modelName) {
 				agent.chatModel = null;
 			}
+			if (agent.summarizationModel?.provider === provider && agent.summarizationModel.model === modelName) {
+				agent.summarizationModel = null;
+			}
 		}
 
 		this.saveSettings();
@@ -1713,6 +1718,7 @@ function normalizeAgent(agent: AgentConfig): void {
 	agent.skills ??= {};
 	agent.mcpServers ??= {};
 	agent.systemPrompt ??= BASE_SYSTEM_PROMPT;
+	agent.summarizationModel ??= null;
 }
 
 function normalizeAgents(mergedData: PluginData): void {

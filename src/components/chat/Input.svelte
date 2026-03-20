@@ -139,7 +139,7 @@ const selectedModelSupportsVision = $derived.by(() => {
 });
 
 const contextBreakdown = $derived.by(() => {
-	return estimateContextUsageBreakdown(messenger.session?.messages ?? [], inputValue, {
+	return estimateContextUsageBreakdown(messenger.session?.getActiveCheckpointMessages() ?? [], inputValue, {
 		systemPrompt: assembledSystemPrompt,
 		pendingAttachmentsCount: attachments.length,
 		pendingVisibleNotesCount: activeVisibleNotes.length,
@@ -153,6 +153,13 @@ const contextUsage = $derived.by(() => {
 });
 
 const canSendMessage = $derived(inputValue.trim().length > 0 || attachments.length > 0);
+const canSummarizeNow = $derived.by(() => {
+	return Boolean(
+		messenger.session &&
+			messenger.session.messageState === MessageState.idle &&
+			messenger.session.messages.length > 0,
+	);
+});
 const showDragActive = $derived(dropTargetMode === "view" ? externalDragActive : isDragging);
 
 $effect(() => {
@@ -396,6 +403,15 @@ function sendMessage() {
 		collapseFullscreen();
 	}
 	onMessageSent?.();
+}
+
+async function summarizeNow() {
+	if (!messenger.session) return;
+	try {
+		await messenger.session.summarizeHistoryNow();
+	} catch (error) {
+		new Notice(error instanceof Error ? error.message : "Failed to summarize history");
+	}
 }
 
 function sanitizeAttachmentFileName(fileName: string): string {
@@ -1037,6 +1053,8 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
           used={contextUsage.estimatedUsedTokens}
           limit={contextUsage.contextWindow}
           breakdown={contextBreakdown}
+          canSummarizeNow={canSummarizeNow}
+          onSummarizeNow={summarizeNow}
         />
         <button
           class="clickable-icon flex flex-row items-center gap-0.5"

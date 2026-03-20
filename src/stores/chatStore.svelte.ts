@@ -21,6 +21,8 @@ import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator"
 import { DEFAULT_AGENT_ID, getData } from "./dataStore.svelte";
 import { getPlugin } from "./state.svelte";
 import { Logger } from "../utils/logging";
+import { shouldSummarizeForEstimatedTokens } from "../agent/summarization";
+import { estimateConversationBaseTokens, estimateLiveDraftTokens } from "../utils/tokenEstimator";
 
 // Re-export for backward compatibility
 export type { ThreadError };
@@ -48,6 +50,15 @@ export enum MessageState {
 	idle = 0,
 	answering = 1,
 	editing = 2,
+}
+
+const HIDDEN_HUMAN_MESSAGE_SOURCES = new Set(["summarization", "manual_summarization"]);
+type HiddenHumanSource = "summarization" | "manual_summarization";
+const MANUAL_SUMMARIZATION_PROMPT =
+	"Summarize older conversation history now to reduce context usage while preserving important facts, decisions, and user preferences. Do not call tools. Reply with exactly: Context compacted.";
+
+function isHiddenHumanSource(source: unknown): source is HiddenHumanSource {
+	return typeof source === "string" && HIDDEN_HUMAN_MESSAGE_SOURCES.has(source);
 }
 
 export type ToolCallStatus = "running" | "completed" | "failed";
@@ -103,6 +114,12 @@ export interface AssistantMessage {
 	errorCode?: string;
 }
 
+export interface TranscriptEvent {
+	type: "summarization_marker";
+	label: string;
+	source: "summarization" | "manual_summarization";
+}
+
 /**
  * Information about branches at a given checkpoint.
  * Used for navigating between alternative conversation paths.
@@ -124,6 +141,7 @@ export interface MessagePair {
 	id: UUIDv7;
 	userMessage: UserMessage;
 	assistantMessage: AssistantMessage;
+	transcriptEvent?: TranscriptEvent;
 	/** The model used to generate the assistant response */
 	model?: ChatModel;
 	/** Generation metadata persisted with the assistant message */
@@ -939,6 +957,32 @@ function mergeAssistantMessages(
 	};
 }
 
+function createSummarizationMarker(source: HiddenHumanSource): MessagePair {
+	return {
+		id: genUUIDv7(),
+		userMessage: { content: "" },
+		assistantMessage: { state: AssistantState.success, content: "" },
+		transcriptEvent: {
+			type: "summarization_marker",
+			label:
+				source === "manual_summarization"
+					? "Conversation compacted here"
+					: "Earlier messages were summarized here",
+			source,
+		},
+	};
+}
+
+function updateSummarizationMarker(pair: MessagePair, source: HiddenHumanSource): void {
+	if (!pair.transcriptEvent || pair.transcriptEvent.type !== "summarization_marker") {
+		return;
+	}
+
+	pair.transcriptEvent.source = source;
+	pair.transcriptEvent.label =
+		source === "manual_summarization" ? "Conversation compacted here" : "Earlier messages were summarized here";
+}
+
 /**
  * Converts an array of BaseMessage (from LangGraph) into MessagePair[] for UI rendering.
  *
@@ -971,6 +1015,22 @@ export function baseMessagesToMessagePairs(
 		const msg = conversationMessages[i];
 
 		if (isHumanMessage(msg)) {
+			const lcSource = msg.additional_kwargs?.lc_source;
+			if (isHiddenHumanSource(lcSource)) {
+				const lastPair = messagePairs.at(-1);
+				if (lastPair?.transcriptEvent?.type === "summarization_marker") {
+					updateSummarizationMarker(lastPair, lcSource);
+				} else {
+					messagePairs.push(createSummarizationMarker(lcSource));
+				}
+				let j = i + 1;
+				while (j < conversationMessages.length && isAIMessage(conversationMessages[j])) {
+					j++;
+				}
+				i = j;
+				continue;
+			}
+
 			// Start a new pair with user message
 			let userContent = extractTextContent(msg);
 			const humanMessageId = msg.id;
@@ -1151,6 +1211,7 @@ export class ChatSession {
 
 	// Reactive UI state
 	messageState = $state<MessageState>(MessageState.idle);
+	summarizingHistory = $state(false);
 
 	private graphState: CheckpointGraphState;
 	private errorCount: number;
@@ -1176,6 +1237,14 @@ export class ChatSession {
 
 	getActiveCheckpointId(): string | undefined {
 		return this.graphState.activeCheckpointId;
+	}
+
+	getActiveCheckpointMessages(): BaseMessage[] {
+		const activeCheckpointId = this.graphState.activeCheckpointId;
+		if (activeCheckpointId && this.graphState.nodes.has(activeCheckpointId)) {
+			return this.graphState.nodes.get(activeCheckpointId)?.messages ?? this.bootstrapMessages;
+		}
+		return this.bootstrapMessages;
 	}
 
 	setLastPersistedActiveCheckpointId(checkpointId?: string): void {
@@ -1461,6 +1530,7 @@ export class ChatSession {
 			reloadAfter?: boolean;
 			parentCheckpointId?: string;
 			beforeCheckpointIds: Set<string>;
+			predictedSummarization?: boolean;
 		},
 	) {
 		const pair = this.findPair(pairId);
@@ -1471,6 +1541,7 @@ export class ChatSession {
 
 		try {
 			this.messageState = MessageState.answering;
+			this.summarizingHistory = options.predictedSummarization ?? false;
 			pair.assistantMessage.state = AssistantState.streaming;
 
 			const streamPromise = this.consumeStream(pair.assistantMessage, getStream(signal));
@@ -1500,8 +1571,40 @@ export class ChatSession {
 		} finally {
 			this.abortController = null;
 			this.cancelled = false;
+			this.summarizingHistory = false;
 			this.messageState = MessageState.idle;
 		}
+	}
+
+	private async shouldPredictSummarization(
+		inputValue: string,
+		options: {
+			attachmentsCount?: number;
+			visibleNotesCount?: number;
+			hasSelection?: boolean;
+			graphNotesCount?: number;
+		} = {},
+	): Promise<boolean> {
+		const selectedAgent = getData().getSelectedAgent();
+		const contextWindow = selectedAgent.chatModel?.modelConfig?.contextWindow;
+		let systemPrompt = selectedAgent.systemPrompt;
+		try {
+			systemPrompt = await getPlugin().agentManager.assembleSystemPrompt();
+		} catch {
+			// Fall back to the base prompt if prompt assembly fails.
+		}
+		const estimatedTokens =
+			estimateConversationBaseTokens(this.getActiveCheckpointMessages(), {
+				systemPrompt,
+			}) +
+			estimateLiveDraftTokens(inputValue, {
+				pendingAttachmentsCount: options.attachmentsCount,
+				pendingVisibleNotesCount: options.visibleNotesCount,
+				hasPendingSelection: options.hasSelection,
+				pendingGraphNotesCount: options.graphNotesCount,
+			});
+
+		return shouldSummarizeForEstimatedTokens(estimatedTokens, contextWindow);
 	}
 
 	/** Augments the user query with visible notes context from the provided refs. */
@@ -1559,7 +1662,18 @@ export class ChatSession {
 					selection,
 					graphNotes,
 				) as AsyncIterable<AgentStreamChunk>,
-			{ generateTitle: userContent, reloadAfter: true, parentCheckpointId, beforeCheckpointIds },
+			{
+				generateTitle: userContent,
+				reloadAfter: true,
+				parentCheckpointId,
+				beforeCheckpointIds,
+				predictedSummarization: await this.shouldPredictSummarization(userContent, {
+					attachmentsCount: attachments?.length,
+					visibleNotesCount: visibleNotes?.length,
+					hasSelection: Boolean(selection),
+					graphNotesCount: graphNotes?.length,
+				}),
+			},
 		);
 	}
 
@@ -1589,7 +1703,14 @@ export class ChatSession {
 					signal,
 					attachments,
 				) as AsyncIterable<AgentStreamChunk>,
-			{ reloadAfter: true, parentCheckpointId: checkpointId, beforeCheckpointIds },
+			{
+				reloadAfter: true,
+				parentCheckpointId: checkpointId,
+				beforeCheckpointIds,
+				predictedSummarization: await this.shouldPredictSummarization(userContent, {
+					attachmentsCount: attachments?.length,
+				}),
+			},
 		);
 	}
 
@@ -1611,7 +1732,12 @@ export class ChatSession {
 					checkpointId,
 					signal,
 				) as AsyncIterable<AgentStreamChunk>,
-			{ reloadAfter: true, parentCheckpointId: checkpointId, beforeCheckpointIds },
+			{
+				reloadAfter: true,
+				parentCheckpointId: checkpointId,
+				beforeCheckpointIds,
+				predictedSummarization: await this.shouldPredictSummarization(""),
+			},
 		);
 	}
 
@@ -1626,6 +1752,7 @@ export class ChatSession {
 
 		for await (const chunk of stream) {
 			if (chunk.type === "token") {
+				this.summarizingHistory = false;
 				if (!chunk.token) continue;
 				tokenBuffer += chunk.token;
 				assistantMsg.content = hasSeenToolCall ? tokenBuffer.trimStart() : tokenBuffer;
@@ -1633,6 +1760,7 @@ export class ChatSession {
 			}
 
 			if (chunk.type === "tool_start") {
+				this.summarizingHistory = false;
 				hasSeenToolCall = true;
 				const preamble = tokenBuffer;
 				tokenBuffer = "";
@@ -1671,6 +1799,7 @@ export class ChatSession {
 			}
 
 			if (chunk.type === "tool_end") {
+				this.summarizingHistory = false;
 				// Determine tool completion status up-front so both ToolCallState
 				// and the timeline event use the same value.  During streaming the
 				// on_tool_end event does not carry a status flag, so we default to
@@ -1717,11 +1846,13 @@ export class ChatSession {
 			}
 
 			if (chunk.type === "result") {
+				this.summarizingHistory = false;
 				assistantMsg.content = hasSeenToolCall ? tokenBuffer.trim() : tokenBuffer;
 				continue;
 			}
 
 			if (chunk.type === "checkpoint_message") {
+				this.summarizingHistory = false;
 				const checkpointAssistant = baseMessageToAssistantMessage(chunk.message);
 				assistantMsg.content = checkpointAssistant.content;
 				assistantMsg.toolCalls = checkpointAssistant.toolCalls;
@@ -1736,6 +1867,51 @@ export class ChatSession {
 
 		if (!assistantMsg.assistantTimeline?.length) {
 			assistantMsg.assistantTimeline = buildTimelineFromToolCalls(assistantMsg.toolCalls);
+		}
+	}
+
+	async summarizeHistoryNow(): Promise<void> {
+		if (this.messageState !== MessageState.idle) {
+			throw new Error("Cannot summarize while another response is in progress.");
+		}
+
+		const plugin = getPlugin();
+		const beforeCheckpointIds = new Set(this.graphState.nodes.keys());
+		const parentCheckpointId = this.graphState.activeCheckpointId ?? this.graphState.rootCheckpointId;
+		const assistantMessage: AssistantMessage = { state: AssistantState.streaming, content: "" };
+
+		this.abortController = new AbortController();
+		const signal = this.abortController.signal;
+
+		try {
+			this.messageState = MessageState.answering;
+			this.summarizingHistory = true;
+
+			await this.consumeStream(
+				assistantMessage,
+				plugin.agentManager.streamQuery(
+					MANUAL_SUMMARIZATION_PROMPT,
+					String(this.id),
+					this.graphState.activeCheckpointId,
+					signal,
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					"manual_summarization",
+				) as AsyncIterable<AgentStreamChunk>,
+			);
+
+			await this.syncGraphAfterRun(parentCheckpointId, beforeCheckpointIds);
+
+			if (this.onNeedReload) {
+				await this.onNeedReload();
+			}
+		} finally {
+			this.abortController = null;
+			this.cancelled = false;
+			this.summarizingHistory = false;
+			this.messageState = MessageState.idle;
 		}
 	}
 }

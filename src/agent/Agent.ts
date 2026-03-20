@@ -12,7 +12,7 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 import type { StreamEvent } from "@langchain/core/tracers/log_stream";
 import type { BaseCheckpointSaver, CheckpointTuple } from "@langchain/langgraph";
 import { MemorySaver } from "@langchain/langgraph";
-import { type ReactAgent, createAgent } from "langchain";
+import { type ReactAgent, createAgent, summarizationMiddleware } from "langchain";
 import { Notice, TFile } from "obsidian";
 
 import { ProviderEndpointError, ProviderNotFoundError } from "../providers/errors";
@@ -36,6 +36,13 @@ import { toBase64, toBase64DataUri } from "../utils/attachments";
 import { extractTextFromPdf } from "../utils/pdfExtractor";
 import { Logger } from "../utils/logging";
 import { type ThreadSnapshot, type ThreadStore, createSnapshot } from "./memory/ThreadStore";
+import {
+	getSummarizationTriggerTokens,
+	getTrimTokensToSummarize,
+	SUMMARY_KEEP_MESSAGE_COUNT,
+	SUMMARY_PREFIX,
+	SUMMARY_PROMPT,
+} from "./summarization";
 import type { Telemetry } from "./telemetry/Telemetry";
 
 const MAX_IMAGE_ATTACHMENT_BYTES = 15 * 1024 * 1024;
@@ -54,6 +61,11 @@ export interface ChooseModelParams {
 	provider: string;
 	chatModel: string;
 	options?: Partial<ChatModelConfig>;
+	summarizationModel?: {
+		provider: string;
+		chatModel: string;
+		options?: Partial<ChatModelConfig>;
+	} | null;
 }
 
 /** Options for a normal query (new message in thread) */
@@ -62,6 +74,7 @@ export interface AgentRunOptions {
 	threadId?: string;
 	metadata?: Record<string, unknown>;
 	configurable?: Record<string, unknown>;
+	lcSource?: string;
 	signal?: AbortSignal;
 	/** Optional attachments (images, PDFs) to include in the message */
 	attachments?: ChatAttachment[];
@@ -78,6 +91,7 @@ export interface AgentEditOptions {
 	query: string;
 	threadId: string;
 	checkpointId: string;
+	lcSource?: string;
 	signal?: AbortSignal;
 	attachments?: ChatAttachment[];
 	visibleNotes?: VisibleNoteRef[];
@@ -184,6 +198,7 @@ export class Agent {
 	private prompt: string;
 	private tools: readonly unknown[] = [];
 	private selectedModel?: SelectedModel;
+	private selectedSummarizationModel?: SelectedModel;
 	private agentRunnable?: AgentRunnable;
 	private readonly checkpointer: BaseCheckpointSaver;
 	private readonly telemetry?: Telemetry;
@@ -367,7 +382,7 @@ export class Agent {
 	}
 
 	async chooseModel(params: ChooseModelParams): Promise<void> {
-		const { provider, chatModel, options } = params;
+		const { provider, chatModel, options, summarizationModel } = params;
 
 		// Create a LangChain instance for this provider + model
 		let instance: BaseChatModel;
@@ -390,8 +405,49 @@ export class Agent {
 			instance,
 			options,
 		};
+
+		if (summarizationModel) {
+			this.selectedSummarizationModel = {
+				provider: summarizationModel.provider,
+				name: summarizationModel.chatModel,
+				instance: this.registry.createChatInstance(
+					summarizationModel.provider,
+					summarizationModel.chatModel,
+					summarizationModel.options,
+				),
+				options: summarizationModel.options,
+			};
+		} else {
+			this.selectedSummarizationModel = undefined;
+		}
 		Logger.debug("agent.chooseModel", { provider, chatModel, options });
 		this.dirty = true;
+	}
+
+	private buildSummarizationMiddleware() {
+		if (!this.selectedModel) {
+			return [];
+		}
+
+		const model = this.selectedSummarizationModel?.instance ?? this.selectedModel.instance;
+		const contextWindow = this.selectedModel.options?.contextWindow;
+		const triggerTokens = getSummarizationTriggerTokens(contextWindow);
+		if (!triggerTokens) {
+			return [];
+		}
+
+		const trimTokensToSummarize = getTrimTokensToSummarize(triggerTokens);
+
+		return [
+			summarizationMiddleware({
+				model,
+				trigger: { tokens: triggerTokens, messages: SUMMARY_KEEP_MESSAGE_COUNT + 2 },
+				keep: { messages: SUMMARY_KEEP_MESSAGE_COUNT },
+				summaryPrefix: SUMMARY_PREFIX,
+				summaryPrompt: SUMMARY_PROMPT,
+				trimTokensToSummarize,
+			}),
+		] as const;
 	}
 
 	/**
@@ -406,12 +462,14 @@ export class Agent {
 		visibleNotes?: VisibleNoteRef[],
 		selection?: SelectionRef,
 		graphNotes?: GraphNoteRef[],
+		lcSource?: string,
 	): HumanMessage {
 		const additional_kwargs: Record<string, unknown> = {};
 		if (attachments?.length) additional_kwargs.attachments = attachments;
 		if (visibleNotes?.length) additional_kwargs.visibleNotes = visibleNotes;
 		if (selection) additional_kwargs.selection = selection;
 		if (graphNotes?.length) additional_kwargs.graphNotes = graphNotes;
+		if (lcSource) additional_kwargs.lc_source = lcSource;
 		const hasKwargs = Object.keys(additional_kwargs).length > 0;
 		// Cast content — the HumanMessage constructor handles both string and
 		// MessageContentComplex[] at runtime, but the TS types are overly strict.
@@ -495,6 +553,7 @@ export class Agent {
 			options.visibleNotes,
 			options.selection,
 			options.graphNotes,
+			options.lcSource,
 		);
 
 		const transportContext = createAiTransportContext("default", `agent.run:${runId}`);
@@ -566,6 +625,7 @@ export class Agent {
 			options.visibleNotes,
 			options.selection,
 			options.graphNotes,
+			options.lcSource,
 		);
 
 		const transportLabel = `agent.streamTokens:${runId}`;
@@ -790,7 +850,14 @@ export class Agent {
 		} as StreamEventsConfig;
 
 		const messageContent = await this.buildMessageContent(query, options.attachments);
-		const humanMessage = this.createHumanMessage(messageContent, options.attachments, options.visibleNotes);
+		const humanMessage = this.createHumanMessage(
+			messageContent,
+			options.attachments,
+			options.visibleNotes,
+			undefined,
+			undefined,
+			options.lcSource,
+		);
 
 		const input = {
 			messages: [humanMessage],
@@ -1355,6 +1422,7 @@ export class Agent {
 			tools: Array.isArray(this.tools) ? [...this.tools] : [],
 			systemPrompt: this.prompt,
 			checkpointer: this.checkpointer,
+			middleware: this.buildSummarizationMiddleware(),
 		});
 		this.dirty = false;
 		return this.agentRunnable;

@@ -75,4 +75,56 @@ describe.skipIf(!providerAvailable)("multi-turn conversation", () => {
 	it("should not produce errors during multi-turn conversation", () => {
 		expect(getErrors()).toBe("");
 	});
+
+	it("should summarize older turns instead of throwing when the configured context window is small", async () => {
+		const summaryThreadId = "multi-turn-summary-" + Date.now();
+		const configKey = "__s2bSummaryCfg_" + Date.now();
+		const restoreKey = "__s2bSummaryRestore_" + Date.now();
+		const filler = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu ".repeat(35);
+
+		const originalConfig = await pollEval(
+			`(function(){ var data = ${PLUGIN}.pluginData; var agent = data.getSelectedAgent(); if (!agent.chatModel) return "NO_CHAT_MODEL"; window.${configKey} = JSON.stringify(agent.chatModel.modelConfig || {}); data.updateAgent(agent.id, { chatModel: { ...agent.chatModel, modelConfig: { ...agent.chatModel.modelConfig, contextWindow: 1500 } }, summarizationModel: null }); return "ok"; })()`,
+			configKey,
+			{ timeoutMs: 10_000 },
+		);
+
+		expect(originalConfig).not.toBe("NO_CHAT_MODEL");
+
+		try {
+			const firstKey = "__s2bSummary1_" + Date.now();
+			const first = await pollEval(
+				`(function(){ var am = ${PLUGIN}.agentManager; window.${firstKey} = "pending"; (async function(){ try { var tokens = ""; for await (var chunk of am.streamQuery("Remember this codeword exactly: STARFRUIT. Reply with OK only. ${filler}", "${summaryThreadId}")) { if (chunk.type === "token" && chunk.token) tokens += chunk.token; } window.${firstKey} = tokens || "EMPTY"; } catch(e) { window.${firstKey} = "ERROR:" + e.message; } })(); return "started"; })()`,
+				firstKey,
+				{ timeoutMs: 90_000 },
+			);
+
+			expect(first).not.toContain("ERROR:");
+
+			for (let i = 0; i < 4; i++) {
+				const loopKey = `__s2bSummaryLoop_${Date.now()}_${i}`;
+				const result = await pollEval(
+					`(function(){ var am = ${PLUGIN}.agentManager; window.${loopKey} = "pending"; (async function(){ try { var tokens = ""; for await (var chunk of am.streamQuery("Keep this response short. ${filler}", "${summaryThreadId}")) { if (chunk.type === "token" && chunk.token) tokens += chunk.token; } window.${loopKey} = tokens || "EMPTY"; } catch(e) { window.${loopKey} = "ERROR:" + e.message; } })(); return "started"; })()`,
+					loopKey,
+					{ timeoutMs: 90_000 },
+				);
+				expect(result).not.toContain("ERROR:");
+			}
+
+			const recallKey = "__s2bSummaryRecall_" + Date.now();
+			const recall = await pollEval(
+				`(function(){ var am = ${PLUGIN}.agentManager; window.${recallKey} = "pending"; (async function(){ try { var tokens = ""; for await (var chunk of am.streamQuery("What codeword did I ask you to remember at the start? Reply with the single word only.", "${summaryThreadId}")) { if (chunk.type === "token" && chunk.token) tokens += chunk.token; } window.${recallKey} = tokens || "EMPTY"; } catch(e) { window.${recallKey} = "ERROR:" + e.message; } })(); return "started"; })()`,
+				recallKey,
+				{ timeoutMs: 90_000 },
+			);
+
+			expect(recall).not.toContain("ERROR:");
+			expect(recall.toUpperCase()).toContain("STARFRUIT");
+		} finally {
+			await pollEval(
+				`(function(){ var data = ${PLUGIN}.pluginData; var agent = data.getSelectedAgent(); var original = JSON.parse('${originalConfig.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'); data.updateAgent(agent.id, { chatModel: { ...agent.chatModel, modelConfig: original } }); window.${restoreKey} = "restored"; return "started"; })()`,
+				restoreKey,
+				{ timeoutMs: 10_000 },
+			);
+		}
+	});
 });

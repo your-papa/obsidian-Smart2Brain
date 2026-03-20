@@ -205,6 +205,10 @@ function toChooseModelParamsImmediate(model: ChatModel): ChooseModelParams {
 	};
 }
 
+function resolveSummarizationChatModel(chatModel: ChatModel, summarizationModel: ChatModel | null): ChatModel {
+	return summarizationModel ?? chatModel;
+}
+
 async function resolveVisionSupportCached(providerId: string, modelId: string): Promise<boolean> {
 	const cacheKey = getVisionSupportCacheKey(providerId, modelId);
 
@@ -738,7 +742,11 @@ export class AgentManager {
 		const chatModel = selectedAgent.chatModel;
 		if (chatModel) {
 			try {
-				await this.agent.chooseModel(toChooseModelParamsImmediate(chatModel));
+				const summarizationModel = resolveSummarizationChatModel(chatModel, selectedAgent.summarizationModel);
+				await this.agent.chooseModel({
+					...toChooseModelParamsImmediate(chatModel),
+					summarizationModel: toChooseModelParamsImmediate(summarizationModel),
+				});
 			} catch (error) {
 				if (error instanceof ProviderNotFoundError) {
 					Logger.warn(
@@ -872,7 +880,11 @@ export class AgentManager {
 		const selectedAgent = pluginData.getSelectedAgent();
 		const chatModel = selectedAgent.chatModel;
 		if (!chatModel) throw new Error("No chat model configured");
-		await agent.chooseModel(await toChooseModelParams(chatModel));
+		const summarizationModel = resolveSummarizationChatModel(chatModel, selectedAgent.summarizationModel);
+		await agent.chooseModel({
+			...(await toChooseModelParams(chatModel)),
+			summarizationModel: await toChooseModelParams(summarizationModel),
+		});
 		const runMetadata = this.buildRunMetadata(selectedAgent.id, selectedAgent.name, chatModel);
 		return { agent, chatModel, runMetadata };
 	}
@@ -886,6 +898,7 @@ export class AgentManager {
 		visibleNotes?: VisibleNoteRef[],
 		selection?: SelectionRef,
 		graphNotes?: GraphNoteRef[],
+		lcSource?: string,
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		setCurrentThreadId(threadId);
 		try {
@@ -902,6 +915,7 @@ export class AgentManager {
 					visibleNotes,
 					selection,
 					graphNotes,
+					lcSource,
 				}),
 				signal,
 				chatModel,
