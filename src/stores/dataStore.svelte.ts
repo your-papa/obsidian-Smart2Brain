@@ -364,11 +364,6 @@ export const DEFAULT_SETTINGS: PluginData = {
 	targetFolder: "Chats",
 	attachmentFolder: "",
 
-	// File filtering
-	excludeFF: ["Chats", ".excalidraw.md"],
-	includeFF: [],
-	isExcluding: true,
-
 	// Privacy
 	privacyListExclude: [],
 	privacyListInclude: [],
@@ -501,40 +496,6 @@ export class PluginDataStore {
 	}
 	set assistantLanguage(val: "de" | "en") {
 		this.#data.assistantLanguage = val;
-		this.saveSettings();
-	}
-
-	get isExcluding(): boolean {
-		return this.#data.isExcluding;
-	}
-
-	toggleIsExcluding() {
-		this.#data.isExcluding = !this.#data.isExcluding;
-	}
-
-	get indexList() {
-		if (this.#data.isExcluding) return this.#data.excludeFF;
-		return this.#data.includeFF;
-	}
-	removeIndexList(val: string) {
-		if (this.#data.isExcluding) {
-			if (!this.#data.excludeFF.includes(val)) return;
-			this.#data.excludeFF.remove(val);
-		} else {
-			if (!this.#data.includeFF.includes(val)) return;
-			this.#data.includeFF.remove(val);
-		}
-		this.saveSettings();
-	}
-
-	addIndexList(val: string) {
-		if (this.#data.isExcluding) {
-			if (this.#data.excludeFF.includes(val)) return;
-			this.#data.excludeFF.push(val);
-		} else {
-			if (this.#data.includeFF.includes(val)) return;
-			this.#data.includeFF.push(val);
-		}
 		this.saveSettings();
 	}
 
@@ -1854,6 +1815,9 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		providerConfig: migratedProviders.providerConfig,
 		providerMeta: migratedProviders.providerMeta,
 	};
+	delete (mergedData as PluginData & { excludeFF?: unknown }).excludeFF;
+	delete (mergedData as PluginData & { includeFF?: unknown }).includeFF;
+	delete (mergedData as PluginData & { isExcluding?: unknown }).isExcluding;
 
 	if (!rawData?.agents || Object.keys(rawData.agents).length === 0) {
 		mergedData.agents = { [DEFAULT_AGENT_ID]: createDefaultAgent() };

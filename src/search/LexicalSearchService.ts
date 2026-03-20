@@ -2,6 +2,7 @@ import { TFile, getAllTags, type CachedMetadata } from "obsidian";
 import type SecondBrainPlugin from "../main";
 import { getData } from "../stores/dataStore.svelte";
 import { Logger } from "../utils/logging";
+import { shouldProcessVaultPath } from "../utils/fileFiltering";
 import { matchesPathPrefix } from "../utils/pathUtils";
 import { MiniSearchService, type LexicalSearchResult } from "../vectorstore/MiniSearchService";
 import type { SearchFilter, SearchMatchBadge, SearchMatchExplanation, VectorSearchResult } from "../vectorstore/types";
@@ -263,15 +264,7 @@ export class LexicalSearchService {
 	}
 
 	private shouldIndexFile(file: TFile): boolean {
-		const pluginData = getData();
-		const indexList = pluginData.indexList;
-		const isExcluding = pluginData.isExcluding;
-
-		const matchesPattern = indexList.some(
-			(pattern) => file.path.startsWith(pattern) || file.path.includes(`/${pattern}`),
-		);
-
-		return isExcluding ? !matchesPattern : indexList.length === 0 || matchesPattern;
+		return shouldProcessVaultPath(file.path, getData().targetFolder);
 	}
 
 	private getSearchableTags(file: TFile): string[] {

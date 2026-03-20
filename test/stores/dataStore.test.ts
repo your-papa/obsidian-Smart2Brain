@@ -459,52 +459,6 @@ describe("PluginDataStore – Embed Models", () => {
 });
 
 /* --------------------------------------------------------------------------
- * Index list (file filter)
- * ------------------------------------------------------------------------*/
-
-describe("PluginDataStore – Index List", () => {
-	let store: PluginDataStore;
-
-	beforeEach(() => {
-		({ store } = makeStore());
-	});
-
-	it("should default to exclude mode", () => {
-		expect(store.isExcluding).toBe(true);
-	});
-
-	it("should return excludeFF as indexList in exclude mode", () => {
-		expect(store.indexList).toEqual(DEFAULT_SETTINGS.excludeFF);
-	});
-
-	it("should toggle between exclude and include mode", () => {
-		store.toggleIsExcluding();
-		expect(store.isExcluding).toBe(false);
-		expect(store.indexList).toEqual(DEFAULT_SETTINGS.includeFF);
-	});
-
-	it("should add to index list", () => {
-		const before = store.indexList.length;
-		store.addIndexList("NewFolder");
-		expect(store.indexList.length).toBe(before + 1);
-		expect(store.indexList).toContain("NewFolder");
-	});
-
-	it("should not add duplicate to index list", () => {
-		store.addIndexList("DupeTest");
-		const len = store.indexList.length;
-		store.addIndexList("DupeTest");
-		expect(store.indexList.length).toBe(len);
-	});
-
-	it("should remove from index list", () => {
-		store.addIndexList("ToRemove");
-		store.removeIndexList("ToRemove");
-		expect(store.indexList).not.toContain("ToRemove");
-	});
-});
-
-/* --------------------------------------------------------------------------
  * Privacy list
  * ------------------------------------------------------------------------*/
 

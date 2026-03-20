@@ -3,6 +3,7 @@ import { type Change, diffLines } from "diff";
 import { z } from "zod";
 import type SecondBrainPlugin from "../main";
 import type { PendingChange, PendingChangeEntry } from "../types/shared";
+import { matchesPathPattern, shouldProcessVaultPath } from "../utils/fileFiltering";
 import { genUUIDv7 } from "../utils/uuid7Validator";
 import { Logger } from "../utils/logging";
 import { getData } from "./dataStore.svelte";
@@ -170,17 +171,9 @@ export class PendingChangesStore {
 		document.dispatchEvent(new CustomEvent("s2b-pending-changes-updated"));
 	}
 
-	/** Check if a vault path is allowed by include/exclude filter settings. */
+	/** Check if a vault path is allowed by internal filtering rules. */
 	isPathAllowed(filePath: string): boolean {
-		const pluginData = getData();
-		const indexList = pluginData.indexList;
-		const isExcluding = pluginData.isExcluding;
-
-		const matchesPattern = indexList.some(
-			(pattern: string) => filePath.startsWith(pattern) || filePath.includes(`/${pattern}`),
-		);
-
-		return isExcluding ? !matchesPattern : indexList.length === 0 || matchesPattern;
+		return shouldProcessVaultPath(filePath, getData().targetFolder);
 	}
 
 	/**
@@ -193,9 +186,7 @@ export class PendingChangesStore {
 		const privacyList = pluginData.privacyList;
 		const isExcluding = pluginData.privacyIsExcluding;
 
-		const matchesPattern = privacyList.some(
-			(pattern: string) => filePath.startsWith(pattern) || filePath.includes(`/${pattern}`),
-		);
+		const matchesPattern = privacyList.some((pattern: string) => matchesPathPattern(filePath, pattern));
 
 		if (isExcluding) {
 			// "Mark as private" mode: matched files ARE private
