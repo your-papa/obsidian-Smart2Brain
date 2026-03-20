@@ -5,7 +5,7 @@ import type { SearchAlgorithm } from "../../types/plugin";
 import type { SearchFilter } from "../../vectorstore";
 import type { SearchMatchBadge } from "../../vectorstore/types";
 import { Logger } from "../../utils/logging";
-import { getSearchResultNoteIcon, getTagIcon } from "../../utils/noteIcons";
+import { getSearchResultNoteIcon, getTagIcon, resolveIconColor } from "../../utils/noteIcons";
 
 interface ParsedQuery {
 	query: string;
@@ -739,11 +739,19 @@ export class SearchModal extends SuggestModal<SearchResult> {
 					const tagIcon = getTagIcon(this.app, tag);
 					if (tagIcon) {
 						tagEl.classList.add(`s2b-search-result-tag-${tagIcon.provider}`);
-						if (tagIcon.color) {
-							tagEl.style.setProperty("--s2b-search-result-tag-accent", tagIcon.color);
+						const resolvedTagColor = resolveIconColor(tagIcon.color);
+						if (resolvedTagColor) {
+							const rgbaColor = resolvedTagColor.replace("rgb(", "rgba(").replace(")", "");
+							tagEl.style.setProperty("--tag-color", resolvedTagColor);
+							tagEl.style.setProperty("--tag-color-hover", resolvedTagColor);
+							tagEl.style.setProperty("--tag-color-remove-hover", resolvedTagColor);
+							tagEl.style.setProperty("--tag-background", `${rgbaColor}, 0.1)`);
+							tagEl.style.setProperty("--tag-background-hover", `${rgbaColor}, 0.1)`);
+							tagEl.style.setProperty("--tag-border-color", `${rgbaColor}, 0.25)`);
+							tagEl.style.setProperty("--tag-border-color-hover", `${rgbaColor}, 0.5)`);
 						}
 
-						const tagIconEl = tagEl.createSpan({ cls: "s2b-search-result-tag-icon" });
+						const tagIconEl = tagEl.createSpan({ cls: "s2b-search-result-tag-icon iconic-icon" });
 						tagIconEl.setAttribute("aria-hidden", "true");
 						tagIcon.render(tagIconEl);
 					}
