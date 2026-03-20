@@ -1301,7 +1301,7 @@ export class VectorStoreService {
 	 */
 	async getAllDocumentVectors(indexId?: string): Promise<DocumentVector[]> {
 		const data = getData();
-		const resolvedId = indexId ?? data.graphEmbedIndex ?? data.searchEmbedIndex;
+		const resolvedId = indexId ?? data.graphEmbedIndex;
 		if (!resolvedId) return [];
 
 		const inst = await this.getOrCreateInstance(resolvedId);

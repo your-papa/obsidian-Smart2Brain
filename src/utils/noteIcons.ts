@@ -1,4 +1,5 @@
-import { App, setIcon } from "obsidian";
+import type { App } from "obsidian";
+import { setIcon } from "obsidian";
 
 const ICONIZE_PLUGIN_ID = "obsidian-icon-folder";
 const ICONIC_PLUGIN_ID = "iconic";
