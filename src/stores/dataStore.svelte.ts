@@ -1176,6 +1176,22 @@ export class PluginDataStore {
 	}
 
 	/**
+	 * Clear the embedding index for a specific purpose.
+	 */
+	clearEmbedIndex(purpose: "search" | "graph"): void {
+		if (purpose === "search") {
+			this.#data.searchEmbedIndex = null;
+		} else {
+			this.#data.graphEmbedIndex = null;
+		}
+
+		// Keep legacy field in sync for backward compat
+		this.#data.defaultEmbedModel = this.getSearchEmbedModel();
+
+		this.saveSettings();
+	}
+
+	/**
 	 * Update cached stats for an embedding index.
 	 */
 	updateEmbeddingIndexStats(indexId: string, stats: { lastBuiltAt?: number; documentCount?: number }): void {
