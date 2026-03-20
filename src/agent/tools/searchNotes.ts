@@ -494,10 +494,10 @@ export function createSearchNotesTool(app: App) {
 
 		if (limitedResults.length === 0) {
 			payload.message = `No notes found matching "${query}". Try a different search term.`;
-			return JSON.stringify(payload, null, 2);
+			return JSON.stringify(payload);
 		}
 
-		return JSON.stringify(payload, null, 2);
+		return JSON.stringify(payload);
 	};
 
 	return tool(searchFn, {
