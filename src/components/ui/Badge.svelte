@@ -1,29 +1,29 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
+import type { Snippet } from "svelte";
 
-  type BadgeTone = "neutral" | "muted" | "accent" | "success" | "warning" | "error";
+type BadgeTone = "neutral" | "muted" | "accent" | "success" | "warning" | "error";
 
-  interface Props {
-    label?: string;
-    tone?: BadgeTone;
-    pill?: boolean;
-    uppercase?: boolean;
-    interactive?: boolean;
-    class?: string;
-    onclick?: (event: MouseEvent) => void;
-    children?: Snippet;
-  }
+interface Props {
+	label?: string;
+	tone?: BadgeTone;
+	pill?: boolean;
+	uppercase?: boolean;
+	interactive?: boolean;
+	class?: string;
+	onclick?: (event: MouseEvent) => void;
+	children?: Snippet;
+}
 
-  let {
-    label,
-    tone = "neutral",
-    pill = true,
-    uppercase = false,
-    interactive = false,
-    class: className = "",
-    onclick,
-    children,
-  }: Props = $props();
+let {
+	label,
+	tone = "neutral",
+	pill = true,
+	uppercase = false,
+	interactive = false,
+	class: className = "",
+	onclick,
+	children,
+}: Props = $props();
 </script>
 
 {#if interactive}

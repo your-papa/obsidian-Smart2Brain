@@ -19,11 +19,6 @@
   const pluginData = getData();
   const plugin = getPlugin();
 
-  const diffViewModeOptions = [
-    { display: "Two Pane (rendered markdown)", value: "two-pane" as const },
-    { display: "Word Diff (inline text)", value: "word-diff" as const },
-  ];
-
   const chatOpenLocationOptions: { display: string; value: ChatOpenLocation }[] = [
     { display: "Main area (tab)", value: "tab" },
     { display: "Left sidebar", value: "left" },
@@ -95,7 +90,27 @@
   function getAgentSecondarySummary(agentId: string): string {
     const agent = agents[agentId];
     if (!agent) return "";
-    const enabledSkills = Object.values(agent.skills).filter((entry) => entry.enabled).length;
+    const discoveredSkills = plugin.skillsService?.getCachedSkills() ?? new Map();
+    const enabledSkills = discoveredSkills.size
+      ? Array.from(discoveredSkills.entries()).filter(([skillId, metadata]) => {
+          if (agent.skills[skillId]?.enabled === false) {
+            return false;
+          }
+          if (
+            metadata.linkedPluginId &&
+            !plugin.agentManager?.isPluginEnabled(metadata.linkedPluginId)
+          ) {
+            return false;
+          }
+          if (
+            metadata.corePluginId &&
+            !plugin.agentManager?.isInternalPluginEnabled(metadata.corePluginId)
+          ) {
+            return false;
+          }
+          return true;
+        }).length
+      : Object.values(agent.skills).filter((entry) => entry.enabled).length;
     const enabledServers = Object.values(agent.mcpServers).filter((entry) => entry.enabled).length;
     return `${enabledSkills} skills enabled · ${enabledServers} MCP servers enabled`;
   }
@@ -112,7 +127,55 @@
 </script>
 
 <div class="agents-settings">
-  <SettingGroup heading="Chat Settings">
+  <ManagedEntitySection
+    heading="Agents"
+    description="Agents combine a model, system prompt, skills, tools, and MCP servers into reusable assistants for different workflows."
+    emptyMessage="No agents configured."
+  >
+    {#snippet actions()}
+      <div class="flex items-center justify-end">
+        <Button buttonText="Add Agent" cta={true} onClick={createNewAgent} />
+      </div>
+    {/snippet}
+
+    {#each agentIds as agentId (agentId)}
+      {@const agent = agents[agentId]}
+      {@const Logo = getAgentLogo(agentId)}
+      <ManagedEntityItem
+        name={agent.name}
+        desc={getAgentModelSummary(agentId)}
+        meta={getAgentSecondarySummary(agentId)}
+        selected={pluginData.selectedAgentId === agentId}
+      >
+        {#snippet leading()}
+          <Logo width={16} height={16} />
+        {/snippet}
+
+        {#snippet badges()}
+          {#if pluginData.defaultAgentId === agentId}
+            <Badge label="Default" tone="accent" />
+          {/if}
+          {#if agentId === DEFAULT_AGENT_ID}
+            <Badge label="Built-in" tone="muted" />
+          {/if}
+        {/snippet}
+
+        {#snippet actions()}
+          <Button
+            buttonText={pluginData.defaultAgentId === agentId ? "Clear Default" : "Set Default"}
+            onClick={() => toggleDefaultAgent(agentId)}
+          />
+          <IconButton icon="settings" label="Edit agent" onclick={() => openAgentEditor(agentId)} />
+          <IconButton icon="copy" label="Duplicate agent" onclick={() => duplicateAgent(agentId)} />
+          {#if agentId !== DEFAULT_AGENT_ID}
+            <IconButton icon="trash" label="Delete agent" onclick={() => deleteAgent(agentId)} />
+          {/if}
+        {/snippet}
+      </ManagedEntityItem>
+    {/each}
+  </ManagedEntitySection>
+
+  <SettingGroup heading="Chats">
     <SettingItem name="Chats Folder" desc="Folder to store chat files and related data">
       <FolderSuggest
         app={plugin.app}
@@ -144,15 +207,6 @@
       />
     </SettingItem>
 
-    <SettingItem name="Diff View Mode" desc="How pending changes are displayed in reading view">
-      <Dropdown
-        type="options"
-        dropdown={diffViewModeOptions}
-        selected={pluginData.diffViewMode}
-        onchange={(value) => (pluginData.diffViewMode = value)}
-      />
-    </SettingItem>
-
     <SettingItem name="Open new chat in" desc="Where to open new chat windows">
       <Dropdown
         type="options"
@@ -162,54 +216,6 @@
       />
     </SettingItem>
   </SettingGroup>
-
-  <ManagedEntitySection
-    heading="Agents"
-    description="Agents are configured from a full editor modal. Use the list below to edit, duplicate, delete, and choose the default agent."
-    emptyMessage="No agents configured."
-  >
-    {#snippet actions()}
-      <div class="flex items-center justify-end">
-        <Button buttonText="Add Agent" iconId="plus" onClick={createNewAgent} />
-      </div>
-    {/snippet}
-
-    {#each agentIds as agentId (agentId)}
-      {@const agent = agents[agentId]}
-      {@const Logo = getAgentLogo(agentId)}
-      <ManagedEntityItem
-        name={agent.name}
-        desc={getAgentModelSummary(agentId)}
-        meta={getAgentSecondarySummary(agentId)}
-        selected={pluginData.selectedAgentId === agentId}
-      >
-        {#snippet leading()}
-          <Logo width={16} height={16} />
-        {/snippet}
-
-        {#snippet badges()}
-          {#if pluginData.defaultAgentId === agentId}
-            <Badge label="Default" tone="accent" />
-          {/if}
-          {#if agentId === DEFAULT_AGENT_ID}
-            <Badge label="Built-in" tone="muted" />
-          {/if}
-        {/snippet}
-
-        {#snippet actions()}
-          <Button
-            buttonText={pluginData.defaultAgentId === agentId ? "Clear Default" : "Set Default"}
-            onClick={() => toggleDefaultAgent(agentId)}
-          />
-          <IconButton icon="pencil" label="Edit agent" onclick={() => openAgentEditor(agentId)} />
-          <IconButton icon="copy" label="Duplicate agent" onclick={() => duplicateAgent(agentId)} />
-          {#if agentId !== DEFAULT_AGENT_ID}
-            <IconButton icon="trash" label="Delete agent" onclick={() => deleteAgent(agentId)} />
-          {/if}
-        {/snippet}
-      </ManagedEntityItem>
-    {/each}
-  </ManagedEntitySection>
 </div>
 
 <style>

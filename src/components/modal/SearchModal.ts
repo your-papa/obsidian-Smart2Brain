@@ -91,6 +91,11 @@ function stripHeadingPrefix(text: string, heading: string): string {
 	return trimmed;
 }
 
+function formatHeadingLabel(heading: string, level?: number): string {
+	const normalizedLevel = Math.max(1, Math.min(level ?? 1, 6));
+	return `${"#".repeat(normalizedLevel)} ${heading}`;
+}
+
 function getBadgeLabel(badge: SearchMatchBadge): string {
 	switch (badge) {
 		case "title":
@@ -794,7 +799,11 @@ export class SearchModal extends SuggestModal<SearchResult> {
 
 			if (result.matchExplanation.heading) {
 				const headingEl = explanationRow.createDiv({ cls: "s2b-search-result-heading" });
-				appendHighlightedText(headingEl, `§ ${result.matchExplanation.heading}`, highlightTerms);
+				appendHighlightedText(
+					headingEl,
+					formatHeadingLabel(result.matchExplanation.heading, result.matchExplanation.headingLevel),
+					highlightTerms,
+				);
 
 				const snippetText = stripHeadingPrefix(result.matchExplanation.text, result.matchExplanation.heading);
 				if (snippetText) {

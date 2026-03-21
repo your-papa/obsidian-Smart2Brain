@@ -143,9 +143,8 @@
     }
   }
 
-  function openIndexingReport() {
-    if (!indexId) return;
-    const modal = new IndexingReportModal(plugin, indexId);
+  function openIndexingReport(targetIndexId: string) {
+    const modal = new IndexingReportModal(plugin, targetIndexId);
     modal.open();
   }
 
@@ -175,53 +174,40 @@
   }
 
   function describeCurrentSelection(): string {
-    if (!indexConfig) {
-      return purpose === "search"
-        ? "No index selected. Semantic search is currently disabled."
-        : "No index selected. Semantic graph features are currently disabled.";
-    }
-    const usage = describeUsage(indexId!);
-    return `${indexConfig.model} is the active ${purpose} index. ${usage}.`;
+    return purpose === "search"
+      ? "Embedding indexes power semantic search across your notes."
+      : "Embedding indexes power semantic graph features across your notes.";
   }
 </script>
 
 <ManagedEntitySection
   heading="Embedding Indexes"
-  description={purpose === "search"
-    ? "Select which configured embedding index powers semantic search. Add a new index from the model picker, then manage selection from the list below."
-    : "Select which configured embedding index powers semantic graph features. Add a new index from the model picker, then manage selection from the list below."}
+  actionsLayout="control"
+  description={describeCurrentSelection()}
   emptyMessage="No embedding indexes configured yet."
 >
   {#snippet actions()}
-    <div class="flex items-center gap-2 justify-between">
-      <div class="setting-item-description text-sm text-[--text-muted]">
-        {describeCurrentSelection()}
-      </div>
-      <div class="flex items-center gap-2">
-        {#if indexProgress.isIndexing}
-          <div class="index-progress-summary">
-            <ProgressBar progress={indexProgress.percentage} />
-            <span>
-              {indexProgress.indexed}/{indexProgress.total}
-              {#if indexProgress.skipped > 0}
-                ({indexProgress.skipped} skipped)
-              {/if}
-            </span>
-          </div>
-          <Button buttonText="Cancel" onClick={cancelIndexing} />
-        {:else}
-          <Button buttonText="Add Index" onClick={openAddIndexModal} />
-          {#if indexId}
-            <Button
-              buttonText={purpose === "search" ? "Disable Search" : "Disable Graph"}
-              onClick={clearSelectedIndex}
-            />
-          {/if}
-          {#if indexId && documentCount > 0}
-            <IconButton icon="list" label="View indexing report" onclick={openIndexingReport} />
-          {/if}
+    <div class="flex items-center gap-2 justify-end">
+      {#if indexProgress.isIndexing}
+        <div class="index-progress-summary">
+          <ProgressBar progress={indexProgress.percentage} />
+          <span>
+            {indexProgress.indexed}/{indexProgress.total}
+            {#if indexProgress.skipped > 0}
+              ({indexProgress.skipped} skipped)
+            {/if}
+          </span>
+        </div>
+        <Button buttonText="Cancel" onClick={cancelIndexing} />
+      {:else}
+        {#if indexId}
+          <Button
+            buttonText={purpose === "search" ? "Disable Search" : "Disable Graph"}
+            onClick={clearSelectedIndex}
+          />
         {/if}
-      </div>
+        <Button buttonText="Add Index" cta={true} onClick={openAddIndexModal} />
+      {/if}
     </div>
   {/snippet}
 
@@ -263,6 +249,13 @@
             <Button
               buttonText={purpose === "search" ? "Use for Search" : "Use for Graph"}
               onClick={() => selectIndex(entry.id)}
+            />
+          {/if}
+          {#if entry.documentCount > 0}
+            <IconButton
+              icon="list"
+              label="View indexing report"
+              onclick={() => openIndexingReport(entry.id)}
             />
           {/if}
           <IconButton

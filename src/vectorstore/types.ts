@@ -95,6 +95,7 @@ export interface SearchMatchExplanation {
 	source: "title" | "alias" | "tag" | "heading" | "content";
 	text: string;
 	heading?: string;
+	headingLevel?: number;
 }
 
 export type SearchMatchBadge = "title" | "alias" | "tag" | "path" | "heading" | "content" | "semantic" | "recent";

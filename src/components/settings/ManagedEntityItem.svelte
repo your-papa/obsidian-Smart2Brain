@@ -51,7 +51,7 @@
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
-  class="managed-entity-item {className}"
+  class="setting-item managed-entity-item {className}"
   class:selected
   class:disabled
   class:clickable
@@ -60,7 +60,7 @@
   onclick={handleClick}
   onkeydown={handleKeyDown}
 >
-  <div class="managed-entity-item-main">
+  <div class="setting-item-info managed-entity-item-main">
     {#if leading}
       <div class="managed-entity-item-leading">
         {@render leading()}
@@ -96,7 +96,10 @@
   {#if actions}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="managed-entity-item-actions" onclick={(event) => event.stopPropagation()}>
+    <div
+      class="setting-item-control managed-entity-item-actions"
+      onclick={(event) => event.stopPropagation()}
+    >
       {@render actions()}
     </div>
   {/if}
@@ -104,16 +107,7 @@
 
 <style>
   .managed-entity-item {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
     gap: 12px;
-    padding: 12px 16px;
-    border-top: 1px solid var(--background-modifier-border);
-  }
-
-  .managed-entity-item.selected {
-    background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
   }
 
   .managed-entity-item.clickable {
@@ -132,7 +126,6 @@
     display: flex;
     align-items: flex-start;
     gap: 12px;
-    flex: 1;
     min-width: 0;
   }
 

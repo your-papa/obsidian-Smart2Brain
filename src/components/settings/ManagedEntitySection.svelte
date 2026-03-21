@@ -7,6 +7,7 @@
     headingDesc?: string;
     description?: string;
     emptyMessage?: string;
+    actionsLayout?: "control" | "full-width";
     actions?: Snippet;
     children?: Snippet;
     class?: string;
@@ -17,6 +18,7 @@
     headingDesc,
     description,
     emptyMessage,
+    actionsLayout = "control",
     actions,
     children,
     class: className = "",
@@ -24,14 +26,40 @@
 </script>
 
 <SettingGroup {heading} {headingDesc} class={className}>
-  {#if description}
-    <div class="managed-entity-section-description setting-item-description">{description}</div>
-  {/if}
+  {#if actionsLayout === "control" && (description || actions)}
+    <div class="setting-item managed-entity-section-header">
+      <div class="setting-item-info managed-entity-section-header-info">
+        {#if description}
+          <div class="managed-entity-section-description setting-item-description">
+            {description}
+          </div>
+        {/if}
+      </div>
 
-  {#if actions}
-    <div class="managed-entity-section-actions">
-      {@render actions()}
+      {#if actions}
+        <div class="setting-item-control managed-entity-section-actions">
+          {@render actions()}
+        </div>
+      {/if}
     </div>
+  {:else}
+    {#if description}
+      <div class="setting-item managed-entity-section-description-row">
+        <div class="setting-item-info">
+          <div class="managed-entity-section-description setting-item-description">
+            {description}
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    {#if actions}
+      <div class="setting-item managed-entity-section-actions-row">
+        <div class="managed-entity-section-actions managed-entity-section-actions--full">
+          {@render actions()}
+        </div>
+      </div>
+    {/if}
   {/if}
 
   {#if children}
@@ -45,14 +73,22 @@
 
 <style>
   .managed-entity-section-description {
-    padding: 0 16px 12px;
+    margin: 0;
   }
 
   .managed-entity-section-actions {
     display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 0 16px 12px;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .managed-entity-section-header-info {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .managed-entity-section-actions--full {
+    width: 100%;
   }
 
   .managed-entity-section-list {
@@ -61,6 +97,11 @@
   }
 
   .managed-entity-section-empty {
-    padding: 0 16px 12px;
+    margin: 0;
+  }
+
+  .managed-entity-section-description-row,
+  .managed-entity-section-actions-row {
+    display: block;
   }
 </style>

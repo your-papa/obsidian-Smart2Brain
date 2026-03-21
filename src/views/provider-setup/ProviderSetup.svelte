@@ -6,6 +6,7 @@
   import SettingItem from "../../components/settings/SettingItem.svelte";
   import Button from "../../components/ui/Button.svelte";
   import Text from "../../components/ui/Text.svelte";
+  import Toggle from "../../components/ui/Toggle.svelte";
   import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
   import {
     createAuthStateQuery,
@@ -52,6 +53,7 @@
   let codexActionError = $state<string | null>(null);
   let codexSession = $derived(isCodex ? getCodexSession() : null);
   let displayName = $state("");
+  const isTrusted = $derived(data.isProviderTrusted(selectedProvider));
 
   $effect(() => {
     displayName = providerMeta?.displayName ?? "";
@@ -105,6 +107,10 @@
 
     invalidateAuthState(selectedProvider);
     invalidateProviderState(selectedProvider);
+  }
+
+  function handleTrustedChange(trusted: boolean) {
+    data.setProviderTrusted(selectedProvider, trusted);
   }
 
   async function handleCodexSignIn() {
@@ -186,6 +192,13 @@
       placeholder={providerDefinition?.displayName ?? "New Provider"}
       onblur={(value: string) => void handleDisplayNameBlur(value)}
     />
+  </SettingItem>
+
+  <SettingItem
+    name="Trusted for private data"
+    desc="Allow this provider to access notes blocked by the privacy list."
+  >
+    <Toggle checked={isTrusted} onchange={handleTrustedChange} />
   </SettingItem>
 
   {#if isCodex}

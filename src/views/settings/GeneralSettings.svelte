@@ -29,7 +29,7 @@
 <!-- Providers -->
 <ManagedEntitySection
   heading="Providers"
-  description="Configured providers stay visible here. Add and edit happen in the provider modal."
+  description="Providers connect Smart Second Brain to the AI services used for chat, embeddings, and other model-powered features."
   emptyMessage="No provider instances configured yet."
 >
   {#snippet actions()}

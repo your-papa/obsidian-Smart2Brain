@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Component } from "svelte";
   import Button from "../ui/Button.svelte";
+  import IconButton from "../ui/IconButton.svelte";
 
   interface Props {
     available?: boolean;
@@ -28,7 +29,7 @@
 </script>
 
 {#if !available && configureLabel && onConfigure}
-  <Button onClick={onConfigure} buttonText={configureLabel} iconId="settings" />
+  <IconButton icon="settings" label={configureLabel} onclick={() => onConfigure()} />
 {:else}
   <div class="model-setting-control">
     <Button onClick={onSelect}>

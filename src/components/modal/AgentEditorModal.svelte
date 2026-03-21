@@ -16,6 +16,7 @@
   import Button from "../ui/Button.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
+  import PresetColorSelector, { type PresetColorOption } from "../ui/PresetColorSelector.svelte";
   import Text from "../ui/Text.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
@@ -44,20 +45,35 @@
   const pluginData = getData();
   const models = useAvailableModels();
 
-  const AGENT_COLORS: { value: AgentColor | "none"; label: string; cssVar: string }[] = [
-    { value: "none", label: "None", cssVar: "" },
-    { value: "red", label: "Red", cssVar: "--color-red" },
-    { value: "orange", label: "Orange", cssVar: "--color-orange" },
-    { value: "yellow", label: "Yellow", cssVar: "--color-yellow" },
-    { value: "green", label: "Green", cssVar: "--color-green" },
-    { value: "cyan", label: "Cyan", cssVar: "--color-cyan" },
-    { value: "blue", label: "Blue", cssVar: "--color-blue" },
-    { value: "purple", label: "Purple", cssVar: "--color-purple" },
-    { value: "pink", label: "Pink", cssVar: "--color-pink" },
+  const AGENT_COLOR_DEFINITIONS: Array<{
+    value: AgentColor | "none";
+    label: string;
+    previewColor?: string;
+  }> = [
+    { value: "none", label: "None" },
+    { value: "red", label: "Red", previewColor: "#e93147" },
+    { value: "orange", label: "Orange", previewColor: "#ec7500" },
+    { value: "yellow", label: "Yellow", previewColor: "#e0ac00" },
+    { value: "green", label: "Green", previewColor: "#08b94e" },
+    { value: "cyan", label: "Cyan", previewColor: "#00bfbc" },
+    { value: "blue", label: "Blue", previewColor: "#086ddd" },
+    { value: "purple", label: "Purple", previewColor: "#7852ee" },
+    { value: "pink", label: "Pink", previewColor: "#d53984" },
   ];
 
   let agents = $derived(pluginData.agents);
   let selectedAgent = $derived(agents[agentId]);
+
+  function resolveAgentColorOptions(): PresetColorOption[] {
+    return AGENT_COLOR_DEFINITIONS.map((option) => ({
+      value: option.value,
+      label: option.label,
+      previewColor: option.previewColor,
+      isEmpty: option.value === "none",
+    }));
+  }
+
+  let agentColorOptions = $derived.by(() => resolveAgentColorOptions());
 
   async function applyChanges() {
     try {
@@ -74,6 +90,22 @@
 
   function updateAgentColor(color: AgentColor | "none") {
     pluginData.updateAgent(agentId, { color: color === "none" ? undefined : color });
+  }
+
+  const selectedAgentColorOption = $derived(
+    agentColorOptions.find(
+      (colorOption) => colorOption.value === (selectedAgent?.color ?? "none"),
+    ) ?? agentColorOptions[0],
+  );
+
+  const agentNameFieldStyle = $derived(
+    selectedAgentColorOption.previewColor
+      ? `--agent-name-accent: ${selectedAgentColorOption.previewColor};`
+      : "--agent-name-accent: transparent;",
+  );
+
+  function handleAgentColorSelect(color: string) {
+    updateAgentColor(color as AgentColor | "none");
   }
 
   const currentModelDisplay = $derived.by(() => {
@@ -178,16 +210,6 @@
   function resetSummarizationModel() {
     pluginData.updateAgent(agentId, { summarizationModel: null });
     void applyChanges();
-  }
-
-  function setAsDefaultAgent() {
-    pluginData.setDefaultAgentId(agentId);
-    new Notice(`${selectedAgent?.name} is now the default agent`);
-  }
-
-  function clearDefaultAgent() {
-    pluginData.clearDefaultAgent();
-    new Notice("Default cleared. New chats will use the last selected agent.");
   }
 
   function openSystemPromptModal() {
@@ -567,46 +589,26 @@
 {#if selectedAgent}
   <div class="agent-editor-modal">
     <SettingGroup heading="General">
-      <SettingItem name="Agent Name" desc="Display name for this agent">
-        <Text
-          inputType="text"
-          placeholder="Agent name"
-          value={selectedAgent.name}
-          onblur={(value: string) => updateAgentName(value)}
-        />
-      </SettingItem>
+      <SettingItem name="Agent Name" desc="Display name and color for this agent">
+        <div class="agent-name-field" style={agentNameFieldStyle}>
+          <PresetColorSelector
+            value={selectedAgent.color ?? "none"}
+            options={agentColorOptions}
+            popoverLabel="Agent Color"
+            triggerLabel="Select agent color"
+            onSelect={handleAgentColorSelect}
+          />
 
-      <SettingItem name="Color" desc="Visual identifier for this agent">
-        <div class="color-picker">
-          {#each AGENT_COLORS as colorOption (colorOption.value)}
-            {@const isSelected = (selectedAgent.color ?? "none") === colorOption.value}
-            <button
-              class="color-swatch"
-              class:selected={isSelected}
-              class:none={colorOption.value === "none"}
-              style={colorOption.cssVar ? `--swatch-color: var(${colorOption.cssVar})` : ""}
-              title={colorOption.label}
-              onclick={() => updateAgentColor(colorOption.value)}
-            >
-              {#if isSelected}
-                <Icon name="check" size="xs" />
-              {/if}
-            </button>
-          {/each}
+          <div class="agent-name-input-shell">
+            <Text
+              inputType="text"
+              class="agent-name-input"
+              placeholder="Agent name"
+              value={selectedAgent.name}
+              onblur={(value: string) => updateAgentName(value)}
+            />
+          </div>
         </div>
-      </SettingItem>
-
-      <SettingItem
-        name="Default Agent"
-        desc={pluginData.defaultAgentId === null
-          ? "No default set. New chats use the last selected agent."
-          : "The default agent is used for new chats."}
-      >
-        {#if agentId === pluginData.defaultAgentId}
-          <Button buttonText="Clear Default" onClick={clearDefaultAgent} />
-        {:else}
-          <Button buttonText="Set as Default" onClick={setAsDefaultAgent} />
-        {/if}
       </SettingItem>
 
       <SettingItem name="Chat Model" desc="AI model for this agent">
@@ -776,7 +778,7 @@
           <div class="skill-empty-state">No custom skills yet</div>
         {/if}
         <div class="skill-add-container">
-          <Button buttonText="Add Custom Skill" onClick={openAddSkillModal} />
+          <Button buttonText="Add Custom Skill" cta={true} onClick={openAddSkillModal} />
         </div>
       </div>
     </SettingGroup>
@@ -807,7 +809,11 @@
           {/snippet}
 
           {#snippet actions()}
-            <Button buttonText="Configure" onClick={() => openToolConfig(tool.id)} />
+            <IconButton
+              icon="settings"
+              label={`Configure ${getToolDisplayName(tool.id)}`}
+              onclick={() => openToolConfig(tool.id)}
+            />
             <Toggle
               checked={enabled && pluginAvailable}
               onchange={() => handleToolToggle(tool.id)}
@@ -823,7 +829,7 @@
         MCP servers extend this agent with external tools. Add and edit happen in the server modal.
       </div>
       <div class="mcp-add-button">
-        <Button buttonText="Add MCP Server" iconId="plus" onClick={openAddMCPServer} />
+        <Button buttonText="Add MCP Server" cta={true} onClick={openAddMCPServer} />
       </div>
       {#if mcpServerIds.length > 0}
         <div class="mcp-servers-list">
@@ -918,43 +924,28 @@
     padding-bottom: 12px;
   }
 
-  .color-picker {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-  }
-  .color-swatch {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    background-color: var(--swatch-color);
-    cursor: pointer;
+  .agent-name-field {
     display: flex;
     align-items: center;
-    justify-content: center;
-    transition: all 0.15s ease;
-    padding: 0;
-    color: white;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    gap: 8px;
+    width: min(100%, 184px);
   }
-  .color-swatch:hover {
-    transform: scale(1.1);
+
+  .agent-name-input-shell {
+    flex: 1 1 0;
+    min-width: 0;
   }
-  .color-swatch.selected {
-    border-color: var(--text-normal);
-    box-shadow: 0 0 0 2px var(--background-primary);
-  }
-  .color-swatch.none {
-    background: linear-gradient(
-      135deg,
-      var(--background-secondary) 45%,
-      var(--background-modifier-border) 45%,
-      var(--background-modifier-border) 55%,
-      var(--background-secondary) 55%
+
+  .agent-name-input-shell :global(.agent-name-input) {
+    width: 100%;
+    background: color-mix(in srgb, var(--agent-name-accent) 18%, var(--background-primary));
+    border-color: color-mix(
+      in srgb,
+      var(--agent-name-accent) 38%,
+      var(--background-modifier-border)
     );
-    color: var(--text-muted);
   }
+
   .skill-category {
     margin-bottom: 20px;
     padding-bottom: 8px;
