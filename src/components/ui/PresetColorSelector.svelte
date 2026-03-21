@@ -1,10 +1,10 @@
 <script lang="ts" module>
-  export interface PresetColorOption {
-    value: string;
-    label: string;
-    previewColor?: string;
-    isEmpty?: boolean;
-  }
+export interface PresetColorOption {
+	value: string;
+	label: string;
+	previewColor?: string;
+	isEmpty?: boolean;
+}
 </script>
 
 <script lang="ts">

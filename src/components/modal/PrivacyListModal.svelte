@@ -1,61 +1,67 @@
 <script lang="ts">
-import { type TAbstractFile, prepareFuzzySearch } from "obsidian";
-import { getData } from "../../stores/dataStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import SettingContainer from "../settings/SettingContainer.svelte";
-import Button from "../ui/Button.svelte";
-import Dropdown from "../ui/Dropdown.svelte";
-import Toggle from "../ui/Toggle.svelte";
-import type { PrivacyListModal } from "./PrivacyListModal";
-import FolderSuggest from "./FolderSuggest.svelte";
+  import { type TAbstractFile, prepareFuzzySearch } from "obsidian";
+  import { getData } from "../../stores/dataStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
+  import { icon } from "../../utils/utils";
+  import SettingContainer from "../settings/SettingContainer.svelte";
+  import Button from "../ui/Button.svelte";
+  import Dropdown from "../ui/Dropdown.svelte";
+  import Toggle from "../ui/Toggle.svelte";
+  import type { PrivacyListModal } from "./PrivacyListModal";
+  import FolderSuggest from "./FolderSuggest.svelte";
 
-interface Props {
-	modal: PrivacyListModal;
-}
+  interface Props {
+    modal: PrivacyListModal;
+  }
 
-const plugin = getPlugin();
-const data = getData();
-const suggestionLength: number = 100;
+  const plugin = getPlugin();
+  const data = getData();
+  const suggestionLength: number = 100;
 
-let { modal }: Props = $props();
+  let { modal }: Props = $props();
 
-const modes = ["File/Folder", "Filetype"] as const;
-let exclusionMode: (typeof modes)[number] = $state("File/Folder");
+  const modes = ["File/Folder", "Filetype"] as const;
+  let exclusionMode: (typeof modes)[number] = $state("File/Folder");
 
-function matchFilesFolders(query: string): TAbstractFile[] {
-	const allFiles = plugin.app.vault.getAllLoadedFiles();
+  function matchFilesFolders(query: string): TAbstractFile[] {
+    const allFiles = plugin.app.vault.getAllLoadedFiles();
 
-	if (!query) {
-		return allFiles.slice(0, 10);
-	}
+    if (!query) {
+      return allFiles.slice(0, 10);
+    }
 
-	const fuzzySearch = prepareFuzzySearch(query);
+    const fuzzySearch = prepareFuzzySearch(query);
 
-	const matches = allFiles
-		.map((file) => ({
-			file,
-			match: fuzzySearch(file.path),
-		}))
-		.filter((item): item is { file: TAbstractFile; match: NonNullable<typeof item.match> } => item.match !== null)
-		.sort((a, b) => (b.match.score ?? 0) - (a.match.score ?? 0))
-		.map((item) => item.file);
+    const matches = allFiles
+      .map((file) => ({
+        file,
+        match: fuzzySearch(file.path),
+      }))
+      .filter(
+        (item): item is { file: TAbstractFile; match: NonNullable<typeof item.match> } =>
+          item.match !== null,
+      )
+      .sort((a, b) => (b.match.score ?? 0) - (a.match.score ?? 0))
+      .map((item) => item.file);
 
-	return matches;
-}
+    return matches;
+  }
 
-function addPrivacyEntry(entry: string) {
-	if (!entry.trim()) return;
-	const normalized = exclusionMode === "Filetype" ? `*.${entry.trim().replace(/^\./, "")}` : entry.trim();
-	data.addPrivacyList(normalized);
-}
+  function addPrivacyEntry(entry: string) {
+    if (!entry.trim()) return;
+    const normalized =
+      exclusionMode === "Filetype" ? `*.${entry.trim().replace(/^\./, "")}` : entry.trim();
+    data.addPrivacyList(normalized);
+  }
 
-function removePrivacyEntry(entry: string) {
-	data.removePrivacyList(entry);
-}
+  function removePrivacyEntry(entry: string) {
+    data.removePrivacyList(entry);
+  }
 </script>
 
 <div class="modal-title">
-  Manage Privacy {data.privacyIsExcluding ? "Blacklist" : "Whitelist"}
+  <span class="privacy-modal-title-icon" use:icon={"shield"} aria-hidden="true"></span>
+  <span>Manage Privacy {data.privacyIsExcluding ? "Blacklist" : "Whitelist"}</span>
 </div>
 <div class="modal-content">
   <p>
@@ -108,3 +114,21 @@ function removePrivacyEntry(entry: string) {
 <div class="modal-button-container">
   <Button buttonText="Done" onClick={() => modal.close()} />
 </div>
+
+<style>
+  .modal-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .privacy-modal-title-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--text-accent);
+    flex-shrink: 0;
+  }
+</style>

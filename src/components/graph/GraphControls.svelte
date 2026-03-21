@@ -1,349 +1,337 @@
 <script lang="ts">
-  import Button from "../ui/Button.svelte";
-  import Toggle from "../ui/Toggle.svelte";
-  import RangeSlider from "../ui/RangeSlider.svelte";
-  import Dropdown from "../ui/Dropdown.svelte";
-  import Search from "../ui/Search.svelte";
-  import Text from "../ui/Text.svelte";
-  import PresetColorSelector, { type PresetColorOption } from "../ui/PresetColorSelector.svelte";
-  import SettingContainer from "../settings/SettingContainer.svelte";
-  import type {
-    ProjectionMethod,
-    ClusteringAlgorithm,
-    SmartGraphSettings,
-    GraphMode,
-    ColorGroup,
-    GraphData,
-  } from "../../types/graph";
-  import { THEME_COLOR_VARS } from "../../types/graph";
+import Button from "../ui/Button.svelte";
+import Toggle from "../ui/Toggle.svelte";
+import RangeSlider from "../ui/RangeSlider.svelte";
+import Dropdown from "../ui/Dropdown.svelte";
+import Search from "../ui/Search.svelte";
+import Text from "../ui/Text.svelte";
+import PresetColorSelector, { type PresetColorOption } from "../ui/PresetColorSelector.svelte";
+import SettingContainer from "../settings/SettingContainer.svelte";
+import type {
+	ProjectionMethod,
+	ClusteringAlgorithm,
+	SmartGraphSettings,
+	GraphMode,
+	ColorGroup,
+	GraphData,
+} from "../../types/graph";
+import { THEME_COLOR_VARS } from "../../types/graph";
 
-  const GRAPH_PRESET_COLOR_OPTIONS: Array<PresetColorOption & { cssVar?: string }> = [
-    { value: "#e93147", label: "Red", previewColor: "#e93147", cssVar: "--color-red" },
-    { value: "#086ddd", label: "Blue", previewColor: "#086ddd", cssVar: "--color-blue" },
-    { value: "#08b94e", label: "Green", previewColor: "#08b94e", cssVar: "--color-green" },
-    { value: "#ec7500", label: "Orange", previewColor: "#ec7500", cssVar: "--color-orange" },
-    { value: "#7852ee", label: "Purple", previewColor: "#7852ee", cssVar: "--color-purple" },
-    { value: "#00bfbc", label: "Cyan", previewColor: "#00bfbc", cssVar: "--color-cyan" },
-    { value: "#e0ac00", label: "Yellow", previewColor: "#e0ac00", cssVar: "--color-yellow" },
-    { value: "#d53984", label: "Pink", previewColor: "#d53984", cssVar: "--color-pink" },
-    { value: "#7a6ae6", label: "Accent", previewColor: "#7a6ae6", cssVar: "--interactive-accent" },
-  ];
+const GRAPH_PRESET_COLOR_OPTIONS: Array<PresetColorOption & { cssVar?: string }> = [
+	{ value: "#e93147", label: "Red", previewColor: "#e93147", cssVar: "--color-red" },
+	{ value: "#086ddd", label: "Blue", previewColor: "#086ddd", cssVar: "--color-blue" },
+	{ value: "#08b94e", label: "Green", previewColor: "#08b94e", cssVar: "--color-green" },
+	{ value: "#ec7500", label: "Orange", previewColor: "#ec7500", cssVar: "--color-orange" },
+	{ value: "#7852ee", label: "Purple", previewColor: "#7852ee", cssVar: "--color-purple" },
+	{ value: "#00bfbc", label: "Cyan", previewColor: "#00bfbc", cssVar: "--color-cyan" },
+	{ value: "#e0ac00", label: "Yellow", previewColor: "#e0ac00", cssVar: "--color-yellow" },
+	{ value: "#d53984", label: "Pink", previewColor: "#d53984", cssVar: "--color-pink" },
+	{ value: "#7a6ae6", label: "Accent", previewColor: "#7a6ae6", cssVar: "--interactive-accent" },
+];
 
-  interface Props {
-    settings: SmartGraphSettings;
-    suggestedK: number | null;
-    isLoading: boolean;
-    graphMode: GraphMode;
-    isTransitioning: boolean;
-    nodeCount: number;
-    edgeCount: number;
-    graphData: GraphData;
-    availableFolders: string[];
-    availableTags: string[];
-    selectedFolders: string[];
-    selectedTags: string[];
-    searchQuery: string;
-    onSettingsChange: (settings: Partial<SmartGraphSettings>) => void;
-    onFolderFilterChange: (folders: string[]) => void;
-    onTagFilterChange: (tags: string[]) => void;
-    onSearchChange: (query: string) => void;
-    onFitToView: () => void;
-    onRefresh: () => void;
-    onApplyProjection?: () => void;
-    onSmartCluster?: () => void;
-    onBackToWiki?: () => void;
-    onLabelClusters?: () => void;
-    isLabeling?: boolean;
-    lassoMode?: boolean;
-    onLassoModeChange?: (active: boolean) => void;
-    selectedCount?: number;
-  }
+interface Props {
+	settings: SmartGraphSettings;
+	suggestedK: number | null;
+	isLoading: boolean;
+	graphMode: GraphMode;
+	isTransitioning: boolean;
+	nodeCount: number;
+	edgeCount: number;
+	graphData: GraphData;
+	availableFolders: string[];
+	availableTags: string[];
+	selectedFolders: string[];
+	selectedTags: string[];
+	searchQuery: string;
+	onSettingsChange: (settings: Partial<SmartGraphSettings>) => void;
+	onFolderFilterChange: (folders: string[]) => void;
+	onTagFilterChange: (tags: string[]) => void;
+	onSearchChange: (query: string) => void;
+	onFitToView: () => void;
+	onRefresh: () => void;
+	onApplyProjection?: () => void;
+	onSmartCluster?: () => void;
+	onBackToWiki?: () => void;
+	onLabelClusters?: () => void;
+	isLabeling?: boolean;
+	lassoMode?: boolean;
+	onLassoModeChange?: (active: boolean) => void;
+	selectedCount?: number;
+}
 
-  let {
-    settings,
-    suggestedK,
-    isLoading,
-    graphMode,
-    isTransitioning,
-    nodeCount,
-    edgeCount,
-    graphData,
-    availableFolders,
-    availableTags,
-    selectedFolders,
-    selectedTags,
-    searchQuery,
-    onSettingsChange,
-    onFolderFilterChange,
-    onTagFilterChange,
-    onSearchChange,
-    onFitToView,
-    onRefresh,
-    onApplyProjection,
-    onSmartCluster,
-    onBackToWiki,
-    onLabelClusters,
-    isLabeling = false,
-    lassoMode = false,
-    onLassoModeChange,
-    selectedCount = 0,
-  }: Props = $props();
+let {
+	settings,
+	suggestedK,
+	isLoading,
+	graphMode,
+	isTransitioning,
+	nodeCount,
+	edgeCount,
+	graphData,
+	availableFolders,
+	availableTags,
+	selectedFolders,
+	selectedTags,
+	searchQuery,
+	onSettingsChange,
+	onFolderFilterChange,
+	onTagFilterChange,
+	onSearchChange,
+	onFitToView,
+	onRefresh,
+	onApplyProjection,
+	onSmartCluster,
+	onBackToWiki,
+	onLabelClusters,
+	isLabeling = false,
+	lassoMode = false,
+	onLassoModeChange,
+	selectedCount = 0,
+}: Props = $props();
 
-  let isCollapsed = $state(true);
-  let isFilterOpen = $state(false);
-  let isInfoOpen = $state(false);
+let isCollapsed = $state(true);
+let isFilterOpen = $state(false);
+let isInfoOpen = $state(false);
 
-  let graphStats = $derived.by(() => {
-    const { nodes, edges } = graphData;
-    if (nodes.length === 0) return null;
+let graphStats = $derived.by(() => {
+	const { nodes, edges } = graphData;
+	if (nodes.length === 0) return null;
 
-    const degrees = nodes.map((n) => n.degree ?? 0);
-    const totalDegree = degrees.reduce((a, b) => a + b, 0);
-    const avgDegree = totalDegree / nodes.length;
-    const maxDegree = Math.max(...degrees);
-    const orphans = degrees.filter((d) => d === 0).length;
+	const degrees = nodes.map((n) => n.degree ?? 0);
+	const totalDegree = degrees.reduce((a, b) => a + b, 0);
+	const avgDegree = totalDegree / nodes.length;
+	const maxDegree = Math.max(...degrees);
+	const orphans = degrees.filter((d) => d === 0).length;
 
-    const wikiEdges = edges.filter((e) => e.type === "wiki").length;
-    const semanticEdges = edges.filter((e) => e.type === "semantic").length;
+	const wikiEdges = edges.filter((e) => e.type === "wiki").length;
+	const semanticEdges = edges.filter((e) => e.type === "semantic").length;
 
-    // Graph density: ratio of actual edges to max possible edges
-    const maxEdges = (nodes.length * (nodes.length - 1)) / 2;
-    const density = maxEdges > 0 ? edges.length / maxEdges : 0;
+	// Graph density: ratio of actual edges to max possible edges
+	const maxEdges = (nodes.length * (nodes.length - 1)) / 2;
+	const density = maxEdges > 0 ? edges.length / maxEdges : 0;
 
-    // Cluster count
-    const clusters = new Set(nodes.map((n) => n.cluster).filter((c) => c != null));
+	// Cluster count
+	const clusters = new Set(nodes.map((n) => n.cluster).filter((c) => c != null));
 
-    // Average shortest path (BFS, sampled for performance)
-    const adj = new Map<string, Set<string>>();
-    for (const n of nodes) adj.set(n.id, new Set());
-    for (const e of edges) {
-      adj.get(e.source)?.add(e.target);
-      adj.get(e.target)?.add(e.source);
-    }
+	// Average shortest path (BFS, sampled for performance)
+	const adj = new Map<string, Set<string>>();
+	for (const n of nodes) adj.set(n.id, new Set());
+	for (const e of edges) {
+		adj.get(e.source)?.add(e.target);
+		adj.get(e.target)?.add(e.source);
+	}
 
-    const sampleSize = Math.min(nodes.length, 50);
-    const sampled =
-      nodes.length <= sampleSize
-        ? nodes
-        : nodes.filter((_, i) => i % Math.ceil(nodes.length / sampleSize) === 0);
-    let totalDist = 0;
-    let pathCount = 0;
-    let maxPath = 0;
+	const sampleSize = Math.min(nodes.length, 50);
+	const sampled =
+		nodes.length <= sampleSize ? nodes : nodes.filter((_, i) => i % Math.ceil(nodes.length / sampleSize) === 0);
+	let totalDist = 0;
+	let pathCount = 0;
+	let maxPath = 0;
 
-    for (const start of sampled) {
-      const dist = new Map<string, number>([[start.id, 0]]);
-      const queue = [start.id];
-      let qi = 0;
-      while (qi < queue.length) {
-        const cur = queue[qi++];
-        const d = dist.get(cur)!;
-        for (const nb of adj.get(cur) ?? []) {
-          if (!dist.has(nb)) {
-            dist.set(nb, d + 1);
-            queue.push(nb);
-          }
-        }
-      }
-      for (const [, d] of dist) {
-        if (d > 0) {
-          totalDist += d;
-          pathCount++;
-          if (d > maxPath) maxPath = d;
-        }
-      }
-    }
+	for (const start of sampled) {
+		const dist = new Map<string, number>([[start.id, 0]]);
+		const queue = [start.id];
+		let qi = 0;
+		while (qi < queue.length) {
+			const cur = queue[qi++];
+			const d = dist.get(cur)!;
+			for (const nb of adj.get(cur) ?? []) {
+				if (!dist.has(nb)) {
+					dist.set(nb, d + 1);
+					queue.push(nb);
+				}
+			}
+		}
+		for (const [, d] of dist) {
+			if (d > 0) {
+				totalDist += d;
+				pathCount++;
+				if (d > maxPath) maxPath = d;
+			}
+		}
+	}
 
-    const avgPath = pathCount > 0 ? totalDist / pathCount : 0;
+	const avgPath = pathCount > 0 ? totalDist / pathCount : 0;
 
-    return {
-      avgDegree,
-      maxDegree,
-      orphans,
-      wikiEdges,
-      semanticEdges,
-      density,
-      clusterCount: clusters.size,
-      avgPath,
-      diameter: maxPath,
-    };
-  });
+	return {
+		avgDegree,
+		maxDegree,
+		orphans,
+		wikiEdges,
+		semanticEdges,
+		density,
+		clusterCount: clusters.size,
+		avgPath,
+		diameter: maxPath,
+	};
+});
 
-  let hasActiveFilters = $derived(
-    selectedFolders.length > 0 || selectedTags.length > 0 || searchQuery.length > 0,
-  );
+let hasActiveFilters = $derived(selectedFolders.length > 0 || selectedTags.length > 0 || searchQuery.length > 0);
 
-  // Per-section collapse state
-  let sectionOpen: Record<string, boolean> = $state({
-    colorGroups: false,
-    projection: true,
-    edges: true,
-    layout: false,
-    display: false,
-  });
+// Per-section collapse state
+let sectionOpen: Record<string, boolean> = $state({
+	colorGroups: false,
+	projection: true,
+	edges: true,
+	layout: false,
+	display: false,
+});
 
-  // Track "dirty" projection/clustering settings that need an explicit Apply.
-  // Store the last-applied values so the button only appears when settings
-  // actually differ from what's currently rendered.
-  // svelte-ignore state_referenced_locally
-  let appliedProjection: ProjectionMethod = $state(settings.projectionMethod);
-  // svelte-ignore state_referenced_locally
-  let appliedUmapNeighbors: number = $state(settings.umapNeighbors);
-  // svelte-ignore state_referenced_locally
-  let appliedUmapMinDist: number = $state(settings.umapMinDist);
-  // svelte-ignore state_referenced_locally
-  let appliedAutoK: boolean = $state(settings.autoK);
-  // svelte-ignore state_referenced_locally
-  let appliedDefaultK: number = $state(settings.defaultK);
-  // svelte-ignore state_referenced_locally
-  let appliedClusteringAlgorithm: ClusteringAlgorithm = $state(settings.clusteringAlgorithm);
-  // svelte-ignore state_referenced_locally
-  let appliedMinClusterSize: number = $state(settings.minClusterSize);
-  // svelte-ignore state_referenced_locally
-  let appliedUseForceLayout: boolean = $state(settings.useForceLayout);
+// Track "dirty" projection/clustering settings that need an explicit Apply.
+// Store the last-applied values so the button only appears when settings
+// actually differ from what's currently rendered.
+// svelte-ignore state_referenced_locally
+let appliedProjection: ProjectionMethod = $state(settings.projectionMethod);
+// svelte-ignore state_referenced_locally
+let appliedUmapNeighbors: number = $state(settings.umapNeighbors);
+// svelte-ignore state_referenced_locally
+let appliedUmapMinDist: number = $state(settings.umapMinDist);
+// svelte-ignore state_referenced_locally
+let appliedAutoK: boolean = $state(settings.autoK);
+// svelte-ignore state_referenced_locally
+let appliedDefaultK: number = $state(settings.defaultK);
+// svelte-ignore state_referenced_locally
+let appliedClusteringAlgorithm: ClusteringAlgorithm = $state(settings.clusteringAlgorithm);
+// svelte-ignore state_referenced_locally
+let appliedMinClusterSize: number = $state(settings.minClusterSize);
+// svelte-ignore state_referenced_locally
+let appliedUseForceLayout: boolean = $state(settings.useForceLayout);
 
-  let projectionDirty = $derived(
-    settings.projectionMethod !== appliedProjection ||
-      (settings.projectionMethod === "umap" &&
-        (settings.umapNeighbors !== appliedUmapNeighbors ||
-          settings.umapMinDist !== appliedUmapMinDist)) ||
-      settings.autoK !== appliedAutoK ||
-      (!settings.autoK && settings.defaultK !== appliedDefaultK) ||
-      settings.clusteringAlgorithm !== appliedClusteringAlgorithm ||
-      (settings.clusteringAlgorithm === "hdbscan" &&
-        settings.minClusterSize !== appliedMinClusterSize) ||
-      settings.useForceLayout !== appliedUseForceLayout,
-  );
+let projectionDirty = $derived(
+	settings.projectionMethod !== appliedProjection ||
+		(settings.projectionMethod === "umap" &&
+			(settings.umapNeighbors !== appliedUmapNeighbors || settings.umapMinDist !== appliedUmapMinDist)) ||
+		settings.autoK !== appliedAutoK ||
+		(!settings.autoK && settings.defaultK !== appliedDefaultK) ||
+		settings.clusteringAlgorithm !== appliedClusteringAlgorithm ||
+		(settings.clusteringAlgorithm === "hdbscan" && settings.minClusterSize !== appliedMinClusterSize) ||
+		settings.useForceLayout !== appliedUseForceLayout,
+);
 
-  const projectionOptions = [
-    { display: "UMAP", value: "umap" as ProjectionMethod },
-    { display: "PCA", value: "pca" as ProjectionMethod },
-  ];
+const projectionOptions = [
+	{ display: "UMAP", value: "umap" as ProjectionMethod },
+	{ display: "PCA", value: "pca" as ProjectionMethod },
+];
 
-  const clusteringAlgorithmOptions = [
-    { display: "K-Means", value: "kmeans" as ClusteringAlgorithm },
-    { display: "HDBSCAN", value: "hdbscan" as ClusteringAlgorithm },
-  ];
+const clusteringAlgorithmOptions = [
+	{ display: "K-Means", value: "kmeans" as ClusteringAlgorithm },
+	{ display: "HDBSCAN", value: "hdbscan" as ClusteringAlgorithm },
+];
 
-  function handleProjectionChange(val: ProjectionMethod) {
-    onSettingsChange({ projectionMethod: val });
-  }
+function handleProjectionChange(val: ProjectionMethod) {
+	onSettingsChange({ projectionMethod: val });
+}
 
-  function handleDiscoveryModeChange(checked: boolean) {
-    onSettingsChange({ discoveryMode: checked });
-  }
+function handleDiscoveryModeChange(checked: boolean) {
+	onSettingsChange({ discoveryMode: checked });
+}
 
-  function handleUmapNeighborsChange(val: number) {
-    onSettingsChange({ umapNeighbors: val });
-  }
+function handleUmapNeighborsChange(val: number) {
+	onSettingsChange({ umapNeighbors: val });
+}
 
-  function handleUmapMinDistChange(val: number) {
-    onSettingsChange({ umapMinDist: val });
-  }
+function handleUmapMinDistChange(val: number) {
+	onSettingsChange({ umapMinDist: val });
+}
 
-  function handleKChange(val: number) {
-    onSettingsChange({ defaultK: val });
-  }
+function handleKChange(val: number) {
+	onSettingsChange({ defaultK: val });
+}
 
-  function handleAutoKChange(checked: boolean) {
-    onSettingsChange({ autoK: checked });
-  }
+function handleAutoKChange(checked: boolean) {
+	onSettingsChange({ autoK: checked });
+}
 
-  function handleClusteringAlgorithmChange(val: ClusteringAlgorithm) {
-    onSettingsChange({ clusteringAlgorithm: val });
-  }
+function handleClusteringAlgorithmChange(val: ClusteringAlgorithm) {
+	onSettingsChange({ clusteringAlgorithm: val });
+}
 
-  function handleMinClusterSizeChange(val: number) {
-    onSettingsChange({ minClusterSize: val });
-  }
+function handleMinClusterSizeChange(val: number) {
+	onSettingsChange({ minClusterSize: val });
+}
 
-  function handleShowOrphansChange(checked: boolean) {
-    onSettingsChange({ showOrphans: checked });
-  }
+function handleShowOrphansChange(checked: boolean) {
+	onSettingsChange({ showOrphans: checked });
+}
 
-  function handleLabelZoomChange(val: number) {
-    onSettingsChange({ labelZoomThreshold: val / 10 });
-  }
+function handleLabelZoomChange(val: number) {
+	onSettingsChange({ labelZoomThreshold: val / 10 });
+}
 
-  function handleLinkDistanceChange(val: number) {
-    onSettingsChange({ linkDistance: val });
-  }
+function handleLinkDistanceChange(val: number) {
+	onSettingsChange({ linkDistance: val });
+}
 
-  function handleChargeStrengthChange(val: number) {
-    onSettingsChange({ chargeStrength: -val });
-  }
+function handleChargeStrengthChange(val: number) {
+	onSettingsChange({ chargeStrength: -val });
+}
 
-  function handleThresholdChange(val: number) {
-    onSettingsChange({ similarityThreshold: val / 100 });
-  }
+function handleThresholdChange(val: number) {
+	onSettingsChange({ similarityThreshold: val / 100 });
+}
 
-  function handleNeighborsChange(val: number) {
-    onSettingsChange({ semanticNeighbors: val });
-  }
+function handleNeighborsChange(val: number) {
+	onSettingsChange({ semanticNeighbors: val });
+}
 
-  function handleFolderSelect(folder: string) {
-    if (selectedFolders.includes(folder)) {
-      onFolderFilterChange(selectedFolders.filter((f) => f !== folder));
-    } else {
-      onFolderFilterChange([...selectedFolders, folder]);
-    }
-  }
+function handleFolderSelect(folder: string) {
+	if (selectedFolders.includes(folder)) {
+		onFolderFilterChange(selectedFolders.filter((f) => f !== folder));
+	} else {
+		onFolderFilterChange([...selectedFolders, folder]);
+	}
+}
 
-  function handleTagSelect(tag: string) {
-    if (selectedTags.includes(tag)) {
-      onTagFilterChange(selectedTags.filter((t) => t !== tag));
-    } else {
-      onTagFilterChange([...selectedTags, tag]);
-    }
-  }
+function handleTagSelect(tag: string) {
+	if (selectedTags.includes(tag)) {
+		onTagFilterChange(selectedTags.filter((t) => t !== tag));
+	} else {
+		onTagFilterChange([...selectedTags, tag]);
+	}
+}
 
-  function clearFilters() {
-    onFolderFilterChange([]);
-    onTagFilterChange([]);
-    onSearchChange("");
-  }
+function clearFilters() {
+	onFolderFilterChange([]);
+	onTagFilterChange([]);
+	onSearchChange("");
+}
 
-  // Color group handlers
-  function getGraphPresetColorOptions(): PresetColorOption[] {
-    return GRAPH_PRESET_COLOR_OPTIONS;
-  }
+// Color group handlers
+function getGraphPresetColorOptions(): PresetColorOption[] {
+	return GRAPH_PRESET_COLOR_OPTIONS;
+}
 
-  function resolveGraphGroupColor(color: string | undefined): string {
-    const options = getGraphPresetColorOptions();
-    return (
-      options.find((option) => option.value === color)?.value ??
-      GRAPH_PRESET_COLOR_OPTIONS.find((option) => color === `var(${option.cssVar})`)?.value ??
-      (color && !THEME_COLOR_VARS.includes(color as (typeof THEME_COLOR_VARS)[number])
-        ? color
-        : undefined) ??
-      options[0]?.value ??
-      "#000000"
-    );
-  }
+function resolveGraphGroupColor(color: string | undefined): string {
+	const options = getGraphPresetColorOptions();
+	return (
+		options.find((option) => option.value === color)?.value ??
+		GRAPH_PRESET_COLOR_OPTIONS.find((option) => color === `var(${option.cssVar})`)?.value ??
+		(color && !THEME_COLOR_VARS.includes(color as (typeof THEME_COLOR_VARS)[number]) ? color : undefined) ??
+		options[0]?.value ??
+		"#000000"
+	);
+}
 
-  function addColorGroup() {
-    const defaultColor = resolveGraphGroupColor(undefined);
-    const updated: ColorGroup[] = [...settings.colorGroups, { query: "", color: defaultColor }];
-    onSettingsChange({ colorGroups: updated });
-  }
+function addColorGroup() {
+	const defaultColor = resolveGraphGroupColor(undefined);
+	const updated: ColorGroup[] = [...settings.colorGroups, { query: "", color: defaultColor }];
+	onSettingsChange({ colorGroups: updated });
+}
 
-  function removeColorGroup(index: number) {
-    const updated = settings.colorGroups.filter((_: ColorGroup, i: number) => i !== index);
-    onSettingsChange({ colorGroups: updated });
-  }
+function removeColorGroup(index: number) {
+	const updated = settings.colorGroups.filter((_: ColorGroup, i: number) => i !== index);
+	onSettingsChange({ colorGroups: updated });
+}
 
-  function updateColorGroupQuery(index: number, query: string) {
-    const updated = settings.colorGroups.map((g: ColorGroup, i: number) =>
-      i === index ? { ...g, query } : g,
-    );
-    onSettingsChange({ colorGroups: updated });
-  }
+function updateColorGroupQuery(index: number, query: string) {
+	const updated = settings.colorGroups.map((g: ColorGroup, i: number) => (i === index ? { ...g, query } : g));
+	onSettingsChange({ colorGroups: updated });
+}
 
-  function updateColorGroupColor(index: number, color: string) {
-    const updated = settings.colorGroups.map((g: ColorGroup, i: number) =>
-      i === index ? { ...g, color } : g,
-    );
-    onSettingsChange({ colorGroups: updated });
-  }
+function updateColorGroupColor(index: number, color: string) {
+	const updated = settings.colorGroups.map((g: ColorGroup, i: number) => (i === index ? { ...g, color } : g));
+	onSettingsChange({ colorGroups: updated });
+}
 </script>
 
 <div class="graph-toolbar">

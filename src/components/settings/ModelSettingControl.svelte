@@ -1,31 +1,31 @@
 <script lang="ts">
-  import type { Component } from "svelte";
-  import Button from "../ui/Button.svelte";
-  import IconButton from "../ui/IconButton.svelte";
+import type { Component } from "svelte";
+import Button from "../ui/Button.svelte";
+import IconButton from "../ui/IconButton.svelte";
 
-  interface Props {
-    available?: boolean;
-    configureLabel?: string;
-    onConfigure?: () => void;
-    placeholder: string;
-    selectedLabel?: string | null;
-    selectedLogo?: Component<{ width?: number; height?: number }> | null;
-    onSelect: () => void;
-    secondaryLabel?: string;
-    onSecondary?: () => void;
-  }
+interface Props {
+	available?: boolean;
+	configureLabel?: string;
+	onConfigure?: () => void;
+	placeholder: string;
+	selectedLabel?: string | null;
+	selectedLogo?: Component<{ width?: number; height?: number }> | null;
+	onSelect: () => void;
+	secondaryLabel?: string;
+	onSecondary?: () => void;
+}
 
-  let {
-    available = true,
-    configureLabel,
-    onConfigure,
-    placeholder,
-    selectedLabel = null,
-    selectedLogo = null,
-    onSelect,
-    secondaryLabel,
-    onSecondary,
-  }: Props = $props();
+let {
+	available = true,
+	configureLabel,
+	onConfigure,
+	placeholder,
+	selectedLabel = null,
+	selectedLogo = null,
+	onSelect,
+	secondaryLabel,
+	onSecondary,
+}: Props = $props();
 </script>
 
 {#if !available && configureLabel && onConfigure}
