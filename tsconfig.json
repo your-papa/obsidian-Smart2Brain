@@ -13,7 +13,7 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "strict": true,
-    "types": ["svelte", "vite/client"],
+    "types": ["svelte", "vite/client", "node"],
     "plugins": [
       {
         "name": "typescript-svelte-plugin",
