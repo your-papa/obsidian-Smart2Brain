@@ -27,11 +27,15 @@ export class ProviderSetupModal extends Modal {
 		this.templateId = typeof target === "string" ? undefined : target.templateId;
 		this.createdDraft = typeof target !== "string" && !target.selectedProvider;
 
-		const displayName =
-			plugin.pluginData.getProviderMeta(this.selectedProvider)?.displayName ??
-			(this.templateId ? getProviderTemplate(this.templateId)?.displayName : this.selectedProvider) ??
-			this.selectedProvider;
-		this.setTitle(`Setup ${displayName}`);
+		if (this.createdDraft) {
+			this.setTitle("Setup Provider");
+		} else {
+			const displayName =
+				plugin.pluginData.getProviderMeta(this.selectedProvider)?.displayName ??
+				(this.templateId ? getProviderTemplate(this.templateId)?.displayName : this.selectedProvider) ??
+				this.selectedProvider;
+			this.setTitle(`Setup ${displayName}`);
+		}
 	}
 
 	onOpen() {

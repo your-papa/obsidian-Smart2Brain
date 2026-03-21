@@ -1,11 +1,11 @@
 <script lang="ts">
-import EmbeddingIndexSection from "../../components/settings/EmbeddingIndexSection.svelte";
-import SettingGroup from "../../components/settings/SettingGroup.svelte";
-import SettingItem from "../../components/settings/SettingItem.svelte";
-import Toggle from "../../components/ui/Toggle.svelte";
-import { getData } from "../../stores/dataStore.svelte";
+  import EmbeddingIndexSection from "../../components/settings/EmbeddingIndexSection.svelte";
+  import SettingGroup from "../../components/settings/SettingGroup.svelte";
+  import SettingItem from "../../components/settings/SettingItem.svelte";
+  import Toggle from "../../components/ui/Toggle.svelte";
+  import { getData } from "../../stores/dataStore.svelte";
 
-const pluginData = getData();
+  const pluginData = getData();
 </script>
 
 <SettingGroup heading="Display">
@@ -44,6 +44,4 @@ const pluginData = getData();
   </SettingItem>
 </SettingGroup>
 
-<SettingGroup>
-  <EmbeddingIndexSection purpose="search" />
-</SettingGroup>
+<EmbeddingIndexSection purpose="search" />

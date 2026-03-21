@@ -1,73 +1,49 @@
 <script lang="ts">
-import { t } from "svelte-i18n";
-import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
-import ProviderItem from "../../components/settings/ProviderItem.svelte";
-import SettingGroup from "../../components/settings/SettingGroup.svelte";
-import SettingItem from "../../components/settings/SettingItem.svelte";
-import Button from "../../components/ui/Button.svelte";
-import Dropdown from "../../components/ui/Dropdown.svelte";
-import Text from "../../components/ui/Text.svelte";
-import Toggle from "../../components/ui/Toggle.svelte";
-import { getAllProviderTemplates, type ProviderTemplateId } from "../../providers/index";
-import { getData } from "../../stores/dataStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import { Logger } from "../../utils/logging";
-import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
+  import { t } from "svelte-i18n";
+  import ManagedEntitySection from "../../components/settings/ManagedEntitySection.svelte";
+  import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
+  import ProviderItem from "../../components/settings/ProviderItem.svelte";
+  import SettingGroup from "../../components/settings/SettingGroup.svelte";
+  import SettingItem from "../../components/settings/SettingItem.svelte";
+  import Button from "../../components/ui/Button.svelte";
+  import Text from "../../components/ui/Text.svelte";
+  import Toggle from "../../components/ui/Toggle.svelte";
+  import { getData } from "../../stores/dataStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
+  import { Logger } from "../../utils/logging";
+  import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
 
-const pluginData = getData();
-const plugin = getPlugin();
+  const pluginData = getData();
+  const plugin = getPlugin();
 
-const privacyListModal = new PrivacyListModal(plugin.app);
+  const privacyListModal = new PrivacyListModal(plugin.app);
 
-// Provider management state
-let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
-const providerTemplates = getAllProviderTemplates();
-const providerTemplateOptions = providerTemplates.map((template) => ({
-	display: template.displayName,
-	value: template.id,
-}));
-let selectedTemplateId = $state<ProviderTemplateId>("openai-compatible");
-let selectedTemplate = $derived(
-	providerTemplates.find((template) => template.id === selectedTemplateId) ?? providerTemplates[0],
-);
+  // Provider management state
+  let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
 
-function handleTemplateChange(templateId: string) {
-	selectedTemplateId = templateId as ProviderTemplateId;
-}
-
-function handleOpenProviderSetup() {
-	new ProviderSetupModal(plugin, { templateId: selectedTemplateId }).open();
-}
+  function handleOpenProviderSetup() {
+    new ProviderSetupModal(plugin, { templateId: "openai-compatible" }).open();
+  }
 </script>
 
 <!-- Providers -->
-<SettingGroup heading="Providers">
-  <SettingItem
-    name="Add Provider"
-    desc={selectedTemplate?.description ??
-      "Create a provider instance from one of the built-in templates."}
-  >
-    <div class="flex items-center gap-2 w-full">
-      <Dropdown
-        type="options"
-        dropdown={providerTemplateOptions}
-        selected={selectedTemplateId}
-        onchange={handleTemplateChange}
-      />
-      <Button buttonText="Configure Provider" cta={true} onClick={handleOpenProviderSetup} />
+<ManagedEntitySection
+  heading="Providers"
+  description="Configured providers stay visible here. Add and edit happen in the provider modal."
+  emptyMessage="No provider instances configured yet."
+>
+  {#snippet actions()}
+    <div class="flex items-center justify-end w-full">
+      <Button buttonText="Add Provider" cta={true} onClick={handleOpenProviderSetup} />
     </div>
-  </SettingItem>
+  {/snippet}
 
   {#if configuredProviderIds.length > 0}
     {#each configuredProviderIds as provider (provider)}
       <ProviderItem {provider} />
     {/each}
-  {:else}
-    <div class="setting-item-description text-sm px-4 pb-2 text-[--text-muted]">
-      No provider instances configured yet.
-    </div>
   {/if}
-</SettingGroup>
+</ManagedEntitySection>
 
 <!-- Data Management -->
 <SettingGroup heading="Data Management">
