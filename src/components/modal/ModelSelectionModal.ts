@@ -1,5 +1,6 @@
 import { Modal } from "obsidian";
 import { mount, unmount } from "svelte";
+import ModalProvider from "../../lib/QueryClientProvider.svelte";
 import type SecondBrainPlugin from "../../main";
 import ModelSelectionModalComponent from "./ModelSelectionModal.svelte";
 
@@ -50,18 +51,30 @@ export class ModelSelectionModal extends Modal {
 
 		this.setTitle(this.modelType === "chat" ? "Select Chat Model" : "Select Embedding Model");
 
-		this.component = mount(ModelSelectionModalComponent, {
-			target: this.contentEl,
-			props: {
-				modal: this,
-				modelType: this.modelType,
-				currentSelection: this.currentSelection,
-				onSelect: (model: SelectedModel | null) => {
-					this.onSelect(model);
-					this.close();
+		this.component = mount(
+			ModalProvider<{
+				modal: ModelSelectionModal;
+				modelType: ModelType;
+				currentSelection: SelectedModel | null;
+				onSelect: (model: SelectedModel | null) => void;
+			}>,
+			{
+				target: this.contentEl,
+				props: {
+					plugin: this.plugin,
+					component: ModelSelectionModalComponent,
+					componentProps: {
+						modal: this,
+						modelType: this.modelType,
+						currentSelection: this.currentSelection,
+						onSelect: (model: SelectedModel | null) => {
+							this.onSelect(model);
+							this.close();
+						},
+					},
 				},
 			},
-		});
+		);
 	}
 
 	onClose() {

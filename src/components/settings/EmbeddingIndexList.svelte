@@ -49,10 +49,7 @@ function formatDate(timestamp: number | null): string {
   />
 {:else}
   {#each indexes as index (index.id)}
-    {@const providerDef = getProviderDefinition(
-      index.provider,
-      pluginData.getAllProviderMeta(),
-    )}
+    {@const providerDef = getProviderDefinition(index.provider, pluginData.getAllProviderMeta())}
     {@const Logo =
       providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon}
     {@const purposes = usedBy(index.id)}
@@ -60,9 +57,9 @@ function formatDate(timestamp: number | null): string {
       name={index.model}
       desc={[
         `${index.documentCount} notes`,
-        storageSizes[index.id] ? formatSize(storageSizes[index.id]) : null,
+        storageSizes[index.id] !== undefined ? formatSize(storageSizes[index.id]) : null,
         formatDate(index.lastBuiltAt),
-        purposes.length > 0 ? `Used by: ${purposes.join(", ")}` : "Unused",
+        purposes.length > 0 ? `Used by: ${purposes.join(", ")}` : null,
       ]
         .filter(Boolean)
         .join(" · ")}

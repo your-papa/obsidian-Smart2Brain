@@ -446,6 +446,7 @@ export class LexicalSearchService {
 			return {
 				source: headingMatchIndex >= 0 ? "heading" : "content",
 				heading: heading.heading,
+				headingLevel: heading.level,
 				text: snippet,
 			};
 		}

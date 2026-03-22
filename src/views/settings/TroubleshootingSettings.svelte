@@ -1,4 +1,6 @@
 <script lang="ts">
+import { Notice } from "obsidian";
+import { get } from "svelte/store";
 import { t } from "svelte-i18n";
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
@@ -6,23 +8,29 @@ import Button from "../../components/ui/Button.svelte";
 import Text from "../../components/ui/Text.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
 import { getData } from "../../stores/dataStore.svelte";
-import { Logger } from "../../utils/logging";
+import { getPlugin } from "../../stores/state.svelte";
 
 const pluginData = getData();
-</script>
+const plugin = getPlugin();
 
-<!-- Data Management -->
-<SettingGroup heading="Data Management">
-  <SettingItem name={$t("settings.clear")} desc={$t("settings.clear_desc")}>
-    <Button
-      buttonText={$t("settings.clear_label")}
-      styles="mod-warning"
-      onClick={() => {
-        Logger.log("Delete Plugin Data");
-      }}
-    />
-  </SettingItem>
-</SettingGroup>
+async function handleCleanupPluginData() {
+	const confirmed = window.confirm(
+		`${get(t)("settings.clear_modal.title")}\n\n${get(t)("settings.clear_modal.description")}`,
+	);
+	if (!confirmed) return;
+
+	try {
+		for (const index of [...pluginData.embeddingIndexes]) {
+			await plugin.vectorStoreService.deleteIndex(index.id);
+		}
+
+		await pluginData.deleteData();
+		new Notice(get(t)("plugin_data_cleared"));
+	} catch (error) {
+		new Notice(error instanceof Error ? error.message : "Failed to clean plugin data");
+	}
+}
+</script>
 
 <!-- Observability -->
 <SettingGroup heading="Observability">
@@ -64,14 +72,22 @@ const pluginData = getData();
       />
     </SettingItem>
   {/if}
+
+  <SettingItem name={$t("settings.verbose")} desc={$t("settings.verbose_desc")}>
+    <Toggle
+      checked={pluginData.isVerbose}
+      onchange={(checked) => (pluginData.isVerbose = checked)}
+    />
+  </SettingItem>
 </SettingGroup>
 
-<!-- Advanced -->
-<SettingGroup heading="Advanced">
-		<SettingItem name={$t("settings.verbose")} desc={$t("settings.verbose_desc")}>
-			<Toggle
-				checked={pluginData.isVerbose}
-				onchange={(checked) => (pluginData.isVerbose = checked)}
-			/>
-		</SettingItem>
-	</SettingGroup>
+<!-- Maintenance -->
+<SettingGroup heading="Maintenance">
+  <SettingItem name={$t("settings.clear")} desc={$t("settings.clear_desc")}>
+    <Button
+      buttonText={$t("settings.clear_label")}
+      styles="mod-warning"
+      onClick={() => void handleCleanupPluginData()}
+    />
+  </SettingItem>
+</SettingGroup>

@@ -126,7 +126,7 @@ describe("search modal", () => {
 			{ timeoutMs: 20_000 },
 		);
 
-		expect(domText(".s2b-search-result-heading")).toContain("Unsupervised Learning");
+		expect(domText(".s2b-search-result-heading")).toContain("## Unsupervised Learning");
 		expect(domText(".s2b-search-result-snippet")).toContain("Clustering algorithms");
 		expect(domText(".s2b-search-result-badge")).toContain("Heading");
 	});
@@ -146,7 +146,7 @@ describe("search modal", () => {
 			{ timeoutMs: 20_000 },
 		);
 
-		expect(domText(".s2b-search-result-heading")).toContain("Unsupervised Learning");
+		expect(domText(".s2b-search-result-heading")).toContain("## Unsupervised Learning");
 		expect(domText(".s2b-search-result-snippet")).toContain("k-means");
 		expect(domText(".s2b-search-result-badge")).toContain("Content");
 	});

@@ -371,10 +371,6 @@ export interface PluginData {
 	// Chat Settings
 	// ============================================================================
 
-	initialAssistantMessageContent: string;
-	isUsingRag: boolean;
-	retrieveTopK: number;
-	assistantLanguage: "de" | "en";
 	targetFolder: string;
 	attachmentFolder: string;
 
@@ -393,19 +389,13 @@ export interface PluginData {
 	// UI State
 	// ============================================================================
 
-	isChatComfy: boolean;
-	isOnboarded: boolean;
-	isQuickSettingsOpen: boolean;
 	chatOpenLocation: ChatOpenLocation;
-	hideIncognitoWarning: boolean;
-	isAutostart: boolean;
 	lastActiveChatId: UUIDv7 | null;
 
 	// ============================================================================
 	// Debugging & Telemetry
 	// ============================================================================
 
-	debuggingLangchainKey: string;
 	enableLangSmith: boolean;
 	langSmithApiKey: string;
 	langSmithProject: string;
@@ -446,9 +436,6 @@ export interface PluginData {
 	 * Index ID used by the graph view ("provider:model"), or null if not configured.
 	 */
 	graphEmbedIndex: string | null;
-
-	/** @deprecated Kept for data migration. Always "hnsw". */
-	vectorStoreBackend?: string;
 
 	/**
 	 * User's favorite models for quick access.

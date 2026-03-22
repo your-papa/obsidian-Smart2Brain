@@ -5,9 +5,11 @@ import { createProviderStateQuery, invalidateProviderState } from "../../lib/que
 import { type LogoProps, getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
+import ManagedEntityItem from "./ManagedEntityItem.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
-import Button from "../ui/Button.svelte";
 import CircularLoader from "../ui/CircularLoader.svelte";
+import IconButton from "../ui/IconButton.svelte";
+import { icon } from "../../utils/utils";
 import { ProviderSetupModal } from "../../views/provider-setup/ProviderSetup";
 
 interface Props {
@@ -23,6 +25,10 @@ let providerDefinition = $derived(getProviderDefinition(provider, data.getAllPro
 const query = createProviderStateQuery(() => provider);
 let isCheckingAuth = $derived(query.isPending || query.isFetching);
 let displayName = $derived(providerDefinition?.displayName ?? provider);
+let isTrusted = $derived(data.isProviderTrusted(provider));
+let authFailureMessage = $derived(
+	query.data && !query.data.auth.success ? query.data.auth.message : "Authentication failed",
+);
 let Logo: Component<LogoProps> = $derived.by(() => {
 	if (providerDefinition?.logo) {
 		return providerDefinition.logo;
@@ -48,47 +54,130 @@ async function handleRemoveProvider() {
 }
 </script>
 
-<div class="setting-item provider-row">
-	<div class="setting-item-info">
-		<div class="setting-item-name flex items-center gap-2">
-			<Logo width={16} height={16} />
-			<span>{displayName}</span>
-			{#if isCheckingAuth}
-				<div class="flex items-center gap-1 text-[--text-muted]" title="Checking authentication">
-					<CircularLoader size={12} color="var(--text-muted)" />
-				</div>
-			{:else if query.data?.auth.success}
-				<Button
-					iconId="check"
-					styles="text-[--background-modifier-success]"
-					tooltip="Authentication valid - Click to refresh"
-					onClick={() => refetch()}
-					stopPropagation={true}
-				/>
-			{:else}
-				<Button
-					iconId="x"
-					styles="text-[--background-modifier-error]"
-					tooltip="Authentication failed - Click to refresh"
-					onClick={() => refetch()}
-					stopPropagation={true}
-				/>
-			{/if}
-		</div>
-	</div>
-	<div class="setting-item-control flex items-center gap-1">
-		<Button
-			iconId="settings"
-			tooltip="Configure provider"
-			onClick={handleOpenSettings}
-			stopPropagation={true}
-		/>
-		<Button
-			iconId="trash"
-			styles="hover:text-[--text-error]"
-			tooltip="Remove provider"
-			onClick={() => void handleRemoveProvider()}
-			stopPropagation={true}
-		/>
-	</div>
-</div>
+<ManagedEntityItem name={displayName}>
+  {#snippet leading()}
+    <Logo width={16} height={16} />
+  {/snippet}
+
+  {#snippet badges()}
+    <div class="provider-status-group">
+      {#if isCheckingAuth}
+        <button
+          type="button"
+          class="provider-icon-button provider-status-indicator"
+          title="Checking auth"
+          aria-label="Checking auth"
+          disabled
+        >
+          <CircularLoader size={12} color="var(--text-muted)" />
+        </button>
+      {:else if query.data?.auth.success}
+        <button
+          type="button"
+          class="provider-icon-button provider-status-indicator provider-icon-indicator-success"
+          title="Authenticated. Click to retry connection"
+          aria-label="Authenticated. Click to retry connection"
+          onclick={refetch}
+        >
+          <span class="provider-status-icon" use:icon={"check-circle"}></span>
+        </button>
+      {:else}
+        <button
+          type="button"
+          class="provider-icon-button provider-status-indicator provider-icon-indicator-error"
+          title={`${authFailureMessage}. Click to retry connection`}
+          aria-label={`${authFailureMessage}. Click to retry connection`}
+          onclick={refetch}
+        >
+          <span class="provider-status-icon" use:icon={"x-circle"}></span>
+        </button>
+      {/if}
+
+      {#if isTrusted}
+        <span
+          class="provider-trust-tooltip"
+          title="Trusted for private data"
+          aria-label="Trusted for private data"
+        >
+          <span class="provider-icon-indicator provider-icon-indicator-accent">
+            <span class="provider-trust-icon" use:icon={"shield"}></span>
+          </span>
+        </span>
+      {/if}
+    </div>
+  {/snippet}
+
+  {#snippet actions()}
+    <IconButton icon="settings" label="Configure provider" onclick={handleOpenSettings} />
+    <IconButton icon="trash" label="Remove provider" onclick={() => void handleRemoveProvider()} />
+  {/snippet}
+</ManagedEntityItem>
+
+<style>
+  .provider-status-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .provider-trust-tooltip {
+    display: inline-flex;
+  }
+
+  .provider-status-indicator,
+  .provider-icon-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    min-width: 16px;
+    min-height: 16px;
+  }
+
+  .provider-icon-indicator-error {
+    color: var(--text-error);
+  }
+
+  .provider-icon-indicator-accent {
+    color: var(--text-accent);
+  }
+
+  .provider-icon-indicator-success {
+    color: var(--text-success, #4caf50);
+  }
+
+  .provider-icon-button {
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    cursor: pointer;
+  }
+
+  .provider-icon-button:disabled {
+    cursor: default;
+  }
+
+  .provider-icon-button:not(:disabled):hover {
+    filter: brightness(1.05);
+  }
+
+  .provider-trust-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+  }
+
+  .provider-status-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+</style>
