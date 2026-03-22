@@ -1,4 +1,14 @@
-import { type App, Platform, SuggestModal, TFile, debounce, setIcon } from "obsidian";
+import {
+	type App,
+	MarkdownView,
+	Notice,
+	Platform,
+	SuggestModal,
+	TFile,
+	debounce,
+	normalizePath,
+	setIcon,
+} from "obsidian";
 import { getRecentNotes, performSearch, type SearchResult } from "../../agent/tools/searchNotes";
 import { getData } from "../../stores/dataStore.svelte";
 import type { SearchAlgorithm } from "../../types/plugin";
@@ -303,6 +313,14 @@ function buildRawQuery(query: string, filter?: SearchFilter): string {
 	return parts.join(" ").trim();
 }
 
+function sanitizeNoteTitle(title: string): string {
+	return title
+		.replace(/[<>:"/\\|?*]/g, "-")
+		.replace(/\s+/g, " ")
+		.trim()
+		.substring(0, 100);
+}
+
 /**
  * Parse search query for filter syntax:
  * - path:folder/subfolder/ - filter by path prefix
@@ -369,6 +387,18 @@ export class SearchModal extends SuggestModal<SearchResult> {
 			return false;
 		});
 
+		this.scope.register(["Mod"], "Enter", (evt) => {
+			evt.preventDefault();
+			void this.openSelectedSuggestionInNewTab();
+			return false;
+		});
+
+		this.scope.register(["Shift"], "Enter", (evt) => {
+			evt.preventDefault();
+			void this.createNoteFromQuery();
+			return false;
+		});
+
 		// Add custom class for styling
 		this.modalEl.addClass("s2b-search-modal");
 		this.modalEl.setAttribute("data-testid", "search-modal");
@@ -398,13 +428,127 @@ export class SearchModal extends SuggestModal<SearchResult> {
 
 	private updateInstructions(): void {
 		const tabKey = Platform.isMacOS ? "⇥" : "Tab";
+		const modEnterKey = Platform.isMacOS ? "⌘↵" : "Ctrl+↵";
 		const semanticLabel = this.semanticEnabled ? "semantic: on" : "semantic: off";
 		this.setInstructions([
 			{ command: "↑↓", purpose: "Navigate" },
 			{ command: "↵", purpose: "Open note" },
+			{ command: modEnterKey, purpose: "Open in new tab" },
+			{ command: "⇧↵", purpose: "Create note" },
 			{ command: tabKey, purpose: semanticLabel },
 			{ command: "esc", purpose: "Close" },
 		]);
+	}
+
+	private getSelectedSuggestion(): SearchResult | null {
+		if (this.searchResults.length === 0) {
+			return null;
+		}
+
+		const suggestionEls = Array.from(this.resultContainerEl?.children ?? []).filter(
+			(child): child is HTMLElement =>
+				child instanceof HTMLElement && child.classList.contains("suggestion-item"),
+		);
+
+		if (suggestionEls.length === 0) {
+			return this.searchResults[0] ?? null;
+		}
+
+		const selectedIndex = suggestionEls.findIndex((child) => child.classList.contains("is-selected"));
+		const resultIndex = selectedIndex >= 0 ? selectedIndex : 0;
+		return this.searchResults[resultIndex] ?? this.searchResults[0] ?? null;
+	}
+
+	private openSearchResult(result: SearchResult, destination: false | "tab"): void {
+		const file = this.app.vault.getAbstractFileByPath(result.path);
+		if (!(file instanceof TFile)) {
+			return;
+		}
+
+		if (destination === false) {
+			const existingLeaf = this.app.workspace
+				.getLeavesOfType("markdown")
+				.find((leaf) => leaf.view instanceof MarkdownView && leaf.view.file?.path === file.path);
+
+			if (existingLeaf) {
+				this.close();
+				this.app.workspace.revealLeaf(existingLeaf);
+				return;
+			}
+		}
+
+		this.close();
+		this.app.workspace.openLinkText(result.path, "", destination);
+	}
+
+	private async openSelectedSuggestionInNewTab(): Promise<void> {
+		const selectedSuggestion = this.getSelectedSuggestion();
+		if (!selectedSuggestion) {
+			return;
+		}
+
+		this.openSearchResult(selectedSuggestion, "tab");
+	}
+
+	private async getUniqueNotePath(baseTitle: string): Promise<{ title: string; path: string }> {
+		const targetFolder = this.getDefaultNewNoteFolder();
+		let index = 1;
+		while (true) {
+			const title = index === 1 ? baseTitle : `${baseTitle} (${index})`;
+			const path = targetFolder ? normalizePath(`${targetFolder}/${title}.md`) : normalizePath(`${title}.md`);
+
+			if (!(await this.app.vault.adapter.exists(path))) {
+				return { title, path };
+			}
+
+			index += 1;
+		}
+	}
+
+	private getDefaultNewNoteFolder(): string {
+		try {
+			// @ts-expect-error - internal Obsidian config API
+			const newFileLocation: unknown = this.app.vault.getConfig("newFileLocation");
+			if (newFileLocation === "folder") {
+				// @ts-expect-error - internal Obsidian config API
+				const configuredFolder: unknown = this.app.vault.getConfig("newFileFolderPath");
+				if (typeof configuredFolder === "string" && configuredFolder.length > 0 && configuredFolder !== "/") {
+					return normalizePath(configuredFolder);
+				}
+			}
+
+			if (newFileLocation === "current") {
+				const activeFile = this.app.workspace.getActiveFile();
+				const activeFolder = activeFile?.parent?.path;
+				if (activeFolder && activeFolder !== "/") {
+					return normalizePath(activeFolder);
+				}
+			}
+		} catch {
+			// Ignore internal config lookup failures and fall back to vault root.
+		}
+
+		return "";
+	}
+
+	private async createNoteFromQuery(): Promise<void> {
+		const parsed = parseQueryWithFilters(this.currentQuery);
+		const requestedTitle = parsed.query.trim() || this.currentQuery.trim();
+		const baseTitle = sanitizeNoteTitle(requestedTitle) || "Untitled";
+
+		try {
+			const { title, path } = await this.getUniqueNotePath(baseTitle);
+			const content = title === "Untitled" ? "" : `# ${title}\n`;
+			const file = await this.app.vault.create(path, content);
+
+			this.close();
+			const leaf = this.app.workspace.getLeaf(false);
+			await leaf.openFile(file);
+			this.app.workspace.revealLeaf(leaf);
+		} catch (error) {
+			Logger.error("[SearchModal] Failed to create note from query:", error);
+			new Notice("Failed to create note");
+		}
 	}
 
 	onOpen(): void {
@@ -821,12 +965,8 @@ export class SearchModal extends SuggestModal<SearchResult> {
 	 * Handle selection - open the note
 	 */
 	onChooseSuggestion(result: SearchResult, evt: MouseEvent | KeyboardEvent): void {
-		const file = this.app.vault.getAbstractFileByPath(result.path);
-		if (file instanceof TFile) {
-			// Open in new leaf if ctrl/cmd is held
-			const newLeaf = evt.ctrlKey || evt.metaKey;
-			this.app.workspace.openLinkText(result.path, "", newLeaf);
-		}
+		const destination = evt.ctrlKey || evt.metaKey ? "tab" : false;
+		this.openSearchResult(result, destination);
 	}
 
 	/**
