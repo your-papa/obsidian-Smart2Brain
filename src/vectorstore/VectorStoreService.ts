@@ -15,6 +15,7 @@ import { getOllamaModelsCache } from "../providers/ollamaModels";
 import { fetchOpenRouterModels } from "../providers/openrouterModels";
 import { getData } from "../stores/dataStore.svelte";
 import { getRegistry } from "../providers/registry";
+import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "./batchSize";
 import { createVectorStore } from "./index";
 import { FileSyncManager } from "./FileSyncManager";
 import {
@@ -23,9 +24,11 @@ import {
 	getIndexFilePath,
 	type DefaultEmbedModel,
 	type DocumentVector,
+	type IndexMetadata,
 	type IndexingProgress,
 	type IndexingReport,
 	type SearchFilter,
+	type SerializedIndex,
 	type SkipReason,
 	type SkippedFile,
 	type VectorSearchResult,
@@ -44,16 +47,6 @@ const MODIFY_DEBOUNCE_MS = 5_000;
 
 /** Approximate chars per token for rough estimation */
 const CHARS_PER_TOKEN = 4;
-
-/**
- * Batch sizes for embedding providers.
- * OpenAI supports up to 2048 inputs per request.
- * Ollama processes sequentially but LangChain handles concurrency.
- * Smaller batches = more frequent progress updates.
- */
-const BATCH_SIZE_OPENAI = 100;
-const BATCH_SIZE_OLLAMA = 1; // Sequential for local models — gives per-file progress updates
-const BATCH_SIZE_DEFAULT = 50;
 
 let instance: VectorStoreService | null = null;
 let pendingInstance: VectorStoreService | null = null;
@@ -112,6 +105,62 @@ interface IndexInstance {
 		maxInputTokens: number;
 	} | null;
 	report: IndexingReport | null;
+}
+
+export interface IndexRestoreSourceSelectionInput {
+	runtime: Pick<IndexMetadata, "providerId" | "modelId" | "documentCount" | "lastUpdated"> | null;
+	file: Pick<SerializedIndex, "providerId" | "modelId" | "documents" | "lastUpdated"> | null;
+	expectedProviderId: string;
+	expectedModelId: string;
+}
+
+export function selectIndexRestoreSource({
+	runtime,
+	file,
+	expectedProviderId,
+	expectedModelId,
+}: IndexRestoreSourceSelectionInput): "runtime" | "file" | "none" {
+	const runtimeMatches =
+		runtime !== null &&
+		runtime.documentCount > 0 &&
+		runtime.providerId === expectedProviderId &&
+		runtime.modelId === expectedModelId;
+	const fileMatches =
+		file !== null &&
+		file.providerId === expectedProviderId &&
+		file.modelId === expectedModelId &&
+		file.documents.length > 0;
+
+	if (runtimeMatches && !fileMatches) return "runtime";
+	if (fileMatches && !runtimeMatches) return "file";
+	if (!runtimeMatches && !fileMatches) return "none";
+
+	if ((runtime?.lastUpdated ?? 0) > (file?.lastUpdated ?? 0)) return "runtime";
+	if ((runtime?.lastUpdated ?? 0) < (file?.lastUpdated ?? 0)) return "file";
+
+	return (runtime?.documentCount ?? 0) >= (file?.documents.length ?? 0) ? "runtime" : "file";
+}
+
+export interface ValidationProgressCountsInput {
+	eligibleFileCount: number;
+	pendingFileCount: number;
+	validPendingFileCount: number;
+}
+
+export function summarizeValidationProgressCounts({
+	eligibleFileCount,
+	pendingFileCount,
+	validPendingFileCount,
+}: ValidationProgressCountsInput): { startingIndexedCount: number; totalCount: number } {
+	const normalizedEligible = Math.max(eligibleFileCount, 0);
+	const normalizedPending = Math.max(Math.min(pendingFileCount, normalizedEligible), 0);
+	const normalizedValidPending = Math.max(Math.min(validPendingFileCount, normalizedPending), 0);
+	const startingIndexedCount = normalizedEligible - normalizedPending;
+
+	return {
+		startingIndexedCount,
+		totalCount: startingIndexedCount + normalizedValidPending,
+	};
 }
 
 /**
@@ -283,45 +332,59 @@ export class VectorStoreService {
 
 		// Try to load from per-index file
 		const serialized = await inst.syncManager.loadFromFile();
+		const runtimeMeta = await inst.store.getMetadata();
+		const [provider = "", ...modelParts] = indexId.split(":");
+		const model = modelParts.join(":");
+		const restoreSource = selectIndexRestoreSource({
+			runtime: runtimeMeta,
+			file: serialized,
+			expectedProviderId: provider,
+			expectedModelId: model,
+		});
 
-		if (serialized) {
-			const [provider = "", ...modelParts] = indexId.split(":");
-			const model = modelParts.join(":");
-			const modelMatches = serialized.providerId === provider && serialized.modelId === model;
+		if (restoreSource === "file" && serialized) {
+			const docs: DocumentVector[] = serialized.documents.map((d) => ({
+				id: d.id,
+				path: d.path,
+				mtime: d.mtime,
+				checksum: d.checksum,
+				vector: toFloat32Array(d.vector),
+				chunkIndex: d.chunkIndex,
+			}));
 
-			if (modelMatches) {
-				const docs: DocumentVector[] = serialized.documents.map((d) => ({
-					id: d.id,
-					path: d.path,
-					mtime: d.mtime,
-					checksum: d.checksum,
-					vector: toFloat32Array(d.vector),
-					chunkIndex: d.chunkIndex,
-				}));
+			await inst.store.clear();
+			await inst.store.bulkPut(docs);
+			await inst.store.setMetadata(serialized.providerId, serialized.modelId, serialized.version);
 
-				await inst.store.clear();
-				await inst.store.bulkPut(docs);
+			inst.currentProviderId = serialized.providerId;
+			inst.currentModelId = serialized.modelId;
 
-				await inst.store.setMetadata(serialized.providerId, serialized.modelId, serialized.version);
+			Logger.log(
+				`[VectorStore] Restored ${docs.length} documents for index ${indexId} from file in ${(performance.now() - initStart).toFixed(1)}ms`,
+			);
 
-				inst.currentProviderId = serialized.providerId;
-				inst.currentModelId = serialized.modelId;
+			this.plugin.app.workspace.onLayoutReady(() => {
+				this.validateIndexOnStartup(inst);
+			});
+		} else if (restoreSource === "runtime" && runtimeMeta) {
+			inst.currentProviderId = runtimeMeta.providerId;
+			inst.currentModelId = runtimeMeta.modelId;
 
-				Logger.log(
-					`[VectorStore] Loaded ${docs.length} documents for index ${indexId} in ${(performance.now() - initStart).toFixed(1)}ms`,
-				);
+			Logger.log(
+				`[VectorStore] Kept newer runtime index for ${indexId} (${runtimeMeta.documentCount} documents) and refreshed the file snapshot`,
+			);
 
-				// Save to per-index file
-				await this.saveInstanceToFile(inst);
+			await this.saveInstanceToFile(inst);
 
-				// Validate index against vault after workspace is ready
-				this.plugin.app.workspace.onLayoutReady(() => {
-					this.validateIndexOnStartup(inst);
-				});
-			} else {
-				Logger.log(`[VectorStore] Model mismatch for ${indexId}, index will be rebuilt on next use`);
-				await inst.store.clear();
-			}
+			this.plugin.app.workspace.onLayoutReady(() => {
+				this.validateIndexOnStartup(inst);
+			});
+		} else if (
+			(serialized && (serialized.providerId !== provider || serialized.modelId !== model)) ||
+			(runtimeMeta && (runtimeMeta.providerId !== provider || runtimeMeta.modelId !== model))
+		) {
+			Logger.log(`[VectorStore] Model mismatch for ${indexId}, index will be rebuilt on next use`);
+			await inst.store.clear();
 		}
 
 		this.instances.set(indexId, inst);
@@ -348,6 +411,19 @@ export class VectorStoreService {
 		return this.getOrCreateInstance(indexId);
 	}
 
+	private async persistIndexCheckpoint(
+		inst: IndexInstance,
+		indexedCount: number,
+		lastPersistedCount: number,
+	): Promise<number> {
+		if (indexedCount === 0 || indexedCount === lastPersistedCount) {
+			return lastPersistedCount;
+		}
+
+		await this.saveInstanceToFile(inst);
+		return indexedCount;
+	}
+
 	private async getEmbeddingMaxInputTokens(
 		inst: IndexInstance,
 		defaultModel: DefaultEmbedModel | null,
@@ -371,10 +447,10 @@ export class VectorStoreService {
 		const ollamaData =
 			defaultModel.provider === "ollama"
 				? (() => {
-						const ollamaAuth = getData().getResolvedProviderAuth("ollama");
-						if (!ollamaAuth?.baseUrl) return null;
-						return getOllamaModelsCache(ollamaAuth.baseUrl);
-					})()
+					const ollamaAuth = getData().getResolvedProviderAuth("ollama");
+					if (!ollamaAuth?.baseUrl) return null;
+					return getOllamaModelsCache(ollamaAuth.baseUrl);
+				})()
 				: null;
 
 		const metadata = hydrateEmbeddingModel(defaultModel.provider, defaultModel.model, {
@@ -518,22 +594,29 @@ export class VectorStoreService {
 
 		const filesToIndex = [...missingFiles, ...staleFiles];
 		if (filesToIndex.length > 0) {
-			const batchSize = this.getBatchSize(defaultModel.provider);
+			const batchSize = this.getBatchSize(inst.indexId, defaultModel.provider);
+			const pendingFileCount = filesToIndex.length;
+			const { startingIndexedCount } = summarizeValidationProgressCounts({
+				eligibleFileCount: vaultFiles.length,
+				pendingFileCount,
+				validPendingFileCount: pendingFileCount,
+			});
 			let indexed = 0;
+			let lastPersistedIndexed = 0;
 			const showNotice = filesToIndex.length > 5;
 			let notice: Notice | null = null;
 			if (showNotice) {
-				notice = new Notice(`Updating index: 0/${filesToIndex.length}`, 0);
+				notice = new Notice("", 0);
 			}
 
 			this.updateInstanceProgress(inst, {
 				isIndexing: true,
-				total: filesToIndex.length,
-				indexed: 0,
+				total: vaultFiles.length,
+				indexed: startingIndexedCount,
 				skipped: 0,
 				currentFile: "Reading files...",
-				percentage: 0,
 			});
+			if (notice) this.updateNotice(notice, inst.progress);
 			inst.abortController = new AbortController();
 
 			interface FileEntry {
@@ -559,7 +642,13 @@ export class VectorStoreService {
 				}
 			}
 
-			this.updateInstanceProgress(inst, { total: validFiles.length });
+			const { totalCount } = summarizeValidationProgressCounts({
+				eligibleFileCount: vaultFiles.length,
+				pendingFileCount,
+				validPendingFileCount: validFiles.length,
+			});
+			this.updateInstanceProgress(inst, { total: totalCount, indexed: startingIndexedCount });
+			if (notice) this.updateNotice(notice, inst.progress);
 
 			for (let i = 0; i < validFiles.length; i += batchSize) {
 				if (inst.abortController?.signal.aborted) {
@@ -599,8 +688,9 @@ export class VectorStoreService {
 						await inst.store.upsert(doc);
 					}
 					indexed += batch.length;
-					this.updateInstanceProgress(inst, { indexed: batchEnd });
-					if (notice) notice.setMessage(`Updating index: ${indexed}/${filesToIndex.length}`);
+					this.updateInstanceProgress(inst, { indexed: startingIndexedCount + batchEnd });
+					lastPersistedIndexed = await this.persistIndexCheckpoint(inst, indexed, lastPersistedIndexed);
+					if (notice) this.updateNotice(notice, inst.progress);
 				} catch (error) {
 					Logger.error("[VectorStore] Batch validation indexing failed:", error);
 					for (const entry of batch) {
@@ -629,7 +719,8 @@ export class VectorStoreService {
 							this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
 						}
 					}
-					if (notice) notice.setMessage(`Updating index: ${indexed}/${filesToIndex.length}`);
+					lastPersistedIndexed = await this.persistIndexCheckpoint(inst, indexed, lastPersistedIndexed);
+					if (notice) this.updateNotice(notice, inst.progress);
 				}
 			}
 
@@ -828,18 +919,11 @@ export class VectorStoreService {
 	}
 
 	/**
-	 * Get the batch size for the given provider.
+	 * Get the configured batch size for an index, falling back to provider defaults.
 	 */
-	private getBatchSize(providerId: string): number {
-		switch (providerId) {
-			case "openai":
-			case "openrouter":
-				return BATCH_SIZE_OPENAI;
-			case "ollama":
-				return BATCH_SIZE_OLLAMA;
-			default:
-				return BATCH_SIZE_DEFAULT;
-		}
+	private getBatchSize(indexId: string, providerId: string): number {
+		const configuredBatchSize = getData().getEmbeddingIndex(indexId)?.batchSize;
+		return normalizeEmbeddingBatchSize(configuredBatchSize ?? getDefaultEmbeddingBatchSize(providerId), providerId);
 	}
 
 	/**
@@ -859,7 +943,7 @@ export class VectorStoreService {
 		inst.abortController = new AbortController();
 		const { vault } = this.plugin.app;
 		const allFiles = vault.getMarkdownFiles();
-		const batchSize = this.getBatchSize(model.provider);
+		const batchSize = this.getBatchSize(inst.indexId, model.provider);
 
 		// Categorize files by skip reason
 		const files: TFile[] = [];
@@ -885,6 +969,7 @@ export class VectorStoreService {
 
 		const notice = new Notice("", 0);
 		this.updateNotice(notice, inst.progress);
+		let lastPersistedIndexed = 0;
 
 		try {
 			await inst.store.setMetadata(model.provider, model.model, INDEX_VERSION);
@@ -967,6 +1052,11 @@ export class VectorStoreService {
 
 					this.updateInstanceProgress(inst, { indexed: batchEnd });
 					this.updateNotice(notice, inst.progress);
+					lastPersistedIndexed = await this.persistIndexCheckpoint(
+						inst,
+						indexedFiles.length,
+						lastPersistedIndexed,
+					);
 				} catch (error) {
 					Logger.warn(
 						`[VectorStore] Batch ${Math.floor(i / batchSize) + 1} failed, falling back to sequential:`,
@@ -1002,6 +1092,11 @@ export class VectorStoreService {
 						}
 					}
 					this.updateNotice(notice, inst.progress);
+					lastPersistedIndexed = await this.persistIndexCheckpoint(
+						inst,
+						indexedFiles.length,
+						lastPersistedIndexed,
+					);
 				}
 			}
 
@@ -1416,7 +1511,7 @@ export class VectorStoreService {
 		}
 		if (!indexId) {
 			callback({ isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 });
-			return () => {};
+			return () => { };
 		}
 
 		// Register at service level so subscriptions survive instance recreation
@@ -1540,7 +1635,7 @@ export class VectorStoreService {
 			this.modifyTimers.clear();
 			// Wait for any in-progress initialization before cleaning up
 			if (this.initPromise) {
-				await this.initPromise.catch(() => {});
+				await this.initPromise.catch(() => { });
 			}
 			for (const inst of this.instances.values()) {
 				await inst.syncManager.flush();

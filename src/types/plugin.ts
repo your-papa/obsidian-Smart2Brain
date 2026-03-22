@@ -37,6 +37,8 @@ export interface EmbeddingIndexConfig {
 	lastBuiltAt: number | null;
 	/** Cached document count for UI display */
 	documentCount: number;
+	/** Documents per embedding request when indexing this model */
+	batchSize?: number;
 }
 
 // ============================================================================
