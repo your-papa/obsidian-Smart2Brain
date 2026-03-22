@@ -2,6 +2,7 @@
 import { type TAbstractFile, prepareFuzzySearch } from "obsidian";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
+import { icon } from "../../utils/utils";
 import SettingContainer from "../settings/SettingContainer.svelte";
 import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
@@ -55,7 +56,8 @@ function removePrivacyEntry(entry: string) {
 </script>
 
 <div class="modal-title">
-  Manage Privacy {data.privacyIsExcluding ? "Blacklist" : "Whitelist"}
+  <span class="privacy-modal-title-icon" use:icon={"shield"} aria-hidden="true"></span>
+  <span>Manage Privacy {data.privacyIsExcluding ? "Blacklist" : "Whitelist"}</span>
 </div>
 <div class="modal-content">
   <p>
@@ -108,3 +110,21 @@ function removePrivacyEntry(entry: string) {
 <div class="modal-button-container">
   <Button buttonText="Done" onClick={() => modal.close()} />
 </div>
+
+<style>
+  .modal-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .privacy-modal-title-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--text-accent);
+    flex-shrink: 0;
+  }
+</style>

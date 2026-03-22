@@ -8,7 +8,7 @@ import {
 	getReadContentDescription,
 	getReadContentGuidance,
 } from "../../stores/dataStore.svelte";
-import type { BuiltInToolId, SearchAlgorithm, ToolConfig } from "../../types/plugin";
+import type { BuiltInToolId, DiffViewMode, SearchAlgorithm, ToolConfig } from "../../types/plugin";
 import type { ChatModel } from "../../stores/chatStore.svelte";
 import type SecondBrainPlugin from "../../main";
 import { ModelSelectionModal, type SelectedModel } from "./ModelSelectionModal";
@@ -99,6 +99,12 @@ let allowMove = $state(
 		(defaultConfig.settings as { allowMove?: boolean })?.allowMove ??
 		true,
 );
+let diffViewMode = $state<DiffViewMode>(pluginData.diffViewMode);
+
+const diffViewModeOptions = [
+	{ display: "Two Pane (rendered markdown)", value: "two-pane" as const },
+	{ display: "Word Diff (inline text)", value: "word-diff" as const },
+];
 type ProcessorMode = "auto" | "custom" | "disabled";
 
 // Processor settings: undefined = auto, null = disabled, ChatModel = custom
@@ -200,6 +206,7 @@ interface ToolConfigSnapshot {
 	allowUpdate: boolean;
 	allowDelete: boolean;
 	allowMove: boolean;
+	diffViewMode: DiffViewMode;
 	imageProcessorKey: string;
 	pdfProcessorKey: string;
 }
@@ -254,6 +261,7 @@ const initialSnapshot: ToolConfigSnapshot = {
 		(initialToolConfig?.settings as { allowMove?: boolean })?.allowMove ??
 		(defaultConfig.settings as { allowMove?: boolean })?.allowMove ??
 		true,
+	diffViewMode: capturedToolId === "manage_notes" ? pluginData.diffViewMode : "two-pane",
 	imageProcessorKey: processorKey(initialImageProcessor),
 	pdfProcessorKey: processorKey(initialPdfProcessor),
 };
@@ -274,6 +282,7 @@ const defaultSnapshot: ToolConfigSnapshot = {
 	allowUpdate: (defaultConfig.settings as { allowUpdate?: boolean })?.allowUpdate ?? true,
 	allowDelete: (defaultConfig.settings as { allowDelete?: boolean })?.allowDelete ?? true,
 	allowMove: (defaultConfig.settings as { allowMove?: boolean })?.allowMove ?? true,
+	diffViewMode: "two-pane",
 	// Default is "auto" for both processors
 	imageProcessorKey: "auto",
 	pdfProcessorKey: "auto",
@@ -303,6 +312,7 @@ const isDirty = $derived.by(() => {
 		allowUpdate,
 		allowDelete,
 		allowMove,
+		diffViewMode: capturedToolId === "manage_notes" ? diffViewMode : "two-pane",
 		imageProcessorKey: processorKey(imageProcessor),
 		pdfProcessorKey: processorKey(pdfProcessor),
 	};
@@ -330,6 +340,7 @@ const isAtDefault = $derived.by(() => {
 		allowUpdate,
 		allowDelete,
 		allowMove,
+		diffViewMode: capturedToolId === "manage_notes" ? diffViewMode : "two-pane",
 		imageProcessorKey: processorKey(imageProcessor),
 		pdfProcessorKey: processorKey(pdfProcessor),
 	};
@@ -397,6 +408,7 @@ function handleSave() {
 		updatedConfig.settings = { includeMetadata };
 	} else if (capturedToolId === "manage_notes") {
 		updatedConfig.settings = { allowCreate, allowUpdate, allowDelete, allowMove };
+		pluginData.diffViewMode = diffViewMode;
 	}
 
 	updateToolConfig(updatedConfig);
@@ -439,6 +451,7 @@ function handleResetToDefault() {
 		allowUpdate = settings.allowUpdate;
 		allowDelete = settings.allowDelete;
 		allowMove = settings.allowMove;
+		diffViewMode = "two-pane";
 	}
 }
 </script>
@@ -636,6 +649,19 @@ function handleResetToDefault() {
   {:else if capturedToolId === "manage_notes"}
     <div class="tool-config-section">
       <h4 class="tool-config-section-title">Allowed Operations</h4>
+      <div class="tool-config-field">
+        <label class="tool-config-label" for="tool-config-diff-view-mode">Diff View Mode</label>
+        <p class="tool-config-description">
+          Choose how pending note edits are previewed in reading view.
+        </p>
+        <Dropdown
+          id="tool-config-diff-view-mode"
+          type="options"
+          dropdown={diffViewModeOptions}
+          selected={diffViewMode}
+          onchange={(value) => (diffViewMode = value)}
+        />
+      </div>
       <div class="tool-config-field">
         <div class="tool-config-label">Allow Create</div>
         <p class="tool-config-description">Permit the agent to propose new markdown notes.</p>

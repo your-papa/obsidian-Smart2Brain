@@ -137,11 +137,11 @@
 			"hybrid": "Hybrid (BM25 + semantic)"
 		},
 		"advanced": "Advanced Settings",
-		"clear": "Clear Plugin Data",
-		"clear_desc": "This will delete all plugin data and the vector store data. All chat files inside your vault will not be affected.",
+		"clear": "Cleanup Plugin Data",
+		"clear_desc": "Deletes plugin settings and generated index data. Secrets, skill files, and chat files inside your vault are kept.",
 		"clear_modal": {
-			"title": "Clear Plugin Data",
-			"description": "Are you sure you want to delete the plugin data? Note that only the plugin data and the vector store data will be removed. All chat files inside your vault will not be affected."
+			"title": "Cleanup Plugin Data",
+			"description": "Delete plugin settings and generated index data? Secrets, skill files, and chat files inside your vault will be kept."
 		},
 		"provider_modal": {
 			"title": "Setup your Provider",
@@ -157,7 +157,7 @@
 			"embedModles": "Embed Models",
 			"manage": "Manage"
 		},
-		"clear_label": "Clear",
+		"clear_label": "Cleanup",
 		"relaunch": "Relaunch",
 		"autostart": "Autostart",
 		"autostart_desc": "Automatically start the Smart Second Brain when Obsidian starts.",

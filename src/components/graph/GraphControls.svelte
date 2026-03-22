@@ -5,7 +5,7 @@ import RangeSlider from "../ui/RangeSlider.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
 import Search from "../ui/Search.svelte";
 import Text from "../ui/Text.svelte";
-import ColorPicker from "../ui/ColorPicker.svelte";
+import PresetColorSelector, { type PresetColorOption } from "../ui/PresetColorSelector.svelte";
 import SettingContainer from "../settings/SettingContainer.svelte";
 import type {
 	ProjectionMethod,
@@ -16,6 +16,18 @@ import type {
 	GraphData,
 } from "../../types/graph";
 import { THEME_COLOR_VARS } from "../../types/graph";
+
+const GRAPH_PRESET_COLOR_OPTIONS: Array<PresetColorOption & { cssVar?: string }> = [
+	{ value: "#e93147", label: "Red", previewColor: "#e93147", cssVar: "--color-red" },
+	{ value: "#086ddd", label: "Blue", previewColor: "#086ddd", cssVar: "--color-blue" },
+	{ value: "#08b94e", label: "Green", previewColor: "#08b94e", cssVar: "--color-green" },
+	{ value: "#ec7500", label: "Orange", previewColor: "#ec7500", cssVar: "--color-orange" },
+	{ value: "#7852ee", label: "Purple", previewColor: "#7852ee", cssVar: "--color-purple" },
+	{ value: "#00bfbc", label: "Cyan", previewColor: "#00bfbc", cssVar: "--color-cyan" },
+	{ value: "#e0ac00", label: "Yellow", previewColor: "#e0ac00", cssVar: "--color-yellow" },
+	{ value: "#d53984", label: "Pink", previewColor: "#d53984", cssVar: "--color-pink" },
+	{ value: "#7a6ae6", label: "Accent", previewColor: "#7a6ae6", cssVar: "--interactive-accent" },
+];
 
 interface Props {
 	settings: SmartGraphSettings;
@@ -285,9 +297,23 @@ function clearFilters() {
 }
 
 // Color group handlers
+function getGraphPresetColorOptions(): PresetColorOption[] {
+	return GRAPH_PRESET_COLOR_OPTIONS;
+}
+
+function resolveGraphGroupColor(color: string | undefined): string {
+	const options = getGraphPresetColorOptions();
+	return (
+		options.find((option) => option.value === color)?.value ??
+		GRAPH_PRESET_COLOR_OPTIONS.find((option) => color === `var(${option.cssVar})`)?.value ??
+		(color && !THEME_COLOR_VARS.includes(color as (typeof THEME_COLOR_VARS)[number]) ? color : undefined) ??
+		options[0]?.value ??
+		"#000000"
+	);
+}
+
 function addColorGroup() {
-	const style = getComputedStyle(document.body);
-	const defaultColor = style.getPropertyValue(THEME_COLOR_VARS[0]).trim() || "#e93147";
+	const defaultColor = resolveGraphGroupColor(undefined);
 	const updated: ColorGroup[] = [...settings.colorGroups, { query: "", color: defaultColor }];
 	onSettingsChange({ colorGroups: updated });
 }
@@ -509,8 +535,15 @@ function updateColorGroupColor(index: number, color: string) {
 
         {#if sectionOpen.colorGroups}
           {#each settings.colorGroups as group, i}
+            {@const graphColorOptions = getGraphPresetColorOptions()}
             <div class="color-group-row">
-              <ColorPicker value={group.color} onchange={(c) => updateColorGroupColor(i, c)} />
+              <PresetColorSelector
+                value={resolveGraphGroupColor(group.color)}
+                options={graphColorOptions}
+                popoverLabel="Group Color"
+                triggerLabel={`Select color for group ${i + 1}`}
+                onSelect={(color) => updateColorGroupColor(i, color)}
+              />
               <Text
                 inputType="text"
                 value={group.query}
@@ -1047,12 +1080,6 @@ function updateColorGroupColor(index: number, color: string) {
     align-items: center;
     gap: 6px;
     padding: 2px 0;
-  }
-
-  .color-group-row :global(input[type="color"]) {
-    width: 24px;
-    height: 24px;
-    flex-shrink: 0;
   }
 
   .color-group-row :global(input[type="text"]) {
