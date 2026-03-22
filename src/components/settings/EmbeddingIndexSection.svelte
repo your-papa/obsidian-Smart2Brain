@@ -214,6 +214,7 @@
   actionsLayout="control"
   description={describeCurrentSelection()}
   emptyMessage="No embedding indexes configured yet."
+  hasItems={indexes.length > 0}
 >
   {#snippet actions()}
     <div class="flex items-center gap-2 justify-end">
