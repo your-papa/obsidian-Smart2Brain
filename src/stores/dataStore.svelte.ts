@@ -19,6 +19,7 @@ import type {
 	ToolConfig,
 	ToolsConfig,
 } from "../types/plugin";
+import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "../vectorstore/batchSize";
 import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 
 import { type GraphMode, type SmartGraphSettings, DEFAULT_SMART_GRAPH_SETTINGS } from "../types/graph";
@@ -521,7 +522,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch {
 			// ignore
@@ -1046,8 +1047,15 @@ export class PluginDataStore {
 	 * Set or create the embedding index for search or graph.
 	 * If no index exists for the given provider:model, creates one.
 	 */
-	setEmbedIndex(purpose: "search" | "graph", provider: string, model: string): void {
+	setEmbedIndex(
+		purpose: "search" | "graph",
+		provider: string,
+		model: string,
+		options?: { batchSize?: number },
+	): void {
 		const indexId = `${provider}:${model}`;
+		const configuredBatchSize =
+			options?.batchSize !== undefined ? normalizeEmbeddingBatchSize(options.batchSize, provider) : undefined;
 
 		// Ensure index config exists
 		const existing = this.#data.embeddingIndexes.find((i) => i.id === indexId);
@@ -1059,7 +1067,12 @@ export class PluginDataStore {
 				createdAt: Date.now(),
 				lastBuiltAt: null,
 				documentCount: 0,
+				batchSize: configuredBatchSize ?? getDefaultEmbeddingBatchSize(provider),
 			});
+		} else if (configuredBatchSize !== undefined) {
+			existing.batchSize = configuredBatchSize;
+		} else if (existing.batchSize === undefined) {
+			existing.batchSize = getDefaultEmbeddingBatchSize(provider);
 		}
 
 		// Set the index for the requested purpose
