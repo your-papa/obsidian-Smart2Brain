@@ -1,52 +1,56 @@
 <script lang="ts">
-import type { Snippet } from "svelte";
+  import type { Snippet } from "svelte";
 
-interface Props {
-	name: string;
-	desc?: string;
-	meta?: string;
-	selected?: boolean;
-	disabled?: boolean;
-	clickable?: boolean;
-	class?: string;
-	onclick?: (event: MouseEvent) => void;
-	leading?: Snippet;
-	badges?: Snippet;
-	children?: Snippet;
-	actions?: Snippet;
-}
+  interface Props {
+    name: string;
+    desc?: string;
+    meta?: string;
+    selected?: boolean;
+    disabled?: boolean;
+    clickable?: boolean;
+    interactiveRole?: "button" | "radio";
+    class?: string;
+    onclick?: (event: MouseEvent) => void;
+    leading?: Snippet;
+    badges?: Snippet;
+    children?: Snippet;
+    trailing?: Snippet;
+    actions?: Snippet;
+  }
 
-let {
-	name,
-	desc,
-	meta,
-	selected = false,
-	disabled = false,
-	clickable = false,
-	class: className = "",
-	onclick,
-	leading,
-	badges,
-	children,
-	actions,
-}: Props = $props();
+  let {
+    name,
+    desc,
+    meta,
+    selected = false,
+    disabled = false,
+    clickable = false,
+    interactiveRole = "button",
+    class: className = "",
+    onclick,
+    leading,
+    badges,
+    children,
+    trailing,
+    actions,
+  }: Props = $props();
 
-function handleClick(event: MouseEvent) {
-	if (disabled || !clickable) {
-		return;
-	}
-	onclick?.(event);
-}
+  function handleClick(event: MouseEvent) {
+    if (disabled || !clickable) {
+      return;
+    }
+    onclick?.(event);
+  }
 
-function handleKeyDown(event: KeyboardEvent) {
-	if (!clickable || disabled) {
-		return;
-	}
-	if (event.key === "Enter" || event.key === " ") {
-		event.preventDefault();
-		onclick?.(event as unknown as MouseEvent);
-	}
-}
+  function handleKeyDown(event: KeyboardEvent) {
+    if (!clickable || disabled) {
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onclick?.(event as unknown as MouseEvent);
+    }
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -55,7 +59,8 @@ function handleKeyDown(event: KeyboardEvent) {
   class:selected
   class:disabled
   class:clickable
-  role={clickable ? "button" : undefined}
+  role={clickable ? interactiveRole : undefined}
+  aria-checked={clickable && interactiveRole === "radio" ? selected : undefined}
   tabindex={clickable && !disabled ? 0 : undefined}
   onclick={handleClick}
   onkeydown={handleKeyDown}
@@ -103,19 +108,44 @@ function handleKeyDown(event: KeyboardEvent) {
       {@render actions()}
     </div>
   {/if}
+
+  {#if trailing}
+    <div class="managed-entity-item-trailing">
+      {@render trailing()}
+    </div>
+  {/if}
 </div>
 
 <style>
   .managed-entity-item {
+    position: relative;
     gap: 12px;
+    padding: 6px 8px;
+    border-radius: 14px;
+  }
+
+  .managed-entity-item::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    background: var(--background-modifier-hover);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 140ms ease;
   }
 
   .managed-entity-item.clickable {
     cursor: pointer;
   }
 
-  .managed-entity-item.clickable:hover {
-    background: var(--background-modifier-hover);
+  .managed-entity-item.clickable:hover::before {
+    opacity: 1;
+  }
+
+  .managed-entity-item.clickable:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--interactive-accent) 60%, transparent);
+    outline-offset: 2px;
   }
 
   .managed-entity-item.disabled {
@@ -123,6 +153,8 @@ function handleKeyDown(event: KeyboardEvent) {
   }
 
   .managed-entity-item-main {
+    position: relative;
+    z-index: 1;
     display: flex;
     align-items: flex-start;
     gap: 12px;
@@ -171,7 +203,19 @@ function handleKeyDown(event: KeyboardEvent) {
     margin-top: 8px;
   }
 
+  .managed-entity-item-trailing {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    min-width: 16px;
+  }
+
   .managed-entity-item-actions {
+    position: relative;
+    z-index: 1;
     display: flex;
     align-items: center;
     gap: 8px;

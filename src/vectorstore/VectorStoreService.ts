@@ -783,39 +783,6 @@ export class VectorStoreService {
 	}
 
 	/**
-	 * Get or create the embeddings instance for the search index.
-	 * @deprecated Use getEmbeddingsForInstance instead.
-	 */
-	private getEmbeddings(): EmbeddingsInterface | null {
-		const data = getData();
-		const indexId = data.searchEmbedIndex;
-		if (!indexId) {
-			const defaultModel = data.defaultEmbedModel;
-			if (!defaultModel) return null;
-			if (!data.isProviderEmbeddingAvailable(defaultModel.provider)) {
-				Logger.warn(
-					"[VectorStore] Embeddings unavailable for provider in current auth mode",
-					defaultModel.provider,
-				);
-				return null;
-			}
-			// Legacy path
-			const inst = this.instances.values().next().value;
-			if (!inst) return null;
-			return this.getEmbeddingsForInstance(inst, defaultModel);
-		}
-		const inst = this.instances.get(indexId);
-		if (!inst) return null;
-		const model = this.getModelForInstance(inst);
-		if (!model) return null;
-		if (!data.isProviderEmbeddingAvailable(model.provider)) {
-			Logger.warn("[VectorStore] Embeddings unavailable for provider in current auth mode", model.provider);
-			return null;
-		}
-		return this.getEmbeddingsForInstance(inst, model);
-	}
-
-	/**
 	 * Ensure the index is built for the given indexId.
 	 * Called on-demand when embeddings search is used.
 	 */

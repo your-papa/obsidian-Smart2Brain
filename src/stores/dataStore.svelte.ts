@@ -357,10 +357,6 @@ export const DEFAULT_SETTINGS: PluginData = {
 	selectedAgentId: DEFAULT_AGENT_ID,
 
 	// Chat settings
-	isUsingRag: false,
-	retrieveTopK: 100,
-	assistantLanguage: "en",
-	initialAssistantMessageContent: "Hi",
 	targetFolder: "Chats",
 	attachmentFolder: "",
 
@@ -370,12 +366,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	privacyIsExcluding: true,
 
 	// UI state
-	isQuickSettingsOpen: true,
 	isVerbose: false,
-	hideIncognitoWarning: false,
-	isAutostart: false,
-	isChatComfy: false,
-	isOnboarded: false,
 	chatOpenLocation: "tab" as ChatOpenLocation,
 	lastActiveChatId: null,
 
@@ -384,7 +375,6 @@ export const DEFAULT_SETTINGS: PluginData = {
 	langSmithApiKey: "",
 	langSmithProject: "obsidian-agent",
 	langSmithEndpoint: "https://api.smith.langchain.com",
-	debuggingLangchainKey: "",
 
 	// Other
 	searchAlgorithm: "lexical",
@@ -434,9 +424,9 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
-	deleteData() {
-		this.#data = DEFAULT_SETTINGS;
-		this.saveSettings();
+	async deleteData(): Promise<void> {
+		this.#data = structuredClone(DEFAULT_SETTINGS);
+		await this.saveSettings();
 	}
 
 	/**
@@ -465,38 +455,6 @@ export class PluginDataStore {
 			const config = this.#data.providerConfig[providerId];
 			return config ? Object.keys(config.chatModels) : [];
 		});
-	}
-
-	get initialAssistantMessageContent() {
-		return this.#data.initialAssistantMessageContent;
-	}
-	set initialAssistantMessageContent(val: string) {
-		this.#data.initialAssistantMessageContent = val;
-		this.saveSettings();
-	}
-
-	get isUsingRag() {
-		return this.#data.isUsingRag;
-	}
-	set isUsingRag(val: boolean) {
-		this.#data.isUsingRag = val;
-		this.saveSettings();
-	}
-
-	get retrieveTopK() {
-		return this.#data.retrieveTopK;
-	}
-	set retrieveTopK(val: number) {
-		this.#data.retrieveTopK = val;
-		this.saveSettings();
-	}
-
-	get assistantLanguage() {
-		return this.#data.assistantLanguage;
-	}
-	set assistantLanguage(val: "de" | "en") {
-		this.#data.assistantLanguage = val;
-		this.saveSettings();
 	}
 
 	// ============================================================================
@@ -605,22 +563,6 @@ export class PluginDataStore {
 		}
 
 		return normalizePath(`${this.#data.targetFolder}/attachments`);
-	}
-
-	get isChatComfy() {
-		return this.#data.isChatComfy;
-	}
-	set isChatComfy(val: boolean) {
-		this.#data.isChatComfy = val;
-		this.saveSettings();
-	}
-
-	get isOnboarded() {
-		return this.#data.isOnboarded;
-	}
-	set isOnboarded(val: boolean) {
-		this.#data.isOnboarded = val;
-		this.saveSettings();
 	}
 
 	get enableLangSmith() {
@@ -991,43 +933,11 @@ export class PluginDataStore {
 		return true;
 	}
 
-	get debuggingLangchainKey() {
-		return this.#data.debuggingLangchainKey;
-	}
-	set debuggingLangchainKey(val: string) {
-		this.#data.debuggingLangchainKey = val;
-		this.saveSettings();
-	}
-
-	get isQuickSettingsOpen() {
-		return this.#data.isQuickSettingsOpen;
-	}
-	set isQuickSettingsOpen(val: boolean) {
-		this.#data.isQuickSettingsOpen = val;
-		this.saveSettings();
-	}
-
 	get isVerbose() {
 		return this.#data.isVerbose;
 	}
 	set isVerbose(val: boolean) {
 		this.#data.isVerbose = val;
-		this.saveSettings();
-	}
-
-	get hideIncognitoWarning() {
-		return this.#data.hideIncognitoWarning;
-	}
-	set hideIncognitoWarning(val: boolean) {
-		this.#data.hideIncognitoWarning = val;
-		this.saveSettings();
-	}
-
-	get isAutostart() {
-		return this.#data.isAutostart;
-	}
-	toggleAutostart() {
-		this.#data.isAutostart = !this.isAutostart;
 		this.saveSettings();
 	}
 

@@ -1,46 +1,36 @@
 <script lang="ts">
-import EmbeddingIndexSection from "../../components/settings/EmbeddingIndexSection.svelte";
-import SettingGroup from "../../components/settings/SettingGroup.svelte";
-import SettingItem from "../../components/settings/SettingItem.svelte";
-import Toggle from "../../components/ui/Toggle.svelte";
-import { getData } from "../../stores/dataStore.svelte";
+  import { SearchDisplaySettingsModal } from "../../components/modal/SearchDisplaySettingsModal";
+  import EmbeddingIndexSection from "../../components/settings/EmbeddingIndexSection.svelte";
+  import SettingGroup from "../../components/settings/SettingGroup.svelte";
+  import SettingItem from "../../components/settings/SettingItem.svelte";
+  import Button from "../../components/ui/Button.svelte";
+  import { getData } from "../../stores/dataStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
 
-const pluginData = getData();
+  const pluginData = getData();
+  const plugin = getPlugin();
+
+  const displaySummary = $derived.by(() => {
+    const enabledLabels: string[] = [];
+    if (pluginData.searchShowPath) enabledLabels.push("Path");
+    if (pluginData.searchShowTags) enabledLabels.push("Tags");
+    if (pluginData.searchShowMatchBadges) enabledLabels.push("Match badges");
+    if (pluginData.searchShowMatchContext) enabledLabels.push("Content snippets");
+
+    return enabledLabels.length > 0 ? enabledLabels.join(", ") : "Nothing extra";
+  });
+
+  function openDisplaySettingsModal() {
+    new SearchDisplaySettingsModal(plugin.app).open();
+  }
 </script>
 
 <SettingGroup heading="Display">
-  <SettingItem name="Show Path" desc="Show the note's folder path inline in search results.">
-    <Toggle
-      checked={pluginData.searchShowPath}
-      onchange={(checked) => (pluginData.searchShowPath = checked)}
-    />
-  </SettingItem>
-
-  <SettingItem name="Show Tags" desc="Show file tags inline in search results.">
-    <Toggle
-      checked={pluginData.searchShowTags}
-      onchange={(checked) => (pluginData.searchShowTags = checked)}
-    />
-  </SettingItem>
-
   <SettingItem
-    name="Show Match Badges"
-    desc="Show why a note matched, for example Title, Tag, or Content."
+    name="Result Details"
+    desc={`Choose which metadata and context appear in each search result. Currently: ${displaySummary}.`}
   >
-    <Toggle
-      checked={pluginData.searchShowMatchBadges}
-      onchange={(checked) => (pluginData.searchShowMatchBadges = checked)}
-    />
-  </SettingItem>
-
-  <SettingItem
-    name="Show Content Snippets"
-    desc="Show the additional heading and snippet text under each search result."
-  >
-    <Toggle
-      checked={pluginData.searchShowMatchContext}
-      onchange={(checked) => (pluginData.searchShowMatchContext = checked)}
-    />
+    <Button buttonText="Configure" onClick={openDisplaySettingsModal} />
   </SettingItem>
 </SettingGroup>
 

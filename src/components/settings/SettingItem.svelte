@@ -1,25 +1,17 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
+import type { Snippet } from "svelte";
 
-  interface Props {
-    name: string;
-    namePrefix?: Snippet;
-    nameSuffix?: Snippet;
-    desc?: string;
-    disabled?: boolean;
-    class?: string;
-    children?: Snippet;
-  }
+interface Props {
+	name: string;
+	namePrefix?: Snippet;
+	nameSuffix?: Snippet;
+	desc?: string;
+	disabled?: boolean;
+	class?: string;
+	children?: Snippet;
+}
 
-  let {
-    name,
-    namePrefix,
-    nameSuffix,
-    desc,
-    disabled = false,
-    class: className = "",
-    children,
-  }: Props = $props();
+let { name, namePrefix, nameSuffix, desc, disabled = false, class: className = "", children }: Props = $props();
 </script>
 
 <div

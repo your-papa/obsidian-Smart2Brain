@@ -1,28 +1,28 @@
 <script lang="ts">
-import type { Snippet } from "svelte";
-import SettingGroup from "./SettingGroup.svelte";
+  import type { Snippet } from "svelte";
+  import SettingGroup from "./SettingGroup.svelte";
 
-interface Props {
-	heading: string;
-	headingDesc?: string;
-	description?: string;
-	emptyMessage?: string;
-	actionsLayout?: "control" | "full-width";
-	actions?: Snippet;
-	children?: Snippet;
-	class?: string;
-}
+  interface Props {
+    heading: string;
+    headingDesc?: string;
+    description?: string;
+    emptyMessage?: string;
+    actionsLayout?: "control" | "full-width";
+    actions?: Snippet;
+    children?: Snippet;
+    class?: string;
+  }
 
-let {
-	heading,
-	headingDesc,
-	description,
-	emptyMessage,
-	actionsLayout = "control",
-	actions,
-	children,
-	class: className = "",
-}: Props = $props();
+  let {
+    heading,
+    headingDesc,
+    description,
+    emptyMessage,
+    actionsLayout = "control",
+    actions,
+    children,
+    class: className = "",
+  }: Props = $props();
 </script>
 
 <SettingGroup {heading} {headingDesc} class={className}>
@@ -94,6 +94,27 @@ let {
   .managed-entity-section-list {
     display: flex;
     flex-direction: column;
+    padding: 4px 6px;
+  }
+
+  .managed-entity-section-list :global(.managed-entity-item) {
+    border: 0 !important;
+    box-shadow: none;
+  }
+
+  .managed-entity-section-list :global(.managed-entity-item:not(:last-child))::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -2px;
+    height: 1px;
+    background: var(--background-modifier-border);
+    pointer-events: none;
+  }
+
+  .managed-entity-section-list :global(.managed-entity-item.clickable:hover)::after {
+    opacity: 0;
   }
 
   .managed-entity-section-empty {

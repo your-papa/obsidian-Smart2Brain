@@ -1,0 +1,225 @@
+<script lang="ts">
+  import Button from "../ui/Button.svelte";
+  import SettingContainer from "../settings/SettingContainer.svelte";
+  import Toggle from "../ui/Toggle.svelte";
+  import type { SearchDisplaySettingsModal } from "./SearchDisplaySettingsModal";
+  import { getData } from "../../stores/dataStore.svelte";
+  import { icon } from "../../utils/utils";
+
+  interface Props {
+    modal: SearchDisplaySettingsModal;
+  }
+
+  const pluginData = getData();
+
+  let { modal }: Props = $props();
+
+  const enabledCount = $derived.by(() => {
+    let count = 0;
+    if (pluginData.searchShowPath) count += 1;
+    if (pluginData.searchShowTags) count += 1;
+    if (pluginData.searchShowMatchBadges) count += 1;
+    if (pluginData.searchShowMatchContext) count += 1;
+    return count;
+  });
+</script>
+
+<div class="modal-title">Search Result Details</div>
+
+<div class="modal-content search-display-settings-modal">
+  <p class="search-display-settings-intro">
+    Choose which metadata and context appear in each search result. The preview updates immediately
+    as you toggle options.
+  </p>
+
+  <div class="search-display-settings-preview-panel">
+    <div class="search-display-settings-preview-header">
+      <div class="search-display-settings-preview-title">Preview</div>
+      <div class="search-display-settings-preview-count">{enabledCount} of 4 enabled</div>
+    </div>
+
+    <div class="search-display-settings-preview-card">
+      <div class="s2b-search-result">
+        <div class="s2b-search-result-title">
+          <div class="s2b-search-result-title-meta">
+            <span class="s2b-search-result-note-icon" aria-hidden="true" use:icon={"file-text"}
+            ></span>
+            <span class="s2b-search-result-name" title="Neural Networks Deep Dive">
+              Neural Networks Deep Dive
+            </span>
+
+            {#if pluginData.searchShowPath || pluginData.searchShowTags}
+              <div class="s2b-search-result-title-secondary">
+                {#if pluginData.searchShowPath}
+                  <span class="s2b-search-result-separator">•</span>
+                  <span class="s2b-search-result-path" title="Research/AI">Research/AI</span>
+                {/if}
+
+                {#if pluginData.searchShowTags}
+                  <div class="s2b-search-result-tags">
+                    <span class="s2b-search-result-tag">
+                      <span class="s2b-search-result-tag-label">ml</span>
+                    </span>
+                    <span class="s2b-search-result-tag">
+                      <span class="s2b-search-result-tag-label">deep-learning</span>
+                    </span>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </div>
+
+          {#if pluginData.searchShowMatchBadges}
+            <div class="s2b-search-result-badges">
+              <span
+                class="s2b-search-result-badge s2b-search-result-badge-title"
+                aria-label="Title"
+                title="Title"
+              >
+                <span class="s2b-search-result-badge-icon" aria-hidden="true" use:icon={"heading"}
+                ></span>
+              </span>
+              <span
+                class="s2b-search-result-badge s2b-search-result-badge-tag"
+                aria-label="Tag"
+                title="Tag"
+              >
+                <span class="s2b-search-result-badge-icon" aria-hidden="true" use:icon={"tags"}
+                ></span>
+              </span>
+              <span
+                class="s2b-search-result-badge s2b-search-result-badge-content"
+                aria-label="Content"
+                title="Content"
+              >
+                <span
+                  class="s2b-search-result-badge-icon"
+                  aria-hidden="true"
+                  use:icon={"align-left"}
+                ></span>
+              </span>
+            </div>
+          {/if}
+        </div>
+
+        {#if pluginData.searchShowMatchContext}
+          <div class="s2b-search-result-explanation">
+            <div class="s2b-search-result-heading">## Unsupervised Learning</div>
+            <div class="s2b-search-result-snippet">
+              Clustering algorithms reveal hidden structure in high-dimensional data and are useful
+              when labels are unavailable.
+            </div>
+          </div>
+        {/if}
+      </div>
+    </div>
+  </div>
+
+  <SettingContainer name="Path" desc="Show the note's folder path inline in search results.">
+    <Toggle
+      checked={pluginData.searchShowPath}
+      onchange={(checked) => (pluginData.searchShowPath = checked)}
+    />
+  </SettingContainer>
+
+  <SettingContainer name="Tags" desc="Show file tags inline in search results.">
+    <Toggle
+      checked={pluginData.searchShowTags}
+      onchange={(checked) => (pluginData.searchShowTags = checked)}
+    />
+  </SettingContainer>
+
+  <SettingContainer
+    name="Match Badges"
+    desc="Show why a note matched, for example Title, Tag, or Content."
+  >
+    <Toggle
+      checked={pluginData.searchShowMatchBadges}
+      onchange={(checked) => (pluginData.searchShowMatchBadges = checked)}
+    />
+  </SettingContainer>
+
+  <SettingContainer
+    name="Content Snippets"
+    desc="Show the additional heading and snippet text under each search result."
+  >
+    <Toggle
+      checked={pluginData.searchShowMatchContext}
+      onchange={(checked) => (pluginData.searchShowMatchContext = checked)}
+    />
+  </SettingContainer>
+</div>
+
+<div class="modal-button-container">
+  <Button buttonText="Done" onClick={() => modal.close()} />
+</div>
+
+<style>
+  .search-display-settings-modal {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .search-display-settings-intro {
+    margin: 0;
+    color: var(--text-muted);
+  }
+
+  .search-display-settings-preview-panel {
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    padding: 14px;
+    background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--background-secondary) 86%, transparent),
+        transparent
+      ),
+      var(--background-primary-alt, var(--background-primary));
+  }
+
+  .search-display-settings-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .search-display-settings-preview-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-normal);
+  }
+
+  .search-display-settings-preview-count {
+    font-size: 0.75rem;
+    line-height: 1.2;
+    color: var(--text-muted);
+    padding: 2px 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 999px;
+    background: var(--background-secondary);
+  }
+
+  .search-display-settings-preview-card {
+    padding: 14px;
+    border-radius: 10px;
+    background: var(--background-primary);
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 80%, transparent);
+  }
+
+  .search-display-settings-preview-card :global(.s2b-search-result-name) {
+    max-width: clamp(8rem, 24vw, 18rem);
+  }
+
+  .search-display-settings-preview-card :global(.s2b-search-result-badges) {
+    margin-left: 0;
+  }
+
+  .search-display-settings-preview-card :global(.s2b-search-result-tag) {
+    --tag-color: var(--text-accent);
+    --tag-background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+    --tag-border-color: color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+  }
+</style>

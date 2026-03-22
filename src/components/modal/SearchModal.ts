@@ -124,13 +124,13 @@ function getBadgeIconId(badge: SearchMatchBadge): string {
 		case "alias":
 			return "forward";
 		case "tag":
-			return "tag";
+			return "tags";
 		case "path":
 			return "folder-tree";
 		case "heading":
 			return "heading";
 		case "content":
-			return "file-text";
+			return "align-left";
 		case "semantic":
 			return "sparkles";
 		case "recent":
