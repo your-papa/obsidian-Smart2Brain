@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
     buildGraph,
     buildWikiGraph,
@@ -55,14 +55,10 @@ function createMockDocumentVector(path: string, vector: number[]): DocumentVecto
 const defaultSettings = {
     defaultK: 3,
     autoK: false,
-    semanticNeighbors: 3,
-    similarityThreshold: 0.3,
-    showOrphans: true,
     projectionMethod: "pca" as const,
     umapNeighbors: 15,
     umapMinDist: 0.1,
     showWikiLinks: true,
-    showSemanticEdges: true,
     clusteringAlgorithm: "kmeans" as const,
     minClusterSize: 5,
 };
@@ -85,10 +81,9 @@ describe("buildGraph", () => {
         const result = await buildGraph(app, docs, {
             ...defaultSettings,
             defaultK: 2,
-            semanticNeighbors: 2,
-            similarityThreshold: 0,
         });
         expect(result.nodes).toHaveLength(3);
+        expect(result.edges).toHaveLength(0);
     });
 
     it("should assign cluster colors", async () => {
@@ -102,8 +97,6 @@ describe("buildGraph", () => {
         const result = await buildGraph(app, docs, {
             ...defaultSettings,
             defaultK: 2,
-            semanticNeighbors: 2,
-            similarityThreshold: 0,
         });
 
         for (const node of result.nodes) {
@@ -112,7 +105,7 @@ describe("buildGraph", () => {
         }
     });
 
-    it("should always include wiki edges in graph data", async () => {
+    it("should include wiki edges when showWikiLinks is true", async () => {
         const docs = [
             createMockDocumentVector("a.md", [1, 0.9, 0, 0]),
             createMockDocumentVector("b.md", [0.9, 1, 0, 0]),
@@ -122,19 +115,15 @@ describe("buildGraph", () => {
         const result = await buildGraph(app, docs, {
             ...defaultSettings,
             showWikiLinks: true,
-            showSemanticEdges: true,
-            semanticNeighbors: 2,
-            similarityThreshold: 0,
         });
 
         const wikiEdges = result.edges.filter((e) => e.type === "wiki");
-        const semanticEdges = result.edges.filter((e) => e.type === "semantic");
 
         expect(wikiEdges.length).toBeGreaterThan(0);
-        expect(semanticEdges.length).toBeGreaterThan(0);
+        expect(result.edges).toEqual(wikiEdges);
     });
 
-    it("should overlay wiki link edges when showWikiLinks is true", async () => {
+    it("should omit wiki edges when showWikiLinks is false", async () => {
         const docs = [
             createMockDocumentVector("a.md", [1, 0, 0, 0]),
             createMockDocumentVector("b.md", [0, 1, 0, 0]),
@@ -146,15 +135,10 @@ describe("buildGraph", () => {
         );
         const result = await buildGraph(app, docs, {
             ...defaultSettings,
-            semanticNeighbors: 1,
-            similarityThreshold: 0,
+            showWikiLinks: false,
         });
 
-        const wikiEdges = result.edges.filter((e) => e.type === "wiki");
-        const semanticEdges = result.edges.filter((e) => e.type === "semantic");
-
-        expect(wikiEdges.length).toBeGreaterThan(0);
-        expect(semanticEdges.length).toBeGreaterThan(0);
+        expect(result.edges).toHaveLength(0);
     });
 
     it("should not duplicate wiki edges", async () => {
@@ -169,7 +153,6 @@ describe("buildGraph", () => {
         );
         const result = await buildGraph(app, docs, {
             ...defaultSettings,
-            similarityThreshold: 0.99, // high threshold to minimize semantic edges
         });
 
         const wikiEdges = result.edges.filter((e) => e.type === "wiki");
@@ -190,29 +173,19 @@ describe("buildGraph", () => {
         expect(wikiEdges).toHaveLength(0);
     });
 
-    it("should hide orphans when showOrphans is false", async () => {
+    it("should include unlinked notes in the projected smart graph", async () => {
         const docs = [
             createMockDocumentVector("a.md", [1, 0.9, 0, 0]),
             createMockDocumentVector("b.md", [0.9, 1, 0, 0]),
             createMockDocumentVector("orphan.md", [0, 0, 0, 1]),
         ];
-        const app = createMockApp({}, ["a.md", "b.md", "orphan.md"]);
+        const app = createMockApp({ "a.md": { "b.md": 1 } }, ["a.md", "b.md", "orphan.md"]);
         const result = await buildGraph(app, docs, {
             ...defaultSettings,
-            showOrphans: false,
-            semanticNeighbors: 1,
-            similarityThreshold: 0.5,
         });
 
-        // orphan.md should be excluded if it has no edges
         const orphanNode = result.nodes.find((n) => n.id === "orphan.md");
-        if (orphanNode) {
-            // If it exists, it must have at least one edge
-            const hasEdge = result.edges.some(
-                (e) => e.source === "orphan.md" || e.target === "orphan.md",
-            );
-            expect(hasEdge).toBe(true);
-        }
+        expect(orphanNode).toBeDefined();
     });
 
     it("should set node labels from file basename", async () => {
@@ -232,7 +205,7 @@ describe("buildWikiGraph", () => {
             ["a.md", "b.md", "c.md"],
         );
 
-        const result = buildWikiGraph(app, { showOrphans: true });
+        const result = buildWikiGraph(app);
 
         expect(result.graphData.nodes).toHaveLength(3);
         expect(result.graphData.edges).toHaveLength(2);
@@ -248,11 +221,13 @@ describe("buildWikiGraph", () => {
 
         const result = buildWikiGraph(
             app,
-            { showOrphans: true },
             { folders: ["Work"], tags: ["#focus"] },
         );
 
-        expect(result.graphData.nodes.map((n) => n.id).sort()).toEqual(["Work/a.md", "Work/b.md"]);
+        expect(result.graphData.nodes.map((n) => n.id).sort((a, b) => a.localeCompare(b))).toEqual([
+            "Work/a.md",
+            "Work/b.md",
+        ]);
         expect(result.graphData.edges).toHaveLength(1);
     });
 });

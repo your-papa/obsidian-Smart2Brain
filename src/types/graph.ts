@@ -1,7 +1,7 @@
 /**
  * Smart Graph View Types
  *
- * Types for the graph visualization feature. The graph uses semantic
+ * Types for the graph visualization feature. The smart graph uses semantic
  * embeddings for node positioning and clustering, with optional wiki link
  * overlay.
  */
@@ -41,7 +41,7 @@ export interface ColorGroup {
 /**
  * The type of relationship an edge represents.
  * - "wiki": An explicit wiki link between notes in Obsidian
- * - "semantic": An inferred similarity edge from embedding cosine similarity
+ * - "semantic": Reserved for future local semantic graph relationships
  */
 export type EdgeType = "wiki" | "semantic";
 
@@ -71,8 +71,6 @@ export interface GraphNode {
 	highlighted?: boolean;
 	/** Number of connections (degree) for sizing */
 	degree?: number;
-	/** True when the node has semantic edges but no wiki edges (discovery mode) */
-	discoverable?: boolean;
 }
 
 /**
@@ -105,18 +103,12 @@ export interface SmartGraphSettings {
 	defaultK: number;
 	/** Whether to auto-determine K via silhouette score */
 	autoK: boolean;
-	/** Whether to show orphan nodes (no connections) */
-	showOrphans: boolean;
 	/** Base node radius in pixels */
 	nodeSize: number;
 	/** Target link distance for force layout */
 	linkDistance: number;
 	/** Charge strength (negative = repulsive). Controls how far apart nodes spread. */
 	chargeStrength: number;
-	/** Minimum similarity threshold for semantic edges (0-1) */
-	similarityThreshold: number;
-	/** Number of nearest neighbors to connect in semantic mode */
-	semanticNeighbors: number;
 	/** Dimensionality reduction algorithm for 2D projection */
 	projectionMethod: ProjectionMethod;
 	/** Number of nearest neighbors UMAP uses to model local structure */
@@ -127,10 +119,6 @@ export interface SmartGraphSettings {
 	showWikiLinks: boolean;
 	/** Zoom scale at which all labels are shown (0 = never) */
 	labelZoomThreshold: number;
-	/** Whether to highlight nodes with semantic but no wiki edges */
-	discoveryMode: boolean;
-	/** Whether to show semantic similarity edges */
-	showSemanticEdges: boolean;
 	/** Chat model used for LLM-powered graph features (e.g., cluster labeling) */
 	graphChatModel: import("../stores/chatStore.svelte").ChatModel | null;
 	/** Whether to automatically generate cluster labels after clustering */
@@ -151,19 +139,14 @@ export interface SmartGraphSettings {
 export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	defaultK: 5,
 	autoK: true,
-	showOrphans: true,
 	nodeSize: 6,
 	linkDistance: 100,
 	chargeStrength: -150,
-	similarityThreshold: 0.3,
-	semanticNeighbors: 5,
 	projectionMethod: "umap",
 	umapNeighbors: 15,
 	umapMinDist: 0.1,
 	showWikiLinks: true,
 	labelZoomThreshold: 2.5,
-	discoveryMode: false,
-	showSemanticEdges: true,
 	graphChatModel: null,
 	autoLabelClusters: false,
 	clusteringAlgorithm: "kmeans",

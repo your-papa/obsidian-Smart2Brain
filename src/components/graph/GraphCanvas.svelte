@@ -19,8 +19,6 @@ interface Props {
 	linkDistance: number;
 	chargeStrength?: number;
 	labelZoomThreshold?: number;
-	discoveryMode?: boolean;
-	showSemanticEdges?: boolean;
 	showWikiLinks?: boolean;
 	useForceLayout?: boolean;
 	transitionTargets?: Map<string, { x: number; y: number }> | null;
@@ -32,7 +30,6 @@ interface Props {
 	onRevealFile?: (path: string) => void;
 	onFocusCluster?: (cluster: number) => void;
 	onToggleWikiLinks?: () => void;
-	onToggleSemanticEdges?: () => void;
 	lassoMode?: boolean;
 	onSelectionChange?: (paths: string[]) => void;
 }
@@ -42,8 +39,6 @@ let {
 	linkDistance,
 	chargeStrength = -150,
 	labelZoomThreshold = 2.5,
-	discoveryMode = false,
-	showSemanticEdges = true,
 	showWikiLinks = true,
 	useForceLayout = true,
 	transitionTargets = null,
@@ -55,7 +50,6 @@ let {
 	onRevealFile,
 	onFocusCluster,
 	onToggleWikiLinks,
-	onToggleSemanticEdges,
 	lassoMode = false,
 	onSelectionChange,
 }: Props = $props();
@@ -102,7 +96,6 @@ let simLinks: SimLink[] = [];
 
 // Pre-split edge arrays – built once in setupSimulation, reused every frame
 let wikiSimLinks: SimLink[] = [];
-let semanticSimLinks: SimLink[] = [];
 
 // Edge fade-in: edges start invisible and fade to full opacity after each
 // setupSimulation call, providing a smooth crossfade on mode/data changes.
@@ -140,7 +133,7 @@ let edgeLegendHitAreas: Array<{
 	y: number;
 	w: number;
 	h: number;
-	type: "wiki" | "semantic";
+	type: "wiki";
 }> = [];
 
 // Labeling animation loop
@@ -352,9 +345,7 @@ function render() {
 	ctx.translate(transform.x, transform.y);
 	ctx.scale(transform.scale, transform.scale);
 
-	// Draw edges — wiki first (solid, below), then semantic (dashed, on top)
-	// This lets users spot new semantic connections that don't exist as wiki links.
-	// Uses pre-split arrays (built in setupSimulation) to avoid filtering every frame.
+	// Draw wiki edges using the pre-split array built in setupSimulation.
 
 	// Advance edge fade-in (smooth crossfade on mode / data changes)
 	if (edgeFadeAlpha < 1) {
@@ -400,50 +391,6 @@ function render() {
 		}
 	} // end showWikiLinks
 
-	if (showSemanticEdges) {
-		for (const link of semanticSimLinks) {
-			const source = link.source as SimNode;
-			const target = link.target as SimNode;
-
-			if (source.x == null || source.y == null || target.x == null || target.y == null) continue;
-
-			// Dim edges outside focused clusters
-			const inFocus =
-				focusedClusters.size === 0 ||
-				(source.cluster != null && focusedClusters.has(source.cluster)) ||
-				(target.cluster != null && focusedClusters.has(target.cluster));
-
-			// Dim edges outside selection
-			const inSelection =
-				selectedNodes.size === 0 || (selectedNodes.has(source.id) && selectedNodes.has(target.id));
-
-			const isHighlighted = hoveredNode && (source.id === hoveredNode.id || target.id === hoveredNode.id);
-
-			const edgeHoverAlpha = hoveredNode
-				? Math.max(hoverAlphas.get(source.id) ?? 0.85, hoverAlphas.get(target.id) ?? 0.85)
-				: 1;
-
-			ctx.beginPath();
-			const dash = 4 / transform.scale;
-			ctx.setLineDash([dash, dash]);
-			ctx.moveTo(source.x, source.y);
-			ctx.lineTo(target.x, target.y);
-			ctx.strokeStyle = isHighlighted ? c.accent : c.graphLine;
-			ctx.lineWidth = isHighlighted ? 2 / transform.scale : Math.max(0.5, link.weight * 2) / transform.scale;
-			ctx.globalAlpha =
-				(!inFocus
-					? 0.05
-					: !inSelection
-						? 0.05
-						: isHighlighted
-							? 0.9
-							: Math.min(0.15 + link.weight * 0.25, 0.6)) *
-				edgeFadeAlpha *
-				(isHighlighted ? 1 : edgeHoverAlpha / 0.85);
-			ctx.stroke();
-			ctx.globalAlpha = 1;
-		}
-	} // end showSemanticEdges
 	ctx.setLineDash([]);
 
 	// ── Smooth hover alpha interpolation ──────────────────────
@@ -519,19 +466,6 @@ function render() {
 			ctx.strokeStyle = isHovered ? c.textNormal : c.accent;
 			ctx.lineWidth = 2 / transform.scale;
 			ctx.stroke();
-		}
-
-		// Discovery mode: pulsing ring for nodes with semantic but no wiki edges
-		if (discoveryMode && node.discoverable && !isHovered && !isDragged) {
-			ctx.beginPath();
-			ctx.arc(node.x, node.y, radius + 4 / transform.scale, 0, Math.PI * 2);
-			ctx.strokeStyle = c.textAccent;
-			ctx.lineWidth = 2 / transform.scale;
-			ctx.setLineDash([3 / transform.scale, 3 / transform.scale]);
-			ctx.globalAlpha = 0.8;
-			ctx.stroke();
-			ctx.setLineDash([]);
-			ctx.globalAlpha = 1;
 		}
 
 		// Pinned node indicator: small inner dot
@@ -658,34 +592,6 @@ function render() {
 		}
 
 		edgeLegendHitAreas.push({ x: lx, y: ly - rowH / 2, w: 120, h: rowH, type: "wiki" });
-
-		// Semantic line (dashed)
-		const row2Y = ly + rowH;
-		ctx.globalAlpha = showSemanticEdges ? 0.7 : 0.25;
-		ctx.beginPath();
-		ctx.setLineDash([4, 4]);
-		ctx.moveTo(lx, row2Y);
-		ctx.lineTo(lx + 28, row2Y);
-		ctx.strokeStyle = c.textFaint;
-		ctx.lineWidth = 1.5;
-		ctx.stroke();
-
-		ctx.setLineDash([]);
-		ctx.fillStyle = c.textMuted;
-		ctx.fillText("Semantic", lx + 34, row2Y);
-
-		if (!showSemanticEdges) {
-			// Strikethrough
-			const textW = ctx.measureText("Semantic").width;
-			ctx.beginPath();
-			ctx.moveTo(lx + 34, row2Y);
-			ctx.lineTo(lx + 34 + textW, row2Y);
-			ctx.strokeStyle = c.textMuted;
-			ctx.lineWidth = 1;
-			ctx.stroke();
-		}
-
-		edgeLegendHitAreas.push({ x: lx, y: row2Y - rowH / 2, w: 120, h: rowH, type: "semantic" });
 
 		ctx.globalAlpha = 1;
 		ctx.restore();
@@ -820,8 +726,7 @@ function render() {
 			ctx.save();
 			ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-			const label =
-				hoveredEdge.type === "wiki" ? `wiki · ${hoveredEdge.weight}` : `sim · ${hoveredEdge.weight.toFixed(3)}`;
+			const label = `wiki · ${hoveredEdge.weight}`;
 
 			ctx.font = `11px ${c.font}`;
 			const metrics = ctx.measureText(label);
@@ -866,9 +771,6 @@ function render() {
 			hoveredNode.label,
 			`${hoveredNode.cluster != null && clusterLabels[hoveredNode.cluster] ? clusterLabels[hoveredNode.cluster] : `Cluster ${hoveredNode.cluster ?? "?"}`}  ·  ${hoveredNode.degree ?? 0} connections`,
 		];
-		if (hoveredNode.discoverable) {
-			lines.push("⚡ Semantic-only (no wiki links)");
-		}
 		if (pinnedNodes.has(hoveredNode.id)) {
 			lines.push("📌 Pinned");
 		}
@@ -1141,11 +1043,7 @@ function handleClick(e: MouseEvent) {
 	// Check edge legend hit areas (screen space)
 	for (const area of edgeLegendHitAreas) {
 		if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
-			if (area.type === "wiki") {
-				onToggleWikiLinks?.();
-			} else {
-				onToggleSemanticEdges?.();
-			}
+			onToggleWikiLinks?.();
 			render();
 			return;
 		}
@@ -1386,7 +1284,6 @@ function setupSimulation(data: GraphData) {
 
 	// Pre-split by edge type to avoid filtering every render frame
 	wikiSimLinks = simLinks.filter((l) => l.type === "wiki");
-	semanticSimLinks = simLinks.filter((l) => l.type === "semantic");
 
 	// Build adjacency map for O(1) hover-dimming lookups
 	adjacency = new Map();

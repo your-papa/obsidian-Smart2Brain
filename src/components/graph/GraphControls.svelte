@@ -101,10 +101,9 @@ let graphStats = $derived.by(() => {
 	const totalDegree = degrees.reduce((a, b) => a + b, 0);
 	const avgDegree = totalDegree / nodes.length;
 	const maxDegree = Math.max(...degrees);
-	const orphans = degrees.filter((d) => d === 0).length;
+	const unlinkedNotes = degrees.filter((d) => d === 0).length;
 
 	const wikiEdges = edges.filter((e) => e.type === "wiki").length;
-	const semanticEdges = edges.filter((e) => e.type === "semantic").length;
 
 	// Graph density: ratio of actual edges to max possible edges
 	const maxEdges = (nodes.length * (nodes.length - 1)) / 2;
@@ -156,9 +155,8 @@ let graphStats = $derived.by(() => {
 	return {
 		avgDegree,
 		maxDegree,
-		orphans,
+		unlinkedNotes,
 		wikiEdges,
-		semanticEdges,
 		density,
 		clusterCount: clusters.size,
 		avgPath,
@@ -172,9 +170,7 @@ let hasActiveFilters = $derived(selectedFolders.length > 0 || selectedTags.lengt
 let sectionOpen: Record<string, boolean> = $state({
 	colorGroups: false,
 	projection: true,
-	edges: true,
 	layout: false,
-	display: false,
 });
 
 // Track "dirty" projection/clustering settings that need an explicit Apply.
@@ -222,10 +218,6 @@ function handleProjectionChange(val: ProjectionMethod) {
 	onSettingsChange({ projectionMethod: val });
 }
 
-function handleDiscoveryModeChange(checked: boolean) {
-	onSettingsChange({ discoveryMode: checked });
-}
-
 function handleUmapNeighborsChange(val: number) {
 	onSettingsChange({ umapNeighbors: val });
 }
@@ -250,10 +242,6 @@ function handleMinClusterSizeChange(val: number) {
 	onSettingsChange({ minClusterSize: val });
 }
 
-function handleShowOrphansChange(checked: boolean) {
-	onSettingsChange({ showOrphans: checked });
-}
-
 function handleLabelZoomChange(val: number) {
 	onSettingsChange({ labelZoomThreshold: val / 10 });
 }
@@ -264,14 +252,6 @@ function handleLinkDistanceChange(val: number) {
 
 function handleChargeStrengthChange(val: number) {
 	onSettingsChange({ chargeStrength: -val });
-}
-
-function handleThresholdChange(val: number) {
-	onSettingsChange({ similarityThreshold: val / 100 });
-}
-
-function handleNeighborsChange(val: number) {
-	onSettingsChange({ semanticNeighbors: val });
 }
 
 function handleFolderSelect(folder: string) {
@@ -407,16 +387,12 @@ function updateColorGroupColor(index: number, color: string) {
         <span class="info-label">Wiki links</span>
         <span class="info-value">{graphStats.wikiEdges}</span>
       {/if}
-      {#if graphStats.semanticEdges > 0}
-        <span class="info-label">Semantic edges</span>
-        <span class="info-value">{graphStats.semanticEdges}</span>
-      {/if}
       <span class="info-label">Avg connections</span>
       <span class="info-value">{graphStats.avgDegree.toFixed(1)}</span>
       <span class="info-label">Max connections</span>
       <span class="info-value">{graphStats.maxDegree}</span>
-      <span class="info-label">Orphan nodes</span>
-      <span class="info-value">{graphStats.orphans}</span>
+      <span class="info-label">Unlinked notes</span>
+      <span class="info-value">{graphStats.unlinkedNotes}</span>
       <span class="info-label">Density</span>
       <span class="info-value">{(graphStats.density * 100).toFixed(2)}%</span>
       {#if graphStats.avgPath > 0}
@@ -699,52 +675,6 @@ function updateColorGroupColor(index: number, color: string) {
             </div>
           {/if}
         {/if}
-
-        <!-- Edges & Connectivity (smart mode only) -->
-        <button
-          type="button"
-          class="section-header"
-          onclick={() => (sectionOpen.edges = !sectionOpen.edges)}
-        >
-          <span>Edges & Connectivity</span>
-          <svg
-            class="section-chevron"
-            class:open={sectionOpen.edges}
-            xmlns="http://www.w3.org/2000/svg"
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
-          >
-        </button>
-
-        {#if sectionOpen.edges}
-          <SettingContainer name="Similarity" desc="Minimum similarity for edges (%)">
-            <RangeSlider
-              value={Math.round(settings.similarityThreshold * 100)}
-              min={10}
-              max={90}
-              step={5}
-              showValue={true}
-              oncommit={handleThresholdChange}
-            />
-          </SettingContainer>
-
-          <SettingContainer name="Neighbors" desc="Max neighbors per node">
-            <RangeSlider
-              value={settings.semanticNeighbors}
-              min={1}
-              max={15}
-              step={1}
-              showValue={true}
-              oncommit={handleNeighborsChange}
-            />
-          </SettingContainer>
-        {/if}
       {/if}
 
       <!-- Layout -->
@@ -801,38 +731,6 @@ function updateColorGroupColor(index: number, color: string) {
             showValue={true}
             oncommit={handleLabelZoomChange}
           />
-        </SettingContainer>
-      {/if}
-
-      <!-- Display -->
-      <button
-        type="button"
-        class="section-header"
-        onclick={() => (sectionOpen.display = !sectionOpen.display)}
-      >
-        <span>Display</span>
-        <svg
-          class="section-chevron"
-          class:open={sectionOpen.display}
-          xmlns="http://www.w3.org/2000/svg"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
-        >
-      </button>
-
-      {#if sectionOpen.display}
-        <SettingContainer name="Orphans" desc="Show unlinked nodes">
-          <Toggle checked={settings.showOrphans} onchange={handleShowOrphansChange} />
-        </SettingContainer>
-
-        <SettingContainer name="Discovery" desc="Highlight semantic-only nodes">
-          <Toggle checked={settings.discoveryMode} onchange={handleDiscoveryModeChange} />
         </SettingContainer>
       {/if}
     </div>
