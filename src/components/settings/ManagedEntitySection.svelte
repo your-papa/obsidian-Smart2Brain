@@ -1,32 +1,32 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
-  import SettingGroup from "./SettingGroup.svelte";
+import type { Snippet } from "svelte";
+import SettingGroup from "./SettingGroup.svelte";
 
-  interface Props {
-    heading: string;
-    headingDesc?: string;
-    description?: string;
-    emptyMessage?: string;
-    hasItems?: boolean;
-    actionsLayout?: "control" | "full-width";
-    actions?: Snippet;
-    children?: Snippet;
-    class?: string;
-  }
+interface Props {
+	heading: string;
+	headingDesc?: string;
+	description?: string;
+	emptyMessage?: string;
+	hasItems?: boolean;
+	actionsLayout?: "control" | "full-width";
+	actions?: Snippet;
+	children?: Snippet;
+	class?: string;
+}
 
-  let {
-    heading,
-    headingDesc,
-    description,
-    emptyMessage,
-    hasItems,
-    actionsLayout = "control",
-    actions,
-    children,
-    class: className = "",
-  }: Props = $props();
+let {
+	heading,
+	headingDesc,
+	description,
+	emptyMessage,
+	hasItems,
+	actionsLayout = "control",
+	actions,
+	children,
+	class: className = "",
+}: Props = $props();
 
-  const shouldRenderChildren = $derived(hasItems ?? !!children);
+const shouldRenderChildren = $derived(hasItems ?? !!children);
 </script>
 
 <SettingGroup {heading} {headingDesc} class={className}>

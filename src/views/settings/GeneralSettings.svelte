@@ -1,26 +1,26 @@
 <script lang="ts">
-  import ManagedEntitySection from "../../components/settings/ManagedEntitySection.svelte";
-  import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
-  import ProviderItem from "../../components/settings/ProviderItem.svelte";
-  import SettingGroup from "../../components/settings/SettingGroup.svelte";
-  import SettingItem from "../../components/settings/SettingItem.svelte";
-  import Button from "../../components/ui/Button.svelte";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { icon } from "../../utils/utils";
-  import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
+import ManagedEntitySection from "../../components/settings/ManagedEntitySection.svelte";
+import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
+import ProviderItem from "../../components/settings/ProviderItem.svelte";
+import SettingGroup from "../../components/settings/SettingGroup.svelte";
+import SettingItem from "../../components/settings/SettingItem.svelte";
+import Button from "../../components/ui/Button.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { icon } from "../../utils/utils";
+import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
 
-  const pluginData = getData();
-  const plugin = getPlugin();
+const pluginData = getData();
+const plugin = getPlugin();
 
-  const privacyListModal = new PrivacyListModal(plugin.app);
+const privacyListModal = new PrivacyListModal(plugin.app);
 
-  // Provider management state
-  let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
+// Provider management state
+let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
 
-  function handleOpenProviderSetup() {
-    new ProviderSetupModal(plugin, { templateId: "openai-compatible" }).open();
-  }
+function handleOpenProviderSetup() {
+	new ProviderSetupModal(plugin, { templateId: "openai-compatible" }).open();
+}
 </script>
 
 <!-- Providers -->

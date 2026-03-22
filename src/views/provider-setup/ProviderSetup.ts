@@ -26,16 +26,24 @@ export class ProviderSetupModal extends Modal {
 		this.selectedProvider = typeof target === "string" ? target : (target.selectedProvider ?? crypto.randomUUID());
 		this.templateId = typeof target === "string" ? undefined : target.templateId;
 		this.createdDraft = typeof target !== "string" && !target.selectedProvider;
+		this.refreshTitle();
+	}
 
+	private resolveDisplayName(): string {
+		return (
+			this.plugin.pluginData.getProviderMeta(this.selectedProvider)?.displayName ??
+			(this.templateId ? getProviderTemplate(this.templateId)?.displayName : this.selectedProvider) ??
+			this.selectedProvider
+		);
+	}
+
+	refreshTitle(displayName = this.resolveDisplayName()) {
 		if (this.createdDraft) {
 			this.setTitle("Setup Provider");
-		} else {
-			const displayName =
-				plugin.pluginData.getProviderMeta(this.selectedProvider)?.displayName ??
-				(this.templateId ? getProviderTemplate(this.templateId)?.displayName : this.selectedProvider) ??
-				this.selectedProvider;
-			this.setTitle(`Setup ${displayName}`);
+			return;
 		}
+
+		this.setTitle(`Edit ${displayName}`);
 	}
 
 	onOpen() {
