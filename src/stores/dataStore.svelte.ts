@@ -1045,7 +1045,6 @@ export class PluginDataStore {
 	/**
 	 * Set or create the embedding index for search or graph.
 	 * If no index exists for the given provider:model, creates one.
-	 * If the other feature has no index set, auto-shares this one.
 	 */
 	setEmbedIndex(purpose: "search" | "graph", provider: string, model: string): void {
 		const indexId = `${provider}:${model}`;
@@ -1066,16 +1065,8 @@ export class PluginDataStore {
 		// Set the index for the requested purpose
 		if (purpose === "search") {
 			this.#data.searchEmbedIndex = indexId;
-			// Auto-share: if graph has no index, use this one
-			if (!this.#data.graphEmbedIndex) {
-				this.#data.graphEmbedIndex = indexId;
-			}
 		} else {
 			this.#data.graphEmbedIndex = indexId;
-			// Auto-share: if search has no index, use this one
-			if (!this.#data.searchEmbedIndex) {
-				this.#data.searchEmbedIndex = indexId;
-			}
 		}
 
 		// Keep legacy field in sync for backward compat

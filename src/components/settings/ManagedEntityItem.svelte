@@ -1,56 +1,56 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
+import type { Snippet } from "svelte";
 
-  interface Props {
-    name: string;
-    desc?: string;
-    meta?: string;
-    selected?: boolean;
-    disabled?: boolean;
-    clickable?: boolean;
-    interactiveRole?: "button" | "radio";
-    class?: string;
-    onclick?: (event: MouseEvent) => void;
-    leading?: Snippet;
-    badges?: Snippet;
-    children?: Snippet;
-    trailing?: Snippet;
-    actions?: Snippet;
-  }
+interface Props {
+	name: string;
+	desc?: string;
+	meta?: string;
+	selected?: boolean;
+	disabled?: boolean;
+	clickable?: boolean;
+	interactiveRole?: "button" | "radio";
+	class?: string;
+	onclick?: (event: MouseEvent) => void;
+	leading?: Snippet;
+	badges?: Snippet;
+	children?: Snippet;
+	trailing?: Snippet;
+	actions?: Snippet;
+}
 
-  let {
-    name,
-    desc,
-    meta,
-    selected = false,
-    disabled = false,
-    clickable = false,
-    interactiveRole = "button",
-    class: className = "",
-    onclick,
-    leading,
-    badges,
-    children,
-    trailing,
-    actions,
-  }: Props = $props();
+let {
+	name,
+	desc,
+	meta,
+	selected = false,
+	disabled = false,
+	clickable = false,
+	interactiveRole = "button",
+	class: className = "",
+	onclick,
+	leading,
+	badges,
+	children,
+	trailing,
+	actions,
+}: Props = $props();
 
-  function handleClick(event: MouseEvent) {
-    if (disabled || !clickable) {
-      return;
-    }
-    onclick?.(event);
-  }
+function handleClick(event: MouseEvent) {
+	if (disabled || !clickable) {
+		return;
+	}
+	onclick?.(event);
+}
 
-  function handleKeyDown(event: KeyboardEvent) {
-    if (!clickable || disabled) {
-      return;
-    }
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      onclick?.(event as unknown as MouseEvent);
-    }
-  }
+function handleKeyDown(event: KeyboardEvent) {
+	if (!clickable || disabled) {
+		return;
+	}
+	if (event.key === "Enter" || event.key === " ") {
+		event.preventDefault();
+		onclick?.(event as unknown as MouseEvent);
+	}
+}
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->

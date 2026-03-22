@@ -1,27 +1,27 @@
 <script lang="ts">
-  import Button from "../ui/Button.svelte";
-  import SettingContainer from "../settings/SettingContainer.svelte";
-  import Toggle from "../ui/Toggle.svelte";
-  import type { SearchDisplaySettingsModal } from "./SearchDisplaySettingsModal";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { icon } from "../../utils/utils";
+import Button from "../ui/Button.svelte";
+import SettingContainer from "../settings/SettingContainer.svelte";
+import Toggle from "../ui/Toggle.svelte";
+import type { SearchDisplaySettingsModal } from "./SearchDisplaySettingsModal";
+import { getData } from "../../stores/dataStore.svelte";
+import { icon } from "../../utils/utils";
 
-  interface Props {
-    modal: SearchDisplaySettingsModal;
-  }
+interface Props {
+	modal: SearchDisplaySettingsModal;
+}
 
-  const pluginData = getData();
+const pluginData = getData();
 
-  let { modal }: Props = $props();
+let { modal }: Props = $props();
 
-  const enabledCount = $derived.by(() => {
-    let count = 0;
-    if (pluginData.searchShowPath) count += 1;
-    if (pluginData.searchShowTags) count += 1;
-    if (pluginData.searchShowMatchBadges) count += 1;
-    if (pluginData.searchShowMatchContext) count += 1;
-    return count;
-  });
+const enabledCount = $derived.by(() => {
+	let count = 0;
+	if (pluginData.searchShowPath) count += 1;
+	if (pluginData.searchShowTags) count += 1;
+	if (pluginData.searchShowMatchBadges) count += 1;
+	if (pluginData.searchShowMatchContext) count += 1;
+	return count;
+});
 </script>
 
 <div class="modal-title">Search Result Details</div>

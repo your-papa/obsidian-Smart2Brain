@@ -1,57 +1,57 @@
 <script lang="ts">
-  import { Notice } from "obsidian";
-  import type { Component } from "svelte";
-  import { createProviderStateQuery, invalidateProviderState } from "../../lib/query";
-  import { type LogoProps, getProviderDefinition } from "../../providers/index";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import ManagedEntityItem from "./ManagedEntityItem.svelte";
-  import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
-  import CircularLoader from "../ui/CircularLoader.svelte";
-  import IconButton from "../ui/IconButton.svelte";
-  import { icon } from "../../utils/utils";
-  import { ProviderSetupModal } from "../../views/provider-setup/ProviderSetup";
+import { Notice } from "obsidian";
+import type { Component } from "svelte";
+import { createProviderStateQuery, invalidateProviderState } from "../../lib/query";
+import { type LogoProps, getProviderDefinition } from "../../providers/index";
+import { getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import ManagedEntityItem from "./ManagedEntityItem.svelte";
+import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
+import CircularLoader from "../ui/CircularLoader.svelte";
+import IconButton from "../ui/IconButton.svelte";
+import { icon } from "../../utils/utils";
+import { ProviderSetupModal } from "../../views/provider-setup/ProviderSetup";
 
-  interface Props {
-    provider: string;
-  }
+interface Props {
+	provider: string;
+}
 
-  const { provider }: Props = $props();
+const { provider }: Props = $props();
 
-  const data = getData();
-  const plugin = getPlugin();
-  let providerDefinition = $derived(getProviderDefinition(provider, data.getAllProviderMeta()));
+const data = getData();
+const plugin = getPlugin();
+let providerDefinition = $derived(getProviderDefinition(provider, data.getAllProviderMeta()));
 
-  const query = createProviderStateQuery(() => provider);
-  let isCheckingAuth = $derived(query.isPending || query.isFetching);
-  let displayName = $derived(providerDefinition?.displayName ?? provider);
-  let isTrusted = $derived(data.isProviderTrusted(provider));
-  let authFailureMessage = $derived(
-    query.data && !query.data.auth.success ? query.data.auth.message : "Authentication failed",
-  );
-  let Logo: Component<LogoProps> = $derived.by(() => {
-    if (providerDefinition?.logo) {
-      return providerDefinition.logo;
-    }
-    return GenericAIIcon;
-  });
+const query = createProviderStateQuery(() => provider);
+let isCheckingAuth = $derived(query.isPending || query.isFetching);
+let displayName = $derived(providerDefinition?.displayName ?? provider);
+let isTrusted = $derived(data.isProviderTrusted(provider));
+let authFailureMessage = $derived(
+	query.data && !query.data.auth.success ? query.data.auth.message : "Authentication failed",
+);
+let Logo: Component<LogoProps> = $derived.by(() => {
+	if (providerDefinition?.logo) {
+		return providerDefinition.logo;
+	}
+	return GenericAIIcon;
+});
 
-  function refetch() {
-    invalidateProviderState(provider);
-  }
+function refetch() {
+	invalidateProviderState(provider);
+}
 
-  function handleOpenSettings() {
-    new ProviderSetupModal(plugin, provider).open();
-  }
+function handleOpenSettings() {
+	new ProviderSetupModal(plugin, provider).open();
+}
 
-  async function handleRemoveProvider() {
-    try {
-      await data.deleteProvider(provider);
-      invalidateProviderState(provider);
-    } catch (error) {
-      new Notice(error instanceof Error ? error.message : "Failed to remove provider");
-    }
-  }
+async function handleRemoveProvider() {
+	try {
+		await data.deleteProvider(provider);
+		invalidateProviderState(provider);
+	} catch (error) {
+		new Notice(error instanceof Error ? error.message : "Failed to remove provider");
+	}
+}
 </script>
 
 <ManagedEntityItem name={displayName}>

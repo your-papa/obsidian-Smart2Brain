@@ -1,16 +1,16 @@
 <script lang="ts">
-  import { Tabs } from "bits-ui";
-  import { consumePendingSettingsTab } from "../../stores/state.svelte";
-  import { icon } from "../../utils/utils";
-  import AgentsSettings from "./AgentsSettings.svelte";
-  import GeneralSettings from "./GeneralSettings.svelte";
-  import GraphSettings from "./GraphSettings.svelte";
-  import SearchSettings from "./SearchSettings.svelte";
-  import TroubleshootingSettings from "./TroubleshootingSettings.svelte";
+import { Tabs } from "bits-ui";
+import { consumePendingSettingsTab } from "../../stores/state.svelte";
+import { icon } from "../../utils/utils";
+import AgentsSettings from "./AgentsSettings.svelte";
+import GeneralSettings from "./GeneralSettings.svelte";
+import GraphSettings from "./GraphSettings.svelte";
+import SearchSettings from "./SearchSettings.svelte";
+import TroubleshootingSettings from "./TroubleshootingSettings.svelte";
 
-  // Check if there's a pending tab request (e.g., from "Manage Agents" button)
-  const pendingTab = consumePendingSettingsTab();
-  let activeTab = $state(pendingTab ?? "general");
+// Check if there's a pending tab request (e.g., from "Manage Agents" button)
+const pendingTab = consumePendingSettingsTab();
+let activeTab = $state(pendingTab ?? "general");
 </script>
 
 <Tabs.Root bind:value={activeTab}>

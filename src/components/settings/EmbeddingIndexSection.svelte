@@ -166,7 +166,7 @@
     const users = usedBy(targetIndexId);
     if (users.length === 2) return "Shared by Search and Graph";
     if (users.length === 1) return `Used by ${users[0]} only`;
-    return "Not assigned to Search or Graph";
+    return "";
   }
 
   function describeCurrentSelection(): string {
@@ -221,7 +221,13 @@
           class="embedding-index-option"
           name={entry.model}
           desc={`${entry.documentCount} notes indexed`}
-          meta={`${entryProviderDef?.displayName ?? entry.provider} · ${formatDate(entry.lastBuiltAt)} · ${describeUsage(entry.id)}`}
+          meta={[
+            entryProviderDef?.displayName ?? entry.provider,
+            formatDate(entry.lastBuiltAt),
+            describeUsage(entry.id),
+          ]
+            .filter(Boolean)
+            .join(" · ")}
           {selected}
           clickable
           interactiveRole="radio"

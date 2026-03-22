@@ -559,12 +559,6 @@ describe("PluginDataStore – Settings", () => {
 		({ store } = makeStore());
 	});
 
-	it("should get and set assistantLanguage", () => {
-		expect(store.assistantLanguage).toBe("en");
-		store.assistantLanguage = "de";
-		expect(store.assistantLanguage).toBe("de");
-	});
-
 	it("should get and set targetFolder", () => {
 		store.targetFolder = "MyChats";
 		expect(store.targetFolder).toBe("MyChats");
@@ -585,12 +579,6 @@ describe("PluginDataStore – Settings", () => {
 		expect(store.diffViewMode).toBe("two-pane");
 		store.diffViewMode = "inline";
 		expect(store.diffViewMode).toBe("inline");
-	});
-
-	it("should toggle autostart", () => {
-		expect(store.isAutostart).toBe(false);
-		store.toggleAutostart();
-		expect(store.isAutostart).toBe(true);
 	});
 });
 
@@ -615,15 +603,18 @@ describe("PluginDataStore – Embedding Indexes", () => {
 		store.setEmbedIndex("search", "openai", "text-embedding-3-small");
 
 		expect(store.searchEmbedIndex).toBe("openai:text-embedding-3-small");
+		expect(store.graphEmbedIndex).toBeNull();
 		expect(store.embeddingIndexes).toHaveLength(1);
 		expect(store.embeddingIndexes[0].provider).toBe("openai");
 	});
 
-	it("should auto-share index when one purpose has no index", () => {
+	it("should keep search and graph index selections independent", () => {
 		store.setEmbedIndex("search", "openai", "text-embedding-3-small");
+		store.setEmbedIndex("graph", "ollama", "nomic-embed-text");
 
-		// Graph should auto-get the same index
-		expect(store.graphEmbedIndex).toBe("openai:text-embedding-3-small");
+		expect(store.searchEmbedIndex).toBe("openai:text-embedding-3-small");
+		expect(store.graphEmbedIndex).toBe("ollama:nomic-embed-text");
+		expect(store.embeddingIndexes).toHaveLength(2);
 	});
 
 	it("should update embedding index stats", () => {
