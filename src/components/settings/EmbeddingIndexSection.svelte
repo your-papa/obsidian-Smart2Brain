@@ -32,6 +32,7 @@
     purpose === "search" ? pluginData.searchEmbedIndex : pluginData.graphEmbedIndex,
   );
   const indexConfig = $derived(indexId ? pluginData.getEmbeddingIndex(indexId) : null);
+  let storageSizes = $state<Record<string, number>>({});
   // Index progress
   let indexProgress = $state<IndexingProgress>({
     isIndexing: false,
@@ -47,6 +48,21 @@
   const indexes = $derived(pluginData.embeddingIndexes);
 
   let unsubscribeProgress: (() => void) | null = null;
+
+  async function refreshStorageSizes() {
+    if (!isVectorStoreInitialized()) {
+      storageSizes = {};
+      return;
+    }
+
+    const service = getVectorStoreService();
+    const nextStorageSizes: Record<string, number> = {};
+    for (const entry of indexes) {
+      nextStorageSizes[entry.id] = await service.getStorageSize(entry.id);
+    }
+
+    storageSizes = nextStorageSizes;
+  }
 
   function subscribeToIndex(id: string | null) {
     unsubscribeProgress?.();
@@ -74,6 +90,11 @@
   $effect(() => {
     const id = indexId ?? null;
     untrack(() => subscribeToIndex(id));
+  });
+
+  $effect(() => {
+    indexes;
+    void untrack(() => refreshStorageSizes());
   });
 
   onDestroy(() => {
@@ -155,6 +176,14 @@
     return new Date(timestamp).toLocaleDateString();
   }
 
+  function formatSize(bytes: number): string {
+    if (bytes === 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    const value = bytes / 1024 ** i;
+    return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+  }
+
   function usedBy(targetIndexId: string): string[] {
     const purposes: string[] = [];
     if (pluginData.searchEmbedIndex === targetIndexId) purposes.push("Search");
@@ -220,7 +249,12 @@
         <ManagedEntityItem
           class="embedding-index-option"
           name={entry.model}
-          desc={`${entry.documentCount} notes indexed`}
+          desc={[
+            `${entry.documentCount} notes indexed`,
+            storageSizes[entry.id] !== undefined ? formatSize(storageSizes[entry.id]) : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
           meta={[
             entryProviderDef?.displayName ?? entry.provider,
             formatDate(entry.lastBuiltAt),

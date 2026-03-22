@@ -57,7 +57,7 @@
       name={index.model}
       desc={[
         `${index.documentCount} notes`,
-        storageSizes[index.id] ? formatSize(storageSizes[index.id]) : null,
+        storageSizes[index.id] !== undefined ? formatSize(storageSizes[index.id]) : null,
         formatDate(index.lastBuiltAt),
         purposes.length > 0 ? `Used by: ${purposes.join(", ")}` : null,
       ]
