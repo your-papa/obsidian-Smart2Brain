@@ -1,19 +1,18 @@
 /**
  * Graph Data Builder
  *
- * Constructs a unified semantic graph from document embeddings.
+ * Constructs a semantic map from document embeddings.
  * Node positions are projected from high-dimensional embedding space into 2D.
  * Clusters are assigned via K-Means — decoupled from edge/layout rebuilds so
- * users can change connectivity settings without losing their cluster assignments.
- * Wiki link edges can be optionally overlaid alongside semantic similarity edges,
- * rendered with distinct visual styling.
+ * users can change projection and clustering settings without losing their
+ * cluster assignments. Wiki link edges can be optionally overlaid on top of
+ * the projected map as authored structure.
  */
 
 import type { App, TFile } from "obsidian";
 import { getAllTags } from "obsidian";
 
 import type { DocumentVector } from "../../vectorstore/types";
-import { cosineSimilarity } from "../../vectorstore/similarity";
 import {
 	kMeansAsync,
 	suggestKAsync,
@@ -96,10 +95,6 @@ export interface GraphStructureResult {
 // Helper functions (extracted to reduce cognitive complexity)
 // ============================================================================
 
-interface SimilarityCache {
-	get(a: number, b: number): number;
-}
-
 function filterDocuments(app: App, documents: DocumentVector[], filter?: GraphFilter): DocumentVector[] {
 	if (!filter?.folders?.length && !filter?.tags?.length) return documents;
 	return documents.filter((doc) => {
@@ -108,87 +103,53 @@ function filterDocuments(app: App, documents: DocumentVector[], filter?: GraphFi
 		return passesFilter(app, file as TFile, filter);
 	});
 }
-
-function buildSimilarityCache(vectors: Float32Array[], n: number): SimilarityCache {
-	const triSize = (n * (n - 1)) / 2;
-	const cache = new Float32Array(triSize);
-	const triIdx = (lo: number, hi: number): number => (lo * (2 * n - lo - 1)) / 2 + (hi - lo - 1);
-	for (let i = 0; i < n; i++) {
-		for (let j = i + 1; j < n; j++) {
-			cache[triIdx(i, j)] = cosineSimilarity(vectors[i], vectors[j]);
-		}
-	}
-	return {
-		get: (a: number, b: number): number => (a < b ? cache[triIdx(a, b)] : cache[triIdx(b, a)]),
-	};
-}
-
 function edgeKey(a: string, b: string): string {
 	return a < b ? `${a}\0${b}` : `${b}\0${a}`;
 }
 
-function getTopNeighbors(
-	nodeIdx: number,
-	simCache: SimilarityCache,
-	n: number,
-	threshold: number,
-	maxNeighbors: number,
-	startIdx = 0,
-	endIdx = n,
-): { index: number; score: number }[] {
-	const similarities: { index: number; score: number }[] = [];
-	for (let j = startIdx; j < endIdx; j++) {
-		if (j === nodeIdx) continue;
-		const score = simCache.get(nodeIdx, j);
-		if (score >= threshold) {
-			similarities.push({ index: j, score });
-		}
-	}
-	similarities.sort((a, b) => b.score - a.score);
-	return similarities.slice(0, maxNeighbors);
-}
-
-function buildSemanticEdges(
-	filtered: DocumentVector[],
-	simCache: SimilarityCache,
-	n: number,
-	settings: Pick<SmartGraphSettings, "semanticNeighbors" | "similarityThreshold">,
-): GraphEdge[] {
+function buildWikiEdges(app: App, filteredPathSet: Set<string>): GraphEdge[] {
 	const edges: GraphEdge[] = [];
-	const neighborCount = Math.min(settings.semanticNeighbors, n - 1);
-	const edgeSet = new Set<string>();
+	const wikiEdgeSet = new Set<string>();
 
-	// Forward pass
-	for (let i = 0; i < n; i++) {
-		for (const neighbor of getTopNeighbors(i, simCache, n, settings.similarityThreshold, neighborCount)) {
-			if (i >= neighbor.index) continue;
-			const key = edgeKey(filtered[i].path, filtered[neighbor.index].path);
-			edgeSet.add(key);
-			edges.push({
-				source: filtered[i].path,
-				target: filtered[neighbor.index].path,
-				weight: neighbor.score,
-				type: "semantic",
-			});
-		}
-	}
-
-	// Reverse pass
-	for (let j = 0; j < n; j++) {
-		for (const neighbor of getTopNeighbors(j, simCache, n, settings.similarityThreshold, neighborCount, 0, j)) {
-			const key = edgeKey(filtered[neighbor.index].path, filtered[j].path);
-			if (edgeSet.has(key)) continue;
-			edgeSet.add(key);
-			edges.push({
-				source: filtered[neighbor.index].path,
-				target: filtered[j].path,
-				weight: neighbor.score,
-				type: "semantic",
-			});
+	for (const [sourcePath, targets] of Object.entries(app.metadataCache.resolvedLinks)) {
+		if (!filteredPathSet.has(sourcePath)) continue;
+		for (const [targetPath, count] of Object.entries(targets)) {
+			if (!filteredPathSet.has(targetPath) || sourcePath === targetPath) continue;
+			const ek = edgeKey(sourcePath, targetPath);
+			if (wikiEdgeSet.has(ek)) continue;
+			wikiEdgeSet.add(ek);
+			edges.push({ source: sourcePath, target: targetPath, weight: count, type: "wiki" });
 		}
 	}
 
 	return edges;
+}
+
+function buildDegreeMap(edges: GraphEdge[]): Map<string, number> {
+	const degreeMap = new Map<string, number>();
+	for (const edge of edges) {
+		degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
+		degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
+	}
+	return degreeMap;
+}
+
+function createWikiNodes(filteredFiles: TFile[], degreeMap: Map<string, number>): GraphNode[] {
+	const nodes: GraphNode[] = [];
+	for (const file of filteredFiles) {
+		const degree = degreeMap.get(file.path) ?? 0;
+		const label = file.path.replace(/\.md$/, "").split("/").pop() ?? file.path;
+		nodes.push({
+			id: file.path,
+			path: file.path,
+			label,
+			x: 0,
+			y: 0,
+			degree,
+			highlighted: false,
+		});
+	}
+	return nodes;
 }
 
 function mergeWikiEdge(edges: GraphEdge[], existingEdgeSet: Set<string>, wikiEdge: GraphEdge, ek: string): void {
@@ -225,48 +186,27 @@ function overlayWikiEdges(app: App, edges: GraphEdge[], filteredPathSet: Set<str
 	}
 }
 
-function computeDegreeAndDiscovery(
-	edges: GraphEdge[],
-	settings: Pick<SmartGraphSettings, "showWikiLinks" | "showSemanticEdges">,
-): { degreeMap: Map<string, number>; hasSemanticEdge: Set<string>; hasWikiEdge: Set<string> } {
+function computeWikiDegree(edges: GraphEdge[]): Map<string, number> {
 	const degreeMap = new Map<string, number>();
-	const hasSemanticEdge = new Set<string>();
-	const hasWikiEdge = new Set<string>();
 
 	for (const edge of edges) {
-		const isVisibleWiki = edge.type === "wiki" && settings.showWikiLinks;
-		const isVisibleSemantic = edge.type === "semantic" && settings.showSemanticEdges;
-
-		if (isVisibleWiki || isVisibleSemantic) {
-			degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
-			degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
-		}
-
-		if (isVisibleSemantic) {
-			hasSemanticEdge.add(edge.source);
-			hasSemanticEdge.add(edge.target);
-		} else if (isVisibleWiki) {
-			hasWikiEdge.add(edge.source);
-			hasWikiEdge.add(edge.target);
-		}
+		if (edge.type !== "wiki") continue;
+		degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
+		degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
 	}
 
-	return { degreeMap, hasSemanticEdge, hasWikiEdge };
+	return degreeMap;
 }
 
 function createGraphNodes(
 	filtered: DocumentVector[],
 	positions: { x: number; y: number }[],
 	degreeMap: Map<string, number>,
-	hasSemanticEdge: Set<string>,
-	hasWikiEdge: Set<string>,
-	settings: Pick<SmartGraphSettings, "showOrphans">,
 ): GraphNode[] {
 	const nodes: GraphNode[] = [];
 	for (let i = 0; i < filtered.length; i++) {
 		const doc = filtered[i];
 		const degree = degreeMap.get(doc.path) ?? 0;
-		if (!settings.showOrphans && degree === 0) continue;
 		const label = doc.path.replace(/\.md$/, "").split("/").pop() ?? doc.path;
 		nodes.push({
 			id: doc.path,
@@ -276,7 +216,6 @@ function createGraphNodes(
 			y: positions[i].y,
 			degree,
 			highlighted: false,
-			discoverable: hasSemanticEdge.has(doc.path) && !hasWikiEdge.has(doc.path),
 		});
 	}
 	return nodes;
@@ -290,17 +229,7 @@ function createGraphNodes(
 export async function buildGraphStructure(
 	app: App,
 	documents: DocumentVector[],
-	settings: Pick<
-		SmartGraphSettings,
-		| "semanticNeighbors"
-		| "similarityThreshold"
-		| "showOrphans"
-		| "projectionMethod"
-		| "umapNeighbors"
-		| "umapMinDist"
-		| "showWikiLinks"
-		| "showSemanticEdges"
-	>,
+	settings: Pick<SmartGraphSettings, "projectionMethod" | "umapNeighbors" | "umapMinDist" | "showWikiLinks">,
 	filter?: GraphFilter,
 ): Promise<GraphStructureResult> {
 	// Filter documents by folder/tag if specified
@@ -312,18 +241,15 @@ export async function buildGraphStructure(
 
 	// Extract vectors
 	const vectors = filtered.map((doc) => doc.vector);
-	const n = filtered.length;
-
-	// Build similarity cache and edge list
-	const simCache = buildSimilarityCache(vectors, n);
-	const edges = buildSemanticEdges(filtered, simCache, n, settings);
+	const edges: GraphEdge[] = [];
 
 	// Overlay wiki link edges
 	const filteredPathSet = new Set(filtered.map((d) => d.path));
 	overlayWikiEdges(app, edges, filteredPathSet);
 
-	// Compute degree and discovery info
-	const { degreeMap, hasSemanticEdge, hasWikiEdge } = computeDegreeAndDiscovery(edges, settings);
+	// Compute wiki connectivity independent of overlay visibility so the smart
+	// map structure stays stable even when users hide wiki links.
+	const degreeMap = computeWikiDegree(edges);
 
 	// Reduce dimensionality for clustering and projection performance.
 	const reducedVectors = await reduceDimensionsAsync(vectors, settings.projectionMethod, undefined, {
@@ -338,11 +264,13 @@ export async function buildGraphStructure(
 	});
 
 	// Create nodes
-	const nodes = createGraphNodes(filtered, positions, degreeMap, hasSemanticEdge, hasWikiEdge, settings);
+	const nodes = createGraphNodes(filtered, positions, degreeMap);
 
 	// Filter edges to only include edges with valid nodes
 	const nodeIds = new Set(nodes.map((n) => n.id));
-	const filteredEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
+	const filteredEdges = settings.showWikiLinks
+		? edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+		: [];
 
 	return {
 		graphData: { nodes, edges: filteredEdges },
@@ -446,22 +374,17 @@ export function applyClusterMap(
 // Wiki-only graph (initial Obsidian-like view)
 // ============================================================================
 
-/** Result of building a wiki-link-only graph (no semantic edges / projection). */
+/** Result of building a wiki-link-only graph (no projection). */
 export interface WikiGraphResult {
 	graphData: GraphData;
 	filteredPaths: string[];
 }
 
 /**
- * Build a graph using only Obsidian wiki-link edges (no semantic edges,
- * no dimensionality reduction, no projection). Nodes start at (0,0) and
+ * Build a graph using only Obsidian wiki-link edges. Nodes start at (0,0) and
  * are positioned by d3-force.
  */
-export function buildWikiGraph(
-	app: App,
-	settings: Pick<SmartGraphSettings, "showOrphans">,
-	filter?: GraphFilter,
-): WikiGraphResult {
+export function buildWikiGraph(app: App, filter?: GraphFilter): WikiGraphResult {
 	let filteredFiles = app.vault.getMarkdownFiles();
 	if (filter?.folders?.length || filter?.tags?.length) {
 		filteredFiles = filteredFiles.filter((file) => passesFilter(app, file, filter));
@@ -473,48 +396,9 @@ export function buildWikiGraph(
 
 	const filteredPaths = filteredFiles.map((file) => file.path);
 	const filteredPathSet = new Set(filteredPaths);
-
-	// Build wiki edges from Obsidian's resolved links
-	const edges: GraphEdge[] = [];
-	const resolvedLinks = app.metadataCache.resolvedLinks;
-	const wikiEdgeSet = new Set<string>();
-
-	for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
-		if (!filteredPathSet.has(sourcePath)) continue;
-		for (const [targetPath, count] of Object.entries(targets)) {
-			if (!filteredPathSet.has(targetPath)) continue;
-			if (sourcePath === targetPath) continue;
-			const ek = sourcePath < targetPath ? `${sourcePath}\0${targetPath}` : `${targetPath}\0${sourcePath}`;
-			if (!wikiEdgeSet.has(ek)) {
-				wikiEdgeSet.add(ek);
-				edges.push({ source: sourcePath, target: targetPath, weight: count, type: "wiki" });
-			}
-		}
-	}
-
-	// Degree map
-	const degreeMap = new Map<string, number>();
-	for (const edge of edges) {
-		degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
-		degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
-	}
-
-	// Create nodes with no position (d3-force will place them)
-	const nodes: GraphNode[] = [];
-	for (const file of filteredFiles) {
-		const degree = degreeMap.get(file.path) ?? 0;
-		if (!settings.showOrphans && degree === 0) continue;
-		const label = file.path.replace(/\.md$/, "").split("/").pop() ?? file.path;
-		nodes.push({
-			id: file.path,
-			path: file.path,
-			label,
-			x: 0,
-			y: 0,
-			degree,
-			highlighted: false,
-		});
-	}
+	const edges = buildWikiEdges(app, filteredPathSet);
+	const degreeMap = buildDegreeMap(edges);
+	const nodes = createWikiNodes(filteredFiles, degreeMap);
 
 	const nodeIds = new Set(nodes.map((n) => n.id));
 	const filteredEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
@@ -581,14 +465,10 @@ export async function buildGraph(
 		SmartGraphSettings,
 		| "defaultK"
 		| "autoK"
-		| "semanticNeighbors"
-		| "similarityThreshold"
-		| "showOrphans"
 		| "projectionMethod"
 		| "umapNeighbors"
 		| "umapMinDist"
 		| "showWikiLinks"
-		| "showSemanticEdges"
 		| "clusteringAlgorithm"
 		| "minClusterSize"
 	>,

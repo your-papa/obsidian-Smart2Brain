@@ -126,7 +126,7 @@ function loadFilterOptions() {
  * cluster colours.
  */
 function buildWikiModeGraph(filter: GraphFilter): GraphData {
-	const { graphData: wikiGraphData } = buildWikiGraph(plugin.app, settings, filter);
+	const { graphData: wikiGraphData } = buildWikiGraph(plugin.app, filter);
 	return applyColorGroups(plugin.app, wikiGraphData, settings.colorGroups);
 }
 
@@ -243,14 +243,10 @@ $effect(() => {
 	graphMode;
 	selectedFolders;
 	selectedTags;
-	settings.showOrphans;
 	settings.colorGroups;
 
 	if (graphMode === "smart") {
-		settings.similarityThreshold;
-		settings.semanticNeighbors;
 		settings.showWikiLinks;
-		settings.showSemanticEdges;
 	}
 
 	// Debounce: schedule a rebuild and clean up on re-trigger
@@ -567,8 +563,6 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
       linkDistance={settings.linkDistance}
       chargeStrength={settings.chargeStrength}
       labelZoomThreshold={settings.labelZoomThreshold}
-      discoveryMode={settings.discoveryMode}
-      showSemanticEdges={graphMode === "smart" ? settings.showSemanticEdges : false}
       showWikiLinks={graphMode === "wiki" ? true : settings.showWikiLinks}
       useForceLayout={graphMode === "wiki" ? true : settings.useForceLayout}
       {focusedClusters}
@@ -578,8 +572,6 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
       onRevealFile={handleRevealFile}
       onFocusCluster={handleFocusCluster}
       onToggleWikiLinks={() => handleSettingsChange({ showWikiLinks: !settings.showWikiLinks })}
-      onToggleSemanticEdges={() =>
-        handleSettingsChange({ showSemanticEdges: !settings.showSemanticEdges })}
       {lassoMode}
       onSelectionChange={handleSelectionChange}
     />
