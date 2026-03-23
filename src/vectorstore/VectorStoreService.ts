@@ -447,10 +447,10 @@ export class VectorStoreService {
 		const ollamaData =
 			defaultModel.provider === "ollama"
 				? (() => {
-					const ollamaAuth = getData().getResolvedProviderAuth("ollama");
-					if (!ollamaAuth?.baseUrl) return null;
-					return getOllamaModelsCache(ollamaAuth.baseUrl);
-				})()
+						const ollamaAuth = getData().getResolvedProviderAuth("ollama");
+						if (!ollamaAuth?.baseUrl) return null;
+						return getOllamaModelsCache(ollamaAuth.baseUrl);
+					})()
 				: null;
 
 		const metadata = hydrateEmbeddingModel(defaultModel.provider, defaultModel.model, {
@@ -595,30 +595,9 @@ export class VectorStoreService {
 		const filesToIndex = [...missingFiles, ...staleFiles];
 		if (filesToIndex.length > 0) {
 			const batchSize = this.getBatchSize(inst.indexId, defaultModel.provider);
-			const pendingFileCount = filesToIndex.length;
-			const { startingIndexedCount } = summarizeValidationProgressCounts({
-				eligibleFileCount: vaultFiles.length,
-				pendingFileCount,
-				validPendingFileCount: pendingFileCount,
-			});
-			let indexed = 0;
-			let lastPersistedIndexed = 0;
-			const showNotice = filesToIndex.length > 5;
-			let notice: Notice | null = null;
-			if (showNotice) {
-				notice = new Notice("", 0);
-			}
 
-			this.updateInstanceProgress(inst, {
-				isIndexing: true,
-				total: vaultFiles.length,
-				indexed: startingIndexedCount,
-				skipped: 0,
-				currentFile: "Reading files...",
-			});
-			if (notice) this.updateNotice(notice, inst.progress);
-			inst.abortController = new AbortController();
-
+			// Pre-read files and filter out too-large/unreadable ones before
+			// setting up progress tracking so counts are accurate from the start.
 			interface FileEntry {
 				file: TFile;
 				content: string;
@@ -626,6 +605,8 @@ export class VectorStoreService {
 			}
 			const validFiles: FileEntry[] = [];
 			const maxContentLength = await this.getMaxEmbeddingContentLength(inst, defaultModel);
+			const skippedTooLarge: string[] = [];
+			const skippedReadError: string[] = [];
 
 			for (const file of filesToIndex) {
 				try {
@@ -634,107 +615,153 @@ export class VectorStoreService {
 						const contentWithTitle = `# ${file.basename}\n\n${content}`;
 						validFiles.push({ file, content, contentWithTitle });
 					} else {
-						this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
+						skippedTooLarge.push(file.basename);
 					}
 				} catch (error) {
 					Logger.error(`[VectorStore] Failed to read ${file.path}:`, error);
-					this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
+					skippedReadError.push(file.basename);
 				}
 			}
 
-			const { totalCount } = summarizeValidationProgressCounts({
-				eligibleFileCount: vaultFiles.length,
-				pendingFileCount,
-				validPendingFileCount: validFiles.length,
-			});
-			this.updateInstanceProgress(inst, { total: totalCount, indexed: startingIndexedCount });
-			if (notice) this.updateNotice(notice, inst.progress);
+			const preFilterSkipped = skippedTooLarge.length + skippedReadError.length;
 
-			for (let i = 0; i < validFiles.length; i += batchSize) {
-				if (inst.abortController?.signal.aborted) {
-					Logger.log(`[VectorStore] Validation indexing cancelled for ${inst.indexId}`);
-					break;
+			Logger.log(
+				`[VectorStore] ${inst.indexId}: pre-filter result: ${validFiles.length} valid, ${preFilterSkipped} skipped (maxContentLength=${maxContentLength})`,
+			);
+
+			if (preFilterSkipped > 0) {
+				const parts: string[] = [];
+				if (skippedTooLarge.length > 0) {
+					parts.push(`${skippedTooLarge.length} too large: ${skippedTooLarge.join(", ")}`);
+				}
+				if (skippedReadError.length > 0) {
+					parts.push(`${skippedReadError.length} unreadable: ${skippedReadError.join(", ")}`);
+				}
+				new Notice(`Skipped indexing ${preFilterSkipped} notes (${parts.join("; ")})`, 8000);
+			}
+
+			// If no files actually need indexing (all too large / unreadable), skip entirely
+			if (validFiles.length === 0) {
+				Logger.log(
+					`[VectorStore] ${inst.indexId}: all ${filesToIndex.length} pending files were skipped (too large or unreadable)`,
+				);
+			} else {
+				const pendingFileCount = filesToIndex.length;
+				const { startingIndexedCount, totalCount } = summarizeValidationProgressCounts({
+					eligibleFileCount: vaultFiles.length,
+					pendingFileCount,
+					validPendingFileCount: validFiles.length,
+				});
+				let indexed = 0;
+				let lastPersistedIndexed = 0;
+				const showNotice = validFiles.length > 5;
+				let notice: Notice | null = null;
+				if (showNotice) {
+					notice = new Notice("", 0);
 				}
 
-				const batch = validFiles.slice(i, i + batchSize);
-				const batchEnd = Math.min(i + batchSize, validFiles.length);
-
 				this.updateInstanceProgress(inst, {
-					currentFile:
-						batch.length === 1 ? batch[0].file.path : `Embedding batch ${Math.floor(i / batchSize) + 1}...`,
+					isIndexing: true,
+					total: totalCount,
+					indexed: startingIndexedCount,
+					skipped: preFilterSkipped,
+					currentFile: null,
 				});
+				if (notice) this.updateNotice(notice, inst.progress);
+				inst.abortController = new AbortController();
 
-				try {
-					const texts = batch.map((entry) => entry.contentWithTitle);
-					const vectors = await embeddings.embedDocuments(texts);
-					if (!vectors || vectors.length === 0) {
-						Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
-						this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + batch.length });
-						continue;
+				for (let i = 0; i < validFiles.length; i += batchSize) {
+					if (inst.abortController?.signal.aborted) {
+						Logger.log(`[VectorStore] Validation indexing cancelled for ${inst.indexId}`);
+						break;
 					}
-					for (let j = 0; j < batch.length; j++) {
-						if (!vectors[j]) {
-							Logger.error(`[VectorStore] Empty vector for ${batch[j].file.path}`);
+
+					const batch = validFiles.slice(i, i + batchSize);
+					const batchEnd = Math.min(i + batchSize, validFiles.length);
+
+					this.updateInstanceProgress(inst, {
+						currentFile:
+							batch.length === 1
+								? batch[0].file.path
+								: `Embedding batch ${Math.floor(i / batchSize) + 1}...`,
+					});
+
+					try {
+						const texts = batch.map((entry) => entry.contentWithTitle);
+						const vectors = await embeddings.embedDocuments(texts);
+						if (!vectors || vectors.length === 0) {
+							Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
+							this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + batch.length });
 							continue;
 						}
-						const entry = batch[j];
-						const doc: DocumentVector = {
-							id: entry.file.path,
-							path: entry.file.path,
-							mtime: entry.file.stat.mtime,
-							checksum: this.hashContent(entry.content),
-							vector: new Float32Array(vectors[j]),
-						};
-						await inst.store.upsert(doc);
-					}
-					indexed += batch.length;
-					this.updateInstanceProgress(inst, { indexed: startingIndexedCount + batchEnd });
-					lastPersistedIndexed = await this.persistIndexCheckpoint(inst, indexed, lastPersistedIndexed);
-					if (notice) this.updateNotice(notice, inst.progress);
-				} catch (error) {
-					Logger.error("[VectorStore] Batch validation indexing failed:", error);
-					for (const entry of batch) {
-						if (inst.abortController?.signal.aborted) break;
-						try {
-							const vector = await embeddings.embedQuery(entry.contentWithTitle);
-							if (!vector || vector.length === 0) {
-								Logger.error(`[VectorStore] embedQuery returned empty result for ${entry.file.path}`);
-								this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
+						for (let j = 0; j < batch.length; j++) {
+							if (!vectors[j]) {
+								Logger.error(`[VectorStore] Empty vector for ${batch[j].file.path}`);
 								continue;
 							}
+							const entry = batch[j];
 							const doc: DocumentVector = {
 								id: entry.file.path,
 								path: entry.file.path,
 								mtime: entry.file.stat.mtime,
 								checksum: this.hashContent(entry.content),
-								vector: new Float32Array(vector),
+								vector: new Float32Array(vectors[j]),
 							};
 							await inst.store.upsert(doc);
-							indexed++;
-							this.updateInstanceProgress(inst, { indexed: inst.progress.indexed + 1 });
-						} catch (entryError) {
-							Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
-							const reason = entryError instanceof Error ? entryError.message : String(entryError);
-							new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
-							this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
 						}
+						indexed += batch.length;
+						this.updateInstanceProgress(inst, { indexed: startingIndexedCount + batchEnd });
+						lastPersistedIndexed = await this.persistIndexCheckpoint(inst, indexed, lastPersistedIndexed);
+						if (notice) this.updateNotice(notice, inst.progress);
+					} catch (error) {
+						Logger.error("[VectorStore] Batch validation indexing failed:", error);
+						for (const entry of batch) {
+							if (inst.abortController?.signal.aborted) break;
+							try {
+								const vector = await embeddings.embedQuery(entry.contentWithTitle);
+								if (!vector || vector.length === 0) {
+									Logger.error(
+										`[VectorStore] embedQuery returned empty result for ${entry.file.path}`,
+									);
+									this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
+									continue;
+								}
+								const doc: DocumentVector = {
+									id: entry.file.path,
+									path: entry.file.path,
+									mtime: entry.file.stat.mtime,
+									checksum: this.hashContent(entry.content),
+									vector: new Float32Array(vector),
+								};
+								await inst.store.upsert(doc);
+								indexed++;
+								this.updateInstanceProgress(inst, { indexed: inst.progress.indexed + 1 });
+							} catch (entryError) {
+								Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
+								const reason = entryError instanceof Error ? entryError.message : String(entryError);
+								new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
+								this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
+							}
+						}
+						lastPersistedIndexed = await this.persistIndexCheckpoint(inst, indexed, lastPersistedIndexed);
+						if (notice) this.updateNotice(notice, inst.progress);
 					}
-					lastPersistedIndexed = await this.persistIndexCheckpoint(inst, indexed, lastPersistedIndexed);
-					if (notice) this.updateNotice(notice, inst.progress);
 				}
-			}
 
-			if (notice) {
-				const cancelled = inst.abortController?.signal.aborted;
-				notice.setMessage(
-					cancelled ? `Indexing cancelled (${indexed} files updated)` : `✓ Index updated: ${indexed} files`,
-				);
-				setTimeout(() => notice.hide(), 3000);
-			}
+				if (notice) {
+					const cancelled = inst.abortController?.signal.aborted;
+					notice.setMessage(
+						cancelled
+							? `Indexing cancelled (${indexed} files updated)`
+							: `✓ Index updated: ${indexed} files`,
+					);
+					setTimeout(() => notice.hide(), 3000);
+				}
 
-			inst.abortController = null;
-			this.updateInstanceProgress(inst, { isIndexing: false, currentFile: null });
-			Logger.log(`[VectorStore] Indexed ${indexed} missing/stale files for ${inst.indexId}`);
+				inst.abortController = null;
+				this.updateInstanceProgress(inst, { isIndexing: false, currentFile: null });
+				Logger.log(`[VectorStore] Indexed ${indexed} missing/stale files for ${inst.indexId}`);
+			} // end else (validFiles.length > 0)
 		}
 
 		await this.saveInstanceToFile(inst);
@@ -868,6 +895,9 @@ export class VectorStoreService {
 			await inst.store.remove(oldPath);
 			if (inst.embeddings) {
 				await this.indexDocumentForInstance(inst, file);
+			} else {
+				// Even if we can't re-index (no embeddings), persist the removal
+				this.scheduleInstanceSave(inst);
 			}
 			this.notifyStatsChanged(inst);
 		}
@@ -1511,7 +1541,7 @@ export class VectorStoreService {
 		}
 		if (!indexId) {
 			callback({ isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 });
-			return () => { };
+			return () => {};
 		}
 
 		// Register at service level so subscriptions survive instance recreation
@@ -1635,7 +1665,7 @@ export class VectorStoreService {
 			this.modifyTimers.clear();
 			// Wait for any in-progress initialization before cleaning up
 			if (this.initPromise) {
-				await this.initPromise.catch(() => { });
+				await this.initPromise.catch(() => {});
 			}
 			for (const inst of this.instances.values()) {
 				await inst.syncManager.flush();
