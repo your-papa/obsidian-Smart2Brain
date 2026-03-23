@@ -172,8 +172,11 @@ export interface IndexingReport {
 /** Current schema version for the serialized index */
 export const INDEX_VERSION = 1;
 
-/** Debounce delay for file sync (5 minutes in ms) */
-export const SYNC_DEBOUNCE_MS = 5 * 60 * 1000;
+/** Debounce delay for file sync (5 seconds in ms) */
+export const SYNC_DEBOUNCE_MS = 5 * 1000;
+
+/** Maximum delay before a save is forced, even if changes keep coming (30 seconds in ms) */
+export const SYNC_MAX_DELAY_MS = 30 * 1000;
 
 /**
  * Sanitize a provider:model string into a filesystem/IndexedDB-safe identifier.

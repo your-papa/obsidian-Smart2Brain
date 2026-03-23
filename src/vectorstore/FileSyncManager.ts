@@ -7,7 +7,13 @@
 
 import { encode, decode } from "@msgpack/msgpack";
 import type { DataAdapter } from "obsidian";
-import { INDEX_VERSION, SYNC_DEBOUNCE_MS, type SerializedIndex, type SerializedDocument } from "./types";
+import {
+	INDEX_VERSION,
+	SYNC_DEBOUNCE_MS,
+	SYNC_MAX_DELAY_MS,
+	type SerializedIndex,
+	type SerializedDocument,
+} from "./types";
 import { Logger } from "../utils/logging";
 
 /**
@@ -19,6 +25,7 @@ export class FileSyncManager {
 	private filePath: string;
 	private isDirty = false;
 	private saveTimeout: ReturnType<typeof setTimeout> | null = null;
+	private maxDelayTimeout: ReturnType<typeof setTimeout> | null = null;
 	private pendingGetIndex: (() => Promise<SerializedIndex>) | null = null;
 	private isSaving = false;
 
@@ -91,8 +98,10 @@ export class FileSyncManager {
 	}
 
 	/**
-	 * Schedule a save operation with debounce.
-	 * Each call resets the timer to the full cooldown duration.
+	 * Schedule a save operation with debounce and a maximum delay.
+	 * The debounce timer resets on each call, but a max-delay timer
+	 * guarantees the save fires within SYNC_MAX_DELAY_MS of the first
+	 * change, preventing indefinite deferral during continuous edits.
 	 *
 	 * @param getIndex Function to get the current index state when save is triggered
 	 */
@@ -100,7 +109,7 @@ export class FileSyncManager {
 		this.isDirty = true;
 		this.pendingGetIndex = getIndex;
 
-		// Clear existing timeout and reset
+		// Clear existing debounce timeout and reset
 		if (this.saveTimeout) {
 			clearTimeout(this.saveTimeout);
 		}
@@ -108,6 +117,13 @@ export class FileSyncManager {
 		this.saveTimeout = setTimeout(async () => {
 			await this.executePendingSave();
 		}, SYNC_DEBOUNCE_MS);
+
+		// Set max-delay timer only once per dirty cycle to guarantee an upper bound
+		if (!this.maxDelayTimeout) {
+			this.maxDelayTimeout = setTimeout(async () => {
+				await this.executePendingSave();
+			}, SYNC_MAX_DELAY_MS);
+		}
 	}
 
 	/**
@@ -115,10 +131,14 @@ export class FileSyncManager {
 	 * Used during plugin unload to ensure data is persisted.
 	 */
 	async flush(): Promise<void> {
-		// Cancel pending timeout
+		// Cancel pending timeouts
 		if (this.saveTimeout) {
 			clearTimeout(this.saveTimeout);
 			this.saveTimeout = null;
+		}
+		if (this.maxDelayTimeout) {
+			clearTimeout(this.maxDelayTimeout);
+			this.maxDelayTimeout = null;
 		}
 
 		// Execute save if dirty
@@ -153,7 +173,15 @@ export class FileSyncManager {
 		} catch (error) {
 			Logger.error("[VectorStore] Failed to execute scheduled save:", error);
 		} finally {
-			this.saveTimeout = null;
+			// Clear both timers so the next dirty cycle starts fresh
+			if (this.saveTimeout) {
+				clearTimeout(this.saveTimeout);
+				this.saveTimeout = null;
+			}
+			if (this.maxDelayTimeout) {
+				clearTimeout(this.maxDelayTimeout);
+				this.maxDelayTimeout = null;
+			}
 		}
 	}
 
