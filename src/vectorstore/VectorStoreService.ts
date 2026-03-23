@@ -353,11 +353,25 @@ export class VectorStoreService {
 			// Open databases
 			await inst.store.open();
 
-			// Try to load from per-index file
-			const serialized = await inst.syncManager.loadFromFile();
-			const runtimeMeta = await inst.store.getMetadata();
 			const [provider = "", ...modelParts] = indexId.split(":");
 			const model = modelParts.join(":");
+
+			// Check IDB metadata first — this is cheap (~50ms).
+			// If runtime already matches the expected provider/model and has documents,
+			// we can skip the expensive loadFromFile() call entirely (avoids deserializing
+			// a potentially 40-100MB+ MessagePack file on the main thread).
+			const runtimeMeta = await inst.store.getMetadata();
+			const runtimeMatches =
+				runtimeMeta !== null &&
+				runtimeMeta.documentCount > 0 &&
+				runtimeMeta.providerId === provider &&
+				runtimeMeta.modelId === model;
+
+			let serialized: SerializedIndex | null = null;
+			if (!runtimeMatches) {
+				serialized = await inst.syncManager.loadFromFile();
+			}
+
 			const restoreSource = selectIndexRestoreSource({
 				runtime: runtimeMeta,
 				file: serialized,
