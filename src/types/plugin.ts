@@ -452,6 +452,7 @@ export interface PluginData {
 
 	/**
 	 * Last selected graph mode (wiki or smart).
+	 * @deprecated Kept for data migration. Use `smartGraphSettings.layoutMode` and `smartGraphSettings.colorMode` instead.
 	 */
 	lastGraphMode: GraphMode;
 

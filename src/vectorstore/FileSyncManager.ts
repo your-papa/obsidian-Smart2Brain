@@ -160,13 +160,18 @@ export class FileSyncManager {
 	/**
 	 * Create a serialized index from documents and metadata.
 	 */
-	static createIndex(documents: SerializedDocument[], providerId: string, modelId: string): SerializedIndex {
+	static createIndex(
+		documents: SerializedDocument[],
+		providerId: string,
+		modelId: string,
+		lastUpdated = Date.now(),
+	): SerializedIndex {
 		return {
 			version: INDEX_VERSION,
 			providerId,
 			modelId,
 			documents,
-			lastUpdated: Date.now(),
+			lastUpdated,
 		};
 	}
 }

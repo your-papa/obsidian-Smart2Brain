@@ -12,17 +12,19 @@ import {
 	type SimulationNodeDatum,
 	type SimulationLinkDatum,
 } from "d3-force";
-import type { GraphData, GraphNode, GraphEdge, EdgeType } from "../../types/graph";
+import type { GraphData, GraphNode, GraphEdge, EdgeType, LayoutMode } from "../../types/graph";
+import { deriveClusterRepresentativesFromGraph } from "../../views/smart-graph/graphDataBuilder";
+import { edgeKey } from "../../utils/graphUtils";
+import { animateTransform, computeNodeBounds, framingTransform, easeOutCubic } from "../../utils/graphAnimation";
 
 interface Props {
 	graphData: GraphData;
+	/** Layout mode — force uses d3-force, semantic uses projected positions. */
+	mode: LayoutMode;
 	linkDistance: number;
 	chargeStrength?: number;
 	labelZoomThreshold?: number;
 	showWikiLinks?: boolean;
-	useForceLayout?: boolean;
-	transitionTargets?: Map<string, { x: number; y: number }> | null;
-	onTransitionEnd?: () => void;
 	focusedClusters?: Set<number>;
 	clusterLabels?: Record<number, string>;
 	isLabeling?: boolean;
@@ -32,17 +34,17 @@ interface Props {
 	onToggleWikiLinks?: () => void;
 	lassoMode?: boolean;
 	onSelectionChange?: (paths: string[]) => void;
+	onClearFocusedClusters?: () => void;
+	onHoverPreview?: (event: MouseEvent, path: string, targetEl: HTMLElement) => void;
 }
 
 let {
 	graphData,
+	mode,
 	linkDistance,
 	chargeStrength = -150,
 	labelZoomThreshold = 2.5,
 	showWikiLinks = true,
-	useForceLayout = true,
-	transitionTargets = null,
-	onTransitionEnd,
 	focusedClusters = new Set<number>(),
 	clusterLabels = {},
 	isLabeling = false,
@@ -52,10 +54,27 @@ let {
 	onToggleWikiLinks,
 	lassoMode = false,
 	onSelectionChange,
+	onClearFocusedClusters,
+	onHoverPreview,
 }: Props = $props();
+
+/** Whether the current mode uses d3-force simulation vs static projected positions. */
+let isForceMode = $derived(mode === "force");
 
 let canvasEl: HTMLCanvasElement;
 let containerEl: HTMLDivElement;
+
+// Invisible anchor element repositioned over hovered nodes for Obsidian's hover popover
+let hoverAnchorEl: HTMLDivElement;
+
+// Auto-compute node size based on graph density — smaller dots for large graphs
+let nodeSize = $derived.by(() => {
+	const n = graphData.nodes.length;
+	if (n <= 50) return 6;
+	if (n <= 200) return 4;
+	if (n <= 500) return 3;
+	return 2;
+});
 
 // Transform state for zoom/pan
 let transform = $state({ x: 0, y: 0, scale: 1 });
@@ -68,17 +87,23 @@ let isPanning = $state(false);
 let panStart = { x: 0, y: 0 };
 
 // Non-reactive drag reference — directly mutates the d3 SimNode's fx/fy
-// without going through Svelte's $state proxy
+// without going through Svelte's $state proxy (wiki mode only)
 let dragSimNode: SimNode | null = null;
 
-// Pinned nodes: nodes with fixed positions (fx/fy set)
+// Pinned nodes: nodes with fixed positions (fx/fy set) — wiki mode only
 let pinnedNodes: Set<string> = new Set();
+
+// rAF render loop ID for smart mode (replaces the d3 simulation tick)
+let smartRafId: number | null = null;
 
 // Lasso selection state
 let selectedNodes: Set<string> = $state(new Set());
 let isLassoing = $state(false);
 let lassoPoints: Array<{ x: number; y: number }> = [];
 let lassoJustFinished = false;
+
+// Track which node already had a hover-preview triggered (fire once per node)
+let previewTriggeredForNode: string | null = null;
 
 // Track whether we need an initial fit-to-view after first simulation setup
 let needsInitialFit = true;
@@ -119,7 +144,7 @@ let adjacency: Map<string, Set<string>> = new Map();
 let hoveredEdge: SimLink | null = $state(null);
 
 // Cluster legend hit areas for click detection (screen space)
-let clusterLegendHitAreas: Array<{
+let clusterAnchorHitAreas: Array<{
 	x: number;
 	y: number;
 	w: number;
@@ -163,10 +188,14 @@ let edgeLookup: Map<string, SimLink> = new Map();
 
 // Node ID → SimNode map for O(1) lookups (built once in setupSimulation)
 let simNodeMap: Map<string, SimNode> = new Map();
+let clusterRepresentativeIds: Set<string> = new Set();
+let clusterRepresentativeNodes: Map<number, SimNode> = new Map();
+let clusterNodeCounts: Map<number, number> = new Map();
 
-function edgeKey(a: string, b: string): string {
-	return a < b ? `${a}\0${b}` : `${b}\0${a}`;
-}
+const REPRESENTATIVE_LABEL_NODE_THRESHOLD = 120;
+const REPRESENTATIVE_LABEL_ZOOM_RATIO = 0.6;
+const FULL_LABEL_DENSE_GRAPH_MULTIPLIER = 1.8;
+const CLUSTER_ANCHOR_ZOOM_RATIO = 0.85;
 
 /**
  * Cached theme colors — Canvas 2D cannot use CSS var() directly.
@@ -262,6 +291,25 @@ export function selectNodesByPaths(paths: string[]) {
 }
 
 /**
+ * Truncate text with an ellipsis if it exceeds `maxWidth` in the current font.
+ */
+function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+	if (ctx.measureText(text).width <= maxWidth) return text;
+	const ellipsis = "…";
+	let lo = 0;
+	let hi = text.length;
+	while (lo < hi) {
+		const mid = (lo + hi + 1) >> 1;
+		if (ctx.measureText(text.slice(0, mid) + ellipsis).width <= maxWidth) {
+			lo = mid;
+		} else {
+			hi = mid - 1;
+		}
+	}
+	return lo > 0 ? text.slice(0, lo) + ellipsis : ellipsis;
+}
+
+/**
  * Find the edge nearest to the given screen coordinates, if within hit distance.
  */
 function findEdgeAt(screenX: number, screenY: number): SimLink | null {
@@ -297,7 +345,7 @@ function screenToGraph(screenX: number, screenY: number): { x: number; y: number
  */
 function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 	const { x, y } = screenToGraph(screenX, screenY);
-	const hitRadius = (NODE_BASE_RADIUS + 4) / transform.scale;
+	const hitRadius = (Math.max(0.5, nodeSize / 6) + 4) / transform.scale;
 
 	// Search in reverse order (top-most nodes first)
 	for (let i = simNodes.length - 1; i >= 0; i--) {
@@ -313,14 +361,14 @@ function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 	return null;
 }
 
-const NODE_BASE_RADIUS = 1;
-
 /**
- * Get the draw radius for a node based on its degree.
+ * Get the draw radius for a node based on its degree and the user-configurable nodeSize.
+ * nodeSize default is 6; the base radius scales linearly so nodes are always visible.
  */
 function getNodeRadius(node: GraphNode): number {
+	const base = Math.max(0.5, nodeSize / 6);
 	const degree = node.degree ?? 0;
-	return NODE_BASE_RADIUS + Math.min(Math.log1p(degree) * 0.5, 6);
+	return base + Math.min(Math.log1p(degree) * 0.5, 6);
 }
 
 /**
@@ -468,8 +516,8 @@ function render() {
 			ctx.stroke();
 		}
 
-		// Pinned node indicator: small inner dot
-		if (pinnedNodes.has(node.id)) {
+		// Pinned node indicator: small inner dot (wiki mode only)
+		if (isForceMode && pinnedNodes.has(node.id)) {
 			const pinR = Math.max(2 / transform.scale, 1);
 			ctx.beginPath();
 			ctx.arc(node.x, node.y, pinR, 0, Math.PI * 2);
@@ -481,41 +529,127 @@ function render() {
 	// ── Unified label rendering ──────────────────────────────
 	// One pass determines label text, style, and opacity per node.
 	// Priority: hover context → zoom labels → search highlights.
-	const showAllLabels = labelZoomThreshold > 0 && transform.scale >= labelZoomThreshold;
+	const denseGraph = simNodes.length >= REPRESENTATIVE_LABEL_NODE_THRESHOLD;
+	const representativeLabelThreshold = labelZoomThreshold;
+	const allLabelsThreshold = denseGraph
+		? Math.max(
+				representativeLabelThreshold,
+				representativeLabelThreshold *
+					(1 + (FULL_LABEL_DENSE_GRAPH_MULTIPLIER - 1) * REPRESENTATIVE_LABEL_ZOOM_RATIO),
+			)
+		: labelZoomThreshold;
+	const showRepresentativeLabels =
+		denseGraph &&
+		labelZoomThreshold > 0 &&
+		transform.scale >= representativeLabelThreshold &&
+		transform.scale < allLabelsThreshold;
+	const representativeLabelOpacity = showRepresentativeLabels
+		? Math.min(
+				1,
+				(transform.scale - representativeLabelThreshold) /
+					Math.max(0.25, allLabelsThreshold - representativeLabelThreshold),
+			)
+		: 0;
+	const showAllLabels = labelZoomThreshold > 0 && transform.scale >= allLabelsThreshold;
+	const showClusterAnchors = clusterRepresentativeNodes.size > 0;
 	const zoomLabelOpacity = showAllLabels
-		? Math.min(1, (transform.scale - labelZoomThreshold) / labelZoomThreshold)
+		? Math.min(1, (transform.scale - allLabelsThreshold) / Math.max(0.25, allLabelsThreshold))
 		: 0;
 	const hovId = hoveredNode?.id ?? null;
 	const hoverNeighbors = hovId ? adjacency.get(hovId) : undefined;
 
-	const fontSize = Math.max(6 / transform.scale, 3.5);
-	ctx.font = `${fontSize}px ${c.font}`;
+	const fontSize = Math.max(4.5 / transform.scale, 2.8);
+	const baseLabelFont = `${fontSize}px ${c.font}`;
+	ctx.font = baseLabelFont;
 	ctx.textAlign = "center";
 	ctx.textBaseline = "bottom";
 
-	for (const node of simNodes) {
-		if (node.x == null || node.y == null) continue;
+	// Label occlusion culling: track drawn label bounding boxes in screen space
+	// and skip any label that would overlap an already-drawn one.
+	const drawnLabelRects: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+	const LABEL_PAD_X = 2; // horizontal padding between labels (screen px)
+	const LABEL_PAD_Y = 1; // vertical padding between labels (screen px)
+
+	function canDrawLabel(nodeX: number, labelY: number, text: string): boolean {
+		const textW = ctx!.measureText(text).width;
+		// Convert label bounds from graph space to screen space
+		const sx = nodeX * transform.scale + transform.x;
+		const sy = labelY * transform.scale + transform.y;
+		const sw = textW * transform.scale;
+		const sh = fontSize * transform.scale;
+		const x1 = sx - sw / 2 - LABEL_PAD_X;
+		const y1 = sy - sh - LABEL_PAD_Y;
+		const x2 = sx + sw / 2 + LABEL_PAD_X;
+		const y2 = sy + LABEL_PAD_Y;
+
+		for (const r of drawnLabelRects) {
+			if (x1 < r.x2 && x2 > r.x1 && y1 < r.y2 && y2 > r.y1) return false;
+		}
+		drawnLabelRects.push({ x1, y1, x2, y2 });
+		return true;
+	}
+
+	// Sort nodes by label priority: hovered → neighbors → highlighted →
+	// cluster representatives → high-degree → rest. Higher-priority labels
+	// reserve screen space first so lower-priority ones get culled.
+	const sortedLabelNodes = simNodes.filter((n) => n.x != null && n.y != null);
+	sortedLabelNodes.sort((a, b) => {
+		const pa =
+			a.id === hovId
+				? 0
+				: hoverNeighbors?.has(a.id)
+					? 1
+					: a.highlighted
+						? 2
+						: clusterRepresentativeIds.has(a.id)
+							? 3
+							: 4;
+		const pb =
+			b.id === hovId
+				? 0
+				: hoverNeighbors?.has(b.id)
+					? 1
+					: b.highlighted
+						? 2
+						: clusterRepresentativeIds.has(b.id)
+							? 3
+							: 4;
+		if (pa !== pb) return pa - pb;
+		return (b.degree ?? 0) - (a.degree ?? 0);
+	});
+
+	for (const node of sortedLabelNodes) {
 		const radius = getNodeRadius(node);
-		const labelY = node.y - radius - 3 / transform.scale;
+		const labelY = node.y - radius - 2 / transform.scale;
 		const nodeAlpha = hoverAlphas.get(node.id) ?? 0.85;
 
 		if (hovId && node.id === hovId) {
-			// Hovered node: always show, full opacity
+			// Hovered node: always show, skip occlusion (reserves its rect)
+			canDrawLabel(node.x, labelY, node.label);
+			ctx.font = baseLabelFont;
 			ctx.fillStyle = c.textNormal;
 			ctx.globalAlpha = 1;
 			ctx.fillText(node.label, node.x, labelY);
 		} else if (hovId && hoverNeighbors?.has(node.id)) {
-			// Neighbor of hovered node
+			// Neighbor of hovered node — draw only if no overlap
+			if (!canDrawLabel(node.x, labelY, node.label)) continue;
+			ctx.font = baseLabelFont;
 			ctx.fillStyle = c.textMuted;
 			ctx.globalAlpha = nodeAlpha;
 			ctx.fillText(node.label, node.x, labelY);
 		} else if (showAllLabels) {
-			// Zoom labels: visible for all remaining nodes
+			// Zoom labels: visible for all remaining nodes — cull overlaps
+			if (!canDrawLabel(node.x, labelY, node.label)) continue;
+			ctx.font = baseLabelFont;
 			ctx.fillStyle = node.highlighted ? c.textAccent : c.textNormal;
 			ctx.globalAlpha = nodeAlpha * zoomLabelOpacity;
 			ctx.fillText(node.label, node.x, labelY);
+		} else if (showRepresentativeLabels && clusterRepresentativeIds.has(node.id)) {
+			// Dense graphs: representative nodes are labeled by screen-space cluster anchors.
 		} else if (node.highlighted && !hovId) {
-			// Search highlights: only when not hovering and not zoomed in
+			// Search highlights — cull overlaps
+			if (!canDrawLabel(node.x, labelY, node.label)) continue;
+			ctx.font = baseLabelFont;
 			ctx.fillStyle = c.textAccent;
 			ctx.globalAlpha = 1;
 			ctx.fillText(node.label, node.x, labelY);
@@ -547,6 +681,156 @@ function render() {
 	}
 
 	ctx.restore();
+
+	// ── Cluster anchors (screen space) ─────────────────────────
+	{
+		const dpr = window.devicePixelRatio || 1;
+		ctx.save();
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+		clusterAnchorHitAreas = [];
+
+		if (showClusterAnchors) {
+			ctx.textAlign = "left";
+			ctx.textBaseline = "middle";
+			ctx.font = `600 11px ${c.font}`;
+
+			// Phase 1: compute initial positions and sizes for all visible anchors
+			const anchorPlacements: Array<{
+				cluster: number;
+				node: SimNode;
+				text: string;
+				pillW: number;
+				pillH: number;
+				idealX: number;
+				idealY: number;
+				x: number;
+				y: number;
+				isFocused: boolean;
+				color: string;
+			}> = [];
+
+			const ANCHOR_PILL_H = 20;
+			const ANCHOR_GAP = 4; // minimum gap between anchor pills
+
+			for (const [cluster, node] of clusterRepresentativeNodes) {
+				if (node.x == null || node.y == null) continue;
+				if (focusedClusters.size > 0 && !focusedClusters.has(cluster)) continue;
+
+				const screenX = node.x * transform.scale + transform.x;
+				const screenY = node.y * transform.scale + transform.y;
+				const anchorLabel = clusterLabels[cluster] ?? node.label;
+				const nodeCount = clusterNodeCounts.get(cluster) ?? 0;
+				const anchorText = `${anchorLabel} · ${nodeCount}`;
+				const textWidth = ctx.measureText(anchorText).width;
+				const pillWidth = Math.min(200, Math.max(80, textWidth + 16));
+				const pillX = Math.max(8, Math.min(width - pillWidth - 8, screenX + 8));
+				const pillY = Math.max(8, Math.min(height - ANCHOR_PILL_H - 8, screenY - ANCHOR_PILL_H - 6));
+
+				anchorPlacements.push({
+					cluster,
+					node,
+					text: anchorText,
+					pillW: pillWidth,
+					pillH: ANCHOR_PILL_H,
+					idealX: pillX,
+					idealY: pillY,
+					x: pillX,
+					y: pillY,
+					isFocused: focusedClusters.has(cluster),
+					color: node.color ?? c.graphNode,
+				});
+			}
+
+			// Phase 2: greedy overlap resolution — nudge colliding pills apart.
+			// Sort by idealY so top-most anchors get priority placement.
+			anchorPlacements.sort((a, b) => a.idealY - b.idealY);
+
+			for (let pass = 0; pass < 3; pass++) {
+				for (let i = 0; i < anchorPlacements.length; i++) {
+					const a = anchorPlacements[i];
+					for (let j = i + 1; j < anchorPlacements.length; j++) {
+						const b = anchorPlacements[j];
+
+						// Check overlap with gap
+						const overlapX = a.x < b.x + b.pillW + ANCHOR_GAP && a.x + a.pillW + ANCHOR_GAP > b.x;
+						const overlapY = a.y < b.y + b.pillH + ANCHOR_GAP && a.y + a.pillH + ANCHOR_GAP > b.y;
+
+						if (overlapX && overlapY) {
+							// Compute overlap depth in each axis
+							const overlapDepthY =
+								Math.min(a.y + a.pillH + ANCHOR_GAP, b.y + b.pillH + ANCHOR_GAP) - Math.max(a.y, b.y);
+							const overlapDepthX =
+								Math.min(a.x + a.pillW + ANCHOR_GAP, b.x + b.pillW + ANCHOR_GAP) - Math.max(a.x, b.x);
+
+							if (overlapDepthY <= overlapDepthX) {
+								// Push apart vertically (cheaper, more natural)
+								const pushY = overlapDepthY / 2 + 1;
+								a.y = Math.max(8, a.y - pushY);
+								b.y = Math.min(height - b.pillH - 8, b.y + pushY);
+							} else {
+								// Push apart horizontally
+								const pushX = overlapDepthX / 2 + 1;
+								a.x = Math.max(8, a.x - pushX);
+								b.x = Math.min(width - b.pillW - 8, b.x + pushX);
+							}
+						}
+					}
+				}
+			}
+
+			// Phase 3: render leader lines, then pills on top
+			// Leader lines connect each anchor pill to its representative node.
+			for (const anchor of anchorPlacements) {
+				const nodeScreenX = anchor.node.x! * transform.scale + transform.x;
+				const nodeScreenY = anchor.node.y! * transform.scale + transform.y;
+				const pillCenterX = anchor.x + anchor.pillW / 2;
+				const pillCenterY = anchor.y + anchor.pillH / 2;
+
+				// Only draw if the pill drifted noticeably from the node
+				const dist = Math.sqrt((pillCenterX - nodeScreenX) ** 2 + (pillCenterY - nodeScreenY) ** 2);
+				if (dist > anchor.pillW * 0.6) {
+					ctx.beginPath();
+					ctx.moveTo(pillCenterX, pillCenterY);
+					ctx.lineTo(nodeScreenX, nodeScreenY);
+					const dash = 3;
+					ctx.setLineDash([dash, dash]);
+					ctx.strokeStyle = anchor.color;
+					ctx.lineWidth = 0.75;
+					ctx.globalAlpha = anchor.isFocused ? 0.5 : 0.25;
+					ctx.stroke();
+					ctx.setLineDash([]);
+				}
+			}
+
+			for (const anchor of anchorPlacements) {
+				ctx.globalAlpha = anchor.isFocused ? 0.96 : 0.88;
+				ctx.fillStyle = c.bgPrimary;
+				ctx.beginPath();
+				ctx.roundRect(anchor.x, anchor.y, anchor.pillW, anchor.pillH, 999);
+				ctx.fill();
+
+				ctx.strokeStyle = anchor.color;
+				ctx.lineWidth = anchor.isFocused ? 1.75 : 1;
+				ctx.stroke();
+
+				ctx.globalAlpha = 1;
+				ctx.fillStyle = c.textNormal;
+				const maxTextW = anchor.pillW - 16;
+				const displayText = truncateText(ctx, anchor.text, maxTextW);
+				ctx.fillText(displayText, anchor.x + 8, anchor.y + anchor.pillH / 2 + 0.5);
+
+				clusterAnchorHitAreas.push({
+					x: anchor.x,
+					y: anchor.y,
+					w: anchor.pillW,
+					h: anchor.pillH,
+					cluster: anchor.cluster,
+				});
+			}
+		}
+
+		ctx.restore();
+	}
 
 	// ── Edge legend (screen space) ──────────────────────────────
 	{
@@ -594,120 +878,6 @@ function render() {
 		edgeLegendHitAreas.push({ x: lx, y: ly - rowH / 2, w: 120, h: rowH, type: "wiki" });
 
 		ctx.globalAlpha = 1;
-		ctx.restore();
-	}
-
-	// ── Cluster legend (screen space, bottom-left above edge legend) ────
-	{
-		const dpr = window.devicePixelRatio || 1;
-		ctx.save();
-		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-		// Collect unique clusters with their colors
-		const clusterMap = new Map<number, string>();
-		for (const node of simNodes) {
-			if (node.cluster != null && node.color && !clusterMap.has(node.cluster)) {
-				clusterMap.set(node.cluster, node.color);
-			}
-		}
-
-		if (clusterMap.size > 0) {
-			const swatchSize = 10;
-			const rowH = 18;
-			const padX = 10;
-			const padY = 6;
-			const entries = [...clusterMap.entries()].sort((a, b) => a[0] - b[0]);
-			const legendH = entries.length * rowH + padY * 2;
-
-			// Compute dynamic legend width based on label text
-			ctx.font = `10px ${c.font}`;
-			let maxTextW = 0;
-			for (const [cluster] of entries) {
-				const label = clusterLabels[cluster] ?? `Cluster ${cluster}`;
-				const tw = ctx.measureText(label).width;
-				if (tw > maxTextW) maxTextW = tw;
-			}
-			const legendW = Math.min(250, Math.max(108, padX + swatchSize + 6 + maxTextW + padX));
-
-			// Position: bottom-left, above the edge legend (which sits at bottom - 40)
-			const legendX = 12;
-			const legendY = canvasEl.height / dpr - 50 - legendH;
-
-			// Background
-			ctx.globalAlpha = 0.85;
-			ctx.fillStyle = c.bgPrimary;
-			ctx.beginPath();
-			ctx.roundRect(legendX, legendY, legendW, legendH, 6);
-			ctx.fill();
-
-			if (isLabeling) {
-				// Animated gradient border while LLM is labeling
-				const t = (performance.now() % 2000) / 2000; // 0..1 over 2 seconds
-				const cx = legendX + legendW / 2;
-				const cy = legendY + legendH / 2;
-				const angle = t * Math.PI * 2;
-				const grad = ctx.createConicGradient(angle, cx, cy);
-				grad.addColorStop(0, c.accent);
-				grad.addColorStop(0.25, c.textFaint);
-				grad.addColorStop(0.5, c.accent);
-				grad.addColorStop(0.75, c.textFaint);
-				grad.addColorStop(1, c.accent);
-				ctx.strokeStyle = grad;
-				ctx.lineWidth = 2;
-				ctx.globalAlpha = 1;
-			} else {
-				ctx.strokeStyle = c.textFaint;
-				ctx.lineWidth = 0.5;
-			}
-			ctx.stroke();
-
-			ctx.globalAlpha = 1;
-			ctx.font = `10px ${c.font}`;
-			ctx.textAlign = "left";
-			ctx.textBaseline = "middle";
-
-			// Reset hit areas
-			clusterLegendHitAreas = [];
-
-			for (let i = 0; i < entries.length; i++) {
-				const [cluster, color] = entries[i];
-				const rowY = legendY + padY + i * rowH + rowH / 2;
-				const hasFocusedClusters = focusedClusters.size > 0;
-				const isFocused = focusedClusters.has(cluster);
-
-				// Color swatch
-				ctx.beginPath();
-				ctx.roundRect(legendX + padX, rowY - swatchSize / 2, swatchSize, swatchSize, 2);
-				ctx.fillStyle = color;
-				ctx.globalAlpha = isFocused ? 1 : hasFocusedClusters ? 0.3 : 0.8;
-				ctx.fill();
-
-				if (isFocused) {
-					ctx.strokeStyle = c.textNormal;
-					ctx.lineWidth = 1.5;
-					ctx.stroke();
-				}
-
-				// Label — use LLM-generated label if available, else fallback
-				const legendLabel = clusterLabels[cluster] ?? `Cluster ${cluster}`;
-				ctx.globalAlpha = isFocused ? 1 : hasFocusedClusters ? 0.4 : 0.7;
-				ctx.fillStyle = c.textMuted;
-				ctx.fillText(legendLabel, legendX + padX + swatchSize + 6, rowY, legendW - padX - swatchSize - 16);
-				ctx.globalAlpha = 1;
-
-				// Store hit area
-				clusterLegendHitAreas.push({
-					x: legendX,
-					y: legendY + padY + i * rowH,
-					w: legendW,
-					h: rowH,
-					cluster,
-				});
-			}
-		} else {
-			clusterLegendHitAreas = [];
-		}
-
 		ctx.restore();
 	}
 
@@ -767,11 +937,14 @@ function render() {
 		ctx.save();
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-		const lines: string[] = [
-			hoveredNode.label,
-			`${hoveredNode.cluster != null && clusterLabels[hoveredNode.cluster] ? clusterLabels[hoveredNode.cluster] : `Cluster ${hoveredNode.cluster ?? "?"}`}  ·  ${hoveredNode.degree ?? 0} connections`,
-		];
-		if (pinnedNodes.has(hoveredNode.id)) {
+		const lines: string[] = [hoveredNode.label];
+		if (hoveredNode.cluster != null) {
+			const clusterLabel = clusterLabels[hoveredNode.cluster] ?? `Cluster ${hoveredNode.cluster}`;
+			lines.push(`${clusterLabel}  ·  ${hoveredNode.degree ?? 0} connections`);
+		} else {
+			lines.push(`${hoveredNode.degree ?? 0} connections`);
+		}
+		if (isForceMode && pinnedNodes.has(hoveredNode.id)) {
 			lines.push("📌 Pinned");
 		}
 
@@ -879,8 +1052,8 @@ function handleMouseDown(e: PointerEvent) {
 
 	const node = findNodeAt(x, y);
 
-	if (node) {
-		// Start dragging a node
+	if (node && isForceMode) {
+		// Start dragging a node (only in wiki/force mode — smart mode positions are projected)
 		const sn = simNodeMap.get(node.id);
 		if (!sn) return;
 		draggedNode = node;
@@ -938,22 +1111,25 @@ function handleMouseMove(e: PointerEvent) {
 		render();
 	} else {
 		// Hover detection: check cluster legend first, then nodes, then edges
-		let overLegend = false;
-		for (const area of clusterLegendHitAreas) {
+		let overClusterAnchor = false;
+		for (const area of clusterAnchorHitAreas) {
 			if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
-				overLegend = true;
+				overClusterAnchor = true;
 				break;
 			}
 		}
 
-		if (overLegend) {
+		if (overClusterAnchor) {
 			canvasEl.style.cursor = "pointer";
 			if (hoveredNode || hoveredEdge) {
 				hoveredNode = null;
 				hoveredEdge = null;
 				render();
 			}
-		} else {
+			return;
+		}
+
+		{
 			// Check edge legend hit areas
 			let overEdgeLegend = false;
 			for (const area of edgeLegendHitAreas) {
@@ -975,9 +1151,15 @@ function handleMouseMove(e: PointerEvent) {
 				if (node !== hoveredNode) {
 					hoveredNode = node;
 					hoveredEdge = null;
+					previewTriggeredForNode = null; // reset preview tracker on node change
 					canvasEl.style.cursor = node ? "pointer" : lassoMode ? "crosshair" : "grab";
 					render();
-				} else if (!node) {
+				}
+				// Cmd/Ctrl+hover triggers note preview (fire once per node)
+				if (node && (e.metaKey || e.ctrlKey) && onHoverPreview && previewTriggeredForNode !== node.id) {
+					triggerNodePreview(e, node);
+				}
+				if (!node) {
 					// No node hovered — check edges
 					const edge = findEdgeAt(x, y);
 					if (edge !== hoveredEdge) {
@@ -1049,10 +1231,8 @@ function handleClick(e: MouseEvent) {
 		}
 	}
 
-	// Check cluster legend hit areas first (screen space)
-	for (const area of clusterLegendHitAreas) {
+	for (const area of clusterAnchorHitAreas) {
 		if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
-			// Toggle this cluster and rebuild selection from all focused clusters
 			onFocusCluster?.(area.cluster);
 			render();
 			return;
@@ -1065,9 +1245,10 @@ function handleClick(e: MouseEvent) {
 		if (onNodeClick) {
 			onNodeClick(node.path);
 		}
-	} else if (selectedNodes.size > 0) {
-		// Click on empty space clears selection
-		clearSelection();
+	} else {
+		// Click on empty space clears selection and focused clusters
+		if (selectedNodes.size > 0) clearSelection();
+		if (focusedClusters.size > 0) onClearFocusedClusters?.();
 	}
 }
 
@@ -1091,9 +1272,23 @@ function handleWheel(e: WheelEvent) {
 	render();
 }
 
+/**
+ * Fire the hover-link preview for a node exactly once.
+ * Positions the invisible anchor at the node's screen location.
+ */
+function triggerNodePreview(event: MouseEvent | KeyboardEvent, node: GraphNode) {
+	const sx = (node.x ?? 0) * transform.scale + transform.x;
+	const sy = (node.y ?? 0) * transform.scale + transform.y;
+	hoverAnchorEl.style.left = `${sx}px`;
+	hoverAnchorEl.style.top = `${sy}px`;
+	previewTriggeredForNode = node.id;
+	onHoverPreview?.(event as MouseEvent, node.path, hoverAnchorEl);
+}
+
 function handleMouseLeave() {
 	hoveredNode = null;
 	hoveredEdge = null;
+	previewTriggeredForNode = null;
 	// Drag continues via pointer capture — only cancel pan
 	isPanning = false;
 	render();
@@ -1141,31 +1336,47 @@ function handleContextMenu(e: MouseEvent) {
 			}),
 	);
 
-	menu.addSeparator();
-
-	const isPinned = pinnedNodes.has(node.id);
 	menu.addItem((item) =>
 		item
-			.setTitle(isPinned ? "Unpin node" : "Pin node")
-			.setIcon(isPinned ? "pin-off" : "pin")
+			.setTitle("Select this cluster")
+			.setIcon("box-select")
 			.onClick(() => {
-				const simNode = simNodeMap.get(node.id);
-				if (!simNode) return;
-
-				if (isPinned) {
-					pinnedNodes.delete(node.id);
-					simNode.fx = null;
-					simNode.fy = null;
-				} else {
-					pinnedNodes.add(node.id);
-					simNode.fx = simNode.x;
-					simNode.fy = simNode.y;
+				if (node.cluster != null) {
+					const clusterPaths = simNodes.filter((n) => n.cluster === node.cluster).map((n) => n.path);
+					selectNodesByPaths(clusterPaths);
+					onSelectionChange?.(clusterPaths);
 				}
-
-				simulation?.alpha(0.1).restart();
-				render();
 			}),
 	);
+
+	// Pin/unpin only makes sense in force-layout (wiki) mode
+	if (isForceMode) {
+		menu.addSeparator();
+
+		const isPinned = pinnedNodes.has(node.id);
+		menu.addItem((item) =>
+			item
+				.setTitle(isPinned ? "Unpin node" : "Pin node")
+				.setIcon(isPinned ? "pin-off" : "pin")
+				.onClick(() => {
+					const simNode = simNodeMap.get(node.id);
+					if (!simNode) return;
+
+					if (isPinned) {
+						pinnedNodes.delete(node.id);
+						simNode.fx = null;
+						simNode.fy = null;
+					} else {
+						pinnedNodes.add(node.id);
+						simNode.fx = simNode.x;
+						simNode.fy = simNode.y;
+					}
+
+					simulation?.alpha(0.1).restart();
+					render();
+				}),
+		);
+	}
 
 	menu.showAtPosition({ x: e.clientX, y: e.clientY });
 }
@@ -1230,19 +1441,18 @@ function clusterCohesionForce(nodes: SimNode[], strength: number) {
 }
 
 // ============================================================================
-// Simulation setup
+// Shared graph data setup (used by both wiki and smart modes)
 // ============================================================================
 
-function setupSimulation(data: GraphData) {
-	// Stop any existing simulation
-	if (simulation) {
-		simulation.stop();
-		simulation = null;
-	}
-
-	if (data.nodes.length === 0) return;
-
-	// Save old positions for pinned nodes and smooth transitions
+/**
+ * Build the internal node/link data structures from the incoming GraphData.
+ * This is shared between wiki (d3-force) and smart (static) modes.
+ */
+function buildInternalData(data: GraphData): {
+	oldPositions: Map<string, { x: number; y: number }>;
+	isSmooth: boolean;
+} {
+	// Save old positions for smooth transitions
 	const oldPositions = new Map<string, { x: number; y: number }>();
 	for (const n of simNodes) {
 		if (n.x != null && n.y != null) {
@@ -1250,16 +1460,40 @@ function setupSimulation(data: GraphData) {
 		}
 	}
 
-	// Create mutable copies for d3-force.
+	// Compute centroid of old positions so new nodes (without a prior position)
+	// can be scattered around it instead of stacking at (0,0).
+	let centroidX = 0;
+	let centroidY = 0;
+	if (oldPositions.size > 0) {
+		for (const { x, y } of oldPositions.values()) {
+			centroidX += x;
+			centroidY += y;
+		}
+		centroidX /= oldPositions.size;
+		centroidY /= oldPositions.size;
+	}
+
+	// Create mutable copies.
 	// Always start from old positions when available so transitions are smooth.
+	// Nodes without a prior position are scattered near the centroid of old nodes
+	// to avoid the "pile at origin" effect during mode transitions.
+	let newNodeIndex = 0;
 	simNodes = data.nodes.map((n) => {
 		const sn: SimNode = { ...n };
 		const old = oldPositions.get(n.id);
 		if (old) {
 			sn.x = old.x;
 			sn.y = old.y;
+		} else if (oldPositions.size > 0) {
+			// Scatter new nodes in a ring around the centroid of the old layout
+			const angle = (2 * Math.PI * newNodeIndex) / Math.max(1, data.nodes.length - oldPositions.size);
+			const radius = 80 + Math.random() * 60;
+			sn.x = centroidX + Math.cos(angle) * radius;
+			sn.y = centroidY + Math.sin(angle) * radius;
+			newNodeIndex++;
 		}
-		if (useForceLayout && pinnedNodes.has(n.id) && old) {
+		// Restore pinned positions in wiki (force) mode
+		if (isForceMode && pinnedNodes.has(n.id) && old) {
 			sn.fx = old.x;
 			sn.fy = old.y;
 		}
@@ -1284,6 +1518,19 @@ function setupSimulation(data: GraphData) {
 
 	// Pre-split by edge type to avoid filtering every render frame
 	wikiSimLinks = simLinks.filter((l) => l.type === "wiki");
+	const clusterRepresentatives = deriveClusterRepresentativesFromGraph(data);
+	clusterRepresentativeIds = new Set([...clusterRepresentatives.values()].map((node) => node.id));
+	clusterRepresentativeNodes = new Map(
+		[...clusterRepresentatives].flatMap(([cluster, node]) => {
+			const simNode = simNodeMap.get(node.id);
+			return simNode ? [[cluster, simNode] as const] : [];
+		}),
+	);
+	clusterNodeCounts = new Map<number, number>();
+	for (const node of data.nodes) {
+		if (node.cluster == null) continue;
+		clusterNodeCounts.set(node.cluster, (clusterNodeCounts.get(node.cluster) ?? 0) + 1);
+	}
 
 	// Build adjacency map for O(1) hover-dimming lookups
 	adjacency = new Map();
@@ -1310,96 +1557,145 @@ function setupSimulation(data: GraphData) {
 	if (isSmooth) skipNextSetupEffects = false;
 	if (!isSmooth) edgeFadeAlpha = 0;
 
-	// When force layout is disabled, create a minimal simulation that pins
-	// nodes at their projection coordinates. This keeps the render loop alive
-	// for zoom/pan/drag interaction without applying any layout forces.
-	if (!useForceLayout && !transitionTargets) {
-		// If nodes had previous positions, animate to new projection coordinates
-		const shouldAnimate = oldPositions.size > 0 && !isSmooth;
+	return { oldPositions, isSmooth };
+}
 
-		if (shouldAnimate) {
-			// Build target map from the original graph data positions
-			const projTargets = new Map<string, { x: number; y: number }>();
-			for (const n of data.nodes) {
-				if (n.x != null && n.y != null) {
-					projTargets.set(n.id, { x: n.x, y: n.y });
-				}
-			}
-			const normalized = normalizeTargetsToView(simNodes, projTargets);
+// ============================================================================
+// Smart mode: static projected layout (no d3-force)
+// ============================================================================
 
-			simulation = forceSimulation<SimNode>(simNodes)
-				.force("targetX", forceX<SimNode>((d) => normalized.get(d.id)?.x ?? d.x ?? 0).strength(0.08))
-				.force("targetY", forceY<SimNode>((d) => normalized.get(d.id)?.y ?? d.y ?? 0).strength(0.08))
-				.force(
-					"collide",
-					forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
-				)
-				.on("tick", () => render())
-				.on("end", () => {
-					// Once settled, pin nodes at their final positions
-					for (const sn of simNodes) {
-						const t = normalized.get(sn.id);
-						if (t) {
-							sn.x = t.x;
-							sn.y = t.y;
-						}
-						sn.fx = sn.x;
-						sn.fy = sn.y;
-					}
-					fitToView();
-					render();
-				})
-				.alphaDecay(0.02)
-				.velocityDecay(0.35);
+/** Stop the smart-mode rAF render loop. */
+function stopSmartRaf() {
+	if (smartRafId != null) {
+		cancelAnimationFrame(smartRafId);
+		smartRafId = null;
+	}
+}
 
-			needsInitialFit = false;
-		} else {
-			// First load or smooth swap: pin nodes at projection coordinates
-			for (const sn of simNodes) {
-				sn.fx = sn.x;
-				sn.fy = sn.y;
-			}
+/**
+ * Set up the smart (projected) graph — nodes are placed directly at their
+ * projected x/y coordinates. No d3-force simulation is used.
+ *
+ * If nodes had previous positions (e.g. from a re-projection), animates
+ * them to their new positions using a rAF-based lerp.
+ */
+function setupSmartLayout(data: GraphData, oldPositions: Map<string, { x: number; y: number }>, isSmooth: boolean) {
+	const shouldAnimate = oldPositions.size > 0 && !isSmooth;
 
-			simulation = forceSimulation<SimNode>(simNodes)
-				.force(
-					"collide",
-					forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
-				)
-				.on("tick", () => {
-					if (needsInitialFit) {
-						initialFitTickCount++;
-						if (initialFitTickCount === 5 || (initialFitTickCount > 5 && initialFitTickCount % 15 === 0)) {
-							fitToView();
-						}
-						if (simulation && simulation.alpha() < 0.1) {
-							needsInitialFit = false;
-							initialFitTickCount = 0;
-							fitToView();
-						}
-					}
-					render();
-				})
-				.alphaDecay(0.05)
-				.velocityDecay(0.4);
-
-			if (!isSmooth) {
-				needsInitialFit = true;
-				initialFitTickCount = 0;
-			} else {
-				simulation.alpha(0.05);
-				needsInitialFit = false;
+	if (shouldAnimate) {
+		// Build target map from the raw projected positions.
+		// We animate directly to these (no rescaling) so the final layout
+		// is identical to a fresh start in smart mode.
+		const projTargets = new Map<string, { x: number; y: number }>();
+		for (const n of data.nodes) {
+			if (n.x != null && n.y != null) {
+				projTargets.set(n.id, { x: n.x, y: n.y });
 			}
 		}
 
-		return;
+		const TRANSITION_DURATION = 900; // ms
+		const startTime = performance.now();
+		// Snapshot start positions (in the old coordinate space)
+		const startPositions = new Map<string, { x: number; y: number }>();
+		for (const sn of simNodes) {
+			startPositions.set(sn.id, { x: sn.x ?? 0, y: sn.y ?? 0 });
+		}
+
+		needsInitialFit = false;
+
+		// Capture the camera transform at animation start so we can
+		// smoothly interpolate it alongside the node positions.
+		cancelCameraAnim();
+
+		function animateStep(now: number) {
+			const elapsed = now - startTime;
+			const t = Math.min(elapsed / TRANSITION_DURATION, 1);
+			const ease = easeOutCubic(t);
+
+			for (const sn of simNodes) {
+				const start = startPositions.get(sn.id);
+				const target = projTargets.get(sn.id);
+				if (start && target) {
+					sn.x = start.x + (target.x - start.x) * ease;
+					sn.y = start.y + (target.y - start.y) * ease;
+				}
+			}
+
+			// Continuously reframe the camera as nodes move so there's
+			// no jarring jump at the end.
+			if (!canvasEl) {
+				render();
+			} else {
+				const bounds = computeNodeBounds(simNodes);
+				if (bounds) {
+					const rect = canvasEl.getBoundingClientRect();
+					const target = framingTransform(bounds, { width: rect.width, height: rect.height }, 20);
+					// Blend camera toward target each frame for a smooth follow
+					const camBlend = Math.min(ease, 1);
+					transform = {
+						x: transform.x + (target.x - transform.x) * camBlend,
+						y: transform.y + (target.y - transform.y) * camBlend,
+						scale: transform.scale + (target.scale - transform.scale) * camBlend,
+					};
+				}
+				render();
+			}
+
+			if (t < 1) {
+				smartRafId = requestAnimationFrame(animateStep);
+			} else {
+				smartRafId = null;
+			}
+		}
+
+		smartRafId = requestAnimationFrame(animateStep);
+	} else {
+		// First load or smooth swap: place nodes directly at projected coords
+		// (they already have the right x/y from the data)
+
+		if (!isSmooth) {
+			needsInitialFit = true;
+			initialFitTickCount = 0;
+		} else {
+			needsInitialFit = false;
+		}
+
+		// Kick off initial fit-to-view via a short rAF sequence.
+		// Set the camera directly each frame (no animation) to track the
+		// bounding box, then do one smooth animated fitToView at the end.
+		if (needsInitialFit) {
+			let tickCount = 0;
+			function initialFitLoop() {
+				tickCount++;
+				if (tickCount >= 5 && canvasEl) {
+					const bounds = computeNodeBounds(simNodes);
+					if (bounds) {
+						const rect = canvasEl.getBoundingClientRect();
+						transform = framingTransform(bounds, { width: rect.width, height: rect.height }, 20);
+					}
+				}
+				render();
+				if (tickCount < 30) {
+					smartRafId = requestAnimationFrame(initialFitLoop);
+				} else {
+					smartRafId = null;
+					needsInitialFit = false;
+					initialFitTickCount = 0;
+					fitToView();
+				}
+			}
+			smartRafId = requestAnimationFrame(initialFitLoop);
+		} else {
+			render();
+		}
 	}
+}
 
-	// Transition mode: handled by a separate $effect that injects
-	// forceX/forceY into the existing simulation (see below).
-	// setupSimulation only creates the normal force-directed layout.
+// ============================================================================
+// Wiki mode: d3-force simulation setup
+// ============================================================================
 
-	// Compute per-cluster centroids in 2D for cluster cohesion force
-
+function setupForceSimulation(data: GraphData, oldPositions: Map<string, { x: number; y: number }>, isSmooth: boolean) {
 	simulation = forceSimulation<SimNode>(simNodes)
 		.force(
 			"link",
@@ -1421,14 +1717,19 @@ function setupSimulation(data: GraphData) {
 			forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
 		)
 		.on("tick", () => {
-			// Continuously fit-to-view during initial settling so the graph
-			// tracks the shrinking bounding box as nodes converge.
+			// Continuously reframe the camera during initial settling so the
+			// graph tracks the shrinking bounding box as nodes converge.
+			// We set the transform directly (no animation) to avoid stacking
+			// competing animated fitToView calls, then do one smooth animated
+			// fitToView once the simulation has nearly settled.
 			if (needsInitialFit) {
 				initialFitTickCount++;
-				// Start fitting at tick 5, then re-fit every 15 ticks until
-				// alpha drops below 0.1 (simulation nearly settled).
-				if (initialFitTickCount === 5 || (initialFitTickCount > 5 && initialFitTickCount % 15 === 0)) {
-					fitToView();
+				if (initialFitTickCount >= 5 && canvasEl) {
+					const bounds = computeNodeBounds(simNodes);
+					if (bounds) {
+						const rect = canvasEl.getBoundingClientRect();
+						transform = framingTransform(bounds, { width: rect.width, height: rect.height }, 20);
+					}
 				}
 				if (simulation && simulation.alpha() < 0.1) {
 					needsInitialFit = false;
@@ -1441,137 +1742,65 @@ function setupSimulation(data: GraphData) {
 		.alphaDecay(0.02)
 		.velocityDecay(0.3);
 
-	// If nodes already had positions, start with low alpha for gentle transition
+	// If nodes already had positions, start with low alpha for gentle transition.
+	// On a smooth data swap (e.g. cosmetic update), skip the initial fit entirely.
+	// On a mode switch (smart → wiki), use a lower alpha and slower decay so
+	// nodes drift into place over ~700ms instead of snapping instantly.
 	if (oldPositions.size > 0) {
-		simulation.alpha(isSmooth ? 0.05 : 0.3);
-		needsInitialFit = false;
+		if (isSmooth) {
+			simulation.alpha(0.05);
+			needsInitialFit = false;
+		} else {
+			simulation.alpha(0.15).alphaDecay(0.008).velocityDecay(0.4);
+			needsInitialFit = true;
+		}
 	}
 }
 
-// React to graphData or useForceLayout changes
+// ============================================================================
+// Main graph setup — dispatches to wiki or smart layout engine
+// ============================================================================
+
+function setupGraph(data: GraphData) {
+	// Stop any existing layout engine
+	if (simulation) {
+		simulation.stop();
+		simulation = null;
+	}
+	stopSmartRaf();
+
+	if (data.nodes.length === 0) return;
+
+	const { oldPositions, isSmooth } = buildInternalData(data);
+
+	if (isForceMode) {
+		// Wiki mode: full d3-force simulation
+		setupForceSimulation(data, oldPositions, isSmooth);
+	} else {
+		// Smart mode: static projected positions, no d3-force
+		setupSmartLayout(data, oldPositions, isSmooth);
+	}
+}
+
+// React to graphData or mode changes
 $effect(() => {
 	// Access reactive dependencies
 	const data = graphData;
-	const _forceLayout = useForceLayout;
-	setupSimulation(data);
+	const _mode = mode;
+	setupGraph(data);
 
 	return () => {
 		if (simulation) {
 			simulation.stop();
 			simulation = null;
 		}
+		stopSmartRaf();
 	};
 });
 
-/**
- * Rescale target positions so they occupy the same bounding region as the
- * current node positions. This prevents jarring jumps when coordinate
- * spaces differ (e.g. UMAP output range vs d3-force layout range).
- */
-function normalizeTargetsToView(
-	nodes: SimNode[],
-	targets: Map<string, { x: number; y: number }>,
-): Map<string, { x: number; y: number }> {
-	let cMinX = Infinity;
-	let cMaxX = -Infinity;
-	let cMinY = Infinity;
-	let cMaxY = -Infinity;
-	for (const node of nodes) {
-		if (node.x != null && node.y != null) {
-			if (node.x < cMinX) cMinX = node.x;
-			if (node.x > cMaxX) cMaxX = node.x;
-			if (node.y < cMinY) cMinY = node.y;
-			if (node.y > cMaxY) cMaxY = node.y;
-		}
-	}
-
-	let tMinX = Infinity;
-	let tMaxX = -Infinity;
-	let tMinY = Infinity;
-	let tMaxY = -Infinity;
-	for (const { x, y } of targets.values()) {
-		if (x < tMinX) tMinX = x;
-		if (x > tMaxX) tMaxX = x;
-		if (y < tMinY) tMinY = y;
-		if (y > tMaxY) tMaxY = y;
-	}
-
-	const cCx = (cMinX + cMaxX) / 2;
-	const cCy = (cMinY + cMaxY) / 2;
-	const cSpan = Math.max(cMaxX - cMinX, cMaxY - cMinY) || 1;
-
-	const tCx = (tMinX + tMaxX) / 2;
-	const tCy = (tMinY + tMaxY) / 2;
-	const tSpan = Math.max(tMaxX - tMinX, tMaxY - tMinY) || 1;
-
-	const scale = cSpan / tSpan;
-
-	const normalized = new Map<string, { x: number; y: number }>();
-	for (const [id, { x, y }] of targets) {
-		normalized.set(id, {
-			x: (x - tCx) * scale + cCx,
-			y: (y - tCy) * scale + cCy,
-		});
-	}
-	return normalized;
-}
-
-// Animate nodes from current positions to transition targets by injecting
-// forceX/forceY into the *existing* d3 simulation (no data swap needed).
+// Hot-update force parameters without full rebuild (wiki mode only)
 $effect(() => {
-	const targets = transitionTargets;
-	if (!targets || targets.size === 0) return;
-
-	// Rescale targets into the current graph coordinate space
-	const normalized = normalizeTargetsToView(simNodes, targets);
-
-	// Strip wiki-layout forces; keep only position-targeting + collision
-	simulation!.force("link", null);
-	simulation!.force("charge", null);
-	simulation!.force("center", null);
-	simulation!.force("gravityX", null);
-	simulation!.force("gravityY", null);
-	simulation!.force("cluster", null);
-
-	simulation!.force("targetX", forceX<SimNode>((d) => normalized.get(d.id)?.x ?? d.x ?? 0).strength(0.08));
-	simulation!.force("targetY", forceY<SimNode>((d) => normalized.get(d.id)?.y ?? d.y ?? 0).strength(0.08));
-
-	// Unpin all nodes so the transition forces can move them
-	for (const sn of simNodes) {
-		sn.fx = null;
-		sn.fy = null;
-	}
-
-	needsInitialFit = false;
-	let transitionTickCount = 0;
-	simulation!.alphaDecay(0.02).velocityDecay(0.35).alpha(1).restart();
-
-	// Replace the existing tick handler with one that progressively fits
-	simulation!.on("tick", () => {
-		transitionTickCount++;
-		// Progressively fit to view as nodes converge
-		if (transitionTickCount === 5 || (transitionTickCount > 5 && transitionTickCount % 15 === 0)) {
-			fitToView();
-		}
-		render();
-	});
-
-	simulation!.on("end", () => {
-		for (const node of simNodes) {
-			const t = normalized.get(node.id);
-			if (t) {
-				node.x = t.x;
-				node.y = t.y;
-			}
-		}
-		render();
-		onTransitionEnd?.();
-	});
-});
-
-// Hot-update force parameters without full rebuild
-$effect(() => {
-	if (!simulation) return;
+	if (!simulation || !isForceMode) return;
 	const _charge = chargeStrength;
 	const _link = linkDistance;
 
@@ -1602,15 +1831,73 @@ onMount(() => {
 	// Register wheel handler as non-passive so preventDefault() works
 	canvasEl.addEventListener("wheel", handleWheel, { passive: false });
 
-	// Keyboard handler for Escape to clear selection / exit lasso mode
+	// Keyboard handler for graph shortcuts
 	function handleKeyDown(e: KeyboardEvent) {
-		if (e.key === "Escape") {
-			if (isLassoing) {
-				isLassoing = false;
-				lassoPoints = [];
+		// Ignore when user is typing in an input/textarea inside the inspector
+		const tag = (e.target as HTMLElement)?.tagName;
+		if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+		// Cmd/Ctrl pressed while hovering a node → trigger preview
+		if (
+			(e.key === "Meta" || e.key === "Control") &&
+			hoveredNode &&
+			onHoverPreview &&
+			previewTriggeredForNode !== hoveredNode.id
+		) {
+			triggerNodePreview(e, hoveredNode);
+			return;
+		}
+
+		switch (e.key) {
+			case "Escape":
+				if (isLassoing) {
+					isLassoing = false;
+					lassoPoints = [];
+					render();
+				} else if (selectedNodes.size > 0) {
+					clearSelection();
+				} else if (focusedClusters.size > 0) {
+					onClearFocusedClusters?.();
+				}
+				break;
+			case "f":
+				// Zoom to selection if nodes are selected, otherwise fit entire graph
+				if (selectedNodes.size > 0) {
+					panToSelection();
+				} else {
+					fitToView();
+				}
+				break;
+			case "=":
+			case "+": {
+				// Zoom in toward center
+				const rect = canvasEl.getBoundingClientRect();
+				const cx = rect.width / 2;
+				const cy = rect.height / 2;
+				const newScale = Math.min(10, transform.scale * 1.2);
+				const scaleRatio = newScale / transform.scale;
+				transform = {
+					x: cx - (cx - transform.x) * scaleRatio,
+					y: cy - (cy - transform.y) * scaleRatio,
+					scale: newScale,
+				};
 				render();
-			} else if (selectedNodes.size > 0) {
-				clearSelection();
+				break;
+			}
+			case "-": {
+				// Zoom out from center
+				const rect = canvasEl.getBoundingClientRect();
+				const cx = rect.width / 2;
+				const cy = rect.height / 2;
+				const newScale = Math.max(0.1, transform.scale / 1.2);
+				const scaleRatio = newScale / transform.scale;
+				transform = {
+					x: cx - (cx - transform.x) * scaleRatio,
+					y: cy - (cy - transform.y) * scaleRatio,
+					scale: newScale,
+				};
+				render();
+				break;
 			}
 		}
 	}
@@ -1634,118 +1921,61 @@ onMount(() => {
 		containerEl.removeEventListener("keydown", handleKeyDown);
 		resizeObserver.disconnect();
 		document.body.removeEventListener("css-change", handleCssChange);
-		if (animFrameId != null) cancelAnimationFrame(animFrameId);
+		cancelCameraAnim();
 		if (hoverAnimFrameId != null) cancelAnimationFrame(hoverAnimFrameId);
 		if (simulation) {
 			simulation.stop();
 			simulation = null;
 		}
+		stopSmartRaf();
 	};
 });
 
-// Animation frame ID for animated transitions
-let animFrameId: number | null = null;
+// Cancel function for the current camera animation (returned by animateTransform)
+let cancelCameraAnim: () => void = () => {};
+
+/** Animate the camera to frame the given nodes with the specified padding and duration. */
+function animateCameraToNodes(filter?: (node: SimNode) => boolean, padding = 40, duration = 400) {
+	if (!canvasEl) return;
+	const bounds = computeNodeBounds(simNodes, filter);
+	if (!bounds) return;
+	const rect = canvasEl.getBoundingClientRect();
+	const target = framingTransform(bounds, { width: rect.width, height: rect.height }, padding);
+
+	cancelCameraAnim();
+	cancelCameraAnim = animateTransform(
+		() => transform,
+		(t) => {
+			transform = t;
+			render();
+		},
+		target,
+		duration,
+	);
+}
 
 /**
  * Fit the graph to the viewport with smooth animation.
  */
 export function fitToView() {
-	if (!canvasEl || simNodes.length === 0) return;
-	const rect = canvasEl.getBoundingClientRect();
-
-	let minX = Number.POSITIVE_INFINITY;
-	let minY = Number.POSITIVE_INFINITY;
-	let maxX = Number.NEGATIVE_INFINITY;
-	let maxY = Number.NEGATIVE_INFINITY;
-
-	for (const node of simNodes) {
-		if (node.x != null && node.y != null) {
-			minX = Math.min(minX, node.x);
-			minY = Math.min(minY, node.y);
-			maxX = Math.max(maxX, node.x);
-			maxY = Math.max(maxY, node.y);
-		}
-	}
-
-	const graphWidth = maxX - minX || 1;
-	const graphHeight = maxY - minY || 1;
-	const padding = 20;
-
-	const scaleX = (rect.width - padding * 2) / graphWidth;
-	const scaleY = (rect.height - padding * 2) / graphHeight;
-	const targetScale = Math.min(scaleX, scaleY, 4);
-
-	const centerX = (minX + maxX) / 2;
-	const centerY = (minY + maxY) / 2;
-
-	const targetX = rect.width / 2 - centerX * targetScale;
-	const targetY = rect.height / 2 - centerY * targetScale;
-
-	// Animate from current transform to target
-	const startTransform = { ...transform };
-	const duration = 300; // ms
-	const startTime = performance.now();
-
-	if (animFrameId != null) cancelAnimationFrame(animFrameId);
-
-	function step(now: number) {
-		const elapsed = now - startTime;
-		const t = Math.min(elapsed / duration, 1);
-		// Ease-out cubic
-		const ease = 1 - (1 - t) ** 3;
-
-		transform = {
-			x: startTransform.x + (targetX - startTransform.x) * ease,
-			y: startTransform.y + (targetY - startTransform.y) * ease,
-			scale: startTransform.scale + (targetScale - startTransform.scale) * ease,
-		};
-		render();
-
-		if (t < 1) {
-			animFrameId = requestAnimationFrame(step);
-		} else {
-			animFrameId = null;
-		}
-	}
-
-	animFrameId = requestAnimationFrame(step);
+	if (simNodes.length === 0) return;
+	animateCameraToNodes(undefined, 20, 300);
 }
 
 /**
- * Return the current simulation positions of all nodes.
+ * Smoothly pan and zoom to frame the currently selected nodes.
  */
-export function getNodePositions(): Map<string, { x: number; y: number }> {
-	const positions = new Map<string, { x: number; y: number }>();
-	for (const node of simNodes) {
-		if (node.x != null && node.y != null) {
-			positions.set(node.id, { x: node.x, y: node.y });
-		}
-	}
-	return positions;
+export function panToSelection() {
+	if (selectedNodes.size === 0) return;
+	animateCameraToNodes((n) => selectedNodes.has(n.id), 60, 400);
 }
 
 /**
- * Tell the canvas that the next graphData change is a cosmetic swap
- * (e.g. adding edges/colors after a transition) — skip fitToView and
- * edge-fade so the graph stays visually stable.
+ * Smoothly pan and zoom to frame the nodes belonging to the given clusters.
  */
-export function prepareDataSwap() {
-	skipNextSetupEffects = true;
-}
-
-/**
- * Update node colors and cluster assignments in-place on the running
- * simulation nodes. Triggers a re-render without rebuilding the simulation.
- */
-export function updateNodeAppearance(updates: Map<string, { color?: string; cluster?: number }>) {
-	for (const node of simNodes) {
-		const u = updates.get(node.id);
-		if (u) {
-			if (u.color !== undefined) node.color = u.color;
-			if (u.cluster !== undefined) node.cluster = u.cluster;
-		}
-	}
-	render();
+export function panToClusters(clusters: Set<number>) {
+	if (simNodes.length === 0 || clusters.size === 0) return;
+	animateCameraToNodes((n) => n.cluster != null && clusters.has(n.cluster), 60, 400);
 }
 </script>
 
@@ -1759,6 +1989,8 @@ export function updateNodeAppearance(updates: Map<string, { color?: string; clus
     onmouseleave={handleMouseLeave}
     oncontextmenu={handleContextMenu}
   ></canvas>
+  <!-- Invisible anchor for Obsidian hover-link popover positioning -->
+  <div bind:this={hoverAnchorEl} class="hover-anchor"></div>
 </div>
 
 <style>
@@ -1778,5 +2010,12 @@ export function updateNodeAppearance(updates: Map<string, { color?: string; clus
 
   canvas:active {
     cursor: grabbing;
+  }
+
+  .hover-anchor {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    pointer-events: none;
   }
 </style>

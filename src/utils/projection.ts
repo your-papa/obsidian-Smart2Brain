@@ -16,6 +16,7 @@ import type { ProjectionMethod } from "../types/graph";
 export interface UMAPOptions {
 	nNeighbors?: number;
 	minDist?: number;
+	nEpochs?: number;
 }
 
 /** Seeded PRNG (mulberry32) for deterministic UMAP results. */
@@ -48,6 +49,10 @@ function umapCosineDistance(a: number[], b: number[]): number {
 const DEFAULT_REDUCE_DIM = 50;
 const DEFAULT_UMAP_NEIGHBORS = 15;
 const DEFAULT_UMAP_MIN_DIST = 0.1;
+const DEFAULT_UMAP_EPOCHS_MIN = 200;
+const DEFAULT_UMAP_EPOCHS_MAX = 500;
+const PCA_OVERSAMPLING = 8;
+const PCA_POWER_ITERATIONS = 1;
 
 function clampUMAPNeighbors(n: number, requested?: number): number {
 	const fallback = Math.max(3, Math.min(DEFAULT_UMAP_NEIGHBORS, n - 1));
@@ -58,6 +63,12 @@ function clampUMAPNeighbors(n: number, requested?: number): number {
 function clampUMAPMinDist(requested?: number): number {
 	if (requested == null || !Number.isFinite(requested)) return DEFAULT_UMAP_MIN_DIST;
 	return Math.max(0, Math.min(requested, 0.99));
+}
+
+function clampUMAPEpochs(n: number, requested?: number): number {
+	const fallback = Math.min(DEFAULT_UMAP_EPOCHS_MAX, Math.max(DEFAULT_UMAP_EPOCHS_MIN, n * 2));
+	if (requested == null || !Number.isFinite(requested)) return fallback;
+	return Math.max(50, Math.min(Math.round(requested), DEFAULT_UMAP_EPOCHS_MAX));
 }
 
 /**
@@ -127,7 +138,7 @@ export async function umapReduce(
 	const data: number[][] = vectors.map((v) => (v instanceof Float32Array ? Array.from(v) : v));
 
 	const nNeighbors = clampUMAPNeighbors(n, umapOptions?.nNeighbors);
-	const nEpochs = Math.min(500, Math.max(200, n * 2));
+	const nEpochs = clampUMAPEpochs(n, umapOptions?.nEpochs);
 
 	const umap = new UMAP({
 		nComponents: targetDim,
@@ -179,72 +190,7 @@ export function pcaReduce(vectors: (Float32Array | number[])[], targetDim = DEFA
 		return [new Float32Array(targetDim)];
 	}
 
-	// Clamp to max extractable components (n-1 from Gram matrix)
-	const nComponents = Math.min(targetDim, n - 1);
-
-	// 1. Compute the mean vector
-	const mean = new Float64Array(d);
-	for (const v of vectors) {
-		for (let j = 0; j < d; j++) mean[j] += v[j];
-	}
-	for (let j = 0; j < d; j++) mean[j] /= n;
-
-	// 2. Center the data
-	const centered: Float64Array[] = vectors.map((v) => {
-		const c = new Float64Array(d);
-		for (let j = 0; j < d; j++) c[j] = v[j] - mean[j];
-		return c;
-	});
-
-	// 3. Gram matrix K = X·Xᵀ (n × n)
-	const K = new Float64Array(n * n);
-	for (let i = 0; i < n; i++) {
-		for (let j = i; j < n; j++) {
-			let dot = 0;
-			for (let k = 0; k < d; k++) dot += centered[i][k] * centered[j][k];
-			K[i * n + j] = dot;
-			K[j * n + i] = dot;
-		}
-	}
-
-	// 4. Extract top-nComponents eigenvectors via power iteration + deflation
-	const eigenvectors: Float64Array[] = [];
-	const eigenvalues: number[] = [];
-
-	for (let c = 0; c < nComponents; c++) {
-		const v = powerIteration(K, n, 200);
-		const lambda = rayleighQuotient(K, v, n);
-
-		if (lambda < 1e-10) break; // remaining components have near-zero variance
-
-		eigenvectors.push(v);
-		eigenvalues.push(lambda);
-
-		// Deflate: K ← K − λ·v·vᵀ
-		for (let i = 0; i < n; i++) {
-			for (let j = 0; j < n; j++) {
-				K[i * n + j] -= lambda * v[i] * v[j];
-			}
-		}
-	}
-
-	const actualDim = eigenvectors.length;
-	if (actualDim === 0) {
-		// Degenerate case — all zero variance
-		return vectors.map(() => new Float32Array(nComponents));
-	}
-
-	// 5. Project: coordinate j of sample i = sqrt(λⱼ) · vⱼ[i]
-	const result: Float32Array[] = [];
-	for (let i = 0; i < n; i++) {
-		const reduced = new Float32Array(nComponents);
-		for (let j = 0; j < actualDim; j++) {
-			reduced[j] = eigenvectors[j][i] * Math.sqrt(eigenvalues[j]);
-		}
-		result.push(reduced);
-	}
-
-	return result;
+	return computePCAScores(vectors, Math.min(targetDim, n - 1, d));
 }
 
 /**
@@ -283,61 +229,193 @@ export function pca2D(vectors: (Float32Array | number[])[], spread = 500): { x: 
 
 	if (n === 0) return [];
 	if (n === 1) return [{ x: 0, y: 0 }];
-
-	const d = vectors[0].length;
-
-	// 1. Compute the mean vector
-	const mean = new Float64Array(d);
-	for (const v of vectors) {
-		for (let j = 0; j < d; j++) mean[j] += v[j];
-	}
-	for (let j = 0; j < d; j++) mean[j] /= n;
-
-	// 2. Center the data
-	const centered: Float64Array[] = vectors.map((v) => {
-		const c = new Float64Array(d);
-		for (let j = 0; j < d; j++) c[j] = v[j] - mean[j];
-		return c;
-	});
-
-	// 3. Compute Gram matrix K = X·Xᵀ (n × n)
-	//    K[i][j] = dot(centered[i], centered[j])
-	const K = new Float64Array(n * n);
-	for (let i = 0; i < n; i++) {
-		for (let j = i; j < n; j++) {
-			let dot = 0;
-			for (let k = 0; k < d; k++) dot += centered[i][k] * centered[j][k];
-			K[i * n + j] = dot;
-			K[j * n + i] = dot;
-		}
-	}
-
-	// 4. Find top eigenvector via power iteration
-	const v1 = powerIteration(K, n, 200);
-	const lambda1 = rayleighQuotient(K, v1, n);
-
-	// 5. Deflate: K' = K - λ₁·v₁·v₁ᵀ
-	for (let i = 0; i < n; i++) {
-		for (let j = 0; j < n; j++) {
-			K[i * n + j] -= lambda1 * v1[i] * v1[j];
-		}
-	}
-
-	// 6. Find second eigenvector
-	const v2 = powerIteration(K, n, 200);
-	const lambda2 = rayleighQuotient(K, v2, n);
-
-	// 7. Scale eigenvectors by sqrt(eigenvalue) to get PCA projections
-	const scale1 = Math.sqrt(Math.max(lambda1, 0));
-	const scale2 = Math.sqrt(Math.max(lambda2, 0));
-
-	const raw = vectors.map((_, i) => ({
-		x: v1[i] * scale1,
-		y: v2[i] * scale2,
+	const scores = computePCAScores(vectors, Math.min(2, vectors[0].length, n - 1));
+	const raw = scores.map((point) => ({
+		x: point[0] ?? 0,
+		y: point[1] ?? 0,
 	}));
 
-	// 8. Normalize to [-spread, spread] range
 	return normalizeCoordinates(raw, spread);
+}
+
+function computePCAScores(vectors: (Float32Array | number[])[], targetDim: number): Float32Array[] {
+	const n = vectors.length;
+	if (n === 0) return [];
+	if (targetDim <= 0) return vectors.map(() => new Float32Array(0));
+
+	const d = vectors[0].length;
+	const mean = computeMean(vectors, d);
+	const sketchDim = Math.min(d, Math.max(targetDim + PCA_OVERSAMPLING, targetDim));
+	const randomBasis = createRandomBasis(d, sketchDim);
+
+	let qColumns = orthonormalizeColumns(multiplyCenteredByBasis(vectors, mean, randomBasis));
+	if (qColumns.length === 0) {
+		return vectors.map(() => new Float32Array(targetDim));
+	}
+
+	for (let i = 0; i < PCA_POWER_ITERATIONS; i++) {
+		const lifted = multiplyCenteredTransposeByBasis(vectors, mean, qColumns);
+		qColumns = orthonormalizeColumns(multiplyCenteredByBasis(vectors, mean, lifted));
+		if (qColumns.length === 0) {
+			return vectors.map(() => new Float32Array(targetDim));
+		}
+	}
+
+	const compressed = multiplyCenteredTransposeByBasis(vectors, mean, qColumns);
+	const smallMatrix = buildBasisGramMatrix(compressed);
+	const { eigenvectors, eigenvalues } = extractTopEigenpairs(
+		smallMatrix,
+		qColumns.length,
+		Math.min(targetDim, qColumns.length),
+	);
+
+	const actualDim = eigenvectors.length;
+	if (actualDim === 0) {
+		return vectors.map(() => new Float32Array(targetDim));
+	}
+
+	const result = Array.from({ length: n }, () => new Float32Array(targetDim));
+	for (let component = 0; component < actualDim; component++) {
+		const eigenvalue = Math.max(eigenvalues[component], 0);
+		if (eigenvalue < 1e-10) continue;
+		const scale = Math.sqrt(eigenvalue);
+		const basisWeights = eigenvectors[component];
+		for (let sample = 0; sample < n; sample++) {
+			let score = 0;
+			for (let col = 0; col < qColumns.length; col++) {
+				score += qColumns[col][sample] * basisWeights[col];
+			}
+			result[sample][component] = score * scale;
+		}
+	}
+
+	return result;
+}
+
+function computeMean(vectors: (Float32Array | number[])[], dimension: number): Float64Array {
+	const mean = new Float64Array(dimension);
+	for (const vector of vectors) {
+		for (let i = 0; i < dimension; i++) {
+			mean[i] += vector[i];
+		}
+	}
+	for (let i = 0; i < dimension; i++) {
+		mean[i] /= vectors.length;
+	}
+	return mean;
+}
+
+function createRandomBasis(dimension: number, count: number): Float64Array[] {
+	const random = seededRandom();
+	return Array.from({ length: count }, () => {
+		const basis = new Float64Array(dimension);
+		for (let i = 0; i < dimension; i++) {
+			basis[i] = random() * 2 - 1;
+		}
+		return basis;
+	});
+}
+
+function multiplyCenteredByBasis(
+	vectors: (Float32Array | number[])[],
+	mean: Float64Array,
+	basis: Float64Array[],
+): Float64Array[] {
+	const columns = basis.map(() => new Float64Array(vectors.length));
+	for (let row = 0; row < vectors.length; row++) {
+		const vector = vectors[row];
+		for (let col = 0; col < basis.length; col++) {
+			const basisVector = basis[col];
+			let sum = 0;
+			for (let dim = 0; dim < mean.length; dim++) {
+				sum += (vector[dim] - mean[dim]) * basisVector[dim];
+			}
+			columns[col][row] = sum;
+		}
+	}
+	return columns;
+}
+
+function multiplyCenteredTransposeByBasis(
+	vectors: (Float32Array | number[])[],
+	mean: Float64Array,
+	basis: Float64Array[],
+): Float64Array[] {
+	const columns = basis.map(() => new Float64Array(mean.length));
+	for (let row = 0; row < vectors.length; row++) {
+		const vector = vectors[row];
+		for (let dim = 0; dim < mean.length; dim++) {
+			const centered = vector[dim] - mean[dim];
+			for (let col = 0; col < basis.length; col++) {
+				columns[col][dim] += centered * basis[col][row];
+			}
+		}
+	}
+	return columns;
+}
+
+function orthonormalizeColumns(columns: Float64Array[]): Float64Array[] {
+	const basis: Float64Array[] = [];
+	for (const column of columns) {
+		const vector = new Float64Array(column);
+		for (const existing of basis) {
+			let projection = 0;
+			for (let i = 0; i < vector.length; i++) {
+				projection += vector[i] * existing[i];
+			}
+			for (let i = 0; i < vector.length; i++) {
+				vector[i] -= projection * existing[i];
+			}
+		}
+		normalize(vector);
+		let norm = 0;
+		for (let i = 0; i < vector.length; i++) {
+			norm += vector[i] * vector[i];
+		}
+		if (norm > 1e-12) {
+			basis.push(vector);
+		}
+	}
+	return basis;
+}
+
+function buildBasisGramMatrix(columns: Float64Array[]): Float64Array {
+	const size = columns.length;
+	const matrix = new Float64Array(size * size);
+	for (let i = 0; i < size; i++) {
+		for (let j = i; j < size; j++) {
+			let dot = 0;
+			for (let k = 0; k < columns[i].length; k++) {
+				dot += columns[i][k] * columns[j][k];
+			}
+			matrix[i * size + j] = dot;
+			matrix[j * size + i] = dot;
+		}
+	}
+	return matrix;
+}
+
+function extractTopEigenpairs(
+	matrix: Float64Array,
+	size: number,
+	count: number,
+): { eigenvectors: Float64Array[]; eigenvalues: number[] } {
+	const working = new Float64Array(matrix);
+	const eigenvectors: Float64Array[] = [];
+	const eigenvalues: number[] = [];
+	for (let component = 0; component < count; component++) {
+		const vector = powerIteration(working, size, 80);
+		const eigenvalue = rayleighQuotient(working, vector, size);
+		if (eigenvalue < 1e-10) break;
+		eigenvectors.push(vector);
+		eigenvalues.push(eigenvalue);
+		for (let i = 0; i < size; i++) {
+			for (let j = 0; j < size; j++) {
+				working[i * size + j] -= eigenvalue * vector[i] * vector[j];
+			}
+		}
+	}
+	return { eigenvectors, eigenvalues };
 }
 
 /**
@@ -374,7 +452,7 @@ export async function umap2D(
 	const nNeighbors = clampUMAPNeighbors(n, umapOptions?.nNeighbors);
 
 	// Scale epochs: small datasets converge quickly, large ones need more
-	const nEpochs = Math.min(500, Math.max(200, n * 2));
+	const nEpochs = clampUMAPEpochs(n, umapOptions?.nEpochs);
 
 	const umap = new UMAP({
 		nComponents: 2,

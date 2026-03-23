@@ -343,12 +343,31 @@ export interface HDBSCANResult {
 	numClusters: number;
 }
 
+const HDBSCAN_EPSILON = 1e-9;
+
+function weightToLambda(weight: number): number {
+	return weight > 0 ? 1 / weight : Number.MAX_SAFE_INTEGER;
+}
+
 /**
  * Compute the mutual reachability distance between two points.
  * mrd(a, b) = max(coreDist(a), coreDist(b), dist(a, b))
  */
 function mutualReachabilityDistance(distAB: number, coreDistA: number, coreDistB: number): number {
 	return Math.max(coreDistA, coreDistB, distAB);
+}
+
+function insertIntoSortedWindow(window: Float64Array, length: number, value: number): void {
+	let insertAt = length;
+	while (insertAt > 0 && value < window[insertAt - 1]) {
+		if (insertAt < window.length) {
+			window[insertAt] = window[insertAt - 1];
+		}
+		insertAt--;
+	}
+	if (insertAt < window.length) {
+		window[insertAt] = value;
+	}
 }
 
 /**
@@ -360,14 +379,24 @@ function computeCoreDistances(distMatrix: Float64Array, n: number, minSamples: n
 	const k = Math.min(minSamples, n - 1);
 
 	for (let i = 0; i < n; i++) {
-		// Collect distances from point i to all other points
-		const distances: number[] = [];
+		if (k === 0) {
+			coreDistances[i] = 0;
+			continue;
+		}
+
+		const nearest = new Float64Array(k).fill(Number.POSITIVE_INFINITY);
+		let count = 0;
 		for (let j = 0; j < n; j++) {
 			if (i === j) continue;
-			distances.push(distMatrix[i * n + j]);
+			const distance = distMatrix[i * n + j];
+			if (count < k) {
+				insertIntoSortedWindow(nearest, count, distance);
+				count++;
+			} else if (distance < nearest[k - 1]) {
+				insertIntoSortedWindow(nearest, k - 1, distance);
+			}
 		}
-		distances.sort((a, b) => a - b);
-		coreDistances[i] = k > 0 ? distances[k - 1] : 0;
+		coreDistances[i] = nearest[k - 1];
 	}
 
 	return coreDistances;
@@ -475,17 +504,193 @@ function buildMST(
 	return edges;
 }
 
+interface SingleLinkageNode {
+	left: number;
+	right: number;
+	size: number;
+	lambda: number;
+	point: number;
+}
+
+function buildSingleLinkageTree(
+	edges: { from: number; to: number; weight: number }[],
+	n: number,
+): { nodes: SingleLinkageNode[]; rootId: number } {
+	const uf = new UnionFind(n);
+	const componentNodes = new Int32Array(n);
+	const nodes: SingleLinkageNode[] = Array.from({ length: n }, (_, point) => ({
+		left: -1,
+		right: -1,
+		size: 1,
+		lambda: Number.MAX_SAFE_INTEGER,
+		point,
+	}));
+
+	for (let i = 0; i < n; i++) {
+		componentNodes[i] = i;
+	}
+
+	for (const edge of edges) {
+		const rootFrom = uf.find(edge.from);
+		const rootTo = uf.find(edge.to);
+		if (rootFrom === rootTo) continue;
+
+		const leftNode = componentNodes[rootFrom];
+		const rightNode = componentNodes[rootTo];
+		const newNodeId = nodes.length;
+		nodes.push({
+			left: leftNode,
+			right: rightNode,
+			size: nodes[leftNode].size + nodes[rightNode].size,
+			lambda: weightToLambda(edge.weight),
+			point: -1,
+		});
+
+		uf.union(rootFrom, rootTo);
+		componentNodes[uf.find(rootFrom)] = newNodeId;
+	}
+
+	const rootId = componentNodes[uf.find(0)];
+	return { nodes, rootId };
+}
+
+interface CondensedCluster {
+	nodeId: number;
+	parent: number | null;
+	children: number[];
+	birthLambda: number;
+	deathLambda: number;
+	stability: number;
+	selectable: boolean;
+	selected: boolean;
+	subtreeStability: number;
+}
+
+function collectLeafPoints(nodeId: number, nodes: SingleLinkageNode[], output: number[]): void {
+	if (nodeId < 0) return;
+	const node = nodes[nodeId];
+	if (node.left === -1) {
+		output.push(node.point);
+		return;
+	}
+	collectLeafPoints(node.left, nodes, output);
+	collectLeafPoints(node.right, nodes, output);
+}
+
+function condenseSingleLinkageTree(
+	nodes: SingleLinkageNode[],
+	rootId: number,
+	minClusterSize: number,
+): CondensedCluster[] {
+	const clusters: CondensedCluster[] = [];
+
+	function createCluster(nodeId: number, birthLambda: number, parent: number | null, selectable: boolean): number {
+		const clusterId = clusters.length;
+		clusters.push({
+			nodeId,
+			parent,
+			children: [],
+			birthLambda,
+			deathLambda: birthLambda,
+			stability: 0,
+			selectable,
+			selected: false,
+			subtreeStability: 0,
+		});
+		if (parent !== null) {
+			clusters[parent].children.push(clusterId);
+		}
+		return clusterId;
+	}
+
+	function expandCluster(clusterId: number, nodeId: number): void {
+		const cluster = clusters[clusterId];
+		const node = nodes[nodeId];
+		cluster.nodeId = nodeId;
+
+		if (node.left === -1) {
+			cluster.deathLambda = cluster.birthLambda;
+			return;
+		}
+
+		const splitLambda = node.lambda;
+		const leftNode = nodes[node.left];
+		const rightNode = nodes[node.right];
+		const leftLarge = leftNode.size >= minClusterSize;
+		const rightLarge = rightNode.size >= minClusterSize;
+
+		if (leftLarge && rightLarge) {
+			cluster.deathLambda = splitLambda;
+			cluster.stability += node.size * Math.max(0, splitLambda - cluster.birthLambda);
+
+			const leftCluster = createCluster(node.left, splitLambda, clusterId, true);
+			const rightCluster = createCluster(node.right, splitLambda, clusterId, true);
+			expandCluster(leftCluster, node.left);
+			expandCluster(rightCluster, node.right);
+			return;
+		}
+
+		if (leftLarge || rightLarge) {
+			cluster.stability +=
+				(leftLarge ? rightNode.size : leftNode.size) * Math.max(0, splitLambda - cluster.birthLambda);
+			expandCluster(clusterId, leftLarge ? node.left : node.right);
+			return;
+		}
+
+		cluster.deathLambda = splitLambda;
+		cluster.stability += node.size * Math.max(0, splitLambda - cluster.birthLambda);
+	}
+
+	const rootCluster = createCluster(rootId, 0, null, false);
+	expandCluster(rootCluster, rootId);
+	return clusters;
+}
+
+function selectEomClusters(clusters: CondensedCluster[]): number[] {
+	if (clusters.length === 0) return [];
+
+	for (let i = clusters.length - 1; i >= 0; i--) {
+		const cluster = clusters[i];
+		if (cluster.children.length === 0) {
+			cluster.subtreeStability = cluster.selectable ? cluster.stability : 0;
+			cluster.selected = cluster.selectable && cluster.stability > HDBSCAN_EPSILON;
+			continue;
+		}
+
+		let childSum = 0;
+		for (const childId of cluster.children) {
+			childSum += clusters[childId].subtreeStability;
+		}
+
+		const chooseSelf =
+			cluster.selectable && cluster.stability > HDBSCAN_EPSILON && cluster.stability > childSum + HDBSCAN_EPSILON;
+
+		cluster.subtreeStability = chooseSelf ? cluster.stability : childSum;
+		cluster.selected = chooseSelf;
+	}
+
+	const selected: number[] = [];
+	const stack = [0];
+	while (stack.length > 0) {
+		const clusterId = stack.pop()!;
+		const cluster = clusters[clusterId];
+		if (cluster.selected) {
+			selected.push(clusterId);
+			continue;
+		}
+		for (let i = cluster.children.length - 1; i >= 0; i--) {
+			stack.push(cluster.children[i]);
+		}
+	}
+
+	return selected;
+}
+
 /**
- * Extract flat clusters from the MST using a bottom-up condensed tree
- * with the Excess of Mass (EOM) cluster selection method.
- *
- * Processes sorted MST edges (ascending weight) and tracks three merge cases:
- * 1. Two small groups (both < minClusterSize) merge to form a new cluster → leaf in hierarchy
- * 2. Two large groups (both ≥ minClusterSize) merge → parent cluster with two children
- * 3. Small group merges into large group → cluster grows, noise points absorbed
- *
- * Each point records its own λ_p (1/weight at time of absorption), and stability
- * is computed as Σ(λ_p − λ_min) per cluster.
+ * Extract flat clusters from the mutual-reachability MST by:
+ * 1. Building the single-linkage tree induced by the MST.
+ * 2. Condensing that tree with HDBSCAN's minClusterSize semantics.
+ * 3. Applying EOM selection to the condensed hierarchy.
  */
 function extractClusters(
 	edges: { from: number; to: number; weight: number }[],
@@ -494,155 +699,17 @@ function extractClusters(
 ): number[] {
 	if (n < 2) return n === 1 ? [0] : [];
 
-	const uf = new UnionFind(n);
-
-	// Track current groups: rootIndex → array of point indices in that group
-	const currentGroups = new Map<number, number[]>();
-	for (let i = 0; i < n; i++) {
-		currentGroups.set(i, [i]);
-	}
-
-	// Hierarchy entries built bottom-up
-	interface HierarchyEntry {
-		childrenClusters: [number, number] | null; // indices into hierarchy array
-		elements: number[]; // point indices
-		lambdaPs: number[]; // per-point λ values (1/weight at absorption)
-		lambdaMin: number | null; // λ at which this cluster dies (set when merged into parent)
-		lambdaMax: number; // λ at which this cluster was born
-	}
-	const hierarchy: HierarchyEntry[] = [];
-
-	// Map: UF root → index in hierarchy array
-	const rootToHierarchy = new Map<number, number>();
-
-	for (const edge of edges) {
-		const rootFrom = uf.find(edge.from);
-		const rootTo = uf.find(edge.to);
-		if (rootFrom === rootTo) continue;
-
-		const sizeFrom = currentGroups.get(rootFrom)!.length;
-		const sizeTo = currentGroups.get(rootTo)!.length;
-		const newSize = sizeFrom + sizeTo;
-		const lambda = edge.weight > 0 ? 1 / edge.weight : Number.MAX_SAFE_INTEGER;
-
-		uf.union(edge.from, edge.to);
-		const newRoot = uf.find(edge.from);
-		const newElements = currentGroups.get(rootFrom)!.concat(currentGroups.get(rootTo)!);
-
-		if (newSize >= minClusterSize && sizeFrom < minClusterSize && sizeTo < minClusterSize) {
-			// Case 1: Two noise groups merge to form a new leaf cluster
-			hierarchy.push({
-				childrenClusters: null,
-				elements: newElements,
-				lambdaPs: new Array(newElements.length).fill(lambda),
-				lambdaMin: null,
-				lambdaMax: lambda,
-			});
-			rootToHierarchy.set(newRoot, hierarchy.length - 1);
-		} else if (newSize >= minClusterSize && sizeFrom >= minClusterSize && sizeTo >= minClusterSize) {
-			// Case 2: Two clusters merge to form a parent cluster
-			const leftIdx = rootToHierarchy.get(rootFrom)!;
-			const rightIdx = rootToHierarchy.get(rootTo)!;
-
-			hierarchy.push({
-				childrenClusters: [leftIdx, rightIdx],
-				elements: newElements,
-				lambdaPs: new Array(newElements.length).fill(lambda),
-				lambdaMin: null,
-				lambdaMax: lambda,
-			});
-
-			// Children die at this lambda
-			hierarchy[leftIdx].lambdaMin = lambda;
-			hierarchy[rightIdx].lambdaMin = lambda;
-
-			rootToHierarchy.set(newRoot, hierarchy.length - 1);
-		} else if (newSize >= minClusterSize) {
-			// Case 3: Noise group absorbed into existing cluster
-			if (rootToHierarchy.get(newRoot) === undefined) {
-				// UF made the noise group's root the new root — reassign
-				const existingIdx = rootToHierarchy.get(rootFrom) ?? rootToHierarchy.get(rootTo);
-				if (existingIdx !== undefined) {
-					rootToHierarchy.set(newRoot, existingIdx);
-				}
-			}
-			const hIdx = rootToHierarchy.get(newRoot);
-			if (hIdx !== undefined) {
-				const cluster = hierarchy[hIdx];
-				cluster.elements = newElements;
-				const noiseSize = sizeFrom < minClusterSize ? sizeFrom : sizeTo;
-				for (let i = 0; i < noiseSize; i++) {
-					cluster.lambdaPs.push(lambda);
-				}
-			}
-		}
-		// else: both groups small and combined still small → stays noise
-
-		currentGroups.set(newRoot, newElements);
-		currentGroups.delete(newRoot === rootFrom ? rootTo : rootFrom);
-	}
-
-	// Remove the root entry (last hierarchy entry spans everything — not useful)
-	if (hierarchy.length > 0) {
-		hierarchy.pop();
-	}
-
-	if (hierarchy.length === 0) {
-		// No clusters formed — assign everything to cluster 0
-		return new Array(n).fill(0);
-	}
-
-	// Compute stability for each cluster: Σ(λ_p − λ_min) for all points
-	const stabilities = new Float64Array(hierarchy.length);
-	for (let i = 0; i < hierarchy.length; i++) {
-		const h = hierarchy[i];
-		const lMin = h.lambdaMin ?? 0;
-		for (const lp of h.lambdaPs) {
-			stabilities[i] += lp - lMin;
-		}
-	}
-
-	// EOM cluster selection (bottom-up since hierarchy is in topological order)
-	const isSelected = new Uint8Array(hierarchy.length);
-	const sHat = new Float64Array(hierarchy.length);
-
-	for (let i = 0; i < hierarchy.length; i++) {
-		if (hierarchy[i].childrenClusters === null) {
-			// Leaf cluster
-			sHat[i] = stabilities[i];
-			isSelected[i] = 1;
-		} else {
-			const [leftIdx, rightIdx] = hierarchy[i].childrenClusters!;
-			const childSum = sHat[leftIdx] + sHat[rightIdx];
-
-			if (stabilities[i] < childSum) {
-				// Children are more stable
-				sHat[i] = childSum;
-				isSelected[i] = 0;
-			} else {
-				// Parent is more stable — select it, deselect children
-				sHat[i] = stabilities[i];
-				isSelected[i] = 1;
-				isSelected[leftIdx] = 0;
-				isSelected[rightIdx] = 0;
-			}
-		}
-	}
-
-	// Assign labels from selected clusters
+	const { nodes, rootId } = buildSingleLinkageTree(edges, n);
+	const condensed = condenseSingleLinkageTree(nodes, rootId, minClusterSize);
+	const selectedClusters = selectEomClusters(condensed);
 	const labels = new Int32Array(n).fill(-1);
-	let labelCounter = 0;
-	for (let i = 0; i < hierarchy.length; i++) {
-		if (isSelected[i]) {
-			for (const p of hierarchy[i].elements) {
-				labels[p] = labelCounter;
-			}
-			labelCounter++;
-		}
-	}
 
-	if (labelCounter === 0) {
-		for (let i = 0; i < n; i++) labels[i] = 0;
+	for (let label = 0; label < selectedClusters.length; label++) {
+		const members: number[] = [];
+		collectLeafPoints(condensed[selectedClusters[label]].nodeId, nodes, members);
+		for (const point of members) {
+			labels[point] = label;
+		}
 	}
 
 	return Array.from(labels);
@@ -653,8 +720,7 @@ function extractClusters(
  *
  * Hierarchical Density-Based Spatial Clustering of Applications with Noise.
  * Automatically determines the number of clusters based on density.
- * Points in low-density regions are labeled as noise (-1) but are reassigned
- * to the nearest cluster for graph display purposes.
+ * Points in low-density regions remain labeled as noise (-1).
  *
  * @param vectors Array of vectors to cluster
  * @param minClusterSize Minimum number of points to form a cluster (default: 5)
@@ -674,12 +740,8 @@ export function hdbscan(
 	if (n === 0) {
 		return { labels: [], numClusters: 0 };
 	}
-	if (n === 1) {
-		return { labels: [0], numClusters: 1 };
-	}
 	if (n < minClusterSize) {
-		// Not enough points for even one cluster — assign all to cluster 0
-		return { labels: new Array(n).fill(0), numClusters: 1 };
+		return { labels: new Array(n).fill(-1), numClusters: 0 };
 	}
 
 	// Build full pairwise distance matrix
@@ -701,28 +763,6 @@ export function hdbscan(
 
 	// Extract clusters using the condensed tree
 	const labels = extractClusters(mstEdges, n, minClusterSize);
-
-	// Reassign noise points (-1) to their nearest non-noise cluster
-	const noiseIndices: number[] = [];
-	for (let i = 0; i < n; i++) {
-		if (labels[i] === -1) noiseIndices.push(i);
-	}
-	if (noiseIndices.length > 0 && noiseIndices.length < n) {
-		for (const ni of noiseIndices) {
-			let bestDist = Number.POSITIVE_INFINITY;
-			let bestLabel = 0;
-			for (let j = 0; j < n; j++) {
-				if (labels[j] === -1 || j === ni) continue;
-				const d = distMatrix[ni * n + j];
-				if (d < bestDist) {
-					bestDist = d;
-					bestLabel = labels[j];
-				}
-			}
-			labels[ni] = bestLabel;
-		}
-	}
-
-	const numClusters = new Set(labels).size;
+	const numClusters = new Set(labels.filter((label) => label >= 0)).size;
 	return { labels, numClusters };
 }

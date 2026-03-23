@@ -201,6 +201,10 @@ export default class SecondBrainPlugin extends Plugin {
 		});
 
 		// Register Smart Graph view
+		this.registerHoverLinkSource(VIEW_TYPE_SMART_GRAPH, {
+			display: "Smart Graph",
+			defaultMod: true,
+		});
 		this.registerView(VIEW_TYPE_SMART_GRAPH, (leaf) => new SmartGraphView(leaf, this));
 
 		if (this.manifest.dir === undefined) {

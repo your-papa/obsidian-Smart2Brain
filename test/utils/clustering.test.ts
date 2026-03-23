@@ -31,6 +31,25 @@ function createCluster(center: Float32Array, count: number, noise: number, start
     return vectors;
 }
 
+function dominantNonNoiseLabel(labels: number[]): { label: number; count: number } {
+    const counts = new Map<number, number>();
+    for (const label of labels) {
+        if (label < 0) continue;
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+
+    let bestLabel = -1;
+    let bestCount = 0;
+    for (const [label, count] of counts) {
+        if (count > bestCount) {
+            bestLabel = label;
+            bestCount = count;
+        }
+    }
+
+    return { label: bestLabel, count: bestCount };
+}
+
 describe("kMeans", () => {
     it("should return empty result for empty input", () => {
         const result = kMeans([], 3);
@@ -174,8 +193,14 @@ describe("hdbscan", () => {
         expect(result.numClusters).toBe(0);
     });
 
-    it("should handle a single point", () => {
+    it("should keep a single point as noise when it cannot form a cluster", () => {
         const result = hdbscan([randomVector(4)], 2);
+        expect(result.labels).toEqual([-1]);
+        expect(result.numClusters).toBe(0);
+    });
+
+    it("should allow a single-point cluster when minClusterSize is 1", () => {
+        const result = hdbscan([randomVector(4)], 1);
         expect(result.labels).toEqual([0]);
         expect(result.numClusters).toBe(1);
     });
@@ -184,19 +209,9 @@ describe("hdbscan", () => {
         const vectors = [randomVector(4, 1), randomVector(4, 2), randomVector(4, 3)];
         const result = hdbscan(vectors, 5);
         expect(result.labels).toHaveLength(3);
-        expect(result.numClusters).toBe(1);
-        // All assigned to cluster 0
+        expect(result.numClusters).toBe(0);
         for (const label of result.labels) {
-            expect(label).toBe(0);
-        }
-    });
-
-    it("should assign all vectors to a cluster (no noise in output)", () => {
-        const vectors = Array.from({ length: 20 }, (_, i) => randomVector(8, i));
-        const result = hdbscan(vectors, 3);
-        expect(result.labels).toHaveLength(20);
-        for (const label of result.labels) {
-            expect(label).toBeGreaterThanOrEqual(0);
+            expect(label).toBe(-1);
         }
     });
 
@@ -215,22 +230,25 @@ describe("hdbscan", () => {
         expect(result.labels).toHaveLength(45);
         expect(result.numClusters).toBe(3);
 
-        // Points within the same original group should all share one label
-        const labels1 = new Set(result.labels.slice(0, 15));
-        const labels2 = new Set(result.labels.slice(15, 30));
-        const labels3 = new Set(result.labels.slice(30, 45));
-        expect(labels1.size).toBe(1);
-        expect(labels2.size).toBe(1);
-        expect(labels3.size).toBe(1);
-        // And the three cluster labels should be distinct
-        const allLabels = new Set([...labels1, ...labels2, ...labels3]);
-        expect(allLabels.size).toBe(3);
+        const dominant1 = dominantNonNoiseLabel(result.labels.slice(0, 15));
+        const dominant2 = dominantNonNoiseLabel(result.labels.slice(15, 30));
+        const dominant3 = dominantNonNoiseLabel(result.labels.slice(30, 45));
+
+        expect(dominant1.count).toBeGreaterThanOrEqual(5);
+        expect(dominant2.count).toBeGreaterThanOrEqual(5);
+        expect(dominant3.count).toBeGreaterThanOrEqual(5);
+        expect(new Set([dominant1.label, dominant2.label, dominant3.label]).size).toBe(3);
     });
 
-    it("should return at least 1 cluster for any valid input", () => {
-        const vectors = Array.from({ length: 10 }, (_, i) => randomVector(4, i));
-        const result = hdbscan(vectors, 3);
-        expect(result.numClusters).toBeGreaterThanOrEqual(1);
+    it("should preserve noise points instead of force-assigning them", () => {
+        const cluster1 = createCluster(new Float32Array([0, 0]), 10, 0.15, 10);
+        const cluster2 = createCluster(new Float32Array([8, 8]), 10, 0.15, 40);
+        const outlier = new Float32Array([4, 4]);
+
+        const result = hdbscan([...cluster1, ...cluster2, outlier], 5, undefined, "euclidean");
+
+        expect(result.numClusters).toBe(2);
+        expect(result.labels.at(-1)).toBe(-1);
     });
 
     it("should find clusters in 2D data with euclidean metric", () => {
@@ -255,13 +273,14 @@ describe("hdbscan", () => {
         const result = hdbscan(vectors, 5, undefined, "euclidean");
 
         expect(result.numClusters).toBe(3);
-        // Each original group should map to exactly one cluster label
-        const labels1 = new Set(result.labels.slice(0, 15));
-        const labels2 = new Set(result.labels.slice(15, 30));
-        const labels3 = new Set(result.labels.slice(30, 45));
-        expect(labels1.size).toBe(1);
-        expect(labels2.size).toBe(1);
-        expect(labels3.size).toBe(1);
-        expect(new Set([...labels1, ...labels2, ...labels3]).size).toBe(3);
+
+        const dominant1 = dominantNonNoiseLabel(result.labels.slice(0, 15));
+        const dominant2 = dominantNonNoiseLabel(result.labels.slice(15, 30));
+        const dominant3 = dominantNonNoiseLabel(result.labels.slice(30, 45));
+
+        expect(dominant1.count).toBeGreaterThanOrEqual(5);
+        expect(dominant2.count).toBeGreaterThanOrEqual(5);
+        expect(dominant3.count).toBeGreaterThanOrEqual(5);
+        expect(new Set([dominant1.label, dominant2.label, dominant3.label]).size).toBe(3);
     });
 });

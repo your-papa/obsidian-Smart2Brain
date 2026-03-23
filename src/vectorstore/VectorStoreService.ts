@@ -85,6 +85,25 @@ export async function waitForVectorStore(): Promise<boolean> {
 }
 
 /**
+ * Wait for a specific index instance to be available.
+ * Unlike waitForVectorStore(), this does not wait for unrelated indexes.
+ */
+export async function waitForVectorStoreIndex(indexId?: string | null): Promise<boolean> {
+	if (!indexId) return false;
+
+	const service = instance ?? pendingInstance;
+	if (!service) return false;
+
+	try {
+		await service.getOrCreateInstance(indexId);
+		return true;
+	} catch (error) {
+		Logger.error(`[VectorStore] Failed to initialize index ${indexId}:`, error);
+		return false;
+	}
+}
+
+/**
  * Per-index state container. Each embedding model gets its own instance
  * with separate storage, sync manager, and progress tracking.
  */
@@ -170,6 +189,8 @@ export function summarizeValidationProgressCounts({
 export class VectorStoreService {
 	private readonly plugin: SecondBrainPlugin;
 	private readonly instances: Map<string, IndexInstance> = new Map();
+	private readonly initializingInstances = new Map<string, Promise<IndexInstance>>();
+	private readonly backgroundSnapshotSaves = new Map<string, Promise<void>>();
 	private readonly progressListeners = new Map<string, Set<(progress: IndexingProgress) => void>>();
 	private readonly modifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private isInitialized = false;
@@ -303,9 +324,7 @@ export class VectorStoreService {
 			if (graphIndex) indexIds.add(graphIndex);
 
 			if (indexIds.size > 0) {
-				for (const indexId of indexIds) {
-					await this.initializeInstance(indexId);
-				}
+				await Promise.all(Array.from(indexIds, (indexId) => this.initializeInstance(indexId)));
 			}
 
 			// Register vault events
@@ -324,71 +343,105 @@ export class VectorStoreService {
 		const existing = this.instances.get(indexId);
 		if (existing) return existing;
 
-		const initStart = performance.now();
-		const inst = this.createInstance(indexId);
+		const pending = this.initializingInstances.get(indexId);
+		if (pending) return pending;
 
-		// Open databases
-		await inst.store.open();
+		const initPromise = (async () => {
+			const initStart = performance.now();
+			const inst = this.createInstance(indexId);
 
-		// Try to load from per-index file
-		const serialized = await inst.syncManager.loadFromFile();
-		const runtimeMeta = await inst.store.getMetadata();
-		const [provider = "", ...modelParts] = indexId.split(":");
-		const model = modelParts.join(":");
-		const restoreSource = selectIndexRestoreSource({
-			runtime: runtimeMeta,
-			file: serialized,
-			expectedProviderId: provider,
-			expectedModelId: model,
-		});
+			// Open databases
+			await inst.store.open();
 
-		if (restoreSource === "file" && serialized) {
-			const docs: DocumentVector[] = serialized.documents.map((d) => ({
-				id: d.id,
-				path: d.path,
-				mtime: d.mtime,
-				checksum: d.checksum,
-				vector: toFloat32Array(d.vector),
-				chunkIndex: d.chunkIndex,
-			}));
-
-			await inst.store.clear();
-			await inst.store.bulkPut(docs);
-			await inst.store.setMetadata(serialized.providerId, serialized.modelId, serialized.version);
-
-			inst.currentProviderId = serialized.providerId;
-			inst.currentModelId = serialized.modelId;
-
-			Logger.log(
-				`[VectorStore] Restored ${docs.length} documents for index ${indexId} from file in ${(performance.now() - initStart).toFixed(1)}ms`,
-			);
-
-			this.plugin.app.workspace.onLayoutReady(() => {
-				this.validateIndexOnStartup(inst);
+			// Try to load from per-index file
+			const serialized = await inst.syncManager.loadFromFile();
+			const runtimeMeta = await inst.store.getMetadata();
+			const [provider = "", ...modelParts] = indexId.split(":");
+			const model = modelParts.join(":");
+			const restoreSource = selectIndexRestoreSource({
+				runtime: runtimeMeta,
+				file: serialized,
+				expectedProviderId: provider,
+				expectedModelId: model,
 			});
-		} else if (restoreSource === "runtime" && runtimeMeta) {
-			inst.currentProviderId = runtimeMeta.providerId;
-			inst.currentModelId = runtimeMeta.modelId;
 
-			Logger.log(
-				`[VectorStore] Kept newer runtime index for ${indexId} (${runtimeMeta.documentCount} documents) and refreshed the file snapshot`,
+			if (restoreSource === "file" && serialized) {
+				const docs: DocumentVector[] = serialized.documents.map((d) => ({
+					id: d.id,
+					path: d.path,
+					mtime: d.mtime,
+					checksum: d.checksum,
+					vector: toFloat32Array(d.vector),
+					chunkIndex: d.chunkIndex,
+				}));
+
+				await inst.store.clear();
+				await inst.store.bulkPut(docs);
+				await inst.store.setMetadata(serialized.providerId, serialized.modelId, serialized.version);
+
+				inst.currentProviderId = serialized.providerId;
+				inst.currentModelId = serialized.modelId;
+
+				Logger.log(
+					`[VectorStore] Restored ${docs.length} documents for index ${indexId} from file in ${(performance.now() - initStart).toFixed(1)}ms`,
+				);
+
+				this.plugin.app.workspace.onLayoutReady(() => {
+					this.validateIndexOnStartup(inst);
+				});
+			} else if (restoreSource === "runtime" && runtimeMeta) {
+				inst.currentProviderId = runtimeMeta.providerId;
+				inst.currentModelId = runtimeMeta.modelId;
+
+				Logger.log(
+					`[VectorStore] Kept newer runtime index for ${indexId} (${runtimeMeta.documentCount} documents) and refreshed the file snapshot`,
+				);
+
+				this.saveInstanceToFileInBackground(inst, indexId, runtimeMeta.documentCount);
+
+				this.plugin.app.workspace.onLayoutReady(() => {
+					this.validateIndexOnStartup(inst);
+				});
+			} else if (
+				(serialized && (serialized.providerId !== provider || serialized.modelId !== model)) ||
+				(runtimeMeta && (runtimeMeta.providerId !== provider || runtimeMeta.modelId !== model))
+			) {
+				Logger.log(`[VectorStore] Model mismatch for ${indexId}, index will be rebuilt on next use`);
+				await inst.store.clear();
+			}
+
+			this.instances.set(indexId, inst);
+			Logger.info(
+				`[VectorStore] Init ${indexId}: ${Math.round(performance.now() - initStart)}ms (source=${restoreSource})`,
 			);
+			return inst;
+		})();
 
-			await this.saveInstanceToFile(inst);
+		this.initializingInstances.set(indexId, initPromise);
+		try {
+			return await initPromise;
+		} finally {
+			this.initializingInstances.delete(indexId);
+		}
+	}
 
-			this.plugin.app.workspace.onLayoutReady(() => {
-				this.validateIndexOnStartup(inst);
-			});
-		} else if (
-			(serialized && (serialized.providerId !== provider || serialized.modelId !== model)) ||
-			(runtimeMeta && (runtimeMeta.providerId !== provider || runtimeMeta.modelId !== model))
-		) {
-			Logger.log(`[VectorStore] Model mismatch for ${indexId}, index will be rebuilt on next use`);
-			await inst.store.clear();
+	private saveInstanceToFileInBackground(inst: IndexInstance, indexId: string, documentCount: number): void {
+		if (this.backgroundSnapshotSaves.has(indexId)) {
+			return;
 		}
 
-		this.instances.set(indexId, inst);
-		return inst;
+		const savePromise = this.saveInstanceToFile(inst)
+			.then(() => {
+				Logger.debug(`[VectorStore] Refreshed snapshot for ${indexId} (${documentCount} docs)`);
+			})
+			.catch((error) => {
+				Logger.error(`[VectorStore] Background snapshot refresh failed for ${indexId}:`, error);
+			})
+			.finally(() => {
+				this.backgroundSnapshotSaves.delete(indexId);
+			});
+
+		this.backgroundSnapshotSaves.set(indexId, savePromise);
 	}
 
 	/**
@@ -447,10 +500,10 @@ export class VectorStoreService {
 		const ollamaData =
 			defaultModel.provider === "ollama"
 				? (() => {
-					const ollamaAuth = getData().getResolvedProviderAuth("ollama");
-					if (!ollamaAuth?.baseUrl) return null;
-					return getOllamaModelsCache(ollamaAuth.baseUrl);
-				})()
+						const ollamaAuth = getData().getResolvedProviderAuth("ollama");
+						if (!ollamaAuth?.baseUrl) return null;
+						return getOllamaModelsCache(ollamaAuth.baseUrl);
+					})()
 				: null;
 
 		const metadata = hydrateEmbeddingModel(defaultModel.provider, defaultModel.model, {
@@ -585,10 +638,13 @@ export class VectorStoreService {
 			`[VectorStore] ${inst.indexId}: ${missingFiles.length} missing, ${staleFiles.length} stale, ${orphanedPaths.length} orphaned`,
 		);
 
+		let didMutateIndex = false;
+
 		if (orphanedPaths.length > 0) {
 			for (const path of orphanedPaths) {
 				await inst.store.remove(path);
 			}
+			didMutateIndex = true;
 			Logger.log(`[VectorStore] Removed ${orphanedPaths.length} orphaned entries`);
 		}
 
@@ -686,6 +742,7 @@ export class VectorStoreService {
 							vector: new Float32Array(vectors[j]),
 						};
 						await inst.store.upsert(doc);
+						didMutateIndex = true;
 					}
 					indexed += batch.length;
 					this.updateInstanceProgress(inst, { indexed: startingIndexedCount + batchEnd });
@@ -710,6 +767,7 @@ export class VectorStoreService {
 								vector: new Float32Array(vector),
 							};
 							await inst.store.upsert(doc);
+							didMutateIndex = true;
 							indexed++;
 							this.updateInstanceProgress(inst, { indexed: inst.progress.indexed + 1 });
 						} catch (entryError) {
@@ -737,7 +795,9 @@ export class VectorStoreService {
 			Logger.log(`[VectorStore] Indexed ${indexed} missing/stale files for ${inst.indexId}`);
 		}
 
-		await this.saveInstanceToFile(inst);
+		if (didMutateIndex) {
+			await this.saveInstanceToFile(inst);
+		}
 
 		// Sync document count to pluginData for reactive UI updates
 		const count = await inst.store.count();
@@ -1343,7 +1403,13 @@ export class VectorStoreService {
 	 */
 	private async saveInstanceToFile(inst: IndexInstance): Promise<void> {
 		const docs = await inst.store.getAllSerialized();
-		const index = FileSyncManager.createIndex(docs, inst.currentProviderId ?? "", inst.currentModelId ?? "");
+		const metadata = await inst.store.getMetadata();
+		const index = FileSyncManager.createIndex(
+			docs,
+			inst.currentProviderId ?? "",
+			inst.currentModelId ?? "",
+			metadata?.lastUpdated,
+		);
 		await inst.syncManager.saveToFile(index);
 	}
 
@@ -1511,7 +1577,7 @@ export class VectorStoreService {
 		}
 		if (!indexId) {
 			callback({ isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 });
-			return () => { };
+			return () => {};
 		}
 
 		// Register at service level so subscriptions survive instance recreation
@@ -1635,7 +1701,10 @@ export class VectorStoreService {
 			this.modifyTimers.clear();
 			// Wait for any in-progress initialization before cleaning up
 			if (this.initPromise) {
-				await this.initPromise.catch(() => { });
+				await this.initPromise.catch(() => {});
+			}
+			if (this.backgroundSnapshotSaves.size > 0) {
+				await Promise.allSettled(this.backgroundSnapshotSaves.values());
 			}
 			for (const inst of this.instances.values()) {
 				await inst.syncManager.flush();
