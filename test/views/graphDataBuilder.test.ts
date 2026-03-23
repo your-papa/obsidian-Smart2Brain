@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
     buildGraph,
+    buildGraphStructure,
     buildWikiGraph,
     applyColorGroups,
     applySearchHighlight,
+    computeClusters,
+    deriveClusterLabelsFromGraph,
 } from "../../src/views/smart-graph/graphDataBuilder";
 import type { App, CachedMetadata, TFile } from "obsidian";
 import type { DocumentVector } from "../../src/vectorstore/types";
@@ -52,12 +55,27 @@ function createMockDocumentVector(path: string, vector: number[]): DocumentVecto
     };
 }
 
+function createCluster(center: Float32Array, count: number, noise: number, startSeed = 0): Float32Array[] {
+    const vectors: Float32Array[] = [];
+    for (let i = 0; i < count; i++) {
+        const vec = new Float32Array(center.length);
+        for (let d = 0; d < center.length; d++) {
+            const x = Math.sin((startSeed + i) * 9301 + d * 49297 + 233280) * 10000;
+            const r = (x - Math.floor(x)) * 2 - 1;
+            vec[d] = center[d] + r * noise;
+        }
+        vectors.push(vec);
+    }
+    return vectors;
+}
+
 const defaultSettings = {
     defaultK: 3,
     autoK: false,
     projectionMethod: "pca" as const,
     umapNeighbors: 15,
     umapMinDist: 0.1,
+    layoutFidelity: 50,
     showWikiLinks: true,
     clusteringAlgorithm: "kmeans" as const,
     minClusterSize: 5,
@@ -195,6 +213,161 @@ describe("buildGraph", () => {
         const app = createMockApp({}, ["folder/My Note.md"]);
         const result = await buildGraph(app, docs, defaultSettings);
         expect(result.nodes[0].label).toBe("My Note");
+    });
+
+    it("should reduce projection dimensions more aggressively when layout fidelity is lower", async () => {
+        const docs = Array.from({ length: 520 }, (_, index) => {
+            const vector = Array.from({ length: 64 }, (_, dim) => Math.sin(index * 0.07 + dim * 0.11));
+            return createMockDocumentVector(`doc-${index}.md`, vector);
+        });
+        const app = createMockApp({}, docs.map((doc) => doc.path));
+
+        const fast = await buildGraphStructure(app, docs, {
+            projectionMethod: "pca",
+            umapNeighbors: 15,
+            umapMinDist: 0.1,
+            layoutFidelity: 0,
+            showWikiLinks: true,
+        });
+        const faithful = await buildGraphStructure(app, docs, {
+            projectionMethod: "pca",
+            umapNeighbors: 15,
+            umapMinDist: 0.1,
+            layoutFidelity: 100,
+            showWikiLinks: true,
+        });
+
+        expect(fast.reducedVectors[0].length).toBeLessThan(faithful.reducedVectors[0].length);
+    });
+});
+
+describe("computeClusters", () => {
+    it("should keep graph nodes unclustered when HDBSCAN finds no real clusters", async () => {
+        const docs = [
+            createMockDocumentVector("a.md", [0, 0]),
+            createMockDocumentVector("b.md", [100, 0]),
+            createMockDocumentVector("c.md", [0, 100]),
+        ];
+
+        const result = await computeClusters(
+            docs,
+            docs.map((doc) => doc.vector),
+            {
+                ...defaultSettings,
+                clusteringAlgorithm: "hdbscan",
+                minClusterSize: 5,
+            },
+        );
+
+        expect(result.k).toBe(0);
+        for (const assignment of result.clusterMap.values()) {
+            expect(assignment.cluster).toBeUndefined();
+            expect(assignment.color).toBe("hsl(0, 0%, 50%)");
+        }
+    });
+
+    it("should keep HDBSCAN noise points gray by default", async () => {
+        const docs = [
+            ...createCluster(new Float32Array([0, 0]), 10, 0.15, 10).map((vector, index) =>
+                createMockDocumentVector(`left-${index}.md`, [...vector]),
+            ),
+            ...createCluster(new Float32Array([8, 8]), 10, 0.15, 40).map((vector, index) =>
+                createMockDocumentVector(`right-${index}.md`, [...vector]),
+            ),
+            createMockDocumentVector("outlier.md", [4, 4]),
+        ];
+
+        const vectors = docs.map((doc) => doc.vector);
+        const result = await computeClusters(
+            docs,
+            vectors,
+            {
+                ...defaultSettings,
+                clusteringAlgorithm: "hdbscan",
+                minClusterSize: 5,
+            },
+            undefined,
+            vectors,
+        );
+
+        expect(result.k).toBe(2);
+        const outlier = result.clusterMap.get("outlier.md");
+        expect(outlier?.cluster).toBeUndefined();
+        expect(outlier?.color).toBe("hsl(0, 0%, 50%)");
+    });
+
+    it("should use the large-graph HDBSCAN fast path for very large inputs", async () => {
+        const docs = [
+            ...createCluster(new Float32Array([0, 0]), 1050, 0.2, 10).map((vector, index) =>
+                createMockDocumentVector(`left-large-${index}.md`, [...vector]),
+            ),
+            ...createCluster(new Float32Array([10, 10]), 1050, 0.2, 2000).map((vector, index) =>
+                createMockDocumentVector(`right-large-${index}.md`, [...vector]),
+            ),
+            createMockDocumentVector("far-outlier.md", [100, 100]),
+        ];
+
+        const vectors = docs.map((doc) => doc.vector);
+        const result = await computeClusters(
+            docs,
+            vectors,
+            {
+                ...defaultSettings,
+                clusteringAlgorithm: "hdbscan",
+                minClusterSize: 15,
+            },
+            undefined,
+            vectors,
+        );
+
+        expect(result.k).toBeGreaterThanOrEqual(2);
+        const assignedClusters = new Set(
+            [...result.clusterMap.values()].flatMap((assignment) =>
+                assignment.cluster === undefined ? [] : [assignment.cluster],
+            ),
+        );
+        expect(assignedClusters.size).toBeGreaterThanOrEqual(2);
+
+        const outlier = result.clusterMap.get("far-outlier.md");
+        expect(outlier?.cluster).toBeUndefined();
+        expect(outlier?.color).toBe("hsl(0, 0%, 50%)");
+    });
+});
+
+describe("deriveClusterLabelsFromGraph", () => {
+    it("should prefer the node with the most internal cluster connections", () => {
+        const graphData = {
+            nodes: [
+                { id: "hub.md", path: "hub.md", label: "Hub", x: 0, y: 0, cluster: 0, degree: 5 },
+                { id: "leaf-a.md", path: "leaf-a.md", label: "Leaf A", x: 0, y: 0, cluster: 0, degree: 3 },
+                { id: "leaf-b.md", path: "leaf-b.md", label: "Leaf B", x: 0, y: 0, cluster: 0, degree: 2 },
+                { id: "other.md", path: "other.md", label: "Other", x: 0, y: 0, cluster: 1, degree: 1 },
+            ],
+            edges: [
+                { source: "hub.md", target: "leaf-a.md", weight: 1, type: "wiki" as const },
+                { source: "hub.md", target: "leaf-b.md", weight: 1, type: "wiki" as const },
+                { source: "leaf-a.md", target: "other.md", weight: 1, type: "wiki" as const },
+            ],
+        };
+
+        const labels = deriveClusterLabelsFromGraph(graphData);
+
+        expect(labels[0]).toBe("Hub");
+        expect(labels[1]).toBe("Other");
+    });
+
+    it("should fall back to total degree when a cluster has no internal edges", () => {
+        const graphData = {
+            nodes: [
+                { id: "higher.md", path: "higher.md", label: "Higher", x: 0, y: 0, cluster: 0, degree: 4 },
+                { id: "lower.md", path: "lower.md", label: "Lower", x: 0, y: 0, cluster: 0, degree: 1 },
+            ],
+            edges: [],
+        };
+
+        const labels = deriveClusterLabelsFromGraph(graphData);
+
+        expect(labels[0]).toBe("Higher");
     });
 });
 

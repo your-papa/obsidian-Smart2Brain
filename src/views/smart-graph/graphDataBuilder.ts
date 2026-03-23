@@ -28,6 +28,7 @@ import {
 	type SmartGraphSettings,
 	type ColorGroup,
 } from "../../types/graph";
+import { edgeKey } from "../../utils/graphUtils";
 
 // ============================================================================
 // Cluster Assignment
@@ -35,7 +36,7 @@ import {
 
 /** Per-node cluster assignment with its display colour. */
 export interface ClusterAssignment {
-	cluster: number;
+	cluster?: number;
 	color: string;
 }
 
@@ -89,13 +90,17 @@ export interface GraphStructureResult {
 	vectors: Float32Array[];
 	/** Reduced vectors (PCA pre-clustering) — used for clustering. */
 	reducedVectors: Float32Array[];
+	/** Time spent reducing embeddings before the final layout projection. */
+	reductionMs: number;
+	/** Time spent projecting reduced vectors into 2D. */
+	projection2DMs: number;
 }
 
 // ============================================================================
 // Helper functions (extracted to reduce cognitive complexity)
 // ============================================================================
 
-function filterDocuments(app: App, documents: DocumentVector[], filter?: GraphFilter): DocumentVector[] {
+export function filterDocuments(app: App, documents: DocumentVector[], filter?: GraphFilter): DocumentVector[] {
 	if (!filter?.folders?.length && !filter?.tags?.length) return documents;
 	return documents.filter((doc) => {
 		const file = app.vault.getAbstractFileByPath(doc.path);
@@ -103,10 +108,6 @@ function filterDocuments(app: App, documents: DocumentVector[], filter?: GraphFi
 		return passesFilter(app, file as TFile, filter);
 	});
 }
-function edgeKey(a: string, b: string): string {
-	return a < b ? `${a}\0${b}` : `${b}\0${a}`;
-}
-
 function buildWikiEdges(app: App, filteredPathSet: Set<string>): GraphEdge[] {
 	const edges: GraphEdge[] = [];
 	const wikiEdgeSet = new Set<string>();
@@ -161,7 +162,7 @@ function mergeWikiEdge(edges: GraphEdge[], existingEdgeSet: Set<string>, wikiEdg
 	}
 }
 
-function overlayWikiEdges(app: App, edges: GraphEdge[], filteredPathSet: Set<string>): void {
+export function overlayWikiEdges(app: App, edges: GraphEdge[], filteredPathSet: Set<string>): void {
 	const resolvedLinks = app.metadataCache.resolvedLinks;
 	const wikiEdgeSet = new Set<string>();
 	const existingEdgeSet = new Set<string>();
@@ -186,7 +187,7 @@ function overlayWikiEdges(app: App, edges: GraphEdge[], filteredPathSet: Set<str
 	}
 }
 
-function computeWikiDegree(edges: GraphEdge[]): Map<string, number> {
+export function computeWikiDegree(edges: GraphEdge[]): Map<string, number> {
 	const degreeMap = new Map<string, number>();
 
 	for (const edge of edges) {
@@ -198,7 +199,7 @@ function computeWikiDegree(edges: GraphEdge[]): Map<string, number> {
 	return degreeMap;
 }
 
-function createGraphNodes(
+export function createGraphNodes(
 	filtered: DocumentVector[],
 	positions: { x: number; y: number }[],
 	degreeMap: Map<string, number>,
@@ -229,14 +230,24 @@ function createGraphNodes(
 export async function buildGraphStructure(
 	app: App,
 	documents: DocumentVector[],
-	settings: Pick<SmartGraphSettings, "projectionMethod" | "umapNeighbors" | "umapMinDist" | "showWikiLinks">,
+	settings: Pick<
+		SmartGraphSettings,
+		"projectionMethod" | "umapNeighbors" | "umapMinDist" | "layoutFidelity" | "showWikiLinks"
+	>,
 	filter?: GraphFilter,
 ): Promise<GraphStructureResult> {
 	// Filter documents by folder/tag if specified
 	const filtered = filterDocuments(app, documents, filter);
 
 	if (filtered.length === 0) {
-		return { graphData: { nodes: [], edges: [] }, filteredDocs: [], vectors: [], reducedVectors: [] };
+		return {
+			graphData: { nodes: [], edges: [] },
+			filteredDocs: [],
+			vectors: [],
+			reducedVectors: [],
+			reductionMs: 0,
+			projection2DMs: 0,
+		};
 	}
 
 	// Extract vectors
@@ -250,18 +261,23 @@ export async function buildGraphStructure(
 	// Compute wiki connectivity independent of overlay visibility so the smart
 	// map structure stays stable even when users hide wiki links.
 	const degreeMap = computeWikiDegree(edges);
+	const projectionPlan = getProjectionPlan(filtered.length, settings);
 
-	// Reduce dimensionality for clustering and projection performance.
-	const reducedVectors = await reduceDimensionsAsync(vectors, settings.projectionMethod, undefined, {
-		nNeighbors: settings.umapNeighbors,
-		minDist: settings.umapMinDist,
-	});
+	// Always use PCA as the preprocessing stage. Running UMAP for both reduction
+	// and final 2D projection compounds distortion and makes cluster structure
+	// harder to interpret.
+	const reductionStart = performance.now();
+	const reducedVectors = await reduceDimensionsAsync(vectors, "pca", projectionPlan.reductionDim);
+	const reductionMs = performance.now() - reductionStart;
 
-	// Project reduced vectors into 2D
+	// Project the PCA-reduced vectors into 2D using the user-selected method.
+	const projection2DStart = performance.now();
 	const positions = await project2DAsync(reducedVectors, settings.projectionMethod, undefined, {
-		nNeighbors: settings.umapNeighbors,
+		nNeighbors: projectionPlan.umapNeighbors ?? settings.umapNeighbors,
 		minDist: settings.umapMinDist,
+		nEpochs: projectionPlan.umapEpochs,
 	});
+	const projection2DMs = performance.now() - projection2DStart;
 
 	// Create nodes
 	const nodes = createGraphNodes(filtered, positions, degreeMap);
@@ -277,6 +293,8 @@ export async function buildGraphStructure(
 		filteredDocs: filtered,
 		vectors,
 		reducedVectors,
+		reductionMs,
+		projection2DMs,
 	};
 }
 
@@ -292,7 +310,9 @@ export interface ClusterResult {
 	k: number;
 }
 
-/**
+export type ClusterLabelMap = Record<number, string>;
+export type ClusterRepresentativeMap = Map<number, GraphNode>;
+
 /**
  * Compute cluster assignments using the configured algorithm.
  * Clustering runs on the reduced (PCA) vectors when available, which sit in a
@@ -301,12 +321,151 @@ export interface ClusterResult {
  * @returns A map from document path to its cluster number and display colour,
  *          plus the K that was used.
  */
+
+const NEUTRAL_CLUSTER_COLOR = "hsl(0, 0%, 50%)";
+const LARGE_GRAPH_CLUSTERING_THRESHOLD = 2000;
+const LARGE_GRAPH_CLUSTERING_SAMPLE_SIZE = 900;
+const LARGE_GRAPH_CLUSTERING_MAX_K = 24;
+const LARGE_GRAPH_PROJECTION_THRESHOLD = 2000;
+const LARGE_GRAPH_UMAP_NEIGHBORS = 10;
+const LARGE_GRAPH_UMAP_EPOCHS = 250;
+
+export interface ProjectionPlan {
+	reductionDim?: number;
+	umapNeighbors?: number;
+	umapEpochs?: number;
+}
+
+function interpolateInt(min: number, max: number, fidelity: number): number {
+	return Math.round(min + (max - min) * fidelity);
+}
+
+function normalizeFidelity(value: number): number {
+	return Math.max(0, Math.min(value, 100)) / 100;
+}
+
+export function getProjectionPlan(
+	documentCount: number,
+	settings: Pick<SmartGraphSettings, "projectionMethod" | "umapNeighbors" | "layoutFidelity">,
+): ProjectionPlan {
+	const fidelity = normalizeFidelity(settings.layoutFidelity);
+
+	if (documentCount < 500) {
+		return {
+			reductionDim: interpolateInt(32, 50, fidelity),
+			umapNeighbors:
+				settings.projectionMethod === "umap"
+					? Math.min(settings.umapNeighbors, interpolateInt(10, 18, fidelity))
+					: undefined,
+			umapEpochs: settings.projectionMethod === "umap" ? interpolateInt(180, 500, fidelity) : undefined,
+		};
+	}
+
+	if (documentCount < LARGE_GRAPH_PROJECTION_THRESHOLD) {
+		return {
+			reductionDim: interpolateInt(24, 50, fidelity),
+			umapNeighbors:
+				settings.projectionMethod === "umap"
+					? Math.min(settings.umapNeighbors, interpolateInt(8, 16, fidelity))
+					: undefined,
+			umapEpochs: settings.projectionMethod === "umap" ? interpolateInt(150, 420, fidelity) : undefined,
+		};
+	}
+
+	return {
+		reductionDim: interpolateInt(12, 36, fidelity),
+		umapNeighbors:
+			settings.projectionMethod === "umap"
+				? Math.min(settings.umapNeighbors, interpolateInt(6, LARGE_GRAPH_UMAP_NEIGHBORS, fidelity))
+				: undefined,
+		umapEpochs:
+			settings.projectionMethod === "umap" ? interpolateInt(120, LARGE_GRAPH_UMAP_EPOCHS, fidelity) : undefined,
+	};
+}
+
+function euclideanDistance(a: Float32Array, b: Float32Array): number {
+	let sum = 0;
+	for (let i = 0; i < a.length; i++) {
+		const diff = a[i] - b[i];
+		sum += diff * diff;
+	}
+	return Math.sqrt(sum);
+}
+
+function evenlySampleIndices(length: number, sampleSize: number): number[] {
+	if (length <= sampleSize) {
+		return Array.from({ length }, (_, index) => index);
+	}
+
+	const step = length / sampleSize;
+	const indices: number[] = [];
+	for (let i = 0; i < sampleSize; i++) {
+		indices.push(Math.min(length - 1, Math.floor(i * step)));
+	}
+	return indices;
+}
+
+function nearestCentroid(vector: Float32Array, centroids: Float32Array[]): { cluster: number; distance: number } {
+	let bestCluster = 0;
+	let bestDistance = Number.POSITIVE_INFINITY;
+	for (let i = 0; i < centroids.length; i++) {
+		const distance = euclideanDistance(vector, centroids[i]);
+		if (distance < bestDistance) {
+			bestDistance = distance;
+			bestCluster = i;
+		}
+	}
+	return { cluster: bestCluster, distance: bestDistance };
+}
+
+function quantile(values: number[], q: number): number {
+	if (values.length === 0) return Number.POSITIVE_INFINITY;
+	const sorted = [...values].sort((a, b) => a - b);
+	const position = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * q)));
+	return sorted[position];
+}
+
+async function computeLargeGraphFastClusters(
+	clusterVectors: Float32Array[],
+	minClusterSize: number,
+): Promise<{ labels: Array<number | undefined>; k: number }> {
+	const sampleIndices = evenlySampleIndices(clusterVectors.length, LARGE_GRAPH_CLUSTERING_SAMPLE_SIZE);
+	const sampledVectors = sampleIndices.map((index) => clusterVectors[index]);
+	const estimatedK = Math.max(
+		2,
+		Math.min(
+			LARGE_GRAPH_CLUSTERING_MAX_K,
+			Math.round(Math.sqrt(clusterVectors.length / Math.max(minClusterSize, 8))),
+		),
+	);
+	const k = Math.min(estimatedK, sampledVectors.length);
+	const sampleResult = await kMeansAsync(sampledVectors, k);
+
+	const thresholdCandidates: number[][] = Array.from({ length: k }, () => []);
+	for (let i = 0; i < sampledVectors.length; i++) {
+		const cluster = sampleResult.labels[i];
+		thresholdCandidates[cluster].push(euclideanDistance(sampledVectors[i], sampleResult.centroids[cluster]));
+	}
+
+	const clusterThresholds = thresholdCandidates.map((distances) => {
+		const base = quantile(distances, 0.9);
+		return Number.isFinite(base) ? base * 1.15 : Number.POSITIVE_INFINITY;
+	});
+
+	const labels: Array<number | undefined> = new Array(clusterVectors.length);
+	for (let i = 0; i < clusterVectors.length; i++) {
+		const nearest = nearestCentroid(clusterVectors[i], sampleResult.centroids);
+		labels[i] = nearest.distance <= clusterThresholds[nearest.cluster] ? nearest.cluster : undefined;
+	}
+
+	return { labels, k };
+}
+
 export async function computeClusters(
 	filteredDocs: DocumentVector[],
 	vectors: Float32Array[],
 	settings: Pick<SmartGraphSettings, "defaultK" | "autoK" | "clusteringAlgorithm" | "minClusterSize">,
 	themeColors?: string[],
-	_graphData?: GraphData,
 	reducedVectors?: Float32Array[],
 ): Promise<ClusterResult> {
 	if (filteredDocs.length === 0 || vectors.length === 0) {
@@ -318,12 +477,18 @@ export async function computeClusters(
 	const clusterVectors = reducedVectors?.length === vectors.length ? reducedVectors : vectors;
 
 	let k: number;
-	let clusterLabels: number[];
+	let clusterLabels: Array<number | undefined>;
 
 	if (settings.clusteringAlgorithm === "hdbscan") {
-		const result = await hdbscanAsync(clusterVectors, settings.minClusterSize, undefined, "euclidean");
-		k = result.numClusters;
-		clusterLabels = result.labels;
+		if (clusterVectors.length >= LARGE_GRAPH_CLUSTERING_THRESHOLD) {
+			const fastResult = await computeLargeGraphFastClusters(clusterVectors, settings.minClusterSize);
+			k = fastResult.k;
+			clusterLabels = fastResult.labels;
+		} else {
+			const result = await hdbscanAsync(clusterVectors, settings.minClusterSize, undefined, "euclidean");
+			k = result.numClusters;
+			clusterLabels = result.labels.map((label) => (label >= 0 ? label : undefined));
+		}
 	} else if (settings.autoK) {
 		const suggested = await suggestKAsync(clusterVectors, 2, Math.min(10, Math.floor(clusterVectors.length / 2)));
 		k = suggested.k;
@@ -341,7 +506,7 @@ export async function computeClusters(
 		const cluster = clusterLabels[i];
 		clusterMap.set(filteredDocs[i].path, {
 			cluster,
-			color: clusterColors[cluster % clusterColors.length],
+			color: cluster === undefined ? NEUTRAL_CLUSTER_COLOR : clusterColors[cluster % clusterColors.length],
 		});
 	}
 
@@ -356,7 +521,7 @@ export async function computeClusters(
 export function applyClusterMap(
 	graphData: GraphData,
 	clusterMap: Map<string, ClusterAssignment>,
-	fallbackColor = "hsl(0, 0%, 50%)",
+	fallbackColor = NEUTRAL_CLUSTER_COLOR,
 ): GraphData {
 	return {
 		...graphData,
@@ -368,6 +533,62 @@ export function applyClusterMap(
 			return { ...node, cluster: undefined, color: fallbackColor };
 		}),
 	};
+}
+
+/**
+ * Derive cluster labels from the best-connected note inside each cluster.
+ * Internal cluster degree is preferred; total wiki degree is used as a fallback.
+ */
+export function deriveClusterRepresentativesFromGraph(graphData: GraphData): ClusterRepresentativeMap {
+	const nodeById = new Map(graphData.nodes.map((node) => [node.id, node]));
+	const clusterNodes = new Map<number, GraphNode[]>();
+	for (const node of graphData.nodes) {
+		if (node.cluster == null) continue;
+		const group = clusterNodes.get(node.cluster) ?? [];
+		group.push(node);
+		clusterNodes.set(node.cluster, group);
+	}
+
+	const internalDegrees = new Map<string, number>();
+	for (const edge of graphData.edges) {
+		const source = nodeById.get(edge.source);
+		const target = nodeById.get(edge.target);
+		if (!source || !target || source.cluster == null || source.cluster !== target.cluster) continue;
+
+		internalDegrees.set(source.id, (internalDegrees.get(source.id) ?? 0) + 1);
+		internalDegrees.set(target.id, (internalDegrees.get(target.id) ?? 0) + 1);
+	}
+
+	const representatives: ClusterRepresentativeMap = new Map();
+	for (const [clusterId, nodes] of clusterNodes) {
+		const hubNode = [...nodes].sort((left, right) => {
+			const internalDiff = (internalDegrees.get(right.id) ?? 0) - (internalDegrees.get(left.id) ?? 0);
+			if (internalDiff !== 0) return internalDiff;
+
+			const degreeDiff = (right.degree ?? 0) - (left.degree ?? 0);
+			if (degreeDiff !== 0) return degreeDiff;
+
+			const labelDiff = left.label.localeCompare(right.label);
+			if (labelDiff !== 0) return labelDiff;
+
+			return left.id.localeCompare(right.id);
+		})[0];
+
+		if (hubNode) {
+			representatives.set(clusterId, hubNode);
+		}
+	}
+
+	return representatives;
+}
+
+export function deriveClusterLabelsFromGraph(graphData: GraphData): ClusterLabelMap {
+	const labels: ClusterLabelMap = {};
+	for (const [clusterId, hubNode] of deriveClusterRepresentativesFromGraph(graphData)) {
+		labels[clusterId] = hubNode.label;
+	}
+
+	return labels;
 }
 
 // ============================================================================
@@ -383,9 +604,16 @@ export interface WikiGraphResult {
 /**
  * Build a graph using only Obsidian wiki-link edges. Nodes start at (0,0) and
  * are positioned by d3-force.
+ *
+ * @param constrainToPaths — When provided, only include files whose path is in
+ *   this set. Used to keep the wiki graph's node set identical to the smart
+ *   graph's so mode transitions don't add/remove nodes.
  */
-export function buildWikiGraph(app: App, filter?: GraphFilter): WikiGraphResult {
+export function buildWikiGraph(app: App, filter?: GraphFilter, constrainToPaths?: Set<string>): WikiGraphResult {
 	let filteredFiles = app.vault.getMarkdownFiles();
+	if (constrainToPaths) {
+		filteredFiles = filteredFiles.filter((file) => constrainToPaths.has(file.path));
+	}
 	if (filter?.folders?.length || filter?.tags?.length) {
 		filteredFiles = filteredFiles.filter((file) => passesFilter(app, file, filter));
 	}
@@ -468,6 +696,7 @@ export async function buildGraph(
 		| "projectionMethod"
 		| "umapNeighbors"
 		| "umapMinDist"
+		| "layoutFidelity"
 		| "showWikiLinks"
 		| "clusteringAlgorithm"
 		| "minClusterSize"
@@ -481,14 +710,7 @@ export async function buildGraph(
 		settings,
 		filter,
 	);
-	const { clusterMap } = await computeClusters(
-		filteredDocs,
-		vectors,
-		settings,
-		themeColors,
-		graphData,
-		reducedVectors,
-	);
+	const { clusterMap } = await computeClusters(filteredDocs, vectors, settings, themeColors, reducedVectors);
 	return applyClusterMap(graphData, clusterMap);
 }
 

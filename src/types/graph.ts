@@ -24,8 +24,24 @@ export type ClusteringAlgorithm = "kmeans" | "hdbscan";
  * Graph display mode.
  * - "wiki": Force-directed layout using only wiki link edges (initial view)
  * - "smart": Projected positions from embedding-based clustering
+ * @deprecated Use `LayoutMode` and `ColorMode` instead.
  */
 export type GraphMode = "wiki" | "smart";
+
+/**
+ * Layout engine for positioning nodes.
+ * - "force": Force-directed simulation using wiki link edges (d3-force)
+ * - "semantic": 2D projection from embedding vectors (UMAP / PCA)
+ */
+export type LayoutMode = "force" | "semantic";
+
+/**
+ * Coloring strategy for graph nodes.
+ * - "groups": User-defined color groups based on folder/tag queries
+ * - "clusters": Automatic cluster coloring from K-Means / HDBSCAN
+ * - "none": Default theme color, no special coloring
+ */
+export type ColorMode = "groups" | "clusters" | "none";
 
 /**
  * A user-defined color group that assigns a color to nodes matching a query.
@@ -55,13 +71,13 @@ export interface GraphNode {
 	path: string;
 	/** Display label (file basename without extension) */
 	label: string;
-	/** X position (set by force simulation) */
+	/** X position (wiki: set by d3-force simulation, smart: set by UMAP projection) */
 	x: number;
-	/** Y position (set by force simulation) */
+	/** Y position (wiki: set by d3-force simulation, smart: set by UMAP projection) */
 	y: number;
-	/** Velocity X (used by d3-force) */
+	/** Velocity X (used by d3-force in wiki mode) */
 	vx?: number;
-	/** Velocity Y (used by d3-force) */
+	/** Velocity Y (used by d3-force in wiki mode) */
 	vy?: number;
 	/** Cluster assignment index */
 	cluster?: number;
@@ -103,8 +119,6 @@ export interface SmartGraphSettings {
 	defaultK: number;
 	/** Whether to auto-determine K via silhouette score */
 	autoK: boolean;
-	/** Base node radius in pixels */
-	nodeSize: number;
 	/** Target link distance for force layout */
 	linkDistance: number;
 	/** Charge strength (negative = repulsive). Controls how far apart nodes spread. */
@@ -115,6 +129,8 @@ export interface SmartGraphSettings {
 	umapNeighbors: number;
 	/** Minimum distance between points in the UMAP embedding */
 	umapMinDist: number;
+	/** Tradeoff between faster graph layout and higher projection fidelity */
+	layoutFidelity: number;
 	/** Whether to show wiki link edges overlaid on the semantic graph */
 	showWikiLinks: boolean;
 	/** Zoom scale at which all labels are shown (0 = never) */
@@ -127,10 +143,12 @@ export interface SmartGraphSettings {
 	clusteringAlgorithm: import("./graph").ClusteringAlgorithm;
 	/** Minimum cluster size for HDBSCAN */
 	minClusterSize: number;
-	/** Use force-directed layout instead of 2D projection in smart mode */
-	useForceLayout: boolean;
 	/** User-defined color groups for the wiki graph mode */
 	colorGroups: ColorGroup[];
+	/** Layout engine for node positioning */
+	layoutMode: import("./graph").LayoutMode;
+	/** Coloring strategy for graph nodes */
+	colorMode: import("./graph").ColorMode;
 }
 
 /**
@@ -139,25 +157,37 @@ export interface SmartGraphSettings {
 export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	defaultK: 5,
 	autoK: true,
-	nodeSize: 6,
 	linkDistance: 100,
 	chargeStrength: -150,
 	projectionMethod: "umap",
 	umapNeighbors: 15,
 	umapMinDist: 0.1,
+	layoutFidelity: 50,
 	showWikiLinks: true,
 	labelZoomThreshold: 2.5,
 	graphChatModel: null,
 	autoLabelClusters: false,
 	clusteringAlgorithm: "kmeans",
 	minClusterSize: 5,
-	useForceLayout: false,
 	colorGroups: [],
+	layoutMode: "force",
+	colorMode: "groups",
 };
 
 /**
  * Obsidian theme color CSS variable names used as the base cluster palette.
  */
+/**
+ * Detail about a focused (zoomed-in) cluster.
+ * Shared between SmartGraphView and GraphInspector.
+ */
+export interface FocusedClusterDetail {
+	cluster: number;
+	label: string;
+	noteCount: number;
+	topNotes: Array<{ label: string; path: string; degree: number }>;
+}
+
 export const THEME_COLOR_VARS = [
 	"--color-red",
 	"--color-blue",

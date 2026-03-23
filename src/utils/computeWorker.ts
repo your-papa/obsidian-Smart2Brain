@@ -11,13 +11,19 @@ import type { HDBSCANResult } from "./clustering";
 import { project2D, reduceDimensions } from "./projection";
 import type { ProjectionMethod } from "../types/graph";
 
+export interface SerializedVectorBatch {
+	data: Float32Array;
+	count: number;
+	dim: number;
+}
+
 export type ComputeWorkerRequest =
-	| { id: number; type: "kMeans"; vectors: number[][]; k: number; maxIterations?: number }
-	| { id: number; type: "suggestK"; vectors: number[][]; minK?: number; maxK?: number }
+	| { id: number; type: "kMeans"; vectors: SerializedVectorBatch; k: number; maxIterations?: number }
+	| { id: number; type: "suggestK"; vectors: SerializedVectorBatch; minK?: number; maxK?: number }
 	| {
 			id: number;
 			type: "hdbscan";
-			vectors: number[][];
+			vectors: SerializedVectorBatch;
 			minClusterSize: number;
 			minSamples?: number;
 			metric?: "cosine" | "euclidean";
@@ -25,20 +31,22 @@ export type ComputeWorkerRequest =
 	| {
 			id: number;
 			type: "project2D";
-			vectors: number[][];
+			vectors: SerializedVectorBatch;
 			method?: ProjectionMethod;
 			spread?: number;
 			umapNeighbors?: number;
 			umapMinDist?: number;
+			umapEpochs?: number;
 	  }
 	| {
 			id: number;
 			type: "reduceDimensions";
-			vectors: number[][];
+			vectors: SerializedVectorBatch;
 			method?: ProjectionMethod;
 			targetDim?: number;
 			umapNeighbors?: number;
 			umapMinDist?: number;
+			umapEpochs?: number;
 	  };
 
 export type ComputeWorkerResponse =
@@ -50,17 +58,42 @@ export type ComputeWorkerResponse =
 	  }
 	| { id: number; type: "hdbscan"; result: HDBSCANResult }
 	| { id: number; type: "project2D"; result: { x: number; y: number }[] }
-	| { id: number; type: "reduceDimensions"; result: number[][] }
+	| { id: number; type: "reduceDimensions"; result: SerializedVectorBatch }
 	| { id: number; type: "error"; error: string };
 
 /**
- * Convert number[][] from the message to Float32Array[] for clustering functions.
+ * Convert a flat vector batch from the message to Float32Array[] views.
  */
-function toFloat32Arrays(arrays: number[][]): Float32Array[] {
-	return arrays.map((a) => new Float32Array(a));
+function toFloat32Arrays(batch: SerializedVectorBatch): Float32Array[] {
+	const { data, count, dim } = batch;
+	const vectors: Float32Array[] = new Array(count);
+	for (let i = 0; i < count; i++) {
+		vectors[i] = new Float32Array(data.buffer, i * dim * Float32Array.BYTES_PER_ELEMENT, dim);
+	}
+	return vectors;
 }
 
-globalThis.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
+function fromFloat32Arrays(vectors: Float32Array[]): SerializedVectorBatch {
+	if (vectors.length === 0) {
+		return { data: new Float32Array(0), count: 0, dim: 0 };
+	}
+
+	const count = vectors.length;
+	const dim = vectors[0].length;
+	const data = new Float32Array(count * dim);
+	for (let i = 0; i < count; i++) {
+		data.set(vectors[i], i * dim);
+	}
+
+	return { data, count, dim };
+}
+
+const workerScope = globalThis as typeof globalThis & {
+	postMessage: (message: ComputeWorkerResponse, transfer?: Transferable[]) => void;
+	onmessage: ((event: MessageEvent<ComputeWorkerRequest>) => void | Promise<void>) | null;
+};
+
+workerScope.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
 	const msg = e.data;
 	try {
 		switch (msg.type) {
@@ -76,7 +109,7 @@ globalThis.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
 						iterations: result.iterations,
 					},
 				};
-				globalThis.postMessage(response);
+				workerScope.postMessage(response);
 				break;
 			}
 			case "suggestK": {
@@ -92,7 +125,7 @@ globalThis.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
 						iterations: result.iterations,
 					},
 				};
-				globalThis.postMessage(response);
+				workerScope.postMessage(response);
 				break;
 			}
 			case "hdbscan": {
@@ -103,7 +136,7 @@ globalThis.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
 					type: "hdbscan",
 					result,
 				};
-				globalThis.postMessage(response);
+				workerScope.postMessage(response);
 				break;
 			}
 			case "project2D": {
@@ -111,13 +144,14 @@ globalThis.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
 				const result = await project2D(vectors, msg.method, msg.spread, {
 					nNeighbors: msg.umapNeighbors,
 					minDist: msg.umapMinDist,
+					nEpochs: msg.umapEpochs,
 				});
 				const response: ComputeWorkerResponse = {
 					id: msg.id,
 					type: "project2D",
 					result,
 				};
-				globalThis.postMessage(response);
+				workerScope.postMessage(response);
 				break;
 			}
 			case "reduceDimensions": {
@@ -125,13 +159,14 @@ globalThis.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
 				const result = await reduceDimensions(vectors, msg.method, msg.targetDim, {
 					nNeighbors: msg.umapNeighbors,
 					minDist: msg.umapMinDist,
+					nEpochs: msg.umapEpochs,
 				});
 				const response: ComputeWorkerResponse = {
 					id: msg.id,
 					type: "reduceDimensions",
-					result: result.map((v) => Array.from(v)),
+					result: fromFloat32Arrays(result),
 				};
-				globalThis.postMessage(response);
+				workerScope.postMessage(response, [response.result.data.buffer as ArrayBuffer]);
 				break;
 			}
 		}
@@ -141,6 +176,6 @@ globalThis.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
 			type: "error",
 			error: err instanceof Error ? err.message : String(err),
 		};
-		globalThis.postMessage(response);
+		workerScope.postMessage(response);
 	}
 };

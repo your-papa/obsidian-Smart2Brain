@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { selectIndexRestoreSource, summarizeValidationProgressCounts } from "../../src/vectorstore/VectorStoreService";
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "../../src/vectorstore/batchSize";
+import { FileSyncManager } from "../../src/vectorstore/FileSyncManager";
 
 describe("embedding batch size helpers", () => {
     it("returns provider-specific defaults", () => {
@@ -74,6 +75,34 @@ describe("selectIndexRestoreSource", () => {
         });
 
         expect(source).toBe("none");
+    });
+
+    it("prefers runtime when timestamps are aligned and document counts match", () => {
+        const source = selectIndexRestoreSource({
+            runtime: {
+                providerId: "openai",
+                modelId: "text-embedding-3-small",
+                documentCount: 3595,
+                lastUpdated: 5_000,
+            },
+            file: {
+                providerId: "openai",
+                modelId: "text-embedding-3-small",
+                documents: new Array(3595).fill(null),
+                lastUpdated: 5_000,
+            },
+            expectedProviderId: "openai",
+            expectedModelId: "text-embedding-3-small",
+        });
+
+        expect(source).toBe("runtime");
+    });
+});
+
+describe("FileSyncManager.createIndex", () => {
+    it("preserves an explicit lastUpdated timestamp", () => {
+        const index = FileSyncManager.createIndex([], "openai", "text-embedding-3-small", 1234);
+        expect(index.lastUpdated).toBe(1234);
     });
 });
 

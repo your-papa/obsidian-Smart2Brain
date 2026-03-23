@@ -33,9 +33,9 @@ describe("smart graph view UI", () => {
 		expect(stats).toMatch(/\d+ nodes/);
 	});
 
-	it("should show the current graph mode", () => {
+	it("should show the current layout mode", () => {
 		const mode = domText(".mode-badge");
-		expect(["Wiki", "Clustering", "Discovery", "Semantic"]).toContain(mode);
+		expect(["Force", "Semantic"]).toContain(mode);
 	});
 
 	it("should render the graph toolbar with action buttons", () => {
@@ -44,23 +44,24 @@ describe("smart graph view UI", () => {
 		expect(domCount('[aria-label="Lasso selection (or hold Shift + drag)"]')).toBe(1);
 	});
 
-	it("should have the Smart Clustering button", () => {
-		expect(domCount('[aria-label="Smart Clustering: group notes by semantic similarity"]')).toBe(1);
-	});
-
-	it("should have a filters toggle button", () => {
-		expect(domCount('[aria-label="Show filters"]')).toBe(1);
-	});
-
-	it("should render the Graph Controls panel", () => {
-		expect(domText(".graph-controls-title")).toBe("Graph Controls");
-	});
-
-	it("should have collapsible sections for Color Groups, Layout, Display", () => {
+	it("should have collapsible Layout section with Positioning dropdown", () => {
 		const sections = obsidian(`dev:dom selector='.section-header' all text`, { ignoreError: true });
-		expect(sections).toContain("Color Groups");
 		expect(sections).toContain("Layout");
-		expect(sections).toContain("Display");
+	});
+
+	it("should have an inspector toggle button", () => {
+		expect(domCount('[aria-label="Show inspector"]')).toBe(1);
+	});
+
+	it("should render the Graph Settings panel", () => {
+		expect(domText(".graph-controls-title")).toBe("Graph Settings");
+	});
+
+	it("should have collapsible sections for Layout, Coloring, and Appearance", () => {
+		const sections = obsidian(`dev:dom selector='.section-header' all text`, { ignoreError: true });
+		expect(sections).toContain("Layout");
+		expect(sections).toContain("Coloring");
+		expect(sections).toContain("Appearance");
 	});
 
 	it("should not produce errors during graph rendering", () => {
