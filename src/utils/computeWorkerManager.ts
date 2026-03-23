@@ -10,7 +10,7 @@
 import { kMeans, suggestK, hdbscan, type KMeansResult, type HDBSCANResult } from "./clustering";
 import { project2D, reduceDimensions } from "./projection";
 import type { ProjectionMethod } from "../types/graph";
-import type { ComputeWorkerRequest, ComputeWorkerResponse } from "./computeWorker";
+import type { ComputeWorkerRequest, ComputeWorkerResponse, SerializedVectorBatch } from "./computeWorker";
 import ComputeWorkerConstructor from "./computeWorker?worker&inline";
 
 let worker: Worker | null = null;
@@ -54,22 +54,52 @@ function postRequest<T extends ComputeWorkerResponse>(request: ComputeWorkerRequ
 
 	return new Promise<T>((resolve, reject) => {
 		pending.set(request.id, { resolve, reject });
-		w.postMessage(request);
+		w.postMessage(request, getTransferList(request));
 	});
 }
 
 /**
- * Convert Float32Array[] to number[][] for structured clone transfer.
+ * Convert vectors to a flat Float32Array batch for worker transfer.
  */
-function toTransferable(vectors: Float32Array[]): number[][] {
-	return vectors.map((v) => Array.from(v));
+function toTransferable(vectors: (Float32Array | number[])[]): SerializedVectorBatch {
+	if (vectors.length === 0) {
+		return { data: new Float32Array(0), count: 0, dim: 0 };
+	}
+
+	const count = vectors.length;
+	const dim = vectors[0].length;
+	const data = new Float32Array(count * dim);
+	for (let i = 0; i < count; i++) {
+		data.set(vectors[i], i * dim);
+	}
+	return { data, count, dim };
+}
+
+function fromTransferable(batch: SerializedVectorBatch): Float32Array[] {
+	const { data, count, dim } = batch;
+	const vectors: Float32Array[] = new Array(count);
+	for (let i = 0; i < count; i++) {
+		vectors[i] = new Float32Array(data.buffer, i * dim * Float32Array.BYTES_PER_ELEMENT, dim);
+	}
+	return vectors;
+}
+
+function getTransferList(request: ComputeWorkerRequest): Transferable[] {
+	switch (request.type) {
+		case "kMeans":
+		case "suggestK":
+		case "hdbscan":
+		case "project2D":
+		case "reduceDimensions":
+			return [request.vectors.data.buffer];
+	}
 }
 
 /**
  * Main-thread fallback for when the worker is unavailable.
  */
 function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse | Promise<ComputeWorkerResponse> {
-	const toF32 = (arrays: number[][]) => arrays.map((a) => new Float32Array(a));
+	const toF32 = (batch: SerializedVectorBatch) => fromTransferable(batch);
 	switch (request.type) {
 		case "kMeans": {
 			const result = kMeans(toF32(request.vectors), request.k, request.maxIterations);
@@ -101,17 +131,25 @@ function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse |
 			return { id: request.id, type: "hdbscan", result };
 		}
 		case "project2D": {
-			return project2D(toF32(request.vectors), request.method, request.spread).then((result) => ({
+			return project2D(toF32(request.vectors), request.method, request.spread, {
+				nNeighbors: request.umapNeighbors,
+				minDist: request.umapMinDist,
+				nEpochs: request.umapEpochs,
+			}).then((result) => ({
 				id: request.id,
 				type: "project2D" as const,
 				result,
 			}));
 		}
 		case "reduceDimensions": {
-			return reduceDimensions(toF32(request.vectors), request.method, request.targetDim).then((result) => ({
+			return reduceDimensions(toF32(request.vectors), request.method, request.targetDim, {
+				nNeighbors: request.umapNeighbors,
+				minDist: request.umapMinDist,
+				nEpochs: request.umapEpochs,
+			}).then((result) => ({
 				id: request.id,
 				type: "reduceDimensions" as const,
-				result: result.map((v) => Array.from(v)),
+				result: toTransferable(result),
 			}));
 		}
 	}
@@ -182,17 +220,18 @@ export async function project2DAsync(
 	vectors: (Float32Array | number[])[],
 	method: ProjectionMethod = "umap",
 	spread = 500,
-	umapOptions?: { nNeighbors?: number; minDist?: number },
+	umapOptions?: { nNeighbors?: number; minDist?: number; nEpochs?: number },
 ): Promise<{ x: number; y: number }[]> {
 	const id = ++requestId;
 	const resp = await postRequest<Extract<ComputeWorkerResponse, { type: "project2D" }>>({
 		id,
 		type: "project2D",
-		vectors: vectors.map((v) => (v instanceof Float32Array ? Array.from(v) : v)),
+		vectors: toTransferable(vectors),
 		method,
 		spread,
 		umapNeighbors: umapOptions?.nNeighbors,
 		umapMinDist: umapOptions?.minDist,
+		umapEpochs: umapOptions?.nEpochs,
 	});
 	return resp.result;
 }
@@ -201,7 +240,7 @@ export async function reduceDimensionsAsync(
 	vectors: Float32Array[],
 	method: ProjectionMethod = "pca",
 	targetDim?: number,
-	umapOptions?: { nNeighbors?: number; minDist?: number },
+	umapOptions?: { nNeighbors?: number; minDist?: number; nEpochs?: number },
 ): Promise<Float32Array[]> {
 	const id = ++requestId;
 	const resp = await postRequest<Extract<ComputeWorkerResponse, { type: "reduceDimensions" }>>({
@@ -212,8 +251,9 @@ export async function reduceDimensionsAsync(
 		targetDim,
 		umapNeighbors: umapOptions?.nNeighbors,
 		umapMinDist: umapOptions?.minDist,
+		umapEpochs: umapOptions?.nEpochs,
 	});
-	return resp.result.map((v) => new Float32Array(v));
+	return fromTransferable(resp.result);
 }
 
 /**

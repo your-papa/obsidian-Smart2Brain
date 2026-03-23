@@ -110,7 +110,6 @@ export class HNSWVectorStore implements VectorStore {
 			this._providerId = meta.providerId;
 			this._modelId = meta.modelId;
 			this.nextHnswId = meta.nextHnswId ?? this.idToNumeric.size;
-			await this.initHNSWIndex();
 		}
 	}
 
@@ -205,7 +204,7 @@ export class HNSWVectorStore implements VectorStore {
 	}
 
 	private async initHNSWIndex(): Promise<void> {
-		if (!this.dimensions) return;
+		if (!this.dimensions || this.hnswIndex) return;
 
 		// Create HNSW index with IndexedDB persistence
 		this.hnswIndex = await HNSWWithDB.create(
@@ -221,6 +220,11 @@ export class HNSWVectorStore implements VectorStore {
 		} catch {
 			// Index doesn't exist yet, will be built on first insert
 		}
+	}
+
+	private async ensureHNSWIndex(): Promise<void> {
+		if (!this.dimensions) return;
+		await this.initHNSWIndex();
 	}
 
 	/**
@@ -299,8 +303,8 @@ export class HNSWVectorStore implements VectorStore {
 		// Initialize dimensions from first document
 		if (!this.dimensions) {
 			this.dimensions = doc.vector.length;
-			await this.initHNSWIndex();
 		}
+		await this.ensureHNSWIndex();
 
 		// Remove existing entry if updating
 		const existing = await this.getByPath(doc.path);
@@ -439,8 +443,8 @@ export class HNSWVectorStore implements VectorStore {
 		// Initialize dimensions from first document
 		if (docs.length > 0 && !this.dimensions) {
 			this.dimensions = docs[0].vector.length;
-			await this.initHNSWIndex();
 		}
+		await this.ensureHNSWIndex();
 
 		// Clear existing mappings
 		await this.clearStore(ID_MAPPING_STORE);
@@ -544,6 +548,7 @@ export class HNSWVectorStore implements VectorStore {
 	 * O(log n) complexity - much faster than brute-force for large datasets.
 	 */
 	async search(queryVector: Float32Array, topK: number, threshold?: number): Promise<ScoredDocument[]> {
+		await this.ensureHNSWIndex();
 		if (!this.hnswIndex) {
 			// Fall back to brute-force if HNSW not initialized
 			return this.bruteForceSearch(queryVector, topK, threshold);
