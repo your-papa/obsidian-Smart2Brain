@@ -1,6 +1,6 @@
 <script lang="ts">
 import { Popover, Separator } from "bits-ui";
-import type { AgentConfig } from "../../types/plugin";
+import { type AgentConfig, resolveAgentColorCSS } from "../../types/plugin";
 import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
 import { getPlugin, requestSettingsTab } from "../../stores/state.svelte";
 import { Logger } from "../../utils/logging";
@@ -71,7 +71,7 @@ function openAgentSettings() {
     <span
       class="agent-pill"
       class:has-color={!!selectedAgent?.color}
-      style={selectedAgent?.color ? `--pill-color: var(--color-${selectedAgent.color})` : ""}
+      style={selectedAgent?.color ? `--pill-color: ${resolveAgentColorCSS(selectedAgent.color)}` : ""}
       data-testid="agent-pill"
     >
       {selectedAgent?.name ?? "Default Agent"}
@@ -112,7 +112,7 @@ function openAgentSettings() {
                   <span
                     class="agent-name-pill"
                     class:has-color={!!agent.color}
-                    style={agent.color ? `--pill-color: var(--color-${agent.color})` : ""}
+                    style={agent.color ? `--pill-color: ${resolveAgentColorCSS(agent.color)}` : ""}
                   >
                     {agent.name}
                   </span>

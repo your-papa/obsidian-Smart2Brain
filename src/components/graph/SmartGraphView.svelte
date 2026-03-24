@@ -29,6 +29,7 @@ import {
 	applyColorGroups,
 	applySearchHighlight,
 	deriveClusterLabelsFromGraph,
+	readNativeGraphSettings,
 	type GraphFilter,
 	type ClusterAssignment,
 	type GraphStructureResult,
@@ -55,8 +56,15 @@ const plugin = getPlugin();
 const data = getData();
 
 // Graph state
+
+// Native Obsidian graph settings — read from `.obsidian/graph.json` on mount
+// and used as a middle layer between hardcoded defaults and user-persisted
+// settings: DEFAULT → native Obsidian → user-defined.
+let nativeGraphSettings: Partial<SmartGraphSettings> = $state({});
+
 let settings: SmartGraphSettings = $derived({
 	...DEFAULT_SMART_GRAPH_SETTINGS,
+	...nativeGraphSettings,
 	...(data.smartGraphSettings ?? {}),
 });
 let graphData: GraphData = $state({ nodes: [], edges: [] });
@@ -73,6 +81,20 @@ let isLabeling = $state(false);
 
 // Cluster state — persisted across edge/layout rebuilds
 let clusterMap: Map<string, ClusterAssignment> = $state(new Map());
+
+/**
+ * Effective color groups: use the user-defined groups if any exist,
+ * otherwise fall back to the native Obsidian graph color groups that were
+ * read into `nativeGraphSettings.colorGroups`.
+ *
+ * We check the *user-persisted* color groups directly (not `settings.colorGroups`)
+ * because the three-layer settings merge already includes native groups.
+ */
+let effectiveColorGroups = $derived(
+	(data.smartGraphSettings?.colorGroups?.length ?? 0) > 0
+		? settings.colorGroups
+		: (nativeGraphSettings.colorGroups ?? []),
+);
 
 // Filter state
 let selectedFolders: string[] = $state([]);
@@ -186,7 +208,7 @@ function createAutoRebuildSignature(layout: LayoutMode, color: ColorMode, filter
 		folders: [...(filter.folders ?? [])].sort(),
 		tags: [...(filter.tags ?? [])].sort(),
 		colorGroups:
-			color === "groups" ? settings.colorGroups.map((group) => ({ query: group.query, color: group.color })) : [],
+			color === "groups" ? effectiveColorGroups.map((group) => ({ query: group.query, color: group.color })) : [],
 		showWikiLinks: layout === "semantic" ? settings.showWikiLinks : true,
 	});
 }
@@ -350,7 +372,7 @@ async function buildForceLayoutGraph(
 	const { graphData: wikiGraphData } = buildWikiGraph(plugin.app, filter, embeddedPaths ?? undefined);
 
 	if (activeColorMode === "groups") {
-		return { graphData: applyColorGroups(plugin.app, wikiGraphData, settings.colorGroups), shouldAutoLabel: false };
+		return { graphData: applyColorGroups(plugin.app, wikiGraphData, effectiveColorGroups), shouldAutoLabel: false };
 	}
 
 	if (activeColorMode === "clusters") {
@@ -437,7 +459,10 @@ async function buildSemanticLayoutGraph(
 	if (!structureResult) {
 		setLoadingStage(`Projecting ${formatCount(filteredDocs.length)} notes into 2D...`);
 		const projection2DStart = performance.now();
-		const positions = await project2DAsync(reducedVectors, settings.projectionMethod, undefined, {
+		// Use spread=1500 so projected coordinates span [-1500,+1500], matching
+		// the typical bounding-box extent of d3-force mode. This keeps node sizes
+		// visually consistent when switching between semantic and force layouts.
+		const positions = await project2DAsync(reducedVectors, settings.projectionMethod, 1500, {
 			nNeighbors: plan.umapNeighbors ?? settings.umapNeighbors,
 			minDist: settings.umapMinDist,
 			nEpochs: plan.umapEpochs,
@@ -507,7 +532,7 @@ async function buildSemanticLayoutGraph(
 			defaultClusterLabels = {};
 		}
 	} else if (activeColorMode === "groups") {
-		coloredGraph = applyColorGroups(plugin.app, rawGraph, settings.colorGroups);
+		coloredGraph = applyColorGroups(plugin.app, rawGraph, effectiveColorGroups);
 		defaultClusterLabels = {};
 	} else {
 		// "none"
@@ -574,7 +599,7 @@ $effect(() => {
 	colorMode;
 	selectedFolders;
 	selectedTags;
-	settings.colorGroups;
+	effectiveColorGroups;
 
 	if (layoutMode === "semantic") {
 		settings.showWikiLinks;
@@ -619,9 +644,28 @@ $effect(() => {
 // Load filter options on mount
 loadFilterOptions();
 
+// Load native Obsidian graph settings (color groups, physics, etc.) as fallback
+readNativeGraphSettings(plugin.app).then((native) => {
+	nativeGraphSettings = native;
+});
+
 // Handlers
 function handleSettingsChange(partial: Partial<SmartGraphSettings>) {
 	data.smartGraphSettings = { ...settings, ...partial };
+}
+
+/**
+ * Reset all user-persisted graph settings.
+ * Merges `DEFAULT_SMART_GRAPH_SETTINGS` with native Obsidian settings
+ * (from `.obsidian/graph.json`) so the result is the same as a fresh start.
+ */
+function handleResetSettings() {
+	data.smartGraphSettings = {
+		...DEFAULT_SMART_GRAPH_SETTINGS,
+		...nativeGraphSettings,
+		// Keep color groups empty so the effectiveColorGroups fallback kicks in
+		colorGroups: [],
+	};
 }
 
 function handleFolderFilterChange(folders: string[]) {
@@ -947,7 +991,10 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
       mode={layoutMode}
       linkDistance={settings.linkDistance}
       chargeStrength={settings.chargeStrength}
+      centerStrength={settings.centerStrength}
+      linkStrength={settings.linkStrength}
       labelZoomThreshold={settings.labelZoomThreshold}
+      nodeSize={settings.nodeSize}
       showWikiLinks={layoutMode === "force" ? true : settings.showWikiLinks}
       {focusedClusters}
       clusterLabels={effectiveClusterLabels}
@@ -1021,6 +1068,8 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     {layoutMode}
     {colorMode}
     onSettingsChange={handleSettingsChange}
+    onResetSettings={handleResetSettings}
+    {effectiveColorGroups}
     onFitToView={handleFitToView}
     onRefresh={handleRefresh}
     onApplyProjection={handleApplyProjection}

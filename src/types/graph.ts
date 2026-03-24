@@ -123,6 +123,10 @@ export interface SmartGraphSettings {
 	linkDistance: number;
 	/** Charge strength (negative = repulsive). Controls how far apart nodes spread. */
 	chargeStrength: number;
+	/** Center force strength (0–1). Pulls the graph toward the center. */
+	centerStrength: number;
+	/** Link force strength (0–1). How strongly edges pull connected nodes together. */
+	linkStrength: number;
 	/** Dimensionality reduction algorithm for 2D projection */
 	projectionMethod: ProjectionMethod;
 	/** Number of nearest neighbors UMAP uses to model local structure */
@@ -149,6 +153,8 @@ export interface SmartGraphSettings {
 	layoutMode: import("./graph").LayoutMode;
 	/** Coloring strategy for graph nodes */
 	colorMode: import("./graph").ColorMode;
+	/** Base node circle size (1–10). Actual radius also factors in node degree. */
+	nodeSize: number;
 }
 
 /**
@@ -157,8 +163,10 @@ export interface SmartGraphSettings {
 export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	defaultK: 5,
 	autoK: true,
-	linkDistance: 100,
-	chargeStrength: -150,
+	linkDistance: 250,
+	chargeStrength: -1000,
+	centerStrength: 0.1,
+	linkStrength: 1,
 	projectionMethod: "umap",
 	umapNeighbors: 15,
 	umapMinDist: 0.1,
@@ -172,6 +180,7 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	colorGroups: [],
 	layoutMode: "force",
 	colorMode: "groups",
+	nodeSize: 4,
 };
 
 /**

@@ -272,7 +272,10 @@ export async function buildGraphStructure(
 
 	// Project the PCA-reduced vectors into 2D using the user-selected method.
 	const projection2DStart = performance.now();
-	const positions = await project2DAsync(reducedVectors, settings.projectionMethod, undefined, {
+	// Use spread=1500 so projected coordinates span [-1500,+1500], matching
+	// the typical bounding-box extent of d3-force mode. This keeps node sizes
+	// visually consistent when switching between semantic and force layouts.
+	const positions = await project2DAsync(reducedVectors, settings.projectionMethod, 1500, {
 		nNeighbors: projectionPlan.umapNeighbors ?? settings.umapNeighbors,
 		minDist: settings.umapMinDist,
 		nEpochs: projectionPlan.umapEpochs,
@@ -639,23 +642,240 @@ export function buildWikiGraph(app: App, filter?: GraphFilter, constrainToPaths?
 // ============================================================================
 
 /**
- * Check whether a file matches a color group query.
- * - Queries starting with `#` match tags.
- * - All other queries match as a path prefix (folder).
+ * Obsidian native graph.json color entry.
+ * Colors can be stored as a packed RGB integer or as HSL components.
+ * The query uses Obsidian's search syntax with operators and boolean logic.
  */
-function matchesColorGroup(app: App, path: string, group: ColorGroup): boolean {
-	const q = group.query.trim();
-	if (!q) return false;
-	if (q.startsWith("#")) {
+interface ObsidianGraphColorEntry {
+	query: string;
+	color: { a: number; rgb?: number; h?: number; s?: number; l?: number };
+}
+
+/**
+ * Convert a packed RGB integer (e.g. `12424185`) to a hex string.
+ */
+function rgbIntToHex(rgb: number): string {
+	const r = (rgb >> 16) & 0xff;
+	const g = (rgb >> 8) & 0xff;
+	const b = rgb & 0xff;
+	return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
+/**
+ * Convert an HSL color to a hex string.
+ */
+function hslToHex(h: number, s: number, l: number): string {
+	const sNorm = s / 100;
+	const lNorm = l / 100;
+	const a = sNorm * Math.min(lNorm, 1 - lNorm);
+	const f = (n: number) => {
+		const k = (n + h / 30) % 12;
+		const color = lNorm - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+		return Math.round(255 * color)
+			.toString(16)
+			.padStart(2, "0");
+	};
+	return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+/**
+ * Resolve an Obsidian graph color entry to a hex string.
+ * Supports both packed RGB integer and HSL formats.
+ */
+function resolveObsidianColor(color: ObsidianGraphColorEntry["color"]): string {
+	if (color.rgb != null) return rgbIntToHex(color.rgb);
+	if (color.h != null && color.s != null && color.l != null) return hslToHex(color.h, color.s, color.l);
+	return "#888888";
+}
+
+/**
+ * Normalise a single Obsidian search term into a Smart Graph query atom.
+ *
+ * - `tag:#foo`  → `#foo`        (tag match)
+ * - `#foo`      → `#foo`        (bare tag)
+ * - `file:X`    → `X`           (path/filename substring)
+ * - `path:X`    → `X`           (path prefix)
+ *
+ * Property selectors like `["key":value]` are not supported and return `null`.
+ */
+function normaliseObsidianTerm(raw: string): string | null {
+	const part = raw.trim();
+	if (!part || part.startsWith("[")) return null;
+	if (part.startsWith("tag:")) {
+		const tag = part.slice(4).trim().replace(/^"|"$/g, "");
+		return tag ? (tag.startsWith("#") ? tag : `#${tag}`) : null;
+	}
+	if (part.startsWith("path:")) {
+		const p = part.slice(5).trim().replace(/^"|"$/g, "");
+		return p || null;
+	}
+	if (part.startsWith("file:")) {
+		const f = part.slice(5).trim().replace(/^"|"$/g, "");
+		return f || null;
+	}
+	if (part.startsWith("#")) return part;
+	return null;
+}
+
+/**
+ * Convert an Obsidian native graph query into a single Smart Graph query
+ * string that preserves OR semantics.
+ *
+ * Obsidian graph queries can be complex boolean expressions like:
+ *   `file:"Bachelor" OR tag:#Bachelor`
+ *   `["related":SAP] OR file:SAP`
+ *
+ * We split on ` OR `, normalise each recognisable atomic term, and rejoin
+ * them with ` OR `.  Property selectors like `["key":value]` are skipped.
+ *
+ * Returns `null` if no recognisable terms remain.
+ *
+ * @example
+ * convertObsidianQuery('file:"Master" OR ["projects":Master] OR tag:#Master')
+ * // → "Master OR #Master"
+ */
+function convertObsidianQuery(query: string): string | null {
+	const parts = query.split(/\s+OR\s+/i);
+	const atoms: string[] = [];
+	for (const raw of parts) {
+		const atom = normaliseObsidianTerm(raw);
+		if (atom) atoms.push(atom);
+	}
+	return atoms.length > 0 ? atoms.join(" OR ") : null;
+}
+
+/**
+ * Read color groups from Obsidian's native graph view configuration.
+ * Convenience wrapper around {@link readNativeGraphSettings} that returns
+ * only the color groups portion.
+ */
+export async function readNativeGraphColorGroups(app: App): Promise<ColorGroup[]> {
+	const native = await readNativeGraphSettings(app);
+	return native.colorGroups ?? [];
+}
+
+/**
+ * Shape of the Obsidian native `graph.json` file (partial — only the fields
+ * we care about).
+ */
+interface ObsidianGraphConfig {
+	colorGroups?: ObsidianGraphColorEntry[];
+	/** Target link distance (positive number). Maps 1:1 to SmartGraphSettings.linkDistance. */
+	linkDistance?: number;
+	/** Repel strength (positive number). Maps to SmartGraphSettings.chargeStrength with negation. */
+	repelStrength?: number;
+	/** Center force strength (0–1). Maps 1:1 to SmartGraphSettings.centerStrength. */
+	centerStrength?: number;
+	/** Link force strength (0–1). Maps 1:1 to SmartGraphSettings.linkStrength. */
+	linkStrength?: number;
+}
+
+/**
+ * Read settings from Obsidian's native graph view configuration.
+ * The settings are stored in `<configDir>/graph.json`.
+ *
+ * Returns a `Partial<SmartGraphSettings>` containing only the fields that
+ * have a meaningful counterpart in the Smart Graph plugin:
+ *
+ * | Obsidian field    | SmartGraphSettings field | Transform          |
+ * |-------------------|--------------------------|--------------------|
+ * | `linkDistance`     | `linkDistance`            | direct (1:1)       |
+ * | `repelStrength`   | `chargeStrength`          | negate (`-value`)  |
+ * | `centerStrength`  | `centerStrength`          | direct (1:1)       |
+ * | `linkStrength`    | `linkStrength`            | direct (1:1)       |
+ * | `colorGroups`     | `colorGroups`             | query/color parse  |
+ *
+ * Returns an empty object if the file doesn't exist or cannot be read.
+ */
+export async function readNativeGraphSettings(app: App): Promise<Partial<SmartGraphSettings>> {
+	const configDir = app.vault.configDir;
+	const graphConfigPath = `${configDir}/graph.json`;
+	try {
+		const exists = await app.vault.adapter.exists(graphConfigPath);
+		if (!exists) return {};
+		const raw = await app.vault.adapter.read(graphConfigPath);
+		const config = JSON.parse(raw) as ObsidianGraphConfig;
+
+		const result: Partial<SmartGraphSettings> = {};
+
+		// --- Color groups ---
+		if (Array.isArray(config.colorGroups) && config.colorGroups.length > 0) {
+			const groups: ColorGroup[] = [];
+			for (const entry of config.colorGroups) {
+				if (!entry.query || !entry.color) continue;
+				const hex = resolveObsidianColor(entry.color);
+				const query = convertObsidianQuery(entry.query);
+				if (query) groups.push({ query, color: hex });
+			}
+			if (groups.length > 0) result.colorGroups = groups;
+		}
+
+		// --- Physics: link distance ---
+		if (typeof config.linkDistance === "number" && config.linkDistance > 0) {
+			result.linkDistance = config.linkDistance;
+		}
+
+		// --- Physics: charge strength (Obsidian stores positive repelStrength) ---
+		// Obsidian clamps abs(repelStrength) < 1 to -1 (see sim.js).
+		if (typeof config.repelStrength === "number") {
+			result.chargeStrength = Math.abs(config.repelStrength) < 1 ? -1 : -config.repelStrength;
+		}
+
+		// --- Physics: center strength ---
+		if (typeof config.centerStrength === "number") {
+			result.centerStrength = config.centerStrength;
+		}
+
+		// --- Physics: link strength ---
+		if (typeof config.linkStrength === "number") {
+			result.linkStrength = config.linkStrength;
+		}
+
+		return result;
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * Check whether a file matches a single atomic query term.
+ * - Terms starting with `#` match tags.
+ * - Terms ending with `/` match as a folder path prefix.
+ * - Other terms match as a path/filename substring (case-insensitive)
+ *   to support Obsidian's `file:` operator which matches against file names.
+ */
+function matchesQueryAtom(app: App, path: string, atom: string): boolean {
+	if (atom.startsWith("#")) {
 		const file = app.vault.getAbstractFileByPath(path);
 		if (!file || !("extension" in file)) return false;
 		const cache = app.metadataCache.getFileCache(file as TFile);
 		const tags = cache ? (getAllTags(cache) ?? []) : [];
-		return tags.includes(q);
+		return tags.includes(atom);
 	}
-	// Folder / path prefix
-	const prefix = q.endsWith("/") ? q : `${q}/`;
-	return path.startsWith(prefix);
+	// Explicit folder prefix (ends with /)
+	if (atom.endsWith("/")) {
+		return path.startsWith(atom);
+	}
+	// Check as folder prefix first
+	if (path.startsWith(`${atom}/`)) return true;
+	// Also match as a path/filename substring (case-insensitive) to support
+	// queries originating from Obsidian's `file:` operator.
+	return path.toLowerCase().includes(atom.toLowerCase());
+}
+
+/**
+ * Check whether a file matches a color group query.
+ * Queries can contain ` OR ` to combine multiple terms — any match wins.
+ */
+function matchesColorGroup(app: App, path: string, group: ColorGroup): boolean {
+	const q = group.query.trim();
+	if (!q) return false;
+	// Support OR-separated queries (e.g. "Master OR #Master")
+	const atoms = q
+		.split(/\s+OR\s+/i)
+		.map((s) => s.trim())
+		.filter(Boolean);
+	return atoms.some((atom) => matchesQueryAtom(app, path, atom));
 }
 
 /**

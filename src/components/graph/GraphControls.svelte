@@ -6,15 +6,16 @@ import Dropdown from "../ui/Dropdown.svelte";
 import Text from "../ui/Text.svelte";
 import PresetColorSelector, { type PresetColorOption } from "../ui/PresetColorSelector.svelte";
 import SettingContainer from "../settings/SettingContainer.svelte";
-import type {
-	ProjectionMethod,
-	ClusteringAlgorithm,
-	SmartGraphSettings,
-	LayoutMode,
-	ColorMode,
-	ColorGroup,
+import {
+	type ProjectionMethod,
+	type ClusteringAlgorithm,
+	type SmartGraphSettings,
+	type LayoutMode,
+	type ColorMode,
+	type ColorGroup,
+	THEME_COLOR_VARS,
+	DEFAULT_SMART_GRAPH_SETTINGS,
 } from "../../types/graph";
-import { THEME_COLOR_VARS } from "../../types/graph";
 
 const GRAPH_PRESET_COLOR_OPTIONS: Array<PresetColorOption & { cssVar?: string }> = [
 	{ value: "#e93147", label: "Red", previewColor: "#e93147", cssVar: "--color-red" },
@@ -36,6 +37,9 @@ interface Props {
 	layoutMode: LayoutMode;
 	colorMode: ColorMode;
 	onSettingsChange: (patch: Partial<SmartGraphSettings>) => void;
+	onResetSettings?: () => void;
+	/** Resolved color groups (user-defined or native Obsidian fallback). */
+	effectiveColorGroups?: ColorGroup[];
 	onFitToView: () => void;
 	onRefresh: () => void;
 	onApplyProjection?: () => void;
@@ -65,6 +69,8 @@ let {
 	layoutMode,
 	colorMode,
 	onSettingsChange,
+	onResetSettings,
+	effectiveColorGroups = settings.colorGroups,
 	onFitToView,
 	onRefresh,
 	onApplyProjection,
@@ -197,6 +203,10 @@ function handleLabelZoomChange(val: number) {
 	onSettingsChange({ labelZoomThreshold: val / 10 });
 }
 
+function handleNodeSizeChange(val: number) {
+	onSettingsChange({ nodeSize: val });
+}
+
 function handleLinkDistanceChange(val: number) {
 	onSettingsChange({ linkDistance: val });
 }
@@ -205,41 +215,55 @@ function handleChargeStrengthChange(val: number) {
 	onSettingsChange({ chargeStrength: -Math.abs(val) });
 }
 
+function handleCenterStrengthChange(val: number) {
+	onSettingsChange({ centerStrength: val / 100 });
+}
+
+function handleLinkStrengthChange(val: number) {
+	onSettingsChange({ linkStrength: val / 100 });
+}
+
 // Color group handlers
 function getGraphPresetColorOptions(): PresetColorOption[] {
 	return GRAPH_PRESET_COLOR_OPTIONS;
 }
 
 function resolveGraphGroupColor(color: string | undefined): string {
+	if (!color) return GRAPH_PRESET_COLOR_OPTIONS[0]?.value ?? "#000000";
 	const options = getGraphPresetColorOptions();
-	return (
-		options.find((option) => option.value === color)?.value ??
-		GRAPH_PRESET_COLOR_OPTIONS.find((option) => color === `var(${option.cssVar})`)?.value ??
-		(color && !THEME_COLOR_VARS.includes(color as (typeof THEME_COLOR_VARS)[number]) ? color : undefined) ??
-		options[0]?.value ??
-		"#000000"
-	);
+	// Match preset by value or CSS variable
+	const preset =
+		options.find((option) => option.value === color) ??
+		GRAPH_PRESET_COLOR_OPTIONS.find((option) => color === `var(${option.cssVar})`);
+	if (preset) return preset.value;
+	// Pass through any valid custom color (hex, rgb, etc.)
+	return color;
 }
 
 function addColorGroup() {
 	const defaultColor = resolveGraphGroupColor(undefined);
-	const updated: ColorGroup[] = [...settings.colorGroups, { query: "", color: defaultColor }];
+	const updated: ColorGroup[] = [...effectiveColorGroups, { query: "", color: defaultColor }];
 	onSettingsChange({ colorGroups: updated });
 }
 
 function removeColorGroup(index: number) {
-	const updated = settings.colorGroups.filter((_: ColorGroup, i: number) => i !== index);
+	const updated = effectiveColorGroups.filter((_: ColorGroup, i: number) => i !== index);
 	onSettingsChange({ colorGroups: updated });
 }
 
 function updateColorGroupQuery(index: number, query: string) {
-	const updated = settings.colorGroups.map((g: ColorGroup, i: number) => (i === index ? { ...g, query } : g));
+	const updated = effectiveColorGroups.map((g: ColorGroup, i: number) => (i === index ? { ...g, query } : g));
 	onSettingsChange({ colorGroups: updated });
 }
 
 function updateColorGroupColor(index: number, color: string) {
-	const updated = settings.colorGroups.map((g: ColorGroup, i: number) => (i === index ? { ...g, color } : g));
+	const updated = effectiveColorGroups.map((g: ColorGroup, i: number) => (i === index ? { ...g, color } : g));
 	onSettingsChange({ colorGroups: updated });
+}
+
+function handleResetSettings() {
+	onResetSettings?.();
+	appliedSnapshot = takeSnapshot(DEFAULT_SMART_GRAPH_SETTINGS);
 }
 </script>
 
@@ -287,6 +311,7 @@ function updateColorGroupColor(index: number, color: string) {
 			<div>
 				<h4 class="graph-controls-title" data-testid="graph-controls-title">Graph Settings</h4>
 			</div>
+			<Button iconId="rotate-ccw" onClick={handleResetSettings} tooltip="Reset to defaults" />
 		</div>
 
 		<div class="graph-controls-body">
@@ -329,8 +354,8 @@ function updateColorGroupColor(index: number, color: string) {
 					<SettingContainer name="Link distance" desc="Target distance between connected nodes">
 						<RangeSlider
 							value={settings.linkDistance}
-							min={20}
-							max={250}
+							min={30}
+							max={500}
 							step={5}
 							showValue={true}
 							oncommit={handleLinkDistanceChange}
@@ -341,10 +366,32 @@ function updateColorGroupColor(index: number, color: string) {
 						<RangeSlider
 							value={Math.abs(settings.chargeStrength)}
 							min={10}
-							max={500}
-							step={5}
+							max={1500}
+							step={10}
 							showValue={true}
 							oncommit={handleChargeStrengthChange}
+						/>
+					</SettingContainer>
+
+					<SettingContainer name="Center force" desc="How strongly the graph is pulled toward the center">
+						<RangeSlider
+							value={Math.round(settings.centerStrength * 100)}
+							min={0}
+							max={100}
+							step={1}
+							showValue={true}
+							oncommit={handleCenterStrengthChange}
+						/>
+					</SettingContainer>
+
+					<SettingContainer name="Link strength" desc="How strongly edges pull connected nodes together">
+						<RangeSlider
+							value={Math.round(settings.linkStrength * 100)}
+							min={0}
+							max={100}
+							step={1}
+							showValue={true}
+							oncommit={handleLinkStrengthChange}
 						/>
 					</SettingContainer>
 				{/if}
@@ -467,7 +514,7 @@ function updateColorGroupColor(index: number, color: string) {
 					</button>
 
 					{#if sectionOpen.colorGroups}
-						{#each settings.colorGroups as group, i}
+					{#each effectiveColorGroups as group, i}
 							{@const graphColorOptions = getGraphPresetColorOptions()}
 							<div class="color-group-row">
 								<PresetColorSelector
@@ -475,6 +522,7 @@ function updateColorGroupColor(index: number, color: string) {
 									options={graphColorOptions}
 									popoverLabel="Group Color"
 									triggerLabel={`Select color for group ${i + 1}`}
+									allowCustomColor={true}
 									onSelect={(color) => updateColorGroupColor(i, color)}
 								/>
 								<Text
@@ -617,6 +665,20 @@ function updateColorGroupColor(index: number, color: string) {
 			</button>
 
 			{#if sectionOpen.appearance}
+				<SettingContainer
+					name="Node size"
+					desc="Base radius of graph nodes"
+				>
+					<RangeSlider
+						value={settings.nodeSize}
+						min={1}
+						max={10}
+						step={1}
+						showValue={true}
+						onchange={handleNodeSizeChange}
+						oncommit={handleNodeSizeChange}
+					/>
+				</SettingContainer>
 				<SettingContainer
 					name="Label zoom"
 					desc="Zoom level to start showing labels (0 = off)"

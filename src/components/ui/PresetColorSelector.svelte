@@ -17,14 +17,28 @@ export interface PresetColorOption {
     popoverLabel: string;
     triggerLabel: string;
     onSelect: (value: string) => void;
+    /** When true, show a custom color picker alongside the presets. */
+    allowCustomColor?: boolean;
   }
 
-  let { value, options, popoverLabel, triggerLabel, onSelect }: Props = $props();
+  let { value, options, popoverLabel, triggerLabel, onSelect, allowCustomColor = false }: Props = $props();
 
   let isOpen = $state(false);
   let customAnchor = $state<HTMLElement | undefined>();
 
-  const selectedOption = $derived(options.find((option) => option.value === value) ?? options[0]);
+  /** Whether the current value is a custom (non-preset) color. */
+  const isCustomColor = $derived(!options.some((o) => o.value === value) && !!value);
+
+  /**
+   * Resolve the selected option for the trigger display.
+   * If the value is a custom color not in presets, create an ad-hoc option so
+   * the trigger circle shows the correct color.
+   */
+  const selectedOption = $derived(
+    options.find((option) => option.value === value) ??
+    (isCustomColor ? { value, label: value, previewColor: value } as PresetColorOption : undefined) ??
+    options[0],
+  );
 
   const triggerStyle =
     "width: 22px; height: 22px; min-width: 22px; min-height: 22px; max-width: 22px; max-height: 22px; border-radius: 999px; padding: 0; margin: 0; border: 0; outline: none; line-height: 0; font-size: 0; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; background: transparent; background-color: transparent; box-shadow: none;";
@@ -212,6 +226,19 @@ export interface PresetColorOption {
           </button>
         {/each}
       </div>
+      {#if allowCustomColor}
+        <div class="preset-color-custom-row">
+          <label class="preset-color-custom-label">
+            <input
+              type="color"
+              class="preset-color-custom-input"
+              value={value}
+              oninput={(e) => handleSelect((e.currentTarget as HTMLInputElement).value)}
+            />
+            <span class="preset-color-custom-text">Custom</span>
+          </label>
+        </div>
+      {/if}
     </Popover.Content>
   </Popover.Portal>
 </Popover.Root>
@@ -339,5 +366,53 @@ export interface PresetColorOption {
     box-shadow:
       0 0 0 2px var(--background-primary),
       0 0 0 4px var(--text-normal);
+  }
+
+  .preset-color-custom-row {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--background-modifier-border);
+  }
+
+  .preset-color-custom-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: var(--font-ui-small);
+    color: var(--text-muted);
+  }
+
+  .preset-color-custom-input {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    cursor: pointer;
+    overflow: hidden;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .preset-color-custom-input::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+
+  .preset-color-custom-input::-webkit-color-swatch {
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 999px;
+  }
+
+  .preset-color-custom-input::-moz-color-swatch {
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 999px;
+  }
+
+  .preset-color-custom-text {
+    user-select: none;
   }
 </style>
