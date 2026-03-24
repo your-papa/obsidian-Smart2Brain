@@ -5,7 +5,6 @@ import {
 	forceSimulation,
 	forceLink,
 	forceManyBody,
-	forceCenter,
 	forceCollide,
 	forceX,
 	forceY,
@@ -15,7 +14,8 @@ import {
 import type { GraphData, GraphNode, GraphEdge, EdgeType, LayoutMode } from "../../types/graph";
 import { deriveClusterRepresentativesFromGraph } from "../../views/smart-graph/graphDataBuilder";
 import { edgeKey } from "../../utils/graphUtils";
-import { animateTransform, computeNodeBounds, framingTransform, easeOutCubic } from "../../utils/graphAnimation";
+import { computeNodeBounds, framingTransform, easeOutCubic } from "../../utils/graphAnimation";
+import { PixiRenderer, readThemeColors, type ClusterPillHit, type EdgeLegendHit } from "./pixiRenderer";
 
 interface Props {
 	graphData: GraphData;
@@ -23,7 +23,10 @@ interface Props {
 	mode: LayoutMode;
 	linkDistance: number;
 	chargeStrength?: number;
+	centerStrength?: number;
+	linkStrength?: number;
 	labelZoomThreshold?: number;
+	nodeSize?: number;
 	showWikiLinks?: boolean;
 	focusedClusters?: Set<number>;
 	clusterLabels?: Record<number, string>;
@@ -42,8 +45,11 @@ let {
 	graphData,
 	mode,
 	linkDistance,
-	chargeStrength = -150,
+	chargeStrength = -1000,
+	centerStrength = 0.1,
+	linkStrength = 1,
 	labelZoomThreshold = 2.5,
+	nodeSize: nodeSizeProp = 4,
 	showWikiLinks = true,
 	focusedClusters = new Set<number>(),
 	clusterLabels = {},
@@ -61,30 +67,28 @@ let {
 /** Whether the current mode uses d3-force simulation vs static projected positions. */
 let isForceMode = $derived(mode === "force");
 
-let canvasEl: HTMLCanvasElement;
 let containerEl: HTMLDivElement;
 
 // Invisible anchor element repositioned over hovered nodes for Obsidian's hover popover
 let hoverAnchorEl: HTMLDivElement;
 
-// Auto-compute node size based on graph density — smaller dots for large graphs
+// Pixi renderer instance
+let pixi: PixiRenderer | null = null;
+
+// Node size: use the user setting, scaled down for very large graphs
 let nodeSize = $derived.by(() => {
 	const n = graphData.nodes.length;
-	if (n <= 50) return 6;
-	if (n <= 200) return 4;
-	if (n <= 500) return 3;
-	return 2;
+	const base = nodeSizeProp;
+	// Gently shrink for large graphs so nodes don't overlap
+	if (n > 500) return Math.max(1, base * 0.5);
+	if (n > 200) return Math.max(1, base * 0.75);
+	return base;
 });
-
-// Transform state for zoom/pan
-let transform = $state({ x: 0, y: 0, scale: 1 });
 
 // Interaction state
 let hoveredNode: GraphNode | null = $state(null);
 let draggedNode: GraphNode | null = $state(null);
 let hasDragged = false;
-let isPanning = $state(false);
-let panStart = { x: 0, y: 0 };
 
 // Non-reactive drag reference — directly mutates the d3 SimNode's fx/fy
 // without going through Svelte's $state proxy (wiki mode only)
@@ -107,10 +111,14 @@ let previewTriggeredForNode: string | null = null;
 
 // Track whether we need an initial fit-to-view after first simulation setup
 let needsInitialFit = true;
-let initialFitTickCount = 0;
+// Tick counter for periodic camera refits during force-mode settling
+let forceTickCount = 0;
 
 // Simulation reference
 let simulation: ReturnType<typeof forceSimulation<SimNode>> | null = null;
+// D3's default link strength function, captured at simulation init so the
+// hot-update effect can reuse it (it depends on the link topology).
+let cachedDefaultLinkStrengthFn: ((link: SimLink, i: number, links: SimLink[]) => number) | null = null;
 
 // D3-compatible node/link types
 type SimNode = GraphNode & SimulationNodeDatum;
@@ -140,26 +148,11 @@ let skipNextSetupEffects = false;
 // Adjacency map: nodeId → Set of connected node ids (O(1) hover lookup)
 let adjacency: Map<string, Set<string>> = new Map();
 
-// Edge hover state for weight display
-let hoveredEdge: SimLink | null = $state(null);
-
 // Cluster legend hit areas for click detection (screen space)
-let clusterAnchorHitAreas: Array<{
-	x: number;
-	y: number;
-	w: number;
-	h: number;
-	cluster: number;
-}> = [];
+let clusterAnchorHitAreas: ClusterPillHit[] = [];
 
 // Edge legend hit areas for click detection (screen space)
-let edgeLegendHitAreas: Array<{
-	x: number;
-	y: number;
-	w: number;
-	h: number;
-	type: "wiki";
-}> = [];
+let edgeLegendHitAreas: EdgeLegendHit[] = [];
 
 // Labeling animation loop
 let labelAnimFrameId: number | null = null;
@@ -186,66 +179,30 @@ $effect(() => {
 // Enables O(1) edge weight lookups for hover labels instead of O(n) scan.
 let edgeLookup: Map<string, SimLink> = new Map();
 
+// Track previous mode + graphData reference to detect mode-only changes
+// (mode changed but data hasn't been re-projected yet).
+let lastMode: LayoutMode | null = null;
+let lastGraphDataRef: GraphData | null = null;
+
 // Node ID → SimNode map for O(1) lookups (built once in setupSimulation)
 let simNodeMap: Map<string, SimNode> = new Map();
 let clusterRepresentativeIds: Set<string> = new Set();
 let clusterRepresentativeNodes: Map<number, SimNode> = new Map();
 let clusterNodeCounts: Map<number, number> = new Map();
 
+// Build a cluster map for edge rendering (nodeId → cluster)
+function getNodeClusterMap(): Map<string, number | undefined> {
+	const map = new Map<string, number | undefined>();
+	for (const n of simNodes) {
+		map.set(n.id, n.cluster);
+	}
+	return map;
+}
+
 const REPRESENTATIVE_LABEL_NODE_THRESHOLD = 120;
 const REPRESENTATIVE_LABEL_ZOOM_RATIO = 0.6;
 const FULL_LABEL_DENSE_GRAPH_MULTIPLIER = 1.8;
 const CLUSTER_ANCHOR_ZOOM_RATIO = 0.85;
-
-/**
- * Cached theme colors — Canvas 2D cannot use CSS var() directly.
- * We read computed styles once and invalidate on Obsidian theme change
- * (via the `css-change` event on `document.body`) instead of every frame.
- */
-type ThemeColors = ReturnType<typeof readThemeColors>;
-let cachedThemeColors: ThemeColors | null = null;
-
-function readThemeColors() {
-	const style = getComputedStyle(canvasEl);
-	const get = (prop: string, fallback: string) => style.getPropertyValue(prop).trim() || fallback;
-	return {
-		accent: get("--interactive-accent", "#7b6cd9"),
-		textNormal: get("--text-normal", "#dcddde"),
-		textMuted: get("--text-muted", "#999999"),
-		textFaint: get("--text-faint", "#b4b4b4"),
-		textAccent: get("--text-accent", "#7b6cd9"),
-		graphLine: get("--graph-line", "#969696"),
-		graphNode: get("--graph-node", "#999999"),
-		textOnAccent: get("--text-on-accent", "#ffffff"),
-		bgPrimary: get("--background-primary", "#1e1e1e"),
-		font: get("--font-interface", "-apple-system, BlinkMacSystemFont, sans-serif"),
-	};
-}
-
-function invalidateThemeColors() {
-	cachedThemeColors = null;
-}
-
-function resolveThemeColors(): ThemeColors {
-	if (!cachedThemeColors) {
-		cachedThemeColors = readThemeColors();
-	}
-	return cachedThemeColors;
-}
-
-/**
- * Distance from point (px,py) to line segment (x1,y1)-(x2,y2).
- */
-function distToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
-	const dx = x2 - x1;
-	const dy = y2 - y1;
-	const lenSq = dx * dx + dy * dy;
-	if (lenSq === 0) return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
-	const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
-	const projX = x1 + t * dx;
-	const projY = y1 + t * dy;
-	return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
-}
 
 /**
  * Ray-casting point-in-polygon test.
@@ -291,53 +248,11 @@ export function selectNodesByPaths(paths: string[]) {
 }
 
 /**
- * Truncate text with an ellipsis if it exceeds `maxWidth` in the current font.
- */
-function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
-	if (ctx.measureText(text).width <= maxWidth) return text;
-	const ellipsis = "…";
-	let lo = 0;
-	let hi = text.length;
-	while (lo < hi) {
-		const mid = (lo + hi + 1) >> 1;
-		if (ctx.measureText(text.slice(0, mid) + ellipsis).width <= maxWidth) {
-			lo = mid;
-		} else {
-			hi = mid - 1;
-		}
-	}
-	return lo > 0 ? text.slice(0, lo) + ellipsis : ellipsis;
-}
-
-/**
- * Find the edge nearest to the given screen coordinates, if within hit distance.
- */
-function findEdgeAt(screenX: number, screenY: number): SimLink | null {
-	const { x, y } = screenToGraph(screenX, screenY);
-	const hitDist = 6 / transform.scale;
-	let best: SimLink | null = null;
-	let bestDist = hitDist;
-	for (const link of simLinks) {
-		const s = link.source as SimNode;
-		const t = link.target as SimNode;
-		if (s.x == null || s.y == null || t.x == null || t.y == null) continue;
-		const d = distToSegment(x, y, s.x, s.y, t.x, t.y);
-		if (d < bestDist) {
-			bestDist = d;
-			best = link;
-		}
-	}
-	return best;
-}
-
-/**
- * Convert screen coordinates to graph coordinates.
+ * Convert screen coordinates to graph (world) coordinates via the viewport.
  */
 function screenToGraph(screenX: number, screenY: number): { x: number; y: number } {
-	return {
-		x: (screenX - transform.x) / transform.scale,
-		y: (screenY - transform.y) / transform.scale,
-	};
+	if (!pixi) return { x: screenX, y: screenY };
+	return pixi.screenToWorld(screenX, screenY);
 }
 
 /**
@@ -345,7 +260,8 @@ function screenToGraph(screenX: number, screenY: number): { x: number; y: number
  */
 function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 	const { x, y } = screenToGraph(screenX, screenY);
-	const hitRadius = (Math.max(0.5, nodeSize / 6) + 4) / transform.scale;
+	const scale = pixi?.scale ?? 1;
+	const hitRadius = (Math.max(1, nodeSize) + 4) / scale;
 
 	// Search in reverse order (top-most nodes first)
 	for (let i = simNodes.length - 1; i >= 0; i--) {
@@ -363,87 +279,32 @@ function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 
 /**
  * Get the draw radius for a node based on its degree and the user-configurable nodeSize.
- * nodeSize default is 6; the base radius scales linearly so nodes are always visible.
  */
 function getNodeRadius(node: GraphNode): number {
-	const base = Math.max(0.5, nodeSize / 6);
+	const base = Math.max(1, nodeSize);
 	const degree = node.degree ?? 0;
-	return base + Math.min(Math.log1p(degree) * 0.5, 6);
+	return base + Math.min(Math.log1p(degree) * 2.5, base * 5);
 }
 
 /**
- * Render the graph to the canvas.
+ * Update the Pixi renderer with current state.
+ * Replaces the old Canvas 2D render() function.
  */
 function render() {
-	if (!canvasEl) return;
-	const ctx = canvasEl.getContext("2d");
-	if (!ctx) return;
+	if (!pixi || !pixi.ready) return;
 
-	const dpr = window.devicePixelRatio || 1;
-	const width = canvasEl.width / dpr;
-	const height = canvasEl.height / dpr;
-
-	// Resolve theme CSS variables (Canvas 2D can't use var() directly)
-	const c = resolveThemeColors();
-
-	// Clear (use logical pixel dimensions — context is already DPR-scaled)
-	ctx.clearRect(0, 0, width, height);
-
-	ctx.save();
-	ctx.translate(transform.x, transform.y);
-	ctx.scale(transform.scale, transform.scale);
-
-	// Draw wiki edges using the pre-split array built in setupSimulation.
+	const width = pixi.width;
+	const height = pixi.height;
+	const scale = pixi.scale;
+	const c = pixi.theme;
+	const nodeClusterMap = getNodeClusterMap();
 
 	// Advance edge fade-in (smooth crossfade on mode / data changes)
 	if (edgeFadeAlpha < 1) {
 		edgeFadeAlpha = Math.min(1, edgeFadeAlpha + EDGE_FADE_RATE);
 	}
 
-	if (showWikiLinks) {
-		for (const link of wikiSimLinks) {
-			const source = link.source as SimNode;
-			const target = link.target as SimNode;
-
-			if (source.x == null || source.y == null || target.x == null || target.y == null) continue;
-
-			// Dim edges outside focused clusters
-			const inFocus =
-				focusedClusters.size === 0 ||
-				(source.cluster != null && focusedClusters.has(source.cluster)) ||
-				(target.cluster != null && focusedClusters.has(target.cluster));
-
-			// Dim edges outside selection
-			const inSelection =
-				selectedNodes.size === 0 || (selectedNodes.has(source.id) && selectedNodes.has(target.id));
-
-			const isHighlighted = hoveredNode && (source.id === hoveredNode.id || target.id === hoveredNode.id);
-
-			// Use the smoother of the two endpoint alphas for edge dimming
-			const edgeHoverAlpha = hoveredNode
-				? Math.max(hoverAlphas.get(source.id) ?? 0.85, hoverAlphas.get(target.id) ?? 0.85)
-				: 1;
-
-			ctx.beginPath();
-			ctx.setLineDash([]);
-			ctx.moveTo(source.x, source.y);
-			ctx.lineTo(target.x, target.y);
-			ctx.strokeStyle = isHighlighted ? c.accent : c.textFaint;
-			ctx.lineWidth = isHighlighted ? 2 / transform.scale : 0.5 / transform.scale;
-			ctx.globalAlpha =
-				(!inFocus ? 0.05 : !inSelection ? 0.05 : isHighlighted ? 0.9 : 0.25) *
-				edgeFadeAlpha *
-				(isHighlighted ? 1 : edgeHoverAlpha / 0.85);
-			ctx.stroke();
-			ctx.globalAlpha = 1;
-		}
-	} // end showWikiLinks
-
-	ctx.setLineDash([]);
-
 	// ── Smooth hover alpha interpolation ──────────────────────
-	// Compute target alpha for each node and lerp toward it.
-	// This produces a smooth dim/brighten effect on hover.
 	let hoverSettled = true;
 	const hasSelection = selectedNodes.size > 0;
 
@@ -481,54 +342,38 @@ function render() {
 		});
 	}
 
-	// Draw nodes
-	for (const node of simNodes) {
-		if (node.x == null || node.y == null) continue;
+	// ── Edges ──────────────────────────────────────────────────
+	pixi.drawEdges(
+		wikiSimLinks as Array<{
+			source: { id: string; x: number; y: number };
+			target: { id: string; x: number; y: number };
+			type: string;
+		}>,
+		{
+			showWikiLinks,
+			hoveredNodeId: hoveredNode?.id ?? null,
+			adjacency,
+			focusedClusters,
+			selectedNodes,
+			hoverAlphas,
+			edgeFadeAlpha,
+			nodeClusterMap,
+		},
+	);
 
-		const radius = getNodeRadius(node);
-		const isHovered = hoveredNode?.id === node.id;
-		const isDragged = draggedNode?.id === node.id;
-		const alpha = hoverAlphas.get(node.id) ?? 0.85;
+	// ── Nodes ──────────────────────────────────────────────────
+	pixi.syncNodes(simNodes, nodeSize, {
+		selectedNodes,
+		hoveredNodeId: hoveredNode?.id ?? null,
+		draggedNodeId: draggedNode?.id ?? null,
+		focusedClusters,
+		pinnedNodes,
+		isForceMode,
+		hoverAlphas,
+		nodeClusterMap,
+	});
 
-		ctx.beginPath();
-		ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-
-		// Fill
-		if (node.highlighted) {
-			ctx.fillStyle = c.accent;
-			ctx.globalAlpha = alpha;
-		} else {
-			ctx.fillStyle = node.color ?? c.graphNode;
-			ctx.globalAlpha = alpha;
-		}
-
-		ctx.fill();
-		ctx.globalAlpha = 1;
-
-		// Stroke for highlighted/hovered/selected nodes
-		if (selectedNodes.has(node.id)) {
-			ctx.strokeStyle = c.accent;
-			ctx.lineWidth = 3 / transform.scale;
-			ctx.stroke();
-		} else if (node.highlighted || isHovered) {
-			ctx.strokeStyle = isHovered ? c.textNormal : c.accent;
-			ctx.lineWidth = 2 / transform.scale;
-			ctx.stroke();
-		}
-
-		// Pinned node indicator: small inner dot (wiki mode only)
-		if (isForceMode && pinnedNodes.has(node.id)) {
-			const pinR = Math.max(2 / transform.scale, 1);
-			ctx.beginPath();
-			ctx.arc(node.x, node.y, pinR, 0, Math.PI * 2);
-			ctx.fillStyle = c.textOnAccent;
-			ctx.fill();
-		}
-	}
-
-	// ── Unified label rendering ──────────────────────────────
-	// One pass determines label text, style, and opacity per node.
-	// Priority: hover context → zoom labels → search highlights.
+	// ── Labels ─────────────────────────────────────────────────
 	const denseGraph = simNodes.length >= REPRESENTATIVE_LABEL_NODE_THRESHOLD;
 	const representativeLabelThreshold = labelZoomThreshold;
 	const allLabelsThreshold = denseGraph
@@ -539,48 +384,32 @@ function render() {
 			)
 		: labelZoomThreshold;
 	const showRepresentativeLabels =
-		denseGraph &&
-		labelZoomThreshold > 0 &&
-		transform.scale >= representativeLabelThreshold &&
-		transform.scale < allLabelsThreshold;
-	const representativeLabelOpacity = showRepresentativeLabels
-		? Math.min(
-				1,
-				(transform.scale - representativeLabelThreshold) /
-					Math.max(0.25, allLabelsThreshold - representativeLabelThreshold),
-			)
-		: 0;
-	const showAllLabels = labelZoomThreshold > 0 && transform.scale >= allLabelsThreshold;
+		denseGraph && labelZoomThreshold > 0 && scale >= representativeLabelThreshold && scale < allLabelsThreshold;
+	const showAllLabels = labelZoomThreshold > 0 && scale >= allLabelsThreshold;
 	const showClusterAnchors = clusterRepresentativeNodes.size > 0;
 	const zoomLabelOpacity = showAllLabels
-		? Math.min(1, (transform.scale - allLabelsThreshold) / Math.max(0.25, allLabelsThreshold))
+		? Math.min(1, (scale - allLabelsThreshold) / Math.max(0.25, allLabelsThreshold))
 		: 0;
 	const hovId = hoveredNode?.id ?? null;
 	const hoverNeighbors = hovId ? adjacency.get(hovId) : undefined;
 
-	const fontSize = Math.max(4.5 / transform.scale, 2.8);
-	const baseLabelFont = `${fontSize}px ${c.font}`;
-	ctx.font = baseLabelFont;
-	ctx.textAlign = "center";
-	ctx.textBaseline = "bottom";
+	const fontSize = Math.max(4.5 / scale, 2.8);
 
-	// Label occlusion culling: track drawn label bounding boxes in screen space
-	// and skip any label that would overlap an already-drawn one.
+	// Label occlusion culling in screen space
 	const drawnLabelRects: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
-	const LABEL_PAD_X = 2; // horizontal padding between labels (screen px)
-	const LABEL_PAD_Y = 1; // vertical padding between labels (screen px)
+	const LABEL_PAD_X = 2;
+	const LABEL_PAD_Y = 1;
 
-	function canDrawLabel(nodeX: number, labelY: number, text: string): boolean {
-		const textW = ctx!.measureText(text).width;
-		// Convert label bounds from graph space to screen space
-		const sx = nodeX * transform.scale + transform.x;
-		const sy = labelY * transform.scale + transform.y;
-		const sw = textW * transform.scale;
-		const sh = fontSize * transform.scale;
-		const x1 = sx - sw / 2 - LABEL_PAD_X;
-		const y1 = sy - sh - LABEL_PAD_Y;
-		const x2 = sx + sw / 2 + LABEL_PAD_X;
-		const y2 = sy + LABEL_PAD_Y;
+	function canDrawLabel(nodeX: number, labelY: number, approxCharCount: number): boolean {
+		// Approximate text width: ~6px per char at 12px font, scaled
+		const textW = approxCharCount * 6 * (fontSize / 12);
+		const screen = pixi!.worldToScreen(nodeX, labelY);
+		const sw = textW * scale;
+		const sh = fontSize * scale;
+		const x1 = screen.x - sw / 2 - LABEL_PAD_X;
+		const y1 = screen.y - sh - LABEL_PAD_Y;
+		const x2 = screen.x + sw / 2 + LABEL_PAD_X;
+		const y2 = screen.y + LABEL_PAD_Y;
 
 		for (const r of drawnLabelRects) {
 			if (x1 < r.x2 && x2 > r.x1 && y1 < r.y2 && y2 > r.y1) return false;
@@ -589,9 +418,7 @@ function render() {
 		return true;
 	}
 
-	// Sort nodes by label priority: hovered → neighbors → highlighted →
-	// cluster representatives → high-degree → rest. Higher-priority labels
-	// reserve screen space first so lower-priority ones get culled.
+	// Sort nodes by label priority
 	const sortedLabelNodes = simNodes.filter((n) => n.x != null && n.y != null);
 	sortedLabelNodes.sort((a, b) => {
 		const pa =
@@ -618,401 +445,161 @@ function render() {
 		return (b.degree ?? 0) - (a.degree ?? 0);
 	});
 
+	const labelEntries: Array<{
+		nodeX: number;
+		nodeY: number;
+		text: string;
+		color: string;
+		alpha: number;
+		fontSize: number;
+	}> = [];
+
 	for (const node of sortedLabelNodes) {
 		const radius = getNodeRadius(node);
-		const labelY = node.y - radius - 2 / transform.scale;
+		const labelY = node.y - radius - 2 / scale;
 		const nodeAlpha = hoverAlphas.get(node.id) ?? 0.85;
 
 		if (hovId && node.id === hovId) {
-			// Hovered node: always show, skip occlusion (reserves its rect)
-			canDrawLabel(node.x, labelY, node.label);
-			ctx.font = baseLabelFont;
-			ctx.fillStyle = c.textNormal;
-			ctx.globalAlpha = 1;
-			ctx.fillText(node.label, node.x, labelY);
+			canDrawLabel(node.x, labelY, node.label.length);
+			labelEntries.push({
+				nodeX: node.x,
+				nodeY: labelY,
+				text: node.label,
+				color: c.textNormal,
+				alpha: 1,
+				fontSize,
+			});
 		} else if (hovId && hoverNeighbors?.has(node.id)) {
-			// Neighbor of hovered node — draw only if no overlap
-			if (!canDrawLabel(node.x, labelY, node.label)) continue;
-			ctx.font = baseLabelFont;
-			ctx.fillStyle = c.textMuted;
-			ctx.globalAlpha = nodeAlpha;
-			ctx.fillText(node.label, node.x, labelY);
+			if (!canDrawLabel(node.x, labelY, node.label.length)) continue;
+			labelEntries.push({
+				nodeX: node.x,
+				nodeY: labelY,
+				text: node.label,
+				color: c.textMuted,
+				alpha: nodeAlpha,
+				fontSize,
+			});
 		} else if (showAllLabels) {
-			// Zoom labels: visible for all remaining nodes — cull overlaps
-			if (!canDrawLabel(node.x, labelY, node.label)) continue;
-			ctx.font = baseLabelFont;
-			ctx.fillStyle = node.highlighted ? c.textAccent : c.textNormal;
-			ctx.globalAlpha = nodeAlpha * zoomLabelOpacity;
-			ctx.fillText(node.label, node.x, labelY);
+			if (!canDrawLabel(node.x, labelY, node.label.length)) continue;
+			labelEntries.push({
+				nodeX: node.x,
+				nodeY: labelY,
+				text: node.label,
+				color: node.highlighted ? c.textAccent : c.textNormal,
+				alpha: nodeAlpha * zoomLabelOpacity,
+				fontSize,
+			});
 		} else if (showRepresentativeLabels && clusterRepresentativeIds.has(node.id)) {
-			// Dense graphs: representative nodes are labeled by screen-space cluster anchors.
+			// Dense graphs: representative nodes labeled by cluster anchor pills
 		} else if (node.highlighted && !hovId) {
-			// Search highlights — cull overlaps
-			if (!canDrawLabel(node.x, labelY, node.label)) continue;
-			ctx.font = baseLabelFont;
-			ctx.fillStyle = c.textAccent;
-			ctx.globalAlpha = 1;
-			ctx.fillText(node.label, node.x, labelY);
+			if (!canDrawLabel(node.x, labelY, node.label.length)) continue;
+			labelEntries.push({
+				nodeX: node.x,
+				nodeY: labelY,
+				text: node.label,
+				color: c.textAccent,
+				alpha: 1,
+				fontSize,
+			});
 		}
 	}
-	ctx.globalAlpha = 1;
 
-	// ── Lasso path (graph space) ──────────────────────────────
+	pixi.drawLabels(labelEntries);
+
+	// ── Lasso ──────────────────────────────────────────────────
 	if (isLassoing && lassoPoints.length >= 2) {
-		ctx.beginPath();
-		ctx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
-		for (let i = 1; i < lassoPoints.length; i++) {
-			ctx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
-		}
-		ctx.closePath();
-		// Semi-transparent fill
-		ctx.fillStyle = c.accent;
-		ctx.globalAlpha = 0.08;
-		ctx.fill();
-		// Dashed stroke
-		const dash = 4 / transform.scale;
-		ctx.setLineDash([dash, dash]);
-		ctx.strokeStyle = c.accent;
-		ctx.lineWidth = 2 / transform.scale;
-		ctx.globalAlpha = 0.6;
-		ctx.stroke();
-		ctx.setLineDash([]);
-		ctx.globalAlpha = 1;
+		pixi.drawLasso(lassoPoints);
+	} else {
+		pixi.clearLasso();
 	}
 
-	ctx.restore();
+	// ── Cluster anchor pills (screen space) ────────────────────
+	if (showClusterAnchors) {
+		const ANCHOR_PILL_H = 20;
+		const ANCHOR_GAP = 4;
 
-	// ── Cluster anchors (screen space) ─────────────────────────
-	{
-		const dpr = window.devicePixelRatio || 1;
-		ctx.save();
-		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-		clusterAnchorHitAreas = [];
+		const anchorPlacements: Array<{
+			cluster: number;
+			nodeScreenX: number;
+			nodeScreenY: number;
+			text: string;
+			pillW: number;
+			pillH: number;
+			x: number;
+			y: number;
+			isFocused: boolean;
+			color: string;
+		}> = [];
 
-		if (showClusterAnchors) {
-			ctx.textAlign = "left";
-			ctx.textBaseline = "middle";
-			ctx.font = `600 11px ${c.font}`;
+		for (const [cluster, node] of clusterRepresentativeNodes) {
+			if (node.x == null || node.y == null) continue;
+			if (focusedClusters.size > 0 && !focusedClusters.has(cluster)) continue;
 
-			// Phase 1: compute initial positions and sizes for all visible anchors
-			const anchorPlacements: Array<{
-				cluster: number;
-				node: SimNode;
-				text: string;
-				pillW: number;
-				pillH: number;
-				idealX: number;
-				idealY: number;
-				x: number;
-				y: number;
-				isFocused: boolean;
-				color: string;
-			}> = [];
+			const screen = pixi.worldToScreen(node.x, node.y);
+			const anchorLabel = clusterLabels[cluster] ?? node.label;
+			const nodeCount = clusterNodeCounts.get(cluster) ?? 0;
+			const anchorText = `${anchorLabel} · ${nodeCount}`;
+			// Approximate pill width: ~7px per char + padding
+			const pillWidth = Math.min(200, Math.max(80, anchorText.length * 7 + 16));
+			const pillX = Math.max(8, Math.min(width - pillWidth - 8, screen.x + 8));
+			const pillY = Math.max(8, Math.min(height - ANCHOR_PILL_H - 8, screen.y - ANCHOR_PILL_H - 6));
 
-			const ANCHOR_PILL_H = 20;
-			const ANCHOR_GAP = 4; // minimum gap between anchor pills
+			anchorPlacements.push({
+				cluster,
+				nodeScreenX: screen.x,
+				nodeScreenY: screen.y,
+				text: anchorText,
+				pillW: pillWidth,
+				pillH: ANCHOR_PILL_H,
+				x: pillX,
+				y: pillY,
+				isFocused: focusedClusters.has(cluster),
+				color: node.color ?? c.graphNode,
+			});
+		}
 
-			for (const [cluster, node] of clusterRepresentativeNodes) {
-				if (node.x == null || node.y == null) continue;
-				if (focusedClusters.size > 0 && !focusedClusters.has(cluster)) continue;
-
-				const screenX = node.x * transform.scale + transform.x;
-				const screenY = node.y * transform.scale + transform.y;
-				const anchorLabel = clusterLabels[cluster] ?? node.label;
-				const nodeCount = clusterNodeCounts.get(cluster) ?? 0;
-				const anchorText = `${anchorLabel} · ${nodeCount}`;
-				const textWidth = ctx.measureText(anchorText).width;
-				const pillWidth = Math.min(200, Math.max(80, textWidth + 16));
-				const pillX = Math.max(8, Math.min(width - pillWidth - 8, screenX + 8));
-				const pillY = Math.max(8, Math.min(height - ANCHOR_PILL_H - 8, screenY - ANCHOR_PILL_H - 6));
-
-				anchorPlacements.push({
-					cluster,
-					node,
-					text: anchorText,
-					pillW: pillWidth,
-					pillH: ANCHOR_PILL_H,
-					idealX: pillX,
-					idealY: pillY,
-					x: pillX,
-					y: pillY,
-					isFocused: focusedClusters.has(cluster),
-					color: node.color ?? c.graphNode,
-				});
-			}
-
-			// Phase 2: greedy overlap resolution — nudge colliding pills apart.
-			// Sort by idealY so top-most anchors get priority placement.
-			anchorPlacements.sort((a, b) => a.idealY - b.idealY);
-
-			for (let pass = 0; pass < 3; pass++) {
-				for (let i = 0; i < anchorPlacements.length; i++) {
-					const a = anchorPlacements[i];
-					for (let j = i + 1; j < anchorPlacements.length; j++) {
-						const b = anchorPlacements[j];
-
-						// Check overlap with gap
-						const overlapX = a.x < b.x + b.pillW + ANCHOR_GAP && a.x + a.pillW + ANCHOR_GAP > b.x;
-						const overlapY = a.y < b.y + b.pillH + ANCHOR_GAP && a.y + a.pillH + ANCHOR_GAP > b.y;
-
-						if (overlapX && overlapY) {
-							// Compute overlap depth in each axis
-							const overlapDepthY =
-								Math.min(a.y + a.pillH + ANCHOR_GAP, b.y + b.pillH + ANCHOR_GAP) - Math.max(a.y, b.y);
-							const overlapDepthX =
-								Math.min(a.x + a.pillW + ANCHOR_GAP, b.x + b.pillW + ANCHOR_GAP) - Math.max(a.x, b.x);
-
-							if (overlapDepthY <= overlapDepthX) {
-								// Push apart vertically (cheaper, more natural)
-								const pushY = overlapDepthY / 2 + 1;
-								a.y = Math.max(8, a.y - pushY);
-								b.y = Math.min(height - b.pillH - 8, b.y + pushY);
-							} else {
-								// Push apart horizontally
-								const pushX = overlapDepthX / 2 + 1;
-								a.x = Math.max(8, a.x - pushX);
-								b.x = Math.min(width - b.pillW - 8, b.x + pushX);
-							}
+		// Greedy overlap resolution
+		anchorPlacements.sort((a, b) => a.y - b.y);
+		for (let pass = 0; pass < 3; pass++) {
+			for (let i = 0; i < anchorPlacements.length; i++) {
+				const a = anchorPlacements[i];
+				for (let j = i + 1; j < anchorPlacements.length; j++) {
+					const b = anchorPlacements[j];
+					const overlapX = a.x < b.x + b.pillW + ANCHOR_GAP && a.x + a.pillW + ANCHOR_GAP > b.x;
+					const overlapY = a.y < b.y + b.pillH + ANCHOR_GAP && a.y + a.pillH + ANCHOR_GAP > b.y;
+					if (overlapX && overlapY) {
+						const overlapDepthY =
+							Math.min(a.y + a.pillH + ANCHOR_GAP, b.y + b.pillH + ANCHOR_GAP) - Math.max(a.y, b.y);
+						const overlapDepthX =
+							Math.min(a.x + a.pillW + ANCHOR_GAP, b.x + b.pillW + ANCHOR_GAP) - Math.max(a.x, b.x);
+						if (overlapDepthY <= overlapDepthX) {
+							const pushY = overlapDepthY / 2 + 1;
+							a.y = Math.max(8, a.y - pushY);
+							b.y = Math.min(height - b.pillH - 8, b.y + pushY);
+						} else {
+							const pushX = overlapDepthX / 2 + 1;
+							a.x = Math.max(8, a.x - pushX);
+							b.x = Math.min(width - b.pillW - 8, b.x + pushX);
 						}
 					}
 				}
 			}
-
-			// Phase 3: render leader lines, then pills on top
-			// Leader lines connect each anchor pill to its representative node.
-			for (const anchor of anchorPlacements) {
-				const nodeScreenX = anchor.node.x! * transform.scale + transform.x;
-				const nodeScreenY = anchor.node.y! * transform.scale + transform.y;
-				const pillCenterX = anchor.x + anchor.pillW / 2;
-				const pillCenterY = anchor.y + anchor.pillH / 2;
-
-				// Only draw if the pill drifted noticeably from the node
-				const dist = Math.sqrt((pillCenterX - nodeScreenX) ** 2 + (pillCenterY - nodeScreenY) ** 2);
-				if (dist > anchor.pillW * 0.6) {
-					ctx.beginPath();
-					ctx.moveTo(pillCenterX, pillCenterY);
-					ctx.lineTo(nodeScreenX, nodeScreenY);
-					const dash = 3;
-					ctx.setLineDash([dash, dash]);
-					ctx.strokeStyle = anchor.color;
-					ctx.lineWidth = 0.75;
-					ctx.globalAlpha = anchor.isFocused ? 0.5 : 0.25;
-					ctx.stroke();
-					ctx.setLineDash([]);
-				}
-			}
-
-			for (const anchor of anchorPlacements) {
-				ctx.globalAlpha = anchor.isFocused ? 0.96 : 0.88;
-				ctx.fillStyle = c.bgPrimary;
-				ctx.beginPath();
-				ctx.roundRect(anchor.x, anchor.y, anchor.pillW, anchor.pillH, 999);
-				ctx.fill();
-
-				ctx.strokeStyle = anchor.color;
-				ctx.lineWidth = anchor.isFocused ? 1.75 : 1;
-				ctx.stroke();
-
-				ctx.globalAlpha = 1;
-				ctx.fillStyle = c.textNormal;
-				const maxTextW = anchor.pillW - 16;
-				const displayText = truncateText(ctx, anchor.text, maxTextW);
-				ctx.fillText(displayText, anchor.x + 8, anchor.y + anchor.pillH / 2 + 0.5);
-
-				clusterAnchorHitAreas.push({
-					x: anchor.x,
-					y: anchor.y,
-					w: anchor.pillW,
-					h: anchor.pillH,
-					cluster: anchor.cluster,
-				});
-			}
 		}
 
-		ctx.restore();
+		clusterAnchorHitAreas = pixi.drawClusterPills(anchorPlacements);
+	} else {
+		clusterAnchorHitAreas = pixi.drawClusterPills([]);
 	}
 
-	// ── Edge legend (screen space) ──────────────────────────────
-	{
-		const dpr = window.devicePixelRatio || 1;
+	// ── Edge legend (screen space) ─────────────────────────────
+	edgeLegendHitAreas = [pixi.drawEdgeLegend(showWikiLinks)];
 
-		ctx.save();
-		// reset to identity so we draw in device pixels
-		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-		const lx = 16;
-		const ly = canvasEl.height / dpr - 40;
-		const rowH = 18;
-
-		ctx.font = `${11}px ${c.font}`;
-		ctx.textAlign = "left";
-		ctx.textBaseline = "middle";
-
-		edgeLegendHitAreas = [];
-
-		// Wiki link line (solid)
-		ctx.globalAlpha = showWikiLinks ? 0.7 : 0.25;
-		ctx.beginPath();
-		ctx.setLineDash([]);
-		ctx.moveTo(lx, ly);
-		ctx.lineTo(lx + 28, ly);
-		ctx.strokeStyle = c.textFaint;
-		ctx.lineWidth = 1.5;
-		ctx.stroke();
-
-		ctx.fillStyle = c.textMuted;
-		ctx.fillText("Wiki link", lx + 34, ly);
-
-		if (!showWikiLinks) {
-			// Strikethrough
-			const textW = ctx.measureText("Wiki link").width;
-			ctx.beginPath();
-			ctx.moveTo(lx + 34, ly);
-			ctx.lineTo(lx + 34 + textW, ly);
-			ctx.strokeStyle = c.textMuted;
-			ctx.lineWidth = 1;
-			ctx.setLineDash([]);
-			ctx.stroke();
-		}
-
-		edgeLegendHitAreas.push({ x: lx, y: ly - rowH / 2, w: 120, h: rowH, type: "wiki" });
-
-		ctx.globalAlpha = 1;
-		ctx.restore();
-	}
-
-	// ── Edge weight tooltip (screen space) ─────────────────────
-	if (hoveredEdge && !hoveredNode) {
-		const s = hoveredEdge.source as SimNode;
-		const t = hoveredEdge.target as SimNode;
-		if (s.x != null && s.y != null && t.x != null && t.y != null) {
-			// Midpoint in graph coords → screen coords
-			const midGX = (s.x + t.x) / 2;
-			const midGY = (s.y + t.y) / 2;
-			const midSX = midGX * transform.scale + transform.x;
-			const midSY = midGY * transform.scale + transform.y;
-
-			const dpr = window.devicePixelRatio || 1;
-			ctx.save();
-			ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-			const label = `wiki · ${hoveredEdge.weight}`;
-
-			ctx.font = `11px ${c.font}`;
-			const metrics = ctx.measureText(label);
-			const padX = 6;
-			const padY = 4;
-			const boxW = metrics.width + padX * 2;
-			const boxH = 18;
-			const bx = midSX - boxW / 2;
-			const by = midSY - boxH - 6;
-
-			// Background pill
-			ctx.globalAlpha = 0.85;
-			ctx.fillStyle = c.bgPrimary;
-			ctx.beginPath();
-			ctx.roundRect(bx, by, boxW, boxH, 4);
-			ctx.fill();
-			ctx.strokeStyle = c.textFaint;
-			ctx.lineWidth = 0.5;
-			ctx.stroke();
-
-			// Text
-			ctx.globalAlpha = 1;
-			ctx.fillStyle = c.textNormal;
-			ctx.textAlign = "center";
-			ctx.textBaseline = "middle";
-			ctx.fillText(label, midSX, by + boxH / 2);
-
-			ctx.restore();
-		}
-	}
-
-	// ── Node info tooltip (screen space) ───────────────────────
+	// ── Node tooltip ───────────────────────────────────────────
 	if (hoveredNode && hoveredNode.x != null && hoveredNode.y != null) {
-		const dpr = window.devicePixelRatio || 1;
-		const sx = hoveredNode.x * transform.scale + transform.x;
-		const sy = hoveredNode.y * transform.scale + transform.y;
-
-		ctx.save();
-		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-		const lines: string[] = [hoveredNode.label];
-		if (hoveredNode.cluster != null) {
-			const clusterLabel = clusterLabels[hoveredNode.cluster] ?? `Cluster ${hoveredNode.cluster}`;
-			lines.push(`${clusterLabel}  ·  ${hoveredNode.degree ?? 0} connections`);
-		} else {
-			lines.push(`${hoveredNode.degree ?? 0} connections`);
-		}
-		if (isForceMode && pinnedNodes.has(hoveredNode.id)) {
-			lines.push("📌 Pinned");
-		}
-
-		const fontSize = 11;
-		const lineH = 16;
-		const padX = 10;
-		const padY = 8;
-		ctx.font = `${fontSize}px ${c.font}`;
-
-		let maxW = 0;
-		for (const line of lines) {
-			const w = ctx.measureText(line).width;
-			if (w > maxW) maxW = w;
-		}
-		const boxW = maxW + padX * 2;
-		const boxH = lines.length * lineH + padY * 2;
-
-		// Position to the right of the node, flip if near right edge
-		const canvasW = canvasEl.width / dpr;
-		let bx = sx + 14;
-		if (bx + boxW > canvasW - 8) bx = sx - boxW - 14;
-		const by = sy - boxH / 2;
-
-		// Background
-		ctx.globalAlpha = 0.92;
-		ctx.fillStyle = c.bgPrimary;
-		ctx.beginPath();
-		ctx.roundRect(bx, by, boxW, boxH, 6);
-		ctx.fill();
-		ctx.strokeStyle = c.textFaint;
-		ctx.lineWidth = 0.5;
-		ctx.stroke();
-
-		// Lines
-		ctx.globalAlpha = 1;
-		ctx.textAlign = "left";
-		ctx.textBaseline = "top";
-
-		for (let i = 0; i < lines.length; i++) {
-			ctx.font = i === 0 ? `bold ${fontSize}px ${c.font}` : `${fontSize}px ${c.font}`;
-			ctx.fillStyle = i === 0 ? c.textNormal : c.textMuted;
-			ctx.fillText(lines[i], bx + padX, by + padY + i * lineH);
-		}
-
-		ctx.restore();
+		pixi.showNodeTooltip(hoveredNode, clusterLabels, pinnedNodes.has(hoveredNode.id), isForceMode);
+	} else {
+		pixi.hideTooltip();
 	}
-}
-
-/**
- * Resize the canvas to fill its container.
- */
-function resizeCanvas() {
-	if (!canvasEl || !containerEl) return;
-	const rect = containerEl.getBoundingClientRect();
-	const dpr = window.devicePixelRatio || 1;
-	canvasEl.width = rect.width * dpr;
-	canvasEl.height = rect.height * dpr;
-	canvasEl.style.width = `${rect.width}px`;
-	canvasEl.style.height = `${rect.height}px`;
-	const ctx = canvasEl.getContext("2d");
-	if (ctx) ctx.scale(dpr, dpr);
-
-	// Center transform if not already set
-	if (transform.x === 0 && transform.y === 0) {
-		transform = { ...transform, x: rect.width / 2, y: rect.height / 2 };
-	}
-
-	render();
 }
 
 // ============================================================================
@@ -1020,9 +607,11 @@ function resizeCanvas() {
 // ============================================================================
 
 function handleMouseDown(e: PointerEvent) {
-	e.preventDefault(); // Prevent native drag on canvas
-	containerEl.focus(); // Ensure keyboard events work
-	const rect = canvasEl.getBoundingClientRect();
+	e.preventDefault();
+	containerEl.focus();
+	if (!pixi) return;
+	const canvas = pixi.canvas;
+	const rect = canvas.getBoundingClientRect();
 	const x = e.clientX - rect.left;
 	const y = e.clientY - rect.top;
 
@@ -1030,7 +619,6 @@ function handleMouseDown(e: PointerEvent) {
 	if (lassoMode || e.shiftKey) {
 		const node = findNodeAt(x, y);
 		if (node && e.shiftKey && !lassoMode) {
-			// Toggle individual node selection
 			const next = new Set(selectedNodes);
 			if (next.has(node.id)) {
 				next.delete(node.id);
@@ -1039,40 +627,41 @@ function handleMouseDown(e: PointerEvent) {
 			}
 			selectedNodes = next;
 			onSelectionChange?.(simNodes.filter((n) => next.has(n.id)).map((n) => n.path));
-			lassoJustFinished = true; // suppress the subsequent click event
+			lassoJustFinished = true;
 			render();
 			return;
 		}
 		isLassoing = true;
+		// Pause pixi-viewport drag during lasso
+		pixi.pauseViewport();
 		const graphPos = screenToGraph(x, y);
 		lassoPoints = [graphPos];
-		canvasEl.setPointerCapture(e.pointerId);
+		canvas.setPointerCapture(e.pointerId);
 		return;
 	}
 
 	const node = findNodeAt(x, y);
 
 	if (node && isForceMode) {
-		// Start dragging a node (only in wiki/force mode — smart mode positions are projected)
 		const sn = simNodeMap.get(node.id);
 		if (!sn) return;
 		draggedNode = node;
 		dragSimNode = sn;
 		hasDragged = false;
+		// Pause pixi-viewport drag during node drag
+		pixi.pauseViewport();
 		simulation?.alphaTarget(0.3).restart();
 		sn.fx = sn.x;
 		sn.fy = sn.y;
-		// Capture pointer so drag continues even outside canvas
-		canvasEl.setPointerCapture(e.pointerId);
-	} else {
-		// Start panning
-		isPanning = true;
-		panStart = { x: e.clientX - transform.x, y: e.clientY - transform.y };
+		canvas.setPointerCapture(e.pointerId);
 	}
+	// Pan is handled by pixi-viewport automatically
 }
 
 function handleMouseMove(e: PointerEvent) {
-	const rect = canvasEl.getBoundingClientRect();
+	if (!pixi) return;
+	const canvas = pixi.canvas;
+	const rect = canvas.getBoundingClientRect();
 	const x = e.clientX - rect.left;
 	const y = e.clientY - rect.top;
 
@@ -1081,9 +670,8 @@ function handleMouseMove(e: PointerEvent) {
 		// Throttle: only add point if moved at least 3px in screen space from last point
 		const last = lassoPoints[lassoPoints.length - 1];
 		if (last) {
-			const lastSX = last.x * transform.scale + transform.x;
-			const lastSY = last.y * transform.scale + transform.y;
-			const dist = Math.sqrt((x - lastSX) ** 2 + (y - lastSY) ** 2);
+			const lastScreen = pixi.worldToScreen(last.x, last.y);
+			const dist = Math.sqrt((x - lastScreen.x) ** 2 + (y - lastScreen.y) ** 2);
 			if (dist < 3) return;
 		}
 		lassoPoints = [...lassoPoints, graphPos];
@@ -1095,22 +683,12 @@ function handleMouseMove(e: PointerEvent) {
 		// Drag node
 		hasDragged = true;
 		hoveredNode = null;
-		hoveredEdge = null;
 		const graphPos = screenToGraph(x, y);
 		dragSimNode.fx = graphPos.x;
 		dragSimNode.fy = graphPos.y;
 		render();
-	} else if (isPanning) {
-		// Pan
-		hasDragged = true;
-		transform = {
-			...transform,
-			x: e.clientX - panStart.x,
-			y: e.clientY - panStart.y,
-		};
-		render();
 	} else {
-		// Hover detection: check cluster legend first, then nodes, then edges
+		// Hover detection: check cluster legend first, then nodes
 		let overClusterAnchor = false;
 		for (const area of clusterAnchorHitAreas) {
 			if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
@@ -1120,54 +698,40 @@ function handleMouseMove(e: PointerEvent) {
 		}
 
 		if (overClusterAnchor) {
-			canvasEl.style.cursor = "pointer";
-			if (hoveredNode || hoveredEdge) {
+			canvas.style.cursor = "pointer";
+			if (hoveredNode) {
 				hoveredNode = null;
-				hoveredEdge = null;
 				render();
 			}
 			return;
 		}
 
-		{
-			// Check edge legend hit areas
-			let overEdgeLegend = false;
-			for (const area of edgeLegendHitAreas) {
-				if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
-					overEdgeLegend = true;
-					break;
-				}
+		// Check edge legend hit areas
+		let overEdgeLegend = false;
+		for (const area of edgeLegendHitAreas) {
+			if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
+				overEdgeLegend = true;
+				break;
 			}
+		}
 
-			if (overEdgeLegend) {
-				canvasEl.style.cursor = "pointer";
-				if (hoveredNode || hoveredEdge) {
-					hoveredNode = null;
-					hoveredEdge = null;
-					render();
-				}
-			} else {
-				const node = findNodeAt(x, y);
-				if (node !== hoveredNode) {
-					hoveredNode = node;
-					hoveredEdge = null;
-					previewTriggeredForNode = null; // reset preview tracker on node change
-					canvasEl.style.cursor = node ? "pointer" : lassoMode ? "crosshair" : "grab";
-					render();
-				}
-				// Cmd/Ctrl+hover triggers note preview (fire once per node)
-				if (node && (e.metaKey || e.ctrlKey) && onHoverPreview && previewTriggeredForNode !== node.id) {
-					triggerNodePreview(e, node);
-				}
-				if (!node) {
-					// No node hovered — check edges
-					const edge = findEdgeAt(x, y);
-					if (edge !== hoveredEdge) {
-						hoveredEdge = edge;
-						canvasEl.style.cursor = edge ? "crosshair" : lassoMode ? "crosshair" : "grab";
-						render();
-					}
-				}
+		if (overEdgeLegend) {
+			canvas.style.cursor = "pointer";
+			if (hoveredNode) {
+				hoveredNode = null;
+				render();
+			}
+		} else {
+			const node = findNodeAt(x, y);
+			if (node !== hoveredNode) {
+				hoveredNode = node;
+				previewTriggeredForNode = null;
+				canvas.style.cursor = node ? "pointer" : lassoMode ? "crosshair" : "grab";
+				render();
+			}
+			// Cmd/Ctrl+hover triggers note preview (fire once per node)
+			if (node && (e.metaKey || e.ctrlKey) && onHoverPreview && previewTriggeredForNode !== node.id) {
+				triggerNodePreview(e, node);
 			}
 		}
 	}
@@ -1177,8 +741,8 @@ function handleMouseUp(_e: PointerEvent) {
 	if (isLassoing) {
 		isLassoing = false;
 		lassoJustFinished = true;
+		pixi?.resumeViewport();
 		if (lassoPoints.length >= 3) {
-			// Run point-in-polygon for all sim nodes, merging with existing selection
 			const merged = new Set(selectedNodes);
 			for (const node of simNodes) {
 				if (node.x == null || node.y == null) continue;
@@ -1203,12 +767,11 @@ function handleMouseUp(_e: PointerEvent) {
 		}
 		draggedNode = null;
 		dragSimNode = null;
+		pixi?.resumeViewport();
 	}
-	isPanning = false;
 }
 
 function handleClick(e: MouseEvent) {
-	// Ignore clicks that were actually drags or lasso completions
 	if (hasDragged) {
 		hasDragged = false;
 		return;
@@ -1217,8 +780,9 @@ function handleClick(e: MouseEvent) {
 		lassoJustFinished = false;
 		return;
 	}
+	if (!pixi) return;
 
-	const rect = canvasEl.getBoundingClientRect();
+	const rect = pixi.canvas.getBoundingClientRect();
 	const x = e.clientX - rect.left;
 	const y = e.clientY - rect.top;
 
@@ -1252,51 +816,32 @@ function handleClick(e: MouseEvent) {
 	}
 }
 
-function handleWheel(e: WheelEvent) {
-	e.preventDefault();
-	const rect = canvasEl.getBoundingClientRect();
-	const mouseX = e.clientX - rect.left;
-	const mouseY = e.clientY - rect.top;
-
-	const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-	const newScale = Math.max(0.1, Math.min(10, transform.scale * zoomFactor));
-
-	// Zoom toward mouse position
-	const scaleRatio = newScale / transform.scale;
-	transform = {
-		x: mouseX - (mouseX - transform.x) * scaleRatio,
-		y: mouseY - (mouseY - transform.y) * scaleRatio,
-		scale: newScale,
-	};
-
-	render();
-}
+// Wheel is handled by pixi-viewport — no manual handleWheel needed.
+// We just need a render on viewport move to update overlays.
 
 /**
  * Fire the hover-link preview for a node exactly once.
  * Positions the invisible anchor at the node's screen location.
  */
 function triggerNodePreview(event: MouseEvent | KeyboardEvent, node: GraphNode) {
-	const sx = (node.x ?? 0) * transform.scale + transform.x;
-	const sy = (node.y ?? 0) * transform.scale + transform.y;
-	hoverAnchorEl.style.left = `${sx}px`;
-	hoverAnchorEl.style.top = `${sy}px`;
+	if (!pixi) return;
+	const screen = pixi.worldToScreen(node.x ?? 0, node.y ?? 0);
+	hoverAnchorEl.style.left = `${screen.x}px`;
+	hoverAnchorEl.style.top = `${screen.y}px`;
 	previewTriggeredForNode = node.id;
 	onHoverPreview?.(event as MouseEvent, node.path, hoverAnchorEl);
 }
 
 function handleMouseLeave() {
 	hoveredNode = null;
-	hoveredEdge = null;
 	previewTriggeredForNode = null;
-	// Drag continues via pointer capture — only cancel pan
-	isPanning = false;
 	render();
 }
 
 function handleContextMenu(e: MouseEvent) {
 	e.preventDefault();
-	const rect = canvasEl.getBoundingClientRect();
+	if (!pixi) return;
+	const rect = pixi.canvas.getBoundingClientRect();
 	const x = e.clientX - rect.left;
 	const y = e.clientY - rect.top;
 	const node = findNodeAt(x, y);
@@ -1584,8 +1129,6 @@ function setupSmartLayout(data: GraphData, oldPositions: Map<string, { x: number
 
 	if (shouldAnimate) {
 		// Build target map from the raw projected positions.
-		// We animate directly to these (no rescaling) so the final layout
-		// is identical to a fresh start in smart mode.
 		const projTargets = new Map<string, { x: number; y: number }>();
 		for (const n of data.nodes) {
 			if (n.x != null && n.y != null) {
@@ -1593,7 +1136,7 @@ function setupSmartLayout(data: GraphData, oldPositions: Map<string, { x: number
 			}
 		}
 
-		const TRANSITION_DURATION = 900; // ms
+		const TRANSITION_DURATION = 1800; // ms — long enough to feel balanced with the force settling
 		const startTime = performance.now();
 		// Snapshot start positions (in the old coordinate space)
 		const startPositions = new Map<string, { x: number; y: number }>();
@@ -1603,9 +1146,22 @@ function setupSmartLayout(data: GraphData, oldPositions: Map<string, { x: number
 
 		needsInitialFit = false;
 
-		// Capture the camera transform at animation start so we can
-		// smoothly interpolate it alongside the node positions.
-		cancelCameraAnim();
+		// Kick off a single smooth camera animation to the target bounding box.
+		// This replaces per-frame moveCenter snaps with one fluid motion.
+		if (pixi) {
+			// Compute target bounds from the final projected positions
+			const targetNodes = simNodes.map((sn) => {
+				const t = projTargets.get(sn.id);
+				return t ? { ...sn, x: t.x, y: t.y } : sn;
+			});
+			const targetBounds = computeNodeBounds(targetNodes);
+			if (targetBounds) {
+				const frame = framingTransform(targetBounds, { width: pixi.width, height: pixi.height }, 20);
+				const cx = (targetBounds.minX + targetBounds.maxX) / 2;
+				const cy = (targetBounds.minY + targetBounds.maxY) / 2;
+				pixi.animateToFrame(cx, cy, frame.scale, TRANSITION_DURATION);
+			}
+		}
 
 		function animateStep(now: number) {
 			const elapsed = now - startTime;
@@ -1621,25 +1177,7 @@ function setupSmartLayout(data: GraphData, oldPositions: Map<string, { x: number
 				}
 			}
 
-			// Continuously reframe the camera as nodes move so there's
-			// no jarring jump at the end.
-			if (!canvasEl) {
-				render();
-			} else {
-				const bounds = computeNodeBounds(simNodes);
-				if (bounds) {
-					const rect = canvasEl.getBoundingClientRect();
-					const target = framingTransform(bounds, { width: rect.width, height: rect.height }, 20);
-					// Blend camera toward target each frame for a smooth follow
-					const camBlend = Math.min(ease, 1);
-					transform = {
-						x: transform.x + (target.x - transform.x) * camBlend,
-						y: transform.y + (target.y - transform.y) * camBlend,
-						scale: transform.scale + (target.scale - transform.scale) * camBlend,
-					};
-				}
-				render();
-			}
+			render();
 
 			if (t < 1) {
 				smartRafId = requestAnimationFrame(animateStep);
@@ -1653,41 +1191,17 @@ function setupSmartLayout(data: GraphData, oldPositions: Map<string, { x: number
 		// First load or smooth swap: place nodes directly at projected coords
 		// (they already have the right x/y from the data)
 
-		if (!isSmooth) {
-			needsInitialFit = true;
-			initialFitTickCount = 0;
-		} else {
-			needsInitialFit = false;
-		}
-
-		// Kick off initial fit-to-view via a short rAF sequence.
-		// Set the camera directly each frame (no animation) to track the
-		// bounding box, then do one smooth animated fitToView at the end.
-		if (needsInitialFit) {
-			let tickCount = 0;
-			function initialFitLoop() {
-				tickCount++;
-				if (tickCount >= 5 && canvasEl) {
-					const bounds = computeNodeBounds(simNodes);
-					if (bounds) {
-						const rect = canvasEl.getBoundingClientRect();
-						transform = framingTransform(bounds, { width: rect.width, height: rect.height }, 20);
-					}
-				}
-				render();
-				if (tickCount < 30) {
-					smartRafId = requestAnimationFrame(initialFitLoop);
-				} else {
-					smartRafId = null;
-					needsInitialFit = false;
-					initialFitTickCount = 0;
-					fitToView();
-				}
+		if (!isSmooth && pixi) {
+			// Snap the camera to frame all nodes, then render.
+			const bounds = computeNodeBounds(simNodes);
+			if (bounds) {
+				const frame = framingTransform(bounds, { width: pixi.width, height: pixi.height }, 20);
+				const cx = (bounds.minX + bounds.maxX) / 2;
+				const cy = (bounds.minY + bounds.maxY) / 2;
+				pixi.snapToFrame(cx, cy, frame.scale);
 			}
-			smartRafId = requestAnimationFrame(initialFitLoop);
-		} else {
-			render();
 		}
+		render();
 	}
 }
 
@@ -1696,45 +1210,48 @@ function setupSmartLayout(data: GraphData, oldPositions: Map<string, { x: number
 // ============================================================================
 
 function setupForceSimulation(data: GraphData, oldPositions: Map<string, { x: number; y: number }>, isSmooth: boolean) {
+	// Save the default d3 link strength function so we can apply linkStrength as
+	// a multiplier, matching how Obsidian's native graph works.
+	const baseLinkForce = forceLink<SimNode, SimLink>(simLinks)
+		.id((d) => d.id)
+		.distance(linkDistance);
+	const defaultLinkStrengthFn = baseLinkForce.strength() as (link: SimLink, i: number, links: SimLink[]) => number;
+	cachedDefaultLinkStrengthFn = defaultLinkStrengthFn;
+	baseLinkForce.strength((l, i, links) => linkStrength * defaultLinkStrengthFn(l, i, links));
+
 	simulation = forceSimulation<SimNode>(simNodes)
-		.force(
-			"link",
-			forceLink<SimNode, SimLink>(simLinks)
-				.id((d) => d.id)
-				.distance(linkDistance)
-				.strength((l) => {
-					if (l.type === "wiki") return 0.5;
-					return Math.min(l.weight * 0.5, 0.5);
-				}),
-		)
-		.force("charge", forceManyBody().strength(chargeStrength).distanceMax(3000))
-		.force("center", forceCenter(0, 0))
-		.force("gravityX", forceX<SimNode>(0).strength(0.08))
-		.force("gravityY", forceY<SimNode>(0).strength(0.08))
+		.force("link", baseLinkForce)
+		.force("charge", forceManyBody().strength(chargeStrength).distanceMin(30))
+		// Obsidian uses forceX + forceY for centering (spring toward origin),
+		// NOT forceCenter (which shifts the centroid). This is the key difference.
+		.force("centerX", forceX<SimNode>(0).strength(centerStrength))
+		.force("centerY", forceY<SimNode>(0).strength(centerStrength))
 		.force("cluster", clusterCohesionForce(simNodes, 0.15))
 		.force(
 			"collide",
 			forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
 		)
 		.on("tick", () => {
-			// Continuously reframe the camera during initial settling so the
-			// graph tracks the shrinking bounding box as nodes converge.
-			// We set the transform directly (no animation) to avoid stacking
-			// competing animated fitToView calls, then do one smooth animated
-			// fitToView once the simulation has nearly settled.
-			if (needsInitialFit) {
-				initialFitTickCount++;
-				if (initialFitTickCount >= 5 && canvasEl) {
+			// During initial settling, continuously refit the camera so it
+			// tracks the expanding layout smoothly instead of staying zoomed-in.
+			if (needsInitialFit && pixi) {
+				forceTickCount++;
+				// Refit every 3 ticks (~50ms) with a short animation that
+				// overlaps the next refit, producing fluid camera motion.
+				if (forceTickCount % 3 === 0) {
 					const bounds = computeNodeBounds(simNodes);
 					if (bounds) {
-						const rect = canvasEl.getBoundingClientRect();
-						transform = framingTransform(bounds, { width: rect.width, height: rect.height }, 20);
+						const frame = framingTransform(bounds, { width: pixi.width, height: pixi.height }, 20);
+						const cx = (bounds.minX + bounds.maxX) / 2;
+						const cy = (bounds.minY + bounds.maxY) / 2;
+						pixi.animateToFrame(cx, cy, frame.scale, 150);
 					}
 				}
-				if (simulation && simulation.alpha() < 0.1) {
+				// Once settled, do one final smooth fit and stop tracking.
+				if (simulation && simulation.alpha() < 0.05) {
 					needsInitialFit = false;
-					initialFitTickCount = 0;
-					fitToView();
+					forceTickCount = 0;
+					animateCameraToNodes(undefined, 20, 500);
 				}
 			}
 			render();
@@ -1753,6 +1270,7 @@ function setupForceSimulation(data: GraphData, oldPositions: Map<string, { x: nu
 		} else {
 			simulation.alpha(0.15).alphaDecay(0.008).velocityDecay(0.4);
 			needsInitialFit = true;
+			forceTickCount = 0;
 		}
 	}
 }
@@ -1770,6 +1288,20 @@ function setupGraph(data: GraphData) {
 	stopSmartRaf();
 
 	if (data.nodes.length === 0) return;
+
+	// Detect mode-only changes: if the mode changed but graphData is the
+	// same reference, the parent hasn't rebuilt the data yet (e.g. waiting
+	// for an async UMAP projection). Freeze the current view and wait.
+	const modeChanged = lastMode !== null && lastMode !== mode;
+	const dataChanged = lastGraphDataRef !== data;
+	lastMode = mode;
+	lastGraphDataRef = data;
+
+	if (modeChanged && !dataChanged) {
+		// Mode switched but data is stale — just render the frozen state
+		render();
+		return;
+	}
 
 	const { oldPositions, isSmooth } = buildInternalData(data);
 
@@ -1798,26 +1330,40 @@ $effect(() => {
 	};
 });
 
+// Re-render when appearance settings change (nodeSize, labelZoomThreshold, showWikiLinks)
+$effect(() => {
+	// Track reactive appearance props so the effect re-fires
+	const _nodeSize = nodeSize;
+	const _labelZoom = labelZoomThreshold;
+	const _showWiki = showWikiLinks;
+	if (pixi) render();
+});
+
 // Hot-update force parameters without full rebuild (wiki mode only)
 $effect(() => {
 	if (!simulation || !isForceMode) return;
 	const _charge = chargeStrength;
 	const _link = linkDistance;
+	const _center = centerStrength;
+	const _linkStr = linkStrength;
 
 	const charge = simulation.force("charge") as ReturnType<typeof forceManyBody> | undefined;
-	if (charge) {
-		charge.strength(_charge);
-	}
+	if (charge) charge.strength(_charge);
 
-	// Scale gravity inversely: lower repulsion → stronger pull toward center
-	const gravityStrength = 0.08 + (1 - Math.abs(_charge) / 800) * 0.12;
-	const gx = simulation.force("gravityX") as ReturnType<typeof forceX> | undefined;
-	if (gx) gx.strength(gravityStrength);
-	const gy = simulation.force("gravityY") as ReturnType<typeof forceY> | undefined;
-	if (gy) gy.strength(gravityStrength);
+	// Center force uses forceX + forceY (spring toward origin), matching Obsidian
+	const cx = simulation.force("centerX") as ReturnType<typeof forceX> | undefined;
+	if (cx) cx.strength(_center);
+	const cy = simulation.force("centerY") as ReturnType<typeof forceY> | undefined;
+	if (cy) cy.strength(_center);
 
 	const link = simulation.force("link") as ReturnType<typeof forceLink<SimNode, SimLink>> | undefined;
-	if (link) link.distance(_link);
+	if (link) {
+		link.distance(_link);
+		if (cachedDefaultLinkStrengthFn) {
+			const baseFn = cachedDefaultLinkStrengthFn;
+			link.strength((l: SimLink, i: number, links: SimLink[]) => _linkStr * baseFn(l, i, links));
+		}
+	}
 
 	const collide = simulation.force("collide") as ReturnType<typeof forceCollide<SimNode>> | undefined;
 	if (collide) collide.radius((d: SimNode) => getNodeRadius(d) + 2);
@@ -1826,132 +1372,127 @@ $effect(() => {
 });
 
 onMount(() => {
-	resizeCanvas();
+	// Initialize Pixi renderer
+	const theme = readThemeColors(containerEl);
+	const renderer = new PixiRenderer();
+	pixi = renderer;
 
-	// Register wheel handler as non-passive so preventDefault() works
-	canvasEl.addEventListener("wheel", handleWheel, { passive: false });
+	renderer.init(containerEl, theme).then(() => {
+		// Re-render overlays (cluster pills, legends, labels) when viewport moves
+		renderer.onViewportMoved(() => render());
 
-	// Keyboard handler for graph shortcuts
-	function handleKeyDown(e: KeyboardEvent) {
-		// Ignore when user is typing in an input/textarea inside the inspector
-		const tag = (e.target as HTMLElement)?.tagName;
-		if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+		// Setup keyboard shortcuts
+		function handleKeyDown(e: KeyboardEvent) {
+			const tag = (e.target as HTMLElement)?.tagName;
+			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
-		// Cmd/Ctrl pressed while hovering a node → trigger preview
-		if (
-			(e.key === "Meta" || e.key === "Control") &&
-			hoveredNode &&
-			onHoverPreview &&
-			previewTriggeredForNode !== hoveredNode.id
-		) {
-			triggerNodePreview(e, hoveredNode);
-			return;
-		}
+			if (
+				(e.key === "Meta" || e.key === "Control") &&
+				hoveredNode &&
+				onHoverPreview &&
+				previewTriggeredForNode !== hoveredNode.id
+			) {
+				triggerNodePreview(e, hoveredNode);
+				return;
+			}
 
-		switch (e.key) {
-			case "Escape":
-				if (isLassoing) {
-					isLassoing = false;
-					lassoPoints = [];
+			switch (e.key) {
+				case "Escape":
+					if (isLassoing) {
+						isLassoing = false;
+						lassoPoints = [];
+						pixi?.resumeViewport();
+						render();
+					} else if (selectedNodes.size > 0) {
+						clearSelection();
+					} else if (focusedClusters.size > 0) {
+						onClearFocusedClusters?.();
+					}
+					break;
+				case "f":
+					if (selectedNodes.size > 0) {
+						panToSelection();
+					} else {
+						fitToView();
+					}
+					break;
+				case "=":
+				case "+": {
+					// Zoom in — pixi-viewport handles it via its wheel plugin,
+					// but we provide keyboard zoom too
+					const currentScale = renderer.scale;
+					const newScale = Math.min(10, currentScale * 1.2);
+					renderer.moveCenter(
+						renderer.screenToWorld(renderer.width / 2, renderer.height / 2).x,
+						renderer.screenToWorld(renderer.width / 2, renderer.height / 2).y,
+						newScale,
+					);
 					render();
-				} else if (selectedNodes.size > 0) {
-					clearSelection();
-				} else if (focusedClusters.size > 0) {
-					onClearFocusedClusters?.();
+					break;
 				}
-				break;
-			case "f":
-				// Zoom to selection if nodes are selected, otherwise fit entire graph
-				if (selectedNodes.size > 0) {
-					panToSelection();
-				} else {
-					fitToView();
+				case "-": {
+					const currentScale = renderer.scale;
+					const newScale = Math.max(0.05, currentScale / 1.2);
+					renderer.moveCenter(
+						renderer.screenToWorld(renderer.width / 2, renderer.height / 2).x,
+						renderer.screenToWorld(renderer.width / 2, renderer.height / 2).y,
+						newScale,
+					);
+					render();
+					break;
 				}
-				break;
-			case "=":
-			case "+": {
-				// Zoom in toward center
-				const rect = canvasEl.getBoundingClientRect();
-				const cx = rect.width / 2;
-				const cy = rect.height / 2;
-				const newScale = Math.min(10, transform.scale * 1.2);
-				const scaleRatio = newScale / transform.scale;
-				transform = {
-					x: cx - (cx - transform.x) * scaleRatio,
-					y: cy - (cy - transform.y) * scaleRatio,
-					scale: newScale,
-				};
-				render();
-				break;
-			}
-			case "-": {
-				// Zoom out from center
-				const rect = canvasEl.getBoundingClientRect();
-				const cx = rect.width / 2;
-				const cy = rect.height / 2;
-				const newScale = Math.max(0.1, transform.scale / 1.2);
-				const scaleRatio = newScale / transform.scale;
-				transform = {
-					x: cx - (cx - transform.x) * scaleRatio,
-					y: cy - (cy - transform.y) * scaleRatio,
-					scale: newScale,
-				};
-				render();
-				break;
 			}
 		}
-	}
-	containerEl.addEventListener("keydown", handleKeyDown);
-	// Make container focusable so it receives keyboard events
-	if (!containerEl.hasAttribute("tabindex")) {
-		containerEl.setAttribute("tabindex", "0");
-	}
+		containerEl.addEventListener("keydown", handleKeyDown);
+		if (!containerEl.hasAttribute("tabindex")) {
+			containerEl.setAttribute("tabindex", "0");
+		}
 
-	const resizeObserver = new ResizeObserver(() => {
-		resizeCanvas();
+		const resizeObserver = new ResizeObserver(() => {
+			const rect = containerEl.getBoundingClientRect();
+			renderer.resize(rect.width, rect.height);
+			render();
+		});
+		resizeObserver.observe(containerEl);
+
+		// Listen for Obsidian theme changes
+		const handleCssChange = () => {
+			const newTheme = readThemeColors(containerEl);
+			renderer.updateTheme(newTheme);
+			render();
+		};
+		document.body.addEventListener("css-change", handleCssChange);
+
+		// Store cleanup references
+		(containerEl as any).__graphCleanup = () => {
+			containerEl.removeEventListener("keydown", handleKeyDown);
+			resizeObserver.disconnect();
+			document.body.removeEventListener("css-change", handleCssChange);
+		};
 	});
-	resizeObserver.observe(containerEl);
-
-	// Listen for Obsidian theme changes to invalidate cached colors
-	const handleCssChange = () => invalidateThemeColors();
-	document.body.addEventListener("css-change", handleCssChange);
 
 	return () => {
-		canvasEl.removeEventListener("wheel", handleWheel);
-		containerEl.removeEventListener("keydown", handleKeyDown);
-		resizeObserver.disconnect();
-		document.body.removeEventListener("css-change", handleCssChange);
-		cancelCameraAnim();
+		(containerEl as any).__graphCleanup?.();
 		if (hoverAnimFrameId != null) cancelAnimationFrame(hoverAnimFrameId);
 		if (simulation) {
 			simulation.stop();
 			simulation = null;
 		}
 		stopSmartRaf();
+		renderer.destroy();
+		pixi = null;
 	};
 });
 
-// Cancel function for the current camera animation (returned by animateTransform)
-let cancelCameraAnim: () => void = () => {};
-
 /** Animate the camera to frame the given nodes with the specified padding and duration. */
 function animateCameraToNodes(filter?: (node: SimNode) => boolean, padding = 40, duration = 400) {
-	if (!canvasEl) return;
+	if (!pixi) return;
 	const bounds = computeNodeBounds(simNodes, filter);
 	if (!bounds) return;
-	const rect = canvasEl.getBoundingClientRect();
-	const target = framingTransform(bounds, { width: rect.width, height: rect.height }, padding);
-
-	cancelCameraAnim();
-	cancelCameraAnim = animateTransform(
-		() => transform,
-		(t) => {
-			transform = t;
-			render();
-		},
-		target,
-		duration,
-	);
+	const target = framingTransform(bounds, { width: pixi.width, height: pixi.height }, padding);
+	const centerX = (bounds.minX + bounds.maxX) / 2;
+	const centerY = (bounds.minY + bounds.maxY) / 2;
+	pixi.animateToFrame(centerX, centerY, target.scale, duration);
 }
 
 /**
@@ -1979,16 +1520,18 @@ export function panToClusters(clusters: Set<number>) {
 }
 </script>
 
-<div class="graph-canvas-container" bind:this={containerEl}>
-  <canvas
-    bind:this={canvasEl}
-    onpointerdown={handleMouseDown}
-    onpointermove={handleMouseMove}
-    onpointerup={handleMouseUp}
-    onclick={handleClick}
-    onmouseleave={handleMouseLeave}
-    oncontextmenu={handleContextMenu}
-  ></canvas>
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events -->
+<div
+  class="graph-canvas-container"
+  bind:this={containerEl}
+  onpointerdown={handleMouseDown}
+  onpointermove={handleMouseMove}
+  onpointerup={handleMouseUp}
+  onclick={handleClick}
+  onmouseleave={handleMouseLeave}
+  oncontextmenu={handleContextMenu}
+>
+  <!-- Pixi.js creates its own <canvas> inside this container via pixi.init() -->
   <!-- Invisible anchor for Obsidian hover-link popover positioning -->
   <div bind:this={hoverAnchorEl} class="hover-anchor"></div>
 </div>
@@ -2000,16 +1543,19 @@ export function panToClusters(clusters: Set<number>) {
     overflow: hidden;
     position: relative;
     outline: none;
-  }
-
-  canvas {
-    display: block;
     cursor: grab;
     touch-action: none; /* Required for pointer capture to work */
   }
 
-  canvas:active {
+  .graph-canvas-container:active {
     cursor: grabbing;
+  }
+
+  /* Pixi creates a <canvas> child — ensure it fills the container */
+  .graph-canvas-container :global(canvas) {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
   }
 
   .hover-anchor {

@@ -61,6 +61,8 @@
     "langsmith": "^0.4.12",
     "minisearch": "^7.2.0",
     "pdf-lib": "^1.17.1",
+    "pixi-viewport": "^6.0.3",
+    "pixi.js": "^8.17.1",
     "runed": "^0.37.1",
     "svelte-i18n": "^4.0.1",
     "umap-js": "^1.4.0",

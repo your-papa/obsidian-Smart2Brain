@@ -339,9 +339,40 @@ export interface AgentConfig {
 }
 
 /**
- * Available colors for agents, matching Obsidian's theme color variables.
+ * Named colors for agents, matching Obsidian's theme color variables.
  */
-export type AgentColor = "red" | "orange" | "yellow" | "green" | "cyan" | "blue" | "purple" | "pink";
+export type AgentNamedColor = "red" | "orange" | "yellow" | "green" | "cyan" | "blue" | "purple" | "pink";
+
+/**
+ * Agent color — either a named Obsidian theme color or an arbitrary CSS color
+ * string (e.g. hex `#bd93f9`).
+ */
+export type AgentColor = AgentNamedColor | (string & {});
+
+/** All named agent color values. */
+export const AGENT_NAMED_COLORS: readonly AgentNamedColor[] = [
+	"red",
+	"orange",
+	"yellow",
+	"green",
+	"cyan",
+	"blue",
+	"purple",
+	"pink",
+] as const;
+
+/**
+ * Resolve an {@link AgentColor} to a usable CSS color value.
+ * Named colors are mapped to `var(--color-<name>)`, while custom values
+ * (hex, rgb, etc.) are returned as-is.
+ */
+export function resolveAgentColorCSS(color: string | undefined): string | undefined {
+	if (!color) return undefined;
+	if ((AGENT_NAMED_COLORS as readonly string[]).includes(color)) {
+		return `var(--color-${color})`;
+	}
+	return color;
+}
 
 /**
  * Record of agent configurations keyed by agent ID

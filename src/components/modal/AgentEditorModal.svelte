@@ -23,7 +23,14 @@ import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
-import type { AgentColor, BuiltInToolId, MCPServerConfig, SkillDisplayInfo } from "../../types/plugin";
+import {
+	type AgentColor,
+	type BuiltInToolId,
+	type MCPServerConfig,
+	type SkillDisplayInfo,
+	AGENT_NAMED_COLORS,
+	resolveAgentColorCSS,
+} from "../../types/plugin";
 import { getProviderDefinition } from "../../providers/index";
 import type { ChatModel } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
@@ -87,16 +94,28 @@ function updateAgentColor(color: AgentColor | "none") {
 	pluginData.updateAgent(agentId, { color: color === "none" ? undefined : color });
 }
 
-const selectedAgentColorOption = $derived(
-	agentColorOptions.find((colorOption) => colorOption.value === (selectedAgent?.color ?? "none")) ??
-		agentColorOptions[0],
+/** Whether the current agent color is a custom (non-preset) value. */
+const isCustomAgentColor = $derived(
+	!!selectedAgent?.color &&
+		selectedAgent.color !== "none" &&
+		!(AGENT_NAMED_COLORS as readonly string[]).includes(selectedAgent.color),
 );
 
-const agentNameFieldStyle = $derived(
-	selectedAgentColorOption.previewColor
-		? `--agent-name-accent: ${selectedAgentColorOption.previewColor};`
-		: "--agent-name-accent: transparent;",
+const selectedAgentColorOption = $derived(
+	agentColorOptions.find((colorOption) => colorOption.value === (selectedAgent?.color ?? "none")) ??
+		(isCustomAgentColor
+			? ({
+					value: selectedAgent!.color!,
+					label: selectedAgent!.color!,
+					previewColor: selectedAgent!.color!,
+				} as PresetColorOption)
+			: agentColorOptions[0]),
 );
+
+const agentNameFieldStyle = $derived.by(() => {
+	const cssColor = resolveAgentColorCSS(selectedAgent?.color);
+	return cssColor ? `--agent-name-accent: ${cssColor};` : "--agent-name-accent: transparent;";
+});
 
 function handleAgentColorSelect(color: string) {
 	updateAgentColor(color as AgentColor | "none");
@@ -572,6 +591,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
             options={agentColorOptions}
             popoverLabel="Agent Color"
             triggerLabel="Select agent color"
+            allowCustomColor={true}
             onSelect={handleAgentColorSelect}
           />
 
