@@ -1402,11 +1402,13 @@ export class VectorStoreService {
 
 				if (filter?.tags?.length) {
 					const normalizedFilterTags = filter.tags.map((t) => (t.startsWith("#") ? t : `#${t}`));
-					const normalizedDocTags = new Set(docTags.map((t) => (t.startsWith("#") ? t : `#${t}`)));
+					const normalizedDocTags = docTags.map((t) => (t.startsWith("#") ? t : `#${t}`));
+					const matchesTag = (filterTag: string) =>
+						normalizedDocTags.some((docTag) => docTag === filterTag || docTag.startsWith(`${filterTag}/`));
 
 					if (filter.requireAllTags) {
-						if (!normalizedFilterTags.every((tag) => normalizedDocTags.has(tag))) continue;
-					} else if (!normalizedFilterTags.some((tag) => normalizedDocTags.has(tag))) {
+						if (!normalizedFilterTags.every(matchesTag)) continue;
+					} else if (!normalizedFilterTags.some(matchesTag)) {
 						continue;
 					}
 				}

@@ -75,7 +75,6 @@ export interface IndexMetadata {
 
 /**
  * Result from a vector similarity search.
- * Compatible with the existing SearchResult interface in searchNotes.ts.
  */
 export interface VectorSearchResult {
 	path: string;
@@ -89,6 +88,20 @@ export interface VectorSearchResult {
 	matchBadges?: SearchMatchBadge[];
 	/** Cosine similarity score (0-1, higher is more similar) */
 	score: number;
+}
+
+/**
+ * Canonical search result consumed by the modal and agent tool layer.
+ * Structurally identical to `VectorSearchResult` except `score` is optional.
+ */
+export interface SearchResult {
+	path: string;
+	name: string;
+	frontmatter?: Record<string, unknown>;
+	tags?: string[];
+	matchExplanation?: SearchMatchExplanation;
+	matchBadges?: SearchMatchBadge[];
+	score?: number;
 }
 
 export interface SearchMatchExplanation {

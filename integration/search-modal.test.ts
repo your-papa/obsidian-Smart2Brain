@@ -48,6 +48,8 @@ describe("search modal", () => {
 	].join("\n");
 	const pathNoteName = "SpaceOps/Path Fixture.md";
 	const pathNoteContent = ["# Path Fixture", "", "This note is about telemetry and consoles."].join("\n");
+	const recentCreatedNoteName = `Recent Created Fixture ${Date.now()}.md`;
+	const recentCreatedNoteContent = ["# Recent Created Fixture", "", "Created for recent notes coverage."].join("\n");
 	const shiftCreateNoteName = `Search Modal Shift Enter Fixture ${Date.now()}.md`;
 	const shiftCreateNoteTitle = shiftCreateNoteName.replace(/\.md$/u, "");
 
@@ -62,6 +64,7 @@ describe("search modal", () => {
 		createNote(tagNoteName, tagNoteContent);
 		createNote(inlineTagOnlyNoteName, inlineTagOnlyNoteContent);
 		createNote(pathNoteName, pathNoteContent);
+		createNote(recentCreatedNoteName, recentCreatedNoteContent);
 	});
 
 	afterAll(() => {
@@ -69,6 +72,7 @@ describe("search modal", () => {
 		deleteNote(tagNoteName);
 		deleteNote(inlineTagOnlyNoteName);
 		deleteNote(pathNoteName);
+		deleteNote(recentCreatedNoteName);
 		deleteNote(shiftCreateNoteName);
 		clearBuffers();
 	});
@@ -86,6 +90,21 @@ describe("search modal", () => {
 			{ ignoreError: true },
 		);
 		expect(placeholder).toContain("Search notes");
+	});
+
+	it("should include newly created notes in the initial recent notes view", async () => {
+		await waitForCondition(
+			() =>
+				obsidianEval(`(() => {
+					return Array.from(document.querySelectorAll('.s2b-search-result-name'))
+						.map((el) => el.textContent ?? '')
+						.includes('${recentCreatedNoteName.replace(/\.md$/u, "")}');
+				})()`).includes("true"),
+			"recently created note to appear in recent notes",
+			{ timeoutMs: 20_000, intervalMs: 250 },
+		);
+
+		expect(domText('.s2b-search-result-name')).toContain(recentCreatedNoteName.replace(/\.md$/u, ""));
 	});
 
 	it("should render search results after typing a query", async () => {
@@ -436,6 +455,33 @@ describe("search modal", () => {
 
 		expect(domText(".s2b-search-result-name")).toContain("Obsidian Plugin Development");
 		expect(domCount(".s2b-search-result-name .s2b-search-result-highlight-title")).toBeGreaterThan(0);
+	});
+
+	it("should rank numeric-leading title prefix matches ahead of noisy content matches", async () => {
+		obsidianEval(`(() => {
+			const input = document.querySelector('.s2b-search-modal .prompt-input');
+			if (!(input instanceof HTMLInputElement)) return 'missing';
+			input.value = '9. semes';
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+			return input.value;
+		})()`);
+
+		await waitForCondition(
+			() =>
+				obsidianEval(`(() => {
+					const first = document.querySelector('.s2b-search-result-name');
+					return first?.textContent ?? '';
+				})()`).includes('9. Semester'),
+			"numeric-leading title match to rank first",
+			{ timeoutMs: 20_000, intervalMs: 250 },
+		);
+
+		expect(
+			obsidianEval(`(() => {
+				const first = document.querySelector('.s2b-search-result-name');
+				return first?.textContent ?? '';
+			})()`),
+		).toContain("9. Semester");
 	});
 
 	it("should only show the semantic glow while a semantic search is in flight", async () => {

@@ -1,9 +1,10 @@
 import { TFile, getAllTags, type CachedMetadata } from "obsidian";
 import type SecondBrainPlugin from "../main";
+import { matchesSearchFilter } from "../search/searchFilters";
+import { extractSearchTerms } from "../search/searchTermUtils";
 import { getData } from "../stores/dataStore.svelte";
 import { Logger } from "../utils/logging";
 import { shouldProcessVaultPath } from "../utils/fileFiltering";
-import { matchesPathPrefix } from "../utils/pathUtils";
 import { MiniSearchService, type LexicalSearchResult } from "../vectorstore/MiniSearchService";
 import type { SearchFilter, SearchMatchBadge, SearchMatchExplanation, VectorSearchResult } from "../vectorstore/types";
 
@@ -280,20 +281,13 @@ export class LexicalSearchService {
 	): VectorSearchResult[] {
 		const { metadataCache } = this.plugin.app;
 		const filteredResults: VectorSearchResult[] = [];
-		const normalizedFilterTags = this.normalizeFilterTags(filter?.tags);
-		const requireAllTags = filter?.requireAllTags === true;
 
 		for (const result of results) {
-			if (filter?.pathPrefixes?.length) {
-				const matchesPath = filter.pathPrefixes.some((prefix) => matchesPathPrefix(result.path, prefix));
-				if (!matchesPath) continue;
-			}
-
 			const file = this.plugin.app.vault.getAbstractFileByPath(result.path);
 			const cache = file instanceof TFile ? metadataCache.getFileCache(file) : null;
 			const docTags = cache ? (getAllTags(cache) ?? []) : [];
 
-			if (normalizedFilterTags && !this.matchesTagFilter(docTags, normalizedFilterTags, requireAllTags)) {
+			if (!matchesSearchFilter(result.path, docTags, filter)) {
 				continue;
 			}
 
@@ -320,23 +314,6 @@ export class LexicalSearchService {
 		}
 
 		return filteredResults;
-	}
-
-	private normalizeFilterTags(tags: string[] | undefined): string[] | undefined {
-		if (!tags?.length) {
-			return undefined;
-		}
-
-		return tags.map((tag) => (tag.startsWith("#") ? tag : `#${tag}`));
-	}
-
-	private matchesTagFilter(docTags: string[], filterTags: string[], requireAllTags: boolean): boolean {
-		const normalizedDocTags = new Set(docTags.map((tag) => (tag.startsWith("#") ? tag : `#${tag}`)));
-		if (requireAllTags) {
-			return filterTags.every((tag) => normalizedDocTags.has(tag));
-		}
-
-		return filterTags.some((tag) => normalizedDocTags.has(tag));
 	}
 
 	private getMatchBadges(
@@ -455,15 +432,7 @@ export class LexicalSearchService {
 	}
 
 	private extractSearchTerms(query: string): string[] {
-		return Array.from(
-			new Set(
-				query
-					.toLowerCase()
-					.split(/[^\p{L}\p{N}#@_-]+/u)
-					.map((term) => term.trim())
-					.filter((term) => term.length > 1),
-			),
-		).sort((left, right) => right.length - left.length);
+		return extractSearchTerms(query);
 	}
 
 	private findMatchIndex(text: string | undefined, terms: string[]): number {

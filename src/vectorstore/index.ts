@@ -27,6 +27,7 @@ export type {
 	SerializedIndex,
 	SkipReason,
 	SkippedFile,
+	SearchResult,
 	VectorSearchResult,
 	VectorStore,
 } from "./types";
