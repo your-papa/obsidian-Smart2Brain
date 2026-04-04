@@ -15,6 +15,9 @@ import { getRecentNotes } from "../../search/recentNotes";
 import type { SearchResult } from "../../vectorstore/types";
 import { extractSearchTerms } from "../../search/searchTermUtils";
 import { getData } from "../../stores/dataStore.svelte";
+import { getMessenger } from "../../stores/chatStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import type { SearchAlgorithm } from "../../types/plugin";
 import type { SearchFilter } from "../../vectorstore";
 import type { SearchMatchBadge } from "../../vectorstore/types";
@@ -284,6 +287,12 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return false;
 		});
 
+		this.scope.register(["Alt"], "Enter", (evt) => {
+			evt.preventDefault();
+			void this.sendSelectedToChat();
+			return false;
+		});
+
 		// Add custom class for styling
 		this.modalEl.addClass("s2b-search-modal");
 		this.modalEl.setAttribute("data-testid", "search-modal");
@@ -314,11 +323,13 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private updateInstructions(): void {
 		const tabKey = Platform.isMacOS ? "⇥" : "Tab";
 		const modEnterKey = Platform.isMacOS ? "⌘↵" : "Ctrl+↵";
+		const altEnterKey = Platform.isMacOS ? "⌥↵" : "Alt+↵";
 		const semanticLabel = this.semanticEnabled ? "semantic: on" : "semantic: off";
 		this.setInstructions([
 			{ command: "↑↓", purpose: "Navigate" },
 			{ command: "↵", purpose: "Open note" },
 			{ command: modEnterKey, purpose: "Open in new tab" },
+			{ command: altEnterKey, purpose: "Send to chat" },
 			{ command: "⇧↵", purpose: "Create note" },
 			{ command: tabKey, purpose: semanticLabel },
 			{ command: "esc", purpose: "Close" },
@@ -373,6 +384,36 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		this.openSearchResult(selectedSuggestion, "tab");
+	}
+
+	private async sendSelectedToChat(): Promise<void> {
+		const selectedSuggestion = this.getSelectedSuggestion();
+		if (!selectedSuggestion) {
+			return;
+		}
+
+		const file = this.app.vault.getAbstractFileByPath(selectedSuggestion.path);
+		if (!(file instanceof TFile)) {
+			return;
+		}
+
+		this.close();
+
+		// Ensure a chat is open
+		const plugin = getPlugin();
+		const existingLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
+		if (!existingLeaf) {
+			await plugin.agentManager.createNewChat();
+		} else {
+			this.app.workspace.revealLeaf(existingLeaf);
+		}
+
+		const messenger = getMessenger();
+		if (messenger) {
+			messenger.pendingAttachmentPaths = [file.path];
+		} else {
+			new Notice("Chat is not initialized yet. Please open a chat first.");
+		}
 	}
 
 	private async getUniqueNotePath(baseTitle: string): Promise<{ title: string; path: string }> {

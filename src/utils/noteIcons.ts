@@ -76,8 +76,10 @@ interface IconicPluginLike {
 export type PathIconKind = "file" | "folder";
 
 export interface PathIconRenderer {
-	provider: "iconize" | "iconic";
+	provider: "iconize" | "iconic" | "extension";
 	color?: string;
+	/** True when the icon is a generic default, not explicitly set by the user. */
+	isDefault?: boolean;
 	render(node: HTMLElement): void;
 }
 
@@ -87,8 +89,6 @@ interface PathIconActionOptions {
 	kind?: PathIconKind;
 	fallbackIconId?: string;
 }
-
-export type SearchResultNoteIcon = PathIconRenderer;
 
 function normalizeTagId(tag: string): string {
 	return tag.startsWith("#") ? tag.slice(1) : tag;
@@ -268,9 +268,13 @@ function getIconicPathIcon(app: App, path: string, kind: PathIconKind): PathIcon
 		return undefined;
 	}
 
+	// Mark as default when using iconDefault (no explicit user icon).
+	const usingDefault = !item.icon && !!item.iconDefault;
+
 	return {
 		provider: "iconic",
 		color: item.color ?? undefined,
+		isDefault: usingDefault,
 		render(node) {
 			const refreshIcon = plugin.fileIconManager?.refreshIcon;
 			if (typeof refreshIcon === "function") {
@@ -386,10 +390,63 @@ export function pathIcon(node: HTMLElement, options: PathIconActionOptions) {
 	};
 }
 
-export function getSearchResultNoteIcon(app: App, path: string): SearchResultNoteIcon | undefined {
-	return getPathIcon(app, path, "file");
+// ---------------------------------------------------------------------------
+// Extension-based fallback icons (for search results)
+// ---------------------------------------------------------------------------
+
+/** Maps file extensions to Lucide icon IDs shipped with Obsidian. */
+const EXTENSION_ICON_MAP: Record<string, string> = {
+	chat: "message-square",
+	excalidraw: "pencil",
+	canvas: "layout-dashboard",
+	base: "database",
+	pdf: "file-text",
+	png: "image",
+	jpg: "image",
+	jpeg: "image",
+	gif: "image",
+	svg: "image",
+	webp: "image",
+	mp3: "audio-lines",
+	wav: "audio-lines",
+	mp4: "film",
+	mov: "film",
+	mkv: "film",
+};
+
+/** Resolve the effective extension key for icon lookup. */
+function getIconExtension(path: string): string {
+	const lower = path.toLowerCase();
+	if (lower.endsWith(".excalidraw.md")) return "excalidraw";
+	return lower.split(".").pop() ?? "";
 }
 
-export function renderSearchResultNoteIcon(app: App, path: string, node: HTMLElement): boolean {
-	return renderPathIcon(app, path, node, "file");
+/**
+ * Get a fallback icon for a file based on its extension.
+ * Returns `undefined` for plain `.md` files — only community-plugin
+ * icons are shown for regular markdown.
+ */
+function getExtensionFallbackIcon(path: string): PathIconRenderer | undefined {
+	const ext = getIconExtension(path);
+	if (!ext || ext === "md") return undefined;
+
+	const iconId = EXTENSION_ICON_MAP[ext];
+	if (!iconId) return undefined;
+
+	return {
+		provider: "extension",
+		render(node) {
+			renderBasicIcon(node, iconId);
+		},
+	};
+}
+
+export function getSearchResultNoteIcon(app: App, path: string): PathIconRenderer | undefined {
+	const communityIcon = getPathIcon(app, path, "file");
+
+	// Explicit community-plugin icon always wins.
+	if (communityIcon && !communityIcon.isDefault) return communityIcon;
+
+	// Prefer extension-specific icon over a generic default.
+	return getExtensionFallbackIcon(path) ?? communityIcon;
 }

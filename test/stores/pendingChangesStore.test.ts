@@ -517,8 +517,8 @@ describe("PendingChangesStore", () => {
 			expect(store.isPathAllowed("Notes/test.md")).toBe(true);
 		});
 
-		it("isPathAllowed should exclude Excalidraw files", () => {
-			expect(store.isPathAllowed("Canvas/diagram.excalidraw.md")).toBe(false);
+		it("isPathAllowed should allow Excalidraw files", () => {
+			expect(store.isPathAllowed("Canvas/diagram.excalidraw.md")).toBe(true);
 		});
 
 		it("isFilePrivate should mark matching files as private when privacyIsExcluding", () => {
