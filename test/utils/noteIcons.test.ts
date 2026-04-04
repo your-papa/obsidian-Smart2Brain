@@ -8,7 +8,6 @@ import {
 	getSearchResultNoteIcon,
 	getTagIcon,
 	renderPathIcon,
-	renderSearchResultNoteIcon,
 	renderTagIcon,
 } from "../../src/utils/noteIcons";
 
@@ -57,7 +56,7 @@ describe("noteIcons", () => {
 		};
 
 		const node = document.createElement("span");
-		const rendered = renderSearchResultNoteIcon(app, "Notes/Test.md", node);
+		const rendered = renderPathIcon(app, "Notes/Test.md", node);
 
 		expect(rendered).toBe(true);
 		expect(setIconForNode).toHaveBeenCalledWith("IbRocket", node, "tomato");
@@ -79,7 +78,7 @@ describe("noteIcons", () => {
 		};
 
 		const node = document.createElement("span");
-		const rendered = renderSearchResultNoteIcon(app, "Notes/Test.md", node);
+		const rendered = renderPathIcon(app, "Notes/Test.md", node);
 
 		expect(rendered).toBe(true);
 		expect(refreshIcon).toHaveBeenCalledWith({ icon: "lucide-book", color: "rebeccapurple" }, node);
@@ -103,7 +102,7 @@ describe("noteIcons", () => {
 		};
 
 		const node = document.createElement("span");
-		const rendered = renderSearchResultNoteIcon(app, "Notes/Test.md", node);
+		const rendered = renderPathIcon(app, "Notes/Test.md", node);
 
 		expect(rendered).toBe(true);
 		expect(refreshIcon).toHaveBeenCalledWith({ icon: "lucide-flame", color: "crimson" }, node);
@@ -124,7 +123,7 @@ describe("noteIcons", () => {
 		};
 
 		const node = document.createElement("span");
-		const rendered = renderSearchResultNoteIcon(app, "Notes/Test.md", node);
+		const rendered = renderPathIcon(app, "Notes/Test.md", node);
 
 		expect(rendered).toBe(true);
 		expect(setIcon).toHaveBeenCalledWith(node, "lucide-file");
@@ -145,7 +144,7 @@ describe("noteIcons", () => {
 		};
 
 		const node = document.createElement("span");
-		const rendered = renderSearchResultNoteIcon(app, "Notes/Test.md", node);
+		const rendered = renderPathIcon(app, "Notes/Test.md", node);
 
 		expect(rendered).toBe(true);
 		expect(setIcon).toHaveBeenCalledWith(node, "lucide-book");
@@ -244,7 +243,7 @@ describe("noteIcons", () => {
 		const app = new App();
 		const node = document.createElement("span");
 
-		expect(renderSearchResultNoteIcon(app, "Notes/Test.md", node)).toBe(false);
+		expect(renderPathIcon(app, "Notes/Test.md", node)).toBe(false);
 		expect(node.innerHTML).toBe("");
 	});
 });

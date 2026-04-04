@@ -46,6 +46,7 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 		searchShowMatchBadges: true,
 		searchShowMatchContext: true,
 		recentNotes: mockRecentNotes,
+		targetFolder: "smart-second-brain",
 		getSelectedAgent: () => ({
 			chatModel: { provider: "openai" },
 			toolsConfig: {
@@ -273,7 +274,7 @@ describe("performSearch lexical startup behavior", () => {
 						},
 					};
 				},
-				getMarkdownFiles() {
+				getFiles() {
 					return [
 						this.getAbstractFileByPath("Notes/older.md"),
 						this.getAbstractFileByPath("Notes/brand-new.md"),

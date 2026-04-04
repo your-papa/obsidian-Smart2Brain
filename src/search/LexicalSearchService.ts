@@ -2,9 +2,8 @@ import { TFile, getAllTags, type CachedMetadata } from "obsidian";
 import type SecondBrainPlugin from "../main";
 import { matchesSearchFilter } from "../search/searchFilters";
 import { extractSearchTerms } from "../search/searchTermUtils";
-import { getData } from "../stores/dataStore.svelte";
 import { Logger } from "../utils/logging";
-import { shouldProcessVaultPath } from "../utils/fileFiltering";
+import { getIndexableVaultFiles, isIndexableFile, readIndexableContent } from "../utils/fileFiltering";
 import { MiniSearchService, type LexicalSearchResult } from "../vectorstore/MiniSearchService";
 import type { SearchFilter, SearchMatchBadge, SearchMatchExplanation, VectorSearchResult } from "../vectorstore/types";
 
@@ -146,11 +145,11 @@ export class LexicalSearchService {
 
 	private async buildIndex(): Promise<void> {
 		const { vault } = this.plugin.app;
-		const files = vault.getMarkdownFiles().filter((file) => this.shouldIndexFile(file));
+		const files = getIndexableVaultFiles(vault);
 
 		for (const file of files) {
 			try {
-				const content = await vault.cachedRead(file);
+				const content = await readIndexableContent(vault, file);
 				this.miniSearch.addDocument(file.path, file.basename, content, this.getSearchableTags(file));
 			} catch (error) {
 				Logger.error(`[LexicalSearch] Failed to read ${file.path}:`, error);
@@ -163,7 +162,7 @@ export class LexicalSearchService {
 
 	private async validateIndex(): Promise<void> {
 		const { vault } = this.plugin.app;
-		const files = vault.getMarkdownFiles().filter((file) => this.shouldIndexFile(file));
+		const files = getIndexableVaultFiles(vault);
 
 		let added = 0;
 		for (const file of files) {
@@ -172,7 +171,7 @@ export class LexicalSearchService {
 			}
 
 			try {
-				const content = await vault.cachedRead(file);
+				const content = await readIndexableContent(vault, file);
 				this.miniSearch.addDocument(file.path, file.basename, content, this.getSearchableTags(file));
 				added++;
 			} catch (error) {
@@ -191,7 +190,7 @@ export class LexicalSearchService {
 
 		this.plugin.registerEvent(
 			vault.on("create", async (file) => {
-				if (file instanceof TFile && file.extension === "md") {
+				if (file instanceof TFile && isIndexableFile(file)) {
 					await this.handleFileCreate(file);
 				}
 			}),
@@ -199,7 +198,7 @@ export class LexicalSearchService {
 
 		this.plugin.registerEvent(
 			vault.on("modify", async (file) => {
-				if (file instanceof TFile && file.extension === "md") {
+				if (file instanceof TFile && isIndexableFile(file)) {
 					await this.handleFileModify(file);
 				}
 			}),
@@ -207,7 +206,7 @@ export class LexicalSearchService {
 
 		this.plugin.registerEvent(
 			vault.on("delete", (file) => {
-				if (file instanceof TFile && file.extension === "md") {
+				if (file instanceof TFile) {
 					this.miniSearch.removeDocument(file.path);
 				}
 			}),
@@ -215,7 +214,7 @@ export class LexicalSearchService {
 
 		this.plugin.registerEvent(
 			vault.on("rename", async (file, oldPath) => {
-				if (file instanceof TFile && file.extension === "md") {
+				if (file instanceof TFile && isIndexableFile(file)) {
 					await this.handleFileRename(file, oldPath);
 				}
 			}),
@@ -223,12 +222,8 @@ export class LexicalSearchService {
 	}
 
 	private async handleFileCreate(file: TFile): Promise<void> {
-		if (!this.shouldIndexFile(file)) {
-			return;
-		}
-
 		try {
-			const content = await this.plugin.app.vault.cachedRead(file);
+			const content = await readIndexableContent(this.plugin.app.vault, file);
 			this.miniSearch.addDocument(file.path, file.basename, content, this.getSearchableTags(file));
 		} catch (error) {
 			Logger.error(`[LexicalSearch] Failed to add ${file.path}:`, error);
@@ -236,13 +231,8 @@ export class LexicalSearchService {
 	}
 
 	private async handleFileModify(file: TFile): Promise<void> {
-		if (!this.shouldIndexFile(file)) {
-			this.miniSearch.removeDocument(file.path);
-			return;
-		}
-
 		try {
-			const content = await this.plugin.app.vault.cachedRead(file);
+			const content = await readIndexableContent(this.plugin.app.vault, file);
 			this.miniSearch.addDocument(file.path, file.basename, content, this.getSearchableTags(file));
 		} catch (error) {
 			Logger.error(`[LexicalSearch] Failed to update ${file.path}:`, error);
@@ -252,20 +242,12 @@ export class LexicalSearchService {
 	private async handleFileRename(file: TFile, oldPath: string): Promise<void> {
 		this.miniSearch.removeDocument(oldPath);
 
-		if (!this.shouldIndexFile(file)) {
-			return;
-		}
-
 		try {
-			const content = await this.plugin.app.vault.cachedRead(file);
+			const content = await readIndexableContent(this.plugin.app.vault, file);
 			this.miniSearch.addDocument(file.path, file.basename, content, this.getSearchableTags(file));
 		} catch (error) {
 			Logger.error(`[LexicalSearch] Failed to rename ${oldPath} -> ${file.path}:`, error);
 		}
-	}
-
-	private shouldIndexFile(file: TFile): boolean {
-		return shouldProcessVaultPath(file.path, getData().targetFolder);
 	}
 
 	private getSearchableTags(file: TFile): string[] {

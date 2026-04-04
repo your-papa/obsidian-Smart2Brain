@@ -36,7 +36,12 @@ import {
 } from "./types";
 import { toFloat32Array } from "./similarity";
 import { Logger } from "../utils/logging";
-import { matchesPathPattern, shouldProcessVaultPath } from "../utils/fileFiltering";
+import {
+	getIndexableVaultFiles,
+	isIndexableFile,
+	matchesPathPattern,
+	readIndexableContent,
+} from "../utils/fileFiltering";
 import { matchesPathPrefix } from "../utils/pathUtils";
 
 /** Default max input tokens for embedding models when metadata is unavailable */
@@ -612,7 +617,7 @@ export class VectorStoreService {
 		Logger.log(`[VectorStore] Validating index ${inst.indexId} against vault...`);
 
 		const { vault } = this.plugin.app;
-		const allVaultFiles = vault.getMarkdownFiles();
+		const allVaultFiles = getIndexableVaultFiles(vault);
 		const vaultFiles = allVaultFiles.filter((file) => this.shouldIndexFile(file, defaultModel.provider));
 
 		const indexedDocs = await inst.store.getAll();
@@ -680,7 +685,7 @@ export class VectorStoreService {
 
 			for (const file of filesToIndex) {
 				try {
-					const content = await vault.cachedRead(file);
+					const content = await readIndexableContent(vault, file);
 					if (content.length <= maxContentLength) {
 						const contentWithTitle = `# ${file.basename}\n\n${content}`;
 						validFiles.push({ file, content, contentWithTitle });
@@ -855,7 +860,7 @@ export class VectorStoreService {
 
 		this.plugin.registerEvent(
 			vault.on("create", async (file) => {
-				if (file instanceof TFile && file.extension === "md") {
+				if (file instanceof TFile && isIndexableFile(file)) {
 					await this.handleFileCreate(file);
 				}
 			}),
@@ -863,7 +868,7 @@ export class VectorStoreService {
 
 		this.plugin.registerEvent(
 			vault.on("modify", (file) => {
-				if (file instanceof TFile && file.extension === "md") {
+				if (file instanceof TFile && isIndexableFile(file)) {
 					this.handleFileModify(file);
 				}
 			}),
@@ -871,7 +876,7 @@ export class VectorStoreService {
 
 		this.plugin.registerEvent(
 			vault.on("delete", async (file) => {
-				if (file instanceof TFile && file.extension === "md") {
+				if (file instanceof TFile) {
 					await this.handleFileDelete(file);
 				}
 			}),
@@ -879,7 +884,7 @@ export class VectorStoreService {
 
 		this.plugin.registerEvent(
 			vault.on("rename", async (file, oldPath) => {
-				if (file instanceof TFile && file.extension === "md") {
+				if (file instanceof TFile && isIndexableFile(file)) {
 					await this.handleFileRename(file, oldPath);
 				}
 			}),
@@ -1044,7 +1049,7 @@ export class VectorStoreService {
 		inst.isIndexing = true;
 		inst.abortController = new AbortController();
 		const { vault } = this.plugin.app;
-		const allFiles = vault.getMarkdownFiles();
+		const allFiles = getIndexableVaultFiles(vault);
 		const batchSize = this.getBatchSize(inst.indexId, model.provider);
 
 		// Categorize files by skip reason
@@ -1090,7 +1095,7 @@ export class VectorStoreService {
 
 			for (const file of files) {
 				try {
-					const content = await vault.cachedRead(file);
+					const content = await readIndexableContent(vault, file);
 					if (content.length > maxContentLength) {
 						skippedFiles.push({ path: file.path, reason: "too-large" });
 						this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
@@ -1276,7 +1281,7 @@ export class VectorStoreService {
 	 */
 	private getFileSkipReason(file: TFile, provider?: string): SkipReason | null {
 		const pluginData = getData();
-		if (!shouldProcessVaultPath(file.path, pluginData.targetFolder)) return "excluded";
+		if (!isIndexableFile(file)) return "excluded";
 
 		// Privacy check: skip private files for untrusted providers
 		if (provider && !pluginData.isProviderTrusted(provider)) {
@@ -1305,7 +1310,7 @@ export class VectorStoreService {
 		}
 
 		try {
-			const content = await this.plugin.app.vault.cachedRead(file);
+			const content = await readIndexableContent(this.plugin.app.vault, file);
 			const maxContentLength = await this.getMaxEmbeddingContentLength(inst, model);
 
 			if (content.length > maxContentLength) {
@@ -1415,7 +1420,8 @@ export class VectorStoreService {
 
 				filteredResults.push({
 					path: r.doc.path,
-					name: r.doc.path.replace(/.*\//, "").replace(/\.md$/, ""),
+					name:
+						file instanceof TFile ? file.basename : r.doc.path.replace(/.*\//, "").replace(/\.[^.]+$/, ""),
 					frontmatter: cache?.frontmatter,
 					tags: docTags,
 					matchBadges: ["semantic"],
@@ -1574,7 +1580,7 @@ export class VectorStoreService {
 	 */
 	private async generateReport(inst: IndexInstance): Promise<IndexingReport> {
 		const { vault } = this.plugin.app;
-		const allFiles = vault.getMarkdownFiles();
+		const allFiles = getIndexableVaultFiles(vault);
 		const model = this.getModelForInstance(inst);
 		const provider = model?.provider;
 

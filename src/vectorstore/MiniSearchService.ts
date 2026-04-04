@@ -52,7 +52,8 @@ const DB_NAME_PREFIX = "s2b-minisearch";
 const DB_VERSION = 5;
 const STORE_NAME = "index";
 const INDEX_KEY = "main";
-const STORAGE_SCHEMA_VERSION = 5;
+/** Bump whenever the indexed file set or field schema changes to force a full reindex. */
+const STORAGE_SCHEMA_VERSION = 6;
 
 export interface LexicalSearchResult {
 	path: string;
@@ -367,7 +368,10 @@ export class MiniSearchService {
 			.map((result): RankedLexicalResult => {
 				const title =
 					(result as MiniSearchResult & { title?: string }).title ||
-					result.id.replace(/\.md$/, "").split("/").pop() ||
+					result.id
+						.replace(/\.[^.]+$/, "")
+						.split("/")
+						.pop() ||
 					result.id;
 				const aliases = this.parseStoredAliases((result as MiniSearchResult & { aliases?: string }).aliases);
 				const tags = this.parseStoredList((result as MiniSearchResult & { tags?: string }).tags);
@@ -391,7 +395,10 @@ export class MiniSearchService {
 			path: result.id,
 			name:
 				(result as MiniSearchResult & { title?: string }).title ||
-				result.id.replace(/\.md$/, "").split("/").pop() ||
+				result.id
+					.replace(/\.[^.]+$/, "")
+					.split("/")
+					.pop() ||
 				result.id,
 			aliases: this.parseStoredAliases((result as MiniSearchResult & { aliases?: string }).aliases),
 			tags: this.parseStoredList((result as MiniSearchResult & { tags?: string }).tags),
@@ -575,7 +582,11 @@ export class MiniSearchService {
 		const paths = Array.from(this.documentPaths).sort();
 		return paths.slice(0, limit).map((path) => ({
 			path,
-			name: path.replace(/\.md$/, "").split("/").pop() || path,
+			name:
+				path
+					.replace(/\.[^.]+$/, "")
+					.split("/")
+					.pop() || path,
 			score: 1,
 		}));
 	}
