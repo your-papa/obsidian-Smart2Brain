@@ -147,9 +147,8 @@ export default class SecondBrainPlugin extends Plugin {
 		setPlugin(this);
 		this.pluginData = await createData(this);
 
-		// Initialize Skills Service (Agent Skills spec)
+		// Create Skills Service instance (discovery deferred to onLayoutReady)
 		this.skillsService = new SkillsService(this);
-		await this.skillsService.initialize();
 
 		// Initialize lexical search for BM25 search and browse (non-blocking)
 		this.lexicalSearchService = LexicalSearchService.startInitialize(this);
@@ -253,12 +252,24 @@ export default class SecondBrainPlugin extends Plugin {
 			}),
 		);
 
-		// Initialize Agent Manager (v2)
+		// Create Agent Manager (v2) — constructor is cheap, heavy init deferred to onLayoutReady
 		this.agentManager = new AgentManager(this);
-		await this.agentManager.initialize();
-
 		createMessenger(this.agentManager);
 		this.registerNotebookNavigatorMenus();
+
+		// Defer heavy initialization (skills discovery, chat index loading, provider registration)
+		// to onLayoutReady so we don't block the Obsidian workspace from rendering.
+		// If a chat view opens before this completes, AgentManager.ensureAgent() handles lazy init.
+		this.app.workspace.onLayoutReady(() => {
+			void (async () => {
+				try {
+					await this.skillsService.initialize();
+					await this.agentManager.initialize();
+				} catch (e) {
+					Log.error("Deferred initialization failed", e);
+				}
+			})();
+		});
 
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu, file) => {

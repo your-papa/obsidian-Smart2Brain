@@ -5,42 +5,37 @@ import {
 	Platform,
 	SuggestModal,
 	TFile,
-	debounce,
+	TFolder,
+	getAllTags,
 	normalizePath,
 	setIcon,
 } from "obsidian";
-import { getRecentNotes, performSearch, type SearchResult } from "../../agent/tools/searchNotes";
+import { performSearch } from "../../agent/tools/searchNotes";
+import { getRecentNotes } from "../../search/recentNotes";
+import type { SearchResult } from "../../vectorstore/types";
+import { extractSearchTerms } from "../../search/searchTermUtils";
 import { getData } from "../../stores/dataStore.svelte";
 import type { SearchAlgorithm } from "../../types/plugin";
 import type { SearchFilter } from "../../vectorstore";
 import type { SearchMatchBadge } from "../../vectorstore/types";
 import { Logger } from "../../utils/logging";
-import { getSearchResultNoteIcon, getTagIcon, resolveIconColor } from "../../utils/noteIcons";
+import { getPathIcon, getSearchResultNoteIcon, getTagIcon, resolveIconColor } from "../../utils/noteIcons";
 
-interface ParsedQuery {
-	query: string;
-	filter?: SearchFilter;
-}
-
-interface ParsedFilterToken {
-	type: "path" | "tag";
+interface AutocompleteSuggestion {
+	type: "autocomplete";
+	kind: "tag" | "folder";
 	value: string;
-	raw: string;
-	start: number;
-	end: number;
+	display: string;
 }
 
-function getHighlightTerms(rawQuery: string): string[] {
-	const { query } = parseQueryWithFilters(rawQuery);
-	return Array.from(
-		new Set(
-			query
-				.toLowerCase()
-				.split(/[^\p{L}\p{N}#@_-]+/u)
-				.map((term) => term.trim())
-				.filter((term) => term.length > 1),
-		),
-	).sort((left, right) => right.length - left.length);
+type SearchSuggestion = SearchResult | AutocompleteSuggestion;
+
+function isAutocomplete(item: SearchSuggestion): item is AutocompleteSuggestion {
+	return "type" in item && item.type === "autocomplete";
+}
+
+function getHighlightTerms(query: string): string[] {
+	return extractSearchTerms(query);
 }
 
 function escapeRegExp(text: string): string {
@@ -210,109 +205,6 @@ function shouldShowMatchExplanation(
 	return !displayTags.includes(explanationTag);
 }
 
-function quoteFilterValue(value: string): string {
-	return /\s/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
-}
-
-function normalizeTag(tag: string): string {
-	return tag.startsWith("#") ? tag : `#${tag}`;
-}
-
-function pushFilterToken(tokens: ParsedFilterToken[], token: ParsedFilterToken): void {
-	if (token.value.length <= 1) {
-		return;
-	}
-
-	const overlapsExisting = tokens.some((existing) => token.start < existing.end && token.end > existing.start);
-	if (!overlapsExisting) {
-		tokens.push(token);
-	}
-}
-
-function extractFilterTokens(rawQuery: string): ParsedFilterToken[] {
-	const tokenRegex = /(path|tag):(?:"([^"]+)"|'([^']+)'|(\S+))/giu;
-	const bareTagRegex = /(^|\s)(#[^\s"']+)/gu;
-	const barePathRegex = /(^|\s)((?!https?:\/\/)[^\s"'#]+(?:\/[^\s"'#]+)*\/)/gu;
-	const tokens: ParsedFilterToken[] = [];
-
-	for (const match of rawQuery.matchAll(tokenRegex)) {
-		const type = match[1].toLowerCase() as ParsedFilterToken["type"];
-		const value = (match[2] ?? match[3] ?? match[4] ?? "").trim();
-		if (!value) continue;
-
-		pushFilterToken(tokens, {
-			type,
-			value: type === "tag" ? normalizeTag(value) : value,
-			raw: match[0],
-			start: match.index ?? 0,
-			end: (match.index ?? 0) + match[0].length,
-		});
-	}
-
-	for (const match of rawQuery.matchAll(bareTagRegex)) {
-		const value = normalizeTag(match[2]);
-		const leadingWhitespace = match[1]?.length ?? 0;
-		const start = (match.index ?? 0) + leadingWhitespace;
-
-		pushFilterToken(tokens, {
-			type: "tag",
-			value,
-			raw: match[2],
-			start,
-			end: start + match[2].length,
-		});
-	}
-
-	for (const match of rawQuery.matchAll(barePathRegex)) {
-		const value = match[2].trim();
-		const leadingWhitespace = match[1]?.length ?? 0;
-		const start = (match.index ?? 0) + leadingWhitespace;
-
-		pushFilterToken(tokens, {
-			type: "path",
-			value,
-			raw: match[2],
-			start,
-			end: start + match[2].length,
-		});
-	}
-
-	return tokens.sort((left, right) => left.start - right.start);
-}
-
-function stripFilterTokens(rawQuery: string, tokens: ParsedFilterToken[]): string {
-	if (tokens.length === 0) {
-		return rawQuery.trim();
-	}
-
-	let cursor = 0;
-	let remaining = "";
-	for (const token of tokens) {
-		remaining += `${rawQuery.slice(cursor, token.start)} `;
-		cursor = token.end;
-	}
-	remaining += rawQuery.slice(cursor);
-
-	return remaining.replace(/\s+/g, " ").trim();
-}
-
-function buildRawQuery(query: string, filter?: SearchFilter): string {
-	const parts: string[] = [];
-	if (query.trim()) {
-		parts.push(query.trim());
-	}
-
-	for (const pathPrefix of filter?.pathPrefixes ?? []) {
-		parts.push(`path:${quoteFilterValue(pathPrefix)}`);
-	}
-
-	for (const tag of filter?.tags ?? []) {
-		parts.push(`tag:${quoteFilterValue(tag)}`);
-	}
-
-	return parts.join(" ").trim();
-}
-
 function sanitizeNoteTitle(title: string): string {
 	return title
 		.replace(/[<>:"/\\|?*]/g, "-")
@@ -322,56 +214,34 @@ function sanitizeNoteTitle(title: string): string {
 }
 
 /**
- * Parse search query for filter syntax:
- * - path:folder/subfolder/ - filter by path prefix
- * - path:"folder with spaces/" - quoted path filter
- * - folder/subfolder/ - shorthand path filter
- * - tag:#tagname or tag:tagname - filter by tag (can use multiple)
- * - #tagname - shorthand tag filter
- *
- * Example: "path:projects/ tag:#active my search query"
- */
-function parseQueryWithFilters(rawQuery: string): ParsedQuery {
-	const tokens = extractFilterTokens(rawQuery);
-	const pathPrefixes = tokens.filter((token) => token.type === "path").map((token) => token.value);
-	const tags = tokens.filter((token) => token.type === "tag").map((token) => token.value);
-	const cleanQuery = stripFilterTokens(rawQuery, tokens);
-
-	const filter: SearchFilter | undefined =
-		pathPrefixes.length > 0 || tags.length > 0
-			? {
-					pathPrefixes: pathPrefixes.length > 0 ? pathPrefixes : undefined,
-					tags: tags.length > 0 ? tags : undefined,
-				}
-			: undefined;
-
-	return { query: cleanQuery, filter };
-}
-
-/**
  * Search modal that provides a popup search experience using the configured search algorithm.
  * Similar to Obsidian's native search or Omnisearch.
  *
- * Supports filter syntax:
- * - path:folder/ to filter by path prefix
- * - tag:#tagname to filter by tag
+ * Supports inline filter chips via # (tags) and / (folders) autocomplete.
  */
-export class SearchModal extends SuggestModal<SearchResult> {
+export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private searchResults: SearchResult[] = [];
 	private currentQuery = "";
-	private lastSearchedQuery = "";
 	private isSearching = false;
 	private isClosed = false;
 	private semanticEnabled = false;
 	private requireAllTags = false;
 	private glowAnimationId: number | null = null;
 	private borderEl: HTMLElement | null = null;
-	private filterChipsEl: HTMLElement | null = null;
-	private pendingSearch = false;
+	private searchTimeout: number | null = null;
+	private searchRequestId = 0;
+	private lastRequestedSearchKey = "";
+	private cachedAutocompleteTags: string[] = [];
+	private cachedTagChildCount = new Map<string, number>();
+	private cachedAutocompleteFolders: string[] = [];
+	/** Inline filter state — chips live inside the input container */
+	private activeFilters: { type: "path" | "tag"; value: string }[] = [];
+	private inlineChipsEl: HTMLElement | null = null;
+	private inlineInputContentEl: HTMLElement | null = null;
 
 	constructor(app: App) {
 		super(app);
-		this.setPlaceholder("Search notes, use #tag or folder/, or leave empty for recent notes...");
+		this.setPlaceholder("Search notes, use #tag or /folder, or leave empty for recent notes...");
 		this.updateInstructions();
 
 		// Register Tab to toggle semantic search
@@ -380,12 +250,26 @@ export class SearchModal extends SuggestModal<SearchResult> {
 			this.semanticEnabled = !this.semanticEnabled;
 			this.updateInstructions();
 			this.syncGlowAnimation();
-			// Re-run search with new algorithm if there's a query
-			if (this.currentQuery.trim()) {
-				this.lastSearchedQuery = ""; // Force re-search
-				this.debouncedSearch(this.currentQuery);
+			// Re-run search with new algorithm if there's a query or filters
+			if (this.currentQuery.trim() || this.activeFilters.length > 0) {
+				this.invalidateSearch();
+				this.triggerSearch(this.currentQuery);
 			}
 			return false;
+		});
+
+		// Register Backspace to remove last filter chip when input is empty
+		this.scope.register([], "Backspace", () => {
+			const inputEl = this.getInputEl();
+			if (inputEl && inputEl.value === "" && this.activeFilters.length > 0) {
+				this.activeFilters.pop();
+				this.renderInlineChips();
+				this.invalidateSearch();
+				this.triggerSearch(this.currentQuery);
+				return false;
+			}
+			// Let default backspace behavior handle text deletion
+			return true;
 		});
 
 		this.scope.register(["Mod"], "Enter", (evt) => {
@@ -533,8 +417,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 	}
 
 	private async createNoteFromQuery(): Promise<void> {
-		const parsed = parseQueryWithFilters(this.currentQuery);
-		const requestedTitle = parsed.query.trim() || this.currentQuery.trim();
+		const requestedTitle = this.currentQuery.trim();
 		const baseTitle = sanitizeNoteTitle(requestedTitle) || "Untitled";
 
 		try {
@@ -554,125 +437,257 @@ export class SearchModal extends SuggestModal<SearchResult> {
 
 	onOpen(): void {
 		super.onOpen();
-		this.ensureFilterChipsEl();
-		this.renderFilterChips(parseQueryWithFilters(this.currentQuery));
+		this.isClosed = false;
+		this.currentQuery = "";
+		this.lastRequestedSearchKey = "";
+		this.searchResults = getRecentNotes(this.app).slice(0, 20);
+		this.buildAutocompleteCaches();
+		this.setupInlineChips();
+		// Seed the empty-query state immediately so recent notes are visible on first open.
+		// @ts-ignore - updateSuggestions is a protected method
+		this.updateSuggestions();
 	}
 
 	onClose(): void {
 		this.isClosed = true;
 		this.stopGlowAnimation();
-		this.filterChipsEl?.remove();
-		this.filterChipsEl = null;
-		// Cancel any pending debounced calls
-		this.debouncedSearch.cancel();
+		this.inlineChipsEl?.remove();
+		this.inlineChipsEl = null;
+		this.inlineInputContentEl?.remove();
+		this.inlineInputContentEl = null;
+		this.cachedAutocompleteTags = [];
+		this.cachedTagChildCount.clear();
+		this.cachedAutocompleteFolders = [];
+		// Cancel any pending search
+		if (this.searchTimeout !== null) {
+			window.clearTimeout(this.searchTimeout);
+			this.searchTimeout = null;
+		}
 	}
 
-	private ensureFilterChipsEl(): HTMLElement | null {
-		if (this.filterChipsEl?.isConnected) {
-			return this.filterChipsEl;
-		}
+	/**
+	 * Set up the inline chip container inside the prompt-input-container,
+	 * before the <input> element, so chips appear inside the input field.
+	 */
+	private setupInlineChips(): void {
+		const inputContainer = this.modalEl.querySelector<HTMLElement>(".prompt-input-container");
+		const inputEl = this.getInputEl();
+		if (!inputContainer || !inputEl) return;
 
-		if (!this.resultContainerEl) {
-			return null;
-		}
+		// Reserve a dedicated content column so wrapped chips never slide beneath the search icon.
+		inputContainer.addClass("s2b-inline-chips-container");
 
-		this.filterChipsEl = this.modalEl.createDiv({ cls: "s2b-search-filter-bar" });
-		this.resultContainerEl.before(this.filterChipsEl);
-		return this.filterChipsEl;
+		this.inlineInputContentEl = document.createElement("div");
+		this.inlineInputContentEl.className = "s2b-inline-input-content";
+		inputContainer.insertBefore(this.inlineInputContentEl, inputEl);
+
+		// Create the chip wrapper inside the content flow, before the input.
+		this.inlineChipsEl = document.createElement("div");
+		this.inlineChipsEl.className = "s2b-inline-chips";
+		this.inlineInputContentEl.appendChild(this.inlineChipsEl);
+		this.inlineInputContentEl.appendChild(inputEl);
+
+		// Make the input grow to fill the remaining space inside the flow container.
+		inputEl.addClass("s2b-inline-input");
+		this.updateInlineInputSpacing();
 	}
 
 	private getInputEl(): HTMLInputElement | null {
 		return this.modalEl.querySelector<HTMLInputElement>(".prompt-input");
 	}
 
-	private setSearchQuery(rawQuery: string): void {
-		this.currentQuery = rawQuery;
-		this.renderFilterChips(parseQueryWithFilters(rawQuery));
+	private usesCupertinoTheme(): boolean {
+		const customCss = (this.app as App & { customCss?: { theme?: string } }).customCss;
+		const themeName = customCss?.theme?.toLowerCase() ?? "";
+		return themeName.includes("cupertino") || themeName.includes("baseline");
+	}
 
+	private updateInlineInputSpacing(): void {
 		const inputEl = this.getInputEl();
-		if (inputEl && inputEl.value !== rawQuery) {
-			inputEl.value = rawQuery;
+		if (!inputEl) return;
+
+		const usesCupertinoTheme = this.usesCupertinoTheme();
+		const hasChips = this.activeFilters.length > 0;
+		if (this.inlineInputContentEl) {
+			this.inlineInputContentEl.style.setProperty(
+				"padding-left",
+				hasChips && usesCupertinoTheme ? "36px" : "8px",
+				"important",
+			);
 		}
 
-		if (rawQuery.trim() && rawQuery !== this.lastSearchedQuery) {
-			this.debouncedSearch(rawQuery);
-		} else if (!rawQuery.trim()) {
-			this.searchResults = [];
-			this.lastSearchedQuery = "";
+		const leadingInset = hasChips || !usesCupertinoTheme ? "0" : "36px";
+		inputEl.style.setProperty("padding-left", leadingInset, "important");
+		inputEl.style.setProperty("padding-inline-start", leadingInset, "important");
+		inputEl.style.setProperty("padding-right", "0", "important");
+		inputEl.style.setProperty("padding-inline-end", "0", "important");
+		inputEl.style.setProperty("margin-left", "0", "important");
+		inputEl.style.setProperty("text-indent", "0", "important");
+	}
+
+	private setSearchQuery(cleanQuery: string): void {
+		this.currentQuery = cleanQuery;
+
+		const inputEl = this.getInputEl();
+		if (inputEl && inputEl.value !== cleanQuery) {
+			inputEl.value = cleanQuery;
+		}
+
+		if (cleanQuery.trim() || this.activeFilters.length > 0) {
+			this.invalidateSearch();
+			this.triggerSearch(cleanQuery);
+		} else {
+			this.searchResults = getRecentNotes(this.app).slice(0, 20);
+			this.lastRequestedSearchKey = "";
 			this.setSearching(false);
 			// @ts-ignore - updateSuggestions is a protected method
 			this.updateSuggestions();
 		}
 	}
 
-	private removeFilterValue(type: "path" | "tag", value: string): void {
-		const parsed = parseQueryWithFilters(this.currentQuery);
-		const nextFilter: SearchFilter = {
-			pathPrefixes:
-				type === "path"
-					? parsed.filter?.pathPrefixes?.filter((pathPrefix) => pathPrefix !== value)
-					: parsed.filter?.pathPrefixes,
-			tags: type === "tag" ? parsed.filter?.tags?.filter((tag) => tag !== value) : parsed.filter?.tags,
-			requireAllTags: this.requireAllTags,
-		};
+	private removeFilter(index: number): void {
+		this.activeFilters.splice(index, 1);
 
-		if (!nextFilter.tags?.length) {
+		const activeTags = this.activeFilters.filter((f) => f.type === "tag");
+		if (activeTags.length < 2) {
 			this.requireAllTags = false;
-			nextFilter.requireAllTags = false;
 		}
 
-		this.setSearchQuery(buildRawQuery(parsed.query, nextFilter));
+		this.renderInlineChips();
+		this.invalidateSearch();
+		this.triggerSearch(this.currentQuery);
 	}
 
 	private toggleRequireAllTags(): void {
 		this.requireAllTags = !this.requireAllTags;
-		this.renderFilterChips(parseQueryWithFilters(this.currentQuery));
-		if (this.currentQuery.trim()) {
-			this.lastSearchedQuery = "";
-			this.debouncedSearch(this.currentQuery);
+		this.renderInlineChips();
+		if (this.currentQuery.trim() || this.activeFilters.length > 0) {
+			this.invalidateSearch();
+			this.triggerSearch(this.currentQuery);
 		}
 	}
 
-	private renderFilterChips(parsed: ParsedQuery): void {
-		const chipsEl = this.ensureFilterChipsEl();
+	/** Build a SearchFilter from the active inline chips */
+	private buildActiveFilter(): SearchFilter | undefined {
+		const tags = this.activeFilters.filter((f) => f.type === "tag").map((f) => f.value);
+		const pathPrefixes = this.activeFilters.filter((f) => f.type === "path").map((f) => f.value);
+
+		if (tags.length === 0 && pathPrefixes.length === 0) return undefined;
+
+		return {
+			tags: tags.length > 0 ? tags : undefined,
+			pathPrefixes: pathPrefixes.length > 0 ? pathPrefixes : undefined,
+			requireAllTags: tags.length > 1 ? this.requireAllTags : undefined,
+		};
+	}
+
+	private buildSearchKey(query: string): string {
+		return JSON.stringify({
+			query,
+			algorithm: this.activeAlgorithm,
+			filter: this.buildActiveFilter() ?? null,
+		});
+	}
+
+	private buildAutocompleteCaches(): void {
+		const leafTags = new Set<string>();
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const cache = this.app.metadataCache.getFileCache(file);
+			if (!cache) {
+				continue;
+			}
+
+			for (const tag of getAllTags(cache) ?? []) {
+				leafTags.add(tag);
+			}
+		}
+
+		this.cachedTagChildCount.clear();
+		for (const tag of leafTags) {
+			const parts = tag.split("/");
+			for (let index = 1; index < parts.length; index++) {
+				const parent = parts.slice(0, index).join("/");
+				this.cachedTagChildCount.set(parent, (this.cachedTagChildCount.get(parent) ?? 0) + 1);
+			}
+		}
+
+		this.cachedAutocompleteTags = Array.from(new Set([...leafTags, ...this.cachedTagChildCount.keys()])).sort();
+		this.cachedAutocompleteFolders = this.app.vault
+			.getAllLoadedFiles()
+			.filter(
+				(abstractFile): abstractFile is TFolder => abstractFile instanceof TFolder && abstractFile.path !== "/",
+			)
+			.map((folder) => folder.path)
+			.sort();
+	}
+
+	/** Render inline filter chips inside the input container */
+	private renderInlineChips(): void {
+		const chipsEl = this.inlineChipsEl;
 		if (!chipsEl) return;
 
 		chipsEl.empty();
-		const filter = parsed.filter;
-		if (!filter?.pathPrefixes?.length && !filter?.tags?.length) {
-			this.requireAllTags = false;
-			chipsEl.style.display = "none";
-			return;
+		this.inlineInputContentEl?.toggleClass("s2b-inline-input-content-has-chips", this.activeFilters.length > 0);
+		this.updateInlineInputSpacing();
+
+		for (const [index, filter] of this.activeFilters.entries()) {
+			const chip = chipsEl.createEl("button", { cls: "s2b-inline-chip" }) as HTMLButtonElement;
+			chip.type = "button";
+
+			// Try to get an icon from Iconic / Iconize
+			const iconRenderer =
+				filter.type === "tag"
+					? getTagIcon(this.app, filter.value)
+					: getPathIcon(this.app, filter.value.replace(/\/$/, ""), "folder");
+
+			if (iconRenderer) {
+				chip.classList.add(`s2b-inline-chip-${iconRenderer.provider}`);
+				const resolvedColor = resolveIconColor(iconRenderer.color);
+				if (resolvedColor) {
+					const rgbaColor = resolvedColor.replace("rgb(", "rgba(").replace(")", "");
+					chip.style.setProperty("--tag-color", resolvedColor);
+					chip.style.setProperty("--tag-color-hover", resolvedColor);
+					chip.style.setProperty("--tag-color-remove-hover", resolvedColor);
+					chip.style.setProperty("--tag-background", `${rgbaColor}, 0.1)`);
+					chip.style.setProperty("--tag-background-hover", `${rgbaColor}, 0.1)`);
+					chip.style.setProperty("--tag-border-color", `${rgbaColor}, 0.25)`);
+					chip.style.setProperty("--tag-border-color-hover", `${rgbaColor}, 0.5)`);
+				}
+				const iconEl = chip.createSpan({ cls: "s2b-inline-chip-icon" });
+				iconEl.setAttribute("aria-hidden", "true");
+				iconRenderer.render(iconEl);
+			} else {
+				// Fallback: default icon for type
+				const iconEl = chip.createSpan({ cls: "s2b-inline-chip-icon" });
+				iconEl.setAttribute("aria-hidden", "true");
+				setIcon(iconEl, filter.type === "tag" ? "tag" : "folder");
+			}
+
+			const label = filter.type === "path" ? filter.value.replace(/\/$/, "") : filter.value.replace(/^#/, "");
+			chip.setAttribute("aria-label", `Remove filter ${label}`);
+			chip.createSpan({ cls: "s2b-inline-chip-label", text: label });
+			chip.createSpan({ cls: "s2b-inline-chip-remove", text: "×" });
+			chip.addEventListener("click", (evt) => {
+				evt.stopPropagation();
+				this.removeFilter(index);
+				this.getInputEl()?.focus();
+			});
 		}
 
-		chipsEl.style.display = "flex";
-
-		for (const pathPrefix of filter.pathPrefixes ?? []) {
-			this.createFilterChip(chipsEl, `In ${pathPrefix}`, () => this.removeFilterValue("path", pathPrefix));
-		}
-
-		for (const tag of filter.tags ?? []) {
-			this.createFilterChip(chipsEl, tag, () => this.removeFilterValue("tag", tag));
-		}
-
-		if (filter.tags?.length) {
+		// Tags ANY/ALL toggle chip (only with 2+ tags)
+		const tagCount = this.activeFilters.filter((f) => f.type === "tag").length;
+		if (tagCount > 1) {
 			const modeChip = chipsEl.createEl("button", {
-				cls: "s2b-search-filter-chip s2b-search-filter-chip-mode",
-				text: this.requireAllTags ? "Tags: ALL" : "Tags: ANY",
+				cls: "s2b-inline-chip s2b-inline-chip-mode",
+				text: this.requireAllTags ? "ALL" : "ANY",
 			}) as HTMLButtonElement;
 			modeChip.type = "button";
 			modeChip.setAttribute("aria-label", "Toggle tag match mode");
-			modeChip.addEventListener("click", () => this.toggleRequireAllTags());
+			modeChip.addEventListener("click", (evt) => {
+				evt.stopPropagation();
+				this.toggleRequireAllTags();
+			});
 		}
-	}
-
-	private createFilterChip(container: HTMLElement, label: string, onRemove: () => void): void {
-		const chip = container.createEl("button", { cls: "s2b-search-filter-chip" }) as HTMLButtonElement;
-		chip.type = "button";
-		chip.setAttribute("aria-label", `Remove filter ${label}`);
-		chip.createSpan({ cls: "s2b-search-filter-chip-value", text: label });
-		chip.createSpan({ cls: "s2b-search-filter-chip-remove", text: "×" });
-		chip.addEventListener("click", onRemove);
 	}
 
 	private startGlowAnimation(): void {
@@ -767,100 +782,196 @@ export class SearchModal extends SuggestModal<SearchResult> {
 		this.modalEl.style.removeProperty("border-color");
 	}
 
-	/**
-	 * Debounced search to avoid too many API calls during typing
-	 */
-	private debouncedSearch = debounce(
-		async (rawQuery: string) => {
-			// Abort if modal was closed
-			if (this.isClosed) return;
-
-			if (!rawQuery.trim()) {
-				this.searchResults = [];
-				this.pendingSearch = false;
-				this.setSearching(false);
-				// @ts-ignore - updateSuggestions is a protected method
-				this.updateSuggestions();
-				return;
-			}
-
-			this.setSearching(true);
-			const algorithm = this.activeAlgorithm;
-
-			// Parse query for filter syntax
-			const { query, filter } = parseQueryWithFilters(rawQuery);
-			const effectiveFilter = filter?.tags?.length
-				? {
-						...filter,
-						requireAllTags: this.requireAllTags,
-					}
-				: filter;
-
-			// Skip if no query and no filter
-			if (!query.trim() && !effectiveFilter) {
-				this.searchResults = [];
-				this.pendingSearch = false;
-				this.setSearching(false);
-				// @ts-ignore - updateSuggestions is a protected method
-				this.updateSuggestions();
-				return;
-			}
-
-			try {
-				const results = await performSearch(this.app, query, algorithm, effectiveFilter);
-				// Only update if query hasn't changed and modal is still open
-				if (rawQuery === this.currentQuery && !this.isClosed) {
-					this.searchResults = results.slice(0, 20);
-					this.lastSearchedQuery = rawQuery;
-					this.pendingSearch = false;
-					// @ts-ignore - updateSuggestions is a protected method
-					this.updateSuggestions();
-				}
-			} catch (error) {
-				Logger.error("[SearchModal] Search failed:", error);
-				this.searchResults = [];
-				this.pendingSearch = false;
-			} finally {
-				this.setSearching(false);
-			}
-		},
-		200,
-		false, // Don't run on leading edge - wait for debounce
-	);
+	/** Force the next getSuggestions call to re-trigger a search. */
+	private invalidateSearch(): void {
+		this.lastRequestedSearchKey = "";
+	}
 
 	/**
-	 * Get suggestions based on query - called by SuggestModal
+	 * Schedule a search with the appropriate debounce for the active algorithm.
+	 * Uses a monotonic request ID to discard stale results.
 	 */
-	getSuggestions(query: string): SearchResult[] {
+	private triggerSearch(cleanQuery: string): void {
+		if (this.searchTimeout !== null) {
+			window.clearTimeout(this.searchTimeout);
+			this.searchTimeout = null;
+		}
+
+		const delay = this.activeAlgorithm === "lexical" ? 40 : 200;
+
+		this.searchTimeout = window.setTimeout(() => {
+			this.searchTimeout = null;
+			void this.requestSearch(cleanQuery);
+		}, delay);
+	}
+
+	/**
+	 * Single search path for all algorithms.
+	 * A monotonic `searchRequestId` ensures only the latest request can update the UI.
+	 */
+	private async requestSearch(cleanQuery: string): Promise<void> {
+		if (this.isClosed) return;
+
+		const filter = this.buildActiveFilter();
+		const algorithm = this.activeAlgorithm;
+		const requestId = ++this.searchRequestId;
+
+		if (!cleanQuery.trim() && !filter) {
+			this.searchResults = [];
+			this.setSearching(false);
+			// @ts-ignore - updateSuggestions is a protected method
+			this.updateSuggestions();
+			return;
+		}
+
+		this.setSearching(true);
+
+		try {
+			const results = await performSearch(this.app, cleanQuery, algorithm, filter);
+
+			// Discard results from stale requests
+			if (requestId !== this.searchRequestId || this.isClosed) return;
+
+			this.searchResults = results.slice(0, 20);
+			// @ts-ignore - updateSuggestions is a protected method
+			this.updateSuggestions();
+		} catch (error) {
+			Logger.error("[SearchModal] Search failed:", error);
+			if (requestId === this.searchRequestId) {
+				this.searchResults = [];
+			}
+		} finally {
+			if (requestId === this.searchRequestId) {
+				this.setSearching(false);
+			}
+		}
+	}
+
+	/**
+	 * Detect whether the user is typing a partial filter token at the end of the query.
+	 * Returns autocomplete suggestions for tags (#) or folders (path/) when applicable.
+	 */
+	private getAutocompleteSuggestions(query: string): AutocompleteSuggestion[] | null {
+		// Match a partial tag at the end: "#" or "#part"
+		const tagMatch = query.match(/(#)([^\s]*)$/u);
+		if (tagMatch) {
+			const partial = tagMatch[2].toLowerCase();
+			return this.getTagSuggestions(partial);
+		}
+
+		// Match a partial folder path at the end.
+		// Triggers when the trailing token contains "/" (e.g. "src/", "/fo", "my/deep/path")
+		// or when it starts with "/" (e.g. "/docs").
+		// Excludes URLs (http:// https://).
+		const folderMatch = query.match(/(?:^|\s)((?!https?:\/\/)(\/[^\s]*|[^\s]*\/[^\s]*))$/u);
+		if (folderMatch) {
+			const partial = folderMatch[1].toLowerCase();
+			const suggestions = this.getFolderSuggestions(partial);
+			// Only enter folder autocomplete if there are matching folders.
+			if (suggestions.length > 0) {
+				return suggestions;
+			}
+		}
+
+		return null;
+	}
+
+	private getTagSuggestions(partial: string): AutocompleteSuggestion[] {
+		return this.cachedAutocompleteTags
+			.filter((tag) => !partial || tag.toLowerCase().slice(1).includes(partial))
+			.slice(0, 20)
+			.map((tag) => {
+				const children = this.cachedTagChildCount.get(tag);
+				const label = tag.startsWith("#") ? tag.slice(1) : tag;
+				return {
+					type: "autocomplete" as const,
+					kind: "tag" as const,
+					value: tag,
+					display: children ? `${label} (${children} subtags)` : label,
+				};
+			});
+	}
+
+	private getFolderSuggestions(partial: string): AutocompleteSuggestion[] {
+		// Strip leading/trailing slashes so "/fo" → "fo" matches folder "foobar"
+		const needle = partial.replace(/^\/+|\/+$/gu, "");
+		return this.cachedAutocompleteFolders
+			.filter((folder) => !needle || folder.toLowerCase().includes(needle))
+			.slice(0, 20)
+			.map((folder) => ({
+				type: "autocomplete" as const,
+				kind: "folder" as const,
+				value: `${folder}/`,
+				display: folder,
+			}));
+	}
+
+	private deferSuggestions(suggestions: SearchSuggestion[]): Promise<SearchSuggestion[]> {
+		return new Promise((resolve) => {
+			window.setTimeout(() => resolve(suggestions), 0);
+		});
+	}
+
+	private applyAutocompleteSuggestion(suggestion: AutocompleteSuggestion): void {
+		// Add the selected suggestion as an inline filter chip
+		this.activeFilters.push({ type: suggestion.kind === "tag" ? "tag" : "path", value: suggestion.value });
+		this.renderInlineChips();
+
+		// Remove the partial token from the input (the #... or folder/ text)
+		let cleanQuery: string;
+		if (suggestion.kind === "tag") {
+			cleanQuery = this.currentQuery.replace(/(#)[^\s]*$/u, "").trim();
+		} else {
+			cleanQuery = this.currentQuery.replace(/(?:^|\s)((?!https?:\/\/)(\/[^\s]*|[^\s]*\/[^\s]*))$/u, "").trim();
+		}
+
+		this.setSearchQuery(cleanQuery);
+		// @ts-ignore - updateSuggestions is a protected method
+		this.updateSuggestions();
+	}
+
+	getSuggestions(query: string): SearchSuggestion[] | Promise<SearchSuggestion[]> {
 		this.currentQuery = query;
-		const parsed = parseQueryWithFilters(query);
-		this.renderFilterChips(parsed);
 
-		if (!query.trim()) {
-			this.pendingSearch = false;
+		// Check for autocomplete mode (typing # or folder/)
+		const autocompleteSuggestions = this.getAutocompleteSuggestions(query);
+		if (autocompleteSuggestions && autocompleteSuggestions.length > 0) {
+			this.lastRequestedSearchKey = "";
+			if (this.searchTimeout !== null) {
+				window.clearTimeout(this.searchTimeout);
+				this.searchTimeout = null;
+			}
+			return autocompleteSuggestions;
+		}
+
+		const filter = this.buildActiveFilter();
+
+		// Empty query with no filter → show recent notes synchronously
+		if (!query.trim() && !filter) {
 			this.searchResults = getRecentNotes(this.app).slice(0, 20);
-			this.lastSearchedQuery = "";
+			this.lastRequestedSearchKey = "";
 			return this.searchResults;
 		}
 
-		// Query matches last search — results are current, render them
-		if (query === this.lastSearchedQuery) {
-			this.pendingSearch = false;
-			return this.searchResults;
+		// Deduplicate: only trigger a new search when the key changes
+		const searchKey = this.buildSearchKey(query);
+		if (searchKey !== this.lastRequestedSearchKey) {
+			this.lastRequestedSearchKey = searchKey;
+			this.triggerSearch(query);
 		}
-
-		// Query changed — kick off debounced search and return empty to avoid
-		// re-rendering up to 20 stale result DOM trees on every keystroke.
-		// Results will appear once the debounced search calls updateSuggestions().
-		this.pendingSearch = true;
-		this.debouncedSearch(query);
-		return [];
+		return this.deferSuggestions(this.searchResults);
 	}
 
 	/**
 	 * Render each suggestion item
 	 */
-	renderSuggestion(result: SearchResult, el: HTMLElement): void {
+	renderSuggestion(item: SearchSuggestion, el: HTMLElement): void {
+		if (isAutocomplete(item)) {
+			this.renderAutocompleteSuggestion(item, el);
+			return;
+		}
+
+		const result = item;
 		const container = el.createDiv({ cls: "s2b-search-result" });
 		const highlightTerms = getHighlightTerms(this.currentQuery);
 		const searchSettings = getData();
@@ -976,12 +1087,66 @@ export class SearchModal extends SuggestModal<SearchResult> {
 		}
 	}
 
+	private renderAutocompleteSuggestion(suggestion: AutocompleteSuggestion, el: HTMLElement): void {
+		const container = el.createDiv({ cls: "s2b-search-autocomplete" });
+		const iconEl = container.createSpan({ cls: "s2b-search-autocomplete-icon" });
+
+		// Use Iconic/Iconize tag icon if available, otherwise fall back to default icons
+		if (suggestion.kind === "tag") {
+			const tagIcon = getTagIcon(this.app, suggestion.value);
+			if (tagIcon) {
+				iconEl.classList.add(`s2b-search-autocomplete-icon-${tagIcon.provider}`);
+				const resolvedColor = resolveIconColor(tagIcon.color);
+				if (resolvedColor) {
+					iconEl.style.color = resolvedColor;
+				}
+				tagIcon.render(iconEl);
+			} else {
+				setIcon(iconEl, "tag");
+			}
+		} else {
+			const folderIcon = getPathIcon(this.app, suggestion.value.replace(/\/$/, ""), "folder");
+			if (folderIcon) {
+				iconEl.classList.add(`s2b-search-autocomplete-icon-${folderIcon.provider}`);
+				const resolvedColor = resolveIconColor(folderIcon.color);
+				if (resolvedColor) {
+					iconEl.style.color = resolvedColor;
+				}
+				folderIcon.render(iconEl);
+			} else {
+				setIcon(iconEl, "folder");
+			}
+		}
+
+		container.createSpan({ cls: "s2b-search-autocomplete-text", text: suggestion.display });
+		container.createSpan({
+			cls: "s2b-search-autocomplete-hint",
+			text: suggestion.kind === "tag" ? "Filter by tag" : "Filter by folder",
+		});
+	}
+
 	/**
-	 * Handle selection - open the note
+	 * Handle selection — open note, or apply autocomplete suggestion
 	 */
-	onChooseSuggestion(result: SearchResult, evt: MouseEvent | KeyboardEvent): void {
+	onChooseSuggestion(item: SearchSuggestion, evt: MouseEvent | KeyboardEvent): void {
+		if (isAutocomplete(item)) {
+			this.applyAutocompleteSuggestion(item);
+			return;
+		}
+
 		const destination = evt.ctrlKey || evt.metaKey ? "tab" : false;
-		this.openSearchResult(result, destination);
+		this.openSearchResult(item, destination);
+	}
+
+	/**
+	 * Override selectSuggestion to prevent closing the modal on autocomplete selection.
+	 */
+	selectSuggestion(value: SearchSuggestion, evt: MouseEvent | KeyboardEvent): void {
+		if (isAutocomplete(value)) {
+			this.applyAutocompleteSuggestion(value);
+			return;
+		}
+		super.selectSuggestion(value, evt);
 	}
 
 	/**
@@ -1003,9 +1168,9 @@ export class SearchModal extends SuggestModal<SearchResult> {
 	onNoSuggestion(): void {
 		this.resultContainerEl.empty();
 
-		// While debounce is pending, show nothing (keeps previous DOM or blank).
-		// This avoids flashing "No notes found" between keystrokes.
-		if (this.pendingSearch) {
+		// While a search is in-flight or debounced, show nothing to avoid
+		// flashing "No notes found" between keystrokes.
+		if (this.isSearching || this.searchTimeout !== null) {
 			return;
 		}
 

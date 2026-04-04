@@ -147,7 +147,7 @@ describe("performSearch lexical startup behavior", () => {
 		]);
 	});
 
-	it("boosts recent search results and adds a recent badge", async () => {
+	it("keeps typed search ranking intact while adding a recent badge", async () => {
 		mockRecentNotes.push(
 			{ path: "Notes/recent.md", lastOpenedAt: 2_000 },
 			{ path: "Notes/older.md", lastOpenedAt: 1_000 },
@@ -173,10 +173,10 @@ describe("performSearch lexical startup behavior", () => {
 		const result = await tool.invoke({ query: "note" });
 		const parsed: SearchToolResultPayload = JSON.parse(String(result));
 
-		expect(parsed.results[0]?.name).toBe("recent");
-		expect(parsed.results[0]?.matchBadges).toEqual(["tag", "recent"]);
-		expect(parsed.results[1]?.name).toBe("older");
-		expect(parsed.results[1]?.matchBadges).toEqual(["title", "recent"]);
+		expect(parsed.results[0]?.name).toBe("older");
+		expect(parsed.results[0]?.matchBadges).toEqual(["title", "recent"]);
+		expect(parsed.results[1]?.name).toBe("recent");
+		expect(parsed.results[1]?.matchBadges).toEqual(["tag", "recent"]);
 	});
 
 	it("returns recently opened notes when recentOnly is true", async () => {
@@ -257,6 +257,48 @@ describe("performSearch lexical startup behavior", () => {
 		expect(new Set(parsed.results[0]?.tags ?? [])).toEqual(new Set(["#project", "#active", "#inline"]));
 	});
 
+	it("includes recently created notes even if they were never opened", async () => {
+		const app = {
+			vault: {
+				getAbstractFileByPath(path: string) {
+					const basename = path.split("/").pop()?.replace(/\.md$/, "") ?? path;
+					return {
+						path,
+						extension: "md",
+						basename,
+						stat: {
+							ctime: path.includes("brand-new") ? 5_000 : 1_000,
+							mtime: 5_000,
+							size: 0,
+						},
+					};
+				},
+				getMarkdownFiles() {
+					return [
+						this.getAbstractFileByPath("Notes/older.md"),
+						this.getAbstractFileByPath("Notes/brand-new.md"),
+					];
+				},
+			},
+			metadataCache: {
+				getFileCache(file: { path: string }) {
+					if (file.path === "Notes/brand-new.md") {
+						return { frontmatter: { aliases: ["Fresh"] }, tags: [{ tag: "#new" }] };
+					}
+					return { frontmatter: undefined, tags: [{ tag: "#old" }] };
+				},
+			},
+		} as unknown as App;
+
+		const tool = createSearchNotesTool(app);
+		const result = await tool.invoke({ recentOnly: true });
+		const parsed: SearchToolResultPayload = JSON.parse(String(result));
+
+		expect(parsed.results[0]?.name).toBe("brand-new");
+		expect(parsed.results[0]?.tags).toEqual(["#new"]);
+		expect(parsed.results[0]?.matchBadges).toEqual(["recent"]);
+	});
+
 	it("uses the standalone lexical index for filter-only browse queries", async () => {
 		const results = await performSearch({} as App, "", "lexical", { tags: ["#beta"] });
 
@@ -285,6 +327,56 @@ describe("performSearch lexical startup behavior", () => {
 			"Lexical search is unavailable because the lexical search service is not ready",
 		);
 		expect(mockLexicalSearch).not.toHaveBeenCalled();
+	});
+
+	it("prefers numeric-leading title matches in hybrid ranking", async () => {
+		mockWaitForVectorStore.mockResolvedValue(true);
+		mockGetVectorStoreService.mockReturnValue({
+			semanticSearch: vi.fn().mockResolvedValue([
+				{ path: "Notes/semester-steering.md", name: "Semester Steering", score: 0.9 },
+				{ path: "Notes/9-semester.md", name: "9. Semester", score: 0.85 },
+			]),
+		});
+		mockLexicalSearch.mockResolvedValue([
+			{ path: "Notes/semester-steering.md", name: "Semester Steering", score: 14 },
+			{ path: "Notes/9-semester.md", name: "9. Semester", score: 13 },
+		]);
+
+		const results = await performSearch({} as App, "9 seme", "hybrid");
+
+		expect(results[0]?.name).toBe("9. Semester");
+		expect(results[1]?.name).toBe("Semester Steering");
+	});
+
+	it("prefers exact alias matches in hybrid ranking", async () => {
+		mockWaitForVectorStore.mockResolvedValue(true);
+		mockGetVectorStoreService.mockReturnValue({
+			semanticSearch: vi.fn().mockResolvedValue([
+				{ path: "Notes/launch.md", name: "Launch Overview", score: 0.92 },
+				{
+					path: "Notes/alias-fixture.md",
+					name: "Alias Fixture",
+					frontmatter: { aliases: ["Rocket Science"] },
+					score: 0.84,
+				},
+			]),
+		});
+		mockLexicalSearch.mockResolvedValue([
+			{ path: "Notes/launch.md", name: "Launch Overview", score: 18, matchBadges: ["content"] },
+			{
+				path: "Notes/alias-fixture.md",
+				name: "Alias Fixture",
+				frontmatter: { aliases: ["Rocket Science"] },
+				matchBadges: ["alias"],
+				matchExplanation: { source: "alias", text: "Alias: Rocket Science" },
+				score: 14,
+			},
+		]);
+
+		const results = await performSearch({} as App, "Rocket Science", "hybrid");
+
+		expect(results[0]?.name).toBe("Alias Fixture");
+		expect(results[0]?.matchBadges).toContain("alias");
 	});
 
 	it("returns structured JSON with tags, match badges, and match snippets", async () => {

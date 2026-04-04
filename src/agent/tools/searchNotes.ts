@@ -1,28 +1,24 @@
 import { tool } from "@langchain/core/tools";
-import { getAllTags } from "obsidian";
-import type { App, TFile } from "obsidian";
+import type { App } from "obsidian";
 import { z } from "zod";
-import type { RecentNoteEntry, SearchAlgorithm, SearchNotesSettings } from "../../types/plugin";
+import type { SearchAlgorithm, SearchNotesSettings } from "../../types/plugin";
 import { getLexicalSearchService, waitForLexicalSearch } from "../../search/LexicalSearchService";
+import {
+	annotateRecentResults,
+	applyRecentBoost,
+	buildRecentBoostMap,
+	getRecentNotes,
+	getRecentPathSet,
+} from "../../search/recentNotes";
+import { calculateAliasBoost, calculateTitleBoost } from "../../search/searchRanking";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
-import { matchesPathPrefix, normalizeVaultPath } from "../../utils/pathUtils";
-import { getVectorStoreService, type SearchFilter, waitForVectorStore } from "../../vectorstore";
+import { normalizeVaultPath } from "../../utils/pathUtils";
+import { getVectorStoreService, type SearchFilter, type SearchResult, waitForVectorStore } from "../../vectorstore";
 import type { SearchMatchBadge, SearchMatchExplanation } from "../../vectorstore/types";
 import { Logger } from "../../utils/logging";
 
-const RECENT_RANK_BOOST = 2.5;
-const RECENT_RANK_DECAY = 1.25;
-
-export interface SearchResult {
-	path: string;
-	name: string;
-	frontmatter?: Record<string, unknown>;
-	tags?: string[];
-	matchExplanation?: SearchMatchExplanation;
-	matchBadges?: SearchMatchBadge[];
-	score?: number;
-}
+export type { SearchResult } from "../../vectorstore/types";
 
 interface SearchToolResultItem {
 	rank: number;
@@ -70,27 +66,6 @@ function mergeBadges(...badgeSets: Array<SearchMatchBadge[] | undefined>): Searc
 	return merged.length > 0 ? merged : undefined;
 }
 
-function getCachedTags(cache: Parameters<typeof getAllTags>[0] | null | undefined): string[] {
-	if (!cache) {
-		return [];
-	}
-
-	return Array.from(new Set((getAllTags(cache) ?? []).filter((tag) => tag.length > 0)));
-}
-
-function isRecentNoteFile(file: unknown): file is Pick<TFile, "path" | "extension" | "basename"> {
-	return (
-		typeof file === "object" &&
-		file !== null &&
-		"path" in file &&
-		typeof file.path === "string" &&
-		"extension" in file &&
-		typeof file.extension === "string" &&
-		"basename" in file &&
-		typeof file.basename === "string"
-	);
-}
-
 function redactRestrictedMatchBadges(
 	badges: SearchMatchBadge[] | undefined,
 	privacyRestricted: boolean,
@@ -107,119 +82,6 @@ function redactRestrictedMatchBadges(
 	return visibleBadges.length > 0 ? visibleBadges : undefined;
 }
 
-function matchesSearchFilter(path: string, docTags: string[], filter?: SearchFilter): boolean {
-	if (filter?.pathPrefixes?.length) {
-		const matchesPath = filter.pathPrefixes.some((prefix) => matchesPathPrefix(path, prefix));
-		if (!matchesPath) {
-			return false;
-		}
-	}
-
-	if (filter?.tags?.length) {
-		const normalizedFilterTags = filter.tags.map((tag) => (tag.startsWith("#") ? tag : `#${tag}`));
-		const normalizedDocTags = new Set(docTags.map((tag) => (tag.startsWith("#") ? tag : `#${tag}`)));
-
-		if (filter.requireAllTags) {
-			return normalizedFilterTags.every((tag) => normalizedDocTags.has(tag));
-		}
-
-		return normalizedFilterTags.some((tag) => normalizedDocTags.has(tag));
-	}
-
-	return true;
-}
-
-function getRecentNoteBoost(recentIndex: number): number {
-	return Math.max(RECENT_RANK_BOOST - recentIndex * RECENT_RANK_DECAY, 0.25);
-}
-
-function addRecentBadge(result: SearchResult): SearchResult {
-	return {
-		...result,
-		matchBadges: mergeBadges(result.matchBadges, ["recent"]),
-	};
-}
-
-function applyRecentBoost(results: SearchResult[], recentNotes: RecentNoteEntry[]): SearchResult[] {
-	if (results.length === 0 || recentNotes.length === 0) {
-		return results;
-	}
-
-	const recentIndexByPath = new Map(recentNotes.map((entry, index) => [entry.path, index]));
-
-	return results
-		.map((result, index) => {
-			const recentIndex = recentIndexByPath.get(result.path);
-			const rank = index - (recentIndex === undefined ? 0 : getRecentNoteBoost(recentIndex));
-
-			return {
-				rank,
-				result: recentIndex === undefined ? result : addRecentBadge(result),
-			};
-		})
-		.sort((left, right) => left.rank - right.rank)
-		.map(({ result }) => result);
-}
-
-export function getRecentNotes(app: App, filter?: SearchFilter): SearchResult[] {
-	const pluginData = getData();
-	const results: SearchResult[] = [];
-
-	for (const [index, entry] of pluginData.recentNotes.entries()) {
-		const file = app.vault.getAbstractFileByPath(entry.path);
-		if (!isRecentNoteFile(file) || file.extension !== "md") {
-			continue;
-		}
-
-		const cache = app.metadataCache.getFileCache(file as TFile);
-		const docTags = getCachedTags(cache);
-		if (!matchesSearchFilter(file.path, docTags, filter)) {
-			continue;
-		}
-
-		results.push({
-			path: file.path,
-			name: file.basename,
-			frontmatter: cache?.frontmatter,
-			tags: docTags,
-			matchBadges: ["recent"],
-			score: getRecentNoteBoost(index),
-		});
-	}
-
-	return results;
-}
-
-/**
- * Calculate title boost based on how well query matches the note title.
- * Returns a boost factor between 0 and titleBoostMax.
- */
-function calculateTitleBoost(query: string, noteName: string, titleBoostMax: number): number {
-	const queryTerms = query
-		.toLowerCase()
-		.split(/\s+/)
-		.filter((term) => term.length > 2);
-	const titleLower = noteName.toLowerCase();
-
-	if (queryTerms.length === 0) return 0;
-
-	// Check for exact match (highest boost)
-	if (titleLower === query.toLowerCase()) {
-		return titleBoostMax;
-	}
-
-	// Check for title containing full query
-	if (titleLower.includes(query.toLowerCase())) {
-		return titleBoostMax * 0.8;
-	}
-
-	// Count how many query terms appear in title
-	const matchingTerms = queryTerms.filter((term) => titleLower.includes(term));
-	const matchRatio = matchingTerms.length / queryTerms.length;
-
-	return titleBoostMax * matchRatio * 0.6;
-}
-
 /**
  * Hybrid search combining semantic and lexical search using Reciprocal Rank Fusion.
  * Runs both searches in parallel and merges results.
@@ -227,6 +89,7 @@ function calculateTitleBoost(query: string, noteName: string, titleBoostMax: num
 async function hybridSearch(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
 	const k = 60; // RRF constant (standard value)
 	const titleBoostMax = 0.03; // Max title boost (roughly equivalent to being in top 3 in both searches)
+	const aliasBoostMax = 0.028;
 
 	// Run semantic and lexical search in parallel
 	const [semanticResults, lexicalResults] = await Promise.all([
@@ -273,7 +136,8 @@ async function hybridSearch(app: App, query: string, filter?: SearchFilter): Pro
 	// Apply title boost to all results
 	for (const entry of scoreMap.values()) {
 		const titleBoost = calculateTitleBoost(query, entry.result.name, titleBoostMax);
-		entry.score += titleBoost;
+		const aliasBoost = calculateAliasBoost(query, entry.result.frontmatter, aliasBoostMax);
+		entry.score += titleBoost + aliasBoost;
 	}
 
 	// Sort by combined RRF score and return
@@ -300,17 +164,7 @@ async function getLexicalResults(app: App, query: string, filter?: SearchFilter)
 		return [];
 	}
 
-	const results = await vectorStore.search(query, 100, filter);
-
-	return results.map((r) => ({
-		path: r.path,
-		name: r.name,
-		frontmatter: r.frontmatter,
-		tags: r.tags,
-		matchExplanation: r.matchExplanation,
-		matchBadges: r.matchBadges,
-		score: r.score,
-	}));
+	return vectorStore.search(query, 100, filter);
 }
 
 /**
@@ -334,17 +188,7 @@ async function embeddingsSearch(app: App, query: string, filter?: SearchFilter):
 		threshold = modelConfig?.similarityThreshold ?? 0;
 	}
 
-	const results = await vectorStore.semanticSearch(query, 100, threshold, filter);
-
-	return results.map((r) => ({
-		path: r.path,
-		name: r.name,
-		frontmatter: r.frontmatter,
-		tags: r.tags,
-		matchExplanation: r.matchExplanation,
-		matchBadges: r.matchBadges,
-		score: r.score,
-	}));
+	return vectorStore.semanticSearch(query, 100, threshold, filter);
 }
 
 /**
@@ -358,12 +202,11 @@ export async function performSearch(
 	filter?: SearchFilter,
 ): Promise<SearchResult[]> {
 	Logger.debug("[search_notes] Algorithm selected:", algorithm, "Filter:", filter);
-	const pluginData = getData();
 
 	// Handle filter-only queries (no search term)
 	if (!query.trim() && filter) {
 		const results = await browseWithFilter(filter);
-		return applyRecentBoost(results, pluginData.recentNotes);
+		return applyRecentBoost(results, buildRecentBoostMap(getRecentNotes(app, filter)));
 	}
 
 	// Require a search term if no filter
@@ -384,7 +227,7 @@ export async function performSearch(
 			break;
 	}
 
-	return applyRecentBoost(results, pluginData.recentNotes);
+	return annotateRecentResults(results, getRecentPathSet(app, filter));
 }
 
 /**
@@ -397,17 +240,7 @@ async function browseWithFilter(filter: SearchFilter): Promise<SearchResult[]> {
 		return [];
 	}
 
-	const results = await vectorStore.browse(100, filter);
-
-	return results.map((r) => ({
-		path: r.path,
-		name: r.name,
-		frontmatter: r.frontmatter,
-		tags: r.tags,
-		matchExplanation: r.matchExplanation,
-		matchBadges: r.matchBadges,
-		score: r.score,
-	}));
+	return vectorStore.browse(100, filter);
 }
 
 /**

@@ -7,15 +7,52 @@
  */
 
 import MiniSearch, { type SearchResult as MiniSearchResult } from "minisearch";
+import {
+	calculateAliasBoost,
+	calculatePathBoost,
+	calculateTagBoost,
+	calculateTitleBoost,
+	matchesLeadingTitlePrefix,
+	type TitleBoostScale,
+} from "../search/searchRanking";
+import {
+	extractNormalizedTokens,
+	isNumericSearchTerm,
+	normalizeSearchText,
+	tokenizeSearchText,
+} from "../search/searchTermUtils";
 import { Logger } from "../utils/logging";
 
 import { getDbName } from "./types";
 
+/**
+ * Lexical (BM25) title boost scale.
+ * Uses absolute score values tuned for BM25 result magnitudes.
+ */
+const LEXICAL_TITLE_SCALE: TitleBoostScale = {
+	exact: 300,
+	leadingPrefixNumeric: 4000,
+	leadingPrefix: 140,
+	startsWith: 70,
+	contains: 25,
+	numericAllTerms: 1200,
+	numericPartialTerms: 600,
+	allTerms: 24,
+	partialTermFactor: 12,
+};
+
+/** Lexical alias boost max (absolute). */
+const LEXICAL_ALIAS_MAX = 220;
+/** Lexical tag boost max (absolute). */
+const LEXICAL_TAG_MAX = 55;
+/** Lexical path-segment boost max (absolute). */
+const LEXICAL_PATH_MAX = 35;
+
 const DB_NAME_PREFIX = "s2b-minisearch";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const STORE_NAME = "index";
 const INDEX_KEY = "main";
-const STORAGE_SCHEMA_VERSION = 4;
+const STORAGE_SCHEMA_VERSION = 5;
 
 export interface LexicalSearchResult {
 	path: string;
@@ -51,6 +88,8 @@ export class MiniSearchService {
 	private isDirty = false;
 	private saveTimeout: ReturnType<typeof setTimeout> | null = null;
 	private documentPaths = new Set<string>();
+	private documentTitles = new Map<string, string>();
+	private documentAliases = new Map<string, string[]>();
 	private readonly dbName: string;
 
 	constructor(vaultId: string, indexId?: string) {
@@ -73,10 +112,7 @@ export class MiniSearchService {
 			},
 			// Simple tokenizer: split on whitespace/punctuation
 			tokenize: (text) => {
-				return text
-					.toLowerCase()
-					.split(/[\s\-_.,;:!?'"()\[\]{}<>]+/)
-					.filter((token) => token.length > 1);
+				return tokenizeSearchText(text);
 			},
 		});
 	}
@@ -134,9 +170,18 @@ export class MiniSearchService {
 						});
 						// Rebuild paths set
 						this.documentPaths.clear();
+						this.documentTitles.clear();
+						this.documentAliases.clear();
 						if (data.paths && Array.isArray(data.paths)) {
 							for (const path of data.paths) {
 								this.documentPaths.add(path);
+								const stored = this.index.getStoredFields(path) as
+									| { title?: string; aliases?: string }
+									| undefined;
+								if (stored?.title) {
+									this.documentTitles.set(path, stored.title);
+								}
+								this.documentAliases.set(path, this.parseStoredAliases(stored?.aliases));
 							}
 						}
 						Logger.log(`[MiniSearch] Loaded index with ${this.documentPaths.size} documents`);
@@ -244,6 +289,8 @@ export class MiniSearchService {
 
 		this.index.add(doc);
 		this.documentPaths.add(path);
+		this.documentTitles.set(path, title);
+		this.documentAliases.set(path, aliases);
 		this.scheduleSave();
 	}
 
@@ -255,6 +302,8 @@ export class MiniSearchService {
 		if (this.documentPaths.has(path)) {
 			this.index.discard(path);
 			this.documentPaths.delete(path);
+			this.documentTitles.delete(path);
+			this.documentAliases.delete(path);
 			this.scheduleSave();
 		}
 	}
@@ -279,6 +328,8 @@ export class MiniSearchService {
 	clear(): void {
 		this.index = this.createIndex();
 		this.documentPaths.clear();
+		this.documentTitles.clear();
+		this.documentAliases.clear();
 		this.scheduleSave();
 	}
 
@@ -298,8 +349,21 @@ export class MiniSearchService {
 			fuzzy: 0.2,
 			prefix: true,
 		});
+		const priorityResults = [...this.findPriorityTitleMatches(query), ...this.findPriorityAliasMatches(query)];
+		const combinedResults = new Map<string, MiniSearchResult>();
 
-		const rankedResults = results
+		for (const result of priorityResults) {
+			combinedResults.set(result.id, result);
+		}
+
+		for (const result of results) {
+			const existing = combinedResults.get(result.id);
+			if (!existing || result.score > existing.score) {
+				combinedResults.set(result.id, result);
+			}
+		}
+
+		const rankedResults = Array.from(combinedResults.values())
 			.map((result): RankedLexicalResult => {
 				const title =
 					(result as MiniSearchResult & { title?: string }).title ||
@@ -315,10 +379,10 @@ export class MiniSearchService {
 					result,
 					adjustedScore:
 						result.score +
-						this.calculateTitleBoost(query, title) +
-						this.calculateAliasBoost(query, aliases) +
-						this.calculateTagBoost(query, tags) +
-						this.calculatePathBoost(query, pathSegments),
+						calculateTitleBoost(query, title, LEXICAL_TITLE_SCALE) +
+						calculateAliasBoost(query, aliases, LEXICAL_ALIAS_MAX) +
+						calculateTagBoost(query, tags, LEXICAL_TAG_MAX) +
+						calculatePathBoost(query, pathSegments, LEXICAL_PATH_MAX),
 				};
 			})
 			.sort((left, right) => right.adjustedScore - left.adjustedScore);
@@ -336,135 +400,80 @@ export class MiniSearchService {
 		}));
 	}
 
-	private calculateTagBoost(query: string, tags: string[]): number {
-		const normalizedQuery = query.trim().toLowerCase();
-		if (!normalizedQuery || tags.length === 0) {
-			return 0;
+	private findPriorityTitleMatches(query: string): MiniSearchResult[] {
+		const queryTokens = extractNormalizedTokens(query);
+		if (queryTokens.length === 0 || !isNumericSearchTerm(queryTokens[0])) {
+			return [];
 		}
 
-		let bestBoost = 0;
-		for (const tag of tags) {
-			const normalizedTag = tag.replace(/^#/, "").trim().toLowerCase();
-			if (!normalizedTag) continue;
-
-			if (normalizedTag === normalizedQuery) {
-				bestBoost = Math.max(bestBoost, 55);
+		const results: MiniSearchResult[] = [];
+		for (const [path, title] of this.documentTitles) {
+			const titleTokens = tokenizeSearchText(title);
+			if (!matchesLeadingTitlePrefix(queryTokens, titleTokens)) {
 				continue;
 			}
 
-			if (normalizedTag.startsWith(normalizedQuery)) {
-				bestBoost = Math.max(bestBoost, 22);
-				continue;
-			}
+			const stored = this.index.getStoredFields(path) as
+				| {
+						path?: string;
+						title?: string;
+						aliases?: string;
+						tags?: string;
+						pathSegments?: string;
+						content?: string;
+				  }
+				| undefined;
 
-			if (normalizedTag.includes(normalizedQuery)) {
-				bestBoost = Math.max(bestBoost, 14);
-			}
+			results.push({
+				id: path,
+				score: 0,
+				...(stored ?? { title }),
+			} as MiniSearchResult);
 		}
 
-		return bestBoost;
+		return results.slice(0, 50);
 	}
 
-	private calculatePathBoost(query: string, pathSegments: string[]): number {
-		const normalizedQuery = query.trim().toLowerCase();
-		if (!normalizedQuery || pathSegments.length === 0) {
-			return 0;
+	private findPriorityAliasMatches(query: string): MiniSearchResult[] {
+		const normalizedQuery = normalizeSearchText(query);
+		if (!normalizedQuery || normalizedQuery.length < 2) {
+			return [];
 		}
 
-		let bestBoost = 0;
-		for (const segment of pathSegments) {
-			const normalizedSegment = segment.trim().toLowerCase();
-			if (!normalizedSegment) continue;
-
-			if (normalizedSegment === normalizedQuery) {
-				bestBoost = Math.max(bestBoost, 35);
+		const results: MiniSearchResult[] = [];
+		for (const [path, aliases] of this.documentAliases) {
+			if (
+				!aliases.some((alias) => {
+					const normalizedAlias = normalizeSearchText(alias);
+					return (
+						normalizedAlias === normalizedQuery ||
+						normalizedAlias.startsWith(normalizedQuery) ||
+						normalizedAlias.includes(normalizedQuery)
+					);
+				})
+			) {
 				continue;
 			}
 
-			if (normalizedSegment.startsWith(normalizedQuery)) {
-				bestBoost = Math.max(bestBoost, 16);
-				continue;
-			}
+			const stored = this.index.getStoredFields(path) as
+				| {
+						path?: string;
+						title?: string;
+						aliases?: string;
+						tags?: string;
+						pathSegments?: string;
+						content?: string;
+				  }
+				| undefined;
 
-			if (normalizedSegment.includes(normalizedQuery)) {
-				bestBoost = Math.max(bestBoost, 9);
-			}
+			results.push({
+				id: path,
+				score: 0,
+				...(stored ?? { title: this.documentTitles.get(path), aliases: aliases.join("\n") }),
+			} as MiniSearchResult);
 		}
 
-		return bestBoost;
-	}
-
-	private calculateAliasBoost(query: string, aliases: string[]): number {
-		const normalizedQuery = query.trim().toLowerCase();
-		if (!normalizedQuery || aliases.length === 0) {
-			return 0;
-		}
-
-		let bestBoost = 0;
-		for (const alias of aliases) {
-			const normalizedAlias = alias.trim().toLowerCase();
-			if (!normalizedAlias) continue;
-
-			if (normalizedAlias === normalizedQuery) {
-				bestBoost = Math.max(bestBoost, 70);
-				continue;
-			}
-
-			if (normalizedAlias.startsWith(normalizedQuery)) {
-				bestBoost = Math.max(bestBoost, 28);
-				continue;
-			}
-
-			if (normalizedAlias.includes(normalizedQuery)) {
-				bestBoost = Math.max(bestBoost, 18);
-			}
-		}
-
-		return bestBoost;
-	}
-
-	private calculateTitleBoost(query: string, title: string): number {
-		const normalizedQuery = query.trim().toLowerCase();
-		const normalizedTitle = title.trim().toLowerCase();
-		const queryTerms = this.extractQueryTerms(normalizedQuery);
-
-		if (!normalizedQuery || !normalizedTitle || queryTerms.length === 0) {
-			return 0;
-		}
-
-		if (normalizedTitle === normalizedQuery) {
-			return 100;
-		}
-
-		if (normalizedTitle.startsWith(normalizedQuery)) {
-			return 40;
-		}
-
-		if (normalizedTitle.includes(normalizedQuery)) {
-			return 25;
-		}
-
-		const matchingTerms = queryTerms.filter((term) => normalizedTitle.includes(term));
-		if (matchingTerms.length === 0) {
-			return 0;
-		}
-
-		if (matchingTerms.length === queryTerms.length) {
-			return 15;
-		}
-
-		return (matchingTerms.length / queryTerms.length) * 8;
-	}
-
-	private extractQueryTerms(query: string): string[] {
-		return Array.from(
-			new Set(
-				query
-					.split(/[\s\-_.,;:!?'"()\[\]{}<>]+/)
-					.map((term) => term.trim())
-					.filter((term) => term.length > 1),
-			),
-		);
+		return results.slice(0, 50);
 	}
 
 	private extractAliases(content: string): string[] {

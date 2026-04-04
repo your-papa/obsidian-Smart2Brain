@@ -65,11 +65,13 @@ function passesFilter(app: App, file: TFile, filter?: GraphFilter): boolean {
 		if (!inFolder) return false;
 	}
 
-	// Tag filter
+	// Tag filter (supports hierarchical tags: #WIN matches #WIN/2016)
 	if (filter.tags && filter.tags.length > 0) {
 		const cache = app.metadataCache.getFileCache(file);
 		const fileTags = cache ? (getAllTags(cache) ?? []) : [];
-		const hasTag = filter.tags.some((t) => fileTags.includes(t));
+		const hasTag = filter.tags.some((filterTag) =>
+			fileTags.some((docTag) => docTag === filterTag || docTag.startsWith(`${filterTag}/`)),
+		);
 		if (!hasTag) return false;
 	}
 
