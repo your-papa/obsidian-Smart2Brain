@@ -367,6 +367,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 	private glowAnimationId: number | null = null;
 	private borderEl: HTMLElement | null = null;
 	private filterChipsEl: HTMLElement | null = null;
+	private pendingSearch = false;
 
 	constructor(app: App) {
 		super(app);
@@ -776,6 +777,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 
 			if (!rawQuery.trim()) {
 				this.searchResults = [];
+				this.pendingSearch = false;
 				this.setSearching(false);
 				// @ts-ignore - updateSuggestions is a protected method
 				this.updateSuggestions();
@@ -797,6 +799,7 @@ export class SearchModal extends SuggestModal<SearchResult> {
 			// Skip if no query and no filter
 			if (!query.trim() && !effectiveFilter) {
 				this.searchResults = [];
+				this.pendingSearch = false;
 				this.setSearching(false);
 				// @ts-ignore - updateSuggestions is a protected method
 				this.updateSuggestions();
@@ -809,12 +812,14 @@ export class SearchModal extends SuggestModal<SearchResult> {
 				if (rawQuery === this.currentQuery && !this.isClosed) {
 					this.searchResults = results.slice(0, 20);
 					this.lastSearchedQuery = rawQuery;
+					this.pendingSearch = false;
 					// @ts-ignore - updateSuggestions is a protected method
 					this.updateSuggestions();
 				}
 			} catch (error) {
 				Logger.error("[SearchModal] Search failed:", error);
 				this.searchResults = [];
+				this.pendingSearch = false;
 			} finally {
 				this.setSearching(false);
 			}
@@ -831,15 +836,25 @@ export class SearchModal extends SuggestModal<SearchResult> {
 		const parsed = parseQueryWithFilters(query);
 		this.renderFilterChips(parsed);
 
-		// Only trigger search if query changed
-		if (query.trim() && query !== this.lastSearchedQuery) {
-			this.debouncedSearch(query);
-		} else if (!query.trim()) {
+		if (!query.trim()) {
+			this.pendingSearch = false;
 			this.searchResults = getRecentNotes(this.app).slice(0, 20);
 			this.lastSearchedQuery = "";
+			return this.searchResults;
 		}
 
-		return this.searchResults;
+		// Query matches last search — results are current, render them
+		if (query === this.lastSearchedQuery) {
+			this.pendingSearch = false;
+			return this.searchResults;
+		}
+
+		// Query changed — kick off debounced search and return empty to avoid
+		// re-rendering up to 20 stale result DOM trees on every keystroke.
+		// Results will appear once the debounced search calls updateSuggestions().
+		this.pendingSearch = true;
+		this.debouncedSearch(query);
+		return [];
 	}
 
 	/**
@@ -986,8 +1001,14 @@ export class SearchModal extends SuggestModal<SearchResult> {
 	 * Empty state message
 	 */
 	onNoSuggestion(): void {
-		// Clear previous empty state messages
 		this.resultContainerEl.empty();
+
+		// While debounce is pending, show nothing (keeps previous DOM or blank).
+		// This avoids flashing "No notes found" between keystrokes.
+		if (this.pendingSearch) {
+			return;
+		}
+
 		const emptyEl = this.resultContainerEl.createDiv({ cls: "s2b-search-empty" });
 		if (this.isSearching && this.semanticEnabled) {
 			emptyEl.setText("Searching...");
