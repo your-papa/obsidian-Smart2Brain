@@ -185,31 +185,12 @@ export interface IndexingReport {
 /** Current schema version for the serialized index */
 export const INDEX_VERSION = 1;
 
-/** Debounce delay for file sync (5 seconds in ms) */
-export const SYNC_DEBOUNCE_MS = 5 * 1000;
-
-/** Maximum delay before a save is forced, even if changes keep coming (30 seconds in ms) */
-export const SYNC_MAX_DELAY_MS = 30 * 1000;
-
 /**
  * Sanitize a provider:model string into a filesystem/IndexedDB-safe identifier.
  * Replaces special characters with underscores while preserving readability.
  */
 export function sanitizeIndexId(provider: string, model: string): string {
 	return `${provider}_${model}`.replace(/[^a-zA-Z0-9._-]/g, "_");
-}
-
-/**
- * Get the index file path for a specific index ID.
- * @param indexId The "provider:model" composite key
- * @returns Path relative to the plugin data dir
- */
-export function getIndexFilePath(indexId: string): string {
-	const colonIdx = indexId.indexOf(":");
-	const provider = colonIdx >= 0 ? indexId.slice(0, colonIdx) : indexId;
-	const model = colonIdx >= 0 ? indexId.slice(colonIdx + 1) : "";
-	const sanitized = sanitizeIndexId(provider, model);
-	return `vectorstore/${sanitized}/index.msgpack`;
 }
 
 /**

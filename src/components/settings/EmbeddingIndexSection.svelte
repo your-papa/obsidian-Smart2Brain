@@ -27,7 +27,6 @@ const plugin = getPlugin();
 
 const indexId = $derived(purpose === "search" ? pluginData.searchEmbedIndex : pluginData.graphEmbedIndex);
 const indexConfig = $derived(indexId ? pluginData.getEmbeddingIndex(indexId) : null);
-let storageSizes = $state<Record<string, number>>({});
 // Index progress
 let indexProgress = $state<IndexingProgress>({
 	isIndexing: false,
@@ -43,21 +42,6 @@ const documentCount = $derived(indexConfig?.documentCount ?? 0);
 const indexes = $derived(pluginData.embeddingIndexes);
 
 let unsubscribeProgress: (() => void) | null = null;
-
-async function refreshStorageSizes() {
-	if (!isVectorStoreInitialized()) {
-		storageSizes = {};
-		return;
-	}
-
-	const service = getVectorStoreService();
-	const nextStorageSizes: Record<string, number> = {};
-	for (const entry of indexes) {
-		nextStorageSizes[entry.id] = await service.getStorageSize(entry.id);
-	}
-
-	storageSizes = nextStorageSizes;
-}
 
 function subscribeToIndex(id: string | null) {
 	unsubscribeProgress?.();
@@ -85,11 +69,6 @@ function subscribeToIndex(id: string | null) {
 $effect(() => {
 	const id = indexId ?? null;
 	untrack(() => subscribeToIndex(id));
-});
-
-$effect(() => {
-	indexes;
-	void untrack(() => refreshStorageSizes());
 });
 
 onDestroy(() => {
@@ -170,17 +149,24 @@ function cancelIndexing() {
 	}
 }
 
+async function exportIndex(targetIndexId: string) {
+	if (!isVectorStoreInitialized()) return;
+	await getVectorStoreService().exportIndex(targetIndexId);
+}
+
+async function importFromFile() {
+	if (!isVectorStoreInitialized()) return;
+	const service = getVectorStoreService();
+	const indexId = await service.importIndex();
+	if (indexId) {
+		const sep = indexId.indexOf(":");
+		pluginData.setEmbedIndex(purpose, indexId.slice(0, sep), indexId.slice(sep + 1));
+	}
+}
+
 function formatDate(timestamp: number | null): string {
 	if (!timestamp) return "Never built";
 	return new Date(timestamp).toLocaleDateString();
-}
-
-function formatSize(bytes: number): string {
-	if (bytes === 0) return "0 B";
-	const units = ["B", "KB", "MB", "GB"];
-	const i = Math.floor(Math.log(bytes) / Math.log(1024));
-	const value = bytes / 1024 ** i;
-	return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 function usedBy(targetIndexId: string): string[] {
@@ -229,6 +215,7 @@ function getSelectionGroupLabel(): string {
         </div>
         <Button buttonText="Cancel" onClick={cancelIndexing} />
       {:else}
+        <IconButton icon="upload" label="Import index from file" onclick={() => void importFromFile()} />
         <Button buttonText="Add Index" cta={true} onClick={openAddIndexModal} />
       {/if}
     </div>
@@ -253,7 +240,6 @@ function getSelectionGroupLabel(): string {
           desc={[
             `${entry.documentCount} notes indexed`,
             `batch ${entryBatchSize}`,
-            storageSizes[entry.id] !== undefined ? formatSize(storageSizes[entry.id]) : null,
           ]
             .filter(Boolean)
             .join(" · ")}
@@ -292,6 +278,11 @@ function getSelectionGroupLabel(): string {
                 icon="list"
                 label="View indexing report"
                 onclick={() => openIndexingReport(entry.id)}
+              />
+              <IconButton
+                icon="download"
+                label="Export index to file"
+                onclick={() => void exportIndex(entry.id)}
               />
             {/if}
             <IconButton

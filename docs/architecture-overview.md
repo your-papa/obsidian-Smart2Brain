@@ -173,9 +173,6 @@ Key components:
   - Supports multiple indexes keyed by embedding model (search index and graph index can differ).
   - Runs provider-independent lexical index (`MiniSearch`) even without embedding model configuration.
 
-- `FileSyncManager.ts`
-  - Syncs in-memory/indexed data to plugin-managed files.
-
 - `HNSWVectorStore.ts`, `hnswWorker.ts`, `HNSWWorkerProxy.ts`
   - Approximate nearest-neighbor semantic retrieval.
 

@@ -3,10 +3,11 @@
  *
  * Main orchestration service for the embedding-based vector store.
  * Manages multiple indexes (one per embedding model), indexing, search,
- * and synchronization between IndexedDB and file storage.
+ * and export/import via native file dialogs.
  */
 
 import { Notice, TFile, getAllTags } from "obsidian";
+import { encode, decode } from "@msgpack/msgpack";
 import type { EmbeddingsInterface } from "@langchain/core/embeddings";
 import type SecondBrainPlugin from "../main";
 import { hydrateEmbeddingModel } from "../lib/modelMetadataNormalizer";
@@ -17,11 +18,10 @@ import { getData } from "../stores/dataStore.svelte";
 import { getRegistry } from "../providers/registry";
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "./batchSize";
 import { createVectorStore } from "./index";
-import { FileSyncManager } from "./FileSyncManager";
 import {
 	INDEX_VERSION,
 	getDbName,
-	getIndexFilePath,
+	sanitizeIndexId,
 	type DefaultEmbedModel,
 	type DocumentVector,
 	type IndexMetadata,
@@ -34,7 +34,6 @@ import {
 	type VectorSearchResult,
 	type VectorStore,
 } from "./types";
-import { toFloat32Array } from "./similarity";
 import { Logger } from "../utils/logging";
 import {
 	getIndexableVaultFiles,
@@ -43,6 +42,84 @@ import {
 	readIndexableContent,
 } from "../utils/fileFiltering";
 import { matchesPathPrefix } from "../utils/pathUtils";
+import { toFloat32Array } from "./similarity";
+
+// ── Electron dialog helpers (Obsidian desktop) ────────────────────────
+
+interface DialogFilter {
+	name: string;
+	extensions: string[];
+}
+
+/**
+ * Require a Node.js built-in module from Electron's renderer process.
+ * Works in Obsidian desktop where `require` is exposed on `window`.
+ */
+function requireNodeModule<T>(id: string): T {
+	const globalWithRequire = globalThis as typeof globalThis & {
+		require?: (id: string) => unknown;
+	};
+	if (typeof globalWithRequire.require !== "function") {
+		throw new Error(`Node module "${id}" is not available in this environment.`);
+	}
+	return globalWithRequire.require(id) as T;
+}
+
+/**
+ * Show a native "Save As" dialog and return the chosen file path, or null if
+ * the user cancelled.
+ */
+function showSaveDialog(options: {
+	title?: string;
+	defaultPath?: string;
+	filters?: DialogFilter[];
+}): string | null {
+	const { remote } = requireNodeModule<{
+		remote: {
+			dialog: {
+				showSaveDialogSync: (options: {
+					title?: string;
+					defaultPath?: string;
+					filters?: DialogFilter[];
+				}) => string | undefined;
+			};
+		};
+	}>("electron");
+	const result = remote.dialog.showSaveDialogSync({
+		title: options.title,
+		defaultPath: options.defaultPath,
+		filters: options.filters,
+	});
+	return result ?? null;
+}
+
+/**
+ * Show a native "Open File" dialog and return the chosen file paths, or null
+ * if the user cancelled.
+ */
+function showOpenDialog(options: {
+	title?: string;
+	filters?: DialogFilter[];
+	properties?: string[];
+}): string[] | null {
+	const { remote } = requireNodeModule<{
+		remote: {
+			dialog: {
+				showOpenDialogSync: (options: {
+					title?: string;
+					filters?: DialogFilter[];
+					properties?: string[];
+				}) => string[] | undefined;
+			};
+		};
+	}>("electron");
+	const result = remote.dialog.showOpenDialogSync({
+		title: options.title,
+		filters: options.filters,
+		properties: options.properties,
+	});
+	return result ?? null;
+}
 
 /** Default max input tokens for embedding models when metadata is unavailable */
 const DEFAULT_EMBED_MAX_INPUT_TOKENS = 8191;
@@ -115,7 +192,6 @@ export async function waitForVectorStoreIndex(indexId?: string | null): Promise<
 interface IndexInstance {
 	indexId: string;
 	store: VectorStore;
-	syncManager: FileSyncManager;
 	embeddings: EmbeddingsInterface | null;
 	currentProviderId: string | null;
 	currentModelId: string | null;
@@ -129,40 +205,6 @@ interface IndexInstance {
 		maxInputTokens: number;
 	} | null;
 	report: IndexingReport | null;
-}
-
-export interface IndexRestoreSourceSelectionInput {
-	runtime: Pick<IndexMetadata, "providerId" | "modelId" | "documentCount" | "lastUpdated"> | null;
-	file: Pick<SerializedIndex, "providerId" | "modelId" | "documents" | "lastUpdated"> | null;
-	expectedProviderId: string;
-	expectedModelId: string;
-}
-
-export function selectIndexRestoreSource({
-	runtime,
-	file,
-	expectedProviderId,
-	expectedModelId,
-}: IndexRestoreSourceSelectionInput): "runtime" | "file" | "none" {
-	const runtimeMatches =
-		runtime !== null &&
-		runtime.documentCount > 0 &&
-		runtime.providerId === expectedProviderId &&
-		runtime.modelId === expectedModelId;
-	const fileMatches =
-		file !== null &&
-		file.providerId === expectedProviderId &&
-		file.modelId === expectedModelId &&
-		file.documents.length > 0;
-
-	if (runtimeMatches && !fileMatches) return "runtime";
-	if (fileMatches && !runtimeMatches) return "file";
-	if (!runtimeMatches && !fileMatches) return "none";
-
-	if ((runtime?.lastUpdated ?? 0) > (file?.lastUpdated ?? 0)) return "runtime";
-	if ((runtime?.lastUpdated ?? 0) < (file?.lastUpdated ?? 0)) return "file";
-
-	return (runtime?.documentCount ?? 0) >= (file?.documents.length ?? 0) ? "runtime" : "file";
 }
 
 export interface ValidationProgressCountsInput {
@@ -195,18 +237,14 @@ export class VectorStoreService {
 	private readonly plugin: SecondBrainPlugin;
 	private readonly instances: Map<string, IndexInstance> = new Map();
 	private readonly initializingInstances = new Map<string, Promise<IndexInstance>>();
-	private readonly backgroundSnapshotSaves = new Map<string, Promise<void>>();
 	private readonly progressListeners = new Map<string, Set<(progress: IndexingProgress) => void>>();
 	private readonly modifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private isInitialized = false;
 	private readonly vaultId: string;
-	private readonly configDir: string;
 
 	private constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
 		this.vaultId = (plugin.app as unknown as { appId: string }).appId;
-		const vault = plugin.app.vault as { configDir?: string };
-		this.configDir = vault.configDir || ".obsidian";
 	}
 
 	/** Promise tracking initialization, awaited by cleanup to avoid closing mid-init. */
@@ -217,13 +255,10 @@ export class VectorStoreService {
 	 */
 	private createInstance(indexId: string): IndexInstance {
 		const store = createVectorStore(this.vaultId, indexId);
-		const filePath = `${this.configDir}/plugins/${this.plugin.manifest.id}/data/${getIndexFilePath(indexId)}`;
-		const syncManager = new FileSyncManager(this.plugin.app.vault.adapter, filePath);
 
 		return {
 			indexId,
 			store,
-			syncManager,
 			embeddings: null,
 			currentProviderId: null,
 			currentModelId: null,
@@ -355,16 +390,12 @@ export class VectorStoreService {
 			const initStart = performance.now();
 			const inst = this.createInstance(indexId);
 
-			// Open databases
+			// Open IndexedDB — this is the sole persistence layer
 			await inst.store.open();
 
 			const [provider = "", ...modelParts] = indexId.split(":");
 			const model = modelParts.join(":");
 
-			// Check IDB metadata first — this is cheap (~50ms).
-			// If runtime already matches the expected provider/model and has documents,
-			// we can skip the expensive loadFromFile() call entirely (avoids deserializing
-			// a potentially 40-100MB+ MessagePack file on the main thread).
 			const runtimeMeta = await inst.store.getMetadata();
 			const runtimeMatches =
 				runtimeMeta !== null &&
@@ -372,67 +403,24 @@ export class VectorStoreService {
 				runtimeMeta.providerId === provider &&
 				runtimeMeta.modelId === model;
 
-			let serialized: SerializedIndex | null = null;
-			if (!runtimeMatches) {
-				serialized = await inst.syncManager.loadFromFile();
-			}
-
-			const restoreSource = selectIndexRestoreSource({
-				runtime: runtimeMeta,
-				file: serialized,
-				expectedProviderId: provider,
-				expectedModelId: model,
-			});
-
-			if (restoreSource === "file" && serialized) {
-				const docs: DocumentVector[] = serialized.documents.map((d) => ({
-					id: d.id,
-					path: d.path,
-					mtime: d.mtime,
-					checksum: d.checksum,
-					vector: toFloat32Array(d.vector),
-					chunkIndex: d.chunkIndex,
-				}));
-
-				await inst.store.clear();
-				await inst.store.bulkPut(docs);
-				await inst.store.setMetadata(serialized.providerId, serialized.modelId, serialized.version);
-
-				inst.currentProviderId = serialized.providerId;
-				inst.currentModelId = serialized.modelId;
-
-				Logger.log(
-					`[VectorStore] Restored ${docs.length} documents for index ${indexId} from file in ${(performance.now() - initStart).toFixed(1)}ms`,
-				);
-
-				this.plugin.app.workspace.onLayoutReady(() => {
-					this.validateIndexOnStartup(inst);
-				});
-			} else if (restoreSource === "runtime" && runtimeMeta) {
+			if (runtimeMatches && runtimeMeta) {
 				inst.currentProviderId = runtimeMeta.providerId;
 				inst.currentModelId = runtimeMeta.modelId;
 
 				Logger.log(
-					`[VectorStore] Kept newer runtime index for ${indexId} (${runtimeMeta.documentCount} documents) and refreshed the file snapshot`,
+					`[VectorStore] Loaded index for ${indexId} from IDB (${runtimeMeta.documentCount} documents)`,
 				);
-
-				this.saveInstanceToFileInBackground(inst, indexId, runtimeMeta.documentCount);
 
 				this.plugin.app.workspace.onLayoutReady(() => {
 					this.validateIndexOnStartup(inst);
 				});
-			} else if (
-				(serialized && (serialized.providerId !== provider || serialized.modelId !== model)) ||
-				(runtimeMeta && (runtimeMeta.providerId !== provider || runtimeMeta.modelId !== model))
-			) {
+			} else if (runtimeMeta && (runtimeMeta.providerId !== provider || runtimeMeta.modelId !== model)) {
 				Logger.log(`[VectorStore] Model mismatch for ${indexId}, index will be rebuilt on next use`);
 				await inst.store.clear();
 			}
 
 			this.instances.set(indexId, inst);
-			Logger.info(
-				`[VectorStore] Init ${indexId}: ${Math.round(performance.now() - initStart)}ms (source=${restoreSource})`,
-			);
+			Logger.info(`[VectorStore] Init ${indexId}: ${Math.round(performance.now() - initStart)}ms`);
 			return inst;
 		})();
 
@@ -442,25 +430,6 @@ export class VectorStoreService {
 		} finally {
 			this.initializingInstances.delete(indexId);
 		}
-	}
-
-	private saveInstanceToFileInBackground(inst: IndexInstance, indexId: string, documentCount: number): void {
-		if (this.backgroundSnapshotSaves.has(indexId)) {
-			return;
-		}
-
-		const savePromise = this.saveInstanceToFile(inst)
-			.then(() => {
-				Logger.debug(`[VectorStore] Refreshed snapshot for ${indexId} (${documentCount} docs)`);
-			})
-			.catch((error) => {
-				Logger.error(`[VectorStore] Background snapshot refresh failed for ${indexId}:`, error);
-			})
-			.finally(() => {
-				this.backgroundSnapshotSaves.delete(indexId);
-			});
-
-		this.backgroundSnapshotSaves.set(indexId, savePromise);
 	}
 
 	/**
@@ -481,19 +450,6 @@ export class VectorStoreService {
 		const indexId = purpose === "search" ? data.searchEmbedIndex : data.graphEmbedIndex;
 		if (!indexId) return null;
 		return this.getOrCreateInstance(indexId);
-	}
-
-	private async persistIndexCheckpoint(
-		inst: IndexInstance,
-		indexedCount: number,
-		lastPersistedCount: number,
-	): Promise<number> {
-		if (indexedCount === 0 || indexedCount === lastPersistedCount) {
-			return lastPersistedCount;
-		}
-
-		await this.saveInstanceToFile(inst);
-		return indexedCount;
 	}
 
 	private async getEmbeddingMaxInputTokens(
@@ -728,7 +684,6 @@ export class VectorStoreService {
 					validPendingFileCount: validFiles.length,
 				});
 				let indexed = 0;
-				let lastPersistedIndexed = 0;
 				const showNotice = validFiles.length > 5;
 				let notice: Notice | null = null;
 				if (showNotice) {
@@ -786,7 +741,6 @@ export class VectorStoreService {
 						}
 						indexed += batch.length;
 						this.updateInstanceProgress(inst, { indexed: startingIndexedCount + batchEnd });
-						lastPersistedIndexed = await this.persistIndexCheckpoint(inst, indexed, lastPersistedIndexed);
 						if (notice) this.updateNotice(notice, inst.progress);
 					} catch (error) {
 						Logger.error("[VectorStore] Batch validation indexing failed:", error);
@@ -818,7 +772,6 @@ export class VectorStoreService {
 								this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
 							}
 						}
-						lastPersistedIndexed = await this.persistIndexCheckpoint(inst, indexed, lastPersistedIndexed);
 						if (notice) this.updateNotice(notice, inst.progress);
 					}
 				}
@@ -837,10 +790,6 @@ export class VectorStoreService {
 				this.updateInstanceProgress(inst, { isIndexing: false, currentFile: null });
 				Logger.log(`[VectorStore] Indexed ${indexed} missing/stale files for ${inst.indexId}`);
 			} // end else (validFiles.length > 0)
-		}
-
-		if (didMutateIndex) {
-			await this.saveInstanceToFile(inst);
 		}
 
 		// Sync document count to pluginData for reactive UI updates
@@ -954,7 +903,6 @@ export class VectorStoreService {
 				continue;
 			}
 			await inst.store.remove(file.path);
-			this.scheduleInstanceSave(inst);
 			this.notifyStatsChanged(inst);
 		}
 	}
@@ -972,9 +920,6 @@ export class VectorStoreService {
 			await inst.store.remove(oldPath);
 			if (inst.embeddings) {
 				await this.indexDocumentForInstance(inst, file);
-			} else {
-				// Even if we can't re-index (no embeddings), persist the removal
-				this.scheduleInstanceSave(inst);
 			}
 			this.notifyStatsChanged(inst);
 		}
@@ -1076,7 +1021,6 @@ export class VectorStoreService {
 
 		const notice = new Notice("", 0);
 		this.updateNotice(notice, inst.progress);
-		let lastPersistedIndexed = 0;
 
 		try {
 			await inst.store.setMetadata(model.provider, model.model, INDEX_VERSION);
@@ -1159,11 +1103,6 @@ export class VectorStoreService {
 
 					this.updateInstanceProgress(inst, { indexed: batchEnd });
 					this.updateNotice(notice, inst.progress);
-					lastPersistedIndexed = await this.persistIndexCheckpoint(
-						inst,
-						indexedFiles.length,
-						lastPersistedIndexed,
-					);
 				} catch (error) {
 					Logger.warn(
 						`[VectorStore] Batch ${Math.floor(i / batchSize) + 1} failed, falling back to sequential:`,
@@ -1199,18 +1138,11 @@ export class VectorStoreService {
 						}
 					}
 					this.updateNotice(notice, inst.progress);
-					lastPersistedIndexed = await this.persistIndexCheckpoint(
-						inst,
-						indexedFiles.length,
-						lastPersistedIndexed,
-					);
 				}
 			}
 
 			// Save the indexing report
 			inst.report = { indexedFiles, skippedFiles, timestamp: Date.now() };
-
-			await this.saveInstanceToFile(inst);
 
 			// Update cached stats in plugin data using actual store count
 			const actualCount = await inst.store.count();
@@ -1335,7 +1267,6 @@ export class VectorStoreService {
 			};
 
 			await inst.store.upsert(doc);
-			this.scheduleInstanceSave(inst);
 
 			Logger.log(`[VectorStore] Indexed: ${file.path} (${inst.indexId})`);
 		} catch (error) {
@@ -1439,31 +1370,6 @@ export class VectorStoreService {
 	}
 
 	/**
-	 * Schedule a save to file with debounce for a specific instance.
-	 */
-	private scheduleInstanceSave(inst: IndexInstance): void {
-		inst.syncManager.scheduleSave(async () => {
-			const docs = await inst.store.getAllSerialized();
-			return FileSyncManager.createIndex(docs, inst.currentProviderId ?? "", inst.currentModelId ?? "");
-		});
-	}
-
-	/**
-	 * Immediately save a specific instance to file.
-	 */
-	private async saveInstanceToFile(inst: IndexInstance): Promise<void> {
-		const docs = await inst.store.getAllSerialized();
-		const metadata = await inst.store.getMetadata();
-		const index = FileSyncManager.createIndex(
-			docs,
-			inst.currentProviderId ?? "",
-			inst.currentModelId ?? "",
-			metadata?.lastUpdated,
-		);
-		await inst.syncManager.saveToFile(index);
-	}
-
-	/**
 	 * Simple hash function for content change detection.
 	 */
 	private hashContent(content: string): string {
@@ -1520,20 +1426,6 @@ export class VectorStoreService {
 			modelId: metadata?.modelId ?? inst.currentModelId,
 			isReady,
 		};
-	}
-
-	/**
-	 * Get the storage size (in bytes) for a specific index's msgpack file.
-	 * Returns 0 if the file doesn't exist.
-	 */
-	async getStorageSize(indexId: string): Promise<number> {
-		const filePath = `${this.configDir}/plugins/${this.plugin.manifest.id}/data/${getIndexFilePath(indexId)}`;
-		try {
-			const stat = await this.plugin.app.vault.adapter.stat(filePath);
-			return stat?.size ?? 0;
-		} catch {
-			return 0;
-		}
 	}
 
 	/**
@@ -1703,12 +1595,126 @@ export class VectorStoreService {
 	}
 
 	/**
-	 * Delete an index completely: clear IndexedDB, delete msgpack file, remove instance.
+	 * Export an index to a user-chosen file via the system save dialog.
+	 * Opens a native file picker and writes the serialized index as MessagePack.
+	 *
+	 * @returns true if the export succeeded, false if cancelled or empty.
+	 */
+	async exportIndex(indexId: string): Promise<boolean> {
+		const inst = await this.getOrCreateInstance(indexId);
+		const docs = await inst.store.getAllSerialized();
+		if (docs.length === 0) {
+			new Notice("Index is empty — nothing to export.");
+			return false;
+		}
+
+		const filePath = showSaveDialog({
+			title: "Export Embedding Index",
+			defaultPath: `s2b-embeddings-${sanitizeIndexId(...this.splitIndexId(indexId))}.msgpack`,
+			filters: [{ name: "MessagePack", extensions: ["msgpack"] }],
+		});
+		if (!filePath) return false; // User cancelled
+
+		const [provider, model] = this.splitIndexId(indexId);
+		const serialized: SerializedIndex = {
+			version: INDEX_VERSION,
+			providerId: provider,
+			modelId: model,
+			documents: docs,
+			lastUpdated: Date.now(),
+		};
+
+		try {
+			const encoded = encode(serialized);
+			const fs = requireNodeModule<typeof import("node:fs")>("fs");
+			fs.writeFileSync(filePath, new Uint8Array(encoded.buffer, encoded.byteOffset, encoded.byteLength));
+			Logger.log(`[VectorStore] Exported ${docs.length} documents to ${filePath}`);
+			new Notice(`Exported ${docs.length} embeddings.`);
+			return true;
+		} catch (error) {
+			Logger.error(`[VectorStore] Export failed:`, error);
+			new Notice("Failed to export index.");
+			return false;
+		}
+	}
+
+	/**
+	 * Import an index from a user-chosen MessagePack file via the system open dialog.
+	 * Reads provider/model metadata from the file, registers the index, and
+	 * bulk-loads embeddings into IDB.
+	 *
+	 * @returns The index ID that was imported, or null on failure/cancel.
+	 */
+	async importIndex(): Promise<string | null> {
+		const filePaths = showOpenDialog({
+			title: "Import Embedding Index",
+			filters: [{ name: "MessagePack", extensions: ["msgpack"] }],
+			properties: ["openFile"],
+		});
+		if (!filePaths || filePaths.length === 0) return null; // User cancelled
+
+		try {
+			const fs = requireNodeModule<typeof import("node:fs")>("fs");
+			const raw = fs.readFileSync(filePaths[0]);
+			const decoded = decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)) as SerializedIndex;
+
+			if (decoded.version !== INDEX_VERSION) {
+				new Notice(
+					`Export file version mismatch (expected ${INDEX_VERSION}, got ${decoded.version}). Re-index instead.`,
+				);
+				return null;
+			}
+
+			const { providerId: provider, modelId: model } = decoded;
+			if (!provider || !model) {
+				new Notice("Export file is missing provider or model metadata.");
+				return null;
+			}
+
+			const indexId = `${provider}:${model}`;
+			const inst = await this.getOrCreateInstance(indexId);
+			await inst.store.clear();
+
+			const docs: DocumentVector[] = decoded.documents.map((d) => ({
+				id: d.id,
+				path: d.path,
+				mtime: d.mtime,
+				checksum: d.checksum,
+				vector: toFloat32Array(d.vector),
+				chunkIndex: d.chunkIndex,
+			}));
+
+			await inst.store.bulkPut(docs);
+			await inst.store.setMetadata(provider, model, INDEX_VERSION);
+			inst.currentProviderId = provider;
+			inst.currentModelId = model;
+
+			await this.notifyStatsChanged(inst);
+
+			Logger.log(`[VectorStore] Imported ${docs.length} documents for ${indexId}`);
+			new Notice(`Imported ${docs.length} embeddings (${model}).`);
+			return indexId;
+		} catch (error) {
+			Logger.error(`[VectorStore] Failed to import index:`, error);
+			new Notice("Failed to import index. The file may be corrupted.");
+			return null;
+		}
+	}
+
+	/**
+	 * Split an indexId ("provider:model") into [provider, model].
+	 */
+	private splitIndexId(indexId: string): [string, string] {
+		const [provider = "", ...modelParts] = indexId.split(":");
+		return [provider, modelParts.join(":")];
+	}
+
+	/**
+	 * Delete an index completely: clear IndexedDB and remove instance.
 	 */
 	async deleteIndex(indexId: string): Promise<void> {
 		const inst = this.instances.get(indexId);
 		if (inst) {
-			await inst.syncManager.flush();
 			await inst.store.clear();
 			await inst.store.close();
 			this.instances.delete(indexId);
@@ -1721,19 +1727,6 @@ export class VectorStoreService {
 			indexedDB.deleteDatabase(`${hnswDbName}-hnsw-index`);
 		} catch (error) {
 			Logger.error(`[VectorStore] Failed to delete IndexedDB databases for ${indexId}:`, error);
-		}
-
-		// Delete the index directory (contains msgpack file)
-		const dataDir = `${this.configDir}/plugins/${this.plugin.manifest.id}/data`;
-		const indexFilePath = getIndexFilePath(indexId);
-		const indexDir = indexFilePath.replace(/\/[^/]+$/, "");
-		const dirPath = `${dataDir}/${indexDir}`;
-		try {
-			if (await this.plugin.app.vault.adapter.exists(dirPath)) {
-				await this.plugin.app.vault.adapter.rmdir(dirPath, true);
-			}
-		} catch (error) {
-			Logger.error(`[VectorStore] Failed to delete index directory for ${indexId}:`, error);
 		}
 
 		// Remove from plugin data
@@ -1753,11 +1746,7 @@ export class VectorStoreService {
 			if (this.initPromise) {
 				await this.initPromise.catch(() => {});
 			}
-			if (this.backgroundSnapshotSaves.size > 0) {
-				await Promise.allSettled(this.backgroundSnapshotSaves.values());
-			}
 			for (const inst of this.instances.values()) {
-				await inst.syncManager.flush();
 				await inst.store.close();
 			}
 			this.instances.clear();
