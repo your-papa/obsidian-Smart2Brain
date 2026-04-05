@@ -32,7 +32,7 @@ export type {
 	VectorStore,
 } from "./types";
 
-export { sanitizeIndexId, getIndexFilePath, getDbName } from "./types";
+export { sanitizeIndexId, getDbName } from "./types";
 
 export { cosineSimilarity, normalize, dotProduct } from "./similarity";
 

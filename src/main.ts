@@ -150,12 +150,6 @@ export default class SecondBrainPlugin extends Plugin {
 		// Create Skills Service instance (discovery deferred to onLayoutReady)
 		this.skillsService = new SkillsService(this);
 
-		// Initialize lexical search for BM25 search and browse (non-blocking)
-		this.lexicalSearchService = LexicalSearchService.startInitialize(this);
-
-		// Initialize Vector Store Service for embeddings search (non-blocking)
-		this.vectorStoreService = VectorStoreService.startInitialize(this);
-
 		// Register file-based chat view and .chat extension (v2 ChatView)
 		// const VIEW_TYPE = "my-view";
 
@@ -247,6 +241,7 @@ export default class SecondBrainPlugin extends Plugin {
 		this.registerEvent(
 			this.app.workspace.on("file-open", (file) => {
 				if (!(file instanceof TFile)) return;
+				if (file.extension !== "md") return;
 				this.pluginData.recordRecentlyOpenedNote(file.path);
 			}),
 		);
@@ -256,10 +251,18 @@ export default class SecondBrainPlugin extends Plugin {
 		createMessenger(this.agentManager);
 		this.registerNotebookNavigatorMenus();
 
-		// Defer heavy initialization (skills discovery, chat index loading, provider registration)
-		// to onLayoutReady so we don't block the Obsidian workspace from rendering.
+		// Defer ALL heavy initialization to onLayoutReady so the Obsidian workspace
+		// renders immediately. This includes:
+		// - LexicalSearch / VectorStore: IDB opens can take seconds when cold
+		// - SkillsService: filesystem discovery
+		// - AgentManager: chat index loading, provider registration
 		// If a chat view opens before this completes, AgentManager.ensureAgent() handles lazy init.
 		this.app.workspace.onLayoutReady(() => {
+			// Start search/vector store initialization (non-blocking, fire-and-forget)
+			this.lexicalSearchService = LexicalSearchService.startInitialize(this);
+			this.vectorStoreService = VectorStoreService.startInitialize(this);
+
+			// Skills + Agent init (sequential, but non-blocking relative to workspace)
 			void (async () => {
 				try {
 					await this.skillsService.initialize();
