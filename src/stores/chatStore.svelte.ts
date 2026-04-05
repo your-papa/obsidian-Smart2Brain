@@ -17,7 +17,7 @@ import { getPendingChangesStore } from "./pendingChangesStore.svelte";
 import { isDraftChatName } from "../utils/threadId";
 import { formatVisibleNotesContext, type VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import { formatSelectionContext, type SelectionRef } from "../hooks/useSelection.svelte";
-import { type UUIDv7, dateFromUUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
+import { type UUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 import { DEFAULT_AGENT_ID, getData } from "./dataStore.svelte";
 import { getPlugin } from "./state.svelte";
 import { Logger } from "../utils/logging";
@@ -142,6 +142,8 @@ export interface MessagePair {
 	userMessage: UserMessage;
 	assistantMessage: AssistantMessage;
 	transcriptEvent?: TranscriptEvent;
+	/** Epoch ms when this message pair was created (persisted via checkpoint ts) */
+	createdAt?: number;
 	/** The model used to generate the assistant response */
 	model?: ChatModel;
 	/** Generation metadata persisted with the assistant message */
@@ -555,6 +557,12 @@ export interface CheckpointMessageMapping {
 	 * Used for editing the first message
 	 */
 	rootCheckpointId?: string;
+
+	/**
+	 * LangChain HumanMessage ID -> checkpoint timestamp (ISO string).
+	 * Used to derive a stable createdAt for each MessagePair.
+	 */
+	humanTimestamps: Map<string, string>;
 }
 
 function buildDerivedBranchInfo(graph: CheckpointGraphState): {
@@ -606,6 +614,7 @@ function buildCheckpointMessageMappingFromGraph(
 	const humanLastCheckpoints = new Map<string, string>();
 	const aiBeforeHumanCheckpoints = new Map<string, string>();
 	const aiAfterHumanCheckpoints = new Map<string, string>();
+	const humanTimestamps = new Map<string, string>();
 
 	const { branchInfoMap, editForkEntryCheckpoints } = buildDerivedBranchInfo(graph);
 
@@ -617,6 +626,7 @@ function buildCheckpointMessageMappingFromGraph(
 			branchInfoMap,
 			editForkEntryCheckpoints,
 			rootCheckpointId: graph.rootCheckpointId,
+			humanTimestamps,
 		};
 	}
 
@@ -651,6 +661,9 @@ function buildCheckpointMessageMappingFromGraph(
 		}
 
 		humanLastCheckpoints.set(humanMessageId, node.checkpointId);
+		if (node.ts) {
+			humanTimestamps.set(humanMessageId, node.ts);
+		}
 		if (lastAiCheckpointId) {
 			aiBeforeHumanCheckpoints.set(humanMessageId, lastAiCheckpointId);
 		}
@@ -664,6 +677,7 @@ function buildCheckpointMessageMappingFromGraph(
 		branchInfoMap,
 		editForkEntryCheckpoints,
 		rootCheckpointId: graph.rootCheckpointId,
+		humanTimestamps,
 	};
 }
 
@@ -1114,11 +1128,22 @@ export function baseMessagesToMessagePairs(
 				}
 			}
 
+			// Derive createdAt from the checkpoint timestamp for this human message
+			let createdAt: number | undefined;
+			if (humanMessageId && checkpointMapping?.humanTimestamps) {
+				const ts = checkpointMapping.humanTimestamps.get(humanMessageId);
+				if (ts) {
+					const parsed = Date.parse(ts);
+					if (Number.isFinite(parsed)) createdAt = parsed;
+				}
+			}
+
 			messagePairs.push({
 				id: pairId,
 				userMessage: { content: userContent, attachments, visibleNotes, selection, graphNotes },
 				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state),
 				generation: deriveGenerationFromAssistantMessages(assistantMessages),
+				createdAt,
 				regenerateFromCheckpointId,
 				editFromCheckpointId,
 				userBranchInfo,
@@ -1144,10 +1169,14 @@ export function baseMessagesToMessagePairs(
 }
 
 /**
- * Get the timestamp from a MessagePair's UUIDv7 id.
+ * Get the timestamp for when this message pair was created.
+ * Returns the stable createdAt (derived from checkpoint ts), or null if unavailable.
  */
-export function getMessagePairTimestamp(pair: MessagePair): Date {
-	return dateFromUUIDv7(pair.id);
+export function getMessagePairTimestamp(pair: MessagePair): Date | null {
+	if (pair.createdAt != null) {
+		return new Date(pair.createdAt);
+	}
+	return null;
 }
 
 /**
@@ -1353,6 +1382,7 @@ export class ChatSession {
 			id: pairId,
 			userMessage: { content, attachments, visibleNotes, selection, graphNotes },
 			assistantMessage: { state: AssistantState.idle, content: "" },
+			createdAt: Date.now(),
 			model: currentModel,
 			generation: {
 				agentId: selectedAgent.id,
