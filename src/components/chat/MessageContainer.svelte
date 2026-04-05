@@ -1,7 +1,13 @@
 <script lang="ts">
 import { Notice } from "obsidian";
 import { tick, untrack } from "svelte";
-import { type AssistantMessage, AssistantState, type MessagePair, type Messenger } from "../../stores/chatStore.svelte";
+import {
+	type AssistantMessage,
+	AssistantState,
+	type MessagePair,
+	type Messenger,
+	getMessagePairTimestamp,
+} from "../../stores/chatStore.svelte";
 import type { UUIDv7 } from "../../utils/uuid7Validator";
 import { Logger } from "../../utils/logging";
 import { getPlugin } from "../../stores/state.svelte";
@@ -187,6 +193,18 @@ function getRenderableAssistantContent(assistantAnswer: AssistantMessage) {
 async function copyToClipboard(content: string) {
 	await navigator.clipboard.writeText(content);
 	new Notice("Copied to Clipboard");
+}
+
+function formatMessageTimestamp(pair: MessagePair): string | null {
+	const date = getMessagePairTimestamp(pair);
+	if (!date) return null;
+	return date.toLocaleString(undefined, {
+		year: "numeric",
+		month: "short",
+		day: "numeric",
+		hour: "2-digit",
+		minute: "2-digit",
+	});
 }
 
 function getGenerationLabel(messagePair: MessagePair): string | null {
@@ -416,6 +434,9 @@ $effect(() => {
                 <div
                   class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
                 >
+                  {#if formatMessageTimestamp(messagePair)}
+                    <span class="message-timestamp text-xs text-[--text-faint]">{formatMessageTimestamp(messagePair)}</span>
+                  {/if}
                   {#if messagePair.userBranchInfo}
                     <BranchNavigator
                       branchInfo={messagePair.userBranchInfo}
@@ -505,6 +526,9 @@ $effect(() => {
                       <span class="generation-label text-sm font-semibold">
                         {getGenerationLabel(messagePair)}
                       </span>
+                    {/if}
+                    {#if formatMessageTimestamp(messagePair)}
+                      <span class="message-timestamp text-xs text-[--text-faint]">{formatMessageTimestamp(messagePair)}</span>
                     {/if}
                   </div>
                 </div>
