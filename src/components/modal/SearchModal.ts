@@ -321,6 +321,11 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	}
 
 	private updateInstructions(): void {
+		const pluginData = getData();
+		if (!pluginData.searchShowKeyboardHints) {
+			this.setInstructions([]);
+			return;
+		}
 		const tabKey = Platform.isMacOS ? "⇥" : "Tab";
 		const modEnterKey = Platform.isMacOS ? "⌘↵" : "Ctrl+↵";
 		const altEnterKey = Platform.isMacOS ? "⌥↵" : "Alt+↵";

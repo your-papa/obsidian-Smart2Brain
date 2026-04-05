@@ -444,6 +444,7 @@ export interface PluginData {
 	searchShowTags: boolean;
 	searchShowMatchBadges: boolean;
 	searchShowMatchContext: boolean;
+	searchShowKeyboardHints: boolean;
 	recentNotes: RecentNoteEntry[];
 
 	/**

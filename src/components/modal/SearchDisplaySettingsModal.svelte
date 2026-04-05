@@ -2,9 +2,14 @@
 import Button from "../ui/Button.svelte";
 import SettingContainer from "../settings/SettingContainer.svelte";
 import Toggle from "../ui/Toggle.svelte";
+import { Platform } from "obsidian";
 import type { SearchDisplaySettingsModal } from "./SearchDisplaySettingsModal";
 import { getData } from "../../stores/dataStore.svelte";
 import { icon } from "../../utils/utils";
+
+const tabKey = Platform.isMacOS ? "⇥" : "Tab";
+const modEnterKey = Platform.isMacOS ? "⌘↵" : "Ctrl+↵";
+const altEnterKey = Platform.isMacOS ? "⌥↵" : "Alt+↵";
 
 interface Props {
 	modal: SearchDisplaySettingsModal;
@@ -20,6 +25,7 @@ const enabledCount = $derived.by(() => {
 	if (pluginData.searchShowTags) count += 1;
 	if (pluginData.searchShowMatchBadges) count += 1;
 	if (pluginData.searchShowMatchContext) count += 1;
+	if (pluginData.searchShowKeyboardHints) count += 1;
 	return count;
 });
 </script>
@@ -35,7 +41,7 @@ const enabledCount = $derived.by(() => {
   <div class="search-display-settings-preview-panel">
     <div class="search-display-settings-preview-header">
       <div class="search-display-settings-preview-title">Preview</div>
-      <div class="search-display-settings-preview-count">{enabledCount} of 4 enabled</div>
+      <div class="search-display-settings-preview-count">{enabledCount} of 5 enabled</div>
     </div>
 
     <div class="search-display-settings-preview-card">
@@ -112,6 +118,18 @@ const enabledCount = $derived.by(() => {
           </div>
         {/if}
       </div>
+
+      {#if pluginData.searchShowKeyboardHints}
+        <div class="prompt-instructions">
+          <div class="prompt-instruction"><span class="prompt-instruction-command">↑↓</span><span>Navigate</span></div>
+          <div class="prompt-instruction"><span class="prompt-instruction-command">↵</span><span>Open note</span></div>
+          <div class="prompt-instruction"><span class="prompt-instruction-command">{modEnterKey}</span><span>Open in new tab</span></div>
+          <div class="prompt-instruction"><span class="prompt-instruction-command">{altEnterKey}</span><span>Send to chat</span></div>
+          <div class="prompt-instruction"><span class="prompt-instruction-command">⇧↵</span><span>Create note</span></div>
+          <div class="prompt-instruction"><span class="prompt-instruction-command">{tabKey}</span><span>semantic: off</span></div>
+          <div class="prompt-instruction"><span class="prompt-instruction-command">esc</span><span>Close</span></div>
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -146,6 +164,16 @@ const enabledCount = $derived.by(() => {
     <Toggle
       checked={pluginData.searchShowMatchContext}
       onchange={(checked) => (pluginData.searchShowMatchContext = checked)}
+    />
+  </SettingContainer>
+
+  <SettingContainer
+    name="Keyboard Shortcuts"
+    desc="Show keyboard shortcut hints at the bottom of the search modal."
+  >
+    <Toggle
+      checked={pluginData.searchShowKeyboardHints}
+      onchange={(checked) => (pluginData.searchShowKeyboardHints = checked)}
     />
   </SettingContainer>
 </div>
@@ -221,5 +249,11 @@ const enabledCount = $derived.by(() => {
     --tag-color: var(--text-accent);
     --tag-background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
     --tag-border-color: color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+  }
+
+  .search-display-settings-preview-card :global(.prompt-instructions) {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--background-modifier-border);
   }
 </style>

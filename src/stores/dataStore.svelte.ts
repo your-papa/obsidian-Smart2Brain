@@ -383,6 +383,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	searchShowTags: true,
 	searchShowMatchBadges: true,
 	searchShowMatchContext: true,
+	searchShowKeyboardHints: true,
 	recentNotes: [],
 	defaultEmbedModel: null,
 	embeddingIndexes: [],
@@ -979,6 +980,14 @@ export class PluginDataStore {
 	}
 	set searchShowMatchContext(val: boolean) {
 		this.#data.searchShowMatchContext = val;
+		this.saveSettings();
+	}
+
+	get searchShowKeyboardHints() {
+		return this.#data.searchShowKeyboardHints;
+	}
+	set searchShowKeyboardHints(val: boolean) {
+		this.#data.searchShowKeyboardHints = val;
 		this.saveSettings();
 	}
 
