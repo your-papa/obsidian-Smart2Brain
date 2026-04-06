@@ -22,7 +22,11 @@ import type {
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "../vectorstore/batchSize";
 import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 
-import { type GraphMode, type SmartGraphSettings, DEFAULT_SMART_GRAPH_SETTINGS } from "../types/graph";
+import {
+	type SmartGraphSettings,
+	type Space,
+	DEFAULT_SMART_GRAPH_SETTINGS,
+} from "../types/graph";
 
 // Provider system types
 import {
@@ -393,7 +397,6 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 	// Smart Graph View
 	smartGraphSettings: DEFAULT_SMART_GRAPH_SETTINGS,
-	lastGraphMode: "wiki" as GraphMode,
 
 	// Diff view
 	diffViewMode: "two-pane",
@@ -1162,12 +1165,54 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
-	get lastGraphMode(): GraphMode {
-		return this.#data.lastGraphMode ?? "wiki";
-	}
-	set lastGraphMode(val: GraphMode) {
-		this.#data.lastGraphMode = val;
+	/**
+	 * Persist only the active immersed space ID without replacing the whole
+	 * smartGraphSettings object. Mutating a specific property in-place prevents
+	 * Svelte from invalidating effects that track `data.spaces` (which reads
+	 * `smartGraphSettings.spaces`), avoiding an expensive reactive cascade on
+	 * every immerse/exit.
+	 */
+	setActiveImmersedSpaceId(id: string | null): void {
+		if (!this.#data.smartGraphSettings) {
+			this.#data.smartGraphSettings = { ...DEFAULT_SMART_GRAPH_SETTINGS, activeImmersedSpaceId: id };
+		} else {
+			this.#data.smartGraphSettings.activeImmersedSpaceId = id;
+		}
 		this.saveSettings();
+	}
+
+	// --- Spaces CRUD ---
+
+	get spaces(): Space[] {
+		return this.smartGraphSettings.spaces ?? [];
+	}
+
+	addSpace(space: Space): void {
+		const settings = this.smartGraphSettings;
+		this.smartGraphSettings = {
+			...settings,
+			spaces: [...(settings.spaces ?? []), space],
+		};
+	}
+
+	updateSpace(id: string, patch: Partial<Omit<Space, "id">>): void {
+		const settings = this.smartGraphSettings;
+		this.smartGraphSettings = {
+			...settings,
+			spaces: (settings.spaces ?? []).map((s) => (s.id === id ? { ...s, ...patch } : s)),
+		};
+	}
+
+	deleteSpace(id: string): void {
+		const settings = this.smartGraphSettings;
+		this.smartGraphSettings = {
+			...settings,
+			spaces: (settings.spaces ?? []).filter((s) => s.id !== id),
+		};
+	}
+
+	getSpaceByLabel(label: string): Space | undefined {
+		return (this.smartGraphSettings.spaces ?? []).find((s) => s.label.toLowerCase() === label.toLowerCase());
 	}
 
 	// --- Diff View Mode ---
@@ -1651,6 +1696,22 @@ export class PluginDataStore {
 }
 
 let _pluginDataStore: PluginDataStore | null = null;
+
+/**
+ * The currently immersed Space — ephemeral, session-only.
+ * Not persisted to PluginData. Automatically scopes search and agent
+ * when the user is immersed in a Space in the graph view.
+ * null = no active immersion.
+ */
+let _immersedSpace: Space | null = $state(null);
+
+export function getImmersedSpace(): Space | null {
+	return _immersedSpace;
+}
+
+export function setImmersedSpace(space: Space | null): void {
+	_immersedSpace = space;
+}
 
 function normalizeAgent(agent: AgentConfig): void {
 	// Ensure toolsConfig exists and has all tools

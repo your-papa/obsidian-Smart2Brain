@@ -14,7 +14,7 @@ import { performSearch } from "../../agent/tools/searchNotes";
 import { getRecentNotes } from "../../search/recentNotes";
 import type { SearchResult } from "../../vectorstore/types";
 import { extractSearchTerms } from "../../search/searchTermUtils";
-import { getData } from "../../stores/dataStore.svelte";
+import { getData, getImmersedSpace } from "../../stores/dataStore.svelte";
 import { getMessenger } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
@@ -23,10 +23,11 @@ import type { SearchFilter } from "../../vectorstore";
 import type { SearchMatchBadge } from "../../vectorstore/types";
 import { Logger } from "../../utils/logging";
 import { getPathIcon, getSearchResultNoteIcon, getTagIcon, resolveIconColor } from "../../utils/noteIcons";
+import { resolveRegionToSearchFilter } from "../../lib/views";
 
 interface AutocompleteSuggestion {
 	type: "autocomplete";
-	kind: "tag" | "folder";
+	kind: "tag" | "folder" | "region";
 	value: string;
 	display: string;
 }
@@ -238,13 +239,13 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private cachedTagChildCount = new Map<string, number>();
 	private cachedAutocompleteFolders: string[] = [];
 	/** Inline filter state — chips live inside the input container */
-	private activeFilters: { type: "path" | "tag"; value: string }[] = [];
+	private activeFilters: { type: "path" | "tag" | "region"; value: string }[] = [];
 	private inlineChipsEl: HTMLElement | null = null;
 	private inlineInputContentEl: HTMLElement | null = null;
 
 	constructor(app: App) {
 		super(app);
-		this.setPlaceholder("Search notes, use #tag or /folder, or leave empty for recent notes...");
+		this.setPlaceholder("Search notes, use #tag, /folder or @region, or leave empty for recent notes...");
 		this.updateInstructions();
 
 		// Register Tab to toggle semantic search
@@ -617,6 +618,28 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private buildActiveFilter(): SearchFilter | undefined {
 		const tags = this.activeFilters.filter((f) => f.type === "tag").map((f) => f.value);
 		const pathPrefixes = this.activeFilters.filter((f) => f.type === "path").map((f) => f.value);
+		const regionLabels = this.activeFilters.filter((f) => f.type === "region").map((f) => f.value);
+
+		// Resolve Spaces → SearchFilter and merge their pathPrefixes/tags
+		const pluginData = getData();
+		for (const label of regionLabels) {
+			const spaceObj = pluginData.getSpaceByLabel(label);
+			if (spaceObj) {
+				const resolved = resolveRegionToSearchFilter(this.app, spaceObj);
+				if (resolved.pathPrefixes) pathPrefixes.push(...resolved.pathPrefixes);
+				if (resolved.tags) tags.push(...resolved.tags);
+			}
+		}
+
+		// Also auto-inject immersed space when no explicit region filter
+		if (regionLabels.length === 0) {
+			const immersedSpace = getImmersedSpace();
+			if (immersedSpace) {
+				const resolved = resolveRegionToSearchFilter(this.app, immersedSpace);
+				if (resolved.pathPrefixes) pathPrefixes.push(...resolved.pathPrefixes);
+				if (resolved.tags) tags.push(...resolved.tags);
+			}
+		}
 
 		if (tags.length === 0 && pathPrefixes.length === 0) return undefined;
 
@@ -684,9 +707,22 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			const iconRenderer =
 				filter.type === "tag"
 					? getTagIcon(this.app, filter.value)
-					: getPathIcon(this.app, filter.value.replace(/\/$/, ""), "folder");
+					: filter.type === "path"
+						? getPathIcon(this.app, filter.value.replace(/\/$/, ""), "folder")
+						: null; // regions use a default icon
 
-			if (iconRenderer) {
+			if (filter.type === "region") {
+				// Look up region color for chip styling
+				const pluginData = getData();
+				const regionObj = pluginData.getSpaceByLabel(filter.value);
+				if (regionObj?.color) {
+					chip.style.setProperty("--tag-color", regionObj.color);
+					chip.style.setProperty("--tag-color-hover", regionObj.color);
+				}
+				const iconEl = chip.createSpan({ cls: "s2b-inline-chip-icon" });
+				iconEl.setAttribute("aria-hidden", "true");
+				setIcon(iconEl, "map-pin");
+			} else if (iconRenderer) {
 				chip.classList.add(`s2b-inline-chip-${iconRenderer.provider}`);
 				const resolvedColor = resolveIconColor(iconRenderer.color);
 				if (resolvedColor) {
@@ -709,7 +745,12 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 				setIcon(iconEl, filter.type === "tag" ? "tag" : "folder");
 			}
 
-			const label = filter.type === "path" ? filter.value.replace(/\/$/, "") : filter.value.replace(/^#/, "");
+			const label =
+				filter.type === "path"
+					? filter.value.replace(/\/$/, "")
+					: filter.type === "region"
+						? filter.value
+						: filter.value.replace(/^#/, "");
 			chip.setAttribute("aria-label", `Remove filter ${label}`);
 			chip.createSpan({ cls: "s2b-inline-chip-label", text: label });
 			chip.createSpan({ cls: "s2b-inline-chip-remove", text: "×" });
@@ -898,6 +939,13 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	 * Returns autocomplete suggestions for tags (#) or folders (path/) when applicable.
 	 */
 	private getAutocompleteSuggestions(query: string): AutocompleteSuggestion[] | null {
+		// Match a partial Region at the end: "@" or "@part"
+		const regionMatch = query.match(/(@)([^\s]*)$/u);
+		if (regionMatch) {
+			const partial = regionMatch[2].toLowerCase();
+			return this.getRegionSuggestions(partial);
+		}
+
 		// Match a partial tag at the end: "#" or "#part"
 		const tagMatch = query.match(/(#)([^\s]*)$/u);
 		if (tagMatch) {
@@ -938,6 +986,20 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			});
 	}
 
+	private getRegionSuggestions(partial: string): AutocompleteSuggestion[] {
+		const pluginData = getData();
+		const spaces = pluginData.spaces;
+		return spaces
+			.filter((s) => !partial || s.label.toLowerCase().includes(partial))
+			.slice(0, 20)
+			.map((s) => ({
+				type: "autocomplete" as const,
+				kind: "region" as const,
+				value: s.label,
+				display: s.label,
+			}));
+	}
+
 	private getFolderSuggestions(partial: string): AutocompleteSuggestion[] {
 		// Strip leading/trailing slashes so "/fo" → "fo" matches folder "foobar"
 		const needle = partial.replace(/^\/+|\/+$/gu, "");
@@ -960,13 +1022,16 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	private applyAutocompleteSuggestion(suggestion: AutocompleteSuggestion): void {
 		// Add the selected suggestion as an inline filter chip
-		this.activeFilters.push({ type: suggestion.kind === "tag" ? "tag" : "path", value: suggestion.value });
+		const chipType = suggestion.kind === "tag" ? "tag" : suggestion.kind === "region" ? "region" : "path";
+		this.activeFilters.push({ type: chipType, value: suggestion.value });
 		this.renderInlineChips();
 
-		// Remove the partial token from the input (the #... or folder/ text)
+		// Remove the partial token from the input (the #... or folder/ or @... text)
 		let cleanQuery: string;
 		if (suggestion.kind === "tag") {
 			cleanQuery = this.currentQuery.replace(/(#)[^\s]*$/u, "").trim();
+		} else if (suggestion.kind === "region") {
+			cleanQuery = this.currentQuery.replace(/(@)[^\s]*$/u, "").trim();
 		} else {
 			cleanQuery = this.currentQuery.replace(/(?:^|\s)((?!https?:\/\/)(\/[^\s]*|[^\s]*\/[^\s]*))$/u, "").trim();
 		}

@@ -158,7 +158,6 @@ export class PixiRenderer {
 			fillColor: string;
 			strokeColor: string | null;
 			strokeWidth: number;
-			pinned: boolean;
 		}
 	> = new Map();
 
@@ -166,6 +165,16 @@ export class PixiRenderer {
 	private labelPool: Text[] = [];
 	private activeLabelCount = 0;
 	private readonly LABEL_POOL_SIZE = 250;
+	// Last-written values per pool slot — used to skip redundant property updates
+	private labelPoolCache: Array<{
+		text: string;
+		nodeX: number;
+		nodeY: number;
+		fontSize: number;
+		color: string;
+		alpha: number;
+		scale: number;
+	} | null> = [];
 
 	// Overlay objects
 	private clusterPillObjects: Array<{ container: Container; graphics: Graphics; text: Text }> = [];
@@ -254,6 +263,7 @@ export class PixiRenderer {
 			.pinch()
 			.wheel({ smooth: 5, trackpadPinch: true })
 			.decelerate({ friction: 0.92 })
+			.animate()
 			.clampZoom({
 				minScale: 0.05,
 				maxScale: 10,
@@ -307,6 +317,7 @@ export class PixiRenderer {
 			t.visible = false;
 			this.labelLayer.addChild(t);
 			this.labelPool.push(t);
+			this.labelPoolCache.push(null);
 		}
 
 		// Legend setup
@@ -376,6 +387,8 @@ export class PixiRenderer {
 
 	updateTheme(theme: ThemeColors): void {
 		this._theme = theme;
+		// Invalidate label cache so font/color changes are picked up on the next draw
+		this.labelPoolCache.fill(null);
 		// Update legend text
 		this.legendText.style.fill = theme.textMuted;
 		this.legendText.style.fontFamily = theme.font;
@@ -440,6 +453,11 @@ export class PixiRenderer {
 		return this.viewport.scaled;
 	}
 
+	/** Cancel any running camera animation (e.g. when the user starts panning). */
+	abortAnimation(): void {
+		this.viewport.plugins.remove("animate");
+	}
+
 	// Pause/resume viewport interaction (e.g. during node drag)
 	pauseViewport(): void {
 		this.viewport.plugins.pause("drag");
@@ -466,7 +484,6 @@ export class PixiRenderer {
 			hoveredNodeId: string | null;
 			draggedNodeId: string | null;
 			focusedClusters: Set<number>;
-			pinnedNodes: Set<string>;
 			isForceMode: boolean;
 			hoverAlphas: Map<string, number>;
 			nodeClusterMap: Map<string, number | undefined>;
@@ -524,8 +541,6 @@ export class PixiRenderer {
 				strokeWidth = 2 / scale;
 			}
 
-			const pinned = opts.isForceMode && opts.pinnedNodes.has(node.id);
-
 			// Check cache — skip geometry rebuild if nothing visual changed
 			const cached = this.nodeVisualCache.get(node.id);
 			const geometryDirty =
@@ -534,8 +549,7 @@ export class PixiRenderer {
 				cached.radius !== radius ||
 				cached.fillColor !== fillColor ||
 				cached.strokeColor !== strokeColor ||
-				cached.strokeWidth !== strokeWidth ||
-				cached.pinned !== pinned;
+				cached.strokeWidth !== strokeWidth;
 
 			if (geometryDirty) {
 				gfx.clear();
@@ -545,16 +559,11 @@ export class PixiRenderer {
 					gfx.circle(0, 0, radius).stroke({ color: strokeColor, width: strokeWidth });
 				}
 
-				if (pinned) {
-					const pinR = Math.max(2 / scale, 1);
-					gfx.circle(0, 0, pinR).fill({ color: c.textOnAccent });
-				}
-
 				gfx.hitArea = {
 					contains: (px: number, py: number) => px * px + py * py <= (radius + 4 / scale) ** 2,
 				};
 
-				this.nodeVisualCache.set(node.id, { radius, fillColor, strokeColor, strokeWidth, pinned });
+				this.nodeVisualCache.set(node.id, { radius, fillColor, strokeColor, strokeWidth });
 			}
 		}
 	}
@@ -679,27 +688,53 @@ export class PixiRenderer {
 		}>,
 	): void {
 		const scale = this.viewport.scaled || 1;
+		const invScale = 1 / scale;
+		const font = this._theme.font;
 		let i = 0;
 
 		for (const label of labels) {
 			if (i >= this.LABEL_POOL_SIZE) break;
 			const t = this.labelPool[i];
-			t.text = label.text;
+			const prev = this.labelPoolCache[i];
+
+			// Position and scale change every force-tick — always update these
 			t.position.set(label.nodeX, label.nodeY);
-			t.style.fontSize = label.fontSize;
-			t.style.fill = label.color;
-			t.style.fontFamily = this._theme.font;
+			t.scale.set(invScale);
 			t.alpha = label.alpha;
-			t.scale.set(1 / scale); // Counter-scale so labels appear fixed-size in screen space
 			t.visible = true;
+
+			// Text and style only change when the label itself changes
+			if (
+				prev === null ||
+				prev.text !== label.text ||
+				prev.fontSize !== label.fontSize ||
+				prev.color !== label.color
+			) {
+				t.text = label.text;
+				t.style.fontSize = label.fontSize;
+				t.style.fill = label.color;
+				t.style.fontFamily = font;
+			}
+
+			this.labelPoolCache[i] = {
+				text: label.text,
+				nodeX: label.nodeX,
+				nodeY: label.nodeY,
+				fontSize: label.fontSize,
+				color: label.color,
+				alpha: label.alpha,
+				scale: invScale,
+			};
 			i++;
 		}
 
-		// Hide unused pool members
-		for (; i < this.LABEL_POOL_SIZE; i++) {
-			this.labelPool[i].visible = false;
+		// Hide pool slots that were active last frame but aren't needed now
+		const prevActive = this.activeLabelCount;
+		for (let j = i; j < prevActive; j++) {
+			this.labelPool[j].visible = false;
+			this.labelPoolCache[j] = null;
 		}
-		this.activeLabelCount = labels.length;
+		this.activeLabelCount = i;
 	}
 
 	// ── Lasso rendering ────────────────────────────────────

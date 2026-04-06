@@ -36,12 +36,27 @@ export function documentsKey(indexId: string | null, documentCount: number): str
 
 /**
  * Deterministic key for the filtered-documents layer.
- * Includes the raw-vector key plus the active folder/tag filters.
+ * Includes the raw-vector key plus the active folder/tag filters and optional
+ * region/drill-in path constraint.
+ *
+ * IMPORTANT: The 5th `drillPaths` parameter MUST be passed when a region
+ * constraint is active (region-detail view). Omitting it causes incorrect
+ * cache hits — vault-view and region-detail-view would share the same cache
+ * entry even though they operate on different document sets.
+ * Fix is in callers (SmartGraphView), not here.
  */
-export function filteredKey(rawKey: string, folders: string[] | undefined, tags: string[] | undefined): string {
+export function filteredKey(
+	rawKey: string,
+	folders: string[] | undefined,
+	tags: string[] | undefined,
+	extensions?: string[] | undefined,
+	drillPaths?: Set<string> | null,
+): string {
 	const f = folders ? folders.slice().sort().join(",") : "";
 	const t = tags ? tags.slice().sort().join(",") : "";
-	return `${rawKey}|f:${f}|t:${t}`;
+	const e = extensions ? extensions.slice().sort().join(",") : "";
+	const d = drillPaths ? [...drillPaths].sort().join(",") : "";
+	return `${rawKey}|f:${f}|t:${t}|e:${e}|d:${d}`;
 }
 
 /**
@@ -109,9 +124,9 @@ export interface CacheStatus {
 
 class SmartGraphCacheImpl {
 	private documents: DocumentsLayer | null = null;
-	private filtered: FilteredLayer | null = null;
-	private reduced: ReducedLayer | null = null;
-	private projection: ProjectionLayer | null = null;
+	private filtered: Map<string, FilteredLayer> = new Map();
+	private reduced: Map<string, ReducedLayer> = new Map();
+	private projection: Map<string, ProjectionLayer> = new Map();
 
 	// ── Getters ──────────────────────────────────────────────────────
 
@@ -121,24 +136,21 @@ class SmartGraphCacheImpl {
 	}
 
 	getFiltered(key: string): { filteredDocs: DocumentVector[]; vectors: Float32Array[]; pathSetKey: string } | null {
-		if (this.filtered?.key === key) {
-			return {
-				filteredDocs: this.filtered.filteredDocs,
-				vectors: this.filtered.vectors,
-				pathSetKey: this.filtered.pathSetKey,
-			};
-		}
-		return null;
+		const entry = this.filtered.get(key);
+		if (!entry) return null;
+		return {
+			filteredDocs: entry.filteredDocs,
+			vectors: entry.vectors,
+			pathSetKey: entry.pathSetKey,
+		};
 	}
 
 	getReduced(key: string): Float32Array[] | null {
-		if (this.reduced?.key === key) return this.reduced.reducedVectors;
-		return null;
+		return this.reduced.get(key)?.reducedVectors ?? null;
 	}
 
 	getProjection(key: string): GraphStructureResult | null {
-		if (this.projection?.key === key) return this.projection.result;
-		return null;
+		return this.projection.get(key)?.result ?? null;
 	}
 
 	// ── Setters ──────────────────────────────────────────────────────
@@ -146,34 +158,34 @@ class SmartGraphCacheImpl {
 	setDocuments(key: string, documents: DocumentVector[]): void {
 		this.documents = { key, documents };
 		// Downstream layers are stale
-		this.filtered = null;
-		this.reduced = null;
-		this.projection = null;
+		this.filtered.clear();
+		this.reduced.clear();
+		this.projection.clear();
 	}
 
 	setFiltered(key: string, filteredDocs: DocumentVector[], vectors: Float32Array[]): void {
 		const psk = pathSetKey(filteredDocs.map((d) => d.path));
-		this.filtered = { key, filteredDocs, vectors, pathSetKey: psk };
-		// Downstream layers are stale
-		this.reduced = null;
-		this.projection = null;
+		this.filtered.set(key, { key, filteredDocs, vectors, pathSetKey: psk });
+		// Invalidate downstream layers whose keys are derived from this filtered key
+		for (const k of this.reduced.keys()) if (k.startsWith(key)) this.reduced.delete(k);
+		for (const k of this.projection.keys()) if (k.startsWith(key)) this.projection.delete(k);
 	}
 
 	setReduced(key: string, reducedVectors: Float32Array[]): void {
-		this.reduced = { key, reducedVectors };
-		// Downstream is stale
-		this.projection = null;
+		this.reduced.set(key, { key, reducedVectors });
+		// Invalidate projection entries derived from this reduced key
+		for (const k of this.projection.keys()) if (k.startsWith(key)) this.projection.delete(k);
 	}
 
 	setProjection(key: string, result: GraphStructureResult): void {
-		this.projection = { key, result };
+		this.projection.set(key, { key, result });
 	}
 
 	// ── Utilities ────────────────────────────────────────────────────
 
 	/** Get the cached path-set key for fast doc-set-changed detection. */
-	getFilteredPathSetKey(): string | null {
-		return this.filtered?.pathSetKey ?? null;
+	getFilteredPathSetKey(key: string): string | null {
+		return this.filtered.get(key)?.pathSetKey ?? null;
 	}
 
 	/**
@@ -189,18 +201,18 @@ class SmartGraphCacheImpl {
 	clear(): void {
 		Logger.info("[SmartGraphCache] Cache cleared");
 		this.documents = null;
-		this.filtered = null;
-		this.reduced = null;
-		this.projection = null;
+		this.filtered.clear();
+		this.reduced.clear();
+		this.projection.clear();
 	}
 
 	/** Report which layers are populated. */
 	status(): CacheStatus {
 		return {
 			documents: this.documents !== null,
-			filtered: this.filtered !== null,
-			reduced: this.reduced !== null,
-			projection: this.projection !== null,
+			filtered: this.filtered.size > 0,
+			reduced: this.reduced.size > 0,
+			projection: this.projection.size > 0,
 		};
 	}
 }

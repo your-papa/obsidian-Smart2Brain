@@ -17,6 +17,8 @@ import { normalizeVaultPath } from "../../utils/pathUtils";
 import { getVectorStoreService, type SearchFilter, type SearchResult, waitForVectorStore } from "../../vectorstore";
 import type { SearchMatchBadge, SearchMatchExplanation } from "../../vectorstore/types";
 import { Logger } from "../../utils/logging";
+import { resolveRegionToSearchFilter } from "../../lib/views";
+import { getImmersedSpace } from "../../stores/dataStore.svelte";
 
 export type { SearchResult } from "../../vectorstore/types";
 
@@ -264,11 +266,13 @@ export function createSearchNotesTool(app: App) {
 		query = "",
 		pathPrefix,
 		tags,
+		region,
 		recentOnly = false,
 	}: {
 		query?: string;
 		pathPrefix?: string;
 		tags?: string[];
+		region?: string;
 		recentOnly?: boolean;
 	}): Promise<string> => {
 		// Get fresh config each call to pick up any changes
@@ -277,11 +281,42 @@ export function createSearchNotesTool(app: App) {
 		const { algorithm, maxResults: limit, showMatchBadges, showMatchContext, showPath, showTags } = settings;
 
 		// Build filter from parameters
+		let filterPathPrefixes: string[] | undefined = pathPrefix ? [normalizeVaultPath(pathPrefix)] : undefined;
+		let filterTags: string[] | undefined = tags?.length ? tags : undefined;
+
+		// Resolve explicit region param → SearchFilter and merge
+		if (region) {
+			const regionObj = pluginData.getSpaceByLabel(region);
+			if (regionObj) {
+				const regionFilter = resolveRegionToSearchFilter(app, regionObj);
+				if (regionFilter.pathPrefixes) {
+					filterPathPrefixes = [...(filterPathPrefixes ?? []), ...regionFilter.pathPrefixes];
+				}
+				if (regionFilter.tags) {
+					filterTags = [...(filterTags ?? []), ...regionFilter.tags];
+				}
+			} else {
+				Logger.warn(`[search_notes] Space "${region}" not found`);
+			}
+		} else {
+			// Auto-inject immersed space as default scope when no explicit region param
+			const immersedSpace = getImmersedSpace();
+			if (immersedSpace) {
+				const spaceFilter = resolveRegionToSearchFilter(app, immersedSpace);
+				if (spaceFilter.pathPrefixes) {
+					filterPathPrefixes = [...(filterPathPrefixes ?? []), ...spaceFilter.pathPrefixes];
+				}
+				if (spaceFilter.tags) {
+					filterTags = [...(filterTags ?? []), ...spaceFilter.tags];
+				}
+			}
+		}
+
 		const filter: SearchFilter | undefined =
-			pathPrefix || tags?.length
+			filterPathPrefixes || filterTags
 				? {
-						pathPrefixes: pathPrefix ? [normalizeVaultPath(pathPrefix)] : undefined,
-						tags: tags,
+						pathPrefixes: filterPathPrefixes,
+						tags: filterTags,
 					}
 				: undefined;
 
@@ -355,11 +390,17 @@ export function createSearchNotesTool(app: App) {
 				.describe(
 					"Optional tags to filter by (e.g., ['#project', '#active']). Documents must have at least one of these tags.",
 				),
+			region: z
+				.string()
+				.optional()
+				.describe(
+					"Optional Region name to restrict search to. A Region is a user-defined, named note set (e.g., 'Machine Learning', 'Work Projects'). When omitted, the current working region is auto-applied. The region's filter is resolved and merged with any other filter parameters.",
+				),
 			recentOnly: z
 				.boolean()
 				.optional()
 				.describe(
-					"When true, ignore query text and return recently opened notes, optionally filtered by pathPrefix and tags.",
+					"When true, ignore query text and return recently opened notes, optionally filtered by pathPrefix, tags, and region.",
 				),
 		}),
 	});

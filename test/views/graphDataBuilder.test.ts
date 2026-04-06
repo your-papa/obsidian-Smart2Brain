@@ -4,7 +4,6 @@ import {
     buildGraphStructure,
     buildWikiGraph,
     applyColorGroups,
-    applySearchHighlight,
     computeClusters,
     deriveClusterLabelsFromGraph,
 } from "../../src/views/smart-graph/graphDataBuilder";
@@ -19,8 +18,8 @@ function createMockApp(
 ): App {
     const mockFiles = files.map((path) => ({
         path,
-        basename: path.replace(/\.md$/, "").split("/").pop(),
-        extension: "md",
+        basename: path.replace(/\.[^.]+$/, "").split("/").pop(),
+        extension: path.split(".").pop() ?? "md",
         name: path.split("/").pop(),
         constructor: { name: "TFile" },
     }));
@@ -39,7 +38,8 @@ function createMockApp(
             getFileCache,
         },
         vault: {
-            getMarkdownFiles: () => mockFiles,
+            getMarkdownFiles: () => mockFiles.filter((f) => f.extension === "md"),
+            getFiles: () => mockFiles,
             getAbstractFileByPath: (path: string) => mockFiles.find((f) => f.path === path) ?? null,
         },
     } as unknown as App;
@@ -431,39 +431,4 @@ describe("applyColorGroups", () => {
     });
 });
 
-describe("applySearchHighlight", () => {
-    const baseData = {
-        nodes: [
-            { id: "note1.md", path: "note1.md", label: "Note One", x: 0, y: 0 },
-            { id: "folder/note2.md", path: "folder/note2.md", label: "Note Two", x: 0, y: 0 },
-            { id: "other.md", path: "other.md", label: "Other", x: 0, y: 0 },
-        ],
-        edges: [],
-    };
 
-    it("should highlight matching nodes by label", () => {
-        const result = applySearchHighlight(baseData, "One");
-        expect(result.nodes[0].highlighted).toBe(true);
-        expect(result.nodes[1].highlighted).toBe(false);
-        expect(result.nodes[2].highlighted).toBe(false);
-    });
-
-    it("should highlight matching nodes by path", () => {
-        const result = applySearchHighlight(baseData, "folder");
-        expect(result.nodes[0].highlighted).toBe(false);
-        expect(result.nodes[1].highlighted).toBe(true);
-        expect(result.nodes[2].highlighted).toBe(false);
-    });
-
-    it("should be case-insensitive", () => {
-        const result = applySearchHighlight(baseData, "note");
-        expect(result.nodes[0].highlighted).toBe(true);
-        expect(result.nodes[1].highlighted).toBe(true);
-        expect(result.nodes[2].highlighted).toBe(false);
-    });
-
-    it("should clear highlights for empty query", () => {
-        const result = applySearchHighlight(baseData, "");
-        expect(result.nodes.every((n) => n.highlighted === false)).toBe(true);
-    });
-});

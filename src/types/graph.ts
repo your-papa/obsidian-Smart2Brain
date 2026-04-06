@@ -21,14 +21,6 @@ export type ProjectionMethod = "pca" | "umap";
 export type ClusteringAlgorithm = "kmeans" | "hdbscan";
 
 /**
- * Graph display mode.
- * - "wiki": Force-directed layout using only wiki link edges (initial view)
- * - "smart": Projected positions from embedding-based clustering
- * @deprecated Use `LayoutMode` and `ColorMode` instead.
- */
-export type GraphMode = "wiki" | "smart";
-
-/**
  * Layout engine for positioning nodes.
  * - "force": Force-directed simulation using wiki link edges (d3-force)
  * - "semantic": 2D projection from embedding vectors (UMAP / PCA)
@@ -42,6 +34,88 @@ export type LayoutMode = "force" | "semantic";
  * - "none": Default theme color, no special coloring
  */
 export type ColorMode = "groups" | "clusters" | "none";
+
+/**
+ * How segments (visual partitions) are derived for node coloring.
+ */
+export type SegmentBy =
+	| "semantic"
+	| "louvain"
+	| "folder"
+	| "tag"
+	| "extension"
+	| "regions"
+	| "none";
+
+/**
+ * A resolved segment of graph nodes — a visual partition of the current scope.
+ */
+export interface RegionSegment {
+	/** Unique key, e.g. "folder:Work", "cluster:3" */
+	id: string;
+	/** Display label shown in the legend */
+	label: string;
+	/** CSS color for this segment's nodes */
+	color: string;
+	/** How this segment was created */
+	source: SegmentBy;
+	/** Resolved file paths that belong to this segment */
+	paths: Set<string>;
+}
+
+// ─── View Filter Types ───────────────────────────────────────
+
+/**
+ * A leaf filter condition — matches files by a single criterion.
+ * - "folder": path prefix match (e.g. "Work" matches "Work/notes.md")
+ * - "tag": tag match incl. hierarchical (e.g. "#ml" matches "#ml/transformers")
+ * - "extension": file extension (e.g. "md", "pdf")
+ * - "paths": explicit frozen path list (for semantic clusters / lasso selections)
+ * - "query": semantic/lexical/hybrid search query, resolved eagerly to a paths list
+ */
+export type ViewFilterLeaf =
+	| { type: "folder"; value: string }
+	| { type: "tag"; value: string }
+	| { type: "extension"; value: string }
+	| { type: "paths"; value: string[] }
+	| { type: "query"; value: string; algorithm: "lexical" | "semantic" | "hybrid" };
+
+/**
+ * A composite filter that combines child conditions with a logic operator.
+ * - "all": AND — every child must match (intersection)
+ * - "any": OR — at least one child must match (union)
+ * - "none": NOT-ANY — no child may match (complement)
+ */
+export interface ViewFilterGroup {
+	type: "all" | "any" | "none";
+	conditions: ViewFilter[];
+}
+
+/**
+ * A recursive filter tree node — either a leaf criterion or a composite group.
+ * Used to define dynamic, re-resolvable note sets for saved Spaces.
+ */
+export type ViewFilter = ViewFilterLeaf | ViewFilterGroup;
+
+/**
+ * A **Space** — a named note set defined by a `ViewFilter` tree.
+ *
+ * Spaces are cross-cutting: they can be loaded in the graph (immerse),
+ * referenced in the search modal via `@spaceName` chips, and used by the
+ * agent's `search_notes(space=…)` parameter.
+ */
+export interface Space {
+	/** Unique identifier */
+	id: string;
+	/** User-visible label (also used as `@spaceName` in search) */
+	label: string;
+	/** The filter tree defining which notes belong to this Space */
+	filter: ViewFilter;
+	/** Display color for this Space in the graph legend and search chips */
+	color: string;
+	/** Timestamp of creation (ISO string) */
+	createdAt: string;
+}
 
 /**
  * A user-defined color group that assigns a color to nodes matching a query.
@@ -87,6 +161,12 @@ export interface GraphNode {
 	highlighted?: boolean;
 	/** Number of connections (degree) for sizing */
 	degree?: number;
+	/**
+	 * Normalized betweenness centrality (0–1).
+	 * High values indicate "bridge" nodes that connect otherwise distant parts of the graph.
+	 * Set when Louvain community detection is active.
+	 */
+	centrality?: number;
 }
 
 /**
@@ -115,6 +195,12 @@ export interface GraphData {
  * Settings for the graph view, persisted in plugin data.
  */
 export interface SmartGraphSettings {
+	/** Saved Spaces — named, cross-cutting note sets */
+	spaces: Space[];
+	/** Layout engine for node positioning */
+	layoutMode: LayoutMode;
+	/** Coloring strategy for graph nodes */
+	colorMode: ColorMode;
 	/** Default number of clusters for K-Means */
 	defaultK: number;
 	/** Whether to auto-determine K via silhouette score */
@@ -137,30 +223,27 @@ export interface SmartGraphSettings {
 	layoutFidelity: number;
 	/** Whether to show wiki link edges overlaid on the semantic graph */
 	showWikiLinks: boolean;
-	/** Zoom scale at which all labels are shown (0 = never) */
-	labelZoomThreshold: number;
 	/** Chat model used for LLM-powered graph features (e.g., cluster labeling) */
 	graphChatModel: import("../stores/chatStore.svelte").ChatModel | null;
 	/** Whether to automatically generate cluster labels after clustering */
 	autoLabelClusters: boolean;
 	/** Clustering algorithm to use */
-	clusteringAlgorithm: import("./graph").ClusteringAlgorithm;
+	clusteringAlgorithm: ClusteringAlgorithm;
 	/** Minimum cluster size for HDBSCAN */
 	minClusterSize: number;
 	/** User-defined color groups for the wiki graph mode */
 	colorGroups: ColorGroup[];
-	/** Layout engine for node positioning */
-	layoutMode: import("./graph").LayoutMode;
-	/** Coloring strategy for graph nodes */
-	colorMode: import("./graph").ColorMode;
-	/** Base node circle size (1–10). Actual radius also factors in node degree. */
-	nodeSize: number;
+	/** How nodes are colored/grouped: none | folder | tag | spaces | similarity clusters */
+	segmentBy: SegmentBy;
+	/** The Space the user was immersed in when the view was last closed. Restored on reload. */
+	activeImmersedSpaceId: string | null;
 }
 
 /**
  * Default graph settings.
  */
 export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
+	spaces: [],
 	defaultK: 5,
 	autoK: true,
 	linkDistance: 250,
@@ -172,7 +255,6 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	umapMinDist: 0.1,
 	layoutFidelity: 50,
 	showWikiLinks: true,
-	labelZoomThreshold: 2.5,
 	graphChatModel: null,
 	autoLabelClusters: false,
 	clusteringAlgorithm: "kmeans",
@@ -180,21 +262,47 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	colorGroups: [],
 	layoutMode: "force",
 	colorMode: "groups",
-	nodeSize: 4,
+	segmentBy: "none",
+	activeImmersedSpaceId: null,
 };
 
 /**
- * Obsidian theme color CSS variable names used as the base cluster palette.
- */
-/**
  * Detail about a focused (zoomed-in) cluster.
- * Shared between SmartGraphView and GraphInspector.
  */
 export interface FocusedClusterDetail {
 	cluster: number;
 	label: string;
 	noteCount: number;
 	topNotes: Array<{ label: string; path: string; degree: number }>;
+}
+
+/**
+ * Convert a `SegmentBy` to the persisted `ColorMode` value.
+ */
+export function segmentByToColorMode(source: SegmentBy): ColorMode {
+	switch (source) {
+		case "semantic":
+			return "clusters";
+		case "regions":
+		case "louvain":
+			return "groups";
+		default:
+			return "none";
+	}
+}
+
+/**
+ * Convert a persisted `ColorMode` to a `SegmentBy`.
+ */
+export function colorModeToSegmentBy(mode: ColorMode): SegmentBy {
+	switch (mode) {
+		case "clusters":
+			return "semantic";
+		case "groups":
+			return "regions";
+		case "none":
+			return "none";
+	}
 }
 
 export const THEME_COLOR_VARS = [
@@ -265,15 +373,8 @@ export function parseHSL(color: string): [number, number, number] {
 
 /**
  * Generate `k` cluster colors from a set of theme base colors.
- *
- * - The first `themeColors.length` clusters use the theme colors directly.
- * - Each subsequent "round" beyond the palette cycles back through the base
- *   colors with a cumulative hue shift (+30° per round), keeping them
- *   distinguishable but still theme-native.
- * - If no theme colors are provided, falls back to evenly-spaced HSL hues.
  */
 export function generateClusterColors(k: number, themeColors: string[] = []): string[] {
-	// Parse base colors into HSL
 	const base: [number, number, number][] =
 		themeColors.length > 0
 			? themeColors.map((c) => parseHSL(c))
@@ -288,7 +389,7 @@ export function generateClusterColors(k: number, themeColors: string[] = []): st
 
 	for (let i = 0; i < k; i++) {
 		const baseIndex = i % paletteSize;
-		const round = Math.floor(i / paletteSize); // 0 for first pass, 1+ for overflow
+		const round = Math.floor(i / paletteSize);
 		const [h, s, l] = base[baseIndex];
 		const shiftedHue = (h + round * HUE_SHIFT_PER_ROUND) % 360;
 		colors.push(`hsl(${shiftedHue}, ${s}%, ${l}%)`);

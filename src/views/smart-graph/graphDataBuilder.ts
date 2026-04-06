@@ -13,6 +13,7 @@ import type { App, TFile } from "obsidian";
 import { getAllTags } from "obsidian";
 
 import type { DocumentVector } from "../../vectorstore/types";
+import { getIndexableVaultFiles } from "../../utils/fileFiltering";
 import {
 	kMeansAsync,
 	suggestKAsync,
@@ -27,8 +28,12 @@ import {
 	generateClusterColors,
 	type SmartGraphSettings,
 	type ColorGroup,
+	type SegmentBy,
+	type RegionSegment,
+	type Space,
 } from "../../types/graph";
 import { edgeKey } from "../../utils/graphUtils";
+import { resolveViewFilter } from "../../lib/views";
 
 // ============================================================================
 // Cluster Assignment
@@ -49,8 +54,8 @@ export interface GraphFilter {
 	folders?: string[];
 	/** Only include files with these tags (any match) */
 	tags?: string[];
-	/** Search query to highlight matching nodes */
-	searchQuery?: string;
+	/** Only include files with these extensions (e.g. "md", "pdf") */
+	extensions?: string[];
 }
 
 /**
@@ -58,6 +63,11 @@ export interface GraphFilter {
  */
 function passesFilter(app: App, file: TFile, filter?: GraphFilter): boolean {
 	if (!filter) return true;
+
+	// Extension filter
+	if (filter.extensions && filter.extensions.length > 0) {
+		if (!filter.extensions.includes(file.extension.toLowerCase())) return false;
+	}
 
 	// Folder filter (append "/" so "Work" doesn't match "Workshop/")
 	if (filter.folders && filter.folders.length > 0) {
@@ -102,13 +112,24 @@ export interface GraphStructureResult {
 // Helper functions (extracted to reduce cognitive complexity)
 // ============================================================================
 
-export function filterDocuments(app: App, documents: DocumentVector[], filter?: GraphFilter): DocumentVector[] {
-	if (!filter?.folders?.length && !filter?.tags?.length) return documents;
-	return documents.filter((doc) => {
-		const file = app.vault.getAbstractFileByPath(doc.path);
-		if (!file || !("extension" in file)) return false;
-		return passesFilter(app, file as TFile, filter);
-	});
+export function filterDocuments(
+	app: App,
+	documents: DocumentVector[],
+	filter?: GraphFilter,
+	constrainPaths?: Set<string> | null,
+): DocumentVector[] {
+	let filtered = documents;
+	if (filter?.folders?.length || filter?.tags?.length || filter?.extensions?.length) {
+		filtered = documents.filter((doc) => {
+			const file = app.vault.getAbstractFileByPath(doc.path);
+			if (!file || !("extension" in file)) return false;
+			return passesFilter(app, file as TFile, filter);
+		});
+	}
+	if (constrainPaths) {
+		filtered = filtered.filter((doc) => constrainPaths.has(doc.path));
+	}
+	return filtered;
 }
 function buildWikiEdges(app: App, filteredPathSet: Set<string>): GraphEdge[] {
 	const edges: GraphEdge[] = [];
@@ -141,7 +162,7 @@ function createWikiNodes(filteredFiles: TFile[], degreeMap: Map<string, number>)
 	const nodes: GraphNode[] = [];
 	for (const file of filteredFiles) {
 		const degree = degreeMap.get(file.path) ?? 0;
-		const label = file.path.replace(/\.md$/, "").split("/").pop() ?? file.path;
+		const label = file.basename;
 		nodes.push({
 			id: file.path,
 			path: file.path,
@@ -210,7 +231,11 @@ export function createGraphNodes(
 	for (let i = 0; i < filtered.length; i++) {
 		const doc = filtered[i];
 		const degree = degreeMap.get(doc.path) ?? 0;
-		const label = doc.path.replace(/\.md$/, "").split("/").pop() ?? doc.path;
+		const label =
+			doc.path
+				.replace(/\.[^.]+$/, "")
+				.split("/")
+				.pop() ?? doc.path;
 		nodes.push({
 			id: doc.path,
 			path: doc.path,
@@ -615,11 +640,11 @@ export interface WikiGraphResult {
  *   graph's so mode transitions don't add/remove nodes.
  */
 export function buildWikiGraph(app: App, filter?: GraphFilter, constrainToPaths?: Set<string>): WikiGraphResult {
-	let filteredFiles = app.vault.getMarkdownFiles();
+	let filteredFiles = getIndexableVaultFiles(app.vault);
 	if (constrainToPaths) {
 		filteredFiles = filteredFiles.filter((file) => constrainToPaths.has(file.path));
 	}
-	if (filter?.folders?.length || filter?.tags?.length) {
+	if (filter?.folders?.length || filter?.tags?.length || filter?.extensions?.length) {
 		filteredFiles = filteredFiles.filter((file) => passesFilter(app, file, filter));
 	}
 
@@ -900,6 +925,272 @@ export function applyColorGroups(app: App, graphData: GraphData, colorGroups: Co
 }
 
 // ============================================================================
+// Unified Groups
+// ============================================================================
+
+/**
+ * Resolve segments for a given segmentBy source.
+ * Partitions the graph's nodes into colored {@link RegionSegment}s depending on
+ * how the user chose to segment them.
+ *
+ * - **folder**: one segment per unique top-level folder (or "Root" for files at vault root)
+ * - **tag**: one segment per unique tag across the displayed nodes
+ * - **extension**: one segment per file extension
+ * - **semantic**: uses a pre-computed `clusterMap` (K-Means / HDBSCAN)
+ * - **regions**: uses saved regions — each region becomes one segment (first-match priority)
+ * - **none**: returns an empty array (no segments)
+ */
+export function resolveSegments(
+	app: App,
+	graphData: GraphData,
+	source: SegmentBy,
+	options?: {
+		clusterMap?: Map<string, ClusterAssignment>;
+		clusterLabels?: Record<number, string>;
+		colorGroups?: ColorGroup[];
+		themeColors?: string[];
+		spaces?: Space[];
+		louvainCommunities?: Record<string, number>;
+	},
+): RegionSegment[] {
+	if (source === "none") return [];
+
+	const { clusterMap, clusterLabels, themeColors = [], spaces = [], louvainCommunities } = options ?? {};
+
+	switch (source) {
+		case "folder":
+			return resolveSegmentsByFolder(graphData, themeColors);
+		case "tag":
+			return resolveSegmentsByTag(app, graphData, themeColors);
+		case "extension":
+			return resolveSegmentsByExtension(graphData, themeColors);
+		case "semantic":
+			return resolveSegmentsByCluster(graphData, clusterMap, clusterLabels, themeColors);
+		case "louvain":
+			return resolveSegmentsByLouvain(graphData, louvainCommunities ?? {}, themeColors);
+		case "regions":
+			return resolveSegmentsBySpaces(app, graphData, spaces);
+		default:
+			return [];
+	}
+}
+
+function resolveSegmentsByFolder(graphData: GraphData, themeColors: string[]): RegionSegment[] {
+	const folderMap = new Map<string, Set<string>>();
+	for (const node of graphData.nodes) {
+		const parts = node.path.split("/");
+		const folder = parts.length > 1 ? parts[0] : "Root";
+		let set = folderMap.get(folder);
+		if (!set) {
+			set = new Set();
+			folderMap.set(folder, set);
+		}
+		set.add(node.path);
+	}
+	const sortedFolders = [...folderMap.keys()].sort();
+	const colors = generateClusterColors(sortedFolders.length, themeColors);
+	return sortedFolders.map((folder, i) => ({
+		id: `folder:${folder}`,
+		label: folder === "Root" ? "Root" : `${folder}/`,
+		color: colors[i],
+		source: "folder" as SegmentBy,
+		paths: folderMap.get(folder)!,
+	}));
+}
+
+function resolveSegmentsByTag(app: App, graphData: GraphData, themeColors: string[]): RegionSegment[] {
+	const tagMap = new Map<string, Set<string>>();
+	for (const node of graphData.nodes) {
+		const file = app.vault.getAbstractFileByPath(node.path);
+		if (!file || !("extension" in file)) continue;
+		const cache = app.metadataCache.getFileCache(file as TFile);
+		const tags = cache ? (getAllTags(cache) ?? []) : [];
+		for (const tag of tags) {
+			let set = tagMap.get(tag);
+			if (!set) {
+				set = new Set();
+				tagMap.set(tag, set);
+			}
+			set.add(node.path);
+		}
+	}
+	const sortedTags = [...tagMap.keys()].sort();
+	const colors = generateClusterColors(sortedTags.length, themeColors);
+	return sortedTags.map((tag, i) => ({
+		id: `tag:${tag}`,
+		label: tag,
+		color: colors[i],
+		source: "tag" as SegmentBy,
+		paths: tagMap.get(tag)!,
+	}));
+}
+
+function resolveSegmentsByExtension(graphData: GraphData, themeColors: string[]): RegionSegment[] {
+	const extMap = new Map<string, Set<string>>();
+	for (const node of graphData.nodes) {
+		const ext = node.path.split(".").pop()?.toLowerCase() ?? "";
+		let set = extMap.get(ext);
+		if (!set) {
+			set = new Set();
+			extMap.set(ext, set);
+		}
+		set.add(node.path);
+	}
+	const sortedExts = [...extMap.keys()].sort();
+	const colors = generateClusterColors(sortedExts.length, themeColors);
+	return sortedExts.map((ext, i) => ({
+		id: `extension:${ext}`,
+		label: `.${ext}`,
+		color: colors[i],
+		source: "extension" as SegmentBy,
+		paths: extMap.get(ext)!,
+	}));
+}
+
+function resolveSegmentsByCluster(
+	graphData: GraphData,
+	clusterMap?: Map<string, ClusterAssignment>,
+	clusterLabels?: Record<number, string>,
+	themeColors: string[] = [],
+): RegionSegment[] {
+	if (!clusterMap || clusterMap.size === 0) return [];
+	const clusterPaths = new Map<number, Set<string>>();
+	const clusterColors = new Map<number, string>();
+	for (const node of graphData.nodes) {
+		const assignment = clusterMap.get(node.id);
+		if (!assignment || assignment.cluster == null) continue;
+		let set = clusterPaths.get(assignment.cluster);
+		if (!set) {
+			set = new Set();
+			clusterPaths.set(assignment.cluster, set);
+		}
+		set.add(node.path);
+		if (!clusterColors.has(assignment.cluster)) {
+			clusterColors.set(assignment.cluster, assignment.color);
+		}
+	}
+	const sortedClusters = [...clusterPaths.keys()].sort((a, b) => a - b);
+	const fallbackColors = generateClusterColors(sortedClusters.length, themeColors);
+	return sortedClusters.map((clusterId, i) => ({
+		id: `cluster:${clusterId}`,
+		label: clusterLabels?.[clusterId] ?? `Cluster ${clusterId}`,
+		color: clusterColors.get(clusterId) ?? fallbackColors[i],
+		source: "semantic" as SegmentBy,
+		paths: clusterPaths.get(clusterId)!,
+	}));
+}
+
+/**
+ * Resolve segments using Louvain community detection on the wiki link graph.
+ * Communities are derived purely from link topology — notes that heavily
+ * interlink end up in the same community regardless of content similarity.
+ * Nodes with no wiki links are not assigned to any community and keep the
+ * default node color.
+ *
+ * `communities` is a pre-computed node-id → community-id map produced by
+ * `louvainAsync` in the compute worker.
+ */
+function resolveSegmentsByLouvain(
+	graphData: GraphData,
+	communities: Record<string, number>,
+	themeColors: string[],
+): RegionSegment[] {
+	if (Object.keys(communities).length === 0) return [];
+
+	const pathById = new Map(graphData.nodes.map((n) => [n.id, n.path]));
+	const communityPaths = new Map<number, Set<string>>();
+
+	for (const [nodeId, communityId] of Object.entries(communities)) {
+		const path = pathById.get(nodeId);
+		if (path == null) continue;
+		if (!communityPaths.has(communityId)) communityPaths.set(communityId, new Set());
+		communityPaths.get(communityId)!.add(path);
+	}
+
+	if (communityPaths.size === 0) return [];
+
+	// Sort by community size descending so the largest get the most prominent colors
+	const sorted = [...communityPaths.entries()].sort((a, b) => b[1].size - a[1].size || a[0] - b[0]);
+	const colors = generateClusterColors(sorted.length, themeColors);
+
+	return sorted.map(([, paths], i) => ({
+		id: `louvain:${i}`,
+		label: `Community ${i + 1}`,
+		color: colors[i],
+		source: "louvain" as SegmentBy,
+		paths,
+	}));
+}
+
+/**
+ * Resolve segments using saved Spaces as the coloring source.
+ * Each Space becomes one segment; nodes are assigned to the first
+ * matching Space (priority order). Spaces with no matching nodes are omitted.
+ */
+function resolveSegmentsBySpaces(app: App, graphData: GraphData, spaces: Space[]): RegionSegment[] {
+	if (spaces.length === 0) return [];
+
+	// Pre-resolve each space's filter to a path set (sync — query leaves return empty)
+	const spacePathSets: Array<{ space: Space; paths: Set<string> }> = spaces.map((space) => ({
+		space,
+		paths: resolveViewFilter(app, space.filter).paths,
+	}));
+
+	// Assign each node to the first matching space
+	const segmentPaths = new Map<string, Set<string>>();
+	for (const node of graphData.nodes) {
+		for (const { space, paths } of spacePathSets) {
+			if (paths.has(node.path)) {
+				let set = segmentPaths.get(space.id);
+				if (!set) {
+					set = new Set();
+					segmentPaths.set(space.id, set);
+				}
+				set.add(node.path);
+				break; // first-match wins
+			}
+		}
+	}
+
+	return spaces
+		.filter((space) => segmentPaths.has(space.id))
+		.map((space) => ({
+			id: `space:${space.id}`,
+			label: space.label,
+			color: space.color,
+			source: "regions" as SegmentBy,
+			paths: segmentPaths.get(space.id)!,
+		}));
+}
+
+/**
+ * Apply resolved segments to graph data — sets `color` on matching nodes.
+ * First matching segment wins; unmatched nodes keep their existing color.
+ */
+export function applySegments(graphData: GraphData, segments: RegionSegment[]): GraphData {
+	if (segments.length === 0) return graphData;
+	// Build a path → (color, cluster index) lookup for O(1) per-node
+	const pathInfo = new Map<string, { color: string; cluster: number }>();
+	// First segment to claim a path wins (ordered)
+	for (let i = 0; i < segments.length; i++) {
+		for (const path of segments[i].paths) {
+			if (!pathInfo.has(path)) {
+				pathInfo.set(path, { color: segments[i].color, cluster: i });
+			}
+		}
+	}
+	return {
+		...graphData,
+		nodes: graphData.nodes.map((node) => {
+			const info = pathInfo.get(node.path);
+			if (info === undefined) return node; // not in any segment
+			if (!info.color) return { ...node, color: undefined, cluster: info.cluster };
+			return { ...node, color: info.color, cluster: info.cluster };
+		}),
+	};
+}
+
+// ============================================================================
 // Convenience: build + cluster in one call (used by Refresh / initial load)
 // ============================================================================
 
@@ -940,20 +1231,3 @@ export async function buildGraph(
  * Apply search highlighting to graph nodes.
  * Nodes whose label matches the query get `highlighted = true`.
  */
-export function applySearchHighlight(data: GraphData, query: string): GraphData {
-	if (!query.trim()) {
-		return {
-			...data,
-			nodes: data.nodes.map((n) => ({ ...n, highlighted: false })),
-		};
-	}
-
-	const lower = query.toLowerCase();
-	return {
-		...data,
-		nodes: data.nodes.map((n) => ({
-			...n,
-			highlighted: n.label.toLowerCase().includes(lower) || n.path.toLowerCase().includes(lower),
-		})),
-	};
-}
