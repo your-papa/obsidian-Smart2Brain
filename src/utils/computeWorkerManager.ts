@@ -12,6 +12,9 @@ import { project2D, reduceDimensions } from "./projection";
 import type { ProjectionMethod } from "../types/graph";
 import type { ComputeWorkerRequest, ComputeWorkerResponse, SerializedVectorBatch } from "./computeWorker";
 import ComputeWorkerConstructor from "./computeWorker?worker&inline";
+import Graph from "graphology";
+import louvain from "graphology-communities-louvain";
+import betweennessCentrality from "graphology-metrics/centrality/betweenness";
 
 let worker: Worker | null = null;
 let requestId = 0;
@@ -92,6 +95,8 @@ function getTransferList(request: ComputeWorkerRequest): Transferable[] {
 		case "project2D":
 		case "reduceDimensions":
 			return [request.vectors.data.buffer];
+		case "louvain":
+			return [];
 	}
 }
 
@@ -151,6 +156,20 @@ function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse |
 				type: "reduceDimensions" as const,
 				result: toTransferable(result),
 			}));
+		}
+		case "louvain": {
+			const graph = new Graph({ type: "undirected", multi: false });
+			for (let i = 0; i < request.sources.length; i++) {
+				if (request.sources[i] !== request.targets[i]) {
+					graph.mergeEdge(request.sources[i], request.targets[i], { weight: request.weights[i] });
+				}
+			}
+			const communities: Record<string, number> = graph.order > 0 ? louvain(graph) : {};
+			let centrality: Record<string, number> | undefined;
+			if (request.withCentrality && graph.order > 0) {
+				centrality = betweennessCentrality(graph, { normalized: true, getEdgeWeight: "weight" });
+			}
+			return { id: request.id, type: "louvain" as const, result: { communities, centrality } };
 		}
 	}
 }
@@ -254,6 +273,27 @@ export async function reduceDimensionsAsync(
 		umapEpochs: umapOptions?.nEpochs,
 	});
 	return fromTransferable(resp.result);
+}
+
+export async function louvainAsync(
+	sources: string[],
+	targets: string[],
+	weights: number[],
+	withCentrality = false,
+): Promise<{ communities: Record<string, number>; centrality: Record<string, number> }> {
+	const id = ++requestId;
+	const resp = await postRequest<Extract<ComputeWorkerResponse, { type: "louvain" }>>({
+		id,
+		type: "louvain",
+		sources,
+		targets,
+		weights,
+		withCentrality,
+	});
+	return {
+		communities: resp.result.communities,
+		centrality: resp.result.centrality ?? {},
+	};
 }
 
 /**

@@ -10,6 +10,9 @@ import { kMeans, suggestK, hdbscan } from "./clustering";
 import type { HDBSCANResult } from "./clustering";
 import { project2D, reduceDimensions } from "./projection";
 import type { ProjectionMethod } from "../types/graph";
+import Graph from "graphology";
+import louvain from "graphology-communities-louvain";
+import betweennessCentrality from "graphology-metrics/centrality/betweenness";
 
 export interface SerializedVectorBatch {
 	data: Float32Array;
@@ -47,6 +50,15 @@ export type ComputeWorkerRequest =
 			umapNeighbors?: number;
 			umapMinDist?: number;
 			umapEpochs?: number;
+	  }
+	| {
+			id: number;
+			type: "louvain";
+			sources: string[];
+			targets: string[];
+			weights: number[];
+			/** If true, also compute betweenness centrality on the same graph */
+			withCentrality?: boolean;
 	  };
 
 export type ComputeWorkerResponse =
@@ -59,6 +71,15 @@ export type ComputeWorkerResponse =
 	| { id: number; type: "hdbscan"; result: HDBSCANResult }
 	| { id: number; type: "project2D"; result: { x: number; y: number }[] }
 	| { id: number; type: "reduceDimensions"; result: SerializedVectorBatch }
+	| {
+			id: number;
+			type: "louvain";
+			result: {
+				communities: Record<string, number>;
+				/** Normalized betweenness centrality per node (0–1). Only present when withCentrality was true. */
+				centrality?: Record<string, number>;
+			};
+	  }
 	| { id: number; type: "error"; error: string };
 
 /**
@@ -167,6 +188,28 @@ workerScope.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
 					result: fromFloat32Arrays(result),
 				};
 				workerScope.postMessage(response, [response.result.data.buffer as ArrayBuffer]);
+				break;
+			}
+			case "louvain": {
+				const graph = new Graph({ type: "undirected", multi: false });
+				for (let i = 0; i < msg.sources.length; i++) {
+					if (msg.sources[i] !== msg.targets[i]) {
+						graph.mergeEdge(msg.sources[i], msg.targets[i], { weight: msg.weights[i] });
+					}
+				}
+				const communities: Record<string, number> = graph.order > 0 ? louvain(graph) : {};
+
+				let centrality: Record<string, number> | undefined;
+				if (msg.withCentrality && graph.order > 0) {
+					// betweennessCentrality returns raw counts; we use normalized=true for 0–1 range
+					centrality = betweennessCentrality(graph, { normalized: true, getEdgeWeight: "weight" });
+				}
+
+				workerScope.postMessage({
+					id: msg.id,
+					type: "louvain",
+					result: { communities, centrality },
+				} satisfies ComputeWorkerResponse);
 				break;
 			}
 		}

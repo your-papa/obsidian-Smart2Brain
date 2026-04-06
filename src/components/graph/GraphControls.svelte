@@ -1,45 +1,31 @@
 <script lang="ts">
 import Button from "../ui/Button.svelte";
-import Toggle from "../ui/Toggle.svelte";
 import RangeSlider from "../ui/RangeSlider.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
-import Text from "../ui/Text.svelte";
-import PresetColorSelector, { type PresetColorOption } from "../ui/PresetColorSelector.svelte";
 import SettingContainer from "../settings/SettingContainer.svelte";
+import SpacePanel from "./SpacePanel.svelte";
 import {
 	type ProjectionMethod,
 	type ClusteringAlgorithm,
 	type SmartGraphSettings,
 	type LayoutMode,
-	type ColorMode,
-	type ColorGroup,
-	THEME_COLOR_VARS,
+	type SegmentBy,
+	type Space,
+	type ViewFilter,
+	type GraphData,
+	type RegionSegment,
 	DEFAULT_SMART_GRAPH_SETTINGS,
 } from "../../types/graph";
 
-const GRAPH_PRESET_COLOR_OPTIONS: Array<PresetColorOption & { cssVar?: string }> = [
-	{ value: "#e93147", label: "Red", previewColor: "#e93147", cssVar: "--color-red" },
-	{ value: "#086ddd", label: "Blue", previewColor: "#086ddd", cssVar: "--color-blue" },
-	{ value: "#08b94e", label: "Green", previewColor: "#08b94e", cssVar: "--color-green" },
-	{ value: "#ec7500", label: "Orange", previewColor: "#ec7500", cssVar: "--color-orange" },
-	{ value: "#7852ee", label: "Purple", previewColor: "#7852ee", cssVar: "--color-purple" },
-	{ value: "#00bfbc", label: "Cyan", previewColor: "#00bfbc", cssVar: "--color-cyan" },
-	{ value: "#e0ac00", label: "Yellow", previewColor: "#e0ac00", cssVar: "--color-yellow" },
-	{ value: "#d53984", label: "Pink", previewColor: "#d53984", cssVar: "--color-pink" },
-	{ value: "#7a6ae6", label: "Accent", previewColor: "#7a6ae6", cssVar: "--interactive-accent" },
-];
-
 interface Props {
 	settings: SmartGraphSettings;
-	suggestedK?: number | null;
 	isLoading?: boolean;
 	loadingLabel?: string;
 	layoutMode: LayoutMode;
-	colorMode: ColorMode;
+	segmentBy: SegmentBy;
 	onSettingsChange: (patch: Partial<SmartGraphSettings>) => void;
+	onSegmentByChange: (s: SegmentBy) => void;
 	onResetSettings?: () => void;
-	/** Resolved color groups (user-defined or native Obsidian fallback). */
-	effectiveColorGroups?: ColorGroup[];
 	onFitToView: () => void;
 	onRefresh: () => void;
 	onApplyProjection?: () => void;
@@ -49,28 +35,37 @@ interface Props {
 	isLabeling?: boolean;
 	lassoMode?: boolean;
 	onLassoModeChange?: (active: boolean) => void;
-
-	// Cluster legend
-	clusterLegendEntries?: Array<{ cluster: number; label: string; color: string; count: number }>;
-	focusedClusters?: Set<number>;
-	onFocusCluster?: (cluster: number) => void;
-
-	// Inspector integration
-	inspectorOpen?: boolean;
-	hasActiveFilters?: boolean;
-	onToggleInspector?: () => void;
+	graphData?: GraphData;
+	nodeCount?: number;
+	// Spaces
+	spaces: Space[];
+	immersedSpaceId: string | null;
+	pendingSpaceFilter: ViewFilter | null;
+	onImmerse: (id: string) => void;
+	onExitImmersion: () => void;
+	onSaveSpace: (draft: { label: string; filter: ViewFilter; color: string }) => void;
+	onUpdateSpace: (id: string, patch: Partial<Omit<Space, "id">>) => void;
+	onDeleteSpace: (id: string) => void;
+	onClearPendingSpaceFilter: () => void;
+	onPreviewSpace?: (draft: Space | null) => void;
+	availableFolders?: string[];
+	availableTags?: string[];
+	spaceBuilderOpen?: boolean;
+	// Segments
+	segments?: RegionSegment[];
+	focusedSegmentId?: string | null;
+	onFocusSegment?: (id: string | null) => void;
 }
 
 let {
 	settings,
-	suggestedK = null,
 	isLoading = false,
 	loadingLabel = "",
 	layoutMode,
-	colorMode,
+	segmentBy,
 	onSettingsChange,
+	onSegmentByChange,
 	onResetSettings,
-	effectiveColorGroups = settings.colorGroups,
 	onFitToView,
 	onRefresh,
 	onApplyProjection,
@@ -80,27 +75,58 @@ let {
 	isLabeling = false,
 	lassoMode = false,
 	onLassoModeChange,
-	clusterLegendEntries = [],
-	focusedClusters = new Set(),
-	onFocusCluster,
-	inspectorOpen = false,
-	hasActiveFilters = false,
-	onToggleInspector,
+	graphData = { nodes: [], edges: [] },
+	nodeCount = 0,
+	spaces,
+	immersedSpaceId,
+	pendingSpaceFilter,
+	onImmerse,
+	onExitImmersion,
+	onSaveSpace,
+	onUpdateSpace,
+	onDeleteSpace,
+	onClearPendingSpaceFilter,
+	onPreviewSpace,
+	availableFolders = [],
+	availableTags = [],
+	spaceBuilderOpen = $bindable(false),
+	segments = [],
+	focusedSegmentId = null,
+	onFocusSegment,
 }: Props = $props();
 
 let isCollapsed = $state(true);
 
-// Per-section collapse state
 let sectionOpen: Record<string, boolean> = $state({
-	layout: true,
-	coloring: true,
-	clusters: false,
-	colorGroups: false,
-	advanced: false,
-	appearance: false,
+	colorBy: true,
+	spaces: true,
+	layout: false,
+	overview: false,
 });
 
-/** Keys tracked for the "Apply" button — changing any triggers the dirty indicator. */
+// When the space builder is requested from outside, ensure the panel and section are visible
+$effect(() => {
+	if (spaceBuilderOpen) {
+		isCollapsed = false;
+		sectionOpen.spaces = true;
+	}
+});
+
+let graphStats = $derived.by(() => {
+	const { nodes, edges } = graphData;
+	if (nodes.length === 0) return null;
+
+	const degrees = nodes.map((n) => n.degree ?? 0);
+	const totalDegree = degrees.reduce((a, b) => a + b, 0);
+	const avgDegree = totalDegree / nodes.length;
+	const maxDegree = Math.max(...degrees);
+	const unlinkedNotes = degrees.filter((d) => d === 0).length;
+	const wikiEdges = edges.filter((e) => e.type === "wiki").length;
+	const clusters = new Set(nodes.map((n) => n.cluster).filter((c) => c != null));
+
+	return { avgDegree, maxDegree, unlinkedNotes, wikiEdges, clusterCount: clusters.size };
+});
+
 const APPLY_KEYS = [
 	"projectionMethod",
 	"umapNeighbors",
@@ -130,12 +156,6 @@ const layoutModeOptions = [
 	{ display: "Semantic", value: "semantic" as LayoutMode },
 ];
 
-const colorModeOptions = [
-	{ display: "Color groups", value: "groups" as ColorMode },
-	{ display: "Clusters", value: "clusters" as ColorMode },
-	{ display: "None", value: "none" as ColorMode },
-];
-
 const projectionOptions = [
 	{ display: "UMAP", value: "umap" as ProjectionMethod },
 	{ display: "PCA", value: "pca" as ProjectionMethod },
@@ -153,10 +173,6 @@ function handleLayoutModeChange(val: LayoutMode) {
 	} else {
 		onSwitchToForce?.();
 	}
-}
-
-function handleColorModeChange(val: ColorMode) {
-	onSettingsChange({ colorMode: val });
 }
 
 function handleProjectionChange(val: ProjectionMethod) {
@@ -187,10 +203,6 @@ function handleKChange(val: number) {
 	onSettingsChange({ defaultK: val });
 }
 
-function handleAutoKChange(checked: boolean) {
-	onSettingsChange({ autoK: checked });
-}
-
 function handleClusteringAlgorithmChange(val: ClusteringAlgorithm) {
 	onSettingsChange({ clusteringAlgorithm: val });
 }
@@ -199,13 +211,6 @@ function handleMinClusterSizeChange(val: number) {
 	onSettingsChange({ minClusterSize: val });
 }
 
-function handleLabelZoomChange(val: number) {
-	onSettingsChange({ labelZoomThreshold: val / 10 });
-}
-
-function handleNodeSizeChange(val: number) {
-	onSettingsChange({ nodeSize: val });
-}
 
 function handleLinkDistanceChange(val: number) {
 	onSettingsChange({ linkDistance: val });
@@ -223,48 +228,19 @@ function handleLinkStrengthChange(val: number) {
 	onSettingsChange({ linkStrength: val / 100 });
 }
 
-// Color group handlers
-function getGraphPresetColorOptions(): PresetColorOption[] {
-	return GRAPH_PRESET_COLOR_OPTIONS;
-}
-
-function resolveGraphGroupColor(color: string | undefined): string {
-	if (!color) return GRAPH_PRESET_COLOR_OPTIONS[0]?.value ?? "#000000";
-	const options = getGraphPresetColorOptions();
-	// Match preset by value or CSS variable
-	const preset =
-		options.find((option) => option.value === color) ??
-		GRAPH_PRESET_COLOR_OPTIONS.find((option) => color === `var(${option.cssVar})`);
-	if (preset) return preset.value;
-	// Pass through any valid custom color (hex, rgb, etc.)
-	return color;
-}
-
-function addColorGroup() {
-	const defaultColor = resolveGraphGroupColor(undefined);
-	const updated: ColorGroup[] = [...effectiveColorGroups, { query: "", color: defaultColor }];
-	onSettingsChange({ colorGroups: updated });
-}
-
-function removeColorGroup(index: number) {
-	const updated = effectiveColorGroups.filter((_: ColorGroup, i: number) => i !== index);
-	onSettingsChange({ colorGroups: updated });
-}
-
-function updateColorGroupQuery(index: number, query: string) {
-	const updated = effectiveColorGroups.map((g: ColorGroup, i: number) => (i === index ? { ...g, query } : g));
-	onSettingsChange({ colorGroups: updated });
-}
-
-function updateColorGroupColor(index: number, color: string) {
-	const updated = effectiveColorGroups.map((g: ColorGroup, i: number) => (i === index ? { ...g, color } : g));
-	onSettingsChange({ colorGroups: updated });
-}
-
 function handleResetSettings() {
 	onResetSettings?.();
 	appliedSnapshot = takeSnapshot(DEFAULT_SMART_GRAPH_SETTINGS);
 }
+
+const colorByOptions = [
+	{ display: "None", value: "none" as SegmentBy },
+	{ display: "Spaces", value: "regions" as SegmentBy },
+	{ display: "Similarity", value: "semantic" as SegmentBy },
+	{ display: "Link Communities", value: "louvain" as SegmentBy },
+	{ display: "Folder", value: "folder" as SegmentBy },
+	{ display: "Tag", value: "tag" as SegmentBy },
+];
 </script>
 
 <!-- Unified vertical toolbar -->
@@ -279,311 +255,80 @@ function handleResetSettings() {
 	/>
 	<div class="toolbar-icon-wrapper">
 		<Button
-			iconId="search"
-			tooltip={inspectorOpen ? "Hide inspector" : "Show inspector"}
-			onClick={() => {
-				if (!inspectorOpen) isCollapsed = true;
-				onToggleInspector?.();
-			}}
-			styles={inspectorOpen ? "is-active" : ""}
-		/>
-		{#if hasActiveFilters}
-			<span class="toolbar-badge"></span>
-		{/if}
-	</div>
-	<div class="toolbar-icon-wrapper">
-		<Button
 			iconId="sliders-horizontal"
-			tooltip={isCollapsed ? "Show graph settings" : "Hide graph settings"}
+			tooltip={isCollapsed ? "Show graph panel" : "Hide graph panel"}
 			onClick={() => {
-				if (isCollapsed && inspectorOpen) onToggleInspector?.();
 				isCollapsed = !isCollapsed;
 			}}
 			styles={!isCollapsed ? "is-active" : ""}
 		/>
+		{#if immersedSpaceId}
+			<span class="toolbar-badge"></span>
+		{/if}
 	</div>
 </div>
 
-<!-- Settings panel -->
+<!-- Unified settings panel -->
 <div class="graph-controls" class:collapsed={isCollapsed}>
 	{#if !isCollapsed}
 		<div class="graph-controls-header">
 			<div>
-				<h4 class="graph-controls-title" data-testid="graph-controls-title">Graph Settings</h4>
+				<h4 class="graph-controls-title" data-testid="graph-controls-title">Graph Panel</h4>
+				<div class="graph-controls-subtitle">
+					{nodeCount} notes · {layoutMode === "force" ? "Force" : "Semantic"}
+					{#if isLoading}
+						<span class="loading-label"> · {loadingLabel}</span>
+					{/if}
+				</div>
 			</div>
 			<Button iconId="rotate-ccw" onClick={handleResetSettings} tooltip="Reset to defaults" />
 		</div>
 
 		<div class="graph-controls-body">
+
 			<!-- ═══════════════════════════════════════ -->
-			<!-- LAYOUT SECTION                         -->
+			<!-- COLOR BY SECTION                       -->
 			<!-- ═══════════════════════════════════════ -->
 			<button
 				type="button"
 				class="section-header section-header--first"
-				onclick={() => (sectionOpen.layout = !sectionOpen.layout)}
+				onclick={() => (sectionOpen.colorBy = !sectionOpen.colorBy)}
 			>
-				<span>Layout</span>
-				<svg
-					class="section-chevron"
-					class:open={sectionOpen.layout}
-					xmlns="http://www.w3.org/2000/svg"
-					width="12"
-					height="12"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
-				>
+				<span>Color by{segmentBy !== "none" ? ` · ${colorByOptions.find(o => o.value === segmentBy)?.display ?? segmentBy}` : ""}</span>
+				<svg class="section-chevron" class:open={sectionOpen.colorBy} xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
 			</button>
 
-			{#if sectionOpen.layout}
-				<SettingContainer name="Positioning" desc="How nodes are arranged in space">
+			{#if sectionOpen.colorBy}
+				<SettingContainer name="Color by" desc="How nodes are colored and grouped" compact>
 					<Dropdown
 						type="options"
-						dropdown={layoutModeOptions}
-						selected={layoutMode}
-						onchange={handleLayoutModeChange}
+						dropdown={colorByOptions}
+						selected={segmentBy}
+						onchange={(v) => onSegmentByChange(v)}
 					/>
 				</SettingContainer>
 
-				<!-- Force-specific settings -->
-				{#if layoutMode === "force"}
-					<SettingContainer name="Link distance" desc="Target distance between connected nodes">
-						<RangeSlider
-							value={settings.linkDistance}
-							min={30}
-							max={500}
-							step={5}
-							showValue={true}
-							oncommit={handleLinkDistanceChange}
-						/>
-					</SettingContainer>
-
-					<SettingContainer name="Repulsion" desc="How strongly nodes push each other apart">
-						<RangeSlider
-							value={Math.abs(settings.chargeStrength)}
-							min={10}
-							max={1500}
-							step={10}
-							showValue={true}
-							oncommit={handleChargeStrengthChange}
-						/>
-					</SettingContainer>
-
-					<SettingContainer name="Center force" desc="How strongly the graph is pulled toward the center">
-						<RangeSlider
-							value={Math.round(settings.centerStrength * 100)}
-							min={0}
-							max={100}
-							step={1}
-							showValue={true}
-							oncommit={handleCenterStrengthChange}
-						/>
-					</SettingContainer>
-
-					<SettingContainer name="Link strength" desc="How strongly edges pull connected nodes together">
-						<RangeSlider
-							value={Math.round(settings.linkStrength * 100)}
-							min={0}
-							max={100}
-							step={1}
-							showValue={true}
-							oncommit={handleLinkStrengthChange}
-						/>
-					</SettingContainer>
-				{/if}
-
-				<!-- Semantic-specific settings -->
-				{#if layoutMode === "semantic"}
-					<SettingContainer name="Projection" desc="2D layout algorithm">
-						<Dropdown
-							type="options"
-							dropdown={projectionOptions}
-							selected={settings.projectionMethod}
-							onchange={handleProjectionChange}
-						/>
-					</SettingContainer>
-
-					<SettingContainer
-						name="Layout fidelity"
-						desc="Speed vs. projection accuracy"
-					>
-						<div class="graph-setting-stack">
-							<RangeSlider
-								value={settings.layoutFidelity}
-								min={0}
-								max={100}
-								step={5}
-								showValue={true}
-								oncommit={handleLayoutFidelityChange}
-							/>
-							<div class="graph-inline-hint">{getLayoutFidelityLabel(settings.layoutFidelity)}</div>
-						</div>
-					</SettingContainer>
-
-					{#if settings.projectionMethod === "umap"}
-						<SettingContainer
-							name="UMAP neighbors"
-							desc="Nearby points used to shape the projection"
-						>
-							<RangeSlider
-								value={settings.umapNeighbors}
-								min={3}
-								max={50}
-								step={1}
-								showValue={true}
-								oncommit={handleUmapNeighborsChange}
-							/>
-						</SettingContainer>
-
-						<SettingContainer
-							name="UMAP min dist"
-							desc="How tightly points can be packed"
-						>
-							<RangeSlider
-								value={settings.umapMinDist}
-								min={0}
-								max={0.99}
-								step={0.01}
-								showValue={true}
-								oncommit={handleUmapMinDistChange}
-							/>
-						</SettingContainer>
-					{/if}
-				{/if}
-			{/if}
-
-			<!-- ═══════════════════════════════════════ -->
-			<!-- COLORING SECTION                       -->
-			<!-- ═══════════════════════════════════════ -->
-			<button
-				type="button"
-				class="section-header"
-				onclick={() => (sectionOpen.coloring = !sectionOpen.coloring)}
-			>
-				<span>Coloring</span>
-				<svg
-					class="section-chevron"
-					class:open={sectionOpen.coloring}
-					xmlns="http://www.w3.org/2000/svg"
-					width="12"
-					height="12"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
-				>
-			</button>
-
-			{#if sectionOpen.coloring}
-				<SettingContainer name="Color mode" desc="How nodes are colored">
-					<Dropdown
-						type="options"
-						dropdown={colorModeOptions}
-						selected={colorMode}
-						onchange={handleColorModeChange}
-					/>
-				</SettingContainer>
-
-				<!-- Color Groups (groups mode) -->
-				{#if colorMode === "groups"}
-					<button
-						type="button"
-						class="section-header section-header--nested"
-						onclick={() => (sectionOpen.colorGroups = !sectionOpen.colorGroups)}
-					>
-						<span>Color Groups</span>
-						<svg
-							class="section-chevron"
-							class:open={sectionOpen.colorGroups}
-							xmlns="http://www.w3.org/2000/svg"
-							width="12"
-							height="12"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
-						>
-					</button>
-
-					{#if sectionOpen.colorGroups}
-					{#each effectiveColorGroups as group, i}
-							{@const graphColorOptions = getGraphPresetColorOptions()}
-							<div class="color-group-row">
-								<PresetColorSelector
-									value={resolveGraphGroupColor(group.color)}
-									options={graphColorOptions}
-									popoverLabel="Group Color"
-									triggerLabel={`Select color for group ${i + 1}`}
-									allowCustomColor={true}
-									onSelect={(color) => updateColorGroupColor(i, color)}
-								/>
-								<Text
-									inputType="text"
-									value={group.query}
-									placeholder="folder/ or #tag"
-									onchange={(v) => updateColorGroupQuery(i, v)}
-								/>
-								<Button iconId="x" onClick={() => removeColorGroup(i)} tooltip="Remove group" />
-							</div>
-						{/each}
-						<div class="apply-bar">
-							<Button iconId="plus" buttonText="Add group" onClick={addColorGroup} />
-						</div>
-					{/if}
-				{/if}
-
-				<!-- Cluster Legend & Settings (clusters mode) -->
-				{#if colorMode === "clusters"}
-					{#if clusterLegendEntries.length > 0}
-						<button
-							type="button"
-							class="section-header section-header--nested"
-							onclick={() => (sectionOpen.clusters = !sectionOpen.clusters)}
-						>
-							<span>Clusters ({clusterLegendEntries.length})</span>
-							<svg
-								class="section-chevron"
-								class:open={sectionOpen.clusters}
-								xmlns="http://www.w3.org/2000/svg"
-								width="12"
-								height="12"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
+				<!-- Segment list -->
+				{#if segments.length > 0 && segmentBy !== "none"}
+					<div class="segment-list">
+						{#each segments as seg (seg.id)}
+							<button
+								type="button"
+								class="segment-row"
+								class:segment-row--active={focusedSegmentId === seg.id}
+								onclick={() => onFocusSegment?.(focusedSegmentId === seg.id ? null : seg.id)}
 							>
-						</button>
+								<span class="segment-dot" style="background-color: {seg.color}"></span>
+								<span class="segment-label">{seg.label}</span>
+								<span class="segment-count">{seg.paths.size}</span>
+							</button>
+						{/each}
+					</div>
+				{/if}
 
-						{#if sectionOpen.clusters}
-							<div class="cluster-legend-list">
-								{#each clusterLegendEntries as entry}
-									<button
-										type="button"
-										class="cluster-legend-item"
-										class:focused={focusedClusters.has(entry.cluster)}
-										class:dimmed={focusedClusters.size > 0 && !focusedClusters.has(entry.cluster)}
-										onclick={() => onFocusCluster?.(entry.cluster)}
-									>
-										<span class="cluster-legend-swatch" style="background: {entry.color}"></span>
-										<span class="cluster-legend-label">{entry.label}</span>
-										<span class="cluster-legend-count">{entry.count}</span>
-									</button>
-								{/each}
-							</div>
-						{/if}
-					{/if}
-
-					<SettingContainer name="Algorithm" desc="Clustering method">
+				<!-- Similarity-specific: clustering controls -->
+				{#if segmentBy === "semantic"}
+					<SettingContainer name="Algorithm" desc="How nodes are grouped into clusters" compact>
 						<Dropdown
 							type="options"
 							dropdown={clusteringAlgorithmOptions}
@@ -592,29 +337,8 @@ function handleResetSettings() {
 						/>
 					</SettingContainer>
 
-					{#if settings.clusteringAlgorithm === "kmeans"}
-						<SettingContainer name="Auto K" desc="Automatically determine cluster count">
-							<Toggle checked={settings.autoK} onchange={handleAutoKChange} />
-						</SettingContainer>
-
-						{#if !settings.autoK}
-							<SettingContainer name="Clusters (K)" desc="Number of semantic clusters">
-								<RangeSlider
-									value={settings.defaultK}
-									min={2}
-									max={20}
-									step={1}
-									showValue={true}
-									oncommit={handleKChange}
-								/>
-							</SettingContainer>
-						{:else if suggestedK !== null}
-							<div class="graph-info">
-								Auto K: <strong>{suggestedK}</strong> clusters
-							</div>
-						{/if}
-					{:else if settings.clusteringAlgorithm === "hdbscan"}
-						<SettingContainer name="Min cluster size" desc="Min points to form a cluster">
+					{#if settings.clusteringAlgorithm === "hdbscan"}
+						<SettingContainer name="Min cluster size" desc="Smallest allowed cluster" compact>
 							<RangeSlider
 								value={settings.minClusterSize}
 								min={2}
@@ -624,93 +348,154 @@ function handleResetSettings() {
 								oncommit={handleMinClusterSizeChange}
 							/>
 						</SettingContainer>
+					{:else}
+						<SettingContainer name="Clusters (K)" desc={settings.autoK ? "Auto-determined" : "Number of clusters"} compact>
+							{#if !settings.autoK}
+								<RangeSlider
+									value={settings.defaultK}
+									min={2}
+									max={30}
+									step={1}
+									showValue={true}
+									oncommit={handleKChange}
+								/>
+							{/if}
+						</SettingContainer>
 					{/if}
 
-					{#if onLabelClusters}
-						<div class="apply-bar">
+					<div class="color-by-actions">
+						<Button
+							buttonText={isLabeling ? "Labeling…" : "Label clusters"}
+							onClick={onLabelClusters}
+							disabled={isLabeling || isLoading}
+						/>
+						{#if projectionDirty && onApplyProjection}
 							<Button
-								iconId="tags"
-								buttonText={isLabeling ? "Labeling…" : "Label clusters"}
-								onClick={() => onLabelClusters?.()}
-								tooltip="Generate cluster labels with LLM"
-								disabled={isLabeling || isLoading}
+								cta
+								buttonText="Apply"
+								onClick={() => { onApplyProjection?.(); appliedSnapshot = takeSnapshot(settings); }}
+								tooltip="Recompute clusters"
+								disabled={isLoading}
 							/>
+						{/if}
+					</div>
+				{/if}
+			{/if}
+
+			<!-- ═══════════════════════════════════════ -->
+			<!-- SPACES SECTION                         -->
+			<!-- ═══════════════════════════════════════ -->
+			<button
+				type="button"
+				class="section-header"
+				onclick={() => (sectionOpen.spaces = !sectionOpen.spaces)}
+			>
+				<span>Spaces{spaces.length > 0 ? ` (${spaces.length})` : ""}</span>
+				<svg class="section-chevron" class:open={sectionOpen.spaces} xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+			</button>
+
+			{#if sectionOpen.spaces}
+				<SpacePanel
+					{spaces}
+					{immersedSpaceId}
+					{pendingSpaceFilter}
+					onImmerse={onImmerse}
+					onExit={onExitImmersion}
+					onSave={onSaveSpace}
+					onUpdate={onUpdateSpace}
+					onDelete={onDeleteSpace}
+					onClearPending={onClearPendingSpaceFilter}
+					{onPreviewSpace}
+					{availableFolders}
+					{availableTags}
+					bind:builderOpen={spaceBuilderOpen}
+				/>
+			{/if}
+
+			<!-- ═══════════════════════════════════════ -->
+			<!-- LAYOUT SECTION                         -->
+			<!-- ═══════════════════════════════════════ -->
+			<button
+				type="button"
+				class="section-header"
+				onclick={() => (sectionOpen.layout = !sectionOpen.layout)}
+			>
+				<span>Layout</span>
+				<svg class="section-chevron" class:open={sectionOpen.layout} xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+			</button>
+
+			{#if sectionOpen.layout}
+				<SettingContainer name="Positioning" desc="How nodes are arranged in space" compact>
+					<Dropdown
+						type="options"
+						dropdown={layoutModeOptions}
+						selected={layoutMode}
+						onchange={handleLayoutModeChange}
+					/>
+				</SettingContainer>
+
+				{#if layoutMode === "force"}
+					<SettingContainer name="Link distance" desc="Target distance between connected nodes" compact>
+						<RangeSlider value={settings.linkDistance} min={30} max={500} step={5} showValue={true} oncommit={handleLinkDistanceChange} />
+					</SettingContainer>
+					<SettingContainer name="Repulsion" desc="How strongly nodes push each other apart" compact>
+						<RangeSlider value={Math.abs(settings.chargeStrength)} min={10} max={1500} step={10} showValue={true} oncommit={handleChargeStrengthChange} />
+					</SettingContainer>
+					<SettingContainer name="Center force" desc="How strongly the graph is pulled toward the center" compact>
+						<RangeSlider value={Math.round(settings.centerStrength * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleCenterStrengthChange} />
+					</SettingContainer>
+					<SettingContainer name="Link strength" desc="How strongly edges pull connected nodes together" compact>
+						<RangeSlider value={Math.round(settings.linkStrength * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleLinkStrengthChange} />
+					</SettingContainer>
+				{/if}
+
+				{#if layoutMode === "semantic"}
+					<SettingContainer name="Projection" desc="2D positioning algorithm" compact>
+						<Dropdown type="options" dropdown={projectionOptions} selected={settings.projectionMethod} onchange={handleProjectionChange} />
+					</SettingContainer>
+					<SettingContainer name="Layout fidelity" desc="Speed vs. projection accuracy" compact>
+						<div class="graph-setting-stack">
+							<RangeSlider value={settings.layoutFidelity} min={0} max={100} step={5} showValue={true} oncommit={handleLayoutFidelityChange} />
+							<div class="graph-inline-hint">{getLayoutFidelityLabel(settings.layoutFidelity)}</div>
+						</div>
+					</SettingContainer>
+					{#if settings.projectionMethod === "umap"}
+						<SettingContainer name="UMAP neighbors" desc="Nearby points used to shape the projection" compact>
+							<RangeSlider value={settings.umapNeighbors} min={3} max={50} step={1} showValue={true} oncommit={handleUmapNeighborsChange} />
+						</SettingContainer>
+						<SettingContainer name="UMAP min dist" desc="How tightly points can be packed" compact>
+							<RangeSlider value={settings.umapMinDist} min={0} max={0.99} step={0.01} showValue={true} oncommit={handleUmapMinDistChange} />
+						</SettingContainer>
+					{/if}
+					{#if projectionDirty && onApplyProjection && segmentBy !== "semantic"}
+						<div class="apply-bar">
+							<span class="section-summary">Unapplied projection changes</span>
+							<Button cta buttonText="Apply" onClick={() => { onApplyProjection?.(); appliedSnapshot = takeSnapshot(settings); }} tooltip="Re-project layout" disabled={isLoading} />
 						</div>
 					{/if}
 				{/if}
 			{/if}
 
-			<!-- ═══════════════════════════════════════ -->
-			<!-- APPEARANCE SECTION                     -->
-			<!-- ═══════════════════════════════════════ -->
-			<button
-				type="button"
-				class="section-header"
-				onclick={() => (sectionOpen.appearance = !sectionOpen.appearance)}
-			>
-				<span>Appearance</span>
-				<svg
-					class="section-chevron"
-					class:open={sectionOpen.appearance}
-					xmlns="http://www.w3.org/2000/svg"
-					width="12"
-					height="12"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
+				<!-- ═══════════════════════════════════════ -->
+				<!-- OVERVIEW SECTION                       -->
+				<!-- ═══════════════════════════════════════ -->
+			{#if graphStats}
+				<button
+					type="button"
+					class="section-header"
+					onclick={() => (sectionOpen.overview = !sectionOpen.overview)}
 				>
-			</button>
-
-			{#if sectionOpen.appearance}
-				<SettingContainer
-					name="Node size"
-					desc="Base radius of graph nodes"
-				>
-					<RangeSlider
-						value={settings.nodeSize}
-						min={1}
-						max={10}
-						step={1}
-						showValue={true}
-						onchange={handleNodeSizeChange}
-						oncommit={handleNodeSizeChange}
-					/>
-				</SettingContainer>
-				<SettingContainer
-					name="Label zoom"
-					desc="Zoom level to start showing labels (0 = off)"
-				>
-					<RangeSlider
-						value={Math.round(settings.labelZoomThreshold * 10)}
-						min={0}
-						max={20}
-						step={1}
-						showValue={true}
-						oncommit={handleLabelZoomChange}
-					/>
-				</SettingContainer>
-			{/if}
-
-			<!-- ═══════════════════════════════════════ -->
-			<!-- APPLY BAR (dirty projection settings)  -->
-			<!-- ═══════════════════════════════════════ -->
-			{#if projectionDirty && onApplyProjection}
-				<div class="apply-bar apply-bar--sticky">
-					<span class="section-summary">Unapplied changes</span>
-					<Button
-						cta
-						buttonText="Apply"
-						onClick={() => {
-							onApplyProjection();
-							appliedSnapshot = takeSnapshot(settings);
-						}}
-						tooltip="Apply projection and clustering changes"
-						disabled={isLoading}
-					/>
-				</div>
+					<span>Overview</span>
+					<svg class="section-chevron" class:open={sectionOpen.overview} xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+				</button>
+				{#if sectionOpen.overview}
+					<div class="overview-grid">
+						<div class="overview-item"><span class="overview-label">Connections</span><span class="overview-value">{graphStats.avgDegree.toFixed(1)} avg</span></div>
+						<div class="overview-item"><span class="overview-label">Hubs</span><span class="overview-value">{graphStats.maxDegree} max</span></div>
+						<div class="overview-item"><span class="overview-label">Isolated</span><span class="overview-value">{graphStats.unlinkedNotes}</span></div>
+						<div class="overview-item"><span class="overview-label">Wiki links</span><span class="overview-value">{graphStats.wikiEdges}</span></div>
+					</div>
+				{/if}
 			{/if}
 		</div>
 	{/if}
@@ -781,17 +566,21 @@ function handleResetSettings() {
 		color: var(--text-normal);
 	}
 
+	.graph-controls-subtitle {
+		font-size: 11px;
+		color: var(--text-muted);
+		margin-top: 1px;
+	}
+
+	.loading-label {
+		color: var(--text-faint);
+	}
+
 	.graph-controls-body {
 		padding: 8px 12px;
 		display: flex;
 		flex-direction: column;
 		gap: 6px;
-	}
-
-	.graph-info {
-		padding: 4px 8px;
-		font-size: 12px;
-		color: var(--text-muted);
 	}
 
 	.graph-setting-stack {
@@ -829,17 +618,6 @@ function handleResetSettings() {
 		margin-top: 0;
 	}
 
-	.section-header--nested {
-		font-size: 11px;
-		text-transform: none;
-		letter-spacing: normal;
-		font-weight: 500;
-		border-top: none;
-		margin-top: 0;
-		padding-left: 4px;
-		color: var(--text-muted);
-	}
-
 	.section-header:hover {
 		color: var(--text-normal);
 	}
@@ -862,82 +640,92 @@ function handleResetSettings() {
 		padding: 4px 0;
 	}
 
-	.apply-bar--sticky {
-		justify-content: space-between;
-	}
-
 	.section-summary {
 		font-size: 11px;
 		color: var(--text-muted);
 	}
 
-	.cluster-legend-list {
+	.overview-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 6px;
+		padding: 4px 0;
+	}
+
+	.overview-item {
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
+		padding: 6px 8px;
+		background: var(--background-secondary);
+		border-radius: 6px;
 	}
 
-	.cluster-legend-item {
+	.overview-label {
+		font-size: 10px;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.4px;
+	}
+
+	.overview-value {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text-normal);
+	}
+
+
+	/* Segment list */
+	.segment-list {
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		padding: 2px 0 6px;
+	}
+
+	.segment-row {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 7px;
 		width: 100%;
-		padding: 5px 8px;
-		border: 1px solid transparent;
-		border-radius: 6px;
+		padding: 3px 6px;
 		background: none;
+		border: none;
+		border-radius: 4px;
 		cursor: pointer;
-		transition:
-			background 0.1s ease,
-			opacity 0.15s ease;
-		opacity: 1;
-	}
-
-	.cluster-legend-item:hover {
-		background: var(--background-secondary);
-	}
-
-	.cluster-legend-item.focused {
-		background: var(--background-secondary);
-		border-color: var(--interactive-accent);
-	}
-
-	.cluster-legend-item.dimmed {
-		opacity: 0.4;
-	}
-
-	.cluster-legend-swatch {
-		flex-shrink: 0;
-		width: 10px;
-		height: 10px;
-		border-radius: 2px;
-	}
-
-	.cluster-legend-label {
-		flex: 1;
-		font-size: 12px;
 		color: var(--text-normal);
+		text-align: left;
+		transition: background-color 0.1s ease;
+	}
+
+	.segment-row:hover {
+		background: var(--background-modifier-hover);
+	}
+
+	.segment-row--active {
+		background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+	}
+
+	.segment-dot {
+		display: inline-block;
+		width: 9px;
+		height: 9px;
+		min-width: 9px;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+
+	.segment-label {
+		flex: 1;
+		font-size: var(--font-ui-small);
+		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		white-space: nowrap;
-		text-align: left;
 	}
 
-	.cluster-legend-count {
+	.segment-count {
+		font-size: 0.7rem;
+		color: var(--text-faint);
 		flex-shrink: 0;
-		font-size: 11px;
-		color: var(--text-muted);
-	}
-
-	.color-group-row {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		padding: 2px 0;
-	}
-
-	.color-group-row :global(input[type="text"]) {
-		flex: 1;
-		min-width: 0;
 	}
 </style>

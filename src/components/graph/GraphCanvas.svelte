@@ -11,7 +11,7 @@ import {
 	type SimulationNodeDatum,
 	type SimulationLinkDatum,
 } from "d3-force";
-import type { GraphData, GraphNode, GraphEdge, EdgeType, LayoutMode } from "../../types/graph";
+import type { GraphData, GraphNode, EdgeType, LayoutMode } from "../../types/graph";
 import { deriveClusterRepresentativesFromGraph } from "../../views/smart-graph/graphDataBuilder";
 import { edgeKey } from "../../utils/graphUtils";
 import { computeNodeBounds, framingTransform, easeOutCubic } from "../../utils/graphAnimation";
@@ -25,8 +25,6 @@ interface Props {
 	chargeStrength?: number;
 	centerStrength?: number;
 	linkStrength?: number;
-	labelZoomThreshold?: number;
-	nodeSize?: number;
 	showWikiLinks?: boolean;
 	focusedClusters?: Set<number>;
 	clusterLabels?: Record<number, string>;
@@ -48,8 +46,6 @@ let {
 	chargeStrength = -1000,
 	centerStrength = 0.1,
 	linkStrength = 1,
-	labelZoomThreshold = 2.5,
-	nodeSize: nodeSizeProp = 4,
 	showWikiLinks = true,
 	focusedClusters = new Set<number>(),
 	clusterLabels = {},
@@ -75,27 +71,21 @@ let hoverAnchorEl: HTMLDivElement;
 // Pixi renderer instance
 let pixi: PixiRenderer | null = null;
 
-// Node size: use the user setting, scaled down for very large graphs
-let nodeSize = $derived.by(() => {
-	const n = graphData.nodes.length;
-	const base = nodeSizeProp;
-	// Gently shrink for large graphs so nodes don't overlap
-	if (n > 500) return Math.max(1, base * 0.5);
-	if (n > 200) return Math.max(1, base * 0.75);
-	return base;
-});
+// Node size auto-tuned from graph size: larger for small graphs, smaller for dense ones.
+// Uses a continuous log scale so the transition is smooth, clamped to a readable range.
+let nodeSize = $derived(Math.max(2, Math.round(7 - Math.log10(Math.max(graphData.nodes.length, 10)) * 1.8)));
 
 // Interaction state
 let hoveredNode: GraphNode | null = $state(null);
 let draggedNode: GraphNode | null = $state(null);
 let hasDragged = false;
+// Track pointer-down position to detect viewport pans (which also fire click)
+let pointerDownScreenPos: { x: number; y: number } | null = null;
 
 // Non-reactive drag reference — directly mutates the d3 SimNode's fx/fy
 // without going through Svelte's $state proxy (wiki mode only)
 let dragSimNode: SimNode | null = null;
 
-// Pinned nodes: nodes with fixed positions (fx/fy set) — wiki mode only
-let pinnedNodes: Set<string> = new Set();
 
 // rAF render loop ID for smart mode (replaces the d3 simulation tick)
 let smartRafId: number | null = null;
@@ -148,6 +138,12 @@ let skipNextSetupEffects = false;
 // Adjacency map: nodeId → Set of connected node ids (O(1) hover lookup)
 let adjacency: Map<string, Set<string>> = new Map();
 
+// Hover alpha stability tracking.
+// When the hover fingerprint is unchanged and alphas have fully settled,
+// skip the O(n) lerp loop on subsequent render calls (e.g. viewport pan/zoom).
+let hoverAlphasSettled = false;
+let lastHoverFingerprint = "";
+
 // Cluster legend hit areas for click detection (screen space)
 let clusterAnchorHitAreas: ClusterPillHit[] = [];
 
@@ -179,6 +175,12 @@ $effect(() => {
 // Enables O(1) edge weight lookups for hover labels instead of O(n) scan.
 let edgeLookup: Map<string, SimLink> = new Map();
 
+// Persistent label occlusion grid — allocated once, zeroed at the start of each render.
+// Avoids a ~10KB allocation + GC at 60fps. Resized only when canvas dimensions change.
+let labelGrid: Uint8Array = new Uint8Array(0);
+let labelGridCols = 0;
+let labelGridRows = 0;
+
 // Track previous mode + graphData reference to detect mode-only changes
 // (mode changed but data hasn't been re-projected yet).
 let lastMode: LayoutMode | null = null;
@@ -190,19 +192,33 @@ let clusterRepresentativeIds: Set<string> = new Set();
 let clusterRepresentativeNodes: Map<number, SimNode> = new Map();
 let clusterNodeCounts: Map<number, number> = new Map();
 
-// Build a cluster map for edge rendering (nodeId → cluster)
+// Cached label sort order — rebuilt only when hover/selection/highlight state changes.
+// Between frames where only positions move, the priority of each node is stable.
+let cachedSortedLabelNodes: SimNode[] = [];
+let cachedSortKey = "";
+// Incremented every time simNodes is fully rebuilt (graph data change).
+// Including this in the sort key ensures stale node references are never reused.
+let simNodesVersion = 0;
+
+// Persistent position memory — survives across buildInternalData calls.
+// Nodes that leave the view (e.g. during immersion) retain their last-known
+// positions here so they are restored instantly when they re-appear, avoiding
+// a full force-simulation re-settle on immersion exit.
+const persistentPositionCache = new Map<string, { x: number; y: number }>();
+
+// Cached cluster map for edge rendering (nodeId → cluster).
+// Rebuilt only when simNodes changes — cluster assignments are stable between renders.
+let cachedNodeClusterMap: Map<string, number | undefined> = new Map();
+let cachedNodeClusterMapVersion = -1;
+
 function getNodeClusterMap(): Map<string, number | undefined> {
-	const map = new Map<string, number | undefined>();
-	for (const n of simNodes) {
-		map.set(n.id, n.cluster);
+	if (cachedNodeClusterMapVersion !== simNodesVersion) {
+		cachedNodeClusterMap = new Map(simNodes.map((n) => [n.id, n.cluster]));
+		cachedNodeClusterMapVersion = simNodesVersion;
 	}
-	return map;
+	return cachedNodeClusterMap;
 }
 
-const REPRESENTATIVE_LABEL_NODE_THRESHOLD = 120;
-const REPRESENTATIVE_LABEL_ZOOM_RATIO = 0.6;
-const FULL_LABEL_DENSE_GRAPH_MULTIPLIER = 1.8;
-const CLUSTER_ANCHOR_ZOOM_RATIO = 0.85;
 
 /**
  * Ray-casting point-in-polygon test.
@@ -278,12 +294,23 @@ function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 }
 
 /**
- * Get the draw radius for a node based on its degree and the user-configurable nodeSize.
+ * Get the draw radius for a node based on its degree, centrality, and the user-configurable nodeSize.
+ *
+ * When betweenness centrality is available (Louvain mode), it is blended with degree:
+ * - degree gives a +log bonus for highly-connected hubs
+ * - centrality gives a larger bonus for bridge nodes whose removal would fragment the graph
+ * The two signals are additive so a hub that is also a bridge gets the largest radius.
  */
 function getNodeRadius(node: GraphNode): number {
 	const base = Math.max(1, nodeSize);
 	const degree = node.degree ?? 0;
-	return base + Math.min(Math.log1p(degree) * 2.5, base * 5);
+	const degreeBonus = Math.min(Math.log1p(degree) * 2.5, base * 5);
+	if (node.centrality != null && node.centrality > 0) {
+		// centrality is 0–1; scale it to the same ceiling as the degree bonus
+		const centralityBonus = Math.min(node.centrality * base * 8, base * 8);
+		return base + Math.max(degreeBonus, centralityBonus * 0.6 + degreeBonus * 0.4);
+	}
+	return base + degreeBonus;
 }
 
 /**
@@ -305,34 +332,43 @@ function render() {
 	}
 
 	// ── Smooth hover alpha interpolation ──────────────────────
+	// Build a fingerprint of everything that determines alpha targets.
+	// If it matches the previous frame and alphas have fully settled, skip the
+	// O(n) lerp loop — nothing would change anyway (e.g. during viewport pan).
+	const hoverFingerprint = `${hoveredNode?.id ?? ""}|${draggedNode?.id ?? ""}|${selectedNodes.size}|${focusedClusters.size}|${simNodesVersion}`;
+	const skipHoverLoop = hoverAlphasSettled && hoverFingerprint === lastHoverFingerprint;
+	lastHoverFingerprint = hoverFingerprint;
+
 	let hoverSettled = true;
-	const hasSelection = selectedNodes.size > 0;
+	if (!skipHoverLoop) {
+		const hasSelection = selectedNodes.size > 0;
+		for (const node of simNodes) {
+			let target: number;
+			if (node.highlighted || hoveredNode?.id === node.id || draggedNode?.id === node.id) {
+				target = 1;
+			} else if (hasSelection && !selectedNodes.has(node.id)) {
+				target = 0.15;
+			} else if (
+				!hasSelection &&
+				focusedClusters.size > 0 &&
+				(node.cluster == null || !focusedClusters.has(node.cluster))
+			) {
+				target = 0.1;
+			} else if (hoveredNode) {
+				const isConnected = adjacency.get(hoveredNode.id)?.has(node.id) ?? false;
+				target = isConnected ? 1 : 0.15;
+			} else {
+				target = 0.85;
+			}
 
-	for (const node of simNodes) {
-		let target: number;
-		if (node.highlighted || hoveredNode?.id === node.id || draggedNode?.id === node.id) {
-			target = 1;
-		} else if (hasSelection && !selectedNodes.has(node.id)) {
-			target = 0.15;
-		} else if (
-			!hasSelection &&
-			focusedClusters.size > 0 &&
-			(node.cluster == null || !focusedClusters.has(node.cluster))
-		) {
-			target = 0.1;
-		} else if (hoveredNode) {
-			const isConnected = adjacency.get(hoveredNode.id)?.has(node.id) ?? false;
-			target = isConnected ? 1 : 0.15;
-		} else {
-			target = 0.85;
+			const prev = hoverAlphas.get(node.id) ?? 0.85;
+			const next = prev + (target - prev) * HOVER_LERP_SPEED;
+			const final = Math.abs(next - target) < 0.01 ? target : next;
+			hoverAlphas.set(node.id, final);
+			if (final !== target) hoverSettled = false;
 		}
-
-		const prev = hoverAlphas.get(node.id) ?? 0.85;
-		const next = prev + (target - prev) * HOVER_LERP_SPEED;
-		const final = Math.abs(next - target) < 0.01 ? target : next;
-		hoverAlphas.set(node.id, final);
-		if (final !== target) hoverSettled = false;
 	}
+	hoverAlphasSettled = hoverSettled;
 
 	// Schedule another frame if alphas haven't settled yet
 	if (!hoverSettled && hoverAnimFrameId == null) {
@@ -367,83 +403,111 @@ function render() {
 		hoveredNodeId: hoveredNode?.id ?? null,
 		draggedNodeId: draggedNode?.id ?? null,
 		focusedClusters,
-		pinnedNodes,
 		isForceMode,
 		hoverAlphas,
 		nodeClusterMap,
 	});
 
 	// ── Labels ─────────────────────────────────────────────────
-	const denseGraph = simNodes.length >= REPRESENTATIVE_LABEL_NODE_THRESHOLD;
-	const representativeLabelThreshold = labelZoomThreshold;
-	const allLabelsThreshold = denseGraph
-		? Math.max(
-				representativeLabelThreshold,
-				representativeLabelThreshold *
-					(1 + (FULL_LABEL_DENSE_GRAPH_MULTIPLIER - 1) * REPRESENTATIVE_LABEL_ZOOM_RATIO),
-			)
-		: labelZoomThreshold;
-	const showRepresentativeLabels =
-		denseGraph && labelZoomThreshold > 0 && scale >= representativeLabelThreshold && scale < allLabelsThreshold;
-	const showAllLabels = labelZoomThreshold > 0 && scale >= allLabelsThreshold;
+	// Labels appear automatically when a node's screen-space radius reaches a
+	// readable threshold — no manual zoom setting needed. The occlusion grid
+	// handles crowding; this threshold handles legibility.
+	const MIN_LABEL_SCREEN_RADIUS = 5; // px — node must be at least this big on screen
 	const showClusterAnchors = clusterRepresentativeNodes.size > 0;
-	const zoomLabelOpacity = showAllLabels
-		? Math.min(1, (scale - allLabelsThreshold) / Math.max(0.25, allLabelsThreshold))
-		: 0;
 	const hovId = hoveredNode?.id ?? null;
 	const hoverNeighbors = hovId ? adjacency.get(hovId) : undefined;
 
-	const fontSize = Math.max(4.5 / scale, 2.8);
+	// Label font size in CSS pixels (screen space).
+	// The renderer counter-scales each label with t.scale.set(1/viewport_scale), which
+	// makes the effective screen size equal to t.style.fontSize exactly — so this value
+	// is the on-screen pixel height at every zoom level, no division by scale needed.
+	// Tied to nodeSize so labels feel proportional when the user adjusts node size.
+	const LABEL_FONT_PX = Math.max(Math.round(nodeSize * 2.5), 10);
 
-	// Label occlusion culling in screen space
-	const drawnLabelRects: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+	// Label occlusion culling — grid-based O(n) instead of O(n²) linear scan.
+	// The canvas is divided into LABEL_CELL_W×LABEL_CELL_H px cells (screen space).
+	// A label is allowed only if none of the cells it spans are already occupied.
+	const LABEL_CELL_W = 60; // px — approx half an average label width
+	const LABEL_CELL_H = LABEL_FONT_PX + 6; // px — label height + padding
 	const LABEL_PAD_X = 2;
 	const LABEL_PAD_Y = 1;
+	const neededCols = Math.ceil(width / LABEL_CELL_W) + 1;
+	const neededRows = Math.ceil(height / LABEL_CELL_H) + 1;
+	// Resize persistent grid only when canvas dimensions change; otherwise just zero it
+	if (neededCols !== labelGridCols || neededRows !== labelGridRows) {
+		labelGridCols = neededCols;
+		labelGridRows = neededRows;
+		labelGrid = new Uint8Array(labelGridCols * labelGridRows);
+	} else {
+		labelGrid.fill(0);
+	}
 
 	function canDrawLabel(nodeX: number, labelY: number, approxCharCount: number): boolean {
-		// Approximate text width: ~6px per char at 12px font, scaled
-		const textW = approxCharCount * 6 * (fontSize / 12);
+		// LABEL_FONT_PX is already in screen px, so sw/sh are screen px directly
+		const sw = approxCharCount * LABEL_FONT_PX * 0.55;
+		const sh = LABEL_FONT_PX;
 		const screen = pixi!.worldToScreen(nodeX, labelY);
-		const sw = textW * scale;
-		const sh = fontSize * scale;
 		const x1 = screen.x - sw / 2 - LABEL_PAD_X;
 		const y1 = screen.y - sh - LABEL_PAD_Y;
 		const x2 = screen.x + sw / 2 + LABEL_PAD_X;
 		const y2 = screen.y + LABEL_PAD_Y;
 
-		for (const r of drawnLabelRects) {
-			if (x1 < r.x2 && x2 > r.x1 && y1 < r.y2 && y2 > r.y1) return false;
+		// Convert to grid cell range
+		const col0 = Math.max(0, Math.floor(x1 / LABEL_CELL_W));
+		const col1 = Math.min(labelGridCols - 1, Math.floor(x2 / LABEL_CELL_W));
+		const row0 = Math.max(0, Math.floor(y1 / LABEL_CELL_H));
+		const row1 = Math.min(labelGridRows - 1, Math.floor(y2 / LABEL_CELL_H));
+
+		// Check — any occupied cell means overlap
+		for (let r = row0; r <= row1; r++) {
+			for (let c = col0; c <= col1; c++) {
+				if (labelGrid[r * labelGridCols + c]) return false;
+			}
 		}
-		drawnLabelRects.push({ x1, y1, x2, y2 });
+		// Mark cells as occupied
+		for (let r = row0; r <= row1; r++) {
+			for (let c = col0; c <= col1; c++) {
+				labelGrid[r * labelGridCols + c] = 1;
+			}
+		}
 		return true;
 	}
 
-	// Sort nodes by label priority
-	const sortedLabelNodes = simNodes.filter((n) => n.x != null && n.y != null);
-	sortedLabelNodes.sort((a, b) => {
-		const pa =
-			a.id === hovId
-				? 0
-				: hoverNeighbors?.has(a.id)
-					? 1
-					: a.highlighted
-						? 2
-						: clusterRepresentativeIds.has(a.id)
-							? 3
-							: 4;
-		const pb =
-			b.id === hovId
-				? 0
-				: hoverNeighbors?.has(b.id)
-					? 1
-					: b.highlighted
-						? 2
-						: clusterRepresentativeIds.has(b.id)
-							? 3
-							: 4;
-		if (pa !== pb) return pa - pb;
-		return (b.degree ?? 0) - (a.degree ?? 0);
-	});
+	// Sort nodes by label priority — cached between frames where priority hasn't changed.
+	// Priority depends on: hovered node, hover neighbors, highlighted nodes, cluster reps, degree.
+	// Positions change every force-tick but priority doesn't — skip the O(n log n) sort those frames.
+	let highlightedCount = 0;
+	for (const n of simNodes) if (n.highlighted) highlightedCount++;
+	const sortKey = `${hovId ?? ""}|${simNodesVersion}|${clusterRepresentativeIds.size}|${highlightedCount}`;
+	if (sortKey !== cachedSortKey) {
+		cachedSortKey = sortKey;
+		cachedSortedLabelNodes = simNodes.filter((n) => n.x != null && n.y != null);
+		cachedSortedLabelNodes.sort((a, b) => {
+			const pa =
+				a.id === hovId
+					? 0
+					: hoverNeighbors?.has(a.id)
+						? 1
+						: a.highlighted
+							? 2
+							: clusterRepresentativeIds.has(a.id)
+								? 3
+								: 4;
+			const pb =
+				b.id === hovId
+					? 0
+					: hoverNeighbors?.has(b.id)
+						? 1
+						: b.highlighted
+							? 2
+							: clusterRepresentativeIds.has(b.id)
+								? 3
+								: 4;
+			if (pa !== pb) return pa - pb;
+			return (b.degree ?? 0) - (a.degree ?? 0);
+		});
+	}
+	const sortedLabelNodes = cachedSortedLabelNodes;
 
 	const labelEntries: Array<{
 		nodeX: number;
@@ -458,8 +522,11 @@ function render() {
 		const radius = getNodeRadius(node);
 		const labelY = node.y - radius - 2 / scale;
 		const nodeAlpha = hoverAlphas.get(node.id) ?? 0.85;
+		// Screen-space radius: how large the node circle appears on screen
+		const screenRadius = radius * scale;
 
 		if (hovId && node.id === hovId) {
+			// Hovered node: always show label, skip occlusion check (it wins)
 			canDrawLabel(node.x, labelY, node.label.length);
 			labelEntries.push({
 				nodeX: node.x,
@@ -467,7 +534,7 @@ function render() {
 				text: node.label,
 				color: c.textNormal,
 				alpha: 1,
-				fontSize,
+				fontSize: LABEL_FONT_PX,
 			});
 		} else if (hovId && hoverNeighbors?.has(node.id)) {
 			if (!canDrawLabel(node.x, labelY, node.label.length)) continue;
@@ -477,20 +544,8 @@ function render() {
 				text: node.label,
 				color: c.textMuted,
 				alpha: nodeAlpha,
-				fontSize,
+				fontSize: LABEL_FONT_PX,
 			});
-		} else if (showAllLabels) {
-			if (!canDrawLabel(node.x, labelY, node.label.length)) continue;
-			labelEntries.push({
-				nodeX: node.x,
-				nodeY: labelY,
-				text: node.label,
-				color: node.highlighted ? c.textAccent : c.textNormal,
-				alpha: nodeAlpha * zoomLabelOpacity,
-				fontSize,
-			});
-		} else if (showRepresentativeLabels && clusterRepresentativeIds.has(node.id)) {
-			// Dense graphs: representative nodes labeled by cluster anchor pills
 		} else if (node.highlighted && !hovId) {
 			if (!canDrawLabel(node.x, labelY, node.label.length)) continue;
 			labelEntries.push({
@@ -499,7 +554,20 @@ function render() {
 				text: node.label,
 				color: c.textAccent,
 				alpha: 1,
-				fontSize,
+				fontSize: LABEL_FONT_PX,
+			});
+		} else if (screenRadius >= MIN_LABEL_SCREEN_RADIUS) {
+			// Node is large enough on screen to anchor a label — show it if space allows
+			if (!canDrawLabel(node.x, labelY, node.label.length)) continue;
+			// Smooth fade-in over a 2px radius window so labels don't pop in abruptly
+			const fadeAlpha = Math.min(1, (screenRadius - MIN_LABEL_SCREEN_RADIUS) / 2);
+			labelEntries.push({
+				nodeX: node.x,
+				nodeY: labelY,
+				text: node.label,
+				color: node.highlighted ? c.textAccent : c.textNormal,
+				alpha: nodeAlpha * fadeAlpha,
+				fontSize: LABEL_FONT_PX,
 			});
 		}
 	}
@@ -596,7 +664,7 @@ function render() {
 
 	// ── Node tooltip ───────────────────────────────────────────
 	if (hoveredNode && hoveredNode.x != null && hoveredNode.y != null) {
-		pixi.showNodeTooltip(hoveredNode, clusterLabels, pinnedNodes.has(hoveredNode.id), isForceMode);
+		pixi.showNodeTooltip(hoveredNode, clusterLabels, false, isForceMode);
 	} else {
 		pixi.hideTooltip();
 	}
@@ -610,10 +678,15 @@ function handleMouseDown(e: PointerEvent) {
 	e.preventDefault();
 	containerEl.focus();
 	if (!pixi) return;
+
+	// Any pointer-down is user intent — abort auto-fit and stop periodic refits
+	pixi.abortAnimation();
+	needsInitialFit = false;
 	const canvas = pixi.canvas;
 	const rect = canvas.getBoundingClientRect();
 	const x = e.clientX - rect.left;
 	const y = e.clientY - rect.top;
+	pointerDownScreenPos = { x, y };
 
 	// Shift+click on a node toggles its selection; Shift+drag on empty space starts lasso
 	if (lassoMode || e.shiftKey) {
@@ -761,10 +834,8 @@ function handleMouseUp(_e: PointerEvent) {
 	}
 	if (dragSimNode) {
 		simulation?.alphaTarget(0);
-		if (!pinnedNodes.has(dragSimNode.id)) {
-			dragSimNode.fx = null;
-			dragSimNode.fy = null;
-		}
+		dragSimNode.fx = null;
+		dragSimNode.fy = null;
 		draggedNode = null;
 		dragSimNode = null;
 		pixi?.resumeViewport();
@@ -785,6 +856,14 @@ function handleClick(e: MouseEvent) {
 	const rect = pixi.canvas.getBoundingClientRect();
 	const x = e.clientX - rect.left;
 	const y = e.clientY - rect.top;
+
+	// If the pointer moved more than 4px since mousedown the user was panning — ignore
+	if (pointerDownScreenPos) {
+		const dx = x - pointerDownScreenPos.x;
+		const dy = y - pointerDownScreenPos.y;
+		pointerDownScreenPos = null;
+		if (dx * dx + dy * dy > 16) return;
+	}
 
 	// Check edge legend hit areas (screen space)
 	for (const area of edgeLegendHitAreas) {
@@ -819,6 +898,12 @@ function handleClick(e: MouseEvent) {
 // Wheel is handled by pixi-viewport — no manual handleWheel needed.
 // We just need a render on viewport move to update overlays.
 
+function handleWheel() {
+	// User is zooming — abort any running camera animation immediately
+	pixi?.abortAnimation();
+	needsInitialFit = false;
+}
+
 /**
  * Fire the hover-link preview for a node exactly once.
  * Positions the invisible anchor at the node's screen location.
@@ -826,8 +911,15 @@ function handleClick(e: MouseEvent) {
 function triggerNodePreview(event: MouseEvent | KeyboardEvent, node: GraphNode) {
 	if (!pixi) return;
 	const screen = pixi.worldToScreen(node.x ?? 0, node.y ?? 0);
-	hoverAnchorEl.style.left = `${screen.x}px`;
-	hoverAnchorEl.style.top = `${screen.y}px`;
+	// worldToScreen returns coords relative to the canvas element.
+	// hoverAnchorEl is position:absolute within containerEl, so we must
+	// subtract the canvas offset relative to the container.
+	const canvasRect = pixi.canvas.getBoundingClientRect();
+	const containerRect = containerEl.getBoundingClientRect();
+	const offsetX = canvasRect.left - containerRect.left;
+	const offsetY = canvasRect.top - containerRect.top;
+	hoverAnchorEl.style.left = `${screen.x + offsetX}px`;
+	hoverAnchorEl.style.top = `${screen.y + offsetY}px`;
 	previewTriggeredForNode = node.id;
 	onHoverPreview?.(event as MouseEvent, node.path, hoverAnchorEl);
 }
@@ -893,35 +985,6 @@ function handleContextMenu(e: MouseEvent) {
 				}
 			}),
 	);
-
-	// Pin/unpin only makes sense in force-layout (wiki) mode
-	if (isForceMode) {
-		menu.addSeparator();
-
-		const isPinned = pinnedNodes.has(node.id);
-		menu.addItem((item) =>
-			item
-				.setTitle(isPinned ? "Unpin node" : "Pin node")
-				.setIcon(isPinned ? "pin-off" : "pin")
-				.onClick(() => {
-					const simNode = simNodeMap.get(node.id);
-					if (!simNode) return;
-
-					if (isPinned) {
-						pinnedNodes.delete(node.id);
-						simNode.fx = null;
-						simNode.fy = null;
-					} else {
-						pinnedNodes.add(node.id);
-						simNode.fx = simNode.x;
-						simNode.fy = simNode.y;
-					}
-
-					simulation?.alpha(0.1).restart();
-					render();
-				}),
-		);
-	}
 
 	menu.showAtPosition({ x: e.clientX, y: e.clientY });
 }
@@ -996,60 +1059,57 @@ function clusterCohesionForce(nodes: SimNode[], strength: number) {
 function buildInternalData(data: GraphData): {
 	oldPositions: Map<string, { x: number; y: number }>;
 	isSmooth: boolean;
+	allPositionsKnown: boolean;
 } {
-	// Save old positions for smooth transitions
+	// Save old positions for smooth transitions and persist them for future restores
 	const oldPositions = new Map<string, { x: number; y: number }>();
 	for (const n of simNodes) {
 		if (n.x != null && n.y != null) {
 			oldPositions.set(n.id, { x: n.x, y: n.y });
+			persistentPositionCache.set(n.id, { x: n.x, y: n.y });
 		}
 	}
 
-	// Compute centroid of old positions so new nodes (without a prior position)
-	// can be scattered around it instead of stacking at (0,0).
+	// Compute centroid from all known positions (old + cached) for scattering new nodes
 	let centroidX = 0;
 	let centroidY = 0;
-	if (oldPositions.size > 0) {
-		for (const { x, y } of oldPositions.values()) {
+	const knownForCentroid = oldPositions.size > 0 ? oldPositions : persistentPositionCache;
+	if (knownForCentroid.size > 0) {
+		for (const { x, y } of knownForCentroid.values()) {
 			centroidX += x;
 			centroidY += y;
 		}
-		centroidX /= oldPositions.size;
-		centroidY /= oldPositions.size;
+		centroidX /= knownForCentroid.size;
+		centroidY /= knownForCentroid.size;
 	}
 
 	// Create mutable copies.
-	// Always start from old positions when available so transitions are smooth.
-	// Nodes without a prior position are scattered near the centroid of old nodes
-	// to avoid the "pile at origin" effect during mode transitions.
+	// Priority: oldPositions (current frame) → persistentPositionCache (prior view) → scatter near centroid.
 	let newNodeIndex = 0;
+	let allPositionsKnown = true;
+	simNodesVersion++;
+	hoverAlphasSettled = false;
+	const hasAnyKnown = oldPositions.size > 0 || persistentPositionCache.size > 0;
 	simNodes = data.nodes.map((n) => {
 		const sn: SimNode = { ...n };
-		const old = oldPositions.get(n.id);
+		const old = oldPositions.get(n.id) ?? persistentPositionCache.get(n.id);
 		if (old) {
 			sn.x = old.x;
 			sn.y = old.y;
-		} else if (oldPositions.size > 0) {
-			// Scatter new nodes in a ring around the centroid of the old layout
-			const angle = (2 * Math.PI * newNodeIndex) / Math.max(1, data.nodes.length - oldPositions.size);
-			const radius = 80 + Math.random() * 60;
-			sn.x = centroidX + Math.cos(angle) * radius;
-			sn.y = centroidY + Math.sin(angle) * radius;
-			newNodeIndex++;
-		}
-		// Restore pinned positions in wiki (force) mode
-		if (isForceMode && pinnedNodes.has(n.id) && old) {
-			sn.fx = old.x;
-			sn.fy = old.y;
+		} else {
+			allPositionsKnown = false;
+			if (hasAnyKnown) {
+				// Scatter new nodes in a ring around the centroid of the known layout
+				const angle = (2 * Math.PI * newNodeIndex) / Math.max(1, data.nodes.length - oldPositions.size);
+				const radius = 80 + Math.random() * 60;
+				sn.x = centroidX + Math.cos(angle) * radius;
+				sn.y = centroidY + Math.sin(angle) * radius;
+				newNodeIndex++;
+			}
 		}
 		return sn;
 	});
 
-	// Prune pinned set for removed nodes
-	const nodeIds = new Set(data.nodes.map((n) => n.id));
-	for (const id of pinnedNodes) {
-		if (!nodeIds.has(id)) pinnedNodes.delete(id);
-	}
 	simNodeMap = new Map(simNodes.map((n) => [n.id, n]));
 
 	simLinks = data.edges
@@ -1102,7 +1162,7 @@ function buildInternalData(data: GraphData): {
 	if (isSmooth) skipNextSetupEffects = false;
 	if (!isSmooth) edgeFadeAlpha = 0;
 
-	return { oldPositions, isSmooth };
+	return { oldPositions, isSmooth, allPositionsKnown };
 }
 
 // ============================================================================
@@ -1209,7 +1269,7 @@ function setupSmartLayout(data: GraphData, oldPositions: Map<string, { x: number
 // Wiki mode: d3-force simulation setup
 // ============================================================================
 
-function setupForceSimulation(data: GraphData, oldPositions: Map<string, { x: number; y: number }>, isSmooth: boolean) {
+function setupForceSimulation(_data: GraphData, oldPositions: Map<string, { x: number; y: number }>, isSmooth: boolean, allPositionsKnown: boolean) {
 	// Save the default d3 link strength function so we can apply linkStrength as
 	// a multiplier, matching how Obsidian's native graph works.
 	const baseLinkForce = forceLink<SimNode, SimLink>(simLinks)
@@ -1259,19 +1319,16 @@ function setupForceSimulation(data: GraphData, oldPositions: Map<string, { x: nu
 		.alphaDecay(0.02)
 		.velocityDecay(0.3);
 
-	// If nodes already had positions, start with low alpha for gentle transition.
-	// On a smooth data swap (e.g. cosmetic update), skip the initial fit entirely.
-	// On a mode switch (smart → wiki), use a lower alpha and slower decay so
-	// nodes drift into place over ~700ms instead of snapping instantly.
-	if (oldPositions.size > 0) {
-		if (isSmooth) {
-			simulation.alpha(0.05);
-			needsInitialFit = false;
-		} else {
-			simulation.alpha(0.15).alphaDecay(0.008).velocityDecay(0.4);
-			needsInitialFit = true;
-			forceTickCount = 0;
-		}
+	// All nodes restored from cache → gentle settle, no camera refit needed.
+	// Some nodes had prior positions (mode switch) → slow drift into place.
+	// No prior positions → full simulation from scratch.
+	if (allPositionsKnown || isSmooth) {
+		simulation.alpha(0.05);
+		needsInitialFit = false;
+	} else if (oldPositions.size > 0) {
+		simulation.alpha(0.15).alphaDecay(0.008).velocityDecay(0.4);
+		needsInitialFit = true;
+		forceTickCount = 0;
 	}
 }
 
@@ -1279,15 +1336,25 @@ function setupForceSimulation(data: GraphData, oldPositions: Map<string, { x: nu
 // Main graph setup — dispatches to wiki or smart layout engine
 // ============================================================================
 
-function setupGraph(data: GraphData) {
-	// Stop any existing layout engine
-	if (simulation) {
-		simulation.stop();
-		simulation = null;
-	}
-	stopSmartRaf();
+/**
+ * Returns true when only node colors / cluster indices changed — the topology
+ * (node IDs, count, edges) is identical to the current simNodes/simLinks.
+ * Used to short-circuit a full layout restart on color-mode switches.
+ */
+function isColorOnlyChange(data: GraphData): boolean {
+	if (simNodes.length === 0) return false;
+	if (simNodes.length !== data.nodes.length) return false;
+	if (simLinks.length !== data.edges.length) return false;
+	const existingIds = new Set(simNodes.map((n) => n.id));
+	return data.nodes.every((n) => existingIds.has(n.id));
+}
 
-	if (data.nodes.length === 0) return;
+function setupGraph(data: GraphData) {
+	if (data.nodes.length === 0) {
+		if (simulation) { simulation.stop(); simulation = null; }
+		stopSmartRaf();
+		return;
+	}
 
 	// Detect mode-only changes: if the mode changed but graphData is the
 	// same reference, the parent hasn't rebuilt the data yet (e.g. waiting
@@ -1303,11 +1370,49 @@ function setupGraph(data: GraphData) {
 		return;
 	}
 
-	const { oldPositions, isSmooth } = buildInternalData(data);
+	// Color-only update: topology unchanged, only colors/clusters differ.
+	// Patch simNodes in-place and re-render — no layout restart needed.
+	// IMPORTANT: do this BEFORE stopping the simulation so the force layout
+	// keeps running uninterrupted.
+	if (dataChanged && !modeChanged && isColorOnlyChange(data)) {
+		for (const sn of simNodes) {
+			const node = data.nodes.find((n) => n.id === sn.id);
+			if (node !== undefined) {
+				sn.color = node.color;
+				sn.cluster = node.cluster;
+			}
+		}
+		// Re-derive cluster metadata so pills on the canvas reflect the new segmentation.
+		// (buildInternalData is not called in this path, so we update it explicitly.)
+		const clusterRepresentatives = deriveClusterRepresentativesFromGraph(data);
+		clusterRepresentativeIds = new Set([...clusterRepresentatives.values()].map((n) => n.id));
+		clusterRepresentativeNodes = new Map(
+			[...clusterRepresentatives].flatMap(([cluster, node]) => {
+				const simNode = simNodeMap.get(node.id);
+				return simNode ? [[cluster, simNode] as const] : [];
+			}),
+		);
+		clusterNodeCounts = new Map<number, number>();
+		for (const node of data.nodes) {
+			if (node.cluster == null) continue;
+			clusterNodeCounts.set(node.cluster, (clusterNodeCounts.get(node.cluster) ?? 0) + 1);
+		}
+		if (pixi) render();
+		return;
+	}
+
+	// Full setup needed — stop existing engines first
+	if (simulation) {
+		simulation.stop();
+		simulation = null;
+	}
+	stopSmartRaf();
+
+	const { oldPositions, isSmooth, allPositionsKnown } = buildInternalData(data);
 
 	if (isForceMode) {
 		// Wiki mode: full d3-force simulation
-		setupForceSimulation(data, oldPositions, isSmooth);
+		setupForceSimulation(data, oldPositions, isSmooth, allPositionsKnown);
 	} else {
 		// Smart mode: static projected positions, no d3-force
 		setupSmartLayout(data, oldPositions, isSmooth);
@@ -1317,25 +1422,25 @@ function setupGraph(data: GraphData) {
 // React to graphData or mode changes
 $effect(() => {
 	// Access reactive dependencies
-	const data = graphData;
+	const _data = graphData;
 	const _mode = mode;
-	setupGraph(data);
+	void _data; void _mode;
+	setupGraph(graphData);
 
+	// Do NOT stop the simulation here. setupGraph manages its own lifecycle:
+	// color-only changes deliberately leave the simulation running, and full
+	// rebuilds call simulation.stop() themselves before restarting.
+	// Stopping here would kill the simulation on every color update (e.g. deselect
+	// → previewSpace change → graphData ref change → cleanup → dead simulation).
+	// Component-level cleanup happens in onMount's return below.
 	return () => {
-		if (simulation) {
-			simulation.stop();
-			simulation = null;
-		}
 		stopSmartRaf();
 	};
 });
 
-// Re-render when appearance settings change (nodeSize, labelZoomThreshold, showWikiLinks)
+// Re-render when appearance settings change (nodeSize, showWikiLinks)
 $effect(() => {
-	// Track reactive appearance props so the effect re-fires
-	const _nodeSize = nodeSize;
-	const _labelZoom = labelZoomThreshold;
-	const _showWiki = showWikiLinks;
+	void nodeSize; void showWikiLinks;
 	if (pixi) render();
 });
 
@@ -1380,6 +1485,41 @@ onMount(() => {
 	renderer.init(containerEl, theme).then(() => {
 		// Re-render overlays (cluster pills, legends, labels) when viewport moves
 		renderer.onViewportMoved(() => render());
+
+		// If graphData arrived before pixi was ready (happens when GraphCanvas
+		// mounts while a build completes, e.g. on first open), do the initial
+		// snap/fit that setupSmartLayout / setupForceSimulation missed.
+		if (simNodes.length > 0) {
+			if (!isForceMode) {
+				// Semantic mode: snap camera to framed view and render.
+				const bounds = computeNodeBounds(simNodes);
+				if (bounds) {
+					const frame = framingTransform(bounds, { width: renderer.width, height: renderer.height }, 20);
+					const cx = (bounds.minX + bounds.maxX) / 2;
+					const cy = (bounds.minY + bounds.maxY) / 2;
+					renderer.snapToFrame(cx, cy, frame.scale);
+				}
+			} else {
+				// Force mode: simulation is already running.
+				// If it has already settled (alpha low), snap the camera immediately
+				// since the tick loop won't fire again to do the initial fit.
+				const alpha = simulation?.alpha() ?? 0;
+				if (alpha < 0.05) {
+					const bounds = computeNodeBounds(simNodes);
+					if (bounds) {
+						const frame = framingTransform(bounds, { width: renderer.width, height: renderer.height }, 20);
+						const cx = (bounds.minX + bounds.maxX) / 2;
+						const cy = (bounds.minY + bounds.maxY) / 2;
+						renderer.snapToFrame(cx, cy, frame.scale);
+					}
+				} else {
+					// Simulation still running — tick loop will handle fitting.
+					needsInitialFit = true;
+					forceTickCount = 0;
+				}
+			}
+			render();
+		}
 
 		// Setup keyboard shortcuts
 		function handleKeyDown(e: KeyboardEvent) {
@@ -1528,6 +1668,7 @@ export function panToClusters(clusters: Set<number>) {
   onpointermove={handleMouseMove}
   onpointerup={handleMouseUp}
   onclick={handleClick}
+  onwheel={handleWheel}
   onmouseleave={handleMouseLeave}
   oncontextmenu={handleContextMenu}
 >

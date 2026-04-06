@@ -1,22 +1,32 @@
 <script lang="ts">
-import { untrack } from "svelte";
+import { untrack, onDestroy, tick } from "svelte";
 import { getAllTags, Notice } from "obsidian";
 import { HumanMessage } from "@langchain/core/messages";
 import { getPlugin } from "../../stores/state.svelte";
-import { getData } from "../../stores/dataStore.svelte";
+import { getData, getImmersedSpace, setImmersedSpace } from "../../stores/dataStore.svelte";
+import { getIndexableVaultFiles } from "../../utils/fileFiltering";
 import { getRegistry } from "../../providers/registry";
 import type { ChatModelConfig } from "../../providers/index";
 import { Logger } from "../../utils/logging";
-import { getVectorStoreService, isVectorStoreInitialized, waitForVectorStoreIndex } from "../../vectorstore";
+import { getVectorStoreService, isVectorStoreInitialized, waitForVectorStore, waitForVectorStoreIndex } from "../../vectorstore";
 import {
 	type GraphData,
 	type GraphEdge,
 	type LayoutMode,
 	type ColorMode,
+	type SegmentBy,
+	type RegionSegment,
+	type Space,
+	type ViewFilter,
 	type SmartGraphSettings,
 	DEFAULT_SMART_GRAPH_SETTINGS,
 	THEME_COLOR_VARS,
+	segmentByToColorMode,
 } from "../../types/graph";
+import {
+	resolveViewFilter,
+	describeViewFilter,
+} from "../../lib/views";
 import {
 	buildWikiGraph,
 	filterDocuments,
@@ -27,9 +37,10 @@ import {
 	computeClusters,
 	applyClusterMap,
 	applyColorGroups,
-	applySearchHighlight,
 	deriveClusterLabelsFromGraph,
 	readNativeGraphSettings,
+	resolveSegments,
+	applySegments,
 	type GraphFilter,
 	type ClusterAssignment,
 	type GraphStructureResult,
@@ -41,7 +52,7 @@ import {
 	reducedKey,
 	projectionKey,
 } from "../../views/smart-graph/graphCache";
-import { reduceDimensionsAsync, project2DAsync } from "../../utils/computeWorkerManager";
+import { reduceDimensionsAsync, project2DAsync, louvainAsync } from "../../utils/computeWorkerManager";
 import type { DocumentVector } from "../../vectorstore/types";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import { VIEW_TYPE_SMART_GRAPH } from "../../views/smart-graph/SmartGraphView";
@@ -50,7 +61,6 @@ import LoadingAnimation from "../ui/LoadingAnimation.svelte";
 import Button from "../ui/Button.svelte";
 import GraphCanvas from "./GraphCanvas.svelte";
 import GraphControls from "./GraphControls.svelte";
-import GraphInspector from "./GraphInspector.svelte";
 
 const plugin = getPlugin();
 const data = getData();
@@ -82,6 +92,11 @@ let isLabeling = $state(false);
 // Cluster state — persisted across edge/layout rebuilds
 let clusterMap: Map<string, ClusterAssignment> = $state(new Map());
 
+// Louvain community state — computed async in worker, cleared on graph rebuild
+let louvainCommunities: Record<string, number> = $state({});
+// Betweenness centrality per node — computed alongside Louvain, cleared on rebuild
+let louvainCentrality: Record<string, number> = $state({});
+
 /**
  * Effective color groups: use the user-defined groups if any exist,
  * otherwise fall back to the native Obsidian graph color groups that were
@@ -99,12 +114,12 @@ let effectiveColorGroups = $derived(
 // Filter state
 let selectedFolders: string[] = $state([]);
 let selectedTags: string[] = $state([]);
-let searchQuery = $state("");
-let displayData: GraphData = $derived(searchQuery ? applySearchHighlight(graphData, searchQuery) : graphData);
+let selectedExtensions: string[] = $state([]);
 
 // Available filters
 let availableFolders: string[] = $state([]);
 let availableTags: string[] = $state([]);
+let availableExtensions: string[] = $state([]);
 
 // Canvas ref
 let canvasComponent: GraphCanvas | undefined = $state(undefined);
@@ -113,10 +128,46 @@ let canvasComponent: GraphCanvas | undefined = $state(undefined);
 let lassoMode = $state(false);
 let selectedPaths: string[] = $state([]);
 let focusedClusters: Set<number> = $state(new Set());
+let spaceBuilderOpen = $state(false);
 
-// Inspector panel state
-let inspectorOpen = $state(false);
-let hasActiveFilters = $derived(selectedFolders.length > 0 || selectedTags.length > 0 || searchQuery.length > 0);
+// Segment / Color-by state — driven by persisted settings, re-applies on change
+let segmentBy: SegmentBy = $derived(settings.segmentBy ?? "none");
+let segments: RegionSegment[] = $state([]);
+let selectedSegmentIds: Set<string> = $state(new Set());
+let focusedSegmentId: string | null = $state(null);
+/** Per-segment color overrides set by the user. */
+let segmentColorOverrides: Record<string, string> = $state({});
+
+// Re-apply coloring whenever spaces or previewSpace changes (no full rebuild needed).
+// segmentBy changes are handled directly in handleSegmentByChange for immediacy.
+$effect(() => {
+	void data.spaces;
+	void previewSpace;
+	untrack(() => {
+		if (graphData.nodes.length > 0 && (segmentBy !== "semantic" || clusterMap.size > 0)) {
+			resolveAndApplySegments(graphData);
+		}
+	});
+});
+
+// Immersion state
+const _restoredSpaceId = data.smartGraphSettings?.activeImmersedSpaceId ?? null;
+let immersedSpaceId: string | null = $state(_restoredSpaceId);
+// Restore the immersed-space store so search/agent pick it up immediately.
+if (_restoredSpaceId) {
+	const restoredSpace = data.spaces.find((s) => s.id === _restoredSpaceId);
+	setImmersedSpace(restoredSpace ?? null);
+}
+let pendingSpaceFilter: ViewFilter | null = $state(null);
+/** Live preview of a space being edited — substitutes the saved version for coloring. */
+let previewSpace: Space | null = $state(null);
+/** Resolved paths for the immersed space — constrains graph build. */
+let immersedSpacePaths: Set<string> | null = $derived.by(() => {
+	if (!immersedSpaceId) return null;
+	const space = data.spaces.find((s) => s.id === immersedSpaceId);
+	if (!space) return null;
+	return resolveViewFilter(plugin.app, space.filter).paths;
+});
 
 let effectiveClusterLabels: Record<number, string> = $derived({
 	...defaultClusterLabels,
@@ -197,18 +248,17 @@ function getFilter(): GraphFilter {
 	return {
 		folders: selectedFolders.length > 0 ? selectedFolders : undefined,
 		tags: selectedTags.length > 0 ? selectedTags : undefined,
-		searchQuery: searchQuery || undefined,
+		extensions: selectedExtensions.length > 0 ? selectedExtensions : undefined,
 	};
 }
 
-function createAutoRebuildSignature(layout: LayoutMode, color: ColorMode, filter: GraphFilter): string {
+function createAutoRebuildSignature(layout: LayoutMode, filter: GraphFilter): string {
 	return JSON.stringify({
 		layoutMode: layout,
-		colorMode: color,
 		folders: [...(filter.folders ?? [])].sort(),
 		tags: [...(filter.tags ?? [])].sort(),
-		colorGroups:
-			color === "groups" ? effectiveColorGroups.map((group) => ({ query: group.query, color: group.color })) : [],
+		extensions: [...(filter.extensions ?? [])].sort(),
+		colorGroups: effectiveColorGroups.map((group) => ({ query: group.query, color: group.color })),
 		showWikiLinks: layout === "semantic" ? settings.showWikiLinks : true,
 	});
 }
@@ -223,9 +273,11 @@ function resolveThemeColors(): string[] {
  * Gather available folder and tag options from the vault.
  */
 function loadFilterOptions() {
+	const vaultFiles = getIndexableVaultFiles(plugin.app.vault);
+
 	// Folders: Get unique top-level and second-level folders
 	const folders = new Set<string>();
-	for (const file of plugin.app.vault.getMarkdownFiles()) {
+	for (const file of vaultFiles) {
 		const parts = file.path.split("/");
 		if (parts.length > 1) {
 			folders.add(parts[0]);
@@ -236,7 +288,7 @@ function loadFilterOptions() {
 	}
 	availableFolders = [...folders].sort();
 
-	// Tags: Get all unique tags from the vault
+	// Tags: Get all unique tags from the vault (only md files have metadata)
 	const tags = new Set<string>();
 	for (const file of plugin.app.vault.getMarkdownFiles()) {
 		const cache = plugin.app.metadataCache.getFileCache(file);
@@ -248,6 +300,13 @@ function loadFilterOptions() {
 		}
 	}
 	availableTags = [...tags].sort();
+
+	// Extensions: Get all unique file extensions from the vault
+	const extensions = new Set<string>();
+	for (const file of vaultFiles) {
+		extensions.add(file.extension.toLowerCase());
+	}
+	availableExtensions = [...extensions].sort();
 }
 
 /**
@@ -271,8 +330,9 @@ async function ensureDocumentsLoaded(gen: number): Promise<DocumentVector[] | nu
 	let documents = smartGraphCache.getDocuments(docKey);
 
 	if (!documents) {
-		if (!isVectorStoreInitialized()) return null;
 		setLoadingStage("Initializing vector index...");
+		const serviceReady = await waitForVectorStore();
+		if (!serviceReady || gen !== buildGeneration) return null;
 		const ready = await waitForVectorStoreIndex(indexId);
 		if (!ready) return null;
 
@@ -303,11 +363,12 @@ async function ensureClusterMap(
 	const docKey = documentsKey(indexId, configuredIndexCount ?? 0);
 
 	// ── Layer 2: Filtered documents + extracted vectors ──────────────
-	const filterK = filteredKey(docKey, filter.folders, filter.tags);
+	const regionConstraint = immersedSpacePaths;
+	const filterK = filteredKey(docKey, filter.folders, filter.tags, filter.extensions, regionConstraint);
 	let filteredResult = smartGraphCache.getFiltered(filterK);
 
 	if (!filteredResult) {
-		const filtered = filterDocuments(plugin.app, documents, filter);
+		const filtered = filterDocuments(plugin.app, documents, filter, regionConstraint);
 		if (filtered.length === 0) return null;
 		const vectors = filtered.map((doc) => doc.vector);
 		smartGraphCache.setFiltered(filterK, filtered, vectors);
@@ -330,7 +391,7 @@ async function ensureClusterMap(
 	}
 
 	// ── Clustering ───────────────────────────────────────────────────
-	const cachedPathSetKey = smartGraphCache.getFilteredPathSetKey();
+	const cachedPathSetKey = smartGraphCache.getFilteredPathSetKey(filterK);
 	const currentPathSetKey = filteredDocs
 		.map((d) => d.path)
 		.slice()
@@ -364,12 +425,22 @@ async function buildForceLayoutGraph(
 	filter: GraphFilter,
 	activeColorMode: ColorMode,
 ): Promise<{ graphData: GraphData; shouldAutoLabel: boolean }> {
+	if (gen !== buildGeneration) return { graphData: { nodes: [], edges: [] } as GraphData, shouldAutoLabel: false };
 	// Always load the indexed documents so the force graph is constrained to
 	// the same set of embedded files as the semantic graph. Without this,
 	// un-indexed vault notes would appear in force mode but not in semantic.
 	await ensureDocumentsLoaded(gen);
 	const embeddedPaths = smartGraphCache.getDocumentPaths();
-	const { graphData: wikiGraphData } = buildWikiGraph(plugin.app, filter, embeddedPaths ?? undefined);
+	// In immersion view, further constrain to only the space's paths
+	const regionConstraint = immersedSpacePaths;
+	const constrainTo = regionConstraint
+		? new Set([...(embeddedPaths ?? [])].filter((p) => regionConstraint!.has(p)))
+		: (embeddedPaths ?? undefined);
+	const { graphData: wikiGraphData } = buildWikiGraph(
+		plugin.app,
+		filter,
+		constrainTo,
+	);
 
 	if (activeColorMode === "groups") {
 		return { graphData: applyColorGroups(plugin.app, wikiGraphData, effectiveColorGroups), shouldAutoLabel: false };
@@ -398,6 +469,7 @@ async function buildSemanticLayoutGraph(
 	shouldAutoLabel: boolean;
 }> {
 	const EMPTY = { graphData: { nodes: [], edges: [] } as GraphData, shouldAutoLabel: false };
+	if (gen !== buildGeneration) return EMPTY;
 
 	// ── Layer 1: Raw document vectors (shared loader) ────────────────
 	const documents = await ensureDocumentsLoaded(gen);
@@ -408,11 +480,12 @@ async function buildSemanticLayoutGraph(
 	const docKey = documentsKey(indexId, configuredIndexCount ?? 0);
 
 	// ── Layer 2: Filtered documents + extracted vectors ──────────────
-	const filterK = filteredKey(docKey, filter.folders, filter.tags);
+	const regionConstraint = immersedSpacePaths;
+	const filterK = filteredKey(docKey, filter.folders, filter.tags, filter.extensions, regionConstraint);
 	let filteredResult = smartGraphCache.getFiltered(filterK);
 
 	if (!filteredResult) {
-		const filtered = filterDocuments(plugin.app, documents, filter);
+		const filtered = filterDocuments(plugin.app, documents, filter, regionConstraint);
 		if (filtered.length === 0) return EMPTY;
 		const vectors = filtered.map((doc) => doc.vector);
 		smartGraphCache.setFiltered(filterK, filtered, vectors);
@@ -552,7 +625,7 @@ async function rebuildGraph(targetLayout: LayoutMode = layoutMode, targetColor: 
 	const buildStart = performance.now();
 	setLoadingStage(targetLayout === "force" ? "Building wiki graph..." : "Preparing smart graph...");
 	const filter = getFilter();
-	lastAutoRebuildSignature = createAutoRebuildSignature(targetLayout, targetColor, filter);
+	lastAutoRebuildSignature = createAutoRebuildSignature(targetLayout, filter);
 
 	try {
 		if (targetLayout === "force") {
@@ -560,6 +633,10 @@ async function rebuildGraph(targetLayout: LayoutMode = layoutMode, targetColor: 
 			logGraphPhase("Force layout build", buildStart, nextGraphData.nodes.length);
 			if (gen !== buildGeneration) return;
 			graphData = nextGraphData;
+			resolveAndApplySegments(nextGraphData);
+			if (segmentBy === "louvain") void runLouvainSegmentation();
+			await tick();
+			try { canvasComponent?.fitToView(); } catch { /* pixi not ready */ }
 
 			if (shouldAutoLabel) {
 				void handleLabelClusters(nextGraphData, gen);
@@ -572,6 +649,10 @@ async function rebuildGraph(targetLayout: LayoutMode = layoutMode, targetColor: 
 		if (gen !== buildGeneration) return;
 
 		graphData = nextGraphData;
+		resolveAndApplySegments(nextGraphData);
+		if (segmentBy === "louvain") void runLouvainSegmentation();
+		await tick();
+		try { canvasComponent?.fitToView(); } catch { /* pixi not ready */ }
 
 		if (shouldAutoLabel) {
 			// Fire-and-forget; handleLabelClusters manages its own isLabeling state.
@@ -588,17 +669,16 @@ async function rebuildGraph(targetLayout: LayoutMode = layoutMode, targetColor: 
 	}
 }
 
-// displayData is $derived above — auto-applies search highlighting.
-
-// Build graph on filter/settings changes (debounced to avoid rapid-fire builds)
+// Build graph on layout/filter changes only (debounced).
+// Segment/color-by changes are handled imperatively in handleSegmentByChange.
 // Note: projectionMethod, UMAP parameters, defaultK, and autoK are
 // intentionally excluded — they only take effect when the user presses Apply.
 $effect(() => {
-	// Track reactive dependencies (layout, color, filter settings)
+	// Track reactive dependencies (layout and filter settings only)
 	layoutMode;
-	colorMode;
 	selectedFolders;
 	selectedTags;
+	selectedExtensions;
 	effectiveColorGroups;
 
 	if (layoutMode === "semantic") {
@@ -606,11 +686,15 @@ $effect(() => {
 	}
 
 	const filter = getFilter();
-	const rebuildSignature = createAutoRebuildSignature(layoutMode, colorMode, filter);
+	const rebuildSignature = createAutoRebuildSignature(layoutMode, filter);
 	if (rebuildSignature === lastAutoRebuildSignature) {
 		return;
 	}
-	lastAutoRebuildSignature = rebuildSignature;
+	// Don't set lastAutoRebuildSignature here — rebuildGraph() sets it when the
+	// build actually starts. Setting it here causes a race: if nativeGraphSettings
+	// loads (async) with the same effective values and re-triggers this effect,
+	// the pre-set signature matches the re-run's signature and the timer is never
+	// rescheduled, so the graph never builds on initial open.
 
 	// Debounce: schedule a rebuild and clean up on re-trigger
 	const timer = setTimeout(() => {
@@ -637,6 +721,8 @@ $effect(() => {
 		Logger.info(`[SmartGraphCache] Index changed (${lastDocCacheKey} → ${key}), invalidating cache`);
 		smartGraphCache.clear();
 		clusterMap = new Map();
+		louvainCommunities = {};
+		louvainCentrality = {};
 	}
 	lastDocCacheKey = key;
 });
@@ -676,8 +762,8 @@ function handleTagFilterChange(tags: string[]) {
 	selectedTags = tags;
 }
 
-function handleSearchChange(query: string) {
-	searchQuery = query;
+function handleExtensionFilterChange(extensions: string[]) {
+	selectedExtensions = extensions;
 }
 
 function handleFitToView() {
@@ -690,6 +776,8 @@ function handleRefresh() {
 		// Force full rebuild by clearing all caches
 		smartGraphCache.clear();
 		clusterMap = new Map();
+		louvainCommunities = {};
+		louvainCentrality = {};
 	}
 	void rebuildGraph();
 }
@@ -719,7 +807,7 @@ function handleSwitchToSemantic() {
 		new Notice("Semantic layout requires indexed embeddings. Build the vector store first.");
 		return;
 	}
-	handleSettingsChange({ layoutMode: "semantic", colorMode: "clusters" });
+	handleSettingsChange({ layoutMode: "semantic" });
 }
 
 /**
@@ -727,7 +815,7 @@ function handleSwitchToSemantic() {
  */
 function handleSwitchToForce() {
 	if (layoutMode === "force") return;
-	handleSettingsChange({ layoutMode: "force", colorMode: "groups" });
+	handleSettingsChange({ layoutMode: "force" });
 }
 
 function handleNodeClick(path: string) {
@@ -746,6 +834,18 @@ function handleRevealFile(path: string) {
 }
 
 function handleFocusCluster(cluster: number) {
+	// When coloring by folder or tag, applySegments assigns cluster=index in the
+	// segments array — so we can look up the segment directly by index and delegate
+	// to handleFocusSegment so the filter uses folder/tag type instead of raw paths.
+	if (segmentBy === "folder" || segmentBy === "tag") {
+		const segment = segments[cluster];
+		if (segment) {
+			const isFocused = focusedSegmentId === segment.id;
+			handleFocusSegment(isFocused ? null : segment.id);
+			return;
+		}
+	}
+
 	// Toggle: add or remove this cluster from the focused set
 	const next = new Set(focusedClusters);
 	if (next.has(cluster)) {
@@ -770,7 +870,9 @@ function handleFocusCluster(cluster: number) {
 
 function handleSelectionChange(paths: string[]) {
 	selectedPaths = paths;
-	// If a chat is already open, sync selection automatically
+	pendingSpaceFilter = paths.length > 0
+		? { type: "any", conditions: [{ type: "paths", value: paths.slice() }] }
+		: null;
 	const messenger = getMessenger();
 	if (messenger) {
 		messenger.pendingGraphNotes = [...paths];
@@ -824,6 +926,8 @@ function handleZoomToSelection() {
 function handleClearSelection() {
 	selectedPaths = [];
 	focusedClusters = new Set();
+	focusedSegmentId = null;
+	pendingSpaceFilter = null;
 	canvasComponent?.clearSelection();
 	const messenger = getMessenger();
 	if (messenger) {
@@ -962,6 +1066,198 @@ Respond with ONLY a JSON object mapping cluster number to label, no markdown fen
 	}
 }
 
+async function runLouvainSegmentation() {
+	const wikiEdges = graphData.edges.filter((e) => e.type === "wiki");
+	if (wikiEdges.length === 0) return;
+	const sources = wikiEdges.map((e) => e.source);
+	const targets = wikiEdges.map((e) => e.target);
+	const weights = wikiEdges.map((e) => e.weight);
+	const result = await louvainAsync(sources, targets, weights, true);
+	louvainCommunities = result.communities;
+	louvainCentrality = result.centrality;
+	resolveAndApplySegments(graphData, "louvain");
+}
+
+function handleSegmentByChange(by: SegmentBy) {
+	selectedSegmentIds = new Set();
+	focusedSegmentId = null;
+	segmentColorOverrides = {};
+	// Clear AI-generated cluster labels — they belong to semantic clustering only.
+	// Keeping them would bleed stale labels into folder/tag/spaces modes.
+	if (by !== "semantic") {
+		clusterLabels = {};
+	}
+	// Clear louvain state when switching away from louvain mode.
+	if (by !== "louvain") {
+		louvainCommunities = {};
+		louvainCentrality = {};
+	}
+	const colorMode: ColorMode = by === "semantic" ? "clusters" : by === "none" ? "none" : "groups";
+	handleSettingsChange({ segmentBy: by, colorMode });
+
+	if (by === "semantic" && clusterMap.size === 0) {
+		// No cached clusters — need a full rebuild to compute them.
+		void rebuildGraph();
+	} else if (by === "louvain") {
+		// Run community detection + betweenness centrality in the worker, then apply.
+		void runLouvainSegmentation();
+	} else {
+		// Clusters available (or non-semantic mode) — re-apply colors immediately, no rebuild.
+		// Pass `by` explicitly: `segmentBy` is a $derived of settings and hasn't updated yet.
+		resolveAndApplySegments(graphData, by);
+	}
+}
+
+function handleSegmentColorChange(segmentId: string, color: string) {
+	// "none" means revert to default theme color
+	const resolvedColor = color === "none" ? "" : color;
+	segmentColorOverrides = { ...segmentColorOverrides, [segmentId]: resolvedColor };
+	segments = segments.map((s) => (s.id === segmentId ? { ...s, color: resolvedColor } : s));
+	graphData = applySegments(graphData, segments);
+}
+
+function handleFocusSegment(segmentId: string | null) {
+	focusedSegmentId = segmentId;
+	if (segmentId == null) {
+		focusedClusters = new Set();
+		canvasComponent?.clearSelection();
+		handleSelectionChange([]);
+		return;
+	}
+	const segment = segments.find((s) => s.id === segmentId);
+	if (segment) {
+		const paths = [...segment.paths];
+		canvasComponent?.selectNodesByPaths(paths);
+		selectedPaths = paths;
+		const messenger = getMessenger();
+		if (messenger) messenger.pendingGraphNotes = [...paths];
+		// Use semantic filter condition when the segment source is folder or tag
+		if (segment.source === "folder") {
+			const value = segmentId.replace(/^folder:/, "");
+			pendingSpaceFilter = { type: "any", conditions: [{ type: "folder", value }] };
+		} else if (segment.source === "tag") {
+			const value = segmentId.replace(/^tag:/, "");
+			pendingSpaceFilter = { type: "any", conditions: [{ type: "tag", value }] };
+		} else {
+			pendingSpaceFilter = { type: "any", conditions: [{ type: "paths", value: paths.slice() }] };
+		}
+		canvasComponent?.panToSelection();
+	}
+}
+
+function handleToggleSegmentSelection(segmentId: string) {
+	const next = new Set(selectedSegmentIds);
+	if (next.has(segmentId)) {
+		next.delete(segmentId);
+	} else {
+		next.add(segmentId);
+	}
+	selectedSegmentIds = next;
+}
+
+// ─── Spaces handlers ─────────────────────────────────────
+
+function handleImmerse(id: string) {
+	immersedSpaceId = id;
+	const space = data.spaces.find((s) => s.id === id);
+	setImmersedSpace(space ?? null);
+	data.setActiveImmersedSpaceId(id);
+	void rebuildGraph();
+}
+
+function handleExitImmersion() {
+	immersedSpaceId = null;
+	setImmersedSpace(null);
+	data.setActiveImmersedSpaceId(null);
+	void rebuildGraph();
+}
+
+function handleSaveSpace(draft: { label: string; filter: ViewFilter; color: string }) {
+	const space: Space = {
+		id: crypto.randomUUID(),
+		label: draft.label,
+		filter: $state.snapshot(draft.filter) as ViewFilter,
+		color: draft.color,
+		createdAt: new Date().toISOString(),
+	};
+	data.addSpace(space);
+	pendingSpaceFilter = null;
+	new Notice(`Space "${space.label}" saved`);
+}
+
+function handleUpdateSpace(id: string, patch: Partial<Omit<Space, "id">>) {
+	data.updateSpace(id, patch.filter ? { ...patch, filter: $state.snapshot(patch.filter) as ViewFilter } : patch);
+}
+
+function handleDeleteSpace(id: string) {
+	if (immersedSpaceId === id) {
+		handleExitImmersion();
+	} else {
+		data.deleteSpace(id);
+	}
+}
+
+/**
+ * Resolve segments from current graphData and apply coloring.
+ * Called after graph build or when segmentBy changes.
+ * Pass `overrideBy` when calling from handleSegmentByChange to bypass the stale
+ * `segmentBy` derived value (which hasn't updated yet when settings are written).
+ */
+function resolveAndApplySegments(gd: GraphData, overrideBy?: SegmentBy) {
+	const by = overrideBy ?? segmentBy;
+	const themeColors = resolveThemeColors();
+	const displaySpaces = previewSpace
+		? previewSpace.id === "__draft__"
+			? [...data.spaces, previewSpace]
+			: data.spaces.map((s) => (s.id === previewSpace!.id ? previewSpace! : s))
+		: data.spaces;
+	const resolved = resolveSegments(plugin.app, gd, by, {
+		clusterMap,
+		clusterLabels: effectiveClusterLabels,
+		colorGroups: effectiveColorGroups,
+		themeColors,
+		spaces: displaySpaces,
+		louvainCommunities,
+	});
+	// Apply persistent color overrides (from user picks or bookmark restore)
+	for (let i = 0; i < resolved.length; i++) {
+		const override = segmentColorOverrides[resolved[i].id];
+		if (override !== undefined) {
+			resolved[i] = { ...resolved[i], color: override };
+		}
+	}
+	segments = resolved;
+	// Always strip previous colors/centrality first so switching modes never bleeds old values
+	const cleanGd: GraphData = {
+		...gd,
+		nodes: gd.nodes.map((n) => ({ ...n, color: undefined, cluster: undefined, centrality: undefined })),
+	};
+	// Apply betweenness centrality to nodes when in louvain mode
+	const effectiveGd =
+		by === "louvain" && Object.keys(louvainCentrality).length > 0
+			? {
+					...cleanGd,
+					nodes: cleanGd.nodes.map((n) => {
+						const c = louvainCentrality[n.id];
+						return c !== undefined ? { ...n, centrality: c } : n;
+					}),
+				}
+			: cleanGd;
+	if (resolved.length > 0) {
+		graphData = applySegments(effectiveGd, resolved);
+		const labels: Record<number, string> = {};
+		for (let i = 0; i < resolved.length; i++) {
+			labels[i] = resolved[i].label;
+		}
+		defaultClusterLabels = labels;
+	} else {
+		graphData = effectiveGd;
+		defaultClusterLabels = {};
+	}
+}
+
+// ─── Saved Views ─────────────────────────────────────────
+
 function handleClearFocusedClusters() {
 	handleClearSelection();
 }
@@ -976,6 +1272,10 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
 		sourcePath: path,
 	});
 }
+
+onDestroy(() => {
+	setImmersedSpace(null);
+});
 </script>
 
 <div class="smart-graph-view">
@@ -987,14 +1287,12 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
   {:else}
     <GraphCanvas
       bind:this={canvasComponent}
-      graphData={displayData}
+      graphData={graphData}
       mode={layoutMode}
       linkDistance={settings.linkDistance}
       chargeStrength={settings.chargeStrength}
       centerStrength={settings.centerStrength}
       linkStrength={settings.linkStrength}
-      labelZoomThreshold={settings.labelZoomThreshold}
-      nodeSize={settings.nodeSize}
       showWikiLinks={layoutMode === "force" ? true : settings.showWikiLinks}
       {focusedClusters}
       clusterLabels={effectiveClusterLabels}
@@ -1024,67 +1322,52 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
           onClick={handleOpenAllSelected}
           tooltip="Open all selected notes in new tabs"
         />
-        {#if !plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT).length}
-          <Button
-            buttonText="Send to Chat"
-            onClick={handleSendToChat}
-            tooltip="Open a new chat with selected notes"
-          />
-        {/if}
+        <Button
+          buttonText="New Space"
+          onClick={() => (spaceBuilderOpen = true)}
+          tooltip="Save selection as a new space"
+        />
         <Button buttonText="Clear" onClick={handleClearSelection} tooltip="Clear selection (Esc)" />
       </div>
     </div>
   {/if}
 
-  <GraphInspector
-    isCollapsed={!inspectorOpen}
-    nodeCount={displayData.nodes.length}
-    graphData={displayData}
-    {colorMode}
-    {isLoading}
-    loadingLabel={loadingMessage}
-    {layoutMode}
-    {availableFolders}
-    {availableTags}
-    {selectedFolders}
-    {selectedTags}
-    {searchQuery}
-    onFolderFilterChange={handleFolderFilterChange}
-    onTagFilterChange={handleTagFilterChange}
-    onSearchChange={handleSearchChange}
-    selectedCount={selectedPaths.length}
-    focusedClusterDetails={focusedClusterDetails}
-    onClearFocusedClusters={handleClearFocusedClusters}
-    onOpenFocusedClusters={handleOpenAllSelected}
-    onSendFocusedClustersToChat={handleSendToChat}
-    onOpenPath={handleNodeClick}
-  />
-
   <GraphControls
     {settings}
-    {suggestedK}
     {isLoading}
     loadingLabel={loadingMessage}
     {layoutMode}
-    {colorMode}
+    {segmentBy}
     onSettingsChange={handleSettingsChange}
+    onSegmentByChange={handleSegmentByChange}
     onResetSettings={handleResetSettings}
-    {effectiveColorGroups}
     onFitToView={handleFitToView}
     onRefresh={handleRefresh}
     onApplyProjection={handleApplyProjection}
     onSwitchToSemantic={handleSwitchToSemantic}
     onSwitchToForce={handleSwitchToForce}
-    onLabelClusters={colorMode === "clusters" ? handleLabelClusters : undefined}
+    onLabelClusters={handleLabelClusters}
     {isLabeling}
     {lassoMode}
     onLassoModeChange={handleLassoModeChange}
-    {clusterLegendEntries}
-    {focusedClusters}
-    onFocusCluster={handleFocusCluster}
-    {inspectorOpen}
-    {hasActiveFilters}
-    onToggleInspector={() => (inspectorOpen = !inspectorOpen)}
+    graphData={graphData}
+    nodeCount={graphData.nodes.length}
+    spaces={data.spaces}
+    {immersedSpaceId}
+    {pendingSpaceFilter}
+    onImmerse={handleImmerse}
+    onExitImmersion={handleExitImmersion}
+    onSaveSpace={handleSaveSpace}
+    onUpdateSpace={handleUpdateSpace}
+    onDeleteSpace={handleDeleteSpace}
+    onClearPendingSpaceFilter={() => (pendingSpaceFilter = null)}
+    onPreviewSpace={(draft) => (previewSpace = draft)}
+    bind:spaceBuilderOpen
+    {availableFolders}
+    {availableTags}
+    {segments}
+    {focusedSegmentId}
+    onFocusSegment={handleFocusSegment}
   />
 </div>
 
