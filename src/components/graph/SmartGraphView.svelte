@@ -3,7 +3,7 @@ import { untrack, onDestroy, tick } from "svelte";
 import { getAllTags, Notice } from "obsidian";
 import { HumanMessage } from "@langchain/core/messages";
 import { getPlugin } from "../../stores/state.svelte";
-import { getData, getImmersedSpace, setImmersedSpace } from "../../stores/dataStore.svelte";
+import { getData, setImmersedSpace } from "../../stores/dataStore.svelte";
 import { getIndexableVaultFiles } from "../../utils/fileFiltering";
 import { getRegistry } from "../../providers/registry";
 import type { ChatModelConfig } from "../../providers/index";
@@ -13,7 +13,6 @@ import {
 	type GraphData,
 	type GraphEdge,
 	type LayoutMode,
-	type ColorMode,
 	type SegmentBy,
 	type RegionSegment,
 	type Space,
@@ -21,11 +20,9 @@ import {
 	type SmartGraphSettings,
 	DEFAULT_SMART_GRAPH_SETTINGS,
 	THEME_COLOR_VARS,
-	segmentByToColorMode,
 } from "../../types/graph";
 import {
 	resolveViewFilter,
-	describeViewFilter,
 } from "../../lib/views";
 import {
 	buildWikiGraph,
@@ -35,15 +32,11 @@ import {
 	computeWikiDegree,
 	createGraphNodes,
 	computeClusters,
-	applyClusterMap,
-	applyColorGroups,
-	deriveClusterLabelsFromGraph,
 	readNativeGraphSettings,
 	resolveSegments,
 	applySegments,
 	type GraphFilter,
 	type ClusterAssignment,
-	type GraphStructureResult,
 } from "../../views/smart-graph/graphDataBuilder";
 import {
 	smartGraphCache,
@@ -80,11 +73,8 @@ let settings: SmartGraphSettings = $derived({
 let graphData: GraphData = $state({ nodes: [], edges: [] });
 /** Derived layout mode from persisted settings. */
 let layoutMode: LayoutMode = $derived(settings.layoutMode);
-/** Derived color mode from persisted settings. */
-let colorMode: ColorMode = $derived(settings.colorMode);
 let isLoading = $state(false);
 let loadingMessage = $state("Building graph...");
-let suggestedK: number | null = $state(null);
 let defaultClusterLabels: Record<number, string> = $state({});
 let clusterLabels: Record<number, string> = $state({});
 let isLabeling = $state(false);
@@ -96,20 +86,6 @@ let clusterMap: Map<string, ClusterAssignment> = $state(new Map());
 let louvainCommunities: Record<string, number> = $state({});
 // Betweenness centrality per node — computed alongside Louvain, cleared on rebuild
 let louvainCentrality: Record<string, number> = $state({});
-
-/**
- * Effective color groups: use the user-defined groups if any exist,
- * otherwise fall back to the native Obsidian graph color groups that were
- * read into `nativeGraphSettings.colorGroups`.
- *
- * We check the *user-persisted* color groups directly (not `settings.colorGroups`)
- * because the three-layer settings merge already includes native groups.
- */
-let effectiveColorGroups = $derived(
-	(data.smartGraphSettings?.colorGroups?.length ?? 0) > 0
-		? settings.colorGroups
-		: (nativeGraphSettings.colorGroups ?? []),
-);
 
 // Filter state
 let selectedFolders: string[] = $state([]);
@@ -258,7 +234,6 @@ function createAutoRebuildSignature(layout: LayoutMode, filter: GraphFilter): st
 		folders: [...(filter.folders ?? [])].sort(),
 		tags: [...(filter.tags ?? [])].sort(),
 		extensions: [...(filter.extensions ?? [])].sort(),
-		colorGroups: effectiveColorGroups.map((group) => ({ query: group.query, color: group.color })),
 		showWikiLinks: layout === "semantic" ? settings.showWikiLinks : true,
 	});
 }
@@ -316,16 +291,10 @@ function loadFilterOptions() {
  * clusterMap is reused so that adjusting edge/layout settings keeps stable
  * cluster colours.
  */
-/**
- * Ensure that the raw document vectors are loaded into the cache (Layer 1).
- * Returns the documents array, or null if the index isn't available.
- * Both `ensureClusterMap` and `buildForceLayoutGraph` use this to guarantee
- * the document cache is populated before constraining the node set.
- */
+/** Ensure raw document vectors are in cache (Layer 1). */
 async function ensureDocumentsLoaded(gen: number): Promise<DocumentVector[] | null> {
 	const indexId = data.graphEmbedIndex;
 	const configuredIndexCount = indexId ? (data.getEmbeddingIndex(indexId)?.documentCount ?? null) : null;
-
 	const docKey = documentsKey(indexId, configuredIndexCount ?? 0);
 	let documents = smartGraphCache.getDocuments(docKey);
 
@@ -335,7 +304,6 @@ async function ensureDocumentsLoaded(gen: number): Promise<DocumentVector[] | nu
 		if (!serviceReady || gen !== buildGeneration) return null;
 		const ready = await waitForVectorStoreIndex(indexId);
 		if (!ready) return null;
-
 		const vectorService = getVectorStoreService();
 		setLoadingStage("Loading vectors from disk...");
 		documents = await vectorService.getAllDocumentVectors();
@@ -347,22 +315,22 @@ async function ensureDocumentsLoaded(gen: number): Promise<DocumentVector[] | nu
 }
 
 /**
- * Load embeddings from the cache / IndexedDB and compute clusters.
- * Shared by both force and semantic layout paths when colorMode is "clusters".
- * Returns the active cluster map, or null if vectors aren't available.
+ * Layers 1–3: load documents, filter, PCA-reduce. Shared by both
+ * `ensureClusterMap` and `buildSemanticLayoutGraph` to avoid duplication.
  */
-async function ensureClusterMap(
-	gen: number,
-	filter: GraphFilter,
-): Promise<{ activeClusterMap: Map<string, ClusterAssignment>; shouldAutoLabel: boolean } | null> {
+async function ensureFilteredVectors(gen: number, filter: GraphFilter): Promise<{
+	filteredDocs: DocumentVector[];
+	vectors: Float32Array[];
+	reducedVectors: Float32Array[];
+	filterK: string;
+	reducK: string;
+} | null> {
 	const documents = await ensureDocumentsLoaded(gen);
 	if (!documents) return null;
 
 	const indexId = data.graphEmbedIndex;
 	const configuredIndexCount = indexId ? (data.getEmbeddingIndex(indexId)?.documentCount ?? null) : null;
 	const docKey = documentsKey(indexId, configuredIndexCount ?? 0);
-
-	// ── Layer 2: Filtered documents + extracted vectors ──────────────
 	const regionConstraint = immersedSpacePaths;
 	const filterK = filteredKey(docKey, filter.folders, filter.tags, filter.extensions, regionConstraint);
 	let filteredResult = smartGraphCache.getFiltered(filterK);
@@ -373,30 +341,44 @@ async function ensureClusterMap(
 		const vectors = filtered.map((doc) => doc.vector);
 		smartGraphCache.setFiltered(filterK, filtered, vectors);
 		filteredResult = smartGraphCache.getFiltered(filterK)!;
+		Logger.info(`[SmartGraphCache] Filtered cached (${formatCount(filteredResult.filteredDocs.length)} docs)`);
+	} else {
+		Logger.info(`[SmartGraphCache] Filtered HIT (${formatCount(filteredResult.filteredDocs.length)} docs)`);
 	}
 
 	const { filteredDocs, vectors } = filteredResult;
 	if (gen !== buildGeneration) return null;
 
-	// ── Layer 3: PCA-reduced vectors (needed by some clustering algs) ─
 	const plan = getProjectionPlan(filteredDocs.length, settings);
 	const reducK = reducedKey(filterK, plan.reductionDim);
 	let reducedVectors = smartGraphCache.getReduced(reducK);
 
 	if (!reducedVectors) {
 		setLoadingStage(`Reducing ${formatCount(filteredDocs.length)} vectors...`);
+		const t0 = performance.now();
 		reducedVectors = await reduceDimensionsAsync(vectors, "pca", plan.reductionDim);
+		Logger.info(`[SmartGraph] Vector reduction (${formatCount(filteredDocs.length)} notes): ${Math.round(performance.now() - t0)}ms`);
 		if (gen !== buildGeneration) return null;
 		smartGraphCache.setReduced(reducK, reducedVectors);
+		Logger.info("[SmartGraphCache] Reduced vectors cached");
+	} else {
+		Logger.info("[SmartGraphCache] Reduced vectors HIT");
 	}
 
-	// ── Clustering ───────────────────────────────────────────────────
+	return { filteredDocs, vectors, reducedVectors, filterK, reducK };
+}
+
+/** Compute (or restore from cache) cluster assignments. Sets `clusterMap` state. */
+async function ensureClusterMap(
+	gen: number,
+	filter: GraphFilter,
+): Promise<{ activeClusterMap: Map<string, ClusterAssignment>; shouldAutoLabel: boolean } | null> {
+	const filtered = await ensureFilteredVectors(gen, filter);
+	if (!filtered) return null;
+	const { filteredDocs, vectors, reducedVectors, filterK } = filtered;
+
 	const cachedPathSetKey = smartGraphCache.getFilteredPathSetKey(filterK);
-	const currentPathSetKey = filteredDocs
-		.map((d) => d.path)
-		.slice()
-		.sort()
-		.join("\0");
+	const currentPathSetKey = filteredDocs.map((d) => d.path).slice().sort().join("\0");
 	const docSetChanged = clusterMap.size === 0 || cachedPathSetKey == null || currentPathSetKey !== cachedPathSetKey;
 
 	let activeClusterMap = clusterMap;
@@ -404,15 +386,12 @@ async function ensureClusterMap(
 	if (docSetChanged) {
 		const themeColors = resolveThemeColors();
 		setLoadingStage(`Clustering ${formatCount(filteredDocs.length)} notes...`);
-		const clusteringStart = performance.now();
+		const t0 = performance.now();
 		const result = await computeClusters(filteredDocs, vectors, settings, themeColors, reducedVectors);
-		logGraphPhase("Clustering", clusteringStart, filteredDocs.length);
-
+		logGraphPhase("Clustering", t0, filteredDocs.length);
 		if (gen !== buildGeneration) return null;
-
 		clusterMap = result.clusterMap;
 		activeClusterMap = result.clusterMap;
-		suggestedK = settings.autoK ? result.k : null;
 		clusterLabels = {};
 		shouldAutoLabel = settings.autoLabelClusters && !!settings.graphChatModel;
 	}
@@ -423,38 +402,26 @@ async function ensureClusterMap(
 async function buildForceLayoutGraph(
 	gen: number,
 	filter: GraphFilter,
-	activeColorMode: ColorMode,
 ): Promise<{ graphData: GraphData; shouldAutoLabel: boolean }> {
-	if (gen !== buildGeneration) return { graphData: { nodes: [], edges: [] } as GraphData, shouldAutoLabel: false };
-	// Always load the indexed documents so the force graph is constrained to
-	// the same set of embedded files as the semantic graph. Without this,
-	// un-indexed vault notes would appear in force mode but not in semantic.
+	const EMPTY = { graphData: { nodes: [], edges: [] } as GraphData, shouldAutoLabel: false };
+	if (gen !== buildGeneration) return EMPTY;
+	// Pre-warm the document cache for seamless switching to semantic mode.
+	// The async gap also lets Obsidian's metadataCache.resolvedLinks finish
+	// populating before buildWikiGraph reads it.
 	await ensureDocumentsLoaded(gen);
-	const embeddedPaths = smartGraphCache.getDocumentPaths();
-	// In immersion view, further constrain to only the space's paths
-	const regionConstraint = immersedSpacePaths;
-	const constrainTo = regionConstraint
-		? new Set([...(embeddedPaths ?? [])].filter((p) => regionConstraint!.has(p)))
-		: (embeddedPaths ?? undefined);
-	const { graphData: wikiGraphData } = buildWikiGraph(
-		plugin.app,
-		filter,
-		constrainTo,
-	);
+	if (gen !== buildGeneration) return EMPTY;
 
-	if (activeColorMode === "groups") {
-		return { graphData: applyColorGroups(plugin.app, wikiGraphData, effectiveColorGroups), shouldAutoLabel: false };
-	}
+	const constrainTo = immersedSpacePaths ?? undefined;
+	const { graphData: wikiGraphData } = buildWikiGraph(plugin.app, filter, constrainTo);
 
-	if (activeColorMode === "clusters") {
+	// For semantic coloring, pre-compute clusters so resolveAndApplySegments can use them.
+	if (segmentBy === "semantic") {
 		const clusterResult = await ensureClusterMap(gen, filter);
-		if (clusterResult) {
-			const coloredGraph = applyClusterMap(wikiGraphData, clusterResult.activeClusterMap);
-			defaultClusterLabels = deriveClusterLabelsFromGraph(coloredGraph);
-			return { graphData: coloredGraph, shouldAutoLabel: clusterResult.shouldAutoLabel };
+		if (!clusterResult) {
+			new Notice("Cluster coloring requires indexed embeddings. Showing uncolored graph.");
+			return { graphData: wikiGraphData, shouldAutoLabel: false };
 		}
-		// Fall through — vectors not available, return uncolored graph
-		new Notice("Cluster coloring requires indexed embeddings. Showing uncolored graph.");
+		return { graphData: wikiGraphData, shouldAutoLabel: clusterResult.shouldAutoLabel };
 	}
 
 	return { graphData: wikiGraphData, shouldAutoLabel: false };
@@ -463,63 +430,16 @@ async function buildForceLayoutGraph(
 async function buildSemanticLayoutGraph(
 	gen: number,
 	filter: GraphFilter,
-	activeColorMode: ColorMode,
-): Promise<{
-	graphData: GraphData;
-	shouldAutoLabel: boolean;
-}> {
+): Promise<{ graphData: GraphData; shouldAutoLabel: boolean }> {
 	const EMPTY = { graphData: { nodes: [], edges: [] } as GraphData, shouldAutoLabel: false };
 	if (gen !== buildGeneration) return EMPTY;
 
-	// ── Layer 1: Raw document vectors (shared loader) ────────────────
-	const documents = await ensureDocumentsLoaded(gen);
-	if (!documents) return EMPTY;
-
-	const indexId = data.graphEmbedIndex;
-	const configuredIndexCount = indexId ? (data.getEmbeddingIndex(indexId)?.documentCount ?? null) : null;
-	const docKey = documentsKey(indexId, configuredIndexCount ?? 0);
-
-	// ── Layer 2: Filtered documents + extracted vectors ──────────────
-	const regionConstraint = immersedSpacePaths;
-	const filterK = filteredKey(docKey, filter.folders, filter.tags, filter.extensions, regionConstraint);
-	let filteredResult = smartGraphCache.getFiltered(filterK);
-
-	if (!filteredResult) {
-		const filtered = filterDocuments(plugin.app, documents, filter, regionConstraint);
-		if (filtered.length === 0) return EMPTY;
-		const vectors = filtered.map((doc) => doc.vector);
-		smartGraphCache.setFiltered(filterK, filtered, vectors);
-		filteredResult = smartGraphCache.getFiltered(filterK)!;
-		Logger.info(`[SmartGraphCache] Filtered cached (${formatCount(filtered.length)} docs)`);
-	} else {
-		Logger.info(`[SmartGraphCache] Filtered HIT (${formatCount(filteredResult.filteredDocs.length)} docs)`);
-	}
-
-	const { filteredDocs, vectors } = filteredResult;
-	if (gen !== buildGeneration) return EMPTY;
-
-	// ── Layer 3: PCA-reduced vectors ─────────────────────────────────
-	const plan = getProjectionPlan(filteredDocs.length, settings);
-	const reducK = reducedKey(filterK, plan.reductionDim);
-	let reducedVectors = smartGraphCache.getReduced(reducK);
-
-	if (!reducedVectors) {
-		setLoadingStage(`Reducing ${formatCount(filteredDocs.length)} vectors...`);
-		const reductionStart = performance.now();
-		reducedVectors = await reduceDimensionsAsync(vectors, "pca", plan.reductionDim);
-		const reductionMs = performance.now() - reductionStart;
-		Logger.info(
-			`[SmartGraph] Vector reduction (${formatCount(filteredDocs.length)} notes): ${Math.round(reductionMs)}ms`,
-		);
-
-		if (gen !== buildGeneration) return EMPTY;
-		smartGraphCache.setReduced(reducK, reducedVectors);
-		Logger.info("[SmartGraphCache] Reduced vectors cached");
-	} else {
-		Logger.info("[SmartGraphCache] Reduced vectors HIT");
-	}
+	const filtered = await ensureFilteredVectors(gen, filter);
+	if (!filtered) return EMPTY;
+	const { filteredDocs, vectors, reducedVectors, filterK, reducK } = filtered;
 
 	// ── Layer 4: 2D projection + graph assembly ──────────────────────
+	const plan = getProjectionPlan(filteredDocs.length, settings);
 	const projK = projectionKey(
 		reducK,
 		settings.projectionMethod,
@@ -531,23 +451,18 @@ async function buildSemanticLayoutGraph(
 
 	if (!structureResult) {
 		setLoadingStage(`Projecting ${formatCount(filteredDocs.length)} notes into 2D...`);
-		const projection2DStart = performance.now();
+		const t0 = performance.now();
 		// Use spread=1500 so projected coordinates span [-1500,+1500], matching
-		// the typical bounding-box extent of d3-force mode. This keeps node sizes
-		// visually consistent when switching between semantic and force layouts.
+		// the typical bounding-box extent of d3-force mode.
 		const positions = await project2DAsync(reducedVectors, settings.projectionMethod, 1500, {
 			nNeighbors: plan.umapNeighbors ?? settings.umapNeighbors,
 			minDist: settings.umapMinDist,
 			nEpochs: plan.umapEpochs,
 		});
-		const projection2DMs = performance.now() - projection2DStart;
-		Logger.info(
-			`[SmartGraph] 2D projection (${formatCount(filteredDocs.length)} notes): ${Math.round(projection2DMs)}ms`,
-		);
-
+		const projection2DMs = performance.now() - t0;
+		Logger.info(`[SmartGraph] 2D projection (${formatCount(filteredDocs.length)} notes): ${Math.round(projection2DMs)}ms`);
 		if (gen !== buildGeneration) return EMPTY;
 
-		// Build graph from projected positions
 		const filteredPathSet = new Set(filteredDocs.map((d) => d.path));
 		const edges: GraphEdge[] = [];
 		overlayWikiEdges(plugin.app, edges, filteredPathSet);
@@ -557,7 +472,6 @@ async function buildSemanticLayoutGraph(
 		const filteredEdges = settings.showWikiLinks
 			? edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
 			: [];
-
 		structureResult = {
 			graphData: { nodes, edges: filteredEdges },
 			filteredDocs,
@@ -570,7 +484,7 @@ async function buildSemanticLayoutGraph(
 		Logger.info("[SmartGraphCache] Projection cached");
 	} else {
 		Logger.info("[SmartGraphCache] Projection HIT");
-		// showWikiLinks may have changed — rebuild edges from cached positions
+		// showWikiLinks may have changed — rebuild edges from cached node positions
 		const filteredPathSet = new Set(filteredDocs.map((d) => d.path));
 		const edges: GraphEdge[] = [];
 		overlayWikiEdges(plugin.app, edges, filteredPathSet);
@@ -583,43 +497,25 @@ async function buildSemanticLayoutGraph(
 		const filteredEdges = settings.showWikiLinks
 			? edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
 			: [];
-		structureResult = {
-			...structureResult,
-			graphData: { nodes, edges: filteredEdges },
+		structureResult = { ...structureResult, graphData: { nodes, edges: filteredEdges } };
+	}
+
+	// For semantic coloring, pre-compute clusters so resolveAndApplySegments can use them.
+	if (segmentBy === "semantic") {
+		const clusterResult = await ensureClusterMap(gen, filter);
+		if (!clusterResult) {
+			new Notice("Cluster coloring requires indexed embeddings. Showing uncolored graph.");
+		}
+		return {
+			graphData: structureResult.graphData,
+			shouldAutoLabel: clusterResult?.shouldAutoLabel ?? false,
 		};
 	}
 
-	const { graphData: rawGraph } = structureResult;
-
-	// Apply coloring based on the active color mode
-	let coloredGraph: GraphData;
-	let shouldAutoLabel = false;
-	if (activeColorMode === "clusters") {
-		const clusterResult = await ensureClusterMap(gen, filter);
-		if (clusterResult) {
-			coloredGraph = applyClusterMap(rawGraph, clusterResult.activeClusterMap);
-			defaultClusterLabels = deriveClusterLabelsFromGraph(coloredGraph);
-			shouldAutoLabel = clusterResult.shouldAutoLabel;
-		} else {
-			coloredGraph = rawGraph;
-			defaultClusterLabels = {};
-		}
-	} else if (activeColorMode === "groups") {
-		coloredGraph = applyColorGroups(plugin.app, rawGraph, effectiveColorGroups);
-		defaultClusterLabels = {};
-	} else {
-		// "none"
-		coloredGraph = rawGraph;
-		defaultClusterLabels = {};
-	}
-
-	return {
-		graphData: coloredGraph,
-		shouldAutoLabel,
-	};
+	return { graphData: structureResult.graphData, shouldAutoLabel: false };
 }
 
-async function rebuildGraph(targetLayout: LayoutMode = layoutMode, targetColor: ColorMode = colorMode) {
+async function rebuildGraph(targetLayout: LayoutMode = layoutMode) {
 	const gen = ++buildGeneration;
 	isLoading = true;
 	const buildStart = performance.now();
@@ -628,24 +524,9 @@ async function rebuildGraph(targetLayout: LayoutMode = layoutMode, targetColor: 
 	lastAutoRebuildSignature = createAutoRebuildSignature(targetLayout, filter);
 
 	try {
-		if (targetLayout === "force") {
-			const { graphData: nextGraphData, shouldAutoLabel } = await buildForceLayoutGraph(gen, filter, targetColor);
-			logGraphPhase("Force layout build", buildStart, nextGraphData.nodes.length);
-			if (gen !== buildGeneration) return;
-			graphData = nextGraphData;
-			resolveAndApplySegments(nextGraphData);
-			if (segmentBy === "louvain") void runLouvainSegmentation();
-			await tick();
-			try { canvasComponent?.fitToView(); } catch { /* pixi not ready */ }
-
-			if (shouldAutoLabel) {
-				void handleLabelClusters(nextGraphData, gen);
-			}
-			return;
-		}
-
-		const { graphData: nextGraphData, shouldAutoLabel } = await buildSemanticLayoutGraph(gen, filter, targetColor);
-		logGraphPhase("Semantic layout build", buildStart, nextGraphData.nodes.length);
+		const buildFn = targetLayout === "force" ? buildForceLayoutGraph : buildSemanticLayoutGraph;
+		const { graphData: nextGraphData, shouldAutoLabel } = await buildFn(gen, filter);
+		logGraphPhase(`${targetLayout === "force" ? "Force" : "Semantic"} layout build`, buildStart, nextGraphData.nodes.length);
 		if (gen !== buildGeneration) return;
 
 		graphData = nextGraphData;
@@ -655,7 +536,6 @@ async function rebuildGraph(targetLayout: LayoutMode = layoutMode, targetColor: 
 		try { canvasComponent?.fitToView(); } catch { /* pixi not ready */ }
 
 		if (shouldAutoLabel) {
-			// Fire-and-forget; handleLabelClusters manages its own isLabeling state.
 			void handleLabelClusters(nextGraphData, gen);
 		}
 	} catch (err) {
@@ -679,7 +559,6 @@ $effect(() => {
 	selectedFolders;
 	selectedTags;
 	selectedExtensions;
-	effectiveColorGroups;
 
 	if (layoutMode === "semantic") {
 		settings.showWikiLinks;
@@ -837,7 +716,7 @@ function handleFocusCluster(cluster: number) {
 	// When coloring by folder or tag, applySegments assigns cluster=index in the
 	// segments array — so we can look up the segment directly by index and delegate
 	// to handleFocusSegment so the filter uses folder/tag type instead of raw paths.
-	if (segmentBy === "folder" || segmentBy === "tag") {
+	if (segmentBy === "folder" || segmentBy === "tag" || segmentBy === "extension") {
 		const segment = segments[cluster];
 		if (segment) {
 			const isFocused = focusedSegmentId === segment.id;
@@ -1092,18 +971,15 @@ function handleSegmentByChange(by: SegmentBy) {
 		louvainCommunities = {};
 		louvainCentrality = {};
 	}
-	const colorMode: ColorMode = by === "semantic" ? "clusters" : by === "none" ? "none" : "groups";
-	handleSettingsChange({ segmentBy: by, colorMode });
+	handleSettingsChange({ segmentBy: by });
 
 	if (by === "semantic" && clusterMap.size === 0) {
 		// No cached clusters — need a full rebuild to compute them.
 		void rebuildGraph();
 	} else if (by === "louvain") {
-		// Run community detection + betweenness centrality in the worker, then apply.
 		void runLouvainSegmentation();
 	} else {
-		// Clusters available (or non-semantic mode) — re-apply colors immediately, no rebuild.
-		// Pass `by` explicitly: `segmentBy` is a $derived of settings and hasn't updated yet.
+		// Pass `by` explicitly: `segmentBy` is a $derived of settings and may not have updated yet.
 		resolveAndApplySegments(graphData, by);
 	}
 }
@@ -1131,13 +1007,16 @@ function handleFocusSegment(segmentId: string | null) {
 		selectedPaths = paths;
 		const messenger = getMessenger();
 		if (messenger) messenger.pendingGraphNotes = [...paths];
-		// Use semantic filter condition when the segment source is folder or tag
+		// Use semantic filter condition when the segment source is folder, tag, or extension
 		if (segment.source === "folder") {
 			const value = segmentId.replace(/^folder:/, "");
 			pendingSpaceFilter = { type: "any", conditions: [{ type: "folder", value }] };
 		} else if (segment.source === "tag") {
 			const value = segmentId.replace(/^tag:/, "");
 			pendingSpaceFilter = { type: "any", conditions: [{ type: "tag", value }] };
+		} else if (segment.source === "extension") {
+			const value = segmentId.replace(/^extension:/, "");
+			pendingSpaceFilter = { type: "any", conditions: [{ type: "extension", value }] };
 		} else {
 			pendingSpaceFilter = { type: "any", conditions: [{ type: "paths", value: paths.slice() }] };
 		}
@@ -1214,7 +1093,6 @@ function resolveAndApplySegments(gd: GraphData, overrideBy?: SegmentBy) {
 	const resolved = resolveSegments(plugin.app, gd, by, {
 		clusterMap,
 		clusterLabels: effectiveClusterLabels,
-		colorGroups: effectiveColorGroups,
 		themeColors,
 		spaces: displaySpaces,
 		louvainCommunities,
@@ -1227,31 +1105,46 @@ function resolveAndApplySegments(gd: GraphData, overrideBy?: SegmentBy) {
 		}
 	}
 	segments = resolved;
-	// Always strip previous colors/centrality first so switching modes never bleeds old values
-	const cleanGd: GraphData = {
-		...gd,
-		nodes: gd.nodes.map((n) => ({ ...n, color: undefined, cluster: undefined, centrality: undefined })),
-	};
-	// Apply betweenness centrality to nodes when in louvain mode
-	const effectiveGd =
-		by === "louvain" && Object.keys(louvainCentrality).length > 0
-			? {
-					...cleanGd,
-					nodes: cleanGd.nodes.map((n) => {
-						const c = louvainCentrality[n.id];
-						return c !== undefined ? { ...n, centrality: c } : n;
-					}),
-				}
-			: cleanGd;
+	// Build path → segment lookup once so the single node-map pass below can do everything:
+	// strip stale color/cluster/centrality, apply betweenness centrality (louvain), apply segment color.
+	const pathInfo = new Map<string, { color: string; cluster: number }>();
+	for (let i = 0; i < resolved.length; i++) {
+		for (const path of resolved[i].paths) {
+			if (!pathInfo.has(path)) {
+				pathInfo.set(path, { color: resolved[i].color, cluster: i });
+			}
+		}
+	}
+	const isLouvain = by === "louvain" && Object.keys(louvainCentrality).length > 0;
 	if (resolved.length > 0) {
-		graphData = applySegments(effectiveGd, resolved);
+		graphData = {
+			...gd,
+			nodes: gd.nodes.map((n) => {
+				const info = pathInfo.get(n.path);
+				const centrality = isLouvain ? louvainCentrality[n.id] : undefined;
+				return {
+					...n,
+					color: info?.color ?? undefined,
+					cluster: info?.cluster ?? undefined,
+					centrality,
+				};
+			}),
+		};
 		const labels: Record<number, string> = {};
 		for (let i = 0; i < resolved.length; i++) {
 			labels[i] = resolved[i].label;
 		}
 		defaultClusterLabels = labels;
 	} else {
-		graphData = effectiveGd;
+		// No segments — strip stale colors in one pass
+		graphData = {
+			...gd,
+			nodes: gd.nodes.map((n) =>
+				n.color !== undefined || n.cluster !== undefined || n.centrality !== undefined
+					? { ...n, color: undefined, cluster: undefined, centrality: undefined }
+					: n,
+			),
+		};
 		defaultClusterLabels = {};
 	}
 }
@@ -1297,6 +1190,7 @@ onDestroy(() => {
       {focusedClusters}
       clusterLabels={effectiveClusterLabels}
       {isLabeling}
+      clusterCohesionStrength={settings.clusterCohesionStrength ?? 0.15}
       onNodeClick={handleNodeClick}
       onRevealFile={handleRevealFile}
       onFocusCluster={handleFocusCluster}

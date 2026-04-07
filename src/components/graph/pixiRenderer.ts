@@ -254,7 +254,7 @@ export class PixiRenderer {
 			worldWidth: this._width * 10,
 			worldHeight: this._height * 10,
 			events: this.app.renderer.events,
-			passiveWheel: false,
+			passiveWheel: true,
 		});
 		this.app.stage.addChild(this.viewport);
 
