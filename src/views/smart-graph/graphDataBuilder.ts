@@ -955,7 +955,8 @@ export function resolveSegments(
 ): RegionSegment[] {
 	if (source === "none") return [];
 
-	const { clusterMap, clusterLabels, themeColors = [], spaces = [], louvainCommunities } = options ?? {};
+	const { clusterMap, clusterLabels, themeColors = [], spaces = [], louvainCommunities } =
+		options ?? {};
 
 	switch (source) {
 		case "folder":
@@ -1097,29 +1098,58 @@ function resolveSegmentsByLouvain(
 ): RegionSegment[] {
 	if (Object.keys(communities).length === 0) return [];
 
-	const pathById = new Map(graphData.nodes.map((n) => [n.id, n.path]));
-	const communityPaths = new Map<number, Set<string>>();
+	const nodeById = new Map(graphData.nodes.map((n) => [n.id, n]));
+	const communityNodes = new Map<number, string[]>();
 
 	for (const [nodeId, communityId] of Object.entries(communities)) {
-		const path = pathById.get(nodeId);
-		if (path == null) continue;
-		if (!communityPaths.has(communityId)) communityPaths.set(communityId, new Set());
-		communityPaths.get(communityId)!.add(path);
+		if (!nodeById.has(nodeId)) continue;
+		if (!communityNodes.has(communityId)) communityNodes.set(communityId, []);
+		communityNodes.get(communityId)!.push(nodeId);
 	}
 
-	if (communityPaths.size === 0) return [];
+	if (communityNodes.size === 0) return [];
 
-	// Sort by community size descending so the largest get the most prominent colors
-	const sorted = [...communityPaths.entries()].sort((a, b) => b[1].size - a[1].size || a[0] - b[0]);
+	// Compute internal degree: count edges whose both endpoints share the same community
+	const internalDegree = new Map<string, number>();
+	for (const edge of graphData.edges) {
+		const sourceCommunity = communities[edge.source];
+		const targetCommunity = communities[edge.target];
+		if (sourceCommunity == null || targetCommunity == null || sourceCommunity !== targetCommunity) continue;
+		internalDegree.set(edge.source, (internalDegree.get(edge.source) ?? 0) + 1);
+		internalDegree.set(edge.target, (internalDegree.get(edge.target) ?? 0) + 1);
+	}
+
+	// Sort communities by size descending so the largest get the most prominent colors
+	const sorted = [...communityNodes.entries()].sort(
+		(a, b) => b[1].length - a[1].length || a[0] - b[0],
+	);
 	const colors = generateClusterColors(sorted.length, themeColors);
 
-	return sorted.map(([, paths], i) => ({
-		id: `louvain:${i}`,
-		label: `Community ${i + 1}`,
-		color: colors[i],
-		source: "louvain" as SegmentBy,
-		paths,
-	}));
+	return sorted.map(([, nodeIds], i) => {
+		// Pick representative: highest internal degree, fall back to total degree
+		let bestId = nodeIds[0];
+		let bestInternal = -Infinity;
+		let bestTotal = -Infinity;
+		for (const id of nodeIds) {
+			const internal = internalDegree.get(id) ?? 0;
+			const total = nodeById.get(id)?.degree ?? 0;
+			if (internal > bestInternal || (internal === bestInternal && total > bestTotal)) {
+				bestInternal = internal;
+				bestTotal = total;
+				bestId = id;
+			}
+		}
+		const label = nodeById.get(bestId)?.label ?? nodeById.get(bestId)?.path ?? `Community ${i + 1}`;
+		const paths = new Set(nodeIds.map((id) => nodeById.get(id)!.path));
+
+		return {
+			id: `louvain:${i}`,
+			label,
+			color: colors[i],
+			source: "louvain" as SegmentBy,
+			paths,
+		};
+	});
 }
 
 /**
