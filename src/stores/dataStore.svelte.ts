@@ -400,6 +400,8 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 	// Diff view
 	diffViewMode: "two-pane",
+
+	vaultSlug: null,
 };
 
 export class PluginDataStore {
@@ -1225,6 +1227,11 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
+	get vaultSlug(): string {
+		// Always non-null after createData() resolves it; fallback for safety
+		return this.#data.vaultSlug ?? "vault";
+	}
+
 	// --- Chat Open Location ---
 
 	get chatOpenLocation(): ChatOpenLocation {
@@ -1656,6 +1663,13 @@ export class PluginDataStore {
 			throw new Error(`Provider with ID "${id}" already exists`);
 		}
 
+		const duplicate = Object.values(this.#data.providerMeta).find(
+			(m) => m.displayName.trim().toLowerCase() === meta.displayName.trim().toLowerCase(),
+		);
+		if (duplicate) {
+			throw new Error(`A provider named "${meta.displayName}" already exists`);
+		}
+
 		this.#data.providerMeta[id] = meta;
 		this.#data.providerConfig[id] = {
 			...createProviderState(meta.templateId),
@@ -1671,6 +1685,17 @@ export class PluginDataStore {
 			throw new Error(`Provider with ID "${providerId}" not found`);
 		}
 
+		if (updates.displayName !== undefined && updates.displayName !== existing.displayName) {
+			const duplicate = Object.entries(this.#data.providerMeta).find(
+				([id, m]) =>
+					id !== providerId &&
+					m.displayName.trim().toLowerCase() === updates.displayName!.trim().toLowerCase(),
+			);
+			if (duplicate) {
+				throw new Error(`A provider named "${updates.displayName}" already exists`);
+			}
+		}
+
 		const nextMeta = { ...existing, ...updates };
 		this.#data.providerMeta[providerId] = nextMeta;
 
@@ -1679,6 +1704,62 @@ export class PluginDataStore {
 				...createProviderState(nextMeta.templateId),
 				isConfigured: this.#data.providerConfig[providerId]?.isConfigured ?? false,
 			};
+		}
+
+		await this.saveSettings();
+	}
+
+	/**
+	 * Re-key a provider from oldId to newId, updating all references across plugin data.
+	 * Used when the provider's display name changes and the ID should stay in sync.
+	 */
+	async renameProvider(oldId: string, newId: string): Promise<void> {
+		if (oldId === newId) return;
+
+		if (!(oldId in this.#data.providerMeta)) {
+			throw new Error(`Provider with ID "${oldId}" not found`);
+		}
+		if (newId in this.#data.providerMeta || newId in this.#data.providerConfig) {
+			throw new Error(`Provider with ID "${newId}" already exists`);
+		}
+
+		// Re-key providerMeta + providerConfig
+		this.#data.providerMeta[newId] = this.#data.providerMeta[oldId];
+		this.#data.providerConfig[newId] = this.#data.providerConfig[oldId];
+		delete this.#data.providerMeta[oldId];
+		delete this.#data.providerConfig[oldId];
+
+		// Update embeddingIndexes: both .provider and composite .id
+		for (const index of this.#data.embeddingIndexes) {
+			if (index.provider === oldId) {
+				index.provider = newId;
+				index.id = `${newId}:${index.model}`;
+			}
+		}
+
+		// Update searchEmbedIndex / graphEmbedIndex (composite "provider:model")
+		if (this.#data.searchEmbedIndex?.startsWith(`${oldId}:`)) {
+			this.#data.searchEmbedIndex = `${newId}:${this.#data.searchEmbedIndex.slice(oldId.length + 1)}`;
+		}
+		if (this.#data.graphEmbedIndex?.startsWith(`${oldId}:`)) {
+			this.#data.graphEmbedIndex = `${newId}:${this.#data.graphEmbedIndex.slice(oldId.length + 1)}`;
+		}
+
+		// Update agent chatModel / summarizationModel provider references
+		for (const agent of Object.values(this.#data.agents)) {
+			if (agent.chatModel?.provider === oldId) {
+				agent.chatModel = { ...agent.chatModel, provider: newId };
+			}
+			if (agent.summarizationModel?.provider === oldId) {
+				agent.summarizationModel = { ...agent.summarizationModel, provider: newId };
+			}
+		}
+
+		// Update favoriteModels
+		if (this.#data.favoriteModels) {
+			for (const fav of this.#data.favoriteModels) {
+				if (fav.provider === oldId) fav.provider = newId;
+			}
 		}
 
 		await this.saveSettings();
@@ -1850,6 +1931,11 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		mergedData.searchAlgorithm = "hybrid";
 	}
 
+	// Resolve vault slug once on first load; persisted so vault renames don't orphan indexes
+	if (!mergedData.vaultSlug) {
+		mergedData.vaultSlug = await resolveVaultSlug(plugin.app.vault.getName());
+	}
+
 	_pluginDataStore = new PluginDataStore(plugin, mergedData);
 	return _pluginDataStore;
 }
@@ -1857,4 +1943,45 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 export function getData(): PluginDataStore {
 	if (!_pluginDataStore) throw new Error("Plugin does not exist");
 	return _pluginDataStore;
+}
+
+/**
+ * Resolve a stable slug for the vault, derived from its current name.
+ * Checks existing IndexedDB databases to avoid collisions with other vaults
+ * that may share the same origin. Increments a numeric suffix if needed.
+ * e.g. "My Vault" → "my-vault", or "my-vault-2" if already taken.
+ */
+async function resolveVaultSlug(vaultName: string): Promise<string> {
+	const base = vaultName
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "") || "vault";
+
+	const dbs = await indexedDB.databases?.().catch(() => [] as IDBDatabaseInfo[]) ?? [];
+	const existingNames = new Set(dbs.map((d) => d.name ?? ""));
+
+	// A slug is "taken by another vault" if any s2b- DB exists with that prefix
+	// but our data.json doesn't have it yet (handled by caller).
+	const isTaken = (slug: string) =>
+		[`s2b-hnsw-${slug}`, `s2b-minisearch-${slug}`].some((prefix) =>
+			[...existingNames].some((name) => name === prefix || name.startsWith(`${prefix}-`)),
+		);
+
+	if (!isTaken(base)) return base;
+	let n = 2;
+	while (isTaken(`${base}-${n}`)) n++;
+	return `${base}-${n}`;
+}
+
+/**
+ * Convert a provider display name to a stable, URL-safe ID.
+ * "LM Studio" → "lm-studio", "My OpenAI" → "my-openai"
+ */
+export function slugifyProviderName(name: string): string {
+	return name
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "");
 }

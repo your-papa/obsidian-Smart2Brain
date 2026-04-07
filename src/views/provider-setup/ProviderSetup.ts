@@ -3,6 +3,7 @@ import { mount } from "svelte";
 import ModalProvider from "../../lib/QueryClientProvider.svelte";
 import type SecondBrainPlugin from "../../main";
 import { getProviderTemplate, type ProviderTemplateId } from "../../providers/index";
+import { slugifyProviderName } from "../../stores/dataStore.svelte";
 import ProviderSetupComponent from "./ProviderSetup.svelte";
 
 interface ProviderSetupTarget {
@@ -23,10 +24,26 @@ export class ProviderSetupModal extends Modal {
 	constructor(plugin: SecondBrainPlugin, target: string | ProviderSetupTarget) {
 		super(plugin.app);
 		this.plugin = plugin;
-		this.selectedProvider = typeof target === "string" ? target : (target.selectedProvider ?? crypto.randomUUID());
+		if (typeof target === "string") {
+			this.selectedProvider = target;
+		} else if (target.selectedProvider) {
+			this.selectedProvider = target.selectedProvider;
+		} else {
+			this.selectedProvider = this.generateDraftId(target.templateId);
+		}
 		this.templateId = typeof target === "string" ? undefined : target.templateId;
 		this.createdDraft = typeof target !== "string" && !target.selectedProvider;
 		this.refreshTitle();
+	}
+
+	private generateDraftId(templateId?: ProviderTemplateId): string {
+		const baseName = templateId ? (getProviderTemplate(templateId)?.displayName ?? "provider") : "provider";
+		const baseSlug = slugifyProviderName(baseName);
+		const existingIds = new Set(Object.keys(this.plugin.pluginData.getAllProviderMeta()));
+		if (!existingIds.has(baseSlug)) return baseSlug;
+		let n = 2;
+		while (existingIds.has(`${baseSlug}-${n}`)) n++;
+		return `${baseSlug}-${n}`;
 	}
 
 	private resolveDisplayName(): string {
@@ -42,7 +59,6 @@ export class ProviderSetupModal extends Modal {
 			this.setTitle("Setup Provider");
 			return;
 		}
-
 		this.setTitle(`Edit ${displayName}`);
 	}
 
@@ -70,9 +86,15 @@ export class ProviderSetupModal extends Modal {
 		}
 
 		const template = getProviderTemplate(this.templateId);
+		const baseName = template?.displayName ?? "Provider";
+		const baseSlug = slugifyProviderName(baseName);
+		// If draft ID has a numeric suffix (e.g. "openai-compatible-2"), reflect it in the display name
+		const suffix = this.selectedProvider.slice(baseSlug.length); // "" or "-2"
+		const displayName = suffix ? `${baseName} ${suffix.slice(1)}` : baseName;
+
 		await this.plugin.pluginData.addProviderInstance(this.selectedProvider, {
 			templateId: this.templateId,
-			displayName: template?.displayName ?? "New Provider",
+			displayName,
 		});
 		this.draftCreated = true;
 
@@ -84,9 +106,7 @@ export class ProviderSetupModal extends Modal {
 
 	private async openWithProvider() {
 		await this.ensureDraftProvider();
-		if (this.isClosed) {
-			return;
-		}
+		if (this.isClosed) return;
 		this.component = mount(
 			ModalProvider<{
 				modal: ProviderSetupModal;
