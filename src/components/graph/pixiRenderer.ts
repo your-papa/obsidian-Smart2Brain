@@ -592,6 +592,7 @@ export class PixiRenderer {
 			selectedNodes: Set<string>;
 			hoverAlphas: Map<string, number>;
 			edgeFadeAlpha: number;
+			baseEdgeAlpha: number;
 			nodeClusterMap: Map<string, number | undefined>;
 		},
 	): void {
@@ -637,7 +638,7 @@ export class PixiRenderer {
 				: 1;
 
 			const rawAlpha =
-				(!inFocus ? 0.05 : !inSelection ? 0.05 : isHighlighted ? 0.9 : 0.25) *
+				(!inFocus ? 0.05 : !inSelection ? 0.05 : isHighlighted ? 0.9 : opts.baseEdgeAlpha) *
 				opts.edgeFadeAlpha *
 				(isHighlighted ? 1 : edgeHoverAlpha / 0.85);
 

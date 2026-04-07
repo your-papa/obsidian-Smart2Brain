@@ -75,6 +75,10 @@ let pixi: PixiRenderer | null = null;
 // Uses a continuous log scale so the transition is smooth, clamped to a readable range.
 let nodeSize = $derived(Math.max(2, Math.round(7 - Math.log10(Math.max(graphData.nodes.length, 10)) * 1.8)));
 
+// Edge alpha auto-tuned from edge count: fade edges as the graph grows denser so
+// overlapping edges don't compound into a dark mass.  Clamped to [0.06, 0.25].
+let baseEdgeAlpha = $derived(Math.max(0.06, Math.min(0.25, 0.5 / Math.sqrt(Math.max(graphData.edges.length, 4)))));
+
 // Interaction state
 let hoveredNode: GraphNode | null = $state(null);
 let draggedNode: GraphNode | null = $state(null);
@@ -393,6 +397,7 @@ function render() {
 			selectedNodes,
 			hoverAlphas,
 			edgeFadeAlpha,
+			baseEdgeAlpha,
 			nodeClusterMap,
 		},
 	);
