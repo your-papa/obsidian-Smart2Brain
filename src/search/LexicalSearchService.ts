@@ -6,6 +6,7 @@ import { Logger } from "../utils/logging";
 import { getIndexableVaultFiles, isIndexableFile, readIndexableContent } from "../utils/fileFiltering";
 import { MiniSearchService, type LexicalSearchResult } from "../vectorstore/MiniSearchService";
 import type { SearchFilter, SearchMatchBadge, SearchMatchExplanation, VectorSearchResult } from "../vectorstore/types";
+import { getData } from "../stores/dataStore.svelte";
 
 const MAX_SNIPPET_LENGTH = 180;
 
@@ -40,7 +41,7 @@ export class LexicalSearchService {
 
 	private constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
-		this.vaultId = (plugin.app as unknown as { appId: string }).appId;
+		this.vaultId = getData().vaultSlug;
 		this.miniSearch = new MiniSearchService(this.vaultId);
 	}
 

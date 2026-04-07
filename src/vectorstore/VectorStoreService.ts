@@ -16,6 +16,7 @@ import { getOllamaModelsCache } from "../providers/ollamaModels";
 import { fetchOpenRouterModels } from "../providers/openrouterModels";
 import { getData } from "../stores/dataStore.svelte";
 import { getRegistry } from "../providers/registry";
+import { getProviderDefinition } from "../providers/index";
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "./batchSize";
 import { createVectorStore } from "./index";
 import {
@@ -244,7 +245,7 @@ export class VectorStoreService {
 
 	private constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
-		this.vaultId = (plugin.app as unknown as { appId: string }).appId;
+		this.vaultId = getData().vaultSlug;
 	}
 
 	/** Promise tracking initialization, awaited by cleanup to avoid closing mid-init. */
@@ -514,9 +515,8 @@ export class VectorStoreService {
 			return;
 		}
 
-		const registry = getRegistry();
-		if (!registry.has(model.provider)) {
-			Logger.log(`[VectorStore] Provider not yet registered for ${inst.indexId}, will validate on first search`);
+		if (!this.ensureProviderRegistered(model.provider)) {
+			Logger.log(`[VectorStore] Provider "${model.provider}" not available for ${inst.indexId}, skipping validation`);
 			return;
 		}
 
@@ -926,6 +926,31 @@ export class VectorStoreService {
 	}
 
 	/**
+	 * Ensure a provider is registered in the runtime registry.
+	 * VectorStoreService may need embeddings before the agent is initialized
+	 * (which is the normal point of provider registration), so we register
+	 * on demand here when needed.
+	 */
+	private ensureProviderRegistered(providerId: string): boolean {
+		const registry = getRegistry();
+		if (registry.has(providerId)) return true;
+
+		const data = getData();
+		const auth = data.getResolvedAuthState(providerId);
+		if (!auth) return false;
+
+		const def = getProviderDefinition(providerId, data.getAllProviderMeta());
+		if (!def) return false;
+
+		try {
+			registry.register(providerId, def, auth);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	/**
 	 * Ensure the index is built for the given indexId.
 	 * Called on-demand when embeddings search is used.
 	 */
@@ -941,6 +966,11 @@ export class VectorStoreService {
 		const model = this.getModelForInstance(inst);
 		if (!model) {
 			new Notice("Invalid embedding index configuration.");
+			return false;
+		}
+
+		if (!this.ensureProviderRegistered(model.provider)) {
+			new Notice(`Provider "${model.provider}" is not configured. Check your provider settings.`);
 			return false;
 		}
 

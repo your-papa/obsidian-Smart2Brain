@@ -488,6 +488,13 @@ export interface PluginData {
 	 * - "word-diff": Inline word-level diff (plain text)
 	 */
 	diffViewMode: DiffViewMode;
+
+	/**
+	 * Stable slug derived from the vault name, used to scope IndexedDB database names.
+	 * Computed once on first load and persisted so renaming the vault doesn't orphan indexes.
+	 * e.g. "My Vault" → "my-vault" or "my-vault-2" if already taken by another vault.
+	 */
+	vaultSlug: string | null;
 }
 
 export type PluginDataKey = keyof PluginData;

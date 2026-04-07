@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { Component } from "svelte";
-import { mount, onMount } from "svelte";
+import { mount, onMount, untrack } from "svelte";
 import AuthConfigFields from "../../components/settings/AuthConfigFields.svelte";
 import Dropdown from "../../components/ui/Dropdown.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
@@ -18,7 +18,7 @@ import {
 	getProviderDefinition,
 } from "../../providers/index";
 import { clearOpenAICodexSession, signInWithOpenAICodex } from "../../providers/openaiCodex";
-import { getData } from "../../stores/dataStore.svelte";
+import { getData, slugifyProviderName } from "../../stores/dataStore.svelte";
 import { getCodexSession } from "../../stores/providerRuntime.svelte";
 import { icon } from "../../utils/utils";
 import type { ProviderSetupModal } from "./ProviderSetup";
@@ -29,14 +29,19 @@ interface Props {
 	selectedProvider: string;
 }
 
-const { modal, selectedProvider }: Props = $props();
+const { modal }: Props = $props();
 const data = getData();
-const query = createAuthStateQuery(() => selectedProvider);
-const providerDefinition = $derived(getProviderDefinition(selectedProvider, data.getAllProviderMeta()));
-const templateId = $derived(data.getProviderTemplateId(selectedProvider));
-let providerMeta = $derived(data.getProviderMeta(selectedProvider));
+
+// providerId only changes once: when a new provider is committed (renamed to slug on submit).
+// During editing it never changes.
+let providerId = $state(untrack(() => modal.selectedProvider));
+
+const query = createAuthStateQuery(() => providerId);
+const providerDefinition = $derived(getProviderDefinition(providerId, data.getAllProviderMeta()));
+const templateId = $derived(data.getProviderTemplateId(providerId));
+const providerMeta = $derived(data.getProviderMeta(providerId));
 const isCodex = $derived(templateId === "openai-codex");
-const isConfigured = $derived(data.isProviderConfigured(selectedProvider));
+const isConfigured = $derived(data.isProviderConfigured(providerId));
 const canChooseTemplate = $derived(!isConfigured);
 const providerTemplates = getAllProviderTemplates();
 const providerTemplateOptions = providerTemplates.map((template) => ({
@@ -45,19 +50,38 @@ const providerTemplateOptions = providerTemplates.map((template) => ({
 }));
 let isSigningIn = $state(false);
 let codexActionError = $state<string | null>(null);
-let codexSession = $derived(isCodex ? getCodexSession() : null);
+const codexSession = $derived(isCodex ? getCodexSession() : null);
 let displayName = $state("");
-const isTrusted = $derived(data.isProviderTrusted(selectedProvider));
+let displayNameError = $state<string | null>(null);
+const isTrusted = $derived(data.isProviderTrusted(providerId));
 
 $effect(() => {
 	displayName = providerMeta?.displayName ?? "";
 });
 
-function handleAddProvider() {
+async function handleAddProvider() {
 	if (!isConfigured) {
-		data.setProviderConfigured(selectedProvider, true);
+		// Rename the draft to a slug derived from the final display name — this is the
+		// only point where the ID changes. Doing it here (not on blur) keeps the setup
+		// flow stable while still producing a human-readable, recovery-friendly ID.
+		const name = displayName.trim() || (providerMeta?.displayName ?? "");
+		const base = slugifyProviderName(name);
+		if (base && base !== providerId) {
+			const otherIds = new Set(Object.keys(data.getAllProviderMeta()).filter((id) => id !== providerId));
+			let finalId = base;
+			let n = 2;
+			while (otherIds.has(finalId)) finalId = `${base}-${n++}`;
+			try {
+				await data.renameProvider(providerId, finalId);
+				modal.selectedProvider = finalId;
+				providerId = finalId;
+			} catch {
+				// keep draft ID if rename somehow fails
+			}
+		}
+		data.setProviderConfigured(providerId, true);
 	}
-	invalidateProviderState(selectedProvider);
+	invalidateProviderState(providerId);
 	modal.markSubmitted();
 	modal.close();
 }
@@ -66,39 +90,42 @@ async function handleDisplayNameBlur(nextName: string) {
 	const trimmedName = nextName.trim();
 	if (!trimmedName || trimmedName === providerMeta?.displayName) {
 		displayName = providerMeta?.displayName ?? "";
+		displayNameError = null;
 		return;
 	}
-
-	await data.updateProviderMeta(selectedProvider, { displayName: trimmedName });
-	displayName = trimmedName;
-	modal.refreshTitle(trimmedName);
+	try {
+		await data.updateProviderMeta(providerId, { displayName: trimmedName });
+		displayName = trimmedName;
+		displayNameError = null;
+		modal.refreshTitle(trimmedName);
+	} catch (e) {
+		displayNameError = e instanceof Error ? e.message : "Invalid name";
+	}
 }
 
 async function handleTemplateChange(nextTemplateId: string) {
-	const currentTemplateId = templateId;
 	const resolvedTemplateId = nextTemplateId as ProviderTemplateId;
-	if (!currentTemplateId || resolvedTemplateId === currentTemplateId) return;
+	if (!templateId || resolvedTemplateId === templateId) return;
 
-	const currentDisplayName = providerMeta?.displayName ?? "";
-	const currentDefaultName = getProviderTemplate(currentTemplateId)?.displayName ?? currentDisplayName;
+	const currentDefaultName = getProviderTemplate(templateId)?.displayName ?? providerMeta?.displayName ?? "";
 	const nextTemplate = getProviderTemplate(resolvedTemplateId);
-	const shouldUpdateDisplayName = !currentDisplayName || currentDisplayName === currentDefaultName;
+	const shouldUpdateDisplayName = !providerMeta?.displayName || providerMeta.displayName === currentDefaultName;
 
-	await data.updateProviderMeta(selectedProvider, {
+	await data.updateProviderMeta(providerId, {
 		templateId: resolvedTemplateId,
-		...(shouldUpdateDisplayName ? { displayName: nextTemplate?.displayName ?? currentDisplayName } : {}),
+		...(shouldUpdateDisplayName ? { displayName: nextTemplate?.displayName ?? providerMeta?.displayName ?? "" } : {}),
 	});
 
 	if (shouldUpdateDisplayName) {
 		displayName = nextTemplate?.displayName ?? "";
 	}
 
-	invalidateAuthState(selectedProvider);
-	invalidateProviderState(selectedProvider);
+	invalidateAuthState(providerId);
+	invalidateProviderState(providerId);
 }
 
 function handleTrustedChange(trusted: boolean) {
-	data.setProviderTrusted(selectedProvider, trusted);
+	data.setProviderTrusted(providerId, trusted);
 }
 
 async function handleCodexSignIn() {
@@ -106,7 +133,7 @@ async function handleCodexSignIn() {
 	codexActionError = null;
 	try {
 		await signInWithOpenAICodex();
-		invalidateAuthState(selectedProvider);
+		invalidateAuthState(providerId);
 	} catch (error) {
 		codexActionError = error instanceof Error ? error.message : String(error);
 	} finally {
@@ -117,14 +144,11 @@ async function handleCodexSignIn() {
 function handleCodexDisconnect() {
 	clearOpenAICodexSession();
 	codexActionError = null;
-	invalidateAuthState(selectedProvider);
+	invalidateAuthState(providerId);
 }
 
 function getProviderLogo(): Component<LogoProps> {
-	if (providerDefinition?.logo) {
-		return providerDefinition.logo;
-	}
-	return GenericAIIcon;
+	return providerDefinition?.logo ?? GenericAIIcon;
 }
 
 function appendHeaderElement() {
@@ -139,14 +163,8 @@ function appendHeaderElement() {
 		alignItems: "center",
 		justifyItems: "start",
 	});
-
 	if (header) {
-		const Logo = getProviderLogo();
-		mount(Logo, {
-			target: header,
-			anchor: title,
-			props: { width: 32, height: 32 },
-		});
+		mount(getProviderLogo(), { target: header, anchor: title, props: { width: 32, height: 32 } });
 	}
 }
 
@@ -181,6 +199,9 @@ onMount(() => {
       onblur={(value: string) => void handleDisplayNameBlur(value)}
     />
   </SettingItem>
+  {#if displayNameError}
+    <div style="color: var(--text-error); font-size: var(--font-smaller); padding: 0 var(--size-4-3) var(--size-4-2);">{displayNameError}</div>
+  {/if}
 
   <SettingItem
     name="Trusted for private data"
@@ -219,7 +240,7 @@ onMount(() => {
       <SettingItem name="Authorization Error" desc={codexActionError} />
     {/if}
   {:else}
-    <AuthConfigFields provider={selectedProvider} />
+    <AuthConfigFields provider={providerId} />
   {/if}
 </div>
 
@@ -229,13 +250,8 @@ onMount(() => {
       class="flex items-center gap-2 rounded px-[--pill-padding-x] mr-auto"
       class:bg-green-100={query.data.success}
       class:bg-red-100={!query.data.success}
+      use:icon={query.data.success ? "check" : "x"}
     >
-      <div
-        class="h-4 w-4"
-        class:text-green-600={query.data.success}
-        class:text-red-600={!query.data.success}
-        use:icon={query.data.success ? "check" : "x"}
-      ></div>
       <span>
         {#if query.data.success}
           Provider authentication successful
@@ -249,7 +265,7 @@ onMount(() => {
   <Button
     buttonText={isConfigured ? "Save Provider" : "Add Provider"}
     cta={true}
-    disabled={!query.data?.success}
-    onClick={handleAddProvider}
+    disabled={!query.data?.success || !!displayNameError}
+    onClick={() => void handleAddProvider()}
   />
 </div>
