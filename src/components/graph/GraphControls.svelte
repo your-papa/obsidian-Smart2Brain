@@ -228,6 +228,10 @@ function handleLinkStrengthChange(val: number) {
 	onSettingsChange({ linkStrength: val / 100 });
 }
 
+function handleClusterCohesionStrengthChange(val: number) {
+	onSettingsChange({ clusterCohesionStrength: val / 100 });
+}
+
 function handleResetSettings() {
 	onResetSettings?.();
 	appliedSnapshot = takeSnapshot(DEFAULT_SMART_GRAPH_SETTINGS);
@@ -240,6 +244,7 @@ const colorByOptions = [
 	{ display: "Link Communities", value: "louvain" as SegmentBy },
 	{ display: "Folder", value: "folder" as SegmentBy },
 	{ display: "Tag", value: "tag" as SegmentBy },
+	{ display: "File Type", value: "extension" as SegmentBy },
 ];
 </script>
 
@@ -446,6 +451,9 @@ const colorByOptions = [
 					</SettingContainer>
 					<SettingContainer name="Link strength" desc="How strongly edges pull connected nodes together" compact>
 						<RangeSlider value={Math.round(settings.linkStrength * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleLinkStrengthChange} />
+					</SettingContainer>
+					<SettingContainer name="Cluster cohesion" desc="How strongly nodes are pulled toward their cluster center" compact>
+						<RangeSlider value={Math.round((settings.clusterCohesionStrength ?? 0.15) * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleClusterCohesionStrengthChange} />
 					</SettingContainer>
 				{/if}
 

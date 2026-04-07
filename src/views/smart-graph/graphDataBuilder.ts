@@ -18,8 +18,6 @@ import {
 	kMeansAsync,
 	suggestKAsync,
 	hdbscanAsync,
-	project2DAsync,
-	reduceDimensionsAsync,
 } from "../../utils/computeWorkerManager";
 import {
 	type GraphData,
@@ -176,36 +174,18 @@ function createWikiNodes(filteredFiles: TFile[], degreeMap: Map<string, number>)
 	return nodes;
 }
 
-function mergeWikiEdge(edges: GraphEdge[], existingEdgeSet: Set<string>, wikiEdge: GraphEdge, ek: string): void {
-	if (existingEdgeSet.has(ek)) {
-		const idx = edges.findIndex((e) => edgeKey(e.source, e.target) === ek);
-		if (idx !== -1) edges[idx] = wikiEdge;
-	} else {
-		edges.push(wikiEdge);
-	}
-}
-
 export function overlayWikiEdges(app: App, edges: GraphEdge[], filteredPathSet: Set<string>): void {
 	const resolvedLinks = app.metadataCache.resolvedLinks;
-	const wikiEdgeSet = new Set<string>();
-	const existingEdgeSet = new Set<string>();
-	for (const e of edges) {
-		existingEdgeSet.add(edgeKey(e.source, e.target));
-	}
+	const seen = new Set<string>();
 
 	for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
 		if (!filteredPathSet.has(sourcePath)) continue;
 		for (const [targetPath, count] of Object.entries(targets)) {
 			if (!filteredPathSet.has(targetPath) || sourcePath === targetPath) continue;
 			const ek = edgeKey(sourcePath, targetPath);
-			if (wikiEdgeSet.has(ek)) continue;
-			wikiEdgeSet.add(ek);
-			mergeWikiEdge(
-				edges,
-				existingEdgeSet,
-				{ source: sourcePath, target: targetPath, weight: count, type: "wiki" },
-				ek,
-			);
+			if (seen.has(ek)) continue;
+			seen.add(ek);
+			edges.push({ source: sourcePath, target: targetPath, weight: count, type: "wiki" });
 		}
 	}
 }
@@ -249,85 +229,6 @@ export function createGraphNodes(
 	return nodes;
 }
 
-/**
- * Build graph structure: filtering, edges, positions, degree, discovery flags.
- * Does NOT run K-Means — use {@link computeClusters} and {@link applyClusterMap}
- * to add cluster assignments separately.
- */
-export async function buildGraphStructure(
-	app: App,
-	documents: DocumentVector[],
-	settings: Pick<
-		SmartGraphSettings,
-		"projectionMethod" | "umapNeighbors" | "umapMinDist" | "layoutFidelity" | "showWikiLinks"
-	>,
-	filter?: GraphFilter,
-): Promise<GraphStructureResult> {
-	// Filter documents by folder/tag if specified
-	const filtered = filterDocuments(app, documents, filter);
-
-	if (filtered.length === 0) {
-		return {
-			graphData: { nodes: [], edges: [] },
-			filteredDocs: [],
-			vectors: [],
-			reducedVectors: [],
-			reductionMs: 0,
-			projection2DMs: 0,
-		};
-	}
-
-	// Extract vectors
-	const vectors = filtered.map((doc) => doc.vector);
-	const edges: GraphEdge[] = [];
-
-	// Overlay wiki link edges
-	const filteredPathSet = new Set(filtered.map((d) => d.path));
-	overlayWikiEdges(app, edges, filteredPathSet);
-
-	// Compute wiki connectivity independent of overlay visibility so the smart
-	// map structure stays stable even when users hide wiki links.
-	const degreeMap = computeWikiDegree(edges);
-	const projectionPlan = getProjectionPlan(filtered.length, settings);
-
-	// Always use PCA as the preprocessing stage. Running UMAP for both reduction
-	// and final 2D projection compounds distortion and makes cluster structure
-	// harder to interpret.
-	const reductionStart = performance.now();
-	const reducedVectors = await reduceDimensionsAsync(vectors, "pca", projectionPlan.reductionDim);
-	const reductionMs = performance.now() - reductionStart;
-
-	// Project the PCA-reduced vectors into 2D using the user-selected method.
-	const projection2DStart = performance.now();
-	// Use spread=1500 so projected coordinates span [-1500,+1500], matching
-	// the typical bounding-box extent of d3-force mode. This keeps node sizes
-	// visually consistent when switching between semantic and force layouts.
-	const positions = await project2DAsync(reducedVectors, settings.projectionMethod, 1500, {
-		nNeighbors: projectionPlan.umapNeighbors ?? settings.umapNeighbors,
-		minDist: settings.umapMinDist,
-		nEpochs: projectionPlan.umapEpochs,
-	});
-	const projection2DMs = performance.now() - projection2DStart;
-
-	// Create nodes
-	const nodes = createGraphNodes(filtered, positions, degreeMap);
-
-	// Filter edges to only include edges with valid nodes
-	const nodeIds = new Set(nodes.map((n) => n.id));
-	const filteredEdges = settings.showWikiLinks
-		? edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
-		: [];
-
-	return {
-		graphData: { nodes, edges: filteredEdges },
-		filteredDocs: filtered,
-		vectors,
-		reducedVectors,
-		reductionMs,
-		projection2DMs,
-	};
-}
-
 // ============================================================================
 // Clustering
 // ============================================================================
@@ -340,7 +241,6 @@ export interface ClusterResult {
 	k: number;
 }
 
-export type ClusterLabelMap = Record<number, string>;
 export type ClusterRepresentativeMap = Map<number, GraphNode>;
 
 /**
@@ -612,15 +512,6 @@ export function deriveClusterRepresentativesFromGraph(graphData: GraphData): Clu
 	return representatives;
 }
 
-export function deriveClusterLabelsFromGraph(graphData: GraphData): ClusterLabelMap {
-	const labels: ClusterLabelMap = {};
-	for (const [clusterId, hubNode] of deriveClusterRepresentativesFromGraph(graphData)) {
-		labels[clusterId] = hubNode.label;
-	}
-
-	return labels;
-}
-
 // ============================================================================
 // Wiki-only graph (initial Obsidian-like view)
 // ============================================================================
@@ -772,16 +663,6 @@ function convertObsidianQuery(query: string): string | null {
 }
 
 /**
- * Read color groups from Obsidian's native graph view configuration.
- * Convenience wrapper around {@link readNativeGraphSettings} that returns
- * only the color groups portion.
- */
-export async function readNativeGraphColorGroups(app: App): Promise<ColorGroup[]> {
-	const native = await readNativeGraphSettings(app);
-	return native.colorGroups ?? [];
-}
-
-/**
  * Shape of the Obsidian native `graph.json` file (partial — only the fields
  * we care about).
  */
@@ -864,66 +745,6 @@ export async function readNativeGraphSettings(app: App): Promise<Partial<SmartGr
 	}
 }
 
-/**
- * Check whether a file matches a single atomic query term.
- * - Terms starting with `#` match tags.
- * - Terms ending with `/` match as a folder path prefix.
- * - Other terms match as a path/filename substring (case-insensitive)
- *   to support Obsidian's `file:` operator which matches against file names.
- */
-function matchesQueryAtom(app: App, path: string, atom: string): boolean {
-	if (atom.startsWith("#")) {
-		const file = app.vault.getAbstractFileByPath(path);
-		if (!file || !("extension" in file)) return false;
-		const cache = app.metadataCache.getFileCache(file as TFile);
-		const tags = cache ? (getAllTags(cache) ?? []) : [];
-		return tags.includes(atom);
-	}
-	// Explicit folder prefix (ends with /)
-	if (atom.endsWith("/")) {
-		return path.startsWith(atom);
-	}
-	// Check as folder prefix first
-	if (path.startsWith(`${atom}/`)) return true;
-	// Also match as a path/filename substring (case-insensitive) to support
-	// queries originating from Obsidian's `file:` operator.
-	return path.toLowerCase().includes(atom.toLowerCase());
-}
-
-/**
- * Check whether a file matches a color group query.
- * Queries can contain ` OR ` to combine multiple terms — any match wins.
- */
-function matchesColorGroup(app: App, path: string, group: ColorGroup): boolean {
-	const q = group.query.trim();
-	if (!q) return false;
-	// Support OR-separated queries (e.g. "Master OR #Master")
-	const atoms = q
-		.split(/\s+OR\s+/i)
-		.map((s) => s.trim())
-		.filter(Boolean);
-	return atoms.some((atom) => matchesQueryAtom(app, path, atom));
-}
-
-/**
- * Apply user-defined color groups to graph nodes.
- * First matching group wins; unmatched nodes keep their existing color.
- */
-export function applyColorGroups(app: App, graphData: GraphData, colorGroups: ColorGroup[]): GraphData {
-	if (colorGroups.length === 0) return graphData;
-	return {
-		...graphData,
-		nodes: graphData.nodes.map((node) => {
-			for (const group of colorGroups) {
-				if (matchesColorGroup(app, node.path, group)) {
-					return { ...node, color: group.color };
-				}
-			}
-			return node;
-		}),
-	};
-}
-
 // ============================================================================
 // Unified Groups
 // ============================================================================
@@ -947,7 +768,6 @@ export function resolveSegments(
 	options?: {
 		clusterMap?: Map<string, ClusterAssignment>;
 		clusterLabels?: Record<number, string>;
-		colorGroups?: ColorGroup[];
 		themeColors?: string[];
 		spaces?: Space[];
 		louvainCommunities?: Record<string, number>;
@@ -1002,9 +822,8 @@ function resolveSegmentsByFolder(graphData: GraphData, themeColors: string[]): R
 function resolveSegmentsByTag(app: App, graphData: GraphData, themeColors: string[]): RegionSegment[] {
 	const tagMap = new Map<string, Set<string>>();
 	for (const node of graphData.nodes) {
-		const file = app.vault.getAbstractFileByPath(node.path);
-		if (!file || !("extension" in file)) continue;
-		const cache = app.metadataCache.getFileCache(file as TFile);
+		// getCache() takes the path directly — no vault file lookup needed
+		const cache = app.metadataCache.getCache(node.path);
 		const tags = cache ? (getAllTags(cache) ?? []) : [];
 		for (const tag of tags) {
 			let set = tagMap.get(tag);
@@ -1220,44 +1039,4 @@ export function applySegments(graphData: GraphData, segments: RegionSegment[]): 
 	};
 }
 
-// ============================================================================
-// Convenience: build + cluster in one call (used by Refresh / initial load)
-// ============================================================================
 
-/**
- * Build a fully-clustered graph in a single call.
- * Equivalent to calling {@link buildGraphStructure} then {@link computeClusters}
- * then {@link applyClusterMap}.
- */
-export async function buildGraph(
-	app: App,
-	documents: DocumentVector[],
-	settings: Pick<
-		SmartGraphSettings,
-		| "defaultK"
-		| "autoK"
-		| "projectionMethod"
-		| "umapNeighbors"
-		| "umapMinDist"
-		| "layoutFidelity"
-		| "showWikiLinks"
-		| "clusteringAlgorithm"
-		| "minClusterSize"
-	>,
-	filter?: GraphFilter,
-	themeColors?: string[],
-): Promise<GraphData> {
-	const { graphData, filteredDocs, vectors, reducedVectors } = await buildGraphStructure(
-		app,
-		documents,
-		settings,
-		filter,
-	);
-	const { clusterMap } = await computeClusters(filteredDocs, vectors, settings, themeColors, reducedVectors);
-	return applyClusterMap(graphData, clusterMap);
-}
-
-/**
- * Apply search highlighting to graph nodes.
- * Nodes whose label matches the query get `highlighted = true`.
- */

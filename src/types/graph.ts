@@ -199,8 +199,6 @@ export interface SmartGraphSettings {
 	spaces: Space[];
 	/** Layout engine for node positioning */
 	layoutMode: LayoutMode;
-	/** Coloring strategy for graph nodes */
-	colorMode: ColorMode;
 	/** Default number of clusters for K-Means */
 	defaultK: number;
 	/** Whether to auto-determine K via silhouette score */
@@ -213,6 +211,8 @@ export interface SmartGraphSettings {
 	centerStrength: number;
 	/** Link force strength (0–1). How strongly edges pull connected nodes together. */
 	linkStrength: number;
+	/** Cluster cohesion force strength (0–1). Pulls nodes toward their cluster centroid. */
+	clusterCohesionStrength: number;
 	/** Dimensionality reduction algorithm for 2D projection */
 	projectionMethod: ProjectionMethod;
 	/** Number of nearest neighbors UMAP uses to model local structure */
@@ -250,6 +250,7 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	chargeStrength: -1000,
 	centerStrength: 0.1,
 	linkStrength: 1,
+	clusterCohesionStrength: 0.15,
 	projectionMethod: "umap",
 	umapNeighbors: 15,
 	umapMinDist: 0.1,
@@ -261,7 +262,6 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	minClusterSize: 5,
 	colorGroups: [],
 	layoutMode: "force",
-	colorMode: "groups",
 	segmentBy: "none",
 	activeImmersedSpaceId: null,
 };
@@ -274,35 +274,6 @@ export interface FocusedClusterDetail {
 	label: string;
 	noteCount: number;
 	topNotes: Array<{ label: string; path: string; degree: number }>;
-}
-
-/**
- * Convert a `SegmentBy` to the persisted `ColorMode` value.
- */
-export function segmentByToColorMode(source: SegmentBy): ColorMode {
-	switch (source) {
-		case "semantic":
-			return "clusters";
-		case "regions":
-		case "louvain":
-			return "groups";
-		default:
-			return "none";
-	}
-}
-
-/**
- * Convert a persisted `ColorMode` to a `SegmentBy`.
- */
-export function colorModeToSegmentBy(mode: ColorMode): SegmentBy {
-	switch (mode) {
-		case "clusters":
-			return "semantic";
-		case "groups":
-			return "regions";
-		case "none":
-			return "none";
-	}
 }
 
 export const THEME_COLOR_VARS = [

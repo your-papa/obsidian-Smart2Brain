@@ -29,6 +29,11 @@ interface Props {
 	focusedClusters?: Set<number>;
 	clusterLabels?: Record<number, string>;
 	isLabeling?: boolean;
+	/**
+	 * Strength of the cluster cohesion force (0 = off, default 0.15).
+	 * Pulls nodes toward their cluster centroid each simulation tick.
+	 */
+	clusterCohesionStrength?: number;
 	onNodeClick?: (path: string) => void;
 	onRevealFile?: (path: string) => void;
 	onFocusCluster?: (cluster: number) => void;
@@ -50,6 +55,7 @@ let {
 	focusedClusters = new Set<number>(),
 	clusterLabels = {},
 	isLabeling = false,
+	clusterCohesionStrength = 0.15,
 	onNodeClick,
 	onRevealFile,
 	onFocusCluster,
@@ -1291,7 +1297,7 @@ function setupForceSimulation(_data: GraphData, oldPositions: Map<string, { x: n
 		// NOT forceCenter (which shifts the centroid). This is the key difference.
 		.force("centerX", forceX<SimNode>(0).strength(centerStrength))
 		.force("centerY", forceY<SimNode>(0).strength(centerStrength))
-		.force("cluster", clusterCohesionForce(simNodes, 0.15))
+		.force("cluster", clusterCohesionForce(simNodes, clusterCohesionStrength))
 		.force(
 			"collide",
 			forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
@@ -1349,9 +1355,15 @@ function setupForceSimulation(_data: GraphData, oldPositions: Map<string, { x: n
 function isColorOnlyChange(data: GraphData): boolean {
 	if (simNodes.length === 0) return false;
 	if (simNodes.length !== data.nodes.length) return false;
-	if (simLinks.length !== data.edges.length) return false;
 	const existingIds = new Set(simNodes.map((n) => n.id));
-	return data.nodes.every((n) => existingIds.has(n.id));
+	if (!data.nodes.every((n) => existingIds.has(n.id))) return false;
+	// Compare filtered edge count — simLinks excludes edges whose endpoints are
+	// outside the rendered node set, so comparing against data.edges directly
+	// produces a false mismatch whenever dangling edges exist.
+	const filteredEdgeCount = data.edges.filter(
+		(e) => existingIds.has(e.source) && existingIds.has(e.target),
+	).length;
+	return simLinks.length === filteredEdgeCount;
 }
 
 function setupGraph(data: GraphData) {
@@ -1376,17 +1388,23 @@ function setupGraph(data: GraphData) {
 	}
 
 	// Color-only update: topology unchanged, only colors/clusters differ.
-	// Patch simNodes in-place and re-render — no layout restart needed.
-	// IMPORTANT: do this BEFORE stopping the simulation so the force layout
-	// keeps running uninterrupted.
+	// Patch simNodes in-place and re-render without restarting the simulation.
 	if (dataChanged && !modeChanged && isColorOnlyChange(data)) {
-		for (const sn of simNodes) {
-			const node = data.nodes.find((n) => n.id === sn.id);
-			if (node !== undefined) {
+		for (const node of data.nodes) {
+			const sn = simNodeMap.get(node.id);
+			if (sn !== undefined) {
 				sn.color = node.color;
 				sn.cluster = node.cluster;
 			}
 		}
+		// Sync cluster cohesion force strength.
+		const clusterForce = simulation?.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
+		if (clusterForce) clusterForce.strength(clusterCohesionStrength);
+		// Stop the simulation: color switches should never move nodes.
+		// The only reason to keep it running would be cohesion pulling nodes toward
+		// new cluster centroids, but that's an explicit user action (changing segmentBy
+		// to "semantic") which goes through a full rebuild anyway.
+		simulation?.stop();
 		// Re-derive cluster metadata so pills on the canvas reflect the new segmentation.
 		// (buildInternalData is not called in this path, so we update it explicitly.)
 		const clusterRepresentatives = deriveClusterRepresentativesFromGraph(data);
@@ -1479,6 +1497,14 @@ $effect(() => {
 	if (collide) collide.radius((d: SimNode) => getNodeRadius(d) + 2);
 
 	simulation.alpha(0.5).restart();
+});
+
+// Keep cluster cohesion force in sync with the prop so switching color-by modes
+// that don't trigger a full rebuild (e.g. semantic → folder) still disables it.
+$effect(() => {
+	const strength = clusterCohesionStrength;
+	const clusterForce = simulation?.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
+	if (clusterForce) clusterForce.strength(strength);
 });
 
 onMount(() => {
