@@ -1,5 +1,5 @@
 <script lang="ts">
-import { onMount } from "svelte";
+import { onMount, untrack } from "svelte";
 import { Menu } from "obsidian";
 import {
 	forceSimulation,
@@ -11,16 +11,14 @@ import {
 	type SimulationNodeDatum,
 	type SimulationLinkDatum,
 } from "d3-force";
-import type { GraphData, GraphNode, EdgeType, LayoutMode } from "../../types/graph";
+import type { GraphData, GraphNode, EdgeType } from "../../types/graph";
 import { deriveClusterRepresentativesFromGraph } from "../../views/smart-graph/graphDataBuilder";
 import { edgeKey } from "../../utils/graphUtils";
-import { computeNodeBounds, framingTransform, easeOutCubic } from "../../utils/graphAnimation";
+import { computeNodeBounds, framingTransform } from "../../utils/graphAnimation";
 import { PixiRenderer, readThemeColors, type ClusterPillHit, type EdgeLegendHit } from "./pixiRenderer";
 
 interface Props {
 	graphData: GraphData;
-	/** Layout mode — force uses d3-force, semantic uses projected positions. */
-	mode: LayoutMode;
 	linkDistance: number;
 	chargeStrength?: number;
 	centerStrength?: number;
@@ -46,7 +44,6 @@ interface Props {
 
 let {
 	graphData,
-	mode,
 	linkDistance,
 	chargeStrength = -1000,
 	centerStrength = 0.1,
@@ -65,9 +62,6 @@ let {
 	onClearFocusedClusters,
 	onHoverPreview,
 }: Props = $props();
-
-/** Whether the current mode uses d3-force simulation vs static projected positions. */
-let isForceMode = $derived(mode === "force");
 
 let containerEl: HTMLDivElement;
 
@@ -96,10 +90,6 @@ let pointerDownScreenPos: { x: number; y: number } | null = null;
 // without going through Svelte's $state proxy (wiki mode only)
 let dragSimNode: SimNode | null = null;
 
-
-// rAF render loop ID for smart mode (replaces the d3 simulation tick)
-let smartRafId: number | null = null;
-
 // Lasso selection state
 let selectedNodes: Set<string> = $state(new Set());
 let isLassoing = $state(false);
@@ -114,8 +104,8 @@ let needsInitialFit = true;
 // Tick counter for periodic camera refits during force-mode settling
 let forceTickCount = 0;
 
-// Simulation reference
-let simulation: ReturnType<typeof forceSimulation<SimNode>> | null = null;
+// Simulation reference — $state so the hot-update $effect re-runs when simulation is (re)created
+let simulation: ReturnType<typeof forceSimulation<SimNode>> | null = $state(null);
 // D3's default link strength function, captured at simulation init so the
 // hot-update effect can reuse it (it depends on the link topology).
 let cachedDefaultLinkStrengthFn: ((link: SimLink, i: number, links: SimLink[]) => number) | null = null;
@@ -140,10 +130,6 @@ const EDGE_FADE_RATE = 0.04; // reaches 1 in 25 ticks (~0.4s at 60fps)
 let hoverAlphas: Map<string, number> = new Map();
 let hoverAnimFrameId: number | null = null;
 const HOVER_LERP_SPEED = 0.06; // per-frame blend factor (~250ms to settle)
-
-// When true, the next setupSimulation call skips disruptive effects
-// (edge fade reset, fitToView) for a seamless data swap.
-let skipNextSetupEffects = false;
 
 // Adjacency map: nodeId → Set of connected node ids (O(1) hover lookup)
 let adjacency: Map<string, Set<string>> = new Map();
@@ -190,11 +176,6 @@ let edgeLookup: Map<string, SimLink> = new Map();
 let labelGrid: Uint8Array = new Uint8Array(0);
 let labelGridCols = 0;
 let labelGridRows = 0;
-
-// Track previous mode + graphData reference to detect mode-only changes
-// (mode changed but data hasn't been re-projected yet).
-let lastMode: LayoutMode | null = null;
-let lastGraphDataRef: GraphData | null = null;
 
 // Node ID → SimNode map for O(1) lookups (built once in setupSimulation)
 let simNodeMap: Map<string, SimNode> = new Map();
@@ -414,7 +395,7 @@ function render() {
 		hoveredNodeId: hoveredNode?.id ?? null,
 		draggedNodeId: draggedNode?.id ?? null,
 		focusedClusters,
-		isForceMode,
+		isForceMode: true,
 		hoverAlphas,
 		nodeClusterMap,
 	});
@@ -675,7 +656,7 @@ function render() {
 
 	// ── Node tooltip ───────────────────────────────────────────
 	if (hoveredNode && hoveredNode.x != null && hoveredNode.y != null) {
-		pixi.showNodeTooltip(hoveredNode, clusterLabels, false, isForceMode);
+		pixi.showNodeTooltip(hoveredNode, clusterLabels, false, true);
 	} else {
 		pixi.hideTooltip();
 	}
@@ -726,7 +707,7 @@ function handleMouseDown(e: PointerEvent) {
 
 	const node = findNodeAt(x, y);
 
-	if (node && isForceMode) {
+	if (node) {
 		const sn = simNodeMap.get(node.id);
 		if (!sn) return;
 		draggedNode = node;
@@ -1168,112 +1149,10 @@ function buildInternalData(data: GraphData): {
 		}
 	}
 
-	// Start edge fade-in when the edge set changes (skip on smooth data swap)
-	const isSmooth = skipNextSetupEffects;
-	if (isSmooth) skipNextSetupEffects = false;
-	if (!isSmooth) edgeFadeAlpha = 0;
+	// Start edge fade-in on full data change
+	edgeFadeAlpha = 0;
 
-	return { oldPositions, isSmooth, allPositionsKnown };
-}
-
-// ============================================================================
-// Smart mode: static projected layout (no d3-force)
-// ============================================================================
-
-/** Stop the smart-mode rAF render loop. */
-function stopSmartRaf() {
-	if (smartRafId != null) {
-		cancelAnimationFrame(smartRafId);
-		smartRafId = null;
-	}
-}
-
-/**
- * Set up the smart (projected) graph — nodes are placed directly at their
- * projected x/y coordinates. No d3-force simulation is used.
- *
- * If nodes had previous positions (e.g. from a re-projection), animates
- * them to their new positions using a rAF-based lerp.
- */
-function setupSmartLayout(data: GraphData, oldPositions: Map<string, { x: number; y: number }>, isSmooth: boolean) {
-	const shouldAnimate = oldPositions.size > 0 && !isSmooth;
-
-	if (shouldAnimate) {
-		// Build target map from the raw projected positions.
-		const projTargets = new Map<string, { x: number; y: number }>();
-		for (const n of data.nodes) {
-			if (n.x != null && n.y != null) {
-				projTargets.set(n.id, { x: n.x, y: n.y });
-			}
-		}
-
-		const TRANSITION_DURATION = 1800; // ms — long enough to feel balanced with the force settling
-		const startTime = performance.now();
-		// Snapshot start positions (in the old coordinate space)
-		const startPositions = new Map<string, { x: number; y: number }>();
-		for (const sn of simNodes) {
-			startPositions.set(sn.id, { x: sn.x ?? 0, y: sn.y ?? 0 });
-		}
-
-		needsInitialFit = false;
-
-		// Kick off a single smooth camera animation to the target bounding box.
-		// This replaces per-frame moveCenter snaps with one fluid motion.
-		if (pixi) {
-			// Compute target bounds from the final projected positions
-			const targetNodes = simNodes.map((sn) => {
-				const t = projTargets.get(sn.id);
-				return t ? { ...sn, x: t.x, y: t.y } : sn;
-			});
-			const targetBounds = computeNodeBounds(targetNodes);
-			if (targetBounds) {
-				const frame = framingTransform(targetBounds, { width: pixi.width, height: pixi.height }, 20);
-				const cx = (targetBounds.minX + targetBounds.maxX) / 2;
-				const cy = (targetBounds.minY + targetBounds.maxY) / 2;
-				pixi.animateToFrame(cx, cy, frame.scale, TRANSITION_DURATION);
-			}
-		}
-
-		function animateStep(now: number) {
-			const elapsed = now - startTime;
-			const t = Math.min(elapsed / TRANSITION_DURATION, 1);
-			const ease = easeOutCubic(t);
-
-			for (const sn of simNodes) {
-				const start = startPositions.get(sn.id);
-				const target = projTargets.get(sn.id);
-				if (start && target) {
-					sn.x = start.x + (target.x - start.x) * ease;
-					sn.y = start.y + (target.y - start.y) * ease;
-				}
-			}
-
-			render();
-
-			if (t < 1) {
-				smartRafId = requestAnimationFrame(animateStep);
-			} else {
-				smartRafId = null;
-			}
-		}
-
-		smartRafId = requestAnimationFrame(animateStep);
-	} else {
-		// First load or smooth swap: place nodes directly at projected coords
-		// (they already have the right x/y from the data)
-
-		if (!isSmooth && pixi) {
-			// Snap the camera to frame all nodes, then render.
-			const bounds = computeNodeBounds(simNodes);
-			if (bounds) {
-				const frame = framingTransform(bounds, { width: pixi.width, height: pixi.height }, 20);
-				const cx = (bounds.minX + bounds.maxX) / 2;
-				const cy = (bounds.minY + bounds.maxY) / 2;
-				pixi.snapToFrame(cx, cy, frame.scale);
-			}
-		}
-		render();
-	}
+	return { oldPositions, isSmooth: false, allPositionsKnown };
 }
 
 // ============================================================================
@@ -1290,7 +1169,8 @@ function setupForceSimulation(_data: GraphData, oldPositions: Map<string, { x: n
 	cachedDefaultLinkStrengthFn = defaultLinkStrengthFn;
 	baseLinkForce.strength((l, i, links) => linkStrength * defaultLinkStrengthFn(l, i, links));
 
-	simulation = forceSimulation<SimNode>(simNodes)
+	simulation = forceSimulation<SimNode>(simNodes);
+	simulation
 		.force("link", baseLinkForce)
 		.force("charge", forceManyBody().strength(chargeStrength).distanceMin(30))
 		// Obsidian uses forceX + forceY for centering (spring toward origin),
@@ -1369,27 +1249,14 @@ function isColorOnlyChange(data: GraphData): boolean {
 function setupGraph(data: GraphData) {
 	if (data.nodes.length === 0) {
 		if (simulation) { simulation.stop(); simulation = null; }
-		stopSmartRaf();
-		return;
-	}
-
-	// Detect mode-only changes: if the mode changed but graphData is the
-	// same reference, the parent hasn't rebuilt the data yet (e.g. waiting
-	// for an async UMAP projection). Freeze the current view and wait.
-	const modeChanged = lastMode !== null && lastMode !== mode;
-	const dataChanged = lastGraphDataRef !== data;
-	lastMode = mode;
-	lastGraphDataRef = data;
-
-	if (modeChanged && !dataChanged) {
-		// Mode switched but data is stale — just render the frozen state
-		render();
 		return;
 	}
 
 	// Color-only update: topology unchanged, only colors/clusters differ.
-	// Patch simNodes in-place and re-render without restarting the simulation.
-	if (dataChanged && !modeChanged && isColorOnlyChange(data)) {
+	// Patch simNodes in-place and re-render — do NOT touch the simulation.
+	// If cohesion > 0 it will naturally pull nodes toward their new cluster centroids.
+	// If cohesion = 0 no force acts on the reassigned clusters so nodes stay put.
+	if (isColorOnlyChange(data)) {
 		for (const node of data.nodes) {
 			const sn = simNodeMap.get(node.id);
 			if (sn !== undefined) {
@@ -1397,14 +1264,9 @@ function setupGraph(data: GraphData) {
 				sn.cluster = node.cluster;
 			}
 		}
-		// Sync cluster cohesion force strength.
+		// Sync the cohesion force strength to the current prop value.
 		const clusterForce = simulation?.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
 		if (clusterForce) clusterForce.strength(clusterCohesionStrength);
-		// Stop the simulation: color switches should never move nodes.
-		// The only reason to keep it running would be cohesion pulling nodes toward
-		// new cluster centroids, but that's an explicit user action (changing segmentBy
-		// to "semantic") which goes through a full rebuild anyway.
-		simulation?.stop();
 		// Re-derive cluster metadata so pills on the canvas reflect the new segmentation.
 		// (buildInternalData is not called in this path, so we update it explicitly.)
 		const clusterRepresentatives = deriveClusterRepresentativesFromGraph(data);
@@ -1424,41 +1286,22 @@ function setupGraph(data: GraphData) {
 		return;
 	}
 
-	// Full setup needed — stop existing engines first
+	// Full setup needed — stop existing simulation first
 	if (simulation) {
 		simulation.stop();
 		simulation = null;
 	}
-	stopSmartRaf();
 
 	const { oldPositions, isSmooth, allPositionsKnown } = buildInternalData(data);
-
-	if (isForceMode) {
-		// Wiki mode: full d3-force simulation
-		setupForceSimulation(data, oldPositions, isSmooth, allPositionsKnown);
-	} else {
-		// Smart mode: static projected positions, no d3-force
-		setupSmartLayout(data, oldPositions, isSmooth);
-	}
+	setupForceSimulation(data, oldPositions, isSmooth, allPositionsKnown);
 }
 
-// React to graphData or mode changes
+// React to graphData changes — setupGraph is called via untrack so that writes
+// to $state simulation inside setupForceSimulation don't re-trigger this effect.
 $effect(() => {
-	// Access reactive dependencies
 	const _data = graphData;
-	const _mode = mode;
-	void _data; void _mode;
-	setupGraph(graphData);
-
-	// Do NOT stop the simulation here. setupGraph manages its own lifecycle:
-	// color-only changes deliberately leave the simulation running, and full
-	// rebuilds call simulation.stop() themselves before restarting.
-	// Stopping here would kill the simulation on every color update (e.g. deselect
-	// → previewSpace change → graphData ref change → cleanup → dead simulation).
-	// Component-level cleanup happens in onMount's return below.
-	return () => {
-		stopSmartRaf();
-	};
+	void _data;
+	untrack(() => setupGraph(graphData));
 });
 
 // Re-render when appearance settings change (nodeSize, showWikiLinks)
@@ -1467,24 +1310,29 @@ $effect(() => {
 	if (pixi) render();
 });
 
-// Hot-update force parameters without full rebuild (wiki mode only)
+// Hot-update force parameters without full rebuild.
+// Reheats the simulation when it has settled so changes are visible immediately.
+// Reading `simulation` ($state) means this effect re-runs when a new simulation
+// is created (e.g. after a full graph rebuild), so slider changes always apply.
 $effect(() => {
-	if (!simulation || !isForceMode) return;
 	const _charge = chargeStrength;
 	const _link = linkDistance;
 	const _center = centerStrength;
 	const _linkStr = linkStrength;
+	const _cohesion = clusterCohesionStrength;
+	const sim = simulation; // $state — tracks simulation creation
 
-	const charge = simulation.force("charge") as ReturnType<typeof forceManyBody> | undefined;
+	if (!sim) return;
+
+	const charge = sim.force("charge") as ReturnType<typeof forceManyBody> | undefined;
 	if (charge) charge.strength(_charge);
 
-	// Center force uses forceX + forceY (spring toward origin), matching Obsidian
-	const cx = simulation.force("centerX") as ReturnType<typeof forceX> | undefined;
+	const cx = sim.force("centerX") as ReturnType<typeof forceX> | undefined;
 	if (cx) cx.strength(_center);
-	const cy = simulation.force("centerY") as ReturnType<typeof forceY> | undefined;
+	const cy = sim.force("centerY") as ReturnType<typeof forceY> | undefined;
 	if (cy) cy.strength(_center);
 
-	const link = simulation.force("link") as ReturnType<typeof forceLink<SimNode, SimLink>> | undefined;
+	const link = sim.force("link") as ReturnType<typeof forceLink<SimNode, SimLink>> | undefined;
 	if (link) {
 		link.distance(_link);
 		if (cachedDefaultLinkStrengthFn) {
@@ -1493,18 +1341,16 @@ $effect(() => {
 		}
 	}
 
-	const collide = simulation.force("collide") as ReturnType<typeof forceCollide<SimNode>> | undefined;
+	const collide = sim.force("collide") as ReturnType<typeof forceCollide<SimNode>> | undefined;
 	if (collide) collide.radius((d: SimNode) => getNodeRadius(d) + 2);
 
-	simulation.alpha(0.5).restart();
-});
+	const clusterForce = sim.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
+	if (clusterForce) clusterForce.strength(_cohesion);
 
-// Keep cluster cohesion force in sync with the prop so switching color-by modes
-// that don't trigger a full rebuild (e.g. semantic → folder) still disables it.
-$effect(() => {
-	const strength = clusterCohesionStrength;
-	const clusterForce = simulation?.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
-	if (clusterForce) clusterForce.strength(strength);
+	// Reheat if settled so the param change is immediately visible.
+	if (sim.alpha() < 0.05) {
+		sim.alpha(0.3).restart();
+	}
 });
 
 onMount(() => {
@@ -1519,10 +1365,13 @@ onMount(() => {
 
 		// If graphData arrived before pixi was ready (happens when GraphCanvas
 		// mounts while a build completes, e.g. on first open), do the initial
-		// snap/fit that setupSmartLayout / setupForceSimulation missed.
+		// snap/fit that setupForceSimulation missed.
 		if (simNodes.length > 0) {
-			if (!isForceMode) {
-				// Semantic mode: snap camera to framed view and render.
+			// Force mode: simulation is already running.
+			// If it has already settled (alpha low), snap the camera immediately
+			// since the tick loop won't fire again to do the initial fit.
+			const alpha = simulation?.alpha() ?? 0;
+			if (alpha < 0.05) {
 				const bounds = computeNodeBounds(simNodes);
 				if (bounds) {
 					const frame = framingTransform(bounds, { width: renderer.width, height: renderer.height }, 20);
@@ -1531,23 +1380,9 @@ onMount(() => {
 					renderer.snapToFrame(cx, cy, frame.scale);
 				}
 			} else {
-				// Force mode: simulation is already running.
-				// If it has already settled (alpha low), snap the camera immediately
-				// since the tick loop won't fire again to do the initial fit.
-				const alpha = simulation?.alpha() ?? 0;
-				if (alpha < 0.05) {
-					const bounds = computeNodeBounds(simNodes);
-					if (bounds) {
-						const frame = framingTransform(bounds, { width: renderer.width, height: renderer.height }, 20);
-						const cx = (bounds.minX + bounds.maxX) / 2;
-						const cy = (bounds.minY + bounds.maxY) / 2;
-						renderer.snapToFrame(cx, cy, frame.scale);
-					}
-				} else {
-					// Simulation still running — tick loop will handle fitting.
-					needsInitialFit = true;
-					forceTickCount = 0;
-				}
+				// Simulation still running — tick loop will handle fitting.
+				needsInitialFit = true;
+				forceTickCount = 0;
 			}
 			render();
 		}

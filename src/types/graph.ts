@@ -197,8 +197,6 @@ export interface GraphData {
 export interface SmartGraphSettings {
 	/** Saved Spaces — named, cross-cutting note sets */
 	spaces: Space[];
-	/** Layout engine for node positioning */
-	layoutMode: LayoutMode;
 	/** Default number of clusters for K-Means */
 	defaultK: number;
 	/** Whether to auto-determine K via silhouette score */
@@ -213,14 +211,6 @@ export interface SmartGraphSettings {
 	linkStrength: number;
 	/** Cluster cohesion force strength (0–1). Pulls nodes toward their cluster centroid. */
 	clusterCohesionStrength: number;
-	/** Dimensionality reduction algorithm for 2D projection */
-	projectionMethod: ProjectionMethod;
-	/** Number of nearest neighbors UMAP uses to model local structure */
-	umapNeighbors: number;
-	/** Minimum distance between points in the UMAP embedding */
-	umapMinDist: number;
-	/** Tradeoff between faster graph layout and higher projection fidelity */
-	layoutFidelity: number;
 	/** Whether to show wiki link edges overlaid on the semantic graph */
 	showWikiLinks: boolean;
 	/** Chat model used for LLM-powered graph features (e.g., cluster labeling) */
@@ -251,17 +241,12 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	centerStrength: 0.1,
 	linkStrength: 1,
 	clusterCohesionStrength: 0.15,
-	projectionMethod: "umap",
-	umapNeighbors: 15,
-	umapMinDist: 0.1,
-	layoutFidelity: 50,
 	showWikiLinks: true,
 	graphChatModel: null,
 	autoLabelClusters: false,
 	clusteringAlgorithm: "kmeans",
 	minClusterSize: 5,
 	colorGroups: [],
-	layoutMode: "force",
 	segmentBy: "none",
 	activeImmersedSpaceId: null,
 };
