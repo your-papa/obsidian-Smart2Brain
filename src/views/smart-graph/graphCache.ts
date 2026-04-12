@@ -11,7 +11,6 @@
  */
 
 import type { DocumentVector } from "../../vectorstore/types";
-import type { GraphStructureResult } from "./graphDataBuilder";
 import { Logger } from "../../utils/logging";
 
 // ============================================================================
@@ -68,20 +67,6 @@ export function reducedKey(filterKey: string, reductionDim: number | undefined):
 	return `${filterKey}|dim:${reductionDim ?? "auto"}`;
 }
 
-/**
- * Deterministic key for the 2D-projection layer.
- * Depends on the reduced vectors plus all projection parameters.
- */
-export function projectionKey(
-	reducKey: string,
-	projectionMethod: string,
-	umapNeighbors: number | undefined,
-	umapMinDist: number,
-	umapEpochs: number | undefined,
-): string {
-	return `${reducKey}|proj:${projectionMethod}|n:${umapNeighbors ?? "-"}|d:${umapMinDist}|e:${umapEpochs ?? "-"}`;
-}
-
 // ============================================================================
 // Cached layer types
 // ============================================================================
@@ -104,12 +89,6 @@ interface ReducedLayer {
 	reducedVectors: Float32Array[];
 }
 
-interface ProjectionLayer {
-	key: string;
-	/** The full GraphStructureResult (positions, edges, degree, etc.) */
-	result: GraphStructureResult;
-}
-
 // ============================================================================
 // Singleton cache
 // ============================================================================
@@ -119,14 +98,12 @@ export interface CacheStatus {
 	documents: boolean;
 	filtered: boolean;
 	reduced: boolean;
-	projection: boolean;
 }
 
 class SmartGraphCacheImpl {
 	private documents: DocumentsLayer | null = null;
 	private filtered: Map<string, FilteredLayer> = new Map();
 	private reduced: Map<string, ReducedLayer> = new Map();
-	private projection: Map<string, ProjectionLayer> = new Map();
 
 	// ── Getters ──────────────────────────────────────────────────────
 
@@ -149,10 +126,6 @@ class SmartGraphCacheImpl {
 		return this.reduced.get(key)?.reducedVectors ?? null;
 	}
 
-	getProjection(key: string): GraphStructureResult | null {
-		return this.projection.get(key)?.result ?? null;
-	}
-
 	// ── Setters ──────────────────────────────────────────────────────
 
 	setDocuments(key: string, documents: DocumentVector[]): void {
@@ -160,7 +133,6 @@ class SmartGraphCacheImpl {
 		// Downstream layers are stale
 		this.filtered.clear();
 		this.reduced.clear();
-		this.projection.clear();
 	}
 
 	setFiltered(key: string, filteredDocs: DocumentVector[], vectors: Float32Array[]): void {
@@ -168,17 +140,10 @@ class SmartGraphCacheImpl {
 		this.filtered.set(key, { key, filteredDocs, vectors, pathSetKey: psk });
 		// Invalidate downstream layers whose keys are derived from this filtered key
 		for (const k of this.reduced.keys()) if (k.startsWith(key)) this.reduced.delete(k);
-		for (const k of this.projection.keys()) if (k.startsWith(key)) this.projection.delete(k);
 	}
 
 	setReduced(key: string, reducedVectors: Float32Array[]): void {
 		this.reduced.set(key, { key, reducedVectors });
-		// Invalidate projection entries derived from this reduced key
-		for (const k of this.projection.keys()) if (k.startsWith(key)) this.projection.delete(k);
-	}
-
-	setProjection(key: string, result: GraphStructureResult): void {
-		this.projection.set(key, { key, result });
 	}
 
 	// ── Utilities ────────────────────────────────────────────────────
@@ -203,7 +168,6 @@ class SmartGraphCacheImpl {
 		this.documents = null;
 		this.filtered.clear();
 		this.reduced.clear();
-		this.projection.clear();
 	}
 
 	/** Report which layers are populated. */
@@ -212,7 +176,6 @@ class SmartGraphCacheImpl {
 			documents: this.documents !== null,
 			filtered: this.filtered.size > 0,
 			reduced: this.reduced.size > 0,
-			projection: this.projection.size > 0,
 		};
 	}
 }

@@ -21,7 +21,6 @@ interface Props {
 	settings: SmartGraphSettings;
 	isLoading?: boolean;
 	loadingLabel?: string;
-	layoutMode: LayoutMode;
 	segmentBy: SegmentBy;
 	onSettingsChange: (patch: Partial<SmartGraphSettings>) => void;
 	onSegmentByChange: (s: SegmentBy) => void;
@@ -29,8 +28,6 @@ interface Props {
 	onFitToView: () => void;
 	onRefresh: () => void;
 	onApplyProjection?: () => void;
-	onSwitchToSemantic?: () => void;
-	onSwitchToForce?: () => void;
 	onLabelClusters?: () => void;
 	isLabeling?: boolean;
 	lassoMode?: boolean;
@@ -61,7 +58,6 @@ let {
 	settings,
 	isLoading = false,
 	loadingLabel = "",
-	layoutMode,
 	segmentBy,
 	onSettingsChange,
 	onSegmentByChange,
@@ -69,8 +65,6 @@ let {
 	onFitToView,
 	onRefresh,
 	onApplyProjection,
-	onSwitchToSemantic,
-	onSwitchToForce,
 	onLabelClusters,
 	isLabeling = false,
 	lassoMode = false,
@@ -153,51 +147,12 @@ let projectionDirty = $derived(APPLY_KEYS.some((k) => settings[k] !== appliedSna
 
 const layoutModeOptions = [
 	{ display: "Force-directed", value: "force" as LayoutMode },
-	{ display: "Semantic", value: "semantic" as LayoutMode },
-];
-
-const projectionOptions = [
-	{ display: "UMAP", value: "umap" as ProjectionMethod },
-	{ display: "PCA", value: "pca" as ProjectionMethod },
 ];
 
 const clusteringAlgorithmOptions = [
 	{ display: "K-Means", value: "kmeans" as ClusteringAlgorithm },
 	{ display: "HDBSCAN", value: "hdbscan" as ClusteringAlgorithm },
 ];
-
-function handleLayoutModeChange(val: LayoutMode) {
-	if (val === layoutMode) return;
-	if (val === "semantic") {
-		onSwitchToSemantic?.();
-	} else {
-		onSwitchToForce?.();
-	}
-}
-
-function handleProjectionChange(val: ProjectionMethod) {
-	onSettingsChange({ projectionMethod: val });
-}
-
-function handleUmapNeighborsChange(val: number) {
-	onSettingsChange({ umapNeighbors: val });
-}
-
-function handleUmapMinDistChange(val: number) {
-	onSettingsChange({ umapMinDist: val });
-}
-
-function handleLayoutFidelityChange(val: number) {
-	onSettingsChange({ layoutFidelity: val });
-}
-
-function getLayoutFidelityLabel(value: number): string {
-	if (value <= 20) return "Fastest";
-	if (value <= 40) return "Speed";
-	if (value < 60) return "Balanced";
-	if (value < 80) return "Fidelity";
-	return "Highest fidelity";
-}
 
 function handleKChange(val: number) {
 	onSettingsChange({ defaultK: val });
@@ -280,7 +235,7 @@ const colorByOptions = [
 			<div>
 				<h4 class="graph-controls-title" data-testid="graph-controls-title">Graph Panel</h4>
 				<div class="graph-controls-subtitle">
-					{nodeCount} notes · {layoutMode === "force" ? "Force" : "Semantic"}
+					{nodeCount} notes · Force-directed
 					{#if isLoading}
 						<span class="loading-label"> · {loadingLabel}</span>
 					{/if}
@@ -430,58 +385,21 @@ const colorByOptions = [
 			</button>
 
 			{#if sectionOpen.layout}
-				<SettingContainer name="Positioning" desc="How nodes are arranged in space" compact>
-					<Dropdown
-						type="options"
-						dropdown={layoutModeOptions}
-						selected={layoutMode}
-						onchange={handleLayoutModeChange}
-					/>
+				<SettingContainer name="Link distance" desc="Target distance between connected nodes" compact>
+					<RangeSlider value={settings.linkDistance} min={30} max={500} step={5} showValue={true} oncommit={handleLinkDistanceChange} />
 				</SettingContainer>
-
-				{#if layoutMode === "force"}
-					<SettingContainer name="Link distance" desc="Target distance between connected nodes" compact>
-						<RangeSlider value={settings.linkDistance} min={30} max={500} step={5} showValue={true} oncommit={handleLinkDistanceChange} />
-					</SettingContainer>
-					<SettingContainer name="Repulsion" desc="How strongly nodes push each other apart" compact>
-						<RangeSlider value={Math.abs(settings.chargeStrength)} min={10} max={1500} step={10} showValue={true} oncommit={handleChargeStrengthChange} />
-					</SettingContainer>
-					<SettingContainer name="Center force" desc="How strongly the graph is pulled toward the center" compact>
-						<RangeSlider value={Math.round(settings.centerStrength * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleCenterStrengthChange} />
-					</SettingContainer>
-					<SettingContainer name="Link strength" desc="How strongly edges pull connected nodes together" compact>
-						<RangeSlider value={Math.round(settings.linkStrength * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleLinkStrengthChange} />
-					</SettingContainer>
-					<SettingContainer name="Cluster cohesion" desc="How strongly nodes are pulled toward their cluster center" compact>
-						<RangeSlider value={Math.round((settings.clusterCohesionStrength ?? 0.15) * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleClusterCohesionStrengthChange} />
-					</SettingContainer>
-				{/if}
-
-				{#if layoutMode === "semantic"}
-					<SettingContainer name="Projection" desc="2D positioning algorithm" compact>
-						<Dropdown type="options" dropdown={projectionOptions} selected={settings.projectionMethod} onchange={handleProjectionChange} />
-					</SettingContainer>
-					<SettingContainer name="Layout fidelity" desc="Speed vs. projection accuracy" compact>
-						<div class="graph-setting-stack">
-							<RangeSlider value={settings.layoutFidelity} min={0} max={100} step={5} showValue={true} oncommit={handleLayoutFidelityChange} />
-							<div class="graph-inline-hint">{getLayoutFidelityLabel(settings.layoutFidelity)}</div>
-						</div>
-					</SettingContainer>
-					{#if settings.projectionMethod === "umap"}
-						<SettingContainer name="UMAP neighbors" desc="Nearby points used to shape the projection" compact>
-							<RangeSlider value={settings.umapNeighbors} min={3} max={50} step={1} showValue={true} oncommit={handleUmapNeighborsChange} />
-						</SettingContainer>
-						<SettingContainer name="UMAP min dist" desc="How tightly points can be packed" compact>
-							<RangeSlider value={settings.umapMinDist} min={0} max={0.99} step={0.01} showValue={true} oncommit={handleUmapMinDistChange} />
-						</SettingContainer>
-					{/if}
-					{#if projectionDirty && onApplyProjection && segmentBy !== "semantic"}
-						<div class="apply-bar">
-							<span class="section-summary">Unapplied projection changes</span>
-							<Button cta buttonText="Apply" onClick={() => { onApplyProjection?.(); appliedSnapshot = takeSnapshot(settings); }} tooltip="Re-project layout" disabled={isLoading} />
-						</div>
-					{/if}
-				{/if}
+				<SettingContainer name="Repulsion" desc="How strongly nodes push each other apart" compact>
+					<RangeSlider value={Math.abs(settings.chargeStrength)} min={10} max={1500} step={10} showValue={true} oncommit={handleChargeStrengthChange} />
+				</SettingContainer>
+				<SettingContainer name="Center force" desc="How strongly the graph is pulled toward the center" compact>
+					<RangeSlider value={Math.round(settings.centerStrength * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleCenterStrengthChange} />
+				</SettingContainer>
+				<SettingContainer name="Link strength" desc="How strongly edges pull connected nodes together" compact>
+					<RangeSlider value={Math.round(settings.linkStrength * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleLinkStrengthChange} />
+				</SettingContainer>
+				<SettingContainer name="Cluster cohesion" desc="How strongly nodes are pulled toward their cluster center" compact>
+					<RangeSlider value={Math.round((settings.clusterCohesionStrength ?? 0.15) * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleClusterCohesionStrengthChange} />
+				</SettingContainer>
 			{/if}
 
 				<!-- ═══════════════════════════════════════ -->

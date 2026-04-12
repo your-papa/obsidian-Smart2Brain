@@ -87,26 +87,6 @@ function passesFilter(app: App, file: TFile, filter?: GraphFilter): boolean {
 }
 
 // ============================================================================
-// Graph Structure (edges, positions, degree — no clustering)
-// ============================================================================
-
-/** Result of building the graph structure without cluster assignments. */
-export interface GraphStructureResult {
-	/** Graph data with nodes that have NO cluster/color set yet. */
-	graphData: GraphData;
-	/** The filtered documents used (needed for clustering later). */
-	filteredDocs: DocumentVector[];
-	/** Embedding vectors aligned with filteredDocs. */
-	vectors: Float32Array[];
-	/** Reduced vectors (PCA pre-clustering) — used for clustering. */
-	reducedVectors: Float32Array[];
-	/** Time spent reducing embeddings before the final layout projection. */
-	reductionMs: number;
-	/** Time spent projecting reduced vectors into 2D. */
-	projection2DMs: number;
-}
-
-// ============================================================================
 // Helper functions (extracted to reduce cognitive complexity)
 // ============================================================================
 
@@ -174,61 +154,6 @@ function createWikiNodes(filteredFiles: TFile[], degreeMap: Map<string, number>)
 	return nodes;
 }
 
-export function overlayWikiEdges(app: App, edges: GraphEdge[], filteredPathSet: Set<string>): void {
-	const resolvedLinks = app.metadataCache.resolvedLinks;
-	const seen = new Set<string>();
-
-	for (const [sourcePath, targets] of Object.entries(resolvedLinks)) {
-		if (!filteredPathSet.has(sourcePath)) continue;
-		for (const [targetPath, count] of Object.entries(targets)) {
-			if (!filteredPathSet.has(targetPath) || sourcePath === targetPath) continue;
-			const ek = edgeKey(sourcePath, targetPath);
-			if (seen.has(ek)) continue;
-			seen.add(ek);
-			edges.push({ source: sourcePath, target: targetPath, weight: count, type: "wiki" });
-		}
-	}
-}
-
-export function computeWikiDegree(edges: GraphEdge[]): Map<string, number> {
-	const degreeMap = new Map<string, number>();
-
-	for (const edge of edges) {
-		if (edge.type !== "wiki") continue;
-		degreeMap.set(edge.source, (degreeMap.get(edge.source) ?? 0) + 1);
-		degreeMap.set(edge.target, (degreeMap.get(edge.target) ?? 0) + 1);
-	}
-
-	return degreeMap;
-}
-
-export function createGraphNodes(
-	filtered: DocumentVector[],
-	positions: { x: number; y: number }[],
-	degreeMap: Map<string, number>,
-): GraphNode[] {
-	const nodes: GraphNode[] = [];
-	for (let i = 0; i < filtered.length; i++) {
-		const doc = filtered[i];
-		const degree = degreeMap.get(doc.path) ?? 0;
-		const label =
-			doc.path
-				.replace(/\.[^.]+$/, "")
-				.split("/")
-				.pop() ?? doc.path;
-		nodes.push({
-			id: doc.path,
-			path: doc.path,
-			label,
-			x: positions[i].x,
-			y: positions[i].y,
-			degree,
-			highlighted: false,
-		});
-	}
-	return nodes;
-}
-
 // ============================================================================
 // Clustering
 // ============================================================================
@@ -256,62 +181,6 @@ const NEUTRAL_CLUSTER_COLOR = "hsl(0, 0%, 50%)";
 const LARGE_GRAPH_CLUSTERING_THRESHOLD = 2000;
 const LARGE_GRAPH_CLUSTERING_SAMPLE_SIZE = 900;
 const LARGE_GRAPH_CLUSTERING_MAX_K = 24;
-const LARGE_GRAPH_PROJECTION_THRESHOLD = 2000;
-const LARGE_GRAPH_UMAP_NEIGHBORS = 10;
-const LARGE_GRAPH_UMAP_EPOCHS = 250;
-
-export interface ProjectionPlan {
-	reductionDim?: number;
-	umapNeighbors?: number;
-	umapEpochs?: number;
-}
-
-function interpolateInt(min: number, max: number, fidelity: number): number {
-	return Math.round(min + (max - min) * fidelity);
-}
-
-function normalizeFidelity(value: number): number {
-	return Math.max(0, Math.min(value, 100)) / 100;
-}
-
-export function getProjectionPlan(
-	documentCount: number,
-	settings: Pick<SmartGraphSettings, "projectionMethod" | "umapNeighbors" | "layoutFidelity">,
-): ProjectionPlan {
-	const fidelity = normalizeFidelity(settings.layoutFidelity);
-
-	if (documentCount < 500) {
-		return {
-			reductionDim: interpolateInt(32, 50, fidelity),
-			umapNeighbors:
-				settings.projectionMethod === "umap"
-					? Math.min(settings.umapNeighbors, interpolateInt(10, 18, fidelity))
-					: undefined,
-			umapEpochs: settings.projectionMethod === "umap" ? interpolateInt(180, 500, fidelity) : undefined,
-		};
-	}
-
-	if (documentCount < LARGE_GRAPH_PROJECTION_THRESHOLD) {
-		return {
-			reductionDim: interpolateInt(24, 50, fidelity),
-			umapNeighbors:
-				settings.projectionMethod === "umap"
-					? Math.min(settings.umapNeighbors, interpolateInt(8, 16, fidelity))
-					: undefined,
-			umapEpochs: settings.projectionMethod === "umap" ? interpolateInt(150, 420, fidelity) : undefined,
-		};
-	}
-
-	return {
-		reductionDim: interpolateInt(12, 36, fidelity),
-		umapNeighbors:
-			settings.projectionMethod === "umap"
-				? Math.min(settings.umapNeighbors, interpolateInt(6, LARGE_GRAPH_UMAP_NEIGHBORS, fidelity))
-				: undefined,
-		umapEpochs:
-			settings.projectionMethod === "umap" ? interpolateInt(120, LARGE_GRAPH_UMAP_EPOCHS, fidelity) : undefined,
-	};
-}
 
 function euclideanDistance(a: Float32Array, b: Float32Array): number {
 	let sum = 0;
@@ -441,28 +310,6 @@ export async function computeClusters(
 	}
 
 	return { clusterMap, k };
-}
-
-/**
- * Apply cluster assignments to graph data.
- * Nodes whose path exists in the clusterMap get the stored cluster/color.
- * Nodes without a mapping keep cluster undefined and receive a neutral fallback color.
- */
-export function applyClusterMap(
-	graphData: GraphData,
-	clusterMap: Map<string, ClusterAssignment>,
-	fallbackColor = NEUTRAL_CLUSTER_COLOR,
-): GraphData {
-	return {
-		...graphData,
-		nodes: graphData.nodes.map((node) => {
-			const assignment = clusterMap.get(node.id);
-			if (assignment) {
-				return { ...node, cluster: assignment.cluster, color: assignment.color };
-			}
-			return { ...node, cluster: undefined, color: fallbackColor };
-		}),
-	};
 }
 
 /**
