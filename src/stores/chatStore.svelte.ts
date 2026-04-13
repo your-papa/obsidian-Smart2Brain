@@ -93,6 +93,7 @@ export interface UserMessage {
 	visibleNotes?: VisibleNoteRef[];
 	selection?: SelectionRef;
 	graphNotes?: GraphNoteRef[];
+	spaces?: string[];
 }
 
 /** Serializable reference to a note selected from the Smart Graph. */
@@ -719,6 +720,12 @@ export function formatGraphNotesContext(notes: GraphNoteRef[]): string {
 	return `[Graph-selected notes]\n${links.join("\n")}`;
 }
 
+/** Formats active space labels into a context block for the agent. */
+export function formatSpaceContext(spaces: string[]): string {
+	if (spaces.length === 0) return "";
+	return `[Active spaces: ${spaces.join(", ")}]`;
+}
+
 /**
  * Strips the augmented context suffix (visible notes + selection + graph notes) from a message.
  * Reconstructs the exact suffix that was appended by augmentWithVisibleNotes()
@@ -730,6 +737,7 @@ function stripAugmentedSuffix(
 	visibleNotes?: VisibleNoteRef[],
 	selection?: SelectionRef,
 	graphNotes?: GraphNoteRef[],
+	spaces?: string[],
 ): string {
 	// Reconstruct the exact suffix in the same order it was appended
 	let suffix = "";
@@ -742,6 +750,10 @@ function stripAugmentedSuffix(
 	}
 	if (graphNotes?.length) {
 		const ctx = formatGraphNotesContext(graphNotes);
+		if (ctx) suffix += `\n\n${ctx}`;
+	}
+	if (spaces?.length) {
+		const ctx = formatSpaceContext(spaces);
 		if (ctx) suffix += `\n\n${ctx}`;
 	}
 	if (suffix && content.endsWith(suffix)) {
@@ -1052,11 +1064,12 @@ export function baseMessagesToMessagePairs(
 			const visibleNotes = (msg.additional_kwargs?.visibleNotes as VisibleNoteRef[] | undefined) ?? undefined;
 			const selection = (msg.additional_kwargs?.selection as SelectionRef | undefined) ?? undefined;
 			const graphNotes = (msg.additional_kwargs?.graphNotes as GraphNoteRef[] | undefined) ?? undefined;
+			const spaces = (msg.additional_kwargs?.spaces as string[] | undefined) ?? undefined;
 
 			// Strip the augmented context blocks by reconstructing the exact suffix
 			// that was appended, then removing it from the end. This is safe even when
 			// user content or selected text contains bracket patterns like "[Selected text from".
-			userContent = stripAugmentedSuffix(userContent, visibleNotes, selection, graphNotes);
+			userContent = stripAugmentedSuffix(userContent, visibleNotes, selection, graphNotes, spaces);
 
 			const pairId = genUUIDv7();
 
@@ -1140,7 +1153,7 @@ export function baseMessagesToMessagePairs(
 
 			messagePairs.push({
 				id: pairId,
-				userMessage: { content: userContent, attachments, visibleNotes, selection, graphNotes },
+				userMessage: { content: userContent, attachments, visibleNotes, selection, graphNotes, spaces },
 				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state),
 				generation: deriveGenerationFromAssistantMessages(assistantMessages),
 				createdAt,
@@ -1365,6 +1378,7 @@ export class ChatSession {
 		visibleNotes?: VisibleNoteRef[],
 		selection?: SelectionRef,
 		graphNotes?: GraphNoteRef[],
+		spaces?: string[],
 	): Promise<UUIDv7> {
 		if (this.messages.length === 0 && isDraftChatName(this.id)) {
 			const promotedThreadId = await getPlugin().agentManager.promoteDraftThread(this.id);
@@ -1380,7 +1394,7 @@ export class ChatSession {
 
 		const pair: MessagePair = {
 			id: pairId,
-			userMessage: { content, attachments, visibleNotes, selection, graphNotes },
+			userMessage: { content, attachments, visibleNotes, selection, graphNotes, spaces },
 			assistantMessage: { state: AssistantState.idle, content: "" },
 			createdAt: Date.now(),
 			model: currentModel,
@@ -1395,7 +1409,7 @@ export class ChatSession {
 		this.messages.push(pair);
 
 		// Stream assistant reply (pass attachments and visible notes so they reach the agent)
-		void this.processAssistantReply(pairId, content, attachments, visibleNotes, selection, graphNotes);
+		void this.processAssistantReply(pairId, content, attachments, visibleNotes, selection, graphNotes, spaces);
 
 		return pairId;
 	}
@@ -1643,6 +1657,7 @@ export class ChatSession {
 		visibleNotes?: VisibleNoteRef[],
 		selection?: SelectionRef,
 		graphNotes?: GraphNoteRef[],
+		spaces?: string[],
 	): string {
 		let result = userContent;
 		if (visibleNotes?.length) {
@@ -1656,6 +1671,10 @@ export class ChatSession {
 			const ctx = formatGraphNotesContext(graphNotes);
 			if (ctx) result = `${result}\n\n${ctx}`;
 		}
+		if (spaces?.length) {
+			const ctx = formatSpaceContext(spaces);
+			if (ctx) result = `${result}\n\n${ctx}`;
+		}
 		return result;
 	}
 
@@ -1667,11 +1686,12 @@ export class ChatSession {
 		visibleNotes?: VisibleNoteRef[],
 		selection?: SelectionRef,
 		graphNotes?: GraphNoteRef[],
+		spaces?: string[],
 	) {
 		const plugin = getPlugin();
 		const beforeCheckpointIds = new Set(this.graphState.nodes.keys());
 		const parentCheckpointId = this.graphState.activeCheckpointId ?? this.graphState.rootCheckpointId;
-		const augmented = this.augmentWithVisibleNotes(userContent, visibleNotes, selection, graphNotes);
+		const augmented = this.augmentWithVisibleNotes(userContent, visibleNotes, selection, graphNotes, spaces);
 
 		checkpointDebug("send.parent", {
 			threadId: this.id,
@@ -1691,6 +1711,8 @@ export class ChatSession {
 					visibleNotes,
 					selection,
 					graphNotes,
+					undefined,
+					spaces,
 				) as AsyncIterable<AgentStreamChunk>,
 			{
 				generateTitle: userContent,
@@ -2231,11 +2253,12 @@ export class Messenger {
 		visibleNotes?: VisibleNoteRef[],
 		selection?: SelectionRef,
 		graphNotes?: GraphNoteRef[],
+		spaces?: string[],
 	): Promise<string> {
 		if (!this.session) {
 			throw new Error("No active session");
 		}
-		return this.session.sendMessage(content, attachments, visibleNotes, selection, graphNotes);
+		return this.session.sendMessage(content, attachments, visibleNotes, selection, graphNotes, spaces);
 	}
 }
 
