@@ -668,7 +668,11 @@ function render() {
 
 function handleMouseDown(e: PointerEvent) {
 	e.preventDefault();
-	containerEl.focus();
+	// Don't steal focus when a modal (e.g. search modal) is open — that would
+	// trap keyboard events in the graph container and make the modal unresponsive.
+	if (!document.querySelector(".modal-container")) {
+		containerEl.focus();
+	}
 	if (!pixi) return;
 
 	// Any pointer-down is user intent — abort auto-fit and stop periodic refits
