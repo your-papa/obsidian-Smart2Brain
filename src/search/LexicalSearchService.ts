@@ -1,6 +1,6 @@
 import { TFile, getAllTags, type CachedMetadata } from "obsidian";
 import type SecondBrainPlugin from "../main";
-import { matchesSearchFilter } from "../search/searchFilters";
+import { compileFilter, matchesSearchFilter } from "../search/searchFilters";
 import { extractSearchTerms } from "../search/searchTermUtils";
 import { Logger } from "../utils/logging";
 import { getIndexableVaultFiles, isIndexableFile, readIndexableContent } from "../utils/fileFiltering";
@@ -264,13 +264,16 @@ export class LexicalSearchService {
 	): VectorSearchResult[] {
 		const { metadataCache } = this.plugin.app;
 		const filteredResults: VectorSearchResult[] = [];
+		// Compile once before the loop so large path-prefix lists build their
+		// exact-path Set a single time instead of on every matchesSearchFilter call.
+		const compiled = filter ? compileFilter(filter) : undefined;
 
 		for (const result of results) {
 			const file = this.plugin.app.vault.getAbstractFileByPath(result.path);
 			const cache = file instanceof TFile ? metadataCache.getFileCache(file) : null;
 			const docTags = cache ? (getAllTags(cache) ?? []) : [];
 
-			if (!matchesSearchFilter(result.path, docTags, filter)) {
+			if (!matchesSearchFilter(result.path, docTags, compiled ?? filter)) {
 				continue;
 			}
 

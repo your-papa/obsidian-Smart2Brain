@@ -53,7 +53,7 @@ const DB_VERSION = 5;
 const STORE_NAME = "index";
 const INDEX_KEY = "main";
 /** Bump whenever the indexed file set or field schema changes to force a full reindex. */
-const STORAGE_SCHEMA_VERSION = 6;
+const STORAGE_SCHEMA_VERSION = 7;
 
 export interface LexicalSearchResult {
 	path: string;
@@ -162,9 +162,9 @@ export class MiniSearchService {
 
 			request.onsuccess = () => {
 				const data = request.result;
-				if (data?.json && data.schemaVersion === STORAGE_SCHEMA_VERSION) {
+				if (data?.indexData && data.schemaVersion === STORAGE_SCHEMA_VERSION) {
 					try {
-						this.index = MiniSearch.loadJSON(data.json, {
+						this.index = MiniSearch.loadJS(data.indexData, {
 							fields: ["title", "aliases", "tags", "pathSegments", "content"],
 							storeFields: ["path", "title", "aliases", "tags", "pathSegments", "content"],
 							idField: "id",
@@ -214,13 +214,13 @@ export class MiniSearchService {
 			return;
 		}
 
-		const json = JSON.stringify(this.index);
+		const indexData = this.index.toJSON();
 		const paths = Array.from(this.documentPaths);
 
 		return new Promise((resolve, reject) => {
 			const transaction = db.transaction(STORE_NAME, "readwrite");
 			const store = transaction.objectStore(STORE_NAME);
-			const request = store.put({ json, paths, schemaVersion: STORAGE_SCHEMA_VERSION }, INDEX_KEY);
+			const request = store.put({ indexData, paths, schemaVersion: STORAGE_SCHEMA_VERSION }, INDEX_KEY);
 
 			request.onsuccess = () => {
 				this.isDirty = false;
@@ -237,18 +237,27 @@ export class MiniSearchService {
 
 	/**
 	 * Schedule a debounced save operation.
+	 * Uses requestIdleCallback so the heavy toJSON() + IndexedDB write only runs
+	 * when the browser is idle — never blocking an active user interaction.
 	 */
 	private scheduleSave(): void {
 		this.isDirty = true;
 
 		if (this.saveTimeout) {
 			clearTimeout(this.saveTimeout);
+			this.saveTimeout = null;
 		}
 
-		this.saveTimeout = setTimeout(
-			() => void this.saveToStorage().catch((e) => Logger.error("[MiniSearch] Scheduled save failed:", e)),
-			5000, // 5 second debounce
-		);
+		// Wait 5 s, then hand off to the browser's idle scheduler.
+		// The 10 s timeout on requestIdleCallback ensures it eventually runs
+		// even on a busy browser, but never mid-keystroke or mid-animation.
+		this.saveTimeout = setTimeout(() => {
+			this.saveTimeout = null;
+			requestIdleCallback(
+				() => void this.saveToStorage().catch((e) => Logger.error("[MiniSearch] Scheduled save failed:", e)),
+				{ timeout: 10_000 },
+			);
+		}, 5000);
 	}
 
 	/**

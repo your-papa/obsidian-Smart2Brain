@@ -7,7 +7,7 @@
 
 import { getAllTags } from "obsidian";
 import type { App, TFile } from "obsidian";
-import { matchesSearchFilter } from "./searchFilters";
+import { compileFilter, matchesSearchFilter } from "./searchFilters";
 import { getData } from "../stores/dataStore.svelte";
 import { getIndexableVaultFiles } from "../utils/fileFiltering";
 import type { SearchFilter, SearchMatchBadge, SearchResult } from "../vectorstore/types";
@@ -51,6 +51,7 @@ function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchResult[]
 	const getAbstractFileByPath = app.vault?.getAbstractFileByPath;
 	if (typeof getAbstractFileByPath !== "function") return [];
 
+	const compiled = filter ? compileFilter(filter) : undefined;
 	const results: SearchResult[] = [];
 	for (const [index, entry] of pluginData.recentNotes.entries()) {
 		const file = getAbstractFileByPath.call(app.vault, entry.path);
@@ -58,7 +59,7 @@ function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchResult[]
 
 		const cache = app.metadataCache.getFileCache(file as TFile);
 		const docTags = getCachedTags(cache);
-		if (!matchesSearchFilter(file.path, docTags, filter)) continue;
+		if (!matchesSearchFilter(file.path, docTags, compiled ?? filter)) continue;
 
 		results.push({
 			path: file.path,
@@ -76,11 +77,12 @@ function getRecentlyCreatedNotes(app: App, filter?: SearchFilter): SearchResult[
 	if (typeof app.vault?.getFiles !== "function") return [];
 	const files = getIndexableVaultFiles(app.vault);
 
+	const compiled = filter ? compileFilter(filter) : undefined;
 	return files
 		.filter((file) => {
 			const cache = app.metadataCache.getFileCache(file);
 			const docTags = getCachedTags(cache);
-			return matchesSearchFilter(file.path, docTags, filter);
+			return matchesSearchFilter(file.path, docTags, compiled ?? filter);
 		})
 		.sort((left, right) => right.stat.ctime - left.stat.ctime)
 		.slice(0, 20)

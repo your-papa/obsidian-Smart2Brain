@@ -14,7 +14,7 @@ import { performSearch } from "../../agent/tools/searchNotes";
 import { getRecentNotes } from "../../search/recentNotes";
 import type { SearchResult } from "../../vectorstore/types";
 import { extractSearchTerms } from "../../search/searchTermUtils";
-import { getData, getImmersedSpace } from "../../stores/dataStore.svelte";
+import { getData } from "../../stores/dataStore.svelte";
 import { getMessenger } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
@@ -27,7 +27,7 @@ import { resolveRegionToSearchFilter } from "../../lib/views";
 
 interface AutocompleteSuggestion {
 	type: "autocomplete";
-	kind: "tag" | "folder" | "region";
+	kind: "tag" | "folder" | "space";
 	value: string;
 	display: string;
 }
@@ -239,13 +239,13 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private cachedTagChildCount = new Map<string, number>();
 	private cachedAutocompleteFolders: string[] = [];
 	/** Inline filter state — chips live inside the input container */
-	private activeFilters: { type: "path" | "tag" | "region"; value: string }[] = [];
+	private activeFilters: { type: "path" | "tag" | "space"; value: string }[] = [];
 	private inlineChipsEl: HTMLElement | null = null;
 	private inlineInputContentEl: HTMLElement | null = null;
 
 	constructor(app: App) {
 		super(app);
-		this.setPlaceholder("Search notes, use #tag, /folder or @region, or leave empty for recent notes...");
+		this.setPlaceholder("Search notes, use #tag, /folder or @space, or leave empty for recent notes...");
 		this.updateInstructions();
 
 		// Register Tab to toggle semantic search
@@ -583,6 +583,10 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		if (cleanQuery.trim() || this.activeFilters.length > 0) {
 			this.invalidateSearch();
 			this.triggerSearch(cleanQuery);
+			// Refresh the display immediately with current (possibly stale) results
+			// while the debounced search runs in the background.
+			// @ts-ignore - updateSuggestions is a protected method
+			this.updateSuggestions();
 		} else {
 			this.searchResults = getRecentNotes(this.app).slice(0, 20);
 			this.lastRequestedSearchKey = "";
@@ -618,7 +622,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private buildActiveFilter(): SearchFilter | undefined {
 		const tags = this.activeFilters.filter((f) => f.type === "tag").map((f) => f.value);
 		const pathPrefixes = this.activeFilters.filter((f) => f.type === "path").map((f) => f.value);
-		const regionLabels = this.activeFilters.filter((f) => f.type === "region").map((f) => f.value);
+		const regionLabels = this.activeFilters.filter((f) => f.type === "space").map((f) => f.value);
 
 		// Resolve Spaces → SearchFilter and merge their pathPrefixes/tags
 		const pluginData = getData();
@@ -626,16 +630,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			const spaceObj = pluginData.getSpaceByLabel(label);
 			if (spaceObj) {
 				const resolved = resolveRegionToSearchFilter(this.app, spaceObj);
-				if (resolved.pathPrefixes) pathPrefixes.push(...resolved.pathPrefixes);
-				if (resolved.tags) tags.push(...resolved.tags);
-			}
-		}
-
-		// Also auto-inject immersed space when no explicit region filter
-		if (regionLabels.length === 0) {
-			const immersedSpace = getImmersedSpace();
-			if (immersedSpace) {
-				const resolved = resolveRegionToSearchFilter(this.app, immersedSpace);
 				if (resolved.pathPrefixes) pathPrefixes.push(...resolved.pathPrefixes);
 				if (resolved.tags) tags.push(...resolved.tags);
 			}
@@ -709,10 +703,10 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 					? getTagIcon(this.app, filter.value)
 					: filter.type === "path"
 						? getPathIcon(this.app, filter.value.replace(/\/$/, ""), "folder")
-						: null; // regions use a default icon
+						: null; // spaces use a default icon
 
-			if (filter.type === "region") {
-				// Look up region color for chip styling
+			if (filter.type === "space") {
+				// Look up space color for chip styling
 				const pluginData = getData();
 				const regionObj = pluginData.getSpaceByLabel(filter.value);
 				if (regionObj?.color) {
@@ -748,7 +742,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			const label =
 				filter.type === "path"
 					? filter.value.replace(/\/$/, "")
-					: filter.type === "region"
+					: filter.type === "space"
 						? filter.value
 						: filter.value.replace(/^#/, "");
 			chip.setAttribute("aria-label", `Remove filter ${label}`);
@@ -939,11 +933,11 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	 * Returns autocomplete suggestions for tags (#) or folders (path/) when applicable.
 	 */
 	private getAutocompleteSuggestions(query: string): AutocompleteSuggestion[] | null {
-		// Match a partial Region at the end: "@" or "@part"
-		const regionMatch = query.match(/(@)([^\s]*)$/u);
-		if (regionMatch) {
-			const partial = regionMatch[2].toLowerCase();
-			return this.getRegionSuggestions(partial);
+		// Match a partial Space at the end: "@" or "@part"
+		const spaceMatch = query.match(/(@)([^\s]*)$/u);
+		if (spaceMatch) {
+			const partial = spaceMatch[2].toLowerCase();
+			return this.getSpaceSuggestions(partial);
 		}
 
 		// Match a partial tag at the end: "#" or "#part"
@@ -986,7 +980,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			});
 	}
 
-	private getRegionSuggestions(partial: string): AutocompleteSuggestion[] {
+	private getSpaceSuggestions(partial: string): AutocompleteSuggestion[] {
 		const pluginData = getData();
 		const spaces = pluginData.spaces;
 		return spaces
@@ -994,7 +988,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			.slice(0, 20)
 			.map((s) => ({
 				type: "autocomplete" as const,
-				kind: "region" as const,
+				kind: "space" as const,
 				value: s.label,
 				display: s.label,
 			}));
@@ -1022,7 +1016,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	private applyAutocompleteSuggestion(suggestion: AutocompleteSuggestion): void {
 		// Add the selected suggestion as an inline filter chip
-		const chipType = suggestion.kind === "tag" ? "tag" : suggestion.kind === "region" ? "region" : "path";
+		const chipType = suggestion.kind === "tag" ? "tag" : suggestion.kind === "space" ? "space" : "path";
 		this.activeFilters.push({ type: chipType, value: suggestion.value });
 		this.renderInlineChips();
 
@@ -1030,15 +1024,13 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		let cleanQuery: string;
 		if (suggestion.kind === "tag") {
 			cleanQuery = this.currentQuery.replace(/(#)[^\s]*$/u, "").trim();
-		} else if (suggestion.kind === "region") {
+		} else if (suggestion.kind === "space") {
 			cleanQuery = this.currentQuery.replace(/(@)[^\s]*$/u, "").trim();
 		} else {
 			cleanQuery = this.currentQuery.replace(/(?:^|\s)((?!https?:\/\/)(\/[^\s]*|[^\s]*\/[^\s]*))$/u, "").trim();
 		}
 
 		this.setSearchQuery(cleanQuery);
-		// @ts-ignore - updateSuggestions is a protected method
-		this.updateSuggestions();
 	}
 
 	getSuggestions(query: string): SearchSuggestion[] | Promise<SearchSuggestion[]> {
@@ -1215,6 +1207,13 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			} else {
 				setIcon(iconEl, "tag");
 			}
+		} else if (suggestion.kind === "space") {
+			const pluginData = getData();
+			const spaceObj = pluginData.getSpaceByLabel(suggestion.value);
+			if (spaceObj?.color) {
+				iconEl.style.color = spaceObj.color;
+			}
+			setIcon(iconEl, "map-pin");
 		} else {
 			const folderIcon = getPathIcon(this.app, suggestion.value.replace(/\/$/, ""), "folder");
 			if (folderIcon) {
@@ -1232,7 +1231,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		container.createSpan({ cls: "s2b-search-autocomplete-text", text: suggestion.display });
 		container.createSpan({
 			cls: "s2b-search-autocomplete-hint",
-			text: suggestion.kind === "tag" ? "Filter by tag" : "Filter by folder",
+			text: suggestion.kind === "tag" ? "Filter by tag" : suggestion.kind === "space" ? "Filter by space" : "Filter by folder",
 		});
 	}
 
