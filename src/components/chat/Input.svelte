@@ -16,6 +16,7 @@ import { extractObsidianDraggedPaths, hasObsidianFileDrag } from "../../utils/ob
 import { getData } from "../../stores/dataStore.svelte";
 import AgentPopover from "./AgentPopover.svelte";
 import ModelPopover from "./ModelPopover.svelte";
+import SpacePopover from "./SpacePopover.svelte";
 import PendingChangesBar from "./PendingChangesBar.svelte";
 import SelectionChip from "./SelectionChip.svelte";
 import GraphNotesChips from "./GraphNotesChips.svelte";
@@ -87,6 +88,12 @@ let assembledSystemPrompt = $state("");
 let assembledPromptRequestVersion = 0;
 
 let selectionChipRef: { clearSelection: () => void } | undefined = $state(undefined);
+let selectedSpace: string | null = $state(null);
+
+const selectedSpaceColor = $derived.by(() => {
+	if (!selectedSpace) return null;
+	return getData().getSpaceByLabel(selectedSpace)?.color ?? null;
+});
 
 const DEFAULT_DRAG_MESSAGE = "Drop files here";
 
@@ -386,6 +393,7 @@ function sendMessage() {
 		activeVisibleNotes.length > 0 ? [...activeVisibleNotes] : undefined,
 		activeSelection ? { ...activeSelection } : undefined,
 		activeGraphNotes.length > 0 ? [...activeGraphNotes] : undefined,
+		selectedSpace ? [selectedSpace] : undefined,
 	);
 	attachments = [];
 	attachmentSizes = new Map();
@@ -964,7 +972,8 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
   <div
     class="chat-input-wrapper flex flex-col gap-3 bg-background-secondary border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isFullscreen
       ? 'flex-1 min-h-0'
-      : ''} {showDragActive ? 'border-[--interactive-accent] chat-input-wrapper-drag-active' : ''}"
+      : ''} {showDragActive ? 'border-[--interactive-accent] chat-input-wrapper-drag-active' : ''} {selectedSpaceColor ? 'chat-input-wrapper-space-active' : ''}"
+    style={selectedSpaceColor ? `--space-color: ${selectedSpaceColor}` : undefined}
     ondragenter={dropTargetMode === "input" ? handleDragEnter : undefined}
     ondragover={dropTargetMode === "input" ? handleDragOver : undefined}
     ondragleave={dropTargetMode === "input" ? handleDragLeave : undefined}
@@ -1031,6 +1040,7 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
       <AgentPopover />
       <div class="w-px h-4 bg-[--background-modifier-border]"></div>
       <ModelPopover />
+      <SpacePopover bind:selectedSpace />
       <input
         type="file"
         multiple={true}
@@ -1196,6 +1206,24 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
     box-shadow:
       0 0 0 2px color-mix(in srgb, var(--interactive-accent) 38%, transparent),
       0 8px 24px color-mix(in srgb, var(--interactive-accent) 24%, transparent);
+  }
+
+  /* Space color glow overrides — only when focused */
+  .chat-input-wrapper-space-active:focus-within {
+    border-color: color-mix(in srgb, var(--space-color) 70%, var(--background-modifier-border));
+    box-shadow:
+      0 6px 20px rgba(0, 0, 0, 0.24),
+      0 0 14px 0 color-mix(in srgb, var(--space-color) 40%, transparent);
+  }
+
+  .chat-input-wrapper-space-active:focus-within::before {
+    background: radial-gradient(
+      circle at 50% 35%,
+      color-mix(in srgb, var(--space-color) 50%, transparent),
+      transparent 60%
+    );
+    opacity: 0.28;
+    filter: blur(9px);
   }
 
   .chat-input-wrapper-drag-active > :not(:last-child) {

@@ -899,6 +899,7 @@ export class AgentManager {
 		selection?: SelectionRef,
 		graphNotes?: GraphNoteRef[],
 		lcSource?: string,
+		spaces?: string[],
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		setCurrentThreadId(threadId);
 		try {
@@ -916,6 +917,7 @@ export class AgentManager {
 					selection,
 					graphNotes,
 					lcSource,
+					spaces,
 				}),
 				signal,
 				chatModel,
