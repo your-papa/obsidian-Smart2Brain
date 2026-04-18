@@ -128,9 +128,12 @@ if (_restoredSpaceId) {
 let pendingSpaceFilter: ViewFilter | null = $state(null);
 /** Live preview of a space being edited — substitutes the saved version for coloring. */
 let previewSpace: Space | null = $state(null);
+/** Frozen paths for a draft immersion (session-only, not persisted). */
+let draftImmersionPaths: Set<string> | null = $state(null);
 /** Resolved paths for the immersed space — constrains graph build. */
 let immersedSpacePaths: Set<string> | null = $derived.by(() => {
 	if (!immersedSpaceId) return null;
+	if (immersedSpaceId === "__draft__") return draftImmersionPaths;
 	const space = data.spaces.find((s) => s.id === immersedSpaceId);
 	if (!space) return null;
 	return resolveViewFilter(plugin.app, space.filter).paths;
@@ -844,10 +847,28 @@ function handleImmerse(id: string) {
 	void buildGraph();
 }
 
+function handleImmerseDraft(filter?: ViewFilter) {
+	const f = filter ?? pendingSpaceFilter;
+	if (!f) return;
+	draftImmersionPaths = resolveViewFilter(plugin.app, f).paths;
+	immersedSpaceId = "__draft__";
+	setImmersedSpace({
+		id: "__draft__",
+		label: "Draft selection",
+		filter: $state.snapshot(pendingSpaceFilter) as ViewFilter,
+		color: "#888888",
+		createdAt: new Date().toISOString(),
+	});
+	// Draft immersion is session-only — don't persist to settings
+	void buildGraph();
+}
+
 function handleExitImmersion() {
+	const wasDraft = immersedSpaceId === "__draft__";
 	immersedSpaceId = null;
+	draftImmersionPaths = null;
 	setImmersedSpace(null);
-	data.setActiveImmersedSpaceId(null);
+	if (!wasDraft) data.setActiveImmersedSpaceId(null);
 	void buildGraph();
 }
 
@@ -994,6 +1015,9 @@ onDestroy(() => {
       onRevealFile={handleRevealFile}
       onFocusCluster={handleFocusCluster}
       onToggleWikiLinks={() => handleSettingsChange({ showWikiLinks: !settings.showWikiLinks })}
+      onImmerseDraft={handleImmerseDraft}
+      onExitImmersion={handleExitImmersion}
+      immersedInDraft={immersedSpaceId === "__draft__"}
       {lassoMode}
       onSelectionChange={handleSelectionChange}
       onClearFocusedClusters={handleClearFocusedClusters}
@@ -1001,26 +1025,50 @@ onDestroy(() => {
     />
   {/if}
 
-  {#if selectedPaths.length > 0}
+  {#if selectedPaths.length > 0 || immersedSpaceId === "__draft__"}
     <div class="graph-selection-bar">
-      <span class="selection-count">{selectedPaths.length} notes selected</span>
+      <span class="selection-count">
+        {#if immersedSpaceId === "__draft__" && selectedPaths.length === 0}
+          Immersed in selection
+        {:else}
+          {selectedPaths.length} notes selected
+        {/if}
+      </span>
       <div class="selection-actions">
-        <Button
-          iconId="scan"
-          onClick={handleZoomToSelection}
-          tooltip="Zoom to selection (F)"
-        />
-        <Button
-          buttonText="Open All"
-          onClick={handleOpenAllSelected}
-          tooltip="Open all selected notes in new tabs"
-        />
-        <Button
-          buttonText="New Space"
-          onClick={() => (spaceBuilderOpen = true)}
-          tooltip="Save selection as a new space"
-        />
-        <Button buttonText="Clear" onClick={handleClearSelection} tooltip="Clear selection (Esc)" />
+        {#if selectedPaths.length > 0}
+          <Button
+            iconId="scan"
+            onClick={handleZoomToSelection}
+            tooltip="Zoom to selection (F)"
+          />
+          <Button
+            buttonText="Open All"
+            onClick={handleOpenAllSelected}
+            tooltip="Open all selected notes in new tabs"
+          />
+          {#if immersedSpaceId !== "__draft__"}
+            <Button
+              buttonText="Immerse"
+              onClick={() => handleImmerseDraft()}
+              tooltip="Immerse in selection (I)"
+            />
+          {/if}
+          <Button
+            buttonText="New Space"
+            onClick={() => (spaceBuilderOpen = true)}
+            tooltip="Save selection as a new space"
+          />
+        {/if}
+        {#if immersedSpaceId === "__draft__"}
+          <Button
+            buttonText="Exit immersion"
+            onClick={handleExitImmersion}
+            tooltip="Exit immersion (I or Esc)"
+          />
+        {/if}
+        {#if selectedPaths.length > 0}
+          <Button buttonText="Clear" onClick={handleClearSelection} tooltip="Clear selection (Esc)" />
+        {/if}
       </div>
     </div>
   {/if}
@@ -1046,6 +1094,7 @@ onDestroy(() => {
     {immersedSpaceId}
     {pendingSpaceFilter}
     onImmerse={handleImmerse}
+    onImmerseDraft={handleImmerseDraft}
     onExitImmersion={handleExitImmersion}
     onSaveSpace={handleSaveSpace}
     onUpdateSpace={handleUpdateSpace}

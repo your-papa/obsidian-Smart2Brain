@@ -15,7 +15,7 @@ import type { GraphData, GraphNode, EdgeType } from "../../types/graph";
 import { deriveClusterRepresentativesFromGraph } from "../../views/smart-graph/graphDataBuilder";
 import { edgeKey } from "../../utils/graphUtils";
 import { computeNodeBounds, framingTransform } from "../../utils/graphAnimation";
-import { PixiRenderer, readThemeColors, type ClusterPillHit, type EdgeLegendHit } from "./pixiRenderer";
+import { PixiRenderer, readThemeColors, type ClusterPillHit } from "./pixiRenderer";
 
 interface Props {
 	graphData: GraphData;
@@ -36,6 +36,9 @@ interface Props {
 	onRevealFile?: (path: string) => void;
 	onFocusCluster?: (cluster: number) => void;
 	onToggleWikiLinks?: () => void;
+	onImmerseDraft?: () => void;
+	onExitImmersion?: () => void;
+	immersedInDraft?: boolean;
 	lassoMode?: boolean;
 	onSelectionChange?: (paths: string[]) => void;
 	onClearFocusedClusters?: () => void;
@@ -57,6 +60,9 @@ let {
 	onRevealFile,
 	onFocusCluster,
 	onToggleWikiLinks,
+	onImmerseDraft,
+	onExitImmersion,
+	immersedInDraft = false,
 	lassoMode = false,
 	onSelectionChange,
 	onClearFocusedClusters,
@@ -76,8 +82,8 @@ let pixi: PixiRenderer | null = null;
 let nodeSize = $derived(Math.max(2, Math.round(7 - Math.log10(Math.max(graphData.nodes.length, 10)) * 1.8)));
 
 // Edge alpha auto-tuned from edge count: fade edges as the graph grows denser so
-// overlapping edges don't compound into a dark mass.  Clamped to [0.06, 0.25].
-let baseEdgeAlpha = $derived(Math.max(0.06, Math.min(0.25, 0.5 / Math.sqrt(Math.max(graphData.edges.length, 4)))));
+// overlapping edges don't compound into a dark mass.  Clamped to [0.18, 0.60].
+let baseEdgeAlpha = $derived(Math.max(0.18, Math.min(0.6, 1.0 / Math.sqrt(Math.max(graphData.edges.length, 4)))));
 
 // Interaction state
 let hoveredNode: GraphNode | null = $state(null);
@@ -142,9 +148,6 @@ let lastHoverFingerprint = "";
 
 // Cluster legend hit areas for click detection (screen space)
 let clusterAnchorHitAreas: ClusterPillHit[] = [];
-
-// Edge legend hit areas for click detection (screen space)
-let edgeLegendHitAreas: EdgeLegendHit[] = [];
 
 // Labeling animation loop
 let labelAnimFrameId: number | null = null;
@@ -651,9 +654,6 @@ function render() {
 		clusterAnchorHitAreas = pixi.drawClusterPills([]);
 	}
 
-	// ── Edge legend (screen space) ─────────────────────────────
-	edgeLegendHitAreas = [pixi.drawEdgeLegend(showWikiLinks)];
-
 	// ── Node tooltip ───────────────────────────────────────────
 	if (hoveredNode && hoveredNode.x != null && hoveredNode.y != null) {
 		pixi.showNodeTooltip(hoveredNode, clusterLabels, false, true);
@@ -775,33 +775,16 @@ function handleMouseMove(e: PointerEvent) {
 			return;
 		}
 
-		// Check edge legend hit areas
-		let overEdgeLegend = false;
-		for (const area of edgeLegendHitAreas) {
-			if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
-				overEdgeLegend = true;
-				break;
-			}
+		const node = findNodeAt(x, y);
+		if (node !== hoveredNode) {
+			hoveredNode = node;
+			previewTriggeredForNode = null;
+			canvas.style.cursor = node ? "pointer" : lassoMode ? "crosshair" : "grab";
+			render();
 		}
-
-		if (overEdgeLegend) {
-			canvas.style.cursor = "pointer";
-			if (hoveredNode) {
-				hoveredNode = null;
-				render();
-			}
-		} else {
-			const node = findNodeAt(x, y);
-			if (node !== hoveredNode) {
-				hoveredNode = node;
-				previewTriggeredForNode = null;
-				canvas.style.cursor = node ? "pointer" : lassoMode ? "crosshair" : "grab";
-				render();
-			}
-			// Cmd/Ctrl+hover triggers note preview (fire once per node)
-			if (node && (e.metaKey || e.ctrlKey) && onHoverPreview && previewTriggeredForNode !== node.id) {
-				triggerNodePreview(e, node);
-			}
+		// Cmd/Ctrl+hover triggers note preview (fire once per node)
+		if (node && (e.metaKey || e.ctrlKey) && onHoverPreview && previewTriggeredForNode !== node.id) {
+			triggerNodePreview(e, node);
 		}
 	}
 }
@@ -859,15 +842,6 @@ function handleClick(e: MouseEvent) {
 		const dy = y - pointerDownScreenPos.y;
 		pointerDownScreenPos = null;
 		if (dx * dx + dy * dy > 16) return;
-	}
-
-	// Check edge legend hit areas (screen space)
-	for (const area of edgeLegendHitAreas) {
-		if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
-			onToggleWikiLinks?.();
-			render();
-			return;
-		}
 	}
 
 	for (const area of clusterAnchorHitAreas) {
@@ -1415,8 +1389,17 @@ onMount(() => {
 						render();
 					} else if (selectedNodes.size > 0) {
 						clearSelection();
+					} else if (immersedInDraft) {
+						onExitImmersion?.();
 					} else if (focusedClusters.size > 0) {
 						onClearFocusedClusters?.();
+					}
+					break;
+				case "i":
+					if (selectedNodes.size > 0 && !immersedInDraft) {
+						onImmerseDraft?.();
+					} else if (immersedInDraft) {
+						onExitImmersion?.();
 					}
 					break;
 				case "f":
@@ -1465,7 +1448,8 @@ onMount(() => {
 		});
 		resizeObserver.observe(containerEl);
 
-		// Listen for Obsidian theme changes
+		// Listen for Obsidian theme changes — covers both "css-change" events (CSS
+		// snippets) and class mutations on body (.theme-dark / .theme-light toggle).
 		const handleCssChange = () => {
 			const newTheme = readThemeColors(containerEl);
 			renderer.updateTheme(newTheme);
@@ -1473,11 +1457,22 @@ onMount(() => {
 		};
 		document.body.addEventListener("css-change", handleCssChange);
 
+		const themeMutationObserver = new MutationObserver((mutations) => {
+			for (const m of mutations) {
+				if (m.type === "attributes" && m.attributeName === "class") {
+					handleCssChange();
+					break;
+				}
+			}
+		});
+		themeMutationObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+
 		// Store cleanup references
 		(containerEl as any).__graphCleanup = () => {
 			containerEl.removeEventListener("keydown", handleKeyDown);
 			resizeObserver.disconnect();
 			document.body.removeEventListener("css-change", handleCssChange);
+			themeMutationObserver.disconnect();
 		};
 	});
 

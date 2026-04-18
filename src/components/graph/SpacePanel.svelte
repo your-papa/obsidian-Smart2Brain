@@ -13,6 +13,7 @@ interface Props {
 	immersedSpaceId: string | null;
 	pendingSpaceFilter: ViewFilter | null;
 	onImmerse: (id: string) => void;
+	onImmerseDraft?: (filter?: ViewFilter) => void;
 	onExit: () => void;
 	onSave: (draft: { label: string; filter: ViewFilter; color: string }) => void;
 	onUpdate: (id: string, patch: Partial<Omit<Space, "id">>) => void;
@@ -29,6 +30,7 @@ let {
 	immersedSpaceId,
 	pendingSpaceFilter,
 	onImmerse,
+	onImmerseDraft,
 	onExit,
 	onSave,
 	onUpdate,
@@ -317,6 +319,11 @@ function handleCancelEdit() {
 			/>
 		</div>
 		<div class="space-panel-builder-actions">
+			{#if immersedSpaceId === "__draft__"}
+				<Button onClick={onExit}>Exit immersion</Button>
+			{:else if onImmerseDraft && normalizeFilter(buildEffectiveFilter(builderFilter, liveLeaf))}
+				<Button onClick={() => onImmerseDraft!(buildEffectiveFilter(builderFilter, liveLeaf))}>Immerse</Button>
+			{/if}
 			<Button onClick={handleCreateSpace}>Create Space</Button>
 			<Button onClick={handleCloseBuilder}>Cancel</Button>
 		</div>
