@@ -1,6 +1,5 @@
 <script lang="ts">
 import { Keymap } from "obsidian";
-import { onDestroy } from "svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
 import type { GraphNoteRef } from "../../stores/chatStore.svelte";
@@ -15,6 +14,11 @@ interface Props {
 }
 
 let { activeGraphNotes = $bindable([]), paths = [] }: Props = $props();
+
+const MAX_VISIBLE = 5;
+let expanded = $state(false);
+const hiddenCount = $derived(Math.max(0, paths.length - MAX_VISIBLE));
+const visiblePaths = $derived(expanded ? paths : paths.slice(0, MAX_VISIBLE));
 
 let dismissed = $state(new Set<string>());
 const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
@@ -57,7 +61,7 @@ export function clear() {
 
 {#if paths.length > 0}
   <div class="graph-notes-chips inline-flex flex-row flex-wrap gap-1.5">
-    {#each paths as path (path)}
+    {#each visiblePaths as path (path)}
       <button
         type="button"
         class="graph-note-chip"
@@ -71,6 +75,11 @@ export function clear() {
         <span>{basename(path)}</span>
       </button>
     {/each}
+    {#if !expanded && hiddenCount > 0}
+      <button type="button" class="more-chip" onclick={() => (expanded = true)}>+{hiddenCount} more</button>
+    {:else if expanded && paths.length > MAX_VISIBLE}
+      <button type="button" class="more-chip" onclick={() => (expanded = false)}>show less</button>
+    {/if}
   </div>
 {/if}
 
@@ -135,5 +144,27 @@ export function clear() {
     align-items: center;
     flex-shrink: 0;
     opacity: 0.9;
+  }
+
+  .more-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    font-size: 11px;
+    line-height: 1.15;
+    background: var(--background-modifier-hover);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 999px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .more-chip:hover {
+    background: var(--background-modifier-border);
+    color: var(--text-normal);
   }
 </style>

@@ -51,6 +51,12 @@ let {
 	onQueuedNotesHandled,
 }: Props = $props();
 
+const MAX_VISIBLE = 5;
+let expanded = $state(false);
+const allNotes = $derived(getRenderableNotes());
+const visibleNotes = $derived(expanded ? allNotes : allNotes.slice(0, MAX_VISIBLE));
+const hiddenCount = $derived(Math.max(0, allNotes.length - MAX_VISIBLE));
+
 const tracker = new VisibleNotesTracker();
 const attachmentPathSet = $derived.by(() => new Set(attachmentPaths));
 const visiblePathSet = $derived.by(() => new Set(tracker.notes.map((n) => n.file.path)));
@@ -268,9 +274,9 @@ function previewNoteLink(evt: Event, path: string): void {
 onDestroy(() => tracker.destroy());
 </script>
 
-{#if getRenderableNotes().length > 0}
+{#if allNotes.length > 0}
   <div class="visible-notes-chips inline-flex flex-row flex-wrap gap-1.5">
-	    {#each getRenderableNotes() as note (note.file.path)}
+	    {#each visibleNotes as note (note.file.path)}
 	      {#if note.file.path !== excludePath}
 	        {@const isAttached = attachmentPathSet.has(note.file.path)}
 	        {@const isHidden = !visiblePathSet.has(note.file.path)}
@@ -322,6 +328,11 @@ onDestroy(() => tracker.destroy());
 	        </span>
 	      {/if}
 	    {/each}
+    {#if !expanded && hiddenCount > 0}
+      <button type="button" class="more-chip" onclick={() => (expanded = true)}>+{hiddenCount} more</button>
+    {:else if expanded && allNotes.length > MAX_VISIBLE}
+      <button type="button" class="more-chip" onclick={() => (expanded = false)}>show less</button>
+    {/if}
   </div>
 {/if}
 
@@ -416,5 +427,27 @@ onDestroy(() => tracker.destroy());
 
   .chip-context {
     opacity: 0.62;
+  }
+
+  .more-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    font-size: 11px;
+    line-height: 1.15;
+    background: var(--background-modifier-hover);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 999px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .more-chip:hover {
+    background: var(--background-modifier-border);
+    color: var(--text-normal);
   }
 </style>
