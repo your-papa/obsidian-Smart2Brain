@@ -12,6 +12,11 @@ interface Props {
 
 const { attachments, onRemoveAttachment }: Props = $props();
 
+const MAX_VISIBLE = 5;
+let expanded = $state(false);
+const hiddenCount = $derived(Math.max(0, attachments.length - MAX_VISIBLE));
+const visibleAttachments = $derived(expanded ? attachments : attachments.slice(0, MAX_VISIBLE));
+
 const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
 
 function attachmentIcon(attachment: ChatAttachment): string {
@@ -46,7 +51,7 @@ function onAttachmentClick(evt: MouseEvent, attachment: ChatAttachment): void {
 
 {#if attachments.length > 0}
   <div class="draft-attachment-chips flex flex-row flex-wrap gap-1.5">
-    {#each attachments as attachment (attachment.vaultPath)}
+    {#each visibleAttachments as attachment (attachment.vaultPath)}
       <button
         type="button"
         class="draft-attachment-chip"
@@ -59,6 +64,11 @@ function onAttachmentClick(evt: MouseEvent, attachment: ChatAttachment): void {
         <span>{attachment.name}</span>
       </button>
     {/each}
+    {#if !expanded && hiddenCount > 0}
+      <button type="button" class="more-chip" onclick={() => (expanded = true)}>+{hiddenCount} more</button>
+    {:else if expanded && attachments.length > MAX_VISIBLE}
+      <button type="button" class="more-chip" onclick={() => (expanded = false)}>show less</button>
+    {/if}
   </div>
 {/if}
 
@@ -110,5 +120,27 @@ function onAttachmentClick(evt: MouseEvent, attachment: ChatAttachment): void {
       inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
       0 0 0 2px color-mix(in srgb, var(--color-green) 28%, transparent),
       0 3px 8px color-mix(in srgb, black 12%, transparent);
+  }
+
+  .more-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    font-size: 11px;
+    line-height: 1.15;
+    background: var(--background-modifier-hover);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 999px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .more-chip:hover {
+    background: var(--background-modifier-border);
+    color: var(--text-normal);
   }
 </style>
