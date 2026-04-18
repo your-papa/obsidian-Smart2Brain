@@ -39,6 +39,7 @@ interface Props {
 	immersedSpaceId: string | null;
 	pendingSpaceFilter: ViewFilter | null;
 	onImmerse: (id: string) => void;
+	onImmerseDraft?: (filter?: ViewFilter) => void;
 	onExitImmersion: () => void;
 	onSaveSpace: (draft: { label: string; filter: ViewFilter; color: string }) => void;
 	onUpdateSpace: (id: string, patch: Partial<Omit<Space, "id">>) => void;
@@ -75,6 +76,7 @@ let {
 	immersedSpaceId,
 	pendingSpaceFilter,
 	onImmerse,
+	onImmerseDraft,
 	onExitImmersion,
 	onSaveSpace,
 	onUpdateSpace,
@@ -247,11 +249,33 @@ const colorByOptions = [
 		<div class="graph-controls-body">
 
 			<!-- ═══════════════════════════════════════ -->
+			<!-- OVERVIEW SECTION                       -->
+			<!-- ═══════════════════════════════════════ -->
+			{#if graphStats}
+				<button
+					type="button"
+					class="section-header section-header--first"
+					onclick={() => (sectionOpen.overview = !sectionOpen.overview)}
+				>
+					<span>Overview</span>
+					<svg class="section-chevron" class:open={sectionOpen.overview} xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+				</button>
+				{#if sectionOpen.overview}
+					<div class="overview-grid">
+						<div class="overview-item"><span class="overview-label">Connections</span><span class="overview-value">{graphStats.avgDegree.toFixed(1)} avg</span></div>
+						<div class="overview-item"><span class="overview-label">Hubs</span><span class="overview-value">{graphStats.maxDegree} max</span></div>
+						<div class="overview-item"><span class="overview-label">Isolated</span><span class="overview-value">{graphStats.unlinkedNotes}</span></div>
+						<div class="overview-item"><span class="overview-label">Wiki links</span><span class="overview-value">{graphStats.wikiEdges}</span></div>
+					</div>
+				{/if}
+			{/if}
+
+			<!-- ═══════════════════════════════════════ -->
 			<!-- COLOR BY SECTION                       -->
 			<!-- ═══════════════════════════════════════ -->
 			<button
 				type="button"
-				class="section-header section-header--first"
+				class="section-header{graphStats ? '' : ' section-header--first'}"
 				onclick={() => (sectionOpen.colorBy = !sectionOpen.colorBy)}
 			>
 				<span>Color by{segmentBy !== "none" ? ` · ${colorByOptions.find(o => o.value === segmentBy)?.display ?? segmentBy}` : ""}</span>
@@ -360,6 +384,7 @@ const colorByOptions = [
 					{immersedSpaceId}
 					{pendingSpaceFilter}
 					onImmerse={onImmerse}
+					{onImmerseDraft}
 					onExit={onExitImmersion}
 					onSave={onSaveSpace}
 					onUpdate={onUpdateSpace}
@@ -400,28 +425,6 @@ const colorByOptions = [
 				<SettingContainer name="Cluster cohesion" desc="How strongly nodes are pulled toward their cluster center" compact>
 					<RangeSlider value={Math.round((settings.clusterCohesionStrength ?? 0.15) * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleClusterCohesionStrengthChange} />
 				</SettingContainer>
-			{/if}
-
-				<!-- ═══════════════════════════════════════ -->
-				<!-- OVERVIEW SECTION                       -->
-				<!-- ═══════════════════════════════════════ -->
-			{#if graphStats}
-				<button
-					type="button"
-					class="section-header"
-					onclick={() => (sectionOpen.overview = !sectionOpen.overview)}
-				>
-					<span>Overview</span>
-					<svg class="section-chevron" class:open={sectionOpen.overview} xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-				</button>
-				{#if sectionOpen.overview}
-					<div class="overview-grid">
-						<div class="overview-item"><span class="overview-label">Connections</span><span class="overview-value">{graphStats.avgDegree.toFixed(1)} avg</span></div>
-						<div class="overview-item"><span class="overview-label">Hubs</span><span class="overview-value">{graphStats.maxDegree} max</span></div>
-						<div class="overview-item"><span class="overview-label">Isolated</span><span class="overview-value">{graphStats.unlinkedNotes}</span></div>
-						<div class="overview-item"><span class="overview-label">Wiki links</span><span class="overview-value">{graphStats.wikiEdges}</span></div>
-					</div>
-				{/if}
 			{/if}
 		</div>
 	{/if}

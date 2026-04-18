@@ -87,6 +87,21 @@ export interface ThemeColors {
 	font: string;
 }
 
+/** Blend fg over bg at the given alpha, returning a fully-opaque hex color.
+ *  Prevents semi-transparent edges from stacking into a bright hotspot near nodes. */
+function blendColor(fg: string, bg: string, alpha: number): string {
+	const pr = parseInt(fg.slice(1, 3), 16);
+	const pg = parseInt(fg.slice(3, 5), 16);
+	const pb = parseInt(fg.slice(5, 7), 16);
+	const br = parseInt(bg.slice(1, 3), 16);
+	const bg_ = parseInt(bg.slice(3, 5), 16);
+	const bb = parseInt(bg.slice(5, 7), 16);
+	const r = Math.round(br + (pr - br) * alpha);
+	const g = Math.round(bg_ + (pg - bg_) * alpha);
+	const b = Math.round(bb + (pb - bb) * alpha);
+	return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
 export function readThemeColors(el: HTMLElement): ThemeColors {
 	const style = getComputedStyle(el);
 	// Resolve every color through the canvas context so CSS calc(), var(),
@@ -117,14 +132,6 @@ export interface ClusterPillHit {
 	cluster: number;
 }
 
-export interface EdgeLegendHit {
-	x: number;
-	y: number;
-	w: number;
-	h: number;
-	type: "wiki";
-}
-
 // ── Renderer ─────────────────────────────────────────────────
 
 export class PixiRenderer {
@@ -142,7 +149,6 @@ export class PixiRenderer {
 	// Overlay (screen-space, outside viewport)
 	private overlayStage!: Container;
 	private clusterPillLayer!: Container;
-	private legendLayer!: Container;
 	private tooltipLayer!: Container;
 
 	// Display objects
@@ -178,9 +184,6 @@ export class PixiRenderer {
 
 	// Overlay objects
 	private clusterPillObjects: Array<{ container: Container; graphics: Graphics; text: Text }> = [];
-	private legendContainer!: Container;
-	private legendGraphics!: Graphics;
-	private legendText!: Text;
 	private tooltipContainer!: Container;
 	private tooltipGraphics!: Graphics;
 	private tooltipTexts: Text[] = [];
@@ -297,10 +300,8 @@ export class PixiRenderer {
 		this.app.stage.addChild(this.overlayStage);
 
 		this.clusterPillLayer = new Container();
-		this.legendLayer = new Container();
 		this.tooltipLayer = new Container();
 		this.overlayStage.addChild(this.clusterPillLayer);
-		this.overlayStage.addChild(this.legendLayer);
 		this.overlayStage.addChild(this.tooltipLayer);
 
 		// Pre-allocate label pool
@@ -319,22 +320,6 @@ export class PixiRenderer {
 			this.labelPool.push(t);
 			this.labelPoolCache.push(null);
 		}
-
-		// Legend setup
-		this.legendContainer = new Container();
-		this.legendGraphics = new Graphics();
-		this.legendText = new Text({
-			text: "Wiki link",
-			style: new TextStyle({
-				fontFamily: theme.font,
-				fontSize: 11,
-				fill: theme.textMuted,
-			}),
-		});
-		this.legendText.anchor.set(0, 0.5);
-		this.legendContainer.addChild(this.legendGraphics);
-		this.legendContainer.addChild(this.legendText);
-		this.legendLayer.addChild(this.legendContainer);
 
 		// Tooltip setup
 		this.tooltipContainer = new Container();
@@ -389,9 +374,6 @@ export class PixiRenderer {
 		this._theme = theme;
 		// Invalidate label cache so font/color changes are picked up on the next draw
 		this.labelPoolCache.fill(null);
-		// Update legend text
-		this.legendText.style.fill = theme.textMuted;
-		this.legendText.style.fontFamily = theme.font;
 		// Update tooltip text styles
 		for (let i = 0; i < this.tooltipTexts.length; i++) {
 			this.tooltipTexts[i].style.fontFamily = theme.font;
@@ -603,7 +585,7 @@ export class PixiRenderer {
 
 		const c = this._theme;
 		const scale = this.viewport.scaled || 1;
-		const normalWidth = 0.5 / scale;
+		const normalWidth = 1.2 / scale;
 		const highlightWidth = 2 / scale;
 
 		// Batch edges by style bucket to minimize draw calls.
@@ -648,7 +630,10 @@ export class PixiRenderer {
 			const color = isHighlighted ? c.accent : c.textFaint;
 			const width = isHighlighted ? highlightWidth : normalWidth;
 
-			const key = `${color}|${width.toFixed(4)}|${alpha}`;
+			// Pre-blend color against background so stacked edges at a node don't
+			// compound into a bright hotspot. Draw at alpha=1 to prevent stacking.
+			const blended = isHighlighted ? color : blendColor(color, c.bgPrimary, alpha);
+			const key = `${blended}|${width.toFixed(4)}`;
 			let bucket = buckets.get(key);
 			if (!bucket) {
 				bucket = [];
@@ -659,15 +644,14 @@ export class PixiRenderer {
 
 		// Draw each bucket as a single batched stroke
 		for (const [key, segments] of buckets) {
-			const [color, widthStr, alphaStr] = key.split("|");
+			const [color, widthStr] = key.split("|");
 			const width = Number(widthStr);
-			const alpha = Number(alphaStr);
 
 			for (const seg of segments) {
 				g.moveTo(seg.sx, seg.sy);
 				g.lineTo(seg.tx, seg.ty);
 			}
-			g.stroke({ color, width, alpha });
+			g.stroke({ color, width, alpha: 1 });
 		}
 	}
 
@@ -858,38 +842,6 @@ export class PixiRenderer {
 		}
 
 		return hitAreas;
-	}
-
-	// ── Edge legend (screen-space) ─────────────────────────
-
-	drawEdgeLegend(showWikiLinks: boolean): EdgeLegendHit {
-		const c = this._theme;
-		const lx = 16;
-		const ly = this._height - 40;
-		const rowH = 18;
-
-		this.legendContainer.position.set(0, 0);
-		const g = this.legendGraphics;
-		g.clear();
-
-		const alpha = showWikiLinks ? 0.7 : 0.25;
-
-		// Wiki link line (solid)
-		g.moveTo(lx, ly).lineTo(lx + 28, ly);
-		g.stroke({ color: c.textFaint, width: 1.5, alpha });
-
-		// Strikethrough when disabled
-		if (!showWikiLinks) {
-			const textW = 50; // approximate "Wiki link" width
-			g.moveTo(lx + 34, ly).lineTo(lx + 34 + textW, ly);
-			g.stroke({ color: c.textMuted, width: 1, alpha: 0.25 });
-		}
-
-		this.legendText.position.set(lx + 34, ly);
-		this.legendText.alpha = alpha;
-		this.legendText.style.fill = c.textMuted;
-
-		return { x: lx, y: ly - rowH / 2, w: 120, h: rowH, type: "wiki" };
 	}
 
 	// ── Node tooltip (screen-space) ────────────────────────
