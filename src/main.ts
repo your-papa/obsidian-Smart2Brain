@@ -236,6 +236,21 @@ export default class SecondBrainPlugin extends Plugin {
 			callback: () => this.activateSmartGraphView(),
 		});
 
+		this.addCommand({
+			id: "export-chat-as-json",
+			name: "Export current chat as JSON",
+			icon: "file-json",
+			callback: async () => {
+				const threadId = getMessenger()?.session?.id;
+				if (!threadId) {
+					new Notice("No chat is currently open");
+					return;
+				}
+				await this.agentManager.exportChatAsJson(threadId);
+				new Notice("Chat exported as JSON");
+			},
+		});
+
 		this.addSettingTab(new SettingsTab(this));
 
 		this.registerEvent(

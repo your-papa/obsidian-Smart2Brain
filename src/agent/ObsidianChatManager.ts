@@ -8,10 +8,13 @@ import {
 	type PendingWrite,
 } from "@langchain/langgraph-checkpoint";
 import { type DataAdapter, TFile, debounce, normalizePath } from "obsidian";
+import { gunzipSync, gzipSync } from "node:zlib";
 import type SecondBrainPlugin from "../main";
 import { getData } from "../stores/dataStore.svelte";
 import type { ThreadSnapshot, ThreadStore } from "./memory/ThreadStore";
 import { Logger } from "../utils/logging";
+import { toBase64, toBase64DataUri } from "../utils/attachments";
+import type { ChatAttachment } from "../types/shared";
 
 interface CheckpointEntry {
 	checkpoint: Checkpoint;
@@ -103,17 +106,106 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 	// --- File System Helpers ---
 
-	private parseNdjsonObject<T>(content: string, context: string): T {
-		const records = content
-			.split(/\r?\n/)
-			.map((line) => line.trim())
-			.filter((line) => line.length > 0);
+	private async readThreadFile(path: string): Promise<ThreadData> {
+		const raw = await this.adapter.readBinary(path);
+		const decompressed = gunzipSync(new Uint8Array(raw));
+		return JSON.parse(decompressed.toString("utf8")) as ThreadData;
+	}
 
-		if (records.length !== 1) {
-			throw new Error(`Invalid NDJSON format for ${context}: expected 1 record, found ${records.length}`);
+	private stripBase64FromChannelValues(channelValues: Record<string, unknown> | undefined): void {
+		if (!channelValues) return;
+		for (const value of Object.values(channelValues)) {
+			this.stripBase64FromWriteValue(value);
 		}
+	}
 
-		return JSON.parse(records[0]) as T;
+	private stripBase64FromWriteValue(value: unknown): void {
+		if (Array.isArray(value)) {
+			this.stripBase64FromMessages(value);
+		} else if (value && typeof value === "object") {
+			const msgs = (value as Record<string, unknown>).messages;
+			if (Array.isArray(msgs)) this.stripBase64FromMessages(msgs);
+		}
+	}
+
+	private stripBase64FromMessages(messages: unknown[]): void {
+		for (const msg of messages) {
+			const kwargs = (msg as Record<string, unknown>).kwargs as Record<string, unknown> | undefined;
+			if (!kwargs) continue;
+			const content = kwargs.content;
+			if (!Array.isArray(content)) continue;
+			const attachments = (kwargs.additional_kwargs as Record<string, unknown> | undefined)
+				?.attachments as ChatAttachment[] | undefined;
+			if (!attachments?.length) continue;
+
+			const imageAttachments = attachments.filter((a) => a.mimeType.startsWith("image/"));
+			const pdfAttachments = attachments.filter((a) => a.mimeType === "application/pdf");
+			let imageIdx = 0;
+			let pdfIdx = 0;
+
+			for (let i = 0; i < content.length; i++) {
+				const block = content[i] as Record<string, unknown>;
+				if (block.type === "image_url") {
+					const url = (block.image_url as Record<string, unknown> | undefined)?.url as string | undefined;
+					if (url?.startsWith("data:")) {
+						const att = imageAttachments[imageIdx++];
+						if (att) content[i] = { type: "image_url", image_url: { url: `vault://${att.vaultPath}` } };
+					}
+				} else if (block.type === "file" && block.source_type === "base64") {
+					const att = pdfAttachments[pdfIdx++];
+					if (att) {
+						content[i] = {
+							type: "file",
+							source_type: "vault",
+							vault_path: att.vaultPath,
+							mime_type: att.mimeType,
+							metadata: block.metadata,
+						};
+					}
+				}
+			}
+		}
+	}
+
+	private async rehydrateBase64InMessages(messages: unknown[]): Promise<void> {
+		const vault = this.plugin.app.vault;
+		for (const msg of messages) {
+			const kwargs = (msg as Record<string, unknown>).kwargs as Record<string, unknown> | undefined;
+			if (!kwargs) continue;
+			const content = kwargs.content;
+			if (!Array.isArray(content)) continue;
+			const attachments = (kwargs.additional_kwargs as Record<string, unknown> | undefined)
+				?.attachments as ChatAttachment[] | undefined;
+
+			for (let i = 0; i < content.length; i++) {
+				const block = content[i] as Record<string, unknown>;
+				if (block.type === "image_url") {
+					const url = (block.image_url as Record<string, unknown> | undefined)?.url as string | undefined;
+					if (url?.startsWith("vault://")) {
+						const vaultPath = url.slice("vault://".length);
+						const file = vault.getAbstractFileByPath(vaultPath);
+						if (file instanceof TFile) {
+							const buffer = await vault.readBinary(file);
+							const mimeType = attachments?.find((a) => a.vaultPath === vaultPath)?.mimeType ?? "image/png";
+							content[i] = { type: "image_url", image_url: { url: toBase64DataUri(buffer, mimeType) } };
+						}
+					}
+				} else if (block.type === "file" && block.source_type === "vault") {
+					const vaultPath = block.vault_path as string;
+					const file = vault.getAbstractFileByPath(vaultPath);
+					if (file instanceof TFile) {
+						const buffer = await vault.readBinary(file);
+						content[i] = {
+							type: "file",
+							source_type: "base64",
+							data: toBase64(buffer),
+							mime_type: block.mime_type,
+							metadata: block.metadata,
+						};
+					}
+				}
+			}
+		}
 	}
 
 	private getCheckpointTimestamp(entry: CheckpointEntry): number {
@@ -200,8 +292,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 					if (!file.endsWith(".chat")) continue;
 
 					try {
-						const content = await this.adapter.read(file);
-						const parsed = this.parseNdjsonObject<ThreadData>(content, file);
+						const parsed = await this.readThreadFile(file);
 						if (parsed.threadId === threadId) {
 							this.filePathCache.set(threadId, file);
 							return file;
@@ -263,8 +354,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			await new Promise((resolve) => setTimeout(resolve, 0));
 
 			try {
-				const content = await this.adapter.read(file);
-				const data = this.parseNdjsonObject<ThreadData>(content, file);
+				const data = await this.readThreadFile(file);
 				if (data?.threadId) {
 					// Cache path
 					this.filePathCache.set(data.threadId, file);
@@ -334,8 +424,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 		try {
 			if (await this.adapter.exists(path)) {
-				const content = await this.adapter.read(path);
-				const data = this.parseNdjsonObject<ThreadData>(content, path);
+				const data = await this.readThreadFile(path);
 				this.storage.set(threadId, data);
 				return data;
 			}
@@ -379,7 +468,11 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		let savePromise: Promise<void> | null = null;
 		savePromise = (async () => {
 			try {
-				await this.adapter.write(path, `${JSON.stringify(data)}\n`);
+				const compressed = gzipSync(JSON.stringify(data));
+				await this.adapter.writeBinary(
+					path,
+					compressed.buffer.slice(compressed.byteOffset, compressed.byteOffset + compressed.byteLength) as ArrayBuffer,
+				);
 				if ((this.dirtyThreadVersions.get(threadId) ?? 0) === targetVersion) {
 					this.persistedThreadVersions.set(threadId, targetVersion);
 				}
@@ -476,8 +569,20 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		};
 	}
 
+	async exportThreadAsJson(threadId: string): Promise<void> {
+		const threadData = await this.ensureThreadLoaded(threadId);
+		if (!threadData) throw new Error(`Thread ${threadId} not found`);
+		const exportData = JSON.parse(JSON.stringify(threadData));
+		for (const entry of Object.values(exportData.checkpoints as Record<string, CheckpointEntry>)) {
+			const messages = ((entry.checkpoint as unknown) as Record<string, unknown>).channel_values as Record<string, unknown>;
+			if (Array.isArray(messages?.messages)) await this.rehydrateBase64InMessages(messages.messages as unknown[]);
+		}
+		const folder = this.getChatFolder();
+		const exportPath = normalizePath(`${folder}/${threadId}.json`);
+		await this.adapter.write(exportPath, JSON.stringify(exportData, null, 2));
+	}
+
 	async flush(threadId?: string): Promise<void> {
-		this.saveDebounced.cancel();
 		this.saveIndexDebounced.cancel();
 
 		if (threadId) {
@@ -517,15 +622,16 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			const entry = threadData.checkpoints[checkpointId];
 			if (!entry) return undefined;
 
-			// For specific checkpoint, also include any error writes from child checkpoints
 			const pendingWrites = this.collectWritesWithErrors(threadData, checkpointId);
+			const checkpoint = JSON.parse(JSON.stringify(entry.checkpoint));
+			const messages = checkpoint.channel_values?.messages;
+			if (Array.isArray(messages)) await this.rehydrateBase64InMessages(messages);
 
 			return {
 				config,
-				checkpoint: entry.checkpoint,
+				checkpoint,
 				metadata: entry.metadata,
 				parentConfig: entry.parentConfig,
-				// Type assertion needed due to LangGraph checkpoint type variance
 				pendingWrites: pendingWrites as unknown as CheckpointTuple["pendingWrites"],
 			};
 		}
@@ -538,18 +644,19 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		if (!latestId) return undefined;
 		const entry = threadData.checkpoints[latestId];
 
-		// Collect writes from the latest checkpoint AND any error writes from subsequent checkpoints
 		const pendingWrites = this.collectWritesWithErrors(threadData, latestId);
+		const checkpoint = JSON.parse(JSON.stringify(entry.checkpoint));
+		const messages = checkpoint.channel_values?.messages;
+		if (Array.isArray(messages)) await this.rehydrateBase64InMessages(messages);
 
 		return {
 			config: {
 				...config,
 				configurable: { ...config.configurable, checkpoint_id: latestId },
 			},
-			checkpoint: entry.checkpoint,
+			checkpoint,
 			metadata: entry.metadata,
 			parentConfig: entry.parentConfig,
-			// Type assertion needed due to LangGraph checkpoint type variance
 			pendingWrites: pendingWrites as unknown as CheckpointTuple["pendingWrites"],
 		};
 	}
@@ -769,6 +876,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		const parentMessageCount = this.getParentMessageCount(threadData, config);
 		const generation = this.extractGenerationMetadata(config.metadata);
 		this.annotateCheckpointMessagesWithGeneration(plainCheckpoint, parentMessageCount, generation);
+		this.stripBase64FromChannelValues(plainCheckpoint.channel_values);
 
 		threadData.checkpoints[checkpointId] = {
 			checkpoint: plainCheckpoint,
@@ -824,7 +932,11 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			threadData.writes[checkpointId] = [];
 		}
 
-		threadData.writes[checkpointId].push(...writes);
+		const plainWrites = JSON.parse(JSON.stringify(writes)) as PendingWrite[];
+		for (const write of plainWrites) {
+			this.stripBase64FromWriteValue(write[1]);
+		}
+		threadData.writes[checkpointId].push(...plainWrites);
 		threadData.updatedAt = Date.now();
 		this.markThreadDirty(threadId);
 		this.saveDebounced(threadId);
