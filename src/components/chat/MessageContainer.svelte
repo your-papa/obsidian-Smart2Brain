@@ -265,7 +265,26 @@ $effect(() => {
     class="scroll-container h-full overflow-y-auto overflow-x-clip px-2 pt-4 pb-8"
   >
     <div class="w-full max-w-[--file-line-width] mx-auto h-full">
-      {#if !messages || messages.length === 0}
+      {#if messenger.isLoadingSession}
+        <!-- Loading skeleton -->
+        <div class="flex flex-col gap-4 pt-2 px-1 animate-pulse" data-testid="chat-loading-skeleton">
+          <div class="flex justify-end">
+            <div class="h-9 w-48 rounded-2xl bg-[--background-modifier-border]"></div>
+          </div>
+          <div class="flex flex-col gap-2">
+            <div class="h-3 w-full rounded bg-[--background-modifier-border]"></div>
+            <div class="h-3 w-4/5 rounded bg-[--background-modifier-border]"></div>
+            <div class="h-3 w-2/3 rounded bg-[--background-modifier-border]"></div>
+          </div>
+          <div class="flex justify-end">
+            <div class="h-9 w-64 rounded-2xl bg-[--background-modifier-border]"></div>
+          </div>
+          <div class="flex flex-col gap-2">
+            <div class="h-3 w-full rounded bg-[--background-modifier-border]"></div>
+            <div class="h-3 w-3/4 rounded bg-[--background-modifier-border]"></div>
+          </div>
+        </div>
+      {:else if !messages || messages.length === 0}
         <!-- Empty state with logo -->
         <div class="flex flex-col items-center justify-center h-full">
           <div

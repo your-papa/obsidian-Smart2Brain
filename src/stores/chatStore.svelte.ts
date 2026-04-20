@@ -1975,6 +1975,7 @@ export class ChatSession {
  * ---------------------------------------------------------------------------*/
 export class Messenger {
 	session: ChatSession | null = $state(null);
+	isLoadingSession: boolean = $state(false);
 	pendingInput: string | null = $state(null);
 	pendingGraphNotes: string[] | null = $state(null);
 	pendingAttachmentPaths: string[] | null = $state(null);
@@ -2136,6 +2137,8 @@ export class Messenger {
 	/* ---------------- Chat Creation / Metadata ---------------- */
 
 	async loadSession(file: TFile, targetCheckpointId?: string) {
+		this.isLoadingSession = true;
+		try {
 		const id = await this.deriveThreadId(file);
 		if (!id) throw new Error("Invalid thread ID");
 
@@ -2177,6 +2180,9 @@ export class Messenger {
 		});
 
 		await this.persistLastViewedCheckpoint(id, resolution.checkpointId);
+		} finally {
+			this.isLoadingSession = false;
+		}
 	}
 
 	/** Reload the current session while preserving valid in-memory active checkpoint precedence. */
