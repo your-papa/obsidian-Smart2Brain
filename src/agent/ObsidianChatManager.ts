@@ -188,6 +188,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 							const buffer = await vault.readBinary(file);
 							const mimeType = attachments?.find((a) => a.vaultPath === vaultPath)?.mimeType ?? "image/png";
 							content[i] = { type: "image_url", image_url: { url: toBase64DataUri(buffer, mimeType) } };
+						} else {
+							content[i] = { type: "text", text: `[Image at "${vaultPath}" is no longer available]` };
 						}
 					}
 				} else if (block.type === "file" && block.source_type === "vault") {
@@ -202,6 +204,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 							mime_type: block.mime_type,
 							metadata: block.metadata,
 						};
+					} else {
+						content[i] = { type: "text", text: `[File at "${vaultPath}" is no longer available]` };
 					}
 				}
 			}
