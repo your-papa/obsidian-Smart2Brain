@@ -39,3 +39,9 @@ workspace.json
 # Obsidian data and local state
 /data.json
 /data/
+
+# Auto-generated files
+main.js
+package-lock.json
+bun.lockb
+bun.lock
