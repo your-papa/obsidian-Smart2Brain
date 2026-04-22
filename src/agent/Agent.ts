@@ -2071,9 +2071,13 @@ export class Agent {
 			throw new Error("No model selected. Call chooseModel() before generateTitle().");
 		}
 
-		const prompt = `Generate a short, concise title (max 5 words) for the following user question. Do not use quotes or markdown.
+		const prompt = `Generate a short, concise title (max 5 words) for the following user message. 
+Rules:
+- Use the same language as the user message.
+- Do not use quotes, markdown, or a period at the end.
+- Capture the core topic or intent.
 
-User question:
+User message:
 ${userMessage}`;
 
 		const response = await this.selectedModel.instance.invoke([{ role: "user", content: prompt }]);
@@ -2086,7 +2090,7 @@ ${userMessage}`;
 			title = content.map((c) => (typeof c === "string" ? c : ((c as { text?: string }).text ?? ""))).join("");
 		}
 
-		return title.replace(/^["']|["']$/g, "").trim();
+		return title.replace(/^["'#*:\s]+|["'#*:\s]+$/g, "").trim();
 	}
 
 	private async safeGetCheckpointTuple(threadId: string): Promise<CheckpointTuple | undefined> {

@@ -1184,8 +1184,7 @@ export class AgentManager {
 		}
 
 		const latestThread = threads[0];
-		const folder = getData().targetFolder;
-		const path = normalizePath(`${folder}/${latestThread.threadId}.chat`);
+		const path = await this.chatManager.resolveFilePath(latestThread.threadId);
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 
 		if (file && file instanceof TFile) {

@@ -272,7 +272,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		}
 	}
 
-	private async resolveFilePath(threadId: string): Promise<string> {
+	async resolveFilePath(threadId: string): Promise<string> {
 		// Check cache first
 		if (this.filePathCache.has(threadId)) {
 			const cachedPath = this.filePathCache.get(threadId);
@@ -1079,6 +1079,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		}
 
 		const currentPath = await this.resolveFilePath(currentThreadId);
+		const file = this.plugin.app.vault.getAbstractFileByPath(currentPath);
+
 		const loaded = await this.ensureThreadLoaded(currentThreadId);
 		if (!loaded) {
 			return false;
@@ -1092,7 +1094,6 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		this.storage.set(nextThreadId, loaded);
 
 		this.filePathCache.delete(currentThreadId);
-		this.filePathCache.set(nextThreadId, currentPath);
 		this.dirtyThreadVersions.delete(currentThreadId);
 		this.persistedThreadVersions.delete(currentThreadId);
 
@@ -1106,6 +1107,22 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			updatedAt: now,
 		});
 
+		let finalPath = currentPath;
+		if (file && file instanceof TFile) {
+			const folder = this.getChatFolder();
+			const newPath = normalizePath(`${folder}/${nextThreadId}.chat`);
+			// Only rename if the path changed and the target doesn't already exist
+			if (currentPath !== newPath && !(await this.adapter.exists(newPath))) {
+				try {
+					await this.plugin.app.fileManager.renameFile(file, newPath);
+					finalPath = newPath;
+				} catch (e) {
+					Logger.error("Error renaming file during ID reassignment:", e);
+				}
+			}
+		}
+
+		this.filePathCache.set(nextThreadId, finalPath);
 		this.markThreadDirty(nextThreadId);
 		this.markIndexDirty();
 		await this.saveThread(nextThreadId);
