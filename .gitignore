@@ -43,5 +43,3 @@ workspace.json
 # Auto-generated files
 main.js
 package-lock.json
-bun.lockb
-bun.lock
