@@ -1986,10 +1986,6 @@ export class Messenger {
 	}
 
 	private async deriveThreadId(file: TFile): Promise<string | null> {
-		if (isDraftChatName(file.basename)) {
-			return file.basename;
-		}
-
 		try {
 			const content = await getPlugin().app.vault.read(file);
 			const parsed = JSON.parse(content) as { threadId?: unknown };
@@ -1997,7 +1993,11 @@ export class Messenger {
 				return parsed.threadId;
 			}
 		} catch {
-			return null;
+			// Fall through to basename
+		}
+
+		if (isDraftChatName(file.basename)) {
+			return file.basename;
 		}
 		return null;
 	}
