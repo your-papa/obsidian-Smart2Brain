@@ -1402,6 +1402,7 @@ export class Agent {
 	): RunnableConfig {
 		const callbacks = this.telemetry?.getCallbacks?.();
 		return {
+			recursionLimit: 1000, // Effectively deactivated (default is 25)
 			configurable: {
 				thread_id: threadId,
 				// If checkpointId is provided, include it to fork from that checkpoint

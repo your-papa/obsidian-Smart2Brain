@@ -725,8 +725,9 @@ export class AgentManager {
 		// Configure Telemetry (use getData())
 		const telemetry = this.configureTelemetry();
 
-		// Create agent with checkpoint storage
-		// The chatManager acts as both checkpointer and thread store
+		const pluginData = getData();
+		const selectedAgent = pluginData.getSelectedAgent();
+
 		this.agent = new Agent({
 			registry: this.registry,
 			checkpointer: this.chatManager,
@@ -737,8 +738,6 @@ export class AgentManager {
 		// Set assembled prompt (base + enabled skills)
 		this.agent.setPrompt(await this.assembleSystemPrompt());
 
-		const pluginData = getData();
-		const selectedAgent = pluginData.getSelectedAgent();
 		const chatModel = selectedAgent.chatModel;
 		if (chatModel) {
 			try {

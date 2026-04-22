@@ -35,3 +35,7 @@ workspace.json
 .btca
 
 .opencode
+
+# Obsidian data and local state
+/data.json
+/data/
