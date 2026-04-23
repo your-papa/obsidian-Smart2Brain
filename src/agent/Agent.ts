@@ -2080,17 +2080,27 @@ Rules:
 User message:
 ${userMessage}`;
 
-		const response = await this.selectedModel.instance.invoke([{ role: "user", content: prompt }]);
+		try {
+			Logger.log(`[Agent] Generating title for message: "${userMessage.slice(0, 50)}..."`);
+			const response = await this.selectedModel.instance.invoke([{ role: "user", content: prompt }]);
+			
+			const content = response.content;
+			Logger.debug("[Agent] Title generation raw response:", content);
 
-		const content = response.content;
-		let title = "";
-		if (typeof content === "string") {
-			title = content;
-		} else if (Array.isArray(content)) {
-			title = content.map((c) => (typeof c === "string" ? c : ((c as { text?: string }).text ?? ""))).join("");
+			let title = "";
+			if (typeof content === "string") {
+				title = content;
+			} else if (Array.isArray(content)) {
+				title = content.map((c) => (typeof c === "string" ? c : ((c as { text?: string }).text ?? ""))).join("");
+			}
+
+			const finalTitle = title.replace(/^["'#*:\s]+|["'#*:\s]+$/g, "").trim();
+			Logger.log(`[Agent] Generated title: "${finalTitle}"`);
+			return finalTitle;
+		} catch (error) {
+			Logger.error("[Agent] Title generation failed:", error);
+			throw error;
 		}
-
-		return title.replace(/^["'#*:\s]+|["'#*:\s]+$/g, "").trim();
 	}
 
 	private async safeGetCheckpointTuple(threadId: string): Promise<CheckpointTuple | undefined> {
