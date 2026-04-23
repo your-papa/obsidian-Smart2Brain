@@ -107,9 +107,45 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	// --- File System Helpers ---
 
 	private async readThreadFile(path: string): Promise<ThreadData> {
-		const raw = await this.adapter.readBinary(path);
-		const decompressed = gunzipSync(new Uint8Array(raw));
-		return JSON.parse(decompressed.toString("utf8")) as ThreadData;
+		let lastError: Error | undefined;
+
+		// Retry up to 3 times with a small delay.
+		// This helps when sync tools (like livesync) are temporarily locking or writing to the file.
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			try {
+				const raw = await this.adapter.readBinary(path);
+				if (!raw || raw.byteLength === 0) {
+					throw new Error("Thread file is empty");
+				}
+
+				const buffer = Buffer.from(raw);
+
+				try {
+					const decompressed = gunzipSync(buffer);
+					return JSON.parse(decompressed.toString("utf8")) as ThreadData;
+				} catch (e) {
+					// Fallback: If it's not a GZIP file, try reading as plain JSON.
+					try {
+						const text = buffer.toString("utf8");
+						return JSON.parse(text) as ThreadData;
+					} catch (jsonErr) {
+						// If both fail, and it was the last attempt, throw.
+						lastError = e as Error;
+					}
+				}
+
+				if (!lastError) break; // Success
+			} catch (err) {
+				lastError = err as Error;
+			}
+
+			if (attempt < 3) {
+				await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+			}
+		}
+
+		Logger.error(`Failed to read thread file at ${path} after 3 attempts.`, lastError);
+		throw lastError ?? new Error(`Unknown error reading ${path}`);
 	}
 
 	private stripBase64FromChannelValues(channelValues: Record<string, unknown> | undefined): void {

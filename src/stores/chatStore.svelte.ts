@@ -23,6 +23,7 @@ import { getPlugin } from "./state.svelte";
 import { Logger } from "../utils/logging";
 import { shouldSummarizeForEstimatedTokens } from "../agent/summarization";
 import { estimateConversationBaseTokens, estimateLiveDraftTokens } from "../utils/tokenEstimator";
+import { gunzipSync } from "node:zlib";
 
 // Re-export for backward compatibility
 export type { ThreadError };
@@ -1986,20 +1987,44 @@ export class Messenger {
 	}
 
 	private async deriveThreadId(file: TFile): Promise<string | null> {
-		try {
-			const content = await getPlugin().app.vault.read(file);
-			const parsed = JSON.parse(content) as { threadId?: unknown };
-			if (typeof parsed.threadId === "string" && parsed.threadId.trim().length > 0) {
-				return parsed.threadId;
-			}
-		} catch {
-			// Fall through to basename
-		}
-
 		if (isDraftChatName(file.basename)) {
 			return file.basename;
 		}
-		return null;
+
+		let lastError: Error | undefined;
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			try {
+				const raw = await getPlugin().app.vault.adapter.readBinary(file.path);
+				if (!raw || raw.byteLength === 0) break;
+
+				const buffer = Buffer.from(raw);
+				let data: unknown;
+				try {
+					const decompressed = gunzipSync(buffer);
+					data = JSON.parse(decompressed.toString("utf8"));
+				} catch {
+					// Fallback to plain JSON
+					const text = buffer.toString("utf8");
+					data = JSON.parse(text);
+				}
+
+				if (data && typeof data === "object" && "threadId" in data && typeof data.threadId === "string") {
+					return data.threadId.trim() || null;
+				}
+				break; // File is readable but doesn't have threadId in expected place
+			} catch (err) {
+				lastError = err as Error;
+			}
+			
+			if (attempt < 3) {
+				await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+			}
+		}
+
+		// Fallback: If we can't read the threadId from the file, use the basename as the ID.
+		// This ensures the chat can still be opened even if the content is temporarily unreadable.
+		Logger.debug(`deriveThreadId: Falling back to basename for ${file.path} after failing to read content.`, lastError);
+		return file.basename;
 	}
 
 	private getLastViewedCheckpointId(history: ThreadHistory | null): string | undefined {
