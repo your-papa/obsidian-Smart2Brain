@@ -326,6 +326,13 @@ export class MiniSearchService {
 	}
 
 	/**
+	 * Get all indexed document paths.
+	 */
+	getDocumentPaths(): IterableIterator<string> {
+		return this.documentPaths.values();
+	}
+
+	/**
 	 * Get the number of indexed documents.
 	 */
 	get documentCount(): number {

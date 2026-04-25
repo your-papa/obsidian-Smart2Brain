@@ -164,6 +164,15 @@ export class LexicalSearchService {
 	private async validateIndex(): Promise<void> {
 		const { vault } = this.plugin.app;
 		const files = getIndexableVaultFiles(vault);
+		const vaultPaths = new Set(files.map((f) => f.path));
+
+		let removed = 0;
+		for (const indexedPath of this.miniSearch.getDocumentPaths()) {
+			if (!vaultPaths.has(indexedPath)) {
+				this.miniSearch.removeDocument(indexedPath);
+				removed++;
+			}
+		}
 
 		let added = 0;
 		for (const file of files) {
@@ -180,9 +189,9 @@ export class LexicalSearchService {
 			}
 		}
 
-		if (added > 0) {
+		if (added > 0 || removed > 0) {
 			await this.miniSearch.flush();
-			Logger.log(`[LexicalSearch] Added ${added} missing documents to lexical index`);
+			Logger.log(`[LexicalSearch] Validated lexical index: added ${added}, removed ${removed} documents`);
 		}
 	}
 
