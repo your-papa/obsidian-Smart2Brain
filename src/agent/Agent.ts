@@ -66,6 +66,11 @@ export interface ChooseModelParams {
 		chatModel: string;
 		options?: Partial<ChatModelConfig>;
 	} | null;
+	titleModel?: {
+		provider: string;
+		chatModel: string;
+		options?: Partial<ChatModelConfig>;
+	} | null;
 }
 
 /** Options for a normal query (new message in thread) */
@@ -201,6 +206,7 @@ export class Agent {
 	private tools: readonly unknown[] = [];
 	private selectedModel?: SelectedModel;
 	private selectedSummarizationModel?: SelectedModel;
+	private selectedTitleModel?: SelectedModel;
 	private agentRunnable?: AgentRunnable;
 	private readonly checkpointer: BaseCheckpointSaver;
 	private readonly telemetry?: Telemetry;
@@ -384,7 +390,7 @@ export class Agent {
 	}
 
 	async chooseModel(params: ChooseModelParams): Promise<void> {
-		const { provider, chatModel, options, summarizationModel } = params;
+		const { provider, chatModel, options, summarizationModel, titleModel } = params;
 
 		// Create a LangChain instance for this provider + model
 		let instance: BaseChatModel;
@@ -421,6 +427,20 @@ export class Agent {
 			};
 		} else {
 			this.selectedSummarizationModel = undefined;
+		}
+		if (titleModel) {
+			this.selectedTitleModel = {
+				provider: titleModel.provider,
+				name: titleModel.chatModel,
+				instance: this.registry.createChatInstance(
+					titleModel.provider,
+					titleModel.chatModel,
+					titleModel.options,
+				),
+				options: titleModel.options,
+			};
+		} else {
+			this.selectedTitleModel = undefined;
 		}
 		Logger.debug("agent.chooseModel", { provider, chatModel, options });
 		this.dirty = true;
@@ -2071,6 +2091,8 @@ export class Agent {
 			throw new Error("No model selected. Call chooseModel() before generateTitle().");
 		}
 
+		const model = this.selectedTitleModel?.instance ?? this.selectedModel.instance;
+
 		const prompt = `Generate a short, concise title (max 5 words) for the following user message. 
 Rules:
 - Use the same language as the user message.
@@ -2082,7 +2104,7 @@ ${userMessage}`;
 
 		try {
 			Logger.log(`[Agent] Generating title for message: "${userMessage.slice(0, 50)}..."`);
-			const response = await this.selectedModel.instance.invoke([{ role: "user", content: prompt }]);
+			const response = await model.invoke([{ role: "user", content: prompt }]);
 			
 			const content = response.content;
 			Logger.debug("[Agent] Title generation raw response:", content);

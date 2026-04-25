@@ -325,6 +325,7 @@ export function createDefaultAgentConfig(id?: string, name?: string): AgentConfi
 		name: name ?? "New Agent",
 		chatModel: null,
 		summarizationModel: null,
+		titleModel: null,
 		systemPrompt: BASE_SYSTEM_PROMPT,
 		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
@@ -341,6 +342,7 @@ function createDefaultAgent(): AgentConfig {
 		name: "Default Agent",
 		chatModel: null,
 		summarizationModel: null,
+		titleModel: null,
 		systemPrompt: BASE_SYSTEM_PROMPT,
 		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
@@ -1467,6 +1469,9 @@ export class PluginDataStore {
 			if (agent.summarizationModel?.provider === provider && agent.summarizationModel.model === modelName) {
 				agent.summarizationModel = null;
 			}
+			if (agent.titleModel?.provider === provider && agent.titleModel.model === modelName) {
+				agent.titleModel = null;
+			}
 		}
 
 		this.saveSettings();
@@ -1753,6 +1758,9 @@ export class PluginDataStore {
 			if (agent.summarizationModel?.provider === oldId) {
 				agent.summarizationModel = { ...agent.summarizationModel, provider: newId };
 			}
+			if (agent.titleModel?.provider === oldId) {
+				agent.titleModel = { ...agent.titleModel, provider: newId };
+			}
 		}
 
 		// Update favoriteModels
@@ -1815,6 +1823,7 @@ function normalizeAgent(agent: AgentConfig): void {
 	agent.mcpServers ??= {};
 	agent.systemPrompt ??= BASE_SYSTEM_PROMPT;
 	agent.summarizationModel ??= null;
+	agent.titleModel ??= null;
 }
 
 function normalizeAgents(mergedData: PluginData): void {

@@ -209,6 +209,10 @@ function resolveSummarizationChatModel(chatModel: ChatModel, summarizationModel:
 	return summarizationModel ?? chatModel;
 }
 
+function resolveTitleChatModel(chatModel: ChatModel, titleModel: ChatModel | null): ChatModel {
+	return titleModel ?? chatModel;
+}
+
 async function resolveVisionSupportCached(providerId: string, modelId: string): Promise<boolean> {
 	const cacheKey = getVisionSupportCacheKey(providerId, modelId);
 
@@ -742,9 +746,11 @@ export class AgentManager {
 		if (chatModel) {
 			try {
 				const summarizationModel = resolveSummarizationChatModel(chatModel, selectedAgent.summarizationModel);
+				const titleModel = resolveTitleChatModel(chatModel, selectedAgent.titleModel);
 				await this.agent.chooseModel({
 					...toChooseModelParamsImmediate(chatModel),
 					summarizationModel: toChooseModelParamsImmediate(summarizationModel),
+					titleModel: toChooseModelParamsImmediate(titleModel),
 				});
 			} catch (error) {
 				if (error instanceof ProviderNotFoundError) {
@@ -880,9 +886,11 @@ export class AgentManager {
 		const chatModel = selectedAgent.chatModel;
 		if (!chatModel) throw new Error("No chat model configured");
 		const summarizationModel = resolveSummarizationChatModel(chatModel, selectedAgent.summarizationModel);
+		const titleModel = resolveTitleChatModel(chatModel, selectedAgent.titleModel);
 		await agent.chooseModel({
 			...(await toChooseModelParams(chatModel)),
 			summarizationModel: await toChooseModelParams(summarizationModel),
+			titleModel: await toChooseModelParams(titleModel),
 		});
 		const runMetadata = this.buildRunMetadata(selectedAgent.id, selectedAgent.name, chatModel);
 		return { agent, chatModel, runMetadata };
