@@ -20,9 +20,7 @@ import {
 	DEFAULT_SMART_GRAPH_SETTINGS,
 	THEME_COLOR_VARS,
 } from "../../types/graph";
-import {
-	resolveViewFilter,
-} from "../../lib/views";
+import { resolveViewFilter } from "../../lib/views";
 import {
 	buildWikiGraph,
 	filterDocuments,
@@ -33,12 +31,7 @@ import {
 	type GraphFilter,
 	type ClusterAssignment,
 } from "../../views/smart-graph/graphDataBuilder";
-import {
-	smartGraphCache,
-	documentsKey,
-	filteredKey,
-	reducedKey,
-} from "../../views/smart-graph/graphCache";
+import { smartGraphCache, documentsKey, filteredKey, reducedKey } from "../../views/smart-graph/graphCache";
 import { reduceDimensionsAsync, louvainAsync } from "../../utils/computeWorkerManager";
 import type { DocumentVector } from "../../vectorstore/types";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
@@ -315,7 +308,11 @@ async function buildGraph() {
 		}
 
 		await tick();
-		try { canvasComponent?.fitToView(); } catch { /* pixi not ready */ }
+		try {
+			canvasComponent?.fitToView();
+		} catch {
+			/* pixi not ready */
+		}
 	} catch (e) {
 		if (ac.signal.aborted) return;
 		console.error("[SmartGraph] Error building graph:", e);
@@ -383,7 +380,9 @@ async function computeAndApplyClusters(
 		setLoadingStage(`Reducing ${formatCount(filteredDocs.length)} vectors...`);
 		const t0 = performance.now();
 		reducedVectors = await reduceDimensionsAsync(vectors, "pca", REDUCTION_DIM);
-		Logger.info(`[SmartGraph] Vector reduction (${formatCount(filteredDocs.length)} notes): ${Math.round(performance.now() - t0)}ms`);
+		Logger.info(
+			`[SmartGraph] Vector reduction (${formatCount(filteredDocs.length)} notes): ${Math.round(performance.now() - t0)}ms`,
+		);
 		if (signal.aborted) return;
 		smartGraphCache.setReduced(reducK, reducedVectors);
 	} else {
@@ -391,7 +390,11 @@ async function computeAndApplyClusters(
 	}
 
 	const cachedPathSetKey = smartGraphCache.getFilteredPathSetKey(filterK);
-	const currentPathSetKey = filteredDocs.map((d) => d.path).slice().sort().join("\0");
+	const currentPathSetKey = filteredDocs
+		.map((d) => d.path)
+		.slice()
+		.sort()
+		.join("\0");
 	const docSetChanged = clusterMap.size === 0 || cachedPathSetKey == null || currentPathSetKey !== cachedPathSetKey;
 
 	if (docSetChanged) {
@@ -553,9 +556,8 @@ function handleFocusCluster(cluster: number) {
 
 function handleSelectionChange(paths: string[]) {
 	selectedPaths = paths;
-	pendingSpaceFilter = paths.length > 0
-		? { type: "any", conditions: [{ type: "paths", value: paths.slice() }] }
-		: null;
+	pendingSpaceFilter =
+		paths.length > 0 ? { type: "any", conditions: [{ type: "paths", value: paths.slice() }] } : null;
 	const messenger = getMessenger();
 	if (messenger) {
 		messenger.pendingGraphNotes = [...paths];
@@ -622,9 +624,7 @@ function handleClearSelection() {
  * Generate thematic labels for each cluster using the user's configured chat model.
  * Groups nodes by cluster, reads note content snippets, and sends a single batched prompt.
  */
-async function handleLabelClusters(
-	sourceGraphData: GraphData | unknown = graphData,
-) {
+async function handleLabelClusters(sourceGraphData: GraphData | unknown = graphData) {
 	if (isLabeling) return;
 	const buildAtStart = currentBuild;
 	const chatModelConfig = settings.graphChatModel;

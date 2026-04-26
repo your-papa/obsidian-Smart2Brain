@@ -1231,7 +1231,12 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		container.createSpan({ cls: "s2b-search-autocomplete-text", text: suggestion.display });
 		container.createSpan({
 			cls: "s2b-search-autocomplete-hint",
-			text: suggestion.kind === "tag" ? "Filter by tag" : suggestion.kind === "space" ? "Filter by space" : "Filter by folder",
+			text:
+				suggestion.kind === "tag"
+					? "Filter by tag"
+					: suggestion.kind === "space"
+						? "Filter by space"
+						: "Filter by folder",
 		});
 	}
 

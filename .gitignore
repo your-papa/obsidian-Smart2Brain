@@ -35,3 +35,10 @@ workspace.json
 .btca
 
 .opencode
+
+# Obsidian data and local state
+/data.json
+/data/
+
+# Auto-generated files
+main.js

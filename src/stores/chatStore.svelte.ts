@@ -14,7 +14,6 @@ import type { ChatModelConfig } from "../providers/index";
 import type { ChatAttachment, ThreadError } from "../types/shared";
 import type { AgentConfig } from "../types/plugin";
 import { getPendingChangesStore } from "./pendingChangesStore.svelte";
-import { isDraftChatName } from "../utils/threadId";
 import { formatVisibleNotesContext, type VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import { formatSelectionContext, type SelectionRef } from "../hooks/useSelection.svelte";
 import { type UUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
@@ -23,7 +22,6 @@ import { getPlugin } from "./state.svelte";
 import { Logger } from "../utils/logging";
 import { shouldSummarizeForEstimatedTokens } from "../agent/summarization";
 import { estimateConversationBaseTokens, estimateLiveDraftTokens } from "../utils/tokenEstimator";
-
 // Re-export for backward compatibility
 export type { ThreadError };
 
@@ -174,12 +172,6 @@ export interface MessagePair {
 	 * Shows how many times this response was regenerated.
 	 */
 	assistantBranchInfo?: BranchInfo;
-}
-
-export interface ChatPreview {
-	id: UUIDv7;
-	title: string;
-	lastAccessed: Date;
 }
 
 export interface ChatModel {
@@ -1380,12 +1372,6 @@ export class ChatSession {
 		graphNotes?: GraphNoteRef[],
 		spaces?: string[],
 	): Promise<UUIDv7> {
-		if (this.messages.length === 0 && isDraftChatName(this.id)) {
-			const promotedThreadId = await getPlugin().agentManager.promoteDraftThread(this.id);
-			if (promotedThreadId) {
-				this.id = promotedThreadId;
-			}
-		}
 		const pairId = genUUIDv7();
 
 		// Capture the current model at send time
@@ -1590,20 +1576,25 @@ export class ChatSession {
 
 			const streamPromise = this.consumeStream(pair.assistantMessage, getStream(signal));
 
-			// Generate chat title in parallel for the first user message.
-			// Start stream consumption first so non-parallel local providers (e.g., Ollama)
-			// prioritize the assistant response before title generation.
-			if (options.generateTitle && this.messages.length === 1) {
-				const plugin = getPlugin();
-				plugin.agentManager
-					.generateThreadTitleFromUserMessage(String(this.id), options.generateTitle)
-					.catch((err) => {
-						Logger.warn("[ChatSession] Failed to generate chat title:", err);
-					});
-			}
-
 			await streamPromise;
 			pair.assistantMessage.state = AssistantState.success;
+
+			// Generate chat title after stream completes for the first user message.
+			// Must be sequential because rename changes this.id (the thread path).
+			if (options.generateTitle && this.messages.length === 1) {
+				try {
+					const plugin = getPlugin();
+					const newPath = await plugin.agentManager.generateThreadTitleFromUserMessage(
+						String(this.id),
+						options.generateTitle,
+					);
+					if (newPath) {
+						this.id = newPath;
+					}
+				} catch (err) {
+					Logger.warn("[ChatSession] Failed to generate chat title:", err);
+				}
+			}
 
 			await this.syncGraphAfterRun(options.parentCheckpointId, options.beforeCheckpointIds);
 
@@ -1985,21 +1976,8 @@ export class Messenger {
 		this.#agentManager = agentManager;
 	}
 
-	private async deriveThreadId(file: TFile): Promise<string | null> {
-		if (isDraftChatName(file.basename)) {
-			return file.basename;
-		}
-
-		try {
-			const content = await getPlugin().app.vault.read(file);
-			const parsed = JSON.parse(content) as { threadId?: unknown };
-			if (typeof parsed.threadId === "string" && parsed.threadId.trim().length > 0) {
-				return parsed.threadId;
-			}
-		} catch {
-			return null;
-		}
-		return null;
+	private deriveThreadId(file: TFile): string {
+		return file.path;
 	}
 
 	private getLastViewedCheckpointId(history: ThreadHistory | null): string | undefined {
@@ -2139,47 +2117,54 @@ export class Messenger {
 	async loadSession(file: TFile, targetCheckpointId?: string) {
 		this.isLoadingSession = true;
 		try {
-		const id = await this.deriveThreadId(file);
-		if (!id) throw new Error("Invalid thread ID");
+			const id = await this.deriveThreadId(file);
+			if (!id) throw new Error("Invalid thread ID");
 
-		const [history, checkpointHistory] = await Promise.all([
-			this.#agentManager.getThreadHistory(id),
-			this.#agentManager.getCheckpointHistory(id),
-		]);
+			const [history, checkpointHistory] = await Promise.all([
+				this.#agentManager.getThreadHistory(id),
+				this.#agentManager.getCheckpointHistory(id),
+			]);
 
-		const savedCheckpointId = this.getLastViewedCheckpointId(history);
-		const graph = buildCheckpointGraph(checkpointHistory);
-		const resolution = resolveActiveCheckpointId(graph, {
-			persistedCheckpointId: savedCheckpointId,
-			explicitTargetCheckpointId: targetCheckpointId,
-		});
+			const savedCheckpointId = this.getLastViewedCheckpointId(history);
+			const graph = buildCheckpointGraph(checkpointHistory);
+			const resolution = resolveActiveCheckpointId(graph, {
+				persistedCheckpointId: savedCheckpointId,
+				explicitTargetCheckpointId: targetCheckpointId,
+			});
 
-		graph.activeCheckpointId = resolution.checkpointId;
-		graph.lastPersistedActiveCheckpointId = savedCheckpointId;
+			graph.activeCheckpointId = resolution.checkpointId;
+			graph.lastPersistedActiveCheckpointId = savedCheckpointId;
 
-		checkpointDebug("load.resolve", {
-			threadId: id,
-			source: resolution.source,
-			resolvedCheckpointId: resolution.checkpointId,
-			sessionCheckpointId: undefined,
-			savedCheckpointId,
-			targetCheckpointId,
-		});
+			checkpointDebug("load.resolve", {
+				threadId: id,
+				source: resolution.source,
+				resolvedCheckpointId: resolution.checkpointId,
+				sessionCheckpointId: undefined,
+				savedCheckpointId,
+				targetCheckpointId,
+			});
 
-		const historyWithError = history as (ThreadHistory & { lastError?: ThreadError; errorCount?: number }) | null;
-		const bootstrapMessages = historyWithError?.messages || [];
-		const errorCount = historyWithError?.errorCount || 0;
+			const historyWithError = history as
+				| (ThreadHistory & { lastError?: ThreadError; errorCount?: number })
+				| null;
+			const bootstrapMessages = historyWithError?.messages || [];
+			const errorCount = historyWithError?.errorCount || 0;
 
-		await this.restoreSelectionFromLoadedMessages(graph, resolution.checkpointId, errorCount, bootstrapMessages);
+			await this.restoreSelectionFromLoadedMessages(
+				graph,
+				resolution.checkpointId,
+				errorCount,
+				bootstrapMessages,
+			);
 
-		this.session = new ChatSession(id, {
-			graphState: graph,
-			errorCount,
-			bootstrapMessages,
-			onNeedReload: async () => this.reloadSession(),
-		});
+			this.session = new ChatSession(id, {
+				graphState: graph,
+				errorCount,
+				bootstrapMessages,
+				onNeedReload: async () => this.reloadSession(),
+			});
 
-		await this.persistLastViewedCheckpoint(id, resolution.checkpointId);
+			await this.persistLastViewedCheckpoint(id, resolution.checkpointId);
 		} finally {
 			this.isLoadingSession = false;
 		}

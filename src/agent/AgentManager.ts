@@ -28,7 +28,7 @@ import {
 	getProviderDefinition,
 } from "../providers/index";
 import type { ChatAttachment } from "../types/shared";
-import { createThreadId, NEW_CHAT_NAME } from "../utils/threadId";
+import { gzipSync } from "node:zlib";
 import { Logger } from "../utils/logging";
 import {
 	Agent,
@@ -207,6 +207,10 @@ function toChooseModelParamsImmediate(model: ChatModel): ChooseModelParams {
 
 function resolveSummarizationChatModel(chatModel: ChatModel, summarizationModel: ChatModel | null): ChatModel {
 	return summarizationModel ?? chatModel;
+}
+
+function resolveTitleChatModel(chatModel: ChatModel, titleModel: ChatModel | null): ChatModel {
+	return titleModel ?? chatModel;
 }
 
 async function resolveVisionSupportCached(providerId: string, modelId: string): Promise<boolean> {
@@ -725,8 +729,9 @@ export class AgentManager {
 		// Configure Telemetry (use getData())
 		const telemetry = this.configureTelemetry();
 
-		// Create agent with checkpoint storage
-		// The chatManager acts as both checkpointer and thread store
+		const pluginData = getData();
+		const selectedAgent = pluginData.getSelectedAgent();
+
 		this.agent = new Agent({
 			registry: this.registry,
 			checkpointer: this.chatManager,
@@ -737,15 +742,15 @@ export class AgentManager {
 		// Set assembled prompt (base + enabled skills)
 		this.agent.setPrompt(await this.assembleSystemPrompt());
 
-		const pluginData = getData();
-		const selectedAgent = pluginData.getSelectedAgent();
 		const chatModel = selectedAgent.chatModel;
 		if (chatModel) {
 			try {
 				const summarizationModel = resolveSummarizationChatModel(chatModel, selectedAgent.summarizationModel);
+				const titleModel = resolveTitleChatModel(chatModel, selectedAgent.titleModel);
 				await this.agent.chooseModel({
 					...toChooseModelParamsImmediate(chatModel),
 					summarizationModel: toChooseModelParamsImmediate(summarizationModel),
+					titleModel: toChooseModelParamsImmediate(titleModel),
 				});
 			} catch (error) {
 				if (error instanceof ProviderNotFoundError) {
@@ -881,9 +886,11 @@ export class AgentManager {
 		const chatModel = selectedAgent.chatModel;
 		if (!chatModel) throw new Error("No chat model configured");
 		const summarizationModel = resolveSummarizationChatModel(chatModel, selectedAgent.summarizationModel);
+		const titleModel = resolveTitleChatModel(chatModel, selectedAgent.titleModel);
 		await agent.chooseModel({
 			...(await toChooseModelParams(chatModel)),
 			summarizationModel: await toChooseModelParams(summarizationModel),
+			titleModel: await toChooseModelParams(titleModel),
 		});
 		const runMetadata = this.buildRunMetadata(selectedAgent.id, selectedAgent.name, chatModel);
 		return { agent, chatModel, runMetadata };
@@ -1061,23 +1068,24 @@ export class AgentManager {
 	 * Generate a title for a thread using only the user's first message.
 	 * This can run in parallel with streaming since it doesn't need the AI response.
 	 */
-	async generateThreadTitleFromUserMessage(threadId: string, userMessage: string): Promise<void> {
+	async generateThreadTitleFromUserMessage(threadId: string, userMessage: string): Promise<string | undefined> {
 		const agent = await this.ensureAgent().catch((e) => {
 			Logger.warn("Agent not initialized, cannot generate title");
 			return null;
 		});
 
-		if (!agent) return;
+		if (!agent) return undefined;
 
 		try {
 			const title = await agent.generateTitle(userMessage);
 			if (title) {
 				Logger.log(`Generated title for thread ${threadId}: "${title}"`);
-				await this.chatManager.renameChatFile(threadId, title);
+				return await this.chatManager.renameChatFile(threadId, title);
 			}
 		} catch (error) {
 			Logger.error(`Error generating title for thread ${threadId}:`, error);
 		}
+		return undefined;
 	}
 
 	/**
@@ -1139,33 +1147,31 @@ export class AgentManager {
 			await this.plugin.app.vault.createFolder(folder);
 		}
 
-		// Find the next available "New Chat" name (e.g. "New Chat", "New Chat (2)", ...)
-		const { title: draftTitle, path: draftPath } = await this.chatManager.getUniqueTitlePath(
-			folder,
-			NEW_CHAT_NAME,
-			"", // no current path — always create a new file
-		);
+		const { path } = await this.chatManager.getUniqueTitlePath(folder, "New Chat", "");
 
 		const initialData = {
-			threadId: draftTitle,
+			threadId: path,
 			createdAt: now,
 			updatedAt: now,
 			checkpoints: {},
 			writes: {},
 		};
 
-		const file = await this.plugin.app.vault.create(draftPath, `${JSON.stringify(initialData)}\n`);
-		await this.chatManager.rebuildIndex();
-		await this.openInChatLeaf(file);
-	}
+		const compressed = gzipSync(JSON.stringify(initialData));
+		await this.plugin.app.vault.adapter.writeBinary(
+			path,
+			compressed.buffer.slice(
+				compressed.byteOffset,
+				compressed.byteOffset + compressed.byteLength,
+			) as ArrayBuffer,
+		);
 
-	async promoteDraftThread(currentThreadId: string): Promise<string | null> {
-		const nextThreadId = createThreadId();
-		const reassigned = await this.chatManager.reassignThreadId(currentThreadId, nextThreadId);
-		if (!reassigned) {
-			return null;
+		this.chatManager.registerNewThread(path);
+
+		const file = this.plugin.app.vault.getAbstractFileByPath(path);
+		if (file instanceof TFile) {
+			await this.openInChatLeaf(file);
 		}
-		return nextThreadId;
 	}
 
 	async getAttachmentDirectory(): Promise<string> {
@@ -1185,9 +1191,7 @@ export class AgentManager {
 		}
 
 		const latestThread = threads[0];
-		const folder = getData().targetFolder;
-		const path = normalizePath(`${folder}/${latestThread.threadId}.chat`);
-		const file = this.plugin.app.vault.getAbstractFileByPath(path);
+		const file = this.plugin.app.vault.getAbstractFileByPath(latestThread.threadId);
 
 		if (file && file instanceof TFile) {
 			await this.openInChatLeaf(file);

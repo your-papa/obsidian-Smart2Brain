@@ -326,6 +326,8 @@ export interface AgentConfig {
 	chatModel: import("../stores/chatStore.svelte").ChatModel | null;
 	/** Optional summarization model; null means auto-use the chat model */
 	summarizationModel: import("../stores/chatStore.svelte").ChatModel | null;
+	/** Optional title generation model; null means auto-use the chat model */
+	titleModel: import("../stores/chatStore.svelte").ChatModel | null;
 	/** Base system prompt for this agent */
 	systemPrompt: string;
 	/** Skill enable states for this agent (skill name -> state) */

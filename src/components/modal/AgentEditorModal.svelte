@@ -142,6 +142,15 @@ const currentSummarizationModelDisplay = $derived.by(() => {
 	};
 });
 
+const currentTitleModelDisplay = $derived.by(() => {
+	if (!selectedAgent?.titleModel) return null;
+	const providerDef = getProviderDefinition(selectedAgent.titleModel.provider, pluginData.getAllProviderMeta());
+	return {
+		model: selectedAgent.titleModel.model,
+		logo: providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon,
+	};
+});
+
 function formatContextWindowLabel(tokens: number): string {
 	if (tokens >= 1000) {
 		const rounded = Number.isInteger(tokens / 1000) ? String(tokens / 1000) : (tokens / 1000).toFixed(1);
@@ -206,6 +215,27 @@ function openSummarizationModelSelectionModal() {
 
 function resetSummarizationModel() {
 	pluginData.updateAgent(agentId, { summarizationModel: null });
+	void applyChanges();
+}
+
+function openTitleModelSelectionModal() {
+	const currentSelection = selectedAgent?.titleModel
+		? {
+				provider: selectedAgent.titleModel.provider,
+				model: selectedAgent.titleModel.model,
+			}
+		: null;
+	new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
+		if (!selected) return;
+		pluginData.updateAgent(agentId, {
+			titleModel: buildPersistedChatModel(selected.provider, selected.model, selectedAgent?.titleModel),
+		});
+		void applyChanges();
+	}).open();
+}
+
+function resetTitleModel() {
+	pluginData.updateAgent(agentId, { titleModel: null });
 	void applyChanges();
 }
 
@@ -639,6 +669,23 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
             <div class="agent-model-warning text-sm">{summarizationContextWindowWarning}</div>
           {/if}
         </div>
+      </SettingItem>
+
+      <SettingItem
+        name="Title Generation Model"
+        desc="Model used to generate conversation titles from the first user message"
+      >
+        <ModelSettingControl
+          available={models.hasProviders && models.hasModels}
+          configureLabel={!models.hasProviders ? "Configure Provider" : "Configure Models"}
+          onConfigure={models.openSettings}
+          placeholder="Auto (same as chat model)"
+          selectedLabel={currentTitleModelDisplay?.model ?? null}
+          selectedLogo={currentTitleModelDisplay?.logo ?? null}
+          onSelect={openTitleModelSelectionModal}
+          secondaryLabel={selectedAgent.titleModel ? "Reset" : undefined}
+          onSecondary={selectedAgent.titleModel ? resetTitleModel : undefined}
+        />
       </SettingItem>
 
       <SettingItem

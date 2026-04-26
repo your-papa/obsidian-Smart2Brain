@@ -213,7 +213,6 @@ function getNodeClusterMap(): Map<string, number | undefined> {
 	return cachedNodeClusterMap;
 }
 
-
 /**
  * Ray-casting point-in-polygon test.
  * Returns true if (px, py) is inside the polygon defined by `poly`.
@@ -1137,7 +1136,12 @@ function buildInternalData(data: GraphData): {
 // Wiki mode: d3-force simulation setup
 // ============================================================================
 
-function setupForceSimulation(_data: GraphData, oldPositions: Map<string, { x: number; y: number }>, isSmooth: boolean, allPositionsKnown: boolean) {
+function setupForceSimulation(
+	_data: GraphData,
+	oldPositions: Map<string, { x: number; y: number }>,
+	isSmooth: boolean,
+	allPositionsKnown: boolean,
+) {
 	// Save the default d3 link strength function so we can apply linkStrength as
 	// a multiplier, matching how Obsidian's native graph works.
 	const baseLinkForce = forceLink<SimNode, SimLink>(simLinks)
@@ -1218,15 +1222,16 @@ function isColorOnlyChange(data: GraphData): boolean {
 	// Compare filtered edge count — simLinks excludes edges whose endpoints are
 	// outside the rendered node set, so comparing against data.edges directly
 	// produces a false mismatch whenever dangling edges exist.
-	const filteredEdgeCount = data.edges.filter(
-		(e) => existingIds.has(e.source) && existingIds.has(e.target),
-	).length;
+	const filteredEdgeCount = data.edges.filter((e) => existingIds.has(e.source) && existingIds.has(e.target)).length;
 	return simLinks.length === filteredEdgeCount;
 }
 
 function setupGraph(data: GraphData) {
 	if (data.nodes.length === 0) {
-		if (simulation) { simulation.stop(); simulation = null; }
+		if (simulation) {
+			simulation.stop();
+			simulation = null;
+		}
 		return;
 	}
 
@@ -1284,7 +1289,8 @@ $effect(() => {
 
 // Re-render when appearance settings change (nodeSize, showWikiLinks)
 $effect(() => {
-	void nodeSize; void showWikiLinks;
+	void nodeSize;
+	void showWikiLinks;
 	if (pixi) render();
 });
 
