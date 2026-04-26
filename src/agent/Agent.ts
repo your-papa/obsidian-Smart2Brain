@@ -2104,6 +2104,13 @@ Rules:
 User message:
 ${userMessage}`;
 
+		// Use buffered transport mode for this non-streaming invoke call.
+		// Electron net.fetch can produce responses that some providers
+		// (e.g. OpenRouter) fail to parse, while the buffered requestUrl
+		// path always returns a well-formed JSON body.
+		const transportContext = createAiTransportContext("buffered", "generateTitle");
+		enterAiTransportContext(transportContext);
+
 		try {
 			Logger.log(`[Agent] Generating title for message: "${userMessage.slice(0, 50)}..."`);
 			const response = await model.invoke([{ role: "user", content: prompt }]);
@@ -2125,7 +2132,7 @@ ${userMessage}`;
 			return finalTitle;
 		} catch (error) {
 			Logger.error("[Agent] Title generation failed:", error);
-			throw error;
+			return undefined;
 		}
 	}
 
