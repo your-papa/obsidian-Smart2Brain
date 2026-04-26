@@ -67,6 +67,7 @@ function clearModel() {
   >
     <ModelSettingControl
       available={availableModels.hasProviders && availableModels.hasModels}
+      loading={availableModels.hasProviders && availableModels.isLoadingModels}
       configureLabel={!availableModels.hasProviders ? "Configure Provider" : "Configure Models"}
       onConfigure={availableModels.openSettings}
       placeholder="Select model"

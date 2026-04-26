@@ -237,7 +237,11 @@ async function handleSelect(model: ChatModel) {
 }
 </script>
 
-{#if !models.hasProviders || !models.hasModels}
+{#if models.hasProviders && models.isLoadingModels}
+  <div class="flex flex-row items-center gap-1">
+    <div class="text-[--text-muted] text-xs">Loading models…</div>
+  </div>
+{:else if !models.hasProviders || !models.hasModels}
   <!-- No providers or no models configured - show settings button -->
   <button onclick={models.openSettings} class="clickable-icon flex flex-row items-center gap-1">
     <Icon name="settings" size="xs" />

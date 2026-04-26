@@ -640,6 +640,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
       <SettingItem name="Chat Model" desc="AI model for this agent">
         <ModelSettingControl
           available={models.hasProviders && models.hasModels}
+          loading={models.hasProviders && models.isLoadingModels}
           configureLabel={!models.hasProviders ? "Configure Provider" : "Configure Models"}
           onConfigure={models.openSettings}
           placeholder="Select a model"
@@ -656,6 +657,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
         <div class="agent-model-setting">
           <ModelSettingControl
             available={models.hasProviders && models.hasModels}
+            loading={models.hasProviders && models.isLoadingModels}
             configureLabel={!models.hasProviders ? "Configure Provider" : "Configure Models"}
             onConfigure={models.openSettings}
             placeholder="Auto (same as chat model)"
@@ -677,6 +679,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
       >
         <ModelSettingControl
           available={models.hasProviders && models.hasModels}
+          loading={models.hasProviders && models.isLoadingModels}
           configureLabel={!models.hasProviders ? "Configure Provider" : "Configure Models"}
           onConfigure={models.openSettings}
           placeholder="Auto (same as chat model)"
@@ -1099,7 +1102,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
   .agent-model-setting {
     display: flex;
     flex-direction: column;
-    align-items: stretch;
+    align-items: flex-end;
     gap: 8px;
     width: 100%;
   }

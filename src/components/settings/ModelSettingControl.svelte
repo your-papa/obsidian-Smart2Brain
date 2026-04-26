@@ -5,6 +5,7 @@ import IconButton from "../ui/IconButton.svelte";
 
 interface Props {
 	available?: boolean;
+	loading?: boolean;
 	configureLabel?: string;
 	onConfigure?: () => void;
 	placeholder: string;
@@ -17,6 +18,7 @@ interface Props {
 
 let {
 	available = true,
+	loading = false,
 	configureLabel,
 	onConfigure,
 	placeholder,
@@ -28,7 +30,9 @@ let {
 }: Props = $props();
 </script>
 
-{#if !available && configureLabel && onConfigure}
+{#if loading}
+  <span class="text-[--text-muted] text-sm">Loading models…</span>
+{:else if !available && configureLabel && onConfigure}
   <IconButton icon="settings" label={configureLabel} onclick={() => onConfigure()} />
 {:else}
   <div class="model-setting-control">
