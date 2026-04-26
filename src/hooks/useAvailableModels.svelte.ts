@@ -1,3 +1,4 @@
+import { Notice } from "obsidian";
 import { createProviderStateQuery, invalidateAllProviders } from "../lib/query";
 import { hydrateChatModel, hydrateEmbeddingModel } from "../lib/modelMetadataNormalizer";
 import { fetchModelsDevData, type ModelsDevApiResponse } from "../providers/modelsDevApi";
@@ -7,7 +8,7 @@ import { getProviderDefinition, isEmbeddingProvider } from "../providers/index";
 import type { EmbedModelConfig } from "../providers/index";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
-import { getPlugin } from "../stores/state.svelte";
+import { getPlugin, requestSettingsTab } from "../stores/state.svelte";
 import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../types/modelMetadata";
 
 export interface ModelOption {
@@ -249,6 +250,10 @@ export class AvailableModels {
 		return this.#availableModels.length > 0;
 	}
 
+	get isLoadingModels(): boolean {
+		return this.#providerQueries.some((q) => q.isPending);
+	}
+
 	get modelOptions(): ModelOption[] {
 		return this.#modelOptions;
 	}
@@ -336,10 +341,17 @@ export class AvailableModels {
 	};
 
 	openSettings = () => {
-		// Internal Obsidian API for opening settings
 		const app = this.#plugin.app as unknown as {
 			setting?: { open: () => void; openTabById: (id: string) => void };
 		};
+
+		if (!this.hasProviders) {
+			new Notice("Add an AI provider first to use model features.");
+		} else if (!this.hasModels) {
+			new Notice("No models found. Check that your provider is running and reachable.");
+		}
+
+		requestSettingsTab("general");
 		app.setting?.open();
 		app.setting?.openTabById("smart-second-brain");
 	};

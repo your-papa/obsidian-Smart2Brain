@@ -118,6 +118,7 @@ function handleSave() {
     <SettingContainer name="Embedding Model" desc="Used to build and refresh this index.">
       <ModelSettingControl
         available={availableModels.hasProviders && availableModels.hasEmbedModels}
+        loading={availableModels.hasProviders && availableModels.isLoadingModels}
         configureLabel={!availableModels.hasProviders ? "Configure Provider" : "Configure Models"}
         onConfigure={availableModels.openSettings}
         placeholder="Select a model"

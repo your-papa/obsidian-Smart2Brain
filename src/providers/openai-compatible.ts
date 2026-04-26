@@ -20,7 +20,7 @@ import type {
 } from "../types/provider/index";
 
 function sanitizeBaseUrl(url: string): string {
-	return url.replace(/\/+$/, "");
+	return url.replace(/\/+$/, "").replace(/\/v1$/i, "");
 }
 
 interface OpenAIModelResponse {
