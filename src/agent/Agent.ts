@@ -2105,7 +2105,7 @@ ${userMessage}`;
 		try {
 			Logger.log(`[Agent] Generating title for message: "${userMessage.slice(0, 50)}..."`);
 			const response = await model.invoke([{ role: "user", content: prompt }]);
-			
+
 			const content = response.content;
 			Logger.debug("[Agent] Title generation raw response:", content);
 
@@ -2113,7 +2113,9 @@ ${userMessage}`;
 			if (typeof content === "string") {
 				title = content;
 			} else if (Array.isArray(content)) {
-				title = content.map((c) => (typeof c === "string" ? c : ((c as { text?: string }).text ?? ""))).join("");
+				title = content
+					.map((c) => (typeof c === "string" ? c : ((c as { text?: string }).text ?? "")))
+					.join("");
 			}
 
 			const finalTitle = title.replace(/^["'#*:\s]+|["'#*:\s]+$/g, "").trim();

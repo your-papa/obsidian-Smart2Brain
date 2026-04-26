@@ -170,8 +170,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			if (!kwargs) continue;
 			const content = kwargs.content;
 			if (!Array.isArray(content)) continue;
-			const attachments = (kwargs.additional_kwargs as Record<string, unknown> | undefined)
-				?.attachments as ChatAttachment[] | undefined;
+			const attachments = (kwargs.additional_kwargs as Record<string, unknown> | undefined)?.attachments as
+				| ChatAttachment[]
+				| undefined;
 			if (!attachments?.length) continue;
 
 			const imageAttachments = attachments.filter((a) => a.mimeType.startsWith("image/"));
@@ -210,8 +211,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			if (!kwargs) continue;
 			const content = kwargs.content;
 			if (!Array.isArray(content)) continue;
-			const attachments = (kwargs.additional_kwargs as Record<string, unknown> | undefined)
-				?.attachments as ChatAttachment[] | undefined;
+			const attachments = (kwargs.additional_kwargs as Record<string, unknown> | undefined)?.attachments as
+				| ChatAttachment[]
+				| undefined;
 
 			for (let i = 0; i < content.length; i++) {
 				const block = content[i] as Record<string, unknown>;
@@ -222,7 +224,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 						const file = vault.getAbstractFileByPath(vaultPath);
 						if (file instanceof TFile) {
 							const buffer = await vault.readBinary(file);
-							const mimeType = attachments?.find((a) => a.vaultPath === vaultPath)?.mimeType ?? "image/png";
+							const mimeType =
+								attachments?.find((a) => a.vaultPath === vaultPath)?.mimeType ?? "image/png";
 							content[i] = { type: "image_url", image_url: { url: toBase64DataUri(buffer, mimeType) } };
 						} else {
 							content[i] = { type: "text", text: `[Image at "${vaultPath}" is no longer available]` };
@@ -511,7 +514,10 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 				const compressed = gzipSync(JSON.stringify(data));
 				await this.adapter.writeBinary(
 					path,
-					compressed.buffer.slice(compressed.byteOffset, compressed.byteOffset + compressed.byteLength) as ArrayBuffer,
+					compressed.buffer.slice(
+						compressed.byteOffset,
+						compressed.byteOffset + compressed.byteLength,
+					) as ArrayBuffer,
 				);
 				if ((this.dirtyThreadVersions.get(threadId) ?? 0) === targetVersion) {
 					this.persistedThreadVersions.set(threadId, targetVersion);
@@ -614,7 +620,10 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		if (!threadData) throw new Error(`Thread ${threadId} not found`);
 		const exportData = JSON.parse(JSON.stringify(threadData));
 		for (const entry of Object.values(exportData.checkpoints as Record<string, CheckpointEntry>)) {
-			const messages = ((entry.checkpoint as unknown) as Record<string, unknown>).channel_values as Record<string, unknown>;
+			const messages = (entry.checkpoint as unknown as Record<string, unknown>).channel_values as Record<
+				string,
+				unknown
+			>;
 			if (Array.isArray(messages?.messages)) await this.rehydrateBase64InMessages(messages.messages as unknown[]);
 		}
 		const folder = this.getChatFolder();

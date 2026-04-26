@@ -144,10 +144,7 @@ const currentSummarizationModelDisplay = $derived.by(() => {
 
 const currentTitleModelDisplay = $derived.by(() => {
 	if (!selectedAgent?.titleModel) return null;
-	const providerDef = getProviderDefinition(
-		selectedAgent.titleModel.provider,
-		pluginData.getAllProviderMeta(),
-	);
+	const providerDef = getProviderDefinition(selectedAgent.titleModel.provider, pluginData.getAllProviderMeta());
 	return {
 		model: selectedAgent.titleModel.model,
 		logo: providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon,
@@ -231,11 +228,7 @@ function openTitleModelSelectionModal() {
 	new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
 		if (!selected) return;
 		pluginData.updateAgent(agentId, {
-			titleModel: buildPersistedChatModel(
-				selected.provider,
-				selected.model,
-				selectedAgent?.titleModel,
-			),
+			titleModel: buildPersistedChatModel(selected.provider, selected.model, selectedAgent?.titleModel),
 		});
 		void applyChanges();
 	}).open();

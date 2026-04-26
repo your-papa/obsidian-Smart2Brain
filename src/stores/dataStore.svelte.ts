@@ -22,11 +22,7 @@ import type {
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "../vectorstore/batchSize";
 import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 
-import {
-	type SmartGraphSettings,
-	type Space,
-	DEFAULT_SMART_GRAPH_SETTINGS,
-} from "../types/graph";
+import { type SmartGraphSettings, type Space, DEFAULT_SMART_GRAPH_SETTINGS } from "../types/graph";
 
 // Provider system types
 import {
@@ -1961,13 +1957,14 @@ export function getData(): PluginDataStore {
  * e.g. "My Vault" → "my-vault", or "my-vault-2" if already taken.
  */
 async function resolveVaultSlug(vaultName: string): Promise<string> {
-	const base = vaultName
-		.trim()
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-+|-+$/g, "") || "vault";
+	const base =
+		vaultName
+			.trim()
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-+|-+$/g, "") || "vault";
 
-	const dbs = await indexedDB.databases?.().catch(() => [] as IDBDatabaseInfo[]) ?? [];
+	const dbs = (await indexedDB.databases?.().catch(() => [] as IDBDatabaseInfo[])) ?? [];
 	const existingNames = new Set(dbs.map((d) => d.name ?? ""));
 
 	// A slug is "taken by another vault" if any s2b- DB exists with that prefix

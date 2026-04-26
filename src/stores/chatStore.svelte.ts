@@ -2015,7 +2015,7 @@ export class Messenger {
 			} catch (err) {
 				lastError = err as Error;
 			}
-			
+
 			if (attempt < 3) {
 				await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
 			}
@@ -2023,7 +2023,10 @@ export class Messenger {
 
 		// Fallback: If we can't read the threadId from the file, use the basename as the ID.
 		// This ensures the chat can still be opened even if the content is temporarily unreadable.
-		Logger.debug(`deriveThreadId: Falling back to basename for ${file.path} after failing to read content.`, lastError);
+		Logger.debug(
+			`deriveThreadId: Falling back to basename for ${file.path} after failing to read content.`,
+			lastError,
+		);
 		return file.basename;
 	}
 
@@ -2164,47 +2167,54 @@ export class Messenger {
 	async loadSession(file: TFile, targetCheckpointId?: string) {
 		this.isLoadingSession = true;
 		try {
-		const id = await this.deriveThreadId(file);
-		if (!id) throw new Error("Invalid thread ID");
+			const id = await this.deriveThreadId(file);
+			if (!id) throw new Error("Invalid thread ID");
 
-		const [history, checkpointHistory] = await Promise.all([
-			this.#agentManager.getThreadHistory(id),
-			this.#agentManager.getCheckpointHistory(id),
-		]);
+			const [history, checkpointHistory] = await Promise.all([
+				this.#agentManager.getThreadHistory(id),
+				this.#agentManager.getCheckpointHistory(id),
+			]);
 
-		const savedCheckpointId = this.getLastViewedCheckpointId(history);
-		const graph = buildCheckpointGraph(checkpointHistory);
-		const resolution = resolveActiveCheckpointId(graph, {
-			persistedCheckpointId: savedCheckpointId,
-			explicitTargetCheckpointId: targetCheckpointId,
-		});
+			const savedCheckpointId = this.getLastViewedCheckpointId(history);
+			const graph = buildCheckpointGraph(checkpointHistory);
+			const resolution = resolveActiveCheckpointId(graph, {
+				persistedCheckpointId: savedCheckpointId,
+				explicitTargetCheckpointId: targetCheckpointId,
+			});
 
-		graph.activeCheckpointId = resolution.checkpointId;
-		graph.lastPersistedActiveCheckpointId = savedCheckpointId;
+			graph.activeCheckpointId = resolution.checkpointId;
+			graph.lastPersistedActiveCheckpointId = savedCheckpointId;
 
-		checkpointDebug("load.resolve", {
-			threadId: id,
-			source: resolution.source,
-			resolvedCheckpointId: resolution.checkpointId,
-			sessionCheckpointId: undefined,
-			savedCheckpointId,
-			targetCheckpointId,
-		});
+			checkpointDebug("load.resolve", {
+				threadId: id,
+				source: resolution.source,
+				resolvedCheckpointId: resolution.checkpointId,
+				sessionCheckpointId: undefined,
+				savedCheckpointId,
+				targetCheckpointId,
+			});
 
-		const historyWithError = history as (ThreadHistory & { lastError?: ThreadError; errorCount?: number }) | null;
-		const bootstrapMessages = historyWithError?.messages || [];
-		const errorCount = historyWithError?.errorCount || 0;
+			const historyWithError = history as
+				| (ThreadHistory & { lastError?: ThreadError; errorCount?: number })
+				| null;
+			const bootstrapMessages = historyWithError?.messages || [];
+			const errorCount = historyWithError?.errorCount || 0;
 
-		await this.restoreSelectionFromLoadedMessages(graph, resolution.checkpointId, errorCount, bootstrapMessages);
+			await this.restoreSelectionFromLoadedMessages(
+				graph,
+				resolution.checkpointId,
+				errorCount,
+				bootstrapMessages,
+			);
 
-		this.session = new ChatSession(id, {
-			graphState: graph,
-			errorCount,
-			bootstrapMessages,
-			onNeedReload: async () => this.reloadSession(),
-		});
+			this.session = new ChatSession(id, {
+				graphState: graph,
+				errorCount,
+				bootstrapMessages,
+				onNeedReload: async () => this.reloadSession(),
+			});
 
-		await this.persistLastViewedCheckpoint(id, resolution.checkpointId);
+			await this.persistLastViewedCheckpoint(id, resolution.checkpointId);
 		} finally {
 			this.isLoadingSession = false;
 		}
