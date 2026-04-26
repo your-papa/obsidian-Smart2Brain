@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { gzipSync, gunzipSync } from "node:zlib";
 
 vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 
@@ -19,16 +20,21 @@ import type { Checkpoint, CheckpointMetadata } from "@langchain/langgraph-checkp
 function createMockPlugin() {
 	return {
 		manifest: { id: "smart-second-brain", dir: "smart-second-brain" },
+		registerEvent: vi.fn(),
 		app: {
 			vault: {
+				on: vi.fn(),
 				adapter: {
 					exists: vi.fn().mockResolvedValue(false),
 					read: vi.fn().mockResolvedValue(""),
+					readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
 					write: vi.fn().mockResolvedValue(undefined),
+					writeBinary: vi.fn().mockResolvedValue(undefined),
 					mkdir: vi.fn().mockResolvedValue(undefined),
 					remove: vi.fn().mockResolvedValue(undefined),
 					rmdir: vi.fn().mockResolvedValue(undefined),
 					list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+					stat: vi.fn().mockResolvedValue({ ctime: 1000, mtime: 2000, size: 100 }),
 				},
 				configDir: ".obsidian",
 			},
@@ -75,15 +81,15 @@ describe("ObsidianChatManager", () => {
 			const threadStore = manager.asThreadStore();
 
 			await threadStore.write({
-				threadId: "thread-1",
+				threadId: "Chats/thread-1.chat",
 				title: "Test Thread",
 				createdAt: 1000,
 				updatedAt: 2000,
 			});
 
-			const result = await threadStore.read("thread-1");
+			const result = await threadStore.read("Chats/thread-1.chat");
 			expect(result).toBeDefined();
-			expect(result!.threadId).toBe("thread-1");
+			expect(result!.threadId).toBe("Chats/thread-1.chat");
 			expect(result!.title).toBe("Test Thread");
 			expect(result!.createdAt).toBe(1000);
 		});
@@ -94,16 +100,20 @@ describe("ObsidianChatManager", () => {
 			(manager as unknown as { indexLoaded: boolean }).indexLoaded = true;
 
 			// Populate threadIndex directly (write() defers index updates via debounce)
-			const threadIndex = (manager as unknown as { threadIndex: Map<string, { threadId: string; title: string; createdAt: number; updatedAt: number }> }).threadIndex;
-			threadIndex.set("old", { threadId: "old", title: "Old Thread", createdAt: 1000, updatedAt: 1000 });
-			threadIndex.set("new", { threadId: "new", title: "New Thread", createdAt: 2000, updatedAt: 3000 });
-			threadIndex.set("mid", { threadId: "mid", title: "Mid Thread", createdAt: 1500, updatedAt: 2000 });
+			const threadIndex = (
+				manager as unknown as {
+					threadIndex: Map<string, { threadId: string; title: string; createdAt: number; updatedAt: number }>;
+				}
+			).threadIndex;
+			threadIndex.set("Chats/old.chat", { threadId: "Chats/old.chat", title: "Old Thread", createdAt: 1000, updatedAt: 1000 });
+			threadIndex.set("Chats/new.chat", { threadId: "Chats/new.chat", title: "New Thread", createdAt: 2000, updatedAt: 3000 });
+			threadIndex.set("Chats/mid.chat", { threadId: "Chats/mid.chat", title: "Mid Thread", createdAt: 1500, updatedAt: 2000 });
 
 			const threads = await threadStore.list();
 			expect(threads).toHaveLength(3);
-			expect(threads[0].threadId).toBe("new");
-			expect(threads[1].threadId).toBe("mid");
-			expect(threads[2].threadId).toBe("old");
+			expect(threads[0].threadId).toBe("Chats/new.chat");
+			expect(threads[1].threadId).toBe("Chats/mid.chat");
+			expect(threads[2].threadId).toBe("Chats/old.chat");
 		});
 
 		it("should delete a thread", async () => {
@@ -111,19 +121,19 @@ describe("ObsidianChatManager", () => {
 			(manager as unknown as { indexLoaded: boolean }).indexLoaded = true;
 
 			await threadStore.write({
-				threadId: "to-delete",
+				threadId: "Chats/to-delete.chat",
 				title: "Delete Me",
 				createdAt: 1000,
 				updatedAt: 1000,
 			});
 
-			await threadStore.delete("to-delete");
+			await threadStore.delete("Chats/to-delete.chat");
 
-			const result = await threadStore.read("to-delete");
+			const result = await threadStore.read("Chats/to-delete.chat");
 			expect(result).toBeUndefined();
 
 			const threads = await threadStore.list();
-			expect(threads.find((t) => t.threadId === "to-delete")).toBeUndefined();
+			expect(threads.find((t) => t.threadId === "Chats/to-delete.chat")).toBeUndefined();
 		});
 
 		it("should clear all threads", async () => {
@@ -131,13 +141,13 @@ describe("ObsidianChatManager", () => {
 			(manager as unknown as { indexLoaded: boolean }).indexLoaded = true;
 
 			await threadStore.write({
-				threadId: "t1",
+				threadId: "Chats/t1.chat",
 				title: "Thread 1",
 				createdAt: 1000,
 				updatedAt: 1000,
 			});
 			await threadStore.write({
-				threadId: "t2",
+				threadId: "Chats/t2.chat",
 				title: "Thread 2",
 				createdAt: 2000,
 				updatedAt: 2000,
@@ -153,20 +163,20 @@ describe("ObsidianChatManager", () => {
 			const threadStore = manager.asThreadStore();
 
 			await threadStore.write({
-				threadId: "thread-update",
+				threadId: "Chats/thread-update.chat",
 				title: "Original",
 				createdAt: 1000,
 				updatedAt: 1000,
 			});
 
 			await threadStore.write({
-				threadId: "thread-update",
+				threadId: "Chats/thread-update.chat",
 				title: "Updated Title",
 				createdAt: 1000,
 				updatedAt: 2000,
 			});
 
-			const result = await threadStore.read("thread-update");
+			const result = await threadStore.read("Chats/thread-update.chat");
 			expect(result!.title).toBe("Updated Title");
 			expect(result!.updatedAt).toBe(2000);
 		});
@@ -175,20 +185,21 @@ describe("ObsidianChatManager", () => {
 			const threadStore = manager.asThreadStore();
 
 			await threadStore.write({
-				threadId: "thread-flush",
+				threadId: "Chats/thread-flush.chat",
 				title: "Flush Me",
 				createdAt: 1000,
 				updatedAt: 2000,
 			});
 
-			expect(plugin.app.vault.adapter.write).not.toHaveBeenCalled();
+			expect(plugin.app.vault.adapter.writeBinary).not.toHaveBeenCalled();
 
-			await threadStore.flush?.("thread-flush");
+			await threadStore.flush?.("Chats/thread-flush.chat");
 
-			expect(plugin.app.vault.adapter.write).toHaveBeenCalledWith(
-				"Chats/thread-flush.chat",
-				expect.stringContaining('"threadId":"thread-flush"'),
-			);
+			expect(plugin.app.vault.adapter.writeBinary).toHaveBeenCalled();
+			const [path, buf] = (plugin.app.vault.adapter.writeBinary as ReturnType<typeof vi.fn>).mock.calls[0];
+			expect(path).toBe("Chats/thread-flush.chat");
+			const json = gunzipSync(Buffer.from(buf)).toString("utf8");
+			expect(json).toContain('"threadId":"Chats/thread-flush.chat"');
 		});
 	});
 
@@ -201,7 +212,7 @@ describe("ObsidianChatManager", () => {
 			const checkpoint = makeCheckpoint("cp-1", "2024-01-01T00:00:00Z");
 			const metadata = makeMetadata(0);
 			const config = {
-				configurable: { thread_id: "thread-1", checkpoint_id: "cp-1" },
+				configurable: { thread_id: "Chats/thread-1.chat", checkpoint_id: "cp-1" },
 			};
 
 			const savedConfig = await manager.put(config, checkpoint, metadata, {});
@@ -209,7 +220,7 @@ describe("ObsidianChatManager", () => {
 			expect(savedConfig.configurable!.checkpoint_id).toBe("cp-1");
 
 			const tuple = await manager.getTuple({
-				configurable: { thread_id: "thread-1", checkpoint_id: "cp-1" },
+				configurable: { thread_id: "Chats/thread-1.chat", checkpoint_id: "cp-1" },
 			});
 
 			expect(tuple).toBeDefined();
@@ -218,14 +229,9 @@ describe("ObsidianChatManager", () => {
 		});
 
 		it("should return the latest checkpoint when no checkpoint_id specified", async () => {
-			const config = { configurable: { thread_id: "thread-2" } };
+			const config = { configurable: { thread_id: "Chats/thread-2.chat" } };
 
-			await manager.put(
-				config,
-				makeCheckpoint("cp-old", "2024-01-01T00:00:00Z"),
-				makeMetadata(0),
-				{},
-			);
+			await manager.put(config, makeCheckpoint("cp-old", "2024-01-01T00:00:00Z"), makeMetadata(0), {});
 			await manager.put(
 				{ ...config, configurable: { ...config.configurable, checkpoint_id: "cp-old" } },
 				makeCheckpoint("cp-new", "2024-01-01T00:01:00Z"),
@@ -240,7 +246,7 @@ describe("ObsidianChatManager", () => {
 
 		it("should return undefined for non-existent thread", async () => {
 			const tuple = await manager.getTuple({
-				configurable: { thread_id: "nonexistent" },
+				configurable: { thread_id: "Chats/nonexistent.chat" },
 			});
 			expect(tuple).toBeUndefined();
 		});
@@ -251,14 +257,9 @@ describe("ObsidianChatManager", () => {
 		});
 
 		it("should store and retrieve writes via putWrites", async () => {
-			const config = { configurable: { thread_id: "thread-3", checkpoint_id: "cp-1" } };
+			const config = { configurable: { thread_id: "Chats/thread-3.chat", checkpoint_id: "cp-1" } };
 
-			await manager.put(
-				config,
-				makeCheckpoint("cp-1", "2024-01-01T00:00:00Z"),
-				makeMetadata(0),
-				{},
-			);
+			await manager.put(config, makeCheckpoint("cp-1", "2024-01-01T00:00:00Z"), makeMetadata(0), {});
 
 			const writes: [string, unknown][] = [["channel-1", { value: "test-write" }]];
 			await manager.putWrites(config, writes, "task-1");
@@ -271,31 +272,27 @@ describe("ObsidianChatManager", () => {
 
 		it("should flush pending checkpoint persistence to disk", async () => {
 			await manager.put(
-				{ configurable: { thread_id: "thread-persist", checkpoint_id: "cp-1" } },
+				{ configurable: { thread_id: "Chats/thread-persist.chat", checkpoint_id: "cp-1" } },
 				makeCheckpoint("cp-1", "2024-01-01T00:00:00Z"),
 				makeMetadata(0),
 				{},
 			);
 
-			expect(plugin.app.vault.adapter.write).not.toHaveBeenCalled();
+			expect(plugin.app.vault.adapter.writeBinary).not.toHaveBeenCalled();
 
-			await manager.flush("thread-persist");
+			await manager.flush("Chats/thread-persist.chat");
 
-			expect(plugin.app.vault.adapter.write).toHaveBeenCalledWith(
-				"Chats/thread-persist.chat",
-				expect.stringContaining('"cp-1"'),
-			);
+			expect(plugin.app.vault.adapter.writeBinary).toHaveBeenCalled();
+			const [path, buf] = (plugin.app.vault.adapter.writeBinary as ReturnType<typeof vi.fn>).mock.calls[0];
+			expect(path).toBe("Chats/thread-persist.chat");
+			const json = gunzipSync(Buffer.from(buf)).toString("utf8");
+			expect(json).toContain('"cp-1"');
 		});
 
 		it("should list checkpoints in order", async () => {
-			const config = { configurable: { thread_id: "thread-4" } };
+			const config = { configurable: { thread_id: "Chats/thread-4.chat" } };
 
-			await manager.put(
-				config,
-				makeCheckpoint("cp-1", "2024-01-01T00:00:00Z"),
-				makeMetadata(0),
-				{},
-			);
+			await manager.put(config, makeCheckpoint("cp-1", "2024-01-01T00:00:00Z"), makeMetadata(0), {});
 			await manager.put(
 				{ ...config, configurable: { ...config.configurable, checkpoint_id: "cp-1" } },
 				makeCheckpoint("cp-2", "2024-01-01T00:01:00Z"),
@@ -322,11 +319,11 @@ describe("ObsidianChatManager", () => {
 		});
 
 		it("should respect limit option in list", async () => {
-			const config = { configurable: { thread_id: "thread-5" } };
+			const config = { configurable: { thread_id: "Chats/thread-5.chat" } };
 
 			await manager.put(config, makeCheckpoint("cp-a", "2024-01-01T00:00:00Z"), makeMetadata(0), {});
 			await manager.put(
-				{ configurable: { thread_id: "thread-5", checkpoint_id: "cp-a" } },
+				{ configurable: { thread_id: "Chats/thread-5.chat", checkpoint_id: "cp-a" } },
 				makeCheckpoint("cp-b", "2024-01-01T00:01:00Z"),
 				makeMetadata(1, "cp-a"),
 				{},
@@ -348,38 +345,25 @@ describe("ObsidianChatManager", () => {
 
 	describe("index rebuild", () => {
 		it("should rebuild index from .chat files on disk", async () => {
-			const threadData = {
-				threadId: "rebuilt-thread",
-				title: "Rebuilt",
-				createdAt: 1000,
-				updatedAt: 2000,
-				checkpoints: {},
-				writes: {},
-			};
-
 			(plugin.app.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
 			(plugin.app.vault.adapter.list as ReturnType<typeof vi.fn>).mockResolvedValue({
 				files: ["Chats/rebuilt-thread.chat"],
 				folders: [],
 			});
-			(plugin.app.vault.adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
-				async (path: string) => {
-					if (path.includes("rebuilt-thread.chat")) {
-						return `${JSON.stringify(threadData)}\n`;
-					}
-					if (path.includes("threads.json")) {
-						throw new Error("Not found");
-					}
-					return "";
-				},
-			);
+			(plugin.app.vault.adapter.stat as ReturnType<typeof vi.fn>).mockResolvedValue({
+				ctime: 1000,
+				mtime: 2000,
+				size: 100,
+			});
 
 			await manager.rebuildIndex();
 
 			const threads = await manager.asThreadStore().list();
 			expect(threads).toHaveLength(1);
-			expect(threads[0].threadId).toBe("rebuilt-thread");
-			expect(threads[0].title).toBe("Rebuilt");
+			expect(threads[0].threadId).toBe("Chats/rebuilt-thread.chat");
+			expect(threads[0].title).toBe("rebuilt-thread");
+			expect(threads[0].createdAt).toBe(1000);
+			expect(threads[0].updatedAt).toBe(2000);
 		});
 	});
 
@@ -405,7 +389,7 @@ describe("ObsidianChatManager", () => {
 			];
 
 			const config = {
-				configurable: { thread_id: "thread-ann" },
+				configurable: { thread_id: "Chats/thread-ann.chat" },
 				metadata: {
 					agent_id: "agent-1",
 					agent_name: "My Agent",
@@ -417,7 +401,7 @@ describe("ObsidianChatManager", () => {
 			await manager.put(config, checkpoint, makeMetadata(0), {});
 
 			const tuple = await manager.getTuple({
-				configurable: { thread_id: "thread-ann", checkpoint_id: "cp-ann" },
+				configurable: { thread_id: "Chats/thread-ann.chat", checkpoint_id: "cp-ann" },
 			});
 
 			const messages = (tuple!.checkpoint.channel_values as Record<string, unknown[]>).messages;

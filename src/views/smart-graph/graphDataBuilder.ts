@@ -14,11 +14,7 @@ import { getAllTags } from "obsidian";
 
 import type { DocumentVector } from "../../vectorstore/types";
 import { getIndexableVaultFiles } from "../../utils/fileFiltering";
-import {
-	kMeansAsync,
-	suggestKAsync,
-	hdbscanAsync,
-} from "../../utils/computeWorkerManager";
+import { kMeansAsync, suggestKAsync, hdbscanAsync } from "../../utils/computeWorkerManager";
 import {
 	type GraphData,
 	type GraphEdge,
@@ -622,8 +618,7 @@ export function resolveSegments(
 ): RegionSegment[] {
 	if (source === "none") return [];
 
-	const { clusterMap, clusterLabels, themeColors = [], spaces = [], louvainCommunities } =
-		options ?? {};
+	const { clusterMap, clusterLabels, themeColors = [], spaces = [], louvainCommunities } = options ?? {};
 
 	switch (source) {
 		case "folder":
@@ -786,9 +781,7 @@ function resolveSegmentsByLouvain(
 	}
 
 	// Sort communities by size descending so the largest get the most prominent colors
-	const sorted = [...communityNodes.entries()].sort(
-		(a, b) => b[1].length - a[1].length || a[0] - b[0],
-	);
+	const sorted = [...communityNodes.entries()].sort((a, b) => b[1].length - a[1].length || a[0] - b[0]);
 	const colors = generateClusterColors(sorted.length, themeColors);
 
 	return sorted.map(([, nodeIds], i) => {
@@ -885,5 +878,3 @@ export function applySegments(graphData: GraphData, segments: RegionSegment[]): 
 		}),
 	};
 }
-
-

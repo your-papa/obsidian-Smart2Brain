@@ -516,7 +516,9 @@ export class VectorStoreService {
 		}
 
 		if (!this.ensureProviderRegistered(model.provider)) {
-			Logger.log(`[VectorStore] Provider "${model.provider}" not available for ${inst.indexId}, skipping validation`);
+			Logger.log(
+				`[VectorStore] Provider "${model.provider}" not available for ${inst.indexId}, skipping validation`,
+			);
 			return;
 		}
 

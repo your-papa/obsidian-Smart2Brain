@@ -394,9 +394,7 @@ async function rewriteQueryLeaves(
 		return filter;
 	}
 	// Composite node: recurse into conditions
-	const rewrittenConditions = await Promise.all(
-		filter.conditions.map((c) => rewriteQueryLeaves(c, searchFn)),
-	);
+	const rewrittenConditions = await Promise.all(filter.conditions.map((c) => rewriteQueryLeaves(c, searchFn)));
 	return { ...filter, conditions: rewrittenConditions };
 }
 

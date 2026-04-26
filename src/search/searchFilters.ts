@@ -33,9 +33,7 @@ const EXACT_SET_THRESHOLD = 20;
 export function compileFilter(filter: SearchFilter): CompiledFilter {
 	const prefixes = filter.pathPrefixes;
 	const exactPathSet =
-		prefixes && prefixes.length > EXACT_SET_THRESHOLD
-			? new Set(prefixes.map(normalizeVaultPath))
-			: null;
+		prefixes && prefixes.length > EXACT_SET_THRESHOLD ? new Set(prefixes.map(normalizeVaultPath)) : null;
 	return { filter, exactPathSet };
 }
 
@@ -53,18 +51,13 @@ export function compileFilter(filter: SearchFilter): CompiledFilter {
  * Pass a `CompiledFilter` (from `compileFilter`) when calling inside a loop
  * over many documents — it avoids rebuilding the exact-path Set on every call.
  */
-export function matchesSearchFilter(
-	path: string,
-	docTags: string[],
-	filter?: SearchFilter | CompiledFilter,
-): boolean {
+export function matchesSearchFilter(path: string, docTags: string[], filter?: SearchFilter | CompiledFilter): boolean {
 	if (!filter) {
 		return true;
 	}
 
 	// Unwrap CompiledFilter if provided
-	const compiled: CompiledFilter | null =
-		"exactPathSet" in filter ? (filter as CompiledFilter) : null;
+	const compiled: CompiledFilter | null = "exactPathSet" in filter ? (filter as CompiledFilter) : null;
 	const sf: SearchFilter = compiled ? compiled.filter : (filter as SearchFilter);
 
 	if (sf.pathPrefixes?.length) {

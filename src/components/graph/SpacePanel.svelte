@@ -77,7 +77,10 @@ function extractLiveLeaf(filter: ViewFilter): ViewFilterLeaf | null {
 $effect(() => {
 	const pf = pendingSpaceFilter;
 	if (!builderOpen && !editingSpaceId) return;
-	if (!pf) { liveLeaf = null; return; }
+	if (!pf) {
+		liveLeaf = null;
+		return;
+	}
 	const leaf = extractLiveLeaf(pf);
 	if (leaf) liveLeaf = leaf;
 });
@@ -95,7 +98,6 @@ function buildEffectiveFilter(committed: ViewFilter, live: ViewFilterLeaf | null
 	if (all.length === 1) return all[0];
 	return { type: "any", conditions: all };
 }
-
 
 // ── New space builder state ───────────────────────────────
 let builderLabel = $state("");
@@ -150,7 +152,10 @@ $effect(() => {
 	void builderLabel;
 	void builderColor;
 	const previewFilter = normalizeFilter(buildEffectiveFilter(builderFilter, liveLeaf));
-	if (!previewFilter) { onPreviewSpace?.(null); return; }
+	if (!previewFilter) {
+		onPreviewSpace?.(null);
+		return;
+	}
 	onPreviewSpace?.({
 		id: "__draft__",
 		label: builderLabel.trim() || "New Space",
@@ -182,7 +187,12 @@ $effect(() => {
 	const space = spaces.find((s) => s.id === id);
 	if (!space) return;
 	const previewFilter = normalizeFilter(buildEffectiveFilter(editFilter, liveLeaf));
-	onPreviewSpace?.({ ...space, label: editLabel || space.label, color: editColor, filter: previewFilter ?? space.filter });
+	onPreviewSpace?.({
+		...space,
+		label: editLabel || space.label,
+		color: editColor,
+		filter: previewFilter ?? space.filter,
+	});
 });
 
 function handleEditSpace(space: Space) {

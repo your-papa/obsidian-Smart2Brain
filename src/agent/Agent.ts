@@ -66,6 +66,11 @@ export interface ChooseModelParams {
 		chatModel: string;
 		options?: Partial<ChatModelConfig>;
 	} | null;
+	titleModel?: {
+		provider: string;
+		chatModel: string;
+		options?: Partial<ChatModelConfig>;
+	} | null;
 }
 
 /** Options for a normal query (new message in thread) */
@@ -201,6 +206,7 @@ export class Agent {
 	private tools: readonly unknown[] = [];
 	private selectedModel?: SelectedModel;
 	private selectedSummarizationModel?: SelectedModel;
+	private selectedTitleModel?: SelectedModel;
 	private agentRunnable?: AgentRunnable;
 	private readonly checkpointer: BaseCheckpointSaver;
 	private readonly telemetry?: Telemetry;
@@ -384,7 +390,7 @@ export class Agent {
 	}
 
 	async chooseModel(params: ChooseModelParams): Promise<void> {
-		const { provider, chatModel, options, summarizationModel } = params;
+		const { provider, chatModel, options, summarizationModel, titleModel } = params;
 
 		// Create a LangChain instance for this provider + model
 		let instance: BaseChatModel;
@@ -421,6 +427,20 @@ export class Agent {
 			};
 		} else {
 			this.selectedSummarizationModel = undefined;
+		}
+		if (titleModel) {
+			this.selectedTitleModel = {
+				provider: titleModel.provider,
+				name: titleModel.chatModel,
+				instance: this.registry.createChatInstance(
+					titleModel.provider,
+					titleModel.chatModel,
+					titleModel.options,
+				),
+				options: titleModel.options,
+			};
+		} else {
+			this.selectedTitleModel = undefined;
 		}
 		Logger.debug("agent.chooseModel", { provider, chatModel, options });
 		this.dirty = true;
@@ -537,7 +557,8 @@ export class Agent {
 
 		const agent = await this.ensureAgent();
 		const runId = this.generateId();
-		const threadId = options.threadId ?? runId;
+		const threadId = options.threadId;
+		if (!threadId) throw new Error("threadId is required");
 		const startedAt = new Date();
 		Logger.debug("agent.run.start", {
 			runId,
@@ -605,7 +626,8 @@ export class Agent {
 
 		const agent = await this.ensureAgent();
 		const runId = this.generateId();
-		const threadId = options.threadId ?? runId;
+		const threadId = options.threadId;
+		if (!threadId) throw new Error("threadId is required");
 		const startedAt = new Date();
 		Logger.debug("agent.streamTokens.start", {
 			runId,
@@ -1402,6 +1424,7 @@ export class Agent {
 	): RunnableConfig {
 		const callbacks = this.telemetry?.getCallbacks?.();
 		return {
+			recursionLimit: 1000, // Effectively deactivated (default is 25)
 			configurable: {
 				thread_id: threadId,
 				// If checkpointId is provided, include it to fork from that checkpoint
@@ -2070,22 +2093,47 @@ export class Agent {
 			throw new Error("No model selected. Call chooseModel() before generateTitle().");
 		}
 
-		const prompt = `Generate a short, concise title (max 5 words) for the following user question. Do not use quotes or markdown.
+		const model = this.selectedTitleModel?.instance ?? this.selectedModel.instance;
 
-User question:
+		const prompt = `Generate a short, concise title (max 5 words) for the following user message. 
+Rules:
+- Use the same language as the user message.
+- Do not use quotes, markdown, or a period at the end.
+- Capture the core topic or intent.
+
+User message:
 ${userMessage}`;
 
-		const response = await this.selectedModel.instance.invoke([{ role: "user", content: prompt }]);
+		// Use buffered transport mode for this non-streaming invoke call.
+		// Electron net.fetch can produce responses that some providers
+		// (e.g. OpenRouter) fail to parse, while the buffered requestUrl
+		// path always returns a well-formed JSON body.
+		const transportContext = createAiTransportContext("buffered", "generateTitle");
+		enterAiTransportContext(transportContext);
 
-		const content = response.content;
-		let title = "";
-		if (typeof content === "string") {
-			title = content;
-		} else if (Array.isArray(content)) {
-			title = content.map((c) => (typeof c === "string" ? c : ((c as { text?: string }).text ?? ""))).join("");
+		try {
+			Logger.log(`[Agent] Generating title for message: "${userMessage.slice(0, 50)}..."`);
+			const response = await model.invoke([{ role: "user", content: prompt }]);
+
+			const content = response.content;
+			Logger.debug("[Agent] Title generation raw response:", content);
+
+			let title = "";
+			if (typeof content === "string") {
+				title = content;
+			} else if (Array.isArray(content)) {
+				title = content
+					.map((c) => (typeof c === "string" ? c : ((c as { text?: string }).text ?? "")))
+					.join("");
+			}
+
+			const finalTitle = title.replace(/^["'#*:\s]+|["'#*:\s]+$/g, "").trim();
+			Logger.log(`[Agent] Generated title: "${finalTitle}"`);
+			return finalTitle;
+		} catch (error) {
+			Logger.error("[Agent] Title generation failed:", error);
+			return undefined;
 		}
-
-		return title.replace(/^["']|["']$/g, "").trim();
 	}
 
 	private async safeGetCheckpointTuple(threadId: string): Promise<CheckpointTuple | undefined> {

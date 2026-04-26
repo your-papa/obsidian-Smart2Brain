@@ -147,9 +147,7 @@ let appliedSnapshot: ApplySnapshot = $state(takeSnapshot(settings));
 
 let projectionDirty = $derived(APPLY_KEYS.some((k) => settings[k] !== appliedSnapshot[k]));
 
-const layoutModeOptions = [
-	{ display: "Force-directed", value: "force" as LayoutMode },
-];
+const layoutModeOptions = [{ display: "Force-directed", value: "force" as LayoutMode }];
 
 const clusteringAlgorithmOptions = [
 	{ display: "K-Means", value: "kmeans" as ClusteringAlgorithm },
@@ -167,7 +165,6 @@ function handleClusteringAlgorithmChange(val: ClusteringAlgorithm) {
 function handleMinClusterSizeChange(val: number) {
 	onSettingsChange({ minClusterSize: val });
 }
-
 
 function handleLinkDistanceChange(val: number) {
 	onSettingsChange({ linkDistance: val });

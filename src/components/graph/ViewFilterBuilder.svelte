@@ -31,7 +31,16 @@ interface Props {
 	availableTags?: string[];
 }
 
-let { filter, onchange, depth = 0, onremove, liveLeaf, onLiveLeafChange, availableFolders = [], availableTags = [] }: Props = $props();
+let {
+	filter,
+	onchange,
+	depth = 0,
+	onremove,
+	liveLeaf,
+	onLiveLeafChange,
+	availableFolders = [],
+	availableTags = [],
+}: Props = $props();
 
 // ── Leaf vs group detection ─────────────────────────────
 const leafTypes = ["folder", "tag", "extension", "paths"] as const;
@@ -69,7 +78,10 @@ function getSuggestions(type: LeafType, query: string): string[] {
 }
 
 function openCombo(target: "leaf" | "live", currentValue: string) {
-	if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
+	if (closeTimeout) {
+		clearTimeout(closeTimeout);
+		closeTimeout = null;
+	}
 	comboTarget = target;
 	comboQuery = currentValue;
 	comboOpen = true;
@@ -90,11 +102,14 @@ function handleComboFocus(target: "leaf" | "live", currentValue: string) {
 }
 
 function pickSuggestion(value: string, target: "leaf" | "live") {
-	if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
+	if (closeTimeout) {
+		clearTimeout(closeTimeout);
+		closeTimeout = null;
+	}
 	if (target === "leaf") {
 		handleLeafValueChange(value);
 	} else {
-		const lt = (liveLeaf as ViewFilterLeaf);
+		const lt = liveLeaf as ViewFilterLeaf;
 		onLiveLeafChange?.({ ...lt, value } as ViewFilterLeaf);
 	}
 	closeCombo();
@@ -162,7 +177,6 @@ function handleAddGroup() {
 function hasCombo(type: string): boolean {
 	return type === "folder" || type === "tag";
 }
-
 </script>
 
 <div class="filter-node" class:filter-node--nested={depth > 0}>

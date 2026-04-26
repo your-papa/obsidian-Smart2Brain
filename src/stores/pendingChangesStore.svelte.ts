@@ -527,6 +527,15 @@ export class PendingChangesStore {
 				changed = true;
 			}
 		}
+		// Re-key threadId when a .chat file is renamed (threadId IS the file path)
+		if (oldPath.endsWith(".chat")) {
+			for (const entry of this.#entries) {
+				if (entry.threadId === oldPath) {
+					entry.threadId = newPath;
+					changed = true;
+				}
+			}
+		}
 		if (changed) {
 			this.scheduleSave();
 			this.notifyChange();

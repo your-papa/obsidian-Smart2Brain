@@ -38,14 +38,7 @@ export type ColorMode = "groups" | "clusters" | "none";
 /**
  * How segments (visual partitions) are derived for node coloring.
  */
-export type SegmentBy =
-	| "semantic"
-	| "louvain"
-	| "folder"
-	| "tag"
-	| "extension"
-	| "regions"
-	| "none";
+export type SegmentBy = "semantic" | "louvain" | "folder" | "tag" | "extension" | "regions" | "none";
 
 /**
  * A resolved segment of graph nodes — a visual partition of the current scope.

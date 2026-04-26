@@ -113,7 +113,9 @@ async function handleTemplateChange(nextTemplateId: string) {
 
 	await data.updateProviderMeta(providerId, {
 		templateId: resolvedTemplateId,
-		...(shouldUpdateDisplayName ? { displayName: nextTemplate?.displayName ?? providerMeta?.displayName ?? "" } : {}),
+		...(shouldUpdateDisplayName
+			? { displayName: nextTemplate?.displayName ?? providerMeta?.displayName ?? "" }
+			: {}),
 	});
 
 	if (shouldUpdateDisplayName) {
