@@ -28,7 +28,7 @@ import {
 	getProviderDefinition,
 } from "../providers/index";
 import type { ChatAttachment } from "../types/shared";
-import { createThreadId, NEW_CHAT_NAME } from "../utils/threadId";
+import { gzipSync } from "node:zlib";
 import { Logger } from "../utils/logging";
 import {
 	Agent,
@@ -1068,23 +1068,24 @@ export class AgentManager {
 	 * Generate a title for a thread using only the user's first message.
 	 * This can run in parallel with streaming since it doesn't need the AI response.
 	 */
-	async generateThreadTitleFromUserMessage(threadId: string, userMessage: string): Promise<void> {
+	async generateThreadTitleFromUserMessage(threadId: string, userMessage: string): Promise<string | undefined> {
 		const agent = await this.ensureAgent().catch((e) => {
 			Logger.warn("Agent not initialized, cannot generate title");
 			return null;
 		});
 
-		if (!agent) return;
+		if (!agent) return undefined;
 
 		try {
 			const title = await agent.generateTitle(userMessage);
 			if (title) {
 				Logger.log(`Generated title for thread ${threadId}: "${title}"`);
-				await this.chatManager.renameChatFile(threadId, title);
+				return await this.chatManager.renameChatFile(threadId, title);
 			}
 		} catch (error) {
 			Logger.error(`Error generating title for thread ${threadId}:`, error);
 		}
+		return undefined;
 	}
 
 	/**
@@ -1146,33 +1147,31 @@ export class AgentManager {
 			await this.plugin.app.vault.createFolder(folder);
 		}
 
-		// Find the next available "New Chat" name (e.g. "New Chat", "New Chat (2)", ...)
-		const { title: draftTitle, path: draftPath } = await this.chatManager.getUniqueTitlePath(
-			folder,
-			NEW_CHAT_NAME,
-			"", // no current path — always create a new file
-		);
+		const { path } = await this.chatManager.getUniqueTitlePath(folder, "New Chat", "");
 
 		const initialData = {
-			threadId: draftTitle,
+			threadId: path,
 			createdAt: now,
 			updatedAt: now,
 			checkpoints: {},
 			writes: {},
 		};
 
-		const file = await this.plugin.app.vault.create(draftPath, `${JSON.stringify(initialData)}\n`);
-		await this.chatManager.rebuildIndex();
-		await this.openInChatLeaf(file);
-	}
+		const compressed = gzipSync(JSON.stringify(initialData));
+		await this.plugin.app.vault.adapter.writeBinary(
+			path,
+			compressed.buffer.slice(
+				compressed.byteOffset,
+				compressed.byteOffset + compressed.byteLength,
+			) as ArrayBuffer,
+		);
 
-	async promoteDraftThread(currentThreadId: string): Promise<string | null> {
-		const nextThreadId = createThreadId();
-		const reassigned = await this.chatManager.reassignThreadId(currentThreadId, nextThreadId);
-		if (!reassigned) {
-			return null;
+		this.chatManager.registerNewThread(path);
+
+		const file = this.plugin.app.vault.getAbstractFileByPath(path);
+		if (file instanceof TFile) {
+			await this.openInChatLeaf(file);
 		}
-		return nextThreadId;
 	}
 
 	async getAttachmentDirectory(): Promise<string> {
@@ -1192,8 +1191,7 @@ export class AgentManager {
 		}
 
 		const latestThread = threads[0];
-		const path = await this.chatManager.resolveFilePath(latestThread.threadId);
-		const file = this.plugin.app.vault.getAbstractFileByPath(path);
+		const file = this.plugin.app.vault.getAbstractFileByPath(latestThread.threadId);
 
 		if (file && file instanceof TFile) {
 			await this.openInChatLeaf(file);

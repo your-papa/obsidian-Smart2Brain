@@ -557,7 +557,8 @@ export class Agent {
 
 		const agent = await this.ensureAgent();
 		const runId = this.generateId();
-		const threadId = options.threadId ?? runId;
+		const threadId = options.threadId;
+		if (!threadId) throw new Error("threadId is required");
 		const startedAt = new Date();
 		Logger.debug("agent.run.start", {
 			runId,
@@ -625,7 +626,8 @@ export class Agent {
 
 		const agent = await this.ensureAgent();
 		const runId = this.generateId();
-		const threadId = options.threadId ?? runId;
+		const threadId = options.threadId;
+		if (!threadId) throw new Error("threadId is required");
 		const startedAt = new Date();
 		Logger.debug("agent.streamTokens.start", {
 			runId,

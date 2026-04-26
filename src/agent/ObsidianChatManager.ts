@@ -46,34 +46,36 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	private plugin: SecondBrainPlugin;
 	private adapter: DataAdapter;
 
-	// In-memory cache: thread_id -> ThreadData (Loaded on demand)
+	// In-memory cache: file path -> ThreadData (Loaded on demand)
 	private storage: Map<string, ThreadData> = new Map();
 
-	// Index cache: thread_id -> ThreadSnapshot (Loaded on startup)
+	// Index cache: file path -> ThreadSnapshot (Loaded on startup)
 	private threadIndex: Map<string, ThreadSnapshot> = new Map();
-
-	// Path cache: thread_id -> file_path (Optimizes file lookups)
-	private filePathCache: Map<string, string> = new Map();
 
 	private indexLoaded = false;
 	private dirtyThreadVersions: Map<string, number> = new Map();
 	private persistedThreadVersions: Map<string, number> = new Map();
-	private dirtyIndexVersion = 0;
-	private persistedIndexVersion = 0;
 	private inFlightThreadSaves: Map<string, Promise<void>> = new Map();
-	private inFlightIndexSave: Promise<void> | null = null;
 
 	constructor(plugin: SecondBrainPlugin) {
 		super();
 		this.plugin = plugin;
 		this.adapter = plugin.app.vault.adapter;
 
-		// When a .chat file is deleted via the Obsidian file explorer (outside the plugin UI),
-		// clean up in-memory caches so stale threads don't appear in the UI.
+		// When a .chat file is deleted externally, clean up in-memory caches.
 		plugin.registerEvent(
 			plugin.app.vault.on("delete", (file) => {
 				if (file instanceof TFile && file.extension === "chat") {
 					this.onChatFileDeleted(file.path);
+				}
+			}),
+		);
+
+		// When a .chat file is renamed externally, re-key in-memory caches.
+		plugin.registerEvent(
+			plugin.app.vault.on("rename", (file, oldPath) => {
+				if (file instanceof TFile && file.extension === "chat") {
+					this.onChatFileRenamed(oldPath, file.path);
 				}
 			}),
 		);
@@ -82,70 +84,65 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	/**
 	 * Handle external deletion of a .chat file (e.g., via Obsidian file explorer).
 	 * Cleans up in-memory caches so stale threads don't appear in the UI.
-	 * Attachment files are intentionally left in place (matching Obsidian's behavior
-	 * of not deleting embedded images when a note is deleted).
 	 */
 	private onChatFileDeleted(filePath: string): void {
-		// Reverse-lookup threadId from filePathCache
-		let threadId: string | undefined;
-		for (const [id, path] of this.filePathCache) {
-			if (path === filePath) {
-				threadId = id;
-				break;
-			}
+		this.storage.delete(filePath);
+		this.threadIndex.delete(filePath);
+		this.dirtyThreadVersions.delete(filePath);
+		this.persistedThreadVersions.delete(filePath);
+	}
+
+	/**
+	 * Handle external rename of a .chat file.
+	 * Re-keys all in-memory caches from old path to new path.
+	 */
+	private onChatFileRenamed(oldPath: string, newPath: string): void {
+		this.rekeyThread(oldPath, newPath);
+	}
+
+	/**
+	 * Re-key all in-memory maps from oldPath to newPath.
+	 */
+	private rekeyThread(oldPath: string, newPath: string): void {
+		const data = this.storage.get(oldPath);
+		if (data) {
+			data.threadId = newPath;
+			this.storage.delete(oldPath);
+			this.storage.set(newPath, data);
 		}
 
-		if (!threadId) return;
+		const snapshot = this.threadIndex.get(oldPath);
+		if (snapshot) {
+			snapshot.threadId = newPath;
+			this.threadIndex.delete(oldPath);
+			this.threadIndex.set(newPath, snapshot);
+		}
 
-		this.storage.delete(threadId);
-		this.threadIndex.delete(threadId);
-		this.filePathCache.delete(threadId);
-		this.markIndexDirty();
-		this.saveIndexDebounced();
+		const dirtyVersion = this.dirtyThreadVersions.get(oldPath);
+		if (dirtyVersion !== undefined) {
+			this.dirtyThreadVersions.delete(oldPath);
+			this.dirtyThreadVersions.set(newPath, dirtyVersion);
+		}
+
+		const persistedVersion = this.persistedThreadVersions.get(oldPath);
+		if (persistedVersion !== undefined) {
+			this.persistedThreadVersions.delete(oldPath);
+			this.persistedThreadVersions.set(newPath, persistedVersion);
+		}
+
+		const inFlight = this.inFlightThreadSaves.get(oldPath);
+		if (inFlight) {
+			this.inFlightThreadSaves.delete(oldPath);
+			this.inFlightThreadSaves.set(newPath, inFlight);
+		}
 	}
 
 	// --- File System Helpers ---
 
 	private async readThreadFile(path: string): Promise<ThreadData> {
-		let lastError: Error | undefined;
-
-		// Retry up to 3 times with a small delay.
-		// This helps when sync tools (like livesync) are temporarily locking or writing to the file.
-		for (let attempt = 1; attempt <= 3; attempt++) {
-			try {
-				const raw = await this.adapter.readBinary(path);
-				if (!raw || raw.byteLength === 0) {
-					throw new Error("Thread file is empty");
-				}
-
-				const buffer = Buffer.from(raw);
-
-				try {
-					const decompressed = gunzipSync(buffer);
-					return JSON.parse(decompressed.toString("utf8")) as ThreadData;
-				} catch (e) {
-					// Fallback: If it's not a GZIP file, try reading as plain JSON.
-					try {
-						const text = buffer.toString("utf8");
-						return JSON.parse(text) as ThreadData;
-					} catch (jsonErr) {
-						// If both fail, and it was the last attempt, throw.
-						lastError = e as Error;
-					}
-				}
-
-				if (!lastError) break; // Success
-			} catch (err) {
-				lastError = err as Error;
-			}
-
-			if (attempt < 3) {
-				await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
-			}
-		}
-
-		Logger.error(`Failed to read thread file at ${path} after 3 attempts.`, lastError);
-		throw lastError ?? new Error(`Unknown error reading ${path}`);
+		const raw = await this.adapter.readBinary(path);
+		const decompressed = gunzipSync(new Uint8Array(raw));
+		return JSON.parse(decompressed.toString("utf8")) as ThreadData;
 	}
 
 	private stripBase64FromChannelValues(channelValues: Record<string, unknown> | undefined): void {
@@ -282,19 +279,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		return data.targetFolder;
 	}
 
-	private getIndexPath(): string {
-		// configDir is an internal Obsidian API property
-		const vault = this.plugin.app.vault as { configDir?: string };
-		const configDir = vault.configDir || ".obsidian";
-		return `${configDir}/plugins/${this.plugin.manifest.id}/data/threads.json`;
-	}
-
 	private markThreadDirty(threadId: string): void {
 		this.dirtyThreadVersions.set(threadId, (this.dirtyThreadVersions.get(threadId) ?? 0) + 1);
-	}
-
-	private markIndexDirty(): void {
-		this.dirtyIndexVersion += 1;
 	}
 
 	private async ensureFolder(): Promise<void> {
@@ -302,83 +288,14 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		if (!(await this.adapter.exists(folder))) {
 			await this.adapter.mkdir(folder);
 		}
-
-		// Ensure plugin data dir for index
-		const vault = this.plugin.app.vault as { configDir?: string };
-		const dataDir = `${vault.configDir || ".obsidian"}/plugins/${this.plugin.manifest.id}/data`;
-		if (!(await this.adapter.exists(dataDir))) {
-			await this.adapter.mkdir(dataDir);
-		}
-	}
-
-	async resolveFilePath(threadId: string): Promise<string> {
-		// Check cache first
-		if (this.filePathCache.has(threadId)) {
-			const cachedPath = this.filePathCache.get(threadId);
-			if (cachedPath) return cachedPath;
-		}
-
-		const folder = this.getChatFolder();
-
-		// First try the default path
-		const defaultPath = `${folder}/${threadId}.chat`;
-		if (await this.adapter.exists(defaultPath)) {
-			this.filePathCache.set(threadId, defaultPath);
-			return defaultPath;
-		}
-
-		// If not found, search for it (renamed files)
-		try {
-			if (await this.adapter.exists(folder)) {
-				const result = await this.adapter.list(folder);
-				for (const file of result.files) {
-					if (!file.endsWith(".chat")) continue;
-
-					try {
-						const parsed = await this.readThreadFile(file);
-						if (parsed.threadId === threadId) {
-							this.filePathCache.set(threadId, file);
-							return file;
-						}
-					} catch {
-						// Ignore malformed files while searching.
-					}
-				}
-			}
-		} catch (e) {
-			Logger.error(`Error searching for file with threadId ${threadId}:`, e);
-		}
-
-		// Use default path (it will be created there when writing)
-		this.filePathCache.set(threadId, defaultPath);
-		return defaultPath;
 	}
 
 	// --- Index Management ---
 
 	async load(): Promise<void> {
 		if (this.indexLoaded) return;
-
 		await this.ensureFolder();
-		const indexPath = this.getIndexPath();
-
-		try {
-			if (await this.adapter.exists(indexPath)) {
-				const content = await this.adapter.read(indexPath);
-				const snapshots = JSON.parse(content) as ThreadSnapshot[];
-				this.threadIndex.clear();
-				for (const snapshot of snapshots) {
-					this.threadIndex.set(snapshot.threadId, snapshot);
-				}
-				this.indexLoaded = true;
-				Logger.log(`ObsidianChatManager: Loaded index with ${this.threadIndex.size} threads`);
-			} else {
-				Logger.log("ObsidianChatManager: Index missing, rebuilding...");
-				await this.rebuildIndex();
-			}
-		} catch (e) {
-			Logger.error("Error loading chat index:", e);
-		}
+		await this.rebuildIndex();
 	}
 
 	async rebuildIndex(): Promise<void> {
@@ -387,87 +304,45 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 		const result = await this.adapter.list(folder);
 		this.threadIndex.clear();
-		this.filePathCache.clear();
 		this.storage.clear();
 
 		for (const file of result.files) {
 			if (!file.endsWith(".chat")) continue;
 
-			// Yield to event loop
-			await new Promise((resolve) => setTimeout(resolve, 0));
-
 			try {
-				const data = await this.readThreadFile(file);
-				if (data?.threadId) {
-					// Cache path
-					this.filePathCache.set(data.threadId, file);
+				const stat = await this.adapter.stat(file);
+				if (!stat) continue;
 
-					// Update index
-					this.threadIndex.set(data.threadId, {
-						threadId: data.threadId,
-						title: data.title,
-						metadata: data.metadata,
-						createdAt: data.createdAt,
-						updatedAt: data.updatedAt,
-					});
-				}
+				// Derive title from filename (strip .chat extension and folder)
+				const basename =
+					file
+						.split("/")
+						.pop()
+						?.replace(/\.chat$/, "") ?? "";
+
+				this.threadIndex.set(file, {
+					threadId: file,
+					title: basename || undefined,
+					createdAt: stat.ctime,
+					updatedAt: stat.mtime,
+				});
 			} catch (e) {
-				Logger.error(`Failed to read ${file} during index rebuild:`, e);
+				Logger.error(`Failed to stat ${file} during index rebuild:`, e);
 			}
 		}
 
 		this.indexLoaded = true;
-		await this.saveIndex();
 	}
-
-	private async saveIndex() {
-		if (this.inFlightIndexSave) {
-			await this.inFlightIndexSave;
-			if (this.persistedIndexVersion >= this.dirtyIndexVersion) {
-				return;
-			}
-		}
-
-		const indexPath = this.getIndexPath();
-		const snapshots = Array.from(this.threadIndex.values());
-		const targetVersion = this.dirtyIndexVersion;
-		let savePromise: Promise<void> | null = null;
-		savePromise = (async () => {
-			try {
-				await this.adapter.write(indexPath, JSON.stringify(snapshots));
-				if (this.dirtyIndexVersion === targetVersion) {
-					this.persistedIndexVersion = targetVersion;
-				}
-			} catch (e) {
-				Logger.error("Error saving chat index:", e);
-			} finally {
-				if (this.inFlightIndexSave === savePromise) {
-					this.inFlightIndexSave = null;
-				}
-			}
-		})();
-		this.inFlightIndexSave = savePromise;
-		await savePromise;
-	}
-
-	private saveIndexDebounced = debounce(
-		() => {
-			this.saveIndex();
-		},
-		2000,
-		true,
-	);
 
 	// --- Thread Loading / Saving ---
 
 	async ensureThreadLoaded(threadId: string): Promise<ThreadData | undefined> {
 		if (this.storage.has(threadId)) return this.storage.get(threadId);
 
-		const path = await this.resolveFilePath(threadId);
-
 		try {
-			if (await this.adapter.exists(path)) {
-				const data = await this.readThreadFile(path);
+			if (await this.adapter.exists(threadId)) {
+				const data = await this.readThreadFile(threadId);
+				data.threadId = threadId; // Ensure threadId matches the file path
 				this.storage.set(threadId, data);
 				return data;
 			}
@@ -488,9 +363,19 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	}
 
 	/**
-	 * Creates a new thread and persists it to disk.
-	 * Returns
-	 **/
+	 * Register a newly created thread in all in-memory caches.
+	 * Call this after creating a new .chat file.
+	 */
+	registerNewThread(path: string): void {
+		const data = this.createThreadData(path);
+		this.storage.set(path, data);
+		this.threadIndex.set(path, {
+			threadId: path,
+			createdAt: data.createdAt,
+			updatedAt: data.updatedAt,
+		});
+		this.indexLoaded = true;
+	}
 
 	private async saveThread(threadId: string) {
 		const existingSave = this.inFlightThreadSaves.get(threadId);
@@ -505,7 +390,6 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		if (!data) return;
 
 		await this.ensureFolder();
-		const path = await this.resolveFilePath(threadId);
 		const targetVersion = this.dirtyThreadVersions.get(threadId) ?? 0;
 
 		let savePromise: Promise<void> | null = null;
@@ -513,7 +397,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			try {
 				const compressed = gzipSync(JSON.stringify(data));
 				await this.adapter.writeBinary(
-					path,
+					threadId,
 					compressed.buffer.slice(
 						compressed.byteOffset,
 						compressed.byteOffset + compressed.byteLength,
@@ -531,8 +415,6 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 					createdAt: data.createdAt,
 					updatedAt: data.updatedAt,
 				});
-				this.markIndexDirty();
-				this.saveIndexDebounced();
 			} catch (e) {
 				Logger.error(`Error saving thread ${threadId}:`, e);
 			} finally {
@@ -627,13 +509,16 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			if (Array.isArray(messages?.messages)) await this.rehydrateBase64InMessages(messages.messages as unknown[]);
 		}
 		const folder = this.getChatFolder();
-		const exportPath = normalizePath(`${folder}/${threadId}.json`);
+		const basename =
+			threadId
+				.split("/")
+				.pop()
+				?.replace(/\.chat$/, "") ?? "export";
+		const exportPath = normalizePath(`${folder}/${basename}.json`);
 		await this.adapter.write(exportPath, JSON.stringify(exportData, null, 2));
 	}
 
 	async flush(threadId?: string): Promise<void> {
-		this.saveIndexDebounced.cancel();
-
 		if (threadId) {
 			await this.saveThread(threadId);
 		} else {
@@ -644,8 +529,6 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			]);
 			await Promise.all(Array.from(threadIds, (id) => this.saveThread(id)));
 		}
-
-		await this.saveIndex();
 	}
 
 	async clear(): Promise<void> {
@@ -952,9 +835,6 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 				updatedAt: threadData.updatedAt,
 			});
 		}
-		// Persist index changes debounced
-		this.markIndexDirty();
-		this.saveIndexDebounced();
 
 		return {
 			...config,
@@ -994,8 +874,6 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			const snapshot = this.threadIndex.get(threadId);
 			if (!snapshot) return;
 			snapshot.updatedAt = threadData.updatedAt;
-			this.markIndexDirty();
-			this.saveIndexDebounced();
 		}
 	}
 
@@ -1003,17 +881,11 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		// Remove from memory
 		this.storage.delete(threadId);
 		this.threadIndex.delete(threadId);
-		this.filePathCache.delete(threadId);
 		this.dirtyThreadVersions.delete(threadId);
 		this.persistedThreadVersions.delete(threadId);
-		this.markIndexDirty();
-		this.saveIndexDebounced();
-
-		// Remove chat file from disk
-		const path = await this.resolveFilePath(threadId);
 		try {
-			if (await this.adapter.exists(path)) {
-				await this.adapter.remove(path);
+			if (await this.adapter.exists(threadId)) {
+				await this.adapter.remove(threadId);
 			}
 		} catch (e) {
 			Logger.error(`Error deleting thread ${threadId}:`, e);
@@ -1061,116 +933,49 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		}
 	}
 
-	async renameChatFile(threadId: string, title: string): Promise<void> {
-		if (!title || !title.trim()) return;
+	async renameChatFile(threadId: string, title: string): Promise<string | undefined> {
+		if (!title || !title.trim()) return undefined;
 
 		try {
-			const oldPath = await this.resolveFilePath(threadId);
-			const file = this.plugin.app.vault.getAbstractFileByPath(oldPath);
+			const file = this.plugin.app.vault.getAbstractFileByPath(threadId);
 
 			if (!file || !(file instanceof TFile)) {
-				Logger.warn(`renameChatFile: File not found: ${oldPath}`);
-				return;
+				Logger.warn(`renameChatFile: File not found: ${threadId}`);
+				return undefined;
 			}
 
 			const sanitizedTitle = this.sanitizeFileName(title) || "Chat";
 			const folder = this.getChatFolder();
-			const currentPath = normalizePath(oldPath);
+			const currentPath = normalizePath(threadId);
 			const uniqueTarget = await this.getUniqueTitlePath(folder, sanitizedTitle, currentPath);
-			const newFileName = uniqueTarget.fileName;
 			const newPath = uniqueTarget.path;
 
-			if (file.name !== newFileName) {
-				await this.plugin.app.fileManager.renameFile(file, newPath);
-			}
+			if (newPath === currentPath) return threadId; // no rename needed
 
+			// Rename on disk — this triggers vault.on("rename") which calls rekeyThread()
+			await this.plugin.app.fileManager.renameFile(file, newPath);
+
+			// Update title + timestamp in the re-keyed data
 			const now = Date.now();
-			const loaded = await this.ensureThreadLoaded(threadId);
-
+			const loaded = this.storage.get(newPath);
 			if (loaded) {
 				loaded.title = uniqueTarget.title;
 				loaded.updatedAt = now;
-				this.markThreadDirty(threadId);
-				this.saveDebounced(threadId);
+				this.markThreadDirty(newPath);
+				this.saveDebounced(newPath);
 			}
 
-			const indexed = this.threadIndex.get(threadId);
+			const indexed = this.threadIndex.get(newPath);
 			if (indexed) {
 				indexed.title = uniqueTarget.title;
 				indexed.updatedAt = now;
-			} else if (loaded) {
-				this.threadIndex.set(threadId, {
-					threadId: loaded.threadId,
-					title: loaded.title,
-					metadata: loaded.metadata,
-					createdAt: loaded.createdAt,
-					updatedAt: loaded.updatedAt,
-				});
 			}
-			this.markIndexDirty();
-			this.saveIndexDebounced();
 
-			// Update cache with new path
-			this.filePathCache.set(threadId, newPath);
 			Logger.log(`renameChatFile: Successfully renamed to ${newPath}`);
+			return newPath;
 		} catch (error) {
 			Logger.error(`Error renaming chat file for thread ${threadId}:`, error);
+			return undefined;
 		}
-	}
-
-	async reassignThreadId(currentThreadId: string, nextThreadId: string): Promise<boolean> {
-		if (!currentThreadId || !nextThreadId || currentThreadId === nextThreadId) {
-			return false;
-		}
-
-		const currentPath = await this.resolveFilePath(currentThreadId);
-		const file = this.plugin.app.vault.getAbstractFileByPath(currentPath);
-
-		const loaded = await this.ensureThreadLoaded(currentThreadId);
-		if (!loaded) {
-			return false;
-		}
-
-		const now = Date.now();
-		loaded.threadId = nextThreadId;
-		loaded.updatedAt = now;
-
-		this.storage.delete(currentThreadId);
-		this.storage.set(nextThreadId, loaded);
-
-		this.filePathCache.delete(currentThreadId);
-		this.dirtyThreadVersions.delete(currentThreadId);
-		this.persistedThreadVersions.delete(currentThreadId);
-
-		const currentIndex = this.threadIndex.get(currentThreadId);
-		this.threadIndex.delete(currentThreadId);
-		this.threadIndex.set(nextThreadId, {
-			threadId: nextThreadId,
-			title: currentIndex?.title ?? loaded.title,
-			metadata: currentIndex?.metadata ?? loaded.metadata,
-			createdAt: currentIndex?.createdAt ?? loaded.createdAt,
-			updatedAt: now,
-		});
-
-		let finalPath = currentPath;
-		if (file && file instanceof TFile) {
-			const folder = this.getChatFolder();
-			const newPath = normalizePath(`${folder}/${nextThreadId}.chat`);
-			// Only rename if the path changed and the target doesn't already exist
-			if (currentPath !== newPath && !(await this.adapter.exists(newPath))) {
-				try {
-					await this.plugin.app.fileManager.renameFile(file, newPath);
-					finalPath = newPath;
-				} catch (e) {
-					Logger.error("Error renaming file during ID reassignment:", e);
-				}
-			}
-		}
-
-		this.filePathCache.set(nextThreadId, finalPath);
-		this.markThreadDirty(nextThreadId);
-		this.markIndexDirty();
-		await this.saveThread(nextThreadId);
-		return true;
 	}
 }
