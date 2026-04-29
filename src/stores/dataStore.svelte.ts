@@ -1100,10 +1100,6 @@ export class PluginDataStore {
 			this.#data.graphEmbedIndex = indexId;
 		}
 
-		// Keep legacy field in sync for backward compat
-		const searchModel = this.getSearchEmbedModel();
-		this.#data.defaultEmbedModel = searchModel;
-
 		this.saveSettings();
 	}
 
@@ -1116,9 +1112,6 @@ export class PluginDataStore {
 		} else {
 			this.#data.graphEmbedIndex = null;
 		}
-
-		// Keep legacy field in sync for backward compat
-		this.#data.defaultEmbedModel = this.getSearchEmbedModel();
 
 		this.saveSettings();
 	}
@@ -1146,9 +1139,6 @@ export class PluginDataStore {
 		if (usedByGraph) this.#data.graphEmbedIndex = null;
 
 		this.#data.embeddingIndexes = this.#data.embeddingIndexes.filter((i) => i.id !== indexId);
-
-		// Keep legacy field in sync
-		this.#data.defaultEmbedModel = this.getSearchEmbedModel();
 
 		this.saveSettings();
 		return true;
@@ -1871,72 +1861,15 @@ function normalizeAgents(mergedData: PluginData): void {
 	}
 }
 
-function inferTemplateIdFromLegacyProvider(providerId: string, state?: StoredProviderState): ProviderTemplateId {
-	if (providerId === "openai" && state?.auth.authMode === "codex") {
-		return "openai-codex";
-	}
-	if (providerId === "openai") {
-		return "openai-compatible";
-	}
-	if (providerId === "anthropic" || providerId === "ollama" || providerId === "openrouter") {
-		return providerId;
-	}
-	return "openai-compatible";
-}
-
-function migrateLegacyProviders(rawData: unknown): Pick<PluginData, "providerConfig" | "providerMeta"> {
-	const record = (rawData && typeof rawData === "object" ? rawData : {}) as {
-		providerConfig?: Record<string, StoredProviderState>;
-		providerMeta?: Record<string, ProviderInstanceMeta>;
-		customProviderMeta?: Record<string, { displayName?: string }>;
-	};
-
-	if (record.providerMeta) {
-		return {
-			providerConfig: record.providerConfig ?? {},
-			providerMeta: record.providerMeta,
-		};
-	}
-
-	const providerConfig = record.providerConfig ?? {};
-	const legacyMeta = record.customProviderMeta ?? {};
-	const providerMeta: Record<string, ProviderInstanceMeta> = {};
-
-	for (const [providerId, state] of Object.entries(providerConfig)) {
-		const templateId = inferTemplateIdFromLegacyProvider(providerId, state);
-		providerMeta[providerId] = {
-			templateId,
-			displayName:
-				legacyMeta[providerId]?.displayName ??
-				(templateId === "openai-compatible"
-					? "OpenAI"
-					: templateId === "openai-codex"
-						? "OpenAI Codex"
-						: templateId[0]?.toUpperCase() + templateId.slice(1)),
-		};
-	}
-
-	return {
-		providerConfig,
-		providerMeta,
-	};
-}
-
 export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataStore> {
 	if (_pluginDataStore) return _pluginDataStore;
 
 	const rawData = await plugin.loadData();
-	const migratedProviders = migrateLegacyProviders(rawData);
 
 	const mergedData: PluginData = {
 		...DEFAULT_SETTINGS,
 		...rawData,
-		providerConfig: migratedProviders.providerConfig,
-		providerMeta: migratedProviders.providerMeta,
 	};
-	delete (mergedData as PluginData & { excludeFF?: unknown }).excludeFF;
-	delete (mergedData as PluginData & { includeFF?: unknown }).includeFF;
-	delete (mergedData as PluginData & { isExcluding?: unknown }).isExcluding;
 
 	if (!rawData?.agents || Object.keys(rawData.agents).length === 0) {
 		mergedData.agents = { [DEFAULT_AGENT_ID]: createDefaultAgent() };
@@ -1944,40 +1877,6 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		mergedData.selectedAgentId = DEFAULT_AGENT_ID;
 	} else {
 		normalizeAgents(mergedData);
-	}
-
-	// Migrate from single defaultEmbedModel to multi-index
-	if (mergedData.defaultEmbedModel && (!mergedData.embeddingIndexes || mergedData.embeddingIndexes.length === 0)) {
-		const { provider, model } = mergedData.defaultEmbedModel;
-		const indexId = `${provider}:${model}`;
-		mergedData.embeddingIndexes = [
-			{
-				id: indexId,
-				provider,
-				model,
-				createdAt: Date.now(),
-				lastBuiltAt: Date.now(), // Assume existing index was built
-				documentCount: 0,
-			},
-		];
-		mergedData.searchEmbedIndex = indexId;
-		mergedData.graphEmbedIndex = indexId;
-	}
-
-	// Migrate removed "embeddings" search algorithm to "hybrid"
-	if ((mergedData.searchAlgorithm as string) === "embeddings") {
-		mergedData.searchAlgorithm = "hybrid";
-	}
-
-	// Migrate spaces from smartGraphSettings to top-level
-	const legacyGraph = rawData?.smartGraphSettings as
-		| (SmartGraphSettings & { spaces?: Space[]; activeImmersedSpaceId?: string | null })
-		| undefined;
-	if (legacyGraph?.spaces?.length && (!mergedData.spaces || mergedData.spaces.length === 0)) {
-		mergedData.spaces = legacyGraph.spaces;
-	}
-	if (legacyGraph?.activeImmersedSpaceId != null && mergedData.activeImmersedSpaceId == null) {
-		mergedData.activeImmersedSpaceId = legacyGraph.activeImmersedSpaceId;
 	}
 
 	// Resolve vault slug once on first load; persisted so vault renames don't orphan indexes
