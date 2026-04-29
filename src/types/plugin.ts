@@ -1,7 +1,9 @@
 import type { StoredProviderState } from "../stores/dataStore.svelte";
 import type { ProviderInstanceMeta } from "../types/provider/index";
 import type { UUIDv7 } from "../utils/uuid7Validator";
-import type { SmartGraphSettings } from "./graph";
+import type { SmartGraphSettings, Space } from "./graph";
+
+export type SpaceImmersionMode = "global" | "per-surface";
 
 export type SearchAlgorithm = "lexical" | "hybrid";
 
@@ -478,6 +480,19 @@ export interface PluginData {
 	 * Each entry is a {provider, model} pair.
 	 */
 	favoriteModels: Array<{ provider: string; model: string }>;
+
+	// ============================================================================
+	// Spaces (cross-cutting, used by graph, search, chat, agent)
+	// ============================================================================
+
+	/** All user-defined spaces */
+	spaces: Space[];
+	/** ID of the currently immersed space (global mode), or null */
+	activeImmersedSpaceId: string | null;
+	/** Whether immersion is shared across all surfaces or independent per surface */
+	spaceImmersionMode: SpaceImmersionMode;
+	/** Space ID used by chat when in per-surface mode */
+	chatSpaceId: string | null;
 
 	/**
 	 * Settings for the Smart Graph View.

@@ -188,8 +188,6 @@ export interface GraphData {
  * Settings for the graph view, persisted in plugin data.
  */
 export interface SmartGraphSettings {
-	/** Saved Spaces — named, cross-cutting note sets */
-	spaces: Space[];
 	/** Default number of clusters for K-Means */
 	defaultK: number;
 	/** Whether to auto-determine K via silhouette score */
@@ -218,15 +216,12 @@ export interface SmartGraphSettings {
 	colorGroups: ColorGroup[];
 	/** How nodes are colored/grouped: none | folder | tag | spaces | similarity clusters */
 	segmentBy: SegmentBy;
-	/** The Space the user was immersed in when the view was last closed. Restored on reload. */
-	activeImmersedSpaceId: string | null;
 }
 
 /**
  * Default graph settings.
  */
 export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
-	spaces: [],
 	defaultK: 5,
 	autoK: true,
 	linkDistance: 250,
@@ -241,7 +236,6 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	minClusterSize: 5,
 	colorGroups: [],
 	segmentBy: "none",
-	activeImmersedSpaceId: null,
 };
 
 /**

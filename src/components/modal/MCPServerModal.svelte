@@ -12,6 +12,7 @@ import Dropdown from "../ui/Dropdown.svelte";
 import Icon from "../ui/Icon.svelte";
 import Text from "../ui/Text.svelte";
 import Toggle from "../ui/Toggle.svelte";
+import { confirmDelete } from "./ConfirmModal";
 import type { MCPServerAccessors, MCPServerModal, MCPServerModalCallback } from "./MCPServerModal";
 
 interface Props {
@@ -210,8 +211,9 @@ function handleSave() {
 	modal.close();
 }
 
-function handleDelete() {
+async function handleDelete() {
 	if (capturedServerId && capturedExistingConfig) {
+		if (!(await confirmDelete(plugin.app, capturedExistingConfig.displayName || capturedServerId))) return;
 		// Pass the deleted server info to callback with enabled: false to indicate deletion
 		onSave(capturedServerId, { ...capturedExistingConfig, enabled: false });
 		modal.close();

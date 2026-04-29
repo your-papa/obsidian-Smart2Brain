@@ -9,15 +9,20 @@ import Text from "../../components/ui/Text.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
+import { ConfirmModal } from "../../components/modal/ConfirmModal";
 
 const pluginData = getData();
 const plugin = getPlugin();
 
 async function handleCleanupPluginData() {
-	const confirmed = window.confirm(
-		`${get(t)("settings.clear_modal.title")}\n\n${get(t)("settings.clear_modal.description")}`,
+	const modal = new ConfirmModal(
+		plugin.app,
+		get(t)("settings.clear_modal.title"),
+		get(t)("settings.clear_modal.description"),
+		"Delete",
 	);
-	if (!confirmed) return;
+	modal.open();
+	if (!(await modal.promise)) return;
 
 	try {
 		for (const index of [...pluginData.embeddingIndexes]) {
