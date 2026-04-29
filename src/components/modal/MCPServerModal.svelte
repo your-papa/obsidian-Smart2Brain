@@ -17,6 +17,7 @@
   import Icon from "../ui/Icon.svelte";
   import Text from "../ui/Text.svelte";
   import Toggle from "../ui/Toggle.svelte";
+  import { confirmDelete } from "./ConfirmModal";
   import type {
     MCPServerAccessors,
     MCPServerModal,
@@ -221,12 +222,10 @@
     modal.close();
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (capturedServerId && capturedExistingConfig) {
       if (
-        !window.confirm(
-          `Delete MCP server "${capturedExistingConfig.displayName || capturedServerId}"?`,
-        )
+        !(await confirmDelete(plugin.app, capturedExistingConfig.displayName || capturedServerId))
       )
         return;
       // Pass the deleted server info to callback with enabled: false to indicate deletion

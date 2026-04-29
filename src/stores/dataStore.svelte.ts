@@ -532,7 +532,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => { });
+				this._plugin.app.vault.createFolder(normalized).catch(() => {});
 			}
 		} catch {
 			// ignore

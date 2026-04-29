@@ -6,6 +6,7 @@
   import { createModelDiscoveryQuery, invalidateProviderState } from "../../lib/query";
   import type { ChatModelConfig } from "../../providers/index";
   import { getData } from "../../stores/dataStore.svelte";
+  import { confirmDelete } from "../../components/modal/ConfirmModal";
   import type { ChatModelManagementModal } from "./ChatModelManagement";
 
   interface Props {
@@ -62,8 +63,8 @@
   const isModelConfigured: () => boolean = () =>
     selectedModel !== undefined && configuredModels.includes(selectedModel);
 
-  function handleDeleteModel(modelName: string) {
-    if (!window.confirm(`Delete model "${modelName}"?`)) return;
+  async function handleDeleteModel(modelName: string) {
+    if (!(await confirmDelete(modal.app, modelName))) return;
     data.deleteChatModel(provider, modelName);
     invalidateProviderState(provider);
   }

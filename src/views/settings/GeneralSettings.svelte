@@ -14,6 +14,7 @@
   import { icon } from "../../utils/utils";
   import { describeViewFilter } from "../../lib/views";
   import { SpaceManagerModal } from "../../components/modal/SpaceManagerModal";
+  import { confirmDelete } from "../../components/modal/ConfirmModal";
   import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
 
   const pluginData = getData();
@@ -43,8 +44,8 @@
     pluginData.spaceImmersionMode = val;
   }
 
-  function handleDeleteSpace(space: (typeof spaces)[number]) {
-    if (!window.confirm(`Delete space "${space.label}"?`)) return;
+  async function handleDeleteSpace(space: (typeof spaces)[number]) {
+    if (!(await confirmDelete(plugin.app, space.label))) return;
     pluginData.deleteSpace(space.id);
   }
 

@@ -9,6 +9,7 @@
   import ProgressBar from "../ui/ProgressBar.svelte";
   import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
   import IconButton from "../ui/IconButton.svelte";
+  import { confirmDelete } from "../modal/ConfirmModal";
   import { getProviderDefinition } from "../../providers/index";
   import { getData } from "../../stores/dataStore.svelte";
   import { getPlugin } from "../../stores/state.svelte";
@@ -132,7 +133,7 @@
   async function deleteIndex(targetIndexId: string) {
     if (!isVectorStoreInitialized()) return;
     const entry = indexes.find((e) => e.id === targetIndexId);
-    if (!window.confirm(`Delete index "${entry?.model ?? targetIndexId}"?`)) return;
+    if (!(await confirmDelete(plugin.app, entry?.model ?? targetIndexId))) return;
     await getVectorStoreService().deleteIndex(targetIndexId);
     if (targetIndexId === indexId) {
       indexProgress = {

@@ -1,66 +1,66 @@
 <script lang="ts">
-  import { Popover } from "bits-ui";
-  import { getData, setImmersedSpace } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { SpaceManagerModal } from "../modal/SpaceManagerModal";
-  import Icon from "./Icon.svelte";
+import { Popover } from "bits-ui";
+import { getData, setImmersedSpace } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { SpaceManagerModal } from "../modal/SpaceManagerModal";
+import Icon from "./Icon.svelte";
 
-  interface Props {
-    /** Always use global immersion mode, regardless of the per-surface setting. */
-    forceGlobal?: boolean;
-  }
+interface Props {
+	/** Always use global immersion mode, regardless of the per-surface setting. */
+	forceGlobal?: boolean;
+}
 
-  let { forceGlobal = false }: Props = $props();
+let { forceGlobal = false }: Props = $props();
 
-  const data = getData();
-  const plugin = getPlugin();
-  const spaces = $derived(data.spaces);
+const data = getData();
+const plugin = getPlugin();
+const spaces = $derived(data.spaces);
 
-  const useGlobal = $derived(forceGlobal || data.spaceImmersionMode === "global");
+const useGlobal = $derived(forceGlobal || data.spaceImmersionMode === "global");
 
-  const activeSpace = $derived.by(() => {
-    if (useGlobal) {
-      const id = data.activeImmersedSpaceId;
-      if (!id) return null;
-      return data.spaces.find((s) => s.id === id) ?? null;
-    }
-    const id = data.chatSpaceId;
-    if (!id) return null;
-    return data.spaces.find((s) => s.id === id) ?? null;
-  });
+const activeSpace = $derived.by(() => {
+	if (useGlobal) {
+		const id = data.activeImmersedSpaceId;
+		if (!id) return null;
+		return data.spaces.find((s) => s.id === id) ?? null;
+	}
+	const id = data.chatSpaceId;
+	if (!id) return null;
+	return data.spaces.find((s) => s.id === id) ?? null;
+});
 
-  let isOpen = $state(false);
-  let customAnchor: HTMLElement | undefined = $state();
+let isOpen = $state(false);
+let customAnchor: HTMLElement | undefined = $state();
 
-  function selectSpace(id: string | null) {
-    if (useGlobal) {
-      if (id) {
-        const space = data.spaces.find((s) => s.id === id);
-        if (space) {
-          data.setActiveImmersedSpaceId(id);
-          setImmersedSpace(space);
-        }
-      } else {
-        data.setActiveImmersedSpaceId(null);
-        setImmersedSpace(null);
-      }
-    } else {
-      data.chatSpaceId = id;
-    }
-    isOpen = false;
-  }
+function selectSpace(id: string | null) {
+	if (useGlobal) {
+		if (id) {
+			const space = data.spaces.find((s) => s.id === id);
+			if (space) {
+				data.setActiveImmersedSpaceId(id);
+				setImmersedSpace(space);
+			}
+		} else {
+			data.setActiveImmersedSpaceId(null);
+			setImmersedSpace(null);
+		}
+	} else {
+		data.chatSpaceId = id;
+	}
+	isOpen = false;
+}
 
-  function handleEditSpace(space: (typeof spaces)[number]) {
-    isOpen = false;
-    new SpaceManagerModal(plugin.app, {
-      space: $state.snapshot(space) as (typeof spaces)[number],
-    }).open();
-  }
+function handleEditSpace(space: (typeof spaces)[number]) {
+	isOpen = false;
+	new SpaceManagerModal(plugin.app, {
+		space: $state.snapshot(space) as (typeof spaces)[number],
+	}).open();
+}
 
-  function handleNewSpace() {
-    isOpen = false;
-    new SpaceManagerModal(plugin.app).open();
-  }
+function handleNewSpace() {
+	isOpen = false;
+	new SpaceManagerModal(plugin.app).open();
+}
 </script>
 
 <button

@@ -1,45 +1,45 @@
 <script lang="ts">
-  import { QueryClientProvider } from "@tanstack/svelte-query";
-  import Input from "../../components/chat/Input.svelte";
-  import MessageContainer from "../../components/chat/MessageContainer.svelte";
-  import SpaceSwitcher from "../../components/ui/SpaceSwitcher.svelte";
-  import { getMessenger } from "../../stores/chatStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { icon } from "../../utils/utils";
+import { QueryClientProvider } from "@tanstack/svelte-query";
+import Input from "../../components/chat/Input.svelte";
+import MessageContainer from "../../components/chat/MessageContainer.svelte";
+import SpaceSwitcher from "../../components/ui/SpaceSwitcher.svelte";
+import { getMessenger } from "../../stores/chatStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { icon } from "../../utils/utils";
 
-  const plugin = getPlugin();
+const plugin = getPlugin();
 
-  const messenger = getMessenger();
+const messenger = getMessenger();
 
-  let messageContainer = $state<ReturnType<typeof MessageContainer> | undefined>();
-  let input = $state<ReturnType<typeof Input> | undefined>();
-  let lastSessionId: string | null = null;
-  let isDragging = $state(false);
-  let dragMessage = $state("Drop files here");
-  let dragHasIssue = $state(false);
+let messageContainer = $state<ReturnType<typeof MessageContainer> | undefined>();
+let input = $state<ReturnType<typeof Input> | undefined>();
+let lastSessionId: string | null = null;
+let isDragging = $state(false);
+let dragMessage = $state("Drop files here");
+let dragHasIssue = $state(false);
 
-  $effect(() => {
-    const sessionId = messenger?.session?.id ?? null;
-    if (!sessionId || sessionId === lastSessionId) return;
-    lastSessionId = sessionId;
-    input?.focusEditor();
-  });
+$effect(() => {
+	const sessionId = messenger?.session?.id ?? null;
+	if (!sessionId || sessionId === lastSessionId) return;
+	lastSessionId = sessionId;
+	input?.focusEditor();
+});
 
-  function handleRootDragEnter(event: DragEvent) {
-    input?.handleDragEnter(event);
-  }
+function handleRootDragEnter(event: DragEvent) {
+	input?.handleDragEnter(event);
+}
 
-  function handleRootDragOver(event: DragEvent) {
-    input?.handleDragOver(event);
-  }
+function handleRootDragOver(event: DragEvent) {
+	input?.handleDragOver(event);
+}
 
-  function handleRootDragLeave(event: DragEvent) {
-    input?.handleDragLeave(event);
-  }
+function handleRootDragLeave(event: DragEvent) {
+	input?.handleDragLeave(event);
+}
 
-  async function handleRootDrop(event: DragEvent) {
-    await input?.handleDrop(event);
-  }
+async function handleRootDrop(event: DragEvent) {
+	await input?.handleDrop(event);
+}
 </script>
 
 <QueryClientProvider client={plugin.queryClient}>
