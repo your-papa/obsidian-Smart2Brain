@@ -532,7 +532,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch {
 			// ignore
@@ -1201,6 +1201,14 @@ export class PluginDataStore {
 
 	deleteSpace(id: string): void {
 		this.#data.spaces = (this.#data.spaces ?? []).filter((s) => s.id !== id);
+		// Clear dangling references to the deleted space
+		if (this.#data.activeImmersedSpaceId === id) {
+			this.#data.activeImmersedSpaceId = null;
+			setImmersedSpace(null);
+		}
+		if (this.#data.chatSpaceId === id) {
+			this.#data.chatSpaceId = null;
+		}
 		this.saveSettings();
 	}
 
@@ -1973,6 +1981,15 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 	}
 
 	_pluginDataStore = new PluginDataStore(plugin, mergedData);
+
+	// Seed the in-memory immersion state from the persisted ID so that
+	// search, chat, and the status bar pick up the active space immediately.
+	const restoredId = mergedData.activeImmersedSpaceId;
+	if (restoredId) {
+		const restoredSpace = (mergedData.spaces ?? []).find((s) => s.id === restoredId);
+		setImmersedSpace(restoredSpace ?? null);
+	}
+
 	return _pluginDataStore;
 }
 

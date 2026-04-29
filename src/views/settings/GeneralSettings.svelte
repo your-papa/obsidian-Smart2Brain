@@ -45,10 +45,6 @@
 
   function handleDeleteSpace(space: (typeof spaces)[number]) {
     if (!window.confirm(`Delete space "${space.label}"?`)) return;
-    if (pluginData.activeImmersedSpaceId === space.id) {
-      pluginData.setActiveImmersedSpaceId(null);
-      setImmersedSpace(null);
-    }
     pluginData.deleteSpace(space.id);
   }
 
