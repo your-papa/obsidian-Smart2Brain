@@ -532,7 +532,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch {
 			// ignore
@@ -1196,6 +1196,11 @@ export class PluginDataStore {
 
 	updateSpace(id: string, patch: Partial<Omit<Space, "id">>): void {
 		this.#data.spaces = (this.#data.spaces ?? []).map((s) => (s.id === id ? { ...s, ...patch } : s));
+		// Refresh live immersion if the edited space is currently active
+		if (_immersedSpace?.id === id) {
+			const updated = this.#data.spaces.find((s) => s.id === id);
+			if (updated) setImmersedSpace(updated);
+		}
 		this.saveSettings();
 	}
 

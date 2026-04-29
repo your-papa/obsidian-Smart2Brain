@@ -1,70 +1,70 @@
 <script lang="ts">
-  import ManagedEntitySection from "../../components/settings/ManagedEntitySection.svelte";
-  import ManagedEntityItem from "../../components/settings/ManagedEntityItem.svelte";
-  import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
-  import ProviderItem from "../../components/settings/ProviderItem.svelte";
-  import SettingGroup from "../../components/settings/SettingGroup.svelte";
-  import SettingItem from "../../components/settings/SettingItem.svelte";
-  import Badge from "../../components/ui/Badge.svelte";
-  import Button from "../../components/ui/Button.svelte";
-  import Dropdown from "../../components/ui/Dropdown.svelte";
-  import IconButton from "../../components/ui/IconButton.svelte";
-  import { getData, setImmersedSpace } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { icon } from "../../utils/utils";
-  import { describeViewFilter } from "../../lib/views";
-  import { SpaceManagerModal } from "../../components/modal/SpaceManagerModal";
-  import { confirmDelete } from "../../components/modal/ConfirmModal";
-  import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
+import ManagedEntitySection from "../../components/settings/ManagedEntitySection.svelte";
+import ManagedEntityItem from "../../components/settings/ManagedEntityItem.svelte";
+import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
+import ProviderItem from "../../components/settings/ProviderItem.svelte";
+import SettingGroup from "../../components/settings/SettingGroup.svelte";
+import SettingItem from "../../components/settings/SettingItem.svelte";
+import Badge from "../../components/ui/Badge.svelte";
+import Button from "../../components/ui/Button.svelte";
+import Dropdown from "../../components/ui/Dropdown.svelte";
+import IconButton from "../../components/ui/IconButton.svelte";
+import { getData, setImmersedSpace } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { icon } from "../../utils/utils";
+import { describeViewFilter } from "../../lib/views";
+import { SpaceManagerModal } from "../../components/modal/SpaceManagerModal";
+import { confirmDelete } from "../../components/modal/ConfirmModal";
+import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
 
-  const pluginData = getData();
-  const plugin = getPlugin();
+const pluginData = getData();
+const plugin = getPlugin();
 
-  const privacyListModal = new PrivacyListModal(plugin.app);
+const privacyListModal = new PrivacyListModal(plugin.app);
 
-  // Provider management state
-  let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
+// Provider management state
+let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
 
-  function handleOpenProviderSetup() {
-    new ProviderSetupModal(plugin, { templateId: "openai-compatible" }).open();
-  }
+function handleOpenProviderSetup() {
+	new ProviderSetupModal(plugin, { templateId: "openai-compatible" }).open();
+}
 
-  // ─── Spaces ──────────────────────────────────────────────
-  const spaces = $derived(pluginData.spaces);
-  const immersedId = $derived(pluginData.activeImmersedSpaceId);
+// ─── Spaces ──────────────────────────────────────────────
+const spaces = $derived(pluginData.spaces);
+const immersedId = $derived(pluginData.activeImmersedSpaceId);
 
-  const immersionModeOptions = [
-    { display: "Global", value: "global" as const },
-    { display: "Per-surface", value: "per-surface" as const },
-  ];
+const immersionModeOptions = [
+	{ display: "Global", value: "global" as const },
+	{ display: "Per-surface", value: "per-surface" as const },
+];
 
-  let immersionMode = $derived(pluginData.spaceImmersionMode);
+let immersionMode = $derived(pluginData.spaceImmersionMode);
 
-  function handleImmersionModeChange(val: "global" | "per-surface") {
-    pluginData.spaceImmersionMode = val;
-  }
+function handleImmersionModeChange(val: "global" | "per-surface") {
+	pluginData.spaceImmersionMode = val;
+}
 
-  async function handleDeleteSpace(space: (typeof spaces)[number]) {
-    if (!(await confirmDelete(plugin.app, space.label))) return;
-    pluginData.deleteSpace(space.id);
-  }
+async function handleDeleteSpace(space: (typeof spaces)[number]) {
+	if (!(await confirmDelete(plugin.app, space.label))) return;
+	pluginData.deleteSpace(space.id);
+}
 
-  function handleImmerseSpace(space: (typeof spaces)[number]) {
-    pluginData.setActiveImmersedSpaceId(space.id);
-    setImmersedSpace(space);
-  }
+function handleImmerseSpace(space: (typeof spaces)[number]) {
+	pluginData.setActiveImmersedSpaceId(space.id);
+	setImmersedSpace(space);
+}
 
-  function handleExitImmersion() {
-    pluginData.setActiveImmersedSpaceId(null);
-    setImmersedSpace(null);
-  }
+function handleExitImmersion() {
+	pluginData.setActiveImmersedSpaceId(null);
+	setImmersedSpace(null);
+}
 
-  function openSpaceManager(space?: (typeof spaces)[number]) {
-    new SpaceManagerModal(
-      plugin.app,
-      space ? { space: $state.snapshot(space) as (typeof spaces)[number] } : undefined,
-    ).open();
-  }
+function openSpaceManager(space?: (typeof spaces)[number]) {
+	new SpaceManagerModal(
+		plugin.app,
+		space ? { space: $state.snapshot(space) as (typeof spaces)[number] } : undefined,
+	).open();
+}
 </script>
 
 <!-- Providers -->
