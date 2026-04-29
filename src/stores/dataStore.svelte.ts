@@ -396,6 +396,12 @@ export const DEFAULT_SETTINGS: PluginData = {
 	// Smart Graph View
 	smartGraphSettings: DEFAULT_SMART_GRAPH_SETTINGS,
 
+	// Spaces (cross-cutting)
+	spaces: [],
+	activeImmersedSpaceId: null,
+	spaceImmersionMode: "global",
+	chatSpaceId: null,
+
 	// Diff view
 	diffViewMode: "two-pane",
 
@@ -526,7 +532,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch {
 			// ignore
@@ -1094,10 +1100,6 @@ export class PluginDataStore {
 			this.#data.graphEmbedIndex = indexId;
 		}
 
-		// Keep legacy field in sync for backward compat
-		const searchModel = this.getSearchEmbedModel();
-		this.#data.defaultEmbedModel = searchModel;
-
 		this.saveSettings();
 	}
 
@@ -1110,9 +1112,6 @@ export class PluginDataStore {
 		} else {
 			this.#data.graphEmbedIndex = null;
 		}
-
-		// Keep legacy field in sync for backward compat
-		this.#data.defaultEmbedModel = this.getSearchEmbedModel();
 
 		this.saveSettings();
 	}
@@ -1141,9 +1140,6 @@ export class PluginDataStore {
 
 		this.#data.embeddingIndexes = this.#data.embeddingIndexes.filter((i) => i.id !== indexId);
 
-		// Keep legacy field in sync
-		this.#data.defaultEmbedModel = this.getSearchEmbedModel();
-
 		this.saveSettings();
 		return true;
 	}
@@ -1167,52 +1163,70 @@ export class PluginDataStore {
 
 	/**
 	 * Persist only the active immersed space ID without replacing the whole
-	 * smartGraphSettings object. Mutating a specific property in-place prevents
-	 * Svelte from invalidating effects that track `data.spaces` (which reads
-	 * `smartGraphSettings.spaces`), avoiding an expensive reactive cascade on
-	 * every immerse/exit.
+	 * settings object. Avoids expensive reactive cascade.
 	 */
+	get activeImmersedSpaceId(): string | null {
+		return this.#data.activeImmersedSpaceId ?? null;
+	}
 	setActiveImmersedSpaceId(id: string | null): void {
-		if (!this.#data.smartGraphSettings) {
-			this.#data.smartGraphSettings = { ...DEFAULT_SMART_GRAPH_SETTINGS, activeImmersedSpaceId: id };
-		} else {
-			this.#data.smartGraphSettings.activeImmersedSpaceId = id;
-		}
+		this.#data.activeImmersedSpaceId = id;
 		this.saveSettings();
 	}
 
 	// --- Spaces CRUD ---
 
 	get spaces(): Space[] {
-		return this.smartGraphSettings.spaces ?? [];
+		return this.#data.spaces ?? [];
 	}
 
 	addSpace(space: Space): void {
-		const settings = this.smartGraphSettings;
-		this.smartGraphSettings = {
-			...settings,
-			spaces: [...(settings.spaces ?? []), space],
-		};
+		this.#data.spaces = [...(this.#data.spaces ?? []), space];
+		this.saveSettings();
 	}
 
 	updateSpace(id: string, patch: Partial<Omit<Space, "id">>): void {
-		const settings = this.smartGraphSettings;
-		this.smartGraphSettings = {
-			...settings,
-			spaces: (settings.spaces ?? []).map((s) => (s.id === id ? { ...s, ...patch } : s)),
-		};
+		this.#data.spaces = (this.#data.spaces ?? []).map((s) => (s.id === id ? { ...s, ...patch } : s));
+		// Refresh live immersion if the edited space is currently active
+		if (_immersedSpace?.id === id) {
+			const updated = this.#data.spaces.find((s) => s.id === id);
+			if (updated) setImmersedSpace(updated);
+		}
+		this.saveSettings();
 	}
 
 	deleteSpace(id: string): void {
-		const settings = this.smartGraphSettings;
-		this.smartGraphSettings = {
-			...settings,
-			spaces: (settings.spaces ?? []).filter((s) => s.id !== id),
-		};
+		this.#data.spaces = (this.#data.spaces ?? []).filter((s) => s.id !== id);
+		// Clear dangling references to the deleted space
+		if (this.#data.activeImmersedSpaceId === id) {
+			this.#data.activeImmersedSpaceId = null;
+			setImmersedSpace(null);
+		}
+		if (this.#data.chatSpaceId === id) {
+			this.#data.chatSpaceId = null;
+		}
+		this.saveSettings();
 	}
 
 	getSpaceByLabel(label: string): Space | undefined {
-		return (this.smartGraphSettings.spaces ?? []).find((s) => s.label.toLowerCase() === label.toLowerCase());
+		return (this.#data.spaces ?? []).find((s) => s.label.toLowerCase() === label.toLowerCase());
+	}
+
+	// --- Space Immersion Mode ---
+
+	get spaceImmersionMode() {
+		return this.#data.spaceImmersionMode ?? "global";
+	}
+	set spaceImmersionMode(val: "global" | "per-surface") {
+		this.#data.spaceImmersionMode = val;
+		this.saveSettings();
+	}
+
+	get chatSpaceId(): string | null {
+		return this.#data.chatSpaceId ?? null;
+	}
+	set chatSpaceId(val: string | null) {
+		this.#data.chatSpaceId = val;
+		this.saveSettings();
 	}
 
 	// --- Diff View Mode ---
@@ -1789,6 +1803,7 @@ let _pluginDataStore: PluginDataStore | null = null;
  * null = no active immersion.
  */
 let _immersedSpace: Space | null = $state(null);
+let _immersionListeners: Array<(space: Space | null) => void> = [];
 
 export function getImmersedSpace(): Space | null {
 	return _immersedSpace;
@@ -1796,6 +1811,14 @@ export function getImmersedSpace(): Space | null {
 
 export function setImmersedSpace(space: Space | null): void {
 	_immersedSpace = space;
+	for (const listener of _immersionListeners) listener(space);
+}
+
+export function onImmersionChange(listener: (space: Space | null) => void): () => void {
+	_immersionListeners.push(listener);
+	return () => {
+		_immersionListeners = _immersionListeners.filter((l) => l !== listener);
+	};
 }
 
 function normalizeAgent(agent: AgentConfig): void {
@@ -1838,72 +1861,15 @@ function normalizeAgents(mergedData: PluginData): void {
 	}
 }
 
-function inferTemplateIdFromLegacyProvider(providerId: string, state?: StoredProviderState): ProviderTemplateId {
-	if (providerId === "openai" && state?.auth.authMode === "codex") {
-		return "openai-codex";
-	}
-	if (providerId === "openai") {
-		return "openai-compatible";
-	}
-	if (providerId === "anthropic" || providerId === "ollama" || providerId === "openrouter") {
-		return providerId;
-	}
-	return "openai-compatible";
-}
-
-function migrateLegacyProviders(rawData: unknown): Pick<PluginData, "providerConfig" | "providerMeta"> {
-	const record = (rawData && typeof rawData === "object" ? rawData : {}) as {
-		providerConfig?: Record<string, StoredProviderState>;
-		providerMeta?: Record<string, ProviderInstanceMeta>;
-		customProviderMeta?: Record<string, { displayName?: string }>;
-	};
-
-	if (record.providerMeta) {
-		return {
-			providerConfig: record.providerConfig ?? {},
-			providerMeta: record.providerMeta,
-		};
-	}
-
-	const providerConfig = record.providerConfig ?? {};
-	const legacyMeta = record.customProviderMeta ?? {};
-	const providerMeta: Record<string, ProviderInstanceMeta> = {};
-
-	for (const [providerId, state] of Object.entries(providerConfig)) {
-		const templateId = inferTemplateIdFromLegacyProvider(providerId, state);
-		providerMeta[providerId] = {
-			templateId,
-			displayName:
-				legacyMeta[providerId]?.displayName ??
-				(templateId === "openai-compatible"
-					? "OpenAI"
-					: templateId === "openai-codex"
-						? "OpenAI Codex"
-						: templateId[0]?.toUpperCase() + templateId.slice(1)),
-		};
-	}
-
-	return {
-		providerConfig,
-		providerMeta,
-	};
-}
-
 export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataStore> {
 	if (_pluginDataStore) return _pluginDataStore;
 
 	const rawData = await plugin.loadData();
-	const migratedProviders = migrateLegacyProviders(rawData);
 
 	const mergedData: PluginData = {
 		...DEFAULT_SETTINGS,
 		...rawData,
-		providerConfig: migratedProviders.providerConfig,
-		providerMeta: migratedProviders.providerMeta,
 	};
-	delete (mergedData as PluginData & { excludeFF?: unknown }).excludeFF;
-	delete (mergedData as PluginData & { includeFF?: unknown }).includeFF;
-	delete (mergedData as PluginData & { isExcluding?: unknown }).isExcluding;
 
 	if (!rawData?.agents || Object.keys(rawData.agents).length === 0) {
 		mergedData.agents = { [DEFAULT_AGENT_ID]: createDefaultAgent() };
@@ -1913,35 +1879,21 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		normalizeAgents(mergedData);
 	}
 
-	// Migrate from single defaultEmbedModel to multi-index
-	if (mergedData.defaultEmbedModel && (!mergedData.embeddingIndexes || mergedData.embeddingIndexes.length === 0)) {
-		const { provider, model } = mergedData.defaultEmbedModel;
-		const indexId = `${provider}:${model}`;
-		mergedData.embeddingIndexes = [
-			{
-				id: indexId,
-				provider,
-				model,
-				createdAt: Date.now(),
-				lastBuiltAt: Date.now(), // Assume existing index was built
-				documentCount: 0,
-			},
-		];
-		mergedData.searchEmbedIndex = indexId;
-		mergedData.graphEmbedIndex = indexId;
-	}
-
-	// Migrate removed "embeddings" search algorithm to "hybrid"
-	if ((mergedData.searchAlgorithm as string) === "embeddings") {
-		mergedData.searchAlgorithm = "hybrid";
-	}
-
 	// Resolve vault slug once on first load; persisted so vault renames don't orphan indexes
 	if (!mergedData.vaultSlug) {
 		mergedData.vaultSlug = await resolveVaultSlug(plugin.app.vault.getName());
 	}
 
 	_pluginDataStore = new PluginDataStore(plugin, mergedData);
+
+	// Seed the in-memory immersion state from the persisted ID so that
+	// search, chat, and the status bar pick up the active space immediately.
+	const restoredId = mergedData.activeImmersedSpaceId;
+	if (restoredId) {
+		const restoredSpace = (mergedData.spaces ?? []).find((s) => s.id === restoredId);
+		setImmersedSpace(restoredSpace ?? null);
+	}
+
 	return _pluginDataStore;
 }
 

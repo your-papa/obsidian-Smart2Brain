@@ -14,7 +14,7 @@ import { performSearch } from "../../agent/tools/searchNotes";
 import { getRecentNotes } from "../../search/recentNotes";
 import type { SearchResult } from "../../vectorstore/types";
 import { extractSearchTerms } from "../../search/searchTermUtils";
-import { getData } from "../../stores/dataStore.svelte";
+import { getData, getImmersedSpace } from "../../stores/dataStore.svelte";
 import { getMessenger } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
@@ -490,6 +490,17 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.searchResults = getRecentNotes(this.app).slice(0, 20);
 		this.buildAutocompleteCaches();
 		this.setupInlineChips();
+
+		// In global mode, auto-inject the immersed space as a removable chip
+		const pluginData = getData();
+		if (pluginData.spaceImmersionMode === "global") {
+			const immersed = getImmersedSpace();
+			if (immersed) {
+				this.activeFilters.push({ type: "space", value: immersed.label });
+				this.renderInlineChips();
+			}
+		}
+
 		// Seed the empty-query state immediately so recent notes are visible on first open.
 		// @ts-ignore - updateSuggestions is a protected method
 		this.updateSuggestions();

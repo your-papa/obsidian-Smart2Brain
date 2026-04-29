@@ -15,8 +15,7 @@ import { mimeFromExtension } from "../../utils/attachments";
 import { extractObsidianDraggedPaths, hasObsidianFileDrag } from "../../utils/obsidianDrag";
 import { getData } from "../../stores/dataStore.svelte";
 import AgentPopover from "./AgentPopover.svelte";
-import ModelPopover from "./ModelPopover.svelte";
-import SpacePopover from "./SpacePopover.svelte";
+import ModelSelectButton from "./ModelSelectButton.svelte";
 import PendingChangesBar from "./PendingChangesBar.svelte";
 import SelectionChip from "./SelectionChip.svelte";
 import GraphNotesChips from "./GraphNotesChips.svelte";
@@ -88,7 +87,18 @@ let assembledSystemPrompt = $state("");
 let assembledPromptRequestVersion = 0;
 
 let selectionChipRef: { clearSelection: () => void } | undefined = $state(undefined);
-let selectedSpace: string | null = $state(null);
+
+const selectedSpace = $derived.by(() => {
+	const d = getData();
+	if (d.spaceImmersionMode === "global") {
+		const id = d.activeImmersedSpaceId;
+		if (!id) return null;
+		return d.spaces.find((s) => s.id === id)?.label ?? null;
+	}
+	const id = d.chatSpaceId;
+	if (!id) return null;
+	return d.spaces.find((s) => s.id === id)?.label ?? null;
+});
 
 const selectedSpaceColor = $derived.by(() => {
 	if (!selectedSpace) return null;
@@ -972,7 +982,9 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
   <div
     class="chat-input-wrapper flex flex-col gap-3 bg-background-secondary border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isFullscreen
       ? 'flex-1 min-h-0'
-      : ''} {showDragActive ? 'border-[--interactive-accent] chat-input-wrapper-drag-active' : ''} {selectedSpaceColor ? 'chat-input-wrapper-space-active' : ''}"
+      : ''} {showDragActive
+      ? 'border-[--interactive-accent] chat-input-wrapper-drag-active'
+      : ''} {selectedSpaceColor ? 'chat-input-wrapper-space-active' : ''}"
     style={selectedSpaceColor ? `--space-color: ${selectedSpaceColor}` : undefined}
     ondragenter={dropTargetMode === "input" ? handleDragEnter : undefined}
     ondragover={dropTargetMode === "input" ? handleDragOver : undefined}
@@ -1035,12 +1047,10 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
       data-testid="message-input"
     ></div>
 
-    <!-- Actions row: agent, model, attachment, send -->
+    <!-- Actions row: agent+model, attachment, send -->
     <div class="flex items-center gap-2">
       <AgentPopover />
-      <div class="w-px h-4 bg-[--background-modifier-border]"></div>
-      <ModelPopover />
-      <SpacePopover bind:selectedSpace />
+      <ModelSelectButton />
       <input
         type="file"
         multiple={true}
@@ -1049,13 +1059,12 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
         style="display:none;"
         oninput={(event) => onFileAttachment(event)}
       />
-      <label class="clickable-icon items-center gap-0.5" for="attachment">
+      <label class="clickable-icon" for="attachment" title="Attach file">
         <div
           class="w-[--icon-s] h-[--icon-s]"
           style="--icon-size: var(--icon-xs)"
           use:icon={"paperclip"}
         ></div>
-        <div class="text-xs">Attach</div>
       </label>
       <div class="ml-auto flex items-center gap-2">
         <ContextUsageCircle
@@ -1063,18 +1072,9 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
           used={contextUsage.estimatedUsedTokens}
           limit={contextUsage.contextWindow}
           breakdown={contextBreakdown}
-          canSummarizeNow={canSummarizeNow}
+          {canSummarizeNow}
           onSummarizeNow={summarizeNow}
         />
-        <button
-          class="clickable-icon flex flex-row items-center gap-0.5"
-          onclick={async () => await getPlugin().agentManager.createNewChat()}
-          title="New Chat"
-          data-testid="new-chat-button"
-        >
-          <div class="h-icon-xs" use:icon={"plus"} style="--icon-size: var(--icon-xs)"></div>
-          <div class="text-xs">New Chat</div>
-        </button>
         {#if !messenger.session || messenger.session.messageState === MessageState.idle}
           <button
             disabled={!canSendMessage || savingFiles}

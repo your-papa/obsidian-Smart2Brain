@@ -3,7 +3,8 @@ import { untrack, onDestroy, tick } from "svelte";
 import { getAllTags, Notice } from "obsidian";
 import { HumanMessage } from "@langchain/core/messages";
 import { getPlugin } from "../../stores/state.svelte";
-import { getData, setImmersedSpace } from "../../stores/dataStore.svelte";
+import { getData, setImmersedSpace, onImmersionChange } from "../../stores/dataStore.svelte";
+import { SpaceManagerModal } from "../modal/SpaceManagerModal";
 import { getIndexableVaultFiles } from "../../utils/fileFiltering";
 import { getRegistry } from "../../providers/registry";
 import type { ChatModelConfig } from "../../providers/index";
@@ -41,6 +42,7 @@ import LoadingAnimation from "../ui/LoadingAnimation.svelte";
 import Button from "../ui/Button.svelte";
 import GraphCanvas from "./GraphCanvas.svelte";
 import GraphControls from "./GraphControls.svelte";
+import SpaceSwitcher from "../ui/SpaceSwitcher.svelte";
 
 const plugin = getPlugin();
 const data = getData();
@@ -88,7 +90,6 @@ let canvasComponent: GraphCanvas | undefined = $state(undefined);
 let lassoMode = $state(false);
 let selectedPaths: string[] = $state([]);
 let focusedClusters: Set<number> = $state(new Set());
-let spaceBuilderOpen = $state(false);
 
 // Segment / Color-by state — driven by persisted settings, re-applies on change
 let segmentBy: SegmentBy = $derived(settings.segmentBy ?? "none");
@@ -98,11 +99,10 @@ let focusedSegmentId: string | null = $state(null);
 /** Per-segment color overrides set by the user. */
 let segmentColorOverrides: Record<string, string> = $state({});
 
-// Re-apply coloring whenever spaces or previewSpace changes (no full rebuild needed).
+// Re-apply coloring whenever spaces change (no full rebuild needed).
 // segmentBy changes are handled directly in handleSegmentByChange for immediacy.
 $effect(() => {
 	void data.spaces;
-	void previewSpace;
 	untrack(() => {
 		if (graphData.nodes.length > 0 && (segmentBy !== "semantic" || clusterMap.size > 0)) {
 			resolveAndApplySegments(graphData);
@@ -111,7 +111,7 @@ $effect(() => {
 });
 
 // Immersion state
-const _restoredSpaceId = data.smartGraphSettings?.activeImmersedSpaceId ?? null;
+const _restoredSpaceId = data.activeImmersedSpaceId ?? null;
 let immersedSpaceId: string | null = $state(_restoredSpaceId);
 // Restore the immersed-space store so search/agent pick it up immediately.
 if (_restoredSpaceId) {
@@ -119,8 +119,6 @@ if (_restoredSpaceId) {
 	setImmersedSpace(restoredSpace ?? null);
 }
 let pendingSpaceFilter: ViewFilter | null = $state(null);
-/** Live preview of a space being edited — substitutes the saved version for coloring. */
-let previewSpace: Space | null = $state(null);
 /** Frozen paths for a draft immersion (session-only, not persisted). */
 let draftImmersionPaths: Set<string> | null = $state(null);
 /** Resolved paths for the immersed space — constrains graph build. */
@@ -131,6 +129,19 @@ let immersedSpacePaths: Set<string> | null = $derived.by(() => {
 	if (!space) return null;
 	return resolveViewFilter(plugin.app, space.filter).paths;
 });
+
+// Sync graph-local immersion state when the shared SpaceSwitcher changes the store
+const disposeImmersionSync = onImmersionChange((space) => {
+	const newId = space?.id ?? null;
+	// Skip if the graph itself triggered the change (already up to date)
+	if (newId === immersedSpaceId) return;
+	// Don't override a draft immersion from the external store
+	if (immersedSpaceId === "__draft__" && newId !== null) return;
+	immersedSpaceId = newId;
+	draftImmersionPaths = null;
+	void buildGraph();
+});
+onDestroy(disposeImmersionSync);
 
 let effectiveClusterLabels: Record<number, string> = $derived({
 	...defaultClusterLabels,
@@ -839,14 +850,6 @@ function handleToggleSegmentSelection(segmentId: string) {
 
 // ─── Spaces handlers ─────────────────────────────────────
 
-function handleImmerse(id: string) {
-	immersedSpaceId = id;
-	const space = data.spaces.find((s) => s.id === id);
-	setImmersedSpace(space ?? null);
-	data.setActiveImmersedSpaceId(id);
-	void buildGraph();
-}
-
 function handleImmerseDraft(filter?: ViewFilter) {
 	const f = filter ?? pendingSpaceFilter;
 	if (!f) return;
@@ -855,7 +858,7 @@ function handleImmerseDraft(filter?: ViewFilter) {
 	setImmersedSpace({
 		id: "__draft__",
 		label: "Draft selection",
-		filter: $state.snapshot(pendingSpaceFilter) as ViewFilter,
+		filter: $state.snapshot(f) as ViewFilter,
 		color: "#888888",
 		createdAt: new Date().toISOString(),
 	});
@@ -872,29 +875,9 @@ function handleExitImmersion() {
 	void buildGraph();
 }
 
-function handleSaveSpace(draft: { label: string; filter: ViewFilter; color: string }) {
-	const space: Space = {
-		id: crypto.randomUUID(),
-		label: draft.label,
-		filter: $state.snapshot(draft.filter) as ViewFilter,
-		color: draft.color,
-		createdAt: new Date().toISOString(),
-	};
-	data.addSpace(space);
-	pendingSpaceFilter = null;
-	new Notice(`Space "${space.label}" saved`);
-}
-
-function handleUpdateSpace(id: string, patch: Partial<Omit<Space, "id">>) {
-	data.updateSpace(id, patch.filter ? { ...patch, filter: $state.snapshot(patch.filter) as ViewFilter } : patch);
-}
-
-function handleDeleteSpace(id: string) {
-	if (immersedSpaceId === id) {
-		handleExitImmersion();
-	} else {
-		data.deleteSpace(id);
-	}
+function handleOpenSpaceManager(opts?: { initialFilter?: ViewFilter; space?: Space }) {
+	const snapped = opts?.space ? { ...opts, space: $state.snapshot(opts.space) as Space } : opts;
+	new SpaceManagerModal(plugin.app, snapped).open();
 }
 
 /**
@@ -906,16 +889,11 @@ function handleDeleteSpace(id: string) {
 function resolveAndApplySegments(gd: GraphData, overrideBy?: SegmentBy) {
 	const by = overrideBy ?? segmentBy;
 	const themeColors = resolveThemeColors();
-	const displaySpaces = previewSpace
-		? previewSpace.id === "__draft__"
-			? [...data.spaces, previewSpace]
-			: data.spaces.map((s) => (s.id === previewSpace!.id ? previewSpace! : s))
-		: data.spaces;
 	const resolved = resolveSegments(plugin.app, gd, by, {
 		clusterMap,
 		clusterLabels: effectiveClusterLabels,
 		themeColors,
-		spaces: displaySpaces,
+		spaces: data.spaces,
 		louvainCommunities,
 	});
 	// Apply persistent color overrides (from user picks or bookmark restore)
@@ -996,12 +974,12 @@ onDestroy(() => {
   {#if isLoading && graphData.nodes.length === 0}
     <div class="graph-loading">
       <LoadingAnimation />
-			<p>{loadingMessage}</p>
+      <p>{loadingMessage}</p>
     </div>
   {:else}
     <GraphCanvas
       bind:this={canvasComponent}
-      graphData={graphData}
+      {graphData}
       linkDistance={settings.linkDistance}
       chargeStrength={settings.chargeStrength}
       centerStrength={settings.centerStrength}
@@ -1025,6 +1003,11 @@ onDestroy(() => {
     />
   {/if}
 
+  <!-- Space switcher overlay -->
+  <div class="graph-space-switcher">
+    <SpaceSwitcher forceGlobal />
+  </div>
+
   {#if selectedPaths.length > 0 || immersedSpaceId === "__draft__"}
     <div class="graph-selection-bar">
       <span class="selection-count">
@@ -1036,11 +1019,7 @@ onDestroy(() => {
       </span>
       <div class="selection-actions">
         {#if selectedPaths.length > 0}
-          <Button
-            iconId="scan"
-            onClick={handleZoomToSelection}
-            tooltip="Zoom to selection (F)"
-          />
+          <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
           <Button
             buttonText="Open All"
             onClick={handleOpenAllSelected}
@@ -1055,7 +1034,10 @@ onDestroy(() => {
           {/if}
           <Button
             buttonText="New Space"
-            onClick={() => (spaceBuilderOpen = true)}
+            onClick={() =>
+              handleOpenSpaceManager({
+                initialFilter: { type: "paths", value: selectedPaths.slice() },
+              })}
             tooltip="Save selection as a new space"
           />
         {/if}
@@ -1067,7 +1049,11 @@ onDestroy(() => {
           />
         {/if}
         {#if selectedPaths.length > 0}
-          <Button buttonText="Clear" onClick={handleClearSelection} tooltip="Clear selection (Esc)" />
+          <Button
+            buttonText="Clear"
+            onClick={handleClearSelection}
+            tooltip="Clear selection (Esc)"
+          />
         {/if}
       </div>
     </div>
@@ -1088,22 +1074,9 @@ onDestroy(() => {
     {isLabeling}
     {lassoMode}
     onLassoModeChange={handleLassoModeChange}
-    graphData={graphData}
+    {graphData}
     nodeCount={graphData.nodes.length}
-    spaces={data.spaces}
     {immersedSpaceId}
-    {pendingSpaceFilter}
-    onImmerse={handleImmerse}
-    onImmerseDraft={handleImmerseDraft}
-    onExitImmersion={handleExitImmersion}
-    onSaveSpace={handleSaveSpace}
-    onUpdateSpace={handleUpdateSpace}
-    onDeleteSpace={handleDeleteSpace}
-    onClearPendingSpaceFilter={() => (pendingSpaceFilter = null)}
-    onPreviewSpace={(draft) => (previewSpace = draft)}
-    bind:spaceBuilderOpen
-    {availableFolders}
-    {availableTags}
     {segments}
     {focusedSegmentId}
     onFocusSegment={handleFocusSegment}
@@ -1117,6 +1090,15 @@ onDestroy(() => {
     position: relative;
     background: var(--background-primary);
     overflow: hidden;
+  }
+
+  .graph-space-switcher {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    pointer-events: auto;
   }
 
   .graph-loading {

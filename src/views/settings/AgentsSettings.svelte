@@ -8,6 +8,7 @@ import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Badge from "../../components/ui/Badge.svelte";
 import Button from "../../components/ui/Button.svelte";
+import { confirmDelete } from "../../components/modal/ConfirmModal";
 import Dropdown from "../../components/ui/Dropdown.svelte";
 import IconButton from "../../components/ui/IconButton.svelte";
 import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
@@ -54,11 +55,13 @@ function duplicateAgent(agentId: string) {
 	openAgentEditor(duplicated.id);
 }
 
-function deleteAgent(agentId: string) {
+async function deleteAgent(agentId: string) {
 	if (agentId === DEFAULT_AGENT_ID) {
 		new Notice("Cannot delete the built-in default agent");
 		return;
 	}
+	const agent = agents[agentId];
+	if (!(await confirmDelete(plugin.app, agent?.name ?? agentId))) return;
 	try {
 		pluginData.deleteAgent(agentId);
 		void applyChanges();

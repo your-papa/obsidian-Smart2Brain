@@ -9,6 +9,7 @@ import Button from "../ui/Button.svelte";
 import ProgressBar from "../ui/ProgressBar.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import IconButton from "../ui/IconButton.svelte";
+import { confirmDelete } from "../modal/ConfirmModal";
 import { getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
@@ -125,6 +126,8 @@ function selectIndex(targetIndexId: string) {
 
 async function deleteIndex(targetIndexId: string) {
 	if (!isVectorStoreInitialized()) return;
+	const entry = indexes.find((e) => e.id === targetIndexId);
+	if (!(await confirmDelete(plugin.app, entry?.model ?? targetIndexId))) return;
 	await getVectorStoreService().deleteIndex(targetIndexId);
 	if (targetIndexId === indexId) {
 		indexProgress = {
@@ -215,7 +218,11 @@ function getSelectionGroupLabel(): string {
         </div>
         <Button buttonText="Cancel" onClick={cancelIndexing} />
       {:else}
-        <IconButton icon="upload" label="Import index from file" onclick={() => void importFromFile()} />
+        <IconButton
+          icon="upload"
+          label="Import index from file"
+          onclick={() => void importFromFile()}
+        />
         <Button buttonText="Add Index" cta={true} onClick={openAddIndexModal} />
       {/if}
     </div>
@@ -237,10 +244,7 @@ function getSelectionGroupLabel(): string {
         <ManagedEntityItem
           class="embedding-index-option"
           name={entry.model}
-          desc={[
-            `${entry.documentCount} notes indexed`,
-            `batch ${entryBatchSize}`,
-          ]
+          desc={[`${entry.documentCount} notes indexed`, `batch ${entryBatchSize}`]
             .filter(Boolean)
             .join(" · ")}
           meta={[

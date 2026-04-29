@@ -11,14 +11,13 @@ import {
 	getRecentPathSet,
 } from "../../search/recentNotes";
 import { calculateAliasBoost, calculateTitleBoost } from "../../search/searchRanking";
-import { getData } from "../../stores/dataStore.svelte";
+import { getData, getImmersedSpace } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { normalizeVaultPath } from "../../utils/pathUtils";
 import { getVectorStoreService, type SearchFilter, type SearchResult, waitForVectorStore } from "../../vectorstore";
 import type { SearchMatchBadge, SearchMatchExplanation } from "../../vectorstore/types";
 import { Logger } from "../../utils/logging";
 import { resolveRegionToSearchFilter } from "../../lib/views";
-import { getImmersedSpace } from "../../stores/dataStore.svelte";
 
 export type { SearchResult } from "../../vectorstore/types";
 
@@ -300,9 +299,14 @@ export function createSearchNotesTool(app: App) {
 			}
 		} else {
 			// Auto-inject immersed space as default scope when no explicit region param
-			const immersedSpace = getImmersedSpace();
-			if (immersedSpace) {
-				const spaceFilter = resolveRegionToSearchFilter(app, immersedSpace);
+			const dataStore = getData();
+			let effectiveSpace = getImmersedSpace();
+			// In per-surface mode, prefer the chat-specific space for agent invocations
+			if (dataStore.spaceImmersionMode === "per-surface" && dataStore.chatSpaceId) {
+				effectiveSpace = dataStore.spaces.find((s) => s.id === dataStore.chatSpaceId) ?? effectiveSpace;
+			}
+			if (effectiveSpace) {
+				const spaceFilter = resolveRegionToSearchFilter(app, effectiveSpace);
 				if (spaceFilter.pathPrefixes) {
 					filterPathPrefixes = [...(filterPathPrefixes ?? []), ...spaceFilter.pathPrefixes];
 				}
