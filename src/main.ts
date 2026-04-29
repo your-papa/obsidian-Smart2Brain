@@ -8,10 +8,19 @@ import { selectionHighlightPlugin } from "./editor/selectionHighlightExtension";
 import { createReadingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
 import { terminateWorker as terminateClusteringWorker } from "./utils/computeWorkerManager";
 import { SearchModal } from "./components/modal/SearchModal";
+import { SpaceManagerModal } from "./components/modal/SpaceManagerModal";
+import { SpaceSuggestModal } from "./components/modal/SpaceSuggestModal";
 import { getQueryClient } from "./lib/query";
 import { SkillsService } from "./skills";
 import { createMessenger, getMessenger } from "./stores/chatStore.svelte";
-import { type PluginDataStore, createData, getData } from "./stores/dataStore.svelte";
+import {
+	type PluginDataStore,
+	createData,
+	getData,
+	setImmersedSpace,
+	getImmersedSpace,
+	onImmersionChange,
+} from "./stores/dataStore.svelte";
 import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingChangesStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
 import { LexicalSearchService } from "./search/LexicalSearchService";
@@ -251,7 +260,69 @@ export default class SecondBrainPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "manage-spaces",
+			name: "Create New Space",
+			icon: "map-pin",
+			callback: () => new SpaceManagerModal(this.app).open(),
+		});
+
+		this.addCommand({
+			id: "immerse-in-space",
+			name: "Immerse in Space",
+			icon: "log-in",
+			callback: () => {
+				const spaces = this.pluginData.spaces;
+				if (spaces.length === 0) {
+					new Notice("No spaces defined. Create one first.");
+					return;
+				}
+				new SpaceSuggestModal(this.app).open();
+			},
+		});
+
+		this.addCommand({
+			id: "exit-space",
+			name: "Exit Space",
+			icon: "log-out",
+			callback: () => {
+				this.pluginData.setActiveImmersedSpaceId(null);
+				setImmersedSpace(null);
+				new Notice("Exited space");
+			},
+		});
+
 		this.addSettingTab(new SettingsTab(this));
+
+		// ── Status bar: current space indicator ──────────────────
+		const statusBarEl = this.addStatusBarItem();
+		statusBarEl.addClass("mod-clickable");
+		const updateStatusBar = (space: import("./types/graph").Space | null) => {
+			statusBarEl.empty();
+			if (space) {
+				const dot = statusBarEl.createSpan({ cls: "s2b-status-dot" });
+				dot.style.background = space.color;
+				dot.style.width = "8px";
+				dot.style.height = "8px";
+				dot.style.borderRadius = "50%";
+				dot.style.display = "inline-block";
+				dot.style.marginRight = "4px";
+				statusBarEl.createSpan({ text: space.label });
+			} else {
+				statusBarEl.createSpan({ text: "All notes" });
+			}
+		};
+		updateStatusBar(getImmersedSpace());
+		const disposeImmersionListener = onImmersionChange(updateStatusBar);
+		this.register(() => disposeImmersionListener());
+		statusBarEl.onClickEvent(() => {
+			const spaces = this.pluginData.spaces;
+			if (spaces.length === 0) {
+				new SpaceManagerModal(this.app).open();
+			} else {
+				new SpaceSuggestModal(this.app).open();
+			}
+		});
 
 		this.registerEvent(
 			this.app.workspace.on("file-open", (file) => {

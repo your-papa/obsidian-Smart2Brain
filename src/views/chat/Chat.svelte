@@ -1,44 +1,45 @@
 <script lang="ts">
-import { QueryClientProvider } from "@tanstack/svelte-query";
-import Input from "../../components/chat/Input.svelte";
-import MessageContainer from "../../components/chat/MessageContainer.svelte";
-import { getMessenger } from "../../stores/chatStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import { icon } from "../../utils/utils";
+  import { QueryClientProvider } from "@tanstack/svelte-query";
+  import Input from "../../components/chat/Input.svelte";
+  import MessageContainer from "../../components/chat/MessageContainer.svelte";
+  import SpaceSwitcher from "../../components/ui/SpaceSwitcher.svelte";
+  import { getMessenger } from "../../stores/chatStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
+  import { icon } from "../../utils/utils";
 
-const plugin = getPlugin();
+  const plugin = getPlugin();
 
-const messenger = getMessenger();
+  const messenger = getMessenger();
 
-let messageContainer = $state<ReturnType<typeof MessageContainer> | undefined>();
-let input = $state<ReturnType<typeof Input> | undefined>();
-let lastSessionId: string | null = null;
-let isDragging = $state(false);
-let dragMessage = $state("Drop files here");
-let dragHasIssue = $state(false);
+  let messageContainer = $state<ReturnType<typeof MessageContainer> | undefined>();
+  let input = $state<ReturnType<typeof Input> | undefined>();
+  let lastSessionId: string | null = null;
+  let isDragging = $state(false);
+  let dragMessage = $state("Drop files here");
+  let dragHasIssue = $state(false);
 
-$effect(() => {
-	const sessionId = messenger?.session?.id ?? null;
-	if (!sessionId || sessionId === lastSessionId) return;
-	lastSessionId = sessionId;
-	input?.focusEditor();
-});
+  $effect(() => {
+    const sessionId = messenger?.session?.id ?? null;
+    if (!sessionId || sessionId === lastSessionId) return;
+    lastSessionId = sessionId;
+    input?.focusEditor();
+  });
 
-function handleRootDragEnter(event: DragEvent) {
-	input?.handleDragEnter(event);
-}
+  function handleRootDragEnter(event: DragEvent) {
+    input?.handleDragEnter(event);
+  }
 
-function handleRootDragOver(event: DragEvent) {
-	input?.handleDragOver(event);
-}
+  function handleRootDragOver(event: DragEvent) {
+    input?.handleDragOver(event);
+  }
 
-function handleRootDragLeave(event: DragEvent) {
-	input?.handleDragLeave(event);
-}
+  function handleRootDragLeave(event: DragEvent) {
+    input?.handleDragLeave(event);
+  }
 
-async function handleRootDrop(event: DragEvent) {
-	await input?.handleDrop(event);
-}
+  async function handleRootDrop(event: DragEvent) {
+    await input?.handleDrop(event);
+  }
 </script>
 
 <QueryClientProvider client={plugin.queryClient}>
@@ -52,6 +53,9 @@ async function handleRootDrop(event: DragEvent) {
     ondrop={handleRootDrop}
   >
     {#if messenger}
+      <div class="flex justify-center py-1 shrink-0">
+        <SpaceSwitcher />
+      </div>
       <MessageContainer bind:this={messageContainer} {messenger} />
       <Input
         bind:this={input}
@@ -82,12 +86,12 @@ async function handleRootDrop(event: DragEvent) {
             ? 'chat-drop-overlay-panel-issue'
             : 'chat-drop-overlay-panel-active'}"
         >
-        <div
-          class="h-icon-s w-icon-s"
-          style="--icon-size: var(--icon-s)"
-          data-testid="chat-drop-overlay-icon"
-          use:icon={dragHasIssue ? "alert-triangle" : "upload"}
-        ></div>
+          <div
+            class="h-icon-s w-icon-s"
+            style="--icon-size: var(--icon-s)"
+            data-testid="chat-drop-overlay-icon"
+            use:icon={dragHasIssue ? "alert-triangle" : "upload"}
+          ></div>
           <span data-testid="chat-drop-overlay-message">{dragMessage}</span>
         </div>
       </div>
@@ -103,8 +107,11 @@ async function handleRootDrop(event: DragEvent) {
     pointer-events: none;
     opacity: 0;
     transition: opacity 140ms ease;
-    background:
-      radial-gradient(circle at top, color-mix(in srgb, var(--interactive-accent) 16%, transparent), transparent 58%),
+    background: radial-gradient(
+        circle at top,
+        color-mix(in srgb, var(--interactive-accent) 16%, transparent),
+        transparent 58%
+      ),
       color-mix(in srgb, var(--background-primary) 72%, transparent);
   }
 

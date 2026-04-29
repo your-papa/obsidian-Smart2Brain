@@ -53,10 +53,9 @@ describe("chat view UI", () => {
 		expect(agentName.length).toBeGreaterThan(0);
 	});
 
-	it("should show a model selector with a model name", () => {
-		// The model button contains the model name text
-		const modelText = domText(String.raw`.chat-input-wrapper .text-\[--text-normal\]`);
-		expect(modelText.length).toBeGreaterThan(0);
+	it("should show the agent selector with an agent name", () => {
+		const agentText = domText("[data-testid='agent-pill']");
+		expect(agentText.length).toBeGreaterThan(0);
 	});
 
 	it("should have a send button that is disabled when input is empty", () => {
@@ -69,8 +68,9 @@ describe("chat view UI", () => {
 		expect(domCount('input[type="file"]#attachment')).toBeGreaterThanOrEqual(1);
 	});
 
-	it("should render a New Chat button in the input area", () => {
-		expect(domCount('[title="New Chat"]')).toBeGreaterThanOrEqual(1);
+	it("should have a New Chat ribbon icon or command available", () => {
+		// New Chat button was removed from input area; it's accessible via ribbon icon and command palette
+		expect(domCount('[aria-label="New Chat"]')).toBeGreaterThanOrEqual(1);
 	});
 
 	it("should display a context usage indicator in the input area", () => {

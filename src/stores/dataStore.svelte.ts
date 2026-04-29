@@ -396,6 +396,12 @@ export const DEFAULT_SETTINGS: PluginData = {
 	// Smart Graph View
 	smartGraphSettings: DEFAULT_SMART_GRAPH_SETTINGS,
 
+	// Spaces (cross-cutting)
+	spaces: [],
+	activeImmersedSpaceId: null,
+	spaceImmersionMode: "global",
+	chatSpaceId: null,
+
 	// Diff view
 	diffViewMode: "two-pane",
 
@@ -1167,52 +1173,57 @@ export class PluginDataStore {
 
 	/**
 	 * Persist only the active immersed space ID without replacing the whole
-	 * smartGraphSettings object. Mutating a specific property in-place prevents
-	 * Svelte from invalidating effects that track `data.spaces` (which reads
-	 * `smartGraphSettings.spaces`), avoiding an expensive reactive cascade on
-	 * every immerse/exit.
+	 * settings object. Avoids expensive reactive cascade.
 	 */
+	get activeImmersedSpaceId(): string | null {
+		return this.#data.activeImmersedSpaceId ?? null;
+	}
 	setActiveImmersedSpaceId(id: string | null): void {
-		if (!this.#data.smartGraphSettings) {
-			this.#data.smartGraphSettings = { ...DEFAULT_SMART_GRAPH_SETTINGS, activeImmersedSpaceId: id };
-		} else {
-			this.#data.smartGraphSettings.activeImmersedSpaceId = id;
-		}
+		this.#data.activeImmersedSpaceId = id;
 		this.saveSettings();
 	}
 
 	// --- Spaces CRUD ---
 
 	get spaces(): Space[] {
-		return this.smartGraphSettings.spaces ?? [];
+		return this.#data.spaces ?? [];
 	}
 
 	addSpace(space: Space): void {
-		const settings = this.smartGraphSettings;
-		this.smartGraphSettings = {
-			...settings,
-			spaces: [...(settings.spaces ?? []), space],
-		};
+		this.#data.spaces = [...(this.#data.spaces ?? []), space];
+		this.saveSettings();
 	}
 
 	updateSpace(id: string, patch: Partial<Omit<Space, "id">>): void {
-		const settings = this.smartGraphSettings;
-		this.smartGraphSettings = {
-			...settings,
-			spaces: (settings.spaces ?? []).map((s) => (s.id === id ? { ...s, ...patch } : s)),
-		};
+		this.#data.spaces = (this.#data.spaces ?? []).map((s) => (s.id === id ? { ...s, ...patch } : s));
+		this.saveSettings();
 	}
 
 	deleteSpace(id: string): void {
-		const settings = this.smartGraphSettings;
-		this.smartGraphSettings = {
-			...settings,
-			spaces: (settings.spaces ?? []).filter((s) => s.id !== id),
-		};
+		this.#data.spaces = (this.#data.spaces ?? []).filter((s) => s.id !== id);
+		this.saveSettings();
 	}
 
 	getSpaceByLabel(label: string): Space | undefined {
-		return (this.smartGraphSettings.spaces ?? []).find((s) => s.label.toLowerCase() === label.toLowerCase());
+		return (this.#data.spaces ?? []).find((s) => s.label.toLowerCase() === label.toLowerCase());
+	}
+
+	// --- Space Immersion Mode ---
+
+	get spaceImmersionMode() {
+		return this.#data.spaceImmersionMode ?? "global";
+	}
+	set spaceImmersionMode(val: "global" | "per-surface") {
+		this.#data.spaceImmersionMode = val;
+		this.saveSettings();
+	}
+
+	get chatSpaceId(): string | null {
+		return this.#data.chatSpaceId ?? null;
+	}
+	set chatSpaceId(val: string | null) {
+		this.#data.chatSpaceId = val;
+		this.saveSettings();
 	}
 
 	// --- Diff View Mode ---
@@ -1789,6 +1800,7 @@ let _pluginDataStore: PluginDataStore | null = null;
  * null = no active immersion.
  */
 let _immersedSpace: Space | null = $state(null);
+let _immersionListeners: Array<(space: Space | null) => void> = [];
 
 export function getImmersedSpace(): Space | null {
 	return _immersedSpace;
@@ -1796,6 +1808,14 @@ export function getImmersedSpace(): Space | null {
 
 export function setImmersedSpace(space: Space | null): void {
 	_immersedSpace = space;
+	for (const listener of _immersionListeners) listener(space);
+}
+
+export function onImmersionChange(listener: (space: Space | null) => void): () => void {
+	_immersionListeners.push(listener);
+	return () => {
+		_immersionListeners = _immersionListeners.filter((l) => l !== listener);
+	};
 }
 
 function normalizeAgent(agent: AgentConfig): void {
@@ -1934,6 +1954,17 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 	// Migrate removed "embeddings" search algorithm to "hybrid"
 	if ((mergedData.searchAlgorithm as string) === "embeddings") {
 		mergedData.searchAlgorithm = "hybrid";
+	}
+
+	// Migrate spaces from smartGraphSettings to top-level
+	const legacyGraph = rawData?.smartGraphSettings as
+		| (SmartGraphSettings & { spaces?: Space[]; activeImmersedSpaceId?: string | null })
+		| undefined;
+	if (legacyGraph?.spaces?.length && (!mergedData.spaces || mergedData.spaces.length === 0)) {
+		mergedData.spaces = legacyGraph.spaces;
+	}
+	if (legacyGraph?.activeImmersedSpaceId != null && mergedData.activeImmersedSpaceId == null) {
+		mergedData.activeImmersedSpaceId = legacyGraph.activeImmersedSpaceId;
 	}
 
 	// Resolve vault slug once on first load; persisted so vault renames don't orphan indexes

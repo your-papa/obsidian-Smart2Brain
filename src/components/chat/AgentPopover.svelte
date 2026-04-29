@@ -1,161 +1,160 @@
 <script lang="ts">
-import { Popover, Separator } from "bits-ui";
-import { type AgentConfig, resolveAgentColorCSS } from "../../types/plugin";
-import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
-import { getPlugin, requestSettingsTab } from "../../stores/state.svelte";
-import { Logger } from "../../utils/logging";
-import Icon from "../ui/Icon.svelte";
-import { chatHistoryContainsPrivateNotes, getMessenger } from "../../stores/chatStore.svelte";
-import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
+  import { Popover } from "bits-ui";
+  import { type AgentConfig, resolveAgentColorCSS } from "../../types/plugin";
+  import { getData } from "../../stores/dataStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
+  import { Logger } from "../../utils/logging";
+  import Icon from "../ui/Icon.svelte";
+  import { chatHistoryContainsPrivateNotes, getMessenger } from "../../stores/chatStore.svelte";
+  import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
+  import { AgentEditorModal } from "../modal/AgentEditorModal";
 
-const data = getData();
-const plugin = getPlugin();
+  const data = getData();
+  const plugin = getPlugin();
 
-// Get all agents reactively
-const agents = $derived(Object.values(data.agents));
+  // Get all agents reactively
+  const agents = $derived(Object.values(data.agents));
 
-// Get currently selected agent
-const selectedAgent = $derived(data.getSelectedAgent());
+  // Get currently selected agent
+  const selectedAgent = $derived(data.getSelectedAgent());
 
-// Check if agent selection actually makes a difference (more than one agent)
-const hasMultipleAgents = $derived(agents.length > 1);
+  // Check if agent selection actually makes a difference (more than one agent)
+  const hasMultipleAgents = $derived(agents.length > 1);
 
-let isOpen = $state(false);
-let customAnchor: HTMLElement | undefined = $state();
+  let isOpen = $state(false);
+  let customAnchor: HTMLElement | undefined = $state();
 
-async function selectAgent(agent: AgentConfig) {
-	// Check if the agent's provider is non-trusted and chat has private notes
-	const newProvider = agent.chatModel?.provider;
-	if (newProvider && !data.isProviderTrusted(newProvider)) {
-		const messages = getMessenger()?.session?.messages;
-		if (messages && chatHistoryContainsPrivateNotes(messages)) {
-			const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
-			if (!confirmed) return;
-		}
-	}
-	data.selectedAgentId = agent.id;
-	isOpen = false;
-	// Reinitialize the agent with the new config
-	plugin.agentManager?.reinitialize().catch((error) => {
-		Logger.error("Failed to switch agent:", error);
-	});
-}
+  async function selectAgent(agent: AgentConfig) {
+    // Check if the agent's provider is non-trusted and chat has private notes
+    const newProvider = agent.chatModel?.provider;
+    if (newProvider && !data.isProviderTrusted(newProvider)) {
+      const messages = getMessenger()?.session?.messages;
+      if (messages && chatHistoryContainsPrivateNotes(messages)) {
+        const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
+        if (!confirmed) return;
+      }
+    }
+    data.selectedAgentId = agent.id;
+    isOpen = false;
+    // Reinitialize the agent with the new config
+    plugin.agentManager?.reinitialize().catch((error) => {
+      Logger.error("Failed to switch agent:", error);
+    });
+  }
 
-function openAgentSettings() {
-	// Request the Agents tab before opening settings
-	requestSettingsTab("agents");
-	const app = plugin.app as unknown as {
-		setting?: { open: () => void; openTabById: (id: string) => void };
-	};
-	app.setting?.open();
-	app.setting?.openTabById("smart-second-brain");
-	isOpen = false;
-}
+  function openAgentEditor(agentId: string) {
+    isOpen = false;
+    new AgentEditorModal(plugin, agentId).open();
+  }
 </script>
 
 {#if agents.length === 0}
   <!-- No agents configured (shouldn't happen, but handle gracefully) -->
-  <button onclick={openAgentSettings} class="clickable-icon flex flex-row items-center gap-1">
-    <Icon name="bot" size="xs" />
+  <button
+    onclick={() => openAgentEditor("default-agent")}
+    class="clickable-icon flex flex-row items-center gap-1"
+  >
     <div class="text-[--text-muted] text-xs">Configure Agent</div>
   </button>
 {:else}
   <button
     bind:this={customAnchor}
-    onclick={() => (isOpen = !isOpen)}
-    class="clickable-icon flex items-center gap-1"
-    title="Select agent"
+    onclick={() => (hasMultipleAgents ? (isOpen = !isOpen) : openAgentEditor(selectedAgent.id))}
+    class="clickable-icon flex items-center gap-1 min-w-0"
+    title={hasMultipleAgents ? "Select agent" : "Edit agent"}
     data-testid="agent-select-button"
   >
-    <Icon name="bot" size="xs" />
     <span
       class="agent-pill"
       class:has-color={!!selectedAgent?.color}
-      style={selectedAgent?.color ? `--pill-color: ${resolveAgentColorCSS(selectedAgent.color)}` : ""}
+      style={selectedAgent?.color
+        ? `--pill-color: ${resolveAgentColorCSS(selectedAgent.color)}`
+        : ""}
       data-testid="agent-pill"
     >
       {selectedAgent?.name ?? "Default Agent"}
     </span>
     {#if hasMultipleAgents}
       {#if isOpen}
-        <Icon name="chevron-up" size="s" />
+        <Icon name="chevron-up" size="xs" />
       {:else}
-        <Icon name="chevron-down" size="s" />
+        <Icon name="chevron-down" size="xs" />
       {/if}
     {/if}
   </button>
 
-  {#if hasMultipleAgents}
-    <Popover.Root bind:open={isOpen}>
-      <Popover.Portal>
-        <Popover.Content
-          class="bg-[--background-primary] rounded-md border-[--background-modifier-border] border-solid shadow-md min-w-[180px] max-w-[280px] z-[var(--layer-popover)]"
-          {customAnchor}
-          sideOffset={8}
-          side="top"
-          align="start"
-        >
-          <div class="flex flex-col mx-2 my-2">
-            <div class="text-xs text-[--text-muted] px-2 py-1 uppercase font-medium">
-              Select Agent
+  <Popover.Root bind:open={isOpen}>
+    <Popover.Portal>
+      <Popover.Content
+        class="bg-[--background-primary] rounded-lg border border-solid border-[--background-modifier-border] shadow-lg z-[var(--layer-popover)] overflow-hidden"
+        {customAnchor}
+        sideOffset={8}
+        side="top"
+        align="start"
+      >
+        <div class="flex flex-col py-1.5 min-w-[220px] max-w-[320px]">
+          <!-- Agent list -->
+          {#if hasMultipleAgents}
+            <div
+              class="text-[0.65rem] text-[--text-faint] px-3 pb-1 uppercase font-medium tracking-wider"
+            >
+              Agent
             </div>
-            {#each agents as agent (agent.id)}
-              {@const isSelected = agent.id === selectedAgent?.id}
-              {@const isDefault = agent.id === data.defaultAgentId}
-              <button
-                class="!flex !flex-row !items-center !gap-2 !p-2 !rounded-lg hover:!bg-[--background-modifier-hover] !border-none !bg-transparent !text-left !cursor-pointer !shadow-none !text-[--text-normal]"
-                class:!bg-[--background-modifier-active-hover]={isSelected}
+          {/if}
+          {#each agents as agent (agent.id)}
+            {@const isSelected = agent.id === selectedAgent?.id}
+            {@const isDefault = agent.id === data.defaultAgentId}
+            {#if hasMultipleAgents}
+              <div
+                class="agent-row"
+                class:agent-row-selected={isSelected}
+                role="button"
+                tabindex="0"
                 onclick={() => selectAgent(agent)}
+                onkeydown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") selectAgent(agent);
+                }}
               >
-                <Icon name="bot" size="s" class={isSelected ? "text-[--text-accent]" : ""} />
-                <div class="flex-1 min-w-0 flex items-center gap-1.5">
-                  <span
-                    class="agent-name-pill"
-                    class:has-color={!!agent.color}
-                    style={agent.color ? `--pill-color: ${resolveAgentColorCSS(agent.color)}` : ""}
-                  >
-                    {agent.name}
-                  </span>
-                  {#if isDefault}
-                    <span
-                      class="text-[0.6rem] px-1 py-0.5 rounded bg-[--background-modifier-success] text-[--text-success] uppercase font-medium"
-                    >
-                      Default
-                    </span>
-                  {/if}
-                </div>
-                {#if isSelected}
-                  <Icon name="check" size="s" class="text-[--text-accent]" />
+                <span
+                  class="agent-name-pill flex-1 min-w-0"
+                  class:has-color={!!agent.color}
+                  style={agent.color ? `--pill-color: ${resolveAgentColorCSS(agent.color)}` : ""}
+                >
+                  {agent.name}
+                </span>
+                {#if isDefault}
+                  <span class="text-[0.6rem] text-[--text-faint] shrink-0">default</span>
                 {/if}
-              </button>
-            {/each}
-          </div>
-
-          <Separator.Root
-            class="bg-[--background-modifier-border] shrink-0 my-1 w-full data-[orientation=horizontal]:h-px"
-          />
-
-          <button
-            onclick={openAgentSettings}
-            aria-label="Open agent settings"
-            class="!flex !flex-row !w-full !m-0 !py-2 !px-4 !rounded-none !gap-2 hover:!bg-[--background-modifier-hover] !border-none !bg-transparent !cursor-pointer !shadow-none !text-[--text-muted] !text-sm"
-          >
-            <Icon name="settings" size="s" />
-            <span>Manage Agents</span>
-          </button>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
-  {/if}
+                {#if isSelected}
+                  <Icon name="check" size="xs" class="text-[--text-accent] shrink-0" />
+                {/if}
+                <button
+                  type="button"
+                  class="agent-settings-btn"
+                  title="Edit agent"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    openAgentEditor(agent.id);
+                  }}
+                >
+                  <Icon name="settings" size="xs" class="text-[--text-faint]" />
+                </button>
+              </div>
+            {/if}
+          {/each}
+        </div>
+      </Popover.Content>
+    </Popover.Portal>
+  </Popover.Root>
 {/if}
 
 <style>
   .agent-pill {
-    max-width: 120px;
+    max-width: 100px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.875rem;
+    font-size: 0.8rem;
     color: var(--text-normal);
   }
 
@@ -167,10 +166,36 @@ function openAgentSettings() {
     font-weight: 500;
   }
 
+  .agent-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    margin: 0 0.25rem;
+    border-radius: 0.375rem;
+    border: none;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: none;
+    color: var(--text-normal);
+    font-size: inherit;
+  }
+
+  .agent-row:hover {
+    background: var(--background-modifier-hover);
+  }
+
+  .agent-row-selected {
+    background: var(--background-modifier-active-hover);
+  }
+
   .agent-name-pill {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 0.875rem;
   }
 
   .agent-name-pill.has-color {
@@ -179,5 +204,24 @@ function openAgentSettings() {
     padding: 1px 8px;
     border-radius: 10px;
     font-weight: 500;
+  }
+
+  .agent-settings-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.15rem;
+    border: none;
+    background: transparent;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+  }
+
+  .agent-settings-btn:hover {
+    opacity: 1;
+    background: var(--background-modifier-hover);
   }
 </style>
