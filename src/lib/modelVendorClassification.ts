@@ -1,9 +1,12 @@
 import { Logger } from "../utils/logging";
 import type { OpenRouterModelInfo } from "../providers/openrouterModels";
+import type { ProviderTemplateId } from "../types/provider/index";
 
 export interface UiClassifiableModel {
 	provider: string;
 	model: string;
+	templateId?: ProviderTemplateId;
+	baseUrl?: string | null;
 	family?: string;
 	families?: string[];
 }
@@ -42,6 +45,68 @@ function extractPrefixFromOpenRouterModelId(modelId: string): string | null {
 	if (!modelId.includes("/")) return null;
 	const [prefix] = modelId.split("/", 1);
 	return prefix || null;
+}
+
+function extractHost(baseUrl?: string | null): string | null {
+	if (!baseUrl) return null;
+	try {
+		return new URL(baseUrl).hostname.toLowerCase();
+	} catch {
+		return baseUrl.toLowerCase();
+	}
+}
+
+function inferVendorFromBaseUrl(baseUrl?: string | null): string | null {
+	const host = extractHost(baseUrl);
+	if (!host) return null;
+
+	if (host.includes("azure.com") || host.includes("azure.net")) {
+		return "microsoft";
+	}
+	if (host === "api.openai.com" || host.endsWith(".openai.com")) {
+		return "openai";
+	}
+	if (host.includes("anthropic.com")) {
+		return "anthropic";
+	}
+	if (host.includes("googleapis.com") || host.includes("google.com")) {
+		return "google";
+	}
+	if (host.includes("x.ai")) {
+		return "x-ai";
+	}
+	if (host.includes("mistral.ai")) {
+		return "mistralai";
+	}
+
+	return null;
+}
+
+function inferVendorFromModelName(modelId: string): string | null {
+	const prefix = extractPrefixFromOpenRouterModelId(modelId);
+	if (prefix && UI_VENDOR_ID_SET.has(prefix)) {
+		return prefix;
+	}
+
+	const normalized = modelId.toLowerCase().trim();
+	const providerishPrefix = normalized.match(/^([a-z0-9-]+)--/i)?.[1] ?? null;
+	if (providerishPrefix) {
+		if (providerishPrefix === "meta" || providerishPrefix === "meta-llama") return "meta-llama";
+		if (providerishPrefix === "xai") return "x-ai";
+		if (UI_VENDOR_ID_SET.has(providerishPrefix)) return providerishPrefix;
+	}
+
+	if (/^(gpt|o[1-9]\b|chatgpt)/.test(normalized)) return "openai";
+	if (/^claude/.test(normalized)) return "anthropic";
+	if (/^gemini/.test(normalized)) return "google";
+	if (/^(phi|wizardlm|mai-)/.test(normalized)) return "microsoft";
+	if (/^(llama|meta-llama|meta\b)/.test(normalized)) return "meta-llama";
+	if (/^deepseek/.test(normalized)) return "deepseek";
+	if (/^grok/.test(normalized)) return "x-ai";
+	if (/^(mistral|mixtral|ministral|codestral)/.test(normalized)) return "mistralai";
+	if (/^qwen/.test(normalized)) return "qwen";
+
+	return null;
 }
 
 function inferOllamaVendorFromOpenRouter(
@@ -84,15 +149,19 @@ export function extractVendor(
 	model: UiClassifiableModel,
 	openRouterModels?: Map<string, OpenRouterModelInfo> | null,
 ): string | null {
-	if (model.provider === "openrouter" && model.model.includes("/")) {
+	if ((model.templateId === "openrouter" || model.provider === "openrouter") && model.model.includes("/")) {
 		return model.model.split("/")[0];
 	}
 
-	if (model.provider === "openai" || model.provider === "anthropic") {
-		return model.provider;
+	if (model.templateId === "openai-codex" || model.provider === "openai") {
+		return "openai";
 	}
 
-	if (model.provider === "ollama") {
+	if (model.templateId === "anthropic" || model.provider === "anthropic") {
+		return "anthropic";
+	}
+
+	if (model.templateId === "ollama" || model.provider === "ollama") {
 		const candidateFamilies = [model.family, ...(model.families ?? [])].filter(
 			(family): family is string => typeof family === "string" && family.length > 0,
 		);
@@ -100,7 +169,11 @@ export function extractVendor(
 		return inferOllamaVendorFromOpenRouter(candidateFamilies, openRouterModels);
 	}
 
-	return null;
+	if (model.templateId === "openai-compatible") {
+		return inferVendorFromBaseUrl(model.baseUrl) ?? inferVendorFromModelName(model.model);
+	}
+
+	return inferVendorFromBaseUrl(model.baseUrl) ?? inferVendorFromModelName(model.model);
 }
 
 export function getUnclassifiedModelsForUi(

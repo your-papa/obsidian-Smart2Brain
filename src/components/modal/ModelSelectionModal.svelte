@@ -1,6 +1,7 @@
 <script lang="ts">
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { extractVendor, logUnclassifiedModelsInfo } from "../../lib/modelVendorClassification";
+import type { UiClassifiableModel } from "../../lib/modelVendorClassification";
 import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../../types/modelMetadata";
 import { getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
@@ -55,20 +56,17 @@ const models = $derived(
 	modelType === "chat" ? availableModels.hydratedChatModels : availableModels.hydratedEmbeddingModels,
 );
 
-function toClassifiableModel(model: HydratedModel): {
-	provider: string;
-	model: string;
-	family?: string;
-	families?: string[];
-} {
-	if (model.provider !== "ollama") {
-		return { provider: model.provider, model: model.variantKey };
-	}
-	const families = availableModels.getOllamaModelFamilies(model.variantKey);
+function toClassifiableModel(model: HydratedModel): UiClassifiableModel {
+	const providerMeta = pluginData.getProviderMeta(model.provider);
+	const providerAuth = pluginData.getResolvedProviderAuth(model.provider);
+	const isOllamaProvider = providerMeta?.templateId === "ollama" || model.provider === "ollama";
+	const families = isOllamaProvider ? availableModels.getOllamaModelFamilies(model.variantKey) : undefined;
 	return {
 		provider: model.provider,
 		model: model.variantKey,
-		family: families[0],
+		templateId: providerMeta?.templateId,
+		baseUrl: providerAuth.baseUrl,
+		family: families?.[0],
 		families,
 	};
 }
