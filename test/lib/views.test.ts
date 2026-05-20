@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolveViewFilter, describeViewFilter, getAllMarkdownPaths } from "../../src/lib/views";
+import {
+	compileSpaceMembershipDraft,
+	createEmptySpaceFilter,
+	describeViewFilter,
+	getAllMarkdownPaths,
+	parseSpaceMembershipFilter,
+	resolveSpaceMembershipDraft,
+	resolveViewFilter,
+} from "../../src/lib/views";
 import type { ViewFilter, ViewFilterGroup } from "../../src/types/graph";
 import type { App, CachedMetadata, TFile } from "obsidian";
 
@@ -477,5 +485,115 @@ describe("getAllMarkdownPaths", () => {
 		const paths = getAllMarkdownPaths(app);
 
 		expect(paths).toEqual(new Set(["notes/a.md", "notes/b.md"]));
+	});
+});
+
+describe("space membership draft helpers", () => {
+	it("compiles an empty draft to an empty paths filter", () => {
+		expect(
+			compileSpaceMembershipDraft({
+				manualPaths: [],
+				autoIncludeRules: [],
+				excludedPaths: [],
+			}),
+		).toEqual(createEmptySpaceFilter());
+	});
+
+	it("compiles manual paths, auto rules, and exclusions into the existing filter shape", () => {
+		expect(
+			compileSpaceMembershipDraft({
+				manualPaths: ["Manual/a.md"],
+				autoIncludeRules: [{ type: "folder", value: "Research" }],
+				excludedPaths: ["Research/old.md"],
+			}),
+		).toEqual({
+			type: "all",
+			conditions: [
+				{
+					type: "any",
+					conditions: [
+						{ type: "paths", value: ["Manual/a.md"] },
+						{ type: "folder", value: "Research" },
+					],
+				},
+				{ type: "none", conditions: [{ type: "paths", value: ["Research/old.md"] }] },
+			],
+		});
+	});
+
+	it("parses a simple compiled filter back into a file-first draft", () => {
+		const parsed = parseSpaceMembershipFilter({
+			type: "all",
+			conditions: [
+				{
+					type: "any",
+					conditions: [
+						{ type: "paths", value: ["Manual/a.md"] },
+						{ type: "tag", value: "#ml" },
+					],
+				},
+				{ type: "none", conditions: [{ type: "paths", value: ["Manual/old.md"] }] },
+			],
+		});
+
+		expect(parsed.isAdvanced).toBe(false);
+		expect(parsed.draft).toEqual({
+			manualPaths: ["Manual/a.md"],
+			autoIncludeRules: [{ type: "tag", value: "#ml" }],
+			excludedPaths: ["Manual/old.md"],
+		});
+	});
+
+	it("marks non-simple all-groups as advanced", () => {
+		const parsed = parseSpaceMembershipFilter({
+			type: "all",
+			conditions: [
+				{ type: "folder", value: "Work" },
+				{ type: "tag", value: "#urgent" },
+			],
+		});
+
+		expect(parsed.isAdvanced).toBe(true);
+		expect(parsed.draft).toEqual({
+			manualPaths: [],
+			autoIncludeRules: [],
+			excludedPaths: [],
+		});
+	});
+
+	it("resolves draft membership with provenance and exclusions", () => {
+		const app = createMockApp(
+			[
+				"Manual/a.md",
+				"Research/ml-paper.md",
+				"Research/deep-learning.md",
+				"Research/skip.md",
+			],
+			{
+				"Research/ml-paper.md": ["#ml"],
+				"Research/deep-learning.md": ["#ml"],
+			},
+		);
+
+		const result = resolveSpaceMembershipDraft(app, {
+			manualPaths: ["Manual/a.md", "missing.md"],
+			autoIncludeRules: [
+				{ type: "folder", value: "Research" },
+				{ type: "tag", value: "#ml" },
+			],
+			excludedPaths: ["Research/skip.md"],
+		});
+
+		expect(result.paths).toEqual(
+			new Set(["Manual/a.md", "Research/ml-paper.md", "Research/deep-learning.md"]),
+		);
+		expect(result.stalePaths).toEqual(["missing.md"]);
+		expect(result.excludedPaths).toEqual(new Set(["Research/skip.md"]));
+		expect(result.provenance.get("Manual/a.md")).toEqual(["Manual"]);
+		expect(result.provenance.get("Research/ml-paper.md")).toEqual([
+			"Folder: Research",
+			"Tag: #ml",
+		]);
+		expect(result.provenance.has("Research/skip.md")).toBe(false);
 	});
 });

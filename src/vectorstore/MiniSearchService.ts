@@ -478,13 +478,13 @@ export class MiniSearchService {
 
 			const stored = this.index.getStoredFields(path) as
 				| {
-					path?: string;
-					title?: string;
-					aliases?: string;
-					tags?: string;
-					pathSegments?: string;
-					content?: string;
-				}
+						path?: string;
+						title?: string;
+						aliases?: string;
+						tags?: string;
+						pathSegments?: string;
+						content?: string;
+				  }
 				| undefined;
 
 			results.push({
@@ -520,13 +520,13 @@ export class MiniSearchService {
 
 			const stored = this.index.getStoredFields(path) as
 				| {
-					path?: string;
-					title?: string;
-					aliases?: string;
-					tags?: string;
-					pathSegments?: string;
-					content?: string;
-				}
+						path?: string;
+						title?: string;
+						aliases?: string;
+						tags?: string;
+						pathSegments?: string;
+						content?: string;
+				  }
 				| undefined;
 
 			results.push({

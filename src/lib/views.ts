@@ -30,6 +30,47 @@ export interface ResolvedView {
 	stalePaths: string[];
 }
 
+export type SpaceMembershipRule =
+	| { type: "folder"; value: string }
+	| { type: "tag"; value: string }
+	| { type: "extension"; value: string }
+	| { type: "query"; value: string; algorithm: "lexical" | "semantic" | "hybrid" };
+
+export interface SpaceMembershipDraft {
+	manualPaths: string[];
+	autoIncludeRules: SpaceMembershipRule[];
+	excludedPaths: string[];
+}
+
+export interface ParsedSpaceMembershipDraft {
+	draft: SpaceMembershipDraft;
+	isAdvanced: boolean;
+}
+
+export interface ResolvedSpaceMembership extends ResolvedView {
+	provenance: Map<string, string[]>;
+	excludedPaths: Set<string>;
+}
+
+export function cloneViewFilter(filter: ViewFilter): ViewFilter {
+	if (isLeaf(filter)) {
+		return cloneViewFilterLeaf(filter);
+	}
+
+	return {
+		type: filter.type,
+		conditions: filter.conditions.map((condition) => cloneViewFilter(condition)),
+	};
+}
+
+export function cloneSpaceMembershipDraft(draft: SpaceMembershipDraft): SpaceMembershipDraft {
+	return {
+		manualPaths: [...draft.manualPaths],
+		autoIncludeRules: draft.autoIncludeRules.map((rule) => cloneSpaceMembershipRule(rule)),
+		excludedPaths: [...draft.excludedPaths],
+	};
+}
+
 /**
  * Recursively resolve a `ViewFilter` tree against the current vault state.
  * `query` leaves are not resolved here — they return empty paths.
@@ -43,6 +84,106 @@ export interface ResolvedView {
 export function resolveViewFilter(app: App, filter: ViewFilter, universe?: Set<string>): ResolvedView {
 	const allPaths = universe ?? getAllMarkdownPaths(app);
 	return resolveNode(app, filter, allPaths);
+}
+
+export function createEmptySpaceFilter(): ViewFilter {
+	return { type: "paths", value: [] };
+}
+
+export function compileSpaceMembershipDraft(draft: SpaceMembershipDraft): ViewFilter {
+	const normalized = normalizeSpaceMembershipDraft(draft);
+	const includeLeaves: ViewFilterLeaf[] = [];
+
+	if (normalized.manualPaths.length > 0) {
+		includeLeaves.push({ type: "paths", value: normalized.manualPaths });
+	}
+
+	for (const rule of normalized.autoIncludeRules) {
+		includeLeaves.push(cloneSpaceMembershipRule(rule));
+	}
+
+	if (includeLeaves.length === 0) {
+		return createEmptySpaceFilter();
+	}
+
+	const includeNode: ViewFilter =
+		includeLeaves.length === 1 ? includeLeaves[0] : { type: "any", conditions: includeLeaves };
+
+	if (normalized.excludedPaths.length === 0) {
+		return includeNode;
+	}
+
+	return {
+		type: "all",
+		conditions: [includeNode, { type: "none", conditions: [{ type: "paths", value: normalized.excludedPaths }] }],
+	};
+}
+
+export function parseSpaceMembershipFilter(filter: ViewFilter): ParsedSpaceMembershipDraft {
+	const draft: SpaceMembershipDraft = {
+		manualPaths: [],
+		autoIncludeRules: [],
+		excludedPaths: [],
+	};
+
+	if (!extractSimpleSpaceMembership(filter, draft)) {
+		return {
+			draft: {
+				manualPaths: [],
+				autoIncludeRules: [],
+				excludedPaths: [],
+			},
+			isAdvanced: true,
+		};
+	}
+
+	return {
+		draft: normalizeSpaceMembershipDraft(draft),
+		isAdvanced: false,
+	};
+}
+
+export function resolveSpaceMembershipDraft(
+	app: App,
+	draft: SpaceMembershipDraft,
+	universe?: Set<string>,
+): ResolvedSpaceMembership {
+	const normalized = normalizeSpaceMembershipDraft(draft);
+	const resolvedPaths = new Set<string>();
+	const provenance = new Map<string, string[]>();
+	const stalePaths = new Set<string>();
+	const allPaths = universe ?? getAllMarkdownPaths(app);
+
+	if (normalized.manualPaths.length > 0) {
+		const manual = resolveViewFilter(app, { type: "paths", value: normalized.manualPaths }, allPaths);
+		mergeResolvedMembership(resolvedPaths, provenance, manual, "Manual", stalePaths);
+	}
+
+	for (const rule of normalized.autoIncludeRules) {
+		const resolved = resolveViewFilter(app, rule, allPaths);
+		mergeResolvedMembership(resolvedPaths, provenance, resolved, describeMembershipRule(rule), stalePaths);
+	}
+
+	const excluded =
+		normalized.excludedPaths.length > 0
+			? resolveViewFilter(app, { type: "paths", value: normalized.excludedPaths }, allPaths)
+			: { paths: new Set<string>(), stalePaths: [] };
+
+	for (const path of excluded.paths) {
+		resolvedPaths.delete(path);
+		provenance.delete(path);
+	}
+
+	for (const stalePath of excluded.stalePaths) {
+		stalePaths.add(stalePath);
+	}
+
+	return {
+		paths: resolvedPaths,
+		stalePaths: [...stalePaths],
+		provenance,
+		excludedPaths: excluded.paths,
+	};
 }
 
 /**
@@ -184,6 +325,155 @@ export function buildFilterFromDrillStack(stack: Array<{ filter: ViewFilter }>):
 	if (stack.length === 0) return { type: "all", conditions: [] };
 	if (stack.length === 1) return stack[0].filter;
 	return { type: "all", conditions: stack.map((e) => e.filter) };
+}
+
+function normalizeSpaceMembershipDraft(draft: SpaceMembershipDraft): SpaceMembershipDraft {
+	return {
+		manualPaths: dedupeStrings(draft.manualPaths),
+		autoIncludeRules: draft.autoIncludeRules.map((rule) => cloneSpaceMembershipRule(rule)),
+		excludedPaths: dedupeStrings(draft.excludedPaths),
+	};
+}
+
+function extractSimpleSpaceMembership(filter: ViewFilter, draft: SpaceMembershipDraft): boolean {
+	if (isLeaf(filter)) {
+		return extractSimpleIncludeNode(filter, draft);
+	}
+
+	if (filter.type === "any") {
+		return filter.conditions.every((condition) => extractSimpleIncludeNode(condition, draft));
+	}
+
+	if (filter.type !== "all") {
+		return false;
+	}
+
+	let includeCount = 0;
+	for (const condition of filter.conditions) {
+		if (isSimpleExclusionNode(condition)) {
+			draft.excludedPaths.push(...collectExcludedPaths(condition));
+			continue;
+		}
+
+		includeCount += 1;
+		if (includeCount > 1) {
+			return false;
+		}
+
+		if (!extractSimpleIncludeNode(condition, draft)) {
+			return false;
+		}
+	}
+
+	return includeCount === 1;
+}
+
+function extractSimpleIncludeNode(filter: ViewFilter, draft: SpaceMembershipDraft): boolean {
+	if (isLeaf(filter)) {
+		if (filter.type === "paths") {
+			draft.manualPaths.push(...filter.value);
+			return true;
+		}
+
+		if (isSpaceMembershipRule(filter)) {
+			draft.autoIncludeRules.push(cloneSpaceMembershipRule(filter));
+			return true;
+		}
+
+		return false;
+	}
+
+	if (filter.type !== "any") {
+		return false;
+	}
+
+	return filter.conditions.every((condition) => extractSimpleIncludeNode(condition, draft));
+}
+
+function isSimpleExclusionNode(filter: ViewFilter): filter is ViewFilterGroup {
+	return (
+		filter.type === "none" &&
+		filter.conditions.every((condition) => isLeaf(condition) && condition.type === "paths")
+	);
+}
+
+function collectExcludedPaths(filter: ViewFilterGroup): string[] {
+	const paths: string[] = [];
+	for (const condition of filter.conditions) {
+		if (isLeaf(condition) && condition.type === "paths") {
+			paths.push(...condition.value);
+		}
+	}
+	return paths;
+}
+
+function isSpaceMembershipRule(filter: ViewFilter): filter is SpaceMembershipRule {
+	return filter.type === "folder" || filter.type === "tag" || filter.type === "extension" || filter.type === "query";
+}
+
+function mergeResolvedMembership(
+	resolvedPaths: Set<string>,
+	provenance: Map<string, string[]>,
+	resolved: ResolvedView,
+	source: string,
+	stalePaths: Set<string>,
+): void {
+	for (const path of resolved.paths) {
+		resolvedPaths.add(path);
+		const current = provenance.get(path) ?? [];
+		if (!current.includes(source)) {
+			provenance.set(path, [...current, source]);
+		}
+	}
+
+	for (const stalePath of resolved.stalePaths) {
+		stalePaths.add(stalePath);
+	}
+}
+
+function describeMembershipRule(rule: SpaceMembershipRule): string {
+	switch (rule.type) {
+		case "folder":
+			return `Folder: ${rule.value}`;
+		case "tag":
+			return `Tag: ${rule.value.startsWith("#") ? rule.value : `#${rule.value}`}`;
+		case "extension":
+			return `Type: ${rule.value.startsWith(".") ? rule.value.slice(1) : rule.value}`;
+		case "query":
+			return `Query: ${rule.value}`;
+	}
+}
+
+function cloneSpaceMembershipRule(rule: SpaceMembershipRule): SpaceMembershipRule {
+	switch (rule.type) {
+		case "folder":
+			return { type: "folder", value: rule.value };
+		case "tag":
+			return { type: "tag", value: rule.value };
+		case "extension":
+			return { type: "extension", value: rule.value };
+		case "query":
+			return { type: "query", value: rule.value, algorithm: rule.algorithm };
+	}
+}
+
+function cloneViewFilterLeaf(filter: ViewFilterLeaf): ViewFilterLeaf {
+	switch (filter.type) {
+		case "folder":
+			return { type: "folder", value: filter.value };
+		case "tag":
+			return { type: "tag", value: filter.value };
+		case "extension":
+			return { type: "extension", value: filter.value };
+		case "paths":
+			return { type: "paths", value: [...filter.value] };
+		case "query":
+			return { type: "query", value: filter.value, algorithm: filter.algorithm };
+	}
+}
+
+function dedupeStrings(values: string[]): string[] {
+	return [...new Set(values)];
 }
 
 /**
