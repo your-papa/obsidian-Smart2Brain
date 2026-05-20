@@ -19,7 +19,7 @@ interface Props {
 let { app, space = null, initialFilter = null, onClose }: Props = $props();
 
 const data = getData();
-const isEditing = !!space;
+let isEditing = $derived(!!space);
 
 // ── Color presets ────────────────────────────────────────────────
 const SPACE_COLOR_OPTIONS: PresetColorOption[] = [
@@ -66,15 +66,22 @@ function ensureGroup(f: ViewFilter): ViewFilter {
 	return { type: "all" as const, conditions: [structuredClone(f)] as ViewFilter[] };
 }
 
-let formLabel = $state(space?.label ?? "");
-let formColor = $state(space?.color ?? SPACE_COLOR_OPTIONS[0].value);
-let formFilter: ViewFilter = $state(
-	space
+const initialFormState = $derived.by(() => ({
+	label: space?.label ?? "",
+	color: space?.color ?? SPACE_COLOR_OPTIONS[0].value,
+	filter: space
 		? ensureGroup(space.filter)
 		: initialFilter
 			? ensureGroup(initialFilter)
 			: { type: "all" as const, conditions: [] as ViewFilter[] },
-);
+}));
+
+// svelte-ignore state_referenced_locally
+let formLabel = $state(initialFormState.label);
+// svelte-ignore state_referenced_locally
+let formColor = $state(initialFormState.color);
+// svelte-ignore state_referenced_locally
+let formFilter: ViewFilter = $state(initialFormState.filter);
 
 function handleSave() {
 	const label = formLabel.trim();
