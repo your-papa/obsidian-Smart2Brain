@@ -64,6 +64,12 @@ export interface LexicalSearchResult {
 	score: number;
 }
 
+export interface AutocompleteCacheSnapshot {
+	tags: string[];
+	tagChildCount: Map<string, number>;
+	folders: string[];
+}
+
 interface IndexedDocument {
 	id: string;
 	path: string;
@@ -91,6 +97,10 @@ export class MiniSearchService {
 	private documentPaths = new Set<string>();
 	private documentTitles = new Map<string, string>();
 	private documentAliases = new Map<string, string[]>();
+	private documentTags = new Map<string, string[]>();
+	private documentFolders = new Map<string, string[]>();
+	private tagUsageCount = new Map<string, number>();
+	private folderUsageCount = new Map<string, number>();
 	private readonly dbName: string;
 
 	constructor(vaultId: string, indexId?: string) {
@@ -173,16 +183,21 @@ export class MiniSearchService {
 						this.documentPaths.clear();
 						this.documentTitles.clear();
 						this.documentAliases.clear();
+						this.documentTags.clear();
+						this.documentFolders.clear();
+						this.tagUsageCount.clear();
+						this.folderUsageCount.clear();
 						if (data.paths && Array.isArray(data.paths)) {
 							for (const path of data.paths) {
 								this.documentPaths.add(path);
 								const stored = this.index.getStoredFields(path) as
-									| { title?: string; aliases?: string }
+									| { title?: string; aliases?: string; tags?: string }
 									| undefined;
 								if (stored?.title) {
 									this.documentTitles.set(path, stored.title);
 								}
 								this.documentAliases.set(path, this.parseStoredAliases(stored?.aliases));
+								this.setDocumentAutocompleteMetadata(path, this.parseStoredList(stored?.tags));
 							}
 						}
 						Logger.log(`[MiniSearch] Loaded index with ${this.documentPaths.size} documents`);
@@ -283,16 +298,18 @@ export class MiniSearchService {
 	addDocument(path: string, title: string, content: string, tags: string[] = []): void {
 		// Remove existing document if present
 		if (this.documentPaths.has(path)) {
+			this.removeDocumentAutocompleteMetadata(path);
 			this.index.discard(path);
 		}
 
 		const aliases = this.extractAliases(content);
+		const normalizedTags = this.normalizeStoredTags(tags);
 		const doc: IndexedDocument = {
 			id: path,
 			path,
 			title,
 			aliases: aliases.join("\n"),
-			tags: this.normalizeStoredTags(tags).join("\n"),
+			tags: normalizedTags.join("\n"),
 			pathSegments: this.extractPathSegments(path).join("\n"),
 			content,
 		};
@@ -301,6 +318,7 @@ export class MiniSearchService {
 		this.documentPaths.add(path);
 		this.documentTitles.set(path, title);
 		this.documentAliases.set(path, aliases);
+		this.setDocumentAutocompleteMetadata(path, normalizedTags);
 		this.scheduleSave();
 	}
 
@@ -310,6 +328,7 @@ export class MiniSearchService {
 	 */
 	removeDocument(path: string): void {
 		if (this.documentPaths.has(path)) {
+			this.removeDocumentAutocompleteMetadata(path);
 			this.index.discard(path);
 			this.documentPaths.delete(path);
 			this.documentTitles.delete(path);
@@ -347,7 +366,28 @@ export class MiniSearchService {
 		this.documentPaths.clear();
 		this.documentTitles.clear();
 		this.documentAliases.clear();
+		this.documentTags.clear();
+		this.documentFolders.clear();
+		this.tagUsageCount.clear();
+		this.folderUsageCount.clear();
 		this.scheduleSave();
+	}
+
+	getAutocompleteCache(): AutocompleteCacheSnapshot {
+		const tagChildCount = new Map<string, number>();
+		for (const tag of this.tagUsageCount.keys()) {
+			const parts = tag.split("/");
+			for (let index = 1; index < parts.length; index++) {
+				const parent = parts.slice(0, index).join("/");
+				tagChildCount.set(parent, (tagChildCount.get(parent) ?? 0) + 1);
+			}
+		}
+
+		return {
+			tags: Array.from(new Set([...this.tagUsageCount.keys(), ...tagChildCount.keys()])).sort(),
+			tagChildCount,
+			folders: Array.from(this.folderUsageCount.keys()).sort(),
+		};
 	}
 
 	/**
@@ -438,13 +478,13 @@ export class MiniSearchService {
 
 			const stored = this.index.getStoredFields(path) as
 				| {
-						path?: string;
-						title?: string;
-						aliases?: string;
-						tags?: string;
-						pathSegments?: string;
-						content?: string;
-				  }
+					path?: string;
+					title?: string;
+					aliases?: string;
+					tags?: string;
+					pathSegments?: string;
+					content?: string;
+				}
 				| undefined;
 
 			results.push({
@@ -480,13 +520,13 @@ export class MiniSearchService {
 
 			const stored = this.index.getStoredFields(path) as
 				| {
-						path?: string;
-						title?: string;
-						aliases?: string;
-						tags?: string;
-						pathSegments?: string;
-						content?: string;
-				  }
+					path?: string;
+					title?: string;
+					aliases?: string;
+					tags?: string;
+					pathSegments?: string;
+					content?: string;
+				}
 				| undefined;
 
 			results.push({
@@ -547,6 +587,53 @@ export class MiniSearchService {
 			.filter((segment) => segment.length > 0);
 
 		return Array.from(new Set(segments));
+	}
+
+	private extractFolderPaths(path: string): string[] {
+		const segments = path
+			.split("/")
+			.slice(0, -1)
+			.map((segment) => segment.trim())
+			.filter((segment) => segment.length > 0);
+
+		const folders: string[] = [];
+		for (let index = 1; index <= segments.length; index++) {
+			folders.push(segments.slice(0, index).join("/"));
+		}
+
+		return folders;
+	}
+
+	private updateUsageCount(map: Map<string, number>, values: string[], delta: 1 | -1): void {
+		for (const value of values) {
+			const nextCount = (map.get(value) ?? 0) + delta;
+			if (nextCount <= 0) {
+				map.delete(value);
+				continue;
+			}
+
+			map.set(value, nextCount);
+		}
+	}
+
+	private setDocumentAutocompleteMetadata(path: string, tags: string[]): void {
+		const normalizedTags = Array.from(new Set(tags.map((tag) => tag.trim()).filter((tag) => tag.length > 0)));
+		const folders = this.extractFolderPaths(path);
+
+		this.documentTags.set(path, normalizedTags);
+		this.documentFolders.set(path, folders);
+		this.updateUsageCount(this.tagUsageCount, normalizedTags, 1);
+		this.updateUsageCount(this.folderUsageCount, folders, 1);
+	}
+
+	private removeDocumentAutocompleteMetadata(path: string): void {
+		const tags = this.documentTags.get(path) ?? [];
+		const folders = this.documentFolders.get(path) ?? [];
+
+		this.updateUsageCount(this.tagUsageCount, tags, -1);
+		this.updateUsageCount(this.folderUsageCount, folders, -1);
+		this.documentTags.delete(path);
+		this.documentFolders.delete(path);
 	}
 
 	private extractFrontmatter(content: string): string | undefined {
