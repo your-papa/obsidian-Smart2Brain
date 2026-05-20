@@ -6,12 +6,14 @@ import {
 	SuggestModal,
 	TFile,
 	TFolder,
+	type WorkspaceLeaf,
 	getAllTags,
 	normalizePath,
 	setIcon,
 } from "obsidian";
 import { performSearch } from "../../agent/tools/searchNotes";
 import { getRecentNotes } from "../../search/recentNotes";
+import { getLexicalSearchService, isLexicalSearchInitialized } from "../../search/LexicalSearchService";
 import type { SearchResult } from "../../vectorstore/types";
 import { extractSearchTerms } from "../../search/searchTermUtils";
 import { getData, getImmersedSpace } from "../../stores/dataStore.svelte";
@@ -233,6 +235,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private glowAnimationId: number | null = null;
 	private borderEl: HTMLElement | null = null;
 	private searchTimeout: number | null = null;
+	private autocompleteHydrationTimeout: number | null = null;
 	private searchRequestId = 0;
 	private lastRequestedSearchKey = "";
 	private cachedAutocompleteTags: string[] = [];
@@ -368,13 +371,28 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		if (destination === false) {
-			const existingLeaf = this.app.workspace
-				.getLeavesOfType("markdown")
-				.find((leaf) => leaf.view instanceof MarkdownView && leaf.view.file?.path === file.path);
+			let existingLeaf: WorkspaceLeaf | null = null;
+			this.app.workspace.iterateAllLeaves((leaf) => {
+				if (existingLeaf) {
+					return;
+				}
+
+				const viewState = leaf.getViewState();
+				if (viewState.type === "markdown" && viewState.state?.file === file.path) {
+					existingLeaf = leaf;
+					return;
+				}
+
+				if (leaf.view instanceof MarkdownView && leaf.view.file?.path === file.path) {
+					existingLeaf = leaf;
+				}
+			});
 
 			if (existingLeaf) {
+				getData().recordRecentlyOpenedNote(file.path);
 				this.close();
-				this.app.workspace.revealLeaf(existingLeaf);
+				this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+				void this.app.workspace.revealLeaf(existingLeaf);
 				return;
 			}
 		}
@@ -487,7 +505,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.isClosed = false;
 		this.currentQuery = "";
 		this.lastRequestedSearchKey = "";
-		this.searchResults = getRecentNotes(this.app).slice(0, 20);
+		this.searchResults = this.getModalRecentNotes();
 		this.buildAutocompleteCaches();
 		this.setupInlineChips();
 
@@ -501,7 +519,8 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			}
 		}
 
-		// Seed the empty-query state immediately so recent notes are visible on first open.
+		// Render the lightweight recent-opened list immediately so the modal
+		// doesn't appear empty.
 		// @ts-ignore - updateSuggestions is a protected method
 		this.updateSuggestions();
 	}
@@ -521,6 +540,81 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			window.clearTimeout(this.searchTimeout);
 			this.searchTimeout = null;
 		}
+		if (this.autocompleteHydrationTimeout !== null) {
+			window.clearTimeout(this.autocompleteHydrationTimeout);
+			this.autocompleteHydrationTimeout = null;
+		}
+	}
+
+	private tryPopulateAutocompleteCachesFromLexicalIndex(): boolean {
+		if (!isLexicalSearchInitialized()) {
+			return false;
+		}
+
+		const lexicalSearch = getLexicalSearchService();
+		const snapshot = lexicalSearch.getAutocompleteCache();
+		if (snapshot.tags.length === 0 && snapshot.folders.length === 0 && lexicalSearch.documentCount === 0) {
+			return false;
+		}
+
+		this.cachedTagChildCount = new Map(snapshot.tagChildCount);
+		this.cachedAutocompleteTags = [...snapshot.tags];
+		this.cachedAutocompleteFolders = [...snapshot.folders];
+		return true;
+	}
+
+	private populateAutocompleteCachesFromVault(): void {
+		const leafTags = new Set<string>();
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const cache = this.app.metadataCache.getFileCache(file);
+			if (!cache) {
+				continue;
+			}
+
+			for (const tag of getAllTags(cache) ?? []) {
+				leafTags.add(tag);
+			}
+		}
+
+		this.cachedTagChildCount.clear();
+		for (const tag of leafTags) {
+			const parts = tag.split("/");
+			for (let index = 1; index < parts.length; index++) {
+				const parent = parts.slice(0, index).join("/");
+				this.cachedTagChildCount.set(parent, (this.cachedTagChildCount.get(parent) ?? 0) + 1);
+			}
+		}
+
+		this.cachedAutocompleteTags = Array.from(new Set([...leafTags, ...this.cachedTagChildCount.keys()])).sort();
+		this.cachedAutocompleteFolders = this.app.vault
+			.getAllLoadedFiles()
+			.filter(
+				(abstractFile): abstractFile is TFolder => abstractFile instanceof TFolder && abstractFile.path !== "/",
+			)
+			.map((folder) => folder.path)
+			.sort();
+	}
+
+	private scheduleAutocompleteHydration(): void {
+		if (this.isClosed || this.autocompleteHydrationTimeout !== null) {
+			return;
+		}
+
+		this.autocompleteHydrationTimeout = window.setTimeout(() => {
+			this.autocompleteHydrationTimeout = null;
+			if (this.isClosed) {
+				return;
+			}
+
+			if (!this.tryPopulateAutocompleteCachesFromLexicalIndex()) {
+				this.populateAutocompleteCachesFromVault();
+			}
+
+			if (this.getAutocompleteSuggestions(this.currentQuery)?.length) {
+				// @ts-ignore - updateSuggestions is a protected method
+				this.updateSuggestions();
+			}
+		}, 0);
 	}
 
 	/**
@@ -583,6 +677,13 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		inputEl.style.setProperty("text-indent", "0", "important");
 	}
 
+	private getModalRecentNotes(): SearchResult[] {
+		const activeFilePath = this.app.workspace.getActiveFile()?.path;
+		return getRecentNotes(this.app)
+			.filter((result) => result.path !== activeFilePath)
+			.slice(0, 20);
+	}
+
 	private setSearchQuery(cleanQuery: string): void {
 		this.currentQuery = cleanQuery;
 
@@ -599,7 +700,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			// @ts-ignore - updateSuggestions is a protected method
 			this.updateSuggestions();
 		} else {
-			this.searchResults = getRecentNotes(this.app).slice(0, 20);
+			this.searchResults = this.getModalRecentNotes();
 			this.lastRequestedSearchKey = "";
 			this.setSearching(false);
 			// @ts-ignore - updateSuggestions is a protected method
@@ -664,35 +765,14 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	}
 
 	private buildAutocompleteCaches(): void {
-		const leafTags = new Set<string>();
-		for (const file of this.app.vault.getMarkdownFiles()) {
-			const cache = this.app.metadataCache.getFileCache(file);
-			if (!cache) {
-				continue;
-			}
-
-			for (const tag of getAllTags(cache) ?? []) {
-				leafTags.add(tag);
-			}
+		if (this.tryPopulateAutocompleteCachesFromLexicalIndex()) {
+			return;
 		}
 
 		this.cachedTagChildCount.clear();
-		for (const tag of leafTags) {
-			const parts = tag.split("/");
-			for (let index = 1; index < parts.length; index++) {
-				const parent = parts.slice(0, index).join("/");
-				this.cachedTagChildCount.set(parent, (this.cachedTagChildCount.get(parent) ?? 0) + 1);
-			}
-		}
-
-		this.cachedAutocompleteTags = Array.from(new Set([...leafTags, ...this.cachedTagChildCount.keys()])).sort();
-		this.cachedAutocompleteFolders = this.app.vault
-			.getAllLoadedFiles()
-			.filter(
-				(abstractFile): abstractFile is TFolder => abstractFile instanceof TFolder && abstractFile.path !== "/",
-			)
-			.map((folder) => folder.path)
-			.sort();
+		this.cachedAutocompleteTags = [];
+		this.cachedAutocompleteFolders = [];
+		this.scheduleAutocompleteHydration();
 	}
 
 	/** Render inline filter chips inside the input container */
@@ -1062,7 +1142,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 		// Empty query with no filter → show recent notes synchronously
 		if (!query.trim() && !filter) {
-			this.searchResults = getRecentNotes(this.app).slice(0, 20);
+			this.searchResults = this.getModalRecentNotes();
 			this.lastRequestedSearchKey = "";
 			return this.searchResults;
 		}

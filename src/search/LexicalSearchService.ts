@@ -4,7 +4,11 @@ import { compileFilter, matchesSearchFilter } from "../search/searchFilters";
 import { extractSearchTerms } from "../search/searchTermUtils";
 import { Logger } from "../utils/logging";
 import { getIndexableVaultFiles, isIndexableFile, readIndexableContent } from "../utils/fileFiltering";
-import { MiniSearchService, type LexicalSearchResult } from "../vectorstore/MiniSearchService";
+import {
+	MiniSearchService,
+	type AutocompleteCacheSnapshot,
+	type LexicalSearchResult,
+} from "../vectorstore/MiniSearchService";
 import type { SearchFilter, SearchMatchBadge, SearchMatchExplanation, VectorSearchResult } from "../vectorstore/types";
 import { getData } from "../stores/dataStore.svelte";
 
@@ -142,6 +146,10 @@ export class LexicalSearchService {
 	async browse(topK: number, filter?: SearchFilter): Promise<VectorSearchResult[]> {
 		const results = this.miniSearch.browse(topK * (filter ? 3 : 1));
 		return this.applyFilter(results, topK, filter);
+	}
+
+	getAutocompleteCache(): AutocompleteCacheSnapshot {
+		return this.miniSearch.getAutocompleteCache();
 	}
 
 	private async buildIndex(): Promise<void> {
@@ -539,7 +547,7 @@ export class LexicalSearchService {
 	async cleanup(): Promise<void> {
 		try {
 			if (pendingInitPromise !== null) {
-				await pendingInitPromise.catch(() => {});
+				await pendingInitPromise.catch(() => { });
 			}
 			await this.miniSearch.flush();
 			this.miniSearch.close();

@@ -104,4 +104,37 @@ describe("MiniSearchService", () => {
 		expect(results[0]?.name).toBe("Alias Fixture");
 		expect(results[0]?.aliases).toContain("Rocket Science");
 	});
+
+	it("maintains autocomplete tag and folder aggregates incrementally", () => {
+		vi.useFakeTimers();
+
+		const service = new MiniSearchService("test-vault", "autocomplete-cache");
+		service.addDocument("Projects/Alpha/Spec.md", "Spec", "Alpha note", ["project/alpha", "shared"]);
+		service.addDocument("Projects/Beta/Plan.md", "Plan", "Beta note", ["project/beta", "shared"]);
+
+		let snapshot = service.getAutocompleteCache();
+
+		expect(snapshot.tags).toEqual(["project", "project/alpha", "project/beta", "shared"]);
+		expect(Array.from(snapshot.tagChildCount.entries())).toEqual([["project", 2]]);
+		expect(snapshot.folders).toEqual(["Projects", "Projects/Alpha", "Projects/Beta"]);
+
+		service.addDocument("Projects/Alpha/Spec.md", "Spec", "Alpha note", ["project/alpha/v2"]);
+		snapshot = service.getAutocompleteCache();
+
+		expect(snapshot.tags).toEqual(["project", "project/alpha", "project/alpha/v2", "project/beta", "shared"]);
+		expect(Array.from(snapshot.tagChildCount.entries())).toEqual([
+			["project", 2],
+			["project/alpha", 1],
+		]);
+
+		service.removeDocument("Projects/Beta/Plan.md");
+		snapshot = service.getAutocompleteCache();
+
+		expect(snapshot.tags).toEqual(["project", "project/alpha", "project/alpha/v2"]);
+		expect(Array.from(snapshot.tagChildCount.entries())).toEqual([
+			["project", 1],
+			["project/alpha", 1],
+		]);
+		expect(snapshot.folders).toEqual(["Projects", "Projects/Alpha"]);
+	});
 });

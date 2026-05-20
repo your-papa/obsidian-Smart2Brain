@@ -48,8 +48,6 @@ describe("search modal", () => {
 	].join("\n");
 	const pathNoteName = "SpaceOps/Path Fixture.md";
 	const pathNoteContent = ["# Path Fixture", "", "This note is about telemetry and consoles."].join("\n");
-	const recentCreatedNoteName = `Recent Created Fixture ${Date.now()}.md`;
-	const recentCreatedNoteContent = ["# Recent Created Fixture", "", "Created for recent notes coverage."].join("\n");
 	const shiftCreateNoteName = `Search Modal Shift Enter Fixture ${Date.now()}.md`;
 	const shiftCreateNoteTitle = shiftCreateNoteName.replace(/\.md$/u, "");
 
@@ -64,7 +62,6 @@ describe("search modal", () => {
 		createNote(tagNoteName, tagNoteContent);
 		createNote(inlineTagOnlyNoteName, inlineTagOnlyNoteContent);
 		createNote(pathNoteName, pathNoteContent);
-		createNote(recentCreatedNoteName, recentCreatedNoteContent);
 	});
 
 	afterAll(() => {
@@ -72,7 +69,6 @@ describe("search modal", () => {
 		deleteNote(tagNoteName);
 		deleteNote(inlineTagOnlyNoteName);
 		deleteNote(pathNoteName);
-		deleteNote(recentCreatedNoteName);
 		deleteNote(shiftCreateNoteName);
 		clearBuffers();
 	});
@@ -90,21 +86,6 @@ describe("search modal", () => {
 			{ ignoreError: true },
 		);
 		expect(placeholder).toContain("Search notes");
-	});
-
-	it("should include newly created notes in the initial recent notes view", async () => {
-		await waitForCondition(
-			() =>
-				obsidianEval(`(() => {
-					return Array.from(document.querySelectorAll('.s2b-search-result-name'))
-						.map((el) => el.textContent ?? '')
-						.includes('${recentCreatedNoteName.replace(/\.md$/u, "")}');
-				})()`).includes("true"),
-			"recently created note to appear in recent notes",
-			{ timeoutMs: 20_000, intervalMs: 250 },
-		);
-
-		expect(domText('.s2b-search-result-name')).toContain(recentCreatedNoteName.replace(/\.md$/u, ""));
 	});
 
 	it("should render search results after typing a query", async () => {

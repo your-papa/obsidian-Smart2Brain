@@ -9,7 +9,6 @@ import { getAllTags } from "obsidian";
 import type { App, TFile } from "obsidian";
 import { compileFilter, matchesSearchFilter } from "./searchFilters";
 import { getData } from "../stores/dataStore.svelte";
-import { getIndexableVaultFiles } from "../utils/fileFiltering";
 import type { SearchFilter, SearchMatchBadge, SearchResult } from "../vectorstore/types";
 
 const RECENT_RANK_BOOST = 2.5;
@@ -46,7 +45,7 @@ function addRecentBadge(result: SearchResult): SearchResult {
 	return { ...result, matchBadges: mergeBadges(result.matchBadges, ["recent"]) };
 }
 
-function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchResult[] {
+export function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchResult[] {
 	const pluginData = getData();
 	const getAbstractFileByPath = app.vault?.getAbstractFileByPath;
 	if (typeof getAbstractFileByPath !== "function") return [];
@@ -73,32 +72,6 @@ function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchResult[]
 	return results;
 }
 
-function getRecentlyCreatedNotes(app: App, filter?: SearchFilter): SearchResult[] {
-	if (typeof app.vault?.getFiles !== "function") return [];
-	const files = getIndexableVaultFiles(app.vault);
-
-	const compiled = filter ? compileFilter(filter) : undefined;
-	return files
-		.filter((file) => {
-			const cache = app.metadataCache.getFileCache(file);
-			const docTags = getCachedTags(cache);
-			return matchesSearchFilter(file.path, docTags, compiled ?? filter);
-		})
-		.sort((left, right) => right.stat.ctime - left.stat.ctime)
-		.slice(0, 20)
-		.map((file, index) => {
-			const cache = app.metadataCache.getFileCache(file);
-			return {
-				path: file.path,
-				name: file.basename,
-				frontmatter: cache?.frontmatter,
-				tags: getCachedTags(cache),
-				matchBadges: ["recent"] as SearchMatchBadge[],
-				score: getRecentNoteBoost(index),
-			};
-		});
-}
-
 function mergeRecentNotes(...collections: SearchResult[][]): SearchResult[] {
 	const merged = new Map<string, SearchResult>();
 	for (const collection of collections) {
@@ -120,9 +93,9 @@ function mergeRecentNotes(...collections: SearchResult[][]): SearchResult[] {
 	return Array.from(merged.values()).sort((left, right) => (right.score ?? 0) - (left.score ?? 0));
 }
 
-/** Get deduplicated recent notes (opened + recently created), optionally filtered. */
+/** Get deduplicated recent notes from the user's recently opened history, optionally filtered. */
 export function getRecentNotes(app: App, filter?: SearchFilter): SearchResult[] {
-	return mergeRecentNotes(getRecentlyOpenedNotes(app, filter), getRecentlyCreatedNotes(app, filter));
+	return mergeRecentNotes(getRecentlyOpenedNotes(app, filter));
 }
 
 /** Annotate search results that appear in recents with a "recent" badge. */
@@ -152,7 +125,7 @@ export function buildRecentBoostMap(results: SearchResult[]): Map<string, number
 	return map;
 }
 
-/** Build a set of all recent-note paths (opened + created). */
+/** Build a set of all recent-note paths from recently opened history. */
 export function getRecentPathSet(app: App, filter?: SearchFilter): Set<string> {
 	const recentPaths = new Set(getData().recentNotes.map((entry) => entry.path));
 	for (const result of getRecentNotes(app, filter)) {
