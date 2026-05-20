@@ -69,7 +69,7 @@ let {
 	onHoverPreview,
 }: Props = $props();
 
-let containerEl: HTMLDivElement;
+let containerEl: HTMLButtonElement;
 
 // Invisible anchor element repositioned over hovered nodes for Obsidian's hover popover
 let hoverAnchorEl: HTMLDivElement;
@@ -152,6 +152,13 @@ let clusterAnchorHitAreas: ClusterPillHit[] = [];
 // Labeling animation loop
 let labelAnimFrameId: number | null = null;
 
+function stopLabelAnimation() {
+	if (labelAnimFrameId != null) {
+		cancelAnimationFrame(labelAnimFrameId);
+		labelAnimFrameId = null;
+	}
+}
+
 $effect(() => {
 	if (isLabeling) {
 		function tick() {
@@ -160,15 +167,78 @@ $effect(() => {
 		}
 		labelAnimFrameId = requestAnimationFrame(tick);
 		return () => {
-			if (labelAnimFrameId != null) {
-				cancelAnimationFrame(labelAnimFrameId);
-				labelAnimFrameId = null;
-			}
+			stopLabelAnimation();
 			// One final render to clear the animated border
 			render();
 		};
 	}
 });
+
+function handleKeyDown(e: KeyboardEvent) {
+	const tag = (e.target as HTMLElement | null)?.tagName;
+	if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+	if (
+		(e.key === "Meta" || e.key === "Control") &&
+		hoveredNode &&
+		onHoverPreview &&
+		previewTriggeredForNode !== hoveredNode.id
+	) {
+		triggerNodePreview(e, hoveredNode);
+		return;
+	}
+
+	const renderer = pixi;
+	if (!renderer) return;
+
+	switch (e.key) {
+		case "Escape":
+			if (isLassoing) {
+				isLassoing = false;
+				lassoPoints = [];
+				pixi?.resumeViewport();
+				render();
+			} else if (selectedNodes.size > 0) {
+				clearSelection();
+			} else if (immersedInDraft) {
+				onExitImmersion?.();
+			} else if (focusedClusters.size > 0) {
+				onClearFocusedClusters?.();
+			}
+			break;
+		case "i":
+			if (selectedNodes.size > 0 && !immersedInDraft) {
+				onImmerseDraft?.();
+			} else if (immersedInDraft) {
+				onExitImmersion?.();
+			}
+			break;
+		case "f":
+			if (selectedNodes.size > 0) {
+				panToSelection();
+			} else {
+				fitToView();
+			}
+			break;
+		case "=":
+		case "+": {
+			const currentScale = renderer.scale;
+			const newScale = Math.min(10, currentScale * 1.2);
+			const center = renderer.screenToWorld(renderer.width / 2, renderer.height / 2);
+			renderer.moveCenter(center.x, center.y, newScale);
+			render();
+			break;
+		}
+		case "-": {
+			const currentScale = renderer.scale;
+			const newScale = Math.max(0.05, currentScale / 1.2);
+			const center = renderer.screenToWorld(renderer.width / 2, renderer.height / 2);
+			renderer.moveCenter(center.x, center.y, newScale);
+			render();
+			break;
+		}
+	}
+}
 
 // Edge lookup map: "nodeA\0nodeB" → SimLink (built once in setupSimulation)
 // Enables O(1) edge weight lookups for hover labels instead of O(n) scan.
@@ -1371,82 +1441,6 @@ onMount(() => {
 			render();
 		}
 
-		// Setup keyboard shortcuts
-		function handleKeyDown(e: KeyboardEvent) {
-			const tag = (e.target as HTMLElement)?.tagName;
-			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-
-			if (
-				(e.key === "Meta" || e.key === "Control") &&
-				hoveredNode &&
-				onHoverPreview &&
-				previewTriggeredForNode !== hoveredNode.id
-			) {
-				triggerNodePreview(e, hoveredNode);
-				return;
-			}
-
-			switch (e.key) {
-				case "Escape":
-					if (isLassoing) {
-						isLassoing = false;
-						lassoPoints = [];
-						pixi?.resumeViewport();
-						render();
-					} else if (selectedNodes.size > 0) {
-						clearSelection();
-					} else if (immersedInDraft) {
-						onExitImmersion?.();
-					} else if (focusedClusters.size > 0) {
-						onClearFocusedClusters?.();
-					}
-					break;
-				case "i":
-					if (selectedNodes.size > 0 && !immersedInDraft) {
-						onImmerseDraft?.();
-					} else if (immersedInDraft) {
-						onExitImmersion?.();
-					}
-					break;
-				case "f":
-					if (selectedNodes.size > 0) {
-						panToSelection();
-					} else {
-						fitToView();
-					}
-					break;
-				case "=":
-				case "+": {
-					// Zoom in — pixi-viewport handles it via its wheel plugin,
-					// but we provide keyboard zoom too
-					const currentScale = renderer.scale;
-					const newScale = Math.min(10, currentScale * 1.2);
-					renderer.moveCenter(
-						renderer.screenToWorld(renderer.width / 2, renderer.height / 2).x,
-						renderer.screenToWorld(renderer.width / 2, renderer.height / 2).y,
-						newScale,
-					);
-					render();
-					break;
-				}
-				case "-": {
-					const currentScale = renderer.scale;
-					const newScale = Math.max(0.05, currentScale / 1.2);
-					renderer.moveCenter(
-						renderer.screenToWorld(renderer.width / 2, renderer.height / 2).x,
-						renderer.screenToWorld(renderer.width / 2, renderer.height / 2).y,
-						newScale,
-					);
-					render();
-					break;
-				}
-			}
-		}
-		containerEl.addEventListener("keydown", handleKeyDown);
-		if (!containerEl.hasAttribute("tabindex")) {
-			containerEl.setAttribute("tabindex", "0");
-		}
-
 		const resizeObserver = new ResizeObserver(() => {
 			const rect = containerEl.getBoundingClientRect();
 			renderer.resize(rect.width, rect.height);
@@ -1471,11 +1465,13 @@ onMount(() => {
 				}
 			}
 		});
-		themeMutationObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+		themeMutationObserver.observe(document.body, {
+			attributes: true,
+			attributeFilter: ["class"],
+		});
 
 		// Store cleanup references
 		(containerEl as any).__graphCleanup = () => {
-			containerEl.removeEventListener("keydown", handleKeyDown);
 			resizeObserver.disconnect();
 			document.body.removeEventListener("css-change", handleCssChange);
 			themeMutationObserver.disconnect();
@@ -1489,7 +1485,7 @@ onMount(() => {
 			simulation.stop();
 			simulation = null;
 		}
-		stopSmartRaf();
+		stopLabelAnimation();
 		renderer.destroy();
 		pixi = null;
 	};
@@ -1531,14 +1527,16 @@ export function panToClusters(clusters: Set<number>) {
 }
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events -->
-<div
+<button
+  type="button"
   class="graph-canvas-container"
   bind:this={containerEl}
+  aria-label="Interactive graph canvas"
   onpointerdown={handleMouseDown}
   onpointermove={handleMouseMove}
   onpointerup={handleMouseUp}
   onclick={handleClick}
+  onkeydown={handleKeyDown}
   onwheel={handleWheel}
   onmouseleave={handleMouseLeave}
   oncontextmenu={handleContextMenu}
@@ -1546,7 +1544,7 @@ export function panToClusters(clusters: Set<number>) {
   <!-- Pixi.js creates its own <canvas> inside this container via pixi.init() -->
   <!-- Invisible anchor for Obsidian hover-link popover positioning -->
   <div bind:this={hoverAnchorEl} class="hover-anchor"></div>
-</div>
+</button>
 
 <style>
   .graph-canvas-container {
@@ -1554,6 +1552,11 @@ export function panToClusters(clusters: Set<number>) {
     height: 100%;
     overflow: hidden;
     position: relative;
+    display: block;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    text-align: initial;
     outline: none;
     cursor: grab;
     touch-action: none; /* Required for pointer capture to work */

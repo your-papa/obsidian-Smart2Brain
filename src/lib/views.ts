@@ -13,9 +13,11 @@
  */
 
 import { type App, type TFile, getAllTags } from "obsidian";
-import type { Region, RegionSegment, Space, ViewFilter, ViewFilterGroup, ViewFilterLeaf } from "../types/graph";
+import type { RegionSegment, Space, ViewFilter, ViewFilterGroup, ViewFilterLeaf } from "../types/graph";
 import type { SearchFilter } from "../vectorstore/types";
 import { matchesPathPrefix } from "../utils/pathUtils";
+
+type RegionLike = Pick<Space, "filter">;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -98,7 +100,7 @@ export function describeViewFilter(filter: ViewFilter): string {
  * Convenience wrapper around `resolveViewFilter` for cross-cutting use
  * (search modal, agent) that only needs the paths.
  */
-export function resolveRegionPaths(app: App, region: Region | Space, universe?: Set<string>): Set<string> {
+export function resolveRegionPaths(app: App, region: RegionLike, universe?: Set<string>): Set<string> {
 	return resolveViewFilter(app, region.filter, universe).paths;
 }
 
@@ -116,7 +118,7 @@ export const resolveSpacePaths = resolveRegionPaths;
  * the vector store pre-filter efficiently.  For complex or mixed filters it
  * falls back to resolving the filter to paths and using `pathPrefixes`.
  */
-export function resolveRegionToSearchFilter(app: App, region: Region | Space, universe?: Set<string>): SearchFilter {
+export function resolveRegionToSearchFilter(app: App, region: RegionLike, universe?: Set<string>): SearchFilter {
 	const filter = region.filter;
 
 	// Optimised path: single simple leaf

@@ -4,10 +4,8 @@ import RangeSlider from "../ui/RangeSlider.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
 import SettingContainer from "../settings/SettingContainer.svelte";
 import {
-	type ProjectionMethod,
 	type ClusteringAlgorithm,
 	type SmartGraphSettings,
-	type LayoutMode,
 	type SegmentBy,
 	type GraphData,
 	type RegionSegment,
@@ -86,10 +84,6 @@ let graphStats = $derived.by(() => {
 });
 
 const APPLY_KEYS = [
-	"projectionMethod",
-	"umapNeighbors",
-	"umapMinDist",
-	"layoutFidelity",
 	"autoK",
 	"defaultK",
 	"clusteringAlgorithm",
@@ -108,8 +102,6 @@ function takeSnapshot(s: SmartGraphSettings): ApplySnapshot {
 let appliedSnapshot: ApplySnapshot = $state(takeSnapshot(settings));
 
 let projectionDirty = $derived(APPLY_KEYS.some((k) => settings[k] !== appliedSnapshot[k]));
-
-const layoutModeOptions = [{ display: "Force-directed", value: "force" as LayoutMode }];
 
 const clusteringAlgorithmOptions = [
 	{ display: "K-Means", value: "kmeans" as ClusteringAlgorithm },
@@ -553,18 +545,6 @@ const colorByOptions = [
     gap: 6px;
   }
 
-  .graph-setting-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    width: 100%;
-  }
-
-  .graph-inline-hint {
-    font-size: 11px;
-    color: var(--text-muted);
-  }
-
   .section-header {
     display: flex;
     align-items: center;
@@ -600,19 +580,6 @@ const colorByOptions = [
 
   .section-chevron.open {
     transform: rotate(0deg);
-  }
-
-  .apply-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    justify-content: flex-end;
-    padding: 4px 0;
-  }
-
-  .section-summary {
-    font-size: 11px;
-    color: var(--text-muted);
   }
 
   .overview-grid {

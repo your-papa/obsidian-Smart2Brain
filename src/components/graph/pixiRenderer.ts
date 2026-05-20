@@ -266,7 +266,7 @@ export class PixiRenderer {
 			.pinch()
 			.wheel({ smooth: 5, trackpadPinch: true })
 			.decelerate({ friction: 0.92 })
-			.animate()
+			.animate({})
 			.clampZoom({
 				minScale: 0.05,
 				maxScale: 10,
