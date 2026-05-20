@@ -1,70 +1,111 @@
 <script lang="ts">
-import ManagedEntitySection from "../../components/settings/ManagedEntitySection.svelte";
-import ManagedEntityItem from "../../components/settings/ManagedEntityItem.svelte";
-import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
-import ProviderItem from "../../components/settings/ProviderItem.svelte";
-import SettingGroup from "../../components/settings/SettingGroup.svelte";
-import SettingItem from "../../components/settings/SettingItem.svelte";
-import Badge from "../../components/ui/Badge.svelte";
-import Button from "../../components/ui/Button.svelte";
-import Dropdown from "../../components/ui/Dropdown.svelte";
-import IconButton from "../../components/ui/IconButton.svelte";
-import { getData, setImmersedSpace } from "../../stores/dataStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import { icon } from "../../utils/utils";
-import { describeViewFilter } from "../../lib/views";
-import { SpaceManagerModal } from "../../components/modal/SpaceManagerModal";
-import { confirmDelete } from "../../components/modal/ConfirmModal";
-import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
+  import ManagedEntitySection from "../../components/settings/ManagedEntitySection.svelte";
+  import ManagedEntityItem from "../../components/settings/ManagedEntityItem.svelte";
+  import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
+  import ProviderItem from "../../components/settings/ProviderItem.svelte";
+  import SettingGroup from "../../components/settings/SettingGroup.svelte";
+  import SettingItem from "../../components/settings/SettingItem.svelte";
+  import Badge from "../../components/ui/Badge.svelte";
+  import Button from "../../components/ui/Button.svelte";
+  import Dropdown from "../../components/ui/Dropdown.svelte";
+  import IconButton from "../../components/ui/IconButton.svelte";
+  import { getData, setImmersedSpace } from "../../stores/dataStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
+  import { icon } from "../../utils/utils";
+  import {
+    describeViewFilter,
+    parseSpaceMembershipFilter,
+    resolveSpaceMembershipDraft,
+    resolveViewFilter,
+  } from "../../lib/views";
+  import { SpaceManagerModal } from "../../components/modal/SpaceManagerModal";
+  import { confirmDelete } from "../../components/modal/ConfirmModal";
+  import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
 
-const pluginData = getData();
-const plugin = getPlugin();
+  const pluginData = getData();
+  const plugin = getPlugin();
 
-const privacyListModal = new PrivacyListModal(plugin.app);
+  const privacyListModal = new PrivacyListModal(plugin.app);
 
-// Provider management state
-let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
+  // Provider management state
+  let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
 
-function handleOpenProviderSetup() {
-	new ProviderSetupModal(plugin, { templateId: "openai-compatible" }).open();
-}
+  function handleOpenProviderSetup() {
+    new ProviderSetupModal(plugin, { templateId: "openai-compatible" }).open();
+  }
 
-// ─── Spaces ──────────────────────────────────────────────
-const spaces = $derived(pluginData.spaces);
-const immersedId = $derived(pluginData.activeImmersedSpaceId);
+  // ─── Spaces ──────────────────────────────────────────────
+  const spaces = $derived(pluginData.spaces);
+  const immersedId = $derived(pluginData.activeImmersedSpaceId);
 
-const immersionModeOptions = [
-	{ display: "Global", value: "global" as const },
-	{ display: "Per-surface", value: "per-surface" as const },
-];
+  const immersionModeOptions = [
+    { display: "Global", value: "global" as const },
+    { display: "Per-surface", value: "per-surface" as const },
+  ];
 
-let immersionMode = $derived(pluginData.spaceImmersionMode);
+  let immersionMode = $derived(pluginData.spaceImmersionMode);
 
-function handleImmersionModeChange(val: "global" | "per-surface") {
-	pluginData.spaceImmersionMode = val;
-}
+  function handleImmersionModeChange(val: "global" | "per-surface") {
+    pluginData.spaceImmersionMode = val;
+  }
 
-async function handleDeleteSpace(space: (typeof spaces)[number]) {
-	if (!(await confirmDelete(plugin.app, space.label))) return;
-	pluginData.deleteSpace(space.id);
-}
+  async function handleDeleteSpace(space: (typeof spaces)[number]) {
+    if (!(await confirmDelete(plugin.app, space.label))) return;
+    pluginData.deleteSpace(space.id);
+  }
 
-function handleImmerseSpace(space: (typeof spaces)[number]) {
-	pluginData.setActiveImmersedSpaceId(space.id);
-	setImmersedSpace(space);
-}
+  function handleImmerseSpace(space: (typeof spaces)[number]) {
+    pluginData.setActiveImmersedSpaceId(space.id);
+    setImmersedSpace(space);
+  }
 
-function handleExitImmersion() {
-	pluginData.setActiveImmersedSpaceId(null);
-	setImmersedSpace(null);
-}
+  function handleExitImmersion() {
+    pluginData.setActiveImmersedSpaceId(null);
+    setImmersedSpace(null);
+  }
 
-function openSpaceManager(space?: (typeof spaces)[number]) {
-	new SpaceManagerModal(
-		plugin.app,
-		space ? { space: $state.snapshot(space) as (typeof spaces)[number] } : undefined,
-	).open();
-}
+  function openSpaceManager(space?: (typeof spaces)[number]) {
+    new SpaceManagerModal(
+      plugin.app,
+      space ? { space: $state.snapshot(space) as (typeof spaces)[number] } : undefined,
+    ).open();
+  }
+
+  function getSpaceSummary(space: (typeof spaces)[number]): string {
+    const parsed = parseSpaceMembershipFilter(space.filter);
+
+    if (parsed.isAdvanced) {
+      const resolved = resolveViewFilter(plugin.app, space.filter);
+      const parts = [
+        `${resolved.paths.size} ${resolved.paths.size === 1 ? "file" : "files"}`,
+        "custom rules",
+      ];
+      if (resolved.stalePaths.length > 0) {
+        parts.push(`${resolved.stalePaths.length} stale`);
+      }
+      return parts.join(" • ");
+    }
+
+    const resolved = resolveSpaceMembershipDraft(plugin.app, parsed.draft);
+    let manualCount = 0;
+    let autoCount = 0;
+
+    for (const sources of resolved.provenance.values()) {
+      if (sources.includes("Manual")) {
+        manualCount += 1;
+      }
+      if (sources.some((source) => source !== "Manual")) {
+        autoCount += 1;
+      }
+    }
+
+    const parts = [`${resolved.paths.size} ${resolved.paths.size === 1 ? "file" : "files"}`];
+    if (manualCount > 0) parts.push(`${manualCount} manual`);
+    if (autoCount > 0) parts.push(`${autoCount} auto`);
+    if (resolved.excludedPaths.size > 0) parts.push(`${resolved.excludedPaths.size} excluded`);
+    if (resolved.stalePaths.length > 0) parts.push(`${resolved.stalePaths.length} stale`);
+    return parts.join(" • ");
+  }
 </script>
 
 <!-- Providers -->
@@ -126,9 +167,11 @@ function openSpaceManager(space?: (typeof spaces)[number]) {
   {/snippet}
 
   {#each spaces as space (space.id)}
+    {@const summary = getSpaceSummary(space)}
     <ManagedEntityItem
       name={space.label}
-      desc={describeViewFilter(space.filter)}
+      desc={summary}
+      meta={describeViewFilter(space.filter)}
       selected={immersedId === space.id}
     >
       {#snippet leading()}
