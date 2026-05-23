@@ -17,11 +17,12 @@ import { getLexicalSearchService, isLexicalSearchInitialized } from "../../searc
 import type { SearchResult } from "../../vectorstore/types";
 import { getData, getImmersedSpace } from "../../stores/dataStore.svelte";
 import { getMessenger } from "../../stores/chatStore.svelte";
-import { getPlugin, requestSettingsTab } from "../../stores/state.svelte";
+import { getPlugin } from "../../stores/state.svelte";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import type { SearchAlgorithm } from "../../types/plugin";
 import type { SearchFilter } from "../../vectorstore";
 import { Logger } from "../../utils/logging";
+import { showSettingsLinkNotice } from "../../utils/settingsNotice";
 import { getPathIcon, getSearchResultNoteIcon, getTagIcon, resolveIconColor } from "../../utils/noteIcons";
 import {
 	formatHeadingLabel,
@@ -163,7 +164,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		]);
 		this.setPlaceholder(
 			this.pickerOptions?.pickerText?.searchPlaceholder ??
-			"Search notes, use #tag, /folder or @space, or leave empty for recent notes...",
+				"Search notes, use #tag, /folder or @space, or leave empty for recent notes...",
 		);
 		this.updateInstructions();
 
@@ -306,31 +307,10 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		return Boolean(getData().searchEmbedIndex);
 	}
 
-	private openSearchSettings(): void {
-		requestSettingsTab("search");
-
-		const app = this.app as App & {
-			setting?: { open: () => void; openTabById: (id: string) => void };
-		};
-
-		app.setting?.open();
-		app.setting?.openTabById("smart-second-brain");
-	}
-
 	private showMissingSearchEmbeddingIndexNotice(): void {
-		const notice = new Notice("", 10000);
-		const el = notice.noticeEl;
-		el.empty();
-		el.appendText("Select a search embedding index before enabling semantic search. ");
-
-		const link = el.createEl("a", {
-			text: "Open search settings",
-			href: "#",
-		});
-		link.addEventListener("click", (evt) => {
-			evt.preventDefault();
-			notice.hide();
-			this.openSearchSettings();
+		showSettingsLinkNotice(this.app, "Select a search embedding index before enabling semantic search.", {
+			tab: "search",
+			linkText: "Open search settings",
 		});
 	}
 

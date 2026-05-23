@@ -17,6 +17,7 @@ import { fetchOpenRouterModels } from "../providers/openrouterModels";
 import { getData } from "../stores/dataStore.svelte";
 import { getRegistry } from "../providers/registry";
 import { getProviderDefinition } from "../providers/index";
+import { showSettingsLinkNotice } from "../utils/settingsNotice";
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "./batchSize";
 import { createVectorStore } from "./index";
 import {
@@ -955,25 +956,41 @@ export class VectorStoreService {
 		const data = getData();
 		const resolvedId = indexId ?? data.searchEmbedIndex;
 		if (!resolvedId) {
-			new Notice("No embedding model configured. Please set a default embedding model in settings.");
+			showSettingsLinkNotice(
+				this.plugin.app,
+				"No embedding model configured. Please set a default embedding model.",
+				{
+					tab: "search",
+					linkText: "Open search settings",
+				},
+			);
 			return false;
 		}
 
 		const inst = await this.getOrCreateInstance(resolvedId);
 		const model = this.getModelForInstance(inst);
 		if (!model) {
-			new Notice("Invalid embedding index configuration.");
+			showSettingsLinkNotice(this.plugin.app, "Invalid embedding index configuration.", {
+				tab: "search",
+				linkText: "Open search settings",
+			});
 			return false;
 		}
 
 		if (!this.ensureProviderRegistered(model.provider)) {
-			new Notice(`Provider "${model.provider}" is not configured. Check your provider settings.`);
+			showSettingsLinkNotice(this.plugin.app, `Provider "${model.provider}" is not configured.`, {
+				tab: "general",
+				linkText: "Open provider settings",
+			});
 			return false;
 		}
 
 		const embeddings = this.getEmbeddingsForInstance(inst, model);
 		if (!embeddings) {
-			new Notice("Failed to initialize embedding model. Check your provider settings.");
+			showSettingsLinkNotice(this.plugin.app, "Failed to initialize embedding model.", {
+				tab: "general",
+				linkText: "Open provider settings",
+			});
 			return false;
 		}
 
