@@ -1,186 +1,178 @@
 <script lang="ts">
-  import type { Component } from "svelte";
-  import { mount, onMount, untrack } from "svelte";
-  import AuthConfigFields from "../../components/settings/AuthConfigFields.svelte";
-  import Dropdown from "../../components/ui/Dropdown.svelte";
-  import SettingItem from "../../components/settings/SettingItem.svelte";
-  import Button from "../../components/ui/Button.svelte";
-  import Text from "../../components/ui/Text.svelte";
-  import Toggle from "../../components/ui/Toggle.svelte";
-  import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
-  import {
-    createAuthStateQuery,
-    invalidateAuthState,
-    invalidateProviderState,
-  } from "../../lib/query";
-  import type SecondBrainPlugin from "../../main";
-  import {
-    getAllProviderTemplates,
-    getProviderTemplate,
-    type LogoProps,
-    type ProviderTemplateId,
-    getProviderDefinition,
-  } from "../../providers/index";
-  import { clearOpenAICodexSession, signInWithOpenAICodex } from "../../providers/openaiCodex";
-  import { getData, slugifyProviderName } from "../../stores/dataStore.svelte";
-  import { getCodexSession } from "../../stores/providerRuntime.svelte";
-  import { icon } from "../../utils/utils";
-  import type { ProviderSetupModal } from "./ProviderSetup";
+import type { Component } from "svelte";
+import { mount, onMount, untrack } from "svelte";
+import AuthConfigFields from "../../components/settings/AuthConfigFields.svelte";
+import Dropdown from "../../components/ui/Dropdown.svelte";
+import SettingItem from "../../components/settings/SettingItem.svelte";
+import Button from "../../components/ui/Button.svelte";
+import Text from "../../components/ui/Text.svelte";
+import Toggle from "../../components/ui/Toggle.svelte";
+import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
+import { createAuthStateQuery, invalidateAuthState, invalidateProviderState } from "../../lib/query";
+import type SecondBrainPlugin from "../../main";
+import {
+	getAllProviderTemplates,
+	getProviderTemplate,
+	type LogoProps,
+	type ProviderTemplateId,
+	getProviderDefinition,
+} from "../../providers/index";
+import { clearOpenAICodexSession, signInWithOpenAICodex } from "../../providers/openaiCodex";
+import { getData, slugifyProviderName } from "../../stores/dataStore.svelte";
+import { getCodexSession } from "../../stores/providerRuntime.svelte";
+import { icon } from "../../utils/utils";
+import type { ProviderSetupModal } from "./ProviderSetup";
 
-  interface Props {
-    modal: ProviderSetupModal;
-    plugin: SecondBrainPlugin;
-    selectedProvider: string;
-  }
+interface Props {
+	modal: ProviderSetupModal;
+	plugin: SecondBrainPlugin;
+	selectedProvider: string;
+}
 
-  const { modal }: Props = $props();
-  const data = getData();
+const { modal }: Props = $props();
+const data = getData();
 
-  // providerId only changes once: when a new provider is committed (renamed to slug on submit).
-  // During editing it never changes.
-  let providerId = $state(untrack(() => modal.selectedProvider));
+// providerId only changes once: when a new provider is committed (renamed to slug on submit).
+// During editing it never changes.
+let providerId = $state(untrack(() => modal.selectedProvider));
 
-  const query = createAuthStateQuery(() => providerId);
-  const providerDefinition = $derived(getProviderDefinition(providerId, data.getAllProviderMeta()));
-  const templateId = $derived(data.getProviderTemplateId(providerId));
-  const providerMeta = $derived(data.getProviderMeta(providerId));
-  const isCodex = $derived(templateId === "openai-codex");
-  const isConfigured = $derived(data.isProviderConfigured(providerId));
-  const canChooseTemplate = $derived(!isConfigured);
-  const providerTemplates = getAllProviderTemplates();
-  const providerTemplateOptions = providerTemplates.map((template) => ({
-    display: template.displayName,
-    value: template.id,
-  }));
-  let isSigningIn = $state(false);
-  let codexActionError = $state<string | null>(null);
-  const codexSession = $derived(isCodex ? getCodexSession() : null);
-  let displayName = $state("");
-  let displayNameError = $state<string | null>(null);
-  const isTrusted = $derived(data.isProviderTrusted(providerId));
+const query = createAuthStateQuery(() => providerId);
+const providerDefinition = $derived(getProviderDefinition(providerId, data.getAllProviderMeta()));
+const templateId = $derived(data.getProviderTemplateId(providerId));
+const providerMeta = $derived(data.getProviderMeta(providerId));
+const isCodex = $derived(templateId === "openai-codex");
+const isConfigured = $derived(data.isProviderConfigured(providerId));
+const canChooseTemplate = $derived(!isConfigured);
+const providerTemplates = getAllProviderTemplates();
+const providerTemplateOptions = providerTemplates.map((template) => ({
+	display: template.displayName,
+	value: template.id,
+}));
+let isSigningIn = $state(false);
+let codexActionError = $state<string | null>(null);
+const codexSession = $derived(isCodex ? getCodexSession() : null);
+let displayName = $state("");
+let displayNameError = $state<string | null>(null);
+const isTrusted = $derived(data.isProviderTrusted(providerId));
 
-  $effect(() => {
-    displayName = providerMeta?.displayName ?? "";
-  });
+$effect(() => {
+	displayName = providerMeta?.displayName ?? "";
+});
 
-  async function handleAddProvider() {
-    if (!isConfigured) {
-      // Rename the draft to a slug derived from the final display name — this is the
-      // only point where the ID changes. Doing it here (not on blur) keeps the setup
-      // flow stable while still producing a human-readable, recovery-friendly ID.
-      const name = displayName.trim() || (providerMeta?.displayName ?? "");
-      const base = slugifyProviderName(name);
-      if (base && base !== providerId) {
-        const otherIds = new Set(
-          Object.keys(data.getAllProviderMeta()).filter((id) => id !== providerId),
-        );
-        let finalId = base;
-        let n = 2;
-        while (otherIds.has(finalId)) finalId = `${base}-${n++}`;
-        try {
-          await data.renameProvider(providerId, finalId);
-          modal.selectedProvider = finalId;
-          providerId = finalId;
-        } catch {
-          // keep draft ID if rename somehow fails
-        }
-      }
-      data.setProviderConfigured(providerId, true);
-    }
-    invalidateProviderState(providerId);
-    modal.markSubmitted();
-    modal.close();
-  }
+async function handleAddProvider() {
+	if (!isConfigured) {
+		// Rename the draft to a slug derived from the final display name — this is the
+		// only point where the ID changes. Doing it here (not on blur) keeps the setup
+		// flow stable while still producing a human-readable, recovery-friendly ID.
+		const name = displayName.trim() || (providerMeta?.displayName ?? "");
+		const base = slugifyProviderName(name);
+		if (base && base !== providerId) {
+			const otherIds = new Set(Object.keys(data.getAllProviderMeta()).filter((id) => id !== providerId));
+			let finalId = base;
+			let n = 2;
+			while (otherIds.has(finalId)) finalId = `${base}-${n++}`;
+			try {
+				await data.renameProvider(providerId, finalId);
+				modal.selectedProvider = finalId;
+				providerId = finalId;
+			} catch {
+				// keep draft ID if rename somehow fails
+			}
+		}
+		data.setProviderConfigured(providerId, true);
+	}
+	invalidateProviderState(providerId);
+	modal.markSubmitted();
+	modal.close();
+}
 
-  async function handleDisplayNameBlur(nextName: string) {
-    const trimmedName = nextName.trim();
-    if (!trimmedName || trimmedName === providerMeta?.displayName) {
-      displayName = providerMeta?.displayName ?? "";
-      displayNameError = null;
-      return;
-    }
-    try {
-      await data.updateProviderMeta(providerId, { displayName: trimmedName });
-      displayName = trimmedName;
-      displayNameError = null;
-      modal.refreshTitle(trimmedName);
-    } catch (e) {
-      displayNameError = e instanceof Error ? e.message : "Invalid name";
-    }
-  }
+async function handleDisplayNameBlur(nextName: string) {
+	const trimmedName = nextName.trim();
+	if (!trimmedName || trimmedName === providerMeta?.displayName) {
+		displayName = providerMeta?.displayName ?? "";
+		displayNameError = null;
+		return;
+	}
+	try {
+		await data.updateProviderMeta(providerId, { displayName: trimmedName });
+		displayName = trimmedName;
+		displayNameError = null;
+		modal.refreshTitle(trimmedName);
+	} catch (e) {
+		displayNameError = e instanceof Error ? e.message : "Invalid name";
+	}
+}
 
-  async function handleTemplateChange(nextTemplateId: string) {
-    const resolvedTemplateId = nextTemplateId as ProviderTemplateId;
-    if (!templateId || resolvedTemplateId === templateId) return;
+async function handleTemplateChange(nextTemplateId: string) {
+	const resolvedTemplateId = nextTemplateId as ProviderTemplateId;
+	if (!templateId || resolvedTemplateId === templateId) return;
 
-    const currentDefaultName =
-      getProviderTemplate(templateId)?.displayName ?? providerMeta?.displayName ?? "";
-    const nextTemplate = getProviderTemplate(resolvedTemplateId);
-    const shouldUpdateDisplayName =
-      !providerMeta?.displayName || providerMeta.displayName === currentDefaultName;
+	const currentDefaultName = getProviderTemplate(templateId)?.displayName ?? providerMeta?.displayName ?? "";
+	const nextTemplate = getProviderTemplate(resolvedTemplateId);
+	const shouldUpdateDisplayName = !providerMeta?.displayName || providerMeta.displayName === currentDefaultName;
 
-    await data.updateProviderMeta(providerId, {
-      templateId: resolvedTemplateId,
-      ...(shouldUpdateDisplayName
-        ? { displayName: nextTemplate?.displayName ?? providerMeta?.displayName ?? "" }
-        : {}),
-    });
+	await data.updateProviderMeta(providerId, {
+		templateId: resolvedTemplateId,
+		...(shouldUpdateDisplayName
+			? { displayName: nextTemplate?.displayName ?? providerMeta?.displayName ?? "" }
+			: {}),
+	});
 
-    if (shouldUpdateDisplayName) {
-      displayName = nextTemplate?.displayName ?? "";
-    }
+	if (shouldUpdateDisplayName) {
+		displayName = nextTemplate?.displayName ?? "";
+	}
 
-    invalidateAuthState(providerId);
-    invalidateProviderState(providerId);
-  }
+	invalidateAuthState(providerId);
+	invalidateProviderState(providerId);
+}
 
-  function handleTrustedChange(trusted: boolean) {
-    data.setProviderTrusted(providerId, trusted);
-  }
+function handleTrustedChange(trusted: boolean) {
+	data.setProviderTrusted(providerId, trusted);
+}
 
-  async function handleCodexSignIn() {
-    isSigningIn = true;
-    codexActionError = null;
-    try {
-      await signInWithOpenAICodex();
-      invalidateAuthState(providerId);
-    } catch (error) {
-      codexActionError = error instanceof Error ? error.message : String(error);
-    } finally {
-      isSigningIn = false;
-    }
-  }
+async function handleCodexSignIn() {
+	isSigningIn = true;
+	codexActionError = null;
+	try {
+		await signInWithOpenAICodex();
+		invalidateAuthState(providerId);
+	} catch (error) {
+		codexActionError = error instanceof Error ? error.message : String(error);
+	} finally {
+		isSigningIn = false;
+	}
+}
 
-  function handleCodexDisconnect() {
-    clearOpenAICodexSession();
-    codexActionError = null;
-    invalidateAuthState(providerId);
-  }
+function handleCodexDisconnect() {
+	clearOpenAICodexSession();
+	codexActionError = null;
+	invalidateAuthState(providerId);
+}
 
-  function getProviderLogo(): Component<LogoProps> {
-    return providerDefinition?.logo ?? GenericAIIcon;
-  }
+function getProviderLogo(): Component<LogoProps> {
+	return providerDefinition?.logo ?? GenericAIIcon;
+}
 
-  function appendHeaderElement() {
-    if (!isConfigured) return;
-    const title = modal.titleEl;
-    const header = title.parentElement;
-    title.setCssStyles({ marginBlock: "0" });
-    header?.setCssStyles({
-      display: "flex",
-      flexDirection: "row",
-      gap: "0.5rem",
-      alignItems: "center",
-      justifyItems: "start",
-    });
-    if (header) {
-      mount(getProviderLogo(), { target: header, anchor: title, props: { width: 32, height: 32 } });
-    }
-  }
+function appendHeaderElement() {
+	if (!isConfigured) return;
+	const title = modal.titleEl;
+	const header = title.parentElement;
+	title.setCssStyles({ marginBlock: "0" });
+	header?.setCssStyles({
+		display: "flex",
+		flexDirection: "row",
+		gap: "0.5rem",
+		alignItems: "center",
+		justifyItems: "start",
+	});
+	if (header) {
+		mount(getProviderLogo(), { target: header, anchor: title, props: { width: 32, height: 32 } });
+	}
+}
 
-  onMount(() => {
-    appendHeaderElement();
-  });
+onMount(() => {
+	appendHeaderElement();
+});
 </script>
 
 <div class="modal-content">

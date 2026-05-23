@@ -3,6 +3,7 @@ import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";
 import type { SelectedModel } from "./ModelSelectionModal";
 import EmbeddingIndexSetupModalComponent from "./EmbeddingIndexSetupModal.svelte";
+import { applyModalLayout } from "./modalLayout";
 
 export interface EmbeddingIndexSetupModalOptions {
 	purpose: "search" | "graph";
@@ -12,6 +13,7 @@ export interface EmbeddingIndexSetupModalOptions {
 
 export class EmbeddingIndexSetupModal extends Modal {
 	private component: ReturnType<typeof EmbeddingIndexSetupModalComponent> | null = null;
+	private restoreLayout: (() => void) | null = null;
 	private readonly plugin: SecondBrainPlugin;
 	private readonly options: EmbeddingIndexSetupModalOptions;
 
@@ -22,11 +24,14 @@ export class EmbeddingIndexSetupModal extends Modal {
 	}
 
 	onOpen() {
-		this.modalEl.style.width = "min(620px, 92vw)";
-		this.modalEl.style.maxWidth = "90vw";
-		this.modalEl.style.height = "auto";
-		this.modalEl.style.maxHeight = "80vh";
-		this.contentEl.style.padding = "16px";
+		this.restoreLayout = applyModalLayout(this, {
+			width: "min(620px, 92vw)",
+			maxWidth: "90vw",
+			height: "auto",
+			maxHeight: "80vh",
+			contentPadding: "16px",
+			contentFill: false,
+		});
 
 		this.setTitle(
 			this.options.purpose === "search" ? "Configure Search Embedding Index" : "Configure Graph Embedding Index",
@@ -44,11 +49,8 @@ export class EmbeddingIndexSetupModal extends Modal {
 	}
 
 	onClose() {
-		this.modalEl.style.removeProperty("width");
-		this.modalEl.style.removeProperty("max-width");
-		this.modalEl.style.removeProperty("height");
-		this.modalEl.style.removeProperty("max-height");
-		this.contentEl.style.removeProperty("padding");
+		this.restoreLayout?.();
+		this.restoreLayout = null;
 
 		if (this.component) {
 			unmount(this.component);

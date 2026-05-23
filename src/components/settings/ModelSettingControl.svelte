@@ -1,39 +1,43 @@
 <script lang="ts">
-import type { Component } from "svelte";
-import Button from "../ui/Button.svelte";
-import IconButton from "../ui/IconButton.svelte";
+  import type { Component } from "svelte";
+  import Button from "../ui/Button.svelte";
 
-interface Props {
-	available?: boolean;
-	loading?: boolean;
-	configureLabel?: string;
-	onConfigure?: () => void;
-	placeholder: string;
-	selectedLabel?: string | null;
-	selectedLogo?: Component<{ width?: number; height?: number }> | null;
-	onSelect: () => void;
-	secondaryLabel?: string;
-	onSecondary?: () => void;
-}
+  interface Props {
+    available?: boolean;
+    loading?: boolean;
+    configureLabel?: string;
+    onConfigure?: () => void;
+    placeholder: string;
+    selectedLabel?: string | null;
+    selectedLogo?: Component<{ width?: number; height?: number }> | null;
+    onSelect: () => void;
+    secondaryLabel?: string;
+    onSecondary?: () => void;
+  }
 
-let {
-	available = true,
-	loading = false,
-	configureLabel,
-	onConfigure,
-	placeholder,
-	selectedLabel = null,
-	selectedLogo = null,
-	onSelect,
-	secondaryLabel,
-	onSecondary,
-}: Props = $props();
+  let {
+    available = true,
+    loading = false,
+    configureLabel,
+    onConfigure,
+    placeholder,
+    selectedLabel = null,
+    selectedLogo = null,
+    onSelect,
+    secondaryLabel,
+    onSecondary,
+  }: Props = $props();
 </script>
 
 {#if loading}
   <span class="text-[--text-muted] text-sm">Loading models…</span>
 {:else if !available && configureLabel && onConfigure}
-  <IconButton icon="settings" label={configureLabel} onclick={() => onConfigure()} />
+  <Button
+    iconId="settings"
+    ariaLabel={configureLabel}
+    tooltip={configureLabel}
+    onClick={() => onConfigure()}
+  />
 {:else}
   <div class="model-setting-control">
     <Button onClick={onSelect}>

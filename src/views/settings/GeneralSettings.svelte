@@ -8,7 +8,6 @@
   import Badge from "../../components/ui/Badge.svelte";
   import Button from "../../components/ui/Button.svelte";
   import Dropdown from "../../components/ui/Dropdown.svelte";
-  import IconButton from "../../components/ui/IconButton.svelte";
   import { getData, setImmersedSpace } from "../../stores/dataStore.svelte";
   import { getPlugin } from "../../stores/state.svelte";
   import { icon } from "../../utils/utils";
@@ -190,8 +189,18 @@
         {:else}
           <Button buttonText="Immerse" onClick={() => handleImmerseSpace(space)} />
         {/if}
-        <IconButton icon="settings" label="Edit space" onclick={() => openSpaceManager(space)} />
-        <IconButton icon="trash" label="Delete space" onclick={() => handleDeleteSpace(space)} />
+        <Button
+          iconId="settings"
+          ariaLabel="Edit space"
+          tooltip="Edit space"
+          onClick={() => openSpaceManager(space)}
+        />
+        <Button
+          iconId="trash"
+          ariaLabel="Delete space"
+          tooltip="Delete space"
+          onClick={() => handleDeleteSpace(space)}
+        />
       {/snippet}
     </ManagedEntityItem>
   {/each}
