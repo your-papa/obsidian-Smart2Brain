@@ -20,6 +20,7 @@ import type {
 	MCPServerConfig,
 	MCPServersConfig,
 	PluginData,
+	PrivacyMode,
 	RecentNoteEntry,
 	SearchAlgorithm,
 	ToolConfig,
@@ -370,6 +371,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	attachmentFolder: "",
 
 	// Privacy
+	privacyMode: "private-by-default",
 	privacyFilter: createEmptySpaceFilter(),
 
 	// UI state
@@ -480,12 +482,29 @@ export class PluginDataStore {
 		return this.#data.privacyFilter;
 	}
 
+	get privacyMode(): PrivacyMode {
+		return this.#data.privacyMode;
+	}
+
+	setPrivacyMode(mode: PrivacyMode) {
+		this.#data.privacyMode = mode;
+		this.saveSettings();
+	}
+
 	setPrivacyFilter(filter: PluginData["privacyFilter"]) {
 		this.#data.privacyFilter = filter;
 		this.saveSettings();
 	}
 
 	isFilePrivate(filePath: string): boolean {
+		const listed = this.isFileListedInPrivacyFilter(filePath);
+		if (this.#data.privacyMode === "private-by-default") {
+			return !listed;
+		}
+		return listed;
+	}
+
+	private isFileListedInPrivacyFilter(filePath: string): boolean {
 		const parsed = parseSpaceMembershipFilter(this.#data.privacyFilter);
 		if (parsed.isAdvanced) {
 			return resolveViewFilter(this._plugin.app, this.#data.privacyFilter, this.getAllVaultPaths()).paths.has(
@@ -523,7 +542,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch {
 			// ignore
@@ -1907,7 +1926,10 @@ async function resolveVaultSlug(vaultName: string): Promise<string> {
 			.replace(/[^a-z0-9]+/g, "-")
 			.replace(/^-+|-+$/g, "") || "vault";
 
-	const dbs = (await indexedDB.databases?.().catch(() => [] as IDBDatabaseInfo[])) ?? [];
+	const dbs =
+		typeof indexedDB === "undefined" || typeof indexedDB.databases !== "function"
+			? []
+			: ((await Promise.resolve(indexedDB.databases()).catch(() => [] as IDBDatabaseInfo[])) ?? []);
 	const existingNames = new Set(dbs.map((d) => d.name ?? ""));
 
 	// A slug is "taken by another vault" if any s2b- DB exists with that prefix

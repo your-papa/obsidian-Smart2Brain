@@ -1,128 +1,124 @@
 <script lang="ts">
-  import type { App } from "obsidian";
-  import type { ViewFilter } from "../../types/graph";
-  import { icon as iconDirective } from "../../utils/utils";
-  import ViewFilterBuilder from "../graph/ViewFilterBuilder.svelte";
-  import Button from "../ui/Button.svelte";
-  import FileSetEntryRow from "./FileSetEntryRow.svelte";
-  import { SearchModal, type SearchModalPickerText } from "./SearchModal";
+import type { App } from "obsidian";
+import type { ViewFilter } from "../../types/graph";
+import { icon as iconDirective } from "../../utils/utils";
+import ViewFilterBuilder from "../graph/ViewFilterBuilder.svelte";
+import Button from "../ui/Button.svelte";
+import FileSetEntryRow from "./FileSetEntryRow.svelte";
+import { SearchModal, type SearchModalPickerText } from "./SearchModal";
 
-  interface FileSetListEntry {
-    path: string;
-    displayName?: string;
-    contextLabel?: string | null;
-    isManual?: boolean;
-    hasAuto?: boolean;
-    searchable?: string;
-  }
+interface FileSetListEntry {
+	path: string;
+	displayName?: string;
+	contextLabel?: string | null;
+	isManual?: boolean;
+	hasAuto?: boolean;
+	searchable?: string;
+}
 
-  interface FileSetAction {
-    label: string;
-    onClick: (path: string) => void;
-    cta?: boolean;
-    disabled?: boolean;
-  }
+interface FileSetAction {
+	label: string;
+	onClick: (path: string) => void;
+	cta?: boolean;
+	disabled?: boolean;
+}
 
-  interface Props {
-    app: App;
-    sourcePath?: string;
-    hoverSource?: string;
-    sectionTitle?: string;
-    includedEntries: FileSetListEntry[];
-    includedEmptyText: string;
-    filteredEmptyText?: string;
-    searchPlaceholder?: string;
-    searchThreshold?: number;
-    addButtonText?: string;
-    addButtonCta?: boolean;
-    onAddFile?: (() => void | Promise<void>) | undefined;
-    pickerModalTitle?: string;
-    pickerText?: SearchModalPickerText;
-    pickerExistingPaths?: string[];
-    pickerIncludedPaths?: string[];
-    onAddPaths?: ((paths: string[]) => void | Promise<void>) | undefined;
-    showFilterToggle?: boolean;
-    filtersButtonText?: string;
-    filterToggleAriaLabel?: string;
-    isFilterActive?: boolean;
-    filterCount?: number;
-    onToggleFilters?: (() => void) | undefined;
-    showFilterPanel?: boolean;
-    filterPanelLabel?: string;
-    filterBuilderFilter?: ViewFilter | null;
-    availableFolders?: string[];
-    availableTags?: string[];
-    onFilterChange?: ((nextFilter: ViewFilter) => void) | undefined;
-    excludedEntries?: FileSetListEntry[];
-    excludedTitle?: string;
-    resolveIncludedActions?: ((entry: FileSetListEntry) => FileSetAction[]) | undefined;
-    resolveExcludedActions?: ((entry: FileSetListEntry) => FileSetAction[]) | undefined;
-  }
+interface Props {
+	app: App;
+	sourcePath?: string;
+	hoverSource?: string;
+	sectionTitle?: string;
+	includedEntries: FileSetListEntry[];
+	includedEmptyText: string;
+	filteredEmptyText?: string;
+	searchPlaceholder?: string;
+	searchThreshold?: number;
+	addButtonText?: string;
+	addButtonCta?: boolean;
+	onAddFile?: (() => void | Promise<void>) | undefined;
+	pickerModalTitle?: string;
+	pickerText?: SearchModalPickerText;
+	pickerExistingPaths?: string[];
+	pickerIncludedPaths?: string[];
+	onAddPaths?: ((paths: string[]) => void | Promise<void>) | undefined;
+	showFilterToggle?: boolean;
+	filtersButtonText?: string;
+	filterToggleAriaLabel?: string;
+	isFilterActive?: boolean;
+	filterCount?: number;
+	onToggleFilters?: (() => void) | undefined;
+	showFilterPanel?: boolean;
+	filterPanelLabel?: string;
+	filterBuilderFilter?: ViewFilter | null;
+	availableFolders?: string[];
+	availableTags?: string[];
+	onFilterChange?: ((nextFilter: ViewFilter) => void) | undefined;
+	excludedEntries?: FileSetListEntry[];
+	excludedTitle?: string;
+	resolveIncludedActions?: ((entry: FileSetListEntry) => FileSetAction[]) | undefined;
+	resolveExcludedActions?: ((entry: FileSetListEntry) => FileSetAction[]) | undefined;
+}
 
-  let {
-    app,
-    sourcePath = "",
-    hoverSource = "smart-second-brain-file-set-editor",
-    sectionTitle = "Included files",
-    includedEntries,
-    includedEmptyText,
-    filteredEmptyText = "No included files match this filter.",
-    searchPlaceholder = "Filter included files",
-    searchThreshold = 6,
-    addButtonText = "Add files",
-    addButtonCta = false,
-    onAddFile,
-    pickerModalTitle = "Add files",
-    pickerText = {},
-    pickerExistingPaths = [],
-    pickerIncludedPaths = [],
-    onAddPaths,
-    showFilterToggle = false,
-    filtersButtonText = "Filters",
-    filterToggleAriaLabel = filtersButtonText,
-    isFilterActive = false,
-    filterCount = 0,
-    onToggleFilters,
-    showFilterPanel = false,
-    filterPanelLabel = "Filters",
-    filterBuilderFilter = null,
-    availableFolders = [],
-    availableTags = [],
-    onFilterChange,
-    excludedEntries = [],
-    excludedTitle = "Excluded files",
-    resolveIncludedActions,
-    resolveExcludedActions,
-  }: Props = $props();
+let {
+	app,
+	sourcePath = "",
+	hoverSource = "smart-second-brain-file-set-editor",
+	sectionTitle = "Included files",
+	includedEntries,
+	includedEmptyText,
+	filteredEmptyText = "No included files match this filter.",
+	searchPlaceholder = "Filter included files",
+	searchThreshold = 6,
+	addButtonText = "Add files",
+	addButtonCta = false,
+	onAddFile,
+	pickerModalTitle = "Add files",
+	pickerText = {},
+	pickerExistingPaths = [],
+	pickerIncludedPaths = [],
+	onAddPaths,
+	showFilterToggle = false,
+	filtersButtonText = "Filters",
+	filterToggleAriaLabel = filtersButtonText,
+	isFilterActive = false,
+	filterCount = 0,
+	onToggleFilters,
+	showFilterPanel = false,
+	filterPanelLabel = "Filters",
+	filterBuilderFilter = null,
+	availableFolders = [],
+	availableTags = [],
+	onFilterChange,
+	excludedEntries = [],
+	excludedTitle = "Excluded files",
+	resolveIncludedActions,
+	resolveExcludedActions,
+}: Props = $props();
 
-  let includedQuery = $state("");
-  const filteredIncludedEntries = $derived.by(() => {
-    const query = includedQuery.trim().toLowerCase();
-    if (!query) return includedEntries;
-    return includedEntries.filter((entry) =>
-      (entry.searchable ?? entry.path).toLowerCase().includes(query),
-    );
-  });
+let includedQuery = $state("");
+const filteredIncludedEntries = $derived.by(() => {
+	const query = includedQuery.trim().toLowerCase();
+	if (!query) return includedEntries;
+	return includedEntries.filter((entry) => (entry.searchable ?? entry.path).toLowerCase().includes(query));
+});
 
-  const showSearchInput = $derived.by(
-    () => includedEntries.length > searchThreshold || includedQuery.trim().length > 0,
-  );
-  const hasAddButton = $derived.by(() => Boolean(onAddFile || onAddPaths));
-  function handleAddButtonClick() {
-    if (onAddPaths) {
-      void pickerModalTitle;
-      new SearchModal(app, {
-        picker: {
-          pickerText,
-          pickerExistingPaths,
-          pickerIncludedPaths,
-          onAddPaths,
-        },
-      }).open();
-      return;
-    }
-    void onAddFile?.();
-  }
+const showSearchInput = $derived.by(() => includedEntries.length > searchThreshold || includedQuery.trim().length > 0);
+const hasAddButton = $derived.by(() => Boolean(onAddFile || onAddPaths));
+function handleAddButtonClick() {
+	if (onAddPaths) {
+		void pickerModalTitle;
+		new SearchModal(app, {
+			picker: {
+				pickerText,
+				pickerExistingPaths,
+				pickerIncludedPaths,
+				onAddPaths,
+			},
+		}).open();
+		return;
+	}
+	void onAddFile?.();
+}
 </script>
 
 <div class="file-set-editor-panel">
