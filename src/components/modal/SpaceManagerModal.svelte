@@ -12,12 +12,11 @@
     resolveViewFilter,
   } from "../../lib/views";
   import { getData } from "../../stores/dataStore.svelte";
-  import { icon as iconDirective } from "../../utils/utils";
+  import { getPlugin } from "../../stores/state.svelte";
   import PresetColorSelector, { type PresetColorOption } from "../ui/PresetColorSelector.svelte";
   import ViewFilterBuilder from "../graph/ViewFilterBuilder.svelte";
-  import Badge from "../ui/Badge.svelte";
   import Button from "../ui/Button.svelte";
-  import { SpaceFilePickerModal } from "./SpaceFilePickerModal";
+  import FileSetEditor from "./FileSetEditor.svelte";
 
   interface Props {
     app: App;
@@ -109,7 +108,7 @@
   // svelte-ignore state_referenced_locally
   let formFilter: ViewFilter = $state(initialFormState.filter);
   let showAutoIncludeRules = $state(false);
-  let includedFilesQuery = $state("");
+  const sourcePath = $derived(app.workspace.getActiveFile()?.path ?? "");
 
   const normalizedFormFilter = $derived.by(() => normalizeFilterForSave(formFilter));
   const parsedMembership = $derived.by(() => parseSpaceMembershipFilter(normalizedFormFilter));
@@ -144,97 +143,71 @@
       ? []
       : [...parsedMembership.draft.excludedPaths].sort((left, right) => left.localeCompare(right)),
   );
+
+  function getParentPath(path: string): string {
+    const parts = path.split("/");
+    return parts.slice(0, -1).join("/");
+  }
+
+  function getDuplicateContextByPath(paths: string[]): Map<string, string | null> {
+    const counts = new Map<string, number>();
+    for (const path of paths) {
+      const name = getFileDisplayName(path);
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+
+    const contextByPath = new Map<string, string | null>();
+    for (const path of paths) {
+      const name = getFileDisplayName(path);
+      if ((counts.get(name) ?? 0) <= 1) {
+        contextByPath.set(path, null);
+        continue;
+      }
+
+      const parentPath = getParentPath(path);
+      contextByPath.set(path, parentPath || "Root");
+    }
+
+    return contextByPath;
+  }
+
+  const includedPathContext = $derived.by(() => getDuplicateContextByPath(includedFiles));
+  const excludedPathContext = $derived.by(() => getDuplicateContextByPath(excludedFiles));
+
   const includedFileEntries = $derived.by(() =>
     includedFiles.map((path) => {
       const sources = getSources(path);
       const isManual = sources.includes("Manual");
       const hasAuto = sources.some((source) => source !== "Manual");
-      const groupKey = isManual && hasAuto ? "mixed" : isManual ? "manual" : "rules";
       return {
         path,
         displayName: getFileDisplayName(path),
-        sources,
+        contextLabel: includedPathContext.get(path) ?? null,
         isManual,
         hasAuto,
-        groupKey,
         searchable: `${path} ${getFileDisplayName(path)} ${sources.join(" ")}`.toLowerCase(),
       };
     }),
   );
-  const filteredIncludedFileEntries = $derived.by(() => {
-    const query = includedFilesQuery.trim().toLowerCase();
-    if (!query) return includedFileEntries;
-    return includedFileEntries.filter((entry) => entry.searchable.includes(query));
-  });
-  const groupedIncludedFileEntries = $derived.by(() => {
-    if (parsedMembership.isAdvanced) {
-      return [
-        {
-          key: "all",
-          label: "Files",
-          description: null,
-          items: filteredIncludedFileEntries,
-        },
-      ];
-    }
-
-    const groups = [
-      {
-        key: "manual",
-        label: "Pinned files",
-        description: "Always included until you remove them.",
-        items: filteredIncludedFileEntries.filter((entry) => entry.groupKey === "manual"),
-      },
-      {
-        key: "mixed",
-        label: "Pinned + rule-matched",
-        description: "Pinned now and still matched by filters.",
-        items: filteredIncludedFileEntries.filter((entry) => entry.groupKey === "mixed"),
-      },
-      {
-        key: "rules",
-        label: "Rule-matched files",
-        description: "Currently included by your filters.",
-        items: filteredIncludedFileEntries.filter((entry) => entry.groupKey === "rules"),
-      },
-    ];
-
-    return groups.filter((group) => group.items.length > 0);
-  });
-
+  const excludedFileEntries = $derived.by(() =>
+    excludedFiles.map((path) => ({
+      path,
+      displayName: getFileDisplayName(path),
+      contextLabel: excludedPathContext.get(path) ?? null,
+    })),
+  );
   const membershipSummary = $derived.by(() => {
     if (parsedMembership.isAdvanced) {
       const resolved = resolvedAdvancedMembership;
       return {
         totalCount: resolved?.paths.size ?? 0,
-        manualCount: null,
-        autoCount: null,
-        excludedCount: null,
         staleCount: resolved?.stalePaths.length ?? 0,
-        isAdvanced: true,
       };
     }
 
-    const resolved = resolvedSimpleMembership;
-    let manualCount = 0;
-    let autoCount = 0;
-
-    for (const sources of resolved?.provenance.values() ?? []) {
-      if (sources.includes("Manual")) {
-        manualCount += 1;
-      }
-      if (sources.some((source) => source !== "Manual")) {
-        autoCount += 1;
-      }
-    }
-
     return {
-      totalCount: resolved?.paths.size ?? 0,
-      manualCount,
-      autoCount,
-      excludedCount: resolved?.excludedPaths.size ?? 0,
-      staleCount: resolved?.stalePaths.length ?? 0,
-      isAdvanced: false,
+      totalCount: resolvedSimpleMembership?.paths.size ?? 0,
+      staleCount: resolvedSimpleMembership?.stalePaths.length ?? 0,
     };
   });
 
@@ -310,24 +283,15 @@
   function updateSimpleMembershipDraft(
     mutator: (draft: NonNullable<typeof parsedMembership.draft>) => void,
   ) {
-    if (parsedMembership.isAdvanced) return;
-    const next = cloneSpaceMembershipDraft(parsedMembership.draft);
+    const currentParsedMembership = parseSpaceMembershipFilter(normalizeFilterForSave(formFilter));
+    if (currentParsedMembership.isAdvanced) return;
+    const next = cloneSpaceMembershipDraft(currentParsedMembership.draft);
     mutator(next);
     formFilter = compileSpaceMembershipDraft(next);
   }
 
-  async function handleOpenFilePicker() {
-    if (parsedMembership.isAdvanced) return;
-
-    const picker = new SpaceFilePickerModal(app, {
-      existingManualPaths: parsedMembership.draft.manualPaths,
-      includedPaths: includedFiles,
-    });
-    picker.open();
-
-    const selectedPaths = await picker.promise;
-    if (selectedPaths.length === 0) return;
-
+  async function handleAddPaths(selectedPaths: string[]) {
+    if (parsedMembership.isAdvanced || selectedPaths.length === 0) return;
     updateSimpleMembershipDraft((draft) => {
       for (const path of selectedPaths) {
         if (!availableFiles.includes(path)) continue;
@@ -371,6 +335,29 @@
     return !parsedMembership.isAdvanced && parsedMembership.draft.manualPaths.includes(path);
   }
 
+  function getIncludedFileActions(entry: {
+    path: string;
+    isManual?: boolean;
+    hasAuto?: boolean;
+  }): Array<{ label: string; onClick: (path: string) => void }> {
+    if (parsedMembership.isAdvanced) return [];
+    const actions: Array<{ label: string; onClick: (path: string) => void }> = [];
+    if (entry.isManual) {
+      actions.push({
+        label: entry.hasAuto ? "Unpin" : "Remove",
+        onClick: handleRemoveManualPath,
+      });
+    }
+    if (entry.hasAuto) {
+      actions.push({ label: "Keep out", onClick: handleExcludePath });
+    }
+    return actions;
+  }
+
+  function getExcludedFileActions(): Array<{ label: string; onClick: (path: string) => void }> {
+    return [{ label: "Restore", onClick: handleRestoreExcludedPath }];
+  }
+
   function toggleAutoIncludeRules() {
     showAutoIncludeRules = !showAutoIncludeRules;
   }
@@ -400,7 +387,7 @@
   }
 </script>
 
-<div class="s2b-space-editor flex flex-col gap-3 p-2">
+<div class="s2b-space-editor flex h-full min-h-0 flex-col gap-3 p-2">
   <!-- Color + Name row -->
   <div class="flex items-center gap-2">
     <PresetColorSelector
@@ -418,178 +405,54 @@
     <span
       >{membershipSummary.totalCount} {membershipSummary.totalCount === 1 ? "file" : "files"}</span
     >
-    {#if membershipSummary.manualCount !== null}
-      <span> • {membershipSummary.manualCount} manual</span>
-    {/if}
-    {#if membershipSummary.autoCount !== null}
-      <span> • {membershipSummary.autoCount} auto</span>
-    {/if}
-    {#if membershipSummary.excludedCount !== null && membershipSummary.excludedCount > 0}
-      <span> • {membershipSummary.excludedCount} excluded</span>
-    {/if}
-    {#if membershipSummary.isAdvanced}
-      <span> • custom rules</span>
-    {/if}
     {#if membershipSummary.staleCount > 0}
       <span> • {membershipSummary.staleCount} stale</span>
     {/if}
   </div>
 
-  <div
-    class="border border-solid border-[--background-modifier-border] rounded-md p-2 flex flex-col gap-2"
-  >
-    <div class="flex items-center justify-between gap-2">
-      <div class="text-xs text-[--text-muted]">Included files</div>
-      {#if parsedMembership.isAdvanced}
-        <div class="text-xs text-[--text-muted]">Read-only for custom rules</div>
-      {/if}
-    </div>
-
-    {#if !parsedMembership.isAdvanced}
-      <div class="flex flex-col gap-2">
-        <div class="flex items-center justify-between gap-2">
-          <div class="text-xs text-[--text-muted]">
-            Add specific files directly, or use filters for automatic membership.
-          </div>
-          <div class="flex items-center gap-1 shrink-0">
-            <button
-              type="button"
-              class="space-filter-toggle-wrap space-filter-toggle"
-              class:space-filter-toggle--active={hasAutoIncludeRules}
-              aria-label={autoIncludeRulesLabel}
-              onclick={toggleAutoIncludeRules}
-            >
-              <span class="space-filter-toggle-content">
-                <span class="space-filter-toggle-icon" use:iconDirective={"filter"}></span>
-                <span>Filters</span>
-              </span>
-              {#if autoIncludeRuleCount > 0}
-                <span class="space-filter-count">{autoIncludeRuleCount}</span>
-              {/if}
-            </button>
-            <Button onClick={() => void handleOpenFilePicker()} buttonText="Add file" />
-          </div>
-        </div>
-
-        {#if autoIncludeRulesOpen}
-          <div class="space-filter-panel">
-            <div class="flex items-start justify-between gap-2">
-              <div class="flex flex-col gap-1">
-                <div class="text-xs text-[--text-muted]">Auto-include rules</div>
-                <div class="text-xs text-[--text-muted]">
-                  For folders, tags, and file types that should stay in sync automatically.
-                </div>
-              </div>
-              {#if autoIncludeRuleCount > 0}
-                <div class="text-xs text-[--text-muted] shrink-0">
-                  {autoIncludeRuleCount} active
-                </div>
-              {/if}
-            </div>
-
-            <ViewFilterBuilder
-              filter={editableRulesFilter}
-              onchange={handleRulesFilterChange}
-              {availableFolders}
-              {availableTags}
-            />
-          </div>
-        {/if}
-      </div>
-    {/if}
-
-    {#if includedFiles.length === 0}
-      <div class="text-xs text-[--text-muted]">
-        {#if parsedMembership.isAdvanced}
-          No files currently match these rules.
-        {:else}
-          No files yet. Add files directly or open the filters above.
-        {/if}
-      </div>
-    {:else}
-      <div class="flex flex-col gap-2">
-        {#if includedFiles.length > 6 || includedFilesQuery.trim().length > 0}
-          <input
-            type="search"
-            class="space-file-filter-input"
-            placeholder="Filter included files"
-            bind:value={includedFilesQuery}
-          />
-        {/if}
-
-        {#if filteredIncludedFileEntries.length === 0}
-          <div class="text-xs text-[--text-muted]">No included files match this filter.</div>
-        {:else}
-          <div class="max-h-56 overflow-auto flex flex-col gap-3">
-            {#each groupedIncludedFileEntries as group (group.key)}
-              <div class="flex flex-col gap-2">
-                {#if group.label}
-                  <div class="space-file-group-header">
-                    <div class="text-xs font-medium">{group.label}</div>
-                    {#if group.description}
-                      <div class="text-xs text-[--text-muted]">{group.description}</div>
-                    {/if}
-                  </div>
-                {/if}
-
-                {#each group.items as entry (entry.path)}
-                  <div class="space-file-row">
-                    <div class="min-w-0 flex-1">
-                      <div class="text-sm truncate">{entry.displayName}</div>
-                      <div class="text-xs text-[--text-muted] truncate">{entry.path}</div>
-                      {#if entry.sources.length > 0}
-                        <div class="flex flex-wrap gap-1 mt-2">
-                          {#each entry.sources as source (source)}
-                            <Badge label={source} tone={source === "Manual" ? "accent" : "muted"} />
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-
-                    {#if !parsedMembership.isAdvanced}
-                      <div class="space-file-actions">
-                        {#if entry.isManual}
-                          <div class="space-file-action-group">
-                            <Button
-                              onClick={() => handleRemoveManualPath(entry.path)}
-                              buttonText={entry.hasAuto ? "Unpin" : "Remove"}
-                            />
-                            <div class="space-file-action-note">
-                              {entry.hasAuto
-                                ? "Still included while rules match."
-                                : "Removes it from this space."}
-                            </div>
-                          </div>
-                        {/if}
-                        {#if entry.hasAuto}
-                          <div class="space-file-action-group">
-                            <Button
-                              onClick={() => handleExcludePath(entry.path)}
-                              buttonText="Keep out"
-                            />
-                            <div class="space-file-action-note">Stops rules from re-adding it.</div>
-                          </div>
-                        {/if}
-                      </div>
-                    {/if}
-                  </div>
-                {/each}
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
+  <div class="flex min-h-0 flex-1 flex-col gap-2">
+    <FileSetEditor
+      {app}
+      {sourcePath}
+      hoverSource="smart-second-brain-space-editor"
+      includedEntries={includedFileEntries}
+      includedEmptyText={parsedMembership.isAdvanced ? "No matching files." : "No files yet."}
+      showFilterToggle={!parsedMembership.isAdvanced}
+      filtersButtonText="Filters"
+      filterToggleAriaLabel={autoIncludeRulesLabel}
+      isFilterActive={hasAutoIncludeRules}
+      filterCount={autoIncludeRuleCount}
+      onToggleFilters={!parsedMembership.isAdvanced ? toggleAutoIncludeRules : undefined}
+      addButtonText="Add files"
+      pickerModalTitle="Add files to this space"
+      pickerText={{
+        searchPlaceholder: "Search vault files",
+        searchAriaLabel: "Search files to include in this space",
+        defaultHeading: "Vault files",
+        defaultDescription: "Select one or more vault files to include in this space.",
+        emptySearchText: "No matching files found.",
+        confirmVerb: "Add",
+        alreadySelectedBadgeLabel: "Already included",
+      }}
+      pickerExistingPaths={!parsedMembership.isAdvanced ? parsedMembership.draft.manualPaths : []}
+      pickerIncludedPaths={includedFiles}
+      onAddPaths={!parsedMembership.isAdvanced ? handleAddPaths : undefined}
+      showFilterPanel={!parsedMembership.isAdvanced && autoIncludeRulesOpen}
+      filterPanelLabel="Filters"
+      filterBuilderFilter={!parsedMembership.isAdvanced ? editableRulesFilter : null}
+      onFilterChange={!parsedMembership.isAdvanced ? handleRulesFilterChange : undefined}
+      {availableFolders}
+      {availableTags}
+      excludedEntries={!parsedMembership.isAdvanced ? excludedFileEntries : []}
+      excludedTitle="Excluded files"
+      resolveIncludedActions={getIncludedFileActions}
+      resolveExcludedActions={getExcludedFileActions}
+    />
   </div>
 
   {#if parsedMembership.isAdvanced}
     <div class="space-filter-panel">
-      <div class="flex flex-col gap-1">
-        <div class="text-xs text-[--text-muted]">Custom rules</div>
-        <div class="text-xs text-[--text-muted]">
-          This space uses a custom rule set. Files are shown above, and you can edit the rules here.
-        </div>
-      </div>
+      <div class="text-xs text-[--text-muted]">Custom rules</div>
 
       <ViewFilterBuilder
         filter={editableRulesFilter}
@@ -599,28 +462,6 @@
       />
     </div>
   {/if}
-
-  {#if !parsedMembership.isAdvanced && excludedFiles.length > 0}
-    <div
-      class="border border-solid border-[--background-modifier-border] rounded-md p-2 flex flex-col gap-2"
-    >
-      <div class="text-xs text-[--text-muted]">Excluded files</div>
-      <div class="flex flex-col gap-2">
-        {#each excludedFiles as path (path)}
-          <div
-            class="flex items-center justify-between gap-3 rounded-md border border-solid border-[--background-modifier-border] px-3 py-2"
-          >
-            <div class="min-w-0 flex-1">
-              <div class="text-sm truncate">{getFileDisplayName(path)}</div>
-              <div class="text-xs text-[--text-muted] truncate">{path}</div>
-            </div>
-            <Button onClick={() => handleRestoreExcludedPath(path)} buttonText="Restore" />
-          </div>
-        {/each}
-      </div>
-    </div>
-  {/if}
-
   <!-- Actions -->
   <div class="flex items-center gap-2 justify-end">
     <Button onClick={onClose} buttonText="Cancel" />
@@ -634,65 +475,6 @@
 </div>
 
 <style>
-  .space-filter-toggle-wrap {
-    position: relative;
-  }
-
-  .space-filter-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 999px;
-    background: var(--background-primary);
-    color: var(--text-normal);
-    transition:
-      border-color 120ms ease,
-      background-color 120ms ease;
-  }
-
-  .space-filter-toggle:hover {
-    background: var(--background-modifier-hover);
-  }
-
-  .space-filter-toggle-content {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.8rem;
-    font-weight: 500;
-  }
-
-  .space-filter-toggle-icon {
-    width: var(--icon-m);
-    height: var(--icon-m);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .space-filter-toggle--active {
-    border-color: var(--interactive-accent);
-    background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
-  }
-
-  .space-filter-count {
-    position: absolute;
-    top: -4px;
-    right: -4px;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    border-radius: 999px;
-    background: var(--interactive-accent);
-    color: var(--text-on-accent);
-    font-size: 10px;
-    line-height: 16px;
-    text-align: center;
-    font-weight: 600;
-  }
-
   .space-filter-panel {
     border: 1px solid var(--background-modifier-border);
     border-radius: 8px;
@@ -702,52 +484,5 @@
     flex-direction: column;
     gap: 10px;
     font-size: 0.8rem;
-  }
-
-  .space-file-filter-input {
-    width: 100%;
-    padding: 8px 10px;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 8px;
-    background: var(--background-primary);
-    color: var(--text-normal);
-  }
-
-  .space-file-group-header {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .space-file-row {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px 12px;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 8px;
-  }
-
-  .space-file-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    flex-shrink: 0;
-  }
-
-  .space-file-action-group {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
-  }
-
-  .space-file-action-note {
-    max-width: 150px;
-    font-size: 0.72rem;
-    line-height: 1.3;
-    color: var(--text-muted);
-    text-align: right;
   }
 </style>

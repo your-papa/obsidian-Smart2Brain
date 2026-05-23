@@ -15,16 +15,24 @@ import { performSearch } from "../../agent/tools/searchNotes";
 import { getRecentNotes } from "../../search/recentNotes";
 import { getLexicalSearchService, isLexicalSearchInitialized } from "../../search/LexicalSearchService";
 import type { SearchResult } from "../../vectorstore/types";
-import { extractSearchTerms } from "../../search/searchTermUtils";
 import { getData, getImmersedSpace } from "../../stores/dataStore.svelte";
 import { getMessenger } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import type { SearchAlgorithm } from "../../types/plugin";
 import type { SearchFilter } from "../../vectorstore";
-import type { SearchMatchBadge } from "../../vectorstore/types";
 import { Logger } from "../../utils/logging";
 import { getPathIcon, getSearchResultNoteIcon, getTagIcon, resolveIconColor } from "../../utils/noteIcons";
+import {
+	formatHeadingLabel,
+	getBadgeIconId,
+	getBadgeLabel,
+	getDisplayTagLabel,
+	getFrontmatterDisplayTags,
+	getHighlightTerms,
+	shouldShowMatchExplanation,
+	stripHeadingPrefix,
+} from "../../utils/searchResultPresentation";
 import { resolveRegionToSearchFilter } from "../../lib/views";
 
 interface AutocompleteSuggestion {
@@ -38,10 +46,6 @@ type SearchSuggestion = SearchResult | AutocompleteSuggestion;
 
 function isAutocomplete(item: SearchSuggestion): item is AutocompleteSuggestion {
 	return "type" in item && item.type === "autocomplete";
-}
-
-function getHighlightTerms(query: string): string[] {
-	return extractSearchTerms(query);
 }
 
 function escapeRegExp(text: string): string {
@@ -78,145 +82,43 @@ function appendHighlightedText(
 	}
 }
 
-function escapeForPattern(text: string): string {
-	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function stripHeadingPrefix(text: string, heading: string): string {
-	const trimmed = text.trim();
-	if (!trimmed) return trimmed;
-
-	const patterns = [
-		new RegExp(`^#+\\s*${escapeForPattern(heading)}\\s*`, "iu"),
-		new RegExp(`^§\\s*${escapeForPattern(heading)}\\s*[—:-]?\\s*`, "iu"),
-		new RegExp(`^${escapeForPattern(heading)}\\s*[—:-]?\\s*`, "iu"),
-	];
-
-	for (const pattern of patterns) {
-		const stripped = trimmed.replace(pattern, "").trim();
-		if (stripped !== trimmed) {
-			return stripped;
-		}
-	}
-
-	return trimmed;
-}
-
-function formatHeadingLabel(heading: string, level?: number): string {
-	const normalizedLevel = Math.max(1, Math.min(level ?? 1, 6));
-	return `${"#".repeat(normalizedLevel)} ${heading}`;
-}
-
-function getBadgeLabel(badge: SearchMatchBadge): string {
-	switch (badge) {
-		case "title":
-			return "Title";
-		case "alias":
-			return "Alias";
-		case "tag":
-			return "Tag";
-		case "path":
-			return "Path";
-		case "heading":
-			return "Heading";
-		case "content":
-			return "Content";
-		case "semantic":
-			return "Semantic";
-		case "recent":
-			return "Recent";
-	}
-}
-
-function getBadgeIconId(badge: SearchMatchBadge): string {
-	switch (badge) {
-		case "title":
-			return "type";
-		case "alias":
-			return "forward";
-		case "tag":
-			return "tags";
-		case "path":
-			return "folder-tree";
-		case "heading":
-			return "heading";
-		case "content":
-			return "align-left";
-		case "semantic":
-			return "sparkles";
-		case "recent":
-			return "clock-3";
-	}
-}
-
-function normalizeDisplayTags(tags: string[] | undefined): string[] {
-	if (!tags?.length) {
-		return [];
-	}
-
-	return Array.from(
-		new Set(
-			tags
-				.map((tag) => (tag.startsWith("#") ? tag : `#${tag}`))
-				.map((tag) => tag.trim())
-				.filter((tag) => tag.length > 1),
-		),
-	);
-}
-
-function getFrontmatterDisplayTags(frontmatter: Record<string, unknown> | undefined): string[] {
-	if (!frontmatter) {
-		return [];
-	}
-
-	const rawTags = frontmatter.tags ?? frontmatter.tag;
-	if (typeof rawTags === "string") {
-		return normalizeDisplayTags(
-			rawTags
-				.split(",")
-				.map((tag) => tag.trim())
-				.filter((tag) => tag.length > 0),
-		);
-	}
-
-	if (Array.isArray(rawTags)) {
-		return normalizeDisplayTags(rawTags.filter((tag): tag is string => typeof tag === "string"));
-	}
-
-	return [];
-}
-
-function getDisplayTagLabel(tag: string): string {
-	return tag.startsWith("#") ? tag.slice(1) : tag;
-}
-
-function getExplanationTag(matchExplanation: SearchResult["matchExplanation"]): string | undefined {
-	if (matchExplanation?.source !== "tag") {
-		return undefined;
-	}
-
-	const match = matchExplanation.text.match(/^Tag:\s*(#\S+)/u);
-	return match?.[1];
-}
-
-function shouldShowMatchExplanation(
-	matchExplanation: SearchResult["matchExplanation"],
-	displayTags: string[],
-): boolean {
-	const explanationTag = getExplanationTag(matchExplanation);
-	if (!explanationTag) {
-		return true;
-	}
-
-	return !displayTags.includes(explanationTag);
-}
-
 function sanitizeNoteTitle(title: string): string {
 	return title
 		.replace(/[<>:"/\\|?*]/g, "-")
 		.replace(/\s+/g, " ")
 		.trim()
 		.substring(0, 100);
+}
+
+export interface SearchModalPickerText {
+	searchPlaceholder?: string;
+	searchAriaLabel?: string;
+	defaultHeading?: string;
+	defaultDescription?: string;
+	emptySearchText?: string;
+	selectionLabel?: string;
+	confirmVerb?: string;
+	alreadySelectedBadgeLabel?: string;
+}
+
+interface SearchModalPickerOptions {
+	pickerText?: SearchModalPickerText;
+	pickerExistingPaths?: string[];
+	pickerIncludedPaths?: string[];
+	onAddPaths: (paths: string[]) => void | Promise<void>;
+}
+
+interface SearchModalOptions {
+	picker?: SearchModalPickerOptions;
+}
+
+function createVaultFileSearchResult(app: App, file: TFile): SearchResult {
+	const cache = app.metadataCache.getFileCache(file);
+	return {
+		path: file.path,
+		name: file.basename,
+		frontmatter: cache?.frontmatter as Record<string, unknown> | undefined,
+	};
 }
 
 /**
@@ -227,6 +129,9 @@ function sanitizeNoteTitle(title: string): string {
  */
 export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private searchResults: SearchResult[] = [];
+	private readonly selectedResultsByPath = new Map<string, SearchResult>();
+	private readonly pickerOptions: SearchModalPickerOptions | null;
+	private readonly pickerUnavailablePaths: Set<string>;
 	private currentQuery = "";
 	private isSearching = false;
 	private isClosed = false;
@@ -245,10 +150,19 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private activeFilters: { type: "path" | "tag" | "space"; value: string }[] = [];
 	private inlineChipsEl: HTMLElement | null = null;
 	private inlineInputContentEl: HTMLElement | null = null;
+	private selectionSummaryEl: HTMLElement | null = null;
 
-	constructor(app: App) {
+	constructor(app: App, options: SearchModalOptions = {}) {
 		super(app);
-		this.setPlaceholder("Search notes, use #tag, /folder or @space, or leave empty for recent notes...");
+		this.pickerOptions = options.picker ?? null;
+		this.pickerUnavailablePaths = new Set([
+			...(this.pickerOptions?.pickerExistingPaths ?? []),
+			...(this.pickerOptions?.pickerIncludedPaths ?? []),
+		]);
+		this.setPlaceholder(
+			this.pickerOptions?.pickerText?.searchPlaceholder ??
+			"Search notes, use #tag, /folder or @space, or leave empty for recent notes...",
+		);
 		this.updateInstructions();
 
 		// Register Tab to toggle semantic search
@@ -280,6 +194,11 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		});
 
 		this.scope.register(["Mod"], "Enter", (evt) => {
+			if (this.isPickerMode()) {
+				evt.preventDefault();
+				return false;
+			}
+
 			evt.preventDefault();
 			void this.openSelectedSuggestionInNewTab();
 			return false;
@@ -287,19 +206,101 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 		this.scope.register(["Shift"], "Enter", (evt) => {
 			evt.preventDefault();
+			this.toggleFocusedSelection();
+			return false;
+		});
+
+		this.scope.register(["Mod", "Shift"], "Enter", (evt) => {
+			if (this.isPickerMode()) {
+				evt.preventDefault();
+				return false;
+			}
+
+			evt.preventDefault();
 			void this.createNoteFromQuery();
 			return false;
 		});
 
 		this.scope.register(["Alt"], "Enter", (evt) => {
+			if (this.isPickerMode()) {
+				evt.preventDefault();
+				return false;
+			}
+
 			evt.preventDefault();
 			void this.sendSelectedToChat();
 			return false;
 		});
 
+		this.scope.register([], "Enter", (evt) => {
+			if (this.isPickerMode()) {
+				evt.preventDefault();
+				this.confirmSelection();
+				return false;
+			}
+
+			if (evt.shiftKey || evt.altKey || evt.metaKey || evt.ctrlKey || this.selectedResultsByPath.size === 0) {
+				return true;
+			}
+
+			evt.preventDefault();
+			this.confirmSelection();
+			return false;
+		});
+
 		// Add custom class for styling
 		this.modalEl.addClass("s2b-search-modal");
+		if (this.isPickerMode()) {
+			this.modalEl.addClass("space-file-picker");
+		}
 		this.modalEl.setAttribute("data-testid", "search-modal");
+	}
+
+	private isPickerMode(): boolean {
+		return this.pickerOptions !== null;
+	}
+
+	private getPickerConfirmVerb(): string {
+		return this.pickerOptions?.pickerText?.confirmVerb ?? "Add";
+	}
+
+	private isPickerUnavailable(path: string): boolean {
+		return this.pickerUnavailablePaths.has(path);
+	}
+
+	private getPickerBrowseResults(): SearchResult[] {
+		return this.app.vault
+			.getMarkdownFiles()
+			.filter((file) => !this.isPickerUnavailable(file.path))
+			.slice()
+			.sort((left, right) => left.path.localeCompare(right.path))
+			.slice(0, 40)
+			.map((file) => createVaultFileSearchResult(this.app, file));
+	}
+
+	private getVisibleResults(results: SearchResult[]): SearchResult[] {
+		if (!this.isPickerMode()) {
+			return results;
+		}
+
+		return results.filter((result) => !this.isPickerUnavailable(result.path));
+	}
+
+	private confirmPickerResults(results: SearchResult[]): void {
+		const pickerOptions = this.pickerOptions;
+		if (!pickerOptions || results.length === 0) {
+			return;
+		}
+
+		const uniquePaths = [
+			...new Set(results.map((result) => result.path).filter((path) => !this.isPickerUnavailable(path))),
+		];
+		if (uniquePaths.length === 0) {
+			return;
+		}
+
+		this.close();
+		void pickerOptions.onAddPaths(uniquePaths);
 	}
 
 	private get activeAlgorithm(): SearchAlgorithm {
@@ -330,22 +331,50 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			this.setInstructions([]);
 			return;
 		}
+
+		if (this.isPickerMode()) {
+			this.setInstructions([
+				{ command: "↑↓", purpose: "Navigate" },
+				{
+					command: "↵",
+					purpose:
+						this.selectedResultsByPath.size > 0
+							? `${this.getPickerConfirmVerb()} selection`
+							: `${this.getPickerConfirmVerb()} focused file`,
+				},
+				{ command: "⇧↵", purpose: "Toggle selection" },
+				{ command: "esc", purpose: "Close" },
+			]);
+			return;
+		}
+
 		const tabKey = Platform.isMacOS ? "⇥" : "Tab";
 		const modEnterKey = Platform.isMacOS ? "⌘↵" : "Ctrl+↵";
+		const modShiftEnterKey = Platform.isMacOS ? "⌘⇧↵" : "Ctrl+Shift+↵";
 		const altEnterKey = Platform.isMacOS ? "⌥↵" : "Alt+↵";
 		const semanticLabel = this.semanticEnabled ? "semantic: on" : "semantic: off";
 		this.setInstructions([
 			{ command: "↑↓", purpose: "Navigate" },
-			{ command: "↵", purpose: "Open note" },
+			{ command: "↵", purpose: this.selectedResultsByPath.size > 0 ? "Confirm selection" : "Open note" },
+			{ command: "⇧↵", purpose: "Toggle selection" },
 			{ command: modEnterKey, purpose: "Open in new tab" },
 			{ command: altEnterKey, purpose: "Send to chat" },
-			{ command: "⇧↵", purpose: "Create note" },
+			{ command: modShiftEnterKey, purpose: "Create note" },
 			{ command: tabKey, purpose: semanticLabel },
 			{ command: "esc", purpose: "Close" },
 		]);
 	}
 
+	private getSelectedResults(): SearchResult[] {
+		return [...this.selectedResultsByPath.values()];
+	}
+
 	private getSelectedSuggestion(): SearchResult | null {
+		const selectedResults = this.getSelectedResults();
+		if (selectedResults.length > 0) {
+			return selectedResults[0] ?? null;
+		}
+
 		if (this.searchResults.length === 0) {
 			return null;
 		}
@@ -362,6 +391,153 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		const selectedIndex = suggestionEls.findIndex((child) => child.classList.contains("is-selected"));
 		const resultIndex = selectedIndex >= 0 ? selectedIndex : 0;
 		return this.searchResults[resultIndex] ?? this.searchResults[0] ?? null;
+	}
+
+	private getFocusedSearchResult(): SearchResult | null {
+		if (this.searchResults.length === 0) {
+			return null;
+		}
+
+		const suggestionEls = Array.from(this.resultContainerEl?.children ?? []).filter(
+			(child): child is HTMLElement =>
+				child instanceof HTMLElement && child.classList.contains("suggestion-item"),
+		);
+
+		if (suggestionEls.length === 0) {
+			return this.searchResults[0] ?? null;
+		}
+
+		const selectedIndex = suggestionEls.findIndex((child) => child.classList.contains("is-selected"));
+		const resultIndex = selectedIndex >= 0 ? selectedIndex : 0;
+		return this.searchResults[resultIndex] ?? this.searchResults[0] ?? null;
+	}
+
+	private syncRenderedSelectionState(): void {
+		const suggestionEls = Array.from(this.resultContainerEl?.children ?? []).filter(
+			(child): child is HTMLElement =>
+				child instanceof HTMLElement && child.classList.contains("suggestion-item"),
+		);
+		if (suggestionEls.length === 0) {
+			return;
+		}
+
+		for (const child of suggestionEls) {
+			const path = child.dataset.searchResultPath;
+			child.toggleClass(
+				"s2b-search-result-item-selected",
+				typeof path === "string" && this.selectedResultsByPath.has(path),
+			);
+		}
+	}
+
+	private toggleSelection(result: SearchResult): void {
+		if (this.isPickerUnavailable(result.path)) {
+			return;
+		}
+
+		if (this.selectedResultsByPath.has(result.path)) {
+			this.selectedResultsByPath.delete(result.path);
+		} else {
+			this.selectedResultsByPath.set(result.path, result);
+		}
+
+		this.updateSelectionSummary();
+		this.updateInstructions();
+		this.syncRenderedSelectionState();
+	}
+
+	private toggleFocusedSelection(): void {
+		const result = this.getFocusedSearchResult();
+		if (!result) {
+			return;
+		}
+
+		this.toggleSelection(result);
+	}
+
+	private clearSelection(): void {
+		if (this.selectedResultsByPath.size === 0) {
+			return;
+		}
+
+		this.selectedResultsByPath.clear();
+		this.updateSelectionSummary();
+		this.updateInstructions();
+		this.syncRenderedSelectionState();
+	}
+
+	private confirmSelection(): void {
+		const selectedResults = this.getSelectedResults();
+		if (this.isPickerMode()) {
+			if (selectedResults.length > 0) {
+				this.confirmPickerResults(selectedResults);
+				return;
+			}
+
+			const focusedResult = this.getFocusedSearchResult();
+			if (focusedResult) {
+				this.confirmPickerResults([focusedResult]);
+			}
+			return;
+		}
+
+		if (selectedResults.length === 0) {
+			return;
+		}
+
+		this.openSearchResults(selectedResults, false);
+	}
+
+	private openSearchResults(results: SearchResult[], destination: false | "tab"): void {
+		if (results.length === 0) {
+			return;
+		}
+
+		if (results.length === 1) {
+			this.openSearchResult(results[0], destination);
+			return;
+		}
+
+		this.close();
+		for (const [index, result] of results.entries()) {
+			getData().recordRecentlyOpenedNote(result.path);
+			this.app.workspace.openLinkText(result.path, "", destination === "tab" || index > 0 ? "tab" : false);
+		}
+	}
+
+	private createSelectionSummary(): void {
+		const inputContainer = this.modalEl.querySelector<HTMLElement>(".prompt-input-container");
+		const containerParent = inputContainer?.parentElement;
+		if (!inputContainer || !containerParent || this.selectionSummaryEl) {
+			return;
+		}
+
+		this.selectionSummaryEl = document.createElement("div");
+		this.selectionSummaryEl.className = "s2b-search-selection-summary";
+		this.selectionSummaryEl.hidden = true;
+		containerParent.insertBefore(this.selectionSummaryEl, inputContainer.nextSibling);
+		this.selectionSummaryEl.addEventListener("click", () => {
+			this.clearSelection();
+			this.getInputEl()?.focus();
+		});
+	}
+
+	private updateSelectionSummary(): void {
+		if (!this.selectionSummaryEl) {
+			return;
+		}
+
+		const count = this.selectedResultsByPath.size;
+		if (count === 0) {
+			this.selectionSummaryEl.hidden = true;
+			this.selectionSummaryEl.textContent = "";
+			return;
+		}
+
+		this.selectionSummaryEl.hidden = false;
+		this.selectionSummaryEl.textContent = this.isPickerMode()
+			? `${count} selected - Enter to ${this.getPickerConfirmVerb().toLowerCase()}, click to clear`
+			: `${count} selected - Enter to open, Alt+Enter to send, click to clear`;
 	}
 
 	private openSearchResult(result: SearchResult, destination: false | "tab"): void {
@@ -402,6 +578,12 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	}
 
 	private async openSelectedSuggestionInNewTab(): Promise<void> {
+		const selectedResults = this.getSelectedResults();
+		if (selectedResults.length > 0) {
+			this.openSearchResults(selectedResults, "tab");
+			return;
+		}
+
 		const selectedSuggestion = this.getSelectedSuggestion();
 		if (!selectedSuggestion) {
 			return;
@@ -411,13 +593,11 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	}
 
 	private async sendSelectedToChat(): Promise<void> {
-		const selectedSuggestion = this.getSelectedSuggestion();
-		if (!selectedSuggestion) {
-			return;
-		}
-
-		const file = this.app.vault.getAbstractFileByPath(selectedSuggestion.path);
-		if (!(file instanceof TFile)) {
+		const selectedResults = this.getSelectedResults();
+		const resultPaths = selectedResults.length > 0 ? selectedResults.map((result) => result.path) : [];
+		const selectedSuggestion = resultPaths.length === 0 ? this.getSelectedSuggestion() : null;
+		const paths = selectedSuggestion ? [selectedSuggestion.path] : resultPaths;
+		if (paths.length === 0) {
 			return;
 		}
 
@@ -434,7 +614,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 		const messenger = getMessenger();
 		if (messenger) {
-			messenger.pendingAttachmentPaths = [file.path];
+			messenger.pendingAttachmentPaths = paths;
 		} else {
 			new Notice("Chat is not initialized yet. Please open a chat first.");
 		}
@@ -503,11 +683,14 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	onOpen(): void {
 		super.onOpen();
 		this.isClosed = false;
+		this.selectedResultsByPath.clear();
 		this.currentQuery = "";
 		this.lastRequestedSearchKey = "";
 		this.searchResults = this.getModalRecentNotes();
 		this.buildAutocompleteCaches();
 		this.setupInlineChips();
+		this.createSelectionSummary();
+		this.updateSelectionSummary();
 
 		// In global mode, auto-inject the immersed space as a removable chip
 		const pluginData = getData();
@@ -527,6 +710,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	onClose(): void {
 		this.isClosed = true;
+		this.selectedResultsByPath.clear();
+		this.selectionSummaryEl?.remove();
+		this.selectionSummaryEl = null;
 		this.stopGlowAnimation();
 		this.inlineChipsEl?.remove();
 		this.inlineChipsEl = null;
@@ -678,6 +864,10 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	}
 
 	private getModalRecentNotes(): SearchResult[] {
+		if (this.isPickerMode()) {
+			return this.getPickerBrowseResults();
+		}
+
 		const activeFilePath = this.app.workspace.getActiveFile()?.path;
 		return getRecentNotes(this.app)
 			.filter((result) => result.path !== activeFilePath)
@@ -1004,7 +1194,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			// Discard results from stale requests
 			if (requestId !== this.searchRequestId || this.isClosed) return;
 
-			this.searchResults = results.slice(0, 20);
+			this.searchResults = this.getVisibleResults(results).slice(0, 20);
 			// @ts-ignore - updateSuggestions is a protected method
 			this.updateSuggestions();
 		} catch (error) {
@@ -1166,6 +1356,8 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		const result = item;
+		el.dataset.searchResultPath = result.path;
+		el.toggleClass("s2b-search-result-item-selected", this.selectedResultsByPath.has(result.path));
 		const container = el.createDiv({ cls: "s2b-search-result" });
 		const highlightTerms = getHighlightTerms(this.currentQuery);
 		const searchSettings = getData();
@@ -1340,6 +1532,22 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return;
 		}
 
+		if (evt.shiftKey) {
+			this.toggleSelection(item);
+			return;
+		}
+
+		if (this.isPickerMode()) {
+			const selectedResults = this.getSelectedResults();
+			if (selectedResults.length > 0) {
+				this.confirmPickerResults(selectedResults);
+				return;
+			}
+
+			this.confirmPickerResults([item]);
+			return;
+		}
+
 		const destination = evt.ctrlKey || evt.metaKey ? "tab" : false;
 		this.openSearchResult(item, destination);
 	}
@@ -1352,6 +1560,17 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			this.applyAutocompleteSuggestion(value);
 			return;
 		}
+
+		if (this.isPickerMode() && evt instanceof KeyboardEvent) {
+			if (evt.shiftKey) {
+				this.toggleSelection(value);
+				return;
+			}
+
+			this.confirmSelection();
+			return;
+		}
+
 		super.selectSuggestion(value, evt);
 	}
 

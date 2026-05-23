@@ -1,177 +1,177 @@
 <script lang="ts">
-  /**
-   * Recursive filter tree editor.
-   *
-   * Each node is either:
-   *   - a **leaf**: type dropdown (folder/tag/extension) + value input
-   *   - a **group**: ALL/ANY/NONE toggle + child list + add/remove buttons
-   *
-   * The component mutates a `ViewFilter` object in-place via `onchange`.
-   */
-  import type { ViewFilter, ViewFilterLeaf, ViewFilterGroup } from "../../types/graph";
-  import Dropdown from "../ui/Dropdown.svelte";
-  import Text from "../ui/Text.svelte";
-  import Icon from "../ui/Icon.svelte";
-  import ViewFilterBuilder from "./ViewFilterBuilder.svelte";
+/**
+ * Recursive filter tree editor.
+ *
+ * Each node is either:
+ *   - a **leaf**: type dropdown (folder/tag/extension) + value input
+ *   - a **group**: ALL/ANY/NONE toggle + child list + add/remove buttons
+ *
+ * The component mutates a `ViewFilter` object in-place via `onchange`.
+ */
+import type { ViewFilter, ViewFilterLeaf, ViewFilterGroup } from "../../types/graph";
+import Dropdown from "../ui/Dropdown.svelte";
+import Text from "../ui/Text.svelte";
+import Icon from "../ui/Icon.svelte";
+import ViewFilterBuilder from "./ViewFilterBuilder.svelte";
 
-  interface Props {
-    filter: ViewFilter;
-    onchange: (filter: ViewFilter) => void;
-    /** Depth for indentation (0 = root) */
-    depth?: number;
-    /** Show a remove button for this node */
-    onremove?: () => void;
-    /** Live selection leaf (root only) — reflects current graph selection */
-    liveLeaf?: ViewFilterLeaf | null;
-    /** Called when user edits or clears (null) the live leaf */
-    onLiveLeafChange?: (leaf: ViewFilterLeaf | null) => void;
-    /** Available folder paths for autocomplete */
-    availableFolders?: string[];
-    /** Available tags for autocomplete */
-    availableTags?: string[];
-  }
+interface Props {
+	filter: ViewFilter;
+	onchange: (filter: ViewFilter) => void;
+	/** Depth for indentation (0 = root) */
+	depth?: number;
+	/** Show a remove button for this node */
+	onremove?: () => void;
+	/** Live selection leaf (root only) — reflects current graph selection */
+	liveLeaf?: ViewFilterLeaf | null;
+	/** Called when user edits or clears (null) the live leaf */
+	onLiveLeafChange?: (leaf: ViewFilterLeaf | null) => void;
+	/** Available folder paths for autocomplete */
+	availableFolders?: string[];
+	/** Available tags for autocomplete */
+	availableTags?: string[];
+}
 
-  let {
-    filter,
-    onchange,
-    depth = 0,
-    onremove,
-    liveLeaf,
-    onLiveLeafChange,
-    availableFolders = [],
-    availableTags = [],
-  }: Props = $props();
+let {
+	filter,
+	onchange,
+	depth = 0,
+	onremove,
+	liveLeaf,
+	onLiveLeafChange,
+	availableFolders = [],
+	availableTags = [],
+}: Props = $props();
 
-  // ── Leaf vs group detection ─────────────────────────────
-  const leafTypes = ["folder", "tag", "extension"] as const;
-  type LeafType = (typeof leafTypes)[number];
+// ── Leaf vs group detection ─────────────────────────────
+const leafTypes = ["folder", "tag", "extension"] as const;
+type LeafType = (typeof leafTypes)[number];
 
-  let isGroup = $derived(filter.type === "all" || filter.type === "any" || filter.type === "none");
+let isGroup = $derived(filter.type === "all" || filter.type === "any" || filter.type === "none");
 
-  // ── Leaf options ────────────────────────────────────────
-  const baseLeafTypeOptions = [
-    { display: "Folder", value: "folder" as LeafType },
-    { display: "Tag", value: "tag" as LeafType },
-    { display: "Extension", value: "extension" as LeafType },
-  ];
+// ── Leaf options ────────────────────────────────────────
+const baseLeafTypeOptions = [
+	{ display: "Folder", value: "folder" as LeafType },
+	{ display: "Tag", value: "tag" as LeafType },
+	{ display: "Extension", value: "extension" as LeafType },
+];
 
-  function getLeafTypeOptions(selectedType?: LeafType) {
-    return baseLeafTypeOptions;
-  }
+function getLeafTypeOptions(selectedType?: LeafType) {
+	return baseLeafTypeOptions;
+}
 
-  // ── Group combinator options ────────────────────────────
-  const combinatorOptions = [
-    { display: "ALL of", value: "all" as const },
-    { display: "ANY of", value: "any" as const },
-    { display: "NONE of", value: "none" as const },
-  ];
+// ── Group combinator options ────────────────────────────
+const combinatorOptions = [
+	{ display: "ALL of", value: "all" as const },
+	{ display: "ANY of", value: "any" as const },
+	{ display: "NONE of", value: "none" as const },
+];
 
-  // ── Combobox state ──────────────────────────────────────
-  let comboOpen = $state(false);
-  let comboQuery = $state("");
-  // Track which field is open: "leaf" | "live" | null
-  let comboTarget: "leaf" | "live" | null = $state(null);
-  let closeTimeout: ReturnType<typeof setTimeout> | null = null;
+// ── Combobox state ──────────────────────────────────────
+let comboOpen = $state(false);
+let comboQuery = $state("");
+// Track which field is open: "leaf" | "live" | null
+let comboTarget: "leaf" | "live" | null = $state(null);
+let closeTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  function getSuggestions(type: LeafType, query: string): string[] {
-    const pool = type === "folder" ? availableFolders : type === "tag" ? availableTags : [];
-    if (pool.length === 0) return [];
-    const q = query.toLowerCase();
-    return pool.filter((v) => v.toLowerCase().includes(q)).slice(0, 10);
-  }
+function getSuggestions(type: LeafType, query: string): string[] {
+	const pool = type === "folder" ? availableFolders : type === "tag" ? availableTags : [];
+	if (pool.length === 0) return [];
+	const q = query.toLowerCase();
+	return pool.filter((v) => v.toLowerCase().includes(q)).slice(0, 10);
+}
 
-  function openCombo(target: "leaf" | "live", currentValue: string) {
-    if (closeTimeout) {
-      clearTimeout(closeTimeout);
-      closeTimeout = null;
-    }
-    comboTarget = target;
-    comboQuery = currentValue;
-    comboOpen = true;
-  }
+function openCombo(target: "leaf" | "live", currentValue: string) {
+	if (closeTimeout) {
+		clearTimeout(closeTimeout);
+		closeTimeout = null;
+	}
+	comboTarget = target;
+	comboQuery = currentValue;
+	comboOpen = true;
+}
 
-  function closeCombo() {
-    comboOpen = false;
-    comboTarget = null;
-  }
+function closeCombo() {
+	comboOpen = false;
+	comboTarget = null;
+}
 
-  function handleComboBlur() {
-    // Delay so a suggestion click fires before we close
-    closeTimeout = setTimeout(closeCombo, 150);
-  }
+function handleComboBlur() {
+	// Delay so a suggestion click fires before we close
+	closeTimeout = setTimeout(closeCombo, 150);
+}
 
-  function handleComboFocus(target: "leaf" | "live", currentValue: string) {
-    openCombo(target, currentValue);
-  }
+function handleComboFocus(target: "leaf" | "live", currentValue: string) {
+	openCombo(target, currentValue);
+}
 
-  function pickSuggestion(value: string, target: "leaf" | "live") {
-    if (closeTimeout) {
-      clearTimeout(closeTimeout);
-      closeTimeout = null;
-    }
-    if (target === "leaf") {
-      handleLeafValueChange(value);
-    } else {
-      const lt = liveLeaf as ViewFilterLeaf;
-      onLiveLeafChange?.({ ...lt, value } as ViewFilterLeaf);
-    }
-    closeCombo();
-  }
+function pickSuggestion(value: string, target: "leaf" | "live") {
+	if (closeTimeout) {
+		clearTimeout(closeTimeout);
+		closeTimeout = null;
+	}
+	if (target === "leaf") {
+		handleLeafValueChange(value);
+	} else {
+		const lt = liveLeaf as ViewFilterLeaf;
+		onLiveLeafChange?.({ ...lt, value } as ViewFilterLeaf);
+	}
+	closeCombo();
+}
 
-  // ── Leaf handlers ───────────────────────────────────────
-  function handleLeafTypeChange(newType: LeafType) {
-    onchange({ type: newType, value: "" });
-    closeCombo();
-  }
+// ── Leaf handlers ───────────────────────────────────────
+function handleLeafTypeChange(newType: LeafType) {
+	onchange({ type: newType, value: "" });
+	closeCombo();
+}
 
-  function handleLeafValueChange(newValue: string) {
-    const leaf = filter as ViewFilterLeaf;
-    onchange({ ...leaf, value: newValue } as ViewFilterLeaf);
-  }
+function handleLeafValueChange(newValue: string) {
+	const leaf = filter as ViewFilterLeaf;
+	onchange({ ...leaf, value: newValue } as ViewFilterLeaf);
+}
 
-  // ── Group handlers ──────────────────────────────────────
-  function handleCombinatorChange(newType: "all" | "any" | "none") {
-    const group = filter as ViewFilterGroup;
-    onchange({ type: newType, conditions: group.conditions });
-  }
+// ── Group handlers ──────────────────────────────────────
+function handleCombinatorChange(newType: "all" | "any" | "none") {
+	const group = filter as ViewFilterGroup;
+	onchange({ type: newType, conditions: group.conditions });
+}
 
-  function handleChildChange(index: number, child: ViewFilter) {
-    const group = filter as ViewFilterGroup;
-    const next = [...group.conditions];
-    next[index] = child;
-    onchange({ ...group, conditions: next });
-  }
+function handleChildChange(index: number, child: ViewFilter) {
+	const group = filter as ViewFilterGroup;
+	const next = [...group.conditions];
+	next[index] = child;
+	onchange({ ...group, conditions: next });
+}
 
-  function handleRemoveChild(index: number) {
-    const group = filter as ViewFilterGroup;
-    const next = group.conditions.filter((_, i) => i !== index);
-    onchange({ ...group, conditions: next });
-  }
+function handleRemoveChild(index: number) {
+	const group = filter as ViewFilterGroup;
+	const next = group.conditions.filter((_, i) => i !== index);
+	onchange({ ...group, conditions: next });
+}
 
-  function handleAddLeaf() {
-    const group = filter as ViewFilterGroup;
-    const extra = liveLeaf ? [liveLeaf] : [];
-    onchange({
-      ...group,
-      conditions: [...group.conditions, ...extra, { type: "folder", value: "" }],
-    });
-    if (liveLeaf) onLiveLeafChange?.(null);
-  }
+function handleAddLeaf() {
+	const group = filter as ViewFilterGroup;
+	const extra = liveLeaf ? [liveLeaf] : [];
+	onchange({
+		...group,
+		conditions: [...group.conditions, ...extra, { type: "folder", value: "" }],
+	});
+	if (liveLeaf) onLiveLeafChange?.(null);
+}
 
-  function handleAddGroup() {
-    const group = filter as ViewFilterGroup;
-    const extra = liveLeaf ? [liveLeaf] : [];
-    onchange({
-      ...group,
-      conditions: [...group.conditions, ...extra, { type: "all", conditions: [] }],
-    });
-    if (liveLeaf) onLiveLeafChange?.(null);
-  }
+function handleAddGroup() {
+	const group = filter as ViewFilterGroup;
+	const extra = liveLeaf ? [liveLeaf] : [];
+	onchange({
+		...group,
+		conditions: [...group.conditions, ...extra, { type: "all", conditions: [] }],
+	});
+	if (liveLeaf) onLiveLeafChange?.(null);
+}
 
-  // Whether a leaf type supports combobox suggestions
-  function hasCombo(type: string): boolean {
-    return type === "folder" || type === "tag";
-  }
+// Whether a leaf type supports combobox suggestions
+function hasCombo(type: string): boolean {
+	return type === "folder" || type === "tag";
+}
 </script>
 
 <div class="filter-node" class:filter-node--nested={depth > 0}>

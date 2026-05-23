@@ -4,6 +4,7 @@ import {
 	createEmptySpaceFilter,
 	describeViewFilter,
 	getAllMarkdownPaths,
+	matchesSpaceMembershipDraftPath,
 	parseSpaceMembershipFilter,
 	resolveSpaceMembershipDraft,
 	resolveViewFilter,
@@ -37,7 +38,7 @@ function createMockApp(
 				tag,
 				position: { start: { line: 0, col: 0, offset: 0 }, end: { line: 0, col: 0, offset: 0 } },
 			})),
-		} as unknown as CachedMetadata;
+		};
 	});
 
 	return {
@@ -595,5 +596,35 @@ describe("space membership draft helpers", () => {
 			"Tag: #ml",
 		]);
 		expect(result.provenance.has("Research/skip.md")).toBe(false);
+	});
+
+	it("matches a single path against simple membership rules", () => {
+		const app = createMockApp(
+			[
+				"Work/manual.md",
+				"Research/ml-paper.md",
+				"Research/skip.md",
+				"Assets/diagram.pdf",
+			],
+			{
+				"Research/ml-paper.md": ["#ml"],
+				"Research/skip.md": ["#ml"],
+			},
+		);
+
+		const draft = {
+			manualPaths: ["Work/manual.md"],
+			autoIncludeRules: [
+				{ type: "tag", value: "#ml" } as const,
+				{ type: "extension", value: "pdf" } as const,
+			],
+			excludedPaths: ["Research/skip.md"],
+		};
+
+		expect(matchesSpaceMembershipDraftPath(app, draft, "Work/manual.md")).toBe(true);
+		expect(matchesSpaceMembershipDraftPath(app, draft, "Research/ml-paper.md")).toBe(true);
+		expect(matchesSpaceMembershipDraftPath(app, draft, "Assets/diagram.pdf")).toBe(true);
+		expect(matchesSpaceMembershipDraftPath(app, draft, "Research/skip.md")).toBe(false);
+		expect(matchesSpaceMembershipDraftPath(app, draft, "Other/file.md")).toBe(false);
 	});
 });

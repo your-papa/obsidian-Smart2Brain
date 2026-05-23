@@ -90,16 +90,29 @@ export interface ThemeColors {
 /** Blend fg over bg at the given alpha, returning a fully-opaque hex color.
  *  Prevents semi-transparent edges from stacking into a bright hotspot near nodes. */
 function blendColor(fg: string, bg: string, alpha: number): string {
-	const pr = parseInt(fg.slice(1, 3), 16);
-	const pg = parseInt(fg.slice(3, 5), 16);
-	const pb = parseInt(fg.slice(5, 7), 16);
-	const br = parseInt(bg.slice(1, 3), 16);
-	const bg_ = parseInt(bg.slice(3, 5), 16);
-	const bb = parseInt(bg.slice(5, 7), 16);
-	const r = Math.round(br + (pr - br) * alpha);
-	const g = Math.round(bg_ + (pg - bg_) * alpha);
-	const b = Math.round(bb + (pb - bb) * alpha);
+	const safeAlpha = clampUnitInterval(alpha, 1);
+	const [pr, pg, pb] = parseHexColorChannels(fg, [255, 255, 255]);
+	const [br, bg_, bb] = parseHexColorChannels(bg, [0, 0, 0]);
+	const r = Math.round(br + (pr - br) * safeAlpha);
+	const g = Math.round(bg_ + (pg - bg_) * safeAlpha);
+	const b = Math.round(bb + (pb - bb) * safeAlpha);
 	return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
+function clampUnitInterval(value: number, fallback: number): number {
+	if (!Number.isFinite(value)) return fallback;
+	return Math.min(1, Math.max(0, value));
+}
+
+function parseHexColorChannels(color: string, fallback: [number, number, number]): [number, number, number] {
+	if (!color.startsWith("#") || color.length !== 7) return fallback;
+	const red = Number.parseInt(color.slice(1, 3), 16);
+	const green = Number.parseInt(color.slice(3, 5), 16);
+	const blue = Number.parseInt(color.slice(5, 7), 16);
+	if (Number.isNaN(red) || Number.isNaN(green) || Number.isNaN(blue)) {
+		return fallback;
+	}
+	return [red, green, blue];
 }
 
 export function readThemeColors(el: HTMLElement): ThemeColors {
@@ -162,7 +175,9 @@ export class PixiRenderer {
 		{
 			radius: number;
 			fillColor: string;
+			fillAlpha: number;
 			strokeColor: string | null;
+			strokeAlpha: number;
 			strokeWidth: number;
 		}
 	> = new Map();
@@ -501,7 +516,7 @@ export class PixiRenderer {
 			// Always update position + alpha (cheap)
 			gfx.position.set(node.x, node.y);
 			const alpha = opts.hoverAlphas.get(node.id) ?? 0.85;
-			gfx.alpha = alpha;
+			gfx.alpha = 1;
 
 			// Compute visual state
 			const base = Math.max(1, nodeSize);
@@ -509,7 +524,8 @@ export class PixiRenderer {
 			const radius = base + Math.min(Math.log1p(degree) * 2.5, base * 5);
 			const rawFill = node.highlighted ? c.accent : (node.color ?? c.graphNode);
 			// Resolve hsl()/calc() colors to hex so Pixi.js can parse them
-			const fillColor = rawFill.startsWith("#") ? rawFill : resolveColor(rawFill, c.graphNode);
+			const resolvedFillColor = rawFill.startsWith("#") ? rawFill : resolveColor(rawFill, c.graphNode);
+			const fillColor = alpha < 1 ? blendColor(resolvedFillColor, c.bgPrimary, alpha) : resolvedFillColor;
 
 			const isSelected = opts.selectedNodes.has(node.id);
 			const isHovered = opts.hoveredNodeId === node.id;
@@ -522,6 +538,9 @@ export class PixiRenderer {
 				strokeColor = isHovered ? c.textNormal : c.accent;
 				strokeWidth = 2 / scale;
 			}
+			const strokeAlpha = strokeColor ? alpha : 1;
+			const blendedStrokeColor =
+				strokeColor && strokeAlpha < 1 ? blendColor(strokeColor, c.bgPrimary, strokeAlpha) : strokeColor;
 
 			// Check cache — skip geometry rebuild if nothing visual changed
 			const cached = this.nodeVisualCache.get(node.id);
@@ -530,22 +549,31 @@ export class PixiRenderer {
 				!cached ||
 				cached.radius !== radius ||
 				cached.fillColor !== fillColor ||
-				cached.strokeColor !== strokeColor ||
+				cached.fillAlpha !== alpha ||
+				cached.strokeColor !== blendedStrokeColor ||
+				cached.strokeAlpha !== strokeAlpha ||
 				cached.strokeWidth !== strokeWidth;
 
 			if (geometryDirty) {
 				gfx.clear();
 				gfx.circle(0, 0, radius).fill({ color: fillColor });
 
-				if (strokeColor) {
-					gfx.circle(0, 0, radius).stroke({ color: strokeColor, width: strokeWidth });
+				if (blendedStrokeColor) {
+					gfx.circle(0, 0, radius).stroke({ color: blendedStrokeColor, width: strokeWidth });
 				}
 
 				gfx.hitArea = {
 					contains: (px: number, py: number) => px * px + py * py <= (radius + 4 / scale) ** 2,
 				};
 
-				this.nodeVisualCache.set(node.id, { radius, fillColor, strokeColor, strokeWidth });
+				this.nodeVisualCache.set(node.id, {
+					radius,
+					fillColor,
+					fillAlpha: alpha,
+					strokeColor: blendedStrokeColor,
+					strokeAlpha,
+					strokeWidth,
+				});
 			}
 		}
 	}
@@ -616,16 +644,25 @@ export class PixiRenderer {
 				(edge.source.id === opts.hoveredNodeId || edge.target.id === opts.hoveredNodeId);
 
 			const edgeHoverAlpha = opts.hoveredNodeId
-				? Math.max(opts.hoverAlphas.get(edge.source.id) ?? 0.85, opts.hoverAlphas.get(edge.target.id) ?? 0.85)
+				? clampUnitInterval(
+						Math.max(
+							opts.hoverAlphas.get(edge.source.id) ?? 0.85,
+							opts.hoverAlphas.get(edge.target.id) ?? 0.85,
+						),
+						0.85,
+					)
 				: 1;
+			const safeBaseEdgeAlpha = clampUnitInterval(opts.baseEdgeAlpha, 0.25);
+			const safeEdgeFadeAlpha = clampUnitInterval(opts.edgeFadeAlpha, 1);
 
 			const rawAlpha =
-				(!inFocus ? 0.05 : !inSelection ? 0.05 : isHighlighted ? 0.9 : opts.baseEdgeAlpha) *
-				opts.edgeFadeAlpha *
+				(!inFocus ? 0.05 : !inSelection ? 0.05 : isHighlighted ? 0.9 : safeBaseEdgeAlpha) *
+				safeEdgeFadeAlpha *
 				(isHighlighted ? 1 : edgeHoverAlpha / 0.85);
 
 			// Quantize alpha to reduce unique buckets (round to nearest 0.05)
-			const alpha = Math.round(rawAlpha * 20) / 20;
+			const alpha = clampUnitInterval(Math.round(rawAlpha * 20) / 20, 0);
+			if (alpha <= 0) continue;
 
 			const color = isHighlighted ? c.accent : c.textFaint;
 			const width = isHighlighted ? highlightWidth : normalWidth;
