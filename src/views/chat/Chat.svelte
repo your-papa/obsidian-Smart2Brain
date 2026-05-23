@@ -63,8 +63,10 @@ async function handleRootDrop(event: DragEvent) {
     ondrop={handleRootDrop}
   >
     {#if messenger}
-      <div class="flex justify-center py-1 shrink-0">
-        <SpaceSwitcher />
+      <div class="chat-space-switcher-wrap">
+        <div class="chat-space-switcher-shell">
+          <SpaceSwitcher />
+        </div>
       </div>
       <MessageContainer bind:this={messageContainer} {messenger} />
       <Input
@@ -110,6 +112,46 @@ async function handleRootDrop(event: DragEvent) {
 </QueryClientProvider>
 
 <style>
+  .chat-space-switcher-wrap {
+    position: absolute;
+    top: 4px;
+    left: 50%;
+    z-index: 30;
+    display: flex;
+    justify-content: center;
+    transform: translateX(-50%);
+    pointer-events: auto;
+  }
+
+  .chat-space-switcher-shell {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 16px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    box-shadow: var(--shadow-s);
+    pointer-events: auto;
+  }
+
+  .chat-space-switcher-shell:has(:global(.space-switcher-trigger:hover)) {
+    background: var(--background-modifier-hover);
+  }
+
+  .chat-space-switcher-wrap :global(.space-switcher-trigger) {
+    pointer-events: auto;
+    box-shadow: none;
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .chat-space-switcher-wrap :global(.space-switcher-trigger:hover) {
+    background: transparent;
+  }
+
+  :global(.chat-root .scroll-container) {
+    padding-top: 44px;
+  }
+
   :global(.chat-root > .chat-input-container) {
     margin-top: -12px;
     padding-top: 12px;
@@ -129,6 +171,29 @@ async function handleRootDrop(event: DragEvent) {
         transparent 58%
       ),
       color-mix(in srgb, var(--background-primary) 72%, transparent);
+  }
+
+  .chat-root::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    pointer-events: none;
+    z-index: 25;
+    background:
+      radial-gradient(
+        ellipse at top center,
+        color-mix(in srgb, var(--background-primary) 52%, transparent),
+        transparent 68%
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in srgb, var(--background-primary) 82%, transparent) 0%,
+        color-mix(in srgb, var(--background-primary) 42%, transparent) 26%,
+        transparent 100%
+      );
   }
 
   .chat-root:has(.chat-drop-overlay)::before {
