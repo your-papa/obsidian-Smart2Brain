@@ -9,6 +9,7 @@ import { getIndexableVaultFiles } from "../../utils/fileFiltering";
 import { getRegistry } from "../../providers/registry";
 import type { ChatModelConfig } from "../../providers/index";
 import { Logger } from "../../utils/logging";
+import { showSettingsLinkNotice } from "../../utils/settingsNotice";
 import { getVectorStoreService, waitForVectorStore, waitForVectorStoreIndex } from "../../vectorstore";
 import {
 	type GraphData,
@@ -305,7 +306,10 @@ async function buildGraph() {
 			const documents = await ensureDocumentsLoaded(ac.signal);
 			if (ac.signal.aborted) return;
 			if (!documents) {
-				new Notice("Semantic cluster coloring requires indexed embeddings.");
+				showSettingsLinkNotice(plugin.app, "Semantic cluster coloring requires indexed embeddings.", {
+					tab: "graph",
+					linkText: "Open graph settings",
+				});
 			} else {
 				await computeAndApplyClusters(ac.signal, documents, filter);
 				if (ac.signal.aborted) return;
@@ -648,7 +652,10 @@ async function handleLabelClusters(sourceGraphData: GraphData | unknown = graphD
 			: graphData;
 
 	if (!chatModelConfig) {
-		new Notice("No graph chat model configured. Set one in Settings → Graph.");
+		showSettingsLinkNotice(plugin.app, "No graph chat model configured.", {
+			tab: "graph",
+			linkText: "Open graph settings",
+		});
 		return;
 	}
 
