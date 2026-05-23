@@ -1,243 +1,259 @@
 <script lang="ts">
-import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
-import { extractVendor, logUnclassifiedModelsInfo } from "../../lib/modelVendorClassification";
-import type { UiClassifiableModel } from "../../lib/modelVendorClassification";
-import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../../types/modelMetadata";
-import { getProviderDefinition } from "../../providers/index";
-import { getData } from "../../stores/dataStore.svelte";
-import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
-import AnthropicLogo from "../ui/logos/AnthropicLogo.svelte";
-import OpenAILogo from "../ui/logos/OpenAILogo.svelte";
-import GoogleLogo from "../ui/logos/GoogleLogo.svelte";
-import MicrosoftLogo from "../ui/logos/MicrosoftLogo.svelte";
-import MetaLogo from "../ui/logos/MetaLogo.svelte";
-import DeepSeekLogo from "../ui/logos/DeepSeekLogo.svelte";
-import MistralLogo from "../ui/logos/MistralLogo.svelte";
-import QwenLogo from "../ui/logos/QwenLogo.svelte";
-import XAILogo from "../ui/logos/XAILogo.svelte";
-import Icon from "../ui/Icon.svelte";
-import type { ModelSelectionModal, ModelType, SelectedModel } from "./ModelSelectionModal";
+  import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
+  import { extractVendor, logUnclassifiedModelsInfo } from "../../lib/modelVendorClassification";
+  import type { UiClassifiableModel } from "../../lib/modelVendorClassification";
+  import type {
+    HydratedChatModelMetadata,
+    HydratedEmbeddingModelMetadata,
+  } from "../../types/modelMetadata";
+  import { getProviderDefinition } from "../../providers/index";
+  import { getData } from "../../stores/dataStore.svelte";
+  import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
+  import OpenAILogo from "../ui/logos/OpenAILogo.svelte";
+  import AnthropicLogo from "../ui/logos/AnthropicLogo.svelte";
+  import GoogleLogo from "../ui/logos/GoogleLogo.svelte";
+  import MicrosoftLogo from "../ui/logos/MicrosoftLogo.svelte";
+  import MetaLogo from "../ui/logos/MetaLogo.svelte";
+  import DeepSeekLogo from "../ui/logos/DeepSeekLogo.svelte";
+  import MistralLogo from "../ui/logos/MistralLogo.svelte";
+  import QwenLogo from "../ui/logos/QwenLogo.svelte";
+  import XAILogo from "../ui/logos/XAILogo.svelte";
+  import Icon from "../ui/Icon.svelte";
+  import type { ModelSelectionModal, ModelType, SelectedModel } from "./ModelSelectionModal";
 
-// AI vendor definitions for filtering (excludes routing/local providers like Ollama, OpenRouter)
-const AI_VENDORS = [
-	{ id: "openai", name: "OpenAI", logo: OpenAILogo },
-	{ id: "anthropic", name: "Anthropic", logo: AnthropicLogo },
-	{ id: "google", name: "Google", logo: GoogleLogo },
-	{ id: "microsoft", name: "Microsoft", logo: MicrosoftLogo },
-	{ id: "meta-llama", name: "Meta", logo: MetaLogo },
-	{ id: "deepseek", name: "DeepSeek", logo: DeepSeekLogo },
-	{ id: "x-ai", name: "xAI", logo: XAILogo },
-	{ id: "mistralai", name: "Mistral", logo: MistralLogo },
-	{ id: "qwen", name: "Qwen", logo: QwenLogo },
-] as const;
+  const AI_VENDORS = [
+    { id: "openai", name: "OpenAI", logo: OpenAILogo },
+    { id: "anthropic", name: "Anthropic", logo: AnthropicLogo },
+    { id: "google", name: "Google", logo: GoogleLogo },
+    { id: "microsoft", name: "Microsoft", logo: MicrosoftLogo },
+    { id: "meta-llama", name: "Meta", logo: MetaLogo },
+    { id: "deepseek", name: "DeepSeek", logo: DeepSeekLogo },
+    { id: "x-ai", name: "xAI", logo: XAILogo },
+    { id: "mistralai", name: "Mistral", logo: MistralLogo },
+    { id: "qwen", name: "Qwen", logo: QwenLogo },
+  ] as const;
 
-interface Props {
-	modal?: ModelSelectionModal;
-	modelType: ModelType;
-	currentSelection: SelectedModel | null;
-	onSelect: (model: SelectedModel | null) => void;
-}
+  interface Props {
+    modal?: ModelSelectionModal;
+    modelType: ModelType;
+    currentSelection: SelectedModel | null;
+    onSelect: (model: SelectedModel | null) => void;
+  }
 
-const { modal, modelType, currentSelection, onSelect }: Props = $props();
+  const { modal, modelType, currentSelection, onSelect }: Props = $props();
 
-const pluginData = getData();
-const availableModels = useAvailableModels();
-const openRouterModels = $derived(availableModels.openRouterModels);
+  const pluginData = getData();
+  const availableModels = useAvailableModels();
+  const openRouterModels = $derived(availableModels.openRouterModels);
 
-let searchQuery = $state("");
-let selectedVendor = $state<string | null>(null);
-let showFavorites = $state(false);
-let searchInputEl: HTMLInputElement | undefined = $state();
+  let searchQuery = $state("");
+  let selectedVendor = $state<string | null>(null);
+  let selectedConfiguredProvider = $state<string | null>(null);
+  let showFavorites = $state(false);
+  let searchInputEl: HTMLInputElement | undefined = $state();
 
-type HydratedModel = HydratedChatModelMetadata | HydratedEmbeddingModelMetadata;
+  type HydratedModel = HydratedChatModelMetadata | HydratedEmbeddingModelMetadata;
 
-// Get hydrated models based on type
-const models = $derived(
-	modelType === "chat" ? availableModels.hydratedChatModels : availableModels.hydratedEmbeddingModels,
-);
+  // Get hydrated models based on type
+  const models = $derived(
+    modelType === "chat"
+      ? availableModels.hydratedChatModels
+      : availableModels.hydratedEmbeddingModels,
+  );
 
-function toClassifiableModel(model: HydratedModel): UiClassifiableModel {
-	const providerMeta = pluginData.getProviderMeta(model.provider);
-	const providerAuth = pluginData.getResolvedProviderAuth(model.provider);
-	const isOllamaProvider = providerMeta?.templateId === "ollama" || model.provider === "ollama";
-	const families = isOllamaProvider ? availableModels.getOllamaModelFamilies(model.variantKey) : undefined;
-	return {
-		provider: model.provider,
-		model: model.variantKey,
-		templateId: providerMeta?.templateId,
-		baseUrl: providerAuth.baseUrl,
-		family: families?.[0],
-		families,
-	};
-}
+  function toClassifiableModel(model: HydratedModel): UiClassifiableModel {
+    const providerMeta = pluginData.getProviderMeta(model.provider);
+    const providerAuth = pluginData.getResolvedProviderAuth(model.provider);
+    const isOllamaProvider = providerMeta?.templateId === "ollama" || model.provider === "ollama";
+    const families = isOllamaProvider
+      ? availableModels.getOllamaModelFamilies(model.variantKey)
+      : undefined;
+    return {
+      provider: model.provider,
+      model: model.variantKey,
+      templateId: providerMeta?.templateId,
+      baseUrl: providerAuth.baseUrl,
+      family: families?.[0],
+      families,
+    };
+  }
 
-const classifiableModels = $derived(models.map((model) => toClassifiableModel(model)));
+  const classifiableModels = $derived(models.map((model) => toClassifiableModel(model)));
 
-$effect(() => {
-	logUnclassifiedModelsInfo("model-selection-modal", classifiableModels, openRouterModels);
-});
+  $effect(() => {
+    logUnclassifiedModelsInfo("model-selection-modal", classifiableModels, openRouterModels);
+  });
 
-$effect(() => {
-	searchInputEl?.focus();
-});
+  $effect(() => {
+    searchInputEl?.focus();
+  });
 
-// Group models by provider
-const modelsByProvider = $derived.by(() => {
-	const grouped = new Map<string, HydratedModel[]>();
+  // Group models by provider
+  const modelsByProvider = $derived.by(() => {
+    const grouped = new Map<string, HydratedModel[]>();
 
-	for (const model of models) {
-		const existing = grouped.get(model.provider) ?? [];
-		existing.push(model);
-		grouped.set(model.provider, existing);
-	}
+    for (const model of models) {
+      const existing = grouped.get(model.provider) ?? [];
+      existing.push(model);
+      grouped.set(model.provider, existing);
+    }
 
-	return Array.from(grouped.entries()).map(([provider, models]) => ({
-		provider,
-		models,
-	}));
-});
+    return Array.from(grouped.entries()).map(([provider, models]) => ({
+      provider,
+      models,
+    }));
+  });
 
-// Get available vendors based on current models
-const availableVendors = $derived.by(() => {
-	const vendorSet = new Set<string>();
-	for (const model of models) {
-		const vendor = extractVendor(toClassifiableModel(model), openRouterModels);
-		if (vendor) vendorSet.add(vendor);
-	}
-	return AI_VENDORS.filter((v) => vendorSet.has(v.id));
-});
+  const availableConfiguredProviders = $derived.by(() =>
+    modelsByProvider.map(({ provider }) => ({
+      id: provider,
+      name: getProviderDisplayName(provider),
+      logo: getProviderLogo(provider),
+    })),
+  );
 
-// Filter models by search query, vendor, and favorites
-const filteredModelsByProvider = $derived.by(() => {
-	let result = modelsByProvider;
+  const showConfiguredProviderFilters = $derived(availableConfiguredProviders.length > 1);
 
-	// Filter by favorites if selected
-	if (showFavorites) {
-		result = result
-			.map(({ provider, models }) => ({
-				provider,
-				models: models.filter((m) => pluginData.isFavoriteModel(m.provider, m.variantKey)),
-			}))
-			.filter(({ models }) => models.length > 0);
-	}
+  const availableVendors = $derived.by(() => {
+    const vendorSet = new Set<string>();
+    for (const model of models) {
+      const vendor = extractVendor(toClassifiableModel(model), openRouterModels);
+      if (vendor) vendorSet.add(vendor);
+    }
+    return AI_VENDORS.filter((vendor) => vendorSet.has(vendor.id));
+  });
 
-	// Filter by vendor if one is selected
-	if (selectedVendor) {
-		result = result
-			.map(({ provider, models }) => ({
-				provider,
-				models: models.filter(
-					(m) => extractVendor(toClassifiableModel(m), openRouterModels) === selectedVendor,
-				),
-			}))
-			.filter(({ models }) => models.length > 0);
-	}
+  // Filter models by search query, AI vendor, configured provider, and favorites
+  const filteredModelsByProvider = $derived.by(() => {
+    let result = modelsByProvider;
 
-	// Filter by search query
-	if (searchQuery.trim()) {
-		const query = searchQuery.toLowerCase();
-		result = result
-			.map(({ provider, models }) => ({
-				provider,
-				models: models.filter(
-					(m) =>
-						m.displayName.toLowerCase().includes(query) ||
-						m.variantKey.toLowerCase().includes(query) ||
-						provider.toLowerCase().includes(query) ||
-						getProviderDisplayName(provider).toLowerCase().includes(query),
-				),
-			}))
-			.filter(({ models }) => models.length > 0);
-	}
+    // Filter by favorites if selected
+    if (showFavorites) {
+      result = result
+        .map(({ provider, models }) => ({
+          provider,
+          models: models.filter((m) => pluginData.isFavoriteModel(m.provider, m.variantKey)),
+        }))
+        .filter(({ models }) => models.length > 0);
+    }
 
-	return result;
-});
+    // Filter by AI vendor if one is selected
+    if (selectedVendor) {
+      result = result
+        .map(({ provider, models }) => ({
+          provider,
+          models: models.filter(
+            (model) =>
+              extractVendor(toClassifiableModel(model), openRouterModels) === selectedVendor,
+          ),
+        }))
+        .filter(({ models }) => models.length > 0);
+    }
 
-// Get provider info
-function getProviderDisplayName(providerId: string): string {
-	const provider = getProviderDefinition(providerId, pluginData.getAllProviderMeta());
-	return provider?.displayName ?? providerId;
-}
+    // Filter by configured provider instance if one is selected
+    if (selectedConfiguredProvider) {
+      result = result.filter(({ provider }) => provider === selectedConfiguredProvider);
+    }
 
-function getProviderLogo(providerId: string) {
-	const provider = getProviderDefinition(providerId, pluginData.getAllProviderMeta());
-	if (provider && "logo" in provider && provider.logo) {
-		return provider.logo;
-	}
-	return GenericAIIcon;
-}
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      result = result
+        .map(({ provider, models }) => ({
+          provider,
+          models: models.filter(
+            (m) =>
+              m.displayName.toLowerCase().includes(query) ||
+              m.variantKey.toLowerCase().includes(query) ||
+              provider.toLowerCase().includes(query) ||
+              getProviderDisplayName(provider).toLowerCase().includes(query),
+          ),
+        }))
+        .filter(({ models }) => models.length > 0);
+    }
 
-// Format cost (per 1M tokens)
-function formatCost(costPer1M?: number): string {
-	if (costPer1M === undefined) return "—";
-	if (costPer1M === 0) return "Free";
-	if (costPer1M < 0.01) return `$${costPer1M.toFixed(4)}`;
-	if (costPer1M < 1) return `$${costPer1M.toFixed(2)}`;
-	return `$${costPer1M.toFixed(2)}`;
-}
+    return result;
+  });
 
-function formatTokenLimit(tokens?: number): string {
-	if (!tokens) return "—";
-	if (tokens >= 1_000_000) {
-		return `${(tokens / 1_000_000).toFixed(1)}M`;
-	}
-	if (tokens >= 1_000) {
-		return `${Math.round(tokens / 1_000)}K`;
-	}
-	return tokens.toString();
-}
+  // Get provider info
+  function getProviderDisplayName(providerId: string): string {
+    const provider = getProviderDefinition(providerId, pluginData.getAllProviderMeta());
+    return provider?.displayName ?? providerId;
+  }
 
-function getVariantKeyDisplay(model: HydratedModel): string {
-	if (model.provider === "ollama") {
-		return model.variantKey.replace(/:latest$/i, "");
-	}
-	return model.variantKey;
-}
+  function getProviderLogo(providerId: string) {
+    const provider = getProviderDefinition(providerId, pluginData.getAllProviderMeta());
+    if (provider && "logo" in provider && provider.logo) {
+      return provider.logo;
+    }
+    return GenericAIIcon;
+  }
 
-// Check if model is currently selected
-function isSelected(provider: string, variantKey: string): boolean {
-	return currentSelection?.provider === provider && currentSelection?.model === variantKey;
-}
+  // Format cost (per 1M tokens)
+  function formatCost(costPer1M?: number): string {
+    if (costPer1M === undefined) return "—";
+    if (costPer1M === 0) return "Free";
+    if (costPer1M < 0.01) return `$${costPer1M.toFixed(4)}`;
+    if (costPer1M < 1) return `$${costPer1M.toFixed(2)}`;
+    return `$${costPer1M.toFixed(2)}`;
+  }
 
-// Handle model selection
-function handleSelect(provider: string, variantKey: string) {
-	onSelect({ provider, model: variantKey });
-}
+  function formatTokenLimit(tokens?: number): string {
+    if (!tokens) return "—";
+    if (tokens >= 1_000_000) {
+      return `${(tokens / 1_000_000).toFixed(1)}M`;
+    }
+    if (tokens >= 1_000) {
+      return `${Math.round(tokens / 1_000)}K`;
+    }
+    return tokens.toString();
+  }
+
+  function getVariantKeyDisplay(model: HydratedModel): string {
+    if (model.provider === "ollama") {
+      return model.variantKey.replace(/:latest$/i, "");
+    }
+    return model.variantKey;
+  }
+
+  // Check if model is currently selected
+  function isSelected(provider: string, variantKey: string): boolean {
+    return currentSelection?.provider === provider && currentSelection?.model === variantKey;
+  }
+
+  // Handle model selection
+  function handleSelect(provider: string, variantKey: string) {
+    onSelect({ provider, model: variantKey });
+  }
 </script>
 
 <div class="model-selection-container">
   <div class="model-selection-layout">
-    <!-- Vendor filter sidebar -->
     {#if availableVendors.length > 0}
-      <div class="vendor-sidebar">
-        <!-- Favorites button -->
+      <div class="model-provider-sidebar" aria-label="AI vendor filters">
         <button
           type="button"
-          class="vendor-btn"
+          class="model-provider-btn"
           class:active={showFavorites}
           onclick={() => {
             showFavorites = !showFavorites;
-            if (showFavorites) selectedVendor = null;
+            if (showFavorites) selectedConfiguredProvider = null;
           }}
           title="Favorites"
         >
           <Icon name="star" size="md" />
         </button>
 
-        <div class="vendor-divider"></div>
-
-        <!-- Vendor icons -->
-        {#each availableVendors as vendor (vendor.id)}
-          {@const VendorLogo = vendor.logo}
+        {#each availableVendors as vendorFilter (vendorFilter.id)}
+          {@const VendorLogo = vendorFilter.logo}
           <button
             type="button"
-            class="vendor-btn"
-            class:active={selectedVendor === vendor.id}
+            class="model-provider-btn"
+            class:active={selectedVendor === vendorFilter.id}
             onclick={() => {
-              showFavorites = false;
-              selectedVendor = selectedVendor === vendor.id ? null : vendor.id;
+              selectedVendor = selectedVendor === vendorFilter.id ? null : vendorFilter.id;
             }}
-            title={vendor.name}
+            title={vendorFilter.name}
           >
             <VendorLogo width={38} height={38} />
           </button>
@@ -245,9 +261,7 @@ function handleSelect(provider: string, variantKey: string) {
       </div>
     {/if}
 
-    <!-- Main content -->
     <div class="model-selection-main">
-      <!-- Search -->
       <div class="model-search">
         <Icon name="search" size="sm" />
         <input
@@ -266,7 +280,28 @@ function handleSelect(provider: string, variantKey: string) {
         {/if}
       </div>
 
-      <!-- Models list -->
+      {#if showConfiguredProviderFilters}
+        <div class="provider-filter-bar" aria-label="Configured provider filters">
+          {#each availableConfiguredProviders as providerFilter (providerFilter.id)}
+            {@const ProviderLogo = providerFilter.logo}
+            <button
+              type="button"
+              class="provider-filter-btn"
+              class:active={selectedConfiguredProvider === providerFilter.id}
+              onclick={() => {
+                showFavorites = false;
+                selectedConfiguredProvider =
+                  selectedConfiguredProvider === providerFilter.id ? null : providerFilter.id;
+              }}
+              title={providerFilter.name}
+            >
+              <ProviderLogo width={18} height={18} />
+              <span>{providerFilter.name}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+
       <div class="models-list">
         {#each filteredModelsByProvider as { provider, models } (provider)}
           {@const Logo = getProviderLogo(provider)}
@@ -314,7 +349,6 @@ function handleSelect(provider: string, variantKey: string) {
                     </div>
                   </div>
 
-                  <!-- Metadata row -->
                   <div class="model-meta">
                     {#if model.kind === "chat"}
                       <span class="meta-tag" title="Context window">
@@ -372,7 +406,7 @@ function handleSelect(provider: string, variantKey: string) {
           <div class="no-models">
             {#if showFavorites}
               No favorite models yet. Click the star on any model to add it.
-            {:else if searchQuery || selectedVendor}
+            {:else if searchQuery || selectedVendor || selectedConfiguredProvider}
               No models match your filters
             {:else if modelType === "embedding"}
               No embedding models available. Configure a provider that supports embeddings.
@@ -402,45 +436,43 @@ function handleSelect(provider: string, variantKey: string) {
     overflow: hidden;
   }
 
-  .vendor-sidebar {
+  .model-provider-sidebar {
     display: flex;
     flex-direction: column;
     gap: 6px;
     padding: 12px 8px;
-    border-right: 1px solid var(--background-modifier-border);
+    margin: 16px 0 16px 16px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
     background: var(--background-secondary);
     overflow-y: auto;
+    flex-shrink: 0;
+    box-sizing: border-box;
   }
 
-  .vendor-btn {
+  .model-provider-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 48px;
-    height: 48px;
+    width: 40px;
+    height: 40px;
     border-radius: 8px;
     border: none;
     cursor: pointer;
     transition: all 0.15s ease;
     background: transparent;
     color: var(--text-muted);
+    flex-shrink: 0;
   }
 
-  .vendor-btn:hover {
+  .model-provider-btn:hover {
     background: var(--background-modifier-hover);
     color: var(--text-normal);
   }
 
-  .vendor-btn.active {
+  .model-provider-btn.active {
     background: var(--interactive-accent);
     color: var(--text-on-accent);
-  }
-
-  .vendor-divider {
-    width: 100%;
-    height: 1px;
-    background: var(--background-modifier-border);
-    margin: 4px 0;
   }
 
   .model-selection-main {
@@ -463,6 +495,46 @@ function handleSelect(provider: string, variantKey: string) {
     border: 1px solid var(--background-modifier-border);
   }
 
+  .provider-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-bottom: 4px;
+  }
+
+  .provider-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 6px 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 999px;
+    background: var(--background-secondary);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .provider-filter-btn:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+    border-color: var(--interactive-accent-hover);
+  }
+
+  .provider-filter-btn.active {
+    background: color-mix(in srgb, var(--interactive-accent) 15%, var(--background-secondary));
+    border-color: var(--interactive-accent);
+    color: var(--text-normal);
+  }
+
+  .provider-filter-btn span {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
   .model-search:focus-within {
     border-color: var(--interactive-accent);
   }
@@ -472,8 +544,16 @@ function handleSelect(provider: string, variantKey: string) {
     background: transparent;
     border: none;
     outline: none;
+    box-shadow: none;
     color: var(--text-normal);
     font-size: 14px;
+  }
+
+  .search-input:focus,
+  .search-input:focus-visible {
+    outline: none;
+    border: none;
+    box-shadow: none;
   }
 
   .search-input::placeholder {

@@ -10,6 +10,7 @@
   import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
   import {
     createAuthStateQuery,
+    getProviderStateQueryOptions,
     invalidateAuthState,
     invalidateProviderState,
   } from "../../lib/query";
@@ -88,6 +89,7 @@
       }
       data.setProviderConfigured(providerId, true);
     }
+    await modal.plugin.queryClient.fetchQuery(getProviderStateQueryOptions(providerId));
     invalidateProviderState(providerId);
     modal.markSubmitted();
     modal.close();
