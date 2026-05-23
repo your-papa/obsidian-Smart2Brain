@@ -35,22 +35,13 @@ export interface ProviderState {
 	embeddingModels?: string[];
 }
 
-/**
- * Combined query for provider auth state and available models.
- * Both are tightly coupled - if auth fails, models are empty.
- * If auth succeeds, models are fetched via discoverModels().
- *
- * @param provider - Function returning the provider ID string
- */
-export function createProviderStateQuery(provider: () => string) {
+export function getProviderStateQueryOptions(providerId: string) {
 	const plugin = getPlugin();
 	const data = getData();
 
-	return createQuery<ProviderState>(() => ({
-		queryKey: ["provider", provider()],
-		queryFn: async () => {
-			const providerId = provider();
-
+	return {
+		queryKey: ["provider", providerId],
+		queryFn: async (): Promise<ProviderState> => {
 			// Get resolved auth state (with secrets resolved)
 			const resolvedAuth = data.getResolvedAuthState(providerId);
 
@@ -102,6 +93,19 @@ export function createProviderStateQuery(provider: () => string) {
 				};
 			}
 		},
+	};
+}
+
+/**
+ * Combined query for provider auth state and available models.
+ * Both are tightly coupled - if auth fails, models are empty.
+ * If auth succeeds, models are fetched via discoverModels().
+ *
+ * @param provider - Function returning the provider ID string
+ */
+export function createProviderStateQuery(provider: () => string) {
+	return createQuery<ProviderState>(() => ({
+		...getProviderStateQueryOptions(provider()),
 	}));
 }
 
