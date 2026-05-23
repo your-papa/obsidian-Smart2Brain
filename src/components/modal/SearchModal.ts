@@ -17,7 +17,7 @@ import { getLexicalSearchService, isLexicalSearchInitialized } from "../../searc
 import type { SearchResult } from "../../vectorstore/types";
 import { getData, getImmersedSpace } from "../../stores/dataStore.svelte";
 import { getMessenger } from "../../stores/chatStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
+import { getPlugin, requestSettingsTab } from "../../stores/state.svelte";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import type { SearchAlgorithm } from "../../types/plugin";
 import type { SearchFilter } from "../../vectorstore";
@@ -170,14 +170,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		// Register Tab to toggle semantic search
 		this.scope.register([], "Tab", (evt) => {
 			evt.preventDefault();
-			this.semanticEnabled = !this.semanticEnabled;
-			this.updateInstructions();
-			this.syncGlowAnimation();
-			// Re-run search with new algorithm if there's a query or filters
-			if (this.currentQuery.trim() || this.activeFilters.length > 0) {
-				this.invalidateSearch();
-				this.triggerSearch(this.currentQuery);
-			}
+			this.toggleSemanticMode();
 			return false;
 		});
 
@@ -307,6 +300,54 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	private get activeAlgorithm(): SearchAlgorithm {
 		return this.semanticEnabled ? "hybrid" : "lexical";
+	}
+
+	private hasSearchEmbeddingIndex(): boolean {
+		return Boolean(getData().searchEmbedIndex);
+	}
+
+	private openSearchSettings(): void {
+		requestSettingsTab("search");
+
+		const app = this.app as App & {
+			setting?: { open: () => void; openTabById: (id: string) => void };
+		};
+
+		app.setting?.open();
+		app.setting?.openTabById("smart-second-brain");
+	}
+
+	private showMissingSearchEmbeddingIndexNotice(): void {
+		const notice = new Notice("", 10000);
+		const el = notice.noticeEl;
+		el.empty();
+		el.appendText("Select a search embedding index before enabling semantic search. ");
+
+		const link = el.createEl("a", {
+			text: "Open search settings",
+			href: "#",
+		});
+		link.addEventListener("click", (evt) => {
+			evt.preventDefault();
+			notice.hide();
+			this.openSearchSettings();
+		});
+	}
+
+	private toggleSemanticMode(): void {
+		if (!this.semanticEnabled && !this.hasSearchEmbeddingIndex()) {
+			this.showMissingSearchEmbeddingIndexNotice();
+			return;
+		}
+
+		this.semanticEnabled = !this.semanticEnabled;
+		this.updateInstructions();
+		this.syncGlowAnimation();
+
+		if (this.currentQuery.trim() || this.activeFilters.length > 0) {
+			this.invalidateSearch();
+			this.triggerSearch(this.currentQuery);
+		}
 	}
 
 	private syncGlowAnimation(): void {
@@ -1690,7 +1731,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	 */
 	private appendSemanticHint(): void {
 		if (this.semanticEnabled) return;
-		if (!getData().searchEmbedIndex) return;
+		if (!this.hasSearchEmbeddingIndex()) return;
 
 		const tabKey = Platform.isMacOS ? "⇥" : "Tab";
 		const hint = this.resultContainerEl.createDiv({ cls: "s2b-search-semantic-hint" });

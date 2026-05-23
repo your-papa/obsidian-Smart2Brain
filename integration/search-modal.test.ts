@@ -297,6 +297,98 @@ describe("search modal", () => {
 		await waitForSelector(".s2b-search-modal");
 	});
 
+	it("should show a notice instead of enabling semantic mode when no search index is selected", async () => {
+		const originalIndex = obsidianEval(`${PLUGIN}.pluginData.searchEmbedIndex ?? null`).replace(/^=>\s*/u, "").trim();
+
+		clearBuffers();
+		obsidianEval(`${PLUGIN}.pluginData.clearEmbedIndex("search")`);
+
+		await waitForCondition(
+			() => obsidianEval(`${PLUGIN}.pluginData.searchEmbedIndex === null`).includes("true"),
+			"search embedding index to be cleared",
+			{ timeoutMs: 10_000, intervalMs: 250 },
+		);
+
+		obsidianEval(`(() => {
+			for (const notice of document.querySelectorAll(".notice")) {
+				notice.remove();
+			}
+			return "cleared";
+		})()`);
+
+		const snapshot = JSON.parse(
+			obsidianEval(`(() => {
+				const plugin = app.plugins.plugins["smart-second-brain"];
+				const modal = document.querySelector(".s2b-search-modal");
+				if (!(modal instanceof HTMLElement)) {
+					return JSON.stringify({ error: "missing-modal", index: null, instructions: "", notices: [] });
+				}
+				const event = new KeyboardEvent("keydown", {
+					key: "Tab",
+					code: "Tab",
+					bubbles: true,
+					cancelable: true,
+				});
+				modal.dispatchEvent(event);
+				return JSON.stringify({
+					error: null,
+					index: plugin.pluginData.searchEmbedIndex,
+					instructions: modal.querySelector(".prompt-instructions")?.textContent ?? "",
+					notices: Array.from(document.querySelectorAll(".notice")).map((notice) => notice.textContent ?? ""),
+					anchors: Array.from(document.querySelectorAll(".notice a")).map((anchor) => anchor.textContent ?? ""),
+				});
+			})()`).replace(/^=>\s*/u, ""),
+		) as { error: string | null; index: string | null; instructions: string; notices: string[]; anchors: string[] };
+
+		expect(snapshot.error).toBeNull();
+		expect(snapshot.index).toBeNull();
+		expect(snapshot.instructions).toContain('semantic: off');
+		expect(snapshot.notices.join(" ")).toContain('Select a search embedding index before enabling semantic search.');
+		expect(snapshot.anchors).toContain('Open search settings');
+
+		const clickResult = obsidianEval(`(() => {
+			const link = document.querySelector(".notice a");
+			if (!(link instanceof HTMLElement)) return "missing-link";
+			link.click();
+			return "clicked";
+		})()`).replace(/^=>\s*/u, "");
+
+		expect(clickResult).toBe("clicked");
+
+		await waitForCondition(
+			() =>
+				obsidianEval(
+					`document.body.textContent?.includes("Embedding indexes power semantic search across your notes.") ?? false`,
+				).includes("true"),
+			"search settings tab to open from notice link",
+			{ timeoutMs: 10_000, intervalMs: 250 },
+		);
+
+		obsidianEval(`(() => {
+			const closeButton = document.querySelector(".modal.mod-settings .modal-close-button");
+			if (closeButton instanceof HTMLElement) {
+				closeButton.click();
+				return "closed";
+			}
+			return "missing-close-button";
+		})()`);
+
+		executeCommand("smart-second-brain:search-notes");
+		await waitForSelector(".s2b-search-modal");
+
+		if (originalIndex !== "null") {
+			const [provider, ...modelParts] = originalIndex.split(":");
+			obsidianEval(
+				`${PLUGIN}.pluginData.setEmbedIndex("search", "${provider}", "${modelParts.join(":")}")`,
+			);
+			await waitForCondition(
+				() => obsidianEval(`${PLUGIN}.pluginData.searchEmbedIndex === "${originalIndex}"`).includes("true"),
+				"search embedding index to be restored",
+				{ timeoutMs: 10_000, intervalMs: 250 },
+			);
+		}
+	});
+
 	it("should display result names matching the query", () => {
 		const resultName = domText(".s2b-search-result-name");
 		expect(resultName.length).toBeGreaterThan(0);
