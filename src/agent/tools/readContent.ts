@@ -122,9 +122,9 @@ function extractSubpathContent(
 		if (cache.blocks && Object.keys(cache.blocks).length > 0) {
 			available.push(
 				"Block IDs:\n" +
-					Object.keys(cache.blocks)
-						.map((id) => `  ^${id}`)
-						.join("\n"),
+				Object.keys(cache.blocks)
+					.map((id) => `  ^${id}`)
+					.join("\n"),
 			);
 		}
 		const availableStr = available.length > 0 ? `\nAvailable targets:\n${available.join("\n")}` : "";
@@ -351,7 +351,7 @@ export function createReadContentTool(app: App, imageProcessor?: BaseChatModel, 
 		if (currentProvider) {
 			const store = getPendingChangesStore();
 			if (store.shouldBlockFile(file.path, currentProvider)) {
-				return `Error: The file "${file.path}" is marked as private and cannot be processed by the current provider. Switch to a trusted provider or remove the file from the privacy list.`;
+				return `Error: The file "${file.path}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
 			}
 		}
 
@@ -369,7 +369,7 @@ export function createReadContentTool(app: App, imageProcessor?: BaseChatModel, 
 				if (processorProvider) {
 					const store = getPendingChangesStore();
 					if (store.shouldBlockFile(file.path, processorProvider)) {
-						return `Error: The file "${file.path}" is marked as private and cannot be processed by the image processor's provider. Switch to a trusted provider or remove the file from the privacy list.`;
+						return `Error: The file "${file.path}" is private for the image processor's provider. Switch to a trusted provider or adjust provider access settings.`;
 					}
 				}
 
@@ -412,7 +412,7 @@ export function createReadContentTool(app: App, imageProcessor?: BaseChatModel, 
 					if (processorProvider) {
 						const store = getPendingChangesStore();
 						if (store.shouldBlockFile(file.path, processorProvider)) {
-							return `Error: The file "${file.path}" is marked as private and cannot be processed by the PDF processor's provider. Switch to a trusted provider or remove the file from the privacy list.`;
+							return `Error: The file "${file.path}" is private for the PDF processor's provider. Switch to a trusted provider or adjust provider access settings.`;
 						}
 					}
 

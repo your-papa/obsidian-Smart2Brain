@@ -18,7 +18,7 @@ function getNoteProperties(app: App, noteName: string): string {
 	if (currentProvider) {
 		const store = getPendingChangesStore();
 		if (store.shouldBlockFile(file.path, currentProvider)) {
-			return `Error: The file "${file.path}" is marked as private and cannot be processed by the current provider. Switch to a trusted provider or remove the file from the privacy list.`;
+			return `Error: The file "${file.path}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
 		}
 	}
 

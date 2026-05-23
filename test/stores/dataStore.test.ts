@@ -10,6 +10,12 @@ beforeAll(() => {
 			if (idx >= 0) this.splice(idx, 1);
 		};
 	}
+
+	if (!(globalThis as typeof globalThis & { indexedDB?: { databases?: () => Promise<unknown[]> } }).indexedDB) {
+		(globalThis as typeof globalThis & { indexedDB?: { databases?: () => Promise<unknown[]> } }).indexedDB = {
+			databases: vi.fn().mockResolvedValue([]),
+		};
+	}
 });
 
 // Mock secretStorage — provider auth tests need it
@@ -31,6 +37,7 @@ import {
 	SetChatModelError,
 	SetEmbedModelError,
 } from "../../src/stores/dataStore.svelte";
+import { compileSpaceMembershipDraft } from "../../src/lib/views";
 import type { StoredProviderState } from "../../src/stores/dataStore.svelte";
 
 /* --------------------------------------------------------------------------
@@ -42,6 +49,7 @@ function createMockPlugin() {
 		app: {
 			vault: {
 				adapter: { exists: vi.fn(), read: vi.fn(), write: vi.fn() },
+				getName: vi.fn().mockReturnValue("Test Vault"),
 				getAbstractFileByPath: vi.fn(),
 				getFolderByPath: vi.fn().mockReturnValue(null),
 				createFolder: vi.fn().mockResolvedValue(undefined),
@@ -469,21 +477,35 @@ describe("PluginDataStore – Privacy List", () => {
 		({ store } = makeStore());
 	});
 
-	it("should default to excluding (mark-as-private) mode", () => {
-		expect(store.privacyIsExcluding).toBe(true);
+	it("should default to private-by-default mode", () => {
+		expect(store.privacyMode).toBe("private-by-default");
 	});
 
-	it("should toggle privacy mode", () => {
-		store.togglePrivacyIsExcluding();
-		expect(store.privacyIsExcluding).toBe(false);
+	it("should treat unlisted files as private in private-by-default mode", () => {
+		store.setPrivacyFilter(
+			compileSpaceMembershipDraft({
+				manualPaths: ["shared.md"],
+				autoIncludeRules: [],
+				excludedPaths: [],
+			}),
+		);
+
+		expect(store.isFilePrivate("shared.md")).toBe(false);
+		expect(store.isFilePrivate("secret.md")).toBe(true);
 	});
 
-	it("should add and remove from privacy list", () => {
-		store.addPrivacyList("secret-folder");
-		expect(store.privacyList).toContain("secret-folder");
+	it("should treat listed files as private in public-by-default mode", () => {
+		store.setPrivacyMode("public-by-default");
+		store.setPrivacyFilter(
+			compileSpaceMembershipDraft({
+				manualPaths: ["secret.md"],
+				autoIncludeRules: [],
+				excludedPaths: [],
+			}),
+		);
 
-		store.removePrivacyList("secret-folder");
-		expect(store.privacyList).not.toContain("secret-folder");
+		expect(store.isFilePrivate("secret.md")).toBe(true);
+		expect(store.isFilePrivate("shared.md")).toBe(false);
 	});
 
 	it("should check provider trust status", () => {

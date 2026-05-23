@@ -387,6 +387,8 @@ export type DiffViewMode = "word-diff" | "two-pane";
 
 export type ChatOpenLocation = "tab" | "left" | "right";
 
+export type PrivacyMode = "private-by-default" | "public-by-default";
+
 export interface PluginData {
 	/** All configured provider instances keyed by opaque provider instance ID */
 	providerConfig: Record<string, StoredProviderState>;
@@ -415,6 +417,8 @@ export interface PluginData {
 	// Privacy
 	// ============================================================================
 
+	/** Controls whether listed files are exposed or private for untrusted providers. */
+	privacyMode: PrivacyMode;
 	/** Filter-backed private file set used to block files for untrusted providers. */
 	privacyFilter: import("./graph").ViewFilter;
 

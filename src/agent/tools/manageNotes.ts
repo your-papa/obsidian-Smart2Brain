@@ -140,7 +140,7 @@ function validateExistingMarkdownFile(
 	const currentProvider = getData().getSelectedAgent().chatModel?.provider;
 	if (currentProvider && store.shouldBlockFile(file.path, currentProvider)) {
 		return {
-			error: `Error in operation ${operationNumber}: The file "${file.path}" is marked as private and cannot be processed by the current provider. Switch to a trusted provider or remove the file from the privacy list.`,
+			error: `Error in operation ${operationNumber}: The file "${file.path}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`,
 		};
 	}
 
@@ -230,7 +230,7 @@ export function createManageNotesTool(app: App) {
 					// Privacy check for create target
 					const currentProvider = getData().getSelectedAgent().chatModel?.provider;
 					if (currentProvider && store.shouldBlockFile(normalizedPath, currentProvider)) {
-						return `Error in operation ${operationNumber}: The path "${normalizedPath}" is in a private area and cannot be processed by the current provider. Switch to a trusted provider or remove the path from the privacy list.`;
+						return `Error in operation ${operationNumber}: The path "${normalizedPath}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
 					}
 
 					const existing = app.vault.getAbstractFileByPath(normalizedPath);
@@ -321,7 +321,7 @@ export function createManageNotesTool(app: App) {
 				// Privacy check for move destination
 				const moveProvider = getData().getSelectedAgent().chatModel?.provider;
 				if (moveProvider && store.shouldBlockFile(normalizedNewPath, moveProvider)) {
-					return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is in a private area and cannot be processed by the current provider. Switch to a trusted provider or remove the path from the privacy list.`;
+					return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
 				}
 
 				if (result.file.path === normalizedNewPath) {

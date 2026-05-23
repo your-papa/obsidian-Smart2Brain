@@ -10,6 +10,7 @@
   } from "../../lib/views";
   import { getData } from "../../stores/dataStore.svelte";
   import { getPlugin } from "../../stores/state.svelte";
+  import type { PrivacyMode } from "../../types/plugin";
   import Button from "../ui/Button.svelte";
   import type { PrivacyListModal } from "./PrivacyListModal";
   import FileSetEditor from "./FileSetEditor.svelte";
@@ -62,6 +63,7 @@
   );
   let showFilters = $state(initialParsed.draft.autoIncludeRules.length > 0);
 
+  const privacyMode = $derived.by(() => data.privacyMode);
   const parsedMembership = $derived.by(() => parseSpaceMembershipFilter(privacyFilter));
   const resolvedPrivacy = $derived.by(() =>
     resolveSpaceMembershipDraft(
@@ -76,6 +78,13 @@
   const excludedFiles = $derived.by(() =>
     [...parsedMembership.draft.excludedPaths].sort((left, right) => left.localeCompare(right)),
   );
+  const totalVaultFiles = $derived.by(() => app.vault.getFiles().length);
+  const accessibleFileCount = $derived.by(() =>
+    privacyMode === "private-by-default"
+      ? includedFiles.length
+      : totalVaultFiles - includedFiles.length,
+  );
+  const privateFileCount = $derived.by(() => totalVaultFiles - accessibleFileCount);
   const hasFilters = $derived.by(() => parsedMembership.draft.autoIncludeRules.length > 0);
   const includedEntries = $derived.by(() =>
     includedFiles.map((path) => ({
@@ -97,6 +106,10 @@
   function savePrivacyFilter(nextFilter: ViewFilter) {
     privacyFilter = ensureGroup(nextFilter);
     data.setPrivacyFilter(nextFilter);
+  }
+
+  function setPrivacyMode(mode: PrivacyMode) {
+    data.setPrivacyMode(mode);
   }
 
   function updateDraft(mutator: (draft: ReturnType<typeof cloneSpaceMembershipDraft>) => void) {
@@ -160,41 +173,115 @@
   }> {
     return entry.isManual
       ? [{ label: "Remove", onClick: removeManualPath }]
-      : [{ label: "Keep public", onClick: excludePath }];
+      : [
+          {
+            label: privacyMode === "private-by-default" ? "Keep private" : "Keep public",
+            onClick: excludePath,
+          },
+        ];
   }
 
   function getExcludedFileActions(): Array<{ label: string; onClick: (path: string) => void }> {
-    return [{ label: "Restore", onClick: restoreExcludedPath }];
+    return [
+      {
+        label: privacyMode === "private-by-default" ? "Restore access" : "Restore private",
+        onClick: restoreExcludedPath,
+      },
+    ];
   }
+
+  const introTitle = $derived.by(() =>
+    privacyMode === "private-by-default" ? "Private by default" : "Public by default",
+  );
+  const introBody = $derived.by(() =>
+    privacyMode === "private-by-default"
+      ? "Untrusted providers can only access the files listed below. Everything else stays private unless the provider is marked as trusted."
+      : "Untrusted providers can access vault files by default, except for the files listed below as private. Trusted providers always bypass this restriction.",
+  );
+  const sectionTitle = $derived.by(() =>
+    privacyMode === "private-by-default" ? "Files exposed to untrusted providers" : "Private files",
+  );
+  const includedEmptyText = $derived.by(() =>
+    privacyMode === "private-by-default"
+      ? "No files are exposed to untrusted providers yet."
+      : "No private files selected yet.",
+  );
+  const pickerModalTitle = $derived.by(() =>
+    privacyMode === "private-by-default" ? "Expose files" : "Add private files",
+  );
+  const pickerText = $derived.by(() =>
+    privacyMode === "private-by-default"
+      ? {
+          searchPlaceholder: "Search vault files",
+          searchAriaLabel: "Search files to expose",
+          defaultHeading: "Vault files",
+          defaultDescription:
+            "Select one or more vault files that untrusted providers are allowed to access.",
+          emptySearchText: "No matching files found.",
+          confirmVerb: "Expose",
+          alreadySelectedBadgeLabel: "Already exposed",
+        }
+      : {
+          searchPlaceholder: "Search vault files",
+          searchAriaLabel: "Search files to mark private",
+          defaultHeading: "Vault files",
+          defaultDescription: "Select one or more vault files to mark as private.",
+          emptySearchText: "No matching files found.",
+          confirmVerb: "Add",
+          alreadySelectedBadgeLabel: "Already private",
+        },
+  );
+  const excludedTitle = $derived.by(() =>
+    privacyMode === "private-by-default" ? "Kept private" : "Kept public",
+  );
 </script>
 
 <div class="privacy-modal-shell">
   <div class="privacy-modal-content">
-    <p>
-      Files in this set are treated as <strong>private</strong> and blocked from non-trusted
-      providers. Currently {includedFiles.length} private file{includedFiles.length === 1
-        ? ""
-        : "s"}.
-    </p>
+    <div class="privacy-mode-panel">
+      <div class="privacy-mode-copy">
+        <div class="privacy-mode-title">{introTitle}</div>
+        <p>{introBody}</p>
+        <p>
+          Untrusted providers can currently access {accessibleFileCount} of {totalVaultFiles} vault file{totalVaultFiles ===
+          1
+            ? ""
+            : "s"}. {privateFileCount} file{privateFileCount === 1 ? "" : "s"} remain private.
+        </p>
+      </div>
+
+      <div class="privacy-mode-toggle" role="tablist" aria-label="Privacy mode">
+        <button
+          type="button"
+          class="privacy-mode-button"
+          class:privacy-mode-button--active={privacyMode === "private-by-default"}
+          aria-pressed={privacyMode === "private-by-default"}
+          onclick={() => setPrivacyMode("private-by-default")}
+        >
+          Private by default
+        </button>
+        <button
+          type="button"
+          class="privacy-mode-button"
+          class:privacy-mode-button--active={privacyMode === "public-by-default"}
+          aria-pressed={privacyMode === "public-by-default"}
+          onclick={() => setPrivacyMode("public-by-default")}
+        >
+          Public by default
+        </button>
+      </div>
+    </div>
 
     <FileSetEditor
       {app}
       {sourcePath}
       hoverSource="smart-second-brain-privacy-editor"
-      sectionTitle="Private files"
+      {sectionTitle}
       {includedEntries}
-      includedEmptyText="No private files selected yet."
+      {includedEmptyText}
       addButtonText="Add files"
-      pickerModalTitle="Add private files"
-      pickerText={{
-        searchPlaceholder: "Search vault files",
-        searchAriaLabel: "Search files to mark private",
-        defaultHeading: "Vault files",
-        defaultDescription: "Select one or more vault files to mark as private.",
-        emptySearchText: "No matching files found.",
-        confirmVerb: "Add",
-        alreadySelectedBadgeLabel: "Already private",
-      }}
+      {pickerModalTitle}
+      {pickerText}
       pickerExistingPaths={parsedMembership.draft.manualPaths}
       pickerIncludedPaths={includedFiles}
       onAddPaths={handleAddPaths}
@@ -217,7 +304,7 @@
       {availableTags}
       onFilterChange={handleRulesFilterChange}
       {excludedEntries}
-      excludedTitle="Kept public"
+      {excludedTitle}
       resolveIncludedActions={getIncludedFileActions}
       resolveExcludedActions={getExcludedFileActions}
     />
@@ -243,5 +330,61 @@
     gap: 12px;
     flex: 1;
     min-height: 0;
+  }
+
+  .privacy-mode-panel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 10px;
+    background: var(--background-secondary);
+  }
+
+  .privacy-mode-copy {
+    display: flex;
+    flex: 1 1 320px;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .privacy-mode-copy p {
+    margin: 0;
+  }
+
+  .privacy-mode-title {
+    font-weight: 600;
+  }
+
+  .privacy-mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px;
+    border-radius: 999px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+  }
+
+  .privacy-mode-button {
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 12px;
+    background: transparent;
+    color: var(--text-normal);
+    font-size: 0.85rem;
+    font-weight: 500;
+  }
+
+  .privacy-mode-button:hover {
+    background: var(--background-modifier-hover);
+  }
+
+  .privacy-mode-button--active {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
   }
 </style>

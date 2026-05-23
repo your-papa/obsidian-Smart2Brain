@@ -6,7 +6,7 @@ export class PrivacyListModal extends Modal {
 	private component: Record<string, never> | null = null;
 
 	onOpen() {
-		this.setTitle("Manage Private Files");
+		this.setTitle("Manage Note Access Policy");
 		this.modalEl.style.width = "min(960px, 96vw)";
 		this.modalEl.style.maxWidth = "96vw";
 		this.modalEl.style.height = "min(840px, 92vh)";
