@@ -1,50 +1,60 @@
 <script lang="ts">
-import { QueryClientProvider } from "@tanstack/svelte-query";
-import Input from "../../components/chat/Input.svelte";
-import MessageContainer from "../../components/chat/MessageContainer.svelte";
-import SpaceSwitcher from "../../components/ui/SpaceSwitcher.svelte";
-import { getMessenger } from "../../stores/chatStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import { icon } from "../../utils/utils";
+  import { QueryClientProvider } from "@tanstack/svelte-query";
+  import Input from "../../components/chat/Input.svelte";
+  import MessageContainer from "../../components/chat/MessageContainer.svelte";
+  import SpaceSwitcher from "../../components/ui/SpaceSwitcher.svelte";
+  import { getMessenger } from "../../stores/chatStore.svelte";
+  import { getData } from "../../stores/dataStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
+  import { icon } from "../../utils/utils";
 
-const plugin = getPlugin();
+  const plugin = getPlugin();
+  const data = getData();
 
-const messenger = getMessenger();
+  const messenger = getMessenger();
 
-let messageContainer = $state<ReturnType<typeof MessageContainer> | undefined>();
-let input = $state<ReturnType<typeof Input> | undefined>();
-let lastSessionId: string | null = null;
-let isDragging = $state(false);
-let dragMessage = $state("Drop files here");
-let dragHasIssue = $state(false);
+  const activeSpaceColor = $derived.by(() => {
+    const useGlobal = data.spaceImmersionMode === "global";
+    const activeSpaceId = useGlobal ? data.activeImmersedSpaceId : data.chatSpaceId;
+    if (!activeSpaceId) return null;
+    return data.spaces.find((space) => space.id === activeSpaceId)?.color ?? null;
+  });
 
-$effect(() => {
-	const sessionId = messenger?.session?.id ?? null;
-	if (!sessionId || sessionId === lastSessionId) return;
-	lastSessionId = sessionId;
-	input?.focusEditor();
-});
+  let messageContainer = $state<ReturnType<typeof MessageContainer> | undefined>();
+  let input = $state<ReturnType<typeof Input> | undefined>();
+  let lastSessionId: string | null = null;
+  let isDragging = $state(false);
+  let dragMessage = $state("Drop files here");
+  let dragHasIssue = $state(false);
 
-function handleRootDragEnter(event: DragEvent) {
-	input?.handleDragEnter(event);
-}
+  $effect(() => {
+    const sessionId = messenger?.session?.id ?? null;
+    if (!sessionId || sessionId === lastSessionId) return;
+    lastSessionId = sessionId;
+    input?.focusEditor();
+  });
 
-function handleRootDragOver(event: DragEvent) {
-	input?.handleDragOver(event);
-}
+  function handleRootDragEnter(event: DragEvent) {
+    input?.handleDragEnter(event);
+  }
 
-function handleRootDragLeave(event: DragEvent) {
-	input?.handleDragLeave(event);
-}
+  function handleRootDragOver(event: DragEvent) {
+    input?.handleDragOver(event);
+  }
 
-async function handleRootDrop(event: DragEvent) {
-	await input?.handleDrop(event);
-}
+  function handleRootDragLeave(event: DragEvent) {
+    input?.handleDragLeave(event);
+  }
+
+  async function handleRootDrop(event: DragEvent) {
+    await input?.handleDrop(event);
+  }
 </script>
 
 <QueryClientProvider client={plugin.queryClient}>
   <div
     class="chat-root relative h-full flex flex-col gap-4 overflow-hidden"
+    style={activeSpaceColor ? `--space-color: ${activeSpaceColor}` : undefined}
     data-testid="chat-root"
     role="region"
     ondragenter={handleRootDragEnter}
@@ -141,9 +151,14 @@ async function handleRootDrop(event: DragEvent) {
   }
 
   :global(.chat-root:has(.chat-input-wrapper:focus-within) .logo-container svg) {
-    fill: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
-    stroke: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
-    filter: drop-shadow(0 0 8px color-mix(in srgb, var(--interactive-accent) 30%, transparent))
-      drop-shadow(0 4px 10px color-mix(in srgb, var(--interactive-accent) 18%, transparent));
+    fill: var(--space-color, hsl(var(--accent-h), var(--accent-s), var(--accent-l)));
+    stroke: var(--space-color, hsl(var(--accent-h), var(--accent-s), var(--accent-l)));
+    filter: drop-shadow(
+        0 0 8px color-mix(in srgb, var(--space-color, var(--interactive-accent)) 30%, transparent)
+      )
+      drop-shadow(
+        0 4px 10px
+          color-mix(in srgb, var(--space-color, var(--interactive-accent)) 18%, transparent)
+      );
   }
 </style>

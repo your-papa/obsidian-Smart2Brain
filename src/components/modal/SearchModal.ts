@@ -318,6 +318,18 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.stopGlowAnimation();
 	}
 
+	private getSemanticGlowColor(): string {
+		const activeSpaceFilters = this.activeFilters.filter((filter) => filter.type === "space");
+		if (activeSpaceFilters.length === 1) {
+			const activeSpaceColor = getData().getSpaceByLabel(activeSpaceFilters[0].value)?.color?.trim();
+			if (activeSpaceColor) {
+				return activeSpaceColor;
+			}
+		}
+
+		return getComputedStyle(document.body).getPropertyValue("--interactive-accent").trim() || "#7f6df2";
+	}
+
 	private setSearching(isSearching: boolean): void {
 		if (this.isSearching === isSearching) {
 			return;
@@ -1151,7 +1163,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private startGlowAnimation(): void {
 		if (this.glowAnimationId !== null) return;
 
-		const accent = getComputedStyle(document.body).getPropertyValue("--interactive-accent").trim() || "#7f6df2";
 		const muted =
 			getComputedStyle(document.body).getPropertyValue("--background-modifier-border").trim() || "#363636";
 		const radius = getComputedStyle(this.modalEl).borderRadius || "12px";
@@ -1200,6 +1211,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 			const r = parseFloat(radius) || 12;
 			const angle = ((performance.now() % 2000) / 2000) * Math.PI * 2;
+			const accent = this.getSemanticGlowColor();
 
 			const cx = w / 2;
 			const cy = h / 2;
