@@ -48,8 +48,8 @@ describe("search modal", () => {
 	].join("\n");
 	const pathNoteName = "SpaceOps/Path Fixture.md";
 	const pathNoteContent = ["# Path Fixture", "", "This note is about telemetry and consoles."].join("\n");
-	const shiftCreateNoteName = `Search Modal Shift Enter Fixture ${Date.now()}.md`;
-	const shiftCreateNoteTitle = shiftCreateNoteName.replace(/\.md$/u, "");
+	const multiSelectCreateNoteName = `Search Modal Shift Enter Fixture ${Date.now()}.md`;
+	const multiSelectCreateNoteTitle = multiSelectCreateNoteName.replace(/\.md$/u, "");
 
 	// Search uses the standalone MiniSearch (BM25) which is always available,
 	// even without an embedding provider. Fixture notes in the vault provide
@@ -69,7 +69,7 @@ describe("search modal", () => {
 		deleteNote(tagNoteName);
 		deleteNote(inlineTagOnlyNoteName);
 		deleteNote(pathNoteName);
-		deleteNote(shiftCreateNoteName);
+		deleteNote(multiSelectCreateNoteName);
 		clearBuffers();
 	});
 
@@ -177,14 +177,20 @@ describe("search modal", () => {
 		await waitForSelector(".s2b-search-modal");
 	});
 
-	it("should create a new note from the query when pressing Shift+Enter", async () => {
+	it("should keep selections across queries when pressing Shift+Enter", async () => {
 		obsidianEval(`(() => {
 			const input = document.querySelector('.s2b-search-modal .prompt-input');
 			if (!(input instanceof HTMLInputElement)) return 'missing';
-			input.value = '${shiftCreateNoteTitle}';
+			input.value = 'Rocket Science';
 			input.dispatchEvent(new Event('input', { bubbles: true }));
 			return input.value;
 		})()`);
+
+		await waitForCondition(
+			() => domText('.s2b-search-result-name').includes('Alias Fixture'),
+			"alias result to appear for first selection",
+			{ timeoutMs: 20_000 },
+		);
 
 		obsidianEval(`(() => {
 			const modal = document.querySelector('.s2b-search-modal');
@@ -201,19 +207,89 @@ describe("search modal", () => {
 		})()`);
 
 		await waitForCondition(
-			() => obsidianEval(`Boolean(app.vault.getAbstractFileByPath('${shiftCreateNoteName}'))`).includes('true'),
-			"shift-enter note to be created",
+			() => domText('.s2b-search-selection-summary').includes('1 selected'),
+			"selection summary to show first selection",
+			{ timeoutMs: 10_000, intervalMs: 250 },
+		);
+
+		obsidianEval(`(() => {
+			const input = document.querySelector('.s2b-search-modal .prompt-input');
+			if (!(input instanceof HTMLInputElement)) return 'missing';
+			input.value = 'orbital-index';
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+			return input.value;
+		})()`);
+
+		await waitForCondition(
+			() => domText('.s2b-search-result-name').includes('Tag Fixture'),
+			"tag fixture to appear for second selection",
+			{ timeoutMs: 20_000 },
+		);
+
+		obsidianEval(`(() => {
+			const modal = document.querySelector('.s2b-search-modal');
+			if (!(modal instanceof HTMLElement)) return 'missing-modal';
+			const event = new KeyboardEvent('keydown', {
+				key: 'Enter',
+				code: 'Enter',
+				shiftKey: true,
+				bubbles: true,
+				cancelable: true,
+			});
+			modal.dispatchEvent(event);
+			return 'dispatched';
+		})()`);
+
+		await waitForCondition(
+			() => domText('.s2b-search-selection-summary').includes('2 selected'),
+			"selection summary to preserve selection across queries",
+			{ timeoutMs: 10_000, intervalMs: 250 },
+		);
+
+		expect(domText('.s2b-search-selection-summary')).toContain('2 selected');
+		expect(
+			obsidianEval(`Array.from(document.querySelectorAll('.s2b-search-result-item-selected')).length`).replace(/^=>\s*/u, ''),
+		).not.toBe('0');
+	});
+
+	it("should create a new note from the query when pressing Mod+Shift+Enter", async () => {
+		obsidianEval(`(() => {
+			const input = document.querySelector('.s2b-search-modal .prompt-input');
+			if (!(input instanceof HTMLInputElement)) return 'missing';
+			input.value = '${multiSelectCreateNoteTitle}';
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+			return input.value;
+		})()`);
+
+		obsidianEval(`(() => {
+			const modal = document.querySelector('.s2b-search-modal');
+			if (!(modal instanceof HTMLElement)) return 'missing-modal';
+			const event = new KeyboardEvent('keydown', {
+				key: 'Enter',
+				code: 'Enter',
+				metaKey: true,
+				shiftKey: true,
+				bubbles: true,
+				cancelable: true,
+			});
+			modal.dispatchEvent(event);
+			return 'dispatched';
+		})()`);
+
+		await waitForCondition(
+			() => obsidianEval(`Boolean(app.vault.getAbstractFileByPath('${multiSelectCreateNoteName}'))`).includes('true'),
+			"mod-shift-enter note to be created",
 			{ timeoutMs: 10_000, intervalMs: 250 },
 		);
 
 		await waitForCondition(
-			() => obsidianEval(`app.workspace.getActiveFile()?.path ?? ''`).includes(shiftCreateNoteName),
+			() => obsidianEval(`app.workspace.getActiveFile()?.path ?? ''`).includes(multiSelectCreateNoteName),
 			"created note to open",
 			{ timeoutMs: 10_000, intervalMs: 250 },
 		);
 
-		expect(readNote(shiftCreateNoteName)).toContain(`# ${shiftCreateNoteTitle}`);
-		expect(obsidianEval(`app.workspace.getActiveFile()?.path ?? ''`)).toContain(shiftCreateNoteName);
+		expect(readNote(multiSelectCreateNoteName)).toContain(`# ${multiSelectCreateNoteTitle}`);
+		expect(obsidianEval(`app.workspace.getActiveFile()?.path ?? ''`)).toContain(multiSelectCreateNoteName);
 
 		executeCommand("smart-second-brain:search-notes");
 		await waitForSelector(".s2b-search-modal");

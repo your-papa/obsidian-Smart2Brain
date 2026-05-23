@@ -52,6 +52,25 @@
 	max-height: 400px;
 }
 
+.s2b-search-selection-summary {
+	margin: 6px 8px 0;
+	padding: 6px 10px;
+	border: 1px solid color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border));
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+	color: var(--text-accent);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.s2b-search-modal .suggestion-item.s2b-search-result-item-selected {
+	background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-secondary));
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+}
+
 /* Inline filter chips inside the input container */
 .s2b-inline-chips-container.prompt-input-container {
 	display: flex;

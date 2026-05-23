@@ -3,7 +3,7 @@ import { type Change, diffLines } from "diff";
 import { z } from "zod";
 import type SecondBrainPlugin from "../main";
 import type { PendingChange, PendingChangeEntry } from "../types/shared";
-import { matchesPathPattern, shouldProcessVaultPath } from "../utils/fileFiltering";
+import { shouldProcessVaultPath } from "../utils/fileFiltering";
 import { genUUIDv7 } from "../utils/uuid7Validator";
 import { Logger } from "../utils/logging";
 import { getData } from "./dataStore.svelte";
@@ -177,23 +177,10 @@ export class PendingChangesStore {
 	}
 
 	/**
-	 * Check if a file is marked as private by the privacy list settings.
-	 * In "mark as private" mode (privacyIsExcluding=true), files matching patterns are private.
-	 * In "mark as public" mode (privacyIsExcluding=false), files NOT matching patterns are private.
+	 * Check if a file is marked as private by the privacy filter.
 	 */
 	isFilePrivate(filePath: string): boolean {
-		const pluginData = getData();
-		const privacyList = pluginData.privacyList;
-		const isExcluding = pluginData.privacyIsExcluding;
-
-		const matchesPattern = privacyList.some((pattern: string) => matchesPathPattern(filePath, pattern));
-
-		if (isExcluding) {
-			// "Mark as private" mode: matched files ARE private
-			return matchesPattern;
-		}
-		// "Mark as public" mode: non-matched files are private (when list is non-empty)
-		return privacyList.length > 0 && !matchesPattern;
+		return getData().isFilePrivate(filePath);
 	}
 
 	/**

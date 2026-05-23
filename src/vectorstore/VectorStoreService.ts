@@ -36,12 +36,7 @@ import {
 	type VectorStore,
 } from "./types";
 import { Logger } from "../utils/logging";
-import {
-	getIndexableVaultFiles,
-	isIndexableFile,
-	matchesPathPattern,
-	readIndexableContent,
-} from "../utils/fileFiltering";
+import { getIndexableVaultFiles, isIndexableFile, readIndexableContent } from "../utils/fileFiltering";
 import { matchesPathPrefix } from "../utils/pathUtils";
 import { toFloat32Array } from "./similarity";
 
@@ -1249,11 +1244,7 @@ export class VectorStoreService {
 
 		// Privacy check: skip private files for untrusted providers
 		if (provider && !pluginData.isProviderTrusted(provider)) {
-			const privacyList = pluginData.privacyList;
-			const privacyIsExcluding = pluginData.privacyIsExcluding;
-			const matchesPrivacy = privacyList.some((pattern) => matchesPathPattern(file.path, pattern));
-			const isPrivate = privacyIsExcluding ? matchesPrivacy : privacyList.length > 0 && !matchesPrivacy;
-			if (isPrivate) return "privacy";
+			if (pluginData.isFilePrivate(file.path)) return "privacy";
 		}
 
 		return null;

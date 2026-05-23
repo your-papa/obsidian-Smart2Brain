@@ -186,6 +186,20 @@ export function resolveSpaceMembershipDraft(
 	};
 }
 
+export function matchesSpaceMembershipDraftPath(app: App, draft: SpaceMembershipDraft, filePath: string): boolean {
+	const normalized = normalizeSpaceMembershipDraft(draft);
+
+	if (normalized.excludedPaths.includes(filePath)) {
+		return false;
+	}
+
+	if (normalized.manualPaths.includes(filePath)) {
+		return true;
+	}
+
+	return normalized.autoIncludeRules.some((rule) => matchesSpaceMembershipRulePath(app, rule, filePath));
+}
+
 /**
  * Async variant that rewrites `query` leaves to `paths` leaves by calling
  * `searchFn`, then delegates to the sync resolver.
@@ -441,6 +455,33 @@ function describeMembershipRule(rule: SpaceMembershipRule): string {
 			return `Type: ${rule.value.startsWith(".") ? rule.value.slice(1) : rule.value}`;
 		case "query":
 			return `Query: ${rule.value}`;
+	}
+}
+
+function matchesSpaceMembershipRulePath(app: App, rule: SpaceMembershipRule, filePath: string): boolean {
+	switch (rule.type) {
+		case "folder":
+			return matchesPathPrefix(filePath, rule.value);
+		case "extension": {
+			const normalizedExt = rule.value.startsWith(".")
+				? rule.value.slice(1).toLowerCase()
+				: rule.value.toLowerCase();
+			const fileExt = filePath.split(".").pop()?.toLowerCase() ?? "";
+			return fileExt === normalizedExt;
+		}
+		case "tag": {
+			const file = app.vault.getAbstractFileByPath(filePath);
+			if (!file || !("extension" in file)) return false;
+			const cache = app.metadataCache.getFileCache(file as TFile);
+			const fileTags = cache ? (getAllTags(cache) ?? []) : [];
+			const normalizedFilter = rule.value.startsWith("#") ? rule.value : `#${rule.value}`;
+			return fileTags.some((tag) => {
+				const normalizedTag = tag.startsWith("#") ? tag : `#${tag}`;
+				return normalizedTag === normalizedFilter || normalizedTag.startsWith(`${normalizedFilter}/`);
+			});
+		}
+		case "query":
+			return false;
 	}
 }
 

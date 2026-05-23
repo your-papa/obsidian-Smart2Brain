@@ -1,130 +1,247 @@
 <script lang="ts">
-import { type TAbstractFile, prepareFuzzySearch } from "obsidian";
-import { getData } from "../../stores/dataStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import { icon } from "../../utils/utils";
-import SettingContainer from "../settings/SettingContainer.svelte";
-import Button from "../ui/Button.svelte";
-import Dropdown from "../ui/Dropdown.svelte";
-import Toggle from "../ui/Toggle.svelte";
-import type { PrivacyListModal } from "./PrivacyListModal";
-import FolderSuggest from "./FolderSuggest.svelte";
+  import { getAllTags, type App } from "obsidian";
+  import type { ViewFilter } from "../../types/graph";
+  import {
+    cloneSpaceMembershipDraft,
+    compileSpaceMembershipDraft,
+    createEmptySpaceFilter,
+    parseSpaceMembershipFilter,
+    resolveSpaceMembershipDraft,
+  } from "../../lib/views";
+  import { getData } from "../../stores/dataStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
+  import Button from "../ui/Button.svelte";
+  import type { PrivacyListModal } from "./PrivacyListModal";
+  import FileSetEditor from "./FileSetEditor.svelte";
 
-interface Props {
-	modal: PrivacyListModal;
-}
+  interface Props {
+    modal: PrivacyListModal;
+  }
 
-const plugin = getPlugin();
-const data = getData();
-const suggestionLength: number = 100;
+  const plugin = getPlugin();
+  const data = getData();
+  const app: App = plugin.app;
+  const sourcePath = $derived(app.workspace.getActiveFile()?.path ?? "");
 
-let { modal }: Props = $props();
+  let { modal }: Props = $props();
 
-const modes = ["File/Folder", "Filetype"] as const;
-let exclusionMode: (typeof modes)[number] = $state("File/Folder");
+  const availableFolders = $derived.by(() => {
+    const folders = new Set<string>();
+    for (const file of app.vault.getFiles()) {
+      const parts = file.path.split("/");
+      if (parts.length > 1) {
+        folders.add(parts[0]);
+        if (parts.length > 2) folders.add(`${parts[0]}/${parts[1]}`);
+      }
+    }
+    return [...folders].sort();
+  });
 
-function matchFilesFolders(query: string): TAbstractFile[] {
-	const allFiles = plugin.app.vault.getAllLoadedFiles();
+  const availableTags = $derived.by(() => {
+    const tags = new Set<string>();
+    for (const file of app.vault.getMarkdownFiles()) {
+      const cache = app.metadataCache.getFileCache(file);
+      if (!cache) continue;
+      for (const tag of getAllTags(cache) ?? []) {
+        tags.add(tag);
+      }
+    }
+    return [...tags].sort();
+  });
 
-	if (!query) {
-		return allFiles.slice(0, 10);
-	}
+  function ensureGroup(filter: ViewFilter): ViewFilter {
+    if (filter.type === "all" || filter.type === "any" || filter.type === "none") {
+      return filter;
+    }
+    return { type: "all", conditions: [filter] };
+  }
 
-	const fuzzySearch = prepareFuzzySearch(query);
+  const initialParsed = parseSpaceMembershipFilter(data.privacyFilter);
+  let privacyFilter = $state<ViewFilter>(
+    ensureGroup(data.privacyFilter ?? createEmptySpaceFilter()),
+  );
+  let showFilters = $state(initialParsed.draft.autoIncludeRules.length > 0);
 
-	const matches = allFiles
-		.map((file) => ({
-			file,
-			match: fuzzySearch(file.path),
-		}))
-		.filter((item): item is { file: TAbstractFile; match: NonNullable<typeof item.match> } => item.match !== null)
-		.sort((a, b) => (b.match.score ?? 0) - (a.match.score ?? 0))
-		.map((item) => item.file);
+  const parsedMembership = $derived.by(() => parseSpaceMembershipFilter(privacyFilter));
+  const resolvedPrivacy = $derived.by(() =>
+    resolveSpaceMembershipDraft(
+      app,
+      parsedMembership.draft,
+      new Set(app.vault.getFiles().map((file) => file.path)),
+    ),
+  );
+  const includedFiles = $derived.by(() =>
+    [...resolvedPrivacy.paths].sort((left, right) => left.localeCompare(right)),
+  );
+  const excludedFiles = $derived.by(() =>
+    [...parsedMembership.draft.excludedPaths].sort((left, right) => left.localeCompare(right)),
+  );
+  const hasFilters = $derived.by(() => parsedMembership.draft.autoIncludeRules.length > 0);
+  const includedEntries = $derived.by(() =>
+    includedFiles.map((path) => ({
+      path,
+      displayName: path.split("/").pop() ?? path,
+      contextLabel: getParentPath(path) || null,
+      searchable: path.toLowerCase(),
+      isManual: resolvedPrivacy.provenance.get(path)?.includes("Manual") ?? false,
+    })),
+  );
+  const excludedEntries = $derived.by(() =>
+    excludedFiles.map((path) => ({
+      path,
+      displayName: path.split("/").pop() ?? path,
+      contextLabel: getParentPath(path) || null,
+    })),
+  );
 
-	return matches;
-}
+  function savePrivacyFilter(nextFilter: ViewFilter) {
+    privacyFilter = ensureGroup(nextFilter);
+    data.setPrivacyFilter(nextFilter);
+  }
 
-function addPrivacyEntry(entry: string) {
-	if (!entry.trim()) return;
-	const normalized = exclusionMode === "Filetype" ? `*.${entry.trim().replace(/^\./, "")}` : entry.trim();
-	data.addPrivacyList(normalized);
-}
+  function updateDraft(mutator: (draft: ReturnType<typeof cloneSpaceMembershipDraft>) => void) {
+    const currentParsedMembership = parseSpaceMembershipFilter(privacyFilter);
+    const draft = cloneSpaceMembershipDraft(currentParsedMembership.draft);
+    mutator(draft);
+    showFilters = showFilters || draft.autoIncludeRules.length > 0;
+    savePrivacyFilter(compileSpaceMembershipDraft(draft));
+  }
 
-function removePrivacyEntry(entry: string) {
-	data.removePrivacyList(entry);
-}
+  function getParentPath(path: string): string {
+    const parts = path.split("/");
+    return parts.slice(0, -1).join("/");
+  }
+
+  function removeManualPath(path: string) {
+    updateDraft((draft) => {
+      draft.manualPaths = draft.manualPaths.filter((entry) => entry !== path);
+      draft.excludedPaths = draft.excludedPaths.filter((entry) => entry !== path);
+    });
+  }
+
+  function excludePath(path: string) {
+    updateDraft((draft) => {
+      if (!draft.excludedPaths.includes(path)) {
+        draft.excludedPaths = [...draft.excludedPaths, path];
+      }
+    });
+  }
+
+  function restoreExcludedPath(path: string) {
+    updateDraft((draft) => {
+      draft.excludedPaths = draft.excludedPaths.filter((entry) => entry !== path);
+    });
+  }
+
+  function handleRulesFilterChange(nextFilter: ViewFilter) {
+    updateDraft((draft) => {
+      const parsed = parseSpaceMembershipFilter(nextFilter);
+      if (parsed.isAdvanced) return;
+      const nextDraft = parsed.draft;
+      const preservedManualPaths = draft.manualPaths;
+      const preservedExcludedPaths = draft.excludedPaths;
+      draft.manualPaths = preservedManualPaths;
+      draft.excludedPaths = preservedExcludedPaths;
+      draft.autoIncludeRules = nextDraft.autoIncludeRules;
+    });
+  }
+
+  async function handleAddPaths(selectedPaths: string[]) {
+    if (selectedPaths.length === 0) return;
+    updateDraft((draft) => {
+      draft.manualPaths = [...draft.manualPaths, ...selectedPaths];
+      draft.excludedPaths = draft.excludedPaths.filter((path) => !selectedPaths.includes(path));
+    });
+  }
+
+  function getIncludedFileActions(entry: { isManual?: boolean }): Array<{
+    label: string;
+    onClick: (path: string) => void;
+  }> {
+    return entry.isManual
+      ? [{ label: "Remove", onClick: removeManualPath }]
+      : [{ label: "Keep public", onClick: excludePath }];
+  }
+
+  function getExcludedFileActions(): Array<{ label: string; onClick: (path: string) => void }> {
+    return [{ label: "Restore", onClick: restoreExcludedPath }];
+  }
 </script>
 
-<div class="modal-title">
-  <span class="privacy-modal-title-icon" use:icon={"shield"} aria-hidden="true"></span>
-  <span>Manage Privacy {data.privacyIsExcluding ? "Blacklist" : "Whitelist"}</span>
-</div>
-<div class="modal-content">
-  <p>
-    Files matching this list are considered <strong>private</strong> and will be blocked from
-    non-trusted providers. Currently {data.privacyIsExcluding ? "excluding" : "including"}
-    {data.privacyList.length} entr{data.privacyList.length !== 1 ? "ies" : "y"}.
-  </p>
-  {#if data.privacyList.length > 0}
-    {#each data.privacyList as entry, index}
-      <div class="sync-exclude-folder">
-        <Button
-          styles="sync-exclude-folder-remove"
-          iconId="x"
-          onClick={() => removePrivacyEntry(entry)}
-        ></Button>
-        <div class="sync-exclude-folder-name">
-          <span>{entry}</span>
-        </div>
-      </div>
-    {/each}
-  {/if}
+<div class="privacy-modal-shell">
+  <div class="privacy-modal-content">
+    <p>
+      Files in this set are treated as <strong>private</strong> and blocked from non-trusted
+      providers. Currently {includedFiles.length} private file{includedFiles.length === 1
+        ? ""
+        : "s"}.
+    </p>
 
-  <SettingContainer
-    name="Choose a mode"
-    desc="If enabled, matched files will be treated as private. Otherwise, only matched files will be considered non-private."
-  >
-    <Toggle checked={data.privacyIsExcluding} onchange={() => data.togglePrivacyIsExcluding()} />
-  </SettingContainer>
-
-  <SettingContainer name="Add a {exclusionMode}" desc="Add files or folders to the privacy list.">
-    <Dropdown
-      type="options"
-      dropdown={modes.map((mode) => ({
-        display: mode,
-        value: mode,
-      }))}
-      onchange={(selected) => (exclusionMode = selected)}
-      selected={exclusionMode}
+    <FileSetEditor
+      {app}
+      {sourcePath}
+      hoverSource="smart-second-brain-privacy-editor"
+      sectionTitle="Private files"
+      {includedEntries}
+      includedEmptyText="No private files selected yet."
+      addButtonText="Add files"
+      pickerModalTitle="Add private files"
+      pickerText={{
+        searchPlaceholder: "Search vault files",
+        searchAriaLabel: "Search files to mark private",
+        defaultHeading: "Vault files",
+        defaultDescription: "Select one or more vault files to mark as private.",
+        emptySearchText: "No matching files found.",
+        confirmVerb: "Add",
+        alreadySelectedBadgeLabel: "Already private",
+      }}
+      pickerExistingPaths={parsedMembership.draft.manualPaths}
+      pickerIncludedPaths={includedFiles}
+      onAddPaths={handleAddPaths}
+      showFilterToggle={true}
+      filtersButtonText="Filters"
+      filterToggleAriaLabel="Toggle privacy filters"
+      isFilterActive={hasFilters}
+      filterCount={parsedMembership.draft.autoIncludeRules.length}
+      onToggleFilters={() => (showFilters = !showFilters)}
+      showFilterPanel={showFilters}
+      filterPanelLabel="Filters"
+      filterBuilderFilter={ensureGroup(
+        compileSpaceMembershipDraft({
+          manualPaths: [],
+          autoIncludeRules: parsedMembership.draft.autoIncludeRules,
+          excludedPaths: [],
+        }),
+      )}
+      {availableFolders}
+      {availableTags}
+      onFilterChange={handleRulesFilterChange}
+      {excludedEntries}
+      excludedTitle="Kept public"
+      resolveIncludedActions={getIncludedFileActions}
+      resolveExcludedActions={getExcludedFileActions}
     />
-    <FolderSuggest
-      app={plugin.app}
-      {suggestionLength}
-      suggestionFn={(query: string) => matchFilesFolders(query)}
-      onSelected={(entry: string) => addPrivacyEntry(entry)}
-      onSubmit={(entry: string) => addPrivacyEntry(entry)}
-    />
-  </SettingContainer>
-</div>
+  </div>
 
-<div class="modal-button-container">
-  <Button buttonText="Done" onClick={() => modal.close()} />
+  <div class="modal-button-container">
+    <Button buttonText="Done" onClick={() => modal.close()} />
+  </div>
 </div>
 
 <style>
-  .modal-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
+  .privacy-modal-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    height: 100%;
+    min-height: 0;
   }
 
-  .privacy-modal-title-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
-    color: var(--text-accent);
-    flex-shrink: 0;
+  .privacy-modal-content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
   }
 </style>

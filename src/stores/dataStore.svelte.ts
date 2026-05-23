@@ -1,5 +1,11 @@
 import { normalizePath } from "obsidian";
 import { BASE_SYSTEM_PROMPT } from "../agent/prompts";
+import {
+	createEmptySpaceFilter,
+	matchesSpaceMembershipDraftPath,
+	parseSpaceMembershipFilter,
+	resolveViewFilter,
+} from "../lib/views";
 import { getSecret, listSecrets, setSecret } from "../lib/secretStorage";
 import type SecondBrainPlugin from "../main";
 import type {
@@ -364,9 +370,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	attachmentFolder: "",
 
 	// Privacy
-	privacyListExclude: [],
-	privacyListInclude: [],
-	privacyIsExcluding: true,
+	privacyFilter: createEmptySpaceFilter(),
 
 	// UI state
 	isVerbose: false,
@@ -469,43 +473,26 @@ export class PluginDataStore {
 	}
 
 	// ============================================================================
-	// Privacy List Methods
+	// Privacy Methods
 	// ============================================================================
 
-	get privacyIsExcluding(): boolean {
-		return this.#data.privacyIsExcluding;
+	get privacyFilter() {
+		return this.#data.privacyFilter;
 	}
 
-	togglePrivacyIsExcluding() {
-		this.#data.privacyIsExcluding = !this.#data.privacyIsExcluding;
+	setPrivacyFilter(filter: PluginData["privacyFilter"]) {
+		this.#data.privacyFilter = filter;
 		this.saveSettings();
 	}
 
-	get privacyList(): string[] {
-		if (this.#data.privacyIsExcluding) return this.#data.privacyListExclude;
-		return this.#data.privacyListInclude;
-	}
-
-	removePrivacyList(val: string) {
-		if (this.#data.privacyIsExcluding) {
-			if (!this.#data.privacyListExclude.includes(val)) return;
-			this.#data.privacyListExclude.remove(val);
-		} else {
-			if (!this.#data.privacyListInclude.includes(val)) return;
-			this.#data.privacyListInclude.remove(val);
+	isFilePrivate(filePath: string): boolean {
+		const parsed = parseSpaceMembershipFilter(this.#data.privacyFilter);
+		if (parsed.isAdvanced) {
+			return resolveViewFilter(this._plugin.app, this.#data.privacyFilter, this.getAllVaultPaths()).paths.has(
+				filePath,
+			);
 		}
-		this.saveSettings();
-	}
-
-	addPrivacyList(val: string) {
-		if (this.#data.privacyIsExcluding) {
-			if (this.#data.privacyListExclude.includes(val)) return;
-			this.#data.privacyListExclude.push(val);
-		} else {
-			if (this.#data.privacyListInclude.includes(val)) return;
-			this.#data.privacyListInclude.push(val);
-		}
-		this.saveSettings();
+		return matchesSpaceMembershipDraftPath(this._plugin.app, parsed.draft, filePath);
 	}
 
 	/** Check whether a provider is trusted to process private/sensitive files. */
@@ -519,6 +506,10 @@ export class PluginDataStore {
 		if (!config) return;
 		config.trustedForPrivateData = trusted;
 		this.saveSettings();
+	}
+
+	private getAllVaultPaths(): Set<string> {
+		return new Set(this._plugin.app.vault.getFiles().map((file) => file.path));
 	}
 
 	get targetFolder() {
