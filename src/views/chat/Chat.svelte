@@ -53,7 +53,7 @@
 
 <QueryClientProvider client={plugin.queryClient}>
   <div
-    class="chat-root relative h-full flex flex-col gap-4 overflow-hidden"
+    class="chat-root relative h-full flex flex-col gap-0 overflow-hidden"
     style={activeSpaceColor ? `--space-color: ${activeSpaceColor}` : undefined}
     data-testid="chat-root"
     role="region"
@@ -110,6 +110,12 @@
 </QueryClientProvider>
 
 <style>
+  :global(.chat-root > .chat-input-container) {
+    margin-top: -12px;
+    padding-top: 12px;
+    z-index: 10;
+  }
+
   .chat-root::before {
     content: "";
     position: absolute;
