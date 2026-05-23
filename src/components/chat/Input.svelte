@@ -1018,7 +1018,7 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
   >
     <!-- Fullscreen toggle - top right corner -->
     <Button
-      styles="fullscreen-toggle-button absolute top-1.5 right-1.5 z-10 opacity-0 transition-opacity duration-150"
+      styles="chat-input-icon-button fullscreen-toggle-button absolute top-1.5 right-1.5 z-10 opacity-0 transition-opacity duration-150"
       iconId={isFullscreen ? "minimize-2" : "maximize-2"}
       iconSize="xs"
       style="pointer-events: auto;"
@@ -1083,6 +1083,7 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
       <Button
         iconId="paperclip"
         iconSize="xs"
+        styles="chat-input-icon-button"
         tooltip="Attach file"
         onClick={() => attachmentInputEl?.click()}
       />
@@ -1267,6 +1268,21 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
     background: var(--send-button-bg-disabled) !important;
     color: color-mix(in srgb, var(--text-on-accent) 82%, transparent) !important;
     opacity: 1 !important;
+  }
+
+  :global(.chat-input-icon-button.clickable-icon) {
+    width: 1.75rem !important;
+    height: 1.75rem !important;
+    min-width: 1.75rem !important;
+    min-height: 1.75rem !important;
+    max-width: 1.75rem !important;
+    max-height: 1.75rem !important;
+    padding: 0 !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    aspect-ratio: 1;
   }
 
   :global(.chat-input-wrapper:hover > .fullscreen-toggle-button.clickable-icon),
