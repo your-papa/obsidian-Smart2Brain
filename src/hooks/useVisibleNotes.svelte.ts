@@ -37,6 +37,28 @@ const VIEW_ICONS: Record<string, string> = {
 	image: "image",
 };
 
+const VISIBLE_NOTES_POLL_MS = 1500;
+
+function isRootVisibleLeaf(workspace: Workspace, leaf: WorkspaceLeaf): boolean {
+	if (leaf.getRoot() !== workspace.rootSplit) return false;
+	return (leaf as any).containerEl?.style.display !== "none";
+}
+
+function shouldPollVisibleNotesContext(workspace: Workspace): boolean {
+	for (const leaf of workspace.getLeavesOfType("pdf")) {
+		if (isRootVisibleLeaf(workspace, leaf)) return true;
+	}
+
+	for (const leaf of workspace.getLeavesOfType("markdown")) {
+		if (!isRootVisibleLeaf(workspace, leaf)) continue;
+		if (leaf.view instanceof MarkdownView && leaf.view.getMode() === "preview") {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 function getPdfContext(view: unknown): string | undefined {
 	try {
 		// biome-ignore lint/suspicious/noExplicitAny: Obsidian internal PDF viewer API
@@ -199,7 +221,7 @@ export function formatVisibleNotesContext(notes: VisibleNoteRef[]): string {
  * Provides context metadata (current PDF page, active heading, etc.).
  */
 export class VisibleNotesTracker {
-	#workspace = getPlugin().app.workspace;
+	readonly #workspace = getPlugin().app.workspace;
 	#notes: VisibleNote[] = $state([]);
 	#refs: EventRef[] = [];
 	#interval: ReturnType<typeof setInterval> | undefined;
@@ -209,14 +231,17 @@ export class VisibleNotesTracker {
 	}
 
 	constructor() {
-		this.#refresh();
+		this.#sync();
 		this.#refs = [
-			this.#workspace.on("active-leaf-change", () => this.#refresh()),
-			this.#workspace.on("layout-change", () => this.#refresh()),
+			this.#workspace.on("active-leaf-change", () => this.#sync()),
+			this.#workspace.on("layout-change", () => this.#sync()),
 		];
-		// Poll periodically so the sidebar chat stays in sync and
-		// context (PDF page, heading) updates without requiring focus.
-		this.#interval = setInterval(() => this.#refresh(), 1500);
+		this.#updatePolling();
+	}
+
+	#sync() {
+		this.#refresh();
+		this.#updatePolling();
 	}
 
 	#refresh() {
@@ -226,6 +251,22 @@ export class VisibleNotesTracker {
 		// unnecessary Svelte re-renders from the polling interval.
 		if (!this.#notesEqual(this.#notes, visible)) {
 			this.#notes = visible;
+		}
+	}
+
+	#updatePolling() {
+		const needsPolling = shouldPollVisibleNotesContext(this.#workspace);
+		if (needsPolling) {
+			if (!this.#interval) {
+				// Poll only for preview / PDF views where scroll position changes context.
+				this.#interval = setInterval(() => this.#refresh(), VISIBLE_NOTES_POLL_MS);
+			}
+			return;
+		}
+
+		if (this.#interval) {
+			clearInterval(this.#interval);
+			this.#interval = undefined;
 		}
 	}
 

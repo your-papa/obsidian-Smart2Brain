@@ -1,92 +1,88 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
-  import { icon } from "../../utils/utils";
+import type { Snippet } from "svelte";
+import { icon } from "../../utils/utils";
 
-  type IconSize = "xs" | "s" | "m" | "l" | "xl";
+type IconSize = "xs" | "s" | "m" | "l" | "xl";
 
-  interface Props {
-    onClick?: (event: MouseEvent) => void;
-    iconId?: string;
-    buttonText?: string;
-    ariaLabel?: string;
-    dataTestId?: string;
-    element?: HTMLButtonElement | undefined;
-    tooltip?: string | undefined;
-    styles?: string;
-    class?: string;
-    disabled?: boolean;
-    cta?: boolean;
-    style?: string;
-    type?: "button" | "submit" | "reset";
-    iconSize?: IconSize | string;
-    stopPropagation?: boolean;
-    children?: Snippet;
-  }
+interface Props {
+	onClick?: (event: MouseEvent) => void;
+	iconId?: string;
+	buttonText?: string;
+	ariaLabel?: string;
+	dataTestId?: string;
+	element?: HTMLButtonElement | undefined;
+	tooltip?: string | undefined;
+	styles?: string;
+	class?: string;
+	disabled?: boolean;
+	cta?: boolean;
+	style?: string;
+	type?: "button" | "submit" | "reset";
+	iconSize?: IconSize | string;
+	stopPropagation?: boolean;
+	children?: Snippet;
+}
 
-  let {
-    onClick: onclick,
-    iconId = "",
-    buttonText = "",
-    ariaLabel = undefined,
-    dataTestId = undefined,
-    element = $bindable(undefined),
-    styles = "",
-    class: className = "",
-    disabled = false,
-    cta = false,
-    tooltip = undefined,
-    style = undefined,
-    type = "button",
-    iconSize = undefined,
-    stopPropagation = false,
-    children,
-  }: Props = $props();
+let {
+	onClick: onclick,
+	iconId = "",
+	buttonText = "",
+	ariaLabel = undefined,
+	dataTestId = undefined,
+	element = $bindable(undefined),
+	styles = "",
+	class: className = "",
+	disabled = false,
+	cta = false,
+	tooltip = undefined,
+	style = undefined,
+	type = "button",
+	iconSize = undefined,
+	stopPropagation = false,
+	children,
+}: Props = $props();
 
-  const iconSizeMap: Record<IconSize, string> = {
-    xs: "var(--icon-xs)",
-    s: "var(--icon-s)",
-    m: "var(--icon-m)",
-    l: "var(--icon-l)",
-    xl: "var(--icon-xl)",
-  };
+const iconSizeMap: Record<IconSize, string> = {
+	xs: "var(--icon-xs)",
+	s: "var(--icon-s)",
+	m: "var(--icon-m)",
+	l: "var(--icon-l)",
+	xl: "var(--icon-xl)",
+};
 
-  const resolvedIconSize = $derived(
-    iconSize ? (iconSizeMap[iconSize as IconSize] ?? iconSize) : undefined,
-  );
+const resolvedIconSize = $derived(iconSize ? (iconSizeMap[iconSize as IconSize] ?? iconSize) : undefined);
 
-  const hasContent = $derived(Boolean(children) || buttonText.length > 0);
-  const isIconOnly = $derived(iconId.length > 0 && !hasContent);
-  const buttonClass = $derived(
-    [
-      isIconOnly ? "clickable-icon" : "",
-      iconId.length > 0 && hasContent ? "s2b-button-with-icon" : "",
-      styles,
-      className,
-    ]
-      .filter(Boolean)
-      .join(" "),
-  );
-  const buttonStyle = $derived.by(() => {
-    const styleParts: string[] = [];
-    if (style) {
-      styleParts.push(style);
-    }
-    if (resolvedIconSize) {
-      styleParts.push(`--s2b-button-icon-size: ${resolvedIconSize};`);
-    }
-    if (isIconOnly && resolvedIconSize) {
-      styleParts.push(`width: ${resolvedIconSize}; height: ${resolvedIconSize};`);
-    }
-    return styleParts.join(" ").trim();
-  });
-  const effectiveAriaLabel = $derived(
-    ariaLabel ?? tooltip ?? (isIconOnly ? buttonText || undefined : undefined),
-  );
+const hasContent = $derived(Boolean(children) || buttonText.length > 0);
+const isIconOnly = $derived(iconId.length > 0 && !hasContent);
+const buttonClass = $derived(
+	[
+		isIconOnly ? "clickable-icon" : "",
+		iconId.length > 0 && hasContent ? "s2b-button-with-icon" : "",
+		styles,
+		className,
+	]
+		.filter(Boolean)
+		.join(" "),
+);
+const buttonStyle = $derived.by(() => {
+	const styleParts: string[] = [];
+	if (style) {
+		styleParts.push(style);
+	}
+	if (resolvedIconSize) {
+		styleParts.push(`--s2b-button-icon-size: ${resolvedIconSize};`);
+	}
+	if (isIconOnly && resolvedIconSize) {
+		styleParts.push(`width: ${resolvedIconSize}; height: ${resolvedIconSize};`);
+	}
+	return styleParts.join(" ").trim();
+});
+const effectiveAriaLabel = $derived(ariaLabel ?? tooltip ?? (isIconOnly ? buttonText || undefined : undefined));
 
-  function handleClick(event: MouseEvent) {
-    if (stopPropagation) event.stopPropagation();
-    onclick?.(event);
-  }
+function handleClick(event: MouseEvent) {
+	if (stopPropagation) event.stopPropagation();
+	onclick?.(event);
+}
 </script>
 
 <button

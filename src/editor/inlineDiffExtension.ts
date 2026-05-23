@@ -11,6 +11,7 @@ import { diffLines, diffWords } from "diff";
 import { editorInfoField, setIcon } from "obsidian";
 import { getData } from "../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
+import type { PendingChangeEntry } from "../types/shared";
 import type { DiffViewMode } from "../types/plugin";
 
 /** Dispatched to signal the plugin should rebuild decorations from the store. */
@@ -323,22 +324,20 @@ function getEditorFilePath(view: EditorView): string | null {
 	}
 }
 
-function buildDecorations(view: EditorView): DecorationSet {
+function getLatestPendingUpdateForPath(filePath: string): PendingChangeEntry | null {
+	try {
+		return getPendingChangesStore().getPendingUpdatesForPath(filePath).at(-1) ?? null;
+	} catch {
+		return null;
+	}
+}
+
+function buildDecorations(view: EditorView, entryOverride?: PendingChangeEntry | null): DecorationSet {
 	try {
 		const filePath = getEditorFilePath(view);
 		if (!filePath) return Decoration.none;
 
-		let store: ReturnType<typeof getPendingChangesStore>;
-		try {
-			store = getPendingChangesStore();
-		} catch {
-			return Decoration.none;
-		}
-
-		const pendingUpdates = store.getPendingUpdatesForPath(filePath);
-		if (pendingUpdates.length === 0) return Decoration.none;
-
-		const entry = pendingUpdates.at(-1);
+		const entry = entryOverride ?? getLatestPendingUpdateForPath(filePath);
 		if (!entry) return Decoration.none;
 		const change = entry.change;
 		if (change.type !== "update") return Decoration.none;
@@ -387,6 +386,8 @@ export const inlineDiffPlugin = ViewPlugin.fromClass(
 		private readonly view: EditorView;
 		private initialized = false;
 		private refreshAttempts = 0;
+		private hasPendingUpdate = false;
+		private lastFilePath: string | null = null;
 
 		constructor(view: EditorView) {
 			this.view = view;
@@ -421,15 +422,35 @@ export const inlineDiffPlugin = ViewPlugin.fromClass(
 			});
 		}
 
+		private rebuildDecorations(filePath = getEditorFilePath(this.view)) {
+			this.lastFilePath = filePath;
+			if (!filePath) {
+				this.hasPendingUpdate = false;
+				this.decorations = Decoration.none;
+				return;
+			}
+
+			const entry = getLatestPendingUpdateForPath(filePath);
+			this.hasPendingUpdate = entry !== null;
+			this.decorations = buildDecorations(this.view, entry);
+		}
+
 		update(update: ViewUpdate) {
 			if (!this.initialized) return;
-			if (
-				update.docChanged ||
-				update.selectionSet ||
-				update.viewportChanged ||
-				update.geometryChanged ||
-				update.transactions.some((tr) => tr.effects.some((e) => e.is(refreshPendingChanges)))
-			) {
+			const refreshRequested = update.transactions.some((tr) =>
+				tr.effects.some((e) => e.is(refreshPendingChanges)),
+			);
+			const filePath = getEditorFilePath(this.view);
+			const fileChanged = filePath !== this.lastFilePath;
+
+			if (refreshRequested || fileChanged) {
+				this.rebuildDecorations(filePath);
+				return;
+			}
+
+			if (!this.hasPendingUpdate) return;
+
+			if (update.docChanged || update.selectionSet || update.viewportChanged || update.geometryChanged) {
 				this.decorations = buildDecorations(this.view);
 			}
 		}

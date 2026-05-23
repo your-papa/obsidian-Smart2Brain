@@ -1,61 +1,53 @@
 <script lang="ts">
-  import { getData } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { Logger } from "../../utils/logging";
-  import { type ChatModel } from "../../stores/chatStore.svelte";
-  import { ModelSelectionModal } from "../modal/ModelSelectionModal";
-  import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
-  import Button from "../ui/Button.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { Logger } from "../../utils/logging";
+import { type ChatModel } from "../../stores/chatStore.svelte";
+import { ModelSelectionModal } from "../modal/ModelSelectionModal";
+import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
+import Button from "../ui/Button.svelte";
 
-  const data = getData();
-  const plugin = getPlugin();
-  const models = useAvailableModels();
+const data = getData();
+const plugin = getPlugin();
+const models = useAvailableModels();
 
-  const selectedAgent = $derived(data.getSelectedAgent());
+const selectedAgent = $derived(data.getSelectedAgent());
 
-  function getModelDisplayName(provider: string, model: string): string {
-    const hydrated = models.hydratedChatModelsByKey.get(`${provider}:${model}`);
-    if (hydrated?.displayName) {
-      return hydrated.displayName;
-    }
-    return model;
-  }
+function getModelDisplayName(provider: string, model: string): string {
+	const hydrated = models.hydratedChatModelsByKey.get(`${provider}:${model}`);
+	if (hydrated?.displayName) {
+		return hydrated.displayName;
+	}
+	return model;
+}
 
-  function buildPersistedChatModel(
-    provider: string,
-    model: string,
-    existing?: ChatModel | null,
-  ): ChatModel {
-    const hydrated = models.hydratedChatModelsByKey.get(`${provider}:${model}`);
-    return {
-      provider,
-      model,
-      modelConfig: {
-        contextWindow: hydrated?.contextWindow ?? existing?.modelConfig?.contextWindow ?? 128000,
-        supportsVision: hydrated?.capabilities.vision ?? existing?.modelConfig?.supportsVision,
-        temperature: existing?.modelConfig?.temperature,
-      },
-    };
-  }
+function buildPersistedChatModel(provider: string, model: string, existing?: ChatModel | null): ChatModel {
+	const hydrated = models.hydratedChatModelsByKey.get(`${provider}:${model}`);
+	return {
+		provider,
+		model,
+		modelConfig: {
+			contextWindow: hydrated?.contextWindow ?? existing?.modelConfig?.contextWindow ?? 128000,
+			supportsVision: hydrated?.capabilities.vision ?? existing?.modelConfig?.supportsVision,
+			temperature: existing?.modelConfig?.temperature,
+		},
+	};
+}
 
-  function openModelSelectionModal() {
-    const currentSelection = selectedAgent?.chatModel
-      ? { provider: selectedAgent.chatModel.provider, model: selectedAgent.chatModel.model }
-      : null;
-    new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
-      if (!selected) return;
-      data.updateAgent(data.selectedAgentId, {
-        chatModel: buildPersistedChatModel(
-          selected.provider,
-          selected.model,
-          selectedAgent?.chatModel,
-        ),
-      });
-      plugin.agentManager?.reinitialize().catch((error) => {
-        Logger.error("Failed to update agent model:", error);
-      });
-    }).open();
-  }
+function openModelSelectionModal() {
+	const currentSelection = selectedAgent?.chatModel
+		? { provider: selectedAgent.chatModel.provider, model: selectedAgent.chatModel.model }
+		: null;
+	new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
+		if (!selected) return;
+		data.updateAgent(data.selectedAgentId, {
+			chatModel: buildPersistedChatModel(selected.provider, selected.model, selectedAgent?.chatModel),
+		});
+		plugin.agentManager?.reinitialize().catch((error) => {
+			Logger.error("Failed to update agent model:", error);
+		});
+	}).open();
+}
 </script>
 
 <Button

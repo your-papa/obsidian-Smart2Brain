@@ -212,19 +212,19 @@ export function isProviderConfigured(): boolean {
 }
 
 /**
- * Wait until the standalone MiniSearch (provider-independent BM25 index)
- * has finished indexing vault files. Call this before any lexical search test.
+ * Wait until the lexical MiniSearch index used by SearchModal/search_notes
+ * has finished indexing vault files. Call this before lexical search tests.
  */
 export async function waitForStandaloneMiniSearch({ timeoutMs = 30_000, intervalMs = 500 } = {}): Promise<void> {
 	await waitForCondition(
 		() => {
 			const raw = obsidianEval(
-				`${PLUGIN}.vectorStoreService.standaloneMiniSearch.documentCount`,
+				`${PLUGIN}.lexicalSearchService?.documentCount ?? 0`,
 			);
 			const value = raw.startsWith("=> ") ? raw.slice(3) : raw;
 			return Number.parseInt(value, 10) > 0;
 		},
-		"standalone MiniSearch to be populated",
+		"lexical MiniSearch to be populated",
 		{ timeoutMs, intervalMs },
 	);
 }
