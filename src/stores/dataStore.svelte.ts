@@ -8,6 +8,7 @@ import {
 } from "../lib/views";
 import { getSecret, listSecrets, setSecret } from "../lib/secretStorage";
 import type SecondBrainPlugin from "../main";
+import { DEFAULT_AGENT_ICON } from "../types/plugin";
 import type {
 	AgentConfig,
 	AgentSkillState,
@@ -326,6 +327,7 @@ export function createDefaultAgentConfig(id?: string, name?: string): AgentConfi
 	return {
 		id: id ?? genUUIDv7(),
 		name: name ?? "New Agent",
+		icon: DEFAULT_AGENT_ICON,
 		chatModel: null,
 		summarizationModel: null,
 		titleModel: null,
@@ -343,6 +345,7 @@ function createDefaultAgent(): AgentConfig {
 	return {
 		id: DEFAULT_AGENT_ID,
 		name: "Default Agent",
+		icon: DEFAULT_AGENT_ICON,
 		chatModel: null,
 		summarizationModel: null,
 		titleModel: null,
@@ -542,7 +545,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch {
 			// ignore

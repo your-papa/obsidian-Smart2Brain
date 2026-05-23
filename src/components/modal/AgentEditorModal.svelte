@@ -1,6 +1,6 @@
 <script lang="ts">
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
-import { Notice, type Modal } from "obsidian";
+import { Notice, getIconIds, type Modal } from "obsidian";
 import { onMount } from "svelte";
 import { AddSkillModal } from "./AddSkillModal";
 import { MCPServerModal } from "./MCPServerModal";
@@ -15,7 +15,8 @@ import SettingItem from "../settings/SettingItem.svelte";
 import Badge from "../ui/Badge.svelte";
 import Button from "../ui/Button.svelte";
 import Icon from "../ui/Icon.svelte";
-import PresetColorSelector, { type PresetColorOption } from "../ui/PresetColorSelector.svelte";
+import PickerPopover from "../ui/PickerPopover.svelte";
+import Search from "../ui/Search.svelte";
 import Text from "../ui/Text.svelte";
 import Toggle from "../ui/Toggle.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
@@ -23,12 +24,10 @@ import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
 import {
-	type AgentColor,
+	DEFAULT_AGENT_ICON,
 	type BuiltInToolId,
 	type MCPServerConfig,
 	type SkillDisplayInfo,
-	AGENT_NAMED_COLORS,
-	resolveAgentColorCSS,
 } from "../../types/plugin";
 import { getProviderDefinition } from "../../providers/index";
 import type { ChatModel } from "../../stores/chatStore.svelte";
@@ -46,35 +45,31 @@ let { modal, plugin, agentId }: Props = $props();
 const pluginData = getData();
 const models = useAvailableModels();
 
-const AGENT_COLOR_DEFINITIONS: Array<{
-	value: AgentColor | "none";
-	label: string;
-	previewColor?: string;
-}> = [
-	{ value: "none", label: "None" },
-	{ value: "red", label: "Red", previewColor: "#e93147" },
-	{ value: "orange", label: "Orange", previewColor: "#ec7500" },
-	{ value: "yellow", label: "Yellow", previewColor: "#e0ac00" },
-	{ value: "green", label: "Green", previewColor: "#08b94e" },
-	{ value: "cyan", label: "Cyan", previewColor: "#00bfbc" },
-	{ value: "blue", label: "Blue", previewColor: "#086ddd" },
-	{ value: "purple", label: "Purple", previewColor: "#7852ee" },
-	{ value: "pink", label: "Pink", previewColor: "#d53984" },
-];
+const POPULAR_AGENT_ICONS = [
+	"bot",
+	"brain",
+	"sparkles",
+	"search",
+	"book-open",
+	"briefcase",
+	"messages-square",
+	"lightbulb",
+	"compass",
+	"folders",
+	"file-text",
+	"workflow",
+] as const;
+
+const AGENT_PICTOGRAM_OPTIONS = ["🤖", "🧠", "📚", "💡", "🧭", "🛠️"] as const;
+
+const BUILT_IN_AGENT_ICONS = getIconIds()
+	.slice()
+	.sort((left, right) => left.localeCompare(right));
 
 let agents = $derived(pluginData.agents);
 let selectedAgent = $derived(agents[agentId]);
-
-function resolveAgentColorOptions(): PresetColorOption[] {
-	return AGENT_COLOR_DEFINITIONS.map((option) => ({
-		value: option.value,
-		label: option.label,
-		previewColor: option.previewColor,
-		isEmpty: option.value === "none",
-	}));
-}
-
-let agentColorOptions = $derived.by(() => resolveAgentColorOptions());
+let agentIconQuery = $state("");
+let isAgentIconPickerOpen = $state(false);
 
 async function applyChanges() {
 	try {
@@ -89,36 +84,32 @@ function updateAgentName(name: string) {
 	modal.setTitle(`Edit Agent: ${name || "Untitled"}`);
 }
 
-function updateAgentColor(color: AgentColor | "none") {
-	pluginData.updateAgent(agentId, { color: color === "none" ? undefined : color });
+function updateAgentIcon(icon: string) {
+	const nextIcon = icon.trim() || DEFAULT_AGENT_ICON;
+	pluginData.updateAgent(agentId, { icon: nextIcon });
 }
 
-/** Whether the current agent color is a custom (non-preset) value. */
-const isCustomAgentColor = $derived(
-	!!selectedAgent?.color &&
-		selectedAgent.color !== "none" &&
-		!(AGENT_NAMED_COLORS as readonly string[]).includes(selectedAgent.color),
-);
+const selectedAgentIcon = $derived(selectedAgent?.icon?.trim() || DEFAULT_AGENT_ICON);
 
-const selectedAgentColorOption = $derived(
-	agentColorOptions.find((colorOption) => colorOption.value === (selectedAgent?.color ?? "none")) ??
-		(isCustomAgentColor
-			? ({
-					value: selectedAgent!.color!,
-					label: selectedAgent!.color!,
-					previewColor: selectedAgent!.color!,
-				} as PresetColorOption)
-			: agentColorOptions[0]),
-);
+const matchingAgentIcons = $derived.by(() => {
+	const query = agentIconQuery.trim().toLowerCase();
+	if (!query) {
+		return Array.from(POPULAR_AGENT_ICONS);
+	}
 
-const agentNameFieldStyle = $derived.by(() => {
-	const cssColor = resolveAgentColorCSS(selectedAgent?.color);
-	return cssColor ? `--agent-name-accent: ${cssColor};` : "--agent-name-accent: transparent;";
+	return BUILT_IN_AGENT_ICONS.filter((iconName) => iconName.toLowerCase().includes(query)).slice(0, 72);
 });
 
-function handleAgentColorSelect(color: string) {
-	updateAgentColor(color as AgentColor | "none");
-}
+const matchingAgentIconCount = $derived.by(() => {
+	const query = agentIconQuery.trim().toLowerCase();
+	if (!query) {
+		return POPULAR_AGENT_ICONS.length;
+	}
+
+	return BUILT_IN_AGENT_ICONS.reduce((count, iconName) => {
+		return iconName.toLowerCase().includes(query) ? count + 1 : count;
+	}, 0);
+});
 
 const currentModelDisplay = $derived.by(() => {
 	if (!selectedAgent?.chatModel) return null;
@@ -613,17 +604,96 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
 {#if selectedAgent}
   <div class="agent-editor-modal">
     <SettingGroup heading="General">
-      <SettingItem name="Agent Name" desc="Display name and color for this agent">
-        <div class="agent-name-field" style={agentNameFieldStyle}>
-          <PresetColorSelector
-            value={selectedAgent.color ?? "none"}
-            options={agentColorOptions}
-            popoverLabel="Agent Color"
-            triggerLabel="Select agent color"
-            allowCustomColor={true}
-            onSelect={handleAgentColorSelect}
-          />
+      <SettingItem
+        name="Agent Icon"
+        desc="Search built-in Obsidian icons or enter any icon ID or emoji/pictogram directly"
+      >
+        <div class="agent-icon-field">
+          <PickerPopover
+            bind:open={isAgentIconPickerOpen}
+            triggerClass="agent-icon-trigger"
+            contentClass="agent-icon-popover"
+            side="bottom"
+            align="start"
+            sideOffset={8}
+          >
+            {#snippet trigger(open)}
+              <span class="agent-icon-trigger-preview">
+                <Icon name={selectedAgentIcon} size="m" />
+              </span>
+              <Icon name={open ? "chevron-up" : "chevron-down"} size="xs" />
+            {/snippet}
 
+            <div class="agent-icon-browser">
+              <Search
+                class="agent-icon-search"
+                value={agentIconQuery}
+                placeholder="Search built-in icons"
+                onchange={(value: string) => (agentIconQuery = value)}
+              />
+
+              <div class="agent-icon-pictograms">
+                {#each AGENT_PICTOGRAM_OPTIONS as pictogram}
+                  <button
+                    type="button"
+                    class="agent-icon-chip"
+                    class:selected={selectedAgentIcon === pictogram}
+                    onclick={() => {
+                      updateAgentIcon(pictogram);
+                      isAgentIconPickerOpen = false;
+                    }}
+                  >
+                    <span class="agent-icon-chip-glyph">{pictogram}</span>
+                  </button>
+                {/each}
+              </div>
+
+              <div class="agent-icon-results-header">
+                <span>{agentIconQuery.trim() ? `Built-in icons (${matchingAgentIconCount})` : "Popular icons"}</span>
+              </div>
+
+              <div class="agent-icon-grid">
+                {#if matchingAgentIcons.length > 0}
+                  {#each matchingAgentIcons as iconName}
+                    <button
+                      type="button"
+                      class="agent-icon-option"
+                      class:selected={selectedAgentIcon === iconName}
+                      title={iconName}
+                      onclick={() => {
+                        updateAgentIcon(iconName);
+                        isAgentIconPickerOpen = false;
+                      }}
+                    >
+                      <span class="agent-icon-option-preview">
+                        <Icon name={iconName} size="s" />
+                      </span>
+                      <span class="agent-icon-option-label">{iconName}</span>
+                    </button>
+                  {/each}
+                {:else}
+                  <div class="agent-icon-empty-state">
+                    No built-in icons match this search. Use the text field for a custom icon ID or emoji.
+                  </div>
+                {/if}
+              </div>
+            </div>
+          </PickerPopover>
+
+          <div class="agent-icon-controls">
+            <Text
+              inputType="text"
+              class="agent-icon-input"
+              placeholder="bot or 🤖"
+              value={selectedAgentIcon}
+              onblur={(value: string) => updateAgentIcon(value)}
+            />
+          </div>
+        </div>
+      </SettingItem>
+
+      <SettingItem name="Agent Name" desc="Display name for this agent">
+        <div class="agent-name-field">
           <div class="agent-name-input-shell">
             <Text
               inputType="text"
@@ -982,6 +1052,144 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
     width: min(100%, 184px);
   }
 
+  .agent-icon-field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: min(100%, 320px);
+  }
+
+  :global(.agent-icon-trigger) {
+    min-width: 0;
+    width: 54px;
+    justify-content: center;
+    padding: 2px 6px;
+  }
+
+  .agent-icon-trigger-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .agent-icon-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .agent-icon-controls :global(.agent-icon-input) {
+    min-width: 0;
+    width: 100%;
+  }
+
+  :global(.agent-icon-popover) {
+    width: min(380px, calc(100vw - 48px));
+    max-width: min(380px, calc(100vw - 48px));
+    z-index: calc(var(--layer-popover) + 20);
+  }
+
+  .agent-icon-browser {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .agent-icon-browser :global(.agent-icon-search) {
+    width: 100%;
+  }
+
+  .agent-icon-pictograms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .agent-icon-chip,
+  .agent-icon-option {
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    color: var(--text-normal);
+  }
+
+  .agent-icon-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    height: 34px;
+    padding: 0 8px;
+    border-radius: 10px;
+  }
+
+  .agent-icon-chip-glyph {
+    font-size: 1rem;
+    line-height: 1;
+  }
+
+  .agent-icon-chip:hover,
+  .agent-icon-option:hover {
+    background: var(--background-modifier-hover);
+  }
+
+  .agent-icon-chip.selected,
+  .agent-icon-option.selected {
+    border-color: color-mix(in srgb, var(--interactive-accent) 55%, var(--background-modifier-border));
+    background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
+  }
+
+  .agent-icon-results-header {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+  }
+
+  .agent-icon-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 6px;
+    max-height: 220px;
+    overflow: auto;
+    padding-right: 2px;
+  }
+
+  .agent-icon-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: 12px;
+    text-align: left;
+  }
+
+  .agent-icon-option-preview {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+
+  .agent-icon-option-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--font-ui-smaller);
+  }
+
+  .agent-icon-empty-state {
+    padding: 10px 12px;
+    border: 1px dashed var(--background-modifier-border);
+    border-radius: 12px;
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+  }
+
   .agent-name-input-shell {
     flex: 1 1 0;
     min-width: 0;
@@ -989,12 +1197,6 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
 
   .agent-name-input-shell :global(.agent-name-input) {
     width: 100%;
-    background: color-mix(in srgb, var(--agent-name-accent) 18%, var(--background-primary));
-    border-color: color-mix(
-      in srgb,
-      var(--agent-name-accent) 38%,
-      var(--background-modifier-border)
-    );
   }
 
   .skill-category {

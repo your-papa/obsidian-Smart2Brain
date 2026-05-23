@@ -1,52 +1,60 @@
 <script lang="ts">
-import { Popover } from "bits-ui";
-import { type AgentConfig, resolveAgentColorCSS } from "../../types/plugin";
-import { getData } from "../../stores/dataStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import { Logger } from "../../utils/logging";
-import Icon from "../ui/Icon.svelte";
-import { chatHistoryContainsPrivateNotes, getMessenger } from "../../stores/chatStore.svelte";
-import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
-import { AgentEditorModal } from "../modal/AgentEditorModal";
-import Button from "../ui/Button.svelte";
+  import { DEFAULT_AGENT_ICON, type AgentConfig } from "../../types/plugin";
+  import { getData } from "../../stores/dataStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
+  import { Logger } from "../../utils/logging";
+  import Icon from "../ui/Icon.svelte";
+  import { chatHistoryContainsPrivateNotes, getMessenger } from "../../stores/chatStore.svelte";
+  import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
+  import { AgentEditorModal } from "../modal/AgentEditorModal";
+  import Button from "../ui/Button.svelte";
+  import PickerPopover from "../ui/PickerPopover.svelte";
+  import PickerOptionRow from "../ui/PickerOptionRow.svelte";
 
-const data = getData();
-const plugin = getPlugin();
+  const data = getData();
+  const plugin = getPlugin();
 
-// Get all agents reactively
-const agents = $derived(Object.values(data.agents));
+  // Get all agents reactively
+  const agents = $derived(Object.values(data.agents));
 
-// Get currently selected agent
-const selectedAgent = $derived(data.getSelectedAgent());
+  // Get currently selected agent
+  const selectedAgent = $derived(data.getSelectedAgent());
 
-// Check if agent selection actually makes a difference (more than one agent)
-const hasMultipleAgents = $derived(agents.length > 1);
+  let isOpen = $state(false);
+  let customAnchor: HTMLButtonElement | undefined = $state();
 
-let isOpen = $state(false);
-let customAnchor: HTMLButtonElement | undefined = $state();
+  function getAgentIcon(agent: Pick<AgentConfig, "icon"> | null | undefined): string {
+    return agent?.icon?.trim() || DEFAULT_AGENT_ICON;
+  }
 
-async function selectAgent(agent: AgentConfig) {
-	// Check if the agent's provider is non-trusted and chat has private notes
-	const newProvider = agent.chatModel?.provider;
-	if (newProvider && !data.isProviderTrusted(newProvider)) {
-		const messages = getMessenger()?.session?.messages;
-		if (messages && chatHistoryContainsPrivateNotes(messages)) {
-			const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
-			if (!confirmed) return;
-		}
-	}
-	data.selectedAgentId = agent.id;
-	isOpen = false;
-	// Reinitialize the agent with the new config
-	plugin.agentManager?.reinitialize().catch((error) => {
-		Logger.error("Failed to switch agent:", error);
-	});
-}
+  async function selectAgent(agent: AgentConfig) {
+    // Check if the agent's provider is non-trusted and chat has private notes
+    const newProvider = agent.chatModel?.provider;
+    if (newProvider && !data.isProviderTrusted(newProvider)) {
+      const messages = getMessenger()?.session?.messages;
+      if (messages && chatHistoryContainsPrivateNotes(messages)) {
+        const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
+        if (!confirmed) return;
+      }
+    }
+    data.selectedAgentId = agent.id;
+    isOpen = false;
+    // Reinitialize the agent with the new config
+    plugin.agentManager?.reinitialize().catch((error) => {
+      Logger.error("Failed to switch agent:", error);
+    });
+  }
 
-function openAgentEditor(agentId: string) {
-	isOpen = false;
-	new AgentEditorModal(plugin, agentId).open();
-}
+  function openAgentEditor(agentId: string) {
+    isOpen = false;
+    new AgentEditorModal(plugin, agentId).open();
+  }
+
+  function createNewAgent() {
+    const agent = data.createAgent("New Agent");
+    data.selectedAgentId = agent.id;
+    openAgentEditor(agent.id);
+  }
 </script>
 
 {#if agents.length === 0}
@@ -58,171 +66,111 @@ function openAgentEditor(agentId: string) {
     <div class="text-[--text-muted] text-xs">Configure Agent</div>
   </Button>
 {:else}
-  <Button
+  <PickerPopover
+    bind:open={isOpen}
     bind:element={customAnchor}
-    onClick={() => (hasMultipleAgents ? (isOpen = !isOpen) : openAgentEditor(selectedAgent.id))}
-    styles="clickable-icon flex items-center gap-1 min-w-0"
-    tooltip={hasMultipleAgents ? "Select agent" : "Edit agent"}
+    tooltip="Agent options"
     dataTestId="agent-select-button"
+    triggerStyles="clickable-icon model-select-btn"
+    triggerClass="agent-popover-trigger"
+    side="top"
+    align="start"
+    sideOffset={8}
   >
-    <span
-      class="agent-pill"
-      class:has-color={!!selectedAgent?.color}
-      style={selectedAgent?.color
-        ? `--pill-color: ${resolveAgentColorCSS(selectedAgent.color)}`
-        : ""}
-      data-testid="agent-pill"
-    >
-      {selectedAgent?.name ?? "Default Agent"}
-    </span>
-    {#if hasMultipleAgents}
-      {#if isOpen}
-        <Icon name="chevron-up" size="xs" />
-      {:else}
-        <Icon name="chevron-down" size="xs" />
-      {/if}
-    {/if}
-  </Button>
+    {#snippet trigger(open)}
+      <span class="agent-pill" data-testid="agent-pill">
+        <span class="agent-pill-icon">
+          <Icon name={getAgentIcon(selectedAgent)} size="xs" />
+        </span>
+        <span class="agent-pill-label">{selectedAgent?.name ?? "Default Agent"}</span>
+      </span>
+      <Icon name={open ? "chevron-up" : "chevron-down"} size="xs" />
+    {/snippet}
 
-  <Popover.Root bind:open={isOpen}>
-    <Popover.Portal>
-      <Popover.Content
-        class="bg-[--background-primary] rounded-lg border border-solid border-[--background-modifier-border] shadow-lg z-[var(--layer-popover)] overflow-hidden"
-        {customAnchor}
-        sideOffset={8}
-        side="top"
-        align="start"
+    {#each agents as agent (agent.id)}
+      {@const isSelected = agent.id === selectedAgent?.id}
+      {@const isDefault = agent.id === data.defaultAgentId}
+      <PickerOptionRow
+        active={isSelected}
+        onClick={() => selectAgent(agent)}
+        onActionClick={() => openAgentEditor(agent.id)}
+        actionTitle="Edit agent"
       >
-        <div class="flex flex-col py-1.5 min-w-[220px] max-w-[320px]">
-          <!-- Agent list -->
-          {#if hasMultipleAgents}
-            <div
-              class="text-[0.65rem] text-[--text-faint] px-3 pb-1 uppercase font-medium tracking-wider"
-            >
-              Agent
-            </div>
-          {/if}
-          {#each agents as agent (agent.id)}
-            {@const isSelected = agent.id === selectedAgent?.id}
-            {@const isDefault = agent.id === data.defaultAgentId}
-            {#if hasMultipleAgents}
-              <div
-                class="agent-row"
-                class:agent-row-selected={isSelected}
-                role="button"
-                tabindex="0"
-                onclick={() => selectAgent(agent)}
-                onkeydown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") selectAgent(agent);
-                }}
-              >
-                <span
-                  class="agent-name-pill flex-1 min-w-0"
-                  class:has-color={!!agent.color}
-                  style={agent.color ? `--pill-color: ${resolveAgentColorCSS(agent.color)}` : ""}
-                >
-                  {agent.name}
-                </span>
-                {#if isDefault}
-                  <span class="text-[0.6rem] text-[--text-faint] shrink-0">default</span>
-                {/if}
-                {#if isSelected}
-                  <Icon name="check" size="xs" class="text-[--text-accent] shrink-0" />
-                {/if}
-                <button
-                  type="button"
-                  class="agent-settings-btn"
-                  title="Edit agent"
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    openAgentEditor(agent.id);
-                  }}
-                >
-                  <Icon name="settings" size="xs" class="text-[--text-faint]" />
-                </button>
-              </div>
-            {/if}
-          {/each}
-        </div>
-      </Popover.Content>
-    </Popover.Portal>
-  </Popover.Root>
+        {#snippet leading()}
+          <span class="agent-option-icon">
+            <Icon name={getAgentIcon(agent)} size="xs" />
+          </span>
+        {/snippet}
+
+        {#snippet content()}
+          <span class="agent-name-pill">{agent.name}</span>
+        {/snippet}
+
+        {#if isDefault}
+          {#snippet meta()}
+            default
+          {/snippet}
+        {/if}
+
+        {#if isSelected}
+          {#snippet trailing()}
+            <Icon name="check" size="xs" class="text-[--text-accent]" />
+          {/snippet}
+        {/if}
+
+        {#snippet action()}
+          <Icon name="settings" size="xs" class="text-[--text-faint]" />
+        {/snippet}
+      </PickerOptionRow>
+    {/each}
+
+    <div class="picker-popover-separator menu-separator"></div>
+
+    <PickerOptionRow onClick={createNewAgent} actionTitle="Create agent">
+      {#snippet leading()}
+        <Icon name="plus" size="xs" />
+      {/snippet}
+
+      {#snippet content()}
+        New Agent
+      {/snippet}
+    </PickerOptionRow>
+  </PickerPopover>
 {/if}
 
 <style>
+  :global(.agent-popover-trigger) {
+    max-width: 190px;
+    padding: 1px 3px;
+    border-radius: 999px;
+  }
+
   .agent-pill {
-    max-width: 100px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 0.8rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 132px;
+    font-size: var(--font-ui-small);
     color: var(--text-normal);
   }
 
-  .agent-pill.has-color {
-    background-color: color-mix(in srgb, var(--pill-color) 25%, transparent);
-    color: var(--pill-color);
-    padding: 1px 8px;
-    border-radius: 10px;
-    font-weight: 500;
-  }
-
-  .agent-row {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.35rem 0.75rem;
-    margin: 0 0.25rem;
-    border-radius: 0.375rem;
-    border: none;
-    background: transparent;
-    text-align: left;
-    cursor: pointer;
-    box-shadow: none;
-    color: var(--text-normal);
-    font-size: inherit;
-  }
-
-  .agent-row:hover {
-    background: var(--background-modifier-hover);
-  }
-
-  .agent-row-selected {
-    background: var(--background-modifier-active-hover);
-  }
-
-  .agent-name-pill {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 0.875rem;
-  }
-
-  .agent-name-pill.has-color {
-    background-color: color-mix(in srgb, var(--pill-color) 25%, transparent);
-    color: var(--pill-color);
-    padding: 1px 8px;
-    border-radius: 10px;
-    font-weight: 500;
-  }
-
-  .agent-settings-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.15rem;
-    border: none;
-    background: transparent;
-    border-radius: 0.25rem;
-    cursor: pointer;
-    opacity: 0.5;
-    transition: opacity 0.15s;
+  .agent-pill-icon,
+  .agent-option-icon {
     flex-shrink: 0;
   }
 
-  .agent-settings-btn:hover {
-    opacity: 1;
-    background: var(--background-modifier-hover);
+  .agent-pill-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .agent-name-pill {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--font-ui-small);
   }
 </style>
