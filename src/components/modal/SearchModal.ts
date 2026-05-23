@@ -151,6 +151,8 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private inlineChipsEl: HTMLElement | null = null;
 	private inlineInputContentEl: HTMLElement | null = null;
 	private selectionSummaryEl: HTMLElement | null = null;
+	private pendingFocusFrameId: number | null = null;
+	private pendingFocusTimeoutIds: ReturnType<typeof globalThis.setTimeout>[] = [];
 
 	constructor(app: App, options: SearchModalOptions = {}) {
 		super(app);
@@ -721,7 +723,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.selectedResultsByPath.clear();
 		this.currentQuery = "";
 		this.lastRequestedSearchKey = "";
-		this.searchResults = this.getModalRecentNotes();
 		this.buildAutocompleteCaches();
 		this.setupInlineChips();
 		this.createSelectionSummary();
@@ -737,10 +738,13 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			}
 		}
 
+		this.searchResults = this.getModalRecentNotes();
+
 		// Render the lightweight recent-opened list immediately so the modal
 		// doesn't appear empty.
 		// @ts-ignore - updateSuggestions is a protected method
 		this.updateSuggestions();
+		this.scheduleInputFocus();
 	}
 
 	onClose(): void {
@@ -765,6 +769,11 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			window.clearTimeout(this.autocompleteHydrationTimeout);
 			this.autocompleteHydrationTimeout = null;
 		}
+		if (this.pendingFocusFrameId !== null) {
+			globalThis.cancelAnimationFrame(this.pendingFocusFrameId);
+			this.pendingFocusFrameId = null;
+		}
+		this.clearPendingFocusTimeouts();
 	}
 
 	private tryPopulateAutocompleteCachesFromLexicalIndex(): boolean {
@@ -869,6 +878,47 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		return this.modalEl.querySelector<HTMLInputElement>(".prompt-input");
 	}
 
+	private scheduleInputFocus(): void {
+		if (this.pendingFocusFrameId !== null) {
+			globalThis.cancelAnimationFrame(this.pendingFocusFrameId);
+		}
+		this.clearPendingFocusTimeouts();
+
+		this.pendingFocusFrameId = globalThis.requestAnimationFrame(() => {
+			this.pendingFocusFrameId = null;
+			this.focusInput();
+			for (const delay of [0, 50, 150, 400, 800]) {
+				const timeoutId = globalThis.setTimeout(() => {
+					this.pendingFocusTimeoutIds = this.pendingFocusTimeoutIds.filter((id) => id !== timeoutId);
+					this.focusInput();
+				}, delay);
+				this.pendingFocusTimeoutIds.push(timeoutId);
+			}
+		});
+	}
+
+	private clearPendingFocusTimeouts(): void {
+		for (const timeoutId of this.pendingFocusTimeoutIds) {
+			globalThis.clearTimeout(timeoutId);
+		}
+		this.pendingFocusTimeoutIds = [];
+	}
+
+	private focusInput(): void {
+		if (this.isClosed) {
+			return;
+		}
+
+		const inputEl = this.getInputEl();
+		if (!inputEl) {
+			return;
+		}
+
+		inputEl.focus();
+		const cursorPosition = inputEl.value.length;
+		inputEl.setSelectionRange(cursorPosition, cursorPosition);
+	}
+
 	private usesCupertinoTheme(): boolean {
 		const customCss = (this.app as App & { customCss?: { theme?: string } }).customCss;
 		const themeName = customCss?.theme?.toLowerCase() ?? "";
@@ -904,7 +954,8 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		const activeFilePath = this.app.workspace.getActiveFile()?.path;
-		return getRecentNotes(this.app)
+		const filter = this.buildActiveFilter();
+		return getRecentNotes(this.app, filter)
 			.filter((result) => result.path !== activeFilePath)
 			.slice(0, 20);
 	}
@@ -916,6 +967,15 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		const inputEl = this.getInputEl();
 		if (inputEl && inputEl.value !== cleanQuery) {
 			inputEl.value = cleanQuery;
+		}
+
+		if (!cleanQuery.trim()) {
+			this.searchResults = this.getModalRecentNotes();
+			this.lastRequestedSearchKey = "";
+			this.setSearching(false);
+			// @ts-ignore - updateSuggestions is a protected method
+			this.updateSuggestions();
+			return;
 		}
 
 		if (cleanQuery.trim() || this.activeFilters.length > 0) {
@@ -1214,8 +1274,8 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		const algorithm = this.activeAlgorithm;
 		const requestId = ++this.searchRequestId;
 
-		if (!cleanQuery.trim() && !filter) {
-			this.searchResults = [];
+		if (!cleanQuery.trim()) {
+			this.searchResults = this.getModalRecentNotes();
 			this.setSearching(false);
 			// @ts-ignore - updateSuggestions is a protected method
 			this.updateSuggestions();
@@ -1364,14 +1424,13 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return autocompleteSuggestions;
 		}
 
-		const filter = this.buildActiveFilter();
-
-		// Empty query with no filter → show recent notes synchronously
-		if (!query.trim() && !filter) {
+		if (!query.trim()) {
 			this.searchResults = this.getModalRecentNotes();
 			this.lastRequestedSearchKey = "";
 			return this.searchResults;
 		}
+
+		const filter = this.buildActiveFilter();
 
 		// Deduplicate: only trigger a new search when the key changes
 		const searchKey = this.buildSearchKey(query);
@@ -1392,6 +1451,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		const result = item;
+		if (!this.currentQuery.trim()) {
+			this.scheduleInputFocus();
+		}
 		el.dataset.searchResultPath = result.path;
 		el.toggleClass("s2b-search-result-item-selected", this.selectedResultsByPath.has(result.path));
 		const container = el.createDiv({ cls: "s2b-search-result" });

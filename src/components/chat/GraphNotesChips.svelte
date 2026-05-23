@@ -1,64 +1,62 @@
 <script lang="ts">
-  import { Keymap } from "obsidian";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { icon } from "../../utils/utils";
-  import type { GraphNoteRef } from "../../stores/chatStore.svelte";
+import { Keymap } from "obsidian";
+import { getPlugin } from "../../stores/state.svelte";
+import { icon } from "../../utils/utils";
+import type { GraphNoteRef } from "../../stores/chatStore.svelte";
 
-  const BASENAME_RE = /(?:.*\/)?([^/]+?)(?:\.\w+)?$/;
+const BASENAME_RE = /(?:.*\/)?([^/]+?)(?:\.\w+)?$/;
 
-  interface Props {
-    /** Bindable: the list of graph-selected note refs (after user dismissals). */
-    activeGraphNotes?: GraphNoteRef[];
-    /** Initial paths set externally (e.g. from Messenger.pendingGraphNotes). */
-    paths?: string[];
-  }
+interface Props {
+	/** Bindable: the list of graph-selected note refs (after user dismissals). */
+	activeGraphNotes?: GraphNoteRef[];
+	/** Initial paths set externally (e.g. from Messenger.pendingGraphNotes). */
+	paths?: string[];
+}
 
-  let { activeGraphNotes = $bindable([]), paths = [] }: Props = $props();
+let { activeGraphNotes = $bindable([]), paths = [] }: Props = $props();
 
-  const MAX_VISIBLE = 5;
-  let expanded = $state(false);
-  const hiddenCount = $derived(Math.max(0, paths.length - MAX_VISIBLE));
-  const visiblePaths = $derived(expanded ? paths : paths.slice(0, MAX_VISIBLE));
+const MAX_VISIBLE = 5;
+let expanded = $state(false);
+const hiddenCount = $derived(Math.max(0, paths.length - MAX_VISIBLE));
+const visiblePaths = $derived(expanded ? paths : paths.slice(0, MAX_VISIBLE));
 
-  let dismissed = $state(new Set<string>());
-  const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
+let dismissed = $state(new Set<string>());
+const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
 
-  function basename(path: string): string {
-    return BASENAME_RE.exec(path)?.[1] ?? path;
-  }
+function basename(path: string): string {
+	return BASENAME_RE.exec(path)?.[1] ?? path;
+}
 
-  // Build refs from paths, excluding dismissed ones
-  $effect(() => {
-    activeGraphNotes = paths
-      .filter((p) => !dismissed.has(p))
-      .map((p) => ({ path: p, basename: basename(p) }));
-  });
+// Build refs from paths, excluding dismissed ones
+$effect(() => {
+	activeGraphNotes = paths.filter((p) => !dismissed.has(p)).map((p) => ({ path: p, basename: basename(p) }));
+});
 
-  function toggle(path: string) {
-    const next = new Set(dismissed);
-    if (next.has(path)) {
-      next.delete(path);
-    } else {
-      next.add(path);
-    }
-    dismissed = next;
-  }
+function toggle(path: string) {
+	const next = new Set(dismissed);
+	if (next.has(path)) {
+		next.delete(path);
+	} else {
+		next.add(path);
+	}
+	dismissed = next;
+}
 
-  function onGraphChipClick(evt: MouseEvent, path: string): void {
-    if (Keymap.isModEvent(evt)) {
-      evt.preventDefault();
-      evt.stopPropagation();
-      getPlugin().app.workspace.openLinkText(path, sourcePath, true);
-      return;
-    }
+function onGraphChipClick(evt: MouseEvent, path: string): void {
+	if (Keymap.isModEvent(evt)) {
+		evt.preventDefault();
+		evt.stopPropagation();
+		getPlugin().app.workspace.openLinkText(path, sourcePath, true);
+		return;
+	}
 
-    toggle(path);
-  }
+	toggle(path);
+}
 
-  /** Clear all graph notes (e.g. after sending a message). */
-  export function clear() {
-    dismissed = new Set();
-  }
+/** Clear all graph notes (e.g. after sending a message). */
+export function clear() {
+	dismissed = new Set();
+}
 </script>
 
 {#if paths.length > 0}

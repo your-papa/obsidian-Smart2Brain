@@ -1,15 +1,15 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
-  import SettingContainer from "./SettingContainer.svelte";
+import type { Snippet } from "svelte";
+import SettingContainer from "./SettingContainer.svelte";
 
-  interface Props {
-    heading?: string;
-    headingDesc?: string;
-    class?: string;
-    children: Snippet;
-  }
+interface Props {
+	heading?: string;
+	headingDesc?: string;
+	class?: string;
+	children: Snippet;
+}
 
-  let { heading, headingDesc, class: className = "", children }: Props = $props();
+let { heading, headingDesc, class: className = "", children }: Props = $props();
 </script>
 
 <div class="setting-group {className}">

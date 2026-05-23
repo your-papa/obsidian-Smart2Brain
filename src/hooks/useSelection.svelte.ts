@@ -1,4 +1,4 @@
-import { MarkdownView, type EventRef, type Workspace, type WorkspaceLeaf } from "obsidian";
+import { MarkdownView, type EventRef, type WorkspaceLeaf } from "obsidian";
 import { getPlugin } from "../stores/state.svelte";
 import { clearSelectionHighlight, setSelectionHighlight } from "../editor/selectionHighlightExtension";
 
@@ -111,12 +111,13 @@ export function formatSelectionContext(ref: SelectionRef): string {
  * that persists even after focus moves to the chat input.
  */
 export class SelectionTracker {
-	#workspace = getPlugin().app.workspace;
+	readonly #workspace = getPlugin().app.workspace;
 	#selection: CapturedSelection | undefined = $state(undefined);
 	#refs: EventRef[] = [];
-	#interval: ReturnType<typeof setInterval> | undefined;
+	#refreshFrame: number | undefined;
 	/** When true, selection was pinned (focus left the note) and should be kept. */
 	#pinned = false;
+	readonly #handleSelectionChange = () => this.#scheduleRefresh();
 
 	/** The current captured selection ref (serializable). */
 	get selection(): SelectionRef | undefined {
@@ -137,10 +138,18 @@ export class SelectionTracker {
 				if (this.#selection && !this.#pinned) {
 					this.#pin();
 				}
-				this.#refresh();
+				this.#scheduleRefresh();
 			}),
 		];
-		this.#interval = setInterval(() => this.#refresh(), 1000);
+		document.addEventListener("selectionchange", this.#handleSelectionChange);
+	}
+
+	#scheduleRefresh() {
+		if (this.#refreshFrame !== undefined) return;
+		this.#refreshFrame = requestAnimationFrame(() => {
+			this.#refreshFrame = undefined;
+			this.#refresh();
+		});
 	}
 
 	#refresh() {
@@ -255,7 +264,10 @@ export class SelectionTracker {
 			this.#workspace.offref(ref);
 		}
 		this.#refs = [];
-		clearInterval(this.#interval);
-		this.#interval = undefined;
+		document.removeEventListener("selectionchange", this.#handleSelectionChange);
+		if (this.#refreshFrame !== undefined) {
+			cancelAnimationFrame(this.#refreshFrame);
+			this.#refreshFrame = undefined;
+		}
 	}
 }

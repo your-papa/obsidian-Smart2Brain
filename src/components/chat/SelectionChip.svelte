@@ -1,67 +1,67 @@
 <script lang="ts">
-  import { Keymap } from "obsidian";
-  import { onDestroy } from "svelte";
-  import { SelectionTracker, type SelectionRef } from "../../hooks/useSelection.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { icon } from "../../utils/utils";
+import { Keymap } from "obsidian";
+import { onDestroy } from "svelte";
+import { SelectionTracker, type SelectionRef } from "../../hooks/useSelection.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { icon } from "../../utils/utils";
 
-  const PREVIEW_LENGTH = 60;
+const PREVIEW_LENGTH = 60;
 
-  interface Props {
-    /** Bindable: the currently active selection ref (undefined when dismissed). */
-    activeSelection?: SelectionRef | undefined;
-  }
+interface Props {
+	/** Bindable: the currently active selection ref (undefined when dismissed). */
+	activeSelection?: SelectionRef | undefined;
+}
 
-  let { activeSelection = $bindable(undefined) }: Props = $props();
+let { activeSelection = $bindable(undefined) }: Props = $props();
 
-  const tracker = new SelectionTracker();
-  let dismissed = $state(false);
-  const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
+const tracker = new SelectionTracker();
+let dismissed = $state(false);
+const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
 
-  $effect(() => {
-    if (dismissed) {
-      activeSelection = undefined;
-    } else {
-      activeSelection = tracker.selection;
-    }
-  });
+$effect(() => {
+	if (dismissed) {
+		activeSelection = undefined;
+	} else {
+		activeSelection = tracker.selection;
+	}
+});
 
-  // When a new selection appears (different text), un-dismiss
-  $effect(() => {
-    if (tracker.selection && dismissed) {
-      dismissed = false;
-    }
-  });
+// When a new selection appears (different text), un-dismiss
+$effect(() => {
+	if (tracker.selection && dismissed) {
+		dismissed = false;
+	}
+});
 
-  function dismiss() {
-    dismissed = true;
-    tracker.clear();
-  }
+function dismiss() {
+	dismissed = true;
+	tracker.clear();
+}
 
-  function onSelectionClick(evt: MouseEvent): void {
-    if (!tracker.selection) return;
-    if (Keymap.isModEvent(evt)) {
-      evt.preventDefault();
-      evt.stopPropagation();
-      getPlugin().app.workspace.openLinkText(tracker.selection.path, sourcePath, true);
-      return;
-    }
+function onSelectionClick(evt: MouseEvent): void {
+	if (!tracker.selection) return;
+	if (Keymap.isModEvent(evt)) {
+		evt.preventDefault();
+		evt.stopPropagation();
+		getPlugin().app.workspace.openLinkText(tracker.selection.path, sourcePath, true);
+		return;
+	}
 
-    dismiss();
-  }
+	dismiss();
+}
 
-  /** Clear the selection and tracker (e.g. after sending a message). */
-  export function clearSelection() {
-    dismiss();
-  }
+/** Clear the selection and tracker (e.g. after sending a message). */
+export function clearSelection() {
+	dismiss();
+}
 
-  function preview(text: string): string {
-    const oneLine = text.replace(/\n/g, " ").trim();
-    if (oneLine.length <= PREVIEW_LENGTH) return oneLine;
-    return `${oneLine.slice(0, PREVIEW_LENGTH)}…`;
-  }
+function preview(text: string): string {
+	const oneLine = text.replace(/\n/g, " ").trim();
+	if (oneLine.length <= PREVIEW_LENGTH) return oneLine;
+	return `${oneLine.slice(0, PREVIEW_LENGTH)}…`;
+}
 
-  onDestroy(() => tracker.destroy());
+onDestroy(() => tracker.destroy());
 </script>
 
 {#if tracker.selection && !dismissed}
