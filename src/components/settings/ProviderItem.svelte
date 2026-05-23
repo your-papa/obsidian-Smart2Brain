@@ -8,7 +8,7 @@
   import ManagedEntityItem from "./ManagedEntityItem.svelte";
   import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
   import CircularLoader from "../ui/CircularLoader.svelte";
-  import IconButton from "../ui/IconButton.svelte";
+  import Button from "../ui/Button.svelte";
   import { icon } from "../../utils/utils";
   import { ProviderSetupModal } from "../../views/provider-setup/ProviderSetup";
   import { confirmDelete } from "../modal/ConfirmModal";
@@ -110,8 +110,18 @@
   {/snippet}
 
   {#snippet actions()}
-    <IconButton icon="settings" label="Configure provider" onclick={handleOpenSettings} />
-    <IconButton icon="trash" label="Remove provider" onclick={() => void handleRemoveProvider()} />
+    <Button
+      iconId="settings"
+      ariaLabel="Configure provider"
+      tooltip="Configure provider"
+      onClick={handleOpenSettings}
+    />
+    <Button
+      iconId="trash"
+      ariaLabel="Remove provider"
+      tooltip="Remove provider"
+      onClick={() => void handleRemoveProvider()}
+    />
   {/snippet}
 </ManagedEntityItem>
 

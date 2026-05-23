@@ -1,14 +1,14 @@
 <script lang="ts">
-  import Button from "../ui/Button.svelte";
-  import type { PrivacyWarningModal } from "./PrivacyWarningModal";
+import Button from "../ui/Button.svelte";
+import type { PrivacyWarningModal } from "./PrivacyWarningModal";
 
-  interface Props {
-    modal: PrivacyWarningModal;
-    onConfirm: () => void;
-    onCancel: () => void;
-  }
+interface Props {
+	modal: PrivacyWarningModal;
+	onConfirm: () => void;
+	onCancel: () => void;
+}
 
-  let { modal, onConfirm, onCancel }: Props = $props();
+let { modal, onConfirm, onCancel }: Props = $props();
 </script>
 
 <div class="modal-title">Privacy Warning</div>

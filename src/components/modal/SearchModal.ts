@@ -161,7 +161,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		]);
 		this.setPlaceholder(
 			this.pickerOptions?.pickerText?.searchPlaceholder ??
-				"Search notes, use #tag, /folder or @space, or leave empty for recent notes...",
+			"Search notes, use #tag, /folder or @space, or leave empty for recent notes...",
 		);
 		this.updateInstructions();
 
@@ -325,6 +325,43 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.syncGlowAnimation();
 	}
 
+	private getEnterInstructionPurpose(): string {
+		if (this.isPickerMode()) {
+			return this.selectedResultsByPath.size > 0
+				? `${this.getPickerConfirmVerb()} selection`
+				: `${this.getPickerConfirmVerb()} focused file`;
+		}
+
+		return this.selectedResultsByPath.size > 0 ? "Open selection" : "Open note";
+	}
+
+	private getCreateInstructionPurpose(): string | null {
+		if (this.isPickerMode()) {
+			return null;
+		}
+
+		const trimmedQuery = this.currentQuery.trim();
+		if (!trimmedQuery) {
+			return null;
+		}
+
+		const preview = trimmedQuery.length > 36 ? `${trimmedQuery.slice(0, 33)}...` : trimmedQuery;
+		return `Create \"${preview}\"`;
+	}
+
+	private getSelectionSummaryText(): string {
+		const selectedResults = this.getSelectedResults();
+		const visibleNames = selectedResults.slice(0, 3).map((result) => result.name);
+		const remainingCount = selectedResults.length - visibleNames.length;
+
+		const namesLabel = visibleNames.join(", ");
+		const moreLabel = remainingCount > 0 ? ` +${remainingCount} more` : "";
+
+		return selectedResults.length === 1
+			? `Selected: ${namesLabel}. Click to clear.`
+			: `${selectedResults.length} selected: ${namesLabel}${moreLabel}. Click to clear.`;
+	}
+
 	private updateInstructions(): void {
 		const pluginData = getData();
 		if (!pluginData.searchShowKeyboardHints) {
@@ -335,13 +372,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		if (this.isPickerMode()) {
 			this.setInstructions([
 				{ command: "↑↓", purpose: "Navigate" },
-				{
-					command: "↵",
-					purpose:
-						this.selectedResultsByPath.size > 0
-							? `${this.getPickerConfirmVerb()} selection`
-							: `${this.getPickerConfirmVerb()} focused file`,
-				},
+				{ command: "↵", purpose: this.getEnterInstructionPurpose() },
 				{ command: "⇧↵", purpose: "Toggle selection" },
 				{ command: "esc", purpose: "Close" },
 			]);
@@ -353,16 +384,22 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		const modShiftEnterKey = Platform.isMacOS ? "⌘⇧↵" : "Ctrl+Shift+↵";
 		const altEnterKey = Platform.isMacOS ? "⌥↵" : "Alt+↵";
 		const semanticLabel = this.semanticEnabled ? "semantic: on" : "semantic: off";
-		this.setInstructions([
+		const instructions = [
 			{ command: "↑↓", purpose: "Navigate" },
-			{ command: "↵", purpose: this.selectedResultsByPath.size > 0 ? "Confirm selection" : "Open note" },
+			{ command: "↵", purpose: this.getEnterInstructionPurpose() },
 			{ command: "⇧↵", purpose: "Toggle selection" },
 			{ command: modEnterKey, purpose: "Open in new tab" },
 			{ command: altEnterKey, purpose: "Send to chat" },
-			{ command: modShiftEnterKey, purpose: "Create note" },
 			{ command: tabKey, purpose: semanticLabel },
 			{ command: "esc", purpose: "Close" },
-		]);
+		];
+
+		const createPurpose = this.getCreateInstructionPurpose();
+		if (createPurpose) {
+			instructions.splice(5, 0, { command: modShiftEnterKey, purpose: createPurpose });
+		}
+
+		this.setInstructions(instructions);
 	}
 
 	private getSelectedResults(): SearchResult[] {
@@ -535,9 +572,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		this.selectionSummaryEl.hidden = false;
-		this.selectionSummaryEl.textContent = this.isPickerMode()
-			? `${count} selected - Enter to ${this.getPickerConfirmVerb().toLowerCase()}, click to clear`
-			: `${count} selected - Enter to open, Alt+Enter to send, click to clear`;
+		this.selectionSummaryEl.textContent = this.getSelectionSummaryText();
 	}
 
 	private openSearchResult(result: SearchResult, destination: false | "tab"): void {
@@ -876,6 +911,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	private setSearchQuery(cleanQuery: string): void {
 		this.currentQuery = cleanQuery;
+		this.updateInstructions();
 
 		const inputEl = this.getInputEl();
 		if (inputEl && inputEl.value !== cleanQuery) {

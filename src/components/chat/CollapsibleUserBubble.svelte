@@ -1,44 +1,44 @@
 <script lang="ts">
-import { useResizeObserver } from "runed";
-import type { ChatAttachment } from "../../types/shared";
-import IconButton from "../ui/IconButton.svelte";
-import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
+  import { useResizeObserver } from "runed";
+  import type { ChatAttachment } from "../../types/shared";
+  import Button from "../ui/Button.svelte";
+  import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 
-interface Props {
-	content: string;
-	attachments?: ChatAttachment[];
-	class?: string;
-}
+  interface Props {
+    content: string;
+    attachments?: ChatAttachment[];
+    class?: string;
+  }
 
-const { content, attachments, class: className = "" }: Props = $props();
+  const { content, attachments, class: className = "" }: Props = $props();
 
-const COLLAPSED_HEIGHT = 96; // ~4 lines at 24px line-height
+  const COLLAPSED_HEIGHT = 96; // ~4 lines at 24px line-height
 
-let isExpanded = $state(false);
-let contentEl: HTMLElement | null = $state(null);
-let isTruncated = $state(false);
+  let isExpanded = $state(false);
+  let contentEl: HTMLElement | null = $state(null);
+  let isTruncated = $state(false);
 
-// Check if content exceeds collapsed height when element resizes
-useResizeObserver(
-	() => contentEl,
-	() => {
-		if (contentEl) {
-			isTruncated = contentEl.scrollHeight > COLLAPSED_HEIGHT;
-		}
-	},
-);
+  // Check if content exceeds collapsed height when element resizes
+  useResizeObserver(
+    () => contentEl,
+    () => {
+      if (contentEl) {
+        isTruncated = contentEl.scrollHeight > COLLAPSED_HEIGHT;
+      }
+    },
+  );
 
-function handleClick(evt: MouseEvent) {
-	// Don't toggle if clicking a link
-	const target = evt.target as HTMLElement;
-	if (target.closest("a")) {
-		return;
-	}
+  function handleClick(evt: MouseEvent) {
+    // Don't toggle if clicking a link
+    const target = evt.target as HTMLElement;
+    if (target.closest("a")) {
+      return;
+    }
 
-	if (isTruncated) {
-		isExpanded = !isExpanded;
-	}
-}
+    if (isTruncated) {
+      isExpanded = !isExpanded;
+    }
+  }
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -66,12 +66,13 @@ function handleClick(evt: MouseEvent) {
     <div
       class="absolute bottom-1 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
     >
-      <IconButton
-        icon="chevron-down"
-        label={isExpanded ? "Collapse message" : "Expand message"}
-        size="xs"
-        class="transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}"
-        onclick={(e) => {
+      <Button
+        iconId="chevron-down"
+        ariaLabel={isExpanded ? "Collapse message" : "Expand message"}
+        tooltip={isExpanded ? "Collapse message" : "Expand message"}
+        iconSize="xs"
+        styles="transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}"
+        onClick={(e) => {
           e.stopPropagation();
           isExpanded = !isExpanded;
         }}

@@ -1,68 +1,69 @@
 <script lang="ts">
-import { Popover } from "bits-ui";
-import { type AgentConfig, resolveAgentColorCSS } from "../../types/plugin";
-import { getData } from "../../stores/dataStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import { Logger } from "../../utils/logging";
-import Icon from "../ui/Icon.svelte";
-import { chatHistoryContainsPrivateNotes, getMessenger } from "../../stores/chatStore.svelte";
-import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
-import { AgentEditorModal } from "../modal/AgentEditorModal";
+  import { Popover } from "bits-ui";
+  import { type AgentConfig, resolveAgentColorCSS } from "../../types/plugin";
+  import { getData } from "../../stores/dataStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
+  import { Logger } from "../../utils/logging";
+  import Icon from "../ui/Icon.svelte";
+  import { chatHistoryContainsPrivateNotes, getMessenger } from "../../stores/chatStore.svelte";
+  import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
+  import { AgentEditorModal } from "../modal/AgentEditorModal";
+  import Button from "../ui/Button.svelte";
 
-const data = getData();
-const plugin = getPlugin();
+  const data = getData();
+  const plugin = getPlugin();
 
-// Get all agents reactively
-const agents = $derived(Object.values(data.agents));
+  // Get all agents reactively
+  const agents = $derived(Object.values(data.agents));
 
-// Get currently selected agent
-const selectedAgent = $derived(data.getSelectedAgent());
+  // Get currently selected agent
+  const selectedAgent = $derived(data.getSelectedAgent());
 
-// Check if agent selection actually makes a difference (more than one agent)
-const hasMultipleAgents = $derived(agents.length > 1);
+  // Check if agent selection actually makes a difference (more than one agent)
+  const hasMultipleAgents = $derived(agents.length > 1);
 
-let isOpen = $state(false);
-let customAnchor: HTMLElement | undefined = $state();
+  let isOpen = $state(false);
+  let customAnchor: HTMLButtonElement | undefined = $state();
 
-async function selectAgent(agent: AgentConfig) {
-	// Check if the agent's provider is non-trusted and chat has private notes
-	const newProvider = agent.chatModel?.provider;
-	if (newProvider && !data.isProviderTrusted(newProvider)) {
-		const messages = getMessenger()?.session?.messages;
-		if (messages && chatHistoryContainsPrivateNotes(messages)) {
-			const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
-			if (!confirmed) return;
-		}
-	}
-	data.selectedAgentId = agent.id;
-	isOpen = false;
-	// Reinitialize the agent with the new config
-	plugin.agentManager?.reinitialize().catch((error) => {
-		Logger.error("Failed to switch agent:", error);
-	});
-}
+  async function selectAgent(agent: AgentConfig) {
+    // Check if the agent's provider is non-trusted and chat has private notes
+    const newProvider = agent.chatModel?.provider;
+    if (newProvider && !data.isProviderTrusted(newProvider)) {
+      const messages = getMessenger()?.session?.messages;
+      if (messages && chatHistoryContainsPrivateNotes(messages)) {
+        const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
+        if (!confirmed) return;
+      }
+    }
+    data.selectedAgentId = agent.id;
+    isOpen = false;
+    // Reinitialize the agent with the new config
+    plugin.agentManager?.reinitialize().catch((error) => {
+      Logger.error("Failed to switch agent:", error);
+    });
+  }
 
-function openAgentEditor(agentId: string) {
-	isOpen = false;
-	new AgentEditorModal(plugin, agentId).open();
-}
+  function openAgentEditor(agentId: string) {
+    isOpen = false;
+    new AgentEditorModal(plugin, agentId).open();
+  }
 </script>
 
 {#if agents.length === 0}
   <!-- No agents configured (shouldn't happen, but handle gracefully) -->
-  <button
-    onclick={() => openAgentEditor("default-agent")}
-    class="clickable-icon flex flex-row items-center gap-1"
+  <Button
+    onClick={() => openAgentEditor("default-agent")}
+    styles="clickable-icon flex flex-row items-center gap-1"
   >
     <div class="text-[--text-muted] text-xs">Configure Agent</div>
-  </button>
+  </Button>
 {:else}
-  <button
-    bind:this={customAnchor}
-    onclick={() => (hasMultipleAgents ? (isOpen = !isOpen) : openAgentEditor(selectedAgent.id))}
-    class="clickable-icon flex items-center gap-1 min-w-0"
-    title={hasMultipleAgents ? "Select agent" : "Edit agent"}
-    data-testid="agent-select-button"
+  <Button
+    bind:element={customAnchor}
+    onClick={() => (hasMultipleAgents ? (isOpen = !isOpen) : openAgentEditor(selectedAgent.id))}
+    styles="clickable-icon flex items-center gap-1 min-w-0"
+    tooltip={hasMultipleAgents ? "Select agent" : "Edit agent"}
+    dataTestId="agent-select-button"
   >
     <span
       class="agent-pill"
@@ -81,7 +82,7 @@ function openAgentEditor(agentId: string) {
         <Icon name="chevron-down" size="xs" />
       {/if}
     {/if}
-  </button>
+  </Button>
 
   <Popover.Root bind:open={isOpen}>
     <Popover.Portal>

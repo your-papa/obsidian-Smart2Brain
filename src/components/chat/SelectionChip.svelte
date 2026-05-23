@@ -1,74 +1,74 @@
 <script lang="ts">
-import { Keymap } from "obsidian";
-import { onDestroy } from "svelte";
-import { SelectionTracker, type SelectionRef } from "../../hooks/useSelection.svelte";
-import { getPlugin } from "../../stores/state.svelte";
-import { icon } from "../../utils/utils";
+  import { Keymap } from "obsidian";
+  import { onDestroy } from "svelte";
+  import { SelectionTracker, type SelectionRef } from "../../hooks/useSelection.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
+  import { icon } from "../../utils/utils";
 
-const PREVIEW_LENGTH = 60;
+  const PREVIEW_LENGTH = 60;
 
-interface Props {
-	/** Bindable: the currently active selection ref (undefined when dismissed). */
-	activeSelection?: SelectionRef | undefined;
-}
+  interface Props {
+    /** Bindable: the currently active selection ref (undefined when dismissed). */
+    activeSelection?: SelectionRef | undefined;
+  }
 
-let { activeSelection = $bindable(undefined) }: Props = $props();
+  let { activeSelection = $bindable(undefined) }: Props = $props();
 
-const tracker = new SelectionTracker();
-let dismissed = $state(false);
-const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
+  const tracker = new SelectionTracker();
+  let dismissed = $state(false);
+  const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
 
-$effect(() => {
-	if (dismissed) {
-		activeSelection = undefined;
-	} else {
-		activeSelection = tracker.selection;
-	}
-});
+  $effect(() => {
+    if (dismissed) {
+      activeSelection = undefined;
+    } else {
+      activeSelection = tracker.selection;
+    }
+  });
 
-// When a new selection appears (different text), un-dismiss
-$effect(() => {
-	if (tracker.selection && dismissed) {
-		dismissed = false;
-	}
-});
+  // When a new selection appears (different text), un-dismiss
+  $effect(() => {
+    if (tracker.selection && dismissed) {
+      dismissed = false;
+    }
+  });
 
-function dismiss() {
-	dismissed = true;
-	tracker.clear();
-}
+  function dismiss() {
+    dismissed = true;
+    tracker.clear();
+  }
 
-function onSelectionClick(evt: MouseEvent): void {
-	if (!tracker.selection) return;
-	if (Keymap.isModEvent(evt)) {
-		evt.preventDefault();
-		evt.stopPropagation();
-		getPlugin().app.workspace.openLinkText(tracker.selection.path, sourcePath, true);
-		return;
-	}
+  function onSelectionClick(evt: MouseEvent): void {
+    if (!tracker.selection) return;
+    if (Keymap.isModEvent(evt)) {
+      evt.preventDefault();
+      evt.stopPropagation();
+      getPlugin().app.workspace.openLinkText(tracker.selection.path, sourcePath, true);
+      return;
+    }
 
-	dismiss();
-}
+    dismiss();
+  }
 
-/** Clear the selection and tracker (e.g. after sending a message). */
-export function clearSelection() {
-	dismiss();
-}
+  /** Clear the selection and tracker (e.g. after sending a message). */
+  export function clearSelection() {
+    dismiss();
+  }
 
-function preview(text: string): string {
-	const oneLine = text.replace(/\n/g, " ").trim();
-	if (oneLine.length <= PREVIEW_LENGTH) return oneLine;
-	return `${oneLine.slice(0, PREVIEW_LENGTH)}…`;
-}
+  function preview(text: string): string {
+    const oneLine = text.replace(/\n/g, " ").trim();
+    if (oneLine.length <= PREVIEW_LENGTH) return oneLine;
+    return `${oneLine.slice(0, PREVIEW_LENGTH)}…`;
+  }
 
-onDestroy(() => tracker.destroy());
+  onDestroy(() => tracker.destroy());
 </script>
 
 {#if tracker.selection && !dismissed}
   <div class="selection-chip-container inline-flex flex-row flex-wrap gap-1.5">
     <button
       type="button"
-      class="selection-chip"
+      class="selection-chip s2b-pill s2b-pill--interactive"
       onclick={onSelectionClick}
       title={`Selected text from ${tracker.selection.path} (click to dismiss)\n\n${tracker.selection.text.slice(0, 200)}`}
     >
@@ -88,43 +88,25 @@ onDestroy(() => tracker.destroy());
 
 <style>
   .selection-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    font-size: 11px;
-    line-height: 1.15;
-    background: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-secondary));
-    border: 1px solid color-mix(in srgb, var(--interactive-accent) 18%, transparent);
-    border-radius: 999px;
-    box-shadow:
-      inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
-      0 1px 2px color-mix(in srgb, black 10%, transparent);
-    color: var(--text-normal);
-    cursor: pointer;
-    transition:
-      background 0.15s ease,
-      border-color 0.15s ease,
-      transform 0.15s ease,
-      box-shadow 0.15s ease;
     max-width: 100%;
-  }
 
-  .selection-chip:hover {
-    background: color-mix(in srgb, var(--interactive-accent) 20%, var(--background-secondary));
-    border-color: color-mix(in srgb, var(--interactive-accent) 26%, transparent);
-    box-shadow:
-      inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
-      0 3px 8px color-mix(in srgb, black 12%, transparent);
-    transform: translateY(-1px);
-  }
-
-  .selection-chip:focus-visible {
-    outline: none;
-    box-shadow:
-      inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
-      0 0 0 2px color-mix(in srgb, var(--interactive-accent) 28%, transparent),
-      0 3px 8px color-mix(in srgb, black 12%, transparent);
+    --s2b-pill-bg: color-mix(in srgb, var(--interactive-accent) 7%, var(--background-secondary));
+    --s2b-pill-border: color-mix(
+      in srgb,
+      var(--interactive-accent) 18%,
+      var(--background-modifier-border)
+    );
+    --s2b-pill-color: var(--text-normal);
+    --s2b-pill-bg-hover: color-mix(
+      in srgb,
+      var(--interactive-accent) 10%,
+      var(--background-secondary)
+    );
+    --s2b-pill-border-hover: color-mix(
+      in srgb,
+      var(--interactive-accent) 24%,
+      var(--background-modifier-border)
+    );
   }
 
   .chip-icon {

@@ -1,239 +1,226 @@
 <script lang="ts">
-  import { getAllTags, type App } from "obsidian";
-  import type { ViewFilter } from "../../types/graph";
-  import {
-    cloneSpaceMembershipDraft,
-    compileSpaceMembershipDraft,
-    createEmptySpaceFilter,
-    parseSpaceMembershipFilter,
-    resolveSpaceMembershipDraft,
-  } from "../../lib/views";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import type { PrivacyMode } from "../../types/plugin";
-  import Button from "../ui/Button.svelte";
-  import type { PrivacyListModal } from "./PrivacyListModal";
-  import FileSetEditor from "./FileSetEditor.svelte";
+import { getAllTags, type App } from "obsidian";
+import type { ViewFilter } from "../../types/graph";
+import {
+	cloneSpaceMembershipDraft,
+	compileSpaceMembershipDraft,
+	createEmptySpaceFilter,
+	parseSpaceMembershipFilter,
+	resolveSpaceMembershipDraft,
+} from "../../lib/views";
+import { getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import type { PrivacyMode } from "../../types/plugin";
+import Button from "../ui/Button.svelte";
+import type { PrivacyListModal } from "./PrivacyListModal";
+import FileSetEditor from "./FileSetEditor.svelte";
 
-  interface Props {
-    modal: PrivacyListModal;
-  }
+interface Props {
+	modal: PrivacyListModal;
+}
 
-  const plugin = getPlugin();
-  const data = getData();
-  const app: App = plugin.app;
-  const sourcePath = $derived(app.workspace.getActiveFile()?.path ?? "");
+const plugin = getPlugin();
+const data = getData();
+const app: App = plugin.app;
+const sourcePath = $derived(app.workspace.getActiveFile()?.path ?? "");
 
-  let { modal }: Props = $props();
+let { modal }: Props = $props();
 
-  const availableFolders = $derived.by(() => {
-    const folders = new Set<string>();
-    for (const file of app.vault.getFiles()) {
-      const parts = file.path.split("/");
-      if (parts.length > 1) {
-        folders.add(parts[0]);
-        if (parts.length > 2) folders.add(`${parts[0]}/${parts[1]}`);
-      }
-    }
-    return [...folders].sort();
-  });
+const availableFolders = $derived.by(() => {
+	const folders = new Set<string>();
+	for (const file of app.vault.getFiles()) {
+		const parts = file.path.split("/");
+		if (parts.length > 1) {
+			folders.add(parts[0]);
+			if (parts.length > 2) folders.add(`${parts[0]}/${parts[1]}`);
+		}
+	}
+	return [...folders].sort();
+});
 
-  const availableTags = $derived.by(() => {
-    const tags = new Set<string>();
-    for (const file of app.vault.getMarkdownFiles()) {
-      const cache = app.metadataCache.getFileCache(file);
-      if (!cache) continue;
-      for (const tag of getAllTags(cache) ?? []) {
-        tags.add(tag);
-      }
-    }
-    return [...tags].sort();
-  });
+const availableTags = $derived.by(() => {
+	const tags = new Set<string>();
+	for (const file of app.vault.getMarkdownFiles()) {
+		const cache = app.metadataCache.getFileCache(file);
+		if (!cache) continue;
+		for (const tag of getAllTags(cache) ?? []) {
+			tags.add(tag);
+		}
+	}
+	return [...tags].sort();
+});
 
-  function ensureGroup(filter: ViewFilter): ViewFilter {
-    if (filter.type === "all" || filter.type === "any" || filter.type === "none") {
-      return filter;
-    }
-    return { type: "all", conditions: [filter] };
-  }
+function ensureGroup(filter: ViewFilter): ViewFilter {
+	if (filter.type === "all" || filter.type === "any" || filter.type === "none") {
+		return filter;
+	}
+	return { type: "all", conditions: [filter] };
+}
 
-  const initialParsed = parseSpaceMembershipFilter(data.privacyFilter);
-  let privacyFilter = $state<ViewFilter>(
-    ensureGroup(data.privacyFilter ?? createEmptySpaceFilter()),
-  );
-  let showFilters = $state(initialParsed.draft.autoIncludeRules.length > 0);
+const initialParsed = parseSpaceMembershipFilter(data.privacyFilter);
+let privacyFilter = $state<ViewFilter>(ensureGroup(data.privacyFilter ?? createEmptySpaceFilter()));
+let showFilters = $state(initialParsed.draft.autoIncludeRules.length > 0);
 
-  const privacyMode = $derived.by(() => data.privacyMode);
-  const parsedMembership = $derived.by(() => parseSpaceMembershipFilter(privacyFilter));
-  const resolvedPrivacy = $derived.by(() =>
-    resolveSpaceMembershipDraft(
-      app,
-      parsedMembership.draft,
-      new Set(app.vault.getFiles().map((file) => file.path)),
-    ),
-  );
-  const includedFiles = $derived.by(() =>
-    [...resolvedPrivacy.paths].sort((left, right) => left.localeCompare(right)),
-  );
-  const excludedFiles = $derived.by(() =>
-    [...parsedMembership.draft.excludedPaths].sort((left, right) => left.localeCompare(right)),
-  );
-  const totalVaultFiles = $derived.by(() => app.vault.getFiles().length);
-  const accessibleFileCount = $derived.by(() =>
-    privacyMode === "private-by-default"
-      ? includedFiles.length
-      : totalVaultFiles - includedFiles.length,
-  );
-  const privateFileCount = $derived.by(() => totalVaultFiles - accessibleFileCount);
-  const hasFilters = $derived.by(() => parsedMembership.draft.autoIncludeRules.length > 0);
-  const includedEntries = $derived.by(() =>
-    includedFiles.map((path) => ({
-      path,
-      displayName: path.split("/").pop() ?? path,
-      contextLabel: getParentPath(path) || null,
-      searchable: path.toLowerCase(),
-      isManual: resolvedPrivacy.provenance.get(path)?.includes("Manual") ?? false,
-    })),
-  );
-  const excludedEntries = $derived.by(() =>
-    excludedFiles.map((path) => ({
-      path,
-      displayName: path.split("/").pop() ?? path,
-      contextLabel: getParentPath(path) || null,
-    })),
-  );
+const privacyMode = $derived.by(() => data.privacyMode);
+const parsedMembership = $derived.by(() => parseSpaceMembershipFilter(privacyFilter));
+const resolvedPrivacy = $derived.by(() =>
+	resolveSpaceMembershipDraft(app, parsedMembership.draft, new Set(app.vault.getFiles().map((file) => file.path))),
+);
+const includedFiles = $derived.by(() => [...resolvedPrivacy.paths].sort((left, right) => left.localeCompare(right)));
+const excludedFiles = $derived.by(() =>
+	[...parsedMembership.draft.excludedPaths].sort((left, right) => left.localeCompare(right)),
+);
+const totalVaultFiles = $derived.by(() => app.vault.getFiles().length);
+const accessibleFileCount = $derived.by(() =>
+	privacyMode === "private-by-default" ? includedFiles.length : totalVaultFiles - includedFiles.length,
+);
+const privateFileCount = $derived.by(() => totalVaultFiles - accessibleFileCount);
+const hasFilters = $derived.by(() => parsedMembership.draft.autoIncludeRules.length > 0);
+const includedEntries = $derived.by(() =>
+	includedFiles.map((path) => ({
+		path,
+		displayName: path.split("/").pop() ?? path,
+		contextLabel: getParentPath(path) || null,
+		searchable: path.toLowerCase(),
+		isManual: resolvedPrivacy.provenance.get(path)?.includes("Manual") ?? false,
+	})),
+);
+const excludedEntries = $derived.by(() =>
+	excludedFiles.map((path) => ({
+		path,
+		displayName: path.split("/").pop() ?? path,
+		contextLabel: getParentPath(path) || null,
+	})),
+);
 
-  function savePrivacyFilter(nextFilter: ViewFilter) {
-    privacyFilter = ensureGroup(nextFilter);
-    data.setPrivacyFilter(nextFilter);
-  }
+function savePrivacyFilter(nextFilter: ViewFilter) {
+	privacyFilter = ensureGroup(nextFilter);
+	data.setPrivacyFilter(nextFilter);
+}
 
-  function setPrivacyMode(mode: PrivacyMode) {
-    data.setPrivacyMode(mode);
-  }
+function setPrivacyMode(mode: PrivacyMode) {
+	data.setPrivacyMode(mode);
+}
 
-  function updateDraft(mutator: (draft: ReturnType<typeof cloneSpaceMembershipDraft>) => void) {
-    const currentParsedMembership = parseSpaceMembershipFilter(privacyFilter);
-    const draft = cloneSpaceMembershipDraft(currentParsedMembership.draft);
-    mutator(draft);
-    showFilters = showFilters || draft.autoIncludeRules.length > 0;
-    savePrivacyFilter(compileSpaceMembershipDraft(draft));
-  }
+function updateDraft(mutator: (draft: ReturnType<typeof cloneSpaceMembershipDraft>) => void) {
+	const currentParsedMembership = parseSpaceMembershipFilter(privacyFilter);
+	const draft = cloneSpaceMembershipDraft(currentParsedMembership.draft);
+	mutator(draft);
+	showFilters = showFilters || draft.autoIncludeRules.length > 0;
+	savePrivacyFilter(compileSpaceMembershipDraft(draft));
+}
 
-  function getParentPath(path: string): string {
-    const parts = path.split("/");
-    return parts.slice(0, -1).join("/");
-  }
+function getParentPath(path: string): string {
+	const parts = path.split("/");
+	return parts.slice(0, -1).join("/");
+}
 
-  function removeManualPath(path: string) {
-    updateDraft((draft) => {
-      draft.manualPaths = draft.manualPaths.filter((entry) => entry !== path);
-      draft.excludedPaths = draft.excludedPaths.filter((entry) => entry !== path);
-    });
-  }
+function removeManualPath(path: string) {
+	updateDraft((draft) => {
+		draft.manualPaths = draft.manualPaths.filter((entry) => entry !== path);
+		draft.excludedPaths = draft.excludedPaths.filter((entry) => entry !== path);
+	});
+}
 
-  function excludePath(path: string) {
-    updateDraft((draft) => {
-      if (!draft.excludedPaths.includes(path)) {
-        draft.excludedPaths = [...draft.excludedPaths, path];
-      }
-    });
-  }
+function excludePath(path: string) {
+	updateDraft((draft) => {
+		if (!draft.excludedPaths.includes(path)) {
+			draft.excludedPaths = [...draft.excludedPaths, path];
+		}
+	});
+}
 
-  function restoreExcludedPath(path: string) {
-    updateDraft((draft) => {
-      draft.excludedPaths = draft.excludedPaths.filter((entry) => entry !== path);
-    });
-  }
+function restoreExcludedPath(path: string) {
+	updateDraft((draft) => {
+		draft.excludedPaths = draft.excludedPaths.filter((entry) => entry !== path);
+	});
+}
 
-  function handleRulesFilterChange(nextFilter: ViewFilter) {
-    updateDraft((draft) => {
-      const parsed = parseSpaceMembershipFilter(nextFilter);
-      if (parsed.isAdvanced) return;
-      const nextDraft = parsed.draft;
-      const preservedManualPaths = draft.manualPaths;
-      const preservedExcludedPaths = draft.excludedPaths;
-      draft.manualPaths = preservedManualPaths;
-      draft.excludedPaths = preservedExcludedPaths;
-      draft.autoIncludeRules = nextDraft.autoIncludeRules;
-    });
-  }
+function handleRulesFilterChange(nextFilter: ViewFilter) {
+	updateDraft((draft) => {
+		const parsed = parseSpaceMembershipFilter(nextFilter);
+		if (parsed.isAdvanced) return;
+		const nextDraft = parsed.draft;
+		const preservedManualPaths = draft.manualPaths;
+		const preservedExcludedPaths = draft.excludedPaths;
+		draft.manualPaths = preservedManualPaths;
+		draft.excludedPaths = preservedExcludedPaths;
+		draft.autoIncludeRules = nextDraft.autoIncludeRules;
+	});
+}
 
-  async function handleAddPaths(selectedPaths: string[]) {
-    if (selectedPaths.length === 0) return;
-    updateDraft((draft) => {
-      draft.manualPaths = [...draft.manualPaths, ...selectedPaths];
-      draft.excludedPaths = draft.excludedPaths.filter((path) => !selectedPaths.includes(path));
-    });
-  }
+async function handleAddPaths(selectedPaths: string[]) {
+	if (selectedPaths.length === 0) return;
+	updateDraft((draft) => {
+		draft.manualPaths = [...draft.manualPaths, ...selectedPaths];
+		draft.excludedPaths = draft.excludedPaths.filter((path) => !selectedPaths.includes(path));
+	});
+}
 
-  function getIncludedFileActions(entry: { isManual?: boolean }): Array<{
-    label: string;
-    onClick: (path: string) => void;
-  }> {
-    return entry.isManual
-      ? [{ label: "Remove", onClick: removeManualPath }]
-      : [
-          {
-            label: privacyMode === "private-by-default" ? "Keep private" : "Keep public",
-            onClick: excludePath,
-          },
-        ];
-  }
+function getIncludedFileActions(entry: { isManual?: boolean }): Array<{
+	label: string;
+	onClick: (path: string) => void;
+}> {
+	return entry.isManual
+		? [{ label: "Remove", onClick: removeManualPath }]
+		: [
+				{
+					label: privacyMode === "private-by-default" ? "Keep private" : "Keep public",
+					onClick: excludePath,
+				},
+			];
+}
 
-  function getExcludedFileActions(): Array<{ label: string; onClick: (path: string) => void }> {
-    return [
-      {
-        label: privacyMode === "private-by-default" ? "Restore access" : "Restore private",
-        onClick: restoreExcludedPath,
-      },
-    ];
-  }
+function getExcludedFileActions(): Array<{ label: string; onClick: (path: string) => void }> {
+	return [
+		{
+			label: privacyMode === "private-by-default" ? "Restore access" : "Restore private",
+			onClick: restoreExcludedPath,
+		},
+	];
+}
 
-  const introTitle = $derived.by(() =>
-    privacyMode === "private-by-default" ? "Private by default" : "Public by default",
-  );
-  const introBody = $derived.by(() =>
-    privacyMode === "private-by-default"
-      ? "Untrusted providers can only access the files listed below. Everything else stays private unless the provider is marked as trusted."
-      : "Untrusted providers can access vault files by default, except for the files listed below as private. Trusted providers always bypass this restriction.",
-  );
-  const sectionTitle = $derived.by(() =>
-    privacyMode === "private-by-default" ? "Files exposed to untrusted providers" : "Private files",
-  );
-  const includedEmptyText = $derived.by(() =>
-    privacyMode === "private-by-default"
-      ? "No files are exposed to untrusted providers yet."
-      : "No private files selected yet.",
-  );
-  const pickerModalTitle = $derived.by(() =>
-    privacyMode === "private-by-default" ? "Expose files" : "Add private files",
-  );
-  const pickerText = $derived.by(() =>
-    privacyMode === "private-by-default"
-      ? {
-          searchPlaceholder: "Search vault files",
-          searchAriaLabel: "Search files to expose",
-          defaultHeading: "Vault files",
-          defaultDescription:
-            "Select one or more vault files that untrusted providers are allowed to access.",
-          emptySearchText: "No matching files found.",
-          confirmVerb: "Expose",
-          alreadySelectedBadgeLabel: "Already exposed",
-        }
-      : {
-          searchPlaceholder: "Search vault files",
-          searchAriaLabel: "Search files to mark private",
-          defaultHeading: "Vault files",
-          defaultDescription: "Select one or more vault files to mark as private.",
-          emptySearchText: "No matching files found.",
-          confirmVerb: "Add",
-          alreadySelectedBadgeLabel: "Already private",
-        },
-  );
-  const excludedTitle = $derived.by(() =>
-    privacyMode === "private-by-default" ? "Kept private" : "Kept public",
-  );
+const introTitle = $derived.by(() =>
+	privacyMode === "private-by-default" ? "Private by default" : "Public by default",
+);
+const introBody = $derived.by(() =>
+	privacyMode === "private-by-default"
+		? "Untrusted providers can only access the files listed below. Everything else stays private unless the provider is marked as trusted."
+		: "Untrusted providers can access vault files by default, except for the files listed below as private. Trusted providers always bypass this restriction.",
+);
+const sectionTitle = $derived.by(() =>
+	privacyMode === "private-by-default" ? "Files exposed to untrusted providers" : "Private files",
+);
+const includedEmptyText = $derived.by(() =>
+	privacyMode === "private-by-default"
+		? "No files are exposed to untrusted providers yet."
+		: "No private files selected yet.",
+);
+const pickerModalTitle = $derived.by(() =>
+	privacyMode === "private-by-default" ? "Expose files" : "Add private files",
+);
+const pickerText = $derived.by(() =>
+	privacyMode === "private-by-default"
+		? {
+				searchPlaceholder: "Search vault files",
+				searchAriaLabel: "Search files to expose",
+				defaultHeading: "Vault files",
+				defaultDescription: "Select one or more vault files that untrusted providers are allowed to access.",
+				emptySearchText: "No matching files found.",
+				confirmVerb: "Expose",
+				alreadySelectedBadgeLabel: "Already exposed",
+			}
+		: {
+				searchPlaceholder: "Search vault files",
+				searchAriaLabel: "Search files to mark private",
+				defaultHeading: "Vault files",
+				defaultDescription: "Select one or more vault files to mark as private.",
+				emptySearchText: "No matching files found.",
+				confirmVerb: "Add",
+				alreadySelectedBadgeLabel: "Already private",
+			},
+);
+const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? "Kept private" : "Kept public"));
 </script>
 
 <div class="privacy-modal-shell">

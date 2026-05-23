@@ -1,159 +1,159 @@
 <script lang="ts">
-import Button from "../ui/Button.svelte";
-import RangeSlider from "../ui/RangeSlider.svelte";
-import Dropdown from "../ui/Dropdown.svelte";
-import SettingContainer from "../settings/SettingContainer.svelte";
-import {
-	type ClusteringAlgorithm,
-	type SmartGraphSettings,
-	type SegmentBy,
-	type GraphData,
-	type RegionSegment,
-	DEFAULT_SMART_GRAPH_SETTINGS,
-} from "../../types/graph";
+  import Button from "../ui/Button.svelte";
+  import RangeSlider from "../ui/RangeSlider.svelte";
+  import Dropdown from "../ui/Dropdown.svelte";
+  import SettingContainer from "../settings/SettingContainer.svelte";
+  import {
+    type ClusteringAlgorithm,
+    type SmartGraphSettings,
+    type SegmentBy,
+    type GraphData,
+    type RegionSegment,
+    DEFAULT_SMART_GRAPH_SETTINGS,
+  } from "../../types/graph";
 
-interface Props {
-	settings: SmartGraphSettings;
-	isLoading?: boolean;
-	loadingLabel?: string;
-	segmentBy: SegmentBy;
-	onSettingsChange: (patch: Partial<SmartGraphSettings>) => void;
-	onSegmentByChange: (s: SegmentBy) => void;
-	onResetSettings?: () => void;
-	onFitToView: () => void;
-	onRefresh: () => void;
-	onApplyProjection?: () => void;
-	onLabelClusters?: () => void;
-	isLabeling?: boolean;
-	lassoMode?: boolean;
-	onLassoModeChange?: (active: boolean) => void;
-	graphData?: GraphData;
-	nodeCount?: number;
-	// Spaces
-	immersedSpaceId: string | null;
-	// Segments
-	segments?: RegionSegment[];
-	focusedSegmentId?: string | null;
-	onFocusSegment?: (id: string | null) => void;
-}
+  interface Props {
+    settings: SmartGraphSettings;
+    isLoading?: boolean;
+    loadingLabel?: string;
+    segmentBy: SegmentBy;
+    onSettingsChange: (patch: Partial<SmartGraphSettings>) => void;
+    onSegmentByChange: (s: SegmentBy) => void;
+    onResetSettings?: () => void;
+    onFitToView: () => void;
+    onRefresh: () => void;
+    onApplyProjection?: () => void;
+    onLabelClusters?: () => void;
+    isLabeling?: boolean;
+    lassoMode?: boolean;
+    onLassoModeChange?: (active: boolean) => void;
+    graphData?: GraphData;
+    nodeCount?: number;
+    // Spaces
+    immersedSpaceId: string | null;
+    // Segments
+    segments?: RegionSegment[];
+    focusedSegmentId?: string | null;
+    onFocusSegment?: (id: string | null) => void;
+  }
 
-let {
-	settings,
-	isLoading = false,
-	loadingLabel = "",
-	segmentBy,
-	onSettingsChange,
-	onSegmentByChange,
-	onResetSettings,
-	onFitToView,
-	onRefresh,
-	onApplyProjection,
-	onLabelClusters,
-	isLabeling = false,
-	lassoMode = false,
-	onLassoModeChange,
-	graphData = { nodes: [], edges: [] },
-	nodeCount = 0,
-	immersedSpaceId,
-	segments = [],
-	focusedSegmentId = null,
-	onFocusSegment,
-}: Props = $props();
+  let {
+    settings,
+    isLoading = false,
+    loadingLabel = "",
+    segmentBy,
+    onSettingsChange,
+    onSegmentByChange,
+    onResetSettings,
+    onFitToView,
+    onRefresh,
+    onApplyProjection,
+    onLabelClusters,
+    isLabeling = false,
+    lassoMode = false,
+    onLassoModeChange,
+    graphData = { nodes: [], edges: [] },
+    nodeCount = 0,
+    immersedSpaceId,
+    segments = [],
+    focusedSegmentId = null,
+    onFocusSegment,
+  }: Props = $props();
 
-let isCollapsed = $state(true);
+  let isCollapsed = $state(true);
 
-let sectionOpen: Record<string, boolean> = $state({
-	colorBy: true,
-	layout: false,
-	overview: false,
-});
+  let sectionOpen: Record<string, boolean> = $state({
+    colorBy: true,
+    layout: false,
+    overview: false,
+  });
 
-let graphStats = $derived.by(() => {
-	const { nodes, edges } = graphData;
-	if (nodes.length === 0) return null;
+  let graphStats = $derived.by(() => {
+    const { nodes, edges } = graphData;
+    if (nodes.length === 0) return null;
 
-	const degrees = nodes.map((n) => n.degree ?? 0);
-	const totalDegree = degrees.reduce((a, b) => a + b, 0);
-	const avgDegree = totalDegree / nodes.length;
-	const maxDegree = Math.max(...degrees);
-	const unlinkedNotes = degrees.filter((d) => d === 0).length;
-	const wikiEdges = edges.filter((e) => e.type === "wiki").length;
-	const clusters = new Set(nodes.map((n) => n.cluster).filter((c) => c != null));
+    const degrees = nodes.map((n) => n.degree ?? 0);
+    const totalDegree = degrees.reduce((a, b) => a + b, 0);
+    const avgDegree = totalDegree / nodes.length;
+    const maxDegree = Math.max(...degrees);
+    const unlinkedNotes = degrees.filter((d) => d === 0).length;
+    const wikiEdges = edges.filter((e) => e.type === "wiki").length;
+    const clusters = new Set(nodes.map((n) => n.cluster).filter((c) => c != null));
 
-	return { avgDegree, maxDegree, unlinkedNotes, wikiEdges, clusterCount: clusters.size };
-});
+    return { avgDegree, maxDegree, unlinkedNotes, wikiEdges, clusterCount: clusters.size };
+  });
 
-const APPLY_KEYS = [
-	"autoK",
-	"defaultK",
-	"clusteringAlgorithm",
-	"minClusterSize",
-] as const satisfies readonly (keyof SmartGraphSettings)[];
+  const APPLY_KEYS = [
+    "autoK",
+    "defaultK",
+    "clusteringAlgorithm",
+    "minClusterSize",
+  ] as const satisfies readonly (keyof SmartGraphSettings)[];
 
-type ApplySnapshot = Pick<SmartGraphSettings, (typeof APPLY_KEYS)[number]>;
+  type ApplySnapshot = Pick<SmartGraphSettings, (typeof APPLY_KEYS)[number]>;
 
-function takeSnapshot(s: SmartGraphSettings): ApplySnapshot {
-	const snap = {} as ApplySnapshot;
-	for (const k of APPLY_KEYS) (snap as Record<string, unknown>)[k] = s[k];
-	return snap;
-}
+  function takeSnapshot(s: SmartGraphSettings): ApplySnapshot {
+    const snap = {} as ApplySnapshot;
+    for (const k of APPLY_KEYS) (snap as Record<string, unknown>)[k] = s[k];
+    return snap;
+  }
 
-// svelte-ignore state_referenced_locally
-let appliedSnapshot: ApplySnapshot = $state(takeSnapshot(settings));
+  // svelte-ignore state_referenced_locally
+  let appliedSnapshot: ApplySnapshot = $state(takeSnapshot(settings));
 
-let projectionDirty = $derived(APPLY_KEYS.some((k) => settings[k] !== appliedSnapshot[k]));
+  let projectionDirty = $derived(APPLY_KEYS.some((k) => settings[k] !== appliedSnapshot[k]));
 
-const clusteringAlgorithmOptions = [
-	{ display: "K-Means", value: "kmeans" as ClusteringAlgorithm },
-	{ display: "HDBSCAN", value: "hdbscan" as ClusteringAlgorithm },
-];
+  const clusteringAlgorithmOptions = [
+    { display: "K-Means", value: "kmeans" as ClusteringAlgorithm },
+    { display: "HDBSCAN", value: "hdbscan" as ClusteringAlgorithm },
+  ];
 
-function handleKChange(val: number) {
-	onSettingsChange({ defaultK: val });
-}
+  function handleKChange(val: number) {
+    onSettingsChange({ defaultK: val });
+  }
 
-function handleClusteringAlgorithmChange(val: ClusteringAlgorithm) {
-	onSettingsChange({ clusteringAlgorithm: val });
-}
+  function handleClusteringAlgorithmChange(val: ClusteringAlgorithm) {
+    onSettingsChange({ clusteringAlgorithm: val });
+  }
 
-function handleMinClusterSizeChange(val: number) {
-	onSettingsChange({ minClusterSize: val });
-}
+  function handleMinClusterSizeChange(val: number) {
+    onSettingsChange({ minClusterSize: val });
+  }
 
-function handleLinkDistanceChange(val: number) {
-	onSettingsChange({ linkDistance: val });
-}
+  function handleLinkDistanceChange(val: number) {
+    onSettingsChange({ linkDistance: val });
+  }
 
-function handleChargeStrengthChange(val: number) {
-	onSettingsChange({ chargeStrength: -Math.abs(val) });
-}
+  function handleChargeStrengthChange(val: number) {
+    onSettingsChange({ chargeStrength: -Math.abs(val) });
+  }
 
-function handleCenterStrengthChange(val: number) {
-	onSettingsChange({ centerStrength: val / 100 });
-}
+  function handleCenterStrengthChange(val: number) {
+    onSettingsChange({ centerStrength: val / 100 });
+  }
 
-function handleLinkStrengthChange(val: number) {
-	onSettingsChange({ linkStrength: val / 100 });
-}
+  function handleLinkStrengthChange(val: number) {
+    onSettingsChange({ linkStrength: val / 100 });
+  }
 
-function handleClusterCohesionStrengthChange(val: number) {
-	onSettingsChange({ clusterCohesionStrength: val / 100 });
-}
+  function handleClusterCohesionStrengthChange(val: number) {
+    onSettingsChange({ clusterCohesionStrength: val / 100 });
+  }
 
-function handleResetSettings() {
-	onResetSettings?.();
-	appliedSnapshot = takeSnapshot(DEFAULT_SMART_GRAPH_SETTINGS);
-}
+  function handleResetSettings() {
+    onResetSettings?.();
+    appliedSnapshot = takeSnapshot(DEFAULT_SMART_GRAPH_SETTINGS);
+  }
 
-const colorByOptions = [
-	{ display: "None", value: "none" as SegmentBy },
-	{ display: "Spaces", value: "regions" as SegmentBy },
-	{ display: "Similarity", value: "semantic" as SegmentBy },
-	{ display: "Link Communities", value: "louvain" as SegmentBy },
-	{ display: "Folder", value: "folder" as SegmentBy },
-	{ display: "Tag", value: "tag" as SegmentBy },
-	{ display: "File Type", value: "extension" as SegmentBy },
-];
+  const colorByOptions = [
+    { display: "None", value: "none" as SegmentBy },
+    { display: "Spaces", value: "regions" as SegmentBy },
+    { display: "Similarity", value: "semantic" as SegmentBy },
+    { display: "Link Communities", value: "louvain" as SegmentBy },
+    { display: "Folder", value: "folder" as SegmentBy },
+    { display: "Tag", value: "tag" as SegmentBy },
+    { display: "File Type", value: "extension" as SegmentBy },
+  ];
 </script>
 
 <!-- Unified vertical toolbar -->
@@ -470,7 +470,7 @@ const colorByOptions = [
     right: 8px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
     z-index: 11;
   }
 
@@ -499,14 +499,14 @@ const colorByOptions = [
     position: absolute;
     top: 8px;
     right: 44px;
-    width: 320px;
+    width: 300px;
     max-height: calc(100% - 16px);
     overflow-y: auto;
-    background: var(--background-primary);
+    background: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
-    border-radius: 8px;
+    border-radius: 12px;
     z-index: 10;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    box-shadow: none;
   }
 
   .graph-controls.collapsed {
@@ -517,7 +517,7 @@ const colorByOptions = [
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 12px;
+    padding: 10px 12px;
     border-bottom: 1px solid var(--background-modifier-border);
   }
 
@@ -529,7 +529,7 @@ const colorByOptions = [
   }
 
   .graph-controls-subtitle {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-muted);
     margin-top: 1px;
   }
@@ -539,10 +539,10 @@ const colorByOptions = [
   }
 
   .graph-controls-body {
-    padding: 8px 12px;
+    padding: 10px 12px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
   }
 
   .section-header {
@@ -550,12 +550,10 @@ const colorByOptions = [
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 6px 0;
+    padding: 6px 0 4px;
     border: none;
     border-top: 1px solid var(--background-modifier-border);
     margin-top: 4px;
@@ -585,7 +583,7 @@ const colorByOptions = [
   .overview-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 6px;
+    gap: 8px;
     padding: 4px 0;
   }
 
@@ -594,15 +592,14 @@ const colorByOptions = [
     flex-direction: column;
     gap: 2px;
     padding: 6px 8px;
-    background: var(--background-secondary);
+    background: var(--background-primary);
     border-radius: 6px;
+    border: 1px solid var(--background-modifier-border);
   }
 
   .overview-label {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
   }
 
   .overview-value {
