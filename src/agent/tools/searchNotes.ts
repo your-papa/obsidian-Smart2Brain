@@ -11,13 +11,13 @@ import {
 	getRecentPathSet,
 } from "../../search/recentNotes";
 import { calculateAliasBoost, calculateTitleBoost } from "../../search/searchRanking";
-import { getData, getImmersedSpace } from "../../stores/dataStore.svelte";
+import { getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { normalizeVaultPath } from "../../utils/pathUtils";
 import { getVectorStoreService, type SearchFilter, type SearchResult, waitForVectorStore } from "../../vectorstore";
 import type { SearchMatchBadge, SearchMatchExplanation } from "../../vectorstore/types";
 import { Logger } from "../../utils/logging";
-import { resolveRegionToSearchFilter } from "../../lib/views";
+import { resolveCurrentSpaceScope } from "./spaceScope";
 
 export type { SearchResult } from "../../vectorstore/types";
 
@@ -265,13 +265,11 @@ export function createSearchNotesTool(app: App) {
 		query = "",
 		pathPrefix,
 		tags,
-		region,
 		recentOnly = false,
 	}: {
 		query?: string;
 		pathPrefix?: string;
 		tags?: string[];
-		region?: string;
 		recentOnly?: boolean;
 	}): Promise<string> => {
 		// Get fresh config each call to pick up any changes
@@ -283,36 +281,20 @@ export function createSearchNotesTool(app: App) {
 		let filterPathPrefixes: string[] | undefined = pathPrefix ? [normalizeVaultPath(pathPrefix)] : undefined;
 		let filterTags: string[] | undefined = tags?.length ? tags : undefined;
 
-		// Resolve explicit region param → SearchFilter and merge
-		if (region) {
-			const regionObj = pluginData.getSpaceByLabel(region);
-			if (regionObj) {
-				const regionFilter = resolveRegionToSearchFilter(app, regionObj);
-				if (regionFilter.pathPrefixes) {
-					filterPathPrefixes = [...(filterPathPrefixes ?? []), ...regionFilter.pathPrefixes];
-				}
-				if (regionFilter.tags) {
-					filterTags = [...(filterTags ?? []), ...regionFilter.tags];
-				}
-			} else {
-				Logger.warn(`[search_notes] Space "${region}" not found`);
+		// Resolve space scope from runtime context (set by AgentManager)
+		const spaceScope = resolveCurrentSpaceScope(app);
+
+		// Merge the runtime space scope filter (hard scope)
+		if (spaceScope.searchFilter) {
+			if (spaceScope.searchFilter.pathPrefixes) {
+				filterPathPrefixes = filterPathPrefixes
+					? [...filterPathPrefixes, ...spaceScope.searchFilter.pathPrefixes]
+					: [...spaceScope.searchFilter.pathPrefixes];
 			}
-		} else {
-			// Auto-inject immersed space as default scope when no explicit region param
-			const dataStore = getData();
-			let effectiveSpace = getImmersedSpace();
-			// In per-surface mode, prefer the chat-specific space for agent invocations
-			if (dataStore.spaceImmersionMode === "per-surface" && dataStore.chatSpaceId) {
-				effectiveSpace = dataStore.spaces.find((s) => s.id === dataStore.chatSpaceId) ?? effectiveSpace;
-			}
-			if (effectiveSpace) {
-				const spaceFilter = resolveRegionToSearchFilter(app, effectiveSpace);
-				if (spaceFilter.pathPrefixes) {
-					filterPathPrefixes = [...(filterPathPrefixes ?? []), ...spaceFilter.pathPrefixes];
-				}
-				if (spaceFilter.tags) {
-					filterTags = [...(filterTags ?? []), ...spaceFilter.tags];
-				}
+			if (spaceScope.searchFilter.tags) {
+				filterTags = filterTags
+					? [...filterTags, ...spaceScope.searchFilter.tags]
+					: [...spaceScope.searchFilter.tags];
 			}
 		}
 
@@ -394,17 +376,11 @@ export function createSearchNotesTool(app: App) {
 				.describe(
 					"Optional tags to filter by (e.g., ['#project', '#active']). Documents must have at least one of these tags.",
 				),
-			region: z
-				.string()
-				.optional()
-				.describe(
-					"Optional Region name to restrict search to. A Region is a user-defined, named note set (e.g., 'Machine Learning', 'Work Projects'). When omitted, the current working region is auto-applied. The region's filter is resolved and merged with any other filter parameters.",
-				),
 			recentOnly: z
 				.boolean()
 				.optional()
 				.describe(
-					"When true, ignore query text and return recently opened notes, optionally filtered by pathPrefix, tags, and region.",
+					"When true, ignore query text and return recently opened notes, optionally filtered by pathPrefix and tags.",
 				),
 		}),
 	});

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { isPathInFolder, normalizeFolderPrefix, normalizeVaultPath } from "../../utils/pathUtils";
+import { resolveCurrentSpaceScope } from "./spaceScope";
 
 interface DirectoryTreeFileEntry {
 	name: string;
@@ -39,6 +40,7 @@ interface DirectoryScanOptions {
 	includeFolders: boolean;
 	currentProvider?: string;
 	store: ReturnType<typeof getPendingChangesStore>;
+	spaceScope: import("./spaceScope").SpaceScope;
 }
 
 interface DirectoryScanResult {
@@ -48,7 +50,12 @@ interface DirectoryScanResult {
 }
 
 const listDirectorySchema = z.object({
-	path: z.string().optional().describe("Optional vault-relative folder path. Omit to list from vault root."),
+	path: z
+		.string()
+		.optional()
+		.describe(
+			"Optional vault-relative folder path to list (e.g. 'Projects/research'). Omit to list from the Space root (or vault root if no Space is active). Do NOT pass a Space name here — Space scoping is applied automatically.",
+		),
 	recursive: z
 		.boolean()
 		.optional()
@@ -183,9 +190,11 @@ function isDirectoryFileVisible(
 	filePath: string,
 	rootPath: string,
 	store: DirectoryScanOptions["store"],
+	spaceScope: DirectoryScanOptions["spaceScope"],
 	currentProvider?: string,
 ): "include" | "skip" | "private" {
 	if (!isPathInFolder(filePath, rootPath)) return "skip";
+	if (!spaceScope.isPathAllowed(filePath)) return "skip";
 	if (!store.isPathAllowed(filePath)) return "skip";
 	if (currentProvider && store.shouldBlockFile(filePath, currentProvider)) return "private";
 	return "include";
@@ -237,7 +246,13 @@ function collectDirectoryEntries(app: App, options: DirectoryScanOptions): Direc
 	};
 
 	for (const file of app.vault.getFiles()) {
-		const visibility = isDirectoryFileVisible(file.path, options.rootPath, options.store, options.currentProvider);
+		const visibility = isDirectoryFileVisible(
+			file.path,
+			options.rootPath,
+			options.store,
+			options.spaceScope,
+			options.currentProvider,
+		);
 		if (visibility === "skip") continue;
 		if (visibility === "private") {
 			result.skippedPrivateFiles++;
@@ -252,7 +267,7 @@ function collectDirectoryEntries(app: App, options: DirectoryScanOptions): Direc
 
 function buildDirectoryListResult(
 	requestedPath: string,
-	options: Omit<DirectoryScanOptions, "store" | "currentProvider">,
+	options: Omit<DirectoryScanOptions, "store" | "currentProvider" | "spaceScope">,
 	scanResult: DirectoryScanResult,
 ): DirectoryListResult {
 	const sortedFolders = options.includeFolders
@@ -278,14 +293,57 @@ export function createListDirectoryTool(app: App) {
 
 	return tool(
 		async ({ path, recursive, maxDepth, includeFiles = true, includeFolders = true }: ListDirectoryInput) => {
-			const effectiveRecursive = recursive ?? maxDepth !== undefined;
+			let effectiveRecursive = recursive ?? maxDepth !== undefined;
 			const effectiveMaxDepth = maxDepth ?? 3;
-			const rootPath = normalizeVaultPath(path ?? "");
+
+			// Enforce active-space boundary
+			const spaceScope = resolveCurrentSpaceScope(app);
+
+			// When no path is specified and a space is active, adjust defaults
+			// so the listing is immediately useful:
+			// - Single folder prefix: auto-root into that folder
+			// - Multiple prefixes or tag-based: enable recursive listing
+			let rootPath = normalizeVaultPath(path ?? "");
+			if (!path && spaceScope.searchFilter) {
+				if (spaceScope.searchFilter.pathPrefixes?.length === 1) {
+					rootPath = normalizeVaultPath(spaceScope.searchFilter.pathPrefixes[0]);
+				} else if (!effectiveRecursive) {
+					effectiveRecursive = true;
+				}
+			}
 			const requestedPath = rootPath || "/";
 			const rootEntity = rootPath ? app.vault.getAbstractFileByPath(rootPath) : null;
 
 			if (rootEntity && "extension" in rootEntity) {
 				return `Error: "${requestedPath}" is a file, not a folder. Use read_content for file contents.`;
+			}
+
+			// Check if the requested path exists as a folder in the vault.
+			// In Obsidian, folders may not have explicit entities, so also check
+			// if any file has this as a path prefix.
+			if (rootPath && !rootEntity) {
+				const folderPrefix = normalizeFolderPrefix(rootPath);
+				const hasChildren = app.vault.getFiles().some((f) => f.path.startsWith(folderPrefix));
+				if (!hasChildren) {
+					return `Error: The folder "${requestedPath}" does not exist in the vault.`;
+				}
+			}
+
+			// Check if the requested path falls outside the active Space
+			if (rootPath && spaceScope.searchFilter) {
+				const folderPrefix = normalizeFolderPrefix(rootPath);
+				const containsSpaceContent = spaceScope.searchFilter.pathPrefixes?.some(
+					(p) => p.startsWith(folderPrefix) || folderPrefix.startsWith(normalizeFolderPrefix(p)),
+				);
+				// For tag-based spaces without path prefixes, check if any allowed file is under this folder
+				const hasAllowedFiles =
+					containsSpaceContent ??
+					app.vault
+						.getFiles()
+						.some((f) => f.path.startsWith(folderPrefix) && spaceScope.isPathAllowed(f.path));
+				if (!hasAllowedFiles) {
+					return `Error: The folder "${requestedPath}" is outside the active Space (${spaceScope.label}). Only paths within the Space are accessible.`;
+				}
 			}
 
 			const store = getPendingChangesStore();
@@ -298,6 +356,7 @@ export function createListDirectoryTool(app: App) {
 				includeFolders,
 				currentProvider,
 				store,
+				spaceScope,
 			};
 			const scanResult = collectDirectoryEntries(app, scanOptions);
 			const result = buildDirectoryListResult(

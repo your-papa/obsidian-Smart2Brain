@@ -1,121 +1,112 @@
 <script lang="ts">
-  import { Notice, type TFolder } from "obsidian";
-  import { AgentEditorModal } from "../../components/modal/AgentEditorModal";
-  import FolderSuggest from "../../components/modal/FolderSuggest.svelte";
-  import ManagedEntityItem from "../../components/settings/ManagedEntityItem.svelte";
-  import ManagedEntitySection from "../../components/settings/ManagedEntitySection.svelte";
-  import SettingGroup from "../../components/settings/SettingGroup.svelte";
-  import SettingItem from "../../components/settings/SettingItem.svelte";
-  import Badge from "../../components/ui/Badge.svelte";
-  import Button from "../../components/ui/Button.svelte";
-  import { confirmDelete } from "../../components/modal/ConfirmModal";
-  import Dropdown from "../../components/ui/Dropdown.svelte";
-  import Icon from "../../components/ui/Icon.svelte";
-  import { getProviderDefinition } from "../../providers/index";
-  import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { DEFAULT_AGENT_ICON, type ChatOpenLocation } from "../../types/plugin";
+import { Notice, type TFolder } from "obsidian";
+import { AgentEditorModal } from "../../components/modal/AgentEditorModal";
+import FolderSuggest from "../../components/modal/FolderSuggest.svelte";
+import ManagedEntityItem from "../../components/settings/ManagedEntityItem.svelte";
+import ManagedEntitySection from "../../components/settings/ManagedEntitySection.svelte";
+import SettingGroup from "../../components/settings/SettingGroup.svelte";
+import SettingItem from "../../components/settings/SettingItem.svelte";
+import Badge from "../../components/ui/Badge.svelte";
+import Button from "../../components/ui/Button.svelte";
+import { confirmDelete } from "../../components/modal/ConfirmModal";
+import Dropdown from "../../components/ui/Dropdown.svelte";
+import Icon from "../../components/ui/Icon.svelte";
+import { getProviderDefinition } from "../../providers/index";
+import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { DEFAULT_AGENT_ICON, type ChatOpenLocation } from "../../types/plugin";
 
-  const pluginData = getData();
-  const plugin = getPlugin();
+const pluginData = getData();
+const plugin = getPlugin();
 
-  const chatOpenLocationOptions: { display: string; value: ChatOpenLocation }[] = [
-    { display: "Main area (tab)", value: "tab" },
-    { display: "Left sidebar", value: "left" },
-    { display: "Right sidebar", value: "right" },
-  ];
+const chatOpenLocationOptions: { display: string; value: ChatOpenLocation }[] = [
+	{ display: "Main area (tab)", value: "tab" },
+	{ display: "Left sidebar", value: "left" },
+	{ display: "Right sidebar", value: "right" },
+];
 
-  function suggestFolders(): TFolder[] {
-    return plugin.app.vault.getAllFolders(true);
-  }
+function suggestFolders(): TFolder[] {
+	return plugin.app.vault.getAllFolders(true);
+}
 
-  let agents = $derived(pluginData.agents);
-  let agentIds = $derived(Object.keys(agents));
+let agents = $derived(pluginData.agents);
+let agentIds = $derived(Object.keys(agents));
 
-  async function applyChanges() {
-    await plugin.agentManager.reinitialize();
-  }
+async function applyChanges() {
+	await plugin.agentManager.reinitialize();
+}
 
-  function openAgentEditor(agentId: string) {
-    new AgentEditorModal(plugin, agentId).open();
-  }
+function openAgentEditor(agentId: string) {
+	new AgentEditorModal(plugin, agentId).open();
+}
 
-  function createNewAgent() {
-    const agent = pluginData.createAgent("New Agent");
-    pluginData.selectedAgentId = agent.id;
-    openAgentEditor(agent.id);
-  }
+function createNewAgent() {
+	const agent = pluginData.createAgent("New Agent");
+	pluginData.selectedAgentId = agent.id;
+	openAgentEditor(agent.id);
+}
 
-  function duplicateAgent(agentId: string) {
-    const sourceAgent = agents[agentId];
-    if (!sourceAgent) return;
-    const duplicated = pluginData.duplicateAgent(agentId, `${sourceAgent.name} (Copy)`);
-    pluginData.selectedAgentId = duplicated.id;
-    openAgentEditor(duplicated.id);
-  }
+function duplicateAgent(agentId: string) {
+	const sourceAgent = agents[agentId];
+	if (!sourceAgent) return;
+	const duplicated = pluginData.duplicateAgent(agentId, `${sourceAgent.name} (Copy)`);
+	pluginData.selectedAgentId = duplicated.id;
+	openAgentEditor(duplicated.id);
+}
 
-  async function deleteAgent(agentId: string) {
-    if (agentId === DEFAULT_AGENT_ID) {
-      new Notice("Cannot delete the built-in default agent");
-      return;
-    }
-    const agent = agents[agentId];
-    if (!(await confirmDelete(plugin.app, agent?.name ?? agentId))) return;
-    try {
-      pluginData.deleteAgent(agentId);
-      void applyChanges();
-    } catch (error) {
-      new Notice(error instanceof Error ? error.message : "Failed to delete agent");
-    }
-  }
+async function deleteAgent(agentId: string) {
+	if (agentId === DEFAULT_AGENT_ID) {
+		new Notice("Cannot delete the built-in default agent");
+		return;
+	}
+	const agent = agents[agentId];
+	if (!(await confirmDelete(plugin.app, agent?.name ?? agentId))) return;
+	try {
+		pluginData.deleteAgent(agentId);
+		void applyChanges();
+	} catch (error) {
+		new Notice(error instanceof Error ? error.message : "Failed to delete agent");
+	}
+}
 
-  function toggleDefaultAgent(agentId: string) {
-    if (pluginData.defaultAgentId === agentId) {
-      pluginData.clearDefaultAgent();
-      return;
-    }
-    pluginData.setDefaultAgentId(agentId);
-  }
+function toggleDefaultAgent(agentId: string) {
+	if (pluginData.defaultAgentId === agentId) {
+		pluginData.clearDefaultAgent();
+		return;
+	}
+	pluginData.setDefaultAgentId(agentId);
+}
 
-  function getAgentModelSummary(agentId: string): string {
-    const agent = agents[agentId];
-    if (!agent?.chatModel) {
-      return "No chat model selected";
-    }
-    const providerDef = getProviderDefinition(
-      agent.chatModel.provider,
-      pluginData.getAllProviderMeta(),
-    );
-    return `${providerDef?.displayName ?? agent.chatModel.provider} · ${agent.chatModel.model}`;
-  }
+function getAgentModelSummary(agentId: string): string {
+	const agent = agents[agentId];
+	if (!agent?.chatModel) {
+		return "No chat model selected";
+	}
+	const providerDef = getProviderDefinition(agent.chatModel.provider, pluginData.getAllProviderMeta());
+	return `${providerDef?.displayName ?? agent.chatModel.provider} · ${agent.chatModel.model}`;
+}
 
-  function getAgentSecondarySummary(agentId: string): string {
-    const agent = agents[agentId];
-    if (!agent) return "";
-    const discoveredSkills = plugin.skillsService?.getCachedSkills() ?? new Map();
-    const enabledSkills = discoveredSkills.size
-      ? Array.from(discoveredSkills.entries()).filter(([skillId, metadata]) => {
-          if (agent.skills[skillId]?.enabled === false) {
-            return false;
-          }
-          if (
-            metadata.linkedPluginId &&
-            !plugin.agentManager?.isPluginEnabled(metadata.linkedPluginId)
-          ) {
-            return false;
-          }
-          if (
-            metadata.corePluginId &&
-            !plugin.agentManager?.isInternalPluginEnabled(metadata.corePluginId)
-          ) {
-            return false;
-          }
-          return true;
-        }).length
-      : Object.values(agent.skills).filter((entry) => entry.enabled).length;
-    const enabledServers = Object.values(agent.mcpServers).filter((entry) => entry.enabled).length;
-    return `${enabledSkills} skills enabled · ${enabledServers} MCP servers enabled`;
-  }
+function getAgentSecondarySummary(agentId: string): string {
+	const agent = agents[agentId];
+	if (!agent) return "";
+	const discoveredSkills = plugin.skillsService?.getCachedSkills() ?? new Map();
+	const enabledSkills = discoveredSkills.size
+		? Array.from(discoveredSkills.entries()).filter(([skillId, metadata]) => {
+				if (agent.skills[skillId]?.enabled === false) {
+					return false;
+				}
+				if (metadata.linkedPluginId && !plugin.agentManager?.isPluginEnabled(metadata.linkedPluginId)) {
+					return false;
+				}
+				if (metadata.corePluginId && !plugin.agentManager?.isInternalPluginEnabled(metadata.corePluginId)) {
+					return false;
+				}
+				return true;
+			}).length
+		: Object.values(agent.skills).filter((entry) => entry.enabled).length;
+	const enabledServers = Object.values(agent.mcpServers).filter((entry) => entry.enabled).length;
+	return `${enabledSkills} skills enabled · ${enabledServers} MCP servers enabled`;
+}
 </script>
 
 <div class="agents-settings">

@@ -16,7 +16,7 @@ import type { SearchFilter } from "../vectorstore/types";
 /**
  * Pre-compiled representation of a `SearchFilter` for efficient repeated use.
  *
- * When a filter contains many path prefixes (e.g. from a complex Region that
+ * When a filter contains many path prefixes (e.g. from a complex Space that
  * resolved to individual file paths), a `Set` is built for O(1) exact-path
  * lookups.  Short prefix lists (<= EXACT_SET_THRESHOLD) skip this step and
  * use the original linear scan, which handles folder-prefix matching.

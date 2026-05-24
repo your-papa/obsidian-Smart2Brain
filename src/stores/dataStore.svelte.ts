@@ -212,7 +212,8 @@ export function getReadContentGuidance(hasImageProcessor: boolean, hasPdfProcess
 
 // --- read_content tool description variants ---
 
-const READ_CONTENT_DESC_SHARED = "Read content of vault files by path or wiki link.";
+const READ_CONTENT_DESC_SHARED =
+	"Read content of vault files by path or wiki link. When an active Space is set, only files within that Space can be read.";
 
 /** No processors: images can't be read */
 export const READ_CONTENT_DESC_NONE = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs, and Excalidraw. Images must be attached directly in chat.`;
@@ -253,7 +254,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "search_notes",
 		description:
-			"Search through your Obsidian notes by keyword. Returns structured JSON with matching note names plus optional paths, tags, match badges, and short match snippets depending on settings. Use this to identify relevant notes before reading them.",
+			"Search through your Obsidian notes by keyword. Returns structured JSON with matching note names plus optional paths, tags, match badges, and short match snippets depending on settings. Use this to identify relevant notes before reading them. When an active Space is set, results are automatically scoped to that Space.",
 		settings: {
 			maxResults: 10,
 			algorithm: "lexical" as SearchAlgorithm,
@@ -263,7 +264,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "list_directory",
 		description:
-			"List directories and files in the vault. Use this to understand folder structure before searching or editing notes.",
+			"List directories and files in the vault. Use this to understand folder structure before searching or editing notes. When an active Space is set, only files within that Space are listed. The 'path' parameter must be an actual vault folder path (e.g. 'Projects/research') — do NOT pass a Space name as the path.",
 	},
 	read_content: {
 		enabled: true,
@@ -277,13 +278,14 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 	get_all_tags: {
 		enabled: true,
 		name: "get_all_tags",
-		description: "Retrieve a list of all tags used in the Obsidian vault. Returns a sorted list of unique tags.",
+		description:
+			"Retrieve a list of all tags used in the Obsidian vault. Returns a sorted list of unique tags. When an active Space is set, only tags from files within that Space are returned.",
 	},
 	get_properties: {
 		enabled: true,
 		name: "get_properties",
 		description:
-			"Retrieve properties (frontmatter) from Obsidian. Omit 'note_name' to list all available property keys in the vault.",
+			"Retrieve properties (frontmatter) from Obsidian. Omit 'note_name' to list all available property keys in the vault. When an active Space is set, only properties from files within that Space are returned.",
 	},
 	execute_javascript: {
 		enabled: true,
@@ -297,7 +299,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "execute_dataview_query",
 		description:
-			"Execute an Obsidian Dataview query (DQL) and return the results in Markdown format. Use this to query notes, metadata, tags, and more using the Dataview Query Language.",
+			"Execute an Obsidian Dataview query (DQL) and return the results in Markdown format. Use this to query notes, metadata, tags, and more using the Dataview Query Language. Note: Dataview queries run against the entire vault — use FROM clauses to narrow scope when a Space is active.",
 		settings: {
 			includeMetadata: true,
 		},
@@ -306,7 +308,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "manage_notes",
 		description:
-			"Create, update, delete, or move markdown notes in one staged batch. Use targeted search-and-replace edits for updates and batch related note operations together.",
+			"Create, update, delete, or move markdown notes in one staged batch. Use targeted search-and-replace edits for updates and batch related note operations together. When an active Space is set, only files within that Space can be targeted.",
 		settings: {
 			allowCreate: true,
 			allowUpdate: true,

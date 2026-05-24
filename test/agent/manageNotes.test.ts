@@ -28,6 +28,14 @@ vi.mock("../../src/agent/tools/runContext", () => ({
 	getCurrentThreadId: () => "test-thread-id",
 }));
 
+vi.mock("../../src/agent/tools/spaceScope", () => ({
+	resolveCurrentSpaceScope: () => ({
+		searchFilter: undefined,
+		isPathAllowed: () => true,
+		label: "entire vault",
+	}),
+}));
+
 const mockResolveVaultFileDetailed = vi.fn();
 vi.mock("../../src/utils/attachments", () => ({
 	resolveVaultFileDetailed: (...args: unknown[]) => mockResolveVaultFileDetailed(...args),

@@ -51,7 +51,7 @@ import { createListDirectoryTool } from "./tools/listDirectory";
 import { createManageNotesTool } from "./tools/manageNotes";
 import { createReadContentTool } from "./tools/readContent";
 import { createSearchNotesTool } from "./tools/searchNotes";
-import { setCurrentThreadId } from "./tools/runContext";
+import { setCurrentThreadId, setCurrentSpaces } from "./tools/runContext";
 
 import { getRegistry } from "../providers/registry";
 
@@ -874,6 +874,36 @@ export class AgentManager {
 		}
 	}
 
+	/**
+	 * Resolve space labels (from the UI) or the persisted immersion state
+	 * into concrete Space objects for the current agent run.
+	 * Returns null when no space restriction is active.
+	 */
+	private resolveRunSpaces(spaceLabels?: string[]): import("../types/graph").Space[] | null {
+		const pluginData = getData();
+
+		// Prefer explicit labels passed from the chat UI
+		if (spaceLabels?.length) {
+			const resolved = spaceLabels
+				.map((label) => pluginData.getSpaceByLabel(label))
+				.filter((s): s is import("../types/graph").Space => s != null);
+			return resolved.length > 0 ? resolved : null;
+		}
+
+		// Fall back to persisted immersion state
+		if (pluginData.spaceImmersionMode === "per-surface" && pluginData.chatSpaceId) {
+			const space = pluginData.spaces.find((s) => s.id === pluginData.chatSpaceId);
+			if (space) return [space];
+		}
+
+		if (pluginData.activeImmersedSpaceId) {
+			const space = pluginData.spaces.find((s) => s.id === pluginData.activeImmersedSpaceId);
+			if (space) return [space];
+		}
+
+		return null;
+	}
+
 	private async prepareAgentForStream(): Promise<{
 		agent: Agent;
 		chatModel: ChatModel;
@@ -909,6 +939,7 @@ export class AgentManager {
 		spaces?: string[],
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		setCurrentThreadId(threadId);
+		setCurrentSpaces(this.resolveRunSpaces(spaces));
 		try {
 			const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
 
@@ -932,6 +963,7 @@ export class AgentManager {
 			);
 		} finally {
 			setCurrentThreadId(null);
+			setCurrentSpaces(null);
 		}
 	}
 
@@ -947,6 +979,7 @@ export class AgentManager {
 		attachments?: ChatAttachment[],
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		setCurrentThreadId(threadId);
+		setCurrentSpaces(this.resolveRunSpaces());
 		try {
 			const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
 
@@ -965,6 +998,7 @@ export class AgentManager {
 			);
 		} finally {
 			setCurrentThreadId(null);
+			setCurrentSpaces(null);
 		}
 	}
 
@@ -978,6 +1012,7 @@ export class AgentManager {
 		signal?: AbortSignal,
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		setCurrentThreadId(threadId);
+		setCurrentSpaces(this.resolveRunSpaces());
 		try {
 			const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
 
@@ -994,6 +1029,7 @@ export class AgentManager {
 			);
 		} finally {
 			setCurrentThreadId(null);
+			setCurrentSpaces(null);
 		}
 	}
 

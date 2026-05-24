@@ -66,6 +66,18 @@ vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 	}),
 }));
 
+vi.mock("../../src/agent/tools/spaceScope", () => ({
+	resolveCurrentSpaceScope: () => ({
+		searchFilter: undefined,
+		isPathAllowed: () => true,
+		label: "entire vault",
+	}),
+}));
+
+vi.mock("../../src/agent/tools/runContext", () => ({
+	getCurrentSpaces: () => null,
+}));
+
 import type { App } from "obsidian";
 import { createSearchNotesTool, performSearch } from "../../src/agent/tools/searchNotes";
 

@@ -8,7 +8,7 @@ import {
 	type SmartGraphSettings,
 	type SegmentBy,
 	type GraphData,
-	type RegionSegment,
+	type SpaceSegment,
 	DEFAULT_SMART_GRAPH_SETTINGS,
 } from "../../types/graph";
 
@@ -32,7 +32,7 @@ interface Props {
 	// Spaces
 	immersedSpaceId: string | null;
 	// Segments
-	segments?: RegionSegment[];
+	segments?: SpaceSegment[];
 	focusedSegmentId?: string | null;
 	onFocusSegment?: (id: string | null) => void;
 }
@@ -147,7 +147,7 @@ function handleResetSettings() {
 
 const colorByOptions = [
 	{ display: "None", value: "none" as SegmentBy },
-	{ display: "Spaces", value: "regions" as SegmentBy },
+	{ display: "Spaces", value: "spaces" as SegmentBy },
 	{ display: "Similarity", value: "semantic" as SegmentBy },
 	{ display: "Link Communities", value: "louvain" as SegmentBy },
 	{ display: "Folder", value: "folder" as SegmentBy },
