@@ -88,13 +88,13 @@ export type AuthValidationResult = { success: true } | { success: false; message
 export type AgentManagerStreamChunk =
 	| { type: "token"; token: string }
 	| Pick<
-			Extract<AgentStreamChunk, { type: "tool_start" }>,
-			"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
-	  >
+		Extract<AgentStreamChunk, { type: "tool_start" }>,
+		"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
+	>
 	| Pick<
-			Extract<AgentStreamChunk, { type: "tool_end" }>,
-			"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
-	  >
+		Extract<AgentStreamChunk, { type: "tool_end" }>,
+		"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
+	>
 	| { type: "result"; result: unknown };
 
 const resolvedVisionSupportCache = new Map<string, boolean>();
@@ -887,7 +887,13 @@ export class AgentManager {
 			const resolved = spaceLabels
 				.map((label) => pluginData.getSpaceByLabel(label))
 				.filter((s): s is import("../types/graph").Space => s != null);
-			return resolved.length > 0 ? resolved : null;
+			if (resolved.length > 0) return resolved;
+			// All labels failed to resolve (space renamed/deleted) — log and
+			// fall through to immersion-state so the agent is never silently
+			// unrestricted when the user intended a space boundary.
+			Logger.warn(
+				`[AgentManager] None of the requested space labels could be resolved: ${spaceLabels.join(", ")}. Falling back to immersion state.`,
+			);
 		}
 
 		// Fall back to persisted immersion state
