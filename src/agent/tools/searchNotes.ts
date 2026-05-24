@@ -13,7 +13,7 @@ import {
 import { calculateAliasBoost, calculateTitleBoost } from "../../search/searchRanking";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
-import { normalizeVaultPath } from "../../utils/pathUtils";
+import { matchesPathPrefix, normalizeVaultPath } from "../../utils/pathUtils";
 import { getVectorStoreService, type SearchFilter, type SearchResult, waitForVectorStore } from "../../vectorstore";
 import type { SearchMatchBadge, SearchMatchExplanation } from "../../vectorstore/types";
 import { Logger } from "../../utils/logging";
@@ -284,26 +284,45 @@ export function createSearchNotesTool(app: App) {
 		// Resolve space scope from runtime context (set by AgentManager)
 		const spaceScope = resolveCurrentSpaceScope(app);
 
-		// Merge the runtime space scope filter (hard scope)
+		// Apply the runtime space scope filter as a hard boundary.
+		// The space filter REPLACES any agent-supplied prefix/tag that falls
+		// outside the space (intersection, not union).
 		if (spaceScope.searchFilter) {
 			if (spaceScope.searchFilter.pathPrefixes) {
-				filterPathPrefixes = filterPathPrefixes
-					? [...filterPathPrefixes, ...spaceScope.searchFilter.pathPrefixes]
-					: [...spaceScope.searchFilter.pathPrefixes];
+				if (filterPathPrefixes) {
+					// Keep only agent-supplied prefixes that are within the space
+					const spacePrefs = spaceScope.searchFilter.pathPrefixes;
+					const validPrefixes = filterPathPrefixes.filter((agentPrefix) =>
+						spacePrefs.some(
+							(sp) => matchesPathPrefix(agentPrefix, sp) || matchesPathPrefix(sp, agentPrefix),
+						),
+					);
+					filterPathPrefixes = validPrefixes.length > 0 ? validPrefixes : [...spacePrefs];
+				} else {
+					filterPathPrefixes = [...spaceScope.searchFilter.pathPrefixes];
+				}
 			}
 			if (spaceScope.searchFilter.tags) {
-				filterTags = filterTags
-					? [...filterTags, ...spaceScope.searchFilter.tags]
-					: [...spaceScope.searchFilter.tags];
+				if (filterTags) {
+					// Keep only agent-supplied tags that are within the space's tag set
+					const spaceTags = spaceScope.searchFilter.tags.map((t) => (t.startsWith("#") ? t : `#${t}`));
+					const validTags = filterTags.filter((agentTag) => {
+						const normalized = agentTag.startsWith("#") ? agentTag : `#${agentTag}`;
+						return spaceTags.some((st) => normalized === st || normalized.startsWith(`${st}/`));
+					});
+					filterTags = validTags.length > 0 ? validTags : [...spaceScope.searchFilter.tags];
+				} else {
+					filterTags = [...spaceScope.searchFilter.tags];
+				}
 			}
 		}
 
 		const filter: SearchFilter | undefined =
 			filterPathPrefixes || filterTags
 				? {
-						pathPrefixes: filterPathPrefixes,
-						tags: filterTags,
-					}
+					pathPrefixes: filterPathPrefixes,
+					tags: filterTags,
+				}
 				: undefined;
 
 		Logger.debug("[search_notes] Configured settings:", {

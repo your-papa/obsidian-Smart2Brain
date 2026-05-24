@@ -112,6 +112,7 @@ function unrestrictedScope(): SpaceScope {
     return {
         searchFilter: undefined,
         isPathAllowed: () => true,
+        isWritePathAllowed: () => true,
         label: "entire vault",
     };
 }
@@ -120,6 +121,7 @@ function spaceScopedTo(...prefixes: string[]): SpaceScope {
     return {
         searchFilter: { pathPrefixes: prefixes },
         isPathAllowed: (path: string) => prefixes.some((p) => path === p || path.startsWith(`${p}/`)),
+        isWritePathAllowed: (path: string) => prefixes.some((p) => path === p || path.startsWith(`${p}/`)),
         label: prefixes.join(", "),
     };
 }

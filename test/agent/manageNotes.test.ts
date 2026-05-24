@@ -32,6 +32,7 @@ vi.mock("../../src/agent/tools/spaceScope", () => ({
 	resolveCurrentSpaceScope: () => ({
 		searchFilter: undefined,
 		isPathAllowed: () => true,
+		isWritePathAllowed: () => true,
 		label: "entire vault",
 	}),
 }));

@@ -234,7 +234,7 @@ export function createManageNotesTool(app: App) {
 					}
 
 					// Active-space boundary check
-					if (!spaceScope.isPathAllowed(normalizedPath)) {
+					if (!spaceScope.isWritePathAllowed(normalizedPath)) {
 						return `Error in operation ${operationNumber}: The path "${normalizedPath}" is outside the active space [${spaceScope.label}]. Only files within the active space can be created.`;
 					}
 
@@ -342,7 +342,7 @@ export function createManageNotesTool(app: App) {
 				if (destinationDuplicateError) return destinationDuplicateError;
 
 				// Active-space boundary check for move destination
-				if (!spaceScope.isPathAllowed(normalizedNewPath)) {
+				if (!spaceScope.isWritePathAllowed(normalizedNewPath)) {
 					return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is outside the active space [${spaceScope.label}]. Only paths within the active space can be targeted.`;
 				}
 
