@@ -1,51 +1,51 @@
 <script lang="ts">
-  import { Popover } from "bits-ui";
-  import type { Snippet } from "svelte";
-  import Button from "./Button.svelte";
+import { Popover } from "bits-ui";
+import type { Snippet } from "svelte";
+import Button from "./Button.svelte";
 
-  type PopoverSide = "top" | "right" | "bottom" | "left";
-  type PopoverAlign = "start" | "center" | "end";
+type PopoverSide = "top" | "right" | "bottom" | "left";
+type PopoverAlign = "start" | "center" | "end";
 
-  interface Props {
-    open?: boolean;
-    element?: HTMLButtonElement | undefined;
-    onTriggerClick?: () => void;
-    tooltip?: string;
-    dataTestId?: string;
-    triggerStyles?: string;
-    triggerClass?: string;
-    contentClass?: string;
-    side?: PopoverSide;
-    align?: PopoverAlign;
-    sideOffset?: number;
-    trigger: Snippet<[boolean]>;
-    children?: Snippet;
-  }
+interface Props {
+	open?: boolean;
+	element?: HTMLButtonElement | undefined;
+	onTriggerClick?: () => void;
+	tooltip?: string;
+	dataTestId?: string;
+	triggerStyles?: string;
+	triggerClass?: string;
+	contentClass?: string;
+	side?: PopoverSide;
+	align?: PopoverAlign;
+	sideOffset?: number;
+	trigger: Snippet<[boolean]>;
+	children?: Snippet;
+}
 
-  let {
-    open = $bindable(false),
-    element = $bindable(undefined),
-    onTriggerClick,
-    tooltip = undefined,
-    dataTestId = undefined,
-    triggerStyles = "picker-popover-trigger",
-    triggerClass = "",
-    contentClass = "",
-    side = "bottom",
-    align = "start",
-    sideOffset = 6,
-    trigger,
-    children,
-  }: Props = $props();
+let {
+	open = $bindable(false),
+	element = $bindable(undefined),
+	onTriggerClick,
+	tooltip = undefined,
+	dataTestId = undefined,
+	triggerStyles = "picker-popover-trigger",
+	triggerClass = "",
+	contentClass = "",
+	side = "bottom",
+	align = "start",
+	sideOffset = 6,
+	trigger,
+	children,
+}: Props = $props();
 
-  function handleTriggerClick() {
-    if (onTriggerClick) {
-      onTriggerClick();
-      return;
-    }
+function handleTriggerClick() {
+	if (onTriggerClick) {
+		onTriggerClick();
+		return;
+	}
 
-    open = !open;
-  }
+	open = !open;
+}
 </script>
 
 <Button

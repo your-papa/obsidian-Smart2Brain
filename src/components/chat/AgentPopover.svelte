@@ -1,60 +1,60 @@
 <script lang="ts">
-  import { DEFAULT_AGENT_ICON, type AgentConfig } from "../../types/plugin";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { Logger } from "../../utils/logging";
-  import Icon from "../ui/Icon.svelte";
-  import { chatHistoryContainsPrivateNotes, getMessenger } from "../../stores/chatStore.svelte";
-  import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
-  import { AgentEditorModal } from "../modal/AgentEditorModal";
-  import Button from "../ui/Button.svelte";
-  import PickerPopover from "../ui/PickerPopover.svelte";
-  import PickerOptionRow from "../ui/PickerOptionRow.svelte";
+import { DEFAULT_AGENT_ICON, type AgentConfig } from "../../types/plugin";
+import { getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { Logger } from "../../utils/logging";
+import Icon from "../ui/Icon.svelte";
+import { chatHistoryContainsPrivateNotes, getMessenger } from "../../stores/chatStore.svelte";
+import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
+import { AgentEditorModal } from "../modal/AgentEditorModal";
+import Button from "../ui/Button.svelte";
+import PickerPopover from "../ui/PickerPopover.svelte";
+import PickerOptionRow from "../ui/PickerOptionRow.svelte";
 
-  const data = getData();
-  const plugin = getPlugin();
+const data = getData();
+const plugin = getPlugin();
 
-  // Get all agents reactively
-  const agents = $derived(Object.values(data.agents));
+// Get all agents reactively
+const agents = $derived(Object.values(data.agents));
 
-  // Get currently selected agent
-  const selectedAgent = $derived(data.getSelectedAgent());
+// Get currently selected agent
+const selectedAgent = $derived(data.getSelectedAgent());
 
-  let isOpen = $state(false);
-  let customAnchor: HTMLButtonElement | undefined = $state();
+let isOpen = $state(false);
+let customAnchor: HTMLButtonElement | undefined = $state();
 
-  function getAgentIcon(agent: Pick<AgentConfig, "icon"> | null | undefined): string {
-    return agent?.icon?.trim() || DEFAULT_AGENT_ICON;
-  }
+function getAgentIcon(agent: Pick<AgentConfig, "icon"> | null | undefined): string {
+	return agent?.icon?.trim() || DEFAULT_AGENT_ICON;
+}
 
-  async function selectAgent(agent: AgentConfig) {
-    // Check if the agent's provider is non-trusted and chat has private notes
-    const newProvider = agent.chatModel?.provider;
-    if (newProvider && !data.isProviderTrusted(newProvider)) {
-      const messages = getMessenger()?.session?.messages;
-      if (messages && chatHistoryContainsPrivateNotes(messages)) {
-        const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
-        if (!confirmed) return;
-      }
-    }
-    data.selectedAgentId = agent.id;
-    isOpen = false;
-    // Reinitialize the agent with the new config
-    plugin.agentManager?.reinitialize().catch((error) => {
-      Logger.error("Failed to switch agent:", error);
-    });
-  }
+async function selectAgent(agent: AgentConfig) {
+	// Check if the agent's provider is non-trusted and chat has private notes
+	const newProvider = agent.chatModel?.provider;
+	if (newProvider && !data.isProviderTrusted(newProvider)) {
+		const messages = getMessenger()?.session?.messages;
+		if (messages && chatHistoryContainsPrivateNotes(messages)) {
+			const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
+			if (!confirmed) return;
+		}
+	}
+	data.selectedAgentId = agent.id;
+	isOpen = false;
+	// Reinitialize the agent with the new config
+	plugin.agentManager?.reinitialize().catch((error) => {
+		Logger.error("Failed to switch agent:", error);
+	});
+}
 
-  function openAgentEditor(agentId: string) {
-    isOpen = false;
-    new AgentEditorModal(plugin, agentId).open();
-  }
+function openAgentEditor(agentId: string) {
+	isOpen = false;
+	new AgentEditorModal(plugin, agentId).open();
+}
 
-  function createNewAgent() {
-    const agent = data.createAgent("New Agent");
-    data.selectedAgentId = agent.id;
-    openAgentEditor(agent.id);
-  }
+function createNewAgent() {
+	const agent = data.createAgent("New Agent");
+	data.selectedAgentId = agent.id;
+	openAgentEditor(agent.id);
+}
 </script>
 
 {#if agents.length === 0}

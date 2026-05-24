@@ -44,6 +44,17 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 // Mock runContext
 vi.mock("../../src/agent/tools/runContext", () => ({
 	getCurrentThreadId: () => "test-thread-id",
+	getCurrentSpaces: () => null,
+}));
+
+// Mock spaceScope
+vi.mock("../../src/agent/tools/spaceScope", () => ({
+	resolveCurrentSpaceScope: () => ({
+		searchFilter: undefined,
+		isPathAllowed: () => true,
+		isWritePathAllowed: () => true,
+		label: "entire vault",
+	}),
 }));
 
 // Mock uuid
