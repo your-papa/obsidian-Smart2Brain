@@ -36,11 +36,11 @@ export function documentsKey(indexId: string | null, documentCount: number): str
 /**
  * Deterministic key for the filtered-documents layer.
  * Includes the raw-vector key plus the active folder/tag filters and optional
- * region/drill-in path constraint.
+ * space/drill-in path constraint.
  *
- * IMPORTANT: The 5th `drillPaths` parameter MUST be passed when a region
- * constraint is active (region-detail view). Omitting it causes incorrect
- * cache hits — vault-view and region-detail-view would share the same cache
+ * IMPORTANT: The 5th `drillPaths` parameter MUST be passed when a space
+ * constraint is active (space-detail view). Omitting it causes incorrect
+ * cache hits — vault-view and space-detail-view would share the same cache
  * entry even though they operate on different document sets.
  * Fix is in callers (SmartGraphView), not here.
  */

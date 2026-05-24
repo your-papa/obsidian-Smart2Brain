@@ -21,6 +21,7 @@ import {
 import { extractPdfPages, extractTextFromPdf, extractTextFromPdfPages } from "../../utils/pdfExtractor";
 import { Logger } from "../../utils/logging";
 import { extractReferenceInfo, resolveFileReferenceDetailed } from "../../utils/pathResolution";
+import { resolveCurrentSpaceScope } from "./spaceScope";
 
 const MAX_PDF_CHARS = 180_000;
 
@@ -345,6 +346,12 @@ export function createReadContentTool(app: App, imageProcessor?: BaseChatModel, 
 
 		const file = resolved.file;
 		const ext = file.extension.toLowerCase();
+
+		// Active-space boundary check
+		const spaceScope = resolveCurrentSpaceScope(app);
+		if (!spaceScope.isPathAllowed(file.path)) {
+			return `Error: The file "${file.path}" is outside the active space [${spaceScope.label}]. Only files within the active space can be read.`;
+		}
 
 		// Privacy check
 		const currentProvider = pluginData.getSelectedAgent().chatModel?.provider;

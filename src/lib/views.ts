@@ -13,11 +13,11 @@
  */
 
 import { type App, type TFile, getAllTags } from "obsidian";
-import type { RegionSegment, Space, ViewFilter, ViewFilterGroup, ViewFilterLeaf } from "../types/graph";
+import type { SpaceSegment, Space, ViewFilter, ViewFilterGroup, ViewFilterLeaf } from "../types/graph";
 import type { SearchFilter } from "../vectorstore/types";
 import { matchesPathPrefix } from "../utils/pathUtils";
 
-type RegionLike = Pick<Space, "filter">;
+type SpaceLike = Pick<Space, "filter">;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -250,31 +250,26 @@ export function describeViewFilter(filter: ViewFilter): string {
 }
 
 /**
- * Resolve a `Region` to a concrete set of paths.
+ * Resolve a Space to a concrete set of paths.
  *
  * Convenience wrapper around `resolveViewFilter` for cross-cutting use
  * (search modal, agent) that only needs the paths.
  */
-export function resolveRegionPaths(app: App, region: RegionLike, universe?: Set<string>): Set<string> {
-	return resolveViewFilter(app, region.filter, universe).paths;
+export function resolveSpacePaths(app: App, space: SpaceLike, universe?: Set<string>): Set<string> {
+	return resolveViewFilter(app, space.filter, universe).paths;
 }
 
 /**
- * @deprecated Use `resolveRegionPaths` instead.
- */
-export const resolveSpacePaths = resolveRegionPaths;
-
-/**
- * Bridge a `Region` (or `Space`) to a `SearchFilter` suitable for the vector
+ * Bridge a Space to a `SearchFilter` suitable for the vector
  * store / search modal / agent.
  *
- * If the Region's filter consists solely of simple folder / tag leaves, this
+ * If the Space's filter consists solely of simple folder / tag leaves, this
  * produces a native `SearchFilter` with `pathPrefixes` / `tags` — which lets
  * the vector store pre-filter efficiently.  For complex or mixed filters it
  * falls back to resolving the filter to paths and using `pathPrefixes`.
  */
-export function resolveRegionToSearchFilter(app: App, region: RegionLike, universe?: Set<string>): SearchFilter {
-	const filter = region.filter;
+export function resolveSpaceToSearchFilter(app: App, space: SpaceLike, universe?: Set<string>): SearchFilter {
+	const filter = space.filter;
 
 	// Optimised path: single simple leaf
 	if (isLeaf(filter)) {
@@ -288,23 +283,19 @@ export function resolveRegionToSearchFilter(app: App, region: RegionLike, univer
 	}
 
 	// Fallback: resolve to paths and wrap as pathPrefixes
-	const paths = resolveRegionPaths(app, region, universe);
+	const paths = resolveSpacePaths(app, space, universe);
 	return { pathPrefixes: [...paths] };
 }
 
 /**
- * @deprecated Use `resolveRegionToSearchFilter` instead.
- */
-export const resolveSpaceToSearchFilter = resolveRegionToSearchFilter;
 
-/**
- * Build a `ViewFilter` from a set of selected `RegionSegment`s.
+ * Build a `ViewFilter` from a set of selected `SpaceSegment`s.
  *
  * - If every segment maps cleanly to a dynamic leaf (folder/tag/extension),
  *   produce a single leaf or `any(…)` group.
  * - Otherwise fall back to a frozen `paths` leaf.
  */
-export function buildFilterFromSegments(segments: RegionSegment[]): { filter: ViewFilter; label: string } {
+export function buildFilterFromSegments(segments: SpaceSegment[]): { filter: ViewFilter; label: string } {
 	const labels: string[] = [];
 	const leaves: ViewFilter[] = [];
 
@@ -333,7 +324,7 @@ export const buildFilterFromGroups = buildFilterFromSegments;
  * - 0 entries → `{ type: "all", conditions: [] }` (matches everything)
  * - 1 entry  → that entry's filter directly
  * - N entries → `{ type: "all", conditions: [each entry's filter] }`
- * @deprecated Drill stack replaced by working Region filter tree.
+ * @deprecated Drill stack replaced by working Space filter tree.
  */
 export function buildFilterFromDrillStack(stack: Array<{ filter: ViewFilter }>): ViewFilter {
 	if (stack.length === 0) return { type: "all", conditions: [] };
@@ -518,11 +509,11 @@ function dedupeStrings(values: string[]): string[] {
 }
 
 /**
- * Try to map a `RegionSegment` to a dynamic `ViewFilterLeaf`.
+ * Try to map a `SpaceSegment` to a dynamic `ViewFilterLeaf`.
  * Returns `null` if the segment can't be represented as a single leaf
  * (e.g. semantic clusters, lasso selections).
  */
-function segmentToLeaf(segment: RegionSegment): ViewFilterLeaf | null {
+function segmentToLeaf(segment: SpaceSegment): ViewFilterLeaf | null {
 	switch (segment.source) {
 		case "folder":
 			return { type: "folder", value: segment.label };
@@ -531,7 +522,7 @@ function segmentToLeaf(segment: RegionSegment): ViewFilterLeaf | null {
 		case "extension":
 			return { type: "extension", value: segment.label.startsWith(".") ? segment.label.slice(1) : segment.label };
 		default:
-			// semantic clusters, "none", "regions", etc. → freeze paths
+			// semantic clusters, "none", "spaces", etc. → freeze paths
 			return null;
 	}
 }
@@ -731,7 +722,7 @@ async function rewriteQueryLeaves(
 	return { ...filter, conditions: rewrittenConditions };
 }
 
-// ── Region → SearchFilter helpers ────────────────────────────────────────
+// ── Space → SearchFilter helpers ─────────────────────────────────────────
 
 /**
  * Try to convert a single leaf to a native `SearchFilter`.

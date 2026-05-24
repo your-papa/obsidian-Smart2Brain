@@ -15,7 +15,7 @@ import {
 	type GraphData,
 	type GraphEdge,
 	type SegmentBy,
-	type RegionSegment,
+	type SpaceSegment,
 	type Space,
 	type ViewFilter,
 	type SmartGraphSettings,
@@ -94,7 +94,7 @@ let focusedClusters: Set<number> = $state(new Set());
 
 // Segment / Color-by state — driven by persisted settings, re-applies on change
 let segmentBy: SegmentBy = $derived(settings.segmentBy ?? "none");
-let segments: RegionSegment[] = $state([]);
+let segments: SpaceSegment[] = $state([]);
 let selectedSegmentIds: Set<string> = $state(new Set());
 let focusedSegmentId: string | null = $state(null);
 /** Per-segment color overrides set by the user. */
@@ -368,12 +368,12 @@ async function computeAndApplyClusters(
 	const indexId = data.graphEmbedIndex;
 	const configuredIndexCount = indexId ? (data.getEmbeddingIndex(indexId)?.documentCount ?? null) : null;
 	const docKey = documentsKey(indexId, configuredIndexCount ?? 0);
-	const regionConstraint = immersedSpacePaths;
-	const filterK = filteredKey(docKey, filter.folders, filter.tags, filter.extensions, regionConstraint);
+	const spaceConstraint = immersedSpacePaths;
+	const filterK = filteredKey(docKey, filter.folders, filter.tags, filter.extensions, spaceConstraint);
 	let filteredResult = smartGraphCache.getFiltered(filterK);
 
 	if (!filteredResult) {
-		const filtered = filterDocuments(plugin.app, documents, filter, regionConstraint);
+		const filtered = filterDocuments(plugin.app, documents, filter, spaceConstraint);
 		if (filtered.length === 0) return;
 		const vectors = filtered.map((doc) => doc.vector);
 		smartGraphCache.setFiltered(filterK, filtered, vectors);

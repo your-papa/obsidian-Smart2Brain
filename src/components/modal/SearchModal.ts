@@ -34,7 +34,7 @@ import {
 	shouldShowMatchExplanation,
 	stripHeadingPrefix,
 } from "../../utils/searchResultPresentation";
-import { resolveRegionToSearchFilter } from "../../lib/views";
+import { resolveSpaceToSearchFilter } from "../../lib/views";
 
 interface AutocompleteSuggestion {
 	type: "autocomplete";
@@ -1053,14 +1053,14 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private buildActiveFilter(): SearchFilter | undefined {
 		const tags = this.activeFilters.filter((f) => f.type === "tag").map((f) => f.value);
 		const pathPrefixes = this.activeFilters.filter((f) => f.type === "path").map((f) => f.value);
-		const regionLabels = this.activeFilters.filter((f) => f.type === "space").map((f) => f.value);
+		const spaceLabels = this.activeFilters.filter((f) => f.type === "space").map((f) => f.value);
 
 		// Resolve Spaces → SearchFilter and merge their pathPrefixes/tags
 		const pluginData = getData();
-		for (const label of regionLabels) {
+		for (const label of spaceLabels) {
 			const spaceObj = pluginData.getSpaceByLabel(label);
 			if (spaceObj) {
-				const resolved = resolveRegionToSearchFilter(this.app, spaceObj);
+				const resolved = resolveSpaceToSearchFilter(this.app, spaceObj);
 				if (resolved.pathPrefixes) pathPrefixes.push(...resolved.pathPrefixes);
 				if (resolved.tags) tags.push(...resolved.tags);
 			}
@@ -1118,10 +1118,10 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			if (filter.type === "space") {
 				// Look up space color for chip styling
 				const pluginData = getData();
-				const regionObj = pluginData.getSpaceByLabel(filter.value);
-				if (regionObj?.color) {
-					chip.style.setProperty("--tag-color", regionObj.color);
-					chip.style.setProperty("--tag-color-hover", regionObj.color);
+				const spaceObj = pluginData.getSpaceByLabel(filter.value);
+				if (spaceObj?.color) {
+					chip.style.setProperty("--tag-color", spaceObj.color);
+					chip.style.setProperty("--tag-color-hover", spaceObj.color);
 				}
 				const iconEl = chip.createSpan({ cls: "s2b-inline-chip-icon" });
 				iconEl.setAttribute("aria-hidden", "true");

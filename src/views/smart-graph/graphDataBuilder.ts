@@ -23,7 +23,7 @@ import {
 	type SmartGraphSettings,
 	type ColorGroup,
 	type SegmentBy,
-	type RegionSegment,
+	type SpaceSegment,
 	type Space,
 } from "../../types/graph";
 import { edgeKey } from "../../utils/graphUtils";
@@ -594,14 +594,14 @@ export async function readNativeGraphSettings(app: App): Promise<Partial<SmartGr
 
 /**
  * Resolve segments for a given segmentBy source.
- * Partitions the graph's nodes into colored {@link RegionSegment}s depending on
+ * Partitions the graph's nodes into colored {@link SpaceSegment}s depending on
  * how the user chose to segment them.
  *
  * - **folder**: one segment per unique top-level folder (or "Root" for files at vault root)
  * - **tag**: one segment per unique tag across the displayed nodes
  * - **extension**: one segment per file extension
  * - **semantic**: uses a pre-computed `clusterMap` (K-Means / HDBSCAN)
- * - **regions**: uses saved regions — each region becomes one segment (first-match priority)
+ * - **spaces**: uses saved spaces — each space becomes one segment (first-match priority)
  * - **none**: returns an empty array (no segments)
  */
 export function resolveSegments(
@@ -615,7 +615,7 @@ export function resolveSegments(
 		spaces?: Space[];
 		louvainCommunities?: Record<string, number>;
 	},
-): RegionSegment[] {
+): SpaceSegment[] {
 	if (source === "none") return [];
 
 	const { clusterMap, clusterLabels, themeColors = [], spaces = [], louvainCommunities } = options ?? {};
@@ -631,14 +631,14 @@ export function resolveSegments(
 			return resolveSegmentsByCluster(graphData, clusterMap, clusterLabels, themeColors);
 		case "louvain":
 			return resolveSegmentsByLouvain(graphData, louvainCommunities ?? {}, themeColors);
-		case "regions":
+		case "spaces":
 			return resolveSegmentsBySpaces(app, graphData, spaces);
 		default:
 			return [];
 	}
 }
 
-function resolveSegmentsByFolder(graphData: GraphData, themeColors: string[]): RegionSegment[] {
+function resolveSegmentsByFolder(graphData: GraphData, themeColors: string[]): SpaceSegment[] {
 	const folderMap = new Map<string, Set<string>>();
 	for (const node of graphData.nodes) {
 		const parts = node.path.split("/");
@@ -661,7 +661,7 @@ function resolveSegmentsByFolder(graphData: GraphData, themeColors: string[]): R
 	}));
 }
 
-function resolveSegmentsByTag(app: App, graphData: GraphData, themeColors: string[]): RegionSegment[] {
+function resolveSegmentsByTag(app: App, graphData: GraphData, themeColors: string[]): SpaceSegment[] {
 	const tagMap = new Map<string, Set<string>>();
 	for (const node of graphData.nodes) {
 		// getCache() takes the path directly — no vault file lookup needed
@@ -687,7 +687,7 @@ function resolveSegmentsByTag(app: App, graphData: GraphData, themeColors: strin
 	}));
 }
 
-function resolveSegmentsByExtension(graphData: GraphData, themeColors: string[]): RegionSegment[] {
+function resolveSegmentsByExtension(graphData: GraphData, themeColors: string[]): SpaceSegment[] {
 	const extMap = new Map<string, Set<string>>();
 	for (const node of graphData.nodes) {
 		const ext = node.path.split(".").pop()?.toLowerCase() ?? "";
@@ -714,7 +714,7 @@ function resolveSegmentsByCluster(
 	clusterMap?: Map<string, ClusterAssignment>,
 	clusterLabels?: Record<number, string>,
 	themeColors: string[] = [],
-): RegionSegment[] {
+): SpaceSegment[] {
 	if (!clusterMap || clusterMap.size === 0) return [];
 	const clusterPaths = new Map<number, Set<string>>();
 	const clusterColors = new Map<number, string>();
@@ -756,7 +756,7 @@ function resolveSegmentsByLouvain(
 	graphData: GraphData,
 	communities: Record<string, number>,
 	themeColors: string[],
-): RegionSegment[] {
+): SpaceSegment[] {
 	if (Object.keys(communities).length === 0) return [];
 
 	const nodeById = new Map(graphData.nodes.map((n) => [n.id, n]));
@@ -816,7 +816,7 @@ function resolveSegmentsByLouvain(
  * Each Space becomes one segment; nodes are assigned to the first
  * matching Space (priority order). Spaces with no matching nodes are omitted.
  */
-function resolveSegmentsBySpaces(app: App, graphData: GraphData, spaces: Space[]): RegionSegment[] {
+function resolveSegmentsBySpaces(app: App, graphData: GraphData, spaces: Space[]): SpaceSegment[] {
 	if (spaces.length === 0) return [];
 
 	// Pre-resolve each space's filter to a path set (sync — query leaves return empty)
@@ -847,7 +847,7 @@ function resolveSegmentsBySpaces(app: App, graphData: GraphData, spaces: Space[]
 			id: `space:${space.id}`,
 			label: space.label,
 			color: space.color,
-			source: "regions" as SegmentBy,
+			source: "spaces" as SegmentBy,
 			paths: segmentPaths.get(space.id)!,
 		}));
 }
@@ -856,7 +856,7 @@ function resolveSegmentsBySpaces(app: App, graphData: GraphData, spaces: Space[]
  * Apply resolved segments to graph data — sets `color` on matching nodes.
  * First matching segment wins; unmatched nodes keep their existing color.
  */
-export function applySegments(graphData: GraphData, segments: RegionSegment[]): GraphData {
+export function applySegments(graphData: GraphData, segments: SpaceSegment[]): GraphData {
 	if (segments.length === 0) return graphData;
 	// Build a path → (color, cluster index) lookup for O(1) per-node
 	const pathInfo = new Map<string, { color: string; cluster: number }>();

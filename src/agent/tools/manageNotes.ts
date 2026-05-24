@@ -8,6 +8,7 @@ import { resolveVaultFileDetailed } from "../../utils/attachments";
 import { normalizeReferencePath } from "../../utils/pathResolution";
 import { genUUIDv7 } from "../../utils/uuid7Validator";
 import { getCurrentThreadId } from "./runContext";
+import { resolveCurrentSpaceScope, type SpaceScope } from "./spaceScope";
 
 const editSchema = z.object({
 	oldText: z
@@ -101,6 +102,7 @@ function validateExistingMarkdownFile(
 	path: string,
 	operationNumber: number,
 	action: "update" | "delete" | "move",
+	spaceScope?: SpaceScope,
 ): { file: TFile } | { error: string } {
 	const store = getPendingChangesStore();
 	const cleanPath = normalizeReferencePath(path);
@@ -127,6 +129,13 @@ function validateExistingMarkdownFile(
 	if (!file.path.endsWith(".md")) {
 		return {
 			error: `Error in operation ${operationNumber}: Only markdown files (.md) can be ${action}d. "${file.path}" is not a markdown file.`,
+		};
+	}
+
+	// Active-space boundary check
+	if (spaceScope && !spaceScope.isPathAllowed(file.path)) {
+		return {
+			error: `Error in operation ${operationNumber}: The file "${file.path}" is outside the active space [${spaceScope.label}]. Only files within the active space can be ${action}d.`,
 		};
 	}
 
@@ -203,6 +212,7 @@ export function createManageNotesTool(app: App) {
 		async ({ operations }: ManageNotesInput, runManager) => {
 			const store = getPendingChangesStore();
 			const settings = getManageNotesSettings();
+			const spaceScope = resolveCurrentSpaceScope(app);
 			const seenPaths = new Set<string>();
 			const stagedChanges: PendingChange[] = [];
 
@@ -221,6 +231,11 @@ export function createManageNotesTool(app: App) {
 
 					if (!normalizedPath.endsWith(".md")) {
 						return `Error in operation ${operationNumber}: Only markdown files (.md) can be created. Got: "${normalizedPath}"`;
+					}
+
+					// Active-space boundary check
+					if (!spaceScope.isWritePathAllowed(normalizedPath)) {
+						return `Error in operation ${operationNumber}: The path "${normalizedPath}" is outside the active space [${spaceScope.label}]. Only files within the active space can be created.`;
 					}
 
 					if (!store.isPathAllowed(normalizedPath)) {
@@ -251,7 +266,13 @@ export function createManageNotesTool(app: App) {
 						return `Error in operation ${operationNumber}: Update operations are disabled for this agent.`;
 					}
 
-					const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "update");
+					const result = validateExistingMarkdownFile(
+						app,
+						operation.path,
+						operationNumber,
+						"update",
+						spaceScope,
+					);
 					if ("error" in result) return result.error;
 
 					const duplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
@@ -282,7 +303,13 @@ export function createManageNotesTool(app: App) {
 				}
 
 				if (operation.type === "delete") {
-					const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "delete");
+					const result = validateExistingMarkdownFile(
+						app,
+						operation.path,
+						operationNumber,
+						"delete",
+						spaceScope,
+					);
 					if ("error" in result) return result.error;
 
 					const duplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
@@ -300,7 +327,7 @@ export function createManageNotesTool(app: App) {
 					return `Error in operation ${operationNumber}: Move operations are disabled for this agent.`;
 				}
 
-				const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "move");
+				const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "move", spaceScope);
 				if ("error" in result) return result.error;
 
 				const sourceDuplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
@@ -313,6 +340,11 @@ export function createManageNotesTool(app: App) {
 
 				const destinationDuplicateError = ensureUniqueTarget(seenPaths, normalizedNewPath, operationNumber);
 				if (destinationDuplicateError) return destinationDuplicateError;
+
+				// Active-space boundary check for move destination
+				if (!spaceScope.isWritePathAllowed(normalizedNewPath)) {
+					return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is outside the active space [${spaceScope.label}]. Only paths within the active space can be targeted.`;
+				}
 
 				if (!store.isPathAllowed(normalizedNewPath)) {
 					return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is excluded by your vault filter settings.`;
