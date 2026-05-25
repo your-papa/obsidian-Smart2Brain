@@ -400,7 +400,7 @@ export interface PluginData {
 	// ============================================================================
 
 	enableLangSmith: boolean;
-	langSmithApiKey: string;
+	langSmithApiKeyId: string;
 	langSmithProject: string;
 	langSmithEndpoint: string;
 	isVerbose: boolean;

@@ -42,6 +42,8 @@ import {
 	type ProviderTemplateId,
 } from "../providers/index";
 
+const LANGSMITH_API_KEY_SECRET_ID = buildManagedSecretId("langsmith", "apiKey");
+
 // ============================================================================
 // Error Classes
 // ============================================================================
@@ -386,7 +388,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 	// Debugging & telemetry
 	enableLangSmith: false,
-	langSmithApiKey: "",
+	langSmithApiKeyId: "",
 	langSmithProject: "obsidian-agent",
 	langSmithEndpoint: "https://api.smith.langchain.com",
 
@@ -546,7 +548,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch {
 			// ignore
@@ -599,10 +601,28 @@ export class PluginDataStore {
 	}
 
 	get langSmithApiKey() {
-		return this.#data.langSmithApiKey;
+		if (!this.#data.langSmithApiKeyId) return "";
+		return getSecret(this._plugin.app, this.#data.langSmithApiKeyId) ?? "";
 	}
 	set langSmithApiKey(val: string) {
-		this.#data.langSmithApiKey = val;
+		const trimmedValue = val.trim();
+		if (trimmedValue) {
+			setSecret(this._plugin.app, LANGSMITH_API_KEY_SECRET_ID, trimmedValue);
+			this.#data.langSmithApiKeyId = LANGSMITH_API_KEY_SECRET_ID;
+		} else {
+			if (this.#data.langSmithApiKeyId) {
+				setSecret(this._plugin.app, this.#data.langSmithApiKeyId, "");
+			}
+			this.#data.langSmithApiKeyId = "";
+		}
+		this.saveSettings();
+	}
+
+	get langSmithApiKeyId() {
+		return this.#data.langSmithApiKeyId;
+	}
+	set langSmithApiKeyId(val: string) {
+		this.#data.langSmithApiKeyId = val.trim();
 		this.saveSettings();
 	}
 
