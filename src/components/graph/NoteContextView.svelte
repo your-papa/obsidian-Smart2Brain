@@ -1,261 +1,294 @@
 <script lang="ts">
-import { onDestroy, onMount } from "svelte";
-import type { EventRef } from "obsidian";
-import { getPlugin } from "../../stores/state.svelte";
-import { getData } from "../../stores/dataStore.svelte";
-import type { GraphData } from "../../types/graph";
-import { getVectorStoreService, waitForVectorStore, waitForVectorStoreIndex } from "../../vectorstore";
-import Button from "../ui/Button.svelte";
-import LoadingAnimation from "../ui/LoadingAnimation.svelte";
-import Icon from "../ui/Icon.svelte";
-import PickerPopover from "../ui/PickerPopover.svelte";
-import Toggle from "../ui/Toggle.svelte";
-import GraphCanvas from "./GraphCanvas.svelte";
-import {
-	DEFAULT_NOTE_CONTEXT_SEMANTIC_THRESHOLD,
-	buildNoteContextSemanticGraph,
-	buildNoteContextWikiGraph,
-	mergeNoteContextGraph,
-} from "../../views/note-context/noteContextDataBuilder";
+  import { onDestroy, onMount } from "svelte";
+  import type { EventRef } from "obsidian";
+  import { getPlugin } from "../../stores/state.svelte";
+  import { getData } from "../../stores/dataStore.svelte";
+  import type { GraphData } from "../../types/graph";
+  import {
+    getVectorStoreService,
+    waitForVectorStore,
+    waitForVectorStoreIndex,
+  } from "../../vectorstore";
+  import Button from "../ui/Button.svelte";
+  import LoadingAnimation from "../ui/LoadingAnimation.svelte";
+  import Icon from "../ui/Icon.svelte";
+  import PickerPopover from "../ui/PickerPopover.svelte";
+  import Toggle from "../ui/Toggle.svelte";
+  import GraphCanvas from "./GraphCanvas.svelte";
+  import {
+    DEFAULT_NOTE_CONTEXT_SEMANTIC_THRESHOLD,
+    buildNoteContextSemanticGraph,
+    buildNoteContextWikiGraph,
+    mergeNoteContextGraph,
+  } from "../../views/note-context/noteContextDataBuilder";
+  import { VIEW_TYPE_NOTE_CONTEXT } from "../../views/note-context/NoteContextView";
 
-const plugin = getPlugin();
-const data = getData();
+  const plugin = getPlugin();
+  const data = getData();
 
-type NoteContextViewMode = "graph" | "list";
-type NoteContextRelationshipMode = "linked" | "semantic" | "both";
-type NoteContextDirection = "incoming" | "outgoing" | "both" | "semantic" | "none";
+  type NoteContextViewMode = "graph" | "list";
+  type NoteContextRelationshipMode = "linked" | "semantic" | "both";
+  type NoteContextDirection = "incoming" | "outgoing" | "both" | "semantic" | "none";
 
-type NoteContextNeighborRow = {
-	path: string;
-	label: string;
-	hasWiki: boolean;
-	hasSemantic: boolean;
-	semanticScore: number | null;
-	direction: NoteContextDirection;
-	directionLabel: string | null;
-};
+  type NoteContextNeighborRow = {
+    path: string;
+    label: string;
+    hasWiki: boolean;
+    hasSemantic: boolean;
+    semanticScore: number | null;
+    direction: NoteContextDirection;
+    directionLabel: string | null;
+  };
 
-let canvasComponent: GraphCanvas | undefined = $state(undefined);
-let graphData: GraphData = $state({ nodes: [], edges: [] });
-let activePath: string | null = $state(null);
-let isLoadingSemantic = $state(false);
-let viewMode: NoteContextViewMode = $state("graph");
-let relationshipMode: NoteContextRelationshipMode = $state("both");
-let showFitButton = $state(false);
-let controlsOpen = $state(false);
-let buildVersion = 0;
-let workspaceRefs: EventRef[] = [];
+  let canvasComponent: GraphCanvas | undefined = $state(undefined);
+  let graphData: GraphData = $state({ nodes: [], edges: [] });
+  let activePath: string | null = $state(null);
+  let isLoadingSemantic = $state(false);
+  let viewMode: NoteContextViewMode = $state("graph");
+  let relationshipMode: NoteContextRelationshipMode = $state("both");
+  let showFitButton = $state(false);
+  let controlsOpen = $state(false);
+  let buildVersion = 0;
+  let workspaceRefs: EventRef[] = [];
 
-const semanticHint = "Semantic neighbors appear once a graph embedding index is configured.";
-function mergeDirection(
-	current: NoteContextDirection | undefined,
-	next: "incoming" | "outgoing",
-): NoteContextDirection {
-	if (!current || current === "none" || current === "semantic") return next;
-	if (current === next) return current;
-	return "both";
-}
+  const semanticHint = "Semantic neighbors appear once a graph embedding index is configured.";
+  function mergeDirection(
+    current: NoteContextDirection | undefined,
+    next: "incoming" | "outgoing",
+  ): NoteContextDirection {
+    if (!current || current === "none" || current === "semantic") return next;
+    if (current === next) return current;
+    return "both";
+  }
 
-function getDirectionLabel(direction: NoteContextDirection): string | null {
-	switch (direction) {
-		case "incoming":
-			return "In";
-		case "outgoing":
-			return "Out";
-		case "both":
-			return "Both";
-		default:
-			return null;
-	}
-}
+  function getDirectionLabel(direction: NoteContextDirection): string | null {
+    switch (direction) {
+      case "incoming":
+        return "In";
+      case "outgoing":
+        return "Out";
+      case "both":
+        return "Both";
+      default:
+        return null;
+    }
+  }
 
-const hasSemanticIndex = $derived(Boolean(data.graphEmbedIndex));
+  const hasSemanticIndex = $derived(Boolean(data.graphEmbedIndex));
 
-const visibleGraphData = $derived.by(() => {
-	const edges = graphData.edges.filter((edge) => {
-		if (relationshipMode === "linked") return edge.type === "wiki";
-		if (relationshipMode === "semantic") return edge.type === "semantic";
-		if (relationshipMode === "both") return edge.type === "wiki" || edge.type === "semantic";
-		return true;
-	});
+  const visibleGraphData = $derived.by(() => {
+    const edges = graphData.edges.filter((edge) => {
+      if (relationshipMode === "linked") return edge.type === "wiki";
+      if (relationshipMode === "semantic") return edge.type === "semantic";
+      if (relationshipMode === "both") return edge.type === "wiki" || edge.type === "semantic";
+      return true;
+    });
 
-	const visibleNodeIds = new Set<string>();
-	if (activePath) {
-		visibleNodeIds.add(activePath);
-	}
-	for (const edge of edges) {
-		visibleNodeIds.add(edge.source);
-		visibleNodeIds.add(edge.target);
-	}
+    const visibleNodeIds = new Set<string>();
+    if (activePath) {
+      visibleNodeIds.add(activePath);
+    }
+    for (const edge of edges) {
+      visibleNodeIds.add(edge.source);
+      visibleNodeIds.add(edge.target);
+    }
 
-	const nodes = graphData.nodes.filter((node) => visibleNodeIds.has(node.id));
-	return { nodes, edges };
-});
+    const nodes = graphData.nodes.filter((node) => visibleNodeIds.has(node.id));
+    return { nodes, edges };
+  });
 
-const visibleNeighborRows = $derived.by((): NoteContextNeighborRow[] => {
-	if (!activePath) return [];
+  const visibleNeighborRows = $derived.by((): NoteContextNeighborRow[] => {
+    if (!activePath) return [];
 
-	const relationshipMap = new Map<string, { hasWiki: boolean; semanticScore: number | null }>();
-	const directionByPath = new Map<string, NoteContextDirection>();
-	for (const edge of visibleGraphData.edges) {
-		const neighborPath: string | null =
-			edge.source === activePath ? edge.target : edge.target === activePath ? edge.source : null;
-		if (!neighborPath || neighborPath === activePath) continue;
+    const relationshipMap = new Map<string, { hasWiki: boolean; semanticScore: number | null }>();
+    const directionByPath = new Map<string, NoteContextDirection>();
+    for (const edge of visibleGraphData.edges) {
+      const neighborPath: string | null =
+        edge.source === activePath ? edge.target : edge.target === activePath ? edge.source : null;
+      if (!neighborPath || neighborPath === activePath) continue;
 
-		const current = relationshipMap.get(neighborPath) ?? { hasWiki: false, semanticScore: null };
-		if (edge.type === "wiki") {
-			current.hasWiki = true;
-			const nextDirection = edge.source === activePath ? "outgoing" : "incoming";
-			directionByPath.set(neighborPath, mergeDirection(directionByPath.get(neighborPath), nextDirection));
-		}
-		if (edge.type === "semantic") {
-			current.semanticScore = Math.max(current.semanticScore ?? Number.NEGATIVE_INFINITY, edge.weight);
-		}
-		relationshipMap.set(neighborPath, current);
-	}
+      const current = relationshipMap.get(neighborPath) ?? { hasWiki: false, semanticScore: null };
+      if (edge.type === "wiki") {
+        current.hasWiki = true;
+        const nextDirection = edge.source === activePath ? "outgoing" : "incoming";
+        directionByPath.set(
+          neighborPath,
+          mergeDirection(directionByPath.get(neighborPath), nextDirection),
+        );
+      }
+      if (edge.type === "semantic") {
+        current.semanticScore = Math.max(
+          current.semanticScore ?? Number.NEGATIVE_INFINITY,
+          edge.weight,
+        );
+      }
+      relationshipMap.set(neighborPath, current);
+    }
 
-	return visibleGraphData.nodes
-		.filter((node) => node.id !== activePath)
-		.map((node) => {
-			const relationship = relationshipMap.get(node.id) ?? {
-				hasWiki: false,
-				semanticScore: null,
-			};
-			const hasSemantic = relationship.semanticScore != null;
-			const direction = directionByPath.get(node.id) ?? (hasSemantic ? "semantic" : "none");
-			return {
-				path: node.path,
-				label: node.label,
-				hasWiki: relationship.hasWiki,
-				hasSemantic,
-				semanticScore: relationship.semanticScore,
-				direction,
-				directionLabel: getDirectionLabel(direction),
-			};
-		})
-		.sort((left, right) => {
-			const bothDiff = Number(right.hasWiki && right.hasSemantic) - Number(left.hasWiki && left.hasSemantic);
-			if (bothDiff !== 0) return bothDiff;
+    return visibleGraphData.nodes
+      .filter((node) => node.id !== activePath)
+      .map((node) => {
+        const relationship = relationshipMap.get(node.id) ?? {
+          hasWiki: false,
+          semanticScore: null,
+        };
+        const hasSemantic = relationship.semanticScore != null;
+        const direction = directionByPath.get(node.id) ?? (hasSemantic ? "semantic" : "none");
+        return {
+          path: node.path,
+          label: node.label,
+          hasWiki: relationship.hasWiki,
+          hasSemantic,
+          semanticScore: relationship.semanticScore,
+          direction,
+          directionLabel: getDirectionLabel(direction),
+        };
+      })
+      .sort((left, right) => {
+        const bothDiff =
+          Number(right.hasWiki && right.hasSemantic) - Number(left.hasWiki && left.hasSemantic);
+        if (bothDiff !== 0) return bothDiff;
 
-			const semanticDiff =
-				(right.semanticScore ?? Number.NEGATIVE_INFINITY) - (left.semanticScore ?? Number.NEGATIVE_INFINITY);
-			if (semanticDiff !== 0) return semanticDiff;
+        const semanticDiff =
+          (right.semanticScore ?? Number.NEGATIVE_INFINITY) -
+          (left.semanticScore ?? Number.NEGATIVE_INFINITY);
+        if (semanticDiff !== 0) return semanticDiff;
 
-			if (left.hasWiki !== right.hasWiki) return Number(right.hasWiki) - Number(left.hasWiki);
-			return left.label.localeCompare(right.label);
-		});
-});
+        if (left.hasWiki !== right.hasWiki) return Number(right.hasWiki) - Number(left.hasWiki);
+        return left.label.localeCompare(right.label);
+      });
+  });
 
-$effect(() => {
-	if (!hasSemanticIndex && (relationshipMode === "semantic" || relationshipMode === "both")) {
-		relationshipMode = "linked";
-	}
-});
+  $effect(() => {
+    if (!hasSemanticIndex && (relationshipMode === "semantic" || relationshipMode === "both")) {
+      relationshipMode = "linked";
+    }
+  });
 
-function syncActivePath(): string | null {
-	const file = plugin.app.workspace.getActiveFile();
-	activePath = file?.extension === "md" ? file.path : null;
-	return activePath;
-}
+  function syncActivePath(): string | null {
+    const file = plugin.app.workspace.getActiveFile();
+    activePath = file?.extension === "md" ? file.path : null;
+    return activePath;
+  }
 
-async function rebuildGraph(): Promise<void> {
-	const localBuildVersion = ++buildVersion;
-	const nextActivePath = syncActivePath();
+  async function rebuildGraph(): Promise<void> {
+    const localBuildVersion = ++buildVersion;
+    const nextActivePath = syncActivePath();
 
-	if (!nextActivePath) {
-		graphData = { nodes: [], edges: [] };
-		isLoadingSemantic = false;
-		showFitButton = false;
-		return;
-	}
+    if (!nextActivePath) {
+      graphData = { nodes: [], edges: [] };
+      isLoadingSemantic = false;
+      showFitButton = false;
+      return;
+    }
 
-	const wikiGraph = buildNoteContextWikiGraph(plugin.app, nextActivePath);
-	graphData = wikiGraph;
-	showFitButton = false;
+    const wikiGraph = buildNoteContextWikiGraph(plugin.app, nextActivePath);
+    graphData = wikiGraph;
+    showFitButton = false;
 
-	if (!hasSemanticIndex) {
-		isLoadingSemantic = false;
-		return;
-	}
+    if (!hasSemanticIndex) {
+      isLoadingSemantic = false;
+      return;
+    }
 
-	isLoadingSemantic = true;
+    isLoadingSemantic = true;
 
-	try {
-		const serviceReady = await waitForVectorStore();
-		if (!serviceReady || localBuildVersion !== buildVersion) return;
+    try {
+      const serviceReady = await waitForVectorStore();
+      if (!serviceReady || localBuildVersion !== buildVersion) return;
 
-		const indexReady = await waitForVectorStoreIndex(data.graphEmbedIndex);
-		if (!indexReady || localBuildVersion !== buildVersion) return;
+      const indexReady = await waitForVectorStoreIndex(data.graphEmbedIndex);
+      if (!indexReady || localBuildVersion !== buildVersion) return;
 
-		const documents = await getVectorStoreService().getAllDocumentVectors();
-		if (localBuildVersion !== buildVersion) return;
+      const documents = await getVectorStoreService().getAllDocumentVectors();
+      if (localBuildVersion !== buildVersion) return;
 
-		const semanticGraph = buildNoteContextSemanticGraph(plugin.app, nextActivePath, documents, {
-			threshold: DEFAULT_NOTE_CONTEXT_SEMANTIC_THRESHOLD,
-		});
+      const semanticGraph = buildNoteContextSemanticGraph(plugin.app, nextActivePath, documents, {
+        threshold: DEFAULT_NOTE_CONTEXT_SEMANTIC_THRESHOLD,
+      });
 
-		if (localBuildVersion !== buildVersion) return;
-		graphData = mergeNoteContextGraph(wikiGraph, semanticGraph, nextActivePath);
-	} catch (error) {
-		console.error("[NoteContext] Failed to build semantic neighborhood", error);
-	} finally {
-		if (localBuildVersion === buildVersion) {
-			isLoadingSemantic = false;
-		}
-	}
-}
+      if (localBuildVersion !== buildVersion) return;
+      graphData = mergeNoteContextGraph(wikiGraph, semanticGraph, nextActivePath);
+    } catch (error) {
+      console.error("[NoteContext] Failed to build semantic neighborhood", error);
+    } finally {
+      if (localBuildVersion === buildVersion) {
+        isLoadingSemantic = false;
+      }
+    }
+  }
 
-function handleNodeClick(path: string) {
-	plugin.app.workspace.openLinkText(path, "", false);
-}
+  function handleNodeClick(path: string) {
+    plugin.app.workspace.openLinkText(path, "", false);
+  }
 
-function setViewMode(mode: NoteContextViewMode) {
-	viewMode = mode;
-	showFitButton = false;
-	controlsOpen = false;
-}
+  function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLElement) {
+    const sourcePath = plugin.app.workspace.getActiveFile()?.path ?? activePath ?? "";
+    plugin.app.workspace.trigger("hover-link", {
+      event,
+      source: VIEW_TYPE_NOTE_CONTEXT,
+      hoverParent: plugin,
+      targetEl,
+      linktext: path,
+      sourcePath,
+    });
+  }
 
-function setRelationshipMode(mode: NoteContextRelationshipMode) {
-	if (!hasSemanticIndex && (mode === "semantic" || mode === "both")) {
-		return;
-	}
+  function handleListRowHover(event: MouseEvent, path: string) {
+    handleHoverPreview(event, path, event.currentTarget as HTMLElement);
+  }
 
-	relationshipMode = mode;
-	showFitButton = false;
-	controlsOpen = false;
-}
+  function handleListRowFocus(event: FocusEvent, path: string) {
+    handleHoverPreview(new MouseEvent("mouseover"), path, event.currentTarget as HTMLElement);
+  }
 
-function setDirectedWikiEdges(enabled: boolean) {
-	data.smartGraphSettings = {
-		...data.smartGraphSettings,
-		directedWikiEdges: enabled,
-	};
-}
+  function setViewMode(mode: NoteContextViewMode) {
+    viewMode = mode;
+    showFitButton = false;
+    controlsOpen = false;
+  }
 
-function registerWorkspaceListeners() {
-	const workspace = plugin.app.workspace;
-	workspaceRefs = [
-		workspace.on("file-open", () => {
-			void rebuildGraph();
-		}),
-		workspace.on("active-leaf-change", () => {
-			void rebuildGraph();
-		}),
-	];
-}
+  function setRelationshipMode(mode: NoteContextRelationshipMode) {
+    if (!hasSemanticIndex && (mode === "semantic" || mode === "both")) {
+      return;
+    }
 
-onMount(() => {
-	registerWorkspaceListeners();
-	void rebuildGraph();
-});
+    relationshipMode = mode;
+    showFitButton = false;
+    controlsOpen = false;
+  }
 
-onDestroy(() => {
-	for (const ref of workspaceRefs) {
-		plugin.app.workspace.offref(ref);
-	}
-	workspaceRefs = [];
-	buildVersion++;
-});
+  function setDirectedWikiEdges(enabled: boolean) {
+    data.smartGraphSettings = {
+      ...data.smartGraphSettings,
+      directedWikiEdges: enabled,
+    };
+  }
+
+  function registerWorkspaceListeners() {
+    const workspace = plugin.app.workspace;
+    workspaceRefs = [
+      workspace.on("file-open", () => {
+        void rebuildGraph();
+      }),
+      workspace.on("active-leaf-change", () => {
+        void rebuildGraph();
+      }),
+    ];
+  }
+
+  onMount(() => {
+    registerWorkspaceListeners();
+    void rebuildGraph();
+  });
+
+  onDestroy(() => {
+    for (const ref of workspaceRefs) {
+      plugin.app.workspace.offref(ref);
+    }
+    workspaceRefs = [];
+    buildVersion++;
+  });
 </script>
 
 <div class="note-context" data-testid="note-context-root">
@@ -398,6 +431,7 @@ onDestroy(() => {
           clusterCohesionStrength={0}
           showWikiLinks={true}
           onNodeClick={handleNodeClick}
+          onHoverPreview={handleHoverPreview}
         />
       {:else}
         <div class="note-context__list" data-testid="note-context-list">
@@ -405,7 +439,10 @@ onDestroy(() => {
             <button
               class="note-context__list-row"
               type="button"
+              data-href={row.path}
               onclick={() => handleNodeClick(row.path)}
+              onmouseover={(event) => handleListRowHover(event, row.path)}
+              onfocus={(event) => handleListRowFocus(event, row.path)}
             >
               <div class="note-context__list-main">
                 <span class="note-context__list-title">{row.label}</span>

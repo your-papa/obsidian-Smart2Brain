@@ -84,7 +84,7 @@
   let containerEl: HTMLButtonElement;
 
   // Invisible anchor element repositioned over hovered nodes for Obsidian's hover popover
-  let hoverAnchorEl: HTMLDivElement;
+  let hoverAnchorEl: HTMLAnchorElement;
 
   // Pixi renderer instance
   let pixi: PixiRenderer | null = null;
@@ -1001,6 +1001,9 @@
     const containerRect = containerEl.getBoundingClientRect();
     const offsetX = canvasRect.left - containerRect.left;
     const offsetY = canvasRect.top - containerRect.top;
+    hoverAnchorEl.href = node.path;
+    hoverAnchorEl.dataset.href = node.path;
+    hoverAnchorEl.setAttribute("aria-label", node.label);
     hoverAnchorEl.style.left = `${screen.x + offsetX}px`;
     hoverAnchorEl.style.top = `${screen.y + offsetY}px`;
     previewTriggeredForNode = node.id;
@@ -1627,7 +1630,13 @@
 >
   <!-- Pixi.js creates its own <canvas> inside this container via pixi.init() -->
   <!-- Invisible anchor for Obsidian hover-link popover positioning -->
-  <div bind:this={hoverAnchorEl} class="hover-anchor"></div>
+  <a
+    bind:this={hoverAnchorEl}
+    class="hover-anchor internal-link"
+    aria-hidden="true"
+    tabindex="-1"
+    href="about:blank"
+  ></a>
 </button>
 
 <style>

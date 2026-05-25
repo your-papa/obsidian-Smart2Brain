@@ -22,7 +22,7 @@ function expandGraphPanel() {
 	})()`);
 }
 
-describe("smart graph view UI", () => {
+describe("graph view UI", () => {
 	beforeAll(async () => {
 		clearBuffers();
 		executeCommand("smart-second-brain:open-smart-graph");
@@ -82,7 +82,7 @@ describe("smart graph view UI", () => {
 	});
 });
 
-describe("smart graph with vault content", () => {
+describe("graph with vault content", () => {
 	beforeAll(async () => {
 		clearBuffers();
 		// Ensure graph is open

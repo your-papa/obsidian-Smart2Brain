@@ -20,7 +20,7 @@ export class SmartGraphView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "Smart Graph";
+		return "Graph";
 	}
 
 	getIcon(): string {

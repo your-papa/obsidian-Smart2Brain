@@ -155,7 +155,7 @@ export default class SecondBrainPlugin extends Plugin {
 		// const VIEW_TYPE = "my-view";
 
 		this.registerHoverLinkSource(VIEW_TYPE_CHAT, {
-			display: "Smart2Brain Chat",
+			display: "S2B Chat",
 			// true = by default require Cmd/Ctrl for this source
 			// false = by default no modifier required (more “reading-mode-like”)
 			defaultMod: false,
@@ -196,12 +196,12 @@ export default class SecondBrainPlugin extends Plugin {
 
 		// Register Smart Graph view
 		this.registerHoverLinkSource(VIEW_TYPE_SMART_GRAPH, {
-			display: "Smart Graph",
+			display: "S2B Graph",
 			defaultMod: true,
 		});
 		this.registerView(VIEW_TYPE_SMART_GRAPH, (leaf) => new SmartGraphView(leaf, this));
 		this.registerHoverLinkSource(VIEW_TYPE_NOTE_CONTEXT, {
-			display: "Note Context",
+			display: "S2B Note Context",
 			defaultMod: true,
 		});
 		this.registerView(VIEW_TYPE_NOTE_CONTEXT, (leaf) => new NoteContextView(leaf, this));
@@ -212,7 +212,7 @@ export default class SecondBrainPlugin extends Plugin {
 		}
 
 		this.addRibbonIcon("message-square", "New Chat", () => this.createNewChat());
-		this.addRibbonIcon("git-fork", "Smart Graph", () => this.activateSmartGraphView());
+		this.addRibbonIcon("git-fork", "Graph", () => this.activateSmartGraphView());
 
 		this.addCommand({
 			id: "open-chat",
@@ -237,7 +237,7 @@ export default class SecondBrainPlugin extends Plugin {
 
 		this.addCommand({
 			id: "open-smart-graph",
-			name: "Open Smart Graph",
+			name: "Open Graph",
 			icon: "git-fork",
 			callback: () => this.activateSmartGraphView(),
 		});
@@ -245,7 +245,7 @@ export default class SecondBrainPlugin extends Plugin {
 		this.addCommand({
 			id: "open-note-context",
 			name: "Open Note Context",
-			icon: "waypoints",
+			icon: "git-fork",
 			callback: () => this.activateNoteContextView(),
 		});
 

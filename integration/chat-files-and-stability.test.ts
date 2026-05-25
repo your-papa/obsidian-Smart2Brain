@@ -140,7 +140,7 @@ describe("plugin reload stability", () => {
 		expect(getErrors()).toBe("");
 	});
 
-	it("should open smart graph after reload", async () => {
+	it("should open graph after reload", async () => {
 		executeCommand("smart-second-brain:open-smart-graph");
 		await waitForSelector('[data-type="smart-second-brain-graph"]');
 
