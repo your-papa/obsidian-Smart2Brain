@@ -3,10 +3,12 @@ import type { App } from "obsidian";
 import { getAllTags } from "obsidian";
 import type { Space, ViewFilter, ViewFilterLeaf } from "../../types/graph";
 import {
+	buildSpaceMembershipRulesEditorFilter,
 	cloneSpaceMembershipDraft,
 	cloneViewFilter,
 	compileSpaceMembershipDraft,
 	createEmptySpaceFilter,
+	extractSpaceMembershipRulesFilter,
 	parseSpaceMembershipFilter,
 	resolveSpaceMembershipDraft,
 	resolveViewFilter,
@@ -212,10 +214,7 @@ const editableRulesFilter = $derived.by(() => {
 		return cloneViewFilter(normalizedFormFilter);
 	}
 
-	return {
-		type: "any" as const,
-		conditions: parsedMembership.draft.autoIncludeRules.map((rule) => cloneViewFilter(rule as ViewFilterLeaf)),
-	};
+	return buildSpaceMembershipRulesEditorFilter(parsedMembership.draft.autoIncludeRules);
 });
 
 function isEmptyRulesFilter(filter: ViewFilter): boolean {
@@ -263,10 +262,10 @@ function handleRulesFilterChange(nextRulesFilter: ViewFilter) {
 		return;
 	}
 
-	const parsedRules = parseSpaceMembershipFilter(nextRulesFilter);
-	if (!parsedRules.isAdvanced) {
+	const simpleRules = extractSpaceMembershipRulesFilter(nextRulesFilter);
+	if (simpleRules) {
 		updateSimpleMembershipDraft((draft) => {
-			draft.autoIncludeRules = parsedRules.draft.autoIncludeRules;
+			draft.autoIncludeRules = simpleRules;
 		});
 		return;
 	}
