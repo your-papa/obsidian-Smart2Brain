@@ -14,7 +14,11 @@
   import type { GraphData, GraphNode, EdgeType } from "../../types/graph";
   import { deriveClusterRepresentativesFromGraph } from "../../views/smart-graph/graphDataBuilder";
   import { edgeKey } from "../../utils/graphUtils";
-  import { computeNodeBounds, framingTransform } from "../../utils/graphAnimation";
+  import {
+    computeNodeBounds,
+    framingTransform,
+    type FramingPadding,
+  } from "../../utils/graphAnimation";
   import { PixiRenderer, readThemeColors, type ClusterPillHit } from "./pixiRenderer";
 
   interface Props {
@@ -107,6 +111,13 @@
   // Non-reactive drag reference — directly mutates the d3 SimNode's fx/fy
   // without going through Svelte's $state proxy (wiki mode only)
   let dragSimNode: SimNode | null = null;
+
+  const GRAPH_FIT_PADDING: FramingPadding = {
+    top: 44,
+    right: 20,
+    bottom: 20,
+    left: 20,
+  };
 
   // Lasso selection state
   let selectedNodes: Set<string> = $state(new Set());
@@ -1287,7 +1298,7 @@
               const frame = framingTransform(
                 bounds,
                 { width: pixi.width, height: pixi.height },
-                20,
+                GRAPH_FIT_PADDING,
               );
               const cx = (bounds.minX + bounds.maxX) / 2;
               const cy = (bounds.minY + bounds.maxY) / 2;
@@ -1298,7 +1309,7 @@
           if (simulation && simulation.alpha() < 0.05) {
             needsInitialFit = false;
             forceTickCount = 0;
-            animateCameraToNodes(undefined, 20, 500);
+            animateCameraToNodes(undefined, GRAPH_FIT_PADDING, 500);
           }
         }
         render();
@@ -1497,7 +1508,7 @@
             const frame = framingTransform(
               bounds,
               { width: renderer.width, height: renderer.height },
-              20,
+              GRAPH_FIT_PADDING,
             );
             const cx = (bounds.minX + bounds.maxX) / 2;
             const cy = (bounds.minY + bounds.maxY) / 2;
@@ -1562,7 +1573,11 @@
   });
 
   /** Animate the camera to frame the given nodes with the specified padding and duration. */
-  function animateCameraToNodes(filter?: (node: SimNode) => boolean, padding = 40, duration = 400) {
+  function animateCameraToNodes(
+    filter?: (node: SimNode) => boolean,
+    padding: number | FramingPadding = 40,
+    duration = 400,
+  ) {
     if (!pixi) return;
     const bounds = computeNodeBounds(simNodes, filter);
     if (!bounds) return;
@@ -1577,7 +1592,7 @@
    */
   export function fitToView() {
     if (simNodes.length === 0) return;
-    animateCameraToNodes(undefined, 20, 300);
+    animateCameraToNodes(undefined, GRAPH_FIT_PADDING, 300);
   }
 
   /**

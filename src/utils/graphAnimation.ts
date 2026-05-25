@@ -15,6 +15,25 @@ export interface BoundingBox {
 	maxY: number;
 }
 
+export interface FramingPadding {
+	top: number;
+	right: number;
+	bottom: number;
+	left: number;
+}
+
+function normalizeFramingPadding(padding: number | FramingPadding): FramingPadding {
+	if (typeof padding === "number") {
+		return {
+			top: padding,
+			right: padding,
+			bottom: padding,
+			left: padding,
+		};
+	}
+	return padding;
+}
+
 /** Ease-out cubic: fast start, gentle deceleration. */
 export function easeOutCubic(t: number): number {
 	return 1 - (1 - t) ** 3;
@@ -59,22 +78,27 @@ export function computeNodeBounds<T extends { x?: number | null; y?: number | nu
 export function framingTransform(
 	bounds: BoundingBox,
 	viewport: { width: number; height: number },
-	padding = 40,
+	padding: number | FramingPadding = 40,
 	maxScale = 4,
 ): Transform {
+	const insets = normalizeFramingPadding(padding);
 	const graphWidth = bounds.maxX - bounds.minX || 1;
 	const graphHeight = bounds.maxY - bounds.minY || 1;
 
-	const scaleX = (viewport.width - padding * 2) / graphWidth;
-	const scaleY = (viewport.height - padding * 2) / graphHeight;
+	const usableWidth = Math.max(1, viewport.width - insets.left - insets.right);
+	const usableHeight = Math.max(1, viewport.height - insets.top - insets.bottom);
+	const scaleX = usableWidth / graphWidth;
+	const scaleY = usableHeight / graphHeight;
 	const scale = Math.min(scaleX, scaleY, maxScale);
 
 	const centerX = (bounds.minX + bounds.maxX) / 2;
 	const centerY = (bounds.minY + bounds.maxY) / 2;
+	const viewportCenterX = insets.left + usableWidth / 2;
+	const viewportCenterY = insets.top + usableHeight / 2;
 
 	return {
-		x: viewport.width / 2 - centerX * scale,
-		y: viewport.height / 2 - centerY * scale,
+		x: viewportCenterX - centerX * scale,
+		y: viewportCenterY - centerY * scale,
 		scale,
 	};
 }

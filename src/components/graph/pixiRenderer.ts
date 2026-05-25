@@ -435,7 +435,7 @@ export class PixiRenderer {
 			scale: scale,
 			time: duration,
 			ease: "easeOutCubic",
-			callbackOnComplete: () => { },
+			callbackOnComplete: () => {},
 		});
 	}
 
@@ -655,12 +655,12 @@ export class PixiRenderer {
 
 			const edgeHoverAlpha = opts.hoveredNodeId
 				? clampUnitInterval(
-					Math.max(
-						opts.hoverAlphas.get(edge.source.id) ?? 0.85,
-						opts.hoverAlphas.get(edge.target.id) ?? 0.85,
-					),
-					0.85,
-				)
+						Math.max(
+							opts.hoverAlphas.get(edge.source.id) ?? 0.85,
+							opts.hoverAlphas.get(edge.target.id) ?? 0.85,
+						),
+						0.85,
+					)
 				: 1;
 			const safeBaseEdgeAlpha = clampUnitInterval(opts.baseEdgeAlpha, 0.25);
 			const safeEdgeFadeAlpha = clampUnitInterval(opts.edgeFadeAlpha, 1);
