@@ -16,6 +16,7 @@ import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingCh
 import { setPlugin } from "./stores/state.svelte";
 import { LexicalSearchService } from "./search/LexicalSearchService";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
+import { LocalSmartGraphView, VIEW_TYPE_LOCAL_SMART_GRAPH } from "./views/local-smart-graph/LocalSmartGraphView";
 import { SmartGraphView, VIEW_TYPE_SMART_GRAPH } from "./views/smart-graph/SmartGraphView";
 import SettingsTab from "./views/settings/Settings";
 import { VectorStoreService } from "./vectorstore";
@@ -199,6 +200,11 @@ export default class SecondBrainPlugin extends Plugin {
 			defaultMod: true,
 		});
 		this.registerView(VIEW_TYPE_SMART_GRAPH, (leaf) => new SmartGraphView(leaf, this));
+		this.registerHoverLinkSource(VIEW_TYPE_LOCAL_SMART_GRAPH, {
+			display: "Local Smart Graph",
+			defaultMod: true,
+		});
+		this.registerView(VIEW_TYPE_LOCAL_SMART_GRAPH, (leaf) => new LocalSmartGraphView(leaf, this));
 
 		if (this.manifest.dir === undefined) {
 			this.unload();
@@ -234,6 +240,13 @@ export default class SecondBrainPlugin extends Plugin {
 			name: "Open Smart Graph",
 			icon: "git-fork",
 			callback: () => this.activateSmartGraphView(),
+		});
+
+		this.addCommand({
+			id: "open-local-smart-graph",
+			name: "Open Local Smart Graph",
+			icon: "git-branch-plus",
+			callback: () => this.activateLocalSmartGraphView(),
 		});
 
 		this.addCommand({
@@ -386,6 +399,23 @@ export default class SecondBrainPlugin extends Plugin {
 			const newLeaf = workspace.getLeaf("tab");
 			await newLeaf.setViewState({
 				type: VIEW_TYPE_SMART_GRAPH,
+				active: true,
+			});
+			leaf = newLeaf;
+		}
+
+		workspace.revealLeaf(leaf);
+	}
+
+	async activateLocalSmartGraphView() {
+		const { workspace } = this.app;
+
+		let leaf = workspace.getLeavesOfType(VIEW_TYPE_LOCAL_SMART_GRAPH)[0];
+
+		if (!leaf) {
+			const newLeaf = workspace.getLeaf("tab");
+			await newLeaf.setViewState({
+				type: VIEW_TYPE_LOCAL_SMART_GRAPH,
 				active: true,
 			});
 			leaf = newLeaf;
