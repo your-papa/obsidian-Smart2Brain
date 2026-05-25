@@ -21,7 +21,23 @@ const providerAvailable = (() => {
 	}
 })();
 
+const searchIndexAvailable = (() => {
+	try {
+		return obsidianEval(`${PLUGIN}.pluginData.searchEmbedIndex !== null`).includes("true");
+	} catch {
+		return false;
+	}
+})();
+
 describe("semantic search", () => {
+	function lexicalSearchEval(globalKey: string, query: string, mapperCode: string): Promise<string> {
+		return pollEval(
+			`(function(){ var ls = ${PLUGIN}.lexicalSearchService; window.${globalKey} = "pending"; ls.search(${JSON.stringify(query)}, 5).then(function(r){ window.${globalKey} = JSON.stringify(r.map(${mapperCode})); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: e.message}); }); return "started"; })()`,
+			globalKey,
+			{ timeoutMs: 15_000 },
+		);
+	}
+
 	beforeAll(async () => {
 		clearBuffers();
 		// Wait for the standalone MiniSearch to finish indexing vault files
@@ -47,11 +63,7 @@ describe("semantic search", () => {
 		it("should return results for a known term", async () => {
 			const globalKey = "__s2bLexical";
 
-			const result = await pollEval(
-				`(function(){ var vs = ${PLUGIN}.vectorStoreService; window.${globalKey} = "pending"; vs.lexicalSearch("transformer", 5).then(function(r){ window.${globalKey} = JSON.stringify(r.map(function(d){ return {name:d.name, path:d.path}; })); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: e.message}); }); return "started"; })()`,
-				globalKey,
-				{ timeoutMs: 15_000 },
-			);
+			const result = await lexicalSearchEval(globalKey, "transformer", "function(d){ return {name:d.name, path:d.path}; }");
 
 			const parsed = JSON.parse(result);
 			expect(parsed.error).toBeUndefined();
@@ -62,11 +74,7 @@ describe("semantic search", () => {
 		it("should rank relevant results higher", async () => {
 			const globalKey = "__s2bLexicalRank";
 
-			const result = await pollEval(
-				`(function(){ var vs = ${PLUGIN}.vectorStoreService; window.${globalKey} = "pending"; vs.lexicalSearch("neural networks", 5).then(function(r){ window.${globalKey} = JSON.stringify(r.map(function(d){ return {name:d.name, score:d.score}; })); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: e.message}); }); return "started"; })()`,
-				globalKey,
-				{ timeoutMs: 15_000 },
-			);
+			const result = await lexicalSearchEval(globalKey, "neural networks", "function(d){ return {name:d.name, score:d.score}; }");
 
 			const parsed = JSON.parse(result);
 			expect(parsed.length).toBeGreaterThan(0);
@@ -79,11 +87,7 @@ describe("semantic search", () => {
 		it("should return empty for nonsense query", async () => {
 			const globalKey = "__s2bLexicalEmpty";
 
-			const result = await pollEval(
-				`(function(){ var vs = ${PLUGIN}.vectorStoreService; window.${globalKey} = "pending"; vs.lexicalSearch("xyzzyflurbnox", 5).then(function(r){ window.${globalKey} = JSON.stringify(r); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: e.message}); }); return "started"; })()`,
-				globalKey,
-				{ timeoutMs: 15_000 },
-			);
+			const result = await lexicalSearchEval(globalKey, "xyzzyflurbnox", "function(d){ return d; }");
 
 			const parsed = JSON.parse(result);
 			expect(parsed.error).toBeUndefined();
@@ -91,7 +95,7 @@ describe("semantic search", () => {
 		});
 	});
 
-	describe.skipIf(!providerAvailable)("hybrid search", () => {
+	describe.skipIf(!providerAvailable || !searchIndexAvailable)("hybrid search", () => {
 		it("should return results combining semantic and lexical relevance", async () => {
 			const globalKey = "__s2bHybrid";
 
@@ -124,11 +128,7 @@ describe("semantic search", () => {
 		it("should find a dynamically created note via lexical search", async () => {
 			const globalKey = "__s2bDynamic";
 
-			const result = await pollEval(
-				`(function(){ var vs = ${PLUGIN}.vectorStoreService; window.${globalKey} = "pending"; vs.lexicalSearch("quantum entanglement", 5).then(function(r){ window.${globalKey} = JSON.stringify(r.map(function(d){ return d.name; })); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: e.message}); }); return "started"; })()`,
-				globalKey,
-				{ timeoutMs: 15_000 },
-			);
+			const result = await lexicalSearchEval(globalKey, "quantum entanglement", "function(d){ return d.name; }");
 
 			const parsed = JSON.parse(result);
 			expect(parsed.error).toBeUndefined();
@@ -140,11 +140,7 @@ describe("semantic search", () => {
 		it("should find cooking content when searching for food terms", async () => {
 			const globalKey = "__s2bCooking";
 
-			const result = await pollEval(
-				`(function(){ var vs = ${PLUGIN}.vectorStoreService; window.${globalKey} = "pending"; vs.lexicalSearch("shakshuka hummus", 5).then(function(r){ window.${globalKey} = JSON.stringify(r.map(function(d){ return d.name; })); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: e.message}); }); return "started"; })()`,
-				globalKey,
-				{ timeoutMs: 15_000 },
-			);
+			const result = await lexicalSearchEval(globalKey, "shakshuka hummus", "function(d){ return d.name; }");
 
 			const parsed = JSON.parse(result);
 			expect(parsed.error).toBeUndefined();
@@ -154,11 +150,7 @@ describe("semantic search", () => {
 		it("should not return unrelated notes for specific queries", async () => {
 			const globalKey = "__s2bUnrelated";
 
-			const result = await pollEval(
-				`(function(){ var vs = ${PLUGIN}.vectorStoreService; window.${globalKey} = "pending"; vs.lexicalSearch("shakshuka", 5).then(function(r){ window.${globalKey} = JSON.stringify(r.map(function(d){ return d.name; })); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: e.message}); }); return "started"; })()`,
-				globalKey,
-				{ timeoutMs: 15_000 },
-			);
+			const result = await lexicalSearchEval(globalKey, "shakshuka", "function(d){ return d.name; }");
 
 			const parsed = JSON.parse(result);
 			expect(parsed.error).toBeUndefined();

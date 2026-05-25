@@ -1,5 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PLUGIN, clearBuffers, getConsole, getErrors, isProviderConfigured, pollEval, sleep } from "./helpers/cli.ts";
+import {
+	PLUGIN,
+	clearBuffers,
+	deleteAgentThread,
+	getConsole,
+	getErrors,
+	isProviderConfigured,
+	pollEval,
+	sleep,
+} from "./helpers/cli.ts";
 
 const providerAvailable = (() => {
 	try {
@@ -10,11 +19,16 @@ const providerAvailable = (() => {
 })();
 
 describe.skipIf(!providerAvailable)("ai transport concurrency", () => {
+	const createdThreadIds: string[] = [];
+
 	beforeAll(() => {
 		clearBuffers();
 	});
 
-	afterAll(() => {
+	afterAll(async () => {
+		for (const threadId of createdThreadIds) {
+			await deleteAgentThread(threadId);
+		}
 		clearBuffers();
 	});
 
@@ -22,6 +36,7 @@ describe.skipIf(!providerAvailable)("ai transport concurrency", () => {
 		const globalKey = "__s2bAiTransportConcurrency_" + Date.now();
 		const downgradedThreadId = "transport-downgrade-" + Date.now();
 		const defaultThreadId = "transport-default-" + Date.now();
+		createdThreadIds.push(downgradedThreadId, defaultThreadId);
 
 		const raw = await pollEval(
 			`(function(){

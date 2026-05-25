@@ -418,14 +418,6 @@ export interface PluginData {
 	recentNotes: RecentNoteEntry[];
 
 	/**
-	 * Default embedding model for vector-based search.
-	 * When null, embeddings search is disabled.
-	 * @deprecated Use embeddingIndexes + searchEmbedIndex/graphEmbedIndex instead.
-	 * Kept for backward compatibility during migration.
-	 */
-	defaultEmbedModel: DefaultEmbedModel | null;
-
-	/**
 	 * Registry of all known embedding indexes.
 	 * Each index is identified by "provider:model" and stored independently.
 	 */

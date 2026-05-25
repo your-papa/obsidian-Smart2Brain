@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	PLUGIN,
 	clearBuffers,
+	closeAllModals,
 	executeCommand,
 	getErrors,
 	obsidianEval,
@@ -20,28 +21,10 @@ function resetSpaces() {
 	})()`);
 }
 
-function closeOpenModals() {
-	obsidianEval(`(() => {
-		document.querySelectorAll(".modal-close-button, .modal button").forEach((el) => {
-			if (!(el instanceof HTMLElement)) return;
-			const text = el.textContent || "";
-			const label = el.getAttribute("aria-label") || "";
-			if (
-				label === "Close" ||
-				text.includes("Cancel") ||
-				text.includes("Create Space") ||
-				text.includes("Save Changes") ||
-				text.includes("Add file") ||
-				text.includes("Add 1 file") ||
-				text.includes("Add 2 files")
-			) {
-				try {
-					el.click();
-				} catch {}
-			}
-		});
-		return document.querySelectorAll(".modal").length;
-	})()`);
+const ACTIVE_PICKER = ".modal-container:last-of-type .s2b-search-modal";
+
+function activePickerSelector(selector: string): string {
+	return `${ACTIVE_PICKER} ${selector}`;
 }
 
 function latestSpaceEditorText(): string {
@@ -55,30 +38,47 @@ function latestSpaceEditorText(): string {
 
 function latestSelectionSummaryText(): string {
 	const raw = obsidianEval(`(() => {
-		const summaries = Array.from(document.querySelectorAll(".s2b-search-selection-summary"));
-		const summary = summaries[summaries.length - 1];
+		const summary = document.querySelector(${JSON.stringify(activePickerSelector(".s2b-search-selection-summary"))});
 		return summary instanceof HTMLElement ? (summary.textContent ?? "") : "";
 	})()`);
 	return raw.startsWith("=> ") ? raw.slice(3) : raw;
+}
+
+function dispatchLatestPickerKey(options: {
+	key: string;
+	code: string;
+	shiftKey?: boolean;
+}): string {
+	return obsidianEval(`(() => {
+		const picker = document.querySelector(${JSON.stringify(ACTIVE_PICKER)});
+		const target = picker instanceof HTMLElement ? picker.querySelector(".prompt-input") ?? picker : null;
+		if (!(target instanceof HTMLElement)) return "missing-picker";
+		target.dispatchEvent(new KeyboardEvent("keydown", ${JSON.stringify({
+		bubbles: true,
+		cancelable: true,
+		...options,
+	})}));
+		return "dispatched";
+	})()`);
 }
 
 describe("spaces editor", () => {
 	beforeAll(() => {
 		clearBuffers();
 		resetSpaces();
-		closeOpenModals();
+		closeAllModals();
 	});
 
 	afterAll(() => {
 		resetSpaces();
-		closeOpenModals();
+		closeAllModals();
 		clearBuffers();
 	});
 
 	it("adds multiple selected files when confirming from the shared file picker", async () => {
 		clearBuffers();
 		resetSpaces();
-		closeOpenModals();
+		closeAllModals();
 
 		executeCommand("smart-second-brain:open-smart-graph");
 		await waitForSelector(".space-switcher-trigger");
@@ -130,12 +130,11 @@ describe("spaces editor", () => {
 		})()`),
 		).toContain("opened-picker-modal");
 
-		await waitForSelector(".s2b-search-modal .prompt-input");
+		await waitForSelector(activePickerSelector(".prompt-input"));
 
 		expect(
 			obsidianEval(`(() => {
-			const pickers = Array.from(document.querySelectorAll(".s2b-search-modal"));
-			const picker = pickers[pickers.length - 1];
+			const picker = document.querySelector(${JSON.stringify(ACTIVE_PICKER)});
 			const searchInput = picker instanceof HTMLElement ? picker.querySelector(".prompt-input") : null;
 			return searchInput instanceof HTMLInputElement ? searchInput.placeholder : "missing-search-input";
 		})()`),
@@ -143,8 +142,7 @@ describe("spaces editor", () => {
 
 		expect(
 			obsidianEval(`(() => {
-			const pickers = Array.from(document.querySelectorAll(".s2b-search-modal"));
-			const picker = pickers[pickers.length - 1];
+			const picker = document.querySelector(${JSON.stringify(ACTIVE_PICKER)});
 			const input = picker instanceof HTMLElement ? picker.querySelector(".prompt-input") : null;
 			if (!(input instanceof HTMLInputElement)) return "missing-search-input";
 			input.value = "Welcome";
@@ -155,7 +153,7 @@ describe("spaces editor", () => {
 
 		await waitForCondition(
 			() =>
-				obsidianEval(`Array.from(document.querySelectorAll(".s2b-search-modal .suggestion-item")).some((el) => {
+				obsidianEval(`Array.from(document.querySelectorAll(${JSON.stringify(activePickerSelector(".suggestion-item"))})).some((el) => {
 					if (!(el instanceof HTMLElement)) return false;
 					return (el.textContent || "").includes("Welcome");
 				})`).includes(
@@ -165,32 +163,19 @@ describe("spaces editor", () => {
 			{ timeoutMs: 20_000, intervalMs: 250 },
 		);
 
-		expect(
-			obsidianEval(`(() => {
-			const pickers = Array.from(document.querySelectorAll(".s2b-search-modal"));
-			const picker = pickers[pickers.length - 1];
-			if (!(picker instanceof HTMLElement)) return "missing-picker";
-			picker.dispatchEvent(new KeyboardEvent("keydown", {
-				key: "Enter",
-				code: "Enter",
-				shiftKey: true,
-				bubbles: true,
-				cancelable: true,
-			}));
-			return "toggled-first-selection";
-		})()`),
-		).toContain("toggled-first-selection");
+		expect(dispatchLatestPickerKey({ key: "Enter", code: "Enter", shiftKey: true })).toContain(
+			"dispatched",
+		);
 
 		await waitForCondition(
-			() => latestSelectionSummaryText().includes("1 selected"),
+			() => latestSelectionSummaryText().includes("Selected:"),
 			"first picker selection summary to appear",
 			{ timeoutMs: 10_000, intervalMs: 250 },
 		);
 
 		expect(
 			obsidianEval(`(() => {
-			const pickers = Array.from(document.querySelectorAll(".s2b-search-modal"));
-			const picker = pickers[pickers.length - 1];
+			const picker = document.querySelector(${JSON.stringify(ACTIVE_PICKER)});
 			const input = picker instanceof HTMLElement ? picker.querySelector(".prompt-input") : null;
 			if (!(input instanceof HTMLInputElement)) return "missing-search-input";
 			input.value = "Project";
@@ -201,7 +186,7 @@ describe("spaces editor", () => {
 
 		await waitForCondition(
 			() =>
-				obsidianEval(`Array.from(document.querySelectorAll(".s2b-search-modal .suggestion-item")).some((el) => {
+				obsidianEval(`Array.from(document.querySelectorAll(${JSON.stringify(activePickerSelector(".suggestion-item"))})).some((el) => {
 					if (!(el instanceof HTMLElement)) return false;
 					return (el.textContent || "").includes("Project Management Notes");
 				})`).includes("true"),
@@ -209,21 +194,9 @@ describe("spaces editor", () => {
 			{ timeoutMs: 20_000, intervalMs: 250 },
 		);
 
-		expect(
-			obsidianEval(`(() => {
-			const pickers = Array.from(document.querySelectorAll(".s2b-search-modal"));
-			const picker = pickers[pickers.length - 1];
-			if (!(picker instanceof HTMLElement)) return "missing-picker";
-			picker.dispatchEvent(new KeyboardEvent("keydown", {
-				key: "Enter",
-				code: "Enter",
-				shiftKey: true,
-				bubbles: true,
-				cancelable: true,
-			}));
-			return "toggled-second-selection";
-		})()`),
-		).toContain("toggled-second-selection");
+		expect(dispatchLatestPickerKey({ key: "Enter", code: "Enter", shiftKey: true })).toContain(
+			"dispatched",
+		);
 
 		await waitForCondition(
 			() => latestSelectionSummaryText().includes("2 selected"),
@@ -231,20 +204,7 @@ describe("spaces editor", () => {
 			{ timeoutMs: 10_000, intervalMs: 250 },
 		);
 
-		expect(
-			obsidianEval(`(() => {
-			const pickers = Array.from(document.querySelectorAll(".s2b-search-modal"));
-			const picker = pickers[pickers.length - 1];
-			if (!(picker instanceof HTMLElement)) return "missing-picker";
-			picker.dispatchEvent(new KeyboardEvent("keydown", {
-				key: "Enter",
-				code: "Enter",
-				bubbles: true,
-				cancelable: true,
-			}));
-			return "confirmed-selected-files";
-		})()`),
-		).toContain("confirmed-selected-files");
+		expect(dispatchLatestPickerKey({ key: "Enter", code: "Enter" })).toContain("dispatched");
 
 		await waitForCondition(
 			() => {

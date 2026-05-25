@@ -38,7 +38,7 @@ vi.mock("../../src/utils/logging", () => ({
 
 vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => ({
-		defaultEmbedModel: null,
+		getSearchEmbedModel: vi.fn().mockReturnValue(null),
 		getEmbedModels: vi.fn().mockReturnValue({}),
 		searchAlgorithm: "lexical",
 		searchShowPath: true,

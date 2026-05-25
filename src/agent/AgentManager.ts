@@ -277,6 +277,24 @@ export class AgentManager {
 	private deferredSetup: Promise<void> | null = null;
 	private readonly chatManager: ObsidianChatManager;
 
+	private sanitizeThreadFileName(threadId: string): string {
+		return threadId
+			.replace(/[<>:"/\\|?*]/g, "-")
+			.replace(/\s+/g, " ")
+			.trim()
+			.substring(0, 100);
+	}
+
+	private normalizeThreadId(threadId: string): string {
+		const normalized = normalizePath(threadId.trim() || "default-thread");
+		if (normalized.endsWith(".chat")) {
+			return normalized;
+		}
+
+		const fileName = `${this.sanitizeThreadFileName(normalized) || "default-thread"}.chat`;
+		return normalizePath(`${getData().targetFolder}/${fileName}`);
+	}
+
 	constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
 		this.chatManager = new ObsidianChatManager(plugin);
@@ -944,7 +962,8 @@ export class AgentManager {
 		lcSource?: string,
 		spaces?: string[],
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
-		setCurrentThreadId(threadId);
+		const resolvedThreadId = this.normalizeThreadId(threadId);
+		setCurrentThreadId(resolvedThreadId);
 		setCurrentSpaces(this.resolveRunSpaces(spaces));
 		try {
 			const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
@@ -952,7 +971,7 @@ export class AgentManager {
 			yield* this.dispatchStream(
 				agent.streamTokens({
 					query,
-					threadId,
+					threadId: resolvedThreadId,
 					metadata: runMetadata,
 					configurable: checkpointId ? { checkpoint_id: checkpointId } : undefined,
 					signal,
@@ -984,7 +1003,8 @@ export class AgentManager {
 		signal?: AbortSignal,
 		attachments?: ChatAttachment[],
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
-		setCurrentThreadId(threadId);
+		const resolvedThreadId = this.normalizeThreadId(threadId);
+		setCurrentThreadId(resolvedThreadId);
 		setCurrentSpaces(this.resolveRunSpaces());
 		try {
 			const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
@@ -992,7 +1012,7 @@ export class AgentManager {
 			yield* this.dispatchStream(
 				agent.editFromCheckpoint({
 					query,
-					threadId,
+					threadId: resolvedThreadId,
 					checkpointId,
 					metadata: runMetadata,
 					signal,
@@ -1017,14 +1037,15 @@ export class AgentManager {
 		checkpointId: string,
 		signal?: AbortSignal,
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
-		setCurrentThreadId(threadId);
+		const resolvedThreadId = this.normalizeThreadId(threadId);
+		setCurrentThreadId(resolvedThreadId);
 		setCurrentSpaces(this.resolveRunSpaces());
 		try {
 			const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
 
 			yield* this.dispatchStream(
 				agent.regenerateFromCheckpoint({
-					threadId,
+					threadId: resolvedThreadId,
 					checkpointId,
 					metadata: runMetadata,
 					signal,
@@ -1040,11 +1061,12 @@ export class AgentManager {
 	}
 
 	async getThreadHistory(threadId: string): Promise<ThreadHistory | null> {
+		const resolvedThreadId = this.normalizeThreadId(threadId);
 		try {
 			// Try to use agent if available to get history from checkpoint (more robust)
 			if (this.agent) {
 				try {
-					const history = await this.agent.getThreadHistory(threadId);
+					const history = await this.agent.getThreadHistory(resolvedThreadId);
 					if (history) {
 						return history;
 					}
@@ -1061,17 +1083,17 @@ export class AgentManager {
 
 	async getCheckpointHistory(threadId: string): Promise<CheckpointHistoryItem[]> {
 		const agent = await this.ensureAgent();
-		return agent.getCheckpointHistory(threadId);
+		return agent.getCheckpointHistory(this.normalizeThreadId(threadId));
 	}
 
 	async getCheckpointMessages(threadId: string, checkpointId: string): Promise<BaseMessage[]> {
 		const agent = await this.ensureAgent();
-		return agent.getCheckpointMessages(threadId, checkpointId);
+		return agent.getCheckpointMessages(this.normalizeThreadId(threadId), checkpointId);
 	}
 
 	async getLatestCheckpointId(threadId: string): Promise<string | undefined> {
 		const agent = await this.ensureAgent();
-		return agent.getLatestCheckpointId(threadId);
+		return agent.getLatestCheckpointId(this.normalizeThreadId(threadId));
 	}
 
 	async getAllThreads(): Promise<ThreadSnapshot[]> {
@@ -1080,11 +1102,11 @@ export class AgentManager {
 	}
 
 	async deleteThread(threadId: string): Promise<void> {
-		await this.chatManager.delete(threadId);
+		await this.chatManager.delete(this.normalizeThreadId(threadId));
 	}
 
 	async setLastViewedCheckpoint(threadId: string, checkpointId: string): Promise<void> {
-		const snapshot = await this.chatManager.read(threadId, true);
+		const snapshot = await this.chatManager.read(this.normalizeThreadId(threadId), true);
 		if (!snapshot) return;
 
 		const currentLastViewed = snapshot.metadata?.lastViewedCheckpointId;

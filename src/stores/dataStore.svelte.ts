@@ -398,7 +398,6 @@ export const DEFAULT_SETTINGS: PluginData = {
 	searchShowMatchContext: true,
 	searchShowKeyboardHints: true,
 	recentNotes: [],
-	defaultEmbedModel: null,
 	embeddingIndexes: [],
 	searchEmbedIndex: null,
 	graphEmbedIndex: null,
@@ -547,7 +546,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch {
 			// ignore
@@ -1029,19 +1028,6 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
-	get defaultEmbedModel() {
-		// Backward-compat: derive from searchEmbedIndex
-		const indexId = this.#data.searchEmbedIndex;
-		if (!indexId) return this.#data.defaultEmbedModel;
-		const config = this.#data.embeddingIndexes.find((i) => i.id === indexId);
-		if (!config) return this.#data.defaultEmbedModel;
-		return { provider: config.provider, model: config.model };
-	}
-	set defaultEmbedModel(val: DefaultEmbedModel | null) {
-		this.#data.defaultEmbedModel = val;
-		this.saveSettings();
-	}
-
 	// --- Embedding Indexes (Multi-Index) ---
 
 	get embeddingIndexes(): EmbeddingIndexConfig[] {
@@ -1185,6 +1171,8 @@ export class PluginDataStore {
 	}
 	setActiveImmersedSpaceId(id: string | null): void {
 		this.#data.activeImmersedSpaceId = id;
+		const activeSpace = id ? ((this.#data.spaces ?? []).find((space) => space.id === id) ?? null) : null;
+		setImmersedSpace(activeSpace);
 		this.saveSettings();
 	}
 

@@ -9,6 +9,7 @@ import type { BaseProviderDefinition, ProviderInstanceMeta, ProviderTemplateId }
 import { createOpenAICompatibleProvider } from "./openai-compatible";
 import { anthropicProvider } from "./anthropic";
 import { ollamaProvider } from "./ollama";
+import { openaiProvider } from "./openai";
 import { openrouterProvider } from "./openrouter";
 import { openAICodexProvider } from "./openai-codex";
 
@@ -91,10 +92,20 @@ export function getProviderDefinition(
 	id: string,
 	providerMeta: Record<string, ProviderInstanceMeta> = {},
 ): BaseProviderDefinition | undefined {
+	switch (id) {
+		case "openai":
+			return openaiProvider;
+		case "anthropic":
+			return anthropicProvider;
+		case "ollama":
+			return ollamaProvider;
+	}
+
 	const meta = providerMeta[id];
 	if (!meta) {
 		return undefined;
 	}
+
 	return createTemplateDefinition(id, meta.templateId, meta);
 }
 
@@ -138,5 +149,6 @@ export type {
 export { isEmbeddingProvider } from "../types/provider/index";
 
 export { anthropicProvider } from "./anthropic";
+export { openaiProvider } from "./openai";
 export { ollamaProvider } from "./ollama";
 export { openrouterProvider } from "./openrouter";

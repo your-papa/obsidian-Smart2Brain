@@ -14,7 +14,6 @@ interface NormalizedRequest {
 	init: RequestInit;
 }
 
-let electronNetFetchPromise: Promise<typeof fetch | null> | null = null;
 const aiTransportContextStorage = new AsyncLocalStorage<AiTransportContext>();
 
 type ErrorWithCause = Error & { cause?: unknown };
@@ -73,70 +72,64 @@ function getCurrentMode(): AiTransportMode {
 }
 
 async function getElectronNetFetch(): Promise<typeof fetch | null> {
-	if (!electronNetFetchPromise) {
-		electronNetFetchPromise = (async () => {
-			const globalWithRequire = globalThis as typeof globalThis & {
-				require?: (id: string) => unknown;
-				window?: { require?: (id: string) => unknown };
+	const globalWithRequire = globalThis as typeof globalThis & {
+		require?: (id: string) => unknown;
+		window?: { require?: (id: string) => unknown };
+	};
+
+	const requireCandidates = [globalWithRequire.require, globalWithRequire.window?.require];
+	for (const requireFn of requireCandidates) {
+		if (typeof requireFn !== "function") continue;
+		try {
+			const electron = requireFn("electron") as {
+				net?: { fetch?: typeof fetch };
+				remote?: { net?: { fetch?: typeof fetch } };
 			};
 
-			const requireCandidates = [globalWithRequire.require, globalWithRequire.window?.require];
-			for (const requireFn of requireCandidates) {
-				if (typeof requireFn !== "function") continue;
-				try {
-					const electron = requireFn("electron") as {
-						net?: { fetch?: typeof fetch };
-						remote?: { net?: { fetch?: typeof fetch } };
-					};
-
-					const remoteNet = electron.remote?.net;
-					const remoteFetch = remoteNet?.fetch;
-					if (typeof remoteFetch === "function") {
-						Logger.debug("aiTransport.electron_fetch_resolved", { source: "electron.remote.net.fetch" });
-						return remoteFetch.bind(remoteNet);
-					}
-
-					const electronFetch = electron.net?.fetch;
-					if (typeof electronFetch === "function") {
-						Logger.debug("aiTransport.electron_fetch_resolved", { source: "electron.net.fetch" });
-						return electronFetch.bind(electron.net);
-					}
-				} catch {
-					// Try the next resolution path.
-				}
+			const remoteNet = electron.remote?.net;
+			const remoteFetch = remoteNet?.fetch;
+			if (typeof remoteFetch === "function") {
+				Logger.debug("aiTransport.electron_fetch_resolved", { source: "electron.remote.net.fetch" });
+				return remoteFetch.bind(remoteNet);
 			}
 
-			try {
-				const electron = (await import("electron")) as {
-					net?: { fetch?: typeof fetch };
-					remote?: { net?: { fetch?: typeof fetch } };
-				};
-
-				const remoteNet = electron.remote?.net;
-				const remoteFetch = remoteNet?.fetch;
-				if (typeof remoteFetch === "function") {
-					Logger.debug("aiTransport.electron_fetch_resolved", {
-						source: "imported electron.remote.net.fetch",
-					});
-					return remoteFetch.bind(remoteNet);
-				}
-
-				const electronFetch = electron.net?.fetch;
-				if (typeof electronFetch === "function") {
-					Logger.debug("aiTransport.electron_fetch_resolved", { source: "imported electron.net.fetch" });
-					return electronFetch.bind(electron.net);
-				}
-
-				Logger.debug("aiTransport.electron_fetch_unavailable");
-				return null;
-			} catch {
-				Logger.debug("aiTransport.electron_fetch_unavailable");
-				return null;
+			const electronFetch = electron.net?.fetch;
+			if (typeof electronFetch === "function") {
+				Logger.debug("aiTransport.electron_fetch_resolved", { source: "electron.net.fetch" });
+				return electronFetch.bind(electron.net);
 			}
-		})();
+		} catch {
+			// Try the next resolution path.
+		}
 	}
 
-	return electronNetFetchPromise;
+	try {
+		const electron = (await import("electron")) as {
+			net?: { fetch?: typeof fetch };
+			remote?: { net?: { fetch?: typeof fetch } };
+		};
+
+		const remoteNet = electron.remote?.net;
+		const remoteFetch = remoteNet?.fetch;
+		if (typeof remoteFetch === "function") {
+			Logger.debug("aiTransport.electron_fetch_resolved", {
+				source: "imported electron.remote.net.fetch",
+			});
+			return remoteFetch.bind(remoteNet);
+		}
+
+		const electronFetch = electron.net?.fetch;
+		if (typeof electronFetch === "function") {
+			Logger.debug("aiTransport.electron_fetch_resolved", { source: "imported electron.net.fetch" });
+			return electronFetch.bind(electron.net);
+		}
+
+		Logger.debug("aiTransport.electron_fetch_unavailable");
+		return null;
+	} catch {
+		Logger.debug("aiTransport.electron_fetch_unavailable");
+		return null;
+	}
 }
 
 function cloneHeaders(headers: HeadersInit | undefined): Headers {

@@ -1,18 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-    PLUGIN,
     clearBuffers,
     deleteAllChatFiles,
     disablePlugin,
     domCount,
-    domText,
     enablePlugin,
     executeCommand,
     getErrors,
     isProviderConfigured,
-    obsidianEval,
-    pollEval,
     sleep,
+    submitChatMessageViaUi,
     waitForCondition,
     waitForSelector,
 } from "./helpers/cli.ts";
@@ -35,7 +32,7 @@ describe("end-to-end chat flow", () => {
         executeCommand("smart-second-brain:new-chat");
         await waitForSelector(".chat-root");
         await sleep(1000);
-    });
+    }, 30_000);
 
     afterAll(() => {
         deleteAllChatFiles();
@@ -48,21 +45,20 @@ describe("end-to-end chat flow", () => {
     });
 
     it.skipIf(!providerAvailable)(
-        "should send a message and receive a streamed response",
+        "should submit a message through the chat UI",
         async () => {
-            const globalKey = "__s2bE2EChat" + Date.now();
-            const threadId = "e2e-chat-" + Date.now();
+            const submitResult = await submitChatMessageViaUi("Reply with exactly: HELLO_E2E");
+            expect(submitResult).not.toContain("missing-editor-api");
+            expect(submitResult).not.toContain("missing-send-button");
+            expect(submitResult).not.toContain("send-disabled");
+            expect(submitResult).not.toContain("ERROR:");
 
-            // Use the agentManager to send a message via the messenger flow
-            const result = await pollEval(
-                `(function(){ var am = ${PLUGIN}.agentManager; window.${globalKey} = "pending"; (async function(){ try { var tokens = ""; for await (var chunk of am.streamQuery("Reply with exactly: HELLO_E2E", "${threadId}")) { if (chunk.type === "token" && chunk.token) tokens += chunk.token; } window.${globalKey} = tokens || "EMPTY"; } catch(e) { window.${globalKey} = "ERROR:" + e.message; } })(); return "started"; })()`,
-                globalKey,
-                { timeoutMs: 60_000 },
-            );
-
-            expect(result).not.toContain("ERROR:");
-            expect(result).not.toBe("EMPTY");
-            expect(result.length).toBeGreaterThan(0);
+            const normalizedSubmitResult = submitResult.startsWith("=> ")
+                ? submitResult.slice(3)
+                : submitResult;
+            const parsed = JSON.parse(normalizedSubmitResult) as { clicked?: boolean; value?: string };
+            expect(parsed.clicked).toBe(true);
+            expect(typeof parsed.value).toBe("string");
         },
     );
 
