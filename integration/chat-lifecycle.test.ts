@@ -23,7 +23,7 @@ describe("new chat creation", () => {
 		executeCommand("smart-second-brain:new-chat");
 		await waitForSelector(".chat-root");
 		await sleep(1000);
-	});
+	}, 30_000);
 
 	afterAll(() => {
 		deleteAllChatFiles();

@@ -49,7 +49,7 @@ export interface SerializedDocument {
  * Written to disk as MessagePack binary.
  */
 export interface SerializedIndex {
-	/** Schema version for migration support */
+	/** Schema version for persisted index data */
 	version: number;
 	/** Provider ID that generated these embeddings */
 	providerId: string;
@@ -196,7 +196,7 @@ export function sanitizeIndexId(provider: string, model: string): string {
 /**
  * Get the database name for a specific index ID and vault.
  * @param vaultId The vault identifier
- * @param indexId Optional "provider:model" composite key. If omitted, returns legacy name.
+ * @param indexId Optional "provider:model" composite key. If omitted, returns the base vault-scoped name.
  * @returns IndexedDB database name
  */
 export function getDbName(prefix: string, vaultId: string, indexId?: string): string {

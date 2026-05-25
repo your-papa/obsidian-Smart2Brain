@@ -408,7 +408,7 @@ describe("PluginDataStore – Chat Models", () => {
 });
 
 describe("createData", () => {
-	it("should default missing summarizationModel to null for older saved agents", async () => {
+	it("should default missing summarizationModel to null for saved agents without that field", async () => {
 		const plugin = {
 			...createMockPlugin(),
 			loadData: vi.fn().mockResolvedValue({
@@ -418,7 +418,7 @@ describe("createData", () => {
 						id: DEFAULT_AGENT_ID,
 						name: "Default Agent",
 						chatModel: null,
-						systemPrompt: "Legacy prompt",
+						systemPrompt: "Saved prompt",
 						skills: {},
 						toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 						mcpServers: {},

@@ -76,7 +76,6 @@ function buildPartialContent(changes: Change[], groupIndex: number, targetUsesNe
 
 	return result;
 }
-
 export function getPendingChangesStore(): PendingChangesStore {
 	if (!_store) throw new Error("PendingChangesStore not initialized");
 	return _store;

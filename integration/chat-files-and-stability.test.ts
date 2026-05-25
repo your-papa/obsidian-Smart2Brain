@@ -8,6 +8,9 @@ import {
 	executeCommand,
 	getErrors,
 	obsidian,
+	obsidianEval,
+	pollEval,
+	PLUGIN,
 	reloadPlugin,
 	sleep,
 	waitForCondition,
@@ -88,9 +91,14 @@ describe("plugin stability with note operations", () => {
 	it("should handle opening a note and switching to chat without errors", async () => {
 		clearBuffers();
 		obsidian(`open file="S2B Stability Test 1"`);
-		await sleep(500);
+		await waitForCondition(
+			() => obsidianEval('app.workspace.getActiveFile()?.basename ?? ""').includes("S2B Stability Test 1"),
+			"stability note to become active",
+			{ timeoutMs: 15_000, intervalMs: 500 },
+		);
 		executeCommand("smart-second-brain:open-chat");
 		await waitForSelector('[data-type="smart-second-brain-chat"]');
+		await sleep(500);
 
 		expect(getErrors()).toBe("");
 	});

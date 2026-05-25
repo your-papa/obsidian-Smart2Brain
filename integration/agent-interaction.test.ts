@@ -1,12 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-	PLUGIN,
 	clearBuffers,
+	deleteAllChatFiles,
+	deleteAgentThread,
+	executeCommand,
+	getLatestPersistedChatSummary,
 	getErrors,
 	isProviderConfigured,
 	obsidianEval,
-	pollEval,
+	submitChatMessageViaUi,
 	sleep,
+	waitForCondition,
+	waitForSelector,
 } from "./helpers/cli.ts";
 
 const providerAvailable = (() => {
@@ -18,17 +23,29 @@ const providerAvailable = (() => {
 })();
 
 describe("agent interaction", () => {
+	let simpleThreadId: string | null = null;
+
 	beforeAll(() => {
+		clearBuffers();
+		deleteAllChatFiles();
+	});
+
+	afterAll(async () => {
+		if (simpleThreadId) {
+			await deleteAgentThread(simpleThreadId);
+		}
 		clearBuffers();
 	});
 
-	afterAll(() => {
-		clearBuffers();
-	});
+	async function openFreshChat(): Promise<void> {
+		executeCommand("smart-second-brain:new-chat");
+		await waitForSelector(".chat-root");
+		await sleep(1000);
+	}
 
 	it.skipIf(!providerAvailable)("should have a chat model configured", () => {
 		const result = obsidianEval(
-			`(function(){ var a = ${PLUGIN}.pluginData.getSelectedAgent(); return a.chatModel.provider + ":" + a.chatModel.model; })()`,
+			`(function(){ var a = app.plugins.plugins["smart-second-brain"].pluginData.getSelectedAgent(); return a.chatModel.provider + ":" + a.chatModel.model; })()`,
 		);
 		expect(result).toContain("=>");
 		expect(result).not.toContain("undefined");
@@ -36,7 +53,7 @@ describe("agent interaction", () => {
 
 	it.skipIf(!providerAvailable)("should have at least one configured provider", () => {
 		const result = obsidianEval(
-			`${PLUGIN}.pluginData.getConfiguredProviders().join(",")`,
+			`app.plugins.plugins["smart-second-brain"].pluginData.getConfiguredProviders().join(",")`,
 		);
 		expect(result).toContain("=>");
 		// Should have at least one provider like ollama or openrouter
@@ -45,17 +62,29 @@ describe("agent interaction", () => {
 	});
 
 	it.skipIf(!providerAvailable)("should send a simple message and receive a response", async () => {
-		const globalKey = "__s2bTestSimple";
+		await openFreshChat();
+		const submitResult = await submitChatMessageViaUi("Reply with exactly: PONG");
+		expect(submitResult).not.toContain("missing-");
+		expect(submitResult).not.toContain("send-disabled");
+		expect(submitResult).not.toContain("ERROR:");
 
-		const result = await pollEval(
-			`(function(){ var am = ${PLUGIN}.agentManager; window.${globalKey} = "pending"; (async function(){ try { var result = ""; for await (var chunk of am.streamQuery("Reply with exactly: PONG", "test-simple-e2e")) { if (chunk.type === "token" && chunk.token) result += chunk.token; } window.${globalKey} = result || "EMPTY"; } catch(e) { window.${globalKey} = "ERROR:" + e.message; } })(); return "started"; })()`,
-			globalKey,
-			{ timeoutMs: 60_000 },
+		await waitForCondition(
+			() => {
+				const summary = getLatestPersistedChatSummary();
+				return Boolean(
+					summary
+					&& summary.humanContents.includes("Reply with exactly: PONG")
+					&& summary.assistantContents.some((content) => content.includes("PONG")),
+				);
+			},
+			"persisted chat summary for simple UI message",
+			{ timeoutMs: 90_000, intervalMs: 1_000 },
 		);
 
-		expect(result).not.toContain("ERROR:");
-		expect(result).not.toBe("EMPTY");
-		expect(result.length).toBeGreaterThan(0);
+		const summary = getLatestPersistedChatSummary();
+		expect(summary).not.toBeNull();
+		expect(summary?.assistantContents.at(-1)).toContain("PONG");
+		simpleThreadId = summary?.threadId ?? null;
 	});
 
 	it("should not produce errors during agent interaction", () => {
@@ -64,50 +93,64 @@ describe("agent interaction", () => {
 });
 
 describe("agent with tool use", () => {
-	let toolResult: string;
+	let toolThreadId: string | null = null;
 
 	beforeAll(() => {
 		clearBuffers();
+		deleteAllChatFiles();
 	});
 
-	afterAll(() => {
+	afterAll(async () => {
+		if (toolThreadId) {
+			await deleteAgentThread(toolThreadId);
+		}
 		clearBuffers();
 	});
 
 	it.skipIf(!providerAvailable)("should invoke tools when asked to search vault content", async () => {
-		const globalKey = "__s2bTestToolsIT";
-		// Use a unique thread ID to avoid cached history
-		const threadId = "test-tools-" + Date.now();
+		executeCommand("smart-second-brain:new-chat");
+		await waitForSelector(".chat-root");
+		await sleep(1000);
 
-		const result = await pollEval(
-			`(function(){ var am = ${PLUGIN}.agentManager; window.${globalKey} = "pending"; (async function(){ try { var tokens = ""; var tools = []; var toolOutputs = []; for await (var chunk of am.streamQuery("Use the search_notes tool to find notes about machine learning in my vault", "${threadId}")) { if (chunk.type === "token" && chunk.token) tokens += chunk.token; if (chunk.type === "tool_start") tools.push(chunk.toolName); if (chunk.type === "tool_end") toolOutputs.push({name: chunk.toolName, hasOutput: !!chunk.output}); } window.${globalKey} = JSON.stringify({tokens: tokens, tools: tools, toolOutputs: toolOutputs, tokenLen: tokens.length}); } catch(e) { window.${globalKey} = JSON.stringify({error: e.message}); } })(); return "started"; })()`,
-			globalKey,
-			{ timeoutMs: 90_000, intervalMs: 3_000 },
+		const prompt = "Use the search_notes tool to find notes about machine learning in my vault";
+		const submitResult = await submitChatMessageViaUi(prompt);
+		expect(submitResult).not.toContain("missing-");
+		expect(submitResult).not.toContain("send-disabled");
+		expect(submitResult).not.toContain("ERROR:");
+
+		await waitForCondition(
+			() => {
+				const summary = getLatestPersistedChatSummary();
+				return Boolean(
+					summary
+					&& summary.humanContents.includes(prompt)
+					&& summary.toolCallNames.length > 0
+					&& summary.toolOutputCount > 0
+					&& summary.assistantContents.length > 0,
+				);
+			},
+			"persisted chat summary for UI tool-use message",
+			{ timeoutMs: 120_000, intervalMs: 1_000 },
 		);
 
-		toolResult = result;
-		const parsed = JSON.parse(result);
-		expect(parsed.error).toBeUndefined();
-		// The agent should produce some response
-		expect(parsed.tokenLen).toBeGreaterThan(0);
-		// With an explicit instruction to use tools, we expect tool usage
-		expect(parsed.tools.length).toBeGreaterThan(0);
-	});
+		const summary = getLatestPersistedChatSummary();
+		expect(summary).not.toBeNull();
+		expect(summary?.assistantContents.length ?? 0).toBeGreaterThan(0);
+		expect(summary?.toolCallNames.length ?? 0).toBeGreaterThan(0);
+		toolThreadId = summary?.threadId ?? null;
+	}, 120_000);
 
 	it.skipIf(!providerAvailable)("should have used a search-related tool", () => {
-		const parsed = JSON.parse(toolResult);
-		const hasSearchTool = parsed.tools.some(
+		const summary = getLatestPersistedChatSummary();
+		const hasSearchTool = (summary?.toolCallNames ?? []).some(
 			(t: string) => t && (t.includes("search") || t.includes("browse") || t.includes("read")),
 		);
 		expect(hasSearchTool).toBe(true);
 	});
 
 	it.skipIf(!providerAvailable)("should have received non-empty output from every tool", () => {
-		const parsed = JSON.parse(toolResult);
-		expect(parsed.toolOutputs.length).toBeGreaterThan(0);
-		for (const tool of parsed.toolOutputs) {
-			expect(tool.hasOutput).toBe(true);
-		}
+		const summary = getLatestPersistedChatSummary();
+		expect(summary?.toolOutputCount ?? 0).toBeGreaterThan(0);
 	});
 
 	it("should not produce errors during tool use", () => {

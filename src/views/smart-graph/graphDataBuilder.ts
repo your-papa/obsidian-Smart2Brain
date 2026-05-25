@@ -20,6 +20,7 @@ import {
 	type GraphEdge,
 	type GraphNode,
 	generateClusterColors,
+	type ProjectionMethod,
 	type SmartGraphSettings,
 	type ColorGroup,
 	type SegmentBy,
@@ -875,6 +876,147 @@ export function applySegments(graphData: GraphData, segments: SpaceSegment[]): G
 			if (info === undefined) return node; // not in any segment
 			if (!info.color) return { ...node, color: undefined, cluster: info.cluster };
 			return { ...node, color: info.color, cluster: info.cluster };
+		}),
+	};
+}
+
+function getPathBasename(path: string): string {
+	const name = path.split("/").pop() ?? path;
+	return name.replace(/\.[^.]+$/, "");
+}
+
+function getProjectionDimensions(vectorLength: number, layoutFidelity: number): number {
+	const clampedFidelity = Math.min(100, Math.max(0, layoutFidelity));
+	const minDimensions = Math.min(8, vectorLength);
+	return Math.max(
+		2,
+		Math.min(vectorLength, Math.round(minDimensions + (vectorLength - minDimensions) * (clampedFidelity / 100))),
+	);
+}
+
+function reduceGraphVector(vector: Float32Array, dimensions: number): Float32Array {
+	return Float32Array.from(vector.subarray(0, Math.max(2, Math.min(dimensions, vector.length))));
+}
+
+interface GraphStructureOptions {
+	projectionMethod?: ProjectionMethod;
+	umapNeighbors?: number;
+	umapMinDist?: number;
+	layoutFidelity?: number;
+	showWikiLinks: boolean;
+}
+
+type GraphBuildOptions = GraphStructureOptions &
+	Pick<SmartGraphSettings, "defaultK" | "autoK" | "clusteringAlgorithm" | "minClusterSize">;
+
+export async function buildGraphStructure(
+	app: App,
+	documents: DocumentVector[],
+	settings: GraphStructureOptions,
+): Promise<{ reducedVectors: Float32Array[]; graphData: GraphData }> {
+	if (documents.length === 0) {
+		return { reducedVectors: [], graphData: { nodes: [], edges: [] } };
+	}
+
+	const dimensions = getProjectionDimensions(documents[0]?.vector.length ?? 2, settings.layoutFidelity ?? 50);
+	const reducedVectors = documents.map((document) => reduceGraphVector(document.vector, dimensions));
+	const constrainedPaths = new Set(documents.map((document) => document.path));
+	const wikiGraph = settings.showWikiLinks
+		? buildWikiGraph(app, undefined, constrainedPaths).graphData
+		: { nodes: [], edges: [] };
+	const wikiDegreeMap = buildDegreeMap(wikiGraph.edges);
+	const nodes = documents.map((document, index) => {
+		const file = app.vault.getAbstractFileByPath(document.path);
+		const vector = reducedVectors[index];
+		return {
+			id: document.path,
+			path: document.path,
+			label:
+				file && "basename" in file && typeof file.basename === "string"
+					? file.basename
+					: getPathBasename(document.path),
+			x: vector[0] ?? 0,
+			y: vector[1] ?? 0,
+			degree: wikiDegreeMap.get(document.path) ?? 0,
+			highlighted: false,
+		} satisfies GraphNode;
+	});
+
+	return {
+		reducedVectors,
+		graphData: {
+			nodes,
+			edges: wikiGraph.edges,
+		},
+	};
+}
+
+export async function buildGraph(
+	app: App,
+	documents: DocumentVector[],
+	settings: GraphBuildOptions,
+): Promise<GraphData> {
+	if (documents.length === 0) {
+		return { nodes: [], edges: [] };
+	}
+
+	const structure = await buildGraphStructure(app, documents, settings);
+	const clusterResult = await computeClusters(
+		documents,
+		documents.map((document) => document.vector),
+		settings,
+		undefined,
+		structure.reducedVectors,
+	);
+
+	return {
+		...structure.graphData,
+		nodes: structure.graphData.nodes.map((node) => {
+			const assignment = clusterResult.clusterMap.get(node.path);
+			return assignment ? { ...node, cluster: assignment.cluster, color: assignment.color } : node;
+		}),
+	};
+}
+
+export function deriveClusterLabelsFromGraph(graphData: GraphData): Record<number, string> {
+	const representatives = deriveClusterRepresentativesFromGraph(graphData);
+	const labels: Record<number, string> = {};
+	for (const [clusterId, node] of representatives) {
+		labels[clusterId] = node.label;
+	}
+	return labels;
+}
+
+export function applyColorGroups(app: App, graphData: GraphData, colorGroups: ColorGroup[]): GraphData {
+	if (colorGroups.length === 0) return graphData;
+
+	return {
+		...graphData,
+		nodes: graphData.nodes.map((node) => {
+			const file = app.vault.getAbstractFileByPath(node.path);
+			if (!file || !("extension" in file)) {
+				return node;
+			}
+
+			for (const group of colorGroups) {
+				const query = group.query.trim();
+				if (!query) continue;
+
+				if (query.startsWith("#")) {
+					const cache = app.metadataCache.getFileCache(file as TFile);
+					const tags = cache ? (getAllTags(cache) ?? []) : [];
+					if (tags.some((tag) => tag === query || tag.startsWith(`${query}/`))) {
+						return { ...node, color: group.color };
+					}
+					continue;
+				}
+
+				if (node.path.includes(query)) {
+					return { ...node, color: group.color };
+				}
+			}
+
+			return node;
 		}),
 	};
 }

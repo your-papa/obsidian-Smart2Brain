@@ -22,7 +22,6 @@ import { getPlugin } from "./state.svelte";
 import { Logger } from "../utils/logging";
 import { shouldSummarizeForEstimatedTokens } from "../agent/summarization";
 import { estimateConversationBaseTokens, estimateLiveDraftTokens } from "../utils/tokenEstimator";
-// Re-export for backward compatibility
 export type { ThreadError };
 
 const CHECKPOINT_DEBUG = false;

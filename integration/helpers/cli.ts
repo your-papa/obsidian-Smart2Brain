@@ -1,6 +1,155 @@
 import { execSync } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
 
 const VAULT_NAME = "Smart2Brain Test Vault";
+const CHAT_FILES_DIR = fileURLToPath(new URL("../Smart2Brain Test Vault/Chats/", import.meta.url));
+
+interface PersistedCheckpointRecord {
+	checkpoint?: {
+		ts?: string;
+		channel_values?: {
+			messages?: PersistedLangChainMessage[];
+		};
+	};
+	metadata?: {
+		step?: number;
+	};
+}
+
+interface PersistedLangChainMessage {
+	kwargs?: {
+		content?: unknown;
+		tool_calls?: Array<{ name?: string }>;
+	};
+	id?: string[];
+	type?: string;
+}
+
+export interface PersistedChatSummary {
+	filePath: string;
+	title: string;
+	threadId: string;
+	updatedAt: number;
+	humanContents: string[];
+	assistantContents: string[];
+	toolCallNames: string[];
+	toolOutputCount: number;
+	checkpointCount: number;
+}
+
+interface PersistedChatFile {
+	threadId?: string;
+	title?: string;
+	updatedAt?: number;
+	checkpoints?: Record<string, PersistedCheckpointRecord>;
+}
+
+function parsePersistedChatFile(path: string): PersistedChatFile | null {
+	try {
+		const raw = readFileSync(path);
+		return JSON.parse(gunzipSync(raw).toString("utf8")) as PersistedChatFile;
+	} catch {
+		return null;
+	}
+}
+
+function getLatestCheckpointRecord(chat: PersistedChatFile): PersistedCheckpointRecord | null {
+	const records = Object.values(chat.checkpoints ?? {});
+	if (records.length === 0) return null;
+
+	return records.sort((left, right) => {
+		const leftStep = left.metadata?.step ?? Number.MIN_SAFE_INTEGER;
+		const rightStep = right.metadata?.step ?? Number.MIN_SAFE_INTEGER;
+		if (leftStep !== rightStep) return leftStep - rightStep;
+
+		const leftTs = Date.parse(left.checkpoint?.ts ?? "");
+		const rightTs = Date.parse(right.checkpoint?.ts ?? "");
+		return leftTs - rightTs;
+	}).at(-1) ?? null;
+}
+
+function stringifyMessageContent(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		return content
+			.map((part) => {
+				if (typeof part === "string") return part;
+				if (part && typeof part === "object" && "text" in part && typeof part.text === "string") {
+					return part.text;
+				}
+				return "";
+			})
+			.join("")
+			.trim();
+	}
+	return "";
+}
+
+function summarizePersistedChat(path: string): PersistedChatSummary | null {
+	const chat = parsePersistedChatFile(path);
+	if (!chat) return null;
+
+	const checkpoint = getLatestCheckpointRecord(chat);
+	const messages = checkpoint?.checkpoint?.channel_values?.messages ?? [];
+	const humanContents: string[] = [];
+	const assistantContents: string[] = [];
+	const toolCallNames: string[] = [];
+	let toolOutputCount = 0;
+
+	for (const message of messages) {
+		const messageName = message.id?.at(-1) ?? message.type ?? "";
+		const content = stringifyMessageContent(message.kwargs?.content).trim();
+		if (messageName === "HumanMessage" && content.length > 0) {
+			humanContents.push(content);
+		}
+		if ((messageName === "AIMessage" || messageName === "AIMessageChunk") && content.length > 0) {
+			assistantContents.push(content);
+		}
+		for (const toolCall of message.kwargs?.tool_calls ?? []) {
+			if (typeof toolCall?.name === "string" && toolCall.name.length > 0) {
+				toolCallNames.push(toolCall.name);
+			}
+		}
+		if (messageName === "ToolMessage") {
+			toolOutputCount += 1;
+		}
+	}
+
+	return {
+		filePath: path,
+		title: chat.title ?? "",
+		threadId: chat.threadId ?? "",
+		updatedAt: chat.updatedAt ?? 0,
+		humanContents,
+		assistantContents,
+		toolCallNames,
+		toolOutputCount,
+		checkpointCount: Object.keys(chat.checkpoints ?? {}).length,
+	};
+}
+
+export function listPersistedChatSummaries(): PersistedChatSummary[] {
+	try {
+		return readdirSync(CHAT_FILES_DIR)
+			.filter((name) => name.endsWith(".chat"))
+			.map((name) => summarizePersistedChat(`${CHAT_FILES_DIR}${name}`))
+			.filter((summary): summary is PersistedChatSummary => summary !== null)
+			.sort((left, right) => left.updatedAt - right.updatedAt);
+	} catch {
+		return [];
+	}
+}
+
+export function getLatestPersistedChatSummary(): PersistedChatSummary | null {
+	const summaries = listPersistedChatSummaries();
+	return summaries.at(-1) ?? null;
+}
+
+export function getPersistedChatSummary(filePath: string): PersistedChatSummary | null {
+	return summarizePersistedChat(filePath);
+}
 
 /**
  * Helper to execute obsidian CLI commands and return trimmed output.
@@ -77,6 +226,61 @@ export function getConsole(level?: "log" | "warn" | "error" | "info" | "debug"):
 export function clearBuffers(): void {
 	obsidian("dev:errors clear", { ignoreError: true });
 	obsidian("dev:console clear", { ignoreError: true });
+}
+
+/**
+ * Close any open modals, including search modals that do not expose a close button.
+ * Repeatedly clicks explicit close buttons and sends Escape until no modal containers remain.
+ */
+export function closeAllModals({ maxPasses = 24 } = {}): void {
+	for (let pass = 0; pass < maxPasses; pass += 1) {
+		if (domCount(".modal-container") === 0) {
+			return;
+		}
+
+		obsidianEval(`(() => {
+			const containers = Array.from(document.querySelectorAll(".modal-container"));
+			const activeContainer = containers[containers.length - 1];
+			if (!(activeContainer instanceof HTMLElement)) return "missing-modal";
+
+			const closeButton = activeContainer.querySelector(".modal-close-button");
+			if (closeButton instanceof HTMLElement) {
+				closeButton.click();
+				return "clicked-close-button";
+			}
+
+			const target = activeContainer.querySelector(".prompt-input")
+				?? activeContainer.querySelector(".modal")
+				?? activeContainer;
+			if (target instanceof HTMLElement) {
+				target.focus();
+				target.dispatchEvent(new KeyboardEvent("keydown", {
+					key: "Escape",
+					code: "Escape",
+					bubbles: true,
+					cancelable: true,
+				}));
+				target.dispatchEvent(new KeyboardEvent("keyup", {
+					key: "Escape",
+					code: "Escape",
+					bubbles: true,
+					cancelable: true,
+				}));
+				return "dispatched-escape";
+			}
+
+			return "no-close-target";
+		})()`);
+
+		obsidian(
+			`dev:cdp method=Input.dispatchKeyEvent params='{"type":"keyDown","key":"Escape","code":"Escape"}'`,
+			{ ignoreError: true },
+		);
+		obsidian(
+			`dev:cdp method=Input.dispatchKeyEvent params='{"type":"keyUp","key":"Escape","code":"Escape"}'`,
+			{ ignoreError: true },
+		);
+	}
 }
 
 /**
@@ -265,4 +469,82 @@ export async function pollEval(
 		}
 	}
 	throw new Error(`pollEval timed out waiting for window.${globalKey}`);
+}
+
+/**
+ * Submit a chat message through the real chat editor UI and send button.
+ */
+export async function submitChatMessageViaUi(message: string): Promise<string> {
+	const globalKey = `__s2bSubmitChat_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+	return pollEval(
+		`(function(){ window.${globalKey} = "pending"; (async function(){ try {
+			const inputRoot = document.getElementById("chat-view-user-input-element");
+			const content = inputRoot?.querySelector(".cm-content");
+			if (content instanceof HTMLElement) {
+				content.focus();
+				content.click();
+				content.dispatchEvent(new Event("focusin", { bubbles: true }));
+			}
+
+			let editor = null;
+			for (let attempt = 0; attempt < 20; attempt += 1) {
+				const candidate = app.workspace.activeEditor?.editor;
+				if (candidate && typeof candidate.setValue === "function" && typeof candidate.getValue === "function") {
+					editor = candidate;
+					break;
+				}
+				await new Promise((resolve) => window.setTimeout(resolve, 50));
+			}
+
+			if (!editor) {
+				window.${globalKey} = "missing-editor-api";
+				return;
+			}
+
+			editor.setValue(${JSON.stringify(message)});
+
+			let send = null;
+			for (let attempt = 0; attempt < 20; attempt += 1) {
+				send = Array.from(document.querySelectorAll("button")).find(
+					(element) => element.getAttribute("data-testid") === "send-message-button",
+				);
+				if (send instanceof HTMLButtonElement && !send.disabled) {
+					break;
+				}
+				await new Promise((resolve) => window.setTimeout(resolve, 50));
+			}
+
+			if (!(send instanceof HTMLButtonElement)) {
+				window.${globalKey} = "missing-send-button";
+				return;
+			}
+			if (send.disabled) {
+				window.${globalKey} = "send-disabled";
+				return;
+			}
+
+			send.click();
+			window.${globalKey} = JSON.stringify({ value: editor.getValue(), clicked: true });
+		} catch (e) {
+			window.${globalKey} = "ERROR:" + (e instanceof Error ? e.message : String(e));
+		} })(); return "started"; })()`,
+		globalKey,
+		{ timeoutMs: 15_000, intervalMs: 250 },
+	);
+}
+
+/**
+ * Delete a persisted agent thread by id or path through the plugin runtime.
+ */
+export async function deleteAgentThread(threadId: string): Promise<void> {
+	const globalKey = `__s2bDeleteThread_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+	const result = await pollEval(
+		`(function(){ var am = ${PLUGIN}.agentManager; window.${globalKey} = "pending"; (async function(){ try { await am.deleteThread(${JSON.stringify(threadId)}); window.${globalKey} = "deleted"; } catch(e) { window.${globalKey} = "ERROR:" + (e instanceof Error ? e.message : String(e)); } })(); return "started"; })()`,
+		globalKey,
+		{ timeoutMs: 15_000, intervalMs: 250 },
+	);
+
+	if (result.startsWith("ERROR:")) {
+		throw new Error(result);
+	}
 }

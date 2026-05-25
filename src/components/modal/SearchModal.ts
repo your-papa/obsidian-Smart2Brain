@@ -1376,6 +1376,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	private getTagSuggestions(partial: string): AutocompleteSuggestion[] {
 		return this.cachedAutocompleteTags
+			.map((tag) => (tag.startsWith("#") ? tag : `#${tag}`))
 			.filter((tag) => !partial || tag.toLowerCase().slice(1).includes(partial))
 			.slice(0, 20)
 			.map((tag) => {

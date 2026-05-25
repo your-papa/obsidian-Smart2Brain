@@ -181,7 +181,7 @@ async function embeddingsSearch(app: App, query: string, filter?: SearchFilter):
 	const pluginData = getData();
 
 	// Get similarity threshold from the configured embed model
-	const defaultModel = pluginData.defaultEmbedModel;
+	const defaultModel = pluginData.getSearchEmbedModel();
 	let threshold = 0;
 	if (defaultModel) {
 		const embedModels = pluginData.getEmbedModels(defaultModel.provider);
@@ -320,9 +320,9 @@ export function createSearchNotesTool(app: App) {
 		const filter: SearchFilter | undefined =
 			filterPathPrefixes || filterTags
 				? {
-						pathPrefixes: filterPathPrefixes,
-						tags: filterTags,
-					}
+					pathPrefixes: filterPathPrefixes,
+					tags: filterTags,
+				}
 				: undefined;
 
 		Logger.debug("[search_notes] Configured settings:", {

@@ -6,8 +6,7 @@ vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: vi.fn(() => ({
 		targetFolder: "Chats",
-		privacyList: [] as string[],
-		privacyIsExcluding: true,
+		isFilePrivate: vi.fn(() => false),
 		isProviderTrusted: vi.fn(() => false),
 	})),
 }));
@@ -508,8 +507,7 @@ describe("PendingChangesStore", () => {
 			const mockGetData = getData as ReturnType<typeof vi.fn>;
 			mockGetData.mockReturnValue({
 				targetFolder: "Chats",
-				privacyList: [],
-				privacyIsExcluding: true,
+				isFilePrivate: vi.fn(() => false),
 				isProviderTrusted: vi.fn(() => false),
 			});
 
@@ -521,12 +519,11 @@ describe("PendingChangesStore", () => {
 			expect(store.isPathAllowed("Canvas/diagram.excalidraw.md")).toBe(true);
 		});
 
-		it("isFilePrivate should mark matching files as private when privacyIsExcluding", () => {
+		it("isFilePrivate should delegate to the data store privacy check", () => {
 			const mockGetData = getData as ReturnType<typeof vi.fn>;
 			mockGetData.mockReturnValue({
 				targetFolder: "Chats",
-				privacyList: ["secret"],
-				privacyIsExcluding: true,
+				isFilePrivate: vi.fn((path: string) => path.startsWith("secret/")),
 				isProviderTrusted: vi.fn(() => false),
 			});
 
@@ -538,8 +535,7 @@ describe("PendingChangesStore", () => {
 			const mockGetData = getData as ReturnType<typeof vi.fn>;
 			mockGetData.mockReturnValue({
 				targetFolder: "Chats",
-				privacyList: ["secret"],
-				privacyIsExcluding: true,
+				isFilePrivate: vi.fn((path: string) => path.startsWith("secret/")),
 				isProviderTrusted: vi.fn(() => false),
 			});
 
@@ -551,20 +547,18 @@ describe("PendingChangesStore", () => {
 			const mockGetData = getData as ReturnType<typeof vi.fn>;
 			mockGetData.mockReturnValue({
 				targetFolder: "Chats",
-				privacyList: ["secret"],
-				privacyIsExcluding: true,
+				isFilePrivate: vi.fn((path: string) => path.startsWith("secret/")),
 				isProviderTrusted: vi.fn(() => true),
 			});
 
 			expect(store.shouldBlockFile("secret/diary.md", "ollama")).toBe(false);
 		});
 
-		it("isFilePrivate should support filetype privacy patterns", () => {
+		it("isFilePrivate should respect whatever policy the data store exposes", () => {
 			const mockGetData = getData as ReturnType<typeof vi.fn>;
 			mockGetData.mockReturnValue({
 				targetFolder: "Chats",
-				privacyList: ["*.pdf"],
-				privacyIsExcluding: true,
+				isFilePrivate: vi.fn((path: string) => path.toLowerCase().endsWith(".pdf")),
 				isProviderTrusted: vi.fn(() => false),
 			});
 

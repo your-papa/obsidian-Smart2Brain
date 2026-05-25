@@ -45,6 +45,50 @@ function addRecentBadge(result: SearchResult): SearchResult {
 	return { ...result, matchBadges: mergeBadges(result.matchBadges, ["recent"]) };
 }
 
+function getRecentNoteTimestamp(file: unknown): number {
+	if (
+		typeof file !== "object" ||
+		file === null ||
+		!("stat" in file) ||
+		typeof file.stat !== "object" ||
+		file.stat === null
+	) {
+		return 0;
+	}
+
+	const stat = file.stat as { ctime?: number; mtime?: number };
+	return stat.ctime ?? stat.mtime ?? 0;
+}
+
+function getRecentlyCreatedNotes(app: App, filter?: SearchFilter): SearchResult[] {
+	const getFiles = app.vault?.getFiles;
+	if (typeof getFiles !== "function") return [];
+
+	const compiled = filter ? compileFilter(filter) : undefined;
+	return getFiles
+		.call(app.vault)
+		.filter((file: unknown): file is TFile => isRecentNoteFile(file))
+		.filter((file) => file.extension.toLowerCase() === "md")
+		.sort((left, right) => getRecentNoteTimestamp(right) - getRecentNoteTimestamp(left))
+		.reduce<SearchResult[]>((results, file, index) => {
+			const cache = app.metadataCache.getFileCache(file);
+			const docTags = getCachedTags(cache);
+			if (!matchesSearchFilter(file.path, docTags, compiled ?? filter)) {
+				return results;
+			}
+
+			results.push({
+				path: file.path,
+				name: file.basename,
+				frontmatter: cache?.frontmatter,
+				tags: docTags,
+				matchBadges: ["recent"],
+				score: getRecentNoteBoost(index),
+			});
+			return results;
+		}, []);
+}
+
 export function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchResult[] {
 	const pluginData = getData();
 	const getAbstractFileByPath = app.vault?.getAbstractFileByPath;
@@ -95,7 +139,7 @@ function mergeRecentNotes(...collections: SearchResult[][]): SearchResult[] {
 
 /** Get deduplicated recent notes from the user's recently opened history, optionally filtered. */
 export function getRecentNotes(app: App, filter?: SearchFilter): SearchResult[] {
-	return mergeRecentNotes(getRecentlyOpenedNotes(app, filter));
+	return mergeRecentNotes(getRecentlyOpenedNotes(app, filter), getRecentlyCreatedNotes(app, filter));
 }
 
 /** Annotate search results that appear in recents with a "recent" badge. */

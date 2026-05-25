@@ -122,7 +122,8 @@ export function resolveIconColor(color?: string): string | undefined {
 
 	const bodyStyle = globalThis.getComputedStyle(document.body);
 	const thematicVariable = ICONIC_COLOR_VARIABLES.get(color);
-	const cssColor = thematicVariable ? bodyStyle.getPropertyValue(thematicVariable).trim() : color;
+	const themedColor = thematicVariable ? bodyStyle.getPropertyValue(thematicVariable).trim() : "";
+	const cssColor = themedColor || color;
 	if (!cssColor) {
 		return undefined;
 	}

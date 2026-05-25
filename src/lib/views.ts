@@ -313,25 +313,6 @@ export function buildFilterFromSegments(segments: SpaceSegment[]): { filter: Vie
 	const filter: ViewFilter = leaves.length === 1 ? leaves[0] : { type: "any", conditions: leaves };
 	return { filter, label: labels.join(" + ") };
 }
-
-/**
- * @deprecated Use `buildFilterFromSegments` instead.
- */
-export const buildFilterFromGroups = buildFilterFromSegments;
-
-/**
- * Build a composite `ViewFilter` from the full drill stack.
- * - 0 entries → `{ type: "all", conditions: [] }` (matches everything)
- * - 1 entry  → that entry's filter directly
- * - N entries → `{ type: "all", conditions: [each entry's filter] }`
- * @deprecated Drill stack replaced by working Space filter tree.
- */
-export function buildFilterFromDrillStack(stack: Array<{ filter: ViewFilter }>): ViewFilter {
-	if (stack.length === 0) return { type: "all", conditions: [] };
-	if (stack.length === 1) return stack[0].filter;
-	return { type: "all", conditions: stack.map((e) => e.filter) };
-}
-
 function normalizeSpaceMembershipDraft(draft: SpaceMembershipDraft): SpaceMembershipDraft {
 	return {
 		manualPaths: dedupeStrings(draft.manualPaths),

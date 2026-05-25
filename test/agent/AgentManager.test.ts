@@ -13,18 +13,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 // Import actual functions and types
-import {
-	BUILT_IN_PROVIDER_IDS,
-	getBuiltInProvider,
-	getProviderDefinition,
-	isBuiltInProvider,
-} from "../../src/providers/index.ts";
+import { getProviderDefinition } from "../../src/providers/index.ts";
 import type { AuthValidationResult } from "../../src/types/provider/index.ts";
 
 describe("AgentManager Provider Integration", () => {
 	describe("Provider Registry Lookup", () => {
 		it("should look up built-in providers by lowercase ID", () => {
-			const provider = getBuiltInProvider("openai");
+			const provider = getProviderDefinition("openai", {});
 
 			expect(provider).toBeDefined();
 			expect(provider?.id).toBe("openai");
@@ -32,7 +27,7 @@ describe("AgentManager Provider Integration", () => {
 		});
 
 		it("should look up anthropic provider", () => {
-			const provider = getBuiltInProvider("anthropic");
+			const provider = getProviderDefinition("anthropic", {});
 
 			expect(provider).toBeDefined();
 			expect(provider?.id).toBe("anthropic");
@@ -40,7 +35,7 @@ describe("AgentManager Provider Integration", () => {
 		});
 
 		it("should look up ollama provider", () => {
-			const provider = getBuiltInProvider("ollama");
+			const provider = getProviderDefinition("ollama", {});
 
 			expect(provider).toBeDefined();
 			expect(provider?.id).toBe("ollama");
@@ -48,7 +43,7 @@ describe("AgentManager Provider Integration", () => {
 		});
 
 		it("should return undefined for unknown provider", () => {
-			const provider = getBuiltInProvider("unknown-provider");
+			const provider = getProviderDefinition("unknown-provider", {});
 
 			expect(provider).toBeUndefined();
 		});
@@ -65,7 +60,9 @@ describe("AgentManager Provider Integration", () => {
 		});
 
 		it("should find custom providers via getProviderDefinition", () => {
-			const customMeta = { "my-custom": { displayName: "My Custom Provider", supportsEmbeddings: false } };
+			const customMeta = {
+				"my-custom": { templateId: "openai-compatible" as const, displayName: "My Custom Provider" },
+			};
 
 			const found = getProviderDefinition("my-custom", customMeta);
 
@@ -74,7 +71,9 @@ describe("AgentManager Provider Integration", () => {
 		});
 
 		it("should prioritize built-in providers over custom with same ID", () => {
-			const customMeta = { openai: { displayName: "Fake OpenAI", supportsEmbeddings: false } };
+			const customMeta = {
+				openai: { templateId: "openai-compatible" as const, displayName: "Fake OpenAI" },
+			};
 
 			const found = getProviderDefinition("openai", customMeta);
 
@@ -86,7 +85,7 @@ describe("AgentManager Provider Integration", () => {
 
 	describe("Provider validateAuth", () => {
 		it("should have validateAuth method on OpenAI provider", () => {
-			const provider = getBuiltInProvider("openai");
+			const provider = getProviderDefinition("openai", {});
 			expect(provider).toBeDefined();
 
 			if (provider) {
@@ -95,7 +94,7 @@ describe("AgentManager Provider Integration", () => {
 		});
 
 		it("should have validateAuth method on Ollama provider", () => {
-			const provider = getBuiltInProvider("ollama");
+			const provider = getProviderDefinition("ollama", {});
 			expect(provider).toBeDefined();
 
 			if (provider) {
@@ -106,21 +105,21 @@ describe("AgentManager Provider Integration", () => {
 
 	describe("Provider model discovery", () => {
 		it("should have discoverModels method on OpenAI provider", () => {
-			const provider = getBuiltInProvider("openai");
+			const provider = getProviderDefinition("openai", {});
 			expect(provider).toBeDefined();
 			expect(provider?.discoverModels).toBeDefined();
 			expect(typeof provider?.discoverModels).toBe("function");
 		});
 
 		it("should have discoverModels method on Ollama provider", () => {
-			const provider = getBuiltInProvider("ollama");
+			const provider = getProviderDefinition("ollama", {});
 			expect(provider).toBeDefined();
 			expect(provider?.discoverModels).toBeDefined();
 			expect(typeof provider?.discoverModels).toBe("function");
 		});
 
 		it("should have discoverModels on Anthropic provider", () => {
-			const provider = getBuiltInProvider("anthropic");
+			const provider = getProviderDefinition("anthropic", {});
 			expect(provider).toBeDefined();
 			expect(provider?.discoverModels).toBeDefined();
 			expect(typeof provider?.discoverModels).toBe("function");
@@ -129,62 +128,11 @@ describe("AgentManager Provider Integration", () => {
 
 	describe("Provider createChatInstance", () => {
 		it("should have createChatInstance method on all built-in providers", () => {
-			for (const id of BUILT_IN_PROVIDER_IDS) {
-				const provider = getBuiltInProvider(id);
+			for (const id of ["openai", "anthropic", "ollama"] as const) {
+				const provider = getProviderDefinition(id, {});
 				expect(provider).toBeDefined();
 				expect(typeof provider?.createChatInstance).toBe("function");
 			}
 		});
-	});
-
-	describe("isBuiltInProvider", () => {
-		it("should return true for built-in provider IDs", () => {
-			expect(isBuiltInProvider("openai")).toBe(true);
-			expect(isBuiltInProvider("anthropic")).toBe(true);
-			expect(isBuiltInProvider("ollama")).toBe(true);
-		});
-
-		it("should return false for custom provider IDs", () => {
-			expect(isBuiltInProvider("my-custom")).toBe(false);
-			expect(isBuiltInProvider("local-llm")).toBe(false);
-		});
-
-		it("should return false for empty string", () => {
-			expect(isBuiltInProvider("")).toBe(false);
-		});
-	});
-});
-
-describe("Provider ID Mapping (Legacy to New)", () => {
-	/**
-	 * The old system used PascalCase provider names: "OpenAI", "Anthropic", "Ollama", "CustomOpenAI"
-	 * The new system uses lowercase with dashes: "openai", "anthropic", "ollama"
-	 *
-	 * This documents the mapping between the two systems during migration.
-	 */
-
-	const LEGACY_TO_NEW_MAPPING: Record<string, string> = {
-		OpenAI: "openai",
-		Anthropic: "anthropic",
-		Ollama: "ollama",
-		CustomOpenAI: "openai", // CustomOpenAI was an alias for OpenAI with different baseUrl
-	};
-
-	it("should map legacy provider names to new IDs", () => {
-		expect(LEGACY_TO_NEW_MAPPING.OpenAI).toBe("openai");
-		expect(LEGACY_TO_NEW_MAPPING.Anthropic).toBe("anthropic");
-		expect(LEGACY_TO_NEW_MAPPING.Ollama).toBe("ollama");
-	});
-
-	it("should handle CustomOpenAI as openai with custom baseUrl", () => {
-		expect(LEGACY_TO_NEW_MAPPING.CustomOpenAI).toBe("openai");
-	});
-
-	it("should find new providers using lowercase IDs", () => {
-		for (const legacyName of Object.keys(LEGACY_TO_NEW_MAPPING)) {
-			const newId = LEGACY_TO_NEW_MAPPING[legacyName];
-			const provider = getBuiltInProvider(newId);
-			expect(provider).toBeDefined();
-		}
 	});
 });

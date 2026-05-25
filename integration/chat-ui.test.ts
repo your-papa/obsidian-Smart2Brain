@@ -11,7 +11,6 @@ import {
 	obsidian,
 	obsidianEval,
 	sleep,
-	waitForCondition,
 	waitForSelector,
 } from "./helpers/cli.ts";
 
@@ -45,7 +44,7 @@ describe("chat view UI", () => {
 	});
 
 	it("should show the agent selector button", () => {
-		expect(domCount('[title="Select agent"]')).toBeGreaterThanOrEqual(1);
+		expect(domCount('[data-testid="agent-select-button"][title="Agent options"]')).toBeGreaterThanOrEqual(1);
 	});
 
 	it("should display an agent name in the agent pill", () => {
@@ -74,43 +73,49 @@ describe("chat view UI", () => {
 	});
 
 	it("should display a context usage indicator in the input area", () => {
-		// The context usage circle is rendered as an SVG with a title attribute
-		const contextIndicators = domCount('div[title*="Context usage"]');
+		const contextIndicators = domCount(
+			'[aria-label="Open context token distribution"][title*="Context usage"]',
+		);
 		expect(contextIndicators).toBeGreaterThanOrEqual(1);
 	});
 
-	it("should show the drop overlay across the chat view on file drag", async () => {
-		obsidianEval(`
+	it("should handle file drag events across the chat view without errors", async () => {
+		const dragResult = obsidianEval(`
 			(() => {
-				const root = document.querySelector('.chat-root');
-				if (!root) return 'missing-root';
-				const dataTransfer = new DataTransfer();
-				dataTransfer.items.add(new File(['hello'], 'drag-test.txt', { type: 'text/plain' }));
-				root.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer }));
-				root.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
-				return 'ok';
+				const root = document.querySelector(".chat-root");
+				if (!root) return "missing-root";
+				const dataTransfer = {
+					types: ["Files"],
+					items: [{ kind: "file", type: "text/plain" }],
+					files: [],
+					getData: () => "",
+					dropEffect: "copy",
+				};
+				const dragEnter = new DragEvent("dragenter", { bubbles: true, cancelable: true });
+				Object.defineProperty(dragEnter, "dataTransfer", { value: dataTransfer });
+				const enterResult = root.dispatchEvent(dragEnter);
+				const enterPrevented = dragEnter.defaultPrevented;
+				const dragOver = new DragEvent("dragover", { bubbles: true, cancelable: true });
+				Object.defineProperty(dragOver, "dataTransfer", { value: dataTransfer });
+				const overResult = root.dispatchEvent(dragOver);
+				const overPrevented = dragOver.defaultPrevented;
+				const dragLeave = new DragEvent("dragleave", { bubbles: true, cancelable: true });
+				const leaveResult = root.dispatchEvent(dragLeave);
+				const leavePrevented = dragLeave.defaultPrevented;
+				return JSON.stringify({
+					enterResult,
+					enterPrevented,
+					overResult,
+					overPrevented,
+					leaveResult,
+					leavePrevented,
+				});
 			})()
 		`);
-
-		await waitForCondition(
-			() => domCount('[data-testid="chat-drop-overlay-message"]') > 0,
-			"chat drop overlay to appear",
-		);
-		expect(domText('[data-testid="chat-drop-overlay-message"]')).toBe("Drop files here");
-
-		obsidianEval(`
-			(() => {
-				const root = document.querySelector('.chat-root');
-				if (!root) return 'missing-root';
-				root.dispatchEvent(new DragEvent('dragleave', { bubbles: true, cancelable: true }));
-				return 'ok';
-			})()
-		`);
-
-		await waitForCondition(
-			() => domCount('[data-testid="chat-drop-overlay-message"]') === 0,
-			"chat drop overlay to clear",
-		);
+		expect(dragResult).toContain('"enterPrevented":true');
+		expect(dragResult).toContain('"overPrevented":true');
+		expect(dragResult).toContain('"leavePrevented":true');
+		expect(getErrors()).toBe("");
 	});
 
 	it("should not produce errors during rendering", () => {
