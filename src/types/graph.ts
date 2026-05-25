@@ -204,6 +204,8 @@ export interface SmartGraphSettings {
 	clusterCohesionStrength: number;
 	/** Whether to show wiki link edges overlaid on the semantic graph */
 	showWikiLinks: boolean;
+	/** Whether to render arrows for directed wiki links */
+	directedWikiEdges: boolean;
 	/** Chat model used for LLM-powered graph features (e.g., cluster labeling) */
 	graphChatModel: import("../stores/chatStore.svelte").ChatModel | null;
 	/** Whether to automatically generate cluster labels after clustering */
@@ -230,6 +232,7 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	linkStrength: 1,
 	clusterCohesionStrength: 0.15,
 	showWikiLinks: true,
+	directedWikiEdges: true,
 	graphChatModel: null,
 	autoLabelClusters: false,
 	clusteringAlgorithm: "kmeans",
@@ -322,9 +325,9 @@ export function generateClusterColors(k: number, themeColors: string[] = []): st
 		themeColors.length > 0
 			? themeColors.map((c) => parseHSL(c))
 			: Array.from(
-					{ length: Math.max(k, 1) },
-					(_, i) => [Math.round((i * 360) / Math.max(k, 1)) % 360, 70, 55] as [number, number, number],
-				);
+				{ length: Math.max(k, 1) },
+				(_, i) => [Math.round((i * 360) / Math.max(k, 1)) % 360, 70, 55] as [number, number, number],
+			);
 
 	const colors: string[] = [];
 	const paletteSize = base.length;

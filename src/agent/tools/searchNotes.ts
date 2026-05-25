@@ -320,9 +320,9 @@ export function createSearchNotesTool(app: App) {
 		const filter: SearchFilter | undefined =
 			filterPathPrefixes || filterTags
 				? {
-					pathPrefixes: filterPathPrefixes,
-					tags: filterTags,
-				}
+						pathPrefixes: filterPathPrefixes,
+						tags: filterTags,
+					}
 				: undefined;
 
 		Logger.debug("[search_notes] Configured settings:", {

@@ -1,59 +1,60 @@
 <script lang="ts">
-import { ModelSelectionModal } from "../../components/modal/ModelSelectionModal";
-import EmbeddingIndexSection from "../../components/settings/EmbeddingIndexSection.svelte";
-import ModelSettingControl from "../../components/settings/ModelSettingControl.svelte";
-import SettingGroup from "../../components/settings/SettingGroup.svelte";
-import SettingItem from "../../components/settings/SettingItem.svelte";
-import Toggle from "../../components/ui/Toggle.svelte";
-import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
-import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
-import { getProviderDefinition } from "../../providers/index";
-import { getData } from "../../stores/dataStore.svelte";
-import { getPlugin } from "../../stores/state.svelte";
+  import { ModelSelectionModal } from "../../components/modal/ModelSelectionModal";
+  import EmbeddingIndexSection from "../../components/settings/EmbeddingIndexSection.svelte";
+  import ModelSettingControl from "../../components/settings/ModelSettingControl.svelte";
+  import SettingGroup from "../../components/settings/SettingGroup.svelte";
+  import SettingItem from "../../components/settings/SettingItem.svelte";
+  import Toggle from "../../components/ui/Toggle.svelte";
+  import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
+  import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
+  import { getProviderDefinition } from "../../providers/index";
+  import { getData } from "../../stores/dataStore.svelte";
+  import { getPlugin } from "../../stores/state.svelte";
 
-const pluginData = getData();
-const plugin = getPlugin();
-const availableModels = useAvailableModels();
+  const pluginData = getData();
+  const plugin = getPlugin();
+  const availableModels = useAvailableModels();
 
-// Helper to update a single graph setting field
-function updateSetting<K extends keyof typeof pluginData.smartGraphSettings>(
-	key: K,
-	value: (typeof pluginData.smartGraphSettings)[K],
-) {
-	pluginData.smartGraphSettings = { ...pluginData.smartGraphSettings, [key]: value };
-}
+  // Helper to update a single graph setting field
+  function updateSetting<K extends keyof typeof pluginData.smartGraphSettings>(
+    key: K,
+    value: (typeof pluginData.smartGraphSettings)[K],
+  ) {
+    pluginData.smartGraphSettings = { ...pluginData.smartGraphSettings, [key]: value };
+  }
 
-// Chat model display info
-const currentModelDisplay = $derived.by(() => {
-	const model = pluginData.smartGraphSettings.graphChatModel;
-	if (!model) return null;
-	const providerDef = getProviderDefinition(model.provider, pluginData.getAllProviderMeta());
-	return {
-		model: model.model,
-		providerName: providerDef?.displayName ?? model.provider,
-		logo: providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon,
-	};
-});
+  // Chat model display info
+  const currentModelDisplay = $derived.by(() => {
+    const model = pluginData.smartGraphSettings.graphChatModel;
+    if (!model) return null;
+    const providerDef = getProviderDefinition(model.provider, pluginData.getAllProviderMeta());
+    return {
+      model: model.model,
+      providerName: providerDef?.displayName ?? model.provider,
+      logo:
+        providerDef && "logo" in providerDef && providerDef.logo ? providerDef.logo : GenericAIIcon,
+    };
+  });
 
-function openModelSelectionModal() {
-	const current = pluginData.smartGraphSettings.graphChatModel;
-	const currentSelection = current ? { provider: current.provider, model: current.model } : null;
+  function openModelSelectionModal() {
+    const current = pluginData.smartGraphSettings.graphChatModel;
+    const currentSelection = current ? { provider: current.provider, model: current.model } : null;
 
-	const modal = new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
-		if (selected) {
-			updateSetting("graphChatModel", {
-				provider: selected.provider,
-				model: selected.model,
-				modelConfig: {},
-			});
-		}
-	});
-	modal.open();
-}
+    const modal = new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
+      if (selected) {
+        updateSetting("graphChatModel", {
+          provider: selected.provider,
+          model: selected.model,
+          modelConfig: {},
+        });
+      }
+    });
+    modal.open();
+  }
 
-function clearModel() {
-	updateSetting("graphChatModel", null);
-}
+  function clearModel() {
+    updateSetting("graphChatModel", null);
+  }
 </script>
 
 <!-- Embedding Index for Graph -->
@@ -86,6 +87,15 @@ function clearModel() {
     <Toggle
       checked={pluginData.smartGraphSettings.autoLabelClusters}
       onchange={(v) => updateSetting("autoLabelClusters", v)}
+    />
+  </SettingItem>
+</SettingGroup>
+
+<SettingGroup heading="Display">
+  <SettingItem name="Direction Arrows" desc="Show arrows for directed wiki links in graph views.">
+    <Toggle
+      checked={pluginData.smartGraphSettings.directedWikiEdges}
+      onchange={(v) => updateSetting("directedWikiEdges", v)}
     />
   </SettingItem>
 </SettingGroup>

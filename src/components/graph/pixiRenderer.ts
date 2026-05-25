@@ -435,7 +435,7 @@ export class PixiRenderer {
 			scale: scale,
 			time: duration,
 			ease: "easeOutCubic",
-			callbackOnComplete: () => {},
+			callbackOnComplete: () => { },
 		});
 	}
 
@@ -596,6 +596,7 @@ export class PixiRenderer {
 		}>,
 		opts: {
 			showWikiLinks: boolean;
+			directedWikiEdges?: boolean;
 			hoveredNodeId: string | null;
 			adjacency: Map<string, Set<string>>;
 			focusedClusters: Set<number>;
@@ -617,8 +618,13 @@ export class PixiRenderer {
 		const highlightWidth = 2 / scale;
 
 		// Batch edges by style bucket to minimize draw calls.
+		// Batch edges by style bucket to minimize draw calls.
 		// Key: "color|width|alpha" → list of segments
-		const buckets = new Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>();
+		const lineBuckets = new Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>();
+		const arrowBuckets = new Map<
+			string,
+			Array<{ ax: number; ay: number; lx: number; ly: number; rx: number; ry: number }>
+		>();
 
 		for (const edge of edges) {
 			const sx = edge.source.x;
@@ -645,12 +651,12 @@ export class PixiRenderer {
 
 			const edgeHoverAlpha = opts.hoveredNodeId
 				? clampUnitInterval(
-						Math.max(
-							opts.hoverAlphas.get(edge.source.id) ?? 0.85,
-							opts.hoverAlphas.get(edge.target.id) ?? 0.85,
-						),
-						0.85,
-					)
+					Math.max(
+						opts.hoverAlphas.get(edge.source.id) ?? 0.85,
+						opts.hoverAlphas.get(edge.target.id) ?? 0.85,
+					),
+					0.85,
+				)
 				: 1;
 			const safeBaseEdgeAlpha = clampUnitInterval(opts.baseEdgeAlpha, 0.25);
 			const safeEdgeFadeAlpha = clampUnitInterval(opts.edgeFadeAlpha, 1);
@@ -671,16 +677,48 @@ export class PixiRenderer {
 			// compound into a bright hotspot. Draw at alpha=1 to prevent stacking.
 			const blended = isHighlighted ? color : blendColor(color, c.bgPrimary, alpha);
 			const key = `${blended}|${width.toFixed(4)}`;
-			let bucket = buckets.get(key);
+			let bucket = lineBuckets.get(key);
 			if (!bucket) {
 				bucket = [];
-				buckets.set(key, bucket);
+				lineBuckets.set(key, bucket);
 			}
 			bucket.push({ sx, sy, tx, ty });
+
+			if (opts.directedWikiEdges) {
+				const dx = tx - sx;
+				const dy = ty - sy;
+				const len = Math.hypot(dx, dy);
+				if (len > 0.0001) {
+					const ux = dx / len;
+					const uy = dy / len;
+					const arrowLength = Math.max(7 / scale, width * 5);
+					const arrowWidth = Math.max(4 / scale, width * 2.6);
+					const tipInset = Math.max(width * 1.5, 2 / scale);
+					const ax = tx - ux * tipInset;
+					const ay = ty - uy * tipInset;
+					const baseX = ax - ux * arrowLength;
+					const baseY = ay - uy * arrowLength;
+					const perpX = -uy;
+					const perpY = ux;
+					let arrows = arrowBuckets.get(key);
+					if (!arrows) {
+						arrows = [];
+						arrowBuckets.set(key, arrows);
+					}
+					arrows.push({
+						ax,
+						ay,
+						lx: baseX + perpX * arrowWidth,
+						ly: baseY + perpY * arrowWidth,
+						rx: baseX - perpX * arrowWidth,
+						ry: baseY - perpY * arrowWidth,
+					});
+				}
+			}
 		}
 
 		// Draw each bucket as a single batched stroke
-		for (const [key, segments] of buckets) {
+		for (const [key, segments] of lineBuckets) {
 			const [color, widthStr] = key.split("|");
 			const width = Number(widthStr);
 
@@ -689,6 +727,18 @@ export class PixiRenderer {
 				g.lineTo(seg.tx, seg.ty);
 			}
 			g.stroke({ color, width, alpha: 1 });
+		}
+		if (opts.directedWikiEdges) {
+			for (const [key, arrows] of arrowBuckets) {
+				const [color] = key.split("|");
+				for (const arrow of arrows) {
+					g.moveTo(arrow.ax, arrow.ay);
+					g.lineTo(arrow.lx, arrow.ly);
+					g.lineTo(arrow.rx, arrow.ry);
+					g.closePath();
+				}
+				g.fill({ color, alpha: 1 });
+			}
 		}
 	}
 

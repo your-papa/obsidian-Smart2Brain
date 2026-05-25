@@ -2,14 +2,14 @@
 import { getAllTags, type App } from "obsidian";
 import type { ViewFilter } from "../../types/graph";
 import {
-  buildSpaceMembershipRulesEditorFilter,
+	buildSpaceMembershipRulesEditorFilter,
 	cloneSpaceMembershipDraft,
-  cloneViewFilter,
+	cloneViewFilter,
 	compileSpaceMembershipDraft,
 	createEmptySpaceFilter,
-  extractSpaceMembershipRulesFilter,
+	extractSpaceMembershipRulesFilter,
 	parseSpaceMembershipFilter,
-  resolveViewFilter,
+	resolveViewFilter,
 	resolveSpaceMembershipDraft,
 } from "../../lib/views";
 import { getData } from "../../stores/dataStore.svelte";
@@ -69,19 +69,19 @@ const privacyMode = $derived.by(() => data.privacyMode);
 const parsedMembership = $derived.by(() => parseSpaceMembershipFilter(privacyFilter));
 const privacyUniverse = $derived.by(() => new Set(app.vault.getFiles().map((file) => file.path)));
 const resolvedPrivacy = $derived.by(() =>
-  parsedMembership.isAdvanced
-    ? {
-        ...resolveViewFilter(app, privacyFilter, privacyUniverse),
-        provenance: new Map<string, string[]>(),
-        excludedPaths: new Set<string>(),
-      }
-    : resolveSpaceMembershipDraft(app, parsedMembership.draft, privacyUniverse),
+	parsedMembership.isAdvanced
+		? {
+				...resolveViewFilter(app, privacyFilter, privacyUniverse),
+				provenance: new Map<string, string[]>(),
+				excludedPaths: new Set<string>(),
+			}
+		: resolveSpaceMembershipDraft(app, parsedMembership.draft, privacyUniverse),
 );
 const includedFiles = $derived.by(() => [...resolvedPrivacy.paths].sort((left, right) => left.localeCompare(right)));
 const excludedFiles = $derived.by(() =>
-  parsedMembership.isAdvanced
-    ? []
-    : [...parsedMembership.draft.excludedPaths].sort((left, right) => left.localeCompare(right)),
+	parsedMembership.isAdvanced
+		? []
+		: [...parsedMembership.draft.excludedPaths].sort((left, right) => left.localeCompare(right)),
 );
 const totalVaultFiles = $derived.by(() => app.vault.getFiles().length);
 const accessibleFileCount = $derived.by(() =>
@@ -95,9 +95,9 @@ const includedEntries = $derived.by(() =>
 		displayName: path.split("/").pop() ?? path,
 		contextLabel: getParentPath(path) || null,
 		searchable: path.toLowerCase(),
-    isManual: parsedMembership.isAdvanced
-      ? false
-      : (resolvedPrivacy.provenance.get(path)?.includes("Manual") ?? false),
+		isManual: parsedMembership.isAdvanced
+			? false
+			: (resolvedPrivacy.provenance.get(path)?.includes("Manual") ?? false),
 	})),
 );
 const excludedEntries = $derived.by(() =>
@@ -152,24 +152,24 @@ function restoreExcludedPath(path: string) {
 }
 
 function handleRulesFilterChange(nextFilter: ViewFilter) {
-  const simpleRules = extractSpaceMembershipRulesFilter(nextFilter);
-  if (!simpleRules) {
-    showFilters = true;
-    savePrivacyFilter(cloneViewFilter(nextFilter));
-    return;
-  }
+	const simpleRules = extractSpaceMembershipRulesFilter(nextFilter);
+	if (!simpleRules) {
+		showFilters = true;
+		savePrivacyFilter(cloneViewFilter(nextFilter));
+		return;
+	}
 
 	updateDraft((draft) => {
 		const preservedManualPaths = draft.manualPaths;
 		const preservedExcludedPaths = draft.excludedPaths;
 		draft.manualPaths = preservedManualPaths;
 		draft.excludedPaths = preservedExcludedPaths;
-    draft.autoIncludeRules = simpleRules;
+		draft.autoIncludeRules = simpleRules;
 	});
 }
 
 async function handleAddPaths(selectedPaths: string[]) {
-  if (selectedPaths.length === 0 || parsedMembership.isAdvanced) return;
+	if (selectedPaths.length === 0 || parsedMembership.isAdvanced) return;
 	updateDraft((draft) => {
 		draft.manualPaths = [...draft.manualPaths, ...selectedPaths];
 		draft.excludedPaths = draft.excludedPaths.filter((path) => !selectedPaths.includes(path));
@@ -180,7 +180,7 @@ function getIncludedFileActions(entry: { isManual?: boolean }): Array<{
 	label: string;
 	onClick: (path: string) => void;
 }> {
-  if (parsedMembership.isAdvanced) return [];
+	if (parsedMembership.isAdvanced) return [];
 
 	return entry.isManual
 		? [{ label: "Remove", onClick: removeManualPath }]
@@ -193,7 +193,7 @@ function getIncludedFileActions(entry: { isManual?: boolean }): Array<{
 }
 
 function getExcludedFileActions(): Array<{ label: string; onClick: (path: string) => void }> {
-  if (parsedMembership.isAdvanced) return [];
+	if (parsedMembership.isAdvanced) return [];
 
 	return [
 		{

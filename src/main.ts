@@ -16,7 +16,7 @@ import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingCh
 import { setPlugin } from "./stores/state.svelte";
 import { LexicalSearchService } from "./search/LexicalSearchService";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
-import { LocalSmartGraphView, VIEW_TYPE_LOCAL_SMART_GRAPH } from "./views/local-smart-graph/LocalSmartGraphView";
+import { NoteContextView, VIEW_TYPE_NOTE_CONTEXT } from "./views/note-context/NoteContextView";
 import { SmartGraphView, VIEW_TYPE_SMART_GRAPH } from "./views/smart-graph/SmartGraphView";
 import SettingsTab from "./views/settings/Settings";
 import { VectorStoreService } from "./vectorstore";
@@ -200,11 +200,11 @@ export default class SecondBrainPlugin extends Plugin {
 			defaultMod: true,
 		});
 		this.registerView(VIEW_TYPE_SMART_GRAPH, (leaf) => new SmartGraphView(leaf, this));
-		this.registerHoverLinkSource(VIEW_TYPE_LOCAL_SMART_GRAPH, {
-			display: "Local Smart Graph",
+		this.registerHoverLinkSource(VIEW_TYPE_NOTE_CONTEXT, {
+			display: "Note Context",
 			defaultMod: true,
 		});
-		this.registerView(VIEW_TYPE_LOCAL_SMART_GRAPH, (leaf) => new LocalSmartGraphView(leaf, this));
+		this.registerView(VIEW_TYPE_NOTE_CONTEXT, (leaf) => new NoteContextView(leaf, this));
 
 		if (this.manifest.dir === undefined) {
 			this.unload();
@@ -243,10 +243,10 @@ export default class SecondBrainPlugin extends Plugin {
 		});
 
 		this.addCommand({
-			id: "open-local-smart-graph",
-			name: "Open Local Smart Graph",
-			icon: "git-branch-plus",
-			callback: () => this.activateLocalSmartGraphView(),
+			id: "open-note-context",
+			name: "Open Note Context",
+			icon: "waypoints",
+			callback: () => this.activateNoteContextView(),
 		});
 
 		this.addCommand({
@@ -407,15 +407,15 @@ export default class SecondBrainPlugin extends Plugin {
 		workspace.revealLeaf(leaf);
 	}
 
-	async activateLocalSmartGraphView() {
+	async activateNoteContextView() {
 		const { workspace } = this.app;
 
-		let leaf = workspace.getLeavesOfType(VIEW_TYPE_LOCAL_SMART_GRAPH)[0];
+		let leaf = workspace.getLeavesOfType(VIEW_TYPE_NOTE_CONTEXT)[0];
 
 		if (!leaf) {
 			const newLeaf = workspace.getLeaf("tab");
 			await newLeaf.setViewState({
-				type: VIEW_TYPE_LOCAL_SMART_GRAPH,
+				type: VIEW_TYPE_NOTE_CONTEXT,
 				active: true,
 			});
 			leaf = newLeaf;
