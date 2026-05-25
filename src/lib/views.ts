@@ -119,6 +119,33 @@ export function compileSpaceMembershipDraft(draft: SpaceMembershipDraft): ViewFi
 	};
 }
 
+export function buildSpaceMembershipRulesEditorFilter(rules: SpaceMembershipRule[]): ViewFilter {
+	return {
+		type: "any",
+		conditions: rules.map((rule) => cloneSpaceMembershipRule(rule)),
+	};
+}
+
+export function extractSpaceMembershipRulesFilter(filter: ViewFilter): SpaceMembershipRule[] | null {
+	if (isLeaf(filter)) {
+		return isSpaceMembershipRule(filter) ? [cloneSpaceMembershipRule(filter)] : null;
+	}
+
+	if (filter.type !== "any") {
+		return null;
+	}
+
+	const rules: SpaceMembershipRule[] = [];
+	for (const condition of filter.conditions) {
+		if (!isLeaf(condition) || !isSpaceMembershipRule(condition)) {
+			return null;
+		}
+		rules.push(cloneSpaceMembershipRule(condition));
+	}
+
+	return rules;
+}
+
 export function parseSpaceMembershipFilter(filter: ViewFilter): ParsedSpaceMembershipDraft {
 	const draft: SpaceMembershipDraft = {
 		manualPaths: [],

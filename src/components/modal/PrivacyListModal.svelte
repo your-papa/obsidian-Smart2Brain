@@ -2,10 +2,14 @@
 import { getAllTags, type App } from "obsidian";
 import type { ViewFilter } from "../../types/graph";
 import {
+  buildSpaceMembershipRulesEditorFilter,
 	cloneSpaceMembershipDraft,
+  cloneViewFilter,
 	compileSpaceMembershipDraft,
 	createEmptySpaceFilter,
+  extractSpaceMembershipRulesFilter,
 	parseSpaceMembershipFilter,
+  resolveViewFilter,
 	resolveSpaceMembershipDraft,
 } from "../../lib/views";
 import { getData } from "../../stores/dataStore.svelte";
@@ -63,26 +67,37 @@ let showFilters = $state(initialParsed.draft.autoIncludeRules.length > 0);
 
 const privacyMode = $derived.by(() => data.privacyMode);
 const parsedMembership = $derived.by(() => parseSpaceMembershipFilter(privacyFilter));
+const privacyUniverse = $derived.by(() => new Set(app.vault.getFiles().map((file) => file.path)));
 const resolvedPrivacy = $derived.by(() =>
-	resolveSpaceMembershipDraft(app, parsedMembership.draft, new Set(app.vault.getFiles().map((file) => file.path))),
+  parsedMembership.isAdvanced
+    ? {
+        ...resolveViewFilter(app, privacyFilter, privacyUniverse),
+        provenance: new Map<string, string[]>(),
+        excludedPaths: new Set<string>(),
+      }
+    : resolveSpaceMembershipDraft(app, parsedMembership.draft, privacyUniverse),
 );
 const includedFiles = $derived.by(() => [...resolvedPrivacy.paths].sort((left, right) => left.localeCompare(right)));
 const excludedFiles = $derived.by(() =>
-	[...parsedMembership.draft.excludedPaths].sort((left, right) => left.localeCompare(right)),
+  parsedMembership.isAdvanced
+    ? []
+    : [...parsedMembership.draft.excludedPaths].sort((left, right) => left.localeCompare(right)),
 );
 const totalVaultFiles = $derived.by(() => app.vault.getFiles().length);
 const accessibleFileCount = $derived.by(() =>
 	privacyMode === "private-by-default" ? includedFiles.length : totalVaultFiles - includedFiles.length,
 );
 const privateFileCount = $derived.by(() => totalVaultFiles - accessibleFileCount);
-const hasFilters = $derived.by(() => parsedMembership.draft.autoIncludeRules.length > 0);
+const hasFilters = $derived.by(() => parsedMembership.isAdvanced || parsedMembership.draft.autoIncludeRules.length > 0);
 const includedEntries = $derived.by(() =>
 	includedFiles.map((path) => ({
 		path,
 		displayName: path.split("/").pop() ?? path,
 		contextLabel: getParentPath(path) || null,
 		searchable: path.toLowerCase(),
-		isManual: resolvedPrivacy.provenance.get(path)?.includes("Manual") ?? false,
+    isManual: parsedMembership.isAdvanced
+      ? false
+      : (resolvedPrivacy.provenance.get(path)?.includes("Manual") ?? false),
 	})),
 );
 const excludedEntries = $derived.by(() =>
@@ -137,20 +152,24 @@ function restoreExcludedPath(path: string) {
 }
 
 function handleRulesFilterChange(nextFilter: ViewFilter) {
+  const simpleRules = extractSpaceMembershipRulesFilter(nextFilter);
+  if (!simpleRules) {
+    showFilters = true;
+    savePrivacyFilter(cloneViewFilter(nextFilter));
+    return;
+  }
+
 	updateDraft((draft) => {
-		const parsed = parseSpaceMembershipFilter(nextFilter);
-		if (parsed.isAdvanced) return;
-		const nextDraft = parsed.draft;
 		const preservedManualPaths = draft.manualPaths;
 		const preservedExcludedPaths = draft.excludedPaths;
 		draft.manualPaths = preservedManualPaths;
 		draft.excludedPaths = preservedExcludedPaths;
-		draft.autoIncludeRules = nextDraft.autoIncludeRules;
+    draft.autoIncludeRules = simpleRules;
 	});
 }
 
 async function handleAddPaths(selectedPaths: string[]) {
-	if (selectedPaths.length === 0) return;
+  if (selectedPaths.length === 0 || parsedMembership.isAdvanced) return;
 	updateDraft((draft) => {
 		draft.manualPaths = [...draft.manualPaths, ...selectedPaths];
 		draft.excludedPaths = draft.excludedPaths.filter((path) => !selectedPaths.includes(path));
@@ -161,6 +180,8 @@ function getIncludedFileActions(entry: { isManual?: boolean }): Array<{
 	label: string;
 	onClick: (path: string) => void;
 }> {
+  if (parsedMembership.isAdvanced) return [];
+
 	return entry.isManual
 		? [{ label: "Remove", onClick: removeManualPath }]
 		: [
@@ -172,6 +193,8 @@ function getIncludedFileActions(entry: { isManual?: boolean }): Array<{
 }
 
 function getExcludedFileActions(): Array<{ label: string; onClick: (path: string) => void }> {
+  if (parsedMembership.isAdvanced) return [];
+
 	return [
 		{
 			label: privacyMode === "private-by-default" ? "Restore access" : "Restore private",
@@ -269,24 +292,20 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
       addButtonText="Add files"
       {pickerModalTitle}
       {pickerText}
-      pickerExistingPaths={parsedMembership.draft.manualPaths}
+      pickerExistingPaths={!parsedMembership.isAdvanced ? parsedMembership.draft.manualPaths : []}
       pickerIncludedPaths={includedFiles}
-      onAddPaths={handleAddPaths}
+      onAddPaths={!parsedMembership.isAdvanced ? handleAddPaths : undefined}
       showFilterToggle={true}
       filtersButtonText="Filters"
       filterToggleAriaLabel="Toggle privacy filters"
       isFilterActive={hasFilters}
-      filterCount={parsedMembership.draft.autoIncludeRules.length}
+      filterCount={parsedMembership.isAdvanced ? 1 : parsedMembership.draft.autoIncludeRules.length}
       onToggleFilters={() => (showFilters = !showFilters)}
       showFilterPanel={showFilters}
       filterPanelLabel="Filters"
-      filterBuilderFilter={ensureGroup(
-        compileSpaceMembershipDraft({
-          manualPaths: [],
-          autoIncludeRules: parsedMembership.draft.autoIncludeRules,
-          excludedPaths: [],
-        }),
-      )}
+      filterBuilderFilter={parsedMembership.isAdvanced
+  		? ensureGroup(cloneViewFilter(privacyFilter))
+  		: buildSpaceMembershipRulesEditorFilter(parsedMembership.draft.autoIncludeRules)}
       {availableFolders}
       {availableTags}
       onFilterChange={handleRulesFilterChange}
