@@ -13,6 +13,7 @@
   import LoadingAnimation from "../ui/LoadingAnimation.svelte";
   import GraphCanvas from "./GraphCanvas.svelte";
   import {
+    DEFAULT_LOCAL_SEMANTIC_THRESHOLD,
     buildLocalSemanticGraph,
     buildLocalWikiGraph,
     mergeLocalGraph,
@@ -20,8 +21,6 @@
 
   const plugin = getPlugin();
   const data = getData();
-
-  const LOCAL_SEMANTIC_THRESHOLD = 0.35;
 
   type LocalViewMode = "graph" | "list";
   type LocalRelationshipMode = "linked" | "semantic" | "both";
@@ -183,7 +182,7 @@
       if (localBuildVersion !== buildVersion) return;
 
       const semanticGraph = buildLocalSemanticGraph(plugin.app, nextActivePath, documents, {
-        threshold: LOCAL_SEMANTIC_THRESHOLD,
+        threshold: DEFAULT_LOCAL_SEMANTIC_THRESHOLD,
       });
 
       if (localBuildVersion !== buildVersion) return;

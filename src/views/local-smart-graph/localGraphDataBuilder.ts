@@ -7,7 +7,7 @@ export interface LocalSemanticGraphOptions {
 	threshold?: number;
 }
 
-const DEFAULT_LOCAL_SEMANTIC_THRESHOLD = 0.35;
+export const DEFAULT_LOCAL_SEMANTIC_THRESHOLD = 0.35;
 
 function getMarkdownFileMap(app: App): Map<string, TFile> {
 	return new Map(app.vault.getMarkdownFiles().map((file) => [file.path, file]));
