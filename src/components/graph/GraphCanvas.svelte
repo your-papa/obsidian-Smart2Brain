@@ -22,6 +22,7 @@
     linkDistance: number;
     class?: string;
     onUserViewportChange?: () => void;
+    alwaysRefitOnDataChange?: boolean;
     directedWikiEdges?: boolean;
     chargeStrength?: number;
     centerStrength?: number;
@@ -53,6 +54,7 @@
     linkDistance,
     class: className = "",
     onUserViewportChange,
+    alwaysRefitOnDataChange = false,
     directedWikiEdges = false,
     chargeStrength = -1000,
     centerStrength = 0.1,
@@ -1304,10 +1306,17 @@
       .alphaDecay(0.02)
       .velocityDecay(0.3);
 
+    // Note Context can opt into an unconditional refit on graph changes, even
+    // when positions are restored from cache.
+    if (alwaysRefitOnDataChange) {
+      simulation.alpha(Math.max(simulation.alpha(), 0.08));
+      needsInitialFit = true;
+      forceTickCount = 0;
+    }
     // All nodes restored from cache → gentle settle, no camera refit needed.
     // Some nodes had prior positions (mode switch) → slow drift into place.
     // No prior positions → full simulation from scratch.
-    if (allPositionsKnown || isSmooth) {
+    else if (allPositionsKnown || isSmooth) {
       simulation.alpha(0.05);
       needsInitialFit = false;
     } else if (oldPositions.size > 0) {
@@ -1407,6 +1416,7 @@
   $effect(() => {
     void nodeSize;
     void showWikiLinks;
+    void alwaysRefitOnDataChange;
     void directedWikiEdges;
     if (pixi) render();
   });

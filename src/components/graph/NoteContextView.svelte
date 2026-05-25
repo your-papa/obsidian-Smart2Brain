@@ -397,6 +397,7 @@
         <GraphCanvas
           bind:this={canvasComponent}
           class="note-context__graph"
+          alwaysRefitOnDataChange={true}
           directedWikiEdges={data.smartGraphSettings.directedWikiEdges}
           graphData={visibleGraphData}
           onUserViewportChange={() => {

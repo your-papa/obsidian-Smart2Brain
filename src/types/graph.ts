@@ -325,9 +325,9 @@ export function generateClusterColors(k: number, themeColors: string[] = []): st
 		themeColors.length > 0
 			? themeColors.map((c) => parseHSL(c))
 			: Array.from(
-				{ length: Math.max(k, 1) },
-				(_, i) => [Math.round((i * 360) / Math.max(k, 1)) % 360, 70, 55] as [number, number, number],
-			);
+					{ length: Math.max(k, 1) },
+					(_, i) => [Math.round((i * 360) / Math.max(k, 1)) % 360, 70, 55] as [number, number, number],
+				);
 
 	const colors: string[] = [];
 	const paletteSize = base.length;

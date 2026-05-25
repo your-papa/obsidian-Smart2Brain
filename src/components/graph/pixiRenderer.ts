@@ -615,13 +615,17 @@ export class PixiRenderer {
 		const c = this._theme;
 		const scale = this.viewport.scaled || 1;
 		const normalWidth = 1.2 / scale;
-		const highlightWidth = 2 / scale;
+		const highlightWidth = 1.6 / scale;
 
 		// Batch edges by style bucket to minimize draw calls.
-		// Batch edges by style bucket to minimize draw calls.
 		// Key: "color|width|alpha" → list of segments
-		const lineBuckets = new Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>();
-		const arrowBuckets = new Map<
+		const normalLineBuckets = new Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>();
+		const highlightLineBuckets = new Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>();
+		const normalArrowBuckets = new Map<
+			string,
+			Array<{ ax: number; ay: number; lx: number; ly: number; rx: number; ry: number }>
+		>();
+		const highlightArrowBuckets = new Map<
 			string,
 			Array<{ ax: number; ay: number; lx: number; ly: number; rx: number; ry: number }>
 		>();
@@ -670,17 +674,14 @@ export class PixiRenderer {
 			const alpha = clampUnitInterval(Math.round(rawAlpha * 20) / 20, 0);
 			if (alpha <= 0) continue;
 
-			const color = isHighlighted ? c.accent : c.textFaint;
+			const color = isHighlighted ? c.accent : c.graphLine;
 			const width = isHighlighted ? highlightWidth : normalWidth;
-
-			// Pre-blend color against background so stacked edges at a node don't
-			// compound into a bright hotspot. Draw at alpha=1 to prevent stacking.
-			const blended = isHighlighted ? color : blendColor(color, c.bgPrimary, alpha);
-			const key = `${blended}|${width.toFixed(4)}`;
-			let bucket = lineBuckets.get(key);
+			const key = `${color}|${width.toFixed(4)}|${alpha.toFixed(2)}`;
+			const targetLineBuckets = isHighlighted ? highlightLineBuckets : normalLineBuckets;
+			let bucket = targetLineBuckets.get(key);
 			if (!bucket) {
 				bucket = [];
-				lineBuckets.set(key, bucket);
+				targetLineBuckets.set(key, bucket);
 			}
 			bucket.push({ sx, sy, tx, ty });
 
@@ -691,19 +692,20 @@ export class PixiRenderer {
 				if (len > 0.0001) {
 					const ux = dx / len;
 					const uy = dy / len;
-					const arrowLength = Math.max(7 / scale, width * 5);
-					const arrowWidth = Math.max(4 / scale, width * 2.6);
-					const tipInset = Math.max(width * 1.5, 2 / scale);
+					const arrowLength = isHighlighted ? Math.max(7 / scale, width * 5) : 11;
+					const arrowWidth = isHighlighted ? Math.max(4 / scale, width * 2.6) : 5.5;
+					const tipInset = isHighlighted ? Math.max(width * 1.5, 2 / scale) : 3;
 					const ax = tx - ux * tipInset;
 					const ay = ty - uy * tipInset;
 					const baseX = ax - ux * arrowLength;
 					const baseY = ay - uy * arrowLength;
 					const perpX = -uy;
 					const perpY = ux;
-					let arrows = arrowBuckets.get(key);
+					const targetArrowBuckets = isHighlighted ? highlightArrowBuckets : normalArrowBuckets;
+					let arrows = targetArrowBuckets.get(key);
 					if (!arrows) {
 						arrows = [];
-						arrowBuckets.set(key, arrows);
+						targetArrowBuckets.set(key, arrows);
 					}
 					arrows.push({
 						ax,
@@ -717,28 +719,44 @@ export class PixiRenderer {
 			}
 		}
 
-		// Draw each bucket as a single batched stroke
-		for (const [key, segments] of lineBuckets) {
-			const [color, widthStr] = key.split("|");
-			const width = Number(widthStr);
+		const drawLineBuckets = (buckets: Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>) => {
+			for (const [key, segments] of buckets) {
+				const [color, widthStr, alphaStr] = key.split("|");
+				const width = Number(widthStr);
+				const alpha = Number(alphaStr);
 
-			for (const seg of segments) {
-				g.moveTo(seg.sx, seg.sy);
-				g.lineTo(seg.tx, seg.ty);
+				for (const seg of segments) {
+					g.moveTo(seg.sx, seg.sy);
+					g.lineTo(seg.tx, seg.ty);
+				}
+				g.stroke({ color, width, alpha });
 			}
-			g.stroke({ color, width, alpha: 1 });
-		}
-		if (opts.directedWikiEdges) {
-			for (const [key, arrows] of arrowBuckets) {
-				const [color] = key.split("|");
+		};
+
+		const drawArrowBuckets = (
+			buckets: Map<string, Array<{ ax: number; ay: number; lx: number; ly: number; rx: number; ry: number }>>,
+		) => {
+			for (const [key, arrows] of buckets) {
+				const [color, , alphaStr] = key.split("|");
+				const alpha = Number(alphaStr);
 				for (const arrow of arrows) {
 					g.moveTo(arrow.ax, arrow.ay);
 					g.lineTo(arrow.lx, arrow.ly);
 					g.lineTo(arrow.rx, arrow.ry);
 					g.closePath();
 				}
-				g.fill({ color, alpha: 1 });
+				g.fill({ color, alpha });
 			}
+		};
+
+		// Always draw hovered connections last so dim edges/arrows never sit on top of them.
+		drawLineBuckets(normalLineBuckets);
+		if (opts.directedWikiEdges) {
+			drawArrowBuckets(normalArrowBuckets);
+		}
+		drawLineBuckets(highlightLineBuckets);
+		if (opts.directedWikiEdges) {
+			drawArrowBuckets(highlightArrowBuckets);
 		}
 	}
 
