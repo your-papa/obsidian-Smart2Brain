@@ -3,14 +3,8 @@ import type { App } from "obsidian";
 import { z } from "zod";
 import type { SearchAlgorithm, SearchNotesSettings } from "../../types/plugin";
 import { getLexicalSearchService, waitForLexicalSearch } from "../../search/LexicalSearchService";
-import {
-	annotateRecentResults,
-	applyRecentBoost,
-	buildRecentBoostMap,
-	getRecentNotes,
-	getRecentPathSet,
-} from "../../search/recentNotes";
-import { calculateAliasBoost, calculateTitleBoost } from "../../search/searchRanking";
+import { rankSearchResults } from "../../search/finalSearchRanking";
+import { buildRecentBoostMap, getRecentNotes } from "../../search/recentNotes";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { matchesPathPrefix, normalizeVaultPath } from "../../utils/pathUtils";
@@ -62,11 +56,6 @@ function normalizeTags(tags: string[] | undefined): string[] | undefined {
 	return Array.from(new Set(tags.map((tag) => (tag.startsWith("#") ? tag : `#${tag}`))));
 }
 
-function mergeBadges(...badgeSets: Array<SearchMatchBadge[] | undefined>): SearchMatchBadge[] | undefined {
-	const merged = Array.from(new Set(badgeSets.flatMap((badges) => badges ?? [])));
-	return merged.length > 0 ? merged : undefined;
-}
-
 function redactRestrictedMatchBadges(
 	badges: SearchMatchBadge[] | undefined,
 	privacyRestricted: boolean,
@@ -88,63 +77,18 @@ function redactRestrictedMatchBadges(
  * Runs both searches in parallel and merges results.
  */
 async function hybridSearch(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
-	const k = 60; // RRF constant (standard value)
-	const titleBoostMax = 0.03; // Max title boost (roughly equivalent to being in top 3 in both searches)
-	const aliasBoostMax = 0.028;
-
 	// Run semantic and lexical search in parallel
 	const [semanticResults, lexicalResults] = await Promise.all([
 		embeddingsSearch(app, query, filter),
 		getLexicalResults(app, query, filter),
 	]);
 
-	// Build RRF score map
-	const scoreMap = new Map<string, { result: SearchResult; score: number }>();
-
-	// Add semantic results with RRF scores
-	semanticResults.forEach((result, rank) => {
-		const rrfScore = 1 / (k + rank + 1);
-		const existing = scoreMap.get(result.path);
-		if (existing) {
-			existing.result = {
-				...existing.result,
-				matchBadges: mergeBadges(existing.result.matchBadges, result.matchBadges),
-			};
-			existing.score += rrfScore;
-		} else {
-			scoreMap.set(result.path, { result, score: rrfScore });
-		}
+	return rankSearchResults({
+		query,
+		lexicalResults,
+		semanticResults,
+		recentBoostByPath: buildRecentBoostMap(getRecentNotes(app, filter)),
 	});
-
-	// Add lexical results with RRF scores
-	lexicalResults.forEach((result, rank) => {
-		const rrfScore = 1 / (k + rank + 1);
-		const existing = scoreMap.get(result.path);
-		if (existing) {
-			existing.result = {
-				...existing.result,
-				frontmatter: existing.result.frontmatter ?? result.frontmatter,
-				tags: existing.result.tags ?? result.tags,
-				matchExplanation: existing.result.matchExplanation ?? result.matchExplanation,
-				matchBadges: mergeBadges(existing.result.matchBadges, result.matchBadges),
-			};
-			existing.score += rrfScore;
-		} else {
-			scoreMap.set(result.path, { result, score: rrfScore });
-		}
-	});
-
-	// Apply title boost to all results
-	for (const entry of scoreMap.values()) {
-		const titleBoost = calculateTitleBoost(query, entry.result.name, titleBoostMax);
-		const aliasBoost = calculateAliasBoost(query, entry.result.frontmatter, aliasBoostMax);
-		entry.score += titleBoost + aliasBoost;
-	}
-
-	// Sort by combined RRF score and return
-	return Array.from(scoreMap.values())
-		.sort((a, b) => b.score - a.score)
-		.map(({ result, score }) => ({ ...result, score }));
 }
 
 async function getReadyLexicalSearchService() {
@@ -207,7 +151,10 @@ export async function performSearch(
 	// Handle filter-only queries (no search term)
 	if (!query.trim() && filter) {
 		const results = await browseWithFilter(filter);
-		return applyRecentBoost(results, buildRecentBoostMap(getRecentNotes(app, filter)));
+		return rankSearchResults({
+			lexicalResults: results,
+			recentBoostByPath: buildRecentBoostMap(getRecentNotes(app, filter)),
+		});
 	}
 
 	// Require a search term if no filter
@@ -228,7 +175,15 @@ export async function performSearch(
 			break;
 	}
 
-	return annotateRecentResults(results, getRecentPathSet(app, filter));
+	if (algorithm === "hybrid") {
+		return results;
+	}
+
+	return rankSearchResults({
+		query,
+		lexicalResults: results,
+		recentBoostByPath: buildRecentBoostMap(getRecentNotes(app, filter)),
+	});
 }
 
 /**
@@ -320,9 +275,9 @@ export function createSearchNotesTool(app: App) {
 		const filter: SearchFilter | undefined =
 			filterPathPrefixes || filterTags
 				? {
-						pathPrefixes: filterPathPrefixes,
-						tags: filterTags,
-					}
+					pathPrefixes: filterPathPrefixes,
+					tags: filterTags,
+				}
 				: undefined;
 
 		Logger.debug("[search_notes] Configured settings:", {

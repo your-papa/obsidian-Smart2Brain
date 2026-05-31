@@ -7,20 +7,16 @@
  */
 
 import MiniSearch, { type SearchResult as MiniSearchResult } from "minisearch";
+import { getTitleMatchKind, matchesLeadingTitlePrefix, type TitleBoostScale } from "../search/searchRanking";
+import { isNumericSearchTerm, normalizeSearchText, tokenizeSearchText } from "../search/searchTermUtils";
+import { createQueryPlan, type QueryPlan } from "../search/queryPlan";
 import {
-	calculateAliasBoost,
-	calculatePathBoost,
-	calculateTagBoost,
-	calculateTitleBoost,
-	matchesLeadingTitlePrefix,
-	type TitleBoostScale,
-} from "../search/searchRanking";
-import {
-	extractNormalizedTokens,
-	isNumericSearchTerm,
-	normalizeSearchText,
-	tokenizeSearchText,
-} from "../search/searchTermUtils";
+	getLexicalMatchTier,
+	scoreLexicalCandidate,
+	type LexicalCandidateEvidence,
+	type LexicalRankingFeatures,
+	type LexicalScoringConfig,
+} from "../search/lexicalScoring";
 import { Logger } from "../utils/logging";
 
 import { getDbName } from "./types";
@@ -62,6 +58,7 @@ export interface LexicalSearchResult {
 	tags?: string[];
 	content?: string;
 	score: number;
+	features?: LexicalRankingFeatures;
 }
 
 export interface AutocompleteCacheSnapshot {
@@ -82,7 +79,33 @@ interface IndexedDocument {
 
 interface RankedLexicalResult {
 	result: MiniSearchResult;
+	matchTier: number;
 	adjustedScore: number;
+	features: LexicalRankingFeatures;
+}
+
+interface CandidateEvidence extends LexicalCandidateEvidence {
+	path: string;
+}
+
+const IDENTITY_SEARCH_FIELDS = ["title", "aliases", "tags", "pathSegments"] as const;
+const CONTENT_SEARCH_FIELDS = ["content"] as const;
+
+const NUMERIC_SUFFIX_BASE_TITLE_PENALTY = 24;
+const LEXICAL_SCORING_CONFIG: LexicalScoringConfig = {
+	titleScale: LEXICAL_TITLE_SCALE,
+	aliasMax: LEXICAL_ALIAS_MAX,
+	tagMax: LEXICAL_TAG_MAX,
+	pathMax: LEXICAL_PATH_MAX,
+	numericSuffixBasePenalty: NUMERIC_SUFFIX_BASE_TITLE_PENALTY,
+};
+
+function shouldIdentityPrefixMatch(term: string): boolean {
+	return term.length >= 1;
+}
+
+function shouldContentPrefixMatch(term: string): boolean {
+	return term.length >= 3;
 }
 
 /**
@@ -119,7 +142,7 @@ export class MiniSearchService {
 			searchOptions: {
 				boost: { title: 2, aliases: 1.8, tags: 1.5, pathSegments: 1.2, content: 1 },
 				fuzzy: 0.2,
-				prefix: true,
+				prefix: shouldContentPrefixMatch,
 			},
 			// Simple tokenizer: split on whitespace/punctuation
 			tokenize: (text) => {
@@ -401,53 +424,33 @@ export class MiniSearchService {
 			return [];
 		}
 
-		const results = this.index.search(query, {
-			boost: { title: 2, aliases: 1.8, tags: 1.5, pathSegments: 1.2, content: 1 },
-			fuzzy: 0.2,
-			prefix: true,
-		});
+		const queryPlan = createQueryPlan(query);
+		if (!queryPlan.identityQuery && !queryPlan.contentQuery) {
+			return [];
+		}
+
+		const identityResults = this.searchIdentityCandidates(queryPlan);
+		const contentResults = this.searchContentCandidates(queryPlan);
 		const priorityResults = [...this.findPriorityTitleMatches(query), ...this.findPriorityAliasMatches(query)];
-		const combinedResults = new Map<string, MiniSearchResult>();
+		const evidenceByPath = new Map<string, CandidateEvidence>();
 
 		for (const result of priorityResults) {
-			combinedResults.set(result.id, result);
+			this.mergeCandidateEvidence(evidenceByPath, result, "priority");
 		}
 
-		for (const result of results) {
-			const existing = combinedResults.get(result.id);
-			if (!existing || result.score > existing.score) {
-				combinedResults.set(result.id, result);
-			}
+		for (const result of identityResults) {
+			this.mergeCandidateEvidence(evidenceByPath, result, "identity");
 		}
 
-		const rankedResults = Array.from(combinedResults.values())
-			.map((result): RankedLexicalResult => {
-				const title =
-					(result as MiniSearchResult & { title?: string }).title ||
-					result.id
-						.replace(/\.[^.]+$/, "")
-						.split("/")
-						.pop() ||
-					result.id;
-				const aliases = this.parseStoredAliases((result as MiniSearchResult & { aliases?: string }).aliases);
-				const tags = this.parseStoredList((result as MiniSearchResult & { tags?: string }).tags);
-				const pathSegments = this.parseStoredList(
-					(result as MiniSearchResult & { pathSegments?: string }).pathSegments,
-				);
+		for (const result of contentResults) {
+			this.mergeCandidateEvidence(evidenceByPath, result, "content");
+		}
 
-				return {
-					result,
-					adjustedScore:
-						result.score +
-						calculateTitleBoost(query, title, LEXICAL_TITLE_SCALE) +
-						calculateAliasBoost(query, aliases, LEXICAL_ALIAS_MAX) +
-						calculateTagBoost(query, tags, LEXICAL_TAG_MAX) +
-						calculatePathBoost(query, pathSegments, LEXICAL_PATH_MAX),
-				};
-			})
-			.sort((left, right) => right.adjustedScore - left.adjustedScore);
+		const rankedResults = Array.from(evidenceByPath.values())
+			.map((evidence): RankedLexicalResult => this.createRankedLexicalResult(queryPlan, query, evidence))
+			.sort((left, right) => right.matchTier - left.matchTier || right.adjustedScore - left.adjustedScore);
 
-		return rankedResults.slice(0, limit).map(({ result, adjustedScore }) => ({
+		return rankedResults.slice(0, limit).map(({ result, adjustedScore, features }) => ({
 			path: result.id,
 			name:
 				(result as MiniSearchResult & { title?: string }).title ||
@@ -460,31 +463,148 @@ export class MiniSearchService {
 			tags: this.parseStoredList((result as MiniSearchResult & { tags?: string }).tags),
 			content: (result as MiniSearchResult & { content?: string }).content,
 			score: adjustedScore,
+			features,
 		}));
 	}
 
-	private findPriorityTitleMatches(query: string): MiniSearchResult[] {
-		const queryTokens = extractNormalizedTokens(query);
-		if (queryTokens.length === 0 || !isNumericSearchTerm(queryTokens[0])) {
+	private mergeCandidateEvidence(
+		evidenceByPath: Map<string, CandidateEvidence>,
+		result: MiniSearchResult,
+		channel: "identity" | "content" | "priority",
+	): void {
+		const existing = evidenceByPath.get(result.id) ?? {
+			path: result.id,
+			identityScore: 0,
+			contentScore: 0,
+			priorityScore: 0,
+		};
+
+		if (channel === "identity") {
+			existing.identityScore = Math.max(existing.identityScore, result.score);
+		} else if (channel === "content") {
+			existing.contentScore = Math.max(existing.contentScore, result.score);
+		} else {
+			existing.priorityScore = Math.max(existing.priorityScore, result.score);
+		}
+
+		evidenceByPath.set(result.id, existing);
+	}
+
+	private createRankedLexicalResult(
+		queryPlan: QueryPlan,
+		query: string,
+		evidence: CandidateEvidence,
+	): RankedLexicalResult {
+		const result = this.getStoredResult(evidence.path);
+		const title =
+			(result as MiniSearchResult & { title?: string }).title ||
+			result.id
+				.replace(/\.[^.]+$/, "")
+				.split("/")
+				.pop() ||
+			result.id;
+		const aliases = this.parseStoredAliases((result as MiniSearchResult & { aliases?: string }).aliases);
+		const tags = this.parseStoredList((result as MiniSearchResult & { tags?: string }).tags);
+		const pathSegments = this.parseStoredList(
+			(result as MiniSearchResult & { pathSegments?: string }).pathSegments,
+		);
+		const features = scoreLexicalCandidate(
+			queryPlan,
+			query,
+			title,
+			aliases,
+			tags,
+			pathSegments,
+			evidence,
+			LEXICAL_SCORING_CONFIG,
+		);
+
+		return {
+			result: { ...result, score: features.baseScore },
+			matchTier: features.matchTier,
+			adjustedScore: features.adjustedScore,
+			features,
+		};
+	}
+
+	private getStoredResult(path: string): MiniSearchResult {
+		const stored = this.index.getStoredFields(path) as
+			| {
+				path?: string;
+				title?: string;
+				aliases?: string;
+				tags?: string;
+				pathSegments?: string;
+				content?: string;
+			}
+			| undefined;
+
+		return {
+			id: path,
+			score: 0,
+			...(stored ?? { title: this.documentTitles.get(path) }),
+		} as MiniSearchResult;
+	}
+
+	private searchIdentityCandidates(queryPlan: QueryPlan): MiniSearchResult[] {
+		if (!queryPlan.identityQuery) {
 			return [];
 		}
 
+		return this.index.search(queryPlan.identityQuery, {
+			fields: [...IDENTITY_SEARCH_FIELDS],
+			boost: { title: 2, aliases: 1.8, tags: 1.5, pathSegments: 1.2 },
+			fuzzy: 0.2,
+			prefix: shouldIdentityPrefixMatch,
+		});
+	}
+
+	private searchContentCandidates(queryPlan: QueryPlan): MiniSearchResult[] {
+		if (!queryPlan.contentQuery) {
+			return [];
+		}
+
+		return this.index.search(queryPlan.contentQuery, {
+			fields: [...CONTENT_SEARCH_FIELDS],
+			boost: { content: 1 },
+			fuzzy: 0.2,
+			prefix: shouldContentPrefixMatch,
+		});
+	}
+
+	private findPriorityTitleMatches(query: string): MiniSearchResult[] {
+		const queryPlan = createQueryPlan(query);
+		const queryTokens = queryPlan.normalizedTokens;
+		const normalizedQuery = queryPlan.normalizedQuery;
+		if (queryTokens.length === 0 || !normalizedQuery) {
+			return [];
+		}
+
+		const shouldRescueShortTitlePrefixes = normalizedQuery.length < 3;
+
 		const results: MiniSearchResult[] = [];
 		for (const [path, title] of this.documentTitles) {
+			const titleMatchKind = getTitleMatchKind(queryPlan, title);
 			const titleTokens = tokenizeSearchText(title);
-			if (!matchesLeadingTitlePrefix(queryTokens, titleTokens)) {
+			const hasNumericLeadingPrefix =
+				isNumericSearchTerm(queryTokens[0] ?? "") && matchesLeadingTitlePrefix(queryTokens, titleTokens);
+			const hasShortTitlePrefixRescue =
+				shouldRescueShortTitlePrefixes &&
+				(titleMatchKind === "exact" || titleMatchKind === "leading-prefix" || titleMatchKind === "starts-with");
+
+			if (!hasNumericLeadingPrefix && !hasShortTitlePrefixRescue) {
 				continue;
 			}
 
 			const stored = this.index.getStoredFields(path) as
 				| {
-						path?: string;
-						title?: string;
-						aliases?: string;
-						tags?: string;
-						pathSegments?: string;
-						content?: string;
-				  }
+					path?: string;
+					title?: string;
+					aliases?: string;
+					tags?: string;
+					pathSegments?: string;
+					content?: string;
+				}
 				| undefined;
 
 			results.push({
@@ -498,8 +618,8 @@ export class MiniSearchService {
 	}
 
 	private findPriorityAliasMatches(query: string): MiniSearchResult[] {
-		const normalizedQuery = normalizeSearchText(query);
-		if (!normalizedQuery || normalizedQuery.length < 2) {
+		const normalizedQuery = createQueryPlan(query).normalizedQuery;
+		if (!normalizedQuery) {
 			return [];
 		}
 
@@ -520,13 +640,13 @@ export class MiniSearchService {
 
 			const stored = this.index.getStoredFields(path) as
 				| {
-						path?: string;
-						title?: string;
-						aliases?: string;
-						tags?: string;
-						pathSegments?: string;
-						content?: string;
-				  }
+					path?: string;
+					title?: string;
+					aliases?: string;
+					tags?: string;
+					pathSegments?: string;
+					content?: string;
+				}
 				| undefined;
 
 			results.push({

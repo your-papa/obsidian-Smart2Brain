@@ -105,6 +105,151 @@ describe("MiniSearchService", () => {
 		expect(results[0]?.aliases).toContain("Rocket Science");
 	});
 
+	it("keeps alias contains matches visible alongside strong title matches", () => {
+		vi.useFakeTimers();
+
+		const service = new MiniSearchService("test-vault", "alias-contains-ranking");
+		service.addDocument(
+			"Notes/sap-ekx.md",
+			"SAP Workstream",
+			[
+				"---",
+				"aliases:",
+				"  - SAP EKX",
+				"---",
+				"",
+				"# SAP Workstream",
+			].join("\n"),
+		);
+		service.addDocument("Notes/ekx-one.md", "EKX Steering Sync", "Title-led EKX note.");
+		service.addDocument("Notes/ekx-two.md", "EKX State of the Union", "Another title-led EKX note.");
+		service.addDocument("Notes/ekx-three.md", "EKX Architecture Session", "Yet another EKX title.");
+
+		const results = service.search("ekx", 10);
+
+		expect(results.map((result) => result.name)).toContain("SAP Workstream");
+	});
+
+	it("prefers alias token matches over plain title-prefix matches for acronyms", () => {
+		vi.useFakeTimers();
+
+		const service = new MiniSearchService("test-vault", "alias-token-ranking");
+		service.addDocument(
+			"Notes/sap-ekx.md",
+			"SAP Workstream",
+			[
+				"---",
+				"aliases:",
+				"  - SAP EKX",
+				"---",
+				"",
+				"# SAP Workstream",
+			].join("\n"),
+		);
+		service.addDocument("Notes/ekx-one.md", "EKX Steering Sync", "Title-led EKX note.");
+
+		const results = service.search("ekx", 5);
+
+		expect(results[0]?.name).toBe("SAP Workstream");
+		expect(results[0]?.aliases).toContain("SAP EKX");
+	});
+
+	it("keeps strong title matches ahead of content-only matches", () => {
+		vi.useFakeTimers();
+
+		const service = new MiniSearchService("test-vault", "title-vs-content");
+		service.addDocument(
+			"Notes/pm-and-comms.md",
+			"PM and comms",
+			"Short note with a direct title match.",
+		);
+		service.addDocument(
+			"Notes/psychologie.md",
+			"Psychologie für Ingenieure",
+			"pm an pm an pm an pm an pm an pm an pm an pm an pm an pm an",
+		);
+
+		const results = service.search("pm an", 5);
+
+		expect(results[0]?.name).toBe("PM and comms");
+		expect(results[1]?.name).toBe("Psychologie für Ingenieure");
+	});
+
+	it("returns title-prefix matches for one- and two-character queries", () => {
+		vi.useFakeTimers();
+
+		const service = new MiniSearchService("test-vault", "short-title-prefixes");
+		service.addDocument("Notes/pm-board.md", "PM Board", "Project management board and planning notes.");
+		service.addDocument(
+			"Notes/noisy.md",
+			"Noisy Content",
+			"pm pm pm pm pm pm repeated in content only to compete with the title match.",
+		);
+
+		const oneCharResults = service.search("p", 5);
+		const twoCharResults = service.search("pm", 5);
+
+		expect(oneCharResults[0]?.name).toBe("PM Board");
+		expect(twoCharResults[0]?.name).toBe("PM Board");
+	});
+
+	it("ignores weak short tokens for BM25 retrieval when stronger terms exist", () => {
+		vi.useFakeTimers();
+
+		const service = new MiniSearchService("test-vault", "mixed-short-token-query");
+		service.addDocument(
+			"Notes/pm-tasks.md",
+			"PM and tasks",
+			"Short note with the intended title match.",
+		);
+		service.addDocument(
+			"Notes/ekx-sync.md",
+			"EKX Steering Sync Pre-Release",
+			"and and and and and choose choose choose choose choose",
+		);
+		service.addDocument(
+			"Notes/psychologie.md",
+			"Psychologie für Ingenieure",
+			"an an an an an an an an an choose once in content",
+		);
+
+		const results = service.search("pm an task", 5);
+
+		expect(results[0]?.name).toBe("PM and tasks");
+		expect(results.slice(0, 2).map((result) => result.name)).not.toContain("EKX Steering Sync Pre-Release");
+	});
+
+	it("keeps the unsuffixed base title ahead of numeric variants", () => {
+		vi.useFakeTimers();
+
+		const service = new MiniSearchService("test-vault", "base-title-vs-variants");
+		service.addDocument("Notes/pm-and-chores.md", "PM and chores", "Canonical PM chores note.");
+		service.addDocument("Notes/pm-and-chores-5.md", "PM and chores-5", "Repeated PM chores note variant.");
+		service.addDocument("Notes/pm-and-chores-12.md", "PM and chores-12", "Repeated PM chores note variant.");
+
+		const results = service.search("pm an ch", 5);
+
+		expect(results[0]?.name).toBe("PM and chores");
+		expect(results[1]?.name).toMatch(/^PM and chores-/);
+	});
+
+	it("keeps the leading short acronym token in mixed numeric queries", () => {
+		vi.useFakeTimers();
+
+		const service = new MiniSearchService("test-vault", "leading-short-token-numeric-query");
+		service.addDocument("Notes/pm-and-chores-2.md", "PM and chores-2", "Target note for the mixed query.");
+		service.addDocument(
+			"Notes/machine-intelligence-2.md",
+			"Machine Intelligence 2",
+			"Content mentions chore chores choose and other lexical noise.",
+		);
+
+		const results = service.search("pm an cho 2", 5);
+
+		expect(results[0]?.name).toBe("PM and chores-2");
+		expect(results[1]?.name).toBe("Machine Intelligence 2");
+	});
+
 	it("maintains autocomplete tag and folder aggregates incrementally", () => {
 		vi.useFakeTimers();
 

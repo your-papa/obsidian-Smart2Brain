@@ -9,13 +9,18 @@
  * (e.g. raw BM25 absolute boosts vs. small RRF fraction boosts).
  */
 
-import {
-	extractNormalizedTokens,
-	extractSearchTerms,
-	isNumericSearchTerm,
-	normalizeSearchText,
-	tokenizeSearchText,
-} from "./searchTermUtils";
+import { isNumericSearchTerm, normalizeSearchText, tokenizeSearchText } from "./searchTermUtils";
+import { createQueryPlan, type QueryPlan } from "./queryPlan";
+
+export type TitleMatchKind =
+	| "exact"
+	| "leading-prefix-numeric"
+	| "leading-prefix"
+	| "starts-with"
+	| "contains"
+	| "all-terms";
+
+export type AliasMatchKind = "exact" | "token" | "prefix" | "contains";
 
 // ---------------------------------------------------------------------------
 // Title boost
@@ -73,45 +78,141 @@ export function matchesLeadingTitlePrefix(queryTokens: string[], titleTokens: st
 	return queryTokens.every((token, index) => titleTokens[index]?.startsWith(token));
 }
 
+function resolveQueryPlan(query: string | QueryPlan): QueryPlan {
+	return typeof query === "string" ? createQueryPlan(query) : query;
+}
+
+function getAliasMatchKindRank(kind: AliasMatchKind | undefined): number {
+	switch (kind) {
+		case "exact":
+			return 4;
+		case "token":
+			return 3;
+		case "prefix":
+			return 2;
+		case "contains":
+			return 1;
+		default:
+			return 0;
+	}
+}
+
+export function getTitleMatchKind(query: string | QueryPlan, title: string): TitleMatchKind | undefined {
+	const plan = resolveQueryPlan(query);
+	const normalizedQuery = plan.normalizedQuery;
+	const normalizedTitle = normalizeSearchText(title);
+	const queryTerms = plan.searchTerms;
+	const queryPrefixTokens = plan.normalizedTokens;
+	const titleTerms = tokenizeSearchText(title);
+
+	if (!normalizedQuery || !normalizedTitle) {
+		return undefined;
+	}
+
+	if (normalizedTitle === normalizedQuery) {
+		return "exact";
+	}
+
+	if (matchesLeadingTitlePrefix(queryPrefixTokens, titleTerms)) {
+		const leadingQueryTerm = queryPrefixTokens[0];
+		if (leadingQueryTerm && isNumericSearchTerm(leadingQueryTerm) && titleTerms[0] === leadingQueryTerm) {
+			return "leading-prefix-numeric";
+		}
+
+		return "leading-prefix";
+	}
+
+	if (normalizedTitle.startsWith(normalizedQuery)) {
+		return "starts-with";
+	}
+
+	if (normalizedTitle.includes(normalizedQuery)) {
+		return "contains";
+	}
+
+	if (queryTerms.length > 0 && queryTerms.every((term) => normalizedTitle.includes(term))) {
+		return "all-terms";
+	}
+
+	return undefined;
+}
+
+export function getAliasMatchKind(
+	query: string | QueryPlan,
+	aliases: string[] | Record<string, unknown> | undefined,
+): AliasMatchKind | undefined {
+	const plan = resolveQueryPlan(query);
+	const normalizedQuery = plan.normalizedQuery;
+	if (!normalizedQuery) {
+		return undefined;
+	}
+
+	const list = Array.isArray(aliases) ? aliases : getFrontmatterAliases(aliases);
+	if (list.length === 0) {
+		return undefined;
+	}
+
+	let bestKind: AliasMatchKind | undefined;
+	for (const alias of list) {
+		const normalizedAlias = normalizeSearchText(alias);
+		if (!normalizedAlias) {
+			continue;
+		}
+
+		const aliasTokens = tokenizeSearchText(alias);
+		let nextKind: AliasMatchKind | undefined;
+		if (normalizedAlias === normalizedQuery) {
+			nextKind = "exact";
+		} else if (aliasTokens.includes(normalizedQuery)) {
+			nextKind = "token";
+		} else if (
+			aliasTokens.some((token) => token.startsWith(normalizedQuery)) ||
+			normalizedAlias.startsWith(normalizedQuery)
+		) {
+			nextKind = "prefix";
+		} else if (normalizedAlias.includes(normalizedQuery)) {
+			nextKind = "contains";
+		}
+
+		if (getAliasMatchKindRank(nextKind) > getAliasMatchKindRank(bestKind)) {
+			bestKind = nextKind;
+		}
+	}
+
+	return bestKind;
+}
+
 /**
  * Calculate a title boost based on how well `query` matches `title`.
  *
  * Pass a `TitleBoostScale` for full control over each tier's value,
  * or a plain number to use the default proportions via `titleBoostFromMax`.
  */
-export function calculateTitleBoost(query: string, title: string, scale: TitleBoostScale | number): number {
+export function calculateTitleBoost(query: string | QueryPlan, title: string, scale: TitleBoostScale | number): number {
 	const s = typeof scale === "number" ? titleBoostFromMax(scale) : scale;
-	const normalizedQuery = normalizeSearchText(query);
+	const plan = resolveQueryPlan(query);
 	const normalizedTitle = normalizeSearchText(title);
-	const queryTerms = extractSearchTerms(query);
-	const queryPrefixTokens = extractNormalizedTokens(query);
+	const queryTerms = plan.searchTerms;
+	const queryPrefixTokens = plan.normalizedTokens;
 	const titleTerms = tokenizeSearchText(title);
+	const minimumMatchedTerms = plan.minimumMatchedTerms;
+	const titleMatchKind = getTitleMatchKind(plan, title);
 
-	if (!normalizedQuery || !normalizedTitle) return 0;
+	if (!normalizedTitle || !titleMatchKind) return 0;
 
-	// Exact match → full boost
-	if (normalizedTitle === normalizedQuery) {
-		return s.exact;
-	}
-
-	// Leading-prefix match
-	if (matchesLeadingTitlePrefix(queryPrefixTokens, titleTerms)) {
-		const leadingQueryTerm = queryPrefixTokens[0];
-		if (leadingQueryTerm && isNumericSearchTerm(leadingQueryTerm) && titleTerms[0] === leadingQueryTerm) {
+	switch (titleMatchKind) {
+		case "exact":
+			return s.exact;
+		case "leading-prefix-numeric":
 			return s.leadingPrefixNumeric;
-		}
-
-		return s.leadingPrefix;
-	}
-
-	// Title starts with the query string
-	if (normalizedTitle.startsWith(normalizedQuery)) {
-		return s.startsWith;
-	}
-
-	// Title contains the full query string
-	if (normalizedTitle.includes(normalizedQuery)) {
-		return s.contains;
+		case "leading-prefix":
+			return s.leadingPrefix;
+		case "starts-with":
+			return s.startsWith;
+		case "contains":
+			return s.contains;
+		default:
+			break;
 	}
 
 	if (queryTerms.length === 0) return 0;
@@ -129,6 +230,7 @@ export function calculateTitleBoost(query: string, title: string, scale: TitleBo
 	// Partial term overlap
 	const matchingTerms = queryTerms.filter((term) => normalizedTitle.includes(term));
 	if (matchingTerms.length === 0) return 0;
+	if (matchingTerms.length < minimumMatchedTerms) return 0;
 
 	const matchRatio = matchingTerms.length / queryTerms.length;
 
@@ -173,37 +275,23 @@ export function getFrontmatterAliases(frontmatter: Record<string, unknown> | und
  * or a pre-parsed `string[]`.  Returns a value between 0 and `maxBoost`.
  */
 export function calculateAliasBoost(
-	query: string,
+	query: string | QueryPlan,
 	aliases: string[] | Record<string, unknown> | undefined,
 	maxBoost: number,
 ): number {
-	const normalizedQuery = normalizeSearchText(query);
-	if (!normalizedQuery) return 0;
-
-	const list = Array.isArray(aliases) ? aliases : getFrontmatterAliases(aliases);
-	if (list.length === 0) return 0;
-
-	let bestBoost = 0;
-	for (const alias of list) {
-		const normalizedAlias = normalizeSearchText(alias);
-		if (!normalizedAlias) continue;
-
-		if (normalizedAlias === normalizedQuery) {
-			bestBoost = Math.max(bestBoost, maxBoost);
-			continue;
-		}
-
-		if (normalizedAlias.startsWith(normalizedQuery)) {
-			bestBoost = Math.max(bestBoost, maxBoost * 0.85);
-			continue;
-		}
-
-		if (normalizedAlias.includes(normalizedQuery)) {
-			bestBoost = Math.max(bestBoost, maxBoost * 0.65);
-		}
+	const matchKind = getAliasMatchKind(query, aliases);
+	switch (matchKind) {
+		case "exact":
+			return maxBoost;
+		case "token":
+			return maxBoost * 0.92;
+		case "prefix":
+			return maxBoost * 0.88;
+		case "contains":
+			return maxBoost * 0.65;
+		default:
+			return 0;
 	}
-
-	return bestBoost;
 }
 
 // ---------------------------------------------------------------------------

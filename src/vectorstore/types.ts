@@ -7,6 +7,7 @@
 
 // Re-export DefaultEmbedModel and EmbeddingIndexConfig from canonical location
 export type { DefaultEmbedModel, EmbeddingIndexConfig } from "../types/plugin";
+import type { LexicalRankingFeatures } from "../search/lexicalScoring";
 
 /**
  * A document with its embedding vector stored in IndexedDB.
@@ -88,6 +89,7 @@ export interface VectorSearchResult {
 	matchBadges?: SearchMatchBadge[];
 	/** Cosine similarity score (0-1, higher is more similar) */
 	score: number;
+	rankingDebug?: SearchRankingDebug;
 }
 
 /**
@@ -102,6 +104,26 @@ export interface SearchResult {
 	matchExplanation?: SearchMatchExplanation;
 	matchBadges?: SearchMatchBadge[];
 	score?: number;
+	rankingDebug?: SearchRankingDebug;
+}
+
+export interface SearchRankingDebug {
+	originalRank?: number;
+	finalRank?: number;
+	rerankScore?: number;
+	finalScore?: number;
+	recentBoost?: number;
+	recentRank?: number;
+	baseScore?: number;
+	lexicalRank?: number;
+	semanticRank?: number;
+	semanticScore?: number;
+	lexicalRrfScore?: number;
+	semanticRrfScore?: number;
+	finalTitleBoost?: number;
+	finalAliasBoost?: number;
+	recentAliasBonus?: number;
+	lexicalFeatures?: LexicalRankingFeatures;
 }
 
 export interface SearchMatchExplanation {

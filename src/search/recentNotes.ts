@@ -9,10 +9,26 @@ import { getAllTags } from "obsidian";
 import type { App, TFile } from "obsidian";
 import { compileFilter, matchesSearchFilter } from "./searchFilters";
 import { getData } from "../stores/dataStore.svelte";
-import type { SearchFilter, SearchMatchBadge, SearchResult } from "../vectorstore/types";
+import type { SearchFilter, SearchResult } from "../vectorstore/types";
 
-const RECENT_RANK_BOOST = 2.5;
-const RECENT_RANK_DECAY = 1.25;
+const RECENT_RANK_BOOST = 4.5;
+const RECENT_RANK_DECAY = 0.75;
+const MIN_RECENT_RANK_BOOST = 0.5;
+const RECENT_SCORE_WEIGHT = 0.6;
+
+export interface RecentBoostInfo {
+	boost: number;
+	recentRank: number;
+}
+
+function getRecentStrength(recentBoost: number): number {
+	return recentBoost / RECENT_RANK_BOOST;
+}
+
+export function getRecentRerankScore(baseScore: number, recentBoost: number): number {
+	const recentStrength = recentBoost > 0 ? getRecentStrength(recentBoost) : 0;
+	return baseScore * (1 + recentStrength * RECENT_SCORE_WEIGHT);
+}
 
 function getCachedTags(cache: Parameters<typeof getAllTags>[0] | null | undefined): string[] {
 	if (!cache) return [];
@@ -32,17 +48,8 @@ function isRecentNoteFile(file: unknown): file is Pick<TFile, "path" | "extensio
 	);
 }
 
-function mergeBadges(...badgeSets: Array<SearchMatchBadge[] | undefined>): SearchMatchBadge[] | undefined {
-	const merged = Array.from(new Set(badgeSets.flatMap((badges) => badges ?? [])));
-	return merged.length > 0 ? merged : undefined;
-}
-
 function getRecentNoteBoost(recentIndex: number): number {
-	return Math.max(RECENT_RANK_BOOST - recentIndex * RECENT_RANK_DECAY, 0.25);
-}
-
-function addRecentBadge(result: SearchResult): SearchResult {
-	return { ...result, matchBadges: mergeBadges(result.matchBadges, ["recent"]) };
+	return Math.max(RECENT_RANK_BOOST - recentIndex * RECENT_RANK_DECAY, MIN_RECENT_RANK_BOOST);
 }
 
 export function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchResult[] {
@@ -59,6 +66,7 @@ export function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchR
 		const cache = app.metadataCache.getFileCache(file as TFile);
 		const docTags = getCachedTags(cache);
 		if (!matchesSearchFilter(file.path, docTags, compiled ?? filter)) continue;
+		const recentBoost = getRecentNoteBoost(index);
 
 		results.push({
 			path: file.path,
@@ -66,7 +74,12 @@ export function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchR
 			frontmatter: cache?.frontmatter,
 			tags: docTags,
 			matchBadges: ["recent"],
-			score: getRecentNoteBoost(index),
+			score: recentBoost,
+			rankingDebug: {
+				recentRank: index + 1,
+				recentBoost,
+				baseScore: recentBoost,
+			},
 		});
 	}
 	return results;
@@ -85,7 +98,6 @@ function mergeRecentNotes(...collections: SearchResult[][]): SearchResult[] {
 				...existing,
 				frontmatter: existing.frontmatter ?? result.frontmatter,
 				tags: existing.tags ?? result.tags,
-				matchBadges: mergeBadges(existing.matchBadges, result.matchBadges),
 				score: Math.max(existing.score ?? 0, result.score ?? 0),
 			});
 		}
@@ -98,38 +110,15 @@ export function getRecentNotes(app: App, filter?: SearchFilter): SearchResult[] 
 	return mergeRecentNotes(getRecentlyOpenedNotes(app, filter));
 }
 
-/** Annotate search results that appear in recents with a "recent" badge. */
-export function annotateRecentResults(results: SearchResult[], recentPaths: Set<string>): SearchResult[] {
-	if (results.length === 0 || recentPaths.size === 0) return results;
-	return results.map((result) => (recentPaths.has(result.path) ? addRecentBadge(result) : result));
-}
-
-/** Re-rank results by boosting recently-opened paths toward the top. */
-export function applyRecentBoost(results: SearchResult[], recentBoostByPath: Map<string, number>): SearchResult[] {
-	if (results.length === 0 || recentBoostByPath.size === 0) return results;
-	return results
-		.map((result, index) => {
-			const recentBoost = recentBoostByPath.get(result.path) ?? 0;
-			return { rank: index - recentBoost, result: recentBoost > 0 ? addRecentBadge(result) : result };
-		})
-		.sort((left, right) => left.rank - right.rank)
-		.map(({ result }) => result);
-}
-
 /** Build a path→boost map from recent results. */
-export function buildRecentBoostMap(results: SearchResult[]): Map<string, number> {
-	const map = new Map<string, number>();
-	for (const result of results) {
-		map.set(result.path, Math.max(map.get(result.path) ?? 0, result.score ?? 0));
+export function buildRecentBoostMap(results: SearchResult[]): Map<string, RecentBoostInfo> {
+	const map = new Map<string, RecentBoostInfo>();
+	for (const [index, result] of results.entries()) {
+		const nextBoost = result.score ?? 0;
+		const existing = map.get(result.path);
+		if (!existing || nextBoost > existing.boost) {
+			map.set(result.path, { boost: nextBoost, recentRank: index + 1 });
+		}
 	}
 	return map;
-}
-
-/** Build a set of all recent-note paths from recently opened history. */
-export function getRecentPathSet(app: App, filter?: SearchFilter): Set<string> {
-	const recentPaths = new Set(getData().recentNotes.map((entry) => entry.path));
-	for (const result of getRecentNotes(app, filter)) {
-		recentPaths.add(result.path);
-	}
-	return recentPaths;
 }

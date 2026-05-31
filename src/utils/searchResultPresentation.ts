@@ -166,6 +166,10 @@ export function shouldShowMatchExplanation(
 	matchExplanation: SearchResult["matchExplanation"],
 	displayTags: string[],
 ): boolean {
+	if (matchExplanation?.source === "title") {
+		return false;
+	}
+
 	const explanationTag = getExplanationTag(matchExplanation);
 	if (!explanationTag) {
 		return true;

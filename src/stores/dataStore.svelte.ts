@@ -548,7 +548,7 @@ export class PluginDataStore {
 			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
 			if (!exists) {
 				// Fire and forget; persistence updated regardless
-				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+				this._plugin.app.vault.createFolder(normalized).catch(() => { });
 			}
 		} catch {
 			// ignore
@@ -1036,6 +1036,11 @@ export class PluginDataStore {
 
 	get recentNotes(): RecentNoteEntry[] {
 		return [...(this.#data.recentNotes ?? [])].sort((left, right) => right.lastOpenedAt - left.lastOpenedAt);
+	}
+
+	async clearRecentNotes(): Promise<void> {
+		this.#data.recentNotes = [];
+		await this.saveSettings();
 	}
 
 	recordRecentlyOpenedNote(path: string): void {

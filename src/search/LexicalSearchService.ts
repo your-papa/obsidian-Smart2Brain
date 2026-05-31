@@ -2,6 +2,14 @@ import { TFile, getAllTags, type CachedMetadata } from "obsidian";
 import type SecondBrainPlugin from "../main";
 import { compileFilter, matchesSearchFilter } from "../search/searchFilters";
 import { extractSearchTerms } from "../search/searchTermUtils";
+import { createQueryPlan, type QueryPlan } from "../search/queryPlan";
+import {
+	hasLexicalAliasSignal,
+	hasLexicalContentSignal,
+	hasLexicalPathSignal,
+	hasLexicalTagSignal,
+	hasLexicalTitleSignal,
+} from "../search/lexicalScoring";
 import { Logger } from "../utils/logging";
 import { getIndexableVaultFiles, isIndexableFile, readIndexableContent } from "../utils/fileFiltering";
 import {
@@ -13,6 +21,11 @@ import type { SearchFilter, SearchMatchBadge, SearchMatchExplanation, VectorSear
 import { getData } from "../stores/dataStore.svelte";
 
 const MAX_SNIPPET_LENGTH = 180;
+
+interface ResolvedMatchMetadata {
+	badges?: SearchMatchBadge[];
+	explanation?: SearchMatchExplanation;
+}
 
 let instance: LexicalSearchService | null = null;
 let pendingInstance: LexicalSearchService | null = null;
@@ -294,21 +307,25 @@ export class LexicalSearchService {
 				continue;
 			}
 
+			const matchMetadata = this.resolveMatchMetadata(
+				query,
+				result.path,
+				result.name,
+				docTags,
+				result.content,
+				result.features,
+				cache,
+			);
+
 			filteredResults.push({
 				path: result.path,
 				name: result.name,
 				frontmatter: cache?.frontmatter,
 				tags: docTags,
-				matchExplanation: this.buildMatchExplanation(
-					query,
-					result.path,
-					result.name,
-					docTags,
-					result.content,
-					cache,
-				),
-				matchBadges: this.getMatchBadges(query, result.path, result.name, docTags, result.content, cache),
+				matchExplanation: matchMetadata.explanation,
+				matchBadges: matchMetadata.badges,
 				score: result.score,
+				rankingDebug: result.features ? { lexicalFeatures: result.features } : undefined,
 			});
 
 			if (filteredResults.length >= topK) {
@@ -319,78 +336,94 @@ export class LexicalSearchService {
 		return filteredResults;
 	}
 
-	private getMatchBadges(
+	private resolveMatchMetadata(
 		query: string | undefined,
 		path: string,
 		noteName: string,
 		docTags: string[],
 		content: string | undefined,
+		features: LexicalSearchResult["features"],
 		cache: CachedMetadata | null,
-	): SearchMatchBadge[] | undefined {
-		if (!query?.trim()) return undefined;
+	): ResolvedMatchMetadata {
+		if (!query?.trim()) return {};
 
-		const terms = this.extractSearchTerms(query);
-		if (terms.length === 0) return undefined;
+		const plan = this.buildQueryPlan(query);
+		if (!plan || plan.searchTerms.length === 0) return {};
 
 		const badges = new Set<SearchMatchBadge>();
-		if (this.findMatchIndex(noteName, terms) !== -1) {
+		const hasAliasSignal = hasLexicalAliasSignal(features);
+		const hasTagSignal = hasLexicalTagSignal(features);
+		const hasTitleSignal = hasLexicalTitleSignal(features);
+		const hasPathSignal = hasLexicalPathSignal(features);
+		const hasContentSignal = hasLexicalContentSignal(features);
+
+		if (hasTitleSignal) {
 			badges.add("title");
 		}
 
-		if (this.findAliasMatch(cache?.frontmatter, terms)) {
+		if (hasAliasSignal) {
 			badges.add("alias");
 		}
 
-		if (this.findTagMatch(docTags, terms)) {
+		if (hasTagSignal) {
 			badges.add("tag");
 		}
 
-		if (this.findPathSegmentMatch(path, terms)) {
+		if (hasPathSignal) {
 			badges.add("path");
 		}
 
-		const explanation = this.buildMatchExplanation(query, path, noteName, docTags, content, cache);
-		if (explanation) {
+		const explanation = this.buildFeatureDrivenExplanation(path, noteName, docTags, content, features, cache, plan);
+		if (explanation?.source !== "alias" && explanation?.source !== "tag" && explanation?.source !== "title") {
+			badges.add(explanation?.source ?? "content");
+		} else if (explanation) {
 			badges.add(explanation.source);
+		} else if (hasContentSignal) {
+			badges.add("content");
 		}
 
-		return badges.size > 0 ? Array.from(badges) : undefined;
+		return {
+			badges: badges.size > 0 ? Array.from(badges) : undefined,
+			explanation,
+		};
 	}
 
-	private buildMatchExplanation(
-		query: string | undefined,
+	private buildFeatureDrivenExplanation(
 		path: string,
 		noteName: string,
 		docTags: string[],
 		content: string | undefined,
+		features: LexicalSearchResult["features"],
 		cache: CachedMetadata | null,
+		plan: QueryPlan,
 	): SearchMatchExplanation | undefined {
-		if (!query?.trim()) return undefined;
-
-		const terms = this.extractSearchTerms(query);
-		if (terms.length === 0) return undefined;
-
-		const aliasMatch = this.findAliasMatch(cache?.frontmatter, terms);
-		if (aliasMatch) {
-			return { source: "alias", text: `Alias: ${aliasMatch}` };
+		if (hasLexicalAliasSignal(features)) {
+			const aliasMatch = this.findAliasMatch(cache?.frontmatter, plan);
+			return { source: "alias", text: aliasMatch ? `Alias: ${aliasMatch}` : "Alias match" };
 		}
 
-		const tagMatch = this.findTagMatch(docTags, terms);
-		if (tagMatch) {
-			return { source: "tag", text: `Tag: ${tagMatch}` };
+		if (hasLexicalTagSignal(features)) {
+			const tagMatch = this.findTagMatch(docTags, plan);
+			return { source: "tag", text: tagMatch ? `Tag: ${tagMatch}` : "Tag match" };
 		}
 
-		const headingMatch = this.findHeadingExplanation(content, cache, terms);
-		if (headingMatch) {
-			return headingMatch;
+		if (hasLexicalTitleSignal(features)) {
+			return { source: "title", text: `Title: ${noteName}` };
 		}
 
-		const snippet = this.extractSnippet(content, terms);
-		if (snippet) {
-			return { source: "content", text: snippet };
+		if (hasLexicalContentSignal(features)) {
+			const headingMatch = this.findHeadingExplanation(content, cache, plan);
+			if (headingMatch) {
+				return headingMatch;
+			}
+
+			const snippet = this.extractSnippet(content, plan);
+			if (snippet) {
+				return { source: "content", text: snippet };
+			}
 		}
 
-		if (this.findPathSegmentMatch(path, terms)) {
+		if (hasLexicalPathSignal(features) && this.findPathSegmentMatch(path, plan)) {
 			return undefined;
 		}
 
@@ -400,7 +433,7 @@ export class LexicalSearchService {
 	private findHeadingExplanation(
 		content: string | undefined,
 		cache: CachedMetadata | null,
-		terms: string[],
+		plan: QueryPlan,
 	): SearchMatchExplanation | undefined {
 		if (!content || !cache?.headings?.length) return undefined;
 
@@ -413,8 +446,8 @@ export class LexicalSearchService {
 			const headingLine = lines[startLine] ?? heading.heading;
 			const sectionText = lines.slice(startLine, endLine).join("\n");
 			const sectionBody = lines.slice(startLine + 1, endLine).join("\n");
-			const headingMatchIndex = this.findMatchIndex(headingLine, terms);
-			const bodyMatchIndex = this.findMatchIndex(sectionBody, terms);
+			const headingMatchIndex = this.findMatchIndex(headingLine, plan);
+			const bodyMatchIndex = this.findMatchIndex(sectionBody, plan);
 
 			if (headingMatchIndex === -1 && bodyMatchIndex === -1) {
 				continue;
@@ -422,7 +455,7 @@ export class LexicalSearchService {
 
 			const matchedBody = bodyMatchIndex >= 0;
 			const snippetSource = matchedBody ? sectionBody : sectionText;
-			const snippet = this.extractSnippet(snippetSource, terms) ?? this.cleanSnippetText(heading.heading);
+			const snippet = this.extractSnippet(snippetSource, plan) ?? this.cleanSnippetText(heading.heading);
 			return {
 				source: headingMatchIndex >= 0 ? "heading" : "content",
 				heading: heading.heading,
@@ -438,27 +471,40 @@ export class LexicalSearchService {
 		return extractSearchTerms(query);
 	}
 
-	private findMatchIndex(text: string | undefined, terms: string[]): number {
+	private buildQueryPlan(query: string | undefined): QueryPlan | null {
+		if (!query?.trim()) {
+			return null;
+		}
+
+		return createQueryPlan(query);
+	}
+
+	private findMatchIndex(text: string | undefined, plan: QueryPlan): number {
 		if (!text) return -1;
 
 		const normalized = text.toLowerCase();
 		let firstMatch = -1;
+		let matchedTerms = 0;
+		const requiredMatches = plan.minimumMatchedTerms;
 
-		for (const term of terms) {
+		for (const term of plan.searchTerms) {
 			const index = normalized.indexOf(term);
-			if (index !== -1 && (firstMatch === -1 || index < firstMatch)) {
-				firstMatch = index;
+			if (index !== -1) {
+				matchedTerms++;
+				if (firstMatch === -1 || index < firstMatch) {
+					firstMatch = index;
+				}
 			}
 		}
 
-		return firstMatch;
+		return matchedTerms >= requiredMatches ? firstMatch : -1;
 	}
 
-	private extractSnippet(content: string | undefined, terms: string[]): string | undefined {
+	private extractSnippet(content: string | undefined, plan: QueryPlan): string | undefined {
 		if (!content) return undefined;
 
 		const normalizedContent = this.stripFrontmatter(content);
-		const matchIndex = this.findMatchIndex(normalizedContent, terms);
+		const matchIndex = this.findMatchIndex(normalizedContent, plan);
 		if (matchIndex === -1) return undefined;
 
 		const start = Math.max(0, matchIndex - 60);
@@ -489,9 +535,9 @@ export class LexicalSearchService {
 			.trim();
 	}
 
-	private findAliasMatch(frontmatter: Record<string, unknown> | undefined, terms: string[]): string | undefined {
+	private findAliasMatch(frontmatter: Record<string, unknown> | undefined, plan: QueryPlan): string | undefined {
 		for (const alias of this.extractAliasesFromFrontmatter(frontmatter)) {
-			if (this.findMatchIndex(alias, terms) !== -1) {
+			if (this.findMatchIndex(alias, plan) !== -1) {
 				return alias;
 			}
 		}
@@ -499,12 +545,12 @@ export class LexicalSearchService {
 		return undefined;
 	}
 
-	private findTagMatch(tags: string[], terms: string[]): string | undefined {
+	private findTagMatch(tags: string[], plan: QueryPlan): string | undefined {
 		for (const tag of tags) {
 			const normalizedTag = tag.startsWith("#") ? tag : `#${tag}`;
 			if (
-				this.findMatchIndex(normalizedTag, terms) !== -1 ||
-				this.findMatchIndex(normalizedTag.slice(1), terms) !== -1
+				this.findMatchIndex(normalizedTag, plan) !== -1 ||
+				this.findMatchIndex(normalizedTag.slice(1), plan) !== -1
 			) {
 				return normalizedTag;
 			}
@@ -513,10 +559,10 @@ export class LexicalSearchService {
 		return undefined;
 	}
 
-	private findPathSegmentMatch(path: string, terms: string[]): string | undefined {
+	private findPathSegmentMatch(path: string, plan: QueryPlan): string | undefined {
 		const segments = path.split("/").slice(0, -1);
 		for (const segment of segments) {
-			if (this.findMatchIndex(segment, terms) !== -1) {
+			if (this.findMatchIndex(segment, plan) !== -1) {
 				return segment;
 			}
 		}
@@ -547,7 +593,7 @@ export class LexicalSearchService {
 	async cleanup(): Promise<void> {
 		try {
 			if (pendingInitPromise !== null) {
-				await pendingInitPromise.catch(() => {});
+				await pendingInitPromise.catch(() => { });
 			}
 			await this.miniSearch.flush();
 			this.miniSearch.close();

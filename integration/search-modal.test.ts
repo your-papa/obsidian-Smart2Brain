@@ -130,6 +130,20 @@ describe("search modal", () => {
 		"",
 		"Program overview and module planning.",
 	].join("\n");
+	const lexicalLeadRankingNoteName = "Recent Boost Probe.md";
+	const lexicalLeadRankingBaseName = lexicalLeadRankingNoteName.replace(/\.md$/u, "");
+	const lexicalLeadRankingNoteContent = [
+		"# Recent Boost Probe",
+		"",
+		"Control note for lexical title matching.",
+	].join("\n");
+	const recentBoostRankingNoteName = "Recent Boost Ranking Fixture.md";
+	const recentBoostRankingBaseName = recentBoostRankingNoteName.replace(/\.md$/u, "");
+	const recentBoostRankingNoteContent = [
+		"# Recent Boost Ranking Fixture",
+		"",
+		"Recent Boost Probe",
+	].join("\n");
 	const filesystemFixtureBaseName = `Filesystem Created Recent Fixture ${Date.now()}`;
 	const filesystemFixtureNoteName = `${filesystemFixtureBaseName}.md`;
 	const filesystemFixturePath = fileURLToPath(
@@ -150,6 +164,8 @@ describe("search modal", () => {
 		createNote(inlineTagOnlyNoteName, inlineTagOnlyNoteContent);
 		createNote(pathNoteName, pathNoteContent);
 		createNote(numericTitleNoteName, numericTitleNoteContent);
+		createNote(lexicalLeadRankingNoteName, lexicalLeadRankingNoteContent);
+		createNote(recentBoostRankingNoteName, recentBoostRankingNoteContent);
 		await sleep(2000);
 	}, 30_000);
 
@@ -189,6 +205,8 @@ describe("search modal", () => {
 		deleteNote(inlineTagOnlyNoteName);
 		deleteNote(pathNoteName);
 		deleteNote(numericTitleNoteName);
+		deleteNote(lexicalLeadRankingNoteName);
+		deleteNote(recentBoostRankingNoteName);
 		deleteNote(multiSelectCreateNoteName);
 		rmSync(filesystemFixturePath, { force: true });
 		clearBuffers();
@@ -218,6 +236,58 @@ describe("search modal", () => {
 
 		const resultCount = domCount(activeSearchSelector(".s2b-search-result"));
 		expect(resultCount).toBeGreaterThan(0);
+	}, 30_000);
+
+	it("should boost a recently opened typed match above the raw lexical leader", async () => {
+		const query = "Recent Boost Probe";
+		const lexicalOrderKey = `__s2bRecentBoostLexicalOrder_${Date.now()}`;
+		const lexicalOrder = JSON.parse(
+			await pollEval(
+				`(function(){ window.${lexicalOrderKey} = "pending"; (async function(){
+					try {
+						const plugin = ${PLUGIN};
+						const search = plugin?.lexicalSearchService;
+						if (!search || typeof search.search !== "function") {
+							window.${lexicalOrderKey} = JSON.stringify({ error: "missing-search", names: [] });
+							return;
+						}
+						const results = await search.search(${JSON.stringify(query)}, 10);
+						window.${lexicalOrderKey} = JSON.stringify({
+							error: null,
+							names: results.map((result) => result.name ?? result.title ?? result.path),
+						});
+					} catch (error) {
+						window.${lexicalOrderKey} = JSON.stringify({
+							error: error instanceof Error ? error.message : String(error),
+							names: [],
+						});
+					}
+				})(); })()`,
+				lexicalOrderKey,
+				{ timeoutMs: 15_000, intervalMs: 250 },
+			),
+		) as { error: string | null; names: string[] };
+
+		expect(lexicalOrder.error).toBeNull();
+		expect(lexicalOrder.names[0]).toBe(lexicalLeadRankingBaseName);
+		expect(lexicalOrder.names.indexOf(recentBoostRankingBaseName)).toBeGreaterThan(0);
+
+		obsidianEval(`(() => {
+			const plugin = ${PLUGIN};
+			plugin?.pluginData.recordRecentlyOpenedNote(${JSON.stringify(recentBoostRankingNoteName)});
+			return "recorded";
+		})()`);
+
+		setActiveSearchQuery(query);
+
+		await waitForCondition(
+			() => domText(activeSearchSelector('.s2b-search-result-name')).includes(recentBoostRankingBaseName),
+			"recently opened typed match to rise to the top",
+			{ timeoutMs: 20_000, intervalMs: 250 },
+		);
+
+		expect(domText(activeSearchSelector('.s2b-search-result-name'))).toContain(recentBoostRankingBaseName);
+		expect(activeSearchBadgeLabels()).toContain('Recent');
 	}, 30_000);
 
 	it("should not show filesystem-created notes that were never opened in recents", async () => {

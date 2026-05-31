@@ -315,7 +315,6 @@
 	font-weight: 500;
 	color: var(--text-normal);
 	flex: 0 1 auto;
-	max-width: clamp(10rem, 32vw, 24rem);
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;

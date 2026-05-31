@@ -145,6 +145,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private autocompleteHydrationTimeout: number | null = null;
 	private searchRequestId = 0;
 	private lastRequestedSearchKey = "";
+	private lastResolvedSearchKey = "";
+	private pendingSuggestionSearchKey: string | null = null;
+	private pendingSuggestionResolvers: Array<(suggestions: SearchSuggestion[]) => void> = [];
 	private cachedAutocompleteTags: string[] = [];
 	private cachedTagChildCount = new Map<string, number>();
 	private cachedAutocompleteFolders: string[] = [];
@@ -1423,6 +1426,29 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	/** Force the next getSuggestions call to re-trigger a search. */
 	private invalidateSearch(): void {
 		this.lastRequestedSearchKey = "";
+		this.lastResolvedSearchKey = "";
+		this.resolvePendingSuggestions([]);
+	}
+
+	private waitForResolvedSuggestions(searchKey: string): Promise<SearchSuggestion[]> {
+		if (this.pendingSuggestionSearchKey !== searchKey) {
+			this.resolvePendingSuggestions([]);
+			this.pendingSuggestionSearchKey = searchKey;
+		}
+
+		return new Promise((resolve) => {
+			this.pendingSuggestionResolvers.push(resolve);
+		});
+	}
+
+	private resolvePendingSuggestions(suggestions: SearchSuggestion[]): void {
+		const resolvers = this.pendingSuggestionResolvers;
+		this.pendingSuggestionResolvers = [];
+		this.pendingSuggestionSearchKey = null;
+
+		for (const resolve of resolvers) {
+			resolve(suggestions);
+		}
 	}
 
 	/**
@@ -1452,10 +1478,13 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 		const filter = this.buildActiveFilter();
 		const algorithm = this.activeAlgorithm;
+		const searchKey = this.buildSearchKey(cleanQuery);
 		const requestId = ++this.searchRequestId;
 
 		if (!cleanQuery.trim()) {
 			this.searchResults = this.getModalRecentNotes();
+			this.lastResolvedSearchKey = "";
+			this.resolvePendingSuggestions(this.searchResults);
 			this.setSearching(false);
 			// @ts-ignore - updateSuggestions is a protected method
 			this.updateSuggestions();
@@ -1468,21 +1497,77 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			const results = await performSearch(this.app, cleanQuery, algorithm, filter);
 
 			// Discard results from stale requests
-			if (requestId !== this.searchRequestId || this.isClosed) return;
+			if (requestId !== this.searchRequestId || this.isClosed) {
+				this.resolvePendingSuggestions([]);
+				return;
+			}
 
 			this.searchResults = this.getVisibleResults(results).slice(0, 20);
+			this.lastResolvedSearchKey = searchKey;
+			this.resolvePendingSuggestions(this.searchResults);
+			this.logVerboseSearchDiagnostics(cleanQuery, algorithm, filter, this.searchResults);
 			// @ts-ignore - updateSuggestions is a protected method
 			this.updateSuggestions();
 		} catch (error) {
 			Logger.error("[SearchModal] Search failed:", error);
 			if (requestId === this.searchRequestId) {
 				this.searchResults = [];
+				this.lastResolvedSearchKey = searchKey;
+				this.resolvePendingSuggestions(this.searchResults);
+				// @ts-ignore - updateSuggestions is a protected method
+				this.updateSuggestions();
 			}
 		} finally {
 			if (requestId === this.searchRequestId) {
 				this.setSearching(false);
 			}
 		}
+	}
+
+	private logVerboseSearchDiagnostics(
+		query: string,
+		algorithm: SearchAlgorithm,
+		filter: SearchFilter | undefined,
+		results: SearchResult[],
+	): void {
+		if (!getData().isVerbose) {
+			return;
+		}
+
+		const summary = results.slice(0, 10).map((result) => ({
+			finalRank: result.rankingDebug?.finalRank,
+			originalRank: result.rankingDebug?.originalRank,
+			lexicalRank: result.rankingDebug?.lexicalRank,
+			semanticRank: result.rankingDebug?.semanticRank,
+			recentRank: result.rankingDebug?.recentRank,
+			recentBoost: result.rankingDebug?.recentBoost,
+			rerankScore: result.rankingDebug?.rerankScore,
+			finalScore: result.rankingDebug?.finalScore,
+			recentAliasBonus: result.rankingDebug?.recentAliasBonus,
+			score: result.rankingDebug?.baseScore ?? result.score,
+			lexicalRrfScore: result.rankingDebug?.lexicalRrfScore,
+			semanticRrfScore: result.rankingDebug?.semanticRrfScore,
+			finalTitleBoost: result.rankingDebug?.finalTitleBoost,
+			finalAliasBoost: result.rankingDebug?.finalAliasBoost,
+			lexicalAdjustedScore: result.rankingDebug?.lexicalFeatures?.adjustedScore,
+			lexicalMatchTier: result.rankingDebug?.lexicalFeatures?.matchTier,
+			identityScore: result.rankingDebug?.lexicalFeatures?.identityScore,
+			contentScore: result.rankingDebug?.lexicalFeatures?.contentScore,
+			priorityScore: result.rankingDebug?.lexicalFeatures?.priorityScore,
+			titleBoost: result.rankingDebug?.lexicalFeatures?.titleBoost,
+			aliasBoost: result.rankingDebug?.lexicalFeatures?.aliasBoost,
+			tagBoost: result.rankingDebug?.lexicalFeatures?.tagBoost,
+			pathBoost: result.rankingDebug?.lexicalFeatures?.pathBoost,
+			numericSuffixPenalty: result.rankingDebug?.lexicalFeatures?.numericSuffixPenalty,
+			name: result.name,
+			path: result.path,
+			badges: result.matchBadges?.join(", ") ?? "",
+		}));
+
+		console.groupCollapsed(`[S2B][SearchDebug] ${algorithm} query=\"${query}\" results=${results.length}`);
+		console.debug("filter", filter ?? null);
+		console.table(summary);
+		console.groupEnd();
 	}
 
 	/**
@@ -1609,11 +1694,14 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			if (this.hasPrimedOpenResults) {
 				this.hasPrimedOpenResults = false;
 				this.lastRequestedSearchKey = "";
+				this.resolvePendingSuggestions(this.searchResults);
 				return this.searchResults;
 			}
 
 			this.searchResults = this.getModalRecentNotes();
 			this.lastRequestedSearchKey = "";
+			this.lastResolvedSearchKey = "";
+			this.resolvePendingSuggestions(this.searchResults);
 			return this.searchResults;
 		}
 
@@ -1625,6 +1713,11 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			this.lastRequestedSearchKey = searchKey;
 			this.triggerSearch(query);
 		}
+
+		if (this.lastResolvedSearchKey !== searchKey) {
+			return this.waitForResolvedSuggestions(searchKey);
+		}
+
 		return this.deferSuggestions(this.searchResults);
 	}
 
@@ -1849,14 +1942,8 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	onNoSuggestion(): void {
 		this.resultContainerEl.empty();
 
-		// While a search is in-flight or debounced, show nothing to avoid
-		// flashing "No notes found" between keystrokes.
-		if (this.isSearching || this.searchTimeout !== null) {
-			return;
-		}
-
 		const emptyEl = this.resultContainerEl.createDiv({ cls: "s2b-search-empty" });
-		if (this.isSearching && this.semanticEnabled) {
+		if (this.currentQuery.trim() && (this.isSearching || this.searchTimeout !== null)) {
 			emptyEl.setText("Searching...");
 		} else if (this.currentQuery.trim()) {
 			emptyEl.setText("No notes found");

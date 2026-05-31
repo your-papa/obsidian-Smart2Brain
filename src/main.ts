@@ -144,6 +144,10 @@ export default class SecondBrainPlugin extends Plugin {
 		}
 	}
 
+	async clearRecentNotesCache(): Promise<void> {
+		await this.pluginData.clearRecentNotes();
+	}
+
 	async onload() {
 		setPlugin(this);
 		this.pluginData = await createData(this);
@@ -269,7 +273,6 @@ export default class SecondBrainPlugin extends Plugin {
 		this.registerEvent(
 			this.app.workspace.on("file-open", (file) => {
 				if (!(file instanceof TFile)) return;
-				if (file.extension !== "md") return;
 				this.pluginData.recordRecentlyOpenedNote(file.path);
 			}),
 		);
