@@ -1,143 +1,143 @@
 <script lang="ts">
-  import { Notice } from "obsidian";
-  import { get } from "svelte/store";
-  import { t } from "svelte-i18n";
-  import SettingGroup from "../../components/settings/SettingGroup.svelte";
-  import SettingItem from "../../components/settings/SettingItem.svelte";
-  import SecretSelect from "../../components/settings/SecretSelect.svelte";
-  import Button from "../../components/ui/Button.svelte";
-  import Text from "../../components/ui/Text.svelte";
-  import Toggle from "../../components/ui/Toggle.svelte";
-  import { createObsidianFetch } from "../../lib/obsidianFetch";
-  import { getData } from "../../stores/dataStore.svelte";
-  import { getPlugin } from "../../stores/state.svelte";
-  import { ConfirmModal } from "../../components/modal/ConfirmModal";
+import { Notice } from "obsidian";
+import { get } from "svelte/store";
+import { t } from "svelte-i18n";
+import SettingGroup from "../../components/settings/SettingGroup.svelte";
+import SettingItem from "../../components/settings/SettingItem.svelte";
+import SecretSelect from "../../components/settings/SecretSelect.svelte";
+import Button from "../../components/ui/Button.svelte";
+import Text from "../../components/ui/Text.svelte";
+import Toggle from "../../components/ui/Toggle.svelte";
+import { createObsidianFetch } from "../../lib/obsidianFetch";
+import { getData } from "../../stores/dataStore.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { ConfirmModal } from "../../components/modal/ConfirmModal";
 
-  const pluginData = getData();
-  const plugin = getPlugin();
-  const DEFAULT_LANGSMITH_ENDPOINT = "https://api.smith.langchain.com";
-  const githubIssuesListUrl =
-    "https://github.com/your-papa/obsidian-Smart2Brain/issues?q=is%3Aissue%20state%3Aopen%20label%3Abug";
-  const githubIssuesNewUrl = "https://github.com/your-papa/obsidian-Smart2Brain/issues/new/choose";
-  let langSmithEndpointDraft = $state(pluginData.langSmithEndpoint);
-  let langSmithCheckState = $state<"idle" | "pending" | "success" | "error">("idle");
-  let langSmithCheckMessage = $state("Check LangSmith connection");
+const pluginData = getData();
+const plugin = getPlugin();
+const DEFAULT_LANGSMITH_ENDPOINT = "https://api.smith.langchain.com";
+const githubIssuesListUrl =
+	"https://github.com/your-papa/obsidian-Smart2Brain/issues?q=is%3Aissue%20state%3Aopen%20label%3Abug";
+const githubIssuesNewUrl = "https://github.com/your-papa/obsidian-Smart2Brain/issues/new/choose";
+let langSmithEndpointDraft = $state(pluginData.langSmithEndpoint);
+let langSmithCheckState = $state<"idle" | "pending" | "success" | "error">("idle");
+let langSmithCheckMessage = $state("Check LangSmith connection");
 
-  $effect(() => {
-    if (langSmithCheckState !== "pending") {
-      langSmithEndpointDraft = pluginData.langSmithEndpoint;
-    }
-  });
+$effect(() => {
+	if (langSmithCheckState !== "pending") {
+		langSmithEndpointDraft = pluginData.langSmithEndpoint;
+	}
+});
 
-  function openGitHubIssues() {
-    window.open(githubIssuesListUrl, "_blank", "noopener,noreferrer");
-  }
+function openGitHubIssues() {
+	window.open(githubIssuesListUrl, "_blank", "noopener,noreferrer");
+}
 
-  function openGitHubIssue() {
-    window.open(githubIssuesNewUrl, "_blank", "noopener,noreferrer");
-  }
+function openGitHubIssue() {
+	window.open(githubIssuesNewUrl, "_blank", "noopener,noreferrer");
+}
 
-  async function handleCleanupPluginData() {
-    const modal = new ConfirmModal(
-      plugin.app,
-      get(t)("settings.clear_modal.title"),
-      get(t)("settings.clear_modal.description"),
-      "Delete",
-    );
-    modal.open();
-    if (!(await modal.promise)) return;
+async function handleCleanupPluginData() {
+	const modal = new ConfirmModal(
+		plugin.app,
+		get(t)("settings.clear_modal.title"),
+		get(t)("settings.clear_modal.description"),
+		"Delete",
+	);
+	modal.open();
+	if (!(await modal.promise)) return;
 
-    try {
-      for (const index of [...pluginData.embeddingIndexes]) {
-        await plugin.vectorStoreService.deleteIndex(index.id);
-      }
+	try {
+		for (const index of [...pluginData.embeddingIndexes]) {
+			await plugin.vectorStoreService.deleteIndex(index.id);
+		}
 
-      await pluginData.deleteData();
-      new Notice(get(t)("plugin_data_cleared"));
-    } catch (error) {
-      new Notice(error instanceof Error ? error.message : "Failed to clean plugin data");
-    }
-  }
+		await pluginData.deleteData();
+		new Notice(get(t)("plugin_data_cleared"));
+	} catch (error) {
+		new Notice(error instanceof Error ? error.message : "Failed to clean plugin data");
+	}
+}
 
-  function getLangSmithCheckIcon(): string {
-    if (langSmithCheckState === "success") return "check-circle";
-    if (langSmithCheckState === "error") return "x-circle";
-    return "refresh-cw";
-  }
+function getLangSmithCheckIcon(): string {
+	if (langSmithCheckState === "success") return "check-circle";
+	if (langSmithCheckState === "error") return "x-circle";
+	return "refresh-cw";
+}
 
-  function getLangSmithCheckButtonStyles(): string {
-    if (langSmithCheckState === "success") return "langsmith-check-button is-success";
-    if (langSmithCheckState === "error") return "langsmith-check-button is-error";
-    if (langSmithCheckState === "pending") return "langsmith-check-button is-pending";
-    return "langsmith-check-button";
-  }
+function getLangSmithCheckButtonStyles(): string {
+	if (langSmithCheckState === "success") return "langsmith-check-button is-success";
+	if (langSmithCheckState === "error") return "langsmith-check-button is-error";
+	if (langSmithCheckState === "pending") return "langsmith-check-button is-pending";
+	return "langsmith-check-button";
+}
 
-  function normalizeLangSmithEndpoint(endpoint: string): string {
-    return (endpoint.trim() || DEFAULT_LANGSMITH_ENDPOINT).replace(/\/+$/, "");
-  }
+function normalizeLangSmithEndpoint(endpoint: string): string {
+	return (endpoint.trim() || DEFAULT_LANGSMITH_ENDPOINT).replace(/\/+$/, "");
+}
 
-  async function handleCheckLangSmithConnection() {
-    const apiKey = pluginData.langSmithApiKey;
-    if (!pluginData.langSmithApiKeyId || !apiKey) {
-      langSmithCheckState = "error";
-      langSmithCheckMessage = "Select a LangSmith API key secret first";
-      new Notice(langSmithCheckMessage);
-      return;
-    }
+async function handleCheckLangSmithConnection() {
+	const apiKey = pluginData.langSmithApiKey;
+	if (!pluginData.langSmithApiKeyId || !apiKey) {
+		langSmithCheckState = "error";
+		langSmithCheckMessage = "Select a LangSmith API key secret first";
+		new Notice(langSmithCheckMessage);
+		return;
+	}
 
-    pluginData.langSmithEndpoint = langSmithEndpointDraft.trim() || DEFAULT_LANGSMITH_ENDPOINT;
-    const endpoint = normalizeLangSmithEndpoint(langSmithEndpointDraft);
+	pluginData.langSmithEndpoint = langSmithEndpointDraft.trim() || DEFAULT_LANGSMITH_ENDPOINT;
+	const endpoint = normalizeLangSmithEndpoint(langSmithEndpointDraft);
 
-    let validationUrl: string;
-    try {
-      validationUrl = new URL("/api/v1/sessions?limit=1", `${endpoint}/`).toString();
-    } catch {
-      langSmithCheckState = "error";
-      langSmithCheckMessage = "Invalid LangSmith endpoint URL";
-      new Notice(langSmithCheckMessage);
-      return;
-    }
+	let validationUrl: string;
+	try {
+		validationUrl = new URL("/api/v1/sessions?limit=1", `${endpoint}/`).toString();
+	} catch {
+		langSmithCheckState = "error";
+		langSmithCheckMessage = "Invalid LangSmith endpoint URL";
+		new Notice(langSmithCheckMessage);
+		return;
+	}
 
-    langSmithCheckState = "pending";
-    langSmithCheckMessage = "Checking LangSmith connection...";
+	langSmithCheckState = "pending";
+	langSmithCheckMessage = "Checking LangSmith connection...";
 
-    try {
-      const obsidianFetch = createObsidianFetch(window.fetch.bind(window));
-      const response = await obsidianFetch(validationUrl, {
-        method: "GET",
-        headers: {
-          "x-api-key": apiKey,
-          accept: "application/json",
-        },
-      });
+	try {
+		const obsidianFetch = createObsidianFetch(window.fetch.bind(window));
+		const response = await obsidianFetch(validationUrl, {
+			method: "GET",
+			headers: {
+				"x-api-key": apiKey,
+				accept: "application/json",
+			},
+		});
 
-      if (response.ok) {
-        langSmithCheckState = "success";
-        langSmithCheckMessage = "LangSmith connection successful";
-        new Notice(langSmithCheckMessage);
-        return;
-      }
+		if (response.ok) {
+			langSmithCheckState = "success";
+			langSmithCheckMessage = "LangSmith connection successful";
+			new Notice(langSmithCheckMessage);
+			return;
+		}
 
-      const responseText = (await response.text()).trim();
-      if (response.status === 401 || response.status === 403) {
-        langSmithCheckState = "error";
-        langSmithCheckMessage = "LangSmith rejected the API key";
-      } else if (response.status === 404) {
-        langSmithCheckState = "error";
-        langSmithCheckMessage = "LangSmith endpoint did not expose the expected API";
-      } else {
-        langSmithCheckState = "error";
-        langSmithCheckMessage = responseText
-          ? `LangSmith check failed (${response.status}): ${responseText}`
-          : `LangSmith check failed with status ${response.status}`;
-      }
-      new Notice(langSmithCheckMessage);
-    } catch (error) {
-      langSmithCheckState = "error";
-      langSmithCheckMessage = error instanceof Error ? error.message : "Failed to reach LangSmith";
-      new Notice(`LangSmith check failed: ${langSmithCheckMessage}`);
-    }
-  }
+		const responseText = (await response.text()).trim();
+		if (response.status === 401 || response.status === 403) {
+			langSmithCheckState = "error";
+			langSmithCheckMessage = "LangSmith rejected the API key";
+		} else if (response.status === 404) {
+			langSmithCheckState = "error";
+			langSmithCheckMessage = "LangSmith endpoint did not expose the expected API";
+		} else {
+			langSmithCheckState = "error";
+			langSmithCheckMessage = responseText
+				? `LangSmith check failed (${response.status}): ${responseText}`
+				: `LangSmith check failed with status ${response.status}`;
+		}
+		new Notice(langSmithCheckMessage);
+	} catch (error) {
+		langSmithCheckState = "error";
+		langSmithCheckMessage = error instanceof Error ? error.message : "Failed to reach LangSmith";
+		new Notice(`LangSmith check failed: ${langSmithCheckMessage}`);
+	}
+}
 </script>
 
 <!-- Observability -->

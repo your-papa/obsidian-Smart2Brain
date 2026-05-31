@@ -1,4 +1,6 @@
 
+import { rmSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	PLUGIN,
@@ -128,6 +130,11 @@ describe("search modal", () => {
 		"",
 		"Program overview and module planning.",
 	].join("\n");
+	const filesystemFixtureBaseName = `Filesystem Created Recent Fixture ${Date.now()}`;
+	const filesystemFixtureNoteName = `${filesystemFixtureBaseName}.md`;
+	const filesystemFixturePath = fileURLToPath(
+		new URL(`./Smart2Brain Test Vault/${encodeURIComponent(filesystemFixtureNoteName)}`, import.meta.url),
+	);
 	const multiSelectCreateNoteName = `Search Modal Shift Enter Fixture ${Date.now()}.md`;
 	const multiSelectCreateNoteTitle = multiSelectCreateNoteName.replace(/\.md$/u, "");
 
@@ -183,6 +190,7 @@ describe("search modal", () => {
 		deleteNote(pathNoteName);
 		deleteNote(numericTitleNoteName);
 		deleteNote(multiSelectCreateNoteName);
+		rmSync(filesystemFixturePath, { force: true });
 		clearBuffers();
 	});
 
@@ -210,6 +218,39 @@ describe("search modal", () => {
 
 		const resultCount = domCount(activeSearchSelector(".s2b-search-result"));
 		expect(resultCount).toBeGreaterThan(0);
+	}, 30_000);
+
+	it("should not show filesystem-created notes that were never opened in recents", async () => {
+		closeAllModals();
+		rmSync(filesystemFixturePath, { force: true });
+		writeFileSync(
+			filesystemFixturePath,
+			["# Filesystem fixture", "", "Created on disk without opening in Obsidian."].join("\n"),
+			"utf8",
+		);
+
+		await waitForCondition(
+			() =>
+				obsidianEval(`Boolean(app.vault.getAbstractFileByPath(${JSON.stringify(filesystemFixtureNoteName)}))`).includes(
+					"true",
+				),
+			"filesystem-created note to appear in the vault",
+			{ timeoutMs: 10_000, intervalMs: 250 },
+		);
+
+		executeCommand("smart-second-brain:search-notes");
+		await waitForSelector(ACTIVE_SEARCH_MODAL);
+
+		const resultNames = obsidian(
+			`dev:dom selector='${activeSearchSelector(".s2b-search-result-name")}' all text`,
+			{ ignoreError: true },
+		);
+
+		expect(resultNames).not.toContain(filesystemFixtureBaseName);
+		expect(getErrors()).toBe("");
+
+		closeAllModals();
+		rmSync(filesystemFixturePath, { force: true });
 	}, 30_000);
 
 	it.skip("should open the selected note in a new tab when Command-clicking a result", async () => {

@@ -44,6 +44,7 @@ interface AutocompleteSuggestion {
 }
 
 type SearchSuggestion = SearchResult | AutocompleteSuggestion;
+type SearchResultBadge = NonNullable<SearchResult["matchBadges"]>[number];
 
 function isAutocomplete(item: SearchSuggestion): item is AutocompleteSuggestion {
 	return "type" in item && item.type === "autocomplete";
@@ -147,13 +148,22 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private cachedAutocompleteTags: string[] = [];
 	private cachedTagChildCount = new Map<string, number>();
 	private cachedAutocompleteFolders: string[] = [];
+	private noteIconCache = new Map<string, ReturnType<typeof getSearchResultNoteIcon> | null>();
+	private tagIconCache = new Map<string, ReturnType<typeof getTagIcon> | null>();
+	private resolvedIconColorCache = new Map<string, string | null>();
+	private noteIconElementCache = new Map<string, HTMLElement | null>();
+	private tagIconElementCache = new Map<string, HTMLElement | null>();
+	private tagPillElementCache = new Map<string, HTMLElement>();
+	private badgeIconElementCache = new Map<string, HTMLElement>();
 	/** Inline filter state — chips live inside the input container */
 	private activeFilters: { type: "path" | "tag" | "space"; value: string }[] = [];
 	private inlineChipsEl: HTMLElement | null = null;
 	private inlineInputContentEl: HTMLElement | null = null;
 	private selectionSummaryEl: HTMLElement | null = null;
+	private pendingPostOpenFrameId: number | null = null;
 	private pendingFocusFrameId: number | null = null;
 	private pendingFocusTimeoutIds: ReturnType<typeof globalThis.setTimeout>[] = [];
+	private hasPrimedOpenResults = false;
 
 	constructor(app: App, options: SearchModalOptions = {}) {
 		super(app);
@@ -164,7 +174,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		]);
 		this.setPlaceholder(
 			this.pickerOptions?.pickerText?.searchPlaceholder ??
-				"Search notes, use #tag, /folder or @space, or leave empty for recent notes...",
+			"Search notes, use #tag, /folder or @space, or leave empty for recent notes...",
 		);
 		this.updateInstructions();
 
@@ -751,15 +761,12 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	}
 
 	onOpen(): void {
-		super.onOpen();
 		this.isClosed = false;
 		this.selectedResultsByPath.clear();
 		this.currentQuery = "";
 		this.lastRequestedSearchKey = "";
-		this.buildAutocompleteCaches();
-		this.setupInlineChips();
-		this.createSelectionSummary();
-		this.updateSelectionSummary();
+		this.activeFilters = [];
+		this.hasPrimedOpenResults = false;
 
 		// In global mode, auto-inject the immersed space as a removable chip
 		const pluginData = getData();
@@ -772,17 +779,24 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		this.searchResults = this.getModalRecentNotes();
+		this.hasPrimedOpenResults = true;
 
-		// Render the lightweight recent-opened list immediately so the modal
-		// doesn't appear empty.
-		// @ts-ignore - updateSuggestions is a protected method
-		this.updateSuggestions();
+		super.onOpen();
+
+		this.schedulePostOpenHydration();
 		this.scheduleInputFocus();
 	}
 
 	onClose(): void {
 		this.isClosed = true;
 		this.selectedResultsByPath.clear();
+		this.noteIconCache.clear();
+		this.tagIconCache.clear();
+		this.resolvedIconColorCache.clear();
+		this.noteIconElementCache.clear();
+		this.tagIconElementCache.clear();
+		this.tagPillElementCache.clear();
+		this.badgeIconElementCache.clear();
 		this.selectionSummaryEl?.remove();
 		this.selectionSummaryEl = null;
 		this.stopGlowAnimation();
@@ -802,11 +816,37 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			window.clearTimeout(this.autocompleteHydrationTimeout);
 			this.autocompleteHydrationTimeout = null;
 		}
+		if (this.pendingPostOpenFrameId !== null) {
+			globalThis.cancelAnimationFrame(this.pendingPostOpenFrameId);
+			this.pendingPostOpenFrameId = null;
+		}
+		this.hasPrimedOpenResults = false;
 		if (this.pendingFocusFrameId !== null) {
 			globalThis.cancelAnimationFrame(this.pendingFocusFrameId);
 			this.pendingFocusFrameId = null;
 		}
 		this.clearPendingFocusTimeouts();
+	}
+
+	private schedulePostOpenHydration(): void {
+		if (this.pendingPostOpenFrameId !== null) {
+			globalThis.cancelAnimationFrame(this.pendingPostOpenFrameId);
+		}
+
+		this.pendingPostOpenFrameId = globalThis.requestAnimationFrame(() => {
+			this.pendingPostOpenFrameId = null;
+			if (this.isClosed) {
+				return;
+			}
+
+			this.buildAutocompleteCaches();
+			this.setupInlineChips();
+			this.createSelectionSummary();
+			this.updateSelectionSummary();
+			if (this.activeFilters.length > 0) {
+				this.renderInlineChips();
+			}
+		});
 	}
 
 	private tryPopulateAutocompleteCachesFromLexicalIndex(): boolean {
@@ -950,6 +990,113 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		inputEl.focus();
 		const cursorPosition = inputEl.value.length;
 		inputEl.setSelectionRange(cursorPosition, cursorPosition);
+	}
+
+	private getCachedSearchResultNoteIcon(path: string) {
+		if (!this.noteIconCache.has(path)) {
+			this.noteIconCache.set(path, getSearchResultNoteIcon(this.app, path) ?? null);
+		}
+
+		return this.noteIconCache.get(path) ?? null;
+	}
+
+	private getCachedTagIcon(tag: string) {
+		if (!this.tagIconCache.has(tag)) {
+			this.tagIconCache.set(tag, getTagIcon(this.app, tag) ?? null);
+		}
+
+		return this.tagIconCache.get(tag) ?? null;
+	}
+
+	private getCachedResolvedIconColor(color?: string): string | undefined {
+		if (!color) {
+			return undefined;
+		}
+
+		if (!this.resolvedIconColorCache.has(color)) {
+			this.resolvedIconColorCache.set(color, resolveIconColor(color) ?? null);
+		}
+
+		return this.resolvedIconColorCache.get(color) ?? undefined;
+	}
+
+	private getCachedSearchResultNoteIconElement(path: string): HTMLElement | null {
+		if (!this.noteIconElementCache.has(path)) {
+			const noteIcon = this.getCachedSearchResultNoteIcon(path);
+			if (!noteIcon) {
+				this.noteIconElementCache.set(path, null);
+			} else {
+				const iconEl = document.createElement("span");
+				iconEl.className = "s2b-search-result-note-icon";
+				iconEl.setAttribute("aria-hidden", "true");
+				noteIcon.render(iconEl);
+				this.noteIconElementCache.set(path, iconEl);
+			}
+		}
+
+		return this.noteIconElementCache.get(path)?.cloneNode(true) as HTMLElement | null;
+	}
+
+	private getCachedTagIconElement(tag: string): HTMLElement | null {
+		if (!this.tagIconElementCache.has(tag)) {
+			const tagIcon = this.getCachedTagIcon(tag);
+			if (!tagIcon) {
+				this.tagIconElementCache.set(tag, null);
+			} else {
+				const iconEl = document.createElement("span");
+				iconEl.className = "s2b-search-result-tag-icon iconic-icon";
+				iconEl.setAttribute("aria-hidden", "true");
+				tagIcon.render(iconEl);
+				this.tagIconElementCache.set(tag, iconEl);
+			}
+		}
+
+		return this.tagIconElementCache.get(tag)?.cloneNode(true) as HTMLElement | null;
+	}
+
+	private getCachedTagPillElement(tag: string): HTMLElement {
+		if (!this.tagPillElementCache.has(tag)) {
+			const tagEl = document.createElement("span");
+			tagEl.className = "s2b-search-result-tag";
+
+			const tagIcon = this.getCachedTagIcon(tag);
+			if (tagIcon) {
+				tagEl.classList.add(`s2b-search-result-tag-${tagIcon.provider}`);
+				const resolvedTagColor = this.getCachedResolvedIconColor(tagIcon.color);
+				if (resolvedTagColor) {
+					const rgbaColor = resolvedTagColor.replace("rgb(", "rgba(").replace(")", "");
+					tagEl.style.setProperty("--tag-color", resolvedTagColor);
+					tagEl.style.setProperty("--tag-color-hover", resolvedTagColor);
+					tagEl.style.setProperty("--tag-color-remove-hover", resolvedTagColor);
+					tagEl.style.setProperty("--tag-background", `${rgbaColor}, 0.1)`);
+					tagEl.style.setProperty("--tag-background-hover", `${rgbaColor}, 0.1)`);
+					tagEl.style.setProperty("--tag-border-color", `${rgbaColor}, 0.25)`);
+					tagEl.style.setProperty("--tag-border-color-hover", `${rgbaColor}, 0.5)`);
+				}
+
+				const tagIconEl = this.getCachedTagIconElement(tag);
+				if (tagIconEl) {
+					tagEl.appendChild(tagIconEl);
+				}
+			}
+
+			tagEl.createSpan({ text: getDisplayTagLabel(tag), cls: "s2b-search-result-tag-label" });
+			this.tagPillElementCache.set(tag, tagEl);
+		}
+
+		return this.tagPillElementCache.get(tag)!.cloneNode(true) as HTMLElement;
+	}
+
+	private getCachedBadgeIconElement(badge: SearchResultBadge): HTMLElement {
+		if (!this.badgeIconElementCache.has(badge)) {
+			const badgeIconEl = document.createElement("span");
+			badgeIconEl.className = "s2b-search-result-badge-icon";
+			badgeIconEl.setAttribute("aria-hidden", "true");
+			setIcon(badgeIconEl, getBadgeIconId(badge));
+			this.badgeIconElementCache.set(badge, badgeIconEl);
+		}
+
+		return this.badgeIconElementCache.get(badge)!.cloneNode(true) as HTMLElement;
 	}
 
 	private usesCupertinoTheme(): boolean {
@@ -1459,6 +1606,12 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		if (!query.trim()) {
+			if (this.hasPrimedOpenResults) {
+				this.hasPrimedOpenResults = false;
+				this.lastRequestedSearchKey = "";
+				return this.searchResults;
+			}
+
 			this.searchResults = this.getModalRecentNotes();
 			this.lastRequestedSearchKey = "";
 			return this.searchResults;
@@ -1485,9 +1638,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		const result = item;
-		if (!this.currentQuery.trim()) {
-			this.scheduleInputFocus();
-		}
 		el.dataset.searchResultPath = result.path;
 		el.toggleClass("s2b-search-result-item-selected", this.selectedResultsByPath.has(result.path));
 		const container = el.createDiv({ cls: "s2b-search-result" });
@@ -1502,11 +1652,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		// Title row
 		const titleRow = container.createDiv({ cls: "s2b-search-result-title" });
 		const titleMeta = titleRow.createDiv({ cls: "s2b-search-result-title-meta" });
-		const noteIcon = getSearchResultNoteIcon(this.app, result.path);
-		if (noteIcon) {
-			const iconEl = titleMeta.createSpan({ cls: "s2b-search-result-note-icon" });
-			iconEl.setAttribute("aria-hidden", "true");
-			noteIcon.render(iconEl);
+		const noteIconEl = this.getCachedSearchResultNoteIconElement(result.path);
+		if (noteIconEl) {
+			titleMeta.appendChild(noteIconEl);
 		}
 		const titleEl = titleMeta.createSpan({ cls: "s2b-search-result-name" });
 		titleEl.setAttribute("title", result.name);
@@ -1528,28 +1676,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			if (displayTags.length > 0) {
 				const tagsContainer = titleSecondary.createDiv({ cls: "s2b-search-result-tags" });
 				for (const tag of visibleTags) {
-					const tagEl = tagsContainer.createSpan({ cls: "s2b-search-result-tag" });
-					const tagIcon = getTagIcon(this.app, tag);
-					if (tagIcon) {
-						tagEl.classList.add(`s2b-search-result-tag-${tagIcon.provider}`);
-						const resolvedTagColor = resolveIconColor(tagIcon.color);
-						if (resolvedTagColor) {
-							const rgbaColor = resolvedTagColor.replace("rgb(", "rgba(").replace(")", "");
-							tagEl.style.setProperty("--tag-color", resolvedTagColor);
-							tagEl.style.setProperty("--tag-color-hover", resolvedTagColor);
-							tagEl.style.setProperty("--tag-color-remove-hover", resolvedTagColor);
-							tagEl.style.setProperty("--tag-background", `${rgbaColor}, 0.1)`);
-							tagEl.style.setProperty("--tag-background-hover", `${rgbaColor}, 0.1)`);
-							tagEl.style.setProperty("--tag-border-color", `${rgbaColor}, 0.25)`);
-							tagEl.style.setProperty("--tag-border-color-hover", `${rgbaColor}, 0.5)`);
-						}
-
-						const tagIconEl = tagEl.createSpan({ cls: "s2b-search-result-tag-icon iconic-icon" });
-						tagIconEl.setAttribute("aria-hidden", "true");
-						tagIcon.render(tagIconEl);
-					}
-
-					tagEl.createSpan({ text: getDisplayTagLabel(tag), cls: "s2b-search-result-tag-label" });
+					tagsContainer.appendChild(this.getCachedTagPillElement(tag));
 				}
 
 				if (hiddenTags.length > 0) {
@@ -1571,10 +1698,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 				});
 				badgeEl.setAttribute("aria-label", badgeLabel);
 				badgeEl.setAttribute("title", badgeLabel);
-
-				const badgeIconEl = badgeEl.createSpan({ cls: "s2b-search-result-badge-icon" });
-				badgeIconEl.setAttribute("aria-hidden", "true");
-				setIcon(badgeIconEl, getBadgeIconId(badge));
+				badgeEl.appendChild(this.getCachedBadgeIconElement(badge));
 			}
 		}
 

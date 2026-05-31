@@ -271,7 +271,7 @@ describe("performSearch lexical startup behavior", () => {
 		expect(new Set(parsed.results[0]?.tags ?? [])).toEqual(new Set(["#project", "#active", "#inline"]));
 	});
 
-	it("includes recently created notes even if they were never opened", async () => {
+	it("does not include notes that were never opened", async () => {
 		const app = {
 			vault: {
 				getAbstractFileByPath(path: string) {
@@ -308,9 +308,8 @@ describe("performSearch lexical startup behavior", () => {
 		const result = await tool.invoke({ recentOnly: true });
 		const parsed: SearchToolResultPayload = JSON.parse(String(result));
 
-		expect(parsed.results[0]?.name).toBe("brand-new");
-		expect(parsed.results[0]?.tags).toEqual(["#new"]);
-		expect(parsed.results[0]?.matchBadges).toEqual(["recent"]);
+		expect(parsed.totalResults).toBe(0);
+		expect(parsed.results).toEqual([]);
 	});
 
 	it("uses the standalone lexical index for filter-only browse queries", async () => {
