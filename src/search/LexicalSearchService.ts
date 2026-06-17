@@ -593,7 +593,7 @@ export class LexicalSearchService {
 	async cleanup(): Promise<void> {
 		try {
 			if (pendingInitPromise !== null) {
-				await pendingInitPromise.catch(() => { });
+				await pendingInitPromise.catch(() => {});
 			}
 			await this.miniSearch.flush();
 			this.miniSearch.close();

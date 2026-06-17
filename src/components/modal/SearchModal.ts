@@ -177,7 +177,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		]);
 		this.setPlaceholder(
 			this.pickerOptions?.pickerText?.searchPlaceholder ??
-			"Search notes, use #tag, /folder or @space, or leave empty for recent notes...",
+				"Search notes, use #tag, /folder or @space, or leave empty for recent notes...",
 		);
 		this.updateInstructions();
 
