@@ -35,6 +35,7 @@ workspace.json
 .btca
 
 .opencode
+.claude/
 
 # Obsidian data and local state
 /data.json
