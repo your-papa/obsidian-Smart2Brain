@@ -17,7 +17,7 @@ const MAX_LOG_ENTRIES = 50;
 
 type AsyncFunctionType = new (...args: string[]) => (...values: unknown[]) => Promise<unknown>;
 
-const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as AsyncFunctionType;
+const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as AsyncFunctionType;
 
 function now(): number {
 	if (typeof performance !== "undefined" && typeof performance.now === "function") {

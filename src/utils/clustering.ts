@@ -248,7 +248,7 @@ export function silhouetteScore(vectors: Float32Array[], labels: number[], maxSa
 	for (let i = 0; i < n; i++) {
 		const label = labels[i];
 		if (!clusters.has(label)) clusters.set(label, []);
-		clusters.get(label)!.push(i);
+		clusters.get(label)?.push(i);
 	}
 
 	let totalSilhouette = 0;

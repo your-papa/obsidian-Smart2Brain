@@ -90,7 +90,7 @@ function normalizeToolCallMessage<TMessage>(message: TMessage): TMessage {
 						const nextAdditionalKwargs = {
 							...(baseMessage.additional_kwargs as Record<string, unknown>),
 						};
-						delete nextAdditionalKwargs.tool_calls;
+						nextAdditionalKwargs.tool_calls = undefined;
 						return nextAdditionalKwargs;
 					})()
 				: {},

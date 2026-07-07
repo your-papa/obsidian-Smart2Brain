@@ -38,7 +38,7 @@ const skippedByReason = $derived.by(() => {
 	const map = new Map<SkipReason, string[]>();
 	for (const { path, reason } of report.skippedFiles) {
 		if (!map.has(reason)) map.set(reason, []);
-		map.get(reason)!.push(path);
+		map.get(reason)?.push(path);
 	}
 	return map;
 });

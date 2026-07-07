@@ -20,12 +20,12 @@
         "d3-force": "^3.0.0",
         "diff": "^8.0.3",
         "graphology": "^0.26.0",
-        "graphology-communities-louvain": "^2.0.2",
         "graphology-metrics": "^2.4.0",
         "hnsw": "^1.1.1",
         "i18next": "^23.16.8",
         "langchain": "^1.3.4",
         "langsmith": "^0.5.25",
+        "leiden-ts": "^0.1.0",
         "minisearch": "^7.2.0",
         "pdf-lib": "^1.17.1",
         "pixi-viewport": "^6.0.3",
@@ -576,8 +576,6 @@
 
     "graphology": ["graphology@0.26.0", "", { "dependencies": { "events": "^3.3.0" }, "peerDependencies": { "graphology-types": ">=0.24.0" } }, "sha512-8SSImzgUUYC89Z042s+0r/vMibY7GX/Emz4LDO5e7jYXhuoWfHISPFJYjpRLUSJGq6UQ6xlenvX1p/hJdfXuXg=="],
 
-    "graphology-communities-louvain": ["graphology-communities-louvain@2.0.2", "", { "dependencies": { "graphology-indices": "^0.17.0", "graphology-utils": "^2.4.4", "mnemonist": "^0.39.0", "pandemonium": "^2.4.1" }, "peerDependencies": { "graphology-types": ">=0.19.0" } }, "sha512-zt+2hHVPYxjEquyecxWXoUoIuN/UvYzsvI7boDdMNz0rRvpESQ7+e+Ejv6wK7AThycbZXuQ6DkG8NPMCq6XwoA=="],
-
     "graphology-indices": ["graphology-indices@0.17.0", "", { "dependencies": { "graphology-utils": "^2.4.2", "mnemonist": "^0.39.0" }, "peerDependencies": { "graphology-types": ">=0.20.0" } }, "sha512-A7RXuKQvdqSWOpn7ZVQo4S33O0vCfPBnUSf7FwE0zNCasqwZVUaCXePuWo5HBpWw68KJcwObZDHpFk6HKH6MYQ=="],
 
     "graphology-metrics": ["graphology-metrics@2.4.0", "", { "dependencies": { "graphology-indices": "^0.17.0", "graphology-shortest-path": "^2.0.0", "graphology-utils": "^2.4.4", "mnemonist": "^0.39.0", "pandemonium": "2.4.1" }, "peerDependencies": { "graphology-types": ">=0.20.0" } }, "sha512-7WOfOP+mFLCaTJx55Qg4eY+211vr1/b3D/R3biz3SXGhAaCVcWYkfabnmO4O4WBNWANEHtVnFrGgJ0kj6MM6xw=="],
@@ -677,6 +675,8 @@
     "langchain": ["langchain@1.3.4", "", { "dependencies": { "@langchain/langgraph": "^1.2.9", "@langchain/langgraph-checkpoint": "^1.0.1", "langsmith": ">=0.5.0 <1.0.0", "uuid": "^11.1.0", "zod": "^3.25.76 || ^4" }, "peerDependencies": { "@langchain/core": "^1.1.41" } }, "sha512-umrD+ZC6vr0Q0U1lC5PoIMMQqgnP+7QhaIdAXCeZiSX2GPVBiVR7Ed2ZR+3MPvz1yWrRtIm17wPaovkND+wOXg=="],
 
     "langsmith": ["langsmith@0.5.25", "", { "dependencies": { "p-queue": "6.6.2" }, "peerDependencies": { "@opentelemetry/api": "*", "@opentelemetry/exporter-trace-otlp-proto": "*", "@opentelemetry/sdk-trace-base": "*", "openai": "*", "ws": ">=7" }, "optionalPeers": ["@opentelemetry/api", "@opentelemetry/exporter-trace-otlp-proto", "@opentelemetry/sdk-trace-base", "openai", "ws"] }, "sha512-AG7NOymrDmwaWq+wus5hJHZjPFKXwsEdfqGBU3eZiF5242mme+5wuJocdBJKGyU1kgBO7TuLHiqtdyIwl4V4yQ=="],
+
+    "leiden-ts": ["leiden-ts@0.1.0", "", {}, "sha512-kX0bBlEdXrbZg9seGZzp+JIwTgSK6xa3+ZFulyc/oeGC3Woam8inhHLeNzma/Wv6ERXiwoNkDAN4ZaGLAOhAbA=="],
 
     "lilconfig": ["lilconfig@3.1.3", "", {}, "sha512-/vlFKAoH5Cgt3Ie+JLhRbwOsCQePABiU3tJ1egGvyQ+33R/vcwM2Zl2QR/LzjsBeItPt3oSVXapn+m4nQDvpzw=="],
 

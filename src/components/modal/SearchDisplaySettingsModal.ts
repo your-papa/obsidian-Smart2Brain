@@ -6,10 +6,6 @@ import SearchDisplaySettingsComponent from "./SearchDisplaySettingsModal.svelte"
 export class SearchDisplaySettingsModal extends Modal {
 	private component: Record<string, never> | null = null;
 
-	constructor(app: App) {
-		super(app);
-	}
-
 	onOpen() {
 		this.component = mount(SearchDisplaySettingsComponent, {
 			target: this.contentEl,

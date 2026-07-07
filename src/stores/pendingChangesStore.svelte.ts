@@ -311,7 +311,7 @@ export class PendingChangesStore {
 		try {
 			return await fn();
 		} finally {
-			resolve!();
+			resolve?.();
 			if (this.#fileLocks.get(filePath) === lock) {
 				this.#fileLocks.delete(filePath);
 			}

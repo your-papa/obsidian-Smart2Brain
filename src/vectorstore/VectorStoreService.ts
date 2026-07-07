@@ -1567,7 +1567,7 @@ export class VectorStoreService {
 		if (!this.progressListeners.has(indexId)) {
 			this.progressListeners.set(indexId, new Set());
 		}
-		this.progressListeners.get(indexId)!.add(callback);
+		this.progressListeners.get(indexId)?.add(callback);
 
 		// Send initial progress from existing instance if available
 		const inst = this.instances.get(indexId);
@@ -1673,7 +1673,7 @@ export class VectorStoreService {
 			new Notice(`Exported ${docs.length} embeddings.`);
 			return true;
 		} catch (error) {
-			Logger.error(`[VectorStore] Export failed:`, error);
+			Logger.error("[VectorStore] Export failed:", error);
 			new Notice("Failed to export index.");
 			return false;
 		}
@@ -1736,7 +1736,7 @@ export class VectorStoreService {
 			new Notice(`Imported ${docs.length} embeddings (${model}).`);
 			return indexId;
 		} catch (error) {
-			Logger.error(`[VectorStore] Failed to import index:`, error);
+			Logger.error("[VectorStore] Failed to import index:", error);
 			new Notice("Failed to import index. The file may be corrupted.");
 			return null;
 		}

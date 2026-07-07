@@ -350,7 +350,7 @@ function normalizeChatCompletionMessages(parsed: Record<string, unknown>): Recor
 				if (entry.content == null) {
 					entry.content = "";
 				}
-				delete entry.name;
+				entry.name = undefined;
 			}
 
 			return entry;

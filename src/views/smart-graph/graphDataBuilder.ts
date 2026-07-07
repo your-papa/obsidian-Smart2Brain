@@ -610,12 +610,12 @@ export function resolveSegments(
 		clusterMap?: Map<string, ClusterAssignment>;
 		clusterLabels?: Record<number, string>;
 		themeColors?: string[];
-		louvainCommunities?: Record<string, number>;
+		leidenCommunities?: Record<string, number>;
 	},
 ): SpaceSegment[] {
 	if (source === "none") return [];
 
-	const { clusterMap, clusterLabels, themeColors = [], louvainCommunities } = options ?? {};
+	const { clusterMap, clusterLabels, themeColors = [], leidenCommunities } = options ?? {};
 
 	switch (source) {
 		case "folder":
@@ -626,8 +626,8 @@ export function resolveSegments(
 			return resolveSegmentsByExtension(graphData, themeColors);
 		case "semantic":
 			return resolveSegmentsByCluster(graphData, clusterMap, clusterLabels, themeColors);
-		case "louvain":
-			return resolveSegmentsByLouvain(graphData, louvainCommunities ?? {}, themeColors);
+		case "leiden":
+			return resolveSegmentsByLeiden(graphData, leidenCommunities ?? {}, themeColors);
 		default:
 			return [];
 	}
@@ -738,16 +738,16 @@ function resolveSegmentsByCluster(
 }
 
 /**
- * Resolve segments using Louvain community detection on the wiki link graph.
+ * Resolve segments using Leiden community detection on the wiki link graph.
  * Communities are derived purely from link topology — notes that heavily
  * interlink end up in the same community regardless of content similarity.
  * Nodes with no wiki links are not assigned to any community and keep the
  * default node color.
  *
  * `communities` is a pre-computed node-id → community-id map produced by
- * `louvainAsync` in the compute worker.
+ * `leidenAsync` in the compute worker.
  */
-function resolveSegmentsByLouvain(
+function resolveSegmentsByLeiden(
 	graphData: GraphData,
 	communities: Record<string, number>,
 	themeColors: string[],
@@ -797,10 +797,10 @@ function resolveSegmentsByLouvain(
 		const paths = new Set(nodeIds.map((id) => nodeById.get(id)?.path).filter((p): p is string => p != null));
 
 		return {
-			id: `louvain:${i}`,
+			id: `leiden:${i}`,
 			label,
 			color: colors[i],
-			source: "louvain" as SegmentBy,
+			source: "leiden" as SegmentBy,
 			paths,
 		};
 	});

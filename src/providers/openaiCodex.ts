@@ -514,7 +514,7 @@ function extractInputTextContent(content: unknown): string {
 function sanitizeCodexPayload(parsed: Record<string, unknown>): void {
 	parsed.store = false;
 	if ("previous_response_id" in parsed) {
-		delete parsed.previous_response_id;
+		parsed.previous_response_id = undefined;
 	}
 	const input = parsed.input;
 	if (!Array.isArray(input)) return;
