@@ -71,6 +71,8 @@ let canvasComponent: GraphCanvas | undefined = $state(undefined);
 // Lasso / selection state
 let lassoMode = $state(false);
 let selectedPaths: string[] = $state([]);
+let immersePaths: Set<string> | null = $state(null);
+let isImmersed: boolean = $derived(immersePaths !== null);
 let focusedClusters: Set<number> = $state(new Set());
 
 // Detail level 0–100: 100 = full graph, <100 = skeleton backbone (fewer clusters + only hubs/bridges)
@@ -79,8 +81,7 @@ let skeletonDetail = $state(100);
 // Segment / Color-by state — always leiden
 let segmentBy: SegmentBy = $derived("leiden" as SegmentBy);
 let segments: SpaceSegment[] = $state([]);
-let selectedSegmentIds: Set<string> = $state(new Set());
-let focusedSegmentId: string | null = $state(null);
+let focusedSegmentIds: Set<string> = $state(new Set());
 /** Per-segment color overrides set by the user. */
 let segmentColorOverrides: Record<string, string> = $state({});
 
@@ -302,7 +303,7 @@ async function buildGraph() {
 
 	try {
 		const filter = getFilter();
-		const { graphData: wikiData } = buildWikiGraph(plugin.app, filter);
+		const { graphData: wikiData } = buildWikiGraph(plugin.app, filter, immersePaths ?? undefined);
 		graphData = wikiData;
 		isLoading = false;
 
@@ -472,13 +473,26 @@ function handleZoomToSelection() {
 function handleClearSelection() {
 	selectedPaths = [];
 	focusedClusters = new Set();
-	focusedSegmentId = null;
+	focusedSegmentIds = new Set();
 	pendingSpaceFilter = null;
 	canvasComponent?.clearSelection();
 	const messenger = getMessenger();
 	if (messenger) {
 		messenger.pendingGraphNotes = [];
 	}
+}
+
+async function handleImmerse() {
+	if (selectedPaths.length === 0) return;
+	immersePaths = new Set(selectedPaths);
+	canvasComponent?.clearSelection();
+	selectedPaths = [];
+	await buildGraph();
+}
+
+async function handleExitImmerse() {
+	immersePaths = null;
+	await buildGraph();
 }
 
 async function runLeidenSegmentation() {
@@ -501,34 +515,45 @@ function handleSegmentColorChange(segmentId: string, color: string) {
 	graphData = applySegments(graphData, segments);
 }
 
-function handleFocusSegment(segmentId: string | null) {
-	focusedSegmentId = segmentId;
-	if (segmentId == null) {
+function handleFocusSegment(segmentId: string, multi: boolean) {
+	const next = new Set(focusedSegmentIds);
+	if (multi) {
+		// Shift/Cmd: toggle this segment in/out of the focused set
+		if (next.has(segmentId)) {
+			next.delete(segmentId);
+		} else {
+			next.add(segmentId);
+		}
+	} else {
+		// Plain click: select only this segment, or deselect if already the only one
+		if (next.size === 1 && next.has(segmentId)) {
+			next.clear();
+		} else {
+			next.clear();
+			next.add(segmentId);
+		}
+	}
+	focusedSegmentIds = next;
+
+	if (next.size === 0) {
 		focusedClusters = new Set();
 		canvasComponent?.clearSelection();
 		handleSelectionChange([]);
 		return;
 	}
-	const segment = segments.find((s) => s.id === segmentId);
-	if (segment) {
-		const paths = [...segment.paths];
-		canvasComponent?.selectNodesByPaths(paths);
-		selectedPaths = paths;
-		const messenger = getMessenger();
-		if (messenger) messenger.pendingGraphNotes = [...paths];
-		pendingSpaceFilter = { type: "any", conditions: [{ type: "paths", value: paths.slice() }] };
-		canvasComponent?.panToSelection();
-	}
-}
 
-function handleToggleSegmentSelection(segmentId: string) {
-	const next = new Set(selectedSegmentIds);
-	if (next.has(segmentId)) {
-		next.delete(segmentId);
-	} else {
-		next.add(segmentId);
+	// Union of all paths across focused segments
+	const paths: string[] = [];
+	for (const id of next) {
+		const seg = segments.find((s) => s.id === id);
+		if (seg) paths.push(...seg.paths);
 	}
-	selectedSegmentIds = next;
+	canvasComponent?.selectNodesByPaths(paths);
+	selectedPaths = paths;
+	const messenger = getMessenger();
+	if (messenger) messenger.pendingGraphNotes = [...paths];
+	pendingSpaceFilter = { type: "any", conditions: [{ type: "paths", value: paths.slice() }] };
+	canvasComponent?.panToSelection();
 }
 
 /**
@@ -694,16 +719,26 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
       onClearFocusedClusters={handleClearFocusedClusters}
       onHoverPreview={handleHoverPreview}
       onSkeletonToggle={handleSkeletonToggle}
+      immersed={isImmersed}
+      onExitImmerse={handleExitImmerse}
     />
   {/if}
 
-  {#if selectedPaths.length > 0}
+  {#if isImmersed}
+    <div class="graph-selection-bar">
+      <span class="selection-count">{graphData.nodes.length} notes · immersed</span>
+      <div class="selection-actions">
+        <Button buttonText="Exit" onClick={handleExitImmerse} tooltip="Exit immerse (Esc)" />
+      </div>
+    </div>
+  {:else if selectedPaths.length > 0}
     <div class="graph-selection-bar">
       <span class="selection-count">
         {selectedPaths.length} notes selected
       </span>
       <div class="selection-actions">
         <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
+        <Button buttonText="Immerse" onClick={handleImmerse} tooltip="Rebuild graph with selected notes only" />
         <Button
           buttonText="Open All"
           onClick={handleOpenAllSelected}
@@ -731,7 +766,7 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     {graphData}
     nodeCount={skeletonDetail < 100 ? skeletonGraphData.nodes.length : graphData.nodes.length}
     {segments}
-    {focusedSegmentId}
+    focusedSegmentIds={focusedSegmentIds}
     onFocusSegment={handleFocusSegment}
     {skeletonDetail}
     onSkeletonDetailChange={(v) => (skeletonDetail = v)}

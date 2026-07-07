@@ -45,6 +45,8 @@ interface Props {
 	onClearFocusedClusters?: () => void;
 	onHoverPreview?: (event: MouseEvent, path: string, targetEl: HTMLElement) => void;
 	onSkeletonToggle?: () => void;
+	immersed?: boolean;
+	onExitImmerse?: () => void;
 }
 
 let {
@@ -71,6 +73,8 @@ let {
 	onClearFocusedClusters,
 	onHoverPreview,
 	onSkeletonToggle,
+	immersed = false,
+	onExitImmerse,
 }: Props = $props();
 
 let containerEl: HTMLButtonElement;
@@ -211,7 +215,9 @@ function handleKeyDown(e: KeyboardEvent) {
 
 	switch (e.key) {
 		case "Escape":
-			if (isLassoing) {
+			if (immersed) {
+				onExitImmerse?.();
+			} else if (isLassoing) {
 				isLassoing = false;
 				lassoPoints = [];
 				pixi?.resumeViewport();

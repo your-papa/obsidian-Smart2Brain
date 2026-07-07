@@ -24,8 +24,8 @@ interface Props {
 	nodeCount?: number;
 	// Segments (community list)
 	segments?: SpaceSegment[];
-	focusedSegmentId?: string | null;
-	onFocusSegment?: (id: string | null) => void;
+	focusedSegmentIds?: Set<string>;
+	onFocusSegment?: (id: string, multi: boolean) => void;
 	// Skeleton view
 	skeletonDetail?: number;
 	onSkeletonDetailChange?: (value: number) => void;
@@ -46,7 +46,7 @@ let {
 	graphData = { nodes: [], edges: [] },
 	nodeCount = 0,
 	segments = [],
-	focusedSegmentId = null,
+	focusedSegmentIds = new Set<string>(),
 	onFocusSegment,
 	skeletonDetail = 100,
 	onSkeletonDetailChange,
@@ -155,14 +155,14 @@ function handleClusterCohesionStrengthChange(val: number) {
 
       <!-- ── Topics ───────────────────────────── -->
       {#if segments.length > 0}
-        <span class="section-label">Topics · {segments.length}</span>
+        <span class="section-label">Topics · {segments.length} <span class="section-label-hint">shift/⌘ multi-select</span></span>
         <div class="segment-list">
           {#each segments as seg (seg.id)}
             <button
               type="button"
               class="segment-row"
-              class:segment-row--active={focusedSegmentId === seg.id}
-              onclick={() => onFocusSegment?.(focusedSegmentId === seg.id ? null : seg.id)}
+              class:segment-row--active={focusedSegmentIds.has(seg.id)}
+              onclick={(e) => onFocusSegment?.(seg.id, e.shiftKey || e.metaKey || e.ctrlKey)}
             >
               <span class="segment-dot" style="background-color: {seg.color}"></span>
               <span class="segment-label">{seg.label}</span>
@@ -485,6 +485,15 @@ function handleClusterCohesionStrengthChange(val: number) {
     letter-spacing: 0.04em;
     padding-top: 8px;
     padding-bottom: 2px;
+  }
+
+  .section-label-hint {
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 10px;
+    color: var(--text-faint);
+    margin-left: 4px;
   }
 
   .section-header {
