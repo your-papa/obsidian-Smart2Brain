@@ -438,7 +438,7 @@ const TOOLS: ToolInfo[] = [
 		id: "web_search",
 		defaultName: "Web Search",
 		defaultDescription:
-			"Search the web and return results (title, URL, snippet). Requires a search provider configured in General settings. Prefer vault search first.",
+			"Search the web and return results (title, URL, snippet). Configure the provider and API key in the tool's Configure panel. Prefer vault search first.",
 	},
 ];
 

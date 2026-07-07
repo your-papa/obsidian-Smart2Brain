@@ -2,11 +2,9 @@
 import ManagedEntitySection from "../../components/settings/ManagedEntitySection.svelte";
 import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
 import ProviderItem from "../../components/settings/ProviderItem.svelte";
-import SecretSelect from "../../components/settings/SecretSelect.svelte";
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
-import Dropdown from "../../components/ui/Dropdown.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
@@ -23,13 +21,6 @@ let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
 function handleOpenProviderSetup() {
 	new ProviderSetupModal(plugin, { templateId: "openai-compatible" }).open();
 }
-
-// ─── Web Search ──────────────────────────────────────────
-const webSearchProviderOptions = [
-	{ display: "None", value: "" },
-	{ display: "Brave Search", value: "brave" },
-	{ display: "Tavily", value: "tavily" },
-];
 </script>
 
 <!-- Providers -->
@@ -69,35 +60,6 @@ const webSearchProviderOptions = [
 
     <Button onClick={() => privacyListModal.open()} buttonText="Manage" />
   </SettingItem>
-</SettingGroup>
-
-<!-- Web Search -->
-<SettingGroup heading="Web Search">
-  <SettingItem
-    name="Provider"
-    desc="Search provider used by the web_search agent tool. Enable the tool per-agent in Agent settings."
-  >
-    <Dropdown
-      type="options"
-      dropdown={webSearchProviderOptions}
-      selected={pluginData.webSearchProvider}
-      onchange={(val) => (pluginData.webSearchProvider = val)}
-    />
-  </SettingItem>
-
-  {#if pluginData.webSearchProvider}
-    <SettingItem
-      name="API Key"
-      desc={pluginData.webSearchProvider === "brave"
-        ? "Brave Search API key from api.search.brave.com"
-        : "Tavily API key from app.tavily.com"}
-    >
-      <SecretSelect
-        value={pluginData.webSearchApiKeyId}
-        onChange={(secretId) => (pluginData.webSearchApiKeyId = secretId)}
-      />
-    </SettingItem>
-  {/if}
 </SettingGroup>
 
 <style>

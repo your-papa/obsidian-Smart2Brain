@@ -13,6 +13,7 @@ import type { ChatModel } from "../../stores/chatStore.svelte";
 import type SecondBrainPlugin from "../../main";
 import { ModelSelectionModal, type SelectedModel } from "./ModelSelectionModal";
 import { NATIVE_PDF_PROVIDERS } from "../../agent/Agent";
+import SecretSelect from "../settings/SecretSelect.svelte";
 import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
 import Text from "../ui/Text.svelte";
@@ -104,6 +105,12 @@ let diffViewMode = $state<DiffViewMode>(pluginData.diffViewMode);
 const diffViewModeOptions = [
 	{ display: "Two Pane (rendered markdown)", value: "two-pane" as const },
 	{ display: "Word Diff (inline text)", value: "word-diff" as const },
+];
+
+const webSearchProviderOptions = [
+	{ display: "None", value: "" },
+	{ display: "Brave Search", value: "brave" },
+	{ display: "Tavily", value: "tavily" },
 ];
 type ProcessorMode = "auto" | "custom" | "disabled";
 
@@ -718,9 +725,34 @@ function handleResetToDefault() {
   {:else if capturedToolId === "web_search"}
     <div class="tool-config-section">
       <h4 class="tool-config-section-title">Web Search Settings</h4>
-      <p class="tool-config-description" style="margin-bottom: 12px;">
-        The search provider and API key are configured in Settings → General → Web Search.
-      </p>
+      <div class="tool-config-field">
+        <label class="tool-config-label" for="tool-config-web-search-provider">Provider</label>
+        <p class="tool-config-description">
+          Search provider used by this tool. The provider and API key are shared across all agents
+          that enable web_search.
+        </p>
+        <Dropdown
+          id="tool-config-web-search-provider"
+          type="options"
+          dropdown={webSearchProviderOptions}
+          selected={pluginData.webSearchProvider}
+          onchange={(val) => (pluginData.webSearchProvider = val)}
+        />
+      </div>
+      {#if pluginData.webSearchProvider}
+        <div class="tool-config-field">
+          <div class="tool-config-label">API Key</div>
+          <p class="tool-config-description">
+            {pluginData.webSearchProvider === "brave"
+              ? "Brave Search API key from api.search.brave.com."
+              : "Tavily API key from app.tavily.com."}
+          </p>
+          <SecretSelect
+            value={pluginData.webSearchApiKeyId}
+            onChange={(secretId) => (pluginData.webSearchApiKeyId = secretId)}
+          />
+        </div>
+      {/if}
       <div class="tool-config-field">
         <label class="tool-config-label" for="tool-config-web-search-max-results">Max Results</label>
         <p class="tool-config-description">Number of search results to return (max 20).</p>
