@@ -13,6 +13,7 @@ import type { ChatModel } from "../../stores/chatStore.svelte";
 import type SecondBrainPlugin from "../../main";
 import { ModelSelectionModal, type SelectedModel } from "./ModelSelectionModal";
 import { NATIVE_PDF_PROVIDERS } from "../../agent/Agent";
+import SecretSelect from "../settings/SecretSelect.svelte";
 import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
 import Text from "../ui/Text.svelte";
@@ -104,6 +105,12 @@ let diffViewMode = $state<DiffViewMode>(pluginData.diffViewMode);
 const diffViewModeOptions = [
 	{ display: "Two Pane (rendered markdown)", value: "two-pane" as const },
 	{ display: "Word Diff (inline text)", value: "word-diff" as const },
+];
+
+const webSearchProviderOptions = [
+	{ display: "None", value: "" },
+	{ display: "Brave Search", value: "brave" },
+	{ display: "Tavily", value: "tavily" },
 ];
 type ProcessorMode = "auto" | "custom" | "disabled";
 
@@ -358,6 +365,8 @@ const toolDisplayNames: Record<BuiltInToolId, string> = {
 	execute_javascript: "Execute JavaScript",
 	execute_dataview_query: "Execute Dataview Query",
 	manage_notes: "Manage Notes",
+	fetch_url: "Fetch URL",
+	web_search: "Web Search",
 };
 
 onMount(() => {
@@ -409,6 +418,10 @@ function handleSave() {
 	} else if (capturedToolId === "manage_notes") {
 		updatedConfig.settings = { allowCreate, allowUpdate, allowDelete, allowMove };
 		pluginData.diffViewMode = diffViewMode;
+	} else if (capturedToolId === "fetch_url") {
+		updatedConfig.settings = { maxContentLength };
+	} else if (capturedToolId === "web_search") {
+		updatedConfig.settings = { maxResults };
 	}
 
 	updateToolConfig(updatedConfig);
@@ -452,6 +465,12 @@ function handleResetToDefault() {
 		allowDelete = settings.allowDelete;
 		allowMove = settings.allowMove;
 		diffViewMode = "two-pane";
+	} else if (capturedToolId === "fetch_url" && defaultConfig.settings) {
+		const settings = defaultConfig.settings as { maxContentLength: number };
+		maxContentLength = settings.maxContentLength;
+	} else if (capturedToolId === "web_search" && defaultConfig.settings) {
+		const settings = defaultConfig.settings as { maxResults: number };
+		maxResults = settings.maxResults;
 	}
 }
 </script>
@@ -681,6 +700,69 @@ function handleResetToDefault() {
         <div class="tool-config-label">Allow Move</div>
         <p class="tool-config-description">Permit renaming or relocating markdown notes.</p>
         <Toggle checked={allowMove} onchange={(checked) => (allowMove = checked)} />
+      </div>
+    </div>
+  {:else if capturedToolId === "fetch_url"}
+    <div class="tool-config-section">
+      <h4 class="tool-config-section-title">Fetch Settings</h4>
+      <div class="tool-config-field">
+        <label class="tool-config-label" for="tool-config-fetch-max-content-length"
+          >Max Content Length</label
+        >
+        <p class="tool-config-description">
+          Maximum characters to return after cleaning HTML. Set to 0 for unlimited (capped by an
+          internal raw-bytes safety limit).
+        </p>
+        <Text
+          id="tool-config-fetch-max-content-length"
+          inputType="number"
+          value={maxContentLength}
+          placeholder="50000"
+          onblur={(v) => (maxContentLength = Number.parseInt(String(v)) || 0)}
+        />
+      </div>
+    </div>
+  {:else if capturedToolId === "web_search"}
+    <div class="tool-config-section">
+      <h4 class="tool-config-section-title">Web Search Settings</h4>
+      <div class="tool-config-field">
+        <label class="tool-config-label" for="tool-config-web-search-provider">Provider</label>
+        <p class="tool-config-description">
+          Search provider used by this tool. The provider and API key are shared across all agents
+          that enable web_search.
+        </p>
+        <Dropdown
+          id="tool-config-web-search-provider"
+          type="options"
+          dropdown={webSearchProviderOptions}
+          selected={pluginData.webSearchProvider}
+          onchange={(val) => (pluginData.webSearchProvider = val)}
+        />
+      </div>
+      {#if pluginData.webSearchProvider}
+        <div class="tool-config-field">
+          <div class="tool-config-label">API Key</div>
+          <p class="tool-config-description">
+            {pluginData.webSearchProvider === "brave"
+              ? "Brave Search API key from api.search.brave.com."
+              : "Tavily API key from app.tavily.com."}
+          </p>
+          <SecretSelect
+            value={pluginData.webSearchApiKeyId}
+            onChange={(secretId) => (pluginData.webSearchApiKeyId = secretId)}
+          />
+        </div>
+      {/if}
+      <div class="tool-config-field">
+        <label class="tool-config-label" for="tool-config-web-search-max-results">Max Results</label>
+        <p class="tool-config-description">Number of search results to return (max 20).</p>
+        <Text
+          id="tool-config-web-search-max-results"
+          inputType="number"
+          value={maxResults}
+          placeholder="10"
+          onblur={(v) => (maxResults = Math.min(Math.max(Number.parseInt(String(v)) || 10, 1), 20))}
+        />
       </div>
     </div>
   {/if}
