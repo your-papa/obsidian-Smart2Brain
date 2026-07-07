@@ -428,6 +428,18 @@ const TOOLS: ToolInfo[] = [
 		defaultDescription:
 			"Create, update, or delete markdown notes in one staged batch. Related note operations can be proposed together for user approval.",
 	},
+	{
+		id: "fetch_url",
+		defaultName: "Fetch URL",
+		defaultDescription:
+			"Fetch a public web page or text resource over HTTP(S) and return its main content as cleaned markdown. Use only with URLs the user provided or clearly public references.",
+	},
+	{
+		id: "web_search",
+		defaultName: "Web Search",
+		defaultDescription:
+			"Search the web and return results (title, URL, snippet). Requires a search provider configured in General settings. Prefer vault search first.",
+	},
 ];
 
 function getToolDisplayName(toolId: BuiltInToolId): string {

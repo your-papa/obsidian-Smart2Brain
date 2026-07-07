@@ -1,0 +1,206 @@
+import { tool } from "@langchain/core/tools";
+import { z } from "zod";
+import { createObsidianFetch } from "../../lib/obsidianFetch";
+import { getData } from "../../stores/dataStore.svelte";
+import { Logger } from "../../utils/logging";
+
+const DEFAULT_MAX_RESULTS = 10;
+const FETCH_TIMEOUT_MS = 15_000;
+
+export interface WebSearchResult {
+	rank: number;
+	title: string;
+	url: string;
+	snippet: string;
+}
+
+interface WebSearchPayload {
+	query: string;
+	provider: string;
+	totalResults: number;
+	results: WebSearchResult[];
+	message?: string;
+}
+
+// ============================================================================
+// Brave Search
+// ============================================================================
+
+interface BraveWebResult {
+	title?: string;
+	url?: string;
+	description?: string;
+}
+
+interface BraveSearchResponse {
+	web?: { results?: BraveWebResult[] };
+}
+
+async function searchBrave(
+	query: string,
+	apiKey: string,
+	count: number,
+	fetchImpl: ReturnType<typeof createObsidianFetch>,
+): Promise<WebSearchResult[]> {
+	const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${count}&text_decorations=false&search_lang=en`;
+
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+	try {
+		const response = await fetchImpl(url, {
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				"Accept-Encoding": "gzip",
+				"X-Subscription-Token": apiKey,
+			},
+			signal: controller.signal,
+		});
+
+		if (!response.ok) {
+			if (response.status === 401) throw new Error("Invalid Brave Search API key");
+			if (response.status === 429) throw new Error("Brave Search rate limit exceeded — try again shortly");
+			throw new Error(`Brave Search returned HTTP ${response.status}`);
+		}
+
+		const data = (await response.json()) as BraveSearchResponse;
+		return (data.web?.results ?? []).map((r, i) => ({
+			rank: i + 1,
+			title: r.title ?? "",
+			url: r.url ?? "",
+			snippet: r.description ?? "",
+		}));
+	} finally {
+		clearTimeout(timeout);
+	}
+}
+
+// ============================================================================
+// Tavily Search
+// ============================================================================
+
+interface TavilySearchResponse {
+	results?: Array<{ title?: string; url?: string; content?: string; score?: number }>;
+}
+
+async function searchTavily(
+	query: string,
+	apiKey: string,
+	count: number,
+	fetchImpl: ReturnType<typeof createObsidianFetch>,
+): Promise<WebSearchResult[]> {
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+	try {
+		const response = await fetchImpl("https://api.tavily.com/search", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${apiKey}`,
+			},
+			body: JSON.stringify({
+				query,
+				max_results: count,
+				search_depth: "basic",
+				include_answer: false,
+				include_raw_content: false,
+			}),
+			signal: controller.signal,
+		});
+
+		if (!response.ok) {
+			if (response.status === 401) throw new Error("Invalid Tavily API key");
+			if (response.status === 429) throw new Error("Tavily rate limit exceeded — try again shortly");
+			throw new Error(`Tavily returned HTTP ${response.status}`);
+		}
+
+		const data = (await response.json()) as TavilySearchResponse;
+		return (data.results ?? []).map((r, i) => ({
+			rank: i + 1,
+			title: r.title ?? "",
+			url: r.url ?? "",
+			snippet: r.content ?? "",
+		}));
+	} finally {
+		clearTimeout(timeout);
+	}
+}
+
+// ============================================================================
+// Tool factory
+// ============================================================================
+
+interface WebSearchSettings {
+	maxResults?: number;
+}
+
+export function createWebSearchTool() {
+	const pluginData = getData();
+	const getToolConfig = () => pluginData.getSelectedAgent().toolsConfig.web_search;
+	const fetchImpl = createObsidianFetch(globalThis.fetch);
+
+	const webSearchFn = async ({ query }: { query: string }): Promise<string> => {
+		const trimmed = query?.trim();
+		if (!trimmed) return "Error: Search query is empty.";
+
+		const provider = pluginData.webSearchProvider;
+		if (!provider) {
+			return "Error: No web search provider configured. Go to Settings → General → Web Search and select a provider with a valid API key.";
+		}
+
+		const apiKey = pluginData.webSearchApiKey;
+		if (!apiKey) {
+			return `Error: No API key configured for web search provider "${provider}". Go to Settings → General → Web Search and add an API key.`;
+		}
+
+		const settings = getToolConfig()?.settings as WebSearchSettings | undefined;
+		const maxResults = Math.min(settings?.maxResults ?? DEFAULT_MAX_RESULTS, 20);
+
+		try {
+			Logger.log(`[web_search] Searching "${trimmed}" via ${provider}`);
+			let results: WebSearchResult[];
+
+			if (provider === "brave") {
+				results = await searchBrave(trimmed, apiKey, maxResults, fetchImpl);
+			} else if (provider === "tavily") {
+				results = await searchTavily(trimmed, apiKey, maxResults, fetchImpl);
+			} else {
+				return `Error: Unknown web search provider "${provider}".`;
+			}
+
+			const payload: WebSearchPayload = {
+				query: trimmed,
+				provider,
+				totalResults: results.length,
+				results,
+			};
+
+			if (results.length === 0) {
+				payload.message = `No results found for "${trimmed}". Try rephrasing the query.`;
+			}
+
+			return JSON.stringify(payload);
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") {
+				return `Error: Web search timed out after ${FETCH_TIMEOUT_MS}ms.`;
+			}
+			const message = error instanceof Error ? error.message : String(error);
+			Logger.error(`[web_search] Failed for "${trimmed}"`, error);
+			return `Error searching the web: ${message}`;
+		}
+	};
+
+	const toolConfig = getToolConfig();
+
+	return tool(webSearchFn, {
+		name: toolConfig?.name ?? "web_search",
+		description:
+			toolConfig?.description ??
+			"Search the web and return a list of relevant results (title, URL, snippet). Use this when the user asks about current events, external topics, or anything that cannot be in the vault. Always prefer searching the vault first with search_notes.",
+		schema: z.object({
+			query: z.string().describe("The search query. Be specific — use 3-8 words for best results."),
+		}),
+	});
+}

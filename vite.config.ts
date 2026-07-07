@@ -1,6 +1,8 @@
 // vite.config.ts
 import { svelte, vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vite";
+import { copyFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import builtinModules from "builtin-modules";
 
@@ -28,6 +30,13 @@ export default defineConfig(({ mode }) => {
 					handler(warning);
 				},
 			}),
+			{
+				name: "copy-manifest",
+				closeBundle() {
+					const outDir = setOutDir(mode);
+					copyFileSync(resolve("manifest.json"), resolve(outDir, "manifest.json"));
+				},
+			},
 		],
 		build: {
 			lib: {
