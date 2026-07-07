@@ -11,8 +11,8 @@ import type { HDBSCANResult } from "./clustering";
 import { project2D, reduceDimensions } from "./projection";
 import type { ProjectionMethod } from "../types/graph";
 import Graph from "graphology";
-import louvain from "graphology-communities-louvain";
 import betweennessCentrality from "graphology-metrics/centrality/betweenness";
+import { Graph as LeidenGraph, leiden } from "leiden-ts";
 
 export interface SerializedVectorBatch {
 	data: Float32Array;
@@ -53,12 +53,16 @@ export type ComputeWorkerRequest =
 	  }
 	| {
 			id: number;
-			type: "louvain";
+			type: "leiden";
 			sources: string[];
 			targets: string[];
 			weights: number[];
 			/** If true, also compute betweenness centrality on the same graph */
 			withCentrality?: boolean;
+			/** PRNG seed for reproducibility (default 42) */
+			seed?: number;
+			/** Resolution γ — lower = fewer larger communities (default 1.0) */
+			resolution?: number;
 	  };
 
 export type ComputeWorkerResponse =
@@ -73,7 +77,7 @@ export type ComputeWorkerResponse =
 	| { id: number; type: "reduceDimensions"; result: SerializedVectorBatch }
 	| {
 			id: number;
-			type: "louvain";
+			type: "leiden";
 			result: {
 				communities: Record<string, number>;
 				/** Normalized betweenness centrality per node (0–1). Only present when withCentrality was true. */
@@ -190,24 +194,53 @@ workerScope.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
 				workerScope.postMessage(response, [response.result.data.buffer as ArrayBuffer]);
 				break;
 			}
-			case "louvain": {
-				const graph = new Graph({ type: "undirected", multi: false });
+			case "leiden": {
+				// Build an integer-indexed graph for leiden-ts (string node ids → indices)
+				const nodeIndex = new Map<string, number>();
 				for (let i = 0; i < msg.sources.length; i++) {
-					if (msg.sources[i] !== msg.targets[i]) {
-						graph.mergeEdge(msg.sources[i], msg.targets[i], { weight: msg.weights[i] });
+					if (!nodeIndex.has(msg.sources[i])) nodeIndex.set(msg.sources[i], nodeIndex.size);
+					if (!nodeIndex.has(msg.targets[i])) nodeIndex.set(msg.targets[i], nodeIndex.size);
+				}
+				const nodeCount = nodeIndex.size;
+				const communities: Record<string, number> = {};
+
+				if (nodeCount > 0) {
+					// Deduplicate edges (leiden-ts rejects duplicate undirected edges)
+					const seen = new Set<string>();
+					const edges: [number, number, number][] = [];
+					for (let i = 0; i < msg.sources.length; i++) {
+						const u = nodeIndex.get(msg.sources[i])!;
+						const v = nodeIndex.get(msg.targets[i])!;
+						if (u === v) continue;
+						const key = u < v ? `${u}:${v}` : `${v}:${u}`;
+						if (!seen.has(key)) {
+							seen.add(key);
+							edges.push([u, v, msg.weights[i]]);
+						}
+					}
+					const lGraph = LeidenGraph.fromEdgeList(nodeCount, edges, { selfLoops: "collapse" });
+					const result = leiden(lGraph, { seed: msg.seed ?? 42, resolution: msg.resolution ?? 1.0 });
+					const assignments = result.partition.assignments;
+					for (const [path, idx] of nodeIndex) {
+						communities[path] = assignments[idx];
 					}
 				}
-				const communities: Record<string, number> = graph.order > 0 ? louvain(graph) : {};
 
+				// Betweenness centrality still uses graphology (leiden-ts doesn't include it)
 				let centrality: Record<string, number> | undefined;
-				if (msg.withCentrality && graph.order > 0) {
-					// betweennessCentrality returns raw counts; we use normalized=true for 0–1 range
-					centrality = betweennessCentrality(graph, { normalized: true, getEdgeWeight: "weight" });
+				if (msg.withCentrality && Object.keys(communities).length > 0) {
+					const gGraph = new Graph({ type: "undirected", multi: false });
+					for (let i = 0; i < msg.sources.length; i++) {
+						if (msg.sources[i] !== msg.targets[i]) {
+							gGraph.mergeEdge(msg.sources[i], msg.targets[i], { weight: msg.weights[i] });
+						}
+					}
+					centrality = betweennessCentrality(gGraph, { normalized: true, getEdgeWeight: "weight" });
 				}
 
 				workerScope.postMessage({
 					id: msg.id,
-					type: "louvain",
+					type: "leiden",
 					result: { communities, centrality },
 				} satisfies ComputeWorkerResponse);
 				break;

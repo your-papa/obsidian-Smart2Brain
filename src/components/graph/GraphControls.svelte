@@ -1,13 +1,10 @@
 <script lang="ts">
 import Button from "../ui/Button.svelte";
 import RangeSlider from "../ui/RangeSlider.svelte";
-import Dropdown from "../ui/Dropdown.svelte";
 import Toggle from "../ui/Toggle.svelte";
 import SettingContainer from "../settings/SettingContainer.svelte";
 import {
-	type ClusteringAlgorithm,
 	type SmartGraphSettings,
-	type SegmentBy,
 	type GraphData,
 	type SpaceSegment,
 	DEFAULT_SMART_GRAPH_SETTINGS,
@@ -17,38 +14,33 @@ interface Props {
 	settings: SmartGraphSettings;
 	isLoading?: boolean;
 	loadingLabel?: string;
-	segmentBy: SegmentBy;
 	onSettingsChange: (patch: Partial<SmartGraphSettings>) => void;
-	onSegmentByChange: (s: SegmentBy) => void;
-	onResetSettings?: () => void;
 	onFitToView: () => void;
 	onRefresh: () => void;
-	onApplyProjection?: () => void;
-	onLabelClusters?: () => void;
-	isLabeling?: boolean;
+	onRerunLeiden?: () => void;
 	lassoMode?: boolean;
 	onLassoModeChange?: (active: boolean) => void;
 	graphData?: GraphData;
 	nodeCount?: number;
-	// Segments
+	// Segments (community list)
 	segments?: SpaceSegment[];
 	focusedSegmentId?: string | null;
 	onFocusSegment?: (id: string | null) => void;
+	// Skeleton view
+	skeletonDetail?: number;
+	onSkeletonDetailChange?: (value: number) => void;
+	onSkeletonDetailCommit?: (value: number) => void;
+	onSkeletonToggle?: () => void;
 }
 
 let {
 	settings,
 	isLoading = false,
 	loadingLabel = "",
-	segmentBy,
 	onSettingsChange,
-	onSegmentByChange,
-	onResetSettings,
 	onFitToView,
 	onRefresh,
-	onApplyProjection,
-	onLabelClusters,
-	isLabeling = false,
+	onRerunLeiden,
 	lassoMode = false,
 	onLassoModeChange,
 	graphData = { nodes: [], edges: [] },
@@ -56,14 +48,18 @@ let {
 	segments = [],
 	focusedSegmentId = null,
 	onFocusSegment,
+	skeletonDetail = 100,
+	onSkeletonDetailChange,
+	onSkeletonDetailCommit,
+	onSkeletonToggle,
 }: Props = $props();
 
 let isCollapsed = $state(true);
+let isDevCollapsed = $state(true);
 
 let sectionOpen: Record<string, boolean> = $state({
-	colorBy: true,
-	layout: false,
-	overview: false,
+	devLayout: false,
+	devLeiden: false,
 });
 
 let graphStats = $derived.by(() => {
@@ -80,43 +76,6 @@ let graphStats = $derived.by(() => {
 
 	return { avgDegree, maxDegree, unlinkedNotes, wikiEdges, clusterCount: clusters.size };
 });
-
-const APPLY_KEYS = [
-	"autoK",
-	"defaultK",
-	"clusteringAlgorithm",
-	"minClusterSize",
-] as const satisfies readonly (keyof SmartGraphSettings)[];
-
-type ApplySnapshot = Pick<SmartGraphSettings, (typeof APPLY_KEYS)[number]>;
-
-function takeSnapshot(s: SmartGraphSettings): ApplySnapshot {
-	const snap = {} as ApplySnapshot;
-	for (const k of APPLY_KEYS) (snap as Record<string, unknown>)[k] = s[k];
-	return snap;
-}
-
-// svelte-ignore state_referenced_locally
-let appliedSnapshot: ApplySnapshot = $state(takeSnapshot(settings));
-
-let projectionDirty = $derived(APPLY_KEYS.some((k) => settings[k] !== appliedSnapshot[k]));
-
-const clusteringAlgorithmOptions = [
-	{ display: "K-Means", value: "kmeans" as ClusteringAlgorithm },
-	{ display: "HDBSCAN", value: "hdbscan" as ClusteringAlgorithm },
-];
-
-function handleKChange(val: number) {
-	onSettingsChange({ defaultK: val });
-}
-
-function handleClusteringAlgorithmChange(val: ClusteringAlgorithm) {
-	onSettingsChange({ clusteringAlgorithm: val });
-}
-
-function handleMinClusterSizeChange(val: number) {
-	onSettingsChange({ minClusterSize: val });
-}
 
 function handleLinkDistanceChange(val: number) {
 	onSettingsChange({ linkDistance: val });
@@ -137,74 +96,161 @@ function handleLinkStrengthChange(val: number) {
 function handleClusterCohesionStrengthChange(val: number) {
 	onSettingsChange({ clusterCohesionStrength: val / 100 });
 }
-
-function handleResetSettings() {
-	onResetSettings?.();
-	appliedSnapshot = takeSnapshot(DEFAULT_SMART_GRAPH_SETTINGS);
-}
-
-const colorByOptions = [
-	{ display: "None", value: "none" as SegmentBy },
-	{ display: "Similarity", value: "semantic" as SegmentBy },
-	{ display: "Link Communities", value: "louvain" as SegmentBy },
-	{ display: "Folder", value: "folder" as SegmentBy },
-	{ display: "Tag", value: "tag" as SegmentBy },
-	{ display: "File Type", value: "extension" as SegmentBy },
-];
 </script>
 
 <!-- Unified vertical toolbar -->
 <div class="graph-toolbar">
   <Button iconId="maximize" onClick={onFitToView} tooltip="Fit graph to view (F)" />
-  <Button iconId="refresh-cw" onClick={onRefresh} tooltip="Rebuild graph" />
   <Button
     iconId="lasso"
     tooltip={lassoMode ? "Exit lasso selection" : "Lasso selection (or hold Shift + drag)"}
     onClick={() => onLassoModeChange?.(!lassoMode)}
     styles={lassoMode ? "is-active" : ""}
   />
+  <Button
+    iconId="atom"
+    tooltip={skeletonDetail < 100 ? "Exit outline view (S)" : "Outline view: top topics and bridge notes only (S)"}
+    onClick={() => onSkeletonToggle?.()}
+    styles={skeletonDetail < 100 ? "is-active" : ""}
+  />
   <div class="toolbar-icon-wrapper">
     <Button
       iconId="sliders-horizontal"
       tooltip={isCollapsed ? "Show graph panel" : "Hide graph panel"}
-      onClick={() => {
-        isCollapsed = !isCollapsed;
-      }}
+      onClick={() => (isCollapsed = !isCollapsed)}
       styles={!isCollapsed ? "is-active" : ""}
     />
   </div>
+  {#if import.meta.env.DEV}
+    <div class="toolbar-icon-wrapper">
+      <Button iconId="refresh-cw" onClick={onRefresh} tooltip="Rebuild graph" />
+    </div>
+    <div class="toolbar-icon-wrapper">
+      <Button
+        iconId="wrench"
+        tooltip={isDevCollapsed ? "Show dev panel" : "Hide dev panel"}
+        onClick={() => (isDevCollapsed = !isDevCollapsed)}
+        styles={!isDevCollapsed ? "is-active" : ""}
+      />
+    </div>
+  {/if}
 </div>
 
-<!-- Unified settings panel -->
+<!-- Main settings panel -->
 <div class="graph-controls" class:collapsed={isCollapsed}>
   {#if !isCollapsed}
-    <div class="graph-controls-header">
-      <div>
-        <h4 class="graph-controls-title" data-testid="graph-controls-title">Graph Panel</h4>
-        <div class="graph-controls-subtitle">
-          {nodeCount} notes · Force-directed
+    <div class="graph-controls-body">
+      <!-- ── Stats row ──────────────────────────── -->
+      <div class="stats-row">
+        <span class="stats-text">
           {#if isLoading}
-            <span class="loading-label"> · {loadingLabel}</span>
+            <span class="loading-label">{loadingLabel}</span>
+          {:else if graphStats}
+            {nodeCount} notes · {graphStats.unlinkedNotes} isolated · {graphStats.avgDegree.toFixed(1)} avg links
+          {:else}
+            {nodeCount} notes
           {/if}
+        </span>
+      </div>
+
+      <!-- ── Topics ───────────────────────────── -->
+      {#if segments.length > 0}
+        <span class="section-label">Topics · {segments.length}</span>
+        <div class="segment-list">
+          {#each segments as seg (seg.id)}
+            <button
+              type="button"
+              class="segment-row"
+              class:segment-row--active={focusedSegmentId === seg.id}
+              onclick={() => onFocusSegment?.(focusedSegmentId === seg.id ? null : seg.id)}
+            >
+              <span class="segment-dot" style="background-color: {seg.color}"></span>
+              <span class="segment-label">{seg.label}</span>
+              <span class="segment-count">{seg.paths.size}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+
+      <!-- ── Detail slider ─────────────────────── -->
+      <SettingContainer name="Detail" compact>
+        <RangeSlider
+          value={skeletonDetail}
+          min={0}
+          max={100}
+          step={1}
+          showValue={true}
+          onchange={onSkeletonDetailChange}
+          oncommit={onSkeletonDetailCommit}
+        />
+      </SettingContainer>
+
+      <!-- ── Display ───────────────────────────── -->
+      <span class="section-label">Display</span>
+      <SettingContainer
+        name="Markdown only"
+        desc="Show only Markdown notes; off shows all indexable files"
+        compact
+      >
+        <Toggle
+          checked={settings.markdownOnly}
+          onchange={(value) => onSettingsChange({ markdownOnly: value })}
+        />
+      </SettingContainer>
+      <SettingContainer
+        name="Direction arrows"
+        desc="Show arrows for directed wiki links"
+        compact
+      >
+        <Toggle
+          checked={settings.directedWikiEdges}
+          onchange={(value) => onSettingsChange({ directedWikiEdges: value })}
+        />
+      </SettingContainer>
+      <SettingContainer
+        name="Highlight isolated"
+        desc="Mark notes with no wiki links in accent color"
+        compact
+      >
+        <Toggle
+          checked={settings.highlightIsolated}
+          onchange={(value) => onSettingsChange({ highlightIsolated: value })}
+        />
+      </SettingContainer>
+      <SettingContainer
+        name="Highlight bridges"
+        desc="Mark notes that connect multiple topics in accent color"
+        compact
+      >
+        <Toggle
+          checked={settings.highlightBridges}
+          onchange={(value) => onSettingsChange({ highlightBridges: value })}
+        />
+      </SettingContainer>
+    </div>
+  {/if}
+</div>
+
+<!-- Dev panel (dev build only) -->
+{#if import.meta.env.DEV}
+  <div class="graph-controls graph-controls--dev" class:collapsed={isDevCollapsed}>
+    {#if !isDevCollapsed}
+      <div class="graph-controls-header">
+        <div>
+          <h4 class="graph-controls-title">Dev · Layout</h4>
+          <div class="graph-controls-subtitle">Physics tuning</div>
         </div>
       </div>
-      <Button iconId="rotate-ccw" onClick={handleResetSettings} tooltip="Reset to defaults" />
-    </div>
-
-    <div class="graph-controls-body">
-      <!-- ═══════════════════════════════════════ -->
-      <!-- OVERVIEW SECTION                       -->
-      <!-- ═══════════════════════════════════════ -->
-      {#if graphStats}
+      <div class="graph-controls-body">
         <button
           type="button"
-          class="section-header section-header--first"
-          onclick={() => (sectionOpen.overview = !sectionOpen.overview)}
+          class="section-header"
+          onclick={() => (sectionOpen.devLayout = !sectionOpen.devLayout)}
         >
-          <span>Overview</span>
+          <span>Force simulation</span>
           <svg
             class="section-chevron"
-            class:open={sectionOpen.overview}
+            class:open={sectionOpen.devLayout}
             xmlns="http://www.w3.org/2000/svg"
             width="12"
             height="12"
@@ -216,163 +262,88 @@ const colorByOptions = [
             stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
           >
         </button>
-        {#if sectionOpen.overview}
-          <div class="overview-grid">
-            <div class="overview-item">
-              <span class="overview-label">Connections</span><span class="overview-value"
-                >{graphStats.avgDegree.toFixed(1)} avg</span
-              >
-            </div>
-            <div class="overview-item">
-              <span class="overview-label">Hubs</span><span class="overview-value"
-                >{graphStats.maxDegree} max</span
-              >
-            </div>
-            <div class="overview-item">
-              <span class="overview-label">Isolated</span><span class="overview-value"
-                >{graphStats.unlinkedNotes}</span
-              >
-            </div>
-            <div class="overview-item">
-              <span class="overview-label">Wiki links</span><span class="overview-value"
-                >{graphStats.wikiEdges}</span
-              >
-            </div>
-          </div>
-        {/if}
-      {/if}
-
-      <!-- ═══════════════════════════════════════ -->
-      <!-- COLOR BY SECTION                       -->
-      <!-- ═══════════════════════════════════════ -->
-      <button
-        type="button"
-        class="section-header{graphStats ? '' : ' section-header--first'}"
-        onclick={() => (sectionOpen.colorBy = !sectionOpen.colorBy)}
-      >
-        <span
-          >Color by{segmentBy !== "none"
-            ? ` · ${colorByOptions.find((o) => o.value === segmentBy)?.display ?? segmentBy}`
-            : ""}</span
-        >
-        <svg
-          class="section-chevron"
-          class:open={sectionOpen.colorBy}
-          xmlns="http://www.w3.org/2000/svg"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
-        >
-      </button>
-
-      {#if sectionOpen.colorBy}
-        <SettingContainer name="Color by" desc="How nodes are colored and grouped" compact>
-          <Dropdown
-            type="options"
-            dropdown={colorByOptions}
-            selected={segmentBy}
-            onchange={(v) => onSegmentByChange(v)}
-          />
-        </SettingContainer>
-
-        <!-- Segment list -->
-        {#if segments.length > 0 && segmentBy !== "none"}
-          <div class="segment-list">
-            {#each segments as seg (seg.id)}
-              <button
-                type="button"
-                class="segment-row"
-                class:segment-row--active={focusedSegmentId === seg.id}
-                onclick={() => onFocusSegment?.(focusedSegmentId === seg.id ? null : seg.id)}
-              >
-                <span class="segment-dot" style="background-color: {seg.color}"></span>
-                <span class="segment-label">{seg.label}</span>
-                <span class="segment-count">{seg.paths.size}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-
-        <!-- Similarity-specific: clustering controls -->
-        {#if segmentBy === "semantic"}
-          <SettingContainer name="Algorithm" desc="How nodes are grouped into clusters" compact>
-            <Dropdown
-              type="options"
-              dropdown={clusteringAlgorithmOptions}
-              selected={settings.clusteringAlgorithm}
-              onchange={handleClusteringAlgorithmChange}
+        {#if sectionOpen.devLayout}
+          <SettingContainer
+            name="Link distance"
+            desc="Target distance between connected nodes"
+            compact
+          >
+            <RangeSlider
+              value={settings.linkDistance}
+              min={30}
+              max={500}
+              step={5}
+              showValue={true}
+              oncommit={handleLinkDistanceChange}
             />
           </SettingContainer>
-
-          {#if settings.clusteringAlgorithm === "hdbscan"}
-            <SettingContainer name="Min cluster size" desc="Smallest allowed cluster" compact>
-              <RangeSlider
-                value={settings.minClusterSize}
-                min={2}
-                max={50}
-                step={1}
-                showValue={true}
-                oncommit={handleMinClusterSizeChange}
-              />
-            </SettingContainer>
-          {:else}
-            <SettingContainer
-              name="Clusters (K)"
-              desc={settings.autoK ? "Auto-determined" : "Number of clusters"}
-              compact
-            >
-              {#if !settings.autoK}
-                <RangeSlider
-                  value={settings.defaultK}
-                  min={2}
-                  max={30}
-                  step={1}
-                  showValue={true}
-                  oncommit={handleKChange}
-                />
-              {/if}
-            </SettingContainer>
-          {/if}
-
-          <div class="color-by-actions">
-            <Button
-              buttonText={isLabeling ? "Labeling…" : "Label clusters"}
-              onClick={onLabelClusters}
-              disabled={isLabeling || isLoading}
+          <SettingContainer name="Repulsion" desc="How strongly nodes push each other apart" compact>
+            <RangeSlider
+              value={Math.abs(settings.chargeStrength)}
+              min={10}
+              max={1500}
+              step={10}
+              showValue={true}
+              oncommit={handleChargeStrengthChange}
             />
-            {#if projectionDirty && onApplyProjection}
-              <Button
-                cta
-                buttonText="Apply"
-                onClick={() => {
-                  onApplyProjection?.();
-                  appliedSnapshot = takeSnapshot(settings);
-                }}
-                tooltip="Recompute clusters"
-                disabled={isLoading}
-              />
-            {/if}
-          </div>
+          </SettingContainer>
+          <SettingContainer
+            name="Center force"
+            desc="How strongly the graph is pulled toward the center"
+            compact
+          >
+            <RangeSlider
+              value={Math.round(settings.centerStrength * 100)}
+              min={0}
+              max={100}
+              step={1}
+              showValue={true}
+              oncommit={handleCenterStrengthChange}
+            />
+          </SettingContainer>
+          <SettingContainer
+            name="Link strength"
+            desc="How strongly edges pull connected nodes together"
+            compact
+          >
+            <RangeSlider
+              value={Math.round(settings.linkStrength * 100)}
+              min={0}
+              max={100}
+              step={1}
+              showValue={true}
+              oncommit={handleLinkStrengthChange}
+            />
+          </SettingContainer>
+          <SettingContainer
+            name="Cluster cohesion"
+            desc="How strongly nodes are pulled toward their cluster center"
+            compact
+          >
+            <RangeSlider
+              value={Math.round((settings.clusterCohesionStrength ?? 0.15) * 100)}
+              min={0}
+              max={100}
+              step={1}
+              showValue={true}
+              oncommit={handleClusterCohesionStrengthChange}
+            />
+          </SettingContainer>
         {/if}
-      {/if}
+      </div>
 
-      <!-- ═══════════════════════════════════════ -->
-      <!-- LAYOUT SECTION                         -->
-      <!-- ═══════════════════════════════════════ -->
+      <!-- ══════════════════════════════════════ -->
+      <!-- LEIDEN CLUSTERING                     -->
+      <!-- ══════════════════════════════════════ -->
       <button
         type="button"
         class="section-header"
-        onclick={() => (sectionOpen.layout = !sectionOpen.layout)}
+        onclick={() => (sectionOpen.devLeiden = !sectionOpen.devLeiden)}
       >
-        <span>Layout</span>
+        <span>Leiden clustering</span>
         <svg
           class="section-chevron"
-          class:open={sectionOpen.layout}
+          class:open={sectionOpen.devLeiden}
           xmlns="http://www.w3.org/2000/svg"
           width="12"
           height="12"
@@ -384,88 +355,62 @@ const colorByOptions = [
           stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
         >
       </button>
-
-      {#if sectionOpen.layout}
+      {#if sectionOpen.devLeiden}
+        <SettingContainer name="Seed" desc="PRNG seed — same seed + graph = same topics" compact>
+          <input
+            type="number"
+            class="dev-number-input"
+            value={settings.leidenSeed ?? 42}
+            min={0}
+            max={999999}
+            step={1}
+            onchange={(e) => {
+              const v = Number((e.target as HTMLInputElement).value);
+              if (Number.isFinite(v)) {
+                onSettingsChange({ leidenSeed: Math.round(v) });
+                onRerunLeiden?.();
+              }
+            }}
+          />
+        </SettingContainer>
         <SettingContainer
-          name="Link distance"
-          desc="Target distance between connected nodes"
+          name="Resolution γ"
+          desc="Lower → fewer larger topics · Higher → more smaller ones"
           compact
         >
           <RangeSlider
-            value={settings.linkDistance}
-            min={30}
-            max={500}
+            value={Math.round((settings.leidenResolution ?? 1.0) * 100)}
+            min={10}
+            max={300}
             step={5}
             showValue={true}
-            oncommit={handleLinkDistanceChange}
-          />
-        </SettingContainer>
-        <SettingContainer name="Repulsion" desc="How strongly nodes push each other apart" compact>
-          <RangeSlider
-            value={Math.abs(settings.chargeStrength)}
-            min={10}
-            max={1500}
-            step={10}
-            showValue={true}
-            oncommit={handleChargeStrengthChange}
+            oncommit={(v) => {
+              onSettingsChange({ leidenResolution: v / 100 });
+              onRerunLeiden?.();
+            }}
           />
         </SettingContainer>
         <SettingContainer
-          name="Center force"
-          desc="How strongly the graph is pulled toward the center"
+          name="Bridge threshold"
+          desc="Min fraction of foreign-topic neighbors to show the bridge ring"
           compact
         >
           <RangeSlider
-            value={Math.round(settings.centerStrength * 100)}
+            value={Math.round((settings.bridgeThreshold ?? 0.4) * 100)}
             min={0}
             max={100}
-            step={1}
+            step={5}
             showValue={true}
-            oncommit={handleCenterStrengthChange}
-          />
-        </SettingContainer>
-        <SettingContainer
-          name="Link strength"
-          desc="How strongly edges pull connected nodes together"
-          compact
-        >
-          <RangeSlider
-            value={Math.round(settings.linkStrength * 100)}
-            min={0}
-            max={100}
-            step={1}
-            showValue={true}
-            oncommit={handleLinkStrengthChange}
-          />
-        </SettingContainer>
-        <SettingContainer
-          name="Cluster cohesion"
-          desc="How strongly nodes are pulled toward their cluster center"
-          compact
-        >
-          <RangeSlider
-            value={Math.round((settings.clusterCohesionStrength ?? 0.15) * 100)}
-            min={0}
-            max={100}
-            step={1}
-            showValue={true}
-            oncommit={handleClusterCohesionStrengthChange}
-          />
-        </SettingContainer>
-        <SettingContainer
-          name="Direction arrows"
-          desc="Show arrows for directed wiki links"
-          compact
-        >
-          <Toggle
-            checked={settings.directedWikiEdges}
-            onchange={(value) => onSettingsChange({ directedWikiEdges: value })}
+            oncommit={(v) => {
+              onSettingsChange({ bridgeThreshold: v / 100 });
+              onRerunLeiden?.();
+            }}
           />
         </SettingContainer>
       {/if}
-    </div>
-  {/if}
-</div>
+    {/if}
+  </div>
+{/if}
 
 <style>
   .graph-toolbar {
@@ -483,15 +428,10 @@ const colorByOptions = [
     display: flex;
   }
 
-  :global(.clickable-icon.is-active) {
-    color: var(--interactive-accent);
-    background: var(--interactive-accent-hover);
-  }
-
   .graph-controls {
     position: absolute;
     top: 8px;
-    right: 44px;
+    right: 52px;
     width: 300px;
     max-height: calc(100% - 16px);
     overflow-y: auto;
@@ -502,40 +442,49 @@ const colorByOptions = [
     box-shadow: none;
   }
 
+  .graph-controls--dev {
+    top: 260px;
+    border-color: var(--color-orange);
+  }
+
   .graph-controls.collapsed {
     display: none;
-  }
-
-  .graph-controls-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--background-modifier-border);
-  }
-
-  .graph-controls-title {
-    margin: 0;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-normal);
-  }
-
-  .graph-controls-subtitle {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 1px;
-  }
-
-  .loading-label {
-    color: var(--text-faint);
   }
 
   .graph-controls-body {
     padding: 10px 12px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 4px;
+  }
+
+  .stats-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    margin-bottom: 4px;
+  }
+
+  .stats-text {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+
+  .loading-label {
+    color: var(--text-faint);
+  }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding-top: 8px;
+    padding-bottom: 2px;
   }
 
   .section-header {
@@ -554,11 +503,6 @@ const colorByOptions = [
     cursor: pointer;
   }
 
-  .section-header--first {
-    border-top: none;
-    margin-top: 0;
-  }
-
   .section-header:hover {
     color: var(--text-normal);
   }
@@ -571,34 +515,6 @@ const colorByOptions = [
 
   .section-chevron.open {
     transform: rotate(0deg);
-  }
-
-  .overview-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    padding: 4px 0;
-  }
-
-  .overview-item {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 6px 8px;
-    background: var(--background-primary);
-    border-radius: 6px;
-    border: 1px solid var(--background-modifier-border);
-  }
-
-  .overview-label {
-    font-size: 11px;
-    color: var(--text-muted);
-  }
-
-  .overview-value {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-normal);
   }
 
   /* Segment list */
@@ -653,5 +569,16 @@ const colorByOptions = [
     font-size: 0.7rem;
     color: var(--text-faint);
     flex-shrink: 0;
+  }
+
+  .dev-number-input {
+    width: 72px;
+    padding: 2px 6px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    text-align: right;
   }
 </style>

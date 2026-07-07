@@ -44,6 +44,7 @@ interface Props {
 	onSelectionChange?: (paths: string[]) => void;
 	onClearFocusedClusters?: () => void;
 	onHoverPreview?: (event: MouseEvent, path: string, targetEl: HTMLElement) => void;
+	onSkeletonToggle?: () => void;
 }
 
 let {
@@ -69,6 +70,7 @@ let {
 	onSelectionChange,
 	onClearFocusedClusters,
 	onHoverPreview,
+	onSkeletonToggle,
 }: Props = $props();
 
 let containerEl: HTMLButtonElement;
@@ -120,6 +122,11 @@ let pendingUserViewportZoom = false;
 let needsInitialFit = true;
 // Tick counter for periodic camera refits during force-mode settling
 let forceTickCount = 0;
+
+// Hide canvas during the initial chaos phase on fresh loads (no cached positions).
+// Starts hidden; revealed immediately when positions are known, or after 300ms on fresh loads.
+let canvasVisible = $state(false);
+let canvasRevealTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Simulation reference — $state so the hot-update $effect re-runs when simulation is (re)created
 let simulation: ReturnType<typeof forceSimulation<SimNode>> | null = $state(null);
@@ -221,6 +228,9 @@ function handleKeyDown(e: KeyboardEvent) {
 			} else {
 				fitToView();
 			}
+			break;
+		case "s":
+			onSkeletonToggle?.();
 			break;
 		case "=":
 		case "+": {
@@ -363,7 +373,7 @@ function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 /**
  * Get the draw radius for a node based on its degree, centrality, and the user-configurable nodeSize.
  *
- * When betweenness centrality is available (Louvain mode), it is blended with degree:
+ * When betweenness centrality is available (Leiden mode), it is blended with degree:
  * - degree gives a +log bonus for highly-connected hubs
  * - centrality gives a larger bonus for bridge nodes whose removal would fragment the graph
  * The two signals are additive so a hub that is also a bridge gets the largest radius.
@@ -1112,6 +1122,7 @@ function buildInternalData(data: GraphData): {
 	oldPositions: Map<string, { x: number; y: number }>;
 	isSmooth: boolean;
 	allPositionsKnown: boolean;
+	isFreshLayout: boolean;
 } {
 	// Save old positions for smooth transitions and persist them for future restores
 	const oldPositions = new Map<string, { x: number; y: number }>();
@@ -1136,12 +1147,17 @@ function buildInternalData(data: GraphData): {
 	}
 
 	// Create mutable copies.
-	// Priority: oldPositions (current frame) → persistentPositionCache (prior view) → scatter near centroid.
+	// Priority: oldPositions (current frame) → persistentPositionCache (prior view) → circle pre-layout.
 	let newNodeIndex = 0;
 	let allPositionsKnown = true;
+	const isFreshLayout = oldPositions.size === 0 && persistentPositionCache.size === 0;
 	simNodesVersion++;
 	hoverAlphasSettled = false;
 	const hasAnyKnown = oldPositions.size > 0 || persistentPositionCache.size > 0;
+	const unknownCount = data.nodes.filter((n) => !oldPositions.has(n.id) && !persistentPositionCache.has(n.id)).length;
+	// Spread radius for circle pre-layout: scale with node count so the graph fills
+	// a reasonable area before forces kick in (reduces initial chaos).
+	const circleRadius = Math.max(150, Math.sqrt(unknownCount) * linkDistance * 0.5);
 	simNodes = data.nodes.map((n) => {
 		const sn: SimNode = { ...n };
 		const old = oldPositions.get(n.id) ?? persistentPositionCache.get(n.id);
@@ -1152,12 +1168,18 @@ function buildInternalData(data: GraphData): {
 			allPositionsKnown = false;
 			if (hasAnyKnown) {
 				// Scatter new nodes in a ring around the centroid of the known layout
-				const angle = (2 * Math.PI * newNodeIndex) / Math.max(1, data.nodes.length - oldPositions.size);
+				const angle = (2 * Math.PI * newNodeIndex) / Math.max(1, unknownCount);
 				const radius = 80 + Math.random() * 60;
 				sn.x = centroidX + Math.cos(angle) * radius;
 				sn.y = centroidY + Math.sin(angle) * radius;
-				newNodeIndex++;
+			} else {
+				// Fresh load: evenly space all nodes on a circle so forces start from
+				// a structured layout rather than a random pile — much less initial chaos.
+				const angle = (2 * Math.PI * newNodeIndex) / Math.max(1, unknownCount);
+				sn.x = Math.cos(angle) * circleRadius;
+				sn.y = Math.sin(angle) * circleRadius;
 			}
+			newNodeIndex++;
 		}
 		return sn;
 	});
@@ -1212,7 +1234,7 @@ function buildInternalData(data: GraphData): {
 	// Start edge fade-in on full data change
 	edgeFadeAlpha = 0;
 
-	return { oldPositions, isSmooth: false, allPositionsKnown };
+	return { oldPositions, isSmooth: false, allPositionsKnown, isFreshLayout };
 }
 
 // ============================================================================
@@ -1224,6 +1246,7 @@ function setupForceSimulation(
 	oldPositions: Map<string, { x: number; y: number }>,
 	isSmooth: boolean,
 	allPositionsKnown: boolean,
+	isFreshLayout: boolean,
 ) {
 	// Save the default d3 link strength function so we can apply linkStrength as
 	// a multiplier, matching how Obsidian's native graph works.
@@ -1276,8 +1299,21 @@ function setupForceSimulation(
 			}
 			render();
 		})
-		.alphaDecay(0.02)
-		.velocityDecay(0.3);
+		.alphaDecay(isFreshLayout ? 0.04 : 0.02)
+		.velocityDecay(isFreshLayout ? 0.5 : 0.3);
+
+	// On a fresh layout, hide the canvas briefly so the first visible frame is
+	// already partially settled rather than the initial random-pile explosion.
+	if (isFreshLayout) {
+		canvasVisible = false;
+		if (canvasRevealTimer != null) clearTimeout(canvasRevealTimer);
+		canvasRevealTimer = setTimeout(() => {
+			canvasVisible = true;
+			canvasRevealTimer = null;
+		}, 300);
+	} else {
+		canvasVisible = true;
+	}
 
 	// Note Context can opt into an unconditional refit on graph changes, even
 	// when positions are restored from cache.
@@ -1339,6 +1375,8 @@ function setupGraph(data: GraphData) {
 			if (sn !== undefined) {
 				sn.color = node.color;
 				sn.cluster = node.cluster;
+				sn.highlighted = node.highlighted;
+				sn.centrality = node.centrality;
 			}
 		}
 		// Sync the cohesion force strength to the current prop value.
@@ -1369,8 +1407,8 @@ function setupGraph(data: GraphData) {
 		simulation = null;
 	}
 
-	const { oldPositions, isSmooth, allPositionsKnown } = buildInternalData(data);
-	setupForceSimulation(data, oldPositions, isSmooth, allPositionsKnown);
+	const { oldPositions, isSmooth, allPositionsKnown, isFreshLayout } = buildInternalData(data);
+	setupForceSimulation(data, oldPositions, isSmooth, allPositionsKnown, isFreshLayout);
 }
 
 // React to graphData changes — setupGraph is called via untrack so that writes
@@ -1518,6 +1556,7 @@ onMount(() => {
 	return () => {
 		(containerEl as any).__graphCleanup?.();
 		if (hoverAnimFrameId != null) cancelAnimationFrame(hoverAnimFrameId);
+		if (canvasRevealTimer != null) clearTimeout(canvasRevealTimer);
 		if (simulation) {
 			simulation.stop();
 			simulation = null;
@@ -1548,7 +1587,7 @@ function animateCameraToNodes(
  */
 export function fitToView() {
 	if (simNodes.length === 0) return;
-	animateCameraToNodes(undefined, GRAPH_FIT_PADDING, 300);
+	animateCameraToNodes(undefined, GRAPH_FIT_PADDING, 600);
 }
 
 /**
@@ -1571,6 +1610,7 @@ export function panToClusters(clusters: Set<number>) {
 <button
   type="button"
   class={["graph-canvas-container", className].filter(Boolean).join(" ")}
+  style="opacity: {canvasVisible ? 1 : 0}; transition: opacity 0.2s ease;"
   bind:this={containerEl}
   onpointerdown={handleMouseDown}
   onpointermove={handleMouseMove}

@@ -38,7 +38,7 @@ export type ColorMode = "groups" | "clusters" | "none";
 /**
  * How segments (visual partitions) are derived for node coloring.
  */
-export type SegmentBy = "semantic" | "louvain" | "folder" | "tag" | "extension" | "none";
+export type SegmentBy = "semantic" | "leiden" | "folder" | "tag" | "extension" | "none";
 
 /**
  * A resolved segment of graph nodes — a visual partition of the current scope.
@@ -137,7 +137,7 @@ export interface GraphNode {
 	/**
 	 * Normalized betweenness centrality (0–1).
 	 * High values indicate "bridge" nodes that connect otherwise distant parts of the graph.
-	 * Set when Louvain community detection is active.
+	 * Set when Leiden community detection is active.
 	 */
 	centrality?: number;
 }
@@ -198,6 +198,18 @@ export interface SmartGraphSettings {
 	colorGroups: ColorGroup[];
 	/** How nodes are colored/grouped: none | folder | tag | similarity clusters */
 	segmentBy: SegmentBy;
+	/** When true, only include markdown files in the graph; otherwise all indexable files */
+	markdownOnly: boolean;
+	/** Leiden PRNG seed — controls community assignment reproducibility */
+	leidenSeed: number;
+	/** Leiden resolution γ (default 1.0). Lower → fewer larger communities; higher → more smaller ones */
+	leidenResolution: number;
+	/** Bridge node threshold: fraction of foreign-community neighbors required to show the bridge ring (0–1) */
+	bridgeThreshold: number;
+	/** Highlight isolated notes (degree 0) in the graph */
+	highlightIsolated: boolean;
+	/** Highlight bridge notes (nodes spanning multiple communities) in the graph */
+	highlightBridges: boolean;
 }
 
 /**
@@ -219,6 +231,12 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	minClusterSize: 5,
 	colorGroups: [],
 	segmentBy: "none",
+	markdownOnly: false,
+	leidenSeed: 42,
+	leidenResolution: 1.0,
+	bridgeThreshold: 0.4,
+	highlightIsolated: false,
+	highlightBridges: false,
 };
 
 /**

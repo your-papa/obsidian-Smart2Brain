@@ -13,8 +13,8 @@ import type { ProjectionMethod } from "../types/graph";
 import type { ComputeWorkerRequest, ComputeWorkerResponse, SerializedVectorBatch } from "./computeWorker";
 import ComputeWorkerConstructor from "./computeWorker?worker&inline";
 import Graph from "graphology";
-import louvain from "graphology-communities-louvain";
 import betweennessCentrality from "graphology-metrics/centrality/betweenness";
+import { Graph as LeidenGraph, leiden } from "leiden-ts";
 
 let worker: Worker | null = null;
 let requestId = 0;
@@ -95,7 +95,7 @@ function getTransferList(request: ComputeWorkerRequest): Transferable[] {
 		case "project2D":
 		case "reduceDimensions":
 			return [request.vectors.data.buffer];
-		case "louvain":
+		case "leiden":
 			return [];
 	}
 }
@@ -157,19 +157,48 @@ function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse |
 				result: toTransferable(result),
 			}));
 		}
-		case "louvain": {
-			const graph = new Graph({ type: "undirected", multi: false });
+		case "leiden": {
+			// Build an integer-indexed graph for leiden-ts (string node ids → indices)
+			const nodeIndex = new Map<string, number>();
 			for (let i = 0; i < request.sources.length; i++) {
-				if (request.sources[i] !== request.targets[i]) {
-					graph.mergeEdge(request.sources[i], request.targets[i], { weight: request.weights[i] });
+				if (!nodeIndex.has(request.sources[i])) nodeIndex.set(request.sources[i], nodeIndex.size);
+				if (!nodeIndex.has(request.targets[i])) nodeIndex.set(request.targets[i], nodeIndex.size);
+			}
+			const nodeCount = nodeIndex.size;
+			const communities: Record<string, number> = {};
+
+			if (nodeCount > 0) {
+				const seen = new Set<string>();
+				const edges: [number, number, number][] = [];
+				for (let i = 0; i < request.sources.length; i++) {
+					const u = nodeIndex.get(request.sources[i])!;
+					const v = nodeIndex.get(request.targets[i])!;
+					if (u === v) continue;
+					const key = u < v ? `${u}:${v}` : `${v}:${u}`;
+					if (!seen.has(key)) {
+						seen.add(key);
+						edges.push([u, v, request.weights[i]]);
+					}
+				}
+				const lGraph = LeidenGraph.fromEdgeList(nodeCount, edges, { selfLoops: "collapse" });
+				const result = leiden(lGraph, { seed: request.seed ?? 42, resolution: request.resolution ?? 1.0 });
+				const assignments = result.partition.assignments;
+				for (const [path, idx] of nodeIndex) {
+					communities[path] = assignments[idx];
 				}
 			}
-			const communities: Record<string, number> = graph.order > 0 ? louvain(graph) : {};
+
 			let centrality: Record<string, number> | undefined;
-			if (request.withCentrality && graph.order > 0) {
-				centrality = betweennessCentrality(graph, { normalized: true, getEdgeWeight: "weight" });
+			if (request.withCentrality && Object.keys(communities).length > 0) {
+				const gGraph = new Graph({ type: "undirected", multi: false });
+				for (let i = 0; i < request.sources.length; i++) {
+					if (request.sources[i] !== request.targets[i]) {
+						gGraph.mergeEdge(request.sources[i], request.targets[i], { weight: request.weights[i] });
+					}
+				}
+				centrality = betweennessCentrality(gGraph, { normalized: true, getEdgeWeight: "weight" });
 			}
-			return { id: request.id, type: "louvain" as const, result: { communities, centrality } };
+			return { id: request.id, type: "leiden" as const, result: { communities, centrality } };
 		}
 	}
 }
@@ -275,20 +304,24 @@ export async function reduceDimensionsAsync(
 	return fromTransferable(resp.result);
 }
 
-export async function louvainAsync(
+export async function leidenAsync(
 	sources: string[],
 	targets: string[],
 	weights: number[],
 	withCentrality = false,
+	seed = 42,
+	resolution = 1.0,
 ): Promise<{ communities: Record<string, number>; centrality: Record<string, number> }> {
 	const id = ++requestId;
-	const resp = await postRequest<Extract<ComputeWorkerResponse, { type: "louvain" }>>({
+	const resp = await postRequest<Extract<ComputeWorkerResponse, { type: "leiden" }>>({
 		id,
-		type: "louvain",
+		type: "leiden",
 		sources,
 		targets,
 		weights,
 		withCentrality,
+		seed,
+		resolution,
 	});
 	return {
 		communities: resp.result.communities,
