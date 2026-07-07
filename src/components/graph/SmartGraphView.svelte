@@ -3,8 +3,7 @@ import { untrack, onDestroy, tick } from "svelte";
 import { getAllTags, Notice } from "obsidian";
 import { HumanMessage } from "@langchain/core/messages";
 import { getPlugin } from "../../stores/state.svelte";
-import { getData, setImmersedSpace, onImmersionChange } from "../../stores/dataStore.svelte";
-import { SpaceManagerModal } from "../modal/SpaceManagerModal";
+import { getData } from "../../stores/dataStore.svelte";
 import { getIndexableVaultFiles } from "../../utils/fileFiltering";
 import { getRegistry } from "../../providers/registry";
 import type { ChatModelConfig } from "../../providers/index";
@@ -16,13 +15,11 @@ import {
 	type GraphEdge,
 	type SegmentBy,
 	type SpaceSegment,
-	type Space,
 	type ViewFilter,
 	type SmartGraphSettings,
 	DEFAULT_SMART_GRAPH_SETTINGS,
 	THEME_COLOR_VARS,
 } from "../../types/graph";
-import { resolveViewFilter } from "../../lib/views";
 import {
 	buildWikiGraph,
 	filterDocuments,
@@ -43,7 +40,6 @@ import LoadingAnimation from "../ui/LoadingAnimation.svelte";
 import Button from "../ui/Button.svelte";
 import GraphCanvas from "./GraphCanvas.svelte";
 import GraphControls from "./GraphControls.svelte";
-import SpaceSwitcher from "../ui/SpaceSwitcher.svelte";
 
 const plugin = getPlugin();
 const data = getData();
@@ -100,49 +96,7 @@ let focusedSegmentId: string | null = $state(null);
 /** Per-segment color overrides set by the user. */
 let segmentColorOverrides: Record<string, string> = $state({});
 
-// Re-apply coloring whenever spaces change (no full rebuild needed).
-// segmentBy changes are handled directly in handleSegmentByChange for immediacy.
-$effect(() => {
-	void data.spaces;
-	untrack(() => {
-		if (graphData.nodes.length > 0 && (segmentBy !== "semantic" || clusterMap.size > 0)) {
-			resolveAndApplySegments(graphData);
-		}
-	});
-});
-
-// Immersion state
-const _restoredSpaceId = data.activeImmersedSpaceId ?? null;
-let immersedSpaceId: string | null = $state(_restoredSpaceId);
-// Restore the immersed-space store so search/agent pick it up immediately.
-if (_restoredSpaceId) {
-	const restoredSpace = data.spaces.find((s) => s.id === _restoredSpaceId);
-	setImmersedSpace(restoredSpace ?? null);
-}
 let pendingSpaceFilter: ViewFilter | null = $state(null);
-/** Frozen paths for a draft immersion (session-only, not persisted). */
-let draftImmersionPaths: Set<string> | null = $state(null);
-/** Resolved paths for the immersed space — constrains graph build. */
-let immersedSpacePaths: Set<string> | null = $derived.by(() => {
-	if (!immersedSpaceId) return null;
-	if (immersedSpaceId === "__draft__") return draftImmersionPaths;
-	const space = data.spaces.find((s) => s.id === immersedSpaceId);
-	if (!space) return null;
-	return resolveViewFilter(plugin.app, space.filter).paths;
-});
-
-// Sync graph-local immersion state when the shared SpaceSwitcher changes the store
-const disposeImmersionSync = onImmersionChange((space) => {
-	const newId = space?.id ?? null;
-	// Skip if the graph itself triggered the change (already up to date)
-	if (newId === immersedSpaceId) return;
-	// Don't override a draft immersion from the external store
-	if (immersedSpaceId === "__draft__" && newId !== null) return;
-	immersedSpaceId = newId;
-	draftImmersionPaths = null;
-	void buildGraph();
-});
-onDestroy(disposeImmersionSync);
 
 let effectiveClusterLabels: Record<number, string> = $derived({
 	...defaultClusterLabels,
@@ -234,7 +188,6 @@ function createAutoRebuildSignature(filter: GraphFilter): string {
 		tags: [...(filter.tags ?? [])].sort(),
 		extensions: [...(filter.extensions ?? [])].sort(),
 		showWikiLinks: settings.showWikiLinks,
-		immersedSpaceId,
 	});
 }
 
@@ -297,8 +250,7 @@ async function buildGraph() {
 
 	try {
 		const filter = getFilter();
-		const constrainTo = immersedSpacePaths ?? undefined;
-		const { graphData: wikiData } = buildWikiGraph(plugin.app, filter, constrainTo);
+		const { graphData: wikiData } = buildWikiGraph(plugin.app, filter);
 		graphData = wikiData;
 		isLoading = false;
 
@@ -368,12 +320,11 @@ async function computeAndApplyClusters(
 	const indexId = data.graphEmbedIndex;
 	const configuredIndexCount = indexId ? (data.getEmbeddingIndex(indexId)?.documentCount ?? null) : null;
 	const docKey = documentsKey(indexId, configuredIndexCount ?? 0);
-	const spaceConstraint = immersedSpacePaths;
-	const filterK = filteredKey(docKey, filter.folders, filter.tags, filter.extensions, spaceConstraint);
+	const filterK = filteredKey(docKey, filter.folders, filter.tags, filter.extensions);
 	let filteredResult = smartGraphCache.getFiltered(filterK);
 
 	if (!filteredResult) {
-		const filtered = filterDocuments(plugin.app, documents, filter, spaceConstraint);
+		const filtered = filterDocuments(plugin.app, documents, filter);
 		if (filtered.length === 0) return;
 		const vectors = filtered.map((doc) => doc.vector);
 		smartGraphCache.setFiltered(filterK, filtered, vectors);
@@ -430,7 +381,6 @@ $effect(() => {
 	selectedTags;
 	selectedExtensions;
 	settings.showWikiLinks;
-	immersedSpacePaths;
 
 	const timer = setTimeout(() => untrack(() => void buildGraph()), 300);
 	return () => clearTimeout(timer);
@@ -784,7 +734,7 @@ function handleSegmentByChange(by: SegmentBy) {
 	focusedSegmentId = null;
 	segmentColorOverrides = {};
 	// Clear AI-generated cluster labels — they belong to semantic clustering only.
-	// Keeping them would bleed stale labels into folder/tag/spaces modes.
+	// Keeping them would bleed stale labels into folder/tag modes.
 	if (by !== "semantic") {
 		clusterLabels = {};
 	}
@@ -855,38 +805,6 @@ function handleToggleSegmentSelection(segmentId: string) {
 	selectedSegmentIds = next;
 }
 
-// ─── Spaces handlers ─────────────────────────────────────
-
-function handleImmerseDraft(filter?: ViewFilter) {
-	const f = filter ?? pendingSpaceFilter;
-	if (!f) return;
-	draftImmersionPaths = resolveViewFilter(plugin.app, f).paths;
-	immersedSpaceId = "__draft__";
-	setImmersedSpace({
-		id: "__draft__",
-		label: "Draft selection",
-		filter: $state.snapshot(f) as ViewFilter,
-		color: "#888888",
-		createdAt: new Date().toISOString(),
-	});
-	// Draft immersion is session-only — don't persist to settings
-	void buildGraph();
-}
-
-function handleExitImmersion() {
-	const wasDraft = immersedSpaceId === "__draft__";
-	immersedSpaceId = null;
-	draftImmersionPaths = null;
-	setImmersedSpace(null);
-	if (!wasDraft) data.setActiveImmersedSpaceId(null);
-	void buildGraph();
-}
-
-function handleOpenSpaceManager(opts?: { initialFilter?: ViewFilter; space?: Space }) {
-	const snapped = opts?.space ? { ...opts, space: $state.snapshot(opts.space) as Space } : opts;
-	new SpaceManagerModal(plugin.app, snapped).open();
-}
-
 /**
  * Resolve segments from current graphData and apply coloring.
  * Called after graph build or when segmentBy changes.
@@ -900,7 +818,6 @@ function resolveAndApplySegments(gd: GraphData, overrideBy?: SegmentBy) {
 		clusterMap,
 		clusterLabels: effectiveClusterLabels,
 		themeColors,
-		spaces: data.spaces,
 		louvainCommunities,
 	});
 	// Apply persistent color overrides (from user picks or bookmark restore)
@@ -972,10 +889,6 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
 		sourcePath,
 	});
 }
-
-onDestroy(() => {
-	setImmersedSpace(null);
-});
 </script>
 
 <div class="smart-graph-view">
@@ -1002,9 +915,6 @@ onDestroy(() => {
       onRevealFile={handleRevealFile}
       onFocusCluster={handleFocusCluster}
       onToggleWikiLinks={() => handleSettingsChange({ showWikiLinks: !settings.showWikiLinks })}
-      onImmerseDraft={handleImmerseDraft}
-      onExitImmersion={handleExitImmersion}
-      immersedInDraft={immersedSpaceId === "__draft__"}
       {lassoMode}
       onSelectionChange={handleSelectionChange}
       onClearFocusedClusters={handleClearFocusedClusters}
@@ -1012,58 +922,23 @@ onDestroy(() => {
     />
   {/if}
 
-  <!-- Space switcher overlay -->
-  <div class="graph-space-switcher">
-    <SpaceSwitcher forceGlobal />
-  </div>
-
-  {#if selectedPaths.length > 0 || immersedSpaceId === "__draft__"}
+  {#if selectedPaths.length > 0}
     <div class="graph-selection-bar">
       <span class="selection-count">
-        {#if immersedSpaceId === "__draft__" && selectedPaths.length === 0}
-          Immersed in selection
-        {:else}
-          {selectedPaths.length} notes selected
-        {/if}
+        {selectedPaths.length} notes selected
       </span>
       <div class="selection-actions">
-        {#if selectedPaths.length > 0}
-          <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
-          <Button
-            buttonText="Open All"
-            onClick={handleOpenAllSelected}
-            tooltip="Open all selected notes in new tabs"
-          />
-          {#if immersedSpaceId !== "__draft__"}
-            <Button
-              buttonText="Immerse"
-              onClick={() => handleImmerseDraft()}
-              tooltip="Immerse in selection (I)"
-            />
-          {/if}
-          <Button
-            buttonText="New Space"
-            onClick={() =>
-              handleOpenSpaceManager({
-                initialFilter: { type: "paths", value: selectedPaths.slice() },
-              })}
-            tooltip="Save selection as a new space"
-          />
-        {/if}
-        {#if immersedSpaceId === "__draft__"}
-          <Button
-            buttonText="Exit immersion"
-            onClick={handleExitImmersion}
-            tooltip="Exit immersion (I or Esc)"
-          />
-        {/if}
-        {#if selectedPaths.length > 0}
-          <Button
-            buttonText="Clear"
-            onClick={handleClearSelection}
-            tooltip="Clear selection (Esc)"
-          />
-        {/if}
+        <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
+        <Button
+          buttonText="Open All"
+          onClick={handleOpenAllSelected}
+          tooltip="Open all selected notes in new tabs"
+        />
+        <Button
+          buttonText="Clear"
+          onClick={handleClearSelection}
+          tooltip="Clear selection (Esc)"
+        />
       </div>
     </div>
   {/if}
@@ -1085,7 +960,6 @@ onDestroy(() => {
     onLassoModeChange={handleLassoModeChange}
     {graphData}
     nodeCount={graphData.nodes.length}
-    {immersedSpaceId}
     {segments}
     {focusedSegmentId}
     onFocusSegment={handleFocusSegment}
@@ -1099,15 +973,6 @@ onDestroy(() => {
     position: relative;
     background: var(--background-primary);
     overflow: hidden;
-  }
-
-  .graph-space-switcher {
-    position: absolute;
-    top: 8px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 10;
-    pointer-events: auto;
   }
 
   .graph-loading {

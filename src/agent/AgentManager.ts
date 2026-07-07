@@ -44,14 +44,16 @@ import { BASE_SYSTEM_PROMPT } from "./prompts";
 import { LangSmithTelemetry, type Telemetry } from "./telemetry";
 import { createExecuteDataviewTool } from "./tools/executeDataview";
 import { createExecuteJavaScriptTool } from "./tools/executeJavaScript";
+import { createFetchUrlTool } from "./tools/fetchUrl";
 import { createGetAllTagsTool } from "./tools/getAllTags";
+import { createWebSearchTool } from "./tools/webSearch";
 import { createGetPropertiesTool } from "./tools/getProperties";
 import { createLoadSkillTool } from "./tools/loadSkill";
 import { createListDirectoryTool } from "./tools/listDirectory";
 import { createManageNotesTool } from "./tools/manageNotes";
 import { createReadContentTool } from "./tools/readContent";
 import { createSearchNotesTool } from "./tools/searchNotes";
-import { setCurrentThreadId, setCurrentSpaces } from "./tools/runContext";
+import { setCurrentThreadId } from "./tools/runContext";
 
 import { getRegistry } from "../providers/registry";
 
@@ -646,6 +648,8 @@ export class AgentManager {
 				() => createReadContentTool(this.plugin.app, imageProcessorInstance, pdfProcessorInstance),
 			],
 			["manage_notes", () => createManageNotesTool(this.plugin.app)],
+			["fetch_url", () => createFetchUrlTool()],
+			["web_search", () => createWebSearchTool()],
 		];
 
 		for (const [toolId, factory] of builtInTools) {
@@ -892,42 +896,6 @@ export class AgentManager {
 		}
 	}
 
-	/**
-	 * Resolve space labels (from the UI) or the persisted immersion state
-	 * into concrete Space objects for the current agent run.
-	 * Returns null when no space restriction is active.
-	 */
-	private resolveRunSpaces(spaceLabels?: string[]): import("../types/graph").Space[] | null {
-		const pluginData = getData();
-
-		// Prefer explicit labels passed from the chat UI
-		if (spaceLabels?.length) {
-			const resolved = spaceLabels
-				.map((label) => pluginData.getSpaceByLabel(label))
-				.filter((s): s is import("../types/graph").Space => s != null);
-			if (resolved.length > 0) return resolved;
-			// All labels failed to resolve (space renamed/deleted) — log and
-			// fall through to immersion-state so the agent is never silently
-			// unrestricted when the user intended a space boundary.
-			Logger.warn(
-				`[AgentManager] None of the requested space labels could be resolved: ${spaceLabels.join(", ")}. Falling back to immersion state.`,
-			);
-		}
-
-		// Fall back to persisted immersion state
-		if (pluginData.spaceImmersionMode === "per-surface" && pluginData.chatSpaceId) {
-			const space = pluginData.spaces.find((s) => s.id === pluginData.chatSpaceId);
-			if (space) return [space];
-		}
-
-		if (pluginData.activeImmersedSpaceId) {
-			const space = pluginData.spaces.find((s) => s.id === pluginData.activeImmersedSpaceId);
-			if (space) return [space];
-		}
-
-		return null;
-	}
-
 	private async prepareAgentForStream(): Promise<{
 		agent: Agent;
 		chatModel: ChatModel;
@@ -960,11 +928,9 @@ export class AgentManager {
 		selection?: SelectionRef,
 		graphNotes?: GraphNoteRef[],
 		lcSource?: string,
-		spaces?: string[],
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		const resolvedThreadId = this.normalizeThreadId(threadId);
 		setCurrentThreadId(resolvedThreadId);
-		setCurrentSpaces(this.resolveRunSpaces(spaces));
 		try {
 			const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
 
@@ -980,7 +946,6 @@ export class AgentManager {
 					selection,
 					graphNotes,
 					lcSource,
-					spaces,
 				}),
 				signal,
 				chatModel,
@@ -988,7 +953,6 @@ export class AgentManager {
 			);
 		} finally {
 			setCurrentThreadId(null);
-			setCurrentSpaces(null);
 		}
 	}
 
@@ -1005,7 +969,6 @@ export class AgentManager {
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		const resolvedThreadId = this.normalizeThreadId(threadId);
 		setCurrentThreadId(resolvedThreadId);
-		setCurrentSpaces(this.resolveRunSpaces());
 		try {
 			const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
 
@@ -1024,7 +987,6 @@ export class AgentManager {
 			);
 		} finally {
 			setCurrentThreadId(null);
-			setCurrentSpaces(null);
 		}
 	}
 
@@ -1039,7 +1001,6 @@ export class AgentManager {
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		const resolvedThreadId = this.normalizeThreadId(threadId);
 		setCurrentThreadId(resolvedThreadId);
-		setCurrentSpaces(this.resolveRunSpaces());
 		try {
 			const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
 
@@ -1056,7 +1017,6 @@ export class AgentManager {
 			);
 		} finally {
 			setCurrentThreadId(null);
-			setCurrentSpaces(null);
 		}
 	}
 

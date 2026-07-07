@@ -25,10 +25,8 @@ import {
 	type ColorGroup,
 	type SegmentBy,
 	type SpaceSegment,
-	type Space,
 } from "../../types/graph";
 import { edgeKey } from "../../utils/graphUtils";
-import { resolveViewFilter } from "../../lib/views";
 
 // ============================================================================
 // Cluster Assignment
@@ -602,7 +600,6 @@ export async function readNativeGraphSettings(app: App): Promise<Partial<SmartGr
  * - **tag**: one segment per unique tag across the displayed nodes
  * - **extension**: one segment per file extension
  * - **semantic**: uses a pre-computed `clusterMap` (K-Means / HDBSCAN)
- * - **spaces**: uses saved spaces — each space becomes one segment (first-match priority)
  * - **none**: returns an empty array (no segments)
  */
 export function resolveSegments(
@@ -613,13 +610,12 @@ export function resolveSegments(
 		clusterMap?: Map<string, ClusterAssignment>;
 		clusterLabels?: Record<number, string>;
 		themeColors?: string[];
-		spaces?: Space[];
 		louvainCommunities?: Record<string, number>;
 	},
 ): SpaceSegment[] {
 	if (source === "none") return [];
 
-	const { clusterMap, clusterLabels, themeColors = [], spaces = [], louvainCommunities } = options ?? {};
+	const { clusterMap, clusterLabels, themeColors = [], louvainCommunities } = options ?? {};
 
 	switch (source) {
 		case "folder":
@@ -632,8 +628,6 @@ export function resolveSegments(
 			return resolveSegmentsByCluster(graphData, clusterMap, clusterLabels, themeColors);
 		case "louvain":
 			return resolveSegmentsByLouvain(graphData, louvainCommunities ?? {}, themeColors);
-		case "spaces":
-			return resolveSegmentsBySpaces(app, graphData, spaces);
 		default:
 			return [];
 	}
@@ -766,7 +760,7 @@ function resolveSegmentsByLouvain(
 	for (const [nodeId, communityId] of Object.entries(communities)) {
 		if (!nodeById.has(nodeId)) continue;
 		if (!communityNodes.has(communityId)) communityNodes.set(communityId, []);
-		communityNodes.get(communityId)!.push(nodeId);
+		communityNodes.get(communityId)?.push(nodeId);
 	}
 
 	if (communityNodes.size === 0) return [];
@@ -788,8 +782,8 @@ function resolveSegmentsByLouvain(
 	return sorted.map(([, nodeIds], i) => {
 		// Pick representative: highest internal degree, fall back to total degree
 		let bestId = nodeIds[0];
-		let bestInternal = -Infinity;
-		let bestTotal = -Infinity;
+		let bestInternal = Number.NEGATIVE_INFINITY;
+		let bestTotal = Number.NEGATIVE_INFINITY;
 		for (const id of nodeIds) {
 			const internal = internalDegree.get(id) ?? 0;
 			const total = nodeById.get(id)?.degree ?? 0;
@@ -800,7 +794,7 @@ function resolveSegmentsByLouvain(
 			}
 		}
 		const label = nodeById.get(bestId)?.label ?? nodeById.get(bestId)?.path ?? `Community ${i + 1}`;
-		const paths = new Set(nodeIds.map((id) => nodeById.get(id)!.path));
+		const paths = new Set(nodeIds.map((id) => nodeById.get(id)?.path).filter((p): p is string => p != null));
 
 		return {
 			id: `louvain:${i}`,
@@ -810,47 +804,6 @@ function resolveSegmentsByLouvain(
 			paths,
 		};
 	});
-}
-
-/**
- * Resolve segments using saved Spaces as the coloring source.
- * Each Space becomes one segment; nodes are assigned to the first
- * matching Space (priority order). Spaces with no matching nodes are omitted.
- */
-function resolveSegmentsBySpaces(app: App, graphData: GraphData, spaces: Space[]): SpaceSegment[] {
-	if (spaces.length === 0) return [];
-
-	// Pre-resolve each space's filter to a path set (sync — query leaves return empty)
-	const spacePathSets: Array<{ space: Space; paths: Set<string> }> = spaces.map((space) => ({
-		space,
-		paths: resolveViewFilter(app, space.filter).paths,
-	}));
-
-	// Assign each node to the first matching space
-	const segmentPaths = new Map<string, Set<string>>();
-	for (const node of graphData.nodes) {
-		for (const { space, paths } of spacePathSets) {
-			if (paths.has(node.path)) {
-				let set = segmentPaths.get(space.id);
-				if (!set) {
-					set = new Set();
-					segmentPaths.set(space.id, set);
-				}
-				set.add(node.path);
-				break; // first-match wins
-			}
-		}
-	}
-
-	return spaces
-		.filter((space) => segmentPaths.has(space.id))
-		.map((space) => ({
-			id: `space:${space.id}`,
-			label: space.label,
-			color: space.color,
-			source: "spaces" as SegmentBy,
-			paths: segmentPaths.get(space.id)!,
-		}));
 }
 
 /**

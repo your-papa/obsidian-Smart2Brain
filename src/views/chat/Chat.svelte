@@ -2,23 +2,13 @@
 import { QueryClientProvider } from "@tanstack/svelte-query";
 import Input from "../../components/chat/Input.svelte";
 import MessageContainer from "../../components/chat/MessageContainer.svelte";
-import SpaceSwitcher from "../../components/ui/SpaceSwitcher.svelte";
 import { getMessenger } from "../../stores/chatStore.svelte";
-import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
 
 const plugin = getPlugin();
-const data = getData();
 
 const messenger = getMessenger();
-
-const activeSpaceColor = $derived.by(() => {
-	const useGlobal = data.spaceImmersionMode === "global";
-	const activeSpaceId = useGlobal ? data.activeImmersedSpaceId : data.chatSpaceId;
-	if (!activeSpaceId) return null;
-	return data.spaces.find((space) => space.id === activeSpaceId)?.color ?? null;
-});
 
 let messageContainer = $state<ReturnType<typeof MessageContainer> | undefined>();
 let input = $state<ReturnType<typeof Input> | undefined>();
@@ -54,7 +44,6 @@ async function handleRootDrop(event: DragEvent) {
 <QueryClientProvider client={plugin.queryClient}>
   <div
     class="chat-root relative h-full flex flex-col gap-0 overflow-hidden"
-    style={activeSpaceColor ? `--space-color: ${activeSpaceColor}` : undefined}
     data-testid="chat-root"
     role="region"
     ondragenter={handleRootDragEnter}
@@ -63,11 +52,6 @@ async function handleRootDrop(event: DragEvent) {
     ondrop={handleRootDrop}
   >
     {#if messenger}
-      <div class="chat-space-switcher-wrap">
-        <div class="chat-space-switcher-shell">
-          <SpaceSwitcher />
-        </div>
-      </div>
       <MessageContainer bind:this={messageContainer} {messenger} />
       <Input
         bind:this={input}
@@ -112,42 +96,6 @@ async function handleRootDrop(event: DragEvent) {
 </QueryClientProvider>
 
 <style>
-  .chat-space-switcher-wrap {
-    position: absolute;
-    top: 4px;
-    left: 50%;
-    z-index: 30;
-    display: flex;
-    justify-content: center;
-    transform: translateX(-50%);
-    pointer-events: auto;
-  }
-
-  .chat-space-switcher-shell {
-    display: inline-flex;
-    align-items: center;
-    border-radius: 16px;
-    border: 1px solid var(--background-modifier-border);
-    background: var(--background-primary);
-    box-shadow: var(--shadow-s);
-    pointer-events: auto;
-  }
-
-  .chat-space-switcher-shell:has(:global(.space-switcher-trigger:hover)) {
-    background: var(--background-modifier-hover);
-  }
-
-  .chat-space-switcher-wrap :global(.space-switcher-trigger) {
-    pointer-events: auto;
-    box-shadow: none;
-    border-color: transparent;
-    background: transparent;
-  }
-
-  .chat-space-switcher-wrap :global(.space-switcher-trigger:hover) {
-    background: transparent;
-  }
-
   :global(.chat-root .scroll-container) {
     padding-top: 44px;
   }
@@ -222,14 +170,9 @@ async function handleRootDrop(event: DragEvent) {
   }
 
   :global(.chat-root:has(.chat-input-wrapper:focus-within) .logo-container svg) {
-    fill: var(--space-color, hsl(var(--accent-h), var(--accent-s), var(--accent-l)));
-    stroke: var(--space-color, hsl(var(--accent-h), var(--accent-s), var(--accent-l)));
-    filter: drop-shadow(
-        0 0 8px color-mix(in srgb, var(--space-color, var(--interactive-accent)) 30%, transparent)
-      )
-      drop-shadow(
-        0 4px 10px
-          color-mix(in srgb, var(--space-color, var(--interactive-accent)) 18%, transparent)
-      );
+    fill: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
+    stroke: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
+    filter: drop-shadow(0 0 8px color-mix(in srgb, var(--interactive-accent) 30%, transparent))
+      drop-shadow(0 4px 10px color-mix(in srgb, var(--interactive-accent) 18%, transparent));
   }
 </style>

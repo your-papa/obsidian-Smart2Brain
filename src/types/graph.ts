@@ -38,7 +38,7 @@ export type ColorMode = "groups" | "clusters" | "none";
 /**
  * How segments (visual partitions) are derived for node coloring.
  */
-export type SegmentBy = "semantic" | "louvain" | "folder" | "tag" | "extension" | "spaces" | "none";
+export type SegmentBy = "semantic" | "louvain" | "folder" | "tag" | "extension" | "none";
 
 /**
  * A resolved segment of graph nodes — a visual partition of the current scope.
@@ -86,29 +86,9 @@ export interface ViewFilterGroup {
 
 /**
  * A recursive filter tree node — either a leaf criterion or a composite group.
- * Used to define dynamic, re-resolvable note sets for saved Spaces.
+ * Used to define dynamic, re-resolvable note sets for saved views.
  */
 export type ViewFilter = ViewFilterLeaf | ViewFilterGroup;
-
-/**
- * A **Space** — a named note set defined by a `ViewFilter` tree.
- *
- * Spaces are cross-cutting: they can be loaded in the graph (immerse),
- * referenced in the search modal via `@spaceName` chips, and used by the
- * agent's `search_notes(space=…)` parameter.
- */
-export interface Space {
-	/** Unique identifier */
-	id: string;
-	/** User-visible label (also used as `@spaceName` in search) */
-	label: string;
-	/** The filter tree defining which notes belong to this Space */
-	filter: ViewFilter;
-	/** Display color for this Space in the graph legend and search chips */
-	color: string;
-	/** Timestamp of creation (ISO string) */
-	createdAt: string;
-}
 
 /**
  * A user-defined color group that assigns a color to nodes matching a query.
@@ -216,7 +196,7 @@ export interface SmartGraphSettings {
 	minClusterSize: number;
 	/** User-defined color groups for the wiki graph mode */
 	colorGroups: ColorGroup[];
-	/** How nodes are colored/grouped: none | folder | tag | spaces | similarity clusters */
+	/** How nodes are colored/grouped: none | folder | tag | similarity clusters */
 	segmentBy: SegmentBy;
 }
 

@@ -90,31 +90,10 @@ let assembledPromptRequestVersion = 0;
 
 let selectionChipRef: { clearSelection: () => void } | undefined = $state(undefined);
 
-const selectedSpace = $derived.by(() => {
-	const d = getData();
-	if (d.spaceImmersionMode === "global") {
-		const id = d.activeImmersedSpaceId;
-		if (!id) return null;
-		return d.spaces.find((s) => s.id === id)?.label ?? null;
-	}
-	const id = d.chatSpaceId;
-	if (!id) return null;
-	return d.spaces.find((s) => s.id === id)?.label ?? null;
-});
-
-const selectedSpaceColor = $derived.by(() => {
-	if (!selectedSpace) return null;
-	return getData().getSpaceByLabel(selectedSpace)?.color ?? null;
-});
-
 const sendButtonStyle = $derived.by(() => {
-	const baseColor = selectedSpaceColor ?? "var(--text-accent)";
-	const hoverColor = selectedSpaceColor
-		? `color-mix(in srgb, ${selectedSpaceColor} 86%, black 14%)`
-		: "color-mix(in srgb, var(--text-accent) 84%, black 16%)";
-	const disabledColor = selectedSpaceColor
-		? `color-mix(in srgb, ${selectedSpaceColor} 68%, var(--background-primary) 32%)`
-		: "color-mix(in srgb, var(--text-accent) 68%, var(--background-primary) 32%)";
+	const baseColor = "var(--text-accent)";
+	const hoverColor = "color-mix(in srgb, var(--text-accent) 84%, black 16%)";
+	const disabledColor = "color-mix(in srgb, var(--text-accent) 68%, var(--background-primary) 32%)";
 
 	return [
 		"--s2b-button-icon-size: var(--icon-xs)",
@@ -427,7 +406,6 @@ function sendMessage() {
 		activeVisibleNotes.length > 0 ? [...activeVisibleNotes] : undefined,
 		activeSelection ? { ...activeSelection } : undefined,
 		activeGraphNotes.length > 0 ? [...activeGraphNotes] : undefined,
-		selectedSpace ? [selectedSpace] : undefined,
 	);
 	attachments = [];
 	attachmentSizes = new Map();
@@ -1008,8 +986,7 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
       ? 'flex-1 min-h-0'
       : ''} {showDragActive
       ? 'border-[--interactive-accent] chat-input-wrapper-drag-active'
-      : ''} {selectedSpaceColor ? 'chat-input-wrapper-space-active' : ''}"
-    style={selectedSpaceColor ? `--space-color: ${selectedSpaceColor}` : undefined}
+      : ''}"
     ondragenter={dropTargetMode === "input" ? handleDragEnter : undefined}
     ondragover={dropTargetMode === "input" ? handleDragOver : undefined}
     ondragleave={dropTargetMode === "input" ? handleDragLeave : undefined}
@@ -1229,24 +1206,6 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
     box-shadow:
       0 0 0 2px color-mix(in srgb, var(--interactive-accent) 38%, transparent),
       0 8px 24px color-mix(in srgb, var(--interactive-accent) 24%, transparent);
-  }
-
-  /* Space color glow overrides — only when focused */
-  .chat-input-wrapper-space-active:focus-within {
-    border-color: color-mix(in srgb, var(--space-color) 70%, var(--background-modifier-border));
-    box-shadow:
-      0 6px 20px rgba(0, 0, 0, 0.24),
-      0 0 14px 0 color-mix(in srgb, var(--space-color) 40%, transparent);
-  }
-
-  .chat-input-wrapper-space-active:focus-within::before {
-    background: radial-gradient(
-      circle at 50% 35%,
-      color-mix(in srgb, var(--space-color) 50%, transparent),
-      transparent 60%
-    );
-    opacity: 0.28;
-    filter: blur(9px);
   }
 
   .chat-input-wrapper-drag-active > :not(:last-child) {

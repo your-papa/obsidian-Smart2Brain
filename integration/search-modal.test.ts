@@ -170,17 +170,6 @@ describe("search modal", () => {
 	}, 30_000);
 
 	beforeEach(async () => {
-		obsidianEval(`(() => {
-			const plugin = ${PLUGIN};
-			if (!plugin) return "missing-plugin";
-			plugin.pluginData.deleteSpace("focus-test-space");
-			plugin.pluginData.setActiveImmersedSpaceId(null);
-			plugin.pluginData.spaceImmersionMode = "global";
-			return JSON.stringify({
-				activeId: plugin.pluginData.activeImmersedSpaceId,
-				spaces: plugin.pluginData.spaces.map((space) => space.id),
-			});
-		})()`);
 		closeAllModals();
 		executeCommand("smart-second-brain:search-notes");
 		await waitForSelector(ACTIVE_SEARCH_MODAL);
@@ -192,14 +181,6 @@ describe("search modal", () => {
 
 	afterAll(() => {
 		closeAllModals();
-		obsidianEval(`(() => {
-			const plugin = ${PLUGIN};
-			if (!plugin) return "missing-plugin";
-			plugin.pluginData.deleteSpace("focus-test-space");
-			plugin.pluginData.setActiveImmersedSpaceId(null);
-			plugin.pluginData.spaceImmersionMode = "global";
-			return "reset";
-		})()`);
 		deleteNote(aliasNoteName);
 		deleteNote(tagNoteName);
 		deleteNote(inlineTagOnlyNoteName);
@@ -774,124 +755,6 @@ describe("search modal", () => {
 				return 'restored';
 			})()`),
 		).toContain("restored");
-	}, 30_000);
-
-	it("should inject the active immersed space chip when opening search", async () => {
-		const focusTestSpaceId = "focus-test-space";
-		const focusTestSpaceLabel = "Focus Test Space";
-		const scopedRecentNotePath = "Machine Learning Basics.md";
-		const focusTestActiveFileKey = "__s2bFocusTestActiveFile";
-		const focusTestSpaceJson = JSON.stringify({
-			id: focusTestSpaceId,
-			label: focusTestSpaceLabel,
-			filter: { type: "paths", value: [scopedRecentNotePath] },
-			color: "#4c8bf5",
-			createdAt: new Date().toISOString(),
-		});
-
-		obsidianEval(`(() => {
-			const containers = Array.from(document.querySelectorAll('.modal-container'));
-			const activeContainer = containers[containers.length - 1];
-			const closeButton = activeContainer?.querySelector('.modal-close-button');
-			if (closeButton instanceof HTMLElement) {
-				closeButton.click();
-			}
-			return document.querySelector(${JSON.stringify(ACTIVE_SEARCH_MODAL)}) ? 'still-open' : 'closed';
-		})()`);
-
-		obsidianEval(`(() => { const plugin = ${PLUGIN}; if (!plugin) return "missing-plugin"; plugin.pluginData.spaceImmersionMode = "global"; if (!plugin.pluginData.spaces.some((space) => space.id === "${focusTestSpaceId}")) plugin.pluginData.addSpace(${focusTestSpaceJson}); return plugin.pluginData.spaces.some((space) => space.id === "${focusTestSpaceId}") ? "ready" : "missing-space"; })()`);
-
-		executeCommand('smart-second-brain:open-smart-graph');
-		await waitForSelector('.space-switcher-trigger');
-
-		obsidianEval(`(() => {
-			const trigger = document.querySelector(".space-switcher-trigger");
-			if (trigger instanceof HTMLElement) {
-				trigger.click();
-			}
-			return "ok";
-		})()`);
-
-		await waitForCondition(
-			() =>
-				obsidianEval(`Array.from(document.querySelectorAll("button")).some((el) => {
-					if (!(el instanceof HTMLElement)) return false;
-					return (el.textContent || "").trim() === "${focusTestSpaceLabel}";
-				})`).includes('true'),
-			"immersed space option to appear",
-			{ timeoutMs: 10_000, intervalMs: 250 },
-		);
-
-		obsidianEval(`(() => {
-			const button = Array.from(document.querySelectorAll("button")).find((el) => {
-				if (!(el instanceof HTMLElement)) return false;
-				return (el.textContent || "").trim() === "${focusTestSpaceLabel}";
-			});
-			if (!(button instanceof HTMLElement)) return "missing-space-option";
-			button.click();
-			return "clicked-space";
-		})()`);
-
-		await waitForCondition(
-			() =>
-				obsidianEval(`(() => {
-					const label = document.querySelector(".space-switcher-label");
-					return label instanceof HTMLElement ? label.textContent?.includes("${focusTestSpaceLabel}") ?? false : false;
-				})()`).includes('true'),
-			"space switcher to reflect the active immersed space",
-			{ timeoutMs: 10_000, intervalMs: 250 },
-		);
-
-		obsidianEval(`(() => { const plugin = ${PLUGIN}; plugin?.pluginData.recordRecentlyOpenedNote("${scopedRecentNotePath}"); return "recorded-path"; })()`);
-
-		obsidianEval(`(() => { const plugin = ${PLUGIN}; plugin?.pluginData.recordRecentlyOpenedNote("${aliasNoteName}"); return "recorded-alias"; })()`);
-
-		obsidianEval(`(() => { const plugin = ${PLUGIN}; plugin?.pluginData.recordRecentlyOpenedNote("Welcome.md"); return "recorded-welcome"; })()`);
-
-		const activeFilePath = await pollEval(
-			`(async () => {
-				const file = app.vault.getAbstractFileByPath("Welcome.md");
-				if (!file) {
-					window.${focusTestActiveFileKey} = "missing-file";
-					return;
-				}
-				const leaf = app.workspace.getLeaf(false);
-				await leaf.openFile(file);
-				window.${focusTestActiveFileKey} = app.workspace.getActiveFile()?.path ?? "";
-			})()`,
-			focusTestActiveFileKey,
-			{ timeoutMs: 15_000, intervalMs: 250 },
-		);
-
-		expect(activeFilePath).toContain('Welcome.md');
-
-		executeCommand('smart-second-brain:search-notes');
-		await waitForSelector(ACTIVE_SEARCH_MODAL);
-
-		await waitForCondition(
-			() =>
-				obsidianEval(`(() => Array.from(document.querySelectorAll(".s2b-inline-chip-label")).some((el) => {
-					return el instanceof HTMLElement && (el.textContent || "").trim() === "${focusTestSpaceLabel}";
-				}) )()`).includes('true'),
-			"active space chip to appear in the search modal",
-			{ timeoutMs: 10_000, intervalMs: 250 },
-		);
-
-		expect(domCount(activeSearchSelector('.prompt-input'))).toBeGreaterThan(0);
-
-		expect(getErrors()).toBe('');
-
-		closeAllModals();
-
-		expect(
-			obsidianEval(`(() => {
-				const plugin = ${PLUGIN};
-				plugin?.pluginData.deleteSpace("${focusTestSpaceId}");
-				return plugin?.pluginData.spaces.some((space) => space.id === "${focusTestSpaceId}")
-					? "still-present"
-					: "deleted";
-			})()`),
-		).toContain('deleted');
 	}, 30_000);
 
 	it("should close without errors when dismissed", async () => {

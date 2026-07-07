@@ -13,11 +13,8 @@
  */
 
 import { type App, type TFile, getAllTags } from "obsidian";
-import type { SpaceSegment, Space, ViewFilter, ViewFilterGroup, ViewFilterLeaf } from "../types/graph";
-import type { SearchFilter } from "../vectorstore/types";
+import type { SpaceSegment, ViewFilter, ViewFilterGroup, ViewFilterLeaf } from "../types/graph";
 import { matchesPathPrefix } from "../utils/pathUtils";
-
-type SpaceLike = Pick<Space, "filter">;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -277,45 +274,6 @@ export function describeViewFilter(filter: ViewFilter): string {
 }
 
 /**
- * Resolve a Space to a concrete set of paths.
- *
- * Convenience wrapper around `resolveViewFilter` for cross-cutting use
- * (search modal, agent) that only needs the paths.
- */
-export function resolveSpacePaths(app: App, space: SpaceLike, universe?: Set<string>): Set<string> {
-	return resolveViewFilter(app, space.filter, universe).paths;
-}
-
-/**
- * Bridge a Space to a `SearchFilter` suitable for the vector
- * store / search modal / agent.
- *
- * If the Space's filter consists solely of simple folder / tag leaves, this
- * produces a native `SearchFilter` with `pathPrefixes` / `tags` — which lets
- * the vector store pre-filter efficiently.  For complex or mixed filters it
- * falls back to resolving the filter to paths and using `pathPrefixes`.
- */
-export function resolveSpaceToSearchFilter(app: App, space: SpaceLike, universe?: Set<string>): SearchFilter {
-	const filter = space.filter;
-
-	// Optimised path: single simple leaf
-	if (isLeaf(filter)) {
-		const native = leafToSearchFilter(filter);
-		if (native) return native;
-	}
-
-	// Optimised path: flat ANY of simple leaves
-	if (!isLeaf(filter) && filter.type === "any" && filter.conditions.every(isLeaf)) {
-		return mergeLeafFilters(filter.conditions as ViewFilterLeaf[]);
-	}
-
-	// Fallback: resolve to paths and wrap as pathPrefixes
-	const paths = resolveSpacePaths(app, space, universe);
-	return { pathPrefixes: [...paths] };
-}
-
-/**
-
  * Build a `ViewFilter` from a set of selected `SpaceSegment`s.
  *
  * - If every segment maps cleanly to a dynamic leaf (folder/tag/extension),
@@ -530,7 +488,7 @@ function segmentToLeaf(segment: SpaceSegment): ViewFilterLeaf | null {
 		case "extension":
 			return { type: "extension", value: segment.label.startsWith(".") ? segment.label.slice(1) : segment.label };
 		default:
-			// semantic clusters, "none", "spaces", etc. → freeze paths
+			// semantic clusters, "none", etc. → freeze paths
 			return null;
 	}
 }
@@ -728,52 +686,4 @@ async function rewriteQueryLeaves(
 	// Composite node: recurse into conditions
 	const rewrittenConditions = await Promise.all(filter.conditions.map((c) => rewriteQueryLeaves(c, searchFn)));
 	return { ...filter, conditions: rewrittenConditions };
-}
-
-// ── Space → SearchFilter helpers ─────────────────────────────────────────
-
-/**
- * Try to convert a single leaf to a native `SearchFilter`.
- * Returns `null` for leaf types that don't map cleanly.
- */
-function leafToSearchFilter(leaf: ViewFilterLeaf): SearchFilter | null {
-	switch (leaf.type) {
-		case "folder":
-			return { pathPrefixes: [leaf.value] };
-		case "tag":
-			return { tags: [leaf.value.startsWith("#") ? leaf.value : `#${leaf.value}`] };
-		case "extension":
-		case "paths":
-		case "query":
-			return null;
-	}
-}
-
-/**
- * Merge multiple simple leaves into one `SearchFilter`.
- * Collects all folder and tag leaves; falls back to `null` if any
- * unsupported leaf type is present.
- */
-function mergeLeafFilters(leaves: ViewFilterLeaf[]): SearchFilter {
-	const pathPrefixes: string[] = [];
-	const tags: string[] = [];
-
-	for (const leaf of leaves) {
-		switch (leaf.type) {
-			case "folder":
-				pathPrefixes.push(leaf.value);
-				break;
-			case "tag":
-				tags.push(leaf.value.startsWith("#") ? leaf.value : `#${leaf.value}`);
-				break;
-			default:
-				// extension / paths / query can't be natively represented → skip
-				break;
-		}
-	}
-
-	const result: SearchFilter = {};
-	if (pathPrefixes.length > 0) result.pathPrefixes = pathPrefixes;
-	if (tags.length > 0) result.tags = tags;
-	return result;
 }

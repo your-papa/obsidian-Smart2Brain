@@ -30,7 +30,7 @@ import type {
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "../vectorstore/batchSize";
 import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 
-import { type SmartGraphSettings, type Space, DEFAULT_SMART_GRAPH_SETTINGS } from "../types/graph";
+import { type SmartGraphSettings, DEFAULT_SMART_GRAPH_SETTINGS } from "../types/graph";
 
 // Provider system types
 import {
@@ -43,6 +43,7 @@ import {
 } from "../providers/index";
 
 const LANGSMITH_API_KEY_SECRET_ID = buildManagedSecretId("langsmith", "apiKey");
+const WEB_SEARCH_API_KEY_SECRET_ID = buildManagedSecretId("web-search", "apiKey");
 
 // ============================================================================
 // Error Classes
@@ -214,8 +215,7 @@ export function getReadContentGuidance(hasImageProcessor: boolean, hasPdfProcess
 
 // --- read_content tool description variants ---
 
-const READ_CONTENT_DESC_SHARED =
-	"Read content of vault files by path or wiki link. When an active Space is set, only files within that Space can be read.";
+const READ_CONTENT_DESC_SHARED = "Read content of vault files by path or wiki link.";
 
 /** No processors: images can't be read */
 export const READ_CONTENT_DESC_NONE = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs, and Excalidraw. Images must be attached directly in chat.`;
@@ -256,7 +256,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "search_notes",
 		description:
-			"Search through your Obsidian notes by keyword. Returns structured JSON with matching note names plus optional paths, tags, match badges, and short match snippets depending on settings. Use this to identify relevant notes before reading them. When an active Space is set, results are automatically scoped to that Space.",
+			"Search through your Obsidian notes by keyword. Returns structured JSON with matching note names plus optional paths, tags, match badges, and short match snippets depending on settings. Use this to identify relevant notes before reading them.",
 		settings: {
 			maxResults: 10,
 			algorithm: "lexical" as SearchAlgorithm,
@@ -266,7 +266,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "list_directory",
 		description:
-			"List directories and files in the vault. Use this to understand folder structure before searching or editing notes. When an active Space is set, only files within that Space are listed. The 'path' parameter must be an actual vault folder path (e.g. 'Projects/research') — do NOT pass a Space name as the path.",
+			"List directories and files in the vault. Use this to understand folder structure before searching or editing notes. The 'path' parameter must be an actual vault folder path (e.g. 'Projects/research').",
 	},
 	read_content: {
 		enabled: true,
@@ -280,14 +280,13 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 	get_all_tags: {
 		enabled: true,
 		name: "get_all_tags",
-		description:
-			"Retrieve a list of all tags used in the Obsidian vault. Returns a sorted list of unique tags. When an active Space is set, only tags from files within that Space are returned.",
+		description: "Retrieve a list of all tags used in the Obsidian vault. Returns a sorted list of unique tags.",
 	},
 	get_properties: {
 		enabled: true,
 		name: "get_properties",
 		description:
-			"Retrieve properties (frontmatter) from Obsidian. Omit 'note_name' to list all available property keys in the vault. When an active Space is set, only properties from files within that Space are returned.",
+			"Retrieve properties (frontmatter) from Obsidian. Omit 'note_name' to list all available property keys in the vault.",
 	},
 	execute_javascript: {
 		enabled: true,
@@ -301,7 +300,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "execute_dataview_query",
 		description:
-			"Execute an Obsidian Dataview query (DQL) and return the results in Markdown format. Use this to query notes, metadata, tags, and more using the Dataview Query Language. Note: Dataview queries run against the entire vault — use FROM clauses to narrow scope when a Space is active.",
+			"Execute an Obsidian Dataview query (DQL) and return the results in Markdown format. Use this to query notes, metadata, tags, and more using the Dataview Query Language.",
 		settings: {
 			includeMetadata: true,
 		},
@@ -310,12 +309,34 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "manage_notes",
 		description:
-			"Create, update, delete, or move markdown notes in one staged batch. Use targeted search-and-replace edits for updates and batch related note operations together. When an active Space is set, only files within that Space can be targeted.",
+			"Create, update, delete, or move markdown notes in one staged batch. Use targeted search-and-replace edits for updates and batch related note operations together.",
 		settings: {
 			allowCreate: true,
 			allowUpdate: true,
 			allowDelete: true,
 			allowMove: true,
+		},
+	},
+	fetch_url: {
+		enabled: false,
+		name: "fetch_url",
+		description:
+			"Fetch a public web page or text resource over HTTP(S) and return its main content. HTML is converted to markdown with scripts, styles, and navigation chrome removed while headings, lists, tables, code blocks, and links are preserved. JSON, plain text, and other text-based responses are returned as-is. Use this when the user asks about a specific URL or when external information is needed that the vault does not contain.",
+		promptGuidance:
+			"Use this only for URLs the user provided or for clearly public references. The tool sends the URL to the configured network — it does not send vault contents. Prefer searching the vault first; reach for fetch_url when the user explicitly references a link or when needed information cannot be in the vault.",
+		settings: {
+			maxContentLength: 50_000,
+		},
+	},
+	web_search: {
+		enabled: false,
+		name: "web_search",
+		description:
+			"Search the web and return a list of relevant results (title, URL, snippet). Use this when the user asks about current events, external topics, or anything that cannot be in the vault. Always prefer searching the vault first with search_notes.",
+		promptGuidance:
+			"Use web_search for questions about external facts, current events, documentation, or topics the vault is unlikely to contain. Prefer search_notes for vault-internal queries. When results look promising, follow up with fetch_url to read the full page. Cite sources in your response.",
+		settings: {
+			maxResults: 10,
 		},
 	},
 };
@@ -392,6 +413,10 @@ export const DEFAULT_SETTINGS: PluginData = {
 	langSmithProject: "obsidian-agent",
 	langSmithEndpoint: "https://api.smith.langchain.com",
 
+	// Web search
+	webSearchProvider: "",
+	webSearchApiKeyId: "",
+
 	// Other
 	searchAlgorithm: "lexical",
 	searchShowPath: true,
@@ -407,12 +432,6 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 	// Smart Graph View
 	smartGraphSettings: DEFAULT_SMART_GRAPH_SETTINGS,
-
-	// Spaces (cross-cutting)
-	spaces: [],
-	activeImmersedSpaceId: null,
-	spaceImmersionMode: "global",
-	chatSpaceId: null,
 
 	// Diff view
 	diffViewMode: "two-pane",
@@ -639,6 +658,44 @@ export class PluginDataStore {
 	}
 	set langSmithEndpoint(val: string) {
 		this.#data.langSmithEndpoint = val;
+		this.saveSettings();
+	}
+
+	// ============================================================================
+	// Web Search
+	// ============================================================================
+
+	get webSearchProvider() {
+		return this.#data.webSearchProvider;
+	}
+	set webSearchProvider(val: string) {
+		this.#data.webSearchProvider = val;
+		this.saveSettings();
+	}
+
+	get webSearchApiKey() {
+		if (!this.#data.webSearchApiKeyId) return "";
+		return getSecret(this._plugin.app, this.#data.webSearchApiKeyId) ?? "";
+	}
+	set webSearchApiKey(val: string) {
+		const trimmedValue = val.trim();
+		if (trimmedValue) {
+			setSecret(this._plugin.app, WEB_SEARCH_API_KEY_SECRET_ID, trimmedValue);
+			this.#data.webSearchApiKeyId = WEB_SEARCH_API_KEY_SECRET_ID;
+		} else {
+			if (this.#data.webSearchApiKeyId) {
+				setSecret(this._plugin.app, this.#data.webSearchApiKeyId, "");
+			}
+			this.#data.webSearchApiKeyId = "";
+		}
+		this.saveSettings();
+	}
+
+	get webSearchApiKeyId() {
+		return this.#data.webSearchApiKeyId;
+	}
+	set webSearchApiKeyId(val: string) {
+		this.#data.webSearchApiKeyId = val.trim();
 		this.saveSettings();
 	}
 
@@ -1187,76 +1244,6 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
-	/**
-	 * Persist only the active immersed space ID without replacing the whole
-	 * settings object. Avoids expensive reactive cascade.
-	 */
-	get activeImmersedSpaceId(): string | null {
-		return this.#data.activeImmersedSpaceId ?? null;
-	}
-	setActiveImmersedSpaceId(id: string | null): void {
-		this.#data.activeImmersedSpaceId = id;
-		const activeSpace = id ? ((this.#data.spaces ?? []).find((space) => space.id === id) ?? null) : null;
-		setImmersedSpace(activeSpace);
-		this.saveSettings();
-	}
-
-	// --- Spaces CRUD ---
-
-	get spaces(): Space[] {
-		return this.#data.spaces ?? [];
-	}
-
-	addSpace(space: Space): void {
-		this.#data.spaces = [...(this.#data.spaces ?? []), space];
-		this.saveSettings();
-	}
-
-	updateSpace(id: string, patch: Partial<Omit<Space, "id">>): void {
-		this.#data.spaces = (this.#data.spaces ?? []).map((s) => (s.id === id ? { ...s, ...patch } : s));
-		// Refresh live immersion if the edited space is currently active
-		if (_immersedSpace?.id === id) {
-			const updated = this.#data.spaces.find((s) => s.id === id);
-			if (updated) setImmersedSpace(updated);
-		}
-		this.saveSettings();
-	}
-
-	deleteSpace(id: string): void {
-		this.#data.spaces = (this.#data.spaces ?? []).filter((s) => s.id !== id);
-		// Clear dangling references to the deleted space
-		if (this.#data.activeImmersedSpaceId === id) {
-			this.#data.activeImmersedSpaceId = null;
-			setImmersedSpace(null);
-		}
-		if (this.#data.chatSpaceId === id) {
-			this.#data.chatSpaceId = null;
-		}
-		this.saveSettings();
-	}
-
-	getSpaceByLabel(label: string): Space | undefined {
-		return (this.#data.spaces ?? []).find((s) => s.label.toLowerCase() === label.toLowerCase());
-	}
-
-	// --- Space Immersion Mode ---
-
-	get spaceImmersionMode() {
-		return this.#data.spaceImmersionMode ?? "global";
-	}
-	set spaceImmersionMode(val: "global" | "per-surface") {
-		this.#data.spaceImmersionMode = val;
-		this.saveSettings();
-	}
-
-	get chatSpaceId(): string | null {
-		return this.#data.chatSpaceId ?? null;
-	}
-	set chatSpaceId(val: string | null) {
-		this.#data.chatSpaceId = val;
-		this.saveSettings();
-	}
-
 	// --- Diff View Mode ---
 
 	get diffViewMode(): DiffViewMode {
@@ -1732,7 +1719,7 @@ export class PluginDataStore {
 			const duplicate = Object.entries(this.#data.providerMeta).find(
 				([id, m]) =>
 					id !== providerId &&
-					m.displayName.trim().toLowerCase() === updates.displayName!.trim().toLowerCase(),
+					m.displayName.trim().toLowerCase() === updates.displayName?.trim().toLowerCase(),
 			);
 			if (duplicate) {
 				throw new Error(`A provider named "${updates.displayName}" already exists`);
@@ -1824,31 +1811,6 @@ export class PluginDataStore {
 
 let _pluginDataStore: PluginDataStore | null = null;
 
-/**
- * The currently immersed Space — ephemeral, session-only.
- * Not persisted to PluginData. Automatically scopes search and agent
- * when the user is immersed in a Space in the graph view.
- * null = no active immersion.
- */
-let _immersedSpace: Space | null = $state(null);
-let _immersionListeners: Array<(space: Space | null) => void> = [];
-
-export function getImmersedSpace(): Space | null {
-	return _immersedSpace;
-}
-
-export function setImmersedSpace(space: Space | null): void {
-	_immersedSpace = space;
-	for (const listener of _immersionListeners) listener(space);
-}
-
-export function onImmersionChange(listener: (space: Space | null) => void): () => void {
-	_immersionListeners.push(listener);
-	return () => {
-		_immersionListeners = _immersionListeners.filter((l) => l !== listener);
-	};
-}
-
 function normalizeAgent(agent: AgentConfig): void {
 	// Ensure toolsConfig exists and has all tools
 	if (agent.toolsConfig) {
@@ -1913,14 +1875,6 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 	}
 
 	_pluginDataStore = new PluginDataStore(plugin, mergedData);
-
-	// Seed the in-memory immersion state from the persisted ID so that
-	// search, chat, and the status bar pick up the active space immediately.
-	const restoredId = mergedData.activeImmersedSpaceId;
-	if (restoredId) {
-		const restoredSpace = (mergedData.spaces ?? []).find((s) => s.id === restoredId);
-		setImmersedSpace(restoredSpace ?? null);
-	}
 
 	return _pluginDataStore;
 }

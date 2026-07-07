@@ -15,7 +15,7 @@ import { performSearch } from "../../agent/tools/searchNotes";
 import { getRecentNotes } from "../../search/recentNotes";
 import { getLexicalSearchService, isLexicalSearchInitialized } from "../../search/LexicalSearchService";
 import type { SearchResult } from "../../vectorstore/types";
-import { getData, getImmersedSpace } from "../../stores/dataStore.svelte";
+import { getData } from "../../stores/dataStore.svelte";
 import { getMessenger } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
@@ -34,11 +34,10 @@ import {
 	shouldShowMatchExplanation,
 	stripHeadingPrefix,
 } from "../../utils/searchResultPresentation";
-import { resolveSpaceToSearchFilter } from "../../lib/views";
 
 interface AutocompleteSuggestion {
 	type: "autocomplete";
-	kind: "tag" | "folder" | "space";
+	kind: "tag" | "folder";
 	value: string;
 	display: string;
 }
@@ -159,7 +158,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private tagPillElementCache = new Map<string, HTMLElement>();
 	private badgeIconElementCache = new Map<string, HTMLElement>();
 	/** Inline filter state — chips live inside the input container */
-	private activeFilters: { type: "path" | "tag" | "space"; value: string }[] = [];
+	private activeFilters: { type: "path" | "tag"; value: string }[] = [];
 	private inlineChipsEl: HTMLElement | null = null;
 	private inlineInputContentEl: HTMLElement | null = null;
 	private selectionSummaryEl: HTMLElement | null = null;
@@ -177,7 +176,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		]);
 		this.setPlaceholder(
 			this.pickerOptions?.pickerText?.searchPlaceholder ??
-				"Search notes, use #tag, /folder or @space, or leave empty for recent notes...",
+				"Search notes, use #tag or /folder, or leave empty for recent notes...",
 		);
 		this.updateInstructions();
 
@@ -353,14 +352,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	}
 
 	private getSemanticGlowColor(): string {
-		const activeSpaceFilters = this.activeFilters.filter((filter) => filter.type === "space");
-		if (activeSpaceFilters.length === 1) {
-			const activeSpaceColor = getData().getSpaceByLabel(activeSpaceFilters[0].value)?.color?.trim();
-			if (activeSpaceColor) {
-				return activeSpaceColor;
-			}
-		}
-
 		return getComputedStyle(document.body).getPropertyValue("--interactive-accent").trim() || "#7f6df2";
 	}
 
@@ -771,16 +762,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.activeFilters = [];
 		this.hasPrimedOpenResults = false;
 
-		// In global mode, auto-inject the immersed space as a removable chip
-		const pluginData = getData();
-		if (pluginData.spaceImmersionMode === "global") {
-			const immersed = getImmersedSpace();
-			if (immersed) {
-				this.activeFilters.push({ type: "space", value: immersed.label });
-				this.renderInlineChips();
-			}
-		}
-
 		this.searchResults = this.getModalRecentNotes();
 		this.hasPrimedOpenResults = true;
 
@@ -1087,7 +1068,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			this.tagPillElementCache.set(tag, tagEl);
 		}
 
-		return this.tagPillElementCache.get(tag)!.cloneNode(true) as HTMLElement;
+		return this.tagPillElementCache.get(tag)?.cloneNode(true) as HTMLElement;
 	}
 
 	private getCachedBadgeIconElement(badge: SearchResultBadge): HTMLElement {
@@ -1099,7 +1080,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			this.badgeIconElementCache.set(badge, badgeIconEl);
 		}
 
-		return this.badgeIconElementCache.get(badge)!.cloneNode(true) as HTMLElement;
+		return this.badgeIconElementCache.get(badge)?.cloneNode(true) as HTMLElement;
 	}
 
 	private usesCupertinoTheme(): boolean {
@@ -1203,18 +1184,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private buildActiveFilter(): SearchFilter | undefined {
 		const tags = this.activeFilters.filter((f) => f.type === "tag").map((f) => f.value);
 		const pathPrefixes = this.activeFilters.filter((f) => f.type === "path").map((f) => f.value);
-		const spaceLabels = this.activeFilters.filter((f) => f.type === "space").map((f) => f.value);
-
-		// Resolve Spaces → SearchFilter and merge their pathPrefixes/tags
-		const pluginData = getData();
-		for (const label of spaceLabels) {
-			const spaceObj = pluginData.getSpaceByLabel(label);
-			if (spaceObj) {
-				const resolved = resolveSpaceToSearchFilter(this.app, spaceObj);
-				if (resolved.pathPrefixes) pathPrefixes.push(...resolved.pathPrefixes);
-				if (resolved.tags) tags.push(...resolved.tags);
-			}
-		}
 
 		if (tags.length === 0 && pathPrefixes.length === 0) return undefined;
 
@@ -1261,22 +1230,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			const iconRenderer =
 				filter.type === "tag"
 					? getTagIcon(this.app, filter.value)
-					: filter.type === "path"
-						? getPathIcon(this.app, filter.value.replace(/\/$/, ""), "folder")
-						: null; // spaces use a default icon
+					: getPathIcon(this.app, filter.value.replace(/\/$/, ""), "folder");
 
-			if (filter.type === "space") {
-				// Look up space color for chip styling
-				const pluginData = getData();
-				const spaceObj = pluginData.getSpaceByLabel(filter.value);
-				if (spaceObj?.color) {
-					chip.style.setProperty("--tag-color", spaceObj.color);
-					chip.style.setProperty("--tag-color-hover", spaceObj.color);
-				}
-				const iconEl = chip.createSpan({ cls: "s2b-inline-chip-icon" });
-				iconEl.setAttribute("aria-hidden", "true");
-				setIcon(iconEl, "map-pin");
-			} else if (iconRenderer) {
+			if (iconRenderer) {
 				chip.classList.add(`s2b-inline-chip-${iconRenderer.provider}`);
 				const resolvedColor = resolveIconColor(iconRenderer.color);
 				if (resolvedColor) {
@@ -1299,12 +1255,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 				setIcon(iconEl, filter.type === "tag" ? "tag" : "folder");
 			}
 
-			const label =
-				filter.type === "path"
-					? filter.value.replace(/\/$/, "")
-					: filter.type === "space"
-						? filter.value
-						: filter.value.replace(/^#/, "");
+			const label = filter.type === "path" ? filter.value.replace(/\/$/, "") : filter.value.replace(/^#/, "");
 			chip.setAttribute("aria-label", `Remove filter ${label}`);
 			chip.createSpan({ cls: "s2b-inline-chip-label", text: label });
 			chip.createSpan({ cls: "s2b-inline-chip-remove", text: "×" });
@@ -1380,7 +1331,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			if (!ctx) return;
 			ctx.scale(dpr, dpr);
 
-			const r = parseFloat(radius) || 12;
+			const r = Number.parseFloat(radius) || 12;
 			const angle = ((performance.now() % 2000) / 2000) * Math.PI * 2;
 			const accent = this.getSemanticGlowColor();
 
@@ -1575,13 +1526,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	 * Returns autocomplete suggestions for tags (#) or folders (path/) when applicable.
 	 */
 	private getAutocompleteSuggestions(query: string): AutocompleteSuggestion[] | null {
-		// Match a partial Space at the end: "@" or "@part"
-		const spaceMatch = query.match(/(@)([^\s]*)$/u);
-		if (spaceMatch) {
-			const partial = spaceMatch[2].toLowerCase();
-			return this.getSpaceSuggestions(partial);
-		}
-
 		// Match a partial tag at the end: "#" or "#part"
 		const tagMatch = query.match(/(#)([^\s]*)$/u);
 		if (tagMatch) {
@@ -1623,20 +1567,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			});
 	}
 
-	private getSpaceSuggestions(partial: string): AutocompleteSuggestion[] {
-		const pluginData = getData();
-		const spaces = pluginData.spaces;
-		return spaces
-			.filter((s) => !partial || s.label.toLowerCase().includes(partial))
-			.slice(0, 20)
-			.map((s) => ({
-				type: "autocomplete" as const,
-				kind: "space" as const,
-				value: s.label,
-				display: s.label,
-			}));
-	}
-
 	private getFolderSuggestions(partial: string): AutocompleteSuggestion[] {
 		// Strip leading/trailing slashes so "/fo" → "fo" matches folder "foobar"
 		const needle = partial.replace(/^\/+|\/+$/gu, "");
@@ -1659,16 +1589,14 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	private applyAutocompleteSuggestion(suggestion: AutocompleteSuggestion): void {
 		// Add the selected suggestion as an inline filter chip
-		const chipType = suggestion.kind === "tag" ? "tag" : suggestion.kind === "space" ? "space" : "path";
+		const chipType = suggestion.kind === "tag" ? "tag" : "path";
 		this.activeFilters.push({ type: chipType, value: suggestion.value });
 		this.renderInlineChips();
 
-		// Remove the partial token from the input (the #... or folder/ or @... text)
+		// Remove the partial token from the input (the #... or folder/ text)
 		let cleanQuery: string;
 		if (suggestion.kind === "tag") {
 			cleanQuery = this.currentQuery.replace(/(#)[^\s]*$/u, "").trim();
-		} else if (suggestion.kind === "space") {
-			cleanQuery = this.currentQuery.replace(/(@)[^\s]*$/u, "").trim();
 		} else {
 			cleanQuery = this.currentQuery.replace(/(?:^|\s)((?!https?:\/\/)(\/[^\s]*|[^\s]*\/[^\s]*))$/u, "").trim();
 		}
@@ -1839,13 +1767,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			} else {
 				setIcon(iconEl, "tag");
 			}
-		} else if (suggestion.kind === "space") {
-			const pluginData = getData();
-			const spaceObj = pluginData.getSpaceByLabel(suggestion.value);
-			if (spaceObj?.color) {
-				iconEl.style.color = spaceObj.color;
-			}
-			setIcon(iconEl, "map-pin");
 		} else {
 			const folderIcon = getPathIcon(this.app, suggestion.value.replace(/\/$/, ""), "folder");
 			if (folderIcon) {
@@ -1863,12 +1784,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		container.createSpan({ cls: "s2b-search-autocomplete-text", text: suggestion.display });
 		container.createSpan({
 			cls: "s2b-search-autocomplete-hint",
-			text:
-				suggestion.kind === "tag"
-					? "Filter by tag"
-					: suggestion.kind === "space"
-						? "Filter by space"
-						: "Filter by folder",
+			text: suggestion.kind === "tag" ? "Filter by tag" : "Filter by folder",
 		});
 	}
 

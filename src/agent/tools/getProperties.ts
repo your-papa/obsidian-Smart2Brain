@@ -3,19 +3,14 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
-import { type SpaceScope, resolveCurrentSpaceScope } from "./spaceScope";
 
-function getNoteProperties(app: App, noteName: string, spaceScope: SpaceScope): string {
+function getNoteProperties(app: App, noteName: string): string {
 	const file = app.vault
 		.getMarkdownFiles()
 		.find((candidate) => candidate.path === noteName || candidate.basename === noteName);
 
 	if (!file) {
 		return `Note "${noteName}" not found.`;
-	}
-
-	if (!spaceScope.isPathAllowed(file.path)) {
-		return `Error: The file "${file.path}" is outside the active space [${spaceScope.label}]. Only files within the active space can be read.`;
 	}
 
 	const pluginData = getData();
@@ -36,11 +31,10 @@ function getNoteProperties(app: App, noteName: string, spaceScope: SpaceScope): 
 	return JSON.stringify(properties);
 }
 
-function getAllPropertyKeys(app: App, spaceScope: SpaceScope): string {
+function getAllPropertyKeys(app: App): string {
 	const allKeys = new Set<string>();
 
 	for (const file of app.vault.getMarkdownFiles()) {
-		if (!spaceScope.isPathAllowed(file.path)) continue;
 		const cache = app.metadataCache.getFileCache(file);
 		if (cache?.frontmatter) {
 			for (const key of Object.keys(cache.frontmatter)) {
@@ -68,8 +62,7 @@ export function createGetPropertiesTool(app: App) {
 	const toolConfig = pluginData.getSelectedAgent().toolsConfig.get_properties;
 
 	const getPropertiesFn = async ({ note_name }: { note_name?: string }) => {
-		const spaceScope = resolveCurrentSpaceScope(app);
-		return note_name ? getNoteProperties(app, note_name, spaceScope) : getAllPropertyKeys(app, spaceScope);
+		return note_name ? getNoteProperties(app, note_name) : getAllPropertyKeys(app);
 	};
 
 	return tool(getPropertiesFn, {

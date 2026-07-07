@@ -40,9 +40,6 @@ interface Props {
 	onRevealFile?: (path: string) => void;
 	onFocusCluster?: (cluster: number) => void;
 	onToggleWikiLinks?: () => void;
-	onImmerseDraft?: () => void;
-	onExitImmersion?: () => void;
-	immersedInDraft?: boolean;
 	lassoMode?: boolean;
 	onSelectionChange?: (paths: string[]) => void;
 	onClearFocusedClusters?: () => void;
@@ -68,9 +65,6 @@ let {
 	onRevealFile,
 	onFocusCluster,
 	onToggleWikiLinks,
-	onImmerseDraft,
-	onExitImmersion,
-	immersedInDraft = false,
 	lassoMode = false,
 	onSelectionChange,
 	onClearFocusedClusters,
@@ -217,17 +211,8 @@ function handleKeyDown(e: KeyboardEvent) {
 				render();
 			} else if (selectedNodes.size > 0) {
 				clearSelection();
-			} else if (immersedInDraft) {
-				onExitImmersion?.();
 			} else if (focusedClusters.size > 0) {
 				onClearFocusedClusters?.();
-			}
-			break;
-		case "i":
-			if (selectedNodes.size > 0 && !immersedInDraft) {
-				onImmerseDraft?.();
-			} else if (immersedInDraft) {
-				onExitImmersion?.();
 			}
 			break;
 		case "f":
@@ -530,7 +515,7 @@ function render() {
 		// LABEL_FONT_PX is already in screen px, so sw/sh are screen px directly
 		const sw = approxCharCount * LABEL_FONT_PX * 0.55;
 		const sh = LABEL_FONT_PX;
-		const screen = pixi!.worldToScreen(nodeX, labelY);
+		const screen = pixi?.worldToScreen(nodeX, labelY);
 		const x1 = screen.x - sw / 2 - LABEL_PAD_X;
 		const y1 = screen.y - sh - LABEL_PAD_Y;
 		const x2 = screen.x + sw / 2 + LABEL_PAD_X;
@@ -1213,8 +1198,8 @@ function buildInternalData(data: GraphData): {
 		const tId = (link.target as SimNode).id;
 		if (!adjacency.has(sId)) adjacency.set(sId, new Set());
 		if (!adjacency.has(tId)) adjacency.set(tId, new Set());
-		adjacency.get(sId)!.add(tId);
-		adjacency.get(tId)!.add(sId);
+		adjacency.get(sId)?.add(tId);
+		adjacency.get(tId)?.add(sId);
 
 		// Store edge by canonical key; keep highest-weight edge per pair
 		const ek = edgeKey(sId, tId);

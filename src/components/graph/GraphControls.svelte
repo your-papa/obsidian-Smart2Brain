@@ -30,8 +30,6 @@ interface Props {
 	onLassoModeChange?: (active: boolean) => void;
 	graphData?: GraphData;
 	nodeCount?: number;
-	// Spaces
-	immersedSpaceId: string | null;
 	// Segments
 	segments?: SpaceSegment[];
 	focusedSegmentId?: string | null;
@@ -55,7 +53,6 @@ let {
 	onLassoModeChange,
 	graphData = { nodes: [], edges: [] },
 	nodeCount = 0,
-	immersedSpaceId,
 	segments = [],
 	focusedSegmentId = null,
 	onFocusSegment,
@@ -148,7 +145,6 @@ function handleResetSettings() {
 
 const colorByOptions = [
 	{ display: "None", value: "none" as SegmentBy },
-	{ display: "Spaces", value: "spaces" as SegmentBy },
 	{ display: "Similarity", value: "semantic" as SegmentBy },
 	{ display: "Link Communities", value: "louvain" as SegmentBy },
 	{ display: "Folder", value: "folder" as SegmentBy },
@@ -176,9 +172,6 @@ const colorByOptions = [
       }}
       styles={!isCollapsed ? "is-active" : ""}
     />
-    {#if immersedSpaceId}
-      <span class="toolbar-badge"></span>
-    {/if}
   </div>
 </div>
 
@@ -488,17 +481,6 @@ const colorByOptions = [
   .toolbar-icon-wrapper {
     position: relative;
     display: flex;
-  }
-
-  .toolbar-badge {
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--interactive-accent);
-    pointer-events: none;
   }
 
   :global(.clickable-icon.is-active) {

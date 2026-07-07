@@ -89,8 +89,6 @@ export interface AgentRunOptions {
 	selection?: SelectionRef;
 	/** Notes selected from the Smart Graph */
 	graphNotes?: GraphNoteRef[];
-	/** Space labels selected by the user to scope the conversation */
-	spaces?: string[];
 }
 
 /** Options for editing a message (forks from checkpoint with new user message) */
@@ -485,14 +483,12 @@ export class Agent {
 		selection?: SelectionRef,
 		graphNotes?: GraphNoteRef[],
 		lcSource?: string,
-		spaces?: string[],
 	): HumanMessage {
 		const additional_kwargs: Record<string, unknown> = {};
 		if (attachments?.length) additional_kwargs.attachments = attachments;
 		if (visibleNotes?.length) additional_kwargs.visibleNotes = visibleNotes;
 		if (selection) additional_kwargs.selection = selection;
 		if (graphNotes?.length) additional_kwargs.graphNotes = graphNotes;
-		if (spaces?.length) additional_kwargs.spaces = spaces;
 		if (lcSource) additional_kwargs.lc_source = lcSource;
 		const hasKwargs = Object.keys(additional_kwargs).length > 0;
 		// Cast content — the HumanMessage constructor handles both string and
@@ -579,7 +575,6 @@ export class Agent {
 			options.selection,
 			options.graphNotes,
 			options.lcSource,
-			options.spaces,
 		);
 
 		const transportContext = createAiTransportContext("default", `agent.run:${runId}`);
@@ -653,7 +648,6 @@ export class Agent {
 			options.selection,
 			options.graphNotes,
 			options.lcSource,
-			options.spaces,
 		);
 
 		const transportLabel = `agent.streamTokens:${runId}`;

@@ -8,7 +8,6 @@ import { selectionHighlightPlugin } from "./editor/selectionHighlightExtension";
 import { createReadingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
 import { terminateWorker as terminateClusteringWorker } from "./utils/computeWorkerManager";
 import { SearchModal } from "./components/modal/SearchModal";
-import { SpaceSwitcherModal } from "./components/modal/SpaceSwitcherModal";
 import { getQueryClient } from "./lib/query";
 import { SkillsService } from "./skills";
 import { createMessenger, getMessenger } from "./stores/chatStore.svelte";
@@ -65,7 +64,7 @@ export default class SecondBrainPlugin extends Plugin {
 		};
 
 		type NavigatorMenusApi = {
-			registerFileMenu?: (cb: (context: NavigatorFileMenuContext) => void) => (() => void) | void;
+			registerFileMenu?: (cb: (context: NavigatorFileMenuContext) => void) => (() => void) | undefined;
 		};
 
 		type NotebookNavigatorApi = {
@@ -252,13 +251,6 @@ export default class SecondBrainPlugin extends Plugin {
 			name: "Open Note Context",
 			icon: "git-fork",
 			callback: () => this.activateNoteContextView(),
-		});
-
-		this.addCommand({
-			id: "change-space",
-			name: "Change Space",
-			icon: "layers",
-			callback: () => new SpaceSwitcherModal(this.app).open(),
 		});
 
 		this.addCommand({

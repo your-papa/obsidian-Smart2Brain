@@ -1,9 +1,7 @@
 import type { StoredProviderState } from "../stores/dataStore.svelte";
 import type { ProviderInstanceMeta } from "../types/provider/index";
 import type { UUIDv7 } from "../utils/uuid7Validator";
-import type { SmartGraphSettings, Space } from "./graph";
-
-export type SpaceImmersionMode = "global" | "per-surface";
+import type { SmartGraphSettings } from "./graph";
 
 export type SearchAlgorithm = "lexical" | "hybrid";
 
@@ -111,7 +109,9 @@ export type BuiltInToolId =
 	| "get_properties"
 	| "execute_javascript"
 	| "execute_dataview_query"
-	| "manage_notes";
+	| "manage_notes"
+	| "fetch_url"
+	| "web_search";
 
 /**
  * Tool-specific settings for search_notes tool
@@ -152,6 +152,22 @@ export interface DataviewQuerySettings {
 }
 
 /**
+ * Tool-specific settings for fetch_url tool
+ */
+export interface FetchUrlSettings {
+	/** Maximum content length to return after cleaning (0 = unlimited) */
+	maxContentLength: number;
+}
+
+/**
+ * Tool-specific settings for web_search tool
+ */
+export interface WebSearchSettings {
+	/** Maximum number of results to return */
+	maxResults: number;
+}
+
+/**
  * Tool-specific settings for manage_notes tool
  */
 export interface ManageNotesSettings {
@@ -173,6 +189,8 @@ export type ToolSpecificSettings =
 	| ReadContentSettings
 	| DataviewQuerySettings
 	| ManageNotesSettings
+	| FetchUrlSettings
+	| WebSearchSettings
 	| Record<string, never>;
 
 /**
@@ -396,6 +414,15 @@ export interface PluginData {
 	lastActiveChatId: UUIDv7 | null;
 
 	// ============================================================================
+	// Web Search
+	// ============================================================================
+
+	/** Selected web search provider ("brave" | "tavily" | "") */
+	webSearchProvider: string;
+	/** Secret ID for the web search API key */
+	webSearchApiKeyId: string;
+
+	// ============================================================================
 	// Debugging & Telemetry
 	// ============================================================================
 
@@ -438,19 +465,6 @@ export interface PluginData {
 	 * Each entry is a {provider, model} pair.
 	 */
 	favoriteModels: Array<{ provider: string; model: string }>;
-
-	// ============================================================================
-	// Spaces (cross-cutting, used by graph, search, chat, agent)
-	// ============================================================================
-
-	/** All user-defined spaces */
-	spaces: Space[];
-	/** ID of the currently immersed space (global mode), or null */
-	activeImmersedSpaceId: string | null;
-	/** Whether immersion is shared across all surfaces or independent per surface */
-	spaceImmersionMode: SpaceImmersionMode;
-	/** Space ID used by chat when in per-surface mode */
-	chatSpaceId: string | null;
 
 	/**
 	 * Settings for the Smart Graph View.

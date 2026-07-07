@@ -21,7 +21,6 @@ import {
 import { extractPdfPages, extractTextFromPdf, extractTextFromPdfPages } from "../../utils/pdfExtractor";
 import { Logger } from "../../utils/logging";
 import { extractReferenceInfo, resolveFileReferenceDetailed } from "../../utils/pathResolution";
-import { resolveCurrentSpaceScope } from "./spaceScope";
 
 const MAX_PDF_CHARS = 180_000;
 
@@ -117,15 +116,14 @@ function extractSubpathContent(
 		const available: string[] = [];
 		if (cache.headings?.length) {
 			available.push(
-				"Headings:\n" + cache.headings.map((h) => `  ${"#".repeat(h.level)} ${h.heading}`).join("\n"),
+				`Headings:\n${cache.headings.map((h) => `  ${"#".repeat(h.level)} ${h.heading}`).join("\n")}`,
 			);
 		}
 		if (cache.blocks && Object.keys(cache.blocks).length > 0) {
 			available.push(
-				"Block IDs:\n" +
-					Object.keys(cache.blocks)
-						.map((id) => `  ^${id}`)
-						.join("\n"),
+				`Block IDs:\n${Object.keys(cache.blocks)
+					.map((id) => `  ^${id}`)
+					.join("\n")}`,
 			);
 		}
 		const availableStr = available.length > 0 ? `\nAvailable targets:\n${available.join("\n")}` : "";
@@ -346,12 +344,6 @@ export function createReadContentTool(app: App, imageProcessor?: BaseChatModel, 
 
 		const file = resolved.file;
 		const ext = file.extension.toLowerCase();
-
-		// Active-space boundary check
-		const spaceScope = resolveCurrentSpaceScope(app);
-		if (!spaceScope.isPathAllowed(file.path)) {
-			return `Error: The file "${file.path}" is outside the active space [${spaceScope.label}]. Only files within the active space can be read.`;
-		}
 
 		// Privacy check
 		const currentProvider = pluginData.getSelectedAgent().chatModel?.provider;
