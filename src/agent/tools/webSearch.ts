@@ -5,7 +5,41 @@ import { getData } from "../../stores/dataStore.svelte";
 import { Logger } from "../../utils/logging";
 
 const DEFAULT_MAX_RESULTS = 10;
+const MIN_MAX_RESULTS = 1;
+const MAX_MAX_RESULTS = 20;
 const FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * Race a promise against a wall-clock deadline. Necessary because
+ * createObsidianFetch may fall back to Obsidian's requestUrl, which ignores
+ * AbortSignal — leaving the raw fetch to hang indefinitely.
+ */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			const err = new Error(`Web search timed out after ${timeoutMs}ms.`);
+			err.name = "TimeoutError";
+			reject(err);
+		}, timeoutMs);
+		promise.then(
+			(value) => {
+				clearTimeout(timer);
+				resolve(value);
+			},
+			(error) => {
+				clearTimeout(timer);
+				reject(error);
+			},
+		);
+	});
+}
+
+/** Clamp a raw settings value into [MIN_MAX_RESULTS, MAX_MAX_RESULTS], defaulting on garbage. */
+function clampMaxResults(raw: unknown): number {
+	const n = typeof raw === "number" ? raw : Number(raw);
+	if (!Number.isFinite(n)) return DEFAULT_MAX_RESULTS;
+	return Math.min(MAX_MAX_RESULTS, Math.max(MIN_MAX_RESULTS, Math.floor(n)));
+}
 
 export interface WebSearchResult {
 	rank: number;
@@ -45,35 +79,29 @@ async function searchBrave(
 	const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${count}&text_decorations=false&search_lang=en`;
 
 	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+	const response = await fetchImpl(url, {
+		method: "GET",
+		headers: {
+			Accept: "application/json",
+			"Accept-Encoding": "gzip",
+			"X-Subscription-Token": apiKey,
+		},
+		signal: controller.signal,
+	});
 
-	try {
-		const response = await fetchImpl(url, {
-			method: "GET",
-			headers: {
-				Accept: "application/json",
-				"Accept-Encoding": "gzip",
-				"X-Subscription-Token": apiKey,
-			},
-			signal: controller.signal,
-		});
-
-		if (!response.ok) {
-			if (response.status === 401) throw new Error("Invalid Brave Search API key");
-			if (response.status === 429) throw new Error("Brave Search rate limit exceeded — try again shortly");
-			throw new Error(`Brave Search returned HTTP ${response.status}`);
-		}
-
-		const data = (await response.json()) as BraveSearchResponse;
-		return (data.web?.results ?? []).map((r, i) => ({
-			rank: i + 1,
-			title: r.title ?? "",
-			url: r.url ?? "",
-			snippet: r.description ?? "",
-		}));
-	} finally {
-		clearTimeout(timeout);
+	if (!response.ok) {
+		if (response.status === 401) throw new Error("Invalid Brave Search API key");
+		if (response.status === 429) throw new Error("Brave Search rate limit exceeded — try again shortly");
+		throw new Error(`Brave Search returned HTTP ${response.status}`);
 	}
+
+	const data = (await response.json()) as BraveSearchResponse;
+	return (data.web?.results ?? []).map((r, i) => ({
+		rank: i + 1,
+		title: r.title ?? "",
+		url: r.url ?? "",
+		snippet: r.description ?? "",
+	}));
 }
 
 // ============================================================================
@@ -91,41 +119,35 @@ async function searchTavily(
 	fetchImpl: ReturnType<typeof createObsidianFetch>,
 ): Promise<WebSearchResult[]> {
 	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+	const response = await fetchImpl("https://api.tavily.com/search", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${apiKey}`,
+		},
+		body: JSON.stringify({
+			query,
+			max_results: count,
+			search_depth: "basic",
+			include_answer: false,
+			include_raw_content: false,
+		}),
+		signal: controller.signal,
+	});
 
-	try {
-		const response = await fetchImpl("https://api.tavily.com/search", {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${apiKey}`,
-			},
-			body: JSON.stringify({
-				query,
-				max_results: count,
-				search_depth: "basic",
-				include_answer: false,
-				include_raw_content: false,
-			}),
-			signal: controller.signal,
-		});
-
-		if (!response.ok) {
-			if (response.status === 401) throw new Error("Invalid Tavily API key");
-			if (response.status === 429) throw new Error("Tavily rate limit exceeded — try again shortly");
-			throw new Error(`Tavily returned HTTP ${response.status}`);
-		}
-
-		const data = (await response.json()) as TavilySearchResponse;
-		return (data.results ?? []).map((r, i) => ({
-			rank: i + 1,
-			title: r.title ?? "",
-			url: r.url ?? "",
-			snippet: r.content ?? "",
-		}));
-	} finally {
-		clearTimeout(timeout);
+	if (!response.ok) {
+		if (response.status === 401) throw new Error("Invalid Tavily API key");
+		if (response.status === 429) throw new Error("Tavily rate limit exceeded — try again shortly");
+		throw new Error(`Tavily returned HTTP ${response.status}`);
 	}
+
+	const data = (await response.json()) as TavilySearchResponse;
+	return (data.results ?? []).map((r, i) => ({
+		rank: i + 1,
+		title: r.title ?? "",
+		url: r.url ?? "",
+		snippet: r.content ?? "",
+	}));
 }
 
 // ============================================================================
@@ -156,16 +178,16 @@ export function createWebSearchTool() {
 		}
 
 		const settings = getToolConfig()?.settings as WebSearchSettings | undefined;
-		const maxResults = Math.min(settings?.maxResults ?? DEFAULT_MAX_RESULTS, 20);
+		const maxResults = clampMaxResults(settings?.maxResults);
 
 		try {
 			Logger.log(`[web_search] Searching "${trimmed}" via ${provider}`);
 			let results: WebSearchResult[];
 
 			if (provider === "brave") {
-				results = await searchBrave(trimmed, apiKey, maxResults, fetchImpl);
+				results = await withTimeout(searchBrave(trimmed, apiKey, maxResults, fetchImpl), FETCH_TIMEOUT_MS);
 			} else if (provider === "tavily") {
-				results = await searchTavily(trimmed, apiKey, maxResults, fetchImpl);
+				results = await withTimeout(searchTavily(trimmed, apiKey, maxResults, fetchImpl), FETCH_TIMEOUT_MS);
 			} else {
 				return `Error: Unknown web search provider "${provider}".`;
 			}
@@ -183,7 +205,7 @@ export function createWebSearchTool() {
 
 			return JSON.stringify(payload);
 		} catch (error) {
-			if (error instanceof Error && error.name === "AbortError") {
+			if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
 				return `Error: Web search timed out after ${FETCH_TIMEOUT_MS}ms.`;
 			}
 			const message = error instanceof Error ? error.message : String(error);
