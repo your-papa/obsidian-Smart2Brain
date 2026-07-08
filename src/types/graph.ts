@@ -206,6 +206,12 @@ export interface SmartGraphSettings {
 	leidenResolution: number;
 	/** Bridge node threshold: fraction of foreign-community neighbors required to show the bridge ring (0–1) */
 	bridgeThreshold: number;
+	/** Skeleton bridge centrality threshold: min betweenness centrality for a node to survive in the outline view (0–1) */
+	skeletonBridgeCentralityThreshold: number;
+	/** Outline view (atom toggle) target Leiden resolution — collapsed γ used when outline is entered */
+	outlineViewResolution: number;
+	/** Outline view (atom toggle) target Detail slider value (0–100) — nodes-per-topic when outline is entered */
+	outlineViewDetail: number;
 	/** Highlight isolated notes (degree 0) in the graph */
 	highlightIsolated: boolean;
 	/** Highlight bridge notes (nodes spanning multiple communities) in the graph */
@@ -235,6 +241,9 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	leidenSeed: 42,
 	leidenResolution: 1.0,
 	bridgeThreshold: 0.4,
+	skeletonBridgeCentralityThreshold: 0.05,
+	outlineViewResolution: 0.5,
+	outlineViewDetail: 30,
 	highlightIsolated: false,
 	highlightBridges: false,
 };

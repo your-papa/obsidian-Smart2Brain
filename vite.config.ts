@@ -38,6 +38,11 @@ export default defineConfig(({ mode }) => {
 				},
 			},
 		],
+		define: {
+			"import.meta.env.DEV": isDevelopment,
+			"import.meta.env.PROD": !isDevelopment,
+			"import.meta.env.MODE": JSON.stringify(mode),
+		},
 		build: {
 			lib: {
 				entry: "src/main.ts",

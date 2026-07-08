@@ -47,6 +47,11 @@ let settings: SmartGraphSettings = $derived({
 	...(data.smartGraphSettings ?? {}),
 });
 let isLoading = $state(false);
+/**
+ * True while a Leiden compute is in flight (fresh runs only; cache hits are effectively instant
+ * and don't set this). Used to short-circuit the atom toggle and prevent racing state writes.
+ */
+let isLeidenRunning = $state(false);
 let loadingMessage = $state("Building graph...");
 let defaultClusterLabels: Record<number, string> = $state({});
 
@@ -54,6 +59,12 @@ let defaultClusterLabels: Record<number, string> = $state({});
 let leidenCommunities: Record<string, number> = $state({});
 // Betweenness centrality per node — computed alongside Leiden, cleared on rebuild
 let leidenCentrality: Record<string, number> = $state({});
+
+/**
+ * Cache of Leiden results keyed by `${seed}:${resolution}`. Leiden is expensive (seconds on
+ * large graphs) but pure over (seed, resolution, graph). We invalidate on every graph rebuild.
+ */
+let leidenCache = new Map<string, { communities: Record<string, number>; centrality: Record<string, number> }>();
 
 // Filter state
 let selectedFolders: string[] = $state([]);
@@ -75,8 +86,11 @@ let immersePaths: Set<string> | null = $state(null);
 let isImmersed: boolean = $derived(immersePaths !== null);
 let focusedClusters: Set<number> = $state(new Set());
 
-// Detail level 0–100: 100 = full graph, <100 = skeleton backbone (fewer clusters + only hubs/bridges)
+// Detail level 0–100: 100 = full graph, <100 = skeleton backbone (fewer nodes per topic)
 let skeletonDetail = $state(100);
+
+// Remembers the Topics slider value before the atom toggle collapsed it, so exit restores it.
+let outlineViewPrevResolution: number | null = $state(null);
 
 // Segment / Color-by state — always leiden
 let segmentBy: SegmentBy = $derived("leiden" as SegmentBy);
@@ -144,11 +158,13 @@ let focusedClusterDetails = $derived.by(() => {
 let graphData: GraphData = $state({ nodes: [], edges: [] });
 
 /**
- * Skeleton view: structural backbone of the vault, parameterised by skeletonDetail (0–100).
+ * Detail view: shows only the top hubs and bridges per cluster, parameterised by skeletonDetail (0–100).
  *
- * detail=0  → fewest clusters (3), only the single top hub + high-centrality bridges per cluster
- * detail=100 → all clusters, many hubs per cluster (approaches the full graph)
+ * detail=0   → 1 hub per cluster + only bridges above the skeletonBridgeCentralityThreshold
+ * detail=100 → full graph (all nodes)
  *
+ * All clusters are always shown; detail only controls how many nodes represent each one.
+ * The bridge centrality threshold is a dev setting — a lower value keeps more bridges visible at low detail.
  * Edges: only wiki edges whose both endpoints survived the node filter.
  */
 let skeletonGraphData: GraphData = $derived.by(() => {
@@ -156,34 +172,17 @@ let skeletonGraphData: GraphData = $derived.by(() => {
 
 	const t = skeletonDetail / 100; // 0–1
 
-	// Number of top clusters: lerp from 3 (min) up to all clusters
-	const clusterSizes = new Map<number, number>();
-	for (const node of graphData.nodes) {
-		if (node.cluster == null) continue;
-		clusterSizes.set(node.cluster, (clusterSizes.get(node.cluster) ?? 0) + 1);
-	}
-	const totalClusters = clusterSizes.size;
-	const topN = Math.max(3, Math.round(3 + t * (totalClusters - 3)));
-
 	// Hubs per cluster: lerp from 1 at t=0 to 10 at t=1
 	const hubsPerCluster = Math.max(1, Math.round(1 + t * 9));
 
-	// Centrality threshold: at t=0 only nodes with centrality > 0.05 are bridges;
-	// at t=1 any non-zero centrality qualifies
-	const centralityThreshold = 0.05 * (1 - t);
+	// Bridge centrality cutoff: at t=0 only nodes above the configured threshold qualify;
+	// at t=1 any non-zero centrality qualifies (i.e. all bridges)
+	const centralityThreshold = (settings.skeletonBridgeCentralityThreshold ?? 0.05) * (1 - t);
 
-	// Pick the top-N clusters by size
-	const topClusters = new Set(
-		[...clusterSizes.entries()]
-			.sort((a, b) => b[1] - a[1])
-			.slice(0, topN)
-			.map(([id]) => id),
-	);
-
-	// For each kept cluster, collect nodes sorted by degree descending
+	// For each cluster, collect nodes sorted by degree descending
 	const clusterNodes = new Map<number, typeof graphData.nodes>();
 	for (const node of graphData.nodes) {
-		if (node.cluster == null || !topClusters.has(node.cluster)) continue;
+		if (node.cluster == null) continue;
 		const list = clusterNodes.get(node.cluster) ?? [];
 		list.push(node);
 		clusterNodes.set(node.cluster, list);
@@ -209,20 +208,6 @@ let skeletonGraphData: GraphData = $derived.by(() => {
 
 // Build cancellation — abort stale builds when a new one starts
 let currentBuild: AbortController | null = null;
-
-function formatCount(count: number): string {
-	return new Intl.NumberFormat().format(count);
-}
-
-function setLoadingStage(message: string): void {
-	loadingMessage = message;
-}
-
-function logGraphPhase(phase: string, start: number, noteCount?: number): void {
-	const durationMs = Math.round(performance.now() - start);
-	const suffix = noteCount == null ? "" : ` (${formatCount(noteCount)} notes)`;
-	Logger.info(`[SmartGraph] ${phase}${suffix}: ${durationMs}ms`);
-}
 
 function getFilter(): GraphFilter {
 	// `markdownOnly` narrows to just .md; explicit extension picks (if any) still win.
@@ -307,6 +292,9 @@ async function buildGraph() {
 		graphData = wikiData;
 		isLoading = false;
 
+		// Graph structure changed — previous Leiden runs are no longer valid.
+		leidenCache.clear();
+
 		resolveAndApplySegments(graphData);
 		void runLeidenSegmentation();
 
@@ -324,24 +312,55 @@ async function buildGraph() {
 	}
 }
 
-// Rebuild on filter/settings changes (debounced 300ms)
+// Rebuild on filter/settings changes (debounced 300ms).
+// We depend on a derived signature so the effect only fires when the tracked *values* change,
+// not whenever the `settings` derived is recomputed (which happens on any settings write,
+// including leidenResolution changes that should NOT trigger a rebuild).
+let buildGraphSignature = $derived(
+	JSON.stringify({
+		folders: selectedFolders,
+		tags: selectedTags,
+		extensions: selectedExtensions,
+		showWikiLinks: settings.showWikiLinks,
+		markdownOnly: settings.markdownOnly,
+	}),
+);
 $effect(() => {
-	selectedFolders;
-	selectedTags;
-	selectedExtensions;
-	settings.showWikiLinks;
-	settings.markdownOnly;
-
+	buildGraphSignature;
 	const timer = setTimeout(() => untrack(() => void buildGraph()), 300);
 	return () => clearTimeout(timer);
 });
 
-// Re-apply segment coloring when highlight toggles change (no Leiden re-run needed)
+// Re-apply segment coloring when highlight toggles change (no Leiden re-run needed).
+// Use a derived signature to avoid firing on every settings write — see buildGraphSignature above.
+let highlightSignature = $derived(`${settings.highlightIsolated}:${settings.highlightBridges}`);
 $effect(() => {
-	settings.highlightIsolated;
-	settings.highlightBridges;
+	highlightSignature;
 	untrack(() => {
 		if (graphData.nodes.length > 0) resolveAndApplySegments(graphData);
+	});
+});
+
+/**
+ * Kick a background prefetch when the outline-view Leiden inputs change (γ or seed). This makes
+ * changes made from the plugin's Settings → Graph tab pick up the same prefetch behavior the
+ * dev panel already has: next atom press stays instant. Guarded by a value signature so the
+ * effect only fires on actual value changes (not on every `settings` derived recompute).
+ */
+let outlineLeidenSignature = $derived(`${settings.leidenSeed}:${settings.outlineViewResolution}`);
+let outlineLeidenSignatureInitial = true;
+$effect(() => {
+	outlineLeidenSignature;
+	untrack(() => {
+		// Skip the initial run — the fresh Leiden path already prefetches on its own after buildGraph.
+		if (outlineLeidenSignatureInitial) {
+			outlineLeidenSignatureInitial = false;
+			return;
+		}
+		if (graphData.nodes.length === 0) return;
+		const wikiEdges = graphData.edges.filter((e) => e.type === "wiki");
+		if (wikiEdges.length === 0) return;
+		void prefetchOutlineLeiden(wikiEdges);
 	});
 });
 
@@ -498,13 +517,77 @@ async function handleExitImmerse() {
 async function runLeidenSegmentation() {
 	const wikiEdges = graphData.edges.filter((e) => e.type === "wiki");
 	if (wikiEdges.length === 0) return;
+
+	const cacheKey = `${settings.leidenSeed}:${settings.leidenResolution}`;
+	const cached = leidenCache.get(cacheKey);
+	if (cached) {
+		Logger.info(`[SmartGraph] Leiden cache hit (γ=${settings.leidenResolution.toFixed(2)})`);
+		leidenCommunities = cached.communities;
+		leidenCentrality = cached.centrality;
+		resolveAndApplySegments(graphData);
+		void prefetchOutlineLeiden(wikiEdges);
+		return;
+	}
+
 	const sources = wikiEdges.map((e) => e.source);
 	const targets = wikiEdges.map((e) => e.target);
 	const weights = wikiEdges.map((e) => e.weight);
-	const result = await leidenAsync(sources, targets, weights, true, settings.leidenSeed, settings.leidenResolution);
+	const start = performance.now();
+	isLeidenRunning = true;
+	let result: Awaited<ReturnType<typeof leidenAsync>>;
+	try {
+		result = await leidenAsync(sources, targets, weights, true, settings.leidenSeed, settings.leidenResolution);
+	} finally {
+		isLeidenRunning = false;
+	}
+	Logger.info(
+		`[SmartGraph] Leiden (γ=${settings.leidenResolution.toFixed(2)}, ${wikiEdges.length} edges, ${graphData.nodes.length} nodes): ${Math.round(performance.now() - start)}ms`,
+	);
+	leidenCache.set(cacheKey, { communities: result.communities, centrality: result.centrality });
 	leidenCommunities = result.communities;
 	leidenCentrality = result.centrality;
 	resolveAndApplySegments(graphData);
+	void prefetchOutlineLeiden(wikiEdges);
+}
+
+/**
+ * Background pre-compute of the outline-view Leiden result at the user-configured γ, so the
+ * first atom-toggle press is instant. Does NOT touch user-facing state — only fills the cache.
+ * Bails if the graph has changed while it was running.
+ */
+async function prefetchOutlineLeiden(wikiEdges: GraphEdge[]) {
+	const outlineResolution = settings.outlineViewResolution ?? 0.5;
+	const key = `${settings.leidenSeed}:${outlineResolution}`;
+	if (leidenCache.has(key)) return;
+
+	const graphSnapshotEdges = graphData.edges;
+	const sources = wikiEdges.map((e) => e.source);
+	const targets = wikiEdges.map((e) => e.target);
+	const weights = wikiEdges.map((e) => e.weight);
+	const start = performance.now();
+	const result = await leidenAsync(sources, targets, weights, true, settings.leidenSeed, outlineResolution);
+
+	// If the graph was rebuilt while we were running, the cache was cleared and our result is stale.
+	if (graphSnapshotEdges !== graphData.edges) {
+		Logger.info("[SmartGraph] Prefetch discarded — graph changed during compute");
+		return;
+	}
+	Logger.info(
+		`[SmartGraph] Leiden prefetch (γ=${outlineResolution.toFixed(2)}, ${wikiEdges.length} edges): ${Math.round(performance.now() - start)}ms`,
+	);
+	leidenCache.set(key, { communities: result.communities, centrality: result.centrality });
+}
+
+/**
+ * Clear the Leiden cache and re-run at the current γ. Used when the seed changes — old
+ * cached entries are no longer valid because they cluster to different communities.
+ * `runLeidenSegmentation` will kick off an outline prefetch on completion; the
+ * outlineLeidenSignature effect additionally prefetches if only the outline γ was changed
+ * from elsewhere (e.g. the plugin's Settings → Graph tab).
+ */
+async function handleSeedChange() {
+	leidenCache.clear();
+	await runLeidenSegmentation();
 }
 
 function handleSegmentColorChange(segmentId: string, color: string) {
@@ -588,9 +671,9 @@ function resolveAndApplySegments(gd: GraphData) {
 	}
 	const isLeiden = by === "leiden" && Object.keys(leidenCentrality).length > 0;
 	if (resolved.length > 0) {
-		// For the bridge ring: a true bridge node is one where the MAJORITY of its wiki-link
-		// neighbors belong to a DIFFERENT community than its own. High-degree hubs link to many
-		// clusters but are firmly assigned to one — their own community dominates their neighbor
+		// For the "Highlight bridges" toggle: a true bridge node is one where the MAJORITY of its
+		// wiki-link neighbors belong to a DIFFERENT community than its own. High-degree hubs link to
+		// many clusters but are firmly assigned to one — their own community dominates their neighbor
 		// vote, so they don't qualify. Only nodes that are structurally "between" communities do.
 		let bridgeNodes: Set<string> | null = null;
 		if (isLeiden) {
@@ -632,7 +715,8 @@ function resolveAndApplySegments(gd: GraphData) {
 			nodes: gd.nodes.map((n) => {
 				const info = pathInfo.get(n.path);
 				const rawCentrality = isLeiden ? leidenCentrality[n.id] : undefined;
-				// Only mark as bridge (and draw the ring) when the node structurally spans communities.
+				// Only record centrality on nodes that structurally span communities — these are the
+				// "bridges" surfaced by the Highlight bridges toggle and consumed by the Detail filter.
 				const centrality = rawCentrality !== undefined && bridgeNodes?.has(n.id) ? rawCentrality : undefined;
 				const isBridge = centrality !== undefined;
 				const isIsolated = (n.degree ?? 0) === 0;
@@ -673,9 +757,41 @@ function handleClearFocusedClusters() {
 }
 
 async function handleSkeletonToggle() {
-	skeletonDetail = skeletonDetail < 100 ? 100 : 30;
+	// Guard against re-entry while a fresh Leiden run is in flight — otherwise rapid clicks
+	// race on state writes and can leave the view stuck between modes.
+	if (isLeidenRunning) return;
+
+	const entering = skeletonDetail >= 100;
+	if (entering) {
+		// Enter outline view: collapse to fewer topics AND fewer nodes per topic.
+		outlineViewPrevResolution = settings.leidenResolution ?? 1.0;
+		skeletonDetail = settings.outlineViewDetail ?? 30;
+		handleSettingsChange({ leidenResolution: settings.outlineViewResolution ?? 0.5 });
+		await runLeidenSegmentation();
+	} else {
+		// Exit outline view: restore Topics to the value that was active before entering, unless
+		// the user manually changed it while inside outline (in which case outlineViewPrevResolution
+		// was cleared by handleTopicsCommit and we leave the current γ alone).
+		skeletonDetail = 100;
+		if (outlineViewPrevResolution != null) {
+			handleSettingsChange({ leidenResolution: outlineViewPrevResolution });
+			outlineViewPrevResolution = null;
+			await runLeidenSegmentation();
+		}
+	}
 	await tick();
 	canvasComponent?.fitToView();
+}
+
+/**
+ * Called when the user commits a new Topics (γ) value from the main panel. If we're currently
+ * inside outline view, drop the memoised "previous" γ so exiting no longer clobbers the user's
+ * manual choice — from now on, outline exit will leave γ where it is.
+ */
+function handleTopicsCommit(resolution: number) {
+	handleSettingsChange({ leidenResolution: resolution });
+	if (skeletonDetail < 100) outlineViewPrevResolution = null;
+	void runLeidenSegmentation();
 }
 
 function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLElement) {
@@ -753,7 +869,10 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     onSettingsChange={handleSettingsChange}
     onFitToView={handleFitToView}
     onRefresh={handleRefresh}
-    onRerunLeiden={() => void runLeidenSegmentation()}
+    onReapplySegments={() => resolveAndApplySegments(graphData)}
+    onSeedChange={() => void handleSeedChange()}
+    onTopicsCommit={handleTopicsCommit}
+    isLeidenRunning={isLeidenRunning}
     {lassoMode}
     onLassoModeChange={handleLassoModeChange}
     {graphData}

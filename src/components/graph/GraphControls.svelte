@@ -17,7 +17,10 @@ interface Props {
 	onSettingsChange: (patch: Partial<SmartGraphSettings>) => void;
 	onFitToView: () => void;
 	onRefresh: () => void;
-	onRerunLeiden?: () => void;
+	onReapplySegments?: () => void;
+	onSeedChange?: () => void;
+	onTopicsCommit?: (resolution: number) => void;
+	isLeidenRunning?: boolean;
 	lassoMode?: boolean;
 	onLassoModeChange?: (active: boolean) => void;
 	graphData?: GraphData;
@@ -40,7 +43,10 @@ let {
 	onSettingsChange,
 	onFitToView,
 	onRefresh,
-	onRerunLeiden,
+	onReapplySegments,
+	onSeedChange,
+	onTopicsCommit,
+	isLeidenRunning = false,
 	lassoMode = false,
 	onLassoModeChange,
 	graphData = { nodes: [], edges: [] },
@@ -109,8 +115,13 @@ function handleClusterCohesionStrengthChange(val: number) {
   />
   <Button
     iconId="atom"
-    tooltip={skeletonDetail < 100 ? "Exit outline view (S)" : "Outline view: top topics and bridge notes only (S)"}
+    tooltip={isLeidenRunning
+      ? "Computing topics…"
+      : skeletonDetail < 100
+        ? "Exit outline view (S)"
+        : "Outline view: top topics and bridge notes only (S)"}
     onClick={() => onSkeletonToggle?.()}
+    disabled={isLeidenRunning}
     styles={skeletonDetail < 100 ? "is-active" : ""}
   />
   <div class="toolbar-icon-wrapper">
@@ -122,9 +133,6 @@ function handleClusterCohesionStrengthChange(val: number) {
     />
   </div>
   {#if import.meta.env.DEV}
-    <div class="toolbar-icon-wrapper">
-      <Button iconId="refresh-cw" onClick={onRefresh} tooltip="Rebuild graph" />
-    </div>
     <div class="toolbar-icon-wrapper">
       <Button
         iconId="wrench"
@@ -172,8 +180,18 @@ function handleClusterCohesionStrengthChange(val: number) {
         </div>
       {/if}
 
-      <!-- ── Detail slider ─────────────────────── -->
-      <SettingContainer name="Detail" compact>
+      <!-- ── Topics / Detail sliders ───────────── -->
+      <SettingContainer name="Topics" desc="Number of topics — lower groups notes broadly, higher splits them finely" compact>
+        <RangeSlider
+          value={Math.round((settings.leidenResolution ?? 1.0) * 100)}
+          min={10}
+          max={300}
+          step={5}
+          showValue={true}
+          oncommit={(v) => onTopicsCommit?.(v / 100)}
+        />
+      </SettingContainer>
+      <SettingContainer name="Detail" desc="Nodes per topic — lower keeps only the top hubs and bridges" compact>
         <RangeSlider
           value={skeletonDetail}
           min={0}
@@ -235,179 +253,72 @@ function handleClusterCohesionStrengthChange(val: number) {
 {#if import.meta.env.DEV}
   <div class="graph-controls graph-controls--dev" class:collapsed={isDevCollapsed}>
     {#if !isDevCollapsed}
-      <div class="graph-controls-header">
-        <div>
-          <h4 class="graph-controls-title">Dev · Layout</h4>
-          <div class="graph-controls-subtitle">Physics tuning</div>
-        </div>
-      </div>
       <div class="graph-controls-body">
         <button
           type="button"
-          class="section-header"
+          class="section-label section-label--collapsible"
           onclick={() => (sectionOpen.devLayout = !sectionOpen.devLayout)}
         >
-          <span>Force simulation</span>
-          <svg
-            class="section-chevron"
-            class:open={sectionOpen.devLayout}
-            xmlns="http://www.w3.org/2000/svg"
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
-          >
+          <span>Layout</span>
+          <svg class="section-chevron" class:open={sectionOpen.devLayout} xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
         </button>
         {#if sectionOpen.devLayout}
-          <SettingContainer
-            name="Link distance"
-            desc="Target distance between connected nodes"
-            compact
-          >
-            <RangeSlider
-              value={settings.linkDistance}
-              min={30}
-              max={500}
-              step={5}
-              showValue={true}
-              oncommit={handleLinkDistanceChange}
-            />
+          <SettingContainer name="Link distance" desc="Target distance between connected nodes" compact>
+            <RangeSlider value={settings.linkDistance} min={30} max={500} step={5} showValue={true} oncommit={handleLinkDistanceChange} />
           </SettingContainer>
           <SettingContainer name="Repulsion" desc="How strongly nodes push each other apart" compact>
-            <RangeSlider
-              value={Math.abs(settings.chargeStrength)}
-              min={10}
-              max={1500}
-              step={10}
-              showValue={true}
-              oncommit={handleChargeStrengthChange}
-            />
+            <RangeSlider value={Math.abs(settings.chargeStrength)} min={10} max={1500} step={10} showValue={true} oncommit={handleChargeStrengthChange} />
           </SettingContainer>
-          <SettingContainer
-            name="Center force"
-            desc="How strongly the graph is pulled toward the center"
-            compact
-          >
-            <RangeSlider
-              value={Math.round(settings.centerStrength * 100)}
-              min={0}
-              max={100}
-              step={1}
-              showValue={true}
-              oncommit={handleCenterStrengthChange}
-            />
+          <SettingContainer name="Center force" desc="How strongly the graph is pulled toward the center" compact>
+            <RangeSlider value={Math.round(settings.centerStrength * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleCenterStrengthChange} />
           </SettingContainer>
-          <SettingContainer
-            name="Link strength"
-            desc="How strongly edges pull connected nodes together"
-            compact
-          >
-            <RangeSlider
-              value={Math.round(settings.linkStrength * 100)}
-              min={0}
-              max={100}
-              step={1}
-              showValue={true}
-              oncommit={handleLinkStrengthChange}
-            />
+          <SettingContainer name="Link strength" desc="How strongly edges pull connected nodes together" compact>
+            <RangeSlider value={Math.round(settings.linkStrength * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleLinkStrengthChange} />
           </SettingContainer>
-          <SettingContainer
-            name="Cluster cohesion"
-            desc="How strongly nodes are pulled toward their cluster center"
-            compact
-          >
-            <RangeSlider
-              value={Math.round((settings.clusterCohesionStrength ?? 0.15) * 100)}
-              min={0}
-              max={100}
-              step={1}
-              showValue={true}
-              oncommit={handleClusterCohesionStrengthChange}
-            />
+          <SettingContainer name="Cluster cohesion" desc="How strongly nodes are pulled toward their cluster center" compact>
+            <RangeSlider value={Math.round((settings.clusterCohesionStrength ?? 0.15) * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleClusterCohesionStrengthChange} />
           </SettingContainer>
         {/if}
-      </div>
 
-      <!-- ══════════════════════════════════════ -->
-      <!-- LEIDEN CLUSTERING                     -->
-      <!-- ══════════════════════════════════════ -->
-      <button
-        type="button"
-        class="section-header"
-        onclick={() => (sectionOpen.devLeiden = !sectionOpen.devLeiden)}
-      >
-        <span>Leiden clustering</span>
-        <svg
-          class="section-chevron"
-          class:open={sectionOpen.devLeiden}
-          xmlns="http://www.w3.org/2000/svg"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg
+        <button
+          type="button"
+          class="section-label section-label--collapsible"
+          onclick={() => (sectionOpen.devLeiden = !sectionOpen.devLeiden)}
         >
-      </button>
-      {#if sectionOpen.devLeiden}
-        <SettingContainer name="Seed" desc="PRNG seed — same seed + graph = same topics" compact>
-          <input
-            type="number"
-            class="dev-number-input"
-            value={settings.leidenSeed ?? 42}
-            min={0}
-            max={999999}
-            step={1}
-            onchange={(e) => {
-              const v = Number((e.target as HTMLInputElement).value);
-              if (Number.isFinite(v)) {
-                onSettingsChange({ leidenSeed: Math.round(v) });
-                onRerunLeiden?.();
-              }
-            }}
-          />
-        </SettingContainer>
-        <SettingContainer
-          name="Resolution γ"
-          desc="Lower → fewer larger topics · Higher → more smaller ones"
-          compact
-        >
-          <RangeSlider
-            value={Math.round((settings.leidenResolution ?? 1.0) * 100)}
-            min={10}
-            max={300}
-            step={5}
-            showValue={true}
-            oncommit={(v) => {
-              onSettingsChange({ leidenResolution: v / 100 });
-              onRerunLeiden?.();
-            }}
-          />
-        </SettingContainer>
-        <SettingContainer
-          name="Bridge threshold"
-          desc="Min fraction of foreign-topic neighbors to show the bridge ring"
-          compact
-        >
-          <RangeSlider
-            value={Math.round((settings.bridgeThreshold ?? 0.4) * 100)}
-            min={0}
-            max={100}
-            step={5}
-            showValue={true}
-            oncommit={(v) => {
-              onSettingsChange({ bridgeThreshold: v / 100 });
-              onRerunLeiden?.();
-            }}
-          />
-        </SettingContainer>
-      {/if}
+          <span>Leiden</span>
+          <svg class="section-chevron" class:open={sectionOpen.devLeiden} xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+        {#if sectionOpen.devLeiden}
+          <SettingContainer name="Seed" desc="PRNG seed — same seed + graph = same topics" compact>
+            <input
+              type="number"
+              class="dev-number-input"
+              value={settings.leidenSeed ?? 42}
+              min={0} max={999999} step={1}
+              onchange={(e) => {
+                const v = Number((e.target as HTMLInputElement).value);
+                if (Number.isFinite(v)) { onSettingsChange({ leidenSeed: Math.round(v) }); onSeedChange?.(); }
+              }}
+            />
+          </SettingContainer>
+          <SettingContainer name="Bridge threshold" desc="Min fraction of foreign-topic neighbors to qualify as a bridge" compact>
+            <RangeSlider value={Math.round((settings.bridgeThreshold ?? 0.4) * 100)} min={0} max={100} step={5} showValue={true} oncommit={(v) => { onSettingsChange({ bridgeThreshold: v / 100 }); onReapplySegments?.(); }} />
+          </SettingContainer>
+          <SettingContainer name="Detail bridge centrality" desc="Min betweenness centrality for bridges to survive at low Detail" compact>
+            <RangeSlider value={Math.round((settings.skeletonBridgeCentralityThreshold ?? 0.05) * 1000)} min={0} max={200} step={1} showValue={true} oncommit={(v) => onSettingsChange({ skeletonBridgeCentralityThreshold: v / 1000 })} />
+          </SettingContainer>
+          <SettingContainer name="Outline Topics" desc="Topics value the atom toggle collapses to (γ ×100)" compact>
+            <RangeSlider value={Math.round((settings.outlineViewResolution ?? 0.5) * 100)} min={10} max={300} step={5} showValue={true} oncommit={(v) => onSettingsChange({ outlineViewResolution: v / 100 })} />
+          </SettingContainer>
+          <SettingContainer name="Outline Detail" desc="Detail value the atom toggle collapses to (0–100)" compact>
+            <RangeSlider value={settings.outlineViewDetail ?? 30} min={0} max={100} step={1} showValue={true} oncommit={(v) => onSettingsChange({ outlineViewDetail: v })} />
+          </SettingContainer>
+        {/if}
+
+        <div class="dev-actions">
+          <Button iconId="refresh-cw" onClick={onRefresh} tooltip="Rebuild graph" />
+        </div>
+      </div>
     {/if}
   </div>
 {/if}
@@ -442,13 +353,13 @@ function handleClusterCohesionStrengthChange(val: number) {
     box-shadow: none;
   }
 
-  .graph-controls--dev {
-    top: 260px;
-    border-color: var(--color-orange);
-  }
-
   .graph-controls.collapsed {
     display: none;
+  }
+
+  .graph-controls--dev {
+    top: 8px;
+    right: 356px;
   }
 
   .graph-controls-body {
@@ -494,26 +405,6 @@ function handleClusterCohesionStrengthChange(val: number) {
     font-size: 10px;
     color: var(--text-faint);
     margin-left: 4px;
-  }
-
-  .section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-muted);
-    padding: 6px 0 4px;
-    border: none;
-    border-top: 1px solid var(--background-modifier-border);
-    margin-top: 4px;
-    background: none;
-    cursor: pointer;
-  }
-
-  .section-header:hover {
-    color: var(--text-normal);
   }
 
   .section-chevron {
@@ -589,5 +480,26 @@ function handleClusterCohesionStrengthChange(val: number) {
     color: var(--text-normal);
     font-size: var(--font-ui-small);
     text-align: right;
+  }
+
+  .section-label--collapsible {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .section-label--collapsible:hover {
+    color: var(--text-normal);
+  }
+
+  .dev-actions {
+    display: flex;
+    gap: 4px;
+    padding-top: 4px;
   }
 </style>

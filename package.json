@@ -25,7 +25,7 @@
   },
   "private": true,
   "scripts": {
-    "dev": "vite build --mode development --watch",
+    "dev": "NODE_ENV=development vite build --mode development --watch",
     "build": "vite build --mode production",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "format": "biome format --write ./src",

@@ -4,6 +4,7 @@ import EmbeddingIndexSection from "../../components/settings/EmbeddingIndexSecti
 import ModelSettingControl from "../../components/settings/ModelSettingControl.svelte";
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
+import RangeSlider from "../../components/ui/RangeSlider.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
 import GenericAIIcon from "../../components/ui/logos/GenericAIIcon.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
@@ -95,6 +96,35 @@ function clearModel() {
     <Toggle
       checked={pluginData.smartGraphSettings.directedWikiEdges}
       onchange={(v) => updateSetting("directedWikiEdges", v)}
+    />
+  </SettingItem>
+</SettingGroup>
+
+<SettingGroup heading="Outline View">
+  <SettingItem
+    name="Outline Topics"
+    desc="Topics value the atom toggle collapses to. Lower groups notes broadly; higher splits them finely."
+  >
+    <RangeSlider
+      value={Math.round((pluginData.smartGraphSettings.outlineViewResolution ?? 0.5) * 100)}
+      min={10}
+      max={300}
+      step={5}
+      showValue={true}
+      oncommit={(v) => updateSetting("outlineViewResolution", v / 100)}
+    />
+  </SettingItem>
+  <SettingItem
+    name="Outline Detail"
+    desc="Detail value the atom toggle collapses to. Lower keeps only the top hubs and bridges per topic."
+  >
+    <RangeSlider
+      value={pluginData.smartGraphSettings.outlineViewDetail ?? 30}
+      min={0}
+      max={100}
+      step={1}
+      showValue={true}
+      oncommit={(v) => updateSetting("outlineViewDetail", v)}
     />
   </SettingItem>
 </SettingGroup>

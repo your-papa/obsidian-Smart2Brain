@@ -85,7 +85,6 @@ export interface ThemeColors {
 	textOnAccent: string;
 	bgPrimary: string;
 	font: string;
-	bridgeRing: string;
 }
 
 /** Blend fg over bg at the given alpha, returning a fully-opaque hex color.
@@ -132,7 +131,6 @@ export function readThemeColors(el: HTMLElement): ThemeColors {
 		textOnAccent: get("--text-on-accent", "#ffffff"),
 		bgPrimary: get("--background-primary", "#1e1e1e"),
 		font: style.getPropertyValue("--font-interface").trim() || "-apple-system, BlinkMacSystemFont, sans-serif",
-		bridgeRing: get("--color-yellow", "#e8c23a"),
 	};
 }
 
@@ -181,7 +179,6 @@ export class PixiRenderer {
 			strokeColor: string | null;
 			strokeAlpha: number;
 			strokeWidth: number;
-			bridgeRingColor: string | null;
 		}
 	> = new Map();
 
@@ -553,14 +550,6 @@ export class PixiRenderer {
 			const blendedStrokeColor =
 				strokeColor && strokeAlpha < 1 ? blendColor(strokeColor, c.bgPrimary, strokeAlpha) : strokeColor;
 
-			// Bridge ring: only nodes with meaningful betweenness centrality (true inter-cluster bridges)
-			const isBridge = (node.centrality ?? 0) >= 0.01;
-			const bridgeRingColor = isBridge
-				? alpha < 1
-					? blendColor(c.bridgeRing, c.bgPrimary, alpha)
-					: c.bridgeRing
-				: null;
-
 			// Check cache — skip geometry rebuild if nothing visual changed
 			const cached = this.nodeVisualCache.get(node.id);
 			const geometryDirty =
@@ -571,17 +560,10 @@ export class PixiRenderer {
 				cached.fillAlpha !== alpha ||
 				cached.strokeColor !== blendedStrokeColor ||
 				cached.strokeAlpha !== strokeAlpha ||
-				cached.strokeWidth !== strokeWidth ||
-				cached.bridgeRingColor !== bridgeRingColor;
+				cached.strokeWidth !== strokeWidth;
 
 			if (geometryDirty) {
 				gfx.clear();
-
-				// Bridge ring drawn first (behind the fill) as a slightly larger circle
-				if (bridgeRingColor) {
-					const ringRadius = radius + 2.5 / scale;
-					gfx.circle(0, 0, ringRadius).stroke({ color: bridgeRingColor, width: 2 / scale });
-				}
 
 				gfx.circle(0, 0, radius).fill({ color: fillColor });
 
@@ -600,7 +582,6 @@ export class PixiRenderer {
 					strokeColor: blendedStrokeColor,
 					strokeAlpha,
 					strokeWidth,
-					bridgeRingColor,
 				});
 			}
 		}
