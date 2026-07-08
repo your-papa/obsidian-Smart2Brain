@@ -215,15 +215,15 @@ function handleKeyDown(e: KeyboardEvent) {
 
 	switch (e.key) {
 		case "Escape":
-			if (immersed) {
-				onExitImmerse?.();
-			} else if (isLassoing) {
+			if (isLassoing) {
 				isLassoing = false;
 				lassoPoints = [];
 				pixi?.resumeViewport();
 				render();
 			} else if (selectedNodes.size > 0) {
 				clearSelection();
+			} else if (immersed) {
+				onExitImmerse?.();
 			} else if (focusedClusters.size > 0) {
 				onClearFocusedClusters?.();
 			}

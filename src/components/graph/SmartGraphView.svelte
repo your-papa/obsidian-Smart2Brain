@@ -724,31 +724,24 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     />
   {/if}
 
-  {#if isImmersed}
-    <div class="graph-selection-bar">
-      <span class="selection-count">{graphData.nodes.length} notes · immersed</span>
-      <div class="selection-actions">
-        <Button buttonText="Exit" onClick={handleExitImmerse} tooltip="Exit immerse (Esc)" />
-      </div>
-    </div>
-  {:else if selectedPaths.length > 0}
+  {#if isImmersed || selectedPaths.length > 0}
     <div class="graph-selection-bar">
       <span class="selection-count">
-        {selectedPaths.length} notes selected
+        {#if selectedPaths.length > 0}
+          {selectedPaths.length} notes selected{isImmersed ? " · immersed" : ""}
+        {:else}
+          {graphData.nodes.length} notes · immersed
+        {/if}
       </span>
       <div class="selection-actions">
-        <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
-        <Button buttonText="Immerse" onClick={handleImmerse} tooltip="Rebuild graph with selected notes only" />
-        <Button
-          buttonText="Open All"
-          onClick={handleOpenAllSelected}
-          tooltip="Open all selected notes in new tabs"
-        />
-        <Button
-          buttonText="Clear"
-          onClick={handleClearSelection}
-          tooltip="Clear selection (Esc)"
-        />
+        {#if selectedPaths.length > 0}
+          <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
+          <Button buttonText="Immerse" onClick={handleImmerse} tooltip="Rebuild graph with selected notes only" />
+          <Button buttonText="Open All" onClick={handleOpenAllSelected} tooltip="Open all selected notes in new tabs" />
+          <Button buttonText="Clear" onClick={handleClearSelection} tooltip="Clear selection (Esc)" />
+        {:else}
+          <Button buttonText="Exit" onClick={handleExitImmerse} tooltip="Exit immerse (Esc)" />
+        {/if}
       </div>
     </div>
   {/if}
