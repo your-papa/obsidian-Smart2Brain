@@ -45,6 +45,16 @@ interface AutocompleteSuggestion {
 type SearchSuggestion = SearchResult | AutocompleteSuggestion;
 type SearchResultBadge = NonNullable<SearchResult["matchBadges"]>[number];
 
+/**
+ * The undocumented chooser that SuggestModal creates internally. It owns the
+ * highlighted-row index, so we drive selection through it to keep our custom
+ * Shift+Arrow handling in sync with Obsidian's own arrow navigation.
+ */
+interface SuggestModalChooser {
+	selectedItem: number;
+	setSelectedItem(index: number, evt?: Event): void;
+}
+
 function isAutocomplete(item: SearchSuggestion): item is AutocompleteSuggestion {
 	return "type" in item && item.type === "autocomplete";
 }
@@ -176,7 +186,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		]);
 		this.setPlaceholder(
 			this.pickerOptions?.pickerText?.searchPlaceholder ??
-				"Search notes, use #tag or /folder, or leave empty for recent notes...",
+				`Search notes with #tag or /folder, or ${Platform.isMacOS ? "⌘↵" : "Ctrl+↵"} to ask the agent...`,
 		);
 		this.updateInstructions();
 
@@ -208,14 +218,68 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			}
 
 			evt.preventDefault();
-			void this.openSelectedSuggestionInNewTab();
+			void this.askAgentWithQuery();
 			return false;
 		});
 
+		this.scope.register(["Shift"], "ArrowDown", (evt) => {
+			if (this.extendSelection(1)) {
+				evt.preventDefault();
+				return false;
+			}
+			return true;
+		});
+
+		this.scope.register(["Shift"], "ArrowUp", (evt) => {
+			if (this.extendSelection(-1)) {
+				evt.preventDefault();
+				return false;
+			}
+			return true;
+		});
+
 		this.scope.register(["Shift"], "Enter", (evt) => {
-			evt.preventDefault();
-			this.toggleFocusedSelection();
-			return false;
+			const focused = this.getFocusedSearchResult();
+			if (focused) {
+				evt.preventDefault();
+				this.toggleSelection(focused);
+				return false;
+			}
+			return true;
+		});
+
+		// Vim-style navigation: Ctrl+J/K move the highlight down/up (no footer hint).
+		this.scope.register(["Ctrl"], "J", (evt) => {
+			if (this.moveFocus(1)) {
+				evt.preventDefault();
+				return false;
+			}
+			return true;
+		});
+
+		this.scope.register(["Ctrl"], "K", (evt) => {
+			if (this.moveFocus(-1)) {
+				evt.preventDefault();
+				return false;
+			}
+			return true;
+		});
+
+		// Ctrl+Shift+J/K select-while-navigating, mirroring Shift+Arrow (no footer hint).
+		this.scope.register(["Ctrl", "Shift"], "J", (evt) => {
+			if (this.extendSelection(1)) {
+				evt.preventDefault();
+				return false;
+			}
+			return true;
+		});
+
+		this.scope.register(["Ctrl", "Shift"], "K", (evt) => {
+			if (this.extendSelection(-1)) {
+				evt.preventDefault();
+				return false;
+			}
+			return true;
 		});
 
 		this.scope.register(["Mod", "Shift"], "Enter", (evt) => {
@@ -371,7 +435,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 				: `${this.getPickerConfirmVerb()} focused file`;
 		}
 
-		return this.selectedResultsByPath.size > 0 ? "Open selection" : "Open note";
+		return this.selectedResultsByPath.size > 0 ? "Open selection in tabs" : "Open note in tab";
 	}
 
 	private getCreateInstructionPurpose(): string | null {
@@ -412,7 +476,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			this.setInstructions([
 				{ command: "↑↓", purpose: "Navigate" },
 				{ command: "↵", purpose: this.getEnterInstructionPurpose() },
-				{ command: "⇧↵", purpose: "Toggle selection" },
+				{ command: "⇧↑↓/↵", purpose: "Select" },
 				{ command: "esc", purpose: "Close" },
 			]);
 			return;
@@ -426,8 +490,8 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		const instructions = [
 			{ command: "↑↓", purpose: "Navigate" },
 			{ command: "↵", purpose: this.getEnterInstructionPurpose() },
-			{ command: "⇧↵", purpose: "Toggle selection" },
-			{ command: modEnterKey, purpose: "Open in new tab" },
+			{ command: "⇧↑↓/↵", purpose: "Select" },
+			{ command: modEnterKey, purpose: "Ask agent" },
 			{ command: altEnterKey, purpose: "Send to chat" },
 			{ command: tabKey, purpose: semanticLabel },
 			{ command: "esc", purpose: "Close" },
@@ -445,6 +509,36 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		return [...this.selectedResultsByPath.values()];
 	}
 
+	/** The rendered suggestion rows, in display order. */
+	private getSuggestionEls(): HTMLElement[] {
+		return Array.from(this.resultContainerEl?.children ?? []).filter(
+			(child): child is HTMLElement =>
+				child instanceof HTMLElement && child.classList.contains("suggestion-item"),
+		);
+	}
+
+	/** Access SuggestModal's internal chooser (undocumented) so we stay in sync with its highlight index. */
+	private getChooser(): SuggestModalChooser | null {
+		const chooser = (this as unknown as { chooser?: SuggestModalChooser }).chooser;
+		return chooser && typeof chooser.setSelectedItem === "function" ? chooser : null;
+	}
+
+	/** Index of the row Obsidian currently highlights (the one arrow keys move), or 0. */
+	private getFocusedIndex(): number {
+		const chooser = this.getChooser();
+		if (chooser && chooser.selectedItem >= 0) {
+			return chooser.selectedItem;
+		}
+
+		const suggestionEls = this.getSuggestionEls();
+		if (suggestionEls.length === 0) {
+			return 0;
+		}
+
+		const selectedIndex = suggestionEls.findIndex((child) => child.classList.contains("is-selected"));
+		return selectedIndex >= 0 ? selectedIndex : 0;
+	}
+
 	private getSelectedSuggestion(): SearchResult | null {
 		const selectedResults = this.getSelectedResults();
 		if (selectedResults.length > 0) {
@@ -455,17 +549,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return null;
 		}
 
-		const suggestionEls = Array.from(this.resultContainerEl?.children ?? []).filter(
-			(child): child is HTMLElement =>
-				child instanceof HTMLElement && child.classList.contains("suggestion-item"),
-		);
-
-		if (suggestionEls.length === 0) {
-			return this.searchResults[0] ?? null;
-		}
-
-		const selectedIndex = suggestionEls.findIndex((child) => child.classList.contains("is-selected"));
-		const resultIndex = selectedIndex >= 0 ? selectedIndex : 0;
+		const resultIndex = this.getFocusedIndex();
 		return this.searchResults[resultIndex] ?? this.searchResults[0] ?? null;
 	}
 
@@ -474,25 +558,83 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return null;
 		}
 
-		const suggestionEls = Array.from(this.resultContainerEl?.children ?? []).filter(
-			(child): child is HTMLElement =>
-				child instanceof HTMLElement && child.classList.contains("suggestion-item"),
-		);
-
-		if (suggestionEls.length === 0) {
-			return this.searchResults[0] ?? null;
-		}
-
-		const selectedIndex = suggestionEls.findIndex((child) => child.classList.contains("is-selected"));
-		const resultIndex = selectedIndex >= 0 ? selectedIndex : 0;
+		const resultIndex = this.getFocusedIndex();
 		return this.searchResults[resultIndex] ?? this.searchResults[0] ?? null;
 	}
 
+	/**
+	 * Toggle the currently highlighted row (select if unselected, unselect if
+	 * selected), then move the highlight one row per the arrow direction. Returns
+	 * false when there is nowhere to move.
+	 */
+	private extendSelection(direction: -1 | 1): boolean {
+		const suggestionEls = this.getSuggestionEls();
+		if (suggestionEls.length === 0 || this.searchResults.length === 0) {
+			return false;
+		}
+
+		const fromIndex = this.getFocusedIndex();
+		const toIndex = fromIndex + direction;
+		if (toIndex < 0 || toIndex >= suggestionEls.length) {
+			return false;
+		}
+
+		const current = this.searchResults[fromIndex];
+		if (current && !this.isPickerUnavailable(current.path)) {
+			if (this.selectedResultsByPath.has(current.path)) {
+				this.selectedResultsByPath.delete(current.path);
+			} else {
+				this.selectedResultsByPath.set(current.path, current);
+			}
+		}
+
+		this.setFocusedIndex(toIndex);
+		this.updateSelectionSummary();
+		this.updateInstructions();
+		this.syncRenderedSelectionState();
+		return true;
+	}
+
+	/** Move the row highlight by one step (Vim-style navigation). Returns false when there is nowhere to move. */
+	private moveFocus(direction: -1 | 1): boolean {
+		const suggestionEls = this.getSuggestionEls();
+		if (suggestionEls.length === 0) {
+			return false;
+		}
+
+		const toIndex = this.getFocusedIndex() + direction;
+		if (toIndex < 0 || toIndex >= suggestionEls.length) {
+			return false;
+		}
+
+		this.setFocusedIndex(toIndex);
+		return true;
+	}
+
+	/** Move Obsidian's row highlight to the given index and scroll it into view. */
+	private setFocusedIndex(index: number): void {
+		// Prefer the chooser so its internal index tracks the visible highlight;
+		// otherwise a following plain arrow press would move from a stale index.
+		const chooser = this.getChooser();
+		if (chooser) {
+			chooser.setSelectedItem(index);
+			return;
+		}
+
+		const suggestionEls = this.getSuggestionEls();
+		const target = suggestionEls[index];
+		if (!target) {
+			return;
+		}
+
+		for (const child of suggestionEls) {
+			child.toggleClass("is-selected", child === target);
+		}
+		target.scrollIntoView({ block: "nearest" });
+	}
+
 	private syncRenderedSelectionState(): void {
-		const suggestionEls = Array.from(this.resultContainerEl?.children ?? []).filter(
-			(child): child is HTMLElement =>
-				child instanceof HTMLElement && child.classList.contains("suggestion-item"),
-		);
+		const suggestionEls = this.getSuggestionEls();
 		if (suggestionEls.length === 0) {
 			return;
 		}
@@ -520,15 +662,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.updateSelectionSummary();
 		this.updateInstructions();
 		this.syncRenderedSelectionState();
-	}
-
-	private toggleFocusedSelection(): void {
-		const result = this.getFocusedSearchResult();
-		if (!result) {
-			return;
-		}
-
-		this.toggleSelection(result);
 	}
 
 	private clearSelection(): void {
@@ -561,7 +694,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return;
 		}
 
-		this.openSearchResults(selectedResults, false);
+		this.openSearchResults(selectedResults, "tab");
 	}
 
 	private openSearchResults(results: SearchResult[], destination: false | "tab"): void {
@@ -620,50 +753,35 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return;
 		}
 
-		if (destination === false) {
-			let existingLeaf: WorkspaceLeaf | null = null;
-			this.app.workspace.iterateAllLeaves((leaf) => {
-				if (existingLeaf) {
-					return;
-				}
-
-				const viewState = leaf.getViewState();
-				if (viewState.type === "markdown" && viewState.state?.file === file.path) {
-					existingLeaf = leaf;
-					return;
-				}
-
-				if (leaf.view instanceof MarkdownView && leaf.view.file?.path === file.path) {
-					existingLeaf = leaf;
-				}
-			});
-
+		// Always reuse a leaf that already has this note open, regardless of the
+		// requested destination — no point opening a duplicate.
+		let existingLeaf: WorkspaceLeaf | null = null;
+		this.app.workspace.iterateAllLeaves((leaf) => {
 			if (existingLeaf) {
-				getData().recordRecentlyOpenedNote(file.path);
-				this.close();
-				this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
-				void this.app.workspace.revealLeaf(existingLeaf);
 				return;
 			}
+
+			const viewState = leaf.getViewState();
+			if (viewState.type === "markdown" && viewState.state?.file === file.path) {
+				existingLeaf = leaf;
+				return;
+			}
+
+			if (leaf.view instanceof MarkdownView && leaf.view.file?.path === file.path) {
+				existingLeaf = leaf;
+			}
+		});
+
+		if (existingLeaf) {
+			getData().recordRecentlyOpenedNote(file.path);
+			this.close();
+			this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+			void this.app.workspace.revealLeaf(existingLeaf);
+			return;
 		}
 
 		this.close();
 		this.app.workspace.openLinkText(result.path, "", destination);
-	}
-
-	private async openSelectedSuggestionInNewTab(): Promise<void> {
-		const selectedResults = this.getSelectedResults();
-		if (selectedResults.length > 0) {
-			this.openSearchResults(selectedResults, "tab");
-			return;
-		}
-
-		const selectedSuggestion = this.getSelectedSuggestion();
-		if (!selectedSuggestion) {
-			return;
-		}
-
-		this.openSearchResult(selectedSuggestion, "tab");
 	}
 
 	private async sendSelectedToChat(): Promise<void> {
@@ -692,6 +810,44 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		} else {
 			new Notice("Chat is not initialized yet. Please open a chat first.");
 		}
+	}
+
+	/**
+	 * Send the typed query to an agent: open/reveal the chat, prefill the query,
+	 * attach any selected notes, and auto-submit. Unlike sendSelectedToChat, the
+	 * query text alone is enough — attachments are optional.
+	 */
+	private async askAgentWithQuery(): Promise<void> {
+		const query = this.currentQuery.trim();
+		if (!query) {
+			return;
+		}
+
+		const selectedResults = this.getSelectedResults();
+		const paths = selectedResults.map((result) => result.path);
+
+		this.close();
+
+		// Ensure a chat is open
+		const plugin = getPlugin();
+		const existingLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
+		if (!existingLeaf) {
+			await plugin.agentManager.createNewChat();
+		} else {
+			this.app.workspace.revealLeaf(existingLeaf);
+		}
+
+		const messenger = getMessenger();
+		if (!messenger) {
+			new Notice("Chat is not initialized yet. Please open a chat first.");
+			return;
+		}
+
+		messenger.pendingInput = query;
+		if (paths.length > 0) {
+			messenger.pendingAttachmentPaths = paths;
+		}
+		messenger.pendingAutoSubmit = true;
 	}
 
 	private async getUniqueNotePath(baseTitle: string): Promise<{ title: string; path: string }> {
@@ -752,6 +908,20 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			Logger.error("[SearchModal] Failed to create note from query:", error);
 			new Notice("Failed to create note");
 		}
+	}
+
+	/**
+	 * Escape clears the selection first; a second press (nothing selected) closes
+	 * the modal. Overrides Modal.onEscapeKey, which is not in the public typings.
+	 */
+	onEscapeKey(evt?: KeyboardEvent): void {
+		if (this.selectedResultsByPath.size > 0) {
+			evt?.preventDefault();
+			this.clearSelection();
+			return;
+		}
+
+		this.close();
 	}
 
 	onOpen(): void {
@@ -1813,8 +1983,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return;
 		}
 
-		const destination = evt.ctrlKey || evt.metaKey ? "tab" : false;
-		this.openSearchResult(item, destination);
+		// Always open in a tab (reusing an existing leaf when the note is already
+		// open) rather than replacing the active note.
+		this.openSearchResult(item, "tab");
 	}
 
 	/**
@@ -1826,12 +1997,14 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return;
 		}
 
-		if (this.isPickerMode() && evt instanceof KeyboardEvent) {
-			if (evt.shiftKey) {
-				this.toggleSelection(value);
-				return;
-			}
+		// Shift-click (or shift+enter) toggles selection and keeps the modal open,
+		// in every mode. super.selectSuggestion would otherwise close the modal.
+		if (evt.shiftKey) {
+			this.toggleSelection(value);
+			return;
+		}
 
+		if (this.isPickerMode() && evt instanceof KeyboardEvent) {
 			this.confirmSelection();
 			return;
 		}

@@ -209,6 +209,9 @@ $effect(() => {
 		const text = messenger.pendingInput;
 		messenger.pendingInput = null;
 		markdownEditor.setValue(text);
+		// setValue does not fire the editor onChange, so mirror the value into
+		// inputValue ourselves — otherwise canSendMessage/auto-submit stay stale.
+		inputValue = text;
 		requestAnimationFrame(() => markdownEditor?.focus());
 	}
 });
@@ -222,6 +225,18 @@ $effect(() => {
 	messenger.pendingAttachmentPaths = null;
 
 	void attachVaultFilesByPath(paths);
+});
+
+// Auto-submit queued input (e.g. "Ask agent" from the search modal).
+// Waits until attachments finish loading and there is something to send,
+// so it works whether or not notes were queued alongside the text.
+$effect(() => {
+	if (!messenger.pendingAutoSubmit) return;
+	if (savingFiles) return;
+	if (!canSendMessage) return;
+
+	messenger.pendingAutoSubmit = false;
+	sendMessage();
 });
 
 // Keep a cached assembled system prompt so estimate matches what is actually sent.

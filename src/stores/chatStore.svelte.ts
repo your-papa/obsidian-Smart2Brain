@@ -1947,6 +1947,7 @@ export class Messenger {
 	pendingInput: string | null = $state(null);
 	pendingGraphNotes: string[] | null = $state(null);
 	pendingAttachmentPaths: string[] | null = $state(null);
+	pendingAutoSubmit: boolean = $state(false);
 	#agentManager: AgentManager;
 
 	constructor(agentManager: AgentManager) {
