@@ -208,11 +208,16 @@ $effect(() => {
 	if (messenger.pendingInput && markdownEditor) {
 		const text = messenger.pendingInput;
 		messenger.pendingInput = null;
-		markdownEditor.setValue(text);
-		// setValue does not fire the editor onChange, so mirror the value into
-		// inputValue ourselves — otherwise canSendMessage/auto-submit stay stale.
+		// Mirror the value into inputValue synchronously so canSendMessage/auto-submit
+		// reflect it (setValue does not fire the editor onChange). Defer the editor
+		// write to the next frame so CodeMirror's DOM is laid out before the
+		// transaction dispatches — otherwise decoration plugins can throw on a
+		// stale position ("No tile at position N").
 		inputValue = text;
-		requestAnimationFrame(() => markdownEditor?.focus());
+		requestAnimationFrame(() => {
+			markdownEditor?.setValue(text);
+			markdownEditor?.focus();
+		});
 	}
 });
 

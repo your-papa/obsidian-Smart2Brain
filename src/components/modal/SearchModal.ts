@@ -825,6 +825,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 		const selectedResults = this.getSelectedResults();
 		const paths = selectedResults.map((result) => result.path);
+		const prompt = this.appendFilterContext(query);
 
 		this.close();
 
@@ -843,11 +844,38 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return;
 		}
 
-		messenger.pendingInput = query;
+		messenger.pendingInput = prompt;
 		if (paths.length > 0) {
 			messenger.pendingAttachmentPaths = paths;
 		}
 		messenger.pendingAutoSubmit = true;
+	}
+
+	/**
+	 * Append the active tag/folder filters as scope context so the agent knows the
+	 * user has narrowed to those notes. Returns the query unchanged when no filters
+	 * are set.
+	 */
+	private appendFilterContext(query: string): string {
+		const tags = this.activeFilters
+			.filter((f) => f.type === "tag")
+			.map((f) => (f.value.startsWith("#") ? f.value : `#${f.value}`));
+		const folders = this.activeFilters.filter((f) => f.type === "path").map((f) => f.value.replace(/\/$/, ""));
+
+		const scopes: string[] = [];
+		if (tags.length > 0) {
+			const joiner = tags.length > 1 && this.requireAllTags ? " and " : " or ";
+			scopes.push(`tagged ${tags.join(joiner)}`);
+		}
+		if (folders.length > 0) {
+			scopes.push(`in the folder${folders.length > 1 ? "s" : ""} ${folders.join(" or ")}`);
+		}
+
+		if (scopes.length === 0) {
+			return query;
+		}
+
+		return `${query}\n\n(Scope: notes ${scopes.join(", ")}.)`;
 	}
 
 	private async getUniqueNotePath(baseTitle: string): Promise<{ title: string; path: string }> {
