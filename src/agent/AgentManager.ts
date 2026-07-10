@@ -1073,6 +1073,11 @@ export class AgentManager {
 		await this.chatManager.delete(this.normalizeThreadId(threadId));
 	}
 
+	/** Rename the chat thread's file to `title`. Returns the new vault path, or `undefined` on failure. */
+	async renameThread(threadId: string, title: string): Promise<string | undefined> {
+		return this.chatManager.renameChatFile(this.normalizeThreadId(threadId), title);
+	}
+
 	async setLastViewedCheckpoint(threadId: string, checkpointId: string): Promise<void> {
 		const snapshot = await this.chatManager.read(this.normalizeThreadId(threadId), true);
 		if (!snapshot) return;
