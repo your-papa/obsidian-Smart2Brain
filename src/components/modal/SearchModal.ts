@@ -787,18 +787,30 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	/**
 	 * Send the typed query to an agent: open/reveal the chat, prefill the query,
-	 * attach any selected notes, and auto-submit. The query text alone is enough —
-	 * attachments are optional.
+	 * attach the selected (or focused) notes, and auto-submit. When the query is
+	 * empty, the selected/focused notes are still attached — the chat opens
+	 * without submitting so the user can type their question.
 	 */
 	private async askAgentWithQuery(): Promise<void> {
 		const query = this.currentQuery.trim();
-		if (!query) {
+
+		// Resolve the notes to attach: an explicit selection, else the focused
+		// result. This lets a note-only ask (empty query) still attach context.
+		const selectedResults = this.getSelectedResults();
+		const focusedResult = selectedResults.length === 0 ? this.getFocusedSearchResult() : null;
+		const paths =
+			selectedResults.length > 0
+				? selectedResults.map((result) => result.path)
+				: focusedResult
+					? [focusedResult.path]
+					: [];
+
+		// Nothing to ask about — no query text and no notes to attach.
+		if (!query && paths.length === 0) {
 			return;
 		}
 
-		const selectedResults = this.getSelectedResults();
-		const paths = selectedResults.map((result) => result.path);
-		const prompt = this.appendFilterContext(query);
+		const prompt = query ? this.appendFilterContext(query) : "";
 
 		this.close();
 
@@ -817,11 +829,16 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return;
 		}
 
-		messenger.pendingInput = prompt;
 		if (paths.length > 0) {
 			messenger.pendingAttachmentPaths = paths;
 		}
-		messenger.pendingAutoSubmit = true;
+
+		// With a query, prefill and auto-submit. Note-only (empty query): attach
+		// the notes and open the chat without submitting, so the user can type.
+		if (prompt) {
+			messenger.pendingInput = prompt;
+			messenger.pendingAutoSubmit = true;
+		}
 	}
 
 	/**
