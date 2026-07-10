@@ -1,6 +1,6 @@
 <div align="center">
 
-![2-05](https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/0f9671ab-c39a-46f1-b3e8-bc045b578965)
+<img width="400" height="202" alt="S2B 1" src="https://github.com/user-attachments/assets/af65af0f-189e-4636-8b58-87f73c3d6e01" />
 
 </div>
 
