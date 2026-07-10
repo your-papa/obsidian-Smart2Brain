@@ -215,6 +215,10 @@ $effect(() => {
 		// stale position ("No tile at position N").
 		inputValue = text;
 		requestAnimationFrame(() => {
+			// If auto-submit already sent and cleared the input this tick, don't
+			// resurrect the text into the cleared editor — that makes a sent
+			// message look like it's still sitting unsent in the input.
+			if (inputValue !== text) return;
 			markdownEditor?.setValue(text);
 			markdownEditor?.focus();
 		});
