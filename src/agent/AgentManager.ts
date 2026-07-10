@@ -1046,6 +1046,14 @@ export class AgentManager {
 		return agent.getCheckpointHistory(this.normalizeThreadId(threadId));
 	}
 
+	/**
+	 * Whether a thread has no checkpoints yet (a brand-new, unsubmitted chat).
+	 * Used to skip the loading skeleton when opening an empty chat.
+	 */
+	async isThreadEmpty(threadId: string): Promise<boolean> {
+		return this.chatManager.isThreadEmpty(this.normalizeThreadId(threadId));
+	}
+
 	async getCheckpointMessages(threadId: string, checkpointId: string): Promise<BaseMessage[]> {
 		const agent = await this.ensureAgent();
 		return agent.getCheckpointMessages(this.normalizeThreadId(threadId), checkpointId);

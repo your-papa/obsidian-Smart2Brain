@@ -352,6 +352,17 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		return undefined;
 	}
 
+	/**
+	 * Whether a thread has no checkpoints yet (a brand-new, unsubmitted chat).
+	 * Cheap enough to call before loading a session so the UI can skip the
+	 * loading skeleton for empty chats. Missing threads are treated as empty.
+	 */
+	async isThreadEmpty(threadId: string): Promise<boolean> {
+		const data = await this.ensureThreadLoaded(threadId);
+		if (!data) return true;
+		return Object.keys(data.checkpoints).length === 0;
+	}
+
 	private createThreadData(threadId: string): ThreadData {
 		return {
 			threadId,

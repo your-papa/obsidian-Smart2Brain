@@ -2093,11 +2093,14 @@ export class Messenger {
 	/* ---------------- Chat Creation / Metadata ---------------- */
 
 	async loadSession(file: TFile, targetCheckpointId?: string) {
-		this.isLoadingSession = true;
-		try {
-			const id = await this.deriveThreadId(file);
-			if (!id) throw new Error("Invalid thread ID");
+		const id = await this.deriveThreadId(file);
+		if (!id) throw new Error("Invalid thread ID");
 
+		// Skip the loading skeleton for brand-new, empty chats: there is no
+		// history to fetch, so show the empty state + input immediately.
+		const isEmpty = await this.#agentManager.isThreadEmpty(id);
+		if (!isEmpty) this.isLoadingSession = true;
+		try {
 			const [history, checkpointHistory] = await Promise.all([
 				this.#agentManager.getThreadHistory(id),
 				this.#agentManager.getCheckpointHistory(id),
