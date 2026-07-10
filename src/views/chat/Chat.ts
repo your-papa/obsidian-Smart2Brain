@@ -32,7 +32,10 @@ export class ChatView extends FileView {
 	async onLoadFile(file: TFile): Promise<void> {
 		await super.onLoadFile(file);
 		const messenger = getMessenger();
-		messenger?.loadSession(file);
+		// Await the session load so callers that open a chat and then submit
+		// (e.g. "Ask agent" from the search modal) find a ready session rather
+		// than racing against an unresolved async load.
+		await messenger?.loadSession(file);
 	}
 
 	protected async onOpen(): Promise<void> {

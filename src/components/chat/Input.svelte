@@ -237,10 +237,13 @@ $effect(() => {
 });
 
 // Auto-submit queued input (e.g. "Ask agent" from the search modal).
-// Waits until attachments finish loading and there is something to send,
-// so it works whether or not notes were queued alongside the text.
+// Waits until the chat session is ready and attachments finish loading and
+// there is something to send, so it works whether or not notes were queued
+// alongside the text — and doesn't drop the send if the session is still
+// loading (the effect re-runs when messenger.session becomes available).
 $effect(() => {
 	if (!messenger.pendingAutoSubmit) return;
+	if (!messenger.session) return;
 	if (savingFiles) return;
 	if (!canSendMessage) return;
 
