@@ -1,4 +1,4 @@
-import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import "./lib/i18n";
 import { Logger as Log } from "./utils/logging";
 import "./styles.css";
@@ -8,6 +8,8 @@ import { selectionHighlightPlugin } from "./editor/selectionHighlightExtension";
 import { createReadingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
 import { terminateWorker as terminateClusteringWorker } from "./utils/computeWorkerManager";
 import { SearchModal } from "./components/modal/SearchModal";
+import { confirmDelete } from "./components/modal/ConfirmModal";
+import { promptText } from "./components/modal/PromptModal";
 import { getQueryClient } from "./lib/query";
 import { SkillsService } from "./skills";
 import { createMessenger, getMessenger } from "./stores/chatStore.svelte";
@@ -48,6 +50,39 @@ export default class SecondBrainPlugin extends Plugin {
 			return "Add to Chat";
 		}
 		return `Add ${selectedCount} files to Chat`;
+	}
+
+	/** Add rename/delete actions to the right-click menu of a `.chat` file. */
+	private addChatFileMenuItems(menu: Menu, file: TFile): void {
+		menu.addItem((item) =>
+			item
+				.setTitle("Rename chat")
+				.setIcon("pencil")
+				.onClick(async () => {
+					const newTitle = await promptText(this.app, "Rename chat", file.basename, "Rename");
+					if (!newTitle || newTitle === file.basename) return;
+					try {
+						await this.agentManager.renameThread(file.path, newTitle);
+					} catch (error) {
+						new Notice(`Failed to rename chat: ${error instanceof Error ? error.message : String(error)}`);
+					}
+				}),
+		);
+
+		menu.addItem((item) =>
+			item
+				.setTitle("Delete chat")
+				.setIcon("trash")
+				.onClick(async () => {
+					const confirmed = await confirmDelete(this.app, file.basename);
+					if (!confirmed) return;
+					try {
+						await this.agentManager.deleteThread(file.path);
+					} catch (error) {
+						new Notice(`Failed to delete chat: ${error instanceof Error ? error.message : String(error)}`);
+					}
+				}),
+		);
 	}
 
 	private registerNotebookNavigatorMenus() {
@@ -308,6 +343,12 @@ export default class SecondBrainPlugin extends Plugin {
 			this.app.workspace.on("file-menu", (menu, file) => {
 				if (!(file instanceof TFile)) return;
 
+				// .chat files get chat-specific actions instead of "Add to Chat".
+				if (file.extension === "chat") {
+					this.addChatFileMenuItems(menu, file);
+					return;
+				}
+
 				menu.addItem((item) =>
 					item
 						.setTitle(this.getAddToChatMenuLabel(1))
@@ -330,13 +371,17 @@ export default class SecondBrainPlugin extends Plugin {
 				const selectedFiles = files.filter((file): file is TFile => file instanceof TFile);
 				if (selectedFiles.length === 0) return;
 
+				// Don't offer "Add to Chat" when the selection is only chat files.
+				const attachableFiles = selectedFiles.filter((file) => file.extension !== "chat");
+				if (attachableFiles.length === 0) return;
+
 				menu.addItem((item) =>
 					item
-						.setTitle(this.getAddToChatMenuLabel(selectedFiles.length))
+						.setTitle(this.getAddToChatMenuLabel(attachableFiles.length))
 						.setIcon("message-square-plus")
 						.onClick(async () => {
 							try {
-								await this.queueFilesForChatAttachment(selectedFiles);
+								await this.queueFilesForChatAttachment(attachableFiles);
 							} catch (error) {
 								new Notice(
 									`Failed to add files to chat: ${error instanceof Error ? error.message : String(error)}`,
