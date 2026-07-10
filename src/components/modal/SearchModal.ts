@@ -186,7 +186,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		]);
 		this.setPlaceholder(
 			this.pickerOptions?.pickerText?.searchPlaceholder ??
-				`Search notes with #tag or /folder, or ${Platform.isMacOS ? "⌘↵" : "Ctrl+↵"} to ask the agent...`,
+				`Search notes with #tag or /folder, or ${Platform.isMacOS ? "⌥↵" : "Alt+↵"} to ask the agent...`,
 		);
 		this.updateInstructions();
 
@@ -217,9 +217,22 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 				return false;
 			}
 
-			evt.preventDefault();
-			void this.askAgentWithQuery();
-			return false;
+			// Cmd/Ctrl+Enter opens in a new tab (native Obsidian convention).
+			const selectedResults = this.getSelectedResults();
+			if (selectedResults.length > 0) {
+				evt.preventDefault();
+				this.openSearchResults(selectedResults, "tab");
+				return false;
+			}
+
+			const focused = this.getFocusedSearchResult();
+			if (focused) {
+				evt.preventDefault();
+				this.openSearchResult(focused, "tab");
+				return false;
+			}
+
+			return true;
 		});
 
 		this.scope.register(["Shift"], "ArrowDown", (evt) => {
@@ -300,7 +313,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			}
 
 			evt.preventDefault();
-			void this.sendSelectedToChat();
+			void this.askAgentWithQuery();
 			return false;
 		});
 
@@ -435,7 +448,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 				: `${this.getPickerConfirmVerb()} focused file`;
 		}
 
-		return this.selectedResultsByPath.size > 0 ? "Open selection in tabs" : "Open note in tab";
+		return this.selectedResultsByPath.size > 0 ? "Open selection" : "Open note";
 	}
 
 	private getCreateInstructionPurpose(): string | null {
@@ -491,8 +504,8 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			{ command: "↑↓", purpose: "Navigate" },
 			{ command: "↵", purpose: this.getEnterInstructionPurpose() },
 			{ command: "⇧↑↓/↵", purpose: "Select" },
-			{ command: modEnterKey, purpose: "Ask agent" },
-			{ command: altEnterKey, purpose: "Send to chat" },
+			{ command: modEnterKey, purpose: "Open in new tab" },
+			{ command: altEnterKey, purpose: "Ask agent" },
 			{ command: tabKey, purpose: semanticLabel },
 			{ command: "esc", purpose: "Close" },
 		];
@@ -537,20 +550,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 		const selectedIndex = suggestionEls.findIndex((child) => child.classList.contains("is-selected"));
 		return selectedIndex >= 0 ? selectedIndex : 0;
-	}
-
-	private getSelectedSuggestion(): SearchResult | null {
-		const selectedResults = this.getSelectedResults();
-		if (selectedResults.length > 0) {
-			return selectedResults[0] ?? null;
-		}
-
-		if (this.searchResults.length === 0) {
-			return null;
-		}
-
-		const resultIndex = this.getFocusedIndex();
-		return this.searchResults[resultIndex] ?? this.searchResults[0] ?? null;
 	}
 
 	private getFocusedSearchResult(): SearchResult | null {
@@ -694,7 +693,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return;
 		}
 
-		this.openSearchResults(selectedResults, "tab");
+		// Plain Enter opens in place (native Obsidian convention). A multi-note
+		// selection still fans the extras out into tabs (see openSearchResults).
+		this.openSearchResults(selectedResults, false);
 	}
 
 	private openSearchResults(results: SearchResult[], destination: false | "tab"): void {
@@ -784,38 +785,10 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.app.workspace.openLinkText(result.path, "", destination);
 	}
 
-	private async sendSelectedToChat(): Promise<void> {
-		const selectedResults = this.getSelectedResults();
-		const resultPaths = selectedResults.length > 0 ? selectedResults.map((result) => result.path) : [];
-		const selectedSuggestion = resultPaths.length === 0 ? this.getSelectedSuggestion() : null;
-		const paths = selectedSuggestion ? [selectedSuggestion.path] : resultPaths;
-		if (paths.length === 0) {
-			return;
-		}
-
-		this.close();
-
-		// Ensure a chat is open
-		const plugin = getPlugin();
-		const existingLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
-		if (!existingLeaf) {
-			await plugin.agentManager.createNewChat();
-		} else {
-			this.app.workspace.revealLeaf(existingLeaf);
-		}
-
-		const messenger = getMessenger();
-		if (messenger) {
-			messenger.pendingAttachmentPaths = paths;
-		} else {
-			new Notice("Chat is not initialized yet. Please open a chat first.");
-		}
-	}
-
 	/**
 	 * Send the typed query to an agent: open/reveal the chat, prefill the query,
-	 * attach any selected notes, and auto-submit. Unlike sendSelectedToChat, the
-	 * query text alone is enough — attachments are optional.
+	 * attach any selected notes, and auto-submit. The query text alone is enough —
+	 * attachments are optional.
 	 */
 	private async askAgentWithQuery(): Promise<void> {
 		const query = this.currentQuery.trim();
@@ -2011,9 +1984,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return;
 		}
 
-		// Always open in a tab (reusing an existing leaf when the note is already
-		// open) rather than replacing the active note.
-		this.openSearchResult(item, "tab");
+		// Open in the current pane (reusing an existing leaf when the note is
+		// already open), matching native Obsidian Enter/click behavior.
+		this.openSearchResult(item, false);
 	}
 
 	/**

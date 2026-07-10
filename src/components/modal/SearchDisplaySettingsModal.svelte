@@ -124,7 +124,7 @@ const enabledCount = $derived.by(() => {
           <div class="prompt-instruction"><span class="prompt-instruction-command">↑↓</span><span>Navigate</span></div>
           <div class="prompt-instruction"><span class="prompt-instruction-command">↵</span><span>Open note</span></div>
           <div class="prompt-instruction"><span class="prompt-instruction-command">{modEnterKey}</span><span>Open in new tab</span></div>
-          <div class="prompt-instruction"><span class="prompt-instruction-command">{altEnterKey}</span><span>Send to chat</span></div>
+          <div class="prompt-instruction"><span class="prompt-instruction-command">{altEnterKey}</span><span>Ask agent</span></div>
           <div class="prompt-instruction"><span class="prompt-instruction-command">⇧↵</span><span>Create note</span></div>
           <div class="prompt-instruction"><span class="prompt-instruction-command">{tabKey}</span><span>semantic: off</span></div>
           <div class="prompt-instruction"><span class="prompt-instruction-command">esc</span><span>Close</span></div>
