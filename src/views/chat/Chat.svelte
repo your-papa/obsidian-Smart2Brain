@@ -165,14 +165,4 @@ async function handleRootDrop(event: DragEvent) {
     border-color: color-mix(in srgb, var(--text-error) 45%, transparent);
   }
 
-  :global(.chat-root:has(.chat-input-wrapper:focus-within) .logo-container) {
-    transform: translateY(-2px) scale(1.02);
-  }
-
-  :global(.chat-root:has(.chat-input-wrapper:focus-within) .logo-container svg) {
-    fill: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
-    stroke: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
-    filter: drop-shadow(0 0 8px color-mix(in srgb, var(--interactive-accent) 30%, transparent))
-      drop-shadow(0 4px 10px color-mix(in srgb, var(--interactive-accent) 18%, transparent));
-  }
 </style>

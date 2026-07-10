@@ -1166,6 +1166,17 @@ export class AgentManager {
 			await this.reinitialize();
 		}
 
+		// Only ever keep one unsubmitted "New Chat" around: if an empty new chat
+		// already exists, reopen it instead of creating another.
+		const existingNewChat = await this.chatManager.findEmptyNewChatThread();
+		if (existingNewChat) {
+			const existingFile = this.plugin.app.vault.getAbstractFileByPath(existingNewChat);
+			if (existingFile instanceof TFile) {
+				await this.openInChatLeaf(existingFile);
+				return;
+			}
+		}
+
 		// Ensure folder exists
 		if (!(await this.plugin.app.vault.adapter.exists(folder))) {
 			await this.plugin.app.vault.createFolder(folder);

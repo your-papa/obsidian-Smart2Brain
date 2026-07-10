@@ -377,6 +377,31 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		this.indexLoaded = true;
 	}
 
+	/**
+	 * Find an existing empty "New Chat" thread (title still "New Chat" and no
+	 * checkpoints yet), if any. Used to avoid creating duplicate new chats — a
+	 * new chat stops being "new" once the user submits their first query, which
+	 * renames the file away from "New Chat".
+	 */
+	async findEmptyNewChatThread(): Promise<string | undefined> {
+		const threads = await this.listThreads();
+		for (const thread of threads) {
+			const basename =
+				thread.threadId
+					.split("/")
+					.pop()
+					?.replace(/\.chat$/, "") ?? "";
+			// Match "New Chat" and any auto-deduped variant like "New Chat (2)".
+			if (!/^New Chat( \(\d+\))?$/.test(basename)) continue;
+
+			const data = await this.ensureThreadLoaded(thread.threadId);
+			if (data && Object.keys(data.checkpoints).length === 0) {
+				return thread.threadId;
+			}
+		}
+		return undefined;
+	}
+
 	private async saveThread(threadId: string) {
 		const existingSave = this.inFlightThreadSaves.get(threadId);
 		if (existingSave) {

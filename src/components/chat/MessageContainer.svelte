@@ -15,7 +15,6 @@ import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import Button from "../ui/Button.svelte";
 import DotAnimation from "../ui/DotAnimation.svelte";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
-import Logo from "../ui/logos/Logo.svelte";
 import BranchNavigator from "./BranchNavigator.svelte";
 import ChatEditor from "./ChatEditor.svelte";
 import CollapsibleUserBubble from "./CollapsibleUserBubble.svelte";
@@ -288,14 +287,8 @@ $effect(() => {
           </div>
         </div>
       {:else if !messages || messages.length === 0}
-        <!-- Empty state with logo -->
+        <!-- Empty state -->
         <div class="flex flex-col items-center justify-center h-full">
-          <div
-            class="logo-container h-[80px] w-[80px] items-center justify-center transition-all duration-150 ease-out"
-            data-testid="chat-logo"
-          >
-            <Logo />
-          </div>
           <p class="text-lg mb-1">Start a new conversation</p>
           <p class="text-sm opacity-70">Ask me anything about your notes.</p>
         </div>
@@ -638,13 +631,6 @@ $effect(() => {
   .summary-marker-icon {
     display: inline-flex;
     align-items: center;
-  }
-
-  .logo-container :global(svg) {
-    width: 100%;
-    height: 100%;
-    fill: var(--text-faint);
-    stroke: var(--text-faint);
   }
 
   .generation-label {

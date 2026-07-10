@@ -1133,10 +1133,8 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
     {/if}
   </div>
 
-  <!-- Footer -->
-  <div class="flex items-center justify-center text-[0.7rem] text-text-muted opacity-70">
-    <span>AI can make mistakes. Please check important information.</span>
-  </div>
+  <!-- Spacer to keep the input glow from being clipped at the bottom edge -->
+  <div class="h-4" aria-hidden="true"></div>
 </div>
 
 <style>
