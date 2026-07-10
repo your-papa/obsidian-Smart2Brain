@@ -696,10 +696,24 @@ export function deriveMessagePairsFromActiveCheckpoint(
  * ---------------------------------------------------------------------------*/
 
 /**
- * Extracts text content from a BaseMessage.
- * Uses the .text getter which handles string and ContentBlock[] formats.
+ * Extracts the user-facing query text from a BaseMessage.
+ *
+ * For a multimodal HumanMessage (content is a ContentBlock[]), `Agent.buildMessageContent`
+ * always places the user's query as the sole leading `{ type: "text" }` block and appends
+ * attachment-derived blocks (inlined `--- File: … ---` / `--- PDF: … ---` dumps, image
+ * notices) after it. The LangChain `.text` getter concatenates ALL text blocks, which would
+ * leak those inlined attachment dumps into the message bubble on reload — so when content is
+ * an array we return only the first text block. For a plain string content we use `.text`.
  */
 function extractTextContent(message: BaseMessage): string {
+	const content = message.content;
+	if (Array.isArray(content)) {
+		const firstText = content.find(
+			(block): block is { type: "text"; text: string } =>
+				typeof block === "object" && block !== null && (block as { type?: unknown }).type === "text",
+		);
+		return firstText?.text ?? "";
+	}
 	return message.text || "";
 }
 
