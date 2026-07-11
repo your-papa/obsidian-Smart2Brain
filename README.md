@@ -8,6 +8,8 @@
 
 </div>
 
+<br>
+
 Your Smart Second Brain is a **free** and **open-source** Obsidian plugin that makes your vault smarter — better search, an interactive knowledge graph, and an AI assistant that actually knows your notes.
 
 The three are designed to work together: search surfaces your notes, the graph reveals how they connect, and the AI assistant can draw on both when answering. Each pillar is also useful on its own. **Smart search and the graph work right away with no AI provider** — connecting one (OpenAI, Anthropic, OpenRouter, or a local [Ollama](https://ollama.com/) model) unlocks the full AI assistant. Desktop-only.
