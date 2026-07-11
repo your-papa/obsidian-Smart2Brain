@@ -87,32 +87,32 @@ async function exploreGraph() {
 <div class="s2b-onboarding">
 	<header class="s2b-onboarding-header">
 		<!-- eslint-disable-next-line svelte/no-at-html-tags -- static, build-inlined asset -->
-		<div class="s2b-onboarding-logo s2b-fade-in" style="--s2b-delay: 0ms" role="img" aria-label="Smart Second Brain">
+		<div class="s2b-onboarding-logo s2b-logo-splash" role="img" aria-label="Smart Second Brain">
 			{@html logoSvg}
 		</div>
-		<h1 class="s2b-onboarding-title s2b-fade-in" style="--s2b-delay: 120ms">Welcome to Smart Second Brain</h1>
-		<p class="s2b-onboarding-subtitle s2b-fade-in" style="--s2b-delay: 220ms">
+		<h1 class="s2b-onboarding-title s2b-fade-in" style="--s2b-delay: 1500ms">Welcome to Smart Second Brain</h1>
+		<p class="s2b-onboarding-subtitle s2b-fade-in" style="--s2b-delay: 1600ms">
 			Turn your vault into an AI-assisted second brain — chat with your notes, search smarter, and explore
 			connections in a graph.
 		</p>
 	</header>
 
 	<section class="s2b-onboarding-pillars">
-		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 320ms">
+		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 1700ms">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"message-square"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Chat with your notes</div>
 				<div class="s2b-onboarding-pillar-desc">Ask questions and get answers grounded in your vault.</div>
 			</div>
 		</div>
-		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 400ms">
+		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 1780ms">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"search"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Smarter search</div>
 				<div class="s2b-onboarding-pillar-desc">Works right away — no setup required.</div>
 			</div>
 		</div>
-		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 480ms">
+		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 1860ms">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"git-fork"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Smart graph</div>
@@ -122,7 +122,7 @@ async function exploreGraph() {
 	</section>
 
 	<section class="s2b-onboarding-steps">
-		<div class="s2b-onboarding-note s2b-fade-in" style="--s2b-delay: 580ms">
+		<div class="s2b-onboarding-note s2b-fade-in" style="--s2b-delay: 1960ms">
 			Search and the graph work immediately. To chat with your notes, connect an AI provider below — this
 			step is optional and you can do it anytime from settings.
 		</div>
@@ -130,7 +130,7 @@ async function exploreGraph() {
 		<!-- Step 1: Connect a provider -->
 		<div
 			class="s2b-onboarding-step s2b-fade-in"
-			style="--s2b-delay: 660ms"
+			style="--s2b-delay: 2040ms"
 			class:s2b-onboarding-step--done={hasProvider}
 		>
 			<span
@@ -158,7 +158,7 @@ async function exploreGraph() {
 		<!-- Step 2: Add a chat model -->
 		<div
 			class="s2b-onboarding-step s2b-fade-in"
-			style="--s2b-delay: 740ms"
+			style="--s2b-delay: 2120ms"
 			class:s2b-onboarding-step--done={hasChatModel}
 			class:s2b-onboarding-step--disabled={!hasProvider}
 		>
@@ -188,7 +188,7 @@ async function exploreGraph() {
 		</div>
 	</section>
 
-	<footer class="s2b-onboarding-footer s2b-fade-in" style="--s2b-delay: 840ms">
+	<footer class="s2b-onboarding-footer s2b-fade-in" style="--s2b-delay: 2220ms">
 		<Button buttonText="Skip for now" onClick={finish} />
 		<div class="s2b-onboarding-footer-primary">
 			<Button buttonText="Explore the graph" onClick={exploreGraph} />
@@ -223,8 +223,41 @@ async function exploreGraph() {
 		}
 	}
 
+	/* Splash intro: the wordmark fades in near screen-center (scaled up), holds a
+	   beat, then glides up to its resting header position. The rest of the page
+	   (delays >= 1500ms) fades in only once the logo has settled. Transform-only
+	   so it stays on the GPU and never reflows the layout below it. */
+	.s2b-logo-splash {
+		animation: s2b-logo-splash 1.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+		will-change: transform, opacity;
+	}
+
+	@keyframes s2b-logo-splash {
+		0% {
+			opacity: 0;
+			transform: translateY(38vh) scale(1.6);
+		}
+		25% {
+			opacity: 1;
+			transform: translateY(38vh) scale(1.6);
+		}
+		60% {
+			opacity: 1;
+			transform: translateY(38vh) scale(1.6);
+		}
+		100% {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
+	}
+
 	@media (prefers-reduced-motion: reduce) {
 		.s2b-fade-in {
+			opacity: 1;
+			animation: none;
+		}
+
+		.s2b-logo-splash {
 			opacity: 1;
 			animation: none;
 		}
