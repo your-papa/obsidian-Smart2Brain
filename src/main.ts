@@ -330,7 +330,7 @@ export default class SecondBrainPlugin extends Plugin {
 		this.addCommand({
 			id: "open-onboarding",
 			name: "Show Welcome / Onboarding",
-			icon: "brain-circuit",
+			icon: "zap",
 			callback: () => this.activateOnboardingView(),
 		});
 

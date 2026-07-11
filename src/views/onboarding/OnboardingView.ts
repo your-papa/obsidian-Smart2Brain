@@ -24,7 +24,7 @@ export class OnboardingView extends ItemView {
 	}
 
 	getIcon(): string {
-		return "brain-circuit";
+		return "zap";
 	}
 
 	async onOpen(): Promise<void> {
