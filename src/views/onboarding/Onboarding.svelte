@@ -24,6 +24,15 @@ let { plugin, close }: Props = $props();
 const data = getData();
 const models = useAvailableModels();
 
+// The intro (splash + content cascade) plays only the FIRST time onboarding is
+// opened. Snapshot the persisted flag at construction so flipping it below
+// doesn't retroactively change this run's decision; on every later open the
+// view renders in its settled state with no animation.
+const playIntro = !data.onboardingSplashSeen;
+if (playIntro) {
+	data.onboardingSplashSeen = true;
+}
+
 // The splash animation lifts the wordmark from true viewport center up to its
 // resting header position. We can't express that offset in `vh` — the resting
 // position depends on layout (padding, header height, viewport size), so any
@@ -35,7 +44,7 @@ let logoEl = $state<HTMLElement | null>(null);
 let splashReady = $state(false);
 
 $effect(() => {
-	if (!logoEl) return;
+	if (!playIntro || !logoEl) return;
 	// Measure BEFORE the splash transform is applied, so the rect reflects the
 	// logo's resting (final) layout position. Then start the animation.
 	const rect = logoEl.getBoundingClientRect();
@@ -113,34 +122,37 @@ async function exploreGraph() {
 			bind:this={logoEl}
 			class="s2b-onboarding-logo"
 			class:s2b-logo-splash={splashReady}
+			class:s2b-logo-settled={!playIntro}
 			role="img"
 			aria-label="Smart Second Brain"
 		>
 			{@html logoSvg}
 		</div>
-		<h1 class="s2b-onboarding-title s2b-fade-in" style="--s2b-delay: 2100ms">Welcome to Smart Second Brain</h1>
-		<p class="s2b-onboarding-subtitle s2b-fade-in" style="--s2b-delay: 2200ms">
+		<h1 class="s2b-onboarding-title" class:s2b-fade-in={playIntro} style="--s2b-delay: 2100ms">
+			Welcome to Smart Second Brain
+		</h1>
+		<p class="s2b-onboarding-subtitle" class:s2b-fade-in={playIntro} style="--s2b-delay: 2200ms">
 			Turn your vault into an AI-assisted second brain — chat with your notes, search smarter, and explore
 			connections in a graph.
 		</p>
 	</header>
 
 	<section class="s2b-onboarding-pillars">
-		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 2300ms">
+		<div class="s2b-onboarding-pillar" class:s2b-fade-in={playIntro} style="--s2b-delay: 2300ms">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"message-square"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Chat with your notes</div>
 				<div class="s2b-onboarding-pillar-desc">Ask questions and get answers grounded in your vault.</div>
 			</div>
 		</div>
-		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 2380ms">
+		<div class="s2b-onboarding-pillar" class:s2b-fade-in={playIntro} style="--s2b-delay: 2380ms">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"search"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Smarter search</div>
 				<div class="s2b-onboarding-pillar-desc">Works right away — no setup required.</div>
 			</div>
 		</div>
-		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 2460ms">
+		<div class="s2b-onboarding-pillar" class:s2b-fade-in={playIntro} style="--s2b-delay: 2460ms">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"git-fork"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Smart graph</div>
@@ -150,14 +162,15 @@ async function exploreGraph() {
 	</section>
 
 	<section class="s2b-onboarding-steps">
-		<div class="s2b-onboarding-note s2b-fade-in" style="--s2b-delay: 2560ms">
+		<div class="s2b-onboarding-note" class:s2b-fade-in={playIntro} style="--s2b-delay: 2560ms">
 			Search and the graph work immediately. To chat with your notes, connect an AI provider below — this
 			step is optional and you can do it anytime from settings.
 		</div>
 
 		<!-- Step 1: Connect a provider -->
 		<div
-			class="s2b-onboarding-step s2b-fade-in"
+			class="s2b-onboarding-step"
+			class:s2b-fade-in={playIntro}
 			style="--s2b-delay: 2640ms"
 			class:s2b-onboarding-step--done={hasProvider}
 		>
@@ -185,7 +198,8 @@ async function exploreGraph() {
 
 		<!-- Step 2: Add a chat model -->
 		<div
-			class="s2b-onboarding-step s2b-fade-in"
+			class="s2b-onboarding-step"
+			class:s2b-fade-in={playIntro}
 			style="--s2b-delay: 2720ms"
 			class:s2b-onboarding-step--done={hasChatModel}
 			class:s2b-onboarding-step--disabled={!hasProvider}
@@ -216,7 +230,7 @@ async function exploreGraph() {
 		</div>
 	</section>
 
-	<footer class="s2b-onboarding-footer s2b-fade-in" style="--s2b-delay: 2820ms">
+	<footer class="s2b-onboarding-footer" class:s2b-fade-in={playIntro} style="--s2b-delay: 2820ms">
 		<Button buttonText="Skip for now" onClick={finish} />
 		<div class="s2b-onboarding-footer-primary">
 			<Button buttonText="Explore the graph" onClick={exploreGraph} />
@@ -335,12 +349,20 @@ async function exploreGraph() {
 		color: var(--text-normal);
 		margin-bottom: 2rem;
 		/* Hidden until the splash $effect measures the offset and applies
-		   .s2b-logo-splash, so the wordmark never flashes at its resting spot. */
+		   .s2b-logo-splash, so the wordmark never flashes at its resting spot.
+		   On reopen (intro already seen) .s2b-logo-settled forces it visible. */
 		opacity: 0;
 	}
 
-	.s2b-onboarding-logo.s2b-logo-splash {
+	.s2b-onboarding-logo.s2b-logo-splash,
+	.s2b-onboarding-logo.s2b-logo-settled {
 		opacity: 1;
+	}
+
+	/* Reopen path: glyphs are shown at rest with no per-letter animation. */
+	.s2b-logo-settled :global(svg path) {
+		opacity: 1;
+		animation: none;
 	}
 
 	@keyframes s2b-logo-splash {
