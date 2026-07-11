@@ -115,7 +115,7 @@ async function exploreGraph() {
 		<div class="s2b-onboarding-pillar">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"git-fork"} aria-hidden="true"></span>
 			<div>
-				<div class="s2b-onboarding-pillar-title">Graph view</div>
+				<div class="s2b-onboarding-pillar-title">Smart graph</div>
 				<div class="s2b-onboarding-pillar-desc">Explore how your notes connect. Also works right away.</div>
 			</div>
 		</div>
@@ -218,12 +218,12 @@ async function exploreGraph() {
 
 	.s2b-onboarding-logo {
 		color: var(--text-normal);
-		margin-bottom: 0.25rem;
+		margin-bottom: 1rem;
 	}
 
 	.s2b-onboarding-logo :global(svg) {
 		display: block;
-		width: 160px;
+		width: 110px;
 		height: auto;
 	}
 
