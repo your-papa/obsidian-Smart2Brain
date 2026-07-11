@@ -73,6 +73,7 @@ export default class SecondBrainPlugin extends Plugin {
 			item
 				.setTitle("Delete chat")
 				.setIcon("trash")
+				.setWarning(true)
 				.onClick(async () => {
 					const confirmed = await confirmDelete(this.app, file.basename);
 					if (!confirmed) return;
