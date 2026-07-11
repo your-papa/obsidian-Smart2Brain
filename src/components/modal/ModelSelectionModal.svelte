@@ -218,22 +218,23 @@ function handleSelect(provider: string, variantKey: string) {
 	onSelect({ provider, model: variantKey });
 }
 
-// --- Custom (manually-entered) model support ---
-// Discovery can come back empty (bad/placeholder key, or a provider with no
-// model-list endpoint). In that case the user can still type a model ID and
-// select it directly — onSelect only needs { provider, model }.
+// --- Model discovery refresh ---
+// Discovery can come back empty (bad/placeholder key, models not yet added to
+// the provider account, or a freshly-pulled Ollama model). Providers don't
+// auto-pull — the user adds models on the provider side, then re-discovers here.
 const configuredProviders = $derived(availableModels.providers);
-let customModelName = $state("");
-let customProvider = $state<string | null>(null);
+const isLoadingModels = $derived(availableModels.isLoadingModels);
 
-const effectiveCustomProvider = $derived(customProvider ?? configuredProviders[0] ?? null);
-const canAddCustomModel = $derived(Boolean(customModelName.trim() && effectiveCustomProvider));
+function refreshModels() {
+	availableModels.refetchModels();
+}
 
-function handleCustomSelect() {
-	const provider = effectiveCustomProvider;
-	const model = customModelName.trim();
-	if (!provider || !model) return;
-	onSelect({ provider, model });
+function getProviderListDisplay(): string {
+	const names = configuredProviders.map((id) => getProviderDisplayName(id));
+	if (names.length === 0) return "your provider";
+	if (names.length === 1) return names[0];
+	if (names.length === 2) return `${names[0]} and ${names[1]}`;
+	return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
 }
 </script>
 
@@ -288,6 +289,16 @@ function handleCustomSelect() {
             <Icon name="x" size="xs" />
           </button>
         {/if}
+        <button
+          type="button"
+          class="refresh-models"
+          class:is-loading={isLoadingModels}
+          onclick={refreshModels}
+          disabled={isLoadingModels}
+          title="Re-fetch models from your configured providers"
+        >
+          <Icon name="refresh-cw" size="sm" />
+        </button>
       </div>
 
       {#if showConfiguredProviderFilters}
@@ -413,54 +424,45 @@ function handleCustomSelect() {
             </div>
           </div>
         {:else}
-          <div class="no-models">
-            {#if showFavorites}
-              No favorite models yet. Click the star on any model to add it.
-            {:else if searchQuery || selectedVendor || selectedConfiguredProvider}
-              No models match your filters
-            {:else if modelType === "embedding"}
-              No embedding models available. Configure a provider that supports embeddings.
-            {:else}
-              No models discovered. Enter a model name below to use it directly.
-            {/if}
-          </div>
-        {/each}
-
-        {#if modelType === "chat" && configuredProviders.length > 0 && (filteredModelsByProvider.length === 0 || searchQuery.trim())}
-          <div class="custom-model">
-            <div class="custom-model-title">Use a custom model</div>
-            <div class="custom-model-desc">
-              If your provider isn't listed above or its models can't be discovered, enter the model ID
-              exactly as the provider expects it.
+          {#if showFavorites}
+            <div class="no-models">No favorite models yet. Click the star on any model to add it.</div>
+          {:else if searchQuery || selectedVendor || selectedConfiguredProvider}
+            <div class="no-models">No models match your filters</div>
+          {:else if configuredProviders.length === 0}
+            <div class="no-models-guide">
+              <div class="no-models-title">No provider configured</div>
+              <div class="no-models-desc">
+                Add an AI provider in settings to discover {modelType === "embedding"
+                  ? "embedding"
+                  : "chat"} models.
+              </div>
             </div>
-            <div class="custom-model-row">
-              {#if configuredProviders.length > 1}
-                <select class="custom-model-provider dropdown" bind:value={customProvider}>
-                  {#each configuredProviders as providerId (providerId)}
-                    <option value={providerId}>{getProviderDisplayName(providerId)}</option>
-                  {/each}
-                </select>
-              {/if}
-              <input
-                type="text"
-                class="custom-model-input"
-                placeholder={searchQuery.trim() ? searchQuery.trim() : "e.g. gpt-4o"}
-                bind:value={customModelName}
-                onkeydown={(e) => {
-                  if (e.key === "Enter" && canAddCustomModel) handleCustomSelect();
-                }}
-              />
+          {:else}
+            <div class="no-models-guide">
+              <div class="no-models-title">No models found</div>
+              <div class="no-models-desc">
+                {#if modelType === "embedding"}
+                  No embedding models were discovered for {getProviderListDisplay()}. Add embedding
+                  models to your provider (for local providers like Ollama, pull them first), then
+                  refresh.
+                {:else}
+                  No chat models were discovered for {getProviderListDisplay()}. Add models to your
+                  provider (for local providers like Ollama, pull them first), then refresh.
+                {/if}
+              </div>
               <button
                 type="button"
-                class="mod-cta custom-model-btn"
-                disabled={!canAddCustomModel}
-                onclick={handleCustomSelect}
+                class="mod-cta no-models-refresh"
+                class:is-loading={isLoadingModels}
+                onclick={refreshModels}
+                disabled={isLoadingModels}
               >
-                Use model
+                <Icon name="refresh-cw" size="sm" />
+                {isLoadingModels ? "Refreshing…" : "Refresh models"}
               </button>
             </div>
-          </div>
-        {/if}
+          {/if}
+        {/each}
       </div>
     </div>
   </div>
@@ -784,63 +786,74 @@ function handleCustomSelect() {
     font-style: italic;
   }
 
-  .custom-model {
+  .no-models-guide {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 12px;
-    border: 1px dashed var(--background-modifier-border);
-    border-radius: 8px;
-    background: var(--background-secondary);
-  }
-
-  .custom-model-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .custom-model-desc {
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-
-  .custom-model-row {
-    display: flex;
     align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
+    gap: 10px;
+    text-align: center;
+    padding: 32px 24px;
+    color: var(--text-muted);
   }
 
-  .custom-model-input {
-    flex: 1;
-    min-width: 160px;
-    background: var(--background-primary);
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 6px;
-    padding: 6px 10px;
+  .no-models-title {
+    font-size: 15px;
+    font-weight: 600;
     color: var(--text-normal);
-    font-size: 14px;
   }
 
-  .custom-model-input:focus {
-    outline: none;
-    border-color: var(--interactive-accent);
+  .no-models-desc {
+    font-size: 13px;
+    max-width: 34rem;
+    line-height: 1.5;
   }
 
-  .custom-model-provider {
-    flex-shrink: 0;
-  }
-
-  .custom-model-btn {
-    flex-shrink: 0;
+  .no-models-refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
     cursor: pointer;
   }
 
-  .custom-model-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .no-models-refresh:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .refresh-models {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    cursor: pointer;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  .refresh-models:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+  }
+
+  .refresh-models:disabled {
+    cursor: default;
+  }
+
+  .refresh-models.is-loading :global(svg),
+  .no-models-refresh.is-loading :global(svg) {
+    animation: s2b-model-refresh-spin 0.8s linear infinite;
+  }
+
+  @keyframes s2b-model-refresh-spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>
