@@ -218,7 +218,7 @@ async function exploreGraph() {
 
 	.s2b-onboarding-logo {
 		color: var(--text-normal);
-		margin-bottom: 1rem;
+		margin-bottom: 2rem;
 	}
 
 	.s2b-onboarding-logo :global(svg) {
