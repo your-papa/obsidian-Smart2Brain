@@ -87,32 +87,32 @@ async function exploreGraph() {
 <div class="s2b-onboarding">
 	<header class="s2b-onboarding-header">
 		<!-- eslint-disable-next-line svelte/no-at-html-tags -- static, build-inlined asset -->
-		<div class="s2b-onboarding-logo" role="img" aria-label="Smart Second Brain">
+		<div class="s2b-onboarding-logo s2b-fade-in" style="--s2b-delay: 0ms" role="img" aria-label="Smart Second Brain">
 			{@html logoSvg}
 		</div>
-		<h1 class="s2b-onboarding-title">Welcome to Smart Second Brain</h1>
-		<p class="s2b-onboarding-subtitle">
+		<h1 class="s2b-onboarding-title s2b-fade-in" style="--s2b-delay: 120ms">Welcome to Smart Second Brain</h1>
+		<p class="s2b-onboarding-subtitle s2b-fade-in" style="--s2b-delay: 220ms">
 			Turn your vault into an AI-assisted second brain — chat with your notes, search smarter, and explore
 			connections in a graph.
 		</p>
 	</header>
 
 	<section class="s2b-onboarding-pillars">
-		<div class="s2b-onboarding-pillar">
+		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 320ms">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"message-square"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Chat with your notes</div>
 				<div class="s2b-onboarding-pillar-desc">Ask questions and get answers grounded in your vault.</div>
 			</div>
 		</div>
-		<div class="s2b-onboarding-pillar">
+		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 400ms">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"search"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Smarter search</div>
 				<div class="s2b-onboarding-pillar-desc">Works right away — no setup required.</div>
 			</div>
 		</div>
-		<div class="s2b-onboarding-pillar">
+		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 480ms">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"git-fork"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Smart graph</div>
@@ -122,13 +122,17 @@ async function exploreGraph() {
 	</section>
 
 	<section class="s2b-onboarding-steps">
-		<div class="s2b-onboarding-note">
+		<div class="s2b-onboarding-note s2b-fade-in" style="--s2b-delay: 580ms">
 			Search and the graph work immediately. To chat with your notes, connect an AI provider below — this
 			step is optional and you can do it anytime from settings.
 		</div>
 
 		<!-- Step 1: Connect a provider -->
-		<div class="s2b-onboarding-step" class:s2b-onboarding-step--done={hasProvider}>
+		<div
+			class="s2b-onboarding-step s2b-fade-in"
+			style="--s2b-delay: 660ms"
+			class:s2b-onboarding-step--done={hasProvider}
+		>
 			<span
 				class="s2b-onboarding-step-status"
 				use:icon={hasProvider ? "check" : "circle"}
@@ -153,7 +157,8 @@ async function exploreGraph() {
 
 		<!-- Step 2: Add a chat model -->
 		<div
-			class="s2b-onboarding-step"
+			class="s2b-onboarding-step s2b-fade-in"
+			style="--s2b-delay: 740ms"
 			class:s2b-onboarding-step--done={hasChatModel}
 			class:s2b-onboarding-step--disabled={!hasProvider}
 		>
@@ -183,7 +188,7 @@ async function exploreGraph() {
 		</div>
 	</section>
 
-	<footer class="s2b-onboarding-footer">
+	<footer class="s2b-onboarding-footer s2b-fade-in" style="--s2b-delay: 840ms">
 		<Button buttonText="Skip for now" onClick={finish} />
 		<div class="s2b-onboarding-footer-primary">
 			<Button buttonText="Explore the graph" onClick={exploreGraph} />
@@ -199,6 +204,32 @@ async function exploreGraph() {
 </div>
 
 <style>
+	/* Staggered entrance: each element fades up in document order, driven by a
+	   per-element `--s2b-delay` set inline. `both` fill keeps them hidden until
+	   their delay elapses (no flash of the full layout on mount). */
+	.s2b-fade-in {
+		opacity: 0;
+		animation: s2b-onboarding-fade-in 0.5s ease-out var(--s2b-delay, 0ms) both;
+	}
+
+	@keyframes s2b-onboarding-fade-in {
+		from {
+			opacity: 0;
+			transform: translateY(8px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.s2b-fade-in {
+			opacity: 1;
+			animation: none;
+		}
+	}
+
 	.s2b-onboarding {
 		display: flex;
 		flex-direction: column;
