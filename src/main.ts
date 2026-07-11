@@ -1,4 +1,4 @@
-import { MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { type EventRef, MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import "./lib/i18n";
 import { Logger as Log } from "./utils/logging";
 import "./styles.css";
@@ -126,6 +126,42 @@ export default class SecondBrainPlugin extends Plugin {
 			).filter((file): file is TFile => file instanceof TFile);
 
 			if (selectedFiles.length === 0) {
+				return;
+			}
+
+			// Single .chat file — show rename/delete instead of "Add to Chat"
+			if (selectedFiles.length === 1 && selectedFiles[0].extension === "chat") {
+				const file = selectedFiles[0];
+				context.addItem((item) => {
+					item.setTitle("Rename chat")
+						.setIcon("pencil")
+						.onClick(async () => {
+							const newTitle = await promptText(this.app, "Rename chat", file.basename, "Rename");
+							if (!newTitle || newTitle === file.basename) return;
+							try {
+								await this.agentManager.renameThread(file.path, newTitle);
+							} catch (error) {
+								new Notice(
+									`Failed to rename chat: ${error instanceof Error ? error.message : String(error)}`,
+								);
+							}
+						});
+				});
+				context.addItem((item) => {
+					item.setTitle("Delete chat")
+						.setIcon("trash")
+						.onClick(async () => {
+							const confirmed = await confirmDelete(this.app, file.basename);
+							if (!confirmed) return;
+							try {
+								await this.agentManager.deleteThread(file.path);
+							} catch (error) {
+								new Notice(
+									`Failed to delete chat: ${error instanceof Error ? error.message : String(error)}`,
+								);
+							}
+						});
+				});
 				return;
 			}
 
@@ -338,6 +374,18 @@ export default class SecondBrainPlugin extends Plugin {
 				}
 			})();
 		});
+
+		this.registerEvent(
+			(
+				this.app.workspace as unknown as {
+					on(name: "leaf-menu", cb: (menu: Menu, leaf: WorkspaceLeaf) => void): EventRef;
+				}
+			).on("leaf-menu", (menu, leaf) => {
+				const file = (leaf.view as { file?: TFile }).file;
+				if (!(file instanceof TFile) || file.extension !== "chat") return;
+				this.addChatFileMenuItems(menu, file);
+			}),
+		);
 
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu, file) => {
