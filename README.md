@@ -1,6 +1,10 @@
 <div align="center">
 
-<img width="400" height="202" alt="S2B 1" src="https://github.com/user-attachments/assets/af65af0f-189e-4636-8b58-87f73c3d6e01" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/logo-light.svg">
+  <img alt="Smart Second Brain" src="assets/logo-light.svg" width="300">
+</picture>
 
 </div>
 
