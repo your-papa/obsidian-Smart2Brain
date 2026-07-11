@@ -27,7 +27,7 @@ let activeTab = $state(pendingTab ?? "general");
   >
     <Tabs.Trigger
       value="general"
-      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:bg-[--background-secondary] data-[state=active]:border-[--background-modifier-border] data-[state=active]:text-[--text-normal] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
+      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:text-[--text-accent] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
     >
       <span class="settings-tab-label">
         <span class="settings-tab-icon" use:icon={"settings"} aria-hidden="true"></span>
@@ -36,7 +36,7 @@ let activeTab = $state(pendingTab ?? "general");
     </Tabs.Trigger>
     <Tabs.Trigger
       value="search"
-      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:bg-[--background-secondary] data-[state=active]:border-[--background-modifier-border] data-[state=active]:text-[--text-normal] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
+      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:text-[--text-accent] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
     >
       <span class="settings-tab-label">
         <span class="settings-tab-icon" use:icon={"search"} aria-hidden="true"></span>
@@ -45,7 +45,7 @@ let activeTab = $state(pendingTab ?? "general");
     </Tabs.Trigger>
     <Tabs.Trigger
       value="agents"
-      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:bg-[--background-secondary] data-[state=active]:border-[--background-modifier-border] data-[state=active]:text-[--text-normal] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
+      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:text-[--text-accent] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
     >
       <span class="settings-tab-label">
         <span class="settings-tab-icon" use:icon={"bot"} aria-hidden="true"></span>
@@ -54,7 +54,7 @@ let activeTab = $state(pendingTab ?? "general");
     </Tabs.Trigger>
     <Tabs.Trigger
       value="graph"
-      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:bg-[--background-secondary] data-[state=active]:border-[--background-modifier-border] data-[state=active]:text-[--text-normal] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
+      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:text-[--text-accent] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
     >
       <span class="settings-tab-label">
         <span class="settings-tab-icon" use:icon={"git-fork"} aria-hidden="true"></span>
@@ -63,7 +63,7 @@ let activeTab = $state(pendingTab ?? "general");
     </Tabs.Trigger>
     <Tabs.Trigger
       value="troubleshooting"
-      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:bg-[--background-secondary] data-[state=active]:border-[--background-modifier-border] data-[state=active]:text-[--text-normal] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
+      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:text-[--text-accent] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
     >
       <span class="settings-tab-label">
         <span class="settings-tab-icon" use:icon={"wrench"} aria-hidden="true"></span>
