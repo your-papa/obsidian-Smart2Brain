@@ -24,6 +24,28 @@ let { plugin, close }: Props = $props();
 const data = getData();
 const models = useAvailableModels();
 
+// The splash animation lifts the wordmark from true viewport center up to its
+// resting header position. We can't express that offset in `vh` — the resting
+// position depends on layout (padding, header height, viewport size), so any
+// fixed `vh` is a guess. Instead we measure it: after mount, compute the delta
+// between the logo's resting center and the viewport center, feed that exact
+// pixel distance into the keyframe via `--s2b-splash-offset`, then start the
+// animation. This is a legitimate $effect (DOM measurement + one-time init).
+let logoEl = $state<HTMLElement | null>(null);
+let splashReady = $state(false);
+
+$effect(() => {
+	if (!logoEl) return;
+	// Measure BEFORE the splash transform is applied, so the rect reflects the
+	// logo's resting (final) layout position. Then start the animation.
+	const rect = logoEl.getBoundingClientRect();
+	const logoCenterY = rect.top + rect.height / 2;
+	const viewportCenterY = window.innerHeight / 2;
+	const offset = viewportCenterY - logoCenterY;
+	logoEl.style.setProperty("--s2b-splash-offset", `${offset}px`);
+	splashReady = true;
+});
+
 // Reactive completion signals derived from the data store — no $effect for state sync.
 let configuredProviders = $derived(data.getConfiguredProviders());
 let hasProvider = $derived(configuredProviders.length > 0);
@@ -87,32 +109,38 @@ async function exploreGraph() {
 <div class="s2b-onboarding">
 	<header class="s2b-onboarding-header">
 		<!-- eslint-disable-next-line svelte/no-at-html-tags -- static, build-inlined asset -->
-		<div class="s2b-onboarding-logo s2b-logo-splash" role="img" aria-label="Smart Second Brain">
+		<div
+			bind:this={logoEl}
+			class="s2b-onboarding-logo"
+			class:s2b-logo-splash={splashReady}
+			role="img"
+			aria-label="Smart Second Brain"
+		>
 			{@html logoSvg}
 		</div>
-		<h1 class="s2b-onboarding-title s2b-fade-in" style="--s2b-delay: 1500ms">Welcome to Smart Second Brain</h1>
-		<p class="s2b-onboarding-subtitle s2b-fade-in" style="--s2b-delay: 1600ms">
+		<h1 class="s2b-onboarding-title s2b-fade-in" style="--s2b-delay: 2100ms">Welcome to Smart Second Brain</h1>
+		<p class="s2b-onboarding-subtitle s2b-fade-in" style="--s2b-delay: 2200ms">
 			Turn your vault into an AI-assisted second brain — chat with your notes, search smarter, and explore
 			connections in a graph.
 		</p>
 	</header>
 
 	<section class="s2b-onboarding-pillars">
-		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 1700ms">
+		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 2300ms">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"message-square"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Chat with your notes</div>
 				<div class="s2b-onboarding-pillar-desc">Ask questions and get answers grounded in your vault.</div>
 			</div>
 		</div>
-		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 1780ms">
+		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 2380ms">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"search"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Smarter search</div>
 				<div class="s2b-onboarding-pillar-desc">Works right away — no setup required.</div>
 			</div>
 		</div>
-		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 1860ms">
+		<div class="s2b-onboarding-pillar s2b-fade-in" style="--s2b-delay: 2460ms">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"git-fork"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Smart graph</div>
@@ -122,7 +150,7 @@ async function exploreGraph() {
 	</section>
 
 	<section class="s2b-onboarding-steps">
-		<div class="s2b-onboarding-note s2b-fade-in" style="--s2b-delay: 1960ms">
+		<div class="s2b-onboarding-note s2b-fade-in" style="--s2b-delay: 2560ms">
 			Search and the graph work immediately. To chat with your notes, connect an AI provider below — this
 			step is optional and you can do it anytime from settings.
 		</div>
@@ -130,7 +158,7 @@ async function exploreGraph() {
 		<!-- Step 1: Connect a provider -->
 		<div
 			class="s2b-onboarding-step s2b-fade-in"
-			style="--s2b-delay: 2040ms"
+			style="--s2b-delay: 2640ms"
 			class:s2b-onboarding-step--done={hasProvider}
 		>
 			<span
@@ -158,7 +186,7 @@ async function exploreGraph() {
 		<!-- Step 2: Add a chat model -->
 		<div
 			class="s2b-onboarding-step s2b-fade-in"
-			style="--s2b-delay: 2120ms"
+			style="--s2b-delay: 2720ms"
 			class:s2b-onboarding-step--done={hasChatModel}
 			class:s2b-onboarding-step--disabled={!hasProvider}
 		>
@@ -188,7 +216,7 @@ async function exploreGraph() {
 		</div>
 	</section>
 
-	<footer class="s2b-onboarding-footer s2b-fade-in" style="--s2b-delay: 2220ms">
+	<footer class="s2b-onboarding-footer s2b-fade-in" style="--s2b-delay: 2820ms">
 		<Button buttonText="Skip for now" onClick={finish} />
 		<div class="s2b-onboarding-footer-primary">
 			<Button buttonText="Explore the graph" onClick={exploreGraph} />
@@ -226,26 +254,44 @@ async function exploreGraph() {
 	/* Splash intro: the wordmark fades in near screen-center (scaled up), holds a
 	   beat, then glides up to its resting header position. The rest of the page
 	   (delays >= 1500ms) fades in only once the logo has settled. Transform-only
-	   so it stays on the GPU and never reflows the layout below it. */
+	   so it stays on the GPU and never reflows the layout below it.
+
+	   The container drives the center → hold → rise motion; the individual glyphs
+	   (S, 2, B — one <path> each) cascade in on top of it, so during the initial
+	   hold the letters reveal one after another before the whole wordmark rises. */
 	.s2b-logo-splash {
-		animation: s2b-logo-splash 1.4s cubic-bezier(0.22, 1, 0.36, 1) both;
-		will-change: transform, opacity;
+		animation: s2b-logo-splash 2s cubic-bezier(0.22, 1, 0.36, 1) both;
+		will-change: transform;
 	}
 
-	@keyframes s2b-logo-splash {
-		0% {
+	/* Per-glyph cascade: each of the three paths starts hidden and eases in with a
+	   staggered delay. transform-box/transform-origin keep the scale-up anchored to
+	   each glyph's own box rather than the SVG viewBox. */
+	.s2b-logo-splash :global(svg path) {
+		opacity: 0;
+		transform-box: fill-box;
+		transform-origin: center;
+		animation: s2b-logo-letter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+	}
+
+	.s2b-logo-splash :global(svg path:nth-of-type(1)) {
+		animation-delay: 0.3s;
+	}
+
+	.s2b-logo-splash :global(svg path:nth-of-type(2)) {
+		animation-delay: 0.65s;
+	}
+
+	.s2b-logo-splash :global(svg path:nth-of-type(3)) {
+		animation-delay: 1s;
+	}
+
+	@keyframes s2b-logo-letter {
+		from {
 			opacity: 0;
-			transform: translateY(38vh) scale(1.6);
+			transform: translateY(30%) scale(0.7);
 		}
-		25% {
-			opacity: 1;
-			transform: translateY(38vh) scale(1.6);
-		}
-		60% {
-			opacity: 1;
-			transform: translateY(38vh) scale(1.6);
-		}
-		100% {
+		to {
 			opacity: 1;
 			transform: translateY(0) scale(1);
 		}
@@ -258,6 +304,11 @@ async function exploreGraph() {
 		}
 
 		.s2b-logo-splash {
+			opacity: 1;
+			animation: none;
+		}
+
+		.s2b-logo-splash :global(svg path) {
 			opacity: 1;
 			animation: none;
 		}
@@ -283,6 +334,25 @@ async function exploreGraph() {
 	.s2b-onboarding-logo {
 		color: var(--text-normal);
 		margin-bottom: 2rem;
+		/* Hidden until the splash $effect measures the offset and applies
+		   .s2b-logo-splash, so the wordmark never flashes at its resting spot. */
+		opacity: 0;
+	}
+
+	.s2b-onboarding-logo.s2b-logo-splash {
+		opacity: 1;
+	}
+
+	@keyframes s2b-logo-splash {
+		0% {
+			transform: translateY(var(--s2b-splash-offset, 44vh)) scale(1.6);
+		}
+		72% {
+			transform: translateY(var(--s2b-splash-offset, 44vh)) scale(1.6);
+		}
+		100% {
+			transform: translateY(0) scale(1);
+		}
 	}
 
 	.s2b-onboarding-logo :global(svg) {
