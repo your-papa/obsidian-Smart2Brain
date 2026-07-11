@@ -217,6 +217,24 @@ function isSelected(provider: string, variantKey: string): boolean {
 function handleSelect(provider: string, variantKey: string) {
 	onSelect({ provider, model: variantKey });
 }
+
+// --- Custom (manually-entered) model support ---
+// Discovery can come back empty (bad/placeholder key, or a provider with no
+// model-list endpoint). In that case the user can still type a model ID and
+// select it directly — onSelect only needs { provider, model }.
+const configuredProviders = $derived(availableModels.providers);
+let customModelName = $state("");
+let customProvider = $state<string | null>(null);
+
+const effectiveCustomProvider = $derived(customProvider ?? configuredProviders[0] ?? null);
+const canAddCustomModel = $derived(Boolean(customModelName.trim() && effectiveCustomProvider));
+
+function handleCustomSelect() {
+	const provider = effectiveCustomProvider;
+	const model = customModelName.trim();
+	if (!provider || !model) return;
+	onSelect({ provider, model });
+}
 </script>
 
 <div class="model-selection-container">
@@ -403,10 +421,46 @@ function handleSelect(provider: string, variantKey: string) {
             {:else if modelType === "embedding"}
               No embedding models available. Configure a provider that supports embeddings.
             {:else}
-              No models available. Configure a provider first.
+              No models discovered. Enter a model name below to use it directly.
             {/if}
           </div>
         {/each}
+
+        {#if modelType === "chat" && configuredProviders.length > 0 && (filteredModelsByProvider.length === 0 || searchQuery.trim())}
+          <div class="custom-model">
+            <div class="custom-model-title">Use a custom model</div>
+            <div class="custom-model-desc">
+              If your provider isn't listed above or its models can't be discovered, enter the model ID
+              exactly as the provider expects it.
+            </div>
+            <div class="custom-model-row">
+              {#if configuredProviders.length > 1}
+                <select class="custom-model-provider dropdown" bind:value={customProvider}>
+                  {#each configuredProviders as providerId (providerId)}
+                    <option value={providerId}>{getProviderDisplayName(providerId)}</option>
+                  {/each}
+                </select>
+              {/if}
+              <input
+                type="text"
+                class="custom-model-input"
+                placeholder={searchQuery.trim() ? searchQuery.trim() : "e.g. gpt-4o"}
+                bind:value={customModelName}
+                onkeydown={(e) => {
+                  if (e.key === "Enter" && canAddCustomModel) handleCustomSelect();
+                }}
+              />
+              <button
+                type="button"
+                class="mod-cta custom-model-btn"
+                disabled={!canAddCustomModel}
+                onclick={handleCustomSelect}
+              >
+                Use model
+              </button>
+            </div>
+          </div>
+        {/if}
       </div>
     </div>
   </div>
@@ -728,5 +782,65 @@ function handleSelect(provider: string, variantKey: string) {
     padding: 32px;
     color: var(--text-muted);
     font-style: italic;
+  }
+
+  .custom-model {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px;
+    border: 1px dashed var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-secondary);
+  }
+
+  .custom-model-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .custom-model-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .custom-model-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .custom-model-input {
+    flex: 1;
+    min-width: 160px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: var(--text-normal);
+    font-size: 14px;
+  }
+
+  .custom-model-input:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+  }
+
+  .custom-model-provider {
+    flex-shrink: 0;
+  }
+
+  .custom-model-btn {
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+
+  .custom-model-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>

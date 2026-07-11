@@ -1,10 +1,18 @@
 <script lang="ts">
+import { ModelSelectionModal } from "../../components/modal/ModelSelectionModal";
 import Button from "../../components/ui/Button.svelte";
+import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import type SecondBrainPlugin from "../../main";
+import { type ChatModel } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
+import { Logger } from "../../utils/logging";
 import { icon } from "../../utils/utils";
-import { ChatModelManagementModal } from "../chat-model-management/ChatModelManagement";
 import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
+// Inlined at build time (?raw) so it ships inside main.js — the single-file
+// CJS bundle has no companion asset dir to serve a separate SVG from. The
+// wordmark's fixed fill is overridden to currentColor via CSS below so it
+// adapts to the active theme.
+import logoSvg from "../../../assets/logo-light.svg?raw";
 
 interface Props {
 	plugin: SecondBrainPlugin;
@@ -14,23 +22,48 @@ interface Props {
 let { plugin, close }: Props = $props();
 
 const data = getData();
+const models = useAvailableModels();
 
 // Reactive completion signals derived from the data store — no $effect for state sync.
 let configuredProviders = $derived(data.getConfiguredProviders());
 let hasProvider = $derived(configuredProviders.length > 0);
-let hasChatModel = $derived(
-	configuredProviders.some((providerId) => Object.keys(data.getChatModels(providerId)).length > 0),
-);
-// The provider we steer the "add a chat model" step toward (first configured one).
-let primaryProvider = $derived(configuredProviders[0]);
+// Onboarding sets the model on the selected agent (same as the chat header
+// selector), so completion tracks the agent's chat model, not added configs.
+let selectedAgent = $derived(data.getSelectedAgent());
+let hasChatModel = $derived(Boolean(selectedAgent?.chatModel));
 
 function openProviderSetup() {
 	new ProviderSetupModal(plugin, { templateId: "openai-compatible" }).open();
 }
 
+function buildPersistedChatModel(provider: string, model: string, existing?: ChatModel | null): ChatModel {
+	const hydrated = models.hydratedChatModelsByKey.get(`${provider}:${model}`);
+	return {
+		provider,
+		model,
+		modelConfig: {
+			contextWindow: hydrated?.contextWindow ?? existing?.modelConfig?.contextWindow ?? 128000,
+			supportsVision: hydrated?.capabilities.vision ?? existing?.modelConfig?.supportsVision,
+			temperature: existing?.modelConfig?.temperature,
+		},
+	};
+}
+
+// Reuse the same picker + agent-update flow as the chat header's model selector.
 function openChatModelSetup() {
-	if (!primaryProvider) return;
-	new ChatModelManagementModal(plugin, primaryProvider).open();
+	if (!hasProvider) return;
+	const currentSelection = selectedAgent?.chatModel
+		? { provider: selectedAgent.chatModel.provider, model: selectedAgent.chatModel.model }
+		: null;
+	new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
+		if (!selected) return;
+		data.updateAgent(data.selectedAgentId, {
+			chatModel: buildPersistedChatModel(selected.provider, selected.model, selectedAgent?.chatModel),
+		});
+		plugin.agentManager?.reinitialize().catch((error) => {
+			Logger.error("Failed to update agent model during onboarding:", error);
+		});
+	}).open();
 }
 
 function finish() {
@@ -53,7 +86,10 @@ async function exploreGraph() {
 
 <div class="s2b-onboarding">
 	<header class="s2b-onboarding-header">
-		<span class="s2b-onboarding-logo" use:icon={"brain-circuit"} aria-hidden="true"></span>
+		<!-- eslint-disable-next-line svelte/no-at-html-tags -- static, build-inlined asset -->
+		<div class="s2b-onboarding-logo" role="img" aria-label="Smart Second Brain">
+			{@html logoSvg}
+		</div>
 		<h1 class="s2b-onboarding-title">Welcome to Smart Second Brain</h1>
 		<p class="s2b-onboarding-subtitle">
 			Turn your vault into an AI-assisted second brain — chat with your notes, search smarter, and explore
@@ -127,19 +163,19 @@ async function exploreGraph() {
 				aria-hidden="true"
 			></span>
 			<div class="s2b-onboarding-step-body">
-				<div class="s2b-onboarding-step-title">Add a chat model</div>
+				<div class="s2b-onboarding-step-title">Choose a chat model</div>
 				<div class="s2b-onboarding-step-desc">
 					{#if !hasProvider}
 						Connect a provider first, then pick a model to chat with.
 					{:else if hasChatModel}
-						Chat model ready. You're all set to start chatting.
+						Using <strong>{selectedAgent?.chatModel?.model}</strong>. You're all set to start chatting.
 					{:else}
-						Choose a model on your connected provider to enable chat.
+						Pick a model from your connected provider to enable chat.
 					{/if}
 				</div>
 			</div>
 			<Button
-				buttonText="Add chat model"
+				buttonText={hasChatModel ? "Change model" : "Choose model"}
 				cta={hasProvider && !hasChatModel}
 				disabled={!hasProvider}
 				onClick={openChatModelSetup}
@@ -181,17 +217,19 @@ async function exploreGraph() {
 	}
 
 	.s2b-onboarding-logo {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 48px;
-		height: 48px;
-		color: var(--text-accent);
+		color: var(--text-normal);
+		margin-bottom: 0.25rem;
 	}
 
-	.s2b-onboarding-logo :global(.svg-icon) {
-		width: 48px;
-		height: 48px;
+	.s2b-onboarding-logo :global(svg) {
+		display: block;
+		width: 160px;
+		height: auto;
+	}
+
+	/* Override the wordmark's baked-in fill so it tracks the theme. */
+	.s2b-onboarding-logo :global(svg path) {
+		fill: currentColor;
 	}
 
 	.s2b-onboarding-title {
