@@ -284,7 +284,8 @@ export class Agent {
 						contentParts.push({
 							type: "text",
 							text: "[Image attachments were skipped because the selected model does not support vision. Switch to a vision-capable model to analyze images.]",
-						});
+							s2b_attachment: true,
+						} as unknown as MessageContentComplex);
 						addedImageSkipNotice = true;
 					}
 					continue;
@@ -316,7 +317,8 @@ export class Agent {
 					contentParts.push({
 						type: "text",
 						text: `[PDF "${attachment.name}" not found at ${attachment.vaultPath}]`,
-					});
+						s2b_attachment: true,
+					} as unknown as MessageContentComplex);
 					continue;
 				}
 				const buffer = await app.vault.readBinary(file);
@@ -344,18 +346,21 @@ export class Agent {
 							contentParts.push({
 								type: "text",
 								text: `--- PDF: ${attachment.name} (${totalPages} pages) ---\n${truncated}\n--- End PDF ---`,
-							});
+								s2b_attachment: true,
+							} as unknown as MessageContentComplex);
 						} else {
 							contentParts.push({
 								type: "text",
 								text: `[PDF "${attachment.name}" contains ${totalPages} page(s) but no extractable text. It may contain only images/scans.]`,
-							});
+								s2b_attachment: true,
+							} as unknown as MessageContentComplex);
 						}
 					} catch (error) {
 						contentParts.push({
 							type: "text",
 							text: `[Error extracting text from PDF "${attachment.name}": ${error instanceof Error ? error.message : String(error)}]`,
-						});
+							s2b_attachment: true,
+						} as unknown as MessageContentComplex);
 					}
 				}
 			} else {
@@ -365,7 +370,8 @@ export class Agent {
 					contentParts.push({
 						type: "text",
 						text: `[File "${attachment.name}" not found at ${attachment.vaultPath}]`,
-					});
+						s2b_attachment: true,
+					} as unknown as MessageContentComplex);
 					continue;
 				}
 				try {
@@ -374,12 +380,14 @@ export class Agent {
 					contentParts.push({
 						type: "text",
 						text: `--- File: ${attachment.name} ---\n${truncated}\n--- End File ---`,
-					});
+						s2b_attachment: true,
+					} as unknown as MessageContentComplex);
 				} catch (error) {
 					contentParts.push({
 						type: "text",
 						text: `[Error reading "${attachment.name}": ${error instanceof Error ? error.message : String(error)}]`,
-					});
+						s2b_attachment: true,
+					} as unknown as MessageContentComplex);
 				}
 			}
 		}
@@ -1750,14 +1758,23 @@ export class Agent {
 		const content = obj.content;
 		if (typeof content === "string") return content;
 		if (Array.isArray(content)) {
-			// If content has non-text items (e.g. image_url), preserve the full array
+			// Preserve the full array when it has non-text items (e.g. image_url) OR
+			// any block tagged as an inlined attachment (s2b_attachment). Attachment
+			// blocks are tagged by buildMessageContent so a text-only-attachment array
+			// is not silently collapsed into the query string (which would leak the
+			// file dump into the UI bubble). The tag is a harmless extra field on a
+			// text block — providers ignore unknown content-block fields — so it can
+			// ride along through every checkpoint round-trip without being stripped.
 			const hasNonTextItems = content.some(
 				(c) => c && typeof c === "object" && (c as { type?: unknown }).type !== "text",
 			);
-			if (hasNonTextItems) {
+			const hasAttachmentBlock = content.some(
+				(c) => c && typeof c === "object" && (c as { s2b_attachment?: unknown }).s2b_attachment === true,
+			);
+			if (hasNonTextItems || hasAttachmentBlock) {
 				return content as MessageContentComplex[];
 			}
-			// Text-only arrays can be joined into a single string
+			// Text-only arrays (no attachments) can be joined into a single string
 			return content
 				.map((c) => {
 					if (typeof c === "string") return c;

@@ -698,21 +698,27 @@ export function deriveMessagePairsFromActiveCheckpoint(
 /**
  * Extracts the user-facing query text from a BaseMessage.
  *
- * For a multimodal HumanMessage (content is a ContentBlock[]), `Agent.buildMessageContent`
- * always places the user's query as the sole leading `{ type: "text" }` block and appends
- * attachment-derived blocks (inlined `--- File: … ---` / `--- PDF: … ---` dumps, image
- * notices) after it. The LangChain `.text` getter concatenates ALL text blocks, which would
- * leak those inlined attachment dumps into the message bubble on reload — so when content is
- * an array we return only the first text block. For a plain string content we use `.text`.
+ * `Agent.buildMessageContent` inlines text/md/csv/json attachments (and non-native
+ * PDFs) as text content blocks tagged with `s2b_attachment: true`, appended after
+ * the untagged query block. That tag keeps the content array from being collapsed
+ * to a string on read, so here we split structurally: join only the untagged text
+ * blocks (the query) and drop the tagged attachment blocks. The attachments still
+ * render separately as chips. A plain-string content (no attachments) is returned
+ * as-is.
  */
 function extractTextContent(message: BaseMessage): string {
 	const content = message.content;
 	if (Array.isArray(content)) {
-		const firstText = content.find(
-			(block): block is { type: "text"; text: string } =>
-				typeof block === "object" && block !== null && (block as { type?: unknown }).type === "text",
-		);
-		return firstText?.text ?? "";
+		return content
+			.filter(
+				(block): block is { type: "text"; text: string } =>
+					typeof block === "object" &&
+					block !== null &&
+					(block as { type?: unknown }).type === "text" &&
+					(block as { s2b_attachment?: unknown }).s2b_attachment !== true,
+			)
+			.map((block) => block.text)
+			.join("");
 	}
 	return message.text || "";
 }
