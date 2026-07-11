@@ -412,6 +412,8 @@ export interface PluginData {
 
 	chatOpenLocation: ChatOpenLocation;
 	lastActiveChatId: UUIDv7 | null;
+	/** Whether the user has completed (or dismissed) the first-run onboarding flow. */
+	onboardingComplete: boolean;
 
 	// ============================================================================
 	// Web Search
