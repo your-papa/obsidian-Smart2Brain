@@ -23,7 +23,7 @@ let activeTab = $state(pendingTab ?? "general");
 
 <Tabs.Root bind:value={activeTab}>
   <Tabs.List
-    class="flex flex-wrap gap-1 border-b border-t-0 border-x-0 border-solid border-[--background-modifier-border] pb-2 mb-4"
+    class="flex flex-wrap justify-center gap-1 border-b border-t-0 border-x-0 border-solid border-[--background-modifier-border] pb-2 mb-4"
   >
     <Tabs.Trigger
       value="general"
