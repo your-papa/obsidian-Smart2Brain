@@ -1,6 +1,8 @@
 import { type EventRef, MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import "./lib/i18n";
 import { Logger as Log } from "./utils/logging";
+import { StartupProfiler } from "./utils/startupProfiler";
+import { persistStartupRecord, recordStartupEnvironment } from "./utils/startupTimingsStore";
 import "./styles.css";
 import { AgentManager } from "./agent/AgentManager";
 import { inlineDiffPlugin } from "./editor/inlineDiffExtension";
@@ -22,7 +24,7 @@ import { NoteContextView, VIEW_TYPE_NOTE_CONTEXT } from "./views/note-context/No
 import { OnboardingView, VIEW_TYPE_ONBOARDING } from "./views/onboarding/OnboardingView";
 import { SmartGraphView, VIEW_TYPE_SMART_GRAPH } from "./views/smart-graph/SmartGraphView";
 import SettingsTab from "./views/settings/Settings";
-import { VectorStoreService } from "./vectorstore";
+import { VectorStoreService, waitForVectorStore } from "./vectorstore";
 
 const SUPPORTED_CHAT_ATTACHMENT_EXTENSIONS = new Set([
 	"txt",
@@ -45,6 +47,9 @@ export default class SecondBrainPlugin extends Plugin {
 	pendingChangesStore!: PendingChangesStore;
 	queryClient = getQueryClient();
 	pluginData!: PluginDataStore;
+	/** `performance.now()` when `onload` finished; -1 until then. Used to attribute the
+	 *  Obsidian pre-layout gap (onload:end → onLayoutReady). */
+	private onloadEndAt = -1;
 
 	private getAddToChatMenuLabel(selectedCount: number): string {
 		if (selectedCount <= 1) {
@@ -222,8 +227,12 @@ export default class SecondBrainPlugin extends Plugin {
 	}
 
 	async onload() {
+		StartupProfiler.mark("onload:start", true);
+		// Time (ms) since the renderer process began until our onload ran. A large value
+		// means Obsidian core / earlier plugins were slow *before* us — not our fault.
+		StartupProfiler.setMeta("rendererToOnloadMs", Math.round(performance.now()));
 		setPlugin(this);
-		this.pluginData = await createData(this);
+		this.pluginData = await StartupProfiler.measure("data:load", () => createData(this), true);
 
 		// Create Skills Service instance (discovery deferred to onLayoutReady)
 		this.skillsService = new SkillsService(this);
@@ -362,6 +371,7 @@ export default class SecondBrainPlugin extends Plugin {
 		this.agentManager = new AgentManager(this);
 		createMessenger(this.agentManager);
 		this.registerNotebookNavigatorMenus();
+		StartupProfiler.mark("onload:registrations-done", true);
 
 		// Defer ALL heavy initialization to onLayoutReady so the Obsidian workspace
 		// renders immediately. This includes:
@@ -370,6 +380,20 @@ export default class SecondBrainPlugin extends Plugin {
 		// - AgentManager: chat index loading, provider registration
 		// If a chat view opens before this completes, AgentManager.ensureAgent() handles lazy init.
 		this.app.workspace.onLayoutReady(() => {
+			// Everything from here runs after the workspace has rendered — tag it deferred.
+			StartupProfiler.leaveBlockingPhase();
+			StartupProfiler.mark("layoutReady:start");
+			// The gap between onload:end and here is Obsidian core building its workspace /
+			// metadata cache (+ other plugins' onload). On a cold start this dominates and is
+			// outside our control — capture it explicitly so it's not mistaken for our cost.
+			// -1 means onLayoutReady fired synchronously mid-onload (already-warm workspace):
+			// there's no meaningful gap in that case.
+			StartupProfiler.setMeta(
+				"obsidianPreLayoutMs",
+				this.onloadEndAt < 0 ? 0 : Math.round(performance.now()) - this.onloadEndAt,
+			);
+			recordStartupEnvironment(this);
+
 			// First-run onboarding: orient the user before heavy init. Only auto-open
 			// when they've never completed it AND haven't configured a provider some
 			// other way. Onboarding is skippable — the plugin works without a provider.
@@ -378,16 +402,28 @@ export default class SecondBrainPlugin extends Plugin {
 			}
 
 			// Start search/vector store initialization (non-blocking, fire-and-forget)
-			this.lexicalSearchService = LexicalSearchService.startInitialize(this);
-			this.vectorStoreService = VectorStoreService.startInitialize(this);
+			this.lexicalSearchService = StartupProfiler.measureSync("lexical:startInit", () =>
+				LexicalSearchService.startInitialize(this),
+			);
+			this.vectorStoreService = StartupProfiler.measureSync("vectorstore:startInit", () =>
+				VectorStoreService.startInitialize(this),
+			);
 
 			// Skills + Agent init (sequential, but non-blocking relative to workspace)
 			void (async () => {
 				try {
-					await this.skillsService.initialize();
-					await this.agentManager.initialize();
+					await StartupProfiler.measure("skills:init", () => this.skillsService.initialize());
+					await StartupProfiler.measure("agent:init", () => this.agentManager.initialize());
+					// Fold in the fire-and-forget search/vectorstore inits so their sub-phase
+					// spans (IDB opens, storage loads) are captured in the summary. The cold
+					// lexical buildIndex is scheduled separately and logs its own line.
+					await StartupProfiler.measure("vectorstore:ready", () => waitForVectorStore());
 				} catch (e) {
 					Log.error("Deferred initialization failed", e);
+				} finally {
+					StartupProfiler.mark("deferred:end");
+					const record = StartupProfiler.flush("S2B startup");
+					if (record) void persistStartupRecord(this, record);
 				}
 			})();
 		});
@@ -460,7 +496,7 @@ export default class SecondBrainPlugin extends Plugin {
 		// Initialize Pending Changes Store for write tool staging
 		this.pendingChangesStore = new PendingChangesStore(this);
 		initPendingChangesStore(this.pendingChangesStore);
-		await this.pendingChangesStore.load();
+		await StartupProfiler.measure("pendingChanges:load", () => this.pendingChangesStore.load(), true);
 
 		// Register inline diff decorations in the editor
 		this.registerEditorExtension(inlineDiffPlugin);
@@ -482,6 +518,9 @@ export default class SecondBrainPlugin extends Plugin {
 		};
 		document.addEventListener("s2b-pending-changes-updated", refreshReadingViews);
 		this.register(() => document.removeEventListener("s2b-pending-changes-updated", refreshReadingViews));
+
+		StartupProfiler.mark("onload:end", true);
+		this.onloadEndAt = Math.round(performance.now());
 	}
 
 	onunload() {

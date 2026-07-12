@@ -6,6 +6,7 @@
 import type { DataAdapter, Plugin } from "obsidian";
 import type { Skill, SkillCategory, SkillEnableState, SkillFrontmatter, SkillMetadata } from "../types/plugin";
 import { Logger as Log } from "../utils/logging";
+import { StartupProfiler } from "../utils/startupProfiler";
 import { BUNDLED_SKILLS } from "./defaults";
 import { validateFrontmatter, type ValidationResult } from "./validation";
 
@@ -230,8 +231,8 @@ export class SkillsService {
 	 * Call this once on plugin load.
 	 */
 	async initialize(): Promise<void> {
-		await this.bootstrapDefaultSkills();
-		await this.discoverSkills();
+		await StartupProfiler.measure("skills:bootstrap", () => this.bootstrapDefaultSkills());
+		await StartupProfiler.measure("skills:discover", () => this.discoverSkills());
 	}
 
 	/**
@@ -252,7 +253,15 @@ export class SkillsService {
 		// List directories in skills folder
 		const listing = await this.adapter.list(skillsDir);
 
+		// Diagnostics: skills discovery can dominate a cold start (per-folder exists+read
+		// filesystem I/O). Track the folder count and the slowest single folder so a slow
+		// startup file shows *which* skill folder was expensive, not just the total.
+		StartupProfiler.setMeta("skillFolderCount", listing.folders.length);
+		let slowestFolder = "";
+		let slowestFolderMs = 0;
+
 		for (const folder of listing.folders) {
+			const folderStart = performance.now();
 			const skillPath = `${folder}/${SKILL_FILENAME}`;
 
 			if (!(await this.adapter.exists(skillPath))) {
@@ -292,7 +301,18 @@ export class SkillsService {
 				Log.debug(`Discovered skill: ${skillName}`);
 			} catch (error) {
 				Log.error(`Error reading skill from ${folder}:`, error);
+			} finally {
+				const folderMs = performance.now() - folderStart;
+				if (folderMs > slowestFolderMs) {
+					slowestFolderMs = folderMs;
+					slowestFolder = folder.split("/").pop() || folder;
+				}
 			}
+		}
+
+		if (slowestFolder) {
+			StartupProfiler.setMeta("slowestSkillFolder", slowestFolder);
+			StartupProfiler.setMeta("slowestSkillFolderMs", Math.round(slowestFolderMs));
 		}
 
 		this.discovered = true;

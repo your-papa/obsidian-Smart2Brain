@@ -30,6 +30,7 @@ import {
 import type { ChatAttachment } from "../types/shared";
 import { gzipSync } from "node:zlib";
 import { Logger } from "../utils/logging";
+import { StartupProfiler } from "../utils/startupProfiler";
 import {
 	Agent,
 	NATIVE_PDF_PROVIDERS,
@@ -731,7 +732,7 @@ export class AgentManager {
 
 	async initialize(): Promise<void> {
 		// Load chats
-		await this.chatManager.load();
+		await StartupProfiler.measure("agent:chatManager.load", () => this.chatManager.load());
 
 		// Cleanup existing agent if any
 		this.agent = null;

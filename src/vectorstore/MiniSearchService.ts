@@ -17,7 +17,7 @@ import {
 	type LexicalRankingFeatures,
 	type LexicalScoringConfig,
 } from "../search/lexicalScoring";
-import { Logger } from "../utils/logging";
+import { getLogLevel, Logger, LogLvl } from "../utils/logging";
 
 import { getDbName } from "./types";
 
@@ -125,6 +125,8 @@ export class MiniSearchService {
 	private tagUsageCount = new Map<string, number>();
 	private folderUsageCount = new Map<string, number>();
 	private readonly dbName: string;
+	/** Serialized byte size of the index blob last read from IDB (diagnostics; 0 if none). */
+	lastLoadedBytes = 0;
 
 	constructor(vaultId: string, indexId?: string) {
 		this.dbName = getDbName(DB_NAME_PREFIX, vaultId, indexId);
@@ -197,6 +199,17 @@ export class MiniSearchService {
 				const data = request.result;
 				if (data?.indexData && data.schemaVersion === STORAGE_SCHEMA_VERSION) {
 					try {
+						// Record blob size for startup diagnostics. `indexData` is the object from
+						// MiniSearch.toJSON(); stringify to approximate its serialized byte size.
+						// Gated on INFO logging: stringifying a large index costs CPU, and we must
+						// not add that cost to every startup — only when diagnostics are enabled.
+						if (getLogLevel() <= LogLvl.INFO) {
+							try {
+								this.lastLoadedBytes = JSON.stringify(data.indexData).length;
+							} catch {
+								this.lastLoadedBytes = 0;
+							}
+						}
 						this.index = MiniSearch.loadJS(data.indexData, {
 							fields: ["title", "aliases", "tags", "pathSegments", "content"],
 							storeFields: ["path", "title", "aliases", "tags", "pathSegments", "content"],

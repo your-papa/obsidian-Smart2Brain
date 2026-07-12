@@ -38,6 +38,7 @@ import {
 	type VectorStore,
 } from "./types";
 import { Logger } from "../utils/logging";
+import { StartupProfiler } from "../utils/startupProfiler";
 import { getIndexableVaultFiles, isIndexableFile, readIndexableContent } from "../utils/fileFiltering";
 import { matchesPathPrefix } from "../utils/pathUtils";
 import { toFloat32Array } from "./similarity";
@@ -389,7 +390,7 @@ export class VectorStoreService {
 			const inst = this.createInstance(indexId);
 
 			// Open IndexedDB — this is the sole persistence layer
-			await inst.store.open();
+			await StartupProfiler.measure(`vectorstore:open[${indexId}]`, () => inst.store.open());
 
 			const [provider = "", ...modelParts] = indexId.split(":");
 			const model = modelParts.join(":");

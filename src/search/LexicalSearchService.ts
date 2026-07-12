@@ -11,6 +11,7 @@ import {
 	hasLexicalTitleSignal,
 } from "../search/lexicalScoring";
 import { Logger } from "../utils/logging";
+import { StartupProfiler } from "../utils/startupProfiler";
 import { getIndexableVaultFiles, isIndexableFile, readIndexableContent } from "../utils/fileFiltering";
 import {
 	MiniSearchService,
@@ -127,8 +128,19 @@ export class LexicalSearchService {
 
 	private async init(): Promise<void> {
 		try {
-			await this.miniSearch.open();
-			const loaded = await this.miniSearch.loadFromStorage();
+			await StartupProfiler.measure("lexical:miniSearch.open", () => this.miniSearch.open());
+			const loaded = await StartupProfiler.measure("lexical:loadFromStorage", () =>
+				this.miniSearch.loadFromStorage(),
+			);
+			// Size metrics: whether slowness scales with index/vault size.
+			StartupProfiler.setMeta("lexicalIndexDocs", this.miniSearch.documentCount);
+			StartupProfiler.setMeta("lexicalIndexBytes", this.miniSearch.lastLoadedBytes);
+			StartupProfiler.setMeta("lexicalIndexLoadedFromCache", loaded);
+			try {
+				StartupProfiler.setMeta("vaultFileCount", this.plugin.app.vault.getFiles().length);
+			} catch {
+				// getFiles can throw if the vault metadata cache isn't ready; non-fatal.
+			}
 			if (loaded) {
 				this.plugin.app.workspace.onLayoutReady(() => {
 					void this.validateIndex();
@@ -166,20 +178,22 @@ export class LexicalSearchService {
 	}
 
 	private async buildIndex(): Promise<void> {
-		const { vault } = this.plugin.app;
-		const files = getIndexableVaultFiles(vault);
+		await StartupProfiler.logDuration("lexical:buildIndex", async () => {
+			const { vault } = this.plugin.app;
+			const files = getIndexableVaultFiles(vault);
 
-		for (const file of files) {
-			try {
-				const content = await readIndexableContent(vault, file);
-				this.miniSearch.addDocument(file.path, file.basename, content, this.getSearchableTags(file));
-			} catch (error) {
-				Logger.error(`[LexicalSearch] Failed to read ${file.path}:`, error);
+			for (const file of files) {
+				try {
+					const content = await readIndexableContent(vault, file);
+					this.miniSearch.addDocument(file.path, file.basename, content, this.getSearchableTags(file));
+				} catch (error) {
+					Logger.error(`[LexicalSearch] Failed to read ${file.path}:`, error);
+				}
 			}
-		}
 
-		await this.miniSearch.flush();
-		Logger.log(`[LexicalSearch] Built lexical index: ${this.miniSearch.documentCount} documents`);
+			await this.miniSearch.flush();
+			Logger.log(`[LexicalSearch] Built lexical index: ${this.miniSearch.documentCount} documents`);
+		});
 	}
 
 	private async validateIndex(): Promise<void> {

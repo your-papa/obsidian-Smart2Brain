@@ -8,6 +8,11 @@ export enum LogLvl {
 
 let logLevel = LogLvl.DEBUG;
 
+/** Current log level. Exposed so other modules (e.g. the startup profiler) can gate work. */
+export function getLogLevel(): LogLvl {
+	return logLevel;
+}
+
 export const Logger = {
 	setLogLevel(level: LogLvl) {
 		logLevel = level;
