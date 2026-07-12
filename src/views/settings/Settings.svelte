@@ -3,6 +3,7 @@ import { Tabs } from "bits-ui";
 import { consumePendingSettingsTab } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
 import AgentsSettings from "./AgentsSettings.svelte";
+import DeveloperSettings from "./DeveloperSettings.svelte";
 import GeneralSettings from "./GeneralSettings.svelte";
 import GraphSettings from "./GraphSettings.svelte";
 import SearchSettings from "./SearchSettings.svelte";
@@ -70,6 +71,17 @@ let activeTab = $state(pendingTab ?? "general");
         <span>Troubleshooting</span>
       </span>
     </Tabs.Trigger>
+    {#if import.meta.env.DEV}
+      <Tabs.Trigger
+        value="developer"
+        class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:bg-[--interactive-accent] data-[state=active]:text-[--text-on-accent] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
+      >
+        <span class="settings-tab-label">
+          <span class="settings-tab-icon" use:icon={"code"} aria-hidden="true"></span>
+          <span>Developer</span>
+        </span>
+      </Tabs.Trigger>
+    {/if}
   </Tabs.List>
 
   <Tabs.Content value="general">
@@ -91,6 +103,12 @@ let activeTab = $state(pendingTab ?? "general");
   <Tabs.Content value="troubleshooting">
     <TroubleshootingSettings />
   </Tabs.Content>
+
+  {#if import.meta.env.DEV}
+    <Tabs.Content value="developer">
+      <DeveloperSettings />
+    </Tabs.Content>
+  {/if}
 </Tabs.Root>
 
 <style>
