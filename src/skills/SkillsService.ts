@@ -191,6 +191,17 @@ export class SkillsService {
 	async bootstrapDefaultSkills(): Promise<number> {
 		await this.ensureSkillsDir();
 		const skillsDir = this.getSkillsDir();
+
+		// Fast path: one list() call to check if all bundled skill folders are already present.
+		// Avoids N exists() round-trips on every startup after the first run.
+		const listing = await this.adapter.list(skillsDir);
+		const existingFolderNames = new Set(listing.folders.map((f) => f.split("/").pop()));
+		const allPresent = BUNDLED_SKILLS.every((s) => existingFolderNames.has(s.name));
+		if (allPresent) {
+			Log.debug("All bundled skills already installed, skipping bootstrap");
+			return 0;
+		}
+
 		let installed = 0;
 
 		for (const bundledSkill of BUNDLED_SKILLS) {
