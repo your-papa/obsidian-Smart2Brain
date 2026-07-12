@@ -6,7 +6,7 @@ import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { READ_CONTENT_GUIDANCE_DEFAULTS, getData, getReadContentGuidance } from "../stores/dataStore.svelte";
-import type { BuiltInToolId } from "../types/plugin";
+import type { BuiltInToolId, AgentConfig } from "../types/plugin";
 import { VIEW_TYPE_CHAT } from "../views/chat/Chat";
 import { lookupModelInfo } from "../providers/modelsDevApi";
 import { fetchOllamaModelsInfo } from "../providers/ollamaModels";
@@ -37,6 +37,7 @@ import {
 	type AgentStreamChunk,
 	type CheckpointHistoryItem,
 	type ChooseModelParams,
+	type SubAgentSpec,
 	type ThreadHistory,
 } from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
@@ -92,11 +93,11 @@ export type AgentManagerStreamChunk =
 	| { type: "token"; token: string }
 	| Pick<
 			Extract<AgentStreamChunk, { type: "tool_start" }>,
-			"type" | "toolCallId" | "toolName" | "input" | "aiMessageId"
+			"type" | "toolCallId" | "toolName" | "input" | "aiMessageId" | "subAgentName" | "parentToolCallId"
 	  >
 	| Pick<
 			Extract<AgentStreamChunk, { type: "tool_end" }>,
-			"type" | "toolCallId" | "toolName" | "output" | "aiMessageId"
+			"type" | "toolCallId" | "toolName" | "output" | "aiMessageId" | "subAgentName" | "parentToolCallId"
 	  >
 	| { type: "result"; result: unknown };
 
@@ -278,6 +279,9 @@ export class AgentManager {
 	private readonly plugin: SecondBrainPlugin;
 	private agent: Agent | null = null;
 	private deferredSetup: Promise<void> | null = null;
+	/** Callbacks to invoke once after the next `initialize()` completes. Used to
+	 *  reload chat sessions that opened before the deferred init finished. */
+	private postInitCallbacks: Array<() => void> = [];
 	private readonly chatManager: ObsidianChatManager;
 
 	private sanitizeThreadFileName(threadId: string): string {
@@ -362,9 +366,9 @@ export class AgentManager {
 	 * Uses the currently selected agent's configuration.
 	 * Only includes skills for plugins that are both enabled AND installed.
 	 */
-	async assembleSystemPrompt(): Promise<string> {
+	async assembleSystemPrompt(agent?: AgentConfig): Promise<string> {
 		const pluginData = getData();
-		const selectedAgent = pluginData.getSelectedAgent();
+		const selectedAgent = agent ?? pluginData.getSelectedAgent();
 
 		let prompt = selectedAgent.systemPrompt || BASE_SYSTEM_PROMPT;
 		const enabledTools = Object.entries(selectedAgent.toolsConfig).filter(([, config]) => config.enabled);
@@ -578,18 +582,31 @@ export class AgentManager {
 	private bindBuiltInTools(agent: Agent): StructuredToolInterface[] {
 		const data = getData();
 		const selectedAgent = data.getSelectedAgent();
+		const tools = this.buildToolsForAgent(selectedAgent);
+		agent.bindTools(tools);
+		agent.bindSubAgents(this.resolveSubAgentSpecs(selectedAgent));
+		return tools;
+	}
+
+	/**
+	 * Builds the built-in tool instances for a given agent config, gated by that
+	 * agent's `toolsConfig`. Shared between the main agent (bindBuiltInTools) and
+	 * subagent resolution (resolveSubAgentSpecs), so a referenced subagent gets
+	 * its own tool set rather than inheriting the parent's.
+	 */
+	private buildToolsForAgent(agentCfg: AgentConfig): StructuredToolInterface[] {
 		const tools: StructuredToolInterface[] = [];
 
-		// Helper to check if tool is enabled for the selected agent
+		// Helper to check if tool is enabled for this agent
 		const isToolEnabled = (toolId: BuiltInToolId): boolean => {
-			return selectedAgent.toolsConfig[toolId]?.enabled ?? true;
+			return agentCfg.toolsConfig[toolId]?.enabled ?? true;
 		};
 
 		// Instantiate vision processor models for read_content.
 		// When not explicitly configured, auto-fallback to the chat model if it supports vision.
 		let imageProcessorInstance: BaseChatModel | undefined;
 		let pdfProcessorInstance: BaseChatModel | undefined;
-		const readContentSettings = selectedAgent.toolsConfig.read_content?.settings as
+		const readContentSettings = agentCfg.toolsConfig.read_content?.settings as
 			| { imageProcessor?: ChatModel | null; pdfProcessor?: ChatModel | null }
 			| undefined;
 
@@ -597,11 +614,9 @@ export class AgentManager {
 		const explicitImage = readContentSettings?.imageProcessor;
 		const explicitPdf = readContentSettings?.pdfProcessor;
 		const imageProcessorModel =
-			explicitImage !== undefined
-				? explicitImage
-				: this.autoProcessorFromChatModel(selectedAgent.chatModel, "image");
+			explicitImage !== undefined ? explicitImage : this.autoProcessorFromChatModel(agentCfg.chatModel, "image");
 		const pdfProcessorModel =
-			explicitPdf !== undefined ? explicitPdf : this.autoProcessorFromChatModel(selectedAgent.chatModel, "pdf");
+			explicitPdf !== undefined ? explicitPdf : this.autoProcessorFromChatModel(agentCfg.chatModel, "pdf");
 
 		if (imageProcessorModel) {
 			try {
@@ -665,8 +680,62 @@ export class AgentManager {
 			}
 		}
 
-		agent.bindTools(tools);
 		return tools;
+	}
+
+	/**
+	 * Resolves an agent's subagent references into fully-built specs (own model,
+	 * own tools, own prompt). Referenced agents without a configured chat model
+	 * are skipped (they cannot run). Delegation is one level deep — a referenced
+	 * subagent's own subAgentIds are ignored.
+	 */
+	private resolveSubAgentSpecs(parentAgent: AgentConfig): SubAgentSpec[] {
+		const data = getData();
+		const refs = data.resolveSubAgents(parentAgent.id);
+		const specs: SubAgentSpec[] = [];
+
+		for (const ref of refs) {
+			if (!ref.chatModel) {
+				Logger.log(`[AgentManager] Skipping subagent "${ref.name}" — no chat model configured.`);
+				continue;
+			}
+			try {
+				const model = this.registry.createChatInstance(
+					ref.chatModel.provider,
+					ref.chatModel.model,
+					ref.chatModel.modelConfig,
+				);
+				const tools = this.buildToolsForAgent(ref);
+				const isSelf = ref.id === parentAgent.id;
+				// A self-reference exposes an isolated-context copy of this agent.
+				// Give it a distinct selector name so it never collides with a
+				// sibling subagent, and describe it as a clean-context worker.
+				const name = isSelf ? `${ref.name} (isolated)` : ref.name;
+				const promptHint = (ref.systemPrompt || "").trim().replace(/\s+/g, " ").slice(0, 160);
+				let description: string;
+				if (isSelf) {
+					description = `Delegate a subtask to a fresh isolated-context copy of yourself ("${ref.name}"). Use this to keep the main conversation's context clean while handling a self-contained subtask.`;
+				} else {
+					description = promptHint
+						? `Delegate to the "${ref.name}" agent. ${promptHint}`
+						: `Delegate a task to the "${ref.name}" agent.`;
+				}
+				specs.push({
+					name,
+					description,
+					// Subagents use their own base system prompt. We intentionally omit
+					// the parent's skills-context XML — subagents run isolated and load
+					// their own skills only if their tools include load_skill.
+					systemPrompt: ref.systemPrompt || BASE_SYSTEM_PROMPT,
+					model,
+					tools,
+				});
+			} catch (e) {
+				Logger.error(`[AgentManager] Failed to build subagent "${ref.name}"`, e);
+			}
+		}
+
+		return specs;
 	}
 
 	private async loadMCPTools(
@@ -791,6 +860,19 @@ export class AgentManager {
 
 		// Start deferred network operations (vision resolution + MCP tools) in background
 		this.deferredSetup = this.performDeferredSetup(this.agent, chatModel ?? undefined, tools);
+
+		// Notify any sessions that opened before init completed (e.g. workspace restore).
+		const callbacks = this.postInitCallbacks.splice(0);
+		for (const cb of callbacks) cb();
+	}
+
+	/**
+	 * Register a one-shot callback to be invoked once the next `initialize()` completes.
+	 * Used by chat sessions that opened before the deferred init finished so they can
+	 * reload their checkpoint history once the agent is ready.
+	 */
+	onNextInitialized(cb: () => void): void {
+		this.postInitCallbacks.push(cb);
 	}
 
 	/**
@@ -850,6 +932,8 @@ export class AgentManager {
 					toolName: chunk.toolName,
 					input: chunk.input,
 					aiMessageId: chunk.aiMessageId,
+					subAgentName: chunk.subAgentName,
+					parentToolCallId: chunk.parentToolCallId,
 				};
 			case "tool_end":
 				return {
@@ -858,6 +942,8 @@ export class AgentManager {
 					toolName: chunk.toolName,
 					output: chunk.output,
 					aiMessageId: chunk.aiMessageId,
+					subAgentName: chunk.subAgentName,
+					parentToolCallId: chunk.parentToolCallId,
 				};
 			case "result":
 				return { type: "result", result: chunk.result };
@@ -1043,8 +1129,13 @@ export class AgentManager {
 	}
 
 	async getCheckpointHistory(threadId: string): Promise<CheckpointHistoryItem[]> {
-		const agent = await this.ensureAgent();
-		return agent.getCheckpointHistory(this.normalizeThreadId(threadId));
+		// Guard: don't force a full initialize() if the agent isn't ready yet.
+		// This can be called during workspace restore (before onLayoutReady) when a chat
+		// view is reopened from a previous session. Returning [] is safe — loadSession
+		// treats an empty checkpoint history as an unloaded state and the view will
+		// reload properly once the deferred init completes.
+		if (!this.agent) return [];
+		return this.agent.getCheckpointHistory(this.normalizeThreadId(threadId));
 	}
 
 	/**

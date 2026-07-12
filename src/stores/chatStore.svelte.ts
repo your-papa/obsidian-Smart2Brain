@@ -67,6 +67,16 @@ export interface ToolCallState {
 	status: ToolCallStatus;
 	output?: unknown;
 	preamble?: string;
+	/** Name of the subagent this tool ran inside (via the `task` tool), if any. */
+	subAgentName?: string;
+	/** The id of the parent `task` tool call this is nested under, if any. */
+	parentToolCallId?: string;
+	/**
+	 * True when this is a `task` call reconstructed from a checkpoint (subagent
+	 * internals were never persisted), so the UI shows a "steps not recorded"
+	 * affordance instead of nested children.
+	 */
+	subAgentDetailsUnavailable?: boolean;
 }
 
 export type AssistantTimelineEventType = "preamble" | "tool_start" | "tool_end";
@@ -82,6 +92,12 @@ export interface AssistantTimelineEvent {
 	status?: ToolCallStatus;
 	/** The id of the AI message that produced this event. Groups events from the same AI message. */
 	aiMessageId?: string;
+	/** Name of the subagent this tool ran inside (via the `task` tool), if any. */
+	subAgentName?: string;
+	/** The id of the parent `task` tool call this is nested under, if any. */
+	parentToolCallId?: string;
+	/** See {@link ToolCallState.subAgentDetailsUnavailable}. */
+	subAgentDetailsUnavailable?: boolean;
 }
 
 export interface UserMessage {
@@ -860,6 +876,9 @@ function buildTimelineFromToolCalls(
 			input: toolCall.input,
 			status: "running",
 			aiMessageId,
+			subAgentName: toolCall.subAgentName,
+			parentToolCallId: toolCall.parentToolCallId,
+			subAgentDetailsUnavailable: toolCall.subAgentDetailsUnavailable,
 		});
 
 		events.push({
@@ -870,6 +889,8 @@ function buildTimelineFromToolCalls(
 			output: toolCall.output,
 			status: toolCall.status,
 			aiMessageId,
+			subAgentName: toolCall.subAgentName,
+			parentToolCallId: toolCall.parentToolCallId,
 		});
 	}
 
@@ -917,12 +938,26 @@ export function baseMessageToAssistantMessage(
 		if (Array.isArray(rawToolCalls) && rawToolCalls.length > 0) {
 			toolCalls = rawToolCalls.map((tc) => {
 				const toolOutput = toolOutputs?.get(tc.id || "");
+				const input = normalizeToolInput(tc.args);
+				// On reload the subagent's own tool calls are not persisted (deepagents
+				// returns only the `task` ToolMessage to the parent), so we cannot
+				// reconstruct nested children. We can still label the `task` call with
+				// the subagent it delegated to, recovered from its `subagent_type` arg.
+				const subAgentName =
+					tc.name === "task" && typeof input.subagent_type === "string"
+						? (input.subagent_type as string)
+						: undefined;
 				return {
 					id: tc.id || "",
 					name: tc.name,
-					input: normalizeToolInput(tc.args),
+					input,
 					status: toolOutput?.status ?? "completed",
 					output: toolOutput?.content,
+					subAgentName,
+					// Reconstructed from a checkpoint: the subagent's own tool
+					// calls are not persisted, so mark the node so the UI shows
+					// a "steps not recorded" affordance instead of children.
+					subAgentDetailsUnavailable: subAgentName !== undefined ? true : undefined,
 				};
 			});
 		}
@@ -1813,6 +1848,8 @@ export class ChatSession {
 					input: this.normalizeToolInput(chunk.input),
 					status: "running",
 					preamble: preamble.trim() || undefined,
+					subAgentName: chunk.subAgentName,
+					parentToolCallId: chunk.parentToolCallId,
 				});
 
 				if (preamble.trim()) {
@@ -1834,6 +1871,8 @@ export class ChatSession {
 					input: this.normalizeToolInput(chunk.input),
 					status: "running",
 					aiMessageId: chunk.aiMessageId,
+					subAgentName: chunk.subAgentName,
+					parentToolCallId: chunk.parentToolCallId,
 				});
 				continue;
 			}
@@ -1852,6 +1891,8 @@ export class ChatSession {
 					if (tc) {
 						tc.status = resolvedStatus;
 						tc.output = chunk.output;
+						if (chunk.subAgentName) tc.subAgentName = chunk.subAgentName;
+						if (chunk.parentToolCallId) tc.parentToolCallId = chunk.parentToolCallId;
 					} else {
 						assistantMsg.toolCalls.push({
 							id: chunk.toolCallId,
@@ -1859,6 +1900,8 @@ export class ChatSession {
 							input: {},
 							status: resolvedStatus,
 							output: chunk.output,
+							subAgentName: chunk.subAgentName,
+							parentToolCallId: chunk.parentToolCallId,
 						});
 					}
 				} else {
@@ -1869,6 +1912,8 @@ export class ChatSession {
 							input: {},
 							status: resolvedStatus,
 							output: chunk.output,
+							subAgentName: chunk.subAgentName,
+							parentToolCallId: chunk.parentToolCallId,
 						},
 					];
 				}
@@ -1881,6 +1926,8 @@ export class ChatSession {
 					output: chunk.output,
 					status: resolvedStatus,
 					aiMessageId: chunk.aiMessageId,
+					subAgentName: chunk.subAgentName,
+					parentToolCallId: chunk.parentToolCallId,
 				});
 				continue;
 			}
@@ -1894,9 +1941,40 @@ export class ChatSession {
 			if (chunk.type === "checkpoint_message") {
 				this.summarizingHistory = false;
 				const checkpointAssistant = baseMessageToAssistantMessage(chunk.message);
+				// Content and final tool statuses/outputs are authoritative from the
+				// checkpoint. But the checkpoint never contains the subagent's own
+				// tool calls (deepagents persists only the `task` ToolMessage), so if
+				// we captured them live keep the richer streamed timeline and only
+				// reconcile final statuses/outputs onto it — otherwise the nested
+				// subagent branch would collapse the instant streaming ends.
 				assistantMsg.content = checkpointAssistant.content;
-				assistantMsg.toolCalls = checkpointAssistant.toolCalls;
-				assistantMsg.assistantTimeline = checkpointAssistant.assistantTimeline;
+
+				const streamedHasSubAgentChildren = assistantMsg.assistantTimeline?.some((e) => e.parentToolCallId);
+
+				if (streamedHasSubAgentChildren) {
+					const finalById = new Map((checkpointAssistant.toolCalls ?? []).map((tc) => [tc.id, tc]));
+					// Reconcile the streamed timeline's tool_end events with the
+					// checkpoint's final status/output (streaming defaults status to
+					// "completed" and can't see error state).
+					for (const event of assistantMsg.assistantTimeline ?? []) {
+						if (event.type !== "tool_end") continue;
+						const final = event.toolCallId ? finalById.get(event.toolCallId) : undefined;
+						if (!final) continue;
+						event.status = final.status;
+						event.output = final.output;
+					}
+					// Mirror the same reconciliation onto the flat toolCalls the
+					// timeline was built from, so both stay in sync.
+					for (const tc of assistantMsg.toolCalls ?? []) {
+						const final = finalById.get(tc.id);
+						if (!final) continue;
+						tc.status = final.status;
+						tc.output = final.output;
+					}
+				} else {
+					assistantMsg.toolCalls = checkpointAssistant.toolCalls;
+					assistantMsg.assistantTimeline = checkpointAssistant.assistantTimeline;
+				}
 				break;
 			}
 		}
@@ -2125,6 +2203,13 @@ export class Messenger {
 				this.#agentManager.getThreadHistory(id),
 				this.#agentManager.getCheckpointHistory(id),
 			]);
+
+			// If the agent wasn't initialized yet, checkpoint history came back empty.
+			// Schedule a reload for once the deferred init completes so the view
+			// shows the real history without the user having to intervene.
+			if (checkpointHistory.length === 0 && !isEmpty) {
+				this.#agentManager.onNextInitialized(() => void this.reloadSession());
+			}
 
 			const savedCheckpointId = this.getLastViewedCheckpointId(history);
 			const graph = buildCheckpointGraph(checkpointHistory);
