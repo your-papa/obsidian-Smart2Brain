@@ -363,10 +363,21 @@ let instance: AvailableModels | null = null;
 /**
  * Returns the singleton AvailableModels instance.
  * All components share the same reactive state.
+ *
+ * The instance is created inside an `$effect.root` so the TanStack queries it
+ * spins up (each `createQuery` registers an internal `$effect`) always have a
+ * stable, app-lifetime owner. Without this, the first `useAvailableModels()`
+ * call from inside a consumer's `$derived` (e.g. the model-selection modal
+ * reading `hydratedChatModels` during onboarding) constructs the singleton in
+ * an unowned reactive context and Svelte throws `effect_in_unowned_derived`.
+ * The root is never disposed — the singleton lives for the whole session.
  */
 export function useAvailableModels(): AvailableModels {
 	if (!instance) {
-		instance = new AvailableModels();
+		$effect.root(() => {
+			instance = new AvailableModels();
+		});
 	}
-	return instance;
+	// biome-ignore lint/style/noNonNullAssertion: the $effect.root callback runs synchronously, so `instance` is set here.
+	return instance!;
 }

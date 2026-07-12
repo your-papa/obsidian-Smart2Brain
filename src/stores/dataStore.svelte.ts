@@ -406,6 +406,8 @@ export const DEFAULT_SETTINGS: PluginData = {
 	isVerbose: false,
 	chatOpenLocation: "tab" as ChatOpenLocation,
 	lastActiveChatId: null,
+	onboardingComplete: false,
+	onboardingSplashSeen: false,
 
 	// Debugging & telemetry
 	enableLangSmith: false,
@@ -1040,6 +1042,22 @@ export class PluginDataStore {
 	}
 	set isVerbose(val: boolean) {
 		this.#data.isVerbose = val;
+		this.saveSettings();
+	}
+
+	get onboardingComplete() {
+		return this.#data.onboardingComplete;
+	}
+	set onboardingComplete(val: boolean) {
+		this.#data.onboardingComplete = val;
+		this.saveSettings();
+	}
+
+	get onboardingSplashSeen() {
+		return this.#data.onboardingSplashSeen;
+	}
+	set onboardingSplashSeen(val: boolean) {
+		this.#data.onboardingSplashSeen = val;
 		this.saveSettings();
 	}
 

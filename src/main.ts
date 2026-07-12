@@ -19,6 +19,7 @@ import { setPlugin } from "./stores/state.svelte";
 import { LexicalSearchService } from "./search/LexicalSearchService";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import { NoteContextView, VIEW_TYPE_NOTE_CONTEXT } from "./views/note-context/NoteContextView";
+import { OnboardingView, VIEW_TYPE_ONBOARDING } from "./views/onboarding/OnboardingView";
 import { SmartGraphView, VIEW_TYPE_SMART_GRAPH } from "./views/smart-graph/SmartGraphView";
 import SettingsTab from "./views/settings/Settings";
 import { VectorStoreService } from "./vectorstore";
@@ -281,6 +282,7 @@ export default class SecondBrainPlugin extends Plugin {
 			defaultMod: true,
 		});
 		this.registerView(VIEW_TYPE_NOTE_CONTEXT, (leaf) => new NoteContextView(leaf, this));
+		this.registerView(VIEW_TYPE_ONBOARDING, (leaf) => new OnboardingView(leaf, this));
 
 		if (this.manifest.dir === undefined) {
 			this.unload();
@@ -326,6 +328,13 @@ export default class SecondBrainPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: "open-onboarding",
+			name: "Show Welcome / Onboarding",
+			icon: "zap",
+			callback: () => this.activateOnboardingView(),
+		});
+
+		this.addCommand({
 			id: "export-chat-as-json",
 			name: "Export current chat as JSON",
 			icon: "file-json",
@@ -361,6 +370,13 @@ export default class SecondBrainPlugin extends Plugin {
 		// - AgentManager: chat index loading, provider registration
 		// If a chat view opens before this completes, AgentManager.ensureAgent() handles lazy init.
 		this.app.workspace.onLayoutReady(() => {
+			// First-run onboarding: orient the user before heavy init. Only auto-open
+			// when they've never completed it AND haven't configured a provider some
+			// other way. Onboarding is skippable — the plugin works without a provider.
+			if (!this.pluginData.onboardingComplete && this.pluginData.getConfiguredProviders().length === 0) {
+				void this.activateOnboardingView();
+			}
+
 			// Start search/vector store initialization (non-blocking, fire-and-forget)
 			this.lexicalSearchService = LexicalSearchService.startInitialize(this);
 			this.vectorStoreService = VectorStoreService.startInitialize(this);
@@ -513,6 +529,24 @@ export default class SecondBrainPlugin extends Plugin {
 			const newLeaf = workspace.getLeaf("tab");
 			await newLeaf.setViewState({
 				type: VIEW_TYPE_NOTE_CONTEXT,
+				active: true,
+			});
+			leaf = newLeaf;
+		}
+
+		workspace.revealLeaf(leaf);
+	}
+
+	async activateOnboardingView() {
+		const { workspace } = this.app;
+
+		let leaf = workspace.getLeavesOfType(VIEW_TYPE_ONBOARDING)[0];
+
+		if (!leaf) {
+			// Open in a new tab in the main editor area
+			const newLeaf = workspace.getLeaf("tab");
+			await newLeaf.setViewState({
+				type: VIEW_TYPE_ONBOARDING,
 				active: true,
 			});
 			leaf = newLeaf;

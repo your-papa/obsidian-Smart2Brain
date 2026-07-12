@@ -412,6 +412,10 @@ export interface PluginData {
 
 	chatOpenLocation: ChatOpenLocation;
 	lastActiveChatId: UUIDv7 | null;
+	/** Whether the user has completed (or dismissed) the first-run onboarding flow. */
+	onboardingComplete: boolean;
+	/** Whether the onboarding splash intro animation has already played (so it plays only once). */
+	onboardingSplashSeen: boolean;
 
 	// ============================================================================
 	// Web Search
