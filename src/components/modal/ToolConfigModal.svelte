@@ -14,6 +14,8 @@ import type SecondBrainPlugin from "../../main";
 import { ModelSelectionModal, type SelectedModel } from "./ModelSelectionModal";
 import { NATIVE_PDF_PROVIDERS } from "../../agent/Agent";
 import SecretSelect from "../settings/SecretSelect.svelte";
+import ModalField from "../settings/ModalField.svelte";
+import SettingGroup from "../settings/SettingGroup.svelte";
 import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
 import Text from "../ui/Text.svelte";
@@ -476,9 +478,7 @@ function handleResetToDefault() {
 </script>
 
 <div class="tool-config-modal-content">
-  <div class="tool-config-field">
-    <label class="tool-config-label" for="tool-config-name">Tool Name</label>
-    <p class="tool-config-description">The name the AI agent sees for this tool. Use snake_case.</p>
+  <ModalField label="Tool Name" desc="The name the AI agent sees for this tool. Use snake_case." for="tool-config-name">
     <Text
       id="tool-config-name"
       inputType="text"
@@ -486,13 +486,13 @@ function handleResetToDefault() {
       placeholder={defaultConfig.name}
       onblur={(v) => (name = v)}
     />
-  </div>
+  </ModalField>
 
-  <div class="tool-config-field">
-    <label class="tool-config-label" for="tool-config-description">Tool Description</label>
-    <p class="tool-config-description">
-      Describe what the tool does. The AI uses this to decide when to use the tool.
-    </p>
+  <ModalField
+    label="Tool Description"
+    desc="Describe what the tool does. The AI uses this to decide when to use the tool."
+    for="tool-config-description"
+  >
     <TextArea
       id="tool-config-description"
       class="w-full h-24"
@@ -500,14 +500,13 @@ function handleResetToDefault() {
       placeholder={defaultConfig.description}
       onblur={(v) => (description = v)}
     />
-  </div>
+  </ModalField>
 
-  <div class="tool-config-field">
-    <label class="tool-config-label" for="tool-config-prompt-guidance">Prompt Guidance</label>
-    <p class="tool-config-description">
-      Optional vault-specific guidance injected into the assembled system prompt when this tool is
-      enabled.
-    </p>
+  <ModalField
+    label="Prompt Guidance"
+    desc="Optional vault-specific guidance injected into the assembled system prompt when this tool is enabled."
+    for="tool-config-prompt-guidance"
+  >
     <TextArea
       id="tool-config-prompt-guidance"
       class="w-full h-24"
@@ -515,16 +514,15 @@ function handleResetToDefault() {
       placeholder="Optional guidance for how the agent should use this tool..."
       onblur={(v) => (promptGuidance = v)}
     />
-  </div>
+  </ModalField>
 
   {#if capturedToolId === "search_notes"}
-    <div class="tool-config-section">
-      <h4 class="tool-config-section-title">Search Settings</h4>
-      <div class="tool-config-field">
-        <label class="tool-config-label" for="tool-config-algorithm">Search Algorithm</label>
-        <p class="tool-config-description">
-          Choose the search algorithm the agent uses for retrieving notes.
-        </p>
+    <SettingGroup heading="Search Settings">
+      <ModalField
+        label="Search Algorithm"
+        desc="Choose the search algorithm the agent uses for retrieving notes."
+        for="tool-config-algorithm"
+      >
         <Dropdown
           id="tool-config-algorithm"
           type="options"
@@ -535,10 +533,12 @@ function handleResetToDefault() {
           selected={algorithm}
           onchange={(v) => (algorithm = v)}
         />
-      </div>
-      <div class="tool-config-field">
-        <label class="tool-config-label" for="tool-config-max-results">Max Notes to Return</label>
-        <p class="tool-config-description">Maximum number of notes to return to the AI agent.</p>
+      </ModalField>
+      <ModalField
+        label="Max Notes to Return"
+        desc="Maximum number of notes to return to the AI agent."
+        for="tool-config-max-results"
+      >
         <Text
           id="tool-config-max-results"
           inputType="number"
@@ -546,46 +546,41 @@ function handleResetToDefault() {
           placeholder="10"
           onblur={(v) => (maxResults = Number.parseInt(String(v)) || 10)}
         />
-      </div>
-      <div class="tool-config-field">
-        <div class="tool-config-label">Include Paths</div>
-        <p class="tool-config-description">Include the full note path for each visible result.</p>
+      </ModalField>
+      <ModalField label="Include Paths" desc="Include the full note path for each visible result." inline>
         <Toggle checked={searchShowPath} onchange={(checked) => (searchShowPath = checked)} />
-      </div>
-      <div class="tool-config-field">
-        <div class="tool-config-label">Include Tags</div>
-        <p class="tool-config-description">Include normalized note tags in each visible result.</p>
+      </ModalField>
+      <ModalField label="Include Tags" desc="Include normalized note tags in each visible result." inline>
         <Toggle checked={searchShowTags} onchange={(checked) => (searchShowTags = checked)} />
-      </div>
-      <div class="tool-config-field">
-        <div class="tool-config-label">Include Match Badges</div>
-        <p class="tool-config-description">
-          Include why a note matched, such as title, tag, or content badges.
-        </p>
+      </ModalField>
+      <ModalField
+        label="Include Match Badges"
+        desc="Include why a note matched, such as title, tag, or content badges."
+        inline
+      >
         <Toggle
           checked={searchShowMatchBadges}
           onchange={(checked) => (searchShowMatchBadges = checked)}
         />
-      </div>
-      <div class="tool-config-field">
-        <div class="tool-config-label">Include Content Snippets</div>
-        <p class="tool-config-description">
-          Include short match snippets or heading context for each visible result.
-        </p>
+      </ModalField>
+      <ModalField
+        label="Include Content Snippets"
+        desc="Include short match snippets or heading context for each visible result."
+        inline
+      >
         <Toggle
           checked={searchShowMatchContext}
           onchange={(checked) => (searchShowMatchContext = checked)}
         />
-      </div>
-    </div>
+      </ModalField>
+    </SettingGroup>
   {:else if capturedToolId === "read_content"}
-    <div class="tool-config-section">
-      <h4 class="tool-config-section-title">Read Settings</h4>
-      <div class="tool-config-field">
-        <label class="tool-config-label" for="tool-config-max-content-length"
-          >Max Content Length</label
-        >
-        <p class="tool-config-description">Maximum characters to return. Set to 0 for unlimited.</p>
+    <SettingGroup heading="Read Settings">
+      <ModalField
+        label="Max Content Length"
+        desc="Maximum characters to return. Set to 0 for unlimited."
+        for="tool-config-max-content-length"
+      >
         <Text
           id="tool-config-max-content-length"
           inputType="number"
@@ -593,17 +588,14 @@ function handleResetToDefault() {
           placeholder="0"
           onblur={(v) => (maxContentLength = Number.parseInt(String(v)) || 0)}
         />
-      </div>
-    </div>
-    <div class="tool-config-section">
-      <h4 class="tool-config-section-title">Vision Processors</h4>
-      <p class="tool-config-description" style="margin-bottom: 12px;">
+      </ModalField>
+    </SettingGroup>
+    <SettingGroup heading="Vision Processors">
+      <p class="tool-config-section-note">
         Configure how images and PDFs encountered during tool use are processed. Auto uses the chat
         model if it supports vision.
       </p>
-      <div class="tool-config-field">
-        <div class="tool-config-label">Image Processor</div>
-        <p class="tool-config-description">Vision model to analyze images found in notes.</p>
+      <ModalField label="Image Processor" desc="Vision model to analyze images found in notes.">
         <Dropdown
           type="options"
           dropdown={imageProcessorModeOptions}
@@ -611,7 +603,7 @@ function handleResetToDefault() {
           onchange={handleImageModeChange}
         />
         {#if imageProcessorMode === "custom"}
-          <div class="processor-selector" style="margin-top: 6px;">
+          <div class="processor-selector">
             <Button
               onClick={() =>
                 openProcessorSelectionModal(imageProcessor ?? null, (model) => {
@@ -626,12 +618,11 @@ function handleResetToDefault() {
             </Button>
           </div>
         {/if}
-      </div>
-      <div class="tool-config-field">
-        <div class="tool-config-label">PDF Processor</div>
-        <p class="tool-config-description">
-          Vision model for enhanced PDF analysis (charts, tables, diagrams).
-        </p>
+      </ModalField>
+      <ModalField
+        label="PDF Processor"
+        desc="Vision model for enhanced PDF analysis (charts, tables, diagrams)."
+      >
         <Dropdown
           type="options"
           dropdown={pdfProcessorModeOptions}
@@ -639,7 +630,7 @@ function handleResetToDefault() {
           onchange={handlePdfModeChange}
         />
         {#if pdfProcessorMode === "custom"}
-          <div class="processor-selector" style="margin-top: 6px;">
+          <div class="processor-selector">
             <Button
               onClick={() =>
                 openProcessorSelectionModal(pdfProcessor ?? null, (model) => {
@@ -654,25 +645,21 @@ function handleResetToDefault() {
             </Button>
           </div>
         {/if}
-      </div>
-    </div>
+      </ModalField>
+    </SettingGroup>
   {:else if capturedToolId === "execute_dataview_query"}
-    <div class="tool-config-section">
-      <h4 class="tool-config-section-title">Dataview Settings</h4>
-      <div class="tool-config-field">
-        <div class="tool-config-label">Include Metadata</div>
-        <p class="tool-config-description">Include file metadata in query results.</p>
+    <SettingGroup heading="Dataview Settings">
+      <ModalField label="Include Metadata" desc="Include file metadata in query results." inline>
         <Toggle checked={includeMetadata} onchange={(checked) => (includeMetadata = checked)} />
-      </div>
-    </div>
+      </ModalField>
+    </SettingGroup>
   {:else if capturedToolId === "manage_notes"}
-    <div class="tool-config-section">
-      <h4 class="tool-config-section-title">Allowed Operations</h4>
-      <div class="tool-config-field">
-        <label class="tool-config-label" for="tool-config-diff-view-mode">Diff View Mode</label>
-        <p class="tool-config-description">
-          Choose how pending note edits are previewed in reading view.
-        </p>
+    <SettingGroup heading="Allowed Operations">
+      <ModalField
+        label="Diff View Mode"
+        desc="Choose how pending note edits are previewed in reading view."
+        for="tool-config-diff-view-mode"
+      >
         <Dropdown
           id="tool-config-diff-view-mode"
           type="options"
@@ -680,39 +667,27 @@ function handleResetToDefault() {
           selected={diffViewMode}
           onchange={(value) => (diffViewMode = value)}
         />
-      </div>
-      <div class="tool-config-field">
-        <div class="tool-config-label">Allow Create</div>
-        <p class="tool-config-description">Permit the agent to propose new markdown notes.</p>
+      </ModalField>
+      <ModalField label="Allow Create" desc="Permit the agent to propose new markdown notes." inline>
         <Toggle checked={allowCreate} onchange={(checked) => (allowCreate = checked)} />
-      </div>
-      <div class="tool-config-field">
-        <div class="tool-config-label">Allow Update</div>
-        <p class="tool-config-description">Permit targeted edits to existing markdown notes.</p>
+      </ModalField>
+      <ModalField label="Allow Update" desc="Permit targeted edits to existing markdown notes." inline>
         <Toggle checked={allowUpdate} onchange={(checked) => (allowUpdate = checked)} />
-      </div>
-      <div class="tool-config-field">
-        <div class="tool-config-label">Allow Delete</div>
-        <p class="tool-config-description">Permit the agent to propose note deletions.</p>
+      </ModalField>
+      <ModalField label="Allow Delete" desc="Permit the agent to propose note deletions." inline>
         <Toggle checked={allowDelete} onchange={(checked) => (allowDelete = checked)} />
-      </div>
-      <div class="tool-config-field">
-        <div class="tool-config-label">Allow Move</div>
-        <p class="tool-config-description">Permit renaming or relocating markdown notes.</p>
+      </ModalField>
+      <ModalField label="Allow Move" desc="Permit renaming or relocating markdown notes." inline>
         <Toggle checked={allowMove} onchange={(checked) => (allowMove = checked)} />
-      </div>
-    </div>
+      </ModalField>
+    </SettingGroup>
   {:else if capturedToolId === "fetch_url"}
-    <div class="tool-config-section">
-      <h4 class="tool-config-section-title">Fetch Settings</h4>
-      <div class="tool-config-field">
-        <label class="tool-config-label" for="tool-config-fetch-max-content-length"
-          >Max Content Length</label
-        >
-        <p class="tool-config-description">
-          Maximum characters to return after cleaning HTML. Set to 0 for unlimited (capped by an
-          internal raw-bytes safety limit).
-        </p>
+    <SettingGroup heading="Fetch Settings">
+      <ModalField
+        label="Max Content Length"
+        desc="Maximum characters to return after cleaning HTML. Set to 0 for unlimited (capped by an internal raw-bytes safety limit)."
+        for="tool-config-fetch-max-content-length"
+      >
         <Text
           id="tool-config-fetch-max-content-length"
           inputType="number"
@@ -720,17 +695,15 @@ function handleResetToDefault() {
           placeholder="50000"
           onblur={(v) => (maxContentLength = Number.parseInt(String(v)) || 0)}
         />
-      </div>
-    </div>
+      </ModalField>
+    </SettingGroup>
   {:else if capturedToolId === "web_search"}
-    <div class="tool-config-section">
-      <h4 class="tool-config-section-title">Web Search Settings</h4>
-      <div class="tool-config-field">
-        <label class="tool-config-label" for="tool-config-web-search-provider">Provider</label>
-        <p class="tool-config-description">
-          Search provider used by this tool. The provider and API key are shared across all agents
-          that enable web_search.
-        </p>
+    <SettingGroup heading="Web Search Settings">
+      <ModalField
+        label="Provider"
+        desc="Search provider used by this tool. The provider and API key are shared across all agents that enable web_search."
+        for="tool-config-web-search-provider"
+      >
         <Dropdown
           id="tool-config-web-search-provider"
           type="options"
@@ -738,24 +711,25 @@ function handleResetToDefault() {
           selected={pluginData.webSearchProvider}
           onchange={(val) => (pluginData.webSearchProvider = val)}
         />
-      </div>
+      </ModalField>
       {#if pluginData.webSearchProvider}
-        <div class="tool-config-field">
-          <div class="tool-config-label">API Key</div>
-          <p class="tool-config-description">
-            {pluginData.webSearchProvider === "brave"
-              ? "Brave Search API key from api.search.brave.com."
-              : "Tavily API key from app.tavily.com."}
-          </p>
+        <ModalField
+          label="API Key"
+          desc={pluginData.webSearchProvider === "brave"
+            ? "Brave Search API key from api.search.brave.com."
+            : "Tavily API key from app.tavily.com."}
+        >
           <SecretSelect
             value={pluginData.webSearchApiKeyId}
             onChange={(secretId) => (pluginData.webSearchApiKeyId = secretId)}
           />
-        </div>
+        </ModalField>
       {/if}
-      <div class="tool-config-field">
-        <label class="tool-config-label" for="tool-config-web-search-max-results">Max Results</label>
-        <p class="tool-config-description">Number of search results to return (max 20).</p>
+      <ModalField
+        label="Max Results"
+        desc="Number of search results to return (max 20)."
+        for="tool-config-web-search-max-results"
+      >
         <Text
           id="tool-config-web-search-max-results"
           inputType="number"
@@ -763,8 +737,8 @@ function handleResetToDefault() {
           placeholder="10"
           onblur={(v) => (maxResults = Math.min(Math.max(Number.parseInt(String(v)) || 10, 1), 20))}
         />
-      </div>
-    </div>
+      </ModalField>
+    </SettingGroup>
   {/if}
 
   <div class="tool-config-actions">
@@ -787,35 +761,10 @@ function handleResetToDefault() {
     padding: 8px 0;
   }
 
-  .tool-config-field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .tool-config-label {
-    font-weight: 500;
-    font-size: 0.95rem;
-  }
-
-  .tool-config-description {
+  .tool-config-section-note {
     font-size: 0.85rem;
     color: var(--text-muted);
     margin: 0 0 4px 0;
-  }
-
-  .tool-config-section {
-    border-top: 1px solid var(--background-modifier-border);
-    padding-top: 16px;
-  }
-
-  .tool-config-section-title {
-    font-weight: 600;
-    font-size: 0.9rem;
-    margin: 0 0 12px 0;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
   }
 
   .tool-config-actions {
@@ -831,5 +780,6 @@ function handleResetToDefault() {
     display: flex;
     align-items: center;
     gap: 8px;
+    margin-top: 6px;
   }
 </style>

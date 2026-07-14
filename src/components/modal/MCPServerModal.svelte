@@ -13,6 +13,9 @@ import Icon from "../ui/Icon.svelte";
 import Text from "../ui/Text.svelte";
 import Toggle from "../ui/Toggle.svelte";
 import { confirmDelete } from "./ConfirmModal";
+import ModalField from "../settings/ModalField.svelte";
+import SettingGroup from "../settings/SettingGroup.svelte";
+import TextArea from "../ui/TextArea.svelte";
 import type { MCPServerAccessors, MCPServerModal, MCPServerModalCallback } from "./MCPServerModal";
 
 interface Props {
@@ -320,10 +323,7 @@ async function handleTestConnection() {
 </script>
 
 <div class="mcp-modal-content">
-  <!-- Name -->
-  <div class="mcp-field">
-    <label class="mcp-label" for="mcp-server-name">Name</label>
-    <p class="mcp-description">A name for this MCP server</p>
+  <ModalField label="Name" desc="A name for this MCP server" for="mcp-server-name">
     <Text
       id="mcp-server-name"
       inputType="text"
@@ -331,21 +331,13 @@ async function handleTestConnection() {
       placeholder="My MCP Server"
       onblur={(v) => (name = v)}
     />
-  </div>
+  </ModalField>
 
-  <!-- Enabled Toggle -->
-  <div class="mcp-field mcp-field-row">
-    <div>
-      <label class="mcp-label" for="mcp-server-enabled">Enabled</label>
-      <p class="mcp-description">Whether this server is active and provides tools</p>
-    </div>
+  <ModalField label="Enabled" desc="Whether this server is active and provides tools" inline>
     <Toggle checked={enabled} onchange={(checked) => (enabled = checked)} />
-  </div>
+  </ModalField>
 
-  <!-- Transport Type -->
-  <div class="mcp-field">
-    <label class="mcp-label" for="mcp-server-transport">Transport Type</label>
-    <p class="mcp-description">How to connect to the MCP server</p>
+  <ModalField label="Transport Type" desc="How to connect to the MCP server" for="mcp-server-transport">
     <Dropdown
       id="mcp-server-transport"
       type="options"
@@ -353,16 +345,15 @@ async function handleTestConnection() {
       selected={transport}
       onchange={(v) => (transport = v)}
     />
-  </div>
+  </ModalField>
 
-  <!-- stdio-specific fields -->
   {#if transport === "stdio"}
-    <div class="mcp-section">
-      <h4 class="mcp-section-title">Command Configuration</h4>
-
-      <div class="mcp-field">
-        <label class="mcp-label" for="mcp-server-command">Command</label>
-        <p class="mcp-description">The executable to run (e.g., npx, node, python)</p>
+    <SettingGroup heading="Command Configuration">
+      <ModalField
+        label="Command"
+        desc="The executable to run (e.g., npx, node, python)"
+        for="mcp-server-command"
+      >
         <Text
           id="mcp-server-command"
           inputType="text"
@@ -370,13 +361,13 @@ async function handleTestConnection() {
           placeholder="npx"
           onblur={(v) => (command = v)}
         />
-      </div>
+      </ModalField>
 
-      <div class="mcp-field">
-        <label class="mcp-label" for="mcp-server-arguments">Arguments</label>
-        <p class="mcp-description">
-          Command arguments, space-separated (use quotes for args with spaces)
-        </p>
+      <ModalField
+        label="Arguments"
+        desc="Command arguments, space-separated (use quotes for args with spaces)"
+        for="mcp-server-arguments"
+      >
         <Text
           id="mcp-server-arguments"
           inputType="text"
@@ -384,29 +375,26 @@ async function handleTestConnection() {
           placeholder="-y @anthropic/mcp-server-filesystem /path/to/dir"
           onblur={(v) => (args = v)}
         />
-      </div>
+      </ModalField>
 
-      <div class="mcp-field">
-        <label class="mcp-label" for="mcp-server-env">Environment Variables (optional)</label>
-        <p class="mcp-description">One per line in KEY=VALUE format</p>
-        <textarea
+      <ModalField
+        label="Environment Variables (optional)"
+        desc="One per line in KEY=VALUE format"
+        for="mcp-server-env"
+      >
+        <TextArea
           id="mcp-server-env"
           class="mcp-textarea"
           bind:value={envVars}
-          placeholder="API_KEY=your-key&#10;DEBUG=true"
-        ></textarea>
-      </div>
-    </div>
+          placeholder={"API_KEY=your-key\nDEBUG=true"}
+        />
+      </ModalField>
+    </SettingGroup>
   {/if}
 
-  <!-- HTTP-specific fields -->
   {#if transport === "http"}
-    <div class="mcp-section">
-      <h4 class="mcp-section-title">Server Configuration</h4>
-
-      <div class="mcp-field">
-        <label class="mcp-label" for="mcp-server-url">Server URL</label>
-        <p class="mcp-description">The URL of the MCP server</p>
+    <SettingGroup heading="Server Configuration">
+      <ModalField label="Server URL" desc="The URL of the MCP server" for="mcp-server-url">
         <Text
           id="mcp-server-url"
           inputType="text"
@@ -414,19 +402,21 @@ async function handleTestConnection() {
           placeholder="https://mcp.example.com/mcp"
           onblur={(v) => (url = v)}
         />
-      </div>
+      </ModalField>
 
-      <div class="mcp-field">
-        <label class="mcp-label" for="mcp-server-headers">Headers (optional)</label>
-        <p class="mcp-description">One per line in Header-Name: value format</p>
-        <textarea
+      <ModalField
+        label="Headers (optional)"
+        desc="One per line in Header-Name: value format"
+        for="mcp-server-headers"
+      >
+        <TextArea
           id="mcp-server-headers"
           class="mcp-textarea"
           bind:value={headers}
-          placeholder="Authorization: Bearer token&#10;X-Custom-Header: value"
-        ></textarea>
-      </div>
-    </div>
+          placeholder={"Authorization: Bearer token\nX-Custom-Header: value"}
+        />
+      </ModalField>
+    </SettingGroup>
   {/if}
 
   <!-- Test Results -->
@@ -488,44 +478,7 @@ async function handleTestConnection() {
     padding: 8px 0;
   }
 
-  .mcp-field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .mcp-field-row {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .mcp-label {
-    font-weight: 500;
-    font-size: 0.95rem;
-  }
-
-  .mcp-description {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    margin: 0 0 4px 0;
-  }
-
-  .mcp-section {
-    border-top: 1px solid var(--background-modifier-border);
-    padding-top: 16px;
-  }
-
-  .mcp-section-title {
-    font-weight: 600;
-    font-size: 0.9rem;
-    margin: 0 0 12px 0;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .mcp-textarea {
+  :global(.mcp-textarea) {
     width: 100%;
     min-height: 80px;
     padding: 8px 12px;
@@ -538,7 +491,7 @@ async function handleTestConnection() {
     resize: vertical;
   }
 
-  .mcp-textarea:focus {
+  :global(.mcp-textarea):focus {
     outline: none;
     border-color: var(--interactive-accent);
     box-shadow: 0 0 0 1px var(--interactive-accent);

@@ -131,7 +131,9 @@ function getAgentSecondarySummary(agentId: string): string {
         selected={pluginData.selectedAgentId === agentId}
       >
         {#snippet leading()}
-          <Icon name={agent.icon?.trim() || DEFAULT_AGENT_ICON} size="s" />
+          <span class="agent-avatar" class:agent-avatar--default={pluginData.defaultAgentId === agentId}>
+            <Icon name={agent.icon?.trim() || DEFAULT_AGENT_ICON} size="s" />
+          </span>
         {/snippet}
 
         {#snippet badges()}
@@ -221,5 +223,23 @@ function getAgentSecondarySummary(agentId: string): string {
     display: flex;
     flex-direction: column;
     gap: 16px;
+  }
+
+  .agent-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-muted);
+  }
+
+  .agent-avatar--default {
+    background: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-secondary));
+    border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
+    color: var(--text-accent);
   }
 </style>
