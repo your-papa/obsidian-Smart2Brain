@@ -7,7 +7,11 @@
 
 import { ChatOpenAI } from "@langchain/openai";
 import { requestUrl } from "obsidian";
-import { createTransportedChatOpenAI, createTransportedOpenAIEmbeddings } from "./chatProviders";
+import {
+	createBufferedTransportedChatOpenAI,
+	createTransportedChatOpenAI,
+	createTransportedOpenAIEmbeddings,
+} from "./chatProviders";
 import OpenAILogo from "../components/ui/logos/OpenAILogo.svelte";
 import type {
 	AuthObject,
@@ -94,6 +98,25 @@ export function createOpenAICompatibleProvider(
 			}
 
 			return createTransportedChatOpenAI(config.id, chatConfig as ConstructorParameters<typeof ChatOpenAI>[0]);
+		},
+		createSubAgentChatInstance: (auth: AuthObject, modelId: string, options?: Partial<ChatModelConfig>) => {
+			const resolvedBaseUrl = sanitizeBaseUrl(auth.baseUrl || defaultBaseUrl);
+			const configuration: Record<string, unknown> = { baseURL: `${resolvedBaseUrl}/v1` };
+			if (auth.headers && Object.keys(auth.headers).length > 0) {
+				configuration.defaultHeaders = auth.headers;
+			}
+			const chatConfig: Record<string, unknown> = {
+				model: modelId,
+				apiKey: auth.apiKey || "not-required",
+				configuration,
+			};
+			if (options?.temperature !== undefined) {
+				chatConfig.temperature = options.temperature;
+			}
+			return createBufferedTransportedChatOpenAI(
+				config.id,
+				chatConfig as ConstructorParameters<typeof ChatOpenAI>[0],
+			);
 		},
 		validateAuth: async (auth: AuthObject): Promise<AuthValidationResult> => {
 			const apiUrl = `${sanitizeBaseUrl(auth.baseUrl || defaultBaseUrl)}/v1`;

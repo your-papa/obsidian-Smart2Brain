@@ -23,7 +23,11 @@ import type {
 } from "../types/provider/index";
 import OpenRouterLogo from "../components/ui/logos/OpenRouterLogo.svelte";
 import { populateOpenRouterCache, type OpenRouterModelInfo } from "./openrouterModels";
-import { createTransportedChatOpenAI, createTransportedOpenAIEmbeddings } from "./chatProviders";
+import {
+	createBufferedTransportedChatOpenAI,
+	createTransportedChatOpenAI,
+	createTransportedOpenAIEmbeddings,
+} from "./chatProviders";
 
 // =============================================================================
 // Constants
@@ -126,6 +130,21 @@ export const openrouterProvider: EmbeddingProviderDefinition = {
 		}
 
 		return createTransportedChatOpenAI("openrouter", config as ConstructorParameters<typeof ChatOpenAI>[0]);
+	},
+
+	createSubAgentChatInstance: (auth: AuthObject, modelId: string, options?: Partial<ChatModelConfig>) => {
+		const config: Record<string, unknown> = {
+			model: modelId,
+			apiKey: auth.apiKey,
+			configuration: { baseURL: OPENROUTER_BASE_URL },
+		};
+		if (options?.temperature !== undefined) {
+			config.temperature = options.temperature;
+		}
+		if (auth.headers && Object.keys(auth.headers).length > 0) {
+			(config.configuration as Record<string, unknown>).defaultHeaders = auth.headers;
+		}
+		return createBufferedTransportedChatOpenAI("openrouter", config as ConstructorParameters<typeof ChatOpenAI>[0]);
 	},
 
 	createEmbeddingInstance: (auth: AuthObject, modelId: string) => {

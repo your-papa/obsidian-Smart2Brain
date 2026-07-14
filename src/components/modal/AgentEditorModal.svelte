@@ -25,6 +25,7 @@ import { createObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
 import {
 	DEFAULT_AGENT_ICON,
+	type AgentConfig,
 	type BuiltInToolId,
 	type MCPServerConfig,
 	type SkillDisplayInfo,
@@ -467,6 +468,36 @@ function handleToolToggle(toolId: BuiltInToolId) {
 
 function getToolEnabled(toolId: BuiltInToolId): boolean {
 	return pluginData.isAgentToolEnabled(agentId, toolId);
+}
+
+// --- Subagents (references to other agents) ---
+
+const subAgentIds = $derived(selectedAgent?.subAgentIds ?? []);
+
+/**
+ * Agents that can be enabled as subagents. Includes this agent itself (an
+ * isolated-context copy is a valid delegation target); self is sorted first.
+ */
+const subAgentCandidates = $derived(
+	Object.values(agents).sort((l, r) => {
+		if (l.id === agentId) return -1;
+		if (r.id === agentId) return 1;
+		return l.name.localeCompare(r.name);
+	}),
+);
+
+function isSubAgentEnabled(refId: string): boolean {
+	return subAgentIds.includes(refId);
+}
+
+function handleSubAgentToggle(refId: string) {
+	pluginData.toggleSubAgentRef(agentId, refId);
+	void applyChanges();
+}
+
+function getSubAgentModelLabel(agent: AgentConfig): string {
+	const model = agent.chatModel ? agent.chatModel.model : "No model configured";
+	return agent.id === agentId ? `${model} · isolated copy of this agent` : model;
 }
 
 function openToolConfig(toolId: BuiltInToolId) {
@@ -950,6 +981,34 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
               checked={enabled && pluginAvailable}
               onchange={() => handleToolToggle(tool.id)}
               disabled={!pluginAvailable}
+            />
+          {/snippet}
+        </ManagedEntityItem>
+      {/each}
+    </SettingGroup>
+
+    <SettingGroup heading="Subagents">
+      <div class="setting-item-description mb-3">
+        Enable agents as subagents. This agent can delegate tasks to them via the
+        <code>task</code> tool — each subagent runs with its own model, tools, and prompt. Enabling
+        this agent itself delegates to a fresh, isolated-context copy of it (useful for keeping the
+        main conversation clean). Delegation is one level deep (a subagent's own subagents are ignored).
+      </div>
+      {#each subAgentCandidates as candidate (candidate.id)}
+        {@const hasModel = !!candidate.chatModel}
+        {@const isEnabled = isSubAgentEnabled(candidate.id)}
+        <ManagedEntityItem
+          class="subagent-entity"
+          name={candidate.id === agentId ? `${candidate.name} (this agent)` : candidate.name}
+          desc={hasModel
+            ? getSubAgentModelLabel(candidate)
+            : "No chat model configured — cannot be used as a subagent"}
+        >
+          {#snippet actions()}
+            <Toggle
+              checked={isEnabled}
+              disabled={!hasModel && !isEnabled}
+              onchange={() => handleSubAgentToggle(candidate.id)}
             />
           {/snippet}
         </ManagedEntityItem>

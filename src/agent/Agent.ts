@@ -9,10 +9,11 @@ import {
 } from "@langchain/core/messages";
 import type { MessageContentComplex } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
-import type { StreamEvent } from "@langchain/core/tracers/log_stream";
+import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import type { BaseCheckpointSaver, CheckpointTuple } from "@langchain/langgraph";
 import { MemorySaver } from "@langchain/langgraph";
 import { type ReactAgent, createAgent, summarizationMiddleware } from "langchain";
+import { createSubAgentMiddleware } from "deepagents/browser";
 import { Notice, TFile } from "obsidian";
 
 import { ProviderEndpointError, ProviderNotFoundError } from "../providers/errors";
@@ -148,6 +149,24 @@ export interface AgentOptions {
 	defaultPrompt?: string;
 }
 
+/**
+ * A fully-resolved subagent, ready to hand to deepagents' subagent middleware.
+ * Carries instances (not IDs): each subagent runs with its own model, tools,
+ * and prompt — resolved by AgentManager from a referenced agent's config.
+ */
+export interface SubAgentSpec {
+	/** Selector name shown to the parent model in the `task` tool. */
+	name: string;
+	/** Short blurb the parent model uses to decide whether to delegate. */
+	description: string;
+	/** The referenced agent's assembled system prompt. */
+	systemPrompt: string;
+	/** The referenced agent's own model instance (may differ from the parent). */
+	model: BaseChatModel;
+	/** The referenced agent's own resolved tool instances. */
+	tools: readonly unknown[];
+}
+
 type AgentRunnable = ReactAgent; // invoke(), stream(), etc.
 
 export type AgentStreamOptions = AgentRunOptions;
@@ -156,6 +175,8 @@ export type AgentStreamChunk =
 	| {
 			type: "token";
 			token: string;
+			/** The id of the AI message producing this token (step boundary discriminator). */
+			aiMessageId?: string;
 			runId: string;
 			threadId: string;
 	  }
@@ -164,8 +185,14 @@ export type AgentStreamChunk =
 			toolCallId: string;
 			toolName: string;
 			input: unknown;
+			/** Preamble text the model emitted before this tool call in the same AI message. */
+			preamble?: string;
 			/** The id of the AI message that produced this tool call. */
 			aiMessageId?: string;
+			/** Name of the subagent this tool ran inside (via the `task` tool), if any. */
+			subAgentName?: string;
+			/** The id of the parent `task` tool call this is nested under, if any. */
+			parentToolCallId?: string;
 			runId: string;
 			threadId: string;
 	  }
@@ -176,6 +203,10 @@ export type AgentStreamChunk =
 			output: unknown;
 			/** The id of the AI message that produced this tool call. */
 			aiMessageId?: string;
+			/** Name of the subagent this tool ran inside (via the `task` tool), if any. */
+			subAgentName?: string;
+			/** The id of the parent `task` tool call this is nested under, if any. */
+			parentToolCallId?: string;
 			runId: string;
 			threadId: string;
 	  }
@@ -202,6 +233,7 @@ interface SelectedModel {
 export class Agent {
 	private prompt: string;
 	private tools: readonly unknown[] = [];
+	private subAgents: readonly SubAgentSpec[] = [];
 	private selectedModel?: SelectedModel;
 	private selectedSummarizationModel?: SelectedModel;
 	private selectedTitleModel?: SelectedModel;
@@ -232,6 +264,15 @@ export class Agent {
 
 	bindTools(tools: readonly unknown[]): void {
 		this.tools = tools;
+		this.dirty = true;
+	}
+
+	/**
+	 * Sets the subagents this agent can delegate to via the `task` tool.
+	 * Specs are fully resolved (model + tool instances) by AgentManager.
+	 */
+	bindSubAgents(subAgents: readonly SubAgentSpec[]): void {
+		this.subAgents = subAgents;
 		this.dirty = true;
 	}
 
@@ -479,6 +520,95 @@ export class Agent {
 	}
 
 	/**
+	 * Builds deepagents' subagent middleware, which adds a `task` tool the model
+	 * can call to delegate work to isolated-context subagents. Each subagent runs
+	 * with its own model, tools, and prompt (resolved by AgentManager). Returns an
+	 * empty array when no subagents are configured, so the `task` tool is only
+	 * exposed when delegation is actually set up.
+	 */
+	private buildSubAgentMiddleware() {
+		if (!this.selectedModel || this.subAgents.length === 0) {
+			return [];
+		}
+
+		return [
+			createSubAgentMiddleware({
+				// Fallback only — every configured subagent overrides these.
+				defaultModel: this.selectedModel.instance,
+				defaultTools: [...this.tools] as never,
+				// Expose only the explicitly-referenced subagents, not a generic one.
+				generalPurposeAgent: false,
+				subagents: this.subAgents.map((s) => {
+					// Wrap the subagent's `invoke` so that every LangGraph-internal channel
+					// that could reconnect it to the parent's checkpoint/history is stripped
+					// before invocation. Without this the subagent inherits the parent's
+					// checkpoint reader and reloads the parent's full message history (→
+					// provider 400s from the dangling `task` tool-call assistant message).
+					const subgraph = createAgent({
+						model: s.model as never,
+						systemPrompt: s.systemPrompt,
+						tools: [...s.tools] as never,
+						middleware: [] as never,
+						name: s.name,
+					});
+					subgraph.invoke = (state: never, config?: never) => {
+						const c = config as Record<string, unknown> | undefined;
+						// Strip EVERY LangGraph-internal channel that could reconnect the
+						// subgraph to the parent's checkpoint/history. Removing only
+						// __pregel_read/__pregel_send/__pregel_scratchpad is not enough: the
+						// parent also passes __pregel_checkpointer, __pregel_previous,
+						// checkpoint_id, checkpoint_ns, checkpoint_map, __pregel_call,
+						// __pregel_replay_state, __pregel_task_id and __pregel_abort_signals.
+						// If any survive, the subgraph's model node reloads the parent's
+						// messages (prepending the parent's user turn + the dangling `task`
+						// tool-call assistant message), which Anthropic/LiteLLM reject with a
+						// 400 "tool_use ids were found without tool_result blocks". Keep only
+						// benign, non-pregel configurable keys.
+						const cleanConfigurable = c?.configurable
+							? Object.fromEntries(
+									Object.entries(c.configurable as Record<string, unknown>).filter(
+										([k]) => !k.startsWith("__pregel") && !k.startsWith("checkpoint"),
+									),
+								)
+							: {};
+						// Keep everything else on the config — crucially `callbacks`, which
+						// carry the parent's streaming/tracing context. Nulling them would
+						// stop the subagent's own tool events (search_notes, list_directory,
+						// …) from bubbling into the parent stream, so the `task` card would
+						// show no nested child branch. Only the checkpoint-read channels
+						// above cause the message leak; callbacks are safe to keep.
+						const cleanConfig = c
+							? {
+									...c,
+									configurable: cleanConfigurable,
+								}
+							: {};
+						// Call the compiled graph directly to bypass ReactAgent.invoke's
+						// #initializeMiddlewareStates, which calls this.#graph.getState(config)
+						// and would re-read the parent's checkpoint via __pregel_read.
+						const compiledGraph = subgraph.graph as {
+							invoke: (s: unknown, c: unknown) => Promise<unknown>;
+						};
+						// The parent graph node also sets an ambient AsyncLocalStorage config
+						// that LangGraph's ensureLangGraphConfig merges back in via
+						// getRunnableConfig() (re-injecting __pregel_read). runWithConfig
+						// re-runs the subgraph in a fresh ALS context whose ambient config is
+						// our clean config, so the parent's channels are no longer visible.
+						return AsyncLocalStorageProviderSingleton.runWithConfig(cleanConfig as never, () =>
+							compiledGraph.invoke(state, cleanConfig),
+						) as Promise<never>;
+					};
+					return {
+						name: s.name,
+						description: s.description,
+						runnable: subgraph,
+					};
+				}),
+			}),
+		];
+	}
+
+	/**
 	 * Creates a HumanMessage with optional attachment metadata in additional_kwargs.
 	 * Attachment metadata is stored so it can be reconstructed from checkpoints.
 	 * Uses the object form so that multimodal content arrays (MessageContentComplex[])
@@ -640,12 +770,7 @@ export class Agent {
 			queryPreview: query.slice(0, 200),
 		});
 
-		type StreamEventsConfig = Parameters<AgentRunnable["streamEvents"]>[1];
 		const invokeConfig = this.buildRunnableConfig(options, threadId);
-		const streamConfig = {
-			...invokeConfig,
-			version: "v2" as const,
-		} as StreamEventsConfig;
 
 		const normalizedQuery = query.trim().length > 0 ? query : "Please analyze the attached files.";
 		const messageContent = await this.buildMessageContent(normalizedQuery, options.attachments);
@@ -666,81 +791,155 @@ export class Agent {
 		streamTransportActive = true;
 
 		const streamInput = { messages: [humanMessage] };
-		const stream = agent.streamEvents(streamInput, streamConfig);
+		const stream = await agent.stream(streamInput, {
+			...invokeConfig,
+			streamMode: ["messages", "tools", "values"] as const,
+		});
 
 		let rawResult: unknown;
 		// Track tool calls in progress to correlate start/end events
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
+		// Stack of open `task` tool call ids, for nesting subagent tool calls
+		const taskCallStack: string[] = [];
+		// The aiMessageId each open `task` call was stamped with, so its subagent
+		// children can inherit the same timeline group (see resolveToolAttribution).
+		const taskAiMessageIds = new Map<string, string | undefined>();
+		// The subagent name (from task input.subagent_type) for each open task call.
+		const taskSubAgentNames = new Map<string, string | undefined>();
+		// Children-claimed count per open task, for FIFO round-robin attribution fallback.
+		const taskChildCounts = new Map<string, number>();
 		// Track the current AI message id from chat model stream chunks
 		let lastAiMessageId: string | undefined;
+		// Map toolCallId → preamble text: populated when a messages-mode AIMessage chunk
+		// arrives with tool_calls. The messages stream delivers individual streaming deltas —
+		// early deltas carry text content, the final delta carries tool_calls with no text.
+		// We accumulate text per-message-id and index it when the tool_calls delta arrives.
+		const toolCallPreambles = new Map<string, string>();
+		// Running text accumulator for the current AI message (reset on new aiMessageId).
+		let preambleAccumulator = "";
 		try {
-			for await (const event of stream) {
+			for await (const chunk of stream) {
 				// Check if aborted before processing
 				if (options.signal?.aborted) {
 					Logger.debug("agent.streamTokens.aborted", { runId, threadId });
 					break;
 				}
 
-				// Handle tool start events - emit tool_start chunk
-				if (event.event === "on_tool_start") {
-					const toolCallId = event.run_id;
-					const toolName = event.name ?? "unknown_tool";
-					const input = this.normalizeStreamToolInput(event.data?.input);
+				const [mode, payload] = chunk as ["messages" | "tools" | "values", unknown];
 
-					pendingToolCalls.set(toolCallId, { name: toolName, input });
-					Logger.debug("agent.streamTokens.tool_start", { runId, toolCallId, toolName });
+				if (mode === "tools") {
+					const tp = payload as
+						| { event: "on_tool_start"; toolCallId?: string; name: string; input: unknown }
+						| { event: "on_tool_end"; toolCallId?: string; name: string; output: unknown }
+						| { event: string; toolCallId?: string; name: string };
 
-					yield {
-						type: "tool_start",
-						toolCallId,
-						toolName,
-						input,
-						aiMessageId: lastAiMessageId,
-						runId,
-						threadId,
-					};
+					if (tp.event === "on_tool_start") {
+						const toolCallId = tp.toolCallId ?? "";
+						const toolName = tp.name;
+						const toolInput = (tp as { event: "on_tool_start"; input: unknown }).input;
+						const input = this.normalizeStreamToolInput(toolInput);
+						const attribution = this.resolveToolAttribution(
+							"on_tool_start",
+							input,
+							toolName,
+							toolCallId,
+							taskCallStack,
+							taskAiMessageIds,
+							taskSubAgentNames,
+							taskChildCounts,
+							lastAiMessageId,
+						);
+						const preamble = toolCallPreambles.get(toolCallId);
+						toolCallPreambles.delete(toolCallId);
+						pendingToolCalls.set(toolCallId, { name: toolName, input });
+						Logger.debug("agent.streamTokens.tool_start", { runId, toolCallId, toolName });
+						yield {
+							type: "tool_start",
+							toolCallId,
+							toolName,
+							input,
+							preamble,
+							...attribution,
+							runId,
+							threadId,
+						};
+						continue;
+					}
+
+					if (tp.event === "on_tool_end") {
+						const toolCallId = tp.toolCallId ?? "";
+						const pending = pendingToolCalls.get(toolCallId);
+						const toolName = pending?.name ?? tp.name;
+						const output = this.normalizeStreamToolOutput(
+							(tp as { event: "on_tool_end"; output: unknown }).output,
+						);
+						const attribution = this.resolveToolAttribution(
+							"on_tool_end",
+							undefined,
+							toolName,
+							toolCallId,
+							taskCallStack,
+							taskAiMessageIds,
+							taskSubAgentNames,
+							taskChildCounts,
+							lastAiMessageId,
+						);
+						pendingToolCalls.delete(toolCallId);
+						Logger.debug("agent.streamTokens.tool_end", { runId, toolCallId, toolName });
+						yield {
+							type: "tool_end",
+							toolCallId,
+							toolName,
+							output,
+							...attribution,
+							runId,
+							threadId,
+						};
+						continue;
+					}
+
+					continue; // on_tool_event, on_tool_error: ignore
+				}
+
+				if (mode === "messages") {
+					const [message] = payload as [BaseMessage, Record<string, unknown>];
+					if (message.getType() === "ai") {
+						// Reset accumulator when a new AI message starts.
+						if (message.id && message.id !== lastAiMessageId) {
+							lastAiMessageId = message.id;
+							preambleAccumulator = "";
+						}
+						const token = this.normalizeContentToString(message.content);
+						if (token && token.length > 0) {
+							preambleAccumulator += token;
+							yield {
+								type: "token",
+								token,
+								aiMessageId: lastAiMessageId,
+								runId,
+								threadId,
+							};
+						}
+						// Index accumulated text as preamble when this delta carries tool_calls.
+						// The messages stream delivers individual deltas: text arrives in earlier
+						// chunks, tool_calls arrive in a final chunk with no text. We track the
+						// running text and stamp it onto each tool call id when the call ids appear.
+						const msgToolCalls = (message as { tool_calls?: { id?: string }[] }).tool_calls;
+						if (Array.isArray(msgToolCalls) && msgToolCalls.length > 0 && preambleAccumulator) {
+							for (const tc of msgToolCalls) {
+								if (tc.id && !toolCallPreambles.has(tc.id)) {
+									toolCallPreambles.set(tc.id, preambleAccumulator);
+								}
+							}
+						}
+					}
 					continue;
 				}
 
-				// Handle tool end events - emit tool_end chunk
-				if (event.event === "on_tool_end") {
-					const toolCallId = event.run_id;
-					const pending = pendingToolCalls.get(toolCallId);
-					const toolName = pending?.name ?? event.name ?? "unknown_tool";
-					const output = this.normalizeStreamToolOutput(event.data?.output);
-
-					pendingToolCalls.delete(toolCallId);
-					Logger.debug("agent.streamTokens.tool_end", { runId, toolCallId, toolName });
-
-					yield {
-						type: "tool_end",
-						toolCallId,
-						toolName,
-						output,
-						aiMessageId: lastAiMessageId,
-						runId,
-						threadId,
-					};
-					continue;
-				}
-
-				// Handle token streaming — also capture AI message id from chunks
-				const token = this.extractTokenFromEvent(event);
-				if (token) {
-					const chunkId = this.extractAiMessageIdFromEvent(event);
-					if (chunkId) lastAiMessageId = chunkId;
-					yield {
-						type: "token",
-						token,
-						runId,
-						threadId,
-					};
-				}
-
-				// Capture final output for result
-				const output = this.extractOutputFromEvent(event);
-				if (output) {
-					rawResult = output;
+				if (mode === "values") {
+					if (this.isAgentOutputCandidate(payload)) {
+						rawResult = payload;
+					}
 				}
 			}
 		} catch (error) {
@@ -872,12 +1071,7 @@ export class Agent {
 			queryPreview: query.slice(0, 200),
 		});
 
-		type StreamEventsConfig = Parameters<AgentRunnable["streamEvents"]>[1];
 		const invokeConfig = this.buildRunnableConfig(options, threadId, checkpointId);
-		const streamConfig = {
-			...invokeConfig,
-			version: "v2" as const,
-		} as StreamEventsConfig;
 
 		const messageContent = await this.buildMessageContent(query, options.attachments);
 		const humanMessage = this.createHumanMessage(
@@ -900,74 +1094,137 @@ export class Agent {
 
 		streamTransportActive = true;
 
-		const stream = agent.streamEvents(input, streamConfig);
+		const stream = await agent.stream(input, {
+			...invokeConfig,
+			streamMode: ["messages", "tools", "values"] as const,
+		});
 
 		let rawResult: unknown;
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
+		const taskCallStack: string[] = [];
+		const taskAiMessageIds = new Map<string, string | undefined>();
+		const taskSubAgentNames = new Map<string, string | undefined>();
+		const taskChildCounts = new Map<string, number>();
 		let lastAiMessageId: string | undefined;
+		const toolCallPreambles = new Map<string, string>();
+		let preambleAccumulator = "";
 		try {
-			for await (const event of stream) {
+			for await (const chunk of stream) {
 				if (options.signal?.aborted) {
 					Logger.debug("agent.editFromCheckpoint.aborted", { runId, threadId });
 					break;
 				}
 
-				if (event.event === "on_tool_start") {
-					const toolCallId = event.run_id;
-					const toolName = event.name ?? "unknown_tool";
-					const toolInput = this.normalizeStreamToolInput(event.data?.input);
+				const [mode, payload] = chunk as ["messages" | "tools" | "values", unknown];
 
-					pendingToolCalls.set(toolCallId, { name: toolName, input: toolInput });
-					Logger.debug("agent.editFromCheckpoint.tool_start", { runId, toolCallId, toolName });
+				if (mode === "tools") {
+					const tp = payload as
+						| { event: "on_tool_start"; toolCallId?: string; name: string; input: unknown }
+						| { event: "on_tool_end"; toolCallId?: string; name: string; output: unknown }
+						| { event: string; toolCallId?: string; name: string };
 
-					yield {
-						type: "tool_start",
-						toolCallId,
-						toolName,
-						input: toolInput,
-						aiMessageId: lastAiMessageId,
-						runId,
-						threadId,
-					};
+					if (tp.event === "on_tool_start") {
+						const toolCallId = tp.toolCallId ?? "";
+						const toolName = tp.name;
+						const toolInput = (tp as { event: "on_tool_start"; input: unknown }).input;
+						const toolInputNorm = this.normalizeStreamToolInput(toolInput);
+						const attribution = this.resolveToolAttribution(
+							"on_tool_start",
+							toolInputNorm,
+							toolName,
+							toolCallId,
+							taskCallStack,
+							taskAiMessageIds,
+							taskSubAgentNames,
+							taskChildCounts,
+							lastAiMessageId,
+						);
+						const preamble = toolCallPreambles.get(toolCallId);
+						toolCallPreambles.delete(toolCallId);
+						pendingToolCalls.set(toolCallId, { name: toolName, input: toolInputNorm });
+						Logger.debug("agent.editFromCheckpoint.tool_start", { runId, toolCallId, toolName });
+						yield {
+							type: "tool_start",
+							toolCallId,
+							toolName,
+							input: toolInputNorm,
+							preamble,
+							...attribution,
+							runId,
+							threadId,
+						};
+						continue;
+					}
+
+					if (tp.event === "on_tool_end") {
+						const toolCallId = tp.toolCallId ?? "";
+						const pending = pendingToolCalls.get(toolCallId);
+						const toolName = pending?.name ?? tp.name;
+						const output = this.normalizeStreamToolOutput(
+							(tp as { event: "on_tool_end"; output: unknown }).output,
+						);
+						const attribution = this.resolveToolAttribution(
+							"on_tool_end",
+							undefined,
+							toolName,
+							toolCallId,
+							taskCallStack,
+							taskAiMessageIds,
+							taskSubAgentNames,
+							taskChildCounts,
+							lastAiMessageId,
+						);
+						pendingToolCalls.delete(toolCallId);
+						Logger.debug("agent.editFromCheckpoint.tool_end", { runId, toolCallId, toolName });
+						yield {
+							type: "tool_end",
+							toolCallId,
+							toolName,
+							output,
+							...attribution,
+							runId,
+							threadId,
+						};
+						continue;
+					}
+
 					continue;
 				}
 
-				if (event.event === "on_tool_end") {
-					const toolCallId = event.run_id;
-					const pending = pendingToolCalls.get(toolCallId);
-					const toolName = pending?.name ?? event.name ?? "unknown_tool";
-					const output = this.normalizeStreamToolOutput(event.data?.output);
-
-					pendingToolCalls.delete(toolCallId);
-					Logger.debug("agent.editFromCheckpoint.tool_end", { runId, toolCallId, toolName });
-
-					yield {
-						type: "tool_end",
-						toolCallId,
-						toolName,
-						output,
-						aiMessageId: lastAiMessageId,
-						runId,
-						threadId,
-					};
+				if (mode === "messages") {
+					const [message] = payload as [BaseMessage, Record<string, unknown>];
+					if (message.getType() === "ai") {
+						if (message.id && message.id !== lastAiMessageId) {
+							lastAiMessageId = message.id;
+							preambleAccumulator = "";
+						}
+						const token = this.normalizeContentToString(message.content);
+						if (token && token.length > 0) {
+							preambleAccumulator += token;
+							yield {
+								type: "token",
+								token,
+								aiMessageId: lastAiMessageId,
+								runId,
+								threadId,
+							};
+						}
+						const msgToolCalls = (message as { tool_calls?: { id?: string }[] }).tool_calls;
+						if (Array.isArray(msgToolCalls) && msgToolCalls.length > 0 && preambleAccumulator) {
+							for (const tc of msgToolCalls) {
+								if (tc.id && !toolCallPreambles.has(tc.id)) {
+									toolCallPreambles.set(tc.id, preambleAccumulator);
+								}
+							}
+						}
+					}
 					continue;
 				}
 
-				const token = this.extractTokenFromEvent(event);
-				if (token) {
-					const chunkId = this.extractAiMessageIdFromEvent(event);
-					if (chunkId) lastAiMessageId = chunkId;
-					yield {
-						type: "token",
-						token,
-						runId,
-						threadId,
-					};
-				}
-
-				const output = this.extractOutputFromEvent(event);
-				if (output) {
-					rawResult = output;
+				if (mode === "values") {
+					if (this.isAgentOutputCandidate(payload)) {
+						rawResult = payload;
+					}
 				}
 			}
 		} catch (error) {
@@ -1092,12 +1349,7 @@ export class Agent {
 			model: this.selectedModel.name,
 		});
 
-		type StreamEventsConfig = Parameters<AgentRunnable["streamEvents"]>[1];
 		const invokeConfig = this.buildRunnableConfig(options, threadId, checkpointId);
-		const streamConfig = {
-			...invokeConfig,
-			version: "v2" as const,
-		} as StreamEventsConfig;
 
 		// Pass null to continue from checkpoint without adding a new message
 		const input = null;
@@ -1109,74 +1361,137 @@ export class Agent {
 
 		streamTransportActive = true;
 
-		const stream = agent.streamEvents(input, streamConfig);
+		const stream = await agent.stream(input, {
+			...invokeConfig,
+			streamMode: ["messages", "tools", "values"] as const,
+		});
 
 		let rawResult: unknown;
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
+		const taskCallStack: string[] = [];
+		const taskAiMessageIds = new Map<string, string | undefined>();
+		const taskSubAgentNames = new Map<string, string | undefined>();
+		const taskChildCounts = new Map<string, number>();
 		let lastAiMessageId: string | undefined;
+		const toolCallPreambles = new Map<string, string>();
+		let preambleAccumulator = "";
 		try {
-			for await (const event of stream) {
+			for await (const chunk of stream) {
 				if (options.signal?.aborted) {
 					Logger.debug("agent.regenerateFromCheckpoint.aborted", { runId, threadId });
 					break;
 				}
 
-				if (event.event === "on_tool_start") {
-					const toolCallId = event.run_id;
-					const toolName = event.name ?? "unknown_tool";
-					const toolInput = this.normalizeStreamToolInput(event.data?.input);
+				const [mode, payload] = chunk as ["messages" | "tools" | "values", unknown];
 
-					pendingToolCalls.set(toolCallId, { name: toolName, input: toolInput });
-					Logger.debug("agent.regenerateFromCheckpoint.tool_start", { runId, toolCallId, toolName });
+				if (mode === "tools") {
+					const tp = payload as
+						| { event: "on_tool_start"; toolCallId?: string; name: string; input: unknown }
+						| { event: "on_tool_end"; toolCallId?: string; name: string; output: unknown }
+						| { event: string; toolCallId?: string; name: string };
 
-					yield {
-						type: "tool_start",
-						toolCallId,
-						toolName,
-						input: toolInput,
-						aiMessageId: lastAiMessageId,
-						runId,
-						threadId,
-					};
+					if (tp.event === "on_tool_start") {
+						const toolCallId = tp.toolCallId ?? "";
+						const toolName = tp.name;
+						const toolInput = (tp as { event: "on_tool_start"; input: unknown }).input;
+						const toolInputNorm = this.normalizeStreamToolInput(toolInput);
+						const attribution = this.resolveToolAttribution(
+							"on_tool_start",
+							toolInputNorm,
+							toolName,
+							toolCallId,
+							taskCallStack,
+							taskAiMessageIds,
+							taskSubAgentNames,
+							taskChildCounts,
+							lastAiMessageId,
+						);
+						pendingToolCalls.set(toolCallId, { name: toolName, input: toolInputNorm });
+						const preamble = toolCallPreambles.get(toolCallId);
+						toolCallPreambles.delete(toolCallId);
+						Logger.debug("agent.regenerateFromCheckpoint.tool_start", { runId, toolCallId, toolName });
+						yield {
+							type: "tool_start",
+							toolCallId,
+							toolName,
+							input: toolInputNorm,
+							preamble,
+							...attribution,
+							runId,
+							threadId,
+						};
+						continue;
+					}
+
+					if (tp.event === "on_tool_end") {
+						const toolCallId = tp.toolCallId ?? "";
+						const pending = pendingToolCalls.get(toolCallId);
+						const toolName = pending?.name ?? tp.name;
+						const output = this.normalizeStreamToolOutput(
+							(tp as { event: "on_tool_end"; output: unknown }).output,
+						);
+						const attribution = this.resolveToolAttribution(
+							"on_tool_end",
+							undefined,
+							toolName,
+							toolCallId,
+							taskCallStack,
+							taskAiMessageIds,
+							taskSubAgentNames,
+							taskChildCounts,
+							lastAiMessageId,
+						);
+						pendingToolCalls.delete(toolCallId);
+						Logger.debug("agent.regenerateFromCheckpoint.tool_end", { runId, toolCallId, toolName });
+						yield {
+							type: "tool_end",
+							toolCallId,
+							toolName,
+							output,
+							...attribution,
+							runId,
+							threadId,
+						};
+						continue;
+					}
+
 					continue;
 				}
 
-				if (event.event === "on_tool_end") {
-					const toolCallId = event.run_id;
-					const pending = pendingToolCalls.get(toolCallId);
-					const toolName = pending?.name ?? event.name ?? "unknown_tool";
-					const output = this.normalizeStreamToolOutput(event.data?.output);
-
-					pendingToolCalls.delete(toolCallId);
-					Logger.debug("agent.regenerateFromCheckpoint.tool_end", { runId, toolCallId, toolName });
-
-					yield {
-						type: "tool_end",
-						toolCallId,
-						toolName,
-						output,
-						aiMessageId: lastAiMessageId,
-						runId,
-						threadId,
-					};
+				if (mode === "messages") {
+					const [message] = payload as [BaseMessage, Record<string, unknown>];
+					if (message.getType() === "ai") {
+						if (message.id && message.id !== lastAiMessageId) {
+							lastAiMessageId = message.id;
+							preambleAccumulator = "";
+						}
+						const token = this.normalizeContentToString(message.content);
+						if (token && token.length > 0) {
+							preambleAccumulator += token;
+							yield {
+								type: "token",
+								token,
+								aiMessageId: lastAiMessageId,
+								runId,
+								threadId,
+							};
+						}
+						const msgToolCalls = (message as { tool_calls?: { id?: string }[] }).tool_calls;
+						if (Array.isArray(msgToolCalls) && msgToolCalls.length > 0 && preambleAccumulator) {
+							for (const tc of msgToolCalls) {
+								if (tc.id && !toolCallPreambles.has(tc.id)) {
+									toolCallPreambles.set(tc.id, preambleAccumulator);
+								}
+							}
+						}
+					}
 					continue;
 				}
 
-				const token = this.extractTokenFromEvent(event);
-				if (token) {
-					const chunkId = this.extractAiMessageIdFromEvent(event);
-					if (chunkId) lastAiMessageId = chunkId;
-					yield {
-						type: "token",
-						token,
-						runId,
-						threadId,
-					};
-				}
-
-				const output = this.extractOutputFromEvent(event);
-				if (output) {
-					rawResult = output;
+				if (mode === "values") {
+					if (this.isAgentOutputCandidate(payload)) {
+						rawResult = payload;
+					}
 				}
 			}
 		} catch (error) {
@@ -1453,7 +1768,7 @@ export class Agent {
 			tools: Array.isArray(this.tools) ? [...this.tools] : [],
 			systemPrompt: this.prompt,
 			checkpointer: this.checkpointer,
-			middleware: this.buildSummarizationMiddleware(),
+			middleware: [...this.buildSummarizationMiddleware(), ...this.buildSubAgentMiddleware()] as never,
 		});
 		this.dirty = false;
 		return this.agentRunnable;
@@ -1841,6 +2156,84 @@ export class Agent {
 		return {};
 	}
 
+	/**
+	 * Resolves subagent nesting AND the timeline group (`aiMessageId`) for a tool
+	 * event, using the per-stream `task` call stack. deepagents runs each subagent
+	 * inside a `task` tool call, so any tool event while a `task` call is open may
+	 * be a child of that call.
+	 *
+	 * Child attribution uses FIFO round-robin: each child is assigned to the open
+	 * task with the fewest children so far, preferring the earliest-pushed task on
+	 * ties. This matches deepagents' sequential execution order — children of task A
+	 * arrive before children of task B even if both tasks' start events appear before
+	 * any children. The `subagent_type` from each task's input (recorded on start) is
+	 * used as the display name for attributed children.
+	 *
+	 * The `aiMessageId` normally follows `lastAiMessageId`. For children we force
+	 * them to inherit the `aiMessageId` the parent `task` call was stamped with so
+	 * parent and children land in the same timeline step.
+	 */
+	private resolveToolAttribution(
+		eventType: "on_tool_start" | "on_tool_end" | "other",
+		toolInput: unknown,
+		toolName: string,
+		toolCallId: string,
+		taskCallStack: string[],
+		taskAiMessageIds: Map<string, string | undefined>,
+		taskSubAgentNames: Map<string, string | undefined>,
+		taskChildCounts: Map<string, number>,
+		lastAiMessageId: string | undefined,
+	): { aiMessageId?: string; subAgentName?: string; parentToolCallId?: string } {
+		const isTaskCall = toolName === "task";
+		if (eventType === "on_tool_start" && isTaskCall) {
+			taskCallStack.push(toolCallId);
+			taskAiMessageIds.set(toolCallId, lastAiMessageId);
+			taskChildCounts.set(toolCallId, 0);
+			const input = toolInput as Record<string, unknown> | undefined;
+			const subAgentName = typeof input?.subagent_type === "string" ? input.subagent_type : undefined;
+			taskSubAgentNames.set(toolCallId, subAgentName);
+			// Stamp the task call itself with its subagent name so the timeline card
+			// shows the subagent label + badge during streaming (matching checkpoint
+			// replay), not the bare "task" tool name.
+			return { aiMessageId: lastAiMessageId, subAgentName };
+		}
+		if (eventType === "on_tool_end" && isTaskCall) {
+			const groupId = taskAiMessageIds.has(toolCallId) ? taskAiMessageIds.get(toolCallId) : lastAiMessageId;
+			const subAgentName = taskSubAgentNames.get(toolCallId);
+			const idx = taskCallStack.lastIndexOf(toolCallId);
+			if (idx !== -1) taskCallStack.splice(idx, 1);
+			taskAiMessageIds.delete(toolCallId);
+			taskSubAgentNames.delete(toolCallId);
+			taskChildCounts.delete(toolCallId);
+			return { aiMessageId: groupId, subAgentName };
+		}
+		// Assign each child to the open task with the fewest children (FIFO round-robin).
+		// Only increment the child count on tool_start — tool_end events carry the same
+		// parentToolCallId for correlation but should not count as a second child attribution.
+		let parentToolCallId: string | undefined;
+		if (taskCallStack.length > 0) {
+			let bestParent: string | undefined;
+			let bestCount = Number.MAX_SAFE_INTEGER;
+			for (const taskId of taskCallStack) {
+				const count = taskChildCounts.get(taskId) ?? 0;
+				if (count < bestCount) {
+					bestCount = count;
+					bestParent = taskId;
+				}
+			}
+			parentToolCallId = bestParent;
+		}
+		if (parentToolCallId) {
+			if (eventType === "on_tool_start") {
+				taskChildCounts.set(parentToolCallId, (taskChildCounts.get(parentToolCallId) ?? 0) + 1);
+			}
+			const resolvedSubAgentName = taskSubAgentNames.get(parentToolCallId);
+			const parentAiMessageId = taskAiMessageIds.get(parentToolCallId) ?? lastAiMessageId;
+			return { aiMessageId: parentAiMessageId, subAgentName: resolvedSubAgentName, parentToolCallId };
+		}
+		return { aiMessageId: lastAiMessageId };
+	}
+
 	private normalizeStreamToolInput(rawInput: unknown): unknown {
 		let input = rawInput;
 
@@ -1880,6 +2273,27 @@ export class Agent {
 
 		if (rawOutput && typeof rawOutput === "object" && !Array.isArray(rawOutput)) {
 			const wrapper = rawOutput as Record<string, unknown>;
+
+			// The `task` tool returns a LangGraph `Command` (returnCommandWithStateUpdate),
+			// not a plain ToolMessage. Its `update.messages` array holds the ToolMessage
+			// whose content is the subagent's final text. Unwrap it so the timeline shows
+			// the subagent output during streaming (instead of dumping the raw Command's
+			// lg_name/update/goto fields), matching checkpoint-replay rendering.
+			if (wrapper.lg_name === "Command") {
+				const update = wrapper.update as { messages?: unknown } | undefined;
+				const messages = Array.isArray(update?.messages) ? (update?.messages as unknown[]) : undefined;
+				const last = messages && messages.length > 0 ? messages[messages.length - 1] : undefined;
+				return last && typeof last === "object" ? this.normalizeStreamToolOutput(last) : undefined;
+			}
+
+			// A live LangChain message instance (BaseMessage) — e.g. the ToolMessage the
+			// `task` tool emits at on_tool_end during streaming. Its `content` holds the
+			// text. Detect it by the `_getType` method (own-key checks are unreliable:
+			// instances carry lc_* bookkeeping fields not in any fixed allowlist).
+			if (typeof (wrapper as { _getType?: unknown })._getType === "function" && "content" in wrapper) {
+				return wrapper.content;
+			}
+
 			const keys = Object.keys(wrapper);
 
 			if (
@@ -1920,125 +2334,21 @@ export class Agent {
 		return undefined;
 	}
 
-	private extractOutputFromEvent(event: StreamEvent): unknown | undefined {
-		const output = event?.data?.output;
-		if (this.isAgentOutputCandidate(output)) {
-			return output;
-		}
-		return undefined;
-	}
-
-	private extractMessagesFromEvent(event: StreamEvent): BaseMessage[] {
-		// Check final output first (most complete state, includes tool calls)
-		const output = this.extractOutputFromEvent(event);
-		if (output) {
-			return this.extractMessagesFromResult(output);
-		}
-
-		// Check if event.data.output exists but wasn't recognized as agent output
-		// This can happen with intermediate chain outputs that contain messages
-		const dataOutput = event?.data?.output;
-		if (dataOutput && typeof dataOutput === "object" && "messages" in dataOutput) {
-			const messages = (dataOutput as { messages?: unknown }).messages;
-			if (Array.isArray(messages)) {
-				return messages.filter((msg): msg is BaseMessage => msg && typeof msg === "object");
-			}
-		}
-
-		// Check chunk data for messages
-		const chunk = event?.data?.chunk;
-		if (!chunk || typeof chunk !== "object") {
-			return [];
-		}
-
-		// Check if chunk itself is an array of messages
-		if (Array.isArray(chunk)) {
-			return chunk.filter((msg): msg is BaseMessage => msg && typeof msg === "object");
-		}
-
-		// Check if chunk contains a messages array
-		if ("messages" in chunk) {
-			const messages = (chunk as { messages?: unknown }).messages;
-			if (Array.isArray(messages)) {
-				return messages.filter((msg): msg is BaseMessage => msg && typeof msg === "object");
-			}
-		}
-
-		return [];
-	}
-
-	/**
-	 * Extracts the AI message id from a chat model stream event.
-	 * AIMessageChunk objects carry an `id` field set by the provider.
-	 */
-	private extractAiMessageIdFromEvent(event: StreamEvent): string | undefined {
-		if (!event.event.endsWith("_stream")) return undefined;
-		const chunk = event.data?.chunk;
-		if (chunk && typeof chunk === "object" && typeof (chunk as { id?: unknown }).id === "string") {
-			return (chunk as { id: string }).id;
-		}
-		return undefined;
-	}
-
-	private extractTokenFromEvent(event: StreamEvent): string | undefined {
-		if (!event.event.endsWith("_stream")) {
-			return undefined;
-		}
-		const chunk = event.data?.chunk;
-		if (typeof chunk === "undefined" || chunk === null) {
-			return undefined;
-		}
-		const token = this.normalizeContentToString(chunk);
-		return token && token.length > 0 ? token : undefined;
-	}
-
 	private normalizeContentToString(value: unknown): string | undefined {
 		if (typeof value === "string") {
-			return value;
+			return value.length > 0 ? value : undefined;
 		}
 		if (Array.isArray(value)) {
 			const combined = value
 				.map((entry) => {
-					if (typeof entry === "string") {
-						return entry;
-					}
-					if (entry && typeof entry === "object") {
-						if (typeof (entry as { text?: unknown }).text === "string") {
-							return (entry as { text: string }).text;
-						}
-						if (typeof (entry as { content?: unknown }).content === "string") {
-							return (entry as { content: string }).content;
-						}
+					if (typeof entry === "string") return entry;
+					if (entry && typeof entry === "object" && typeof (entry as { text?: unknown }).text === "string") {
+						return (entry as { text: string }).text;
 					}
 					return "";
 				})
 				.join("");
 			return combined.length > 0 ? combined : undefined;
-		}
-		if (value && typeof value === "object") {
-			const textField = (value as { text?: unknown }).text;
-			if (typeof textField === "string") {
-				return textField;
-			}
-			const contentField = (value as { content?: unknown }).content;
-			const contentText = this.normalizeContentToString(contentField);
-			if (contentText) {
-				return contentText;
-			}
-			const messageField = (value as { message?: { content?: unknown } }).message;
-			if (messageField) {
-				const messageText = this.normalizeContentToString(messageField.content);
-				if (messageText) {
-					return messageText;
-				}
-			}
-			const deltaField = (value as { delta?: unknown }).delta;
-			if (deltaField) {
-				const deltaText = this.normalizeContentToString(deltaField);
-				if (deltaText) {
-					return deltaText;
-				}
-			}
 		}
 		return undefined;
 	}

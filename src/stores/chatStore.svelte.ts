@@ -71,12 +71,6 @@ export interface ToolCallState {
 	subAgentName?: string;
 	/** The id of the parent `task` tool call this is nested under, if any. */
 	parentToolCallId?: string;
-	/**
-	 * True when this is a `task` call reconstructed from a checkpoint (subagent
-	 * internals were never persisted), so the UI shows a "steps not recorded"
-	 * affordance instead of nested children.
-	 */
-	subAgentDetailsUnavailable?: boolean;
 }
 
 export type AssistantTimelineEventType = "preamble" | "tool_start" | "tool_end";
@@ -96,8 +90,6 @@ export interface AssistantTimelineEvent {
 	subAgentName?: string;
 	/** The id of the parent `task` tool call this is nested under, if any. */
 	parentToolCallId?: string;
-	/** See {@link ToolCallState.subAgentDetailsUnavailable}. */
-	subAgentDetailsUnavailable?: boolean;
 }
 
 export interface UserMessage {
@@ -856,14 +848,21 @@ function buildTimelineFromToolCalls(
 	if (!toolCalls || toolCalls.length === 0) return undefined;
 
 	const events: AssistantTimelineEvent[] = [];
+	// Track preamble texts already emitted for this message so that when multiple
+	// tool calls share the same flat-string preamble (checkpoint replay collapses
+	// the content to a single string), the preamble event is only emitted once —
+	// for the first tool call that carries it.
+	const emittedPreambles = new Set<string>();
 	for (const toolCall of toolCalls) {
-		if (toolCall.preamble?.trim()) {
+		const preambleText = toolCall.preamble?.trim();
+		if (preambleText && !emittedPreambles.has(preambleText)) {
+			emittedPreambles.add(preambleText);
 			events.push({
 				id: `preamble-${toolCall.id}`,
 				type: "preamble",
 				toolCallId: toolCall.id,
 				toolName: toolCall.name,
-				content: toolCall.preamble.trim(),
+				content: preambleText,
 				aiMessageId,
 			});
 		}
@@ -878,7 +877,6 @@ function buildTimelineFromToolCalls(
 			aiMessageId,
 			subAgentName: toolCall.subAgentName,
 			parentToolCallId: toolCall.parentToolCallId,
-			subAgentDetailsUnavailable: toolCall.subAgentDetailsUnavailable,
 		});
 
 		events.push({
@@ -895,6 +893,86 @@ function buildTimelineFromToolCalls(
 	}
 
 	return events.length > 0 ? events : undefined;
+}
+
+/**
+ * Builds a map of AIMessage id → parent task call id for subagent AIMessages.
+ *
+ * deepagents injects subagent AIMessages into the parent thread's checkpoint.  These
+ * appear after the ToolMessages that completed the parent's `task` calls — i.e. an
+ * AIMessage with non-task tool calls that follows a ToolMessage closing a `task` call
+ * is a subagent's internal turn.  Parent-agent AIMessages (those that have `task` calls
+ * themselves) pass through without clearing the accumulated closed-task list, so
+ * sequential task dispatch (one task at a time) is handled correctly alongside
+ * parallel dispatch (multiple tasks per LLM turn).
+ *
+ * Each subagent AIMessage is attributed to the closed `task` call with the fewest
+ * children assigned so far (FIFO round-robin — same heuristic as live streaming).
+ */
+function buildSubAgentParentMap(messages: BaseMessage[]): Map<string, string> {
+	// messageId → parentTaskCallId
+	const parentMap = new Map<string, string>();
+	// task call IDs registered from AIMessages (name === "task")
+	const registeredTaskCallIds = new Set<string>();
+	// task call IDs closed by ToolMessages, available for attribution; grows across
+	// multiple parent-agent turns within a single user turn (sequential task dispatch)
+	const closedTaskCallIds: string[] = [];
+	// How many subagent AIMessages have been assigned per closed task (round-robin counter)
+	const taskChildCounts = new Map<string, number>();
+
+	for (const msg of messages) {
+		if (isHumanMessage(msg)) {
+			registeredTaskCallIds.clear();
+			closedTaskCallIds.length = 0;
+			taskChildCounts.clear();
+			continue;
+		}
+
+		if (isToolMessage(msg)) {
+			const tcId = (msg as ToolMessage).tool_call_id;
+			if (tcId && registeredTaskCallIds.has(tcId)) {
+				closedTaskCallIds.push(tcId);
+				taskChildCounts.set(tcId, 0);
+			}
+			continue;
+		}
+
+		if (isAIMessage(msg)) {
+			const aiMsg = msg as AIMessage;
+			const tc = aiMsg.tool_calls ?? [];
+			const hasTaskCalls = tc.some((c) => c.name === "task");
+			const hasAnyToolCalls = tc.length > 0;
+
+			if (!hasTaskCalls && hasAnyToolCalls && closedTaskCallIds.length > 0) {
+				// Subagent AIMessage: has tool calls, none are `task`, and task calls
+				// have been closed upstream.  Assign to the closed task with the fewest
+				// children (FIFO round-robin).
+				let bestParent = closedTaskCallIds[0];
+				let bestCount = taskChildCounts.get(bestParent) ?? 0;
+				for (const tid of closedTaskCallIds) {
+					const c = taskChildCounts.get(tid) ?? 0;
+					if (c < bestCount) {
+						bestCount = c;
+						bestParent = tid;
+					}
+				}
+				if (msg.id) parentMap.set(msg.id, bestParent);
+				taskChildCounts.set(bestParent, bestCount + 1);
+			}
+			// Parent-agent turns (hasTaskCalls) and final-answer turns (no tool calls)
+			// intentionally do NOT reset closedTaskCallIds — sequential task dispatch
+			// interleaves parent turns between subagent turns within the same user turn.
+
+			// Register new `task` tool calls for future ToolMessage matching
+			for (const call of tc) {
+				if (call.name === "task" && call.id) {
+					registeredTaskCallIds.add(call.id);
+				}
+			}
+		}
+	}
+
+	return parentMap;
 }
 
 /**
@@ -936,6 +1014,33 @@ export function baseMessageToAssistantMessage(
 		const rawToolCalls = aiMsg.tool_calls;
 
 		if (Array.isArray(rawToolCalls) && rawToolCalls.length > 0) {
+			// Extract per-tool-call preamble text.
+			// Live responses (Anthropic): content is an array of ordered blocks —
+			// text blocks that precede a tool_use block are the preamble for that call.
+			// Replayed checkpoints: LangGraph collapses AIMessageChunk content to a
+			// flat string; that string is the preamble shared by all tool calls in
+			// the message.
+			const preambleByToolId = new Map<string, string>();
+			if (Array.isArray(aiMsg.content)) {
+				let pendingText = "";
+				for (const block of aiMsg.content as Array<{ type: string; text?: string; id?: string }>) {
+					if (block.type === "text") {
+						pendingText += block.text ?? "";
+					} else if (block.type === "tool_use" && block.id) {
+						if (pendingText.trim()) preambleByToolId.set(block.id, pendingText.trim());
+						pendingText = "";
+					} else {
+						pendingText = "";
+					}
+				}
+			} else if (typeof aiMsg.content === "string" && aiMsg.content.trim()) {
+				// Flat string from a replayed checkpoint — assign to all tool calls.
+				const sharedPreamble = aiMsg.content.trim();
+				for (const tc of rawToolCalls) {
+					if (tc.id) preambleByToolId.set(tc.id, sharedPreamble);
+				}
+			}
+
 			toolCalls = rawToolCalls.map((tc) => {
 				const toolOutput = toolOutputs?.get(tc.id || "");
 				const input = normalizeToolInput(tc.args);
@@ -953,11 +1058,8 @@ export function baseMessageToAssistantMessage(
 					input,
 					status: toolOutput?.status ?? "completed",
 					output: toolOutput?.content,
+					preamble: preambleByToolId.get(tc.id || "") ?? undefined,
 					subAgentName,
-					// Reconstructed from a checkpoint: the subagent's own tool
-					// calls are not persisted, so mark the node so the UI shows
-					// a "steps not recorded" affordance instead of children.
-					subAgentDetailsUnavailable: subAgentName !== undefined ? true : undefined,
 				};
 			});
 		}
@@ -979,6 +1081,7 @@ function mergeAssistantMessages(
 	assistantMessages: BaseMessage[],
 	toolOutputs: Map<string, { content: unknown; status: ToolCallStatus }>,
 	stateOverride?: AssistantState,
+	subAgentParentMap?: Map<string, string>,
 ): AssistantMessage {
 	if (assistantMessages.length === 0) {
 		return {
@@ -994,17 +1097,36 @@ function mergeAssistantMessages(
 
 	for (const msg of assistantMessages) {
 		const converted = baseMessageToAssistantMessage(msg, toolOutputs);
+		// If this AIMessage was produced by a subagent (deepagents injects its internal
+		// turns into the parent checkpoint), patch its tool calls with parentToolCallId
+		// so foldSubAgentChildren can nest them under the correct `task` step.
+		const parentTaskCallId = msg.id ? subAgentParentMap?.get(msg.id) : undefined;
+		if (parentTaskCallId && converted.toolCalls) {
+			for (const tc of converted.toolCalls) {
+				tc.parentToolCallId = parentTaskCallId;
+			}
+			if (converted.assistantTimeline) {
+				for (const event of converted.assistantTimeline) {
+					event.parentToolCallId = parentTaskCallId;
+				}
+			}
+		}
 
-		// Use the last non-empty content
-		if (converted.content.trim()) {
+		// Use the last non-empty content — but skip subagent messages entirely;
+		// their text is intermediate subagent reasoning, not the parent answer.
+		if (!parentTaskCallId && converted.content.trim()) {
 			finalContent = converted.content;
 		}
 
-		// Collect all tool calls and build timeline with the AI message's native id
+		// Collect all tool calls and timeline events.
+		// Use the converted.assistantTimeline directly (which already has parentToolCallId
+		// patched in above and preambles extracted) rather than rebuilding from toolCalls,
+		// so preamble events inherit the correct parentToolCallId for folding.
 		if (converted.toolCalls) {
 			allToolCalls.push(...converted.toolCalls);
-			const events = buildTimelineFromToolCalls(converted.toolCalls, msg.id);
-			if (events) allTimelineEvents.push(...events);
+			if (converted.assistantTimeline) {
+				allTimelineEvents.push(...converted.assistantTimeline);
+			}
 		}
 	}
 
@@ -1062,6 +1184,7 @@ export function baseMessagesToMessagePairs(
 
 	const messagePairs: MessagePair[] = [];
 	const toolOutputs = buildToolOutputsMap(messages);
+	const subAgentParentMap = buildSubAgentParentMap(messages);
 
 	// Filter to just user (human) and assistant (ai) messages
 	const conversationMessages = messages.filter((msg) => isHumanMessage(msg) || isAIMessage(msg));
@@ -1186,7 +1309,7 @@ export function baseMessagesToMessagePairs(
 			messagePairs.push({
 				id: pairId,
 				userMessage: { content: userContent, attachments, visibleNotes, selection, graphNotes },
-				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state),
+				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state, subAgentParentMap),
 				generation: deriveGenerationFromAssistantMessages(assistantMessages),
 				createdAt,
 				regenerateFromCheckpointId,
@@ -1822,6 +1945,13 @@ export class ChatSession {
 	private async consumeStream(assistantMsg: AssistantMessage, stream: AsyncIterable<AgentStreamChunk>) {
 		let tokenBuffer = "";
 		let hasSeenToolCall = false;
+		// Track preamble texts already emitted during streaming so that parallel tool
+		// calls sharing the same preambleAccumulator text only get one preamble event.
+		const emittedStreamPreambles = new Set<string>();
+		let currentTokenAiMessageId: string | undefined;
+		// True after a tool_end — signals that the next token starts a new LangGraph step.
+		// We reset the display content then to avoid stacking inter-step AI texts.
+		let pendingStepReset = false;
 
 		if (!assistantMsg.assistantTimeline) assistantMsg.assistantTimeline = [];
 
@@ -1829,6 +1959,19 @@ export class ChatSession {
 			if (chunk.type === "token") {
 				this.summarizingHistory = false;
 				if (!chunk.token) continue;
+
+				// Detect step boundary via aiMessageId change (preferred), or via
+				// pendingStepReset (fallback when aiMessageId doesn't change between steps).
+				const aiIdChanged =
+					hasSeenToolCall && chunk.aiMessageId && chunk.aiMessageId !== currentTokenAiMessageId;
+				if (aiIdChanged || pendingStepReset) {
+					tokenBuffer = "";
+					assistantMsg.content = "";
+					pendingStepReset = false;
+					emittedStreamPreambles.clear();
+				}
+				if (chunk.aiMessageId) currentTokenAiMessageId = chunk.aiMessageId;
+
 				tokenBuffer += chunk.token;
 				assistantMsg.content = hasSeenToolCall ? tokenBuffer.trimStart() : tokenBuffer;
 				continue;
@@ -1837,7 +1980,15 @@ export class ChatSession {
 			if (chunk.type === "tool_start") {
 				this.summarizingHistory = false;
 				hasSeenToolCall = true;
-				const preamble = tokenBuffer;
+				pendingStepReset = false;
+				// Use the preamble carried on the chunk (indexed by Agent.ts from the
+				// messages stream before tool callbacks fire) rather than tokenBuffer.
+				// tokenBuffer may contain text from earlier steps or be empty if messages
+				// arrived out of order relative to tool callbacks.
+				const preamble = chunk.preamble ?? "";
+				const preambleTrimmed = preamble.trim();
+				const isFirstWithPreamble = !!preambleTrimmed && !emittedStreamPreambles.has(preambleTrimmed);
+				if (isFirstWithPreamble) emittedStreamPreambles.add(preambleTrimmed);
 				tokenBuffer = "";
 				assistantMsg.content = "";
 
@@ -1847,18 +1998,18 @@ export class ChatSession {
 					name: chunk.toolName,
 					input: this.normalizeToolInput(chunk.input),
 					status: "running",
-					preamble: preamble.trim() || undefined,
+					preamble: isFirstWithPreamble ? preambleTrimmed : undefined,
 					subAgentName: chunk.subAgentName,
 					parentToolCallId: chunk.parentToolCallId,
 				});
 
-				if (preamble.trim()) {
+				if (isFirstWithPreamble) {
 					assistantMsg.assistantTimeline.push({
 						id: `preamble-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
 						type: "preamble",
 						toolCallId: chunk.toolCallId,
 						toolName: chunk.toolName,
-						content: preamble.trim(),
+						content: preambleTrimmed,
 						aiMessageId: chunk.aiMessageId,
 					});
 				}
@@ -1891,8 +2042,14 @@ export class ChatSession {
 					if (tc) {
 						tc.status = resolvedStatus;
 						tc.output = chunk.output;
-						if (chunk.subAgentName) tc.subAgentName = chunk.subAgentName;
-						if (chunk.parentToolCallId) tc.parentToolCallId = chunk.parentToolCallId;
+						// Attribution (subagent name + parent task) is authoritative from the
+						// tool_start event. Do NOT overwrite it here: the on_tool_end attribution
+						// is recomputed by a FIFO round-robin that can pick a different open
+						// `task` when several run in parallel, which would re-parent an already
+						// nested child onto the wrong task card. Only fill gaps.
+						if (chunk.subAgentName && !tc.subAgentName) tc.subAgentName = chunk.subAgentName;
+						if (chunk.parentToolCallId && !tc.parentToolCallId)
+							tc.parentToolCallId = chunk.parentToolCallId;
 					} else {
 						assistantMsg.toolCalls.push({
 							id: chunk.toolCallId,
@@ -1929,6 +2086,9 @@ export class ChatSession {
 					subAgentName: chunk.subAgentName,
 					parentToolCallId: chunk.parentToolCallId,
 				});
+				// Signal that the next token starts a new LangGraph step — we reset the
+				// display buffer then so inter-step AI texts don't stack in the answer area.
+				pendingStepReset = true;
 				continue;
 			}
 
@@ -1949,13 +2109,14 @@ export class ChatSession {
 				// subagent branch would collapse the instant streaming ends.
 				assistantMsg.content = checkpointAssistant.content;
 
-				const streamedHasSubAgentChildren = assistantMsg.assistantTimeline?.some((e) => e.parentToolCallId);
+				const streamedHasToolCalls = (assistantMsg.toolCalls?.length ?? 0) > 0;
 
-				if (streamedHasSubAgentChildren) {
+				if (streamedHasToolCalls) {
 					const finalById = new Map((checkpointAssistant.toolCalls ?? []).map((tc) => [tc.id, tc]));
-					// Reconcile the streamed timeline's tool_end events with the
-					// checkpoint's final status/output (streaming defaults status to
-					// "completed" and can't see error state).
+					// Keep the streamed timeline (which has preamble text and subagent
+					// children); only patch in authoritative final status/output from the
+					// checkpoint, since streaming always defaults status to "completed"
+					// and cannot observe error state.
 					for (const event of assistantMsg.assistantTimeline ?? []) {
 						if (event.type !== "tool_end") continue;
 						const final = event.toolCallId ? finalById.get(event.toolCallId) : undefined;
@@ -1963,8 +2124,6 @@ export class ChatSession {
 						event.status = final.status;
 						event.output = final.output;
 					}
-					// Mirror the same reconciliation onto the flat toolCalls the
-					// timeline was built from, so both stay in sync.
 					for (const tc of assistantMsg.toolCalls ?? []) {
 						const final = finalById.get(tc.id);
 						if (!final) continue;

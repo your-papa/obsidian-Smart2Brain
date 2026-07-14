@@ -193,6 +193,24 @@ describe("baseMessageToAssistantMessage", () => {
 		expect(result.content).toBe("");
 		expect(result.state).toBe(AssistantState.success);
 	});
+
+	it("labels a reconstructed task call with its subagent name", () => {
+		const msg = aiMsgWithToolCalls("Delegating", [
+			{ id: "task-1", name: "task", args: { subagent_type: "Web Search", description: "search" } },
+		]);
+
+		const result = baseMessageToAssistantMessage(msg);
+
+		expect(result.toolCalls).toHaveLength(1);
+		expect(result.toolCalls![0].name).toBe("task");
+		expect(result.toolCalls![0].subAgentName).toBe("Web Search");
+	});
+
+	it("does not set subAgentName on ordinary (non-task) tool calls", () => {
+		const msg = aiMsgWithToolCalls("", [{ id: "tc-1", name: "search_notes", args: { query: "x" } }]);
+		const result = baseMessageToAssistantMessage(msg);
+		expect(result.toolCalls![0].subAgentName).toBeUndefined();
+	});
 });
 
 /* --------------------------------------------------------------------------
@@ -490,5 +508,268 @@ describe("AssistantState enum", () => {
 		expect(AssistantState.success).toBe(2);
 		expect(AssistantState.error).toBe(3);
 		expect(AssistantState.cancelled).toBe(4);
+	});
+});
+
+/* --------------------------------------------------------------------------
+ * baseMessagesToMessagePairs — subagent AIMessage attribution
+ * ------------------------------------------------------------------------*/
+
+describe("baseMessagesToMessagePairs — subagent AIMessage attribution", () => {
+	it("folds subagent AIMessage tool calls under their parent task call", () => {
+		// Reproduces the deepagents checkpoint pattern:
+		//   HumanMessage
+		//   AIMessage: task(A), task(B), task(C)
+		//   ToolMessage(A) ToolMessage(B) ToolMessage(C)
+		//   AIMessage (subagent 1): list_directory, search_notes  ← should get parentToolCallId=A
+		//   ToolMessage(list_dir) ToolMessage(search_notes)
+		//   AIMessage: final answer (no tool calls)
+		const taskIdA = "task-A";
+		const taskIdB = "task-B";
+		const taskIdC = "task-C";
+
+		const parentAI = new AIMessage({
+			id: "parent-ai-1",
+			content: "",
+			tool_calls: [
+				{ id: taskIdA, name: "task", args: { subagent_type: "researcher" } },
+				{ id: taskIdB, name: "task", args: { subagent_type: "researcher" } },
+				{ id: taskIdC, name: "task", args: { subagent_type: "researcher" } },
+			],
+		});
+		const subAgentAI = new AIMessage({
+			id: "subagent-ai-1",
+			content: "",
+			tool_calls: [
+				{ id: "list-dir-1", name: "list_directory", args: {} },
+				{ id: "search-1", name: "search_notes", args: { query: "test" } },
+			],
+		});
+		const finalAI = new AIMessage({ id: "final-ai", content: "Here is my answer." });
+
+		const messages = [
+			new HumanMessage({ id: "human-1", content: "explore my notes" }),
+			parentAI,
+			new ToolMessage({ content: "task A result", tool_call_id: taskIdA }),
+			new ToolMessage({ content: "task B result", tool_call_id: taskIdB }),
+			new ToolMessage({ content: "task C result", tool_call_id: taskIdC }),
+			subAgentAI,
+			new ToolMessage({ content: "dir listing", tool_call_id: "list-dir-1" }),
+			new ToolMessage({ content: "search results", tool_call_id: "search-1" }),
+			finalAI,
+		];
+
+		const pairs = baseMessagesToMessagePairs(messages);
+		expect(pairs).toHaveLength(1);
+
+		const { toolCalls } = pairs[0].assistantMessage;
+		expect(toolCalls).toBeDefined();
+
+		// Parent's task calls should have no parentToolCallId
+		const taskCalls = toolCalls!.filter((tc) => tc.name === "task");
+		expect(taskCalls).toHaveLength(3);
+		for (const tc of taskCalls) {
+			expect(tc.parentToolCallId).toBeUndefined();
+		}
+
+		// Subagent's tool calls should have parentToolCallId = taskIdA (FIFO: A has fewest children)
+		const subagentCalls = toolCalls!.filter((tc) => tc.name !== "task");
+		expect(subagentCalls).toHaveLength(2);
+		for (const tc of subagentCalls) {
+			expect(tc.parentToolCallId).toBe(taskIdA);
+		}
+
+		// Final answer — content should be preserved
+		expect(pairs[0].assistantMessage.content).toBe("Here is my answer.");
+	});
+
+	it("assigns multiple subagent AIMessages round-robin across tasks", () => {
+		const taskIdD = "task-D";
+		const taskIdE = "task-E";
+
+		const parentAI = new AIMessage({
+			id: "parent-ai-2",
+			content: "",
+			tool_calls: [
+				{ id: taskIdD, name: "task", args: { subagent_type: "analyst" } },
+				{ id: taskIdE, name: "task", args: { subagent_type: "analyst" } },
+			],
+		});
+		const subAgentAI1 = new AIMessage({
+			id: "sub-ai-1",
+			content: "",
+			tool_calls: [{ id: "search-D1", name: "search_notes", args: {} }],
+		});
+		const subAgentAI2 = new AIMessage({
+			id: "sub-ai-2",
+			content: "",
+			tool_calls: [{ id: "search-E1", name: "search_notes", args: {} }],
+		});
+		const finalAI = new AIMessage({ id: "final-ai-2", content: "Done." });
+
+		const messages = [
+			new HumanMessage({ id: "h2", content: "analyze notes" }),
+			parentAI,
+			new ToolMessage({ content: "D result", tool_call_id: taskIdD }),
+			new ToolMessage({ content: "E result", tool_call_id: taskIdE }),
+			subAgentAI1,
+			new ToolMessage({ content: "search result D", tool_call_id: "search-D1" }),
+			subAgentAI2,
+			new ToolMessage({ content: "search result E", tool_call_id: "search-E1" }),
+			finalAI,
+		];
+
+		const pairs = baseMessagesToMessagePairs(messages);
+		const { toolCalls } = pairs[0].assistantMessage;
+		expect(toolCalls).toBeDefined();
+
+		const sub1 = toolCalls!.find((tc) => tc.id === "search-D1");
+		const sub2 = toolCalls!.find((tc) => tc.id === "search-E1");
+		expect(sub1?.parentToolCallId).toBe(taskIdD);  // FIFO: D first
+		expect(sub2?.parentToolCallId).toBe(taskIdE);  // FIFO: E second (D already has 1 child)
+	});
+
+	it("does not attribute final-answer AIMessage (no tool calls) as subagent", () => {
+		const taskId = "task-X";
+		const parentAI = new AIMessage({
+			id: "parent-ai-x",
+			content: "",
+			tool_calls: [{ id: taskId, name: "task", args: {} }],
+		});
+		const finalAI = new AIMessage({ id: "final-x", content: "Final answer." });
+
+		const messages = [
+			new HumanMessage({ id: "hx", content: "do something" }),
+			parentAI,
+			new ToolMessage({ content: "task result", tool_call_id: taskId }),
+			finalAI,
+		];
+
+		const pairs = baseMessagesToMessagePairs(messages);
+		const { toolCalls, content } = pairs[0].assistantMessage;
+
+		// Only the parent task call should appear — final AI produces no tool calls
+		const allCalls = toolCalls ?? [];
+		const withParent = allCalls.filter((tc) => tc.parentToolCallId !== undefined);
+		expect(withParent).toHaveLength(0);
+		expect(content).toBe("Final answer.");
+	});
+
+	it("handles sequential task dispatch: one task per parent turn", () => {
+		// Reproduces the actual pattern observed in checkpoints:
+		//   AI: task(A) → TOOL(A) → AI: task(B) → TOOL(B) → AI: task(C) → TOOL(C)
+		//   AI (subagent 1): search_notes  ← from task A
+		//   TOOL(search)
+		//   AI (subagent 2): list_directory  ← from task B
+		//   TOOL(list_dir)
+		//   AI (subagent 3): search_notes  ← from task C
+		//   TOOL(search2)
+		//   AI: final answer
+		const taskIdA = "seq-task-A";
+		const taskIdB = "seq-task-B";
+		const taskIdC = "seq-task-C";
+
+		const messages = [
+			new HumanMessage({ id: "seq-human", content: "use subagents" }),
+			new AIMessage({ id: "seq-parent-1", content: "", tool_calls: [{ id: taskIdA, name: "task", args: {} }] }),
+			new ToolMessage({ content: "A done", tool_call_id: taskIdA }),
+			new AIMessage({ id: "seq-parent-2", content: "", tool_calls: [{ id: taskIdB, name: "task", args: {} }] }),
+			new ToolMessage({ content: "B done", tool_call_id: taskIdB }),
+			new AIMessage({ id: "seq-parent-3", content: "", tool_calls: [{ id: taskIdC, name: "task", args: {} }] }),
+			new ToolMessage({ content: "C done", tool_call_id: taskIdC }),
+			new AIMessage({ id: "sub-seq-1", content: "", tool_calls: [{ id: "search-seq-1", name: "search_notes", args: {} }] }),
+			new ToolMessage({ content: "r1", tool_call_id: "search-seq-1" }),
+			new AIMessage({ id: "sub-seq-2", content: "", tool_calls: [{ id: "list-seq-1", name: "list_directory", args: {} }] }),
+			new ToolMessage({ content: "r2", tool_call_id: "list-seq-1" }),
+			new AIMessage({ id: "sub-seq-3", content: "", tool_calls: [{ id: "search-seq-2", name: "search_notes", args: {} }] }),
+			new ToolMessage({ content: "r3", tool_call_id: "search-seq-2" }),
+			new AIMessage({ id: "seq-final", content: "Sequential done." }),
+		];
+
+		const pairs = baseMessagesToMessagePairs(messages);
+		const { toolCalls } = pairs[0].assistantMessage;
+		expect(toolCalls).toBeDefined();
+
+		// Task calls have no parent
+		const taskCalls = toolCalls!.filter((tc) => tc.name === "task");
+		expect(taskCalls).toHaveLength(3);
+		for (const tc of taskCalls) expect(tc.parentToolCallId).toBeUndefined();
+
+		// Subagent calls attributed round-robin: A→search-seq-1, B→list-seq-1, C→search-seq-2
+		const sub1 = toolCalls!.find((tc) => tc.id === "search-seq-1");
+		const sub2 = toolCalls!.find((tc) => tc.id === "list-seq-1");
+		const sub3 = toolCalls!.find((tc) => tc.id === "search-seq-2");
+		expect(sub1?.parentToolCallId).toBe(taskIdA);
+		expect(sub2?.parentToolCallId).toBe(taskIdB);
+		expect(sub3?.parentToolCallId).toBe(taskIdC);
+
+		expect(pairs[0].assistantMessage.content).toBe("Sequential done.");
+	});
+});
+
+describe("baseMessageToAssistantMessage — preamble extraction from content blocks", () => {
+	it("extracts preamble text preceding a tool_use block on replay", () => {
+		const msg = new AIMessage({
+			id: "ai-preamble-1",
+			content: [
+				{ type: "text", text: "Let me search for that." },
+				{ type: "tool_use", id: "call-1", name: "search_notes", input: { query: "test" } },
+			],
+			tool_calls: [{ id: "call-1", name: "search_notes", args: { query: "test" } }],
+		});
+
+		const result = baseMessageToAssistantMessage(msg);
+		expect(result.toolCalls).toHaveLength(1);
+		expect(result.toolCalls![0].preamble).toBe("Let me search for that.");
+	});
+
+	it("assigns empty preamble when no text precedes a tool_use block", () => {
+		const msg = new AIMessage({
+			id: "ai-preamble-2",
+			content: [
+				{ type: "tool_use", id: "call-2", name: "list_directory", input: {} },
+			],
+			tool_calls: [{ id: "call-2", name: "list_directory", args: {} }],
+		});
+
+		const result = baseMessageToAssistantMessage(msg);
+		expect(result.toolCalls![0].preamble).toBeUndefined();
+	});
+
+	it("assigns distinct preambles when multiple tool calls each have preceding text", () => {
+		const msg = new AIMessage({
+			id: "ai-preamble-3",
+			content: [
+				{ type: "text", text: "First I'll search." },
+				{ type: "tool_use", id: "call-a", name: "search_notes", input: {} },
+				{ type: "text", text: "Then I'll list." },
+				{ type: "tool_use", id: "call-b", name: "list_directory", input: {} },
+			],
+			tool_calls: [
+				{ id: "call-a", name: "search_notes", args: {} },
+				{ id: "call-b", name: "list_directory", args: {} },
+			],
+		});
+
+		const result = baseMessageToAssistantMessage(msg);
+		expect(result.toolCalls![0].preamble).toBe("First I'll search.");
+		expect(result.toolCalls![1].preamble).toBe("Then I'll list.");
+	});
+
+	it("emits preamble timeline events when preamble is present", () => {
+		const msg = new AIMessage({
+			id: "ai-preamble-4",
+			content: [
+				{ type: "text", text: "Thinking out loud." },
+				{ type: "tool_use", id: "call-x", name: "search_notes", input: {} },
+			],
+			tool_calls: [{ id: "call-x", name: "search_notes", args: {} }],
+		});
+
+		const result = baseMessageToAssistantMessage(msg);
+		const preambleEvent = result.assistantTimeline?.find((e) => e.type === "preamble");
+		expect(preambleEvent).toBeDefined();
+		expect(preambleEvent?.content).toBe("Thinking out loud.");
+		expect(preambleEvent?.toolCallId).toBe("call-x");
 	});
 });

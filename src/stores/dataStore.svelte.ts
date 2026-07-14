@@ -360,6 +360,7 @@ export function createDefaultAgentConfig(id?: string, name?: string): AgentConfi
 		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
+		subAgentIds: [],
 	};
 }
 
@@ -378,6 +379,7 @@ function createDefaultAgent(): AgentConfig {
 		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
+		subAgentIds: [],
 	};
 }
 
@@ -846,6 +848,15 @@ export class PluginDataStore {
 		const { [agentId]: _, ...rest } = this.#data.agents;
 		this.#data.agents = rest;
 
+		// Scrub the deleted agent from any other agent's subagent references, so a
+		// dangling ID can't linger in `subAgentIds` (which would show as an enabled
+		// subagent in settings while being silently dropped at resolution time).
+		for (const other of Object.values(this.#data.agents)) {
+			if (other.subAgentIds?.includes(agentId)) {
+				other.subAgentIds = other.subAgentIds.filter((id) => id !== agentId);
+			}
+		}
+
 		// If deleted agent was selected, switch to the default agent (or built-in default)
 		if (this.#data.selectedAgentId === agentId) {
 			this.#data.selectedAgentId = this.#data.defaultAgentId ?? DEFAULT_AGENT_ID;
@@ -873,10 +884,16 @@ export class PluginDataStore {
 
 		// Use $state.snapshot to unwrap Svelte proxies, then structuredClone for deep copy
 		const clonedAgent = structuredClone($state.snapshot(sourceAgent));
+		const newId = genUUIDv7();
+		// Preserve self-reference semantics: if the source delegated to itself, the
+		// duplicate should delegate to ITSELF (its own isolated copy), not back to the
+		// source agent. Remap the source id in subAgentIds to the new id.
+		const remappedSubAgentIds = (clonedAgent.subAgentIds ?? []).map((id) => (id === agentId ? newId : id));
 		const newAgent: AgentConfig = {
 			...clonedAgent,
-			id: genUUIDv7(),
+			id: newId,
 			name: newName,
+			subAgentIds: remappedSubAgentIds,
 		};
 
 		this.#data.agents = {
@@ -920,6 +937,59 @@ export class PluginDataStore {
 			};
 			this.saveSettings();
 		}
+	}
+
+	// --- Agent-specific Subagent References ---
+
+	/**
+	 * Get the list of subagent (referenced agent) IDs for an agent.
+	 */
+	getSubAgentIds(agentId: string): string[] {
+		return this.#data.agents[agentId]?.subAgentIds ?? [];
+	}
+
+	/**
+	 * Enable or disable another agent as a subagent of this agent.
+	 * Self-reference is allowed: an agent may delegate to an isolated-context
+	 * copy of itself. Nesting is capped at one level (the self-copy has no
+	 * `task` tool), so this cannot recurse.
+	 */
+	setSubAgentEnabled(agentId: string, refId: string, enabled: boolean): void {
+		const agent = this.#data.agents[agentId];
+		if (!agent) return;
+		const current = agent.subAgentIds ?? [];
+		const has = current.includes(refId);
+		if (enabled && !has) {
+			agent.subAgentIds = [...current, refId];
+		} else if (!enabled && has) {
+			agent.subAgentIds = current.filter((id) => id !== refId);
+		} else {
+			return;
+		}
+		this.saveSettings();
+	}
+
+	/**
+	 * Toggle another agent's enabled state as a subagent of this agent.
+	 */
+	toggleSubAgentRef(agentId: string, refId: string): void {
+		const enabled = this.getSubAgentIds(agentId).includes(refId);
+		this.setSubAgentEnabled(agentId, refId, !enabled);
+	}
+
+	/**
+	 * Resolve an agent's subagent references to the live AgentConfig objects.
+	 * Self-reference is allowed (isolated-context copy of the same agent);
+	 * only IDs of agents that no longer exist are filtered out.
+	 */
+	resolveSubAgents(agentId: string): AgentConfig[] {
+		const ids = this.getSubAgentIds(agentId);
+		const resolved: AgentConfig[] = [];
+		for (const refId of ids) {
+			const ref = this.#data.agents[refId];
+			if (ref) resolved.push(ref);
+		}
+		return resolved;
 	}
 
 	// --- Agent-specific MCP Server Configuration ---

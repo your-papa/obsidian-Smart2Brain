@@ -90,15 +90,23 @@ export type AuthValidationResult = { success: true } | { success: false; message
  * Derived from the canonical AgentStreamChunk to stay in sync automatically.
  */
 export type AgentManagerStreamChunk =
-	| { type: "token"; token: string }
+	| { type: "token"; token: string; aiMessageId?: string }
 	| Pick<
 			Extract<AgentStreamChunk, { type: "tool_start" }>,
-			"type" | "toolCallId" | "toolName" | "input" | "aiMessageId" | "subAgentName" | "parentToolCallId"
+			| "type"
+			| "toolCallId"
+			| "toolName"
+			| "input"
+			| "preamble"
+			| "aiMessageId"
+			| "subAgentName"
+			| "parentToolCallId"
 	  >
 	| Pick<
 			Extract<AgentStreamChunk, { type: "tool_end" }>,
 			"type" | "toolCallId" | "toolName" | "output" | "aiMessageId" | "subAgentName" | "parentToolCallId"
 	  >
+	| Pick<Extract<AgentStreamChunk, { type: "checkpoint_message" }>, "type" | "message">
 	| { type: "result"; result: unknown };
 
 const resolvedVisionSupportCache = new Map<string, boolean>();
@@ -700,7 +708,7 @@ export class AgentManager {
 				continue;
 			}
 			try {
-				const model = this.registry.createChatInstance(
+				const model = this.registry.createSubAgentChatInstance(
 					ref.chatModel.provider,
 					ref.chatModel.model,
 					ref.chatModel.modelConfig,
@@ -924,13 +932,14 @@ export class AgentManager {
 	private mapChunk(chunk: AgentStreamChunk): AgentManagerStreamChunk | null {
 		switch (chunk.type) {
 			case "token":
-				return { type: "token", token: chunk.token };
+				return { type: "token", token: chunk.token, aiMessageId: chunk.aiMessageId };
 			case "tool_start":
 				return {
 					type: "tool_start",
 					toolCallId: chunk.toolCallId,
 					toolName: chunk.toolName,
 					input: chunk.input,
+					preamble: chunk.preamble,
 					aiMessageId: chunk.aiMessageId,
 					subAgentName: chunk.subAgentName,
 					parentToolCallId: chunk.parentToolCallId,
@@ -947,6 +956,8 @@ export class AgentManager {
 				};
 			case "result":
 				return { type: "result", result: chunk.result };
+			case "checkpoint_message":
+				return { type: "checkpoint_message", message: chunk.message };
 			default:
 				return null;
 		}

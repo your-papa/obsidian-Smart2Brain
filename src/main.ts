@@ -1,5 +1,6 @@
 import { type EventRef, MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import "./lib/i18n";
+import "./lib/langgraphContext";
 import { Logger as Log } from "./utils/logging";
 import { StartupProfiler } from "./utils/startupProfiler";
 import { persistStartupRecord, recordStartupEnvironment } from "./utils/startupTimingsStore";
