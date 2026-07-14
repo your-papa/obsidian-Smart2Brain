@@ -995,14 +995,19 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
         main conversation clean). Delegation is one level deep (a subagent's own subagents are ignored).
       </div>
       {#each subAgentCandidates as candidate (candidate.id)}
+        {@const hasModel = !!candidate.chatModel}
+        {@const isEnabled = isSubAgentEnabled(candidate.id)}
         <ManagedEntityItem
           class="subagent-entity"
           name={candidate.id === agentId ? `${candidate.name} (this agent)` : candidate.name}
-          desc={getSubAgentModelLabel(candidate)}
+          desc={hasModel
+            ? getSubAgentModelLabel(candidate)
+            : "No chat model configured — cannot be used as a subagent"}
         >
           {#snippet actions()}
             <Toggle
-              checked={isSubAgentEnabled(candidate.id)}
+              checked={isEnabled}
+              disabled={!hasModel && !isEnabled}
               onchange={() => handleSubAgentToggle(candidate.id)}
             />
           {/snippet}

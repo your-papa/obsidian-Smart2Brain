@@ -2042,8 +2042,14 @@ export class ChatSession {
 					if (tc) {
 						tc.status = resolvedStatus;
 						tc.output = chunk.output;
-						if (chunk.subAgentName) tc.subAgentName = chunk.subAgentName;
-						if (chunk.parentToolCallId) tc.parentToolCallId = chunk.parentToolCallId;
+						// Attribution (subagent name + parent task) is authoritative from the
+						// tool_start event. Do NOT overwrite it here: the on_tool_end attribution
+						// is recomputed by a FIFO round-robin that can pick a different open
+						// `task` when several run in parallel, which would re-parent an already
+						// nested child onto the wrong task card. Only fill gaps.
+						if (chunk.subAgentName && !tc.subAgentName) tc.subAgentName = chunk.subAgentName;
+						if (chunk.parentToolCallId && !tc.parentToolCallId)
+							tc.parentToolCallId = chunk.parentToolCallId;
 					} else {
 						assistantMsg.toolCalls.push({
 							id: chunk.toolCallId,

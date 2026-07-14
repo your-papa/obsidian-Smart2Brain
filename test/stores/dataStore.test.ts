@@ -196,6 +196,34 @@ describe("PluginDataStore – Agent CRUD", () => {
 	it("should throw when duplicating non-existent agent", () => {
 		expect(() => store.duplicateAgent("nonexistent", "Copy")).toThrow("not found");
 	});
+
+	it("should scrub deleted agent from other agents' subAgentIds", () => {
+		const parent = store.createAgent("Parent");
+		const sub = store.createAgent("Sub");
+		store.setSubAgentEnabled(parent.id, sub.id, true);
+		expect(store.getSubAgentIds(parent.id)).toContain(sub.id);
+
+		store.deleteAgent(sub.id);
+		expect(store.getSubAgentIds(parent.id)).not.toContain(sub.id);
+	});
+
+	it("should remap a self-reference to the duplicate when duplicating", () => {
+		const agent = store.createAgent("Self-Delegating");
+		store.setSubAgentEnabled(agent.id, agent.id, true); // self-reference
+		const dupe = store.duplicateAgent(agent.id, "Copy");
+		// The duplicate must delegate to ITSELF, not back to the source agent.
+		expect(dupe.subAgentIds).toContain(dupe.id);
+		expect(dupe.subAgentIds).not.toContain(agent.id);
+	});
+
+	it("should keep a non-self subagent reference intact when duplicating", () => {
+		const agent = store.createAgent("Delegator");
+		const other = store.createAgent("Other");
+		store.setSubAgentEnabled(agent.id, other.id, true);
+		const dupe = store.duplicateAgent(agent.id, "Copy");
+		expect(dupe.subAgentIds).toContain(other.id);
+		expect(dupe.subAgentIds).not.toContain(dupe.id);
+	});
 });
 
 /* --------------------------------------------------------------------------
