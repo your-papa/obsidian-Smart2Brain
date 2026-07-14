@@ -18,7 +18,7 @@ import type {
 	BaseProviderDefinition,
 	ChatModelConfig,
 } from "../types/provider/index";
-import { createTransportedChatAnthropic } from "./chatProviders";
+import { createBufferedTransportedChatAnthropic, createTransportedChatAnthropic } from "./chatProviders";
 
 // =============================================================================
 // Constants
@@ -152,6 +152,26 @@ export const anthropicProvider: BaseProviderDefinition = {
 		}
 
 		return createTransportedChatAnthropic("anthropic", config as ConstructorParameters<typeof ChatAnthropic>[0]);
+	},
+
+	createSubAgentChatInstance: (auth: AuthObject, modelId: string, options?: Partial<ChatModelConfig>) => {
+		const resolvedBaseUrl = sanitizeBaseUrl(auth.baseUrl || ANTHROPIC_DEFAULT_BASE_URL);
+		const config: Record<string, unknown> = {
+			model: modelId,
+			apiKey: auth.apiKey,
+			clientOptions: { baseURL: resolvedBaseUrl, defaultHeaders: auth.headers },
+		};
+		if (options?.temperature !== undefined) {
+			config.temperature = options.temperature;
+		}
+		const extra = options as Record<string, unknown> | undefined;
+		if (extra?.thinking !== undefined) {
+			config.thinking = extra.thinking;
+		}
+		return createBufferedTransportedChatAnthropic(
+			"anthropic",
+			config as ConstructorParameters<typeof ChatAnthropic>[0],
+		);
 	},
 
 	validateAuth: async (auth: AuthObject): Promise<AuthValidationResult> => {

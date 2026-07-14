@@ -507,6 +507,9 @@ $effect(() => {
                     isStreaming={messagePair.assistantMessage.state === AssistantState.streaming}
                     isError={messagePair.assistantMessage.state === AssistantState.error}
                     isProcessing={isAssistantProcessing}
+                    ontoggle={() => {
+                      timelineCollapsed[messagePair.id] = !(timelineCollapsed[messagePair.id] ?? false);
+                    }}
                   />
                 {:else}
                   <!-- Content Section: only reached for completed messages with no tool calls / timeline -->

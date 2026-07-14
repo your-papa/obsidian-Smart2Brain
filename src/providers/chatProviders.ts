@@ -10,8 +10,9 @@ import {
 import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
 import { ChatOllama, OllamaEmbeddings } from "@langchain/ollama";
-import { createAiProviderFetch } from "../lib/aiTransport";
+import { createAiProviderFetch, createBufferedAiProviderFetch } from "../lib/aiTransport";
 import { createObsidianFetch } from "../lib/obsidianFetch";
+import { Logger } from "../utils/logging";
 import { ChatOpenAIResponses, type ChatOpenAIResponsesConfig } from "./langchainOpenAIResponses";
 
 function parseToolArgs(args: unknown): Record<string, unknown> {
@@ -107,6 +108,65 @@ function normalizeToolCallMessage<TMessage>(message: TMessage): TMessage {
 	return new AIMessage(payload) as TMessage;
 }
 
+/**
+ * Guarantees the model result is a genuine `@langchain/core` message.
+ *
+ * LangChain's agent runtime validates model output with `AIMessage.isInstance`,
+ * which requires the brand symbol AND `type === "ai"`. Some OpenAI-compatible
+ * endpoints (e.g. OpenRouter) return payloads that `ChatOpenAI` turns into an
+ * object that fails this check, surfacing as
+ * `expected AIMessage or Command, got object` inside subagent middleware. When
+ * that happens we rebuild a real `AIMessage`/`AIMessageChunk` from the
+ * message-shaped fields so the agent loop can proceed instead of crashing.
+ */
+function coerceModelResult<TMessage>(message: TMessage): TMessage {
+	if (!message || typeof message !== "object") {
+		return message;
+	}
+	// Already a valid core AIMessage / AIMessageChunk — leave untouched.
+	// Use AIMessage.isInstance (brand + type check) rather than isAIMessage,
+	// which calls `_getType()` and would throw on a plain object.
+	if (AIMessage.isInstance(message as never)) {
+		return message;
+	}
+
+	const candidate = message as unknown as {
+		content?: unknown;
+		id?: unknown;
+		tool_calls?: unknown;
+		additional_kwargs?: unknown;
+		response_metadata?: unknown;
+		concat?: unknown;
+	};
+	// Only coerce things that look like a chat message (have a content field).
+	if (!("content" in candidate)) {
+		return message;
+	}
+
+	Logger.debug("chatProviders.coerceModelResult: rebuilding non-AIMessage model result", {
+		keys: Object.keys(candidate),
+		hasConcat: typeof candidate.concat === "function",
+	});
+
+	const payload = {
+		content: (candidate.content as never) ?? "",
+		id: typeof candidate.id === "string" ? candidate.id : undefined,
+		tool_calls: Array.isArray(candidate.tool_calls) ? (candidate.tool_calls as never) : [],
+		additional_kwargs:
+			candidate.additional_kwargs && typeof candidate.additional_kwargs === "object"
+				? (candidate.additional_kwargs as Record<string, unknown>)
+				: {},
+		response_metadata:
+			candidate.response_metadata && typeof candidate.response_metadata === "object"
+				? (candidate.response_metadata as Record<string, unknown>)
+				: {},
+	};
+
+	return typeof candidate.concat === "function"
+		? (new AIMessageChunk(payload) as TMessage)
+		: (new AIMessage(payload) as TMessage);
+}
+
 function normalizeInputMessage<TMessage>(message: TMessage): TMessage {
 	if (!message || typeof message !== "object") {
 		return message;
@@ -192,7 +252,12 @@ function wrapAsyncIterable<T>(iterable: AsyncIterable<T>, normalize: (value: T) 
 	};
 }
 
-function createNormalizedChatModel<TModel extends BaseChatModel>(model: TModel): TModel {
+/**
+ * Wraps a chat model in a Proxy that normalizes message I/O and guarantees the
+ * model result is a genuine core message. Exported for testing the coercion of
+ * non-branded results (see the OpenRouter/subagent regression).
+ */
+export function createNormalizedChatModel<TModel extends BaseChatModel>(model: TModel): TModel {
 	return new Proxy(model, {
 		get(target, prop, receiver) {
 			const value = Reflect.get(target, prop, receiver);
@@ -208,14 +273,16 @@ function createNormalizedChatModel<TModel extends BaseChatModel>(model: TModel):
 			if (prop === "invoke" && typeof value === "function") {
 				return async (...args: unknown[]) => {
 					const normalizedArgs = args.length > 0 ? [normalizeInputPayload(args[0]), ...args.slice(1)] : args;
-					return normalizeToolCallMessage(await value.apply(target, normalizedArgs));
+					return coerceModelResult(normalizeToolCallMessage(await value.apply(target, normalizedArgs)));
 				};
 			}
 
 			if (prop === "stream" && typeof value === "function") {
 				return async (...args: unknown[]) => {
 					const normalizedArgs = args.length > 0 ? [normalizeInputPayload(args[0]), ...args.slice(1)] : args;
-					return wrapAsyncIterable(await value.apply(target, normalizedArgs), normalizeToolCallMessage);
+					return wrapAsyncIterable(await value.apply(target, normalizedArgs), (chunk) =>
+						coerceModelResult(normalizeToolCallMessage(chunk)),
+					);
 				};
 			}
 
@@ -234,6 +301,30 @@ export function createTransportedChatOpenAI(
 		configuration: {
 			...(baseConfig.configuration ?? {}),
 			fetch: baseConfig.configuration?.fetch ?? createAiProviderFetch(providerId),
+		},
+	};
+
+	return createNormalizedChatModel(new ChatOpenAI(nextConfig));
+}
+
+/**
+ * Subagent variant of {@link createTransportedChatOpenAI}: buffered `requestUrl`
+ * transport + `disableStreaming: true`. Subagents are invoked non-streaming (via the
+ * deepagents `task` tool), and the endpoints used here return an empty body for a
+ * non-streaming request over Electron's `net.fetch`. Both pieces are required — the
+ * flag makes LangChain take the non-streaming path, the buffered fetch returns a body.
+ */
+export function createBufferedTransportedChatOpenAI(
+	providerId: string,
+	config: ConstructorParameters<typeof ChatOpenAI>[0],
+): ChatOpenAI {
+	const baseConfig = config ?? {};
+	const nextConfig = {
+		...baseConfig,
+		disableStreaming: true,
+		configuration: {
+			...(baseConfig.configuration ?? {}),
+			fetch: baseConfig.configuration?.fetch ?? createBufferedAiProviderFetch(providerId),
 		},
 	};
 
@@ -266,6 +357,24 @@ export function createTransportedChatAnthropic(
 		clientOptions: {
 			...(baseConfig.clientOptions ?? {}),
 			fetch: baseConfig.clientOptions?.fetch ?? createAiProviderFetch(providerId),
+		},
+	};
+
+	return createNormalizedChatModel(new ChatAnthropic(nextConfig));
+}
+
+/** Subagent variant of {@link createTransportedChatAnthropic}: buffered transport + non-streaming. */
+export function createBufferedTransportedChatAnthropic(
+	providerId: string,
+	config: ConstructorParameters<typeof ChatAnthropic>[0],
+): ChatAnthropic {
+	const baseConfig = config ?? {};
+	const nextConfig = {
+		...baseConfig,
+		streaming: false,
+		clientOptions: {
+			...(baseConfig.clientOptions ?? {}),
+			fetch: baseConfig.clientOptions?.fetch ?? createBufferedAiProviderFetch(providerId),
 		},
 	};
 

@@ -1,6 +1,13 @@
 <script lang="ts">
-import type { AssistantTimelineEvent, ToolCallState, ToolCallStatus } from "../../stores/chatStore.svelte";
+import type { AssistantTimelineEvent, ToolCallState } from "../../stores/chatStore.svelte";
 import { buildToolOutputRenderModel, type ToolOutputRenderModel } from "./toolOutputRenderModel";
+import {
+	buildStepsFromEvents,
+	buildStepsFromToolCalls,
+	toolDisplayName,
+	type TimelineStep,
+	type UnifiedToolCall,
+} from "./toolTimelineModel";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 
 interface Props {
@@ -11,12 +18,23 @@ interface Props {
 	isStreaming?: boolean;
 	isError?: boolean;
 	isProcessing?: boolean;
+	ontoggle?: () => void;
 }
 
-const { toolCalls, assistantTimeline, collapsed, answerContent, isStreaming, isError, isProcessing }: Props = $props();
+const { toolCalls, assistantTimeline, collapsed, answerContent, isStreaming, isError, isProcessing, ontoggle }: Props =
+	$props();
 
-let expandedSteps: Record<string, boolean> = $state({});
 let hoveringFinalControl = $state(false);
+
+// Per-`task`-card expansion of the nested subagent sub-timeline, keyed by the
+// task tool-call id. Collapsed by default — a subagent (especially several in
+// parallel) can emit many child tool calls and clutter the chat; the user
+// expands on demand.
+let subAgentExpanded = $state<Record<string, boolean>>({});
+
+function toggleSubAgent(taskCallId: string) {
+	subAgentExpanded[taskCallId] = !subAgentExpanded[taskCallId];
+}
 
 /* ── Formatters ── */
 
@@ -110,14 +128,6 @@ function formatReadContentSource(sourceType: "file" | "pdf" | "excalidraw"): str
 
 /* ── Unified tool call model ── */
 
-interface UnifiedToolCall {
-	id: string;
-	name: string;
-	input?: Record<string, unknown>;
-	output?: unknown;
-	status: ToolCallStatus;
-}
-
 interface DirectoryTreeFileView {
 	name: string;
 	path: string;
@@ -130,104 +140,6 @@ interface DirectoryTreeNodeView {
 	path: string;
 	folders: DirectoryTreeNodeView[];
 	files: DirectoryTreeFileView[];
-}
-
-interface TimelineStep {
-	id: string;
-	preambles: string[];
-	tools: UnifiedToolCall[];
-}
-
-function buildStepsFromEvents(rawEvents: AssistantTimelineEvent[]): TimelineStep[] {
-	const steps: TimelineStep[] = [];
-	const stepByGroup = new Map<string, TimelineStep>();
-
-	// If events have aiMessageId, group by it; otherwise fall back to single-step heuristic
-	const hasGroupIds = rawEvents.some((e) => e.aiMessageId !== undefined);
-
-	if (hasGroupIds) {
-		for (const event of rawEvents) {
-			// tool_end events never create a new step — they only update an existing tool
-			// across all steps (the aiMessageId on tool_end may differ from tool_start when
-			// the first tool call in a stream has no preamble and lastAiMessageId was still
-			// undefined at tool_start time). Creating a step here would leave empty steps.
-			if (event.type === "tool_end") {
-				for (const s of steps) {
-					const tool = s.tools.find((t) => t.id === event.toolCallId);
-					if (tool) {
-						tool.status = event.status ?? "completed";
-						tool.output = event.output;
-						break;
-					}
-				}
-				continue;
-			}
-
-			const groupId = event.aiMessageId ?? "unknown";
-
-			if (!stepByGroup.has(groupId)) {
-				const step: TimelineStep = {
-					id: `step-${groupId}`,
-					preambles: [],
-					tools: [],
-				};
-				stepByGroup.set(groupId, step);
-				steps.push(step);
-			}
-			const step = stepByGroup.get(groupId)!;
-
-			if (event.type === "preamble" && event.content?.trim()) {
-				step.preambles.push(event.content.trim());
-			} else if (event.type === "tool_start") {
-				step.tools.push({
-					id: event.toolCallId ?? "",
-					name: event.toolName ?? "Unknown",
-					input: event.input,
-					status: "running",
-				});
-			}
-		}
-	} else {
-		// Fallback: all events belong to one step (no boundary info available)
-		const step: TimelineStep = { id: "step-0", preambles: [], tools: [] };
-		for (const event of rawEvents) {
-			if (event.type === "preamble" && event.content?.trim()) {
-				step.preambles.push(event.content.trim());
-			} else if (event.type === "tool_start") {
-				step.tools.push({
-					id: event.toolCallId ?? "",
-					name: event.toolName ?? "Unknown",
-					input: event.input,
-					status: "running",
-				});
-			} else if (event.type === "tool_end") {
-				const tool = step.tools.find((t) => t.id === event.toolCallId);
-				if (tool) {
-					tool.status = event.status ?? "completed";
-					tool.output = event.output;
-				}
-			}
-		}
-		if (step.tools.length > 0 || step.preambles.length > 0) steps.push(step);
-	}
-
-	return steps;
-}
-
-function buildStepsFromToolCalls(calls: ToolCallState[] | undefined): TimelineStep[] {
-	if (!calls || calls.length === 0) return [];
-	const step: TimelineStep = { id: "step-0", preambles: [], tools: [] };
-	for (const tc of calls) {
-		if (tc.preamble?.trim()) step.preambles.push(tc.preamble.trim());
-		step.tools.push({
-			id: tc.id,
-			name: tc.name,
-			input: tc.input,
-			output: tc.output,
-			status: tc.status,
-		});
-	}
-	return [step];
 }
 
 function getDirectoryNodeName(path: string, fallback = "/"): string {
@@ -306,26 +218,16 @@ function isStepRunning(step: TimelineStep): boolean {
 	return step.tools.some((t) => t.status === "running");
 }
 
-function getCollapsedStepLabel(step: TimelineStep): string {
-	if (step.tools.length === 0) return step.preambles.length > 0 ? "Thinking…" : "0 tools";
-
-	const groupedCounts = new Map<string, number>();
-	for (const tool of step.tools) {
-		const formattedName = formatToolName(tool.name);
-		groupedCounts.set(formattedName, (groupedCounts.get(formattedName) ?? 0) + 1);
-	}
-
-	return Array.from(groupedCounts.entries())
-		.map(([name, count]) => (count > 1 ? `${name} (${count})` : name))
-		.join(", ");
-}
-
 function hasStepFailure(step: TimelineStep): boolean {
 	return step.tools.some((t) => t.status === "failed");
 }
 
 function getOverallStatus(stepsArg: TimelineStep[]): "running" | "completed" {
 	return stepsArg.some(isStepRunning) ? "running" : "completed";
+}
+
+function getThinkingSummaryLabel(stepsArg: TimelineStep[]): string {
+	return stepsArg.length === 1 ? "Thinking process (1 step)" : `Thinking process (${stepsArg.length} steps)`;
 }
 
 /* ── Derived state ── */
@@ -352,61 +254,160 @@ const effectiveTotal = $derived(steps.length + (showAnswerStep ? 1 : 0) + (showP
 // MarkdownRenderer that takes over once streaming completes.  This prevents a
 // visible layout jump when the stream ends and the else-branch mounts.
 const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && showAnswerStep);
-
-// Reset per-step expand state when collapse state changes (new stream starts)
-$effect(() => {
-	if (!collapsed) expandedSteps = {};
-});
-
-function handleStepRailClick(stepId: string) {
-	expandedSteps[stepId] = !expandedSteps[stepId];
-}
-
-function isStepExpanded(stepId: string): boolean {
-	return !collapsed || !!expandedSteps[stepId];
-}
-
-function toggleAllPreviousSteps() {
-	if (!collapsed || steps.length === 0) return;
-
-	const areAllExpanded = steps.every((step) => !!expandedSteps[step.id]);
-	if (areAllExpanded) {
-		expandedSteps = {};
-		return;
-	}
-
-	const nextExpanded: Record<string, boolean> = {};
-	for (const step of steps) {
-		nextExpanded[step.id] = true;
-	}
-	expandedSteps = nextExpanded;
-}
 </script>
+
+{#snippet toolCard(tool: UnifiedToolCall)}
+  {#if tool.preamble}
+    <div class="tool-timeline-preamble">
+      <MarkdownRenderer
+        content={tool.preamble}
+        class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0"
+      />
+    </div>
+  {/if}
+  {@const inputPreview = getToolInputPreview(tool.input)}
+  {@const outputModel =
+    tool.output !== undefined
+      ? buildToolOutputRenderModel(tool.name, tool.output, tool.input)
+      : undefined}
+  {@const isSubAgentParent = tool.name === "task" && !!tool.subAgentName}
+  <details class="tool-card" class:tool-card-subagent={isSubAgentParent}>
+    <summary class="tool-card-header">
+      <span
+        class="tool-status-icon"
+        class:status-running={tool.status === "running"}
+        class:status-done={tool.status === "completed"}
+        class:status-failed={tool.status === "failed"}
+      >
+        {#if tool.status === "running"}
+          <span class="tool-spinner"></span>
+        {:else if tool.status === "completed"}
+          <svg viewBox="0 0 16 16" fill="none" class="tool-icon-svg">
+            <path
+              d="M3.5 8.5L6.5 11.5L12.5 4.5"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        {:else}
+          <svg viewBox="0 0 16 16" fill="none" class="tool-icon-svg">
+            <path
+              d="M4 4L12 12M12 4L4 12"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+          </svg>
+        {/if}
+      </span>
+      <span class="tool-card-name">
+        {tool.name === "task" ? toolDisplayName(tool) : formatToolName(tool.name)}
+      </span>
+      {#if isSubAgentParent}
+        <span class="tool-card-subagent-badge">subagent</span>
+      {:else if tool.subAgentName}
+        <span class="tool-card-subagent-badge">via {tool.subAgentName}</span>
+      {/if}
+      {#if inputPreview.visibleEntries.length > 0}
+        <span class="tool-card-input-preview">
+          {#each inputPreview.visibleEntries as entry (entry.key)}
+            <span class="tool-card-input-chip">
+              <span class="tool-card-input-key">{entry.key}:</span>
+              <span class="tool-card-input-value">{entry.value}</span>
+            </span>
+          {/each}
+          {#if inputPreview.hiddenCount > 0}
+            <span class="tool-card-input-more">+{inputPreview.hiddenCount}</span>
+          {/if}
+        </span>
+      {/if}
+      <span class="tool-card-expand-hint">
+        <svg viewBox="0 0 16 16" fill="none" class="tool-expand-chevron">
+          <path
+            d="M6 4L10 8L6 12"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </span>
+    </summary>
+
+    <div class="tool-card-body">
+      {#if formatToolInput(tool.input).length > 0}
+        <div class="tool-io-section">
+          <div class="tool-io-label">Input</div>
+          <div class="tool-io-entries">
+            {#each formatToolInput(tool.input) as { key, value } (key)}
+              <div class="tool-io-entry">
+                <span class="tool-io-key">{key}</span>
+                <MarkdownRenderer content={formatValue(value)} class="tool-io-value [&_p]:m-0" />
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if tool.output !== undefined}
+        <div class="tool-io-section">
+          <div class="tool-io-label">Output</div>
+          <div class="tool-io-output">
+            {#if outputModel}
+              {@render outputRenderer(outputModel)}
+            {/if}
+          </div>
+        </div>
+      {:else if tool.status !== "running"}
+        <div class="tool-io-section">
+          <div class="tool-io-label">Output</div>
+          <span class="tool-io-empty">(no output)</span>
+        </div>
+      {/if}
+    </div>
+  </details>
+{/snippet}
+
+{#snippet subAgentBranch(children: UnifiedToolCall[])}
+  <div class="tool-subagent-branch">
+    {#each children as child, childIdx (child.id)}
+      <div
+        class="tool-subagent-branch-row"
+        class:branch-first={childIdx === 0}
+        class:branch-last={childIdx === children.length - 1}
+      >
+        <div class="tool-subagent-branch-rail">
+          <div
+            class="tool-step-dot tool-subagent-dot"
+            class:dot-running={child.status === "running"}
+            class:dot-failed={child.status === "failed"}
+            class:dot-done={child.status === "completed"}
+          ></div>
+        </div>
+        <div class="tool-subagent-branch-content">
+          {@render toolCard(child)}
+        </div>
+      </div>
+    {/each}
+  </div>
+{/snippet}
 
 {#snippet stepRow(
   step: TimelineStep,
   stepIdx: number,
   totalSteps: number,
-  expanded: boolean,
-  railClickable: boolean,
 )}
   <div
     class="tool-step"
-    class:tool-step-expanded={expanded}
-    class:tool-step-collapsed={!expanded}
     class:step-running={isStepRunning(step)}
     class:step-failed={hasStepFailure(step)}
     class:step-first={stepIdx === 0}
     class:step-last={stepIdx === totalSteps - 1}
     class:step-only={totalSteps === 1}
   >
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <div
-      class="tool-step-rail"
-      class:tool-step-rail-clickable={railClickable}
-      onclick={railClickable ? () => handleStepRailClick(step.id) : undefined}
-    >
+    <div class="tool-step-rail">
       <div
         class="tool-step-dot"
         class:dot-running={isStepRunning(step)}
@@ -416,131 +417,48 @@ function toggleAllPreviousSteps() {
     </div>
 
     <div class="tool-step-content">
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <div
-        class="tool-step-collapsed-label"
-        onclick={railClickable ? () => handleStepRailClick(step.id) : undefined}
-      >
-        {getCollapsedStepLabel(step)}
-      </div>
-
-      <div class="tool-step-expand-grid">
-        <div class="tool-step-expand-inner">
-          {#if step.preambles.length > 0}
-            <div class="tool-step-preambles">
-              {#each step.preambles as preamble, preambleIndex (step.id + "-pre-" + String(preambleIndex))}
-                <div class="tool-timeline-preamble">
-                  <MarkdownRenderer
-                    content={preamble}
-                    class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0"
+      <div class="tool-step-tools">
+        {#each step.tools as tool (tool.id)}
+          {@const isSubAgentParent = tool.name === "task" && !!tool.subAgentName}
+          {@const branchChildren = tool.children ?? []}
+          {#if isSubAgentParent && branchChildren.length > 0}
+            {@const expanded = subAgentExpanded[tool.id] ?? false}
+            {@const runningCount = branchChildren.filter((c) => c.status === "running").length}
+            <div class="tool-subagent-group">
+              {@render toolCard(tool)}
+              <button
+                type="button"
+                class="tool-subagent-toggle"
+                class:is-expanded={expanded}
+                onclick={() => toggleSubAgent(tool.id)}
+                aria-expanded={expanded}
+              >
+                <svg viewBox="0 0 16 16" fill="none" class="tool-subagent-toggle-chevron">
+                  <path
+                    d="M6 4L10 8L6 12"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
                   />
-                </div>
-              {/each}
+                </svg>
+                <span class="tool-subagent-toggle-label">
+                  {expanded ? "Hide" : "Show"}
+                  {branchChildren.length}
+                  {branchChildren.length === 1 ? "step" : "steps"}
+                </span>
+                {#if runningCount > 0}
+                  <span class="tool-subagent-toggle-running">running…</span>
+                {/if}
+              </button>
+              {#if expanded}
+                {@render subAgentBranch(branchChildren)}
+              {/if}
             </div>
+          {:else}
+            {@render toolCard(tool)}
           {/if}
-
-          {#each step.tools as tool (tool.id)}
-            {@const inputPreview = getToolInputPreview(tool.input)}
-            {@const outputModel =
-              tool.output !== undefined
-                ? buildToolOutputRenderModel(tool.name, tool.output, tool.input)
-                : undefined}
-            <details class="tool-card">
-              <summary class="tool-card-header">
-                <span
-                  class="tool-status-icon"
-                  class:status-running={tool.status === "running"}
-                  class:status-done={tool.status === "completed"}
-                  class:status-failed={tool.status === "failed"}
-                >
-                  {#if tool.status === "running"}
-                    <span class="tool-spinner"></span>
-                  {:else if tool.status === "completed"}
-                    <svg viewBox="0 0 16 16" fill="none" class="tool-icon-svg">
-                      <path
-                        d="M3.5 8.5L6.5 11.5L12.5 4.5"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
-                  {:else}
-                    <svg viewBox="0 0 16 16" fill="none" class="tool-icon-svg">
-                      <path
-                        d="M4 4L12 12M12 4L4 12"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                      />
-                    </svg>
-                  {/if}
-                </span>
-                <span class="tool-card-name">{formatToolName(tool.name)}</span>
-                {#if inputPreview.visibleEntries.length > 0}
-                  <span class="tool-card-input-preview">
-                    {#each inputPreview.visibleEntries as entry (entry.key)}
-                      <span class="tool-card-input-chip">
-                        <span class="tool-card-input-key">{entry.key}:</span>
-                        <span class="tool-card-input-value">{entry.value}</span>
-                      </span>
-                    {/each}
-                    {#if inputPreview.hiddenCount > 0}
-                      <span class="tool-card-input-more">+{inputPreview.hiddenCount}</span>
-                    {/if}
-                  </span>
-                {/if}
-                <span class="tool-card-expand-hint">
-                  <svg viewBox="0 0 16 16" fill="none" class="tool-expand-chevron">
-                    <path
-                      d="M6 4L10 8L6 12"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    />
-                  </svg>
-                </span>
-              </summary>
-
-              <div class="tool-card-body">
-                {#if formatToolInput(tool.input).length > 0}
-                  <div class="tool-io-section">
-                    <div class="tool-io-label">Input</div>
-                    <div class="tool-io-entries">
-                      {#each formatToolInput(tool.input) as { key, value } (key)}
-                        <div class="tool-io-entry">
-                          <span class="tool-io-key">{key}</span>
-                          <MarkdownRenderer
-                            content={formatValue(value)}
-                            class="tool-io-value [&_p]:m-0"
-                          />
-                        </div>
-                      {/each}
-                    </div>
-                  </div>
-                {/if}
-
-                {#if tool.output !== undefined}
-                  <div class="tool-io-section">
-                    <div class="tool-io-label">Output</div>
-                    <div class="tool-io-output">
-                      {#if outputModel}
-                        {@render outputRenderer(outputModel)}
-                      {/if}
-                    </div>
-                  </div>
-                {:else if tool.status !== "running"}
-                  <div class="tool-io-section">
-                    <div class="tool-io-label">Output</div>
-                    <span class="tool-io-empty">(no output)</span>
-                  </div>
-                {/if}
-              </div>
-            </details>
-          {/each}
-        </div>
+        {/each}
       </div>
     </div>
   </div>
@@ -887,25 +805,52 @@ function toggleAllPreviousSteps() {
       </div>
     {/if}
 
-    {#each steps as step, stepIdx (step.id)}
-      {@const expanded = isStepExpanded(step.id)}
-      {@render stepRow(step, stepIdx, effectiveTotal, expanded, collapsed)}
-    {/each}
+    {#if collapsed && steps.length > 0}
+      <!-- Single summary node: entire thinking process collapsed into one clickable row -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <div
+        class="tool-step thinking-summary-step step-first"
+        class:step-last={!showAnswerStep}
+        class:step-only={effectiveTotal === 1}
+        onclick={ontoggle}
+      >
+        <div class="tool-step-rail thinking-summary-rail">
+          <div
+            class="tool-step-dot"
+            class:dot-failed={steps.some(hasStepFailure)}
+            class:dot-done={!steps.some(hasStepFailure)}
+          ></div>
+        </div>
+        <div class="tool-step-content thinking-summary-content">
+          <span class="thinking-summary-label">{getThinkingSummaryLabel(steps)}</span>
+        </div>
+      </div>
+    {:else}
+      <!-- All steps expanded — wrap in animated grid for smooth collapse/expand transition -->
+      <div class="steps-expand-grid" class:steps-expanded={!collapsed}>
+        <div class="steps-expand-inner">
+          {#each steps as step, stepIdx (step.id)}
+            {@render stepRow(step, stepIdx, showAnswerStep ? steps.length + 1 : effectiveTotal - (showProcessingDot ? 1 : 0))}
+          {/each}
+        </div>
+      </div>
+    {/if}
 
     {#if showAnswerStep}
       <div
         class="tool-step step-last"
-        class:step-first={steps.length === 0}
+        class:step-first={steps.length === 0 && !showProcessingDot}
         class:step-only={effectiveTotal === 1}
       >
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div
           class="tool-step-rail"
-          class:tool-step-rail-clickable={collapsed && steps.length > 0}
-          onclick={collapsed && steps.length > 0 ? toggleAllPreviousSteps : undefined}
+          class:tool-step-rail-clickable={!collapsed && steps.length > 0 && !!ontoggle}
+          onclick={!collapsed && steps.length > 0 && ontoggle ? ontoggle : undefined}
           onmouseenter={() => {
-            if (collapsed && steps.length > 0) hoveringFinalControl = true;
+            if (!collapsed && steps.length > 0 && ontoggle) hoveringFinalControl = true;
           }}
           onmouseleave={() => {
             hoveringFinalControl = false;
@@ -949,25 +894,55 @@ function toggleAllPreviousSteps() {
     opacity: 0.55;
   }
 
-  /* ── Collapsed step (just dot + label, clickable) ── */
-  .tool-step-collapsed {
+  /* ── Thinking-process summary node (collapsed state) ── */
+  .thinking-summary-step {
     cursor: pointer;
     user-select: none;
-    align-items: flex-start;
-    padding: 0;
-    min-height: 0;
   }
-  .tool-step-collapsed:hover .tool-step-collapsed-label {
-    color: var(--text-normal);
-  }
-  .tool-step-collapsed:hover .tool-step-dot {
+  .thinking-summary-step:hover .tool-step-dot {
     transform: scale(1.3);
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--interactive-accent) 20%, transparent);
   }
-  .tool-step-collapsed:hover .tool-step-rail::before {
+  .thinking-summary-step:hover .tool-step-rail::before {
     background: var(--interactive-accent);
     opacity: 0.5;
   }
+  .thinking-summary-rail {
+    padding-top: 6px;
+  }
+  .thinking-summary-content {
+    padding: 4px 0 10px;
+    justify-content: center;
+  }
+  .thinking-summary-label {
+    font-size: 0.76rem;
+    color: var(--text-faint);
+    transition: color 0.15s;
+  }
+  .thinking-summary-step:hover .thinking-summary-label {
+    color: var(--text-normal);
+  }
+
+  /* ── Steps expand/collapse wrapper ── */
+  .steps-expand-grid {
+    display: grid;
+    grid-template-columns: 100%;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+      grid-template-rows 0.26s ease,
+      opacity 0.22s ease;
+  }
+  .steps-expand-grid.steps-expanded {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+  .steps-expand-inner {
+    min-height: 0;
+    overflow: visible;
+  }
+
+  /* ── Rail clickable (answer-dot collapse trigger) ── */
   .tool-step-rail-clickable {
     cursor: pointer;
     border-radius: 4px;
@@ -980,38 +955,6 @@ function toggleAllPreviousSteps() {
     background: var(--interactive-accent);
     opacity: 0.5;
   }
-  .tool-step-collapsed .tool-step-rail-clickable {
-    padding-top: 0;
-    padding-bottom: 0;
-  }
-  .tool-step-collapsed .tool-step-rail {
-    padding-top: 6px;
-  }
-  .tool-step-collapsed-label {
-    font-size: 0.76rem;
-    color: var(--text-faint);
-    width: 100%;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    padding: 0;
-    max-height: 0;
-    opacity: 0;
-    overflow: hidden;
-    transform: translateY(-2px);
-    transition:
-      color 0.15s,
-      max-height 0.24s ease,
-      opacity 0.2s ease,
-      padding 0.24s ease,
-      transform 0.24s ease;
-  }
-
-  .tool-step-collapsed .tool-step-collapsed-label {
-    padding: 6px 0;
-    max-height: 28px;
-    opacity: 1;
-    transform: translateY(0);
-  }
 
   /* ── Preamble ── */
   .tool-timeline-preamble {
@@ -1021,10 +964,6 @@ function toggleAllPreviousSteps() {
     font-style: italic;
     flex: 1;
     min-width: 0;
-  }
-
-  .tool-step-preambles {
-    margin-bottom: 4px;
   }
 
   /* ── Step row ── */
@@ -1046,7 +985,7 @@ function toggleAllPreviousSteps() {
     align-self: stretch;
     width: 24px;
     flex-shrink: 0;
-    padding-top: 14px;
+    padding-top: 8px;
   }
 
   .tool-step-rail::before {
@@ -1066,21 +1005,13 @@ function toggleAllPreviousSteps() {
 
   /* First step: line starts at dot center */
   .step-first .tool-step-rail::before {
-    top: 19px;
-  }
-
-  .step-first.tool-step-collapsed .tool-step-rail::before {
-    top: 11px;
+    top: 13px;
   }
 
   /* Last step: line ends at dot center */
   .step-last .tool-step-rail::before {
     bottom: auto;
-    height: 19px;
-  }
-
-  .step-last.tool-step-collapsed .tool-step-rail::before {
-    height: 11px;
+    height: 13px;
   }
 
   /* Single step: no connecting line needed */
@@ -1136,29 +1067,13 @@ function toggleAllPreviousSteps() {
     display: flex;
     flex-direction: column;
     gap: 0;
-    padding: 4px 0;
+    padding: 4px 0 8px;
   }
 
-  .tool-step-expand-grid {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition:
-      grid-template-rows 0.26s ease,
-      opacity 0.2s ease;
-  }
-
-  .tool-step-expand-inner {
-    min-height: 0;
-    overflow: hidden;
+  .tool-step-tools {
     display: flex;
     flex-direction: column;
     gap: 4px;
-  }
-
-  .tool-step-expanded .tool-step-expand-grid {
-    grid-template-rows: 1fr;
-    opacity: 1;
   }
 
   /* ── Tool card ── */
@@ -1210,12 +1125,168 @@ function toggleAllPreviousSteps() {
     white-space: nowrap;
   }
 
+  /* ── Subagent nesting ── */
+  .tool-card-subagent {
+    border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
+  }
+
+  .tool-card-subagent-badge {
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--interactive-accent);
+    background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+  }
+
+  /* ── Subagent branch (git-merge style sub-timeline) ── */
+  .tool-subagent-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    position: relative;
+  }
+
+  /* Collapsed-by-default toggle for the subagent's nested sub-timeline. Sits
+     indented under the parent `task` card (matching the branch indent) and
+     reveals/hides the child tool calls on demand to keep the chat uncluttered. */
+  .tool-subagent-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: 6px;
+    padding: 3px 8px 3px 4px;
+    background: none;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    transition: background 0.12s, color 0.12s;
+  }
+
+  .tool-subagent-toggle:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+
+  .tool-subagent-toggle-chevron {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    transition: transform 0.12s;
+  }
+
+  .tool-subagent-toggle.is-expanded .tool-subagent-toggle-chevron {
+    transform: rotate(90deg);
+  }
+
+  .tool-subagent-toggle-running {
+    color: var(--interactive-accent);
+    font-style: italic;
+  }
+
+  /* The subagent's tool calls hang off the parent `task` card as a nested
+     sub-timeline. A curved elbow diverges from just under the parent card,
+     runs a vertical spine through the child dots, and stops at the last child
+     to "merge" back. Indented so it reads as subordinate to the `task` node
+     without leaving the step's content column. */
+  .tool-subagent-branch {
+    display: flex;
+    flex-direction: column;
+    margin-left: 6px;
+    padding-left: 4px;
+  }
+
+  .tool-subagent-branch-row {
+    display: flex;
+    gap: 0;
+    position: relative;
+  }
+
+  .tool-subagent-branch-rail {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    align-self: stretch;
+    width: 20px;
+    flex-shrink: 0;
+    padding-top: 13px;
+  }
+
+  /* Vertical spine of the branch — a subtler accent tint so the main timeline
+     still reads as primary. */
+  .tool-subagent-branch-rail::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px;
+    background: color-mix(in srgb, var(--interactive-accent) 32%, var(--background-modifier-border));
+    border-radius: 1px;
+    top: 0;
+    bottom: 0;
+  }
+
+  /* First child: the spine begins at the child dot; a curved elbow reaches up
+     and to the left, connecting to the parent `task` card area. The elbow
+     right-edge anchors at the sub-rail spine (left: 50%), and its width
+     extends leftward far enough to reach the parent main-rail spine. */
+  .branch-first .tool-subagent-branch-rail::before {
+    top: 0;
+  }
+  .branch-first .tool-subagent-branch-rail::after {
+    display: none;
+  }
+
+  /* Last child (when not also first): spine stops at the dot, no trailing line. */
+  .branch-last:not(.branch-first) .tool-subagent-branch-rail::before {
+    bottom: auto;
+    height: 18px;
+  }
+
+  /* Single child: only the elbow feeds the dot, no through-spine. */
+  .branch-first.branch-last .tool-subagent-branch-rail::before {
+    display: none;
+  }
+
+  .tool-subagent-dot {
+    width: 8px;
+    height: 8px;
+    border-width: 2px;
+  }
+
+  /* Child dots use a slightly muted accent so they read as secondary to the
+     parent node's dot. */
+  .tool-subagent-dot.dot-done {
+    border-color: color-mix(in srgb, var(--interactive-accent) 70%, var(--background-modifier-border));
+    background: color-mix(in srgb, var(--interactive-accent) 70%, var(--background-modifier-border));
+    box-shadow: none;
+  }
+
+  .tool-subagent-branch-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 4px 0;
+  }
+
+  /* Child tool cards are visually lighter than the parent `task` card. */
+  .tool-subagent-branch-content :global(.tool-card) {
+    background: color-mix(in srgb, var(--background-secondary) 22%, var(--background-primary));
+  }
+
   .tool-card-input-preview {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     min-width: 0;
-    max-width: 42%;
+    max-width: 55%;
     overflow: hidden;
     margin-right: 4px;
   }
@@ -1224,8 +1295,11 @@ function toggleAllPreviousSteps() {
     display: inline-flex;
     align-items: center;
     gap: 3px;
+    /* Allow chips to shrink so multiple chips (e.g. task's subagent_type +
+       description) truncate individually instead of overflowing and visually
+       overlapping inside the clipped preview container. */
     min-width: 0;
-    max-width: 100%;
+    flex-shrink: 1;
     padding: 1px 6px;
     border-radius: 999px;
     background: color-mix(in srgb, var(--background-modifier-border) 60%, transparent);

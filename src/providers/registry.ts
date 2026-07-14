@@ -186,6 +186,20 @@ class ProviderRegistry {
 	}
 
 	/**
+	 * Creates a chat instance for use as a subagent model. Uses the provider's
+	 * `createSubAgentChatInstance` (buffered, non-streaming transport) when available,
+	 * else falls back to `createChatInstance`.
+	 */
+	createSubAgentChatInstance(id: string, modelId: string, options?: Partial<ChatModelConfig>): BaseChatModel {
+		const entry = this.providers.get(id);
+		if (!entry) {
+			throw new ProviderNotFoundError(id);
+		}
+		const factory = entry.definition.createSubAgentChatInstance ?? entry.definition.createChatInstance;
+		return factory(entry.auth, modelId, options);
+	}
+
+	/**
 	 * Creates a LangChain embedding instance.
 	 *
 	 * @param id - Provider ID (must be registered)

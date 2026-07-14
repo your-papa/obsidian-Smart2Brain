@@ -523,3 +523,22 @@ export async function performAiFetch(
 export function createAiProviderFetch(providerId: string): typeof fetch {
 	return ((input: RequestInfo | URL, init?: RequestInit) => performAiFetch(providerId, input, init)) as typeof fetch;
 }
+
+/**
+ * Fetch implementation that always routes through Obsidian's buffered `requestUrl`
+ * (never Electron's `net.fetch`). Subagent models are invoked non-streaming (via the
+ * deepagents `task` tool's `.invoke()`), and the LiteLLM/OpenAI-compatible endpoints
+ * used here return an empty body for a non-streaming request served over `net.fetch` —
+ * which surfaces as "Cannot read properties of undefined (reading 'message')" inside
+ * `BaseChatModel.invoke`. Routing through `requestUrl` returns a usable buffered body.
+ * Pair with `disableStreaming: true` on the model (see chatProviders) so LangChain
+ * actually takes the non-streaming path.
+ */
+export function createBufferedAiProviderFetch(providerId: string): typeof fetch {
+	return ((input: RequestInfo | URL, init?: RequestInit) => {
+		const normalized = normalizeRequest(input, init);
+		const bufferedInit = isStreamingRequest(normalized.init) ? disableStreaming(normalized.init) : normalized.init;
+		Logger.debug("aiTransport.subagent_buffered_request", { providerId, url: normalized.url });
+		return requestUrlFetch(normalized.url, bufferedInit);
+	}) as typeof fetch;
+}

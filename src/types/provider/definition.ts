@@ -60,6 +60,19 @@ export interface BaseProviderDefinition {
 	/** Creates a LangChain chat instance (e.g., ChatOpenAI, ChatAnthropic, ChatOllama). */
 	createChatInstance: (auth: AuthObject, modelId: string, options?: Partial<ChatModelConfig>) => BaseChatModel;
 
+	/**
+	 * Creates a chat instance for use as a subagent model (optional). Subagents are
+	 * invoked non-streaming via the deepagents `task` tool, which the OpenAI-compatible
+	 * LiteLLM endpoints only handle correctly over the buffered `requestUrl` transport
+	 * with streaming disabled. Providers that need that override this; the registry
+	 * falls back to {@link createChatInstance} when it is absent.
+	 */
+	createSubAgentChatInstance?: (
+		auth: AuthObject,
+		modelId: string,
+		options?: Partial<ChatModelConfig>,
+	) => BaseChatModel;
+
 	/** Validates authentication credentials for this provider. */
 	validateAuth: (auth: AuthObject) => Promise<AuthValidationResult>;
 

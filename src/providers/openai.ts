@@ -21,6 +21,7 @@ import type {
 } from "../types/provider/index";
 import { createOpenAICodexFetch, getValidOpenAICodexSession } from "./openaiCodex";
 import {
+	createBufferedTransportedChatOpenAI,
 	createTransportedChatOpenAI,
 	createTransportedChatOpenAIResponses,
 	createTransportedOpenAIEmbeddings,
@@ -171,6 +172,23 @@ export const openaiProvider: EmbeddingProviderDefinition = {
 		}
 
 		return createTransportedChatOpenAI("openai", config as ConstructorParameters<typeof ChatOpenAI>[0]);
+	},
+
+	createSubAgentChatInstance: (auth: AuthObject, modelId: string, options?: Partial<ChatModelConfig>) => {
+		const config: Record<string, unknown> = { model: modelId, apiKey: auth.apiKey };
+		if (options?.temperature !== undefined) {
+			config.temperature = options.temperature;
+		}
+		if (auth.baseUrl && auth.baseUrl.trim() !== "") {
+			config.configuration = { baseURL: sanitizeBaseUrl(auth.baseUrl) };
+		}
+		if (auth.headers && Object.keys(auth.headers).length > 0) {
+			config.configuration = {
+				...(config.configuration as Record<string, unknown>),
+				defaultHeaders: auth.headers,
+			};
+		}
+		return createBufferedTransportedChatOpenAI("openai", config as ConstructorParameters<typeof ChatOpenAI>[0]);
 	},
 
 	createEmbeddingInstance: (auth: AuthObject, modelId: string) => {

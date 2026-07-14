@@ -360,6 +360,13 @@ export interface AgentConfig {
 	toolsConfig: ToolsConfig;
 	/** MCP server configurations for this agent */
 	mcpServers: MCPServersConfig;
+	/**
+	 * IDs of other agents exposed to this agent as callable subagents via the
+	 * `task` delegation tool. Each referenced agent runs with its own model,
+	 * tools, and prompt. Delegation is one level deep — a referenced subagent's
+	 * own `subAgentIds` are ignored.
+	 */
+	subAgentIds?: string[];
 }
 
 /**
