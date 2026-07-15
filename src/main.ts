@@ -6,7 +6,6 @@ import { StartupProfiler } from "./utils/startupProfiler";
 import { persistStartupRecord, recordStartupEnvironment } from "./utils/startupTimingsStore";
 import "./styles.css";
 import { AgentManager } from "./agent/AgentManager";
-import { createS2bApi, type S2bApi } from "./agent/api/s2bApi";
 import { inlineDiffPlugin } from "./editor/inlineDiffExtension";
 import { selectionHighlightPlugin } from "./editor/selectionHighlightExtension";
 import { createReadingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
@@ -44,9 +43,6 @@ const SUPPORTED_CHAT_ATTACHMENT_EXTENSIONS = new Set([
 export default class SecondBrainPlugin extends Plugin {
 	agentManager!: AgentManager;
 	skillsService!: SkillsService;
-	/** Public JavaScript API — see {@link createS2bApi}. Scriptable via the
-	 *  `exec_smart-second-brain` integration, dataviewjs, and other plugins. */
-	api!: S2bApi;
 	lexicalSearchService!: LexicalSearchService;
 	vectorStoreService!: VectorStoreService;
 	pendingChangesStore!: PendingChangesStore;
@@ -241,14 +237,6 @@ export default class SecondBrainPlugin extends Plugin {
 
 		// Create Skills Service instance (discovery deferred to onLayoutReady)
 		this.skillsService = new SkillsService(this);
-
-		// Expose the public S2B api. Surfacing it here (before AgentManager binds
-		// tools in onLayoutReady) means `app.plugins.plugins["smart-second-brain"].api`
-		// resolves for the `exec_smart-second-brain` self-integration, dataviewjs
-		// blocks, and other plugins. Vision/PDF processors are resolved per-model by
-		// AgentManager, so the api's readContent falls back to text extraction when
-		// they're absent — acceptable for scripting use.
-		this.api = createS2bApi(this.app, { skillsService: this.skillsService });
 
 		// Register file-based chat view and .chat extension (v2 ChatView)
 		// const VIEW_TYPE = "my-view";

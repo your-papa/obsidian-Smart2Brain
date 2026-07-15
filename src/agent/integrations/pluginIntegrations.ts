@@ -28,19 +28,6 @@ export const CURATED_PLUGIN_INTEGRATIONS: PluginIntegration[] = [
 	{ pluginId: "tasknotes", displayName: "TaskNotes", skillId: "tasknotes" },
 ];
 
-/** Smart Second Brain's own plugin id — S2B exposes its capabilities as a public
- *  `api` (see `createS2bApi`) and is scriptable as a self-integration, exactly
- *  like any third-party api-plugin. */
-export const S2B_PLUGIN_ID = "smart-second-brain";
-
-/** The self-integration entry. Always offered (it's our own plugin — no external
- *  api-probe needed), paired with the bundled `core` skill documenting the api. */
-export const S2B_SELF_INTEGRATION: PluginIntegration = {
-	pluginId: S2B_PLUGIN_ID,
-	displayName: "Smart Second Brain",
-	skillId: "core",
-};
-
 /**
  * Whether an *enabled* plugin exposes an object `api` we can hand to evaluated
  * code. `.api` may be a lazy or throwing getter, so probe defensively.
@@ -98,7 +85,6 @@ const PLUGIN_ICON_BY_ID: Record<string, string> = {
 	"obsidian-tasks-plugin": "check-square",
 	dataview: "code",
 	"obsidian-charts": "bar-chart-3",
-	[S2B_PLUGIN_ID]: "brain",
 };
 
 /**

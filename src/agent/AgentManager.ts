@@ -60,7 +60,6 @@ import {
 	CURATED_PLUGIN_INTEGRATIONS,
 	type PluginIntegration,
 	pluginExposesApi,
-	S2B_SELF_INTEGRATION,
 	toExecToolId,
 	toRuntimeToolName,
 } from "./integrations/pluginIntegrations";
@@ -746,10 +745,6 @@ export class AgentManager {
 		const app = this.plugin.app;
 		const byId = new Map<string, PluginIntegration>();
 
-		// Smart Second Brain scripts itself: always offer the self-integration
-		// (our own plugin, api guaranteed present via main.ts).
-		byId.set(S2B_SELF_INTEGRATION.pluginId, S2B_SELF_INTEGRATION);
-
 		for (const integ of CURATED_PLUGIN_INTEGRATIONS) {
 			if (this.isPluginEnabled(integ.pluginId) && pluginExposesApi(app, integ.pluginId)) {
 				byId.set(integ.pluginId, integ);
@@ -758,7 +753,11 @@ export class AgentManager {
 
 		// @ts-ignore - Obsidian plugin API (not in official types)
 		const enabledIds: string[] = Array.from(app.plugins?.enabledPlugins ?? []);
+		// S2B exposes its own public `api`, so it would otherwise auto-discover itself
+		// as a scriptable plugin. Agent self-scripting was removed, so skip our own id.
+		const selfId = this.plugin.manifest.id;
 		for (const pluginId of enabledIds) {
+			if (pluginId === selfId) continue;
 			if (byId.has(pluginId)) continue;
 			if (!pluginExposesApi(app, pluginId)) continue;
 			// @ts-ignore - Obsidian plugin API (not in official types)
@@ -786,8 +785,7 @@ export class AgentManager {
 	/**
 	 * Count the capabilities switched on for an agent, using the "one capability card =
 	 * one capability" model the agent editor renders:
-	 *   - the Core · Vault exploration card counts as 1 when any built-in tool OR the
-	 *     Smart Second Brain core API skill is enabled;
+	 *   - the Core · Vault exploration card counts as 1 when any built-in tool is enabled;
 	 *   - each core / community / auto-discovered plugin card counts as 1 when its skill
 	 *     (or, for an uncurated auto-discovered plugin, its exec tool) is enabled and the
 	 *     linked plugin is available;
@@ -799,9 +797,8 @@ export class AgentManager {
 	countEnabledCapabilities(agentId: string): number {
 		const agent = getData().agents[agentId];
 		if (!agent) return 0;
-		const s2bPluginId = S2B_SELF_INTEGRATION.pluginId;
 
-		// Core card: any vault-exploration tool on, or the S2B core API skill on.
+		// Core card: any vault-exploration tool on.
 		const anyVaultToolOn = VAULT_TOOL_IDS.some((toolId) => agent.toolsConfig[toolId]?.enabled ?? true);
 		// Web card (separate capability): any web tool on.
 		const anyWebToolOn = WEB_TOOL_IDS.some((toolId) => agent.toolsConfig[toolId]?.enabled ?? true);
@@ -815,18 +812,14 @@ export class AgentManager {
 			return true;
 		};
 
-		const coreApiSkillOn = Array.from(cachedSkills.entries()).some(
-			([skillId, metadata]) => metadata.linkedPluginId === s2bPluginId && skillEnabled(skillId),
-		);
-		let count = anyVaultToolOn || coreApiSkillOn ? 1 : 0;
+		let count = anyVaultToolOn ? 1 : 0;
 		if (anyWebToolOn) count++;
 
-		// Plugin / community cards: enabled + available skills, excluding the S2B core
-		// skill (folded into the Core card above) and user-authored custom skills.
+		// Plugin / community cards: enabled + available skills, excluding user-authored
+		// custom skills.
 		const coveredPluginIds = new Set<string>();
 		for (const [skillId, metadata] of cachedSkills) {
 			if (metadata.linkedPluginId) coveredPluginIds.add(metadata.linkedPluginId);
-			if (metadata.linkedPluginId === s2bPluginId) continue;
 			if (metadata.category === "custom") continue;
 			if (skillEnabled(skillId) && skillAvailable(metadata)) count++;
 		}

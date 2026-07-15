@@ -26,12 +26,7 @@ import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
-import {
-	type PluginIntegration,
-	getPluginIcon,
-	S2B_PLUGIN_ID,
-	toExecToolId,
-} from "../../agent/integrations/pluginIntegrations";
+import { type PluginIntegration, getPluginIcon, toExecToolId } from "../../agent/integrations/pluginIntegrations";
 import { buildPluginApiSkill } from "../../skills/templates/pluginApiScripting";
 import {
 	DEFAULT_AGENT_ICON,
@@ -316,20 +311,11 @@ const skills = $derived.by(() => {
 });
 
 const coreSkills = $derived(skills.filter((skill) => skill.category === "core"));
-// The Smart Second Brain self-integration skill ("core") links to our own plugin id.
-// It documents scripting S2B's own api, so it belongs inside the Core · Vault exploration
-// card rather than the community Plugin Skills list — pull it out here.
-const coreApiSkill = $derived(skills.find((skill) => skill.linkedPluginId === S2B_PLUGIN_ID));
 // Community-plugin skills are only shown when their linked plugin is actually installed
 // in this vault. A skill for an uninstalled plugin has no working exec tool and nothing
 // the user can act on, so it is hidden entirely (installed-but-disabled still shows,
-// with a "Not enabled" affordance). The S2B self-skill is excluded (see coreApiSkill).
-const pluginSkills = $derived(
-	skills.filter(
-		(skill) =>
-			skill.category === "plugin" && skill.linkedPluginId !== S2B_PLUGIN_ID && isSkillPluginInstalled(skill),
-	),
-);
+// with a "Not enabled" affordance).
+const pluginSkills = $derived(skills.filter((skill) => skill.category === "plugin" && isSkillPluginInstalled(skill)));
 const customSkills = $derived(skills.filter((skill) => skill.category === "custom"));
 
 async function refreshSkillsList() {
@@ -1055,7 +1041,7 @@ const sectionCounts = $derived<Partial<Record<SectionId, number>>>({
             and MCP servers. Expand a capability to configure the individual items inside it.
           </div>
 
-          <!-- Card 1: Core · Vault exploration — vault built-in tools + the S2B API-scripting skill. -->
+          <!-- Card 1: Core · Vault exploration — the built-in vault tools. -->
           <CapabilityCard
             title="Core · Vault exploration"
             description="Search, read, edit, and explore your vault with the built-in tools."
@@ -1068,35 +1054,6 @@ const sectionCounts = $derived<Partial<Record<SectionId, number>>>({
               {#each vaultTools as tool (tool.id)}
                 {@render toolRow(tool)}
               {/each}
-
-              {#if coreApiSkill}
-                {@const execIntegration = skillExecIntegration(coreApiSkill)}
-                <ManagedEntityItem
-                  class="skill-entity"
-                  name={coreApiSkill.displayName}
-                  desc={coreApiSkill.description}
-                  meta="Enabling this grants API scripting — the agent can run code against Smart Second Brain's own public API on the main thread (not sandboxed)."
-                >
-                  {#snippet badges()}
-                    {#if execIntegration && coreApiSkill.enabled}
-                      <Badge label="API scripting" tone="muted" />
-                    {/if}
-                  {/snippet}
-
-                  {#snippet actions()}
-                    <Button
-                      iconId="pencil"
-                      ariaLabel={`Edit ${coreApiSkill.displayName} prompt`}
-                      tooltip={`Edit ${coreApiSkill.displayName} prompt`}
-                      onClick={() => openSkillModal(coreApiSkill.id)}
-                    />
-                    <Toggle
-                      checked={coreApiSkill.enabled}
-                      onchange={() => toggleSkill(coreApiSkill.id, !coreApiSkill.enabled)}
-                    />
-                  {/snippet}
-                </ManagedEntityItem>
-              {/if}
             {/snippet}
           </CapabilityCard>
 
