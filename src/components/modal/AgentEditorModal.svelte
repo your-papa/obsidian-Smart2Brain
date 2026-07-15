@@ -14,9 +14,12 @@ import SettingGroup from "../settings/SettingGroup.svelte";
 import SettingItem from "../settings/SettingItem.svelte";
 import Badge from "../ui/Badge.svelte";
 import Button from "../ui/Button.svelte";
+import CapabilityCard from "../ui/CapabilityCard.svelte";
 import Icon from "../ui/Icon.svelte";
+import PickerOptionRow from "../ui/PickerOptionRow.svelte";
 import PickerPopover from "../ui/PickerPopover.svelte";
 import Search from "../ui/Search.svelte";
+import SlidingTabs from "../ui/SlidingTabs.svelte";
 import Text from "../ui/Text.svelte";
 import Toggle from "../ui/Toggle.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
@@ -24,7 +27,16 @@ import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
 import {
+	type PluginIntegration,
+	getPluginIcon,
+	S2B_PLUGIN_ID,
+	toExecToolId,
+} from "../../agent/integrations/pluginIntegrations";
+import { buildPluginApiSkill } from "../../skills/templates/pluginApiScripting";
+import {
 	DEFAULT_AGENT_ICON,
+	VAULT_TOOL_IDS,
+	WEB_TOOL_IDS,
 	type AgentConfig,
 	type BuiltInToolId,
 	type MCPServerConfig,
@@ -72,9 +84,9 @@ let selectedAgent = $derived(agents[agentId]);
 let agentIconQuery = $state("");
 let isAgentIconPickerOpen = $state(false);
 
-type SectionId = "overview" | "general" | "skills" | "tools" | "subagents" | "mcp";
+type SectionId = "general" | "capabilities" | "subagents";
 
-let activeSection = $state<SectionId>("overview");
+let activeSection = $state<SectionId>("general");
 
 interface SectionDef {
 	id: SectionId;
@@ -83,12 +95,9 @@ interface SectionDef {
 }
 
 const SECTIONS: SectionDef[] = [
-	{ id: "overview", label: "Overview", icon: "layout-dashboard" },
-	{ id: "general", label: "Model & Prompt", icon: "sliders-horizontal" },
-	{ id: "skills", label: "Skills", icon: "sparkles" },
-	{ id: "tools", label: "Tools", icon: "wrench" },
+	{ id: "general", label: "General", icon: "sliders-horizontal" },
+	{ id: "capabilities", label: "Capabilities", icon: "blocks" },
 	{ id: "subagents", label: "Subagents", icon: "git-branch" },
-	{ id: "mcp", label: "MCP Servers", icon: "server" },
 ];
 
 async function applyChanges() {
@@ -281,6 +290,9 @@ function openRenderedSystemPromptModal() {
 
 let skillsRefreshCounter = $state(0);
 
+// Controls the "+ Add" dropdown on the Custom capabilities card.
+let isAddCapabilityMenuOpen = $state(false);
+
 const skills = $derived.by(() => {
 	const _refresh = skillsRefreshCounter;
 	const skillsService = plugin.skillsService;
@@ -304,7 +316,20 @@ const skills = $derived.by(() => {
 });
 
 const coreSkills = $derived(skills.filter((skill) => skill.category === "core"));
-const pluginSkills = $derived(skills.filter((skill) => skill.category === "plugin"));
+// The Smart Second Brain self-integration skill ("core") links to our own plugin id.
+// It documents scripting S2B's own api, so it belongs inside the Core · Vault exploration
+// card rather than the community Plugin Skills list — pull it out here.
+const coreApiSkill = $derived(skills.find((skill) => skill.linkedPluginId === S2B_PLUGIN_ID));
+// Community-plugin skills are only shown when their linked plugin is actually installed
+// in this vault. A skill for an uninstalled plugin has no working exec tool and nothing
+// the user can act on, so it is hidden entirely (installed-but-disabled still shows,
+// with a "Not enabled" affordance). The S2B self-skill is excluded (see coreApiSkill).
+const pluginSkills = $derived(
+	skills.filter(
+		(skill) =>
+			skill.category === "plugin" && skill.linkedPluginId !== S2B_PLUGIN_ID && isSkillPluginInstalled(skill),
+	),
+);
 const customSkills = $derived(skills.filter((skill) => skill.category === "custom"));
 
 async function refreshSkillsList() {
@@ -315,6 +340,26 @@ async function refreshSkillsList() {
 onMount(() => {
 	modal.setTitle(`Edit Agent: ${selectedAgent?.name ?? "Agent"}`);
 	void refreshSkillsList();
+
+	// A plugin installed/enabled in Obsidian's settings while this modal is open won't
+	// show up until we re-resolve integrations (resolvePluginIntegrations reads live
+	// app.plugins state, not a Svelte signal). Obsidian's community-plugin manager emits
+	// an untyped "changed" event on install/enable/disable — subscribe to it so new
+	// api-plugins auto-discover here immediately, not only after an Obsidian reload.
+	const refresh = () => {
+		void refreshSkillsList();
+	};
+	// @ts-ignore - app.plugins is not in the official Obsidian types
+	const pluginManager = plugin.app.plugins as
+		| { on?: (name: string, cb: () => void) => unknown; offref?: (ref: unknown) => void }
+		| undefined;
+	const changeRef = pluginManager?.on?.("changed", refresh);
+	// Fallback for returning from an external window; harmless duplicate refresh otherwise.
+	window.addEventListener("focus", refresh);
+	return () => {
+		if (changeRef) pluginManager?.offref?.(changeRef);
+		window.removeEventListener("focus", refresh);
+	};
 });
 
 function openSkillModal(skillId: string) {
@@ -373,6 +418,12 @@ function toggleSkill(skillId: string, newEnabled: boolean) {
 		}
 	}
 	pluginData.setAgentSkillEnabled(agentId, skillId, newEnabled);
+	// Bundle code-exec with the skill: if the linked plugin exposes a callable `.api`,
+	// enabling the skill also grants API scripting, and disabling revokes it.
+	const integration = skillExecIntegration(skill);
+	if (integration) {
+		pluginData.setAgentPluginExecEnabled(agentId, toExecToolId(integration.pluginId), newEnabled);
+	}
 	void applyChanges();
 }
 
@@ -386,6 +437,81 @@ async function deleteSkill(skillId: string) {
 
 function openPluginPage(pluginId: string) {
 	window.open(`obsidian://show-plugin?id=${pluginId}`);
+}
+
+// --- Per-plugin code-exec integrations (bundled with the linked skill's toggle) ---
+
+// Map of pluginId → integration, for plugins that currently expose a callable `.api`.
+// A plugin skill whose linkedPluginId is present here gains code-exec scripting when
+// the skill is enabled (see toggleSkill), so the two capabilities share one switch.
+const execIntegrationsByPlugin = $derived.by<Map<string, PluginIntegration>>(() => {
+	// resolvePluginIntegrations() reads live app.plugins state, which is not a Svelte
+	// signal — depend on skillsRefreshCounter so newly installed/enabled plugins get
+	// picked up when we refresh (e.g. on window focus after returning from Obsidian's
+	// plugin settings), not only after a full modal recreation / Obsidian reload.
+	const _refresh = skillsRefreshCounter;
+	const resolved = plugin.agentManager?.resolvePluginIntegrations() ?? [];
+	return new Map(resolved.map((integ) => [integ.pluginId, integ]));
+});
+
+function skillExecIntegration(skill: SkillDisplayInfo): PluginIntegration | undefined {
+	if (!skill.linkedPluginId) return undefined;
+	return execIntegrationsByPlugin.get(skill.linkedPluginId);
+}
+
+// Auto-discovered api-plugins that have NO skill covering them yet. These render as
+// inline rows in the Plugin Skills list. Enabling one generates a plugin-specific
+// "API scripting" skill (seeded from a template) linked to it, then enables that skill
+// plus its own exec_<plugin> tool — after which the plugin renders as a normal curated
+// Plugin Skills row (editable/deletable) and drops out of this list.
+interface AutoIntegrationDisplay {
+	pluginId: string;
+	displayName: string;
+	execEnabled: boolean;
+}
+
+const autoDiscoveredIntegrations = $derived.by<AutoIntegrationDisplay[]>(() => {
+	const execState = selectedAgent?.pluginExecTools ?? {};
+	// A plugin is "covered" by a skill if any discovered skill links to it.
+	const coveredPluginIds = new Set(
+		skills.map((skill) => skill.linkedPluginId).filter((id): id is string => Boolean(id)),
+	);
+	const result: AutoIntegrationDisplay[] = [];
+	for (const integ of execIntegrationsByPlugin.values()) {
+		if (integ.skillId) continue; // curated + documented → shown as its own skill row
+		if (coveredPluginIds.has(integ.pluginId)) continue; // a skill already covers it
+		result.push({
+			pluginId: integ.pluginId,
+			displayName: integ.displayName,
+			execEnabled: execState[toExecToolId(integ.pluginId)] ?? false,
+		});
+	}
+	return result;
+});
+
+async function toggleAutoIntegration(pluginId: string, displayName: string, newEnabled: boolean) {
+	if (newEnabled) {
+		// Generate a plugin-specific skill from the template (unless one already links
+		// to this plugin), then enable it alongside the exec tool. Re-discover so the
+		// new skill enters the cache and the row re-renders as a curated Plugin Skill.
+		let skillId = skills.find((skill) => skill.linkedPluginId === pluginId)?.id;
+		if (!skillId) {
+			const generated = buildPluginApiSkill(pluginId, displayName);
+			const result = await plugin.skillsService?.saveSkill(generated);
+			if (result && !result.valid) {
+				new Notice(`Could not create skill for ${displayName}: ${result.errors[0]?.message ?? "invalid"}`);
+				return;
+			}
+			await refreshSkillsList();
+			skillId = generated.frontmatter.name;
+		}
+		pluginData.setAgentSkillEnabled(agentId, skillId, true);
+		pluginData.setAgentPluginExecEnabled(agentId, toExecToolId(pluginId), true);
+	} else {
+		// Only revoke the exec tool; leave any generated skill file in place for reuse.
+		pluginData.setAgentPluginExecEnabled(agentId, toExecToolId(pluginId), false);
+	}
+	void applyChanges();
 }
 
 function getMCPToolsBadgeLabel(serverId: string, toolsState?: MCPServerToolsState): string {
@@ -437,12 +563,6 @@ const TOOLS: ToolInfo[] = [
 			"Run isolated JavaScript for calculations and data transformation. Use return for the final value and console.log for intermediate output.",
 	},
 	{
-		id: "execute_dataview_query",
-		defaultName: "Execute Dataview Query",
-		defaultDescription: "Execute Obsidian Dataview queries (DQL) and return results.",
-		requiresPlugin: { id: "dataview", name: "Dataview" },
-	},
-	{
 		id: "manage_notes",
 		defaultName: "Manage Notes",
 		defaultDescription:
@@ -488,6 +608,38 @@ function handleToolToggle(toolId: BuiltInToolId) {
 function getToolEnabled(toolId: BuiltInToolId): boolean {
 	return pluginData.isAgentToolEnabled(agentId, toolId);
 }
+
+// --- Core · Vault exploration + Web capability cards (bulk-toggle their built-in tools) ---
+
+const vaultTools = $derived(TOOLS.filter((tool) => (VAULT_TOOL_IDS as readonly string[]).includes(tool.id)));
+const webTools = $derived(TOOLS.filter((tool) => (WEB_TOOL_IDS as readonly string[]).includes(tool.id)));
+
+// Each card's master is a plain on/off switch: OFF turns every tool in the card off; ON turns
+// every (installable) tool in the card on. `checked` reflects "any tool in the card is on".
+// Tools whose required plugin isn't installed can't be enabled, so they're excluded from the
+// numerator and the "turn everything on" loop (otherwise the summary can't reach N of N).
+function availableToolsIn(tools: ToolInfo[]): ToolInfo[] {
+	return tools.filter((tool) => !tool.requiresPlugin || isPluginInstalled(tool.requiresPlugin.id));
+}
+function enabledCountIn(tools: ToolInfo[]): number {
+	return availableToolsIn(tools).filter((tool) => getToolEnabled(tool.id)).length;
+}
+function toggleAllTools(tools: ToolInfo[], next: boolean) {
+	for (const tool of availableToolsIn(tools)) {
+		if (getToolEnabled(tool.id) !== next) {
+			pluginData.toggleAgentToolEnabled(agentId, tool.id);
+		}
+	}
+	void applyChanges();
+}
+
+const vaultAvailableCount = $derived(availableToolsIn(vaultTools).length);
+const vaultEnabledCount = $derived(enabledCountIn(vaultTools));
+const vaultAnyOn = $derived(vaultEnabledCount > 0);
+
+const webAvailableCount = $derived(availableToolsIn(webTools).length);
+const webEnabledCount = $derived(enabledCountIn(webTools));
+const webAnyOn = $derived(webEnabledCount > 0);
 
 // --- Subagents (references to other agents) ---
 
@@ -664,56 +816,81 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
 
 // --- Live counts for the section nav rail ---
 
-const enabledSkillsCount = $derived(skills.filter((skill) => skill.enabled && isSkillPluginAvailable(skill)).length);
-const enabledToolsCount = $derived(TOOLS.filter((tool) => getToolEnabled(tool.id)).length);
-const enabledMCPCount = $derived(
-	selectedAgent ? Object.values(selectedAgent.mcpServers).filter((server) => server.enabled).length : 0,
-);
+// The Capabilities count is "how many capability CARDS are switched on", not how many
+// individual items — one card = one capability. AgentManager.countEnabledCapabilities is
+// the single source of truth (shared with the agents-list summary so the two never drift).
+// Reference the reactive signals it reads under the hood so the derived recomputes: the
+// selected agent's config (toggling any tool/skill/server), and skillsRefreshCounter
+// (skill discovery / plugin install/enable while the modal is open).
+const capabilitiesCount = $derived.by(() => {
+	void skillsRefreshCounter;
+	void selectedAgent?.toolsConfig;
+	void selectedAgent?.skills;
+	void selectedAgent?.mcpServers;
+	void selectedAgent?.pluginExecTools;
+	return plugin.agentManager?.countEnabledCapabilities(agentId) ?? 0;
+});
+// Each card's header shows how many of its tools are on, over the tools that can actually be
+// enabled here (uninstalled-plugin tools are excluded from both the numerator and denominator).
+const vaultSummary = $derived(`${vaultEnabledCount} of ${vaultAvailableCount} on`);
+const webSummary = $derived(`${webEnabledCount} of ${webAvailableCount} on`);
 
 const sectionCounts = $derived<Partial<Record<SectionId, number>>>({
-	skills: enabledSkillsCount,
-	tools: enabledToolsCount,
+	capabilities: capabilitiesCount,
 	subagents: subAgentIds.length,
-	mcp: enabledMCPCount,
-});
-
-const chatModelSummary = $derived(
-	selectedAgent?.chatModel
-		? `${getProviderDefinition(selectedAgent.chatModel.provider, pluginData.getAllProviderMeta())?.displayName ?? selectedAgent.chatModel.provider} · ${selectedAgent.chatModel.model}`
-		: "No chat model selected",
-);
-
-const promptSummary = $derived.by(() => {
-	const prompt = selectedAgent?.systemPrompt?.trim();
-	if (!prompt) return "Using the default base system prompt";
-	const firstLine = prompt.split("\n")[0]?.trim() ?? "";
-	return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine || "Custom system prompt set";
 });
 </script>
 
 {#if selectedAgent}
   <div class="agent-editor-container">
-    <div class="agent-editor-layout">
-      <nav class="agent-editor-rail" aria-label="Agent settings sections">
-      {#each SECTIONS as section (section.id)}
-        <button
-          type="button"
-          class="agent-rail-item"
-          class:active={activeSection === section.id}
-          onclick={() => (activeSection = section.id)}
-        >
-          <span class="agent-rail-icon"><Icon name={section.icon} size="s" /></span>
-          <span class="agent-rail-label">{section.label}</span>
-          {#if sectionCounts[section.id] !== undefined && sectionCounts[section.id]! > 0}
-            <span class="agent-rail-count"><Badge label={String(sectionCounts[section.id])} tone="muted" /></span>
-          {/if}
-        </button>
-      {/each}
-    </nav>
+    <SlidingTabs bind:value={activeSection} tabs={SECTIONS} class="agent-editor-layout">
+      {#snippet trailing(section)}
+        {#if sectionCounts[section.id] !== undefined && sectionCounts[section.id]! > 0}
+          <span class="agent-tab-count"><Badge label={String(sectionCounts[section.id])} tone="muted" /></span>
+        {/if}
+      {/snippet}
 
     <div class="agent-editor-pane">
-      {#if activeSection === "overview"}
-        <SettingGroup heading="Overview">
+      <!-- Shared per-tool row (used by the Core · Vault and Web capability cards). Declared at
+           the pane level so it isn't mistaken for a prop of an enclosing component. -->
+      {#snippet toolRow(tool: ToolInfo)}
+        {@const enabled = getToolEnabled(tool.id)}
+        {@const pluginAvailable = !tool.requiresPlugin || isPluginInstalled(tool.requiresPlugin.id)}
+        <ManagedEntityItem
+          class="tool-entity"
+          name={getToolDisplayName(tool.id)}
+          desc={getToolDescription(tool.id)}
+          disabled={!pluginAvailable}
+        >
+          {#snippet badges()}
+            {#if tool.requiresPlugin && !pluginAvailable}
+              <Badge
+                label={`Requires ${tool.requiresPlugin.name}`}
+                tone="warning"
+                interactive
+                onclick={() => openPluginPage(tool.requiresPlugin!.id)}
+              />
+            {/if}
+          {/snippet}
+
+          {#snippet actions()}
+            <Button
+              iconId="settings"
+              ariaLabel={`Configure ${getToolDisplayName(tool.id)}`}
+              tooltip={`Configure ${getToolDisplayName(tool.id)}`}
+              onClick={() => openToolConfig(tool.id)}
+            />
+            <Toggle
+              checked={enabled && pluginAvailable}
+              onchange={() => handleToolToggle(tool.id)}
+              disabled={!pluginAvailable}
+            />
+          {/snippet}
+        </ManagedEntityItem>
+      {/snippet}
+
+      {#if activeSection === "general"}
+        <SettingGroup heading="General">
           <div class="agent-overview-identity">
             <PickerPopover
               bind:open={isAgentIconPickerOpen}
@@ -820,90 +997,16 @@ const promptSummary = $derived.by(() => {
             />
           </SettingItem>
 
-          <div class="agent-overview-summary">
-            <ManagedEntityItem
-              class="agent-overview-link"
-              clickable
-              name="Skills"
-              desc={`${enabledSkillsCount} enabled`}
-              meta="Dynamically loaded instructions injected when relevant."
-              onclick={() => (activeSection = "skills")}
-            >
-              {#snippet leading()}
-                <Icon name="sparkles" size="s" />
-              {/snippet}
-              {#snippet trailing()}
-                <Icon name="chevron-right" size="s" />
-              {/snippet}
-            </ManagedEntityItem>
+          <SettingItem
+            name="Base System Prompt"
+            desc="Customize the base system instructions for this agent"
+          >
+            <div class="flex items-center gap-2 justify-end">
+              <Button buttonText="Edit Prompt" onClick={openSystemPromptModal} />
+              <Button buttonText="View Final Prompt" onClick={openRenderedSystemPromptModal} />
+            </div>
+          </SettingItem>
 
-            <ManagedEntityItem
-              class="agent-overview-link"
-              clickable
-              name="Tools"
-              desc={`${enabledToolsCount} of ${TOOLS.length} enabled`}
-              meta="Built-in vault and web capabilities."
-              onclick={() => (activeSection = "tools")}
-            >
-              {#snippet leading()}
-                <Icon name="wrench" size="s" />
-              {/snippet}
-              {#snippet trailing()}
-                <Icon name="chevron-right" size="s" />
-              {/snippet}
-            </ManagedEntityItem>
-
-            <ManagedEntityItem
-              class="agent-overview-link"
-              clickable
-              name="Subagents"
-              desc={`${subAgentIds.length} enabled`}
-              meta="Delegate tasks to other agents via the task tool."
-              onclick={() => (activeSection = "subagents")}
-            >
-              {#snippet leading()}
-                <Icon name="git-branch" size="s" />
-              {/snippet}
-              {#snippet trailing()}
-                <Icon name="chevron-right" size="s" />
-              {/snippet}
-            </ManagedEntityItem>
-
-            <ManagedEntityItem
-              class="agent-overview-link"
-              clickable
-              name="MCP Servers"
-              desc={`${enabledMCPCount} enabled`}
-              meta="External tools from Model Context Protocol servers."
-              onclick={() => (activeSection = "mcp")}
-            >
-              {#snippet leading()}
-                <Icon name="server" size="s" />
-              {/snippet}
-              {#snippet trailing()}
-                <Icon name="chevron-right" size="s" />
-              {/snippet}
-            </ManagedEntityItem>
-
-            <ManagedEntityItem
-              class="agent-overview-link"
-              clickable
-              name="System Prompt"
-              desc={promptSummary}
-              meta={chatModelSummary}
-              onclick={() => (activeSection = "general")}
-            >
-              {#snippet leading()}
-                <Icon name="scroll-text" size="s" />
-              {/snippet}
-              {#snippet trailing()}
-                <Icon name="chevron-right" size="s" />
-              {/snippet}
-            </ManagedEntityItem>
-          </div>
-        </SettingGroup>
-      {:else if activeSection === "general"}
-        <SettingGroup heading="Model & Prompt">
           <SettingItem
             name="Summarization Model"
             desc="Model used to compress older chat history when the context window fills up"
@@ -944,189 +1047,335 @@ const promptSummary = $derived.by(() => {
               onSecondary={selectedAgent.titleModel ? resetTitleModel : undefined}
             />
           </SettingItem>
+        </SettingGroup>
+      {:else if activeSection === "capabilities"}
+        <SettingGroup heading="Capabilities">
+          <div class="setting-item-description mb-3">
+            Everything this agent can do — built-in tools, skills loaded on demand, plugin integrations,
+            and MCP servers. Expand a capability to configure the individual items inside it.
+          </div>
 
-          <SettingItem
-            name="Base System Prompt"
-            desc="Customize the base system instructions for this agent"
+          <!-- Card 1: Core · Vault exploration — vault built-in tools + the S2B API-scripting skill. -->
+          <CapabilityCard
+            title="Core · Vault exploration"
+            description="Search, read, edit, and explore your vault with the built-in tools."
+            icon="compass"
+            summary={vaultSummary}
+            masterEnabled={vaultAnyOn}
+            onToggleMaster={(next) => toggleAllTools(vaultTools, next)}
           >
-            <div class="flex items-center gap-2 justify-end">
-              <Button buttonText="Edit Prompt" onClick={openSystemPromptModal} />
-              <Button buttonText="View Final Prompt" onClick={openRenderedSystemPromptModal} />
-            </div>
-          </SettingItem>
-        </SettingGroup>
-      {:else if activeSection === "skills"}
-        <SettingGroup heading="Skills">
-          <div class="setting-item-description mb-3">
-            Skills are loaded dynamically based on their description. Only relevant skill instructions
-            are injected into the final system prompt when needed.
-          </div>
+            {#snippet body()}
+              {#each vaultTools as tool (tool.id)}
+                {@render toolRow(tool)}
+              {/each}
 
-          {#if coreSkills.length > 0}
-            <div class="skill-category">
-              <div class="skill-category-header">
-                <span class="skill-category-title">Core Skills</span>
-                <Badge label="Based on Obsidian Core Plugins" pill={false} uppercase />
-              </div>
-              {#each coreSkills as ext (ext.id)}
-                {@const pluginAvailable = isSkillPluginAvailable(ext)}
+              {#if coreApiSkill}
+                {@const execIntegration = skillExecIntegration(coreApiSkill)}
                 <ManagedEntityItem
                   class="skill-entity"
-                  name={ext.displayName}
-                  desc={ext.description}
-                  meta="Loaded from an Obsidian core plugin integration."
+                  name={coreApiSkill.displayName}
+                  desc={coreApiSkill.description}
+                  meta="Enabling this grants API scripting — the agent can run code against Smart Second Brain's own public API on the main thread (not sandboxed)."
                 >
                   {#snippet badges()}
-                    {#if !pluginAvailable}
-                      <Badge label="Core plugin disabled" tone="warning" />
+                    {#if execIntegration && coreApiSkill.enabled}
+                      <Badge label="API scripting" tone="muted" />
                     {/if}
                   {/snippet}
 
                   {#snippet actions()}
                     <Button
                       iconId="pencil"
-                      ariaLabel={`Edit ${ext.displayName} prompt`}
-                      tooltip={`Edit ${ext.displayName} prompt`}
-                      onClick={() => openSkillModal(ext.id)}
+                      ariaLabel={`Edit ${coreApiSkill.displayName} prompt`}
+                      tooltip={`Edit ${coreApiSkill.displayName} prompt`}
+                      onClick={() => openSkillModal(coreApiSkill.id)}
                     />
                     <Toggle
-                      checked={ext.enabled && pluginAvailable}
-                      onchange={() => toggleSkill(ext.id, !ext.enabled)}
+                      checked={coreApiSkill.enabled}
+                      onchange={() => toggleSkill(coreApiSkill.id, !coreApiSkill.enabled)}
                     />
                   {/snippet}
                 </ManagedEntityItem>
+              {/if}
+            {/snippet}
+          </CapabilityCard>
+
+          <!-- Card 1b: Web — tools that reach the public internet (fetch URL, web search). -->
+          <CapabilityCard
+            title="Web"
+            description="Reach the public internet: fetch web pages and run web searches."
+            icon="globe"
+            summary={webSummary}
+            masterEnabled={webAnyOn}
+            onToggleMaster={(next) => toggleAllTools(webTools, next)}
+          >
+            {#snippet body()}
+              {#each webTools as tool (tool.id)}
+                {@render toolRow(tool)}
               {/each}
-            </div>
-          {/if}
+            {/snippet}
+          </CapabilityCard>
 
-          {#if pluginSkills.length > 0}
-            <div class="skill-category">
-              <div class="skill-category-header">
-                <span class="skill-category-title">Plugin Skills</span>
-                <Badge label="Based on Community Plugins" pill={false} uppercase />
-              </div>
-              {#each pluginSkills as ext (ext.id)}
-                {@const installed = isSkillPluginInstalled(ext)}
-                {@const pluginAvailable = isSkillPluginAvailable(ext)}
-                <ManagedEntityItem
-                  class="skill-entity"
-                  name={ext.displayName}
-                  desc={ext.description}
-                  meta="Loaded from a community plugin integration."
-                >
-                  {#snippet badges()}
-                    {#if !installed}
-                      <Badge
-                        label="Not installed"
-                        tone="warning"
-                        interactive
-                        onclick={() => openPluginPage(ext.linkedPluginId ?? ext.id)}
-                      />
-                    {:else if !pluginAvailable}
-                      <Badge
-                        label="Not enabled"
-                        tone="warning"
-                        interactive
-                        onclick={() => openPluginPage(ext.linkedPluginId ?? ext.id)}
-                      />
-                    {/if}
-                  {/snippet}
 
-                  {#snippet actions()}
-                    <Button
-                      iconId="pencil"
-                      ariaLabel={`Edit ${ext.displayName} prompt`}
-                      tooltip={`Edit ${ext.displayName} prompt`}
-                      onClick={() => openSkillModal(ext.id)}
-                    />
-                    <Toggle
-                      checked={ext.enabled && pluginAvailable}
-                      onchange={() => toggleSkill(ext.id, !ext.enabled)}
-                    />
-                  {/snippet}
-                </ManagedEntityItem>
-              {/each}
-            </div>
-          {/if}
-
-          <div class="skill-category">
-            <div class="skill-category-header">
-              <span class="skill-category-title">Custom Skills</span>
-              <Badge label="User-defined" pill={false} uppercase />
-            </div>
-            {#each customSkills as ext (ext.id)}
-              <ManagedEntityItem
-                class="skill-entity"
-                name={ext.displayName}
-                desc={ext.description}
-                meta="Stored as a custom skill in the vault configuration."
-              >
-                {#snippet actions()}
-                  <Button
-                    iconId="trash"
-                    ariaLabel={`Delete ${ext.displayName}`}
-                    tooltip={`Delete ${ext.displayName}`}
-                    onClick={() => void deleteSkill(ext.id)}
-                  />
-                  <Button
-                    iconId="pencil"
-                    ariaLabel={`Edit ${ext.displayName} prompt`}
-                    tooltip={`Edit ${ext.displayName} prompt`}
-                    onClick={() => openSkillModal(ext.id)}
-                  />
-                  <Toggle checked={ext.enabled} onchange={() => toggleSkill(ext.id, !ext.enabled)} />
-                {/snippet}
-              </ManagedEntityItem>
-            {/each}
-            {#if customSkills.length === 0}
-              <div class="skill-empty-state">No custom skills yet</div>
-            {/if}
-            <div class="skill-add-container">
-              <Button buttonText="Add Custom Skill" cta={true} onClick={openAddSkillModal} />
-            </div>
-          </div>
-        </SettingGroup>
-      {:else if activeSection === "tools"}
-        <SettingGroup heading="Built-in Tools">
-          <div class="setting-item-description mb-3">
-            Enable or disable the built-in tools available to this agent. Use the settings icon to
-            configure each tool.
-          </div>
-          {#each TOOLS as tool (tool.id)}
-            {@const enabled = getToolEnabled(tool.id)}
-            {@const pluginAvailable = !tool.requiresPlugin || isPluginInstalled(tool.requiresPlugin.id)}
-            <ManagedEntityItem
-              class="tool-entity"
-              name={getToolDisplayName(tool.id)}
-              desc={getToolDescription(tool.id)}
-              disabled={!pluginAvailable}
+          <!-- Cards 2: one flat card per Obsidian core-plugin skill (Canvas, Bases, …). -->
+          {#each coreSkills as ext (ext.id)}
+            {@const pluginAvailable = isSkillPluginAvailable(ext)}
+            <CapabilityCard
+              title={ext.displayName}
+              description={ext.description}
+              icon={getPluginIcon(ext.corePluginId, "sparkles")}
+              expandable={false}
+              masterEnabled={ext.enabled && pluginAvailable}
+              masterDisabled={!pluginAvailable}
+              onToggleMaster={() => toggleSkill(ext.id, !ext.enabled)}
             >
               {#snippet badges()}
-                {#if tool.requiresPlugin && !pluginAvailable}
-                  <Badge
-                    label={`Requires ${tool.requiresPlugin.name}`}
-                    tone="warning"
-                    interactive
-                    onclick={() => openPluginPage(tool.requiresPlugin!.id)}
-                  />
+                <Badge label="Core plugin" tone="muted" />
+                {#if !pluginAvailable}
+                  <Badge label="Core plugin disabled" tone="warning" />
                 {/if}
               {/snippet}
 
-              {#snippet actions()}
+              {#snippet headerActions()}
                 <Button
-                  iconId="settings"
-                  ariaLabel={`Configure ${getToolDisplayName(tool.id)}`}
-                  tooltip={`Configure ${getToolDisplayName(tool.id)}`}
-                  onClick={() => openToolConfig(tool.id)}
-                />
-                <Toggle
-                  checked={enabled && pluginAvailable}
-                  onchange={() => handleToolToggle(tool.id)}
-                  disabled={!pluginAvailable}
+                  iconId="pencil"
+                  ariaLabel={`Edit ${ext.displayName} prompt`}
+                  tooltip={`Edit ${ext.displayName} prompt`}
+                  onClick={() => openSkillModal(ext.id)}
                 />
               {/snippet}
-            </ManagedEntityItem>
+            </CapabilityCard>
           {/each}
+
+          <!-- Cards 3: one flat card per community-plugin skill (Dataview, Tasks, …). -->
+          {#each pluginSkills as ext (ext.id)}
+            {@const pluginAvailable = isSkillPluginAvailable(ext)}
+            {@const execIntegration = skillExecIntegration(ext)}
+            <CapabilityCard
+              title={ext.displayName}
+              description={ext.description}
+              icon={getPluginIcon(ext.linkedPluginId)}
+              expandable={false}
+              masterEnabled={ext.enabled && pluginAvailable}
+              masterDisabled={!pluginAvailable}
+              onToggleMaster={() => toggleSkill(ext.id, !ext.enabled)}
+            >
+              {#snippet badges()}
+                <Badge label="Community plugin" tone="muted" />
+                {#if !pluginAvailable}
+                  <Badge
+                    label="Not enabled"
+                    tone="warning"
+                    interactive
+                    onclick={() => openPluginPage(ext.linkedPluginId ?? ext.id)}
+                  />
+                {:else if execIntegration && ext.enabled}
+                  <Badge label="API scripting" tone="muted" />
+                {/if}
+              {/snippet}
+
+              {#snippet headerActions()}
+                <Button
+                  iconId="pencil"
+                  ariaLabel={`Edit ${ext.displayName} prompt`}
+                  tooltip={`Edit ${ext.displayName} prompt`}
+                  onClick={() => openSkillModal(ext.id)}
+                />
+              {/snippet}
+            </CapabilityCard>
+          {/each}
+
+          <!-- Cards 4: auto-discovered api-plugins with no skill yet. Enabling generates one. -->
+          {#each autoDiscoveredIntegrations as integ (integ.pluginId)}
+            <CapabilityCard
+              title={integ.displayName}
+              description="Auto-discovered plugin exposing a public API. Enabling creates an editable API-scripting skill — the agent introspects the API before calling it. Runs on the main thread (not sandboxed)."
+              icon={getPluginIcon(integ.pluginId)}
+              expandable={false}
+              masterEnabled={integ.execEnabled}
+              onToggleMaster={(next) => void toggleAutoIntegration(integ.pluginId, integ.displayName, next)}
+            >
+              {#snippet badges()}
+                <Badge label="Auto-discovered" tone="muted" />
+                {#if integ.execEnabled}
+                  <Badge label="API scripting" tone="muted" />
+                {/if}
+              {/snippet}
+            </CapabilityCard>
+          {/each}
+
+          <!-- Card 5: Custom capabilities — the user's own skills + MCP servers, with a "+ Add" menu. -->
+          <CapabilityCard
+            title="Custom capabilities"
+            description="Your own skills and MCP servers."
+            icon="wand-sparkles"
+            summary={`${customSkills.length} ${customSkills.length === 1 ? "skill" : "skills"} · ${mcpServerIds.length} ${mcpServerIds.length === 1 ? "server" : "servers"}`}
+            defaultExpanded
+          >
+            {#snippet headerActions()}
+              <PickerPopover
+                bind:open={isAddCapabilityMenuOpen}
+                side="bottom"
+                align="end"
+                sideOffset={6}
+              >
+                {#snippet trigger(open)}
+                  <Icon name="plus" size="xs" />
+                  <span>Add</span>
+                  <Icon name={open ? "chevron-up" : "chevron-down"} size="xs" />
+                {/snippet}
+
+                <PickerOptionRow
+                  onClick={() => {
+                    isAddCapabilityMenuOpen = false;
+                    openAddSkillModal();
+                  }}
+                >
+                  {#snippet leading()}
+                    <Icon name="sparkles" size="s" />
+                  {/snippet}
+                  {#snippet content()}
+                    Custom Skill
+                  {/snippet}
+                </PickerOptionRow>
+
+                <PickerOptionRow
+                  onClick={() => {
+                    isAddCapabilityMenuOpen = false;
+                    openAddMCPServer();
+                  }}
+                >
+                  {#snippet leading()}
+                    <Icon name="server" size="s" />
+                  {/snippet}
+                  {#snippet content()}
+                    MCP Server
+                  {/snippet}
+                </PickerOptionRow>
+              </PickerPopover>
+            {/snippet}
+
+            {#snippet body()}
+              <div class="skill-category-header">
+                <span class="skill-category-title">Skills</span>
+                <Badge label="User-defined" pill={false} uppercase />
+              </div>
+              {#each customSkills as ext (ext.id)}
+                <ManagedEntityItem
+                  class="skill-entity"
+                  name={ext.displayName}
+                  desc={ext.description}
+                  meta="Stored as a custom skill in the vault configuration."
+                >
+                  {#snippet actions()}
+                    <Button
+                      iconId="trash"
+                      ariaLabel={`Delete ${ext.displayName}`}
+                      tooltip={`Delete ${ext.displayName}`}
+                      onClick={() => void deleteSkill(ext.id)}
+                    />
+                    <Button
+                      iconId="pencil"
+                      ariaLabel={`Edit ${ext.displayName} prompt`}
+                      tooltip={`Edit ${ext.displayName} prompt`}
+                      onClick={() => openSkillModal(ext.id)}
+                    />
+                    <Toggle checked={ext.enabled} onchange={() => toggleSkill(ext.id, !ext.enabled)} />
+                  {/snippet}
+                </ManagedEntityItem>
+              {/each}
+              {#if customSkills.length === 0}
+                <div class="skill-empty-state">No custom skills yet</div>
+              {/if}
+
+              <div class="skill-category-header capability-subgroup-header">
+                <span class="skill-category-title">MCP Servers</span>
+                <Badge label="External tools" pill={false} uppercase />
+              </div>
+              {#if mcpServerIds.length > 0}
+                <div class="mcp-servers-list">
+                  {#each mcpServerIds as serverId (serverId)}
+                    {@const config = selectedAgent.mcpServers[serverId]}
+                    {@const toolsState = getServerToolsState(serverId)}
+                    {@const isExpanded = expandedServerId === serverId}
+                    <ManagedEntityItem
+                      class="mcp-entity"
+                      name={config.displayName}
+                      desc={config.transport === "stdio"
+                        ? `${config.command} ${config.args.join(" ")}`
+                        : config.url}
+                      meta={config.transport === "stdio"
+                        ? "Local stdio MCP server"
+                        : "Remote HTTP MCP server"}
+                    >
+                      {#snippet badges()}
+                        <Badge
+                          label={config.transport === "stdio" ? "Local" : "HTTP"}
+                          tone={config.transport === "stdio" ? "success" : "accent"}
+                        />
+                        <Badge
+                          interactive
+                          onclick={() => toggleToolsList(serverId)}
+                          class={`mcp-tools-badge ${toolsState?.error ? "error" : ""} ${toolsState?.tools && toolsState.tools.length > 0 ? "has-tools" : ""}`}
+                        >
+                          {#if toolsState?.loading}
+                            <Icon name="loader" size="xs" />
+                          {:else if toolsState?.error}
+                            <Icon name="alert-circle" size="xs" />
+                          {:else}
+                            <Icon name="wrench" size="xs" />
+                          {/if}
+                          <span>{getMCPToolsBadgeLabel(serverId, toolsState)}</span>
+                        </Badge>
+                      {/snippet}
+
+                      {#snippet children()}
+                        {#if isExpanded && toolsState}
+                          <div class="mcp-tools-list">
+                            {#if toolsState.loading}
+                              <div class="mcp-tools-loading">Loading tools...</div>
+                            {:else if toolsState.error}
+                              <div class="mcp-tools-error">
+                                <Icon name="alert-circle" size="s" />
+                                <span>{toolsState.error}</span>
+                                <button
+                                  class="mcp-tools-retry"
+                                  onclick={() => void fetchServerTools(serverId)}>Retry</button
+                                >
+                              </div>
+                            {:else if toolsState.tools.length === 0}
+                              <div class="mcp-tools-empty">No tools available</div>
+                            {:else}
+                              {#each toolsState.tools as tool (tool.name)}
+                                <div class="mcp-tool-item">
+                                  <span class="mcp-tool-name">{tool.name}</span>
+                                  {#if tool.description}
+                                    <span class="mcp-tool-desc">{tool.description}</span>
+                                  {/if}
+                                </div>
+                              {/each}
+                            {/if}
+                          </div>
+                        {/if}
+                      {/snippet}
+
+                      {#snippet actions()}
+                        <Button
+                          iconId="pencil"
+                          ariaLabel={`Edit ${config.displayName}`}
+                          tooltip={`Edit ${config.displayName}`}
+                          onClick={() => openEditMCPServer(serverId)}
+                        />
+                        <Toggle checked={config.enabled} onchange={() => toggleMCPServer(serverId)} />
+                      {/snippet}
+                    </ManagedEntityItem>
+                  {/each}
+                </div>
+              {:else}
+                <div class="mcp-empty-state"><p>No MCP servers configured for this agent.</p></div>
+              {/if}
+            {/snippet}
+          </CapabilityCard>
         </SettingGroup>
       {:else if activeSection === "subagents"}
         <SettingGroup heading="Subagents">
@@ -1156,100 +1405,9 @@ const promptSummary = $derived.by(() => {
             </ManagedEntityItem>
           {/each}
         </SettingGroup>
-      {:else if activeSection === "mcp"}
-        <SettingGroup heading="MCP Servers">
-          <div class="setting-item-description mb-3">
-            MCP servers extend this agent with external tools. Add and edit happen in the server modal.
-          </div>
-          <div class="mcp-add-button">
-            <Button buttonText="Add MCP Server" cta={true} onClick={openAddMCPServer} />
-          </div>
-          {#if mcpServerIds.length > 0}
-            <div class="mcp-servers-list">
-              {#each mcpServerIds as serverId (serverId)}
-                {@const config = selectedAgent.mcpServers[serverId]}
-                {@const toolsState = getServerToolsState(serverId)}
-                {@const isExpanded = expandedServerId === serverId}
-                <ManagedEntityItem
-                  class="mcp-entity"
-                  name={config.displayName}
-                  desc={config.transport === "stdio"
-                    ? `${config.command} ${config.args.join(" ")}`
-                    : config.url}
-                  meta={config.transport === "stdio"
-                    ? "Local stdio MCP server"
-                    : "Remote HTTP MCP server"}
-                >
-                  {#snippet badges()}
-                    <Badge
-                      label={config.transport === "stdio" ? "Local" : "HTTP"}
-                      tone={config.transport === "stdio" ? "success" : "accent"}
-                    />
-                    <Badge
-                      interactive
-                      onclick={() => toggleToolsList(serverId)}
-                      class={`mcp-tools-badge ${toolsState?.error ? "error" : ""} ${toolsState?.tools && toolsState.tools.length > 0 ? "has-tools" : ""}`}
-                    >
-                      {#if toolsState?.loading}
-                        <Icon name="loader" size="xs" />
-                      {:else if toolsState?.error}
-                        <Icon name="alert-circle" size="xs" />
-                      {:else}
-                        <Icon name="wrench" size="xs" />
-                      {/if}
-                      <span>{getMCPToolsBadgeLabel(serverId, toolsState)}</span>
-                    </Badge>
-                  {/snippet}
-
-                  {#snippet children()}
-                    {#if isExpanded && toolsState}
-                      <div class="mcp-tools-list">
-                        {#if toolsState.loading}
-                          <div class="mcp-tools-loading">Loading tools...</div>
-                        {:else if toolsState.error}
-                          <div class="mcp-tools-error">
-                            <Icon name="alert-circle" size="s" />
-                            <span>{toolsState.error}</span>
-                            <button
-                              class="mcp-tools-retry"
-                              onclick={() => void fetchServerTools(serverId)}>Retry</button
-                            >
-                          </div>
-                        {:else if toolsState.tools.length === 0}
-                          <div class="mcp-tools-empty">No tools available</div>
-                        {:else}
-                          {#each toolsState.tools as tool (tool.name)}
-                            <div class="mcp-tool-item">
-                              <span class="mcp-tool-name">{tool.name}</span>
-                              {#if tool.description}
-                                <span class="mcp-tool-desc">{tool.description}</span>
-                              {/if}
-                            </div>
-                          {/each}
-                        {/if}
-                      </div>
-                    {/if}
-                  {/snippet}
-
-                  {#snippet actions()}
-                    <Button
-                      iconId="pencil"
-                      ariaLabel={`Edit ${config.displayName}`}
-                      tooltip={`Edit ${config.displayName}`}
-                      onClick={() => openEditMCPServer(serverId)}
-                    />
-                    <Toggle checked={config.enabled} onchange={() => toggleMCPServer(serverId)} />
-                  {/snippet}
-                </ManagedEntityItem>
-              {/each}
-            </div>
-          {:else}
-            <div class="mcp-empty-state"><p>No MCP servers configured for this agent.</p></div>
-          {/if}
-        </SettingGroup>
       {/if}
     </div>
-    </div>
+    </SlidingTabs>
   </div>
 {/if}
 
@@ -1260,89 +1418,22 @@ const promptSummary = $derived.by(() => {
     container-type: inline-size;
   }
 
-  .agent-editor-layout {
+  /* bits-ui forwards this class to the rendered Tabs.Root element, so it must be
+     :global (Svelte can't see it statically through the component boundary). */
+  :global(.agent-editor-layout) {
     display: flex;
-    align-items: stretch;
-    gap: 20px;
+    flex-direction: column;
     height: 100%;
     min-height: 0;
   }
 
-  .agent-editor-rail {
-    flex: 0 0 200px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding-right: 16px;
-    border-right: 1px solid var(--background-modifier-border);
-    overflow-y: auto;
-  }
-
-  .agent-rail-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    /* Match Obsidian's native .vertical-tab-nav-item metrics. */
-    padding: 6px 8px;
-    border: 0;
-    border-radius: 12px;
-    background: transparent;
-    color: var(--text-normal);
-    font-size: var(--font-ui-small);
-    font-weight: 400;
-    text-align: left;
-    cursor: pointer;
-    transition: background 140ms ease, color 140ms ease;
-  }
-
-  .agent-rail-item:hover {
-    background: var(--background-modifier-hover);
-    color: var(--text-normal);
-  }
-
-  /* Active row: solid accent fill with on-accent text, mirroring native settings. */
-  .agent-rail-item.active {
-    background: var(--interactive-accent);
-    color: var(--text-on-accent);
-    font-weight: 400;
-  }
-
-  .agent-rail-item.active:hover {
-    background: var(--interactive-accent-hover);
-    color: var(--text-on-accent);
-  }
-
-  .agent-rail-item.active .agent-rail-icon {
-    color: var(--text-on-accent);
-  }
-
-  .agent-rail-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    color: var(--text-muted);
-  }
-
-  .agent-rail-item:hover .agent-rail-icon {
-    color: var(--text-normal);
-  }
-
-  .agent-rail-label {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .agent-rail-count {
+  /* Tab label + icon, matching the main S2B settings tab bar. */
+  .agent-tab-count {
     flex-shrink: 0;
   }
 
-  /* On the accent-filled active row, make the count chip read as on-accent. */
-  .agent-rail-item.active .agent-rail-count :global(.badge) {
+  /* On the accent-filled active tab, make the count chip read as on-accent. */
+  :global([data-tabs-trigger][data-state="active"]) .agent-tab-count :global(.badge) {
     background: color-mix(in srgb, var(--text-on-accent) 22%, transparent);
     border-color: color-mix(in srgb, var(--text-on-accent) 35%, transparent);
     color: var(--text-on-accent);
@@ -1391,17 +1482,6 @@ const promptSummary = $derived.by(() => {
 
   .agent-icon-inline-edit:hover {
     text-decoration: underline;
-  }
-
-  .agent-overview-summary {
-    display: flex;
-    flex-direction: column;
-    margin-top: 8px;
-  }
-
-  :global(.agent-overview-link) {
-    padding-left: 4px;
-    padding-right: 4px;
   }
 
   :global(.agent-icon-trigger) {
@@ -1522,13 +1602,6 @@ const promptSummary = $derived.by(() => {
     color: var(--text-muted);
   }
 
-  .skill-category {
-    margin-bottom: 20px;
-    padding-bottom: 8px;
-  }
-  .skill-category:last-child {
-    margin-bottom: 0;
-  }
   .skill-category-header {
     display: flex;
     align-items: center;
@@ -1536,6 +1609,10 @@ const promptSummary = $derived.by(() => {
     margin-bottom: 8px;
     padding-bottom: 6px;
     border-bottom: 1px solid var(--background-modifier-border);
+  }
+  /* Space the second sub-group (MCP Servers) away from the first inside a card body. */
+  .capability-subgroup-header {
+    margin-top: 20px;
   }
   .skill-category-title {
     font-weight: 600;
@@ -1553,10 +1630,6 @@ const promptSummary = $derived.by(() => {
     color: var(--text-muted);
     background: var(--background-secondary);
     border-radius: 8px;
-  }
-  .skill-add-container,
-  .mcp-add-button {
-    margin-top: 12px;
   }
   :global(.skill-entity),
   :global(.tool-entity),
@@ -1635,28 +1708,5 @@ const promptSummary = $derived.by(() => {
     align-items: flex-end;
     gap: 8px;
     width: 100%;
-  }
-
-  /* Collapse the rail to a horizontal tab strip on narrow modals/themes. */
-  @container (max-width: 700px) {
-    .agent-editor-layout {
-      flex-direction: column;
-      gap: 12px;
-    }
-    .agent-editor-rail {
-      flex: 0 0 auto;
-      flex-direction: row;
-      flex-wrap: wrap;
-      padding-right: 0;
-      padding-bottom: 12px;
-      border-right: 0;
-      border-bottom: 1px solid var(--background-modifier-border);
-    }
-    .agent-rail-item {
-      width: auto;
-    }
-    .agent-editor-pane {
-      overflow-y: visible;
-    }
   }
 </style>

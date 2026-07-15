@@ -196,155 +196,173 @@ function summarizeOperations(changes: PendingChange[]): string {
 		.join(", ");
 }
 
+/**
+ * Validates and stages a batch of note operations into the pending-changes store
+ * for user review, returning the human-readable summary string. Shared by the
+ * `manage_notes` tool and the public S2B api (`api.manageNotes`) so both write
+ * paths stage identically — nothing is applied here; the user approves/rejects
+ * staged changes separately.
+ *
+ * @param toolCallId groups the staged changes; defaults to a fresh UUID when the
+ *   caller has no run id (e.g. the api path outside a tool run).
+ */
+export async function stageNoteOperations(
+	app: App,
+	operations: ManageNotesInput["operations"],
+	toolCallId?: string,
+): Promise<string> {
+	const store = getPendingChangesStore();
+	const settings = getManageNotesSettings();
+	const seenPaths = new Set<string>();
+	const stagedChanges: PendingChange[] = [];
+
+	for (let i = 0; i < operations.length; i++) {
+		const operation = operations[i];
+		const operationNumber = i + 1;
+
+		if (operation.type === "create") {
+			if (!settings.allowCreate) {
+				return `Error in operation ${operationNumber}: Create operations are disabled for this agent.`;
+			}
+
+			const normalizedPath = normalizePath(operation.path);
+			const duplicateError = ensureUniqueTarget(seenPaths, normalizedPath, operationNumber);
+			if (duplicateError) return duplicateError;
+
+			if (!normalizedPath.endsWith(".md")) {
+				return `Error in operation ${operationNumber}: Only markdown files (.md) can be created. Got: "${normalizedPath}"`;
+			}
+
+			if (!store.isPathAllowed(normalizedPath)) {
+				return `Error in operation ${operationNumber}: The path "${normalizedPath}" is excluded by your vault filter settings.`;
+			}
+
+			// Privacy check for create target
+			const currentProvider = getData().getSelectedAgent().chatModel?.provider;
+			if (currentProvider && store.shouldBlockFile(normalizedPath, currentProvider)) {
+				return `Error in operation ${operationNumber}: The path "${normalizedPath}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
+			}
+
+			const existing = app.vault.getAbstractFileByPath(normalizedPath);
+			if (existing) {
+				return `Error in operation ${operationNumber}: A file already exists at "${normalizedPath}". Use an update operation to modify existing files.`;
+			}
+
+			stagedChanges.push({
+				type: "create",
+				path: normalizedPath,
+				content: operation.content,
+			});
+			continue;
+		}
+
+		if (operation.type === "update") {
+			if (!settings.allowUpdate) {
+				return `Error in operation ${operationNumber}: Update operations are disabled for this agent.`;
+			}
+
+			const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "update");
+			if ("error" in result) return result.error;
+
+			const duplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
+			if (duplicateError) return duplicateError;
+
+			const originalContent = await app.vault.read(result.file);
+			const editResult = applySequentialEdits(
+				originalContent,
+				operation.edits,
+				result.file.path,
+				operationNumber,
+			);
+			if ("error" in editResult) return editResult.error;
+
+			stagedChanges.push({
+				type: "update",
+				path: result.file.path,
+				originalContent,
+				newContent: editResult.content,
+			});
+			continue;
+		}
+
+		if (!settings.allowDelete) {
+			if (operation.type === "delete") {
+				return `Error in operation ${operationNumber}: Delete operations are disabled for this agent.`;
+			}
+		}
+
+		if (operation.type === "delete") {
+			const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "delete");
+			if ("error" in result) return result.error;
+
+			const duplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
+			if (duplicateError) return duplicateError;
+
+			stagedChanges.push({
+				type: "delete",
+				path: result.file.path,
+				originalContent: await app.vault.read(result.file),
+			});
+			continue;
+		}
+
+		if (!settings.allowMove) {
+			return `Error in operation ${operationNumber}: Move operations are disabled for this agent.`;
+		}
+
+		const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "move");
+		if ("error" in result) return result.error;
+
+		const sourceDuplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
+		if (sourceDuplicateError) return sourceDuplicateError;
+
+		const normalizedNewPath = normalizePath(operation.newPath);
+		if (!normalizedNewPath.endsWith(".md")) {
+			return `Error in operation ${operationNumber}: Only markdown files (.md) can be moved. Got destination "${normalizedNewPath}"`;
+		}
+
+		const destinationDuplicateError = ensureUniqueTarget(seenPaths, normalizedNewPath, operationNumber);
+		if (destinationDuplicateError) return destinationDuplicateError;
+
+		if (!store.isPathAllowed(normalizedNewPath)) {
+			return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is excluded by your vault filter settings.`;
+		}
+
+		// Privacy check for move destination
+		const moveProvider = getData().getSelectedAgent().chatModel?.provider;
+		if (moveProvider && store.shouldBlockFile(normalizedNewPath, moveProvider)) {
+			return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
+		}
+
+		if (result.file.path === normalizedNewPath) {
+			return `Error in operation ${operationNumber}: Source and destination are the same path "${normalizedNewPath}".`;
+		}
+
+		const existingDestination = app.vault.getAbstractFileByPath(normalizedNewPath);
+		if (existingDestination) {
+			return `Error in operation ${operationNumber}: A file already exists at "${normalizedNewPath}".`;
+		}
+
+		stagedChanges.push({
+			type: "move",
+			path: result.file.path,
+			newPath: normalizedNewPath,
+		});
+	}
+
+	const threadId = getCurrentThreadId();
+	const resolvedToolCallId = toolCallId ?? genUUIDv7();
+	store.addChanges(stagedChanges, resolvedToolCallId, threadId);
+
+	return `Proposed ${stagedChanges.length} note operation(s) across ${seenPaths.size} path(s) (${summarizeOperations(stagedChanges)}) — the user will review and approve or reject these changes.`;
+}
+
 export function createManageNotesTool(app: App) {
 	const toolConfig = getManageNotesToolConfig();
 
 	return tool(
 		async ({ operations }: ManageNotesInput, runManager) => {
-			const store = getPendingChangesStore();
-			const settings = getManageNotesSettings();
-			const seenPaths = new Set<string>();
-			const stagedChanges: PendingChange[] = [];
-
-			for (let i = 0; i < operations.length; i++) {
-				const operation = operations[i];
-				const operationNumber = i + 1;
-
-				if (operation.type === "create") {
-					if (!settings.allowCreate) {
-						return `Error in operation ${operationNumber}: Create operations are disabled for this agent.`;
-					}
-
-					const normalizedPath = normalizePath(operation.path);
-					const duplicateError = ensureUniqueTarget(seenPaths, normalizedPath, operationNumber);
-					if (duplicateError) return duplicateError;
-
-					if (!normalizedPath.endsWith(".md")) {
-						return `Error in operation ${operationNumber}: Only markdown files (.md) can be created. Got: "${normalizedPath}"`;
-					}
-
-					if (!store.isPathAllowed(normalizedPath)) {
-						return `Error in operation ${operationNumber}: The path "${normalizedPath}" is excluded by your vault filter settings.`;
-					}
-
-					// Privacy check for create target
-					const currentProvider = getData().getSelectedAgent().chatModel?.provider;
-					if (currentProvider && store.shouldBlockFile(normalizedPath, currentProvider)) {
-						return `Error in operation ${operationNumber}: The path "${normalizedPath}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
-					}
-
-					const existing = app.vault.getAbstractFileByPath(normalizedPath);
-					if (existing) {
-						return `Error in operation ${operationNumber}: A file already exists at "${normalizedPath}". Use an update operation to modify existing files.`;
-					}
-
-					stagedChanges.push({
-						type: "create",
-						path: normalizedPath,
-						content: operation.content,
-					});
-					continue;
-				}
-
-				if (operation.type === "update") {
-					if (!settings.allowUpdate) {
-						return `Error in operation ${operationNumber}: Update operations are disabled for this agent.`;
-					}
-
-					const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "update");
-					if ("error" in result) return result.error;
-
-					const duplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
-					if (duplicateError) return duplicateError;
-
-					const originalContent = await app.vault.read(result.file);
-					const editResult = applySequentialEdits(
-						originalContent,
-						operation.edits,
-						result.file.path,
-						operationNumber,
-					);
-					if ("error" in editResult) return editResult.error;
-
-					stagedChanges.push({
-						type: "update",
-						path: result.file.path,
-						originalContent,
-						newContent: editResult.content,
-					});
-					continue;
-				}
-
-				if (!settings.allowDelete) {
-					if (operation.type === "delete") {
-						return `Error in operation ${operationNumber}: Delete operations are disabled for this agent.`;
-					}
-				}
-
-				if (operation.type === "delete") {
-					const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "delete");
-					if ("error" in result) return result.error;
-
-					const duplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
-					if (duplicateError) return duplicateError;
-
-					stagedChanges.push({
-						type: "delete",
-						path: result.file.path,
-						originalContent: await app.vault.read(result.file),
-					});
-					continue;
-				}
-
-				if (!settings.allowMove) {
-					return `Error in operation ${operationNumber}: Move operations are disabled for this agent.`;
-				}
-
-				const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "move");
-				if ("error" in result) return result.error;
-
-				const sourceDuplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
-				if (sourceDuplicateError) return sourceDuplicateError;
-
-				const normalizedNewPath = normalizePath(operation.newPath);
-				if (!normalizedNewPath.endsWith(".md")) {
-					return `Error in operation ${operationNumber}: Only markdown files (.md) can be moved. Got destination "${normalizedNewPath}"`;
-				}
-
-				const destinationDuplicateError = ensureUniqueTarget(seenPaths, normalizedNewPath, operationNumber);
-				if (destinationDuplicateError) return destinationDuplicateError;
-
-				if (!store.isPathAllowed(normalizedNewPath)) {
-					return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is excluded by your vault filter settings.`;
-				}
-
-				// Privacy check for move destination
-				const moveProvider = getData().getSelectedAgent().chatModel?.provider;
-				if (moveProvider && store.shouldBlockFile(normalizedNewPath, moveProvider)) {
-					return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
-				}
-
-				if (result.file.path === normalizedNewPath) {
-					return `Error in operation ${operationNumber}: Source and destination are the same path "${normalizedNewPath}".`;
-				}
-
-				const existingDestination = app.vault.getAbstractFileByPath(normalizedNewPath);
-				if (existingDestination) {
-					return `Error in operation ${operationNumber}: A file already exists at "${normalizedNewPath}".`;
-				}
-
-				stagedChanges.push({
-					type: "move",
-					path: result.file.path,
-					newPath: normalizedNewPath,
-				});
-			}
-
-			const threadId = getCurrentThreadId();
-			const toolCallId = runManager?.runId ?? genUUIDv7();
-			store.addChanges(stagedChanges, toolCallId, threadId);
-
-			return `Proposed ${stagedChanges.length} note operation(s) across ${seenPaths.size} path(s) (${summarizeOperations(stagedChanges)}) — the user will review and approve or reject these changes.`;
+			return stageNoteOperations(app, operations, runManager?.runId);
 		},
 		{
 			name: toolConfig.name,

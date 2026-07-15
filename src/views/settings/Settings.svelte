@@ -1,7 +1,7 @@
 <script lang="ts">
 import { Tabs } from "bits-ui";
 import { consumePendingSettingsTab } from "../../stores/state.svelte";
-import { icon } from "../../utils/utils";
+import SlidingTabs, { type SlidingTab } from "../../components/ui/SlidingTabs.svelte";
 import AgentsSettings from "./AgentsSettings.svelte";
 import DeveloperSettings from "./DeveloperSettings.svelte";
 import GeneralSettings from "./GeneralSettings.svelte";
@@ -12,6 +12,15 @@ import TroubleshootingSettings from "./TroubleshootingSettings.svelte";
 // Check if there's a pending tab request (e.g., from "Manage Agents" button)
 const pendingTab = consumePendingSettingsTab();
 let activeTab = $state(pendingTab ?? "general");
+
+const SETTINGS_TABS: SlidingTab<string>[] = [
+	{ id: "general", label: "General", icon: "settings" },
+	{ id: "search", label: "Search", icon: "search" },
+	{ id: "agents", label: "Agents", icon: "bot" },
+	{ id: "graph", label: "Graph", icon: "git-fork" },
+	{ id: "troubleshooting", label: "Troubleshooting", icon: "wrench" },
+	...(import.meta.env.DEV ? [{ id: "developer", label: "Developer", icon: "code" }] : []),
+];
 </script>
 
 <div class="s2b-settings-logo">
@@ -22,68 +31,7 @@ let activeTab = $state(pendingTab ?? "general");
   </svg>
 </div>
 
-<Tabs.Root bind:value={activeTab}>
-  <Tabs.List
-    class="flex flex-wrap justify-center gap-1 border-b border-t-0 border-x-0 border-solid border-[--background-modifier-border] pb-2 mb-4"
-  >
-    <Tabs.Trigger
-      value="general"
-      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:bg-[--interactive-accent] data-[state=active]:text-[--text-on-accent] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
-    >
-      <span class="settings-tab-label">
-        <span class="settings-tab-icon" use:icon={"settings"} aria-hidden="true"></span>
-        <span>General</span>
-      </span>
-    </Tabs.Trigger>
-    <Tabs.Trigger
-      value="search"
-      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:bg-[--interactive-accent] data-[state=active]:text-[--text-on-accent] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
-    >
-      <span class="settings-tab-label">
-        <span class="settings-tab-icon" use:icon={"search"} aria-hidden="true"></span>
-        <span>Search</span>
-      </span>
-    </Tabs.Trigger>
-    <Tabs.Trigger
-      value="agents"
-      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:bg-[--interactive-accent] data-[state=active]:text-[--text-on-accent] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
-    >
-      <span class="settings-tab-label">
-        <span class="settings-tab-icon" use:icon={"bot"} aria-hidden="true"></span>
-        <span>Agents</span>
-      </span>
-    </Tabs.Trigger>
-    <Tabs.Trigger
-      value="graph"
-      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:bg-[--interactive-accent] data-[state=active]:text-[--text-on-accent] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
-    >
-      <span class="settings-tab-label">
-        <span class="settings-tab-icon" use:icon={"git-fork"} aria-hidden="true"></span>
-        <span>Graph</span>
-      </span>
-    </Tabs.Trigger>
-    <Tabs.Trigger
-      value="troubleshooting"
-      class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:bg-[--interactive-accent] data-[state=active]:text-[--text-on-accent] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
-    >
-      <span class="settings-tab-label">
-        <span class="settings-tab-icon" use:icon={"wrench"} aria-hidden="true"></span>
-        <span>Troubleshooting</span>
-      </span>
-    </Tabs.Trigger>
-    {#if import.meta.env.DEV}
-      <Tabs.Trigger
-        value="developer"
-        class="px-3 py-1.5 text-sm font-medium rounded-md border border-transparent transition-colors data-[state=active]:bg-[--interactive-accent] data-[state=active]:text-[--text-on-accent] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:bg-[--background-modifier-hover] data-[state=inactive]:hover:text-[--text-normal]"
-      >
-        <span class="settings-tab-label">
-          <span class="settings-tab-icon" use:icon={"code"} aria-hidden="true"></span>
-          <span>Developer</span>
-        </span>
-      </Tabs.Trigger>
-    {/if}
-  </Tabs.List>
-
+<SlidingTabs bind:value={activeTab} tabs={SETTINGS_TABS}>
   <Tabs.Content value="general">
     <GeneralSettings />
   </Tabs.Content>
@@ -109,7 +57,7 @@ let activeTab = $state(pendingTab ?? "general");
       <DeveloperSettings />
     </Tabs.Content>
   {/if}
-</Tabs.Root>
+</SlidingTabs>
 
 <style>
   .s2b-settings-logo {
@@ -121,20 +69,5 @@ let activeTab = $state(pendingTab ?? "general");
   .s2b-settings-logo svg {
     height: 28px;
     width: auto;
-  }
-
-  .settings-tab-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-  }
-
-  .settings-tab-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 14px;
-    height: 14px;
-    flex-shrink: 0;
   }
 </style>

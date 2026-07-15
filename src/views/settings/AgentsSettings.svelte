@@ -87,25 +87,11 @@ function getAgentModelSummary(agentId: string): string {
 }
 
 function getAgentSecondarySummary(agentId: string): string {
-	const agent = agents[agentId];
-	if (!agent) return "";
-	const discoveredSkills = plugin.skillsService?.getCachedSkills() ?? new Map();
-	const enabledSkills = discoveredSkills.size
-		? Array.from(discoveredSkills.entries()).filter(([skillId, metadata]) => {
-				if (agent.skills[skillId]?.enabled === false) {
-					return false;
-				}
-				if (metadata.linkedPluginId && !plugin.agentManager?.isPluginEnabled(metadata.linkedPluginId)) {
-					return false;
-				}
-				if (metadata.corePluginId && !plugin.agentManager?.isInternalPluginEnabled(metadata.corePluginId)) {
-					return false;
-				}
-				return true;
-			}).length
-		: Object.values(agent.skills).filter((entry) => entry.enabled).length;
-	const enabledServers = Object.values(agent.mcpServers).filter((entry) => entry.enabled).length;
-	return `${enabledSkills} skills enabled · ${enabledServers} MCP servers enabled`;
+	// Single source of truth for the count (shared with the agent editor's rail badge):
+	// enabled capability cards — Core counts once, each plugin/custom skill and MCP server
+	// counts individually. See AgentManager.countEnabledCapabilities.
+	const count = plugin.agentManager?.countEnabledCapabilities(agentId) ?? 0;
+	return `${count} ${count === 1 ? "capability" : "capabilities"} enabled`;
 }
 </script>
 

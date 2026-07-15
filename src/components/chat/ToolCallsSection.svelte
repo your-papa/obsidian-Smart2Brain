@@ -685,33 +685,6 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
         class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.82rem] leading-[1.6] break-words [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-[--background-primary] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.88em] [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-1.5 [&_pre_code]:bg-transparent [&_pre_code]:p-0"
       />
     </div>
-  {:else if model.kind === "execute_dataview_query"}
-    <div class="tool-output-metrics">
-      <span class="tool-output-metric-chip">Dataview</span>
-      {#if model.payload.query}
-        <span class="tool-output-metric-chip">query attached</span>
-      {/if}
-      {#if model.payload.state === "empty"}
-        <span class="tool-output-metric-chip tool-output-metric-chip-warning">no results</span>
-      {:else if model.payload.state === "error"}
-        <span class="tool-output-metric-chip tool-output-metric-chip-warning">error</span>
-      {/if}
-    </div>
-    {#if model.payload.query}
-      <details class="tool-output-raw-toggle">
-        <summary class="tool-output-raw-summary">Query</summary>
-        <MarkdownRenderer
-          content={formatRawToolOutput(model.payload.query)}
-          class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.8rem] leading-[1.55] [&_pre]:my-0 [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded"
-        />
-      </details>
-    {/if}
-    <div class="tool-output-read-content-card">
-      <MarkdownRenderer
-        content={model.payload.markdown}
-        class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.82rem] leading-[1.6] break-words [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:bg-[--background-primary] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.88em] [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-1.5 [&_pre_code]:bg-transparent [&_pre_code]:p-0"
-      />
-    </div>
   {:else if model.kind === "execute_javascript"}
     <div class="tool-output-metrics">
       <span class="tool-output-metric-chip">JavaScript</span>

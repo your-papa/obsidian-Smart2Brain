@@ -21,12 +21,12 @@ function handleKeydown(e: KeyboardEvent) {
 }
 </script>
 
-<!-- 
+<!--
   Obsidian's native toggle structure:
   <label class="checkbox-container is-enabled">
     <input type="checkbox">
   </label>
-  The ::before pseudo-element on .checkbox-container creates the toggle knob
+  The ::before pseudo-element on .checkbox-container creates the toggle knob.
 -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->

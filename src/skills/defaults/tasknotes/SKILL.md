@@ -15,6 +15,24 @@ This skill enables you to work with tasks managed by the [TaskNotes](https://git
 
 Use the `search_notes`, `read_content`, `get_properties`, and `manage_notes` tools to read and write tasks.
 
+## Scripting the TaskNotes API (advanced)
+
+Because this skill is enabled and the TaskNotes plugin exposes a public API, you likely also
+have an `exec_tasknotes` tool (check your available tools) that runs JavaScript against the
+TaskNotes plugin's `api` object on the main thread. This is more reliable than hand-editing
+frontmatter for creating/updating tasks, because the plugin manages ids, dates, and recurrence
+for you.
+
+- `api` is the TaskNotes plugin API; `app` is the Obsidian app.
+- Discover what's available at runtime before assuming methods exist — e.g. `return Object.keys(api)` or inspect a method's shape — since the API surface can change across plugin versions.
+- Prefer the API for mutations (create/update/complete) over `manage_notes` frontmatter edits when it's available. Fall back to the file-based approach below if the integration is off.
+- Keep snippets read-only unless the user asked to modify data. Awaited work times out; this is not sandboxed.
+
+```javascript
+// Inspect the available API before calling it
+return Object.keys(api);
+```
+
 ---
 
 ## Task File Format
@@ -104,7 +122,7 @@ Default values (the user may have customized these):
 ### Find tasks by status
 Use `search_notes` with a property filter, or `get_properties` to inspect a file's frontmatter.
 
-For structured queries across many tasks, use `execute_dataview_query` (if the Dataview skill is also enabled):
+For structured queries across many tasks, write a ```dataview code fence (it renders natively when the Dataview plugin is installed) — or, if the Dataview skill is enabled, run the DQL via `api.tryQueryMarkdown(...)` with the `exec_dataview` tool:
 
 ```dataview
 TABLE title, status, due, priority

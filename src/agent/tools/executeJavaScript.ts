@@ -1,43 +1,11 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
-import type { JavaScriptExecutionResult } from "./executeJavaScriptShared";
+import { formatExecutionResult, type JavaScriptExecutionResult } from "./executeJavaScriptShared";
 import type { ExecuteJavaScriptWorkerRequest, ExecuteJavaScriptWorkerResponse } from "./executeJavaScriptWorker";
 import ExecuteJavaScriptWorkerConstructor from "./executeJavaScriptWorker?worker&inline";
 
 const EXECUTION_TIMEOUT_MS = 3_000;
-const MAX_OUTPUT_CHARS = 20_000;
-
-function truncateOutput(value: string, maxChars = MAX_OUTPUT_CHARS): string {
-	if (value.length <= maxChars) return value;
-	return `${value.slice(0, maxChars)}\n\n[truncated ${value.length - maxChars} characters]`;
-}
-
-function formatResult(value: unknown): string {
-	if (value === undefined) return "undefined";
-	if (typeof value === "string") return value;
-	try {
-		return JSON.stringify(value, null, 2);
-	} catch {
-		return String(value);
-	}
-}
-
-function formatExecutionResult(result: JavaScriptExecutionResult): string {
-	const sections = [`Execution completed in ${result.durationMs}ms.`];
-
-	if (result.logs.length > 0) {
-		sections.push(`Console output:\n${result.logs.map((entry) => `- ${entry}`).join("\n")}`);
-	}
-
-	if (result.result === undefined) {
-		sections.push("Return value: undefined. Use `return` in the snippet when you need a final value.");
-	} else {
-		sections.push(`Return value:\n${formatResult(result.result)}`);
-	}
-
-	return truncateOutput(sections.join("\n\n"));
-}
 
 async function executeInWorker(code: string, input?: unknown): Promise<JavaScriptExecutionResult> {
 	if (typeof Worker === "undefined") {

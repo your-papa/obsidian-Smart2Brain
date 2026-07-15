@@ -321,12 +321,23 @@ async function readExcalidrawContent(app: App, file: TFile, maxLength: number): 
 	return `Excalidraw drawing "${file.path}" contains no elements. The drawing appears to be empty.`;
 }
 
-export function createReadContentTool(app: App, imageProcessor?: BaseChatModel, pdfProcessor?: BaseChatModel) {
+export interface ReadNoteContentOptions {
+	imageProcessor?: BaseChatModel;
+	pdfProcessor?: BaseChatModel;
+}
+
+/**
+ * Reads a note/PDF/text/Excalidraw file (with optional fragment) and returns its
+ * content as a formatted string — the same logic the `read_content` tool serves,
+ * shared with the public S2B api (`api.readContent`). Applies privacy checks and
+ * uses the provided vision/PDF processors when the target needs analysis.
+ */
+export async function readNoteContent(app: App, path: string, opts: ReadNoteContentOptions = {}): Promise<string> {
+	const { imageProcessor, pdfProcessor } = opts;
 	const pluginData = getData();
-	const defaultToolConfig = DEFAULT_TOOLS_CONFIG.read_content;
 	const getToolConfig = () => pluginData.getSelectedAgent().toolsConfig.read_content;
 
-	const readContentFn = async ({ path }: { path: string }): Promise<string> => {
+	{
 		const { subpath, path: normalizedPath } = extractReferenceInfo(path);
 		if (!normalizedPath) {
 			return "Error: Path is empty. Provide a file path or wiki link.";
@@ -541,7 +552,16 @@ export function createReadContentTool(app: App, imageProcessor?: BaseChatModel, 
 		} catch (error) {
 			return `Error reading file "${path}": ${error instanceof Error ? error.message : String(error)}`;
 		}
-	};
+	}
+}
+
+export function createReadContentTool(app: App, imageProcessor?: BaseChatModel, pdfProcessor?: BaseChatModel) {
+	const pluginData = getData();
+	const defaultToolConfig = DEFAULT_TOOLS_CONFIG.read_content;
+	const getToolConfig = () => pluginData.getSelectedAgent().toolsConfig.read_content;
+
+	const readContentFn = ({ path }: { path: string }): Promise<string> =>
+		readNoteContent(app, path, { imageProcessor, pdfProcessor });
 
 	const toolConfig = getToolConfig();
 

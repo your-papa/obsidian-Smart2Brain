@@ -101,17 +101,37 @@ export type MCPServersConfig = Record<string, MCPServerConfig>;
 /**
  * Available built-in tool identifiers
  */
-export type BuiltInToolId =
-	| "search_notes"
-	| "list_directory"
-	| "read_content"
-	| "get_all_tags"
-	| "get_properties"
-	| "execute_javascript"
-	| "execute_dataview_query"
-	| "manage_notes"
-	| "fetch_url"
-	| "web_search";
+/**
+ * All built-in tool ids. This array is the single source of truth — `BuiltInToolId` is
+ * derived from it, so adding an id here extends the type automatically (and a runtime
+ * loop over every tool, e.g. capability counting, can never fall out of sync with it).
+ */
+export const BUILT_IN_TOOL_IDS = [
+	"search_notes",
+	"list_directory",
+	"read_content",
+	"get_all_tags",
+	"get_properties",
+	"execute_javascript",
+	"manage_notes",
+	"fetch_url",
+	"web_search",
+] as const;
+
+export type BuiltInToolId = (typeof BUILT_IN_TOOL_IDS)[number];
+
+/**
+ * Built-in tools that reach out to the public web rather than the vault. These are surfaced
+ * as their own "Web" capability card (separate from the vault-exploration Core card) — shared
+ * here so the editor and the capability-count logic agree on which tools belong to that card.
+ */
+export const WEB_TOOL_IDS = ["fetch_url", "web_search"] as const satisfies readonly BuiltInToolId[];
+
+/** Built-in tools that operate on the vault (everything not in `WEB_TOOL_IDS`) — the Core card. */
+export const VAULT_TOOL_IDS = BUILT_IN_TOOL_IDS.filter(
+	(id): id is Exclude<BuiltInToolId, (typeof WEB_TOOL_IDS)[number]> =>
+		!(WEB_TOOL_IDS as readonly string[]).includes(id),
+);
 
 /**
  * Tool-specific settings for search_notes tool
@@ -141,14 +161,6 @@ export interface ReadContentSettings {
 	imageProcessor?: import("../stores/chatStore.svelte").ChatModel | null;
 	/** Vision model for PDFs: undefined = auto-derive from chat model, null = disabled, ChatModel = explicit */
 	pdfProcessor?: import("../stores/chatStore.svelte").ChatModel | null;
-}
-
-/**
- * Tool-specific settings for execute_dataview_query tool
- */
-export interface DataviewQuerySettings {
-	/** Whether to include file metadata in results */
-	includeMetadata: boolean;
 }
 
 /**
@@ -187,7 +199,6 @@ export interface ManageNotesSettings {
 export type ToolSpecificSettings =
 	| SearchNotesSettings
 	| ReadContentSettings
-	| DataviewQuerySettings
 	| ManageNotesSettings
 	| FetchUrlSettings
 	| WebSearchSettings
@@ -358,6 +369,12 @@ export interface AgentConfig {
 	skills: Record<string, AgentSkillState>;
 	/** Configuration for built-in tools */
 	toolsConfig: ToolsConfig;
+	/**
+	 * Per-plugin code-exec integration enable state, keyed by `exec:<pluginId>`.
+	 * Defaults to disabled (absent = off) — the agent may only run code against a
+	 * plugin's public API once the user has explicitly approved that integration.
+	 */
+	pluginExecTools?: Record<string, boolean>;
 	/** MCP server configurations for this agent */
 	mcpServers: MCPServersConfig;
 	/**

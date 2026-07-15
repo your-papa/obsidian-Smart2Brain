@@ -464,9 +464,15 @@ export class SkillsService {
 	 * Generate available_skills XML for system prompt context.
 	 * Per spec recommendation for Claude models.
 	 * @param enableState - Optional enable/disable state to filter skills
+	 * @param isPluginEnabled - Optional check for whether a linked community plugin is enabled
+	 * @param isInternalPluginEnabled - Optional check for whether a linked core plugin is enabled
 	 * @returns XML string for injection into system prompt
 	 */
-	generateContextXml(enableState?: SkillEnableState): string {
+	generateContextXml(
+		enableState?: SkillEnableState,
+		isPluginEnabled?: (pluginId: string) => boolean,
+		isInternalPluginEnabled?: (pluginId: string) => boolean,
+	): string {
 		if (this.skillsCache.size === 0) {
 			return "";
 		}
@@ -476,6 +482,16 @@ export class SkillsService {
 		for (const [name, metadata] of this.skillsCache) {
 			// Skip disabled skills if enableState provided
 			if (enableState && enableState[name] === false) {
+				continue;
+			}
+
+			// Skip skills whose linked plugin isn't enabled — an unavailable plugin has
+			// no runtime api/behavior to back the skill, so advertising it misleads the
+			// agent into thinking it can use capabilities that aren't present.
+			if (metadata.linkedPluginId && isPluginEnabled && !isPluginEnabled(metadata.linkedPluginId)) {
+				continue;
+			}
+			if (metadata.corePluginId && isInternalPluginEnabled && !isInternalPluginEnabled(metadata.corePluginId)) {
 				continue;
 			}
 

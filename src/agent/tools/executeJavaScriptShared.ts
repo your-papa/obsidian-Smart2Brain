@@ -9,6 +9,43 @@ export interface JavaScriptExecutionResult {
 	result: unknown;
 }
 
+/** Max characters of formatted tool output returned to the agent. */
+export const MAX_OUTPUT_CHARS = 20_000;
+
+/** Truncate a formatted output string to {@link MAX_OUTPUT_CHARS}, annotating the cut. */
+export function truncateOutput(value: string, maxChars = MAX_OUTPUT_CHARS): string {
+	if (value.length <= maxChars) return value;
+	return `${value.slice(0, maxChars)}\n\n[truncated ${value.length - maxChars} characters]`;
+}
+
+/** Format an execution return value as a readable string for the agent. */
+export function formatResult(value: unknown): string {
+	if (value === undefined) return "undefined";
+	if (typeof value === "string") return value;
+	try {
+		return JSON.stringify(value, null, 2);
+	} catch {
+		return String(value);
+	}
+}
+
+/** Format a full execution result (duration + console logs + return value). */
+export function formatExecutionResult(result: JavaScriptExecutionResult): string {
+	const sections = [`Execution completed in ${result.durationMs}ms.`];
+
+	if (result.logs.length > 0) {
+		sections.push(`Console output:\n${result.logs.map((entry) => `- ${entry}`).join("\n")}`);
+	}
+
+	if (result.result === undefined) {
+		sections.push("Return value: undefined. Use `return` in the snippet when you need a final value.");
+	} else {
+		sections.push(`Return value:\n${formatResult(result.result)}`);
+	}
+
+	return truncateOutput(sections.join("\n\n"));
+}
+
 const MAX_SERIALIZATION_DEPTH = 6;
 const MAX_ARRAY_ITEMS = 100;
 const MAX_OBJECT_KEYS = 100;
@@ -165,6 +202,35 @@ export async function executeJavaScriptSnippet(
 	const start = now();
 	const fn = new AsyncFunction("input", "console", `"use strict";\n${payload.code}`);
 	const result = await fn(payload.input, executionConsole);
+
+	return {
+		durationMs: Math.max(0, Math.round(now() - start)),
+		logs,
+		result: normalizeValue(result),
+	};
+}
+
+/**
+ * Run a snippet on the *main thread* with an arbitrary set of extra bindings in
+ * scope (e.g. a plugin's `api` object and `app`). Unlike {@link executeJavaScriptSnippet},
+ * which runs in a sandboxed worker, this has full main-thread access — used by
+ * the per-plugin code-exec integration tools where reaching `app.plugins.plugins`
+ * is the whole point. Console output and the return value are captured/normalized
+ * the same way.
+ *
+ * @param bindings extra named values injected into the snippet's scope
+ */
+export async function executeJavaScriptSnippetWithScope(
+	payload: JavaScriptExecutionPayload,
+	bindings: Record<string, unknown>,
+): Promise<JavaScriptExecutionResult> {
+	const logs: string[] = [];
+	const executionConsole = createConsoleProxy(logs);
+	const start = now();
+	const bindingNames = Object.keys(bindings);
+	const bindingValues = bindingNames.map((name) => bindings[name]);
+	const fn = new AsyncFunction("input", "console", ...bindingNames, `"use strict";\n${payload.code}`);
+	const result = await fn(payload.input, executionConsole, ...bindingValues);
 
 	return {
 		durationMs: Math.max(0, Math.round(now() - start)),

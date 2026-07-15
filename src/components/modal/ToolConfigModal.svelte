@@ -54,11 +54,6 @@ let maxContentLength = $state(
 		(defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
 		0,
 );
-let includeMetadata = $state(
-	(initialToolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
-		(defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
-		true,
-);
 let maxResults = $state(
 	(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
 		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
@@ -204,7 +199,6 @@ interface ToolConfigSnapshot {
 	description: string;
 	promptGuidance: string;
 	maxContentLength: number;
-	includeMetadata: boolean;
 	maxResults: number;
 	algorithm: SearchAlgorithm;
 	searchShowPath: boolean;
@@ -234,10 +228,6 @@ const initialSnapshot: ToolConfigSnapshot = {
 		(initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
 		(defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
 		0,
-	includeMetadata:
-		(initialToolConfig?.settings as { includeMetadata?: boolean })?.includeMetadata ??
-		(defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ??
-		true,
 	maxResults:
 		(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
 		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
@@ -280,7 +270,6 @@ const defaultSnapshot: ToolConfigSnapshot = {
 	description: defaultConfig.description,
 	promptGuidance: defaultConfig.promptGuidance ?? "",
 	maxContentLength: (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ?? 0,
-	includeMetadata: (defaultConfig.settings as { includeMetadata?: boolean })?.includeMetadata ?? true,
 	maxResults: (defaultConfig.settings as { maxResults?: number })?.maxResults ?? 10,
 	algorithm: (defaultConfig.settings as { algorithm?: SearchAlgorithm })?.algorithm ?? "lexical",
 	searchShowPath: pluginData.searchShowPath,
@@ -310,7 +299,6 @@ const isDirty = $derived.by(() => {
 		description,
 		promptGuidance,
 		maxContentLength,
-		includeMetadata,
 		maxResults,
 		algorithm,
 		searchShowPath,
@@ -338,7 +326,6 @@ const isAtDefault = $derived.by(() => {
 			? (defaultConfig.promptGuidance ?? "")
 			: promptGuidance,
 		maxContentLength,
-		includeMetadata,
 		maxResults,
 		algorithm,
 		searchShowPath,
@@ -365,7 +352,6 @@ const toolDisplayNames: Record<BuiltInToolId, string> = {
 	get_all_tags: "Get All Tags",
 	get_properties: "Get Properties",
 	execute_javascript: "Execute JavaScript",
-	execute_dataview_query: "Execute Dataview Query",
 	manage_notes: "Manage Notes",
 	fetch_url: "Fetch URL",
 	web_search: "Web Search",
@@ -415,8 +401,6 @@ function handleSave() {
 		if (imageProcessor !== undefined) settings.imageProcessor = imageProcessor;
 		if (pdfProcessor !== undefined) settings.pdfProcessor = pdfProcessor;
 		updatedConfig.settings = settings as ToolConfig["settings"];
-	} else if (capturedToolId === "execute_dataview_query") {
-		updatedConfig.settings = { includeMetadata };
 	} else if (capturedToolId === "manage_notes") {
 		updatedConfig.settings = { allowCreate, allowUpdate, allowDelete, allowMove };
 		pluginData.diffViewMode = diffViewMode;
@@ -452,9 +436,6 @@ function handleResetToDefault() {
 		pdfProcessor = undefined;
 		imageProcessorMode = "auto";
 		pdfProcessorMode = "auto";
-	} else if (capturedToolId === "execute_dataview_query" && defaultConfig.settings) {
-		const settings = defaultConfig.settings as { includeMetadata: boolean };
-		includeMetadata = settings.includeMetadata;
 	} else if (capturedToolId === "manage_notes" && defaultConfig.settings) {
 		const settings = defaultConfig.settings as {
 			allowCreate: boolean;
@@ -645,12 +626,6 @@ function handleResetToDefault() {
             </Button>
           </div>
         {/if}
-      </ModalField>
-    </SettingGroup>
-  {:else if capturedToolId === "execute_dataview_query"}
-    <SettingGroup heading="Dataview Settings">
-      <ModalField label="Include Metadata" desc="Include file metadata in query results." inline>
-        <Toggle checked={includeMetadata} onchange={(checked) => (includeMetadata = checked)} />
       </ModalField>
     </SettingGroup>
   {:else if capturedToolId === "manage_notes"}

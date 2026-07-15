@@ -93,17 +93,6 @@ describe("buildToolOutputRenderModel", () => {
 		expect(model.payload.label).toBe("page(s) 2 of 4");
 	});
 
-	it("renders execute_dataview_query outputs as a specialized model", () => {
-		const model = buildToolOutputRenderModel("execute_dataview_query", "| File |\n| --- |\n| [[Welcome]] |", {
-			query: 'TABLE file.name FROM "Projects"',
-		});
-
-		expect(model.kind).toBe("execute_dataview_query");
-		if (model.kind !== "execute_dataview_query") return;
-		expect(model.payload.query).toBe('TABLE file.name FROM "Projects"');
-		expect(model.payload.state).toBe("success");
-	});
-
 	it("renders execute_javascript outputs as a specialized model", () => {
 		const model = buildToolOutputRenderModel(
 			"execute_javascript",

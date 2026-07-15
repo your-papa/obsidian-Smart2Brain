@@ -57,12 +57,6 @@ interface ReadContentPayload {
 	truncated?: boolean;
 }
 
-interface ExecuteDataviewPayload {
-	query?: string;
-	markdown: string;
-	state: "success" | "empty" | "error";
-}
-
 interface ExecuteJavaScriptPayload {
 	state: "success" | "error";
 	durationMs?: number;
@@ -138,11 +132,6 @@ export type ToolOutputRenderModel =
 	| {
 			kind: "read_content";
 			payload: ReadContentPayload;
-			rawText: string;
-	  }
-	| {
-			kind: "execute_dataview_query";
-			payload: ExecuteDataviewPayload;
 			rawText: string;
 	  }
 	| {
@@ -250,14 +239,6 @@ function buildSpecializedStringModel(
 		}
 	}
 
-	if (toolName === "execute_dataview_query") {
-		return {
-			kind: "execute_dataview_query",
-			payload: buildDataviewPayload(trimmed, input),
-			rawText: trimmed,
-		};
-	}
-
 	if (toolName === "execute_javascript") {
 		return {
 			kind: "execute_javascript",
@@ -300,14 +281,6 @@ function buildStructuredToolSpecificModel(
 
 	if (toolName === "list_directory" && isListDirectoryPayload(value)) {
 		return { kind: "list_directory", payload: value, rawText };
-	}
-
-	if (toolName === "execute_dataview_query" && typeof value === "string") {
-		return {
-			kind: "execute_dataview_query",
-			payload: buildDataviewPayload(value, input),
-			rawText,
-		};
 	}
 
 	if (toolName === "execute_javascript" && typeof value === "string") {
@@ -497,23 +470,6 @@ function parseReadContentPayload(value: string): ReadContentPayload | undefined 
 	}
 
 	return undefined;
-}
-
-function buildDataviewPayload(markdown: string, input?: Record<string, unknown> | null): ExecuteDataviewPayload {
-	const query = typeof input?.query === "string" ? input.query : undefined;
-	const trimmed = markdown.trim();
-	let state: ExecuteDataviewPayload["state"] = "success";
-	if (trimmed.startsWith("Error")) {
-		state = "error";
-	} else if (trimmed === "Query executed successfully but returned no results.") {
-		state = "empty";
-	}
-
-	return {
-		query,
-		markdown,
-		state,
-	};
 }
 
 function buildExecuteJavaScriptPayload(

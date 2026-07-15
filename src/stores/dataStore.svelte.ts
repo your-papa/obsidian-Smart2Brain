@@ -296,15 +296,6 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		promptGuidance:
 			"Use this for calculations, reshaping JSON, filtering arrays, parsing structured text, or other logic-heavy transformations. The code runs in an isolated worker without Obsidian APIs, so do not use it for note edits or vault access.",
 	},
-	execute_dataview_query: {
-		enabled: true,
-		name: "execute_dataview_query",
-		description:
-			"Execute an Obsidian Dataview query (DQL) and return the results in Markdown format. Use this to query notes, metadata, tags, and more using the Dataview Query Language.",
-		settings: {
-			includeMetadata: true,
-		},
-	},
 	manage_notes: {
 		enabled: true,
 		name: "manage_notes",
@@ -937,6 +928,28 @@ export class PluginDataStore {
 			};
 			this.saveSettings();
 		}
+	}
+
+	// --- Per-plugin Code-Exec Integrations ---
+
+	/**
+	 * Check whether a per-plugin code-exec integration is enabled for an agent.
+	 * Defaults to `false` — integrations are disabled until the user approves them
+	 * (contrast built-in tools, which default enabled).
+	 */
+	isAgentPluginExecEnabled(agentId: string, toolId: string): boolean {
+		const agent = this.#data.agents[agentId];
+		return agent?.pluginExecTools?.[toolId] ?? false;
+	}
+
+	/**
+	 * Set the enabled state of a per-plugin code-exec integration for an agent.
+	 */
+	setAgentPluginExecEnabled(agentId: string, toolId: string, enabled: boolean): void {
+		const agent = this.#data.agents[agentId];
+		if (!agent) return;
+		(agent.pluginExecTools ??= {})[toolId] = enabled;
+		this.saveSettings();
 	}
 
 	// --- Agent-specific Subagent References ---
@@ -1918,6 +1931,7 @@ function normalizeAgent(agent: AgentConfig): void {
 
 	agent.skills ??= {};
 	agent.mcpServers ??= {};
+	agent.pluginExecTools ??= {};
 	agent.systemPrompt ??= BASE_SYSTEM_PROMPT;
 	agent.summarizationModel ??= null;
 	agent.titleModel ??= null;

@@ -6,7 +6,7 @@ import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { READ_CONTENT_GUIDANCE_DEFAULTS, getData, getReadContentGuidance } from "../stores/dataStore.svelte";
-import type { BuiltInToolId, AgentConfig } from "../types/plugin";
+import { VAULT_TOOL_IDS, WEB_TOOL_IDS, type BuiltInToolId, type AgentConfig } from "../types/plugin";
 import { VIEW_TYPE_CHAT } from "../views/chat/Chat";
 import { lookupModelInfo } from "../providers/modelsDevApi";
 import { fetchOllamaModelsInfo } from "../providers/ollamaModels";
@@ -44,8 +44,8 @@ import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
 import { BASE_SYSTEM_PROMPT } from "./prompts";
 import { LangSmithTelemetry, type Telemetry } from "./telemetry";
-import { createExecuteDataviewTool } from "./tools/executeDataview";
 import { createExecuteJavaScriptTool } from "./tools/executeJavaScript";
+import { createPluginApiExecTool } from "./tools/executePluginApi";
 import { createFetchUrlTool } from "./tools/fetchUrl";
 import { createGetAllTagsTool } from "./tools/getAllTags";
 import { createWebSearchTool } from "./tools/webSearch";
@@ -56,6 +56,14 @@ import { createManageNotesTool } from "./tools/manageNotes";
 import { createReadContentTool } from "./tools/readContent";
 import { createSearchNotesTool } from "./tools/searchNotes";
 import { setCurrentThreadId } from "./tools/runContext";
+import {
+	CURATED_PLUGIN_INTEGRATIONS,
+	type PluginIntegration,
+	pluginExposesApi,
+	S2B_SELF_INTEGRATION,
+	toExecToolId,
+	toRuntimeToolName,
+} from "./integrations/pluginIntegrations";
 
 import { getRegistry } from "../providers/registry";
 
@@ -428,6 +436,26 @@ export class AgentManager {
 			prompt += `\n\n# Tool Guidelines\n${guidelinesSection}`;
 		}
 
+		// Per-plugin code-exec integrations the user has approved for this agent.
+		const enabledIntegrations = this.resolvePluginIntegrations().filter(
+			(integ) =>
+				this.isPluginEnabled(integ.pluginId) &&
+				(selectedAgent.pluginExecTools?.[toExecToolId(integ.pluginId)] ?? false),
+		);
+		if (enabledIntegrations.length > 0) {
+			const integrationsSection = enabledIntegrations
+				.map(
+					(integ) =>
+						`## ${integ.displayName}\n- Tool: \`${toRuntimeToolName(integ.pluginId)}\` runs JavaScript against this plugin's \`api\` on the main thread.\n- ${
+							integ.skillId
+								? `Load the "${integ.skillId}" skill first to learn the API's shape.`
+								: `Introspect this plugin's \`api\` (e.g. \`return Object.keys(api)\`) before calling it.`
+						}\n- Not sandboxed and awaited work times out — keep snippets simple and prefer read-only calls unless the user asked to modify data.`,
+				)
+				.join("\n\n");
+			prompt += `\n\n# Plugin Integrations\nYou can script these installed plugins via their public API:\n\n${integrationsSection}`;
+		}
+
 		const skillsService = this.plugin.skillsService;
 		if (!skillsService?.isDiscovered()) {
 			return prompt;
@@ -442,8 +470,13 @@ export class AgentManager {
 			enableState[name] = agentSkills[name]?.enabled ?? true;
 		}
 
-		// Add available skills context XML (for skill discovery via load_skill tool)
-		const contextXml = skillsService.generateContextXml(enableState);
+		// Add available skills context XML (for skill discovery via load_skill tool).
+		// Gate on plugin availability so skills for not-enabled plugins aren't advertised.
+		const contextXml = skillsService.generateContextXml(
+			enableState,
+			(id) => this.isPluginEnabled(id),
+			(id) => this.isInternalPluginEnabled(id),
+		);
 		if (contextXml) {
 			prompt +=
 				"\n\n# Skills\nThe following available_skills section lists skills that can help you with specific tasks. When you need detailed instructions for a skill, use the `load_skill` tool with the skill name to retrieve the full instructions. Only load skills when you actually need them for a task.";
@@ -665,7 +698,6 @@ export class AgentManager {
 			["list_directory", () => createListDirectoryTool(this.plugin.app)],
 			["get_all_tags", () => createGetAllTagsTool(this.plugin.app)],
 			["execute_javascript", () => createExecuteJavaScriptTool()],
-			["execute_dataview_query", () => createExecuteDataviewTool(this.plugin.app)],
 			["get_properties", () => createGetPropertiesTool(this.plugin.app)],
 			[
 				"read_content",
@@ -680,6 +712,16 @@ export class AgentManager {
 			if (isToolEnabled(toolId)) tools.push(factory());
 		}
 
+		// Per-plugin code-exec integrations: one tool per enabled+approved plugin
+		// that exposes an `api`. Double-gated — the plugin must be enabled (so its
+		// runtime api exists) AND the user must have approved the integration for
+		// this agent (defaults off).
+		for (const integ of this.resolvePluginIntegrations()) {
+			if (!this.isPluginEnabled(integ.pluginId)) continue;
+			if (!(agentCfg.pluginExecTools?.[toExecToolId(integ.pluginId)] ?? false)) continue;
+			tools.push(createPluginApiExecTool(this.plugin.app, integ.pluginId, integ.displayName));
+		}
+
 		// Add load_skill tool if skillsService is available and has skills
 		if (this.plugin.skillsService?.isDiscovered()) {
 			const skillsCache = this.plugin.skillsService.getCachedSkills();
@@ -689,6 +731,123 @@ export class AgentManager {
 		}
 
 		return tools;
+	}
+
+	/**
+	 * Resolves the list of plugin integrations offered as per-plugin code-exec
+	 * tools: curated entries whose plugin is enabled and exposes an `api`, unioned
+	 * with auto-discovered enabled plugins that expose an `api` but aren't curated.
+	 * De-duped by pluginId. Only enabled plugins are considered — a disabled
+	 * plugin has no runtime api to script against.
+	 *
+	 * Exposed publicly so the settings UI can render the same list users approve.
+	 */
+	resolvePluginIntegrations(): PluginIntegration[] {
+		const app = this.plugin.app;
+		const byId = new Map<string, PluginIntegration>();
+
+		// Smart Second Brain scripts itself: always offer the self-integration
+		// (our own plugin, api guaranteed present via main.ts).
+		byId.set(S2B_SELF_INTEGRATION.pluginId, S2B_SELF_INTEGRATION);
+
+		for (const integ of CURATED_PLUGIN_INTEGRATIONS) {
+			if (this.isPluginEnabled(integ.pluginId) && pluginExposesApi(app, integ.pluginId)) {
+				byId.set(integ.pluginId, integ);
+			}
+		}
+
+		// @ts-ignore - Obsidian plugin API (not in official types)
+		const enabledIds: string[] = Array.from(app.plugins?.enabledPlugins ?? []);
+		for (const pluginId of enabledIds) {
+			if (byId.has(pluginId)) continue;
+			if (!pluginExposesApi(app, pluginId)) continue;
+			// @ts-ignore - Obsidian plugin API (not in official types)
+			const displayName = app.plugins?.manifests?.[pluginId]?.name ?? pluginId;
+			byId.set(pluginId, { pluginId, displayName });
+		}
+
+		// Attach a skillId to any integration a discovered skill links to (curated skills,
+		// or a per-plugin skill generated when the user enabled an auto-discovered plugin),
+		// so the prompt points the agent at the right skill to load.
+		const skillsService = this.plugin.skillsService;
+		if (skillsService?.isDiscovered()) {
+			for (const [skillName, metadata] of skillsService.getCachedSkills()) {
+				if (!metadata.linkedPluginId) continue;
+				const integ = byId.get(metadata.linkedPluginId);
+				if (integ && !integ.skillId) {
+					byId.set(metadata.linkedPluginId, { ...integ, skillId: skillName });
+				}
+			}
+		}
+
+		return Array.from(byId.values());
+	}
+
+	/**
+	 * Count the capabilities switched on for an agent, using the "one capability card =
+	 * one capability" model the agent editor renders:
+	 *   - the Core · Vault exploration card counts as 1 when any built-in tool OR the
+	 *     Smart Second Brain core API skill is enabled;
+	 *   - each core / community / auto-discovered plugin card counts as 1 when its skill
+	 *     (or, for an uncurated auto-discovered plugin, its exec tool) is enabled and the
+	 *     linked plugin is available;
+	 *   - each user-authored custom skill and each enabled MCP server counts as 1.
+	 *
+	 * This is the single source of truth for the count shown in both the editor's rail
+	 * badge and the agents-list summary, so the two never drift.
+	 */
+	countEnabledCapabilities(agentId: string): number {
+		const agent = getData().agents[agentId];
+		if (!agent) return 0;
+		const s2bPluginId = S2B_SELF_INTEGRATION.pluginId;
+
+		// Core card: any vault-exploration tool on, or the S2B core API skill on.
+		const anyVaultToolOn = VAULT_TOOL_IDS.some((toolId) => agent.toolsConfig[toolId]?.enabled ?? true);
+		// Web card (separate capability): any web tool on.
+		const anyWebToolOn = WEB_TOOL_IDS.some((toolId) => agent.toolsConfig[toolId]?.enabled ?? true);
+		const skillsService = this.plugin.skillsService;
+		const cachedSkills = skillsService?.isDiscovered() ? skillsService.getCachedSkills() : new Map();
+
+		const skillEnabled = (skillId: string) => agent.skills[skillId]?.enabled ?? true;
+		const skillAvailable = (metadata: { corePluginId?: string; linkedPluginId?: string }) => {
+			if (metadata.corePluginId) return this.isInternalPluginEnabled(metadata.corePluginId);
+			if (metadata.linkedPluginId) return this.isPluginEnabled(metadata.linkedPluginId);
+			return true;
+		};
+
+		const coreApiSkillOn = Array.from(cachedSkills.entries()).some(
+			([skillId, metadata]) => metadata.linkedPluginId === s2bPluginId && skillEnabled(skillId),
+		);
+		let count = anyVaultToolOn || coreApiSkillOn ? 1 : 0;
+		if (anyWebToolOn) count++;
+
+		// Plugin / community cards: enabled + available skills, excluding the S2B core
+		// skill (folded into the Core card above) and user-authored custom skills.
+		const coveredPluginIds = new Set<string>();
+		for (const [skillId, metadata] of cachedSkills) {
+			if (metadata.linkedPluginId) coveredPluginIds.add(metadata.linkedPluginId);
+			if (metadata.linkedPluginId === s2bPluginId) continue;
+			if (metadata.category === "custom") continue;
+			if (skillEnabled(skillId) && skillAvailable(metadata)) count++;
+		}
+
+		// Auto-discovered plugin cards: an api-plugin with no skill covering it yet counts
+		// when its exec tool is enabled (enabling it in the editor also generates a skill).
+		for (const integ of this.resolvePluginIntegrations()) {
+			if (integ.skillId) continue;
+			if (coveredPluginIds.has(integ.pluginId)) continue;
+			if (agent.pluginExecTools?.[toExecToolId(integ.pluginId)] ?? false) count++;
+		}
+
+		// Custom skills.
+		for (const [skillId, metadata] of cachedSkills) {
+			if (metadata.category === "custom" && skillEnabled(skillId)) count++;
+		}
+
+		// MCP servers.
+		count += Object.values(agent.mcpServers).filter((server) => server.enabled).length;
+
+		return count;
 	}
 
 	/**
