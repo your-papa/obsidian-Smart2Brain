@@ -19,7 +19,6 @@ import Icon from "../ui/Icon.svelte";
 import PickerOptionRow from "../ui/PickerOptionRow.svelte";
 import PickerPopover from "../ui/PickerPopover.svelte";
 import Search from "../ui/Search.svelte";
-import SlidingTabs from "../ui/SlidingTabs.svelte";
 import Text from "../ui/Text.svelte";
 import Toggle from "../ui/Toggle.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
@@ -78,22 +77,6 @@ let agents = $derived(pluginData.agents);
 let selectedAgent = $derived(agents[agentId]);
 let agentIconQuery = $state("");
 let isAgentIconPickerOpen = $state(false);
-
-type SectionId = "general" | "capabilities" | "subagents";
-
-let activeSection = $state<SectionId>("general");
-
-interface SectionDef {
-	id: SectionId;
-	label: string;
-	icon: string;
-}
-
-const SECTIONS: SectionDef[] = [
-	{ id: "general", label: "General", icon: "sliders-horizontal" },
-	{ id: "capabilities", label: "Capabilities", icon: "blocks" },
-	{ id: "subagents", label: "Subagents", icon: "git-branch" },
-];
 
 async function applyChanges() {
 	try {
@@ -800,42 +783,14 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
 	return mcpServerTools[serverId];
 }
 
-// --- Live counts for the section nav rail ---
-
-// The Capabilities count is "how many capability CARDS are switched on", not how many
-// individual items — one card = one capability. AgentManager.countEnabledCapabilities is
-// the single source of truth (shared with the agents-list summary so the two never drift).
-// Reference the reactive signals it reads under the hood so the derived recomputes: the
-// selected agent's config (toggling any tool/skill/server), and skillsRefreshCounter
-// (skill discovery / plugin install/enable while the modal is open).
-const capabilitiesCount = $derived.by(() => {
-	void skillsRefreshCounter;
-	void selectedAgent?.toolsConfig;
-	void selectedAgent?.skills;
-	void selectedAgent?.mcpServers;
-	void selectedAgent?.pluginExecTools;
-	return plugin.agentManager?.countEnabledCapabilities(agentId) ?? 0;
-});
 // Each card's header shows how many of its tools are on, over the tools that can actually be
 // enabled here (uninstalled-plugin tools are excluded from both the numerator and denominator).
 const vaultSummary = $derived(`${vaultEnabledCount} of ${vaultAvailableCount} on`);
 const webSummary = $derived(`${webEnabledCount} of ${webAvailableCount} on`);
-
-const sectionCounts = $derived<Partial<Record<SectionId, number>>>({
-	capabilities: capabilitiesCount,
-	subagents: subAgentIds.length,
-});
 </script>
 
 {#if selectedAgent}
   <div class="agent-editor-container">
-    <SlidingTabs bind:value={activeSection} tabs={SECTIONS} class="agent-editor-layout">
-      {#snippet trailing(section)}
-        {#if sectionCounts[section.id] !== undefined && sectionCounts[section.id]! > 0}
-          <span class="agent-tab-count"><Badge label={String(sectionCounts[section.id])} tone="muted" /></span>
-        {/if}
-      {/snippet}
-
     <div class="agent-editor-pane">
       <!-- Shared per-tool row (used by the Core · Vault and Web capability cards). Declared at
            the pane level so it isn't mistaken for a prop of an enclosing component. -->
@@ -875,7 +830,7 @@ const sectionCounts = $derived<Partial<Record<SectionId, number>>>({
         </ManagedEntityItem>
       {/snippet}
 
-      {#if activeSection === "general"}
+      <section class="agent-editor-section">
         <SettingGroup heading="General">
           <div class="agent-overview-identity">
             <PickerPopover
@@ -1034,16 +989,17 @@ const sectionCounts = $derived<Partial<Record<SectionId, number>>>({
             />
           </SettingItem>
         </SettingGroup>
-      {:else if activeSection === "capabilities"}
-        <SettingGroup heading="Capabilities">
+      </section>
+
+      <section class="agent-editor-section">
+        <SettingGroup heading="Core">
           <div class="setting-item-description mb-3">
-            Everything this agent can do — built-in tools, skills loaded on demand, plugin integrations,
-            and MCP servers. Expand a capability to configure the individual items inside it.
+            Built-in capabilities every agent can use — vault exploration and web access.
           </div>
 
-          <!-- Card 1: Core · Vault exploration — the built-in vault tools. -->
+          <!-- Card 1: Vault exploration — the built-in vault tools. -->
           <CapabilityCard
-            title="Core · Vault exploration"
+            title="Vault exploration"
             description="Search, read, edit, and explore your vault with the built-in tools."
             icon="compass"
             summary={vaultSummary}
@@ -1073,8 +1029,8 @@ const sectionCounts = $derived<Partial<Record<SectionId, number>>>({
             {/snippet}
           </CapabilityCard>
 
-
-          <!-- Cards 2: one flat card per Obsidian core-plugin skill (Canvas, Bases, …). -->
+          <!-- Cards 1c: one flat card per Obsidian core-plugin skill (Canvas, Bases, …). These
+               ship with Obsidian, so they belong with the other built-in capabilities. -->
           {#each coreSkills as ext (ext.id)}
             {@const pluginAvailable = isSkillPluginAvailable(ext)}
             <CapabilityCard
@@ -1087,7 +1043,6 @@ const sectionCounts = $derived<Partial<Record<SectionId, number>>>({
               onToggleMaster={() => toggleSkill(ext.id, !ext.enabled)}
             >
               {#snippet badges()}
-                <Badge label="Core plugin" tone="muted" />
                 {#if !pluginAvailable}
                   <Badge label="Core plugin disabled" tone="warning" />
                 {/if}
@@ -1103,6 +1058,15 @@ const sectionCounts = $derived<Partial<Record<SectionId, number>>>({
               {/snippet}
             </CapabilityCard>
           {/each}
+        </SettingGroup>
+      </section>
+
+      <section class="agent-editor-section">
+        <SettingGroup heading="Integrations">
+          <div class="setting-item-description mb-3">
+            Capabilities backed by your installed community plugins. Each bundles a skill (and, where
+            available, code-scripting) behind one switch.
+          </div>
 
           <!-- Cards 3: one flat card per community-plugin skill (Dataview, Tasks, …). -->
           {#each pluginSkills as ext (ext.id)}
@@ -1118,7 +1082,6 @@ const sectionCounts = $derived<Partial<Record<SectionId, number>>>({
               onToggleMaster={() => toggleSkill(ext.id, !ext.enabled)}
             >
               {#snippet badges()}
-                <Badge label="Community plugin" tone="muted" />
                 {#if !pluginAvailable}
                   <Badge
                     label="Not enabled"
@@ -1153,13 +1116,46 @@ const sectionCounts = $derived<Partial<Record<SectionId, number>>>({
               onToggleMaster={(next) => void toggleAutoIntegration(integ.pluginId, integ.displayName, next)}
             >
               {#snippet badges()}
-                <Badge label="Auto-discovered" tone="muted" />
                 {#if integ.execEnabled}
                   <Badge label="API scripting" tone="muted" />
                 {/if}
               {/snippet}
             </CapabilityCard>
           {/each}
+        </SettingGroup>
+      </section>
+
+      <section class="agent-editor-section">
+        <SettingGroup heading="Subagents">
+          <div class="setting-item-description mb-3">
+            Other agents this one can delegate to via the <code>task</code> tool — each subagent runs
+            with its own model, tools, and prompt. Enabling this agent itself delegates to a fresh,
+            isolated-context copy of it (useful for keeping the main conversation clean). Delegation is
+            one level deep (a subagent's own subagents are ignored).
+          </div>
+          {#each subAgentCandidates as candidate (candidate.id)}
+            {@const hasModel = !!candidate.chatModel}
+            {@const isEnabled = isSubAgentEnabled(candidate.id)}
+            <CapabilityCard
+              title={candidate.id === agentId ? `${candidate.name} (this agent)` : candidate.name}
+              description={hasModel
+                ? getSubAgentModelLabel(candidate)
+                : "No chat model configured — cannot be used as a subagent"}
+              icon={candidate.icon?.trim() || DEFAULT_AGENT_ICON}
+              expandable={false}
+              masterEnabled={isEnabled}
+              masterDisabled={!hasModel && !isEnabled}
+              onToggleMaster={() => handleSubAgentToggle(candidate.id)}
+            />
+          {/each}
+        </SettingGroup>
+      </section>
+
+      <section class="agent-editor-section">
+        <SettingGroup heading="Custom">
+          <div class="setting-item-description mb-3">
+            Capabilities you bring yourself — your own skills and MCP servers.
+          </div>
 
           <!-- Card 5: Custom capabilities — the user's own skills + MCP servers, with a "+ Add" menu. -->
           <CapabilityCard
@@ -1334,37 +1330,8 @@ const sectionCounts = $derived<Partial<Record<SectionId, number>>>({
             {/snippet}
           </CapabilityCard>
         </SettingGroup>
-      {:else if activeSection === "subagents"}
-        <SettingGroup heading="Subagents">
-          <div class="setting-item-description mb-3">
-            Enable agents as subagents. This agent can delegate tasks to them via the
-            <code>task</code> tool — each subagent runs with its own model, tools, and prompt. Enabling
-            this agent itself delegates to a fresh, isolated-context copy of it (useful for keeping the
-            main conversation clean). Delegation is one level deep (a subagent's own subagents are ignored).
-          </div>
-          {#each subAgentCandidates as candidate (candidate.id)}
-            {@const hasModel = !!candidate.chatModel}
-            {@const isEnabled = isSubAgentEnabled(candidate.id)}
-            <ManagedEntityItem
-              class="subagent-entity"
-              name={candidate.id === agentId ? `${candidate.name} (this agent)` : candidate.name}
-              desc={hasModel
-                ? getSubAgentModelLabel(candidate)
-                : "No chat model configured — cannot be used as a subagent"}
-            >
-              {#snippet actions()}
-                <Toggle
-                  checked={isEnabled}
-                  disabled={!hasModel && !isEnabled}
-                  onchange={() => handleSubAgentToggle(candidate.id)}
-                />
-              {/snippet}
-            </ManagedEntityItem>
-          {/each}
-        </SettingGroup>
-      {/if}
+      </section>
     </div>
-    </SlidingTabs>
   </div>
 {/if}
 
@@ -1375,32 +1342,15 @@ const sectionCounts = $derived<Partial<Record<SectionId, number>>>({
     container-type: inline-size;
   }
 
-  /* bits-ui forwards this class to the rendered Tabs.Root element, so it must be
-     :global (Svelte can't see it statically through the component boundary). */
-  :global(.agent-editor-layout) {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    min-height: 0;
-  }
-
-  /* Tab label + icon, matching the main S2B settings tab bar. */
-  .agent-tab-count {
-    flex-shrink: 0;
-  }
-
-  /* On the accent-filled active tab, make the count chip read as on-accent. */
-  :global([data-tabs-trigger][data-state="active"]) .agent-tab-count :global(.badge) {
-    background: color-mix(in srgb, var(--text-on-accent) 22%, transparent);
-    border-color: color-mix(in srgb, var(--text-on-accent) 35%, transparent);
-    color: var(--text-on-accent);
-  }
-
   .agent-editor-pane {
-    flex: 1 1 auto;
-    min-width: 0;
+    height: 100%;
     overflow-y: auto;
     padding-bottom: 12px;
+  }
+
+  /* Spacing between the capability bands. */
+  .agent-editor-section + .agent-editor-section {
+    margin-top: 24px;
   }
 
   .agent-overview-identity {

@@ -21,7 +21,7 @@ export class AgentEditorModal extends Modal {
 		this.setTitle("Edit Agent");
 
 		this.restoreLayout = applyModalLayout(this, {
-			width: "min(1100px, 94vw)",
+			width: "min(720px, 94vw)",
 			maxWidth: "94vw",
 			height: "90vh",
 			contentOverflow: "auto",
