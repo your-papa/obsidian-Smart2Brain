@@ -24,6 +24,12 @@ import Button from "../ui/Button.svelte";
 const data = getData();
 const plugin = getPlugin();
 const models = useAvailableModels();
+
+interface Props {
+	threadPath?: string | null;
+}
+const { threadPath = null }: Props = $props();
+
 const openRouterModels = $derived(models.openRouterModels);
 
 // AI vendor definitions for filtering (excludes routing/local providers like Ollama, OpenRouter)
@@ -227,7 +233,7 @@ function getModelDisplayName(model: ChatModel): string {
 async function handleSelect(model: ChatModel) {
 	// Check if switching to a non-trusted provider with private notes in history
 	if (!data.isProviderTrusted(model.provider)) {
-		const messages = getMessenger()?.session?.messages;
+		const messages = getMessenger()?.sessionFor(threadPath)?.messages;
 		if (messages && chatHistoryContainsPrivateNotes(messages)) {
 			const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
 			if (!confirmed) return;

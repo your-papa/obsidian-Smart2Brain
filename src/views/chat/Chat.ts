@@ -3,12 +3,16 @@ import ChatViewComponent from "./Chat.svelte";
 import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";
 import { getMessenger } from "../../stores/chatStore.svelte";
+import { ThreadPathStore } from "./threadPathStore.svelte";
 
 export const VIEW_TYPE_CHAT = "smart-second-brain-chat";
 
 export class ChatView extends FileView {
 	plugin!: SecondBrainPlugin;
 	component!: ChatViewComponent;
+	/** Reactive per-tab thread path. Passed into Chat.svelte so each tab
+	 * renders its own session rather than following the global active pointer. */
+	private readonly threadPathStore = new ThreadPathStore();
 
 	// Keep constructor signature stable for current registrations
 	constructor(leaf: WorkspaceLeaf, plugin: SecondBrainPlugin) {
@@ -31,6 +35,7 @@ export class ChatView extends FileView {
 
 	async onLoadFile(file: TFile): Promise<void> {
 		await super.onLoadFile(file);
+		this.threadPathStore.current = file.path;
 		const messenger = getMessenger();
 		// Await the session load so callers that open a chat and then submit
 		// (e.g. "Ask agent" from the search modal) find a ready session rather
@@ -41,7 +46,7 @@ export class ChatView extends FileView {
 	protected async onOpen(): Promise<void> {
 		this.component = mount(ChatViewComponent, {
 			target: this.contentEl,
-			props: {},
+			props: { threadPathStore: this.threadPathStore },
 		});
 		return super.onOpen();
 	}

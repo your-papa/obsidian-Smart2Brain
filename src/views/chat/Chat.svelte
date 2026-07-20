@@ -5,6 +5,15 @@ import MessageContainer from "../../components/chat/MessageContainer.svelte";
 import { getMessenger } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
+import type { ThreadPathStore } from "./threadPathStore.svelte";
+
+interface Props {
+	threadPathStore: ThreadPathStore;
+}
+
+const { threadPathStore }: Props = $props();
+
+const threadPath = $derived(threadPathStore.current);
 
 const plugin = getPlugin();
 
@@ -18,7 +27,7 @@ let dragMessage = $state("Drop files here");
 let dragHasIssue = $state(false);
 
 $effect(() => {
-	const sessionId = messenger?.session?.id ?? null;
+	const sessionId = messenger?.sessionFor(threadPath)?.id ?? null;
 	if (!sessionId || sessionId === lastSessionId) return;
 	lastSessionId = sessionId;
 	input?.focusEditor();
@@ -52,10 +61,11 @@ async function handleRootDrop(event: DragEvent) {
     ondrop={handleRootDrop}
   >
     {#if messenger}
-      <MessageContainer bind:this={messageContainer} {messenger} />
+      <MessageContainer bind:this={messageContainer} {messenger} {threadPath} />
       <Input
         bind:this={input}
         {messenger}
+        {threadPath}
         dropTargetMode="view"
         externalDragActive={isDragging}
         onDragStateChange={(state) => {

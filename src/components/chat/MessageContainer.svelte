@@ -25,6 +25,7 @@ import { icon } from "../../utils/utils";
 
 interface Props {
 	messenger: Messenger;
+	threadPath: string | null;
 }
 
 function linkPathForReference(path: string, viewType?: string, context?: string): string {
@@ -36,11 +37,11 @@ function linkPathForReference(path: string, viewType?: string, context?: string)
 	return `${path}#page=${pageLabel}`;
 }
 
-const { messenger }: Props = $props();
+const { messenger, threadPath }: Props = $props();
 const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
 
 const messages = $derived.by(() => {
-	return messenger.session?.messages;
+	return messenger.sessionFor(threadPath)?.messages;
 });
 
 // Edit mode state
@@ -75,7 +76,7 @@ async function regenerateResponse(messageId: UUIDv7) {
 
 async function retryLastError(messageId: UUIDv7) {
 	try {
-		await messenger.session?.retryLastError(messageId);
+		await messenger.sessionFor(threadPath)?.retryLastError(messageId);
 	} catch (error) {
 		Logger.error("[MessageContainer] Retry failed:", error);
 		new Notice(`Retry failed: ${error instanceof Error ? error.message : "Unknown error"}`);
@@ -597,7 +598,7 @@ $effect(() => {
                 {/if}
               </div>
 
-              {#if index === messages.length - 1 && messenger.session?.summarizingHistory}
+              {#if index === messages.length - 1 && messenger.sessionFor(threadPath)?.summarizingHistory}
                 <div
                   class="summarizing-status flex items-center gap-2 text-sm text-text-muted pl-1"
                 >

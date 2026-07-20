@@ -2359,6 +2359,12 @@ export class Messenger {
 		return this.activeThreadPath ? (this.sessions.get(this.activeThreadPath) ?? null) : null;
 	}
 
+	/** Per-tab session accessor: returns the session for a specific thread path.
+	 * Use this instead of `session` when a component is pinned to a file (e.g. ChatView). */
+	sessionFor(threadPath: string | null): ChatSession | null {
+		return threadPath ? (this.sessions.get(threadPath) ?? null) : null;
+	}
+
 	/** The single running session, if any. */
 	get runningSession(): ChatSession | null {
 		return this.runningThreadPath ? (this.sessions.get(this.runningThreadPath) ?? null) : null;

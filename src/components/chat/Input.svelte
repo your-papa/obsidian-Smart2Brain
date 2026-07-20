@@ -25,6 +25,7 @@ import ContextUsageCircle from "./ContextUsageCircle.svelte";
 import Button from "../ui/Button.svelte";
 interface Props {
 	messenger: Messenger;
+	threadPath: string | null;
 	onFocusChange?: (focused: boolean) => void;
 	onMessageSent?: () => void;
 	onDragStateChange?: (state: DragOverlayState) => void;
@@ -47,12 +48,16 @@ const FULLSCREEN_TRANSITION_MS = 220;
 
 const {
 	messenger,
+	threadPath,
 	onFocusChange,
 	onMessageSent,
 	onDragStateChange,
 	dropTargetMode = "input",
 	externalDragActive = false,
 }: Props = $props();
+
+// Pinned to this tab's own thread — does not follow the global activeThreadPath pointer.
+const session = $derived(messenger.sessionFor(threadPath));
 
 let editorContainer: HTMLDivElement | undefined = $state();
 let attachmentInputEl: HTMLInputElement | undefined = $state();
@@ -159,7 +164,7 @@ const selectedModelSupportsVision = $derived.by(() => {
 });
 
 const contextBreakdown = $derived.by(() => {
-	return estimateContextUsageBreakdown(messenger.session?.getActiveCheckpointMessages() ?? [], inputValue, {
+	return estimateContextUsageBreakdown(session?.getActiveCheckpointMessages() ?? [], inputValue, {
 		systemPrompt: assembledSystemPrompt,
 		pendingAttachmentsCount: attachments.length,
 		pendingVisibleNotesCount: activeVisibleNotes.length,
@@ -173,7 +178,7 @@ const contextUsage = $derived.by(() => {
 });
 
 const canSendMessage = $derived(inputValue.trim().length > 0 || attachments.length > 0);
-const busyElsewhere = $derived(messenger.isBusyElsewhere(messenger.session?.id ?? null));
+const busyElsewhere = $derived(messenger.isBusyElsewhere(session?.id ?? null));
 const busyChatName = $derived.by(() => {
 	const path = messenger.runningThreadPath;
 	if (!path || !busyElsewhere) return null;
@@ -186,10 +191,7 @@ const busyChatName = $derived.by(() => {
 });
 const canSummarizeNow = $derived.by(() => {
 	return Boolean(
-		messenger.session &&
-			messenger.session.messageState === MessageState.idle &&
-			messenger.session.messages.length > 0 &&
-			!busyElsewhere,
+		session && session.messageState === MessageState.idle && session.messages.length > 0 && !busyElsewhere,
 	);
 });
 const showDragActive = $derived(dropTargetMode === "view" ? externalDragActive : isDragging);
@@ -252,10 +254,10 @@ $effect(() => {
 // Waits until the chat session is ready and attachments finish loading and
 // there is something to send, so it works whether or not notes were queued
 // alongside the text — and doesn't drop the send if the session is still
-// loading (the effect re-runs when messenger.session becomes available).
+// loading (the effect re-runs when session becomes available).
 $effect(() => {
 	if (!messenger.pendingAutoSubmit) return;
-	if (!messenger.session) return;
+	if (!session) return;
 	if (savingFiles) return;
 	if (!canSendMessage) return;
 
@@ -473,7 +475,7 @@ function sendMessage() {
 }
 
 async function summarizeNow() {
-	if (!messenger.session) return;
+	if (!session) return;
 	try {
 		await messenger.summarizeHistoryNow();
 	} catch (error) {
@@ -1031,7 +1033,7 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
       <div class="h-icon-xs" use:icon={"refresh-cw"} style="--icon-size: var(--icon-xs)"></div>
     </button>
   {/if}
-  <PendingChangesBar {messenger} />
+  <PendingChangesBar {messenger} {threadPath} />
   <!-- Input wrapper with glow effect -->
   <div
     class="chat-input-wrapper flex flex-col gap-3 bg-background-secondary border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isFullscreen
@@ -1098,7 +1100,7 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
 
     <!-- Actions row: agent+model, attachment, send -->
     <div class="flex items-center gap-2">
-      <AgentPopover />
+      <AgentPopover {threadPath} />
       <ModelSelectButton />
       <input
         bind:this={attachmentInputEl}
@@ -1125,7 +1127,7 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
           {canSummarizeNow}
           onSummarizeNow={summarizeNow}
         />
-        {#if !messenger.session || messenger.session.messageState === MessageState.idle}
+        {#if !session || session.messageState === MessageState.idle}
           <Button
             disabled={!canSendMessage || savingFiles || busyElsewhere}
             ariaLabel="send message"
@@ -1136,11 +1138,11 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
             style={sendButtonStyle}
             iconId="send-horizontal"
           />
-        {:else if messenger.session.messageState === MessageState.answering}
+        {:else if session.messageState === MessageState.answering}
           <Button
             ariaLabel="stop streaming"
             tooltip="Stop streaming"
-            onClick={() => messenger.session?.stopStreaming()}
+            onClick={() => session?.stopStreaming()}
             styles="h-7 w-7 p-1 rounded-md bg-interactive-accent text-text-on-accent border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 hover:bg-interactive-accent-hover"
             iconId="square"
             iconSize="xs"

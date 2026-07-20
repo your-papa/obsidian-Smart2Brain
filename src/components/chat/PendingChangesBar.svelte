@@ -8,12 +8,13 @@ import { icon } from "../../utils/utils";
 
 interface Props {
 	messenger: Messenger;
+	threadPath: string | null;
 }
 
-const { messenger }: Props = $props();
+const { messenger, threadPath }: Props = $props();
 const store = getPendingChangesStore();
 
-const threadId = $derived(messenger.session?.id);
+const threadId = $derived(threadPath);
 const pendingEntries = $derived.by(() => {
 	void store.revision;
 	return threadId ? store.getEntriesForThread(threadId).filter((e) => e.status === "pending") : [];

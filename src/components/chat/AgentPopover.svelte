@@ -14,6 +14,11 @@ import PickerOptionRow from "../ui/PickerOptionRow.svelte";
 const data = getData();
 const plugin = getPlugin();
 
+interface Props {
+	threadPath?: string | null;
+}
+const { threadPath = null }: Props = $props();
+
 // Get all agents reactively
 const agents = $derived(Object.values(data.agents));
 
@@ -31,7 +36,7 @@ async function selectAgent(agent: AgentConfig) {
 	// Check if the agent's provider is non-trusted and chat has private notes
 	const newProvider = agent.chatModel?.provider;
 	if (newProvider && !data.isProviderTrusted(newProvider)) {
-		const messages = getMessenger()?.session?.messages;
+		const messages = getMessenger()?.sessionFor(threadPath)?.messages;
 		if (messages && chatHistoryContainsPrivateNotes(messages)) {
 			const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
 			if (!confirmed) return;
