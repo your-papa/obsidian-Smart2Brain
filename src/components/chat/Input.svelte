@@ -173,11 +173,23 @@ const contextUsage = $derived.by(() => {
 });
 
 const canSendMessage = $derived(inputValue.trim().length > 0 || attachments.length > 0);
+const busyElsewhere = $derived(messenger.isBusyElsewhere(messenger.session?.id ?? null));
+const busyChatName = $derived.by(() => {
+	const path = messenger.runningThreadPath;
+	if (!path || !busyElsewhere) return null;
+	return (
+		path
+			.split("/")
+			.pop()
+			?.replace(/\.chat$/, "") ?? path
+	);
+});
 const canSummarizeNow = $derived.by(() => {
 	return Boolean(
 		messenger.session &&
 			messenger.session.messageState === MessageState.idle &&
-			messenger.session.messages.length > 0,
+			messenger.session.messages.length > 0 &&
+			!busyElsewhere,
 	);
 });
 const showDragActive = $derived(dropTargetMode === "view" ? externalDragActive : isDragging);
@@ -421,19 +433,27 @@ function sendMessage() {
 		new Notice("Please wait for attachments to finish saving");
 		return;
 	}
+	if (busyElsewhere) {
+		new Notice(`Agent busy in ${busyChatName ?? "another chat"} — stop it to continue`);
+		return;
+	}
 	if (!canSendMessage) {
 		new Notice("Add text or attach a file before sending");
 		return;
 	}
 
 	const contentToSend = inputValue.trim().length > 0 ? inputValue : "Please analyze the attached files.";
-	messenger.sendMessage(
-		contentToSend,
-		attachments.length > 0 ? [...attachments] : undefined,
-		activeVisibleNotes.length > 0 ? [...activeVisibleNotes] : undefined,
-		activeSelection ? { ...activeSelection } : undefined,
-		activeGraphNotes.length > 0 ? [...activeGraphNotes] : undefined,
-	);
+	void messenger
+		.sendMessage(
+			contentToSend,
+			attachments.length > 0 ? [...attachments] : undefined,
+			activeVisibleNotes.length > 0 ? [...activeVisibleNotes] : undefined,
+			activeSelection ? { ...activeSelection } : undefined,
+			activeGraphNotes.length > 0 ? [...activeGraphNotes] : undefined,
+		)
+		.catch((error) => {
+			new Notice(error instanceof Error ? error.message : "Failed to send message");
+		});
 	attachments = [];
 	attachmentSizes = new Map();
 	managedAttachmentPaths = new Set();
@@ -455,10 +475,15 @@ function sendMessage() {
 async function summarizeNow() {
 	if (!messenger.session) return;
 	try {
-		await messenger.session.summarizeHistoryNow();
+		await messenger.summarizeHistoryNow();
 	} catch (error) {
 		new Notice(error instanceof Error ? error.message : "Failed to summarize history");
 	}
+}
+
+function openRunningChat() {
+	const path = messenger.runningThreadPath;
+	if (path) void getPlugin().agentManager.openChatByThreadId(path);
 }
 
 function sanitizeAttachmentFileName(fileName: string): string {
@@ -1102,9 +1127,9 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
         />
         {#if !messenger.session || messenger.session.messageState === MessageState.idle}
           <Button
-            disabled={!canSendMessage || savingFiles}
+            disabled={!canSendMessage || savingFiles || busyElsewhere}
             ariaLabel="send message"
-            tooltip="Send message"
+            tooltip={busyElsewhere ? `Agent busy in ${busyChatName ?? "another chat"}` : "Send message"}
             onClick={sendMessage}
             dataTestId="send-message-button"
             styles="send-message-button p-0 rounded-md border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 disabled:cursor-not-allowed"
@@ -1123,6 +1148,18 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
         {/if}
       </div>
     </div>
+
+    {#if busyElsewhere}
+      <button
+        type="button"
+        class="mt-1 flex items-center gap-1.5 text-xs text-[--text-muted] hover:text-[--text-normal] cursor-pointer bg-transparent border-none p-0"
+        onclick={openRunningChat}
+        title="Go to the running chat"
+      >
+        <span class="w-[--icon-xs] h-[--icon-xs]" style="--icon-size: var(--icon-xs)" use:icon={"loader-circle"}></span>
+        <span>Agent busy in {busyChatName ?? "another chat"} — stop it to continue</span>
+      </button>
+    {/if}
 
     {#if dropTargetMode === "input" && isDragging}
       <div

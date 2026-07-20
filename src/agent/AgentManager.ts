@@ -1422,6 +1422,15 @@ export class AgentManager {
 		workspace.revealLeaf(leaf);
 	}
 
+	/** Open (and reveal) the chat leaf for a given thread path. Used to navigate
+	 * to a backgrounded running chat from the busy hint and status-bar indicator. */
+	async openChatByThreadId(threadId: string): Promise<void> {
+		const file = this.plugin.app.vault.getAbstractFileByPath(threadId);
+		if (file instanceof TFile) {
+			await this.openInChatLeaf(file);
+		}
+	}
+
 	async createNewChat(): Promise<void> {
 		const now = Date.now();
 

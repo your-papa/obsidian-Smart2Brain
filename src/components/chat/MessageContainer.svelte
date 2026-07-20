@@ -57,7 +57,7 @@ function cancelEdit() {
 async function submitEdit(messageId: UUIDv7, newContent: string) {
 	editingMessageId = null;
 	try {
-		await messenger.session?.editMessage(messageId, newContent);
+		await messenger.editMessage(messageId, newContent);
 	} catch (error) {
 		Logger.error("[MessageContainer] Edit failed:", error);
 		new Notice(`Edit failed: ${error instanceof Error ? error.message : "Unknown error"}`);
@@ -66,7 +66,7 @@ async function submitEdit(messageId: UUIDv7, newContent: string) {
 
 async function regenerateResponse(messageId: UUIDv7) {
 	try {
-		await messenger.session?.regenerateResponse(messageId);
+		await messenger.regenerateResponse(messageId);
 	} catch (error) {
 		Logger.error("[MessageContainer] Regenerate failed:", error);
 		new Notice(`Regenerate failed: ${error instanceof Error ? error.message : "Unknown error"}`);

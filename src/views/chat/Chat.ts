@@ -48,6 +48,9 @@ export class ChatView extends FileView {
 
 	async onClose() {
 		super.onClose();
+		// Only unmount the view. Do NOT abort the stream or touch the session map:
+		// the run keeps going in the background and reattaches when this chat is
+		// reopened. Stop is reachable via the status-bar indicator.
 		if (this.component) unmount(this.component);
 	}
 }

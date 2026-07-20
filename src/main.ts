@@ -1,4 +1,5 @@
 import { type EventRef, MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { mount, unmount } from "svelte";
 import "./lib/i18n";
 import "./lib/langgraphContext";
 import { Logger as Log } from "./utils/logging";
@@ -21,6 +22,7 @@ import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingCh
 import { setPlugin } from "./stores/state.svelte";
 import { LexicalSearchService } from "./search/LexicalSearchService";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
+import RunningIndicator from "./components/chat/RunningIndicator.svelte";
 import { NoteContextView, VIEW_TYPE_NOTE_CONTEXT } from "./views/note-context/NoteContextView";
 import { OnboardingView, VIEW_TYPE_ONBOARDING } from "./views/onboarding/OnboardingView";
 import { SmartGraphView, VIEW_TYPE_SMART_GRAPH } from "./views/smart-graph/SmartGraphView";
@@ -51,6 +53,8 @@ export default class SecondBrainPlugin extends Plugin {
 	/** `performance.now()` when `onload` finished; -1 until then. Used to attribute the
 	 *  Obsidian pre-layout gap (onload:end → onLayoutReady). */
 	private onloadEndAt = -1;
+	/** Mounted status-bar running-agent indicator (unmounted on plugin unload). */
+	private runningIndicator: ReturnType<typeof mount> | null = null;
 
 	private getAddToChatMenuLabel(selectedCount: number): string {
 		if (selectedCount <= 1) {
@@ -302,6 +306,11 @@ export default class SecondBrainPlugin extends Plugin {
 		this.addRibbonIcon("message-square", "New Chat", () => this.createNewChat());
 		this.addRibbonIcon("git-fork", "Graph", () => this.activateSmartGraphView());
 
+		// Global running-agent indicator in the status bar: shows the single
+		// streaming chat (if any) and lets the user stop it from anywhere.
+		const statusBarEl = this.addStatusBarItem();
+		this.runningIndicator = mount(RunningIndicator, { target: statusBarEl, props: {} });
+
 		this.addCommand({
 			id: "open-chat",
 			name: "Open Chat",
@@ -382,7 +391,7 @@ export default class SecondBrainPlugin extends Plugin {
 				const messenger = getMessenger();
 				if (!messenger) return;
 				// Already showing this thread — nothing to do.
-				if (messenger.session?.id === file.path) return;
+				if (messenger.activeThreadPath === file.path) return;
 				void messenger.loadSession(file);
 			}),
 		);
@@ -563,6 +572,10 @@ export default class SecondBrainPlugin extends Plugin {
 
 	onunload() {
 		Log.info("Unloading plugin");
+		if (this.runningIndicator) {
+			void unmount(this.runningIndicator);
+			this.runningIndicator = null;
+		}
 		if (this.lexicalSearchService) void this.lexicalSearchService.cleanup();
 		if (this.vectorStoreService) void this.vectorStoreService.cleanup();
 		if (this.agentManager) void this.agentManager.cleanup();
