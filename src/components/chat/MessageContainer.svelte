@@ -73,6 +73,15 @@ async function regenerateResponse(messageId: UUIDv7) {
 	}
 }
 
+async function retryLastError(messageId: UUIDv7) {
+	try {
+		await messenger.session?.retryLastError(messageId);
+	} catch (error) {
+		Logger.error("[MessageContainer] Retry failed:", error);
+		new Notice(`Retry failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+	}
+}
+
 async function handleBranchNavigate(checkpointId: string) {
 	try {
 		await messenger.switchToBranch(checkpointId);
@@ -136,7 +145,13 @@ function renderAssitantAnswer(assistantAnswer: AssistantMessage) {
 		return "> [!Warning] stopped by user";
 	}
 	if (assistantAnswer.state === AssistantState.error) {
-		return "> [!Error] an error occured";
+		const detail = assistantAnswer.errorCode?.trim();
+		if (detail) {
+			// Indent continuation lines so multi-line messages stay inside the callout.
+			const body = detail.replace(/\n/g, "\n> ");
+			return `> [!Error] Something went wrong\n> ${body}`;
+		}
+		return "> [!Error] Something went wrong\n> The model request failed.";
 	}
 	return assistantAnswer.content;
 }
@@ -526,8 +541,23 @@ $effect(() => {
                   {/if}
                 {/if}
 
-                <!-- Assistant message actions and branch navigator -->
-                {#if !(messagePair.assistantMessage.state === AssistantState.streaming)}
+                {#if messagePair.assistantMessage.state === AssistantState.error}
+                  <div class="flex flex-row items-center">
+                    <Button
+                      iconId="refresh-cw"
+                      buttonText="Retry"
+                      ariaLabel="Retry this request"
+                      tooltip="Re-run the failed request"
+                      onClick={() => retryLastError(messagePair.id)}
+                    />
+                  </div>
+                {/if}
+
+                <!-- Assistant message actions and branch navigator.
+                     Skipped for error pairs: the dedicated Retry button above is
+                     the only relevant action, and Copy/Regenerate would act on an
+                     empty, non-existent response. -->
+                {#if !(messagePair.assistantMessage.state === AssistantState.streaming) && messagePair.assistantMessage.state !== AssistantState.error}
                   <div class="flex flex-row items-center gap-2">
                     <div
                       class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"

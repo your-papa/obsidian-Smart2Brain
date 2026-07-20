@@ -285,6 +285,35 @@ describe("baseMessagesToMessagePairs", () => {
 		expect(pairs[1].assistantMessage.state).toBe(AssistantState.error);
 	});
 
+	it("should attach lastErrorMessage to the most-recent error pair as errorCode", () => {
+		const msgs = [humanMsg("Hello"), aiMsg("Hi"), humanMsg("Search")];
+		const pairs = baseMessagesToMessagePairs(msgs, 1, undefined, "Model does not fit under the memory ceiling.");
+
+		expect(pairs[1].assistantMessage.state).toBe(AssistantState.error);
+		expect(pairs[1].assistantMessage.errorCode).toBe("Model does not fit under the memory ceiling.");
+		// The earlier, successful pair carries no error code.
+		expect(pairs[0].assistantMessage.errorCode).toBeUndefined();
+	});
+
+	it("should leave errorCode undefined for error pairs when no lastErrorMessage is provided", () => {
+		const msgs = [humanMsg("Search")];
+		const pairs = baseMessagesToMessagePairs(msgs, 1);
+
+		expect(pairs[0].assistantMessage.state).toBe(AssistantState.error);
+		expect(pairs[0].assistantMessage.errorCode).toBeUndefined();
+	});
+
+	it("attaches lastErrorMessage to the newest error pair even when errorCount overcounts", () => {
+		// errorCount is thread-wide (all branches); the active path here has a
+		// single trailing error turn. The message must still land on it rather
+		// than being lost because the count-down never reached exactly zero.
+		const msgs = [humanMsg("Hello"), aiMsg("Hi"), humanMsg("Search")];
+		const pairs = baseMessagesToMessagePairs(msgs, 3, undefined, "boom");
+
+		expect(pairs[1].assistantMessage.state).toBe(AssistantState.error);
+		expect(pairs[1].assistantMessage.errorCode).toBe("boom");
+	});
+
 	it("should mark as cancelled when no response and errorCount is 0", () => {
 		const msgs = [humanMsg("Hello")];
 		const pairs = baseMessagesToMessagePairs(msgs, 0);

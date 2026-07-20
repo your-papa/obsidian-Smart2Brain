@@ -22,6 +22,7 @@ import { getPlugin } from "./state.svelte";
 import { Logger } from "../utils/logging";
 import { shouldSummarizeForEstimatedTokens } from "../agent/summarization";
 import { estimateConversationBaseTokens, estimateLiveDraftTokens } from "../utils/tokenEstimator";
+import { extractErrorMessage } from "../utils/errorMessage";
 export type { ThreadError };
 
 const CHECKPOINT_DEBUG = false;
@@ -685,18 +686,19 @@ export function deriveMessagePairsFromActiveCheckpoint(
 	activeCheckpointId: string | undefined,
 	errorCount = 0,
 	bootstrapMessages: BaseMessage[] = [],
+	lastErrorMessage?: string,
 ): MessagePair[] {
 	if (!activeCheckpointId || !graph.nodes.has(activeCheckpointId)) {
-		return baseMessagesToMessagePairs(bootstrapMessages, errorCount);
+		return baseMessagesToMessagePairs(bootstrapMessages, errorCount, undefined, lastErrorMessage);
 	}
 
 	const activeNode = graph.nodes.get(activeCheckpointId);
 	if (!activeNode) {
-		return baseMessagesToMessagePairs(bootstrapMessages, errorCount);
+		return baseMessagesToMessagePairs(bootstrapMessages, errorCount, undefined, lastErrorMessage);
 	}
 
 	const checkpointMapping = buildCheckpointMessageMappingFromGraph(graph, activeCheckpointId);
-	return baseMessagesToMessagePairs(activeNode.messages, errorCount, checkpointMapping);
+	return baseMessagesToMessagePairs(activeNode.messages, errorCount, checkpointMapping, lastErrorMessage);
 }
 
 /* -----------------------------------------------------------------------------
@@ -1179,6 +1181,7 @@ export function baseMessagesToMessagePairs(
 	messages: BaseMessage[],
 	errorCount = 0,
 	checkpointMapping?: CheckpointMessageMapping,
+	lastErrorMessage?: string,
 ): MessagePair[] {
 	if (!messages || messages.length === 0) return [];
 
@@ -1306,10 +1309,12 @@ export function baseMessagesToMessagePairs(
 				}
 			}
 
+			const assistantMessage = mergeAssistantMessages(assistantMessages, toolOutputs, state, subAgentParentMap);
+
 			messagePairs.push({
 				id: pairId,
 				userMessage: { content: userContent, attachments, visibleNotes, selection, graphNotes },
-				assistantMessage: mergeAssistantMessages(assistantMessages, toolOutputs, state, subAgentParentMap),
+				assistantMessage,
 				generation: deriveGenerationFromAssistantMessages(assistantMessages),
 				createdAt,
 				regenerateFromCheckpointId,
@@ -1330,6 +1335,17 @@ export function baseMessagesToMessagePairs(
 				generation: extractGenerationFromAssistantMessage(msg),
 			});
 			i++;
+		}
+	}
+
+	// Surface the recovered error message on the newest error pair. `errorCount`
+	// is thread-wide (counts errors across all branches), so it can exceed the
+	// number of error pairs on the active path — that's why we attach by finding
+	// the last error pair here rather than during the count-down loop above.
+	if (lastErrorMessage) {
+		const lastErrorPair = messagePairs.findLast((pair) => pair.assistantMessage.state === AssistantState.error);
+		if (lastErrorPair) {
+			lastErrorPair.assistantMessage.errorCode = lastErrorMessage;
 		}
 	}
 
@@ -1394,6 +1410,7 @@ export function chatHistoryContainsPrivateNotes(messages: MessagePair[]): boolea
 interface ChatSessionOptions {
 	graphState: CheckpointGraphState;
 	errorCount: number;
+	lastErrorMessage?: string;
 	bootstrapMessages?: BaseMessage[];
 	onNeedReload?: () => Promise<void>;
 }
@@ -1412,6 +1429,7 @@ export class ChatSession {
 
 	private graphState: CheckpointGraphState;
 	private errorCount: number;
+	private lastErrorMessage: string | undefined;
 	private bootstrapMessages: BaseMessage[];
 	private onNeedReload: (() => Promise<void>) | undefined;
 
@@ -1419,6 +1437,7 @@ export class ChatSession {
 		this.id = id;
 		this.graphState = options.graphState;
 		this.errorCount = options.errorCount;
+		this.lastErrorMessage = options.lastErrorMessage;
 		this.bootstrapMessages = options.bootstrapMessages ?? [];
 		this.onNeedReload = options.onNeedReload;
 		this.rebuildMessagePairs();
@@ -1448,9 +1467,15 @@ export class ChatSession {
 		this.graphState.lastPersistedActiveCheckpointId = checkpointId;
 	}
 
-	applyGraphState(graphState: CheckpointGraphState, errorCount: number, bootstrapMessages?: BaseMessage[]): void {
+	applyGraphState(
+		graphState: CheckpointGraphState,
+		errorCount: number,
+		bootstrapMessages?: BaseMessage[],
+		lastErrorMessage?: string,
+	): void {
 		this.graphState = graphState;
 		this.errorCount = errorCount;
+		this.lastErrorMessage = lastErrorMessage;
 		if (bootstrapMessages) {
 			this.bootstrapMessages = bootstrapMessages;
 		}
@@ -1463,6 +1488,7 @@ export class ChatSession {
 			this.graphState.activeCheckpointId,
 			this.errorCount,
 			this.bootstrapMessages,
+			this.lastErrorMessage,
 		);
 	}
 
@@ -1514,7 +1540,7 @@ export class ChatSession {
 		}
 		nextGraph.activeCheckpointId = optimisticCheckpointId;
 
-		this.applyGraphState(nextGraph, this.errorCount);
+		this.applyGraphState(nextGraph, this.errorCount, undefined, this.lastErrorMessage);
 		const optimisticPair = this.messages.at(-1);
 		if (!optimisticPair) {
 			throw new Error("Optimistic fork failed: no message pair derived");
@@ -1666,6 +1692,43 @@ export class ChatSession {
 		await this.processRegenerateReply(optimisticPair.id, checkpointId);
 	}
 
+	/**
+	 * Retry a failed turn: re-run the model for a user message whose response
+	 * errored out. Unlike {@link regenerateResponse}, this tolerates a missing
+	 * `regenerateFromCheckpointId` — immediately after a live error the graph is
+	 * still stale (the failed run skips `syncGraphAfterRun`), so we reload the
+	 * session from the persisted checkpoints first to recover the checkpoint that
+	 * holds the failed user message, then regenerate from it.
+	 */
+	async retryLastError(pairId: UUIDv7): Promise<void> {
+		const pair = this.findPair(pairId);
+		if (!pair || pair.assistantMessage.state !== AssistantState.error) {
+			throw new Error("Cannot retry: message pair is not in an error state.");
+		}
+
+		// Fast path: the checkpoint is already known (e.g. after a reload).
+		if (pair.regenerateFromCheckpointId) {
+			await this.regenerateResponse(pairId);
+			return;
+		}
+
+		// Slow path: sync from persisted checkpoints so the failed user message's
+		// checkpoint becomes addressable, then regenerate the now-resolved pair.
+		if (!this.onNeedReload) {
+			throw new Error("Cannot retry: no checkpoint available and session reload is unavailable.");
+		}
+		await this.onNeedReload();
+
+		const reloadedPair = this.messages.findLast(
+			(p) => p.assistantMessage.state === AssistantState.error && p.regenerateFromCheckpointId,
+		);
+		if (!reloadedPair?.regenerateFromCheckpointId) {
+			throw new Error("Cannot retry: failed message could not be recovered from history.");
+		}
+
+		await this.regenerateResponse(reloadedPair.id);
+	}
+
 	/* -----------------------------------------------------------------------
 	 * Streaming logic
 	 * ---------------------------------------------------------------------*/
@@ -1707,7 +1770,7 @@ export class ChatSession {
 			resolvedActiveCheckpointId,
 		});
 
-		this.applyGraphState(nextGraph, this.errorCount);
+		this.applyGraphState(nextGraph, this.errorCount, undefined, this.lastErrorMessage);
 		await this.persistLastViewedCheckpoint(resolvedActiveCheckpointId);
 	}
 
@@ -1764,7 +1827,13 @@ export class ChatSession {
 				await this.onNeedReload();
 			}
 		} catch (_err) {
-			pair.assistantMessage.state = this.cancelled ? AssistantState.cancelled : AssistantState.error;
+			if (this.cancelled) {
+				pair.assistantMessage.state = AssistantState.cancelled;
+			} else {
+				pair.assistantMessage.state = AssistantState.error;
+				pair.assistantMessage.errorCode = extractErrorMessage(_err);
+				Logger.error("[ChatSession] Run failed:", _err);
+			}
 		} finally {
 			this.abortController = null;
 			this.cancelled = false;
@@ -2207,6 +2276,15 @@ export class Messenger {
 	pendingAutoSubmit: boolean = $state(false);
 	#agentManager: AgentManager;
 
+	/**
+	 * Monotonically increasing token identifying the most recent `loadSession`
+	 * call. Switching threads quickly fires overlapping async loads; without a
+	 * guard, a slower earlier load can resolve last and clobber `this.session`
+	 * with the previous chat's checkpoints. Each load captures the token at
+	 * start and only commits its result if it is still the latest.
+	 */
+	#loadToken = 0;
+
 	constructor(agentManager: AgentManager) {
 		this.#agentManager = agentManager;
 	}
@@ -2350,12 +2428,19 @@ export class Messenger {
 	/* ---------------- Chat Creation / Metadata ---------------- */
 
 	async loadSession(file: TFile, targetCheckpointId?: string) {
-		const id = await this.deriveThreadId(file);
+		// Claim the latest-load token synchronously, before any await, so
+		// overlapping loads are ordered by call order rather than by whichever
+		// async fetch happens to resolve last.
+		const token = ++this.#loadToken;
+		const isLatest = () => this.#loadToken === token;
+
+		const id = this.deriveThreadId(file);
 		if (!id) throw new Error("Invalid thread ID");
 
 		// Skip the loading skeleton for brand-new, empty chats: there is no
 		// history to fetch, so show the empty state + input immediately.
 		const isEmpty = await this.#agentManager.isThreadEmpty(id);
+		if (!isLatest()) return; // A newer switch superseded this load.
 		if (!isEmpty) this.isLoadingSession = true;
 		try {
 			const [history, checkpointHistory] = await Promise.all([
@@ -2363,11 +2448,18 @@ export class Messenger {
 				this.#agentManager.getCheckpointHistory(id),
 			]);
 
+			// A newer thread switch started while we were fetching — discard this
+			// result so it can't overwrite the newer session's checkpoints.
+			if (!isLatest()) return;
+
 			// If the agent wasn't initialized yet, checkpoint history came back empty.
 			// Schedule a reload for once the deferred init completes so the view
 			// shows the real history without the user having to intervene.
 			if (checkpointHistory.length === 0 && !isEmpty) {
-				this.#agentManager.onNextInitialized(() => void this.reloadSession());
+				this.#agentManager.onNextInitialized(() => {
+					// Only reload if this thread is still the active one.
+					if (this.session?.id === id) void this.reloadSession();
+				});
 			}
 
 			const savedCheckpointId = this.getLastViewedCheckpointId(history);
@@ -2394,6 +2486,7 @@ export class Messenger {
 				| null;
 			const bootstrapMessages = historyWithError?.messages || [];
 			const errorCount = historyWithError?.errorCount || 0;
+			const lastErrorMessage = historyWithError?.lastError?.message;
 
 			await this.restoreSelectionFromLoadedMessages(
 				graph,
@@ -2402,16 +2495,21 @@ export class Messenger {
 				bootstrapMessages,
 			);
 
+			if (!isLatest()) return;
+
 			this.session = new ChatSession(id, {
 				graphState: graph,
 				errorCount,
+				lastErrorMessage,
 				bootstrapMessages,
 				onNeedReload: async () => this.reloadSession(),
 			});
 
 			await this.persistLastViewedCheckpoint(id, resolution.checkpointId);
 		} finally {
-			this.isLoadingSession = false;
+			// Only the latest load owns the loading flag; a superseded load must
+			// not clear the skeleton out from under the newer one.
+			if (isLatest()) this.isLoadingSession = false;
 		}
 	}
 
@@ -2421,13 +2519,20 @@ export class Messenger {
 			throw new Error("No active session to reload");
 		}
 
-		const id = this.session.id;
-		const sessionCheckpointId = this.session.getActiveCheckpointId();
+		// Capture identity up front. A thread switch during the awaits below
+		// replaces `this.session`; applying stale history to the new session
+		// would show the previous chat's checkpoints, so we bail if it changed.
+		const session = this.session;
+		const id = session.id;
+		const loadToken = this.#loadToken;
+		const sessionCheckpointId = session.getActiveCheckpointId();
 
 		const [history, checkpointHistory] = await Promise.all([
 			this.#agentManager.getThreadHistory(id),
 			this.#agentManager.getCheckpointHistory(id),
 		]);
+
+		if (this.session !== session || this.#loadToken !== loadToken) return;
 
 		const savedCheckpointId = this.getLastViewedCheckpointId(history);
 		const graph = buildCheckpointGraph(checkpointHistory);
@@ -2450,7 +2555,12 @@ export class Messenger {
 		});
 
 		const historyWithError = history as (ThreadHistory & { lastError?: ThreadError; errorCount?: number }) | null;
-		this.session.applyGraphState(graph, historyWithError?.errorCount || 0, historyWithError?.messages || []);
+		session.applyGraphState(
+			graph,
+			historyWithError?.errorCount || 0,
+			historyWithError?.messages || [],
+			historyWithError?.lastError?.message,
+		);
 
 		await this.persistLastViewedCheckpoint(id, resolution.checkpointId);
 	}
@@ -2476,7 +2586,12 @@ export class Messenger {
 		graph.lastPersistedActiveCheckpointId = this.getLastViewedCheckpointId(history);
 
 		const historyWithError = history as (ThreadHistory & { lastError?: ThreadError; errorCount?: number }) | null;
-		this.session.applyGraphState(graph, historyWithError?.errorCount || 0, historyWithError?.messages || []);
+		this.session.applyGraphState(
+			graph,
+			historyWithError?.errorCount || 0,
+			historyWithError?.messages || [],
+			historyWithError?.lastError?.message,
+		);
 
 		await this.persistLastViewedCheckpoint(threadId, checkpointId);
 	}

@@ -368,6 +368,25 @@ export default class SecondBrainPlugin extends Plugin {
 			}),
 		);
 
+		// The Messenger holds a single `session`, but chats open in their own
+		// leaves (default `chatOpenLocation: "tab"`). Switching between already-open
+		// chat tabs fires `active-leaf-change` but NOT `onLoadFile` (each leaf's file
+		// is already loaded), so `loadSession` never runs and every tab keeps showing
+		// whichever thread was loaded last. Reconcile the shared session with the
+		// focused chat leaf's file whenever the active leaf changes.
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", (leaf) => {
+				if (!(leaf?.view instanceof ChatView)) return;
+				const file = leaf.view.file;
+				if (!file) return;
+				const messenger = getMessenger();
+				if (!messenger) return;
+				// Already showing this thread — nothing to do.
+				if (messenger.session?.id === file.path) return;
+				void messenger.loadSession(file);
+			}),
+		);
+
 		// Create Agent Manager (v2) — constructor is cheap, heavy init deferred to onLayoutReady
 		this.agentManager = new AgentManager(this);
 		createMessenger(this.agentManager);
