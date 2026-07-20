@@ -1,36 +1,35 @@
 <script lang="ts">
-import { getMessenger } from "../../stores/chatStore.svelte";
+import { getSessionRegistry } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
 
-const messenger = $derived(getMessenger());
+const registry = $derived(getSessionRegistry());
 
-const runningPath = $derived(messenger?.runningThreadPath ?? null);
-const runningName = $derived.by(() => {
-	if (!runningPath) return null;
-	return (
-		runningPath
-			.split("/")
-			.pop()
-			?.replace(/\.chat$/, "") ?? runningPath
-	);
-});
+// All chats currently streaming. Concurrency-ready: one chip per running
+// session. Under the Phase-1 one-at-a-time policy there is at most one.
+const running = $derived(
+	(registry?.runningSessions ?? []).map((s) => ({
+		path: s.id,
+		name:
+			s.id
+				.split("/")
+				.pop()
+				?.replace(/\.chat$/, "") ?? s.id,
+		stop: () => s.stopStreaming(),
+	})),
+);
 
-function openRunningChat() {
-	if (runningPath) void getPlugin().agentManager.openChatByThreadId(runningPath);
-}
-
-function stopRunning() {
-	messenger?.stopRunning();
+function openChat(path: string) {
+	void getPlugin().agentManager.openChatByThreadId(path);
 }
 </script>
 
-{#if runningPath}
+{#each running as chat (chat.path)}
 	<span class="s2b-running-indicator flex items-center gap-1">
 		<button
 			type="button"
 			class="flex items-center gap-1 bg-transparent border-none p-0 cursor-pointer text-[--text-muted] hover:text-[--text-normal]"
-			onclick={openRunningChat}
+			onclick={() => openChat(chat.path)}
 			title="Go to the running chat"
 		>
 			<span
@@ -38,19 +37,19 @@ function stopRunning() {
 				style="--icon-size: var(--icon-xs)"
 				use:icon={"loader-circle"}
 			></span>
-			<span>Agent running in {runningName}</span>
+			<span>Agent running in {chat.name}</span>
 		</button>
 		<button
 			type="button"
 			class="flex items-center bg-transparent border-none p-0 cursor-pointer text-[--text-muted] hover:text-[--text-error]"
-			onclick={stopRunning}
+			onclick={chat.stop}
 			title="Stop the running agent"
 			aria-label="stop the running agent"
 		>
 			<span class="w-[--icon-xs] h-[--icon-xs]" style="--icon-size: var(--icon-xs)" use:icon={"square"}></span>
 		</button>
 	</span>
-{/if}
+{/each}
 
 <style>
 	.s2b-running-spinner {

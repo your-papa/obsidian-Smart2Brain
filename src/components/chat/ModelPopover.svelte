@@ -3,7 +3,7 @@ import { Popover } from "bits-ui";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { extractVendor, logUnclassifiedModelsInfo } from "../../lib/modelVendorClassification";
 import { getProviderDefinition } from "../../providers/index";
-import { type ChatModel, chatHistoryContainsPrivateNotes, getMessenger } from "../../stores/chatStore.svelte";
+import { type ChatModel, chatHistoryContainsPrivateNotes, getSessionRegistry } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { Logger } from "../../utils/logging";
@@ -233,7 +233,7 @@ function getModelDisplayName(model: ChatModel): string {
 async function handleSelect(model: ChatModel) {
 	// Check if switching to a non-trusted provider with private notes in history
 	if (!data.isProviderTrusted(model.provider)) {
-		const messages = getMessenger()?.sessionFor(threadPath)?.messages;
+		const messages = getSessionRegistry()?.sessionFor(threadPath)?.messages;
 		if (messages && chatHistoryContainsPrivateNotes(messages)) {
 			const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
 			if (!confirmed) return;

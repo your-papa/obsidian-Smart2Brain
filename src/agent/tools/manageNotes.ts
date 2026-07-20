@@ -1,5 +1,6 @@
 import { type App, normalizePath, type TFile } from "obsidian";
 import { tool } from "@langchain/core/tools";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import { z } from "zod";
 import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
@@ -7,7 +8,6 @@ import type { PendingChange } from "../../types/shared";
 import { resolveVaultFileDetailed } from "../../utils/attachments";
 import { normalizeReferencePath } from "../../utils/pathResolution";
 import { genUUIDv7 } from "../../utils/uuid7Validator";
-import { getCurrentThreadId } from "./runContext";
 
 const editSchema = z.object({
 	oldText: z
@@ -209,6 +209,7 @@ function summarizeOperations(changes: PendingChange[]): string {
 export async function stageNoteOperations(
 	app: App,
 	operations: ManageNotesInput["operations"],
+	threadId: string,
 	toolCallId?: string,
 ): Promise<string> {
 	const store = getPendingChangesStore();
@@ -350,19 +351,37 @@ export async function stageNoteOperations(
 		});
 	}
 
-	const threadId = getCurrentThreadId();
 	const resolvedToolCallId = toolCallId ?? genUUIDv7();
 	store.addChanges(stagedChanges, resolvedToolCallId, threadId);
 
 	return `Proposed ${stagedChanges.length} note operation(s) across ${seenPaths.size} path(s) (${summarizeOperations(stagedChanges)}) — the user will review and approve or reject these changes.`;
 }
 
+/** Reads the thread id LangGraph threads through the run config's `configurable`
+ * (set by Agent.buildRunnableConfig). Resolving per-invocation from config —
+ * rather than a module global — is what makes concurrent agent runs stage their
+ * note changes under the correct thread. Subagent (`task`) invocations keep this
+ * key too: the subagent config filter in Agent.ts strips only `__pregel*` /
+ * `checkpoint*`, so `thread_id` survives into the nested run.
+ *
+ * Note: for a Zod-schema `tool()`, LangChain passes the merged RunnableConfig as
+ * the SECOND callback argument (alongside `runId`); the third arg is undefined.
+ * So we read both `runId` and `configurable.thread_id` off the same object. */
+function resolveThreadIdFromConfig(config: RunnableConfig | undefined): string {
+	const threadId = config?.configurable?.thread_id;
+	if (typeof threadId !== "string" || threadId.length === 0) {
+		throw new Error("No active agent run — cannot determine threadId for note staging");
+	}
+	return threadId;
+}
+
 export function createManageNotesTool(app: App) {
 	const toolConfig = getManageNotesToolConfig();
 
 	return tool(
-		async ({ operations }: ManageNotesInput, runManager) => {
-			return stageNoteOperations(app, operations, runManager?.runId);
+		async ({ operations }: ManageNotesInput, config: RunnableConfig & { runId?: string }) => {
+			const threadId = resolveThreadIdFromConfig(config);
+			return stageNoteOperations(app, operations, threadId, config?.runId);
 		},
 		{
 			name: toolConfig.name,

@@ -16,7 +16,7 @@ import { getRecentNotes } from "../../search/recentNotes";
 import { getLexicalSearchService, isLexicalSearchInitialized } from "../../search/LexicalSearchService";
 import type { SearchResult } from "../../vectorstore/types";
 import { getData } from "../../stores/dataStore.svelte";
-import { getMessenger } from "../../stores/chatStore.svelte";
+import { getSessionRegistry } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import type { SearchAlgorithm } from "../../types/plugin";
@@ -823,7 +823,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			this.app.workspace.revealLeaf(existingLeaf);
 		}
 
-		const messenger = getMessenger();
+		const messenger = getSessionRegistry();
 		if (!messenger) {
 			new Notice("Chat is not initialized yet. Please open a chat first.");
 			return;

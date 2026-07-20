@@ -5,7 +5,7 @@ import {
 	type AssistantMessage,
 	AssistantState,
 	type MessagePair,
-	type Messenger,
+	type SessionRegistry,
 	getMessagePairTimestamp,
 } from "../../stores/chatStore.svelte";
 import type { UUIDv7 } from "../../utils/uuid7Validator";
@@ -24,7 +24,7 @@ import ToolCallsSection from "./ToolCallsSection.svelte";
 import { icon } from "../../utils/utils";
 
 interface Props {
-	messenger: Messenger;
+	registry: SessionRegistry;
 	threadPath: string | null;
 }
 
@@ -37,11 +37,15 @@ function linkPathForReference(path: string, viewType?: string, context?: string)
 	return `${path}#page=${pageLabel}`;
 }
 
-const { messenger, threadPath }: Props = $props();
+const { registry, threadPath }: Props = $props();
 const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
 
+// This view's own session, pinned to its thread path. All actions target it
+// directly — never a global active pointer.
+const session = $derived(registry.sessionFor(threadPath));
+
 const messages = $derived.by(() => {
-	return messenger.sessionFor(threadPath)?.messages;
+	return session?.messages;
 });
 
 // Edit mode state
@@ -58,7 +62,7 @@ function cancelEdit() {
 async function submitEdit(messageId: UUIDv7, newContent: string) {
 	editingMessageId = null;
 	try {
-		await messenger.editMessage(messageId, newContent);
+		await session?.editMessage(messageId, newContent);
 	} catch (error) {
 		Logger.error("[MessageContainer] Edit failed:", error);
 		new Notice(`Edit failed: ${error instanceof Error ? error.message : "Unknown error"}`);
@@ -67,7 +71,7 @@ async function submitEdit(messageId: UUIDv7, newContent: string) {
 
 async function regenerateResponse(messageId: UUIDv7) {
 	try {
-		await messenger.regenerateResponse(messageId);
+		await session?.regenerateResponse(messageId);
 	} catch (error) {
 		Logger.error("[MessageContainer] Regenerate failed:", error);
 		new Notice(`Regenerate failed: ${error instanceof Error ? error.message : "Unknown error"}`);
@@ -76,7 +80,7 @@ async function regenerateResponse(messageId: UUIDv7) {
 
 async function retryLastError(messageId: UUIDv7) {
 	try {
-		await messenger.sessionFor(threadPath)?.retryLastError(messageId);
+		await session?.retryLastError(messageId);
 	} catch (error) {
 		Logger.error("[MessageContainer] Retry failed:", error);
 		new Notice(`Retry failed: ${error instanceof Error ? error.message : "Unknown error"}`);
@@ -84,8 +88,9 @@ async function retryLastError(messageId: UUIDv7) {
 }
 
 async function handleBranchNavigate(checkpointId: string) {
+	if (!threadPath) return;
 	try {
-		await messenger.switchToBranch(checkpointId);
+		await registry.switchToBranch(threadPath, checkpointId);
 	} catch (error) {
 		Logger.error("[MessageContainer] Branch switch failed:", error);
 		new Notice(`Branch switch failed: ${error instanceof Error ? error.message : "Unknown error"}`);
@@ -280,7 +285,7 @@ $effect(() => {
     class="scroll-container h-full overflow-y-auto overflow-x-clip px-2 pt-4 pb-8"
   >
     <div class="w-full max-w-[--file-line-width] mx-auto h-full">
-      {#if messenger.isLoadingSession}
+      {#if registry.isLoadingSession}
         <!-- Loading skeleton -->
         <div
           class="flex flex-col gap-4 pt-2 px-1 animate-pulse"
@@ -598,7 +603,7 @@ $effect(() => {
                 {/if}
               </div>
 
-              {#if index === messages.length - 1 && messenger.sessionFor(threadPath)?.summarizingHistory}
+              {#if index === messages.length - 1 && session?.summarizingHistory}
                 <div
                   class="summarizing-status flex items-center gap-2 text-sm text-text-muted pl-1"
                 >

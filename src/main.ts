@@ -16,7 +16,7 @@ import { confirmDelete } from "./components/modal/ConfirmModal";
 import { promptText } from "./components/modal/PromptModal";
 import { getQueryClient } from "./lib/query";
 import { SkillsService } from "./skills";
-import { createMessenger, getMessenger } from "./stores/chatStore.svelte";
+import { createSessionRegistry, getSessionRegistry } from "./stores/chatStore.svelte";
 import { type PluginDataStore, createData, getData } from "./stores/dataStore.svelte";
 import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingChangesStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
@@ -210,16 +210,16 @@ export default class SecondBrainPlugin extends Plugin {
 
 		await this.agentManager.openLatestChat();
 
-		const messenger = getMessenger();
-		if (!messenger) {
+		const registry = getSessionRegistry();
+		if (!registry) {
 			new Notice("Chat is not initialized yet. Please open chat and try again.");
 			return;
 		}
 
-		const existing = messenger.pendingAttachmentPaths ?? [];
+		const existing = registry.pendingAttachmentPaths ?? [];
 		const merged = [...existing, ...supportedFiles.map((file) => file.path)];
 		const deduped = [...new Set(merged)];
-		messenger.pendingAttachmentPaths = deduped;
+		registry.pendingAttachmentPaths = deduped;
 
 		const skipped = files.length - supportedFiles.length;
 		if (skipped > 0) {
@@ -358,7 +358,7 @@ export default class SecondBrainPlugin extends Plugin {
 			name: "Export current chat as JSON",
 			icon: "file-json",
 			callback: async () => {
-				const threadId = getMessenger()?.session?.id;
+				const threadId = this.app.workspace.getActiveViewOfType(ChatView)?.file?.path;
 				if (!threadId) {
 					new Notice("No chat is currently open");
 					return;
@@ -377,28 +377,27 @@ export default class SecondBrainPlugin extends Plugin {
 			}),
 		);
 
-		// The Messenger holds a single `session`, but chats open in their own
-		// leaves (default `chatOpenLocation: "tab"`). Switching between already-open
-		// chat tabs fires `active-leaf-change` but NOT `onLoadFile` (each leaf's file
-		// is already loaded), so `loadSession` never runs and every tab keeps showing
-		// whichever thread was loaded last. Reconcile the shared session with the
-		// focused chat leaf's file whenever the active leaf changes.
+		// Each chat tab binds to its own thread path and renders its own session,
+		// so switching tabs no longer needs to move a global pointer. But a parked
+		// idle session can be evicted (LRU) while its tab stays open; if the user
+		// returns to that tab, its session is gone from the registry and the view
+		// would be empty. Rebuild it on focus when missing. (Running sessions are
+		// never evicted, so this only ever reloads idle ones.)
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
 				if (!(leaf?.view instanceof ChatView)) return;
 				const file = leaf.view.file;
 				if (!file) return;
-				const messenger = getMessenger();
-				if (!messenger) return;
-				// Already showing this thread — nothing to do.
-				if (messenger.activeThreadPath === file.path) return;
-				void messenger.loadSession(file);
+				const registry = getSessionRegistry();
+				if (!registry) return;
+				if (registry.sessionFor(file.path)) return; // still live — nothing to do
+				void registry.loadSession(file);
 			}),
 		);
 
 		// Create Agent Manager (v2) — constructor is cheap, heavy init deferred to onLayoutReady
 		this.agentManager = new AgentManager(this);
-		createMessenger(this.agentManager);
+		createSessionRegistry(this.agentManager);
 		this.registerNotebookNavigatorMenus();
 
 		// Enabling/disabling a plugin changes which skills are advertised to the agent

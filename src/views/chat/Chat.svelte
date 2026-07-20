@@ -2,7 +2,7 @@
 import { QueryClientProvider } from "@tanstack/svelte-query";
 import Input from "../../components/chat/Input.svelte";
 import MessageContainer from "../../components/chat/MessageContainer.svelte";
-import { getMessenger } from "../../stores/chatStore.svelte";
+import { getSessionRegistry } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
 import type { ThreadPathStore } from "./threadPathStore.svelte";
@@ -17,7 +17,7 @@ const threadPath = $derived(threadPathStore.current);
 
 const plugin = getPlugin();
 
-const messenger = getMessenger();
+const registry = getSessionRegistry();
 
 let messageContainer = $state<ReturnType<typeof MessageContainer> | undefined>();
 let input = $state<ReturnType<typeof Input> | undefined>();
@@ -27,7 +27,7 @@ let dragMessage = $state("Drop files here");
 let dragHasIssue = $state(false);
 
 $effect(() => {
-	const sessionId = messenger?.sessionFor(threadPath)?.id ?? null;
+	const sessionId = registry?.sessionFor(threadPath)?.id ?? null;
 	if (!sessionId || sessionId === lastSessionId) return;
 	lastSessionId = sessionId;
 	input?.focusEditor();
@@ -60,11 +60,11 @@ async function handleRootDrop(event: DragEvent) {
     ondragleave={handleRootDragLeave}
     ondrop={handleRootDrop}
   >
-    {#if messenger}
-      <MessageContainer bind:this={messageContainer} {messenger} {threadPath} />
+    {#if registry}
+      <MessageContainer bind:this={messageContainer} {registry} {threadPath} />
       <Input
         bind:this={input}
-        {messenger}
+        {registry}
         {threadPath}
         dropTargetMode="view"
         externalDragActive={isDragging}

@@ -41,11 +41,6 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 	},
 }));
 
-// Mock runContext
-vi.mock("../../src/agent/tools/runContext", () => ({
-	getCurrentThreadId: () => "test-thread-id",
-}));
-
 // Mock uuid
 vi.mock("../../src/utils/uuid7Validator", () => ({
 	genUUIDv7: () => "mock-uuid",
@@ -56,6 +51,10 @@ const mockResolveVaultFileDetailed = vi.fn();
 vi.mock("../../src/utils/attachments", () => ({
 	resolveVaultFileDetailed: (...args: unknown[]) => mockResolveVaultFileDetailed(...args),
 }));
+
+// The tool reads its thread id from the run config's `configurable.thread_id`
+// (set by Agent.buildRunnableConfig in production). Pass it on every invoke.
+const THREAD_CONFIG = { configurable: { thread_id: "test-thread-id" } };
 
 import type { App } from "obsidian";
 import { createManageNotesTool } from "../../src/agent/tools/manageNotes";
@@ -98,7 +97,7 @@ describe("manageNotes tool (update operations)", () => {
 					edits: [{ oldText: "This is a test", newText: "This is updated" }],
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("1 update");
 		expect(mockAddChanges).toHaveBeenCalledWith(
@@ -131,7 +130,7 @@ describe("manageNotes tool (update operations)", () => {
 					],
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("1 update");
 		expect(mockAddChanges).toHaveBeenCalledWith(
@@ -158,7 +157,7 @@ describe("manageNotes tool (update operations)", () => {
 					edits: [{ oldText: "nonexistent text", newText: "replacement" }],
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("Could not find");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -177,7 +176,7 @@ describe("manageNotes tool (update operations)", () => {
 					edits: [{ oldText: "foo", newText: "baz" }],
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("appears multiple times");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -195,7 +194,7 @@ describe("manageNotes tool (update operations)", () => {
 					edits: [{ oldText: "a", newText: "b" }],
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("Only markdown files");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -212,7 +211,7 @@ describe("manageNotes tool (update operations)", () => {
 					edits: [{ oldText: "a", newText: "b" }],
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("File not found");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -232,7 +231,7 @@ describe("manageNotes tool (update operations)", () => {
 					edits: [{ oldText: "a", newText: "b" }],
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("Multiple files match");
 		expect(result).toContain("Notes/test.md");
@@ -252,7 +251,7 @@ describe("manageNotes tool (update operations)", () => {
 					edits: [{ oldText: "a", newText: "b" }],
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("excluded by");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -271,7 +270,7 @@ describe("manageNotes tool (update operations)", () => {
 					edits: [{ oldText: "content here", newText: "updated content" }],
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(mockResolveVaultFileDetailed).toHaveBeenCalledWith(app, "My Note");
 	});
@@ -293,7 +292,7 @@ describe("manageNotes tool (update operations)", () => {
 					],
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(mockAddChanges).toHaveBeenCalledWith(
 			[

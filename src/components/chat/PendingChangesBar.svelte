@@ -1,17 +1,15 @@
 <script lang="ts">
 import { Notice } from "obsidian";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
-import type { Messenger } from "../../stores/chatStore.svelte";
 import type { PendingChangeEntry } from "../../types/shared";
 import DiffView from "../ui/DiffView.svelte";
 import { icon } from "../../utils/utils";
 
 interface Props {
-	messenger: Messenger;
 	threadPath: string | null;
 }
 
-const { messenger, threadPath }: Props = $props();
+const { threadPath }: Props = $props();
 const store = getPendingChangesStore();
 
 const threadId = $derived(threadPath);

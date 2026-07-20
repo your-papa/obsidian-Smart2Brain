@@ -3,7 +3,7 @@ import { Notice, TFile, normalizePath } from "obsidian";
 import { onDestroy, onMount } from "svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
-import { MessageState, type Messenger } from "../../stores/chatStore.svelte";
+import { MessageState, type SessionRegistry } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
 import { buildUsageEstimate, estimateContextUsageBreakdown } from "../../utils/tokenEstimator";
@@ -24,7 +24,7 @@ import DraftAttachmentChips from "./DraftAttachmentChips.svelte";
 import ContextUsageCircle from "./ContextUsageCircle.svelte";
 import Button from "../ui/Button.svelte";
 interface Props {
-	messenger: Messenger;
+	registry: SessionRegistry;
 	threadPath: string | null;
 	onFocusChange?: (focused: boolean) => void;
 	onMessageSent?: () => void;
@@ -47,7 +47,7 @@ const MAX_TOTAL_ATTACHMENTS_BYTES = 25 * 1024 * 1024; // 25 MB per message
 const FULLSCREEN_TRANSITION_MS = 220;
 
 const {
-	messenger,
+	registry,
 	threadPath,
 	onFocusChange,
 	onMessageSent,
@@ -56,8 +56,8 @@ const {
 	externalDragActive = false,
 }: Props = $props();
 
-// Pinned to this tab's own thread — does not follow the global activeThreadPath pointer.
-const session = $derived(messenger.sessionFor(threadPath));
+// Pinned to this tab's own thread — never follows a global pointer.
+const session = $derived(registry.sessionFor(threadPath));
 
 let editorContainer: HTMLDivElement | undefined = $state();
 let attachmentInputEl: HTMLInputElement | undefined = $state();
@@ -178,10 +178,13 @@ const contextUsage = $derived.by(() => {
 });
 
 const canSendMessage = $derived(inputValue.trim().length > 0 || attachments.length > 0);
-const busyElsewhere = $derived(messenger.isBusyElsewhere(session?.id ?? null));
+// Phase-1 one-at-a-time: block sending here while a DIFFERENT chat is generating.
+// (Phase 2 removes this gate once the agent-execution layer is concurrency-safe.)
+const busyElsewhere = $derived(registry.anyRunning && !session?.isRunning);
 const busyChatName = $derived.by(() => {
-	const path = messenger.runningThreadPath;
-	if (!path || !busyElsewhere) return null;
+	if (!busyElsewhere) return null;
+	const path = registry.runningSessions[0]?.id;
+	if (!path) return null;
 	return (
 		path
 			.split("/")
@@ -219,9 +222,9 @@ onMount(() => {
 
 // Consume any pending input queued from elsewhere (e.g. graph "Send to Chat")
 $effect(() => {
-	if (messenger.pendingInput && markdownEditor) {
-		const text = messenger.pendingInput;
-		messenger.pendingInput = null;
+	if (registry.pendingInput && markdownEditor) {
+		const text = registry.pendingInput;
+		registry.pendingInput = null;
 		// Mirror the value into inputValue synchronously so canSendMessage/auto-submit
 		// reflect it (setValue does not fire the editor onChange). Defer the editor
 		// write to the next frame so CodeMirror's DOM is laid out before the
@@ -240,12 +243,12 @@ $effect(() => {
 });
 
 $effect(() => {
-	if (!messenger.pendingAttachmentPaths || messenger.pendingAttachmentPaths.length === 0) {
+	if (!registry.pendingAttachmentPaths || registry.pendingAttachmentPaths.length === 0) {
 		return;
 	}
 
-	const paths = [...messenger.pendingAttachmentPaths];
-	messenger.pendingAttachmentPaths = null;
+	const paths = [...registry.pendingAttachmentPaths];
+	registry.pendingAttachmentPaths = null;
 
 	void attachVaultFilesByPath(paths);
 });
@@ -256,12 +259,12 @@ $effect(() => {
 // alongside the text — and doesn't drop the send if the session is still
 // loading (the effect re-runs when session becomes available).
 $effect(() => {
-	if (!messenger.pendingAutoSubmit) return;
+	if (!registry.pendingAutoSubmit) return;
 	if (!session) return;
 	if (savingFiles) return;
 	if (!canSendMessage) return;
 
-	messenger.pendingAutoSubmit = false;
+	registry.pendingAutoSubmit = false;
 	sendMessage();
 });
 
@@ -285,9 +288,9 @@ $effect(() => {
 
 // Consume pending graph notes queued from Smart Graph
 $effect(() => {
-	if (messenger.pendingGraphNotes !== null) {
-		pendingGraphPaths = messenger.pendingGraphNotes;
-		messenger.pendingGraphNotes = null;
+	if (registry.pendingGraphNotes !== null) {
+		pendingGraphPaths = registry.pendingGraphNotes;
+		registry.pendingGraphNotes = null;
 		if (pendingGraphPaths.length > 0) {
 			requestAnimationFrame(() => markdownEditor?.focus());
 		}
@@ -443,9 +446,13 @@ function sendMessage() {
 		new Notice("Add text or attach a file before sending");
 		return;
 	}
+	if (!session) {
+		new Notice("Chat is not ready yet");
+		return;
+	}
 
 	const contentToSend = inputValue.trim().length > 0 ? inputValue : "Please analyze the attached files.";
-	void messenger
+	void session
 		.sendMessage(
 			contentToSend,
 			attachments.length > 0 ? [...attachments] : undefined,
@@ -477,14 +484,14 @@ function sendMessage() {
 async function summarizeNow() {
 	if (!session) return;
 	try {
-		await messenger.summarizeHistoryNow();
+		await session.summarizeHistoryNow();
 	} catch (error) {
 		new Notice(error instanceof Error ? error.message : "Failed to summarize history");
 	}
 }
 
 function openRunningChat() {
-	const path = messenger.runningThreadPath;
+	const path = registry.runningSessions[0]?.id;
 	if (path) void getPlugin().agentManager.openChatByThreadId(path);
 }
 
@@ -1033,7 +1040,7 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
       <div class="h-icon-xs" use:icon={"refresh-cw"} style="--icon-size: var(--icon-xs)"></div>
     </button>
   {/if}
-  <PendingChangesBar {messenger} {threadPath} />
+  <PendingChangesBar {threadPath} />
   <!-- Input wrapper with glow effect -->
   <div
     class="chat-input-wrapper flex flex-col gap-3 bg-background-secondary border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isFullscreen

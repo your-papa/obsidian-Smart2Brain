@@ -24,14 +24,14 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 	},
 }));
 
-vi.mock("../../src/agent/tools/runContext", () => ({
-	getCurrentThreadId: () => "test-thread-id",
-}));
-
 const mockResolveVaultFileDetailed = vi.fn();
 vi.mock("../../src/utils/attachments", () => ({
 	resolveVaultFileDetailed: (...args: unknown[]) => mockResolveVaultFileDetailed(...args),
 }));
+
+// The tool reads its thread id from the run config's `configurable.thread_id`
+// (set by Agent.buildRunnableConfig in production). Pass it on every invoke.
+const THREAD_CONFIG = { configurable: { thread_id: "test-thread-id" } };
 
 import type { App } from "obsidian";
 import { createManageNotesTool } from "../../src/agent/tools/manageNotes";
@@ -111,7 +111,7 @@ describe("manageNotes tool", () => {
 					path: "Archive/old.md",
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("Proposed 3 note operation(s)");
 		expect(result).toContain("1 create, 1 update, 1 delete");
@@ -157,7 +157,7 @@ describe("manageNotes tool", () => {
 					content: "# Another",
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("Error in operation 1, edit 1");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -176,7 +176,7 @@ describe("manageNotes tool", () => {
 					edits: [{ oldText: "content here", newText: "updated content" }],
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(mockResolveVaultFileDetailed).toHaveBeenCalledWith(app, "My Note");
 	});
@@ -200,7 +200,7 @@ describe("manageNotes tool", () => {
 					path: "Notes/test.md",
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("targeted more than once in this batch");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -216,7 +216,7 @@ describe("manageNotes tool", () => {
 					path: "Notes/test.md",
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("Delete operations are disabled");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -238,7 +238,7 @@ describe("manageNotes tool", () => {
 					],
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(mockAddChanges).toHaveBeenCalledWith(
 			[
@@ -265,7 +265,7 @@ describe("manageNotes tool", () => {
 					newPath: "Archive/source.md",
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("1 move");
 		expect(mockAddChanges).toHaveBeenCalledWith(
@@ -292,7 +292,7 @@ describe("manageNotes tool", () => {
 					newPath: "Archive/source.md",
 				},
 			],
-		});
+		}, THREAD_CONFIG);
 
 		expect(result).toContain("Move operations are disabled");
 		expect(mockAddChanges).not.toHaveBeenCalled();

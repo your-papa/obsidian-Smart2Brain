@@ -25,7 +25,7 @@ import {
 import { leidenAsync } from "../../utils/computeWorkerManager";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import { VIEW_TYPE_SMART_GRAPH } from "../../views/smart-graph/SmartGraphView";
-import { getMessenger } from "../../stores/chatStore.svelte";
+import { getSessionRegistry } from "../../stores/chatStore.svelte";
 import LoadingAnimation from "../ui/LoadingAnimation.svelte";
 import Button from "../ui/Button.svelte";
 import GraphCanvas from "./GraphCanvas.svelte";
@@ -439,7 +439,7 @@ function handleSelectionChange(paths: string[]) {
 	selectedPaths = paths;
 	pendingSpaceFilter =
 		paths.length > 0 ? { type: "any", conditions: [{ type: "paths", value: paths.slice() }] } : null;
-	const messenger = getMessenger();
+	const messenger = getSessionRegistry();
 	if (messenger) {
 		messenger.pendingGraphNotes = [...paths];
 	}
@@ -450,7 +450,7 @@ function handleLassoModeChange(active: boolean) {
 	if (!active) {
 		selectedPaths = [];
 		canvasComponent?.clearSelection();
-		const messenger = getMessenger();
+		const messenger = getSessionRegistry();
 		if (messenger) {
 			messenger.pendingGraphNotes = [];
 		}
@@ -477,7 +477,7 @@ async function handleSendToChat() {
 	}
 
 	// Queue graph notes as structured data (rendered as chips in the chat input)
-	const messenger = getMessenger();
+	const messenger = getSessionRegistry();
 	if (messenger) {
 		messenger.pendingGraphNotes = [...paths];
 	} else {
@@ -495,7 +495,7 @@ function handleClearSelection() {
 	focusedSegmentIds = new Set();
 	pendingSpaceFilter = null;
 	canvasComponent?.clearSelection();
-	const messenger = getMessenger();
+	const messenger = getSessionRegistry();
 	if (messenger) {
 		messenger.pendingGraphNotes = [];
 	}
@@ -633,7 +633,7 @@ function handleFocusSegment(segmentId: string, multi: boolean) {
 	}
 	canvasComponent?.selectNodesByPaths(paths);
 	selectedPaths = paths;
-	const messenger = getMessenger();
+	const messenger = getSessionRegistry();
 	if (messenger) messenger.pendingGraphNotes = [...paths];
 	pendingSpaceFilter = { type: "any", conditions: [{ type: "paths", value: paths.slice() }] };
 	canvasComponent?.panToSelection();

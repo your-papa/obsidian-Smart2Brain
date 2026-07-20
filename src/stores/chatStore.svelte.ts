@@ -1414,11 +1414,8 @@ interface ChatSessionOptions {
 	lastErrorMessage?: string;
 	bootstrapMessages?: BaseMessage[];
 	onNeedReload?: () => Promise<void>;
-	/** Fires true when a stream starts, false when it ends. Used by Messenger to
-	 * track the single running thread for one-at-a-time enforcement. */
-	onRunStateChange?: (running: boolean) => void;
-	/** Fires when this.id changes (title rename). Used by Messenger to rekey the
-	 * session map so the new path stays addressable. */
+	/** Fires when this.id changes (title rename). Used by SessionRegistry to rekey
+	 * the session map so the new path stays addressable. */
 	onThreadIdChange?: (oldPath: string, newPath: string) => void;
 }
 
@@ -1439,11 +1436,10 @@ export class ChatSession {
 	private lastErrorMessage: string | undefined;
 	private bootstrapMessages: BaseMessage[];
 	private onNeedReload: (() => Promise<void>) | undefined;
-	private onRunStateChange: ((running: boolean) => void) | undefined;
 	private onThreadIdChange: ((oldPath: string, newPath: string) => void) | undefined;
 
 	/** Wall-clock of the last time this session was surfaced or ran; used by the
-	 * Messenger to evict the least-recently-used parked idle sessions. */
+	 * SessionRegistry to evict the least-recently-used parked idle sessions. */
 	lastTouchedAt = Date.now();
 
 	constructor(id: string, options: ChatSessionOptions) {
@@ -1453,7 +1449,6 @@ export class ChatSession {
 		this.lastErrorMessage = options.lastErrorMessage;
 		this.bootstrapMessages = options.bootstrapMessages ?? [];
 		this.onNeedReload = options.onNeedReload;
-		this.onRunStateChange = options.onRunStateChange;
 		this.onThreadIdChange = options.onThreadIdChange;
 		this.rebuildMessagePairs();
 	}
@@ -1822,7 +1817,6 @@ export class ChatSession {
 		this.abortController = new AbortController();
 		const signal = this.abortController.signal;
 		this.touch();
-		this.onRunStateChange?.(true);
 
 		try {
 			this.messageState = MessageState.answering;
@@ -1872,7 +1866,6 @@ export class ChatSession {
 			this.summarizingHistory = false;
 			this.messageState = MessageState.idle;
 			this.touch();
-			this.onRunStateChange?.(false);
 		}
 	}
 
@@ -2263,7 +2256,6 @@ export class ChatSession {
 		this.abortController = new AbortController();
 		const signal = this.abortController.signal;
 		this.touch();
-		this.onRunStateChange?.(true);
 
 		try {
 			this.messageState = MessageState.answering;
@@ -2295,44 +2287,31 @@ export class ChatSession {
 			this.summarizingHistory = false;
 			this.messageState = MessageState.idle;
 			this.touch();
-			this.onRunStateChange?.(false);
 		}
 	}
 }
 
 /* -----------------------------------------------------------------------------
- * Messenger
- *  - Orchestrates sessions
- *  - Uses graph-first checkpoint loading/reloading/navigation
+ * SessionRegistry
  * ---------------------------------------------------------------------------*/
-/* -----------------------------------------------------------------------------
- * BusyElsewhereError
- * ---------------------------------------------------------------------------*/
-
-/** Thrown when a run-starting action is attempted while a different chat is streaming. */
-export class BusyElsewhereError extends Error {
-	constructor(public readonly runningThreadPath: string) {
-		super(`Agent busy in ${runningThreadPath}`);
-		this.name = "BusyElsewhereError";
-	}
-}
 
 /** Maximum number of parked (non-active, non-running) idle sessions kept in memory. */
 const MAX_PARKED_SESSIONS = 3;
 
 /* -----------------------------------------------------------------------------
- * Messenger
- *  - Orchestrates sessions
- *  - Uses graph-first checkpoint loading/reloading/navigation
+ * SessionRegistry
+ *  - Owns the global set of live ChatSessions keyed by thread path.
+ *  - Loads/reloads/rekeys/evicts sessions; derives the running set.
+ *  - Does NOT hold a single "active" pointer: each view (ChatView) binds to its
+ *    own thread path and reads its session via `sessionFor(threadPath)`. Actions
+ *    (send/edit/regenerate/summarize/switchToBranch) are called directly on the
+ *    ChatSession the view resolved, so an action from one tab can never leak into
+ *    another. Running state is read per-session (`ChatSession.isRunning`).
  * ---------------------------------------------------------------------------*/
-export class Messenger {
+export class SessionRegistry {
 	/** All live sessions keyed by thread path. A running session is parked here
 	 * (not destroyed) when the user navigates away, so it can be reattached. */
 	sessions = new SvelteMap<string, ChatSession>();
-	/** Thread path the current view is showing. */
-	activeThreadPath: string | null = $state(null);
-	/** The at-most-one thread that is currently streaming (null when idle). */
-	runningThreadPath: string | null = $state(null);
 	isLoadingSession: boolean = $state(false);
 	pendingInput: string | null = $state(null);
 	pendingGraphNotes: string[] | null = $state(null);
@@ -2343,7 +2322,7 @@ export class Messenger {
 	/**
 	 * Monotonically increasing token identifying the most recent `loadSession`
 	 * call. Switching threads quickly fires overlapping async loads; without a
-	 * guard, a slower earlier load can resolve last and clobber `this.session`
+	 * guard, a slower earlier load can resolve last and clobber a session
 	 * with the previous chat's checkpoints. Each load captures the token at
 	 * start and only commits its result if it is still the latest.
 	 */
@@ -2353,34 +2332,33 @@ export class Messenger {
 		this.#agentManager = agentManager;
 	}
 
-	/** Backward-compatible accessor: the session the current view is bound to.
-	 * Plain getter over $state fields, so $derived/$effect readers stay reactive. */
-	get session(): ChatSession | null {
-		return this.activeThreadPath ? (this.sessions.get(this.activeThreadPath) ?? null) : null;
-	}
-
-	/** Per-tab session accessor: returns the session for a specific thread path.
-	 * Use this instead of `session` when a component is pinned to a file (e.g. ChatView). */
+	/** The session for a specific thread path — the only session accessor.
+	 * Each view passes its own pinned threadPath. */
 	sessionFor(threadPath: string | null): ChatSession | null {
 		return threadPath ? (this.sessions.get(threadPath) ?? null) : null;
 	}
 
-	/** The single running session, if any. */
-	get runningSession(): ChatSession | null {
-		return this.runningThreadPath ? (this.sessions.get(this.runningThreadPath) ?? null) : null;
+	/** All sessions currently streaming. Concurrency-ready: derived from each
+	 * session's own `isRunning`, not a single shared slot. */
+	get runningSessions(): ChatSession[] {
+		return [...this.sessions.values()].filter((s) => s.isRunning);
 	}
 
-	/** True when a different chat than the given path is streaming. */
-	isBusyElsewhere(threadPath: string | null): boolean {
-		return this.runningThreadPath !== null && this.runningThreadPath !== threadPath;
+	/** True when any session is streaming. */
+	get anyRunning(): boolean {
+		for (const s of this.sessions.values()) {
+			if (s.isRunning) return true;
+		}
+		return false;
 	}
 
-	/** Stop the currently running background/foreground stream (if any). */
-	stopRunning(): void {
-		this.runningSession?.stopStreaming();
+	/** Stop every running stream. */
+	stopAll(): void {
+		for (const s of this.runningSessions) s.stopStreaming();
 	}
 
-	/** Wires session callbacks: run-state tracking and map rekeying on rename. */
+	/** Wires session callbacks: map rekeying on rename. Run-state is read
+	 * per-session (no registry slot to push into). */
 	private buildSessionOptions(
 		id: string,
 		base: Pick<
@@ -2390,13 +2368,6 @@ export class Messenger {
 	): ChatSessionOptions {
 		return {
 			...base,
-			onRunStateChange: (running) => {
-				if (running) {
-					this.runningThreadPath = id;
-				} else if (this.runningThreadPath === id) {
-					this.runningThreadPath = null;
-				}
-			},
 			onThreadIdChange: (oldPath, newPath) => {
 				this.rekeySession(oldPath, newPath);
 				id = newPath; // keep closure in sync
@@ -2404,24 +2375,23 @@ export class Messenger {
 		};
 	}
 
-	/** Rekey a session in the map after its thread path changes (title rename),
-	 * repointing active/running pointers. */
+	/** Rekey a session in the map after its thread path changes (title rename).
+	 * Views bind by their own threadPath (updated via ChatView's rename handling),
+	 * so there is no registry-level active/running pointer to repoint here. */
 	private rekeySession(oldPath: string, newPath: string): void {
 		if (oldPath === newPath) return;
 		const s = this.sessions.get(oldPath);
 		if (!s) return;
 		this.sessions.delete(oldPath);
 		this.sessions.set(newPath, s);
-		if (this.activeThreadPath === oldPath) this.activeThreadPath = newPath;
-		if (this.runningThreadPath === oldPath) this.runningThreadPath = newPath;
 	}
 
 	/** Drop least-recently-used idle parked sessions, keeping at most
-	 * MAX_PARKED_SESSIONS beyond the active and running ones. */
+	 * MAX_PARKED_SESSIONS idle ones. Never evicts a running session (concurrency:
+	 * protects ALL running sessions, not a single slot). Sessions currently
+	 * mounted in a view stay in the MRU window because loading touches them. */
 	private evictParkedSessions(): void {
-		const parked = [...this.sessions.values()].filter(
-			(s) => s.id !== this.activeThreadPath && s.id !== this.runningThreadPath && !s.isRunning,
-		);
+		const parked = [...this.sessions.values()].filter((s) => !s.isRunning);
 		if (parked.length <= MAX_PARKED_SESSIONS) return;
 		parked.sort((a, b) => b.lastTouchedAt - a.lastTouchedAt);
 		for (const s of parked.slice(MAX_PARKED_SESSIONS)) {
@@ -2574,10 +2544,10 @@ export class Messenger {
 		// Reattach: if a live (running) session already exists for this thread,
 		// re-surface it instead of rebuilding from checkpoints — rebuilding would
 		// discard the in-flight streaming state (partial tokens, abortController).
+		// The view is already pinned to this thread path, so no pointer to move.
 		const existing = this.sessions.get(id);
 		if (existing && existing.isRunning && !targetCheckpointId) {
 			existing.touch();
-			this.activeThreadPath = id;
 			this.evictParkedSessions();
 			return;
 		}
@@ -2602,8 +2572,9 @@ export class Messenger {
 			// shows the real history without the user having to intervene.
 			if (checkpointHistory.length === 0 && !isEmpty) {
 				this.#agentManager.onNextInitialized(() => {
-					// Only reload if this thread is still the active one.
-					if (this.activeThreadPath === id) void this.reloadSession(id);
+					// Only reload if this thread's session is still around (its view
+					// may have closed and the session been evicted meanwhile).
+					if (this.sessions.has(id)) void this.reloadSession(id);
 				});
 			}
 
@@ -2655,7 +2626,6 @@ export class Messenger {
 				}),
 			);
 			this.sessions.set(id, session);
-			this.activeThreadPath = id;
 
 			await this.persistLastViewedCheckpoint(id, resolution.checkpointId, session);
 			this.evictParkedSessions();
@@ -2667,15 +2637,15 @@ export class Messenger {
 	}
 
 	/** Reload a specific session (by thread path) while preserving valid
-	 * in-memory active checkpoint precedence. Defaults to the active session. */
-	async reloadSession(threadId?: string, targetCheckpointId?: string): Promise<void> {
-		const session = threadId ? (this.sessions.get(threadId) ?? null) : this.session;
+	 * in-memory active checkpoint precedence. */
+	async reloadSession(threadId: string, targetCheckpointId?: string): Promise<void> {
+		const session = this.sessions.get(threadId) ?? null;
 		if (!session) {
 			throw new Error("No session to reload");
 		}
 
-		// Capture load token: a thread switch during the awaits below changes
-		// activeThreadPath; applying stale history to the new session would show
+		// Capture load token: a thread switch during the awaits below can replace
+		// this session; applying stale history to a newer session would show
 		// the wrong chat's checkpoints.
 		const id = session.id;
 		const loadToken = this.#loadToken;
@@ -2720,12 +2690,14 @@ export class Messenger {
 		await this.persistLastViewedCheckpoint(id, resolution.checkpointId, session);
 	}
 
-	/** Switch to a different branch by activating a specific checkpoint directly.
-	 * Read-only navigation — allowed even while another chat is streaming. */
-	async switchToBranch(checkpointId: string): Promise<void> {
-		const session = this.session;
+	/** Switch a specific thread to a different branch by activating a checkpoint.
+	 * Read-only navigation — allowed even while a chat is streaming. Takes an
+	 * explicit threadPath so the calling view targets its own session, never a
+	 * global active pointer. */
+	async switchToBranch(threadPath: string, checkpointId: string): Promise<void> {
+		const session = this.sessions.get(threadPath) ?? null;
 		if (!session) {
-			throw new Error("No active session");
+			throw new Error("No session for thread");
 		}
 
 		const threadId = session.id;
@@ -2752,71 +2724,23 @@ export class Messenger {
 
 		await this.persistLastViewedCheckpoint(threadId, checkpointId, session);
 	}
-
-	/* ---------------- Sending Messages ---------------- */
-
-	/** Guard for run-starting actions: reject when a different chat is streaming. */
-	private assertNotBusyElsewhere(threadPath: string | null): void {
-		if (this.isBusyElsewhere(threadPath)) {
-			throw new BusyElsewhereError(this.runningThreadPath!);
-		}
-	}
-
-	async sendMessage(
-		content: string,
-		attachments?: ChatAttachment[],
-		visibleNotes?: VisibleNoteRef[],
-		selection?: SelectionRef,
-		graphNotes?: GraphNoteRef[],
-	): Promise<string> {
-		const session = this.session;
-		if (!session) {
-			throw new Error("No active session");
-		}
-		this.assertNotBusyElsewhere(session.id);
-		return session.sendMessage(content, attachments, visibleNotes, selection, graphNotes);
-	}
-
-	/** Edit a user message on the active session, guarded against cross-chat runs. */
-	async editMessage(pairId: UUIDv7, newContent: string): Promise<void> {
-		const session = this.session;
-		if (!session) throw new Error("No active session");
-		this.assertNotBusyElsewhere(session.id);
-		return session.editMessage(pairId, newContent);
-	}
-
-	/** Regenerate the assistant reply on the active session, guarded against cross-chat runs. */
-	async regenerateResponse(pairId: UUIDv7): Promise<void> {
-		const session = this.session;
-		if (!session) throw new Error("No active session");
-		this.assertNotBusyElsewhere(session.id);
-		return session.regenerateResponse(pairId);
-	}
-
-	/** Manually summarize the active session's history, guarded against cross-chat runs. */
-	async summarizeHistoryNow(): Promise<void> {
-		const session = this.session;
-		if (!session) throw new Error("No active session");
-		this.assertNotBusyElsewhere(session.id);
-		return session.summarizeHistoryNow();
-	}
 }
 
 /* -----------------------------------------------------------------------------
- * Singleton helpers (unchanged pattern)
+ * Singleton helpers
  * ---------------------------------------------------------------------------*/
-let messengerSingleton: Messenger | null = null;
+let sessionRegistrySingleton: SessionRegistry | null = null;
 
-export function createMessenger(agentManager?: AgentManager): Messenger {
-	if (!messengerSingleton) {
+export function createSessionRegistry(agentManager?: AgentManager): SessionRegistry {
+	if (!sessionRegistrySingleton) {
 		if (!agentManager) {
-			throw new Error("AgentManager is required for first Messenger creation");
+			throw new Error("AgentManager is required for first SessionRegistry creation");
 		}
-		messengerSingleton = new Messenger(agentManager);
+		sessionRegistrySingleton = new SessionRegistry(agentManager);
 	}
-	return messengerSingleton;
+	return sessionRegistrySingleton;
 }
 
-export function getMessenger(): Messenger | null {
-	return messengerSingleton;
+export function getSessionRegistry(): SessionRegistry | null {
+	return sessionRegistrySingleton;
 }

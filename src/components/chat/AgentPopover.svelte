@@ -4,7 +4,7 @@ import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { Logger } from "../../utils/logging";
 import Icon from "../ui/Icon.svelte";
-import { chatHistoryContainsPrivateNotes, getMessenger } from "../../stores/chatStore.svelte";
+import { chatHistoryContainsPrivateNotes, getSessionRegistry } from "../../stores/chatStore.svelte";
 import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
 import { AgentEditorModal } from "../modal/AgentEditorModal";
 import Button from "../ui/Button.svelte";
@@ -36,7 +36,7 @@ async function selectAgent(agent: AgentConfig) {
 	// Check if the agent's provider is non-trusted and chat has private notes
 	const newProvider = agent.chatModel?.provider;
 	if (newProvider && !data.isProviderTrusted(newProvider)) {
-		const messages = getMessenger()?.sessionFor(threadPath)?.messages;
+		const messages = getSessionRegistry()?.sessionFor(threadPath)?.messages;
 		if (messages && chatHistoryContainsPrivateNotes(messages)) {
 			const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
 			if (!confirmed) return;
