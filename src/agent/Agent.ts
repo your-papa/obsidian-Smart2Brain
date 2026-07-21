@@ -14,12 +14,11 @@ import type { BaseCheckpointSaver, CheckpointTuple } from "@langchain/langgraph"
 import { MemorySaver } from "@langchain/langgraph";
 import { type ReactAgent, createAgent, summarizationMiddleware } from "langchain";
 import { createSubAgentMiddleware } from "deepagents/browser";
-import { Notice, TFile } from "obsidian";
+import { TFile } from "obsidian";
 
-import { ProviderEndpointError, ProviderNotFoundError } from "../providers/errors";
+import { ProviderEndpointError } from "../providers/errors";
 import type { ChatModelConfig } from "../providers/index";
 import type { ProviderRegistry } from "../providers/registry";
-import { getData } from "../stores/dataStore.svelte";
 import { getPlugin } from "../stores/state.svelte";
 import type { VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../hooks/useSelection.svelte";
@@ -27,11 +26,10 @@ import type { GraphNoteRef } from "../stores/chatStore.svelte";
 import type { ChatAttachment, ThreadError } from "../types/shared";
 import {
 	AiTransportDowngradeRequiredError,
-	type AiTransportContext,
+	bindAsyncIterableToTransportContext,
 	createAiTransportContext,
-	enterAiTransportContext,
 	findAiTransportDowngradeRequiredError,
-	setAiTransportMode,
+	runWithAiTransportContext,
 } from "../lib/aiTransport";
 import { toBase64, toBase64DataUri } from "../utils/attachments";
 import { extractTextFromPdf } from "../utils/pdfExtractor";
@@ -77,6 +75,8 @@ export interface ChooseModelParams {
 /** Options for a normal query (new message in thread) */
 export interface AgentRunOptions {
 	query: string;
+	/** Fully-resolved model + runnable for this run (per-run, never instance state). */
+	resolved: ResolvedRun;
 	threadId?: string;
 	metadata?: Record<string, unknown>;
 	configurable?: Record<string, unknown>;
@@ -95,6 +95,7 @@ export interface AgentRunOptions {
 /** Options for editing a message (forks from checkpoint with new user message) */
 export interface AgentEditOptions {
 	query: string;
+	resolved: ResolvedRun;
 	threadId: string;
 	checkpointId: string;
 	lcSource?: string;
@@ -107,6 +108,7 @@ export interface AgentEditOptions {
 
 /** Options for regenerating a response from a checkpoint (no new user message) */
 export interface AgentRegenerateOptions {
+	resolved: ResolvedRun;
 	threadId: string;
 	checkpointId: string;
 	signal?: AbortSignal;
@@ -223,33 +225,59 @@ export type AgentStreamChunk =
 			threadId: string;
 	  };
 
-interface SelectedModel {
+export interface SelectedModel {
 	provider: string;
 	name: string;
 	instance: BaseChatModel;
 	options?: Partial<ChatModelConfig>;
 }
 
+/**
+ * Parameters for resolving a run. Unlike the old `chooseModel`, this carries the
+ * agent's prompt/tools/subagents explicitly (per-run, not instance state) plus a
+ * `cacheKey` (built by AgentManager over the full agent config) so the runnable
+ * can be memoized per agent-config without any shared mutable state.
+ */
+export interface ResolveRunParams extends ChooseModelParams {
+	/** Signature over the full agent config (model + prompt + tools + subagents). */
+	cacheKey: string;
+	systemPrompt: string;
+	tools: readonly unknown[];
+	subAgents: readonly SubAgentSpec[];
+}
+
+/**
+ * A fully-resolved run: an immutable bundle handed into each run method. Nothing
+ * model-related lives on the Agent instance between runs, so concurrent runs with
+ * different models can never clobber each other. Same-config runs share one
+ * (thread-stateless) cached runnable.
+ */
+export interface ResolvedRun {
+	runnable: AgentRunnable;
+	selectedModel: SelectedModel;
+	/** Undefined → summarization falls back to `selectedModel`. */
+	summarizationModel?: SelectedModel;
+	/** Undefined → title generation falls back to `selectedModel`. */
+	titleModel?: SelectedModel;
+	supportsVision: boolean;
+	currentProvider: string;
+}
+
 export class Agent {
-	private prompt: string;
-	private tools: readonly unknown[] = [];
-	private subAgents: readonly SubAgentSpec[] = [];
-	private selectedModel?: SelectedModel;
-	private selectedSummarizationModel?: SelectedModel;
-	private selectedTitleModel?: SelectedModel;
-	private agentRunnable?: AgentRunnable;
 	private readonly checkpointer: BaseCheckpointSaver;
 	private readonly telemetry?: Telemetry;
 	private readonly threadStore?: ThreadStore;
 	private readonly registry: ProviderRegistry;
-	private dirty = true;
+	private readonly defaultPrompt: string;
+	/** Runnables memoized by agent-config cacheKey (built by AgentManager). */
+	private readonly runnableCache = new Map<string, AgentRunnable>();
 
 	constructor(options: AgentOptions) {
 		this.registry = options.registry;
 		this.telemetry = options.telemetry;
 		this.threadStore = options.threadStore;
 		this.checkpointer = this.wrapCheckpointer(options.checkpointer ?? new MemorySaver());
-		this.prompt = options.defaultPrompt ?? "You are a privacy-focused assistant.";
+		this.defaultPrompt = options.defaultPrompt ?? "You are a privacy-focused assistant.";
 		Logger.debug("agent.init", {
 			hasTelemetry: Boolean(this.telemetry),
 			hasThreadStore: Boolean(this.threadStore),
@@ -257,39 +285,24 @@ export class Agent {
 		});
 	}
 
-	setPrompt(prompt: string): void {
-		this.prompt = prompt;
-		this.dirty = true;
-	}
-
-	bindTools(tools: readonly unknown[]): void {
-		this.tools = tools;
-		this.dirty = true;
-	}
-
 	/**
-	 * Sets the subagents this agent can delegate to via the `task` tool.
-	 * Specs are fully resolved (model + tool instances) by AgentManager.
+	 * Drops any cached runnables built for the given agent config. Needed only for
+	 * changes that the cacheKey can't see (async-loaded MCP tools); model/prompt/tool
+	 * config changes are already covered by the key. Matches on the `agentId` field
+	 * embedded in the JSON cacheKey.
 	 */
-	bindSubAgents(subAgents: readonly SubAgentSpec[]): void {
-		this.subAgents = subAgents;
-		this.dirty = true;
+	invalidateRunnable(agentId: string): void {
+		const needle = `"agentId":${JSON.stringify(agentId)}`;
+		for (const key of this.runnableCache.keys()) {
+			if (key.includes(needle)) this.runnableCache.delete(key);
+		}
 	}
 
-	/**
-	 * Returns whether the currently selected model supports vision/image input.
-	 */
-	get supportsVision(): boolean {
-		return this.selectedModel?.options?.supportsVision ?? false;
+	/** Drops every cached runnable. Use when a global input to prompt assembly
+	 *  (e.g. the set of loaded skills) changes and can affect any agent's prompt. */
+	invalidateAllRunnables(): void {
+		this.runnableCache.clear();
 	}
-
-	/**
-	 * Returns the current provider ID.
-	 */
-	get currentProvider(): string {
-		return this.selectedModel?.provider ?? "";
-	}
-
 	/**
 	 * Builds the message content for a HumanMessage, supporting multimodal attachments.
 	 *
@@ -303,6 +316,8 @@ export class Agent {
 	 */
 	private async buildMessageContent(
 		query: string,
+		supportsVision: boolean,
+		currentProvider: string,
 		attachments?: ChatAttachment[],
 	): Promise<string | MessageContentComplex[]> {
 		if (!attachments || attachments.length === 0) {
@@ -311,7 +326,7 @@ export class Agent {
 
 		const contentParts: MessageContentComplex[] = [{ type: "text", text: query }];
 		const hasImages = attachments.some((a) => a.mimeType.startsWith("image/"));
-		const skipImagesForNonVisionModel = hasImages && !this.supportsVision;
+		const skipImagesForNonVisionModel = hasImages && !supportsVision;
 		let addedImageSkipNotice = false;
 
 		// For non-vision models, skip image attachments but continue processing other supported files.
@@ -364,7 +379,7 @@ export class Agent {
 				}
 				const buffer = await app.vault.readBinary(file);
 
-				if (NATIVE_PDF_PROVIDERS.has(this.currentProvider)) {
+				if (NATIVE_PDF_PROVIDERS.has(currentProvider)) {
 					// Native PDF: use LangChain's standardized file content block.
 					// LangChain auto-converts to each provider's native format:
 					//   Anthropic → type: "document" with source.type: "base64"
@@ -436,70 +451,87 @@ export class Agent {
 		return contentParts;
 	}
 
-	async chooseModel(params: ChooseModelParams): Promise<void> {
-		const { provider, chatModel, options, summarizationModel, titleModel } = params;
-
-		// Create a LangChain instance for this provider + model
-		let instance: BaseChatModel;
-		try {
-			instance = this.registry.createChatInstance(provider, chatModel, options);
-		} catch (error) {
-			if (error instanceof ProviderNotFoundError) {
-				const data = getData();
-				const selectedAgent = data.getSelectedAgent();
-				data.updateAgent(selectedAgent.id, { chatModel: null });
-				new Notice(`Provider "${provider}" is no longer available. Please select a new model.`);
-				throw error;
-			}
-			throw error;
-		}
-
-		this.selectedModel = {
+	/**
+	 * Pure resolver: builds the model instances and the (memoized) runnable for a
+	 * run WITHOUT mutating any instance state. Returns an immutable {@link ResolvedRun}
+	 * bundle the caller threads into the run method. Concurrent runs with different
+	 * models each get their own bundle, so they can never clobber each other.
+	 *
+	 * On `ProviderNotFoundError` it simply rethrows — the caller (AgentManager) owns
+	 * the config side effect of clearing the offending agent's model, since only it
+	 * knows WHICH agent config this run used.
+	 */
+	async resolveRun(params: ResolveRunParams): Promise<ResolvedRun> {
+		const {
 			provider,
-			name: chatModel,
-			instance,
+			chatModel,
 			options,
-		};
+			summarizationModel,
+			titleModel,
+			cacheKey,
+			systemPrompt,
+			tools,
+			subAgents,
+		} = params;
 
-		if (summarizationModel) {
-			this.selectedSummarizationModel = {
-				provider: summarizationModel.provider,
-				name: summarizationModel.chatModel,
-				instance: this.registry.createChatInstance(
-					summarizationModel.provider,
-					summarizationModel.chatModel,
-					summarizationModel.options,
-				),
-				options: summarizationModel.options,
-			};
-		} else {
-			this.selectedSummarizationModel = undefined;
+		const instance = this.registry.createChatInstance(provider, chatModel, options);
+		const selectedModel: SelectedModel = { provider, name: chatModel, instance, options };
+
+		const resolvedSummarization: SelectedModel | undefined = summarizationModel
+			? {
+					provider: summarizationModel.provider,
+					name: summarizationModel.chatModel,
+					instance: this.registry.createChatInstance(
+						summarizationModel.provider,
+						summarizationModel.chatModel,
+						summarizationModel.options,
+					),
+					options: summarizationModel.options,
+				}
+			: undefined;
+
+		const resolvedTitle: SelectedModel | undefined = titleModel
+			? {
+					provider: titleModel.provider,
+					name: titleModel.chatModel,
+					instance: this.registry.createChatInstance(
+						titleModel.provider,
+						titleModel.chatModel,
+						titleModel.options,
+					),
+					options: titleModel.options,
+				}
+			: undefined;
+
+		let runnable = this.runnableCache.get(cacheKey);
+		if (!runnable) {
+			runnable = createAgent({
+				model: selectedModel.instance,
+				tools: Array.isArray(tools) ? [...tools] : [],
+				systemPrompt,
+				checkpointer: this.checkpointer,
+				middleware: [
+					...this.buildSummarizationMiddleware(selectedModel, resolvedSummarization),
+					...this.buildSubAgentMiddleware(selectedModel, subAgents, tools),
+				] as never,
+			});
+			this.runnableCache.set(cacheKey, runnable);
+			Logger.debug("agent.resolveRun.build", { provider, chatModel, cacheKey });
 		}
-		if (titleModel) {
-			this.selectedTitleModel = {
-				provider: titleModel.provider,
-				name: titleModel.chatModel,
-				instance: this.registry.createChatInstance(
-					titleModel.provider,
-					titleModel.chatModel,
-					titleModel.options,
-				),
-				options: titleModel.options,
-			};
-		} else {
-			this.selectedTitleModel = undefined;
-		}
-		Logger.debug("agent.chooseModel", { provider, chatModel, options });
-		this.dirty = true;
+
+		return {
+			runnable,
+			selectedModel,
+			summarizationModel: resolvedSummarization,
+			titleModel: resolvedTitle,
+			supportsVision: options?.supportsVision ?? false,
+			currentProvider: provider,
+		};
 	}
 
-	private buildSummarizationMiddleware() {
-		if (!this.selectedModel) {
-			return [];
-		}
-
-		const model = this.selectedSummarizationModel?.instance ?? this.selectedModel.instance;
-		const contextWindow = this.selectedModel.options?.contextWindow;
+	private buildSummarizationMiddleware(selectedModel: SelectedModel, summarizationModel?: SelectedModel) {
+		const model = summarizationModel?.instance ?? selectedModel.instance;
+		const contextWindow = selectedModel.options?.contextWindow;
 		const triggerTokens = getSummarizationTriggerTokens(contextWindow);
 		if (!triggerTokens) {
 			return [];
@@ -526,19 +558,23 @@ export class Agent {
 	 * empty array when no subagents are configured, so the `task` tool is only
 	 * exposed when delegation is actually set up.
 	 */
-	private buildSubAgentMiddleware() {
-		if (!this.selectedModel || this.subAgents.length === 0) {
+	private buildSubAgentMiddleware(
+		selectedModel: SelectedModel,
+		subAgents: readonly SubAgentSpec[],
+		tools: readonly unknown[],
+	) {
+		if (subAgents.length === 0) {
 			return [];
 		}
 
 		return [
 			createSubAgentMiddleware({
 				// Fallback only — every configured subagent overrides these.
-				defaultModel: this.selectedModel.instance,
-				defaultTools: [...this.tools] as never,
+				defaultModel: selectedModel.instance,
+				defaultTools: [...tools] as never,
 				// Expose only the explicitly-referenced subagents, not a generic one.
 				generalPurposeAgent: false,
-				subagents: this.subAgents.map((s) => {
+				subagents: subAgents.map((s) => {
 					// Wrap the subagent's `invoke` so that every LangGraph-internal channel
 					// that could reconnect it to the parent's checkpoint/history is stripped
 					// before invocation. Without this the subagent inherits the parent's
@@ -637,29 +673,10 @@ export class Agent {
 		});
 	}
 
-	private async withAiTransportMode<T>(
-		context: AiTransportContext,
-		mode: "default" | "buffered",
-		label: string,
-		operation: () => Promise<T>,
-	): Promise<T> {
-		enterAiTransportContext(context);
-		const previousMode = context.mode;
-		const previousLabel = context.label;
-		setAiTransportMode(context, mode, label);
-		try {
-			return await operation();
-		} finally {
-			context.mode = previousMode;
-			context.label = previousLabel;
-		}
-	}
-
 	private async invokeBufferedFallback(
 		agent: AgentRunnable,
 		input: unknown,
 		invokeConfig: RunnableConfig,
-		transportContext: AiTransportContext,
 		runId: string,
 		threadId: string,
 		context: string,
@@ -673,23 +690,21 @@ export class Agent {
 			message: error.cause instanceof Error ? error.cause.message : String(error.cause),
 		});
 
-		return this.withAiTransportMode(transportContext, "buffered", `${context}:buffered:${runId}`, async () =>
-			agent.invoke(input as never, invokeConfig),
-		);
+		// Fresh buffered context scoped via run() — isolated from any other
+		// concurrent stream's transport context.
+		const bufferedContext = createAiTransportContext("buffered", `${context}:buffered:${runId}`);
+		return runWithAiTransportContext(bufferedContext, async () => agent.invoke(input as never, invokeConfig));
 	}
 
 	async run(options: AgentRunOptions): Promise<AgentResult> {
-		const { query } = options;
+		const { query, resolved } = options;
+		const { runnable: agent, selectedModel } = resolved;
 		const hasAttachments = Boolean(options.attachments?.length);
-		if (!this.selectedModel) {
-			throw new Error("No model selected. Call chooseModel() before run().");
-		}
 
 		if ((!query || query.trim().length === 0) && !hasAttachments) {
 			throw new Error("Query must be a non-empty string when no attachments are provided.");
 		}
 
-		const agent = await this.ensureAgent();
 		const runId = this.generateId();
 		const threadId = options.threadId;
 		if (!threadId) throw new Error("threadId is required");
@@ -697,15 +712,20 @@ export class Agent {
 		Logger.debug("agent.run.start", {
 			runId,
 			threadId,
-			provider: this.selectedModel.provider,
-			model: this.selectedModel.name,
+			provider: selectedModel.provider,
+			model: selectedModel.name,
 			queryPreview: query.slice(0, 200),
 		});
 
 		const invokeConfig = this.buildRunnableConfig(options, threadId);
 
 		const normalizedQuery = query.trim().length > 0 ? query : "Please analyze the attached files.";
-		const messageContent = await this.buildMessageContent(normalizedQuery, options.attachments);
+		const messageContent = await this.buildMessageContent(
+			normalizedQuery,
+			resolved.supportsVision,
+			resolved.currentProvider,
+			options.attachments,
+		);
 		const humanMessage = this.createHumanMessage(
 			messageContent,
 			options.attachments,
@@ -716,14 +736,13 @@ export class Agent {
 		);
 
 		const transportContext = createAiTransportContext("default", `agent.run:${runId}`);
-		enterAiTransportContext(transportContext);
-		const rawResult = await this.withAiTransportMode(transportContext, "default", `agent.run:${runId}`, async () =>
+		const rawResult = await runWithAiTransportContext(transportContext, async () =>
 			agent.invoke({ messages: [humanMessage] }, invokeConfig),
 		);
 
 		const finishedAt = new Date();
 		const messages = this.extractMessagesFromResult(rawResult);
-		await this.persistThreadMetadata(threadId, runId, messages);
+		await this.persistThreadMetadata(threadId, runId, messages, selectedModel.name);
 		await this.flushThreadPersistence(threadId);
 
 		const result: AgentResult = {
@@ -747,17 +766,14 @@ export class Agent {
 	}
 
 	async *streamTokens(options: AgentStreamOptions): AsyncGenerator<AgentStreamChunk> {
-		const { query } = options;
+		const { query, resolved } = options;
+		const { runnable: agent, selectedModel } = resolved;
 		const hasAttachments = Boolean(options.attachments?.length);
-		if (!this.selectedModel) {
-			throw new Error("No model selected. Call chooseModel() before streamTokens().");
-		}
 
 		if ((!query || query.trim().length === 0) && !hasAttachments) {
 			throw new Error("Query must be a non-empty string when no attachments are provided.");
 		}
 
-		const agent = await this.ensureAgent();
 		const runId = this.generateId();
 		const threadId = options.threadId;
 		if (!threadId) throw new Error("threadId is required");
@@ -765,15 +781,20 @@ export class Agent {
 		Logger.debug("agent.streamTokens.start", {
 			runId,
 			threadId,
-			provider: this.selectedModel.provider,
-			model: this.selectedModel.name,
+			provider: selectedModel.provider,
+			model: selectedModel.name,
 			queryPreview: query.slice(0, 200),
 		});
 
 		const invokeConfig = this.buildRunnableConfig(options, threadId);
 
 		const normalizedQuery = query.trim().length > 0 ? query : "Please analyze the attached files.";
-		const messageContent = await this.buildMessageContent(normalizedQuery, options.attachments);
+		const messageContent = await this.buildMessageContent(
+			normalizedQuery,
+			resolved.supportsVision,
+			resolved.currentProvider,
+			options.attachments,
+		);
 		const humanMessage = this.createHumanMessage(
 			messageContent,
 			options.attachments,
@@ -785,16 +806,19 @@ export class Agent {
 
 		const transportLabel = `agent.streamTokens:${runId}`;
 		const transportContext = createAiTransportContext("default", transportLabel);
-		enterAiTransportContext(transportContext);
-		let streamTransportActive = false;
-
-		streamTransportActive = true;
 
 		const streamInput = { messages: [humanMessage] };
-		const stream = await agent.stream(streamInput, {
-			...invokeConfig,
-			streamMode: ["messages", "tools", "values"] as const,
-		});
+		// Bind the LangChain stream so each pull runs inside this run's transport
+		// context (run()-scoped, concurrency-safe). Without this the fetch issued
+		// deep inside the stream would read whichever context another concurrent
+		// run last set.
+		const stream = bindAsyncIterableToTransportContext(
+			await agent.stream(streamInput, {
+				...invokeConfig,
+				streamMode: ["messages", "tools", "values"] as const,
+			}),
+			transportContext,
+		);
 
 		let rawResult: unknown;
 		// Track tool calls in progress to correlate start/end events
@@ -943,8 +967,6 @@ export class Agent {
 				}
 			}
 		} catch (error) {
-			streamTransportActive = false;
-
 			// Don't log or rethrow abort errors - they're expected during cancellation
 			if (error instanceof Error && error.name === "AbortError") {
 				Logger.debug("agent.streamTokens.aborted", { runId, threadId });
@@ -957,7 +979,6 @@ export class Agent {
 					agent,
 					streamInput,
 					invokeConfig,
-					transportContext,
 					runId,
 					threadId,
 					"agent.streamTokens",
@@ -966,7 +987,7 @@ export class Agent {
 			} else {
 				// Wrap connection errors in ProviderEndpointError for consistent handling
 				if (error instanceof TypeError && error.message.includes("fetch")) {
-					const provider = this.selectedModel?.provider ?? "unknown";
+					const provider = selectedModel.provider;
 					Logger.debug("agent.streamTokens.error", { runId, message: `Connection failed to ${provider}` });
 					throw new ProviderEndpointError(provider, "Connection refused - service may not be running");
 				}
@@ -978,10 +999,6 @@ export class Agent {
 				throw error;
 			}
 		} finally {
-			if (streamTransportActive) {
-				transportContext.mode = "default";
-				transportContext.label = transportLabel;
-			}
 			Logger.debug("agent.streamTokens.cleanup", { runId, threadId });
 		}
 
@@ -996,7 +1013,7 @@ export class Agent {
 
 		const finishedAt = new Date();
 		const messages = this.extractMessagesFromResult(rawResult);
-		await this.persistThreadMetadata(threadId, runId, messages);
+		await this.persistThreadMetadata(threadId, runId, messages, selectedModel.name);
 		await this.flushThreadPersistence(threadId);
 
 		const result: AgentResult = {
@@ -1046,10 +1063,8 @@ export class Agent {
 	 * This creates a new branch from the given checkpoint.
 	 */
 	async *editFromCheckpoint(options: AgentEditOptions): AsyncGenerator<AgentStreamChunk> {
-		const { query, threadId, checkpointId } = options;
-		if (!this.selectedModel) {
-			throw new Error("No model selected. Call chooseModel() before editFromCheckpoint().");
-		}
+		const { query, threadId, checkpointId, resolved } = options;
+		const { runnable: agent, selectedModel } = resolved;
 
 		if (!query || query.trim().length === 0) {
 			throw new Error("Query must be a non-empty string.");
@@ -1059,21 +1074,25 @@ export class Agent {
 			throw new Error("checkpointId is required for editing.");
 		}
 
-		const agent = await this.ensureAgent();
 		const runId = this.generateId();
 		const startedAt = new Date();
 		Logger.debug("agent.editFromCheckpoint.start", {
 			runId,
 			threadId,
 			checkpointId,
-			provider: this.selectedModel.provider,
-			model: this.selectedModel.name,
+			provider: selectedModel.provider,
+			model: selectedModel.name,
 			queryPreview: query.slice(0, 200),
 		});
 
 		const invokeConfig = this.buildRunnableConfig(options, threadId, checkpointId);
 
-		const messageContent = await this.buildMessageContent(query, options.attachments);
+		const messageContent = await this.buildMessageContent(
+			query,
+			resolved.supportsVision,
+			resolved.currentProvider,
+			options.attachments,
+		);
 		const humanMessage = this.createHumanMessage(
 			messageContent,
 			options.attachments,
@@ -1089,15 +1108,14 @@ export class Agent {
 
 		const transportLabel = `agent.editFromCheckpoint:${runId}`;
 		const transportContext = createAiTransportContext("default", transportLabel);
-		enterAiTransportContext(transportContext);
-		let streamTransportActive = false;
 
-		streamTransportActive = true;
-
-		const stream = await agent.stream(input, {
-			...invokeConfig,
-			streamMode: ["messages", "tools", "values"] as const,
-		});
+		const stream = bindAsyncIterableToTransportContext(
+			await agent.stream(input, {
+				...invokeConfig,
+				streamMode: ["messages", "tools", "values"] as const,
+			}),
+			transportContext,
+		);
 
 		let rawResult: unknown;
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
@@ -1228,8 +1246,6 @@ export class Agent {
 				}
 			}
 		} catch (error) {
-			streamTransportActive = false;
-
 			if (error instanceof Error && error.name === "AbortError") {
 				Logger.debug("agent.editFromCheckpoint.aborted", { runId, threadId });
 				return;
@@ -1241,7 +1257,6 @@ export class Agent {
 					agent,
 					input,
 					invokeConfig,
-					transportContext,
 					runId,
 					threadId,
 					"agent.editFromCheckpoint",
@@ -1249,7 +1264,7 @@ export class Agent {
 				);
 			} else {
 				if (error instanceof TypeError && error.message.includes("fetch")) {
-					const provider = this.selectedModel?.provider ?? "unknown";
+					const provider = selectedModel.provider;
 					Logger.debug("agent.editFromCheckpoint.error", {
 						runId,
 						message: `Connection failed to ${provider}`,
@@ -1264,10 +1279,6 @@ export class Agent {
 				throw error;
 			}
 		} finally {
-			if (streamTransportActive) {
-				transportContext.mode = "default";
-				transportContext.label = transportLabel;
-			}
 			Logger.debug("agent.editFromCheckpoint.cleanup", { runId, threadId });
 		}
 
@@ -1281,7 +1292,7 @@ export class Agent {
 
 		const finishedAt = new Date();
 		const messages = this.extractMessagesFromResult(rawResult);
-		await this.persistThreadMetadata(threadId, runId, messages);
+		await this.persistThreadMetadata(threadId, runId, messages, selectedModel.name);
 		await this.flushThreadPersistence(threadId);
 
 		const result: AgentResult = {
@@ -1329,24 +1340,21 @@ export class Agent {
 	 * This forks from the given checkpoint and generates a new response.
 	 */
 	async *regenerateFromCheckpoint(options: AgentRegenerateOptions): AsyncGenerator<AgentStreamChunk> {
-		const { threadId, checkpointId } = options;
-		if (!this.selectedModel) {
-			throw new Error("No model selected. Call chooseModel() before regenerateFromCheckpoint().");
-		}
+		const { threadId, checkpointId, resolved } = options;
+		const { runnable: agent, selectedModel } = resolved;
 
 		if (!checkpointId) {
 			throw new Error("checkpointId is required for regeneration.");
 		}
 
-		const agent = await this.ensureAgent();
 		const runId = this.generateId();
 		const startedAt = new Date();
 		Logger.debug("agent.regenerateFromCheckpoint.start", {
 			runId,
 			threadId,
 			checkpointId,
-			provider: this.selectedModel.provider,
-			model: this.selectedModel.name,
+			provider: selectedModel.provider,
+			model: selectedModel.name,
 		});
 
 		const invokeConfig = this.buildRunnableConfig(options, threadId, checkpointId);
@@ -1356,15 +1364,14 @@ export class Agent {
 
 		const transportLabel = `agent.regenerateFromCheckpoint:${runId}`;
 		const transportContext = createAiTransportContext("default", transportLabel);
-		enterAiTransportContext(transportContext);
-		let streamTransportActive = false;
 
-		streamTransportActive = true;
-
-		const stream = await agent.stream(input, {
-			...invokeConfig,
-			streamMode: ["messages", "tools", "values"] as const,
-		});
+		const stream = bindAsyncIterableToTransportContext(
+			await agent.stream(input, {
+				...invokeConfig,
+				streamMode: ["messages", "tools", "values"] as const,
+			}),
+			transportContext,
+		);
 
 		let rawResult: unknown;
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
@@ -1495,8 +1502,6 @@ export class Agent {
 				}
 			}
 		} catch (error) {
-			streamTransportActive = false;
-
 			if (error instanceof Error && error.name === "AbortError") {
 				Logger.debug("agent.regenerateFromCheckpoint.aborted", { runId, threadId });
 				return;
@@ -1508,7 +1513,6 @@ export class Agent {
 					agent,
 					input,
 					invokeConfig,
-					transportContext,
 					runId,
 					threadId,
 					"agent.regenerateFromCheckpoint",
@@ -1516,7 +1520,7 @@ export class Agent {
 				);
 			} else {
 				if (error instanceof TypeError && error.message.includes("fetch")) {
-					const provider = this.selectedModel?.provider ?? "unknown";
+					const provider = selectedModel.provider;
 					Logger.debug("agent.regenerateFromCheckpoint.error", {
 						runId,
 						message: `Connection failed to ${provider}`,
@@ -1531,10 +1535,6 @@ export class Agent {
 				throw error;
 			}
 		} finally {
-			if (streamTransportActive) {
-				transportContext.mode = "default";
-				transportContext.label = transportLabel;
-			}
 			Logger.debug("agent.regenerateFromCheckpoint.cleanup", { runId, threadId });
 		}
 
@@ -1548,7 +1548,7 @@ export class Agent {
 
 		const finishedAt = new Date();
 		const messages = this.extractMessagesFromResult(rawResult);
-		await this.persistThreadMetadata(threadId, runId, messages);
+		await this.persistThreadMetadata(threadId, runId, messages, selectedModel.name);
 
 		const result: AgentResult = {
 			runId,
@@ -1752,26 +1752,6 @@ export class Agent {
 			callbacks: callbacks ?? undefined,
 			signal: options.signal,
 		} as RunnableConfig;
-	}
-
-	private async ensureAgent(): Promise<AgentRunnable> {
-		if (!this.selectedModel) {
-			throw new Error("No model selected.");
-		}
-
-		if (this.agentRunnable && !this.dirty) {
-			return this.agentRunnable;
-		}
-
-		this.agentRunnable = createAgent({
-			model: this.selectedModel.instance,
-			tools: Array.isArray(this.tools) ? [...this.tools] : [],
-			systemPrompt: this.prompt,
-			checkpointer: this.checkpointer,
-			middleware: [...this.buildSummarizationMiddleware(), ...this.buildSubAgentMiddleware()] as never,
-		});
-		this.dirty = false;
-		return this.agentRunnable;
 	}
 
 	private wrapCheckpointer(checkpointer: BaseCheckpointSaver): BaseCheckpointSaver {
@@ -2371,14 +2351,19 @@ export class Agent {
 		return last.text || last.content;
 	}
 
-	private async persistThreadMetadata(threadId: string, runId: string, messages: BaseMessage[]): Promise<void> {
+	private async persistThreadMetadata(
+		threadId: string,
+		runId: string,
+		messages: BaseMessage[],
+		modelName?: string,
+	): Promise<void> {
 		if (!this.threadStore) {
 			return;
 		}
 		const existing = await this.threadStore.read(threadId);
 		const metadata: Record<string, unknown> = { ...(existing?.metadata ?? {}) };
 		metadata.lastRunId = runId;
-		metadata.model = this.selectedModel?.name;
+		metadata.model = modelName;
 		const lastMessage = messages[messages.length - 1];
 		// Use BaseMessage.text getter to extract text content
 		const preview = lastMessage?.text;
@@ -2409,12 +2394,8 @@ export class Agent {
 		await this.threadStore.flush(threadId);
 	}
 
-	async generateTitle(userMessage: string): Promise<string | undefined> {
-		if (!this.selectedModel) {
-			throw new Error("No model selected. Call chooseModel() before generateTitle().");
-		}
-
-		const model = this.selectedTitleModel?.instance ?? this.selectedModel.instance;
+	async generateTitle(userMessage: string, resolved: ResolvedRun): Promise<string | undefined> {
+		const model = resolved.titleModel?.instance ?? resolved.selectedModel.instance;
 
 		const prompt = `Generate a short, concise title (max 5 words) for the following user message. 
 Rules:
@@ -2428,13 +2409,15 @@ ${userMessage}`;
 		// Use buffered transport mode for this non-streaming invoke call.
 		// Electron net.fetch can produce responses that some providers
 		// (e.g. OpenRouter) fail to parse, while the buffered requestUrl
-		// path always returns a well-formed JSON body.
+		// path always returns a well-formed JSON body. Scoped via run() so a
+		// concurrent stream's transport context is never disturbed.
 		const transportContext = createAiTransportContext("buffered", "generateTitle");
-		enterAiTransportContext(transportContext);
 
 		try {
 			Logger.log(`[Agent] Generating title for message: "${userMessage.slice(0, 50)}..."`);
-			const response = await model.invoke([{ role: "user", content: prompt }]);
+			const response = await runWithAiTransportContext(transportContext, async () =>
+				model.invoke([{ role: "user", content: prompt }]),
+			);
 
 			const content = response.content;
 			Logger.debug("[Agent] Title generation raw response:", content);

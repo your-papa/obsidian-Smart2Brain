@@ -1,8 +1,7 @@
 <script lang="ts">
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
-import { Logger } from "../../utils/logging";
-import { type ChatModel } from "../../stores/chatStore.svelte";
+import { type ChatModel, getSessionRegistry } from "../../stores/chatStore.svelte";
 import { ModelSelectionModal } from "../modal/ModelSelectionModal";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import Button from "../ui/Button.svelte";
@@ -11,7 +10,18 @@ const data = getData();
 const plugin = getPlugin();
 const models = useAvailableModels();
 
-const selectedAgent = $derived(data.getSelectedAgent());
+interface Props {
+	threadPath?: string | null;
+}
+const { threadPath = null }: Props = $props();
+
+// The agent this TAB runs (per-session selection, falling back to the global).
+// The model pill and the modal's current selection both read from this agent so
+// they reflect what the tab will actually use, not the global selection.
+const session = $derived(getSessionRegistry()?.sessionFor(threadPath));
+const selectedAgent = $derived(
+	(session?.selectedAgentId ? data.getAgent(session.selectedAgentId) : undefined) ?? data.getSelectedAgent(),
+);
 
 function getModelDisplayName(provider: string, model: string): string {
 	const hydrated = models.hydratedChatModelsByKey.get(`${provider}:${model}`);
@@ -40,11 +50,9 @@ function openModelSelectionModal() {
 		: null;
 	new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
 		if (!selected) return;
-		data.updateAgent(data.selectedAgentId, {
+		const agentId = session?.selectedAgentId || data.selectedAgentId;
+		data.updateAgent(agentId, {
 			chatModel: buildPersistedChatModel(selected.provider, selected.model, selectedAgent?.chatModel),
-		});
-		plugin.agentManager?.reinitialize().catch((error) => {
-			Logger.error("Failed to update agent model:", error);
 		});
 	}).open();
 }

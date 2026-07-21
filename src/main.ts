@@ -413,7 +413,7 @@ export default class SecondBrainPlugin extends Plugin {
 		if (typeof pluginManager?.on === "function") {
 			this.registerEvent(
 				pluginManager.on("changed", () => {
-					void this.agentManager.updateSystemPrompt();
+					this.agentManager.invalidateSystemPromptCaches();
 				}),
 			);
 		}

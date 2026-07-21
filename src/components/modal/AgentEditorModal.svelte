@@ -39,7 +39,6 @@ import {
 import { getProviderDefinition } from "../../providers/index";
 import type { ChatModel } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
-import { Logger } from "../../utils/logging";
 
 interface Props {
 	modal: Modal;
@@ -78,12 +77,8 @@ let selectedAgent = $derived(agents[agentId]);
 let agentIconQuery = $state("");
 let isAgentIconPickerOpen = $state(false);
 
-async function applyChanges() {
-	try {
-		await plugin.agentManager.reinitialize();
-	} catch (error) {
-		Logger.error("Failed to reinitialize agent:", error);
-	}
+function applyChanges() {
+	plugin.agentManager?.invalidateAgentRunnable(agentId);
 }
 
 function updateAgentName(name: string) {

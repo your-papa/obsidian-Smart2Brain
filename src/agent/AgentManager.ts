@@ -37,6 +37,7 @@ import {
 	type AgentStreamChunk,
 	type CheckpointHistoryItem,
 	type ChooseModelParams,
+	type ResolvedRun,
 	type SubAgentSpec,
 	type ThreadHistory,
 } from "./Agent";
@@ -199,30 +200,6 @@ async function toChooseModelParams(model: ChatModel): Promise<ChooseModelParams>
 	};
 }
 
-/**
- * Non-blocking variant of toChooseModelParams for use during initialization.
- * Uses cached vision support if available, otherwise defaults to false.
- * Vision support will be properly resolved before actual agent invocation
- * via the async toChooseModelParams in prepareAgentForStream().
- */
-function toChooseModelParamsImmediate(model: ChatModel): ChooseModelParams {
-	const options = { ...model.modelConfig };
-	const cacheKey = getVisionSupportCacheKey(model.provider, model.model);
-
-	if (options.supportsVision !== undefined) {
-		resolvedVisionSupportCache.set(cacheKey, options.supportsVision);
-	} else {
-		const cached = resolvedVisionSupportCache.get(cacheKey);
-		options.supportsVision = cached ?? false;
-	}
-
-	return {
-		provider: model.provider,
-		chatModel: model.model,
-		options,
-	};
-}
-
 function resolveSummarizationChatModel(chatModel: ChatModel, summarizationModel: ChatModel | null): ChatModel {
 	return summarizationModel ?? chatModel;
 }
@@ -293,6 +270,10 @@ export class AgentManager {
 	private readonly plugin: SecondBrainPlugin;
 	private agent: Agent | null = null;
 	private deferredSetup: Promise<void> | null = null;
+	/** MCP tools memoized per agent id (network handshake — see ensureMCPToolsForAgent). */
+	private readonly mcpToolsByAgent = new Map<string, StructuredToolInterface[]>();
+	/** In-flight MCP handshake promises — deduplicates concurrent callers for the same agent. */
+	private readonly mcpToolsInflight = new Map<string, Promise<StructuredToolInterface[]>>();
 	/** Callbacks to invoke once after the next `initialize()` completes. Used to
 	 *  reload chat sessions that opened before the deferred init finished. */
 	private postInitCallbacks: Array<() => void> = [];
@@ -486,12 +467,15 @@ export class AgentManager {
 	}
 
 	/**
-	 * Updates the agent's system prompt by reassembling from current settings.
-	 * Call this after changing base prompt or skills.
+	 * Invalidates cached runnables after a change to a global prompt input
+	 * (e.g. loaded/unloaded skills). The system prompt is reassembled per-agent
+	 * at stream time, so this only needs to drop stale cached runnables; also
+	 * clears per-agent MCP tool caches so they are re-fetched next run.
 	 */
-	async updateSystemPrompt(): Promise<void> {
-		const assembledPrompt = await this.assembleSystemPrompt();
-		this.agent?.setPrompt(assembledPrompt);
+	invalidateSystemPromptCaches(): void {
+		this.mcpToolsByAgent.clear();
+		this.mcpToolsInflight.clear();
+		this.agent?.invalidateAllRunnables();
 	}
 
 	/**
@@ -618,13 +602,53 @@ export class AgentManager {
 		return chatModel;
 	}
 
-	private bindBuiltInTools(agent: Agent): StructuredToolInterface[] {
+	/**
+	 * Assembles the full tool set for an agent config — its built-in tools plus any
+	 * MCP tools (cached per agent so we don't re-handshake on every run). Used by
+	 * `prepareAgentForStream` to build the per-run tool list handed to `resolveRun`.
+	 */
+	private async assembleToolsForAgent(agentCfg: AgentConfig): Promise<StructuredToolInterface[]> {
+		const tools = this.buildToolsForAgent(agentCfg);
+		const mcpTools = await this.ensureMCPToolsForAgent(agentCfg.id);
+		return [...tools, ...mcpTools];
+	}
+
+	/**
+	 * Loads (and memoizes) the MCP tools for a given agent. MCP handshakes are
+	 * network round-trips, so the resolved tools are cached per agent id and only
+	 * re-fetched after `invalidateAgentRunnable` clears the entry.
+	 */
+	private async ensureMCPToolsForAgent(agentId: string): Promise<StructuredToolInterface[]> {
+		const cached = this.mcpToolsByAgent.get(agentId);
+		if (cached) return cached;
+
+		const inflight = this.mcpToolsInflight.get(agentId);
+		if (inflight) return inflight;
+
 		const data = getData();
-		const selectedAgent = data.getSelectedAgent();
-		const tools = this.buildToolsForAgent(selectedAgent);
-		agent.bindTools(tools);
-		agent.bindSubAgents(this.resolveSubAgentSpecs(selectedAgent));
-		return tools;
+		const mcpServers = data.getAgentMCPServersForClient(agentId);
+		const promise = (async () => {
+			const tools: StructuredToolInterface[] = [];
+			// Only cache a SUCCESSFUL load. A transient handshake failure (server
+			// down at warm-up) must NOT persist an empty tool set as success —
+			// otherwise the agent runs the whole session with its MCP tools
+			// silently missing and never retries. On failure we return the (empty)
+			// tools for this run but leave the cache unset so the next call retries.
+			const ok =
+				!mcpServers || Object.keys(mcpServers).length === 0 || (await this.loadMCPTools(tools, mcpServers));
+			if (ok) this.mcpToolsByAgent.set(agentId, tools);
+			return tools;
+		})();
+		this.mcpToolsInflight.set(agentId, promise);
+		try {
+			return await promise;
+		} finally {
+			// Clear inflight on every path (success, empty result, or a future
+			// throw) so a rejected promise can never poison the map.
+			if (this.mcpToolsInflight.get(agentId) === promise) {
+				this.mcpToolsInflight.delete(agentId);
+			}
+		}
 	}
 
 	/**
@@ -701,7 +725,7 @@ export class AgentManager {
 				"read_content",
 				() => createReadContentTool(this.plugin.app, imageProcessorInstance, pdfProcessorInstance),
 			],
-			["manage_notes", () => createManageNotesTool(this.plugin.app)],
+			["manage_notes", () => createManageNotesTool(this.plugin.app, agentCfg.id)],
 			["fetch_url", () => createFetchUrlTool()],
 			["web_search", () => createWebSearchTool()],
 		];
@@ -900,8 +924,8 @@ export class AgentManager {
 	private async loadMCPTools(
 		tools: StructuredToolInterface[],
 		mcpServers: Record<string, unknown> | undefined,
-	): Promise<void> {
-		if (!mcpServers || Object.keys(mcpServers).length === 0) return;
+	): Promise<boolean> {
+		if (!mcpServers || Object.keys(mcpServers).length === 0) return true;
 
 		try {
 			const mcpConfig = { mcpServers } as ConstructorParameters<typeof MultiServerMCPClient>[0];
@@ -918,11 +942,14 @@ export class AgentManager {
 				const mcpTools = await mcpClient.getTools();
 				Logger.log(`Loaded ${mcpTools.length} MCP tools`);
 				tools.push(...mcpTools);
+				return true;
 			} catch (e) {
 				Logger.error("Failed to get MCP tools", e);
+				return false;
 			}
 		} catch (error) {
 			Logger.error("Failed to load MCP tools", error);
+			return false;
 		}
 	}
 
@@ -990,35 +1017,16 @@ export class AgentManager {
 			telemetry,
 		});
 
-		// Set assembled prompt (base + enabled skills)
-		this.agent.setPrompt(await this.assembleSystemPrompt());
+		// Reset the per-agent MCP-tool cache; runnables are per-run resolved.
+		this.mcpToolsByAgent.clear();
+		this.mcpToolsInflight.clear();
 
+		// Warm up network-dependent setup (vision resolution + MCP tools) for the
+		// default agent in the background so the first run resolves fast. Model,
+		// prompt, and tools are no longer eagerly bound — each run resolves its own
+		// runnable via prepareAgentForStream, keyed by agent config.
 		const chatModel = selectedAgent.chatModel;
-		if (chatModel) {
-			try {
-				const summarizationModel = resolveSummarizationChatModel(chatModel, selectedAgent.summarizationModel);
-				const titleModel = resolveTitleChatModel(chatModel, selectedAgent.titleModel);
-				await this.agent.chooseModel({
-					...toChooseModelParamsImmediate(chatModel),
-					summarizationModel: toChooseModelParamsImmediate(summarizationModel),
-					titleModel: toChooseModelParamsImmediate(titleModel),
-				});
-			} catch (error) {
-				if (error instanceof ProviderNotFoundError) {
-					Logger.warn(
-						`[AgentManager] Provider "${chatModel.provider}" not registered, skipping model selection`,
-					);
-				} else {
-					throw error;
-				}
-			}
-		}
-
-		// Bind built-in tools synchronously
-		const tools = this.bindBuiltInTools(this.agent);
-
-		// Start deferred network operations (vision resolution + MCP tools) in background
-		this.deferredSetup = this.performDeferredSetup(this.agent, chatModel ?? undefined, tools);
+		this.deferredSetup = this.performDeferredSetup(selectedAgent, chatModel ?? undefined);
 
 		// Notify any sessions that opened before init completed (e.g. workspace restore).
 		const callbacks = this.postInitCallbacks.splice(0);
@@ -1037,14 +1045,10 @@ export class AgentManager {
 	/**
 	 * Performs network-dependent setup in the background to avoid blocking plugin startup.
 	 * - Resolves vision support from external APIs (Ollama, OpenRouter, models.dev)
-	 * - Loads MCP tools from configured MCP servers
+	 * - Warms the per-agent MCP tool cache
 	 * These are awaited before the first agent invocation via awaitDeferredSetup().
 	 */
-	private async performDeferredSetup(
-		agent: Agent,
-		chatModel: ChatModel | undefined,
-		tools: StructuredToolInterface[],
-	): Promise<void> {
+	private async performDeferredSetup(agentCfg: AgentConfig, chatModel: ChatModel | undefined): Promise<void> {
 		const promises: Promise<void>[] = [];
 
 		// Deferred: resolve vision support and persist it
@@ -1058,17 +1062,12 @@ export class AgentManager {
 			);
 		}
 
-		// Deferred: load MCP tools and rebind
-		const data = getData();
-		const selectedAgent = data.getSelectedAgent();
-		const mcpServers = data.getAgentMCPServersForClient(selectedAgent.id);
-		if (mcpServers && Object.keys(mcpServers).length > 0) {
-			promises.push(
-				this.loadMCPTools(tools, mcpServers).then(() => {
-					agent.bindTools(tools);
-				}),
-			);
-		}
+		// Deferred: warm the MCP tool cache for the default agent (non-fatal).
+		promises.push(
+			this.ensureMCPToolsForAgent(agentCfg.id)
+				.then(() => undefined)
+				.catch(() => undefined),
+		);
 
 		await Promise.all(promises);
 	}
@@ -1145,31 +1144,117 @@ export class AgentManager {
 		}
 	}
 
-	private async prepareAgentForStream(): Promise<{
+	/**
+	 * Stable signature over everything in an agent config that feeds the runnable
+	 * build (model + prompt + tools + subagents). Used as the runnable cache key so
+	 * a config change produces a fresh runnable while unchanged configs reuse one.
+	 * MCP tools are excluded here (loaded async) — those need explicit invalidation
+	 * via `invalidateAgentRunnable`.
+	 * Includes the resolved subagents' own revisions (not just their ids), so editing
+	 * a subagent's model/prompt/tools also invalidates every parent that references it.
+	 */
+	private agentConfigRevision(agent: AgentConfig): string {
+		const data = getData();
+		const subAgentRevisions = (agent.subAgentIds ?? []).map((id) => {
+			const sub = data.getAgent(id);
+			if (!sub) return { id, missing: true };
+			return {
+				id,
+				systemPrompt: sub.systemPrompt,
+				chatModel: sub.chatModel ? `${sub.chatModel.provider}:${sub.chatModel.model}` : null,
+				toolsConfig: sub.toolsConfig,
+				pluginExecTools: sub.pluginExecTools ?? null,
+			};
+		});
+		return JSON.stringify({
+			systemPrompt: agent.systemPrompt,
+			skills: agent.skills,
+			toolsConfig: agent.toolsConfig,
+			pluginExecTools: agent.pluginExecTools ?? null,
+			subAgentIds: agent.subAgentIds ?? null,
+			subAgentRevisions,
+		});
+	}
+
+	private buildRunnableCacheKey(agent: AgentConfig, chatModel: ChatModel, summarizationModel: ChatModel): string {
+		return JSON.stringify({
+			provider: chatModel.provider,
+			model: chatModel.model,
+			contextWindow: chatModel.modelConfig?.contextWindow ?? null,
+			supportsVision: chatModel.modelConfig?.supportsVision ?? null,
+			summ: `${summarizationModel.provider}:${summarizationModel.model}`,
+			agentId: agent.id,
+			agentRev: this.agentConfigRevision(agent),
+		});
+	}
+
+	/** Drops cached runnables + MCP tools for an agent whose config changed in a way
+	 *  the cache key can't see (e.g. async-loaded MCP tools, or subagent internals). */
+	invalidateAgentRunnable(agentId: string): void {
+		this.mcpToolsByAgent.delete(agentId);
+		this.mcpToolsInflight.delete(agentId);
+		this.agent?.invalidateRunnable(agentId);
+	}
+
+	private async prepareAgentForStream(agentId: string): Promise<{
 		agent: Agent;
+		resolved: ResolvedRun;
 		chatModel: ChatModel;
 		runMetadata: Record<string, unknown>;
+		resolvedAgentId: string;
 	}> {
 		const agent = await this.ensureAgent();
 		await this.awaitDeferredSetup();
 		const pluginData = getData();
-		const selectedAgent = pluginData.getSelectedAgent();
+		// Empty agentId ("" default) → intentionally use global selection.
+		// Non-empty but unknown agentId → agent was deleted; throw rather than silently
+		// falling back to the global (which would mislabel metadata and risk clearing
+		// the global agent's model on ProviderNotFoundError mid-run for another tab).
+		let selectedAgent: ReturnType<typeof pluginData.getSelectedAgent>;
+		if (!agentId) {
+			selectedAgent = pluginData.getSelectedAgent();
+		} else {
+			const found = pluginData.getAgent(agentId);
+			if (!found) throw new Error(`Agent "${agentId}" no longer exists — please select a different agent.`);
+			selectedAgent = found;
+		}
 		const chatModel = selectedAgent.chatModel;
 		if (!chatModel) throw new Error("No chat model configured");
 		const summarizationModel = resolveSummarizationChatModel(chatModel, selectedAgent.summarizationModel);
 		const titleModel = resolveTitleChatModel(chatModel, selectedAgent.titleModel);
-		await agent.chooseModel({
-			...(await toChooseModelParams(chatModel)),
-			summarizationModel: await toChooseModelParams(summarizationModel),
-			titleModel: await toChooseModelParams(titleModel),
-		});
+
+		const systemPrompt = await this.assembleSystemPrompt(selectedAgent);
+		const tools = await this.assembleToolsForAgent(selectedAgent);
+		const subAgents = this.resolveSubAgentSpecs(selectedAgent);
+		const cacheKey = this.buildRunnableCacheKey(selectedAgent, chatModel, summarizationModel);
+
+		let resolved: ResolvedRun;
+		try {
+			resolved = await agent.resolveRun({
+				...(await toChooseModelParams(chatModel)),
+				summarizationModel: await toChooseModelParams(summarizationModel),
+				titleModel: await toChooseModelParams(titleModel),
+				cacheKey,
+				systemPrompt,
+				tools,
+				subAgents,
+			});
+		} catch (error) {
+			if (error instanceof ProviderNotFoundError) {
+				pluginData.updateAgent(selectedAgent.id, { chatModel: null });
+				new Notice(`Provider "${chatModel.provider}" is no longer available. Please select a new model.`);
+			}
+			throw error;
+		}
+
 		const runMetadata = this.buildRunMetadata(selectedAgent.id, selectedAgent.name, chatModel);
-		return { agent, chatModel, runMetadata };
+		return { agent, resolved, chatModel, runMetadata, resolvedAgentId: selectedAgent.id };
 	}
 
 	async *streamQuery(
 		query: string,
 		threadId = "default-thread",
+		agentId: string,
 		checkpointId?: string,
 		signal?: AbortSignal,
 		attachments?: ChatAttachment[],
@@ -1179,14 +1264,15 @@ export class AgentManager {
 		lcSource?: string,
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		const resolvedThreadId = this.normalizeThreadId(threadId);
-		const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
+		const { agent, resolved, chatModel, runMetadata, resolvedAgentId } = await this.prepareAgentForStream(agentId);
 
 		yield* this.dispatchStream(
 			agent.streamTokens({
 				query,
+				resolved,
 				threadId: resolvedThreadId,
 				metadata: runMetadata,
-				configurable: checkpointId ? { checkpoint_id: checkpointId } : undefined,
+				configurable: { agent_id: resolvedAgentId, ...(checkpointId ? { checkpoint_id: checkpointId } : {}) },
 				signal,
 				attachments,
 				visibleNotes,
@@ -1207,19 +1293,22 @@ export class AgentManager {
 	async *editFromCheckpoint(
 		query: string,
 		threadId: string,
+		agentId: string,
 		checkpointId: string,
 		signal?: AbortSignal,
 		attachments?: ChatAttachment[],
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		const resolvedThreadId = this.normalizeThreadId(threadId);
-		const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
+		const { agent, resolved, chatModel, runMetadata, resolvedAgentId } = await this.prepareAgentForStream(agentId);
 
 		yield* this.dispatchStream(
 			agent.editFromCheckpoint({
 				query,
+				resolved,
 				threadId: resolvedThreadId,
 				checkpointId,
 				metadata: runMetadata,
+				configurable: { agent_id: resolvedAgentId },
 				signal,
 				attachments,
 			} as Parameters<Agent["editFromCheckpoint"]>[0]),
@@ -1235,17 +1324,20 @@ export class AgentManager {
 	 */
 	async *regenerateFromCheckpoint(
 		threadId: string,
+		agentId: string,
 		checkpointId: string,
 		signal?: AbortSignal,
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		const resolvedThreadId = this.normalizeThreadId(threadId);
-		const { agent, chatModel, runMetadata } = await this.prepareAgentForStream();
+		const { agent, resolved, chatModel, runMetadata, resolvedAgentId } = await this.prepareAgentForStream(agentId);
 
 		yield* this.dispatchStream(
 			agent.regenerateFromCheckpoint({
+				resolved,
 				threadId: resolvedThreadId,
 				checkpointId,
 				metadata: runMetadata,
+				configurable: { agent_id: resolvedAgentId },
 				signal,
 			}),
 			signal,
@@ -1344,16 +1436,22 @@ export class AgentManager {
 	 * Generate a title for a thread using only the user's first message.
 	 * This can run in parallel with streaming since it doesn't need the AI response.
 	 */
-	async generateThreadTitleFromUserMessage(threadId: string, userMessage: string): Promise<string | undefined> {
-		const agent = await this.ensureAgent().catch((e) => {
-			Logger.warn("Agent not initialized, cannot generate title");
-			return null;
-		});
-
-		if (!agent) return undefined;
+	async generateThreadTitleFromUserMessage(
+		threadId: string,
+		agentId: string,
+		userMessage: string,
+	): Promise<string | undefined> {
+		let resolved: ResolvedRun;
+		let agent: Agent;
+		try {
+			({ agent, resolved } = await this.prepareAgentForStream(agentId));
+		} catch (e) {
+			Logger.warn("Agent not ready, cannot generate title", e);
+			return undefined;
+		}
 
 		try {
-			const title = await agent.generateTitle(userMessage);
+			const title = await agent.generateTitle(userMessage, resolved);
 			if (title) {
 				Logger.log(`Generated title for thread ${threadId}: "${title}"`);
 				return await this.chatManager.renameChatFile(threadId, title);
@@ -1421,10 +1519,10 @@ export class AgentManager {
 		const data = getData();
 		const folder = data.targetFolder;
 
-		// Reset to default agent if one is set
+		// Reset the global default agent for the next new chat. Each session captures
+		// its own selectedAgentId at creation, so no agent rebuild is needed here.
 		if (data.defaultAgentId && data.selectedAgentId !== data.defaultAgentId) {
 			data.selectedAgentId = data.defaultAgentId;
-			await this.reinitialize();
 		}
 
 		// Only ever keep one unsubmitted "New Chat" around: if an empty new chat

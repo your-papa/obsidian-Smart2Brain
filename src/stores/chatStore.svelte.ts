@@ -1413,6 +1413,9 @@ interface ChatSessionOptions {
 	errorCount: number;
 	lastErrorMessage?: string;
 	bootstrapMessages?: BaseMessage[];
+	/** Agent selected for this session's runs. Defaults to the global
+	 * `selectedAgentId`; restored per-thread from generation metadata on load. */
+	selectedAgentId?: string;
 	onNeedReload?: () => Promise<void>;
 	/** Fires when this.id changes (title rename). Used by SessionRegistry to rekey
 	 * the session map so the new path stays addressable. */
@@ -1422,6 +1425,10 @@ interface ChatSessionOptions {
 export class ChatSession {
 	id = $state<string>("");
 	messages: MessagePair[] = $state<MessagePair[]>([]);
+
+	/** Agent whose model/prompt/tools this session's runs resolve against.
+	 * Per-session so concurrent tabs can run different agents/models. */
+	selectedAgentId = $state<string>("");
 
 	// Streaming / lifecycle
 	private abortController: AbortController | null = null;
@@ -1444,6 +1451,7 @@ export class ChatSession {
 
 	constructor(id: string, options: ChatSessionOptions) {
 		this.id = id;
+		this.selectedAgentId = options.selectedAgentId ?? getData().selectedAgentId;
 		this.graphState = options.graphState;
 		this.errorCount = options.errorCount;
 		this.lastErrorMessage = options.lastErrorMessage;
@@ -1835,6 +1843,7 @@ export class ChatSession {
 					const plugin = getPlugin();
 					const newPath = await plugin.agentManager.generateThreadTitleFromUserMessage(
 						String(this.id),
+						this.selectedAgentId,
 						options.generateTitle,
 					);
 					if (newPath) {
@@ -1948,6 +1957,7 @@ export class ChatSession {
 				plugin.agentManager.streamQuery(
 					augmented,
 					String(this.id),
+					this.selectedAgentId,
 					this.graphState.activeCheckpointId,
 					signal,
 					attachments,
@@ -1993,6 +2003,7 @@ export class ChatSession {
 				plugin.agentManager.editFromCheckpoint(
 					augmented,
 					String(this.id),
+					this.selectedAgentId,
 					checkpointId,
 					signal,
 					attachments,
@@ -2023,6 +2034,7 @@ export class ChatSession {
 			(signal) =>
 				plugin.agentManager.regenerateFromCheckpoint(
 					String(this.id),
+					this.selectedAgentId,
 					checkpointId,
 					signal,
 				) as AsyncIterable<AgentStreamChunk>,
@@ -2266,6 +2278,7 @@ export class ChatSession {
 				plugin.agentManager.streamQuery(
 					MANUAL_SUMMARIZATION_PROMPT,
 					String(this.id),
+					this.selectedAgentId,
 					this.graphState.activeCheckpointId,
 					signal,
 					undefined,
@@ -2344,14 +2357,6 @@ export class SessionRegistry {
 		return [...this.sessions.values()].filter((s) => s.isRunning);
 	}
 
-	/** True when any session is streaming. */
-	get anyRunning(): boolean {
-		for (const s of this.sessions.values()) {
-			if (s.isRunning) return true;
-		}
-		return false;
-	}
-
 	/** Stop every running stream. */
 	stopAll(): void {
 		for (const s of this.runningSessions) s.stopStreaming();
@@ -2363,7 +2368,7 @@ export class SessionRegistry {
 		id: string,
 		base: Pick<
 			ChatSessionOptions,
-			"graphState" | "errorCount" | "lastErrorMessage" | "bootstrapMessages" | "onNeedReload"
+			"graphState" | "errorCount" | "lastErrorMessage" | "bootstrapMessages" | "onNeedReload" | "selectedAgentId"
 		>,
 	): ChatSessionOptions {
 		return {
@@ -2484,7 +2489,7 @@ export class SessionRegistry {
 		activeCheckpointId: string | undefined,
 		errorCount: number,
 		bootstrapMessages: BaseMessage[],
-	): Promise<void> {
+	): Promise<string> {
 		const data = getData();
 		const messagePairs = deriveMessagePairsFromActiveCheckpoint(
 			graph,
@@ -2505,12 +2510,6 @@ export class SessionRegistry {
 			nextModel = resolved.model;
 		}
 
-		let changed = false;
-		if (data.selectedAgentId !== nextAgentId) {
-			data.selectedAgentId = nextAgentId;
-			changed = true;
-		}
-
 		const selectedAgent = data.getAgent(nextAgentId);
 		if (selectedAgent) {
 			const currentModel = selectedAgent.chatModel;
@@ -2520,13 +2519,11 @@ export class SessionRegistry {
 
 			if (modelChanged) {
 				data.updateAgent(nextAgentId, { chatModel: nextModel });
-				changed = true;
+				this.#agentManager.invalidateAgentRunnable(nextAgentId);
 			}
 		}
 
-		if (changed) {
-			await this.#agentManager.reinitialize();
-		}
+		return nextAgentId;
 	}
 
 	/* ---------------- Chat Creation / Metadata ---------------- */
@@ -2604,7 +2601,7 @@ export class SessionRegistry {
 			const errorCount = historyWithError?.errorCount || 0;
 			const lastErrorMessage = historyWithError?.lastError?.message;
 
-			await this.restoreSelectionFromLoadedMessages(
+			const restoredAgentId = await this.restoreSelectionFromLoadedMessages(
 				graph,
 				resolution.checkpointId,
 				errorCount,
@@ -2620,6 +2617,7 @@ export class SessionRegistry {
 					errorCount,
 					lastErrorMessage,
 					bootstrapMessages,
+					selectedAgentId: restoredAgentId,
 					// Reload against this specific session/thread, not whatever is
 					// active when a backgrounded run finishes later.
 					onNeedReload: async () => this.reloadSession(id),

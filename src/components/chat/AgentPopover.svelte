@@ -2,9 +2,8 @@
 import { DEFAULT_AGENT_ICON, type AgentConfig } from "../../types/plugin";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
-import { Logger } from "../../utils/logging";
-import Icon from "../ui/Icon.svelte";
 import { chatHistoryContainsPrivateNotes, getSessionRegistry } from "../../stores/chatStore.svelte";
+import Icon from "../ui/Icon.svelte";
 import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
 import { AgentEditorModal } from "../modal/AgentEditorModal";
 import Button from "../ui/Button.svelte";
@@ -22,8 +21,14 @@ const { threadPath = null }: Props = $props();
 // Get all agents reactively
 const agents = $derived(Object.values(data.agents));
 
-// Get currently selected agent
-const selectedAgent = $derived(data.getSelectedAgent());
+// The agent this TAB will actually run. Selection is per-session (each tab holds
+// its own selectedAgentId); fall back to the global selection for a tab that
+// hasn't overridden it. Displaying the global here would let the pill/checkmark
+// lie about which agent the tab runs when two tabs pick different agents.
+const session = $derived(getSessionRegistry()?.sessionFor(threadPath));
+const selectedAgent = $derived(
+	(session?.selectedAgentId ? data.getAgent(session.selectedAgentId) : undefined) ?? data.getSelectedAgent(),
+);
 
 let isOpen = $state(false);
 let customAnchor: HTMLButtonElement | undefined = $state();
@@ -36,18 +41,16 @@ async function selectAgent(agent: AgentConfig) {
 	// Check if the agent's provider is non-trusted and chat has private notes
 	const newProvider = agent.chatModel?.provider;
 	if (newProvider && !data.isProviderTrusted(newProvider)) {
-		const messages = getSessionRegistry()?.sessionFor(threadPath)?.messages;
+		const messages = session?.messages;
 		if (messages && chatHistoryContainsPrivateNotes(messages)) {
 			const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
 			if (!confirmed) return;
 		}
 	}
+	// Set per-session selection; also update the global so new tabs start on this agent.
+	if (session) session.selectedAgentId = agent.id;
 	data.selectedAgentId = agent.id;
 	isOpen = false;
-	// Reinitialize the agent with the new config
-	plugin.agentManager?.reinitialize().catch((error) => {
-		Logger.error("Failed to switch agent:", error);
-	});
 }
 
 function openAgentEditor(agentId: string) {

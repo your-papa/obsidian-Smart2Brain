@@ -6,7 +6,6 @@ import { getProviderDefinition } from "../../providers/index";
 import { type ChatModel, chatHistoryContainsPrivateNotes, getSessionRegistry } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
-import { Logger } from "../../utils/logging";
 import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import AnthropicLogo from "../ui/logos/AnthropicLogo.svelte";
@@ -45,8 +44,12 @@ const AI_VENDORS = [
 	{ id: "qwen", name: "Qwen", logo: QwenLogo },
 ] as const;
 
-// Get the selected agent reactively
-const selectedAgent = $derived(data.getSelectedAgent());
+// The agent this TAB runs (per-session selection, falling back to the global),
+// so the model pill/checkmark reflect what the tab uses rather than the global.
+const session = $derived(getSessionRegistry()?.sessionFor(threadPath));
+const selectedAgent = $derived(
+	(session?.selectedAgentId ? data.getAgent(session.selectedAgentId) : undefined) ?? data.getSelectedAgent(),
+);
 
 // Derive the effective selected model from the selected agent
 const selectedModel = $derived.by(() => {
@@ -88,11 +91,8 @@ $effect(() => {
 
 // Update the agent's model when user selects a different one
 function selectModel(model: ChatModel) {
-	const agentId = data.selectedAgentId;
+	const agentId = session?.selectedAgentId || data.selectedAgentId;
 	data.updateAgent(agentId, { chatModel: model });
-	plugin.agentManager?.reinitialize().catch((error) => {
-		Logger.error("Failed to update agent model:", error);
-	});
 }
 
 let isOpen = $state(false);
@@ -233,7 +233,7 @@ function getModelDisplayName(model: ChatModel): string {
 async function handleSelect(model: ChatModel) {
 	// Check if switching to a non-trusted provider with private notes in history
 	if (!data.isProviderTrusted(model.provider)) {
-		const messages = getSessionRegistry()?.sessionFor(threadPath)?.messages;
+		const messages = session?.messages;
 		if (messages && chatHistoryContainsPrivateNotes(messages)) {
 			const confirmed = await new PrivacyWarningModal(plugin.app).prompt();
 			if (!confirmed) return;

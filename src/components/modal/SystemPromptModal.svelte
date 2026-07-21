@@ -60,7 +60,7 @@ async function initializeEditor() {
 
 async function handleSave() {
 	accessors.setPrompt?.(promptValue);
-	await plugin.agentManager?.updateSystemPrompt();
+	plugin.agentManager?.invalidateSystemPromptCaches();
 	modal.close();
 }
 

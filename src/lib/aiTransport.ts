@@ -49,26 +49,61 @@ export function createAiTransportContext(mode: AiTransportMode, label: string): 
 	return { mode, label };
 }
 
-export function enterAiTransportContext(context: AiTransportContext): void {
-	aiTransportContextStorage.enterWith(context);
+/**
+ * Runs `fn` with `context` as the active transport context, scoped via
+ * AsyncLocalStorage.run() (NOT enterWith). This is concurrency-safe: two
+ * overlapping runs each get their own isolated context, so a buffered
+ * downgrade in one stream can never leak its mode into another stream's
+ * async continuation. Use this to wrap non-streaming invokes (title/summary
+ * generation, buffered fallback) whose entire lifecycle fits in one call.
+ */
+export function runWithAiTransportContext<T>(context: AiTransportContext, fn: () => Promise<T>): Promise<T> {
+	return aiTransportContextStorage.run(context, fn);
 }
 
-export function setAiTransportMode(context: AiTransportContext, mode: AiTransportMode, label: string): void {
-	if (context.mode !== mode) {
-		Logger.debug("aiTransport.mode_overlap", {
-			current: context.label,
-			next: label,
-			currentMode: context.mode,
-			nextMode: mode,
-		});
-	}
-
-	context.mode = mode;
-	context.label = label;
+/**
+ * Wraps an async iterable so that every pull (`next`/`return`/`throw`) runs
+ * inside `aiTransportContextStorage.run(context)`. Streaming agents re-yield
+ * each chunk to their own consumer, which awaits work OUTSIDE the transport
+ * scope; a plain run() around the generator body would lose the context on
+ * every yield. Binding each pull instead keeps the context active precisely
+ * when the underlying LangChain stream resumes (and issues its fetch, which
+ * reads the context via getCurrentMode) — isolated per run even under
+ * concurrent streams. See src/lib/aiTransport ALS notes.
+ */
+export function bindAsyncIterableToTransportContext<T>(
+	iterable: AsyncIterable<T>,
+	context: AiTransportContext,
+): AsyncIterable<T> {
+	const iterator = iterable[Symbol.asyncIterator]();
+	return {
+		[Symbol.asyncIterator](): AsyncIterator<T> {
+			return {
+				next: (...args) => aiTransportContextStorage.run(context, () => iterator.next(...args)),
+				return: iterator.return
+					? (value?: unknown) =>
+							aiTransportContextStorage.run(context, () =>
+								(iterator.return as (v?: unknown) => Promise<IteratorResult<T>>)(value),
+							)
+					: undefined,
+				throw: iterator.throw
+					? (err?: unknown) =>
+							aiTransportContextStorage.run(context, () =>
+								(iterator.throw as (e?: unknown) => Promise<IteratorResult<T>>)(err),
+							)
+					: undefined,
+			};
+		},
+	};
 }
 
 function getCurrentMode(): AiTransportMode {
 	return aiTransportContextStorage.getStore()?.mode ?? "default";
+}
+
+/** Test-only: read the current transport mode as resolved from ALS. */
+export function getCurrentAiTransportModeForTest(): AiTransportMode {
+	return getCurrentMode();
 }
 
 async function getElectronNetFetch(): Promise<typeof fetch | null> {

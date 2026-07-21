@@ -25,6 +25,13 @@ function makeRegistry() {
 	};
 }
 
+const BASE_RESOLVE_PARAMS = {
+	cacheKey: "test-key",
+	systemPrompt: "You are a helpful assistant.",
+	tools: [] as const,
+	subAgents: [] as const,
+} as const;
+
 describe("Agent summarization middleware", () => {
 	beforeEach(() => {
 		createAgentMock.mockClear();
@@ -35,7 +42,8 @@ describe("Agent summarization middleware", () => {
 		const registry = makeRegistry();
 		const agent = new Agent({ registry: registry as never });
 
-		await agent.chooseModel({
+		await agent.resolveRun({
+			...BASE_RESOLVE_PARAMS,
 			provider: "openai",
 			chatModel: "gpt-4o",
 			options: { contextWindow: 100_000 },
@@ -45,8 +53,6 @@ describe("Agent summarization middleware", () => {
 				options: { contextWindow: 100_000 },
 			},
 		});
-
-		await (agent as unknown as { ensureAgent: () => Promise<unknown> }).ensureAgent();
 
 		expect(summarizationMiddlewareMock).toHaveBeenCalledTimes(1);
 		expect((summarizationMiddlewareMock.mock.calls[0] ?? [])[0]).toMatchObject({
@@ -65,13 +71,13 @@ describe("Agent summarization middleware", () => {
 		const registry = makeRegistry();
 		const agent = new Agent({ registry: registry as never });
 
-		await agent.chooseModel({
+		await agent.resolveRun({
+			...BASE_RESOLVE_PARAMS,
+			cacheKey: "test-key-2",
 			provider: "anthropic",
 			chatModel: "claude-sonnet",
 			options: { contextWindow: 50_000 },
 		});
-
-		await (agent as unknown as { ensureAgent: () => Promise<unknown> }).ensureAgent();
 
 		expect(summarizationMiddlewareMock).toHaveBeenCalledTimes(1);
 		expect(registry.createChatInstance).toHaveBeenCalledTimes(1);
@@ -85,13 +91,13 @@ describe("Agent summarization middleware", () => {
 		const registry = makeRegistry();
 		const agent = new Agent({ registry: registry as never });
 
-		await agent.chooseModel({
+		await agent.resolveRun({
+			...BASE_RESOLVE_PARAMS,
+			cacheKey: "test-key-3",
 			provider: "openai",
 			chatModel: "gpt-4o",
 			options: {},
 		});
-
-		await (agent as unknown as { ensureAgent: () => Promise<unknown> }).ensureAgent();
 
 		expect(summarizationMiddlewareMock).not.toHaveBeenCalled();
 		expect(createAgentMock).toHaveBeenCalledWith(

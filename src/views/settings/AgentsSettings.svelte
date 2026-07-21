@@ -32,10 +32,6 @@ function suggestFolders(): TFolder[] {
 let agents = $derived(pluginData.agents);
 let agentIds = $derived(Object.keys(agents));
 
-async function applyChanges() {
-	await plugin.agentManager.reinitialize();
-}
-
 function openAgentEditor(agentId: string) {
 	new AgentEditorModal(plugin, agentId).open();
 }
@@ -63,7 +59,7 @@ async function deleteAgent(agentId: string) {
 	if (!(await confirmDelete(plugin.app, agent?.name ?? agentId))) return;
 	try {
 		pluginData.deleteAgent(agentId);
-		void applyChanges();
+		plugin.agentManager?.invalidateAgentRunnable(agentId);
 	} catch (error) {
 		new Notice(error instanceof Error ? error.message : "Failed to delete agent");
 	}

@@ -178,24 +178,8 @@ const contextUsage = $derived.by(() => {
 });
 
 const canSendMessage = $derived(inputValue.trim().length > 0 || attachments.length > 0);
-// Phase-1 one-at-a-time: block sending here while a DIFFERENT chat is generating.
-// (Phase 2 removes this gate once the agent-execution layer is concurrency-safe.)
-const busyElsewhere = $derived(registry.anyRunning && !session?.isRunning);
-const busyChatName = $derived.by(() => {
-	if (!busyElsewhere) return null;
-	const path = registry.runningSessions[0]?.id;
-	if (!path) return null;
-	return (
-		path
-			.split("/")
-			.pop()
-			?.replace(/\.chat$/, "") ?? path
-	);
-});
 const canSummarizeNow = $derived.by(() => {
-	return Boolean(
-		session && session.messageState === MessageState.idle && session.messages.length > 0 && !busyElsewhere,
-	);
+	return Boolean(session && session.messageState === MessageState.idle && session.messages.length > 0);
 });
 const showDragActive = $derived(dropTargetMode === "view" ? externalDragActive : isDragging);
 
@@ -438,10 +422,6 @@ function sendMessage() {
 		new Notice("Please wait for attachments to finish saving");
 		return;
 	}
-	if (busyElsewhere) {
-		new Notice(`Agent busy in ${busyChatName ?? "another chat"} — stop it to continue`);
-		return;
-	}
 	if (!canSendMessage) {
 		new Notice("Add text or attach a file before sending");
 		return;
@@ -488,11 +468,6 @@ async function summarizeNow() {
 	} catch (error) {
 		new Notice(error instanceof Error ? error.message : "Failed to summarize history");
 	}
-}
-
-function openRunningChat() {
-	const path = registry.runningSessions[0]?.id;
-	if (path) void getPlugin().agentManager.openChatByThreadId(path);
 }
 
 function sanitizeAttachmentFileName(fileName: string): string {
@@ -1108,7 +1083,7 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
     <!-- Actions row: agent+model, attachment, send -->
     <div class="flex items-center gap-2">
       <AgentPopover {threadPath} />
-      <ModelSelectButton />
+      <ModelSelectButton {threadPath} />
       <input
         bind:this={attachmentInputEl}
         type="file"
@@ -1136,9 +1111,9 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
         />
         {#if !session || session.messageState === MessageState.idle}
           <Button
-            disabled={!canSendMessage || savingFiles || busyElsewhere}
+            disabled={!canSendMessage || savingFiles}
             ariaLabel="send message"
-            tooltip={busyElsewhere ? `Agent busy in ${busyChatName ?? "another chat"}` : "Send message"}
+            tooltip="Send message"
             onClick={sendMessage}
             dataTestId="send-message-button"
             styles="send-message-button p-0 rounded-md border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 disabled:cursor-not-allowed"
@@ -1157,18 +1132,6 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
         {/if}
       </div>
     </div>
-
-    {#if busyElsewhere}
-      <button
-        type="button"
-        class="mt-1 flex items-center gap-1.5 text-xs text-[--text-muted] hover:text-[--text-normal] cursor-pointer bg-transparent border-none p-0"
-        onclick={openRunningChat}
-        title="Go to the running chat"
-      >
-        <span class="w-[--icon-xs] h-[--icon-xs]" style="--icon-size: var(--icon-xs)" use:icon={"loader-circle"}></span>
-        <span>Agent busy in {busyChatName ?? "another chat"} — stop it to continue</span>
-      </button>
-    {/if}
 
     {#if dropTargetMode === "input" && isDragging}
       <div

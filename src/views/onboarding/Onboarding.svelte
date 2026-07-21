@@ -5,7 +5,6 @@ import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import type SecondBrainPlugin from "../../main";
 import { type ChatModel } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
-import { Logger } from "../../utils/logging";
 import { icon } from "../../utils/utils";
 import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
 // Inlined at build time (?raw) so it ships inside main.js — the single-file
@@ -90,9 +89,6 @@ function openChatModelSetup() {
 		if (!selected) return;
 		data.updateAgent(data.selectedAgentId, {
 			chatModel: buildPersistedChatModel(selected.provider, selected.model, selectedAgent?.chatModel),
-		});
-		plugin.agentManager?.reinitialize().catch((error) => {
-			Logger.error("Failed to update agent model during onboarding:", error);
 		});
 	}).open();
 }

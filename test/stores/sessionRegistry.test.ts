@@ -18,7 +18,7 @@ function makeRegistry(): SessionRegistry {
 }
 
 function makeSession(id: string): ChatSession {
-	return new ChatSession(id, { graphState: { nodes: new Map() }, errorCount: 0 });
+	return new ChatSession(id, { graphState: { nodes: new Map() }, errorCount: 0, selectedAgentId: "" });
 }
 
 function seed(registry: SessionRegistry, id: string): ChatSession {
@@ -48,15 +48,15 @@ describe("SessionRegistry — sessionFor is per-thread", () => {
 });
 
 describe("SessionRegistry — running set derives from ChatSession.isRunning", () => {
-	it("runningSessions/anyRunning reflect per-session state", () => {
+	it("runningSessions reflects per-session state", () => {
 		const r = makeRegistry();
 		const a = seed(r, "a.chat");
 		const b = seed(r, "b.chat");
-		expect(r.anyRunning).toBe(false);
+		expect(r.runningSessions.length).toBe(0);
 		expect(r.runningSessions).toEqual([]);
 
 		markRunning(a, true);
-		expect(r.anyRunning).toBe(true);
+		expect(r.runningSessions.length).toBeGreaterThan(0);
 		expect(r.runningSessions).toEqual([a]);
 
 		markRunning(b, true);
@@ -94,10 +94,11 @@ describe("SessionRegistry — per-session actions never cross threads", () => {
 		markRunning(a, true);
 		expect(a.isRunning).toBe(true);
 		expect(b.isRunning).toBe(false);
-		// The "busy" gate is per-view: a is running, so b is "busy elsewhere",
-		// but a is free to act on itself.
-		expect(r.anyRunning && !a.isRunning).toBe(false); // a can act
-		expect(r.anyRunning && !b.isRunning).toBe(true); // b is blocked
+		// Per-view gate: a is running so b would be "busy elsewhere" (Phase-1 policy);
+		// a is free to act on itself.
+		const anyRunning = r.runningSessions.length > 0;
+		expect(anyRunning && !a.isRunning).toBe(false); // a can act
+		expect(anyRunning && !b.isRunning).toBe(true); // b is blocked
 	});
 });
 
