@@ -128,7 +128,16 @@ async function handleRootDrop(event: DragEvent) {
         color-mix(in srgb, var(--interactive-accent) 16%, transparent),
         transparent 58%
       ),
-      color-mix(in srgb, var(--background-primary) 72%, transparent);
+      color-mix(in srgb, var(--chat-bg) 72%, transparent);
+  }
+
+  .chat-root {
+    --chat-bg: var(--background-primary);
+  }
+
+  :global(.mod-left-split .chat-root),
+  :global(.mod-right-split .chat-root) {
+    --chat-bg: var(--background-secondary);
   }
 
   .chat-root::after {
@@ -137,19 +146,12 @@ async function handleRootDrop(event: DragEvent) {
     top: 0;
     left: 0;
     right: 0;
-    height: 56px;
+    height: 32px;
     pointer-events: none;
     z-index: 25;
-    background:
-      radial-gradient(
-        ellipse at top center,
-        color-mix(in srgb, var(--background-primary) 52%, transparent),
-        transparent 68%
-      ),
-      linear-gradient(
+    background: linear-gradient(
         to bottom,
-        color-mix(in srgb, var(--background-primary) 82%, transparent) 0%,
-        color-mix(in srgb, var(--background-primary) 42%, transparent) 26%,
+        color-mix(in srgb, var(--chat-bg) 60%, transparent) 0%,
         transparent 100%
       );
   }

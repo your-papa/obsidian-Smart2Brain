@@ -354,7 +354,7 @@ $effect(() => {
                   />
                 {/if}
                 <div
-                  class="w-full max-w-[80%] rounded-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2"
+                  class="w-full max-w-[80%] rounded-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] px-4 py-2"
                 >
                   <ChatEditor
                     initialValue={messagePair.userMessage.content}
@@ -461,7 +461,7 @@ $effect(() => {
                 <CollapsibleUserBubble
                   content={messagePair.userMessage.content}
                   attachments={messagePair.userMessage.attachments}
-                  class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] border border-solid border-1 border-[--color-accent] px-4 py-2"
+                  class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] px-4 py-2"
                 />
               {/if}
 
@@ -659,6 +659,8 @@ $effect(() => {
     -webkit-overflow-scrolling: touch;
     /* Allow the container to have its own scroll bounce */
     overscroll-behavior: contain;
+    mask-image: linear-gradient(to bottom, transparent 0%, black 24px, black calc(100% - 24px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 24px, black calc(100% - 24px), transparent 100%);
   }
 
   .summary-marker {

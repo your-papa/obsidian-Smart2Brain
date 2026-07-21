@@ -1018,7 +1018,7 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
   <PendingChangesBar {threadPath} />
   <!-- Input wrapper with glow effect -->
   <div
-    class="chat-input-wrapper flex flex-col gap-3 bg-background-secondary border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isFullscreen
+    class="chat-input-wrapper flex flex-col gap-3 border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isFullscreen
       ? 'flex-1 min-h-0'
       : ''} {showDragActive
       ? 'border-[--interactive-accent] chat-input-wrapper-drag-active'
@@ -1156,6 +1156,16 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
 <style>
   .chat-input-container {
     background: transparent !important;
+    --input-bg: var(--background-secondary);
+  }
+
+  :global(.mod-left-split .chat-input-container),
+  :global(.mod-right-split .chat-input-container) {
+    --input-bg: var(--background-primary);
+  }
+
+  .chat-input-wrapper {
+    background: var(--input-bg);
   }
 
   .chat-input-container.chat-input-fullscreen {
@@ -1195,51 +1205,13 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
     transition: none !important;
   }
 
-  /* Complex box-shadow with color-mix - requires CSS */
-  .chat-input-wrapper {
-    box-shadow:
-      0 4px 16px rgba(0, 0, 0, 0.18),
-      0 0 8px 0 color-mix(in srgb, var(--interactive-accent) 10%, transparent);
-  }
-
-  /* Radial gradient glow effect behind input - requires pseudo-element */
-  .chat-input-wrapper::before {
-    content: "";
-    position: absolute;
-    inset: -10px;
-    border-radius: inherit;
-    background: radial-gradient(
-      circle at 50% 35%,
-      color-mix(in srgb, var(--interactive-accent) 35%, transparent),
-      transparent 60%
-    );
-    opacity: 0.12;
-    filter: blur(10px);
-    z-index: -1;
-    transition:
-      opacity 0.25s ease,
-      filter 0.25s ease;
-    pointer-events: none;
-  }
-
   .chat-input-wrapper:focus-within {
     border-color: var(--interactive-accent);
-    box-shadow:
-      0 6px 20px rgba(0, 0, 0, 0.24),
-      0 0 14px 0 color-mix(in srgb, var(--interactive-accent) 25%, transparent);
-  }
-
-  .chat-input-wrapper:focus-within::before {
-    opacity: 0.22;
-    filter: blur(9px);
   }
 
   .chat-input-wrapper-drag-active {
-    background: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-secondary));
+    background: color-mix(in srgb, var(--interactive-accent) 22%, var(--input-bg));
     border-color: color-mix(in srgb, var(--interactive-accent) 82%, white 18%) !important;
-    box-shadow:
-      0 0 0 2px color-mix(in srgb, var(--interactive-accent) 38%, transparent),
-      0 8px 24px color-mix(in srgb, var(--interactive-accent) 24%, transparent);
   }
 
   .chat-input-wrapper-drag-active > :not(:last-child) {
