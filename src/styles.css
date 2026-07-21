@@ -624,6 +624,19 @@
 	margin: 4px 0;
 }
 
+/* Banner shown at the top of a note's inline diff when other chats also have a
+   pending update to the same file (only the latest is rendered inline). */
+.s2b-diff-cross-thread-banner {
+	font-size: var(--font-smaller);
+	line-height: 1.4;
+	padding: 6px 10px;
+	margin: 4px 0;
+	border-radius: 4px;
+	background-color: hsla(var(--color-orange-hsl), 0.15);
+	border: 1px solid hsla(var(--color-orange-hsl), 0.35);
+	color: var(--text-normal);
+}
+
 .s2b-diff-actions-label {
 	font-size: var(--font-smaller);
 	color: var(--text-muted);

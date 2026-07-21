@@ -92,7 +92,7 @@ export class PendingChangesStore {
 	#saveTimer: ReturnType<typeof setTimeout> | null = null;
 	readonly #processingGroups = new Set<string>();
 	readonly #fileLocks = new Map<string, Promise<void>>();
-	#isBatchProcessing = false;
+	readonly #batchProcessing = new Set<string>();
 	#renameHandler: EventRef | null = null;
 
 	constructor(plugin: SecondBrainPlugin) {
@@ -242,6 +242,13 @@ export class PendingChangesStore {
 
 		await this.withFileLock(normalizedPath, async () => {
 			if (change.type === "create") {
+				// Re-check at apply time (like move below): the stage-time existence
+				// check can pass for two tabs both staging the same new path, since
+				// neither is applied yet. Surface a clean error rather than a raw
+				// vault.create throw when the first one already created it.
+				if (app.vault.getAbstractFileByPath(normalizedPath)) {
+					throw new Error(`Cannot apply create — a file already exists at: ${change.path}`);
+				}
 				const dir = normalizedPath.substring(0, normalizedPath.lastIndexOf("/"));
 				if (dir && !(await app.vault.adapter.exists(dir))) {
 					await app.vault.createFolder(dir);
@@ -297,22 +304,39 @@ export class PendingChangesStore {
 		this.notifyChange();
 	}
 
-	/** Acquire a per-file lock to serialize vault writes for the same path. */
+	/** Acquire a per-file lock to serialize vault writes for the same path.
+	 *
+	 * A FIFO queue, not a single-slot barrier: each caller chains onto the tail
+	 * of the current chain for this path, so N concurrent ops on the same file
+	 * run strictly one after another. (A previous version had every waiter await
+	 * the same in-flight promise and then proceed together — two tabs editing one
+	 * note could interleave read→modify and clobber each other.) The stored
+	 * promise is the tail of the chain; the map entry is cleared only when this
+	 * op is still the tail, so a later arrival that already chained onto us keeps
+	 * the entry alive. */
 	private async withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
-		// Wait for any in-flight operation on this file to finish
-		const existing = this.#fileLocks.get(filePath);
-		if (existing) await existing;
+		const previous = this.#fileLocks.get(filePath) ?? Promise.resolve();
 
-		let resolve: () => void;
-		const lock = new Promise<void>((r) => {
-			resolve = r;
-		});
-		this.#fileLocks.set(filePath, lock);
+		// Run only after everything already queued for this path settles. Swallow
+		// the predecessor's outcome so one op's failure doesn't reject the chain.
+		const run = previous.then(
+			() => fn(),
+			() => fn(),
+		);
+
+		// Publish this op as the new tail. Ignore its result/rejection here — the
+		// tail marker only needs to resolve; the real result flows out via `run`.
+		const tail = run.then(
+			() => {},
+			() => {},
+		);
+		this.#fileLocks.set(filePath, tail);
+
 		try {
-			return await fn();
+			return await run;
 		} finally {
-			resolve?.();
-			if (this.#fileLocks.get(filePath) === lock) {
+			// Only clear if nobody chained after us; otherwise leave their tail in place.
+			if (this.#fileLocks.get(filePath) === tail) {
 				this.#fileLocks.delete(filePath);
 			}
 		}
@@ -381,8 +405,10 @@ export class PendingChangesStore {
 
 	/** Accept all pending changes for a thread. Returns paths that failed. */
 	async acceptAll(threadId: string): Promise<string[]> {
-		if (this.#isBatchProcessing) return ["Batch operation already in progress"];
-		this.#isBatchProcessing = true;
+		// Keyed by thread so concurrent chats accepting their own (disjoint) changes
+		// don't spuriously block each other.
+		if (this.#batchProcessing.has(threadId)) return ["Batch operation already in progress"];
+		this.#batchProcessing.add(threadId);
 		try {
 			// Snapshot the list before iterating to avoid picking up entries added mid-loop
 			const pending = [...this.#entries.filter((e) => e.threadId === threadId && e.status === "pending")];
@@ -397,7 +423,7 @@ export class PendingChangesStore {
 			}
 			return failures;
 		} finally {
-			this.#isBatchProcessing = false;
+			this.#batchProcessing.delete(threadId);
 		}
 	}
 
@@ -457,6 +483,26 @@ export class PendingChangesStore {
 		return this.#entries.filter(
 			(e) => e.status === "pending" && e.change.type === "update" && e.change.path === filePath,
 		);
+	}
+
+	/** Count distinct OTHER threads that also have a pending update to `filePath`.
+	 * `exceptThreadId` is the thread being viewed/staged; it's excluded so the
+	 * result is "how many *other* chats are editing this same file". Used by the
+	 * diff UI (banner) and manage_notes (stage-time warning) to surface the
+	 * cross-thread collision the update-dedup deliberately doesn't collapse. */
+	countOtherThreadsPendingUpdate(filePath: string, exceptThreadId: string): number {
+		const threads = new Set<string>();
+		for (const e of this.#entries) {
+			if (
+				e.status === "pending" &&
+				e.change.type === "update" &&
+				e.change.path === filePath &&
+				e.threadId !== exceptThreadId
+			) {
+				threads.add(e.threadId);
+			}
+		}
+		return threads.size;
 	}
 
 	/** Check if file was modified externally since change was staged. */

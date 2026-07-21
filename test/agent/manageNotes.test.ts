@@ -4,11 +4,13 @@ vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 
 const mockAddChanges = vi.fn().mockReturnValue(["mock-id"]);
 const mockIsPathAllowed = vi.fn().mockReturnValue(true);
+const mockCountOtherThreads = vi.fn().mockReturnValue(0);
 
 vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 	getPendingChangesStore: () => ({
 		addChanges: mockAddChanges,
 		isPathAllowed: mockIsPathAllowed,
+		countOtherThreadsPendingUpdate: mockCountOtherThreads,
 	}),
 }));
 
@@ -56,6 +58,7 @@ function setManageNotesPermissions(permissions?: {
 	allowMove?: boolean;
 }) {
 	mockGetData.mockReturnValue({
+		getAgent: () => undefined,
 		getSelectedAgent: () => ({
 			toolsConfig: {
 				manage_notes: {
@@ -78,6 +81,7 @@ describe("manageNotes tool", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mockIsPathAllowed.mockReturnValue(true);
+		mockCountOtherThreads.mockReturnValue(0);
 		setManageNotesPermissions();
 		app = createMockApp();
 		tool = createManageNotesTool(app);
@@ -94,24 +98,27 @@ describe("manageNotes tool", () => {
 			.mockResolvedValueOnce("Hello world\nThis is a test\nGoodbye")
 			.mockResolvedValueOnce("Delete me");
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "create",
-					path: "Notes/new-note.md",
-					content: "# New note\n",
-				},
-				{
-					type: "update",
-					path: "Notes/existing.md",
-					edits: [{ oldText: "This is a test", newText: "This is updated" }],
-				},
-				{
-					type: "delete",
-					path: "Archive/old.md",
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "create",
+						path: "Notes/new-note.md",
+						content: "# New note\n",
+					},
+					{
+						type: "update",
+						path: "Notes/existing.md",
+						edits: [{ oldText: "This is a test", newText: "This is updated" }],
+					},
+					{
+						type: "delete",
+						path: "Archive/old.md",
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("Proposed 3 note operation(s)");
 		expect(result).toContain("1 create, 1 update, 1 delete");
@@ -144,20 +151,23 @@ describe("manageNotes tool", () => {
 		mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
 		vi.mocked(app.vault.read).mockResolvedValue("Hello world");
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "Notes/test.md",
-					edits: [{ oldText: "missing", newText: "replacement" }],
-				},
-				{
-					type: "create",
-					path: "Notes/another.md",
-					content: "# Another",
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "Notes/test.md",
+						edits: [{ oldText: "missing", newText: "replacement" }],
+					},
+					{
+						type: "create",
+						path: "Notes/another.md",
+						content: "# Another",
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("Error in operation 1, edit 1");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -168,15 +178,18 @@ describe("manageNotes tool", () => {
 		mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
 		vi.mocked(app.vault.read).mockResolvedValue("content here");
 
-		await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "[[My Note]]",
-					edits: [{ oldText: "content here", newText: "updated content" }],
-				},
-			],
-		}, THREAD_CONFIG);
+		await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "[[My Note]]",
+						edits: [{ oldText: "content here", newText: "updated content" }],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(mockResolveVaultFileDetailed).toHaveBeenCalledWith(app, "My Note");
 	});
@@ -188,19 +201,22 @@ describe("manageNotes tool", () => {
 			.mockReturnValueOnce({ status: "found", file });
 		vi.mocked(app.vault.read).mockResolvedValueOnce("AAA").mockResolvedValueOnce("AAA");
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "Notes/test.md",
-					edits: [{ oldText: "AAA", newText: "BBB" }],
-				},
-				{
-					type: "delete",
-					path: "Notes/test.md",
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "Notes/test.md",
+						edits: [{ oldText: "AAA", newText: "BBB" }],
+					},
+					{
+						type: "delete",
+						path: "Notes/test.md",
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("targeted more than once in this batch");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -209,14 +225,17 @@ describe("manageNotes tool", () => {
 	it("respects per-operation permissions from manage_notes settings", async () => {
 		setManageNotesPermissions({ allowCreate: true, allowUpdate: true, allowDelete: false });
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "delete",
-					path: "Notes/test.md",
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "delete",
+						path: "Notes/test.md",
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("Delete operations are disabled");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -227,18 +246,21 @@ describe("manageNotes tool", () => {
 		mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
 		vi.mocked(app.vault.read).mockResolvedValue("start AAA middle BBB end");
 
-		await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "Notes/test.md",
-					edits: [
-						{ oldText: "AAA", newText: "XXX" },
-						{ oldText: "XXX middle", newText: "YYY between" },
-					],
-				},
-			],
-		}, THREAD_CONFIG);
+		await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "Notes/test.md",
+						edits: [
+							{ oldText: "AAA", newText: "XXX" },
+							{ oldText: "XXX middle", newText: "YYY between" },
+						],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(mockAddChanges).toHaveBeenCalledWith(
 			[
@@ -257,15 +279,18 @@ describe("manageNotes tool", () => {
 		mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
 		vi.mocked(app.vault.getAbstractFileByPath).mockReturnValue(null);
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "move",
-					path: "Notes/source.md",
-					newPath: "Archive/source.md",
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "move",
+						path: "Notes/source.md",
+						newPath: "Archive/source.md",
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("1 move");
 		expect(mockAddChanges).toHaveBeenCalledWith(
@@ -284,17 +309,71 @@ describe("manageNotes tool", () => {
 	it("respects move permissions from manage_notes settings", async () => {
 		setManageNotesPermissions({ allowCreate: true, allowUpdate: true, allowDelete: true, allowMove: false });
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "move",
-					path: "Notes/source.md",
-					newPath: "Archive/source.md",
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "move",
+						path: "Notes/source.md",
+						newPath: "Archive/source.md",
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("Move operations are disabled");
 		expect(mockAddChanges).not.toHaveBeenCalled();
+	});
+
+	it("warns when another chat has a pending update to the same file", async () => {
+		const file = makeFile("Notes/shared.md");
+		mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+		vi.mocked(app.vault.read).mockResolvedValue("Hello world");
+		// Another thread already has a pending update to this path.
+		mockCountOtherThreads.mockReturnValue(1);
+
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "Notes/shared.md",
+						edits: [{ oldText: "Hello world", newText: "Hi world" }],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
+
+		// The change is still staged...
+		expect(mockAddChanges).toHaveBeenCalled();
+		// ...but the result flags the cross-thread collision.
+		expect(mockCountOtherThreads).toHaveBeenCalledWith("Notes/shared.md", "test-thread-id");
+		expect(result).toContain("another chat already has a pending update");
+		expect(result).toContain('"Notes/shared.md"');
+	});
+
+	it("does not warn when no other chat is editing the file", async () => {
+		const file = makeFile("Notes/solo.md");
+		mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+		vi.mocked(app.vault.read).mockResolvedValue("Hello world");
+		mockCountOtherThreads.mockReturnValue(0);
+
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "Notes/solo.md",
+						edits: [{ oldText: "Hello world", newText: "Hi world" }],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
+
+		expect(mockAddChanges).toHaveBeenCalled();
+		expect(result).not.toContain("another chat");
 	});
 });

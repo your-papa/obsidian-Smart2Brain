@@ -59,13 +59,13 @@ const manageNotesSchema = z.object({
 
 type ManageNotesInput = z.infer<typeof manageNotesSchema>;
 
-function getManageNotesSettings(): {
+function getManageNotesSettings(agentId: string): {
 	allowCreate: boolean;
 	allowUpdate: boolean;
 	allowDelete: boolean;
 	allowMove: boolean;
 } {
-	const settings = getData().getSelectedAgent().toolsConfig.manage_notes.settings as
+	const settings = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).toolsConfig.manage_notes.settings as
 		| { allowCreate?: boolean; allowUpdate?: boolean; allowDelete?: boolean; allowMove?: boolean }
 		| undefined;
 
@@ -77,8 +77,8 @@ function getManageNotesSettings(): {
 	};
 }
 
-function getManageNotesToolConfig(): { name: string; description: string } {
-	const selectedConfig = getData().getSelectedAgent().toolsConfig.manage_notes;
+function getManageNotesToolConfig(agentId: string): { name: string; description: string } {
+	const selectedConfig = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).toolsConfig.manage_notes;
 	const defaultConfig = DEFAULT_TOOLS_CONFIG.manage_notes;
 
 	return {
@@ -101,6 +101,7 @@ function validateExistingMarkdownFile(
 	path: string,
 	operationNumber: number,
 	action: "update" | "delete" | "move",
+	agentId: string,
 ): { file: TFile } | { error: string } {
 	const store = getPendingChangesStore();
 	const cleanPath = normalizeReferencePath(path);
@@ -136,8 +137,8 @@ function validateExistingMarkdownFile(
 		};
 	}
 
-	// Privacy check
-	const currentProvider = getData().getSelectedAgent().chatModel?.provider;
+	// Privacy check — use the agent that owns this run, not the global selection.
+	const currentProvider = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).chatModel?.provider;
 	if (currentProvider && store.shouldBlockFile(file.path, currentProvider)) {
 		return {
 			error: `Error in operation ${operationNumber}: The file "${file.path}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`,
@@ -211,11 +212,17 @@ export async function stageNoteOperations(
 	operations: ManageNotesInput["operations"],
 	threadId: string,
 	toolCallId?: string,
+	agentId = "",
 ): Promise<string> {
 	const store = getPendingChangesStore();
-	const settings = getManageNotesSettings();
+	const settings = getManageNotesSettings(agentId);
 	const seenPaths = new Set<string>();
 	const stagedChanges: PendingChange[] = [];
+	// Paths this update touches that ANOTHER chat already has a pending update for.
+	// Collected during the loop (before this batch is staged) and surfaced in the
+	// result so the model knows a concurrent chat is editing the same file — the
+	// update-dedup only collapses same-thread duplicates, not cross-thread ones.
+	const crossThreadPaths = new Set<string>();
 
 	for (let i = 0; i < operations.length; i++) {
 		const operation = operations[i];
@@ -239,7 +246,7 @@ export async function stageNoteOperations(
 			}
 
 			// Privacy check for create target
-			const currentProvider = getData().getSelectedAgent().chatModel?.provider;
+			const currentProvider = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).chatModel?.provider;
 			if (currentProvider && store.shouldBlockFile(normalizedPath, currentProvider)) {
 				return `Error in operation ${operationNumber}: The path "${normalizedPath}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
 			}
@@ -262,11 +269,15 @@ export async function stageNoteOperations(
 				return `Error in operation ${operationNumber}: Update operations are disabled for this agent.`;
 			}
 
-			const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "update");
+			const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "update", agentId);
 			if ("error" in result) return result.error;
 
 			const duplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
 			if (duplicateError) return duplicateError;
+
+			if (store.countOtherThreadsPendingUpdate(result.file.path, threadId) > 0) {
+				crossThreadPaths.add(result.file.path);
+			}
 
 			const originalContent = await app.vault.read(result.file);
 			const editResult = applySequentialEdits(
@@ -293,7 +304,7 @@ export async function stageNoteOperations(
 		}
 
 		if (operation.type === "delete") {
-			const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "delete");
+			const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "delete", agentId);
 			if ("error" in result) return result.error;
 
 			const duplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
@@ -311,7 +322,7 @@ export async function stageNoteOperations(
 			return `Error in operation ${operationNumber}: Move operations are disabled for this agent.`;
 		}
 
-		const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "move");
+		const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "move", agentId);
 		if ("error" in result) return result.error;
 
 		const sourceDuplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
@@ -330,7 +341,7 @@ export async function stageNoteOperations(
 		}
 
 		// Privacy check for move destination
-		const moveProvider = getData().getSelectedAgent().chatModel?.provider;
+		const moveProvider = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).chatModel?.provider;
 		if (moveProvider && store.shouldBlockFile(normalizedNewPath, moveProvider)) {
 			return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
 		}
@@ -354,7 +365,12 @@ export async function stageNoteOperations(
 	const resolvedToolCallId = toolCallId ?? genUUIDv7();
 	store.addChanges(stagedChanges, resolvedToolCallId, threadId);
 
-	return `Proposed ${stagedChanges.length} note operation(s) across ${seenPaths.size} path(s) (${summarizeOperations(stagedChanges)}) — the user will review and approve or reject these changes.`;
+	let summary = `Proposed ${stagedChanges.length} note operation(s) across ${seenPaths.size} path(s) (${summarizeOperations(stagedChanges)}) — the user will review and approve or reject these changes.`;
+	if (crossThreadPaths.size > 0) {
+		const paths = [...crossThreadPaths].map((p) => `"${p}"`).join(", ");
+		summary += ` Note: another chat already has a pending update to ${paths}. Both proposals target the same file — whichever is accepted first wins, and the other may then be un-appliable (its expected original content will no longer match). Coordinate or avoid duplicating edits across chats.`;
+	}
+	return summary;
 }
 
 /** Reads the thread id LangGraph threads through the run config's `configurable`
@@ -375,13 +391,13 @@ function resolveThreadIdFromConfig(config: RunnableConfig | undefined): string {
 	return threadId;
 }
 
-export function createManageNotesTool(app: App) {
-	const toolConfig = getManageNotesToolConfig();
+export function createManageNotesTool(app: App, agentId = "") {
+	const toolConfig = getManageNotesToolConfig(agentId);
 
 	return tool(
 		async ({ operations }: ManageNotesInput, config: RunnableConfig & { runId?: string }) => {
 			const threadId = resolveThreadIdFromConfig(config);
-			return stageNoteOperations(app, operations, threadId, config?.runId);
+			return stageNoteOperations(app, operations, threadId, config?.runId, agentId);
 		},
 		{
 			name: toolConfig.name,

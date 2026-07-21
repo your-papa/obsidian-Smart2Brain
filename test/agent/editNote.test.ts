@@ -6,17 +6,20 @@ vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 const mockAddChanges = vi.fn();
 const mockIsPathAllowed = vi.fn().mockReturnValue(true);
 const mockShouldBlockFile = vi.fn().mockReturnValue(false);
+const mockCountOtherThreads = vi.fn().mockReturnValue(0);
 vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 	getPendingChangesStore: () => ({
 		addChanges: mockAddChanges,
 		isPathAllowed: mockIsPathAllowed,
 		shouldBlockFile: mockShouldBlockFile,
+		countOtherThreadsPendingUpdate: mockCountOtherThreads,
 	}),
 }));
 
 // Mock dataStore
 vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => ({
+		getAgent: () => undefined,
 		getSelectedAgent: () => ({
 			chatModel: { provider: "openai" },
 			toolsConfig: {
@@ -80,6 +83,7 @@ describe("manageNotes tool (update operations)", () => {
 		vi.clearAllMocks();
 		mockIsPathAllowed.mockReturnValue(true);
 		mockShouldBlockFile.mockReturnValue(false);
+		mockCountOtherThreads.mockReturnValue(0);
 		app = createMockApp();
 		tool = createManageNotesTool(app);
 	});
@@ -89,15 +93,18 @@ describe("manageNotes tool (update operations)", () => {
 		mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
 		vi.mocked(app.vault.read).mockResolvedValue("Hello world\nThis is a test\nGoodbye");
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "Notes/test.md",
-					edits: [{ oldText: "This is a test", newText: "This is updated" }],
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "Notes/test.md",
+						edits: [{ oldText: "This is a test", newText: "This is updated" }],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("1 update");
 		expect(mockAddChanges).toHaveBeenCalledWith(
@@ -119,18 +126,21 @@ describe("manageNotes tool (update operations)", () => {
 		mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
 		vi.mocked(app.vault.read).mockResolvedValue("AAA\nBBB\nCCC");
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "Notes/test.md",
-					edits: [
-						{ oldText: "AAA", newText: "111" },
-						{ oldText: "CCC", newText: "333" },
-					],
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "Notes/test.md",
+						edits: [
+							{ oldText: "AAA", newText: "111" },
+							{ oldText: "CCC", newText: "333" },
+						],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("1 update");
 		expect(mockAddChanges).toHaveBeenCalledWith(
@@ -149,15 +159,18 @@ describe("manageNotes tool (update operations)", () => {
 		mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
 		vi.mocked(app.vault.read).mockResolvedValue("Hello world");
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "Notes/test.md",
-					edits: [{ oldText: "nonexistent text", newText: "replacement" }],
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "Notes/test.md",
+						edits: [{ oldText: "nonexistent text", newText: "replacement" }],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("Could not find");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -168,15 +181,18 @@ describe("manageNotes tool (update operations)", () => {
 		mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
 		vi.mocked(app.vault.read).mockResolvedValue("foo bar foo");
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "Notes/test.md",
-					edits: [{ oldText: "foo", newText: "baz" }],
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "Notes/test.md",
+						edits: [{ oldText: "foo", newText: "baz" }],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("appears multiple times");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -186,15 +202,18 @@ describe("manageNotes tool (update operations)", () => {
 		const file = makeFile("Notes/image.png", "png");
 		mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "Notes/image.png",
-					edits: [{ oldText: "a", newText: "b" }],
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "Notes/image.png",
+						edits: [{ oldText: "a", newText: "b" }],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("Only markdown files");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -203,15 +222,18 @@ describe("manageNotes tool (update operations)", () => {
 	it("should return error when file is not found", async () => {
 		mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "nonexistent.md",
-					edits: [{ oldText: "a", newText: "b" }],
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "nonexistent.md",
+						edits: [{ oldText: "a", newText: "b" }],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("File not found");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -223,15 +245,18 @@ describe("manageNotes tool (update operations)", () => {
 			candidates: ["Notes/test.md", "Archive/test.md"],
 		});
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "test.md",
-					edits: [{ oldText: "a", newText: "b" }],
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "test.md",
+						edits: [{ oldText: "a", newText: "b" }],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("Multiple files match");
 		expect(result).toContain("Notes/test.md");
@@ -243,15 +268,18 @@ describe("manageNotes tool (update operations)", () => {
 		mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
 		mockIsPathAllowed.mockReturnValue(false);
 
-		const result = await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "Excluded/test.md",
-					edits: [{ oldText: "a", newText: "b" }],
-				},
-			],
-		}, THREAD_CONFIG);
+		const result = await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "Excluded/test.md",
+						edits: [{ oldText: "a", newText: "b" }],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(result).toContain("excluded by");
 		expect(mockAddChanges).not.toHaveBeenCalled();
@@ -262,15 +290,18 @@ describe("manageNotes tool (update operations)", () => {
 		mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
 		vi.mocked(app.vault.read).mockResolvedValue("content here");
 
-		await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "[[My Note]]",
-					edits: [{ oldText: "content here", newText: "updated content" }],
-				},
-			],
-		}, THREAD_CONFIG);
+		await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "[[My Note]]",
+						edits: [{ oldText: "content here", newText: "updated content" }],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(mockResolveVaultFileDetailed).toHaveBeenCalledWith(app, "My Note");
 	});
@@ -281,18 +312,21 @@ describe("manageNotes tool (update operations)", () => {
 		vi.mocked(app.vault.read).mockResolvedValue("start AAA middle BBB end");
 
 		// First edit changes AAA to XXX, second edit targets a string that includes XXX
-		await tool.invoke({
-			operations: [
-				{
-					type: "update",
-					path: "Notes/test.md",
-					edits: [
-						{ oldText: "AAA", newText: "XXX" },
-						{ oldText: "XXX middle", newText: "YYY between" },
-					],
-				},
-			],
-		}, THREAD_CONFIG);
+		await tool.invoke(
+			{
+				operations: [
+					{
+						type: "update",
+						path: "Notes/test.md",
+						edits: [
+							{ oldText: "AAA", newText: "XXX" },
+							{ oldText: "XXX middle", newText: "YYY between" },
+						],
+					},
+				],
+			},
+			THREAD_CONFIG,
+		);
 
 		expect(mockAddChanges).toHaveBeenCalledWith(
 			[

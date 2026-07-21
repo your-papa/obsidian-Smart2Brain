@@ -58,6 +58,15 @@ function changePathLabel(entry: PendingChangeEntry): string {
 	return entry.change.type === "move" ? `${entry.change.path} -> ${entry.change.newPath}` : entry.change.path;
 }
 
+/** Number of OTHER chats that also have a pending update to this entry's file.
+ * Only updates can collide cross-thread (create/delete/move aren't dedup-scoped
+ * the same way, and only updates carry the stale-original-content hazard). */
+function otherThreadCount(entry: PendingChangeEntry): number {
+	void store.revision;
+	if (entry.change.type !== "update" || !threadId) return 0;
+	return store.countOtherThreadsPendingUpdate(entry.change.path, threadId);
+}
+
 async function handleAccept(entry: PendingChangeEntry) {
 	try {
 		await store.acceptChange(entry.id);
@@ -148,6 +157,15 @@ async function handleRejectAll() {
                   {changeTypeLabel(entry)}
                 </span>
                 <span class="pcb-path">{changePathLabel(entry)}</span>
+                {#if otherThreadCount(entry) > 0}
+                  <span
+                    class="pcb-cross-thread"
+                    title={`${otherThreadCount(entry)} other chat${otherThreadCount(entry) !== 1 ? "s" : ""} also ${otherThreadCount(entry) !== 1 ? "have" : "has"} a pending edit to this file. Whichever is accepted first wins; the others may then fail to apply.`}
+                  >
+                    <span use:icon={"users"} style="--icon-size: 11px"></span>
+                    {otherThreadCount(entry)}
+                  </span>
+                {/if}
               </div>
               <div class="pcb-entry-actions">
                 <button
@@ -338,6 +356,20 @@ async function handleRejectAll() {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .pcb-cross-thread {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+    padding: 1px 5px;
+    border-radius: var(--radius-s);
+    font-size: 10px;
+    font-weight: var(--font-semibold);
+    background: hsla(var(--color-orange-hsl), 0.2);
+    color: var(--color-orange);
+    cursor: help;
   }
 
   .pcb-entry-actions {

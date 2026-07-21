@@ -208,6 +208,34 @@ interface ChangeGroup {
 	docLength: number;
 }
 
+/** Block widget shown at the top of the document when OTHER chats also have a
+ * pending update to this file. The inline diff only renders the newest pending
+ * update ({@link getLatestPendingUpdateForPath} → `.at(-1)`), so without this
+ * banner the existence of competing edits from other threads would be invisible
+ * here. Purely informational — the entries are reviewed from each chat's own
+ * PendingChangesBar. */
+class CrossThreadBannerWidget extends WidgetType {
+	constructor(readonly otherCount: number) {
+		super();
+	}
+
+	toDOM(): HTMLElement {
+		const banner = document.createElement("div");
+		banner.className = "s2b-diff-cross-thread-banner";
+		const chat = this.otherCount === 1 ? "chat has" : "chats have";
+		banner.textContent = `${this.otherCount} other ${chat} a pending edit to this file. Only the latest is shown here; whichever is accepted first wins and the others may then fail to apply.`;
+		return banner;
+	}
+
+	eq(other: CrossThreadBannerWidget): boolean {
+		return this.otherCount === other.otherCount;
+	}
+
+	ignoreEvent(): boolean {
+		return true;
+	}
+}
+
 function createGroupDecoration(
 	group: ChangeGroup,
 	entryId: string,
@@ -355,6 +383,23 @@ function buildDecorations(view: EditorView, entryOverride?: PendingChangeEntry |
 
 		const mapPos = buildPositionMapper(change.originalContent, docText);
 		const decorations = [];
+
+		// Prepend a banner if OTHER chats also have a pending update to this file
+		// (the inline diff only renders this entry — the newest). Anchored at the
+		// document start with side: -1 so it sorts before any group decoration.
+		let otherThreads = 0;
+		try {
+			otherThreads = getPendingChangesStore().countOtherThreadsPendingUpdate(filePath, entry.threadId);
+		} catch {
+			otherThreads = 0;
+		}
+		if (otherThreads > 0) {
+			decorations.push(
+				Decoration.widget({ widget: new CrossThreadBannerWidget(otherThreads), side: -1, block: true }).range(
+					0,
+				),
+			);
+		}
 
 		for (let gi = 0; gi < groups.length; gi++) {
 			const group = groups[gi];
