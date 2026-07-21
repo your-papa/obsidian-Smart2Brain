@@ -16,7 +16,7 @@ import { confirmDelete } from "./components/modal/ConfirmModal";
 import { promptText } from "./components/modal/PromptModal";
 import { getQueryClient } from "./lib/query";
 import { SkillsService } from "./skills";
-import { createSessionRegistry, getSessionRegistry } from "./stores/chatStore.svelte";
+import { createSessionRegistry, getSessionRegistry, type SessionRegistry } from "./stores/chatStore.svelte";
 import { type PluginDataStore, createData, getData } from "./stores/dataStore.svelte";
 import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingChangesStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
@@ -50,6 +50,10 @@ export default class SecondBrainPlugin extends Plugin {
 	pendingChangesStore!: PendingChangesStore;
 	queryClient = getQueryClient();
 	pluginData!: PluginDataStore;
+	/** The global session registry (per-thread ChatSessions, running set, eviction).
+	 *  Same instance the module singleton returns — held here so it's reachable for
+	 *  debugging and any host-side wiring. */
+	sessionRegistry!: SessionRegistry;
 	/** `performance.now()` when `onload` finished; -1 until then. Used to attribute the
 	 *  Obsidian pre-layout gap (onload:end → onLayoutReady). */
 	private onloadEndAt = -1;
@@ -306,6 +310,15 @@ export default class SecondBrainPlugin extends Plugin {
 		this.addRibbonIcon("message-square", "New Chat", () => this.createNewChat());
 		this.addRibbonIcon("git-fork", "Graph", () => this.activateSmartGraphView());
 
+		// Create Agent Manager (v2) + session registry BEFORE mounting the status-bar
+		// indicator below. Both constructors are cheap (heavy init is deferred to
+		// onLayoutReady). The indicator reads the registry singleton via a plain
+		// getSessionRegistry() call inside a $derived — if the registry doesn't exist
+		// yet at mount time, that derived pins to null with no reactive source to
+		// update it later, so the indicator would never show a running chat.
+		this.agentManager = new AgentManager(this);
+		this.sessionRegistry = createSessionRegistry(this.agentManager);
+
 		// Global running-agent indicator in the status bar: shows the single
 		// streaming chat (if any) and lets the user stop it from anywhere.
 		const statusBarEl = this.addStatusBarItem();
@@ -395,9 +408,6 @@ export default class SecondBrainPlugin extends Plugin {
 			}),
 		);
 
-		// Create Agent Manager (v2) — constructor is cheap, heavy init deferred to onLayoutReady
-		this.agentManager = new AgentManager(this);
-		createSessionRegistry(this.agentManager);
 		this.registerNotebookNavigatorMenus();
 
 		// Enabling/disabling a plugin changes which skills are advertised to the agent
