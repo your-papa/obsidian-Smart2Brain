@@ -28,11 +28,13 @@ function seed(registry: SessionRegistry, id: string): ChatSession {
 }
 
 /** Force a session into the "running" state without a live stream. `isRunning`
- * is derived from a private abortController; poke it via a cast. */
+ * is derived from a private reactive `running` flag that the stream lifecycle
+ * flips in lockstep with the abortController; poke both via a cast so the state
+ * is internally consistent. */
 function markRunning(session: ChatSession, running: boolean): void {
-	(session as unknown as { abortController: AbortController | null }).abortController = running
-		? new AbortController()
-		: null;
+	const internals = session as unknown as { abortController: AbortController | null; running: boolean };
+	internals.abortController = running ? new AbortController() : null;
+	internals.running = running;
 }
 
 describe("SessionRegistry — sessionFor is per-thread", () => {

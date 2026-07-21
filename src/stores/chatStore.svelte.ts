@@ -1433,6 +1433,11 @@ export class ChatSession {
 	// Streaming / lifecycle
 	private abortController: AbortController | null = null;
 	private cancelled = false;
+	// Reactive mirror of "a stream is in flight". `abortController` is an
+	// imperative handle (not $state), so UI that reacts to running state — the
+	// status-bar RunningIndicator, input disable — reads THIS instead. Flip it
+	// in lockstep wherever abortController is set/cleared.
+	private running = $state(false);
 
 	// Reactive UI state
 	messageState = $state<MessageState>(MessageState.idle);
@@ -1461,9 +1466,11 @@ export class ChatSession {
 		this.rebuildMessagePairs();
 	}
 
-	/** True while a stream (query/edit/regenerate/summarization) is in flight. */
+	/** True while a stream (query/edit/regenerate/summarization) is in flight.
+	 * Reads the reactive `running` flag so $derived consumers (RunningIndicator)
+	 * update when a stream starts/stops. */
 	get isRunning(): boolean {
-		return this.abortController !== null;
+		return this.running;
 	}
 
 	touch(): void {
@@ -1823,6 +1830,7 @@ export class ChatSession {
 		}
 
 		this.abortController = new AbortController();
+		this.running = true;
 		const signal = this.abortController.signal;
 		this.touch();
 
@@ -1871,6 +1879,7 @@ export class ChatSession {
 			}
 		} finally {
 			this.abortController = null;
+			this.running = false;
 			this.cancelled = false;
 			this.summarizingHistory = false;
 			this.messageState = MessageState.idle;
@@ -2266,6 +2275,7 @@ export class ChatSession {
 		const assistantMessage: AssistantMessage = { state: AssistantState.streaming, content: "" };
 
 		this.abortController = new AbortController();
+		this.running = true;
 		const signal = this.abortController.signal;
 		this.touch();
 
@@ -2296,6 +2306,7 @@ export class ChatSession {
 			}
 		} finally {
 			this.abortController = null;
+			this.running = false;
 			this.cancelled = false;
 			this.summarizingHistory = false;
 			this.messageState = MessageState.idle;
