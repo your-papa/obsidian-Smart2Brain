@@ -1,5 +1,7 @@
 {
   "newLinkFormat": "shortest",
   "showUnsupportedFiles": false,
-  "alwaysUpdateLinks": true
+  "alwaysUpdateLinks": true,
+  "settingsPopoutWindow": false,
+  "promptDelete": false
 }

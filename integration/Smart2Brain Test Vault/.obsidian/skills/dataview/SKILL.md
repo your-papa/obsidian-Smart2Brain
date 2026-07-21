@@ -7,6 +7,7 @@ metadata:
   author: "Smart2Brain"
   version: "1.0"
   linkedPlugin: "dataview"
+  displayName: "dataview"
 ---
 
 # Dataview Integration
@@ -45,6 +46,25 @@ LIMIT 10
 ## Data Analysis
 
 If you need to SEE the results to answer a question or perform analysis, use the `execute_dataview_query` tool (supports DQL only).
+
+## Scripting the Dataview API (advanced)
+
+Because this skill is enabled and the Dataview plugin exposes a public API, you likely also
+have an `exec_dataview` tool (check your available tools) that runs JavaScript against
+Dataview's `api` object (the same API `dataviewjs` blocks use) on the main thread. Use it for
+anything DQL can't express — aggregation, custom filtering, computing statistics across pages.
+
+- `api` is the Dataview API; `app` is the Obsidian app.
+- Prefer `execute_dataview_query` (DQL) for simple tables/lists; reach for `exec_dataview` only when you need programmatic logic.
+- Keep snippets read-only unless the user asked to modify data. Awaited work times out; this is not sandboxed.
+
+```javascript
+// Count pages per tag under a folder
+const pages = api.pages('"Projects"');
+const byStatus = {};
+for (const p of pages) byStatus[p.status ?? "none"] = (byStatus[p.status ?? "none"] ?? 0) + 1;
+return byStatus;
+```
 
 ## Displaying Lists/Tables
 
