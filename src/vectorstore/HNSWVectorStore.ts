@@ -339,18 +339,23 @@ export class HNSWVectorStore implements VectorStore {
 
 	private async removeFromHNSW(_id: string): Promise<void> {
 		// Note: The hnsw package doesn't support deletion directly.
-		// Deleted entries remain until the index is rebuilt.
-		// This is acceptable for incremental updates; bulk operations rebuild the index.
+		// Deleted entries remain in the HNSW graph until the index is rebuilt
+		// (bulkPut). Search tolerates them: numeric ids with no string mapping
+		// are skipped. Chunking increases the orphan count per note edit, but
+		// introduces no new failure mode — the graph is rebuilt on full reindex.
 	}
 
 	/**
 	 * Remove a document by path.
+	 * A note may be stored as multiple chunk rows sharing the same `path`; this
+	 * deletes every one of them and drops each chunk's id-mapping.
 	 */
 	async remove(path: string): Promise<void> {
 		const db = this.requireDb();
 
-		const doc = await this.getByPath(path);
-		if (doc) {
+		// Drop id-mappings for ALL chunks of this note (getByPath returns only one).
+		const stored = await this.getAllStoredForPath(path);
+		for (const doc of stored) {
 			await this.removeFromHNSW(doc.id);
 			await this.removeIdMapping(doc.id);
 		}
@@ -661,6 +666,21 @@ export class HNSWVectorStore implements VectorStore {
 			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
 			const store = tx.objectStore(DOCUMENTS_STORE);
 			const request = store.getAll();
+
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result as StoredDocument[]);
+		});
+	}
+
+	/** Get every stored chunk row for a given note path. */
+	private async getAllStoredForPath(path: string): Promise<StoredDocument[]> {
+		const db = this.requireDb();
+
+		return new Promise((resolve, reject) => {
+			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+			const store = tx.objectStore(DOCUMENTS_STORE);
+			const index = store.index("path");
+			const request = index.getAll(IDBKeyRange.only(path));
 
 			request.onerror = () => reject(request.error);
 			request.onsuccess = () => resolve(request.result as StoredDocument[]);

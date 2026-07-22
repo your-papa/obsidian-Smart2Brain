@@ -23,6 +23,7 @@ import { createVectorStore } from "./index";
 import {
 	INDEX_VERSION,
 	getDbName,
+	makeChunkId,
 	sanitizeIndexId,
 	type DefaultEmbedModel,
 	type DocumentVector,
@@ -41,6 +42,7 @@ import { Logger } from "../utils/logging";
 import { StartupProfiler } from "../utils/startupProfiler";
 import { getIndexableVaultFiles, isIndexableFile, readIndexableContent } from "../utils/fileFiltering";
 import { matchesPathPrefix } from "../utils/pathUtils";
+import { chunkText } from "../utils/chunkText";
 import { toFloat32Array } from "./similarity";
 
 // ── Electron dialog helpers (Obsidian desktop) ────────────────────────
@@ -128,6 +130,14 @@ const MODIFY_DEBOUNCE_MS = 5_000;
 
 /** Approximate chars per token for rough estimation */
 const CHARS_PER_TOKEN = 4;
+
+/**
+ * Over-fetch factor for semantic search. A large note is now stored as multiple
+ * chunks, so several of a note's chunks can occupy adjacent result slots; we
+ * request more raw neighbors than `topK` and dedup to distinct notes afterwards
+ * so `topK` still yields `topK` distinct notes.
+ */
+const CHUNK_OVERFETCH = 4;
 
 let instance: VectorStoreService | null = null;
 let pendingInstance: VectorStoreService | null = null;
@@ -396,11 +406,13 @@ export class VectorStoreService {
 			const model = modelParts.join(":");
 
 			const runtimeMeta = await inst.store.getMetadata();
+			const versionCurrent = runtimeMeta !== null && runtimeMeta.version >= INDEX_VERSION;
 			const runtimeMatches =
 				runtimeMeta !== null &&
 				runtimeMeta.documentCount > 0 &&
 				runtimeMeta.providerId === provider &&
-				runtimeMeta.modelId === model;
+				runtimeMeta.modelId === model &&
+				versionCurrent;
 
 			if (runtimeMatches && runtimeMeta) {
 				inst.currentProviderId = runtimeMeta.providerId;
@@ -413,8 +425,14 @@ export class VectorStoreService {
 				this.plugin.app.workspace.onLayoutReady(() => {
 					this.validateIndexOnStartup(inst);
 				});
-			} else if (runtimeMeta && (runtimeMeta.providerId !== provider || runtimeMeta.modelId !== model)) {
-				Logger.log(`[VectorStore] Model mismatch for ${indexId}, index will be rebuilt on next use`);
+			} else if (
+				runtimeMeta &&
+				(runtimeMeta.providerId !== provider || runtimeMeta.modelId !== model || !versionCurrent)
+			) {
+				const why = !versionCurrent
+					? `schema v${runtimeMeta.version} < v${INDEX_VERSION} (pre-chunking)`
+					: "model mismatch";
+				Logger.log(`[VectorStore] Clearing index for ${indexId} (${why}), will rebuild on next use`);
 				await inst.store.clear();
 			}
 
@@ -577,6 +595,9 @@ export class VectorStoreService {
 		const vaultFiles = allVaultFiles.filter((file) => this.shouldIndexFile(file, defaultModel.provider));
 
 		const indexedDocs = await inst.store.getAll();
+		// A note may be stored as multiple chunk rows; collapse them to one entry
+		// per path. All chunks of a note share the same mtime, so last-write-wins
+		// is correct for missing/stale detection.
 		const indexedMap = new Map<string, { mtime: number }>();
 		for (const doc of indexedDocs) {
 			indexedMap.set(doc.path, { mtime: doc.mtime });
@@ -627,64 +648,69 @@ export class VectorStoreService {
 		if (filesToIndex.length > 0) {
 			const batchSize = this.getBatchSize(inst.indexId, defaultModel.provider);
 
-			// Pre-read files and filter out too-large/unreadable ones before
-			// setting up progress tracking so counts are accurate from the start.
-			interface FileEntry {
+			// Pre-read files and split them into chunks before setting up
+			// progress tracking so counts are accurate from the start. Large
+			// notes are chunked (not skipped); each chunk is embedded separately.
+			interface ChunkEntry {
 				file: TFile;
-				content: string;
-				contentWithTitle: string;
+				chunkIndex: number;
+				chunkCount: number;
+				checksum: string;
+				embedText: string;
 			}
-			const validFiles: FileEntry[] = [];
+			const validChunks: ChunkEntry[] = [];
 			const maxContentLength = await this.getMaxEmbeddingContentLength(inst, defaultModel);
-			const skippedTooLarge: string[] = [];
 			const skippedReadError: string[] = [];
+			let validFileCount = 0;
 
 			for (const file of filesToIndex) {
 				try {
 					const content = await readIndexableContent(vault, file);
-					if (content.length <= maxContentLength) {
-						const contentWithTitle = `# ${file.basename}\n\n${content}`;
-						validFiles.push({ file, content, contentWithTitle });
-					} else {
-						skippedTooLarge.push(file.basename);
+					const checksum = this.hashContent(content);
+					const chunks = chunkText(content, file.basename, maxContentLength);
+					for (const chunk of chunks) {
+						validChunks.push({
+							file,
+							chunkIndex: chunk.chunkIndex,
+							chunkCount: chunks.length,
+							checksum,
+							embedText: chunk.content,
+						});
 					}
+					validFileCount++;
 				} catch (error) {
 					Logger.error(`[VectorStore] Failed to read ${file.path}:`, error);
 					skippedReadError.push(file.basename);
 				}
 			}
 
-			const preFilterSkipped = skippedTooLarge.length + skippedReadError.length;
+			const preFilterSkipped = skippedReadError.length;
 
 			Logger.log(
-				`[VectorStore] ${inst.indexId}: pre-filter result: ${validFiles.length} valid, ${preFilterSkipped} skipped (maxContentLength=${maxContentLength})`,
+				`[VectorStore] ${inst.indexId}: pre-filter result: ${validFileCount} files (${validChunks.length} chunks), ${preFilterSkipped} skipped (maxContentLength=${maxContentLength})`,
 			);
 
 			if (preFilterSkipped > 0) {
-				const parts: string[] = [];
-				if (skippedTooLarge.length > 0) {
-					parts.push(`${skippedTooLarge.length} too large: ${skippedTooLarge.join(", ")}`);
-				}
-				if (skippedReadError.length > 0) {
-					parts.push(`${skippedReadError.length} unreadable: ${skippedReadError.join(", ")}`);
-				}
-				new Notice(`Skipped indexing ${preFilterSkipped} notes (${parts.join("; ")})`, 8000);
+				new Notice(
+					`Skipped indexing ${preFilterSkipped} notes (unreadable: ${skippedReadError.join(", ")})`,
+					8000,
+				);
 			}
 
-			// If no files actually need indexing (all too large / unreadable), skip entirely
-			if (validFiles.length === 0) {
+			// If no files actually need indexing (all unreadable), skip entirely
+			if (validChunks.length === 0) {
 				Logger.log(
-					`[VectorStore] ${inst.indexId}: all ${filesToIndex.length} pending files were skipped (too large or unreadable)`,
+					`[VectorStore] ${inst.indexId}: all ${filesToIndex.length} pending files were skipped (unreadable)`,
 				);
 			} else {
 				const pendingFileCount = filesToIndex.length;
 				const { startingIndexedCount, totalCount } = summarizeValidationProgressCounts({
 					eligibleFileCount: vaultFiles.length,
 					pendingFileCount,
-					validPendingFileCount: validFiles.length,
+					validPendingFileCount: validFileCount,
 				});
 				let indexed = 0;
-				const showNotice = validFiles.length > 5;
+				const showNotice = validFileCount > 5;
 				let notice: Notice | null = null;
 				if (showNotice) {
 					notice = new Notice("", 0);
@@ -700,14 +726,24 @@ export class VectorStoreService {
 				if (notice) this.updateNotice(notice, inst.progress);
 				inst.abortController = new AbortController();
 
-				for (let i = 0; i < validFiles.length; i += batchSize) {
+				// A note may have been indexed previously (stale re-index) with a
+				// different chunk count; drop its old chunks before writing new ones.
+				const purgedPaths = new Set<string>();
+				const purgeIfNeeded = async (entry: ChunkEntry) => {
+					if (entry.chunkIndex === 0 && !purgedPaths.has(entry.file.path)) {
+						await inst.store.remove(entry.file.path);
+						purgedPaths.add(entry.file.path);
+					}
+				};
+
+				for (let i = 0; i < validChunks.length; i += batchSize) {
 					if (inst.abortController?.signal.aborted) {
 						Logger.log(`[VectorStore] Validation indexing cancelled for ${inst.indexId}`);
 						break;
 					}
 
-					const batch = validFiles.slice(i, i + batchSize);
-					const batchEnd = Math.min(i + batchSize, validFiles.length);
+					const batch = validChunks.slice(i, i + batchSize);
+					const batchEnd = Math.min(i + batchSize, validChunks.length);
 
 					this.updateInstanceProgress(inst, {
 						currentFile:
@@ -717,7 +753,7 @@ export class VectorStoreService {
 					});
 
 					try {
-						const texts = batch.map((entry) => entry.contentWithTitle);
+						const texts = batch.map((entry) => entry.embedText);
 						const vectors = await embeddings.embedDocuments(texts);
 						if (!vectors || vectors.length === 0) {
 							Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
@@ -730,11 +766,13 @@ export class VectorStoreService {
 								continue;
 							}
 							const entry = batch[j];
+							await purgeIfNeeded(entry);
 							const doc: DocumentVector = {
-								id: entry.file.path,
+								id: makeChunkId(entry.file.path, entry.chunkIndex),
 								path: entry.file.path,
 								mtime: entry.file.stat.mtime,
-								checksum: this.hashContent(entry.content),
+								checksum: entry.checksum,
+								chunkIndex: entry.chunkIndex,
 								vector: new Float32Array(vectors[j]),
 							};
 							await inst.store.upsert(doc);
@@ -747,7 +785,7 @@ export class VectorStoreService {
 						for (const entry of batch) {
 							if (inst.abortController?.signal.aborted) break;
 							try {
-								const vector = await embeddings.embedQuery(entry.contentWithTitle);
+								const vector = await embeddings.embedQuery(entry.embedText);
 								if (!vector || vector.length === 0) {
 									Logger.error(
 										`[VectorStore] embedQuery returned empty result for ${entry.file.path}`,
@@ -755,11 +793,13 @@ export class VectorStoreService {
 									this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
 									continue;
 								}
+								await purgeIfNeeded(entry);
 								const doc: DocumentVector = {
-									id: entry.file.path,
+									id: makeChunkId(entry.file.path, entry.chunkIndex),
 									path: entry.file.path,
 									mtime: entry.file.stat.mtime,
-									checksum: this.hashContent(entry.content),
+									checksum: entry.checksum,
+									chunkIndex: entry.chunkIndex,
 									vector: new Float32Array(vector),
 								};
 								await inst.store.upsert(doc);
@@ -780,16 +820,16 @@ export class VectorStoreService {
 					const cancelled = inst.abortController?.signal.aborted;
 					notice.setMessage(
 						cancelled
-							? `Indexing cancelled (${indexed} files updated)`
-							: `✓ Index updated: ${indexed} files`,
+							? `Indexing cancelled (${indexed} chunks updated)`
+							: `✓ Index updated: ${indexed} chunks`,
 					);
 					setTimeout(() => notice.hide(), 3000);
 				}
 
 				inst.abortController = null;
 				this.updateInstanceProgress(inst, { isIndexing: false, currentFile: null });
-				Logger.log(`[VectorStore] Indexed ${indexed} missing/stale files for ${inst.indexId}`);
-			} // end else (validFiles.length > 0)
+				Logger.log(`[VectorStore] Indexed ${indexed} chunks for ${inst.indexId}`);
+			} // end else (validChunks.length > 0)
 		}
 
 		// Sync document count to pluginData for reactive UI updates
@@ -996,17 +1036,20 @@ export class VectorStoreService {
 			return false;
 		}
 
-		// Check if model changed
+		// Rebuild if the model changed or the persisted index predates chunking.
 		const meta = await inst.store.getMetadata();
 		const modelChanged = meta && (meta.providerId !== model.provider || meta.modelId !== model.model);
+		const versionStale = meta !== null && meta.version < INDEX_VERSION;
 
-		if (modelChanged) {
-			Logger.log(`[VectorStore] Model changed for ${resolvedId}, clearing index`);
+		if (modelChanged || versionStale) {
+			Logger.log(
+				`[VectorStore] Rebuilding index for ${resolvedId} (${versionStale ? `schema v${meta?.version} < v${INDEX_VERSION}` : "model changed"})`,
+			);
 			await inst.store.clear();
 		}
 
 		const count = await inst.store.count();
-		if (count === 0 || modelChanged) {
+		if (count === 0 || modelChanged || versionStale) {
 			await this.buildFullIndex(inst, embeddings, model);
 			inst.hasValidatedThisSession = true;
 		} else if (!inst.hasValidatedThisSession) {
@@ -1074,25 +1117,31 @@ export class VectorStoreService {
 			this.updateInstanceProgress(inst, { currentFile: "Reading files..." });
 			this.updateNotice(notice, inst.progress);
 
-			interface FileEntry {
+			interface ChunkEntry {
 				file: TFile;
-				content: string;
-				contentWithTitle: string;
+				chunkIndex: number;
+				checksum: string;
+				embedText: string;
 			}
 
-			const validFiles: FileEntry[] = [];
+			const validChunks: ChunkEntry[] = [];
+			let validFileCount = 0;
 			const maxContentLength = await this.getMaxEmbeddingContentLength(inst, model);
 
 			for (const file of files) {
 				try {
 					const content = await readIndexableContent(vault, file);
-					if (content.length > maxContentLength) {
-						skippedFiles.push({ path: file.path, reason: "too-large" });
-						this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
-						continue;
+					const checksum = this.hashContent(content);
+					const chunks = chunkText(content, file.basename, maxContentLength);
+					for (const chunk of chunks) {
+						validChunks.push({
+							file,
+							chunkIndex: chunk.chunkIndex,
+							checksum,
+							embedText: chunk.content,
+						});
 					}
-					const contentWithTitle = `# ${file.basename}\n\n${content}`;
-					validFiles.push({ file, content, contentWithTitle });
+					validFileCount++;
 				} catch (error) {
 					Logger.error(`[VectorStore] Failed to read ${file.path}:`, error);
 					skippedFiles.push({ path: file.path, reason: "read-error" });
@@ -1100,17 +1149,26 @@ export class VectorStoreService {
 				}
 			}
 
-			this.updateInstanceProgress(inst, { total: validFiles.length });
+			// Progress is tracked per file; the store was cleared before this loop
+			// so chunks can be inserted directly without purging prior versions.
+			this.updateInstanceProgress(inst, { total: validFileCount });
 			this.updateNotice(notice, inst.progress);
+			const indexedPaths = new Set<string>();
+			const noteIndexed = (path: string) => {
+				if (!indexedPaths.has(path)) {
+					indexedPaths.add(path);
+					indexedFiles.push(path);
+					this.updateInstanceProgress(inst, { indexed: indexedPaths.size });
+				}
+			};
 
-			for (let i = 0; i < validFiles.length; i += batchSize) {
+			for (let i = 0; i < validChunks.length; i += batchSize) {
 				if (inst.abortController?.signal.aborted) {
 					Logger.log(`[VectorStore] Indexing cancelled for ${inst.indexId}`);
 					break;
 				}
 
-				const batch = validFiles.slice(i, i + batchSize);
-				const batchEnd = Math.min(i + batchSize, validFiles.length);
+				const batch = validChunks.slice(i, i + batchSize);
 
 				this.updateInstanceProgress(inst, {
 					currentFile:
@@ -1119,7 +1177,7 @@ export class VectorStoreService {
 				this.updateNotice(notice, inst.progress);
 
 				try {
-					const texts = batch.map((entry) => entry.contentWithTitle);
+					const texts = batch.map((entry) => entry.embedText);
 					const vectors = await embeddings.embedDocuments(texts);
 					if (!vectors || vectors.length === 0) {
 						Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
@@ -1137,17 +1195,17 @@ export class VectorStoreService {
 						}
 						const entry = batch[j];
 						const doc: DocumentVector = {
-							id: entry.file.path,
+							id: makeChunkId(entry.file.path, entry.chunkIndex),
 							path: entry.file.path,
 							mtime: entry.file.stat.mtime,
-							checksum: this.hashContent(entry.content),
+							checksum: entry.checksum,
+							chunkIndex: entry.chunkIndex,
 							vector: new Float32Array(vectors[j]),
 						};
 						await inst.store.upsert(doc);
-						indexedFiles.push(entry.file.path);
+						noteIndexed(entry.file.path);
 					}
 
-					this.updateInstanceProgress(inst, { indexed: batchEnd });
 					this.updateNotice(notice, inst.progress);
 				} catch (error) {
 					Logger.warn(
@@ -1158,7 +1216,7 @@ export class VectorStoreService {
 					for (const entry of batch) {
 						if (inst.abortController?.signal.aborted) break;
 						try {
-							const vector = await embeddings.embedQuery(entry.contentWithTitle);
+							const vector = await embeddings.embedQuery(entry.embedText);
 							if (!vector || vector.length === 0) {
 								Logger.error(`[VectorStore] embedQuery returned empty result for ${entry.file.path}`);
 								skippedFiles.push({ path: entry.file.path, reason: "embed-error" });
@@ -1166,15 +1224,15 @@ export class VectorStoreService {
 								continue;
 							}
 							const doc: DocumentVector = {
-								id: entry.file.path,
+								id: makeChunkId(entry.file.path, entry.chunkIndex),
 								path: entry.file.path,
 								mtime: entry.file.stat.mtime,
-								checksum: this.hashContent(entry.content),
+								checksum: entry.checksum,
+								chunkIndex: entry.chunkIndex,
 								vector: new Float32Array(vector),
 							};
 							await inst.store.upsert(doc);
-							indexedFiles.push(entry.file.path);
-							this.updateInstanceProgress(inst, { indexed: inst.progress.indexed + 1 });
+							noteIndexed(entry.file.path);
 						} catch (entryError) {
 							Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
 							const reason = entryError instanceof Error ? entryError.message : String(entryError);
@@ -1286,31 +1344,37 @@ export class VectorStoreService {
 		try {
 			const content = await readIndexableContent(this.plugin.app.vault, file);
 			const maxContentLength = await this.getMaxEmbeddingContentLength(inst, model);
+			const checksum = this.hashContent(content);
+			const chunks = chunkText(content, file.basename, maxContentLength);
 
-			if (content.length > maxContentLength) {
-				Logger.log(`[VectorStore] Skipping ${file.path}: too large`);
-				return;
+			// Embed all chunks first; only touch the store once every embedding
+			// succeeded so a mid-way failure can't leave a note partially indexed.
+			const vectors: Float32Array[] = [];
+			for (const chunk of chunks) {
+				const vector = await embeddings.embedQuery(chunk.content);
+				if (!vector || vector.length === 0) {
+					Logger.error(`[VectorStore] embedQuery returned empty result for ${file.path}`);
+					new Notice(`Failed to embed ${file.basename}: empty result from model`);
+					return;
+				}
+				vectors.push(new Float32Array(vector));
 			}
 
-			const contentWithTitle = `# ${file.basename}\n\n${content}`;
-			const vector = await embeddings.embedQuery(contentWithTitle);
-			if (!vector || vector.length === 0) {
-				Logger.error(`[VectorStore] embedQuery returned empty result for ${file.path}`);
-				new Notice(`Failed to embed ${file.basename}: empty result from model`);
-				return;
+			// Replace any prior version's chunks, then write the new ones.
+			await inst.store.remove(file.path);
+			for (let i = 0; i < chunks.length; i++) {
+				const doc: DocumentVector = {
+					id: makeChunkId(file.path, chunks[i].chunkIndex),
+					path: file.path,
+					mtime: file.stat.mtime,
+					checksum,
+					chunkIndex: chunks[i].chunkIndex,
+					vector: vectors[i],
+				};
+				await inst.store.upsert(doc);
 			}
 
-			const doc: DocumentVector = {
-				id: file.path,
-				path: file.path,
-				mtime: file.stat.mtime,
-				checksum: this.hashContent(content),
-				vector: new Float32Array(vector),
-			};
-
-			await inst.store.upsert(doc);
-
-			Logger.log(`[VectorStore] Indexed: ${file.path} (${inst.indexId})`);
+			Logger.log(`[VectorStore] Indexed: ${file.path} (${chunks.length} chunks, ${inst.indexId})`);
 		} catch (error) {
 			Logger.error(`[VectorStore] Failed to index ${file.path} (${inst.indexId}):`, error);
 			const reason = error instanceof Error ? error.message : String(error);
@@ -1361,14 +1425,22 @@ export class VectorStoreService {
 			const queryVectorTyped = new Float32Array(queryVector);
 
 			const hasFilters = filter?.pathPrefixes?.length || filter?.tags?.length;
-			const searchTopK = hasFilters ? topK * 3 : topK;
+			// Over-fetch so filtering + chunk→note dedup still leaves enough
+			// distinct notes to fill topK.
+			const searchTopK = (hasFilters ? topK * 3 : topK) * CHUNK_OVERFETCH;
 
 			const results = await inst.store.search(queryVectorTyped, searchTopK, threshold);
 
 			const { metadataCache } = this.plugin.app;
 			const filteredResults: VectorSearchResult[] = [];
+			// Collapse multiple chunk-hits of the same note into one result. HNSW
+			// returns results sorted by score, so the first hit per path is its
+			// best-matching chunk.
+			const seenPaths = new Set<string>();
 
 			for (const r of results) {
+				if (seenPaths.has(r.doc.path)) continue;
+
 				if (filter?.pathPrefixes?.length) {
 					const matchesPath = filter.pathPrefixes.some((prefix) => matchesPathPrefix(r.doc.path, prefix));
 					if (!matchesPath) continue;
@@ -1391,6 +1463,7 @@ export class VectorStoreService {
 					}
 				}
 
+				seenPaths.add(r.doc.path);
 				filteredResults.push({
 					path: r.doc.path,
 					name:

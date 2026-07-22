@@ -102,9 +102,12 @@ export class AvailableModels {
 			// Get all discovered models from the provider
 			const discoveredModels = state?.models ?? [];
 
+			const ollamaData = provider === "ollama" ? this.#getOllamaData() : null;
 			for (const modelName of discoveredModels) {
 				// Skip embedding models - they shouldn't appear in chat model selection
-				if (isLikelyEmbeddingModel(modelName)) {
+				const ollamaInfo = ollamaData?.get(modelName);
+				const hasEmbeddingCapability = ollamaInfo?.capabilities?.includes("embedding");
+				if (hasEmbeddingCapability || isLikelyEmbeddingModel(modelName)) {
 					continue;
 				}
 
@@ -148,10 +151,13 @@ export class AvailableModels {
 					});
 				}
 			} else {
-				// Fall back to heuristic filtering
+				// Fall back to heuristic filtering, augmented by Ollama capabilities metadata
+				const ollamaData = provider === "ollama" ? this.#getOllamaData() : null;
 				const discoveredModels = state?.models ?? [];
 				for (const modelName of discoveredModels) {
-					if (isLikelyEmbeddingModel(modelName)) {
+					const ollamaInfo = ollamaData?.get(modelName);
+					const hasEmbeddingCapability = ollamaInfo?.capabilities?.includes("embedding");
+					if (hasEmbeddingCapability || isLikelyEmbeddingModel(modelName)) {
 						out.push({
 							model: modelName,
 							provider,

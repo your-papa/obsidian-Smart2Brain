@@ -25,8 +25,10 @@ export interface DocumentVector {
 	/** Embedding vector as Float32Array for efficient computation */
 	vector: Float32Array;
 	/**
-	 * Chunk index within the document (for future chunking support).
-	 * If undefined, the document is embedded as a single chunk.
+	 * Chunk index within the document (0-based).
+	 * Large notes are split into multiple chunks, each embedded as its own
+	 * vector; a note that fits in one embedding has a single chunk at index 0.
+	 * The record `id` is `${path}#${chunkIndex}` (see `makeChunkId`).
 	 */
 	chunkIndex?: number;
 }
@@ -204,8 +206,10 @@ export interface IndexingReport {
 	timestamp: number;
 }
 
-/** Current schema version for the serialized index */
-export const INDEX_VERSION = 1;
+/** Current schema version for the serialized index.
+ * v2: notes are split into multiple chunks (`${path}#${chunkIndex}` ids) instead
+ * of one vector per note. Bumping this forces a rebuild of pre-chunking indexes. */
+export const INDEX_VERSION = 2;
 
 /**
  * Sanitize a provider:model string into a filesystem/IndexedDB-safe identifier.
@@ -213,6 +217,15 @@ export const INDEX_VERSION = 1;
  */
 export function sanitizeIndexId(provider: string, model: string): string {
 	return `${provider}_${model}`.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+/**
+ * Build the unique record id for a note chunk.
+ * A note is identified by its `path`; each chunk within it gets a distinct id
+ * so multiple chunks of one note can coexist in the path-indexed store.
+ */
+export function makeChunkId(path: string, chunkIndex: number): string {
+	return `${path}#${chunkIndex}`;
 }
 
 /**
