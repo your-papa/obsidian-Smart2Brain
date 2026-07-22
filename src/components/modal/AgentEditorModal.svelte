@@ -511,6 +511,12 @@ const TOOLS: ToolInfo[] = [
 			"Read notes and vault files by path or wiki link. Supports markdown/text files and PDF text extraction. Images must be attached in chat.",
 	},
 	{
+		id: "grep_notes",
+		defaultName: "Grep Notes",
+		defaultDescription:
+			"Find an exact substring or regex pattern across notes, returning matching lines with line numbers and context. Unlike Search Notes, it matches literal strings. Scope to one note with a path, or page large result sets.",
+	},
+	{
 		id: "get_all_tags",
 		defaultName: "Get All Tags",
 		defaultDescription: "Retrieve a list of all tags used in the vault.",

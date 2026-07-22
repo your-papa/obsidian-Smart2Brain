@@ -51,6 +51,7 @@ import { createFetchUrlTool } from "./tools/fetchUrl";
 import { createGetAllTagsTool } from "./tools/getAllTags";
 import { createWebSearchTool } from "./tools/webSearch";
 import { createGetPropertiesTool } from "./tools/getProperties";
+import { createGrepNotesTool } from "./tools/grepNotes";
 import { createLoadSkillTool } from "./tools/loadSkill";
 import { createListDirectoryTool } from "./tools/listDirectory";
 import { createManageNotesTool } from "./tools/manageNotes";
@@ -725,6 +726,7 @@ export class AgentManager {
 				"read_content",
 				() => createReadContentTool(this.plugin.app, imageProcessorInstance, pdfProcessorInstance),
 			],
+			["grep_notes", () => createGrepNotesTool(this.plugin.app)],
 			["manage_notes", () => createManageNotesTool(this.plugin.app, agentCfg.id)],
 			["fetch_url", () => createFetchUrlTool()],
 			["web_search", () => createWebSearchTool()],

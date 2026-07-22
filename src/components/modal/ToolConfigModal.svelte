@@ -54,6 +54,11 @@ let maxResults = $state(
 		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
 		10,
 );
+let contextLines = $state(
+	(initialToolConfig?.settings as { contextLines?: number })?.contextLines ??
+		(defaultConfig.settings as { contextLines?: number })?.contextLines ??
+		2,
+);
 let algorithm = $state<SearchAlgorithm>(
 	(initialToolConfig?.settings as { algorithm?: SearchAlgorithm })?.algorithm ??
 		(defaultConfig.settings as { algorithm?: SearchAlgorithm })?.algorithm ??
@@ -342,6 +347,7 @@ const toolDisplayNames: Record<BuiltInToolId, string> = {
 	manage_notes: "Manage Notes",
 	fetch_url: "Fetch URL",
 	web_search: "Web Search",
+	grep_notes: "Grep Notes",
 };
 
 onMount(() => {
@@ -391,6 +397,8 @@ function handleSave() {
 	} else if (capturedToolId === "manage_notes") {
 		updatedConfig.settings = { allowCreate, allowUpdate, allowDelete, allowMove };
 		pluginData.diffViewMode = diffViewMode;
+	} else if (capturedToolId === "grep_notes") {
+		updatedConfig.settings = { contextLines };
 	} else if (capturedToolId === "fetch_url") {
 		// no extra settings
 	} else if (capturedToolId === "web_search") {
@@ -433,6 +441,9 @@ function handleResetToDefault() {
 		allowDelete = settings.allowDelete;
 		allowMove = settings.allowMove;
 		diffViewMode = "two-pane";
+	} else if (capturedToolId === "grep_notes" && defaultConfig.settings) {
+		const settings = defaultConfig.settings as { contextLines: number };
+		contextLines = settings.contextLines;
 	} else if (capturedToolId === "fetch_url" && defaultConfig.settings) {
 		// no extra settings to reset
 	} else if (capturedToolId === "web_search" && defaultConfig.settings) {
@@ -536,6 +547,22 @@ function handleResetToDefault() {
         <Toggle
           checked={searchShowMatchContext}
           onchange={(checked) => (searchShowMatchContext = checked)}
+        />
+      </ModalField>
+    </SettingGroup>
+  {:else if capturedToolId === "grep_notes"}
+    <SettingGroup heading="Grep Settings">
+      <ModalField
+        label="Context Lines"
+        desc="Number of surrounding lines to show on each side of a match."
+        for="tool-config-context-lines"
+      >
+        <Text
+          id="tool-config-context-lines"
+          inputType="number"
+          value={contextLines}
+          placeholder="2"
+          onblur={(v) => (contextLines = Math.max(Number.parseInt(String(v)) || 2, 0))}
         />
       </ModalField>
     </SettingGroup>

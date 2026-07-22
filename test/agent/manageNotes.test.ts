@@ -31,6 +31,14 @@ vi.mock("../../src/utils/attachments", () => ({
 	resolveVaultFileDetailed: (...args: unknown[]) => mockResolveVaultFileDetailed(...args),
 }));
 
+const mockGetIndexableVaultFiles = vi.fn().mockReturnValue([]);
+vi.mock("../../src/utils/fileFiltering", () => ({
+	getIndexableVaultFiles: (...args: unknown[]) => mockGetIndexableVaultFiles(...args),
+	isTextIndexableFile: (file: { extension: string }) =>
+		["md", "txt", "csv", "json", "yaml", "yml", "canvas", "chat"].includes(file.extension.toLowerCase()),
+	shouldProcessVaultPath: (filePath: string, prefix: string) => filePath.startsWith(prefix),
+}));
+
 // The tool reads its thread id from the run config's `configurable.thread_id`
 // (set by Agent.buildRunnableConfig in production). Pass it on every invoke.
 const THREAD_CONFIG = { configurable: { thread_id: "test-thread-id" } };
@@ -82,6 +90,7 @@ describe("manageNotes tool", () => {
 		vi.clearAllMocks();
 		mockIsPathAllowed.mockReturnValue(true);
 		mockCountOtherThreads.mockReturnValue(0);
+		mockGetIndexableVaultFiles.mockReturnValue([]);
 		setManageNotesPermissions();
 		app = createMockApp();
 		tool = createManageNotesTool(app);
@@ -375,5 +384,184 @@ describe("manageNotes tool", () => {
 
 		expect(mockAddChanges).toHaveBeenCalled();
 		expect(result).not.toContain("another chat");
+	});
+
+	describe("update edit flags — is_regex / replace_all", () => {
+		it("replaces every occurrence with replace_all", async () => {
+			const file = makeFile("Notes/changelog.md");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+			vi.mocked(app.vault.read).mockResolvedValue("v1 here, and v1 there, plus v1");
+
+			await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/changelog.md",
+							edits: [{ oldText: "v1", newText: "v2", replace_all: true }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(mockAddChanges).toHaveBeenCalledWith(
+				[
+					expect.objectContaining({
+						type: "update",
+						newContent: "v2 here, and v2 there, plus v2",
+					}),
+				],
+				expect.anything(),
+				expect.anything(),
+			);
+		});
+
+		it("errors on a non-unique oldText without replace_all", async () => {
+			const file = makeFile("Notes/dupes.md");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+			vi.mocked(app.vault.read).mockResolvedValue("dup dup dup");
+
+			const result = await tool.invoke(
+				{
+					operations: [{ type: "update", path: "Notes/dupes.md", edits: [{ oldText: "dup", newText: "x" }] }],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("appears multiple times");
+			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
+
+		it("does not treat $ in newText as a back-reference for literal edits", async () => {
+			const file = makeFile("Notes/price.md");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+			vi.mocked(app.vault.read).mockResolvedValue("Cost: PLACEHOLDER");
+
+			await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/price.md",
+							edits: [{ oldText: "PLACEHOLDER", newText: "$5" }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(mockAddChanges).toHaveBeenCalledWith(
+				[expect.objectContaining({ newContent: "Cost: $5" })],
+				expect.anything(),
+				expect.anything(),
+			);
+		});
+
+		it("applies a regex edit with back-references", async () => {
+			const file = makeFile("Notes/dates.md");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+			vi.mocked(app.vault.read).mockResolvedValue("Date 2026-07-22 end");
+
+			await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/dates.md",
+							edits: [{ oldText: "(\\d{4})-(\\d{2})-(\\d{2})", newText: "$3/$2/$1", is_regex: true }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(mockAddChanges).toHaveBeenCalledWith(
+				[expect.objectContaining({ newContent: "Date 22/07/2026 end" })],
+				expect.anything(),
+				expect.anything(),
+			);
+		});
+	});
+
+	describe("vault-wide replace operation", () => {
+		it("stages one update per changed note across the vault", async () => {
+			const a = makeFile("Projects/a.md");
+			const b = makeFile("Projects/b.md");
+			const c = makeFile("Other/c.md");
+			mockGetIndexableVaultFiles.mockReturnValue([a, b, c]);
+			vi.mocked(app.vault.read).mockImplementation(async (f: { path: string }) =>
+				f.path === "Projects/a.md"
+					? "has #todo here"
+					: f.path === "Projects/b.md"
+						? "no match here"
+						: "another #todo",
+			);
+
+			const result = await tool.invoke(
+				{
+					operations: [{ type: "replace", find: "#todo", replace: "#task" }],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("Proposed");
+			const staged = mockAddChanges.mock.calls[0][0];
+			// Only the two files that actually contain #todo are staged.
+			expect(staged).toHaveLength(2);
+			expect(staged.map((c: { path: string }) => c.path).sort()).toEqual(["Other/c.md", "Projects/a.md"]);
+			expect(staged.every((c: { type: string }) => c.type === "update")).toBe(true);
+			expect(staged.find((c: { path: string }) => c.path === "Projects/a.md").newContent).toBe("has #task here");
+		});
+
+		it("scopes the replace to path_prefix", async () => {
+			const a = makeFile("Projects/a.md");
+			const c = makeFile("Other/c.md");
+			mockGetIndexableVaultFiles.mockReturnValue([a, c]);
+			vi.mocked(app.vault.read).mockResolvedValue("#todo everywhere");
+
+			await tool.invoke(
+				{
+					operations: [{ type: "replace", find: "#todo", replace: "#task", path_prefix: "Projects" }],
+				},
+				THREAD_CONFIG,
+			);
+
+			const staged = mockAddChanges.mock.calls[0][0];
+			expect(staged).toHaveLength(1);
+			expect(staged[0].path).toBe("Projects/a.md");
+		});
+
+		it("returns an error and stages nothing when there are zero matches", async () => {
+			const a = makeFile("Notes/a.md");
+			mockGetIndexableVaultFiles.mockReturnValue([a]);
+			vi.mocked(app.vault.read).mockResolvedValue("nothing relevant");
+
+			const result = await tool.invoke(
+				{
+					operations: [{ type: "replace", find: "#todo", replace: "#task" }],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("No occurrences");
+			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
+
+		it("requires update permission", async () => {
+			setManageNotesPermissions({ allowCreate: true, allowUpdate: false, allowDelete: true, allowMove: true });
+			tool = createManageNotesTool(app);
+			const a = makeFile("Notes/a.md");
+			mockGetIndexableVaultFiles.mockReturnValue([a]);
+			vi.mocked(app.vault.read).mockResolvedValue("#todo");
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "replace", find: "#todo", replace: "#task" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("update permission");
+			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
 	});
 });

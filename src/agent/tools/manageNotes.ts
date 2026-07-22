@@ -6,16 +6,26 @@ import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { PendingChange } from "../../types/shared";
 import { resolveVaultFileDetailed } from "../../utils/attachments";
+import { getIndexableVaultFiles, isTextIndexableFile, shouldProcessVaultPath } from "../../utils/fileFiltering";
+import { normalizeVaultPath } from "../../utils/pathUtils";
 import { normalizeReferencePath } from "../../utils/pathResolution";
 import { genUUIDv7 } from "../../utils/uuid7Validator";
+import { buildGrepMatcher } from "./grepMatcher";
 
 const editSchema = z.object({
 	oldText: z
 		.string()
 		.describe(
-			"The exact text to find in the file. Must match exactly once. Include enough surrounding context to make the match unique.",
+			"The text to find. Without replace_all, must match exactly once — include enough surrounding context to make it unique. With replace_all, every occurrence is replaced.",
 		),
-	newText: z.string().describe("The text to replace oldText with"),
+	newText: z
+		.string()
+		.describe("The text to replace oldText with. Supports $1/$2 back-references when is_regex is true."),
+	is_regex: z.boolean().optional().describe("Treat oldText as a regular expression. Default false."),
+	replace_all: z
+		.boolean()
+		.optional()
+		.describe("Replace all occurrences instead of requiring a single unique match. Default false."),
 });
 
 const createOperationSchema = z.object({
@@ -43,6 +53,18 @@ const moveOperationSchema = z.object({
 	newPath: z.string().describe("Destination vault-relative path for the markdown note. Must end in .md."),
 });
 
+const replaceOperationSchema = z.object({
+	type: z.literal("replace"),
+	find: z.string().describe("Exact text substring or regex pattern to find across notes."),
+	replace: z.string().describe("Replacement text. Supports $1/$2 back-references when is_regex is true."),
+	is_regex: z.boolean().optional().describe("Treat find as a regular expression. Default false."),
+	case_sensitive: z.boolean().optional().describe("Case-sensitive matching. Default false."),
+	path_prefix: z
+		.string()
+		.optional()
+		.describe("Optional folder to scope the replace (e.g. 'Projects'). Omit to replace across the whole vault."),
+});
+
 const manageNotesSchema = z.object({
 	operations: z
 		.array(
@@ -51,6 +73,7 @@ const manageNotesSchema = z.object({
 				updateOperationSchema,
 				deleteOperationSchema,
 				moveOperationSchema,
+				replaceOperationSchema,
 			]),
 		)
 		.min(1)
@@ -150,23 +173,57 @@ function validateExistingMarkdownFile(
 
 function applySequentialEdits(
 	originalContent: string,
-	edits: { oldText: string; newText: string }[],
+	edits: { oldText: string; newText: string; is_regex?: boolean; replace_all?: boolean }[],
 	path: string,
 	operationNumber: number,
 ): { content: string } | { error: string } {
 	let content = originalContent;
 
 	for (let i = 0; i < edits.length; i++) {
-		const { oldText, newText } = edits[i];
+		const { oldText, newText, is_regex = false, replace_all = false } = edits[i];
+		const sequentialNote =
+			i > 0
+				? " Note: edits are applied sequentially, so this oldText must match the content after earlier edits were applied."
+				: "";
+
+		if (is_regex) {
+			const built = buildGrepMatcher(oldText, true, true);
+			if (!built.ok) {
+				return {
+					error: `Error in operation ${operationNumber}, edit ${i + 1}: ${built.error.replace(/^Error: /, "")}`,
+				};
+			}
+			const matcher = built.matcher;
+			const occurrences = matcher.count(content);
+			if (occurrences === 0) {
+				return {
+					error: `Error in operation ${operationNumber}, edit ${i + 1}: Could not find a match for the regex in "${path}".${sequentialNote}`,
+				};
+			}
+			if (!replace_all && occurrences > 1) {
+				return {
+					error: `Error in operation ${operationNumber}, edit ${i + 1}: The regex matches multiple times in "${path}". Make it more specific, or set replace_all to replace every match.`,
+				};
+			}
+			// Regex replace ($1/$2 back-references honored); non-global regex replaces only the first match.
+			content = content.replace(replace_all ? matcher.globalRegex() : new RegExp(oldText), newText);
+			continue;
+		}
+
+		// Literal find-and-replace — plain string ops so `$` in newText is not treated as a back-reference.
 		const idx = content.indexOf(oldText);
 		if (idx === -1) {
 			return {
-				error: `Error in operation ${operationNumber}, edit ${i + 1}: Could not find the specified text in "${path}". Make sure oldText matches exactly (including whitespace and newlines).${i > 0 ? " Note: edits are applied sequentially, so this oldText must match the content after earlier edits were applied." : ""}`,
+				error: `Error in operation ${operationNumber}, edit ${i + 1}: Could not find the specified text in "${path}". Make sure oldText matches exactly (including whitespace and newlines).${sequentialNote}`,
 			};
+		}
+		if (replace_all) {
+			content = content.split(oldText).join(newText);
+			continue;
 		}
 		if (content.includes(oldText, idx + 1)) {
 			return {
-				error: `Error in operation ${operationNumber}, edit ${i + 1}: The specified oldText appears multiple times in "${path}". Include more surrounding context to make it unique.`,
+				error: `Error in operation ${operationNumber}, edit ${i + 1}: The specified oldText appears multiple times in "${path}". Include more surrounding context to make it unique, or set replace_all to replace every occurrence.`,
 			};
 		}
 		content = content.slice(0, idx) + newText + content.slice(idx + oldText.length);
@@ -318,48 +375,109 @@ export async function stageNoteOperations(
 			continue;
 		}
 
-		if (!settings.allowMove) {
-			return `Error in operation ${operationNumber}: Move operations are disabled for this agent.`;
+		if (operation.type === "move") {
+			if (!settings.allowMove) {
+				return `Error in operation ${operationNumber}: Move operations are disabled for this agent.`;
+			}
+
+			const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "move", agentId);
+			if ("error" in result) return result.error;
+
+			const sourceDuplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
+			if (sourceDuplicateError) return sourceDuplicateError;
+
+			const normalizedNewPath = normalizePath(operation.newPath);
+			if (!normalizedNewPath.endsWith(".md")) {
+				return `Error in operation ${operationNumber}: Only markdown files (.md) can be moved. Got destination "${normalizedNewPath}"`;
+			}
+
+			const destinationDuplicateError = ensureUniqueTarget(seenPaths, normalizedNewPath, operationNumber);
+			if (destinationDuplicateError) return destinationDuplicateError;
+
+			if (!store.isPathAllowed(normalizedNewPath)) {
+				return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is excluded by your vault filter settings.`;
+			}
+
+			// Privacy check for move destination
+			const moveProvider = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).chatModel?.provider;
+			if (moveProvider && store.shouldBlockFile(normalizedNewPath, moveProvider)) {
+				return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
+			}
+
+			if (result.file.path === normalizedNewPath) {
+				return `Error in operation ${operationNumber}: Source and destination are the same path "${normalizedNewPath}".`;
+			}
+
+			const existingDestination = app.vault.getAbstractFileByPath(normalizedNewPath);
+			if (existingDestination) {
+				return `Error in operation ${operationNumber}: A file already exists at "${normalizedNewPath}".`;
+			}
+
+			stagedChanges.push({
+				type: "move",
+				path: result.file.path,
+				newPath: normalizedNewPath,
+			});
+			continue;
 		}
 
-		const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "move", agentId);
-		if ("error" in result) return result.error;
-
-		const sourceDuplicateError = ensureUniqueTarget(seenPaths, result.file.path, operationNumber);
-		if (sourceDuplicateError) return sourceDuplicateError;
-
-		const normalizedNewPath = normalizePath(operation.newPath);
-		if (!normalizedNewPath.endsWith(".md")) {
-			return `Error in operation ${operationNumber}: Only markdown files (.md) can be moved. Got destination "${normalizedNewPath}"`;
+		// operation.type === "replace" — vault-wide (or folder-scoped) find-and-replace.
+		if (!settings.allowUpdate) {
+			return `Error in operation ${operationNumber}: Replace operations require update permission, which is disabled for this agent.`;
 		}
 
-		const destinationDuplicateError = ensureUniqueTarget(seenPaths, normalizedNewPath, operationNumber);
-		if (destinationDuplicateError) return destinationDuplicateError;
+		const built = buildGrepMatcher(operation.find, operation.is_regex ?? false, operation.case_sensitive ?? false);
+		if (!built.ok) {
+			return `Error in operation ${operationNumber}: ${built.error.replace(/^Error: /, "")}`;
+		}
+		const matcher = built.matcher;
 
-		if (!store.isPathAllowed(normalizedNewPath)) {
-			return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is excluded by your vault filter settings.`;
+		let candidateFiles = getIndexableVaultFiles(app.vault).filter(
+			(f) => f.extension.toLowerCase() === "md" && isTextIndexableFile(f),
+		);
+		if (operation.path_prefix) {
+			const prefix = normalizeVaultPath(operation.path_prefix);
+			candidateFiles = candidateFiles.filter((f) => shouldProcessVaultPath(f.path, prefix));
+		}
+		candidateFiles.sort((a, b) => a.path.localeCompare(b.path));
+
+		const replaceProvider = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).chatModel?.provider;
+		let notesSearched = 0;
+		let notesChanged = 0;
+
+		for (const file of candidateFiles) {
+			if (!store.isPathAllowed(file.path)) continue;
+			if (replaceProvider && store.shouldBlockFile(file.path, replaceProvider)) continue;
+
+			// Guard against conflicting with another op in this same batch.
+			if (seenPaths.has(file.path)) continue;
+
+			notesSearched++;
+			const originalContent = await app.vault.read(file);
+			if (!matcher.test(originalContent)) continue;
+
+			const newContent = operation.is_regex
+				? originalContent.replace(matcher.globalRegex(), operation.replace)
+				: originalContent.split(operation.find).join(operation.replace);
+
+			if (newContent === originalContent) continue;
+
+			seenPaths.add(file.path);
+			if (store.countOtherThreadsPendingUpdate(file.path, threadId) > 0) {
+				crossThreadPaths.add(file.path);
+			}
+			stagedChanges.push({
+				type: "update",
+				path: file.path,
+				originalContent,
+				newContent,
+			});
+			notesChanged++;
 		}
 
-		// Privacy check for move destination
-		const moveProvider = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).chatModel?.provider;
-		if (moveProvider && store.shouldBlockFile(normalizedNewPath, moveProvider)) {
-			return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
+		if (notesChanged === 0) {
+			return `Error in operation ${operationNumber}: No occurrences of "${operation.find}" found across ${notesSearched} note(s) searched${operation.path_prefix ? ` under "${operation.path_prefix}"` : ""}. Nothing was staged.`;
 		}
-
-		if (result.file.path === normalizedNewPath) {
-			return `Error in operation ${operationNumber}: Source and destination are the same path "${normalizedNewPath}".`;
-		}
-
-		const existingDestination = app.vault.getAbstractFileByPath(normalizedNewPath);
-		if (existingDestination) {
-			return `Error in operation ${operationNumber}: A file already exists at "${normalizedNewPath}".`;
-		}
-
-		stagedChanges.push({
-			type: "move",
-			path: result.file.path,
-			newPath: normalizedNewPath,
-		});
 	}
 
 	const resolvedToolCallId = toolCallId ?? genUUIDv7();

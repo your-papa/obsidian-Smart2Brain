@@ -110,6 +110,7 @@ export const BUILT_IN_TOOL_IDS = [
 	"search_notes",
 	"list_directory",
 	"read_content",
+	"grep_notes",
 	"get_all_tags",
 	"get_properties",
 	"execute_javascript",
@@ -164,6 +165,14 @@ export interface ReadContentSettings {
 }
 
 /**
+ * Tool-specific settings for grep_notes tool
+ */
+export interface GrepNotesSettings {
+	/** Lines of surrounding context to show on each side of a match */
+	contextLines: number;
+}
+
+/**
  * Tool-specific settings for fetch_url tool
  */
 export interface FetchUrlSettings {
@@ -199,6 +208,7 @@ export interface ManageNotesSettings {
 export type ToolSpecificSettings =
 	| SearchNotesSettings
 	| ReadContentSettings
+	| GrepNotesSettings
 	| ManageNotesSettings
 	| FetchUrlSettings
 	| WebSearchSettings

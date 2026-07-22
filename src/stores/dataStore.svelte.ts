@@ -18,6 +18,7 @@ import type {
 	ChatOpenLocation,
 	DiffViewMode,
 	EmbeddingIndexConfig,
+	GrepNotesSettings,
 	MCPServerConfig,
 	MCPServersConfig,
 	PluginData,
@@ -275,6 +276,15 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		description: READ_CONTENT_DESC_NONE,
 		promptGuidance: READ_CONTENT_GUIDANCE_NONE,
 	},
+	grep_notes: {
+		enabled: true,
+		name: "grep_notes",
+		description:
+			"Find an exact text substring or regex pattern across your notes, returning matching lines with line numbers and surrounding context. Unlike search_notes (which ranks notes by relevance and cannot match literal strings), this does exact/regex line-level matching. Provide 'path' to scope the search to a single note. Use it to find literal strings (e.g. 'TODO(fix)', '#deprecated', a wiki link), or to locate exact positions before editing.",
+		settings: {
+			contextLines: 2,
+		} satisfies GrepNotesSettings,
+	},
 	get_all_tags: {
 		enabled: true,
 		name: "get_all_tags",
@@ -298,7 +308,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "manage_notes",
 		description:
-			"Create, update, delete, or move markdown notes in one staged batch. Use targeted search-and-replace edits for updates and batch related note operations together.",
+			"Create, update, delete, move, or find-and-replace across markdown notes in one staged batch. For a single note, use 'update' with targeted search-and-replace edits (add is_regex/replace_all to match by regex or replace every occurrence). For vault-wide or folder-scoped find-and-replace, use the 'replace' operation (find/replace, optional is_regex/case_sensitive/path_prefix) — preview its blast radius first with grep_notes. Batch related note operations together.",
 		settings: {
 			allowCreate: true,
 			allowUpdate: true,
