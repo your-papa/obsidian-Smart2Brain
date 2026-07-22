@@ -1166,6 +1166,7 @@ const webSummary = $derived(`${webEnabledCount} of ${webAvailableCount} on`);
                 side="bottom"
                 align="end"
                 sideOffset={6}
+                contentClass="add-capability-popover"
               >
                 {#snippet trigger(open)}
                   <Icon name="plus" size="xs" />
@@ -1403,6 +1404,10 @@ const webSummary = $derived(`${webEnabledCount} of ${webAvailableCount} on`);
   :global(.agent-icon-popover) {
     width: min(380px, calc(100vw - 48px));
     max-width: min(380px, calc(100vw - 48px));
+    z-index: calc(var(--layer-popover) + 20);
+  }
+
+  :global(.add-capability-popover) {
     z-index: calc(var(--layer-popover) + 20);
   }
 
