@@ -21,8 +21,15 @@ import {
 import { extractPdfPages, extractTextFromPdf, extractTextFromPdfPages } from "../../utils/pdfExtractor";
 import { Logger } from "../../utils/logging";
 import { extractReferenceInfo, resolveFileReferenceDetailed } from "../../utils/pathResolution";
+import { READ_CONTENT_BUDGET_FRACTION, contextWindowToCharBudget, truncateToBudget } from "../../utils/contentBudget";
 
-const MAX_PDF_CHARS = 180_000;
+/** Conservative cap for whole-PDF vision sends — well under Anthropic's 32 MB native-PDF limit. */
+const MAX_PDF_VISION_BYTES = 20 * 1024 * 1024;
+
+function resolveMaxContentLength(): number {
+	const contextWindow = getData().getSelectedAgent().chatModel?.modelConfig?.contextWindow;
+	return contextWindowToCharBudget(contextWindow, READ_CONTENT_BUDGET_FRACTION);
+}
 
 /** Extract text from a LangChain chat model response (handles both string and structured content). */
 function extractTextContent(response: { content: string | Array<Record<string, unknown>> }): string {
@@ -70,8 +77,7 @@ interface ExcalidrawPlugin {
 }
 
 function truncateContent(content: string, maxChars: number): string {
-	if (content.length <= maxChars) return content;
-	return `${content.slice(0, maxChars)}\n\n[...truncated ${content.length - maxChars} characters to fit context limits...]`;
+	return truncateToBudget(content, maxChars).text;
 }
 
 /**
@@ -105,10 +111,13 @@ function extractSubpathContent(
 	file: TFile,
 	content: string,
 	subpath: string,
-): { text: string; label: string; error?: undefined } | { error: string; text?: undefined; label?: undefined } {
+): { ok: true; text: string; label: string } | { ok: false; error: string } {
 	const cache = app.metadataCache.getFileCache(file);
 	if (!cache) {
-		return { error: `Error: No cached metadata available for "${file.path}". The file may not be indexed yet.` };
+		return {
+			ok: false,
+			error: `Error: No cached metadata available for "${file.path}". The file may not be indexed yet.`,
+		};
 	}
 
 	const result = resolveSubpath(cache, subpath);
@@ -128,6 +137,7 @@ function extractSubpathContent(
 		}
 		const availableStr = available.length > 0 ? `\nAvailable targets:\n${available.join("\n")}` : "";
 		return {
+			ok: false,
 			error: `Error: Could not resolve "${subpath}" in "${file.path}".${availableStr}`,
 		};
 	}
@@ -137,7 +147,7 @@ function extractSubpathContent(
 	const text = content.slice(startOffset, endOffset).trim();
 
 	const label = result.type === "heading" ? `section "${subpath.slice(1)}"` : `block ${subpath}`;
-	return { text, label };
+	return { ok: true, text, label };
 }
 
 function isExcalidrawFile(file: TFile): boolean {
@@ -324,6 +334,8 @@ async function readExcalidrawContent(app: App, file: TFile, maxLength: number): 
 export interface ReadNoteContentOptions {
 	imageProcessor?: BaseChatModel;
 	pdfProcessor?: BaseChatModel;
+	offset?: number;
+	length?: number;
 }
 
 /**
@@ -333,9 +345,8 @@ export interface ReadNoteContentOptions {
  * uses the provided vision/PDF processors when the target needs analysis.
  */
 export async function readNoteContent(app: App, path: string, opts: ReadNoteContentOptions = {}): Promise<string> {
-	const { imageProcessor, pdfProcessor } = opts;
+	const { imageProcessor, pdfProcessor, offset, length } = opts;
 	const pluginData = getData();
-	const getToolConfig = () => pluginData.getSelectedAgent().toolsConfig.read_content;
 
 	{
 		const { subpath, path: normalizedPath } = extractReferenceInfo(path);
@@ -466,6 +477,12 @@ export async function readNoteContent(app: App, path: string, opts: ReadNoteCont
 					} else {
 						// No page fragment: send entire PDF to vision model
 						try {
+							if (buffer.byteLength > MAX_PDF_VISION_BYTES) {
+								throw new Error(
+									`PDF "${file.name}" is too large for vision analysis (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB > 20 MB). ` +
+										`Use a page fragment ([[${file.name}#page=1-5]]) to send a smaller excerpt, or text extraction will be used instead.`,
+								);
+							}
 							Logger.log(`[read_content] Analyzing PDF "${file.name}" via vision model`);
 							const pdfContent = [
 								{
@@ -517,14 +534,12 @@ export async function readNoteContent(app: App, path: string, opts: ReadNoteCont
 					return `PDF "${file.name}" contains ${totalPages} page(s) but no extractable text. The PDF may contain only images/scans.`;
 				}
 
-				const truncated = truncateContent(text, MAX_PDF_CHARS);
+				const truncated = truncateContent(text, resolveMaxContentLength());
 				return `Content of PDF "${file.name}" (${totalPages} pages):\n\n${truncated}`;
 			}
 
 			if (isExcalidrawFile(file)) {
-				const currentConfig = getToolConfig();
-				const settings = currentConfig?.settings as { maxContentLength?: number } | undefined;
-				const maxLength = settings?.maxContentLength ?? 0;
+				const maxLength = resolveMaxContentLength();
 				return await readExcalidrawContent(app, file, maxLength);
 			}
 
@@ -533,19 +548,30 @@ export async function readNoteContent(app: App, path: string, opts: ReadNoteCont
 
 				if (subpath) {
 					const sectionResult = extractSubpathContent(app, file, content, subpath);
-					if (sectionResult.error) return sectionResult.error;
-					return `Content of "${file.path}" (${sectionResult.label}):\n\n${sectionResult.text}`;
+					if (!sectionResult.ok) return sectionResult.error;
+					const { text: sectionText, label: sectionLabel } = sectionResult;
+					const maxLength = length ?? resolveMaxContentLength();
+					const start = Math.min(offset ?? 0, sectionText.length);
+					const slice = sectionText.slice(start, maxLength > 0 ? start + maxLength : undefined);
+					const remaining = sectionText.length - (start + slice.length);
+					const header = `Content of "${file.path}" (${sectionLabel}${start > 0 ? `, offset ${start}` : ""})`;
+					const suffix =
+						remaining > 0
+							? `\n\n... [${remaining} characters remaining — call again with offset=${start + slice.length}]`
+							: "";
+					return `${header}:\n\n${slice}${suffix}`;
 				}
 
-				const currentConfig = getToolConfig();
-				const settings = currentConfig?.settings as { maxContentLength?: number } | undefined;
-				const maxLength = settings?.maxContentLength ?? 0;
-
-				if (maxLength > 0 && content.length > maxLength) {
-					return `Content of "${file.path}":\n\n${content.slice(0, maxLength)}\n\n... [Content truncated at ${maxLength} characters]`;
-				}
-
-				return `Content of "${file.path}":\n\n${content}`;
+				const maxLength = length ?? resolveMaxContentLength();
+				const start = Math.min(offset ?? 0, content.length);
+				const slice = content.slice(start, maxLength > 0 ? start + maxLength : undefined);
+				const remaining = content.length - (start + slice.length);
+				const header = `Content of "${file.path}"${start > 0 ? ` (offset ${start})` : ""}`;
+				const suffix =
+					remaining > 0
+						? `\n\n... [${remaining} characters remaining — call again with offset=${start + slice.length}]`
+						: "";
+				return `${header}:\n\n${slice}${suffix}`;
 			}
 
 			return `Error: Unsupported file type ".${ext}". This tool supports notes, PDFs, and text documents (md, txt, csv, json).${imageProcessor ? " Images are also supported via vision analysis." : " For images, ask the user to attach them directly in the chat input."}`;
@@ -560,8 +586,12 @@ export function createReadContentTool(app: App, imageProcessor?: BaseChatModel, 
 	const defaultToolConfig = DEFAULT_TOOLS_CONFIG.read_content;
 	const getToolConfig = () => pluginData.getSelectedAgent().toolsConfig.read_content;
 
-	const readContentFn = ({ path }: { path: string }): Promise<string> =>
-		readNoteContent(app, path, { imageProcessor, pdfProcessor });
+	const readContentFn = ({
+		path,
+		offset,
+		length,
+	}: { path: string; offset?: number; length?: number }): Promise<string> =>
+		readNoteContent(app, path, { imageProcessor, pdfProcessor, offset, length });
 
 	const toolConfig = getToolConfig();
 
@@ -580,6 +610,22 @@ export function createReadContentTool(app: App, imageProcessor?: BaseChatModel, 
 				.string()
 				.describe(
 					"Full path or wiki link. Supports fragments: [[Note#Section]], [[Note#^block-id]], [[doc.pdf#page=3]], [[doc.pdf#page=1-3,5]].",
+				),
+			offset: z
+				.number()
+				.int()
+				.nonnegative()
+				.optional()
+				.describe(
+					"0-based character offset to start reading from. Omit to read from the beginning. Only applies to text files.",
+				),
+			length: z
+				.number()
+				.int()
+				.positive()
+				.optional()
+				.describe(
+					"Max characters to return. Omit to use the automatic context-window budget. Only applies to text files.",
 				),
 		}),
 	});
