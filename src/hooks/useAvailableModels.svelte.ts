@@ -50,7 +50,8 @@ function isLikelyEmbeddingModel(modelName: string): boolean {
 		lower.includes("/gte-") ||
 		lower.includes("nomic-") ||
 		lower.includes("titan-text-") || // AWS Titan text embedding
-		lower.includes("-embedding")
+		lower.includes("-embedding") ||
+		lower.includes("harrier") // Contextual AI embedding model family
 	);
 }
 
