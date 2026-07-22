@@ -49,11 +49,6 @@ function updateToolConfig(config: Partial<ToolConfig>): void {
 let name = $state(initialToolConfig?.name ?? defaultConfig.name);
 let description = $state(initialToolConfig?.description ?? defaultConfig.description);
 let promptGuidance = $state(initialToolConfig?.promptGuidance ?? defaultConfig.promptGuidance ?? "");
-let maxContentLength = $state(
-	(initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
-		(defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
-		0,
-);
 let maxResults = $state(
 	(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
 		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
@@ -198,7 +193,6 @@ interface ToolConfigSnapshot {
 	name: string;
 	description: string;
 	promptGuidance: string;
-	maxContentLength: number;
 	maxResults: number;
 	algorithm: SearchAlgorithm;
 	searchShowPath: boolean;
@@ -224,10 +218,6 @@ const initialSnapshot: ToolConfigSnapshot = {
 	name: initialToolConfig?.name ?? defaultConfig.name,
 	description: initialToolConfig?.description ?? defaultConfig.description,
 	promptGuidance: initialToolConfig?.promptGuidance ?? defaultConfig.promptGuidance ?? "",
-	maxContentLength:
-		(initialToolConfig?.settings as { maxContentLength?: number })?.maxContentLength ??
-		(defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ??
-		0,
 	maxResults:
 		(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
 		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
@@ -269,7 +259,6 @@ const defaultSnapshot: ToolConfigSnapshot = {
 	name: defaultConfig.name,
 	description: defaultConfig.description,
 	promptGuidance: defaultConfig.promptGuidance ?? "",
-	maxContentLength: (defaultConfig.settings as { maxContentLength?: number })?.maxContentLength ?? 0,
 	maxResults: (defaultConfig.settings as { maxResults?: number })?.maxResults ?? 10,
 	algorithm: (defaultConfig.settings as { algorithm?: SearchAlgorithm })?.algorithm ?? "lexical",
 	searchShowPath: pluginData.searchShowPath,
@@ -298,7 +287,6 @@ const isDirty = $derived.by(() => {
 		name,
 		description,
 		promptGuidance,
-		maxContentLength,
 		maxResults,
 		algorithm,
 		searchShowPath,
@@ -325,7 +313,6 @@ const isAtDefault = $derived.by(() => {
 		promptGuidance: READ_CONTENT_GUIDANCE_DEFAULTS.has(promptGuidance)
 			? (defaultConfig.promptGuidance ?? "")
 			: promptGuidance,
-		maxContentLength,
 		maxResults,
 		algorithm,
 		searchShowPath,
@@ -397,7 +384,7 @@ function handleSave() {
 	} else if (capturedToolId === "read_content") {
 		// Build settings with three-state processors:
 		// undefined = auto, null = disabled, ChatModel = custom
-		const settings: Record<string, unknown> = { maxContentLength };
+		const settings: Record<string, unknown> = {};
 		if (imageProcessor !== undefined) settings.imageProcessor = imageProcessor;
 		if (pdfProcessor !== undefined) settings.pdfProcessor = pdfProcessor;
 		updatedConfig.settings = settings as ToolConfig["settings"];
@@ -405,7 +392,7 @@ function handleSave() {
 		updatedConfig.settings = { allowCreate, allowUpdate, allowDelete, allowMove };
 		pluginData.diffViewMode = diffViewMode;
 	} else if (capturedToolId === "fetch_url") {
-		updatedConfig.settings = { maxContentLength };
+		// no extra settings
 	} else if (capturedToolId === "web_search") {
 		updatedConfig.settings = { maxResults };
 	}
@@ -429,8 +416,6 @@ function handleResetToDefault() {
 		searchShowMatchBadges = pluginData.searchShowMatchBadges;
 		searchShowMatchContext = pluginData.searchShowMatchContext;
 	} else if (capturedToolId === "read_content" && defaultConfig.settings) {
-		const settings = defaultConfig.settings as { maxContentLength: number };
-		maxContentLength = settings.maxContentLength;
 		// Reset processors to "auto" mode
 		imageProcessor = undefined;
 		pdfProcessor = undefined;
@@ -449,8 +434,7 @@ function handleResetToDefault() {
 		allowMove = settings.allowMove;
 		diffViewMode = "two-pane";
 	} else if (capturedToolId === "fetch_url" && defaultConfig.settings) {
-		const settings = defaultConfig.settings as { maxContentLength: number };
-		maxContentLength = settings.maxContentLength;
+		// no extra settings to reset
 	} else if (capturedToolId === "web_search" && defaultConfig.settings) {
 		const settings = defaultConfig.settings as { maxResults: number };
 		maxResults = settings.maxResults;
@@ -556,21 +540,6 @@ function handleResetToDefault() {
       </ModalField>
     </SettingGroup>
   {:else if capturedToolId === "read_content"}
-    <SettingGroup heading="Read Settings">
-      <ModalField
-        label="Max Content Length"
-        desc="Maximum characters to return. Set to 0 for unlimited."
-        for="tool-config-max-content-length"
-      >
-        <Text
-          id="tool-config-max-content-length"
-          inputType="number"
-          value={maxContentLength}
-          placeholder="0"
-          onblur={(v) => (maxContentLength = Number.parseInt(String(v)) || 0)}
-        />
-      </ModalField>
-    </SettingGroup>
     <SettingGroup heading="Vision Processors">
       <p class="tool-config-section-note">
         Configure how images and PDFs encountered during tool use are processed. Auto uses the chat
@@ -657,21 +626,7 @@ function handleResetToDefault() {
       </ModalField>
     </SettingGroup>
   {:else if capturedToolId === "fetch_url"}
-    <SettingGroup heading="Fetch Settings">
-      <ModalField
-        label="Max Content Length"
-        desc="Maximum characters to return after cleaning HTML. Set to 0 for unlimited (capped by an internal raw-bytes safety limit)."
-        for="tool-config-fetch-max-content-length"
-      >
-        <Text
-          id="tool-config-fetch-max-content-length"
-          inputType="number"
-          value={maxContentLength}
-          placeholder="50000"
-          onblur={(v) => (maxContentLength = Number.parseInt(String(v)) || 0)}
-        />
-      </ModalField>
-    </SettingGroup>
+    <!-- no tool-specific settings -->
   {:else if capturedToolId === "web_search"}
     <SettingGroup heading="Web Search Settings">
       <ModalField

@@ -79,7 +79,7 @@ onDestroy(() => tracker.destroy());
         ></span
       >
       {#if tracker.isLong}
-        <span class="chip-warning" title="Long selection — full text will be sent">⚠</span>
+        <span class="chip-warning" title="Long selection — will be truncated to fit the model's context">⚠</span>
       {/if}
       <div class="chip-close" use:icon={"x"} style="--icon-size: 10px"></div>
     </button>

@@ -4,8 +4,8 @@ import { z } from "zod";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
 import { getData } from "../../stores/dataStore.svelte";
 import { Logger } from "../../utils/logging";
+import { READ_CONTENT_BUDGET_FRACTION, contextWindowToCharBudget } from "../../utils/contentBudget";
 
-const DEFAULT_MAX_CONTENT_LENGTH = 50_000;
 const FETCH_TIMEOUT_MS = 20_000;
 /** Hard ceiling on raw response size we will read (binary or text), independent of the post-strip cap. */
 const MAX_RAW_BYTES = 4 * 1024 * 1024;
@@ -183,10 +183,6 @@ async function readBoundedBody(
 	return { bytes: merged, overflow: false };
 }
 
-interface FetchUrlSettings {
-	maxContentLength?: number;
-}
-
 /**
  * Tool for fetching a URL and returning a cleaned markdown view of its content.
  * Uses Obsidian's htmlToMarkdown after stripping boilerplate so layout (headings,
@@ -217,8 +213,8 @@ export function createFetchUrlTool() {
 		const initialError = validateUrl(currentUrl);
 		if (initialError) return `Error: ${initialError}`;
 
-		const settings = getToolConfig()?.settings as FetchUrlSettings | undefined;
-		const maxContentLength = settings?.maxContentLength ?? DEFAULT_MAX_CONTENT_LENGTH;
+		const contextWindow = pluginData.getSelectedAgent().chatModel?.modelConfig?.contextWindow;
+		const maxContentLength = contextWindowToCharBudget(contextWindow, READ_CONTENT_BUDGET_FRACTION);
 
 		const controller = new AbortController();
 		const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);

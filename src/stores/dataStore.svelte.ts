@@ -173,7 +173,8 @@ export const DEFAULT_AGENT_ID = "default-agent";
 const READ_CONTENT_GUIDANCE_SHARED = `When reading a note that contains embedded PDFs (\`![[doc.pdf]]\`) or text files (\`![[notes.md]]\`, \`![[data.csv]]\`), use \`read_content\` to read them.
 When the user attaches files directly in the chat (PDFs, images, or text files), they are included automatically in the message — no need to call \`read_content\` for those. Attached PDFs and images are processed natively by the model, which is more capable than text extraction.
 Text files (.md, .txt, .csv, .json) are returned as-is.
-PDF page references are supported: \`[[report.pdf#page=3]]\` for a single page, \`[[report.pdf#page=1-3,5]]\` for multiple pages or ranges. Only the requested pages are returned.`;
+PDF page references are supported: \`[[report.pdf#page=3]]\` for a single page, \`[[report.pdf#page=1-3,5]]\` for multiple pages or ranges. Only the requested pages are returned.
+For large text files, use \`offset\` and \`length\` to read in chunks. When a response ends with a 'characters remaining' notice, call \`read_content\` again with the indicated \`offset\` to continue reading.`;
 
 /** No processors: images can't be read, PDFs use text extraction */
 export const READ_CONTENT_GUIDANCE_NONE = `${READ_CONTENT_GUIDANCE_SHARED}
@@ -273,9 +274,6 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		name: "read_content",
 		description: READ_CONTENT_DESC_NONE,
 		promptGuidance: READ_CONTENT_GUIDANCE_NONE,
-		settings: {
-			maxContentLength: 0,
-		},
 	},
 	get_all_tags: {
 		enabled: true,
@@ -315,9 +313,6 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 			"Fetch a public web page or text resource over HTTP(S) and return its main content. HTML is converted to markdown with scripts, styles, and navigation chrome removed while headings, lists, tables, code blocks, and links are preserved. JSON, plain text, and other text-based responses are returned as-is. Use this when the user asks about a specific URL or when external information is needed that the vault does not contain.",
 		promptGuidance:
 			"Use this only for URLs the user provided or for clearly public references. The tool sends the URL to the configured network — it does not send vault contents. Prefer searching the vault first; reach for fetch_url when the user explicitly references a link or when needed information cannot be in the vault.",
-		settings: {
-			maxContentLength: 50_000,
-		},
 	},
 	web_search: {
 		enabled: false,
@@ -1922,7 +1917,7 @@ function normalizeAgent(agent: AgentConfig): void {
 
 	// Ensure read_content settings have processor fields
 	const readSettings = agent.toolsConfig.read_content?.settings as
-		| { maxContentLength?: number; imageProcessor?: unknown; pdfProcessor?: unknown }
+		| { imageProcessor?: unknown; pdfProcessor?: unknown }
 		| undefined;
 	if (readSettings) {
 		// Do NOT default imageProcessor/pdfProcessor — undefined means "auto-derive

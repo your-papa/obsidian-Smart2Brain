@@ -1,6 +1,8 @@
 import { MarkdownView, type EventRef, type WorkspaceLeaf } from "obsidian";
 import { getPlugin } from "../stores/state.svelte";
+import { getData } from "../stores/dataStore.svelte";
 import { clearSelectionHighlight, setSelectionHighlight } from "../editor/selectionHighlightExtension";
+import { SELECTION_BUDGET_FRACTION, contextWindowToCharBudget, truncateToBudget } from "../utils/contentBudget";
 
 /** Serializable snapshot of user-selected text. Persisted in HumanMessage additional_kwargs. */
 export interface SelectionRef {
@@ -23,8 +25,6 @@ const VIEW_ICONS: Record<string, string> = {
 	markdown: "file-text",
 	pdf: "file-type",
 };
-
-const LONG_SELECTION_CHARS = 4000;
 
 /**
  * Attempt to get the selected text in the active leaf.
@@ -100,9 +100,18 @@ function getSelectionFromLeaf(leaf: WorkspaceLeaf): CapturedSelection | undefine
 	return undefined;
 }
 
-/** Formats a captured selection into a context block for the agent. */
+/** Resolve the dynamic char cap for selection text from the active chat model. */
+function selectionCharBudget(): number {
+	const contextWindow = getData().getSelectedAgent().chatModel?.modelConfig?.contextWindow;
+	return contextWindowToCharBudget(contextWindow, SELECTION_BUDGET_FRACTION);
+}
+
+/** Formats a captured selection into a context block for the agent.
+ * The selected text is capped to a budget derived from the model's context
+ * window so a huge selection can't dominate (or overflow) the request. */
 export function formatSelectionContext(ref: SelectionRef): string {
-	return `[Selected text from ${ref.path}]\n${ref.text}`;
+	const { text } = truncateToBudget(ref.text, selectionCharBudget());
+	return `[Selected text from ${ref.path}]\n${text}`;
 }
 
 /**
@@ -124,9 +133,10 @@ export class SelectionTracker {
 		return this.#selection?.ref;
 	}
 
-	/** Whether the current selection exceeds the long-selection warning threshold. */
+	/** Whether the current selection will be truncated when sent (exceeds the
+	 * model-derived char budget). Drives the ⚠ warning cue on the chip. */
 	get isLong(): boolean {
-		return (this.#selection?.ref.text.length ?? 0) > LONG_SELECTION_CHARS;
+		return (this.#selection?.ref.text.length ?? 0) > selectionCharBudget();
 	}
 
 	constructor() {
