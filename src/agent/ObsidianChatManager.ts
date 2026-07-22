@@ -11,6 +11,8 @@ import { type DataAdapter, TFile, debounce, normalizePath } from "obsidian";
 import { gunzipSync, gzipSync } from "node:zlib";
 import type SecondBrainPlugin from "../main";
 import { getData } from "../stores/dataStore.svelte";
+import type { CheckpointHistoryItem } from "./Agent";
+import { normalizeMessages } from "./messageNormalization";
 import type { ThreadSnapshot, ThreadStore } from "./memory/ThreadStore";
 import { Logger } from "../utils/logging";
 import { toBase64, toBase64DataUri } from "../utils/attachments";
@@ -361,6 +363,37 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		const data = await this.ensureThreadLoaded(threadId);
 		if (!data) return true;
 		return Object.keys(data.checkpoints).length === 0;
+	}
+
+	/**
+	 * Reads a thread's checkpoints directly from its `.chat` file and returns them
+	 * as `CheckpointHistoryItem[]` — the same shape `Agent.getCheckpointHistory`
+	 * produces — so read-only consumers (e.g. the `.chat` embed preview) can build
+	 * the branch graph without spinning up a live agent/session.
+	 *
+	 * Messages are normalized to `BaseMessage` instances via the shared normalizer.
+	 * Base64 blobs are NOT rehydrated (embeds render text only), keeping this cheap.
+	 */
+	async readCheckpointHistory(path: string): Promise<CheckpointHistoryItem[]> {
+		const data = await this.ensureThreadLoaded(normalizePath(path));
+		if (!data) return [];
+
+		const results: CheckpointHistoryItem[] = [];
+		for (const [checkpointId, entry] of Object.entries(data.checkpoints)) {
+			const rawMessages = this.getCheckpointMessages(entry.checkpoint);
+			const messages = normalizeMessages(rawMessages);
+			const step = typeof entry.metadata?.step === "number" ? entry.metadata.step : 0;
+			const parentCheckpointId = entry.parentConfig?.configurable?.checkpoint_id as string | undefined;
+			const ts = (entry.checkpoint as { ts?: unknown })?.ts;
+			results.push({
+				checkpointId,
+				messages,
+				step,
+				parentCheckpointId,
+				ts: typeof ts === "string" ? ts : undefined,
+			});
+		}
+		return results;
 	}
 
 	private createThreadData(threadId: string): ThreadData {

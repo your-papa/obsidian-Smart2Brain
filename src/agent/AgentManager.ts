@@ -1387,6 +1387,15 @@ export class AgentManager {
 		return this.chatManager.isThreadEmpty(this.normalizeThreadId(threadId));
 	}
 
+	/**
+	 * Reads a thread's checkpoints straight from its `.chat` file (no live agent
+	 * required) as `CheckpointHistoryItem[]`. Used by the read-only `.chat` embed
+	 * preview, which can render during workspace restore before the agent inits.
+	 */
+	async readCheckpointHistory(threadId: string): Promise<CheckpointHistoryItem[]> {
+		return this.chatManager.readCheckpointHistory(this.normalizeThreadId(threadId));
+	}
+
 	async getCheckpointMessages(threadId: string, checkpointId: string): Promise<BaseMessage[]> {
 		const agent = await this.ensureAgent();
 		return agent.getCheckpointMessages(this.normalizeThreadId(threadId), checkpointId);

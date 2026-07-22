@@ -448,7 +448,7 @@ function resolveFallbackCheckpoint(graph: CheckpointGraphState, fromCheckpointId
 	return first?.checkpointId;
 }
 
-function resolveActiveCheckpointId(
+export function resolveActiveCheckpointId(
 	graph: CheckpointGraphState,
 	options: {
 		sessionActiveCheckpointId?: string;
