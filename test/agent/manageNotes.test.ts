@@ -557,6 +557,32 @@ describe("manageNotes tool", () => {
 			expect(staged[0].path).toBe("Projects/a.md");
 		});
 
+		it("surfaces files a later replace op skips because an earlier op changed them", async () => {
+			// Two replace ops in one batch. Op A rewrites foo→bar in shared.md; op B
+			// would rewrite baz→qux in the same file, but it is skipped to avoid
+			// staging a conflicting second diff. The skip must be surfaced, not silent.
+			const shared = makeFile("Notes/shared.md");
+			mockGetIndexableVaultFiles.mockReturnValue([shared]);
+			vi.mocked(app.vault.read).mockResolvedValue("foo and baz together");
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{ type: "replace", find: "foo", replace: "bar" },
+						{ type: "replace", find: "baz", replace: "qux" },
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			// Op A staged one change; op B's match in the same file was skipped and
+			// the summary must say so rather than silently under-applying.
+			const staged = mockAddChanges.mock.calls[0][0];
+			expect(staged).toHaveLength(1);
+			expect(staged[0].newContent).toBe("bar and baz together");
+			expect(result).toMatch(/skipped because an earlier operation/);
+		});
+
 		it("skips oversized notes in a vault-wide regex replace and reports the skip", async () => {
 			const small = makeFile("Notes/small.md");
 			const huge = makeFile("Notes/huge.md");

@@ -102,21 +102,31 @@ const MAX_SAFE_QUANTIFIER_BOUND = 1000;
  * single left-to-right pass (a regex-based replace can't do this correctly
  * because `]` at class start is literal and escapes may appear inside a class):
  *
- *  - An escaped char `\X` → `E` (the escaped metacharacter is a literal).
- *  - A character class `[...]` → `C` (the whole class is one atom; parens,
+ *  - An escaped shorthand *class* `\d \w \s \D \W \S \p \P` → `E` (a broad atom
+ *    that can overlap its neighbours).
+ *  - Any other escaped char `\X` (`\)`, `\.`, `\{`, …) → `L` (a narrow literal
+ *    atom — it matches exactly one specific character, so it does NOT overlap a
+ *    different literal). Keeping this distinct from `E` is what stops `\(a+\)+`
+ *    (literal parens around `a+`) from being misread as adjacent overlapping
+ *    quantifiers.
+ *  - A character class `[...]` → `C` (the whole class is one broad atom; parens,
  *    pipes and braces inside it are literal, not structure).
  *
  * Placeholders are letters, which carry no regex meaning, so quantifiers/groups
  * around them read exactly as they would around any literal character.
  */
+const ESCAPED_CLASS_CHARS = new Set(["d", "D", "w", "W", "s", "S", "p", "P"]);
+
 function neutralizeLiterals(pattern: string): string {
 	let out = "";
 	let i = 0;
 	while (i < pattern.length) {
 		const ch = pattern[i];
 		if (ch === "\\") {
-			// Escaped char (or a trailing lone backslash) → one literal atom.
-			out += "E";
+			// Escaped shorthand class (\d,\w,\s,…) is a broad atom (`E`); any other
+			// escaped char (or a trailing lone backslash) is one narrow literal (`L`).
+			const next = pattern[i + 1];
+			out += next !== undefined && ESCAPED_CLASS_CHARS.has(next) ? "E" : "L";
 			i += 2;
 			continue;
 		}
@@ -139,6 +149,54 @@ function neutralizeLiterals(pattern: string): string {
 		i++;
 	}
 	return out;
+}
+
+/**
+ * Detect two unbounded quantifiers (`*`/`+`) applied to *adjacent, overlapping*
+ * atoms in a neutralized pattern — e.g. `a+a+`, `.+.+`, `\d+\d+` (→ `E+E+`),
+ * `[a-z]+[a-z]+` (→ `C+C+`). This is the sequential-quantifier ReDoS shape the
+ * nested-quantifier check misses because there is no enclosing group.
+ *
+ * "Adjacent" means the second quantified atom starts exactly where the first
+ * ended (no separator between them). "Overlapping" means the two atoms can match
+ * the same characters — approximated as: the atoms are identical, OR either is a
+ * broad atom (`.`, a character class `C`, or an escaped shorthand class `\d`/`\w`
+ * → `E`). A narrow literal placeholder (`L`, from an escaped literal like `\)`)
+ * only overlaps an identical `L`. Because neutralization collapses all escaped
+ * shorthand classes to `E`, a safe disjoint pair like `\w+\s+` (→ `E+E+`) is
+ * conservatively rejected too; that is an accepted false-positive — such a
+ * pattern is trivially rewritten (`\w+\s`), and erring toward rejection keeps the
+ * UI thread safe.
+ *
+ * Distinct literals with quantifiers (`a+b+`), a required separator (`\d+-\d+`),
+ * or escaped literal parens around a quantifier (`\(a+\)+` → `La+L+`) are NOT
+ * flagged — they cannot backtrack catastrophically.
+ */
+function hasAdjacentOverlappingQuantifiers(neutralized: string): boolean {
+	// Match each `<atom><*|+>`; an atom is a single ordinary char, `.`, or a
+	// neutralization placeholder (`C` = char class, `E` = escaped class, `L` =
+	// escaped literal).
+	const atomQuantifier = /([A-Za-z0-9._]|C|E|L)([*+])/g;
+	// Broad atoms overlap (almost) anything; a narrow literal `L` overlaps only an
+	// identical `L`, handled by the `atom === prevAtom` check.
+	const BROAD = new Set([".", "C", "E"]);
+	let match: RegExpExecArray | null;
+	let prevAtom: string | null = null;
+	let prevEnd = -1;
+	// biome-ignore lint/suspicious/noAssignInExpressions: standard exec-loop idiom
+	while ((match = atomQuantifier.exec(neutralized))) {
+		const atom = match[1];
+		const start = match.index;
+		if (prevAtom !== null && start === prevEnd) {
+			// The two quantified atoms are directly adjacent (no separator).
+			if (atom === prevAtom || BROAD.has(atom) || BROAD.has(prevAtom)) {
+				return true;
+			}
+		}
+		prevAtom = atom;
+		prevEnd = atomQuantifier.lastIndex;
+	}
+	return false;
 }
 
 function screenRegexForRedos(pattern: string): string | null {
@@ -184,6 +242,17 @@ function screenRegexForRedos(pattern: string): string | null {
 	const boundedQuantifiedGroup = /\)\s*\{\d+(?:,\d*)?\}/;
 	if (boundedQuantifiedGroup.test(stripped)) {
 		return "bounded repetition applied to a group (e.g. `(a+){10,}`) — prone to catastrophic backtracking";
+	}
+
+	// Two unbounded quantifiers applied back-to-back to overlapping atoms, e.g.
+	// `a+a+`, `.+.+`, `\d+\d+`, `\w+\w+`. When adjacent greedy quantifiers can both
+	// consume the same characters, the number of ways to split the input explodes
+	// (super-linear/exponential) — the classic `a+a+a+X`-against-`"aaaa…"` freeze,
+	// which is NOT caught by the nested-quantifier check (there is no group). This
+	// is distinct from safe adjacency like `a+b+` (disjoint literals) or `\d+-\d+`
+	// (a required separator between them), which are not flagged.
+	if (hasAdjacentOverlappingQuantifiers(stripped)) {
+		return "adjacent unbounded quantifiers on overlapping atoms (e.g. `a+a+`, `\\d+\\d+`) — prone to catastrophic backtracking";
 	}
 
 	// A single large bounded repetition, e.g. a{5000} / .{2000,} — even without

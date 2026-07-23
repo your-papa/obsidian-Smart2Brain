@@ -298,6 +298,11 @@ export async function stageNoteOperations(
 	// regex input length. Accumulated across ops so a partial-success summary can
 	// still surface the skip (the pure-skip case is reported per-op below).
 	let tooLargeSkippedTotal = 0;
+	// Notes a vault-wide replace skipped because an *earlier* operation in this
+	// same batch already staged a change to them. Skipping avoids staging two
+	// conflicting diffs for one file (the second would be un-appliable), but the
+	// skip must be surfaced — otherwise a multi-op batch silently under-applies.
+	const conflictSkippedPaths = new Set<string>();
 
 	for (let i = 0; i < operations.length; i++) {
 		const operation = operations[i];
@@ -463,13 +468,21 @@ export async function stageNoteOperations(
 		let notesSearched = 0;
 		let notesChanged = 0;
 		let notesTooLarge = 0;
+		let notesConflictSkipped = 0;
 
 		for (const file of candidateFiles) {
 			if (!store.isPathAllowed(file.path)) continue;
 			if (replaceProvider && store.shouldBlockFile(file.path, replaceProvider)) continue;
 
-			// Guard against conflicting with another op in this same batch.
-			if (seenPaths.has(file.path)) continue;
+			// Guard against conflicting with another op in this same batch: an
+			// earlier op already staged a change to this file, so staging a second
+			// diff from the same original content would be un-appliable. Record the
+			// skip so it is surfaced rather than silently under-applied.
+			if (seenPaths.has(file.path)) {
+				conflictSkippedPaths.add(file.path);
+				notesConflictSkipped++;
+				continue;
+			}
 
 			notesSearched++;
 			const originalContent = await app.vault.read(file);
@@ -504,6 +517,14 @@ export async function stageNoteOperations(
 		}
 
 		if (notesChanged === 0) {
+			// If the only reason nothing staged is that every candidate was
+			// conflict-skipped (an earlier op in this batch already changed those
+			// files), do NOT abort the batch — the earlier op's change is valid and
+			// the conflict is surfaced in the final summary. Aborting here would
+			// discard that valid change. Only hard-error on a genuine no-match.
+			if (notesConflictSkipped > 0) {
+				continue;
+			}
 			const tooLargeNote =
 				notesTooLarge > 0
 					? ` ${notesTooLarge} note(s) were skipped as too large to search with a regex safely — use a literal find or split them.`
@@ -522,6 +543,9 @@ export async function stageNoteOperations(
 	}
 	if (tooLargeSkippedTotal > 0) {
 		summary += ` ${tooLargeSkippedTotal} note(s) were skipped as too large to search with a regex safely — use a literal find or split them.`;
+	}
+	if (conflictSkippedPaths.size > 0) {
+		summary += ` ${conflictSkippedPaths.size} note(s) matched a later replace operation but were skipped because an earlier operation in this batch already modified them — run those replacements in a separate manage_notes call to apply them.`;
 	}
 	return summary;
 }

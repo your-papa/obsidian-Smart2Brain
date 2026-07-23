@@ -150,6 +150,28 @@ describe("buildGrepMatcher — ReDoS protection", () => {
 		expect(buildGrepMatcher("([^x]+)*$", true, false).ok).toBe(false);
 	});
 
+	it("rejects adjacent unbounded quantifiers on overlapping atoms", () => {
+		// Sequential quantifiers (no enclosing group) backtrack catastrophically:
+		// `a+a+a+X` against a long run of `a` is the canonical freeze. These must
+		// be rejected even though the nested-quantifier check does not fire.
+		expect(buildGrepMatcher("a+a+a+X", true, false).ok).toBe(false);
+		expect(buildGrepMatcher("\\d+\\d+\\d+x", true, false).ok).toBe(false);
+		expect(buildGrepMatcher(".+.+", true, false).ok).toBe(false);
+		expect(buildGrepMatcher("\\w+\\w+", true, false).ok).toBe(false);
+		expect(buildGrepMatcher("a*a*b", true, false).ok).toBe(false);
+		expect(buildGrepMatcher("[a-z]+[a-z]+", true, false).ok).toBe(false);
+	});
+
+	it("still accepts safe adjacent quantifiers on disjoint/separated atoms", () => {
+		// Distinct literals or a required separator between quantifiers cannot
+		// backtrack — these must NOT be rejected.
+		expect(buildGrepMatcher("a+b+c", true, false).ok).toBe(true);
+		expect(buildGrepMatcher("\\d+-\\d+", true, false).ok).toBe(true);
+		expect(buildGrepMatcher("\\d+\\.\\d+", true, false).ok).toBe(true);
+		expect(buildGrepMatcher("https?://\\S+", true, false).ok).toBe(true);
+		expect(buildGrepMatcher("\\d{4}-\\d{2}", true, false).ok).toBe(true);
+	});
+
 	it("accepts a safe pattern with escaped parens around a quantifier", () => {
 		// `\(a+\)+` is a literal '(' , a+, literal ')', repeated — NOT a quantified
 		// group. Neutralizing escapes to placeholders (not deleting them) keeps it
