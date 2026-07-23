@@ -194,16 +194,22 @@ function applySequentialEdits(
 				};
 			}
 			const matcher = built.matcher;
-			if (matcher.matchesEmpty) {
-				return {
-					error: `Error in operation ${operationNumber}, edit ${i + 1}: The regex can match an empty string, which matches everywhere in "${path}". Use a pattern that matches concrete text.`,
-				};
-			}
 			// A regex over an over-length note can backtrack catastrophically past
-			// what the ReDoS screen catches. Refuse rather than freeze the UI.
+			// what the ReDoS screen catches. Refuse rather than freeze the UI. This
+			// runs before the zero-width check so we never scan an over-length note.
 			if (content.length > matcher.maxInputLength) {
 				return {
 					error: `Error in operation ${operationNumber}, edit ${i + 1}: "${path}" is ${content.length} characters, too large to search safely with a regex (limit ${matcher.maxInputLength}). Use a literal (non-regex) find, or split the note.`,
+				};
+			}
+			// Reject patterns whose match consumes no characters (`\b`, `(?=x)`, `^`,
+			// `$`, `x*`, …). Replacing a zero-width match inserts the replacement at
+			// every boundary instead of substituting text — never what the caller
+			// intends. Checked against the actual content so anchored patterns that
+			// DO consume text (`\bword`) are allowed.
+			if (matcher.hasZeroWidthMatch(content)) {
+				return {
+					error: `Error in operation ${operationNumber}, edit ${i + 1}: The regex matches an empty (zero-width) position in "${path}", so replacing it would insert text at every boundary rather than substitute. Use a pattern that matches concrete text.`,
 				};
 			}
 			const occurrences = matcher.count(content);
@@ -455,6 +461,14 @@ export async function stageNoteOperations(
 		}
 		const matcher = built.matcher;
 
+		// Structurally empty-matchable patterns (`x*`, `^`, `$`, `a?`) match at
+		// every position regardless of content, so reject upfront before scanning
+		// the vault. Content-dependent zero-width patterns (`\b`, `(?=x)`) can only
+		// be detected against real text and are caught in the loop below.
+		if (operation.is_regex && matcher.matchesEmpty) {
+			return `Error in operation ${operationNumber}: The regex "${operation.find}" matches an empty (zero-width) position, so replacing it would insert text everywhere rather than substitute. Use a pattern that matches concrete text.`;
+		}
+
 		let candidateFiles = getIndexableVaultFiles(app.vault).filter(
 			(f) => f.extension.toLowerCase() === "md" && isTextIndexableFile(f),
 		);
@@ -494,6 +508,14 @@ export async function stageNoteOperations(
 				notesTooLarge++;
 				tooLargeSkippedTotal++;
 				continue;
+			}
+			// Content-dependent zero-width guard: `\b`, `(?=x)` etc. match without
+			// consuming characters, so replacing them scatters the replacement across
+			// every boundary. This is a property of the pattern, not the file — the
+			// first note that exhibits it proves the pattern is wrong for a replace —
+			// so abort the whole operation rather than silently skipping notes.
+			if (operation.is_regex && matcher.hasZeroWidthMatch(originalContent)) {
+				return `Error in operation ${operationNumber}: The regex "${operation.find}" matches an empty (zero-width) position in "${file.path}", so replacing it would insert text at every boundary rather than substitute. Use a pattern that matches concrete text.`;
 			}
 			if (!matcher.test(originalContent)) continue;
 

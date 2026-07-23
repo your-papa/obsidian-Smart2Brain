@@ -507,6 +507,30 @@ describe("manageNotes tool", () => {
 			expect(result).toContain("too large to search safely with a regex");
 			expect(mockAddChanges).not.toHaveBeenCalled();
 		});
+
+		it("refuses a zero-width regex edit that would insert at every boundary", async () => {
+			const file = makeFile("Notes/zw.md");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+			// `\b` matches zero-width at word boundaries — replacing it would scatter
+			// the replacement across the note rather than substitute text.
+			vi.mocked(app.vault.read).mockResolvedValue("hello world");
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/zw.md",
+							edits: [{ oldText: "\\b", newText: "X", is_regex: true, replace_all: true }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("zero-width");
+			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
 	});
 
 	describe("vault-wide replace operation", () => {
@@ -604,6 +628,38 @@ describe("manageNotes tool", () => {
 			expect(staged).toHaveLength(1);
 			expect(staged[0].path).toBe("Notes/small.md");
 			expect(result).toContain("skipped as too large");
+		});
+
+		it("refuses a zero-width regex in a vault-wide replace", async () => {
+			const a = makeFile("Notes/a.md");
+			mockGetIndexableVaultFiles.mockReturnValue([a]);
+			vi.mocked(app.vault.read).mockResolvedValue("hello world");
+
+			const result = await tool.invoke(
+				{
+					operations: [{ type: "replace", find: "\\b", replace: "X", is_regex: true }],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("zero-width");
+			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
+
+		it("refuses a structurally empty-matchable regex upfront in a vault-wide replace", async () => {
+			const a = makeFile("Notes/a.md");
+			mockGetIndexableVaultFiles.mockReturnValue([a]);
+			vi.mocked(app.vault.read).mockResolvedValue("anything");
+
+			const result = await tool.invoke(
+				{
+					operations: [{ type: "replace", find: "x*", replace: "Y", is_regex: true }],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("zero-width");
+			expect(mockAddChanges).not.toHaveBeenCalled();
 		});
 
 		it("returns an error and stages nothing when there are zero matches", async () => {

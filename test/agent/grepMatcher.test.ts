@@ -222,6 +222,48 @@ describe("buildGrepMatcher — empty-match handling", () => {
 	});
 });
 
+describe("buildGrepMatcher — zero-width match detection (hasZeroWidthMatch)", () => {
+	const text = "hello world";
+
+	it("flags patterns that match zero-width against real content", () => {
+		// These consume no characters at their match position, so a replace would
+		// insert at every boundary rather than substitute. matchesEmpty (a `""`
+		// test) catches x*/^/$ but NOT \b or (?=x) — hasZeroWidthMatch catches all.
+		for (const p of ["\\b", "(?=o)", "^", "$", "x*", "\\d*", "a?"]) {
+			const built = buildGrepMatcher(p, true, false);
+			expect(built.ok).toBe(true);
+			if (!built.ok) continue;
+			expect(built.matcher.hasZeroWidthMatch(text)).toBe(true);
+		}
+	});
+
+	it("does NOT flag anchored/lookahead patterns that consume real text", () => {
+		// `\bworld` and `(?=world)world` both consume `world`; `\d+`/`l+` consume
+		// digits/letters. A replace on these is meaningful and must be allowed.
+		for (const p of ["\\bworld", "(?=world)world", "\\d+", "l+", "hello"]) {
+			const built = buildGrepMatcher(p, true, false);
+			expect(built.ok).toBe(true);
+			if (!built.ok) continue;
+			expect(built.matcher.hasZeroWidthMatch(text)).toBe(false);
+		}
+	});
+
+	it("never flags a literal needle as zero-width", () => {
+		const built = buildGrepMatcher("world", false, false);
+		if (!built.ok) return;
+		expect(built.matcher.hasZeroWidthMatch(text)).toBe(false);
+	});
+
+	it("reports no zero-width match for over-ceiling input (backstop, not scanned)", () => {
+		const built = buildGrepMatcher("\\b", true, false);
+		if (!built.ok) return;
+		// Over the ceiling the matcher refuses to scan; callers reject on
+		// maxInputLength first, so returning false here is a safe backstop.
+		const over = "a ".repeat(MAX_REGEX_INPUT_LENGTH);
+		expect(built.matcher.hasZeroWidthMatch(over)).toBe(false);
+	});
+});
+
 describe("buildGrepMatcher — input-length ceiling (ReDoS backstop)", () => {
 	it("exposes MAX_REGEX_INPUT_LENGTH as maxInputLength for a regex matcher", () => {
 		const built = buildGrepMatcher("needle", true, false);

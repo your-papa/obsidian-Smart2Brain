@@ -28,8 +28,31 @@ export interface GrepMatcher {
 	 * Whether the compiled needle can match the empty string (e.g. `x*`, `a?`).
 	 * Such patterns make find-and-replace nonsensical (they "match" at every
 	 * position), so callers should reject them rather than count/replace.
+	 *
+	 * NOTE: this is a *structural* signal (does the pattern match `""`?). It does
+	 * NOT catch zero-width patterns that only match at a position inside real
+	 * text — `\b`, `(?=x)`, `^`, `$` all have `matchesEmpty === false` for some
+	 * flag combinations yet still match *zero characters*, so replacing them
+	 * inserts the replacement at every boundary. Use `hasZeroWidthMatch(text)` on
+	 * the actual content to gate replace operations; `matchesEmpty` remains only
+	 * as the fast structural pre-check that keeps `count` from inflating.
 	 */
 	readonly matchesEmpty: boolean;
+	/**
+	 * Whether running this matcher against `text` produces at least one
+	 * **zero-length** match — a match that consumes no characters (`\b`, `(?=x)`,
+	 * `^`, `$`, `x*`, `a?`, …). Such a match makes find-and-replace nonsensical:
+	 * `String.prototype.replace` would insert the replacement at that position
+	 * without removing anything, scattering it across every boundary. This is the
+	 * exact, content-aware guard that `matchesEmpty` (a structural `""` test)
+	 * cannot provide — `\bworld` and `(?=world)world` correctly return `false`
+	 * (they consume `world`), while a bare `\b` returns `true`.
+	 *
+	 * Literal needles never match zero-width (an escaped literal always consumes
+	 * its characters, and an empty literal is already rejected upstream), so this
+	 * is always `false` for them.
+	 */
+	hasZeroWidthMatch(text: string): boolean;
 	/**
 	 * Longest input `test`/`count` will run this matcher against. For a regex
 	 * matcher this is the ReDoS backtracking bound (`MAX_REGEX_INPUT_LENGTH`);
@@ -328,6 +351,26 @@ export function buildGrepMatcher(pattern: string, isRegex: boolean, caseSensitiv
 					for (const _ of text.matchAll(new RegExp(source.source, globalFlags))) n++;
 					return n;
 				},
+				hasZeroWidthMatch: (text: string) => {
+					// A zero-length match means replace would insert without consuming
+					// — nonsensical. Detected against the actual content because it is
+					// input-dependent (`\bworld` consumes text; a bare `\b` does not).
+					// The length backstop mirrors count/test: over-ceiling input is not
+					// scanned, and reporting "no zero-width match" there is safe because
+					// the caller has already refused the over-length note.
+					if (matchesEmpty) return true;
+					if (text.length > MAX_REGEX_INPUT_LENGTH) return false;
+					const g = new RegExp(source.source, globalFlags);
+					let m: RegExpExecArray | null;
+					// biome-ignore lint/suspicious/noAssignInExpressions: standard exec-loop idiom
+					while ((m = g.exec(text)) !== null) {
+						if (m[0].length === 0) return true;
+						// Guard against an infinite loop should a non-empty match ever
+						// report length 0 via flags; advance past a zero-width position.
+						if (m.index === g.lastIndex) g.lastIndex++;
+					}
+					return false;
+				},
 				matchesEmpty,
 				maxInputLength: MAX_REGEX_INPUT_LENGTH,
 			},
@@ -351,6 +394,9 @@ export function buildGrepMatcher(pattern: string, isRegex: boolean, caseSensitiv
 				const matches = text.match(new RegExp(escaped, globalFlags));
 				return matches ? matches.length : 0;
 			},
+			// A non-empty literal always consumes its characters; an empty literal
+			// is rejected upstream. Either way a literal never matches zero-width.
+			hasZeroWidthMatch: () => matchesEmpty,
 			matchesEmpty,
 			// A literal needle is matched by `String.includes` / an escaped-literal
 			// regex with no quantifiers — it cannot backtrack, so no length bound.
