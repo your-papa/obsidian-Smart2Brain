@@ -8,7 +8,7 @@ import { getIndexableVaultFiles, isTextIndexableFile, shouldProcessVaultPath } f
 import { Logger } from "../../utils/logging";
 import { normalizeVaultPath } from "../../utils/pathUtils";
 import { resolveFileReferenceDetailed } from "../../utils/pathResolution";
-import { buildGrepMatcher } from "./grepMatcher";
+import { buildGrepMatcher, MAX_SCANNED_LINE_LENGTH } from "./grepMatcher";
 
 const DEFAULT_LIMIT = 50;
 
@@ -34,6 +34,8 @@ interface GrepNotesPayload {
 	returned: number;
 	has_more: boolean;
 	next_offset?: number;
+	/** Number of lines skipped because they exceeded the scan-length limit. */
+	lines_skipped?: number;
 	results: GrepNotesResultItem[];
 	message?: string;
 }
@@ -130,6 +132,7 @@ export function createGrepNotesTool(app: App) {
 		const store = getPendingChangesStore();
 		const flat: FlatMatch[] = [];
 		let filesSearched = 0;
+		let linesSkipped = 0;
 
 		for (const file of files) {
 			if (currentProvider && store.shouldBlockFile(file.path, currentProvider)) {
@@ -145,6 +148,13 @@ export function createGrepNotesTool(app: App) {
 			}
 			const lines = content.split("\n");
 			for (let i = 0; i < lines.length; i++) {
+				// Skip pathologically long lines (minified blobs, data URIs) rather
+				// than run the regex against them on the UI thread. Counted and
+				// reported so this is a visible limit, not a silent wrong answer.
+				if (lines[i].length > MAX_SCANNED_LINE_LENGTH) {
+					linesSkipped++;
+					continue;
+				}
 				if (matcher.test(lines[i])) {
 					flat.push({
 						path: file.path,
@@ -183,13 +193,21 @@ export function createGrepNotesTool(app: App) {
 			returned,
 			has_more: hasMore,
 			next_offset: hasMore ? safeOffset + returned : undefined,
+			lines_skipped: linesSkipped || undefined,
 			results,
 		};
 
+		const skippedNote =
+			linesSkipped > 0
+				? ` (${linesSkipped} line${linesSkipped === 1 ? "" : "s"} longer than ${MAX_SCANNED_LINE_LENGTH} chars were skipped)`
+				: "";
+
 		if (totalMatches === 0) {
-			payload.message = `No matches for "${pattern}" across ${filesSearched} note(s) searched.`;
+			payload.message = `No matches for "${pattern}" across ${filesSearched} note(s) searched.${skippedNote}`;
 		} else if (hasMore) {
-			payload.message = `Showing matches ${safeOffset + 1}-${safeOffset + returned} of ${totalMatches}. Call again with offset=${safeOffset + returned} for more.`;
+			payload.message = `Showing matches ${safeOffset + 1}-${safeOffset + returned} of ${totalMatches}. Call again with offset=${safeOffset + returned} for more.${skippedNote}`;
+		} else if (skippedNote) {
+			payload.message = `${totalMatches} match${totalMatches === 1 ? "" : "es"} found.${skippedNote}`;
 		}
 
 		return JSON.stringify(payload);

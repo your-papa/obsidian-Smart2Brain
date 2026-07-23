@@ -117,15 +117,29 @@ describe("buildGrepMatcher — ReDoS protection", () => {
 		expect(built.matcher.test("abc123")).toBe(true);
 	});
 
-	it("does not run a regex against an over-long line", () => {
-		const built = buildGrepMatcher("a", true, false);
+	it("matches against long content (no length cap inside the matcher)", () => {
+		// The matcher no longer caps input length — grep_notes enforces its own
+		// per-line limit. manage_notes runs count/replace against whole notes,
+		// which routinely exceed 5000 chars, so the matcher must still match.
+		const built = buildGrepMatcher("needle", true, false);
 		if (!built.ok) return;
-		// Comfortably over MAX_SCANNED_LINE_LENGTH (5000).
-		const huge = "a".repeat(6000);
-		expect(built.matcher.test(huge)).toBe(false);
-		expect(built.matcher.count(huge)).toBe(0);
-		// A normal-length line still matches.
-		expect(built.matcher.test("a")).toBe(true);
+		const bigNote = `${"x".repeat(6000)}needle${"y".repeat(6000)}`;
+		expect(built.matcher.test(bigNote)).toBe(true);
+		expect(built.matcher.count(bigNote)).toBe(1);
+	});
+
+	it("does not treat an escaped paren as a group terminator", () => {
+		// `\){5,10}` repeats a literal ')' — it is NOT a bounded group repetition
+		// and must be accepted.
+		const built = buildGrepMatcher("\\){5,10}", true, false);
+		expect(built.ok).toBe(true);
+		if (!built.ok) return;
+		expect(built.matcher.test(")))))")).toBe(true);
+	});
+
+	it("accepts escaped braces and parens generally", () => {
+		expect(buildGrepMatcher("\\(a\\)", true, false).ok).toBe(true);
+		expect(buildGrepMatcher("price\\{\\d+\\}", true, false).ok).toBe(true);
 	});
 
 	it("does not screen literal needles (parens are literal there)", () => {

@@ -35,13 +35,19 @@ export interface GrepMatcher {
 export type BuildMatcherResult = { ok: true; matcher: GrepMatcher } | { ok: false; error: string };
 
 /**
- * Longest line we will run a user-supplied regex against. `grep_notes` and
- * `manage_notes` scan every vault file synchronously on the UI thread, so an
- * unbounded line length turns even a linear regex into a visible freeze. Lines
- * longer than this are treated as non-matching (they are almost always minified
- * blobs / data URIs, not prose the agent means to search).
+ * Longest line `grep_notes` will run a user-supplied regex against. It scans
+ * every vault file line-by-line synchronously on the UI thread, so a
+ * pathological line length would turn even a screened regex into a visible
+ * freeze (backtracking cost scales super-linearly with input length). The
+ * caller skips lines longer than this and reports how many were skipped, so the
+ * bound is a visible safety limit rather than a silent wrong answer.
+ *
+ * This is a `grep_notes` line-scan concern only — it is NOT applied inside the
+ * matcher. `manage_notes` runs `count`/replace against whole-note content
+ * (which routinely exceeds this), and capping there silently dropped valid
+ * matches. ReDoS protection for those paths comes from `screenRegexForRedos`.
  */
-const MAX_SCANNED_LINE_LENGTH = 5000;
+export const MAX_SCANNED_LINE_LENGTH = 5000;
 
 /**
  * Reject regex patterns whose structure is prone to catastrophic backtracking
@@ -62,18 +68,25 @@ const MAX_SCANNED_LINE_LENGTH = 5000;
 const MAX_SAFE_QUANTIFIER_BOUND = 1000;
 
 function screenRegexForRedos(pattern: string): string | null {
+	// Structural checks below look for real regex metacharacters — group parens,
+	// quantifiers, braces. An *escaped* metacharacter (`\)`, `\(`, `\{`) is a
+	// literal, not structure, so strip every `\X` pair first. Without this, a
+	// pattern like `\){5,10}` (a literal `)` repeated) would be misread as a
+	// bounded group repetition and wrongly rejected.
+	const stripped = pattern.replace(/\\./g, "");
+
 	// A group that is quantified, whose body contains an unbounded quantifier:
 	// (a+)+, (a*)*, (a+)*, (.*)+, (\d+){2,} etc. This is the classic exponential
 	// nested-quantifier form.
 	const nestedQuantifier = /\([^)]*[*+][^)]*\)\s*[*+]|\([^)]*[*+][^)]*\)\s*\{\d+,?\d*\}/;
-	if (nestedQuantifier.test(pattern)) {
+	if (nestedQuantifier.test(stripped)) {
 		return "quantifier applied to a group that already contains an unbounded quantifier (e.g. `(a+)+`)";
 	}
 
 	// Quantified alternation of single-char classes that overlap, e.g. (a|a)*,
 	// (\w|\d)+ — overlapping branches under a quantifier backtrack badly.
 	const quantifiedAlternation = /\([^)]*\|[^)]*\)\s*[*+]/;
-	if (quantifiedAlternation.test(pattern)) {
+	if (quantifiedAlternation.test(stripped)) {
 		return "quantifier applied to an alternation group (e.g. `(a|a)*`) — prone to catastrophic backtracking";
 	}
 
@@ -81,18 +94,18 @@ function screenRegexForRedos(pattern: string): string | null {
 	// bounded but still explodes the match tree. Any `{n,m}` (or `{n,}`) applied
 	// directly to a group is treated as unsafe.
 	const boundedQuantifiedGroup = /\)\s*\{\d+(?:,\d*)?\}/;
-	if (boundedQuantifiedGroup.test(pattern)) {
+	if (boundedQuantifiedGroup.test(stripped)) {
 		return "bounded repetition applied to a group (e.g. `(a+){10,}`) — prone to catastrophic backtracking";
 	}
 
 	// A single large bounded repetition, e.g. a{5000} / .{2000,} — even without
-	// nesting, a huge explicit bound makes each line scan O(bound) and stacks up
-	// across the whole vault. Reject bounds above a conservative ceiling.
-	for (const m of pattern.matchAll(/\{(\d+)(?:,(\d*))?\}/g)) {
+	// nesting, a huge explicit bound makes each scan O(bound). Reject bounds
+	// above a conservative ceiling.
+	for (const m of stripped.matchAll(/\{(\d+)(?:,(\d*))?\}/g)) {
 		const lower = Number(m[1]);
 		const upper = m[2] === undefined ? lower : m[2] === "" ? Number.POSITIVE_INFINITY : Number(m[2]);
 		if (lower > MAX_SAFE_QUANTIFIER_BOUND || upper > MAX_SAFE_QUANTIFIER_BOUND) {
-			return `repetition bound greater than ${MAX_SAFE_QUANTIFIER_BOUND} (e.g. \`a{${m[1]}}\`) — too expensive to scan the whole vault`;
+			return `repetition bound greater than ${MAX_SAFE_QUANTIFIER_BOUND} (e.g. \`a{${m[1]}}\`) — too expensive to scan`;
 		}
 	}
 
@@ -139,12 +152,10 @@ export function buildGrepMatcher(pattern: string, isRegex: boolean, caseSensitiv
 			ok: true,
 			matcher: {
 				// A non-global clone avoids the stateful `lastIndex` trap when reusing `.test()` in a loop.
-				test: (text: string) =>
-					text.length <= MAX_SCANNED_LINE_LENGTH && new RegExp(source.source, singleFlags).test(text),
+				test: (text: string) => new RegExp(source.source, singleFlags).test(text),
 				globalRegex: () => new RegExp(source.source, globalFlags),
 				singleRegex: () => new RegExp(source.source, singleFlags),
 				count: (text: string) => {
-					if (text.length > MAX_SCANNED_LINE_LENGTH) return 0;
 					// Count non-overlapping matches. `matchAll` advances past
 					// zero-length matches correctly (unlike `String.match(/g/)`,
 					// which for an empty-matchable pattern returns one entry per
