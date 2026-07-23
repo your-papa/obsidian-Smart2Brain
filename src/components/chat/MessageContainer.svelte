@@ -314,7 +314,7 @@ $effect(() => {
           <p class="text-sm opacity-70">Ask me anything about your notes.</p>
         </div>
       {:else}
-        {#each messages as messagePair, index}
+        {#each messages as messagePair, index (messagePair.id)}
           {#if messagePair.transcriptEvent?.type === "summarization_marker"}
             <div
               class="summary-marker-row flex justify-center my-4"

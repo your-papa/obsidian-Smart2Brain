@@ -137,3 +137,39 @@ export function createObsidianFetch(
 		}
 	};
 }
+
+/**
+ * Ref-counted installer for the global `fetch` patch used by MCP clients (which
+ * read `globalThis.fetch` at call time and can't be handed a fetch directly).
+ *
+ * Multiple callers may need the patch concurrently (e.g. two `fetchServerTools`
+ * calls, or agent MCP tool-loading overlapping a settings-modal probe). The
+ * naive `_originalFetch`-flag + `finally`-restore pattern corrupts under
+ * concurrency: one caller's restore fires mid-flight of another, or the
+ * original gets captured as an already-wrapped fetch and double-wrapped
+ * permanently. Ref-counting installs once (on 0→1) and restores once (on 1→0),
+ * so concurrent users are safe. `release()` is idempotent.
+ */
+let patchDepth = 0;
+let savedFetch: typeof globalThis.fetch | null = null;
+
+export function installObsidianFetch(): { release: () => void } {
+	if (patchDepth === 0) {
+		savedFetch = globalThis.fetch;
+		globalThis.fetch = createObsidianFetch(savedFetch);
+	}
+	patchDepth++;
+
+	let released = false;
+	return {
+		release: () => {
+			if (released) return;
+			released = true;
+			patchDepth--;
+			if (patchDepth === 0 && savedFetch) {
+				globalThis.fetch = savedFetch;
+				savedFetch = null;
+			}
+		},
+	};
+}

@@ -81,6 +81,30 @@ export class HNSWVectorStore implements VectorStore {
 	private nextHnswId = 0;
 	private readonly dbName: string;
 
+	/**
+	 * Debounced HNSW graph flush for the incremental path. `upsert` mutates the
+	 * in-memory graph but, without this, only `close()`/`bulkPut` ever persisted
+	 * it — so a force-quit between full rebuilds lost every incrementally-added
+	 * point from the persisted graph (their doc rows/id-mappings survived in IDB,
+	 * so search silently returned stale results with no error). Coalesce rapid
+	 * edits into one save; `close()` cancels this and does a final synchronous
+	 * flush.
+	 *
+	 * A plain timer (not obsidian's `debounce`) because this module also runs
+	 * inside the HNSW Web Worker, where the `obsidian` package can't be resolved.
+	 */
+	private static readonly SAVE_DEBOUNCE_MS = 2000;
+	private hasPendingIndexSave = false;
+	private saveIndexTimer: ReturnType<typeof setTimeout> | null = null;
+
+	private scheduleIndexSave(): void {
+		if (this.saveIndexTimer !== null) clearTimeout(this.saveIndexTimer);
+		this.saveIndexTimer = setTimeout(() => {
+			this.saveIndexTimer = null;
+			void this.flushIndex();
+		}, HNSWVectorStore.SAVE_DEBOUNCE_MS);
+	}
+
 	// ID mappings (string ID <-> numeric HNSW ID)
 	private idToNumeric: Map<string, number> = new Map();
 	private numericToId: Map<number, string> = new Map();
@@ -231,9 +255,16 @@ export class HNSWVectorStore implements VectorStore {
 	 * Close the database connection.
 	 */
 	async close(): Promise<void> {
+		// Cancel the pending debounced save so it can't fire after we null `db`,
+		// then flush synchronously so no incremental changes are lost on close.
+		if (this.saveIndexTimer !== null) {
+			clearTimeout(this.saveIndexTimer);
+			this.saveIndexTimer = null;
+		}
 		if (this.hnswIndex) {
 			try {
 				await this.hnswIndex.saveIndex();
+				this.hasPendingIndexSave = false;
 			} catch {
 				// Ignore save errors on close
 			}
@@ -335,6 +366,27 @@ export class HNSWVectorStore implements VectorStore {
 		}
 
 		await this.updateLastUpdated();
+
+		// Persist the in-memory graph. Debounced so a burst of edits collapses
+		// into one save; a clean close() flushes anything still pending.
+		this.hasPendingIndexSave = true;
+		this.scheduleIndexSave();
+	}
+
+	/**
+	 * Persist the HNSW graph to IndexedDB if there are unsaved incremental
+	 * changes. Safe to call repeatedly (no-op when nothing is pending).
+	 */
+	private async flushIndex(): Promise<void> {
+		if (!this.hasPendingIndexSave || !this.hnswIndex || !this.db) return;
+		this.hasPendingIndexSave = false;
+		try {
+			await this.hnswIndex.saveIndex();
+		} catch (e) {
+			// Re-arm so a later flush (or close) retries the save.
+			this.hasPendingIndexSave = true;
+			Logger.error(`${LOG_PREFIX} Failed to persist HNSW graph:`, e);
+		}
 	}
 
 	private async removeFromHNSW(_id: string): Promise<void> {
@@ -705,6 +757,14 @@ export class HNSWVectorStore implements VectorStore {
 		const meta = await this.getMetadataInternal();
 		if (meta) {
 			meta.lastUpdated = Date.now();
+			// Persist the id high-water mark and dimensions on the incremental
+			// path too. `upsert` bumps `nextHnswId` in memory; if only
+			// `setMetadata` (full-rebuild path) persisted it, a reload would
+			// restore a stale counter and reassign an in-use id → `addPoint`
+			// throws "Node with id N already exists" and the note silently fails
+			// to index. Keep the persisted counter in lockstep with memory.
+			meta.nextHnswId = this.nextHnswId;
+			if (this.dimensions) meta.dimensions = this.dimensions;
 			await this.putInStore(METADATA_STORE, meta);
 		}
 	}

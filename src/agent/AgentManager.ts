@@ -1,7 +1,7 @@
 import type { BaseMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { Notice, normalizePath, TFile } from "obsidian";
-import { createObsidianFetch } from "../lib/obsidianFetch";
+import { installObsidianFetch } from "../lib/obsidianFetch";
 import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
@@ -271,6 +271,17 @@ export class AgentManager {
 	private readonly plugin: SecondBrainPlugin;
 	private agent: Agent | null = null;
 	private deferredSetup: Promise<void> | null = null;
+	/**
+	 * In-flight `initialize()` run, if any. `ensureAgent()` (lazy init on first
+	 * chat open) and the deferred `initialize()` in main.ts's `onLayoutReady` can
+	 * fire concurrently on a cold start; without this guard both would run the
+	 * full teardown-and-rebuild (`this.agent = null` + `registry.clear()`)
+	 * interleaved, clobbering each other and possibly leaving a half-configured
+	 * agent. Concurrent callers share this promise instead. */
+	private initPromise: Promise<void> | null = null;
+	/** Long-lived ref-counted global-fetch patch for MCP tool transport, held for
+	 * the manager's lifetime and released in cleanup(). */
+	private mcpFetchPatch: { release: () => void } | null = null;
 	/** MCP tools memoized per agent id (network handshake — see ensureMCPToolsForAgent). */
 	private readonly mcpToolsByAgent = new Map<string, StructuredToolInterface[]>();
 	/** In-flight MCP handshake promises — deduplicates concurrent callers for the same agent. */
@@ -933,10 +944,13 @@ export class AgentManager {
 			const mcpConfig = { mcpServers } as ConstructorParameters<typeof MultiServerMCPClient>[0];
 			Logger.log("Initializing MCP client...", mcpConfig);
 
-			const globalWithFetch = globalThis as typeof globalThis & { _originalFetch?: typeof fetch };
-			if (!globalWithFetch._originalFetch) {
-				globalWithFetch._originalFetch = globalThis.fetch;
-				globalThis.fetch = createObsidianFetch(globalWithFetch._originalFetch);
+			// Patch global fetch once for the manager's lifetime — MCP tools read
+			// `globalThis.fetch` both here (getTools) and later at invocation time,
+			// so the patch must outlive this call. Ref-counted so it composes
+			// safely with other installers (e.g. the settings modal's probe) and
+			// is released exactly once in cleanup().
+			if (!this.mcpFetchPatch) {
+				this.mcpFetchPatch = installObsidianFetch();
 			}
 
 			try {
@@ -988,6 +1002,18 @@ export class AgentManager {
 	}
 
 	async initialize(): Promise<void> {
+		// Dedupe concurrent callers (lazy `ensureAgent` vs. the deferred
+		// onLayoutReady init) onto a single in-flight run. Without this the
+		// teardown-and-rebuild below would interleave and corrupt agent/registry
+		// state. `reinitialize()` deliberately runs a fresh pass after this one.
+		if (this.initPromise) return this.initPromise;
+		this.initPromise = this.runInitialize().finally(() => {
+			this.initPromise = null;
+		});
+		return this.initPromise;
+	}
+
+	private async runInitialize(): Promise<void> {
 		// Load chats
 		await StartupProfiler.measure("agent:chatManager.load", () => this.chatManager.load());
 
@@ -1479,6 +1505,12 @@ export class AgentManager {
 	 */
 	async reinitialize(): Promise<void> {
 		Logger.log("Reinitializing agent with updated settings...");
+		// Settings changed — we need a fresh pass, not a shared in-flight one that
+		// may have started with stale settings. Wait for any current init to
+		// settle, then run a guaranteed-fresh initialize().
+		if (this.initPromise) {
+			await this.initPromise.catch(() => {});
+		}
 		await this.initialize();
 		Logger.log("Agent reinitialized successfully");
 	}
@@ -1486,12 +1518,10 @@ export class AgentManager {
 	async cleanup(): Promise<void> {
 		await this.chatManager.flush();
 
-		// Restore original fetch if it was patched
-		const globalWithFetch = globalThis as typeof globalThis & { _originalFetch?: typeof fetch };
-		if (globalWithFetch._originalFetch) {
-			globalThis.fetch = globalWithFetch._originalFetch;
-			globalWithFetch._originalFetch = undefined;
-		}
+		// Release the MCP global-fetch patch (ref-counted; restores the original
+		// fetch when the last holder releases).
+		this.mcpFetchPatch?.release();
+		this.mcpFetchPatch = null;
 
 		// Cleanup if needed
 		this.agent = null;

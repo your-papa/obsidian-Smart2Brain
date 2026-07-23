@@ -18,7 +18,10 @@ import { Graph as LeidenGraph, leiden } from "leiden-ts";
 
 let worker: Worker | null = null;
 let requestId = 0;
-const pending = new Map<number, { resolve: (value: any) => void; reject: (reason: any) => void }>();
+const pending = new Map<
+	number,
+	{ resolve: (value: any) => void; reject: (reason: any) => void; request: ComputeWorkerRequest }
+>();
 
 function getWorker(): Worker | null {
 	if (worker) return worker;
@@ -37,14 +40,38 @@ function getWorker(): Worker | null {
 			}
 		};
 		worker.onerror = (e) => {
-			// If the worker fails to load, fall back to main-thread execution
+			// The worker died (failed to load, or crashed on a message). Honor the
+			// documented contract: don't reject unrelated in-flight requests —
+			// recompute each one synchronously on the main thread so a transient
+			// worker failure degrades gracefully instead of surfacing spurious
+			// errors for work that was otherwise fine.
 			console.warn("[ComputeWorker] Worker error, falling back to main thread:", e.message);
-			terminateWorker();
+			recoverPendingOnMainThread();
 		};
 		return worker;
 	} catch {
 		// Workers not available — fall back to synchronous
 		return null;
+	}
+}
+
+/**
+ * Tear down the worker and re-run every in-flight request on the main thread,
+ * settling each promise with the synchronous result. Used when the worker
+ * errors out mid-flight (as opposed to an explicit `terminateWorker()`, which
+ * rejects). Keeps callers whose work never reached the worker from failing.
+ */
+function recoverPendingOnMainThread(): void {
+	if (worker) {
+		worker.terminate();
+		worker = null;
+	}
+	const entries = [...pending.values()];
+	pending.clear();
+	for (const entry of entries) {
+		Promise.resolve()
+			.then(() => runOnMainThread(entry.request))
+			.then(entry.resolve, entry.reject);
 	}
 }
 
@@ -56,7 +83,7 @@ function postRequest<T extends ComputeWorkerResponse>(request: ComputeWorkerRequ
 	}
 
 	return new Promise<T>((resolve, reject) => {
-		pending.set(request.id, { resolve, reject });
+		pending.set(request.id, { resolve, reject, request });
 		w.postMessage(request, getTransferList(request));
 	});
 }

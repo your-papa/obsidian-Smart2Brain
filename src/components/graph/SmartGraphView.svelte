@@ -1,5 +1,5 @@
 <script lang="ts">
-import { untrack, tick } from "svelte";
+import { untrack, tick, onDestroy } from "svelte";
 import { getAllTags, Notice } from "obsidian";
 import { getPlugin } from "../../stores/state.svelte";
 import { getData } from "../../stores/dataStore.svelte";
@@ -209,6 +209,15 @@ let skeletonGraphData: GraphData = $derived.by(() => {
 // Build cancellation — abort stale builds when a new one starts
 let currentBuild: AbortController | null = null;
 
+// Generation guard for async continuations. Bumped by every new build and by
+// onDestroy, so a slow await (buildWikiGraph tick, leidenAsync, native-settings
+// read) that resolves after a newer build started — or after the view was
+// closed — bails instead of writing stale state over the current graph or onto
+// a destroyed component. AbortController alone was insufficient: it was only
+// checked in the catch, so success-path writes ran unconditionally.
+let buildVersion = 0;
+let isDestroyed = false;
+
 function getFilter(): GraphFilter {
 	// `markdownOnly` narrows to just .md; explicit extension picks (if any) still win.
 	const extensions = selectedExtensions.length > 0 ? selectedExtensions : settings.markdownOnly ? ["md"] : undefined;
@@ -283,12 +292,15 @@ async function buildGraph() {
 	currentBuild?.abort();
 	const ac = new AbortController();
 	currentBuild = ac;
+	const localBuildVersion = ++buildVersion;
 	isLoading = true;
 	loadingMessage = "Building graph...";
 
 	try {
 		const filter = getFilter();
 		const { graphData: wikiData } = buildWikiGraph(plugin.app, filter, immersePaths ?? undefined);
+		// A newer build (or unmount) superseded us before we could apply.
+		if (localBuildVersion !== buildVersion) return;
 		graphData = wikiData;
 		isLoading = false;
 
@@ -299,13 +311,14 @@ async function buildGraph() {
 		void runLeidenSegmentation();
 
 		await tick();
+		if (localBuildVersion !== buildVersion) return;
 		try {
 			canvasComponent?.fitToView();
 		} catch {
 			/* pixi not ready */
 		}
 	} catch (e) {
-		if (ac.signal.aborted) return;
+		if (ac.signal.aborted || localBuildVersion !== buildVersion) return;
 		console.error("[SmartGraph] Error building graph:", e);
 		graphData = { nodes: [], edges: [] };
 		isLoading = false;
@@ -366,7 +379,18 @@ $effect(() => {
 
 // Load native Obsidian graph settings (color groups, physics, etc.) as fallback
 readNativeGraphSettings(plugin.app).then((native) => {
+	// Guard against a resolve after the view was destroyed.
+	if (isDestroyed) return;
 	nativeGraphSettings = native;
+});
+
+onDestroy(() => {
+	// Invalidate any in-flight async build/Leiden continuations so they bail
+	// instead of writing $state on a destroyed component, and abort the current
+	// build.
+	isDestroyed = true;
+	buildVersion++;
+	currentBuild?.abort();
 });
 
 // Handlers
@@ -515,6 +539,7 @@ async function handleExitImmerse() {
 }
 
 async function runLeidenSegmentation() {
+	const localBuildVersion = buildVersion;
 	const wikiEdges = graphData.edges.filter((e) => e.type === "wiki");
 	if (wikiEdges.length === 0) return;
 
@@ -540,6 +565,10 @@ async function runLeidenSegmentation() {
 	} finally {
 		isLeidenRunning = false;
 	}
+	// The graph was rebuilt (or the view closed) while Leiden ran; its
+	// communities are keyed by nodes that may no longer exist. Discard them
+	// rather than applying stale segments over the current graph.
+	if (localBuildVersion !== buildVersion) return;
 	Logger.info(
 		`[SmartGraph] Leiden (γ=${settings.leidenResolution.toFixed(2)}, ${wikiEdges.length} edges, ${graphData.nodes.length} nodes): ${Math.round(performance.now() - start)}ms`,
 	);

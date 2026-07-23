@@ -23,7 +23,7 @@ import Text from "../ui/Text.svelte";
 import Toggle from "../ui/Toggle.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
-import { createObsidianFetch } from "../../lib/obsidianFetch";
+import { installObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
 import { type PluginIntegration, getPluginIcon, toExecToolId } from "../../agent/integrations/pluginIntegrations";
 import { buildPluginApiSkill } from "../../skills/templates/pluginApiScripting";
@@ -737,12 +737,7 @@ async function fetchServerTools(serverId: string) {
 	if (!config) return;
 	mcpServerTools[serverId] = { loading: true, error: null, tools: [] };
 	try {
-		const windowWithFetch = window as Window & { _originalFetch?: typeof fetch };
-		const needsPatch = !windowWithFetch._originalFetch;
-		if (needsPatch) {
-			windowWithFetch._originalFetch = window.fetch;
-			window.fetch = createObsidianFetch(windowWithFetch._originalFetch);
-		}
+		const patch = installObsidianFetch();
 		try {
 			const mcpClient = new MultiServerMCPClient(buildMCPConfig(serverId, config));
 			const tools = await mcpClient.getTools();
@@ -755,10 +750,7 @@ async function fetchServerTools(serverId: string) {
 				})),
 			};
 		} finally {
-			if (needsPatch && windowWithFetch._originalFetch) {
-				window.fetch = windowWithFetch._originalFetch;
-				windowWithFetch._originalFetch = undefined;
-			}
+			patch.release();
 		}
 	} catch (err) {
 		mcpServerTools[serverId] = {

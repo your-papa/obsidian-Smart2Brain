@@ -281,6 +281,26 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		return data.targetFolder;
 	}
 
+	/**
+	 * Validate that a threadId resolves to a `.chat` file directly inside the
+	 * configured chat folder before it is used as a filesystem path for a write
+	 * or delete. A thread_id can arrive from an untrusted source (a crafted
+	 * `.chat` embed, a hand-edited config, a malicious skill/tool), so a value
+	 * like `../../../.obsidian/plugins/foo/main.js` must never reach
+	 * `writeBinary`/`remove`. Returns the normalized path, or throws.
+	 */
+	private assertContainedThreadPath(threadId: string): string {
+		const normalized = normalizePath(threadId);
+		const folder = normalizePath(this.getChatFolder());
+		const prefix = folder === "/" ? "" : `${folder}/`;
+
+		const escapesFolder = !normalized.startsWith(prefix) || normalized.slice(prefix.length).includes("/");
+		if (escapesFolder || !normalized.endsWith(".chat") || normalized.length <= prefix.length + ".chat".length - 1) {
+			throw new Error(`Refusing to access thread outside chat folder: ${threadId}`);
+		}
+		return normalized;
+	}
+
 	private markThreadDirty(threadId: string): void {
 		this.dirtyThreadVersions.set(threadId, (this.dirtyThreadVersions.get(threadId) ?? 0) + 1);
 	}
@@ -458,6 +478,14 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		const data = this.storage.get(threadId);
 		if (!data) return;
 
+		let safePath: string;
+		try {
+			safePath = this.assertContainedThreadPath(threadId);
+		} catch (e) {
+			Logger.error(`Refusing to save thread with unsafe path: ${threadId}`, e);
+			return;
+		}
+
 		await this.ensureFolder();
 		const targetVersion = this.dirtyThreadVersions.get(threadId) ?? 0;
 
@@ -466,7 +494,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			try {
 				const compressed = gzipSync(JSON.stringify(data));
 				await this.adapter.writeBinary(
-					threadId,
+					safePath,
 					compressed.buffer.slice(
 						compressed.byteOffset,
 						compressed.byteOffset + compressed.byteLength,
@@ -952,9 +980,16 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		this.threadIndex.delete(threadId);
 		this.dirtyThreadVersions.delete(threadId);
 		this.persistedThreadVersions.delete(threadId);
+		let safePath: string;
 		try {
-			if (await this.adapter.exists(threadId)) {
-				await this.adapter.remove(threadId);
+			safePath = this.assertContainedThreadPath(threadId);
+		} catch (e) {
+			Logger.error(`Refusing to delete thread with unsafe path: ${threadId}`, e);
+			return;
+		}
+		try {
+			if (await this.adapter.exists(safePath)) {
+				await this.adapter.remove(safePath);
 			}
 		} catch (e) {
 			Logger.error(`Error deleting thread ${threadId}:`, e);

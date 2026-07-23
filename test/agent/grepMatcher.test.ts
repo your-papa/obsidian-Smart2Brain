@@ -76,3 +76,73 @@ describe("buildGrepMatcher — regex", () => {
 		expect(built.matcher.count("a1b2c3")).toBe(3);
 	});
 });
+
+describe("buildGrepMatcher — ReDoS protection", () => {
+	it("rejects nested-quantifier patterns", () => {
+		const built = buildGrepMatcher("(a+)+$", true, false);
+		expect(built.ok).toBe(false);
+		if (built.ok) return;
+		expect(built.error).toContain("rejected");
+	});
+
+	it("rejects quantified-alternation patterns", () => {
+		const built = buildGrepMatcher("(a|a)*", true, false);
+		expect(built.ok).toBe(false);
+	});
+
+	it("still accepts ordinary quantifiers", () => {
+		const built = buildGrepMatcher("\\d+", true, false);
+		expect(built.ok).toBe(true);
+		if (!built.ok) return;
+		expect(built.matcher.test("abc123")).toBe(true);
+	});
+
+	it("does not run a regex against an over-long line", () => {
+		const built = buildGrepMatcher("a", true, false);
+		if (!built.ok) return;
+		const huge = "a".repeat(20001);
+		expect(built.matcher.test(huge)).toBe(false);
+		expect(built.matcher.count(huge)).toBe(0);
+		// A normal-length line still matches.
+		expect(built.matcher.test("a")).toBe(true);
+	});
+
+	it("does not screen literal needles (parens are literal there)", () => {
+		const built = buildGrepMatcher("(a+)+", false, false);
+		expect(built.ok).toBe(true);
+		if (!built.ok) return;
+		expect(built.matcher.test("literal (a+)+ text")).toBe(true);
+	});
+});
+
+describe("buildGrepMatcher — empty-match handling", () => {
+	it("flags empty-matchable regex and counts them as zero", () => {
+		const built = buildGrepMatcher("x*", true, false);
+		expect(built.ok).toBe(true);
+		if (!built.ok) return;
+		expect(built.matcher.matchesEmpty).toBe(true);
+		// `x*` matches at every position; a naive String.match(/x*/g) would
+		// inflate this — count must not.
+		expect(built.matcher.count("abc")).toBe(0);
+	});
+
+	it("counts a real repeated regex correctly (non-overlapping)", () => {
+		const built = buildGrepMatcher("\\d+", true, false);
+		if (!built.ok) return;
+		expect(built.matcher.matchesEmpty).toBe(false);
+		expect(built.matcher.count("a12b3c456")).toBe(3);
+	});
+
+	it("singleRegex replaces only the first match; globalRegex replaces all", () => {
+		const built = buildGrepMatcher("\\d", true, false);
+		if (!built.ok) return;
+		expect("a1b2c3".replace(built.matcher.singleRegex(), "#")).toBe("a#b2c3");
+		expect("a1b2c3".replace(built.matcher.globalRegex(), "#")).toBe("a#b#c#");
+	});
+
+	it("literal needle is never empty-matchable unless the pattern is empty", () => {
+		const built = buildGrepMatcher("foo", false, false);
+		if (!built.ok) return;
+		expect(built.matcher.matchesEmpty).toBe(false);
+	});
+});
