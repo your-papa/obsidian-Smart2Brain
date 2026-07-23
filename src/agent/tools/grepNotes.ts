@@ -12,6 +12,18 @@ import { buildGrepMatcher, MAX_SCANNED_LINE_LENGTH } from "./grepMatcher";
 
 const DEFAULT_LIMIT = 50;
 
+/**
+ * Upper bound on how many files a single vault-wide grep will read + scan. The
+ * scan is O(total bytes) and runs synchronously on the UI thread, so a very
+ * large vault would otherwise turn every call into a multi-second freeze. When
+ * the eligible file set exceeds this, we scan the first `MAX_SCANNED_FILES` (in
+ * stable path order), return the matches found so far, and set
+ * `scan_truncated: true` so the agent knows the search was partial and can
+ * narrow with `path_prefix`. A scoped (`path`) search is a single file and is
+ * never subject to this bound.
+ */
+export const MAX_SCANNED_FILES = 5000;
+
 interface FlatMatch {
 	path: string;
 	line_number: number;
@@ -36,6 +48,11 @@ interface GrepNotesPayload {
 	next_offset?: number;
 	/** Number of lines skipped because they exceeded the scan-length limit. */
 	lines_skipped?: number;
+	/**
+	 * True when a vault-wide search hit `MAX_SCANNED_FILES` and stopped early, so
+	 * the results are partial. Never set for a scoped (`path`) search.
+	 */
+	scan_truncated?: boolean;
 	results: GrepNotesResultItem[];
 	message?: string;
 }
@@ -127,16 +144,25 @@ export function createGrepNotesTool(app: App) {
 			scope = "vault";
 		}
 
-		// Scan every file into a flat match list (stable order for paging).
+		// Scan the file set into a flat match list (stable order for paging).
+		// Vault-wide scans are bounded by MAX_SCANNED_FILES so a huge vault can't
+		// freeze the UI thread; a scoped (single-file) search is never bounded.
 		const currentProvider = pluginData.getSelectedAgent().chatModel?.provider;
 		const store = getPendingChangesStore();
 		const flat: FlatMatch[] = [];
 		let filesSearched = 0;
 		let linesSkipped = 0;
+		let scanTruncated = false;
 
 		for (const file of files) {
 			if (currentProvider && store.shouldBlockFile(file.path, currentProvider)) {
 				continue;
+			}
+			// Bound the total scan work. `filesSearched` counts files we actually
+			// read (post privacy filter), so blocked files don't consume budget.
+			if (scope === "vault" && filesSearched >= MAX_SCANNED_FILES) {
+				scanTruncated = true;
+				break;
 			}
 			filesSearched++;
 			let content: string;
@@ -194,6 +220,7 @@ export function createGrepNotesTool(app: App) {
 			has_more: hasMore,
 			next_offset: hasMore ? safeOffset + returned : undefined,
 			lines_skipped: linesSkipped || undefined,
+			scan_truncated: scanTruncated || undefined,
 			results,
 		};
 
@@ -202,12 +229,16 @@ export function createGrepNotesTool(app: App) {
 				? ` (${linesSkipped} line${linesSkipped === 1 ? "" : "s"} longer than ${MAX_SCANNED_LINE_LENGTH} chars were skipped)`
 				: "";
 
+		const truncatedNote = scanTruncated
+			? ` Search stopped after scanning ${MAX_SCANNED_FILES} files — results are partial. Narrow the search with path_prefix to cover the rest.`
+			: "";
+
 		if (totalMatches === 0) {
-			payload.message = `No matches for "${pattern}" across ${filesSearched} note(s) searched.${skippedNote}`;
+			payload.message = `No matches for "${pattern}" across ${filesSearched} note(s) searched.${skippedNote}${truncatedNote}`;
 		} else if (hasMore) {
-			payload.message = `Showing matches ${safeOffset + 1}-${safeOffset + returned} of ${totalMatches}. Call again with offset=${safeOffset + returned} for more.${skippedNote}`;
-		} else if (skippedNote) {
-			payload.message = `${totalMatches} match${totalMatches === 1 ? "" : "es"} found.${skippedNote}`;
+			payload.message = `Showing matches ${safeOffset + 1}-${safeOffset + returned} of ${totalMatches}. Call again with offset=${safeOffset + returned} for more.${skippedNote}${truncatedNote}`;
+		} else if (skippedNote || truncatedNote) {
+			payload.message = `${totalMatches} match${totalMatches === 1 ? "" : "es"} found.${skippedNote}${truncatedNote}`;
 		}
 
 		return JSON.stringify(payload);
