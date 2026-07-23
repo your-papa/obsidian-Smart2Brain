@@ -41,18 +41,26 @@ export type BuildMatcherResult = { ok: true; matcher: GrepMatcher } | { ok: fals
  * longer than this are treated as non-matching (they are almost always minified
  * blobs / data URIs, not prose the agent means to search).
  */
-const MAX_SCANNED_LINE_LENGTH = 20000;
+const MAX_SCANNED_LINE_LENGTH = 5000;
 
 /**
  * Reject regex patterns whose structure is prone to catastrophic backtracking
  * (ReDoS). A user- or agent-supplied pattern is compiled and then `.test()`ed
  * line-by-line across the whole vault on the only UI thread with no timeout, so
  * a pattern like `(a+)+$` against a long non-matching line would hard-lock
- * Obsidian. Detecting ReDoS in general is undecidable; we screen for the common
- * dangerous shapes (a quantified group whose body is itself quantified, and
- * quantified alternations with overlapping branches). Returns an error message
- * if the pattern looks unsafe, or `null` if it passes.
+ * Obsidian.
+ *
+ * Detecting ReDoS in general is undecidable and pure syntactic screening can
+ * never be exhaustive — so this is defense-in-depth, paired with the input-size
+ * cap (`MAX_SCANNED_LINE_LENGTH`) that bounds the worst case even for a pattern
+ * that slips through. We reject the well-known dangerous shapes: a quantified
+ * group whose body is itself quantified (`(a+)+`), quantified alternations with
+ * overlapping branches (`(a|a)*`), large bounded repetitions (`a{5000,}`), and
+ * bounded repetition applied to a quantified group (`(a+){10,}`). Returns an
+ * error message if the pattern looks unsafe, or `null` if it passes.
  */
+const MAX_SAFE_QUANTIFIER_BOUND = 1000;
+
 function screenRegexForRedos(pattern: string): string | null {
 	// A group that is quantified, whose body contains an unbounded quantifier:
 	// (a+)+, (a*)*, (a+)*, (.*)+, (\d+){2,} etc. This is the classic exponential
@@ -67,6 +75,25 @@ function screenRegexForRedos(pattern: string): string | null {
 	const quantifiedAlternation = /\([^)]*\|[^)]*\)\s*[*+]/;
 	if (quantifiedAlternation.test(pattern)) {
 		return "quantifier applied to an alternation group (e.g. `(a|a)*`) — prone to catastrophic backtracking";
+	}
+
+	// A group followed by a bounded repetition, e.g. (a+){10,} or (ab){50,100} —
+	// bounded but still explodes the match tree. Any `{n,m}` (or `{n,}`) applied
+	// directly to a group is treated as unsafe.
+	const boundedQuantifiedGroup = /\)\s*\{\d+(?:,\d*)?\}/;
+	if (boundedQuantifiedGroup.test(pattern)) {
+		return "bounded repetition applied to a group (e.g. `(a+){10,}`) — prone to catastrophic backtracking";
+	}
+
+	// A single large bounded repetition, e.g. a{5000} / .{2000,} — even without
+	// nesting, a huge explicit bound makes each line scan O(bound) and stacks up
+	// across the whole vault. Reject bounds above a conservative ceiling.
+	for (const m of pattern.matchAll(/\{(\d+)(?:,(\d*))?\}/g)) {
+		const lower = Number(m[1]);
+		const upper = m[2] === undefined ? lower : m[2] === "" ? Number.POSITIVE_INFINITY : Number(m[2]);
+		if (lower > MAX_SAFE_QUANTIFIER_BOUND || upper > MAX_SAFE_QUANTIFIER_BOUND) {
+			return `repetition bound greater than ${MAX_SAFE_QUANTIFIER_BOUND} (e.g. \`a{${m[1]}}\`) — too expensive to scan the whole vault`;
+		}
 	}
 
 	return null;

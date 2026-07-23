@@ -90,6 +90,26 @@ describe("buildGrepMatcher — ReDoS protection", () => {
 		expect(built.ok).toBe(false);
 	});
 
+	it("rejects bounded repetition applied to a group", () => {
+		const built = buildGrepMatcher("(a+){10,}", true, false);
+		expect(built.ok).toBe(false);
+		if (built.ok) return;
+		expect(built.error).toContain("rejected");
+	});
+
+	it("rejects a large explicit repetition bound", () => {
+		expect(buildGrepMatcher("a{5000}", true, false).ok).toBe(false);
+		expect(buildGrepMatcher("x{0,9999}", true, false).ok).toBe(false);
+		expect(buildGrepMatcher("y{2000,}", true, false).ok).toBe(false);
+	});
+
+	it("still accepts a modest bounded repetition", () => {
+		const built = buildGrepMatcher("a{2,5}", true, false);
+		expect(built.ok).toBe(true);
+		if (!built.ok) return;
+		expect(built.matcher.test("aaa")).toBe(true);
+	});
+
 	it("still accepts ordinary quantifiers", () => {
 		const built = buildGrepMatcher("\\d+", true, false);
 		expect(built.ok).toBe(true);
@@ -100,7 +120,8 @@ describe("buildGrepMatcher — ReDoS protection", () => {
 	it("does not run a regex against an over-long line", () => {
 		const built = buildGrepMatcher("a", true, false);
 		if (!built.ok) return;
-		const huge = "a".repeat(20001);
+		// Comfortably over MAX_SCANNED_LINE_LENGTH (5000).
+		const huge = "a".repeat(6000);
 		expect(built.matcher.test(huge)).toBe(false);
 		expect(built.matcher.count(huge)).toBe(0);
 		// A normal-length line still matches.
