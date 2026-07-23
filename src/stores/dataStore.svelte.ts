@@ -6,7 +6,7 @@ import {
 	parseSpaceMembershipFilter,
 	resolveViewFilter,
 } from "../lib/views";
-import { getSecret, listSecrets, setSecret } from "../lib/secretStorage";
+import { getSecret, listSecrets, removeSecret, setSecret } from "../lib/secretStorage";
 import type SecondBrainPlugin from "../main";
 import { DEFAULT_AGENT_ICON } from "../types/plugin";
 import type {
@@ -1909,8 +1909,28 @@ export class PluginDataStore {
 			throw new Error(`Provider with ID "${providerId}" not found`);
 		}
 
+		// Collect this provider's secret IDs before dropping its config, so we can
+		// clear the raw values from the (cross-plugin) SecretStorage instead of
+		// orphaning API keys there after the provider is gone.
+		const config = this.#data.providerConfig[providerId];
+		const secretIdsToConsider = config ? Object.values(config.auth.secretIds ?? {}) : [];
+
 		delete this.#data.providerMeta[providerId];
 		delete this.#data.providerConfig[providerId];
+
+		// A secret ID can be shared (assignSecretIdToProviderField lets one field
+		// point at an existing secret). Only remove secrets no remaining provider
+		// still references, so we never clear a key another provider depends on.
+		const stillReferenced = new Set<string>();
+		for (const cfg of Object.values(this.#data.providerConfig)) {
+			for (const id of Object.values(cfg.auth.secretIds ?? {})) stillReferenced.add(id);
+		}
+		for (const secretId of secretIdsToConsider) {
+			if (secretId && !stillReferenced.has(secretId)) {
+				removeSecret(this._plugin.app, secretId);
+			}
+		}
+
 		await this.saveSettings();
 	}
 }

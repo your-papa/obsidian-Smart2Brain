@@ -194,6 +194,11 @@ function applySequentialEdits(
 				};
 			}
 			const matcher = built.matcher;
+			if (matcher.matchesEmpty) {
+				return {
+					error: `Error in operation ${operationNumber}, edit ${i + 1}: The regex can match an empty string, which matches everywhere in "${path}". Use a pattern that matches concrete text.`,
+				};
+			}
 			const occurrences = matcher.count(content);
 			if (occurrences === 0) {
 				return {
@@ -205,8 +210,10 @@ function applySequentialEdits(
 					error: `Error in operation ${operationNumber}, edit ${i + 1}: The regex matches multiple times in "${path}". Make it more specific, or set replace_all to replace every match.`,
 				};
 			}
-			// Regex replace ($1/$2 back-references honored); non-global regex replaces only the first match.
-			content = content.replace(replace_all ? matcher.globalRegex() : new RegExp(oldText), newText);
+			// Regex replace ($1/$2 back-references honored). Use the matcher's own
+			// compiled regex so the replace can never diverge from the count above:
+			// global replaces every match, non-global replaces only the first.
+			content = content.replace(replace_all ? matcher.globalRegex() : matcher.singleRegex(), newText);
 			continue;
 		}
 

@@ -2,7 +2,7 @@
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { Notice } from "obsidian";
 import { onMount } from "svelte";
-import { createObsidianFetch } from "../../lib/obsidianFetch";
+import { installObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
 import type { MCPHTTPServerConfig, MCPServerConfig, MCPStdioServerConfig, MCPTransportType } from "../../types/plugin";
 import { getData } from "../../stores/dataStore.svelte";
@@ -282,20 +282,16 @@ async function handleTestConnection() {
 	testSuccess = false;
 
 	try {
-		// Patch fetch for CORS bypass (same as in AgentManager)
-		const windowWithFetch = window as Window & { _originalFetch?: typeof fetch };
-		const needsPatch = !windowWithFetch._originalFetch;
-
-		if (needsPatch) {
-			windowWithFetch._originalFetch = window.fetch;
-			window.fetch = createObsidianFetch(windowWithFetch._originalFetch);
-		}
-
+		// Ref-counted global-fetch patch for CORS bypass — safe under concurrency
+		// (unlike the old _originalFetch flag + finally-restore, which corrupted
+		// when two probes overlapped).
+		const patch = installObsidianFetch();
+		let mcpClient: MultiServerMCPClient | undefined;
 		try {
 			const config = buildTestConfig();
 			Logger.log("Testing MCP connection with config:", config);
 
-			const mcpClient = new MultiServerMCPClient(config);
+			mcpClient = new MultiServerMCPClient(config);
 			const tools = await mcpClient.getTools();
 
 			discoveredTools = tools.map((t) => ({
@@ -306,11 +302,14 @@ async function handleTestConnection() {
 
 			new Notice(`Connection successful! Found ${tools.length} tool(s).`);
 		} finally {
-			// Restore original fetch if we patched it
-			if (needsPatch && windowWithFetch._originalFetch) {
-				window.fetch = windowWithFetch._originalFetch;
-				windowWithFetch._originalFetch = undefined;
+			// Close the client so a stdio server's spawned child process / open
+			// session doesn't dangle after a one-off connection test.
+			try {
+				await mcpClient?.close();
+			} catch (closeErr) {
+				Logger.debug("MCP client close failed after test:", closeErr);
 			}
+			patch.release();
 		}
 	} catch (err) {
 		Logger.error("MCP connection test failed:", err);
