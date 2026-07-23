@@ -119,6 +119,40 @@ describe("grep_notes tool", () => {
 		expect(payload.results[0].matches[0].line_number).toBe(1);
 	});
 
+	it("skips lines over the scan-length limit and reports the count", async () => {
+		const file = makeFile("mixed.md");
+		mockGetIndexableVaultFiles.mockReturnValue([file]);
+		// One normal matching line, one 6000-char line that also contains the
+		// needle but must be skipped (over the 5000-char limit).
+		const longLine = `${"z".repeat(6000)}needle`;
+		const app = createMockApp(() => `needle here\n${longLine}\nno match`);
+		const tool = createGrepNotesTool(app);
+
+		const payload = JSON.parse((await tool.invoke({ pattern: "needle" })) as string);
+		// Only the short line matched; the long line was skipped, not scanned.
+		expect(payload.total_matches).toBe(1);
+		expect(payload.results[0].matches[0].line_number).toBe(1);
+		expect(payload.lines_skipped).toBe(1);
+		expect(payload.message).toContain("skipped");
+	});
+
+	it("scans every note in a large vault (grep is exhaustive, no file cap)", async () => {
+		// A vault-wide grep must read every eligible note — there is no file-count
+		// cap that would silently drop the tail of a large vault. 6000 files, each
+		// with one match: all 6000 are found and files_searched equals the total.
+		const total = 6000;
+		const files = Array.from({ length: total }, (_, i) => makeFile(`n${String(i).padStart(5, "0")}.md`));
+		mockGetIndexableVaultFiles.mockReturnValue(files);
+		const app = createMockApp(() => "needle");
+		const tool = createGrepNotesTool(app);
+
+		const payload = JSON.parse((await tool.invoke({ pattern: "needle" })) as string);
+
+		expect(payload.files_searched).toBe(total);
+		expect(payload.total_matches).toBe(total);
+		expect(payload.scan_truncated).toBeUndefined();
+	});
+
 	it("returns an error for an invalid regex", async () => {
 		const app = createMockApp(() => "");
 		const tool = createGrepNotesTool(app);

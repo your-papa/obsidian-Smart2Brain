@@ -194,9 +194,22 @@ function applySequentialEdits(
 				};
 			}
 			const matcher = built.matcher;
-			if (matcher.matchesEmpty) {
+			// A regex over an over-length note can backtrack catastrophically past
+			// what the ReDoS screen catches. Refuse rather than freeze the UI. This
+			// runs before the zero-width check so we never scan an over-length note.
+			if (content.length > matcher.maxInputLength) {
 				return {
-					error: `Error in operation ${operationNumber}, edit ${i + 1}: The regex can match an empty string, which matches everywhere in "${path}". Use a pattern that matches concrete text.`,
+					error: `Error in operation ${operationNumber}, edit ${i + 1}: "${path}" is ${content.length} characters, too large to search safely with a regex (limit ${matcher.maxInputLength}). Use a literal (non-regex) find, or split the note.`,
+				};
+			}
+			// Reject patterns whose match consumes no characters (`\b`, `(?=x)`, `^`,
+			// `$`, `x*`, …). Replacing a zero-width match inserts the replacement at
+			// every boundary instead of substituting text — never what the caller
+			// intends. Checked against the actual content so anchored patterns that
+			// DO consume text (`\bword`) are allowed.
+			if (matcher.hasZeroWidthMatch(content)) {
+				return {
+					error: `Error in operation ${operationNumber}, edit ${i + 1}: The regex matches an empty (zero-width) position in "${path}", so replacing it would insert text at every boundary rather than substitute. Use a pattern that matches concrete text.`,
 				};
 			}
 			const occurrences = matcher.count(content);
@@ -287,6 +300,15 @@ export async function stageNoteOperations(
 	// result so the model knows a concurrent chat is editing the same file — the
 	// update-dedup only collapses same-thread duplicates, not cross-thread ones.
 	const crossThreadPaths = new Set<string>();
+	// Notes skipped by a vault-wide regex replace because they exceed the safe
+	// regex input length. Accumulated across ops so a partial-success summary can
+	// still surface the skip (the pure-skip case is reported per-op below).
+	let tooLargeSkippedTotal = 0;
+	// Notes a vault-wide replace skipped because an *earlier* operation in this
+	// same batch already staged a change to them. Skipping avoids staging two
+	// conflicting diffs for one file (the second would be un-appliable), but the
+	// skip must be surfaced — otherwise a multi-op batch silently under-applies.
+	const conflictSkippedPaths = new Set<string>();
 
 	for (let i = 0; i < operations.length; i++) {
 		const operation = operations[i];
@@ -439,6 +461,14 @@ export async function stageNoteOperations(
 		}
 		const matcher = built.matcher;
 
+		// Structurally empty-matchable patterns (`x*`, `^`, `$`, `a?`) match at
+		// every position regardless of content, so reject upfront before scanning
+		// the vault. Content-dependent zero-width patterns (`\b`, `(?=x)`) can only
+		// be detected against real text and are caught in the loop below.
+		if (operation.is_regex && matcher.matchesEmpty) {
+			return `Error in operation ${operationNumber}: The regex "${operation.find}" matches an empty (zero-width) position, so replacing it would insert text everywhere rather than substitute. Use a pattern that matches concrete text.`;
+		}
+
 		let candidateFiles = getIndexableVaultFiles(app.vault).filter(
 			(f) => f.extension.toLowerCase() === "md" && isTextIndexableFile(f),
 		);
@@ -451,16 +481,42 @@ export async function stageNoteOperations(
 		const replaceProvider = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).chatModel?.provider;
 		let notesSearched = 0;
 		let notesChanged = 0;
+		let notesTooLarge = 0;
+		let notesConflictSkipped = 0;
 
 		for (const file of candidateFiles) {
 			if (!store.isPathAllowed(file.path)) continue;
 			if (replaceProvider && store.shouldBlockFile(file.path, replaceProvider)) continue;
 
-			// Guard against conflicting with another op in this same batch.
-			if (seenPaths.has(file.path)) continue;
+			// Guard against conflicting with another op in this same batch: an
+			// earlier op already staged a change to this file, so staging a second
+			// diff from the same original content would be un-appliable. Record the
+			// skip so it is surfaced rather than silently under-applied.
+			if (seenPaths.has(file.path)) {
+				conflictSkippedPaths.add(file.path);
+				notesConflictSkipped++;
+				continue;
+			}
 
 			notesSearched++;
 			const originalContent = await app.vault.read(file);
+			// Skip notes too large to regex safely (unbounded backtracking would
+			// freeze the UI). Only regex ops are affected — a literal find is a
+			// plain string scan with no backtracking. Counted and surfaced below
+			// so the skip is visible, not a silent wrong answer.
+			if (operation.is_regex && originalContent.length > matcher.maxInputLength) {
+				notesTooLarge++;
+				tooLargeSkippedTotal++;
+				continue;
+			}
+			// Content-dependent zero-width guard: `\b`, `(?=x)` etc. match without
+			// consuming characters, so replacing them scatters the replacement across
+			// every boundary. This is a property of the pattern, not the file — the
+			// first note that exhibits it proves the pattern is wrong for a replace —
+			// so abort the whole operation rather than silently skipping notes.
+			if (operation.is_regex && matcher.hasZeroWidthMatch(originalContent)) {
+				return `Error in operation ${operationNumber}: The regex "${operation.find}" matches an empty (zero-width) position in "${file.path}", so replacing it would insert text at every boundary rather than substitute. Use a pattern that matches concrete text.`;
+			}
 			if (!matcher.test(originalContent)) continue;
 
 			const newContent = operation.is_regex
@@ -483,7 +539,19 @@ export async function stageNoteOperations(
 		}
 
 		if (notesChanged === 0) {
-			return `Error in operation ${operationNumber}: No occurrences of "${operation.find}" found across ${notesSearched} note(s) searched${operation.path_prefix ? ` under "${operation.path_prefix}"` : ""}. Nothing was staged.`;
+			// If the only reason nothing staged is that every candidate was
+			// conflict-skipped (an earlier op in this batch already changed those
+			// files), do NOT abort the batch — the earlier op's change is valid and
+			// the conflict is surfaced in the final summary. Aborting here would
+			// discard that valid change. Only hard-error on a genuine no-match.
+			if (notesConflictSkipped > 0) {
+				continue;
+			}
+			const tooLargeNote =
+				notesTooLarge > 0
+					? ` ${notesTooLarge} note(s) were skipped as too large to search with a regex safely — use a literal find or split them.`
+					: "";
+			return `Error in operation ${operationNumber}: No occurrences of "${operation.find}" found across ${notesSearched} note(s) searched${operation.path_prefix ? ` under "${operation.path_prefix}"` : ""}. Nothing was staged.${tooLargeNote}`;
 		}
 	}
 
@@ -494,6 +562,12 @@ export async function stageNoteOperations(
 	if (crossThreadPaths.size > 0) {
 		const paths = [...crossThreadPaths].map((p) => `"${p}"`).join(", ");
 		summary += ` Note: another chat already has a pending update to ${paths}. Both proposals target the same file — whichever is accepted first wins, and the other may then be un-appliable (its expected original content will no longer match). Coordinate or avoid duplicating edits across chats.`;
+	}
+	if (tooLargeSkippedTotal > 0) {
+		summary += ` ${tooLargeSkippedTotal} note(s) were skipped as too large to search with a regex safely — use a literal find or split them.`;
+	}
+	if (conflictSkippedPaths.size > 0) {
+		summary += ` ${conflictSkippedPaths.size} note(s) matched a later replace operation but were skipped because an earlier operation in this batch already modified them — run those replacements in a separate manage_notes call to apply them.`;
 	}
 	return summary;
 }

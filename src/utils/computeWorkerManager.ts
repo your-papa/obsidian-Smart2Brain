@@ -83,9 +83,28 @@ function postRequest<T extends ComputeWorkerResponse>(request: ComputeWorkerRequ
 	}
 
 	return new Promise<T>((resolve, reject) => {
-		pending.set(request.id, { resolve, reject, request });
+		// Store a recovery copy whose vector buffer is NOT the one we transfer.
+		// `getTransferList` hands the buffer to the worker, which detaches it on
+		// this thread; recomputing on the main thread from a detached buffer
+		// would throw. Cloning first keeps the recovery path intact while the
+		// worker still gets a zero-copy transfer of the original.
+		pending.set(request.id, { resolve, reject, request: cloneRequestForRecovery(request) });
 		w.postMessage(request, getTransferList(request));
 	});
+}
+
+/**
+ * Deep-copy the transferable vector buffer of a request so a retained copy
+ * survives the `postMessage` transfer (which detaches the original's buffer on
+ * this thread). Non-vector requests (e.g. `leiden`) transfer nothing and are
+ * returned as-is.
+ */
+function cloneRequestForRecovery(request: ComputeWorkerRequest): ComputeWorkerRequest {
+	if (request.type === "leiden") return request;
+	const { data, count, dim } = request.vectors;
+	// `data.slice()` allocates a fresh backing buffer, decoupled from the one
+	// about to be transferred.
+	return { ...request, vectors: { data: data.slice(), count, dim } };
 }
 
 /**

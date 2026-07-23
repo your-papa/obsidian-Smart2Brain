@@ -44,6 +44,7 @@ vi.mock("../../src/utils/fileFiltering", () => ({
 const THREAD_CONFIG = { configurable: { thread_id: "test-thread-id" } };
 
 import type { App } from "obsidian";
+import { MAX_REGEX_INPUT_LENGTH } from "../../src/agent/tools/grepMatcher";
 import { createManageNotesTool } from "../../src/agent/tools/manageNotes";
 
 function makeFile(path: string, ext = "md") {
@@ -482,6 +483,54 @@ describe("manageNotes tool", () => {
 				expect.anything(),
 			);
 		});
+
+		it("refuses a regex edit on a note larger than the safe regex ceiling", async () => {
+			const file = makeFile("Notes/huge.md");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+			// A note past the ceiling: a screen-bypassing pattern could freeze the UI,
+			// so the tool must refuse rather than run the regex.
+			vi.mocked(app.vault.read).mockResolvedValue("x".repeat(MAX_REGEX_INPUT_LENGTH + 1));
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/huge.md",
+							edits: [{ oldText: "x+", newText: "y", is_regex: true }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("too large to search safely with a regex");
+			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
+
+		it("refuses a zero-width regex edit that would insert at every boundary", async () => {
+			const file = makeFile("Notes/zw.md");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+			// `\b` matches zero-width at word boundaries — replacing it would scatter
+			// the replacement across the note rather than substitute text.
+			vi.mocked(app.vault.read).mockResolvedValue("hello world");
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/zw.md",
+							edits: [{ oldText: "\\b", newText: "X", is_regex: true, replace_all: true }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("zero-width");
+			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
 	});
 
 	describe("vault-wide replace operation", () => {
@@ -530,6 +579,87 @@ describe("manageNotes tool", () => {
 			const staged = mockAddChanges.mock.calls[0][0];
 			expect(staged).toHaveLength(1);
 			expect(staged[0].path).toBe("Projects/a.md");
+		});
+
+		it("surfaces files a later replace op skips because an earlier op changed them", async () => {
+			// Two replace ops in one batch. Op A rewrites foo→bar in shared.md; op B
+			// would rewrite baz→qux in the same file, but it is skipped to avoid
+			// staging a conflicting second diff. The skip must be surfaced, not silent.
+			const shared = makeFile("Notes/shared.md");
+			mockGetIndexableVaultFiles.mockReturnValue([shared]);
+			vi.mocked(app.vault.read).mockResolvedValue("foo and baz together");
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{ type: "replace", find: "foo", replace: "bar" },
+						{ type: "replace", find: "baz", replace: "qux" },
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			// Op A staged one change; op B's match in the same file was skipped and
+			// the summary must say so rather than silently under-applying.
+			const staged = mockAddChanges.mock.calls[0][0];
+			expect(staged).toHaveLength(1);
+			expect(staged[0].newContent).toBe("bar and baz together");
+			expect(result).toMatch(/skipped because an earlier operation/);
+		});
+
+		it("skips oversized notes in a vault-wide regex replace and reports the skip", async () => {
+			const small = makeFile("Notes/small.md");
+			const huge = makeFile("Notes/huge.md");
+			mockGetIndexableVaultFiles.mockReturnValue([small, huge]);
+			vi.mocked(app.vault.read).mockImplementation(async (f: { path: string }) =>
+				f.path === "Notes/small.md" ? "foo here" : "foo".repeat(MAX_REGEX_INPUT_LENGTH),
+			);
+
+			const result = await tool.invoke(
+				{
+					operations: [{ type: "replace", find: "foo", replace: "bar", is_regex: true }],
+				},
+				THREAD_CONFIG,
+			);
+
+			// The small note is staged; the huge note is skipped, not scanned, and
+			// the skip is surfaced in the summary rather than silently dropped.
+			const staged = mockAddChanges.mock.calls[0][0];
+			expect(staged).toHaveLength(1);
+			expect(staged[0].path).toBe("Notes/small.md");
+			expect(result).toContain("skipped as too large");
+		});
+
+		it("refuses a zero-width regex in a vault-wide replace", async () => {
+			const a = makeFile("Notes/a.md");
+			mockGetIndexableVaultFiles.mockReturnValue([a]);
+			vi.mocked(app.vault.read).mockResolvedValue("hello world");
+
+			const result = await tool.invoke(
+				{
+					operations: [{ type: "replace", find: "\\b", replace: "X", is_regex: true }],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("zero-width");
+			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
+
+		it("refuses a structurally empty-matchable regex upfront in a vault-wide replace", async () => {
+			const a = makeFile("Notes/a.md");
+			mockGetIndexableVaultFiles.mockReturnValue([a]);
+			vi.mocked(app.vault.read).mockResolvedValue("anything");
+
+			const result = await tool.invoke(
+				{
+					operations: [{ type: "replace", find: "x*", replace: "Y", is_regex: true }],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("zero-width");
+			expect(mockAddChanges).not.toHaveBeenCalled();
 		});
 
 		it("returns an error and stages nothing when there are zero matches", async () => {
