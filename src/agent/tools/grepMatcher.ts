@@ -30,6 +30,17 @@ export interface GrepMatcher {
 	 * position), so callers should reject them rather than count/replace.
 	 */
 	readonly matchesEmpty: boolean;
+	/**
+	 * Longest input `test`/`count` will run this matcher against. For a regex
+	 * matcher this is the ReDoS backtracking bound (`MAX_REGEX_INPUT_LENGTH`);
+	 * for a literal needle it is `Infinity` (literals cannot backtrack). Callers
+	 * that operate on whole-note content should check `text.length` against this
+	 * and surface a clear "input too large" error instead of running the regex —
+	 * `test`/`count` return `false`/`0` for over-length input as a safety
+	 * backstop, but that is indistinguishable from a genuine non-match, so the
+	 * caller-side check is what keeps the failure visible.
+	 */
+	readonly maxInputLength: number;
 }
 
 export type BuildMatcherResult = { ok: true; matcher: GrepMatcher } | { ok: false; error: string };
@@ -50,6 +61,24 @@ export type BuildMatcherResult = { ok: true; matcher: GrepMatcher } | { ok: fals
 export const MAX_SCANNED_LINE_LENGTH = 5000;
 
 /**
+ * Hard ceiling on the input length a *regex* matcher will run against, enforced
+ * inside `buildGrepMatcher` so every caller inherits it (no caller can forget).
+ *
+ * The ReDoS structural screen (`screenRegexForRedos`) is provably incomplete —
+ * regex-safety screening is undecidable — so a pattern with catastrophic
+ * backtracking can slip through. Without a length bound, such a pattern run
+ * against whole-note content (`manage_notes` does exactly this) backtracks
+ * super-linearly and freezes the single UI thread. This ceiling caps the worst
+ * case regardless of what the screen missed.
+ *
+ * Chosen large enough that every realistic note passes untouched (a 200k-char
+ * note is ~40k words), but small enough that even an exponential pattern can't
+ * run long. Literal needles are exempt (they use `String.includes` / an escaped
+ * literal regex and cannot backtrack) — their `maxInputLength` is `Infinity`.
+ */
+export const MAX_REGEX_INPUT_LENGTH = 200_000;
+
+/**
  * Reject regex patterns whose structure is prone to catastrophic backtracking
  * (ReDoS). A user- or agent-supplied pattern is compiled and then `.test()`ed
  * line-by-line across the whole vault on the only UI thread with no timeout, so
@@ -67,13 +96,72 @@ export const MAX_SCANNED_LINE_LENGTH = 5000;
  */
 const MAX_SAFE_QUANTIFIER_BOUND = 1000;
 
+/**
+ * Rewrite a regex source so the ReDoS structural screen only sees genuine
+ * structure. Two constructs are collapsed to inert letter placeholders in a
+ * single left-to-right pass (a regex-based replace can't do this correctly
+ * because `]` at class start is literal and escapes may appear inside a class):
+ *
+ *  - An escaped char `\X` → `E` (the escaped metacharacter is a literal).
+ *  - A character class `[...]` → `C` (the whole class is one atom; parens,
+ *    pipes and braces inside it are literal, not structure).
+ *
+ * Placeholders are letters, which carry no regex meaning, so quantifiers/groups
+ * around them read exactly as they would around any literal character.
+ */
+function neutralizeLiterals(pattern: string): string {
+	let out = "";
+	let i = 0;
+	while (i < pattern.length) {
+		const ch = pattern[i];
+		if (ch === "\\") {
+			// Escaped char (or a trailing lone backslash) → one literal atom.
+			out += "E";
+			i += 2;
+			continue;
+		}
+		if (ch === "[") {
+			// Consume a full character class. A `]` immediately after `[` or `[^`
+			// is a literal member, not the terminator; escapes are skipped whole.
+			let j = i + 1;
+			if (pattern[j] === "^") j++;
+			if (pattern[j] === "]") j++; // leading literal ']'
+			while (j < pattern.length && pattern[j] !== "]") {
+				if (pattern[j] === "\\") j += 2;
+				else j++;
+			}
+			// j is at the closing ']' (or end of string if unterminated).
+			out += "C";
+			i = j + 1;
+			continue;
+		}
+		out += ch;
+		i++;
+	}
+	return out;
+}
+
 function screenRegexForRedos(pattern: string): string | null {
-	// Structural checks below look for real regex metacharacters — group parens,
-	// quantifiers, braces. An *escaped* metacharacter (`\)`, `\(`, `\{`) is a
-	// literal, not structure, so strip every `\X` pair first. Without this, a
-	// pattern like `\){5,10}` (a literal `)` repeated) would be misread as a
-	// bounded group repetition and wrongly rejected.
-	const stripped = pattern.replace(/\\./g, "");
+	// The structural checks below look for real regex *structure* — group parens,
+	// quantifiers, braces, alternation. Two things masquerade as structure but are
+	// not, and must be neutralized first or the screen both misses real dangers
+	// and rejects safe patterns:
+	//
+	//  1. Escaped metacharacters (`\)`, `\(`, `\{`, `\|`) are literals. Replace
+	//     each `\X` pair with a neutral literal placeholder so the escaped char
+	//     becomes an ordinary character rather than vanishing. Deleting it (an
+	//     earlier approach) let neighbours fuse: `\(a+\)+` → `(a+)+`, a false
+	//     positive. Placeholder-ing yields `Ea+E+` — not a group — correctly safe.
+	//  2. Character-class contents (`[...]`) are a single atom; a `)`/`(`/`|`
+	//     inside a class is literal, not group structure. Replace each class with
+	//     a single placeholder atom so, e.g., `([^)]+)+$` presents as `(C+)+$` and
+	//     the nested-quantifier check can see the real `(…+)+` shape. Without this
+	//     the `)` inside `[^)]` was read as the group terminator and the pattern
+	//     slipped through to catastrophic backtracking.
+	//
+	// Placeholders are letters (no regex meaning) so downstream checks treat them
+	// as ordinary atoms.
+	const stripped = neutralizeLiterals(pattern);
 
 	// A group that is quantified, whose body contains an unbounded quantifier:
 	// (a+)+, (a*)*, (a+)*, (.*)+, (\d+){2,} etc. This is the classic exponential
@@ -152,7 +240,12 @@ export function buildGrepMatcher(pattern: string, isRegex: boolean, caseSensitiv
 			ok: true,
 			matcher: {
 				// A non-global clone avoids the stateful `lastIndex` trap when reusing `.test()` in a loop.
-				test: (text: string) => new RegExp(source.source, singleFlags).test(text),
+				// The length guard is a backstop for patterns the ReDoS screen missed:
+				// refusing to run against over-length input caps worst-case backtracking.
+				// Callers should check `maxInputLength` and surface a clear error;
+				// returning false here is only a last-resort safety net.
+				test: (text: string) =>
+					text.length <= MAX_REGEX_INPUT_LENGTH && new RegExp(source.source, singleFlags).test(text),
 				globalRegex: () => new RegExp(source.source, globalFlags),
 				singleRegex: () => new RegExp(source.source, singleFlags),
 				count: (text: string) => {
@@ -161,11 +254,13 @@ export function buildGrepMatcher(pattern: string, isRegex: boolean, caseSensitiv
 					// which for an empty-matchable pattern returns one entry per
 					// character and inflates the count).
 					if (matchesEmpty) return 0;
+					if (text.length > MAX_REGEX_INPUT_LENGTH) return 0;
 					let n = 0;
 					for (const _ of text.matchAll(new RegExp(source.source, globalFlags))) n++;
 					return n;
 				},
 				matchesEmpty,
+				maxInputLength: MAX_REGEX_INPUT_LENGTH,
 			},
 		};
 	}
@@ -188,6 +283,9 @@ export function buildGrepMatcher(pattern: string, isRegex: boolean, caseSensitiv
 				return matches ? matches.length : 0;
 			},
 			matchesEmpty,
+			// A literal needle is matched by `String.includes` / an escaped-literal
+			// regex with no quantifiers — it cannot backtrack, so no length bound.
+			maxInputLength: Number.POSITIVE_INFINITY,
 		},
 	};
 }

@@ -199,6 +199,13 @@ function applySequentialEdits(
 					error: `Error in operation ${operationNumber}, edit ${i + 1}: The regex can match an empty string, which matches everywhere in "${path}". Use a pattern that matches concrete text.`,
 				};
 			}
+			// A regex over an over-length note can backtrack catastrophically past
+			// what the ReDoS screen catches. Refuse rather than freeze the UI.
+			if (content.length > matcher.maxInputLength) {
+				return {
+					error: `Error in operation ${operationNumber}, edit ${i + 1}: "${path}" is ${content.length} characters, too large to search safely with a regex (limit ${matcher.maxInputLength}). Use a literal (non-regex) find, or split the note.`,
+				};
+			}
 			const occurrences = matcher.count(content);
 			if (occurrences === 0) {
 				return {
@@ -287,6 +294,10 @@ export async function stageNoteOperations(
 	// result so the model knows a concurrent chat is editing the same file — the
 	// update-dedup only collapses same-thread duplicates, not cross-thread ones.
 	const crossThreadPaths = new Set<string>();
+	// Notes skipped by a vault-wide regex replace because they exceed the safe
+	// regex input length. Accumulated across ops so a partial-success summary can
+	// still surface the skip (the pure-skip case is reported per-op below).
+	let tooLargeSkippedTotal = 0;
 
 	for (let i = 0; i < operations.length; i++) {
 		const operation = operations[i];
@@ -451,6 +462,7 @@ export async function stageNoteOperations(
 		const replaceProvider = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).chatModel?.provider;
 		let notesSearched = 0;
 		let notesChanged = 0;
+		let notesTooLarge = 0;
 
 		for (const file of candidateFiles) {
 			if (!store.isPathAllowed(file.path)) continue;
@@ -461,6 +473,15 @@ export async function stageNoteOperations(
 
 			notesSearched++;
 			const originalContent = await app.vault.read(file);
+			// Skip notes too large to regex safely (unbounded backtracking would
+			// freeze the UI). Only regex ops are affected — a literal find is a
+			// plain string scan with no backtracking. Counted and surfaced below
+			// so the skip is visible, not a silent wrong answer.
+			if (operation.is_regex && originalContent.length > matcher.maxInputLength) {
+				notesTooLarge++;
+				tooLargeSkippedTotal++;
+				continue;
+			}
 			if (!matcher.test(originalContent)) continue;
 
 			const newContent = operation.is_regex
@@ -483,7 +504,11 @@ export async function stageNoteOperations(
 		}
 
 		if (notesChanged === 0) {
-			return `Error in operation ${operationNumber}: No occurrences of "${operation.find}" found across ${notesSearched} note(s) searched${operation.path_prefix ? ` under "${operation.path_prefix}"` : ""}. Nothing was staged.`;
+			const tooLargeNote =
+				notesTooLarge > 0
+					? ` ${notesTooLarge} note(s) were skipped as too large to search with a regex safely — use a literal find or split them.`
+					: "";
+			return `Error in operation ${operationNumber}: No occurrences of "${operation.find}" found across ${notesSearched} note(s) searched${operation.path_prefix ? ` under "${operation.path_prefix}"` : ""}. Nothing was staged.${tooLargeNote}`;
 		}
 	}
 
@@ -494,6 +519,9 @@ export async function stageNoteOperations(
 	if (crossThreadPaths.size > 0) {
 		const paths = [...crossThreadPaths].map((p) => `"${p}"`).join(", ");
 		summary += ` Note: another chat already has a pending update to ${paths}. Both proposals target the same file — whichever is accepted first wins, and the other may then be un-appliable (its expected original content will no longer match). Coordinate or avoid duplicating edits across chats.`;
+	}
+	if (tooLargeSkippedTotal > 0) {
+		summary += ` ${tooLargeSkippedTotal} note(s) were skipped as too large to search with a regex safely — use a literal find or split them.`;
 	}
 	return summary;
 }

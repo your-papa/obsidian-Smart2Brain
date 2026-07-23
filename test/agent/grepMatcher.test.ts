@@ -5,7 +5,7 @@ vi.mock("../../src/utils/logging", () => ({
 	Logger: { debug: vi.fn(), warn: vi.fn(), error: vi.fn(), log: vi.fn() },
 }));
 
-import { buildGrepMatcher, escapeRegExp } from "../../src/agent/tools/grepMatcher";
+import { buildGrepMatcher, escapeRegExp, MAX_REGEX_INPUT_LENGTH } from "../../src/agent/tools/grepMatcher";
 
 describe("escapeRegExp", () => {
 	it("escapes regex metacharacters", () => {
@@ -142,6 +142,24 @@ describe("buildGrepMatcher — ReDoS protection", () => {
 		expect(buildGrepMatcher("price\\{\\d+\\}", true, false).ok).toBe(true);
 	});
 
+	it("catches nested quantifiers hidden inside a character class", () => {
+		// The `)` lives inside `[^)]`, so a screen that scans group bodies with
+		// `[^)]*` would stop early and miss the real `(…+)+` shape. The class-aware
+		// screen must still reject these.
+		expect(buildGrepMatcher("([^)]+)+$", true, false).ok).toBe(false);
+		expect(buildGrepMatcher("([^x]+)*$", true, false).ok).toBe(false);
+	});
+
+	it("accepts a safe pattern with escaped parens around a quantifier", () => {
+		// `\(a+\)+` is a literal '(' , a+, literal ')', repeated — NOT a quantified
+		// group. Neutralizing escapes to placeholders (not deleting them) keeps it
+		// from collapsing to `(a+)+` and being wrongly rejected.
+		const built = buildGrepMatcher("\\(a+\\)+", true, false);
+		expect(built.ok).toBe(true);
+		if (!built.ok) return;
+		expect(built.matcher.test("(aaa))")).toBe(true);
+	});
+
 	it("does not screen literal needles (parens are literal there)", () => {
 		const built = buildGrepMatcher("(a+)+", false, false);
 		expect(built.ok).toBe(true);
@@ -179,5 +197,37 @@ describe("buildGrepMatcher — empty-match handling", () => {
 		const built = buildGrepMatcher("foo", false, false);
 		if (!built.ok) return;
 		expect(built.matcher.matchesEmpty).toBe(false);
+	});
+});
+
+describe("buildGrepMatcher — input-length ceiling (ReDoS backstop)", () => {
+	it("exposes MAX_REGEX_INPUT_LENGTH as maxInputLength for a regex matcher", () => {
+		const built = buildGrepMatcher("needle", true, false);
+		if (!built.ok) return;
+		expect(built.matcher.maxInputLength).toBe(MAX_REGEX_INPUT_LENGTH);
+	});
+
+	it("does not run a regex against input longer than the ceiling", () => {
+		const built = buildGrepMatcher("needle", true, false);
+		if (!built.ok) return;
+		// Over-length input: the matcher refuses to run (backstop), so it reports
+		// no match / zero count even though the needle is present. Callers detect
+		// this via maxInputLength and surface a clear error instead.
+		const over = `${"x".repeat(MAX_REGEX_INPUT_LENGTH + 1)}needle`;
+		expect(built.matcher.test(over)).toBe(false);
+		expect(built.matcher.count(over)).toBe(0);
+		// At/under the ceiling it still matches normally.
+		const under = `${"x".repeat(1000)}needle`;
+		expect(built.matcher.test(under)).toBe(true);
+		expect(built.matcher.count(under)).toBe(1);
+	});
+
+	it("does not cap literal needles (they cannot backtrack)", () => {
+		const built = buildGrepMatcher("needle", false, false);
+		if (!built.ok) return;
+		expect(built.matcher.maxInputLength).toBe(Number.POSITIVE_INFINITY);
+		const over = `${"x".repeat(MAX_REGEX_INPUT_LENGTH + 1)}needle`;
+		expect(built.matcher.test(over)).toBe(true);
+		expect(built.matcher.count(over)).toBe(1);
 	});
 });

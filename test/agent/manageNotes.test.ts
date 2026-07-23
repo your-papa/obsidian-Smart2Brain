@@ -44,6 +44,7 @@ vi.mock("../../src/utils/fileFiltering", () => ({
 const THREAD_CONFIG = { configurable: { thread_id: "test-thread-id" } };
 
 import type { App } from "obsidian";
+import { MAX_REGEX_INPUT_LENGTH } from "../../src/agent/tools/grepMatcher";
 import { createManageNotesTool } from "../../src/agent/tools/manageNotes";
 
 function makeFile(path: string, ext = "md") {
@@ -482,6 +483,30 @@ describe("manageNotes tool", () => {
 				expect.anything(),
 			);
 		});
+
+		it("refuses a regex edit on a note larger than the safe regex ceiling", async () => {
+			const file = makeFile("Notes/huge.md");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+			// A note past the ceiling: a screen-bypassing pattern could freeze the UI,
+			// so the tool must refuse rather than run the regex.
+			vi.mocked(app.vault.read).mockResolvedValue("x".repeat(MAX_REGEX_INPUT_LENGTH + 1));
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/huge.md",
+							edits: [{ oldText: "x+", newText: "y", is_regex: true }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("too large to search safely with a regex");
+			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
 	});
 
 	describe("vault-wide replace operation", () => {
@@ -530,6 +555,29 @@ describe("manageNotes tool", () => {
 			const staged = mockAddChanges.mock.calls[0][0];
 			expect(staged).toHaveLength(1);
 			expect(staged[0].path).toBe("Projects/a.md");
+		});
+
+		it("skips oversized notes in a vault-wide regex replace and reports the skip", async () => {
+			const small = makeFile("Notes/small.md");
+			const huge = makeFile("Notes/huge.md");
+			mockGetIndexableVaultFiles.mockReturnValue([small, huge]);
+			vi.mocked(app.vault.read).mockImplementation(async (f: { path: string }) =>
+				f.path === "Notes/small.md" ? "foo here" : "foo".repeat(MAX_REGEX_INPUT_LENGTH),
+			);
+
+			const result = await tool.invoke(
+				{
+					operations: [{ type: "replace", find: "foo", replace: "bar", is_regex: true }],
+				},
+				THREAD_CONFIG,
+			);
+
+			// The small note is staged; the huge note is skipped, not scanned, and
+			// the skip is surfaced in the summary rather than silently dropped.
+			const staged = mockAddChanges.mock.calls[0][0];
+			expect(staged).toHaveLength(1);
+			expect(staged[0].path).toBe("Notes/small.md");
+			expect(result).toContain("skipped as too large");
 		});
 
 		it("returns an error and stages nothing when there are zero matches", async () => {
