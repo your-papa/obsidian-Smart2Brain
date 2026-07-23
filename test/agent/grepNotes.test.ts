@@ -31,7 +31,7 @@ vi.mock("../../src/utils/pathResolution", () => ({
 }));
 
 import type { App } from "obsidian";
-import { createGrepNotesTool, MAX_SCANNED_FILES } from "../../src/agent/tools/grepNotes";
+import { createGrepNotesTool } from "../../src/agent/tools/grepNotes";
 
 function makeFile(path: string, ext = "md") {
 	return { path, name: path.split("/").pop()!, extension: ext };
@@ -136,34 +136,20 @@ describe("grep_notes tool", () => {
 		expect(payload.message).toContain("skipped");
 	});
 
-	it("bounds a vault-wide scan and flags truncation past the file budget", async () => {
-		// One more file than the budget, each containing a match. The scan must
-		// stop at MAX_SCANNED_FILES, so the last file's match is never found and
-		// scan_truncated is reported.
-		const files = Array.from({ length: MAX_SCANNED_FILES + 1 }, (_, i) =>
-			makeFile(`n${String(i).padStart(5, "0")}.md`),
-		);
+	it("scans every note in a large vault (grep is exhaustive, no file cap)", async () => {
+		// A vault-wide grep must read every eligible note — there is no file-count
+		// cap that would silently drop the tail of a large vault. 6000 files, each
+		// with one match: all 6000 are found and files_searched equals the total.
+		const total = 6000;
+		const files = Array.from({ length: total }, (_, i) => makeFile(`n${String(i).padStart(5, "0")}.md`));
 		mockGetIndexableVaultFiles.mockReturnValue(files);
 		const app = createMockApp(() => "needle");
 		const tool = createGrepNotesTool(app);
 
 		const payload = JSON.parse((await tool.invoke({ pattern: "needle" })) as string);
 
-		expect(payload.files_searched).toBe(MAX_SCANNED_FILES);
-		expect(payload.total_matches).toBe(MAX_SCANNED_FILES);
-		expect(payload.scan_truncated).toBe(true);
-		expect(payload.message).toContain("path_prefix");
-	});
-
-	it("does not flag truncation when the file set fits within the budget", async () => {
-		const files = Array.from({ length: 3 }, (_, i) => makeFile(`m${i}.md`));
-		mockGetIndexableVaultFiles.mockReturnValue(files);
-		const app = createMockApp(() => "needle");
-		const tool = createGrepNotesTool(app);
-
-		const payload = JSON.parse((await tool.invoke({ pattern: "needle" })) as string);
-
-		expect(payload.files_searched).toBe(3);
+		expect(payload.files_searched).toBe(total);
+		expect(payload.total_matches).toBe(total);
 		expect(payload.scan_truncated).toBeUndefined();
 	});
 
