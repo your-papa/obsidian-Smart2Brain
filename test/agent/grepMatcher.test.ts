@@ -150,6 +150,29 @@ describe("buildGrepMatcher — ReDoS protection", () => {
 		expect(buildGrepMatcher("([^x]+)*$", true, false).ok).toBe(false);
 	});
 
+	it("catches nested quantified groups that a flat [^)]* scan misses", () => {
+		// `((a+))+$` is exponential (verified: >1s at ~24 chars), but the old flat
+		// `\([^)]*[*+][^)]*\)[*+]` regex stopped at the inner `)` and let it pass.
+		// The depth-aware screen balances parens and rejects the whole family.
+		expect(buildGrepMatcher("((a+))+$", true, false).ok).toBe(false);
+		expect(buildGrepMatcher("(([a-z]+))+$", true, false).ok).toBe(false);
+		expect(buildGrepMatcher("(((a+)))+", true, false).ok).toBe(false);
+		expect(buildGrepMatcher("(a*)*", true, false).ok).toBe(false);
+	});
+
+	it("still accepts nested groups whose repetition is fenced", () => {
+		// A literal/atom between the inner quantifier and the group boundary fences
+		// each repetition, so these stay linear and must NOT be rejected.
+		expect(buildGrepMatcher("((a+)b)+$", true, false).ok).toBe(true);
+		expect(buildGrepMatcher("(a(b)c)+", true, false).ok).toBe(true);
+		expect(buildGrepMatcher("((ab))+", true, false).ok).toBe(true);
+		expect(buildGrepMatcher("(a+b)+", true, false).ok).toBe(true);
+		expect(buildGrepMatcher("(\\w+)@(\\w+)", true, false).ok).toBe(true);
+		// A non-capturing group of literal-fenced content — the `(?:\(a+\))+` shape
+		// the flat screen wrongly rejected. Depth-aware analysis accepts it.
+		expect(buildGrepMatcher("(?:\\(a+\\))+", true, false).ok).toBe(true);
+	});
+
 	it("rejects adjacent unbounded quantifiers on overlapping atoms", () => {
 		// Sequential quantifiers (no enclosing group) backtrack catastrophically:
 		// `a+a+a+X` against a long run of `a` is the canonical freeze. These must
@@ -180,6 +203,14 @@ describe("buildGrepMatcher — ReDoS protection", () => {
 		expect(built.ok).toBe(true);
 		if (!built.ok) return;
 		expect(built.matcher.test("(aaa))")).toBe(true);
+	});
+
+	it("accepts a backreference pattern that is not catastrophic in V8", () => {
+		// `^(a+)\1+$` looks ReDoS-shaped but the backreference *constrains* the
+		// match (the second run must equal the first), so V8 runs it in ~0.02ms
+		// regardless of input length — verified empirically. Rejecting it would be
+		// a false positive that blocks a legitimate "doubled run" search.
+		expect(buildGrepMatcher("^(a+)\\1+$", true, false).ok).toBe(true);
 	});
 
 	it("does not screen literal needles (parens are literal there)", () => {

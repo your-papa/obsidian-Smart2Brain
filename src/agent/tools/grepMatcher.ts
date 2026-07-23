@@ -222,46 +222,177 @@ function hasAdjacentOverlappingQuantifiers(neutralized: string): boolean {
 	return false;
 }
 
+/**
+ * Index of the `)` that closes the group whose `(` is at `open`, tracking paren
+ * depth so nested groups are handled correctly. Returns -1 if unbalanced.
+ * Operates on a *neutralized* pattern, so every `(`/`)` is real group structure
+ * (literal parens are already `L`, class contents are `C`).
+ */
+function matchingParen(s: string, open: number): number {
+	let depth = 0;
+	for (let i = open; i < s.length; i++) {
+		if (s[i] === "(") depth++;
+		else if (s[i] === ")") {
+			depth--;
+			if (depth === 0) return i;
+		}
+	}
+	return -1;
+}
+
+/** Strip a leading group prefix — `?:`, `?=`, `?!`, `?<name>`, `?<=`, `?<!`. */
+function stripGroupPrefix(body: string): string {
+	return body.replace(/^\?[:=!]|^\?<[=!]|^\?<[^>]*>/, "");
+}
+
+/**
+ * Whether a quantified group's *body* is "unfenced" — i.e. it reduces to a
+ * single unbounded-quantified unit (`a+`, `(a+)`, `((a+))`, …) with nothing else
+ * at the top level to fence a repetition. This is the property that makes an
+ * outer unbounded quantifier catastrophic: `(a+)+` and `((a+))+` explode, but
+ * `(a+b)+` (fenced by `b`), `(a(b)c)+` (no top-level quantifier), and
+ * `(?:\(a+\))+` → `(?:La+L)+` (fenced by literal `L`) do not.
+ *
+ * Verified empirically: `((a+))+$` is exponential (>1s at ~24 chars) while every
+ * fenced form stays linear. Recurses through redundant group wrappers so
+ * `(((a+)))+` is still caught. Operates on a neutralized pattern.
+ */
+function bodyIsUnfenced(body: string): boolean {
+	const tokens = splitTopLevel(body);
+	// More than one top-level token means something fences the repetition (a
+	// sibling atom, a separator, an alternation) — not the catastrophic shape.
+	if (tokens.length !== 1) return false;
+	const t = tokens[0];
+	if (t.kind === "atom") return t.unbounded;
+	if (t.kind === "group") {
+		// A single nested group: dangerous if the group's own unbounded quantifier
+		// wraps an unfenced body, or (an unquantified wrapper) its body is unfenced.
+		if (t.unbounded) return bodyIsUnfenced(t.inner);
+		if (!t.quantified) return bodyIsUnfenced(t.inner);
+	}
+	return false;
+}
+
+type TopLevelToken =
+	| { kind: "atom"; quantified: boolean; unbounded: boolean }
+	| { kind: "group"; quantified: boolean; unbounded: boolean; inner: string }
+	| { kind: "alt" };
+
+/**
+ * Split a neutralized regex body into its top-level tokens (depth 0 only):
+ * ordinary atoms, groups (with their inner text), and `|` alternation markers.
+ * Each atom/group carries whether it is quantified and, if so, whether by an
+ * unbounded quantifier (`*`/`+`, not `?` and not a bounded `{n,m}`).
+ */
+function splitTopLevel(body: string): TopLevelToken[] {
+	const tokens: TopLevelToken[] = [];
+	let i = 0;
+	while (i < body.length) {
+		const c = body[i];
+		if (c === "|") {
+			tokens.push({ kind: "alt" });
+			i++;
+			continue;
+		}
+		if (c === "(") {
+			const close = matchingParen(body, i);
+			if (close === -1) {
+				i++;
+				continue;
+			}
+			const inner = stripGroupPrefix(body.slice(i + 1, close));
+			const after = body[close + 1];
+			if (after === "*" || after === "+") {
+				tokens.push({ kind: "group", quantified: true, unbounded: true, inner });
+				i = close + 2;
+			} else if (after === "?") {
+				tokens.push({ kind: "group", quantified: true, unbounded: false, inner });
+				i = close + 2;
+			} else if (after === "{") {
+				const end = body.indexOf("}", close);
+				tokens.push({ kind: "group", quantified: true, unbounded: false, inner });
+				i = end === -1 ? close + 1 : end + 1;
+			} else {
+				tokens.push({ kind: "group", quantified: false, unbounded: false, inner });
+				i = close + 1;
+			}
+			continue;
+		}
+		// Ordinary atom (one neutralized char). Read its trailing quantifier.
+		const after = body[i + 1];
+		if (after === "*" || after === "+") {
+			tokens.push({ kind: "atom", quantified: true, unbounded: true });
+			i += 2;
+		} else if (after === "?") {
+			tokens.push({ kind: "atom", quantified: true, unbounded: false });
+			i += 2;
+		} else if (after === "{") {
+			const end = body.indexOf("}", i);
+			tokens.push({ kind: "atom", quantified: true, unbounded: false });
+			i = end === -1 ? i + 1 : end + 1;
+		} else {
+			tokens.push({ kind: "atom", quantified: false, unbounded: false });
+			i++;
+		}
+	}
+	return tokens;
+}
+
+/**
+ * Depth-aware scan for the two catastrophic quantified-group shapes that a flat
+ * `[^)]*` regex cannot see because it can't balance parens:
+ *
+ *  - An unbounded-quantified group with an unfenced body: `(a+)+`, `((a+))+`,
+ *    `(C+)+` (from `([^)]+)+`). The old `\([^)]*[*+][^)]*\)[*+]` regex stopped at
+ *    the first inner `)`, so `((a+))+` slipped through.
+ *  - A quantified group containing a top-level alternation: `(a|a)*`, `(a|b)+`.
+ *
+ * Returns a reason string if the neutralized pattern contains either shape.
+ */
+function findDangerousQuantifiedGroup(neutralized: string): string | null {
+	for (let i = 0; i < neutralized.length; i++) {
+		if (neutralized[i] !== "(") continue;
+		const close = matchingParen(neutralized, i);
+		if (close === -1) break;
+		const after = neutralized[close + 1];
+		if (after !== "*" && after !== "+") continue; // only unbounded group quantifiers here
+		const body = stripGroupPrefix(neutralized.slice(i + 1, close));
+		if (bodyIsUnfenced(body)) {
+			return "quantifier applied to a group whose body is itself unbounded (e.g. `(a+)+`, `((a+))+`)";
+		}
+		// A quantified group with a top-level alternation backtracks badly when the
+		// branches overlap: `(a|a)*`, `(\w|\d)+`.
+		if (splitTopLevel(body).some((t) => t.kind === "alt")) {
+			return "quantifier applied to an alternation group (e.g. `(a|a)*`) — prone to catastrophic backtracking";
+		}
+	}
+	return null;
+}
+
 function screenRegexForRedos(pattern: string): string | null {
 	// The structural checks below look for real regex *structure* — group parens,
 	// quantifiers, braces, alternation. Two things masquerade as structure but are
-	// not, and must be neutralized first or the screen both misses real dangers
-	// and rejects safe patterns:
+	// not, and are neutralized first (see `neutralizeLiterals`) so the screen
+	// neither misses real dangers nor rejects safe patterns:
 	//
-	//  1. Escaped metacharacters (`\)`, `\(`, `\{`, `\|`) are literals. Replace
-	//     each `\X` pair with a neutral literal placeholder so the escaped char
-	//     becomes an ordinary character rather than vanishing. Deleting it (an
-	//     earlier approach) let neighbours fuse: `\(a+\)+` → `(a+)+`, a false
-	//     positive. Placeholder-ing yields `Ea+E+` — not a group — correctly safe.
-	//  2. Character-class contents (`[...]`) are a single atom; a `)`/`(`/`|`
-	//     inside a class is literal, not group structure. Replace each class with
-	//     a single placeholder atom so, e.g., `([^)]+)+$` presents as `(C+)+$` and
-	//     the nested-quantifier check can see the real `(…+)+` shape. Without this
-	//     the `)` inside `[^)]` was read as the group terminator and the pattern
-	//     slipped through to catastrophic backtracking.
+	//  1. Escaped metacharacters (`\)`, `\(`, `\{`, `\|`) are literals → `L`/`E`,
+	//     so `\(a+\)+` → `La+L+` (not a group) is correctly safe.
+	//  2. Character-class contents (`[...]`) are a single atom → `C`, so
+	//     `([^)]+)+$` → `(C+)+$` presents its real `(…+)+` shape.
 	//
-	// Placeholders are letters (no regex meaning) so downstream checks treat them
-	// as ordinary atoms.
+	// After neutralization every `(`/`)` is genuine group structure, which lets
+	// the depth-aware `findDangerousQuantifiedGroup` scan balance parens correctly
+	// — catching nested shapes like `((a+))+` that a flat `[^)]*` regex misses.
 	const stripped = neutralizeLiterals(pattern);
 
-	// A group that is quantified, whose body contains an unbounded quantifier:
-	// (a+)+, (a*)*, (a+)*, (.*)+, (\d+){2,} etc. This is the classic exponential
-	// nested-quantifier form.
-	const nestedQuantifier = /\([^)]*[*+][^)]*\)\s*[*+]|\([^)]*[*+][^)]*\)\s*\{\d+,?\d*\}/;
-	if (nestedQuantifier.test(stripped)) {
-		return "quantifier applied to a group that already contains an unbounded quantifier (e.g. `(a+)+`)";
-	}
-
-	// Quantified alternation of single-char classes that overlap, e.g. (a|a)*,
-	// (\w|\d)+ — overlapping branches under a quantifier backtrack badly.
-	const quantifiedAlternation = /\([^)]*\|[^)]*\)\s*[*+]/;
-	if (quantifiedAlternation.test(stripped)) {
-		return "quantifier applied to an alternation group (e.g. `(a|a)*`) — prone to catastrophic backtracking";
+	// Catastrophic quantified-group shapes (nested/unfenced body, or quantified
+	// alternation), detected with real paren balancing rather than a flat regex.
+	const dangerousGroup = findDangerousQuantifiedGroup(stripped);
+	if (dangerousGroup) {
+		return dangerousGroup;
 	}
 
 	// A group followed by a bounded repetition, e.g. (a+){10,} or (ab){50,100} —
-	// bounded but still explodes the match tree. Any `{n,m}` (or `{n,}`) applied
-	// directly to a group is treated as unsafe.
 	const boundedQuantifiedGroup = /\)\s*\{\d+(?:,\d*)?\}/;
 	if (boundedQuantifiedGroup.test(stripped)) {
 		return "bounded repetition applied to a group (e.g. `(a+){10,}`) — prone to catastrophic backtracking";
