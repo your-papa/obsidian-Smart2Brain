@@ -90,6 +90,17 @@ function handleAuthModeChange(mode: OpenAIAuthMode) {
 const showSignIn = $derived(!!oauth);
 const isSignedIn = $derived(showSignIn ? (oauth?.isSignedIn?.() ?? false) : false);
 
+// Whether this OAuth provider is already connected, so the edit view shows a "Connected"
+// state instead of a misleading "Sign in" CTA. Two flavors:
+//  - session-backed (Codex): connected == an active session (oauth.isSignedIn()).
+//  - api-key-backed (OpenRouter): no session to check — connected == a stored apiKey.
+const oauthConnected = $derived.by(() => {
+	if (!oauth) return false;
+	if (oauth.isSignedIn) return isSignedIn;
+	const stored = data.getStoredAuthState(providerId);
+	return !!(stored?.values.apiKey || stored?.secretIds.apiKey);
+});
+
 // Whether the user has actually supplied credentials yet. Suppresses the connection
 // status on an untouched form (an empty required field validates to a scary "API key is
 // required" error otherwise). True once any required auth field has a stored value/secret,
@@ -456,21 +467,30 @@ $effect(() => {
 {#snippet oauthSignIn()}
   {#if oauth}
     <SettingItem name={`${oauth.label} Sign-In`} desc={oauth.description ?? ""}>
-      <div class="flex gap-2">
+      <div class="flex gap-2 items-center">
         {#if isSigningIn && oauth.cancelSignIn}
           <!-- While a sign-in is pending, let the user abort it (e.g. they closed the
                browser tab) and retry, instead of waiting out the timeout. -->
           <Button buttonText="Cancel sign-in" onClick={handleCancelSignIn} />
+        {:else if oauthConnected && !oauth.disconnect}
+          <!-- API-key-backed OAuth (e.g. OpenRouter): the minted key doesn't expire, so
+               reconnecting is needless. Show a plain connected status, no button. -->
+          <span class="oauth-connected-label">Connected via {oauth.label}</span>
+        {:else if oauthConnected}
+          <!-- Session-backed OAuth (e.g. Codex/ChatGPT): tokens can expire or be revoked,
+               so keep Reconnect (re-auth) and Disconnect available. -->
+          <span class="oauth-connected-label">Connected via {oauth.label}</span>
+          <Button buttonText="Reconnect" disabled={isSigningIn} onClick={() => void handleOAuthSignIn()} />
+          {#if oauth.disconnect}
+            <Button buttonText="Disconnect" onClick={handleOAuthDisconnect} />
+          {/if}
         {:else}
           <Button
-            buttonText={isSignedIn ? "Reconnect" : `Sign in with ${oauth.label}`}
+            buttonText={`Sign in with ${oauth.label}`}
             disabled={isSigningIn}
             cta={true}
             onClick={() => void handleOAuthSignIn()}
           />
-        {/if}
-        {#if oauth.disconnect && isSignedIn && !isSigningIn}
-          <Button buttonText="Disconnect" onClick={handleOAuthDisconnect} />
         {/if}
       </div>
     </SettingItem>
@@ -478,6 +498,14 @@ $effect(() => {
 {/snippet}
 
 <style>
+  .oauth-connected-label {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-success, #4caf50);
+    font-size: var(--font-ui-small);
+    font-weight: 500;
+  }
+
   .auth-alt-toggle {
     padding: 0 var(--size-4-3) var(--size-4-2);
   }
