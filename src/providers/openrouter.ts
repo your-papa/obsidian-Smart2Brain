@@ -23,7 +23,7 @@ import type {
 } from "../types/provider/index";
 import OpenRouterLogo from "../components/ui/logos/OpenRouterLogo.svelte";
 import { populateOpenRouterCache, type OpenRouterModelInfo } from "./openrouterModels";
-import { signInWithOpenRouter } from "./openrouterOAuth";
+import { signInWithOpenRouter, cancelOpenRouterSignIn } from "./openrouterOAuth";
 import {
 	createBufferedTransportedChatOpenAI,
 	createTransportedChatOpenAI,
@@ -96,6 +96,7 @@ export const openrouterProvider: EmbeddingProviderDefinition = {
 		icon: "log-in",
 		description: "Authorize in your browser to connect without manually creating an API key.",
 		signIn: async () => ({ kind: "apiKey", apiKey: await signInWithOpenRouter() }),
+		cancelSignIn: cancelOpenRouterSignIn,
 		supportsApiKey: true,
 	},
 

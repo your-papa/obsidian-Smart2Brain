@@ -57,6 +57,14 @@ interface PendingOpenAICodexAuth {
 let pendingOpenAICodexAuth: PendingOpenAICodexAuth | null = null;
 let pendingOpenAICodexRefresh: Promise<CodexSession | null> | null = null;
 
+/** Thrown when the user explicitly cancels an in-progress sign-in (vs. a real failure). */
+export class OpenAICodexSignInCancelledError extends Error {
+	constructor() {
+		super("ChatGPT sign-in cancelled");
+		this.name = "OpenAICodexSignInCancelledError";
+	}
+}
+
 const HTML_SUCCESS = `<!doctype html>
 <html>
   <head><title>Smart2Brain - Authorization Successful</title></head>
@@ -448,6 +456,18 @@ export async function signInWithOpenAICodex(): Promise<CodexSession> {
 
 	saveOpenAICodexSession(session);
 	return session;
+}
+
+/**
+ * Aborts an in-progress ChatGPT (Codex) sign-in: rejects the pending promise with a
+ * cancellation marker and tears down the callback server (freeing the port), so the user
+ * can retry immediately instead of waiting out the timeout. No-op if none pending.
+ */
+export function cancelOpenAICodexSignIn(): void {
+	const pending = pendingOpenAICodexAuth;
+	if (!pending) return;
+	pending.reject(new OpenAICodexSignInCancelledError());
+	cleanupPendingOpenAICodexAuth();
 }
 
 function buildHeaders(initHeaders: HeadersInit | undefined, accountId?: string): Headers {

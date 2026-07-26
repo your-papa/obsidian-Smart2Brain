@@ -7,6 +7,7 @@ import type {
 	ChatModelConfig,
 } from "../types/provider/index";
 import {
+	cancelOpenAICodexSignIn,
 	clearOpenAICodexSession,
 	createOpenAICodexFetch,
 	getValidOpenAICodexSession,
@@ -64,6 +65,7 @@ export function openAICodexProvider(providerId: string, displayName = "OpenAI Co
 				await signInWithOpenAICodex();
 				return { kind: "session" };
 			},
+			cancelSignIn: cancelOpenAICodexSignIn,
 			isSignedIn: () => !!getCodexSession(),
 			disconnect: clearOpenAICodexSession,
 			supportsApiKey: false,

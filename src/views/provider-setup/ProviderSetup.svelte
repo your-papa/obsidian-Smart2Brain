@@ -121,10 +121,24 @@ async function handleOAuthSignIn() {
 		}
 		invalidateAuthState(providerId);
 	} catch (error) {
-		signInError = error instanceof Error ? error.message : String(error);
+		// A user-initiated cancel isn't a failure — clear the flow silently so the CTA
+		// returns to "Sign in" and the user can retry. Cancellation markers set their name.
+		const name = error instanceof Error ? error.name : "";
+		if (name === "OpenRouterSignInCancelledError" || name === "OpenAICodexSignInCancelledError") {
+			signInError = null;
+		} else {
+			signInError = error instanceof Error ? error.message : String(error);
+		}
 	} finally {
 		isSigningIn = false;
 	}
+}
+
+// Abort an in-progress sign-in (e.g. the user closed the browser tab before authorizing).
+// This rejects the pending signIn() promise and frees its callback server/port so the flow
+// can be retried immediately instead of hanging until the timeout.
+function handleCancelSignIn() {
+	oauth?.cancelSignIn?.();
 }
 
 function handleOAuthDisconnect() {
@@ -423,13 +437,19 @@ $effect(() => {
   {#if oauth}
     <SettingItem name={`${oauth.label} Sign-In`} desc={oauth.description ?? ""}>
       <div class="flex gap-2">
-        <Button
-          buttonText={isSignedIn ? "Reconnect" : `Sign in with ${oauth.label}`}
-          disabled={isSigningIn}
-          cta={true}
-          onClick={() => void handleOAuthSignIn()}
-        />
-        {#if oauth.disconnect && isSignedIn}
+        {#if isSigningIn && oauth.cancelSignIn}
+          <!-- While a sign-in is pending, let the user abort it (e.g. they closed the
+               browser tab) and retry, instead of waiting out the timeout. -->
+          <Button buttonText="Cancel sign-in" onClick={handleCancelSignIn} />
+        {:else}
+          <Button
+            buttonText={isSignedIn ? "Reconnect" : `Sign in with ${oauth.label}`}
+            disabled={isSigningIn}
+            cta={true}
+            onClick={() => void handleOAuthSignIn()}
+          />
+        {/if}
+        {#if oauth.disconnect && isSignedIn && !isSigningIn}
           <Button buttonText="Disconnect" onClick={handleOAuthDisconnect} />
         {/if}
       </div>

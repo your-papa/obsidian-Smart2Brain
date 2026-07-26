@@ -20,6 +20,7 @@ import type {
 	EmbeddingProviderDefinition,
 } from "../types/provider/index";
 import {
+	cancelOpenAICodexSignIn,
 	clearOpenAICodexSession,
 	createOpenAICodexFetch,
 	getValidOpenAICodexSession,
@@ -114,6 +115,7 @@ export const openaiProvider: EmbeddingProviderDefinition = {
 			await signInWithOpenAICodex();
 			return { kind: "session" };
 		},
+		cancelSignIn: cancelOpenAICodexSignIn,
 		isSignedIn: () => !!getCodexSession(),
 		disconnect: clearOpenAICodexSession,
 		supportsApiKey: true,

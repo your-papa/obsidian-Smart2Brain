@@ -63,6 +63,14 @@ export interface ProviderOAuthCapability {
 	signIn: () => Promise<OAuthSignInResult>;
 
 	/**
+	 * Aborts an in-progress signIn(): rejects its promise and tears down any callback
+	 * server so the user can retry immediately (e.g. after closing the browser tab). The
+	 * rejected signIn() error is a cancellation marker the modal treats as "not an error".
+	 * Omit for flows that can't be cancelled.
+	 */
+	cancelSignIn?: () => void;
+
+	/**
 	 * True when a session-backed flow is currently signed in (drives Reconnect/Disconnect
 	 * and the connection status). API-key-backed flows omit this — their status comes from
 	 * the auth-validation query instead.
