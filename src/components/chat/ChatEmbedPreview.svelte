@@ -8,10 +8,11 @@ interface Props {
 	pairs: MessagePair[];
 	title?: string;
 	updatedAt?: number;
+	loading?: boolean;
 	onOpenChat?: () => void;
 }
 
-const { pairs, title, updatedAt, onOpenChat }: Props = $props();
+const { pairs, title, updatedAt, loading = false, onOpenChat }: Props = $props();
 
 const formattedDate = $derived(
 	typeof updatedAt === "number" && updatedAt > 0 ? new Date(updatedAt).toLocaleString() : undefined,
@@ -40,7 +41,13 @@ const formattedDate = $derived(
 		{/if}
 	</div>
 
-	{#if pairs.length === 0}
+	{#if loading}
+		<div class="s2b-chat-embed-skeleton">
+			<div class="s2b-chat-embed-skeleton-line s2b-chat-embed-skeleton-short"></div>
+			<div class="s2b-chat-embed-skeleton-line s2b-chat-embed-skeleton-long"></div>
+			<div class="s2b-chat-embed-skeleton-line s2b-chat-embed-skeleton-medium"></div>
+		</div>
+	{:else if pairs.length === 0}
 		<div class="s2b-chat-embed-empty">This chat has no messages yet.</div>
 	{:else}
 		<div class="s2b-chat-embed-body">
@@ -157,5 +164,28 @@ const formattedDate = $derived(
 	padding: var(--size-4-4);
 	text-align: center;
 	color: var(--text-muted);
+}
+
+.s2b-chat-embed-skeleton {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-2);
+	padding: var(--size-4-3);
+}
+
+.s2b-chat-embed-skeleton-line {
+	height: 12px;
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-border);
+	animation: s2b-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.s2b-chat-embed-skeleton-short  { width: 40%; align-self: flex-end; }
+.s2b-chat-embed-skeleton-long   { width: 90%; }
+.s2b-chat-embed-skeleton-medium { width: 65%; }
+
+@keyframes s2b-skeleton-pulse {
+	0%, 100% { opacity: 1; }
+	50%       { opacity: 0.4; }
 }
 </style>

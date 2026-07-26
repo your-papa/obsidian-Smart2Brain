@@ -49,8 +49,12 @@ class ChatEmbed extends MarkdownRenderChild {
 	 * Obsidian's embed pipeline calls `loadFile()` on the returned component after
 	 * construction (NOT `onload`), so the render must live here. It is also called
 	 * again when the embedded file changes on disk.
+	 *
+	 * We return synchronously after rendering a skeleton so Obsidian can lay out
+	 * and paint the note immediately. The real transcript loads in the background
+	 * and swaps in once ready, avoiding a freeze on large .chat files.
 	 */
-	async loadFile(): Promise<void> {
+	loadFile(): void {
 		this.containerEl.empty();
 		this.containerEl.addClass("s2b-chat-embed-container");
 
@@ -59,28 +63,55 @@ class ChatEmbed extends MarkdownRenderChild {
 			this.component = undefined;
 		}
 
+		// Render skeleton immediately so the note stays responsive, then load data.
+		this.component = mount(ChatEmbedPreview, {
+			target: this.containerEl,
+			props: {
+				pairs: [],
+				title: this.file.basename,
+				updatedAt: this.file.stat?.mtime,
+				loading: true,
+				onOpenChat: () => {
+					void this.plugin.app.workspace.openLinkText(this.file.path, "", false);
+				},
+			},
+		});
+
+		// Yield to the browser paint cycle before doing the heavy work.
+		setTimeout(() => {
+			void this.loadContent();
+		}, 0);
+	}
+
+	private async loadContent(): Promise<void> {
 		try {
 			const checkpoints = await this.plugin.agentManager.readCheckpointHistory(this.file.path);
 			const graph = buildCheckpointGraph(checkpoints);
 			const active = resolveActiveCheckpointId(graph, {});
 			const pairs = deriveMessagePairsFromActiveCheckpoint(graph, active.checkpointId);
 
+			if (this.component) {
+				// Swap skeleton for real content via Svelte's $set equivalent.
+				unmount(this.component);
+			}
 			this.component = mount(ChatEmbedPreview, {
 				target: this.containerEl,
 				props: {
 					pairs,
 					title: this.file.basename,
 					updatedAt: this.file.stat?.mtime,
+					loading: false,
 					onOpenChat: () => {
-						// The plugin patches WorkspaceLeaf.openFile to route .chat files
-						// into the configured sidebar split, so a plain openLinkText opens
-						// the real chat view rather than replacing the current note.
 						void this.plugin.app.workspace.openLinkText(this.file.path, "", false);
 					},
 				},
 			});
 		} catch (e) {
 			Logger.error(`Failed to render .chat embed for ${this.file.path}:`, e);
+			if (this.component) {
+				unmount(this.component);
+				this.component = undefined;
+			}
 			this.containerEl.setText("Could not load chat preview.");
 		}
 	}
