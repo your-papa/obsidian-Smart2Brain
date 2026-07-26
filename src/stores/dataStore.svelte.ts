@@ -44,7 +44,10 @@ import {
 } from "../providers/index";
 
 const LANGSMITH_API_KEY_SECRET_ID = buildManagedSecretId("langsmith", "apiKey");
-const WEB_SEARCH_API_KEY_SECRET_ID = buildManagedSecretId("web-search", "apiKey");
+/** Managed secret id for a web-search provider's API key, e.g. "web-search-brave-api-key". */
+function webSearchSecretId(provider: string): string {
+	return buildManagedSecretId(`web-search-${provider}`, "apiKey");
+}
 
 // ============================================================================
 // Error Classes
@@ -415,7 +418,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 	// Web search
 	webSearchProvider: "firecrawl",
-	webSearchApiKeyId: "",
+	webSearchApiKeyIds: {},
 
 	// Other
 	searchAlgorithm: "lexical",
@@ -673,29 +676,43 @@ export class PluginDataStore {
 		this.saveSettings();
 	}
 
+	/** Resolve the API key for the currently selected provider (empty string if none). */
 	get webSearchApiKey() {
-		if (!this.#data.webSearchApiKeyId) return "";
-		return getSecret(this._plugin.app, this.#data.webSearchApiKeyId) ?? "";
+		const secretId = this.#data.webSearchApiKeyIds[this.#data.webSearchProvider];
+		if (!secretId) return "";
+		return getSecret(this._plugin.app, secretId) ?? "";
 	}
+	/** Store (or clear) the API key for the currently selected provider only. */
 	set webSearchApiKey(val: string) {
+		const provider = this.#data.webSearchProvider;
+		if (!provider) return;
 		const trimmedValue = val.trim();
 		if (trimmedValue) {
-			setSecret(this._plugin.app, WEB_SEARCH_API_KEY_SECRET_ID, trimmedValue);
-			this.#data.webSearchApiKeyId = WEB_SEARCH_API_KEY_SECRET_ID;
+			const secretId = webSearchSecretId(provider);
+			setSecret(this._plugin.app, secretId, trimmedValue);
+			this.#data.webSearchApiKeyIds[provider] = secretId;
 		} else {
-			if (this.#data.webSearchApiKeyId) {
-				setSecret(this._plugin.app, this.#data.webSearchApiKeyId, "");
-			}
-			this.#data.webSearchApiKeyId = "";
+			const existing = this.#data.webSearchApiKeyIds[provider];
+			if (existing) setSecret(this._plugin.app, existing, "");
+			delete this.#data.webSearchApiKeyIds[provider];
 		}
 		this.saveSettings();
 	}
 
+	/** Secret id bound to the current provider's key field in the UI (empty if unset). */
 	get webSearchApiKeyId() {
-		return this.#data.webSearchApiKeyId;
+		return this.#data.webSearchApiKeyIds[this.#data.webSearchProvider] ?? "";
 	}
+	/** Bind an existing secret to the current provider (used by the SecretSelect picker). */
 	set webSearchApiKeyId(val: string) {
-		this.#data.webSearchApiKeyId = val.trim();
+		const provider = this.#data.webSearchProvider;
+		if (!provider) return;
+		const trimmed = val.trim();
+		if (trimmed) {
+			this.#data.webSearchApiKeyIds[provider] = trimmed;
+		} else {
+			delete this.#data.webSearchApiKeyIds[provider];
+		}
 		this.saveSettings();
 	}
 

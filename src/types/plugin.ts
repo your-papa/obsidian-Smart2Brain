@@ -457,8 +457,11 @@ export interface PluginData {
 
 	/** Selected web search provider ("firecrawl" | "brave" | "tavily" | "") */
 	webSearchProvider: string;
-	/** Secret ID for the web search API key */
-	webSearchApiKeyId: string;
+	/**
+	 * Secret IDs for web search API keys, keyed by provider id. Per-provider so a key
+	 * entered for one provider is never transmitted to another when the provider changes.
+	 */
+	webSearchApiKeyIds: Record<string, string>;
 
 	// ============================================================================
 	// Debugging & Telemetry
