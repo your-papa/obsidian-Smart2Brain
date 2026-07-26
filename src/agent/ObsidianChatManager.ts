@@ -8,7 +8,7 @@ import {
 	type PendingWrite,
 } from "@langchain/langgraph-checkpoint";
 import { type DataAdapter, TFile, debounce, normalizePath } from "obsidian";
-import { gunzip, gunzipSync, gzipSync } from "node:zlib";
+import { gunzip, gzipSync } from "node:zlib";
 import type SecondBrainPlugin from "../main";
 import { getData } from "../stores/dataStore.svelte";
 import type { CheckpointHistoryItem } from "./Agent";
