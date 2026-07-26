@@ -105,7 +105,7 @@ const diffViewModeOptions = [
 ];
 
 const webSearchProviderOptions = [
-	{ display: "None", value: "" },
+	{ display: "Firecrawl (keyless)", value: "firecrawl" },
 	{ display: "Brave Search", value: "brave" },
 	{ display: "Tavily", value: "tavily" },
 ];
@@ -671,10 +671,12 @@ function handleResetToDefault() {
       </ModalField>
       {#if pluginData.webSearchProvider}
         <ModalField
-          label="API Key"
+          label={pluginData.webSearchProvider === "firecrawl" ? "API Key (optional)" : "API Key"}
           desc={pluginData.webSearchProvider === "brave"
             ? "Brave Search API key from api.search.brave.com."
-            : "Tavily API key from app.tavily.com."}
+            : pluginData.webSearchProvider === "tavily"
+              ? "Tavily API key from app.tavily.com."
+              : "Optional — add a Firecrawl API key (fc-…) for higher rate limits. Leave empty to use the keyless tier."}
         >
           <SecretSelect
             value={pluginData.webSearchApiKeyId}
@@ -682,19 +684,6 @@ function handleResetToDefault() {
           />
         </ModalField>
       {/if}
-      <ModalField
-        label="Max Results"
-        desc="Number of search results to return (max 20)."
-        for="tool-config-web-search-max-results"
-      >
-        <Text
-          id="tool-config-web-search-max-results"
-          inputType="number"
-          value={maxResults}
-          placeholder="10"
-          onblur={(v) => (maxResults = Math.min(Math.max(Number.parseInt(String(v)) || 10, 1), 20))}
-        />
-      </ModalField>
     </SettingGroup>
   {/if}
 

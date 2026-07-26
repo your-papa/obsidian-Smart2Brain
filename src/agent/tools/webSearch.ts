@@ -151,6 +151,68 @@ async function searchTavily(
 }
 
 // ============================================================================
+// Firecrawl Search
+// ============================================================================
+
+interface FirecrawlWebResult {
+	title?: string;
+	url?: string;
+	description?: string;
+	position?: number;
+}
+
+interface FirecrawlSearchResponse {
+	success?: boolean;
+	error?: string;
+	data?: { web?: FirecrawlWebResult[] };
+}
+
+/**
+ * Firecrawl search. Works keyless (the free tier); an optional API key raises
+ * rate limits. The Authorization header is only sent when a key is present.
+ */
+async function searchFirecrawl(
+	query: string,
+	apiKey: string,
+	count: number,
+	fetchImpl: ReturnType<typeof createObsidianFetch>,
+): Promise<WebSearchResult[]> {
+	const headers: Record<string, string> = { "Content-Type": "application/json" };
+	if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+	const controller = new AbortController();
+	const response = await fetchImpl("https://api.firecrawl.dev/v2/search", {
+		method: "POST",
+		headers,
+		body: JSON.stringify({
+			query,
+			limit: count,
+			sources: ["web"],
+		}),
+		signal: controller.signal,
+	});
+
+	if (!response.ok) {
+		if (response.status === 401) throw new Error("Invalid Firecrawl API key");
+		if (response.status === 429)
+			throw new Error("Firecrawl rate limit exceeded — try again shortly, or add an API key for higher limits");
+		throw new Error(`Firecrawl returned HTTP ${response.status}`);
+	}
+
+	const data = (await response.json()) as FirecrawlSearchResponse;
+	if (data.success === false) {
+		throw new Error(`Firecrawl search failed${data.error ? `: ${data.error}` : ""}`);
+	}
+
+	return (data.data?.web ?? []).map((r, i) => ({
+		rank: i + 1,
+		title: r.title ?? "",
+		url: r.url ?? "",
+		snippet: r.description ?? "",
+	}));
+}
+
+// ============================================================================
 // Tool factory
 // ============================================================================
 
@@ -173,7 +235,8 @@ export function createWebSearchTool() {
 		}
 
 		const apiKey = pluginData.webSearchApiKey;
-		if (!apiKey) {
+		// Firecrawl works keyless; Brave and Tavily require a key.
+		if (!apiKey && provider !== "firecrawl") {
 			return `Error: No API key configured for web search provider "${provider}". Go to Settings → General → Web Search and add an API key.`;
 		}
 
@@ -188,6 +251,8 @@ export function createWebSearchTool() {
 				results = await withTimeout(searchBrave(trimmed, apiKey, maxResults, fetchImpl), FETCH_TIMEOUT_MS);
 			} else if (provider === "tavily") {
 				results = await withTimeout(searchTavily(trimmed, apiKey, maxResults, fetchImpl), FETCH_TIMEOUT_MS);
+			} else if (provider === "firecrawl") {
+				results = await withTimeout(searchFirecrawl(trimmed, apiKey, maxResults, fetchImpl), FETCH_TIMEOUT_MS);
 			} else {
 				return `Error: Unknown web search provider "${provider}".`;
 			}

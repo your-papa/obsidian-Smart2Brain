@@ -325,7 +325,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 			"Use this only for URLs the user provided or for clearly public references. The tool sends the URL to the configured network — it does not send vault contents. Prefer searching the vault first; reach for fetch_url when the user explicitly references a link or when needed information cannot be in the vault.",
 	},
 	web_search: {
-		enabled: false,
+		enabled: true,
 		name: "web_search",
 		description:
 			"Search the web and return a list of relevant results (title, URL, snippet). Use this when the user asks about current events, external topics, or anything that cannot be in the vault. Always prefer searching the vault first with search_notes.",
@@ -414,7 +414,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	langSmithEndpoint: "https://api.smith.langchain.com",
 
 	// Web search
-	webSearchProvider: "",
+	webSearchProvider: "firecrawl",
 	webSearchApiKeyId: "",
 
 	// Other
