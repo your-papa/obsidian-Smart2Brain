@@ -9,6 +9,9 @@ import {
 } from "../../stores/chatStore.svelte";
 import { Logger } from "../../utils/logging";
 
+/** Yield to the browser so it can paint/handle input before continuing. */
+const yieldToMain = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 /**
  * Shape of the context object Obsidian's (internal) embed registry passes to an
  * embed creator. Not part of the public API, so typed locally.
@@ -28,6 +31,11 @@ interface EmbedRegistry {
 }
 
 let warnedMissingRegistry = false;
+
+// Stagger concurrent embed loads so their CPU bursts don't pile up in the
+// same frame. Each embed increments this counter and resets it on idle.
+let pendingLoadCount = 0;
+const STAGGER_MS = 50;
 
 /**
  * A read-only embedded/hovered preview of a `.chat` file. Reads the thread's
@@ -77,15 +85,24 @@ class ChatEmbed extends MarkdownRenderChild {
 			},
 		});
 
-		// Yield to the browser paint cycle before doing the heavy work.
+		// Stagger concurrent loads: each embed waits an extra STAGGER_MS per
+		// already-queued embed, spreading their CPU bursts across frames.
+		const delay = pendingLoadCount * STAGGER_MS;
+		pendingLoadCount++;
 		setTimeout(() => {
+			pendingLoadCount = Math.max(0, pendingLoadCount - 1);
 			void this.loadContent();
-		}, 0);
+		}, delay);
 	}
 
 	private async loadContent(): Promise<void> {
 		try {
+			// readCheckpointHistory uses async gunzip — decompression happens off the
+			// main thread. Yield once more after it returns so JSON.parse + graph
+			// building get their own frame and don't compound with other embeds.
 			const checkpoints = await this.plugin.agentManager.readCheckpointHistory(this.file.path);
+			await yieldToMain();
+
 			const graph = buildCheckpointGraph(checkpoints);
 			const active = resolveActiveCheckpointId(graph, {});
 			const pairs = deriveMessagePairsFromActiveCheckpoint(graph, active.checkpointId);

@@ -8,7 +8,7 @@ import {
 	type PendingWrite,
 } from "@langchain/langgraph-checkpoint";
 import { type DataAdapter, TFile, debounce, normalizePath } from "obsidian";
-import { gunzipSync, gzipSync } from "node:zlib";
+import { gunzip, gunzipSync, gzipSync } from "node:zlib";
 import type SecondBrainPlugin from "../main";
 import { getData } from "../stores/dataStore.svelte";
 import type { CheckpointHistoryItem } from "./Agent";
@@ -143,8 +143,12 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 	private async readThreadFile(path: string): Promise<ThreadData> {
 		const raw = await this.adapter.readBinary(path);
-		const decompressed = gunzipSync(new Uint8Array(raw));
-		return JSON.parse(decompressed.toString("utf8")) as ThreadData;
+		const decompressed = await new Promise<string>((resolve, reject) => {
+			gunzip(new Uint8Array(raw), (err, result) => (err ? reject(err) : resolve(result.toString("utf8"))));
+		});
+		// Yield after decompression so JSON.parse doesn't block the same frame.
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+		return JSON.parse(decompressed) as ThreadData;
 	}
 
 	private stripBase64FromChannelValues(channelValues: Record<string, unknown> | undefined): void {
