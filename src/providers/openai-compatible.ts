@@ -136,19 +136,19 @@ export function createOpenAICompatibleProvider(
 			],
 		},
 		auth: {
-			apiKey: {
-				label: "API Key",
-				description: "API key for authentication (if required)",
-				kind: "secret",
-				required: true,
-				placeholder: "sk-...",
-			},
 			baseUrl: {
 				label: "Base URL",
 				description: "The base URL for the OpenAI-compatible API endpoint",
 				kind: "text",
-				required: false,
-				placeholder: defaultBaseUrl,
+				required: true,
+				placeholder: "https://your-endpoint.example/v1",
+			},
+			apiKey: {
+				label: "API Key",
+				description: "API key for authentication (leave empty if your endpoint needs none)",
+				kind: "secret",
+				required: true,
+				placeholder: "sk-...",
 			},
 			headers: {
 				label: "Custom Headers",

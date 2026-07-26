@@ -244,6 +244,20 @@ export default class SecondBrainPlugin extends Plugin {
 		setPlugin(this);
 		this.pluginData = await StartupProfiler.measure("data:load", () => createData(this), true);
 
+		// Sweep orphaned draft providers. A "draft" (an unconfigured provider instance)
+		// only lives for the duration of an open Setup Provider modal, which deletes it on
+		// close if never configured. Any unconfigured provider present at load leaked from a
+		// modal that never ran its onClose cleanup (app reload / crash mid-draft). It's
+		// invisible everywhere the UI gates on getConfiguredProviders(), but it pollutes the
+		// provider ID/name space — causing new instances to be named "OpenAI 2" etc. — so
+		// reclaim it here, before any view or modal can open.
+		const orphanedDrafts = this.pluginData
+			.getAllProviderIds()
+			.filter((id) => !this.pluginData.isProviderConfigured(id));
+		for (const id of orphanedDrafts) {
+			await this.pluginData.deleteProvider(id);
+		}
+
 		// Create Skills Service instance (discovery deferred to onLayoutReady)
 		this.skillsService = new SkillsService(this);
 

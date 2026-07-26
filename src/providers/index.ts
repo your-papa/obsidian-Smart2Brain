@@ -21,14 +21,14 @@ export interface ProviderTemplateDefinition {
 
 export const PROVIDER_TEMPLATES: readonly ProviderTemplateDefinition[] = [
 	{
-		id: "openai-compatible",
-		displayName: "OpenAI-Compatible",
-		description: "Flexible OpenAI-style provider for OpenAI and compatible endpoints.",
+		id: "openai",
+		displayName: "OpenAI",
+		description: "OpenAI models via ChatGPT sign-in or an API key.",
 	},
 	{
-		id: "openai-codex",
-		displayName: "OpenAI Codex",
-		description: "ChatGPT/Codex sign-in flow for Codex-backed OpenAI models.",
+		id: "openai-compatible",
+		displayName: "Custom",
+		description: "Flexible OpenAI-style provider for OpenAI and compatible endpoints.",
 	},
 	{
 		id: "anthropic",
@@ -57,6 +57,12 @@ function createTemplateDefinition(
 	meta: ProviderInstanceMeta,
 ): BaseProviderDefinition | undefined {
 	switch (templateId) {
+		case "openai":
+			return {
+				...openaiProvider,
+				id: instanceId,
+				displayName: meta.displayName,
+			};
 		case "openai-compatible":
 			return createOpenAICompatibleProvider({
 				id: instanceId,

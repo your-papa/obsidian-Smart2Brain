@@ -63,7 +63,7 @@ let selectedAgent = $derived(data.getSelectedAgent());
 let hasChatModel = $derived(Boolean(selectedAgent?.chatModel));
 
 function openProviderSetup() {
-	new ProviderSetupModal(plugin, { templateId: "openai-compatible" }).open();
+	new ProviderSetupModal(plugin, {}).open();
 }
 
 function buildPersistedChatModel(provider: string, model: string, existing?: ChatModel | null): ChatModel {

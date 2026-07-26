@@ -1,7 +1,7 @@
 <script lang="ts">
 import { Notice } from "obsidian";
 import type { Component } from "svelte";
-import { createProviderStateQuery, invalidateProviderState } from "../../lib/query";
+import { createProviderStateQuery, invalidateProviderState, removeProviderQueries } from "../../lib/query";
 import { type LogoProps, getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
@@ -49,7 +49,9 @@ async function handleRemoveProvider() {
 	if (!(await confirmDelete(plugin.app, displayName))) return;
 	try {
 		await data.deleteProvider(provider);
-		invalidateProviderState(provider);
+		// Drop cached auth/state entirely (not just invalidate) so re-adding a provider with
+		// the same slug ID doesn't inherit this one's stale "connected" verdict from cache.
+		removeProviderQueries(provider);
 	} catch (error) {
 		new Notice(error instanceof Error ? error.message : "Failed to remove provider");
 	}
@@ -166,6 +168,13 @@ async function handleRemoveProvider() {
     background: transparent;
     box-shadow: none;
     cursor: pointer;
+    /* Size the button to its icon — the theme's default button height (30px) would
+       otherwise inflate the header row and push the leading logo off-center. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 16px;
+    line-height: 1;
   }
 
   .provider-icon-button:disabled {

@@ -19,7 +19,14 @@ import type {
 	ChatModelConfig,
 	EmbeddingProviderDefinition,
 } from "../types/provider/index";
-import { createOpenAICodexFetch, getValidOpenAICodexSession } from "./openaiCodex";
+import {
+	cancelOpenAICodexSignIn,
+	clearOpenAICodexSession,
+	createOpenAICodexFetch,
+	getValidOpenAICodexSession,
+	signInWithOpenAICodex,
+} from "./openaiCodex";
+import { getCodexSession } from "../stores/providerRuntime.svelte";
 import {
 	createBufferedTransportedChatOpenAI,
 	createTransportedChatOpenAI,
@@ -95,6 +102,23 @@ export const openaiProvider: EmbeddingProviderDefinition = {
 			url: "https://platform.openai.com/api-keys",
 			text: "OpenAI Dashboard",
 		},
+	},
+
+	// =========================================================================
+	// OAuth (ChatGPT sign-in) capability
+	// =========================================================================
+	oauth: {
+		label: "ChatGPT",
+		icon: "log-in",
+		description: "Open a browser window to complete ChatGPT/Codex authorization.",
+		signIn: async () => {
+			await signInWithOpenAICodex();
+			return { kind: "session" };
+		},
+		cancelSignIn: cancelOpenAICodexSignIn,
+		isSignedIn: () => !!getCodexSession(),
+		disconnect: clearOpenAICodexSession,
+		supportsApiKey: true,
 	},
 
 	// =========================================================================
@@ -175,6 +199,27 @@ export const openaiProvider: EmbeddingProviderDefinition = {
 	},
 
 	createSubAgentChatInstance: (auth: AuthObject, modelId: string, options?: Partial<ChatModelConfig>) => {
+		// Codex (ChatGPT sign-in) has no API key — authenticate via the Codex session
+		// transport, mirroring createChatInstance. Without this branch the subagent reads
+		// the absent auth.apiKey and fails with missing authentication.
+		if (auth.authMode === "codex") {
+			return createTransportedChatOpenAIResponses("openai", {
+				model: modelId,
+				apiKey: async () => {
+					const session = await getValidOpenAICodexSession();
+					if (!session) {
+						throw new Error("ChatGPT sign-in required");
+					}
+					return session.accessToken;
+				},
+				configuration: {
+					baseURL: OPENAI_DEFAULT_BASE_URL,
+					fetch: createOpenAICodexFetch(),
+				},
+				temperature: options?.temperature,
+			});
+		}
+
 		const config: Record<string, unknown> = { model: modelId, apiKey: auth.apiKey };
 		if (options?.temperature !== undefined) {
 			config.temperature = options.temperature;

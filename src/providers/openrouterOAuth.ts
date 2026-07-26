@@ -30,6 +30,14 @@ interface OpenRouterKeyResponse {
 
 let pendingOpenRouterAuth: PendingOpenRouterAuth | null = null;
 
+/** Thrown when the user explicitly cancels an in-progress sign-in (vs. a real failure). */
+export class OpenRouterSignInCancelledError extends Error {
+	constructor() {
+		super("OpenRouter sign-in cancelled");
+		this.name = "OpenRouterSignInCancelledError";
+	}
+}
+
 const HTML_SUCCESS = `<!doctype html>
 <html>
   <head><title>Smart2Brain - OpenRouter Connected</title></head>
@@ -282,4 +290,16 @@ export async function signInWithOpenRouter(): Promise<string> {
 			cleanupPendingOpenRouterAuth();
 		}, OAUTH_TIMEOUT_MS);
 	});
+}
+
+/**
+ * Aborts an in-progress OpenRouter sign-in: rejects the pending promise with a
+ * cancellation marker and tears down the callback server (freeing port 3000), so the
+ * user can retry immediately instead of waiting out the timeout. No-op if none pending.
+ */
+export function cancelOpenRouterSignIn(): void {
+	const pending = pendingOpenRouterAuth;
+	if (!pending) return;
+	pending.reject(new OpenRouterSignInCancelledError());
+	cleanupPendingOpenRouterAuth();
 }

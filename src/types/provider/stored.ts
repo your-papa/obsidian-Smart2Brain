@@ -7,7 +7,13 @@
 /**
  * Code-defined provider template identifiers.
  */
-export type ProviderTemplateId = "openai-compatible" | "openai-codex" | "anthropic" | "ollama" | "openrouter";
+export type ProviderTemplateId =
+	| "openai"
+	| "openai-compatible"
+	| "openai-codex"
+	| "anthropic"
+	| "ollama"
+	| "openrouter";
 
 /**
  * Persisted metadata for a configured provider instance.

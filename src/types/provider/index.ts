@@ -23,6 +23,8 @@ export type {
 export type {
 	LogoProps,
 	ProviderSetupInstructions,
+	ProviderOAuthCapability,
+	OAuthSignInResult,
 	AuthValidationResult,
 	BaseProviderDefinition,
 	EmbeddingProviderDefinition,

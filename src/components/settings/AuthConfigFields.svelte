@@ -1,21 +1,24 @@
 <script lang="ts">
+import type { Snippet } from "svelte";
 import { createAuthStateQuery, invalidateAuthState } from "../../lib/query";
 import { type AuthFieldDefinition, getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import Text from "../ui/Text.svelte";
-import Toggle from "../ui/Toggle.svelte";
 import SecretSelect from "./SecretSelect.svelte";
 import SettingItem from "./SettingItem.svelte";
 
 interface Props {
 	provider: string;
+	// Optional content rendered after the required fields (and setup link) but before the
+	// Advanced disclosure — e.g. the "Trusted with private notes" toggle in provider setup.
+	afterRequired?: Snippet;
 }
 
-const { provider }: Props = $props();
+const { provider, afterRequired }: Props = $props();
 
 const data = getData();
 
-// Local state for advanced toggle
+// Local state for advanced disclosure
 let showAdvanced = $state(false);
 
 // Query for provider auth state
@@ -30,6 +33,9 @@ let storedAuth = $derived(data.getStoredAuthState(provider));
 
 // Get auth fields from provider definition
 let authFields = $derived(providerDefinition?.auth ?? null);
+
+// Optional link to where the user can obtain credentials (e.g. an API-key page)
+let setupLink = $derived(providerDefinition?.setupInstructions?.link ?? null);
 
 // Split fields into required and optional
 let requiredFields = $derived((): [string, AuthFieldDefinition][] => {
@@ -87,6 +93,10 @@ function handleFieldChange(fieldKey: string, value: string) {
 
 // Get validation state styling for a field
 function getFieldStyles(fieldKey: string): string {
+	// The base URL isn't validated on its own — the auth query checks the whole
+	// connection — so don't paint a success/error border on it; it reads as if the
+	// URL itself passed/failed. Keep the status border on the credential fields.
+	if (fieldKey === "baseUrl") return "";
 	const value = getFieldValue(fieldKey);
 	if (value === "") return "";
 	if (isCheckingAuth || !query.data) {
@@ -138,20 +148,48 @@ function getFieldStyles(fieldKey: string): string {
         {@render fieldRenderer(fieldKey, field)}
     {/each}
 
-    <!-- Advanced toggle (only if there are optional fields) -->
-    {#if hasOptionalFields}
-        <SettingItem
-            name="Advanced Options"
-            desc="Show optional configuration fields"
-        >
-            <Toggle bind:checked={showAdvanced} />
-        </SettingItem>
+    <!-- Link to where credentials can be obtained (e.g. API-key page) -->
+    {#if setupLink}
+        <div class="auth-setup-link">
+            <a href={setupLink.url} target="_blank" rel="noopener noreferrer">
+                → {setupLink.text}
+            </a>
+        </div>
     {/if}
 
-    <!-- Optional fields (only when showAdvanced) -->
-    {#if showAdvanced}
-        {#each optionalFields() as [fieldKey, field]}
-            {@render fieldRenderer(fieldKey, field)}
-        {/each}
+    <!-- Caller-supplied content between the required fields and Advanced. -->
+    {@render afterRequired?.()}
+
+    <!-- Advanced disclosure (only if there are optional fields) -->
+    {#if hasOptionalFields}
+        <details class="auth-advanced" bind:open={showAdvanced}>
+            <summary class="auth-advanced-summary">Advanced</summary>
+            {#each optionalFields() as [fieldKey, field]}
+                {@render fieldRenderer(fieldKey, field)}
+            {/each}
+        </details>
     {/if}
 {/if}
+
+<style>
+    .auth-setup-link {
+        padding: 0 var(--size-4-3) var(--size-4-2);
+        font-size: var(--font-smaller);
+    }
+
+    .auth-advanced {
+        margin-top: var(--size-4-2);
+    }
+
+    .auth-advanced-summary {
+        cursor: pointer;
+        color: var(--text-muted);
+        font-size: var(--font-smaller);
+        padding: var(--size-4-1) var(--size-4-3);
+        user-select: none;
+    }
+
+    .auth-advanced-summary:hover {
+        color: var(--text-normal);
+    }
+</style>

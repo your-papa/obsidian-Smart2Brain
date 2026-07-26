@@ -19,7 +19,7 @@ const privacyListModal = new PrivacyListModal(plugin.app);
 let configuredProviderIds = $derived(pluginData.getConfiguredProviders());
 
 function handleOpenProviderSetup() {
-	new ProviderSetupModal(plugin, { templateId: "openai-compatible" }).open();
+	new ProviderSetupModal(plugin, {}).open();
 }
 </script>
 
