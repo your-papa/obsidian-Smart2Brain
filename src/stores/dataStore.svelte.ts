@@ -145,9 +145,17 @@ function buildManagedSecretId(providerId: string, fieldName: string): string {
 }
 
 function createProviderState(templateId: ProviderTemplateId): StoredProviderState {
+	// Base URL pre-seed. Only Ollama is seeded: its baseUrl is a REQUIRED field (shown in
+	// the main section), and Ollama runs on a well-known local default, so filling it in
+	// saves the user typing without side effects.
+	//
+	// Anthropic is intentionally NOT seeded even though it has a default endpoint: its
+	// baseUrl is an OPTIONAL (Advanced) field, and a stored value there forces the Advanced
+	// section open on a fresh provider. The provider falls back to its default at runtime
+	// (auth.baseUrl || DEFAULT) and the field placeholder shows it, so seeding adds nothing.
+	// openai-compatible ("Custom") is likewise not seeded — a generic endpoint shouldn't
+	// bias toward one vendor.
 	const baseUrlByTemplate: Partial<Record<ProviderTemplateId, string>> = {
-		anthropic: "https://api.anthropic.com",
-		"openai-compatible": "https://api.openai.com",
 		ollama: "http://localhost:11434",
 	};
 	const authMode = templateId === "openai-codex" ? "codex" : "apiKey";

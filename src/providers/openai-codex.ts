@@ -6,7 +6,13 @@ import type {
 	BaseProviderDefinition,
 	ChatModelConfig,
 } from "../types/provider/index";
-import { createOpenAICodexFetch, getValidOpenAICodexSession } from "./openaiCodex";
+import {
+	clearOpenAICodexSession,
+	createOpenAICodexFetch,
+	getValidOpenAICodexSession,
+	signInWithOpenAICodex,
+} from "./openaiCodex";
+import { getCodexSession } from "../stores/providerRuntime.svelte";
 import { fetchOpenRouterModels, isEmbeddingModel, type OpenRouterModelInfo } from "./openrouterModels";
 
 const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
@@ -49,6 +55,18 @@ export function openAICodexProvider(providerId: string, displayName = "OpenAI Co
 				"Complete the browser-based sign-in flow",
 				"Select one of the discovered Codex-backed chat models",
 			],
+		},
+		oauth: {
+			label: "ChatGPT",
+			icon: "log-in",
+			description: "Open a browser window to complete ChatGPT/Codex authorization.",
+			signIn: async () => {
+				await signInWithOpenAICodex();
+				return { kind: "session" };
+			},
+			isSignedIn: () => !!getCodexSession(),
+			disconnect: clearOpenAICodexSession,
+			supportsApiKey: false,
 		},
 		auth: {
 			apiKey: {

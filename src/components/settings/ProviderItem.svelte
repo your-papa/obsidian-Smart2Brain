@@ -166,6 +166,13 @@ async function handleRemoveProvider() {
     background: transparent;
     box-shadow: none;
     cursor: pointer;
+    /* Size the button to its icon — the theme's default button height (30px) would
+       otherwise inflate the header row and push the leading logo off-center. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 16px;
+    line-height: 1;
   }
 
   .provider-icon-button:disabled {

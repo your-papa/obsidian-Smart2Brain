@@ -16,6 +16,8 @@ interface Props {
 	/** Bindable active tab id. */
 	value: T;
 	tabs: SlidingTab<T>[];
+	/** Called when the active tab changes (in addition to updating the bound value). */
+	onValueChange?: (value: T) => void;
 	/** Optional extra trigger content rendered after the label (e.g. a count badge). */
 	trailing?: Snippet<[SlidingTab<T>]>;
 	/** Tab panels (e.g. Tabs.Content) rendered below the tab strip. */
@@ -24,7 +26,7 @@ interface Props {
 	class?: string;
 }
 
-let { value = $bindable(), tabs, trailing, children, class: className = "" }: Props = $props();
+let { value = $bindable(), tabs, onValueChange, trailing, children, class: className = "" }: Props = $props();
 
 // The list element + a live map of trigger elements, used to measure the active
 // tab so the sliding indicator can be positioned over it.
@@ -133,7 +135,7 @@ function registerTrigger(node: HTMLElement, id: T) {
 }
 </script>
 
-<Tabs.Root bind:value class={className}>
+<Tabs.Root bind:value onValueChange={(v) => onValueChange?.(v as T)} class={className}>
 	<Tabs.List
 		bind:ref={listEl}
 		class="s2b-sliding-tabs flex flex-wrap justify-center gap-1 border-b border-t-0 border-x-0 border-solid border-[--background-modifier-border] pb-2 mb-4"

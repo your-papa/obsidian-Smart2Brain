@@ -19,7 +19,13 @@ import type {
 	ChatModelConfig,
 	EmbeddingProviderDefinition,
 } from "../types/provider/index";
-import { createOpenAICodexFetch, getValidOpenAICodexSession } from "./openaiCodex";
+import {
+	clearOpenAICodexSession,
+	createOpenAICodexFetch,
+	getValidOpenAICodexSession,
+	signInWithOpenAICodex,
+} from "./openaiCodex";
+import { getCodexSession } from "../stores/providerRuntime.svelte";
 import {
 	createBufferedTransportedChatOpenAI,
 	createTransportedChatOpenAI,
@@ -95,6 +101,22 @@ export const openaiProvider: EmbeddingProviderDefinition = {
 			url: "https://platform.openai.com/api-keys",
 			text: "OpenAI Dashboard",
 		},
+	},
+
+	// =========================================================================
+	// OAuth (ChatGPT sign-in) capability
+	// =========================================================================
+	oauth: {
+		label: "ChatGPT",
+		icon: "log-in",
+		description: "Open a browser window to complete ChatGPT/Codex authorization.",
+		signIn: async () => {
+			await signInWithOpenAICodex();
+			return { kind: "session" };
+		},
+		isSignedIn: () => !!getCodexSession(),
+		disconnect: clearOpenAICodexSession,
+		supportsApiKey: true,
 	},
 
 	// =========================================================================

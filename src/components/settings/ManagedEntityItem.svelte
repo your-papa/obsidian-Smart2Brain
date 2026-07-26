@@ -166,7 +166,10 @@ function handleKeyDown(event: KeyboardEvent) {
     align-items: center;
     justify-content: center;
     min-width: 18px;
-    padding-top: 2px;
+    /* Match the header's first-line box so the icon centers on the name line even when
+       the body has extra rows below (desc/meta). align-items: flex-start on -main keeps
+       it pinned to the first line; this height + centering aligns it with the text. */
+    min-height: 1lh;
   }
 
   .managed-entity-item-body {

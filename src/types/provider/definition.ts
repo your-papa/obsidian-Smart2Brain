@@ -39,6 +39,48 @@ export interface ProviderSetupInstructions {
 export type AuthValidationResult = { valid: true } | { valid: false; error: string };
 
 /**
+ * Result of a completed OAuth sign-in flow, describing how the modal must persist it.
+ *  - `apiKey`: store the returned key in the provider's `apiKey` auth field (e.g. OpenRouter).
+ *  - `session`: the flow already persisted its own session store (e.g. Codex) — nothing to store.
+ */
+export type OAuthSignInResult = { kind: "apiKey"; apiKey: string } | { kind: "session" };
+
+/**
+ * Declares that a provider supports a browser-based OAuth sign-in flow, so the setup
+ * modal can render a uniform sign-in UI without hard-coding per-provider branches.
+ */
+export interface ProviderOAuthCapability {
+	/** Label for the sign-in tab + CTA button, e.g. "ChatGPT", "OpenRouter". */
+	label: string;
+
+	/** Lucide icon id for the sign-in tab (optional; the modal defaults to "log-in"). */
+	icon?: string;
+
+	/** Copy shown under the sign-in CTA. */
+	description?: string;
+
+	/** Runs the browser OAuth flow and returns how the result must be persisted. */
+	signIn: () => Promise<OAuthSignInResult>;
+
+	/**
+	 * True when a session-backed flow is currently signed in (drives Reconnect/Disconnect
+	 * and the connection status). API-key-backed flows omit this — their status comes from
+	 * the auth-validation query instead.
+	 */
+	isSignedIn?: () => boolean;
+
+	/** Session-backed disconnect (omit for API-key flows). */
+	disconnect?: () => void;
+
+	/**
+	 * Whether the provider ALSO supports a manual API-key path. When true the modal shows
+	 * the `[ Sign in ] | [ API key ]` switcher; when false it shows the sign-in CTA only
+	 * (OAuth-only providers such as Codex).
+	 */
+	supportsApiKey: boolean;
+}
+
+/**
  * Base interface for all provider definitions.
  */
 export interface BaseProviderDefinition {
@@ -53,6 +95,9 @@ export interface BaseProviderDefinition {
 
 	/** Instructions for setting up this provider. */
 	setupInstructions: ProviderSetupInstructions;
+
+	/** Optional browser-based OAuth sign-in capability (rendered by the setup modal). */
+	oauth?: ProviderOAuthCapability;
 
 	/** Authentication field definitions for this provider. At least one field must be required. */
 	auth: ProviderAuthConfig;
