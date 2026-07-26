@@ -119,6 +119,11 @@ async function handleOAuthSignIn() {
 			// Store the OAuth-obtained key as a managed secret so validation re-runs and Save enables.
 			data.setProviderAuthField(providerId, "apiKey", result.apiKey, true);
 		}
+		// A completed OAuth sign-in is a clear terminal action — once the connection
+		// validates and the provider commits, auto-close the modal so the user gets
+		// unambiguous feedback (the provider appears in the list) rather than having to
+		// spot the small green header icon. The commit effect honors this flag.
+		closeAfterCommit = true;
 		invalidateAuthState(providerId);
 	} catch (error) {
 		// A user-initiated cancel isn't a failure — clear the flow silently so the CTA
@@ -193,6 +198,11 @@ async function handleSelectTemplate(id: ProviderTemplateId) {
 // or while a commit is already in flight (the effect can re-fire mid-await).
 let isCommitting = false;
 
+// Set by a completed OAuth sign-in: once the provider commits, auto-close the modal after
+// a short beat so the "Connected" check is briefly visible. Manual API-key entry doesn't
+// set this — the modal stays open so the user can still adjust trusted/advanced fields.
+let closeAfterCommit = false;
+
 // Promotes a draft to a fully configured provider the moment its connection validates.
 // This replaces the old "Add Provider" button: display name / auth / trusted all
 // autosave as they change, so the only remaining commit steps are slug-finalizing the
@@ -233,6 +243,14 @@ async function commitProvider() {
 		invalidateProviderState(providerId);
 	} finally {
 		isCommitting = false;
+	}
+
+	// OAuth sign-in path: the provider is now committed and shows "Connected". Close the
+	// modal after a short beat so the green check is briefly visible — the provider then
+	// appears in the list, which is the clearest confirmation.
+	if (closeAfterCommit) {
+		closeAfterCommit = false;
+		setTimeout(() => modal.close(), 800);
 	}
 }
 
