@@ -1,6 +1,7 @@
 import { Modal } from "obsidian";
 import { mount } from "svelte";
 import ModalProvider from "../../lib/QueryClientProvider.svelte";
+import { removeProviderQueries } from "../../lib/query";
 import type SecondBrainPlugin from "../../main";
 import { getProviderTemplate, type ProviderTemplateId } from "../../providers/index";
 import { slugifyProviderName } from "../../stores/dataStore.svelte";
@@ -94,7 +95,11 @@ export class ProviderSetupModal extends Modal {
 			!this.isSubmitted &&
 			!this.plugin.pluginData.isProviderConfigured(this.selectedProvider)
 		) {
-			void this.plugin.pluginData.deleteProvider(this.selectedProvider);
+			const draftId = this.selectedProvider;
+			void this.plugin.pluginData.deleteProvider(draftId);
+			// Drop the draft's cached auth/state so re-adding the same template (which reuses
+			// the slug ID) doesn't inherit this abandoned draft's stale validation verdict.
+			removeProviderQueries(draftId);
 		}
 	}
 

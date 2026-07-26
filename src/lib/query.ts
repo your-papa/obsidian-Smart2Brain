@@ -174,6 +174,19 @@ export function invalidateAuthState(provider: string) {
 }
 
 /**
+ * Remove all cached state for a provider (auth + combined). Use on delete: provider IDs
+ * are deterministic (slug-based), so re-adding a same-named provider would otherwise serve
+ * the deleted provider's stale cached auth verdict — showing it "connected" and even
+ * auto-committing it before the user enters any credentials. removeQueries drops the
+ * entries entirely (invalidate only marks them stale, and staleTime keeps them served).
+ */
+export function removeProviderQueries(provider: string) {
+	const plugin = getPlugin();
+	plugin.queryClient.removeQueries({ queryKey: ["authState", provider] });
+	plugin.queryClient.removeQueries({ queryKey: ["provider", provider] });
+}
+
+/**
  * Query for model discovery - returns all available models.
  *
  * @param provider - Function returning the provider ID (e.g., "openai", "anthropic")

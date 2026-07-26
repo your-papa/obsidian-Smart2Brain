@@ -1,7 +1,7 @@
 <script lang="ts">
 import { Notice } from "obsidian";
 import type { Component } from "svelte";
-import { createProviderStateQuery, invalidateProviderState } from "../../lib/query";
+import { createProviderStateQuery, invalidateProviderState, removeProviderQueries } from "../../lib/query";
 import { type LogoProps, getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
@@ -49,7 +49,9 @@ async function handleRemoveProvider() {
 	if (!(await confirmDelete(plugin.app, displayName))) return;
 	try {
 		await data.deleteProvider(provider);
-		invalidateProviderState(provider);
+		// Drop cached auth/state entirely (not just invalidate) so re-adding a provider with
+		// the same slug ID doesn't inherit this one's stale "connected" verdict from cache.
+		removeProviderQueries(provider);
 	} catch (error) {
 		new Notice(error instanceof Error ? error.message : "Failed to remove provider");
 	}
