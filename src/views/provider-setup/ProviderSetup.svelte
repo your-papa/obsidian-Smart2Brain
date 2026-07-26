@@ -223,12 +223,14 @@ async function commitProvider() {
 			}
 		}
 		data.setProviderConfigured(providerId, true);
+		// Mark submitted BEFORE any await — the provider is now committed. Otherwise closing
+		// the modal during the fetchQuery below (e.g. right after seeing "Connected") would
+		// hit onClose with isSubmitted still false and delete the just-configured provider.
+		modal.markSubmitted();
 		// The auth query re-keys on providerId, so it re-fires under the new ID after a
 		// rename — refetch so the inline status stays "Connected" rather than flashing.
 		await modal.plugin.queryClient.fetchQuery(getProviderStateQueryOptions(providerId));
 		invalidateProviderState(providerId);
-		// Prevent onClose from auto-deleting the now-committed provider.
-		modal.markSubmitted();
 	} finally {
 		isCommitting = false;
 	}

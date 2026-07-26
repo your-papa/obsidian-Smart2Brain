@@ -85,7 +85,15 @@ export class ProviderSetupModal extends Modal {
 		this.isClosed = true;
 		const { contentEl } = this;
 		contentEl.empty();
-		if (this.createdDraft && this.draftCreated && !this.isSubmitted) {
+		// Only auto-delete a draft that was never committed. Guard on isConfigured too (not
+		// just isSubmitted): a live commit flips isConfigured before its async status refetch
+		// finishes, so a close mid-commit must not delete an already-configured provider.
+		if (
+			this.createdDraft &&
+			this.draftCreated &&
+			!this.isSubmitted &&
+			!this.plugin.pluginData.isProviderConfigured(this.selectedProvider)
+		) {
 			void this.plugin.pluginData.deleteProvider(this.selectedProvider);
 		}
 	}
