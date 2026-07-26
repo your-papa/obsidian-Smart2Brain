@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { MessagePair } from "../../stores/chatStore.svelte";
+import { icon } from "../../utils/utils";
 import CollapsibleUserBubble from "./CollapsibleUserBubble.svelte";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 
@@ -19,18 +20,21 @@ const formattedDate = $derived(
 
 <div class="s2b-chat-embed">
 	<div class="s2b-chat-embed-header">
-		{#if onOpenChat}
-			<button
-				type="button"
-				class="s2b-chat-embed-title s2b-chat-embed-title-link"
-				onclick={onOpenChat}
-				aria-label="Open chat"
-			>
-				{title || "Chat"}
-			</button>
-		{:else}
-			<span class="s2b-chat-embed-title">{title || "Chat"}</span>
-		{/if}
+		<div class="s2b-chat-embed-header-left">
+			<span class="s2b-chat-embed-icon" use:icon={"message-square"}></span>
+			{#if onOpenChat}
+				<button
+					type="button"
+					class="s2b-chat-embed-title s2b-chat-embed-title-link"
+					onclick={onOpenChat}
+					aria-label="Open chat"
+				>
+					{title || "Chat"}
+				</button>
+			{:else}
+				<span class="s2b-chat-embed-title">{title || "Chat"}</span>
+			{/if}
+		</div>
 		{#if formattedDate}
 			<span class="s2b-chat-embed-date">{formattedDate}</span>
 		{/if}
@@ -76,12 +80,26 @@ const formattedDate = $derived(
 
 .s2b-chat-embed-header {
 	display: flex;
-	align-items: baseline;
+	align-items: center;
 	justify-content: space-between;
 	gap: var(--size-4-2);
-	padding: var(--size-4-2) var(--size-4-3);
+	padding: var(--size-2-3) var(--size-4-3);
 	border-bottom: 1px solid var(--background-modifier-border);
 	background: var(--background-secondary);
+}
+
+.s2b-chat-embed-header-left {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-1);
+	min-width: 0;
+}
+
+.s2b-chat-embed-icon {
+	flex-shrink: 0;
+	color: var(--text-muted);
+	display: flex;
+	align-items: center;
 }
 
 .s2b-chat-embed-title {

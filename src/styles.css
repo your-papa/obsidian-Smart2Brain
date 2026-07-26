@@ -762,3 +762,10 @@
 ::highlight(s2b-selection) {
 	background-color: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
 }
+
+/* Chat embed preview — icon sizing (setIcon injects SVG after mount, needs global rule) */
+.s2b-chat-embed-icon svg,
+.s2b-chat-embed-icon .svg-icon {
+	width: 20px;
+	height: 20px;
+}
