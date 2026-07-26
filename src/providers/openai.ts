@@ -197,6 +197,27 @@ export const openaiProvider: EmbeddingProviderDefinition = {
 	},
 
 	createSubAgentChatInstance: (auth: AuthObject, modelId: string, options?: Partial<ChatModelConfig>) => {
+		// Codex (ChatGPT sign-in) has no API key — authenticate via the Codex session
+		// transport, mirroring createChatInstance. Without this branch the subagent reads
+		// the absent auth.apiKey and fails with missing authentication.
+		if (auth.authMode === "codex") {
+			return createTransportedChatOpenAIResponses("openai", {
+				model: modelId,
+				apiKey: async () => {
+					const session = await getValidOpenAICodexSession();
+					if (!session) {
+						throw new Error("ChatGPT sign-in required");
+					}
+					return session.accessToken;
+				},
+				configuration: {
+					baseURL: OPENAI_DEFAULT_BASE_URL,
+					fetch: createOpenAICodexFetch(),
+				},
+				temperature: options?.temperature,
+			});
+		}
+
 		const config: Record<string, unknown> = { model: modelId, apiKey: auth.apiKey };
 		if (options?.temperature !== undefined) {
 			config.temperature = options.temperature;

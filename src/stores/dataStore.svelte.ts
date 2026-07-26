@@ -1798,7 +1798,11 @@ export class PluginDataStore {
 	}
 
 	isProviderUsingCodexAuth(providerId: string): boolean {
-		return this.getProviderMeta(providerId)?.templateId === "openai-codex";
+		// Covers both the legacy "openai-codex" template and the first-class "openai"
+		// template switched to ChatGPT sign-in (auth.authMode === "codex"). A template-only
+		// check would miss the latter, letting codex-mode providers be offered for
+		// embeddings — which they don't support (createEmbeddingInstance throws).
+		return this.getProviderAuthMode(providerId) === "codex";
 	}
 
 	isProviderEmbeddingAvailable(providerId: string): boolean {
