@@ -745,6 +745,17 @@ export class VectorStoreService {
 						indexed: startingIndexedCount + indexedValidationPaths.size,
 					});
 				};
+				// `skipped` is likewise counted in files (starting from the pre-filter
+				// count) so it stays comparable with `total`/`indexed`; a note failing
+				// any chunk is counted once.
+				const skippedValidationPaths = new Set<string>();
+				const noteSkipped = (path: string) => {
+					if (skippedValidationPaths.has(path)) return;
+					skippedValidationPaths.add(path);
+					this.updateInstanceProgress(inst, {
+						skipped: preFilterSkipped + skippedValidationPaths.size,
+					});
+				};
 				const showNotice = validFileCount > 5;
 				let notice: Notice | null = null;
 				if (showNotice) {
@@ -795,7 +806,7 @@ export class VectorStoreService {
 						if (inst.abortController?.signal.aborted) break;
 						if (!vectors || vectors.length === 0) {
 							Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
-							this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + batch.length });
+							for (const entry of batch) noteSkipped(entry.file.path);
 							continue;
 						}
 						for (let j = 0; j < batch.length; j++) {
@@ -828,7 +839,7 @@ export class VectorStoreService {
 									Logger.error(
 										`[VectorStore] embedQuery returned empty result for ${entry.file.path}`,
 									);
-									this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
+									noteSkipped(entry.file.path);
 									continue;
 								}
 								await purgeIfNeeded(entry);
@@ -847,7 +858,7 @@ export class VectorStoreService {
 								Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
 								const reason = entryError instanceof Error ? entryError.message : String(entryError);
 								new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
-								this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
+								noteSkipped(entry.file.path);
 							}
 						}
 						if (notice) this.updateNotice(notice, inst.progress);
@@ -1204,6 +1215,18 @@ export class VectorStoreService {
 					this.updateInstanceProgress(inst, { indexed: indexedPaths.size });
 				}
 			};
+			// Track in-loop skips per distinct file so `skipped` stays in the same
+			// (file) units as `total`/`indexed`; a note failing any chunk is counted
+			// once. Starts from the pre-filter skip count captured above.
+			const preFilterSkippedCount = skippedFiles.length;
+			const skippedPaths = new Set<string>();
+			const noteSkipped = (path: string, reason: SkipReason) => {
+				skippedFiles.push({ path, reason });
+				if (!skippedPaths.has(path)) {
+					skippedPaths.add(path);
+					this.updateInstanceProgress(inst, { skipped: preFilterSkippedCount + skippedPaths.size });
+				}
+			};
 
 			for (let i = 0; i < validChunks.length; i += batchSize) {
 				if (inst.abortController?.signal.aborted) {
@@ -1228,8 +1251,7 @@ export class VectorStoreService {
 					if (inst.abortController?.signal.aborted) break;
 					if (!vectors || vectors.length === 0) {
 						Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
-						for (const entry of batch) skippedFiles.push({ path: entry.file.path, reason: "embed-error" });
-						this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + batch.length });
+						for (const entry of batch) noteSkipped(entry.file.path, "embed-error");
 						this.updateNotice(notice, inst.progress);
 						continue;
 					}
@@ -1237,7 +1259,7 @@ export class VectorStoreService {
 					for (let j = 0; j < batch.length; j++) {
 						if (!vectors[j]) {
 							Logger.error(`[VectorStore] Empty vector for ${batch[j].file.path}`);
-							skippedFiles.push({ path: batch[j].file.path, reason: "embed-error" });
+							noteSkipped(batch[j].file.path, "embed-error");
 							continue;
 						}
 						const entry = batch[j];
@@ -1266,8 +1288,7 @@ export class VectorStoreService {
 							const vector = await embeddings.embedQuery(entry.embedText);
 							if (!vector || vector.length === 0) {
 								Logger.error(`[VectorStore] embedQuery returned empty result for ${entry.file.path}`);
-								skippedFiles.push({ path: entry.file.path, reason: "embed-error" });
-								this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
+								noteSkipped(entry.file.path, "embed-error");
 								continue;
 							}
 							const doc: DocumentVector = {
@@ -1284,8 +1305,7 @@ export class VectorStoreService {
 							Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
 							const reason = entryError instanceof Error ? entryError.message : String(entryError);
 							new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
-							skippedFiles.push({ path: entry.file.path, reason: "embed-error" });
-							this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
+							noteSkipped(entry.file.path, "embed-error");
 						}
 					}
 					this.updateNotice(notice, inst.progress);
