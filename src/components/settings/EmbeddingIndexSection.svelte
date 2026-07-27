@@ -12,8 +12,7 @@ import { confirmDelete } from "../modal/ConfirmModal";
 import { getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
-import { isVectorStoreInitialized, getVectorStoreService, type IndexingProgress } from "../../vectorstore";
-import { getDefaultEmbeddingBatchSize } from "../../vectorstore/batchSize";
+import { isVectorStoreInitialized, getVectorStoreService, formatEta, type IndexingProgress } from "../../vectorstore";
 
 interface Props {
 	/** Which feature this embedding index is for */
@@ -35,6 +34,7 @@ let indexProgress = $state<IndexingProgress>({
 	skipped: 0,
 	currentFile: null,
 	percentage: 0,
+	etaMs: null,
 });
 
 // Document count derived from reactive pluginData
@@ -55,6 +55,7 @@ function subscribeToIndex(id: string | null) {
 			skipped: 0,
 			currentFile: null,
 			percentage: 0,
+			etaMs: null,
 		};
 		return;
 	}
@@ -107,6 +108,7 @@ function clearSelectedIndex() {
 		skipped: 0,
 		currentFile: null,
 		percentage: 0,
+		etaMs: null,
 	};
 }
 
@@ -136,6 +138,7 @@ async function deleteIndex(targetIndexId: string) {
 			skipped: 0,
 			currentFile: null,
 			percentage: 0,
+			etaMs: null,
 		};
 	}
 }
@@ -178,13 +181,6 @@ function usedBy(targetIndexId: string): string[] {
 	return purposes;
 }
 
-function describeUsage(targetIndexId: string): string {
-	const users = usedBy(targetIndexId);
-	if (users.length === 2) return "Shared by Search and Graph";
-	if (users.length === 1) return `Used by ${users[0]} only`;
-	return "";
-}
-
 function describeCurrentSelection(): string {
 	return purpose === "search"
 		? "Embedding indexes power semantic search across your notes."
@@ -213,6 +209,9 @@ function getSelectionGroupLabel(): string {
             {#if indexProgress.skipped > 0}
               ({indexProgress.skipped} skipped)
             {/if}
+            {#if indexProgress.etaMs !== null}
+              (~{formatEta(indexProgress.etaMs)} left)
+            {/if}
           </span>
         </div>
         <Button buttonText="Cancel" onClick={cancelIndexing} />
@@ -239,18 +238,14 @@ function getSelectionGroupLabel(): string {
           entryProviderDef && "logo" in entryProviderDef && entryProviderDef.logo
             ? entryProviderDef.logo
             : GenericAIIcon}
-        {@const entryBatchSize = entry.batchSize ?? getDefaultEmbeddingBatchSize(entry.provider)}
         {@const selected = entry.id === indexId}
         <ManagedEntityItem
           class="embedding-index-option"
           name={entry.model}
-          desc={[`${entry.documentCount} notes indexed`, `batch ${entryBatchSize}`]
-            .filter(Boolean)
-            .join(" · ")}
           meta={[
             entryProviderDef?.displayName ?? entry.provider,
             formatDate(entry.lastBuiltAt),
-            describeUsage(entry.id),
+            `${entry.documentCount} notes indexed`,
           ]
             .filter(Boolean)
             .join(" · ")}

@@ -182,6 +182,8 @@ export interface IndexingProgress {
 	currentFile: string | null;
 	/** Progress percentage (0-100) */
 	percentage: number;
+	/** Estimated milliseconds remaining, or null when not yet known */
+	etaMs: number | null;
 }
 
 /** Reasons a file can be skipped during indexing */

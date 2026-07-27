@@ -6,8 +6,9 @@ export function getDefaultEmbeddingBatchSize(providerId: string): number {
 		case "openai":
 		case "openrouter":
 			return 100;
+		case "omlx":
 		case "ollama":
-			return 1;
+			return 10;
 		default:
 			return 50;
 	}

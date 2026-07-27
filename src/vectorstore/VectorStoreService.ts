@@ -207,6 +207,10 @@ interface IndexInstance {
 	hasValidatedThisSession: boolean;
 	isIndexing: boolean;
 	progress: IndexingProgress;
+	/** Timestamp (ms) when the current indexing run started, for ETA estimation */
+	indexingStartedAt: number | null;
+	/** `indexed` count when the current run started, so ETA measures only this run's rate */
+	indexingStartCount: number;
 	abortController: AbortController | null;
 	maxInputTokensCache: {
 		provider: string;
@@ -214,6 +218,23 @@ interface IndexInstance {
 		maxInputTokens: number;
 	} | null;
 	report: IndexingReport | null;
+}
+
+/**
+ * Format an estimated-time-remaining duration (in ms) as a short human string,
+ * e.g. "45s", "3m", "1h 12m". Rounds up so the estimate never reads as "0s"
+ * while work is still in flight.
+ */
+export function formatEta(ms: number): string {
+	const totalSeconds = Math.max(1, Math.ceil(ms / 1000));
+	if (totalSeconds < 60) return `${totalSeconds}s`;
+
+	const totalMinutes = Math.ceil(totalSeconds / 60);
+	if (totalMinutes < 60) return `${totalMinutes}m`;
+
+	const hours = Math.floor(totalMinutes / 60);
+	const minutes = totalMinutes % 60;
+	return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
 export interface ValidationProgressCountsInput {
@@ -280,7 +301,10 @@ export class VectorStoreService {
 				skipped: 0,
 				currentFile: null,
 				percentage: 0,
+				etaMs: null,
 			},
+			indexingStartedAt: null,
+			indexingStartCount: 0,
 			abortController: null,
 			maxInputTokensCache: null,
 			report: null,
@@ -1106,6 +1130,7 @@ export class VectorStoreService {
 			skipped: skippedFiles.length,
 			currentFile: null,
 			percentage: 0,
+			etaMs: null,
 		});
 
 		const notice = new Notice("", 0);
@@ -1277,8 +1302,9 @@ export class VectorStoreService {
 	 * Update the indexing notice with current progress.
 	 */
 	private updateNotice(notice: Notice, progress: IndexingProgress): void {
-		const { indexed, skipped, total, percentage } = progress;
+		const { indexed, skipped, total, percentage, etaMs } = progress;
 		const skippedText = skipped > 0 ? ` (${skipped} skipped)` : "";
+		const etaText = etaMs !== null ? ` (~${formatEta(etaMs)} left)` : "";
 
 		const el = notice.noticeEl;
 		el.empty();
@@ -1287,7 +1313,7 @@ export class VectorStoreService {
 
 		container.createDiv({
 			cls: "s2b-indexing-status",
-			text: `Indexing: ${indexed}/${total}${skippedText}`,
+			text: `Indexing: ${indexed}/${total}${skippedText}${etaText}`,
 		});
 
 		const progressContainer = container.createDiv({ cls: "s2b-indexing-progress" });
@@ -1552,11 +1578,27 @@ export class VectorStoreService {
 			indexId = data.searchEmbedIndex ?? undefined;
 		}
 		if (!indexId) {
-			return { isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 };
+			return {
+				isIndexing: false,
+				total: 0,
+				indexed: 0,
+				skipped: 0,
+				currentFile: null,
+				percentage: 0,
+				etaMs: null,
+			};
 		}
 		const inst = this.instances.get(indexId);
 		if (!inst) {
-			return { isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 };
+			return {
+				isIndexing: false,
+				total: 0,
+				indexed: 0,
+				skipped: 0,
+				currentFile: null,
+				percentage: 0,
+				etaMs: null,
+			};
 		}
 		return { ...inst.progress };
 	}
@@ -1633,7 +1675,15 @@ export class VectorStoreService {
 			indexId = data.searchEmbedIndex ?? undefined;
 		}
 		if (!indexId) {
-			callback({ isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 });
+			callback({
+				isIndexing: false,
+				total: 0,
+				indexed: 0,
+				skipped: 0,
+				currentFile: null,
+				percentage: 0,
+				etaMs: null,
+			});
 			return () => {};
 		}
 
@@ -1648,7 +1698,15 @@ export class VectorStoreService {
 		callback(
 			inst
 				? { ...inst.progress }
-				: { isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 },
+				: {
+						isIndexing: false,
+						total: 0,
+						indexed: 0,
+						skipped: 0,
+						currentFile: null,
+						percentage: 0,
+						etaMs: null,
+					},
 		);
 
 		return () => {
@@ -1664,10 +1722,22 @@ export class VectorStoreService {
 	 * Update progress state for a specific instance and notify listeners.
 	 */
 	private updateInstanceProgress(inst: IndexInstance, partial: Partial<IndexingProgress>): void {
+		const wasIndexing = inst.progress.isIndexing;
 		Object.assign(inst.progress, partial);
+
+		// Track the start of an indexing run so ETA measures only this run's rate.
+		if (inst.progress.isIndexing && !wasIndexing) {
+			inst.indexingStartedAt = Date.now();
+			inst.indexingStartCount = inst.progress.indexed;
+		} else if (!inst.progress.isIndexing) {
+			inst.indexingStartedAt = null;
+			inst.indexingStartCount = 0;
+		}
+
 		if (inst.progress.total > 0) {
 			inst.progress.percentage = Math.round((inst.progress.indexed / inst.progress.total) * 100);
 		}
+		inst.progress.etaMs = this.estimateEtaMs(inst);
 		const progress = { ...inst.progress };
 		const listeners = this.progressListeners.get(inst.indexId);
 		if (listeners) {
@@ -1675,6 +1745,26 @@ export class VectorStoreService {
 				listener(progress);
 			}
 		}
+	}
+
+	/**
+	 * Estimate milliseconds remaining for the current indexing run based on the
+	 * rate of files processed so far. Returns null until enough progress has been
+	 * made to produce a stable estimate.
+	 */
+	private estimateEtaMs(inst: IndexInstance): number | null {
+		const { isIndexing, indexed, total } = inst.progress;
+		if (!isIndexing || inst.indexingStartedAt === null || total <= 0) return null;
+
+		const doneThisRun = indexed - inst.indexingStartCount;
+		const remaining = total - indexed;
+		if (doneThisRun <= 0 || remaining <= 0) return null;
+
+		const elapsed = Date.now() - inst.indexingStartedAt;
+		if (elapsed <= 0) return null;
+
+		const msPerFile = elapsed / doneThisRun;
+		return Math.round(msPerFile * remaining);
 	}
 
 	/**
