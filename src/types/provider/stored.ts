@@ -13,6 +13,7 @@ export type ProviderTemplateId =
 	| "openai-codex"
 	| "anthropic"
 	| "ollama"
+	| "omlx"
 	| "openrouter";
 
 /**

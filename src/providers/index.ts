@@ -12,6 +12,7 @@ import { ollamaProvider } from "./ollama";
 import { openaiProvider } from "./openai";
 import { openrouterProvider } from "./openrouter";
 import { openAICodexProvider } from "./openai-codex";
+import { createOmlxProvider } from "./omlx";
 
 export interface ProviderTemplateDefinition {
 	id: ProviderTemplateId;
@@ -39,6 +40,11 @@ export const PROVIDER_TEMPLATES: readonly ProviderTemplateDefinition[] = [
 		id: "ollama",
 		displayName: "Ollama",
 		description: "Local Ollama models over the Ollama API.",
+	},
+	{
+		id: "omlx",
+		displayName: "oMLX",
+		description: "Local MLX models on your Mac via oMLX's OpenAI-compatible server.",
 	},
 	{
 		id: "openrouter",
@@ -69,6 +75,8 @@ function createTemplateDefinition(
 				displayName: meta.displayName,
 				defaultBaseUrl: "https://api.openai.com",
 			});
+		case "omlx":
+			return createOmlxProvider(instanceId, meta.displayName);
 		case "openai-codex":
 			return openAICodexProvider(instanceId, meta.displayName);
 		case "anthropic":
@@ -131,6 +139,7 @@ export {
 export { ProviderRegistry } from "./registry";
 
 export { createOpenAICompatibleProvider } from "./openai-compatible";
+export { createOmlxProvider } from "./omlx";
 
 export type {
 	AuthObject,
