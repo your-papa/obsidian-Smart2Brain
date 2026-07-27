@@ -369,6 +369,8 @@ export function createDefaultAgentConfig(id?: string, name?: string): AgentConfi
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
 		subAgentIds: [],
+		memoryEnabled: false,
+		memoryFolder: "Agent Notes",
 	};
 }
 
@@ -388,6 +390,8 @@ function createDefaultAgent(): AgentConfig {
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
 		subAgentIds: [],
+		memoryEnabled: false,
+		memoryFolder: "Agent Notes",
 	};
 }
 

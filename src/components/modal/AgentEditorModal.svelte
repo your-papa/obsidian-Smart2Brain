@@ -1,13 +1,14 @@
 <script lang="ts">
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
-import { Notice, getIconIds, type Modal } from "obsidian";
+import { Notice, getIconIds, normalizePath, type Modal } from "obsidian";
 import { onMount } from "svelte";
 import { AddSkillModal } from "./AddSkillModal";
+import { CapabilitySettingsModal } from "./CapabilitySettingsModal";
 import { MCPServerModal } from "./MCPServerModal";
+import { MemorySettingsModal } from "./MemorySettingsModal";
 import { ModelSelectionModal } from "./ModelSelectionModal";
 import { SkillModal } from "./SkillModal";
 import { SystemPromptModal } from "./SystemPromptModal";
-import { ToolConfigModal } from "./ToolConfigModal";
 import ManagedEntityItem from "../settings/ManagedEntityItem.svelte";
 import ModelSettingControl from "../settings/ModelSettingControl.svelte";
 import SettingGroup from "../settings/SettingGroup.svelte";
@@ -26,6 +27,8 @@ import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { installObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
 import { type PluginIntegration, getPluginIcon, toExecToolId } from "../../agent/integrations/pluginIntegrations";
+import { BUILT_IN_TOOL_META } from "../../agent/builtInToolMeta";
+import { buildDefaultMemoryPrompt } from "../../agent/prompts";
 import { buildPluginApiSkill } from "../../skills/templates/pluginApiScripting";
 import {
 	DEFAULT_AGENT_ICON,
@@ -33,6 +36,7 @@ import {
 	WEB_TOOL_IDS,
 	type AgentConfig,
 	type BuiltInToolId,
+	type CapabilityId,
 	type MCPServerConfig,
 	type SkillDisplayInfo,
 } from "../../types/plugin";
@@ -492,91 +496,40 @@ interface ToolInfo {
 	requiresPlugin?: { id: string; name: string };
 }
 
-const TOOLS: ToolInfo[] = [
-	{
-		id: "search_notes",
-		defaultName: "Search Notes",
-		defaultDescription: "Search through your Obsidian notes by keyword. Returns matching file names and metadata.",
-	},
-	{
-		id: "list_directory",
-		defaultName: "List Directory",
-		defaultDescription:
-			"List directories and files in the vault to understand folder structure before searching or editing notes.",
-	},
-	{
-		id: "read_content",
-		defaultName: "Read Content",
-		defaultDescription:
-			"Read notes and vault files by path or wiki link. Supports markdown/text files and PDF text extraction. Images must be attached in chat.",
-	},
-	{
-		id: "grep_notes",
-		defaultName: "Grep Notes",
-		defaultDescription:
-			"Find an exact substring or regex pattern across notes, returning matching lines with line numbers and context. Unlike Search Notes, it matches literal strings. Scope to one note with a path, or page large result sets.",
-	},
-	{
-		id: "get_all_tags",
-		defaultName: "Get All Tags",
-		defaultDescription: "Retrieve a list of all tags used in the vault.",
-	},
-	{
-		id: "get_properties",
-		defaultName: "Get Properties",
-		defaultDescription: "Retrieve frontmatter properties from notes or list all property keys in the vault.",
-	},
-	{
-		id: "execute_javascript",
-		defaultName: "Execute JavaScript",
-		defaultDescription:
-			"Run isolated JavaScript for calculations and data transformation. Use return for the final value and console.log for intermediate output.",
-	},
-	{
-		id: "manage_notes",
-		defaultName: "Manage Notes",
-		defaultDescription:
-			"Create, update, or delete markdown notes in one staged batch. Related note operations can be proposed together for user approval.",
-	},
-	{
-		id: "fetch_url",
-		defaultName: "Fetch URL",
-		defaultDescription:
-			"Fetch a public web page or text resource over HTTP(S) and return its main content as cleaned markdown. Use only with URLs the user provided or clearly public references.",
-	},
-	{
-		id: "web_search",
-		defaultName: "Web Search",
-		defaultDescription:
-			"Search the web and return results (title, URL, snippet). Configure the provider and API key in the tool's Configure panel. Prefer vault search first.",
-	},
-];
-
-function getToolDisplayName(toolId: BuiltInToolId): string {
-	const config = selectedAgent?.toolsConfig[toolId];
-	const defaultTool = TOOLS.find((tool) => tool.id === toolId);
-	const name = config?.name ?? defaultTool?.defaultName ?? toolId;
-	return name.includes("_")
-		? name
-				.split("_")
-				.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-				.join(" ")
-		: name;
-}
-
-function getToolDescription(toolId: BuiltInToolId): string {
-	const config = selectedAgent?.toolsConfig[toolId];
-	const defaultTool = TOOLS.find((tool) => tool.id === toolId);
-	return config?.description ?? defaultTool?.defaultDescription ?? "";
-}
-
-function handleToolToggle(toolId: BuiltInToolId) {
-	pluginData.toggleAgentToolEnabled(agentId, toolId);
-	void applyChanges();
-}
+// Display metadata for the built-in tools, shared with the Capability Settings modal.
+const TOOLS: ToolInfo[] = BUILT_IN_TOOL_META;
 
 function getToolEnabled(toolId: BuiltInToolId): boolean {
 	return pluginData.isAgentToolEnabled(agentId, toolId);
+}
+
+// --- Memory: long-lived facts stored as notes in a per-agent folder ---
+
+const memoryEnabled = $derived(selectedAgent?.memoryEnabled ?? false);
+// Recording a memory is a note write, so memory needs manage_notes enabled.
+const manageNotesEnabled = $derived(getToolEnabled("manage_notes"));
+
+function handleMemoryToggle(next: boolean) {
+	// Seed the editable memory instructions the first time memory is enabled so the
+	// user can see and tune them (they live in the base-prompt area, not the tool tail).
+	const patch: Partial<AgentConfig> = { memoryEnabled: next };
+	if (next && !selectedAgent?.memoryPrompt?.trim()) {
+		patch.memoryPrompt = buildDefaultMemoryPrompt(normalizePath(selectedAgent?.memoryFolder || "Agent Notes"));
+	}
+	pluginData.updateAgent(agentId, patch);
+	void applyChanges();
+}
+
+function openMemorySettingsModal() {
+	if (!selectedAgent) return;
+	new MemorySettingsModal(plugin, agentId, { onChange: () => void applyChanges() }).open();
+}
+
+// --- Per-capability settings (guidance + per-tool settings), opened from each card's gear ---
+
+function openCapabilitySettingsModal(capId: CapabilityId) {
+	if (!selectedAgent) return;
+	new CapabilitySettingsModal(plugin, capId, agentId, { onChange: () => void applyChanges() }).open();
 }
 
 // --- Core · Vault exploration + Web capability cards (bulk-toggle their built-in tools) ---
@@ -585,14 +538,14 @@ const vaultTools = $derived(TOOLS.filter((tool) => (VAULT_TOOL_IDS as readonly s
 const webTools = $derived(TOOLS.filter((tool) => (WEB_TOOL_IDS as readonly string[]).includes(tool.id)));
 
 // Each card's master is a plain on/off switch: OFF turns every tool in the card off; ON turns
-// every (installable) tool in the card on. `checked` reflects "any tool in the card is on".
+// every (installable) tool in the card on. `masterEnabled` reflects "any tool in the card is on".
 // Tools whose required plugin isn't installed can't be enabled, so they're excluded from the
-// numerator and the "turn everything on" loop (otherwise the summary can't reach N of N).
+// "turn everything on" loop.
 function availableToolsIn(tools: ToolInfo[]): ToolInfo[] {
 	return tools.filter((tool) => !tool.requiresPlugin || isPluginInstalled(tool.requiresPlugin.id));
 }
-function enabledCountIn(tools: ToolInfo[]): number {
-	return availableToolsIn(tools).filter((tool) => getToolEnabled(tool.id)).length;
+function anyEnabledIn(tools: ToolInfo[]): boolean {
+	return availableToolsIn(tools).some((tool) => getToolEnabled(tool.id));
 }
 function toggleAllTools(tools: ToolInfo[], next: boolean) {
 	for (const tool of availableToolsIn(tools)) {
@@ -603,13 +556,8 @@ function toggleAllTools(tools: ToolInfo[], next: boolean) {
 	void applyChanges();
 }
 
-const vaultAvailableCount = $derived(availableToolsIn(vaultTools).length);
-const vaultEnabledCount = $derived(enabledCountIn(vaultTools));
-const vaultAnyOn = $derived(vaultEnabledCount > 0);
-
-const webAvailableCount = $derived(availableToolsIn(webTools).length);
-const webEnabledCount = $derived(enabledCountIn(webTools));
-const webAnyOn = $derived(webEnabledCount > 0);
+const vaultAnyOn = $derived(anyEnabledIn(vaultTools));
+const webAnyOn = $derived(anyEnabledIn(webTools));
 
 // --- Subagents (references to other agents) ---
 
@@ -639,21 +587,6 @@ function handleSubAgentToggle(refId: string) {
 function getSubAgentModelLabel(agent: AgentConfig): string {
 	const model = agent.chatModel ? agent.chatModel.model : "No model configured";
 	return agent.id === agentId ? `${model} · isolated copy of this agent` : model;
-}
-
-function openToolConfig(toolId: BuiltInToolId) {
-	new ToolConfigModal(
-		plugin,
-		toolId,
-		() => {
-			void applyChanges();
-		},
-		{
-			agentId,
-			getToolConfig: () => selectedAgent?.toolsConfig[toolId],
-			updateToolConfig: (config) => pluginData.updateAgentToolConfig(agentId, toolId, config),
-		},
-	).open();
 }
 
 let mcpServerIds = $derived(selectedAgent ? Object.keys(selectedAgent.mcpServers) : []);
@@ -776,53 +709,12 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
 	return mcpServerTools[serverId];
 }
 
-// Each card's header shows how many of its tools are on, over the tools that can actually be
-// enabled here (uninstalled-plugin tools are excluded from both the numerator and denominator).
-const vaultSummary = $derived(`${vaultEnabledCount} of ${vaultAvailableCount} on`);
-const webSummary = $derived(`${webEnabledCount} of ${webAvailableCount} on`);
+// The Memory card's manage_notes dependency is surfaced as a badge (see below).
 </script>
 
 {#if selectedAgent}
   <div class="agent-editor-container">
     <div class="agent-editor-pane">
-      <!-- Shared per-tool row (used by the Core · Vault and Web capability cards). Declared at
-           the pane level so it isn't mistaken for a prop of an enclosing component. -->
-      {#snippet toolRow(tool: ToolInfo)}
-        {@const enabled = getToolEnabled(tool.id)}
-        {@const pluginAvailable = !tool.requiresPlugin || isPluginInstalled(tool.requiresPlugin.id)}
-        <ManagedEntityItem
-          class="tool-entity"
-          name={getToolDisplayName(tool.id)}
-          desc={getToolDescription(tool.id)}
-          disabled={!pluginAvailable}
-        >
-          {#snippet badges()}
-            {#if tool.requiresPlugin && !pluginAvailable}
-              <Badge
-                label={`Requires ${tool.requiresPlugin.name}`}
-                tone="warning"
-                interactive
-                onclick={() => openPluginPage(tool.requiresPlugin!.id)}
-              />
-            {/if}
-          {/snippet}
-
-          {#snippet actions()}
-            <Button
-              iconId="settings"
-              ariaLabel={`Configure ${getToolDisplayName(tool.id)}`}
-              tooltip={`Configure ${getToolDisplayName(tool.id)}`}
-              onClick={() => openToolConfig(tool.id)}
-            />
-            <Toggle
-              checked={enabled && pluginAvailable}
-              onchange={() => handleToolToggle(tool.id)}
-              disabled={!pluginAvailable}
-            />
-          {/snippet}
-        </ManagedEntityItem>
-      {/snippet}
-
       <section class="agent-editor-section">
         <SettingGroup heading="General">
           <div class="agent-overview-identity">
@@ -985,24 +877,27 @@ const webSummary = $derived(`${webEnabledCount} of ${webAvailableCount} on`);
       </section>
 
       <section class="agent-editor-section">
-        <SettingGroup heading="Core">
+        <SettingGroup heading="Core Capabilities">
           <div class="setting-item-description mb-3">
             Built-in capabilities every agent can use — vault exploration and web access.
           </div>
 
-          <!-- Card 1: Vault exploration — the built-in vault tools. -->
+          <!-- Card 1: Vault exploration — configure guidance + per-tool settings via the gear. -->
           <CapabilityCard
             title="Vault exploration"
             description="Search, read, edit, and explore your vault with the built-in tools."
             icon="compass"
-            summary={vaultSummary}
+            expandable={false}
             masterEnabled={vaultAnyOn}
             onToggleMaster={(next) => toggleAllTools(vaultTools, next)}
           >
-            {#snippet body()}
-              {#each vaultTools as tool (tool.id)}
-                {@render toolRow(tool)}
-              {/each}
+            {#snippet headerActions()}
+              <Button
+                iconId="settings"
+                ariaLabel="Vault exploration settings"
+                tooltip="Vault exploration settings"
+                onClick={() => openCapabilitySettingsModal("vault")}
+              />
             {/snippet}
           </CapabilityCard>
 
@@ -1011,14 +906,45 @@ const webSummary = $derived(`${webEnabledCount} of ${webAvailableCount} on`);
             title="Web"
             description="Reach the public internet: fetch web pages and run web searches."
             icon="globe"
-            summary={webSummary}
+            expandable={false}
             masterEnabled={webAnyOn}
             onToggleMaster={(next) => toggleAllTools(webTools, next)}
           >
-            {#snippet body()}
-              {#each webTools as tool (tool.id)}
-                {@render toolRow(tool)}
-              {/each}
+            {#snippet headerActions()}
+              <Button
+                iconId="settings"
+                ariaLabel="Web settings"
+                tooltip="Web settings"
+                onClick={() => openCapabilitySettingsModal("web")}
+              />
+            {/snippet}
+          </CapabilityCard>
+
+          <!-- Card 1b-memory: Memory — a folder the agent manages itself for durable facts and
+               vault pointers. Enabling it injects memory instructions into the system prompt and
+               auto-applies note writes inside the folder. Needs the Manage notes tool. The gear
+               opens the folder + instructions settings. -->
+          <CapabilityCard
+            title="Memory"
+            description="A folder the agent manages itself for durable facts about you and pointers to where things live in your vault. Note writes inside it apply automatically."
+            icon="brain"
+            expandable={false}
+            masterEnabled={memoryEnabled}
+            onToggleMaster={(next) => handleMemoryToggle(next)}
+          >
+            {#snippet badges()}
+              {#if memoryEnabled && !manageNotesEnabled}
+                <Badge label="Needs Manage notes" tone="warning" />
+              {/if}
+            {/snippet}
+
+            {#snippet headerActions()}
+              <Button
+                iconId="settings"
+                ariaLabel="Memory settings"
+                tooltip="Memory settings"
+                onClick={openMemorySettingsModal}
+              />
             {/snippet}
           </CapabilityCard>
 
@@ -1537,7 +1463,6 @@ const webSummary = $derived(`${webEnabledCount} of ${webAvailableCount} on`);
     border-radius: 8px;
   }
   :global(.skill-entity),
-  :global(.tool-entity),
   :global(.mcp-entity) {
     padding-left: 0;
     padding-right: 0;

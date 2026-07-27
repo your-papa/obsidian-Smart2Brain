@@ -529,8 +529,7 @@ export class Agent {
 		const triggerTokens = getSummarizationTriggerTokens(contextWindow);
 		if (!triggerTokens) {
 			Logger.warn(
-				`[Agent] Summarization disabled: model "${selectedModel.name}" has no contextWindow configured. ` +
-					"Long threads will not be summarized and may hit provider context limits.",
+				`[Agent] Summarization disabled: model "${selectedModel.name}" has no contextWindow configured. Long threads will not be summarized and may hit provider context limits.`,
 			);
 			return [];
 		}

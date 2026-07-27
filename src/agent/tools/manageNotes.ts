@@ -275,6 +275,43 @@ function summarizeOperations(changes: PendingChange[]): string {
 }
 
 /**
+ * True when `path` is the folder itself or nested inside it. Both are normalized
+ * first so a trailing slash or `.`-segment doesn't cause a false negative. Used to
+ * scope memory auto-approval strictly to the agent's memory folder — mirrors the
+ * containment guard in ObsidianChatManager so nothing outside the folder is ever
+ * auto-applied.
+ */
+function isInsideFolder(path: string, folder: string): boolean {
+	const p = normalizePath(path);
+	const f = normalizePath(folder);
+	if (f === "" || f === "/") return true;
+	return p === f || p.startsWith(`${f}/`);
+}
+
+/**
+ * Reads the effective memory config for the agent that owns this run. Falls back
+ * to the selected agent (api path with no agentId) and to the default folder name.
+ */
+function getMemoryConfig(agentId: string): { enabled: boolean; folder: string } {
+	const agent = getData().getAgent(agentId) ?? getData().getSelectedAgent();
+	return {
+		enabled: agent?.memoryEnabled ?? false,
+		folder: normalizePath(agent?.memoryFolder || "Agent Notes"),
+	};
+}
+
+/**
+ * Decides whether a staged change should auto-apply because it targets the memory
+ * folder. Create/update/delete key off `path`; a move auto-applies only when it
+ * lands INSIDE the folder (reorganizing within/into memory) — a move OUT of the
+ * folder stays staged so the user still reviews removing a note from memory.
+ */
+function isMemoryChange(change: PendingChange, folder: string): boolean {
+	if (change.type === "move") return isInsideFolder(change.newPath, folder);
+	return isInsideFolder(change.path, folder);
+}
+
+/**
  * Validates and stages a batch of note operations into the pending-changes store
  * for user review, returning the human-readable summary string. Shared by the
  * `manage_notes` tool and the public S2B api (`api.manageNotes`) so both write
@@ -556,9 +593,46 @@ export async function stageNoteOperations(
 	}
 
 	const resolvedToolCallId = toolCallId ?? genUUIDv7();
-	store.addChanges(stagedChanges, resolvedToolCallId, threadId);
+	const entryIds = store.addChanges(stagedChanges, resolvedToolCallId, threadId);
 
-	let summary = `Proposed ${stagedChanges.length} note operation(s) across ${seenPaths.size} path(s) (${summarizeOperations(stagedChanges)}) — the user will review and approve or reject these changes.`;
+	// Auto-apply changes that target the agent's memory folder: the agent governs
+	// that folder itself, so those writes shouldn't wait in the review queue. We
+	// reuse acceptChange (locking, conflict/existence checks, folder creation)
+	// rather than a parallel write path. Non-memory changes stay pending.
+	const memory = getMemoryConfig(agentId);
+	let autoAppliedCount = 0;
+	const autoApplyFailures: string[] = [];
+	if (memory.enabled) {
+		for (let i = 0; i < stagedChanges.length; i++) {
+			const change = stagedChanges[i];
+			if (!isMemoryChange(change, memory.folder)) continue;
+			try {
+				// Sequential await respects the store's per-file lock ordering.
+				await store.acceptChange(entryIds[i]);
+				autoAppliedCount++;
+			} catch (e) {
+				const path = change.type === "move" ? change.newPath : change.path;
+				autoApplyFailures.push(`"${path}": ${e instanceof Error ? e.message : String(e)}`);
+			}
+		}
+	}
+
+	const stagedCount = stagedChanges.length - autoAppliedCount - autoApplyFailures.length;
+	let summary: string;
+	if (autoAppliedCount > 0 && stagedCount === 0 && autoApplyFailures.length === 0) {
+		summary = `Saved ${autoAppliedCount} memory note operation(s) (${summarizeOperations(stagedChanges)}) to \`${memory.folder}/\` — applied automatically, no user review needed.`;
+	} else {
+		summary = `Proposed ${stagedChanges.length} note operation(s) across ${seenPaths.size} path(s) (${summarizeOperations(stagedChanges)}).`;
+		if (autoAppliedCount > 0) {
+			summary += ` ${autoAppliedCount} targeting \`${memory.folder}/\` were applied automatically (memory).`;
+		}
+		if (stagedCount > 0) {
+			summary += ` ${stagedCount} will be reviewed by the user, who will approve or reject them.`;
+		}
+	}
+	if (autoApplyFailures.length > 0) {
+		summary += ` ${autoApplyFailures.length} memory write(s) could not be applied: ${autoApplyFailures.join("; ")}.`;
+	}
 	if (crossThreadPaths.size > 0) {
 		const paths = [...crossThreadPaths].map((p) => `"${p}"`).join(", ");
 		summary += ` Note: another chat already has a pending update to ${paths}. Both proposals target the same file — whichever is accepted first wins, and the other may then be un-appliable (its expected original content will no longer match). Coordinate or avoid duplicating edits across chats.`;

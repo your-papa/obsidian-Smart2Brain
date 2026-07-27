@@ -21,8 +21,9 @@ let editor: EmbeddableMarkdownEditor | undefined = $state();
 let initialPromptValue = $state("");
 let promptValue = $state("");
 let isLoading = $state(true);
+const defaultPrompt = $derived(accessors.defaultPrompt ?? BASE_SYSTEM_PROMPT);
 const isDirty = $derived(promptValue !== initialPromptValue);
-const isAtDefault = $derived(promptValue === BASE_SYSTEM_PROMPT);
+const isAtDefault = $derived(promptValue === defaultPrompt);
 const showResetToDefault = $derived(!isAtDefault);
 
 onMount(() => {
@@ -65,8 +66,8 @@ async function handleSave() {
 }
 
 function handleResetToDefault() {
-	promptValue = BASE_SYSTEM_PROMPT;
-	editor?.setValue(BASE_SYSTEM_PROMPT);
+	promptValue = defaultPrompt;
+	editor?.setValue(defaultPrompt);
 }
 </script>
 

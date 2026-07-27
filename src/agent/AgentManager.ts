@@ -6,7 +6,7 @@ import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { READ_CONTENT_GUIDANCE_DEFAULTS, getData, getReadContentGuidance } from "../stores/dataStore.svelte";
-import { VAULT_TOOL_IDS, WEB_TOOL_IDS, type BuiltInToolId, type AgentConfig } from "../types/plugin";
+import { CAPABILITIES, VAULT_TOOL_IDS, WEB_TOOL_IDS, type BuiltInToolId, type AgentConfig } from "../types/plugin";
 import { VIEW_TYPE_CHAT } from "../views/chat/Chat";
 import { lookupModelInfo } from "../providers/modelsDevApi";
 import { fetchOllamaModelsInfo } from "../providers/ollamaModels";
@@ -43,7 +43,7 @@ import {
 } from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
-import { BASE_SYSTEM_PROMPT } from "./prompts";
+import { BASE_SYSTEM_PROMPT, buildDefaultCapabilityGuidance, buildDefaultMemoryPrompt } from "./prompts";
 import { LangSmithTelemetry, type Telemetry } from "./telemetry";
 import { createExecuteJavaScriptTool } from "./tools/executeJavaScript";
 import { createPluginApiExecTool } from "./tools/executePluginApi";
@@ -378,53 +378,83 @@ export class AgentManager {
 		const selectedAgent = agent ?? pluginData.getSelectedAgent();
 
 		let prompt = selectedAgent.systemPrompt || BASE_SYSTEM_PROMPT;
-		const enabledTools = Object.entries(selectedAgent.toolsConfig).filter(([, config]) => config.enabled);
-		const hasWriteTools = enabledTools.some(([toolId]) => toolId === "manage_notes");
-		const toolGuidelines = enabledTools
-			.map(([toolId, config]) => {
-				let guidance = config.promptGuidance?.trim() ?? "";
+		const hasWriteTools = selectedAgent.toolsConfig.manage_notes?.enabled ?? false;
 
-				// Select the appropriate read_content guidance based on effective processors
-				// (explicit config OR auto-derived from chat model). Only override if
-				// guidance matches one of the 4 defaults (user hasn't customized it).
-				if (toolId === "read_content" && guidance.length > 0) {
-					const settings = config.settings as
-						| { imageProcessor?: ChatModel | null; pdfProcessor?: ChatModel | null }
-						| undefined;
-					const { hasImageProcessor, hasPdfProcessor } = resolveEffectiveProcessors(
-						settings,
-						selectedAgent.chatModel,
-					);
-
-					if (READ_CONTENT_GUIDANCE_DEFAULTS.has(guidance)) {
-						guidance = getReadContentGuidance(hasImageProcessor, hasPdfProcessor);
-					}
+		// Memory: long-lived facts stored as notes in a dedicated folder. Gated on the
+		// agent opting in AND manage_notes being enabled (recording a memory is a note
+		// write). The guidance lives in the user-editable `memoryPrompt` and is placed
+		// right after the base prompt — adjacent to it, NOT buried in the auto-appended
+		// tool-guideline tail — so it reads as (and is tunable as) agent behavior.
+		// Writes inside the folder auto-apply (see stageNoteOperations).
+		if (selectedAgent.memoryEnabled && hasWriteTools) {
+			const memoryFolder = normalizePath(selectedAgent.memoryFolder || "Agent Notes");
+			// Best-effort ensure the folder exists so search_notes/list_directory have
+			// somewhere to look before the first memory is written.
+			try {
+				if (!this.plugin.app.vault.getFolderByPath(memoryFolder)) {
+					void this.plugin.app.vault.createFolder(memoryFolder).catch(() => {});
 				}
-
-				return {
-					toolId,
-					name: config.name,
-					guidance,
-				};
-			})
-			.filter((tool) => tool.guidance.length > 0);
-
-		if (hasWriteTools) {
-			prompt +=
-				"\n\n# Write Tool Guidelines\n- All write operations (create, update, delete, move) are staged for user approval. Never say a change has already been applied.\n- Modify only what the user asked for and preserve surrounding content.\n- Prefer batching related write operations so the user can review them together.\n- Prefer targeted edits over full rewrites unless a full rewrite is clearly necessary.";
-		} else {
-			prompt +=
-				"\n\n# Capabilities\n- No write tools are currently enabled.\n- Do not claim you can modify notes.\n- If the user asks for edits, explain the change you would make instead.";
+			} catch {
+				// ignore — folder is created on first write anyway
+			}
+			const memoryPrompt = selectedAgent.memoryPrompt?.trim() || buildDefaultMemoryPrompt(memoryFolder);
+			prompt += `\n\n${memoryPrompt}`;
 		}
 
-		if (toolGuidelines.length > 0) {
-			const guidelinesSection = toolGuidelines
-				.map(
-					(tool) =>
-						`## ${tool.name}\n- Tool ID: \`${tool.toolId}\`\n- ${tool.guidance.split("\n").join("\n- ")}`,
-				)
-				.join("\n\n");
-			prompt += `\n\n# Tool Guidelines\n${guidelinesSection}`;
+		// Per-capability guidance. Each capability (vault, web) becomes a top-level `#`
+		// section: its own guidance (user override or default) followed by its enabled
+		// tools' per-tool guidance as `##` subheaders. Replaces the old flat
+		// `# Write Tool Guidelines` + `# Tool Guidelines` sections. The write-staging
+		// policy now lives inside the vault capability's default guidance (manage_notes
+		// is a vault tool); the no-write honesty guard below still handles the empty case.
+		const toolsConfig = selectedAgent.toolsConfig;
+		const isToolEnabled = (toolId: BuiltInToolId): boolean => toolsConfig[toolId]?.enabled ?? false;
+
+		// Resolve a single tool's per-tool guidance, preserving the read_content dynamic
+		// resolution (explicit-config OR chat-model-derived processors).
+		const resolveToolGuidance = (toolId: BuiltInToolId): string => {
+			const config = toolsConfig[toolId];
+			if (!config?.enabled) return "";
+			let guidance = config.promptGuidance?.trim() ?? "";
+			if (toolId === "read_content" && guidance.length > 0) {
+				const settings = config.settings as
+					| { imageProcessor?: ChatModel | null; pdfProcessor?: ChatModel | null }
+					| undefined;
+				const { hasImageProcessor, hasPdfProcessor } = resolveEffectiveProcessors(
+					settings,
+					selectedAgent.chatModel,
+				);
+				if (READ_CONTENT_GUIDANCE_DEFAULTS.has(guidance)) {
+					guidance = getReadContentGuidance(hasImageProcessor, hasPdfProcessor);
+				}
+			}
+			return guidance;
+		};
+
+		for (const cap of CAPABILITIES) {
+			const enabledCapTools = cap.toolIds.filter(isToolEnabled);
+			if (enabledCapTools.length === 0) continue;
+
+			const capGuidance =
+				selectedAgent.capabilityPrompts?.[cap.id]?.trim() || buildDefaultCapabilityGuidance(cap.id);
+
+			let section = `\n\n# ${cap.title}`;
+			if (capGuidance) section += `\n${capGuidance}`;
+
+			for (const toolId of enabledCapTools) {
+				const guidance = resolveToolGuidance(toolId);
+				if (!guidance) continue;
+				const name = toolsConfig[toolId]?.name ?? toolId;
+				section += `\n\n## ${name}\n- Tool ID: \`${toolId}\`\n- ${guidance.split("\n").join("\n- ")}`;
+			}
+			prompt += section;
+		}
+
+		// Honesty guard when no write tool is enabled (the write policy otherwise lives
+		// inside the vault capability guidance above).
+		if (!hasWriteTools) {
+			prompt +=
+				"\n\n# Capabilities\n- No write tools are currently enabled.\n- Do not claim you can modify notes.\n- If the user asks for edits, explain the change you would make instead.";
 		}
 
 		// Per-plugin code-exec integrations the user has approved for this agent.

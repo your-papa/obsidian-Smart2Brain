@@ -58,12 +58,7 @@ export function createPluginApiExecTool(app: App, pluginId: string, displayName:
 
 	return tool(execFn, {
 		name: toRuntimeToolName(pluginId),
-		description:
-			`Run JavaScript against the "${displayName}" plugin's public API on the main thread. ` +
-			`The plugin's api object is in scope as \`api\`, and the Obsidian \`app\` is available. ` +
-			`Use \`return\` for the final value and \`console.log\` for intermediate output. ` +
-			`Awaited work times out after ${EXECUTION_TIMEOUT_MS}ms; this is not sandboxed, so keep snippets simple and read-only unless the user asked otherwise. ` +
-			`Load the "${displayName}" skill (if available) to learn the API's shape before calling it.`,
+		description: `Run JavaScript against the "${displayName}" plugin's public API on the main thread. The plugin's api object is in scope as \`api\`, and the Obsidian \`app\` is available. Use \`return\` for the final value and \`console.log\` for intermediate output. Awaited work times out after ${EXECUTION_TIMEOUT_MS}ms; this is not sandboxed, so keep snippets simple and read-only unless the user asked otherwise. Load the "${displayName}" skill (if available) to learn the API's shape before calling it.`,
 		schema: z.object({
 			code: z
 				.string()

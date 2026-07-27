@@ -2554,7 +2554,7 @@ export class SessionRegistry {
 		// discard the in-flight streaming state (partial tokens, abortController).
 		// The view is already pinned to this thread path, so no pointer to move.
 		const existing = this.sessions.get(id);
-		if (existing && existing.isRunning && !targetCheckpointId) {
+		if (existing?.isRunning && !targetCheckpointId) {
 			existing.touch();
 			this.evictParkedSessions();
 			return;

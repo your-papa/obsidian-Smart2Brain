@@ -135,6 +135,48 @@ export const VAULT_TOOL_IDS = BUILT_IN_TOOL_IDS.filter(
 );
 
 /**
+ * Built-in capability identifiers. A capability is a fixed grouping of built-in tools
+ * surfaced as one card in the Agent editor and one `#` section in the assembled system
+ * prompt. (Memory is a separate folder feature, not a capability, so it is not listed.)
+ */
+export type CapabilityId = "vault" | "web";
+
+/**
+ * Definition of a built-in capability. Single source of truth shared by the editor UI
+ * (which renders one card per capability) and `AgentManager.assembleSystemPrompt` (which
+ * renders one `#` section per capability with its tools nested as `##` subheaders) so the
+ * vault/web split is not duplicated. Default guidance *strings* live in `prompts.ts`.
+ */
+export interface CapabilityDef {
+	id: CapabilityId;
+	/** Section heading / card title (e.g. "Vault exploration"). */
+	title: string;
+	/** Card description shown in the editor. */
+	description: string;
+	/** Obsidian icon id for the card. */
+	icon: string;
+	/** Built-in tools that belong to this capability. */
+	toolIds: readonly BuiltInToolId[];
+}
+
+export const CAPABILITIES: readonly CapabilityDef[] = [
+	{
+		id: "vault",
+		title: "Vault exploration",
+		description: "Search, read, edit, and explore your vault with the built-in tools.",
+		icon: "compass",
+		toolIds: VAULT_TOOL_IDS,
+	},
+	{
+		id: "web",
+		title: "Web",
+		description: "Reach the public internet: fetch web pages and run web searches.",
+		icon: "globe",
+		toolIds: WEB_TOOL_IDS,
+	},
+];
+
+/**
  * Tool-specific settings for search_notes tool
  */
 export interface SearchNotesSettings {
@@ -394,6 +436,29 @@ export interface AgentConfig {
 	 * own `subAgentIds` are ignored.
 	 */
 	subAgentIds?: string[];
+	/**
+	 * Whether this agent records and recalls long-lived facts in a memory folder.
+	 * Absent = disabled. When enabled (and `manage_notes` is on), `memoryPrompt` is
+	 * interpolated into the assembled system prompt and note writes inside
+	 * `memoryFolder` auto-apply.
+	 */
+	memoryEnabled?: boolean;
+	/** Vault folder this agent uses for memory notes. Absent = "Agent Notes". */
+	memoryFolder?: string;
+	/**
+	 * User-editable memory instructions injected right after the base system prompt
+	 * (not in the auto-appended tool tail) so the user can read and tune them. Seeded
+	 * with the default guidance when memory is first enabled; absent falls back to the
+	 * default rendered from `memoryFolder`.
+	 */
+	memoryPrompt?: string;
+	/**
+	 * Per-capability guidance overrides, keyed by `CapabilityId` ("vault" | "web").
+	 * Injected as the body of that capability's `#` section in the assembled system
+	 * prompt, above its enabled tools' per-tool `##` subheaders. Seeded on first
+	 * pencil-edit; absent falls back to `buildDefaultCapabilityGuidance(id)`.
+	 */
+	capabilityPrompts?: Partial<Record<CapabilityId, string>>;
 }
 
 /**
