@@ -789,6 +789,10 @@ export class VectorStoreService {
 					try {
 						const texts = batch.map((entry) => entry.embedText);
 						const vectors = await embeddings.embedDocuments(texts);
+						// The run may have been aborted (e.g. index deleted) while the
+						// embedding call was in flight; bail before writing to a store
+						// that could now be closed.
+						if (inst.abortController?.signal.aborted) break;
 						if (!vectors || vectors.length === 0) {
 							Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
 							this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + batch.length });
@@ -866,9 +870,13 @@ export class VectorStoreService {
 			} // end else (validChunks.length > 0)
 		}
 
-		// Sync document count to pluginData for reactive UI updates
-		const count = await inst.store.count();
-		getData().updateEmbeddingIndexStats(inst.indexId, { documentCount: count });
+		// Sync document count to pluginData for reactive UI updates. Skip when the
+		// run was aborted (e.g. the index was deleted mid-build) since the store
+		// may have been closed out from under us.
+		if (!inst.abortController?.signal.aborted && this.instances.has(inst.indexId)) {
+			const count = await inst.store.count();
+			getData().updateEmbeddingIndexStats(inst.indexId, { documentCount: count });
+		}
 
 		Logger.log(`[VectorStore] Validation complete for ${inst.indexId}`);
 	}
@@ -1214,6 +1222,10 @@ export class VectorStoreService {
 				try {
 					const texts = batch.map((entry) => entry.embedText);
 					const vectors = await embeddings.embedDocuments(texts);
+					// The run may have been aborted (e.g. index deleted) while the
+					// embedding call was in flight; bail before writing to a store
+					// that could now be closed.
+					if (inst.abortController?.signal.aborted) break;
 					if (!vectors || vectors.length === 0) {
 						Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
 						for (const entry of batch) skippedFiles.push({ path: entry.file.path, reason: "embed-error" });
@@ -1283,16 +1295,21 @@ export class VectorStoreService {
 			// Save the indexing report
 			inst.report = { indexedFiles, skippedFiles, timestamp: Date.now() };
 
-			// Update cached stats in plugin data using actual store count
-			const actualCount = await inst.store.count();
-			const data = getData();
-			data.updateEmbeddingIndexStats(inst.indexId, {
-				lastBuiltAt: Date.now(),
-				documentCount: actualCount,
-			});
+			const cancelled = inst.abortController?.signal.aborted;
+
+			// A cancelled run may have had its store torn down (e.g. index deleted
+			// mid-build); skip the post-run store read/stats update in that case.
+			if (!cancelled) {
+				// Update cached stats in plugin data using actual store count
+				const actualCount = await inst.store.count();
+				const data = getData();
+				data.updateEmbeddingIndexStats(inst.indexId, {
+					lastBuiltAt: Date.now(),
+					documentCount: actualCount,
+				});
+			}
 
 			const { indexed, skipped } = inst.progress;
-			const cancelled = inst.abortController?.signal.aborted;
 			const skippedText = skipped > 0 ? `, ${skipped} skipped` : "";
 			const noticeMessage = cancelled
 				? `Indexing cancelled (${indexed} notes indexed so far)`
@@ -1930,6 +1947,14 @@ export class VectorStoreService {
 	async deleteIndex(indexId: string): Promise<void> {
 		const inst = this.instances.get(indexId);
 		if (inst) {
+			// Abort any in-flight indexing run so it stops writing to the store
+			// we're about to clear, and flip progress off so listeners (e.g. the
+			// settings progress bar) hide immediately instead of lingering. Keep
+			// the abortController set (don't null it) so the loop's own
+			// `signal.aborted` checks fire and it breaks out on its next tick.
+			inst.abortController?.abort();
+			this.updateInstanceProgress(inst, { isIndexing: false, currentFile: null, etaMs: null });
+			inst.isIndexing = false;
 			await inst.store.clear();
 			await inst.store.close();
 			this.instances.delete(indexId);
