@@ -12,6 +12,7 @@ export {
 	isVectorStoreInitialized,
 	waitForVectorStore,
 	waitForVectorStoreIndex,
+	formatEta,
 } from "./VectorStoreService";
 
 export type {

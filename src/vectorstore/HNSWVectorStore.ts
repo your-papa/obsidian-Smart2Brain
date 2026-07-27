@@ -601,6 +601,33 @@ export class HNSWVectorStore implements VectorStore {
 	}
 
 	/**
+	 * Count distinct notes (unique paths). Walks the `path` index with a
+	 * unique-key cursor so it never deserializes vectors.
+	 */
+	async countNotes(): Promise<number> {
+		const db = this.requireDb();
+
+		return new Promise((resolve, reject) => {
+			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+			const store = tx.objectStore(DOCUMENTS_STORE);
+			const index = store.index("path");
+			const request = index.openKeyCursor(null, "nextunique");
+
+			let notes = 0;
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => {
+				const cursor = request.result;
+				if (cursor) {
+					notes++;
+					cursor.continue();
+				} else {
+					resolve(notes);
+				}
+			};
+		});
+	}
+
+	/**
 	 * Search for similar vectors using HNSW approximate nearest neighbor.
 	 * O(log n) complexity - much faster than brute-force for large datasets.
 	 */

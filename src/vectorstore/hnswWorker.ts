@@ -126,6 +126,10 @@ globalThis.onmessage = async (e: MessageEvent<HNSWWorkerRequest>) => {
 				result = await requireStore().count();
 				break;
 			}
+			case "countNotes": {
+				result = await requireStore().countNotes();
+				break;
+			}
 			case "search": {
 				const [queryVector, topK, threshold] = args as [Float32Array | number[], number, number | undefined];
 				const qv = queryVector instanceof Float32Array ? queryVector : toFloat32Array(queryVector);

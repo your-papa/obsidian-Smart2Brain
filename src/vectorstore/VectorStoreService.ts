@@ -207,6 +207,10 @@ interface IndexInstance {
 	hasValidatedThisSession: boolean;
 	isIndexing: boolean;
 	progress: IndexingProgress;
+	/** Timestamp (ms) when the current indexing run started, for ETA estimation */
+	indexingStartedAt: number | null;
+	/** `indexed` count when the current run started, so ETA measures only this run's rate */
+	indexingStartCount: number;
 	abortController: AbortController | null;
 	maxInputTokensCache: {
 		provider: string;
@@ -214,6 +218,23 @@ interface IndexInstance {
 		maxInputTokens: number;
 	} | null;
 	report: IndexingReport | null;
+}
+
+/**
+ * Format an estimated-time-remaining duration (in ms) as a short human string,
+ * e.g. "45s", "3m", "1h 12m". Rounds up so the estimate never reads as "0s"
+ * while work is still in flight.
+ */
+export function formatEta(ms: number): string {
+	const totalSeconds = Math.max(1, Math.ceil(ms / 1000));
+	if (totalSeconds < 60) return `${totalSeconds}s`;
+
+	const totalMinutes = Math.ceil(totalSeconds / 60);
+	if (totalMinutes < 60) return `${totalMinutes}m`;
+
+	const hours = Math.floor(totalMinutes / 60);
+	const minutes = totalMinutes % 60;
+	return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
 export interface ValidationProgressCountsInput {
@@ -280,7 +301,10 @@ export class VectorStoreService {
 				skipped: 0,
 				currentFile: null,
 				percentage: 0,
+				etaMs: null,
 			},
+			indexingStartedAt: null,
+			indexingStartCount: 0,
 			abortController: null,
 			maxInputTokensCache: null,
 			report: null,
@@ -710,6 +734,28 @@ export class VectorStoreService {
 					validPendingFileCount: validFileCount,
 				});
 				let indexed = 0;
+				// Progress is tracked in files (matching `total`), not chunks: a note is
+				// counted once its final chunk is written, so a multi-chunk note advances
+				// the bar by one, keeping `indexed <= total` and the ETA well-defined.
+				const indexedValidationPaths = new Set<string>();
+				const noteValidated = (path: string) => {
+					if (indexedValidationPaths.has(path)) return;
+					indexedValidationPaths.add(path);
+					this.updateInstanceProgress(inst, {
+						indexed: startingIndexedCount + indexedValidationPaths.size,
+					});
+				};
+				// `skipped` is likewise counted in files (starting from the pre-filter
+				// count) so it stays comparable with `total`/`indexed`; a note failing
+				// any chunk is counted once.
+				const skippedValidationPaths = new Set<string>();
+				const noteSkipped = (path: string) => {
+					if (skippedValidationPaths.has(path)) return;
+					skippedValidationPaths.add(path);
+					this.updateInstanceProgress(inst, {
+						skipped: preFilterSkipped + skippedValidationPaths.size,
+					});
+				};
 				const showNotice = validFileCount > 5;
 				let notice: Notice | null = null;
 				if (showNotice) {
@@ -743,7 +789,6 @@ export class VectorStoreService {
 					}
 
 					const batch = validChunks.slice(i, i + batchSize);
-					const batchEnd = Math.min(i + batchSize, validChunks.length);
 
 					this.updateInstanceProgress(inst, {
 						currentFile:
@@ -755,9 +800,13 @@ export class VectorStoreService {
 					try {
 						const texts = batch.map((entry) => entry.embedText);
 						const vectors = await embeddings.embedDocuments(texts);
+						// The run may have been aborted (e.g. index deleted) while the
+						// embedding call was in flight; bail before writing to a store
+						// that could now be closed.
+						if (inst.abortController?.signal.aborted) break;
 						if (!vectors || vectors.length === 0) {
 							Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
-							this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + batch.length });
+							for (const entry of batch) noteSkipped(entry.file.path);
 							continue;
 						}
 						for (let j = 0; j < batch.length; j++) {
@@ -776,9 +825,9 @@ export class VectorStoreService {
 								vector: new Float32Array(vectors[j]),
 							};
 							await inst.store.upsert(doc);
+							if (entry.chunkIndex === entry.chunkCount - 1) noteValidated(entry.file.path);
 						}
 						indexed += batch.length;
-						this.updateInstanceProgress(inst, { indexed: startingIndexedCount + batchEnd });
 						if (notice) this.updateNotice(notice, inst.progress);
 					} catch (error) {
 						Logger.error("[VectorStore] Batch validation indexing failed:", error);
@@ -790,7 +839,7 @@ export class VectorStoreService {
 									Logger.error(
 										`[VectorStore] embedQuery returned empty result for ${entry.file.path}`,
 									);
-									this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
+									noteSkipped(entry.file.path);
 									continue;
 								}
 								await purgeIfNeeded(entry);
@@ -804,12 +853,12 @@ export class VectorStoreService {
 								};
 								await inst.store.upsert(doc);
 								indexed++;
-								this.updateInstanceProgress(inst, { indexed: inst.progress.indexed + 1 });
+								if (entry.chunkIndex === entry.chunkCount - 1) noteValidated(entry.file.path);
 							} catch (entryError) {
 								Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
 								const reason = entryError instanceof Error ? entryError.message : String(entryError);
 								new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
-								this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
+								noteSkipped(entry.file.path);
 							}
 						}
 						if (notice) this.updateNotice(notice, inst.progress);
@@ -832,9 +881,13 @@ export class VectorStoreService {
 			} // end else (validChunks.length > 0)
 		}
 
-		// Sync document count to pluginData for reactive UI updates
-		const count = await inst.store.count();
-		getData().updateEmbeddingIndexStats(inst.indexId, { documentCount: count });
+		// Sync document count to pluginData for reactive UI updates. Skip when the
+		// run was aborted (e.g. the index was deleted mid-build) since the store
+		// may have been closed out from under us.
+		if (!inst.abortController?.signal.aborted && this.instances.has(inst.indexId)) {
+			const noteCount = await inst.store.countNotes();
+			getData().updateEmbeddingIndexStats(inst.indexId, { documentCount: noteCount });
+		}
 
 		Logger.log(`[VectorStore] Validation complete for ${inst.indexId}`);
 	}
@@ -1106,6 +1159,7 @@ export class VectorStoreService {
 			skipped: skippedFiles.length,
 			currentFile: null,
 			percentage: 0,
+			etaMs: null,
 		});
 
 		const notice = new Notice("", 0);
@@ -1161,6 +1215,18 @@ export class VectorStoreService {
 					this.updateInstanceProgress(inst, { indexed: indexedPaths.size });
 				}
 			};
+			// Track in-loop skips per distinct file so `skipped` stays in the same
+			// (file) units as `total`/`indexed`; a note failing any chunk is counted
+			// once. Starts from the pre-filter skip count captured above.
+			const preFilterSkippedCount = skippedFiles.length;
+			const skippedPaths = new Set<string>();
+			const noteSkipped = (path: string, reason: SkipReason) => {
+				skippedFiles.push({ path, reason });
+				if (!skippedPaths.has(path)) {
+					skippedPaths.add(path);
+					this.updateInstanceProgress(inst, { skipped: preFilterSkippedCount + skippedPaths.size });
+				}
+			};
 
 			for (let i = 0; i < validChunks.length; i += batchSize) {
 				if (inst.abortController?.signal.aborted) {
@@ -1179,10 +1245,13 @@ export class VectorStoreService {
 				try {
 					const texts = batch.map((entry) => entry.embedText);
 					const vectors = await embeddings.embedDocuments(texts);
+					// The run may have been aborted (e.g. index deleted) while the
+					// embedding call was in flight; bail before writing to a store
+					// that could now be closed.
+					if (inst.abortController?.signal.aborted) break;
 					if (!vectors || vectors.length === 0) {
 						Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
-						for (const entry of batch) skippedFiles.push({ path: entry.file.path, reason: "embed-error" });
-						this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + batch.length });
+						for (const entry of batch) noteSkipped(entry.file.path, "embed-error");
 						this.updateNotice(notice, inst.progress);
 						continue;
 					}
@@ -1190,7 +1259,7 @@ export class VectorStoreService {
 					for (let j = 0; j < batch.length; j++) {
 						if (!vectors[j]) {
 							Logger.error(`[VectorStore] Empty vector for ${batch[j].file.path}`);
-							skippedFiles.push({ path: batch[j].file.path, reason: "embed-error" });
+							noteSkipped(batch[j].file.path, "embed-error");
 							continue;
 						}
 						const entry = batch[j];
@@ -1219,8 +1288,7 @@ export class VectorStoreService {
 							const vector = await embeddings.embedQuery(entry.embedText);
 							if (!vector || vector.length === 0) {
 								Logger.error(`[VectorStore] embedQuery returned empty result for ${entry.file.path}`);
-								skippedFiles.push({ path: entry.file.path, reason: "embed-error" });
-								this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
+								noteSkipped(entry.file.path, "embed-error");
 								continue;
 							}
 							const doc: DocumentVector = {
@@ -1237,8 +1305,7 @@ export class VectorStoreService {
 							Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
 							const reason = entryError instanceof Error ? entryError.message : String(entryError);
 							new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
-							skippedFiles.push({ path: entry.file.path, reason: "embed-error" });
-							this.updateInstanceProgress(inst, { skipped: inst.progress.skipped + 1 });
+							noteSkipped(entry.file.path, "embed-error");
 						}
 					}
 					this.updateNotice(notice, inst.progress);
@@ -1248,16 +1315,21 @@ export class VectorStoreService {
 			// Save the indexing report
 			inst.report = { indexedFiles, skippedFiles, timestamp: Date.now() };
 
-			// Update cached stats in plugin data using actual store count
-			const actualCount = await inst.store.count();
-			const data = getData();
-			data.updateEmbeddingIndexStats(inst.indexId, {
-				lastBuiltAt: Date.now(),
-				documentCount: actualCount,
-			});
+			const cancelled = inst.abortController?.signal.aborted;
+
+			// A cancelled run may have had its store torn down (e.g. index deleted
+			// mid-build); skip the post-run store read/stats update in that case.
+			if (!cancelled) {
+				// Update cached stats in plugin data using the distinct-note count
+				const noteCount = await inst.store.countNotes();
+				const data = getData();
+				data.updateEmbeddingIndexStats(inst.indexId, {
+					lastBuiltAt: Date.now(),
+					documentCount: noteCount,
+				});
+			}
 
 			const { indexed, skipped } = inst.progress;
-			const cancelled = inst.abortController?.signal.aborted;
 			const skippedText = skipped > 0 ? `, ${skipped} skipped` : "";
 			const noticeMessage = cancelled
 				? `Indexing cancelled (${indexed} notes indexed so far)`
@@ -1277,8 +1349,9 @@ export class VectorStoreService {
 	 * Update the indexing notice with current progress.
 	 */
 	private updateNotice(notice: Notice, progress: IndexingProgress): void {
-		const { indexed, skipped, total, percentage } = progress;
+		const { indexed, skipped, total, percentage, etaMs } = progress;
 		const skippedText = skipped > 0 ? ` (${skipped} skipped)` : "";
+		const etaText = etaMs !== null ? ` (~${formatEta(etaMs)} left)` : "";
 
 		const el = notice.noticeEl;
 		el.empty();
@@ -1287,7 +1360,7 @@ export class VectorStoreService {
 
 		container.createDiv({
 			cls: "s2b-indexing-status",
-			text: `Indexing: ${indexed}/${total}${skippedText}`,
+			text: `Indexing: ${indexed}/${total}${skippedText}${etaText}`,
 		});
 
 		const progressContainer = container.createDiv({ cls: "s2b-indexing-progress" });
@@ -1530,13 +1603,13 @@ export class VectorStoreService {
 
 		const inst = await this.getOrCreateInstance(resolvedId);
 
-		const count = await inst.store.count();
+		const noteCount = await inst.store.countNotes();
 		const metadata = await inst.store.getMetadata();
 		const model = this.getModelForInstance(inst);
 		const isReady = this.isInitialized && model !== null;
 
 		return {
-			documentCount: count,
+			documentCount: noteCount,
 			providerId: metadata?.providerId ?? inst.currentProviderId,
 			modelId: metadata?.modelId ?? inst.currentModelId,
 			isReady,
@@ -1552,11 +1625,27 @@ export class VectorStoreService {
 			indexId = data.searchEmbedIndex ?? undefined;
 		}
 		if (!indexId) {
-			return { isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 };
+			return {
+				isIndexing: false,
+				total: 0,
+				indexed: 0,
+				skipped: 0,
+				currentFile: null,
+				percentage: 0,
+				etaMs: null,
+			};
 		}
 		const inst = this.instances.get(indexId);
 		if (!inst) {
-			return { isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 };
+			return {
+				isIndexing: false,
+				total: 0,
+				indexed: 0,
+				skipped: 0,
+				currentFile: null,
+				percentage: 0,
+				etaMs: null,
+			};
 		}
 		return { ...inst.progress };
 	}
@@ -1633,7 +1722,15 @@ export class VectorStoreService {
 			indexId = data.searchEmbedIndex ?? undefined;
 		}
 		if (!indexId) {
-			callback({ isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 });
+			callback({
+				isIndexing: false,
+				total: 0,
+				indexed: 0,
+				skipped: 0,
+				currentFile: null,
+				percentage: 0,
+				etaMs: null,
+			});
 			return () => {};
 		}
 
@@ -1648,7 +1745,15 @@ export class VectorStoreService {
 		callback(
 			inst
 				? { ...inst.progress }
-				: { isIndexing: false, total: 0, indexed: 0, skipped: 0, currentFile: null, percentage: 0 },
+				: {
+						isIndexing: false,
+						total: 0,
+						indexed: 0,
+						skipped: 0,
+						currentFile: null,
+						percentage: 0,
+						etaMs: null,
+					},
 		);
 
 		return () => {
@@ -1664,10 +1769,22 @@ export class VectorStoreService {
 	 * Update progress state for a specific instance and notify listeners.
 	 */
 	private updateInstanceProgress(inst: IndexInstance, partial: Partial<IndexingProgress>): void {
+		const wasIndexing = inst.progress.isIndexing;
 		Object.assign(inst.progress, partial);
+
+		// Track the start of an indexing run so ETA measures only this run's rate.
+		if (inst.progress.isIndexing && !wasIndexing) {
+			inst.indexingStartedAt = Date.now();
+			inst.indexingStartCount = inst.progress.indexed;
+		} else if (!inst.progress.isIndexing) {
+			inst.indexingStartedAt = null;
+			inst.indexingStartCount = 0;
+		}
+
 		if (inst.progress.total > 0) {
 			inst.progress.percentage = Math.round((inst.progress.indexed / inst.progress.total) * 100);
 		}
+		inst.progress.etaMs = this.estimateEtaMs(inst);
 		const progress = { ...inst.progress };
 		const listeners = this.progressListeners.get(inst.indexId);
 		if (listeners) {
@@ -1678,11 +1795,31 @@ export class VectorStoreService {
 	}
 
 	/**
+	 * Estimate milliseconds remaining for the current indexing run based on the
+	 * rate of files processed so far. Returns null until enough progress has been
+	 * made to produce a stable estimate.
+	 */
+	private estimateEtaMs(inst: IndexInstance): number | null {
+		const { isIndexing, indexed, total } = inst.progress;
+		if (!isIndexing || inst.indexingStartedAt === null || total <= 0) return null;
+
+		const doneThisRun = indexed - inst.indexingStartCount;
+		const remaining = total - indexed;
+		if (doneThisRun <= 0 || remaining <= 0) return null;
+
+		const elapsed = Date.now() - inst.indexingStartedAt;
+		if (elapsed <= 0) return null;
+
+		const msPerFile = elapsed / doneThisRun;
+		return Math.round(msPerFile * remaining);
+	}
+
+	/**
 	 * Update the cached document count in pluginData after a file event.
 	 */
 	private async notifyStatsChanged(inst: IndexInstance): Promise<void> {
-		const count = await inst.store.count();
-		getData().updateEmbeddingIndexStats(inst.indexId, { documentCount: count });
+		const noteCount = await inst.store.countNotes();
+		getData().updateEmbeddingIndexStats(inst.indexId, { documentCount: noteCount });
 	}
 
 	/**
@@ -1830,6 +1967,14 @@ export class VectorStoreService {
 	async deleteIndex(indexId: string): Promise<void> {
 		const inst = this.instances.get(indexId);
 		if (inst) {
+			// Abort any in-flight indexing run so it stops writing to the store
+			// we're about to clear, and flip progress off so listeners (e.g. the
+			// settings progress bar) hide immediately instead of lingering. Keep
+			// the abortController set (don't null it) so the loop's own
+			// `signal.aborted` checks fire and it breaks out on its next tick.
+			inst.abortController?.abort();
+			this.updateInstanceProgress(inst, { isIndexing: false, currentFile: null, etaMs: null });
+			inst.isIndexing = false;
 			await inst.store.clear();
 			await inst.store.close();
 			this.instances.delete(indexId);
