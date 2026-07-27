@@ -29,7 +29,7 @@ function sanitizeBaseUrl(url: string): string {
 
 interface OpenAIModelEntry {
 	id?: string;
-	/** Some servers (e.g. mlx-lm / OMLX) set type="embedding" on embedding models */
+	/** Some servers set type="embedding" on embedding models */
 	type?: string;
 	/** Alternate field name used by some servers */
 	object?: string;
@@ -37,15 +37,6 @@ interface OpenAIModelEntry {
 
 interface OpenAIModelResponse {
 	data?: Array<OpenAIModelEntry>;
-}
-
-interface ModelStatusEntry {
-	id?: string;
-	model_type?: string;
-}
-
-interface ModelsStatusResponse {
-	models?: Array<ModelStatusEntry>;
 }
 
 function isEmbeddingEntry(entry: OpenAIModelEntry): boolean {
@@ -75,41 +66,6 @@ async function fetchModelEntries(
 
 	const payload = response.json as OpenAIModelResponse;
 	return Array.isArray(payload.data) ? payload.data : [];
-}
-
-/**
- * Tries to fetch /v1/models/status, an extension some OpenAI-compatible servers expose
- * (e.g. OMLX) that carries an authoritative model_type per entry.
- * Returns a map of model id → model_type, or null if the endpoint is unavailable.
- */
-async function fetchModelTypeMap(auth: AuthObject, defaultBaseUrl: string): Promise<Map<string, string> | null> {
-	const apiUrl = `${sanitizeBaseUrl(auth.baseUrl || defaultBaseUrl)}/v1`;
-	const headers: Record<string, string> = { "Content-Type": "application/json" };
-
-	if (auth.apiKey) {
-		headers.Authorization = `Bearer ${auth.apiKey}`;
-	}
-	if (auth.headers) {
-		Object.assign(headers, auth.headers);
-	}
-
-	try {
-		const response = await requestUrl({ url: `${apiUrl}/models/status`, method: "GET", headers, throw: false });
-		if (response.status < 200 || response.status >= 300) return null;
-
-		const payload = response.json as ModelsStatusResponse;
-		if (!Array.isArray(payload.models)) return null;
-
-		const map = new Map<string, string>();
-		for (const entry of payload.models) {
-			if (entry.id && entry.model_type) {
-				map.set(entry.id, entry.model_type);
-			}
-		}
-		return map.size > 0 ? map : null;
-	} catch {
-		return null;
-	}
 }
 
 export interface OpenAICompatibleProviderInput {
@@ -248,17 +204,8 @@ export function createOpenAICompatibleProvider(
 			}
 		},
 		discoverModels: async (auth: AuthObject): Promise<string[]> => {
-			const [entries, typeMap] = await Promise.all([
-				fetchModelEntries(auth, config.id, defaultBaseUrl),
-				fetchModelTypeMap(auth, defaultBaseUrl),
-			]);
-			return entries
-				.filter((r) => {
-					if (!r.id) return false;
-					if (typeMap) return typeMap.get(r.id) !== "embedding";
-					return !isEmbeddingEntry(r);
-				})
-				.map((r) => r.id as string);
+			const entries = await fetchModelEntries(auth, config.id, defaultBaseUrl);
+			return entries.filter((r) => r.id && !isEmbeddingEntry(r)).map((r) => r.id as string);
 		},
 	};
 
@@ -284,17 +231,8 @@ export function createOpenAICompatibleProvider(
 			return createTransportedOpenAIEmbeddings(config.id, embeddingConfig);
 		},
 		discoverEmbeddingModels: async (auth: AuthObject): Promise<string[]> => {
-			const [entries, typeMap] = await Promise.all([
-				fetchModelEntries(auth, config.id, defaultBaseUrl),
-				fetchModelTypeMap(auth, defaultBaseUrl),
-			]);
-			return entries
-				.filter((r) => {
-					if (!r.id) return false;
-					if (typeMap) return typeMap.get(r.id) === "embedding";
-					return isEmbeddingEntry(r);
-				})
-				.map((r) => r.id as string);
+			const entries = await fetchModelEntries(auth, config.id, defaultBaseUrl);
+			return entries.filter((r) => r.id && isEmbeddingEntry(r)).map((r) => r.id as string);
 		},
 	} satisfies EmbeddingProviderDefinition;
 }

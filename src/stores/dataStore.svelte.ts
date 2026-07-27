@@ -145,9 +145,9 @@ function buildManagedSecretId(providerId: string, fieldName: string): string {
 }
 
 function createProviderState(templateId: ProviderTemplateId): StoredProviderState {
-	// Base URL pre-seed. Only Ollama is seeded: its baseUrl is a REQUIRED field (shown in
-	// the main section), and Ollama runs on a well-known local default, so filling it in
-	// saves the user typing without side effects.
+	// Base URL pre-seed. Only local providers (Ollama, oMLX) are seeded: their baseUrl is a
+	// REQUIRED field (shown in the main section) pointing at a well-known local default, so
+	// filling it in saves the user typing without side effects.
 	//
 	// Anthropic is intentionally NOT seeded even though it has a default endpoint: its
 	// baseUrl is an OPTIONAL (Advanced) field, and a stored value there forces the Advanced
@@ -157,6 +157,7 @@ function createProviderState(templateId: ProviderTemplateId): StoredProviderStat
 	// bias toward one vendor.
 	const baseUrlByTemplate: Partial<Record<ProviderTemplateId, string>> = {
 		ollama: "http://localhost:11434",
+		omlx: "http://localhost:8000",
 	};
 	const authMode = templateId === "openai-codex" ? "codex" : "apiKey";
 
@@ -168,7 +169,7 @@ function createProviderState(templateId: ProviderTemplateId): StoredProviderStat
 		},
 		chatModels: {},
 		embedModels: {},
-		trustedForPrivateData: templateId === "ollama",
+		trustedForPrivateData: templateId === "ollama" || templateId === "omlx",
 	};
 }
 

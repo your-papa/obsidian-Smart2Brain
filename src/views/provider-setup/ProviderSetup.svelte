@@ -1,6 +1,7 @@
 <script lang="ts">
 import type { Component } from "svelte";
 import { mount, unmount, untrack } from "svelte";
+import { Platform } from "obsidian";
 import AuthConfigFields from "../../components/settings/AuthConfigFields.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
@@ -12,6 +13,7 @@ import AnthropicLogo from "../../components/ui/logos/AnthropicLogo.svelte";
 import OllamaLogo from "../../components/ui/logos/OllamaLogo.svelte";
 import OpenAILogo from "../../components/ui/logos/OpenAILogo.svelte";
 import OpenRouterLogo from "../../components/ui/logos/OpenRouterLogo.svelte";
+import OmlxLogo from "../../components/ui/logos/OmlxLogo.svelte";
 import {
 	createAuthStateQuery,
 	getProviderStateQueryOptions,
@@ -55,12 +57,15 @@ const isConfigured = $derived(data.isProviderConfigured(providerId));
 
 // Picker display order: lead with the most-used providers so the grid scans fast.
 // Templates not listed fall to the end in their registry order.
-const PICKER_ORDER: ProviderTemplateId[] = ["openai-compatible", "openrouter", "openai", "anthropic"];
-const providerTemplates = [...getAllProviderTemplates()].sort((a, b) => {
-	const ai = PICKER_ORDER.indexOf(a.id);
-	const bi = PICKER_ORDER.indexOf(b.id);
-	return (ai === -1 ? PICKER_ORDER.length : ai) - (bi === -1 ? PICKER_ORDER.length : bi);
-});
+const PICKER_ORDER: ProviderTemplateId[] = ["openai-compatible", "omlx", "openrouter", "ollama", "openai", "anthropic"];
+// oMLX is a macOS-native app (Apple Silicon), so its template is only offered on macOS.
+const providerTemplates = [...getAllProviderTemplates()]
+	.filter((t) => t.id !== "omlx" || Platform.isMacOS)
+	.sort((a, b) => {
+		const ai = PICKER_ORDER.indexOf(a.id);
+		const bi = PICKER_ORDER.indexOf(b.id);
+		return (ai === -1 ? PICKER_ORDER.length : ai) - (bi === -1 ? PICKER_ORDER.length : bi);
+	});
 let isSigningIn = $state(false);
 let signInError = $state<string | null>(null);
 
@@ -183,6 +188,7 @@ const TEMPLATE_LOGOS: Partial<Record<ProviderTemplateId, Component<LogoProps>>> 
 	"openai-codex": OpenAILogo,
 	anthropic: AnthropicLogo,
 	ollama: OllamaLogo,
+	omlx: OmlxLogo,
 	openrouter: OpenRouterLogo,
 };
 
