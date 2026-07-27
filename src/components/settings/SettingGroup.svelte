@@ -20,14 +20,3 @@ let { heading, headingDesc, class: className = "", children }: Props = $props();
     {@render children()}
   </div>
 </div>
-
-<style>
-  /* `.setting-group` collides with an Obsidian core rule that caps width at 700px and
-     centers via `margin: 0 auto` (meant for the settings tab). Neutralize it so the
-     group fills its container in our modals. */
-  .setting-group {
-    max-width: none;
-    margin-left: 0;
-    margin-right: 0;
-  }
-</style>

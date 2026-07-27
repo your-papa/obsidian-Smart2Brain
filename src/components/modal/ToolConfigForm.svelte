@@ -356,10 +356,25 @@ const showResetToDefault = $derived(!isAtDefault);
 
 /** Build the persisted patch from current field state (shared by Save + live-commit). */
 function buildConfigPatch(): Partial<ToolConfig> {
+	// For read_content, the description/promptGuidance auto-swap when processor mode changes
+	// is driven by a deferred $effect. In live-commit mode `commit()` can run synchronously
+	// (from a processor-mode handler) before that effect flushes, so resolve the swap here
+	// too — when the current value is a known default — to avoid persisting a stale variant.
+	let resolvedDescription = description;
+	let resolvedGuidance = promptGuidance;
+	if (capturedToolId === "read_content") {
+		const hasImg = resolveHasProcessor(imageProcessorMode, imageProcessor, chatModelSupportsVision);
+		const hasPdf = resolveHasProcessor(pdfProcessorMode, pdfProcessor, chatModelSupportsPdf);
+		if (READ_CONTENT_DESC_DEFAULTS.has(description))
+			resolvedDescription = getReadContentDescription(hasImg, hasPdf);
+		if (READ_CONTENT_GUIDANCE_DEFAULTS.has(promptGuidance))
+			resolvedGuidance = getReadContentGuidance(hasImg, hasPdf);
+	}
+
 	const updatedConfig: Partial<ToolConfig> = {
 		name,
-		description,
-		promptGuidance: promptGuidance.trim(),
+		description: resolvedDescription,
+		promptGuidance: resolvedGuidance.trim(),
 	};
 
 	if (capturedToolId === "search_notes") {
@@ -792,6 +807,15 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
     flex-direction: column;
     gap: 16px;
     padding: 8px 0;
+  }
+
+  /* `.setting-group` collides with an Obsidian core rule (`max-width: 700px; margin: 0 auto`)
+     meant for the native settings tab. Inside these wide modals that centers the tool
+     settings; neutralize it here (scoped to this form) rather than globally. */
+  .tool-config-modal-content :global(.setting-group) {
+    max-width: none;
+    margin-left: 0;
+    margin-right: 0;
   }
 
   .tool-config-section-note {
