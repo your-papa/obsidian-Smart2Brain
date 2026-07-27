@@ -734,6 +734,17 @@ export class VectorStoreService {
 					validPendingFileCount: validFileCount,
 				});
 				let indexed = 0;
+				// Progress is tracked in files (matching `total`), not chunks: a note is
+				// counted once its final chunk is written, so a multi-chunk note advances
+				// the bar by one, keeping `indexed <= total` and the ETA well-defined.
+				const indexedValidationPaths = new Set<string>();
+				const noteValidated = (path: string) => {
+					if (indexedValidationPaths.has(path)) return;
+					indexedValidationPaths.add(path);
+					this.updateInstanceProgress(inst, {
+						indexed: startingIndexedCount + indexedValidationPaths.size,
+					});
+				};
 				const showNotice = validFileCount > 5;
 				let notice: Notice | null = null;
 				if (showNotice) {
@@ -767,7 +778,6 @@ export class VectorStoreService {
 					}
 
 					const batch = validChunks.slice(i, i + batchSize);
-					const batchEnd = Math.min(i + batchSize, validChunks.length);
 
 					this.updateInstanceProgress(inst, {
 						currentFile:
@@ -800,9 +810,9 @@ export class VectorStoreService {
 								vector: new Float32Array(vectors[j]),
 							};
 							await inst.store.upsert(doc);
+							if (entry.chunkIndex === entry.chunkCount - 1) noteValidated(entry.file.path);
 						}
 						indexed += batch.length;
-						this.updateInstanceProgress(inst, { indexed: startingIndexedCount + batchEnd });
 						if (notice) this.updateNotice(notice, inst.progress);
 					} catch (error) {
 						Logger.error("[VectorStore] Batch validation indexing failed:", error);
@@ -828,7 +838,7 @@ export class VectorStoreService {
 								};
 								await inst.store.upsert(doc);
 								indexed++;
-								this.updateInstanceProgress(inst, { indexed: inst.progress.indexed + 1 });
+								if (entry.chunkIndex === entry.chunkCount - 1) noteValidated(entry.file.path);
 							} catch (entryError) {
 								Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
 								const reason = entryError instanceof Error ? entryError.message : String(entryError);
