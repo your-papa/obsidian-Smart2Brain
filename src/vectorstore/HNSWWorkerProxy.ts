@@ -118,6 +118,10 @@ export class HNSWWorkerProxy implements VectorStore {
 		return (await this.call("count")) as number;
 	}
 
+	async countNotes(): Promise<number> {
+		return (await this.call("countNotes")) as number;
+	}
+
 	async search(queryVector: Float32Array, topK: number, threshold?: number): Promise<ScoredDocument[]> {
 		return (await this.call("search", queryVector, topK, threshold)) as ScoredDocument[];
 	}

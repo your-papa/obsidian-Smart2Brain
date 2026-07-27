@@ -330,9 +330,16 @@ export interface VectorStore {
 	clear(): Promise<void>;
 
 	/**
-	 * Get the number of documents in the store.
+	 * Get the number of documents (chunks) in the store.
 	 */
 	count(): Promise<number>;
+
+	/**
+	 * Get the number of distinct notes (unique paths) in the store. A note is
+	 * split into multiple chunk documents, so this is <= count() and is the
+	 * user-facing "notes indexed" figure.
+	 */
+	countNotes(): Promise<number>;
 
 	/**
 	 * Search for similar vectors.

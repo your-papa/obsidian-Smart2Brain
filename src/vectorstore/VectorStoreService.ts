@@ -885,8 +885,8 @@ export class VectorStoreService {
 		// run was aborted (e.g. the index was deleted mid-build) since the store
 		// may have been closed out from under us.
 		if (!inst.abortController?.signal.aborted && this.instances.has(inst.indexId)) {
-			const count = await inst.store.count();
-			getData().updateEmbeddingIndexStats(inst.indexId, { documentCount: count });
+			const noteCount = await inst.store.countNotes();
+			getData().updateEmbeddingIndexStats(inst.indexId, { documentCount: noteCount });
 		}
 
 		Logger.log(`[VectorStore] Validation complete for ${inst.indexId}`);
@@ -1320,12 +1320,12 @@ export class VectorStoreService {
 			// A cancelled run may have had its store torn down (e.g. index deleted
 			// mid-build); skip the post-run store read/stats update in that case.
 			if (!cancelled) {
-				// Update cached stats in plugin data using actual store count
-				const actualCount = await inst.store.count();
+				// Update cached stats in plugin data using the distinct-note count
+				const noteCount = await inst.store.countNotes();
 				const data = getData();
 				data.updateEmbeddingIndexStats(inst.indexId, {
 					lastBuiltAt: Date.now(),
-					documentCount: actualCount,
+					documentCount: noteCount,
 				});
 			}
 
@@ -1603,13 +1603,13 @@ export class VectorStoreService {
 
 		const inst = await this.getOrCreateInstance(resolvedId);
 
-		const count = await inst.store.count();
+		const noteCount = await inst.store.countNotes();
 		const metadata = await inst.store.getMetadata();
 		const model = this.getModelForInstance(inst);
 		const isReady = this.isInitialized && model !== null;
 
 		return {
-			documentCount: count,
+			documentCount: noteCount,
 			providerId: metadata?.providerId ?? inst.currentProviderId,
 			modelId: metadata?.modelId ?? inst.currentModelId,
 			isReady,
@@ -1818,8 +1818,8 @@ export class VectorStoreService {
 	 * Update the cached document count in pluginData after a file event.
 	 */
 	private async notifyStatsChanged(inst: IndexInstance): Promise<void> {
-		const count = await inst.store.count();
-		getData().updateEmbeddingIndexStats(inst.indexId, { documentCount: count });
+		const noteCount = await inst.store.countNotes();
+		getData().updateEmbeddingIndexStats(inst.indexId, { documentCount: noteCount });
 	}
 
 	/**
