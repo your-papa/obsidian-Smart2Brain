@@ -1,6 +1,6 @@
 <script lang="ts">
 import { Notice } from "obsidian";
-import { navigateToPendingChange } from "../../lib/pendingChangeNavigation";
+import { navigateToPendingChange, revealAndScroll } from "../../lib/pendingChangeNavigation";
 import { getPlugin } from "../../stores/state.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { PendingChangeEntry } from "../../types/shared";
@@ -107,6 +107,13 @@ async function handleRejectAll() {
 async function handleNav(direction: "next" | "prev") {
 	if (!threadId || pendingCount === 0) return;
 	await navigateToPendingChange(getPlugin(), threadId, direction);
+}
+
+/** Jump to a clicked diff row's position in the target note. `line` is 0-based
+ * in the note's current content (only wired for updates, which are on disk). */
+async function handleJump(entry: PendingChangeEntry, line: number) {
+	const opened = await revealAndScroll(getPlugin(), entry.change.path, line);
+	if (!opened) new Notice("Could not open the note for this change.");
 }
 </script>
 
@@ -227,7 +234,7 @@ async function handleNav(direction: "next" | "prev") {
 
             {#if expandedIds[entry.id]}
               <div class="pcb-diff-body">
-                <DiffView change={entry.change} />
+                <DiffView change={entry.change} onJump={(line) => handleJump(entry, line)} />
               </div>
             {/if}
           </div>
