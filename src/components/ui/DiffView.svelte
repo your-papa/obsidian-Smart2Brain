@@ -197,11 +197,21 @@ const entries = $derived(hunks ? collapseContext(computeLines(hunks)) : []);
   }
 
   .s2b-diff-added {
-    background-color: hsla(var(--color-green-hsl), 0.15);
+    background-color: hsla(var(--color-green-hsl), 0.28);
+    box-shadow: inset 2px 0 0 var(--color-green);
   }
 
   .s2b-diff-removed {
-    background-color: hsla(var(--color-red-hsl), 0.15);
+    background-color: hsla(var(--color-red-hsl), 0.28);
+    box-shadow: inset 2px 0 0 var(--color-red);
+  }
+
+  .s2b-diff-added .s2b-diff-content {
+    color: var(--color-green);
+  }
+
+  .s2b-diff-removed .s2b-diff-content {
+    color: var(--color-red);
   }
 
   .s2b-diff-gutter {
