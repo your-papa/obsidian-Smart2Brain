@@ -594,19 +594,61 @@
 	white-space: pre-wrap;
 }
 
-.s2b-diff-edit-word-container,
-.s2b-diff-edit-two-pane-container {
+/* Editor line-background tints — additive, no document reflow. Applied via
+   Decoration.line to the lines a pending change group covers. */
+.s2b-diff-line-removed {
+	background-color: rgba(220, 50, 47, 0.1);
+	box-shadow: inset 2px 0 0 rgba(220, 50, 47, 0.5);
+}
+
+.s2b-diff-line-added {
+	background-color: rgba(0, 180, 0, 0.1);
+	box-shadow: inset 2px 0 0 rgba(0, 180, 0, 0.5);
+}
+
+/* Reading-view section tints — additive class on the rendered section. */
+.s2b-diff-section {
+	border-radius: 4px;
+}
+
+.s2b-diff-section-removed {
+	background-color: rgba(220, 50, 47, 0.1);
+}
+
+.s2b-diff-section-added {
+	background-color: rgba(0, 180, 0, 0.1);
+}
+
+/* Word-diff mode already shows old+new inline in the card, so the section's own
+   rendered original is a duplicate — hide it and drop the (now-empty) tint. */
+.s2b-diff-hide-original > :not(.s2b-diff-reading-group) {
+	display: none;
+}
+
+.s2b-diff-hide-original.s2b-diff-section-removed,
+.s2b-diff-hide-original.s2b-diff-section-added {
+	background-color: transparent;
+}
+
+/* The injected review card sits inside the tinted section; give it the normal
+   background so the section highlight only shows under the original text, not
+   under the diff view itself. */
+.s2b-diff-reading-group {
+	background-color: var(--background-primary);
+	border-radius: 4px;
+}
+
+/* Group wrapper + detail body (both views). */
+.s2b-diff-edit-group,
+.s2b-diff-reading-group {
 	margin: 4px 0;
 }
 
-.s2b-diff-edit-word-preview {
-	padding: 8px 12px;
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 4px;
-	background-color: var(--background-primary-alt);
+.s2b-diff-detail {
+	margin-top: 4px;
 	font-family: var(--font-text);
-	font-size: var(--font-ui-small);
-	line-height: 1.6;
+	font-size: var(--font-text-size);
+	line-height: var(--line-height-normal);
 	white-space: pre-wrap;
 	word-break: break-word;
 }
@@ -675,11 +717,6 @@
 	opacity: 1;
 }
 
-.s2b-diff-edit-word-container .s2b-diff-toggle-btn,
-.s2b-diff-edit-two-pane-container .s2b-diff-toggle-btn {
-	opacity: 1;
-}
-
 .s2b-diff-accept-btn {
 	background-color: rgba(0, 180, 0, 0.2);
 	color: var(--text-normal);
@@ -723,7 +760,7 @@
 
 .s2b-diff-pane-removed,
 .s2b-diff-pane-added {
-	padding: 4px 12px;
+	padding: 4px 0;
 }
 
 .s2b-diff-pane-removed > *:first-child,
