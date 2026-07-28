@@ -4,7 +4,6 @@ import { firstChangedLine, revealAndScroll } from "../../lib/pendingChangeNaviga
 import { getPlugin } from "../../stores/state.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { PendingChangeEntry } from "../../types/shared";
-import DiffView from "../ui/DiffView.svelte";
 import { icon } from "../../utils/utils";
 
 interface Props {
@@ -22,11 +21,6 @@ const pendingEntries = $derived.by(() => {
 const pendingCount = $derived(pendingEntries.length);
 
 let isExpanded = $state(false);
-let expandedIds: Record<string, boolean> = $state({});
-
-function toggleExpand(id: string) {
-	expandedIds[id] = !expandedIds[id];
-}
 
 function changeTypeLabel(entry: PendingChangeEntry): string {
 	switch (entry.change.type) {
@@ -161,7 +155,14 @@ async function handleJump(entry: PendingChangeEntry) {
           <div class="pcb-entry">
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div class="pcb-entry-header" onclick={() => toggleExpand(entry.id)}>
+            <div
+              class="pcb-entry-header"
+              class:pcb-entry-openable={entry.change.type === "update"}
+              onclick={() => {
+                if (entry.change.type === "update") handleJump(entry);
+              }}
+              title={entry.change.type === "update" ? "Open the note at this change" : undefined}
+            >
               <div class="pcb-entry-left">
                 <span class="pcb-badge {changeTypeBadgeClass(entry.change.type)}">
                   {changeTypeLabel(entry)}
@@ -178,19 +179,6 @@ async function handleJump(entry: PendingChangeEntry) {
                 {/if}
               </div>
               <div class="pcb-entry-actions">
-                {#if entry.change.type === "update"}
-                  <button
-                    class="pcb-action-icon pcb-jump"
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      handleJump(entry);
-                    }}
-                    title="Jump to this change in the note"
-                    type="button"
-                  >
-                    <div use:icon={"arrow-right-to-line"} style="--icon-size: 12px"></div>
-                  </button>
-                {/if}
                 <button
                   class="pcb-action-icon pcb-action-accept"
                   onclick={(e) => {
@@ -213,15 +201,8 @@ async function handleJump(entry: PendingChangeEntry) {
                 >
                   <div use:icon={"x"} style="--icon-size: 12px"></div>
                 </button>
-                <div class="pcb-chevron" class:pcb-chevron-open={expandedIds[entry.id]}>▸</div>
               </div>
             </div>
-
-            {#if expandedIds[entry.id]}
-              <div class="pcb-diff-body">
-                <DiffView change={entry.change} />
-              </div>
-            {/if}
           </div>
         {/each}
       </div>
@@ -322,15 +303,6 @@ async function handleJump(entry: PendingChangeEntry) {
     transition: background 100ms ease;
   }
 
-  .pcb-jump {
-    color: var(--text-muted);
-  }
-
-  .pcb-jump:hover {
-    background: var(--background-modifier-hover);
-    color: var(--text-accent);
-  }
-
   .pcb-chevron {
     transition: transform 100ms ease;
     color: var(--text-faint);
@@ -364,13 +336,17 @@ async function handleJump(entry: PendingChangeEntry) {
     padding: 4px 10px;
     background: transparent;
     border: none;
-    cursor: pointer;
+    cursor: default;
     color: var(--text-normal);
     font-size: var(--font-ui-smaller);
     text-align: left;
   }
 
-  .pcb-entry-header:hover {
+  .pcb-entry-openable {
+    cursor: pointer;
+  }
+
+  .pcb-entry-openable:hover {
     background: var(--background-modifier-hover);
   }
 
@@ -434,11 +410,5 @@ async function handleJump(entry: PendingChangeEntry) {
   .badge-delete {
     background: hsla(var(--color-red-hsl), 0.2);
     color: var(--color-red);
-  }
-
-  .pcb-diff-body {
-    padding: 0 10px 8px;
-    max-height: 300px;
-    overflow: auto;
   }
 </style>
