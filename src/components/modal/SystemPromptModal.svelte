@@ -121,8 +121,13 @@ function handleUseNewDefault() {
         <pre class="system-prompt-preview">{promptValue}</pre>
       {/if}
     </div>
-  {:else}
-    <div bind:this={editorContainer} class="system-prompt-editor-container">
+  {/if}
+  {#if !readOnly}
+    <div
+      bind:this={editorContainer}
+      class="system-prompt-editor-container"
+      class:hidden={viewMode === "diff"}
+    >
       {#if isLoading}
         <div class="system-prompt-loading">Loading prompt…</div>
       {/if}
@@ -221,7 +226,11 @@ function handleUseNewDefault() {
     color: inherit;
   }
 
-  /* ── Editor / preview (unchanged from before) ── */
+  /* ── Editor / preview ── */
+  .hidden {
+    display: none;
+  }
+
   .system-prompt-editor-container {
     flex: 1 1 auto;
     min-height: 0;

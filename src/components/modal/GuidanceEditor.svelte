@@ -75,9 +75,8 @@ function handleReset() {
         <pre class="guidance-diff-text">{@html renderDiffSide(current, defaultValue, "new")}</pre>
       </div>
     </div>
-  {:else}
-    <div bind:this={editorContainer} class="guidance-editor-container"></div>
   {/if}
+  <div bind:this={editorContainer} class="guidance-editor-container" class:hidden={showDiff}></div>
   {#if !isAtDefault}
     <div class="guidance-editor-footer">
       <button type="button" class="guidance-reset-link" onclick={handleReset}>Reset to default</button>
@@ -100,6 +99,10 @@ function handleReset() {
     max-height: 320px;
     overflow-y: auto;
     border-radius: 12px;
+  }
+
+  .guidance-editor-container.hidden {
+    display: none;
   }
 
   .guidance-editor-container :global(.cm-editor) {
