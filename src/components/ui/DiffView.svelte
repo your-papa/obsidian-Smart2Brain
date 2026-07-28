@@ -203,8 +203,10 @@ const entries = $derived(hunks ? collapseContext(computeLines(hunks)) : []);
   }
 
   .s2b-diff-separator {
-    padding: 3px 0;
-    text-align: center;
+    padding: 3px 0.75em;
+    text-align: left;
+    position: sticky;
+    left: 0;
     color: var(--text-faint);
     background-color: var(--background-secondary);
     font-size: var(--font-smallest);
