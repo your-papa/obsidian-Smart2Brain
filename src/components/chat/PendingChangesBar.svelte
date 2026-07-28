@@ -111,7 +111,7 @@ async function handleJump(entry: PendingChangeEntry) {
  * Preview core plugin reads modifier keys off the event, so this respects the
  * user's "require Cmd" setting. The rendered preview shows the note WITH its
  * in-note pending-change decorations, which the sidebar can't render itself. */
-function previewChange(evt: MouseEvent, entry: PendingChangeEntry) {
+function previewChange(evt: Event, entry: PendingChangeEntry) {
 	const target = evt.currentTarget;
 	if (!(target instanceof HTMLElement)) return;
 	getPlugin().app.workspace.trigger("hover-link", {
@@ -171,25 +171,27 @@ function previewChange(evt: MouseEvent, entry: PendingChangeEntry) {
       <div class="pcb-list">
         {#each pendingEntries as entry (entry.id)}
           <div class="pcb-entry">
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <!-- svelte-ignore a11y_mouse_events_have_key_events -->
-            <div
-              class="pcb-entry-header"
-              class:pcb-entry-openable={entry.change.type === "update"}
-              onclick={() => {
-                if (entry.change.type === "update") handleJump(entry);
-              }}
-              onmouseover={(e) => {
-                if (entry.change.type === "update") previewChange(e, entry);
-              }}
-              title={entry.change.type === "update" ? "Open the note at this change (⌘/Ctrl-hover to preview)" : undefined}
-            >
+            <div class="pcb-entry-header">
               <div class="pcb-entry-left">
                 <span class="pcb-badge {changeTypeBadgeClass(entry.change.type)}">
                   {changeTypeLabel(entry)}
                 </span>
-                <span class="pcb-path">{changePathLabel(entry)}</span>
+                {#if entry.change.type === "update"}
+                  <!-- svelte-ignore a11y_mouse_events_have_key_events -->
+                  <a
+                    class="internal-link pcb-path"
+                    href={entry.change.path}
+                    data-href={entry.change.path}
+                    onclick={(e) => {
+                      e.preventDefault();
+                      handleJump(entry);
+                    }}
+                    onmouseover={(e) => previewChange(e, entry)}
+                    onfocus={(e) => previewChange(e, entry)}
+                  >{changePathLabel(entry)}</a>
+                {:else}
+                  <span class="pcb-path">{changePathLabel(entry)}</span>
+                {/if}
                 {#if otherThreadCount(entry) > 0}
                   <span
                     class="pcb-cross-thread"
@@ -364,14 +366,6 @@ function previewChange(evt: MouseEvent, entry: PendingChangeEntry) {
     text-align: left;
   }
 
-  .pcb-entry-openable {
-    cursor: pointer;
-  }
-
-  .pcb-entry-openable:hover {
-    background: var(--background-modifier-hover);
-  }
-
   .pcb-entry-left {
     display: flex;
     align-items: center;
@@ -386,6 +380,10 @@ function previewChange(evt: MouseEvent, entry: PendingChangeEntry) {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  a.pcb-path {
+    cursor: pointer;
   }
 
   .pcb-cross-thread {
