@@ -63,6 +63,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	private dirtyThreadVersions: Map<string, number> = new Map();
 	private persistedThreadVersions: Map<string, number> = new Map();
 	private inFlightThreadSaves: Map<string, Promise<void>> = new Map();
+	/** Thread IDs loaded from a file whose version exceeds THREAD_DATA_VERSION. We must
+	 *  not overwrite them — doing so would downgrade a newer-format file to an older schema. */
+	private newerVersionThreadIds: Set<string> = new Set();
 
 	constructor(plugin: SecondBrainPlugin) {
 		super();
@@ -158,6 +161,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			Logger.warn(
 				`[ChatManager] Thread file version ${parsed.version} is newer than supported ${THREAD_DATA_VERSION}. Some data may not display correctly.`,
 			);
+			this.newerVersionThreadIds.add(parsed.threadId);
 		}
 		return parsed;
 	}
@@ -492,6 +496,15 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 		const data = this.storage.get(threadId);
 		if (!data) return;
+
+		// Never overwrite a file that was written by a newer plugin version — doing so
+		// would downgrade its schema and corrupt data the older plugin can't interpret.
+		if (this.newerVersionThreadIds.has(threadId)) {
+			Logger.warn(
+				`[ChatManager] Skipping save of thread ${threadId} — file was created by a newer plugin version.`,
+			);
+			return;
+		}
 
 		let safePath: string;
 		try {

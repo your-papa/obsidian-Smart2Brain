@@ -426,6 +426,9 @@ const MIGRATIONS: Migration[] = [
 
 function runMigrations(data: PluginData): void {
 	const from = data.schemaVersion ?? 0;
+	// If data was written by a newer plugin, leave schemaVersion untouched so the
+	// correct migrations run again when the user upgrades back to the newer version.
+	if (from > CURRENT_SCHEMA_VERSION) return;
 	for (let v = from; v < CURRENT_SCHEMA_VERSION; v++) {
 		MIGRATIONS[v]?.(data);
 	}
