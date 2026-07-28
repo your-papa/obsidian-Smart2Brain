@@ -10,6 +10,7 @@ import {
 import type { BuiltInToolId, DiffViewMode, SearchAlgorithm, ToolConfig } from "../../types/plugin";
 import type { ChatModel } from "../../stores/chatStore.svelte";
 import type SecondBrainPlugin from "../../main";
+import { diffWords } from "diff";
 import { ModelSelectionModal, type SelectedModel } from "./ModelSelectionModal";
 import { NATIVE_PDF_PROVIDERS } from "../../agent/Agent";
 import SecretSelect from "../settings/SecretSelect.svelte";
@@ -113,6 +114,20 @@ let allowMove = $state(
 		true,
 );
 let diffViewMode = $state<DiffViewMode>(pluginData.diffViewMode);
+let showGuidanceDiff = $state(false);
+
+function renderDiffSide(oldText: string, newText: string, side: "old" | "new"): string {
+	const parts = diffWords(oldText, newText);
+	return parts
+		.filter((p) => (side === "old" ? !p.added : !p.removed))
+		.map((p) => {
+			const escaped = p.value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+			if (side === "old" && p.removed) return `<mark class="s2b-prompt-diff-removed">${escaped}</mark>`;
+			if (side === "new" && p.added) return `<mark class="s2b-prompt-diff-added">${escaped}</mark>`;
+			return escaped;
+		})
+		.join("");
+}
 
 const diffViewModeOptions = [
 	{ display: "Two Pane (rendered markdown)", value: "two-pane" as const },
@@ -514,16 +529,37 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
     desc="Optional vault-specific guidance injected into the assembled system prompt when this tool is enabled."
     for="tool-config-prompt-guidance"
   >
-    <TextArea
-      id="tool-config-prompt-guidance"
-      class="w-full h-24"
-      value={promptGuidance}
-      placeholder="Optional guidance for how the agent should use this tool..."
-      onblur={(v) => {
-        promptGuidance = v;
-        commit();
-      }}
-    />
+    {#if showGuidanceDiff}
+      {@const defaultGuidance = defaultConfig.promptGuidance ?? ""}
+      <div class="tool-guidance-diff-container">
+        <div class="tool-guidance-diff-pane">
+          <div class="tool-guidance-diff-pane-label">Yours</div>
+          <pre class="tool-guidance-diff-text">{@html renderDiffSide(promptGuidance, defaultGuidance, "old")}</pre>
+        </div>
+        <div class="tool-guidance-diff-pane">
+          <div class="tool-guidance-diff-pane-label">Default</div>
+          <pre class="tool-guidance-diff-text">{@html renderDiffSide(promptGuidance, defaultGuidance, "new")}</pre>
+        </div>
+      </div>
+    {:else}
+      <TextArea
+        id="tool-config-prompt-guidance"
+        class="w-full h-24"
+        value={promptGuidance}
+        placeholder="Optional guidance for how the agent should use this tool..."
+        onblur={(v) => {
+          promptGuidance = v;
+          commit();
+        }}
+      />
+    {/if}
+    {#if promptGuidance !== (defaultConfig.promptGuidance ?? "") && !READ_CONTENT_GUIDANCE_DEFAULTS.has(promptGuidance)}
+      <div class="tool-guidance-diff-footer">
+        <button type="button" class="tool-guidance-link" onclick={() => (showGuidanceDiff = !showGuidanceDiff)}>
+          {showGuidanceDiff ? "Back to editor" : "Diff with default"}
+        </button>
+      </div>
+    {/if}
   </ModalField>
 
   {#if capturedToolId === "search_notes"}
@@ -856,5 +892,66 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
     align-items: center;
     gap: 8px;
     margin-top: 6px;
+  }
+
+  /* ── Prompt guidance diff ── */
+  .tool-guidance-diff-container {
+    display: flex;
+    gap: 10px;
+    min-height: 96px;
+    max-height: 240px;
+    overflow: hidden;
+  }
+
+  .tool-guidance-diff-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow-y: auto;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+
+  .tool-guidance-diff-pane-label {
+    font-size: var(--font-ui-smaller);
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    flex-shrink: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .tool-guidance-diff-text {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-text);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--text-normal);
+    user-select: text;
+  }
+
+  .tool-guidance-diff-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 4px;
+  }
+
+  .tool-guidance-link {
+    border: 0;
+    background: transparent;
+    color: var(--text-accent);
+    cursor: pointer;
+    padding: 0;
+    font-size: var(--font-ui-smaller);
+  }
+
+  .tool-guidance-link:hover {
+    text-decoration: underline;
   }
 </style>

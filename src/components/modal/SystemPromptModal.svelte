@@ -27,9 +27,7 @@ let promptValue = $state("");
 let isLoading = $state(true);
 let viewMode: ViewMode = $state<ViewMode>("edit");
 
-// Initialise to diff tab when the modal was opened with showDiff=true.
-// Use $effect (run once on mount) rather than reading showDiff directly in
-// $state() to avoid the "captures initial value only" Svelte warning.
+// Initialise to diff when the modal was opened with showDiff=true.
 $effect(() => {
 	if (showDiff) viewMode = "diff";
 });
@@ -104,15 +102,6 @@ function handleUseNewDefault() {
 <div class="system-prompt-modal-content">
   <p class="system-prompt-description">{description}</p>
 
-  {#if canShowDiff}
-    <div class="prompt-view-tabs">
-      <button class="prompt-tab" class:active={viewMode === "edit"} onclick={() => (viewMode = "edit")}>Edit</button>
-      <button class="prompt-tab" class:active={viewMode === "diff"} onclick={() => (viewMode = "diff")}
-        >Diff with default</button
-      >
-    </div>
-  {/if}
-
   {#if viewMode === "diff" && canShowDiff}
     <div class="prompt-diff-container">
       <div class="prompt-diff-pane">
@@ -144,7 +133,7 @@ function handleUseNewDefault() {
     <Button buttonText={readOnly ? "Close" : "Cancel"} onClick={() => modal.close()} />
     <div class="flex-1"></div>
     {#if viewMode === "diff" && canShowDiff}
-      <Button buttonText="Keep mine" onClick={() => (viewMode = "edit")} />
+      <Button buttonText="Back to editor" onClick={() => (viewMode = "edit")} />
       <Button buttonText="Use new default" cta={true} onClick={handleUseNewDefault} />
     {:else}
       {#if !readOnly && accessors.viewFinalPrompt}
@@ -152,6 +141,9 @@ function handleUseNewDefault() {
       {/if}
       {#if !readOnly && !isAtDefault}
         <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
+      {/if}
+      {#if canShowDiff}
+        <Button buttonText="Diff with default" onClick={() => (viewMode = "diff")} />
       {/if}
       {#if !readOnly && isDirty}
         <Button buttonText="Save" cta={true} onClick={handleSave} />
@@ -173,35 +165,6 @@ function handleUseNewDefault() {
     margin: 0 0 12px 0;
     color: var(--text-muted);
     font-size: var(--font-ui-small);
-  }
-
-  /* ── Tab toggle ── */
-  .prompt-view-tabs {
-    display: flex;
-    gap: 2px;
-    flex-shrink: 0;
-    margin-bottom: 10px;
-    border-bottom: 1px solid var(--background-modifier-border);
-  }
-
-  .prompt-tab {
-    padding: 4px 12px 8px;
-    font-size: var(--font-ui-small);
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    cursor: pointer;
-    color: var(--text-muted);
-    margin-bottom: -1px;
-  }
-
-  .prompt-tab:hover {
-    color: var(--text-normal);
-  }
-
-  .prompt-tab.active {
-    color: var(--text-normal);
-    border-bottom-color: var(--interactive-accent);
   }
 
   /* ── Two-pane diff ── */
