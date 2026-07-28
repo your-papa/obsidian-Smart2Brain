@@ -2,8 +2,10 @@ import { type DecorationSet, Decoration, EditorView, ViewPlugin, type ViewUpdate
 import { type EditorState, type Extension, StateEffect, StateField } from "@codemirror/state";
 import { diffLines, diffWords } from "diff";
 import { type App, Component, MarkdownRenderer, editorInfoField, setIcon } from "obsidian";
+import { navigateToPendingChange } from "../lib/pendingChangeNavigation";
 import { getData } from "../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
+import { getPlugin } from "../stores/state.svelte";
 import type { PendingChangeEntry } from "../types/shared";
 import type { DiffViewMode } from "../types/plugin";
 
@@ -23,6 +25,31 @@ function createEditActionBar(entryId: string, groupIndex: number): HTMLElement {
 	label.className = "s2b-diff-actions-label";
 	label.textContent = "Pending change";
 	bar.appendChild(label);
+
+	// Prev/next chevrons: step through this chat thread's pending changes across
+	// files, reusing the SAME shared cursor as the chat-bar arrows and palette
+	// commands so all three entry points stay in sync. The entry's threadId is
+	// resolved lazily on click (the bar only knows the entryId).
+	const makeNavBtn = (iconName: string, ariaLabel: string, direction: "next" | "prev"): HTMLButtonElement => {
+		const btn = document.createElement("button");
+		btn.className = "s2b-diff-nav-btn";
+		btn.setAttribute("aria-label", ariaLabel);
+		setIcon(btn, iconName);
+		btn.addEventListener("click", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			try {
+				const entry = getPendingChangesStore().getEntry(entryId);
+				if (!entry) return;
+				void navigateToPendingChange(getPlugin(), entry.threadId, direction);
+			} catch {
+				/* store/plugin not initialized */
+			}
+		});
+		return btn;
+	};
+	bar.appendChild(makeNavBtn("chevron-up", "Previous pending change", "prev"));
+	bar.appendChild(makeNavBtn("chevron-down", "Next pending change", "next"));
 
 	// Toggle view mode icon (visible on hover via CSS)
 	const toggleBtn = document.createElement("button");

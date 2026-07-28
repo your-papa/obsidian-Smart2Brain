@@ -724,6 +724,25 @@
 	background-color: var(--background-modifier-hover);
 }
 
+/* Prev/next pending-change chevrons in the note's diff action bar. Always
+   visible (unlike the hover-only view-mode toggle) since navigation is a
+   primary review action. */
+.s2b-diff-nav-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: var(--text-muted);
+	padding: 2px;
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+}
+
+.s2b-diff-nav-btn:hover {
+	color: var(--text-normal);
+	background-color: var(--background-modifier-hover);
+}
+
 .s2b-diff-actions-bar:hover .s2b-diff-toggle-btn,
 .s2b-diff-action-bar-widget:hover .s2b-diff-toggle-btn {
 	opacity: 1;

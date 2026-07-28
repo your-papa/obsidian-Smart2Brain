@@ -1,8 +1,10 @@
 import type { Change } from "diff";
 import { MarkdownRenderer, setIcon, type MarkdownPostProcessorContext, type Plugin } from "obsidian";
 import { diffLines, diffWords } from "diff";
+import { navigateToPendingChange } from "../lib/pendingChangeNavigation";
 import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
+import { getPlugin } from "../stores/state.svelte";
 import type { DiffViewMode } from "../types/plugin";
 import type { PendingChangeEntry } from "../types/shared";
 
@@ -314,6 +316,31 @@ function createReadingDiffActionBar(entryId: string, groupIndex: number, renderC
 	label.className = "s2b-diff-actions-label";
 	label.textContent = "Pending change";
 	bar.appendChild(label);
+
+	// Prev/next chevrons: step through this chat thread's pending changes across
+	// files, reusing the SAME shared cursor as the edit-mode bar, the chat-bar
+	// arrows, and the palette commands. Mirrors createEditActionBar in
+	// inlineDiffExtension.ts (reading + edit views have parallel action bars).
+	const makeNavBtn = (iconName: string, ariaLabel: string, direction: "next" | "prev"): HTMLButtonElement => {
+		const btn = document.createElement("button");
+		btn.className = "s2b-diff-nav-btn";
+		btn.setAttribute("aria-label", ariaLabel);
+		setIcon(btn, iconName);
+		btn.addEventListener("click", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			try {
+				const entry = getPendingChangesStore().getEntry(entryId);
+				if (!entry) return;
+				void navigateToPendingChange(getPlugin(), entry.threadId, direction);
+			} catch {
+				/* store/plugin not initialized */
+			}
+		});
+		return btn;
+	};
+	bar.appendChild(makeNavBtn("chevron-up", "Previous pending change", "prev"));
+	bar.appendChild(makeNavBtn("chevron-down", "Next pending change", "next"));
 
 	// Toggle view mode icon (visible on hover via CSS)
 	const toggleBtn = document.createElement("button");
