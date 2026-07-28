@@ -18,6 +18,9 @@ import { Logger } from "../utils/logging";
 import { toBase64, toBase64DataUri } from "../utils/attachments";
 import type { ChatAttachment } from "../types/shared";
 
+/** Bump when the ThreadData/CheckpointEntry schema changes. Absent in pre-versioning files → treated as 0. */
+const THREAD_DATA_VERSION = 1;
+
 interface CheckpointEntry {
 	checkpoint: Checkpoint;
 	metadata: CheckpointMetadata;
@@ -25,6 +28,8 @@ interface CheckpointEntry {
 }
 
 interface ThreadData {
+	/** Schema version written on save; absent (0) on files predating versioning. */
+	version?: number;
 	// Metadata (ThreadSnapshot)
 	threadId: string;
 	title?: string;
@@ -58,6 +63,9 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	private dirtyThreadVersions: Map<string, number> = new Map();
 	private persistedThreadVersions: Map<string, number> = new Map();
 	private inFlightThreadSaves: Map<string, Promise<void>> = new Map();
+	/** Thread IDs loaded from a file whose version exceeds THREAD_DATA_VERSION. We must
+	 *  not overwrite them — doing so would downgrade a newer-format file to an older schema. */
+	private newerVersionThreadIds: Set<string> = new Set();
 
 	constructor(plugin: SecondBrainPlugin) {
 		super();
@@ -88,6 +96,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	 * Cleans up in-memory caches so stale threads don't appear in the UI.
 	 */
 	private onChatFileDeleted(filePath: string): void {
+		const data = this.storage.get(filePath);
+		if (data) this.newerVersionThreadIds.delete(data.threadId);
 		this.storage.delete(filePath);
 		this.threadIndex.delete(filePath);
 		this.dirtyThreadVersions.delete(filePath);
@@ -108,6 +118,10 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	private rekeyThread(oldPath: string, newPath: string): void {
 		const data = this.storage.get(oldPath);
 		if (data) {
+			if (this.newerVersionThreadIds.has(data.threadId)) {
+				this.newerVersionThreadIds.delete(data.threadId);
+				this.newerVersionThreadIds.add(newPath);
+			}
 			data.threadId = newPath;
 			this.storage.delete(oldPath);
 			this.storage.set(newPath, data);
@@ -148,7 +162,14 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		});
 		// Yield after decompression so JSON.parse doesn't block the same frame.
 		await new Promise<void>((resolve) => setTimeout(resolve, 0));
-		return JSON.parse(decompressed) as ThreadData;
+		const parsed = JSON.parse(decompressed) as ThreadData;
+		if ((parsed.version ?? 0) > THREAD_DATA_VERSION) {
+			Logger.warn(
+				`[ChatManager] Thread file version ${parsed.version} is newer than supported ${THREAD_DATA_VERSION}. Some data may not display correctly.`,
+			);
+			this.newerVersionThreadIds.add(parsed.threadId);
+		}
+		return parsed;
 	}
 
 	private stripBase64FromChannelValues(channelValues: Record<string, unknown> | undefined): void {
@@ -482,6 +503,15 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		const data = this.storage.get(threadId);
 		if (!data) return;
 
+		// Never overwrite a file that was written by a newer plugin version — doing so
+		// would downgrade its schema and corrupt data the older plugin can't interpret.
+		if (this.newerVersionThreadIds.has(threadId)) {
+			Logger.warn(
+				`[ChatManager] Skipping save of thread ${threadId} — file was created by a newer plugin version.`,
+			);
+			return;
+		}
+
 		let safePath: string;
 		try {
 			safePath = this.assertContainedThreadPath(threadId);
@@ -496,7 +526,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		let savePromise: Promise<void> | null = null;
 		savePromise = (async () => {
 			try {
-				const compressed = gzipSync(JSON.stringify(data));
+				const compressed = gzipSync(JSON.stringify({ ...data, version: THREAD_DATA_VERSION }));
 				await this.adapter.writeBinary(
 					safePath,
 					compressed.buffer.slice(

@@ -1,5 +1,11 @@
 import { normalizePath } from "obsidian";
-import { BASE_SYSTEM_PROMPT } from "../agent/prompts";
+import {
+	BASE_SYSTEM_PROMPT,
+	BASE_SYSTEM_PROMPT_VERSION,
+	HISTORICAL_CAPABILITY_GUIDANCE,
+	HISTORICAL_SYSTEM_PROMPTS,
+	HISTORICAL_TOOL_GUIDANCE,
+} from "../agent/prompts";
 import {
 	createEmptySpaceFilter,
 	matchesSpaceMembershipDraftPath,
@@ -365,6 +371,7 @@ export function createDefaultAgentConfig(id?: string, name?: string): AgentConfi
 		summarizationModel: null,
 		titleModel: null,
 		systemPrompt: BASE_SYSTEM_PROMPT,
+		systemPromptVersion: BASE_SYSTEM_PROMPT_VERSION,
 		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
@@ -386,6 +393,7 @@ function createDefaultAgent(): AgentConfig {
 		summarizationModel: null,
 		titleModel: null,
 		systemPrompt: BASE_SYSTEM_PROMPT,
+		systemPromptVersion: BASE_SYSTEM_PROMPT_VERSION,
 		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
@@ -395,7 +403,42 @@ function createDefaultAgent(): AgentConfig {
 	};
 }
 
+// ---------------------------------------------------------------------------
+// Settings schema versioning
+// ---------------------------------------------------------------------------
+
+/** Increment this when making any breaking change to PluginData. Add a corresponding entry to MIGRATIONS. */
+const CURRENT_SCHEMA_VERSION = 2;
+
+type Migration = (data: PluginData) => void;
+
+/**
+ * One entry per version step. MIGRATIONS[v] upgrades data from version v → v+1.
+ * Keep entries in order; never remove them.
+ */
+const MIGRATIONS: Migration[] = [
+	// v0 → v1: first versioned release — no structural changes needed
+	(_data) => {},
+	// v1 → v2: prompt auto-migration added — logic lives in normalizeAgent() which
+	//           runs on every load; the version bump marks that the tracking fields exist
+	(_data) => {},
+];
+
+function runMigrations(data: PluginData): void {
+	const from = data.schemaVersion ?? 0;
+	// If data was written by a newer plugin, leave schemaVersion untouched so the
+	// correct migrations run again when the user upgrades back to the newer version.
+	if (from > CURRENT_SCHEMA_VERSION) return;
+	for (let v = from; v < CURRENT_SCHEMA_VERSION; v++) {
+		MIGRATIONS[v]?.(data);
+	}
+	data.schemaVersion = CURRENT_SCHEMA_VERSION;
+}
+
+// ---------------------------------------------------------------------------
+
 export const DEFAULT_SETTINGS: PluginData = {
+	schemaVersion: CURRENT_SCHEMA_VERSION,
 	// Configured provider instances keyed by opaque provider instance ID
 	providerConfig: {},
 	// Persisted metadata for configured provider instances
@@ -459,9 +502,17 @@ export class PluginDataStore {
 	#data: PluginData;
 	private readonly _plugin: SecondBrainPlugin;
 
-	constructor(plugin: SecondBrainPlugin, initialData: PluginData) {
+	/**
+	 * Agent names whose system prompt was customized and could not be auto-updated
+	 * to the latest default. Populated once at startup; read by main.ts to surface
+	 * a one-time Notice after the workspace is ready.
+	 */
+	readonly stalePromptAgentNames: readonly string[];
+
+	constructor(plugin: SecondBrainPlugin, initialData: PluginData, stalePromptAgentNames: string[] = []) {
 		this._plugin = plugin;
 		this.#data = $state(initialData);
+		this.stalePromptAgentNames = stalePromptAgentNames;
 	}
 
 	/**
@@ -1971,7 +2022,7 @@ export class PluginDataStore {
 
 let _pluginDataStore: PluginDataStore | null = null;
 
-function normalizeAgent(agent: AgentConfig): void {
+function normalizeAgent(agent: AgentConfig): boolean {
 	// Ensure toolsConfig exists and has all tools
 	if (agent.toolsConfig) {
 		agent.toolsConfig = { ...structuredClone(DEFAULT_TOOLS_CONFIG), ...agent.toolsConfig };
@@ -1991,17 +2042,61 @@ function normalizeAgent(agent: AgentConfig): void {
 	agent.skills ??= {};
 	agent.mcpServers ??= {};
 	agent.pluginExecTools ??= {};
+
+	// --- Prompt auto-migration ---
+
+	// 1. System prompt: silently update to current default if the stored prompt still
+	//    matches an old default verbatim; leave custom prompts untouched.
+	//    Returns true when a custom prompt is stale (so callers can notify the user).
+	let hasStaleCustomPrompt = false;
+	const storedPromptVersion = agent.systemPromptVersion ?? 0;
+	if (storedPromptVersion < BASE_SYSTEM_PROMPT_VERSION) {
+		const historicalDefault = HISTORICAL_SYSTEM_PROMPTS.get(storedPromptVersion);
+		if (!historicalDefault || agent.systemPrompt === historicalDefault) {
+			agent.systemPrompt = BASE_SYSTEM_PROMPT;
+		} else {
+			hasStaleCustomPrompt = true;
+		}
+		agent.systemPromptVersion = BASE_SYSTEM_PROMPT_VERSION;
+	}
 	agent.systemPrompt ??= BASE_SYSTEM_PROMPT;
+	agent.systemPromptVersion ??= BASE_SYSTEM_PROMPT_VERSION;
+
+	// 2. Capability prompts: if the stored value is a verbatim historical default,
+	//    delete the key so the live default is used going forward.
+	if (agent.capabilityPrompts) {
+		for (const [capId, historicalSet] of HISTORICAL_CAPABILITY_GUIDANCE) {
+			const stored = agent.capabilityPrompts[capId];
+			if (stored !== undefined && historicalSet.has(stored)) {
+				delete agent.capabilityPrompts[capId];
+			}
+		}
+	}
+
+	// 3. Per-tool promptGuidance: same pattern. read_content is handled separately
+	//    by READ_CONTENT_GUIDANCE_DEFAULTS elsewhere; skip it here.
+	for (const [toolId, historicalSet] of HISTORICAL_TOOL_GUIDANCE) {
+		const toolCfg = agent.toolsConfig[toolId];
+		if (toolCfg?.promptGuidance !== undefined && historicalSet.has(toolCfg.promptGuidance)) {
+			toolCfg.promptGuidance = undefined;
+		}
+	}
+
 	agent.summarizationModel ??= null;
 	agent.titleModel ??= null;
+	return hasStaleCustomPrompt;
 }
 
-function normalizeAgents(mergedData: PluginData): void {
+function normalizeAgents(mergedData: PluginData): string[] {
 	if (!mergedData.agents[DEFAULT_AGENT_ID]) {
 		mergedData.agents[DEFAULT_AGENT_ID] = createDefaultAgent();
 	}
+	const staleAgentNames: string[] = [];
 	for (const agentId of Object.keys(mergedData.agents)) {
-		normalizeAgent(mergedData.agents[agentId]);
+		const agent = mergedData.agents[agentId];
+		if (normalizeAgent(agent)) {
+			staleAgentNames.push(agent.name);
+		}
 	}
 	// Ensure defaultAgentId is valid
 	if (mergedData.defaultAgentId !== null && !mergedData.agents[mergedData.defaultAgentId]) {
@@ -2010,6 +2105,7 @@ function normalizeAgents(mergedData: PluginData): void {
 	if (!mergedData.selectedAgentId || !mergedData.agents[mergedData.selectedAgentId]) {
 		mergedData.selectedAgentId = mergedData.defaultAgentId ?? DEFAULT_AGENT_ID;
 	}
+	return staleAgentNames;
 }
 
 export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataStore> {
@@ -2022,12 +2118,27 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		...rawData,
 	};
 
-	if (!rawData?.agents || Object.keys(rawData.agents).length === 0) {
+	runMigrations(mergedData);
+
+	// If the data was written by a newer plugin, skip normalizeAgents() too — it
+	// would rewrite prompt fields using this plugin's older defaults and those
+	// mutations would be persisted on the next save, corrupting the newer state.
+	const fromNewerPlugin = (rawData?.schemaVersion ?? 0) > CURRENT_SCHEMA_VERSION;
+
+	let stalePromptAgentNames: string[] = [];
+	if (fromNewerPlugin) {
+		// Leave agents untouched; just ensure the bare minimum so the UI doesn't crash.
+		if (!mergedData.agents || Object.keys(mergedData.agents).length === 0) {
+			mergedData.agents = { [DEFAULT_AGENT_ID]: createDefaultAgent() };
+			mergedData.defaultAgentId = DEFAULT_AGENT_ID;
+			mergedData.selectedAgentId = DEFAULT_AGENT_ID;
+		}
+	} else if (!rawData?.agents || Object.keys(rawData.agents).length === 0) {
 		mergedData.agents = { [DEFAULT_AGENT_ID]: createDefaultAgent() };
 		mergedData.defaultAgentId = DEFAULT_AGENT_ID;
 		mergedData.selectedAgentId = DEFAULT_AGENT_ID;
 	} else {
-		normalizeAgents(mergedData);
+		stalePromptAgentNames = normalizeAgents(mergedData);
 	}
 
 	// Resolve vault slug once on first load; persisted so vault renames don't orphan indexes
@@ -2035,7 +2146,7 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		mergedData.vaultSlug = await resolveVaultSlug(plugin.app.vault.getName());
 	}
 
-	_pluginDataStore = new PluginDataStore(plugin, mergedData);
+	_pluginDataStore = new PluginDataStore(plugin, mergedData, stalePromptAgentNames);
 
 	return _pluginDataStore;
 }

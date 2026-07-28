@@ -417,6 +417,12 @@ export interface AgentConfig {
 	titleModel: import("../stores/chatStore.svelte").ChatModel | null;
 	/** Base system prompt for this agent */
 	systemPrompt: string;
+	/**
+	 * Which version of BASE_SYSTEM_PROMPT this agent's systemPrompt was copied from.
+	 * Absent = pre-versioning (treated as 0). normalizeAgent() uses this to detect
+	 * whether the stored prompt is still an unmodified default and can be auto-updated.
+	 */
+	systemPromptVersion?: number;
 	/** Skill enable states for this agent (skill name -> state) */
 	skills: Record<string, AgentSkillState>;
 	/** Configuration for built-in tools */
@@ -473,6 +479,9 @@ export type ChatOpenLocation = "tab" | "left" | "right";
 export type PrivacyMode = "private-by-default" | "public-by-default";
 
 export interface PluginData {
+	/** Incremented whenever a breaking schema change is made; drives runMigrations(). Absent on pre-versioning data ⇒ treated as 0. */
+	schemaVersion: number;
+
 	/** All configured provider instances keyed by opaque provider instance ID */
 	providerConfig: Record<string, StoredProviderState>;
 	/** Persisted metadata for configured provider instances */

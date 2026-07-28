@@ -1,5 +1,6 @@
 <script lang="ts">
 import { onDestroy, onMount } from "svelte";
+import { diffWords } from "diff";
 import { getBundledSkill, parseFrontmatter } from "../../skills";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
 import type SecondBrainPlugin from "../../main";
@@ -71,6 +72,22 @@ let hasParsedBundledDefault = $state(false);
 const isDirty = $derived(
 	editName !== initialName || editDescription !== initialDescription || promptValue !== initialPrompt,
 );
+
+let showInstructionsDiff = $state(false);
+const canShowInstructionsDiff = $derived(hasParsedBundledDefault && promptValue !== bundledDefaultPrompt);
+
+function renderDiffSide(oldText: string, newText: string, side: "old" | "new"): string {
+	const parts = diffWords(oldText, newText);
+	return parts
+		.filter((p) => (side === "old" ? !p.added : !p.removed))
+		.map((p) => {
+			const escaped = p.value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+			if (side === "old" && p.removed) return `<mark class="s2b-prompt-diff-removed">${escaped}</mark>`;
+			if (side === "new" && p.added) return `<mark class="s2b-prompt-diff-added">${escaped}</mark>`;
+			return escaped;
+		})
+		.join("");
+}
 
 const isAtBundledDefault = $derived(
 	hasParsedBundledDefault &&
@@ -188,6 +205,7 @@ async function handleResetToDefault() {
 	editDescription = bundledDefaultDescription;
 	promptValue = bundledDefaultPrompt;
 	editor?.setValue(bundledDefaultPrompt);
+	showInstructionsDiff = false;
 }
 </script>
 
@@ -223,7 +241,19 @@ async function handleResetToDefault() {
 
   <div class="skill-field flex-1">
     <div class="skill-label">Instructions</div>
-    <div bind:this={editorContainer} class="skill-editor-container"></div>
+    {#if showInstructionsDiff}
+      <div class="skill-diff-container">
+        <div class="skill-diff-pane">
+          <div class="skill-diff-pane-label">Yours</div>
+          <pre class="skill-diff-text">{@html renderDiffSide(promptValue, bundledDefaultPrompt, "old")}</pre>
+        </div>
+        <div class="skill-diff-pane">
+          <div class="skill-diff-pane-label">Bundled default</div>
+          <pre class="skill-diff-text">{@html renderDiffSide(promptValue, bundledDefaultPrompt, "new")}</pre>
+        </div>
+      </div>
+    {/if}
+    <div bind:this={editorContainer} class="skill-editor-container" class:hidden={showInstructionsDiff}></div>
   </div>
 
   {#if validationError}
@@ -235,6 +265,12 @@ async function handleResetToDefault() {
     <div class="flex-1"></div>
     {#if showResetToDefault}
       <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
+    {/if}
+    {#if canShowInstructionsDiff}
+      <Button
+        buttonText={showInstructionsDiff ? "Back to editor" : "Diff with default"}
+        onClick={() => (showInstructionsDiff = !showInstructionsDiff)}
+      />
     {/if}
     {#if isDirty}
       <Button
@@ -297,6 +333,52 @@ async function handleResetToDefault() {
     min-height: 0;
     overflow-y: auto;
     border-radius: 12px;
+  }
+
+  .skill-editor-container.hidden {
+    display: none;
+  }
+
+  /* ── Instructions diff ── */
+  .skill-diff-container {
+    display: flex;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .skill-diff-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow-y: auto;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+
+  .skill-diff-pane-label {
+    font-size: var(--font-ui-smaller);
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    flex-shrink: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .skill-diff-text {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-text);
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--text-normal);
+    user-select: text;
   }
 
   .skill-editor-container :global(.cm-editor) {

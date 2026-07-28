@@ -1910,9 +1910,21 @@ export class VectorStoreService {
 			const raw = fs.readFileSync(filePaths[0]);
 			const decoded = decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)) as SerializedIndex;
 
-			if (decoded.version !== INDEX_VERSION) {
+			if (typeof decoded.version !== "number" || !Number.isInteger(decoded.version)) {
 				new Notice(
-					`Export file version mismatch (expected ${INDEX_VERSION}, got ${decoded.version}). Re-index instead.`,
+					"Export file has an invalid or missing version field. Re-index to regenerate a compatible export.",
+				);
+				return null;
+			}
+			if (decoded.version < INDEX_VERSION) {
+				new Notice(
+					`Export file schema v${decoded.version} is outdated (current: v${INDEX_VERSION}). Re-index to regenerate a compatible export.`,
+				);
+				return null;
+			}
+			if (decoded.version > INDEX_VERSION) {
+				new Notice(
+					`Export file was created with a newer plugin version (schema v${decoded.version}). Update the plugin to import it.`,
 				);
 				return null;
 			}
