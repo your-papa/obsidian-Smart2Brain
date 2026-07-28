@@ -109,6 +109,21 @@ async function exploreGraph() {
 	await plugin.activateSmartGraphView();
 	close();
 }
+
+function openHotkeysSettings() {
+	const app = plugin.app as typeof plugin.app & {
+		setting?: {
+			open: () => void;
+			openTabById: (id: string) => void;
+			activeTab?: { searchComponent?: { setValue: (v: string) => void; changeCallback: (v: string) => void } };
+		};
+	};
+	app.setting?.open();
+	app.setting?.openTabById("hotkeys");
+	const query = "search notes";
+	app.setting?.activeTab?.searchComponent?.setValue(query);
+	app.setting?.activeTab?.searchComponent?.changeCallback(query);
+}
 </script>
 
 <div class="s2b-onboarding">
@@ -145,7 +160,10 @@ async function exploreGraph() {
 			<span class="s2b-onboarding-pillar-icon" use:icon={"search"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Smarter search</div>
-				<div class="s2b-onboarding-pillar-desc">Works right away — no setup required.</div>
+				<div class="s2b-onboarding-pillar-desc">
+					Works right away — no setup required. Tip: assign a hotkey to <em>Smart Second Brain: Search
+					notes</em> in <button class="s2b-onboarding-link" onclick={openHotkeysSettings}>Settings → Hotkeys</button> for instant access.
+				</div>
 			</div>
 		</div>
 		<div class="s2b-onboarding-pillar" class:s2b-fade-in={playIntro} style="--s2b-delay: 2460ms">
@@ -525,6 +543,18 @@ async function exploreGraph() {
 	.s2b-onboarding-privacy-desc {
 		color: var(--text-muted);
 		font-size: var(--font-ui-small);
+	}
+
+	.s2b-onboarding-link {
+		all: unset;
+		color: var(--text-accent);
+		cursor: pointer;
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+
+	.s2b-onboarding-link:hover {
+		color: var(--text-accent-hover);
 	}
 
 	.s2b-onboarding-footer {
