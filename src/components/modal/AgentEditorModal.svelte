@@ -70,8 +70,6 @@ const POPULAR_AGENT_ICONS = [
 	"workflow",
 ] as const;
 
-const AGENT_PICTOGRAM_OPTIONS = ["🤖", "🧠", "📚", "💡", "🧭", "🛠️"] as const;
-
 const BUILT_IN_AGENT_ICONS = getIconIds()
 	.slice()
 	.sort((left, right) => left.localeCompare(right));
@@ -91,7 +89,9 @@ function updateAgentName(name: string) {
 }
 
 function updateAgentIcon(icon: string) {
-	const nextIcon = icon.trim() || DEFAULT_AGENT_ICON;
+	const trimmed = icon.trim();
+	const isValid = trimmed.length > 0 && BUILT_IN_AGENT_ICONS.includes(trimmed);
+	const nextIcon = isValid ? trimmed : DEFAULT_AGENT_ICON;
 	pluginData.updateAgent(agentId, { icon: nextIcon });
 }
 
@@ -741,22 +741,6 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
                   onchange={(value: string) => (agentIconQuery = value)}
                 />
 
-                <div class="agent-icon-pictograms">
-                  {#each AGENT_PICTOGRAM_OPTIONS as pictogram}
-                    <button
-                      type="button"
-                      class="agent-icon-chip"
-                      class:selected={selectedAgentIcon === pictogram}
-                      onclick={() => {
-                        updateAgentIcon(pictogram);
-                        isAgentIconPickerOpen = false;
-                      }}
-                    >
-                      <span class="agent-icon-chip-glyph">{pictogram}</span>
-                    </button>
-                  {/each}
-                </div>
-
                 <div class="agent-icon-results-header">
                   <span>{agentIconQuery.trim() ? `Built-in icons (${matchingAgentIconCount})` : "Popular icons"}</span>
                 </div>
@@ -782,7 +766,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
                     {/each}
                   {:else}
                     <div class="agent-icon-empty-state">
-                      No built-in icons match this search. Use the text field for a custom icon ID or emoji.
+                      No built-in icons match this search.
                     </div>
                   {/if}
                 </div>
@@ -798,7 +782,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
                 onblur={(value: string) => updateAgentName(value)}
               />
               <div class="agent-overview-name-hint">
-                Search built-in Obsidian icons or type any icon ID or emoji directly.
+                Search built-in Obsidian (Lucide) icons.
                 <button
                   type="button"
                   class="agent-icon-inline-edit"
@@ -1345,40 +1329,16 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
     width: 100%;
   }
 
-  .agent-icon-pictograms {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .agent-icon-chip,
   .agent-icon-option {
     border: 1px solid var(--background-modifier-border);
     background: var(--background-primary);
     color: var(--text-normal);
   }
 
-  .agent-icon-chip {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 34px;
-    height: 34px;
-    padding: 0 8px;
-    border-radius: 10px;
-  }
-
-  .agent-icon-chip-glyph {
-    font-size: 1rem;
-    line-height: 1;
-  }
-
-  .agent-icon-chip:hover,
   .agent-icon-option:hover {
     background: var(--background-modifier-hover);
   }
 
-  .agent-icon-chip.selected,
   .agent-icon-option.selected {
     border-color: color-mix(in srgb, var(--interactive-accent) 55%, var(--background-modifier-border));
     background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));

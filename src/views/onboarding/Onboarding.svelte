@@ -226,7 +226,21 @@ async function exploreGraph() {
 		</div>
 	</section>
 
-	<footer class="s2b-onboarding-footer" class:s2b-fade-in={playIntro} style="--s2b-delay: 2820ms">
+	<!-- Privacy note -->
+	<div class="s2b-onboarding-privacy" class:s2b-fade-in={playIntro} style="--s2b-delay: 2800ms">
+		<span class="s2b-onboarding-privacy-icon" use:icon={"shield"} aria-hidden="true"></span>
+		<div>
+			<div class="s2b-onboarding-privacy-title">Note access is private by default</div>
+			<div class="s2b-onboarding-privacy-desc">
+				By default your notes are <strong>not</strong> shared with AI providers. You can unblock access
+				two ways: mark a specific provider as <strong>trusted</strong> in its settings (that provider
+				only), or switch to <strong>public by default</strong> in <strong>Settings → Privacy</strong> to
+				allow all providers.
+			</div>
+		</div>
+	</div>
+
+	<footer class="s2b-onboarding-footer" class:s2b-fade-in={playIntro} style="--s2b-delay: 2920ms">
 		<Button buttonText="Skip for now" onClick={finish} />
 		<div class="s2b-onboarding-footer-primary">
 			<Button buttonText="Explore the graph" onClick={exploreGraph} />
@@ -478,6 +492,37 @@ async function exploreGraph() {
 	}
 
 	.s2b-onboarding-step-desc {
+		color: var(--text-muted);
+		font-size: var(--font-ui-small);
+	}
+
+	.s2b-onboarding-privacy {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.75rem;
+		padding: 0.75rem;
+		border-radius: var(--radius-m);
+		background: color-mix(in srgb, var(--color-blue) 10%, var(--background-secondary));
+		border: 1px solid color-mix(in srgb, var(--color-blue) 25%, transparent);
+	}
+
+	.s2b-onboarding-privacy-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 20px;
+		height: 20px;
+		color: var(--color-blue);
+		flex-shrink: 0;
+		margin-top: 2px;
+	}
+
+	.s2b-onboarding-privacy-title {
+		font-weight: var(--font-semibold);
+		margin-bottom: 0.25rem;
+	}
+
+	.s2b-onboarding-privacy-desc {
 		color: var(--text-muted);
 		font-size: var(--font-ui-small);
 	}

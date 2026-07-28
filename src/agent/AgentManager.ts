@@ -1587,7 +1587,7 @@ export class AgentManager {
 				leaf = location === "left" ? workspace.getLeftLeaf(false) : workspace.getRightLeaf(false);
 			}
 		} else {
-			leaf = workspace.getLeaf(false);
+			leaf = workspace.getLeaf("tab");
 		}
 		if (!leaf) return;
 		await leaf.openFile(file);

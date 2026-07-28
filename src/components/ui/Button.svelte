@@ -95,7 +95,6 @@ function handleClick(event: MouseEvent) {
   onclick={handleClick}
   aria-label={effectiveAriaLabel}
   data-testid={dataTestId}
-  title={tooltip}
 >
   {#if iconId !== ""}
     <span class="s2b-button-icon" class:s2b-button-icon-only={isIconOnly} use:icon={iconId}></span>

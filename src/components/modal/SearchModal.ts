@@ -147,6 +147,10 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private isSearching = false;
 	private isClosed = false;
 	private semanticEnabled = false;
+	/** When Tab arms a one-shot semantic search, this holds the query it was
+	 * armed for. Semantic stays on (results visible) until the query text
+	 * changes, at which point it auto-reverts to lexical. null = not armed. */
+	private semanticOneShotQuery: string | null = null;
 	private requireAllTags = false;
 	private glowAnimationId: number | null = null;
 	private borderEl: HTMLElement | null = null;
@@ -410,6 +414,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		this.semanticEnabled = !this.semanticEnabled;
+		// Arm one-shot only when turning semantic ON, keyed to the current query
+		// so it reverts to lexical once the user changes what they're searching.
+		this.semanticOneShotQuery = this.semanticEnabled ? this.currentQuery : null;
 		this.updateInstructions();
 		this.syncGlowAnimation();
 
@@ -949,6 +956,8 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.lastRequestedSearchKey = "";
 		this.activeFilters = [];
 		this.hasPrimedOpenResults = false;
+		this.semanticEnabled = false;
+		this.semanticOneShotQuery = null;
 
 		this.searchResults = this.getModalRecentNotes();
 		this.hasPrimedOpenResults = true;
@@ -1794,6 +1803,15 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	getSuggestions(query: string): SearchSuggestion[] | Promise<SearchSuggestion[]> {
 		this.currentQuery = query;
+
+		// One-shot semantic (armed by Tab) reverts to lexical as soon as the
+		// query text changes — the semantic results for the armed query stay
+		// visible, but the next search the user types runs lexically.
+		if (this.semanticOneShotQuery !== null && query !== this.semanticOneShotQuery) {
+			this.semanticOneShotQuery = null;
+			this.semanticEnabled = false;
+			this.updateInstructions();
+		}
 
 		// Check for autocomplete mode (typing # or folder/)
 		const autocompleteSuggestions = this.getAutocompleteSuggestions(query);

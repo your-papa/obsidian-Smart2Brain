@@ -1004,15 +1004,15 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
     }
   }}
 >
-  {#if models.hasUnavailableProviders}
+  {#if selectedChatModel && models.unavailableProviders.includes(selectedChatModel.provider)}
     <button
-      class="flex flex-row items-center gap-1.5 px-2 py-1 rounded-md bg-[--background-modifier-error] text-[--text-on-accent] text-xs cursor-pointer border-none"
+      class="flex flex-row items-center gap-1 text-xs cursor-pointer border-none bg-transparent p-0"
+      style="color: var(--text-error);"
       onclick={models.refetchProviders}
       title="Click to retry connection"
     >
       <div class="h-icon-xs" use:icon={"alert-triangle"} style="--icon-size: var(--icon-xs)"></div>
-      <span>Cannot connect to: {models.unavailableProviders.join(", ")}</span>
-      <div class="h-icon-xs" use:icon={"refresh-cw"} style="--icon-size: var(--icon-xs)"></div>
+      <span>Cannot connect to {selectedChatModel.provider} — click to retry</span>
     </button>
   {/if}
   <PendingChangesBar {threadPath} />

@@ -35,7 +35,7 @@ const isRowDisabled = $derived(disabled || isDisabled);
     : ''} {compact ? 'setting-item--compact' : ''} {className}"
 >
   <div class="setting-item-info">
-    <div class="setting-item-name" title={compact && desc ? desc : ""}>
+    <div class="setting-item-name" aria-label={compact && desc ? desc : undefined}>
       {#if namePrefix}
         <span class="setting-item-name-prefix">{@render namePrefix()}</span>
       {/if}
