@@ -188,11 +188,11 @@ const entries = $derived(hunks ? collapseContext(computeLines(hunks)) : []);
   }
 
   .s2b-diff-added {
-    background-color: color-mix(in srgb, var(--color-green) 30%, transparent);
+    background-color: color-mix(in srgb, var(--color-green) 22%, var(--background-primary));
   }
 
   .s2b-diff-removed {
-    background-color: color-mix(in srgb, var(--color-red) 30%, transparent);
+    background-color: color-mix(in srgb, var(--color-red) 22%, var(--background-primary));
   }
 
   .s2b-diff-content {
