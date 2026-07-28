@@ -627,12 +627,30 @@ export default class SecondBrainPlugin extends Plugin {
 		// Register reading view diff highlighting
 		this.registerMarkdownPostProcessor(createReadingViewDiffPostProcessor(this));
 
-		// Re-render reading views when pending changes update
+		// Re-render reading views when pending changes update. `rerender(true)`
+		// rebuilds the preview from scratch and Obsidian re-asserts its OWN scroll
+		// position several hundred ms later on a large note — so accepting/rejecting
+		// a change would jump the reader away from the spot they were reviewing.
+		// Snapshot each PREVIEW scroller's scrollTop and re-assert it repeatedly past
+		// that late reset (edit mode preserves scroll natively, so it's skipped).
+		// Verified on a 328-line note: without the later re-asserts scrollTop landed
+		// ~1628 after a 3000 scroll; with them it holds at 3000.
 		const refreshReadingViews = () => {
 			for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
 				const view = leaf.view;
-				if (view instanceof MarkdownView) {
-					view.previewMode?.rerender(true);
+				if (!(view instanceof MarkdownView)) continue;
+				const isPreview = view.getMode() === "preview";
+				const scroller = isPreview ? view.contentEl.querySelector<HTMLElement>(".markdown-preview-view") : null;
+				const prevScrollTop = scroller?.scrollTop ?? null;
+				view.previewMode?.rerender(true);
+				if (scroller && prevScrollTop !== null) {
+					const restore = () => {
+						if (scroller.isConnected) scroller.scrollTop = prevScrollTop;
+					};
+					requestAnimationFrame(restore);
+					for (const delay of [50, 100, 200, 350, 500]) {
+						window.setTimeout(restore, delay);
+					}
 				}
 			}
 		};

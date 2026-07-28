@@ -14,6 +14,35 @@ function countPartLines(value: string): number {
 	return value.replace(/\n$/, "").split("\n").length;
 }
 
+/** Total number of original lines represented by a line diff (removed + unchanged parts). */
+export function countOriginalLines(changes: Change[]): number {
+	let total = 0;
+	for (const part of changes) {
+		if (part.value === "" || part.added) continue;
+		total += countPartLines(part.value);
+	}
+	return total;
+}
+
+/**
+ * The original-content line a PURE INSERTION at `oldLine` anchors to, for the
+ * purpose of matching it to a rendered section.
+ *
+ * A pure insertion removes no original line, so it has no natural home. We anchor
+ * it to the line NOW FOLLOWING the insertion point (`oldLine`) when one exists —
+ * that's the section that visually follows the inserted text. Only at end-of-file
+ * (no following line) do we fall back to the line BEFORE it (`oldLine - 1`).
+ *
+ * This returns a SINGLE line on purpose: an earlier "match both oldLine-1 AND
+ * oldLine" heuristic double-claimed an insertion that sat exactly on the boundary
+ * between two rendered sections (the before-line owned by section A, the
+ * following line by section B) — producing two review cards for one change group.
+ * Anchoring to exactly one line keeps the change owned by exactly one section.
+ */
+export function insertionAnchorLine(oldLine: number, totalOriginalLines: number): number {
+	return oldLine < totalOriginalLines ? oldLine : Math.max(0, oldLine - 1);
+}
+
 /**
  * Computes which lines in the *original* content are removed or modified.
  * Returns a Set of 0-based line numbers that are affected.
@@ -21,6 +50,7 @@ function countPartLines(value: string): number {
 export function computeOriginalAffectedLines(originalContent: string, newContent: string): Set<number> {
 	const affected = new Set<number>();
 	const changes = diffLines(originalContent, newContent);
+	const totalOriginalLines = countOriginalLines(changes);
 	let oldLine = 0; // 0-based
 
 	for (const part of changes) {
@@ -33,12 +63,10 @@ export function computeOriginalAffectedLines(originalContent: string, newContent
 			}
 			oldLine += lines;
 		} else if (part.added) {
-			// A pure insertion removes no original line. Flag both the line before
-			// the insertion point AND the original line now following it (oldLine):
-			// the "before" line is often a blank separator owned by no rendered
-			// section, so relying on it alone silently drops the decoration.
-			affected.add(Math.max(0, oldLine - 1));
-			affected.add(oldLine);
+			// A pure insertion removes no original line. Anchor it to exactly ONE
+			// line (the following line, or the line before at EOF) so a single
+			// rendered section owns it — see insertionAnchorLine.
+			affected.add(insertionAnchorLine(oldLine, totalOriginalLines));
 		} else {
 			oldLine += lines;
 		}
@@ -178,6 +206,7 @@ function extractSectionTexts(changes: Change[], lineStart: number, lineEnd: numb
 		oldLine: 0,
 		seenChange: false,
 	};
+	const totalOriginalLines = countOriginalLines(changes);
 
 	for (const part of changes) {
 		if (part.value === "") continue;
@@ -186,16 +215,12 @@ function extractSectionTexts(changes: Change[], lineStart: number, lineEnd: numb
 		if (part.removed) {
 			processRemovedPart(partLines, lineStart, lineEnd, state);
 		} else if (part.added) {
-			// Match the insertion to the section either by the line before it or
-			// by the original line now following it (state.oldLine) — the "before"
-			// line is often a blank separator owned by no rendered section, which
-			// would otherwise leave the detail body empty. Mirrors
-			// computeOriginalAffectedLines / checkPartForSection.
-			const beforeLine = Math.max(0, state.oldLine - 1);
-			const inSection =
-				(beforeLine >= lineStart && beforeLine <= lineEnd) ||
-				(state.oldLine >= lineStart && state.oldLine <= lineEnd);
-			if (inSection) {
+			// Match the insertion to the section that owns its single anchor line
+			// (the following line, or the line before at EOF) — see
+			// insertionAnchorLine. Mirrors computeOriginalAffectedLines /
+			// checkPartForSection so all three agree on which section owns it.
+			const anchor = insertionAnchorLine(state.oldLine, totalOriginalLines);
+			if (anchor >= lineStart && anchor <= lineEnd) {
 				state.seenChange = true;
 				state.sectionNew += part.value;
 			}
@@ -242,6 +267,7 @@ async function applyTwoPaneDiff(
 	lineEnd: number,
 	sourcePath: string,
 	plugin: Plugin,
+	isCurrent: () => boolean,
 ): Promise<void> {
 	const { sectionOld, sectionNew } = extractSectionTexts(changes, lineStart, lineEnd);
 	if (sectionOld === sectionNew) return;
@@ -255,6 +281,9 @@ async function applyTwoPaneDiff(
 	const newPane = document.createElement("div");
 	newPane.className = "s2b-diff-pane-added";
 	await MarkdownRenderer.render(plugin.app, sectionNew.trimEnd(), newPane, sourcePath, plugin);
+	// A newer render may have superseded this one while we awaited — bail so we
+	// don't append a stale pane into a container the newer render already owns.
+	if (!isCurrent()) return;
 	paneWrap.appendChild(newPane);
 
 	diffContent.appendChild(paneWrap);
@@ -270,17 +299,38 @@ interface DiffRenderContext {
 	plugin: Plugin;
 }
 
+/**
+ * Monotonic render token per detail container. `applyTwoPaneDiff` awaits
+ * `MarkdownRenderer.render`, so a fast mode flip (two-pane → word-diff, or two
+ * rapid two-pane renders) can let an EARLIER async render append its pane AFTER a
+ * newer `renderDetailInto` already cleared and re-filled the container — the card
+ * then shows content from both modes. Each `renderDetailInto` bumps this token;
+ * the async path only appends when its captured token is still current.
+ */
+const renderTokens = new WeakMap<HTMLElement, number>();
+
 /** Render the diff detail (word-diff or two-pane) into a detail container. */
 function renderDetailInto(container: HTMLElement, ctx: DiffRenderContext, mode: DiffViewMode): void {
+	const token = (renderTokens.get(container) ?? 0) + 1;
+	renderTokens.set(container, token);
 	container.empty();
 	if (mode === "word-diff") {
 		applyInlineWordDiff(container, ctx.changes, ctx.origLineStart, ctx.origLineEnd);
 	} else {
-		applyTwoPaneDiff(container, ctx.changes, ctx.origLineStart, ctx.origLineEnd, ctx.filePath, ctx.plugin).catch(
-			() => {
-				applyInlineWordDiff(container, ctx.changes, ctx.origLineStart, ctx.origLineEnd);
-			},
-		);
+		applyTwoPaneDiff(
+			container,
+			ctx.changes,
+			ctx.origLineStart,
+			ctx.origLineEnd,
+			ctx.filePath,
+			ctx.plugin,
+			() => renderTokens.get(container) === token,
+		).catch(() => {
+			// Only fall back if this render is still the current one — a superseded
+			// render must not repaint the container the newer render owns.
+			if (renderTokens.get(container) !== token) return;
+			applyInlineWordDiff(container, ctx.changes, ctx.origLineStart, ctx.origLineEnd);
+		});
 	}
 }
 
@@ -441,20 +491,18 @@ function checkPartForSection(
 	lineCount: number,
 	sectionStart: number,
 	sectionEnd: number,
+	totalOriginalLines: number,
 ): number {
 	if (part.removed) {
 		if (rangeOverlapsSection(oldLine, lineCount, sectionStart, sectionEnd)) {
 			return groupIndex;
 		}
 	} else if (part.added) {
-		// Mirror computeOriginalAffectedLines: match either the line before the
-		// insertion point or the original line now following it, so group-index
-		// detection stays consistent with the widened affected set.
-		const beforeLine = Math.max(0, oldLine - 1);
-		if (
-			(beforeLine >= sectionStart && beforeLine <= sectionEnd) ||
-			(oldLine >= sectionStart && oldLine <= sectionEnd)
-		) {
+		// Mirror computeOriginalAffectedLines: match the insertion's single anchor
+		// line (following line, or line before at EOF) so group-index detection
+		// stays consistent with the affected set and only one section claims it.
+		const anchor = insertionAnchorLine(oldLine, totalOriginalLines);
+		if (anchor >= sectionStart && anchor <= sectionEnd) {
 			return groupIndex;
 		}
 	}
@@ -469,6 +517,7 @@ function computeGroupIndexForSection(changes: Change[], sectionLineStart: number
 	let oldLine = 0;
 	let groupIndex = -1;
 	let inGroup = false;
+	const totalOriginalLines = countOriginalLines(changes);
 
 	for (const part of changes) {
 		if (part.value === "") continue;
@@ -486,6 +535,7 @@ function computeGroupIndexForSection(changes: Change[], sectionLineStart: number
 				partLineCount,
 				sectionLineStart,
 				sectionLineEnd,
+				totalOriginalLines,
 			);
 			if (result >= 0) return result;
 			if (part.removed) oldLine += partLineCount;

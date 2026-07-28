@@ -1,7 +1,11 @@
 import type { EditorView } from "@codemirror/view";
 import { diffLines } from "diff";
 import { MarkdownView, Notice, TFile } from "obsidian";
-import { computeOriginalAffectedLines } from "../editor/readingViewDiffProcessor";
+import {
+	computeOriginalAffectedLines,
+	countOriginalLines,
+	insertionAnchorLine,
+} from "../editor/readingViewDiffProcessor";
 import type SecondBrainPlugin from "../main";
 import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
 import type { PendingChange, PendingChangeEntry } from "../types/shared";
@@ -57,6 +61,7 @@ function countPartLines(value: string): number {
  */
 function groupFirstLines(originalContent: string, newContent: string): Array<{ groupIndex: number; line: number }> {
 	const parts = diffLines(originalContent, newContent);
+	const totalOriginalLines = countOriginalLines(parts);
 	const out: Array<{ groupIndex: number; line: number }> = [];
 	let oldLine = 0; // 0-based line in originalContent
 	let groupIndex = -1;
@@ -78,8 +83,10 @@ function groupFirstLines(originalContent: string, newContent: string): Array<{ g
 			if (!inGroup) {
 				inGroup = true;
 				groupIndex++;
-				// Pure insertion: anchor to the line before the insertion point.
-				groupLine = Math.max(0, oldLine - 1);
+				// Pure insertion: anchor to the same single line the decorations use
+				// (following line, or line before at EOF) so nav scrolls to the
+				// section that actually renders the card.
+				groupLine = insertionAnchorLine(oldLine, totalOriginalLines);
 			}
 		} else {
 			if (inGroup) {
