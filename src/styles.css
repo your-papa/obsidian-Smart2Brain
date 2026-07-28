@@ -598,12 +598,16 @@
    Decoration.line to the lines a pending change group covers. */
 .s2b-diff-line-removed {
 	background-color: rgba(220, 50, 47, 0.1);
-	box-shadow: inset 2px 0 0 rgba(220, 50, 47, 0.5);
 }
 
 .s2b-diff-line-added {
 	background-color: rgba(0, 180, 0, 0.1);
-	box-shadow: inset 2px 0 0 rgba(0, 180, 0, 0.5);
+}
+
+/* Neutral tint for removed lines in word-diff mode: marks the source lines the
+   card refers to without the "deleted" (red) connotation. */
+.s2b-diff-line-muted {
+	background-color: var(--background-modifier-hover);
 }
 
 /* Reading-view section tints — additive class on the rendered section. */

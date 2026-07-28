@@ -279,6 +279,9 @@ function createGroupDecoration(
 /** Line-background tint decorations for removed/added lines within a group. */
 const removedLineDecoration = Decoration.line({ class: "s2b-diff-line-removed" });
 const addedLineDecoration = Decoration.line({ class: "s2b-diff-line-added" });
+/** Neutral tint for removed lines in word-diff mode — marks the source lines
+ * the card's diff refers to without the "deleted" connotation of red. */
+const mutedLineDecoration = Decoration.line({ class: "s2b-diff-line-muted" });
 
 /**
  * Identify contiguous change groups from a line-level diff.
@@ -461,8 +464,19 @@ function buildDecorations(state: EditorState, entryOverride?: PendingChangeEntry
 
 			// Line-background tints — additive, no document reflow. Tint every
 			// removed line the group covers; a pure insertion (no removed text)
-			// tints its single anchor line as added.
-			const tint = group.removedText ? removedLineDecoration : addedLineDecoration;
+			// tints its single anchor line as added. In word-diff mode the card
+			// already shows the exact old->new inline, so removed lines get a
+			// MUTED tint instead of red: a full red band there reads like "this
+			// line was deleted" (misleading for an in-place edit), while no tint
+			// makes the still-visible original look like a duplicate paragraph.
+			// Two-pane keeps the red (the document is the reference the new pane
+			// is compared against).
+			let tint: Decoration;
+			if (group.removedText) {
+				tint = mode === "word-diff" ? mutedLineDecoration : removedLineDecoration;
+			} else {
+				tint = addedLineDecoration;
+			}
 			const spanEnd = group.removedText
 				? Math.min(clampedOffset + group.docLength, state.doc.length)
 				: clampedOffset;
