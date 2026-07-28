@@ -1,5 +1,6 @@
 <script lang="ts">
 import { onDestroy, onMount } from "svelte";
+import { diffWords } from "diff";
 import { BASE_SYSTEM_PROMPT } from "../../agent/prompts";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
 import type SecondBrainPlugin from "../../main";
@@ -12,26 +13,50 @@ interface Props {
 	accessors: SystemPromptAccessors;
 	description: string;
 	readOnly: boolean;
+	showDiff?: boolean;
 }
 
-const { modal, plugin, accessors, description, readOnly }: Props = $props();
+const { modal, plugin, accessors, description, readOnly, showDiff = false }: Props = $props();
+
+type ViewMode = "edit" | "diff";
 
 let editorContainer: HTMLDivElement | undefined = $state();
 let editor: EmbeddableMarkdownEditor | undefined = $state();
 let initialPromptValue = $state("");
 let promptValue = $state("");
 let isLoading = $state(true);
+let viewMode: ViewMode = $state<ViewMode>("edit");
+
+// Initialise to diff tab when the modal was opened with showDiff=true.
+// Use $effect (run once on mount) rather than reading showDiff directly in
+// $state() to avoid the "captures initial value only" Svelte warning.
+$effect(() => {
+	if (showDiff) viewMode = "diff";
+});
+
 const defaultPrompt = $derived(accessors.defaultPrompt ?? BASE_SYSTEM_PROMPT);
 const isDirty = $derived(promptValue !== initialPromptValue);
 const isAtDefault = $derived(promptValue === defaultPrompt);
-const showResetToDefault = $derived(!isAtDefault);
+const canShowDiff = $derived(!readOnly && !isAtDefault);
+
+function renderDiffSide(oldText: string, newText: string, side: "old" | "new"): string {
+	const parts = diffWords(oldText, newText);
+	return parts
+		.filter((p) => (side === "old" ? !p.added : !p.removed))
+		.map((p) => {
+			const escaped = p.value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+			if (side === "old" && p.removed) return `<mark class="s2b-prompt-diff-removed">${escaped}</mark>`;
+			if (side === "new" && p.added) return `<mark class="s2b-prompt-diff-added">${escaped}</mark>`;
+			return escaped;
+		})
+		.join("");
+}
 
 onMount(() => {
 	if (readOnly) {
 		void loadPrompt();
 		return;
 	}
-
 	void initializeEditor();
 });
 
@@ -69,11 +94,37 @@ function handleResetToDefault() {
 	promptValue = defaultPrompt;
 	editor?.setValue(defaultPrompt);
 }
+
+function handleUseNewDefault() {
+	handleResetToDefault();
+	viewMode = "edit";
+}
 </script>
 
 <div class="system-prompt-modal-content">
   <p class="system-prompt-description">{description}</p>
-  {#if readOnly}
+
+  {#if canShowDiff}
+    <div class="prompt-view-tabs">
+      <button class="prompt-tab" class:active={viewMode === "edit"} onclick={() => (viewMode = "edit")}>Edit</button>
+      <button class="prompt-tab" class:active={viewMode === "diff"} onclick={() => (viewMode = "diff")}
+        >Diff with default</button
+      >
+    </div>
+  {/if}
+
+  {#if viewMode === "diff" && canShowDiff}
+    <div class="prompt-diff-container">
+      <div class="prompt-diff-pane">
+        <div class="prompt-diff-pane-label">Yours</div>
+        <pre class="prompt-diff-text">{@html renderDiffSide(promptValue, defaultPrompt, "old")}</pre>
+      </div>
+      <div class="prompt-diff-pane">
+        <div class="prompt-diff-pane-label">New default</div>
+        <pre class="prompt-diff-text">{@html renderDiffSide(promptValue, defaultPrompt, "new")}</pre>
+      </div>
+    </div>
+  {:else if readOnly}
     <div class="system-prompt-preview-container">
       {#if isLoading}
         <div class="system-prompt-loading">Loading prompt…</div>
@@ -88,17 +139,23 @@ function handleResetToDefault() {
       {/if}
     </div>
   {/if}
+
   <div class="system-prompt-actions">
     <Button buttonText={readOnly ? "Close" : "Cancel"} onClick={() => modal.close()} />
     <div class="flex-1"></div>
-    {#if !readOnly && accessors.viewFinalPrompt}
-      <Button buttonText="View Final" onClick={accessors.viewFinalPrompt} />
-    {/if}
-    {#if !readOnly && showResetToDefault}
-      <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
-    {/if}
-    {#if !readOnly && isDirty}
-      <Button buttonText="Save" cta={true} onClick={handleSave} />
+    {#if viewMode === "diff" && canShowDiff}
+      <Button buttonText="Keep mine" onClick={() => (viewMode = "edit")} />
+      <Button buttonText="Use new default" cta={true} onClick={handleUseNewDefault} />
+    {:else}
+      {#if !readOnly && accessors.viewFinalPrompt}
+        <Button buttonText="View Final" onClick={accessors.viewFinalPrompt} />
+      {/if}
+      {#if !readOnly && !isAtDefault}
+        <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
+      {/if}
+      {#if !readOnly && isDirty}
+        <Button buttonText="Save" cta={true} onClick={handleSave} />
+      {/if}
     {/if}
   </div>
 </div>
@@ -108,7 +165,7 @@ function handleResetToDefault() {
     display: flex;
     flex-direction: column;
     flex: 1;
-    min-height: 0; /* Required for nested flex to shrink properly */
+    min-height: 0;
   }
 
   .system-prompt-description {
@@ -118,9 +175,93 @@ function handleResetToDefault() {
     font-size: var(--font-ui-small);
   }
 
+  /* ── Tab toggle ── */
+  .prompt-view-tabs {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--background-modifier-border);
+  }
+
+  .prompt-tab {
+    padding: 4px 12px 8px;
+    font-size: var(--font-ui-small);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    color: var(--text-muted);
+    margin-bottom: -1px;
+  }
+
+  .prompt-tab:hover {
+    color: var(--text-normal);
+  }
+
+  .prompt-tab.active {
+    color: var(--text-normal);
+    border-bottom-color: var(--interactive-accent);
+  }
+
+  /* ── Two-pane diff ── */
+  .prompt-diff-container {
+    display: flex;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .prompt-diff-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow-y: auto;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+
+  .prompt-diff-pane-label {
+    font-size: var(--font-ui-smaller);
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    flex-shrink: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .prompt-diff-text {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-monospace);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--text-normal);
+    user-select: text;
+  }
+
+  :global(mark.s2b-prompt-diff-removed) {
+    background: color-mix(in srgb, var(--color-red) 35%, transparent);
+    border-radius: 2px;
+    color: inherit;
+  }
+
+  :global(mark.s2b-prompt-diff-added) {
+    background: color-mix(in srgb, var(--color-green) 35%, transparent);
+    border-radius: 2px;
+    color: inherit;
+  }
+
+  /* ── Editor / preview (unchanged from before) ── */
   .system-prompt-editor-container {
     flex: 1 1 auto;
-    min-height: 0; /* Required for flex child to shrink below content */
+    min-height: 0;
     overflow-y: auto;
     border-radius: 12px;
   }

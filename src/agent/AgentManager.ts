@@ -10,6 +10,7 @@ import { CAPABILITIES, VAULT_TOOL_IDS, WEB_TOOL_IDS, type BuiltInToolId, type Ag
 import { VIEW_TYPE_CHAT } from "../views/chat/Chat";
 import { lookupModelInfo } from "../providers/modelsDevApi";
 import { fetchOllamaModelsInfo } from "../providers/ollamaModels";
+import { SystemPromptModal } from "../components/modal/SystemPromptModal";
 import {
 	extractCapabilities as extractOpenRouterCapabilities,
 	fetchOpenRouterModels,
@@ -518,6 +519,24 @@ export class AgentManager {
 		this.mcpToolsByAgent.clear();
 		this.mcpToolsInflight.clear();
 		this.agent?.invalidateAllRunnables();
+	}
+
+	openSystemPromptDiff(agentName: string): void {
+		const pluginData = getData();
+		const agent = Object.values(pluginData.agents).find((a) => a.name === agentName);
+		if (!agent) return;
+		new SystemPromptModal(
+			this.plugin,
+			{
+				getPrompt: () => agent.systemPrompt,
+				setPrompt: (prompt: string) => {
+					pluginData.updateAgent(agent.id, { systemPrompt: prompt });
+					this.invalidateSystemPromptCaches();
+				},
+				defaultPrompt: BASE_SYSTEM_PROMPT,
+			},
+			{ title: `System Prompt — ${agent.name}`, showDiff: true },
+		).open();
 	}
 
 	/**
@@ -1311,7 +1330,7 @@ export class AgentManager {
 
 	async *streamQuery(
 		query: string,
-		threadId,
+		threadId: string,
 		agentId: string,
 		checkpointId?: string,
 		signal?: AbortSignal,

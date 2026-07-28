@@ -27,11 +27,12 @@ export class SystemPromptModal extends Modal {
 	private readonly titleText: string;
 	private readonly descriptionText: string;
 	private readonly readOnly: boolean;
+	private readonly showDiff: boolean;
 
 	constructor(
 		plugin: SecondBrainPlugin,
 		accessors: SystemPromptAccessors,
-		options?: { title?: string; description?: string; readOnly?: boolean },
+		options?: { title?: string; description?: string; readOnly?: boolean; showDiff?: boolean },
 	) {
 		super(plugin.app);
 		this.plugin = plugin;
@@ -39,6 +40,7 @@ export class SystemPromptModal extends Modal {
 		this.titleText = options?.title ?? "System Prompt";
 		this.descriptionText = options?.description ?? "Customize the system instructions used for every chat.";
 		this.readOnly = options?.readOnly ?? false;
+		this.showDiff = options?.showDiff ?? false;
 		this.setTitle(this.titleText);
 	}
 
@@ -58,6 +60,7 @@ export class SystemPromptModal extends Modal {
 				accessors: this.accessors,
 				description: this.descriptionText,
 				readOnly: this.readOnly,
+				showDiff: this.showDiff,
 			},
 		});
 	}
