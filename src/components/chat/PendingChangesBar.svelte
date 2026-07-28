@@ -1,6 +1,6 @@
 <script lang="ts">
 import { Notice } from "obsidian";
-import { navigateToPendingChange, revealAndScroll } from "../../lib/pendingChangeNavigation";
+import { firstChangedLine, navigateToPendingChange, revealAndScroll } from "../../lib/pendingChangeNavigation";
 import { getPlugin } from "../../stores/state.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { PendingChangeEntry } from "../../types/shared";
@@ -109,10 +109,11 @@ async function handleNav(direction: "next" | "prev") {
 	await navigateToPendingChange(getPlugin(), threadId, direction);
 }
 
-/** Jump to a clicked diff row's position in the target note. `line` is 0-based
- * in the note's current content (only wired for updates, which are on disk). */
-async function handleJump(entry: PendingChangeEntry, line: number) {
-	const opened = await revealAndScroll(getPlugin(), entry.change.path, line);
+/** Jump to this change's position in the target note (its first changed line).
+ * Only meaningful for updates; create/delete/move fall back to the top of file
+ * and the button is only shown for updates. */
+async function handleJump(entry: PendingChangeEntry) {
+	const opened = await revealAndScroll(getPlugin(), entry.change.path, firstChangedLine(entry.change));
 	if (!opened) new Notice("Could not open the note for this change.");
 }
 </script>
@@ -206,6 +207,19 @@ async function handleJump(entry: PendingChangeEntry, line: number) {
                 {/if}
               </div>
               <div class="pcb-entry-actions">
+                {#if entry.change.type === "update"}
+                  <button
+                    class="pcb-action-icon pcb-jump"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      handleJump(entry);
+                    }}
+                    title="Jump to this change in the note"
+                    type="button"
+                  >
+                    <div use:icon={"arrow-right-to-line"} style="--icon-size: 12px"></div>
+                  </button>
+                {/if}
                 <button
                   class="pcb-action-icon pcb-action-accept"
                   onclick={(e) => {
@@ -234,7 +248,7 @@ async function handleJump(entry: PendingChangeEntry, line: number) {
 
             {#if expandedIds[entry.id]}
               <div class="pcb-diff-body">
-                <DiffView change={entry.change} onJump={(line) => handleJump(entry, line)} />
+                <DiffView change={entry.change} />
               </div>
             {/if}
           </div>
@@ -339,6 +353,15 @@ async function handleJump(entry: PendingChangeEntry, line: number) {
 
   .pcb-nav {
     color: var(--text-muted);
+  }
+
+  .pcb-jump {
+    color: var(--text-muted);
+  }
+
+  .pcb-jump:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-accent);
   }
 
   .pcb-nav:hover:not(:disabled) {

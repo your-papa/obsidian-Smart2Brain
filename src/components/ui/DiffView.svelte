@@ -4,12 +4,9 @@ import type { PendingChange } from "../../types/shared";
 
 interface Props {
 	change: PendingChange;
-	/** Jump to a position in the target note. `line` is 0-based in the ORIGINAL
-	 * content (undefined → top of file). Only wired for clickable changed rows. */
-	onJump?: (line: number) => void;
 }
 
-const { change, onJump }: Props = $props();
+const { change }: Props = $props();
 
 const hunks = $derived.by(() => {
 	if (change.type === "create") {
@@ -30,8 +27,6 @@ interface LineEntry {
 	content: string;
 	oldLineNo?: number;
 	newLineNo?: number;
-	/** 0-based ORIGINAL-content line to scroll to when this row is clicked. */
-	jumpLine: number;
 }
 
 /** A collapsed gap standing in for `hidden` unchanged lines the diff elided. */
@@ -57,21 +52,13 @@ function computeLines(changes: Change[]): LineEntry[] {
 
 		for (const line of lines) {
 			if (part.added) {
-				// An added line has no original line of its own; anchor the jump to
-				// the original line just before the insertion point (0-based).
-				result.push({ type: "added", content: line, newLineNo: newLine, jumpLine: Math.max(0, oldLine - 2) });
+				result.push({ type: "added", content: line, newLineNo: newLine });
 				newLine++;
 			} else if (part.removed) {
-				result.push({ type: "removed", content: line, oldLineNo: oldLine, jumpLine: oldLine - 1 });
+				result.push({ type: "removed", content: line, oldLineNo: oldLine });
 				oldLine++;
 			} else {
-				result.push({
-					type: "context",
-					content: line,
-					oldLineNo: oldLine,
-					newLineNo: newLine,
-					jumpLine: oldLine - 1,
-				});
+				result.push({ type: "context", content: line, oldLineNo: oldLine, newLineNo: newLine });
 				oldLine++;
 				newLine++;
 			}
@@ -142,10 +129,6 @@ function collapseContext(lines: LineEntry[], context = CONTEXT): DisplayEntry[] 
 }
 
 const entries = $derived(hunks ? collapseContext(computeLines(hunks)) : []);
-
-/** Rows are clickable only for updates (create isn't on disk yet, delete removes
- * the file, move has no line target) and only when a jump handler is wired. */
-const jumpable = $derived(!!onJump && change.type === "update");
 </script>
 
 <div class="s2b-diff-view">
@@ -162,15 +145,10 @@ const jumpable = $derived(!!onJump && change.type === "update");
             ⋯ {entry.hidden} unchanged line{entry.hidden !== 1 ? "s" : ""}
           </div>
         {:else}
-          <!-- svelte-ignore a11y_click_events_have_key_events -->
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="s2b-diff-line"
             class:s2b-diff-added={entry.type === "added"}
             class:s2b-diff-removed={entry.type === "removed"}
-            class:s2b-diff-line-jumpable={jumpable}
-            title={jumpable ? "Jump to this line in the note" : undefined}
-            onclick={jumpable ? () => onJump?.(entry.jumpLine) : undefined}
           >
             <span class="s2b-diff-content">{entry.content}</span>
           </div>
@@ -208,15 +186,6 @@ const jumpable = $derived(!!onJump && change.type === "update");
   .s2b-diff-line {
     display: flex;
     white-space: pre;
-  }
-
-  .s2b-diff-line-jumpable {
-    cursor: pointer;
-  }
-
-  .s2b-diff-line-jumpable:hover {
-    outline: 1px solid var(--text-accent);
-    outline-offset: -1px;
   }
 
   .s2b-diff-added {
