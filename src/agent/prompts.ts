@@ -93,7 +93,7 @@ export const DEFAULT_VAULT_CAPABILITY_GUIDANCE = `## Finding Notes
  * fetch_url / web_search carries the operational detail. User-editable via the
  * capability pencil; `capabilityPrompts.web` overrides it.
  */
-export const DEFAULT_WEB_CAPABILITY_GUIDANCE = `Prefer the vault first; reach for web tools when the user references a link or when the needed information cannot be in the vault. Only the query or URL you pass is sent to the configured web service — never vault contents.`;
+export const DEFAULT_WEB_CAPABILITY_GUIDANCE = "Prefer the vault first; reach for web tools when the user references a link or when the needed information cannot be in the vault. Only the query or URL you pass is sent to the configured web service — never vault contents.";
 
 /**
  * Default guidance for a built-in capability, used to seed `capabilityPrompts[id]` on

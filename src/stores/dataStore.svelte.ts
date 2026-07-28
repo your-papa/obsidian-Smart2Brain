@@ -2078,7 +2078,7 @@ function normalizeAgent(agent: AgentConfig): boolean {
 	for (const [toolId, historicalSet] of HISTORICAL_TOOL_GUIDANCE) {
 		const toolCfg = agent.toolsConfig[toolId];
 		if (toolCfg?.promptGuidance !== undefined && historicalSet.has(toolCfg.promptGuidance)) {
-			delete toolCfg.promptGuidance;
+			toolCfg.promptGuidance = undefined;
 		}
 	}
 

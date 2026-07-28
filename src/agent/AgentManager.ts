@@ -1311,7 +1311,7 @@ export class AgentManager {
 
 	async *streamQuery(
 		query: string,
-		threadId = "default-thread",
+		threadId,
 		agentId: string,
 		checkpointId?: string,
 		signal?: AbortSignal,
