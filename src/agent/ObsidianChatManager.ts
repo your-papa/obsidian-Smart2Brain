@@ -96,6 +96,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	 * Cleans up in-memory caches so stale threads don't appear in the UI.
 	 */
 	private onChatFileDeleted(filePath: string): void {
+		const data = this.storage.get(filePath);
+		if (data) this.newerVersionThreadIds.delete(data.threadId);
 		this.storage.delete(filePath);
 		this.threadIndex.delete(filePath);
 		this.dirtyThreadVersions.delete(filePath);
@@ -116,6 +118,10 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	private rekeyThread(oldPath: string, newPath: string): void {
 		const data = this.storage.get(oldPath);
 		if (data) {
+			if (this.newerVersionThreadIds.has(data.threadId)) {
+				this.newerVersionThreadIds.delete(data.threadId);
+				this.newerVersionThreadIds.add(newPath);
+			}
 			data.threadId = newPath;
 			this.storage.delete(oldPath);
 			this.storage.set(newPath, data);

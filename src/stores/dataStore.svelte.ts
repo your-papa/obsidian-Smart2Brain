@@ -2120,8 +2120,20 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 
 	runMigrations(mergedData);
 
+	// If the data was written by a newer plugin, skip normalizeAgents() too — it
+	// would rewrite prompt fields using this plugin's older defaults and those
+	// mutations would be persisted on the next save, corrupting the newer state.
+	const fromNewerPlugin = (rawData?.schemaVersion ?? 0) > CURRENT_SCHEMA_VERSION;
+
 	let stalePromptAgentNames: string[] = [];
-	if (!rawData?.agents || Object.keys(rawData.agents).length === 0) {
+	if (fromNewerPlugin) {
+		// Leave agents untouched; just ensure the bare minimum so the UI doesn't crash.
+		if (!mergedData.agents || Object.keys(mergedData.agents).length === 0) {
+			mergedData.agents = { [DEFAULT_AGENT_ID]: createDefaultAgent() };
+			mergedData.defaultAgentId = DEFAULT_AGENT_ID;
+			mergedData.selectedAgentId = DEFAULT_AGENT_ID;
+		}
+	} else if (!rawData?.agents || Object.keys(rawData.agents).length === 0) {
 		mergedData.agents = { [DEFAULT_AGENT_ID]: createDefaultAgent() };
 		mergedData.defaultAgentId = DEFAULT_AGENT_ID;
 		mergedData.selectedAgentId = DEFAULT_AGENT_ID;
