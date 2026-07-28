@@ -85,9 +85,10 @@ export async function revealAndScroll(plugin: SecondBrainPlugin, path: string, l
 	// In that case open a new tab so the chat survives.
 	const current = ws.getLeaf(false);
 	const leaf = current.view instanceof ChatView ? ws.getLeaf("tab") : current;
-	// eState scrolls the initial (source) render; then apply a mode-aware scroll
-	// once the view is mounted so reading mode lands correctly too.
-	await leaf.openFile(file, { eState: { line } });
+	// Open WITHOUT eState.line: passing it makes Obsidian flash the target line
+	// yellow (.is-flashing), which is redundant here — the change's own red/green
+	// tint already marks the spot. scrollToLine handles the scroll in both modes.
+	await leaf.openFile(file);
 	void ws.revealLeaf(leaf);
 	if (leaf.view instanceof MarkdownView) scrollToLine(leaf.view, line);
 	return true;
