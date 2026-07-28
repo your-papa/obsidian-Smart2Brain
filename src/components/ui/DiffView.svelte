@@ -150,9 +150,6 @@ const entries = $derived(hunks ? collapseContext(computeLines(hunks)) : []);
             class:s2b-diff-added={entry.type === "added"}
             class:s2b-diff-removed={entry.type === "removed"}
           >
-            <span class="s2b-diff-marker">
-              {#if entry.type === "added"}+{:else if entry.type === "removed"}-{:else}&nbsp;{/if}
-            </span>
             <span class="s2b-diff-content">{entry.content}</span>
           </div>
         {/if}
@@ -191,32 +188,16 @@ const entries = $derived(hunks ? collapseContext(computeLines(hunks)) : []);
   }
 
   .s2b-diff-added {
-    background-color: hsla(var(--color-green-hsl), 0.35);
+    background-color: color-mix(in srgb, var(--color-green) 30%, transparent);
   }
 
   .s2b-diff-removed {
-    background-color: hsla(var(--color-red-hsl), 0.35);
-  }
-
-  .s2b-diff-marker {
-    display: inline-block;
-    width: 1.5em;
-    text-align: center;
-    color: var(--text-muted);
-    user-select: none;
-    flex-shrink: 0;
-  }
-
-  .s2b-diff-added .s2b-diff-marker {
-    color: var(--color-green);
-  }
-
-  .s2b-diff-removed .s2b-diff-marker {
-    color: var(--color-red);
+    background-color: color-mix(in srgb, var(--color-red) 30%, transparent);
   }
 
   .s2b-diff-content {
     flex: 1;
+    padding-left: 0.75em;
     padding-right: 1em;
   }
 
