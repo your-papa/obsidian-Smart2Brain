@@ -5,6 +5,7 @@ import { getPlugin } from "../../stores/state.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { PendingChangeEntry } from "../../types/shared";
 import { icon } from "../../utils/utils";
+import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 
 interface Props {
 	threadPath: string | null;
@@ -105,6 +106,23 @@ async function handleJump(entry: PendingChangeEntry) {
 	const opened = await revealAndScroll(getPlugin(), entry.change.path, firstChangedLine(entry.change));
 	if (!opened) new Notice("Could not open the note for this change.");
 }
+
+/** Fire Obsidian's native page-preview hover for this change's note. The Page
+ * Preview core plugin reads modifier keys off the event, so this respects the
+ * user's "require Cmd" setting. The rendered preview shows the note WITH its
+ * in-note pending-change decorations, which the sidebar can't render itself. */
+function previewChange(evt: MouseEvent, entry: PendingChangeEntry) {
+	const target = evt.currentTarget;
+	if (!(target instanceof HTMLElement)) return;
+	getPlugin().app.workspace.trigger("hover-link", {
+		event: evt,
+		source: VIEW_TYPE_CHAT,
+		hoverParent: getPlugin(),
+		targetEl: target,
+		linktext: entry.change.path,
+		sourcePath: threadId ?? "",
+	});
+}
 </script>
 
 {#if pendingCount > 0}
@@ -155,13 +173,17 @@ async function handleJump(entry: PendingChangeEntry) {
           <div class="pcb-entry">
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <!-- svelte-ignore a11y_mouse_events_have_key_events -->
             <div
               class="pcb-entry-header"
               class:pcb-entry-openable={entry.change.type === "update"}
               onclick={() => {
                 if (entry.change.type === "update") handleJump(entry);
               }}
-              title={entry.change.type === "update" ? "Open the note at this change" : undefined}
+              onmouseover={(e) => {
+                if (entry.change.type === "update") previewChange(e, entry);
+              }}
+              title={entry.change.type === "update" ? "Open the note at this change (⌘/Ctrl-hover to preview)" : undefined}
             >
               <div class="pcb-entry-left">
                 <span class="pcb-badge {changeTypeBadgeClass(entry.change.type)}">
