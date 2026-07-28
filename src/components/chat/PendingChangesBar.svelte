@@ -1,5 +1,7 @@
 <script lang="ts">
 import { Notice } from "obsidian";
+import { navigateToPendingChange } from "../../lib/pendingChangeNavigation";
+import { getPlugin } from "../../stores/state.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { PendingChangeEntry } from "../../types/shared";
 import DiffView from "../ui/DiffView.svelte";
@@ -101,6 +103,11 @@ async function handleRejectAll() {
 	await store.rejectAll(threadId);
 	new Notice("Rejected all pending changes");
 }
+
+async function handleNav(direction: "next" | "prev") {
+	if (!threadId || pendingCount === 0) return;
+	await navigateToPendingChange(getPlugin(), threadId, direction);
+}
 </script>
 
 {#if pendingCount > 0}
@@ -116,6 +123,30 @@ async function handleRejectAll() {
         </span>
       </div>
       <div class="pcb-summary-right">
+        <button
+          class="pcb-action-icon pcb-nav"
+          onclick={(e) => {
+            e.stopPropagation();
+            handleNav("prev");
+          }}
+          disabled={pendingCount < 2}
+          title="Previous pending change"
+          type="button"
+        >
+          <div use:icon={"chevron-up"} style="--icon-size: 12px"></div>
+        </button>
+        <button
+          class="pcb-action-icon pcb-nav"
+          onclick={(e) => {
+            e.stopPropagation();
+            handleNav("next");
+          }}
+          disabled={pendingCount < 2}
+          title="Next pending change"
+          type="button"
+        >
+          <div use:icon={"chevron-down"} style="--icon-size: 12px"></div>
+        </button>
         <button
           class="pcb-action pcb-action-accept"
           onclick={(e) => {
@@ -297,6 +328,20 @@ async function handleRejectAll() {
     cursor: pointer;
     background: transparent;
     transition: background 100ms ease;
+  }
+
+  .pcb-nav {
+    color: var(--text-muted);
+  }
+
+  .pcb-nav:hover:not(:disabled) {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+
+  .pcb-nav:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   .pcb-chevron {

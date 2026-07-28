@@ -16,7 +16,7 @@ function countPartLines(value: string): number {
  * Computes which lines in the *original* content are removed or modified.
  * Returns a Set of 0-based line numbers that are affected.
  */
-function computeOriginalAffectedLines(originalContent: string, newContent: string): Set<number> {
+export function computeOriginalAffectedLines(originalContent: string, newContent: string): Set<number> {
 	const affected = new Set<number>();
 	const changes = diffLines(originalContent, newContent);
 	let oldLine = 0; // 0-based
