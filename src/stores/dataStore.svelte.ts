@@ -395,7 +395,36 @@ function createDefaultAgent(): AgentConfig {
 	};
 }
 
+// ---------------------------------------------------------------------------
+// Settings schema versioning
+// ---------------------------------------------------------------------------
+
+/** Increment this when making any breaking change to PluginData. Add a corresponding entry to MIGRATIONS. */
+const CURRENT_SCHEMA_VERSION = 1;
+
+type Migration = (data: PluginData) => void;
+
+/**
+ * One entry per version step. MIGRATIONS[v] upgrades data from version v → v+1.
+ * Keep entries in order; never remove them.
+ */
+const MIGRATIONS: Migration[] = [
+	// v0 → v1: first versioned release — no structural changes needed
+	(_data) => {},
+];
+
+function runMigrations(data: PluginData): void {
+	const from = data.schemaVersion ?? 0;
+	for (let v = from; v < CURRENT_SCHEMA_VERSION; v++) {
+		MIGRATIONS[v]?.(data);
+	}
+	data.schemaVersion = CURRENT_SCHEMA_VERSION;
+}
+
+// ---------------------------------------------------------------------------
+
 export const DEFAULT_SETTINGS: PluginData = {
+	schemaVersion: CURRENT_SCHEMA_VERSION,
 	// Configured provider instances keyed by opaque provider instance ID
 	providerConfig: {},
 	// Persisted metadata for configured provider instances
@@ -2021,6 +2050,8 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		...DEFAULT_SETTINGS,
 		...rawData,
 	};
+
+	runMigrations(mergedData);
 
 	if (!rawData?.agents || Object.keys(rawData.agents).length === 0) {
 		mergedData.agents = { [DEFAULT_AGENT_ID]: createDefaultAgent() };

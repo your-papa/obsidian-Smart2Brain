@@ -18,6 +18,9 @@ import { Logger } from "../utils/logging";
 import { toBase64, toBase64DataUri } from "../utils/attachments";
 import type { ChatAttachment } from "../types/shared";
 
+/** Bump when the ThreadData/CheckpointEntry schema changes. Absent in pre-versioning files → treated as 0. */
+const THREAD_DATA_VERSION = 1;
+
 interface CheckpointEntry {
 	checkpoint: Checkpoint;
 	metadata: CheckpointMetadata;
@@ -25,6 +28,8 @@ interface CheckpointEntry {
 }
 
 interface ThreadData {
+	/** Schema version written on save; absent (0) on files predating versioning. */
+	version?: number;
 	// Metadata (ThreadSnapshot)
 	threadId: string;
 	title?: string;
@@ -148,7 +153,13 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		});
 		// Yield after decompression so JSON.parse doesn't block the same frame.
 		await new Promise<void>((resolve) => setTimeout(resolve, 0));
-		return JSON.parse(decompressed) as ThreadData;
+		const parsed = JSON.parse(decompressed) as ThreadData;
+		if ((parsed.version ?? 0) > THREAD_DATA_VERSION) {
+			Logger.warn(
+				`[ChatManager] Thread file version ${parsed.version} is newer than supported ${THREAD_DATA_VERSION}. Some data may not display correctly.`,
+			);
+		}
+		return parsed;
 	}
 
 	private stripBase64FromChannelValues(channelValues: Record<string, unknown> | undefined): void {
@@ -496,7 +507,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		let savePromise: Promise<void> | null = null;
 		savePromise = (async () => {
 			try {
-				const compressed = gzipSync(JSON.stringify(data));
+				const compressed = gzipSync(JSON.stringify({ ...data, version: THREAD_DATA_VERSION }));
 				await this.adapter.writeBinary(
 					safePath,
 					compressed.buffer.slice(

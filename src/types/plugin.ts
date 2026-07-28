@@ -473,6 +473,9 @@ export type ChatOpenLocation = "tab" | "left" | "right";
 export type PrivacyMode = "private-by-default" | "public-by-default";
 
 export interface PluginData {
+	/** Incremented whenever a breaking schema change is made; drives runMigrations(). Absent on pre-versioning data ⇒ treated as 0. */
+	schemaVersion: number;
+
 	/** All configured provider instances keyed by opaque provider instance ID */
 	providerConfig: Record<string, StoredProviderState>;
 	/** Persisted metadata for configured provider instances */
