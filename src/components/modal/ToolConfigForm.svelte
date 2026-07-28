@@ -115,6 +115,7 @@ let allowMove = $state(
 );
 let diffViewMode = $state<DiffViewMode>(pluginData.diffViewMode);
 let showGuidanceDiff = $state(false);
+let showDescriptionDiff = $state(false);
 
 function renderDiffSide(oldText: string, newText: string, side: "old" | "new"): string {
 	const parts = diffWords(oldText, newText);
@@ -512,16 +513,36 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
     desc="Describe what the tool does. The AI uses this to decide when to use the tool."
     for="tool-config-description"
   >
-    <TextArea
-      id="tool-config-description"
-      class="w-full h-24"
-      value={description}
-      placeholder={defaultConfig.description}
-      onblur={(v) => {
-        description = v;
-        commit();
-      }}
-    />
+    {#if showDescriptionDiff}
+      <div class="tool-guidance-diff-container">
+        <div class="tool-guidance-diff-pane">
+          <div class="tool-guidance-diff-pane-label">Yours</div>
+          <pre class="tool-guidance-diff-text">{@html renderDiffSide(description, defaultConfig.description, "old")}</pre>
+        </div>
+        <div class="tool-guidance-diff-pane">
+          <div class="tool-guidance-diff-pane-label">Default</div>
+          <pre class="tool-guidance-diff-text">{@html renderDiffSide(description, defaultConfig.description, "new")}</pre>
+        </div>
+      </div>
+    {:else}
+      <TextArea
+        id="tool-config-description"
+        class="w-full h-24"
+        value={description}
+        placeholder={defaultConfig.description}
+        onblur={(v) => {
+          description = v;
+          commit();
+        }}
+      />
+    {/if}
+    {#if description !== defaultConfig.description && !READ_CONTENT_DESC_DEFAULTS.has(description)}
+      <div class="tool-guidance-diff-footer">
+        <button type="button" class="tool-guidance-link" onclick={() => (showDescriptionDiff = !showDescriptionDiff)}>
+          {showDescriptionDiff ? "Back to editor" : "Diff with default"}
+        </button>
+      </div>
+    {/if}
   </ModalField>
 
   <ModalField
