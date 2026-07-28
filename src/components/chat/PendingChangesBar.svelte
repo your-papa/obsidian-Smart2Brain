@@ -1,9 +1,11 @@
 <script lang="ts">
 import { Notice } from "obsidian";
+import { firstChangedLine, revealAndScroll } from "../../lib/pendingChangeNavigation";
+import { getPlugin } from "../../stores/state.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { PendingChangeEntry } from "../../types/shared";
-import DiffView from "../ui/DiffView.svelte";
 import { icon } from "../../utils/utils";
+import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 
 interface Props {
 	threadPath: string | null;
@@ -20,11 +22,6 @@ const pendingEntries = $derived.by(() => {
 const pendingCount = $derived(pendingEntries.length);
 
 let isExpanded = $state(false);
-let expandedIds: Record<string, boolean> = $state({});
-
-function toggleExpand(id: string) {
-	expandedIds[id] = !expandedIds[id];
-}
 
 function changeTypeLabel(entry: PendingChangeEntry): string {
 	switch (entry.change.type) {
@@ -101,6 +98,31 @@ async function handleRejectAll() {
 	await store.rejectAll(threadId);
 	new Notice("Rejected all pending changes");
 }
+
+/** Jump to this change's position in the target note (its first changed line).
+ * Only meaningful for updates; create/delete/move fall back to the top of file
+ * and the button is only shown for updates. */
+async function handleJump(entry: PendingChangeEntry) {
+	const opened = await revealAndScroll(getPlugin(), entry.change.path, firstChangedLine(entry.change));
+	if (!opened) new Notice("Could not open the note for this change.");
+}
+
+/** Fire Obsidian's native page-preview hover for this change's note. The Page
+ * Preview core plugin reads modifier keys off the event, so this respects the
+ * user's "require Cmd" setting. The rendered preview shows the note WITH its
+ * in-note pending-change decorations, which the sidebar can't render itself. */
+function previewChange(evt: Event, entry: PendingChangeEntry) {
+	const target = evt.currentTarget;
+	if (!(target instanceof HTMLElement)) return;
+	getPlugin().app.workspace.trigger("hover-link", {
+		event: evt,
+		source: VIEW_TYPE_CHAT,
+		hoverParent: getPlugin(),
+		targetEl: target,
+		linktext: entry.change.path,
+		sourcePath: threadId ?? "",
+	});
+}
 </script>
 
 {#if pendingCount > 0}
@@ -149,14 +171,27 @@ async function handleRejectAll() {
       <div class="pcb-list">
         {#each pendingEntries as entry (entry.id)}
           <div class="pcb-entry">
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div class="pcb-entry-header" onclick={() => toggleExpand(entry.id)}>
+            <div class="pcb-entry-header">
               <div class="pcb-entry-left">
                 <span class="pcb-badge {changeTypeBadgeClass(entry.change.type)}">
                   {changeTypeLabel(entry)}
                 </span>
-                <span class="pcb-path">{changePathLabel(entry)}</span>
+                {#if entry.change.type === "update"}
+                  <!-- svelte-ignore a11y_mouse_events_have_key_events -->
+                  <a
+                    class="internal-link pcb-path"
+                    href={entry.change.path}
+                    data-href={entry.change.path}
+                    onclick={(e) => {
+                      e.preventDefault();
+                      handleJump(entry);
+                    }}
+                    onmouseover={(e) => previewChange(e, entry)}
+                    onfocus={(e) => previewChange(e, entry)}
+                  >{changePathLabel(entry)}</a>
+                {:else}
+                  <span class="pcb-path">{changePathLabel(entry)}</span>
+                {/if}
                 {#if otherThreadCount(entry) > 0}
                   <span
                     class="pcb-cross-thread"
@@ -190,15 +225,8 @@ async function handleRejectAll() {
                 >
                   <div use:icon={"x"} style="--icon-size: 12px"></div>
                 </button>
-                <div class="pcb-chevron" class:pcb-chevron-open={expandedIds[entry.id]}>▸</div>
               </div>
             </div>
-
-            {#if expandedIds[entry.id]}
-              <div class="pcb-diff-body">
-                <DiffView change={entry.change} />
-              </div>
-            {/if}
           </div>
         {/each}
       </div>
@@ -332,14 +360,10 @@ async function handleRejectAll() {
     padding: 4px 10px;
     background: transparent;
     border: none;
-    cursor: pointer;
+    cursor: default;
     color: var(--text-normal);
     font-size: var(--font-ui-smaller);
     text-align: left;
-  }
-
-  .pcb-entry-header:hover {
-    background: var(--background-modifier-hover);
   }
 
   .pcb-entry-left {
@@ -356,6 +380,10 @@ async function handleRejectAll() {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  a.pcb-path {
+    cursor: pointer;
   }
 
   .pcb-cross-thread {
@@ -402,11 +430,5 @@ async function handleRejectAll() {
   .badge-delete {
     background: hsla(var(--color-red-hsl), 0.2);
     color: var(--color-red);
-  }
-
-  .pcb-diff-body {
-    padding: 0 10px 8px;
-    max-height: 300px;
-    overflow: auto;
   }
 </style>

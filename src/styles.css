@@ -580,33 +580,86 @@
 }
 /* Inline diff decorations — word-level (edit view) */
 .s2b-diff-word-removed {
-	background-color: rgba(220, 50, 47, 0.25);
+	background-color: rgba(220, 50, 47, 0.18);
 	border-radius: 2px;
 	padding: 0 1px;
 }
 
 .s2b-diff-word-added {
 	display: inline;
-	background-color: rgba(0, 180, 0, 0.25);
+	background-color: rgba(0, 180, 0, 0.18);
 	border-radius: 2px;
 	padding: 0 1px;
-	font-weight: 600;
 	white-space: pre-wrap;
 }
 
-.s2b-diff-edit-word-container,
-.s2b-diff-edit-two-pane-container {
+/* Editor line-background tints — additive, no document reflow. Applied via
+   Decoration.line to the lines a pending change group covers. */
+.s2b-diff-line-removed {
+	background-color: rgba(220, 50, 47, 0.18);
+}
+
+.s2b-diff-line-added {
+	background-color: rgba(0, 180, 0, 0.18);
+}
+
+/* Neutral tint for removed lines in word-diff mode: marks the source lines the
+   card refers to without the "deleted" (red) connotation. */
+.s2b-diff-line-muted {
+	background-color: var(--background-modifier-hover);
+}
+
+/* Reading-view section tints — additive class on the rendered section. */
+.s2b-diff-section {
+	border-radius: 4px;
+}
+
+.s2b-diff-section-removed {
+	background-color: rgba(220, 50, 47, 0.18);
+}
+
+.s2b-diff-section-added {
+	background-color: rgba(0, 180, 0, 0.18);
+}
+
+/* Word-diff mode already shows old+new inline in the card, so the section's own
+   rendered original is a duplicate — hide it and drop the (now-empty) tint. */
+.s2b-diff-hide-original > :not(.s2b-diff-reading-group) {
+	display: none;
+}
+
+.s2b-diff-hide-original.s2b-diff-section-removed,
+.s2b-diff-hide-original.s2b-diff-section-added {
+	background-color: transparent;
+}
+
+/* The injected review card sits inside the tinted section; give it the normal
+   background so the section highlight only shows under the original text, not
+   under the diff view itself. */
+.s2b-diff-reading-group {
+	background-color: var(--background-primary);
+	border-radius: 4px;
+}
+
+/* The rendered original follows the review card inside the tinted section. Its
+   natural paragraph margin-top would push a full blank line between the new
+   pane and the original — edit mode stacks them flush, so collapse it here to
+   keep the two views consistent (the card's own margin-bottom is the separator). */
+.s2b-diff-section > .s2b-diff-reading-group + * {
+	margin-top: 0;
+}
+
+/* Group wrapper + detail body (both views). */
+.s2b-diff-edit-group,
+.s2b-diff-reading-group {
 	margin: 4px 0;
 }
 
-.s2b-diff-edit-word-preview {
-	padding: 8px 12px;
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 4px;
-	background-color: var(--background-primary-alt);
+.s2b-diff-detail {
+	margin-top: 4px;
 	font-family: var(--font-text);
-	font-size: var(--font-ui-small);
-	line-height: 1.6;
+	font-size: var(--font-text-size);
+	line-height: var(--line-height-normal);
 	white-space: pre-wrap;
 	word-break: break-word;
 }
@@ -640,7 +693,31 @@
 .s2b-diff-actions-label {
 	font-size: var(--font-smaller);
 	color: var(--text-muted);
-	flex: 1;
+	/* Absorb free space so the buttons sit at the right — unless a position
+	   indicator follows the label, in which case the indicator carries the
+	   auto-margin instead (see below) and the two sit together on the left. */
+	margin-right: auto;
+}
+
+/* Position of this change group among the note's pending changes (e.g. "2/3"),
+   shown directly after the "Pending change" label. Stays visible at rest
+   (unlike the hover-only chevrons/toggle) so the user sees where they are at a
+   glance. It takes over the auto-margin so it hugs the label on the left.
+   Matches the label's font-size + line-height so the two text baselines line up
+   in the center-aligned bar (a smaller font floats visibly higher). */
+.s2b-diff-position-indicator {
+	font-size: var(--font-smaller);
+	line-height: 1;
+	color: var(--text-muted);
+	opacity: 0.8;
+	font-variant-numeric: tabular-nums;
+	margin-right: auto;
+}
+
+/* When the indicator is present, the label no longer needs the spacer — drop
+   its auto-margin so the label and indicator stay adjacent (gap only). */
+.s2b-diff-actions-label:has(+ .s2b-diff-position-indicator) {
+	margin-right: 0;
 }
 
 .s2b-diff-accept-btn,
@@ -652,7 +729,11 @@
 	border: 1px solid var(--background-modifier-border);
 }
 
-.s2b-diff-toggle-btn {
+/* Scoped under the bar containers (0,2,0) so `background: none` beats
+   Obsidian's default `button:not(.clickable-icon)` (0,1,1) at rest AND on hover
+   — otherwise the icons show an ugly --interactive-normal background at rest. */
+.s2b-diff-actions-bar .s2b-diff-toggle-btn,
+.s2b-diff-action-bar-widget .s2b-diff-toggle-btn {
 	opacity: 0;
 	transition: opacity 0.15s ease;
 	background: none;
@@ -665,18 +746,40 @@
 	align-items: center;
 }
 
-.s2b-diff-toggle-btn:hover {
+.s2b-diff-actions-bar .s2b-diff-toggle-btn:hover,
+.s2b-diff-action-bar-widget .s2b-diff-toggle-btn:hover {
 	color: var(--text-normal);
-	background-color: var(--background-modifier-hover);
+	background: none;
+}
+
+/* Prev/next pending-change chevrons in the note's diff action bar. Hidden at
+   rest and revealed on hover (like the view-mode toggle) to keep the resting
+   bar clean; the position indicator stays visible so navigation context isn't
+   lost. Scoped under the bar for the same specificity reason as the toggle. */
+.s2b-diff-actions-bar .s2b-diff-nav-btn,
+.s2b-diff-action-bar-widget .s2b-diff-nav-btn {
+	opacity: 0;
+	transition: opacity 0.15s ease;
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: var(--text-muted);
+	padding: 2px;
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+}
+
+.s2b-diff-actions-bar .s2b-diff-nav-btn:hover,
+.s2b-diff-action-bar-widget .s2b-diff-nav-btn:hover {
+	color: var(--text-normal);
+	background: none;
 }
 
 .s2b-diff-actions-bar:hover .s2b-diff-toggle-btn,
-.s2b-diff-action-bar-widget:hover .s2b-diff-toggle-btn {
-	opacity: 1;
-}
-
-.s2b-diff-edit-word-container .s2b-diff-toggle-btn,
-.s2b-diff-edit-two-pane-container .s2b-diff-toggle-btn {
+.s2b-diff-actions-bar:hover .s2b-diff-nav-btn,
+.s2b-diff-action-bar-widget:hover .s2b-diff-toggle-btn,
+.s2b-diff-action-bar-widget:hover .s2b-diff-nav-btn {
 	opacity: 1;
 }
 
@@ -699,16 +802,15 @@
 }
 
 .s2b-reading-diff-word-removed {
-	background-color: rgba(220, 50, 47, 0.25);
+	background-color: rgba(220, 50, 47, 0.18);
 	border-radius: 2px;
 	padding: 0 1px;
 }
 
 .s2b-reading-diff-word-added {
-	background-color: rgba(0, 180, 0, 0.25);
+	background-color: rgba(0, 180, 0, 0.18);
 	border-radius: 2px;
 	padding: 0 1px;
-	font-weight: 600;
 }
 
 /* Two-pane stacked diff (reading view) */
@@ -723,7 +825,7 @@
 
 .s2b-diff-pane-removed,
 .s2b-diff-pane-added {
-	padding: 4px 12px;
+	padding: 0;
 }
 
 .s2b-diff-pane-removed > *:first-child,
@@ -737,12 +839,12 @@
 }
 
 .s2b-diff-pane-removed {
-	background-color: rgba(220, 50, 47, 0.1);
+	background-color: rgba(220, 50, 47, 0.18);
 	border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .s2b-diff-pane-added {
-	background-color: rgba(0, 180, 0, 0.1);
+	background-color: rgba(0, 180, 0, 0.18);
 }
 
 .s2b-diff-two-pane pre {

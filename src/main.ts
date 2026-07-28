@@ -22,6 +22,7 @@ import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingCh
 import { setPlugin } from "./stores/state.svelte";
 import { LexicalSearchService } from "./search/LexicalSearchService";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
+import { navigateToPendingChange } from "./lib/pendingChangeNavigation";
 import { registerChatEmbed } from "./views/chat/chatEmbed";
 import RunningIndicator from "./components/chat/RunningIndicator.svelte";
 import { NoteContextView, VIEW_TYPE_NOTE_CONTEXT } from "./views/note-context/NoteContextView";
@@ -66,6 +67,21 @@ export default class SecondBrainPlugin extends Plugin {
 			return "Add to Chat";
 		}
 		return `Add ${selectedCount} files to Chat`;
+	}
+
+	/** Thread path for pending-change navigation: the focused chat if there is one,
+	 *  else the most-recently-active open chat leaf. Jumping to a change makes the
+	 *  target NOTE the active view, so relying on `getActiveViewOfType(ChatView)`
+	 *  alone would break the second command press — the fallback keeps repeated
+	 *  next/prev working while any chat is open. */
+	private resolveChatThreadIdForNavigation(): string | null {
+		const active = this.app.workspace.getActiveViewOfType(ChatView)?.file?.path;
+		if (active) return active;
+		const chatLeaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
+		const recent = this.app.workspace.getMostRecentLeaf();
+		const preferred = recent && chatLeaves.includes(recent) ? recent : chatLeaves[0];
+		const view = preferred?.view;
+		return view instanceof ChatView ? (view.file?.path ?? null) : null;
 	}
 
 	/** Add rename/delete actions to the right-click menu of a `.chat` file. */
@@ -399,6 +415,36 @@ export default class SecondBrainPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "next-pending-change",
+			name: "Next pending change",
+			icon: "chevron-down",
+			callback: async () => {
+				const threadId = this.resolveChatThreadIdForNavigation();
+				if (!threadId) {
+					new Notice("No chat is currently open");
+					return;
+				}
+				const target = await navigateToPendingChange(this, threadId, "next");
+				if (!target) new Notice("No pending changes in this chat");
+			},
+		});
+
+		this.addCommand({
+			id: "previous-pending-change",
+			name: "Previous pending change",
+			icon: "chevron-up",
+			callback: async () => {
+				const threadId = this.resolveChatThreadIdForNavigation();
+				if (!threadId) {
+					new Notice("No chat is currently open");
+					return;
+				}
+				const target = await navigateToPendingChange(this, threadId, "prev");
+				if (!target) new Notice("No pending changes in this chat");
+			},
+		});
+
 		this.addSettingTab(new SettingsTab(this));
 
 		this.registerEvent(
@@ -581,12 +627,30 @@ export default class SecondBrainPlugin extends Plugin {
 		// Register reading view diff highlighting
 		this.registerMarkdownPostProcessor(createReadingViewDiffPostProcessor(this));
 
-		// Re-render reading views when pending changes update
+		// Re-render reading views when pending changes update. `rerender(true)`
+		// rebuilds the preview from scratch and Obsidian re-asserts its OWN scroll
+		// position several hundred ms later on a large note — so accepting/rejecting
+		// a change would jump the reader away from the spot they were reviewing.
+		// Snapshot each PREVIEW scroller's scrollTop and re-assert it repeatedly past
+		// that late reset (edit mode preserves scroll natively, so it's skipped).
+		// Verified on a 328-line note: without the later re-asserts scrollTop landed
+		// ~1628 after a 3000 scroll; with them it holds at 3000.
 		const refreshReadingViews = () => {
 			for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
 				const view = leaf.view;
-				if (view instanceof MarkdownView) {
-					view.previewMode?.rerender(true);
+				if (!(view instanceof MarkdownView)) continue;
+				const isPreview = view.getMode() === "preview";
+				const scroller = isPreview ? view.contentEl.querySelector<HTMLElement>(".markdown-preview-view") : null;
+				const prevScrollTop = scroller?.scrollTop ?? null;
+				view.previewMode?.rerender(true);
+				if (scroller && prevScrollTop !== null) {
+					const restore = () => {
+						if (scroller.isConnected) scroller.scrollTop = prevScrollTop;
+					};
+					requestAnimationFrame(restore);
+					for (const delay of [50, 100, 200, 350, 500]) {
+						window.setTimeout(restore, delay);
+					}
 				}
 			}
 		};

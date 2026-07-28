@@ -1,8 +1,10 @@
 import type { Change } from "diff";
 import { MarkdownRenderer, setIcon, type MarkdownPostProcessorContext, type Plugin } from "obsidian";
 import { diffLines, diffWords } from "diff";
+import { navigateToPendingChange } from "../lib/pendingChangeNavigation";
 import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
+import { getPlugin } from "../stores/state.svelte";
 import type { DiffViewMode } from "../types/plugin";
 import type { PendingChangeEntry } from "../types/shared";
 
@@ -12,13 +14,43 @@ function countPartLines(value: string): number {
 	return value.replace(/\n$/, "").split("\n").length;
 }
 
+/** Total number of original lines represented by a line diff (removed + unchanged parts). */
+export function countOriginalLines(changes: Change[]): number {
+	let total = 0;
+	for (const part of changes) {
+		if (part.value === "" || part.added) continue;
+		total += countPartLines(part.value);
+	}
+	return total;
+}
+
+/**
+ * The original-content line a PURE INSERTION at `oldLine` anchors to, for the
+ * purpose of matching it to a rendered section.
+ *
+ * A pure insertion removes no original line, so it has no natural home. We anchor
+ * it to the line NOW FOLLOWING the insertion point (`oldLine`) when one exists —
+ * that's the section that visually follows the inserted text. Only at end-of-file
+ * (no following line) do we fall back to the line BEFORE it (`oldLine - 1`).
+ *
+ * This returns a SINGLE line on purpose: an earlier "match both oldLine-1 AND
+ * oldLine" heuristic double-claimed an insertion that sat exactly on the boundary
+ * between two rendered sections (the before-line owned by section A, the
+ * following line by section B) — producing two review cards for one change group.
+ * Anchoring to exactly one line keeps the change owned by exactly one section.
+ */
+export function insertionAnchorLine(oldLine: number, totalOriginalLines: number): number {
+	return oldLine < totalOriginalLines ? oldLine : Math.max(0, oldLine - 1);
+}
+
 /**
  * Computes which lines in the *original* content are removed or modified.
  * Returns a Set of 0-based line numbers that are affected.
  */
-function computeOriginalAffectedLines(originalContent: string, newContent: string): Set<number> {
+export function computeOriginalAffectedLines(originalContent: string, newContent: string): Set<number> {
 	const affected = new Set<number>();
 	const changes = diffLines(originalContent, newContent);
+	const totalOriginalLines = countOriginalLines(changes);
 	let oldLine = 0; // 0-based
 
 	for (const part of changes) {
@@ -31,8 +63,10 @@ function computeOriginalAffectedLines(originalContent: string, newContent: strin
 			}
 			oldLine += lines;
 		} else if (part.added) {
-			const markerLine = Math.max(0, oldLine - 1);
-			affected.add(markerLine);
+			// A pure insertion removes no original line. Anchor it to exactly ONE
+			// line (the following line, or the line before at EOF) so a single
+			// rendered section owns it — see insertionAnchorLine.
+			affected.add(insertionAnchorLine(oldLine, totalOriginalLines));
 		} else {
 			oldLine += lines;
 		}
@@ -172,6 +206,7 @@ function extractSectionTexts(changes: Change[], lineStart: number, lineEnd: numb
 		oldLine: 0,
 		seenChange: false,
 	};
+	const totalOriginalLines = countOriginalLines(changes);
 
 	for (const part of changes) {
 		if (part.value === "") continue;
@@ -180,8 +215,12 @@ function extractSectionTexts(changes: Change[], lineStart: number, lineEnd: numb
 		if (part.removed) {
 			processRemovedPart(partLines, lineStart, lineEnd, state);
 		} else if (part.added) {
-			const insertionPoint = Math.max(0, state.oldLine - 1);
-			if (insertionPoint >= lineStart && insertionPoint <= lineEnd) {
+			// Match the insertion to the section that owns its single anchor line
+			// (the following line, or the line before at EOF) — see
+			// insertionAnchorLine. Mirrors computeOriginalAffectedLines /
+			// checkPartForSection so all three agree on which section owns it.
+			const anchor = insertionAnchorLine(state.oldLine, totalOriginalLines);
+			if (anchor >= lineStart && anchor <= lineEnd) {
 				state.seenChange = true;
 				state.sectionNew += part.value;
 			}
@@ -198,74 +237,57 @@ function extractSectionTexts(changes: Change[], lineStart: number, lineEnd: numb
 	};
 }
 
-/** Append unchanged text as a div to a parent element. */
-function appendContextText(parent: HTMLElement, text: string, className: string): void {
-	if (!text) return;
-	const div = document.createElement("div");
-	div.className = className;
-	div.textContent = text.trimEnd();
-	parent.appendChild(div);
-}
-
 /**
- * Extract section-relevant text from the line-level diff, then apply
- * word-level diffing. Unchanged prefix/suffix lines within the section
- * are preserved as separate elements so the action bar and diff content
- * only cover the actual change.
+ * Render a word-level diff of the changed section into a detail container.
+ * Additive — the caller owns `container`; Obsidian's rendered markdown is
+ * never touched.
  */
-function applyInlineWordDiff(el: HTMLElement, changes: Change[], lineStart: number, lineEnd: number): void {
-	const { prefixText, sectionOld, sectionNew, suffixText } = extractSectionTexts(changes, lineStart, lineEnd);
+function applyInlineWordDiff(container: HTMLElement, changes: Change[], lineStart: number, lineEnd: number): void {
+	const { sectionOld, sectionNew } = extractSectionTexts(changes, lineStart, lineEnd);
 	if (sectionOld === sectionNew) return;
-
-	el.empty();
-	appendContextText(el, prefixText, "s2b-diff-context");
 
 	const diffContent = document.createElement("div");
 	diffContent.className = "s2b-diff-content";
 	renderWordDiff(diffContent, sectionOld, sectionNew);
-	el.appendChild(diffContent);
-
-	appendContextText(el, suffixText, "s2b-diff-context");
+	container.appendChild(diffContent);
 }
 
 /**
- * Render a two-pane stacked diff: the original section (red tint) on top,
- * the new section (green tint) below, both rendered as full markdown.
+ * Render the "new content" preview into a detail container: the proposed section
+ * text rendered as full markdown into a pane we own (green tint). The original
+ * text is deliberately NOT shown — Obsidian's rendered markdown of the current
+ * (original) note is already visible directly beneath this decoration, so a
+ * removed pane would just duplicate it. Additive — Obsidian's rendered markdown
+ * is never touched.
  */
 async function applyTwoPaneDiff(
-	el: HTMLElement,
+	container: HTMLElement,
 	changes: Change[],
 	lineStart: number,
 	lineEnd: number,
 	sourcePath: string,
 	plugin: Plugin,
+	isCurrent: () => boolean,
 ): Promise<void> {
-	const { prefixText, sectionOld, sectionNew, suffixText } = extractSectionTexts(changes, lineStart, lineEnd);
+	const { sectionOld, sectionNew } = extractSectionTexts(changes, lineStart, lineEnd);
 	if (sectionOld === sectionNew) return;
-
-	el.empty();
-	appendContextText(el, prefixText, "s2b-diff-context");
 
 	const diffContent = document.createElement("div");
 	diffContent.className = "s2b-diff-content";
 
-	const container = document.createElement("div");
-	container.className = "s2b-diff-two-pane";
-
-	const oldPane = document.createElement("div");
-	oldPane.className = "s2b-diff-pane-removed";
-	await MarkdownRenderer.render(plugin.app, sectionOld.trimEnd(), oldPane, sourcePath, plugin);
-	container.appendChild(oldPane);
+	const paneWrap = document.createElement("div");
+	paneWrap.className = "s2b-diff-two-pane";
 
 	const newPane = document.createElement("div");
 	newPane.className = "s2b-diff-pane-added";
 	await MarkdownRenderer.render(plugin.app, sectionNew.trimEnd(), newPane, sourcePath, plugin);
-	container.appendChild(newPane);
+	// A newer render may have superseded this one while we awaited — bail so we
+	// don't append a stale pane into a container the newer render already owns.
+	if (!isCurrent()) return;
+	paneWrap.appendChild(newPane);
 
-	diffContent.appendChild(container);
-	el.appendChild(diffContent);
-
-	appendContextText(el, suffixText, "s2b-diff-context");
+	diffContent.appendChild(paneWrap);
+	container.appendChild(diffContent);
 }
 
 /** Context needed to re-render a diff section in a different mode. */
@@ -277,19 +299,112 @@ interface DiffRenderContext {
 	plugin: Plugin;
 }
 
+/**
+ * Monotonic render token per detail container. `applyTwoPaneDiff` awaits
+ * `MarkdownRenderer.render`, so a fast mode flip (two-pane → word-diff, or two
+ * rapid two-pane renders) can let an EARLIER async render append its pane AFTER a
+ * newer `renderDetailInto` already cleared and re-filled the container — the card
+ * then shows content from both modes. Each `renderDetailInto` bumps this token;
+ * the async path only appends when its captured token is still current.
+ */
+const renderTokens = new WeakMap<HTMLElement, number>();
+
+/** Render the diff detail (word-diff or two-pane) into a detail container. */
+function renderDetailInto(container: HTMLElement, ctx: DiffRenderContext, mode: DiffViewMode): void {
+	const token = (renderTokens.get(container) ?? 0) + 1;
+	renderTokens.set(container, token);
+	container.empty();
+	if (mode === "word-diff") {
+		applyInlineWordDiff(container, ctx.changes, ctx.origLineStart, ctx.origLineEnd);
+	} else {
+		applyTwoPaneDiff(
+			container,
+			ctx.changes,
+			ctx.origLineStart,
+			ctx.origLineEnd,
+			ctx.filePath,
+			ctx.plugin,
+			() => renderTokens.get(container) === token,
+		).catch(() => {
+			// Only fall back if this render is still the current one — a superseded
+			// render must not repaint the container the newer render owns.
+			if (renderTokens.get(container) !== token) return;
+			applyInlineWordDiff(container, ctx.changes, ctx.origLineStart, ctx.origLineEnd);
+		});
+	}
+}
+
+/**
+ * Build the action bar + always-shown detail body for a reading-view change
+ * group. Additive: returns a fragment the caller prepends to the section; it
+ * never touches Obsidian's rendered markdown. The diff detail is always rendered
+ * (no collapse); the toggle switches word-diff ↔ two-pane in place.
+ */
 function createReadingDiffActionBar(
 	entryId: string,
 	groupIndex: number,
-	sectionEl: HTMLElement,
+	groupTotal: number,
 	renderCtx: DiffRenderContext,
 ): HTMLElement {
+	const wrap = document.createElement("div");
+	wrap.className = "s2b-diff-reading-group";
+
 	const bar = document.createElement("div");
 	bar.className = "s2b-diff-actions-bar";
+	wrap.appendChild(bar);
+
+	const detail = document.createElement("div");
+	detail.className = "s2b-diff-detail";
+	wrap.appendChild(detail);
+
+	const renderDetail = () => {
+		let mode: DiffViewMode = "word-diff";
+		try {
+			mode = getData().diffViewMode;
+		} catch {
+			/* data store not ready */
+		}
+		renderDetailInto(detail, renderCtx, mode);
+	};
 
 	const label = document.createElement("span");
 	label.className = "s2b-diff-actions-label";
 	label.textContent = "Pending change";
 	bar.appendChild(label);
+
+	// Position among this note's pending change groups (e.g. "2/3"). Only shown
+	// when there's more than one — mirrors createEditActionBar so both views match.
+	if (groupTotal > 1) {
+		const position = document.createElement("span");
+		position.className = "s2b-diff-position-indicator";
+		position.textContent = `${groupIndex + 1}/${groupTotal}`;
+		bar.appendChild(position);
+	}
+
+	// Prev/next chevrons: step through this chat thread's pending changes across
+	// files, reusing the SAME shared cursor as the edit-mode bar, the chat-bar
+	// arrows, and the palette commands. Mirrors createEditActionBar in
+	// inlineDiffExtension.ts (reading + edit views have parallel action bars).
+	const makeNavBtn = (iconName: string, ariaLabel: string, direction: "next" | "prev"): HTMLButtonElement => {
+		const btn = document.createElement("button");
+		btn.className = "s2b-diff-nav-btn";
+		btn.setAttribute("aria-label", ariaLabel);
+		setIcon(btn, iconName);
+		btn.addEventListener("click", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			try {
+				const entry = getPendingChangesStore().getEntry(entryId);
+				if (!entry) return;
+				void navigateToPendingChange(getPlugin(), entry.threadId, direction, { entryId, groupIndex });
+			} catch {
+				/* store/plugin not initialized */
+			}
+		});
+		return btn;
+	};
+	bar.appendChild(makeNavBtn("chevron-up", "Previous pending change", "prev"));
+	bar.appendChild(makeNavBtn("chevron-down", "Next pending change", "next"));
 
 	// Toggle view mode icon (visible on hover via CSS)
 	const toggleBtn = document.createElement("button");
@@ -311,7 +426,12 @@ function createReadingDiffActionBar(
 		} catch {
 			/* data store not initialized */
 		}
-		document.dispatchEvent(new CustomEvent("s2b-pending-changes-updated"));
+		// A view-mode flip is NOT a pending-changes mutation — dispatch the
+		// dedicated mode event so only the in-place re-render paths react. Firing
+		// s2b-pending-changes-updated here would trigger main.ts's destructive
+		// previewMode.rerender(true), which races (and loses to) the async
+		// two-pane render and tears down the review card.
+		document.dispatchEvent(new CustomEvent("s2b-diff-mode-changed"));
 	});
 	bar.appendChild(toggleBtn);
 
@@ -320,6 +440,7 @@ function createReadingDiffActionBar(
 	acceptBtn.textContent = "Accept";
 	acceptBtn.addEventListener("click", (e) => {
 		e.preventDefault();
+		e.stopPropagation();
 		try {
 			const store = getPendingChangesStore();
 			void store.acceptChangeGroup(entryId, groupIndex);
@@ -334,6 +455,7 @@ function createReadingDiffActionBar(
 	rejectBtn.textContent = "Reject";
 	rejectBtn.addEventListener("click", (e) => {
 		e.preventDefault();
+		e.stopPropagation();
 		try {
 			const store = getPendingChangesStore();
 			store.rejectChangeGroup(entryId, groupIndex);
@@ -343,49 +465,11 @@ function createReadingDiffActionBar(
 	});
 	bar.appendChild(rejectBtn);
 
-	return bar;
-}
+	// The diff detail is always shown (no collapse) — render it now. It survives
+	// store-triggered section re-renders via the same call path.
+	renderDetail();
 
-/** Re-render only the diff content of a section element, preserving the action bar and context. */
-function rerenderDiffContent(el: HTMLElement, ctx: DiffRenderContext, mode: DiffViewMode): void {
-	// Remove only the diff content container — keep action bar and context text
-	const oldDiffContent = el.querySelector(".s2b-diff-content");
-	if (!oldDiffContent) return;
-	const insertBefore = oldDiffContent.nextSibling;
-	oldDiffContent.remove();
-
-	const { sectionOld, sectionNew } = extractSectionTexts(ctx.changes, ctx.origLineStart, ctx.origLineEnd);
-	if (sectionOld === sectionNew) return;
-
-	const diffContent = document.createElement("div");
-	diffContent.className = "s2b-diff-content";
-
-	if (mode === "word-diff") {
-		renderWordDiff(diffContent, sectionOld, sectionNew);
-	} else {
-		const container = document.createElement("div");
-		container.className = "s2b-diff-two-pane";
-
-		const oldPane = document.createElement("div");
-		oldPane.className = "s2b-diff-pane-removed";
-		const newPane = document.createElement("div");
-		newPane.className = "s2b-diff-pane-added";
-
-		container.appendChild(oldPane);
-		container.appendChild(newPane);
-		diffContent.appendChild(container);
-
-		void Promise.all([
-			MarkdownRenderer.render(ctx.plugin.app, sectionOld.trimEnd(), oldPane, ctx.filePath, ctx.plugin),
-			MarkdownRenderer.render(ctx.plugin.app, sectionNew.trimEnd(), newPane, ctx.filePath, ctx.plugin),
-		]);
-	}
-
-	if (insertBefore) {
-		insertBefore.before(diffContent);
-	} else {
-		el.appendChild(diffContent);
-	}
+	return wrap;
 }
 
 /**
@@ -407,14 +491,20 @@ function checkPartForSection(
 	lineCount: number,
 	sectionStart: number,
 	sectionEnd: number,
+	totalOriginalLines: number,
 ): number {
 	if (part.removed) {
 		if (rangeOverlapsSection(oldLine, lineCount, sectionStart, sectionEnd)) {
 			return groupIndex;
 		}
 	} else if (part.added) {
-		const markerLine = Math.max(0, oldLine - 1);
-		if (markerLine >= sectionStart && markerLine <= sectionEnd) return groupIndex;
+		// Mirror computeOriginalAffectedLines: match the insertion's single anchor
+		// line (following line, or line before at EOF) so group-index detection
+		// stays consistent with the affected set and only one section claims it.
+		const anchor = insertionAnchorLine(oldLine, totalOriginalLines);
+		if (anchor >= sectionStart && anchor <= sectionEnd) {
+			return groupIndex;
+		}
 	}
 	return -1;
 }
@@ -427,6 +517,7 @@ function computeGroupIndexForSection(changes: Change[], sectionLineStart: number
 	let oldLine = 0;
 	let groupIndex = -1;
 	let inGroup = false;
+	const totalOriginalLines = countOriginalLines(changes);
 
 	for (const part of changes) {
 		if (part.value === "") continue;
@@ -444,6 +535,7 @@ function computeGroupIndexForSection(changes: Change[], sectionLineStart: number
 				partLineCount,
 				sectionLineStart,
 				sectionLineEnd,
+				totalOriginalLines,
 			);
 			if (result >= 0) return result;
 			if (part.removed) oldLine += partLineCount;
@@ -456,29 +548,27 @@ function computeGroupIndexForSection(changes: Change[], sectionLineStart: number
 	return -1;
 }
 
-/** Apply the configured diff visualization to an affected section. */
-function applyDiff(
-	el: HTMLElement,
-	changes: Change[],
-	origLineStart: number,
-	origLineEnd: number,
-	filePath: string,
-	plugin: Plugin,
-): void {
-	let mode: DiffViewMode = "word-diff";
-	try {
-		mode = getData().diffViewMode;
-	} catch {
-		// Data store not ready yet — fall back to word-diff
+/**
+ * Total number of change groups in a line diff — a group is a contiguous run of
+ * removed/added parts ended by an unchanged part. Mirrors the group-walking in
+ * {@link computeGroupIndexForSection} (minus the per-section check) so the
+ * "N/total" indicator's denominator matches the indices that function returns.
+ */
+function countGroups(changes: Change[]): number {
+	let total = 0;
+	let inGroup = false;
+	for (const part of changes) {
+		if (part.value === "") continue;
+		if (part.removed || part.added) {
+			if (!inGroup) {
+				total++;
+				inGroup = true;
+			}
+		} else {
+			inGroup = false;
+		}
 	}
-	if (mode === "word-diff") {
-		applyInlineWordDiff(el, changes, origLineStart, origLineEnd);
-	} else {
-		applyTwoPaneDiff(el, changes, origLineStart, origLineEnd, filePath, plugin).catch(() => {
-			// Two-pane rendering failed — fall back to word-diff
-			applyInlineWordDiff(el, changes, origLineStart, origLineEnd);
-		});
-	}
+	return total;
 }
 
 /** Check if a section overlaps affected lines and return true if it does. */
@@ -489,8 +579,48 @@ function sectionHasAffectedLine(affectedLines: Set<number>, origLineStart: numbe
 	return false;
 }
 
+/** Whether the changed section has any removed lines (vs. a pure insertion). */
+function sectionHasRemoval(changes: Change[], lineStart: number, lineEnd: number): boolean {
+	const { sectionOld } = extractSectionTexts(changes, lineStart, lineEnd);
+	return sectionOld.trim().length > 0;
+}
+
 /**
- * Core logic for processing a section element for diff highlighting.
+ * Strip any diff decoration this processor previously applied to a section
+ * element. Needed because the processor is additive and Obsidian reuses section
+ * DOM nodes across `rerender(true)` — without this a tint/review bar would
+ * linger after the pending change is accepted/rejected or the section stops
+ * overlapping a change.
+ */
+function clearSectionDecoration(el: HTMLElement): void {
+	el.classList.remove(
+		"s2b-diff-section",
+		"s2b-diff-section-removed",
+		"s2b-diff-section-added",
+		"s2b-diff-hide-original",
+	);
+	el.querySelector(":scope > .s2b-diff-reading-group")?.remove();
+}
+
+/**
+ * In word-diff mode the detail already shows the old (red) and new (green) text
+ * inline, so the section's own rendered original is a duplicate — hide it (and
+ * suppress the section tint, which would otherwise be an empty red band). In
+ * two-pane mode the original stays visible beneath the new-content pane.
+ *
+ * Only applies when the change REMOVED original lines. For a PURE INSERTION the
+ * section's rendered content is unchanged (not a duplicate of anything in the
+ * card), so hiding it would wrongly blank out a legitimate paragraph.
+ */
+function applyWordDiffOriginalVisibility(el: HTMLElement, mode: DiffViewMode, hasRemoval: boolean): void {
+	el.classList.toggle("s2b-diff-hide-original", hasRemoval && mode === "word-diff");
+}
+
+/**
+ * Core logic for decorating a rendered section that overlaps a pending change.
+ * Purely ADDITIVE — it tints the section and prepends a collapsible review bar,
+ * but never calls `el.empty()` or replaces Obsidian's rendered markdown, so it
+ * does not clash with other plugins' post-processors.
  */
 function processSection(
 	el: HTMLElement,
@@ -511,40 +641,80 @@ function processSection(
 	const origLineEnd = mapLine(sectionInfo.lineEnd);
 
 	if (origLineStart === null || origLineEnd === null) return;
-	if (!sectionHasAffectedLine(affectedLines, origLineStart, origLineEnd)) return;
-
-	applyDiff(el, changes, origLineStart, origLineEnd, filePath, plugin);
-
-	if (!el.querySelector(".s2b-diff-actions-bar")) {
-		const groupIndex = computeGroupIndexForSection(changes, origLineStart, origLineEnd);
-		if (groupIndex === -1) return;
-		const renderCtx: DiffRenderContext = { changes, origLineStart, origLineEnd, filePath, plugin };
-		const actionBar = createReadingDiffActionBar(entry.id, groupIndex, el, renderCtx);
-		const diffContent = el.querySelector(".s2b-diff-content");
-		if (diffContent) {
-			diffContent.before(actionBar);
-		} else {
-			el.insertBefore(actionBar, el.firstChild);
-		}
-
-		// Sync with global mode changes (e.g. toggled from edit view or another section)
-		const syncHandler = () => {
-			if (!el.isConnected) {
-				document.removeEventListener("s2b-pending-changes-updated", syncHandler);
-				return;
-			}
-			let mode: DiffViewMode = "word-diff";
-			try {
-				mode = getData().diffViewMode;
-			} catch {
-				/* */
-			}
-			const toggleBtn = el.querySelector<HTMLElement>(".s2b-diff-toggle-btn");
-			if (toggleBtn) setIcon(toggleBtn, mode === "word-diff" ? "columns-2" : "file-diff");
-			rerenderDiffContent(el, renderCtx, mode);
-		};
-		document.addEventListener("s2b-pending-changes-updated", syncHandler);
+	if (!sectionHasAffectedLine(affectedLines, origLineStart, origLineEnd)) {
+		// This section no longer overlaps the change (e.g. content shifted after
+		// an accept on a reused DOM node) — clear any stale decoration.
+		clearSectionDecoration(el);
+		return;
 	}
+
+	// Idempotency: skip only if OUR review card is still present. Checking the
+	// tint CLASS here would be wrong — Obsidian reuses the section DOM node across
+	// scroll-triggered re-renders and regenerates its inner content, which wipes
+	// the `.s2b-diff-reading-group` bar while our added class survives. Guarding on
+	// the class then early-returns and never re-inserts the bar, leaving a tinted
+	// section with no Accept/Reject/nav controls (the "reading-mode review is
+	// broken after scrolling" bug). Guard on the bar's presence instead so a
+	// stripped section gets its bar rebuilt.
+	if (el.querySelector(":scope > .s2b-diff-reading-group")) {
+		return;
+	}
+
+	// Additive tint on the rendered section. Only tint when the change REMOVES
+	// original lines — those rendered lines are the "before" the card refers to.
+	// A PURE INSERTION changes no original line (the new text lives in the review
+	// card), so tinting the section green would falsely paint an unchanged
+	// paragraph as "added" — and on a long wrapped paragraph the green bleeds
+	// across the whole block. Mark it only as a diff section (for lifecycle
+	// clearing) without an add/remove color.
+	el.classList.add("s2b-diff-section");
+	const hasRemoval = sectionHasRemoval(changes, origLineStart, origLineEnd);
+	if (hasRemoval) {
+		el.classList.add("s2b-diff-section-removed");
+	}
+
+	const groupIndex = computeGroupIndexForSection(changes, origLineStart, origLineEnd);
+	if (groupIndex === -1) return;
+	const renderCtx: DiffRenderContext = { changes, origLineStart, origLineEnd, filePath, plugin };
+	const groupEl = createReadingDiffActionBar(entry.id, groupIndex, countGroups(changes), renderCtx);
+	el.insertBefore(groupEl, el.firstChild);
+
+	// Hide the (duplicated) original when the initial mode is word-diff.
+	let initialMode: DiffViewMode = "word-diff";
+	try {
+		initialMode = getData().diffViewMode;
+	} catch {
+		/* data store not ready */
+	}
+	applyWordDiffOriginalVisibility(el, initialMode, hasRemoval);
+
+	// Sync the toggle icon + expanded detail with global mode changes (e.g.
+	// toggled from this or another section, or the editor). Only re-renders our
+	// detail subtree in place — never the section. Listens to the dedicated
+	// mode event (fired by the toggle) as well as the pending-changes event (so
+	// the icon stays correct after external mutations).
+	const syncHandler = () => {
+		if (!el.isConnected) {
+			document.removeEventListener("s2b-pending-changes-updated", syncHandler);
+			document.removeEventListener("s2b-diff-mode-changed", syncHandler);
+			return;
+		}
+		let mode: DiffViewMode = "word-diff";
+		try {
+			mode = getData().diffViewMode;
+		} catch {
+			/* */
+		}
+		const toggleBtn = groupEl.querySelector<HTMLElement>(".s2b-diff-toggle-btn");
+		if (toggleBtn) setIcon(toggleBtn, mode === "word-diff" ? "columns-2" : "file-diff");
+		applyWordDiffOriginalVisibility(el, mode, hasRemoval);
+		const detail = groupEl.querySelector<HTMLElement>(":scope > .s2b-diff-detail");
+		if (detail) {
+			renderDetailInto(detail, renderCtx, mode);
+		}
+	};
+	document.addEventListener("s2b-pending-changes-updated", syncHandler);
+	document.addEventListener("s2b-diff-mode-changed", syncHandler);
 }
 
 /**
@@ -564,7 +734,12 @@ export function createReadingViewDiffPostProcessor(plugin: Plugin) {
 		}
 
 		const pendingUpdates = store.getPendingUpdatesForPath(filePath);
-		if (pendingUpdates.length === 0) return;
+		if (pendingUpdates.length === 0) {
+			// No pending change for this file — strip any decoration left on a
+			// reused section node from a previous render.
+			clearSectionDecoration(el);
+			return;
+		}
 
 		const entry = pendingUpdates.at(-1);
 		if (!entry) return;

@@ -1,16 +1,11 @@
-import {
-	type DecorationSet,
-	Decoration,
-	type EditorView,
-	ViewPlugin,
-	type ViewUpdate,
-	WidgetType,
-} from "@codemirror/view";
-import { StateEffect } from "@codemirror/state";
+import { type DecorationSet, Decoration, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
+import { type EditorState, type Extension, StateEffect, StateField } from "@codemirror/state";
 import { diffLines, diffWords } from "diff";
-import { editorInfoField, setIcon } from "obsidian";
+import { type App, Component, MarkdownRenderer, editorInfoField, setIcon } from "obsidian";
+import { navigateToPendingChange } from "../lib/pendingChangeNavigation";
 import { getData } from "../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
+import { getPlugin } from "../stores/state.svelte";
 import type { PendingChangeEntry } from "../types/shared";
 import type { DiffViewMode } from "../types/plugin";
 
@@ -18,9 +13,11 @@ import type { DiffViewMode } from "../types/plugin";
 const refreshPendingChanges = StateEffect.define();
 
 /**
- * Create an action bar element with toggle, accept, and reject buttons for edit view.
+ * Create the compact action bar shown at the head of a pending change group:
+ * the "Pending change" label, a view-mode toggle, and Accept / Reject buttons.
+ * The diff detail below is always shown (no collapse).
  */
-function createEditActionBar(entryId: string, groupIndex: number): HTMLElement {
+function createEditActionBar(entryId: string, groupIndex: number, groupTotal: number): HTMLElement {
 	const bar = document.createElement("div");
 	bar.className = "s2b-diff-action-bar-widget";
 
@@ -28,6 +25,46 @@ function createEditActionBar(entryId: string, groupIndex: number): HTMLElement {
 	label.className = "s2b-diff-actions-label";
 	label.textContent = "Pending change";
 	bar.appendChild(label);
+
+	// Position among this note's pending change groups (e.g. "2/3"). Only shown
+	// when there's more than one — a lone change needs no counter. The note's
+	// inline diff renders a single entry's groups, so groupIndex/groupTotal is a
+	// per-file position (see buildDecorations).
+	if (groupTotal > 1) {
+		const position = document.createElement("span");
+		position.className = "s2b-diff-position-indicator";
+		position.textContent = `${groupIndex + 1}/${groupTotal}`;
+		bar.appendChild(position);
+	}
+
+	// Prev/next chevrons: step through this chat thread's pending changes across
+	// files, reusing the SAME shared cursor as the chat-bar arrows and palette
+	// commands so all three entry points stay in sync. The entry's threadId is
+	// resolved lazily on click (the bar only knows the entryId).
+	const makeNavBtn = (iconName: string, ariaLabel: string, direction: "next" | "prev"): HTMLButtonElement => {
+		const btn = document.createElement("button");
+		btn.className = "s2b-diff-nav-btn";
+		btn.setAttribute("aria-label", ariaLabel);
+		setIcon(btn, iconName);
+		btn.addEventListener("click", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			try {
+				const entry = getPendingChangesStore().getEntry(entryId);
+				if (!entry) return;
+				// Pass this bar's own stop as the origin so the chevron steps
+				// relative to the change it's attached to — not the thread's shared
+				// cursor, which every bar shares (all bars would otherwise move in
+				// lockstep from the same global position).
+				void navigateToPendingChange(getPlugin(), entry.threadId, direction, { entryId, groupIndex });
+			} catch {
+				/* store/plugin not initialized */
+			}
+		});
+		return btn;
+	};
+	bar.appendChild(makeNavBtn("chevron-up", "Previous pending change", "prev"));
+	bar.appendChild(makeNavBtn("chevron-down", "Next pending change", "next"));
 
 	// Toggle view mode icon (visible on hover via CSS)
 	const toggleBtn = document.createElement("button");
@@ -49,7 +86,11 @@ function createEditActionBar(entryId: string, groupIndex: number): HTMLElement {
 		} catch {
 			/* data store not initialized */
 		}
-		document.dispatchEvent(new CustomEvent("s2b-pending-changes-updated"));
+		// A view-mode flip is not a pending-changes mutation — use the dedicated
+		// mode event so it doesn't trigger the reading views' destructive
+		// rerender (see readingViewDiffProcessor). The editor field rebuilds its
+		// decorations synchronously in response either way.
+		document.dispatchEvent(new CustomEvent("s2b-diff-mode-changed"));
 	});
 	bar.appendChild(toggleBtn);
 
@@ -102,96 +143,119 @@ function appendWordDiffContent(container: HTMLElement, removedText: string, adde
 }
 
 /**
- * Block widget that shows a word-level diff preview with an action bar.
+ * Render the diff detail body (word-diff or two-pane) for a change group. In
+ * two-pane mode only the NEW content is shown, rendered as full markdown (the
+ * original is already visible + red-tinted in the document). `app`/`sourcePath`
+ * are needed for markdown rendering; a transient {@link Component} owns the
+ * render lifecycle and is unloaded when the widget's DOM is torn down.
  */
-class WordDiffGroupWidget extends WidgetType {
-	constructor(
-		readonly entryId: string,
-		readonly groupIndex: number,
-		readonly removedText: string,
-		readonly addedText: string,
-	) {
-		super();
-	}
+function buildDetailBody(
+	mode: DiffViewMode,
+	removedText: string,
+	addedText: string,
+	app: App | null,
+	sourcePath: string,
+	onCleanup: (fn: () => void) => void,
+): HTMLElement {
+	const body = document.createElement("div");
+	body.className = "s2b-diff-detail";
 
-	toDOM(): HTMLElement {
-		const container = document.createElement("div");
-		container.className = "s2b-diff-edit-word-container";
-
-		container.appendChild(createEditActionBar(this.entryId, this.groupIndex));
-
-		const preview = document.createElement("div");
-		preview.className = "s2b-diff-edit-word-preview";
-		appendWordDiffContent(preview, this.removedText, this.addedText);
-		container.appendChild(preview);
-
-		return container;
-	}
-
-	eq(other: WordDiffGroupWidget): boolean {
-		return (
-			this.entryId === other.entryId &&
-			this.groupIndex === other.groupIndex &&
-			this.removedText === other.removedText &&
-			this.addedText === other.addedText
-		);
-	}
-
-	ignoreEvent(): boolean {
-		return false;
-	}
-}
-
-/**
- * Block widget that shows a two-pane diff (removed/added) with an action bar (two-pane mode).
- */
-class TwoPaneGroupWidget extends WidgetType {
-	constructor(
-		readonly entryId: string,
-		readonly groupIndex: number,
-		readonly removedText: string,
-		readonly addedText: string,
-	) {
-		super();
-	}
-
-	toDOM(): HTMLElement {
-		const container = document.createElement("div");
-		container.className = "s2b-diff-edit-two-pane-container";
-
-		container.appendChild(createEditActionBar(this.entryId, this.groupIndex));
-
+	if (mode === "two-pane") {
 		const panes = document.createElement("div");
 		panes.className = "s2b-diff-two-pane";
 
-		if (this.removedText) {
-			const removed = document.createElement("div");
-			removed.className = "s2b-diff-pane-removed";
-			const pre = document.createElement("pre");
-			pre.textContent = this.removedText;
-			removed.appendChild(pre);
-			panes.appendChild(removed);
-		}
-
-		if (this.addedText) {
+		// Only the new content is shown. The original lines are already visible
+		// (and tinted red) in the document above/around this widget, so a removed
+		// pane would just duplicate them.
+		if (addedText) {
 			const added = document.createElement("div");
 			added.className = "s2b-diff-pane-added";
-			const pre = document.createElement("pre");
-			pre.textContent = this.addedText;
-			added.appendChild(pre);
+			if (app) {
+				// Render markdown so the pane matches the reading-view two-pane
+				// (headings/bold/lists formatted, not raw source).
+				const component = new Component();
+				component.load();
+				onCleanup(() => component.unload());
+				void MarkdownRenderer.render(app, addedText.trimEnd(), added, sourcePath, component);
+			} else {
+				const pre = document.createElement("pre");
+				pre.textContent = addedText;
+				added.appendChild(pre);
+			}
 			panes.appendChild(added);
 		}
 
-		container.appendChild(panes);
+		body.appendChild(panes);
+	} else {
+		const preview = document.createElement("div");
+		preview.className = "s2b-diff-edit-word-preview";
+		appendWordDiffContent(preview, removedText, addedText);
+		body.appendChild(preview);
+	}
+
+	return body;
+}
+
+/**
+ * Lightweight block widget for a single change group: a compact action bar
+ * (accept / reject / view-mode toggle) plus the always-shown word-diff /
+ * two-pane detail. The removed/added lines are also conveyed by the line tints
+ * in the document. This replaces the old always-on full-preview block widgets,
+ * which reflowed the editor for every group.
+ */
+class PendingGroupWidget extends WidgetType {
+	/** Markdown-render cleanups for the currently-shown detail body, so a
+	 * re-render or widget teardown unloads its Components. */
+	private detailCleanups: Array<() => void> = [];
+
+	constructor(
+		readonly entryId: string,
+		readonly groupIndex: number,
+		readonly groupTotal: number,
+		readonly removedText: string,
+		readonly addedText: string,
+		readonly mode: DiffViewMode,
+		readonly app: App | null,
+		readonly sourcePath: string,
+	) {
+		super();
+	}
+
+	private runDetailCleanups() {
+		for (const fn of this.detailCleanups) fn();
+		this.detailCleanups = [];
+	}
+
+	private buildDetail(): HTMLElement {
+		this.runDetailCleanups();
+		return buildDetailBody(this.mode, this.removedText, this.addedText, this.app, this.sourcePath, (fn) =>
+			this.detailCleanups.push(fn),
+		);
+	}
+
+	toDOM(): HTMLElement {
+		const container = document.createElement("div");
+		container.className = "s2b-diff-edit-group";
+
+		container.appendChild(createEditActionBar(this.entryId, this.groupIndex, this.groupTotal));
+		container.appendChild(this.buildDetail());
+
 		return container;
 	}
 
-	eq(other: TwoPaneGroupWidget): boolean {
+	destroy(): void {
+		this.runDetailCleanups();
+	}
+
+	eq(other: PendingGroupWidget): boolean {
 		return (
 			this.entryId === other.entryId &&
 			this.groupIndex === other.groupIndex &&
+			this.groupTotal === other.groupTotal &&
 			this.removedText === other.removedText &&
-			this.addedText === other.addedText
+			this.addedText === other.addedText &&
+			this.mode === other.mode &&
+			this.sourcePath === other.sourcePath
 		);
 	}
 
@@ -240,15 +304,31 @@ function createGroupDecoration(
 	group: ChangeGroup,
 	entryId: string,
 	groupIndex: number,
+	groupTotal: number,
 	mode: DiffViewMode,
+	app: App | null,
+	sourcePath: string,
 ): Decoration {
-	const widget =
-		mode === "two-pane"
-			? new TwoPaneGroupWidget(entryId, groupIndex, group.removedText, group.addedText)
-			: new WordDiffGroupWidget(entryId, groupIndex, group.removedText, group.addedText);
-
+	const widget = new PendingGroupWidget(
+		entryId,
+		groupIndex,
+		groupTotal,
+		group.removedText,
+		group.addedText,
+		mode,
+		app,
+		sourcePath,
+	);
 	return Decoration.widget({ widget, side: -1, block: true });
 }
+
+/** Line-background tint for removed lines within a group. (Pure insertions are
+ * NOT tinted — the inserted text lives in the widget card, not the document, so
+ * there is no document line to mark as added.) */
+const removedLineDecoration = Decoration.line({ class: "s2b-diff-line-removed" });
+/** Neutral tint for removed lines in word-diff mode — marks the source lines
+ * the card's diff refers to without the "deleted" connotation of red. */
+const mutedLineDecoration = Decoration.line({ class: "s2b-diff-line-muted" });
 
 /**
  * Identify contiguous change groups from a line-level diff.
@@ -344,9 +424,17 @@ function buildPositionMapper(originalContent: string, docText: string): (origPos
 }
 
 /** Build decorations for a single change group at the given mapped offset. */
-function getEditorFilePath(view: EditorView): string | null {
+function getEditorFilePath(state: EditorState): string | null {
 	try {
-		return view.state.field(editorInfoField, false)?.file?.path ?? null;
+		return state.field(editorInfoField, false)?.file?.path ?? null;
+	} catch {
+		return null;
+	}
+}
+
+function getEditorApp(state: EditorState): App | null {
+	try {
+		return state.field(editorInfoField, false)?.app ?? null;
 	} catch {
 		return null;
 	}
@@ -360,9 +448,9 @@ function getLatestPendingUpdateForPath(filePath: string): PendingChangeEntry | n
 	}
 }
 
-function buildDecorations(view: EditorView, entryOverride?: PendingChangeEntry | null): DecorationSet {
+function buildDecorations(state: EditorState, entryOverride?: PendingChangeEntry | null): DecorationSet {
 	try {
-		const filePath = getEditorFilePath(view);
+		const filePath = getEditorFilePath(state);
 		if (!filePath) return Decoration.none;
 
 		const entry = entryOverride ?? getLatestPendingUpdateForPath(filePath);
@@ -377,7 +465,8 @@ function buildDecorations(view: EditorView, entryOverride?: PendingChangeEntry |
 			mode = "word-diff";
 		}
 
-		const docText = view.state.doc.toString();
+		const docText = state.doc.toString();
+		const app = getEditorApp(state);
 		const groups = identifyGroups(change.originalContent, change.newContent);
 		if (groups.length === 0) return Decoration.none;
 
@@ -413,37 +502,109 @@ function buildDecorations(view: EditorView, entryOverride?: PendingChangeEntry |
 				continue;
 			}
 
-			const lineStart = view.state.doc.lineAt(Math.min(mappedOffset, view.state.doc.length)).from;
-			const decoration = createGroupDecoration(group, entry.id, gi, mode);
-			decorations.push(decoration.range(lineStart));
+			const clampedOffset = Math.min(mappedOffset, state.doc.length);
+			const lineStart = state.doc.lineAt(clampedOffset).from;
+
+			// Compact collapsible action bar for the group, anchored above its
+			// first line (side: -1 so it sorts before the line decoration).
+			decorations.push(
+				createGroupDecoration(group, entry.id, gi, groups.length, mode, app, filePath).range(lineStart),
+			);
+
+			// Line-background tints — additive, no document reflow. Only lines that
+			// exist in the DOCUMENT get tinted; the inserted (new) text lives solely
+			// in the widget card, not in the document, so a PURE INSERTION tints
+			// NOTHING. Tinting its anchor line (the existing, unchanged paragraph
+			// before the insertion point) as "added" falsely paints an unchanged
+			// line green — and on a long wrapped paragraph that green bleeds across
+			// the whole block. For groups WITH removed text: in word-diff mode the
+			// card already shows the exact old->new inline, so removed lines get a
+			// MUTED tint (a full red band there reads like "this line was deleted",
+			// misleading for an in-place edit; no tint makes the still-visible
+			// original look like a duplicate). Two-pane keeps the red (the document
+			// is the reference the new pane is compared against).
+			if (!group.removedText) {
+				// Pure insertion: no document line changed — skip the tint entirely.
+				continue;
+			}
+			const tint: Decoration = mode === "word-diff" ? mutedLineDecoration : removedLineDecoration;
+			// group.docLength counts the removed lines' trailing newline, so
+			// clampedOffset + docLength lands on the START of the line AFTER the
+			// change — often a blank separator. Step back one char so the span ends
+			// on the last removed line's own newline and the loop doesn't tint that
+			// trailing blank line (edit mode used to show a stray tinted gap under
+			// the original; reading mode never did — this keeps them consistent).
+			const spanEnd = Math.min(clampedOffset + group.docLength - 1, state.doc.length);
+			let pos = lineStart;
+			while (pos <= spanEnd) {
+				const line = state.doc.lineAt(pos);
+				decorations.push(tint.range(line.from));
+				if (line.to >= state.doc.length) break;
+				pos = line.to + 1;
+			}
 		}
 
+		// Decoration.set(..., true) sorts the mixed line/widget/block ranges,
+		// satisfying CM6's sorted-range invariant regardless of push order.
 		return Decoration.set(decorations, true);
 	} catch {
 		return Decoration.none;
 	}
 }
 
-export const inlineDiffPlugin = ViewPlugin.fromClass(
+/**
+ * The pending-diff decorations live in a StateField (NOT a ViewPlugin): CM6
+ * forbids block decorations — the collapsible group widget and cross-thread
+ * banner are `block: true` — from being provided by a ViewPlugin ("Block
+ * decorations may not be specified via plugins"). The field rebuilds when it
+ * sees a {@link refreshPendingChanges} effect (fired by the companion plugin on
+ * init, store changes, file switches, and viewport/geometry changes) or when
+ * the document itself changes; otherwise it maps the existing set through the
+ * transaction's changes to keep positions valid.
+ */
+const pendingDiffField = StateField.define<DecorationSet>({
+	create() {
+		// editorInfoField may not be ready during field init — defer the first
+		// build to the companion plugin's scheduled refresh.
+		return Decoration.none;
+	},
+	update(deco, tr) {
+		const refreshRequested = tr.effects.some((e) => e.is(refreshPendingChanges));
+		if (refreshRequested || tr.docChanged) {
+			return buildDecorations(tr.state);
+		}
+		return deco.map(tr.changes);
+	},
+	provide: (f) => EditorView.decorations.from(f),
+});
+
+/**
+ * Companion side-effect plugin: it holds no decorations itself. It (1) defers
+ * the first decoration build until `editorInfoField` is ready (rAF loop, as the
+ * field/plugin can be constructed before Obsidian attaches the file), (2)
+ * rebuilds on the `s2b-pending-changes-updated` DOM event, and (3) re-fires the
+ * refresh effect on file switches and viewport/geometry changes the field can't
+ * observe on its own.
+ */
+const inlineDiffSideEffects = ViewPlugin.fromClass(
 	class {
-		decorations: DecorationSet = Decoration.none;
 		private readonly refreshHandler: () => void;
 		private readonly view: EditorView;
 		private initialized = false;
 		private refreshAttempts = 0;
-		private hasPendingUpdate = false;
 		private lastFilePath: string | null = null;
 
 		constructor(view: EditorView) {
 			this.view = view;
-			// Don't call buildDecorations during construction or the first
-			// synchronous update — editorInfoField may not be ready yet and
-			// causes "Failed to open" errors in Obsidian.
-			// Schedule the first build for the next frame.
 			this.refreshHandler = () => {
-				this.view.dispatch({ effects: refreshPendingChanges.of(null) });
+				try {
+					this.view.dispatch({ effects: refreshPendingChanges.of(null) });
+				} catch {
+					/* view may already be destroyed */
+				}
 			};
 			document.addEventListener("s2b-pending-changes-updated", this.refreshHandler);
+			document.addEventListener("s2b-diff-mode-changed", this.refreshHandler);
 			this.scheduleInitialRefresh();
 		}
 
@@ -451,14 +612,11 @@ export const inlineDiffPlugin = ViewPlugin.fromClass(
 			requestAnimationFrame(() => {
 				if (this.initialized) return;
 
-				const hasFilePath = getEditorFilePath(this.view) !== null;
+				const hasFilePath = getEditorFilePath(this.view.state) !== null;
 				if (hasFilePath || this.refreshAttempts >= 4) {
 					this.initialized = true;
-					try {
-						this.view.dispatch({ effects: refreshPendingChanges.of(null) });
-					} catch {
-						/* view may already be destroyed */
-					}
+					this.lastFilePath = getEditorFilePath(this.view.state);
+					this.refreshHandler();
 					return;
 				}
 
@@ -467,44 +625,30 @@ export const inlineDiffPlugin = ViewPlugin.fromClass(
 			});
 		}
 
-		private rebuildDecorations(filePath = getEditorFilePath(this.view)) {
-			this.lastFilePath = filePath;
-			if (!filePath) {
-				this.hasPendingUpdate = false;
-				this.decorations = Decoration.none;
-				return;
-			}
-
-			const entry = getLatestPendingUpdateForPath(filePath);
-			this.hasPendingUpdate = entry !== null;
-			this.decorations = buildDecorations(this.view, entry);
-		}
-
 		update(update: ViewUpdate) {
 			if (!this.initialized) return;
-			const refreshRequested = update.transactions.some((tr) =>
-				tr.effects.some((e) => e.is(refreshPendingChanges)),
-			);
-			const filePath = getEditorFilePath(this.view);
-			const fileChanged = filePath !== this.lastFilePath;
 
-			if (refreshRequested || fileChanged) {
-				this.rebuildDecorations(filePath);
+			const filePath = getEditorFilePath(this.view.state);
+			if (filePath !== this.lastFilePath) {
+				this.lastFilePath = filePath;
+				this.refreshHandler();
 				return;
 			}
 
-			if (!this.hasPendingUpdate) return;
-
-			if (update.docChanged || update.selectionSet || update.viewportChanged || update.geometryChanged) {
-				this.decorations = buildDecorations(this.view);
+			// docChanged is handled directly by the field; only viewport/geometry
+			// changes (which the field can't observe) need a nudge.
+			if (update.viewportChanged || update.geometryChanged) {
+				this.refreshHandler();
 			}
 		}
 
 		destroy() {
 			document.removeEventListener("s2b-pending-changes-updated", this.refreshHandler);
+			document.removeEventListener("s2b-diff-mode-changed", this.refreshHandler);
 		}
 	},
-	{
-		decorations: (v) => v.decorations,
-	},
 );
+
+/** Inline pending-diff decorations: the decoration StateField plus its
+ * companion side-effect plugin. Registered as one editor extension. */
+export const inlineDiffPlugin: Extension = [pendingDiffField, inlineDiffSideEffects];
