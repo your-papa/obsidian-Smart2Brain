@@ -164,6 +164,7 @@ const entries = $derived(hunks ? collapseContext(computeLines(hunks)) : []);
     border-radius: var(--radius-s);
     overflow: auto;
     max-height: 400px;
+    background-color: var(--background-primary);
     font-family: var(--font-monospace);
     font-size: var(--font-smaller);
     line-height: 1.5;
