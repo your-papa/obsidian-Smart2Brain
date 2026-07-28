@@ -477,8 +477,14 @@ function buildDecorations(state: EditorState, entryOverride?: PendingChangeEntry
 			} else {
 				tint = addedLineDecoration;
 			}
+			// group.docLength counts the removed lines' trailing newline, so
+			// clampedOffset + docLength lands on the START of the line AFTER the
+			// change — often a blank separator. Step back one char so the span ends
+			// on the last removed line's own newline and the loop doesn't tint that
+			// trailing blank line red (edit mode used to show a stray red gap under
+			// the original; reading mode never did — this keeps them consistent).
 			const spanEnd = group.removedText
-				? Math.min(clampedOffset + group.docLength, state.doc.length)
+				? Math.min(clampedOffset + group.docLength - 1, state.doc.length)
 				: clampedOffset;
 			let pos = lineStart;
 			while (pos <= spanEnd) {

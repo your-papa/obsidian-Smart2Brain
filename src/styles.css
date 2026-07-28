@@ -642,6 +642,14 @@
 	border-radius: 4px;
 }
 
+/* The rendered original follows the review card inside the tinted section. Its
+   natural paragraph margin-top would push a full blank line between the new
+   pane and the original — edit mode stacks them flush, so collapse it here to
+   keep the two views consistent (the card's own margin-bottom is the separator). */
+.s2b-diff-section > .s2b-diff-reading-group + * {
+	margin-top: 0;
+}
+
 /* Group wrapper + detail body (both views). */
 .s2b-diff-edit-group,
 .s2b-diff-reading-group {
