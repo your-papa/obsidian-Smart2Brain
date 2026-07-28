@@ -417,6 +417,12 @@ export interface AgentConfig {
 	titleModel: import("../stores/chatStore.svelte").ChatModel | null;
 	/** Base system prompt for this agent */
 	systemPrompt: string;
+	/**
+	 * Which version of BASE_SYSTEM_PROMPT this agent's systemPrompt was copied from.
+	 * Absent = pre-versioning (treated as 0). normalizeAgent() uses this to detect
+	 * whether the stored prompt is still an unmodified default and can be auto-updated.
+	 */
+	systemPromptVersion?: number;
 	/** Skill enable states for this agent (skill name -> state) */
 	skills: Record<string, AgentSkillState>;
 	/** Configuration for built-in tools */

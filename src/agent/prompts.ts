@@ -108,3 +108,54 @@ export function buildDefaultCapabilityGuidance(id: CapabilityId): string {
 			return DEFAULT_WEB_CAPABILITY_GUIDANCE;
 	}
 }
+
+/** Increment when BASE_SYSTEM_PROMPT changes in a way that affects agent behaviour. */
+export const BASE_SYSTEM_PROMPT_VERSION = 1;
+
+/**
+ * Maps each historical version number to the exact prompt string shipped at that version.
+ * Lets normalizeAgent() detect "still on old default" vs "user customized" without storing
+ * a hash. Keep all entries forever — never remove old versions.
+ */
+export const HISTORICAL_SYSTEM_PROMPTS: ReadonlyMap<number, string> = new Map([[1, BASE_SYSTEM_PROMPT]]);
+
+/**
+ * All known-default strings for each capability, across all plugin versions.
+ * If a stored capabilityPrompts[id] value is in this set it is treated as
+ * "user hasn't customized it" and the key is cleared so the live default is used.
+ * Append new defaults here when guidance text changes; never remove old entries.
+ */
+export const HISTORICAL_CAPABILITY_GUIDANCE: ReadonlyMap<CapabilityId, ReadonlySet<string>> = new Map([
+	["vault", new Set([DEFAULT_VAULT_CAPABILITY_GUIDANCE])],
+	["web", new Set([DEFAULT_WEB_CAPABILITY_GUIDANCE])],
+]);
+
+/**
+ * All known-default promptGuidance strings per tool, across all plugin versions.
+ * Same semantics as HISTORICAL_CAPABILITY_GUIDANCE — stored value in set ⇒ treat as absent.
+ * read_content is intentionally omitted: its guidance is dynamic (varies by processor config)
+ * and already handled by READ_CONTENT_GUIDANCE_DEFAULTS.
+ */
+export const HISTORICAL_TOOL_GUIDANCE: ReadonlyMap<
+	import("../types/plugin").BuiltInToolId,
+	ReadonlySet<string>
+> = new Map([
+	[
+		"execute_javascript",
+		new Set([
+			"Use this for calculations, reshaping JSON, filtering arrays, parsing structured text, or other logic-heavy transformations. The code runs in an isolated worker without Obsidian APIs, so do not use it for note edits or vault access.",
+		]),
+	],
+	[
+		"fetch_url",
+		new Set([
+			"Use this only for URLs the user provided or for clearly public references. The tool sends the URL to the configured network — it does not send vault contents. Prefer searching the vault first; reach for fetch_url when the user explicitly references a link or when needed information cannot be in the vault.",
+		]),
+	],
+	[
+		"web_search",
+		new Set([
+			"Use web_search for questions about external facts, current events, documentation, or topics the vault is unlikely to contain. Prefer search_notes for vault-internal queries. When results look promising, follow up with fetch_url to read the full page. Cite sources in your response.",
+		]),
+	],
+]);

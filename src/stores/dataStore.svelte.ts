@@ -1,5 +1,11 @@
 import { normalizePath } from "obsidian";
-import { BASE_SYSTEM_PROMPT } from "../agent/prompts";
+import {
+	BASE_SYSTEM_PROMPT,
+	BASE_SYSTEM_PROMPT_VERSION,
+	HISTORICAL_CAPABILITY_GUIDANCE,
+	HISTORICAL_SYSTEM_PROMPTS,
+	HISTORICAL_TOOL_GUIDANCE,
+} from "../agent/prompts";
 import {
 	createEmptySpaceFilter,
 	matchesSpaceMembershipDraftPath,
@@ -365,6 +371,7 @@ export function createDefaultAgentConfig(id?: string, name?: string): AgentConfi
 		summarizationModel: null,
 		titleModel: null,
 		systemPrompt: BASE_SYSTEM_PROMPT,
+		systemPromptVersion: BASE_SYSTEM_PROMPT_VERSION,
 		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
@@ -386,6 +393,7 @@ function createDefaultAgent(): AgentConfig {
 		summarizationModel: null,
 		titleModel: null,
 		systemPrompt: BASE_SYSTEM_PROMPT,
+		systemPromptVersion: BASE_SYSTEM_PROMPT_VERSION,
 		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
@@ -400,7 +408,7 @@ function createDefaultAgent(): AgentConfig {
 // ---------------------------------------------------------------------------
 
 /** Increment this when making any breaking change to PluginData. Add a corresponding entry to MIGRATIONS. */
-const CURRENT_SCHEMA_VERSION = 1;
+const CURRENT_SCHEMA_VERSION = 2;
 
 type Migration = (data: PluginData) => void;
 
@@ -410,6 +418,9 @@ type Migration = (data: PluginData) => void;
  */
 const MIGRATIONS: Migration[] = [
 	// v0 → v1: first versioned release — no structural changes needed
+	(_data) => {},
+	// v1 → v2: prompt auto-migration added — logic lives in normalizeAgent() which
+	//           runs on every load; the version bump marks that the tracking fields exist
 	(_data) => {},
 ];
 
@@ -2020,7 +2031,42 @@ function normalizeAgent(agent: AgentConfig): void {
 	agent.skills ??= {};
 	agent.mcpServers ??= {};
 	agent.pluginExecTools ??= {};
+
+	// --- Prompt auto-migration ---
+
+	// 1. System prompt: silently update to current default if the stored prompt still
+	//    matches an old default verbatim; leave custom prompts untouched.
+	const storedPromptVersion = agent.systemPromptVersion ?? 0;
+	if (storedPromptVersion < BASE_SYSTEM_PROMPT_VERSION) {
+		const historicalDefault = HISTORICAL_SYSTEM_PROMPTS.get(storedPromptVersion);
+		if (!historicalDefault || agent.systemPrompt === historicalDefault) {
+			agent.systemPrompt = BASE_SYSTEM_PROMPT;
+		}
+		agent.systemPromptVersion = BASE_SYSTEM_PROMPT_VERSION;
+	}
 	agent.systemPrompt ??= BASE_SYSTEM_PROMPT;
+	agent.systemPromptVersion ??= BASE_SYSTEM_PROMPT_VERSION;
+
+	// 2. Capability prompts: if the stored value is a verbatim historical default,
+	//    delete the key so the live default is used going forward.
+	if (agent.capabilityPrompts) {
+		for (const [capId, historicalSet] of HISTORICAL_CAPABILITY_GUIDANCE) {
+			const stored = agent.capabilityPrompts[capId];
+			if (stored !== undefined && historicalSet.has(stored)) {
+				delete agent.capabilityPrompts[capId];
+			}
+		}
+	}
+
+	// 3. Per-tool promptGuidance: same pattern. read_content is handled separately
+	//    by READ_CONTENT_GUIDANCE_DEFAULTS elsewhere; skip it here.
+	for (const [toolId, historicalSet] of HISTORICAL_TOOL_GUIDANCE) {
+		const toolCfg = agent.toolsConfig[toolId];
+		if (toolCfg?.promptGuidance !== undefined && historicalSet.has(toolCfg.promptGuidance)) {
+			delete toolCfg.promptGuidance;
+		}
+	}
+
 	agent.summarizationModel ??= null;
 	agent.titleModel ??= null;
 }
