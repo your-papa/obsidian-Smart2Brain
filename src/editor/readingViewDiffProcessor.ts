@@ -290,7 +290,12 @@ function renderDetailInto(container: HTMLElement, ctx: DiffRenderContext, mode: 
  * never touches Obsidian's rendered markdown. The diff detail is always rendered
  * (no collapse); the toggle switches word-diff ↔ two-pane in place.
  */
-function createReadingDiffActionBar(entryId: string, groupIndex: number, renderCtx: DiffRenderContext): HTMLElement {
+function createReadingDiffActionBar(
+	entryId: string,
+	groupIndex: number,
+	groupTotal: number,
+	renderCtx: DiffRenderContext,
+): HTMLElement {
 	const wrap = document.createElement("div");
 	wrap.className = "s2b-diff-reading-group";
 
@@ -317,6 +322,15 @@ function createReadingDiffActionBar(entryId: string, groupIndex: number, renderC
 	label.textContent = "Pending change";
 	bar.appendChild(label);
 
+	// Position among this note's pending change groups (e.g. "2/3"). Only shown
+	// when there's more than one — mirrors createEditActionBar so both views match.
+	if (groupTotal > 1) {
+		const position = document.createElement("span");
+		position.className = "s2b-diff-position-indicator";
+		position.textContent = `${groupIndex + 1}/${groupTotal}`;
+		bar.appendChild(position);
+	}
+
 	// Prev/next chevrons: step through this chat thread's pending changes across
 	// files, reusing the SAME shared cursor as the edit-mode bar, the chat-bar
 	// arrows, and the palette commands. Mirrors createEditActionBar in
@@ -332,7 +346,7 @@ function createReadingDiffActionBar(entryId: string, groupIndex: number, renderC
 			try {
 				const entry = getPendingChangesStore().getEntry(entryId);
 				if (!entry) return;
-				void navigateToPendingChange(getPlugin(), entry.threadId, direction);
+				void navigateToPendingChange(getPlugin(), entry.threadId, direction, { entryId, groupIndex });
 			} catch {
 				/* store/plugin not initialized */
 			}
@@ -484,6 +498,29 @@ function computeGroupIndexForSection(changes: Change[], sectionLineStart: number
 	return -1;
 }
 
+/**
+ * Total number of change groups in a line diff — a group is a contiguous run of
+ * removed/added parts ended by an unchanged part. Mirrors the group-walking in
+ * {@link computeGroupIndexForSection} (minus the per-section check) so the
+ * "N/total" indicator's denominator matches the indices that function returns.
+ */
+function countGroups(changes: Change[]): number {
+	let total = 0;
+	let inGroup = false;
+	for (const part of changes) {
+		if (part.value === "") continue;
+		if (part.removed || part.added) {
+			if (!inGroup) {
+				total++;
+				inGroup = true;
+			}
+		} else {
+			inGroup = false;
+		}
+	}
+	return total;
+}
+
 /** Check if a section overlaps affected lines and return true if it does. */
 function sectionHasAffectedLine(affectedLines: Set<number>, origLineStart: number, origLineEnd: number): boolean {
 	for (let line = origLineStart; line <= origLineEnd; line++) {
@@ -520,9 +557,13 @@ function clearSectionDecoration(el: HTMLElement): void {
  * inline, so the section's own rendered original is a duplicate — hide it (and
  * suppress the section tint, which would otherwise be an empty red band). In
  * two-pane mode the original stays visible beneath the new-content pane.
+ *
+ * Only applies when the change REMOVED original lines. For a PURE INSERTION the
+ * section's rendered content is unchanged (not a duplicate of anything in the
+ * card), so hiding it would wrongly blank out a legitimate paragraph.
  */
-function applyWordDiffOriginalVisibility(el: HTMLElement, mode: DiffViewMode): void {
-	el.classList.toggle("s2b-diff-hide-original", mode === "word-diff");
+function applyWordDiffOriginalVisibility(el: HTMLElement, mode: DiffViewMode, hasRemoval: boolean): void {
+	el.classList.toggle("s2b-diff-hide-original", hasRemoval && mode === "word-diff");
 }
 
 /**
@@ -557,22 +598,35 @@ function processSection(
 		return;
 	}
 
-	// Idempotency: if we already decorated this section (re-entry from a
-	// re-render), do nothing rather than double-insert.
-	if (el.classList.contains("s2b-diff-section") || el.querySelector(":scope > .s2b-diff-reading-group")) {
+	// Idempotency: skip only if OUR review card is still present. Checking the
+	// tint CLASS here would be wrong — Obsidian reuses the section DOM node across
+	// scroll-triggered re-renders and regenerates its inner content, which wipes
+	// the `.s2b-diff-reading-group` bar while our added class survives. Guarding on
+	// the class then early-returns and never re-inserts the bar, leaving a tinted
+	// section with no Accept/Reject/nav controls (the "reading-mode review is
+	// broken after scrolling" bug). Guard on the bar's presence instead so a
+	// stripped section gets its bar rebuilt.
+	if (el.querySelector(":scope > .s2b-diff-reading-group")) {
 		return;
 	}
 
-	// Additive tint on the rendered section.
+	// Additive tint on the rendered section. Only tint when the change REMOVES
+	// original lines — those rendered lines are the "before" the card refers to.
+	// A PURE INSERTION changes no original line (the new text lives in the review
+	// card), so tinting the section green would falsely paint an unchanged
+	// paragraph as "added" — and on a long wrapped paragraph the green bleeds
+	// across the whole block. Mark it only as a diff section (for lifecycle
+	// clearing) without an add/remove color.
 	el.classList.add("s2b-diff-section");
-	el.classList.add(
-		sectionHasRemoval(changes, origLineStart, origLineEnd) ? "s2b-diff-section-removed" : "s2b-diff-section-added",
-	);
+	const hasRemoval = sectionHasRemoval(changes, origLineStart, origLineEnd);
+	if (hasRemoval) {
+		el.classList.add("s2b-diff-section-removed");
+	}
 
 	const groupIndex = computeGroupIndexForSection(changes, origLineStart, origLineEnd);
 	if (groupIndex === -1) return;
 	const renderCtx: DiffRenderContext = { changes, origLineStart, origLineEnd, filePath, plugin };
-	const groupEl = createReadingDiffActionBar(entry.id, groupIndex, renderCtx);
+	const groupEl = createReadingDiffActionBar(entry.id, groupIndex, countGroups(changes), renderCtx);
 	el.insertBefore(groupEl, el.firstChild);
 
 	// Hide the (duplicated) original when the initial mode is word-diff.
@@ -582,7 +636,7 @@ function processSection(
 	} catch {
 		/* data store not ready */
 	}
-	applyWordDiffOriginalVisibility(el, initialMode);
+	applyWordDiffOriginalVisibility(el, initialMode, hasRemoval);
 
 	// Sync the toggle icon + expanded detail with global mode changes (e.g.
 	// toggled from this or another section, or the editor). Only re-renders our
@@ -603,7 +657,7 @@ function processSection(
 		}
 		const toggleBtn = groupEl.querySelector<HTMLElement>(".s2b-diff-toggle-btn");
 		if (toggleBtn) setIcon(toggleBtn, mode === "word-diff" ? "columns-2" : "file-diff");
-		applyWordDiffOriginalVisibility(el, mode);
+		applyWordDiffOriginalVisibility(el, mode, hasRemoval);
 		const detail = groupEl.querySelector<HTMLElement>(":scope > .s2b-diff-detail");
 		if (detail) {
 			renderDetailInto(detail, renderCtx, mode);

@@ -17,7 +17,7 @@ const refreshPendingChanges = StateEffect.define();
  * the "Pending change" label, a view-mode toggle, and Accept / Reject buttons.
  * The diff detail below is always shown (no collapse).
  */
-function createEditActionBar(entryId: string, groupIndex: number): HTMLElement {
+function createEditActionBar(entryId: string, groupIndex: number, groupTotal: number): HTMLElement {
 	const bar = document.createElement("div");
 	bar.className = "s2b-diff-action-bar-widget";
 
@@ -25,6 +25,17 @@ function createEditActionBar(entryId: string, groupIndex: number): HTMLElement {
 	label.className = "s2b-diff-actions-label";
 	label.textContent = "Pending change";
 	bar.appendChild(label);
+
+	// Position among this note's pending change groups (e.g. "2/3"). Only shown
+	// when there's more than one — a lone change needs no counter. The note's
+	// inline diff renders a single entry's groups, so groupIndex/groupTotal is a
+	// per-file position (see buildDecorations).
+	if (groupTotal > 1) {
+		const position = document.createElement("span");
+		position.className = "s2b-diff-position-indicator";
+		position.textContent = `${groupIndex + 1}/${groupTotal}`;
+		bar.appendChild(position);
+	}
 
 	// Prev/next chevrons: step through this chat thread's pending changes across
 	// files, reusing the SAME shared cursor as the chat-bar arrows and palette
@@ -41,7 +52,11 @@ function createEditActionBar(entryId: string, groupIndex: number): HTMLElement {
 			try {
 				const entry = getPendingChangesStore().getEntry(entryId);
 				if (!entry) return;
-				void navigateToPendingChange(getPlugin(), entry.threadId, direction);
+				// Pass this bar's own stop as the origin so the chevron steps
+				// relative to the change it's attached to — not the thread's shared
+				// cursor, which every bar shares (all bars would otherwise move in
+				// lockstep from the same global position).
+				void navigateToPendingChange(getPlugin(), entry.threadId, direction, { entryId, groupIndex });
 			} catch {
 				/* store/plugin not initialized */
 			}
@@ -196,6 +211,7 @@ class PendingGroupWidget extends WidgetType {
 	constructor(
 		readonly entryId: string,
 		readonly groupIndex: number,
+		readonly groupTotal: number,
 		readonly removedText: string,
 		readonly addedText: string,
 		readonly mode: DiffViewMode,
@@ -221,7 +237,7 @@ class PendingGroupWidget extends WidgetType {
 		const container = document.createElement("div");
 		container.className = "s2b-diff-edit-group";
 
-		container.appendChild(createEditActionBar(this.entryId, this.groupIndex));
+		container.appendChild(createEditActionBar(this.entryId, this.groupIndex, this.groupTotal));
 		container.appendChild(this.buildDetail());
 
 		return container;
@@ -235,6 +251,7 @@ class PendingGroupWidget extends WidgetType {
 		return (
 			this.entryId === other.entryId &&
 			this.groupIndex === other.groupIndex &&
+			this.groupTotal === other.groupTotal &&
 			this.removedText === other.removedText &&
 			this.addedText === other.addedText &&
 			this.mode === other.mode &&
@@ -287,6 +304,7 @@ function createGroupDecoration(
 	group: ChangeGroup,
 	entryId: string,
 	groupIndex: number,
+	groupTotal: number,
 	mode: DiffViewMode,
 	app: App | null,
 	sourcePath: string,
@@ -294,6 +312,7 @@ function createGroupDecoration(
 	const widget = new PendingGroupWidget(
 		entryId,
 		groupIndex,
+		groupTotal,
 		group.removedText,
 		group.addedText,
 		mode,
@@ -303,9 +322,10 @@ function createGroupDecoration(
 	return Decoration.widget({ widget, side: -1, block: true });
 }
 
-/** Line-background tint decorations for removed/added lines within a group. */
+/** Line-background tint for removed lines within a group. (Pure insertions are
+ * NOT tinted — the inserted text lives in the widget card, not the document, so
+ * there is no document line to mark as added.) */
 const removedLineDecoration = Decoration.line({ class: "s2b-diff-line-removed" });
-const addedLineDecoration = Decoration.line({ class: "s2b-diff-line-added" });
 /** Neutral tint for removed lines in word-diff mode — marks the source lines
  * the card's diff refers to without the "deleted" connotation of red. */
 const mutedLineDecoration = Decoration.line({ class: "s2b-diff-line-muted" });
@@ -487,32 +507,34 @@ function buildDecorations(state: EditorState, entryOverride?: PendingChangeEntry
 
 			// Compact collapsible action bar for the group, anchored above its
 			// first line (side: -1 so it sorts before the line decoration).
-			decorations.push(createGroupDecoration(group, entry.id, gi, mode, app, filePath).range(lineStart));
+			decorations.push(
+				createGroupDecoration(group, entry.id, gi, groups.length, mode, app, filePath).range(lineStart),
+			);
 
-			// Line-background tints — additive, no document reflow. Tint every
-			// removed line the group covers; a pure insertion (no removed text)
-			// tints its single anchor line as added. In word-diff mode the card
-			// already shows the exact old->new inline, so removed lines get a
-			// MUTED tint instead of red: a full red band there reads like "this
-			// line was deleted" (misleading for an in-place edit), while no tint
-			// makes the still-visible original look like a duplicate paragraph.
-			// Two-pane keeps the red (the document is the reference the new pane
-			// is compared against).
-			let tint: Decoration;
-			if (group.removedText) {
-				tint = mode === "word-diff" ? mutedLineDecoration : removedLineDecoration;
-			} else {
-				tint = addedLineDecoration;
+			// Line-background tints — additive, no document reflow. Only lines that
+			// exist in the DOCUMENT get tinted; the inserted (new) text lives solely
+			// in the widget card, not in the document, so a PURE INSERTION tints
+			// NOTHING. Tinting its anchor line (the existing, unchanged paragraph
+			// before the insertion point) as "added" falsely paints an unchanged
+			// line green — and on a long wrapped paragraph that green bleeds across
+			// the whole block. For groups WITH removed text: in word-diff mode the
+			// card already shows the exact old->new inline, so removed lines get a
+			// MUTED tint (a full red band there reads like "this line was deleted",
+			// misleading for an in-place edit; no tint makes the still-visible
+			// original look like a duplicate). Two-pane keeps the red (the document
+			// is the reference the new pane is compared against).
+			if (!group.removedText) {
+				// Pure insertion: no document line changed — skip the tint entirely.
+				continue;
 			}
+			const tint: Decoration = mode === "word-diff" ? mutedLineDecoration : removedLineDecoration;
 			// group.docLength counts the removed lines' trailing newline, so
 			// clampedOffset + docLength lands on the START of the line AFTER the
 			// change — often a blank separator. Step back one char so the span ends
 			// on the last removed line's own newline and the loop doesn't tint that
-			// trailing blank line red (edit mode used to show a stray red gap under
+			// trailing blank line (edit mode used to show a stray tinted gap under
 			// the original; reading mode never did — this keeps them consistent).
-			const spanEnd = group.removedText
-				? Math.min(clampedOffset + group.docLength - 1, state.doc.length)
-				: clampedOffset;
+			const spanEnd = Math.min(clampedOffset + group.docLength - 1, state.doc.length);
 			let pos = lineStart;
 			while (pos <= spanEnd) {
 				const line = state.doc.lineAt(pos);

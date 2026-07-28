@@ -1,3 +1,4 @@
+import type { EditorView } from "@codemirror/view";
 import { diffLines } from "diff";
 import { MarkdownView, Notice, TFile } from "obsidian";
 import { computeOriginalAffectedLines } from "../editor/readingViewDiffProcessor";
@@ -146,21 +147,73 @@ export function firstChangedLine(change: PendingChange): number {
 }
 
 /**
- * Scroll a MarkdownView to `line`, working in both source and reading mode.
- * `currentMode.applyScroll` is the sub-view (editor or preview) actually shown,
- * and both implement it — `setEphemeralState({ line })` alone does NOT reliably
- * scroll the reading view.
+ * Fraction of the viewport height from the top at which the jumped-to change is
+ * positioned. 1/5 sits the change clearly in the upper portion (not centered),
+ * while still leaving a little context above it rather than pinning to the top.
+ */
+const SCROLL_ANCHOR_FRACTION = 1 / 5;
+
+/**
+ * Scroll a MarkdownView so the target change sits in the TOP THIRD of the
+ * viewport (rather than pinned to the very top, which `applyScroll` alone does).
+ *
+ * Both modes compute `scrollTop` manually — the built-in `scrollIntoView`
+ * keyword anchors (`start`/`center`) can't express an arbitrary fraction, and in
+ * reading mode `applyScroll(line)`'s line→pixel estimate is off by thousands of
+ * px from a rendered section's real offset, so it can't be nudged reliably.
+ *
+ * Edit mode: `cm.lineBlockAt(pos).top` is the line's document-space Y; scroll so
+ * it sits `clientHeight * FRACTION` below the viewport top.
+ *
+ * Reading mode: `applyScroll(line)` DOES accurately top-pin the target line on a
+ * normally-structured note (verified: `applyScroll(58)` put that line at
+ * viewport-top ~1px), so use it to reach the correct line — then nudge the
+ * scroller up by `clientHeight * FRACTION` to drop the line to the anchor. Do
+ * NOT anchor to `querySelector(".s2b-diff-section")`: reading view VIRTUALIZES,
+ * so only sections near the viewport exist in the DOM, and the first one is
+ * usually NOT the target group — navigating to a later change would scroll to
+ * the wrong (earlier) change's section. Driving off `line` avoids that entirely.
  *
  * Reading-mode layout isn't final the instant a leaf is revealed/re-rendered, so
- * a single synchronous call scrolls a not-yet-tall container and lands at 0. We
- * re-apply on the next frame and once more shortly after so the scroll sticks
+ * a single synchronous call scrolls a not-yet-laid-out container and lands wrong.
+ * We re-apply on the next frame and once more shortly after so the scroll sticks
  * whether the view is ready now or momentarily later.
  */
 function scrollToLine(view: MarkdownView, line: number): void {
-	const apply = () => view.currentMode.applyScroll(line);
+	const apply = () => {
+		// Edit mode: anchor the line's document-space top to the top third.
+		// biome-ignore lint/suspicious/noExplicitAny: Obsidian internal CM6 API
+		const cm = (view.editor as any)?.cm as EditorView | undefined;
+		if (cm?.state && cm.scrollDOM && view.getMode() === "source") {
+			try {
+				const lineCount = cm.state.doc.lines;
+				const clamped = Math.min(Math.max(line + 1, 1), lineCount); // CM lines are 1-based
+				const pos = cm.state.doc.line(clamped).from;
+				const block = cm.lineBlockAt(pos);
+				const anchor = cm.scrollDOM.clientHeight * SCROLL_ANCHOR_FRACTION;
+				cm.scrollDOM.scrollTop = Math.max(0, block.top - anchor);
+				return;
+			} catch {
+				/* fall through to applyScroll below */
+			}
+		}
+
+		// Reading mode: top-pin the TARGET line via applyScroll (accurate on
+		// structured notes, and it targets the right line even when the section
+		// isn't rendered yet), then nudge it down to the fractional anchor.
+		view.currentMode.applyScroll(line);
+		const scroller = view.contentEl.querySelector<HTMLElement>(".markdown-preview-view");
+		if (scroller && scroller.clientHeight > 0) {
+			const anchor = scroller.clientHeight * SCROLL_ANCHOR_FRACTION;
+			scroller.scrollTop = Math.max(0, scroller.scrollTop - anchor);
+		}
+	};
 	apply();
 	requestAnimationFrame(apply);
 	window.setTimeout(apply, 50);
+	// One later retry: reading-mode layout can settle a frame or two late, so a
+	// final pass ensures the scroll lands where intended.
+	window.setTimeout(apply, 200);
 }
 
 /**
@@ -206,6 +259,14 @@ export async function revealAndScroll(plugin: SecondBrainPlugin, path: string, l
  * sync. Steps through each changed spot (group) within a file before moving to
  * the next file.
  *
+ * `origin`, when given, is the stop the step is taken RELATIVE TO — the in-note
+ * action bars pass their own `(entryId, groupIndex)` so their chevrons move
+ * relative to the change they're attached to, not the thread's shared cursor.
+ * Without it (palette commands, chat-bar arrows) the shared per-thread cursor is
+ * used. Either way the resulting stop becomes the new shared cursor, keeping all
+ * entry points in sync. If the origin isn't found among the current stops (e.g.
+ * it was just accepted/rejected) we fall back to the shared cursor.
+ *
  * Returns the stop navigated to, or null when the thread has no pending changes
  * (the caller Notices). A `create` target that isn't on disk yet still advances
  * the cursor but shows a Notice instead of opening nothing.
@@ -214,6 +275,7 @@ export async function navigateToPendingChange(
 	plugin: SecondBrainPlugin,
 	threadId: string,
 	direction: "next" | "prev",
+	origin?: { entryId: string; groupIndex: number },
 ): Promise<NavStop | null> {
 	const stops = orderedStopsForThread(threadId);
 	const n = stops.length;
@@ -222,8 +284,14 @@ export async function navigateToPendingChange(
 		return null;
 	}
 
-	const currentKey = cursors.get(threadId);
-	const currentIdx = currentKey ? stops.findIndex((s) => stopKey(s.entry.id, s.groupIndex) === currentKey) : -1;
+	// Prefer the clicked bar's own stop as the step origin; fall back to the
+	// thread's shared cursor when no origin is given or it's no longer present.
+	const originKey = origin ? stopKey(origin.entryId, origin.groupIndex) : undefined;
+	let currentIdx = originKey ? stops.findIndex((s) => stopKey(s.entry.id, s.groupIndex) === originKey) : -1;
+	if (currentIdx === -1) {
+		const currentKey = cursors.get(threadId);
+		currentIdx = currentKey ? stops.findIndex((s) => stopKey(s.entry.id, s.groupIndex) === currentKey) : -1;
+	}
 	let idx: number;
 	if (currentIdx === -1) {
 		// No cursor yet, or it pointed at an accepted/rejected group: start at the
