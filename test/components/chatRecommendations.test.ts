@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
 	DISMISS_ALL_ID,
+	filterPluginNudges,
 	filterSuggestions,
+	type PluginNudge,
+	pluginNudgeId,
 	type RecommendationContext,
 	type SuggestedQuery,
 	SUGGESTED_QUERIES,
@@ -62,5 +65,33 @@ describe("SUGGESTED_QUERIES catalog", () => {
 
 	it("does not reuse the whole-block dismissal id for any suggestion", () => {
 		expect(SUGGESTED_QUERIES.some((s) => s.id === DISMISS_ALL_ID)).toBe(false);
+	});
+});
+
+describe("plugin nudges", () => {
+	const nudge = (pluginId: string): PluginNudge => ({
+		id: pluginNudgeId(pluginId),
+		pluginId,
+		displayName: pluginId,
+		icon: "puzzle",
+	});
+
+	it("builds a `plugin:<id>` dismissal key", () => {
+		expect(pluginNudgeId("dataview")).toBe("plugin:dataview");
+	});
+
+	it("keeps candidates that are not dismissed", () => {
+		const nudges = [nudge("dataview"), nudge("tasknotes")];
+		expect(filterPluginNudges(nudges, []).map((n) => n.pluginId)).toEqual(["dataview", "tasknotes"]);
+	});
+
+	it("drops a nudge whose id is dismissed", () => {
+		const nudges = [nudge("dataview"), nudge("tasknotes")];
+		const visible = filterPluginNudges(nudges, [pluginNudgeId("dataview")]);
+		expect(visible.map((n) => n.pluginId)).toEqual(["tasknotes"]);
+	});
+
+	it("returns nothing when the whole block is dismissed", () => {
+		expect(filterPluginNudges([nudge("dataview")], [DISMISS_ALL_ID])).toEqual([]);
 	});
 });

@@ -101,3 +101,32 @@ export function filterSuggestions(
 	if (dismissed.includes(DISMISS_ALL_ID)) return [];
 	return catalog.filter((s) => requirementMet(s.requires, ctx) && !dismissed.includes(s.id));
 }
+
+/**
+ * A nudge to enable an S2B agent capability for an installed Obsidian plugin
+ * whose integration isn't switched on for the selected agent yet (issue #355).
+ */
+export interface PluginNudge {
+	/** Dismissal key, of the form `plugin:<pluginId>`. */
+	id: string;
+	pluginId: string;
+	displayName: string;
+	/** Lucide icon id (matching the plugin's own glyph where known). */
+	icon: string;
+	/** Bundled skill id documenting the plugin, when the integration has one. */
+	skillId?: string;
+}
+
+/** Dismissal key for a plugin nudge. Keep in sync with {@link PluginNudge.id}. */
+export const pluginNudgeId = (pluginId: string): string => `plugin:${pluginId}`;
+
+/**
+ * Filters plugin nudges down to those the user hasn't dismissed. The candidate
+ * list is expected to already be narrowed to installed-but-not-enabled
+ * integrations by the caller (which reads live `app.plugins` / agent state).
+ * Respects {@link DISMISS_ALL_ID} so "Dismiss all" hides plugin nudges too.
+ */
+export function filterPluginNudges(candidates: readonly PluginNudge[], dismissed: readonly string[]): PluginNudge[] {
+	if (dismissed.includes(DISMISS_ALL_ID)) return [];
+	return candidates.filter((n) => !dismissed.includes(n.id));
+}
