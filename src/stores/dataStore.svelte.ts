@@ -465,6 +465,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	lastActiveChatId: null,
 	onboardingComplete: false,
 	onboardingSplashSeen: false,
+	dismissedRecommendations: [],
 
 	// Debugging & telemetry
 	enableLangSmith: false,
@@ -1228,6 +1229,20 @@ export class PluginDataStore {
 	set onboardingSplashSeen(val: boolean) {
 		this.#data.onboardingSplashSeen = val;
 		this.saveSettings();
+	}
+
+	get dismissedRecommendations() {
+		return this.#data.dismissedRecommendations;
+	}
+	isRecommendationDismissed(id: string) {
+		return this.#data.dismissedRecommendations.includes(id);
+	}
+	dismissRecommendation(id: string) {
+		if (!this.#data.dismissedRecommendations.includes(id)) {
+			// Reassign (not push) so $state reactivity fires.
+			this.#data.dismissedRecommendations = [...this.#data.dismissedRecommendations, id];
+			this.saveSettings();
+		}
 	}
 
 	get searchAlgorithm() {
