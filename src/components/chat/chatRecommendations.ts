@@ -130,3 +130,64 @@ export function filterPluginNudges(candidates: readonly PluginNudge[], dismissed
 	if (dismissed.includes(DISMISS_ALL_ID)) return [];
 	return candidates.filter((n) => !dismissed.includes(n.id));
 }
+
+/**
+ * The kind of guidance surface a stale-guidance notice refers to. Mirrors
+ * `StaleGuidance.kind` from types/plugin — duplicated here to keep this module
+ * free of the plugin-types import (it stays pure/unit-testable).
+ */
+export type UpdateNoticeKind = "system-prompt" | "capability" | "tool";
+
+/**
+ * A notice that a built-in prompt/guidance default changed upstream while the
+ * user had a customization of the same surface, so it couldn't be auto-updated
+ * (issue #356). Sourced from the store's `staleGuidance` records.
+ */
+export interface UpdateNotice {
+	/** Dismissal key, of the form `update:<agentId>:<kind>[:<targetId>]`. */
+	id: string;
+	agentId: string;
+	agentName: string;
+	kind: UpdateNoticeKind;
+	/** CapabilityId / BuiltInToolId for capability|tool kinds; undefined for system-prompt. */
+	targetId?: string;
+	/** Human label for the surface, e.g. "Vault guidance", "web_search guidance". */
+	label: string;
+}
+
+/** Minimal shape of a store `StaleGuidance` record consumed by {@link toUpdateNotice}. */
+export interface StaleGuidanceLike {
+	agentId: string;
+	agentName: string;
+	kind: UpdateNoticeKind;
+	targetId?: string;
+	label: string;
+}
+
+/** Dismissal key for an update notice. Keep in sync with {@link UpdateNotice.id}. */
+export const updateNoticeId = (agentId: string, kind: UpdateNoticeKind, targetId?: string): string =>
+	`update:${agentId}:${kind}${targetId ? `:${targetId}` : ""}`;
+
+/** Maps a store stale-guidance record to a dismissable notice. */
+export function toUpdateNotice(record: StaleGuidanceLike): UpdateNotice {
+	return {
+		id: updateNoticeId(record.agentId, record.kind, record.targetId),
+		agentId: record.agentId,
+		agentName: record.agentName,
+		kind: record.kind,
+		targetId: record.targetId,
+		label: record.label,
+	};
+}
+
+/**
+ * Maps stale-guidance records to notices and drops the dismissed ones. Respects
+ * {@link DISMISS_ALL_ID} so "Dismiss all" hides update notices too.
+ */
+export function filterUpdateNotices(
+	records: readonly StaleGuidanceLike[],
+	dismissed: readonly string[],
+): UpdateNotice[] {
+	if (dismissed.includes(DISMISS_ALL_ID)) return [];
+	return records.map(toUpdateNotice).filter((n) => !dismissed.includes(n.id));
+}

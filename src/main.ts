@@ -521,25 +521,10 @@ export default class SecondBrainPlugin extends Plugin {
 				void this.activateOnboardingView();
 			}
 
-			// Notify about agents whose system prompt was customized and could not be
-			// auto-updated to the latest default — show a persistent notice with a
-			// "Review diff" link that opens the modal directly on the diff tab.
-			const stale = this.pluginData.stalePromptAgentNames;
-			if (stale.length > 0) {
-				for (const agentName of stale) {
-					const notice = new Notice("", 0);
-					notice.noticeEl.empty();
-					notice.noticeEl.appendText(
-						`Smart Second Brain: the default system prompt was updated. Agent "${agentName}" has a customized prompt that was not auto-updated. `,
-					);
-					const link = notice.noticeEl.createEl("a", { text: "Review diff", href: "#" });
-					link.addEventListener("click", (e) => {
-						e.preventDefault();
-						notice.hide();
-						this.agentManager.openSystemPromptDiff(agentName);
-					});
-				}
-			}
+			// Agents whose customized prompt/guidance couldn't be auto-updated after a
+			// default changed are surfaced in the new-chat recommendations view
+			// (ChatRecommendations.svelte reads pluginData.staleGuidance), so no startup
+			// Notice here — that would double-notify.
 
 			// Start search/vector store initialization (non-blocking, fire-and-forget)
 			this.lexicalSearchService = StartupProfiler.measureSync("lexical:startInit", () =>

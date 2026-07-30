@@ -3,11 +3,14 @@ import {
 	DISMISS_ALL_ID,
 	filterPluginNudges,
 	filterSuggestions,
+	filterUpdateNotices,
 	type PluginNudge,
 	pluginNudgeId,
 	type RecommendationContext,
+	type StaleGuidanceLike,
 	type SuggestedQuery,
 	SUGGESTED_QUERIES,
+	updateNoticeId,
 } from "../../src/components/chat/chatRecommendations";
 
 const ALL: RecommendationContext = { hasChat: true, hasSearch: true, hasGraph: true };
@@ -93,5 +96,59 @@ describe("plugin nudges", () => {
 
 	it("returns nothing when the whole block is dismissed", () => {
 		expect(filterPluginNudges([nudge("dataview")], [DISMISS_ALL_ID])).toEqual([]);
+	});
+});
+
+describe("update notices", () => {
+	const sys: StaleGuidanceLike = {
+		agentId: "a1",
+		agentName: "Default",
+		kind: "system-prompt",
+		label: "system prompt",
+	};
+	const cap: StaleGuidanceLike = {
+		agentId: "a1",
+		agentName: "Default",
+		kind: "capability",
+		targetId: "vault",
+		label: "Vault guidance",
+	};
+	const tool: StaleGuidanceLike = {
+		agentId: "a2",
+		agentName: "Researcher",
+		kind: "tool",
+		targetId: "web_search",
+		label: "web_search guidance",
+	};
+
+	it("builds `update:<agentId>:<kind>` for system-prompt (no targetId)", () => {
+		expect(updateNoticeId("a1", "system-prompt")).toBe("update:a1:system-prompt");
+	});
+
+	it("builds `update:<agentId>:<kind>:<targetId>` when a targetId is present", () => {
+		expect(updateNoticeId("a1", "capability", "vault")).toBe("update:a1:capability:vault");
+	});
+
+	it("maps records to notices with matching ids", () => {
+		const notices = filterUpdateNotices([sys, cap, tool], []);
+		expect(notices.map((n) => n.id)).toEqual([
+			"update:a1:system-prompt",
+			"update:a1:capability:vault",
+			"update:a2:tool:web_search",
+		]);
+	});
+
+	it("drops a notice whose id is dismissed", () => {
+		const visible = filterUpdateNotices([sys, cap], [updateNoticeId("a1", "capability", "vault")]);
+		expect(visible.map((n) => n.id)).toEqual(["update:a1:system-prompt"]);
+	});
+
+	it("returns nothing when the whole block is dismissed", () => {
+		expect(filterUpdateNotices([sys, cap, tool], [DISMISS_ALL_ID])).toEqual([]);
+	});
+
+	it("carries agentName/label/targetId through to the notice", () => {
+		const [notice] = filterUpdateNotices([cap], []);
+		expect(notice).toMatchObject({ agentName: "Default", label: "Vault guidance", targetId: "vault" });
 	});
 });

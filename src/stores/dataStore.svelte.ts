@@ -2,9 +2,11 @@ import { normalizePath } from "obsidian";
 import {
 	BASE_SYSTEM_PROMPT,
 	BASE_SYSTEM_PROMPT_VERSION,
+	CAPABILITY_GUIDANCE_VERSION,
 	HISTORICAL_CAPABILITY_GUIDANCE,
 	HISTORICAL_SYSTEM_PROMPTS,
 	HISTORICAL_TOOL_GUIDANCE,
+	TOOL_GUIDANCE_VERSION,
 } from "../agent/prompts";
 import {
 	createEmptySpaceFilter,
@@ -20,6 +22,7 @@ import type {
 	AgentSkillState,
 	AgentsConfig,
 	BuiltInToolId,
+	CapabilityId,
 	DefaultEmbedModel,
 	ChatOpenLocation,
 	DiffViewMode,
@@ -31,6 +34,7 @@ import type {
 	PrivacyMode,
 	RecentNoteEntry,
 	SearchAlgorithm,
+	StaleGuidance,
 	ToolConfig,
 	ToolsConfig,
 } from "../types/plugin";
@@ -408,7 +412,7 @@ function createDefaultAgent(): AgentConfig {
 // ---------------------------------------------------------------------------
 
 /** Increment this when making any breaking change to PluginData. Add a corresponding entry to MIGRATIONS. */
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 
 type Migration = (data: PluginData) => void;
 
@@ -422,6 +426,26 @@ const MIGRATIONS: Migration[] = [
 	// v1 → v2: prompt auto-migration added — logic lives in normalizeAgent() which
 	//           runs on every load; the version bump marks that the tracking fields exist
 	(_data) => {},
+	// v2 → v3: per-capability / per-tool guidance version stamps added (issue #356).
+	//          Seed every EXISTING customized guidance value to the current version so
+	//          pre-existing customizations aren't retroactively flagged as "the default
+	//          changed" — staleness detection only applies to changes made from here on.
+	(data) => {
+		for (const agent of Object.values(data.agents ?? {})) {
+			if (agent.capabilityPrompts) {
+				const version: Partial<Record<CapabilityId, number>> = { ...agent.capabilityPromptsVersion };
+				for (const capId of Object.keys(agent.capabilityPrompts) as CapabilityId[]) {
+					version[capId] ??= CAPABILITY_GUIDANCE_VERSION.get(capId) ?? 1;
+				}
+				agent.capabilityPromptsVersion = version;
+			}
+			for (const [toolId, toolCfg] of Object.entries(agent.toolsConfig ?? {})) {
+				if (toolCfg?.promptGuidance !== undefined && toolCfg.promptGuidanceVersion === undefined) {
+					toolCfg.promptGuidanceVersion = TOOL_GUIDANCE_VERSION.get(toolId as BuiltInToolId) ?? 1;
+				}
+			}
+		}
+	},
 ];
 
 function runMigrations(data: PluginData): void {
@@ -504,16 +528,17 @@ export class PluginDataStore {
 	private readonly _plugin: SecondBrainPlugin;
 
 	/**
-	 * Agent names whose system prompt was customized and could not be auto-updated
-	 * to the latest default. Populated once at startup; read by main.ts to surface
-	 * a one-time Notice after the workspace is ready.
+	 * Guidance surfaces (base system prompt, per-capability guidance, per-tool
+	 * guidance) that a user had customized against an older default which has since
+	 * changed, so they couldn't be auto-updated. Populated once at startup; read by
+	 * the new-chat recommendations surface (and main.ts fallback) to notify the user.
 	 */
-	readonly stalePromptAgentNames: readonly string[];
+	readonly staleGuidance: readonly StaleGuidance[];
 
-	constructor(plugin: SecondBrainPlugin, initialData: PluginData, stalePromptAgentNames: string[] = []) {
+	constructor(plugin: SecondBrainPlugin, initialData: PluginData, staleGuidance: StaleGuidance[] = []) {
 		this._plugin = plugin;
 		this.#data = $state(initialData);
-		this.stalePromptAgentNames = stalePromptAgentNames;
+		this.staleGuidance = staleGuidance;
 	}
 
 	/**
@@ -899,11 +924,23 @@ export class PluginDataStore {
 			throw new Error(`Agent with ID "${agentId}" not found`);
 		}
 
+		// When capability guidance is (re)written, stamp each present capability with
+		// the current default version so normalizeAgent() can detect a later default
+		// change vs. a customization written against the current default (issue #356).
+		let stampedUpdates = updates;
+		if (updates.capabilityPrompts) {
+			const version: Partial<Record<CapabilityId, number>> = { ...agent.capabilityPromptsVersion };
+			for (const capId of Object.keys(updates.capabilityPrompts) as CapabilityId[]) {
+				version[capId] = CAPABILITY_GUIDANCE_VERSION.get(capId) ?? 1;
+			}
+			stampedUpdates = { ...updates, capabilityPromptsVersion: version };
+		}
+
 		this.#data.agents = {
 			...this.#data.agents,
 			[agentId]: {
 				...agent,
-				...updates,
+				...stampedUpdates,
 			},
 		};
 		this.saveSettings();
@@ -1009,10 +1046,17 @@ export class PluginDataStore {
 	updateAgentToolConfig(agentId: string, toolId: BuiltInToolId, config: Partial<ToolConfig>): void {
 		const agent = this.#data.agents[agentId];
 		if (agent?.toolsConfig[toolId]) {
-			agent.toolsConfig[toolId] = {
+			const next: ToolConfig = {
 				...agent.toolsConfig[toolId],
 				...config,
 			};
+			// Stamp the guidance version whenever promptGuidance is (re)written, so
+			// normalizeAgent() can later tell a stale-default customization from a
+			// current one (issue #356). read_content has dynamic guidance — skip it.
+			if (config.promptGuidance !== undefined && toolId !== "read_content") {
+				next.promptGuidanceVersion = TOOL_GUIDANCE_VERSION.get(toolId) ?? 1;
+			}
+			agent.toolsConfig[toolId] = next;
 			this.saveSettings();
 		}
 	}
@@ -2037,7 +2081,18 @@ export class PluginDataStore {
 
 let _pluginDataStore: PluginDataStore | null = null;
 
-function normalizeAgent(agent: AgentConfig): boolean {
+/** Human label for a capability's guidance, shown in the "updated" notice. */
+const CAPABILITY_GUIDANCE_LABEL: Record<CapabilityId, string> = {
+	vault: "Vault guidance",
+	web: "Web guidance",
+};
+
+/**
+ * Normalizes an agent in place and collects any built-in prompt/guidance that
+ * changed upstream while the user had a customization (so it couldn't be
+ * auto-migrated). Returns the stale records for that agent (empty when clean).
+ */
+function normalizeAgent(agent: AgentConfig): StaleGuidance[] {
 	// Ensure toolsConfig exists and has all tools
 	if (agent.toolsConfig) {
 		agent.toolsConfig = { ...structuredClone(DEFAULT_TOOLS_CONFIG), ...agent.toolsConfig };
@@ -2058,19 +2113,20 @@ function normalizeAgent(agent: AgentConfig): boolean {
 	agent.mcpServers ??= {};
 	agent.pluginExecTools ??= {};
 
+	const stale: StaleGuidance[] = [];
+
 	// --- Prompt auto-migration ---
 
 	// 1. System prompt: silently update to current default if the stored prompt still
-	//    matches an old default verbatim; leave custom prompts untouched.
-	//    Returns true when a custom prompt is stale (so callers can notify the user).
-	let hasStaleCustomPrompt = false;
+	//    matches an old default verbatim; leave custom prompts untouched and flag them
+	//    stale (so callers can notify the user).
 	const storedPromptVersion = agent.systemPromptVersion ?? 0;
 	if (storedPromptVersion < BASE_SYSTEM_PROMPT_VERSION) {
 		const historicalDefault = HISTORICAL_SYSTEM_PROMPTS.get(storedPromptVersion);
 		if (!historicalDefault || agent.systemPrompt === historicalDefault) {
 			agent.systemPrompt = BASE_SYSTEM_PROMPT;
 		} else {
-			hasStaleCustomPrompt = true;
+			stale.push({ agentId: agent.id, agentName: agent.name, kind: "system-prompt", label: "system prompt" });
 		}
 		agent.systemPromptVersion = BASE_SYSTEM_PROMPT_VERSION;
 	}
@@ -2078,12 +2134,30 @@ function normalizeAgent(agent: AgentConfig): boolean {
 	agent.systemPromptVersion ??= BASE_SYSTEM_PROMPT_VERSION;
 
 	// 2. Capability prompts: if the stored value is a verbatim historical default,
-	//    delete the key so the live default is used going forward.
+	//    delete the key so the live default is used going forward. If it's a
+	//    customization stamped against an older version, flag it stale.
 	if (agent.capabilityPrompts) {
 		for (const [capId, historicalSet] of HISTORICAL_CAPABILITY_GUIDANCE) {
 			const stored = agent.capabilityPrompts[capId];
-			if (stored !== undefined && historicalSet.has(stored)) {
+			if (stored === undefined) continue;
+			if (historicalSet.has(stored)) {
 				delete agent.capabilityPrompts[capId];
+				if (agent.capabilityPromptsVersion) delete agent.capabilityPromptsVersion[capId];
+				continue;
+			}
+			// Customized value: flag stale only when it was stamped against an older
+			// default version than the one currently shipped (absent stamp = treated
+			// as current — pre-versioning data is seeded by the v2→v3 migration).
+			const storedVersion =
+				agent.capabilityPromptsVersion?.[capId] ?? CAPABILITY_GUIDANCE_VERSION.get(capId) ?? 1;
+			if (storedVersion < (CAPABILITY_GUIDANCE_VERSION.get(capId) ?? 1)) {
+				stale.push({
+					agentId: agent.id,
+					agentName: agent.name,
+					kind: "capability",
+					targetId: capId,
+					label: CAPABILITY_GUIDANCE_LABEL[capId],
+				});
 			}
 		}
 	}
@@ -2092,26 +2166,37 @@ function normalizeAgent(agent: AgentConfig): boolean {
 	//    by READ_CONTENT_GUIDANCE_DEFAULTS elsewhere; skip it here.
 	for (const [toolId, historicalSet] of HISTORICAL_TOOL_GUIDANCE) {
 		const toolCfg = agent.toolsConfig[toolId];
-		if (toolCfg?.promptGuidance !== undefined && historicalSet.has(toolCfg.promptGuidance)) {
+		if (toolCfg?.promptGuidance === undefined) continue;
+		if (historicalSet.has(toolCfg.promptGuidance)) {
 			toolCfg.promptGuidance = undefined;
+			toolCfg.promptGuidanceVersion = undefined;
+			continue;
+		}
+		const storedVersion = toolCfg.promptGuidanceVersion ?? TOOL_GUIDANCE_VERSION.get(toolId) ?? 1;
+		if (storedVersion < (TOOL_GUIDANCE_VERSION.get(toolId) ?? 1)) {
+			stale.push({
+				agentId: agent.id,
+				agentName: agent.name,
+				kind: "tool",
+				targetId: toolId,
+				label: `${toolId} guidance`,
+			});
 		}
 	}
 
 	agent.summarizationModel ??= null;
 	agent.titleModel ??= null;
-	return hasStaleCustomPrompt;
+	return stale;
 }
 
-function normalizeAgents(mergedData: PluginData): string[] {
+function normalizeAgents(mergedData: PluginData): StaleGuidance[] {
 	if (!mergedData.agents[DEFAULT_AGENT_ID]) {
 		mergedData.agents[DEFAULT_AGENT_ID] = createDefaultAgent();
 	}
-	const staleAgentNames: string[] = [];
+	const stale: StaleGuidance[] = [];
 	for (const agentId of Object.keys(mergedData.agents)) {
 		const agent = mergedData.agents[agentId];
-		if (normalizeAgent(agent)) {
-			staleAgentNames.push(agent.name);
-		}
+		stale.push(...normalizeAgent(agent));
 	}
 	// Ensure defaultAgentId is valid
 	if (mergedData.defaultAgentId !== null && !mergedData.agents[mergedData.defaultAgentId]) {
@@ -2120,7 +2205,7 @@ function normalizeAgents(mergedData: PluginData): string[] {
 	if (!mergedData.selectedAgentId || !mergedData.agents[mergedData.selectedAgentId]) {
 		mergedData.selectedAgentId = mergedData.defaultAgentId ?? DEFAULT_AGENT_ID;
 	}
-	return staleAgentNames;
+	return stale;
 }
 
 export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataStore> {
@@ -2140,7 +2225,7 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 	// mutations would be persisted on the next save, corrupting the newer state.
 	const fromNewerPlugin = (rawData?.schemaVersion ?? 0) > CURRENT_SCHEMA_VERSION;
 
-	let stalePromptAgentNames: string[] = [];
+	let staleGuidance: StaleGuidance[] = [];
 	if (fromNewerPlugin) {
 		// Leave agents untouched; just ensure the bare minimum so the UI doesn't crash.
 		if (!mergedData.agents || Object.keys(mergedData.agents).length === 0) {
@@ -2153,7 +2238,7 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		mergedData.defaultAgentId = DEFAULT_AGENT_ID;
 		mergedData.selectedAgentId = DEFAULT_AGENT_ID;
 	} else {
-		stalePromptAgentNames = normalizeAgents(mergedData);
+		staleGuidance = normalizeAgents(mergedData);
 	}
 
 	// Resolve vault slug once on first load; persisted so vault renames don't orphan indexes
@@ -2161,7 +2246,7 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 		mergedData.vaultSlug = await resolveVaultSlug(plugin.app.vault.getName());
 	}
 
-	_pluginDataStore = new PluginDataStore(plugin, mergedData, stalePromptAgentNames);
+	_pluginDataStore = new PluginDataStore(plugin, mergedData, staleGuidance);
 
 	return _pluginDataStore;
 }

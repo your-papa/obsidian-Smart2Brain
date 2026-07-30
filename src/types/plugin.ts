@@ -142,6 +142,22 @@ export const VAULT_TOOL_IDS = BUILT_IN_TOOL_IDS.filter(
 export type CapabilityId = "vault" | "web";
 
 /**
+ * A built-in prompt or guidance default that changed in a plugin update while the
+ * user had a customized version, so it couldn't be auto-migrated. Surfaced as a
+ * dismissable "updated" notice in the new-chat recommendations surface (issue #356).
+ */
+export interface StaleGuidance {
+	agentId: string;
+	agentName: string;
+	/** Which surface is stale. */
+	kind: "system-prompt" | "capability" | "tool";
+	/** CapabilityId (kind "capability") or BuiltInToolId (kind "tool"); absent for the base prompt. */
+	targetId?: string;
+	/** Human-readable label for the notice, e.g. "system prompt", "Vault guidance", "web_search guidance". */
+	label: string;
+}
+
+/**
  * Definition of a built-in capability. Single source of truth shared by the editor UI
  * (which renders one card per capability) and `AgentManager.assembleSystemPrompt` (which
  * renders one `#` section per capability with its tools nested as `##` subheaders) so the
@@ -268,6 +284,12 @@ export interface ToolConfig {
 	description: string;
 	/** Optional prompt-only guidance injected into the assembled system prompt when this tool is enabled */
 	promptGuidance?: string;
+	/**
+	 * Which TOOL_GUIDANCE_VERSION `promptGuidance` was written against, stamped at
+	 * save time. Enables the same stale-default detection as capabilityPromptsVersion
+	 * (issue #356). Absent = pre-versioning (treated as current on first load).
+	 */
+	promptGuidanceVersion?: number;
 	/** Tool-specific settings */
 	settings?: ToolSpecificSettings;
 }
@@ -465,6 +487,13 @@ export interface AgentConfig {
 	 * pencil-edit; absent falls back to `buildDefaultCapabilityGuidance(id)`.
 	 */
 	capabilityPrompts?: Partial<Record<CapabilityId, string>>;
+	/**
+	 * Which CAPABILITY_GUIDANCE_VERSION each customized `capabilityPrompts` entry
+	 * was written against, stamped at save time. Lets normalizeAgent() detect when
+	 * the shipped default has moved since the user customized it (issue #356).
+	 * Absent for a capability = pre-versioning (treated as current on first load).
+	 */
+	capabilityPromptsVersion?: Partial<Record<CapabilityId, number>>;
 }
 
 /**
