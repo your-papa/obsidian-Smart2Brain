@@ -529,16 +529,16 @@ export class AgentManager {
 		this.agent?.invalidateAllRunnables();
 	}
 
-	openSystemPromptDiff(agentName: string): void {
+	openSystemPromptDiff(agentId: string): void {
 		const pluginData = getData();
-		const agent = Object.values(pluginData.agents).find((a) => a.name === agentName);
+		const agent = pluginData.agents[agentId];
 		if (!agent) return;
 		new SystemPromptModal(
 			this.plugin,
 			{
-				getPrompt: () => agent.systemPrompt,
+				getPrompt: () => pluginData.agents[agentId]?.systemPrompt ?? BASE_SYSTEM_PROMPT,
 				setPrompt: (prompt: string) => {
-					pluginData.updateAgent(agent.id, { systemPrompt: prompt });
+					pluginData.updateAgent(agentId, { systemPrompt: prompt });
 					this.invalidateSystemPromptCaches();
 				},
 				defaultPrompt: BASE_SYSTEM_PROMPT,

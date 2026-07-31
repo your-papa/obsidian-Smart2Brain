@@ -128,7 +128,7 @@ function reviewNotice(notice: UpdateNotice): void {
 	if (!mgr) return;
 	switch (notice.kind) {
 		case "system-prompt":
-			mgr.openSystemPromptDiff(notice.agentName);
+			mgr.openSystemPromptDiff(notice.agentId);
 			break;
 		case "capability":
 			if (notice.targetId) mgr.openCapabilityGuidanceDiff(notice.agentId, notice.targetId as CapabilityId);
