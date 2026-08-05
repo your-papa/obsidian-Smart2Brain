@@ -485,6 +485,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 	// UI state
 	isVerbose: false,
+	showToolIODetails: false,
 	chatOpenLocation: "tab" as ChatOpenLocation,
 	lastActiveChatId: null,
 	onboardingComplete: false,
@@ -1271,6 +1272,14 @@ export class PluginDataStore {
 	}
 	set isVerbose(val: boolean) {
 		this.#data.isVerbose = val;
+		this.saveSettings();
+	}
+
+	get showToolIODetails() {
+		return this.#data.showToolIODetails ?? false;
+	}
+	set showToolIODetails(val: boolean) {
+		this.#data.showToolIODetails = val;
 		this.saveSettings();
 	}
 

@@ -206,3 +206,47 @@ export function toolDisplayName(tool: UnifiedToolCall): string {
 	}
 	return tool.name;
 }
+
+/**
+ * A run of consecutive tool calls in a step that render as a single row. Most
+ * groups hold one call; a group of several always shares the same tool name and
+ * is merged into one sentence (e.g. three `grep_notes` calls → one "Searched for
+ * text …" row listing each pattern), expanding to the individual calls.
+ *
+ * `id` is stable (the first call's id) so Svelte keying survives streaming as a
+ * group grows. `merged` is a convenience flag for `calls.length > 1`.
+ */
+export interface ToolCallGroup {
+	id: string;
+	name: string;
+	calls: UnifiedToolCall[];
+	merged: boolean;
+}
+
+/**
+ * Groups a step's tools into rows, merging *consecutive* calls to the same tool
+ * so repeated calls collapse into one sentence. Calls that must stay individually
+ * legible are never merged and always form a group of one:
+ *  - `task` calls (each subagent is its own labelled node), and
+ *  - any call with folded subagent `children` (its own sub-timeline hangs off it).
+ * Order is preserved; only adjacent same-name calls coalesce, so an A A B A
+ * sequence yields [A A] [B] [A] rather than reordering.
+ */
+export function groupStepTools(tools: UnifiedToolCall[]): ToolCallGroup[] {
+	const groups: ToolCallGroup[] = [];
+
+	const isMergeable = (tool: UnifiedToolCall): boolean =>
+		tool.name !== "task" && !(tool.children && tool.children.length > 0);
+
+	for (const tool of tools) {
+		const last = groups.at(-1);
+		if (last && isMergeable(tool) && last.name === tool.name && isMergeable(last.calls[0])) {
+			last.calls.push(tool);
+			last.merged = true;
+			continue;
+		}
+		groups.push({ id: tool.id, name: tool.name, calls: [tool], merged: false });
+	}
+
+	return groups;
+}
