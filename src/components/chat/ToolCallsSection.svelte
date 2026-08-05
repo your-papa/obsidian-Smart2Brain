@@ -145,10 +145,6 @@ function getVisibleItems<T>(items: T[] | undefined, maxItems = 8): { visible: T[
 	};
 }
 
-function countLines(value: string): number {
-	return value.split(/\r?\n/).length;
-}
-
 function formatReadContentSource(sourceType: "file" | "pdf" | "excalidraw"): string {
 	if (sourceType === "pdf") return "PDF";
 	if (sourceType === "excalidraw") return "Excalidraw";
@@ -363,7 +359,7 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   {#if hasFriendlyResult(outputModel)}
     <div class="tool-io-section">
       <div class="tool-io-output">
-        {@render outputRenderer(outputModel!)}
+        {@render outputBody(outputModel!)}
       </div>
     </div>
   {:else if showRawIO && tool.status !== "running"}
@@ -796,10 +792,6 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   {/if}
 {/snippet}
 
-{#snippet outputRenderer(model: ToolOutputRenderModel)}
-  {@render outputBody(model)}
-{/snippet}
-
 {#if noTimelineWrap}
   <!-- Inline rendering: content streaming with no tool-call steps yet.
        Renders identical to the completed plain-MarkdownRenderer path so there
@@ -1144,9 +1136,9 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
     color: var(--color-red);
   }
 
-  /* Muted one-line result summary shown after the plain-language label
-     (e.g. "3 notes", "512 lines"). Hugs its content on the right; the label's
-     flex-grow keeps the chevron pinned to the edge. */
+  /* Faint task-description subtitle shown only on a subagent `task` row (the
+     "what it was asked to do"). Regular tools fold their outcome into the label
+     instead, so this never carries a result count. */
   .tool-card-summary {
     flex: 0 1 auto;
     min-width: 0;

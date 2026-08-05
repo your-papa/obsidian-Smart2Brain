@@ -556,10 +556,15 @@ export function buildMergedToolSummary(toolName: string, calls: MergedCall[], st
 	// No merge recipe (or a tool whose calls don't share a target): fall back to a
 	// count phrase using the single-call verb, so the row still reads as a sentence.
 	if (!spec) {
-		const one = buildToolSummary(toolName, calls[0].input, calls[0].model, status);
-		// Re-tense the single label's verb by swapping its leading clause is fragile;
-		// instead append a count. The single label already carries the right tense.
-		return { label: `${one.label} ×${calls.length}`, summary: "" };
+		// Re-summarize with empty input so the label is just the tense-aware verb
+		// (e.g. "Listed all tags"), never the *first* call's target clause — that
+		// clause describes one call and would misrepresent the whole group.
+		const base = buildToolSummary(toolName, {}, undefined, status);
+		const label = `${base.label} ×${calls.length}`;
+		// Sum the count-based outcomes each call already computed so a merged
+		// generic tool still reports its result (e.g. two get_all_tags → "found N tags").
+		const summary = status === "failed" ? "failed" : mergedGenericSummary(calls);
+		return { label, summary };
 	}
 
 	const targets = calls.map((c) => spec.target(c.input)).filter((t): t is string => !!t);
@@ -575,6 +580,36 @@ export function buildMergedToolSummary(toolName: string, calls: MergedCall[], st
 	}
 
 	const label = renderLabel({ verb: spec.verb, rest }, status);
+	// A failed group must not display a positive aggregate ("found 3 notes") in red —
+	// mirror the single-call failed guard. Aggregates are also empty while running.
+	if (status === "failed") return { label, summary: "failed" };
 	const summary = status === "running" ? "" : (spec.aggregate?.(calls) ?? "");
 	return { label, summary };
+}
+
+/**
+ * Sums the count-based outcomes (list/table/keyValue) across a merged run of a
+ * generic tool with no dedicated merge recipe, so the row still reports a result.
+ * Returns an empty string when no call produced a countable shape.
+ */
+function mergedGenericSummary(calls: MergedCall[]): string {
+	let total = 0;
+	let noun: string | undefined;
+	for (const c of calls) {
+		switch (c.model?.kind) {
+			case "list":
+				total += c.model.items.length;
+				noun ??= "item";
+				break;
+			case "table":
+				total += c.model.rows.length;
+				noun ??= "row";
+				break;
+			case "keyValue":
+				total += c.model.entries.length;
+				noun ??= "field";
+				break;
+		}
+	}
+	return noun ? `found ${pluralize(total, noun)}` : "";
 }

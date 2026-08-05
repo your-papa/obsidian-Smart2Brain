@@ -272,11 +272,50 @@ describe("buildMergedToolSummary", () => {
 	});
 
 	it("falls back to a ×N label for tools without a merge recipe", () => {
+		const calls = [mergedCall("get_all_tags", ["#a", "#b"], {}), mergedCall("get_all_tags", ["#a", "#b"], {})];
+		const s = buildMergedToolSummary("get_all_tags", calls, "completed");
+		expect(s.label).toContain("×2");
+	});
+
+	it("keeps the verb-only label for a ×N fallback (never the first call's target)", () => {
+		// The generic fallback re-summarizes with empty input so the label is the
+		// tense-aware verb, not the first call's argument clause.
+		const calls = [
+			mergedCall("my_custom_tool", ["a"], { path: "Notes/first.md" }),
+			mergedCall("my_custom_tool", ["b"], { path: "Notes/second.md" }),
+		];
+		const s = buildMergedToolSummary("my_custom_tool", calls, "completed");
+		expect(s.label).toBe("Used My Custom Tool ×2");
+		expect(s.label).not.toContain("first.md");
+	});
+
+	it("aggregates count-based outcomes for a ×N generic merge", () => {
+		// Two list-returning generic calls (2 + 3 items) → the merged row still
+		// reports the summed count rather than dropping the outcome.
 		const calls = [
 			mergedCall("get_all_tags", ["#a", "#b"], {}),
-			mergedCall("get_all_tags", ["#a", "#b"], {}),
+			mergedCall("get_all_tags", ["#a", "#b", "#c"], {}),
 		];
 		const s = buildMergedToolSummary("get_all_tags", calls, "completed");
+		expect(s.summary).toBe("found 5 items");
+	});
+
+	it("does not show a positive aggregate for a failed merged group", () => {
+		// One call failed; the group status is failed. The merged row must read as
+		// failed, not "found N notes" (which would render in red implying success).
+		const calls = [
+			mergedCall("search_notes", JSON.stringify({ totalResults: 3, results: [] }), { query: "a" }),
+			mergedCall("search_notes", JSON.stringify({ totalResults: 2, results: [] }), { query: "b" }),
+		];
+		const s = buildMergedToolSummary("search_notes", calls, "failed");
+		expect(s.summary).toBe("failed");
+		expect(s.label).toBe("Searched notes for “a” and “b”");
+	});
+
+	it("does not show an aggregate for a failed ×N fallback group", () => {
+		const calls = [mergedCall("get_all_tags", ["#a"], {}), mergedCall("get_all_tags", ["#b"], {})];
+		const s = buildMergedToolSummary("get_all_tags", calls, "failed");
+		expect(s.summary).toBe("failed");
 		expect(s.label).toContain("×2");
 	});
 });
