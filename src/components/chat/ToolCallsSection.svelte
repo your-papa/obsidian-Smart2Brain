@@ -1098,7 +1098,13 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   }
 
   .tool-card-header {
-    display: flex;
+    /* inline-flex so the clickable/hoverable area hugs the text instead of
+       spanning the full card width — clicking empty space to the right no
+       longer toggles the row or selects the label (matches the compact feel
+       of the "Thinking process" summary). max-width keeps long labels from
+       overflowing the card; ellipsis on the name handles the overflow. */
+    display: inline-flex;
+    max-width: 100%;
     align-items: center;
     gap: 8px;
     padding: 3px 6px;
@@ -1119,9 +1125,9 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
        only the text color — no background highlight, no chevron. */
     color: var(--text-faint);
     transition: color 0.15s;
-    /* Grow to fill when it is the only element, but shrink with ellipsis so a
-       long phrase yields room to the summary. */
-    flex: 1 1 auto;
+    /* Size to content, but shrink with ellipsis if the label alone would
+       exceed the card width (header is capped at max-width: 100%). */
+    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
