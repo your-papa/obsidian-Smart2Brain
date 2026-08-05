@@ -6,11 +6,19 @@ import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { READ_CONTENT_GUIDANCE_DEFAULTS, getData, getReadContentGuidance } from "../stores/dataStore.svelte";
-import { CAPABILITIES, VAULT_TOOL_IDS, WEB_TOOL_IDS, type BuiltInToolId, type AgentConfig } from "../types/plugin";
+import {
+	CAPABILITIES,
+	VAULT_TOOL_IDS,
+	WEB_TOOL_IDS,
+	type BuiltInToolId,
+	type CapabilityId,
+	type AgentConfig,
+} from "../types/plugin";
 import { VIEW_TYPE_CHAT } from "../views/chat/Chat";
 import { lookupModelInfo } from "../providers/modelsDevApi";
 import { fetchOllamaModelsInfo } from "../providers/ollamaModels";
 import { SystemPromptModal } from "../components/modal/SystemPromptModal";
+import { CapabilitySettingsModal } from "../components/modal/CapabilitySettingsModal";
 import {
 	extractCapabilities as extractOpenRouterCapabilities,
 	fetchOpenRouterModels,
@@ -521,22 +529,47 @@ export class AgentManager {
 		this.agent?.invalidateAllRunnables();
 	}
 
-	openSystemPromptDiff(agentName: string): void {
+	openSystemPromptDiff(agentId: string): void {
 		const pluginData = getData();
-		const agent = Object.values(pluginData.agents).find((a) => a.name === agentName);
+		const agent = pluginData.agents[agentId];
 		if (!agent) return;
 		new SystemPromptModal(
 			this.plugin,
 			{
-				getPrompt: () => agent.systemPrompt,
+				getPrompt: () => pluginData.agents[agentId]?.systemPrompt ?? BASE_SYSTEM_PROMPT,
 				setPrompt: (prompt: string) => {
-					pluginData.updateAgent(agent.id, { systemPrompt: prompt });
+					pluginData.updateAgent(agentId, { systemPrompt: prompt });
 					this.invalidateSystemPromptCaches();
 				},
 				defaultPrompt: BASE_SYSTEM_PROMPT,
 			},
 			{ title: `System Prompt — ${agent.name}`, showDiff: true },
 		).open();
+	}
+
+	/**
+	 * Opens the per-capability settings modal so the user can review the capability's
+	 * guidance against the current default (GuidanceEditor has a built-in "Diff with
+	 * default" toggle). Used by the "updated guidance" notice's Review action for a
+	 * `kind: "capability"` stale record.
+	 */
+	openCapabilityGuidanceDiff(agentId: string, capId: CapabilityId): void {
+		const pluginData = getData();
+		if (!pluginData.agents[agentId] || !CAPABILITIES.some((c) => c.id === capId)) return;
+		new CapabilitySettingsModal(this.plugin, capId, agentId, {
+			onChange: () => this.invalidateAgentRunnable(agentId),
+		}).open();
+	}
+
+	/**
+	 * Opens the settings modal for the capability that owns `toolId`, where the tool's
+	 * own guidance (with its "Diff with default" toggle) lives. Used by the "updated
+	 * guidance" notice's Review action for a `kind: "tool"` stale record.
+	 */
+	openToolGuidanceDiff(agentId: string, toolId: BuiltInToolId): void {
+		const cap = CAPABILITIES.find((c) => c.toolIds.includes(toolId));
+		if (!cap) return;
+		this.openCapabilityGuidanceDiff(agentId, cap.id);
 	}
 
 	/**

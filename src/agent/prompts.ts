@@ -160,3 +160,27 @@ export const HISTORICAL_TOOL_GUIDANCE: ReadonlyMap<
 		]),
 	],
 ]);
+
+/**
+ * Current default version per capability. Bump the entry for a capability
+ * whenever its default guidance text changes (and append the new default to
+ * HISTORICAL_CAPABILITY_GUIDANCE). Agents stamp the version their customized
+ * guidance was written against (capabilityPromptsVersion) so normalizeAgent()
+ * can flag "the default moved since you customized this" — see issue #356.
+ * Capabilities absent here are treated as version 1.
+ */
+export const CAPABILITY_GUIDANCE_VERSION: ReadonlyMap<CapabilityId, number> = new Map([
+	["vault", 1],
+	["web", 1],
+]);
+
+/**
+ * Current default version per built-in tool guidance. Same contract as
+ * CAPABILITY_GUIDANCE_VERSION. Tools absent here are treated as version 1.
+ * read_content is intentionally omitted (dynamic guidance).
+ */
+export const TOOL_GUIDANCE_VERSION: ReadonlyMap<import("../types/plugin").BuiltInToolId, number> = new Map([
+	["execute_javascript", 1],
+	["fetch_url", 1],
+	["web_search", 1],
+]);

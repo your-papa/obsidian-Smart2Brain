@@ -21,6 +21,7 @@ import CollapsibleUserBubble from "./CollapsibleUserBubble.svelte";
 import UserAttachmentFiles from "./UserAttachmentFiles.svelte";
 import UserAttachmentImages from "./UserAttachmentImages.svelte";
 import ToolCallsSection from "./ToolCallsSection.svelte";
+import ChatRecommendations from "./ChatRecommendations.svelte";
 import { icon } from "../../utils/utils";
 
 interface Props {
@@ -310,8 +311,7 @@ $effect(() => {
       {:else if !messages || messages.length === 0}
         <!-- Empty state -->
         <div class="flex flex-col items-center justify-center h-full">
-          <p class="text-lg mb-1">Start a new conversation</p>
-          <p class="text-sm opacity-70">Ask me anything about your notes.</p>
+          <ChatRecommendations {registry} />
         </div>
       {:else}
         {#each messages as messagePair, index (messagePair.id)}
