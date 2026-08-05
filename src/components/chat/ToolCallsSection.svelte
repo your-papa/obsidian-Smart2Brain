@@ -404,7 +404,6 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   <details class="tool-card tool-card-merged">
     <summary class="tool-card-header">
       <span class="tool-card-name" class:tool-card-name-failed={status === "failed"}>{foldOutcome(summary)}</span>
-      <span class="tool-card-merged-count">{group.calls.length}×</span>
     </summary>
 
     <!-- Each merged call keeps its own friendly result (and raw I/O in dev mode). -->
@@ -600,6 +599,14 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
           </details>
         {/each}
       </div>
+    {:else}
+      <!-- No nested sections (e.g. a heterogeneous array reduced to an item count):
+           show the full payload as the friendly result so its contents remain
+           visible without the developer raw-I/O toggle. -->
+      <MarkdownRenderer
+        content={formatRawToolOutput(model.json)}
+        class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.8rem] leading-[1.55] [&_pre]:my-0 [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded"
+      />
     {/if}
   {:else if model.kind === "search_notes"}
     {@const visibleResults = getVisibleItems(model.payload.results, 6)}
@@ -1145,15 +1152,6 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   }
 
   /* ── Merged multi-call row ── */
-  /* Small "3×" count chip trailing the merged sentence. The label flex-grows and
-     ellipsizes, so the chip hugs the end of the (possibly truncated) sentence. */
-  .tool-card-merged-count {
-    flex: 0 0 auto;
-    color: var(--text-faint);
-    font-size: 0.72rem;
-    font-variant-numeric: tabular-nums;
-  }
-
   /* Expanded body of a merged row: one indented sub-entry per call, each with its
      own label and full input/output, under the same left rule as a single row. */
   .tool-card-merged-list {

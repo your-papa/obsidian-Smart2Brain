@@ -157,6 +157,23 @@ describe("buildToolOutputRenderModel", () => {
 		expect(model.sections.map((section) => section.key)).toEqual(["meta", "items"]);
 	});
 
+	it("preserves the full payload for a heterogeneous array (rendered when no sections exist)", () => {
+		// A non-scalar, non-tabular array reduces to an item count with no nested
+		// sections; the complete payload must still live in `json` so the UI can
+		// render it as the friendly result (issue: it must not be lost behind the
+		// developer-only raw-I/O toggle).
+		const model = buildToolOutputRenderModel("mcp_tool", [{ a: 1 }, "text", 42]);
+
+		expect(model.kind).toBe("structured");
+		if (model.kind !== "structured") return;
+		expect(model.sections).toEqual([]);
+		expect(model.summaryEntries).toEqual([{ key: "items", value: "3" }]);
+		// The full contents survive in `json` (not just the count).
+		expect(model.json).toContain('"a": 1');
+		expect(model.json).toContain("text");
+		expect(model.json).toContain("42");
+	});
+
 	it("unwraps langchain content blocks", () => {
 		const model = buildToolOutputRenderModel("mcp_tool", [{ type: "json", data: { count: 2 } }]);
 
