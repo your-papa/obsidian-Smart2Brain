@@ -11,7 +11,7 @@ import {
 	type ToolCallGroup,
 	type UnifiedToolCall,
 } from "./toolTimelineModel";
-import { buildToolSummary, buildMergedToolSummary, type MergedCall } from "./toolSummaryModel";
+import { buildToolSummary, buildMergedToolSummary, type MergedCall, type ToolSummary } from "./toolSummaryModel";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 
 interface Props {
@@ -74,6 +74,16 @@ function getTaskSummary(input: Record<string, unknown> | null | undefined): stri
 /** Output render model for a tool call, or undefined if it hasn't produced output. */
 function toOutputModel(tool: UnifiedToolCall): ToolOutputRenderModel | undefined {
 	return tool.output !== undefined ? buildToolOutputRenderModel(tool.name, tool.output, tool.input) : undefined;
+}
+
+/**
+ * Folds a tool summary into one continuous sentence — the plain-language label
+ * with the outcome clause appended after a comma (e.g. "Read main.md, 512 lines").
+ * The outcome is already phrased to read as a natural continuation. When there is
+ * no outcome yet (still running, or nothing to report) just the label is shown.
+ */
+function foldOutcome(summary: ToolSummary): string {
+	return summary.summary ? `${summary.label}, ${summary.summary}` : summary.label;
 }
 
 /**
@@ -290,12 +300,16 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
       : undefined}
   {@const isSubAgentParent = tool.name === "task" && !!tool.subAgentName}
   {@const toolSummary = buildToolSummary(tool.name, tool.input, outputModel, tool.status)}
-  {@const headerLabel = tool.name === "task" ? toolDisplayName(tool) : toolSummary.label}
-  {@const headerSummary = tool.name === "task" ? getTaskSummary(tool.input) : toolSummary.summary}
+  {@const isTask = tool.name === "task"}
+  <!-- Regular tools fold the outcome into the sentence ("Read main.md, 512 lines");
+       task rows keep the subagent name as the label and the task description as a
+       separate faint subtitle rather than a comma-joined outcome clause. -->
+  {@const headerLabel = isTask ? toolDisplayName(tool) : foldOutcome(toolSummary)}
+  {@const headerSubtitle = isTask ? getTaskSummary(tool.input) : ""}
   {#if isExpandable(tool)}
     <details class="tool-card">
       <summary class="tool-card-header">
-        {@render toolCardHeader(headerLabel, headerSummary, tool.status, isSubAgentParent, tool.subAgentName)}
+        {@render toolCardHeader(headerLabel, headerSubtitle, tool.status, isSubAgentParent, tool.subAgentName)}
       </summary>
       <div class="tool-card-body">
         {@render toolBody(tool, outputModel)}
@@ -304,7 +318,7 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   {:else}
     <div class="tool-card tool-card-flat">
       <div class="tool-card-header">
-        {@render toolCardHeader(headerLabel, headerSummary, tool.status, isSubAgentParent, tool.subAgentName)}
+        {@render toolCardHeader(headerLabel, headerSubtitle, tool.status, isSubAgentParent, tool.subAgentName)}
       </div>
     </div>
   {/if}
@@ -312,7 +326,7 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
 
 {#snippet toolCardHeader(
   label: string,
-  summary: string,
+  subtitle: string,
   status: UnifiedToolCall["status"],
   isSubAgentParent: boolean,
   subAgentName: string | undefined,
@@ -323,8 +337,8 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   {:else if subAgentName}
     <span class="tool-card-subagent-badge">via {subAgentName}</span>
   {/if}
-  {#if summary}
-    <span class="tool-card-summary">{summary}</span>
+  {#if subtitle}
+    <span class="tool-card-summary">{subtitle}</span>
   {/if}
 {/snippet}
 
@@ -389,11 +403,8 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   {@const summary = buildMergedToolSummary(group.name, toMergedCalls(group), status)}
   <details class="tool-card tool-card-merged">
     <summary class="tool-card-header">
-      <span class="tool-card-name" class:tool-card-name-failed={status === "failed"}>{summary.label}</span>
+      <span class="tool-card-name" class:tool-card-name-failed={status === "failed"}>{foldOutcome(summary)}</span>
       <span class="tool-card-merged-count">{group.calls.length}×</span>
-      {#if summary.summary}
-        <span class="tool-card-summary">{summary.summary}</span>
-      {/if}
     </summary>
 
     <!-- Each merged call keeps its own friendly result (and raw I/O in dev mode). -->
@@ -403,10 +414,7 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
         <div class="tool-card-merged-item">
           <div class="tool-card-merged-item-label">
             <span class="tool-card-merged-item-index">{callIdx + 1}.</span>
-            <span class:tool-card-name-failed={call.status === "failed"}>{callSummary.label}</span>
-            {#if callSummary.summary}
-              <span class="tool-card-summary">{callSummary.summary}</span>
-            {/if}
+            <span class:tool-card-name-failed={call.status === "failed"}>{foldOutcome(callSummary)}</span>
           </div>
           <div class="tool-card-body tool-card-body-merged">
             {@render toolBody(call, toOutputModel(call))}
@@ -1137,10 +1145,10 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   }
 
   /* ── Merged multi-call row ── */
-  /* Small "3×" count chip after the merged sentence; grows to keep the summary
-     and chevron right-aligned like the single-row layout. */
+  /* Small "3×" count chip trailing the merged sentence. The label flex-grows and
+     ellipsizes, so the chip hugs the end of the (possibly truncated) sentence. */
   .tool-card-merged-count {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     color: var(--text-faint);
     font-size: 0.72rem;
     font-variant-numeric: tabular-nums;

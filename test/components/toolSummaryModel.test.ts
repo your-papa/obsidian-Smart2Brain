@@ -35,13 +35,13 @@ describe("buildToolSummary", () => {
 			);
 			const s = buildToolSummary("search_notes", { query: "vector store" }, out, "completed");
 			expect(s.label).toBe("Searched notes for “vector store”");
-			expect(s.summary).toBe("3 notes");
+			expect(s.summary).toBe("found 3 notes");
 		});
 
 		it("reports no matches for an empty result set", () => {
 			const out = model("search_notes", JSON.stringify({ query: "zzz", totalResults: 0, results: [] }));
 			const s = buildToolSummary("search_notes", { query: "zzz" }, out, "completed");
-			expect(s.summary).toBe("no matches");
+			expect(s.summary).toBe("found no matches");
 		});
 
 		it("handles recent-only searches without a query", () => {
@@ -56,13 +56,13 @@ describe("buildToolSummary", () => {
 			const out = model("grep_notes", payload);
 			const s = buildToolSummary("grep_notes", { pattern: "TODO" }, out, "completed");
 			expect(s.label).toBe("Searched for text “TODO”");
-			expect(s.summary).toBe("5 matches in 2 files");
+			expect(s.summary).toBe("found 5 matches in 2 files");
 		});
 
 		it("reports no matches", () => {
 			const out = model("grep_notes", JSON.stringify({ pattern: "TODO", total_matches: 0, files_searched: 4 }));
 			const s = buildToolSummary("grep_notes", { pattern: "TODO" }, out, "completed");
-			expect(s.summary).toBe("no matches");
+			expect(s.summary).toBe("found no matches");
 		});
 	});
 
@@ -76,7 +76,7 @@ describe("buildToolSummary", () => {
 			});
 			const s = buildToolSummary("list_directory", { path: "Notes/Projects" }, out, "completed");
 			expect(s.label).toBe("Listed folder Projects");
-			expect(s.summary).toBe("1 folder, 2 files");
+			expect(s.summary).toBe("found 1 folder and 2 files");
 		});
 
 		it("labels the vault root", () => {
@@ -105,7 +105,7 @@ describe("buildToolSummary", () => {
 			const out = model("manage_notes", "Proposed 2 note operation(s) across 1 path(s) (1 create, 1 append)");
 			const s = buildToolSummary("manage_notes", {}, out, "completed");
 			expect(s.label).toBe("Edited a note");
-			expect(s.summary).toBe("2 operations · 1 note");
+			expect(s.summary).toBe("2 operations across 1 note");
 		});
 
 		it("uses present tense while editing", () => {
@@ -119,7 +119,7 @@ describe("buildToolSummary", () => {
 			const out = model("execute_javascript", "JavaScript execution failed: boom", { code: "throw 1" });
 			const s = buildToolSummary("execute_javascript", { code: "throw 1" }, out, "completed");
 			expect(s.label).toBe("Ran JavaScript");
-			expect(s.summary).toBe("error");
+			expect(s.summary).toBe("errored");
 		});
 
 		it("summarizes logs and duration on success", () => {
@@ -129,7 +129,7 @@ describe("buildToolSummary", () => {
 				{ code: "console.log('hi')" },
 			);
 			const s = buildToolSummary("execute_javascript", { code: "console.log('hi')" }, out, "completed");
-			expect(s.summary).toContain("2 logs");
+			expect(s.summary).toContain("logged 2 lines");
 			expect(s.summary).toContain("12ms");
 		});
 
@@ -184,7 +184,7 @@ describe("buildToolSummary", () => {
 		it("derives a count hint from list output", () => {
 			const out = model("my_custom_tool", ["a", "b", "c"]);
 			const s = buildToolSummary("my_custom_tool", {}, out, "completed");
-			expect(s.summary).toBe("3 items");
+			expect(s.summary).toBe("found 3 items");
 		});
 	});
 
@@ -220,7 +220,7 @@ describe("buildMergedToolSummary", () => {
 		];
 		const s = buildMergedToolSummary("grep_notes", calls, "completed");
 		expect(s.label).toBe("Searched for text “foo” and “bar”");
-		expect(s.summary).toBe("5 matches");
+		expect(s.summary).toBe("found 5 matches");
 	});
 
 	it("lists search queries with an Oxford-style 'and' and sums notes", () => {
@@ -231,7 +231,7 @@ describe("buildMergedToolSummary", () => {
 		];
 		const s = buildMergedToolSummary("search_notes", calls, "completed");
 		expect(s.label).toBe("Searched notes for “a”, “b” and “c”");
-		expect(s.summary).toBe("7 notes");
+		expect(s.summary).toBe("found 7 notes");
 	});
 
 	it("caps a long target list with '+N more'", () => {

@@ -2,17 +2,17 @@ import type { ToolCallStatus } from "../../stores/chatStore.svelte";
 import type { ToolOutputRenderModel } from "./toolOutputRenderModel";
 
 /**
- * A compact, one-line description of a tool call — a short plain-language phrase
- * (e.g. `Searched notes for "vector store"`, `Read main.ts`) plus an optional
- * muted result summary shown on the collapsed row.
+ * A compact, one-line description of a tool call: a plain-language `label` and an
+ * `summary` outcome clause that the UI folds into one sentence
+ * (e.g. label `Read main.md` + summary `512 lines` → `Read main.md, 512 lines`).
  *
- * `label` is the primary line, written as a short sentence an average user can
- * read at a glance (not `verb(target)` function syntax) and tense-matched to the
- * tool's status: **present continuous while running** (`Reading main.ts`), **past
- * tense once finished** (`Read main.ts`). `summary` is the muted trailing detail
- * describing the outcome (e.g. `3 notes`, `512 lines`, `no matches`). Either can
- * be empty when there is nothing meaningful to show yet (e.g. a tool still
- * running with no input).
+ * `label` is written as a short sentence an average user can read at a glance (not
+ * `verb(target)` function syntax) and tense-matched to the tool's status:
+ * **present continuous while running** (`Reading main.ts`), **past tense once
+ * finished** (`Read main.ts`). `summary` is the outcome, phrased to read as a
+ * natural continuation of the label (`found 3 notes`, `found no matches`,
+ * `512 lines`). Either can be empty when there is nothing meaningful to show yet
+ * (e.g. a tool still running with no input).
  */
 export interface ToolSummary {
 	label: string;
@@ -152,7 +152,7 @@ function summarizeSearchNotes(
 
 	if (model?.kind !== "search_notes") return { label, summary: "" };
 	const total = model.payload.totalResults ?? model.payload.results?.length ?? 0;
-	return { label, summary: total === 0 ? "no matches" : pluralize(total, "note") };
+	return { label, summary: total === 0 ? "found no matches" : `found ${pluralize(total, "note")}` };
 }
 
 function summarizeGrepNotes(
@@ -170,9 +170,9 @@ function summarizeGrepNotes(
 		const total = numberProp(payload, "total_matches");
 		const files = numberProp(payload, "files_searched");
 		if (total !== undefined) {
-			if (total === 0) return { label, summary: "no matches" };
+			if (total === 0) return { label, summary: "found no matches" };
 			const filePart = files !== undefined ? ` in ${pluralize(files, "file")}` : "";
-			return { label, summary: `${pluralize(total, "match", "matches")}${filePart}` };
+			return { label, summary: `found ${pluralize(total, "match", "matches")}${filePart}` };
 		}
 	}
 	return { label, summary: "" };
@@ -194,7 +194,7 @@ function summarizeListDirectory(
 	const parts: string[] = [];
 	if (folders > 0) parts.push(pluralize(folders, "folder"));
 	parts.push(pluralize(files, "file"));
-	return { label, summary: parts.join(", ") };
+	return { label, summary: `found ${parts.join(" and ")}` };
 }
 
 function summarizeReadContent(
@@ -220,25 +220,25 @@ function summarizeManageNotes(model: ToolOutputRenderModel | undefined): RawSumm
 		paths === 1
 			? { verb: verb("Editing a note", "Edited a note") }
 			: { verb: verb("Editing notes", "Edited notes") };
-	return { label, summary: `${pluralize(operations, "operation")} · ${pluralize(paths, "note")}` };
+	return { label, summary: `${pluralize(operations, "operation")} across ${pluralize(paths, "note")}` };
 }
 
 function summarizeExecuteJavaScript(model: ToolOutputRenderModel | undefined): RawSummary {
 	const label: Label = { verb: verb("Running JavaScript", "Ran JavaScript") };
 	if (model?.kind !== "execute_javascript") return { label, summary: "" };
-	if (model.payload.state === "error") return { label, summary: "error" };
+	if (model.payload.state === "error") return { label, summary: "errored" };
 	const logs = model.payload.logs.length;
 	const parts: string[] = [];
-	if (logs > 0) parts.push(pluralize(logs, "log"));
-	if (model.payload.resultText) parts.push("returned value");
-	if (model.payload.durationMs !== undefined) parts.push(`${model.payload.durationMs}ms`);
-	return { label, summary: parts.join(" · ") };
+	if (logs > 0) parts.push(`logged ${pluralize(logs, "line")}`);
+	if (model.payload.resultText) parts.push("returned a value");
+	if (model.payload.durationMs !== undefined) parts.push(`in ${model.payload.durationMs}ms`);
+	return { label, summary: parts.join(" ") };
 }
 
 function summarizeGetAllTags(model: ToolOutputRenderModel | undefined): RawSummary {
 	const label: Label = { verb: verb("Listing all tags", "Listed all tags") };
 	const count = listLength(model);
-	return { label, summary: count !== undefined ? pluralize(count, "tag") : "" };
+	return { label, summary: count !== undefined ? `found ${pluralize(count, "tag")}` : "" };
 }
 
 function summarizeGetProperties(input: Record<string, unknown> | null | undefined): RawSummary {
@@ -266,7 +266,7 @@ function summarizeWebSearch(
 		? { verb: verb("Searching the web for", "Searched the web for"), rest: `“${truncateTarget(query)}”` }
 		: { verb: verb("Searching the web", "Searched the web") };
 	const count = listLength(model);
-	return { label, summary: count !== undefined ? pluralize(count, "result") : "" };
+	return { label, summary: count !== undefined ? `found ${pluralize(count, "result")}` : "" };
 }
 
 function summarizeLoadSkill(input: Record<string, unknown> | null | undefined): RawSummary {
@@ -298,13 +298,13 @@ function summarizeGeneric(
 	if (model) {
 		switch (model.kind) {
 			case "list":
-				summary = pluralize(model.items.length, "item");
+				summary = `found ${pluralize(model.items.length, "item")}`;
 				break;
 			case "table":
-				summary = pluralize(model.rows.length, "row");
+				summary = `found ${pluralize(model.rows.length, "row")}`;
 				break;
 			case "keyValue":
-				summary = pluralize(model.entries.length, "field");
+				summary = `found ${pluralize(model.entries.length, "field")}`;
 				break;
 			default:
 				summary = "";
@@ -462,7 +462,7 @@ const MERGE_SPECS: Partial<Record<BuiltInTool, MergeSpec>> = {
 					? (c.model.payload.totalResults ?? c.model.payload.results?.length ?? 0)
 					: undefined,
 			);
-			return total === undefined ? "" : total === 0 ? "no matches" : pluralize(total, "note");
+			return total === undefined ? "" : total === 0 ? "found no matches" : `found ${pluralize(total, "note")}`;
 		},
 	},
 	grep_notes: {
@@ -474,7 +474,11 @@ const MERGE_SPECS: Partial<Record<BuiltInTool, MergeSpec>> = {
 				const payload = parseRawJson(c.model?.rawText);
 				return payload && typeof payload === "object" ? numberProp(payload, "total_matches") : undefined;
 			});
-			return total === undefined ? "" : total === 0 ? "no matches" : pluralize(total, "match", "matches");
+			return total === undefined
+				? ""
+				: total === 0
+					? "found no matches"
+					: `found ${pluralize(total, "match", "matches")}`;
 		},
 	},
 	read_content: {
