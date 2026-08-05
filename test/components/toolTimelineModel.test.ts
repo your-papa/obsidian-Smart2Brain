@@ -4,6 +4,7 @@ import {
 	buildStepsFromEvents,
 	buildStepsFromToolCalls,
 	foldSubAgentChildren,
+	groupStepTools,
 	toolDisplayName,
 	type TimelineStep,
 	type UnifiedToolCall,
@@ -200,5 +201,68 @@ describe("toolTimelineModel — subagent nesting", () => {
 		expect(steps).toHaveLength(2);
 		expect(steps[0].tools[0].preamble).toBe("First thought.");
 		expect(steps[1].tools[0].preamble).toBe("Second thought.");
+	});
+});
+
+describe("groupStepTools — merging consecutive same-tool calls", () => {
+	const call = (id: string, name: string, extra: Partial<UnifiedToolCall> = {}): UnifiedToolCall => ({
+		id,
+		name,
+		status: "completed",
+		...extra,
+	});
+
+	it("merges consecutive same-tool calls into one group", () => {
+		const groups = groupStepTools([
+			call("1", "grep_notes"),
+			call("2", "grep_notes"),
+			call("3", "grep_notes"),
+		]);
+		expect(groups).toHaveLength(1);
+		expect(groups[0].merged).toBe(true);
+		expect(groups[0].calls).toHaveLength(3);
+		expect(groups[0].id).toBe("1");
+		expect(groups[0].name).toBe("grep_notes");
+	});
+
+	it("keeps different tools in separate groups", () => {
+		const groups = groupStepTools([call("1", "grep_notes"), call("2", "read_content")]);
+		expect(groups).toHaveLength(2);
+		expect(groups.every((g) => !g.merged)).toBe(true);
+	});
+
+	it("only merges adjacent runs (A A B A → three groups)", () => {
+		const groups = groupStepTools([
+			call("1", "search_notes"),
+			call("2", "search_notes"),
+			call("3", "read_content"),
+			call("4", "search_notes"),
+		]);
+		expect(groups.map((g) => g.calls.length)).toEqual([2, 1, 1]);
+		expect(groups.map((g) => g.merged)).toEqual([true, false, false]);
+	});
+
+	it("never merges task (subagent) calls", () => {
+		const groups = groupStepTools([
+			call("1", "task", { subAgentName: "Researcher" }),
+			call("2", "task", { subAgentName: "Writer" }),
+		]);
+		expect(groups).toHaveLength(2);
+		expect(groups.every((g) => !g.merged)).toBe(true);
+	});
+
+	it("never merges calls that carry subagent children", () => {
+		const groups = groupStepTools([
+			call("1", "search_notes", { children: [call("c1", "read_content")] }),
+			call("2", "search_notes", { children: [call("c2", "read_content")] }),
+		]);
+		expect(groups).toHaveLength(2);
+	});
+
+	it("wraps a single call as an unmerged group of one", () => {
+		const groups = groupStepTools([call("1", "read_content")]);
+		expect(groups).toHaveLength(1);
+		expect(groups[0].merged).toBe(false);
+		expect(groups[0].calls).toHaveLength(1);
 	});
 });

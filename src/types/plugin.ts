@@ -578,6 +578,14 @@ export interface PluginData {
 	langSmithEndpoint: string;
 	isVerbose: boolean;
 
+	/**
+	 * Show raw tool input/output (arg key-values + raw output blob) in the chat
+	 * tool-call rows. Off by default: users see only the plain-language summary and
+	 * the friendly structured result. A developer escape hatch for inspecting the
+	 * exact I/O; surfaced only in the DEV-only Developer settings tab.
+	 */
+	showToolIODetails: boolean;
+
 	// ============================================================================
 	// Other
 	// ============================================================================

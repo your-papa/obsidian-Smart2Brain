@@ -1,13 +1,17 @@
 <script lang="ts">
 import type { AssistantTimelineEvent, ToolCallState } from "../../stores/chatStore.svelte";
+import { getData } from "../../stores/dataStore.svelte";
 import { buildToolOutputRenderModel, type ToolOutputRenderModel } from "./toolOutputRenderModel";
 import {
 	buildStepsFromEvents,
 	buildStepsFromToolCalls,
+	groupStepTools,
 	toolDisplayName,
 	type TimelineStep,
+	type ToolCallGroup,
 	type UnifiedToolCall,
 } from "./toolTimelineModel";
+import { buildToolSummary, buildMergedToolSummary, type MergedCall, type ToolSummary } from "./toolSummaryModel";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 
 interface Props {
@@ -24,6 +28,13 @@ interface Props {
 const { toolCalls, assistantTimeline, collapsed, answerContent, isStreaming, isError, isProcessing, ontoggle }: Props =
 	$props();
 
+const pluginData = getData();
+
+// Raw tool input args + raw output blob are hidden by default; a tool row expands
+// to only the friendly structured result. Developers can flip this on (DEV-only
+// Developer settings) to also see the exact I/O for debugging.
+const showRawIO = $derived(pluginData.showToolIODetails);
+
 let hoveringFinalControl = $state(false);
 
 // Per-`task`-card expansion of the nested subagent sub-timeline, keyed by the
@@ -38,14 +49,6 @@ function toggleSubAgent(taskCallId: string) {
 
 /* ── Formatters ── */
 
-function formatToolName(name: string): string {
-	if (!name) return "Unknown Tool";
-	return name
-		.replace(/_/g, " ")
-		.replace(/([a-z])([A-Z])/g, "$1 $2")
-		.replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 function formatValue(value: unknown): string {
 	if (value === null || value === undefined) return "null";
 	if (typeof value === "string") return value;
@@ -58,40 +61,66 @@ function formatToolInput(input: Record<string, unknown> | null | undefined): { k
 	return Object.entries(input).map(([key, value]) => ({ key, value }));
 }
 
-function hasToolInputValue(value: unknown): boolean {
-	if (value === null || value === undefined) return false;
-	if (typeof value === "string") return value.trim().length > 0;
-	if (Array.isArray(value)) return value.length > 0;
-	if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
-	return true;
+/**
+ * Muted one-line summary for a `task` (subagent) row: the subagent's task
+ * description, if one was passed. The label already carries the subagent name,
+ * so this adds the "what it was asked to do" without the removed argument pills.
+ */
+function getTaskSummary(input: Record<string, unknown> | null | undefined): string {
+	const description = input?.description;
+	return typeof description === "string" ? description.trim() : "";
 }
 
-function formatInlineValue(value: unknown): string {
-	if (typeof value === "string") return value;
-	if (typeof value === "number" || typeof value === "boolean") return String(value);
-	if (Array.isArray(value)) return `[${value.length} item${value.length === 1 ? "" : "s"}]`;
-	if (typeof value === "object" && value !== null) {
-		const keys = Object.keys(value as Record<string, unknown>);
-		if (keys.length === 1) return `{${keys[0]}}`;
-		return `{${keys.length} keys}`;
-	}
-	return formatValue(value);
+/** Output render model for a tool call, or undefined if it hasn't produced output. */
+function toOutputModel(tool: UnifiedToolCall): ToolOutputRenderModel | undefined {
+	return tool.output !== undefined ? buildToolOutputRenderModel(tool.name, tool.output, tool.input) : undefined;
 }
 
-function getToolInputPreview(
-	input: Record<string, unknown> | null | undefined,
-	maxItems = 2,
-): { visibleEntries: { key: string; value: string }[]; hiddenCount: number } {
-	const entries = formatToolInput(input).filter((entry) => hasToolInputValue(entry.value));
-	const visibleEntries = entries.slice(0, maxItems).map(({ key, value }) => ({
-		key,
-		value: formatInlineValue(value),
-	}));
+/**
+ * Folds a tool summary into one continuous sentence — the plain-language label
+ * with the outcome clause appended after a comma (e.g. "Read main.md, 512 lines").
+ * The outcome is already phrased to read as a natural continuation. When there is
+ * no outcome yet (still running, or nothing to report) just the label is shown.
+ */
+function foldOutcome(summary: ToolSummary): string {
+	return summary.summary ? `${summary.label}, ${summary.summary}` : summary.label;
+}
 
-	return {
-		visibleEntries,
-		hiddenCount: Math.max(0, entries.length - visibleEntries.length),
-	};
+/**
+ * Whether a friendly, user-facing structured result exists for this output model.
+ * Everything except the empty/unknown fallback renders a meaningful result view;
+ * `empty` (and an absent model) has nothing worth an expand affordance.
+ */
+function hasFriendlyResult(model: ToolOutputRenderModel | undefined): boolean {
+	return !!model && model.kind !== "empty";
+}
+
+/**
+ * Whether a row should be expandable at all. Without raw-I/O mode, a row expands
+ * only when it has a friendly structured result; with raw-I/O mode on it also
+ * expands whenever there are input args or any output to show. Rows with nothing
+ * to reveal render as flat one-liners (no chevron, non-interactive).
+ */
+function isExpandable(tool: UnifiedToolCall): boolean {
+	const model = toOutputModel(tool);
+	if (hasFriendlyResult(model)) return true;
+	if (showRawIO && (formatToolInput(tool.input).length > 0 || tool.output !== undefined)) return true;
+	return false;
+}
+
+/** The merged calls (input + output model) for a group's summary builder. */
+function toMergedCalls(group: ToolCallGroup): MergedCall[] {
+	return group.calls.map((tool) => ({ input: tool.input, model: toOutputModel(tool) }));
+}
+
+/**
+ * A merged group's overall status: running if any call is still running, failed
+ * if any failed (and none running), else completed — mirroring the step-dot rule.
+ */
+function mergedGroupStatus(group: ToolCallGroup): "running" | "completed" | "failed" {
+	if (group.calls.some((c) => c.status === "running")) return "running";
+	if (group.calls.some((c) => c.status === "failed")) return "failed";
+	return "completed";
 }
 
 function formatRawToolOutput(rawText: string): string {
@@ -114,10 +143,6 @@ function getVisibleItems<T>(items: T[] | undefined, maxItems = 8): { visible: T[
 		visible,
 		hiddenCount: Math.max(0, (items?.length ?? 0) - visible.length),
 	};
-}
-
-function countLines(value: string): number {
-	return value.split(/\r?\n/).length;
 }
 
 function formatReadContentSource(sourceType: "file" | "pdf" | "excalidraw"): string {
@@ -265,109 +290,84 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
       />
     </div>
   {/if}
-  {@const inputPreview = getToolInputPreview(tool.input)}
   {@const outputModel =
     tool.output !== undefined
       ? buildToolOutputRenderModel(tool.name, tool.output, tool.input)
       : undefined}
   {@const isSubAgentParent = tool.name === "task" && !!tool.subAgentName}
-  <details class="tool-card" class:tool-card-subagent={isSubAgentParent}>
-    <summary class="tool-card-header">
-      <span
-        class="tool-status-icon"
-        class:status-running={tool.status === "running"}
-        class:status-done={tool.status === "completed"}
-        class:status-failed={tool.status === "failed"}
-      >
-        {#if tool.status === "running"}
-          <span class="tool-spinner"></span>
-        {:else if tool.status === "completed"}
-          <svg viewBox="0 0 16 16" fill="none" class="tool-icon-svg">
-            <path
-              d="M3.5 8.5L6.5 11.5L12.5 4.5"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        {:else}
-          <svg viewBox="0 0 16 16" fill="none" class="tool-icon-svg">
-            <path
-              d="M4 4L12 12M12 4L4 12"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-            />
-          </svg>
-        {/if}
-      </span>
-      <span class="tool-card-name">
-        {tool.name === "task" ? toolDisplayName(tool) : formatToolName(tool.name)}
-      </span>
-      {#if isSubAgentParent}
-        <span class="tool-card-subagent-badge">subagent</span>
-      {:else if tool.subAgentName}
-        <span class="tool-card-subagent-badge">via {tool.subAgentName}</span>
-      {/if}
-      {#if inputPreview.visibleEntries.length > 0}
-        <span class="tool-card-input-preview">
-          {#each inputPreview.visibleEntries as entry (entry.key)}
-            <span class="tool-card-input-chip">
-              <span class="tool-card-input-key">{entry.key}:</span>
-              <span class="tool-card-input-value">{entry.value}</span>
-            </span>
-          {/each}
-          {#if inputPreview.hiddenCount > 0}
-            <span class="tool-card-input-more">+{inputPreview.hiddenCount}</span>
-          {/if}
-        </span>
-      {/if}
-      <span class="tool-card-expand-hint">
-        <svg viewBox="0 0 16 16" fill="none" class="tool-expand-chevron">
-          <path
-            d="M6 4L10 8L6 12"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </span>
-    </summary>
-
-    <div class="tool-card-body">
-      {#if formatToolInput(tool.input).length > 0}
-        <div class="tool-io-section">
-          <div class="tool-io-label">Input</div>
-          <div class="tool-io-entries">
-            {#each formatToolInput(tool.input) as { key, value } (key)}
-              <div class="tool-io-entry">
-                <span class="tool-io-key">{key}</span>
-                <MarkdownRenderer content={formatValue(value)} class="tool-io-value [&_p]:m-0" />
-              </div>
-            {/each}
-          </div>
-        </div>
-      {/if}
-
-      {#if tool.output !== undefined}
-        <div class="tool-io-section">
-          <div class="tool-io-label">Output</div>
-          <div class="tool-io-output">
-            {#if outputModel}
-              {@render outputRenderer(outputModel)}
-            {/if}
-          </div>
-        </div>
-      {:else if tool.status !== "running"}
-        <div class="tool-io-section">
-          <div class="tool-io-label">Output</div>
-          <span class="tool-io-empty">(no output)</span>
-        </div>
-      {/if}
+  {@const toolSummary = buildToolSummary(tool.name, tool.input, outputModel, tool.status)}
+  {@const isTask = tool.name === "task"}
+  <!-- Regular tools fold the outcome into the sentence ("Read main.md, 512 lines");
+       task rows keep the subagent name as the label and the task description as a
+       separate faint subtitle rather than a comma-joined outcome clause. -->
+  {@const headerLabel = isTask ? toolDisplayName(tool) : foldOutcome(toolSummary)}
+  {@const headerSubtitle = isTask ? getTaskSummary(tool.input) : ""}
+  {#if isExpandable(tool)}
+    <details class="tool-card">
+      <summary class="tool-card-header">
+        {@render toolCardHeader(headerLabel, headerSubtitle, tool.status, isSubAgentParent, tool.subAgentName)}
+      </summary>
+      <div class="tool-card-body">
+        {@render toolBody(tool, outputModel)}
+      </div>
+    </details>
+  {:else}
+    <div class="tool-card tool-card-flat">
+      <div class="tool-card-header">
+        {@render toolCardHeader(headerLabel, headerSubtitle, tool.status, isSubAgentParent, tool.subAgentName)}
+      </div>
     </div>
-  </details>
+  {/if}
+{/snippet}
+
+{#snippet toolCardHeader(
+  label: string,
+  subtitle: string,
+  status: UnifiedToolCall["status"],
+  isSubAgentParent: boolean,
+  subAgentName: string | undefined,
+)}
+  <span class="tool-card-name" class:tool-card-name-failed={status === "failed"}>{label}</span>
+  {#if isSubAgentParent}
+    <span class="tool-card-subagent-badge">subagent</span>
+  {:else if subAgentName}
+    <span class="tool-card-subagent-badge">via {subAgentName}</span>
+  {/if}
+  {#if subtitle}
+    <span class="tool-card-summary">{subtitle}</span>
+  {/if}
+{/snippet}
+
+{#snippet toolBody(tool: UnifiedToolCall, outputModel: ToolOutputRenderModel | undefined)}
+  <!-- Raw input args are hidden from users by default; the plain-language label
+       already restates them. Developer mode reveals the exact arguments. -->
+  {#if showRawIO && formatToolInput(tool.input).length > 0}
+    <div class="tool-io-section">
+      <div class="tool-io-label">Input</div>
+      <div class="tool-io-entries">
+        {#each formatToolInput(tool.input) as { key, value } (key)}
+          <div class="tool-io-entry">
+            <span class="tool-io-key">{key}</span>
+            <MarkdownRenderer content={formatValue(value)} class="tool-io-value [&_p]:m-0" />
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  <!-- Friendly, structured result — always shown when present. -->
+  {#if hasFriendlyResult(outputModel)}
+    <div class="tool-io-section">
+      <div class="tool-io-output">
+        {@render outputBody(outputModel!)}
+      </div>
+    </div>
+  {:else if showRawIO && tool.status !== "running"}
+    <div class="tool-io-section">
+      <div class="tool-io-label">Output</div>
+      <span class="tool-io-empty">(no output)</span>
+    </div>
+  {/if}
 {/snippet}
 
 {#snippet subAgentBranch(children: UnifiedToolCall[])}
@@ -394,6 +394,32 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   </div>
 {/snippet}
 
+{#snippet mergedToolRow(group: ToolCallGroup)}
+  {@const status = mergedGroupStatus(group)}
+  {@const summary = buildMergedToolSummary(group.name, toMergedCalls(group), status)}
+  <details class="tool-card tool-card-merged">
+    <summary class="tool-card-header">
+      <span class="tool-card-name" class:tool-card-name-failed={status === "failed"}>{foldOutcome(summary)}</span>
+    </summary>
+
+    <!-- Each merged call keeps its own friendly result (and raw I/O in dev mode). -->
+    <div class="tool-card-merged-list">
+      {#each group.calls as call, callIdx (call.id)}
+        {@const callSummary = buildToolSummary(call.name, call.input, toOutputModel(call), call.status)}
+        <div class="tool-card-merged-item">
+          <div class="tool-card-merged-item-label">
+            <span class="tool-card-merged-item-index">{callIdx + 1}.</span>
+            <span class:tool-card-name-failed={call.status === "failed"}>{foldOutcome(callSummary)}</span>
+          </div>
+          <div class="tool-card-body tool-card-body-merged">
+            {@render toolBody(call, toOutputModel(call))}
+          </div>
+        </div>
+      {/each}
+    </div>
+  </details>
+{/snippet}
+
 {#snippet stepRow(
   step: TimelineStep,
   stepIdx: number,
@@ -418,45 +444,50 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
 
     <div class="tool-step-content">
       <div class="tool-step-tools">
-        {#each step.tools as tool (tool.id)}
-          {@const isSubAgentParent = tool.name === "task" && !!tool.subAgentName}
-          {@const branchChildren = tool.children ?? []}
-          {#if isSubAgentParent && branchChildren.length > 0}
-            {@const expanded = subAgentExpanded[tool.id] ?? false}
-            {@const runningCount = branchChildren.filter((c) => c.status === "running").length}
-            <div class="tool-subagent-group">
-              {@render toolCard(tool)}
-              <button
-                type="button"
-                class="tool-subagent-toggle"
-                class:is-expanded={expanded}
-                onclick={() => toggleSubAgent(tool.id)}
-                aria-expanded={expanded}
-              >
-                <svg viewBox="0 0 16 16" fill="none" class="tool-subagent-toggle-chevron">
-                  <path
-                    d="M6 4L10 8L6 12"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-                <span class="tool-subagent-toggle-label">
-                  {expanded ? "Hide" : "Show"}
-                  {branchChildren.length}
-                  {branchChildren.length === 1 ? "step" : "steps"}
-                </span>
-                {#if runningCount > 0}
-                  <span class="tool-subagent-toggle-running">running…</span>
-                {/if}
-              </button>
-              {#if expanded}
-                {@render subAgentBranch(branchChildren)}
-              {/if}
-            </div>
+        {#each groupStepTools(step.tools) as group (group.id)}
+          {#if group.merged}
+            {@render mergedToolRow(group)}
           {:else}
-            {@render toolCard(tool)}
+            {@const tool = group.calls[0]}
+            {@const isSubAgentParent = tool.name === "task" && !!tool.subAgentName}
+            {@const branchChildren = tool.children ?? []}
+            {#if isSubAgentParent && branchChildren.length > 0}
+              {@const expanded = subAgentExpanded[tool.id] ?? false}
+              {@const runningCount = branchChildren.filter((c) => c.status === "running").length}
+              <div class="tool-subagent-group">
+                {@render toolCard(tool)}
+                <button
+                  type="button"
+                  class="tool-subagent-toggle"
+                  class:is-expanded={expanded}
+                  onclick={() => toggleSubAgent(tool.id)}
+                  aria-expanded={expanded}
+                >
+                  <svg viewBox="0 0 16 16" fill="none" class="tool-subagent-toggle-chevron">
+                    <path
+                      d="M6 4L10 8L6 12"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                  <span class="tool-subagent-toggle-label">
+                    {expanded ? "Hide" : "Show"}
+                    {branchChildren.length}
+                    {branchChildren.length === 1 ? "step" : "steps"}
+                  </span>
+                  {#if runningCount > 0}
+                    <span class="tool-subagent-toggle-running">running…</span>
+                  {/if}
+                </button>
+                {#if expanded}
+                  {@render subAgentBranch(branchChildren)}
+                {/if}
+              </div>
+            {:else}
+              {@render toolCard(tool)}
+            {/if}
           {/if}
         {/each}
       </div>
@@ -564,6 +595,14 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
           </details>
         {/each}
       </div>
+    {:else}
+      <!-- No nested sections (e.g. a heterogeneous array reduced to an item count):
+           show the full payload as the friendly result so its contents remain
+           visible without the developer raw-I/O toggle. -->
+      <MarkdownRenderer
+        content={formatRawToolOutput(model.json)}
+        class="tool-output-content markdown-preview-view !m-0 !p-0 text-[0.8rem] leading-[1.55] [&_pre]:my-0 [&_pre]:bg-[--background-primary] [&_pre]:p-2.5 [&_pre]:rounded"
+      />
     {/if}
   {:else if model.kind === "search_notes"}
     {@const visibleResults = getVisibleItems(model.payload.results, 6)}
@@ -720,7 +759,7 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
         />
       </div>
     {/if}
-    {#if model.payload.code}
+    {#if showRawIO && model.payload.code}
       <details class="tool-output-raw-toggle">
         <summary class="tool-output-raw-summary">Executed Code</summary>
         <MarkdownRenderer
@@ -729,7 +768,7 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
         />
       </details>
     {/if}
-    {#if model.payload.inputJson}
+    {#if showRawIO && model.payload.inputJson}
       <details class="tool-output-raw-toggle">
         <summary class="tool-output-raw-summary">Input</summary>
         <MarkdownRenderer
@@ -742,7 +781,7 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
     <div class="tool-io-empty">(no output)</div>
   {/if}
 
-  {#if model.rawText.trim() && model.kind !== "markdown"}
+  {#if showRawIO && model.rawText.trim() && model.kind !== "markdown"}
     <details class="tool-output-raw-toggle">
       <summary class="tool-output-raw-summary">Raw output</summary>
       <MarkdownRenderer
@@ -751,10 +790,6 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
       />
     </details>
   {/if}
-{/snippet}
-
-{#snippet outputRenderer(model: ToolOutputRenderModel)}
-  {@render outputBody(model)}
 {/snippet}
 
 {#if noTimelineWrap}
@@ -1046,43 +1081,30 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   .tool-step-tools {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 1px;
   }
 
-  /* ── Tool card ── */
+  /* ── Tool row (chromeless: no card border/background) ── */
   .tool-card {
-    border-radius: 8px;
-    background: var(--background-primary);
-    border: 1px solid var(--background-modifier-border);
-    overflow: hidden;
-    transition:
-      box-shadow 0.15s,
-      border-color 0.15s;
-  }
-  .tool-card:hover {
-    border-color: color-mix(
-      in srgb,
-      var(--interactive-accent) 30%,
-      var(--background-modifier-border)
-    );
-  }
-  .tool-card[open] {
-    box-shadow: 0 1px 4px color-mix(in srgb, var(--background-modifier-border) 40%, transparent);
+    border-radius: 6px;
   }
 
   .tool-card-header {
-    display: flex;
+    /* inline-flex so the clickable/hoverable area hugs the text instead of
+       spanning the full card width — clicking empty space to the right no
+       longer toggles the row or selects the label (matches the compact feel
+       of the "Thinking process" summary). max-width keeps long labels from
+       overflowing the card; ellipsis on the name handles the overflow. */
+    display: inline-flex;
+    max-width: 100%;
     align-items: center;
     gap: 8px;
-    padding: 8px 10px;
+    padding: 3px 6px;
     cursor: pointer;
     user-select: none;
     list-style: none;
     font-size: 0.82rem;
-    transition: background 0.12s;
-  }
-  .tool-card-header:hover {
-    background: var(--background-modifier-hover);
+    border-radius: 6px;
   }
   .tool-card-header::-webkit-details-marker {
     display: none;
@@ -1090,19 +1112,84 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
 
   .tool-card-name {
     font-weight: 500;
-    color: var(--text-normal);
-    flex: 1;
+    /* Faint by default, like the "Thinking process" summary label: the preamble
+       carries intent, so the tool row reads as a quiet receipt. Hover changes
+       only the text color — no background highlight, no chevron. */
+    color: var(--text-faint);
+    transition: color 0.15s;
+    /* Size to content, but shrink with ellipsis if the label alone would
+       exceed the card width (header is capped at max-width: 100%). */
+    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
-  /* ── Subagent nesting ── */
-  .tool-card-subagent {
-    border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
+  .tool-card-header:hover .tool-card-name {
+    color: var(--text-normal);
   }
 
+  /* Failed calls override the faint label to red so errors don't blend into the
+     quiet grey of routine rows (kept red on hover too). */
+  .tool-card-name-failed,
+  .tool-card-header:hover .tool-card-name-failed {
+    color: var(--color-red);
+  }
+
+  /* Faint task-description subtitle shown only on a subagent `task` row (the
+     "what it was asked to do"). Regular tools fold their outcome into the label
+     instead, so this never carries a result count. */
+  .tool-card-summary {
+    flex: 0 1 auto;
+    min-width: 0;
+    color: var(--text-faint);
+    font-size: 0.76rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Merged multi-call row ── */
+  /* Expanded body of a merged row: one indented sub-entry per call, each with its
+     own label and full input/output, under the same left rule as a single row. */
+  .tool-card-merged-list {
+    margin: 2px 0 6px 12px;
+    padding-left: 12px;
+    border-left: 2px solid var(--background-modifier-border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .tool-card-merged-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .tool-card-merged-item-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: var(--text-normal);
+    padding: 2px 0;
+  }
+
+  .tool-card-merged-item-index {
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+
+  /* Inside a merged item the body's own left rule is redundant with the list's. */
+  .tool-card-body-merged {
+    margin-left: 0;
+    border-left: none;
+    padding-left: 14px;
+  }
+
+  /* ── Subagent nesting ── */
   .tool-card-subagent-badge {
     flex-shrink: 0;
     padding: 1px 7px;
@@ -1249,119 +1336,22 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
     padding: 4px 0;
   }
 
-  /* Child tool cards are visually lighter than the parent `task` card. */
-  .tool-subagent-branch-content :global(.tool-card) {
-    background: color-mix(in srgb, var(--background-secondary) 22%, var(--background-primary));
-  }
-
-  .tool-card-input-preview {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    min-width: 0;
-    max-width: 55%;
-    overflow: hidden;
-    margin-right: 4px;
-  }
-
-  .tool-card-input-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    /* Allow chips to shrink so multiple chips (e.g. task's subagent_type +
-       description) truncate individually instead of overflowing and visually
-       overlapping inside the clipped preview container. */
-    min-width: 0;
-    flex-shrink: 1;
-    padding: 1px 6px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
-    color: var(--text-muted);
-    font-size: 0.7rem;
-  }
-
-  .tool-card-input-key {
-    color: var(--text-faint);
-    flex-shrink: 0;
-  }
-
-  .tool-card-input-value {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .tool-card-input-more {
-    flex-shrink: 0;
-    color: var(--text-faint);
-    font-size: 0.7rem;
-  }
-
-  .tool-card-expand-hint {
-    flex-shrink: 0;
-    color: var(--text-faint);
-    transition: transform 0.2s;
-  }
-  .tool-card[open] .tool-card-expand-hint {
-    transform: rotate(90deg);
-  }
-  .tool-expand-chevron {
-    width: 12px;
-    height: 12px;
-    display: block;
-  }
-
-  /* ── Status icons ── */
-  .tool-status-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-  .status-running {
-    color: var(--text-accent);
-  }
-  .status-done {
-    color: var(--interactive-accent);
-    background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
-  }
-  .status-failed {
-    color: var(--color-red);
-    background: color-mix(in srgb, var(--color-red) 12%, transparent);
-  }
-  .tool-icon-svg {
-    width: 12px;
-    height: 12px;
-  }
-
-  .tool-spinner {
-    display: block;
-    width: 12px;
-    height: 12px;
-    border: 2px solid color-mix(in srgb, var(--text-accent) 25%, transparent);
-    border-top-color: var(--text-accent);
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
+  /* A row with nothing to reveal renders flat: no expand affordance, so drop the
+     interactive cursor and leave it as a static one-liner. */
+  .tool-card-flat .tool-card-header {
+    cursor: default;
   }
 
   /* ── I/O sections ── */
+  /* Expanded detail region: indented under the row's label with a subtle left
+     rule instead of a bordered card, so it reads as belonging to the row above. */
   .tool-card-body {
-    border-top: 1px solid var(--background-modifier-border);
-    padding: 10px 12px;
+    margin: 2px 0 6px 12px;
+    padding: 6px 0 2px 12px;
+    border-left: 2px solid var(--background-modifier-border);
     display: flex;
     flex-direction: column;
     gap: 10px;
-    background: color-mix(in srgb, var(--background-secondary) 30%, transparent);
   }
 
   .tool-io-section {
