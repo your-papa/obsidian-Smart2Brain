@@ -920,29 +920,30 @@ $effect(() => {
   .message-nav-overlay {
     position: absolute;
     inset: 0;
-    /* Full-width so the cluster's gutter math resolves against the whole area. */
+    /* Full-area so the gutter math below resolves against the whole width. */
     pointer-events: none;
     z-index: 30;
   }
 
   .message-nav {
     position: absolute;
-    bottom: 8px;
-    /* Sit in the right gutter, just outside the message column, when there's
-       room. `--gutter` is the space between the column edge and the area edge;
-       when it exceeds the cluster width we place the cluster hard against the
-       column's right edge (a small gap out into the gutter), otherwise we clamp
-       to the area edge — overlapping near the scrollbar as a graceful fallback
-       on narrow layouts where the gutter can't fit the cluster. */
+    bottom: 12px;
+    /* Sit a fixed distance out from the content column's right edge, into the
+       gutter — a constant offset regardless of pane width, so on very wide panes
+       the arrows stay near the content instead of drifting to the middle of a
+       huge gutter. `--gutter` is the space to the right of the column; `--out` is
+       how far past the content edge to sit. Clamped so at narrow widths (small
+       gutter) the arrows rest flush at the content edge, aligned with the input. */
     --gutter: max(0px, (100% - var(--file-line-width)) / 2);
-    --cluster: 44px;
-    --gap: 8px;
-    right: max(6px, calc(var(--gutter) - var(--cluster) - var(--gap)));
+    --out: 16px;
+    --cluster: 20px;
+    right: clamp(2px, calc(var(--gutter) - var(--out)), var(--gutter));
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 4px;
-    /* Padded hit area so the cluster is easy to hover without a visible panel. */
-    padding: 6px;
+    padding: 0;
+    width: var(--cluster);
     opacity: 0;
     transition: opacity 160ms ease;
     /* Container stays hoverable even when the arrows are faded out, so moving
@@ -951,8 +952,8 @@ $effect(() => {
     pointer-events: auto;
   }
 
-  /* Show while scrolling, when hovering the cluster's hit area, or when a nav
-     button has focus. Standalone arrows — no container chrome. */
+  /* Show while scrolling, when hovering the cluster, or when a nav button has
+     focus. Standalone arrows — no container chrome. */
   .message-nav-active,
   .message-nav:hover,
   .message-nav:focus-within {
@@ -963,6 +964,8 @@ $effect(() => {
      a neighbour's position when the opposite direction is unavailable. */
   .message-nav-slot {
     display: flex;
+    align-items: center;
+    justify-content: center;
     transition: opacity 120ms ease;
   }
 
@@ -979,13 +982,21 @@ $effect(() => {
 
   .message-nav :global(button) {
     color: var(--text-muted);
-    background: transparent;
-    box-shadow: none;
+    /* Override Obsidian's .clickable-icon defaults (padding, min-width, hover
+       box-shadow/background) so the arrows are a tight, chrome-free icon box. */
+    background: transparent !important;
+    box-shadow: none !important;
+    width: var(--icon-s) !important;
+    height: var(--icon-s) !important;
+    min-width: 0 !important;
+    padding: 2px !important;
+    box-sizing: content-box;
+    border-radius: 4px;
   }
 
   .message-nav :global(button:hover) {
     color: var(--text-normal);
-    background: transparent;
-    box-shadow: none;
+    background: transparent !important;
+    box-shadow: none !important;
   }
 </style>
