@@ -122,9 +122,19 @@ const NAV_TOP_OFFSET = 48;
 // Fast custom smooth-scroll — the native `behavior: "smooth"` easing is too
 // slow for message navigation. Duration is short and capped regardless of
 // distance so long jumps still feel snappy.
+let scrollRafId: number | null = null;
+
 function animateScrollTo(top: number) {
 	if (!scrollContainer) return;
 	const el = scrollContainer;
+
+	// Cancel any in-flight animation so a new target fully supersedes the old
+	// one — otherwise overlapping RAF loops fight over scrollTop and jitter.
+	if (scrollRafId !== null) {
+		cancelAnimationFrame(scrollRafId);
+		scrollRafId = null;
+	}
+
 	const start = el.scrollTop;
 	const max = el.scrollHeight - el.clientHeight;
 	const target = Math.max(0, Math.min(top, max));
@@ -140,9 +150,13 @@ function animateScrollTo(top: number) {
 		// easeOutCubic
 		const eased = 1 - (1 - t) ** 3;
 		el.scrollTop = start + delta * eased;
-		if (t < 1) requestAnimationFrame(step);
+		if (t < 1) {
+			scrollRafId = requestAnimationFrame(step);
+		} else {
+			scrollRafId = null;
+		}
 	};
-	requestAnimationFrame(step);
+	scrollRafId = requestAnimationFrame(step);
 }
 
 // Scroll a specific user message to the top of the container.
@@ -432,20 +446,21 @@ $effect(() => {
 	}
 });
 
-// Keep the active-message pointer in bounds and aligned with what's on screen
-// when the thread or message list changes (e.g. switching chats, new replies).
+// Recompute the active message + nav availability from the DOM after the thread
+// or message list changes (switching chats, new replies). This is a legitimate
+// DOM-measurement side effect, not state synchronization: `recomputeActiveUserIndex`
+// derives everything from live element positions, so a stale `activeUserIndex`
+// self-heals here and on the next scroll rather than needing an imperative clamp.
 $effect(() => {
 	void threadPath;
-	const count = userMessageIds.length;
-	untrack(() => {
-		if (activeUserIndex > count - 1) activeUserIndex = Math.max(0, count - 1);
-	});
+	void userMessageIds.length;
 	tick().then(() => recomputeActiveUserIndex());
 });
 
 $effect(() => {
 	return () => {
 		if (scrollIdleTimer) clearTimeout(scrollIdleTimer);
+		if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
 	};
 });
 </script>
@@ -792,43 +807,47 @@ $effect(() => {
   </div>
 
   {#if userMessageIds.length > 1}
-    <!-- Message navigation controls -->
-    <div class="message-nav" class:message-nav-active={isScrolling} data-testid="message-nav">
-      <div class="message-nav-slot" class:message-nav-hidden={!canNavigatePrev}>
-        <Button
-          iconId="chevrons-up"
-          iconSize="s"
-          tooltip="Jump to top"
-          dataTestId="message-nav-top"
-          onClick={scrollToTop}
-        />
-      </div>
-      <div class="message-nav-slot" class:message-nav-hidden={!canNavigatePrev}>
-        <Button
-          iconId="chevron-up"
-          iconSize="s"
-          tooltip="Previous message (Alt+↑)"
-          dataTestId="message-nav-prev"
-          onClick={navigatePrevMessage}
-        />
-      </div>
-      <div class="message-nav-slot" class:message-nav-hidden={!canNavigateNext}>
-        <Button
-          iconId="chevron-down"
-          iconSize="s"
-          tooltip="Next message (Alt+↓)"
-          dataTestId="message-nav-next"
-          onClick={navigateNextMessage}
-        />
-      </div>
-      <div class="message-nav-slot" class:message-nav-hidden={!canNavigateNext}>
-        <Button
-          iconId="chevrons-down"
-          iconSize="s"
-          tooltip="Jump to bottom"
-          dataTestId="message-nav-bottom"
-          onClick={scrollToBottom}
-        />
+    <!-- Message navigation controls. The overlay mirrors the content column's
+         max-width so the cluster hugs the right edge of the messages when a wide
+         gutter opens up, while staying near the scrollbar at narrower widths. -->
+    <div class="message-nav-overlay">
+      <div class="message-nav" class:message-nav-active={isScrolling} data-testid="message-nav">
+        <div class="message-nav-slot" class:message-nav-hidden={!canNavigatePrev}>
+          <Button
+            iconId="chevrons-up"
+            iconSize="s"
+            tooltip="Jump to top"
+            dataTestId="message-nav-top"
+            onClick={scrollToTop}
+          />
+        </div>
+        <div class="message-nav-slot" class:message-nav-hidden={!canNavigatePrev}>
+          <Button
+            iconId="chevron-up"
+            iconSize="s"
+            tooltip="Previous message (Alt+↑)"
+            dataTestId="message-nav-prev"
+            onClick={navigatePrevMessage}
+          />
+        </div>
+        <div class="message-nav-slot" class:message-nav-hidden={!canNavigateNext}>
+          <Button
+            iconId="chevron-down"
+            iconSize="s"
+            tooltip="Next message (Alt+↓)"
+            dataTestId="message-nav-next"
+            onClick={navigateNextMessage}
+          />
+        </div>
+        <div class="message-nav-slot" class:message-nav-hidden={!canNavigateNext}>
+          <Button
+            iconId="chevrons-down"
+            iconSize="s"
+            tooltip="Jump to bottom"
+            dataTestId="message-nav-bottom"
+            onClick={scrollToBottom}
+          />
+        </div>
       </div>
     </div>
   {/if}
@@ -898,11 +917,21 @@ $effect(() => {
     min-height: 20px;
   }
 
+  .message-nav-overlay {
+    position: absolute;
+    inset: 0;
+    /* Mirror the message column so the cluster tracks the content's right edge.
+       The 16px accounts for the scroll container's px-2 plus the column's px-1. */
+    max-width: calc(var(--file-line-width) + 16px);
+    margin: 0 auto;
+    pointer-events: none;
+    z-index: 30;
+  }
+
   .message-nav {
     position: absolute;
     right: 6px;
     bottom: 8px;
-    z-index: 30;
     display: flex;
     flex-direction: column;
     gap: 4px;
