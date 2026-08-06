@@ -48,6 +48,18 @@ function handleRootDragLeave(event: DragEvent) {
 async function handleRootDrop(event: DragEvent) {
 	await input?.handleDrop(event);
 }
+
+// Route Alt+↑/↓ message-navigation hotkeys to the container from anywhere in
+// the chat view. A native listener keeps chat-root a plain region (a11y).
+function messageNavHotkeys(node: HTMLElement) {
+	const onKeydown = (event: KeyboardEvent) => messageContainer?.handleNavKeydown(event);
+	node.addEventListener("keydown", onKeydown);
+	return {
+		destroy() {
+			node.removeEventListener("keydown", onKeydown);
+		},
+	};
+}
 </script>
 
 <QueryClientProvider client={plugin.queryClient}>
@@ -59,6 +71,7 @@ async function handleRootDrop(event: DragEvent) {
     ondragover={handleRootDragOver}
     ondragleave={handleRootDragLeave}
     ondrop={handleRootDrop}
+    use:messageNavHotkeys
   >
     {#if registry}
       <MessageContainer bind:this={messageContainer} {registry} {threadPath} />
