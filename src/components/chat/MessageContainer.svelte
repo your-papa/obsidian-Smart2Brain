@@ -920,18 +920,24 @@ $effect(() => {
   .message-nav-overlay {
     position: absolute;
     inset: 0;
-    /* Mirror the message column so the cluster tracks the content's right edge.
-       The 16px accounts for the scroll container's px-2 plus the column's px-1. */
-    max-width: calc(var(--file-line-width) + 16px);
-    margin: 0 auto;
+    /* Full-width so the cluster's gutter math resolves against the whole area. */
     pointer-events: none;
     z-index: 30;
   }
 
   .message-nav {
     position: absolute;
-    right: 6px;
     bottom: 8px;
+    /* Sit in the right gutter, just outside the message column, when there's
+       room. `--gutter` is the space between the column edge and the area edge;
+       when it exceeds the cluster width we place the cluster hard against the
+       column's right edge (a small gap out into the gutter), otherwise we clamp
+       to the area edge — overlapping near the scrollbar as a graceful fallback
+       on narrow layouts where the gutter can't fit the cluster. */
+    --gutter: max(0px, (100% - var(--file-line-width)) / 2);
+    --cluster: 44px;
+    --gap: 8px;
+    right: max(6px, calc(var(--gutter) - var(--cluster) - var(--gap)));
     display: flex;
     flex-direction: column;
     gap: 4px;
