@@ -13,6 +13,15 @@ export function getLogLevel(): LogLvl {
 	return logLevel;
 }
 
+/**
+ * Apply the "Developer Console logging" (verbose) preference to the Logger.
+ * Verbose on → DEBUG (everything). Verbose off → WARN (warnings + errors only),
+ * so the console isn't flooded during normal use.
+ */
+export function applyVerboseLogging(verbose: boolean): void {
+	logLevel = verbose ? LogLvl.DEBUG : LogLvl.WARN;
+}
+
 export const Logger = {
 	setLogLevel(level: LogLvl) {
 		logLevel = level;

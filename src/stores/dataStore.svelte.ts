@@ -42,6 +42,7 @@ import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "../ve
 import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 
 import { type SmartGraphSettings, DEFAULT_SMART_GRAPH_SETTINGS } from "../types/graph";
+import { applyVerboseLogging } from "../utils/logging";
 
 // Provider system types
 import {
@@ -1273,6 +1274,7 @@ export class PluginDataStore {
 	}
 	set isVerbose(val: boolean) {
 		this.#data.isVerbose = val;
+		applyVerboseLogging(val);
 		this.saveSettings();
 	}
 

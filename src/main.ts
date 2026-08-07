@@ -2,7 +2,7 @@ import { type EventRef, MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf
 import { mount, unmount } from "svelte";
 import "./lib/i18n";
 import "./lib/langgraphContext";
-import { Logger as Log } from "./utils/logging";
+import { Logger as Log, applyVerboseLogging } from "./utils/logging";
 import { StartupProfiler } from "./utils/startupProfiler";
 import { persistStartupRecord, recordStartupEnvironment } from "./utils/startupTimingsStore";
 import "./styles.css";
@@ -259,6 +259,8 @@ export default class SecondBrainPlugin extends Plugin {
 		StartupProfiler.setMeta("rendererToOnloadMs", Math.round(performance.now()));
 		setPlugin(this);
 		this.pluginData = await StartupProfiler.measure("data:load", () => createData(this), true);
+		// Sync the Logger's level to the persisted "Developer Console logging" preference.
+		applyVerboseLogging(this.pluginData.isVerbose);
 
 		// Sweep orphaned draft providers. A "draft" (an unconfigured provider instance)
 		// only lives for the duration of an open Setup Provider modal, which deletes it on
