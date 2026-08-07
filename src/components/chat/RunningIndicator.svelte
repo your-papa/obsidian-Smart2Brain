@@ -1,22 +1,26 @@
 <script lang="ts">
 import { getSessionRegistry } from "../../stores/chatStore.svelte";
+import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
 
 const registry = $derived(getSessionRegistry());
+const pluginData = getData();
 
 // All chats currently streaming. Concurrency-ready: one chip per running
 // session. Under the Phase-1 one-at-a-time policy there is at most one.
+// Suppressed entirely when the status-bar indicator is disabled in settings.
 const running = $derived(
-	(registry?.runningSessions ?? []).map((s) => ({
-		path: s.id,
-		name:
-			s.id
-				.split("/")
-				.pop()
-				?.replace(/\.chat$/, "") ?? s.id,
-		stop: () => s.stopStreaming(),
-	})),
+	pluginData.showActiveAgentsInStatusBar
+		? (registry?.runningSessions ?? []).map((s) => ({
+				path: s.id,
+				name:
+					s.id
+						.split("/")
+						.pop()
+						?.replace(/\.chat$/, "") ?? s.id,
+			}))
+		: [],
 );
 
 function openChat(path: string) {
@@ -25,36 +29,79 @@ function openChat(path: string) {
 </script>
 
 {#each running as chat (chat.path)}
-	<span class="s2b-running-indicator flex items-center gap-1">
+	<div class="s2b-running-indicator">
 		<button
 			type="button"
-			class="flex items-center gap-1 bg-transparent border-none p-0 cursor-pointer text-[--text-muted] hover:text-[--text-normal]"
+			class="s2b-running-go"
 			onclick={() => openChat(chat.path)}
-			title="Go to the running chat"
+			title="Go to the running chat: {chat.name}"
 		>
-			<span
-				class="s2b-running-spinner w-[--icon-xs] h-[--icon-xs]"
-				style="--icon-size: var(--icon-xs)"
-				use:icon={"loader-circle"}
-			></span>
-			<span>Agent running in {chat.name}</span>
+			<span class="s2b-running-spinner" use:icon={"loader-circle"}></span>
+			<span class="s2b-running-label">{chat.name}</span>
 		</button>
-		<button
-			type="button"
-			class="flex items-center bg-transparent border-none p-0 cursor-pointer text-[--text-muted] hover:text-[--text-error]"
-			onclick={chat.stop}
-			title="Stop the running agent"
-			aria-label="stop the running agent"
-		>
-			<span class="w-[--icon-xs] h-[--icon-xs]" style="--icon-size: var(--icon-xs)" use:icon={"square"}></span>
-		</button>
-	</span>
+	</div>
 {/each}
 
 <style>
+	.s2b-running-indicator {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+		height: 100%;
+		line-height: 1;
+	}
+
+	.s2b-running-go {
+		display: inline-flex;
+		align-items: center;
+		height: auto;
+		min-height: 0;
+		padding: 0;
+		margin: 0;
+		background: transparent;
+		border: none;
+		box-shadow: none;
+		border-radius: 0;
+		font-size: inherit;
+		line-height: 1;
+		cursor: pointer;
+		color: var(--text-muted);
+		gap: var(--size-2-2);
+		max-width: 220px;
+	}
+
+	.s2b-running-go:hover {
+		color: var(--text-normal);
+	}
+
+	.s2b-running-label {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	/* Center the injected SVG so rotation pivots on its true center.
+	   Size to ~1em so the icon never grows the fixed-height status bar. */
+	.s2b-running-spinner {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+		width: 1em;
+		height: 1em;
+	}
+
+	.s2b-running-spinner :global(svg) {
+		width: 1em;
+		height: 1em;
+		display: block;
+	}
+
 	.s2b-running-spinner {
 		animation: s2b-spin 1.2s linear infinite;
+		transform-origin: center;
 	}
+
 	@keyframes s2b-spin {
 		from {
 			transform: rotate(0deg);

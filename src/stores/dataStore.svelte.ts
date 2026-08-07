@@ -493,6 +493,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	onboardingSplashSeen: false,
 	dismissedRecommendations: [],
 	thinkingProcessExpanded: true,
+	showActiveAgentsInStatusBar: true,
 
 	// Debugging & telemetry
 	enableLangSmith: false,
@@ -1291,6 +1292,14 @@ export class PluginDataStore {
 	}
 	set thinkingProcessExpanded(val: boolean) {
 		this.#data.thinkingProcessExpanded = val;
+		this.saveSettings();
+	}
+
+	get showActiveAgentsInStatusBar() {
+		return this.#data.showActiveAgentsInStatusBar ?? true;
+	}
+	set showActiveAgentsInStatusBar(val: boolean) {
+		this.#data.showActiveAgentsInStatusBar = val;
 		this.saveSettings();
 	}
 

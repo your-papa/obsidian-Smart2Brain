@@ -11,6 +11,7 @@ import Button from "../../components/ui/Button.svelte";
 import { confirmDelete } from "../../components/modal/ConfirmModal";
 import Dropdown from "../../components/ui/Dropdown.svelte";
 import Icon from "../../components/ui/Icon.svelte";
+import Toggle from "../../components/ui/Toggle.svelte";
 import { getProviderDefinition } from "../../providers/index";
 import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
@@ -195,6 +196,16 @@ function getAgentSecondarySummary(agentId: string): string {
         dropdown={chatOpenLocationOptions}
         selected={pluginData.chatOpenLocation}
         onchange={(value) => (pluginData.chatOpenLocation = value)}
+      />
+    </SettingItem>
+
+    <SettingItem
+      name="Show active agents in status bar"
+      desc="Display a clickable indicator in the status bar for each chat with a running agent."
+    >
+      <Toggle
+        checked={pluginData.showActiveAgentsInStatusBar}
+        onchange={(checked) => (pluginData.showActiveAgentsInStatusBar = checked)}
       />
     </SettingItem>
   </SettingGroup>

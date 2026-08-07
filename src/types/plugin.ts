@@ -562,6 +562,13 @@ export interface PluginData {
 	 */
 	thinkingProcessExpanded: boolean;
 
+	/**
+	 * Whether to show the running-agent indicator in the status bar. When enabled,
+	 * each streaming chat surfaces a clickable chip that jumps to that chat.
+	 * Persisted; default enabled.
+	 */
+	showActiveAgentsInStatusBar: boolean;
+
 	// ============================================================================
 	// Web Search
 	// ============================================================================
