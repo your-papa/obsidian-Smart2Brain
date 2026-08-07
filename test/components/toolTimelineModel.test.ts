@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { AssistantTimelineEvent } from "../../src/stores/chatStore.svelte";
 import {
 	buildStepsFromEvents,
-	buildStepsFromToolCalls,
 	foldSubAgentChildren,
 	groupStepTools,
 	toolDisplayName,
@@ -142,23 +141,6 @@ describe("toolTimelineModel — subagent nesting", () => {
 		expect(steps[0].tools[0].children?.[0].status).toBe("completed");
 	});
 
-	it("renders a checkpoint-reconstructed task with no children when subagent steps aren't in the checkpoint", () => {
-		const steps = buildStepsFromToolCalls([
-			{
-				id: "task-1",
-				name: "task",
-				input: { subagent_type: "Web Search" },
-				status: "completed",
-				output: "summary",
-				subAgentName: "Web Search",
-			},
-		]);
-		expect(steps[0].tools).toHaveLength(1);
-		const parent = steps[0].tools[0];
-		expect(parent.children).toBeUndefined();
-		expect(toolDisplayName(parent)).toBe("Web Search");
-	});
-
 	it("labels task calls with their subagent name verbatim", () => {
 		const parent: UnifiedToolCall = {
 			id: "task-1",
@@ -201,6 +183,10 @@ describe("toolTimelineModel — subagent nesting", () => {
 		expect(steps).toHaveLength(2);
 		expect(steps[0].tools[0].preamble).toBe("First thought.");
 		expect(steps[1].tools[0].preamble).toBe("Second thought.");
+		// Each step carries the aiMessageId it was grouped under — the UI uses this to
+		// fold the current run once live content belongs to a newer message.
+		expect(steps[0].aiMessageId).toBe("m1");
+		expect(steps[1].aiMessageId).toBe("m2");
 	});
 });
 

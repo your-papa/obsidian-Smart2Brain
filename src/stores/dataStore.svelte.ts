@@ -491,6 +491,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	onboardingComplete: false,
 	onboardingSplashSeen: false,
 	dismissedRecommendations: [],
+	thinkingProcessExpanded: true,
 
 	// Debugging & telemetry
 	enableLangSmith: false,
@@ -1280,6 +1281,14 @@ export class PluginDataStore {
 	}
 	set showToolIODetails(val: boolean) {
 		this.#data.showToolIODetails = val;
+		this.saveSettings();
+	}
+
+	get thinkingProcessExpanded() {
+		return this.#data.thinkingProcessExpanded ?? true;
+	}
+	set thinkingProcessExpanded(val: boolean) {
+		this.#data.thinkingProcessExpanded = val;
 		this.saveSettings();
 	}
 

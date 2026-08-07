@@ -1,10 +1,9 @@
 <script lang="ts">
-import type { AssistantTimelineEvent, ToolCallState } from "../../stores/chatStore.svelte";
+import type { AssistantTimelineEvent } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { buildToolOutputRenderModel, type ToolOutputRenderModel } from "./toolOutputRenderModel";
 import {
 	buildStepsFromEvents,
-	buildStepsFromToolCalls,
 	groupStepTools,
 	toolDisplayName,
 	type TimelineStep,
@@ -13,20 +12,30 @@ import {
 } from "./toolTimelineModel";
 import { buildToolSummary, buildMergedToolSummary, type MergedCall, type ToolSummary } from "./toolSummaryModel";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
+import Icon from "../ui/Icon.svelte";
 
 interface Props {
-	toolCalls?: ToolCallState[];
 	assistantTimeline?: AssistantTimelineEvent[];
 	collapsed: boolean;
 	answerContent?: string;
+	/** aiMessageId of the text currently in `answerContent` (streaming); folds the last
+	 *  tool step once it differs from that step (the next AI message has begun). */
+	contentAiMessageId?: string;
 	isStreaming?: boolean;
-	isError?: boolean;
-	isProcessing?: boolean;
+	/** Persisted wall-clock duration of the turn (ms), for the "Thought for Ns" label. */
+	thinkingDurationMs?: number;
 	ontoggle?: () => void;
 }
 
-const { toolCalls, assistantTimeline, collapsed, answerContent, isStreaming, isError, isProcessing, ontoggle }: Props =
-	$props();
+const {
+	assistantTimeline,
+	collapsed,
+	answerContent,
+	contentAiMessageId,
+	isStreaming,
+	thinkingDurationMs,
+	ontoggle,
+}: Props = $props();
 
 const pluginData = getData();
 
@@ -35,17 +44,7 @@ const pluginData = getData();
 // Developer settings) to also see the exact I/O for debugging.
 const showRawIO = $derived(pluginData.showToolIODetails);
 
-let hoveringFinalControl = $state(false);
-
-// Per-`task`-card expansion of the nested subagent sub-timeline, keyed by the
-// task tool-call id. Collapsed by default — a subagent (especially several in
-// parallel) can emit many child tool calls and clutter the chat; the user
-// expands on demand.
-let subAgentExpanded = $state<Record<string, boolean>>({});
-
-function toggleSubAgent(taskCallId: string) {
-	subAgentExpanded[taskCallId] = !subAgentExpanded[taskCallId];
-}
+let hoveringRail = $state(false);
 
 /* ── Formatters ── */
 
@@ -247,65 +246,151 @@ function hasStepFailure(step: TimelineStep): boolean {
 	return step.tools.some((t) => t.status === "failed");
 }
 
-function getOverallStatus(stepsArg: TimelineStep[]): "running" | "completed" {
-	return stepsArg.some(isStepRunning) ? "running" : "completed";
-}
-
-function getThinkingSummaryLabel(stepsArg: TimelineStep[]): string {
-	return stepsArg.length === 1 ? "Thinking process (1 step)" : `Thinking process (${stepsArg.length} steps)`;
-}
-
 /* ── Derived state ── */
 
-const steps = $derived(
-	assistantTimeline && assistantTimeline.length > 0
-		? buildStepsFromEvents(assistantTimeline)
-		: buildStepsFromToolCalls(toolCalls),
-);
-const overallStatus = $derived(getOverallStatus(steps));
+const steps = $derived(buildStepsFromEvents(assistantTimeline ?? []));
 
-// Show answer as a final timeline step when there's content or tools finished streaming.
-// Guard with steps.length > 0 so that during initial processing (no tool-call steps yet)
-// showProcessingDot takes over instead of the answer step pre-empting it.
-const showAnswerStep = $derived(
-	!!(answerContent || (isStreaming && overallStatus === "completed" && steps.length > 0)),
+// A new timeline step is created only when a new AI message begins that CALLS A TOOL
+// (buildStepsFromEvents groups tool events by aiMessageId), so a text-only final answer
+// creates NO step. The last tool step therefore stays the "current run" (rendered below
+// the label with its tools) only until the model begins the NEXT AI message — the exact
+// moment the user identified: "the first token of the next AI message is streamed". That
+// moment is an aiMessageId change: the live content (`answerContent`) carries a different
+// aiMessageId than the last step. Until then the step is current and does not fold; once
+// content is a newer message, the step folds into the process and the new content streams
+// in the single spot below. No id yet (pre-first-token, or content cleared on tool_start)
+// keeps the step current — an empty/idless content spot never triggers a fold.
+const lastStep = $derived(steps.at(-1));
+const contentIsNewerMessage = $derived(
+	!!contentAiMessageId && !!lastStep?.aiMessageId && contentAiMessageId !== lastStep.aiMessageId,
 );
-// Show a lone processing dot when nothing has arrived yet
-const showProcessingDot = $derived(!!isProcessing && steps.length === 0 && !showAnswerStep);
-const effectiveTotal = $derived(steps.length + (showAnswerStep ? 1 : 0) + (showProcessingDot ? 1 : 0));
+// The separate current-run block below the process exists ONLY to keep the in-flight run
+// visible while the process is COLLAPSED (the grid is 0-height then). While the process is
+// EXPANDED the grid already shows every step, so rendering the last step ALSO in the
+// current block — then moving it up into the grid the instant the next AI message folds it
+// — relocated the step across containers and made its preamble visibly jump. So the split
+// only applies when collapsed: when expanded, the current step stays in the grid the whole
+// time and nothing moves on fold.
+const currentStep = $derived(collapsed && isStreaming && lastStep && !contentIsNewerMessage ? lastStep : undefined);
+const priorSteps = $derived(currentStep ? steps.slice(0, -1) : steps);
 
-// When content is streaming but no tool-call steps have arrived yet, render the
-// answer inline (no timeline dot/rail) so the layout matches the plain-text
-// MarkdownRenderer that takes over once streaming completes.  This prevents a
-// visible layout jump when the stream ends and the else-branch mounts.
-const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && showAnswerStep);
+// The header is in its live "running" state (shimmer word + elapsed timer) for the
+// entire stream, and settles to the static "Thought for Ns" the moment streaming
+// stops. No latch, no mid-stream freeze — the "thinking process" spans the whole turn.
+const summaryRunning = $derived(!!isStreaming);
+
+// While streaming, the header shows an animated live status instead of the static
+// settled label: a word that rotates through the set below (the agent is thinking
+// AND taking actions, so a single word undersells it) plus a live elapsed-seconds
+// timer, à la Claude Code. Not clickable while running.
+const RUNNING_WORDS = ["Working", "Thinking", "Exploring", "Investigating", "Reasoning", "Digging in"];
+const WORD_ROTATE_SECONDS = 10;
+let runningSeconds = $state(0);
+let runningWordIndex = $state(0);
+
+// Drive the timer from a wall-clock anchor captured once on the rising edge of the
+// stream, so elapsed is monotonic and can't drift or reset on mid-stream state
+// churn. The anchor is set on the isStreaming rising edge; the interval ticks while
+// summaryRunning (i.e. the whole stream) and stops when streaming ends, at which
+// point the precise persisted duration takes over via settledSeconds below.
+let runStartMs = 0;
+let wasStreaming = false;
+
+$effect(() => {
+	if (isStreaming && !wasStreaming) {
+		runStartMs = Date.now();
+		runningSeconds = 0;
+		runningWordIndex = 0;
+	}
+	wasStreaming = !!isStreaming;
+
+	if (!summaryRunning) return;
+
+	const tick = () => {
+		const elapsed = Math.floor((Date.now() - runStartMs) / 1000);
+		runningSeconds = elapsed;
+		runningWordIndex = Math.floor(elapsed / WORD_ROTATE_SECONDS) % RUNNING_WORDS.length;
+	};
+	tick();
+	const timer = setInterval(tick, 1000);
+	return () => clearInterval(timer);
+});
+
+const runningLabel = $derived(`${RUNNING_WORDS[runningWordIndex]}… ${runningSeconds}s`);
+// Settled label after the run finishes: the total time it took. Prefers the
+// PERSISTED duration (survives reload) → the live timer (this session). A settled
+// turn always took SOME time, so floor at 1s — we never fall back to a step-count
+// phrasing ("Thinking process (N steps)"), which regressed the header to the old
+// wording the instant a sub-second run (or a history message with no stored
+// duration) settled and got collapsed.
+const settledSeconds = $derived(
+	thinkingDurationMs !== undefined && thinkingDurationMs >= 0
+		? Math.max(1, Math.round(thinkingDurationMs / 1000))
+		: Math.max(1, runningSeconds),
+);
+const settledLabel = $derived(`Thought for ${settledSeconds}s`);
+
+// The single content spot below the label. `answerContent` (the reducer's `content`)
+// holds ONLY the current message's uncommitted text: while streaming it's the run's
+// live text (opening text pre-tool, or the answer tail post-tool); once settled it's
+// the final answer. We render it in ONE place, in the full answer style, whenever it's
+// non-empty — so it streams live and simply STAYS put on completion (no restyle, no
+// relocation). It never duplicates a folded step's committed preamble: the reducer moves
+// that text onto the timeline step and clears `content` on every `tool_start`, so this
+// only ever carries text not yet committed to a step.
+const liveContent = $derived(answerContent ?? "");
+
+// True in the narrow window where the model is streaming its opening text BEFORE the
+// first tool call (no steps yet). That text lives in the answer spot now, but the instant
+// the first tool_start arrives the reducer re-homes it as that step's preamble — which
+// sits inside the step with ~7px of top padding (.tool-step-content 4px + preamble 3px).
+// Without matching that offset here the text visibly drops when the tool call lands. So in
+// this window only, pad the answer spot to the same offset; the final answer (steps exist,
+// or not streaming) stays flush. Kept in a class rather than inline so it's easy to tune.
+const isPreFirstToolText = $derived(!!isStreaming && steps.length === 0 && !!liveContent);
+
+// The thinking-process header (chevron + shimmer/settled label) is shown whenever
+// there is a thinking process to represent: any built step, OR we're streaming.
+// Keying it on `isStreaming` (not on a per-content flag) keeps the header present for
+// the entire turn, so it never vanishes while a preamble streams and reappears when
+// the first step lands. It stays hidden for a settled tool-free answer (no steps, not
+// streaming).
+const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
 </script>
+
+{#snippet preambleBlock(text: string)}
+  <div class="tool-timeline-preamble">
+    <MarkdownRenderer
+      content={text}
+      class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0"
+    />
+  </div>
+{/snippet}
 
 {#snippet toolCard(tool: UnifiedToolCall)}
   {#if tool.preamble}
-    <div class="tool-timeline-preamble">
-      <MarkdownRenderer
-        content={tool.preamble}
-        class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0"
-      />
-    </div>
+    {@render preambleBlock(tool.preamble)}
   {/if}
   {@const outputModel =
     tool.output !== undefined
       ? buildToolOutputRenderModel(tool.name, tool.output, tool.input)
       : undefined}
-  {@const isSubAgentParent = tool.name === "task" && !!tool.subAgentName}
   {@const toolSummary = buildToolSummary(tool.name, tool.input, outputModel, tool.status)}
   {@const isTask = tool.name === "task"}
-  <!-- Regular tools fold the outcome into the sentence ("Read main.md, 512 lines");
-       task rows keep the subagent name as the label and the task description as a
-       separate faint subtitle rather than a comma-joined outcome clause. -->
-  {@const headerLabel = isTask ? toolDisplayName(tool) : foldOutcome(toolSummary)}
-  {@const headerSubtitle = isTask ? getTaskSummary(tool.input) : ""}
+  <!-- A `task` (subagent) row reads as one coherent sentence like any other tool
+       call: the subagent name followed by what it was asked to do
+       ("Web Search: Explore the user's OKRs"). No "subagent" pill and no separate
+       subtitle — the delegation is conveyed by the sentence itself. -->
+  {@const taskSentence = (() => {
+    const name = toolDisplayName(tool);
+    const description = getTaskSummary(tool.input);
+    return description ? `${name}: ${description}` : name;
+  })()}
+  {@const headerLabel = isTask ? taskSentence : foldOutcome(toolSummary)}
   {#if isExpandable(tool)}
     <details class="tool-card">
       <summary class="tool-card-header">
-        {@render toolCardHeader(headerLabel, headerSubtitle, tool.status, isSubAgentParent, tool.subAgentName)}
+        {@render toolCardHeader(headerLabel, tool.status, tool.subAgentName, isTask)}
       </summary>
       <div class="tool-card-body">
         {@render toolBody(tool, outputModel)}
@@ -314,7 +399,7 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   {:else}
     <div class="tool-card tool-card-flat">
       <div class="tool-card-header">
-        {@render toolCardHeader(headerLabel, headerSubtitle, tool.status, isSubAgentParent, tool.subAgentName)}
+        {@render toolCardHeader(headerLabel, tool.status, tool.subAgentName, isTask)}
       </div>
     </div>
   {/if}
@@ -322,19 +407,19 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
 
 {#snippet toolCardHeader(
   label: string,
-  subtitle: string,
   status: UnifiedToolCall["status"],
-  isSubAgentParent: boolean,
   subAgentName: string | undefined,
+  isTask: boolean,
 )}
-  <span class="tool-card-name" class:tool-card-name-failed={status === "failed"}>{label}</span>
-  {#if isSubAgentParent}
-    <span class="tool-card-subagent-badge">subagent</span>
-  {:else if subAgentName}
+  <span
+    class="tool-card-name"
+    class:tool-card-name-failed={status === "failed"}
+    class:is-running={status === "running"}>{label}</span>
+  <!-- Orphan-child attribution: a subagent tool call whose parent `task` row isn't
+       shown (folding couldn't find it) still notes which subagent it ran in. The
+       `task` row itself needs no chip — its sentence already names the subagent. -->
+  {#if subAgentName && !isTask}
     <span class="tool-card-subagent-badge">via {subAgentName}</span>
-  {/if}
-  {#if subtitle}
-    <span class="tool-card-summary">{subtitle}</span>
   {/if}
 {/snippet}
 
@@ -370,36 +455,70 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   {/if}
 {/snippet}
 
-{#snippet subAgentBranch(children: UnifiedToolCall[])}
-  <div class="tool-subagent-branch">
-    {#each children as child, childIdx (child.id)}
-      <div
-        class="tool-subagent-branch-row"
-        class:branch-first={childIdx === 0}
-        class:branch-last={childIdx === children.length - 1}
-      >
-        <div class="tool-subagent-branch-rail">
-          <div
-            class="tool-step-dot tool-subagent-dot"
-            class:dot-running={child.status === "running"}
-            class:dot-failed={child.status === "failed"}
-            class:dot-done={child.status === "completed"}
-          ></div>
-        </div>
-        <div class="tool-subagent-branch-content">
-          {@render toolCard(child)}
-        </div>
+{#snippet subAgentGroup(tool: UnifiedToolCall, children: UnifiedToolCall[])}
+  {@const outputModel =
+    tool.output !== undefined
+      ? buildToolOutputRenderModel(tool.name, tool.output, tool.input)
+      : undefined}
+  {@const name = toolDisplayName(tool)}
+  {@const description = getTaskSummary(tool.input)}
+  {@const headerLabel = description ? `${name}: ${description}` : name}
+  <div class="tool-subagent-group">
+    {#if tool.preamble}
+      {@render preambleBlock(tool.preamble)}
+    {/if}
+    <!-- The task sentence is itself the expand toggle (a normal tool-card
+         <details>): clicking it reveals the subagent's child steps and its final
+         output. Collapsed by default so a subagent's many child calls don't
+         clutter the chat until the user opts in. -->
+    <details class="tool-card">
+      <summary class="tool-card-header">
+        <span
+          class="tool-card-name"
+          class:tool-card-name-failed={tool.status === "failed"}
+          class:is-running={tool.status === "running"}>{headerLabel}</span>
+      </summary>
+
+      <!-- Child steps render inline as normal tool rows, indented under the task
+           sentence — no rail, no dots. -->
+      <div class="tool-subagent-branch">
+        {#each children as child (child.id)}
+          <div class="tool-subagent-branch-content">
+            {@render toolCard(child)}
+          </div>
+        {/each}
       </div>
-    {/each}
+
+      <!-- The subagent's final output, below its steps. -->
+      {#if hasFriendlyResult(outputModel)}
+        <div class="tool-subagent-output">
+          <div class="tool-subagent-output-label">Result</div>
+          <div class="tool-io-output">
+            {@render outputBody(outputModel!)}
+          </div>
+        </div>
+      {/if}
+    </details>
   </div>
 {/snippet}
 
 {#snippet mergedToolRow(group: ToolCallGroup)}
   {@const status = mergedGroupStatus(group)}
   {@const summary = buildMergedToolSummary(group.name, toMergedCalls(group), status)}
-  <details class="tool-card tool-card-merged">
+  {@const mergedPreamble = group.calls.find((c) => c.preamble)?.preamble}
+  {#if mergedPreamble}
+    <!-- The preamble is attached to a single tool call, but when consecutive
+         same-type calls merge into one group the individual toolCard (which
+         renders the preamble) is bypassed for mergedToolRow. Surface the group's
+         preamble here too so it doesn't vanish the moment a second call merges in. -->
+    {@render preambleBlock(mergedPreamble)}
+  {/if}
+  <details class="tool-card">
     <summary class="tool-card-header">
-      <span class="tool-card-name" class:tool-card-name-failed={status === "failed"}>{foldOutcome(summary)}</span>
+      <span
+        class="tool-card-name"
+        class:tool-card-name-failed={status === "failed"}
+        class:is-running={status === "running"}>{foldOutcome(summary)}</span>
     </summary>
 
     <!-- Each merged call keeps its own friendly result (and raw I/O in dev mode). -->
@@ -427,8 +546,6 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
 )}
   <div
     class="tool-step"
-    class:step-running={isStepRunning(step)}
-    class:step-failed={hasStepFailure(step)}
     class:step-first={stepIdx === 0}
     class:step-last={stepIdx === totalSteps - 1}
     class:step-only={totalSteps === 1}
@@ -452,39 +569,7 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
             {@const isSubAgentParent = tool.name === "task" && !!tool.subAgentName}
             {@const branchChildren = tool.children ?? []}
             {#if isSubAgentParent && branchChildren.length > 0}
-              {@const expanded = subAgentExpanded[tool.id] ?? false}
-              {@const runningCount = branchChildren.filter((c) => c.status === "running").length}
-              <div class="tool-subagent-group">
-                {@render toolCard(tool)}
-                <button
-                  type="button"
-                  class="tool-subagent-toggle"
-                  class:is-expanded={expanded}
-                  onclick={() => toggleSubAgent(tool.id)}
-                  aria-expanded={expanded}
-                >
-                  <svg viewBox="0 0 16 16" fill="none" class="tool-subagent-toggle-chevron">
-                    <path
-                      d="M6 4L10 8L6 12"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    />
-                  </svg>
-                  <span class="tool-subagent-toggle-label">
-                    {expanded ? "Hide" : "Show"}
-                    {branchChildren.length}
-                    {branchChildren.length === 1 ? "step" : "steps"}
-                  </span>
-                  {#if runningCount > 0}
-                    <span class="tool-subagent-toggle-running">running…</span>
-                  {/if}
-                </button>
-                {#if expanded}
-                  {@render subAgentBranch(branchChildren)}
-                {/if}
-              </div>
+              {@render subAgentGroup(tool, branchChildren)}
             {:else}
               {@render toolCard(tool)}
             {/if}
@@ -571,7 +656,7 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
     </div>
   {:else if model.kind === "structured"}
     {#if model.summaryEntries.length > 0}
-      <div class="tool-output-kv-list tool-output-structured-summary">
+      <div class="tool-output-kv-list">
         {#each model.summaryEntries as entry (entry.key)}
           <div class="tool-output-kv-row">
             <span class="tool-output-kv-key">{entry.key}</span>
@@ -792,146 +877,255 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   {/if}
 {/snippet}
 
-{#if noTimelineWrap}
-  <!-- Inline rendering: content streaming with no tool-call steps yet.
-       Renders identical to the completed plain-MarkdownRenderer path so there
-       is no layout shift when streaming ends and the else-branch takes over. -->
-  {#if answerContent}
-    <MarkdownRenderer
-      content={answerContent}
-      class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
-    />
+{#snippet answerContentBlock()}
+  {#if liveContent}
+    <div class:answer-spot-pre-tool={isPreFirstToolText}>
+      <MarkdownRenderer
+        content={liveContent}
+        class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
+      />
+    </div>
   {/if}
-{:else}
-  <div class="tool-timeline" class:tool-timeline-highlight-all={hoveringFinalControl}>
-    {#if showProcessingDot}
-      <div class="tool-step step-only">
-        <div class="tool-step-rail">
-          <div class="tool-step-dot dot-running"></div>
-        </div>
-        <div class="tool-step-content"></div>
-      </div>
-    {/if}
+{/snippet}
 
-    {#if collapsed && steps.length > 0}
-      <!-- Single summary node: entire thinking process collapsed into one clickable row -->
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <div
-        class="tool-step thinking-summary-step step-first"
-        class:step-last={!showAnswerStep}
-        class:step-only={effectiveTotal === 1}
-        onclick={ontoggle}
-      >
-        <div class="tool-step-rail thinking-summary-rail">
-          <div
-            class="tool-step-dot"
-            class:dot-failed={steps.some(hasStepFailure)}
-            class:dot-done={!steps.some(hasStepFailure)}
-          ></div>
-        </div>
-        <div class="tool-step-content thinking-summary-content">
-          <span class="thinking-summary-label">{getThinkingSummaryLabel(steps)}</span>
-        </div>
-      </div>
-    {:else}
-      <!-- All steps expanded — wrap in animated grid for smooth collapse/expand transition -->
-      <div class="steps-expand-grid" class:steps-expanded={!collapsed}>
-        <div class="steps-expand-inner">
-          {#each steps as step, stepIdx (step.id)}
-            {@render stepRow(step, stepIdx, showAnswerStep ? steps.length + 1 : effectiveTotal - (showProcessingDot ? 1 : 0))}
-          {/each}
-        </div>
-      </div>
-    {/if}
+<!-- Single render branch — NEVER a top-level {#if} that swaps the whole subtree.
+     A previous `{#if noTimelineWrap}` inline branch vs. the timeline branch caused
+     the header to unmount/remount when an early preamble briefly surfaced as
+     answerContent (before the first step was built) and then the step landed — the
+     flicker at the first step. Now the timeline container is always present; only
+     its INNER header/steps render when there's a thinking process. When there's no
+     process (pure answer), the container is empty (zero-height) and just the answer
+     shows below — same layout as before, but no subtree swap. -->
+<div class="tool-timeline no-rail" class:tool-timeline-highlight-all={hoveringRail}>
+  {#if showThinkingHeader}
+    <!-- The header is ALWAYS a clickable chevron toggle — in BOTH the running and
+         settled states — so (a) the process can be collapsed mid-stream to just
+         watch for the answer, and (b) the chevron never appears/disappears on
+         completion, so the label doesn't shift when the run settles. Only the
+         label content swaps: a shimmering rotating word + timer while running,
+         the static "Thought for Ns" once done. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <button
+      type="button"
+      class="thinking-summary-header"
+      class:is-collapsed={collapsed}
+      onclick={ontoggle}
+      onmouseenter={() => {
+        hoveringRail = true;
+      }}
+      onmouseleave={() => {
+        hoveringRail = false;
+      }}
+    >
+      <span class="thinking-summary-chevron" class:is-open={!collapsed}>
+        <Icon name="chevron-right" size="xs" />
+      </span>
+      <!-- One persistent label node: only its text + `is-running` class toggle across
+           the streaming→settled boundary. Swapping two separate spans here used to tear
+           down the shimmer's background-clip paint and (with a fit-content header) snap
+           the row width when the text changed — visible motion at completion even when
+           the process was already collapsed. A single node makes it a pure in-place
+           color/text change. -->
+      <span class="thinking-summary-status" class:is-running={summaryRunning}>
+        {summaryRunning ? runningLabel : settledLabel}
+      </span>
+    </button>
 
-    {#if showAnswerStep}
-      <div
-        class="tool-step step-last"
-        class:step-first={steps.length === 0 && !showProcessingDot}
-        class:step-only={effectiveTotal === 1}
-      >
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <div
-          class="tool-step-rail"
-          class:tool-step-rail-clickable={!collapsed && steps.length > 0 && !!ontoggle}
-          onclick={!collapsed && steps.length > 0 && ontoggle ? ontoggle : undefined}
-          onmouseenter={() => {
-            if (!collapsed && steps.length > 0 && ontoggle) hoveringFinalControl = true;
-          }}
-          onmouseleave={() => {
-            hoveringFinalControl = false;
-          }}
-        >
-          <div
-            class="tool-step-dot"
-            class:dot-running={isStreaming}
-            class:dot-failed={!isStreaming && isError}
-            class:dot-done={!isStreaming && !isError}
-          ></div>
-        </div>
-        <div class="tool-step-content">
-          {#if answerContent}
-            <MarkdownRenderer
-              content={answerContent}
-              class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
-            />
-          {/if}
-        </div>
+    <!-- Steps animate open/closed via a 0fr↔1fr grid-rows transition. The header
+         above stays put; only this block grows/shrinks. While streaming this holds
+         only the PRIOR (finished) runs; the current run renders below the process so
+         it doesn't hop up until the next AI message starts and folds it in. -->
+    <div class="steps-expand-grid" class:steps-expanded={!collapsed}>
+      <div class="steps-expand-inner">
+        {#each priorSteps as step, stepIdx (step.id)}
+          {@render stepRow(step, stepIdx, priorSteps.length)}
+        {/each}
       </div>
-    {/if}
+    </div>
+  {/if}
+</div>
+
+<!-- Current run's tool rows (streaming only), rendered below the process and OUTSIDE
+     the collapsible grid so they stay visible even when the process is collapsed —
+     the user chose to keep the in-flight tool calls shown while collapsed; only the
+     FOLDED prior messages' tool calls hide. When the next AI message begins, this run
+     becomes a prior step and folds into the process above; a fresh current run's tools
+     take its place here. The current run's committed preamble rides along on the step
+     (rendered by stepRow); its live/uncommitted text streams in the single content spot
+     below. -->
+{#if isStreaming && currentStep}
+  <div class="tool-timeline no-rail tool-timeline-current">
+    {@render stepRow(currentStep, 0, 1)}
   </div>
 {/if}
 
+<!-- The single content spot: `content` in full answer style, whenever non-empty. It
+     streams live here and STAYS here on completion — same node, same style, no move. -->
+{@render answerContentBlock()}
+
 <style>
   /* ── Timeline container ── */
+  /* The rail bleeds left into the surrounding padding so the answer/preamble
+     text lines up flush with the rest of the chat content. The bleed is capped
+     at the padding that's ALWAYS present (scroll-container px-2 = 8px + message
+     px-2 = 8px → 16px), never the old -24px which overshot that on narrow panes
+     and pushed the dot past the scroll container's `overflow-x: hidden` edge,
+     clipping its left half + glow. A small left padding keeps the dot's glow
+     ring off the very edge even at the tightest width. Raising z-index cannot
+     fix this — the dot is clipped by an ancestor's overflow, not painted over. */
   .tool-timeline {
-    width: calc(100% + 24px);
-    margin-left: -24px;
-    padding: 4px 0;
+    position: relative;
   }
 
-  .tool-timeline-highlight-all .tool-step-dot {
-    transform: scale(1.2);
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--interactive-accent) 20%, transparent);
+  /* When the process is collapsed the header is a single quiet row; the parent
+     `.group`'s 0.75rem flex gap then leaves an outsized space below it. Pull whatever
+     follows (the live current-run block while streaming, or the answer once settled) up
+     so the collapsed label sits close to it. Applied in BOTH phases with the SAME value
+     so nothing shifts at the streaming→settled boundary — an earlier settled-only gate
+     made the gap snap tighter the instant the run settled. Transitioned so any residual
+     height change (e.g. the current-run block unmounting at settle) eases rather than
+     jumps. */
+  .tool-timeline:has(.thinking-summary-header.is-collapsed) {
+    margin-bottom: -0.95rem;
+    transition: margin-bottom 0.2s ease;
   }
 
-  .tool-timeline-highlight-all .tool-step-rail::before {
-    background: var(--interactive-accent);
-    opacity: 0.55;
+  /* Rail-less mode: the vertical timeline rail (dots + connecting line) is hidden
+     and its 24px column collapses to zero, so the "Thinking process" header and
+     the expanded step content sit flush with the answer below — no indent, no
+     negative-margin bleed into the chat history, nothing to clip on narrow panes. */
+  .tool-timeline.no-rail .tool-step-rail {
+    display: none;
+  }
+  .tool-timeline.no-rail .tool-step {
+    /* Was flex [rail | content]; with the rail gone the content is the only child
+       and should fill the row flush-left. */
+    gap: 0;
   }
 
-  /* ── Thinking-process summary node (collapsed state) ── */
-  .thinking-summary-step {
-    cursor: pointer;
-    user-select: none;
+  /* The current-run block (streaming) sits directly below the process, holding the
+     run in flight. It reuses the same rail-less step layout as the process so a run
+     looks identical whether it's live here or folded into the process above — no
+     shift when it folds. No extra chrome; the step's own padding provides spacing. */
+  .tool-timeline-current {
+    margin-top: 0;
   }
-  .thinking-summary-step:hover .tool-step-dot {
-    transform: scale(1.3);
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--interactive-accent) 20%, transparent);
-  }
-  .thinking-summary-step:hover .tool-step-rail::before {
-    background: var(--interactive-accent);
-    opacity: 0.5;
-  }
-  .thinking-summary-rail {
-    padding-top: 6px;
-  }
-  .thinking-summary-content {
-    padding: 4px 0 10px;
-    justify-content: center;
-  }
-  .thinking-summary-label {
+
+  /* ── Header status label (single node for both states) ──
+     One persistent span carries both the running and settled label. The base rule is
+     the settled look (solid faint text); `.is-running` layers the shimmer gradient +
+     animation on top. Same node in both states, so completion is a pure color/text
+     change — no span teardown, no paint jolt. */
+  .thinking-summary-status {
     font-size: 0.76rem;
+    line-height: 20px;
     color: var(--text-faint);
     transition: color 0.15s;
   }
-  .thinking-summary-step:hover .thinking-summary-label {
+  .thinking-summary-status.is-running,
+  .tool-card-name.is-running {
+    /* Animated gradient sweep across the text: a faint→bright→faint band scrolls
+       left→right via background-position, clipped to the glyphs. Shared by the
+       thinking-process header label and any running tool-call name so an in-flight
+       tool reads with the same "live" treatment as the header. */
+    background: linear-gradient(
+      100deg,
+      var(--text-faint) 0%,
+      var(--text-faint) 35%,
+      var(--text-normal) 50%,
+      var(--text-faint) 65%,
+      var(--text-faint) 100%
+    );
+    background-size: 220% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    animation: thinking-shimmer 1.8s linear infinite;
+  }
+  @keyframes thinking-shimmer {
+    0% {
+      background-position: 130% 0;
+    }
+    100% {
+      background-position: -30% 0;
+    }
+  }
+  /* Respect reduced-motion: drop the sweep, keep a readable static color. */
+  @media (prefers-reduced-motion: reduce) {
+    .thinking-summary-status.is-running,
+    .tool-card-name.is-running {
+      animation: none;
+      background: none;
+      color: var(--text-muted);
+      -webkit-text-fill-color: var(--text-muted);
+    }
+  }
+
+  /* ── Thinking-process summary header (collapsed toggle) ── */
+  /* A plain, rail-less toggle: chevron + label, flush with the answer. Clicking
+     (or the whole row hover, via .tool-timeline-highlight-all) toggles the steps. */
+  .thinking-summary-header {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    cursor: pointer;
+    user-select: none;
+    /* Full-width flow row (not fit-content): the label text changes length across the
+       streaming→settled boundary ("Working… Ns" → "Thought for Ns"); a fit-content row
+       would snap its width on that change, a visible reflow at completion. A normal-flow
+       row keeps the chevron + label left-aligned and the row width stable. */
+    align-self: flex-start;
+    color: inherit;
+  }
+  .thinking-summary-chevron {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+    transition:
+      transform 0.18s ease,
+      color 0.15s;
+    flex-shrink: 0;
+  }
+  .thinking-summary-chevron.is-open {
+    transform: rotate(90deg);
+  }
+  /* Whole-header hover feedback, driven off the shared hoveringRail state so the
+     header and (former) rail highlight as one unit with no competing mechanism. */
+  .tool-timeline-highlight-all .thinking-summary-status,
+  .tool-timeline-highlight-all .thinking-summary-chevron {
     color: var(--text-normal);
   }
 
+  /* When a SETTLED process is collapsed, the "Thought for Ns" label + chevron are
+     ambient: hidden until the mouse is over the whole assistant message (the process
+     header AND its answer, i.e. the parent `.group`), so a quiet, collapsed turn reads
+     as just the answer. The label still occupies its row (opacity, not display) so the
+     answer below doesn't shift when it fades in. While RUNNING the label is the progress
+     indicator and stays visible — so this only applies when the status is not running. */
+  .thinking-summary-header.is-collapsed .thinking-summary-status:not(.is-running),
+  .thinking-summary-header.is-collapsed:not(:has(.is-running)) .thinking-summary-chevron {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  :global(.group:hover) .thinking-summary-header.is-collapsed .thinking-summary-status,
+  :global(.group:hover) .thinking-summary-header.is-collapsed .thinking-summary-chevron,
+  .thinking-summary-header.is-collapsed:hover .thinking-summary-status,
+  .thinking-summary-header.is-collapsed:hover .thinking-summary-chevron {
+    opacity: 1;
+  }
+
   /* ── Steps expand/collapse wrapper ── */
+  /* Both the expanded steps and the collapsed summary use a 0fr↔1fr grid-rows
+     transition — the standard trick for animating to/from intrinsic height.
+     The inner wrapper must clip (overflow: hidden) or the content spills past
+     the collapsing track and the height animation reads as an instant pop. */
   .steps-expand-grid {
     display: grid;
     grid-template-columns: 100%;
@@ -947,29 +1141,28 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   }
   .steps-expand-inner {
     min-height: 0;
-    overflow: visible;
+    overflow: hidden;
   }
 
-  /* ── Rail clickable (answer-dot collapse trigger) ── */
-  .tool-step-rail-clickable {
-    cursor: pointer;
-    border-radius: 4px;
-  }
-  .tool-step-rail-clickable:hover .tool-step-dot {
-    transform: scale(1.3);
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--interactive-accent) 20%, transparent);
-  }
-  .tool-step-rail-clickable:hover::before {
-    background: var(--interactive-accent);
-    opacity: 0.5;
+  /* ── Answer spot ── */
+  /* The single live-content spot below the header. Before the first tool call the model's
+     opening text streams here; the instant that first tool call lands, the reducer re-homes
+     the text as the step's preamble, which sits with ~7px of top padding inside the step
+     (.tool-step-content 4px + .tool-timeline-preamble 3px). Match that offset ONLY in the
+     pre-first-tool window so the text doesn't jump down when it becomes a preamble. The
+     final answer (steps present, or settled) keeps this at 0 for a tight header→answer gap. */
+  .answer-spot-pre-tool {
+    padding-top: 7px;
   }
 
   /* ── Preamble ── */
   .tool-timeline-preamble {
-    padding: 6px 0;
+    /* Match the tool-card-header's 3px top padding so the first text line starts
+       at the same offset whether a step opens with a preamble or a tool row —
+       keeps the step dot aligned to the first line in both cases. */
+    padding: 3px 0;
     font-size: 0.82rem;
     color: var(--text-muted);
-    font-style: italic;
     flex: 1;
     min-width: 0;
   }
@@ -993,7 +1186,11 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
     align-self: stretch;
     width: 24px;
     flex-shrink: 0;
-    padding-top: 8px;
+    /* Push the dot down so its center (padding-top + 5px dot radius) lands on the
+       first content line's optical center. Content adds 4px top padding and the
+       preamble/header add 3px, and the first line is ~19px tall — its center sits
+       ~16px below the step top, so 12px + 5px ≈ 17px keeps the dot on that line. */
+    padding-top: 12px;
   }
 
   .tool-step-rail::before {
@@ -1013,13 +1210,13 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
 
   /* First step: line starts at dot center */
   .step-first .tool-step-rail::before {
-    top: 13px;
+    top: 17px;
   }
 
   /* Last step: line ends at dot center */
   .step-last .tool-step-rail::before {
     bottom: auto;
-    height: 13px;
+    height: 17px;
   }
 
   /* Single step: no connecting line needed */
@@ -1099,7 +1296,10 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
     max-width: 100%;
     align-items: center;
     gap: 8px;
-    padding: 3px 6px;
+    /* No left padding: the tool name lines up flush with the preamble text above it
+       (the preamble has no horizontal padding), so the whole step reads as one column
+       with no stray indent. Right padding kept for the hover hit area. */
+    padding: 3px 6px 3px 0;
     cursor: pointer;
     user-select: none;
     list-style: none;
@@ -1117,10 +1317,12 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
        only the text color — no background highlight, no chevron. */
     color: var(--text-faint);
     transition: color 0.15s;
-    /* Size to content, but shrink with ellipsis if the label alone would
-       exceed the card width (header is capped at max-width: 100%). */
+    /* Size to content, but ellipsis if the label alone overflows the capped-width
+       header (task rows now fold the subagent name + description into this single
+       label, so there's no competing sibling to crush it). */
     flex: 0 1 auto;
     min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1134,19 +1336,6 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
   .tool-card-name-failed,
   .tool-card-header:hover .tool-card-name-failed {
     color: var(--color-red);
-  }
-
-  /* Faint task-description subtitle shown only on a subagent `task` row (the
-     "what it was asked to do"). Regular tools fold their outcome into the label
-     instead, so this never carries a result count. */
-  .tool-card-summary {
-    flex: 0 1 auto;
-    min-width: 0;
-    color: var(--text-faint);
-    font-size: 0.76rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   /* ── Merged multi-call row ── */
@@ -1202,7 +1391,7 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
     background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
   }
 
-  /* ── Subagent branch (git-merge style sub-timeline) ── */
+  /* ── Subagent group (task sentence + inline child steps + final output) ── */
   .tool-subagent-group {
     display: flex;
     flex-direction: column;
@@ -1210,130 +1399,40 @@ const noTimelineWrap = $derived(steps.length === 0 && !showProcessingDot && show
     position: relative;
   }
 
-  /* Collapsed-by-default toggle for the subagent's nested sub-timeline. Sits
-     indented under the parent `task` card (matching the branch indent) and
-     reveals/hides the child tool calls on demand to keep the chat uncluttered. */
-  .tool-subagent-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    margin-left: 6px;
-    padding: 3px 8px 3px 4px;
-    background: none;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    color: var(--text-muted);
-    font-size: 0.74rem;
-    transition: background 0.12s, color 0.12s;
-  }
-
-  .tool-subagent-toggle:hover {
-    background: var(--background-modifier-hover);
-    color: var(--text-normal);
-  }
-
-  .tool-subagent-toggle-chevron {
-    width: 12px;
-    height: 12px;
-    flex-shrink: 0;
-    transition: transform 0.12s;
-  }
-
-  .tool-subagent-toggle.is-expanded .tool-subagent-toggle-chevron {
-    transform: rotate(90deg);
-  }
-
-  .tool-subagent-toggle-running {
-    color: var(--interactive-accent);
-    font-style: italic;
-  }
-
-  /* The subagent's tool calls hang off the parent `task` card as a nested
-     sub-timeline. A curved elbow diverges from just under the parent card,
-     runs a vertical spine through the child dots, and stops at the last child
-     to "merge" back. Indented so it reads as subordinate to the `task` node
-     without leaving the step's content column. */
+  /* The subagent's tool calls render as a plain indented list under the parent
+     `task` sentence — no rail or dots, always visible. A subtle left rule
+     (matching the expanded tool-body indent) marks them as subordinate without a
+     second timeline. */
   .tool-subagent-branch {
     display: flex;
     flex-direction: column;
-    margin-left: 6px;
-    padding-left: 4px;
-  }
-
-  .tool-subagent-branch-row {
-    display: flex;
-    gap: 0;
-    position: relative;
-  }
-
-  .tool-subagent-branch-rail {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    align-self: stretch;
-    width: 20px;
-    flex-shrink: 0;
-    padding-top: 13px;
-  }
-
-  /* Vertical spine of the branch — a subtler accent tint so the main timeline
-     still reads as primary. */
-  .tool-subagent-branch-rail::before {
-    content: "";
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 2px;
-    background: color-mix(in srgb, var(--interactive-accent) 32%, var(--background-modifier-border));
-    border-radius: 1px;
-    top: 0;
-    bottom: 0;
-  }
-
-  /* First child: the spine begins at the child dot; a curved elbow reaches up
-     and to the left, connecting to the parent `task` card area. The elbow
-     right-edge anchors at the sub-rail spine (left: 50%), and its width
-     extends leftward far enough to reach the parent main-rail spine. */
-  .branch-first .tool-subagent-branch-rail::before {
-    top: 0;
-  }
-  .branch-first .tool-subagent-branch-rail::after {
-    display: none;
-  }
-
-  /* Last child (when not also first): spine stops at the dot, no trailing line. */
-  .branch-last:not(.branch-first) .tool-subagent-branch-rail::before {
-    bottom: auto;
-    height: 18px;
-  }
-
-  /* Single child: only the elbow feeds the dot, no through-spine. */
-  .branch-first.branch-last .tool-subagent-branch-rail::before {
-    display: none;
-  }
-
-  .tool-subagent-dot {
-    width: 8px;
-    height: 8px;
-    border-width: 2px;
-  }
-
-  /* Child dots use a slightly muted accent so they read as secondary to the
-     parent node's dot. */
-  .tool-subagent-dot.dot-done {
-    border-color: color-mix(in srgb, var(--interactive-accent) 70%, var(--background-modifier-border));
-    background: color-mix(in srgb, var(--interactive-accent) 70%, var(--background-modifier-border));
-    box-shadow: none;
+    margin: 2px 0 4px 12px;
+    padding-left: 12px;
+    border-left: 2px solid var(--background-modifier-border);
   }
 
   .tool-subagent-branch-content {
-    flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
-    padding: 4px 0;
+  }
+
+  /* The subagent's final output, shown below its child steps under the same
+     indent so it reads as the branch's conclusion. */
+  .tool-subagent-output {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0 0 4px 12px;
+    padding-left: 12px;
+  }
+
+  .tool-subagent-output-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-faint);
   }
 
   /* A row with nothing to reveal renders flat: no expand affordance, so drop the
