@@ -2128,6 +2128,7 @@ let _pluginDataStore: PluginDataStore | null = null;
 /** Human label for a capability's guidance, shown in the "updated" notice. */
 const CAPABILITY_GUIDANCE_LABEL: Record<CapabilityId, string> = {
 	vault: "Vault guidance",
+	notes: "Note Management guidance",
 	web: "Web guidance",
 };
 

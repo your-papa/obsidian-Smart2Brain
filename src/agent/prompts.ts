@@ -62,8 +62,8 @@ The \`${folder}/\` folder is your own working memory — an intermediate layer b
  * Default guidance for the Vault exploration capability. Rendered as the body of the
  * `# Vault exploration` section in the assembled system prompt (above the enabled
  * vault tools' per-tool `##` subheaders). Contains the note-finding procedure (moved
- * here out of BASE_SYSTEM_PROMPT so it only appears when a vault tool is enabled) plus
- * the write-staging policy (manage_notes is a vault tool). User-editable via the
+ * here out of BASE_SYSTEM_PROMPT so it only appears when a vault tool is enabled).
+ * Write policy lives in the separate Note management capability. User-editable via the
  * capability pencil; `capabilityPrompts.vault` overrides it.
  */
 export const DEFAULT_VAULT_CAPABILITY_GUIDANCE = `## Finding Notes
@@ -80,9 +80,16 @@ export const DEFAULT_VAULT_CAPABILITY_GUIDANCE = `## Finding Notes
 3. **Reading Content**:
    - \`search_notes\` will give you a list of potential matches with metadata.
    - If the user query contains explicit Obsidian wiki links (e.g. [[Project Plan]]), you may call \`read_content\` directly with those links.
-   - If you need to read the full content of a note and no explicit wiki link is provided, use \`read_content\` with the specific file path from the search results.
+   - If you need to read the full content of a note and no explicit wiki link is provided, use \`read_content\` with the specific file path from the search results.`;
 
-## Write Operations
+/**
+ * Default guidance for the Note management capability. Rendered as the body of the
+ * `# Note management` section in the assembled system prompt (above the enabled
+ * `manage_notes` `##` subheader). Holds the write-staging policy previously bundled
+ * into the vault guidance (issue #368). User-editable via the capability pencil;
+ * `capabilityPrompts.notes` overrides it.
+ */
+export const DEFAULT_NOTES_CAPABILITY_GUIDANCE = `## Write Operations
 - All write operations (create, update, delete, move) are staged for user approval. Never say a change has already been applied.
 - Modify only what the user asked for and preserve surrounding content.
 - Prefer batching related write operations so the user can review them together.
@@ -105,6 +112,8 @@ export function buildDefaultCapabilityGuidance(id: CapabilityId): string {
 	switch (id) {
 		case "vault":
 			return DEFAULT_VAULT_CAPABILITY_GUIDANCE;
+		case "notes":
+			return DEFAULT_NOTES_CAPABILITY_GUIDANCE;
 		case "web":
 			return DEFAULT_WEB_CAPABILITY_GUIDANCE;
 	}
@@ -128,6 +137,7 @@ export const HISTORICAL_SYSTEM_PROMPTS: ReadonlyMap<number, string> = new Map([[
  */
 export const HISTORICAL_CAPABILITY_GUIDANCE: ReadonlyMap<CapabilityId, ReadonlySet<string>> = new Map([
 	["vault", new Set([DEFAULT_VAULT_CAPABILITY_GUIDANCE])],
+	["notes", new Set([DEFAULT_NOTES_CAPABILITY_GUIDANCE])],
 	["web", new Set([DEFAULT_WEB_CAPABILITY_GUIDANCE])],
 ]);
 
@@ -171,6 +181,7 @@ export const HISTORICAL_TOOL_GUIDANCE: ReadonlyMap<
  */
 export const CAPABILITY_GUIDANCE_VERSION: ReadonlyMap<CapabilityId, number> = new Map([
 	["vault", 1],
+	["notes", 1],
 	["web", 1],
 ]);
 

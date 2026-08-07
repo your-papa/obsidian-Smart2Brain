@@ -32,6 +32,7 @@ import { buildPluginApiSkill } from "../../skills/templates/pluginApiScripting";
 import {
 	DEFAULT_AGENT_ICON,
 	VAULT_TOOL_IDS,
+	NOTE_TOOL_IDS,
 	WEB_TOOL_IDS,
 	type AgentConfig,
 	type BuiltInToolId,
@@ -534,6 +535,7 @@ function openCapabilitySettingsModal(capId: CapabilityId) {
 // --- Core · Vault exploration + Web capability cards (bulk-toggle their built-in tools) ---
 
 const vaultTools = $derived(TOOLS.filter((tool) => (VAULT_TOOL_IDS as readonly string[]).includes(tool.id)));
+const noteTools = $derived(TOOLS.filter((tool) => (NOTE_TOOL_IDS as readonly string[]).includes(tool.id)));
 const webTools = $derived(TOOLS.filter((tool) => (WEB_TOOL_IDS as readonly string[]).includes(tool.id)));
 
 // Each card's master is a plain on/off switch: OFF turns every tool in the card off; ON turns
@@ -556,6 +558,7 @@ function toggleAllTools(tools: ToolInfo[], next: boolean) {
 }
 
 const vaultAnyOn = $derived(anyEnabledIn(vaultTools));
+const noteAnyOn = $derived(anyEnabledIn(noteTools));
 const webAnyOn = $derived(anyEnabledIn(webTools));
 
 // --- Subagents (references to other agents) ---
@@ -862,24 +865,43 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
       <section class="agent-editor-section">
         <SettingGroup heading="Core Capabilities">
           <div class="setting-item-description mb-3">
-            Built-in capabilities every agent can use — vault exploration and web access.
+            Built-in capabilities every agent can use — vault exploration, note management, and web
+            access.
           </div>
 
-          <!-- Vault exploration — configure guidance + per-tool settings via the gear. -->
+          <!-- Vault Exploration — configure guidance + per-tool settings via the gear. -->
           <SettingItem
-            name="Vault exploration"
-            desc="Search, read, edit, and explore your vault with the built-in tools."
+            name="Vault Exploration"
+            desc="Search, read, and explore your vault with the built-in tools."
           >
             {#snippet namePrefix()}
               <Icon name="compass" size="s" />
             {/snippet}
             <Button
               iconId="settings"
-              ariaLabel="Vault exploration settings"
-              tooltip="Vault exploration settings"
+              ariaLabel="Vault Exploration settings"
+              tooltip="Vault Exploration settings"
               onClick={() => openCapabilitySettingsModal("vault")}
             />
             <Toggle checked={vaultAnyOn} onchange={(next) => toggleAllTools(vaultTools, next)} />
+          </SettingItem>
+
+          <!-- Note Management — the write tools (create/update/delete/move). Kept separate from
+               vault exploration so read access can be granted without write access (issue #368). -->
+          <SettingItem
+            name="Note Management"
+            desc="Create, update, delete, and move notes. All writes are staged for your review."
+          >
+            {#snippet namePrefix()}
+              <Icon name="file-pen" size="s" />
+            {/snippet}
+            <Button
+              iconId="settings"
+              ariaLabel="Note Management settings"
+              tooltip="Note Management settings"
+              onClick={() => openCapabilitySettingsModal("notes")}
+            />
+            <Toggle checked={noteAnyOn} onchange={(next) => toggleAllTools(noteTools, next)} />
           </SettingItem>
 
           <!-- Web — tools that reach the public internet (fetch URL, web search). -->
