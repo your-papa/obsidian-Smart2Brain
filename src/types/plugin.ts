@@ -555,6 +555,12 @@ export interface PluginData {
 	onboardingSplashSeen: boolean;
 	/** IDs of new-chat recommendations the user has dismissed. Includes the well-known block id to dismiss the whole surface. */
 	dismissedRecommendations: string[];
+	/**
+	 * Default collapse state of a chat turn's thinking process when the user hasn't
+	 * toggled that turn individually: expanded (true) or collapsed (false). Persisted
+	 * so the choice survives reloads. Default expanded.
+	 */
+	thinkingProcessExpanded: boolean;
 
 	// ============================================================================
 	// Web Search

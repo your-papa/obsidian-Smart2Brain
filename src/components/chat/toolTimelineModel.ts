@@ -1,4 +1,4 @@
-import type { AssistantTimelineEvent, ToolCallState, ToolCallStatus } from "../../stores/chatStore.svelte";
+import type { AssistantTimelineEvent, ToolCallStatus } from "../../stores/chatStore.svelte";
 
 /**
  * A single tool call in the rendered timeline. When a tool ran inside a
@@ -24,6 +24,13 @@ export interface UnifiedToolCall {
 
 export interface TimelineStep {
 	id: string;
+	/**
+	 * The aiMessageId this step's tools were grouped under (the LangGraph AI message
+	 * that made these tool calls). Used by the UI to fold the step into the thinking
+	 * process once live content carries a different aiMessageId (the next message
+	 * began). Undefined for checkpoint-reconstructed steps (settled, not streaming).
+	 */
+	aiMessageId?: string;
 	tools: UnifiedToolCall[];
 }
 
@@ -77,6 +84,7 @@ export function buildStepsFromEvents(rawEvents: AssistantTimelineEvent[]): Timel
 			if (!stepByGroup.has(groupId)) {
 				const step: TimelineStep = {
 					id: `step-${groupId}`,
+					aiMessageId: event.aiMessageId,
 					tools: [],
 				};
 				stepByGroup.set(groupId, step);
@@ -122,31 +130,6 @@ export function buildStepsFromEvents(rawEvents: AssistantTimelineEvent[]): Timel
 	}
 
 	return foldSubAgentChildren(steps);
-}
-
-export function buildStepsFromToolCalls(calls: ToolCallState[] | undefined): TimelineStep[] {
-	if (!calls || calls.length === 0) return [];
-	const step: TimelineStep = { id: "step-0", tools: [] };
-	// Deduplicate identical preamble texts: when checkpoint replay assigns the
-	// same flat-string content to all tool calls in a message, only the first
-	// tool in that group keeps the preamble so it isn't shown N times.
-	const seenPreambles = new Set<string>();
-	for (const tc of calls) {
-		const preambleText = tc.preamble?.trim() || undefined;
-		const preamble = preambleText && !seenPreambles.has(preambleText) ? preambleText : undefined;
-		if (preamble) seenPreambles.add(preamble);
-		step.tools.push({
-			id: tc.id,
-			name: tc.name,
-			preamble,
-			input: tc.input,
-			output: tc.output,
-			status: tc.status,
-			subAgentName: tc.subAgentName,
-			parentToolCallId: tc.parentToolCallId,
-		});
-	}
-	return foldSubAgentChildren([step]);
 }
 
 /**

@@ -1504,6 +1504,15 @@ export class AgentManager {
 		return this.chatManager.readCheckpointHistory(this.normalizeThreadId(threadId));
 	}
 
+	/**
+	 * Persists the thinking duration (ms) for a finished turn onto the checkpoint's
+	 * final AI message, so the "Thought for Ns" label survives reload. Called from
+	 * ChatSession after a run settles and the checkpoint graph has synced.
+	 */
+	async annotateThinkingDuration(threadId: string, checkpointId: string, durationMs: number): Promise<void> {
+		await this.chatManager.annotateThinkingDuration(this.normalizeThreadId(threadId), checkpointId, durationMs);
+	}
+
 	async getCheckpointMessages(threadId: string, checkpointId: string): Promise<BaseMessage[]> {
 		const agent = await this.ensureAgent();
 		return agent.getCheckpointMessages(this.normalizeThreadId(threadId), checkpointId);

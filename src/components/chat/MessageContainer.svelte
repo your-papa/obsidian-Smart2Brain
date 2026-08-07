@@ -1,6 +1,6 @@
 <script lang="ts">
 import { Notice } from "obsidian";
-import { tick, untrack } from "svelte";
+import { tick } from "svelte";
 import {
 	type AssistantMessage,
 	AssistantState,
@@ -10,7 +10,7 @@ import {
 } from "../../stores/chatStore.svelte";
 import type { UUIDv7 } from "../../utils/uuid7Validator";
 import { Logger } from "../../utils/logging";
-import { getPlugin } from "../../stores/state.svelte";
+import { getPlugin, thinkingProcessPref } from "../../stores/state.svelte";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import Button from "../ui/Button.svelte";
 import DotAnimation from "../ui/DotAnimation.svelte";
@@ -410,41 +410,68 @@ function getGenerationLabel(messagePair: MessagePair): string | null {
 	return agentLabel ?? modelLabel ?? null;
 }
 
-// Pre-populate so the very first render is already correct for history messages,
-// preventing a one-frame flash where completed timelines appear expanded before
-// the $effect below runs and collapses them.
-// Capture the initial snapshot via untrack() - ongoing message state changes
-// are handled by the $effect; we only need this for messages loaded from history.
-let timelineCollapsed: Record<string, boolean | undefined> = $state(
-	Object.fromEntries(
-		untrack(() => messages ?? []).map((p) => {
-			const a = p.assistantMessage;
-			const finished = a.state !== AssistantState.streaming && a.state !== AssistantState.idle;
-			return [p.id, finished && (a.toolCalls?.length ?? 0) > 0 ? true : undefined];
-		}),
-	),
-);
+// ── Timeline collapse state ──────────────────────────────────────────────
+// NOTHING collapses or expands automatically — the user drives the collapse state and
+// whatever it is while a turn streams simply carries through unchanged after it settles.
+// Two controls feed it:
+//
+//  1. GLOBAL session preference (`thinkingProcessPref.streamingExpanded`, session-scoped,
+//     default expanded). This is the default a turn shows when the user hasn't toggled it
+//     individually. Toggling the chevron on a turn that is still STREAMING (its per-turn
+//     key isn't stable yet) flips this global pref, so every other untouched turn follows.
+//  2. TRANSIENT per-turn override (`perTurnOverride`, keyed by the turn's stable
+//     `regenerateFromCheckpointId`, only settable once the turn has settled). Toggling a
+//     settled turn opens/closes just that turn. Not persisted; never touches the pref.
+//
+// The effective collapsed value is a pure function of these two — no $effect, no phase-
+// dependent default, no auto-collapse. A run left expanded settles expanded; a run
+// collapsed mid-stream settles collapsed. Both fall back to the same global pref, so the
+// value the user sees while streaming is exactly the value after settle: no seam.
+const perTurnOverride: Record<string, boolean> = $state({});
 
-$effect(() => {
-	const messageList = messages ?? [];
-	for (const messagePair of messageList) {
-		const assistantMessage = messagePair.assistantMessage;
-		const hasToolCalls = (assistantMessage.toolCalls?.length ?? 0) > 0;
-		const isStreaming =
-			assistantMessage.state === AssistantState.streaming || assistantMessage.state === AssistantState.idle;
-		const streamFinished = !isStreaming;
+// Stable key for a settled turn's transient override. `regenerateFromCheckpointId` is the
+// checkpoint where this human message is last — turn-unique and stable across the settle
+// rebuild and future runs (unlike `id`, which is a fresh UUID every rebuild). Error/
+// cancelled turns that never checkpointed have no id here; they also have no thinking
+// process worth persisting, so `id` is a fine fallback key for them.
+function overrideKey(pair: MessagePair): string {
+	return pair.regenerateFromCheckpointId ?? pair.id;
+}
 
-		// Clear the collapsed state when a new stream starts so the timeline
-		// expands automatically during regeneration, matching first-run behaviour.
-		if (isStreaming && timelineCollapsed[messagePair.id] !== undefined) {
-			timelineCollapsed[messagePair.id] = undefined;
-		}
+// Whether this pair has a STABLE per-turn key yet. `regenerateFromCheckpointId` is only
+// stable once the turn has settled onto a real checkpoint; before that it's either absent
+// (fresh send) or a temporary `optimistic-…` id (regenerate/edit) that the settle rebuild
+// replaces. A per-turn override written under a temporary key orphans at settle → the turn
+// falls back to the pref and appears to "auto-expand". So the override branch is only taken
+// when the key is stable; otherwise the click flips the global pref instead.
+function hasStableKey(pair: MessagePair): boolean {
+	const id = pair.regenerateFromCheckpointId;
+	return !!id && !id.startsWith("optimistic-");
+}
 
-		if (hasToolCalls && streamFinished && timelineCollapsed[messagePair.id] === undefined) {
-			timelineCollapsed[messagePair.id] = true;
-		}
+// The effective collapsed state a turn's process renders with. A per-turn override wins,
+// but ONLY when read under a stable key (a temporary streaming key can't have a meaningful
+// override — those clicks go to the pref); otherwise the turn follows the global pref.
+function isCollapsed(pair: MessagePair): boolean {
+	if (hasStableKey(pair)) {
+		const override = perTurnOverride[overrideKey(pair)];
+		if (override !== undefined) return override;
 	}
-});
+	return !thinkingProcessPref.streamingExpanded;
+}
+
+// Chevron toggle. A per-turn override is only meaningful once the turn has a STABLE key
+// (settled onto a real checkpoint). Until then — while streaming, or in the brief window
+// where state has flipped to success but the checkpoint id hasn't been assigned — flip the
+// global pref instead, so the choice can't be stranded under a temporary key and lost at
+// the settle rebuild (the intermittent "collapsed turn auto-expands" bug).
+function toggleCollapsed(pair: MessagePair): void {
+	if (!hasStableKey(pair)) {
+		thinkingProcessPref.toggleStreamingExpanded();
+		return;
+	}
+	perTurnOverride[overrideKey(pair)] = !isCollapsed(pair);
+}
 
 // Recompute the active message + nav availability from the DOM after the thread
 // or message list changes (switching chats, new replies). This is a legitimate
@@ -701,24 +728,16 @@ $effect(() => {
                      the component never unmounts mid-stream, preventing the jarring flash
                      where preamble content appears as plain text before the timeline builds. -->
                   {@const renderInfo = getRenderableAssistantContent(messagePair.assistantMessage)}
-                  {@const isAssistantProcessing =
-                    (messagePair.assistantMessage.state === AssistantState.idle ||
-                      messagePair.assistantMessage.state === AssistantState.streaming) &&
-                    !messagePair.assistantMessage.content &&
-                    !messagePair.assistantMessage.toolCalls?.length}
                   <ToolCallsSection
-                    toolCalls={messagePair.assistantMessage.toolCalls}
                     assistantTimeline={messagePair.assistantMessage.assistantTimeline}
-                    collapsed={timelineCollapsed[messagePair.id] ?? false}
+                    collapsed={isCollapsed(messagePair)}
                     answerContent={renderInfo.renderContent && renderInfo.content
                       ? renderInfo.content
                       : undefined}
+                    contentAiMessageId={messagePair.assistantMessage.contentAiMessageId}
                     isStreaming={messagePair.assistantMessage.state === AssistantState.streaming}
-                    isError={messagePair.assistantMessage.state === AssistantState.error}
-                    isProcessing={isAssistantProcessing}
-                    ontoggle={() => {
-                      timelineCollapsed[messagePair.id] = !(timelineCollapsed[messagePair.id] ?? false);
-                    }}
+                    thinkingDurationMs={messagePair.assistantMessage.thinkingDurationMs}
+                    ontoggle={() => toggleCollapsed(messagePair)}
                   />
                 {:else}
                   <!-- Content Section: only reached for completed messages with no tool calls / timeline -->

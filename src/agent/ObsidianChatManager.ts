@@ -917,6 +917,43 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		}
 	}
 
+	/**
+	 * Stamps the wall-clock thinking duration (ms) for a finished turn onto the
+	 * final AI message of the given checkpoint, so the "Thought for Ns" label
+	 * survives reload. Mirrors annotateCheckpointMessagesWithGeneration: writes a
+	 * scalar into the message's response_metadata, which round-trips through the
+	 * NDJSON checkpoint. Called post-completion from ChatSession (the duration isn't
+	 * known during the graph's own `put`). Targets the LAST AI serialized message in
+	 * the checkpoint — the final answer — matching the read side, which takes the
+	 * last top-level non-empty AI message as the duration carrier.
+	 */
+	async annotateThinkingDuration(threadId: string, checkpointId: string, durationMs: number): Promise<void> {
+		if (!threadId || !checkpointId || !Number.isFinite(durationMs) || durationMs < 0) return;
+		const threadData = await this.ensureThreadLoaded(threadId);
+		const entry = threadData?.checkpoints[checkpointId];
+		if (!entry) return;
+
+		const messages = this.getCheckpointMessages(entry.checkpoint);
+		// Find the last AI message in the checkpoint (the final answer).
+		let target: Record<string, unknown> | undefined;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const message = messages[i];
+			if (this.isRecord(message) && this.isAiSerializedMessage(message)) {
+				target = message;
+				break;
+			}
+		}
+		if (!target) return;
+
+		const responseMetadata = this.getOrCreateResponseMetadata(target);
+		if (!responseMetadata) return;
+		if (responseMetadata.thinking_duration_ms === durationMs) return; // no-op if unchanged
+
+		responseMetadata.thinking_duration_ms = durationMs;
+		this.markThreadDirty(threadId);
+		this.saveDebounced(threadId);
+	}
+
 	async put(
 		config: RunnableConfig,
 		checkpoint: Checkpoint,

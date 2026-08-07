@@ -113,6 +113,19 @@ export interface AssistantMessage {
 	content: string;
 	toolCalls?: ToolCallState[];
 	assistantTimeline?: AssistantTimelineEvent[];
+	// Wall-clock time the assistant spent producing this turn (thinking + tool
+	// calls), in milliseconds. Stamped live in the store when the stream ends and
+	// persisted onto the final AI message's response_metadata so the "Thought for
+	// Ns" label survives reload. Absent for turns predating this / restored history
+	// with no stored duration (the UI falls back to the step count).
+	thinkingDurationMs?: number;
+	// The aiMessageId of the text currently in `content` (streaming only). The UI uses
+	// this to decide when the last tool step folds into the thinking process: the step
+	// stays "current" (rendered below the label with its tools) until live content
+	// carries a DIFFERENT aiMessageId — i.e. the model has begun the next AI message
+	// (the "first token of the next message" fold trigger). Cleared whenever `content`
+	// is cleared (tool_start / step boundary) so an empty spot never drives a fold.
+	contentAiMessageId?: string;
 	nerd_stats?: {
 		tokensPerSecond: number;
 		retrievedDocsNum: number;
@@ -822,6 +835,19 @@ function extractGenerationFromAssistantMessage(msg: BaseMessage): MessageGenerat
 	return extractGenerationFromMetadata(aiMessage.response_metadata);
 }
 
+/**
+ * Reads the persisted thinking duration (ms) off an AI message's response_metadata,
+ * written by ObsidianChatManager on save (mirrors the generation-metadata pattern).
+ * Returns undefined for non-AI messages or turns with no stored duration.
+ */
+function extractThinkingDurationFromMessage(msg: BaseMessage): number | undefined {
+	if (!isAIMessage(msg)) return undefined;
+	const meta = (msg as AIMessage & { response_metadata?: unknown }).response_metadata;
+	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return undefined;
+	const value = (meta as Record<string, unknown>).thinking_duration_ms;
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
 function mergeGeneration(
 	current: MessageGeneration | undefined,
 	next: MessageGeneration | undefined,
@@ -1073,6 +1099,7 @@ export function baseMessageToAssistantMessage(
 		content: textContent,
 		toolCalls,
 		assistantTimeline: buildTimelineFromToolCalls(toolCalls, msg.id),
+		thinkingDurationMs: extractThinkingDurationFromMessage(msg),
 	};
 }
 
@@ -1095,6 +1122,7 @@ function mergeAssistantMessages(
 
 	// Merge multiple assistant messages — each AI message identified by its native id
 	let finalContent = "";
+	let finalDuration: number | undefined;
 	const allToolCalls: ToolCallState[] = [];
 	const allTimelineEvents: AssistantTimelineEvent[] = [];
 
@@ -1119,6 +1147,11 @@ function mergeAssistantMessages(
 		// their text is intermediate subagent reasoning, not the parent answer.
 		if (!parentTaskCallId && converted.content.trim()) {
 			finalContent = converted.content;
+			// The duration is written onto the same final answer message, so carry it
+			// from whichever message supplies finalContent (last top-level non-empty).
+			if (converted.thinkingDurationMs !== undefined) {
+				finalDuration = converted.thinkingDurationMs;
+			}
 		}
 
 		// Collect all tool calls and timeline events.
@@ -1138,6 +1171,7 @@ function mergeAssistantMessages(
 		content: finalContent,
 		toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
 		assistantTimeline: allTimelineEvents.length > 0 ? allTimelineEvents : undefined,
+		thinkingDurationMs: finalDuration,
 	};
 }
 
@@ -1839,10 +1873,20 @@ export class ChatSession {
 			this.summarizingHistory = options.predictedSummarization ?? false;
 			pair.assistantMessage.state = AssistantState.streaming;
 
-			const streamPromise = this.consumeStream(pair.assistantMessage, getStream(signal));
+			// Wall-clock start of the turn — used to compute the run duration stamped on
+			// the message (live) and persisted onto the checkpoint below.
+			const runStartedAtMs = Date.now();
 
-			await streamPromise;
+			await this.consumeStream(pair.assistantMessage, getStream(signal));
 			pair.assistantMessage.state = AssistantState.success;
+
+			// Stamp the elapsed time so the "Thought for Ns" label shows immediately
+			// (before any reload) and reads back from persistence later. This is the
+			// FULL-run duration (turn start → stream end): the whole turn is the
+			// "thinking process" — all streamed text renders under the header until the
+			// stream ends, at which point the final answer drops into place below.
+			const thinkingDurationMs = Date.now() - runStartedAtMs;
+			pair.assistantMessage.thinkingDurationMs = thinkingDurationMs;
 
 			// Generate chat title after stream completes for the first user message.
 			// Must be sequential because rename changes this.id (the thread path).
@@ -1865,6 +1909,34 @@ export class ChatSession {
 			}
 
 			await this.syncGraphAfterRun(options.parentCheckpointId, options.beforeCheckpointIds);
+
+			// syncGraphAfterRun rebuilds this.messages from the checkpoint graph, which
+			// replaces the pair object we stamped above with a fresh one whose
+			// thinkingDurationMs is read from response_metadata — not yet written (that
+			// happens below). Without this re-stamp the label flips from "Thought for Ns"
+			// back to the step-count fallback the instant the stream settles.
+			const rebuiltPair = this.findPair(pairId);
+			if (rebuiltPair) {
+				rebuiltPair.assistantMessage.thinkingDurationMs = thinkingDurationMs;
+			}
+
+			// Persist the thinking duration onto the just-created checkpoint's final
+			// AI message (response_metadata) so "Thought for Ns" survives reload. Done
+			// after syncGraphAfterRun, when the active checkpoint id for this turn is
+			// resolved. Best-effort: a failure here only loses the persisted label,
+			// not the answer, so it must never break the run.
+			const settledCheckpointId = this.graphState.activeCheckpointId;
+			if (settledCheckpointId) {
+				try {
+					await getPlugin().agentManager.annotateThinkingDuration(
+						String(this.id),
+						settledCheckpointId,
+						thinkingDurationMs,
+					);
+				} catch (err) {
+					Logger.warn("[ChatSession] Failed to persist thinking duration:", err);
+				}
+			}
 
 			if (options.reloadAfter && this.onNeedReload) {
 				await this.onNeedReload();
@@ -2059,7 +2131,10 @@ export class ChatSession {
 	/**
 	 * Shared stream consumption logic for both normal queries and regeneration.
 	 */
-	private async consumeStream(assistantMsg: AssistantMessage, stream: AsyncIterable<AgentStreamChunk>) {
+	private async consumeStream(
+		assistantMsg: AssistantMessage,
+		stream: AsyncIterable<AgentStreamChunk>,
+	): Promise<void> {
 		let tokenBuffer = "";
 		let hasSeenToolCall = false;
 		// Track preamble texts already emitted during streaming so that parallel tool
@@ -2084,6 +2159,7 @@ export class ChatSession {
 				if (aiIdChanged || pendingStepReset) {
 					tokenBuffer = "";
 					assistantMsg.content = "";
+					assistantMsg.contentAiMessageId = undefined;
 					pendingStepReset = false;
 					emittedStreamPreambles.clear();
 				}
@@ -2091,6 +2167,10 @@ export class ChatSession {
 
 				tokenBuffer += chunk.token;
 				assistantMsg.content = hasSeenToolCall ? tokenBuffer.trimStart() : tokenBuffer;
+				// Stamp the aiMessageId of the text now in `content` so the UI can tell
+				// when the model has moved to a NEW message (fold trigger). See the field
+				// docs on AssistantMessage.
+				assistantMsg.contentAiMessageId = currentTokenAiMessageId;
 				continue;
 			}
 
@@ -2108,6 +2188,7 @@ export class ChatSession {
 				if (isFirstWithPreamble) emittedStreamPreambles.add(preambleTrimmed);
 				tokenBuffer = "";
 				assistantMsg.content = "";
+				assistantMsg.contentAiMessageId = undefined;
 
 				if (!assistantMsg.toolCalls) assistantMsg.toolCalls = [];
 				assistantMsg.toolCalls.push({
@@ -2212,6 +2293,7 @@ export class ChatSession {
 			if (chunk.type === "result") {
 				this.summarizingHistory = false;
 				assistantMsg.content = hasSeenToolCall ? tokenBuffer.trim() : tokenBuffer;
+				assistantMsg.contentAiMessageId = currentTokenAiMessageId;
 				continue;
 			}
 
