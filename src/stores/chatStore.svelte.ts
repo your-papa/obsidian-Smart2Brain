@@ -2642,11 +2642,17 @@ export class SessionRegistry {
 			return;
 		}
 
+		// Show the skeleton immediately, synchronously (before any await) so
+		// Svelte paints it at least once even when the thread is already cached
+		// and every fetch below resolves within the same microtask flush.
+		this.isLoadingSession = true;
+
 		// Skip the loading skeleton for brand-new, empty chats: there is no
-		// history to fetch, so show the empty state + input immediately.
+		// history to fetch, so show the empty state + input immediately. Clear
+		// the flag we just set before any meaningful history work happens.
 		const isEmpty = await this.#agentManager.isThreadEmpty(id);
 		if (!isLatest()) return; // A newer switch superseded this load.
-		if (!isEmpty) this.isLoadingSession = true;
+		if (isEmpty) this.isLoadingSession = false;
 		try {
 			const [history, checkpointHistory] = await Promise.all([
 				this.#agentManager.getThreadHistory(id),
