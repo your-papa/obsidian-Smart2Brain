@@ -46,16 +46,6 @@ const showRawIO = $derived(pluginData.showToolIODetails);
 
 let hoveringRail = $state(false);
 
-// Per-`task`-card expansion of the nested subagent sub-timeline, keyed by the
-// task tool-call id. Collapsed by default — a subagent (especially several in
-// parallel) can emit many child tool calls and clutter the chat; the user
-// expands on demand.
-let subAgentExpanded = $state<Record<string, boolean>>({});
-
-function toggleSubAgent(taskCallId: string) {
-	subAgentExpanded[taskCallId] = !subAgentExpanded[taskCallId];
-}
-
 /* ── Formatters ── */
 
 function formatValue(value: unknown): string {
@@ -385,18 +375,22 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
     tool.output !== undefined
       ? buildToolOutputRenderModel(tool.name, tool.output, tool.input)
       : undefined}
-  {@const isSubAgentParent = tool.name === "task" && !!tool.subAgentName}
   {@const toolSummary = buildToolSummary(tool.name, tool.input, outputModel, tool.status)}
   {@const isTask = tool.name === "task"}
-  <!-- Regular tools fold the outcome into the sentence ("Read main.md, 512 lines");
-       task rows keep the subagent name as the label and the task description as a
-       separate faint subtitle rather than a comma-joined outcome clause. -->
-  {@const headerLabel = isTask ? toolDisplayName(tool) : foldOutcome(toolSummary)}
-  {@const headerSubtitle = isTask ? getTaskSummary(tool.input) : ""}
+  <!-- A `task` (subagent) row reads as one coherent sentence like any other tool
+       call: the subagent name followed by what it was asked to do
+       ("Web Search: Explore the user's OKRs"). No "subagent" pill and no separate
+       subtitle — the delegation is conveyed by the sentence itself. -->
+  {@const taskSentence = (() => {
+    const name = toolDisplayName(tool);
+    const description = getTaskSummary(tool.input);
+    return description ? `${name}: ${description}` : name;
+  })()}
+  {@const headerLabel = isTask ? taskSentence : foldOutcome(toolSummary)}
   {#if isExpandable(tool)}
     <details class="tool-card">
       <summary class="tool-card-header">
-        {@render toolCardHeader(headerLabel, headerSubtitle, tool.status, isSubAgentParent, tool.subAgentName)}
+        {@render toolCardHeader(headerLabel, tool.status, tool.subAgentName, isTask)}
       </summary>
       <div class="tool-card-body">
         {@render toolBody(tool, outputModel)}
@@ -405,7 +399,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
   {:else}
     <div class="tool-card tool-card-flat">
       <div class="tool-card-header">
-        {@render toolCardHeader(headerLabel, headerSubtitle, tool.status, isSubAgentParent, tool.subAgentName)}
+        {@render toolCardHeader(headerLabel, tool.status, tool.subAgentName, isTask)}
       </div>
     </div>
   {/if}
@@ -413,22 +407,19 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
 
 {#snippet toolCardHeader(
   label: string,
-  subtitle: string,
   status: UnifiedToolCall["status"],
-  isSubAgentParent: boolean,
   subAgentName: string | undefined,
+  isTask: boolean,
 )}
   <span
     class="tool-card-name"
     class:tool-card-name-failed={status === "failed"}
     class:is-running={status === "running"}>{label}</span>
-  {#if isSubAgentParent}
-    <span class="tool-card-subagent-badge">subagent</span>
-  {:else if subAgentName}
+  <!-- Orphan-child attribution: a subagent tool call whose parent `task` row isn't
+       shown (folding couldn't find it) still notes which subagent it ran in. The
+       `task` row itself needs no chip — its sentence already names the subagent. -->
+  {#if subAgentName && !isTask}
     <span class="tool-card-subagent-badge">via {subAgentName}</span>
-  {/if}
-  {#if subtitle}
-    <span class="tool-card-summary">{subtitle}</span>
   {/if}
 {/snippet}
 
@@ -464,27 +455,50 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
   {/if}
 {/snippet}
 
-{#snippet subAgentBranch(children: UnifiedToolCall[])}
-  <div class="tool-subagent-branch">
-    {#each children as child, childIdx (child.id)}
-      <div
-        class="tool-subagent-branch-row"
-        class:branch-first={childIdx === 0}
-        class:branch-last={childIdx === children.length - 1}
-      >
-        <div class="tool-subagent-branch-rail">
-          <div
-            class="tool-step-dot tool-subagent-dot"
-            class:dot-running={child.status === "running"}
-            class:dot-failed={child.status === "failed"}
-            class:dot-done={child.status === "completed"}
-          ></div>
-        </div>
-        <div class="tool-subagent-branch-content">
-          {@render toolCard(child)}
-        </div>
+{#snippet subAgentGroup(tool: UnifiedToolCall, children: UnifiedToolCall[])}
+  {@const outputModel =
+    tool.output !== undefined
+      ? buildToolOutputRenderModel(tool.name, tool.output, tool.input)
+      : undefined}
+  {@const name = toolDisplayName(tool)}
+  {@const description = getTaskSummary(tool.input)}
+  {@const headerLabel = description ? `${name}: ${description}` : name}
+  <div class="tool-subagent-group">
+    {#if tool.preamble}
+      {@render preambleBlock(tool.preamble)}
+    {/if}
+    <!-- The task sentence is itself the expand toggle (a normal tool-card
+         <details>): clicking it reveals the subagent's child steps and its final
+         output. Collapsed by default so a subagent's many child calls don't
+         clutter the chat until the user opts in. -->
+    <details class="tool-card">
+      <summary class="tool-card-header">
+        <span
+          class="tool-card-name"
+          class:tool-card-name-failed={tool.status === "failed"}
+          class:is-running={tool.status === "running"}>{headerLabel}</span>
+      </summary>
+
+      <!-- Child steps render inline as normal tool rows, indented under the task
+           sentence — no rail, no dots. -->
+      <div class="tool-subagent-branch">
+        {#each children as child (child.id)}
+          <div class="tool-subagent-branch-content">
+            {@render toolCard(child)}
+          </div>
+        {/each}
       </div>
-    {/each}
+
+      <!-- The subagent's final output, below its steps. -->
+      {#if hasFriendlyResult(outputModel)}
+        <div class="tool-subagent-output">
+          <div class="tool-subagent-output-label">Result</div>
+          <div class="tool-io-output">
+            {@render outputBody(outputModel!)}
+          </div>
+        </div>
+      {/if}
+    </details>
   </div>
 {/snippet}
 
@@ -555,39 +569,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
             {@const isSubAgentParent = tool.name === "task" && !!tool.subAgentName}
             {@const branchChildren = tool.children ?? []}
             {#if isSubAgentParent && branchChildren.length > 0}
-              {@const expanded = subAgentExpanded[tool.id] ?? false}
-              {@const runningCount = branchChildren.filter((c) => c.status === "running").length}
-              <div class="tool-subagent-group">
-                {@render toolCard(tool)}
-                <button
-                  type="button"
-                  class="tool-subagent-toggle"
-                  class:is-expanded={expanded}
-                  onclick={() => toggleSubAgent(tool.id)}
-                  aria-expanded={expanded}
-                >
-                  <svg viewBox="0 0 16 16" fill="none" class="tool-subagent-toggle-chevron">
-                    <path
-                      d="M6 4L10 8L6 12"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    />
-                  </svg>
-                  <span>
-                    {expanded ? "Hide" : "Show"}
-                    {branchChildren.length}
-                    {branchChildren.length === 1 ? "step" : "steps"}
-                  </span>
-                  {#if runningCount > 0}
-                    <span class="tool-subagent-toggle-running">running…</span>
-                  {/if}
-                </button>
-                {#if expanded}
-                  {@render subAgentBranch(branchChildren)}
-                {/if}
-              </div>
+              {@render subAgentGroup(tool, branchChildren)}
             {:else}
               {@render toolCard(tool)}
             {/if}
@@ -1335,10 +1317,12 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
        only the text color — no background highlight, no chevron. */
     color: var(--text-faint);
     transition: color 0.15s;
-    /* Size to content, but shrink with ellipsis if the label alone would
-       exceed the card width (header is capped at max-width: 100%). */
+    /* Size to content, but ellipsis if the label alone overflows the capped-width
+       header (task rows now fold the subagent name + description into this single
+       label, so there's no competing sibling to crush it). */
     flex: 0 1 auto;
     min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1352,19 +1336,6 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
   .tool-card-name-failed,
   .tool-card-header:hover .tool-card-name-failed {
     color: var(--color-red);
-  }
-
-  /* Faint task-description subtitle shown only on a subagent `task` row (the
-     "what it was asked to do"). Regular tools fold their outcome into the label
-     instead, so this never carries a result count. */
-  .tool-card-summary {
-    flex: 0 1 auto;
-    min-width: 0;
-    color: var(--text-faint);
-    font-size: 0.76rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   /* ── Merged multi-call row ── */
@@ -1420,7 +1391,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
     background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
   }
 
-  /* ── Subagent branch (git-merge style sub-timeline) ── */
+  /* ── Subagent group (task sentence + inline child steps + final output) ── */
   .tool-subagent-group {
     display: flex;
     flex-direction: column;
@@ -1428,130 +1399,40 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
     position: relative;
   }
 
-  /* Collapsed-by-default toggle for the subagent's nested sub-timeline. Sits
-     indented under the parent `task` card (matching the branch indent) and
-     reveals/hides the child tool calls on demand to keep the chat uncluttered. */
-  .tool-subagent-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    margin-left: 6px;
-    padding: 3px 8px 3px 4px;
-    background: none;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    color: var(--text-muted);
-    font-size: 0.74rem;
-    transition: background 0.12s, color 0.12s;
-  }
-
-  .tool-subagent-toggle:hover {
-    background: var(--background-modifier-hover);
-    color: var(--text-normal);
-  }
-
-  .tool-subagent-toggle-chevron {
-    width: 12px;
-    height: 12px;
-    flex-shrink: 0;
-    transition: transform 0.12s;
-  }
-
-  .tool-subagent-toggle.is-expanded .tool-subagent-toggle-chevron {
-    transform: rotate(90deg);
-  }
-
-  .tool-subagent-toggle-running {
-    color: var(--interactive-accent);
-    font-style: italic;
-  }
-
-  /* The subagent's tool calls hang off the parent `task` card as a nested
-     sub-timeline. A curved elbow diverges from just under the parent card,
-     runs a vertical spine through the child dots, and stops at the last child
-     to "merge" back. Indented so it reads as subordinate to the `task` node
-     without leaving the step's content column. */
+  /* The subagent's tool calls render as a plain indented list under the parent
+     `task` sentence — no rail or dots, always visible. A subtle left rule
+     (matching the expanded tool-body indent) marks them as subordinate without a
+     second timeline. */
   .tool-subagent-branch {
     display: flex;
     flex-direction: column;
-    margin-left: 6px;
-    padding-left: 4px;
-  }
-
-  .tool-subagent-branch-row {
-    display: flex;
-    gap: 0;
-    position: relative;
-  }
-
-  .tool-subagent-branch-rail {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    align-self: stretch;
-    width: 20px;
-    flex-shrink: 0;
-    padding-top: 13px;
-  }
-
-  /* Vertical spine of the branch — a subtler accent tint so the main timeline
-     still reads as primary. */
-  .tool-subagent-branch-rail::before {
-    content: "";
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 2px;
-    background: color-mix(in srgb, var(--interactive-accent) 32%, var(--background-modifier-border));
-    border-radius: 1px;
-    top: 0;
-    bottom: 0;
-  }
-
-  /* First child: the spine begins at the child dot; a curved elbow reaches up
-     and to the left, connecting to the parent `task` card area. The elbow
-     right-edge anchors at the sub-rail spine (left: 50%), and its width
-     extends leftward far enough to reach the parent main-rail spine. */
-  .branch-first .tool-subagent-branch-rail::before {
-    top: 0;
-  }
-  .branch-first .tool-subagent-branch-rail::after {
-    display: none;
-  }
-
-  /* Last child (when not also first): spine stops at the dot, no trailing line. */
-  .branch-last:not(.branch-first) .tool-subagent-branch-rail::before {
-    bottom: auto;
-    height: 18px;
-  }
-
-  /* Single child: only the elbow feeds the dot, no through-spine. */
-  .branch-first.branch-last .tool-subagent-branch-rail::before {
-    display: none;
-  }
-
-  .tool-subagent-dot {
-    width: 8px;
-    height: 8px;
-    border-width: 2px;
-  }
-
-  /* Child dots use a slightly muted accent so they read as secondary to the
-     parent node's dot. */
-  .tool-subagent-dot.dot-done {
-    border-color: color-mix(in srgb, var(--interactive-accent) 70%, var(--background-modifier-border));
-    background: color-mix(in srgb, var(--interactive-accent) 70%, var(--background-modifier-border));
-    box-shadow: none;
+    margin: 2px 0 4px 12px;
+    padding-left: 12px;
+    border-left: 2px solid var(--background-modifier-border);
   }
 
   .tool-subagent-branch-content {
-    flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
-    padding: 4px 0;
+  }
+
+  /* The subagent's final output, shown below its child steps under the same
+     indent so it reads as the branch's conclusion. */
+  .tool-subagent-output {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0 0 4px 12px;
+    padding-left: 12px;
+  }
+
+  .tool-subagent-output-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-faint);
   }
 
   /* A row with nothing to reveal renders flat: no expand affordance, so drop the
