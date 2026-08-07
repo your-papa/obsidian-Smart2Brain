@@ -4,8 +4,10 @@ import type SecondBrainPlugin from "../../main";
 import { CAPABILITIES, type BuiltInToolId, type CapabilityId, type ToolConfig } from "../../types/plugin";
 import { buildDefaultCapabilityGuidance } from "../../agent/prompts";
 import { getToolDescription, getToolDisplayName } from "../../agent/builtInToolMeta";
-import CapabilityCard from "../ui/CapabilityCard.svelte";
 import Button from "../ui/Button.svelte";
+import Icon from "../ui/Icon.svelte";
+import Toggle from "../ui/Toggle.svelte";
+import SettingItem from "../settings/SettingItem.svelte";
 import GuidanceEditor from "./GuidanceEditor.svelte";
 import ToolConfigForm from "./ToolConfigForm.svelte";
 import type { CapabilitySettingsModal } from "./CapabilitySettingsModal";
@@ -62,6 +64,13 @@ function toggleTool(toolId: BuiltInToolId) {
 	notifyChange();
 }
 
+// Accordion: at most one tool's config form is expanded at a time.
+let expandedToolId = $state<BuiltInToolId | null>(null);
+
+function toggleExpanded(toolId: BuiltInToolId) {
+	expandedToolId = expandedToolId === toolId ? null : toolId;
+}
+
 $effect(() => {
 	modal.setTitle(cap ? `${cap.title} Settings` : "Capability Settings");
 });
@@ -88,27 +97,42 @@ $effect(() => {
       <section class="capability-settings-section">
         <div class="capability-settings-heading">Tools</div>
         <p class="capability-settings-desc">
-          Enable a tool and expand it to customize its name, description, guidance, and settings.
+          Enable a tool, then expand it to customize its name, description, guidance, and settings.
         </p>
         {#each cap.toolIds as toolId (toolId)}
           {@const config = selectedAgent.toolsConfig[toolId]}
           {@const enabled = isToolEnabled(toolId)}
-          <CapabilityCard
-            title={getToolDisplayName(toolId, config?.name)}
-            description={getToolDescription(toolId, config?.description)}
-            masterEnabled={enabled}
-            onToggleMaster={() => toggleTool(toolId)}
-          >
-            {#snippet body()}
-              <ToolConfigForm
-                {plugin}
-                {toolId}
-                accessors={toolAccessors(toolId)}
-                footer="none"
-                onChange={notifyChange}
-              />
-            {/snippet}
-          </CapabilityCard>
+          {@const isExpanded = expandedToolId === toolId}
+          <div class="capability-tool" class:expanded={isExpanded}>
+            <SettingItem
+              name={getToolDisplayName(toolId, config?.name)}
+              desc={getToolDescription(toolId, config?.description)}
+            >
+              {#snippet namePrefix()}
+                <button
+                  type="button"
+                  class="capability-tool-chevron"
+                  aria-expanded={isExpanded}
+                  aria-label={isExpanded ? "Collapse settings" : "Expand settings"}
+                  onclick={() => toggleExpanded(toolId)}
+                >
+                  <Icon name={isExpanded ? "chevron-down" : "chevron-right"} size="s" />
+                </button>
+              {/snippet}
+              <Toggle checked={enabled} onchange={() => toggleTool(toolId)} />
+            </SettingItem>
+            {#if isExpanded}
+              <div class="capability-tool-config">
+                <ToolConfigForm
+                  {plugin}
+                  {toolId}
+                  accessors={toolAccessors(toolId)}
+                  footer="none"
+                  onChange={notifyChange}
+                />
+              </div>
+            {/if}
+          </div>
         {/each}
       </section>
     </div>
@@ -159,5 +183,39 @@ $effect(() => {
     border-top: 1px solid var(--background-modifier-border);
     padding-top: 16px;
     margin-top: 12px;
+  }
+
+  .capability-tool {
+    border: 1px solid transparent;
+    border-radius: 10px;
+  }
+
+  .capability-tool.expanded {
+    border-color: var(--background-modifier-border);
+    background: var(--background-primary);
+  }
+
+  .capability-tool-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 140ms ease, color 140ms ease;
+  }
+
+  .capability-tool-chevron:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+
+  .capability-tool-config {
+    padding: 0 12px 12px;
   }
 </style>

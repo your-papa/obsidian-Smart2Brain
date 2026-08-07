@@ -37,7 +37,6 @@ import { Logger } from "../utils/logging";
 export function initLangGraphAsyncContext(): void {
 	try {
 		AsyncLocalStorageProviderSingleton.initializeGlobalInstance(new AsyncLocalStorage());
-		Logger.debug("langgraphContext: initialized global AsyncLocalStorage for LangGraph config propagation");
 	} catch (error) {
 		// Never let this crash plugin startup — the worst case without it is the
 		// pre-existing "Config not retrievable" error on subagent delegation.
