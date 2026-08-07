@@ -15,7 +15,6 @@ import SettingGroup from "../settings/SettingGroup.svelte";
 import SettingItem from "../settings/SettingItem.svelte";
 import Badge from "../ui/Badge.svelte";
 import Button from "../ui/Button.svelte";
-import CapabilityCard from "../ui/CapabilityCard.svelte";
 import Icon from "../ui/Icon.svelte";
 import PickerOptionRow from "../ui/PickerOptionRow.svelte";
 import PickerPopover from "../ui/PickerPopover.svelte";
@@ -866,100 +865,87 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
             Built-in capabilities every agent can use — vault exploration and web access.
           </div>
 
-          <!-- Card 1: Vault exploration — configure guidance + per-tool settings via the gear. -->
-          <CapabilityCard
-            title="Vault exploration"
-            description="Search, read, edit, and explore your vault with the built-in tools."
-            icon="compass"
-            expandable={false}
-            masterEnabled={vaultAnyOn}
-            onToggleMaster={(next) => toggleAllTools(vaultTools, next)}
+          <!-- Vault exploration — configure guidance + per-tool settings via the gear. -->
+          <SettingItem
+            name="Vault exploration"
+            desc="Search, read, edit, and explore your vault with the built-in tools."
           >
-            {#snippet headerActions()}
-              <Button
-                iconId="settings"
-                ariaLabel="Vault exploration settings"
-                tooltip="Vault exploration settings"
-                onClick={() => openCapabilitySettingsModal("vault")}
-              />
+            {#snippet namePrefix()}
+              <Icon name="compass" size="s" />
             {/snippet}
-          </CapabilityCard>
+            <Button
+              iconId="settings"
+              ariaLabel="Vault exploration settings"
+              tooltip="Vault exploration settings"
+              onClick={() => openCapabilitySettingsModal("vault")}
+            />
+            <Toggle checked={vaultAnyOn} onchange={(next) => toggleAllTools(vaultTools, next)} />
+          </SettingItem>
 
-          <!-- Card 1b: Web — tools that reach the public internet (fetch URL, web search). -->
-          <CapabilityCard
-            title="Web"
-            description="Reach the public internet: fetch web pages and run web searches."
-            icon="globe"
-            expandable={false}
-            masterEnabled={webAnyOn}
-            onToggleMaster={(next) => toggleAllTools(webTools, next)}
-          >
-            {#snippet headerActions()}
-              <Button
-                iconId="settings"
-                ariaLabel="Web settings"
-                tooltip="Web settings"
-                onClick={() => openCapabilitySettingsModal("web")}
-              />
+          <!-- Web — tools that reach the public internet (fetch URL, web search). -->
+          <SettingItem name="Web" desc="Reach the public internet: fetch web pages and run web searches.">
+            {#snippet namePrefix()}
+              <Icon name="globe" size="s" />
             {/snippet}
-          </CapabilityCard>
+            <Button
+              iconId="settings"
+              ariaLabel="Web settings"
+              tooltip="Web settings"
+              onClick={() => openCapabilitySettingsModal("web")}
+            />
+            <Toggle checked={webAnyOn} onchange={(next) => toggleAllTools(webTools, next)} />
+          </SettingItem>
 
-          <!-- Card 1b-memory: Memory — a folder the agent manages itself for durable facts and
-               vault pointers. Enabling it injects memory instructions into the system prompt and
-               auto-applies note writes inside the folder. Needs the Manage notes tool. The gear
-               opens the folder + instructions settings. -->
-          <CapabilityCard
-            title="Memory"
-            description="A folder the agent manages itself for durable facts about you and pointers to where things live in your vault. Note writes inside it apply automatically."
-            icon="brain"
-            expandable={false}
-            masterEnabled={memoryEnabled}
-            onToggleMaster={(next) => handleMemoryToggle(next)}
+          <!-- Memory — a folder the agent manages itself for durable facts and vault pointers.
+               Enabling it injects memory instructions into the system prompt and auto-applies note
+               writes inside the folder. Needs the Manage notes tool. The gear opens the folder +
+               instructions settings. -->
+          <SettingItem
+            name="Memory"
+            desc="A folder the agent manages itself for durable facts about you and pointers to where things live in your vault. Note writes inside it apply automatically."
           >
-            {#snippet badges()}
+            {#snippet namePrefix()}
+              <Icon name="brain" size="s" />
+            {/snippet}
+            {#snippet nameSuffix()}
               {#if memoryEnabled && !manageNotesEnabled}
                 <Badge label="Needs Manage notes" tone="warning" />
               {/if}
             {/snippet}
+            <Button
+              iconId="settings"
+              ariaLabel="Memory settings"
+              tooltip="Memory settings"
+              onClick={openMemorySettingsModal}
+            />
+            <Toggle checked={memoryEnabled} onchange={(next) => handleMemoryToggle(next)} />
+          </SettingItem>
 
-            {#snippet headerActions()}
-              <Button
-                iconId="settings"
-                ariaLabel="Memory settings"
-                tooltip="Memory settings"
-                onClick={openMemorySettingsModal}
-              />
-            {/snippet}
-          </CapabilityCard>
-
-          <!-- Cards 1c: one flat card per Obsidian core-plugin skill (Canvas, Bases, …). These
-               ship with Obsidian, so they belong with the other built-in capabilities. -->
+          <!-- One row per Obsidian core-plugin skill (Canvas, Bases, …). These ship with Obsidian,
+               so they belong with the other built-in capabilities. -->
           {#each coreSkills as ext (ext.id)}
             {@const pluginAvailable = isSkillPluginAvailable(ext)}
-            <CapabilityCard
-              title={ext.displayName}
-              description={ext.description}
-              icon={getPluginIcon(ext.corePluginId, "sparkles")}
-              expandable={false}
-              masterEnabled={ext.enabled && pluginAvailable}
-              masterDisabled={!pluginAvailable}
-              onToggleMaster={() => toggleSkill(ext.id, !ext.enabled)}
-            >
-              {#snippet badges()}
+            <SettingItem name={ext.displayName} desc={ext.description}>
+              {#snippet namePrefix()}
+                <Icon name={getPluginIcon(ext.corePluginId, "sparkles")} size="s" />
+              {/snippet}
+              {#snippet nameSuffix()}
                 {#if !pluginAvailable}
                   <Badge label="Core plugin disabled" tone="warning" />
                 {/if}
               {/snippet}
-
-              {#snippet headerActions()}
-                <Button
-                  iconId="pencil"
-                  ariaLabel={`Edit ${ext.displayName} prompt`}
-                  tooltip={`Edit ${ext.displayName} prompt`}
-                  onClick={() => openSkillModal(ext.id)}
-                />
-              {/snippet}
-            </CapabilityCard>
+              <Button
+                iconId="pencil"
+                ariaLabel={`Edit ${ext.displayName} prompt`}
+                tooltip={`Edit ${ext.displayName} prompt`}
+                onClick={() => openSkillModal(ext.id)}
+              />
+              <Toggle
+                checked={ext.enabled && pluginAvailable}
+                disabled={!pluginAvailable}
+                onchange={() => toggleSkill(ext.id, !ext.enabled)}
+              />
+            </SettingItem>
           {/each}
         </SettingGroup>
       </section>
@@ -971,20 +957,15 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
             available, code-scripting) behind one switch.
           </div>
 
-          <!-- Cards 3: one flat card per community-plugin skill (Dataview, Tasks, …). -->
+          <!-- One row per community-plugin skill (Dataview, Tasks, …). -->
           {#each pluginSkills as ext (ext.id)}
             {@const pluginAvailable = isSkillPluginAvailable(ext)}
             {@const execIntegration = skillExecIntegration(ext)}
-            <CapabilityCard
-              title={ext.displayName}
-              description={ext.description}
-              icon={getPluginIcon(ext.linkedPluginId)}
-              expandable={false}
-              masterEnabled={ext.enabled && pluginAvailable}
-              masterDisabled={!pluginAvailable}
-              onToggleMaster={() => toggleSkill(ext.id, !ext.enabled)}
-            >
-              {#snippet badges()}
+            <SettingItem name={ext.displayName} desc={ext.description}>
+              {#snippet namePrefix()}
+                <Icon name={getPluginIcon(ext.linkedPluginId)} size="s" />
+              {/snippet}
+              {#snippet nameSuffix()}
                 {#if !pluginAvailable}
                   <Badge
                     label="Not enabled"
@@ -996,34 +977,39 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
                   <Badge label="API scripting" tone="muted" />
                 {/if}
               {/snippet}
-
-              {#snippet headerActions()}
-                <Button
-                  iconId="pencil"
-                  ariaLabel={`Edit ${ext.displayName} prompt`}
-                  tooltip={`Edit ${ext.displayName} prompt`}
-                  onClick={() => openSkillModal(ext.id)}
-                />
-              {/snippet}
-            </CapabilityCard>
+              <Button
+                iconId="pencil"
+                ariaLabel={`Edit ${ext.displayName} prompt`}
+                tooltip={`Edit ${ext.displayName} prompt`}
+                onClick={() => openSkillModal(ext.id)}
+              />
+              <Toggle
+                checked={ext.enabled && pluginAvailable}
+                disabled={!pluginAvailable}
+                onchange={() => toggleSkill(ext.id, !ext.enabled)}
+              />
+            </SettingItem>
           {/each}
 
-          <!-- Cards 4: auto-discovered api-plugins with no skill yet. Enabling generates one. -->
+          <!-- Auto-discovered api-plugins with no skill yet. Enabling generates one. -->
           {#each autoDiscoveredIntegrations as integ (integ.pluginId)}
-            <CapabilityCard
-              title={integ.displayName}
-              description="Auto-discovered plugin exposing a public API. Enabling creates an editable API-scripting skill — the agent introspects the API before calling it. Runs on the main thread (not sandboxed)."
-              icon={getPluginIcon(integ.pluginId)}
-              expandable={false}
-              masterEnabled={integ.execEnabled}
-              onToggleMaster={(next) => void toggleAutoIntegration(integ.pluginId, integ.displayName, next)}
+            <SettingItem
+              name={integ.displayName}
+              desc="Auto-discovered plugin exposing a public API. Enabling creates an editable API-scripting skill — the agent introspects the API before calling it. Runs on the main thread (not sandboxed)."
             >
-              {#snippet badges()}
+              {#snippet namePrefix()}
+                <Icon name={getPluginIcon(integ.pluginId)} size="s" />
+              {/snippet}
+              {#snippet nameSuffix()}
                 {#if integ.execEnabled}
                   <Badge label="API scripting" tone="muted" />
                 {/if}
               {/snippet}
-            </CapabilityCard>
+              <Toggle
+                checked={integ.execEnabled}
+                onchange={(next) => void toggleAutoIntegration(integ.pluginId, integ.displayName, next)}
+              />
+            </SettingItem>
           {/each}
         </SettingGroup>
       </section>
@@ -1039,17 +1025,21 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
           {#each subAgentCandidates as candidate (candidate.id)}
             {@const hasModel = !!candidate.chatModel}
             {@const isEnabled = isSubAgentEnabled(candidate.id)}
-            <CapabilityCard
-              title={candidate.id === agentId ? `${candidate.name} (this agent)` : candidate.name}
-              description={hasModel
+            <SettingItem
+              name={candidate.id === agentId ? `${candidate.name} (this agent)` : candidate.name}
+              desc={hasModel
                 ? getSubAgentModelLabel(candidate)
                 : "No chat model configured — cannot be used as a subagent"}
-              icon={candidate.icon?.trim() || DEFAULT_AGENT_ICON}
-              expandable={false}
-              masterEnabled={isEnabled}
-              masterDisabled={!hasModel && !isEnabled}
-              onToggleMaster={() => handleSubAgentToggle(candidate.id)}
-            />
+            >
+              {#snippet namePrefix()}
+                <Icon name={candidate.icon?.trim() || DEFAULT_AGENT_ICON} size="s" />
+              {/snippet}
+              <Toggle
+                checked={isEnabled}
+                disabled={!hasModel && !isEnabled}
+                onchange={() => handleSubAgentToggle(candidate.id)}
+              />
+            </SettingItem>
           {/each}
         </SettingGroup>
       </section>
@@ -1060,179 +1050,172 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
             Capabilities you bring yourself — your own skills and MCP servers.
           </div>
 
-          <!-- Card 5: Custom capabilities — the user's own skills + MCP servers, with a "+ Add" menu. -->
-          <CapabilityCard
-            title="Custom capabilities"
-            description="Your own skills and MCP servers."
-            icon="wand-sparkles"
-            summary={`${customSkills.length} ${customSkills.length === 1 ? "skill" : "skills"} · ${mcpServerIds.length} ${mcpServerIds.length === 1 ? "server" : "servers"}`}
-            defaultExpanded
+          <!-- Custom capabilities — the user's own skills + MCP servers, with a "+ Add" menu. -->
+          <SettingItem
+            name="Add capability"
+            desc={`${customSkills.length} ${customSkills.length === 1 ? "skill" : "skills"} · ${mcpServerIds.length} ${mcpServerIds.length === 1 ? "server" : "servers"}`}
           >
-            {#snippet headerActions()}
-              <PickerPopover
-                bind:open={isAddCapabilityMenuOpen}
-                side="bottom"
-                align="end"
-                sideOffset={6}
-                contentClass="add-capability-popover"
+            <PickerPopover
+              bind:open={isAddCapabilityMenuOpen}
+              side="bottom"
+              align="end"
+              sideOffset={6}
+              contentClass="add-capability-popover"
+            >
+              {#snippet trigger(open)}
+                <Icon name="plus" size="xs" />
+                <span>Add</span>
+                <Icon name={open ? "chevron-up" : "chevron-down"} size="xs" />
+              {/snippet}
+
+              <PickerOptionRow
+                onClick={() => {
+                  isAddCapabilityMenuOpen = false;
+                  openAddSkillModal();
+                }}
               >
-                {#snippet trigger(open)}
-                  <Icon name="plus" size="xs" />
-                  <span>Add</span>
-                  <Icon name={open ? "chevron-up" : "chevron-down"} size="xs" />
+                {#snippet leading()}
+                  <Icon name="sparkles" size="s" />
                 {/snippet}
+                {#snippet content()}
+                  Custom Skill
+                {/snippet}
+              </PickerOptionRow>
 
-                <PickerOptionRow
-                  onClick={() => {
-                    isAddCapabilityMenuOpen = false;
-                    openAddSkillModal();
-                  }}
-                >
-                  {#snippet leading()}
-                    <Icon name="sparkles" size="s" />
-                  {/snippet}
-                  {#snippet content()}
-                    Custom Skill
-                  {/snippet}
-                </PickerOptionRow>
+              <PickerOptionRow
+                onClick={() => {
+                  isAddCapabilityMenuOpen = false;
+                  openAddMCPServer();
+                }}
+              >
+                {#snippet leading()}
+                  <Icon name="server" size="s" />
+                {/snippet}
+                {#snippet content()}
+                  MCP Server
+                {/snippet}
+              </PickerOptionRow>
+            </PickerPopover>
+          </SettingItem>
 
-                <PickerOptionRow
-                  onClick={() => {
-                    isAddCapabilityMenuOpen = false;
-                    openAddMCPServer();
-                  }}
-                >
-                  {#snippet leading()}
-                    <Icon name="server" size="s" />
-                  {/snippet}
-                  {#snippet content()}
-                    MCP Server
-                  {/snippet}
-                </PickerOptionRow>
-              </PickerPopover>
-            {/snippet}
+          <div class="skill-category-header">
+            <span class="skill-category-title">Skills</span>
+            <Badge label="User-defined" pill={false} uppercase />
+          </div>
+          {#each customSkills as ext (ext.id)}
+            <ManagedEntityItem
+              class="skill-entity"
+              name={ext.displayName}
+              desc={ext.description}
+              meta="Stored as a custom skill in the vault configuration."
+            >
+              {#snippet actions()}
+                <Button
+                  iconId="trash"
+                  ariaLabel={`Delete ${ext.displayName}`}
+                  tooltip={`Delete ${ext.displayName}`}
+                  onClick={() => void deleteSkill(ext.id)}
+                />
+                <Button
+                  iconId="pencil"
+                  ariaLabel={`Edit ${ext.displayName} prompt`}
+                  tooltip={`Edit ${ext.displayName} prompt`}
+                  onClick={() => openSkillModal(ext.id)}
+                />
+                <Toggle checked={ext.enabled} onchange={() => toggleSkill(ext.id, !ext.enabled)} />
+              {/snippet}
+            </ManagedEntityItem>
+          {/each}
+          {#if customSkills.length === 0}
+            <div class="skill-empty-state">No custom skills yet</div>
+          {/if}
 
-            {#snippet body()}
-              <div class="skill-category-header">
-                <span class="skill-category-title">Skills</span>
-                <Badge label="User-defined" pill={false} uppercase />
-              </div>
-              {#each customSkills as ext (ext.id)}
+          <div class="skill-category-header capability-subgroup-header">
+            <span class="skill-category-title">MCP Servers</span>
+            <Badge label="External tools" pill={false} uppercase />
+          </div>
+          {#if mcpServerIds.length > 0}
+            <div class="mcp-servers-list">
+              {#each mcpServerIds as serverId (serverId)}
+                {@const config = selectedAgent.mcpServers[serverId]}
+                {@const toolsState = getServerToolsState(serverId)}
+                {@const isExpanded = expandedServerId === serverId}
                 <ManagedEntityItem
-                  class="skill-entity"
-                  name={ext.displayName}
-                  desc={ext.description}
-                  meta="Stored as a custom skill in the vault configuration."
+                  class="mcp-entity"
+                  name={config.displayName}
+                  desc={config.transport === "stdio"
+                    ? `${config.command} ${config.args.join(" ")}`
+                    : config.url}
+                  meta={config.transport === "stdio"
+                    ? "Local stdio MCP server"
+                    : "Remote HTTP MCP server"}
                 >
+                  {#snippet badges()}
+                    <Badge
+                      label={config.transport === "stdio" ? "Local" : "HTTP"}
+                      tone={config.transport === "stdio" ? "success" : "accent"}
+                    />
+                    <Badge
+                      interactive
+                      onclick={() => toggleToolsList(serverId)}
+                      class={`mcp-tools-badge ${toolsState?.error ? "error" : ""} ${toolsState?.tools && toolsState.tools.length > 0 ? "has-tools" : ""}`}
+                    >
+                      {#if toolsState?.loading}
+                        <Icon name="loader" size="xs" />
+                      {:else if toolsState?.error}
+                        <Icon name="alert-circle" size="xs" />
+                      {:else}
+                        <Icon name="wrench" size="xs" />
+                      {/if}
+                      <span>{getMCPToolsBadgeLabel(serverId, toolsState)}</span>
+                    </Badge>
+                  {/snippet}
+
+                  {#snippet children()}
+                    {#if isExpanded && toolsState}
+                      <div class="mcp-tools-list">
+                        {#if toolsState.loading}
+                          <div class="mcp-tools-loading">Loading tools...</div>
+                        {:else if toolsState.error}
+                          <div class="mcp-tools-error">
+                            <Icon name="alert-circle" size="s" />
+                            <span>{toolsState.error}</span>
+                            <button
+                              class="mcp-tools-retry"
+                              onclick={() => void fetchServerTools(serverId)}>Retry</button
+                            >
+                          </div>
+                        {:else if toolsState.tools.length === 0}
+                          <div class="mcp-tools-empty">No tools available</div>
+                        {:else}
+                          {#each toolsState.tools as tool (tool.name)}
+                            <div class="mcp-tool-item">
+                              <span class="mcp-tool-name">{tool.name}</span>
+                              {#if tool.description}
+                                <span class="mcp-tool-desc">{tool.description}</span>
+                              {/if}
+                            </div>
+                          {/each}
+                        {/if}
+                      </div>
+                    {/if}
+                  {/snippet}
+
                   {#snippet actions()}
                     <Button
-                      iconId="trash"
-                      ariaLabel={`Delete ${ext.displayName}`}
-                      tooltip={`Delete ${ext.displayName}`}
-                      onClick={() => void deleteSkill(ext.id)}
-                    />
-                    <Button
                       iconId="pencil"
-                      ariaLabel={`Edit ${ext.displayName} prompt`}
-                      tooltip={`Edit ${ext.displayName} prompt`}
-                      onClick={() => openSkillModal(ext.id)}
+                      ariaLabel={`Edit ${config.displayName}`}
+                      tooltip={`Edit ${config.displayName}`}
+                      onClick={() => openEditMCPServer(serverId)}
                     />
-                    <Toggle checked={ext.enabled} onchange={() => toggleSkill(ext.id, !ext.enabled)} />
+                    <Toggle checked={config.enabled} onchange={() => toggleMCPServer(serverId)} />
                   {/snippet}
                 </ManagedEntityItem>
               {/each}
-              {#if customSkills.length === 0}
-                <div class="skill-empty-state">No custom skills yet</div>
-              {/if}
-
-              <div class="skill-category-header capability-subgroup-header">
-                <span class="skill-category-title">MCP Servers</span>
-                <Badge label="External tools" pill={false} uppercase />
-              </div>
-              {#if mcpServerIds.length > 0}
-                <div class="mcp-servers-list">
-                  {#each mcpServerIds as serverId (serverId)}
-                    {@const config = selectedAgent.mcpServers[serverId]}
-                    {@const toolsState = getServerToolsState(serverId)}
-                    {@const isExpanded = expandedServerId === serverId}
-                    <ManagedEntityItem
-                      class="mcp-entity"
-                      name={config.displayName}
-                      desc={config.transport === "stdio"
-                        ? `${config.command} ${config.args.join(" ")}`
-                        : config.url}
-                      meta={config.transport === "stdio"
-                        ? "Local stdio MCP server"
-                        : "Remote HTTP MCP server"}
-                    >
-                      {#snippet badges()}
-                        <Badge
-                          label={config.transport === "stdio" ? "Local" : "HTTP"}
-                          tone={config.transport === "stdio" ? "success" : "accent"}
-                        />
-                        <Badge
-                          interactive
-                          onclick={() => toggleToolsList(serverId)}
-                          class={`mcp-tools-badge ${toolsState?.error ? "error" : ""} ${toolsState?.tools && toolsState.tools.length > 0 ? "has-tools" : ""}`}
-                        >
-                          {#if toolsState?.loading}
-                            <Icon name="loader" size="xs" />
-                          {:else if toolsState?.error}
-                            <Icon name="alert-circle" size="xs" />
-                          {:else}
-                            <Icon name="wrench" size="xs" />
-                          {/if}
-                          <span>{getMCPToolsBadgeLabel(serverId, toolsState)}</span>
-                        </Badge>
-                      {/snippet}
-
-                      {#snippet children()}
-                        {#if isExpanded && toolsState}
-                          <div class="mcp-tools-list">
-                            {#if toolsState.loading}
-                              <div class="mcp-tools-loading">Loading tools...</div>
-                            {:else if toolsState.error}
-                              <div class="mcp-tools-error">
-                                <Icon name="alert-circle" size="s" />
-                                <span>{toolsState.error}</span>
-                                <button
-                                  class="mcp-tools-retry"
-                                  onclick={() => void fetchServerTools(serverId)}>Retry</button
-                                >
-                              </div>
-                            {:else if toolsState.tools.length === 0}
-                              <div class="mcp-tools-empty">No tools available</div>
-                            {:else}
-                              {#each toolsState.tools as tool (tool.name)}
-                                <div class="mcp-tool-item">
-                                  <span class="mcp-tool-name">{tool.name}</span>
-                                  {#if tool.description}
-                                    <span class="mcp-tool-desc">{tool.description}</span>
-                                  {/if}
-                                </div>
-                              {/each}
-                            {/if}
-                          </div>
-                        {/if}
-                      {/snippet}
-
-                      {#snippet actions()}
-                        <Button
-                          iconId="pencil"
-                          ariaLabel={`Edit ${config.displayName}`}
-                          tooltip={`Edit ${config.displayName}`}
-                          onClick={() => openEditMCPServer(serverId)}
-                        />
-                        <Toggle checked={config.enabled} onchange={() => toggleMCPServer(serverId)} />
-                      {/snippet}
-                    </ManagedEntityItem>
-                  {/each}
-                </div>
-              {:else}
-                <div class="mcp-empty-state"><p>No MCP servers configured for this agent.</p></div>
-              {/if}
-            {/snippet}
-          </CapabilityCard>
+            </div>
+          {:else}
+            <div class="mcp-empty-state"><p>No MCP servers configured for this agent.</p></div>
+          {/if}
         </SettingGroup>
       </section>
     </div>
