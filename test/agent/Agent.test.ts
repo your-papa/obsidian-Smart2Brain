@@ -13,7 +13,7 @@ vi.mock("langchain", () => ({
 }));
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { Agent } from "../../src/agent/Agent";
+import { Agent, sanitizeRunnableName } from "../../src/agent/Agent";
 
 function makeRegistry() {
 	return {
@@ -135,5 +135,108 @@ describe("Agent stream tool output normalization", () => {
 		).normalizeStreamToolOutput(undefined);
 
 		expect(output).toBeUndefined();
+	});
+});
+
+describe("sanitizeRunnableName", () => {
+	// OpenAI/Azure/OpenAI-compatible endpoints enforce `^[^\s<|\\/>]+$` on
+	// `messages[N].name`; a subagent runnable name leaks into AIMessage.name and
+	// would 400 the subagent's second turn if it contains disallowed characters.
+	const disallowed = /[\s<|\\/>]/;
+
+	it("replaces spaces and parentheses with underscores", () => {
+		expect(sanitizeRunnableName("Default Agent (isolated)")).toBe("Default_Agent_isolated");
+	});
+
+	it("leaves an already-safe name untouched", () => {
+		expect(sanitizeRunnableName("research-agent")).toBe("research-agent");
+	});
+
+	it("collapses runs of disallowed characters into a single underscore", () => {
+		expect(sanitizeRunnableName("a   /  b")).toBe("a_b");
+	});
+
+	it("trims leading and trailing underscores", () => {
+		expect(sanitizeRunnableName("  spaced  ")).toBe("spaced");
+	});
+
+	it("falls back to 'subagent' for an all-disallowed name", () => {
+		expect(sanitizeRunnableName("  <|>  ")).toBe("subagent");
+	});
+
+	it("produces a name matching the provider pattern for tricky inputs", () => {
+		for (const input of ["Default Agent (isolated)", "My/Weird\\Name", "a|b<c>d", "  "]) {
+			expect(sanitizeRunnableName(input)).not.toMatch(disallowed);
+		}
+	});
+});
+
+describe("Agent streamTokens subagent-content suppression", () => {
+	// Regression coverage for the leak fix: tokens authored by a subagent carry
+	// `lc_agent_name` in the messages-mode stream metadata and must NOT surface as
+	// parent-content `token` chunks (the subagent answer is delivered via the
+	// `task` ToolMessage instead). Parent tokens (no `lc_agent_name`) must survive.
+	type StreamTuple = ["messages" | "tools" | "values", unknown];
+
+	function aiMessage(id: string, content: string) {
+		return {
+			id,
+			content,
+			getType: () => "ai",
+		};
+	}
+
+	/** Builds a resolved run whose runnable streams the given tuples. */
+	function makeResolvedRun(tuples: StreamTuple[]) {
+		return {
+			runnable: {
+				// biome-ignore lint/suspicious/useAwait: async generator for the stream contract
+				stream: async () =>
+					(async function* () {
+						for (const t of tuples) yield t;
+					})(),
+			},
+			selectedModel: { provider: "openai", name: "gpt-4o", instance: {} },
+			supportsVision: false,
+			currentProvider: "openai",
+		} as never;
+	}
+
+	async function collectTokens(tuples: StreamTuple[]): Promise<string[]> {
+		const agent = new Agent({ registry: makeRegistry() as never });
+		const tokens: string[] = [];
+		// Append a terminal `values` payload so streamTokens resolves a final output
+		// (otherwise it throws "completed without producing a final output").
+		const withFinal: StreamTuple[] = [...tuples, ["values", { messages: [aiMessage("final", "done")] }]];
+		for await (const chunk of agent.streamTokens({
+			query: "hi",
+			threadId: "t1",
+			resolved: makeResolvedRun(withFinal),
+		} as never)) {
+			if ((chunk as { type: string }).type === "token") {
+				tokens.push((chunk as { token: string }).token);
+			}
+		}
+		return tokens;
+	}
+
+	it("suppresses subagent tokens and preserves parent tokens", async () => {
+		const tokens = await collectTokens([
+			["messages", [aiMessage("p1", "Parent before. "), { langgraph_node: "model_request" }]],
+			["messages", [aiMessage("s1", "Subagent answer."), { lc_agent_name: "Default Agent (isolated)" }]],
+			["messages", [aiMessage("p1", "Parent after."), { langgraph_node: "model_request" }]],
+		]);
+
+		expect(tokens).toEqual(["Parent before. ", "Parent after."]);
+		expect(tokens.join("")).not.toContain("Subagent answer.");
+	});
+
+	it("emits parent tokens normally when no subagent is involved", async () => {
+		const tokens = await collectTokens([
+			["messages", [aiMessage("p1", "Hello "), { langgraph_node: "model_request" }]],
+			["messages", [aiMessage("p1", "world"), {}]],
+		]);
+
+		expect(tokens).toEqual(["Hello ", "world"]);
 	});
 });
