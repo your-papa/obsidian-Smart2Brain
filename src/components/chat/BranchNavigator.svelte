@@ -32,9 +32,9 @@ function navigateRight() {
 </script>
 
 {#if branchInfo.totalBranches > 1}
-	<div class="flex items-center gap-1 text-xs text-text-muted select-none">
+	<div class="branch-nav flex items-center gap-1 text-xs text-text-muted select-none">
 		<button
-			class="p-0.5 rounded border-none bg-transparent cursor-pointer flex items-center justify-center hover:bg-background-modifier-hover hover:text-text-normal disabled:opacity-30 disabled:cursor-not-allowed"
+			class="clickable-icon branch-nav-btn"
 			disabled={!canGoLeft}
 			onclick={navigateLeft}
 			aria-label="Previous branch"
@@ -50,7 +50,7 @@ function navigateRight() {
 			{branchInfo.currentIndex} / {branchInfo.totalBranches}
 		</span>
 		<button
-			class="p-0.5 rounded border-none bg-transparent cursor-pointer flex items-center justify-center hover:bg-background-modifier-hover hover:text-text-normal disabled:opacity-30 disabled:cursor-not-allowed"
+			class="clickable-icon branch-nav-btn"
 			disabled={!canGoRight}
 			onclick={navigateRight}
 			aria-label="Next branch"
@@ -64,3 +64,17 @@ function navigateRight() {
 		</button>
 	</div>
 {/if}
+
+<style>
+	/* Rely on Obsidian's native .clickable-icon for the resting/hover look
+	   (transparent → --background-modifier-hover, rounded, native cursor). Only
+	   tighten the padding so the chevrons sit snug around the branch counter. */
+	.branch-nav-btn {
+		padding: 3px;
+	}
+
+	.branch-nav-btn:disabled {
+		opacity: 0.3;
+		cursor: not-allowed;
+	}
+</style>

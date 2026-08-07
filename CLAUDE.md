@@ -84,6 +84,7 @@ Tests mock `obsidian`, `electron`, and `@sap-ai-sdk/langchain` via `test/__mocks
       <TextComponent inputType="password" bind:value={apiKey} />
   </SettingContainer>
   ```
+- **Prefer Obsidian's native styling over custom CSS.** Match native look/behavior wherever possible instead of reinventing it. For icon buttons use the native `.clickable-icon` class (it already provides the transparent-at-rest → `--background-modifier-hover` highlight, native rounding, and cursor) rather than hand-rolled hover backgrounds. Lean on Obsidian's CSS variables (`--background-modifier-hover`, `--radius-s`, `--text-muted`, etc.) so the plugin tracks the user's theme. Only add custom CSS when native genuinely can't express the intent.
 
 ## Verifying changes in a live vault
 

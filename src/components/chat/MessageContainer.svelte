@@ -11,8 +11,11 @@ import {
 import type { UUIDv7 } from "../../utils/uuid7Validator";
 import { Logger } from "../../utils/logging";
 import { getPlugin, thinkingProcessPref } from "../../stores/state.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import { DEFAULT_AGENT_ICON } from "../../types/plugin";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import Button from "../ui/Button.svelte";
+import Icon from "../ui/Icon.svelte";
 import DotAnimation from "../ui/DotAnimation.svelte";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 import BranchNavigator from "./BranchNavigator.svelte";
@@ -396,18 +399,27 @@ function formatMessageTimestamp(pair: MessagePair): string | null {
 	});
 }
 
-function getGenerationLabel(messagePair: MessagePair): string | null {
+function getGenerationLabel(
+	messagePair: MessagePair,
+): { agent: string | null; agentIcon: string | null; model: string | null } | null {
 	const generation = messagePair.generation;
 	if (!generation) return null;
 
-	const agentLabel = generation.agentName ?? generation.agentId;
-	const modelLabel =
+	const agent = generation.agentName ?? generation.agentId ?? null;
+	const model =
 		generation.provider && generation.model
 			? `${generation.provider}/${generation.model}`
-			: (generation.model ?? generation.provider);
+			: (generation.model ?? generation.provider ?? null);
 
-	if (agentLabel && modelLabel) return `${agentLabel} · ${modelLabel}`;
-	return agentLabel ?? modelLabel ?? null;
+	if (!agent && !model) return null;
+
+	// Resolve the agent's own icon from its config (falling back to the default
+	// agent icon), so the footer matches how agents render in the picker.
+	const agentIcon = agent
+		? (generation.agentId ? getData().getAgent(generation.agentId)?.icon?.trim() : "") || DEFAULT_AGENT_ICON
+		: null;
+
+	return { agent, agentIcon, model };
 }
 
 // ── Timeline collapse state ──────────────────────────────────────────────
@@ -684,33 +696,31 @@ $effect(() => {
               <div class="flex flex-row items-center gap-2">
                 {#if editingMessageId !== messagePair.id}
                   <div
-                    class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+                    class="message-footer flex flex-row items-center gap-3 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
                   >
                     {#if formatMessageTimestamp(messagePair)}
-                      <span class="message-timestamp text-xs text-[--text-faint]"
-                        >{formatMessageTimestamp(messagePair)}</span
-                      >
+                      <span class="message-timestamp">{formatMessageTimestamp(messagePair)}</span>
                     {/if}
-                    {#if messagePair.userBranchInfo}
-                      <BranchNavigator
-                        branchInfo={messagePair.userBranchInfo}
-                        onNavigate={handleBranchNavigate}
+                    <div class="footer-actions flex flex-row items-center gap-1.5">
+                      {#if messagePair.userBranchInfo}
+                        <BranchNavigator
+                          branchInfo={messagePair.userBranchInfo}
+                          onNavigate={handleBranchNavigate}
+                        />
+                      {/if}
+                      <Button
+                        iconId="edit"
+                        ariaLabel="Edit message"
+                        tooltip="Edit message"
+                        onClick={() => startEdit(messagePair)}
                       />
-                    {/if}
-                    <Button
-                      iconId="edit"
-                      ariaLabel="Edit message"
-                      tooltip="Edit message"
-                      styles="hover:text-[--text-accent]"
-                      onClick={() => startEdit(messagePair)}
-                    />
-                    <Button
-                      iconId="copy"
-                      ariaLabel="Copy message"
-                      tooltip="Copy message"
-                      styles="hover:text-[--text-accent]"
-                      onClick={() => copyToClipboard(messagePair.userMessage.content)}
-                    />
+                      <Button
+                        iconId="copy"
+                        ariaLabel="Copy message"
+                        tooltip="Copy message"
+                        onClick={() => copyToClipboard(messagePair.userMessage.content)}
+                      />
+                    </div>
                   </div>
                 {/if}
               </div>
@@ -771,43 +781,65 @@ $effect(() => {
                      the only relevant action, and Copy/Regenerate would act on an
                      empty, non-existent response. -->
                 {#if !(messagePair.assistantMessage.state === AssistantState.streaming) && messagePair.assistantMessage.state !== AssistantState.error}
-                  <div class="flex flex-row items-center gap-2">
-                    <div
-                      class="flex flex-row items-center gap-2 transform opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
-                    >
-                      {#if messagePair.assistantBranchInfo}
-                        <BranchNavigator
-                          branchInfo={messagePair.assistantBranchInfo}
-                          onNavigate={handleBranchNavigate}
-                        />
-                      {/if}
-                      <Button
-                        iconId="copy"
-                        ariaLabel="Copy response"
-                        tooltip="Copy response"
-                        styles="hover:text-[--text-accent]"
-                        onClick={() => copyToClipboard(messagePair.assistantMessage.content)}
+                {@const genLabel = getGenerationLabel(messagePair)}
+                {@const timestamp = formatMessageTimestamp(messagePair)}
+                <div
+                  class="message-footer flex flex-row items-center gap-3 flex-wrap opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+                >
+                  <div class="footer-actions flex flex-row items-center gap-1.5">
+                    {#if messagePair.assistantBranchInfo}
+                      <BranchNavigator
+                        branchInfo={messagePair.assistantBranchInfo}
+                        onNavigate={handleBranchNavigate}
                       />
-                      <Button
-                        iconId="refresh-cw"
-                        ariaLabel="Regenerate response"
-                        tooltip="Regenerate response"
-                        styles="hover:text-[--text-accent]"
-                        onClick={() => regenerateResponse(messagePair.id)}
-                      />
-                      {#if getGenerationLabel(messagePair)}
-                        <span class="generation-label text-sm font-semibold">
-                          {getGenerationLabel(messagePair)}
+                    {/if}
+                    <Button
+                      iconId="refresh-cw"
+                      ariaLabel="Regenerate response"
+                      tooltip="Regenerate response"
+                      onClick={() => regenerateResponse(messagePair.id)}
+                    />
+                    <Button
+                      iconId="copy"
+                      ariaLabel="Copy response"
+                      tooltip="Copy response"
+                      onClick={() => copyToClipboard(messagePair.assistantMessage.content)}
+                    />
+                  </div>
+
+                  {#if genLabel || timestamp}
+                    <div class="footer-meta flex flex-row items-center gap-2 min-w-0">
+                      {#if genLabel}
+                        <span
+                          class="generation-label inline-flex items-center gap-1 min-w-0"
+                          title={[genLabel.agent, genLabel.model].filter(Boolean).join(" · ")}
+                        >
+                          {#if genLabel.agent}
+                            {#if genLabel.agentIcon}
+                              <span class="generation-agent-icon" aria-hidden="true">
+                                <Icon name={genLabel.agentIcon} size="xs" />
+                              </span>
+                            {/if}
+                            <span class="generation-agent truncate">{genLabel.agent}</span>
+                          {/if}
+                          {#if genLabel.agent && genLabel.model}
+                            <span class="generation-sep" aria-hidden="true">·</span>
+                          {/if}
+                          {#if genLabel.model}
+                            <span class="generation-model truncate">{genLabel.model}</span>
+                          {/if}
                         </span>
                       {/if}
-                      {#if formatMessageTimestamp(messagePair)}
-                        <span class="message-timestamp text-xs text-[--text-faint]"
-                          >{formatMessageTimestamp(messagePair)}</span
-                        >
+                      {#if genLabel && timestamp}
+                        <span class="footer-dot" aria-hidden="true"></span>
+                      {/if}
+                      {#if timestamp}
+                        <span class="message-timestamp">{timestamp}</span>
                       {/if}
                     </div>
-                  </div>
-                {/if}
+                  {/if}
+                </div>
+              {/if}
               </div>
 
               {#if index === messages.length - 1 && session?.summarizingHistory}
@@ -927,9 +959,61 @@ $effect(() => {
     align-items: center;
   }
 
+  /* Assistant footer: a quiet row of controls + generation metadata. Actions
+     sit left in muted color and warm to normal on hover; metadata reads as a
+     single subdued, consistently-sized group so it never competes with the
+     message content above it. */
+  .message-footer {
+    min-height: 22px;
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+
+  .footer-meta {
+    color: var(--text-faint);
+    overflow: hidden;
+  }
+
   .generation-label {
-    color: var(--text-accent);
+    color: var(--text-muted);
+    line-height: 1.15;
+  }
+
+  .generation-agent {
+    font-weight: 500;
+  }
+
+  .generation-agent-icon {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    color: var(--text-muted);
+  }
+
+  .generation-sep {
+    color: var(--text-faint);
+    flex-shrink: 0;
+  }
+
+  .generation-model {
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Small dot separating the model label from the timestamp. */
+  .footer-dot {
+    width: 2px;
+    height: 2px;
+    border-radius: 999px;
+    background: var(--text-faint);
+    flex-shrink: 0;
+    opacity: 0.6;
+  }
+
+  .message-timestamp {
+    color: var(--text-faint);
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
 
   .summarizing-status {
