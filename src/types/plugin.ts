@@ -128,10 +128,20 @@ export type BuiltInToolId = (typeof BUILT_IN_TOOL_IDS)[number];
  */
 export const WEB_TOOL_IDS = ["fetch_url", "web_search"] as const satisfies readonly BuiltInToolId[];
 
-/** Built-in tools that operate on the vault (everything not in `WEB_TOOL_IDS`) — the Core card. */
+/**
+ * Built-in tools that mutate the vault (create/update/delete/move notes). Split out from
+ * vault *exploration* into their own "Note management" capability so read access can be
+ * granted without write access — the only mutating built-in tool is `manage_notes` (issue #368).
+ */
+export const NOTE_TOOL_IDS = ["manage_notes"] as const satisfies readonly BuiltInToolId[];
+
+/**
+ * Built-in tools that read/explore the vault — everything that is neither a web tool nor a
+ * note-management (write) tool. Surfaced as the "Vault exploration" (Core) card.
+ */
 export const VAULT_TOOL_IDS = BUILT_IN_TOOL_IDS.filter(
-	(id): id is Exclude<BuiltInToolId, (typeof WEB_TOOL_IDS)[number]> =>
-		!(WEB_TOOL_IDS as readonly string[]).includes(id),
+	(id): id is Exclude<BuiltInToolId, (typeof WEB_TOOL_IDS)[number] | (typeof NOTE_TOOL_IDS)[number]> =>
+		!(WEB_TOOL_IDS as readonly string[]).includes(id) && !(NOTE_TOOL_IDS as readonly string[]).includes(id),
 );
 
 /**
@@ -139,7 +149,7 @@ export const VAULT_TOOL_IDS = BUILT_IN_TOOL_IDS.filter(
  * surfaced as one card in the Agent editor and one `#` section in the assembled system
  * prompt. (Memory is a separate folder feature, not a capability, so it is not listed.)
  */
-export type CapabilityId = "vault" | "web";
+export type CapabilityId = "vault" | "notes" | "web";
 
 /**
  * A built-in prompt or guidance default that changed in a plugin update while the
@@ -178,10 +188,17 @@ export interface CapabilityDef {
 export const CAPABILITIES: readonly CapabilityDef[] = [
 	{
 		id: "vault",
-		title: "Vault exploration",
-		description: "Search, read, edit, and explore your vault with the built-in tools.",
+		title: "Vault Exploration",
+		description: "Search, read, and explore your vault with the built-in tools.",
 		icon: "compass",
 		toolIds: VAULT_TOOL_IDS,
+	},
+	{
+		id: "notes",
+		title: "Note Management",
+		description: "Create, update, delete, and move notes. All writes are staged for your review.",
+		icon: "file-pen",
+		toolIds: NOTE_TOOL_IDS,
 	},
 	{
 		id: "web",

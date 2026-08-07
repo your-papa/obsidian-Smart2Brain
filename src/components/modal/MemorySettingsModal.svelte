@@ -55,7 +55,7 @@ $effect(() => {
           <Badge label="Needs Manage notes" tone="warning" />
           <span>
             Memory records notes with the <strong>Manage Notes</strong> tool. Enable it in the
-            Vault exploration capability so this agent can write memories.
+            Note Management capability so this agent can write memories.
           </span>
         </div>
       {/if}

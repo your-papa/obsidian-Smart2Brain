@@ -9,6 +9,7 @@ import { READ_CONTENT_GUIDANCE_DEFAULTS, getData, getReadContentGuidance } from 
 import {
 	CAPABILITIES,
 	VAULT_TOOL_IDS,
+	NOTE_TOOL_IDS,
 	WEB_TOOL_IDS,
 	type BuiltInToolId,
 	type CapabilityId,
@@ -410,12 +411,12 @@ export class AgentManager {
 			prompt += `\n\n${memoryPrompt}`;
 		}
 
-		// Per-capability guidance. Each capability (vault, web) becomes a top-level `#`
+		// Per-capability guidance. Each capability (vault, notes, web) becomes a top-level `#`
 		// section: its own guidance (user override or default) followed by its enabled
 		// tools' per-tool guidance as `##` subheaders. Replaces the old flat
 		// `# Write Tool Guidelines` + `# Tool Guidelines` sections. The write-staging
-		// policy now lives inside the vault capability's default guidance (manage_notes
-		// is a vault tool); the no-write honesty guard below still handles the empty case.
+		// policy lives inside the Note management capability's default guidance (manage_notes
+		// is its only tool); the no-write honesty guard below still handles the empty case.
 		const toolsConfig = selectedAgent.toolsConfig;
 		const isToolEnabled = (toolId: BuiltInToolId): boolean => toolsConfig[toolId]?.enabled ?? false;
 
@@ -903,7 +904,9 @@ export class AgentManager {
 	/**
 	 * Count the capabilities switched on for an agent, using the "one capability card =
 	 * one capability" model the agent editor renders:
-	 *   - the Core · Vault exploration card counts as 1 when any built-in tool is enabled;
+	 *   - the Core · Vault exploration card counts as 1 when any read/explore tool is enabled;
+	 *   - the Note management card counts as 1 when any write tool is enabled;
+	 *   - the Web card counts as 1 when any web tool is enabled;
 	 *   - each core / community / auto-discovered plugin card counts as 1 when its skill
 	 *     (or, for an uncurated auto-discovered plugin, its exec tool) is enabled and the
 	 *     linked plugin is available;
@@ -918,6 +921,8 @@ export class AgentManager {
 
 		// Core card: any vault-exploration tool on.
 		const anyVaultToolOn = VAULT_TOOL_IDS.some((toolId) => agent.toolsConfig[toolId]?.enabled ?? true);
+		// Note management card (separate capability): any write tool on.
+		const anyNoteToolOn = NOTE_TOOL_IDS.some((toolId) => agent.toolsConfig[toolId]?.enabled ?? true);
 		// Web card (separate capability): any web tool on.
 		const anyWebToolOn = WEB_TOOL_IDS.some((toolId) => agent.toolsConfig[toolId]?.enabled ?? true);
 		const skillsService = this.plugin.skillsService;
@@ -931,6 +936,7 @@ export class AgentManager {
 		};
 
 		let count = anyVaultToolOn ? 1 : 0;
+		if (anyNoteToolOn) count++;
 		if (anyWebToolOn) count++;
 
 		// Plugin / community cards: enabled + available skills, excluding user-authored

@@ -149,8 +149,6 @@ function createNewAgent() {
 <style>
   :global(.agent-popover-trigger) {
     max-width: 190px;
-    padding: 1px 3px;
-    border-radius: 999px;
   }
 
   .agent-pill {
