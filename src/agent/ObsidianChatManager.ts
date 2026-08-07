@@ -628,27 +628,6 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		};
 	}
 
-	async exportThreadAsJson(threadId: string): Promise<void> {
-		const threadData = await this.ensureThreadLoaded(threadId);
-		if (!threadData) throw new Error(`Thread ${threadId} not found`);
-		const exportData = JSON.parse(JSON.stringify(threadData));
-		for (const entry of Object.values(exportData.checkpoints as Record<string, CheckpointEntry>)) {
-			const messages = (entry.checkpoint as unknown as Record<string, unknown>).channel_values as Record<
-				string,
-				unknown
-			>;
-			if (Array.isArray(messages?.messages)) await this.rehydrateBase64InMessages(messages.messages as unknown[]);
-		}
-		const folder = this.getChatFolder();
-		const basename =
-			threadId
-				.split("/")
-				.pop()
-				?.replace(/\.chat$/, "") ?? "export";
-		const exportPath = normalizePath(`${folder}/${basename}.json`);
-		await this.adapter.write(exportPath, JSON.stringify(exportData, null, 2));
-	}
-
 	async flush(threadId?: string): Promise<void> {
 		if (threadId) {
 			await this.saveThread(threadId);

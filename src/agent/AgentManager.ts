@@ -1704,10 +1704,6 @@ export class AgentManager {
 		return this.chatManager.getAttachmentDirectory();
 	}
 
-	async exportChatAsJson(threadId: string): Promise<void> {
-		await this.chatManager.exportThreadAsJson(threadId);
-	}
-
 	async openLatestChat(): Promise<void> {
 		const threads = await this.chatManager.listThreads();
 

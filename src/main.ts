@@ -403,21 +403,6 @@ export default class SecondBrainPlugin extends Plugin {
 		});
 
 		this.addCommand({
-			id: "export-chat-as-json",
-			name: "Export current chat as JSON",
-			icon: "file-json",
-			callback: async () => {
-				const threadId = this.app.workspace.getActiveViewOfType(ChatView)?.file?.path;
-				if (!threadId) {
-					new Notice("No chat is currently open");
-					return;
-				}
-				await this.agentManager.exportChatAsJson(threadId);
-				new Notice("Chat exported as JSON");
-			},
-		});
-
-		this.addCommand({
 			id: "next-pending-change",
 			name: "Next pending change",
 			icon: "chevron-down",
