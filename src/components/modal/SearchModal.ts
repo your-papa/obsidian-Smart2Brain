@@ -18,7 +18,6 @@ import type { SearchResult } from "../../vectorstore/types";
 import { getData } from "../../stores/dataStore.svelte";
 import { getSessionRegistry } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
-import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import type { SearchAlgorithm } from "../../types/plugin";
 import type { SearchFilter } from "../../vectorstore";
 import { Logger } from "../../utils/logging";
@@ -801,10 +800,13 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private async askAgentWithQuery(): Promise<void> {
 		const query = this.currentQuery.trim();
 
-		// Resolve the notes to attach: an explicit selection, else the focused
-		// result. This lets a note-only ask (empty query) still attach context.
+		// Resolve the notes to attach. Explicit selections are always attached.
+		// The focused-row fallback only applies to a note-only ask (empty query):
+		// there the highlighted row is the intended subject. With a query typed,
+		// don't silently attach the auto-highlighted first result the user never
+		// selected — attach only what they explicitly picked.
 		const selectedResults = this.getSelectedResults();
-		const focusedResult = selectedResults.length === 0 ? this.getFocusedSearchResult() : null;
+		const focusedResult = selectedResults.length === 0 && !query ? this.getFocusedSearchResult() : null;
 		const paths =
 			selectedResults.length > 0
 				? selectedResults.map((result) => result.path)
@@ -821,20 +823,21 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 		this.close();
 
-		// Ensure a chat is open
+		// Always start a fresh chat rather than appending to whatever thread the
+		// open chat leaf happens to be showing. createNewChat() reveals the leaf and
+		// reuses an existing empty "New Chat" so we don't accumulate empty threads.
 		const plugin = getPlugin();
-		const existingLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
-		if (!existingLeaf) {
-			await plugin.agentManager.createNewChat();
-		} else {
-			this.app.workspace.revealLeaf(existingLeaf);
-		}
+		const threadPath = await plugin.agentManager.createNewChat();
 
 		const messenger = getSessionRegistry();
 		if (!messenger) {
 			new Notice("Chat is not initialized yet. Please open a chat first.");
 			return;
 		}
+
+		// Scope the pending submission to the chat we just opened, so a stale chat
+		// tab doesn't consume the input/auto-submit meant for this new thread.
+		messenger.pendingSubmitThreadPath = threadPath;
 
 		if (paths.length > 0) {
 			messenger.pendingAttachmentPaths = paths;

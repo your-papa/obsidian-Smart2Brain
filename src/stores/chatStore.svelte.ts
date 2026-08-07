@@ -2423,6 +2423,10 @@ export class SessionRegistry {
 	pendingGraphNotes: string[] | null = $state(null);
 	pendingAttachmentPaths: string[] | null = $state(null);
 	pendingAutoSubmit: boolean = $state(false);
+	/** When set, only the Input bound to this thread path consumes the pending
+	 * input/attachments/auto-submit above. Prevents a stale chat tab from eating a
+	 * submission meant for a freshly opened chat (e.g. "Ask agent" from search). */
+	pendingSubmitThreadPath: string | null = $state(null);
 	#agentManager: AgentManager;
 
 	/**

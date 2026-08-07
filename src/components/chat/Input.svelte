@@ -208,6 +208,7 @@ onMount(() => {
 
 // Consume any pending input queued from elsewhere (e.g. graph "Send to Chat")
 $effect(() => {
+	if (registry.pendingSubmitThreadPath && registry.pendingSubmitThreadPath !== threadPath) return;
 	if (registry.pendingInput && markdownEditor) {
 		const text = registry.pendingInput;
 		registry.pendingInput = null;
@@ -229,12 +230,19 @@ $effect(() => {
 });
 
 $effect(() => {
+	if (registry.pendingSubmitThreadPath && registry.pendingSubmitThreadPath !== threadPath) return;
 	if (!registry.pendingAttachmentPaths || registry.pendingAttachmentPaths.length === 0) {
 		return;
 	}
 
 	const paths = [...registry.pendingAttachmentPaths];
 	registry.pendingAttachmentPaths = null;
+	// Note-only ask (no auto-submit): the target is satisfied once the notes are
+	// attached, so release it here. With an auto-submit pending, that effect
+	// clears the target instead.
+	if (!registry.pendingAutoSubmit && registry.pendingSubmitThreadPath === threadPath) {
+		registry.pendingSubmitThreadPath = null;
+	}
 
 	void attachVaultFilesByPath(paths);
 });
@@ -246,11 +254,13 @@ $effect(() => {
 // loading (the effect re-runs when session becomes available).
 $effect(() => {
 	if (!registry.pendingAutoSubmit) return;
+	if (registry.pendingSubmitThreadPath && registry.pendingSubmitThreadPath !== threadPath) return;
 	if (!session) return;
 	if (savingFiles) return;
 	if (!canSendMessage) return;
 
 	registry.pendingAutoSubmit = false;
+	registry.pendingSubmitThreadPath = null;
 	sendMessage();
 });
 
@@ -1112,7 +1122,8 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
             ariaLabel="stop streaming"
             tooltip="Stop streaming"
             onClick={() => session?.stopStreaming()}
-            styles="h-7 w-7 p-1 rounded-md bg-interactive-accent text-text-on-accent border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 hover:bg-interactive-accent-hover"
+            styles="send-message-button p-0 rounded-md border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200"
+            style={sendButtonStyle}
             iconId="square"
             iconSize="xs"
           />
@@ -1209,6 +1220,12 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
   :global(.send-message-button) {
     background: var(--send-button-bg) !important;
     color: var(--text-on-accent) !important;
+    width: 1.75rem !important;
+    height: 1.75rem !important;
+    min-width: 1.75rem !important;
+    min-height: 1.75rem !important;
+    flex: 0 0 auto;
+    aspect-ratio: 1;
   }
 
   :global(.send-message-button:hover:not(:disabled)) {

@@ -1645,7 +1645,7 @@ export class AgentManager {
 		}
 	}
 
-	async createNewChat(): Promise<void> {
+	async createNewChat(): Promise<string | null> {
 		const now = Date.now();
 
 		const data = getData();
@@ -1664,7 +1664,7 @@ export class AgentManager {
 			const existingFile = this.plugin.app.vault.getAbstractFileByPath(existingNewChat);
 			if (existingFile instanceof TFile) {
 				await this.openInChatLeaf(existingFile);
-				return;
+				return existingNewChat;
 			}
 		}
 
@@ -1698,6 +1698,7 @@ export class AgentManager {
 		if (file instanceof TFile) {
 			await this.openInChatLeaf(file);
 		}
+		return path;
 	}
 
 	async getAttachmentDirectory(): Promise<string> {
