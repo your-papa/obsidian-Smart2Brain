@@ -976,19 +976,49 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
      fix this — the dot is clipped by an ancestor's overflow, not painted over. */
   .tool-timeline {
     position: relative;
+    /* The container is full-width but its only interactive parts are the header button and
+       the steps grid (both left-aligned / their own width). The negative margin-top pulls
+       the container up so its empty right strip overlaps the user block's action-button row
+       (edit/copy/branch, far right). As the later, higher-stacked element the container would
+       otherwise swallow clicks meant for those buttons. Make the container itself transparent
+       to pointer events and restore them on the real interactive children, so a click in the
+       empty strip falls through to the buttons underneath. The answer content is a SIBLING of
+       .tool-timeline (rendered after it), so it is unaffected. */
+    pointer-events: none;
+  }
+  .tool-timeline > .thinking-summary-header,
+  .tool-timeline > .steps-expand-grid {
+    pointer-events: auto;
   }
 
-  /* When the process is collapsed the header is a single quiet row; the parent
-     `.group`'s 0.75rem flex gap then leaves an outsized space below it. Pull whatever
-     follows (the live current-run block while streaming, or the answer once settled) up
-     so the collapsed label sits close to it. Applied in BOTH phases with the SAME value
-     so nothing shifts at the streaming→settled boundary — an earlier settled-only gate
-     made the gap snap tighter the instant the run settled. Transitioned so any residual
-     height change (e.g. the current-run block unmounting at settle) eases rather than
-     jumps. */
+  /* The gap ABOVE the header is closed whenever a process is present at all — collapsed
+     OR expanded — because that reserved space is the same in both states: the user block
+     above always reserves a hover-reveal action-button row (edit/copy/branch, faded via
+     opacity not display) and the assistant `.group` adds its own top spacing, and neither
+     depends on whether the process below is open. It leaves an outsized gap between the
+     user bubble and the process the header is meant to sit quietly under. Pull the whole
+     timeline (header + steps + answer, as one unit) up to overlap into that reserved space
+     so any turn with a process reads as tightly under the user bubble as a turn with no
+     process at all. Because it moves the timeline as a unit, the header→steps and
+     steps→answer spacing INSIDE is untouched — only the block's top edge shifts. Hover
+     still shifts nothing: the reserved row keeps its height; we only slide up over the
+     empty part of it. Transitioned so the expand/collapse toggle eases rather than jumps. */
+  .tool-timeline:has(.thinking-summary-header) {
+    margin-top: -1.6rem;
+    transition:
+      margin-top 0.2s ease,
+      margin-bottom 0.2s ease;
+  }
+
+  /* The gap BELOW the header (before the answer) is collapsed-only: when collapsed the
+     header is a single quiet row and the parent `.group`'s 0.75rem flex gap then leaves an
+     outsized space below it, so pull whatever follows (the live current-run block while
+     streaming, or the answer once settled) up under the label. When EXPANDED the steps fill
+     that space, so there's nothing to close. Applied in BOTH streaming and settled phases
+     with the SAME value so nothing shifts at the streaming→settled boundary — an earlier
+     settled-only gate made the gap snap tighter the instant the run settled. */
   .tool-timeline:has(.thinking-summary-header.is-collapsed) {
     margin-bottom: -0.95rem;
-    transition: margin-bottom 0.2s ease;
   }
 
   /* Rail-less mode: the vertical timeline rail (dots + connecting line) is hidden
