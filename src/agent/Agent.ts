@@ -146,6 +146,22 @@ export interface AgentOptions {
 }
 
 /**
+ * Sanitizes a subagent display name into a value safe to stamp onto a message's
+ * `name` field. OpenAI/Azure/OpenAI-compatible chat endpoints enforce the pattern
+ * `^[^\s<|\\/>]+$` on `messages[N].name` (also used for LangGraph runnable names,
+ * which leak into the subagent's `AIMessage.name`). Names with spaces or `()` —
+ * e.g. "Default Agent (isolated)" — otherwise 400 the subagent's second turn.
+ * Collapses every disallowed character to `_`; falls back to `subagent` if empty.
+ */
+export function sanitizeRunnableName(name: string): string {
+	const cleaned = name
+		.replace(/[\s<|\\/>()]+/g, "_")
+		.replace(/_+/g, "_")
+		.replace(/^_+|_+$/g, "");
+	return cleaned || "subagent";
+}
+
+/**
  * A fully-resolved subagent, ready to hand to deepagents' subagent middleware.
  * Carries instances (not IDs): each subagent runs with its own model, tools,
  * and prompt — resolved by AgentManager from a referenced agent's config.
@@ -582,7 +598,15 @@ export class Agent {
 						systemPrompt: s.systemPrompt,
 						tools: [...s.tools] as never,
 						middleware: [] as never,
-						name: s.name,
+						// The runnable name is stamped onto the subagent's AIMessage.name,
+						// which serializes into the OpenAI/Azure request as `messages[N].name`.
+						// OpenAI-compatible endpoints enforce the pattern `^[^\s<|\\/>]+$`
+						// (no whitespace, no `<|\/>`), so a display name like
+						// "Default Agent (isolated)" makes the subagent's second turn (after
+						// its first tool call) 400 with "Invalid 'messages[N].name'". Sanitize
+						// to a pattern-safe slug; the human-facing selector name (the `task`
+						// tool's `subagent_type`) stays untouched below.
+						name: sanitizeRunnableName(s.name),
 					});
 					subgraph.invoke = (state: never, config?: never) => {
 						const c = config as Record<string, unknown> | undefined;
@@ -923,8 +947,16 @@ export class Agent {
 				}
 
 				if (mode === "messages") {
-					const [message] = payload as [BaseMessage, Record<string, unknown>];
+					const [message, msgMeta] = payload as [BaseMessage, Record<string, unknown>];
 					if (message.getType() === "ai") {
+						// Tokens authored by a subagent carry `lc_agent_name` in their stream
+						// metadata (set by deepagents' `task` tool). The subagent's answer is
+						// delivered to the parent via the `task` ToolMessage (rendered under the
+						// task card), so its streamed tokens must NOT append to the parent's main
+						// content — otherwise the subagent's final answer leaks into the parent
+						// message. Skip subagent tokens (and their preamble accounting) here.
+						const isSubAgentToken = typeof msgMeta?.lc_agent_name === "string";
+						if (isSubAgentToken) continue;
 						// Reset accumulator when a new AI message starts.
 						if (message.id && message.id !== lastAiMessageId) {
 							lastAiMessageId = message.id;
@@ -1207,8 +1239,12 @@ export class Agent {
 				}
 
 				if (mode === "messages") {
-					const [message] = payload as [BaseMessage, Record<string, unknown>];
+					const [message, msgMeta] = payload as [BaseMessage, Record<string, unknown>];
 					if (message.getType() === "ai") {
+						// Subagent tokens carry `lc_agent_name` — suppress them from the parent's
+						// main content (they're delivered via the `task` ToolMessage). See the
+						// streamTokens loop for the full rationale.
+						if (typeof msgMeta?.lc_agent_name === "string") continue;
 						if (message.id && message.id !== lastAiMessageId) {
 							lastAiMessageId = message.id;
 							preambleAccumulator = "";
@@ -1463,8 +1499,12 @@ export class Agent {
 				}
 
 				if (mode === "messages") {
-					const [message] = payload as [BaseMessage, Record<string, unknown>];
+					const [message, msgMeta] = payload as [BaseMessage, Record<string, unknown>];
 					if (message.getType() === "ai") {
+						// Subagent tokens carry `lc_agent_name` — suppress them from the parent's
+						// main content (they're delivered via the `task` ToolMessage). See the
+						// streamTokens loop for the full rationale.
+						if (typeof msgMeta?.lc_agent_name === "string") continue;
 						if (message.id && message.id !== lastAiMessageId) {
 							lastAiMessageId = message.id;
 							preambleAccumulator = "";

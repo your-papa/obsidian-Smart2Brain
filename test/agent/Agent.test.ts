@@ -13,7 +13,7 @@ vi.mock("langchain", () => ({
 }));
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { Agent } from "../../src/agent/Agent";
+import { Agent, sanitizeRunnableName } from "../../src/agent/Agent";
 
 function makeRegistry() {
 	return {
@@ -135,5 +135,38 @@ describe("Agent stream tool output normalization", () => {
 		).normalizeStreamToolOutput(undefined);
 
 		expect(output).toBeUndefined();
+	});
+});
+
+describe("sanitizeRunnableName", () => {
+	// OpenAI/Azure/OpenAI-compatible endpoints enforce `^[^\s<|\\/>]+$` on
+	// `messages[N].name`; a subagent runnable name leaks into AIMessage.name and
+	// would 400 the subagent's second turn if it contains disallowed characters.
+	const disallowed = /[\s<|\\/>]/;
+
+	it("replaces spaces and parentheses with underscores", () => {
+		expect(sanitizeRunnableName("Default Agent (isolated)")).toBe("Default_Agent_isolated");
+	});
+
+	it("leaves an already-safe name untouched", () => {
+		expect(sanitizeRunnableName("research-agent")).toBe("research-agent");
+	});
+
+	it("collapses runs of disallowed characters into a single underscore", () => {
+		expect(sanitizeRunnableName("a   /  b")).toBe("a_b");
+	});
+
+	it("trims leading and trailing underscores", () => {
+		expect(sanitizeRunnableName("  spaced  ")).toBe("spaced");
+	});
+
+	it("falls back to 'subagent' for an all-disallowed name", () => {
+		expect(sanitizeRunnableName("  <|>  ")).toBe("subagent");
+	});
+
+	it("produces a name matching the provider pattern for tricky inputs", () => {
+		for (const input of ["Default Agent (isolated)", "My/Weird\\Name", "a|b<c>d", "  "]) {
+			expect(sanitizeRunnableName(input)).not.toMatch(disallowed);
+		}
 	});
 });
