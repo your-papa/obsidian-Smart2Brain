@@ -748,7 +748,7 @@ $effect(() => {
                     {#if renderInfo.renderContent}
                       <MarkdownRenderer
                         content={renderInfo.content}
-                        class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]"
+                        class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-[--font-monospace] [&_code]:text-[0.9em] [&_pre]:bg-code-background [&_pre]:p-3 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-2 [&_pre]:text-[0.85em] [&_pre]:relative [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[1em] [&_pre_.clickable-icon]:absolute [&_pre_.clickable-icon]:top-1.5 [&_pre_.clickable-icon]:right-1.5 [&_pre_.clickable-icon]:opacity-0 [&_pre:hover_.clickable-icon]:opacity-100"
                       />
                     {/if}
                   {/if}
