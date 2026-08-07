@@ -86,6 +86,10 @@ const shouldRenderChildren = $derived(hasItems ?? !!children);
     justify-content: flex-end;
   }
 
+  .managed-entity-section-header {
+    padding-bottom: 0 !important;
+  }
+
   .managed-entity-section-header-info {
     flex: 1 1 auto;
     min-width: 0;
