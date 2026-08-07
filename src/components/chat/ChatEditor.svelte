@@ -160,12 +160,15 @@ function handleSubmit() {
 		}
 
 		:global(.cm-content) {
-			padding: 0 !important;
+			/* Reset only vertical padding; keep horizontal so Live Preview's
+			   list hanging-indents (padding-inline-start + negative text-indent)
+			   are not collapsed, which would clip "- " / "1." markers off-screen. */
+			padding-block: 0 !important;
 			caret-color: var(--text-normal);
 		}
 
 		:global(.cm-line) {
-			padding: 0 !important;
+			padding-block: 0 !important;
 			line-height: 1.5;
 		}
 

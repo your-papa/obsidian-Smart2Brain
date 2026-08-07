@@ -1,5 +1,5 @@
 <script lang="ts">
-import { Notice, TFile, normalizePath } from "obsidian";
+import { Notice, Platform, TFile, normalizePath } from "obsidian";
 import { onDestroy, onMount } from "svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
@@ -61,6 +61,8 @@ const session = $derived(registry.sessionFor(threadPath));
 
 let editorContainer: HTMLDivElement | undefined = $state();
 let attachmentInputEl: HTMLInputElement | undefined = $state();
+/** Send shortcut hint for the send button tooltip (platform-aware). */
+const sendShortcut = Platform.isMacOS ? "⌘↵" : "Ctrl+↵";
 let markdownEditor: EmbeddableMarkdownEditor | undefined = $state();
 let inputValue = $state("");
 
@@ -314,26 +316,11 @@ function initializeEditor() {
 		onChange: (value) => {
 			inputValue = value;
 		},
-		onEnter: (_editor, _mod, shift) => {
-			// Shift+Enter: allow newline (return false to use default behavior)
-			if (shift) {
-				return false;
-			}
-
-			// In fullscreen mode, Enter inserts newline; use Mod+Enter to send.
-			if (isFullscreen) {
-				return false;
-			}
-
-			// Regular Enter: send message
-			if (savingFiles) {
-				new Notice("Please wait for attachments to finish saving");
-			} else if (canSendMessage) {
-				sendMessage();
-			} else {
-				new Notice("Add text or attach a file before sending");
-			}
-			return true;
+		onEnter: () => {
+			// Input is a markdown editor: Enter (and Shift+Enter) always insert a
+			// newline so lists/code blocks flow naturally. Sending is Mod+Enter only.
+			// Return false to use the editor's default newline behavior.
+			return false;
 		},
 		onSubmit: () => {
 			// Mod+Enter: send message
@@ -1113,7 +1100,7 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
           <Button
             disabled={!canSendMessage || savingFiles}
             ariaLabel="send message"
-            tooltip="Send message"
+            tooltip="Send message ({sendShortcut})"
             onClick={sendMessage}
             dataTestId="send-message-button"
             styles="send-message-button p-0 rounded-md border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 disabled:cursor-not-allowed"
@@ -1274,12 +1261,15 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
     }
 
     :global(.cm-content) {
-      padding: 0 !important;
+      /* Reset only vertical padding; keep horizontal so Live Preview's
+         list hanging-indents (padding-inline-start + negative text-indent)
+         are not collapsed, which would clip "- " / "1." markers off-screen. */
+      padding-block: 0 !important;
       caret-color: var(--text-normal);
     }
 
     :global(.cm-line) {
-      padding: 0 !important;
+      padding-block: 0 !important;
       line-height: 1.5;
     }
 
