@@ -941,8 +941,6 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     loadingLabel={loadingMessage}
     onSettingsChange={handleSettingsChange}
     onFitToView={handleFitToView}
-    onZoomIn={() => canvasComponent?.zoomByFactor(1.2)}
-    onZoomOut={() => canvasComponent?.zoomByFactor(1 / 1.2)}
     onRefresh={handleRefresh}
     onReapplySegments={() => resolveAndApplySegments(graphData)}
     onSeedChange={() => void handleSeedChange()}

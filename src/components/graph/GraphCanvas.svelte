@@ -1638,10 +1638,9 @@ export function fitToView() {
 
 /**
  * Zoom the viewport by a multiplicative factor around the screen center.
- * Shared by the +/- keyboard shortcuts and the on-screen zoom buttons (the
- * only zoom affordance on touch besides pinch).
+ * Backs the +/- keyboard shortcuts.
  */
-export function zoomByFactor(factor: number) {
+function zoomByFactor(factor: number) {
 	const renderer = pixi;
 	if (!renderer) return;
 	const newScale = Math.min(10, Math.max(0.05, renderer.scale * factor));
