@@ -1,6 +1,6 @@
 <script lang="ts">
 import { untrack, tick, onDestroy } from "svelte";
-import { getAllTags, Notice } from "obsidian";
+import { getAllTags, Notice, type WorkspaceLeaf } from "obsidian";
 import { getPlugin } from "../../stores/state.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getIndexableVaultFiles, isAgentFilePath } from "../../utils/fileFiltering";
@@ -88,25 +88,32 @@ let focusedClusters: Set<number> = $state(new Set());
 
 // Whether a chat view is currently *visible* to the user. Graph selection is
 // ambient (it shows in any open chat automatically), so the selection bar only
-// needs an explicit "Attach in Chat" action when there's no chat the user can
-// see to receive it. A chat leaf parked in a collapsed sidebar (or hidden
-// background tab) doesn't count — it has zero size, so the user sees nothing.
-// Tracked reactively via a workspace listener since getLeavesOfType() isn't reactive.
+// needs an explicit "Open in Chat" action when there's no chat the user can
+// currently see. A chat leaf parked in a collapsed sidebar (or hidden background
+// tab) doesn't count. Tracked reactively via workspace listeners since
+// getLeavesOfType() isn't reactive.
 let hasOpenChat = $state(false);
+function isLeafVisible(leaf: WorkspaceLeaf): boolean {
+	const el = (leaf as { containerEl?: HTMLElement }).containerEl;
+	if (el?.style.display === "none") return false;
+	const root = leaf.getRoot();
+	const { leftSplit, rightSplit } = plugin.app.workspace;
+	// In a sidebar → only visible when that sidebar isn't collapsed.
+	if (root === leftSplit) return !(leftSplit as { collapsed?: boolean }).collapsed;
+	if (root === rightSplit) return !(rightSplit as { collapsed?: boolean }).collapsed;
+	// Main editor area → visible unless the tab is hidden behind another (display:none).
+	return true;
+}
 function refreshHasOpenChat() {
-	hasOpenChat = plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT).some((leaf) => {
-		const el = (leaf as { containerEl?: HTMLElement }).containerEl;
-		if (!el || el.style.display === "none") return false;
-		// A collapsed sidebar / hidden tab renders the leaf at zero size.
-		return el.offsetWidth > 0 && el.offsetHeight > 0;
-	});
+	hasOpenChat = plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT).some(isLeafVisible);
 }
 refreshHasOpenChat();
 const chatOpenEventRefs = [
 	plugin.app.workspace.on("layout-change", refreshHasOpenChat),
-	// Collapsing/expanding a sidebar or switching tabs changes visibility
-	// without a layout-change, so also refresh on active-leaf changes.
 	plugin.app.workspace.on("active-leaf-change", refreshHasOpenChat),
+	// Collapsing/expanding a sidebar fires `resize` but not layout-change, so this
+	// is what keeps the button in sync when the user toggles the chat sidebar.
+	plugin.app.workspace.on("resize", refreshHasOpenChat),
 ];
 onDestroy(() => {
 	for (const ref of chatOpenEventRefs) plugin.app.workspace.offref(ref);
@@ -519,7 +526,7 @@ async function handleSendToChat() {
 	const paths = selectedPaths;
 	if (paths.length === 0) return;
 
-	// Ensure a chat is open
+	// Reveal an existing chat (uncollapsing its sidebar) or create one.
 	const { workspace } = plugin.app;
 	const existingLeaf = workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
 	if (!existingLeaf) {
@@ -915,10 +922,9 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
           <Button buttonText="Open All" onClick={handleOpenAllSelected} tooltip="Open all selected notes in new tabs" />
           {#if !hasOpenChat}
             <Button
-              iconId="message-square"
-              buttonText="Attach in Chat"
+              buttonText="Open in Chat"
               onClick={handleSendToChat}
-              tooltip="Open a chat and attach the selected notes"
+              tooltip="Reveal the chat and attach the selected notes"
             />
           {/if}
           <Button buttonText="Clear" onClick={handleClearSelection} tooltip="Clear selection (Esc)" />
