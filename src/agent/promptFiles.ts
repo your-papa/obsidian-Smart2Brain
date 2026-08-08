@@ -40,22 +40,30 @@ export class PromptFilesService {
 	}
 
 	/**
-	 * Seed default files on first run: write each agent's `Base Prompts/<id>.md` from the code
-	 * default ONLY when absent (never clobber an edit). This makes the code constant the source of
-	 * the seeded default while the file stays user-editable.
+	 * Seed default files on first run: write each agent's `Base Prompts/<id>.md` when absent
+	 * (never clobber an edit). Content is the code default `BASE_SYSTEM_PROMPT`, UNLESS the v4→v5
+	 * migration stashed a customized prompt on `agent.migratedBasePrompt` — in that case the
+	 * user's old customization is written to the new file (and the transient cleared) so the
+	 * config→file move never silently discards it.
 	 */
 	async seedDefaults(agents: AgentsConfig): Promise<void> {
 		await this.ensureDirs();
 
 		for (const agentId of Object.keys(agents)) {
 			const path = basePromptPath(agentId);
+			const agent = agents[agentId] as unknown as { migratedBasePrompt?: string };
+			const migrated = agent?.migratedBasePrompt?.trim() ? agent.migratedBasePrompt : null;
 			try {
 				if (!(await this.adapter.exists(path))) {
 					await this.ensureParent(path);
-					await this.adapter.write(path, BASE_SYSTEM_PROMPT);
+					await this.adapter.write(path, migrated ?? BASE_SYSTEM_PROMPT);
 				}
 			} catch (error) {
 				Log.error(`Failed to seed base prompt for ${agentId}:`, error);
+			} finally {
+				// Consume the one-shot migration transient regardless of write outcome — leaving it
+				// set would re-seed a stale prompt on a later folder change.
+				if (agent && "migratedBasePrompt" in agent) agent.migratedBasePrompt = undefined;
 			}
 		}
 	}

@@ -712,6 +712,10 @@ export default class SecondBrainPlugin extends Plugin {
 		await this.skillsService?.bootstrapDefaultSkills();
 		await this.skillsService?.discoverSkills();
 		await this.promptFilesService?.seedDefaults(this.pluginData.agents);
+		// Reload the base-prompt cache from the *new* folder — seedDefaults only writes files,
+		// it doesn't touch the cache, so without this the assembled prompt keeps serving the old
+		// folder's content (or the default) until a later vault event refreshes it.
+		await this.promptFilesService?.refresh(this.pluginData.agents);
 		this.agentManager?.invalidateSystemPromptCaches();
 	}
 

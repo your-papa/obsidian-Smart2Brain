@@ -32,6 +32,7 @@ import {
 	DEFAULT_TOOLS_CONFIG,
 	createDefaultAgentConfig,
 	createData,
+	__resetPluginDataStoreForTests,
 	AddChatModelError,
 	AddEmbedModelError,
 	SetChatModelError,
@@ -438,6 +439,11 @@ describe("PluginDataStore – Chat Models", () => {
 });
 
 describe("createData", () => {
+	// createData memoizes a module-level singleton; reset it so each fixture migrates fresh.
+	beforeEach(() => {
+		__resetPluginDataStoreForTests();
+	});
+
 	it("should default missing summarizationModel to null for saved agents without that field", async () => {
 		const plugin = {
 			...createMockPlugin(),
@@ -459,6 +465,63 @@ describe("createData", () => {
 
 		const store = await createData(plugin as never);
 		expect(store.getAgent(DEFAULT_AGENT_ID)?.summarizationModel).toBeNull();
+	});
+
+	// v4→v5 moves the base system prompt from the `systemPrompt` config field to a file. A
+	// CUSTOMIZED prompt must survive the move (stashed on `migratedBasePrompt` for the async seed
+	// to write); a shipped default is discarded so the file seeds fresh. (Regression: PR #370.)
+	it("preserves a customized systemPrompt across the v4→v5 migration via migratedBasePrompt", async () => {
+		const plugin = {
+			...createMockPlugin(),
+			loadData: vi.fn().mockResolvedValue({
+				...structuredClone(DEFAULT_SETTINGS),
+				schemaVersion: 4,
+				agents: {
+					[DEFAULT_AGENT_ID]: {
+						id: DEFAULT_AGENT_ID,
+						name: "Default Agent",
+						chatModel: null,
+						systemPrompt: "MY CUSTOM PROMPT",
+						skills: {},
+						toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
+						mcpServers: {},
+					},
+				},
+			}),
+		};
+
+		const store = await createData(plugin as never);
+		const agent = store.getAgent(DEFAULT_AGENT_ID) as unknown as {
+			systemPrompt?: unknown;
+			migratedBasePrompt?: string;
+		};
+		expect(agent.migratedBasePrompt).toBe("MY CUSTOM PROMPT");
+		expect(agent.systemPrompt).toBeUndefined();
+	});
+
+	it("does not stash a shipped-default systemPrompt across the v4→v5 migration", async () => {
+		const plugin = {
+			...createMockPlugin(),
+			loadData: vi.fn().mockResolvedValue({
+				...structuredClone(DEFAULT_SETTINGS),
+				schemaVersion: 4,
+				agents: {
+					[DEFAULT_AGENT_ID]: {
+						id: DEFAULT_AGENT_ID,
+						name: "Default Agent",
+						chatModel: null,
+						systemPrompt: BASE_SYSTEM_PROMPT,
+						skills: {},
+						toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
+						mcpServers: {},
+					},
+				},
+			}),
+		};
+
+		const store = await createData(plugin as never);
+		const agent = store.getAgent(DEFAULT_AGENT_ID) as unknown as { migratedBasePrompt?: string };
+		expect(agent.migratedBasePrompt).toBeUndefined();
 	});
 });
 

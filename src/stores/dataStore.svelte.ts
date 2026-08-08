@@ -443,6 +443,16 @@ const MIGRATIONS: Migration[] = [
 		// Drop removed per-agent fields — their content is now file-backed or global.
 		for (const agent of Object.values(data.agents ?? {})) {
 			const a = agent as unknown as Record<string, unknown>;
+			// The base system prompt moves from this config field to a file (Base Prompts/<id>.md).
+			// If the user CUSTOMIZED it (not equal to any shipped default), stash it in a transient so
+			// the async seed writes it to the new file instead of clobbering it with the factory
+			// default. A recognized/absent default is dropped — the file seeds fresh from the default.
+			const oldPrompt = typeof a.systemPrompt === "string" ? (a.systemPrompt as string) : "";
+			const isShippedDefault =
+				!oldPrompt.trim() ||
+				oldPrompt === BASE_SYSTEM_PROMPT ||
+				[...HISTORICAL_SYSTEM_PROMPTS.values()].includes(oldPrompt);
+			if (!isShippedDefault) a.migratedBasePrompt = oldPrompt;
 			a.systemPrompt = undefined;
 			a.systemPromptVersion = undefined;
 			a.capabilityPrompts = undefined;
@@ -2292,6 +2302,15 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 export function getData(): PluginDataStore {
 	if (!_pluginDataStore) throw new Error("Plugin does not exist");
 	return _pluginDataStore;
+}
+
+/**
+ * Test-only: clear the module-level singleton so a subsequent `createData` runs migrations +
+ * normalization on fresh input. `createData` memoizes its result, which is correct at runtime
+ * (one store per session) but makes per-test fixtures leak across tests. Not used in production.
+ */
+export function __resetPluginDataStoreForTests(): void {
+	_pluginDataStore = null;
 }
 
 /**

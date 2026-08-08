@@ -1043,6 +1043,18 @@ export class AgentManager {
 		// Load chats
 		await StartupProfiler.measure("agent:chatManager.load", () => this.chatManager.load());
 
+		// Guarantee the base-prompt cache is seeded + loaded before we assemble any system
+		// prompt. main.ts's deferred startup runs promptFiles:init before agent:init, but a chat
+		// opened during cold startup can trigger lazy ensureAgent() → initialize() *first*; without
+		// this, getBasePrompt() would read an empty cache and fall back to BASE_SYSTEM_PROMPT,
+		// dropping the user's file-backed instructions for that request. Both calls are idempotent
+		// and cheap (skip-if-exists writes over a bounded file set).
+		const promptFiles = this.plugin.promptFilesService;
+		if (promptFiles) {
+			await promptFiles.seedDefaults(getData().agents);
+			await promptFiles.refresh(getData().agents);
+		}
+
 		// Cleanup existing agent if any
 		this.agent = null;
 		this.deferredSetup = null;
