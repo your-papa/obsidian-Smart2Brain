@@ -87,7 +87,11 @@ function applyChanges() {
 }
 
 function updateAgentName(name: string) {
+	// Capture the note's current path (derived from the OLD name) before committing the
+	// rename, then reconcile the file on disk to the new name-based path.
+	const oldPath = basePromptPath(agentId);
 	pluginData.updateAgent(agentId, { name });
+	void plugin.promptFilesService?.renameBasePrompt(agentId, oldPath);
 	modal.setTitle(`Edit Agent: ${name || "Untitled"}`);
 }
 

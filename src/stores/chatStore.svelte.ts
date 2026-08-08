@@ -2533,8 +2533,7 @@ export class SessionRegistry {
 
 	private getDefaultAgentForFallback() {
 		const data = getData();
-		const defaultAgentId = data.defaultAgentId ?? DEFAULT_AGENT_ID;
-		return data.getAgent(defaultAgentId) ?? data.getAgent(DEFAULT_AGENT_ID) ?? data.getSelectedAgent();
+		return data.getAgent(data.defaultAgentId) ?? data.getAgent(DEFAULT_AGENT_ID) ?? data.getSelectedAgent();
 	}
 
 	private getModelConfigForSelection(

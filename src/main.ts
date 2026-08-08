@@ -536,6 +536,9 @@ export default class SecondBrainPlugin extends Plugin {
 					// Seed default guidance / base-prompt files (if absent) then load them into cache,
 					// so the assembled system prompt and staleness detection see file content.
 					await StartupProfiler.measure("promptFiles:init", async () => {
+						// Migrate any legacy id-named files to the current name-based scheme first,
+						// so seedDefaults sees the existing (renamed) file and doesn't re-create it.
+						await this.promptFilesService.migrateBasePromptFilenames(this.pluginData.agents);
 						await this.promptFilesService.seedDefaults(this.pluginData.agents);
 						await this.promptFilesService.refresh(this.pluginData.agents);
 					});
@@ -722,6 +725,7 @@ export default class SecondBrainPlugin extends Plugin {
 		await this.skillsService?.migrateCoreSkills();
 		await this.skillsService?.bootstrapDefaultSkills();
 		await this.skillsService?.discoverSkills();
+		await this.promptFilesService?.migrateBasePromptFilenames(this.pluginData.agents);
 		await this.promptFilesService?.seedDefaults(this.pluginData.agents);
 		// Reload the base-prompt cache from the *new* folder — seedDefaults only writes files,
 		// it doesn't touch the cache, so without this the assembled prompt keeps serving the old

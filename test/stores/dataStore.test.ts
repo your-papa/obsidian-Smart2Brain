@@ -177,13 +177,13 @@ describe("PluginDataStore – Agent CRUD", () => {
 		expect(store.selectedAgentId).toBe(DEFAULT_AGENT_ID);
 	});
 
-	it("should clear defaultAgentId when that agent is deleted", () => {
+	it("should fall back to the built-in default when that agent is deleted", () => {
 		const agent = store.createAgent("Custom Default");
 		store.setDefaultAgentId(agent.id);
 		expect(store.defaultAgentId).toBe(agent.id);
 
 		store.deleteAgent(agent.id);
-		expect(store.defaultAgentId).toBeNull();
+		expect(store.defaultAgentId).toBe(DEFAULT_AGENT_ID);
 	});
 
 	it("should duplicate an agent", () => {
@@ -264,13 +264,6 @@ describe("PluginDataStore – Agent Selection", () => {
 
 	it("should throw when setting default to non-existent agent", () => {
 		expect(() => store.setDefaultAgentId("nonexistent")).toThrow("not found");
-	});
-
-	it("should clear the default agent", () => {
-		const agent = store.createAgent("Temp Default");
-		store.setDefaultAgentId(agent.id);
-		store.clearDefaultAgent();
-		expect(store.defaultAgentId).toBeNull();
 	});
 });
 

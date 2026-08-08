@@ -1051,6 +1051,7 @@ export class AgentManager {
 		// and cheap (skip-if-exists writes over a bounded file set).
 		const promptFiles = this.plugin.promptFilesService;
 		if (promptFiles) {
+			await promptFiles.migrateBasePromptFilenames(getData().agents);
 			await promptFiles.seedDefaults(getData().agents);
 			await promptFiles.refresh(getData().agents);
 		}
@@ -1608,9 +1609,9 @@ export class AgentManager {
 		const data = getData();
 		const folder = data.targetFolder;
 
-		// Reset the global default agent for the next new chat. Each session captures
-		// its own selectedAgentId at creation, so no agent rebuild is needed here.
-		if (data.defaultAgentId && data.selectedAgentId !== data.defaultAgentId) {
+		// Every new chat starts on the default agent. Each session captures its own
+		// selectedAgentId at creation, so no agent rebuild is needed here.
+		if (data.selectedAgentId !== data.defaultAgentId) {
 			data.selectedAgentId = data.defaultAgentId;
 		}
 

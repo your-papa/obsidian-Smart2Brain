@@ -126,6 +126,59 @@ export class PromptFilesService {
 		this.basePromptCache.delete(agentId);
 	}
 
+	/**
+	 * Reconcile an agent's base-prompt file to its current name-based path. Call after an
+	 * agent is renamed: if a file exists at `oldPath` and the desired path (derived from the
+	 * agent's current name) differs, rename it on disk so the note tracks the agent name.
+	 * The cache is keyed by id, so it needs no update. Best-effort.
+	 */
+	async renameBasePrompt(agentId: string, oldPath: string): Promise<void> {
+		const newPath = basePromptPath(agentId);
+		if (newPath === oldPath) return;
+		try {
+			if (!(await this.adapter.exists(oldPath))) return;
+			// Don't clobber an existing file at the target (e.g. a collision resolved elsewhere).
+			if (await this.adapter.exists(newPath)) return;
+			await this.ensureParent(newPath);
+			await this.adapter.rename(oldPath, newPath);
+		} catch (error) {
+			Log.debug(`Could not rename base prompt for ${agentId}:`, error);
+		}
+	}
+
+	/**
+	 * Copy one agent's base prompt to another (used when duplicating an agent), so the copy
+	 * inherits the source's edited prompt rather than starting from the bare default.
+	 */
+	async copyBasePrompt(fromId: string, toId: string): Promise<void> {
+		const content = this.getBasePrompt(fromId);
+		await this.writeBasePrompt(toId, content);
+	}
+
+	/**
+	 * One-time migration for installs whose base prompts were named by agent id
+	 * (`Base Prompts/<uuid>.md`, the pre-name-based scheme). For each agent, if a legacy
+	 * id-named file exists and the current name-based path is free, rename it — preserving
+	 * user edits and avoiding orphaned id files. Safe to run every startup (a no-op once
+	 * migrated). Call before {@link refresh} so the cache reads the new paths.
+	 */
+	async migrateBasePromptFilenames(agents: AgentsConfig): Promise<void> {
+		const dir = basePromptsDir();
+		for (const agentId of Object.keys(agents)) {
+			const legacyPath = `${dir}/${agentId}.md`;
+			const desiredPath = basePromptPath(agentId);
+			if (legacyPath === desiredPath) continue;
+			try {
+				if (!(await this.adapter.exists(legacyPath))) continue;
+				if (await this.adapter.exists(desiredPath)) continue;
+				await this.ensureParent(desiredPath);
+				await this.adapter.rename(legacyPath, desiredPath);
+			} catch (error) {
+				Log.debug(`Could not migrate base prompt filename for ${agentId}:`, error);
+			}
+		}
+	}
+
 	private async ensureDirs(): Promise<void> {
 		// Create the configurable agent-root folder first, then the nested `Base Prompts/` dir:
 		// Obsidian's DataAdapter.mkdir doesn't create intermediate parents, and the `agentFolder`

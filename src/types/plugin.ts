@@ -447,8 +447,8 @@ export interface PluginData {
 
 	/** All agent configurations keyed by agent ID */
 	agents: AgentsConfig;
-	/** ID of the default agent, or null if using "last selected" behavior */
-	defaultAgentId: string | null;
+	/** ID of the default agent every new chat starts on. Always a valid agent ID. */
+	defaultAgentId: string;
 	/** ID of the currently selected/active agent */
 	selectedAgentId: string;
 

@@ -916,9 +916,9 @@ export class PluginDataStore {
 	}
 
 	/**
-	 * Get the default agent ID, or null if using "last selected" behavior.
+	 * Get the default agent ID that every new chat starts on. Always valid.
 	 */
-	get defaultAgentId(): string | null {
+	get defaultAgentId(): string {
 		return this.#data.defaultAgentId;
 	}
 
@@ -950,34 +950,22 @@ export class PluginDataStore {
 
 	/**
 	 * Get the default agent configuration.
-	 * If no default is set (null), returns the built-in default agent.
 	 */
 	getDefaultAgent(): AgentConfig {
-		if (this.#data.defaultAgentId) {
-			return this.#data.agents[this.#data.defaultAgentId];
-		}
-		// Fallback to built-in default agent when no default is set
-		return this.#data.agents[DEFAULT_AGENT_ID];
+		// Fall back to the built-in agent if the pointer ever goes stale.
+		return this.#data.agents[this.#data.defaultAgentId] ?? this.#data.agents[DEFAULT_AGENT_ID];
 	}
 
 	/**
-	 * Set the default agent ID, or null to use "last selected" behavior.
-	 * @param agentId - The ID of the agent to set as default, or null to clear
-	 * @throws Error if agent doesn't exist (when agentId is not null)
+	 * Set the default agent every new chat starts on.
+	 * @param agentId - The ID of the agent to set as default
+	 * @throws Error if the agent doesn't exist
 	 */
-	setDefaultAgentId(agentId: string | null): void {
-		if (agentId !== null && !this.#data.agents[agentId]) {
+	setDefaultAgentId(agentId: string): void {
+		if (!this.#data.agents[agentId]) {
 			throw new Error(`Agent with ID "${agentId}" not found`);
 		}
 		this.#data.defaultAgentId = agentId;
-		this.saveSettings();
-	}
-
-	/**
-	 * Clear the default agent, enabling "last selected" behavior.
-	 */
-	clearDefaultAgent(): void {
-		this.#data.defaultAgentId = null;
 		this.saveSettings();
 	}
 
@@ -1044,14 +1032,14 @@ export class PluginDataStore {
 			}
 		}
 
-		// If deleted agent was selected, switch to the default agent (or built-in default)
-		if (this.#data.selectedAgentId === agentId) {
-			this.#data.selectedAgentId = this.#data.defaultAgentId ?? DEFAULT_AGENT_ID;
+		// If deleted agent was the default, fall back to the built-in default
+		if (this.#data.defaultAgentId === agentId) {
+			this.#data.defaultAgentId = DEFAULT_AGENT_ID;
 		}
 
-		// If deleted agent was the user's default, clear the default (use last selected)
-		if (this.#data.defaultAgentId === agentId) {
-			this.#data.defaultAgentId = null;
+		// If deleted agent was selected, switch to the (now-valid) default agent
+		if (this.#data.selectedAgentId === agentId) {
+			this.#data.selectedAgentId = this.#data.defaultAgentId;
 		}
 
 		this.saveSettings();
@@ -2248,12 +2236,12 @@ function normalizeAgents(mergedData: PluginData): void {
 	for (const agentId of Object.keys(mergedData.agents)) {
 		normalizeAgent(mergedData.agents[agentId]);
 	}
-	// Ensure defaultAgentId is valid
-	if (mergedData.defaultAgentId !== null && !mergedData.agents[mergedData.defaultAgentId]) {
-		mergedData.defaultAgentId = null;
+	// Ensure defaultAgentId points at a real agent; fall back to the built-in default
+	if (!mergedData.defaultAgentId || !mergedData.agents[mergedData.defaultAgentId]) {
+		mergedData.defaultAgentId = DEFAULT_AGENT_ID;
 	}
 	if (!mergedData.selectedAgentId || !mergedData.agents[mergedData.selectedAgentId]) {
-		mergedData.selectedAgentId = mergedData.defaultAgentId ?? DEFAULT_AGENT_ID;
+		mergedData.selectedAgentId = mergedData.defaultAgentId;
 	}
 }
 

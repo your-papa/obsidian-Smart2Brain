@@ -47,6 +47,8 @@ function openAgentEditor(agentId: string) {
 function createNewAgent() {
 	const agent = pluginData.createAgent("New Agent");
 	pluginData.selectedAgentId = agent.id;
+	// Seed the base prompt note immediately so it exists in the vault before the editor opens.
+	void plugin.promptFilesService?.ensureBasePrompt(agent.id);
 	openAgentEditor(agent.id);
 }
 
@@ -55,6 +57,8 @@ function duplicateAgent(agentId: string) {
 	if (!sourceAgent) return;
 	const duplicated = pluginData.duplicateAgent(agentId, `${sourceAgent.name} (Copy)`);
 	pluginData.selectedAgentId = duplicated.id;
+	// Carry over the source's edited base prompt to the duplicate's own note.
+	void plugin.promptFilesService?.copyBasePrompt(agentId, duplicated.id);
 	openAgentEditor(duplicated.id);
 }
 
@@ -66,19 +70,18 @@ async function deleteAgent(agentId: string) {
 	const agent = agents[agentId];
 	if (!(await confirmDelete(plugin.app, agent?.name ?? agentId))) return;
 	try {
-		pluginData.deleteAgent(agentId);
+		// Remove the note BEFORE deleting the agent from config: deleteBasePrompt resolves the
+		// note path from the agent's (name-based) entry, which is gone once deleteAgent runs.
 		void plugin.promptFilesService?.deleteBasePrompt(agentId);
+		pluginData.deleteAgent(agentId);
 		plugin.agentManager?.invalidateAgentRunnable(agentId);
 	} catch (error) {
 		new Notice(error instanceof Error ? error.message : "Failed to delete agent");
 	}
 }
 
-function toggleDefaultAgent(agentId: string) {
-	if (pluginData.defaultAgentId === agentId) {
-		pluginData.clearDefaultAgent();
-		return;
-	}
+function setDefaultAgent(agentId: string) {
+	if (pluginData.defaultAgentId === agentId) return;
 	pluginData.setDefaultAgentId(agentId);
 }
 
@@ -133,9 +136,6 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
         {/snippet}
 
         {#snippet badges()}
-          {#if pluginData.defaultAgentId === agentId}
-            <Badge label="Default" tone="accent" />
-          {/if}
           {#if agentId === DEFAULT_AGENT_ID}
             <Badge label="Built-in" tone="muted" />
           {/if}
@@ -159,10 +159,30 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
         {/snippet}
 
         {#snippet actions()}
-          <Button
-            buttonText={pluginData.defaultAgentId === agentId ? "Clear Default" : "Set Default"}
-            onClick={() => toggleDefaultAgent(agentId)}
-          />
+          {#if agentId !== DEFAULT_AGENT_ID}
+            <Button
+              iconId="trash"
+              ariaLabel="Delete agent"
+              tooltip="Delete agent"
+              onClick={() => deleteAgent(agentId)}
+            />
+          {/if}
+          {#if pluginData.defaultAgentId === agentId}
+            <Button
+              iconId="star"
+              disabled
+              ariaLabel="Default agent"
+              tooltip="Default agent for new chats"
+              style="color: var(--text-accent); opacity: 1;"
+            />
+          {:else}
+            <Button
+              iconId="star"
+              ariaLabel="Set as default"
+              tooltip="Set as default for new chats"
+              onClick={() => setDefaultAgent(agentId)}
+            />
+          {/if}
           <Button
             iconId="settings"
             ariaLabel="Edit agent"
@@ -175,14 +195,6 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
             tooltip="Duplicate agent"
             onClick={() => duplicateAgent(agentId)}
           />
-          {#if agentId !== DEFAULT_AGENT_ID}
-            <Button
-              iconId="trash"
-              ariaLabel="Delete agent"
-              tooltip="Delete agent"
-              onClick={() => deleteAgent(agentId)}
-            />
-          {/if}
         {/snippet}
       </ManagedEntityItem>
     {/each}
