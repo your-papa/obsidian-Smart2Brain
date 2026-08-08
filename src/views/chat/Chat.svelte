@@ -153,12 +153,14 @@ function messageNavHotkeys(node: HTMLElement) {
     --chat-bg: var(--background-secondary);
   }
 
-  /* Obsidian's floating mobile navbar (~52px pill, ~84px of the viewport
-     bottom) sits over the full-height chat leaf, covering the composer's
-     action row. Pad the bottom so the composer clears it. Matches the graph
-     selection bar's clearance. */
+  /* Obsidian's floating mobile navbar (~52px pill) sits over the full-height
+     chat leaf, covering the composer's action row. The navbar already floats
+     above the device safe area, so we only need to clear the pill itself.
+     When the on-screen keyboard opens Obsidian hides the navbar and grows
+     `--keyboard-height`; fold that clearance away as the keyboard rises so the
+     composer doesn't hop. Keyboard closed → 60px gap; open → 0. */
   :global(.is-mobile) .chat-root {
-    padding-bottom: calc(80px + var(--safe-area-inset-bottom, 0px));
+    padding-bottom: max(0px, calc(60px - var(--keyboard-height, 0px)));
   }
 
   .chat-root::after {
