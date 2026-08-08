@@ -80,6 +80,8 @@ let dragCounter = 0;
 let dragMessage = $state("Drop files here");
 let dragHasIssue = $state(false);
 let isFullscreen = $state(false);
+/** Enter sends when collapsed; when expanded, Enter is a newline and Mod+Enter sends. */
+const sendShortcutHint = $derived(isFullscreen ? sendShortcut : "↵");
 let isFullscreenVisible = $state(false);
 let fullscreenNoTransition = $state(false);
 let fullscreenTransitioning = false;
@@ -324,21 +326,20 @@ function initializeEditor() {
 		onChange: (value) => {
 			inputValue = value;
 		},
-		onEnter: () => {
-			// Input is a markdown editor: Enter (and Shift+Enter) always insert a
-			// newline so lists/code blocks flow naturally. Sending is Mod+Enter only.
+		onEnter: (_editor, _mod, shift) => {
+			// When expanded (fullscreen), Enter always inserts a newline so long,
+			// multi-line drafts flow naturally — sending is Mod+Enter only there.
+			// Otherwise plain Enter sends; Shift+Enter always inserts a newline.
 			// Return false to use the editor's default newline behavior.
-			return false;
+			if (isFullscreen || shift) {
+				return false;
+			}
+			attemptSend();
+			return true;
 		},
 		onSubmit: () => {
-			// Mod+Enter: send message
-			if (savingFiles) {
-				new Notice("Please wait for attachments to finish saving");
-			} else if (canSendMessage) {
-				sendMessage();
-			} else {
-				new Notice("Add text or attach a file before sending");
-			}
+			// Mod+Enter: send message (works in both collapsed and expanded modes)
+			attemptSend();
 		},
 		onFocus: () => {
 			onFocusChange?.(true);
@@ -410,6 +411,16 @@ function toggleFullscreen() {
 		return;
 	}
 	expandFullscreen();
+}
+
+function attemptSend() {
+	if (savingFiles) {
+		new Notice("Please wait for attachments to finish saving");
+	} else if (canSendMessage) {
+		sendMessage();
+	} else {
+		new Notice("Add text or attach a file before sending");
+	}
 }
 
 function sendMessage() {
@@ -1108,7 +1119,7 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
           <Button
             disabled={!canSendMessage || savingFiles}
             ariaLabel="send message"
-            tooltip="Send message ({sendShortcut})"
+            tooltip="Send message ({sendShortcutHint})"
             onClick={sendMessage}
             dataTestId="send-message-button"
             styles="send-message-button p-0 rounded-md border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 disabled:cursor-not-allowed"
