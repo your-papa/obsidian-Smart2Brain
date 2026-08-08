@@ -975,13 +975,34 @@ export class PluginDataStore {
 	 * @returns The created agent configuration
 	 */
 	createAgent(name: string): AgentConfig {
-		const agent = createDefaultAgentConfig(undefined, name);
+		const agent = createDefaultAgentConfig(undefined, this.uniqueAgentName(name));
 		this.#data.agents = {
 			...this.#data.agents,
 			[agent.id]: agent,
 		};
 		this.saveSettings();
 		return agent;
+	}
+
+	/**
+	 * Ensure an agent display name is unique across all agents. Display names are the
+	 * source of each agent's base-prompt filename, so a duplicate name would produce a
+	 * duplicate file path — enforcing uniqueness here removes that clash at the source.
+	 * Appends " 2", " 3", … until free. `exceptId` excludes the agent being renamed so it
+	 * can keep its own name.
+	 */
+	private uniqueAgentName(desired: string, exceptId?: string): string {
+		const base = desired.trim() || "Agent";
+		const taken = new Set(
+			Object.values(this.#data.agents)
+				.filter((agent) => agent.id !== exceptId)
+				.map((agent) => agent.name),
+		);
+		if (!taken.has(base)) return base;
+		for (let n = 2; ; n++) {
+			const candidate = `${base} ${n}`;
+			if (!taken.has(candidate)) return candidate;
+		}
 	}
 
 	/**
@@ -996,11 +1017,16 @@ export class PluginDataStore {
 			throw new Error(`Agent with ID "${agentId}" not found`);
 		}
 
+		// Keep display names unique (they drive the base-prompt filename). Renaming to your
+		// own current name is a no-op; a clash with another agent gets a numeric suffix.
+		const normalizedUpdates =
+			updates.name !== undefined ? { ...updates, name: this.uniqueAgentName(updates.name, agentId) } : updates;
+
 		this.#data.agents = {
 			...this.#data.agents,
 			[agentId]: {
 				...agent,
-				...updates,
+				...normalizedUpdates,
 			},
 		};
 		this.saveSettings();
@@ -1067,7 +1093,7 @@ export class PluginDataStore {
 		const newAgent: AgentConfig = {
 			...clonedAgent,
 			id: newId,
-			name: newName,
+			name: this.uniqueAgentName(newName),
 			subAgentIds: remappedSubAgentIds,
 		};
 

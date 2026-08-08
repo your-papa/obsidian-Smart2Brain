@@ -201,24 +201,6 @@ describe("PromptFilesService", () => {
 		expect(adapter.files.has("Agents/Base Prompts/Research Assistant v2.md")).toBe(true);
 	});
 
-	it("disambiguates colliding names with a short-id suffix (both members suffixed)", async () => {
-		state.agents = {
-			"1a2b0000-xxxx": { id: "1a2b0000-xxxx", name: "Research" },
-			"3c4d0000-yyyy": { id: "3c4d0000-yyyy", name: "Research" },
-		};
-		const adapter = makeAdapter();
-		const svc = makeService(adapter);
-
-		await svc.writeBasePrompt("1a2b0000-xxxx", "a");
-		await svc.writeBasePrompt("3c4d0000-yyyy", "b");
-
-		// Each colliding member gets a distinct `-<first 4 hex of id>` suffix; the bare
-		// "Research.md" is never written.
-		expect(adapter.files.get("Agents/Base Prompts/Research-1a2b.md")).toBe("a");
-		expect(adapter.files.get("Agents/Base Prompts/Research-3c4d.md")).toBe("b");
-		expect(adapter.files.has("Agents/Base Prompts/Research.md")).toBe(false);
-	});
-
 	it("copyBasePrompt carries the source's edited prompt to the duplicate", async () => {
 		state.agents = {
 			src: { id: "src", name: "Source" },

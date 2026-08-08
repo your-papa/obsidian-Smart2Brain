@@ -196,6 +196,38 @@ describe("PluginDataStore – Agent CRUD", () => {
 		expect(dupe.summarizationModel).toEqual({ provider: "openai", model: "gpt-4o-mini" });
 	});
 
+	// Display names must be unique because they drive each agent's base-prompt filename.
+	it("auto-suffixes a duplicate name on create", () => {
+		const first = store.createAgent("Research");
+		const second = store.createAgent("Research");
+		expect(first.name).toBe("Research");
+		expect(second.name).toBe("Research 2");
+	});
+
+	it("auto-suffixes a duplicate name on duplicate", () => {
+		store.createAgent("Research");
+		const dupe = store.duplicateAgent(DEFAULT_AGENT_ID, "Research");
+		expect(dupe.name).toBe("Research 2");
+	});
+
+	it("auto-suffixes when renaming into an existing name", () => {
+		store.createAgent("Research");
+		const other = store.createAgent("Draft");
+		store.updateAgent(other.id, { name: "Research" });
+		expect(store.getAgent(other.id)!.name).toBe("Research 2");
+	});
+
+	it("renaming an agent to its own current name is a no-op (no suffix)", () => {
+		const agent = store.createAgent("Research");
+		store.updateAgent(agent.id, { name: "Research" });
+		expect(store.getAgent(agent.id)!.name).toBe("Research");
+	});
+
+	it("falls back to 'Agent' for an empty name", () => {
+		const agent = store.createAgent("   ");
+		expect(agent.name).toBe("Agent");
+	});
+
 	it("should throw when duplicating non-existent agent", () => {
 		expect(() => store.duplicateAgent("nonexistent", "Copy")).toThrow("not found");
 	});

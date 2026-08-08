@@ -61,20 +61,15 @@ export function sanitizeAgentFileName(name: string): string {
 	return cleaned || FALLBACK_AGENT_FILE_NAME;
 }
 
-/** Short, stable disambiguator derived from an agent id (first 4 hex chars of the UUID). */
-function shortAgentId(agentId: string): string {
-	return agentId.replace(/[^0-9a-fA-F]/g, "").slice(0, 4) || agentId.slice(0, 4);
-}
-
 /**
  * Path to an agent's base prompt file, named after the agent:
  * `<agentFolder>/Base Prompts/<Agent Name>.md`.
  *
  * The filename is derived from the agent's *current* name (looked up live from plugin
- * data), so callers that only hold an agent id still get the right path. When two agents
- * sanitize to the same name, every member of that colliding set gets a `-<shortId>` suffix
- * (deterministic, order-independent). Unknown ids fall back to `<agentId>.md` so stale
- * lookups stay safe.
+ * data), so callers that only hold an agent id still get the right path. Agent display
+ * names are kept unique by the data store (see `uniqueAgentName`), so the sanitized names
+ * don't collide in practice. Unknown ids fall back to `<agentId>.md` so stale lookups
+ * stay safe.
  */
 export function basePromptPath(agentId: string): string {
 	const agents = getData()?.agents;
@@ -84,12 +79,5 @@ export function basePromptPath(agentId: string): string {
 		// nothing crashes; callers still resolve a stable, unique path.
 		return `${basePromptsDir()}/${agentId}.md`;
 	}
-
-	const base = sanitizeAgentFileName(agent.name);
-	// A name collides when another agent sanitizes to the same base name.
-	const collides = Object.values(agents).some(
-		(other) => other.id !== agentId && sanitizeAgentFileName(other.name) === base,
-	);
-	const fileName = collides ? `${base}-${shortAgentId(agentId)}` : base;
-	return `${basePromptsDir()}/${fileName}.md`;
+	return `${basePromptsDir()}/${sanitizeAgentFileName(agent.name)}.md`;
 }
