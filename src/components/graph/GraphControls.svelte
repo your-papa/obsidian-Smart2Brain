@@ -1,4 +1,5 @@
 <script lang="ts">
+import { Platform } from "obsidian";
 import Button from "../ui/Button.svelte";
 import RangeSlider from "../ui/RangeSlider.svelte";
 import Toggle from "../ui/Toggle.svelte";
@@ -16,6 +17,8 @@ interface Props {
 	loadingLabel?: string;
 	onSettingsChange: (patch: Partial<SmartGraphSettings>) => void;
 	onFitToView: () => void;
+	onZoomIn?: () => void;
+	onZoomOut?: () => void;
 	onRefresh: () => void;
 	onReapplySegments?: () => void;
 	onSeedChange?: () => void;
@@ -42,6 +45,8 @@ let {
 	loadingLabel = "",
 	onSettingsChange,
 	onFitToView,
+	onZoomIn,
+	onZoomOut,
 	onRefresh,
 	onReapplySegments,
 	onSeedChange,
@@ -107,6 +112,11 @@ function handleClusterCohesionStrengthChange(val: number) {
 <!-- Unified vertical toolbar -->
 <div class="graph-toolbar">
   <Button iconId="maximize" onClick={onFitToView} tooltip="Fit graph to view (F)" />
+  {#if Platform.isMobile}
+    <!-- Touch has no scroll-wheel zoom; expose on-screen +/- (pinch still works). -->
+    <Button iconId="zoom-in" onClick={() => onZoomIn?.()} tooltip="Zoom in" />
+    <Button iconId="zoom-out" onClick={() => onZoomOut?.()} tooltip="Zoom out" />
+  {/if}
   <Button
     iconId="lasso"
     tooltip={lassoMode ? "Exit lasso selection" : "Lasso selection (or hold Shift + drag)"}

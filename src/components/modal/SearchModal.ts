@@ -176,6 +176,10 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private inlineChipsEl: HTMLElement | null = null;
 	private inlineInputContentEl: HTMLElement | null = null;
 	private selectionSummaryEl: HTMLElement | null = null;
+	/** Mobile-only tap bar: exposes semantic-toggle + ask-agent, which are
+	   otherwise bound only to Tab / Alt+Enter (unreachable without a keyboard). */
+	private mobileActionsEl: HTMLElement | null = null;
+	private mobileSemanticButtonEl: HTMLElement | null = null;
 	private pendingPostOpenFrameId: number | null = null;
 	private pendingFocusFrameId: number | null = null;
 	private pendingFocusTimeoutIds: ReturnType<typeof globalThis.setTimeout>[] = [];
@@ -428,6 +432,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		// so it reverts to lexical once the user changes what they're searching.
 		this.semanticOneShotQuery = this.semanticEnabled ? this.currentQuery : null;
 		this.updateInstructions();
+		this.refreshMobileSemanticButton();
 		this.syncGlowAnimation();
 
 		if (this.currentQuery.trim() || this.activeFilters.length > 0) {
@@ -1046,6 +1051,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.inlineChipsEl = null;
 		this.inlineInputContentEl?.remove();
 		this.inlineInputContentEl = null;
+		this.mobileActionsEl?.remove();
+		this.mobileActionsEl = null;
+		this.mobileSemanticButtonEl = null;
 		this.cachedAutocompleteTags = [];
 		this.cachedTagChildCount.clear();
 		this.cachedAutocompleteFolders = [];
@@ -1083,6 +1091,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 			this.buildAutocompleteCaches();
 			this.setupInlineChips();
+			this.setupMobileActions();
 			this.createSelectionSummary();
 			this.updateSelectionSummary();
 			if (this.activeFilters.length > 0) {
@@ -1194,6 +1203,69 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	private getInputEl(): HTMLInputElement | null {
 		return this.modalEl.querySelector<HTMLInputElement>(".prompt-input");
+	}
+
+	/**
+	 * Mobile-only tap bar. Semantic-search toggle and "Ask the agent" are
+	 * otherwise reachable only via Tab / Alt+Enter, which a phone without a
+	 * hardware keyboard can't produce. Insert visible buttons right after the
+	 * input container so both are one tap away. Desktop keeps the compact
+	 * keyboard-hint footer unchanged.
+	 */
+	private setupMobileActions(): void {
+		if (!Platform.isMobile) return;
+		const inputContainer = this.modalEl.querySelector<HTMLElement>(".prompt-input-container");
+		if (!inputContainer) return;
+
+		const bar = document.createElement("div");
+		bar.className = "s2b-search-mobile-actions";
+
+		// Semantic-search toggle (Tab on desktop). Hidden in picker mode where
+		// the agent/semantic flow doesn't apply.
+		if (!this.isPickerMode()) {
+			const semanticBtn = document.createElement("button");
+			semanticBtn.className = "s2b-pill s2b-pill--interactive";
+			semanticBtn.type = "button";
+			this.mobileSemanticButtonEl = semanticBtn;
+			semanticBtn.addEventListener("click", (evt) => {
+				evt.preventDefault();
+				this.toggleSemanticMode();
+				this.refreshMobileSemanticButton();
+			});
+			bar.appendChild(semanticBtn);
+
+			const askBtn = document.createElement("button");
+			askBtn.className = "s2b-pill s2b-pill--interactive s2b-search-mobile-ask";
+			askBtn.type = "button";
+			const askIcon = document.createElement("span");
+			askIcon.className = "s2b-search-mobile-icon";
+			setIcon(askIcon, "bot");
+			askBtn.appendChild(askIcon);
+			askBtn.appendChild(document.createTextNode("Ask agent"));
+			askBtn.addEventListener("click", (evt) => {
+				evt.preventDefault();
+				void this.askAgentWithQuery();
+			});
+			bar.appendChild(askBtn);
+		}
+
+		if (!bar.hasChildNodes()) return;
+		inputContainer.insertAdjacentElement("afterend", bar);
+		this.mobileActionsEl = bar;
+		this.refreshMobileSemanticButton();
+	}
+
+	/** Sync the mobile semantic toggle's label/active state with `semanticEnabled`. */
+	private refreshMobileSemanticButton(): void {
+		const btn = this.mobileSemanticButtonEl;
+		if (!btn) return;
+		btn.empty();
+		const icon = document.createElement("span");
+		icon.className = "s2b-search-mobile-icon";
+		setIcon(icon, "sparkles");
+		btn.appendChild(icon);
+		btn.appendChild(document.createTextNode(this.semanticEnabled ? "Semantic: on" : "Semantic: off"));
+		btn.toggleClass("s2b-pill--active", this.semanticEnabled);
 	}
 
 	private scheduleInputFocus(): void {

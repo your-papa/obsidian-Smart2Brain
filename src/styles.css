@@ -911,3 +911,34 @@
 		opacity: 1 !important;
 	}
 }
+
+/* Search modal mobile action bar (semantic toggle + ask agent). Rendered only
+   on Platform.isMobile; mirrors the Tab / Alt+Enter keyboard actions. */
+.s2b-search-mobile-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 8px 12px 4px;
+}
+
+.s2b-search-mobile-actions .s2b-pill {
+	min-height: 36px;
+	padding: 6px 14px;
+	font-size: var(--font-ui-small);
+}
+
+.s2b-search-mobile-actions .s2b-pill.s2b-pill--active {
+	background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-secondary));
+	border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
+	color: var(--text-accent);
+}
+
+.s2b-search-mobile-icon {
+	display: inline-flex;
+	align-items: center;
+}
+
+.s2b-search-mobile-icon svg {
+	width: 16px;
+	height: 16px;
+}
