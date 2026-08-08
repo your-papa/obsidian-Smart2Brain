@@ -1024,8 +1024,12 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     flex-wrap: wrap;
     justify-content: center;
     white-space: normal;
-    /* Clear Obsidian's floating mobile navbar at the bottom. */
-    bottom: calc(12px + var(--safe-area-inset-bottom, 0px));
+    /* Sit clear of Obsidian's floating mobile navbar (a ~52px pill anchored to
+       the bottom with a gap below it — it occupies ~84px of the viewport
+       bottom and floats over the full-height graph canvas). Obsidian exposes
+       no reliable height var for it, so clear it with a fixed offset plus any
+       device safe-area inset. */
+    bottom: calc(92px + var(--safe-area-inset-bottom, 0px));
   }
 
   :global(.is-mobile) .selection-actions {
