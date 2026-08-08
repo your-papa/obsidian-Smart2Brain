@@ -61,6 +61,8 @@ function openAgentEditor(agentId: string) {
 function createNewAgent() {
 	const agent = data.createAgent("New Agent");
 	data.selectedAgentId = agent.id;
+	// Seed the base prompt note immediately so it exists in the vault before the editor opens.
+	void plugin.promptFilesService?.ensureBasePrompt(agent.id);
 	openAgentEditor(agent.id);
 }
 </script>

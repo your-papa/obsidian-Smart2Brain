@@ -177,13 +177,13 @@ describe("PluginDataStore – Agent CRUD", () => {
 		expect(store.selectedAgentId).toBe(DEFAULT_AGENT_ID);
 	});
 
-	it("should clear defaultAgentId when that agent is deleted", () => {
+	it("should fall back to the built-in default when that agent is deleted", () => {
 		const agent = store.createAgent("Custom Default");
 		store.setDefaultAgentId(agent.id);
 		expect(store.defaultAgentId).toBe(agent.id);
 
 		store.deleteAgent(agent.id);
-		expect(store.defaultAgentId).toBeNull();
+		expect(store.defaultAgentId).toBe(DEFAULT_AGENT_ID);
 	});
 
 	it("should duplicate an agent", () => {
@@ -194,6 +194,47 @@ describe("PluginDataStore – Agent CRUD", () => {
 		expect(dupe.name).toBe("Copy of Default");
 		expect(dupe.id).not.toBe(DEFAULT_AGENT_ID);
 		expect(dupe.summarizationModel).toEqual({ provider: "openai", model: "gpt-4o-mini" });
+	});
+
+	// Display names must be unique because they drive each agent's base-prompt filename.
+	it("auto-suffixes a duplicate name on create", () => {
+		const first = store.createAgent("Research");
+		const second = store.createAgent("Research");
+		expect(first.name).toBe("Research");
+		expect(second.name).toBe("Research 2");
+	});
+
+	it("auto-suffixes a duplicate name on duplicate", () => {
+		store.createAgent("Research");
+		const dupe = store.duplicateAgent(DEFAULT_AGENT_ID, "Research");
+		expect(dupe.name).toBe("Research 2");
+	});
+
+	it("auto-suffixes when renaming into an existing name", () => {
+		store.createAgent("Research");
+		const other = store.createAgent("Draft");
+		store.updateAgent(other.id, { name: "Research" });
+		expect(store.getAgent(other.id)!.name).toBe("Research 2");
+	});
+
+	it("renaming an agent to its own current name is a no-op (no suffix)", () => {
+		const agent = store.createAgent("Research");
+		store.updateAgent(agent.id, { name: "Research" });
+		expect(store.getAgent(agent.id)!.name).toBe("Research");
+	});
+
+	it("falls back to 'Agent' for an empty name", () => {
+		const agent = store.createAgent("   ");
+		expect(agent.name).toBe("Agent");
+	});
+
+	it("auto-suffixes when two distinct names sanitize to the same filename", () => {
+		// "A/B" and "A B" both sanitize to "A B" — uniqueness is enforced on the sanitized
+		// filename, so the second must be nudged even though the raw names differ.
+		const first = store.createAgent("A/B");
+		const second = store.createAgent("A B");
+		expect(first.name).toBe("A/B");
+		expect(second.name).toBe("A B 2");
 	});
 
 	it("should throw when duplicating non-existent agent", () => {
@@ -264,13 +305,6 @@ describe("PluginDataStore – Agent Selection", () => {
 
 	it("should throw when setting default to non-existent agent", () => {
 		expect(() => store.setDefaultAgentId("nonexistent")).toThrow("not found");
-	});
-
-	it("should clear the default agent", () => {
-		const agent = store.createAgent("Temp Default");
-		store.setDefaultAgentId(agent.id);
-		store.clearDefaultAgent();
-		expect(store.defaultAgentId).toBeNull();
 	});
 });
 
@@ -522,6 +556,38 @@ describe("createData", () => {
 		const store = await createData(plugin as never);
 		const agent = store.getAgent(DEFAULT_AGENT_ID) as unknown as { migratedBasePrompt?: string };
 		expect(agent.migratedBasePrompt).toBeUndefined();
+	});
+
+	it("de-duplicates persisted agent names that sanitize to the same prompt filename", async () => {
+		const mkAgent = (id: string, name: string) => ({
+			id,
+			name,
+			chatModel: null,
+			systemPrompt: "",
+			skills: {},
+			toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
+			mcpServers: {},
+		});
+		const plugin = {
+			...createMockPlugin(),
+			loadData: vi.fn().mockResolvedValue({
+				...structuredClone(DEFAULT_SETTINGS),
+				agents: {
+					[DEFAULT_AGENT_ID]: mkAgent(DEFAULT_AGENT_ID, "Default Agent"),
+					// Distinct raw names that both sanitize to "Research Assistant".
+					a1: mkAgent("a1", "Research/Assistant"),
+					a2: mkAgent("a2", "Research Assistant"),
+				},
+			}),
+		};
+
+		const store = await createData(plugin as never);
+		const n1 = store.getAgent("a1")!.name;
+		const n2 = store.getAgent("a2")!.name;
+		// First occurrence keeps its name; the clashing one is suffixed so the sanitized
+		// filenames differ.
+		expect(n1).not.toBe(n2);
+		expect(new Set([n1, n2]).size).toBe(2);
 	});
 });
 

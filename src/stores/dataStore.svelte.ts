@@ -8,6 +8,7 @@ import {
 } from "../lib/views";
 import { getSecret, listSecrets, removeSecret, setSecret } from "../lib/secretStorage";
 import { isAgentFilePath } from "../utils/fileFiltering";
+import { sanitizeAgentFileName } from "../utils/agentPaths";
 import type SecondBrainPlugin from "../main";
 import { DEFAULT_AGENT_ICON } from "../types/plugin";
 import type {
@@ -916,9 +917,9 @@ export class PluginDataStore {
 	}
 
 	/**
-	 * Get the default agent ID, or null if using "last selected" behavior.
+	 * Get the default agent ID that every new chat starts on. Always valid.
 	 */
-	get defaultAgentId(): string | null {
+	get defaultAgentId(): string {
 		return this.#data.defaultAgentId;
 	}
 
@@ -950,34 +951,22 @@ export class PluginDataStore {
 
 	/**
 	 * Get the default agent configuration.
-	 * If no default is set (null), returns the built-in default agent.
 	 */
 	getDefaultAgent(): AgentConfig {
-		if (this.#data.defaultAgentId) {
-			return this.#data.agents[this.#data.defaultAgentId];
-		}
-		// Fallback to built-in default agent when no default is set
-		return this.#data.agents[DEFAULT_AGENT_ID];
+		// Fall back to the built-in agent if the pointer ever goes stale.
+		return this.#data.agents[this.#data.defaultAgentId] ?? this.#data.agents[DEFAULT_AGENT_ID];
 	}
 
 	/**
-	 * Set the default agent ID, or null to use "last selected" behavior.
-	 * @param agentId - The ID of the agent to set as default, or null to clear
-	 * @throws Error if agent doesn't exist (when agentId is not null)
+	 * Set the default agent every new chat starts on.
+	 * @param agentId - The ID of the agent to set as default
+	 * @throws Error if the agent doesn't exist
 	 */
-	setDefaultAgentId(agentId: string | null): void {
-		if (agentId !== null && !this.#data.agents[agentId]) {
+	setDefaultAgentId(agentId: string): void {
+		if (!this.#data.agents[agentId]) {
 			throw new Error(`Agent with ID "${agentId}" not found`);
 		}
 		this.#data.defaultAgentId = agentId;
-		this.saveSettings();
-	}
-
-	/**
-	 * Clear the default agent, enabling "last selected" behavior.
-	 */
-	clearDefaultAgent(): void {
-		this.#data.defaultAgentId = null;
 		this.saveSettings();
 	}
 
@@ -987,13 +976,35 @@ export class PluginDataStore {
 	 * @returns The created agent configuration
 	 */
 	createAgent(name: string): AgentConfig {
-		const agent = createDefaultAgentConfig(undefined, name);
+		const agent = createDefaultAgentConfig(undefined, this.uniqueAgentName(name));
 		this.#data.agents = {
 			...this.#data.agents,
 			[agent.id]: agent,
 		};
 		this.saveSettings();
 		return agent;
+	}
+
+	/**
+	 * Ensure an agent's name yields a UNIQUE base-prompt filename. Display names drive each
+	 * agent's note filename (via {@link sanitizeAgentFileName}), so uniqueness is enforced on
+	 * the *sanitized* form — otherwise two distinct raw names that sanitize to the same file
+	 * (e.g. "A/B" and "A B") could still share/orphan a note. Appends " 2", " 3", … until the
+	 * sanitized filename is free. `exceptId` excludes the agent being renamed so it can keep
+	 * its own name.
+	 */
+	private uniqueAgentName(desired: string, exceptId?: string): string {
+		const base = desired.trim() || "Agent";
+		const takenFiles = new Set(
+			Object.values(this.#data.agents)
+				.filter((agent) => agent.id !== exceptId)
+				.map((agent) => sanitizeAgentFileName(agent.name)),
+		);
+		if (!takenFiles.has(sanitizeAgentFileName(base))) return base;
+		for (let n = 2; ; n++) {
+			const candidate = `${base} ${n}`;
+			if (!takenFiles.has(sanitizeAgentFileName(candidate))) return candidate;
+		}
 	}
 
 	/**
@@ -1008,11 +1019,16 @@ export class PluginDataStore {
 			throw new Error(`Agent with ID "${agentId}" not found`);
 		}
 
+		// Keep display names unique (they drive the base-prompt filename). Renaming to your
+		// own current name is a no-op; a clash with another agent gets a numeric suffix.
+		const normalizedUpdates =
+			updates.name !== undefined ? { ...updates, name: this.uniqueAgentName(updates.name, agentId) } : updates;
+
 		this.#data.agents = {
 			...this.#data.agents,
 			[agentId]: {
 				...agent,
-				...updates,
+				...normalizedUpdates,
 			},
 		};
 		this.saveSettings();
@@ -1044,14 +1060,14 @@ export class PluginDataStore {
 			}
 		}
 
-		// If deleted agent was selected, switch to the default agent (or built-in default)
-		if (this.#data.selectedAgentId === agentId) {
-			this.#data.selectedAgentId = this.#data.defaultAgentId ?? DEFAULT_AGENT_ID;
+		// If deleted agent was the default, fall back to the built-in default
+		if (this.#data.defaultAgentId === agentId) {
+			this.#data.defaultAgentId = DEFAULT_AGENT_ID;
 		}
 
-		// If deleted agent was the user's default, clear the default (use last selected)
-		if (this.#data.defaultAgentId === agentId) {
-			this.#data.defaultAgentId = null;
+		// If deleted agent was selected, switch to the (now-valid) default agent
+		if (this.#data.selectedAgentId === agentId) {
+			this.#data.selectedAgentId = this.#data.defaultAgentId;
 		}
 
 		this.saveSettings();
@@ -1079,7 +1095,7 @@ export class PluginDataStore {
 		const newAgent: AgentConfig = {
 			...clonedAgent,
 			id: newId,
-			name: newName,
+			name: this.uniqueAgentName(newName),
 			subAgentIds: remappedSubAgentIds,
 		};
 
@@ -2248,12 +2264,43 @@ function normalizeAgents(mergedData: PluginData): void {
 	for (const agentId of Object.keys(mergedData.agents)) {
 		normalizeAgent(mergedData.agents[agentId]);
 	}
-	// Ensure defaultAgentId is valid
-	if (mergedData.defaultAgentId !== null && !mergedData.agents[mergedData.defaultAgentId]) {
-		mergedData.defaultAgentId = null;
+	// Repair any persisted name clashes: two agents whose names sanitize to the same
+	// base-prompt filename would share/overwrite one note. Uniqueness is normally enforced
+	// on write (uniqueAgentName), but a vault could predate that or be hand-edited — so
+	// de-duplicate on load too. The built-in default agent is processed first so it keeps
+	// its name; later clashers get a numeric suffix (matching uniqueAgentName's scheme).
+	dedupeAgentNames(mergedData.agents);
+	// Ensure defaultAgentId points at a real agent; fall back to the built-in default
+	if (!mergedData.defaultAgentId || !mergedData.agents[mergedData.defaultAgentId]) {
+		mergedData.defaultAgentId = DEFAULT_AGENT_ID;
 	}
 	if (!mergedData.selectedAgentId || !mergedData.agents[mergedData.selectedAgentId]) {
-		mergedData.selectedAgentId = mergedData.defaultAgentId ?? DEFAULT_AGENT_ID;
+		mergedData.selectedAgentId = mergedData.defaultAgentId;
+	}
+}
+
+/**
+ * Force every agent's name to yield a unique sanitized base-prompt filename, mutating
+ * clashing names in place. Deterministic: the built-in default agent is claimed first,
+ * then the rest in insertion order; each later clash is suffixed " 2", " 3", … until its
+ * sanitized filename is free. Mirrors {@link PluginDataStore.uniqueAgentName} for load time.
+ */
+function dedupeAgentNames(agents: AgentsConfig): void {
+	const taken = new Set<string>();
+	const order = Object.keys(agents).sort((a, b) => {
+		if (a === DEFAULT_AGENT_ID) return -1;
+		if (b === DEFAULT_AGENT_ID) return 1;
+		return 0;
+	});
+	for (const id of order) {
+		const agent = agents[id];
+		const base = agent.name?.trim() || "Agent";
+		let candidate = base;
+		for (let n = 2; taken.has(sanitizeAgentFileName(candidate)); n++) {
+			candidate = `${base} ${n}`;
+		}
+		if (candidate !== agent.name) agent.name = candidate;
+		taken.add(sanitizeAgentFileName(candidate));
 	}
 }
 
