@@ -1,4 +1,5 @@
 import { type App, TFile } from "obsidian";
+import { isAgentFilePath } from "./fileFiltering";
 
 export type ResolveVaultFileResult =
 	| { status: "found"; file: TFile }
@@ -56,7 +57,7 @@ export function resolveVaultFileDetailed(app: App, path: string): ResolveVaultFi
 
 	const basename = cleanPath.split("/").pop() ?? cleanPath;
 	const hasExtension = basename.includes(".");
-	const allFiles = app.vault.getFiles();
+	const allFiles = app.vault.getFiles().filter((f) => !isAgentFilePath(f.path));
 
 	if (hasExtension) {
 		const exactNameMatches = allFiles.filter((f) => f.name === basename);
@@ -112,7 +113,7 @@ export function resolveMarkdownFileDetailed(app: App, pathOrReference: string): 
 	}
 
 	const normalizedTarget = linkPath.toLowerCase();
-	const markdownFiles = app.vault.getMarkdownFiles();
+	const markdownFiles = app.vault.getMarkdownFiles().filter((f) => !isAgentFilePath(f.path));
 	const basenameMatches = markdownFiles.filter((f) => f.basename.toLowerCase() === normalizedTarget);
 
 	if (basenameMatches.length === 1) return { status: "found", file: basenameMatches[0] };

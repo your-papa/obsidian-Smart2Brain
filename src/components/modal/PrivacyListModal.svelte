@@ -14,6 +14,7 @@ import {
 } from "../../lib/views";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
+import { isAgentFilePath } from "../../utils/fileFiltering";
 import type { PrivacyMode } from "../../types/plugin";
 import Button from "../ui/Button.svelte";
 import type { PrivacyListModal } from "./PrivacyListModal";
@@ -33,6 +34,7 @@ let { modal }: Props = $props();
 const availableFolders = $derived.by(() => {
 	const folders = new Set<string>();
 	for (const file of app.vault.getFiles()) {
+		if (isAgentFilePath(file.path)) continue;
 		const parts = file.path.split("/");
 		if (parts.length > 1) {
 			folders.add(parts[0]);
@@ -45,6 +47,7 @@ const availableFolders = $derived.by(() => {
 const availableTags = $derived.by(() => {
 	const tags = new Set<string>();
 	for (const file of app.vault.getMarkdownFiles()) {
+		if (isAgentFilePath(file.path)) continue;
 		const cache = app.metadataCache.getFileCache(file);
 		if (!cache) continue;
 		for (const tag of getAllTags(cache) ?? []) {
@@ -67,7 +70,15 @@ let showFilters = $state(initialParsed.draft.autoIncludeRules.length > 0);
 
 const privacyMode = $derived.by(() => data.privacyMode);
 const parsedMembership = $derived.by(() => parseSpaceMembershipFilter(privacyFilter));
-const privacyUniverse = $derived.by(() => new Set(app.vault.getFiles().map((file) => file.path)));
+const privacyUniverse = $derived.by(
+	() =>
+		new Set(
+			app.vault
+				.getFiles()
+				.filter((file) => !isAgentFilePath(file.path))
+				.map((file) => file.path),
+		),
+);
 const resolvedPrivacy = $derived.by(() =>
 	parsedMembership.isAdvanced
 		? {
@@ -83,7 +94,7 @@ const excludedFiles = $derived.by(() =>
 		? []
 		: [...parsedMembership.draft.excludedPaths].sort((left, right) => left.localeCompare(right)),
 );
-const totalVaultFiles = $derived.by(() => app.vault.getFiles().length);
+const totalVaultFiles = $derived.by(() => app.vault.getFiles().filter((file) => !isAgentFilePath(file.path)).length);
 const accessibleFileCount = $derived.by(() =>
 	privacyMode === "private-by-default" ? includedFiles.length : totalVaultFiles - includedFiles.length,
 );

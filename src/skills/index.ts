@@ -11,7 +11,15 @@ export {
 	validateNameMatchesDirectory,
 	validateFrontmatter,
 	slugifySkillName,
+	humanizeSkillName,
 	type ValidationError,
 	type ValidationResult,
 } from "./validation";
-export { BUNDLED_SKILLS, getBundledSkill, type BundledSkill } from "./defaults";
+export {
+	BUNDLED_SKILLS,
+	BUNDLED_CORE_SKILLS,
+	BUNDLED_INTEGRATION_SKILLS,
+	getBundledSkill,
+	getBundledIntegrationSkillForPlugin,
+	type BundledSkill,
+} from "./defaults";

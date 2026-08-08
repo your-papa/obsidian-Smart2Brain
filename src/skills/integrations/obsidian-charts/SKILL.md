@@ -4,7 +4,7 @@ description: Create charts and visualizations from note data using Chart.js via 
 license: MIT
 compatibility: Requires Obsidian Charts plugin and Dataview plugin to be installed and enabled
 metadata:
-  author: "Smart2Brain"
+  author: "S2B"
   version: "1.0"
   linkedPlugin: "obsidian-charts"
 ---

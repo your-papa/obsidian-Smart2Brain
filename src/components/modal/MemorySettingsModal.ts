@@ -5,10 +5,10 @@ import MemorySettingsModalComponent from "./MemorySettingsModal.svelte";
 import { applyModalLayout } from "./modalLayout";
 
 /**
- * Memory settings modal opened from the Memory card's gear. Memory is not a
- * `CAPABILITIES` entry (it's a folder feature), so it gets its own settings modal —
- * same frame as `CapabilitySettingsModal` — holding the memory folder and the memory
- * instructions together. Edits persist live via `getData()`.
+ * Memory settings modal opened from the Memory card's gear. Memory is a folder feature
+ * (not a skill), so it gets its own settings modal — same frame as the per-skill
+ * `SkillToolsModal` — holding the memory folder and the memory instructions together.
+ * Edits persist live via `getData()`.
  */
 export class MemorySettingsModal extends Modal {
 	private component: ReturnType<typeof MemorySettingsModalComponent> | null = null;

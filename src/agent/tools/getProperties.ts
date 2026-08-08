@@ -3,11 +3,15 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
+import { isAgentFilePath } from "../../utils/fileFiltering";
 
 function getNoteProperties(app: App, noteName: string): string {
 	const file = app.vault
 		.getMarkdownFiles()
-		.find((candidate) => candidate.path === noteName || candidate.basename === noteName);
+		.find(
+			(candidate) =>
+				!isAgentFilePath(candidate.path) && (candidate.path === noteName || candidate.basename === noteName),
+		);
 
 	if (!file) {
 		return `Note "${noteName}" not found.`;
@@ -35,6 +39,7 @@ function getAllPropertyKeys(app: App): string {
 	const allKeys = new Set<string>();
 
 	for (const file of app.vault.getMarkdownFiles()) {
+		if (isAgentFilePath(file.path)) continue;
 		const cache = app.metadataCache.getFileCache(file);
 		if (cache?.frontmatter) {
 			for (const key of Object.keys(cache.frontmatter)) {

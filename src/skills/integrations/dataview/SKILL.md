@@ -4,7 +4,7 @@ description: Script the Dataview plugin via its public JavaScript API to query a
 license: MIT
 compatibility: Requires Dataview plugin to be installed and enabled in Obsidian
 metadata:
-  author: "Smart2Brain"
+  author: "S2B"
   version: "1.0"
   linkedPlugin: "dataview"
 ---

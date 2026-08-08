@@ -1,4 +1,5 @@
 import type { TFile, Vault } from "obsidian";
+import { getData } from "../stores/dataStore.svelte";
 
 function normalizePattern(pattern: string): string {
 	return pattern.trim().replace(/^\/+|\/+$/g, "");
@@ -46,11 +47,43 @@ export function isTextIndexableFile(file: TFile): boolean {
 }
 
 /**
- * Returns `true` when the file should be included in the search index.
- * Every non-hidden vault file is indexable.
+ * Returns `true` when `path` lives inside the configurable agent root folder (default
+ * "Agents"). That folder holds all agent context — `Memories/`, `Skills/` (skill dirs,
+ * core skills included), and `Base Prompts/`. These are plugin machinery, not user notes, so they must be
+ * kept out of indexing, search, graph, and the agent's vault-facing tools. `agentFolder` is
+ * pure/injectable for testing; callers that don't have it use `isAgentFilePath`, which reads
+ * it from plugin data.
  */
-export function isIndexableFile(_file: TFile): boolean {
-	return true;
+export function isAgentPath(path: string, agentFolder: string): boolean {
+	if (!agentFolder) return false;
+	const folder = normalizePattern(agentFolder);
+	if (!folder) return false;
+	const p = path.replace(/^\/+/, "");
+	return p === folder || p.startsWith(`${folder}/`);
+}
+
+/**
+ * `isAgentPath` with the configured agent folder resolved from plugin data. Use this from
+ * runtime call sites (indexing, search, graph, tools); use `isAgentPath` directly in tests.
+ * Fails open (returns `false`) if the data store isn't initialized yet — the caller then
+ * treats the file as a normal note, preserving pre-relocation behavior rather than throwing.
+ */
+export function isAgentFilePath(path: string): boolean {
+	let agentFolder: string;
+	try {
+		agentFolder = getData().agentFolder;
+	} catch {
+		return false;
+	}
+	return isAgentPath(path, agentFolder);
+}
+
+/**
+ * Returns `true` when the file should be included in the search index.
+ * Every non-hidden vault file is indexable, except files under the agent folder.
+ */
+export function isIndexableFile(file: TFile): boolean {
+	return !isAgentFilePath(file.path);
 }
 
 /**

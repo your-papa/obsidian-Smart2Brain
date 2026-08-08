@@ -1,45 +1,44 @@
 <script lang="ts">
 import { getData } from "../../stores/dataStore.svelte";
 import type SecondBrainPlugin from "../../main";
-import { CAPABILITIES, type BuiltInToolId, type CapabilityId, type ToolConfig } from "../../types/plugin";
-import { buildDefaultCapabilityGuidance } from "../../agent/prompts";
+import { BUILT_IN_TOOL_IDS, type BuiltInToolId, type ToolConfig } from "../../types/plugin";
 import { getToolDescription, getToolDisplayName } from "../../agent/builtInToolMeta";
+import { humanizeSkillName } from "../../skills";
 import Button from "../ui/Button.svelte";
 import Icon from "../ui/Icon.svelte";
 import Toggle from "../ui/Toggle.svelte";
 import SettingItem from "../settings/SettingItem.svelte";
-import GuidanceEditor from "./GuidanceEditor.svelte";
 import ToolConfigForm from "./ToolConfigForm.svelte";
-import type { CapabilitySettingsModal } from "./CapabilitySettingsModal";
+import type { SkillToolsModal } from "./SkillToolsModal";
 import type { ToolConfigAccessors } from "./ToolConfigModal";
 
 interface Props {
-	modal: CapabilitySettingsModal;
+	modal: SkillToolsModal;
 	plugin: SecondBrainPlugin;
-	capId: CapabilityId;
+	/** The (core) skill whose attached tools this modal configures. */
+	skillName: string;
 	agentId: string;
 	onChange?: () => void;
 }
 
-const { modal, plugin, capId, agentId, onChange }: Props = $props();
+const { modal, plugin, skillName, agentId, onChange }: Props = $props();
 const pluginData = getData();
 
-const cap = $derived(CAPABILITIES.find((c) => c.id === capId));
 const selectedAgent = $derived(pluginData.agents[agentId]);
 
-// `capId` is fixed for the modal's lifetime.
-// svelte-ignore state_referenced_locally
-const defaultGuidance = buildDefaultCapabilityGuidance(capId);
+/** The built-in tools this skill attaches, parsed from its `allowed-tools` frontmatter. */
+const skillMeta = $derived(plugin.skillsService?.getCachedSkills().get(skillName));
+const toolIds = $derived.by<BuiltInToolId[]>(() => {
+	const spec = skillMeta?.frontmatter.allowedTools;
+	if (!spec) return [];
+	const builtIn = new Set<string>(BUILT_IN_TOOL_IDS);
+	return spec
+		.split(/\s+/)
+		.map((s) => s.trim())
+		.filter((id): id is BuiltInToolId => builtIn.has(id));
+});
 
-function persistGuidance(value: string) {
-	pluginData.updateAgent(agentId, {
-		capabilityPrompts: {
-			...(selectedAgent?.capabilityPrompts ?? {}),
-			[capId]: value,
-		},
-	});
-	notifyChange();
-}
+const skillTitle = $derived(humanizeSkillName(skillMeta?.frontmatter.name ?? skillName));
 
 function notifyChange() {
 	plugin.agentManager?.invalidateAgentRunnable(agentId);
@@ -72,38 +71,27 @@ function toggleExpanded(toolId: BuiltInToolId) {
 }
 
 $effect(() => {
-	modal.setTitle(cap ? `${cap.title} Settings` : "Capability Settings");
+	modal.setTitle(`${skillTitle} — Tools`);
 });
 </script>
 
-<div class="capability-settings-content">
-  {#if cap && selectedAgent}
-    <div class="capability-settings-scroll">
-      <section class="capability-settings-section">
-        <div class="capability-settings-heading">Guidance</div>
-        <p class="capability-settings-desc">
-          Injected as the intro to this capability's section in the system prompt, above each
-          enabled tool's own guidance.
+<div class="skill-tools-content">
+  {#if selectedAgent}
+    <div class="skill-tools-scroll">
+      <section class="skill-tools-section">
+        <div class="skill-tools-heading">Tools</div>
+        <p class="skill-tools-desc">
+          Enable a tool, then expand it to customize its name, description, and settings. A tool only
+          binds when this skill is enabled and its toggle here is on.
         </p>
-        <GuidanceEditor
-          {plugin}
-          value={selectedAgent.capabilityPrompts?.[capId] ?? ""}
-          defaultValue={defaultGuidance}
-          placeholder="Guidance for how the agent should use this capability…"
-          onCommit={persistGuidance}
-        />
-      </section>
-
-      <section class="capability-settings-section">
-        <div class="capability-settings-heading">Tools</div>
-        <p class="capability-settings-desc">
-          Enable a tool, then expand it to customize its name, description, guidance, and settings.
-        </p>
-        {#each cap.toolIds as toolId (toolId)}
+        {#if toolIds.length === 0}
+          <p class="skill-tools-desc">This skill attaches no built-in tools.</p>
+        {/if}
+        {#each toolIds as toolId (toolId)}
           {@const config = selectedAgent.toolsConfig[toolId]}
           {@const enabled = isToolEnabled(toolId)}
           {@const isExpanded = expandedToolId === toolId}
-          <div class="capability-tool" class:expanded={isExpanded}>
+          <div class="skill-tools-tool" class:expanded={isExpanded}>
             <SettingItem
               name={getToolDisplayName(toolId, config?.name)}
               desc={getToolDescription(toolId, config?.description)}
@@ -111,7 +99,7 @@ $effect(() => {
               {#snippet namePrefix()}
                 <button
                   type="button"
-                  class="capability-tool-chevron"
+                  class="skill-tools-tool-chevron"
                   aria-expanded={isExpanded}
                   aria-label={isExpanded ? "Collapse settings" : "Expand settings"}
                   onclick={() => toggleExpanded(toolId)}
@@ -122,7 +110,7 @@ $effect(() => {
               <Toggle checked={enabled} onchange={() => toggleTool(toolId)} />
             </SettingItem>
             {#if isExpanded}
-              <div class="capability-tool-config">
+              <div class="skill-tools-tool-config">
                 <ToolConfigForm
                   {plugin}
                   {toolId}
@@ -138,44 +126,40 @@ $effect(() => {
     </div>
   {/if}
 
-  <div class="capability-settings-footer">
+  <div class="skill-tools-footer">
     <div class="flex-1"></div>
     <Button buttonText="Done" cta={true} onClick={() => modal.close()} />
   </div>
 </div>
 
 <style>
-  .capability-settings-content {
+  .skill-tools-content {
     display: flex;
     flex-direction: column;
     flex: 1;
     min-height: 0;
   }
 
-  .capability-settings-scroll {
+  .skill-tools-scroll {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
     padding-right: 4px;
   }
 
-  .capability-settings-section + .capability-settings-section {
-    margin-top: 24px;
-  }
-
-  .capability-settings-heading {
+  .skill-tools-heading {
     font-weight: 600;
     font-size: var(--font-ui-medium);
     margin-bottom: 4px;
   }
 
-  .capability-settings-desc {
+  .skill-tools-desc {
     margin: 0 0 10px 0;
     color: var(--text-muted);
     font-size: var(--font-ui-small);
   }
 
-  .capability-settings-footer {
+  .skill-tools-footer {
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -185,17 +169,17 @@ $effect(() => {
     margin-top: 12px;
   }
 
-  .capability-tool {
+  .skill-tools-tool {
     border: 1px solid transparent;
     border-radius: 10px;
   }
 
-  .capability-tool.expanded {
+  .skill-tools-tool.expanded {
     border-color: var(--background-modifier-border);
     background: var(--background-primary);
   }
 
-  .capability-tool-chevron {
+  .skill-tools-tool-chevron {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -210,12 +194,12 @@ $effect(() => {
     transition: background 140ms ease, color 140ms ease;
   }
 
-  .capability-tool-chevron:hover {
+  .skill-tools-tool-chevron:hover {
     background: var(--background-modifier-hover);
     color: var(--text-normal);
   }
 
-  .capability-tool-config {
+  .skill-tools-tool-config {
     padding: 0 12px 12px;
   }
 </style>

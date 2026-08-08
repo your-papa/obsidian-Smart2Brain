@@ -6,6 +6,7 @@ import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { PendingChange } from "../../types/shared";
 import { resolveVaultFileDetailed } from "../../utils/attachments";
+import { memoriesDir } from "../../utils/agentPaths";
 import { getIndexableVaultFiles, isTextIndexableFile, shouldProcessVaultPath } from "../../utils/fileFiltering";
 import { normalizeVaultPath } from "../../utils/pathUtils";
 import { normalizeReferencePath } from "../../utils/pathResolution";
@@ -290,13 +291,14 @@ function isInsideFolder(path: string, folder: string): boolean {
 
 /**
  * Reads the effective memory config for the agent that owns this run. Falls back
- * to the selected agent (api path with no agentId) and to the default folder name.
+ * to the selected agent (api path with no agentId). The memory folder is the global
+ * `Agents/Memories/`.
  */
 function getMemoryConfig(agentId: string): { enabled: boolean; folder: string } {
 	const agent = getData().getAgent(agentId) ?? getData().getSelectedAgent();
 	return {
 		enabled: agent?.memoryEnabled ?? false,
-		folder: normalizePath(agent?.memoryFolder || "Agent Notes"),
+		folder: normalizePath(memoriesDir()),
 	};
 }
 

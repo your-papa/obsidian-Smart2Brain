@@ -5,16 +5,28 @@
 
 import type { DataAdapter, Plugin } from "obsidian";
 import type { Skill, SkillCategory, SkillEnableState, SkillFrontmatter, SkillMetadata } from "../types/plugin";
+import { getData } from "../stores/dataStore.svelte";
+import { skillsDir } from "../utils/agentPaths";
 import { Logger as Log } from "../utils/logging";
 import { StartupProfiler } from "../utils/startupProfiler";
-import { BUNDLED_SKILLS } from "./defaults";
+import {
+	BUNDLED_CORE_SKILLS,
+	BUNDLED_INTEGRATION_SKILLS,
+	type BundledSkill,
+	getBundledIntegrationSkillForPlugin,
+} from "./defaults";
+import { isInternalPluginEnabled } from "../agent/integrations/pluginIntegrations";
+import { buildPluginApiSkill } from "./templates/pluginApiScripting";
 import { validateFrontmatter, type ValidationResult } from "./validation";
-
-/** Skills directory relative to vault config */
-const SKILLS_DIR = "skills";
 
 /** SKILL.md filename per spec */
 const SKILL_FILENAME = "SKILL.md";
+
+/** Legacy skills directory name under the vault config dir, kept for one-time migration. */
+const LEGACY_CONFIG_SKILLS_DIR = "skills";
+
+/** Prior (v4) skills location: a top-level vault folder named "Skills". Migrated into the agent folder's Skills/. */
+const LEGACY_VAULT_SKILLS_DIR = "Skills";
 
 /**
  * Parse YAML frontmatter from SKILL.md content.
@@ -164,12 +176,27 @@ export class SkillsService {
 	}
 
 	/**
-	 * Get the skills directory path within the vault.
+	 * Get the skills directory path within the vault. Skills live directly under the agent
+	 * folder's `Skills/` subdir (each skill is a `<name>/SKILL.md`, core skills included).
+	 * They're user-visible/editable, and skill edits flow through the vault-backed
+	 * pending-changes review.
 	 */
 	getSkillsDir(): string {
+		return skillsDir();
+	}
+
+	/**
+	 * Prior skills locations, checked once by the relocation migration:
+	 * - the v4 top-level vault `Skills/` folder, and
+	 * - the pre-v4 config-dir `<configDir>/skills`.
+	 */
+	private getLegacyVaultSkillsDir(): string {
+		return LEGACY_VAULT_SKILLS_DIR;
+	}
+	private getLegacyConfigSkillsDir(): string {
 		const vault = this.plugin.app.vault as { configDir?: string };
 		const configDir = vault.configDir || ".obsidian";
-		return `${configDir}/${SKILLS_DIR}`;
+		return `${configDir}/${LEGACY_CONFIG_SKILLS_DIR}`;
 	}
 
 	/**
@@ -184,48 +211,53 @@ export class SkillsService {
 	}
 
 	/**
+	 * The bundled skills seeded at startup: the core skills (always) plus each
+	 * *core-plugin* integration skill (canvas/bases, carrying `corePluginId`) whose
+	 * core plugin is currently enabled. Community-plugin integration skills are
+	 * excluded here — they seed on-demand via `seedIntegrationSkill` when the user
+	 * enables the integration.
+	 */
+	private getStartupSeedSkills(): typeof BUNDLED_CORE_SKILLS {
+		const app = this.plugin.app;
+		const enabledCorePluginSkills = BUNDLED_INTEGRATION_SKILLS.filter(
+			(s) => s.corePluginId && isInternalPluginEnabled(app, s.corePluginId),
+		);
+		return [...BUNDLED_CORE_SKILLS, ...enabledCorePluginSkills];
+	}
+
+	/**
 	 * Bootstrap default skills on first run.
-	 * Copies bundled skills to the vault if they don't already exist.
+	 * Copies the startup seed set (core skills + enabled core-plugin integration skills)
+	 * into the vault if they don't already exist. Community integration skills are seeded
+	 * on-demand (see `seedIntegrationSkill`), not here.
 	 * @returns Number of skills installed
 	 */
 	async bootstrapDefaultSkills(): Promise<number> {
 		await this.ensureSkillsDir();
 		const skillsDir = this.getSkillsDir();
+		const seedSkills = this.getStartupSeedSkills();
 
-		// Fast path: one list() call to check if all bundled skill folders are already present.
+		// Fast path: one list() call to check if all seed skill folders are already present.
 		// Avoids N exists() round-trips on every startup after the first run.
 		const listing = await this.adapter.list(skillsDir);
 		const existingFolderNames = new Set(listing.folders.map((f) => f.split("/").pop()));
-		const allPresent = BUNDLED_SKILLS.every((s) => existingFolderNames.has(s.name));
+		const allPresent = seedSkills.every((s) => existingFolderNames.has(s.name));
 		if (allPresent) {
-			Log.debug("All bundled skills already installed, skipping bootstrap");
+			Log.debug("All startup seed skills already installed, skipping bootstrap");
 			return 0;
 		}
 
 		let installed = 0;
 
-		for (const bundledSkill of BUNDLED_SKILLS) {
-			const skillDir = `${skillsDir}/${bundledSkill.name}`;
-			const skillPath = `${skillDir}/${SKILL_FILENAME}`;
-
+		for (const bundledSkill of seedSkills) {
 			// Skip if already exists (user may have customized)
-			if (await this.adapter.exists(skillPath)) {
+			if (await this.adapter.exists(`${skillsDir}/${bundledSkill.name}/${SKILL_FILENAME}`)) {
 				Log.debug(`Skill ${bundledSkill.name} already exists, skipping`);
 				continue;
 			}
-
-			try {
-				// Create skill directory
-				if (!(await this.adapter.exists(skillDir))) {
-					await this.adapter.mkdir(skillDir);
-				}
-
-				// Write SKILL.md
-				await this.adapter.write(skillPath, bundledSkill.content);
+			if (await this.writeBundledSkill(bundledSkill)) {
 				installed++;
 				Log.info(`Installed default skill: ${bundledSkill.name}`);
-			} catch (error) {
-				Log.error(`Failed to install skill ${bundledSkill.name}:`, error);
 			}
 		}
 
@@ -237,11 +269,157 @@ export class SkillsService {
 	}
 
 	/**
+	 * Write a bundled skill's verbatim SKILL.md to disk (creating its dir), preserving the
+	 * file byte-for-byte rather than round-tripping through parse/serialize. Returns true on
+	 * success. Does not overwrite an existing file — callers check existence first.
+	 */
+	private async writeBundledSkill(skill: BundledSkill): Promise<boolean> {
+		const skillDir = `${this.getSkillsDir()}/${skill.name}`;
+		try {
+			if (!(await this.adapter.exists(skillDir))) {
+				await this.adapter.mkdir(skillDir);
+			}
+			await this.adapter.write(`${skillDir}/${SKILL_FILENAME}`, skill.content);
+			return true;
+		} catch (error) {
+			Log.error(`Failed to write skill ${skill.name}:`, error);
+			return false;
+		}
+	}
+
+	/**
+	 * Seed the skill documenting a community-plugin integration, on demand (called when the
+	 * user enables the integration). Prefers a *prewritten* bundled integration skill for the
+	 * plugin (written verbatim); if none exists, falls back to the introspect-first
+	 * `buildPluginApiSkill` template (written via `saveSkill`). Skips if a SKILL.md is already
+	 * present for the resolved skill name (user may have customized it). Callers should
+	 * re-discover afterwards so the new skill enters the cache.
+	 *
+	 * @returns the seeded skill's name, or null if seeding failed.
+	 */
+	async seedIntegrationSkill(pluginId: string, displayName: string): Promise<string | null> {
+		await this.ensureSkillsDir();
+		const bundled = getBundledIntegrationSkillForPlugin(pluginId);
+
+		if (bundled) {
+			if (await this.adapter.exists(`${this.getSkillsDir()}/${bundled.name}/${SKILL_FILENAME}`)) {
+				return bundled.name;
+			}
+			return (await this.writeBundledSkill(bundled)) ? bundled.name : null;
+		}
+
+		// No prewritten skill — generate the introspect-first template.
+		const generated = buildPluginApiSkill(pluginId, displayName);
+		if (await this.adapter.exists(`${this.getSkillsDir()}/${generated.frontmatter.name}/${SKILL_FILENAME}`)) {
+			return generated.frontmatter.name;
+		}
+		const result = await this.saveSkill(generated);
+		return result.valid ? generated.frontmatter.name : null;
+	}
+
+	/**
+	 * One-time migration: consolidate skills under the agent folder's `Skills/` dir.
+	 * Moves skill folders from either prior location — the v4 top-level vault `Skills/` folder,
+	 * or the pre-v4 config-dir `<configDir>/skills` — into the agent folder's `Skills/`. Idempotent
+	 * (gated by the `agentFolderMigrated` flag), and skips any skill already present at the
+	 * destination so a user's customized copy isn't overwritten. Copies rather than moves, leaving
+	 * legacy files in place as a safety net.
+	 */
+	async migrateAgentFolder(): Promise<void> {
+		const data = getData();
+		if (data.agentFolderMigrated) return;
+
+		const destDir = this.getSkillsDir();
+		// Prefer the newer vault `Skills/` location; fall back to the config-dir one.
+		const sources = [this.getLegacyVaultSkillsDir(), this.getLegacyConfigSkillsDir()];
+
+		try {
+			let anySource = false;
+			for (const legacyDir of sources) {
+				if (!(await this.adapter.exists(legacyDir))) continue;
+				anySource = true;
+				await this.ensureSkillsDir();
+				const listing = await this.adapter.list(legacyDir);
+				let migrated = 0;
+
+				for (const folder of listing.folders) {
+					const name = folder.split("/").pop();
+					if (!name) continue;
+					const legacyPath = `${folder}/${SKILL_FILENAME}`;
+					const destSkillDir = `${destDir}/${name}`;
+					const destPath = `${destSkillDir}/${SKILL_FILENAME}`;
+
+					if (!(await this.adapter.exists(legacyPath))) continue;
+					// Don't clobber a skill the user already has at the destination.
+					if (await this.adapter.exists(destPath)) continue;
+
+					try {
+						const content = await this.adapter.read(legacyPath);
+						if (!(await this.adapter.exists(destSkillDir))) {
+							await this.adapter.mkdir(destSkillDir);
+						}
+						await this.adapter.write(destPath, content);
+						migrated++;
+					} catch (error) {
+						Log.error(`Failed to migrate skill ${name} into ${destDir}:`, error);
+					}
+				}
+
+				if (migrated > 0) {
+					Log.info(`Migrated ${migrated} skills from ${legacyDir} into ${destDir}`);
+				}
+			}
+
+			if (!anySource) {
+				Log.debug("No legacy skills location found — nothing to consolidate");
+			}
+			data.agentFolderMigrated = true;
+		} catch (error) {
+			// Leave the flag unset so we retry next start rather than losing skills silently.
+			Log.error("Agent folder consolidation migration failed:", error);
+		}
+	}
+
+	/**
+	 * One-time migration for "everything is a skill" (schema v6): the 4 former capabilities
+	 * (vault/notes/web/update) are now bundled core skills. Their editable guidance used to live
+	 * in `Skills/<id>/GUIDANCE.md`; those files are now orphaned. Delete each orphan
+	 * GUIDANCE.md (and only that file) so `bootstrapDefaultSkills` can seed the new `SKILL.md`
+	 * into the same dir. Idempotent (gated by `coreSkillsSeeded`); the flag is set only on success
+	 * so a failure retries next start rather than leaving a half-migrated tree. Must run BEFORE
+	 * bootstrap so the fresh SKILL.md lands cleanly.
+	 */
+	async migrateCoreSkills(): Promise<void> {
+		const data = getData();
+		if (data.coreSkillsSeeded) return;
+
+		const dir = this.getSkillsDir();
+		const CORE_SKILL_NAMES = ["vault", "notes", "web", "update"];
+
+		try {
+			for (const name of CORE_SKILL_NAMES) {
+				const guidancePath = `${dir}/${name}/GUIDANCE.md`;
+				if (await this.adapter.exists(guidancePath)) {
+					await this.adapter.remove(guidancePath);
+					Log.info(`Removed orphaned core-skill guidance: ${guidancePath}`);
+				}
+			}
+			data.coreSkillsSeeded = true;
+		} catch (error) {
+			// Leave the flag unset so we retry next start.
+			Log.error("Core-skill migration (orphan guidance cleanup) failed:", error);
+		}
+	}
+
+	/**
 	 * Initialize the skills service.
-	 * Bootstraps default skills if needed, then discovers all available skills.
-	 * Call this once on plugin load.
+	 * Consolidates legacy skills into the agent folder's Skills/ dir, cleans up orphaned
+	 * core-skill guidance (v6 core-skill migration), bootstraps default skills if needed, then
+	 * discovers all available skills. Call this once on plugin load.
 	 */
 	async initialize(): Promise<void> {
+		await StartupProfiler.measure("skills:migrate", () => this.migrateAgentFolder());
+		await StartupProfiler.measure("skills:migrate-core", () => this.migrateCoreSkills());
 		await StartupProfiler.measure("skills:bootstrap", () => this.bootstrapDefaultSkills());
 		await StartupProfiler.measure("skills:discover", () => this.discoverSkills());
 	}
@@ -273,6 +451,9 @@ export class SkillsService {
 
 		for (const folder of listing.folders) {
 			const folderStart = performance.now();
+			const dirName = folder.split("/").pop() || "";
+
+			// Every folder under the skills root is a skill dir: it must contain a SKILL.md.
 			const skillPath = `${folder}/${SKILL_FILENAME}`;
 
 			if (!(await this.adapter.exists(skillPath))) {
@@ -284,10 +465,7 @@ export class SkillsService {
 				const content = await this.adapter.read(skillPath);
 				const { frontmatter } = parseFrontmatter(content);
 
-				// Get directory name for validation
-				const dirName = folder.split("/").pop() || "";
-
-				// Validate frontmatter
+				// Validate frontmatter (dirName computed at the top of the loop)
 				const validation = validateFrontmatter(frontmatter, dirName);
 				if (!validation.valid) {
 					Log.info(

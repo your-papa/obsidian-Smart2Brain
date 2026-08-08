@@ -39,7 +39,8 @@ import {
 } from "../../src/stores/dataStore.svelte";
 import { compileSpaceMembershipDraft } from "../../src/lib/views";
 import type { StoredProviderState } from "../../src/stores/dataStore.svelte";
-import { CAPABILITY_GUIDANCE_VERSION, TOOL_GUIDANCE_VERSION } from "../../src/agent/prompts";
+import type { PromptFileReader } from "../../src/types/plugin";
+import { BASE_SYSTEM_PROMPT, HISTORICAL_SYSTEM_PROMPTS } from "../../src/agent/prompts";
 
 /* --------------------------------------------------------------------------
  * Helpers
@@ -466,27 +467,18 @@ describe("createData", () => {
  * ------------------------------------------------------------------------*/
 
 describe("PluginDataStore – staleGuidance", () => {
-	const CUSTOM_VAULT = "MY custom vault guidance that differs from every default";
-	const CUSTOM_WEB = "MY custom web guidance";
-	const CUSTOM_PROMPT = "MY custom system prompt, not any shipped default";
-
-	// An agent whose vault + web capability guidance are customized and stamped
-	// against version 0 (below the shipped version), i.e. the default moved after
-	// the user customized — so both should surface as stale.
-	function staleAgentData() {
+	// A minimal agent (no removed prompt/guidance fields — the base prompt is file-backed now,
+	// and skill/tool guidance moved into skill bodies).
+	function agentData() {
 		return {
 			agents: {
 				[DEFAULT_AGENT_ID]: {
 					id: DEFAULT_AGENT_ID,
 					name: "Default Agent",
 					chatModel: null,
-					systemPrompt: "unused",
-					systemPromptVersion: 1,
 					skills: {},
-					toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
+					toolsConfig: { ...structuredClone(DEFAULT_TOOLS_CONFIG) },
 					mcpServers: {},
-					capabilityPrompts: { vault: CUSTOM_VAULT, web: CUSTOM_WEB },
-					capabilityPromptsVersion: { vault: 0, web: 0 },
 				},
 			},
 			defaultAgentId: DEFAULT_AGENT_ID,
@@ -494,77 +486,48 @@ describe("PluginDataStore – staleGuidance", () => {
 		};
 	}
 
-	it("flags customized capability guidance stamped below the current version", () => {
-		const { store } = makeStore(staleAgentData() as never);
-		const kinds = store.staleGuidance.map((s) => `${s.kind}:${s.targetId}`).sort();
-		expect(kinds).toEqual(["capability:vault", "capability:web"]);
-	});
-
-	it("does NOT flag guidance stamped at the current version", () => {
-		const data = staleAgentData();
-		data.agents[DEFAULT_AGENT_ID].capabilityPromptsVersion = {
-			vault: CAPABILITY_GUIDANCE_VERSION.get("vault") ?? 1,
-			web: CAPABILITY_GUIDANCE_VERSION.get("web") ?? 1,
+	// A reader that reports base-prompt file contents (the only file-backed prompt surface now).
+	function makeReader(files: { basePrompt?: Record<string, string> }): PromptFileReader {
+		return {
+			getBasePrompt: (agentId) => files.basePrompt?.[agentId] ?? null,
 		};
-		const { store } = makeStore(data as never);
+	}
+
+	it("reports nothing when no reader is set (early startup)", () => {
+		const { store } = makeStore(agentData() as never);
 		expect(store.staleGuidance).toEqual([]);
 	});
 
-	it("clears a capability's notice reactively once it is re-aligned, WITHOUT touching a sibling (greptile P1)", () => {
-		const { store } = makeStore(staleAgentData() as never);
-		expect(store.staleGuidance).toHaveLength(2);
-
-		// Edit only vault; modal submits the full map (both keys present).
-		store.updateAgent(DEFAULT_AGENT_ID, {
-			capabilityPrompts: { vault: "freshly re-aligned vault guidance", web: CUSTOM_WEB },
-		});
-
-		const remaining = store.staleGuidance.map((s) => s.targetId);
-		// vault cleared (re-stamped current); web still stale (unchanged value → old stamp kept).
-		expect(remaining).toEqual(["web"]);
-		expect(store.getAgent(DEFAULT_AGENT_ID)?.capabilityPromptsVersion?.web).toBe(0);
+	it("does NOT flag a base prompt file that equals the current default", () => {
+		const { store } = makeStore(agentData() as never);
+		store.setPromptFileReader(makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: BASE_SYSTEM_PROMPT } }));
+		expect(store.staleGuidance).toEqual([]);
 	});
 
-	it("flags a customized system prompt whose stamp predates the current, and clears it on edit", () => {
-		const { store } = makeStore({
-			agents: {
-				[DEFAULT_AGENT_ID]: {
-					id: DEFAULT_AGENT_ID,
-					name: "Default Agent",
-					chatModel: null,
-					systemPrompt: CUSTOM_PROMPT,
-					systemPromptVersion: 0,
-					skills: {},
-					toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
-					mcpServers: {},
-				},
-			},
-			defaultAgentId: DEFAULT_AGENT_ID,
-			selectedAgentId: DEFAULT_AGENT_ID,
-		} as never);
+	it("does NOT flag an absent base prompt file (uses the live default)", () => {
+		const { store } = makeStore(agentData() as never);
+		store.setPromptFileReader(makeReader({}));
+		expect(store.staleGuidance).toEqual([]);
+	});
+
+	it("does NOT flag an unrecognized base prompt customization", () => {
+		const { store } = makeStore(agentData() as never);
+		store.setPromptFileReader(makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: "my own custom prompt" } }));
+		expect(store.staleGuidance).toEqual([]);
+	});
+
+	it("flags a base prompt file that matches an OLD shipped default", () => {
+		const { store } = makeStore(agentData() as never);
+		// Find a historical base prompt that differs from the current default, if any exists.
+		const historical = [...HISTORICAL_SYSTEM_PROMPTS.values()].find((p) => p !== BASE_SYSTEM_PROMPT);
+		if (!historical) {
+			// Only one shipped version so far — nothing can be "old"; assert the no-flag case.
+			store.setPromptFileReader(makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: BASE_SYSTEM_PROMPT } }));
+			expect(store.staleGuidance).toEqual([]);
+			return;
+		}
+		store.setPromptFileReader(makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: historical } }));
 		expect(store.staleGuidance.map((s) => s.kind)).toEqual(["system-prompt"]);
-
-		store.updateAgent(DEFAULT_AGENT_ID, { systemPrompt: "edited to align with the new default" });
-		expect(store.staleGuidance).toEqual([]);
-	});
-
-	it("flags customized tool guidance below version and clears it via updateAgentToolConfig", () => {
-		const data = staleAgentData();
-		delete (data.agents[DEFAULT_AGENT_ID] as Record<string, unknown>).capabilityPrompts;
-		delete (data.agents[DEFAULT_AGENT_ID] as Record<string, unknown>).capabilityPromptsVersion;
-		data.agents[DEFAULT_AGENT_ID].toolsConfig.web_search = {
-			...data.agents[DEFAULT_AGENT_ID].toolsConfig.web_search,
-			promptGuidance: "MY custom web_search guidance",
-			promptGuidanceVersion: 0,
-		} as never;
-		const { store } = makeStore(data as never);
-		expect(store.staleGuidance.map((s) => `${s.kind}:${s.targetId}`)).toEqual(["tool:web_search"]);
-
-		store.updateAgentToolConfig(DEFAULT_AGENT_ID, "web_search", { promptGuidance: "re-aligned web_search guidance" });
-		expect(store.staleGuidance).toEqual([]);
-		expect(store.getAgent(DEFAULT_AGENT_ID)?.toolsConfig.web_search?.promptGuidanceVersion).toBe(
-			TOOL_GUIDANCE_VERSION.get("web_search") ?? 1,
-		);
 	});
 });
 

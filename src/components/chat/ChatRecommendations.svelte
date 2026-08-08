@@ -3,7 +3,6 @@ import { Notice } from "obsidian";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import type { SessionRegistry } from "../../stores/chatStore.svelte";
-import type { BuiltInToolId, CapabilityId } from "../../types/plugin";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { getPluginIcon, toExecToolId } from "../../agent/integrations/pluginIntegrations";
 import { icon } from "../../utils/utils";
@@ -122,20 +121,12 @@ function dismiss(id: string): void {
 	data.dismissRecommendation(id);
 }
 
-// Opens the right diff surface for a stale-guidance notice's Review action.
+// Opens the base-system-prompt diff for a stale-guidance notice's Review action.
 function reviewNotice(notice: UpdateNotice): void {
 	const mgr = plugin.agentManager;
 	if (!mgr) return;
-	switch (notice.kind) {
-		case "system-prompt":
-			mgr.openSystemPromptDiff(notice.agentId);
-			break;
-		case "capability":
-			if (notice.targetId) mgr.openCapabilityGuidanceDiff(notice.agentId, notice.targetId as CapabilityId);
-			break;
-		case "tool":
-			if (notice.targetId) mgr.openToolGuidanceDiff(notice.agentId, notice.targetId as BuiltInToolId);
-			break;
+	if (notice.kind === "system-prompt" && notice.agentId) {
+		mgr.openSystemPromptDiff(notice.agentId);
 	}
 }
 </script>
@@ -150,8 +141,13 @@ function reviewNotice(notice: UpdateNotice): void {
             <div class="update-notice flex items-center gap-2">
               <span class="chip-icon" use:icon={"refresh-cw"} style="--icon-size: 14px"></span>
               <span class="update-notice-text flex-1">
-                The default {notice.label} changed. <strong>{notice.agentName}</strong>'s customized version
-                was kept — review the diff to update it.
+                {#if notice.agentName}
+                  The default {notice.label} changed. <strong>{notice.agentName}</strong>'s customized version
+                  was kept — review the diff to update it.
+                {:else}
+                  The default {notice.label} changed. Your customized version was kept — review the diff
+                  to update it.
+                {/if}
               </span>
               <Button buttonText="Review" onClick={() => reviewNotice(notice)} />
               <button
@@ -171,7 +167,7 @@ function reviewNotice(notice: UpdateNotice): void {
 
     {#if pluginNudges.length > 0}
       <div class="recommendation-group flex flex-col items-center gap-2">
-        <p class="text-sm opacity-70">Enable capabilities for your plugins</p>
+        <p class="text-sm opacity-70">Enable skills for your plugins</p>
         <div class="plugin-nudges flex flex-col gap-1.5 w-full">
           {#each pluginNudges as nudge (nudge.id)}
             <div class="plugin-nudge flex items-center gap-2">
@@ -236,7 +232,7 @@ function reviewNotice(notice: UpdateNotice): void {
     </button>
   </div>
 {:else}
-  <!-- Fallback so the empty chat view is never completely blank (all dismissed / no capability). -->
+  <!-- Fallback so the empty chat view is never completely blank (all dismissed / no suggestions). -->
   <div class="flex flex-col items-center">
     <p class="text-lg mb-1">Start a new conversation</p>
     <p class="text-sm opacity-70">Ask me anything about your notes.</p>

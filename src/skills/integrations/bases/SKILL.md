@@ -3,7 +3,7 @@ name: bases
 description: Work with Obsidian Bases for structured data and database-like views. Use when user asks about creating bases, defining schemas, filtering data, or working with structured note collections.
 license: MIT
 metadata:
-  author: "Smart2Brain"
+  author: "S2B"
   version: "1.0"
   category: "core"
   corePluginId: "bases"

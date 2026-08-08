@@ -30,6 +30,13 @@ function suggestFolders(): TFolder[] {
 	return plugin.app.vault.getAllFolders(true);
 }
 
+// Persist a new agent-context root, then seed core skills + base prompts into it (skip-if-exists;
+// existing files in the old folder are left untouched) so the change takes effect without a reload.
+async function changeAgentFolder(path: string): Promise<void> {
+	pluginData.agentFolder = path;
+	await plugin.reinitAgentFolder();
+}
+
 let agents = $derived(pluginData.agents);
 let agentIds = $derived(Object.keys(agents));
 
@@ -60,6 +67,7 @@ async function deleteAgent(agentId: string) {
 	if (!(await confirmDelete(plugin.app, agent?.name ?? agentId))) return;
 	try {
 		pluginData.deleteAgent(agentId);
+		void plugin.promptFilesService?.deleteBasePrompt(agentId);
 		plugin.agentManager?.invalidateAgentRunnable(agentId);
 	} catch (error) {
 		new Notice(error instanceof Error ? error.message : "Failed to delete agent");
@@ -83,12 +91,17 @@ function getAgentModelSummary(agentId: string): string {
 	return `${providerDef?.displayName ?? agent.chatModel.provider} · ${agent.chatModel.model}`;
 }
 
-function getAgentSecondarySummary(agentId: string): string {
-	// Single source of truth for the count (shared with the agent editor's rail badge):
-	// enabled capability cards — Core counts once, each plugin/custom skill and MCP server
-	// counts individually. See AgentManager.countEnabledCapabilities.
-	const count = plugin.agentManager?.countEnabledCapabilities(agentId) ?? 0;
-	return `${count} ${count === 1 ? "capability" : "capabilities"} enabled`;
+// Enabled-skills summary for an agent row: a capped strip of the enabled skills' icons
+// with a "+N" overflow chip. Icons come from AgentManager.getEnabledSkillIcons (single
+// source of truth — see collectEnabledSkills).
+const MAX_SKILL_ICONS = 12;
+function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: number; count: number } {
+	const icons = plugin.agentManager?.getEnabledSkillIcons(agentId) ?? [];
+	return {
+		icons: icons.slice(0, MAX_SKILL_ICONS),
+		overflow: Math.max(0, icons.length - MAX_SKILL_ICONS),
+		count: icons.length,
+	};
 }
 </script>
 
@@ -107,10 +120,10 @@ function getAgentSecondarySummary(agentId: string): string {
 
     {#each agentIds as agentId (agentId)}
       {@const agent = agents[agentId]}
+      {@const skillsSummary = getAgentSkillsSummary(agentId)}
       <ManagedEntityItem
         name={agent.name}
         desc={getAgentModelSummary(agentId)}
-        meta={getAgentSecondarySummary(agentId)}
         selected={pluginData.selectedAgentId === agentId}
       >
         {#snippet leading()}
@@ -126,6 +139,23 @@ function getAgentSecondarySummary(agentId: string): string {
           {#if agentId === DEFAULT_AGENT_ID}
             <Badge label="Built-in" tone="muted" />
           {/if}
+        {/snippet}
+
+        {#snippet children()}
+          <div class="agent-skills-summary">
+            {#if skillsSummary.count === 0}
+              <span class="agent-skills-empty">No skills enabled</span>
+            {:else}
+              <span class="agent-skills-icons">
+                {#each skillsSummary.icons as icon, i (i)}
+                  <Icon name={icon} size="xs" />
+                {/each}
+                {#if skillsSummary.overflow > 0}
+                  <span class="agent-skills-overflow">+{skillsSummary.overflow}</span>
+                {/if}
+              </span>
+            {/if}
+          </div>
         {/snippet}
 
         {#snippet actions()}
@@ -157,6 +187,25 @@ function getAgentSecondarySummary(agentId: string): string {
       </ManagedEntityItem>
     {/each}
   </ManagedEntitySection>
+
+  <SettingGroup heading="Agents Storage">
+    <SettingItem
+      name="Agents Folder"
+      desc="Vault folder holding agent context — skills, memories, and base prompts. Changing it seeds the new location; existing files are left in place."
+    >
+      <FolderSuggest
+        app={plugin.app}
+        value={pluginData.agentFolder}
+        placeholder="Agents"
+        suggestionFn={(query) =>
+          suggestFolders().filter((folder) =>
+            folder.path.toLowerCase().includes(query.toLowerCase()),
+          )}
+        onSelected={(path: string) => void changeAgentFolder(path)}
+        onSubmit={(path: string) => void changeAgentFolder(path)}
+      />
+    </SettingItem>
+  </SettingGroup>
 
   <SettingGroup heading="Chats">
     <SettingItem name="Chats Folder" desc="Folder to store chat files and related data">
@@ -234,5 +283,32 @@ function getAgentSecondarySummary(agentId: string): string {
     background: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-secondary));
     border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
     color: var(--text-accent);
+  }
+
+  .agent-skills-summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .agent-skills-icons {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    color: var(--text-normal);
+  }
+
+  .agent-skills-overflow {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+
+  .agent-skills-empty {
+    color: var(--text-muted);
   }
 </style>

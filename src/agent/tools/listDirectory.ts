@@ -4,6 +4,7 @@ import { z } from "zod";
 import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { isPathInFolder, normalizeFolderPrefix, normalizeVaultPath } from "../../utils/pathUtils";
+import { isAgentFilePath } from "../../utils/fileFiltering";
 
 interface DirectoryTreeFileEntry {
 	name: string;
@@ -191,6 +192,8 @@ function isDirectoryFileVisible(
 	currentProvider?: string,
 ): "include" | "skip" | "private" {
 	if (!isPathInFolder(filePath, rootPath)) return "skip";
+	// Skills live in a vault folder but are plugin machinery, not user notes — hide them.
+	if (isAgentFilePath(filePath)) return "skip";
 	if (!store.isPathAllowed(filePath)) return "skip";
 	if (currentProvider && store.shouldBlockFile(filePath, currentProvider)) return "private";
 	return "include";

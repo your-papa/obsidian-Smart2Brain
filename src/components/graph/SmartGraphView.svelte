@@ -3,7 +3,7 @@ import { untrack, tick, onDestroy } from "svelte";
 import { getAllTags, Notice } from "obsidian";
 import { getPlugin } from "../../stores/state.svelte";
 import { getData } from "../../stores/dataStore.svelte";
-import { getIndexableVaultFiles } from "../../utils/fileFiltering";
+import { getIndexableVaultFiles, isAgentFilePath } from "../../utils/fileFiltering";
 import { Logger } from "../../utils/logging";
 import {
 	type GraphData,
@@ -266,6 +266,7 @@ function loadFilterOptions() {
 	// Tags: Get all unique tags from the vault (only md files have metadata)
 	const tags = new Set<string>();
 	for (const file of plugin.app.vault.getMarkdownFiles()) {
+		if (isAgentFilePath(file.path)) continue;
 		const cache = plugin.app.metadataCache.getFileCache(file);
 		if (cache) {
 			const fileTags = getAllTags(cache) ?? [];

@@ -42,7 +42,7 @@ onMount(() => {
 	editor = new EmbeddableMarkdownEditor(plugin.app, editorContainer, {
 		value: current,
 		placeholder,
-		cls: "capability-guidance-editor",
+		cls: "guidance-editor",
 		editable: true,
 		onChange: (next) => {
 			current = next;

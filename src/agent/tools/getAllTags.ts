@@ -2,6 +2,7 @@ import { type App, getAllTags } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { getData } from "../../stores/dataStore.svelte";
+import { isAgentFilePath } from "../../utils/fileFiltering";
 
 /**
  * Tool for retrieving all tags from the Obsidian vault
@@ -11,7 +12,7 @@ export function createGetAllTagsTool(app: App) {
 	const toolConfig = pluginData.getSelectedAgent().toolsConfig.get_all_tags;
 
 	const getTagsFn = async (): Promise<string> => {
-		const files = app.vault.getMarkdownFiles();
+		const files = app.vault.getMarkdownFiles().filter((file) => !isAgentFilePath(file.path));
 		const tags = new Set<string>();
 
 		for (const file of files) {

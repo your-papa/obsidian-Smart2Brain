@@ -169,3 +169,19 @@ export function slugifySkillName(displayName: string): string {
 		.replace(/-{2,}/g, "-") // Replace consecutive hyphens
 		.slice(0, MAX_NAME_LENGTH);
 }
+
+/**
+ * Humanize a skill name/id into a display label: split on hyphens and Title-Case
+ * each word. The inverse of {@link slugifySkillName}. Skill ids are lowercase-hyphen
+ * slugs (`explore-vault`), so the UI derives their label rather than storing a
+ * redundant `displayName` — e.g. `explore-vault` → "Explore Vault", `web` → "Web".
+ * @param name - Skill name/id slug
+ * @returns Human-readable Title-Cased label
+ */
+export function humanizeSkillName(name: string): string {
+	return name
+		.split("-")
+		.filter(Boolean)
+		.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+		.join(" ");
+}

@@ -1,11 +1,13 @@
 /**
- * Default skills bundled with the plugin.
- * These are copied to the vault's .obsidian/skills/ directory on first run.
+ * Bundled skills shipped with the plugin, discovered at build time from two dirs:
+ * - `defaults/<name>/SKILL.md` — core skills, seeded into the vault's agent folder
+ *   (`Agents/Skills/`) always on first run.
+ * - `integrations/<name>/SKILL.md` — integration skills, seeded conditionally
+ *   (see SkillsService.bootstrapDefaultSkills / seedIntegrationSkill).
  *
- * To add a new default skill:
- * 1. Create a new directory: src/skills/defaults/<skill-name>/
- * 2. Add a SKILL.md file with frontmatter (name, description, metadata)
- * 3. The skill will be automatically discovered and registered
+ * To add a new skill:
+ * 1. Create a directory under `defaults/` (core) or `integrations/` (plugin-linked).
+ * 2. Add a SKILL.md with frontmatter (name, description, metadata).
  *
  * Frontmatter metadata fields:
  * - linkedPlugin: Community plugin ID (sets category to "plugin")
@@ -111,54 +113,92 @@ function determineCategory(linkedPluginId?: string, corePluginId?: string): Skil
 }
 
 /**
- * Auto-discover all SKILL.md files in subdirectories.
- * Uses Vite's import.meta.glob for build-time discovery.
+ * Auto-discover SKILL.md files at build time via Vite's import.meta.glob.
+ * Two sources, two seeding policies (see SkillsService.bootstrapDefaultSkills):
+ * - `defaults/**` → core skills, always seeded.
+ * - `integrations/**` → integration skills (core-plugin or community-plugin), seeded
+ *   conditionally: canvas/bases at startup iff their core plugin is enabled; community
+ *   integrations on-demand when the user enables the integration.
  */
-const skillModules = import.meta.glob<string>("./**/SKILL.md", {
+const coreSkillModules = import.meta.glob<string>("./**/SKILL.md", {
+	eager: true,
+	query: "?raw",
+	import: "default",
+});
+const integrationSkillModules = import.meta.glob<string>("../integrations/**/SKILL.md", {
 	eager: true,
 	query: "?raw",
 	import: "default",
 });
 
 /**
- * Build the BUNDLED_SKILLS array from discovered SKILL.md files.
+ * Build one BundledSkill from a globbed SKILL.md path + content. The directory name is
+ * the last path segment before `/SKILL.md`, so both `./<name>/SKILL.md` (core) and
+ * `../integrations/<name>/SKILL.md` (integration) parse. Returns null for non-SKILL.md
+ * paths (defensive; the glob only yields SKILL.md).
  */
-function buildBundledSkills(): BundledSkill[] {
-	const skills: BundledSkill[] = [];
+function parseBundledSkill(path: string, content: string): BundledSkill | null {
+	const segments = path.split("/");
+	if (segments.pop() !== "SKILL.md") return null;
+	const dirName = segments.pop();
+	if (!dirName) return null;
 
-	for (const [path, content] of Object.entries(skillModules)) {
-		// Extract directory name from path like "./dataview/SKILL.md"
-		const dirMatch = path.match(/^\.\/([^/]+)\/SKILL\.md$/);
-		if (!dirMatch) continue;
+	const { name, linkedPluginId, corePluginId } = parseFrontmatter(content);
 
-		const dirName = dirMatch[1];
-		const { name, linkedPluginId, corePluginId } = parseFrontmatter(content);
-
+	return {
 		// Use frontmatter name or fall back to directory name
-		const skillName = name || dirName;
-		const category = determineCategory(linkedPluginId, corePluginId);
+		name: name || dirName,
+		content,
+		linkedPluginId,
+		corePluginId,
+		category: determineCategory(linkedPluginId, corePluginId),
+	};
+}
 
-		skills.push({
-			name: skillName,
-			content,
-			linkedPluginId,
-			corePluginId,
-			category,
-		});
+/**
+ * Build a sorted BundledSkill array from a glob's module map.
+ */
+function buildBundledSkills(modules: Record<string, string>): BundledSkill[] {
+	const skills: BundledSkill[] = [];
+	for (const [path, content] of Object.entries(modules)) {
+		const skill = parseBundledSkill(path, content);
+		if (skill) skills.push(skill);
 	}
-
 	// Sort alphabetically by name for consistent ordering
 	return skills.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
- * All bundled default skills (auto-discovered from subdirectories)
+ * Core skills (from `defaults/`) — always seeded on first run.
  */
-export const BUNDLED_SKILLS: BundledSkill[] = buildBundledSkills();
+export const BUNDLED_CORE_SKILLS: BundledSkill[] = buildBundledSkills(coreSkillModules);
 
 /**
- * Get a bundled skill by name
+ * Integration skills (from `integrations/`) — seeded conditionally. Core-plugin ones
+ * (canvas/bases, carrying `corePluginId`) seed at startup iff the core plugin is enabled;
+ * community-plugin ones (carrying `linkedPluginId`) seed on integration-enable.
+ */
+export const BUNDLED_INTEGRATION_SKILLS: BundledSkill[] = buildBundledSkills(integrationSkillModules);
+
+/**
+ * All bundled skills (core + integration), for callers that want the full set.
+ */
+export const BUNDLED_SKILLS: BundledSkill[] = [...BUNDLED_CORE_SKILLS, ...BUNDLED_INTEGRATION_SKILLS];
+
+/**
+ * Get a bundled skill by name (searches core + integration).
  */
 export function getBundledSkill(name: string): BundledSkill | undefined {
 	return BUNDLED_SKILLS.find((s) => s.name === name);
+}
+
+/**
+ * Get a bundled *integration* skill by the community plugin id it documents
+ * (`linkedPluginId`). Used to prefer a prewritten skill over the introspect-first
+ * template when the user enables an integration. Returns undefined for core-plugin
+ * integrations (they carry `corePluginId`, not `linkedPluginId`) and for plugins with
+ * no prewritten skill.
+ */
+export function getBundledIntegrationSkillForPlugin(pluginId: string): BundledSkill | undefined {
+	return BUNDLED_INTEGRATION_SKILLS.find((s) => s.linkedPluginId === pluginId);
 }
