@@ -6,7 +6,11 @@
  * This is intentionally NOT a bundled skill (it does not live under
  * `src/skills/defaults/`, so it is never discovered or attached to an agent
  * directly). Instead it is the seed content for a generated, plugin-specific
- * skill the user can then edit and iterate on independently.
+ * skill the user can then edit and iterate on independently. The template tells
+ * the agent to introspect the API, do the task, and then persist a verified
+ * replacement — via the `update_skill` tool (staged for review) when available,
+ * or otherwise by emitting a SKILL.md code block the user copies over this file
+ * — turning a throwaway introspection session into a durable, documented skill.
  */
 
 import type { SkillFrontmatter } from "../../types/plugin";
@@ -16,8 +20,18 @@ import { slugifySkillName } from "../validation";
  * Generic introspect-first instructions, parameterized by the plugin's display
  * name and its runtime `exec_<plugin>` tool name. Written so a user can start
  * from a working baseline and specialize it as they learn the plugin's API.
+ *
+ * `skillName` and `pluginId` are woven into the "Persist what you learned"
+ * section so the agent can emit a copy-paste-ready replacement SKILL.md with
+ * the correct frontmatter (name must match the skill's directory; the
+ * `linkedPlugin` metadata is what keeps the skill wired to its exec tool).
  */
-export function pluginApiSkillTemplate(displayName: string, execToolName: string): string {
+export function pluginApiSkillTemplate(
+	displayName: string,
+	execToolName: string,
+	skillName: string,
+	pluginId: string,
+): string {
 	return `# ${displayName} API scripting
 
 This skill covers scripting **${displayName}**'s public JavaScript \`api\` object. You have an
@@ -77,7 +91,44 @@ a string — read it, adjust, and retry with a corrected call.
 1. \`return Object.keys(api)\` to see what's available.
 2. Inspect the one or two members that look relevant (type + arity).
 3. Call them with the real arguments; return the result.
-4. As you find reliable patterns, document them here so future runs skip the introspection.
+4. Once the task is done and you know which calls actually work, **persist what you learned** (see
+   below) so future runs skip the introspection.
+
+## Persist what you learned
+
+There is no hand-written documentation for **${displayName}** yet — this skill is a generic
+starting point. After you have completed a real task and confirmed which \`api\` calls work, fold
+that knowledge back into this skill so future runs start from concrete, verified instructions.
+
+**Preferred: use the \`update_skill\` tool.** If you have an \`update_skill\` tool available, call it
+with \`skillName: "${skillName}"\` and a \`newBody\` that replaces the generic guidance below with the
+**specific, verified** calls — real method names, argument shapes, return values, and any gotchas.
+The edit is staged for the user to review before it applies. Keep the read-only-by-default and
+safety guidance, and only document methods you actually confirmed exist.
+
+**Fallback (no \`update_skill\` tool):** output a complete replacement for this SKILL.md in a single
+fenced code block and tell the user they can copy it over the skill file at
+\`Skills/${skillName}/SKILL.md\` under the vault's agent folder. Keep the frontmatter exactly as
+below — the \`name\` must stay \`${skillName}\` (it must match the skill's folder name) and
+\`metadata.linkedPlugin\` must stay \`${pluginId}\` (this keeps the skill wired to its \`${execToolName}\` tool).
+
+\`\`\`markdown
+---
+name: ${skillName}
+description: <one line: what ${displayName}'s API does and when to use it>
+license: MIT
+metadata:
+  linkedPlugin: ${pluginId}
+  displayName: ${displayName}
+---
+
+# ${displayName} API scripting
+
+<the concrete, verified instructions you built up — real methods, arguments, patterns, and safety notes>
+\`\`\`
+
+Either way, do not persist anything until you have verified real calls; a skill full of unconfirmed
+methods is worse than the generic template.
 `;
 }
 
@@ -103,6 +154,6 @@ export function buildPluginApiSkill(
 				displayName,
 			},
 		},
-		content: pluginApiSkillTemplate(displayName, execToolName),
+		content: pluginApiSkillTemplate(displayName, execToolName, skillName, pluginId),
 	};
 }

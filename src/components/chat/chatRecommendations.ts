@@ -2,10 +2,10 @@
  * Static catalog of new-chat recommendations and the pure gating logic used to
  * decide which ones to show. Kept free of Svelte/Obsidian imports so it can be
  * unit-tested in isolation and reused by future recommendation types
- * (plugin-capability nudges, updated-prompt notices — see issue #334).
+ * (plugin-skill nudges, updated-prompt notices — see issue #334).
  */
 
-/** Capability a suggestion depends on. `undefined` ⇒ always available. */
+/** Feature a suggestion depends on. `undefined` ⇒ always available. */
 export type SuggestionRequirement = "chat" | "search" | "graph";
 
 export interface SuggestedQuery {
@@ -17,14 +17,14 @@ export interface SuggestedQuery {
 	label: string;
 	/** Prefilled query text, when it should differ from the visible label. */
 	query?: string;
-	/** Capability gate; the suggestion is hidden unless the capability is available. */
+	/** Feature gate; the suggestion is hidden unless the feature is available. */
 	requires?: SuggestionRequirement;
 }
 
 /** Well-known id used to dismiss the entire recommendations block at once. */
 export const DISMISS_ALL_ID = "suggested-queries";
 
-/** Snapshot of which capabilities are currently available in the vault. */
+/** Snapshot of which features are currently available in the vault. */
 export interface RecommendationContext {
 	hasChat: boolean;
 	hasSearch: boolean;
@@ -32,7 +32,7 @@ export interface RecommendationContext {
 }
 
 /**
- * Curated first-query suggestions. `requires` gates each on a capability so we
+ * Curated first-query suggestions. `requires` gates each on a feature so we
  * never suggest something the user can't run (e.g. a vault-search prompt with
  * no populated index).
  */
@@ -89,7 +89,7 @@ function requirementMet(requires: SuggestionRequirement | undefined, ctx: Recomm
 }
 
 /**
- * Returns the suggestions to display: those whose capability gate is met and
+ * Returns the suggestions to display: those whose feature gate is met and
  * that the user hasn't dismissed. If the whole block was dismissed
  * ({@link DISMISS_ALL_ID}) the result is empty.
  */
@@ -103,7 +103,7 @@ export function filterSuggestions(
 }
 
 /**
- * A nudge to enable an S2B agent capability for an installed Obsidian plugin
+ * A nudge to enable an S2B agent skill for an installed Obsidian plugin
  * whose integration isn't switched on for the selected agent yet (issue #355).
  */
 export interface PluginNudge {
@@ -134,48 +134,49 @@ export function filterPluginNudges(candidates: readonly PluginNudge[], dismissed
 /**
  * The kind of guidance surface a stale-guidance notice refers to. Mirrors
  * `StaleGuidance.kind` from types/plugin — duplicated here to keep this module
- * free of the plugin-types import (it stays pure/unit-testable).
+ * free of the plugin-types import (it stays pure/unit-testable). Only the per-agent
+ * base system prompt is tracked now — skill/tool guidance moved into skill bodies.
  */
-export type UpdateNoticeKind = "system-prompt" | "capability" | "tool";
+export type UpdateNoticeKind = "system-prompt";
 
 /**
- * A notice that a built-in prompt/guidance default changed upstream while the
- * user had a customization of the same surface, so it couldn't be auto-updated
- * (issue #356). Sourced from the store's `staleGuidance` records.
+ * A notice that the base system prompt default changed upstream while the user had a
+ * customization of it, so it couldn't be auto-updated (issue #356). Sourced from the
+ * store's `staleGuidance` records.
  */
 export interface UpdateNotice {
-	/** Dismissal key, of the form `update:<agentId>:<kind>[:<targetId>]`. */
+	/** Dismissal key, of the form `update:<agentId|global>:<kind>`. */
 	id: string;
-	agentId: string;
-	agentName: string;
+	/** Owning agent for the base system prompt. */
+	agentId?: string;
+	agentName?: string;
 	kind: UpdateNoticeKind;
-	/** CapabilityId / BuiltInToolId for capability|tool kinds; undefined for system-prompt. */
-	targetId?: string;
-	/** Human label for the surface, e.g. "Vault guidance", "web_search guidance". */
+	/** Human label for the surface, e.g. "system prompt". */
 	label: string;
 }
 
 /** Minimal shape of a store `StaleGuidance` record consumed by {@link toUpdateNotice}. */
 export interface StaleGuidanceLike {
-	agentId: string;
-	agentName: string;
+	agentId?: string;
+	agentName?: string;
 	kind: UpdateNoticeKind;
-	targetId?: string;
 	label: string;
 }
 
-/** Dismissal key for an update notice. Keep in sync with {@link UpdateNotice.id}. */
-export const updateNoticeId = (agentId: string, kind: UpdateNoticeKind, targetId?: string): string =>
-	`update:${agentId}:${kind}${targetId ? `:${targetId}` : ""}`;
+/**
+ * Dismissal key for an update notice. Global surfaces (no agentId) use the literal
+ * `global` segment so their key is stable and distinct from any per-agent key.
+ */
+export const updateNoticeId = (agentId: string | undefined, kind: UpdateNoticeKind): string =>
+	`update:${agentId ?? "global"}:${kind}`;
 
 /** Maps a store stale-guidance record to a dismissable notice. */
 export function toUpdateNotice(record: StaleGuidanceLike): UpdateNotice {
 	return {
-		id: updateNoticeId(record.agentId, record.kind, record.targetId),
+		id: updateNoticeId(record.agentId, record.kind),
 		agentId: record.agentId,
 		agentName: record.agentName,
 		kind: record.kind,
-		targetId: record.targetId,
 		label: record.label,
 	};
 }

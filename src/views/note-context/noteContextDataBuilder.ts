@@ -1,5 +1,6 @@
 import { TFile, type App } from "obsidian";
 import type { GraphData, GraphEdge, GraphNode } from "../../types/graph";
+import { isAgentFilePath } from "../../utils/fileFiltering";
 import { edgeKey } from "../../utils/graphUtils";
 import { cosineSimilarity, type DocumentVector } from "../../vectorstore";
 
@@ -10,7 +11,12 @@ export interface NoteContextSemanticGraphOptions {
 export const DEFAULT_NOTE_CONTEXT_SEMANTIC_THRESHOLD = 0.35;
 
 function getMarkdownFileMap(app: App): Map<string, TFile> {
-	return new Map(app.vault.getMarkdownFiles().map((file) => [file.path, file]));
+	return new Map(
+		app.vault
+			.getMarkdownFiles()
+			.filter((file) => !isAgentFilePath(file.path))
+			.map((file) => [file.path, file]),
+	);
 }
 
 function buildDegreeMap(edges: GraphEdge[]): Map<string, number> {

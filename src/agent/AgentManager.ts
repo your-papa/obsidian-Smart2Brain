@@ -5,21 +5,12 @@ import { installObsidianFetch } from "../lib/obsidianFetch";
 import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
-import { READ_CONTENT_GUIDANCE_DEFAULTS, getData, getReadContentGuidance } from "../stores/dataStore.svelte";
-import {
-	CAPABILITIES,
-	VAULT_TOOL_IDS,
-	NOTE_TOOL_IDS,
-	WEB_TOOL_IDS,
-	type BuiltInToolId,
-	type CapabilityId,
-	type AgentConfig,
-} from "../types/plugin";
+import { getData } from "../stores/dataStore.svelte";
+import { BUILT_IN_TOOL_IDS, type BuiltInToolId, type AgentConfig, type SkillMetadata } from "../types/plugin";
 import { VIEW_TYPE_CHAT } from "../views/chat/Chat";
 import { lookupModelInfo } from "../providers/modelsDevApi";
 import { fetchOllamaModelsInfo } from "../providers/ollamaModels";
 import { SystemPromptModal } from "../components/modal/SystemPromptModal";
-import { CapabilitySettingsModal } from "../components/modal/CapabilitySettingsModal";
 import {
 	extractCapabilities as extractOpenRouterCapabilities,
 	fetchOpenRouterModels,
@@ -40,6 +31,7 @@ import {
 import type { ChatAttachment } from "../types/shared";
 import { gzipSync } from "node:zlib";
 import { Logger } from "../utils/logging";
+import { memoriesDir } from "../utils/agentPaths";
 import { StartupProfiler } from "../utils/startupProfiler";
 import {
 	Agent,
@@ -53,7 +45,7 @@ import {
 } from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
-import { BASE_SYSTEM_PROMPT, buildDefaultCapabilityGuidance, buildDefaultMemoryPrompt } from "./prompts";
+import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT, buildMemoryFolderHeader } from "./prompts";
 import { LangSmithTelemetry, type Telemetry } from "./telemetry";
 import { createExecuteJavaScriptTool } from "./tools/executeJavaScript";
 import { createPluginApiExecTool } from "./tools/executePluginApi";
@@ -65,14 +57,19 @@ import { createGrepNotesTool } from "./tools/grepNotes";
 import { createLoadSkillTool } from "./tools/loadSkill";
 import { createListDirectoryTool } from "./tools/listDirectory";
 import { createManageNotesTool } from "./tools/manageNotes";
+import { createUpdateSkillTool } from "./tools/updateSkill";
 import { createReadContentTool } from "./tools/readContent";
 import { createSearchNotesTool } from "./tools/searchNotes";
 import {
 	CURATED_PLUGIN_INTEGRATIONS,
 	type PluginIntegration,
 	pluginExposesApi,
+	isCommunityPluginEnabled,
+	isInternalPluginEnabled,
+	getPluginIcon,
+	skillIcon,
+	coreSkillRank,
 	toExecToolId,
-	toRuntimeToolName,
 } from "./integrations/pluginIntegrations";
 
 import { getRegistry } from "../providers/registry";
@@ -129,29 +126,6 @@ export type AgentManagerStreamChunk =
 
 const resolvedVisionSupportCache = new Map<string, boolean>();
 const inflightVisionSupportRequests = new Map<string, Promise<boolean>>();
-
-/**
- * Resolves the effective image/PDF processors for read_content.
- * - undefined: auto-derive from chat model (never explicitly configured)
- * - null: explicitly disabled by the user
- * - ChatModel: explicitly set by the user
- */
-function resolveEffectiveProcessors(
-	settings: { imageProcessor?: ChatModel | null; pdfProcessor?: ChatModel | null } | undefined,
-	chatModel: ChatModel | null,
-): { hasImageProcessor: boolean; hasPdfProcessor: boolean } {
-	const imageProc = settings?.imageProcessor;
-	const pdfProc = settings?.pdfProcessor;
-
-	const chatModelSupportsVision = !!chatModel?.modelConfig?.supportsVision;
-	const chatModelSupportsPdf = chatModelSupportsVision && !!chatModel && NATIVE_PDF_PROVIDERS.has(chatModel.provider);
-
-	return {
-		// undefined = auto-derive, null = explicitly off, ChatModel = explicitly set
-		hasImageProcessor: imageProc !== undefined ? !!imageProc : chatModelSupportsVision,
-		hasPdfProcessor: pdfProc !== undefined ? !!pdfProc : chatModelSupportsPdf,
-	};
-}
 
 function getVisionSupportCacheKey(providerId: string, modelId: string): string {
 	return `${providerId}::${modelId}`;
@@ -342,29 +316,15 @@ export class AgentManager {
 	 * Check if an Obsidian community plugin is enabled (installed and active).
 	 */
 	isPluginEnabled(pluginId: string): boolean {
-		// @ts-ignore - Obsidian plugin API
-		return Boolean(this.plugin.app.plugins?.enabledPlugins?.has(pluginId));
+		return isCommunityPluginEnabled(this.plugin.app, pluginId);
 	}
 
 	/**
 	 * Check if an Obsidian core (internal) plugin is enabled.
-	 * Uses undocumented internal API - may need updates with Obsidian changes.
 	 * @param pluginId - Core plugin ID (e.g., "canvas", "bases")
 	 */
 	isInternalPluginEnabled(pluginId: string): boolean {
-		// @ts-ignore - Obsidian internal plugin API (not in official types)
-		const internalPlugins = this.plugin.app.internalPlugins;
-		if (!internalPlugins) return false;
-
-		// @ts-ignore - internal API
-		const pluginById = internalPlugins.getPluginById?.(pluginId);
-		if (pluginById) {
-			// @ts-ignore - internal API
-			return Boolean(pluginById.enabled);
-		}
-
-		// @ts-ignore - internal API
-		return Boolean(internalPlugins.plugins?.[pluginId]?.enabled);
+		return isInternalPluginEnabled(this.plugin.app, pluginId);
 	}
 
 	/**
@@ -387,17 +347,17 @@ export class AgentManager {
 		const pluginData = getData();
 		const selectedAgent = agent ?? pluginData.getSelectedAgent();
 
-		let prompt = selectedAgent.systemPrompt || BASE_SYSTEM_PROMPT;
+		let prompt = this.plugin.promptFilesService?.getBasePrompt(selectedAgent.id) ?? BASE_SYSTEM_PROMPT;
 		const hasWriteTools = selectedAgent.toolsConfig.manage_notes?.enabled ?? false;
 
-		// Memory: long-lived facts stored as notes in a dedicated folder. Gated on the
+		// Memory: long-lived facts stored as notes in the shared memory folder. Gated on the
 		// agent opting in AND manage_notes being enabled (recording a memory is a note
 		// write). The guidance lives in the user-editable `memoryPrompt` and is placed
 		// right after the base prompt — adjacent to it, NOT buried in the auto-appended
 		// tool-guideline tail — so it reads as (and is tunable as) agent behavior.
 		// Writes inside the folder auto-apply (see stageNoteOperations).
 		if (selectedAgent.memoryEnabled && hasWriteTools) {
-			const memoryFolder = normalizePath(selectedAgent.memoryFolder || "Agent Notes");
+			const memoryFolder = normalizePath(memoriesDir());
 			// Best-effort ensure the folder exists so search_notes/list_directory have
 			// somewhere to look before the first memory is written.
 			try {
@@ -407,85 +367,30 @@ export class AgentManager {
 			} catch {
 				// ignore — folder is created on first write anyway
 			}
-			const memoryPrompt = selectedAgent.memoryPrompt?.trim() || buildDefaultMemoryPrompt(memoryFolder);
-			prompt += `\n\n${memoryPrompt}`;
+			// The live memory folder is named by a header we always prepend, so it tracks the
+			// configurable agent folder. The editable `memoryPrompt` is path-agnostic instructions
+			// (no baked-in path to go stale); absent falls back to the default instructions.
+			const instructions = selectedAgent.memoryPrompt?.trim() || DEFAULT_MEMORY_PROMPT;
+			prompt += `\n\n${buildMemoryFolderHeader(memoryFolder)}\n\n${instructions}`;
 		}
 
-		// Per-capability guidance. Each capability (vault, notes, web) becomes a top-level `#`
-		// section: its own guidance (user override or default) followed by its enabled
-		// tools' per-tool guidance as `##` subheaders. Replaces the old flat
-		// `# Write Tool Guidelines` + `# Tool Guidelines` sections. The write-staging
-		// policy lives inside the Note management capability's default guidance (manage_notes
-		// is its only tool); the no-write honesty guard below still handles the empty case.
-		const toolsConfig = selectedAgent.toolsConfig;
-		const isToolEnabled = (toolId: BuiltInToolId): boolean => toolsConfig[toolId]?.enabled ?? false;
-
-		// Resolve a single tool's per-tool guidance, preserving the read_content dynamic
-		// resolution (explicit-config OR chat-model-derived processors).
-		const resolveToolGuidance = (toolId: BuiltInToolId): string => {
-			const config = toolsConfig[toolId];
-			if (!config?.enabled) return "";
-			let guidance = config.promptGuidance?.trim() ?? "";
-			if (toolId === "read_content" && guidance.length > 0) {
-				const settings = config.settings as
-					| { imageProcessor?: ChatModel | null; pdfProcessor?: ChatModel | null }
-					| undefined;
-				const { hasImageProcessor, hasPdfProcessor } = resolveEffectiveProcessors(
-					settings,
-					selectedAgent.chatModel,
-				);
-				if (READ_CONTENT_GUIDANCE_DEFAULTS.has(guidance)) {
-					guidance = getReadContentGuidance(hasImageProcessor, hasPdfProcessor);
-				}
-			}
-			return guidance;
-		};
-
-		for (const cap of CAPABILITIES) {
-			const enabledCapTools = cap.toolIds.filter(isToolEnabled);
-			if (enabledCapTools.length === 0) continue;
-
-			const capGuidance =
-				selectedAgent.capabilityPrompts?.[cap.id]?.trim() || buildDefaultCapabilityGuidance(cap.id);
-
-			let section = `\n\n# ${cap.title}`;
-			if (capGuidance) section += `\n${capGuidance}`;
-
-			for (const toolId of enabledCapTools) {
-				const guidance = resolveToolGuidance(toolId);
-				if (!guidance) continue;
-				const name = toolsConfig[toolId]?.name ?? toolId;
-				section += `\n\n## ${name}\n- Tool ID: \`${toolId}\`\n- ${guidance.split("\n").join("\n- ")}`;
-			}
-			prompt += section;
-		}
+		// Note: tool how-to and skill guidance are no longer injected eagerly here.
+		// Every former capability is now a core *skill* (a SKILL.md with tools attached via
+		// `allowed-tools`); its guidance is the skill body, advertised by description in
+		// the `# Skills` section below and loaded on demand via `load_skill`. Anything that
+		// must always be in front of the model belongs in the skill's description.
 
 		// Honesty guard when no write tool is enabled (the write policy otherwise lives
-		// inside the vault capability guidance above).
+		// inside the "edit-notes" core skill's body, loaded on demand).
 		if (!hasWriteTools) {
 			prompt +=
-				"\n\n# Capabilities\n- No write tools are currently enabled.\n- Do not claim you can modify notes.\n- If the user asks for edits, explain the change you would make instead.";
+				"\n\n# Write Access\n- No write tools are currently enabled.\n- Do not claim you can modify notes.\n- If the user asks for edits, explain the change you would make instead.";
 		}
 
-		// Per-plugin code-exec integrations the user has approved for this agent.
-		const enabledIntegrations = this.resolvePluginIntegrations().filter(
-			(integ) =>
-				this.isPluginEnabled(integ.pluginId) &&
-				(selectedAgent.pluginExecTools?.[toExecToolId(integ.pluginId)] ?? false),
-		);
-		if (enabledIntegrations.length > 0) {
-			const integrationsSection = enabledIntegrations
-				.map(
-					(integ) =>
-						`## ${integ.displayName}\n- Tool: \`${toRuntimeToolName(integ.pluginId)}\` runs JavaScript against this plugin's \`api\` on the main thread.\n- ${
-							integ.skillId
-								? `Load the "${integ.skillId}" skill first to learn the API's shape.`
-								: `Introspect this plugin's \`api\` (e.g. \`return Object.keys(api)\`) before calling it.`
-						}\n- Not sandboxed and awaited work times out — keep snippets simple and prefer read-only calls unless the user asked to modify data.`,
-				)
-				.join("\n\n");
-			prompt += `\n\n# Plugin Integrations\nYou can script these installed plugins via their public API:\n\n${integrationsSection}`;
-		}
+		// Note: per-plugin code-exec integrations need no prompt block here — each enabled
+		// `exec_<plugin>` tool already carries its usage guidance in the tool description
+		// (see createPluginApiExecTool), and the linked skill is advertised in `# Skills`
+		// with its api shape in the skill body, loaded on demand via `load_skill`.
 
 		const skillsService = this.plugin.skillsService;
 		if (!skillsService?.isDiscovered()) {
@@ -534,43 +439,20 @@ export class AgentManager {
 		const pluginData = getData();
 		const agent = pluginData.agents[agentId];
 		if (!agent) return;
+		const promptFiles = this.plugin.promptFilesService;
 		new SystemPromptModal(
 			this.plugin,
 			{
-				getPrompt: () => pluginData.agents[agentId]?.systemPrompt ?? BASE_SYSTEM_PROMPT,
+				getPrompt: () => promptFiles?.getBasePrompt(agentId) ?? BASE_SYSTEM_PROMPT,
 				setPrompt: (prompt: string) => {
-					pluginData.updateAgent(agentId, { systemPrompt: prompt });
-					this.invalidateSystemPromptCaches();
+					void promptFiles?.writeBasePrompt(agentId, prompt).then(() => {
+						this.invalidateSystemPromptCaches();
+					});
 				},
 				defaultPrompt: BASE_SYSTEM_PROMPT,
 			},
 			{ title: `System Prompt — ${agent.name}`, showDiff: true },
 		).open();
-	}
-
-	/**
-	 * Opens the per-capability settings modal so the user can review the capability's
-	 * guidance against the current default (GuidanceEditor has a built-in "Diff with
-	 * default" toggle). Used by the "updated guidance" notice's Review action for a
-	 * `kind: "capability"` stale record.
-	 */
-	openCapabilityGuidanceDiff(agentId: string, capId: CapabilityId): void {
-		const pluginData = getData();
-		if (!pluginData.agents[agentId] || !CAPABILITIES.some((c) => c.id === capId)) return;
-		new CapabilitySettingsModal(this.plugin, capId, agentId, {
-			onChange: () => this.invalidateAgentRunnable(agentId),
-		}).open();
-	}
-
-	/**
-	 * Opens the settings modal for the capability that owns `toolId`, where the tool's
-	 * own guidance (with its "Diff with default" toggle) lives. Used by the "updated
-	 * guidance" notice's Review action for a `kind: "tool"` stale record.
-	 */
-	openToolGuidanceDiff(agentId: string, toolId: BuiltInToolId): void {
-		const cap = CAPABILITIES.find((c) => c.toolIds.includes(toolId));
-		if (!cap) return;
-		this.openCapabilityGuidanceDiff(agentId, cap.id);
 	}
 
 	/**
@@ -747,17 +629,45 @@ export class AgentManager {
 	}
 
 	/**
-	 * Builds the built-in tool instances for a given agent config, gated by that
-	 * agent's `toolsConfig`. Shared between the main agent (bindBuiltInTools) and
-	 * subagent resolution (resolveSubAgentSpecs), so a referenced subagent gets
-	 * its own tool set rather than inheriting the parent's.
+	 * The set of built-in tool ids an agent may use, derived from its *enabled* skills'
+	 * `allowed-tools` frontmatter. A built-in tool is only bound if some enabled skill
+	 * attaches it — this is what makes `allowed-tools` load-bearing (a "core skill" is a
+	 * skill that carries tools). Unknown tool ids (not built-in) are ignored. `load_skill`
+	 * is never attached this way — it is bound unconditionally when any skill exists.
+	 */
+	private attachedToolIds(agentCfg: AgentConfig): Set<BuiltInToolId> {
+		const attached = new Set<BuiltInToolId>();
+		const cache = this.plugin.skillsService?.getCachedSkills();
+		if (!cache) return attached;
+		const builtIn = new Set<string>(BUILT_IN_TOOL_IDS);
+		for (const [name, meta] of cache) {
+			if (!(agentCfg.skills[name]?.enabled ?? true)) continue;
+			const spec = meta.frontmatter.allowedTools;
+			if (!spec) continue;
+			for (const raw of spec.split(/\s+/)) {
+				const id = raw.trim();
+				if (!id) continue;
+				if (builtIn.has(id)) attached.add(id as BuiltInToolId);
+				else
+					Logger.warn(`[AgentManager] Skill "${name}" lists unknown tool "${id}" in allowed-tools; ignoring`);
+			}
+		}
+		return attached;
+	}
+
+	/**
+	 * Builds the built-in tool instances for a given agent config. A built-in tool binds
+	 * iff (a) some enabled skill attaches it via `allowed-tools` AND (b) the per-tool
+	 * override in `toolsConfig` hasn't disabled it (default enabled). Shared between the
+	 * main agent (bindBuiltInTools) and subagent resolution (resolveSubAgentSpecs).
 	 */
 	private buildToolsForAgent(agentCfg: AgentConfig): StructuredToolInterface[] {
 		const tools: StructuredToolInterface[] = [];
 
-		// Helper to check if tool is enabled for this agent
+		// A tool must be attached by an enabled skill AND not vetoed by its per-tool override.
+		const attached = this.attachedToolIds(agentCfg);
 		const isToolEnabled = (toolId: BuiltInToolId): boolean => {
-			return agentCfg.toolsConfig[toolId]?.enabled ?? true;
+			return attached.has(toolId) && (agentCfg.toolsConfig[toolId]?.enabled ?? true);
 		};
 
 		// Instantiate vision processor models for read_content.
@@ -824,6 +734,7 @@ export class AgentManager {
 			["manage_notes", () => createManageNotesTool(this.plugin.app, agentCfg.id)],
 			["fetch_url", () => createFetchUrlTool()],
 			["web_search", () => createWebSearchTool()],
+			["update_skill", () => createUpdateSkillTool(this.plugin.skillsService, this.plugin.app, agentCfg.id)],
 		];
 
 		for (const [toolId, factory] of builtInTools) {
@@ -902,29 +813,21 @@ export class AgentManager {
 	}
 
 	/**
-	 * Count the capabilities switched on for an agent, using the "one capability card =
-	 * one capability" model the agent editor renders:
-	 *   - the Core · Vault exploration card counts as 1 when any read/explore tool is enabled;
-	 *   - the Note management card counts as 1 when any write tool is enabled;
-	 *   - the Web card counts as 1 when any web tool is enabled;
-	 *   - each core / community / auto-discovered plugin card counts as 1 when its skill
-	 *     (or, for an uncurated auto-discovered plugin, its exec tool) is enabled and the
-	 *     linked plugin is available;
-	 *   - each user-authored custom skill and each enabled MCP server counts as 1.
+	 * The skills switched on for an agent, in a stable display order, each with a resolved
+	 * icon id. Everything is a skill now, so this is:
+	 *   - each enabled, available core / community / auto-discovered plugin skill (the 4 former
+	 *     capabilities — explore-vault/edit-notes/web/update-skills — are core skills here);
+	 *   - each api-plugin with no skill covering it yet whose exec tool is enabled;
+	 *   - each enabled user-authored custom skill;
+	 *   - each enabled MCP server.
 	 *
-	 * This is the single source of truth for the count shown in both the editor's rail
-	 * badge and the agents-list summary, so the two never drift.
+	 * Single source of truth for both the count and the icon strip shown in the agents-list
+	 * summary (and the editor's rail badge), so the two never drift.
 	 */
-	countEnabledCapabilities(agentId: string): number {
+	private collectEnabledSkills(agentId: string): { icon: string }[] {
 		const agent = getData().agents[agentId];
-		if (!agent) return 0;
+		if (!agent) return [];
 
-		// Core card: any vault-exploration tool on.
-		const anyVaultToolOn = VAULT_TOOL_IDS.some((toolId) => agent.toolsConfig[toolId]?.enabled ?? true);
-		// Note management card (separate capability): any write tool on.
-		const anyNoteToolOn = NOTE_TOOL_IDS.some((toolId) => agent.toolsConfig[toolId]?.enabled ?? true);
-		// Web card (separate capability): any web tool on.
-		const anyWebToolOn = WEB_TOOL_IDS.some((toolId) => agent.toolsConfig[toolId]?.enabled ?? true);
 		const skillsService = this.plugin.skillsService;
 		const cachedSkills = skillsService?.isDiscovered() ? skillsService.getCachedSkills() : new Map();
 
@@ -934,37 +837,71 @@ export class AgentManager {
 			if (metadata.linkedPluginId) return this.isPluginEnabled(metadata.linkedPluginId);
 			return true;
 		};
+		const iconFor = (skillId: string, metadata: SkillMetadata) =>
+			skillIcon({
+				id: skillId,
+				icon: metadata.frontmatter.metadata?.icon,
+				linkedPluginId: metadata.linkedPluginId,
+				corePluginId: metadata.corePluginId,
+				category: metadata.category,
+			});
 
-		let count = anyVaultToolOn ? 1 : 0;
-		if (anyNoteToolOn) count++;
-		if (anyWebToolOn) count++;
+		const result: { icon: string }[] = [];
 
-		// Plugin / community cards: enabled + available skills, excluding user-authored
-		// custom skills.
+		// Plugin / community / core skills: enabled + available, excluding user-authored custom.
+		// Ordered so the S2B built-in core skills come first (fixed order), then core-plugin
+		// skills — matching the editor's Core Skills list (see coreSkillRank).
 		const coveredPluginIds = new Set<string>();
+		const coreEntries: { icon: string; rank: number }[] = [];
 		for (const [skillId, metadata] of cachedSkills) {
 			if (metadata.linkedPluginId) coveredPluginIds.add(metadata.linkedPluginId);
 			if (metadata.category === "custom") continue;
-			if (skillEnabled(skillId) && skillAvailable(metadata)) count++;
+			if (skillEnabled(skillId) && skillAvailable(metadata))
+				coreEntries.push({
+					icon: iconFor(skillId, metadata),
+					rank: coreSkillRank({ id: skillId, corePluginId: metadata.corePluginId }),
+				});
 		}
+		coreEntries.sort((a, b) => a.rank - b.rank);
+		for (const entry of coreEntries) result.push({ icon: entry.icon });
 
-		// Auto-discovered plugin cards: an api-plugin with no skill covering it yet counts
-		// when its exec tool is enabled (enabling it in the editor also generates a skill).
+		// Plugin api-integration cards: an api-plugin with no skill covering it yet counts
+		// when its exec tool is enabled (enabling it in the editor also seeds a skill). Covered
+		// == a discovered skill links it; curated integrations are seeded on first enable, so
+		// key off actual coverage rather than the static curated skillId.
 		for (const integ of this.resolvePluginIntegrations()) {
-			if (integ.skillId) continue;
 			if (coveredPluginIds.has(integ.pluginId)) continue;
-			if (agent.pluginExecTools?.[toExecToolId(integ.pluginId)] ?? false) count++;
+			if (agent.pluginExecTools?.[toExecToolId(integ.pluginId)] ?? false)
+				result.push({ icon: getPluginIcon(integ.pluginId) });
 		}
 
 		// Custom skills.
 		for (const [skillId, metadata] of cachedSkills) {
-			if (metadata.category === "custom" && skillEnabled(skillId)) count++;
+			if (metadata.category === "custom" && skillEnabled(skillId))
+				result.push({ icon: iconFor(skillId, metadata) });
 		}
 
 		// MCP servers.
-		count += Object.values(agent.mcpServers).filter((server) => server.enabled).length;
+		for (const server of Object.values(agent.mcpServers)) {
+			if (server.enabled) result.push({ icon: "server" });
+		}
 
-		return count;
+		return result;
+	}
+
+	/**
+	 * Count the skills switched on for an agent (see `collectEnabledSkills`).
+	 */
+	countEnabledSkills(agentId: string): number {
+		return this.collectEnabledSkills(agentId).length;
+	}
+
+	/**
+	 * Icon ids for the skills switched on for an agent, in display order (see
+	 * `collectEnabledSkills`). Used by the agents-list summary strip.
+	 */
+	getEnabledSkillIcons(agentId: string): string[] {
+		return this.collectEnabledSkills(agentId).map((s) => s.icon);
 	}
 
 	/**
@@ -995,7 +932,8 @@ export class AgentManager {
 				// Give it a distinct selector name so it never collides with a
 				// sibling subagent, and describe it as a clean-context worker.
 				const name = isSelf ? `${ref.name} (isolated)` : ref.name;
-				const promptHint = (ref.systemPrompt || "").trim().replace(/\s+/g, " ").slice(0, 160);
+				const refBasePrompt = this.plugin.promptFilesService?.getBasePrompt(ref.id) ?? BASE_SYSTEM_PROMPT;
+				const promptHint = refBasePrompt.trim().replace(/\s+/g, " ").slice(0, 160);
 				let description: string;
 				if (isSelf) {
 					description = `Delegate a subtask to a fresh isolated-context copy of yourself ("${ref.name}"). Use this to keep the main conversation's context clean while handling a self-contained subtask.`;
@@ -1010,7 +948,7 @@ export class AgentManager {
 					// Subagents use their own base system prompt. We intentionally omit
 					// the parent's skills-context XML — subagents run isolated and load
 					// their own skills only if their tools include load_skill.
-					systemPrompt: ref.systemPrompt || BASE_SYSTEM_PROMPT,
+					systemPrompt: refBasePrompt,
 					model,
 					tools,
 				});
@@ -1104,6 +1042,18 @@ export class AgentManager {
 	private async runInitialize(): Promise<void> {
 		// Load chats
 		await StartupProfiler.measure("agent:chatManager.load", () => this.chatManager.load());
+
+		// Guarantee the base-prompt cache is seeded + loaded before we assemble any system
+		// prompt. main.ts's deferred startup runs promptFiles:init before agent:init, but a chat
+		// opened during cold startup can trigger lazy ensureAgent() → initialize() *first*; without
+		// this, getBasePrompt() would read an empty cache and fall back to BASE_SYSTEM_PROMPT,
+		// dropping the user's file-backed instructions for that request. Both calls are idempotent
+		// and cheap (skip-if-exists writes over a bounded file set).
+		const promptFiles = this.plugin.promptFilesService;
+		if (promptFiles) {
+			await promptFiles.seedDefaults(getData().agents);
+			await promptFiles.refresh(getData().agents);
+		}
 
 		// Cleanup existing agent if any
 		this.agent = null;
@@ -1271,19 +1221,20 @@ export class AgentManager {
 	 */
 	private agentConfigRevision(agent: AgentConfig): string {
 		const data = getData();
+		const promptFiles = this.plugin.promptFilesService;
 		const subAgentRevisions = (agent.subAgentIds ?? []).map((id) => {
 			const sub = data.getAgent(id);
 			if (!sub) return { id, missing: true };
 			return {
 				id,
-				systemPrompt: sub.systemPrompt,
+				systemPrompt: promptFiles?.getBasePrompt(id) ?? null,
 				chatModel: sub.chatModel ? `${sub.chatModel.provider}:${sub.chatModel.model}` : null,
 				toolsConfig: sub.toolsConfig,
 				pluginExecTools: sub.pluginExecTools ?? null,
 			};
 		});
 		return JSON.stringify({
-			systemPrompt: agent.systemPrompt,
+			systemPrompt: promptFiles?.getBasePrompt(agent.id) ?? null,
 			skills: agent.skills,
 			toolsConfig: agent.toolsConfig,
 			pluginExecTools: agent.pluginExecTools ?? null,

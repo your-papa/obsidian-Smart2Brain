@@ -1,8 +1,13 @@
 <script lang="ts">
-import { onDestroy } from "svelte";
-import { EmbeddableMarkdownEditor } from "../../lib/editor";
+import { normalizePath } from "obsidian";
 import type SecondBrainPlugin from "../../main";
-import { slugifySkillName, validateSkillName, validateDescription, parseFrontmatter } from "../../skills";
+import {
+	slugifySkillName,
+	humanizeSkillName,
+	validateSkillName,
+	validateDescription,
+	parseFrontmatter,
+} from "../../skills";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
 import Button from "../ui/Button.svelte";
 import Text from "../ui/Text.svelte";
@@ -23,15 +28,15 @@ let mode = $state<Mode>("create");
 
 let skillName = $state("");
 let skillDescription = $state("");
-let promptValue = $state("");
+// Body for the new SKILL.md. Empty in the create flow (we scaffold a starter), or the
+// fetched body when importing. The user writes/edits the real instructions in the opened note.
+let importedBody = $state("");
 let validationError = $state("");
 
 // Import mode state
 let importUrl = $state("");
 let importLoading = $state(false);
 let importError = $state("");
-
-let editor: EmbeddableMarkdownEditor | undefined = $state();
 
 // Generate slug from display name
 const skillSlug = $derived(slugifySkillName(skillName));
@@ -54,38 +59,6 @@ const validation = $derived(() => {
 });
 
 const isValid = $derived(validation().valid);
-
-// Track if we have pending content to load into editor
-let pendingEditorContent = $state<string | null>(null);
-
-// Svelte action to manage editor lifecycle with the DOM element
-function editorAction(node: HTMLDivElement) {
-	// Create editor when element mounts
-	const initialValue = pendingEditorContent ?? promptValue;
-	editor = new EmbeddableMarkdownEditor(plugin.app, node, {
-		value: initialValue,
-		placeholder: "Enter instructions for this skill...",
-		cls: "skill-editor",
-		onChange: (value) => {
-			promptValue = value;
-		},
-	});
-	// Clear pending content after using it
-	if (pendingEditorContent !== null) {
-		pendingEditorContent = null;
-	}
-
-	return {
-		destroy() {
-			editor?.destroy();
-			editor = undefined;
-		},
-	};
-}
-
-onDestroy(() => {
-	editor?.destroy();
-});
 
 /**
  * Convert a GitHub URL to raw content URL.
@@ -132,17 +105,14 @@ async function handleImport() {
 			throw new Error("Invalid SKILL.md: missing name or description in frontmatter");
 		}
 
-		// Populate fields
-		skillName = frontmatter.metadata?.displayName ?? frontmatter.name;
+		// Populate fields; keep the imported body so it's written into the new note verbatim.
+		skillName = humanizeSkillName(frontmatter.name);
 		skillDescription = frontmatter.description;
-		promptValue = body;
+		importedBody = body;
 
-		// Switch to create mode to allow editing
+		// Switch to create view so the user can confirm name/description before we scaffold + open.
 		mode = "create";
 		importUrl = "";
-
-		// Set pending content - $effect will initialize editor and set content
-		pendingEditorContent = body;
 	} catch (err) {
 		importError = err instanceof Error ? err.message : "Failed to import skill";
 	} finally {
@@ -154,23 +124,26 @@ function openSkillsMarketplace() {
 	window.open("https://skillsmp.com/", "_blank");
 }
 
+/** Starter body written into a brand-new skill (when not importing an existing one). */
+function scaffoldBody(): string {
+	return `# ${skillName.trim()}\n\nDescribe when to use this skill and the steps to follow.\n`;
+}
+
 async function handleSave() {
 	if (!isValid) {
 		validationError = validation().error;
 		return;
 	}
 
-	// Save skill using SkillsService (file-based)
+	// Write a SKILL.md (scaffold for a new skill, or the imported body) then open the note so
+	// the user writes the real instructions in Obsidian — consistent with the edit (pencil) flow.
 	const skillsService = plugin.skillsService;
 	const result = await skillsService.saveSkill({
 		frontmatter: {
 			name: skillSlug,
 			description: skillDescription.trim(),
-			metadata: {
-				displayName: skillName.trim(),
-			},
 		},
-		content: promptValue,
+		content: importedBody.trim() ? importedBody : scaffoldBody(),
 	});
 
 	if (!result.valid) {
@@ -178,12 +151,19 @@ async function handleSave() {
 		return;
 	}
 
-	// Re-discover skills to update cache
+	// Re-discover skills to update cache, then let the agent reinitialize.
 	await skillsService.discoverSkills();
-
-	// Call onSave and wait for it to complete (agent reinitialization)
 	await onSave(skillSlug);
-	modal.close();
+
+	// Open the freshly created note for editing, then close the modal.
+	const metadata = skillsService.getCachedSkills().get(skillSlug);
+	if (metadata) {
+		const skillPath = normalizePath(`${metadata.path}/SKILL.md`);
+		modal.close();
+		plugin.app.workspace.openLinkText(skillPath, "", true);
+	} else {
+		modal.close();
+	}
 }
 </script>
 
@@ -269,17 +249,9 @@ async function handleSave() {
         onchange={(val) => (skillDescription = val)}
       />
       <p class="add-skill-description">
-        A short description of what this skill does and when to use it.
+        A short description of what this skill does and when to use it. After you add it, the
+        skill's note opens so you can write the full instructions.
       </p>
-    </div>
-
-    <div class="add-skill-field flex-1">
-      <div class="add-skill-label">Instructions</div>
-      <p class="add-skill-description">
-        Define the behavior and capabilities for this skill. These instructions will be appended to
-        the system prompt when the skill is enabled.
-      </p>
-      <div use:editorAction class="skill-editor-container"></div>
     </div>
 
     {#if validationError}
@@ -289,7 +261,7 @@ async function handleSave() {
     <div class="add-skill-actions">
       <div class="flex-1"></div>
       <Button buttonText="Cancel" onClick={() => modal.close()} />
-      <Button buttonText="Add Skill" cta={true} onClick={handleSave} disabled={!isValid} />
+      <Button buttonText="Add & Open Note" cta={true} onClick={handleSave} disabled={!isValid} />
     </div>
   {/if}
 </div>
@@ -298,8 +270,6 @@ async function handleSave() {
   .add-skill-modal-content {
     display: flex;
     flex-direction: column;
-    flex: 1;
-    min-height: 0;
     gap: 12px;
   }
 
@@ -307,11 +277,6 @@ async function handleSave() {
     display: flex;
     flex-direction: column;
     gap: 4px;
-  }
-
-  .add-skill-field.flex-1 {
-    flex: 1;
-    min-height: 0;
   }
 
   .add-skill-label {
@@ -338,45 +303,6 @@ async function handleSave() {
     padding: 8px 12px;
     background: var(--background-modifier-error);
     border-radius: 6px;
-  }
-
-  .skill-editor-container {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
-    border-radius: 12px;
-  }
-
-  .skill-editor-container :global(.cm-editor) {
-    height: 100%;
-    background: var(--background-secondary);
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 12px;
-    font-family: var(--font-text);
-    font-size: 0.95rem;
-  }
-
-  .skill-editor-container :global(.cm-editor.cm-focused) {
-    outline: none;
-    border-color: var(--interactive-accent);
-    box-shadow: 0 0 0 1px var(--interactive-accent);
-  }
-
-  .skill-editor-container :global(.cm-scroller) {
-    padding: 12px 14px;
-  }
-
-  .skill-editor-container :global(.cm-content) {
-    min-height: 100px;
-    caret-color: var(--text-normal);
-  }
-
-  .skill-editor-container :global(.cm-line) {
-    line-height: 1.6;
-  }
-
-  .skill-editor-container :global(.cm-placeholder) {
-    color: var(--text-muted);
   }
 
   .add-skill-actions {

@@ -3,7 +3,7 @@ name: canvas
 description: Work with Obsidian Canvas files for visual note-taking and concept mapping. Use when user asks about creating, editing, or understanding canvas files, nodes, connections, or visual layouts.
 license: MIT
 metadata:
-  author: "Smart2Brain"
+  author: "S2B"
   version: "1.0"
   category: "core"
   corePluginId: "canvas"

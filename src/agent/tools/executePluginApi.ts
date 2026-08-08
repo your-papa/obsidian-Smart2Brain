@@ -7,7 +7,7 @@ import {
 	MAX_OUTPUT_CHARS,
 	truncateOutput,
 } from "./executeJavaScriptShared";
-import { toRuntimeToolName } from "../integrations/pluginIntegrations";
+import { resolvePluginApi, toRuntimeToolName } from "../integrations/pluginIntegrations";
 
 const EXECUTION_TIMEOUT_MS = 5_000;
 
@@ -29,13 +29,9 @@ export function createPluginApiExecTool(app: App, pluginId: string, displayName:
 			return `Error: the "${displayName}" plugin (${pluginId}) is not enabled or installed. Ask the user to enable it.`;
 		}
 
-		let api: unknown;
-		try {
-			api = plugin.api;
-		} catch (error) {
-			return `Error: could not access the "${displayName}" plugin's API: ${error instanceof Error ? error.message : String(error)}`;
-		}
-		if (typeof api !== "object" || api === null) {
+		// Prefer `.api`, fall back to `.apiV1` (e.g. the Tasks plugin exposes `apiV1`).
+		const api = resolvePluginApi(app, pluginId);
+		if (api === null) {
 			return `Error: the "${displayName}" plugin does not expose an "api" object, so it cannot be scripted.`;
 		}
 

@@ -154,7 +154,6 @@ const selectedChatModel = $derived.by(() => {
 const selectedAgentPromptSignature = $derived.by(() => {
 	return JSON.stringify({
 		agentId: selectedAgent.id,
-		systemPrompt: selectedAgent.systemPrompt,
 		toolsConfig: selectedAgent.toolsConfig,
 		skills: selectedAgent.skills,
 	});
@@ -267,7 +266,6 @@ $effect(() => {
 // Keep a cached assembled system prompt so estimate matches what is actually sent.
 $effect(() => {
 	const _signature = selectedAgentPromptSignature;
-	assembledSystemPrompt = selectedAgent.systemPrompt ?? "";
 	const requestVersion = ++assembledPromptRequestVersion;
 
 	void (async () => {

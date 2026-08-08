@@ -21,6 +21,7 @@ import { getPlugin } from "../../stores/state.svelte";
 import type { SearchAlgorithm } from "../../types/plugin";
 import type { SearchFilter } from "../../vectorstore";
 import { Logger } from "../../utils/logging";
+import { isAgentFilePath } from "../../utils/fileFiltering";
 import { showSettingsLinkNotice } from "../../utils/settingsNotice";
 import { getPathIcon, getSearchResultNoteIcon, getTagIcon, resolveIconColor } from "../../utils/noteIcons";
 import {
@@ -359,7 +360,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private getPickerBrowseResults(): SearchResult[] {
 		return this.app.vault
 			.getMarkdownFiles()
-			.filter((file) => !this.isPickerUnavailable(file.path))
+			.filter((file) => !isAgentFilePath(file.path) && !this.isPickerUnavailable(file.path))
 			.slice()
 			.sort((left, right) => left.path.localeCompare(right.path))
 			.slice(0, 40)
@@ -1053,6 +1054,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private populateAutocompleteCachesFromVault(): void {
 		const leafTags = new Set<string>();
 		for (const file of this.app.vault.getMarkdownFiles()) {
+			if (isAgentFilePath(file.path)) {
+				continue;
+			}
 			const cache = this.app.metadataCache.getFileCache(file);
 			if (!cache) {
 				continue;

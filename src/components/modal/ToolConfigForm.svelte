@@ -2,10 +2,8 @@
 import {
 	DEFAULT_TOOLS_CONFIG,
 	READ_CONTENT_DESC_DEFAULTS,
-	READ_CONTENT_GUIDANCE_DEFAULTS,
 	getData,
 	getReadContentDescription,
-	getReadContentGuidance,
 } from "../../stores/dataStore.svelte";
 import type { BuiltInToolId, DiffViewMode, SearchAlgorithm, ToolConfig } from "../../types/plugin";
 import type { ChatModel } from "../../stores/chatStore.svelte";
@@ -31,8 +29,8 @@ interface Props {
 	/**
 	 * "modal" — render the standalone-modal footer (Cancel / Reset / Save) and persist
 	 * only when Save is pressed (preserves the old ToolConfigModal UX).
-	 * "none" — no footer; persist on every field commit (inline usage in the Capability
-	 * Settings modal). A "Reset to default" link is shown when the config is non-default.
+	 * "none" — no footer; persist on every field commit (inline usage in the per-skill
+	 * SkillToolsModal). A "Reset to default" link is shown when the config is non-default.
 	 */
 	footer?: "modal" | "none";
 	/** Called when the standalone modal saves (footer="modal"). */
@@ -64,7 +62,6 @@ function writeToolConfig(config: Partial<ToolConfig>): void {
 
 let name = $state(initialToolConfig?.name ?? defaultConfig.name);
 let description = $state(initialToolConfig?.description ?? defaultConfig.description);
-let promptGuidance = $state(initialToolConfig?.promptGuidance ?? defaultConfig.promptGuidance ?? "");
 let maxResults = $state(
 	(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
 		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
@@ -114,7 +111,6 @@ let allowMove = $state(
 		true,
 );
 let diffViewMode = $state<DiffViewMode>(pluginData.diffViewMode);
-let showGuidanceDiff = $state(false);
 let showDescriptionDiff = $state(false);
 
 function renderDiffSide(oldText: string, newText: string, side: "old" | "new"): string {
@@ -209,15 +205,6 @@ function resolveHasProcessor(mode: ProcessorMode, proc: ChatModel | null | undef
 	return false;
 }
 
-// Auto-update promptGuidance when processor mode/selection changes and guidance is a known default.
-$effect(() => {
-	const hasImg = resolveHasProcessor(imageProcessorMode, imageProcessor, chatModelSupportsVision);
-	const hasPdf = resolveHasProcessor(pdfProcessorMode, pdfProcessor, chatModelSupportsPdf);
-	if (capturedToolId === "read_content" && READ_CONTENT_GUIDANCE_DEFAULTS.has(promptGuidance)) {
-		promptGuidance = getReadContentGuidance(hasImg, hasPdf);
-	}
-});
-
 // Auto-update description when processor mode/selection changes and description is a known default
 $effect(() => {
 	const hasImg = resolveHasProcessor(imageProcessorMode, imageProcessor, chatModelSupportsVision);
@@ -230,7 +217,6 @@ $effect(() => {
 interface ToolConfigSnapshot {
 	name: string;
 	description: string;
-	promptGuidance: string;
 	maxResults: number;
 	algorithm: SearchAlgorithm;
 	searchShowPath: boolean;
@@ -255,7 +241,6 @@ function processorKey(proc: ChatModel | null | undefined): string {
 const initialSnapshot: ToolConfigSnapshot = {
 	name: initialToolConfig?.name ?? defaultConfig.name,
 	description: initialToolConfig?.description ?? defaultConfig.description,
-	promptGuidance: initialToolConfig?.promptGuidance ?? defaultConfig.promptGuidance ?? "",
 	maxResults:
 		(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
 		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
@@ -296,7 +281,6 @@ const initialSnapshot: ToolConfigSnapshot = {
 const defaultSnapshot: ToolConfigSnapshot = {
 	name: defaultConfig.name,
 	description: defaultConfig.description,
-	promptGuidance: defaultConfig.promptGuidance ?? "",
 	maxResults: (defaultConfig.settings as { maxResults?: number })?.maxResults ?? 10,
 	algorithm: (defaultConfig.settings as { algorithm?: SearchAlgorithm })?.algorithm ?? "lexical",
 	searchShowPath: pluginData.searchShowPath,
@@ -324,7 +308,6 @@ const isDirty = $derived.by(() => {
 	const currentSnapshot: ToolConfigSnapshot = {
 		name,
 		description,
-		promptGuidance,
 		maxResults,
 		algorithm,
 		searchShowPath,
@@ -345,12 +328,9 @@ const isDirty = $derived.by(() => {
 const isAtDefault = $derived.by(() => {
 	const currentSnapshot: ToolConfigSnapshot = {
 		name,
-		// Normalize known-default description/guidance variants so processor-triggered
+		// Normalize known-default description variants so processor-triggered
 		// auto-swaps don't make the config appear "non-default".
 		description: READ_CONTENT_DESC_DEFAULTS.has(description) ? defaultConfig.description : description,
-		promptGuidance: READ_CONTENT_GUIDANCE_DEFAULTS.has(promptGuidance)
-			? (defaultConfig.promptGuidance ?? "")
-			: promptGuidance,
 		maxResults,
 		algorithm,
 		searchShowPath,
@@ -372,25 +352,21 @@ const showResetToDefault = $derived(!isAtDefault);
 
 /** Build the persisted patch from current field state (shared by Save + live-commit). */
 function buildConfigPatch(): Partial<ToolConfig> {
-	// For read_content, the description/promptGuidance auto-swap when processor mode changes
-	// is driven by a deferred $effect. In live-commit mode `commit()` can run synchronously
-	// (from a processor-mode handler) before that effect flushes, so resolve the swap here
-	// too — when the current value is a known default — to avoid persisting a stale variant.
+	// For read_content, the description auto-swap when processor mode changes is driven by a
+	// deferred $effect. In live-commit mode `commit()` can run synchronously (from a processor-mode
+	// handler) before that effect flushes, so resolve the swap here too — when the current value is
+	// a known default — to avoid persisting a stale variant.
 	let resolvedDescription = description;
-	let resolvedGuidance = promptGuidance;
 	if (capturedToolId === "read_content") {
 		const hasImg = resolveHasProcessor(imageProcessorMode, imageProcessor, chatModelSupportsVision);
 		const hasPdf = resolveHasProcessor(pdfProcessorMode, pdfProcessor, chatModelSupportsPdf);
 		if (READ_CONTENT_DESC_DEFAULTS.has(description))
 			resolvedDescription = getReadContentDescription(hasImg, hasPdf);
-		if (READ_CONTENT_GUIDANCE_DEFAULTS.has(promptGuidance))
-			resolvedGuidance = getReadContentGuidance(hasImg, hasPdf);
 	}
 
 	const updatedConfig: Partial<ToolConfig> = {
 		name,
 		description: resolvedDescription,
-		promptGuidance: resolvedGuidance.trim(),
 	};
 
 	if (capturedToolId === "search_notes") {
@@ -437,7 +413,6 @@ function handleSave() {
 function handleResetToDefault() {
 	name = defaultConfig.name;
 	description = defaultConfig.description;
-	promptGuidance = defaultConfig.promptGuidance ?? "";
 
 	if (capturedToolId === "search_notes" && defaultConfig.settings) {
 		const settings = defaultConfig.settings as { maxResults: number; algorithm: SearchAlgorithm };
@@ -540,44 +515,6 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
       <div class="tool-guidance-diff-footer">
         <button type="button" class="tool-guidance-link" onclick={() => (showDescriptionDiff = !showDescriptionDiff)}>
           {showDescriptionDiff ? "Back to editor" : "Diff with default"}
-        </button>
-      </div>
-    {/if}
-  </ModalField>
-
-  <ModalField
-    label="Prompt Guidance"
-    desc="Optional vault-specific guidance injected into the assembled system prompt when this tool is enabled."
-    for="tool-config-prompt-guidance"
-  >
-    {#if showGuidanceDiff}
-      {@const defaultGuidance = defaultConfig.promptGuidance ?? ""}
-      <div class="tool-guidance-diff-container">
-        <div class="tool-guidance-diff-pane">
-          <div class="tool-guidance-diff-pane-label">Yours</div>
-          <pre class="tool-guidance-diff-text">{@html renderDiffSide(promptGuidance, defaultGuidance, "old")}</pre>
-        </div>
-        <div class="tool-guidance-diff-pane">
-          <div class="tool-guidance-diff-pane-label">Default</div>
-          <pre class="tool-guidance-diff-text">{@html renderDiffSide(promptGuidance, defaultGuidance, "new")}</pre>
-        </div>
-      </div>
-    {:else}
-      <TextArea
-        id="tool-config-prompt-guidance"
-        class="w-full h-24"
-        value={promptGuidance}
-        placeholder="Optional guidance for how the agent should use this tool..."
-        onblur={(v) => {
-          promptGuidance = v;
-          commit();
-        }}
-      />
-    {/if}
-    {#if promptGuidance !== (defaultConfig.promptGuidance ?? "") && !READ_CONTENT_GUIDANCE_DEFAULTS.has(promptGuidance)}
-      <div class="tool-guidance-diff-footer">
-        <button type="button" class="tool-guidance-link" onclick={() => (showGuidanceDiff = !showGuidanceDiff)}>
-          {showGuidanceDiff ? "Back to editor" : "Diff with default"}
         </button>
       </div>
     {/if}

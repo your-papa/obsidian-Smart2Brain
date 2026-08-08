@@ -2,11 +2,10 @@
 import { normalizePath } from "obsidian";
 import { getData } from "../../stores/dataStore.svelte";
 import type SecondBrainPlugin from "../../main";
-import { buildDefaultMemoryPrompt } from "../../agent/prompts";
-import SettingItem from "../settings/SettingItem.svelte";
+import { DEFAULT_MEMORY_PROMPT } from "../../agent/prompts";
+import { memoriesDir } from "../../utils/agentPaths";
 import Badge from "../ui/Badge.svelte";
 import Button from "../ui/Button.svelte";
-import Text from "../ui/Text.svelte";
 import GuidanceEditor from "./GuidanceEditor.svelte";
 import type { MemorySettingsModal } from "./MemorySettingsModal";
 
@@ -21,20 +20,18 @@ const { modal, plugin, agentId, onChange }: Props = $props();
 const pluginData = getData();
 
 const selectedAgent = $derived(pluginData.agents[agentId]);
-const memoryFolder = $derived(selectedAgent?.memoryFolder ?? "Agent Notes");
+// Memory is a single global folder shared by all agents. The path is shown as read-only
+// context here; the editable instructions below are path-agnostic (the live folder is
+// named by a header injected at prompt-assembly time), so changing the agent folder never
+// leaves a stale path in stored instructions.
+const memoryFolder = $derived(normalizePath(memoriesDir()));
 const manageNotesEnabled = $derived(pluginData.isAgentToolEnabled(agentId, "manage_notes"));
-const defaultInstructions = $derived(buildDefaultMemoryPrompt(normalizePath(memoryFolder)));
+const defaultInstructions = DEFAULT_MEMORY_PROMPT;
 
 function notifyChange() {
 	plugin.agentManager?.invalidateAgentRunnable(agentId);
 	plugin.agentManager?.invalidateSystemPromptCaches();
 	onChange?.();
-}
-
-function handleFolderChange(value: string) {
-	const normalized = normalizePath(value.trim() || "Agent Notes");
-	pluginData.updateAgent(agentId, { memoryFolder: normalized });
-	notifyChange();
 }
 
 function persistInstructions(value: string) {
@@ -55,40 +52,25 @@ $effect(() => {
           <Badge label="Needs Manage notes" tone="warning" />
           <span>
             Memory records notes with the <strong>Manage Notes</strong> tool. Enable it in the
-            Note Management capability so this agent can write memories.
+            Note Management skill so this agent can write memories.
           </span>
         </div>
       {/if}
 
       <section class="memory-settings-section">
-        <div class="memory-settings-heading">Memory folder</div>
-        <SettingItem
-          name="Folder"
-          desc="Vault folder where memory notes are stored. Created automatically if missing. Reset the instructions below after renaming to refresh the baked-in folder path."
-        >
-          <Text
-            inputType="text"
-            value={memoryFolder}
-            placeholder="Agent Notes"
-            onchange={(v) => handleFolderChange(v)}
-          />
-        </SettingItem>
-      </section>
-
-      <section class="memory-settings-section">
         <div class="memory-settings-heading">Instructions</div>
         <p class="memory-settings-desc">
-          How this agent uses its memory folder. Injected right after the base system prompt.
+          How this agent uses its memory folder (<code>{memoryFolder}/</code>). Injected right
+          after the base system prompt. The folder path is added automatically, so these
+          instructions stay correct if you change the agents folder.
         </p>
-        {#key memoryFolder}
-          <GuidanceEditor
-            {plugin}
-            value={selectedAgent.memoryPrompt ?? ""}
-            defaultValue={defaultInstructions}
-            placeholder="Instructions for how the agent uses its memory folder…"
-            onCommit={persistInstructions}
-          />
-        {/key}
+        <GuidanceEditor
+          {plugin}
+          value={selectedAgent.memoryPrompt ?? ""}
+          defaultValue={defaultInstructions}
+          placeholder="Instructions for how the agent uses its memory folder…"
+          onCommit={persistInstructions}
+        />
       </section>
     </div>
   {/if}
@@ -125,10 +107,6 @@ $effect(() => {
     background: var(--background-secondary);
     font-size: var(--font-ui-small);
     color: var(--text-muted);
-  }
-
-  .memory-settings-section + .memory-settings-section {
-    margin-top: 24px;
   }
 
   .memory-settings-heading {

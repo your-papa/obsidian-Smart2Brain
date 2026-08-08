@@ -3,11 +3,10 @@ import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { Notice, getIconIds, normalizePath, type Modal } from "obsidian";
 import { onMount } from "svelte";
 import { AddSkillModal } from "./AddSkillModal";
-import { CapabilitySettingsModal } from "./CapabilitySettingsModal";
+import { SkillToolsModal } from "./SkillToolsModal";
 import { MCPServerModal } from "./MCPServerModal";
 import { MemorySettingsModal } from "./MemorySettingsModal";
 import { ModelSelectionModal } from "./ModelSelectionModal";
-import { SkillModal } from "./SkillModal";
 import { SystemPromptModal } from "./SystemPromptModal";
 import ManagedEntityItem from "../settings/ManagedEntityItem.svelte";
 import ModelSettingControl from "../settings/ModelSettingControl.svelte";
@@ -25,18 +24,22 @@ import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { installObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
-import { type PluginIntegration, getPluginIcon, toExecToolId } from "../../agent/integrations/pluginIntegrations";
-import { BUILT_IN_TOOL_META } from "../../agent/builtInToolMeta";
-import { buildDefaultMemoryPrompt } from "../../agent/prompts";
-import { buildPluginApiSkill } from "../../skills/templates/pluginApiScripting";
+import {
+	type PluginIntegration,
+	getPluginIcon,
+	skillIcon,
+	coreSkillRank,
+	toExecToolId,
+} from "../../agent/integrations/pluginIntegrations";
+import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT } from "../../agent/prompts";
+import { basePromptPath } from "../../utils/agentPaths";
+import { Logger } from "../../utils/logging";
+import { extractErrorMessage } from "../../utils/errorMessage";
+import { humanizeSkillName } from "../../skills";
 import {
 	DEFAULT_AGENT_ICON,
-	VAULT_TOOL_IDS,
-	NOTE_TOOL_IDS,
-	WEB_TOOL_IDS,
 	type AgentConfig,
 	type BuiltInToolId,
-	type CapabilityId,
 	type MCPServerConfig,
 	type SkillDisplayInfo,
 } from "../../types/plugin";
@@ -235,20 +238,35 @@ function resetTitleModel() {
 	void applyChanges();
 }
 
-function openSystemPromptModal() {
+function openBasePromptNote() {
 	if (!selectedAgent) return;
-	const promptModal = new SystemPromptModal(plugin, {
-		getPrompt: () => selectedAgent?.systemPrompt ?? "",
-		setPrompt: (prompt: string) => {
-			pluginData.updateAgent(agentId, { systemPrompt: prompt });
-			void applyChanges();
-		},
-		viewFinalPrompt: () => {
-			promptModal.close();
-			openRenderedSystemPromptModal();
-		},
-	});
-	promptModal.open();
+	const path = normalizePath(basePromptPath(agentId));
+	// Seed the file from the default if it doesn't exist yet (e.g. an agent created this
+	// session, before init-time seeding runs), then open it.
+	void (async () => {
+		await plugin.promptFilesService?.ensureBasePrompt(agentId);
+		modal.close();
+		plugin.app.workspace.openLinkText(path, "", true);
+	})();
+}
+
+// Whether this agent's base-prompt FILE has drifted from the shipped default. Reads the
+// prompt-file cache (kept fresh by the vault-change handler); `basePromptDriftTick` lets us
+// force a re-check after opening the diff modal. When false, we hide the "Diff with default"
+// button — matching the skill guidance behaviour (diff only shown when drifted).
+let basePromptDriftTick = $state(0);
+const basePromptDrifted = $derived.by(() => {
+	void basePromptDriftTick;
+	if (!selectedAgent) return false;
+	const content = plugin.promptFilesService?.getBasePrompt(agentId) ?? BASE_SYSTEM_PROMPT;
+	return content.trim() !== BASE_SYSTEM_PROMPT.trim();
+});
+
+function openBasePromptDiff() {
+	if (!selectedAgent) return;
+	plugin.agentManager?.openSystemPromptDiff(agentId);
+	// The diff modal can reset/realign the file; re-check drift when we return to this modal.
+	basePromptDriftTick++;
 }
 
 function openRenderedSystemPromptModal() {
@@ -267,8 +285,8 @@ function openRenderedSystemPromptModal() {
 
 let skillsRefreshCounter = $state(0);
 
-// Controls the "+ Add" dropdown on the Custom capabilities card.
-let isAddCapabilityMenuOpen = $state(false);
+// Controls the "+ Add" dropdown on the Custom skills card.
+let isAddSkillMenuOpen = $state(false);
 
 const skills = $derived.by(() => {
 	const _refresh = skillsRefreshCounter;
@@ -278,7 +296,7 @@ const skills = $derived.by(() => {
 	const agentSkills = selectedAgent?.skills ?? {};
 	const result: SkillDisplayInfo[] = [];
 	for (const [skillName, metadata] of cachedSkills) {
-		const displayName = metadata.frontmatter.metadata?.displayName ?? metadata.frontmatter.name;
+		const displayName = humanizeSkillName(metadata.frontmatter.name);
 		result.push({
 			id: skillName,
 			displayName,
@@ -292,7 +310,12 @@ const skills = $derived.by(() => {
 	return result;
 });
 
-const coreSkills = $derived(skills.filter((skill) => skill.category === "core"));
+// Core skills: the S2B built-in skills first (fixed order), then Obsidian core-plugin
+// skills (Canvas, Bases, …). Shares coreSkillRank with the agents-summary icon strip so
+// the two never drift.
+const coreSkills = $derived(
+	skills.filter((skill) => skill.category === "core").sort((a, b) => coreSkillRank(a) - coreSkillRank(b)),
+);
 // Community-plugin skills are only shown when their linked plugin is actually installed
 // in this vault. A skill for an uninstalled plugin has no working exec tool and nothing
 // the user can act on, so it is hidden entirely (installed-but-disabled still shows,
@@ -330,11 +353,17 @@ onMount(() => {
 	};
 });
 
-function openSkillModal(skillId: string) {
-	new SkillModal(plugin, skillId, () => {
-		void refreshSkillsList();
-		void applyChanges();
-	}).open();
+// Skills are real vault notes now, so "edit" just opens the SKILL.md in Obsidian rather
+// than a bespoke editor modal. Close this modal first so the note is visible in the workspace.
+function openSkillNote(skillId: string) {
+	const metadata = plugin.skillsService?.getCachedSkills().get(skillId);
+	if (!metadata) {
+		new Notice("Could not find this skill's file.");
+		return;
+	}
+	const skillPath = normalizePath(`${metadata.path}/SKILL.md`);
+	modal.close();
+	plugin.app.workspace.openLinkText(skillPath, "", true);
 }
 
 function openAddSkillModal() {
@@ -411,7 +440,7 @@ function openPluginPage(pluginId: string) {
 
 // Map of pluginId → integration, for plugins that currently expose a callable `.api`.
 // A plugin skill whose linkedPluginId is present here gains code-exec scripting when
-// the skill is enabled (see toggleSkill), so the two capabilities share one switch.
+// the skill is enabled (see toggleSkill), so the skill and its code-exec share one switch.
 const execIntegrationsByPlugin = $derived.by<Map<string, PluginIntegration>>(() => {
 	// resolvePluginIntegrations() reads live app.plugins state, which is not a Svelte
 	// signal — depend on skillsRefreshCounter so newly installed/enabled plugins get
@@ -427,11 +456,12 @@ function skillExecIntegration(skill: SkillDisplayInfo): PluginIntegration | unde
 	return execIntegrationsByPlugin.get(skill.linkedPluginId);
 }
 
-// Auto-discovered api-plugins that have NO skill covering them yet. These render as
-// inline rows in the Plugin Skills list. Enabling one generates a plugin-specific
-// "API scripting" skill (seeded from a template) linked to it, then enables that skill
-// plus its own exec_<plugin> tool — after which the plugin renders as a normal curated
-// Plugin Skills row (editable/deletable) and drops out of this list.
+// Plugin api-integrations with NO skill covering them yet — both curated integrations
+// whose (community-plugin) skill hasn't been seeded and auto-discovered plugins exposing
+// a public api. These render as inline rows in the Integrations list. Enabling one seeds
+// its skill (prewritten bundled skill if available, else an introspect-first template)
+// linked to it, then enables that skill plus its own exec_<plugin> tool — after which the
+// plugin renders as a normal curated Plugin Skills row (editable) and drops out of this list.
 interface AutoIntegrationDisplay {
 	pluginId: string;
 	displayName: string;
@@ -446,8 +476,11 @@ const autoDiscoveredIntegrations = $derived.by<AutoIntegrationDisplay[]>(() => {
 	);
 	const result: AutoIntegrationDisplay[] = [];
 	for (const integ of execIntegrationsByPlugin.values()) {
-		if (integ.skillId) continue; // curated + documented → shown as its own skill row
-		if (coveredPluginIds.has(integ.pluginId)) continue; // a skill already covers it
+		// Covered iff a skill is actually on disk linking this plugin. Curated integrations
+		// (dataview/tasks/tasknotes) are no longer seeded at startup, so until the user
+		// enables one it has no covering skill and belongs in this list — enabling it seeds
+		// the prewritten skill (or a template) via seedIntegrationSkill.
+		if (coveredPluginIds.has(integ.pluginId)) continue;
 		result.push({
 			pluginId: integ.pluginId,
 			displayName: integ.displayName,
@@ -459,24 +492,36 @@ const autoDiscoveredIntegrations = $derived.by<AutoIntegrationDisplay[]>(() => {
 
 async function toggleAutoIntegration(pluginId: string, displayName: string, newEnabled: boolean) {
 	if (newEnabled) {
-		// Generate a plugin-specific skill from the template (unless one already links
-		// to this plugin), then enable it alongside the exec tool. Re-discover so the
-		// new skill enters the cache and the row re-renders as a curated Plugin Skill.
+		// Seed the integration's skill on demand (prewritten if bundled, else an
+		// introspect-first template), then enable it alongside the exec tool. Re-discover
+		// so the new skill enters the cache and the row re-renders as a curated Plugin Skill.
 		let skillId = skills.find((skill) => skill.linkedPluginId === pluginId)?.id;
 		if (!skillId) {
-			const generated = buildPluginApiSkill(pluginId, displayName);
-			const result = await plugin.skillsService?.saveSkill(generated);
-			if (result && !result.valid) {
-				new Notice(`Could not create skill for ${displayName}: ${result.errors[0]?.message ?? "invalid"}`);
+			const service = plugin.skillsService;
+			if (!service) {
+				new Notice("Skills are still initializing — try again in a moment.");
 				return;
 			}
+			try {
+				skillId = (await service.seedIntegrationSkill(pluginId, displayName)) ?? undefined;
+			} catch (error) {
+				Logger.error(`[AgentEditor] seedIntegrationSkill failed for ${pluginId}:`, error);
+				new Notice(`Could not create skill for ${displayName}: ${extractErrorMessage(error)}`);
+				return;
+			}
+			if (!skillId) {
+				new Notice(`Could not create skill for ${displayName}.`);
+				return;
+			}
+			// Re-discover so the new skill enters the cache; without this the enable below
+			// targets a skillId the reactive `skills` list doesn't know about yet, so the row
+			// wouldn't flip to a curated Plugin Skill.
 			await refreshSkillsList();
-			skillId = generated.frontmatter.name;
 		}
 		pluginData.setAgentSkillEnabled(agentId, skillId, true);
 		pluginData.setAgentPluginExecEnabled(agentId, toExecToolId(pluginId), true);
 	} else {
-		// Only revoke the exec tool; leave any generated skill file in place for reuse.
+		// Only revoke the exec tool; leave any seeded skill file in place for reuse.
 		pluginData.setAgentPluginExecEnabled(agentId, toExecToolId(pluginId), false);
 	}
 	void applyChanges();
@@ -488,16 +533,6 @@ function getMCPToolsBadgeLabel(serverId: string, toolsState?: MCPServerToolsStat
 	if (toolsState?.tools) return `${toolsState.tools.length} tools`;
 	return "Load tools";
 }
-
-interface ToolInfo {
-	id: BuiltInToolId;
-	defaultName: string;
-	defaultDescription: string;
-	requiresPlugin?: { id: string; name: string };
-}
-
-// Display metadata for the built-in tools, shared with the Capability Settings modal.
-const TOOLS: ToolInfo[] = BUILT_IN_TOOL_META;
 
 function getToolEnabled(toolId: BuiltInToolId): boolean {
 	return pluginData.isAgentToolEnabled(agentId, toolId);
@@ -514,7 +549,7 @@ function handleMemoryToggle(next: boolean) {
 	// user can see and tune them (they live in the base-prompt area, not the tool tail).
 	const patch: Partial<AgentConfig> = { memoryEnabled: next };
 	if (next && !selectedAgent?.memoryPrompt?.trim()) {
-		patch.memoryPrompt = buildDefaultMemoryPrompt(normalizePath(selectedAgent?.memoryFolder || "Agent Notes"));
+		patch.memoryPrompt = DEFAULT_MEMORY_PROMPT;
 	}
 	pluginData.updateAgent(agentId, patch);
 	void applyChanges();
@@ -525,41 +560,23 @@ function openMemorySettingsModal() {
 	new MemorySettingsModal(plugin, agentId, { onChange: () => void applyChanges() }).open();
 }
 
-// --- Per-capability settings (guidance + per-tool settings), opened from each card's gear ---
+// --- Per-skill tool overrides (opened from a core skill's gear) ---
 
-function openCapabilitySettingsModal(capId: CapabilityId) {
+/** True when a skill attaches at least one built-in tool via its `allowed-tools` frontmatter. */
+function skillHasTools(skillId: string): boolean {
+	const spec = plugin.skillsService?.getCachedSkills().get(skillId)?.frontmatter.allowedTools;
+	return !!spec && spec.trim().length > 0;
+}
+
+/** Icon for a core-skill row (shared with the agents-list strip via `skillIcon`). */
+function coreSkillIcon(skill: SkillDisplayInfo): string {
+	return skillIcon(skill);
+}
+
+function openSkillToolsModal(skillId: string) {
 	if (!selectedAgent) return;
-	new CapabilitySettingsModal(plugin, capId, agentId, { onChange: () => void applyChanges() }).open();
+	new SkillToolsModal(plugin, skillId, agentId, { onChange: () => void applyChanges() }).open();
 }
-
-// --- Core · Vault exploration + Web capability cards (bulk-toggle their built-in tools) ---
-
-const vaultTools = $derived(TOOLS.filter((tool) => (VAULT_TOOL_IDS as readonly string[]).includes(tool.id)));
-const noteTools = $derived(TOOLS.filter((tool) => (NOTE_TOOL_IDS as readonly string[]).includes(tool.id)));
-const webTools = $derived(TOOLS.filter((tool) => (WEB_TOOL_IDS as readonly string[]).includes(tool.id)));
-
-// Each card's master is a plain on/off switch: OFF turns every tool in the card off; ON turns
-// every (installable) tool in the card on. `masterEnabled` reflects "any tool in the card is on".
-// Tools whose required plugin isn't installed can't be enabled, so they're excluded from the
-// "turn everything on" loop.
-function availableToolsIn(tools: ToolInfo[]): ToolInfo[] {
-	return tools.filter((tool) => !tool.requiresPlugin || isPluginInstalled(tool.requiresPlugin.id));
-}
-function anyEnabledIn(tools: ToolInfo[]): boolean {
-	return availableToolsIn(tools).some((tool) => getToolEnabled(tool.id));
-}
-function toggleAllTools(tools: ToolInfo[], next: boolean) {
-	for (const tool of availableToolsIn(tools)) {
-		if (getToolEnabled(tool.id) !== next) {
-			pluginData.toggleAgentToolEnabled(agentId, tool.id);
-		}
-	}
-	void applyChanges();
-}
-
-const vaultAnyOn = $derived(anyEnabledIn(vaultTools));
-const noteAnyOn = $derived(anyEnabledIn(noteTools));
-const webAnyOn = $derived(anyEnabledIn(webTools));
 
 // --- Subagents (references to other agents) ---
 
@@ -814,9 +831,35 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
             desc="Customize the base system instructions for this agent"
           >
             <div class="flex items-center gap-2 justify-end">
-              <Button buttonText="Edit Prompt" onClick={openSystemPromptModal} />
+              <Button buttonText="Open Prompt Note" onClick={openBasePromptNote} />
+              {#if basePromptDrifted}
+                <Button buttonText="Diff with default" onClick={openBasePromptDiff} />
+              {/if}
               <Button buttonText="View Final Prompt" onClick={openRenderedSystemPromptModal} />
             </div>
+          </SettingItem>
+
+          <!-- Memory — a folder the agent manages itself for durable facts and vault pointers.
+               Enabling it injects memory instructions into the system prompt and auto-applies note
+               writes inside the folder. Needs the Manage notes tool. The gear opens the folder +
+               instructions settings. Lives here (not the skills list) as an agent-level capability
+               that shapes the system prompt, alongside the base prompt. -->
+          <SettingItem
+            name="Memory"
+            desc="A folder the agent manages itself for durable facts about you and pointers to where things live in your vault. Note writes inside it apply automatically."
+          >
+            {#snippet nameSuffix()}
+              {#if memoryEnabled && !manageNotesEnabled}
+                <Badge label="Needs Manage notes" tone="warning" />
+              {/if}
+            {/snippet}
+            <Button
+              iconId="settings"
+              ariaLabel="Memory settings"
+              tooltip="Memory settings"
+              onClick={openMemorySettingsModal}
+            />
+            <Toggle checked={memoryEnabled} onchange={(next) => handleMemoryToggle(next)} />
           </SettingItem>
 
           <SettingItem
@@ -863,104 +906,41 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
       </section>
 
       <section class="agent-editor-section">
-        <SettingGroup heading="Core Capabilities">
+        <SettingGroup heading="Core Skills">
           <div class="setting-item-description mb-3">
-            Built-in capabilities every agent can use — vault exploration, note management, and web
-            access.
+            Built-in skills every agent can use — vault exploration, note management, web access, and
+            self-updating skills. Each is a skill: toggle it to attach its tools, open its note to edit
+            its instructions, or use the gear to fine-tune individual tools.
           </div>
 
-          <!-- Vault Exploration — configure guidance + per-tool settings via the gear. -->
-          <SettingItem
-            name="Vault Exploration"
-            desc="Search, read, and explore your vault with the built-in tools."
-          >
-            {#snippet namePrefix()}
-              <Icon name="compass" size="s" />
-            {/snippet}
-            <Button
-              iconId="settings"
-              ariaLabel="Vault Exploration settings"
-              tooltip="Vault Exploration settings"
-              onClick={() => openCapabilitySettingsModal("vault")}
-            />
-            <Toggle checked={vaultAnyOn} onchange={(next) => toggleAllTools(vaultTools, next)} />
-          </SettingItem>
-
-          <!-- Note Management — the write tools (create/update/delete/move). Kept separate from
-               vault exploration so read access can be granted without write access (issue #368). -->
-          <SettingItem
-            name="Note Management"
-            desc="Create, update, delete, and move notes. All writes are staged for your review."
-          >
-            {#snippet namePrefix()}
-              <Icon name="file-pen" size="s" />
-            {/snippet}
-            <Button
-              iconId="settings"
-              ariaLabel="Note Management settings"
-              tooltip="Note Management settings"
-              onClick={() => openCapabilitySettingsModal("notes")}
-            />
-            <Toggle checked={noteAnyOn} onchange={(next) => toggleAllTools(noteTools, next)} />
-          </SettingItem>
-
-          <!-- Web — tools that reach the public internet (fetch URL, web search). -->
-          <SettingItem name="Web" desc="Reach the public internet: fetch web pages and run web searches.">
-            {#snippet namePrefix()}
-              <Icon name="globe" size="s" />
-            {/snippet}
-            <Button
-              iconId="settings"
-              ariaLabel="Web settings"
-              tooltip="Web settings"
-              onClick={() => openCapabilitySettingsModal("web")}
-            />
-            <Toggle checked={webAnyOn} onchange={(next) => toggleAllTools(webTools, next)} />
-          </SettingItem>
-
-          <!-- Memory — a folder the agent manages itself for durable facts and vault pointers.
-               Enabling it injects memory instructions into the system prompt and auto-applies note
-               writes inside the folder. Needs the Manage notes tool. The gear opens the folder +
-               instructions settings. -->
-          <SettingItem
-            name="Memory"
-            desc="A folder the agent manages itself for durable facts about you and pointers to where things live in your vault. Note writes inside it apply automatically."
-          >
-            {#snippet namePrefix()}
-              <Icon name="brain" size="s" />
-            {/snippet}
-            {#snippet nameSuffix()}
-              {#if memoryEnabled && !manageNotesEnabled}
-                <Badge label="Needs Manage notes" tone="warning" />
-              {/if}
-            {/snippet}
-            <Button
-              iconId="settings"
-              ariaLabel="Memory settings"
-              tooltip="Memory settings"
-              onClick={openMemorySettingsModal}
-            />
-            <Toggle checked={memoryEnabled} onchange={(next) => handleMemoryToggle(next)} />
-          </SettingItem>
-
-          <!-- One row per Obsidian core-plugin skill (Canvas, Bases, …). These ship with Obsidian,
-               so they belong with the other built-in capabilities. -->
+          <!-- One row per core skill: the built-in vault/notes/web/update skills (which attach
+               built-in tools via allowed-tools) plus Obsidian core-plugin skills (Canvas, Bases, …).
+               The gear opens the per-skill tool overrides when the skill attaches any tools. -->
           {#each coreSkills as ext (ext.id)}
             {@const pluginAvailable = isSkillPluginAvailable(ext)}
+            {@const hasTools = skillHasTools(ext.id)}
             <SettingItem name={ext.displayName} desc={ext.description}>
               {#snippet namePrefix()}
-                <Icon name={getPluginIcon(ext.corePluginId, "sparkles")} size="s" />
+                <Icon name={coreSkillIcon(ext)} size="s" />
               {/snippet}
               {#snippet nameSuffix()}
                 {#if !pluginAvailable}
                   <Badge label="Core plugin disabled" tone="warning" />
                 {/if}
               {/snippet}
+              {#if hasTools}
+                <Button
+                  iconId="settings"
+                  ariaLabel={`${ext.displayName} tools`}
+                  tooltip={`${ext.displayName} tools`}
+                  onClick={() => openSkillToolsModal(ext.id)}
+                />
+              {/if}
               <Button
                 iconId="pencil"
-                ariaLabel={`Edit ${ext.displayName} prompt`}
-                tooltip={`Edit ${ext.displayName} prompt`}
-                onClick={() => openSkillModal(ext.id)}
+                ariaLabel={`Open ${ext.displayName} skill note`}
+                tooltip={`Open ${ext.displayName} skill note`}
+                onClick={() => openSkillNote(ext.id)}
               />
               <Toggle
                 checked={ext.enabled && pluginAvailable}
@@ -975,7 +955,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
       <section class="agent-editor-section">
         <SettingGroup heading="Integrations">
           <div class="setting-item-description mb-3">
-            Capabilities backed by your installed community plugins. Each bundles a skill (and, where
+            Skills backed by your installed community plugins. Each bundles a skill (and, where
             available, code-scripting) behind one switch.
           </div>
 
@@ -1001,9 +981,9 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
               {/snippet}
               <Button
                 iconId="pencil"
-                ariaLabel={`Edit ${ext.displayName} prompt`}
-                tooltip={`Edit ${ext.displayName} prompt`}
-                onClick={() => openSkillModal(ext.id)}
+                ariaLabel={`Open ${ext.displayName} skill note`}
+                tooltip={`Open ${ext.displayName} skill note`}
+                onClick={() => openSkillNote(ext.id)}
               />
               <Toggle
                 checked={ext.enabled && pluginAvailable}
@@ -1069,20 +1049,20 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
       <section class="agent-editor-section">
         <SettingGroup heading="Custom">
           <div class="setting-item-description mb-3">
-            Capabilities you bring yourself — your own skills and MCP servers.
+            Skills you bring yourself — your own skills and MCP servers.
           </div>
 
-          <!-- Custom capabilities — the user's own skills + MCP servers, with a "+ Add" menu. -->
+          <!-- Custom skills — the user's own skills + MCP servers, with a "+ Add" menu. -->
           <SettingItem
-            name="Add capability"
+            name="Add skill"
             desc={`${customSkills.length} ${customSkills.length === 1 ? "skill" : "skills"} · ${mcpServerIds.length} ${mcpServerIds.length === 1 ? "server" : "servers"}`}
           >
             <PickerPopover
-              bind:open={isAddCapabilityMenuOpen}
+              bind:open={isAddSkillMenuOpen}
               side="bottom"
               align="end"
               sideOffset={6}
-              contentClass="add-capability-popover"
+              contentClass="add-skill-popover"
             >
               {#snippet trigger(open)}
                 <Icon name="plus" size="xs" />
@@ -1092,7 +1072,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
 
               <PickerOptionRow
                 onClick={() => {
-                  isAddCapabilityMenuOpen = false;
+                  isAddSkillMenuOpen = false;
                   openAddSkillModal();
                 }}
               >
@@ -1106,7 +1086,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
 
               <PickerOptionRow
                 onClick={() => {
-                  isAddCapabilityMenuOpen = false;
+                  isAddSkillMenuOpen = false;
                   openAddMCPServer();
                 }}
               >
@@ -1140,9 +1120,9 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
                 />
                 <Button
                   iconId="pencil"
-                  ariaLabel={`Edit ${ext.displayName} prompt`}
-                  tooltip={`Edit ${ext.displayName} prompt`}
-                  onClick={() => openSkillModal(ext.id)}
+                  ariaLabel={`Open ${ext.displayName} skill note`}
+                  tooltip={`Open ${ext.displayName} skill note`}
+                  onClick={() => openSkillNote(ext.id)}
                 />
                 <Toggle checked={ext.enabled} onchange={() => toggleSkill(ext.id, !ext.enabled)} />
               {/snippet}
@@ -1152,7 +1132,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
             <div class="skill-empty-state">No custom skills yet</div>
           {/if}
 
-          <div class="skill-category-header capability-subgroup-header">
+          <div class="skill-category-header skill-subgroup-header">
             <span class="skill-category-title">MCP Servers</span>
             <Badge label="External tools" pill={false} uppercase />
           </div>
@@ -1257,7 +1237,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
     padding-bottom: 12px;
   }
 
-  /* Spacing between the capability bands. */
+  /* Spacing between the skill bands. */
   .agent-editor-section + .agent-editor-section {
     margin-top: 24px;
   }
@@ -1320,7 +1300,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
     z-index: calc(var(--layer-popover) + 20);
   }
 
-  :global(.add-capability-popover) {
+  :global(.add-skill-popover) {
     z-index: calc(var(--layer-popover) + 20);
   }
 
@@ -1407,7 +1387,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
     border-bottom: 1px solid var(--background-modifier-border);
   }
   /* Space the second sub-group (MCP Servers) away from the first inside a card body. */
-  .capability-subgroup-header {
+  .skill-subgroup-header {
     margin-top: 20px;
   }
   .skill-category-title {

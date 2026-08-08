@@ -1,13 +1,5 @@
 import { normalizePath } from "obsidian";
-import {
-	BASE_SYSTEM_PROMPT,
-	BASE_SYSTEM_PROMPT_VERSION,
-	CAPABILITY_GUIDANCE_VERSION,
-	HISTORICAL_CAPABILITY_GUIDANCE,
-	HISTORICAL_SYSTEM_PROMPTS,
-	HISTORICAL_TOOL_GUIDANCE,
-	TOOL_GUIDANCE_VERSION,
-} from "../agent/prompts";
+import { BASE_SYSTEM_PROMPT, HISTORICAL_SYSTEM_PROMPTS } from "../agent/prompts";
 import {
 	createEmptySpaceFilter,
 	matchesSpaceMembershipDraftPath,
@@ -15,6 +7,7 @@ import {
 	resolveViewFilter,
 } from "../lib/views";
 import { getSecret, listSecrets, removeSecret, setSecret } from "../lib/secretStorage";
+import { isAgentFilePath } from "../utils/fileFiltering";
 import type SecondBrainPlugin from "../main";
 import { DEFAULT_AGENT_ICON } from "../types/plugin";
 import type {
@@ -22,7 +15,6 @@ import type {
 	AgentSkillState,
 	AgentsConfig,
 	BuiltInToolId,
-	CapabilityId,
 	DefaultEmbedModel,
 	ChatOpenLocation,
 	DiffViewMode,
@@ -32,6 +24,7 @@ import type {
 	MCPServersConfig,
 	PluginData,
 	PrivacyMode,
+	PromptFileReader,
 	RecentNoteEntry,
 	SearchAlgorithm,
 	StaleGuidance,
@@ -297,7 +290,6 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "read_content",
 		description: READ_CONTENT_DESC_NONE,
-		promptGuidance: READ_CONTENT_GUIDANCE_NONE,
 	},
 	grep_notes: {
 		enabled: true,
@@ -324,8 +316,6 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		name: "execute_javascript",
 		description:
 			"Execute isolated JavaScript for calculations and data transformation. Pass structured data via the input field, use return for the final value, and use console.log for intermediate output.",
-		promptGuidance:
-			"Use this for calculations, reshaping JSON, filtering arrays, parsing structured text, or other logic-heavy transformations. The code runs in an isolated worker without Obsidian APIs, so do not use it for note edits or vault access.",
 	},
 	manage_notes: {
 		enabled: true,
@@ -344,19 +334,21 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		name: "fetch_url",
 		description:
 			"Fetch a public web page or text resource over HTTP(S) and return its main content. HTML is converted to markdown with scripts, styles, and navigation chrome removed while headings, lists, tables, code blocks, and links are preserved. JSON, plain text, and other text-based responses are returned as-is. Use this when the user asks about a specific URL or when external information is needed that the vault does not contain.",
-		promptGuidance:
-			"Use this only for URLs the user provided or for clearly public references. The tool sends the URL to the configured network — it does not send vault contents. Prefer searching the vault first; reach for fetch_url when the user explicitly references a link or when needed information cannot be in the vault.",
 	},
 	web_search: {
 		enabled: true,
 		name: "web_search",
 		description:
 			"Search the web and return a list of relevant results (title, URL, snippet). Use this when the user asks about current events, external topics, or anything that cannot be in the vault. Always prefer searching the vault first with search_notes.",
-		promptGuidance:
-			"Use web_search for questions about external facts, current events, documentation, or topics the vault is unlikely to contain. Prefer search_notes for vault-internal queries. When results look promising, follow up with fetch_url to read the full page. Cite sources in your response.",
 		settings: {
 			maxResults: 10,
 		},
+	},
+	update_skill: {
+		enabled: false,
+		name: "update_skill",
+		description:
+			"Revise one of your own attached skills — rewrite its instructions (body) and optionally its description. Use this after you've verified how to accomplish a task (e.g. discovered a plugin's real API) to make that knowledge permanent, so future runs skip re-discovery. The skill's name and plugin link are locked. All edits are staged for the user to review before they apply.",
 	},
 };
 
@@ -375,14 +367,11 @@ export function createDefaultAgentConfig(id?: string, name?: string): AgentConfi
 		chatModel: null,
 		summarizationModel: null,
 		titleModel: null,
-		systemPrompt: BASE_SYSTEM_PROMPT,
-		systemPromptVersion: BASE_SYSTEM_PROMPT_VERSION,
 		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
 		subAgentIds: [],
 		memoryEnabled: false,
-		memoryFolder: "Agent Notes",
 	};
 }
 
@@ -397,14 +386,11 @@ function createDefaultAgent(): AgentConfig {
 		chatModel: null,
 		summarizationModel: null,
 		titleModel: null,
-		systemPrompt: BASE_SYSTEM_PROMPT,
-		systemPromptVersion: BASE_SYSTEM_PROMPT_VERSION,
 		skills: {},
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
 		subAgentIds: [],
 		memoryEnabled: false,
-		memoryFolder: "Agent Notes",
 	};
 }
 
@@ -413,7 +399,7 @@ function createDefaultAgent(): AgentConfig {
 // ---------------------------------------------------------------------------
 
 /** Increment this when making any breaking change to PluginData. Add a corresponding entry to MIGRATIONS. */
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 6;
 
 type Migration = (data: PluginData) => void;
 
@@ -427,23 +413,67 @@ const MIGRATIONS: Migration[] = [
 	// v1 → v2: prompt auto-migration added — logic lives in normalizeAgent() which
 	//           runs on every load; the version bump marks that the tracking fields exist
 	(_data) => {},
-	// v2 → v3: per-capability / per-tool guidance version stamps added (issue #356).
-	//          Seed every EXISTING customized guidance value to the current version so
-	//          pre-existing customizations aren't retroactively flagged as "the default
-	//          changed" — staleness detection only applies to changes made from here on.
+	// v2 → v3: per-capability / per-tool guidance version stamps were added here (issue #356) on
+	//          loosely-typed old data. Those fields (capabilityPrompts/promptGuidance and their
+	//          version stamps) were all later removed — capability guidance and per-tool how-to now
+	//          live in skill bodies (v6, "everything is a skill"). This step is now a historical
+	//          no-op; the removed fields are stripped in later migrations / normalizeAgent.
+	(_data) => {},
+	// v3 → v4: skills relocated from `<configDir>/skills` into a vault folder ("Skills").
+	//          Existing installs have skills under the config dir, so mark the async move as
+	//          pending (SkillsService.migrateSkillsLocation runs it on next init). The actual
+	//          file I/O cannot happen here — migrations are synchronous and data-only.
 	(data) => {
+		(data as unknown as { skillsRelocated: boolean }).skillsRelocated = false;
+	},
+	// v4 → v5: all agent context consolidated under one configurable vault root `Agent/`
+	//          (Memories/ + Skills/{GUIDANCE.md,skills} + Base Prompts/<id>.md). Guidance
+	//          and the base system prompt become files (global guidance; per-agent base prompt),
+	//          so the per-agent config fields that used to hold them are dropped, along with the
+	//          per-agent memory folder (memory is now the global Agent/Memories/). The async file
+	//          move (Skills/ or legacy <configDir>/skills → Agent/Skills/) is marked pending
+	//          for SkillsService.migrateAgentFolder to run on next init.
+	(data) => {
+		data.agentFolder ??= "Agents";
+		data.agentFolderMigrated = false;
+		// Drop removed top-level fields (superseded by agentFolder).
+		const loose = data as unknown as Record<string, unknown>;
+		loose.skillsFolder = undefined;
+		loose.skillsRelocated = undefined;
+		// Drop removed per-agent fields — their content is now file-backed or global.
 		for (const agent of Object.values(data.agents ?? {})) {
-			if (agent.capabilityPrompts) {
-				const version: Partial<Record<CapabilityId, number>> = { ...agent.capabilityPromptsVersion };
-				for (const capId of Object.keys(agent.capabilityPrompts) as CapabilityId[]) {
-					version[capId] ??= CAPABILITY_GUIDANCE_VERSION.get(capId) ?? 1;
-				}
-				agent.capabilityPromptsVersion = version;
-			}
-			for (const [toolId, toolCfg] of Object.entries(agent.toolsConfig ?? {})) {
-				if (toolCfg?.promptGuidance !== undefined && toolCfg.promptGuidanceVersion === undefined) {
-					toolCfg.promptGuidanceVersion = TOOL_GUIDANCE_VERSION.get(toolId as BuiltInToolId) ?? 1;
-				}
+			const a = agent as unknown as Record<string, unknown>;
+			// The base system prompt moves from this config field to a file (Base Prompts/<id>.md).
+			// If the user CUSTOMIZED it (not equal to any shipped default), stash it in a transient so
+			// the async seed writes it to the new file instead of clobbering it with the factory
+			// default. A recognized/absent default is dropped — the file seeds fresh from the default.
+			const oldPrompt = typeof a.systemPrompt === "string" ? (a.systemPrompt as string) : "";
+			const isShippedDefault =
+				!oldPrompt.trim() ||
+				oldPrompt === BASE_SYSTEM_PROMPT ||
+				[...HISTORICAL_SYSTEM_PROMPTS.values()].includes(oldPrompt);
+			if (!isShippedDefault) a.migratedBasePrompt = oldPrompt;
+			a.systemPrompt = undefined;
+			a.systemPromptVersion = undefined;
+			a.capabilityPrompts = undefined;
+			a.capabilityPromptsVersion = undefined;
+			a.memoryFolder = undefined;
+		}
+	},
+	// v5 → v6: "everything is a skill". The 4 former capabilities (vault/notes/web/update) become
+	//          bundled core skills (`Skills/<id>/SKILL.md`, tools attached via `allowed-tools`); the
+	//          eager capability-guidance sections and per-capability GUIDANCE.md files are gone.
+	//          Mark the async seed/cleanup pending — SkillsService.migrateCoreSkills runs it on next
+	//          init (delete orphan GUIDANCE.md, then bootstrap seeds the new SKILL.md). Also strip the
+	//          removed per-tool guidance fields (promptGuidance/promptGuidanceVersion) — per-tool
+	//          how-to now lives in the core skill body, not a config field.
+	(data) => {
+		data.coreSkillsSeeded = false;
+		for (const agent of Object.values(data.agents ?? {})) {
+			for (const toolCfg of Object.values(agent.toolsConfig ?? {})) {
+				const t = toolCfg as unknown as Record<string, unknown>;
+				t.promptGuidance = undefined;
+				t.promptGuidanceVersion = undefined;
 			}
 		}
 	},
@@ -479,6 +509,9 @@ export const DEFAULT_SETTINGS: PluginData = {
 	// Chat settings
 	targetFolder: "Chats",
 	attachmentFolder: "",
+	agentFolder: "Agents",
+	agentFolderMigrated: false,
+	coreSkillsSeeded: false,
 
 	// Privacy
 	privacyMode: "private-by-default",
@@ -532,14 +565,20 @@ export class PluginDataStore {
 	private readonly _plugin: SecondBrainPlugin;
 
 	/**
-	 * Guidance surfaces (base system prompt, per-capability guidance, per-tool
-	 * guidance) whose built-in default changed while the user had a customization
-	 * stamped against an older version, so it couldn't be auto-updated. Derived
-	 * reactively from live agent state — the moment the user re-aligns a prompt (which
-	 * re-stamps its version to current), the corresponding notice disappears (#356).
+	 * Guidance surfaces whose built-in default changed while the user had a customization
+	 * that couldn't be auto-updated. Now driven by file content (the per-agent base prompt is
+	 * file-backed), so the store needs a reader for the file-backed surface — injected via
+	 * {@link setPromptFileReader}. Until a reader is set (early startup), nothing is reported.
+	 * The moment a user re-aligns a surface, its notice disappears on the next recompute (#356).
 	 */
 	get staleGuidance(): readonly StaleGuidance[] {
-		return computeStaleGuidance(this.#data.agents);
+		return computeStaleGuidance(this.#data.agents, this.#promptFileReader);
+	}
+
+	/** Reader for file-backed prompt surfaces, injected by the prompt-file store once ready. */
+	#promptFileReader: PromptFileReader | null = null;
+	setPromptFileReader(reader: PromptFileReader | null): void {
+		this.#promptFileReader = reader;
 	}
 
 	constructor(plugin: SecondBrainPlugin, initialData: PluginData) {
@@ -652,7 +691,12 @@ export class PluginDataStore {
 	}
 
 	private getAllVaultPaths(): Set<string> {
-		return new Set(this._plugin.app.vault.getFiles().map((file) => file.path));
+		return new Set(
+			this._plugin.app.vault
+				.getFiles()
+				.map((file) => file.path)
+				.filter((p) => !isAgentFilePath(p)),
+		);
 	}
 
 	get targetFolder() {
@@ -679,6 +723,40 @@ export class PluginDataStore {
 	}
 	set attachmentFolder(val: string) {
 		this.#data.attachmentFolder = val;
+		this.saveSettings();
+	}
+
+	get agentFolder() {
+		return this.#data.agentFolder || "Agents";
+	}
+	set agentFolder(val: string) {
+		const normalized = normalizePath(val || "Agents");
+		this.#data.agentFolder = normalized;
+		// Best-effort ensure the folder exists
+		try {
+			const exists = !!this._plugin.app.vault.getFolderByPath(normalized);
+			if (!exists) {
+				this._plugin.app.vault.createFolder(normalized).catch(() => {});
+			}
+		} catch {
+			// ignore
+		}
+		this.saveSettings();
+	}
+
+	get agentFolderMigrated() {
+		return this.#data.agentFolderMigrated ?? false;
+	}
+	set agentFolderMigrated(val: boolean) {
+		this.#data.agentFolderMigrated = val;
+		this.saveSettings();
+	}
+
+	get coreSkillsSeeded() {
+		return this.#data.coreSkillsSeeded ?? false;
+	}
+	set coreSkillsSeeded(val: boolean) {
+		this.#data.coreSkillsSeeded = val;
 		this.saveSettings();
 	}
 
@@ -930,32 +1008,11 @@ export class PluginDataStore {
 			throw new Error(`Agent with ID "${agentId}" not found`);
 		}
 
-		// Stamp guidance/prompt version to the current default whenever the user
-		// actually CHANGES the corresponding value, so detectStaleGuidance() stops
-		// reporting it (issue #356). Only changed entries are stamped — the modal
-		// submits the whole capabilityPrompts map, so blindly stamping every key would
-		// erase a sibling capability's older (stale) stamp (greptile P1).
-		let stampedUpdates = updates;
-		if (updates.capabilityPrompts) {
-			const version: Partial<Record<CapabilityId, number>> = { ...agent.capabilityPromptsVersion };
-			for (const capId of Object.keys(updates.capabilityPrompts) as CapabilityId[]) {
-				if (updates.capabilityPrompts[capId] !== agent.capabilityPrompts?.[capId]) {
-					version[capId] = CAPABILITY_GUIDANCE_VERSION.get(capId) ?? 1;
-				}
-			}
-			stampedUpdates = { ...stampedUpdates, capabilityPromptsVersion: version };
-		}
-		// A changed system prompt is re-aligned to the current default version, so a
-		// prior stale-prompt notice closes once the user edits it via the diff modal.
-		if (updates.systemPrompt !== undefined && updates.systemPrompt !== agent.systemPrompt) {
-			stampedUpdates = { ...stampedUpdates, systemPromptVersion: BASE_SYSTEM_PROMPT_VERSION };
-		}
-
 		this.#data.agents = {
 			...this.#data.agents,
 			[agentId]: {
 				...agent,
-				...stampedUpdates,
+				...updates,
 			},
 		};
 		this.saveSettings();
@@ -1061,21 +1118,10 @@ export class PluginDataStore {
 	updateAgentToolConfig(agentId: string, toolId: BuiltInToolId, config: Partial<ToolConfig>): void {
 		const agent = this.#data.agents[agentId];
 		if (agent?.toolsConfig[toolId]) {
-			const next: ToolConfig = {
+			agent.toolsConfig[toolId] = {
 				...agent.toolsConfig[toolId],
 				...config,
 			};
-			// Stamp the guidance version to current whenever promptGuidance actually
-			// CHANGES, so detectStaleGuidance() stops reporting a re-aligned value
-			// (issue #356). read_content has dynamic guidance — skip it.
-			if (
-				config.promptGuidance !== undefined &&
-				config.promptGuidance !== agent.toolsConfig[toolId].promptGuidance &&
-				toolId !== "read_content"
-			) {
-				next.promptGuidanceVersion = TOOL_GUIDANCE_VERSION.get(toolId) ?? 1;
-			}
-			agent.toolsConfig[toolId] = next;
 			this.saveSettings();
 		}
 	}
@@ -2125,89 +2171,50 @@ export class PluginDataStore {
 
 let _pluginDataStore: PluginDataStore | null = null;
 
-/** Human label for a capability's guidance, shown in the "updated" notice. */
-const CAPABILITY_GUIDANCE_LABEL: Record<CapabilityId, string> = {
-	vault: "Vault guidance",
-	notes: "Note Management guidance",
-	web: "Web guidance",
-};
-
 /**
- * Pure staleness detection for one agent (NO mutation). Reads the agent's current
- * prompt/guidance values + version stamps and returns records for any built-in
- * default that moved past the version the user's customization was stamped against.
- * Kept separate from normalizeAgent() so the store can recompute it reactively —
- * the moment a user re-aligns a prompt (which re-stamps the version), the matching
- * notice disappears (issue #356). Verbatim-old-default values are treated as
- * not-stale here because normalizeAgent() clears them to the live default on load.
+ * Per-agent staleness for the base system prompt (file `Base Prompts/<id>.md`): stale when the
+ * file content is an OLD shipped default (the shipped default moved since the user's copy was
+ * written). A user customization we don't recognize is left alone; absence ⇒ live default.
+ * Skill/tool guidance moved into skill bodies, so it is no longer tracked here.
  */
-function detectStaleGuidance(agent: AgentConfig): StaleGuidance[] {
+function detectStaleGuidance(agent: AgentConfig, reader: PromptFileReader | null): StaleGuidance[] {
 	const stale: StaleGuidance[] = [];
 
-	// 1. System prompt: stale when it's a customization (not the current default and
-	//    not a verbatim historical default) whose stamped version predates the current.
-	const promptVersion = agent.systemPromptVersion ?? 0;
-	if (
-		promptVersion < BASE_SYSTEM_PROMPT_VERSION &&
-		agent.systemPrompt !== undefined &&
-		agent.systemPrompt !== BASE_SYSTEM_PROMPT &&
-		HISTORICAL_SYSTEM_PROMPTS.get(promptVersion) !== agent.systemPrompt
-	) {
-		stale.push({ agentId: agent.id, agentName: agent.name, kind: "system-prompt", label: "system prompt" });
-	}
-
-	// 2. Capability guidance: stale when customized (not a verbatim historical default)
-	//    and stamped against an older version than the one currently shipped.
-	if (agent.capabilityPrompts) {
-		for (const [capId, historicalSet] of HISTORICAL_CAPABILITY_GUIDANCE) {
-			const stored = agent.capabilityPrompts[capId];
-			if (stored === undefined || historicalSet.has(stored)) continue;
-			const storedVersion =
-				agent.capabilityPromptsVersion?.[capId] ?? CAPABILITY_GUIDANCE_VERSION.get(capId) ?? 1;
-			if (storedVersion < (CAPABILITY_GUIDANCE_VERSION.get(capId) ?? 1)) {
-				stale.push({
-					agentId: agent.id,
-					agentName: agent.name,
-					kind: "capability",
-					targetId: capId,
-					label: CAPABILITY_GUIDANCE_LABEL[capId],
-				});
+	if (reader) {
+		const content = reader.getBasePrompt(agent.id);
+		if (content !== null && content !== BASE_SYSTEM_PROMPT) {
+			for (const [, historical] of HISTORICAL_SYSTEM_PROMPTS) {
+				if (historical === content) {
+					stale.push({
+						agentId: agent.id,
+						agentName: agent.name,
+						kind: "system-prompt",
+						label: "system prompt",
+					});
+					break;
+				}
 			}
 		}
 	}
 
-	// 3. Per-tool guidance: same pattern. read_content is dynamic — handled elsewhere.
-	for (const [toolId, historicalSet] of HISTORICAL_TOOL_GUIDANCE) {
-		const toolCfg = agent.toolsConfig?.[toolId];
-		if (toolCfg?.promptGuidance === undefined || historicalSet.has(toolCfg.promptGuidance)) continue;
-		const storedVersion = toolCfg.promptGuidanceVersion ?? TOOL_GUIDANCE_VERSION.get(toolId) ?? 1;
-		if (storedVersion < (TOOL_GUIDANCE_VERSION.get(toolId) ?? 1)) {
-			stale.push({
-				agentId: agent.id,
-				agentName: agent.name,
-				kind: "tool",
-				targetId: toolId,
-				label: `${toolId} guidance`,
-			});
-		}
-	}
-
-	return stale;
-}
-
-/** Aggregates {@link detectStaleGuidance} across all agents (pure, no mutation). */
-function computeStaleGuidance(agents: AgentsConfig): StaleGuidance[] {
-	const stale: StaleGuidance[] = [];
-	for (const agent of Object.values(agents)) stale.push(...detectStaleGuidance(agent));
 	return stale;
 }
 
 /**
- * Normalizes an agent in place: fills defaults, and auto-migrates prompt/guidance
- * that still matches an OLD default verbatim up to the current default. Crucially it
- * does NOT advance the version stamp of a *customized* stale value — that stamp is
- * the durable signal detectStaleGuidance() reads, so bumping it here would silently
- * consume the "review this" state before the user ever saw it (issue #356).
+ * Aggregates per-agent base-system-prompt staleness across all agents (pure, no mutation).
+ * `reader` is null before the prompt-file layer is ready.
+ */
+function computeStaleGuidance(agents: AgentsConfig, reader: PromptFileReader | null): StaleGuidance[] {
+	const stale: StaleGuidance[] = [];
+	for (const agent of Object.values(agents)) stale.push(...detectStaleGuidance(agent, reader));
+	return stale;
+}
+
+/**
+ * Normalizes an agent in place: fills defaults. The base system prompt is file-backed now
+ * (not agent config), so its auto-migration/staleness lives in the prompt-file layer; per-tool
+ * and per-skill guidance moved into skill bodies, so there is no per-agent guidance to
+ * migrate here anymore.
  */
 function normalizeAgent(agent: AgentConfig): void {
 	// Ensure toolsConfig exists and has all tools
@@ -2229,50 +2236,6 @@ function normalizeAgent(agent: AgentConfig): void {
 	agent.skills ??= {};
 	agent.mcpServers ??= {};
 	agent.pluginExecTools ??= {};
-
-	// --- Prompt auto-migration (mutations only; staleness is detected separately) ---
-
-	// 1. System prompt: if the stored prompt still matches an old default verbatim,
-	//    silently upgrade it to the current default and advance the version stamp. A
-	//    *customized* stale prompt is left fully untouched — including its old version
-	//    stamp — so detectStaleGuidance() keeps reporting it until the user re-aligns
-	//    it (bumping the stamp here would consume that signal before it's seen).
-	const storedPromptVersion = agent.systemPromptVersion ?? 0;
-	if (storedPromptVersion < BASE_SYSTEM_PROMPT_VERSION) {
-		const historicalDefault = HISTORICAL_SYSTEM_PROMPTS.get(storedPromptVersion);
-		if (agent.systemPrompt === undefined || !historicalDefault || agent.systemPrompt === historicalDefault) {
-			agent.systemPrompt = BASE_SYSTEM_PROMPT;
-			agent.systemPromptVersion = BASE_SYSTEM_PROMPT_VERSION;
-		}
-		// else: customized old-version prompt — leave prompt AND version as-is (stale).
-	}
-	agent.systemPrompt ??= BASE_SYSTEM_PROMPT;
-	agent.systemPromptVersion ??= BASE_SYSTEM_PROMPT_VERSION;
-
-	// 2. Capability prompts: if the stored value is a verbatim historical default,
-	//    delete the key so the live default is used going forward. Customized values
-	//    are left untouched (their staleness is reported by detectStaleGuidance).
-	if (agent.capabilityPrompts) {
-		for (const [capId, historicalSet] of HISTORICAL_CAPABILITY_GUIDANCE) {
-			const stored = agent.capabilityPrompts[capId];
-			if (stored === undefined) continue;
-			if (historicalSet.has(stored)) {
-				delete agent.capabilityPrompts[capId];
-				if (agent.capabilityPromptsVersion) delete agent.capabilityPromptsVersion[capId];
-			}
-		}
-	}
-
-	// 3. Per-tool promptGuidance: same pattern. read_content is handled separately
-	//    by READ_CONTENT_GUIDANCE_DEFAULTS elsewhere; skip it here.
-	for (const [toolId, historicalSet] of HISTORICAL_TOOL_GUIDANCE) {
-		const toolCfg = agent.toolsConfig[toolId];
-		if (toolCfg?.promptGuidance === undefined) continue;
-		if (historicalSet.has(toolCfg.promptGuidance)) {
-			toolCfg.promptGuidance = undefined;
-			toolCfg.promptGuidanceVersion = undefined;
-		}
-	}
 
 	agent.summarizationModel ??= null;
 	agent.titleModel ??= null;
@@ -2339,6 +2302,15 @@ export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataS
 export function getData(): PluginDataStore {
 	if (!_pluginDataStore) throw new Error("Plugin does not exist");
 	return _pluginDataStore;
+}
+
+/**
+ * Test-only: clear the module-level singleton so a subsequent `createData` runs migrations +
+ * normalization on fresh input. `createData` memoizes its result, which is correct at runtime
+ * (one store per session) but makes per-test fixtures leak across tests. Not used in production.
+ */
+export function __resetPluginDataStoreForTests(): void {
+	_pluginDataStore = null;
 }
 
 /**

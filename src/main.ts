@@ -3,10 +3,12 @@ import { mount, unmount } from "svelte";
 import "./lib/i18n";
 import "./lib/langgraphContext";
 import { Logger as Log, applyVerboseLogging } from "./utils/logging";
+import { isAgentFilePath } from "./utils/fileFiltering";
 import { StartupProfiler } from "./utils/startupProfiler";
 import { persistStartupRecord, recordStartupEnvironment } from "./utils/startupTimingsStore";
 import "./styles.css";
 import { AgentManager } from "./agent/AgentManager";
+import { PromptFilesService } from "./agent/promptFiles";
 import { inlineDiffPlugin } from "./editor/inlineDiffExtension";
 import { selectionHighlightPlugin } from "./editor/selectionHighlightExtension";
 import { createReadingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
@@ -47,6 +49,7 @@ const SUPPORTED_CHAT_ATTACHMENT_EXTENSIONS = new Set([
 export default class SecondBrainPlugin extends Plugin {
 	agentManager!: AgentManager;
 	skillsService!: SkillsService;
+	promptFilesService!: PromptFilesService;
 	lexicalSearchService!: LexicalSearchService;
 	vectorStoreService!: VectorStoreService;
 	pendingChangesStore!: PendingChangesStore;
@@ -278,6 +281,11 @@ export default class SecondBrainPlugin extends Plugin {
 
 		// Create Skills Service instance (discovery deferred to onLayoutReady)
 		this.skillsService = new SkillsService(this);
+
+		// File-backed prompt store (per-agent base prompts). Seeded and
+		// refreshed during deferred init; provides the reader the data store uses for staleness.
+		this.promptFilesService = new PromptFilesService(this.app);
+		this.pluginData.setPromptFileReader(this.promptFilesService.reader);
 
 		// Register file-based chat view and .chat extension (v2 ChatView)
 		// const VIEW_TYPE = "my-view";
@@ -525,6 +533,12 @@ export default class SecondBrainPlugin extends Plugin {
 			void (async () => {
 				try {
 					await StartupProfiler.measure("skills:init", () => this.skillsService.initialize());
+					// Seed default guidance / base-prompt files (if absent) then load them into cache,
+					// so the assembled system prompt and staleness detection see file content.
+					await StartupProfiler.measure("promptFiles:init", async () => {
+						await this.promptFilesService.seedDefaults(this.pluginData.agents);
+						await this.promptFilesService.refresh(this.pluginData.agents);
+					});
 					await StartupProfiler.measure("agent:init", () => this.agentManager.initialize());
 					// Fold in the fire-and-forget search/vectorstore inits so their sub-phase
 					// spans (IDB opens, storage loads) are captured in the summary. The cold
@@ -539,6 +553,23 @@ export default class SecondBrainPlugin extends Plugin {
 				}
 			})();
 		});
+
+		// Everything under the agent folder now lives in the vault, so an accepted `update_skill`
+		// edit or a manual user edit to a skill / GUIDANCE.md / base-prompt file fires a vault
+		// modify/create/delete event. Re-discover skills, reload the prompt-file caches, and rebuild
+		// the live agent's system prompt so revised content takes effect without a reload.
+		const refreshAgentContextOnVaultChange = (file: TFile | { path?: string }) => {
+			const path = file?.path;
+			if (!path || !isAgentFilePath(path)) return;
+			void (async () => {
+				await this.skillsService?.discoverSkills();
+				await this.promptFilesService?.refresh(this.pluginData.agents);
+				this.agentManager?.invalidateSystemPromptCaches();
+			})();
+		};
+		this.registerEvent(this.app.vault.on("modify", refreshAgentContextOnVaultChange));
+		this.registerEvent(this.app.vault.on("create", refreshAgentContextOnVaultChange));
+		this.registerEvent(this.app.vault.on("delete", refreshAgentContextOnVaultChange));
 
 		this.registerEvent(
 			(
@@ -668,6 +699,35 @@ export default class SecondBrainPlugin extends Plugin {
 
 	async createNewChat() {
 		return this.agentManager.createNewChat();
+	}
+
+	/**
+	 * Re-seed and re-discover agent context after the configurable agent folder changes at runtime.
+	 * All steps are skip-if-exists, so the new location is populated (core skills + per-agent base
+	 * prompts) without touching or moving files in the old folder. Mirrors the startup init order
+	 * ({@link SkillsService.initialize}) and the vault-change refresh path.
+	 */
+	async reinitAgentFolder(): Promise<void> {
+		// Await the agent-root folder before seeding: the `agentFolder` setter's createFolder is
+		// fire-and-forget, so it may not have completed by the time we get here. Obsidian's
+		// DataAdapter.mkdir doesn't create intermediate parents, so bootstrapping the nested
+		// `Skills/`/`Base Prompts/` dirs against a not-yet-created root would throw and abort the
+		// rest of reinit (prompt refresh + cache invalidation), leaving chats on the old folder's
+		// prompts. (bootstrapDefaultSkills/seedDefaults also ensure the root now, but making the
+		// dependency explicit here keeps reinit correct independent of their internals.)
+		const root = this.pluginData.agentFolder;
+		if (!this.app.vault.getFolderByPath(root)) {
+			await this.app.vault.adapter.mkdir(root).catch(() => {});
+		}
+		await this.skillsService?.migrateCoreSkills();
+		await this.skillsService?.bootstrapDefaultSkills();
+		await this.skillsService?.discoverSkills();
+		await this.promptFilesService?.seedDefaults(this.pluginData.agents);
+		// Reload the base-prompt cache from the *new* folder — seedDefaults only writes files,
+		// it doesn't touch the cache, so without this the assembled prompt keeps serving the old
+		// folder's content (or the default) until a later vault event refreshes it.
+		await this.promptFilesService?.refresh(this.pluginData.agents);
+		this.agentManager?.invalidateSystemPromptCaches();
 	}
 
 	async openLatestChat() {

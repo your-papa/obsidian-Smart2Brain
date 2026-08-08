@@ -3,10 +3,11 @@ import { Notice } from "obsidian";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import type { SessionRegistry } from "../../stores/chatStore.svelte";
-import type { BuiltInToolId, CapabilityId } from "../../types/plugin";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { getPluginIcon, toExecToolId } from "../../agent/integrations/pluginIntegrations";
 import { icon } from "../../utils/utils";
+import { Logger } from "../../utils/logging";
+import { extractErrorMessage } from "../../utils/errorMessage";
 import Button from "../ui/Button.svelte";
 import {
 	DISMISS_ALL_ID,
@@ -105,14 +106,37 @@ function useSuggestion(s: SuggestedQuery): void {
 	registry.pendingInput = s.query ?? s.label;
 }
 
-function enablePlugin(nudge: PluginNudge): void {
+async function enablePlugin(nudge: PluginNudge): Promise<void> {
 	const agent = data.getSelectedAgent();
-	// Mirror AgentEditorModal.toggleSkill/toggleAutoIntegration: enable the
-	// documenting skill when present, and grant the exec tool so the agent can
-	// script against the plugin's api.
-	if (nudge.skillId) {
-		data.setAgentSkillEnabled(agent.id, nudge.skillId, true);
+	// Mirror AgentEditorModal.toggleAutoIntegration exactly: for an auto-discovered
+	// plugin with no documenting skill yet (nudge.skillId absent), seed one on demand
+	// (prewritten bundled skill if available, else an introspect-first template) and
+	// re-discover so it enters the cache — otherwise enabling only the exec tool leaves
+	// the integration with no editable skill note (no pencil / generic description).
+	let skillId = nudge.skillId;
+	if (!skillId) {
+		const service = plugin.skillsService;
+		if (!service) {
+			new Notice("Skills are still initializing — try again in a moment.");
+			return;
+		}
+		try {
+			skillId = (await service.seedIntegrationSkill(nudge.pluginId, nudge.displayName)) ?? undefined;
+		} catch (error) {
+			Logger.error(`[ChatRecommendations] seedIntegrationSkill failed for ${nudge.pluginId}:`, error);
+			new Notice(`Could not create skill for ${nudge.displayName}: ${extractErrorMessage(error)}`);
+			return;
+		}
+		if (!skillId) {
+			new Notice(`Could not create skill for ${nudge.displayName}.`);
+			return;
+		}
+		// Re-discover so the new skill enters the cache; without this a later editor
+		// open (and the runtime binding) wouldn't see it as a curated Plugin Skill.
+		await service.discoverSkills();
+		pluginRefresh++;
 	}
+	data.setAgentSkillEnabled(agent.id, skillId, true);
 	data.setAgentPluginExecEnabled(agent.id, toExecToolId(nudge.pluginId), true);
 	new Notice(`Enabled ${nudge.displayName} for ${agent.name}.`);
 	// pluginNudges recomputes off the persisted agent state and drops this entry.
@@ -122,20 +146,12 @@ function dismiss(id: string): void {
 	data.dismissRecommendation(id);
 }
 
-// Opens the right diff surface for a stale-guidance notice's Review action.
+// Opens the base-system-prompt diff for a stale-guidance notice's Review action.
 function reviewNotice(notice: UpdateNotice): void {
 	const mgr = plugin.agentManager;
 	if (!mgr) return;
-	switch (notice.kind) {
-		case "system-prompt":
-			mgr.openSystemPromptDiff(notice.agentId);
-			break;
-		case "capability":
-			if (notice.targetId) mgr.openCapabilityGuidanceDiff(notice.agentId, notice.targetId as CapabilityId);
-			break;
-		case "tool":
-			if (notice.targetId) mgr.openToolGuidanceDiff(notice.agentId, notice.targetId as BuiltInToolId);
-			break;
+	if (notice.kind === "system-prompt" && notice.agentId) {
+		mgr.openSystemPromptDiff(notice.agentId);
 	}
 }
 </script>
@@ -150,8 +166,13 @@ function reviewNotice(notice: UpdateNotice): void {
             <div class="update-notice flex items-center gap-2">
               <span class="chip-icon" use:icon={"refresh-cw"} style="--icon-size: 14px"></span>
               <span class="update-notice-text flex-1">
-                The default {notice.label} changed. <strong>{notice.agentName}</strong>'s customized version
-                was kept — review the diff to update it.
+                {#if notice.agentName}
+                  The default {notice.label} changed. <strong>{notice.agentName}</strong>'s customized version
+                  was kept — review the diff to update it.
+                {:else}
+                  The default {notice.label} changed. Your customized version was kept — review the diff
+                  to update it.
+                {/if}
               </span>
               <Button buttonText="Review" onClick={() => reviewNotice(notice)} />
               <button
@@ -171,13 +192,13 @@ function reviewNotice(notice: UpdateNotice): void {
 
     {#if pluginNudges.length > 0}
       <div class="recommendation-group flex flex-col items-center gap-2">
-        <p class="text-sm opacity-70">Enable capabilities for your plugins</p>
+        <p class="text-sm opacity-70">Enable skills for your plugins</p>
         <div class="plugin-nudges flex flex-col gap-1.5 w-full">
           {#each pluginNudges as nudge (nudge.id)}
             <div class="plugin-nudge flex items-center gap-2">
               <span class="chip-icon" use:icon={nudge.icon} style="--icon-size: 14px"></span>
               <span class="plugin-nudge-name flex-1">{nudge.displayName}</span>
-              <Button buttonText="Enable" cta onClick={() => enablePlugin(nudge)} />
+              <Button buttonText="Enable" cta onClick={() => void enablePlugin(nudge)} />
               <button
                 type="button"
                 class="dismiss-chip clickable-icon"
@@ -236,7 +257,7 @@ function reviewNotice(notice: UpdateNotice): void {
     </button>
   </div>
 {:else}
-  <!-- Fallback so the empty chat view is never completely blank (all dismissed / no capability). -->
+  <!-- Fallback so the empty chat view is never completely blank (all dismissed / no suggestions). -->
   <div class="flex flex-col items-center">
     <p class="text-lg mb-1">Start a new conversation</p>
     <p class="text-sm opacity-70">Ask me anything about your notes.</p>

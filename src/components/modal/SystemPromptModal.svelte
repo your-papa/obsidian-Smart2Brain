@@ -93,7 +93,7 @@ function handleResetToDefault() {
 	editor?.setValue(defaultPrompt);
 }
 
-function handleUseNewDefault() {
+function handleUseDefault() {
 	handleResetToDefault();
 	viewMode = "edit";
 }
@@ -109,7 +109,7 @@ function handleUseNewDefault() {
         <pre class="prompt-diff-text">{@html renderDiffSide(promptValue, defaultPrompt, "old")}</pre>
       </div>
       <div class="prompt-diff-pane">
-        <div class="prompt-diff-pane-label">New default</div>
+        <div class="prompt-diff-pane-label">Default</div>
         <pre class="prompt-diff-text">{@html renderDiffSide(promptValue, defaultPrompt, "new")}</pre>
       </div>
     </div>
@@ -139,7 +139,7 @@ function handleUseNewDefault() {
     <div class="flex-1"></div>
     {#if viewMode === "diff" && canShowDiff}
       <Button buttonText="Back to editor" onClick={() => (viewMode = "edit")} />
-      <Button buttonText="Use new default" cta={true} onClick={handleUseNewDefault} />
+      <Button buttonText="Use default" cta={true} onClick={handleUseDefault} />
     {:else}
       {#if !readOnly && accessors.viewFinalPrompt}
         <Button buttonText="View Final" onClick={accessors.viewFinalPrompt} />

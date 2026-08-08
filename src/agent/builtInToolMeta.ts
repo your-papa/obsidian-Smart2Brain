@@ -2,7 +2,7 @@ import type { BuiltInToolId } from "../types/plugin";
 
 /**
  * Display metadata for a built-in tool, shown in the Agent editor and the
- * Capability Settings modal. The runtime tool `name`/`description` come from the
+ * per-skill SkillToolsModal. The runtime tool `name`/`description` come from the
  * agent's `toolsConfig` (user-editable); these are the fallback defaults + the
  * plugin-requirement hint used purely for UI rendering.
  */
@@ -14,9 +14,9 @@ export interface BuiltInToolMeta {
 }
 
 /**
- * Default display metadata for every built-in tool. Shared by `AgentEditorModal`
- * (capability cards) and `CapabilitySettingsModal` (per-tool sections) so the
- * display-name title-casing and default descriptions live in exactly one place.
+ * Default display metadata for every built-in tool. Shared by the agent editor and the
+ * per-skill `SkillToolsModal` (per-tool sections) so the display-name title-casing and
+ * default descriptions live in exactly one place.
  */
 export const BUILT_IN_TOOL_META: BuiltInToolMeta[] = [
 	{
@@ -75,6 +75,12 @@ export const BUILT_IN_TOOL_META: BuiltInToolMeta[] = [
 		defaultName: "Web Search",
 		defaultDescription:
 			"Search the web and return results (title, URL, snippet). Configure the provider and API key in the tool's Configure panel. Prefer vault search first.",
+	},
+	{
+		id: "update_skill",
+		defaultName: "Update Skill",
+		defaultDescription:
+			"Revise one of the agent's own attached skills — rewrite its instructions and optionally its description to capture verified knowledge. The skill's name and plugin link are locked; edits are staged for your review.",
 	},
 ];
 

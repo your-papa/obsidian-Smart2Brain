@@ -25,21 +25,21 @@ const CATALOG: SuggestedQuery[] = [
 
 const ids = (list: SuggestedQuery[]) => list.map((s) => s.id);
 
-describe("filterSuggestions — capability gating", () => {
+describe("filterSuggestions — feature gating", () => {
 	it("keeps ungated suggestions regardless of context", () => {
 		expect(ids(filterSuggestions(NONE, [], CATALOG))).toContain("always");
 	});
 
-	it("hides gated suggestions when the capability is unavailable", () => {
+	it("hides gated suggestions when the feature is unavailable", () => {
 		const visible = ids(filterSuggestions(NONE, [], CATALOG));
 		expect(visible).toEqual(["always"]);
 	});
 
-	it("shows gated suggestions when the capability is available", () => {
+	it("shows gated suggestions when the feature is available", () => {
 		expect(ids(filterSuggestions(ALL, [], CATALOG))).toEqual(["always", "chat", "search", "graph"]);
 	});
 
-	it("gates each capability independently", () => {
+	it("gates each feature independently", () => {
 		const searchOnly: RecommendationContext = { hasChat: false, hasSearch: true, hasGraph: false };
 		expect(ids(filterSuggestions(searchOnly, [], CATALOG))).toEqual(["always", "search"]);
 	});
@@ -106,49 +106,37 @@ describe("update notices", () => {
 		kind: "system-prompt",
 		label: "system prompt",
 	};
-	const cap: StaleGuidanceLike = {
-		agentId: "a1",
-		agentName: "Default",
-		kind: "capability",
-		targetId: "vault",
-		label: "Vault guidance",
-	};
-	const tool: StaleGuidanceLike = {
+	const sys2: StaleGuidanceLike = {
 		agentId: "a2",
 		agentName: "Researcher",
-		kind: "tool",
-		targetId: "web_search",
-		label: "web_search guidance",
+		kind: "system-prompt",
+		label: "system prompt",
 	};
 
-	it("builds `update:<agentId>:<kind>` for system-prompt (no targetId)", () => {
+	it("builds `update:<agentId>:<kind>` for system-prompt", () => {
 		expect(updateNoticeId("a1", "system-prompt")).toBe("update:a1:system-prompt");
 	});
 
-	it("builds `update:<agentId>:<kind>:<targetId>` when a targetId is present", () => {
-		expect(updateNoticeId("a1", "capability", "vault")).toBe("update:a1:capability:vault");
+	it("uses the `global` segment when there is no agentId", () => {
+		expect(updateNoticeId(undefined, "system-prompt")).toBe("update:global:system-prompt");
 	});
 
 	it("maps records to notices with matching ids", () => {
-		const notices = filterUpdateNotices([sys, cap, tool], []);
-		expect(notices.map((n) => n.id)).toEqual([
-			"update:a1:system-prompt",
-			"update:a1:capability:vault",
-			"update:a2:tool:web_search",
-		]);
+		const notices = filterUpdateNotices([sys, sys2], []);
+		expect(notices.map((n) => n.id)).toEqual(["update:a1:system-prompt", "update:a2:system-prompt"]);
 	});
 
 	it("drops a notice whose id is dismissed", () => {
-		const visible = filterUpdateNotices([sys, cap], [updateNoticeId("a1", "capability", "vault")]);
+		const visible = filterUpdateNotices([sys, sys2], [updateNoticeId("a2", "system-prompt")]);
 		expect(visible.map((n) => n.id)).toEqual(["update:a1:system-prompt"]);
 	});
 
 	it("returns nothing when the whole block is dismissed", () => {
-		expect(filterUpdateNotices([sys, cap, tool], [DISMISS_ALL_ID])).toEqual([]);
+		expect(filterUpdateNotices([sys, sys2], [DISMISS_ALL_ID])).toEqual([]);
 	});
 
-	it("carries agentName/label/targetId through to the notice", () => {
-		const [notice] = filterUpdateNotices([cap], []);
-		expect(notice).toMatchObject({ agentName: "Default", label: "Vault guidance", targetId: "vault" });
+	it("carries agentName/label through to the notice", () => {
+		const [notice] = filterUpdateNotices([sys], []);
+		expect(notice).toMatchObject({ agentId: "a1", agentName: "Default", label: "system prompt" });
 	});
 });

@@ -104,7 +104,7 @@ export type MCPServersConfig = Record<string, MCPServerConfig>;
 /**
  * All built-in tool ids. This array is the single source of truth — `BuiltInToolId` is
  * derived from it, so adding an id here extends the type automatically (and a runtime
- * loop over every tool, e.g. capability counting, can never fall out of sync with it).
+ * loop over every tool, e.g. skill counting, can never fall out of sync with it).
  */
 export const BUILT_IN_TOOL_IDS = [
 	"search_notes",
@@ -117,97 +117,37 @@ export const BUILT_IN_TOOL_IDS = [
 	"manage_notes",
 	"fetch_url",
 	"web_search",
+	"update_skill",
 ] as const;
 
 export type BuiltInToolId = (typeof BUILT_IN_TOOL_IDS)[number];
 
 /**
- * Built-in tools that reach out to the public web rather than the vault. These are surfaced
- * as their own "Web" capability card (separate from the vault-exploration Core card) — shared
- * here so the editor and the capability-count logic agree on which tools belong to that card.
+ * Reader for the file-backed prompt surface (per-agent base prompt). Returns the current
+ * cached file content, or null when the file is absent. Implemented by the prompt-file layer
+ * and injected into the data store so staleness detection stays synchronous inside the
+ * reactive `staleGuidance` getter.
  */
-export const WEB_TOOL_IDS = ["fetch_url", "web_search"] as const satisfies readonly BuiltInToolId[];
+export interface PromptFileReader {
+	/** Cached content of `Base Prompts/<agentId>.md`, or null if absent. */
+	getBasePrompt(agentId: string): string | null;
+}
 
 /**
- * Built-in tools that mutate the vault (create/update/delete/move notes). Split out from
- * vault *exploration* into their own "Note management" capability so read access can be
- * granted without write access — the only mutating built-in tool is `manage_notes` (issue #368).
- */
-export const NOTE_TOOL_IDS = ["manage_notes"] as const satisfies readonly BuiltInToolId[];
-
-/**
- * Built-in tools that read/explore the vault — everything that is neither a web tool nor a
- * note-management (write) tool. Surfaced as the "Vault exploration" (Core) card.
- */
-export const VAULT_TOOL_IDS = BUILT_IN_TOOL_IDS.filter(
-	(id): id is Exclude<BuiltInToolId, (typeof WEB_TOOL_IDS)[number] | (typeof NOTE_TOOL_IDS)[number]> =>
-		!(WEB_TOOL_IDS as readonly string[]).includes(id) && !(NOTE_TOOL_IDS as readonly string[]).includes(id),
-);
-
-/**
- * Built-in capability identifiers. A capability is a fixed grouping of built-in tools
- * surfaced as one card in the Agent editor and one `#` section in the assembled system
- * prompt. (Memory is a separate folder feature, not a capability, so it is not listed.)
- */
-export type CapabilityId = "vault" | "notes" | "web";
-
-/**
- * A built-in prompt or guidance default that changed in a plugin update while the
- * user had a customized version, so it couldn't be auto-migrated. Surfaced as a
- * dismissable "updated" notice in the new-chat recommendations surface (issue #356).
+ * A built-in prompt default that changed in a plugin update while the user had a customized
+ * version, so it couldn't be auto-migrated. Surfaced as a dismissable "updated" notice in the
+ * new-chat recommendations surface (issue #356). Only the per-agent base system prompt is
+ * tracked this way now — skill/tool guidance moved into skill bodies (edited via the note).
  */
 export interface StaleGuidance {
-	agentId: string;
-	agentName: string;
+	/** Owning agent for the base system prompt. */
+	agentId?: string;
+	agentName?: string;
 	/** Which surface is stale. */
-	kind: "system-prompt" | "capability" | "tool";
-	/** CapabilityId (kind "capability") or BuiltInToolId (kind "tool"); absent for the base prompt. */
-	targetId?: string;
-	/** Human-readable label for the notice, e.g. "system prompt", "Vault guidance", "web_search guidance". */
+	kind: "system-prompt";
+	/** Human-readable label for the notice, e.g. "system prompt". */
 	label: string;
 }
-
-/**
- * Definition of a built-in capability. Single source of truth shared by the editor UI
- * (which renders one card per capability) and `AgentManager.assembleSystemPrompt` (which
- * renders one `#` section per capability with its tools nested as `##` subheaders) so the
- * vault/web split is not duplicated. Default guidance *strings* live in `prompts.ts`.
- */
-export interface CapabilityDef {
-	id: CapabilityId;
-	/** Section heading / card title (e.g. "Vault exploration"). */
-	title: string;
-	/** Card description shown in the editor. */
-	description: string;
-	/** Obsidian icon id for the card. */
-	icon: string;
-	/** Built-in tools that belong to this capability. */
-	toolIds: readonly BuiltInToolId[];
-}
-
-export const CAPABILITIES: readonly CapabilityDef[] = [
-	{
-		id: "vault",
-		title: "Vault Exploration",
-		description: "Search, read, and explore your vault with the built-in tools.",
-		icon: "compass",
-		toolIds: VAULT_TOOL_IDS,
-	},
-	{
-		id: "notes",
-		title: "Note Management",
-		description: "Create, update, delete, and move notes. All writes are staged for your review.",
-		icon: "file-pen",
-		toolIds: NOTE_TOOL_IDS,
-	},
-	{
-		id: "web",
-		title: "Web",
-		description: "Reach the public internet: fetch web pages and run web searches.",
-		icon: "globe",
-		toolIds: WEB_TOOL_IDS,
-	},
-];
 
 /**
  * Tool-specific settings for search_notes tool
@@ -299,14 +239,6 @@ export interface ToolConfig {
 	name: string;
 	/** Custom description for the tool (shown to the AI agent) */
 	description: string;
-	/** Optional prompt-only guidance injected into the assembled system prompt when this tool is enabled */
-	promptGuidance?: string;
-	/**
-	 * Which TOOL_GUIDANCE_VERSION `promptGuidance` was written against, stamped at
-	 * save time. Enables the same stale-default detection as capabilityPromptsVersion
-	 * (issue #356). Absent = pre-versioning (treated as current on first load).
-	 */
-	promptGuidanceVersion?: number;
 	/** Tool-specific settings */
 	settings?: ToolSpecificSettings;
 }
@@ -454,14 +386,6 @@ export interface AgentConfig {
 	summarizationModel: import("../stores/chatStore.svelte").ChatModel | null;
 	/** Optional title generation model; null means auto-use the chat model */
 	titleModel: import("../stores/chatStore.svelte").ChatModel | null;
-	/** Base system prompt for this agent */
-	systemPrompt: string;
-	/**
-	 * Which version of BASE_SYSTEM_PROMPT this agent's systemPrompt was copied from.
-	 * Absent = pre-versioning (treated as 0). normalizeAgent() uses this to detect
-	 * whether the stored prompt is still an unmodified default and can be auto-updated.
-	 */
-	systemPromptVersion?: number;
 	/** Skill enable states for this agent (skill name -> state) */
 	skills: Record<string, AgentSkillState>;
 	/** Configuration for built-in tools */
@@ -482,35 +406,19 @@ export interface AgentConfig {
 	 */
 	subAgentIds?: string[];
 	/**
-	 * Whether this agent records and recalls long-lived facts in a memory folder.
-	 * Absent = disabled. When enabled (and `manage_notes` is on), `memoryPrompt` is
-	 * interpolated into the assembled system prompt and note writes inside
-	 * `memoryFolder` auto-apply.
+	 * Whether this agent records and recalls long-lived facts in the shared memory folder.
+	 * Absent = disabled. When enabled (and `manage_notes` is on), the memory guidance is
+	 * interpolated into the assembled system prompt and note writes inside the global
+	 * `Agents/Memories/` folder auto-apply.
 	 */
 	memoryEnabled?: boolean;
-	/** Vault folder this agent uses for memory notes. Absent = "Agent Notes". */
-	memoryFolder?: string;
 	/**
 	 * User-editable memory instructions injected right after the base system prompt
 	 * (not in the auto-appended tool tail) so the user can read and tune them. Seeded
 	 * with the default guidance when memory is first enabled; absent falls back to the
-	 * default rendered from `memoryFolder`.
+	 * default rendered from the global memories folder.
 	 */
 	memoryPrompt?: string;
-	/**
-	 * Per-capability guidance overrides, keyed by `CapabilityId` ("vault" | "web").
-	 * Injected as the body of that capability's `#` section in the assembled system
-	 * prompt, above its enabled tools' per-tool `##` subheaders. Seeded on first
-	 * pencil-edit; absent falls back to `buildDefaultCapabilityGuidance(id)`.
-	 */
-	capabilityPrompts?: Partial<Record<CapabilityId, string>>;
-	/**
-	 * Which CAPABILITY_GUIDANCE_VERSION each customized `capabilityPrompts` entry
-	 * was written against, stamped at save time. Lets normalizeAgent() detect when
-	 * the shipped default has moved since the user customized it (issue #356).
-	 * Absent for a capability = pre-versioning (treated as current on first load).
-	 */
-	capabilityPromptsVersion?: Partial<Record<CapabilityId, number>>;
 }
 
 /**
@@ -550,6 +458,28 @@ export interface PluginData {
 
 	targetFolder: string;
 	attachmentFolder: string;
+	/**
+	 * Configurable root vault folder for all agent context (default "Agents"). Holds three
+	 * fixed subdirectories: `Memories/` (shared memory notes), `Skills/` (skill
+	 * `<name>/SKILL.md` dirs, core skills included), and `Base Prompts/`
+	 * (`<agent-id>.md` per agent). The whole tree is plugin machinery, excluded from
+	 * indexing/search/graph via `isAgentFilePath`.
+	 */
+	agentFolder: string;
+	/**
+	 * One-time flag: agent context has been consolidated under the vault `Agents/` folder
+	 * (skills moved from the top-level `Skills/` folder or legacy `<configDir>/skills` into
+	 * `Agents/Skills/`). Set by `SkillsService.migrateAgentFolder` on first init.
+	 */
+	agentFolderMigrated: boolean;
+	/**
+	 * One-time flag: the capability→core-skill migration has run. The 4 former capabilities
+	 * (vault/notes/web/update) are now bundled core skills (`Skills/<id>/SKILL.md` with
+	 * tools attached via `allowed-tools`). On first init after upgrade, the orphaned
+	 * `Skills/<id>/GUIDANCE.md` files are removed so `bootstrapDefaultSkills` can seed the
+	 * new SKILL.md into the same dirs. Set by `SkillsService.migrateCoreSkills` on success.
+	 */
+	coreSkillsSeeded: boolean;
 
 	// ============================================================================
 	// Privacy

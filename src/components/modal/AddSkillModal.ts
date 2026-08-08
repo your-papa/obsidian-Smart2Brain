@@ -21,11 +21,14 @@ export class AddSkillModal extends Modal {
 	onOpen() {
 		this.setTitle("Add Custom Skill");
 
+		// The modal is just a couple of text fields now (instructions are written in the opened
+		// note), so let it size to its content instead of forcing a tall fixed height.
 		this.restoreLayout = applyModalLayout(this, {
-			width: "min(800px, 90vw)",
+			width: "min(560px, 90vw)",
 			maxWidth: "90vw",
-			height: "85vh",
-			contentOverflow: "hidden",
+			maxHeight: "85vh",
+			contentOverflow: "auto",
+			contentFill: false,
 		});
 
 		this.component = mount(AddSkillModalComponent, {
