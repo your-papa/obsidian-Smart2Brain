@@ -557,6 +557,38 @@ describe("createData", () => {
 		const agent = store.getAgent(DEFAULT_AGENT_ID) as unknown as { migratedBasePrompt?: string };
 		expect(agent.migratedBasePrompt).toBeUndefined();
 	});
+
+	it("de-duplicates persisted agent names that sanitize to the same prompt filename", async () => {
+		const mkAgent = (id: string, name: string) => ({
+			id,
+			name,
+			chatModel: null,
+			systemPrompt: "",
+			skills: {},
+			toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
+			mcpServers: {},
+		});
+		const plugin = {
+			...createMockPlugin(),
+			loadData: vi.fn().mockResolvedValue({
+				...structuredClone(DEFAULT_SETTINGS),
+				agents: {
+					[DEFAULT_AGENT_ID]: mkAgent(DEFAULT_AGENT_ID, "Default Agent"),
+					// Distinct raw names that both sanitize to "Research Assistant".
+					a1: mkAgent("a1", "Research/Assistant"),
+					a2: mkAgent("a2", "Research Assistant"),
+				},
+			}),
+		};
+
+		const store = await createData(plugin as never);
+		const n1 = store.getAgent("a1")!.name;
+		const n2 = store.getAgent("a2")!.name;
+		// First occurrence keeps its name; the clashing one is suffixed so the sanitized
+		// filenames differ.
+		expect(n1).not.toBe(n2);
+		expect(new Set([n1, n2]).size).toBe(2);
+	});
 });
 
 /* --------------------------------------------------------------------------
