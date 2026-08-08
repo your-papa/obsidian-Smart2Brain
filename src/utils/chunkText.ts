@@ -58,6 +58,29 @@ function splitParagraphs(content: string): string[] {
 }
 
 /**
+ * Split text on sentence boundaries: whitespace that immediately follows a
+ * sentence terminator (`.`, `!`, `?`). Equivalent to splitting on
+ * `/(?<=[.!?])\s+/`, but written without regex lookbehind, which is unsupported
+ * on iOS < 16.4 (and throws at parse time there).
+ */
+function splitOnSentences(text: string): string[] {
+	const parts: string[] = [];
+	let start = 0;
+	// Match a terminator followed by one or more whitespace chars; the split
+	// point is *after* the terminator, and the whitespace run is dropped.
+	const boundary = /[.!?]\s+/g;
+	let m: RegExpExecArray | null;
+	// biome-ignore lint/suspicious/noAssignInExpressions: standard exec loop
+	while ((m = boundary.exec(text)) !== null) {
+		const cut = m.index + 1; // keep the terminator on the left part
+		parts.push(text.slice(start, cut));
+		start = cut + (m[0].length - 1); // skip the whitespace run
+	}
+	if (start < text.length) parts.push(text.slice(start));
+	return parts;
+}
+
+/**
  * Break a single oversized unit (a paragraph too large for the body budget)
  * into pieces no larger than `maxBodyChars`, preferring line, then sentence,
  * then hard character boundaries.
@@ -65,14 +88,17 @@ function splitParagraphs(content: string): string[] {
 function splitOversizedUnit(unit: string, maxBodyChars: number): string[] {
 	if (unit.length <= maxBodyChars) return [unit];
 
-	// Try progressively finer separators.
-	for (const sep of ["\n", /(?<=[.!?])\s+/]) {
-		const parts = typeof sep === "string" ? unit.split(sep) : unit.split(sep as RegExp);
+	// Try progressively finer separators: newline first, then sentence boundary.
+	const strategies: Array<{ split: (s: string) => string[]; joiner: string }> = [
+		{ split: (s) => s.split("\n"), joiner: "\n" },
+		{ split: splitOnSentences, joiner: " " },
+	];
+	for (const { split, joiner } of strategies) {
+		const parts = split(unit);
 		if (parts.length < 2) continue;
 
 		const packed: string[] = [];
 		let current = "";
-		const joiner = typeof sep === "string" ? sep : " ";
 		for (const part of parts) {
 			const candidate = current ? `${current}${joiner}${part}` : part;
 			if (candidate.length <= maxBodyChars) {

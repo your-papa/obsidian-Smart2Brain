@@ -1,6 +1,6 @@
 import type { BaseMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { Notice, normalizePath, TFile } from "obsidian";
+import { Notice, normalizePath, Platform, TFile } from "obsidian";
 import { installObsidianFetch } from "../lib/obsidianFetch";
 import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
@@ -29,7 +29,7 @@ import {
 	getProviderDefinition,
 } from "../providers/index";
 import type { ChatAttachment } from "../types/shared";
-import { gzipSync } from "node:zlib";
+import { gzipString, toArrayBuffer } from "../utils/gzip";
 import { Logger } from "../utils/logging";
 import { memoriesDir } from "../utils/agentPaths";
 import { StartupProfiler } from "../utils/startupProfiler";
@@ -75,7 +75,7 @@ import {
 import { getRegistry } from "../providers/registry";
 
 import type { StructuredToolInterface } from "@langchain/core/tools";
-import { MultiServerMCPClient } from "@langchain/mcp-adapters";
+import type { MultiServerMCPClient } from "@langchain/mcp-adapters";
 
 const URL_REGEX = /https?:\/\/[^\s]+/g;
 const LANGCHAIN_TROUBLESHOOT_REGEX = /\n*Troubleshooting URL: https:\/\/docs\.langchain\.com\S*/g;
@@ -966,7 +966,19 @@ export class AgentManager {
 	): Promise<boolean> {
 		if (!mcpServers || Object.keys(mcpServers).length === 0) return true;
 
+		// MCP transports depend on Node builtins (child_process/stdio, node:stream)
+		// that Obsidian's mobile WebView lacks; the SDK also imports them at module
+		// top, so it must never be evaluated on mobile. Skip MCP there entirely.
+		if (!Platform.isDesktopApp) {
+			Logger.log("Skipping MCP tools: not available on mobile.");
+			return true;
+		}
+
 		try {
+			// Dynamically import so the MCP SDK (and its top-level Node builtin
+			// imports) is only evaluated when MCP is actually used on desktop —
+			// never at plugin load, which would crash the whole plugin.
+			const { MultiServerMCPClient } = await import("@langchain/mcp-adapters");
 			const mcpConfig = { mcpServers } as ConstructorParameters<typeof MultiServerMCPClient>[0];
 			Logger.log("Initializing MCP client...", mcpConfig);
 
@@ -1641,14 +1653,8 @@ export class AgentManager {
 			writes: {},
 		};
 
-		const compressed = gzipSync(JSON.stringify(initialData));
-		await this.plugin.app.vault.adapter.writeBinary(
-			path,
-			compressed.buffer.slice(
-				compressed.byteOffset,
-				compressed.byteOffset + compressed.byteLength,
-			) as ArrayBuffer,
-		);
+		const compressed = await gzipString(JSON.stringify(initialData));
+		await this.plugin.app.vault.adapter.writeBinary(path, toArrayBuffer(compressed));
 
 		this.chatManager.registerNewThread(path);
 

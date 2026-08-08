@@ -49,18 +49,34 @@ export function isTextExtension(ext: string): boolean {
 }
 
 /**
+ * Encodes an ArrayBuffer to a base64 string.
+ *
+ * Uses the web `btoa` (available on desktop and mobile) rather than Node's
+ * `Buffer`, which does not exist in Obsidian's mobile WebView. Chunked to avoid
+ * exceeding the argument-count limit of `String.fromCharCode` on large buffers.
+ */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+	const bytes = new Uint8Array(buffer);
+	const CHUNK = 0x8000; // 32 KiB per fromCharCode call
+	let binary = "";
+	for (let i = 0; i < bytes.length; i += CHUNK) {
+		binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+	}
+	return btoa(binary);
+}
+
+/**
  * Converts an ArrayBuffer to a base64 data URI string.
  */
 export function toBase64DataUri(buffer: ArrayBuffer, mimeType: string): string {
-	const base64 = Buffer.from(buffer).toString("base64");
-	return `data:${mimeType};base64,${base64}`;
+	return `data:${mimeType};base64,${arrayBufferToBase64(buffer)}`;
 }
 
 /**
  * Converts an ArrayBuffer to a raw base64 string (no data URI prefix).
  */
 export function toBase64(buffer: ArrayBuffer): string {
-	return Buffer.from(buffer).toString("base64");
+	return arrayBufferToBase64(buffer);
 }
 
 /**

@@ -1,5 +1,4 @@
 <script lang="ts">
-import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { Notice, getIconIds, normalizePath, type Modal } from "obsidian";
 import { onMount } from "svelte";
 import { AddSkillModal } from "./AddSkillModal";
@@ -695,6 +694,7 @@ async function fetchServerTools(serverId: string) {
 	try {
 		const patch = installObsidianFetch();
 		try {
+			const { MultiServerMCPClient } = await import("@langchain/mcp-adapters");
 			const mcpClient = new MultiServerMCPClient(buildMCPConfig(serverId, config));
 			const tools = await mcpClient.getTools();
 			mcpServerTools[serverId] = {

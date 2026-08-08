@@ -1,6 +1,6 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { Logger } from "../utils/logging";
+import { createAsyncLocalStorage, hasNativeAsyncLocalStorage } from "./asyncLocalStorage";
 
 /**
  * Wires LangChain-core's global AsyncLocalStorage singleton to a real
@@ -27,16 +27,22 @@ import { Logger } from "../utils/logging";
  * (its config is passed explicitly), but the `task` tool's ALS-only lookup
  * throws when it tries to build the subagent's state.
  *
- * Obsidian runs in Electron's renderer where `node:async_hooks` IS available
- * (see `src/lib/aiTransport.ts`, which already uses AsyncLocalStorage in
- * production), so we can safely initialize the real instance here.
+ * Obsidian desktop runs in Electron's renderer where `node:async_hooks` IS
+ * available (see `src/lib/aiTransport.ts`). On mobile there is no
+ * `node:async_hooks`, so `createAsyncLocalStorage()` returns a synchronous shim
+ * that still satisfies the singleton's `getStore()`/`run()` contract for the
+ * single-run agent flows the mobile UI drives.
  *
  * `initializeGlobalInstance` is a no-op if some other code already set an
  * instance, so importing this module is idempotent and safe to run first.
  */
 export function initLangGraphAsyncContext(): void {
 	try {
-		AsyncLocalStorageProviderSingleton.initializeGlobalInstance(new AsyncLocalStorage());
+		// biome-ignore lint/suspicious/noExplicitAny: singleton accepts a duck-typed ALS
+		AsyncLocalStorageProviderSingleton.initializeGlobalInstance(createAsyncLocalStorage<any>() as any);
+		if (!hasNativeAsyncLocalStorage) {
+			Logger.info("langgraphContext: using synchronous AsyncLocalStorage shim (no node:async_hooks)");
+		}
 	} catch (error) {
 		// Never let this crash plugin startup — the worst case without it is the
 		// pre-existing "Config not retrievable" error on subagent delegation.

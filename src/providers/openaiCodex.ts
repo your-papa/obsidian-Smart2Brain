@@ -1,7 +1,5 @@
-import { createServer } from "node:http";
 import type { Server, IncomingMessage, ServerResponse } from "node:http";
-import { Buffer } from "node:buffer";
-import { requestUrl } from "obsidian";
+import { Platform, requestUrl } from "obsidian";
 import { getPlugin } from "../stores/state.svelte";
 import {
 	clearCodexSession,
@@ -13,6 +11,7 @@ import type { CodexSession } from "../types/provider";
 import { Logger } from "../utils/logging";
 import { performAiFetch } from "../lib/aiTransport";
 import { escapeHtml } from "../utils/html";
+import { arrayBufferToBase64Url, base64UrlToString, requireNodeHttp } from "./oauthNode";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER = "https://auth.openai.com";
@@ -122,7 +121,7 @@ function generateRandomString(length: number): string {
 }
 
 function base64UrlEncode(buffer: ArrayBuffer): string {
-	return Buffer.from(buffer).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+	return arrayBufferToBase64Url(buffer);
 }
 
 function generateState(): string {
@@ -140,7 +139,7 @@ function parseJwtClaims(token: string): IdTokenClaims | undefined {
 	const parts = token.split(".");
 	if (parts.length !== 3 || !parts[1]) return undefined;
 	try {
-		return JSON.parse(Buffer.from(parts[1], "base64url").toString()) as IdTokenClaims;
+		return JSON.parse(base64UrlToString(parts[1])) as IdTokenClaims;
 	} catch {
 		return undefined;
 	}
@@ -382,6 +381,7 @@ async function startOpenAICodexAuthServer(expectedState: string, pkce: PkceCodes
 
 	await new Promise<void>((resolve, reject) => {
 		let settled = false;
+		const createServer = requireNodeHttp();
 		const server = createServer((req, res) => {
 			void handleOpenAICodexCallback(req, res);
 		});
@@ -418,6 +418,9 @@ async function startOpenAICodexAuthServer(expectedState: string, pkce: PkceCodes
 }
 
 export async function signInWithOpenAICodex(): Promise<CodexSession> {
+	if (Platform.isMobileApp) {
+		throw new Error("ChatGPT sign-in is only available on desktop. Enter an API key instead.");
+	}
 	const redirectUri = getRedirectUri();
 	const pkce = await generatePkce();
 	const expectedState = generateState();

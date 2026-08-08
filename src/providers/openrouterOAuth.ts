@@ -1,9 +1,8 @@
-import { Buffer } from "node:buffer";
-import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import { requestUrl } from "obsidian";
+import { Platform, requestUrl } from "obsidian";
 import { Logger } from "../utils/logging";
 import { escapeHtml } from "../utils/html";
+import { arrayBufferToBase64Url, requireNodeHttp } from "./oauthNode";
 
 const OPENROUTER_AUTH_URL = "https://openrouter.ai/auth";
 const OPENROUTER_EXCHANGE_URL = "https://openrouter.ai/api/v1/auth/keys";
@@ -99,7 +98,7 @@ function generateRandomString(length: number): string {
 async function createCodeChallenge(codeVerifier: string): Promise<string> {
 	const data = new TextEncoder().encode(codeVerifier);
 	const hash = await crypto.subtle.digest("SHA-256", data);
-	return Buffer.from(hash).toString("base64url");
+	return arrayBufferToBase64Url(hash);
 }
 
 function buildAuthorizeUrl(redirectUri: string, codeChallenge: string): string {
@@ -214,6 +213,7 @@ async function startOpenRouterAuthServer(codeVerifier: string, redirectUri: stri
 
 	await new Promise<void>((resolve, reject) => {
 		let settled = false;
+		const createServer = requireNodeHttp();
 		const server = createServer((req, res) => {
 			void handleOpenRouterCallback(req, res);
 		});
@@ -256,6 +256,9 @@ async function openBrowser(url: string): Promise<void> {
 }
 
 export async function signInWithOpenRouter(): Promise<string> {
+	if (Platform.isMobileApp) {
+		throw new Error("OpenRouter browser sign-in is only available on desktop. Enter an API key instead.");
+	}
 	const redirectUri = getRedirectUri();
 	const codeVerifier = generateRandomString(64);
 	const codeChallenge = await createCodeChallenge(codeVerifier);

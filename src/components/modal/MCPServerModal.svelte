@@ -1,6 +1,6 @@
 <script lang="ts">
-import { MultiServerMCPClient } from "@langchain/mcp-adapters";
-import { Notice } from "obsidian";
+import type { MultiServerMCPClient } from "@langchain/mcp-adapters";
+import { Notice, Platform } from "obsidian";
 import { onMount } from "svelte";
 import { installObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
@@ -52,7 +52,10 @@ function generateServerId(input: string): string {
 // Form state - initialized from captured initial values
 let name = $state(initialConfig?.displayName ?? "");
 let enabled = $state(initialConfig?.enabled ?? true);
-let transport = $state<MCPTransportType>(initialConfig?.transport ?? "http");
+// stdio is desktop-only; if a mobile user opens an existing stdio server
+// (e.g. synced from desktop), fall back to http so the dropdown selection
+// stays valid rather than showing an absent option.
+let transport = $state<MCPTransportType>(Platform.isDesktopApp ? (initialConfig?.transport ?? "http") : "http");
 
 // stdio-specific fields
 let command = $state((initialConfig as MCPStdioServerConfig)?.command ?? "");
@@ -77,10 +80,12 @@ let testError = $state<string | null>(null);
 let discoveredTools = $state<{ name: string; description?: string }[]>([]);
 let testSuccess = $state(false);
 
-// Transport options
+// Transport options. stdio spawns a local process (Node child_process), which
+// is desktop-only — AgentManager skips all MCP loading on mobile, so don't let
+// mobile users configure a transport that would silently never load.
 const transportOptions = [
 	{ display: "Remote Server (HTTP)", value: "http" as MCPTransportType },
-	{ display: "Local Command (stdio)", value: "stdio" as MCPTransportType },
+	...(Platform.isDesktopApp ? [{ display: "Local Command (stdio)", value: "stdio" as MCPTransportType }] : []),
 ];
 
 onMount(() => {
@@ -291,6 +296,7 @@ async function handleTestConnection() {
 			const config = buildTestConfig();
 			Logger.log("Testing MCP connection with config:", config);
 
+			const { MultiServerMCPClient } = await import("@langchain/mcp-adapters");
 			mcpClient = new MultiServerMCPClient(config);
 			const tools = await mcpClient.getTools();
 

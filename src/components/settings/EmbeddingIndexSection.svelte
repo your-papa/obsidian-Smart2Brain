@@ -1,5 +1,6 @@
 <script lang="ts">
 import { onDestroy, untrack } from "svelte";
+import { Platform } from "obsidian";
 import { EmbeddingIndexSetupModal } from "../modal/EmbeddingIndexSetupModal";
 import { IndexingReportModal } from "../modal/IndexingReportModal";
 import ManagedEntityItem from "./ManagedEntityItem.svelte";
@@ -216,12 +217,15 @@ function getSelectionGroupLabel(): string {
         </div>
         <Button buttonText="Cancel" onClick={cancelIndexing} />
       {:else}
+        <!-- Index import uses a native file dialog + node fs; desktop only. -->
+        {#if Platform.isDesktopApp}
         <Button
           iconId="upload"
           ariaLabel="Import index from file"
           tooltip="Import index from file"
           onClick={() => void importFromFile()}
         />
+        {/if}
         <Button buttonText="Add Index" cta={true} onClick={openAddIndexModal} />
       {/if}
     </div>
@@ -279,12 +283,15 @@ function getSelectionGroupLabel(): string {
                 tooltip="View indexing report"
                 onClick={() => openIndexingReport(entry.id)}
               />
+              <!-- Index export uses a native file dialog + node fs; desktop only. -->
+              {#if Platform.isDesktopApp}
               <Button
                 iconId="download"
                 ariaLabel="Export index to file"
                 tooltip="Export index to file"
                 onClick={() => void exportIndex(entry.id)}
               />
+              {/if}
             {/if}
             <Button
               iconId="trash"

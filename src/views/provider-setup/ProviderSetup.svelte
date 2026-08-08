@@ -92,7 +92,10 @@ function handleAuthModeChange(mode: OpenAIAuthMode) {
 // For OAuth-capable providers the sign-in CTA is always shown (it's the primary path);
 // the API-key field is an optional reveal below it. For OAuth-only providers there's no
 // key path at all. Non-OAuth providers show neither (plain AuthConfigFields).
-const showSignIn = $derived(!!oauth);
+// The loopback-server OAuth flow needs node:http, so sign-in is desktop-only; on mobile
+// we suppress the CTA and fall back to the API-key path where the provider supports one.
+const oauthAvailable = $derived(!!oauth && Platform.isDesktopApp);
+const showSignIn = $derived(oauthAvailable);
 const isSignedIn = $derived(showSignIn ? (oauth?.isSignedIn?.() ?? false) : false);
 
 // Whether this OAuth provider is already connected, so the edit view shows a "Connected"
@@ -431,29 +434,43 @@ $effect(() => {
 
     {#if oauth && oauth.supportsApiKey}
       <!-- OAuth + API key: sign-in is the primary path; the key field is revealed on
-           demand via a link, so the common (no-key) flow stays a single clean button. -->
-      {@render oauthSignIn()}
+           demand via a link, so the common (no-key) flow stays a single clean button.
+           On mobile the loopback OAuth flow is unavailable, so show the key field only. -->
+      {#if oauthAvailable}
+        {@render oauthSignIn()}
 
-      <div class="auth-alt-toggle">
-        <button type="button" class="auth-alt-link" onclick={toggleApiKey}>
-          {revealApiKey ? "Hide API key field" : "Use an API key instead →"}
-        </button>
-      </div>
+        <div class="auth-alt-toggle">
+          <button type="button" class="auth-alt-link" onclick={toggleApiKey}>
+            {revealApiKey ? "Hide API key field" : "Use an API key instead →"}
+          </button>
+        </div>
 
-      {#if revealApiKey}
+        {#if revealApiKey}
+          <AuthConfigFields provider={providerId} />
+        {/if}
+      {:else}
         <AuthConfigFields provider={providerId} />
       {/if}
 
       {@render trustedToggle()}
     {:else if oauth}
-      <!-- OAuth-only provider (no manual API key): sign-in CTA only. -->
+      <!-- OAuth-only provider (no manual API key): sign-in CTA only. On mobile there is
+           no viable credential path (loopback OAuth needs a desktop). -->
       {#if oauth.description}
         <div class="setting-item">
           <div class="setting-item-description">{oauth.description}</div>
         </div>
       {/if}
 
-      {@render oauthSignIn()}
+      {#if oauthAvailable}
+        {@render oauthSignIn()}
+      {:else}
+        <div class="setting-item">
+          <div class="setting-item-description">
+            {oauth.label} sign-in is only available on desktop.
+          </div>
+        </div>
+      {/if}
       {@render trustedToggle()}
     {:else}
       <AuthConfigFields provider={providerId} afterRequired={trustedToggle} />

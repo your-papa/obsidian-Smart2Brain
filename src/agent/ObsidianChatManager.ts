@@ -8,7 +8,6 @@ import {
 	type PendingWrite,
 } from "@langchain/langgraph-checkpoint";
 import { type DataAdapter, TFile, debounce, normalizePath } from "obsidian";
-import { gunzip, gzipSync } from "node:zlib";
 import type SecondBrainPlugin from "../main";
 import { getData } from "../stores/dataStore.svelte";
 import type { CheckpointHistoryItem } from "./Agent";
@@ -16,6 +15,7 @@ import { normalizeMessages } from "./messageNormalization";
 import type { ThreadSnapshot, ThreadStore } from "./memory/ThreadStore";
 import { Logger } from "../utils/logging";
 import { toBase64, toBase64DataUri } from "../utils/attachments";
+import { gunzipToString, gzipString, toArrayBuffer } from "../utils/gzip";
 import type { ChatAttachment } from "../types/shared";
 
 /** Bump when the ThreadData/CheckpointEntry schema changes. Absent in pre-versioning files → treated as 0. */
@@ -157,9 +157,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 	private async readThreadFile(path: string): Promise<ThreadData> {
 		const raw = await this.adapter.readBinary(path);
-		const decompressed = await new Promise<string>((resolve, reject) => {
-			gunzip(new Uint8Array(raw), (err, result) => (err ? reject(err) : resolve(result.toString("utf8"))));
-		});
+		const decompressed = await gunzipToString(raw);
 		// Yield after decompression so JSON.parse doesn't block the same frame.
 		await new Promise<void>((resolve) => setTimeout(resolve, 0));
 		const parsed = JSON.parse(decompressed) as ThreadData;
@@ -526,14 +524,8 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		let savePromise: Promise<void> | null = null;
 		savePromise = (async () => {
 			try {
-				const compressed = gzipSync(JSON.stringify({ ...data, version: THREAD_DATA_VERSION }));
-				await this.adapter.writeBinary(
-					safePath,
-					compressed.buffer.slice(
-						compressed.byteOffset,
-						compressed.byteOffset + compressed.byteLength,
-					) as ArrayBuffer,
-				);
+				const compressed = await gzipString(JSON.stringify({ ...data, version: THREAD_DATA_VERSION }));
+				await this.adapter.writeBinary(safePath, toArrayBuffer(compressed));
 				if ((this.dirtyThreadVersions.get(threadId) ?? 0) === targetVersion) {
 					this.persistedThreadVersions.set(threadId, targetVersion);
 				}
