@@ -1680,4 +1680,33 @@ export class AgentManager {
 			await this.createNewChat();
 		}
 	}
+
+	/**
+	 * Resolve the chat thread that a "attach to chat" action should target, and
+	 * reveal it. Prefers a chat view that is already open — the most-recently-used
+	 * one (so the note lands in the chat the user was last looking at) — and falls
+	 * back to creating a fresh chat thread when none is open. Returns the target
+	 * thread path, or null if a chat could not be opened.
+	 */
+	async resolveOrOpenChatForAttach(): Promise<string | null> {
+		const workspace = this.plugin.app.workspace;
+		const chatLeaves = workspace.getLeavesOfType(VIEW_TYPE_CHAT);
+
+		// Prefer an already-open chat, most-recently-used first, so the note is
+		// attached to the chat the user was last interacting with.
+		const mostRecent = workspace.getMostRecentLeaf();
+		const orderedLeaves = mostRecent && chatLeaves.includes(mostRecent) ? [mostRecent, ...chatLeaves] : chatLeaves;
+
+		for (const leaf of orderedLeaves) {
+			const file = (leaf.view as { file?: TFile }).file;
+			if (file instanceof TFile) {
+				await workspace.revealLeaf(leaf);
+				workspace.setActiveLeaf(leaf, { focus: true });
+				return file.path;
+			}
+		}
+
+		// No chat open — create a fresh thread directly.
+		return this.createNewChat();
+	}
 }

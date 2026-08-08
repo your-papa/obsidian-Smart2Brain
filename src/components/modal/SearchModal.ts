@@ -321,6 +321,16 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return false;
 		});
 
+		this.scope.register(["Alt"], "A", (evt) => {
+			if (this.isPickerMode()) {
+				return true;
+			}
+
+			evt.preventDefault();
+			void this.attachToChat();
+			return false;
+		});
+
 		this.scope.register([], "Enter", (evt) => {
 			if (this.isPickerMode()) {
 				evt.preventDefault();
@@ -506,6 +516,8 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		const modEnterKey = Platform.isMacOS ? "⌘↵" : "Ctrl+↵";
 		const modShiftEnterKey = Platform.isMacOS ? "⌘⇧↵" : "Ctrl+Shift+↵";
 		const altEnterKey = Platform.isMacOS ? "⌥↵" : "Alt+↵";
+		const attachKey = Platform.isMacOS ? "⌥A" : "Alt+A";
+		const attachPurpose = this.selectedResultsByPath.size > 0 ? "Attach selection to chat" : "Attach to chat";
 		const semanticLabel = this.semanticEnabled ? "semantic: on" : "semantic: off";
 		const instructions = [
 			{ command: "↑↓", purpose: "Navigate" },
@@ -513,6 +525,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			{ command: "⇧↑↓/↵", purpose: "Select" },
 			{ command: modEnterKey, purpose: "Open in new tab" },
 			{ command: altEnterKey, purpose: "Ask agent" },
+			{ command: attachKey, purpose: attachPurpose },
 			{ command: tabKey, purpose: semanticLabel },
 			{ command: "esc", purpose: "Close" },
 		];
@@ -798,6 +811,50 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	 * empty, the selected/focused notes are still attached — the chat opens
 	 * without submitting so the user can type their question.
 	 */
+	/**
+	 * Attach the selected (or focused) notes to a chat without sending. Targets an
+	 * already-open chat (most-recently-used); if none is open, a fresh chat thread
+	 * is created. The notes are queued as pending attachments scoped to that thread
+	 * so the chat's composer picks them up without auto-submitting.
+	 */
+	private async attachToChat(): Promise<void> {
+		// Explicit selections win; otherwise fall back to the highlighted row.
+		const selectedResults = this.getSelectedResults();
+		const focusedResult = selectedResults.length === 0 ? this.getFocusedSearchResult() : null;
+		const paths =
+			selectedResults.length > 0
+				? selectedResults.map((result) => result.path)
+				: focusedResult
+					? [focusedResult.path]
+					: [];
+
+		if (paths.length === 0) {
+			return;
+		}
+
+		this.close();
+
+		const messenger = getSessionRegistry();
+		if (!messenger) {
+			new Notice("Chat is not initialized yet. Please open a chat first.");
+			return;
+		}
+
+		const plugin = getPlugin();
+		const threadPath = await plugin.agentManager.resolveOrOpenChatForAttach();
+		if (!threadPath) {
+			new Notice("Could not open a chat to attach to.");
+			return;
+		}
+
+		// Scope the pending attachments to the resolved chat so a different open
+		// chat tab doesn't consume them. No auto-submit: the notes just land in
+		// the composer for the user to add a question.
+		messenger.pendingSubmitThreadPath = threadPath;
+		messenger.pendingAttachmentPaths = paths;
+		messenger.pendingAutoSubmit = false;
+	}
+
 	private async askAgentWithQuery(): Promise<void> {
 		const query = this.currentQuery.trim();
 

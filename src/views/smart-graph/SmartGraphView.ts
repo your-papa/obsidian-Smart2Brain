@@ -41,6 +41,8 @@ export class SmartGraphView extends ItemView {
 	async onClose(): Promise<void> {
 		const messenger = getSessionRegistry();
 		if (messenger) {
+			// The graph is gone; drop the ambient selection so chats stop showing its chips.
+			messenger.graphSelection = [];
 			messenger.pendingGraphNotes = [];
 		}
 

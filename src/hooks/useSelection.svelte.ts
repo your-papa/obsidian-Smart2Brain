@@ -27,6 +27,45 @@ const VIEW_ICONS: Record<string, string> = {
 };
 
 /**
+ * Whether the leaf currently holds a *live but collapsed* selection — i.e. the
+ * user has placed a cursor / clicked inside it with no text range. Used to
+ * detect an intentional "click to dismiss" on a pinned selection. Returns false
+ * when there's no live selection at all (focus is elsewhere).
+ */
+function hasCollapsedSelectionInLeaf(leaf: WorkspaceLeaf): boolean {
+	const view = leaf.view;
+	const viewType = leaf.view.getViewType();
+
+	// Markdown edit mode: inspect the CM6 state selection.
+	if (view instanceof MarkdownView && view.getMode() === "source") {
+		try {
+			// biome-ignore lint/suspicious/noExplicitAny: Obsidian internal CM6 API
+			const cm = (view.editor as any).cm;
+			if (!cm?.state) return false;
+			// A collapsed main range with editor focus means a cursor is placed but nothing is selected.
+			return cm.hasFocus && cm.state.selection.main.empty;
+		} catch {
+			return false;
+		}
+	}
+
+	// Reading mode / PDF: inspect the DOM selection scoped to this leaf.
+	if ((view instanceof MarkdownView && view.getMode() === "preview") || viewType === "pdf") {
+		try {
+			const domSel = activeWindow.getSelection();
+			if (!domSel || domSel.rangeCount === 0) return false;
+			const range = domSel.getRangeAt(0);
+			if (!leaf.view.containerEl.contains(range.commonAncestorContainer)) return false;
+			return domSel.isCollapsed;
+		} catch {
+			return false;
+		}
+	}
+
+	return false;
+}
+
+/**
  * Attempt to get the selected text in the active leaf.
  * Supports markdown edit mode (CM6), markdown reading mode, and PDF views.
  */
@@ -178,6 +217,12 @@ export class SelectionTracker {
 				this.#clearHighlights();
 				this.#pinned = false;
 				this.#selection = captured;
+				return;
+			}
+			// User clicked (placed a cursor) with no range in the note that owns the
+			// pinned selection → treat as an intentional dismissal, not a stray blur.
+			if (!captured && hasCollapsedSelectionInLeaf(activeLeaf)) {
+				this.clear();
 			}
 			return;
 		}
@@ -234,9 +279,49 @@ export class SelectionTracker {
 
 	/** Clear the captured selection and remove all highlights. */
 	clear() {
+		const cleared = this.#selection;
 		this.#selection = undefined;
 		this.#pinned = false;
 		this.#clearHighlights();
+		this.#clearNativeSelection(cleared);
+	}
+
+	/**
+	 * Collapse the live selection in the note that held the dismissed selection so
+	 * a dismissed chip isn't immediately re-captured on the next refresh. Without
+	 * this the underlying range lingers and `getSelectionFromLeaf` re-adopts it,
+	 * resurrecting the chip.
+	 *
+	 * The selection is usually *pinned* by the time it's dismissed, meaning focus
+	 * has already moved to the chat — so we target the note leaf by the captured
+	 * path, NOT the active leaf (which is the chat). Handles CM6 edit mode
+	 * (state selection) and DOM (reading/PDF).
+	 */
+	#clearNativeSelection(cleared: CapturedSelection | undefined) {
+		// CM6 edit mode reads cm.state.selection, not the DOM — collapse it in the
+		// specific editor that owned the selection.
+		try {
+			const path = cleared?.ref.path;
+			for (const leaf of this.#workspace.getLeavesOfType("markdown")) {
+				const view = leaf.view;
+				if (!(view instanceof MarkdownView) || view.getMode() !== "source") continue;
+				if (path && view.file?.path !== path) continue;
+				// biome-ignore lint/suspicious/noExplicitAny: Obsidian internal CM6 API
+				const cm = (view.editor as any).cm;
+				if (cm?.state && !cm.state.selection.main.empty) {
+					cm.dispatch({ selection: { anchor: cm.state.selection.main.head } });
+				}
+			}
+		} catch {
+			/* CM internals may change */
+		}
+
+		// Reading / PDF (and as a general fallback): collapse the DOM selection.
+		try {
+			activeWindow.getSelection()?.removeAllRanges();
+		} catch {
+			/* safety */
+		}
 	}
 
 	/** Remove all visual highlights (CM6 decorations and CSS Highlight API). */
@@ -269,7 +354,11 @@ export class SelectionTracker {
 	}
 
 	destroy() {
-		this.clear();
+		// Reset our own state + highlights, but leave the user's live selection
+		// intact (don't collapse it just because the chat view unmounted).
+		this.#selection = undefined;
+		this.#pinned = false;
+		this.#clearHighlights();
 		for (const ref of this.#refs) {
 			this.#workspace.offref(ref);
 		}

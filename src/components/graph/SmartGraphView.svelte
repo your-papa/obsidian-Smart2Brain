@@ -466,7 +466,8 @@ function handleSelectionChange(paths: string[]) {
 		paths.length > 0 ? { type: "any", conditions: [{ type: "paths", value: paths.slice() }] } : null;
 	const messenger = getSessionRegistry();
 	if (messenger) {
-		messenger.pendingGraphNotes = [...paths];
+		// Ambient: mirror the live graph selection into every open chat's tray.
+		messenger.graphSelection = [...paths];
 	}
 }
 
@@ -477,7 +478,7 @@ function handleLassoModeChange(active: boolean) {
 		canvasComponent?.clearSelection();
 		const messenger = getSessionRegistry();
 		if (messenger) {
-			messenger.pendingGraphNotes = [];
+			messenger.graphSelection = [];
 		}
 	}
 }
@@ -501,9 +502,11 @@ async function handleSendToChat() {
 		workspace.revealLeaf(existingLeaf);
 	}
 
-	// Queue graph notes as structured data (rendered as chips in the chat input)
 	const messenger = getSessionRegistry();
 	if (messenger) {
+		// Ambient selection (shown in every chat) …
+		messenger.graphSelection = [...paths];
+		// … plus a one-shot signal so the just-opened/focused chat grabs focus.
 		messenger.pendingGraphNotes = [...paths];
 	} else {
 		new Notice("Chat is not initialized yet. Please open a chat first.");
@@ -522,7 +525,7 @@ function handleClearSelection() {
 	canvasComponent?.clearSelection();
 	const messenger = getSessionRegistry();
 	if (messenger) {
-		messenger.pendingGraphNotes = [];
+		messenger.graphSelection = [];
 	}
 }
 
@@ -664,7 +667,7 @@ function handleFocusSegment(segmentId: string, multi: boolean) {
 	canvasComponent?.selectNodesByPaths(paths);
 	selectedPaths = paths;
 	const messenger = getSessionRegistry();
-	if (messenger) messenger.pendingGraphNotes = [...paths];
+	if (messenger) messenger.graphSelection = [...paths];
 	pendingSpaceFilter = { type: "any", conditions: [{ type: "paths", value: paths.slice() }] };
 	canvasComponent?.panToSelection();
 }
