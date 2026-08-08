@@ -298,14 +298,19 @@ export class SelectionTracker {
 	 * (state selection) and DOM (reading/PDF).
 	 */
 	#clearNativeSelection(cleared: CapturedSelection | undefined) {
+		// Only collapse the native range that belongs to the dismissed selection.
+		// With no captured selection there's nothing of ours to clear — bailing
+		// here avoids stomping unrelated live selections in other editors/notes.
+		const path = cleared?.ref.path;
+		if (!path) return;
+
 		// CM6 edit mode reads cm.state.selection, not the DOM — collapse it in the
 		// specific editor that owned the selection.
 		try {
-			const path = cleared?.ref.path;
 			for (const leaf of this.#workspace.getLeavesOfType("markdown")) {
 				const view = leaf.view;
 				if (!(view instanceof MarkdownView) || view.getMode() !== "source") continue;
-				if (path && view.file?.path !== path) continue;
+				if (view.file?.path !== path) continue;
 				// biome-ignore lint/suspicious/noExplicitAny: Obsidian internal CM6 API
 				const cm = (view.editor as any).cm;
 				if (cm?.state && !cm.state.selection.main.empty) {
@@ -316,12 +321,31 @@ export class SelectionTracker {
 			/* CM internals may change */
 		}
 
-		// Reading / PDF (and as a general fallback): collapse the DOM selection.
+		// Reading / PDF: collapse the DOM selection only when it lives inside the
+		// note that owned the dismissed selection, so we don't wipe an unrelated
+		// selection the user has active elsewhere.
 		try {
-			activeWindow.getSelection()?.removeAllRanges();
+			const domSel = activeWindow.getSelection();
+			if (!domSel || domSel.rangeCount === 0) return;
+			const container = this.#leafContainerForPath(path);
+			if (container?.contains(domSel.getRangeAt(0).commonAncestorContainer)) {
+				domSel.removeAllRanges();
+			}
 		} catch {
 			/* safety */
 		}
+	}
+
+	/** Container element of the visible note leaf owning `path`, if any. */
+	#leafContainerForPath(path: string): HTMLElement | undefined {
+		for (const type of ["markdown", "pdf"]) {
+			for (const leaf of this.#workspace.getLeavesOfType(type)) {
+				if ((leaf.view as { file?: { path: string } }).file?.path === path) {
+					return leaf.view.containerEl;
+				}
+			}
+		}
+		return undefined;
 	}
 
 	/** Remove all visual highlights (CM6 decorations and CSS Highlight API). */

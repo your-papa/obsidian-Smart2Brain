@@ -1693,9 +1693,14 @@ export class AgentManager {
 		const chatLeaves = workspace.getLeavesOfType(VIEW_TYPE_CHAT);
 
 		// Prefer an already-open chat, most-recently-used first, so the note is
-		// attached to the chat the user was last interacting with.
-		const mostRecent = workspace.getMostRecentLeaf();
-		const orderedLeaves = mostRecent && chatLeaves.includes(mostRecent) ? [mostRecent, ...chatLeaves] : chatLeaves;
+		// attached to the chat the user was last interacting with. Obsidian stamps
+		// each leaf with an `activeTime` when it's focused; sorting on it picks the
+		// right chat even when the *currently* active leaf isn't a chat (e.g. the
+		// user is in a note or the search modal when they trigger the attach).
+		const orderedLeaves = [...chatLeaves].sort(
+			(a, b) =>
+				((b as { activeTime?: number }).activeTime ?? 0) - ((a as { activeTime?: number }).activeTime ?? 0),
+		);
 
 		for (const leaf of orderedLeaves) {
 			const file = (leaf.view as { file?: TFile }).file;

@@ -86,10 +86,13 @@ let fullscreenNoTransition = $state(false);
 let fullscreenTransitioning = false;
 let fullscreenPlaceholderHeight = $state(0);
 let containerEl: HTMLDivElement | undefined = $state();
-let activeVisibleNotes: VisibleNoteRef[] = $state([]);
-let activeSelection: SelectionRef | undefined = $state(undefined);
-let activeGraphNotes: GraphNoteRef[] = $state([]);
-let contextTrayRef: { clear: () => void } | undefined = $state(undefined);
+let contextTrayRef = $state<ReturnType<typeof ContextTray> | undefined>(undefined);
+// Read the tray's context outputs reactively through the instance. They're
+// getter functions over `$derived` state in ContextTray, so reading them inside
+// these `$derived`s tracks their dependencies across the component boundary.
+const activeVisibleNotes = $derived(contextTrayRef?.getActiveVisibleNotes() ?? []);
+const activeSelection = $derived(contextTrayRef?.getActiveSelection());
+const activeGraphNotes = $derived(contextTrayRef?.getActiveGraphNotes() ?? []);
 let assembledSystemPrompt = $state("");
 let assembledPromptRequestVersion = 0;
 
@@ -1007,9 +1010,6 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     <div class="flex flex-row flex-wrap items-start gap-1.5 pt-2">
       <ContextTray
         bind:this={contextTrayRef}
-        bind:activeVisibleNotes
-        bind:activeSelection
-        bind:activeGraphNotes
         graphPaths={registry.graphSelection}
         {attachments}
         onRemoveAttachment={removeAttachment}

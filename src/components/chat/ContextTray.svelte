@@ -18,12 +18,6 @@ const SELECTION_PREVIEW_LENGTH = 40;
 const BASENAME_RE = /(?:.*\/)?([^/]+?)(?:\.\w+)?$/;
 
 interface Props {
-	/** Bindable: the active (frontmost) note as a serializable ref, when not deactivated. */
-	activeVisibleNotes?: VisibleNoteRef[];
-	/** Bindable: the currently active selection ref (undefined when dismissed). */
-	activeSelection?: SelectionRef | undefined;
-	/** Bindable: the list of graph-selected note refs (after user dismissals). */
-	activeGraphNotes?: GraphNoteRef[];
 	/** Graph note paths set externally (e.g. from Messenger.pendingGraphNotes). */
 	graphPaths?: string[];
 	/** Content attachments (files whose bytes/content are inlined into the message). */
@@ -37,9 +31,6 @@ interface Props {
 }
 
 let {
-	activeVisibleNotes = $bindable([]),
-	activeSelection = $bindable(undefined),
-	activeGraphNotes = $bindable([]),
 	graphPaths = [],
 	attachments = [],
 	onRemoveAttachment,
@@ -50,6 +41,18 @@ let {
 const tracker = new VisibleNotesTracker();
 const selectionTracker = new SelectionTracker();
 const sourcePath = $derived(getPlugin().app.workspace.getActiveFile()?.path ?? "");
+
+// --- Selection ---
+// Remember *which* selection the user dismissed (by identity) rather than a bare
+// boolean, so a freshly-captured selection un-dismisses automatically without a
+// state-sync effect: the tracker hands back a new ref and the identity no longer
+// matches the dismissed one.
+let dismissedSelection = $state<SelectionRef | undefined>(undefined);
+const activeSelection = $derived<SelectionRef | undefined>(
+	selectionTracker.selection && selectionTracker.selection === dismissedSelection
+		? undefined
+		: selectionTracker.selection,
+);
 
 // --- Visible notes (auto references, front tab of each pane) ---
 let deactivatedPaths = $state(new Set<string>());
@@ -74,42 +77,36 @@ $effect(() => {
 	if (changed) deactivatedPaths = next;
 });
 
-// Sync the bound activeVisibleNotes with the visible, non-deactivated notes.
-$effect(() => {
-	activeVisibleNotes = toVisibleNoteRefs(visibleNotes.filter((n) => !deactivatedPaths.has(n.file.path)));
-});
-
-// --- Selection ---
-let selectionDismissed = $state(false);
-$effect(() => {
-	activeSelection = selectionDismissed ? undefined : selectionTracker.selection;
-});
-// A new selection un-dismisses.
-$effect(() => {
-	if (selectionTracker.selection && selectionDismissed) {
-		selectionDismissed = false;
-	}
-});
-
 // --- Graph notes ---
 let graphDismissed = $state(new Set<string>());
 // Graph selections can be large (lasso-select of many nodes). Collapse them into
 // a single summary chip by default; expand on demand to review/remove individuals.
 let graphExpanded = $state(false);
 const activeGraphPaths = $derived(graphPaths.filter((p) => !graphDismissed.has(p)));
-$effect(() => {
-	activeGraphNotes = activeGraphPaths.map((p) => ({ path: p, basename: basename(p) }));
-});
 // Once every graph note is dismissed there's nothing to expand.
 $effect(() => {
 	if (activeGraphPaths.length === 0 && graphExpanded) graphExpanded = false;
 });
 
+// --- One-way outputs. Derived, not synced through effects, per the repo's
+// Svelte guidance. Exposed as getter functions (Svelte disallows exporting
+// `$derived` directly); the parent reads them inside its own `$derived`, so the
+// reactive dependency is tracked across the component boundary. ---
+const activeVisibleNotes = $derived(toVisibleNoteRefs(visibleNotes.filter((n) => !deactivatedPaths.has(n.file.path))));
+const activeGraphNotes = $derived<GraphNoteRef[]>(activeGraphPaths.map((p) => ({ path: p, basename: basename(p) })));
+
+export function getActiveVisibleNotes(): VisibleNoteRef[] {
+	return activeVisibleNotes;
+}
+export function getActiveSelection(): SelectionRef | undefined {
+	return activeSelection;
+}
+export function getActiveGraphNotes(): GraphNoteRef[] {
+	return activeGraphNotes;
+}
+
 const hasAny = $derived(
-	visibleNotes.length > 0 ||
-		(selectionTracker.selection && !selectionDismissed) ||
-		activeGraphPaths.length > 0 ||
-		attachments.length > 0,
+	visibleNotes.length > 0 || Boolean(activeSelection) || activeGraphPaths.length > 0 || attachments.length > 0,
 );
 
 function basename(path: string): string {
@@ -183,7 +180,7 @@ function onSelectionClick(evt: MouseEvent): void {
 }
 
 function dismissSelection(): void {
-	selectionDismissed = true;
+	dismissedSelection = selectionTracker.selection;
 	selectionTracker.clear();
 }
 
@@ -327,15 +324,15 @@ onDestroy(() => {
     {/if}
 
     <!-- Selected text -->
-    {#if selectionTracker.selection && !selectionDismissed}
+    {#if activeSelection}
       <button
         type="button"
         class="s2b-chip s2b-pill s2b-pill--interactive selection"
-        title={`Selected text from ${selectionTracker.selection.path} (click to dismiss)\n\n${selectionTracker.selection.text.slice(0, 200)}`}
+        title={`Selected text from ${activeSelection.path} (click to dismiss)\n\n${activeSelection.text.slice(0, 200)}`}
         onclick={onSelectionClick}
       >
-        <div class="chip-icon" use:icon={selectionTracker.selection.icon} style="--icon-size: 12px"></div>
-        <span class="chip-label">{selectionPreview(selectionTracker.selection.text)}</span>
+        <div class="chip-icon" use:icon={activeSelection.icon} style="--icon-size: 12px"></div>
+        <span class="chip-label">{selectionPreview(activeSelection.text)}</span>
         {#if selectionTracker.isLong}
           <span class="chip-warning" title="Long selection — will be truncated to fit the model's context">⚠</span>
         {/if}
