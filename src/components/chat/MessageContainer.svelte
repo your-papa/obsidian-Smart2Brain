@@ -541,7 +541,7 @@ $effect(() => {
           <ChatRecommendations {registry} />
         </div>
       {:else}
-        {#each messages as messagePair, index (messagePair.id)}
+        {#each messages as messagePair, index (messagePair.stableKey ?? messagePair.id)}
           {#if messagePair.transcriptEvent?.type === "summarization_marker"}
             <div
               class="summary-marker-row flex justify-center my-4"

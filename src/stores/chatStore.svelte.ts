@@ -160,6 +160,15 @@ export interface BranchInfo {
 
 export interface MessagePair {
 	id: UUIDv7;
+	/**
+	 * Stable identity for this turn that survives the settle rebuild. `id` is a
+	 * fresh UUID on every `rebuildMessagePairs()` pass, so keying UI lists on it
+	 * tears down and recreates every row when a stream settles (losing scroll
+	 * position). This key is derived from the persisted human message id instead,
+	 * so a turn keeps the same identity across rebuilds. Falls back to `id` for
+	 * pairs with no human message (orphaned assistant, summary markers).
+	 */
+	stableKey?: string;
 	userMessage: UserMessage;
 	assistantMessage: AssistantMessage;
 	transcriptEvent?: TranscriptEvent;
@@ -1349,6 +1358,7 @@ export function baseMessagesToMessagePairs(
 
 			messagePairs.push({
 				id: pairId,
+				stableKey: humanMessageId ?? pairId,
 				userMessage: { content: userContent, attachments, visibleNotes, selection, graphNotes },
 				assistantMessage,
 				generation: deriveGenerationFromAssistantMessages(assistantMessages),
