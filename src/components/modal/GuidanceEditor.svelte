@@ -145,6 +145,13 @@ function handleReset() {
     overflow: hidden;
   }
 
+  /* Stack the two diff panes vertically on mobile — side-by-side is too narrow. */
+  :global(.is-mobile) .guidance-diff-container {
+    flex-direction: column;
+    max-height: none;
+    overflow: auto;
+  }
+
   .guidance-diff-pane {
     flex: 1;
     display: flex;

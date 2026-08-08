@@ -55,7 +55,7 @@ const isModelConfigured = () => configuredModels.includes(selectedModel);
     </div>
 
     <div
-        class="grid p-3 gap-2 grid-cols-2 border-solid border-x-0 border-t border-b-0 border-[--background-modifier-border]"
+        class="s2b-model-grid grid p-3 gap-2 grid-cols-2 border-solid border-x-0 border-t border-b-0 border-[--background-modifier-border]"
     >
         {#each Object.entries(embeddingModels) as [modelName, modelConfig]}
             <div class="community-item">

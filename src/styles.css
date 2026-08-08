@@ -942,3 +942,9 @@
 	width: 16px;
 	height: 16px;
 }
+
+/* Model-management grids are fixed 2/3 columns; a phone can't fit that without
+   clipping model names. Collapse to a single column on mobile. */
+.is-mobile .s2b-model-grid {
+	grid-template-columns: 1fr !important;
+}

@@ -1032,7 +1032,7 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     ></div>
 
     <!-- Actions row: attachment, agent+model, send -->
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2 flex-wrap">
       <input
         bind:this={attachmentInputEl}
         type="file"

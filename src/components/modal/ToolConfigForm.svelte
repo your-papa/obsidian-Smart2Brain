@@ -821,6 +821,7 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
   .tool-config-actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     border-top: 1px solid var(--background-modifier-border);
     padding-top: 16px;
@@ -859,6 +860,13 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
     min-height: 96px;
     max-height: 240px;
     overflow: hidden;
+  }
+
+  /* Stack the two diff panes vertically on mobile — side-by-side is too narrow. */
+  :global(.is-mobile) .tool-guidance-diff-container {
+    flex-direction: column;
+    max-height: none;
+    overflow: auto;
   }
 
   .tool-guidance-diff-pane {

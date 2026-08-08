@@ -181,6 +181,13 @@ function handleUseDefault() {
     overflow: hidden;
   }
 
+  /* Two monospace panes side-by-side are unreadable on a phone (~165px each);
+     stack them vertically on mobile. */
+  :global(.is-mobile) .prompt-diff-container {
+    flex-direction: column;
+    overflow: auto;
+  }
+
   .prompt-diff-pane {
     flex: 1;
     display: flex;
@@ -304,6 +311,7 @@ function handleUseDefault() {
     flex-shrink: 0;
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     margin-top: 16px;
   }

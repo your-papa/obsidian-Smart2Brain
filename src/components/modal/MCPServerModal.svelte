@@ -505,6 +505,7 @@ async function handleTestConnection() {
   .mcp-actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     border-top: 1px solid var(--background-modifier-border);
     padding-top: 16px;
