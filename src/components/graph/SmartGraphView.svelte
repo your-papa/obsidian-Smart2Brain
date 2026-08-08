@@ -86,17 +86,31 @@ let immersePaths: Set<string> | null = $state(null);
 let isImmersed: boolean = $derived(immersePaths !== null);
 let focusedClusters: Set<number> = $state(new Set());
 
-// Whether a chat view is currently open. Graph selection is ambient (it shows in
-// any open chat automatically), so the selection bar only needs an explicit
-// "Attach in Chat" action when there's no chat to receive it. Tracked reactively
-// via a workspace listener since getLeavesOfType() isn't reactive.
+// Whether a chat view is currently *visible* to the user. Graph selection is
+// ambient (it shows in any open chat automatically), so the selection bar only
+// needs an explicit "Attach in Chat" action when there's no chat the user can
+// see to receive it. A chat leaf parked in a collapsed sidebar (or hidden
+// background tab) doesn't count — it has zero size, so the user sees nothing.
+// Tracked reactively via a workspace listener since getLeavesOfType() isn't reactive.
 let hasOpenChat = $state(false);
 function refreshHasOpenChat() {
-	hasOpenChat = plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT).length > 0;
+	hasOpenChat = plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT).some((leaf) => {
+		const el = (leaf as { containerEl?: HTMLElement }).containerEl;
+		if (!el || el.style.display === "none") return false;
+		// A collapsed sidebar / hidden tab renders the leaf at zero size.
+		return el.offsetWidth > 0 && el.offsetHeight > 0;
+	});
 }
 refreshHasOpenChat();
-const chatOpenEventRef = plugin.app.workspace.on("layout-change", refreshHasOpenChat);
-onDestroy(() => plugin.app.workspace.offref(chatOpenEventRef));
+const chatOpenEventRefs = [
+	plugin.app.workspace.on("layout-change", refreshHasOpenChat),
+	// Collapsing/expanding a sidebar or switching tabs changes visibility
+	// without a layout-change, so also refresh on active-leaf changes.
+	plugin.app.workspace.on("active-leaf-change", refreshHasOpenChat),
+];
+onDestroy(() => {
+	for (const ref of chatOpenEventRefs) plugin.app.workspace.offref(ref);
+});
 
 // Detail level 0–100: 100 = full graph, <100 = skeleton backbone (fewer nodes per topic)
 let skeletonDetail = $state(100);
