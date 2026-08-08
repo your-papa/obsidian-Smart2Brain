@@ -322,6 +322,14 @@ function reviewNotice(notice: UpdateNotice): void {
     opacity: 1;
   }
 
+  /* Touch has no hover — always show the dismiss control so chips are
+     dismissable on mobile. */
+  @media (hover: none) {
+    .dismiss-chip {
+      opacity: 1;
+    }
+  }
+
   .dismiss-all {
     color: var(--text-muted);
     opacity: 0.6;

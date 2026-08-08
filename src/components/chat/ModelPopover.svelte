@@ -283,7 +283,7 @@ async function handleSelect(model: ChatModel) {
   <Popover.Root bind:open={isOpen}>
     <Popover.Portal>
       <Popover.Content
-        class="model-popover-content bg-[--background-primary] rounded-lg border border-solid border-[--background-modifier-border] shadow-lg z-[var(--layer-popover)] max-h-[400px] flex"
+        class="model-popover-content bg-[--background-primary] rounded-lg border border-solid border-[--background-modifier-border] shadow-lg z-[var(--layer-popover)] max-h-[400px] max-w-[calc(100vw-16px)] flex"
         {customAnchor}
         sideOffset={8}
         side="top"
@@ -353,7 +353,7 @@ async function handleSelect(model: ChatModel) {
         {/if}
 
         <!-- Main content -->
-        <div class="flex flex-col flex-1 w-[280px] overflow-hidden">
+        <div class="flex flex-col flex-1 w-[280px] max-w-full min-w-0 overflow-hidden">
           <!-- Search -->
           <div
             class="flex items-center gap-2 px-3 py-2 border-b border-solid border-[--background-modifier-border]"

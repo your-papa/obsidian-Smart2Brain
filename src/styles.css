@@ -872,3 +872,42 @@
 	width: 20px;
 	height: 20px;
 }
+
+/* ────────────────────────────────────────────────────────────────────────
+   Mobile / touch adaptations
+   Much of the chat UI reveals actions on :hover (message footers, code-copy,
+   picker-row actions). Touch devices have no hover, so those affordances are
+   invisible and unreachable. `@media (hover: none)` targets touch/pen inputs
+   (phones, tablets, touch laptops) without a width breakpoint — always show
+   the affordance and re-enable pointer events there. We keep the entry/exit
+   transition on hover-capable devices untouched.
+   ──────────────────────────────────────────────────────────────────────── */
+@media (hover: none) {
+	/* Message action footers (edit / copy / regenerate / branch navigator).
+	   These use Tailwind `opacity-0 group-hover:opacity-100 pointer-events-none
+	   group-hover:pointer-events-auto` — override to always-visible on touch. */
+	.message-footer {
+		opacity: 1 !important;
+		transform: none !important;
+		pointer-events: auto !important;
+	}
+
+	/* Code-block copy button lives in `<pre>` and is revealed on `pre:hover`.
+	   Show it persistently on touch so code is copyable. */
+	.message-text pre .clickable-icon {
+		opacity: 1 !important;
+	}
+
+	/* Shared picker-row trailing action (PickerOptionRow) — revealed on
+	   :hover/:focus-within; always show on touch. */
+	.picker-option-action {
+		opacity: 1 !important;
+	}
+
+	/* Generic hover-reveal hook: any element that fades in on group-hover
+	   (context-usage %, collapse chevron, …) tagged with this class shows on
+	   touch. */
+	.s2b-hover-reveal {
+		opacity: 1 !important;
+	}
+}

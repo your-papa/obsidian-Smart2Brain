@@ -191,7 +191,7 @@ $effect(() => {
 
     <Popover.Portal>
         <Popover.Content
-            class="!bg-[--background-primary] !border !border-solid !border-[--background-modifier-border] !rounded-lg !shadow-md min-w-[--radix-popover-trigger-width] max-w-[400px] overflow-hidden z-[--layer-menu] flex flex-col"
+            class="!bg-[--background-primary] !border !border-solid !border-[--background-modifier-border] !rounded-lg !shadow-md min-w-[--radix-popover-trigger-width] max-w-[min(400px,calc(100vw-24px))] overflow-hidden z-[--layer-menu] flex flex-col"
             sideOffset={4}
             align="start"
             onkeydown={handleKeydown}

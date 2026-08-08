@@ -114,7 +114,7 @@ const maxContextLabel = $derived.by(() => {
     </svg>
     <!-- Show value only on hover to keep the icon visually quiet by default -->
     <div
-      class="absolute text-[12px] font-semibold opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+      class="s2b-hover-reveal absolute text-[12px] font-semibold opacity-0 transition-opacity duration-150 group-hover:opacity-100"
     >
       {centerLabel}
     </div>

@@ -107,7 +107,7 @@ function handleTriggerClick() {
   }
 
   :global(.picker-popover-content) {
-    min-width: 236px;
+    min-width: min(236px, calc(100vw - 24px));
     max-width: min(340px, calc(100vw - 24px));
     background: var(--background-primary);
     border-radius: 10px;
