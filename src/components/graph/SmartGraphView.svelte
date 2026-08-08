@@ -1011,4 +1011,25 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     display: flex;
     gap: 6px;
   }
+
+  /* On a phone the centered, nowrap bar overflows both screen edges — the
+     buttons past the viewport can't be tapped. Pin it to the safe width,
+     let the count + actions wrap, and let the actions fill the row so every
+     button stays on-screen and comfortably tappable. */
+  :global(.is-mobile) .graph-selection-bar {
+    left: 8px;
+    right: 8px;
+    transform: none;
+    max-width: none;
+    flex-wrap: wrap;
+    justify-content: center;
+    white-space: normal;
+    /* Clear Obsidian's floating mobile navbar at the bottom. */
+    bottom: calc(12px + var(--safe-area-inset-bottom, 0px));
+  }
+
+  :global(.is-mobile) .selection-actions {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
 </style>

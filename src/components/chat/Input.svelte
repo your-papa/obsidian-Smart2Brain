@@ -21,6 +21,7 @@ import ContextTray from "./ContextTray.svelte";
 import ContextUsageCircle from "./ContextUsageCircle.svelte";
 import AttachPopover from "./AttachPopover.svelte";
 import { SearchModal } from "../modal/SearchModal";
+import { isMobileUI } from "../../utils/platform";
 import Button from "../ui/Button.svelte";
 interface Props {
 	registry: SessionRegistry;
@@ -1049,14 +1050,16 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
       <AgentPopover {threadPath} />
       <ModelSelectButton {threadPath} />
       <div class="ml-auto flex items-center gap-2">
-        <ContextUsageCircle
-          usagePercent={contextUsage.usagePercent}
-          used={contextUsage.estimatedUsedTokens}
-          limit={contextUsage.contextWindow}
-          breakdown={contextBreakdown}
-          {canSummarizeNow}
-          onSummarizeNow={summarizeNow}
-        />
+        {#if !isMobileUI()}
+          <ContextUsageCircle
+            usagePercent={contextUsage.usagePercent}
+            used={contextUsage.estimatedUsedTokens}
+            limit={contextUsage.contextWindow}
+            breakdown={contextBreakdown}
+            {canSummarizeNow}
+            onSummarizeNow={summarizeNow}
+          />
+        {/if}
         {#if !session || session.messageState === MessageState.idle}
           <Button
             disabled={!canSendMessage || savingFiles}
