@@ -1234,6 +1234,12 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
 
     :global(.cm-scroller) {
       overflow-x: hidden;
+      /* Obsidian's mobile CSS adds a large `--view-top-spacing-markdown`
+         padding-top to `.markdown-source-view > .cm-editor > .cm-scroller` to
+         clear the phone header/toolbar. Our embedded composer carries the
+         `markdown-source-view` class too, so it inherits ~119px of dead space
+         above the placeholder. Reset it — the composer has no header to clear. */
+      padding-top: 0 !important;
     }
 
     :global(.cm-content) {
