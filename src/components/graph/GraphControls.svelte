@@ -1,5 +1,5 @@
 <script lang="ts">
-import { Platform } from "obsidian";
+import { isMobileUI } from "../../utils/platform";
 import Button from "../ui/Button.svelte";
 import RangeSlider from "../ui/RangeSlider.svelte";
 import Toggle from "../ui/Toggle.svelte";
@@ -112,7 +112,7 @@ function handleClusterCohesionStrengthChange(val: number) {
 <!-- Unified vertical toolbar -->
 <div class="graph-toolbar">
   <Button iconId="maximize" onClick={onFitToView} tooltip="Fit graph to view (F)" />
-  {#if Platform.isMobile}
+  {#if isMobileUI()}
     <!-- Touch has no scroll-wheel zoom; expose on-screen +/- (pinch still works). -->
     <Button iconId="zoom-in" onClick={() => onZoomIn?.()} tooltip="Zoom in" />
     <Button iconId="zoom-out" onClick={() => onZoomOut?.()} tooltip="Zoom out" />

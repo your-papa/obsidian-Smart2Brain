@@ -22,6 +22,7 @@ import type { SearchAlgorithm } from "../../types/plugin";
 import type { SearchFilter } from "../../vectorstore";
 import { Logger } from "../../utils/logging";
 import { isAgentFilePath } from "../../utils/fileFiltering";
+import { isMobileUI } from "../../utils/platform";
 import { showSettingsLinkNotice } from "../../utils/settingsNotice";
 import { getPathIcon, getSearchResultNoteIcon, getTagIcon, resolveIconColor } from "../../utils/noteIcons";
 import {
@@ -1213,7 +1214,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	 * keyboard-hint footer unchanged.
 	 */
 	private setupMobileActions(): void {
-		if (!Platform.isMobile) return;
+		if (!isMobileUI()) return;
 		const inputContainer = this.modalEl.querySelector<HTMLElement>(".prompt-input-container");
 		if (!inputContainer) return;
 
