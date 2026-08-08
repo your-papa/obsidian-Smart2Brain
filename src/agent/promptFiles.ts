@@ -54,18 +54,28 @@ export class PromptFilesService {
 			const agent = agents[agentId] as unknown as { migratedBasePrompt?: string };
 			const migrated = agent?.migratedBasePrompt?.trim() ? agent.migratedBasePrompt : null;
 			try {
-				if (!(await this.adapter.exists(path))) {
-					await this.ensureParent(path);
-					await this.adapter.write(path, migrated ?? BASE_SYSTEM_PROMPT);
+				if (await this.adapter.exists(path)) {
+					// File already present — never clobber an edit. The migrated prompt is
+					// superseded by the on-disk file, so the transient is spent: clear it.
+					this.clearMigratedBasePrompt(agent);
+					continue;
 				}
+				await this.ensureParent(path);
+				await this.adapter.write(path, migrated ?? BASE_SYSTEM_PROMPT);
+				// Only clear AFTER a successful write — the customized prompt is now durable in
+				// the file. On a write failure we deliberately keep the transient so a later
+				// seedDefaults (e.g. next startup / folder change) can retry, rather than
+				// discarding the user's only retained copy.
+				this.clearMigratedBasePrompt(agent);
 			} catch (error) {
 				Log.error(`Failed to seed base prompt for ${agentId}:`, error);
-			} finally {
-				// Consume the one-shot migration transient regardless of write outcome — leaving it
-				// set would re-seed a stale prompt on a later folder change.
-				if (agent && "migratedBasePrompt" in agent) agent.migratedBasePrompt = undefined;
 			}
 		}
+	}
+
+	/** Consume the one-shot v4→v5 migration transient (see the v4→v5 migration in dataStore). */
+	private clearMigratedBasePrompt(agent: { migratedBasePrompt?: string }): void {
+		if (agent && "migratedBasePrompt" in agent) agent.migratedBasePrompt = undefined;
 	}
 
 	/** Re-read all base-prompt files into the cache. Cheap: a bounded set of files. */

@@ -112,4 +112,42 @@ describe("PromptFilesService", () => {
 
 		expect(adapter.files.has("Meta/Agents/Base Prompts/default-agent.md")).toBe(true);
 	});
+
+	// v4→v5 migration stashes a customized prompt on `migratedBasePrompt`; seedDefaults must write
+	// it to the new file (not the factory default) and only consume the transient once it's durable.
+	it("seeds a migrated customized prompt to the new file and clears the transient", async () => {
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		const agents = { "default-agent": { id: "default-agent", migratedBasePrompt: "MY CUSTOM" } } as never;
+
+		await svc.seedDefaults(agents);
+
+		expect(adapter.files.get("Agents/Base Prompts/default-agent.md")).toBe("MY CUSTOM");
+		expect((agents as Record<string, { migratedBasePrompt?: string }>)["default-agent"].migratedBasePrompt).toBeUndefined();
+	});
+
+	it("keeps the migrated prompt transient when the write fails (so a later seed can retry)", async () => {
+		const adapter = makeAdapter();
+		adapter.write.mockRejectedValueOnce(new Error("EACCES"));
+		const svc = makeService(adapter);
+		const agents = { "default-agent": { id: "default-agent", migratedBasePrompt: "MY CUSTOM" } } as never;
+
+		await svc.seedDefaults(agents);
+
+		// Write failed → file absent AND the only retained copy is preserved for a retry.
+		expect(adapter.files.has("Agents/Base Prompts/default-agent.md")).toBe(false);
+		expect((agents as Record<string, { migratedBasePrompt?: string }>)["default-agent"].migratedBasePrompt).toBe("MY CUSTOM");
+	});
+
+	it("clears the migrated transient without clobbering an existing base-prompt file", async () => {
+		const adapter = makeAdapter({ "Agents/Base Prompts/default-agent.md": "already edited" });
+		const svc = makeService(adapter);
+		const agents = { "default-agent": { id: "default-agent", migratedBasePrompt: "MY CUSTOM" } } as never;
+
+		await svc.seedDefaults(agents);
+
+		// Existing file wins (never clobbered); the superseded transient is consumed.
+		expect(adapter.files.get("Agents/Base Prompts/default-agent.md")).toBe("already edited");
+		expect((agents as Record<string, { migratedBasePrompt?: string }>)["default-agent"].migratedBasePrompt).toBeUndefined();
+	});
 });

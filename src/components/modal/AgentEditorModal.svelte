@@ -33,6 +33,8 @@ import {
 } from "../../agent/integrations/pluginIntegrations";
 import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT } from "../../agent/prompts";
 import { basePromptPath } from "../../utils/agentPaths";
+import { Logger } from "../../utils/logging";
+import { extractErrorMessage } from "../../utils/errorMessage";
 import { humanizeSkillName } from "../../skills";
 import {
 	DEFAULT_AGENT_ICON,
@@ -495,11 +497,25 @@ async function toggleAutoIntegration(pluginId: string, displayName: string, newE
 		// so the new skill enters the cache and the row re-renders as a curated Plugin Skill.
 		let skillId = skills.find((skill) => skill.linkedPluginId === pluginId)?.id;
 		if (!skillId) {
-			skillId = (await plugin.skillsService?.seedIntegrationSkill(pluginId, displayName)) ?? undefined;
+			const service = plugin.skillsService;
+			if (!service) {
+				new Notice("Skills are still initializing — try again in a moment.");
+				return;
+			}
+			try {
+				skillId = (await service.seedIntegrationSkill(pluginId, displayName)) ?? undefined;
+			} catch (error) {
+				Logger.error(`[AgentEditor] seedIntegrationSkill failed for ${pluginId}:`, error);
+				new Notice(`Could not create skill for ${displayName}: ${extractErrorMessage(error)}`);
+				return;
+			}
 			if (!skillId) {
 				new Notice(`Could not create skill for ${displayName}.`);
 				return;
 			}
+			// Re-discover so the new skill enters the cache; without this the enable below
+			// targets a skillId the reactive `skills` list doesn't know about yet, so the row
+			// wouldn't flip to a curated Plugin Skill.
 			await refreshSkillsList();
 		}
 		pluginData.setAgentSkillEnabled(agentId, skillId, true);
