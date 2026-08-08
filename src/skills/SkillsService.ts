@@ -6,7 +6,7 @@
 import type { DataAdapter, Plugin } from "obsidian";
 import type { Skill, SkillCategory, SkillEnableState, SkillFrontmatter, SkillMetadata } from "../types/plugin";
 import { getData } from "../stores/dataStore.svelte";
-import { skillsDir } from "../utils/agentPaths";
+import { agentRootDir, skillsDir } from "../utils/agentPaths";
 import { Logger as Log } from "../utils/logging";
 import { StartupProfiler } from "../utils/startupProfiler";
 import {
@@ -201,8 +201,19 @@ export class SkillsService {
 
 	/**
 	 * Ensure the skills directory exists, creating it if necessary.
+	 *
+	 * Creates the configurable agent-root folder first, then the nested `Skills/` dir — Obsidian's
+	 * DataAdapter.mkdir does not create intermediate parents, and the `agentFolder` setter only
+	 * fires an *unawaited* createFolder. Without this, a runtime agent-folder change (settings →
+	 * reinitAgentFolder) could try to create `<newFolder>/Skills` before `<newFolder>` exists, throw,
+	 * and abort the rest of reinit (prompt refresh + system-prompt cache invalidation) — leaving
+	 * conversations serving the old folder's prompts. Awaiting parent creation here removes the race.
 	 */
 	async ensureSkillsDir(): Promise<void> {
+		const rootDir = agentRootDir();
+		if (!(await this.adapter.exists(rootDir))) {
+			await this.adapter.mkdir(rootDir);
+		}
 		const skillsDir = this.getSkillsDir();
 		if (!(await this.adapter.exists(skillsDir))) {
 			await this.adapter.mkdir(skillsDir);

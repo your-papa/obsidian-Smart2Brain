@@ -1,6 +1,6 @@
 import type { App, DataAdapter } from "obsidian";
 import type { AgentsConfig, PromptFileReader } from "../types/plugin";
-import { basePromptPath, basePromptsDir } from "../utils/agentPaths";
+import { agentRootDir, basePromptPath, basePromptsDir } from "../utils/agentPaths";
 import { Logger as Log } from "../utils/logging";
 import { BASE_SYSTEM_PROMPT } from "./prompts";
 
@@ -127,8 +127,14 @@ export class PromptFilesService {
 	}
 
 	private async ensureDirs(): Promise<void> {
+		// Create the configurable agent-root folder first, then the nested `Base Prompts/` dir:
+		// Obsidian's DataAdapter.mkdir doesn't create intermediate parents, and the `agentFolder`
+		// setter's createFolder is unawaited — so a runtime folder change could reach here before
+		// the root exists. Ensuring the parent chain avoids a silent seed failure into a stale folder.
+		const root = agentRootDir();
 		const dir = basePromptsDir();
 		try {
+			if (!(await this.adapter.exists(root))) await this.adapter.mkdir(root);
 			if (!(await this.adapter.exists(dir))) await this.adapter.mkdir(dir);
 		} catch (error) {
 			Log.error(`Failed to create ${dir}:`, error);

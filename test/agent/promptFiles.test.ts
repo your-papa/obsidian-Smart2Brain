@@ -61,6 +61,25 @@ describe("PromptFilesService", () => {
 		expect(adapter.files.get("Agents/Base Prompts/default-agent.md")).toBe(BASE_SYSTEM_PROMPT);
 	});
 
+	// The agentFolder setter's createFolder is fire-and-forget, and DataAdapter.mkdir does not create
+	// intermediate parents — so seedDefaults must create the agent-root folder before the nested
+	// `Base Prompts/` dir, or a runtime folder change would seed into a missing parent and fail.
+	it("creates the agent-root folder before the nested Base Prompts dir", async () => {
+		state.agentFolder = "Meta/Agents";
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+
+		await svc.seedDefaults(AGENTS);
+
+		const rootIdx = adapter.mkdir.mock.calls.findIndex((c) => c[0] === "Meta/Agents");
+		const dirIdx = adapter.mkdir.mock.calls.findIndex((c) => c[0] === "Meta/Agents/Base Prompts");
+		expect(rootIdx).toBeGreaterThanOrEqual(0);
+		expect(dirIdx).toBeGreaterThanOrEqual(0);
+		// Root must be created no later than the nested dir.
+		expect(rootIdx).toBeLessThan(dirIdx);
+		expect(adapter.files.get("Meta/Agents/Base Prompts/default-agent.md")).toBe(BASE_SYSTEM_PROMPT);
+	});
+
 	it("does not clobber an edited base prompt on seed", async () => {
 		const adapter = makeAdapter({ "Agents/Base Prompts/default-agent.md": "my edited prompt" });
 		const svc = makeService(adapter);
