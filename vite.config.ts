@@ -32,7 +32,7 @@ function routeBuiltinRequiresThroughWindow() {
 		builtinSet.add(`node:${bare}`);
 	}
 	const prelude =
-		"const require$builtin=(id)=>{try{const r=(typeof window!=='undefined'&&window.require)||(typeof globalThis!=='undefined'&&globalThis.require);if(typeof r==='function')return r(id);}catch(e){}try{return require(id);}catch(e){}return {};};\n";
+		"const require$builtin=(id)=>{try{const r=(typeof window!=='undefined'&&window.require)||(typeof globalThis!=='undefined'&&globalThis.require);if(typeof r==='function')return r(id)??{};}catch(e){}try{return require(id)??{};}catch(e){}return {};};\n";
 	return {
 		name: "route-builtin-requires-through-window",
 		renderChunk(code: string) {

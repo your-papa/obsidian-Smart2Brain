@@ -966,12 +966,20 @@ export class AgentManager {
 	): Promise<boolean> {
 		if (!mcpServers || Object.keys(mcpServers).length === 0) return true;
 
-		// MCP transports depend on Node builtins (child_process/stdio, node:stream)
-		// that Obsidian's mobile WebView lacks; the SDK also imports them at module
-		// top, so it must never be evaluated on mobile. Skip MCP there entirely.
+		// stdio transport spawns a local process (Node child_process/stdio), which
+		// Obsidian's mobile WebView lacks. HTTP MCP has no such dependency, so on
+		// mobile drop only the stdio servers and load the rest. If that leaves no
+		// servers, skip entirely (avoids evaluating the SDK for nothing).
 		if (!Platform.isDesktopApp) {
-			Logger.log("Skipping MCP tools: not available on mobile.");
-			return true;
+			const httpServers = Object.fromEntries(
+				Object.entries(mcpServers).filter(([, cfg]) => (cfg as { transport?: string })?.transport !== "stdio"),
+			);
+			const droppedStdio = Object.keys(mcpServers).length - Object.keys(httpServers).length;
+			if (droppedStdio > 0) {
+				Logger.log(`Skipping ${droppedStdio} stdio MCP server(s): stdio transport is desktop-only.`);
+			}
+			if (Object.keys(httpServers).length === 0) return true;
+			mcpServers = httpServers;
 		}
 
 		try {
