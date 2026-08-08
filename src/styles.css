@@ -855,14 +855,15 @@
 	font-size: var(--font-smaller);
 }
 
-/* Selection highlight — dim accent background persisted after focus leaves the note */
+/* Selection highlight — accent-tinted band persisted after focus leaves the note.
+   Kept prominent (not faint) so the captured text is obvious at a glance. */
 .s2b-selection-highlight {
-	background-color: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+	background-color: color-mix(in srgb, var(--interactive-accent) 28%, transparent);
 	border-radius: 2px;
 }
 
 ::highlight(s2b-selection) {
-	background-color: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+	background-color: color-mix(in srgb, var(--interactive-accent) 28%, transparent);
 }
 
 /* Chat embed preview — icon sizing (setIcon injects SVG after mount, needs global rule) */

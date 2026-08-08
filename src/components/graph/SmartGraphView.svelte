@@ -1,6 +1,6 @@
 <script lang="ts">
 import { untrack, tick, onDestroy } from "svelte";
-import { getAllTags, Notice } from "obsidian";
+import { getAllTags, Notice, type WorkspaceLeaf } from "obsidian";
 import { getPlugin } from "../../stores/state.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getIndexableVaultFiles, isAgentFilePath } from "../../utils/fileFiltering";
@@ -85,6 +85,39 @@ let selectedPaths: string[] = $state([]);
 let immersePaths: Set<string> | null = $state(null);
 let isImmersed: boolean = $derived(immersePaths !== null);
 let focusedClusters: Set<number> = $state(new Set());
+
+// Whether a chat view is currently *visible* to the user. Graph selection is
+// ambient (it shows in any open chat automatically), so the selection bar only
+// needs an explicit "Open in Chat" action when there's no chat the user can
+// currently see. A chat leaf parked in a collapsed sidebar (or hidden background
+// tab) doesn't count. Tracked reactively via workspace listeners since
+// getLeavesOfType() isn't reactive.
+let hasOpenChat = $state(false);
+function isLeafVisible(leaf: WorkspaceLeaf): boolean {
+	const el = (leaf as { containerEl?: HTMLElement }).containerEl;
+	if (el?.style.display === "none") return false;
+	const root = leaf.getRoot();
+	const { leftSplit, rightSplit } = plugin.app.workspace;
+	// In a sidebar → only visible when that sidebar isn't collapsed.
+	if (root === leftSplit) return !(leftSplit as { collapsed?: boolean }).collapsed;
+	if (root === rightSplit) return !(rightSplit as { collapsed?: boolean }).collapsed;
+	// Main editor area → visible unless the tab is hidden behind another (display:none).
+	return true;
+}
+function refreshHasOpenChat() {
+	hasOpenChat = plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT).some(isLeafVisible);
+}
+refreshHasOpenChat();
+const chatOpenEventRefs = [
+	plugin.app.workspace.on("layout-change", refreshHasOpenChat),
+	plugin.app.workspace.on("active-leaf-change", refreshHasOpenChat),
+	// Collapsing/expanding a sidebar fires `resize` but not layout-change, so this
+	// is what keeps the button in sync when the user toggles the chat sidebar.
+	plugin.app.workspace.on("resize", refreshHasOpenChat),
+];
+onDestroy(() => {
+	for (const ref of chatOpenEventRefs) plugin.app.workspace.offref(ref);
+});
 
 // Detail level 0–100: 100 = full graph, <100 = skeleton backbone (fewer nodes per topic)
 let skeletonDetail = $state(100);
@@ -466,7 +499,8 @@ function handleSelectionChange(paths: string[]) {
 		paths.length > 0 ? { type: "any", conditions: [{ type: "paths", value: paths.slice() }] } : null;
 	const messenger = getSessionRegistry();
 	if (messenger) {
-		messenger.pendingGraphNotes = [...paths];
+		// Ambient: mirror the live graph selection into every open chat's tray.
+		messenger.graphSelection = [...paths];
 	}
 }
 
@@ -477,7 +511,7 @@ function handleLassoModeChange(active: boolean) {
 		canvasComponent?.clearSelection();
 		const messenger = getSessionRegistry();
 		if (messenger) {
-			messenger.pendingGraphNotes = [];
+			messenger.graphSelection = [];
 		}
 	}
 }
@@ -492,7 +526,7 @@ async function handleSendToChat() {
 	const paths = selectedPaths;
 	if (paths.length === 0) return;
 
-	// Ensure a chat is open
+	// Reveal an existing chat (uncollapsing its sidebar) or create one.
 	const { workspace } = plugin.app;
 	const existingLeaf = workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
 	if (!existingLeaf) {
@@ -501,9 +535,11 @@ async function handleSendToChat() {
 		workspace.revealLeaf(existingLeaf);
 	}
 
-	// Queue graph notes as structured data (rendered as chips in the chat input)
 	const messenger = getSessionRegistry();
 	if (messenger) {
+		// Ambient selection (shown in every chat) …
+		messenger.graphSelection = [...paths];
+		// … plus a one-shot signal so the just-opened/focused chat grabs focus.
 		messenger.pendingGraphNotes = [...paths];
 	} else {
 		new Notice("Chat is not initialized yet. Please open a chat first.");
@@ -522,7 +558,7 @@ function handleClearSelection() {
 	canvasComponent?.clearSelection();
 	const messenger = getSessionRegistry();
 	if (messenger) {
-		messenger.pendingGraphNotes = [];
+		messenger.graphSelection = [];
 	}
 }
 
@@ -664,7 +700,7 @@ function handleFocusSegment(segmentId: string, multi: boolean) {
 	canvasComponent?.selectNodesByPaths(paths);
 	selectedPaths = paths;
 	const messenger = getSessionRegistry();
-	if (messenger) messenger.pendingGraphNotes = [...paths];
+	if (messenger) messenger.graphSelection = [...paths];
 	pendingSpaceFilter = { type: "any", conditions: [{ type: "paths", value: paths.slice() }] };
 	canvasComponent?.panToSelection();
 }
@@ -884,6 +920,13 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
           <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
           <Button buttonText="Immerse" onClick={handleImmerse} tooltip="Rebuild graph with selected notes only" />
           <Button buttonText="Open All" onClick={handleOpenAllSelected} tooltip="Open all selected notes in new tabs" />
+          {#if !hasOpenChat}
+            <Button
+              buttonText="Open in Chat"
+              onClick={handleSendToChat}
+              tooltip="Reveal the chat and attach the selected notes"
+            />
+          {/if}
           <Button buttonText="Clear" onClick={handleClearSelection} tooltip="Clear selection (Esc)" />
         {:else}
           <Button buttonText="Exit" onClick={handleExitImmerse} tooltip="Exit immerse (Esc)" />

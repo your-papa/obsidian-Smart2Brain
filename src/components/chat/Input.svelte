@@ -17,11 +17,10 @@ import { getData } from "../../stores/dataStore.svelte";
 import AgentPopover from "./AgentPopover.svelte";
 import ModelSelectButton from "./ModelSelectButton.svelte";
 import PendingChangesBar from "./PendingChangesBar.svelte";
-import SelectionChip from "./SelectionChip.svelte";
-import GraphNotesChips from "./GraphNotesChips.svelte";
-import VisibleNotesChips from "./VisibleNotesChips.svelte";
-import DraftAttachmentChips from "./DraftAttachmentChips.svelte";
+import ContextTray from "./ContextTray.svelte";
 import ContextUsageCircle from "./ContextUsageCircle.svelte";
+import AttachPopover from "./AttachPopover.svelte";
+import { SearchModal } from "../modal/SearchModal";
 import Button from "../ui/Button.svelte";
 interface Props {
 	registry: SessionRegistry;
@@ -87,17 +86,15 @@ let fullscreenNoTransition = $state(false);
 let fullscreenTransitioning = false;
 let fullscreenPlaceholderHeight = $state(0);
 let containerEl: HTMLDivElement | undefined = $state();
-let activeVisibleNotes: VisibleNoteRef[] = $state([]);
-let queuedVisibleNotes: VisibleNoteRef[] = $state([]);
-let displayedVisibleNotePaths: string[] = $state([]);
-let activeSelection: SelectionRef | undefined = $state(undefined);
-let activeGraphNotes: GraphNoteRef[] = $state([]);
-let pendingGraphPaths: string[] = $state([]);
-let graphNotesChipRef: { clear: () => void } | undefined = $state(undefined);
+let contextTrayRef = $state<ReturnType<typeof ContextTray> | undefined>(undefined);
+// Read the tray's context outputs reactively through the instance. They're
+// getter functions over `$derived` state in ContextTray, so reading them inside
+// these `$derived`s tracks their dependencies across the component boundary.
+const activeVisibleNotes = $derived(contextTrayRef?.getActiveVisibleNotes() ?? []);
+const activeSelection = $derived(contextTrayRef?.getActiveSelection());
+const activeGraphNotes = $derived(contextTrayRef?.getActiveGraphNotes() ?? []);
 let assembledSystemPrompt = $state("");
 let assembledPromptRequestVersion = 0;
-
-let selectionChipRef: { clearSelection: () => void } | undefined = $state(undefined);
 
 const sendButtonStyle = $derived.by(() => {
 	const baseColor = "var(--text-accent)";
@@ -282,12 +279,14 @@ $effect(() => {
 	})();
 });
 
-// Consume pending graph notes queued from Smart Graph
+// The live graph selection is ambient (registry.graphSelection) and shown in
+// every chat's tray. `pendingGraphNotes` is a one-shot focus signal from the
+// graph's "send to chat" button — consume it to grab focus for this chat.
 $effect(() => {
 	if (registry.pendingGraphNotes !== null) {
-		pendingGraphPaths = registry.pendingGraphNotes;
+		const hadNotes = registry.pendingGraphNotes.length > 0;
 		registry.pendingGraphNotes = null;
-		if (pendingGraphPaths.length > 0) {
+		if (hadNotes) {
 			requestAnimationFrame(() => markdownEditor?.focus());
 		}
 	}
@@ -456,9 +455,7 @@ function sendMessage() {
 		URL.revokeObjectURL(url);
 	}
 	previewUrls = new Map();
-	selectionChipRef?.clearSelection();
-	graphNotesChipRef?.clear();
-	pendingGraphPaths = [];
+	contextTrayRef?.clear();
 	inputValue = "";
 	markdownEditor?.clear();
 	if (isFullscreen) {
@@ -759,6 +756,21 @@ async function onFileAttachment(event: Event) {
 	input.value = "";
 }
 
+/** Open the search modal in picker mode to attach vault files as content. */
+function openVaultPicker() {
+	new SearchModal(getPlugin().app, {
+		picker: {
+			pickerText: {
+				searchPlaceholder: "Search vault files to attach...",
+				confirmVerb: "Attach",
+				selectionLabel: "to attach",
+			},
+			pickerExistingPaths: attachments.map((att) => att.vaultPath),
+			onAddPaths: (paths) => attachVaultFilesByPath(paths),
+		},
+	}).open();
+}
+
 function getDragFeedback(dataTransfer?: DataTransfer | null): {
 	message: string;
 	hasIssue: boolean;
@@ -771,7 +783,7 @@ function getDragFeedback(dataTransfer?: DataTransfer | null): {
 	let hasImage = false;
 	let hasClearlyUnsupported = false;
 
-	const draggedVaultFiles = extractObsidianDraggedPaths(dataTransfer)
+	const draggedVaultFiles = extractObsidianDraggedPaths(dataTransfer, getPlugin().app)
 		.map((path) => getPlugin().app.vault.getAbstractFileByPath(path))
 		.filter((file): file is TFile => file instanceof TFile);
 
@@ -839,7 +851,7 @@ function resetDragState() {
 export function handleDragEnter(event: DragEvent) {
 	event.preventDefault();
 	dragCounter++;
-	if (event.dataTransfer?.types.includes("Files") || hasObsidianFileDrag(event.dataTransfer)) {
+	if (event.dataTransfer?.types.includes("Files") || hasObsidianFileDrag(event.dataTransfer, getPlugin().app)) {
 		isDragging = true;
 		const feedback = getDragFeedback(event.dataTransfer);
 		dragMessage = feedback.message;
@@ -865,18 +877,6 @@ export function handleDragLeave(event: DragEvent) {
 	}
 }
 
-function mergeVisibleNoteQueue(existing: VisibleNoteRef[], incoming: VisibleNoteRef[]): VisibleNoteRef[] {
-	if (incoming.length === 0) {
-		return existing;
-	}
-
-	const merged = new Map(existing.map((note) => [note.path, note]));
-	for (const note of incoming) {
-		merged.set(note.path, note);
-	}
-	return [...merged.values()];
-}
-
 export async function handleDrop(event: DragEvent) {
 	event.preventDefault();
 	resetDragState();
@@ -886,40 +886,11 @@ export async function handleDrop(event: DragEvent) {
 		return;
 	}
 
-	const draggedVaultPaths = extractObsidianDraggedPaths(event.dataTransfer);
+	const draggedVaultPaths = extractObsidianDraggedPaths(event.dataTransfer, getPlugin().app);
 	if (draggedVaultPaths.length > 0) {
-		const app = getPlugin().app;
-		const markdownNotes: VisibleNoteRef[] = [];
-		const attachmentPaths: string[] = [];
-
-		for (const path of draggedVaultPaths) {
-			const abstract = app.vault.getAbstractFileByPath(path);
-			if (!(abstract instanceof TFile)) {
-				attachmentPaths.push(path);
-				continue;
-			}
-
-			if (abstract.extension.toLowerCase() === "md") {
-				markdownNotes.push({
-					path: abstract.path,
-					basename: abstract.basename,
-					viewType: "markdown",
-					icon: "file-text",
-				});
-				continue;
-			}
-
-			attachmentPaths.push(path);
-		}
-
-		if (markdownNotes.length > 0) {
-			queuedVisibleNotes = mergeVisibleNoteQueue(queuedVisibleNotes, markdownNotes);
-			requestAnimationFrame(() => markdownEditor?.focus());
-		}
-
-		if (attachmentPaths.length > 0) {
-			await attachVaultFilesByPath(attachmentPaths);
-		}
+		// Dragging any vault file (incl. markdown) attaches it as content.
+		// References are created only by typing [[wikilinks]] in the editor.
+		await attachVaultFilesByPath(draggedVaultPaths);
 		return;
 	}
 
@@ -956,19 +927,11 @@ function removeAttachmentByPath(vaultPath: string) {
 }
 
 function canPromoteVisibleNoteToAttachment(note: VisibleNote): boolean {
-	if (note.viewType === "markdown") {
-		return false;
-	}
 	return ACCEPTED_EXTENSIONS.has(note.file.extension.toLowerCase());
 }
 
-/** Toggle a non-markdown visible note pill between visible-only and attached modes. */
-async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached: boolean) {
-	if (currentlyAttached) {
-		removeAttachmentByPath(note.file.path);
-		return;
-	}
-
+/** Promote the active visible note to a content attachment (inline its bytes/content). */
+async function promoteVisibleNoteToAttachment(note: VisibleNote) {
 	if (!canPromoteVisibleNoteToAttachment(note)) {
 		new Notice(`Unsupported file type: .${note.file.extension.toLowerCase()}`);
 		return;
@@ -1045,31 +1008,13 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
       tooltip={isFullscreen ? "Exit fullscreen (Esc)" : "Fullscreen editor"}
     />
     <div class="flex flex-row flex-wrap items-start gap-1.5 pt-2">
-      <VisibleNotesChips
-        bind:activeNotes={activeVisibleNotes}
-        queuedNotes={queuedVisibleNotes}
-        excludePath={activeSelection?.path}
-        attachmentPaths={attachments.map((att) => att.vaultPath)}
-        onToggleAttachment={toggleVisibleNoteAttachment}
-        canPromoteToAttachment={canPromoteVisibleNoteToAttachment}
-        onDisplayedPathsChange={(paths) => {
-          displayedVisibleNotePaths = paths;
-        }}
-        onQueuedNotesHandled={() => {
-          queuedVisibleNotes = [];
-        }}
-      />
-      <SelectionChip bind:activeSelection bind:this={selectionChipRef} />
-      <GraphNotesChips
-        bind:activeGraphNotes
-        paths={pendingGraphPaths}
-        bind:this={graphNotesChipRef}
-      />
-      <DraftAttachmentChips
-        attachments={attachments.filter(
-          (attachment) => !displayedVisibleNotePaths.includes(attachment.vaultPath),
-        )}
+      <ContextTray
+        bind:this={contextTrayRef}
+        graphPaths={registry.graphSelection}
+        {attachments}
         onRemoveAttachment={removeAttachment}
+        onPromoteToAttachment={promoteVisibleNoteToAttachment}
+        canPromoteToAttachment={canPromoteVisibleNoteToAttachment}
       />
       {#if savingFiles}
         <div class="text-xs text-text-muted flex items-center">Saving...</div>
@@ -1086,10 +1031,8 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
       data-testid="message-input"
     ></div>
 
-    <!-- Actions row: agent+model, attachment, send -->
+    <!-- Actions row: attachment, agent+model, send -->
     <div class="flex items-center gap-2">
-      <AgentPopover {threadPath} />
-      <ModelSelectButton {threadPath} />
       <input
         bind:this={attachmentInputEl}
         type="file"
@@ -1099,13 +1042,12 @@ async function toggleVisibleNoteAttachment(note: VisibleNote, currentlyAttached:
         style="display:none;"
         oninput={(event) => onFileAttachment(event)}
       />
-      <Button
-        iconId="paperclip"
-        iconSize="xs"
-        styles="chat-input-icon-button"
-        tooltip="Attach file"
-        onClick={() => attachmentInputEl?.click()}
+      <AttachPopover
+        onFromComputer={() => attachmentInputEl?.click()}
+        onFromVault={openVaultPicker}
       />
+      <AgentPopover {threadPath} />
+      <ModelSelectButton {threadPath} />
       <div class="ml-auto flex items-center gap-2">
         <ContextUsageCircle
           usagePercent={contextUsage.usagePercent}

@@ -1,10 +1,10 @@
-import { MarkdownView, type EventRef, type TFile, type Workspace, type WorkspaceLeaf } from "obsidian";
+import type { EventRef, TFile, Workspace, WorkspaceLeaf } from "obsidian";
 import { getPlugin } from "../stores/state.svelte";
 
 export interface VisibleNote {
 	file: TFile;
 	viewType: string;
-	/** e.g. "p. 1 / 2" for PDFs, "§ Heading" for markdown */
+	/** e.g. "p. 1 / 2" for PDFs. (Markdown notes carry no context — the user selects the exact text to reference.) */
 	context?: string;
 	icon: string;
 }
@@ -45,15 +45,9 @@ function isRootVisibleLeaf(workspace: Workspace, leaf: WorkspaceLeaf): boolean {
 }
 
 function shouldPollVisibleNotesContext(workspace: Workspace): boolean {
+	// Only PDFs have scroll-dependent context (page number) worth polling for.
 	for (const leaf of workspace.getLeavesOfType("pdf")) {
 		if (isRootVisibleLeaf(workspace, leaf)) return true;
-	}
-
-	for (const leaf of workspace.getLeavesOfType("markdown")) {
-		if (!isRootVisibleLeaf(workspace, leaf)) continue;
-		if (leaf.view instanceof MarkdownView && leaf.view.getMode() === "preview") {
-			return true;
-		}
 	}
 
 	return false;
@@ -83,103 +77,23 @@ function getPdfContext(view: unknown): string | undefined {
 	return undefined;
 }
 
-function getTopVisibleLine(view: MarkdownView): number | undefined {
-	try {
-		const editor = view.editor;
-		if (!editor) return undefined;
-		// Access internal CodeMirror 6 EditorView for scroll-based line detection
-		// biome-ignore lint/suspicious/noExplicitAny: Obsidian internal CM6 API
-		const cm = (editor as any).cm;
-		if (cm?.lineBlockAtHeight && cm?.scrollDOM) {
-			const scrollTop = cm.scrollDOM.scrollTop;
-			// Use top third of visible area so a heading fully on screen is picked up
-			const offset = cm.scrollDOM.clientHeight / 3;
-			const block = cm.lineBlockAtHeight(scrollTop + offset);
-			if (block) {
-				const doc = cm.state?.doc;
-				if (doc) return doc.lineAt(block.from).number - 1; // 0-indexed
-			}
-		}
-	} catch {
-		/* CM internals may change */
-	}
-	// Fallback to cursor position
-	return view.editor?.getCursor()?.line;
-}
-
-function getReadingModeHeading(view: MarkdownView): string | undefined {
-	try {
-		const container = view.previewMode?.containerEl;
-		if (!container) return undefined;
-		const scroller = container.querySelector(".markdown-preview-sizer") ?? container;
-		const headingEls = scroller.querySelectorAll("h1, h2, h3, h4, h5, h6");
-		if (!headingEls.length) return undefined;
-
-		const containerRect = container.getBoundingClientRect();
-		let best: Element | undefined;
-		// Use top third of the visible area as the threshold so a heading
-		// that is fully visible (but not scrolled flush to the top) is picked up.
-		const threshold = containerRect.top + containerRect.height / 3;
-		for (const el of headingEls) {
-			const rect = el.getBoundingClientRect();
-			if (rect.top <= threshold) {
-				best = el;
-			} else {
-				break;
-			}
-		}
-		if (!best) return undefined;
-		const text = best.textContent?.trim();
-		return text ? `§ ${text}` : undefined;
-	} catch {
-		/* safety net */
-	}
-	return undefined;
-}
-
-function getMarkdownContext(view: unknown): string | undefined {
-	try {
-		if (!(view instanceof MarkdownView) || !view.file) return undefined;
-
-		// Reading Mode: use DOM heading positions
-		if (view.getMode() === "preview") {
-			return getReadingModeHeading(view);
-		}
-
-		// Edit Mode: use CM6 scroll position + metadata cache
-		const cache = view.app.metadataCache.getFileCache(view.file);
-		const headings = cache?.headings;
-		if (!headings?.length) return undefined;
-
-		const line = getTopVisibleLine(view);
-		if (line == null) return undefined;
-
-		// Walk headings in reverse to find the last one at or before the visible line
-		for (let i = headings.length - 1; i >= 0; i--) {
-			if (headings[i].position.start.line <= line) {
-				return `§ ${headings[i].heading}`;
-			}
-		}
-	} catch {
-		/* safety net */
-	}
-	return undefined;
-}
-
 function getContext(type: string, leaf: WorkspaceLeaf): string | undefined {
 	switch (type) {
 		case "pdf":
 			return getPdfContext(leaf.view);
-		case "markdown":
-			return getMarkdownContext(leaf.view);
 		default:
 			return undefined;
 	}
 }
 
 /**
- * One-shot snapshot of visible notes. Use at send time to inject context
- * into the agent query without requiring a reactive tracker.
+ * Snapshot of the notes currently *visible* to the user in the main workspace
+ * area: the front (on-screen) tab of each pane, for every supported view type.
+ * Notes stacked behind another tab are excluded (their leaf is `display:none`),
+ * and the chat view is excluded because it is not a supported note type.
+ *
+ * Multiple visible panes (e.g. a side-by-side split) yield multiple notes.
+ * To reference a non-visible note the user types a [[wikilink]].
  */
 export function getVisibleNotes(workspace: Workspace): VisibleNote[] {
 	const visible: VisibleNote[] = [];
@@ -188,7 +102,8 @@ export function getVisibleNotes(workspace: Workspace): VisibleNote[] {
 	for (const type of VIEW_TYPES) {
 		for (const leaf of workspace.getLeavesOfType(type)) {
 			if (leaf.getRoot() !== workspace.rootSplit) continue;
-			if ((leaf as any).containerEl?.style.display === "none") continue;
+			// Front-tab test: background tabs in a stack are hidden with display:none.
+			if ((leaf as { containerEl?: HTMLElement }).containerEl?.style.display === "none") continue;
 			const file = (leaf.view as { file?: TFile }).file;
 			if (!file || seen.has(file.path)) continue;
 			seen.add(file.path);
@@ -216,9 +131,10 @@ export function formatVisibleNotesContext(notes: VisibleNoteRef[]): string {
 }
 
 /**
- * Reactive tracker for files visible in the main workspace area.
- * Tracks markdown, PDF, canvas, and image views.
- * Provides context metadata (current PDF page, active heading, etc.).
+ * Reactive tracker for the notes currently visible in the main workspace area
+ * (front tab of each pane, chat view excluded). Provides context metadata
+ * (current PDF page, active heading, etc.). Updates on leaf/layout changes and
+ * polls only when a preview/PDF view is visible (scroll changes context).
  */
 export class VisibleNotesTracker {
 	readonly #workspace = getPlugin().app.workspace;
@@ -226,6 +142,7 @@ export class VisibleNotesTracker {
 	#refs: EventRef[] = [];
 	#interval: ReturnType<typeof setInterval> | undefined;
 
+	/** The currently visible notes (front tab of each pane, chat excluded). */
 	get notes(): VisibleNote[] {
 		return this.#notes;
 	}
@@ -245,12 +162,11 @@ export class VisibleNotesTracker {
 	}
 
 	#refresh() {
-		const visible = getVisibleNotes(this.#workspace);
-
+		const next = getVisibleNotes(this.#workspace);
 		// Only update state when the visible set actually changed to avoid
 		// unnecessary Svelte re-renders from the polling interval.
-		if (!this.#notesEqual(this.#notes, visible)) {
-			this.#notes = visible;
+		if (!this.#notesEqual(this.#notes, next)) {
+			this.#notes = next;
 		}
 	}
 

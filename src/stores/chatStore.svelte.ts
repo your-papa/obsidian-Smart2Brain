@@ -2432,6 +2432,12 @@ export class SessionRegistry {
 	isLoadingSession: boolean = $state(false);
 	pendingInput: string | null = $state(null);
 	pendingGraphNotes: string[] | null = $state(null);
+	/** The live graph selection, shared across all chats. Unlike the one-shot
+	 * `pendingGraphNotes` (which focuses a specific chat), this ambient state is
+	 * read reactively by every open chat's context tray, so a graph selection
+	 * shows up in whichever chat the user switches to while it stays selected.
+	 * Per-chat exclusions are tracked locally in each ContextTray. */
+	graphSelection: string[] = $state([]);
 	pendingAttachmentPaths: string[] | null = $state(null);
 	pendingAutoSubmit: boolean = $state(false);
 	/** When set, only the Input bound to this thread path consumes the pending
