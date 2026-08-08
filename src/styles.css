@@ -948,3 +948,13 @@
 .is-mobile .s2b-model-grid {
 	grid-template-columns: 1fr !important;
 }
+
+/* Touch tap-target floors. Several icon buttons are sized to their glyph
+   (16–28px), below the ~44px comfortable touch target. Bump them on mobile.
+   Obsidian already touch-sizes bare .clickable-icon, so we target only the
+   custom-sized ones here. */
+.is-mobile .branch-nav-btn,
+.is-mobile .s2b-model-favorite {
+	min-width: 40px;
+	min-height: 40px;
+}

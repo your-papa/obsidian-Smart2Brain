@@ -181,6 +181,13 @@ async function handleRemoveProvider() {
     cursor: default;
   }
 
+  /* Touch: keep the icon visually 16px but grow the tap area to ~44px via
+     padding, cancelled by negative margin so the header row layout is unchanged. */
+  :global(.is-mobile) .provider-icon-button {
+    padding: 14px;
+    margin: -14px;
+  }
+
   .provider-icon-button:not(:disabled):hover {
     filter: brightness(1.05);
   }

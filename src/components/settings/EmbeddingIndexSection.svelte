@@ -351,6 +351,12 @@ function getSelectionGroupLabel(): string {
     min-width: 220px;
   }
 
+  /* The 220px floor overflows a phone row alongside the Cancel button. */
+  :global(.is-mobile) .index-progress-summary {
+    min-width: 0;
+    flex: 1;
+  }
+
   .index-progress-summary span {
     font-size: 0.75rem;
     color: var(--text-muted);

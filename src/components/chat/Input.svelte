@@ -1179,6 +1179,14 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     aspect-ratio: 1;
   }
 
+  /* Bump the send target to a comfortable touch size on mobile. */
+  :global(.is-mobile .send-message-button) {
+    width: 2.75rem !important;
+    height: 2.75rem !important;
+    min-width: 2.75rem !important;
+    min-height: 2.75rem !important;
+  }
+
   :global(.send-message-button:hover:not(:disabled)) {
     background: var(--send-button-bg-hover) !important;
     color: var(--text-on-accent) !important;

@@ -407,7 +407,7 @@ async function handleSelect(model: ChatModel) {
                       </button>
                       <button
                         type="button"
-                        class="flex items-center justify-center w-7 h-7 rounded-md border-none cursor-pointer transition-colors hover:bg-[--background-modifier-hover] shrink-0"
+                        class="s2b-model-favorite flex items-center justify-center w-7 h-7 rounded-md border-none cursor-pointer transition-colors hover:bg-[--background-modifier-hover] shrink-0"
                         style:color={isFavorite ? "var(--text-accent)" : "var(--text-faint)"}
                         onclick={(e) => {
                           e.stopPropagation();
