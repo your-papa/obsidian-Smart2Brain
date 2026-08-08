@@ -285,7 +285,11 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
     color: var(--text-accent);
   }
 
-  .agent-skills-summary {
+  /* These live inside ManagedEntityItem's `children` snippet and are only referenced
+     within {#if} branches, so Svelte's scoped-CSS analysis prunes the plain-class rules
+     (unlike .agent-avatar, which survives via its class: directive). Scope them with
+     :global so the flex layout actually reaches the rendered icon strip. */
+  :global(.agent-skills-summary) {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
@@ -295,7 +299,7 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
     color: var(--text-muted);
   }
 
-  .agent-skills-icons {
+  :global(.agent-skills-icons) {
     display: inline-flex;
     align-items: center;
     flex-wrap: wrap;
@@ -303,12 +307,12 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
     color: var(--text-normal);
   }
 
-  .agent-skills-overflow {
+  :global(.agent-skills-overflow) {
     font-size: 0.8rem;
     color: var(--text-muted);
   }
 
-  .agent-skills-empty {
+  :global(.agent-skills-empty) {
     color: var(--text-muted);
   }
 </style>
