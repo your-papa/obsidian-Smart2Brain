@@ -86,6 +86,18 @@ let immersePaths: Set<string> | null = $state(null);
 let isImmersed: boolean = $derived(immersePaths !== null);
 let focusedClusters: Set<number> = $state(new Set());
 
+// Whether a chat view is currently open. Graph selection is ambient (it shows in
+// any open chat automatically), so the selection bar only needs an explicit
+// "Attach in Chat" action when there's no chat to receive it. Tracked reactively
+// via a workspace listener since getLeavesOfType() isn't reactive.
+let hasOpenChat = $state(false);
+function refreshHasOpenChat() {
+	hasOpenChat = plugin.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT).length > 0;
+}
+refreshHasOpenChat();
+const chatOpenEventRef = plugin.app.workspace.on("layout-change", refreshHasOpenChat);
+onDestroy(() => plugin.app.workspace.offref(chatOpenEventRef));
+
 // Detail level 0–100: 100 = full graph, <100 = skeleton backbone (fewer nodes per topic)
 let skeletonDetail = $state(100);
 
@@ -887,6 +899,14 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
           <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
           <Button buttonText="Immerse" onClick={handleImmerse} tooltip="Rebuild graph with selected notes only" />
           <Button buttonText="Open All" onClick={handleOpenAllSelected} tooltip="Open all selected notes in new tabs" />
+          {#if !hasOpenChat}
+            <Button
+              iconId="message-square"
+              buttonText="Attach in Chat"
+              onClick={handleSendToChat}
+              tooltip="Open a chat and attach the selected notes"
+            />
+          {/if}
           <Button buttonText="Clear" onClick={handleClearSelection} tooltip="Clear selection (Esc)" />
         {:else}
           <Button buttonText="Exit" onClick={handleExitImmerse} tooltip="Exit immerse (Esc)" />
