@@ -41,7 +41,7 @@ function pick(action: () => void) {
       <Icon name="paperclip" size="xs" />
     {/snippet}
     {#snippet content()}
-      From computer
+      From device
     {/snippet}
   </PickerOptionRow>
 
