@@ -70,9 +70,11 @@ async function deleteAgent(agentId: string) {
 	const agent = agents[agentId];
 	if (!(await confirmDelete(plugin.app, agent?.name ?? agentId))) return;
 	try {
-		// Remove the note BEFORE deleting the agent from config: deleteBasePrompt resolves the
-		// note path from the agent's (name-based) entry, which is gone once deleteAgent runs.
-		void plugin.promptFilesService?.deleteBasePrompt(agentId);
+		// Remove the note BEFORE the agent leaves config, and AWAIT it: deleteBasePrompt
+		// resolves the note path from the agent's (name-based) entry, and only once the
+		// agent is gone can its name be reused by another agent. Fully ordering the removal
+		// closes the window where a reused name could point deletion at the wrong note.
+		await plugin.promptFilesService?.deleteBasePrompt(agentId);
 		pluginData.deleteAgent(agentId);
 		plugin.agentManager?.invalidateAgentRunnable(agentId);
 	} catch (error) {

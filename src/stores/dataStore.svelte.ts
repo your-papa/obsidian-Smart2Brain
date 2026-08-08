@@ -8,6 +8,7 @@ import {
 } from "../lib/views";
 import { getSecret, listSecrets, removeSecret, setSecret } from "../lib/secretStorage";
 import { isAgentFilePath } from "../utils/fileFiltering";
+import { sanitizeAgentFileName } from "../utils/agentPaths";
 import type SecondBrainPlugin from "../main";
 import { DEFAULT_AGENT_ICON } from "../types/plugin";
 import type {
@@ -985,23 +986,24 @@ export class PluginDataStore {
 	}
 
 	/**
-	 * Ensure an agent display name is unique across all agents. Display names are the
-	 * source of each agent's base-prompt filename, so a duplicate name would produce a
-	 * duplicate file path — enforcing uniqueness here removes that clash at the source.
-	 * Appends " 2", " 3", … until free. `exceptId` excludes the agent being renamed so it
-	 * can keep its own name.
+	 * Ensure an agent's name yields a UNIQUE base-prompt filename. Display names drive each
+	 * agent's note filename (via {@link sanitizeAgentFileName}), so uniqueness is enforced on
+	 * the *sanitized* form — otherwise two distinct raw names that sanitize to the same file
+	 * (e.g. "A/B" and "A B") could still share/orphan a note. Appends " 2", " 3", … until the
+	 * sanitized filename is free. `exceptId` excludes the agent being renamed so it can keep
+	 * its own name.
 	 */
 	private uniqueAgentName(desired: string, exceptId?: string): string {
 		const base = desired.trim() || "Agent";
-		const taken = new Set(
+		const takenFiles = new Set(
 			Object.values(this.#data.agents)
 				.filter((agent) => agent.id !== exceptId)
-				.map((agent) => agent.name),
+				.map((agent) => sanitizeAgentFileName(agent.name)),
 		);
-		if (!taken.has(base)) return base;
+		if (!takenFiles.has(sanitizeAgentFileName(base))) return base;
 		for (let n = 2; ; n++) {
 			const candidate = `${base} ${n}`;
-			if (!taken.has(candidate)) return candidate;
+			if (!takenFiles.has(sanitizeAgentFileName(candidate))) return candidate;
 		}
 	}
 

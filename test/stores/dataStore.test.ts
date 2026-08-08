@@ -228,6 +228,15 @@ describe("PluginDataStore – Agent CRUD", () => {
 		expect(agent.name).toBe("Agent");
 	});
 
+	it("auto-suffixes when two distinct names sanitize to the same filename", () => {
+		// "A/B" and "A B" both sanitize to "A B" — uniqueness is enforced on the sanitized
+		// filename, so the second must be nudged even though the raw names differ.
+		const first = store.createAgent("A/B");
+		const second = store.createAgent("A B");
+		expect(first.name).toBe("A/B");
+		expect(second.name).toBe("A B 2");
+	});
+
 	it("should throw when duplicating non-existent agent", () => {
 		expect(() => store.duplicateAgent("nonexistent", "Copy")).toThrow("not found");
 	});
