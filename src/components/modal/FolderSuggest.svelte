@@ -1,7 +1,7 @@
 <script lang="ts" generics="T extends TAbstractFile">
 import { type App, type TAbstractFile } from "obsidian";
 import { onDestroy, onMount } from "svelte";
-import { FileFolderSuggest } from "./folderSuggest";
+import { type FileFolderSuggest, createFileFolderSuggest } from "./folderSuggest";
 
 interface Props {
 	app: App;
@@ -24,7 +24,7 @@ let {
 }: Props = $props();
 
 let inputEl: HTMLInputElement;
-let suggestInstance: FileFolderSuggest;
+let suggestInstance: FileFolderSuggest | null = null;
 
 let inputValue: string = $state("");
 
@@ -36,12 +36,12 @@ $effect(() => {
 function submit(e: KeyboardEvent) {
 	if (e.key === "Enter" && inputValue.trim()) {
 		onSubmit(inputValue);
-		suggestInstance.close();
+		suggestInstance?.close();
 	}
 }
 
 onMount(() => {
-	suggestInstance = new FileFolderSuggest(app, inputEl, {
+	suggestInstance = createFileFolderSuggest(app, inputEl, {
 		getSuggestions: suggestionFn,
 		getLimit: () => suggestionLength,
 		onSelect: (path) => {
