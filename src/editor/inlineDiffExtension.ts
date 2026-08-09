@@ -197,71 +197,146 @@ function buildDetailBody(
 }
 
 /**
- * Lightweight block widget for a single change group: a compact action bar
- * (accept / reject / view-mode toggle) plus the always-shown word-diff /
- * two-pane detail. The removed/added lines are also conveyed by the line tints
- * in the document. This replaces the old always-on full-preview block widgets,
- * which reflowed the editor for every group.
+ * `WidgetType` comes from `@codemirror/view`, which is **externalized** (provided
+ * by the Obsidian host, not bundled — see vite.config.ts). On Obsidian mobile
+ * (iOS) the host does not expose that export in the shape the bundle expects, so
+ * a top-level `class ... extends WidgetType {}` sees `WidgetType === undefined`
+ * and throws `TypeError: The superclass is not a constructor` at module load,
+ * crashing the whole plugin before any of our code runs. Desktop exposes it, so
+ * it never surfaced there. Same failure family as `AbstractInputSuggest` — see
+ * `src/components/modal/folderSuggest.ts`.
+ *
+ * Defer the `class extends WidgetType` declarations into a memoized factory so
+ * the superclass is only dereferenced the first time a diff decoration is
+ * actually built (well past plugin load). If `WidgetType` is somehow missing,
+ * the inline-diff widgets degrade instead of taking down the plugin.
  */
-class PendingGroupWidget extends WidgetType {
-	/** Markdown-render cleanups for the currently-shown detail body, so a
-	 * re-render or widget teardown unloads its Components. */
-	private detailCleanups: Array<() => void> = [];
+type PendingGroupWidget = WidgetType & {
+	entryId: string;
+	groupIndex: number;
+	groupTotal: number;
+};
 
-	constructor(
-		readonly entryId: string,
-		readonly groupIndex: number,
-		readonly groupTotal: number,
-		readonly removedText: string,
-		readonly addedText: string,
-		readonly mode: DiffViewMode,
-		readonly app: App | null,
-		readonly sourcePath: string,
-	) {
-		super();
+interface WidgetClasses {
+	PendingGroupWidget: new (
+		entryId: string,
+		groupIndex: number,
+		groupTotal: number,
+		removedText: string,
+		addedText: string,
+		mode: DiffViewMode,
+		app: App | null,
+		sourcePath: string,
+	) => WidgetType;
+	CrossThreadBannerWidget: new (otherCount: number) => WidgetType;
+}
+
+let widgetClasses: WidgetClasses | null = null;
+
+function getWidgetClasses(): WidgetClasses {
+	if (widgetClasses) return widgetClasses;
+
+	/**
+	 * Lightweight block widget for a single change group: a compact action bar
+	 * (accept / reject / view-mode toggle) plus the always-shown word-diff /
+	 * two-pane detail. The removed/added lines are also conveyed by the line tints
+	 * in the document. This replaces the old always-on full-preview block widgets,
+	 * which reflowed the editor for every group.
+	 */
+	class PendingGroupWidgetImpl extends WidgetType {
+		/** Markdown-render cleanups for the currently-shown detail body, so a
+		 * re-render or widget teardown unloads its Components. */
+		private detailCleanups: Array<() => void> = [];
+
+		constructor(
+			readonly entryId: string,
+			readonly groupIndex: number,
+			readonly groupTotal: number,
+			readonly removedText: string,
+			readonly addedText: string,
+			readonly mode: DiffViewMode,
+			readonly app: App | null,
+			readonly sourcePath: string,
+		) {
+			super();
+		}
+
+		private runDetailCleanups() {
+			for (const fn of this.detailCleanups) fn();
+			this.detailCleanups = [];
+		}
+
+		private buildDetail(): HTMLElement {
+			this.runDetailCleanups();
+			return buildDetailBody(this.mode, this.removedText, this.addedText, this.app, this.sourcePath, (fn) =>
+				this.detailCleanups.push(fn),
+			);
+		}
+
+		toDOM(): HTMLElement {
+			const container = document.createElement("div");
+			container.className = "s2b-diff-edit-group";
+
+			container.appendChild(createEditActionBar(this.entryId, this.groupIndex, this.groupTotal));
+			container.appendChild(this.buildDetail());
+
+			return container;
+		}
+
+		destroy(): void {
+			this.runDetailCleanups();
+		}
+
+		eq(other: PendingGroupWidgetImpl): boolean {
+			return (
+				this.entryId === other.entryId &&
+				this.groupIndex === other.groupIndex &&
+				this.groupTotal === other.groupTotal &&
+				this.removedText === other.removedText &&
+				this.addedText === other.addedText &&
+				this.mode === other.mode &&
+				this.sourcePath === other.sourcePath
+			);
+		}
+
+		ignoreEvent(): boolean {
+			return false;
+		}
 	}
 
-	private runDetailCleanups() {
-		for (const fn of this.detailCleanups) fn();
-		this.detailCleanups = [];
+	/** Block widget shown at the top of the document when OTHER chats also have a
+	 * pending update to this file. The inline diff only renders the newest pending
+	 * update ({@link getLatestPendingUpdateForPath} → `.at(-1)`), so without this
+	 * banner the existence of competing edits from other threads would be invisible
+	 * here. Purely informational — the entries are reviewed from each chat's own
+	 * PendingChangesBar. */
+	class CrossThreadBannerWidgetImpl extends WidgetType {
+		constructor(readonly otherCount: number) {
+			super();
+		}
+
+		toDOM(): HTMLElement {
+			const banner = document.createElement("div");
+			banner.className = "s2b-diff-cross-thread-banner";
+			const chat = this.otherCount === 1 ? "chat has" : "chats have";
+			banner.textContent = `${this.otherCount} other ${chat} a pending edit to this file. Only the latest is shown here; whichever is accepted first wins and the others may then fail to apply.`;
+			return banner;
+		}
+
+		eq(other: CrossThreadBannerWidgetImpl): boolean {
+			return this.otherCount === other.otherCount;
+		}
+
+		ignoreEvent(): boolean {
+			return false;
+		}
 	}
 
-	private buildDetail(): HTMLElement {
-		this.runDetailCleanups();
-		return buildDetailBody(this.mode, this.removedText, this.addedText, this.app, this.sourcePath, (fn) =>
-			this.detailCleanups.push(fn),
-		);
-	}
-
-	toDOM(): HTMLElement {
-		const container = document.createElement("div");
-		container.className = "s2b-diff-edit-group";
-
-		container.appendChild(createEditActionBar(this.entryId, this.groupIndex, this.groupTotal));
-		container.appendChild(this.buildDetail());
-
-		return container;
-	}
-
-	destroy(): void {
-		this.runDetailCleanups();
-	}
-
-	eq(other: PendingGroupWidget): boolean {
-		return (
-			this.entryId === other.entryId &&
-			this.groupIndex === other.groupIndex &&
-			this.groupTotal === other.groupTotal &&
-			this.removedText === other.removedText &&
-			this.addedText === other.addedText &&
-			this.mode === other.mode &&
-			this.sourcePath === other.sourcePath
-		);
-	}
-
-	ignoreEvent(): boolean {
-		return false;
-	}
+	widgetClasses = {
+		PendingGroupWidget: PendingGroupWidgetImpl,
+		CrossThreadBannerWidget: CrossThreadBannerWidgetImpl,
+	};
+	return widgetClasses;
 }
 
 /** A contiguous group of line-level changes in the diff. */
@@ -270,34 +345,6 @@ interface ChangeGroup {
 	addedText: string;
 	docOffset: number;
 	docLength: number;
-}
-
-/** Block widget shown at the top of the document when OTHER chats also have a
- * pending update to this file. The inline diff only renders the newest pending
- * update ({@link getLatestPendingUpdateForPath} → `.at(-1)`), so without this
- * banner the existence of competing edits from other threads would be invisible
- * here. Purely informational — the entries are reviewed from each chat's own
- * PendingChangesBar. */
-class CrossThreadBannerWidget extends WidgetType {
-	constructor(readonly otherCount: number) {
-		super();
-	}
-
-	toDOM(): HTMLElement {
-		const banner = document.createElement("div");
-		banner.className = "s2b-diff-cross-thread-banner";
-		const chat = this.otherCount === 1 ? "chat has" : "chats have";
-		banner.textContent = `${this.otherCount} other ${chat} a pending edit to this file. Only the latest is shown here; whichever is accepted first wins and the others may then fail to apply.`;
-		return banner;
-	}
-
-	eq(other: CrossThreadBannerWidget): boolean {
-		return this.otherCount === other.otherCount;
-	}
-
-	ignoreEvent(): boolean {
-		return true;
-	}
 }
 
 function createGroupDecoration(
@@ -309,7 +356,7 @@ function createGroupDecoration(
 	app: App | null,
 	sourcePath: string,
 ): Decoration {
-	const widget = new PendingGroupWidget(
+	const widget = new (getWidgetClasses().PendingGroupWidget)(
 		entryId,
 		groupIndex,
 		groupTotal,
@@ -484,9 +531,11 @@ function buildDecorations(state: EditorState, entryOverride?: PendingChangeEntry
 		}
 		if (otherThreads > 0) {
 			decorations.push(
-				Decoration.widget({ widget: new CrossThreadBannerWidget(otherThreads), side: -1, block: true }).range(
-					0,
-				),
+				Decoration.widget({
+					widget: new (getWidgetClasses().CrossThreadBannerWidget)(otherThreads),
+					side: -1,
+					block: true,
+				}).range(0),
 			);
 		}
 

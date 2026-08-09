@@ -76,7 +76,7 @@ const PROCESS_SHIM =
  * to tell a fix apart from a stale/cached plugin file on mobile. Bump the tag on
  * each diagnostic build. Temporary diagnostic aid; safe to keep or remove.
  */
-const BUILD_MARKER = 'try{console.log("[S2B] build marker: ios-diag-1");}catch(e){}';
+const BUILD_MARKER = 'try{console.log("[S2B] build marker: ios-diag-2");}catch(e){}';
 
 const BANNER = `${BUILD_MARKER}\n${PROCESS_SHIM}`;
 
