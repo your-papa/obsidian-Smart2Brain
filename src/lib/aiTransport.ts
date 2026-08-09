@@ -1,6 +1,6 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import { requestUrl, type RequestUrlParam } from "obsidian";
 import { Logger } from "../utils/logging";
+import { createAsyncLocalStorage } from "./asyncLocalStorage";
 
 export type AiTransportMode = "default" | "buffered";
 
@@ -14,7 +14,7 @@ interface NormalizedRequest {
 	init: RequestInit;
 }
 
-const aiTransportContextStorage = new AsyncLocalStorage<AiTransportContext>();
+const aiTransportContextStorage = createAsyncLocalStorage<AiTransportContext>();
 
 type ErrorWithCause = Error & { cause?: unknown };
 

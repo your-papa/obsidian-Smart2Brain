@@ -92,7 +92,12 @@ function handleAuthModeChange(mode: OpenAIAuthMode) {
 // For OAuth-capable providers the sign-in CTA is always shown (it's the primary path);
 // the API-key field is an optional reveal below it. For OAuth-only providers there's no
 // key path at all. Non-OAuth providers show neither (plain AuthConfigFields).
-const showSignIn = $derived(!!oauth);
+// The loopback-server OAuth flow needs node:http, so it's desktop-only; providers whose
+// redirect is caught via an obsidian:// protocol handler (OpenRouter) set `worksOnMobile`
+// and are available everywhere. On mobile without that flag we suppress the CTA and fall
+// back to the API-key path where the provider supports one.
+const oauthAvailable = $derived(!!oauth && (Platform.isDesktopApp || oauth.worksOnMobile === true));
+const showSignIn = $derived(oauthAvailable);
 const isSignedIn = $derived(showSignIn ? (oauth?.isSignedIn?.() ?? false) : false);
 
 // Whether this OAuth provider is already connected, so the edit view shows a "Connected"
@@ -160,6 +165,17 @@ async function handleOAuthSignIn() {
 // can be retried immediately instead of hanging until the timeout.
 function handleCancelSignIn() {
 	oauth?.cancelSignIn?.();
+}
+
+// Manual code-paste fallback for obsidian:// OAuth flows: if the deep-link redirect doesn't
+// route back to Obsidian, the user pastes the code shown in the browser to finish the same
+// pending sign-in. Resolves the in-progress signIn() promise (see handleOAuthSignIn's await).
+let manualCode = $state("");
+function handleSubmitManualCode() {
+	const code = manualCode.trim();
+	if (!code) return;
+	oauth?.submitManualCode?.(code);
+	manualCode = "";
 }
 
 function handleOAuthDisconnect() {
@@ -431,29 +447,43 @@ $effect(() => {
 
     {#if oauth && oauth.supportsApiKey}
       <!-- OAuth + API key: sign-in is the primary path; the key field is revealed on
-           demand via a link, so the common (no-key) flow stays a single clean button. -->
-      {@render oauthSignIn()}
+           demand via a link, so the common (no-key) flow stays a single clean button.
+           On mobile the loopback OAuth flow is unavailable, so show the key field only. -->
+      {#if oauthAvailable}
+        {@render oauthSignIn()}
 
-      <div class="auth-alt-toggle">
-        <button type="button" class="auth-alt-link" onclick={toggleApiKey}>
-          {revealApiKey ? "Hide API key field" : "Use an API key instead →"}
-        </button>
-      </div>
+        <div class="auth-alt-toggle">
+          <button type="button" class="auth-alt-link" onclick={toggleApiKey}>
+            {revealApiKey ? "Hide API key field" : "Use an API key instead →"}
+          </button>
+        </div>
 
-      {#if revealApiKey}
+        {#if revealApiKey}
+          <AuthConfigFields provider={providerId} />
+        {/if}
+      {:else}
         <AuthConfigFields provider={providerId} />
       {/if}
 
       {@render trustedToggle()}
     {:else if oauth}
-      <!-- OAuth-only provider (no manual API key): sign-in CTA only. -->
+      <!-- OAuth-only provider (no manual API key): sign-in CTA only. On mobile there is
+           no viable credential path (loopback OAuth needs a desktop). -->
       {#if oauth.description}
         <div class="setting-item">
           <div class="setting-item-description">{oauth.description}</div>
         </div>
       {/if}
 
-      {@render oauthSignIn()}
+      {#if oauthAvailable}
+        {@render oauthSignIn()}
+      {:else}
+        <div class="setting-item">
+          <div class="setting-item-description">
+            {oauth.label} sign-in is only available on desktop.
+          </div>
+        </div>
+      {/if}
       {@render trustedToggle()}
     {:else}
       <AuthConfigFields provider={providerId} afterRequired={trustedToggle} />
@@ -500,6 +530,20 @@ $effect(() => {
         {/if}
       </div>
     </SettingItem>
+    {#if isSigningIn && oauth.submitManualCode}
+      <!-- On mobile the flow is headless (no localhost/redirect): OpenRouter shows the
+           authorization code in the browser and the user pastes it here. On desktop this
+           is a fallback if the browser doesn't return to Obsidian automatically. -->
+      <SettingItem
+        name="Paste authorization code"
+        desc="Copy the authorization code shown in the browser and paste it here to finish connecting."
+      >
+        <div class="flex gap-2 items-center">
+          <Text inputType="text" bind:value={manualCode} placeholder="Authorization code" />
+          <Button buttonText="Submit" disabled={!manualCode.trim()} onClick={handleSubmitManualCode} />
+        </div>
+      </SettingItem>
+    {/if}
   {/if}
 {/snippet}
 

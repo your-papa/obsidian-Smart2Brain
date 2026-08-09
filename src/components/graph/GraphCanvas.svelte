@@ -100,6 +100,20 @@ let hasDragged = false;
 // Track pointer-down position to detect viewport pans (which also fire click)
 let pointerDownScreenPos: { x: number; y: number } | null = null;
 
+// Long-press → context menu (touch has no right-click). Armed on pointerdown
+// over a node, cancelled by movement/lift; fires the same menu as oncontextmenu.
+let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+let longPressFired = false;
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_MOVE_TOLERANCE = 10;
+
+function cancelLongPress() {
+	if (longPressTimer !== null) {
+		clearTimeout(longPressTimer);
+		longPressTimer = null;
+	}
+}
+
 // Non-reactive drag reference — directly mutates the d3 SimNode's fx/fy
 // without going through Svelte's $state proxy (wiki mode only)
 let dragSimNode: SimNode | null = null;
@@ -240,21 +254,11 @@ function handleKeyDown(e: KeyboardEvent) {
 			break;
 		case "=":
 		case "+": {
-			const currentScale = renderer.scale;
-			const newScale = Math.min(10, currentScale * 1.2);
-			const center = renderer.screenToWorld(renderer.width / 2, renderer.height / 2);
-			renderer.moveCenter(center.x, center.y, newScale);
-			onUserViewportChange?.();
-			render();
+			zoomByFactor(1.2);
 			break;
 		}
 		case "-": {
-			const currentScale = renderer.scale;
-			const newScale = Math.max(0.05, currentScale / 1.2);
-			const center = renderer.screenToWorld(renderer.width / 2, renderer.height / 2);
-			renderer.moveCenter(center.x, center.y, newScale);
-			onUserViewportChange?.();
-			render();
+			zoomByFactor(1 / 1.2);
 			break;
 		}
 	}
@@ -804,6 +808,21 @@ function handleMouseDown(e: PointerEvent) {
 	if (node) {
 		const sn = simNodeMap.get(node.id);
 		if (!sn) return;
+		// Touch: show the node's label/neighbor highlight on tap (no hover), and
+		// arm a long-press that opens the context menu (no right-click).
+		if (e.pointerType === "touch" || e.pointerType === "pen") {
+			if (hoveredNode !== node) {
+				hoveredNode = node;
+				render();
+			}
+			longPressFired = false;
+			cancelLongPress();
+			longPressTimer = setTimeout(() => {
+				longPressTimer = null;
+				longPressFired = true;
+				openNodeMenu(node, e.clientX, e.clientY);
+			}, LONG_PRESS_MS);
+		}
 		draggedNode = node;
 		dragSimNode = sn;
 		hasDragged = false;
@@ -827,6 +846,12 @@ function handleMouseMove(e: PointerEvent) {
 	const rect = canvas.getBoundingClientRect();
 	const x = e.clientX - rect.left;
 	const y = e.clientY - rect.top;
+
+	// Movement past a small tolerance means pan/drag, not a long-press.
+	if (longPressTimer !== null && pointerDownScreenPos) {
+		const moved = Math.hypot(x - pointerDownScreenPos.x, y - pointerDownScreenPos.y);
+		if (moved > LONG_PRESS_MOVE_TOLERANCE) cancelLongPress();
+	}
 
 	if (isLassoing) {
 		const graphPos = screenToGraph(x, y);
@@ -884,6 +909,7 @@ function handleMouseMove(e: PointerEvent) {
 }
 
 function handleMouseUp(_e: PointerEvent) {
+	cancelLongPress();
 	if (isLassoing) {
 		isLassoing = false;
 		lassoJustFinished = true;
@@ -916,6 +942,11 @@ function handleMouseUp(_e: PointerEvent) {
 }
 
 function handleClick(e: MouseEvent) {
+	// A long-press already opened the context menu — don't also open the file.
+	if (longPressFired) {
+		longPressFired = false;
+		return;
+	}
 	if (hasDragged) {
 		hasDragged = false;
 		return;
@@ -993,6 +1024,7 @@ function triggerNodePreview(event: MouseEvent | KeyboardEvent, node: GraphNode) 
 }
 
 function handleMouseLeave() {
+	cancelLongPress();
 	hoveredNode = null;
 	previewTriggeredForNode = null;
 	render();
@@ -1007,7 +1039,15 @@ function handleContextMenu(e: MouseEvent) {
 	const node = findNodeAt(x, y);
 
 	if (!node) return;
+	openNodeMenu(node, e.clientX, e.clientY);
+}
 
+/**
+ * Build and show the node context menu at a viewport position. Shared by
+ * right-click (desktop) and long-press (touch), so mobile users can reach
+ * "Reveal in file explorer" / cluster actions that have no other entry point.
+ */
+function openNodeMenu(node: GraphNode, clientX: number, clientY: number) {
 	const menu = new Menu();
 
 	menu.addItem((item) =>
@@ -1054,7 +1094,7 @@ function handleContextMenu(e: MouseEvent) {
 			}),
 	);
 
-	menu.showAtPosition({ x: e.clientX, y: e.clientY });
+	menu.showAtPosition({ x: clientX, y: clientY });
 }
 
 // ============================================================================
@@ -1594,6 +1634,20 @@ function animateCameraToNodes(
 export function fitToView() {
 	if (simNodes.length === 0) return;
 	animateCameraToNodes(undefined, GRAPH_FIT_PADDING, 600);
+}
+
+/**
+ * Zoom the viewport by a multiplicative factor around the screen center.
+ * Backs the +/- keyboard shortcuts.
+ */
+function zoomByFactor(factor: number) {
+	const renderer = pixi;
+	if (!renderer) return;
+	const newScale = Math.min(10, Math.max(0.05, renderer.scale * factor));
+	const center = renderer.screenToWorld(renderer.width / 2, renderer.height / 2);
+	renderer.moveCenter(center.x, center.y, newScale);
+	onUserViewportChange?.();
+	render();
 }
 
 /**

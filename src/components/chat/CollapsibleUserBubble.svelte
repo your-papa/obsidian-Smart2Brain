@@ -64,7 +64,7 @@ function handleClick(evt: MouseEvent) {
   {#if isTruncated}
     <!-- Expand/collapse icon button (visible on hover) -->
     <div
-      class="absolute bottom-1 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+      class="s2b-hover-reveal absolute bottom-1 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
     >
       <Button
         iconId="chevron-down"

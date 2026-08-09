@@ -21,6 +21,7 @@ import ContextTray from "./ContextTray.svelte";
 import ContextUsageCircle from "./ContextUsageCircle.svelte";
 import AttachPopover from "./AttachPopover.svelte";
 import { SearchModal } from "../modal/SearchModal";
+import { isMobileUI } from "../../utils/platform";
 import Button from "../ui/Button.svelte";
 interface Props {
 	registry: SessionRegistry;
@@ -1032,7 +1033,7 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     ></div>
 
     <!-- Actions row: attachment, agent+model, send -->
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2 flex-wrap">
       <input
         bind:this={attachmentInputEl}
         type="file"
@@ -1049,14 +1050,16 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
       <AgentPopover {threadPath} />
       <ModelSelectButton {threadPath} />
       <div class="ml-auto flex items-center gap-2">
-        <ContextUsageCircle
-          usagePercent={contextUsage.usagePercent}
-          used={contextUsage.estimatedUsedTokens}
-          limit={contextUsage.contextWindow}
-          breakdown={contextBreakdown}
-          {canSummarizeNow}
-          onSummarizeNow={summarizeNow}
-        />
+        {#if !isMobileUI()}
+          <ContextUsageCircle
+            usagePercent={contextUsage.usagePercent}
+            used={contextUsage.estimatedUsedTokens}
+            limit={contextUsage.contextWindow}
+            breakdown={contextBreakdown}
+            {canSummarizeNow}
+            onSummarizeNow={summarizeNow}
+          />
+        {/if}
         {#if !session || session.messageState === MessageState.idle}
           <Button
             disabled={!canSendMessage || savingFiles}
@@ -1179,6 +1182,14 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     aspect-ratio: 1;
   }
 
+  /* Bump the send target to a comfortable touch size on mobile. */
+  :global(.is-mobile .send-message-button) {
+    width: 2.75rem !important;
+    height: 2.75rem !important;
+    min-width: 2.75rem !important;
+    min-height: 2.75rem !important;
+  }
+
   :global(.send-message-button:hover:not(:disabled)) {
     background: var(--send-button-bg-hover) !important;
     color: var(--text-on-accent) !important;
@@ -1226,6 +1237,12 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
 
     :global(.cm-scroller) {
       overflow-x: hidden;
+      /* Obsidian's mobile CSS adds a large `--view-top-spacing-markdown`
+         padding-top to `.markdown-source-view > .cm-editor > .cm-scroller` to
+         clear the phone header/toolbar. Our embedded composer carries the
+         `markdown-source-view` class too, so it inherits ~119px of dead space
+         above the placeholder. Reset it — the composer has no header to clear. */
+      padding-top: 0 !important;
     }
 
     :global(.cm-content) {

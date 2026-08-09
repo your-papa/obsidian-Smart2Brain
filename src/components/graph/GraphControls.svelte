@@ -353,6 +353,12 @@ function handleClusterCohesionStrengthChange(val: number) {
     box-shadow: none;
   }
 
+  /* On a phone a fixed 300px panel + 52px offset overflows and occludes the
+     canvas — fit it to the viewport instead. */
+  :global(.is-mobile) .graph-controls {
+    width: min(300px, calc(100vw - 68px));
+  }
+
   .graph-controls.collapsed {
     display: none;
   }
