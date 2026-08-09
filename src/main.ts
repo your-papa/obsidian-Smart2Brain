@@ -1,3 +1,4 @@
+import "./lib/iosClassProbe";
 import { type EventRef, MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import { mount, unmount } from "svelte";
 import "./lib/i18n";
