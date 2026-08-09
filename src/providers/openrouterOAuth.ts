@@ -1,30 +1,41 @@
-import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { Platform, requestUrl } from "obsidian";
 import { Logger } from "../utils/logging";
-import { escapeHtml } from "../utils/html";
-import { arrayBufferToBase64Url, requireNodeHttp } from "./oauthNode";
+import { arrayBufferToBase64Url } from "./oauthNode";
 
 const OPENROUTER_AUTH_URL = "https://openrouter.ai/auth";
 const OPENROUTER_EXCHANGE_URL = "https://openrouter.ai/api/v1/auth/keys";
-const CALLBACK_HOST = "localhost";
-const CALLBACK_PORT = 3000;
-const CALLBACK_PATH = "/";
-const HEALTHCHECK_PATH = "/health";
+/**
+ * Redirect target for the OAuth flow. OpenRouter has no per-app redirect
+ * allowlist, so we point `callback_url` at an `obsidian://` deep link caught by
+ * the protocol handler registered in `main.ts`. This works on both desktop and
+ * mobile — no localhost server required. The action segment must match the
+ * `registerObsidianProtocolHandler` action.
+ */
+export const OPENROUTER_OAUTH_ACTION = "s2b-openrouter-oauth";
+const REDIRECT_URI = `obsidian://${OPENROUTER_OAUTH_ACTION}`;
 const OAUTH_TIMEOUT_MS = 5 * 60_000;
 
 interface PendingOpenRouterAuth {
-	server: Server;
 	codeVerifier: string;
 	resolve: (apiKey: string) => void;
 	reject: (error: Error) => void;
 	timeoutId: ReturnType<typeof setTimeout>;
-	redirectUri: string;
+	/** Guards against a double-resolve (deep link + manual paste racing). */
+	settled: boolean;
 }
 
 interface OpenRouterKeyResponse {
 	key?: string;
 	error?: { message?: string };
 	message?: string;
+}
+
+/** Params delivered by Obsidian's protocol handler (plus our known keys). */
+export interface OpenRouterOAuthRedirectParams {
+	action: string;
+	code?: string;
+	error?: string;
+	[key: string]: string | undefined;
 }
 
 let pendingOpenRouterAuth: PendingOpenRouterAuth | null = null;
@@ -37,54 +48,10 @@ export class OpenRouterSignInCancelledError extends Error {
 	}
 }
 
-const HTML_SUCCESS = `<!doctype html>
-<html>
-  <head><title>Smart2Brain - OpenRouter Connected</title></head>
-  <body style="font-family:system-ui,-apple-system,sans-serif;background:#131010;color:#f1ecec;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
-    <div style="text-align:center;padding:2rem;">
-      <h1 style="margin-bottom:1rem;">OpenRouter Connected</h1>
-      <p>You can close this window and return to Obsidian.</p>
-    </div>
-    <script>setTimeout(() => window.close(), 1500)</script>
-  </body>
-</html>`;
-
-function htmlError(error: string): string {
-	return `<!doctype html>
-<html>
-  <head><title>Smart2Brain - OpenRouter Authentication Failed</title></head>
-  <body style="font-family:system-ui,-apple-system,sans-serif;background:#131010;color:#f1ecec;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
-    <div style="text-align:center;padding:2rem;">
-      <h1 style="color:#fc533a;margin-bottom:1rem;">Authentication Failed</h1>
-      <p>${escapeHtml(error)}</p>
-    </div>
-  </body>
-</html>`;
-}
-
-function oauthSuccessPage(res: ServerResponse): void {
-	res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-	res.end(HTML_SUCCESS);
-}
-
-function oauthErrorPage(res: ServerResponse, error: string): void {
-	res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-	res.end(htmlError(error));
-}
-
 function cleanupPendingOpenRouterAuth() {
 	if (!pendingOpenRouterAuth) return;
 	clearTimeout(pendingOpenRouterAuth.timeoutId);
-	pendingOpenRouterAuth.server.close();
 	pendingOpenRouterAuth = null;
-}
-
-function getRedirectUri(): string {
-	return `http://${CALLBACK_HOST}:${CALLBACK_PORT}${CALLBACK_PATH}`;
-}
-
-function getHealthcheckUri(): string {
-	return `http://${CALLBACK_HOST}:${CALLBACK_PORT}${HEALTHCHECK_PATH}`;
 }
 
 function generateRandomString(length: number): string {
@@ -101,23 +68,13 @@ async function createCodeChallenge(codeVerifier: string): Promise<string> {
 	return arrayBufferToBase64Url(hash);
 }
 
-function buildAuthorizeUrl(redirectUri: string, codeChallenge: string): string {
+function buildAuthorizeUrl(codeChallenge: string): string {
 	const params = new URLSearchParams({
-		callback_url: redirectUri,
+		callback_url: REDIRECT_URI,
 		code_challenge: codeChallenge,
 		code_challenge_method: "S256",
 	});
 	return `${OPENROUTER_AUTH_URL}?${params.toString()}`;
-}
-
-async function verifyCallbackServer(): Promise<void> {
-	const response = await requestUrl({
-		url: getHealthcheckUri(),
-		method: "GET",
-	});
-	if (response.status !== 200 || response.text !== "ok") {
-		throw new Error("OpenRouter callback server healthcheck failed");
-	}
 }
 
 async function exchangeCodeForApiKey(code: string, codeVerifier: string): Promise<string> {
@@ -153,99 +110,68 @@ async function exchangeCodeForApiKey(code: string, codeVerifier: string): Promis
 	return payload.key;
 }
 
-async function handleOpenRouterCallback(req: IncomingMessage, res: ServerResponse): Promise<void> {
+/**
+ * Complete a pending sign-in from a raw authorization code (from either the
+ * `obsidian://` redirect or a manual paste). Exchanges the code for an API key
+ * and resolves the pending promise. No-op if nothing is pending or already settled.
+ */
+async function completeWithCode(code: string): Promise<void> {
 	const pending = pendingOpenRouterAuth;
-	if (!pending) {
-		oauthErrorPage(res, "No active OpenRouter sign-in session");
-		return;
-	}
-
+	if (!pending || pending.settled) return;
+	pending.settled = true;
 	try {
-		const url = new URL(req.url ?? "/", pending.redirectUri);
-		Logger.debug("OpenRouter callback request received", {
-			pathname: url.pathname,
-			search: url.search,
-		});
-
-		if (url.pathname === HEALTHCHECK_PATH) {
-			res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-			res.end("ok");
-			return;
-		}
-
-		if (url.pathname !== CALLBACK_PATH) {
-			oauthErrorPage(res, "Unexpected callback path");
-			return;
-		}
-
-		const callbackError = url.searchParams.get("error");
-		if (callbackError) {
-			oauthErrorPage(res, callbackError);
-			pending.reject(new Error(callbackError));
-			cleanupPendingOpenRouterAuth();
-			return;
-		}
-
-		const code = url.searchParams.get("code");
-		if (!code) {
-			oauthErrorPage(res, "Missing authorization code");
-			pending.reject(new Error("Missing authorization code"));
-			cleanupPendingOpenRouterAuth();
-			return;
-		}
-
 		const apiKey = await exchangeCodeForApiKey(code, pending.codeVerifier);
-		oauthSuccessPage(res);
 		pending.resolve(apiKey);
-		cleanupPendingOpenRouterAuth();
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		oauthErrorPage(res, message);
-		pending.reject(error instanceof Error ? error : new Error(message));
+		pending.reject(error instanceof Error ? error : new Error(String(error)));
+	} finally {
 		cleanupPendingOpenRouterAuth();
 	}
 }
 
-async function startOpenRouterAuthServer(codeVerifier: string, redirectUri: string): Promise<void> {
-	if (pendingOpenRouterAuth) {
-		throw new Error("An OpenRouter sign-in flow is already in progress");
+/**
+ * Handle the `obsidian://s2b-openrouter-oauth` redirect delivered by the
+ * protocol handler registered in `main.ts`. Extracts `code`/`error` and
+ * resolves the pending sign-in.
+ */
+export function resolveOpenRouterOAuthRedirect(params: OpenRouterOAuthRedirectParams): void {
+	const pending = pendingOpenRouterAuth;
+	if (!pending || pending.settled) {
+		Logger.warn("OpenRouter OAuth redirect received with no active sign-in session");
+		return;
 	}
 
-	await new Promise<void>((resolve, reject) => {
-		let settled = false;
-		const createServer = requireNodeHttp();
-		const server = createServer((req, res) => {
-			void handleOpenRouterCallback(req, res);
-		});
-
-		const finalizeReject = (error: Error) => {
-			if (settled) return;
-			settled = true;
-			server.close();
-			reject(error);
-		};
-
-		server.once("error", (error) => {
-			Logger.error("Failed to start OpenRouter callback server", error);
-			finalizeReject(
-				new Error(`Failed to start OpenRouter callback server on localhost:${CALLBACK_PORT}: ${error.message}`),
-			);
-		});
-
-		server.listen(CALLBACK_PORT, () => {
-			if (settled) return;
-			settled = true;
-			pendingOpenRouterAuth = {
-				server,
-				codeVerifier,
-				resolve: () => undefined,
-				reject: () => undefined,
-				redirectUri,
-				timeoutId: setTimeout(() => undefined, OAUTH_TIMEOUT_MS),
-			};
-			resolve();
-		});
+	Logger.debug("OpenRouter OAuth redirect received", {
+		hasCode: Boolean(params.code),
+		hasError: Boolean(params.error),
 	});
+
+	if (params.error) {
+		pending.settled = true;
+		pending.reject(new Error(params.error));
+		cleanupPendingOpenRouterAuth();
+		return;
+	}
+
+	if (!params.code) {
+		pending.settled = true;
+		pending.reject(new Error("Missing authorization code"));
+		cleanupPendingOpenRouterAuth();
+		return;
+	}
+
+	void completeWithCode(params.code);
+}
+
+/**
+ * Manual code-paste fallback: if the deep-link redirect doesn't fire, the user
+ * can copy the authorization code shown in the browser and submit it here to
+ * complete the same pending sign-in.
+ */
+export function submitOpenRouterAuthCode(code: string): void {
+	const trimmed = code.trim();
+	if (!trimmed) return;
+	void completeWithCode(trimmed);
 }
 
 async function openBrowser(url: string): Promise<void> {
@@ -255,54 +181,53 @@ async function openBrowser(url: string): Promise<void> {
 	}
 }
 
+/**
+ * Start the OpenRouter OAuth sign-in. Opens the browser to the authorize URL and
+ * resolves once the `obsidian://` redirect (or a manual code paste) delivers the
+ * authorization code. Works on desktop and mobile — no localhost server.
+ */
 export async function signInWithOpenRouter(): Promise<string> {
-	if (Platform.isMobileApp) {
-		throw new Error("OpenRouter browser sign-in is only available on desktop. Enter an API key instead.");
+	if (pendingOpenRouterAuth) {
+		throw new Error("An OpenRouter sign-in flow is already in progress");
 	}
-	const redirectUri = getRedirectUri();
+
 	const codeVerifier = generateRandomString(64);
 	const codeChallenge = await createCodeChallenge(codeVerifier);
-	const authorizeUrl = buildAuthorizeUrl(redirectUri, codeChallenge);
-
-	await startOpenRouterAuthServer(codeVerifier, redirectUri);
-	try {
-		Logger.info("OpenRouter callback server listening", {
-			redirectUri,
-			healthcheckUri: getHealthcheckUri(),
-		});
-		await verifyCallbackServer();
-		Logger.info("OpenRouter callback server healthcheck passed");
-		await openBrowser(authorizeUrl);
-	} catch (error) {
-		cleanupPendingOpenRouterAuth();
-		throw error;
-	}
+	const authorizeUrl = buildAuthorizeUrl(codeChallenge);
 
 	return new Promise<string>((resolve, reject) => {
-		if (!pendingOpenRouterAuth) {
-			reject(new Error("OpenRouter sign-in session was not initialized"));
-			return;
-		}
+		pendingOpenRouterAuth = {
+			codeVerifier,
+			resolve,
+			reject,
+			settled: false,
+			timeoutId: setTimeout(() => {
+				if (!pendingOpenRouterAuth || pendingOpenRouterAuth.settled) return;
+				pendingOpenRouterAuth.settled = true;
+				pendingOpenRouterAuth.reject(new Error("Timed out waiting for OpenRouter sign-in"));
+				cleanupPendingOpenRouterAuth();
+			}, OAUTH_TIMEOUT_MS),
+		};
 
-		pendingOpenRouterAuth.resolve = resolve;
-		pendingOpenRouterAuth.reject = reject;
-		clearTimeout(pendingOpenRouterAuth.timeoutId);
-		pendingOpenRouterAuth.timeoutId = setTimeout(() => {
-			if (!pendingOpenRouterAuth) return;
-			pendingOpenRouterAuth.reject(new Error("Timed out waiting for OpenRouter sign-in"));
+		Logger.info("OpenRouter sign-in started", { redirectUri: REDIRECT_URI, mobile: Platform.isMobileApp });
+		void openBrowser(authorizeUrl).catch((error) => {
+			if (!pendingOpenRouterAuth || pendingOpenRouterAuth.settled) return;
+			pendingOpenRouterAuth.settled = true;
+			reject(error instanceof Error ? error : new Error(String(error)));
 			cleanupPendingOpenRouterAuth();
-		}, OAUTH_TIMEOUT_MS);
+		});
 	});
 }
 
 /**
  * Aborts an in-progress OpenRouter sign-in: rejects the pending promise with a
- * cancellation marker and tears down the callback server (freeing port 3000), so the
- * user can retry immediately instead of waiting out the timeout. No-op if none pending.
+ * cancellation marker, so the user can retry immediately instead of waiting out
+ * the timeout. No-op if none pending.
  */
 export function cancelOpenRouterSignIn(): void {
 	const pending = pendingOpenRouterAuth;
-	if (!pending) return;
+	if (!pending || pending.settled) return;
+	pending.settled = true;
 	pending.reject(new OpenRouterSignInCancelledError());
 	cleanupPendingOpenRouterAuth();
 }

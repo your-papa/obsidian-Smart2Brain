@@ -23,7 +23,7 @@ import type {
 } from "../types/provider/index";
 import OpenRouterLogo from "../components/ui/logos/OpenRouterLogo.svelte";
 import { populateOpenRouterCache, type OpenRouterModelInfo } from "./openrouterModels";
-import { signInWithOpenRouter, cancelOpenRouterSignIn } from "./openrouterOAuth";
+import { signInWithOpenRouter, cancelOpenRouterSignIn, submitOpenRouterAuthCode } from "./openrouterOAuth";
 import {
 	createBufferedTransportedChatOpenAI,
 	createTransportedChatOpenAI,
@@ -98,6 +98,11 @@ export const openrouterProvider: EmbeddingProviderDefinition = {
 		signIn: async () => ({ kind: "apiKey", apiKey: await signInWithOpenRouter() }),
 		cancelSignIn: cancelOpenRouterSignIn,
 		supportsApiKey: true,
+		// The redirect is caught via an obsidian:// protocol handler, so this flow
+		// works on mobile too (no localhost server). submitManualCode is the paste
+		// fallback if the deep link doesn't route back to Obsidian.
+		worksOnMobile: true,
+		submitManualCode: submitOpenRouterAuthCode,
 	},
 
 	// =========================================================================

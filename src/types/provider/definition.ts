@@ -86,6 +86,22 @@ export interface ProviderOAuthCapability {
 	 * (OAuth-only providers such as Codex).
 	 */
 	supportsApiKey: boolean;
+
+	/**
+	 * Whether this OAuth flow works on Obsidian mobile. Loopback-server flows (Codex) are
+	 * desktop-only; flows that catch the redirect via an `obsidian://` protocol handler
+	 * (OpenRouter) work everywhere. The setup modal gates the sign-in CTA on
+	 * `Platform.isDesktopApp || worksOnMobile`. Defaults to false (desktop-only) when omitted.
+	 */
+	worksOnMobile?: boolean;
+
+	/**
+	 * Manual code-paste fallback for `obsidian://` flows: if the deep-link redirect doesn't
+	 * fire (e.g. a device that doesn't route it back to Obsidian), the user can copy the
+	 * authorization code shown in the browser and submit it here to complete the same pending
+	 * sign-in. Resolves the in-progress signIn() promise. Omit for flows without a paste path.
+	 */
+	submitManualCode?: (code: string) => void;
 }
 
 /**

@@ -92,9 +92,11 @@ function handleAuthModeChange(mode: OpenAIAuthMode) {
 // For OAuth-capable providers the sign-in CTA is always shown (it's the primary path);
 // the API-key field is an optional reveal below it. For OAuth-only providers there's no
 // key path at all. Non-OAuth providers show neither (plain AuthConfigFields).
-// The loopback-server OAuth flow needs node:http, so sign-in is desktop-only; on mobile
-// we suppress the CTA and fall back to the API-key path where the provider supports one.
-const oauthAvailable = $derived(!!oauth && Platform.isDesktopApp);
+// The loopback-server OAuth flow needs node:http, so it's desktop-only; providers whose
+// redirect is caught via an obsidian:// protocol handler (OpenRouter) set `worksOnMobile`
+// and are available everywhere. On mobile without that flag we suppress the CTA and fall
+// back to the API-key path where the provider supports one.
+const oauthAvailable = $derived(!!oauth && (Platform.isDesktopApp || oauth.worksOnMobile === true));
 const showSignIn = $derived(oauthAvailable);
 const isSignedIn = $derived(showSignIn ? (oauth?.isSignedIn?.() ?? false) : false);
 
@@ -163,6 +165,17 @@ async function handleOAuthSignIn() {
 // can be retried immediately instead of hanging until the timeout.
 function handleCancelSignIn() {
 	oauth?.cancelSignIn?.();
+}
+
+// Manual code-paste fallback for obsidian:// OAuth flows: if the deep-link redirect doesn't
+// route back to Obsidian, the user pastes the code shown in the browser to finish the same
+// pending sign-in. Resolves the in-progress signIn() promise (see handleOAuthSignIn's await).
+let manualCode = $state("");
+function handleSubmitManualCode() {
+	const code = manualCode.trim();
+	if (!code) return;
+	oauth?.submitManualCode?.(code);
+	manualCode = "";
 }
 
 function handleOAuthDisconnect() {
@@ -517,6 +530,19 @@ $effect(() => {
         {/if}
       </div>
     </SettingItem>
+    {#if isSigningIn && oauth.submitManualCode}
+      <!-- Fallback for obsidian:// flows: if the browser doesn't route the redirect back
+           to Obsidian, the user pastes the authorization code shown in the browser. -->
+      <SettingItem
+        name="Paste authorization code"
+        desc="If the browser didn't return to Obsidian automatically, copy the code shown there and paste it here."
+      >
+        <div class="flex gap-2 items-center">
+          <Text inputType="text" bind:value={manualCode} placeholder="Authorization code" />
+          <Button buttonText="Submit" disabled={!manualCode.trim()} onClick={handleSubmitManualCode} />
+        </div>
+      </SettingItem>
+    {/if}
   {/if}
 {/snippet}
 
