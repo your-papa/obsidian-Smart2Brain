@@ -1,7 +1,7 @@
 // vite.config.ts
 import { svelte, vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vite";
-import { copyFileSync } from "node:fs";
+import { copyFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import builtinModules from "builtin-modules";
@@ -76,9 +76,25 @@ const PROCESS_SHIM =
  * to tell a fix apart from a stale/cached plugin file on mobile. Bump the tag on
  * each diagnostic build. Temporary diagnostic aid; safe to keep or remove.
  */
-const BUILD_MARKER = 'try{console.log("[S2B] build marker: ios-diag-3");}catch(e){}';
+const BUILD_MARKER = 'try{console.log("[S2B] build marker: ios-diag-4");}catch(e){}';
 
-const BANNER = `${BUILD_MARKER}\n${PROCESS_SHIM}`;
+/**
+ * Bundled deps (`@langchain/core`'s `IterableReadableStream`) declare
+ * `class X extends ReadableStream {}` at module top-level. If Obsidian's iOS
+ * WebView doesn't expose the WHATWG Streams globals to plugin JS at eval time,
+ * the superclass is undefined → `TypeError: The superclass is not a constructor`
+ * at load. Inline `web-streams-polyfill`'s self-installing ES5 build, gated on a
+ * feature check so it runs ONLY when the global is absent (desktop/native
+ * untouched). Banner placement = runs first, survives minify, before the
+ * LangChain bundle initializes.
+ */
+const STREAMS_POLYFILL_SRC = readFileSync(resolve("node_modules/web-streams-polyfill/dist/polyfill.es5.js"), "utf8");
+const STREAMS_SHIM =
+	"(function(){try{if(typeof ReadableStream!=='undefined'&&ReadableStream)return;}catch(e){}" +
+	"try{console.log('[S2B] installing web-streams-polyfill (no global ReadableStream)');}catch(e){}" +
+	`${STREAMS_POLYFILL_SRC}\n})();`;
+
+const BANNER = `${BUILD_MARKER}\n${PROCESS_SHIM}\n${STREAMS_SHIM}`;
 
 const setOutDir = (mode: string) => {
 	switch (mode) {

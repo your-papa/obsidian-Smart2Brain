@@ -34,3 +34,14 @@ try {
 } catch (e) {
 	console.log("[S2B] obsidian-class probe failed", e);
 }
+
+// Bundled deps (e.g. @langchain/core's IterableReadableStream) subclass these Web
+// globals at module top-level. Probe which are undefined on this platform.
+const WEB_GLOBALS = ["ReadableStream", "WritableStream", "TransformStream", "Event", "EventTarget", "AbortController"];
+try {
+	const g = globalThis as unknown as Record<string, unknown>;
+	const gMissing = WEB_GLOBALS.filter((n) => typeof g[n] !== "function");
+	console.log(`[S2B] web-globals MISSING: ${gMissing.length ? gMissing.join(",") : "(none)"}`);
+} catch (e) {
+	console.log("[S2B] web-globals probe failed", e);
+}
