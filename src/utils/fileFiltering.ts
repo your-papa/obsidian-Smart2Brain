@@ -110,7 +110,7 @@ export async function readIndexableContent(vault: Vault, file: TFile): Promise<s
 		return "";
 	}
 
-	const raw = await vault.cachedRead(file);
+	const raw = await readTextFile(vault, file);
 
 	if (file.extension === "chat") {
 		return extractChatContent(raw);
@@ -121,6 +121,24 @@ export async function readIndexableContent(vault: Vault, file: TFile): Promise<s
 	}
 
 	return raw;
+}
+
+/**
+ * Read a text file's raw content, resilient to Obsidian mobile's `cachedRead`.
+ *
+ * On iOS, `vault.cachedRead()` / `vault.read()` route through a reader that
+ * rejects non-markdown extensions with "The file couldn't be opened because it
+ * isn't in the correct format" — so indexing `.chat`/`.canvas`/`.json` files
+ * throws on device (desktop is unaffected). The low-level `vault.adapter.read()`
+ * is a plain UTF-8 read with no such format gate. Try `cachedRead` first (it's
+ * cache-backed and fast on desktop) and fall back to the adapter on failure.
+ */
+async function readTextFile(vault: Vault, file: TFile): Promise<string> {
+	try {
+		return await vault.cachedRead(file);
+	} catch {
+		return await vault.adapter.read(file.path);
+	}
 }
 
 // ---------------------------------------------------------------------------
