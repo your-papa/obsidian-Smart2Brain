@@ -793,3 +793,9 @@ export default class SecondBrainPlugin extends Plugin {
 		workspace.revealLeaf(leaf);
 	}
 }
+
+// TEMP iOS diagnostic: if this prints, our entry module fully evaluated and the
+// crash is Obsidian instantiating something afterward — not our module eval.
+try {
+	console.log("[S2B] main.ts module body fully evaluated");
+} catch {}
