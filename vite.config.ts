@@ -76,7 +76,19 @@ const PROCESS_SHIM =
  * to tell a fix apart from a stale/cached plugin file on mobile. Bump the tag on
  * each diagnostic build. Temporary diagnostic aid; safe to keep or remove.
  */
-const BUILD_MARKER = 'try{console.log("[S2B] build marker: ios-diag-4");}catch(e){}';
+const BUILD_MARKER = 'try{console.log("[S2B] build marker: ios-diag-5");}catch(e){}';
+
+/**
+ * Capture the real load-time error before Obsidian swallows it. The device stack
+ * trace only shows `app.js` (minified host loader), never our class name; a
+ * global `error` listener logs the actual Error's message + stack so we can see
+ * which construct throws "The superclass is not a constructor". Diagnostic only.
+ */
+const ERROR_BEACON =
+	"(function(){try{var g=(typeof window!=='undefined')?window:(typeof self!=='undefined'?self:globalThis);" +
+	"if(g&&g.addEventListener){g.addEventListener('error',function(ev){try{var e=ev&&ev.error;" +
+	"console.log('[S2B] window.error:', (e&&e.message)||ev.message, '@', ev.filename+':'+ev.lineno+':'+ev.colno);" +
+	"if(e&&e.stack)console.log('[S2B] window.error stack:', e.stack);}catch(x){}});}}catch(e){}})();";
 
 /**
  * Bundled deps (`@langchain/core`'s `IterableReadableStream`) declare
@@ -94,7 +106,7 @@ const STREAMS_SHIM =
 	"try{console.log('[S2B] installing web-streams-polyfill (no global ReadableStream)');}catch(e){}" +
 	`${STREAMS_POLYFILL_SRC}\n})();`;
 
-const BANNER = `${BUILD_MARKER}\n${PROCESS_SHIM}\n${STREAMS_SHIM}`;
+const BANNER = `${BUILD_MARKER}\n${ERROR_BEACON}\n${PROCESS_SHIM}\n${STREAMS_SHIM}`;
 
 const setOutDir = (mode: string) => {
 	switch (mode) {
