@@ -62,21 +62,28 @@ function messageNavHotkeys(node: HTMLElement) {
 	};
 }
 
-// Keep the composer above the on-screen keyboard on mobile. iOS WebKit does NOT
-// shrink `window.visualViewport` when the keyboard opens inside Obsidian's
-// WKWebView (verified on-device: innerHeight === visualViewport.height); instead
-// Obsidian shrinks its own `.app-container` by the keyboard height while the
-// layout viewport stays full. On top of that, Obsidian pads `.view-content` with
-// a large bottom padding when the keyboard is up, which collapses our `h-full`
-// chat-root to a sliver (its `height:100%` resolves against the shrunken content
-// box). The CSS below fixes the sizing by absolutely filling `.view-content`; the
-// only thing it needs from JS is whether the keyboard is currently open, so it can
-// drop the mobile-navbar clearance while the keyboard (and no navbar) is up.
+// Keep the composer above the on-screen keyboard on mobile. Measured facts about
+// Obsidian's iOS WKWebView (via on-device inspection):
+//   • The keyboard does NOT shrink `window.visualViewport` (innerHeight ===
+//     visualViewport.height throughout). Obsidian instead shrinks its own
+//     `.app-container` by the keyboard height — that shrink is the ONE reliable
+//     keyboard signal (measured 335px open / 0px closed, every time). Focus events
+//     churn inside CodeMirror during the animation and are not trustworthy.
+//   • When the keyboard is up Obsidian pads `.view-content` with a large bottom
+//     padding, collapsing an `h-full` child to a sliver. We fix that by filling
+//     `.view-content` with `position:absolute; inset:0`.
+//   • BUT the whole workspace (`.view-content` and up) bottoms out ~52px ABOVE the
+//     app-container bottom — that band is the mobile-navbar space Obsidian keeps
+//     reserved even with the keyboard up. No descendant (absolute OR fixed) can
+//     occupy it via `inset`/`bottom`; both are capped at the workspace bottom.
+//     Measured: chat-root bottom 487, app-container/keyboard top 539 → 52px gap.
+//   • A GPU `transform: translateY()` DOES escape that cap and lets the composer
+//     reach the real keyboard top (verified: translateY(52px) → bottom 539).
 //
-// Detect the keyboard and publish it as `--s2b-keyboard-open` (1/0) on the root.
-// Driven primarily by input `focusin`/`focusout` (which lead the keyboard
-// animation), with the `.app-container` shrink as a self-healing correction.
-// Desktop / no-container hosts no-op.
+// So: fill `.view-content` absolutely (sizing), and when the keyboard is open push
+// the whole chat-root down by exactly `appContainerBottom − chatRootBottom` so its
+// bottom lands on the keyboard. Publish that push as `--s2b-kb-push` and the
+// open/closed flag as `--s2b-keyboard-open`. Desktop / no-container hosts no-op.
 function keyboardInset(node: HTMLElement) {
 	if (!isMobileUI()) {
 		return {};
@@ -87,54 +94,64 @@ function keyboardInset(node: HTMLElement) {
 		return {};
 	}
 
-	const set = (open: boolean) => {
-		node.style.setProperty("--s2b-keyboard-open", open ? "1" : "0");
-	};
+	// `.chat-root` fills its parent `.view-content`; that parent is NOT transformed,
+	// so its bottom is the stable "workspace-capped" edge to measure the gap from —
+	// measuring the (translated) node against itself would feed the transform back
+	// into its own input and run away.
+	const parent = node.parentElement;
 
-	// Primary driver: focus. `focusin`/`focusout` fire *before* iOS animates the
-	// keyboard, so flipping the state here moves the composer in lockstep with
-	// (or slightly ahead of) the keyboard instead of lagging behind it — and it
-	// keeps the layout still on the very first tap, so focus lands on the first
-	// try rather than needing a second tap after a mid-tap reflow.
-	let focused = false;
-	const onFocusIn = () => {
-		focused = true;
-		set(true);
-	};
-	const onFocusOut = () => {
-		focused = false;
-		set(false);
-	};
-	node.addEventListener("focusin", onFocusIn);
-	node.addEventListener("focusout", onFocusOut);
+	// Track the format toolbar's size too — it mounts/resizes around the keyboard
+	// animation and its top is our target edge. Re-observed each update since it's
+	// created lazily when a CM editor gains focus.
+	let observedToolbar: HTMLElement | null = null;
+	const update = () => {
+		const acRect = appContainer.getBoundingClientRect();
+		// Keyboard open ⇒ Obsidian shrinks the app container well below the layout
+		// viewport. A 50px guard ignores incidental sub-pixel/chrome differences.
+		const kbOpen = window.innerHeight - acRect.height > 50;
+		node.style.setProperty("--s2b-keyboard-open", kbOpen ? "1" : "0");
 
-	// Correction: reconcile against the actual app-container shrink so a stuck
-	// state (e.g. keyboard dismissed by a gesture without a blur) self-heals.
-	// Keyboard open ⇒ Obsidian shrinks the app container well below the layout
-	// viewport. A 50px guard ignores incidental sub-pixel/chrome differences.
-	const reconcile = () => {
-		const shrink = window.innerHeight - appContainer.getBoundingClientRect().height;
-		const kbOpen = shrink > 50;
-		// Only correct once the focus-driven guess and reality actually disagree,
-		// so we never fight the leading edge of the focus transition.
-		if (kbOpen !== focused) {
-			set(kbOpen);
+		// The composer must sit flush on top of whatever occupies the space above
+		// the keyboard. When a CM editor is focused, Obsidian shows its mobile format
+		// toolbar (bold/italic/…) in the reserved band just above the keyboard, so
+		// the target edge is the toolbar's TOP; otherwise it's the keyboard top
+		// (= app-container bottom). Push the chat-root down from its untransformed
+		// (workspace-capped) parent bottom to that target. Only while the keyboard
+		// is open (closed ⇒ the navbar occupies the band and `bottom` handles it).
+		const toolbar = document.querySelector<HTMLElement>(".mobile-toolbar");
+		if (toolbar && toolbar !== observedToolbar) {
+			// Keep the offset live if the toolbar itself resizes.
+			ro.observe(toolbar);
+			observedToolbar = toolbar;
+		}
+		if (kbOpen && parent) {
+			const toolbarRect = toolbar?.getBoundingClientRect();
+			const targetTop = toolbarRect && toolbarRect.height > 0 ? toolbarRect.top : acRect.bottom;
+			const gap = Math.round(targetTop - parent.getBoundingClientRect().bottom);
+			node.style.setProperty("--s2b-kb-push", `${Math.max(0, gap)}px`);
+		} else {
+			node.style.setProperty("--s2b-kb-push", "0px");
 		}
 	};
 
-	const ro = new ResizeObserver(reconcile);
+	const ro = new ResizeObserver(update);
+	update();
 	ro.observe(appContainer);
-	vv?.addEventListener("resize", reconcile);
-	vv?.addEventListener("scroll", reconcile);
+	// The parent bottom is our gap reference; observe it too (its bottom padding
+	// changes when the keyboard opens even if its box height doesn't).
+	if (parent) {
+		ro.observe(parent);
+	}
+	vv?.addEventListener("resize", update);
+	vv?.addEventListener("scroll", update);
 
 	return {
 		destroy() {
-			node.removeEventListener("focusin", onFocusIn);
-			node.removeEventListener("focusout", onFocusOut);
 			ro.disconnect();
-			vv?.removeEventListener("resize", reconcile);
-			vv?.removeEventListener("scroll", reconcile);
-			node.style.setProperty("--s2b-keyboard-open", "0");
+			vv?.removeEventListener("resize", update);
+			vv?.removeEventListener("scroll", update);
+			node.style.removeProperty("--s2b-keyboard-open");
+			node.style.removeProperty("--s2b-kb-push");
 		},
 	};
 }
@@ -232,20 +249,15 @@ function keyboardInset(node: HTMLElement) {
     --chat-bg: var(--background-secondary);
   }
 
-  /* Mobile keyboard handling. On iOS, focusing the composer makes Obsidian pad
-     `.view-content` with a large bottom padding (≈ keyboard height); our
-     `h-full` chat-root then resolves `height:100%` against that shrunken content
-     box and collapses to a sliver, floating the composer near the top (the
-     original bug). Fix by absolutely filling the leaf's `.view-content` border
-     box so the chat-root ignores that padding entirely and the bottom-anchored
-     composer sits at the true bottom of the visible area.
-
-     When the keyboard is CLOSED, Obsidian's floating mobile navbar (~52px pill,
-     raised above the home-indicator safe area) overlaps that bottom edge, so we
-     lift the chat-root by the navbar height + safe-area inset. When the keyboard
-     is OPEN there is no navbar and the composer should sit flush above the
-     keyboard, so `--s2b-keyboard-open` (set by the `keyboardInset` action from
-     the `.app-container` shrink) collapses the clearance to 0. */
+  /* Mobile keyboard handling. Fill the leaf's `.view-content` border box with an
+     absolute chat-root so it ignores the large bottom padding Obsidian adds when
+     the keyboard is up (which would otherwise collapse an `h-full` child). The
+     workspace bottoms out ~52px above the real keyboard top (the reserved
+     mobile-navbar band), and no descendant can occupy that band via `inset`/
+     `bottom` — so when the keyboard is OPEN we translate the whole chat-root down
+     by `--s2b-kb-push` (measured = app-container bottom − our bottom) to land the
+     composer flush on the keyboard. When CLOSED, the push is 0 and we instead lift
+     by the navbar clearance so the composer sits just above the floating navbar. */
   :global(.is-mobile) .chat-root {
     position: absolute;
     inset: 0;
@@ -253,9 +265,13 @@ function keyboardInset(node: HTMLElement) {
     bottom: calc((1 - var(--s2b-keyboard-open, 0)) * (52px + env(safe-area-inset-bottom)));
     height: auto;
     padding-bottom: 0;
-    /* Glide the composer with the keyboard animation rather than snapping late.
+    /* Push across the reserved navbar band to the real keyboard top when open. */
+    transform: translateY(var(--s2b-kb-push, 0px));
+    /* Glide with the keyboard animation rather than snapping late.
        Roughly matches iOS's keyboard timing (~0.25s ease-out). */
-    transition: bottom 0.22s cubic-bezier(0.17, 0.59, 0.4, 1);
+    transition:
+      transform 0.22s cubic-bezier(0.17, 0.59, 0.4, 1),
+      bottom 0.22s cubic-bezier(0.17, 0.59, 0.4, 1);
   }
 
   /* Anchor the absolute chat-root to the leaf's content area. `:has` is supported
