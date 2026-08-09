@@ -62,33 +62,51 @@ function messageNavHotkeys(node: HTMLElement) {
 	};
 }
 
-// Keep the composer above the on-screen keyboard on mobile. iOS WebKit shrinks
-// the *visual* viewport when the keyboard opens but leaves the layout viewport
-// (and our `h-full` chat-root) at full height, so the bottom-anchored input gets
-// scrolled off-screen. Publish the keyboard height as `--keyboard-height` on the
-// root; the mobile `:global(.is-mobile) .chat-root` rules use it to shrink the
-// visible height and fold away the navbar clearance. Desktop / no-viewport hosts
-// are untouched (the action no-ops).
+// Keep the composer above the on-screen keyboard on mobile. iOS WebKit does NOT
+// shrink `window.visualViewport` when the keyboard opens inside Obsidian's
+// WKWebView (verified on-device: innerHeight === visualViewport.height); instead
+// Obsidian shrinks its own `.app-container` by the keyboard height while the
+// layout viewport stays full. On top of that, Obsidian pads `.view-content` with
+// a large bottom padding when the keyboard is up, which collapses our `h-full`
+// chat-root to a sliver (its `height:100%` resolves against the shrunken content
+// box). The CSS below fixes the sizing by absolutely filling `.view-content`; the
+// only thing it needs from JS is whether the keyboard is currently open, so it can
+// drop the mobile-navbar clearance while the keyboard (and no navbar) is up.
+//
+// Detect the keyboard by the `.app-container` shrink and publish it as
+// `--s2b-keyboard-open` (1/0) on the root. Desktop / no-container hosts no-op.
 function keyboardInset(node: HTMLElement) {
+	if (!isMobileUI()) {
+		return {};
+	}
+	const appContainer = typeof document !== "undefined" ? document.querySelector<HTMLElement>(".app-container") : null;
 	const vv = typeof window !== "undefined" ? window.visualViewport : undefined;
-	if (!isMobileUI() || !vv) {
+	if (!appContainer) {
 		return {};
 	}
 
 	const update = () => {
-		const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-		node.style.setProperty("--keyboard-height", `${kb}px`);
+		// Keyboard open ⇒ Obsidian shrinks the app container well below the layout
+		// viewport. A 50px guard ignores incidental sub-pixel/chrome differences.
+		const shrink = window.innerHeight - appContainer.getBoundingClientRect().height;
+		node.style.setProperty("--s2b-keyboard-open", shrink > 50 ? "1" : "0");
 	};
 
 	update();
-	vv.addEventListener("resize", update);
-	vv.addEventListener("scroll", update);
+	// The app-container resize is what actually changes; observe it directly, and
+	// also listen to visualViewport as a cheap secondary trigger (fires on the
+	// keyboard animation on some builds even though its height doesn't change).
+	const ro = new ResizeObserver(update);
+	ro.observe(appContainer);
+	vv?.addEventListener("resize", update);
+	vv?.addEventListener("scroll", update);
 
 	return {
 		destroy() {
-			vv.removeEventListener("resize", update);
-			vv.removeEventListener("scroll", update);
-			node.style.setProperty("--keyboard-height", "0px");
+			ro.disconnect();
+			vv?.removeEventListener("resize", update);
+			vv?.removeEventListener("scroll", update);
+			node.style.setProperty("--s2b-keyboard-open", "0");
 		},
 	};
 }
@@ -186,18 +204,33 @@ function keyboardInset(node: HTMLElement) {
     --chat-bg: var(--background-secondary);
   }
 
-  /* Obsidian's floating mobile navbar (~52px pill) sits over the full-height
-     chat leaf, covering the composer's action row. The navbar already floats
-     above the device safe area, so we only need to clear the pill itself.
-     When the on-screen keyboard opens `--keyboard-height` (set by the
-     `keyboardInset` action from `window.visualViewport`) grows; fold that
-     clearance away as the keyboard rises so the composer doesn't hop, and shrink
-     the visible height so the bottom-anchored input stays directly above the
-     keyboard instead of being scrolled off-screen.
-     Keyboard closed → 60px gap, full height; open → 0 gap, height minus keyboard. */
+  /* Mobile keyboard handling. On iOS, focusing the composer makes Obsidian pad
+     `.view-content` with a large bottom padding (≈ keyboard height); our
+     `h-full` chat-root then resolves `height:100%` against that shrunken content
+     box and collapses to a sliver, floating the composer near the top (the
+     original bug). Fix by absolutely filling the leaf's `.view-content` border
+     box so the chat-root ignores that padding entirely and the bottom-anchored
+     composer sits at the true bottom of the visible area.
+
+     When the keyboard is CLOSED, Obsidian's floating mobile navbar (~52px pill,
+     raised above the home-indicator safe area) overlaps that bottom edge, so we
+     lift the chat-root by the navbar height + safe-area inset. When the keyboard
+     is OPEN there is no navbar and the composer should sit flush above the
+     keyboard, so `--s2b-keyboard-open` (set by the `keyboardInset` action from
+     the `.app-container` shrink) collapses the clearance to 0. */
   :global(.is-mobile) .chat-root {
-    height: calc(100% - var(--keyboard-height, 0px));
-    padding-bottom: max(0px, calc(60px - var(--keyboard-height, 0px)));
+    position: absolute;
+    inset: 0;
+    /* Clearance for the floating navbar; folded away while the keyboard is up. */
+    bottom: calc((1 - var(--s2b-keyboard-open, 0)) * (52px + env(safe-area-inset-bottom)));
+    height: auto;
+    padding-bottom: 0;
+  }
+
+  /* Anchor the absolute chat-root to the leaf's content area. `:has` is supported
+     on the iOS WebKit / modern Electron Obsidian runs on. */
+  :global(.is-mobile .view-content:has(> .chat-root)) {
+    position: relative;
   }
 
   .chat-root::after {
