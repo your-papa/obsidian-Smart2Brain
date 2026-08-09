@@ -50,6 +50,26 @@ function routeBuiltinRequiresThroughWindow() {
 	};
 }
 
+/**
+ * Some bundled deps read the Node `process` global at module-eval time
+ * (`process.env`, `process.platform`, `process.version`, `process.cwd()`, …).
+ * Electron's renderer (desktop, and the desktop mobile-emulator) provides it,
+ * but iOS/Android WebKit has no `process` at all — the bare reference throws
+ * `ReferenceError: Can't find variable: process` and crashes plugin load.
+ *
+ * Injected as the output `banner` so it runs before any bundled code, after
+ * minification (a renderChunk-prepended shim gets dropped by the later minify
+ * pass). Installs a minimal shim ONLY when `process` is absent, so the real Node
+ * `process` on desktop is left untouched. `nextTick` falls back to a microtask.
+ */
+const PROCESS_SHIM =
+	"(function(){try{if(typeof process!=='undefined'&&process)return;}catch(e){}" +
+	"var noop=function(){};var g=(typeof globalThis!=='undefined')?globalThis:(typeof self!=='undefined'?self:this);" +
+	"g.process={env:{},argv:[],platform:'',arch:'',version:'',versions:{},browser:true," +
+	"cwd:function(){return '/';},nextTick:function(f){var a=Array.prototype.slice.call(arguments,1);Promise.resolve().then(function(){f.apply(null,a);});}," +
+	"on:noop,off:noop,once:noop,emit:noop,addListener:noop,removeListener:noop," +
+	"stdout:{write:noop,isTTY:false},stderr:{write:noop,isTTY:false}};})();";
+
 const setOutDir = (mode: string) => {
 	switch (mode) {
 		case "development":
@@ -101,6 +121,9 @@ export default defineConfig(({ mode }) => {
 					sourcemapBaseUrl: new URL(setOutDir(mode), import.meta.url).toString(),
 					manualChunks: undefined,
 					inlineDynamicImports: true,
+						// Runs before all bundled code (survives minification), shimming
+						// `process` on mobile where WebKit has no such global.
+						banner: PROCESS_SHIM,
 				},
 				external: [
 					"obsidian",
