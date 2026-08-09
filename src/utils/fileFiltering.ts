@@ -1,5 +1,6 @@
 import type { TFile, Vault } from "obsidian";
 import { getData } from "../stores/dataStore.svelte";
+import { gunzipToString } from "./gzip";
 
 function normalizePattern(pattern: string): string {
 	return pattern.trim().replace(/^\/+|\/+$/g, "");
@@ -110,11 +111,22 @@ export async function readIndexableContent(vault: Vault, file: TFile): Promise<s
 		return "";
 	}
 
-	const raw = await readTextFile(vault, file);
-
+	// `.chat` files are gzip-compressed binary (written via readBinary/gzipString
+	// by ObsidianChatManager), NOT UTF-8 text. A text read throws on iOS ("file
+	// isn't in the correct format") and yields garbage on desktop, so read + gunzip
+	// the bytes and hand the decompressed JSON to the extractor.
 	if (file.extension === "chat") {
-		return extractChatContent(raw);
+		try {
+			const bytes = await vault.adapter.readBinary(file.path);
+			const raw = await gunzipToString(bytes);
+			return extractChatContent(raw);
+		} catch {
+			// Unreadable/corrupt thread file — skip rather than fail the whole index.
+			return "";
+		}
 	}
+
+	const raw = await readTextFile(vault, file);
 
 	if (file.path.toLowerCase().endsWith(".excalidraw.md")) {
 		return extractExcalidrawContent(raw);
@@ -126,12 +138,10 @@ export async function readIndexableContent(vault: Vault, file: TFile): Promise<s
 /**
  * Read a text file's raw content, resilient to Obsidian mobile's `cachedRead`.
  *
- * On iOS, `vault.cachedRead()` / `vault.read()` route through a reader that
- * rejects non-markdown extensions with "The file couldn't be opened because it
- * isn't in the correct format" — so indexing `.chat`/`.canvas`/`.json` files
- * throws on device (desktop is unaffected). The low-level `vault.adapter.read()`
- * is a plain UTF-8 read with no such format gate. Try `cachedRead` first (it's
- * cache-backed and fast on desktop) and fall back to the adapter on failure.
+ * On iOS, `vault.cachedRead()` / `vault.read()` route through a reader that can
+ * reject some non-markdown extensions. The low-level `vault.adapter.read()` is a
+ * plain UTF-8 read with no such gate. Try `cachedRead` first (cache-backed, fast
+ * on desktop) and fall back to the adapter on failure.
  */
 async function readTextFile(vault: Vault, file: TFile): Promise<string> {
 	try {
