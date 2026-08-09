@@ -73,8 +73,10 @@ function messageNavHotkeys(node: HTMLElement) {
 // only thing it needs from JS is whether the keyboard is currently open, so it can
 // drop the mobile-navbar clearance while the keyboard (and no navbar) is up.
 //
-// Detect the keyboard by the `.app-container` shrink and publish it as
-// `--s2b-keyboard-open` (1/0) on the root. Desktop / no-container hosts no-op.
+// Detect the keyboard and publish it as `--s2b-keyboard-open` (1/0) on the root.
+// Driven primarily by input `focusin`/`focusout` (which lead the keyboard
+// animation), with the `.app-container` shrink as a self-healing correction.
+// Desktop / no-container hosts no-op.
 function keyboardInset(node: HTMLElement) {
 	if (!isMobileUI()) {
 		return {};
@@ -85,27 +87,53 @@ function keyboardInset(node: HTMLElement) {
 		return {};
 	}
 
-	const update = () => {
-		// Keyboard open ⇒ Obsidian shrinks the app container well below the layout
-		// viewport. A 50px guard ignores incidental sub-pixel/chrome differences.
-		const shrink = window.innerHeight - appContainer.getBoundingClientRect().height;
-		node.style.setProperty("--s2b-keyboard-open", shrink > 50 ? "1" : "0");
+	const set = (open: boolean) => {
+		node.style.setProperty("--s2b-keyboard-open", open ? "1" : "0");
 	};
 
-	update();
-	// The app-container resize is what actually changes; observe it directly, and
-	// also listen to visualViewport as a cheap secondary trigger (fires on the
-	// keyboard animation on some builds even though its height doesn't change).
-	const ro = new ResizeObserver(update);
+	// Primary driver: focus. `focusin`/`focusout` fire *before* iOS animates the
+	// keyboard, so flipping the state here moves the composer in lockstep with
+	// (or slightly ahead of) the keyboard instead of lagging behind it — and it
+	// keeps the layout still on the very first tap, so focus lands on the first
+	// try rather than needing a second tap after a mid-tap reflow.
+	let focused = false;
+	const onFocusIn = () => {
+		focused = true;
+		set(true);
+	};
+	const onFocusOut = () => {
+		focused = false;
+		set(false);
+	};
+	node.addEventListener("focusin", onFocusIn);
+	node.addEventListener("focusout", onFocusOut);
+
+	// Correction: reconcile against the actual app-container shrink so a stuck
+	// state (e.g. keyboard dismissed by a gesture without a blur) self-heals.
+	// Keyboard open ⇒ Obsidian shrinks the app container well below the layout
+	// viewport. A 50px guard ignores incidental sub-pixel/chrome differences.
+	const reconcile = () => {
+		const shrink = window.innerHeight - appContainer.getBoundingClientRect().height;
+		const kbOpen = shrink > 50;
+		// Only correct once the focus-driven guess and reality actually disagree,
+		// so we never fight the leading edge of the focus transition.
+		if (kbOpen !== focused) {
+			set(kbOpen);
+		}
+	};
+
+	const ro = new ResizeObserver(reconcile);
 	ro.observe(appContainer);
-	vv?.addEventListener("resize", update);
-	vv?.addEventListener("scroll", update);
+	vv?.addEventListener("resize", reconcile);
+	vv?.addEventListener("scroll", reconcile);
 
 	return {
 		destroy() {
+			node.removeEventListener("focusin", onFocusIn);
+			node.removeEventListener("focusout", onFocusOut);
 			ro.disconnect();
-			vv?.removeEventListener("resize", update);
-			vv?.removeEventListener("scroll", update);
+			vv?.removeEventListener("resize", reconcile);
+			vv?.removeEventListener("scroll", reconcile);
 			node.style.setProperty("--s2b-keyboard-open", "0");
 		},
 	};
@@ -225,6 +253,9 @@ function keyboardInset(node: HTMLElement) {
     bottom: calc((1 - var(--s2b-keyboard-open, 0)) * (52px + env(safe-area-inset-bottom)));
     height: auto;
     padding-bottom: 0;
+    /* Glide the composer with the keyboard animation rather than snapping late.
+       Roughly matches iOS's keyboard timing (~0.25s ease-out). */
+    transition: bottom 0.22s cubic-bezier(0.17, 0.59, 0.4, 1);
   }
 
   /* Anchor the absolute chat-root to the leaf's content area. `:has` is supported
