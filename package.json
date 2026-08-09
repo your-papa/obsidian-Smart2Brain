@@ -12,6 +12,7 @@
     "autoprefixer": "^10.4.27",
     "btca": "2.0.5",
     "builtin-modules": "^5.0.0",
+    "events": "^3.3.0",
     "jsdom": "^27.4.0",
     "obsidian": "^1.12.3",
     "postcss": "^8.5.8",
@@ -21,8 +22,7 @@
     "tslib": "^2.8.1",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
-    "vitest": "^4.0.18",
-    "web-streams-polyfill": "^4"
+    "vitest": "^4.0.18"
   },
   "private": true,
   "scripts": {

@@ -24,6 +24,17 @@ import builtinModules from "builtin-modules";
  * returns an empty object so module-eval doesn't throw; code that actually needs
  * a builtin still guards/degrades (Node features are desktop-only).
  */
+/**
+ * `events` polyfill (Node's EventEmitter, browser build from the `events`
+ * package). On mobile there is no Node `require`, so `require$builtin("events")`
+ * would otherwise return `{}` — and bundled deps that do
+ * `class Graph extends events.EventEmitter {}` (graphology) then extend
+ * `undefined` and throw "The superclass is not a constructor" at load. We inline
+ * the polyfill and hand it back for `events`/`node:events` when no native require
+ * exists, so the superclass is a real constructor on iOS/Android.
+ */
+const EVENTS_POLYFILL_SRC = readFileSync(resolve("node_modules/events/events.js"), "utf8");
+
 function routeBuiltinRequiresThroughWindow() {
 	const builtinSet = new Set<string>();
 	for (const m of builtinModules) {
@@ -31,8 +42,14 @@ function routeBuiltinRequiresThroughWindow() {
 		builtinSet.add(bare);
 		builtinSet.add(`node:${bare}`);
 	}
+	// Build the `events` polyfill once into a module-like object the helper can
+	// return. The polyfill is CJS (`module.exports = EventEmitter`), so evaluate
+	// it against a fresh module/exports pair and cache the result.
 	const prelude =
-		"const require$builtin=(id)=>{try{const r=(typeof window!=='undefined'&&window.require)||(typeof globalThis!=='undefined'&&globalThis.require);if(typeof r==='function')return r(id)??{};}catch(e){}try{return require(id)??{};}catch(e){}return {};};\n";
+		"const require$eventsPolyfill=(function(){var module={exports:{}};var exports=module.exports;" +
+		`(function(module,exports){${EVENTS_POLYFILL_SRC}\n})(module,exports);` +
+		"return module.exports;})();\n" +
+		"const require$builtin=(id)=>{try{const r=(typeof window!=='undefined'&&window.require)||(typeof globalThis!=='undefined'&&globalThis.require);if(typeof r==='function')return r(id)??{};}catch(e){}try{return require(id)??{};}catch(e){}if(id==='events'||id==='node:events')return require$eventsPolyfill;return {};};\n";
 	return {
 		name: "route-builtin-requires-through-window",
 		renderChunk(code: string) {
@@ -70,43 +87,7 @@ const PROCESS_SHIM =
 	"on:noop,off:noop,once:noop,emit:noop,addListener:noop,removeListener:noop," +
 	"stdout:{write:noop,isTTY:false},stderr:{write:noop,isTTY:false}};})();";
 
-/**
- * Build/version beacon logged as the very first thing (before any bundled code),
- * so a device console shows exactly which build is running — the definitive way
- * to tell a fix apart from a stale/cached plugin file on mobile. Bump the tag on
- * each diagnostic build. Temporary diagnostic aid; safe to keep or remove.
- */
-const BUILD_MARKER = 'try{console.log("[S2B] build marker: ios-diag-10");}catch(e){}';
-
-/**
- * Capture the real load-time error before Obsidian swallows it. The device stack
- * trace only shows `app.js` (minified host loader), never our class name; a
- * global `error` listener logs the actual Error's message + stack so we can see
- * which construct throws "The superclass is not a constructor". Diagnostic only.
- */
-const ERROR_BEACON =
-	"(function(){try{var g=(typeof window!=='undefined')?window:(typeof self!=='undefined'?self:globalThis);" +
-	"if(g&&g.addEventListener){g.addEventListener('error',function(ev){try{var e=ev&&ev.error;" +
-	"console.log('[S2B] window.error:', (e&&e.message)||ev.message, '@', ev.filename+':'+ev.lineno+':'+ev.colno);" +
-	"if(e&&e.stack)console.log('[S2B] window.error stack:', e.stack);}catch(x){}});}}catch(e){}})();";
-
-/**
- * Bundled deps (`@langchain/core`'s `IterableReadableStream`) declare
- * `class X extends ReadableStream {}` at module top-level. If Obsidian's iOS
- * WebView doesn't expose the WHATWG Streams globals to plugin JS at eval time,
- * the superclass is undefined → `TypeError: The superclass is not a constructor`
- * at load. Inline `web-streams-polyfill`'s self-installing ES5 build, gated on a
- * feature check so it runs ONLY when the global is absent (desktop/native
- * untouched). Banner placement = runs first, survives minify, before the
- * LangChain bundle initializes.
- */
-const STREAMS_POLYFILL_SRC = readFileSync(resolve("node_modules/web-streams-polyfill/dist/polyfill.es5.js"), "utf8");
-const STREAMS_SHIM =
-	"(function(){try{if(typeof ReadableStream!=='undefined'&&ReadableStream)return;}catch(e){}" +
-	"try{console.log('[S2B] installing web-streams-polyfill (no global ReadableStream)');}catch(e){}" +
-	`${STREAMS_POLYFILL_SRC}\n})();`;
-
-const BANNER = `${BUILD_MARKER}\n${ERROR_BEACON}\n${PROCESS_SHIM}\n${STREAMS_SHIM}`;
+const BANNER = PROCESS_SHIM;
 
 const setOutDir = (mode: string) => {
 	switch (mode) {
@@ -146,9 +127,6 @@ export default defineConfig(({ mode }) => {
 			"import.meta.env.MODE": JSON.stringify(mode),
 		},
 		build: {
-			// TEMP iOS diagnostic: disable minification so a load-time throw's stack
-			// names our real module/class instead of a minified `app.js` frame.
-			minify: false,
 			lib: {
 				entry: "src/main.ts",
 				formats: ["cjs"],
@@ -162,9 +140,8 @@ export default defineConfig(({ mode }) => {
 					sourcemapBaseUrl: new URL(setOutDir(mode), import.meta.url).toString(),
 					manualChunks: undefined,
 					inlineDynamicImports: true,
-						// Runs before all bundled code (survives minification): a build
-						// beacon (to spot stale mobile caches) + the `process` shim for
-						// mobile WebKit, which has no such global.
+						// Runs before all bundled code (survives minification): the
+						// `process` shim for mobile WebKit, which has no such global.
 						banner: BANNER,
 				},
 				external: [

@@ -1,50 +1,28 @@
-import "./lib/iosClassProbe";
 import { type EventRef, MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import { mount, unmount } from "svelte";
 import "./lib/i18n";
 import "./lib/langgraphContext";
-import "./lib/_ck_a";
 import { Logger as Log, applyVerboseLogging } from "./utils/logging";
 import { isAgentFilePath } from "./utils/fileFiltering";
 import { StartupProfiler } from "./utils/startupProfiler";
 import { persistStartupRecord, recordStartupEnvironment } from "./utils/startupTimingsStore";
 import "./styles.css";
 import { AgentManager } from "./agent/AgentManager";
-import "./lib/_ck_b";
 import { PromptFilesService } from "./agent/promptFiles";
 import { inlineDiffPlugin } from "./editor/inlineDiffExtension";
 import { selectionHighlightPlugin } from "./editor/selectionHighlightExtension";
 import { createReadingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
-import "./lib/_ck_c";
-import "./lib/_ckdep_clustering";
-import "./lib/_ck_w1";
-import "./lib/_ckdep_projection";
-import "./lib/_ck_w2";
-import "./lib/_ckdep_graphology";
-import "./lib/_ck_w3";
-import "./lib/_ckdep_metrics";
-import "./lib/_ck_w4";
-import "./lib/_ckdep_leiden";
-import "./lib/_ck_w5";
-import "./lib/_ckdep_umap";
 import { terminateWorker as terminateClusteringWorker } from "./utils/computeWorkerManager";
-import "./lib/_ck_c1";
 import { SearchModal } from "./components/modal/SearchModal";
-import "./lib/_ck_c2";
 import { confirmDelete } from "./components/modal/ConfirmModal";
 import { promptText } from "./components/modal/PromptModal";
 import { getQueryClient } from "./lib/query";
-import "./lib/_ck_c3";
 import { SkillsService } from "./skills";
-import "./lib/_ck_c4";
 import { createSessionRegistry, getSessionRegistry, type SessionRegistry } from "./stores/chatStore.svelte";
 import { type PluginDataStore, createData, getData } from "./stores/dataStore.svelte";
 import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingChangesStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
-import "./lib/_ck_c5";
 import { LexicalSearchService } from "./search/LexicalSearchService";
-import "./lib/_ck_c6";
-import "./lib/_ck_d";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import { navigateToPendingChange } from "./lib/pendingChangeNavigation";
 import { registerChatEmbed } from "./views/chat/chatEmbed";
@@ -54,7 +32,6 @@ import { OnboardingView, VIEW_TYPE_ONBOARDING } from "./views/onboarding/Onboard
 import { SmartGraphView, VIEW_TYPE_SMART_GRAPH } from "./views/smart-graph/SmartGraphView";
 import SettingsTab from "./views/settings/Settings";
 import { VectorStoreService, waitForVectorStore } from "./vectorstore";
-import "./lib/_ck_e";
 
 const SUPPORTED_CHAT_ATTACHMENT_EXTENSIONS = new Set([
 	"txt",
@@ -815,9 +792,3 @@ export default class SecondBrainPlugin extends Plugin {
 		workspace.revealLeaf(leaf);
 	}
 }
-
-// TEMP iOS diagnostic: if this prints, our entry module fully evaluated and the
-// crash is Obsidian instantiating something afterward — not our module eval.
-try {
-	console.log("[S2B] main.ts module body fully evaluated");
-} catch {}
