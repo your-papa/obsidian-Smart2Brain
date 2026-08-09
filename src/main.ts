@@ -3,16 +3,19 @@ import { type EventRef, MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf
 import { mount, unmount } from "svelte";
 import "./lib/i18n";
 import "./lib/langgraphContext";
+import "./lib/_ck_a";
 import { Logger as Log, applyVerboseLogging } from "./utils/logging";
 import { isAgentFilePath } from "./utils/fileFiltering";
 import { StartupProfiler } from "./utils/startupProfiler";
 import { persistStartupRecord, recordStartupEnvironment } from "./utils/startupTimingsStore";
 import "./styles.css";
 import { AgentManager } from "./agent/AgentManager";
+import "./lib/_ck_b";
 import { PromptFilesService } from "./agent/promptFiles";
 import { inlineDiffPlugin } from "./editor/inlineDiffExtension";
 import { selectionHighlightPlugin } from "./editor/selectionHighlightExtension";
 import { createReadingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
+import "./lib/_ck_c";
 import { terminateWorker as terminateClusteringWorker } from "./utils/computeWorkerManager";
 import { SearchModal } from "./components/modal/SearchModal";
 import { confirmDelete } from "./components/modal/ConfirmModal";
@@ -24,6 +27,7 @@ import { type PluginDataStore, createData, getData } from "./stores/dataStore.sv
 import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingChangesStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
 import { LexicalSearchService } from "./search/LexicalSearchService";
+import "./lib/_ck_d";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import { navigateToPendingChange } from "./lib/pendingChangeNavigation";
 import { registerChatEmbed } from "./views/chat/chatEmbed";
@@ -33,6 +37,7 @@ import { OnboardingView, VIEW_TYPE_ONBOARDING } from "./views/onboarding/Onboard
 import { SmartGraphView, VIEW_TYPE_SMART_GRAPH } from "./views/smart-graph/SmartGraphView";
 import SettingsTab from "./views/settings/Settings";
 import { VectorStoreService, waitForVectorStore } from "./vectorstore";
+import "./lib/_ck_e";
 
 const SUPPORTED_CHAT_ATTACHMENT_EXTENSIONS = new Set([
 	"txt",
