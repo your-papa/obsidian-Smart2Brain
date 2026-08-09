@@ -531,11 +531,12 @@ $effect(() => {
       </div>
     </SettingItem>
     {#if isSigningIn && oauth.submitManualCode}
-      <!-- Fallback for obsidian:// flows: if the browser doesn't route the redirect back
-           to Obsidian, the user pastes the authorization code shown in the browser. -->
+      <!-- On mobile the flow is headless (no localhost/redirect): OpenRouter shows the
+           authorization code in the browser and the user pastes it here. On desktop this
+           is a fallback if the browser doesn't return to Obsidian automatically. -->
       <SettingItem
         name="Paste authorization code"
-        desc="If the browser didn't return to Obsidian automatically, copy the code shown there and paste it here."
+        desc="Copy the authorization code shown in the browser and paste it here to finish connecting."
       >
         <div class="flex gap-2 items-center">
           <Text inputType="text" bind:value={manualCode} placeholder="Authorization code" />

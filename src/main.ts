@@ -26,11 +26,6 @@ import { LexicalSearchService } from "./search/LexicalSearchService";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import { navigateToPendingChange } from "./lib/pendingChangeNavigation";
 import { registerChatEmbed } from "./views/chat/chatEmbed";
-import {
-	OPENROUTER_OAUTH_ACTION,
-	resolveOpenRouterOAuthRedirect,
-	type OpenRouterOAuthRedirectParams,
-} from "./providers/openrouterOAuth";
 import RunningIndicator from "./components/chat/RunningIndicator.svelte";
 import { NoteContextView, VIEW_TYPE_NOTE_CONTEXT } from "./views/note-context/NoteContextView";
 import { OnboardingView, VIEW_TYPE_ONBOARDING } from "./views/onboarding/OnboardingView";
@@ -303,13 +298,6 @@ export default class SecondBrainPlugin extends Plugin {
 		});
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
 		this.registerExtensions(["chat"], VIEW_TYPE_CHAT);
-
-		// Catch the OpenRouter OAuth redirect (obsidian://s2b-openrouter-oauth?code=…),
-		// which replaces the desktop-only localhost callback server so sign-in works
-		// on mobile too. The pending flow lives in openrouterOAuth.ts.
-		this.registerObsidianProtocolHandler(OPENROUTER_OAUTH_ACTION, (params) => {
-			resolveOpenRouterOAuthRedirect(params as OpenRouterOAuthRedirectParams);
-		});
 
 		// Read-only preview for embedded (![[chat.chat]]) and hovered .chat links.
 		registerChatEmbed(this);
