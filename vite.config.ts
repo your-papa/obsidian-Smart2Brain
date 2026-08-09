@@ -76,7 +76,7 @@ const PROCESS_SHIM =
  * to tell a fix apart from a stale/cached plugin file on mobile. Bump the tag on
  * each diagnostic build. Temporary diagnostic aid; safe to keep or remove.
  */
-const BUILD_MARKER = 'try{console.log("[S2B] build marker: ios-diag-5");}catch(e){}';
+const BUILD_MARKER = 'try{console.log("[S2B] build marker: ios-diag-6-unminified");}catch(e){}';
 
 /**
  * Capture the real load-time error before Obsidian swallows it. The device stack
@@ -146,6 +146,9 @@ export default defineConfig(({ mode }) => {
 			"import.meta.env.MODE": JSON.stringify(mode),
 		},
 		build: {
+			// TEMP iOS diagnostic: disable minification so a load-time throw's stack
+			// names our real module/class instead of a minified `app.js` frame.
+			minify: false,
 			lib: {
 				entry: "src/main.ts",
 				formats: ["cjs"],
