@@ -5,6 +5,7 @@ import MessageContainer from "../../components/chat/MessageContainer.svelte";
 import { getSessionRegistry } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
+import { isMobileUI } from "../../utils/platform";
 import type { ThreadPathStore } from "./threadPathStore.svelte";
 
 interface Props {
@@ -60,6 +61,37 @@ function messageNavHotkeys(node: HTMLElement) {
 		},
 	};
 }
+
+// Keep the composer above the on-screen keyboard on mobile. iOS WebKit shrinks
+// the *visual* viewport when the keyboard opens but leaves the layout viewport
+// (and our `h-full` chat-root) at full height, so the bottom-anchored input gets
+// scrolled off-screen. Publish the keyboard height as `--keyboard-height` on the
+// root; the mobile `:global(.is-mobile) .chat-root` rules use it to shrink the
+// visible height and fold away the navbar clearance. Desktop / no-viewport hosts
+// are untouched (the action no-ops).
+function keyboardInset(node: HTMLElement) {
+	const vv = typeof window !== "undefined" ? window.visualViewport : undefined;
+	if (!isMobileUI() || !vv) {
+		return {};
+	}
+
+	const update = () => {
+		const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+		node.style.setProperty("--keyboard-height", `${kb}px`);
+	};
+
+	update();
+	vv.addEventListener("resize", update);
+	vv.addEventListener("scroll", update);
+
+	return {
+		destroy() {
+			vv.removeEventListener("resize", update);
+			vv.removeEventListener("scroll", update);
+			node.style.setProperty("--keyboard-height", "0px");
+		},
+	};
+}
 </script>
 
 <QueryClientProvider client={plugin.queryClient}>
@@ -72,6 +104,7 @@ function messageNavHotkeys(node: HTMLElement) {
     ondragleave={handleRootDragLeave}
     ondrop={handleRootDrop}
     use:messageNavHotkeys
+    use:keyboardInset
   >
     {#if registry}
       <MessageContainer bind:this={messageContainer} {registry} {threadPath} />
@@ -156,10 +189,14 @@ function messageNavHotkeys(node: HTMLElement) {
   /* Obsidian's floating mobile navbar (~52px pill) sits over the full-height
      chat leaf, covering the composer's action row. The navbar already floats
      above the device safe area, so we only need to clear the pill itself.
-     When the on-screen keyboard opens Obsidian hides the navbar and grows
-     `--keyboard-height`; fold that clearance away as the keyboard rises so the
-     composer doesn't hop. Keyboard closed → 60px gap; open → 0. */
+     When the on-screen keyboard opens `--keyboard-height` (set by the
+     `keyboardInset` action from `window.visualViewport`) grows; fold that
+     clearance away as the keyboard rises so the composer doesn't hop, and shrink
+     the visible height so the bottom-anchored input stays directly above the
+     keyboard instead of being scrolled off-screen.
+     Keyboard closed → 60px gap, full height; open → 0 gap, height minus keyboard. */
   :global(.is-mobile) .chat-root {
+    height: calc(100% - var(--keyboard-height, 0px));
     padding-bottom: max(0px, calc(60px - var(--keyboard-height, 0px)));
   }
 
