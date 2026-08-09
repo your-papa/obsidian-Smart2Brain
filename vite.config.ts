@@ -1,7 +1,7 @@
 // vite.config.ts
 import { svelte, vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vite";
-import { copyFileSync } from "node:fs";
+import { copyFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import builtinModules from "builtin-modules";
@@ -70,6 +70,33 @@ const PROCESS_SHIM =
 	"on:noop,off:noop,once:noop,emit:noop,addListener:noop,removeListener:noop," +
 	"stdout:{write:noop,isTTY:false},stderr:{write:noop,isTTY:false}};})();";
 
+/**
+ * Some bundled deps (`@langchain/core`'s `IterableReadableStream`, the MCP SDK's
+ * SSE parser) declare `class X extends ReadableStream/TransformStream {}` at
+ * module top-level. Obsidian's iOS WebView does not expose the WHATWG Streams
+ * globals to plugin JS at eval time, so the bare superclass reference throws
+ * `TypeError: The superclass is not a constructor` and crashes plugin load
+ * before any of our code runs. Desktop Electron has them, so it's unaffected.
+ *
+ * We inline `web-streams-polyfill`'s self-installing ES5 polyfill (a self-
+ * contained IIFE that defines the classes and assigns them onto the global),
+ * gated behind a feature check so it ONLY runs when `ReadableStream` is absent —
+ * the real WebKit/Electron implementations are left untouched everywhere else.
+ * Injected as the output `banner` (same reason as PROCESS_SHIM) so it runs first,
+ * survives minification, and is in place before the LangChain bundle initializes.
+ * The `[S2B]` log makes the next device test a definitive diagnostic.
+ */
+const STREAMS_POLYFILL_SRC = readFileSync(
+	resolve("node_modules/web-streams-polyfill/dist/polyfill.es5.js"),
+	"utf8",
+);
+const STREAMS_SHIM =
+	"(function(){try{if(typeof ReadableStream!=='undefined'&&ReadableStream)return;}catch(e){}" +
+	"try{console.log('[S2B] installing web-streams-polyfill (no global ReadableStream)');}catch(e){}" +
+	`${STREAMS_POLYFILL_SRC}\n})();`;
+
+const BANNER = `${PROCESS_SHIM}\n${STREAMS_SHIM}`;
+
 const setOutDir = (mode: string) => {
 	switch (mode) {
 		case "development":
@@ -121,9 +148,10 @@ export default defineConfig(({ mode }) => {
 					sourcemapBaseUrl: new URL(setOutDir(mode), import.meta.url).toString(),
 					manualChunks: undefined,
 					inlineDynamicImports: true,
-						// Runs before all bundled code (survives minification), shimming
-						// `process` on mobile where WebKit has no such global.
-						banner: PROCESS_SHIM,
+						// Runs before all bundled code (survives minification): shims
+						// `process` and the WHATWG Streams globals on mobile, where
+						// WebKit doesn't expose them to plugin JS at eval time.
+						banner: BANNER,
 				},
 				external: [
 					"obsidian",
