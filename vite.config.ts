@@ -76,7 +76,7 @@ const PROCESS_SHIM =
  * to tell a fix apart from a stale/cached plugin file on mobile. Bump the tag on
  * each diagnostic build. Temporary diagnostic aid; safe to keep or remove.
  */
-const BUILD_MARKER = 'try{console.log("[S2B] build marker: ios-diag-8");}catch(e){}';
+const BUILD_MARKER = 'try{console.log("[S2B] build marker: ios-diag-9");}catch(e){}';
 
 /**
  * Capture the real load-time error before Obsidian swallows it. The device stack
