@@ -70,6 +70,16 @@ const PROCESS_SHIM =
 	"on:noop,off:noop,once:noop,emit:noop,addListener:noop,removeListener:noop," +
 	"stdout:{write:noop,isTTY:false},stderr:{write:noop,isTTY:false}};})();";
 
+/**
+ * Build/version beacon logged as the very first thing (before any bundled code),
+ * so a device console shows exactly which build is running — the definitive way
+ * to tell a fix apart from a stale/cached plugin file on mobile. Bump the tag on
+ * each diagnostic build. Temporary diagnostic aid; safe to keep or remove.
+ */
+const BUILD_MARKER = 'try{console.log("[S2B] build marker: ios-diag-1");}catch(e){}';
+
+const BANNER = `${BUILD_MARKER}\n${PROCESS_SHIM}`;
+
 const setOutDir = (mode: string) => {
 	switch (mode) {
 		case "development":
@@ -121,9 +131,10 @@ export default defineConfig(({ mode }) => {
 					sourcemapBaseUrl: new URL(setOutDir(mode), import.meta.url).toString(),
 					manualChunks: undefined,
 					inlineDynamicImports: true,
-						// Runs before all bundled code (survives minification), shimming
-						// `process` on mobile where WebKit has no such global.
-						banner: PROCESS_SHIM,
+						// Runs before all bundled code (survives minification): a build
+						// beacon (to spot stale mobile caches) + the `process` shim for
+						// mobile WebKit, which has no such global.
+						banner: BANNER,
 				},
 				external: [
 					"obsidian",
