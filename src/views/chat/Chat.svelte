@@ -67,8 +67,20 @@ function messageNavHotkeys(node: HTMLElement) {
 //   • The keyboard does NOT shrink `window.visualViewport` (innerHeight ===
 //     visualViewport.height throughout). Obsidian instead shrinks its own
 //     `.app-container` by the keyboard height — that shrink is the ONE reliable
-//     keyboard signal (measured 335px open / 0px closed, every time). Focus events
-//     churn inside CodeMirror during the animation and are not trustworthy.
+//     keyboard signal (measured 335px open / 0px closed, every time).
+//   • `.app-container`'s ResizeObserver fires ~450ms AFTER a focus event that
+//     opens the keyboard — well after iOS's own ~250ms keyboard slide-up
+//     animation has finished (measured on-device: touchend → focus 13ms later
+//     → appContainerResize 466ms after THAT). Driving the push purely off the
+//     resize observer means our composer sits at its closed position while the
+//     real keyboard is already covering it, then snaps late — looks like the
+//     composer "disappears, then jumps". A `focusin` listener reacts the
+//     instant the editor is focused (now a deterministic single event, not the
+//     churn the resize-only approach was originally written to dodge — that
+//     churn came from *native* focus races; our own forced `touchend` → focus()
+//     call is a single clean event) and kicks the transition off immediately
+//     using the last-known push (usually 0, see below), so our animation
+//     overlaps the real keyboard animation instead of starting after it.
 //   • When the keyboard is up Obsidian pads `.view-content` with a large bottom
 //     padding, collapsing an `h-full` child to a sliver. We fix that by filling
 //     `.view-content` with `position:absolute; inset:0`.
@@ -100,6 +112,11 @@ function keyboardInset(node: HTMLElement) {
 	// into its own input and run away.
 	const parent = node.parentElement;
 
+	// Remember the last push we computed while the keyboard was open so an
+	// optimistic focus-triggered open can reuse it instead of guessing 0 —
+	// the toolbar/keyboard geometry is stable across opens on the same device.
+	let lastKnownPush = 0;
+
 	// Track the format toolbar's size too — it mounts/resizes around the keyboard
 	// animation and its top is our target edge. Re-observed each update since it's
 	// created lazily when a CM editor gains focus.
@@ -127,12 +144,25 @@ function keyboardInset(node: HTMLElement) {
 		if (kbOpen && parent) {
 			const toolbarRect = toolbar?.getBoundingClientRect();
 			const targetTop = toolbarRect && toolbarRect.height > 0 ? toolbarRect.top : acRect.bottom;
-			const gap = Math.round(targetTop - parent.getBoundingClientRect().bottom);
-			node.style.setProperty("--s2b-kb-push", `${Math.max(0, gap)}px`);
+			const gap = Math.max(0, Math.round(targetTop - parent.getBoundingClientRect().bottom));
+			lastKnownPush = gap;
+			node.style.setProperty("--s2b-kb-push", `${gap}px`);
 		} else {
 			node.style.setProperty("--s2b-kb-push", "0px");
 		}
 	};
+
+	// Fire the instant the editor is focused, ahead of `.app-container`'s own
+	// (much later) resize notification, so our CSS transition starts in step
+	// with the real keyboard animation instead of after it. `update()` still
+	// runs once the resize observer catches up and corrects any drift.
+	const onFocusIn = (event: FocusEvent) => {
+		const target = event.target;
+		if (!(target instanceof HTMLElement) || !target.closest(".cm-editor")) return;
+		node.style.setProperty("--s2b-keyboard-open", "1");
+		node.style.setProperty("--s2b-kb-push", `${lastKnownPush}px`);
+	};
+	node.addEventListener("focusin", onFocusIn);
 
 	const ro = new ResizeObserver(update);
 	update();
@@ -148,6 +178,7 @@ function keyboardInset(node: HTMLElement) {
 	return {
 		destroy() {
 			ro.disconnect();
+			node.removeEventListener("focusin", onFocusIn);
 			vv?.removeEventListener("resize", update);
 			vv?.removeEventListener("scroll", update);
 			node.style.removeProperty("--s2b-keyboard-open");
