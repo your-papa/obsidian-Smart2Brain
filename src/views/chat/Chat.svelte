@@ -117,6 +117,19 @@ function keyboardInset(node: HTMLElement) {
 	// the toolbar/keyboard geometry is stable across opens on the same device.
 	let lastKnownPush = 0;
 
+	// The editor's own focus state, kept in sync by `onFocusIn`/`onFocusOut`.
+	// `update()` uses this to avoid clobbering an optimistic open with a
+	// premature `kbOpen: false` reading — `.view-content`'s padding (which the
+	// `parent` ResizeObserver below watches) can shift slightly AHEAD of
+	// `.app-container`'s own height change, firing `update()` with stale
+	// (not-yet-shrunk) geometry right after `onFocusIn` set the optimistic
+	// state, snapping the composer back to closed for one frame before the
+	// real resize confirms it open again ~450ms later — a worse jump than the
+	// one this optimistic path was written to fix. While focused, only trust
+	// `update()` to report `kbOpen: true` (a correction/refinement), never to
+	// revert to `false`; only blur is allowed to close it.
+	let editorFocused = false;
+
 	// Track the format toolbar's size too — it mounts/resizes around the keyboard
 	// animation and its top is our target edge. Re-observed each update since it's
 	// created lazily when a CM editor gains focus.
@@ -125,7 +138,7 @@ function keyboardInset(node: HTMLElement) {
 		const acRect = appContainer.getBoundingClientRect();
 		// Keyboard open ⇒ Obsidian shrinks the app container well below the layout
 		// viewport. A 50px guard ignores incidental sub-pixel/chrome differences.
-		const kbOpen = window.innerHeight - acRect.height > 50;
+		const kbOpen = window.innerHeight - acRect.height > 50 || editorFocused;
 		node.style.setProperty("--s2b-keyboard-open", kbOpen ? "1" : "0");
 
 		// The composer must sit flush on top of whatever occupies the space above
@@ -159,10 +172,21 @@ function keyboardInset(node: HTMLElement) {
 	const onFocusIn = (event: FocusEvent) => {
 		const target = event.target;
 		if (!(target instanceof HTMLElement) || !target.closest(".cm-editor")) return;
+		editorFocused = true;
 		node.style.setProperty("--s2b-keyboard-open", "1");
 		node.style.setProperty("--s2b-kb-push", `${lastKnownPush}px`);
 	};
 	node.addEventListener("focusin", onFocusIn);
+
+	// Symmetric close: once the editor blurs, drop the optimistic override so
+	// `update()` (or the next resize) is free to report the keyboard closed.
+	const onFocusOut = (event: FocusEvent) => {
+		const target = event.target;
+		if (!(target instanceof HTMLElement) || !target.closest(".cm-editor")) return;
+		editorFocused = false;
+		update();
+	};
+	node.addEventListener("focusout", onFocusOut);
 
 	const ro = new ResizeObserver(update);
 	update();
@@ -179,6 +203,7 @@ function keyboardInset(node: HTMLElement) {
 		destroy() {
 			ro.disconnect();
 			node.removeEventListener("focusin", onFocusIn);
+			node.removeEventListener("focusout", onFocusOut);
 			vv?.removeEventListener("resize", update);
 			vv?.removeEventListener("scroll", update);
 			node.style.removeProperty("--s2b-keyboard-open");
