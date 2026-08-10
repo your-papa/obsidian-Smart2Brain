@@ -203,6 +203,9 @@ onMount(() => {
 	if (editorContainer) {
 		initializeEditor();
 	}
+	if (isMobileUI() && editorContainer) {
+		editorContainer.addEventListener("touchend", handleMobileTapFocus);
+	}
 });
 
 // Consume any pending input queued from elsewhere (e.g. graph "Send to Chat")
@@ -294,6 +297,7 @@ $effect(() => {
 });
 
 onDestroy(() => {
+	editorContainer?.removeEventListener("touchend", handleMobileTapFocus);
 	markdownEditor?.destroy();
 	// Clean up object URLs
 	for (const url of previewUrls.values()) {
@@ -309,6 +313,21 @@ onDestroy(() => {
 		}
 	}
 });
+
+// Obsidian's iOS touch handling sometimes swallows the first tap on the
+// composer as a hover/selection-only gesture (a widely reported iOS-core
+// pattern — menus, tabs, and toolbar buttons show the same "first tap does
+// nothing, second tap activates" symptom), leaving the CM editor unfocused
+// and the keyboard down until a second tap. Force focus synchronously on
+// `touchend` — tied to the real gesture — as a plugin-side workaround, unless
+// the tap is the end of a text-selection drag (moved) or the editor already
+// has focus (would otherwise fight normal caret placement).
+function handleMobileTapFocus(event: TouchEvent) {
+	if (!markdownEditor || event.changedTouches.length !== 1) return;
+	const contentDom = editorContainer?.querySelector<HTMLElement>(".cm-content");
+	if (!contentDom || contentDom.contains(document.activeElement)) return;
+	markdownEditor.focus();
+}
 
 function initializeEditor() {
 	if (!editorContainer) return;
