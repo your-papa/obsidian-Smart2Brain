@@ -1005,9 +1005,15 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     </button>
   {/if}
   <PendingChangesBar {threadPath} />
-  <!-- Input wrapper with glow effect -->
+  <!-- Input wrapper with glow effect.
+       Transition is scoped to the two properties that actually change state
+       (border-color on focus/drag, background on drag-active) rather than
+       `transition-all`, which also animated layout geometry — including the
+       reflow when the mobile keyboard opens. The fullscreen expand/collapse
+       animation is unaffected: it lives on `.chat-input-container`, which has
+       its own explicit transition list. -->
   <div
-    class="chat-input-wrapper flex flex-col gap-3 border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isFullscreen
+    class="chat-input-wrapper flex flex-col gap-3 border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-[background-color,border-color] duration-200 ease-in-out relative isolate {isFullscreen
       ? 'flex-1 min-h-0'
       : ''} {showDragActive
       ? 'border-[--interactive-accent] chat-input-wrapper-drag-active'
