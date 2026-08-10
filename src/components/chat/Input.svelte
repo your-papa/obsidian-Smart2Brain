@@ -203,6 +203,9 @@ onMount(() => {
 	if (editorContainer) {
 		initializeEditor();
 	}
+	if (isMobileUI() && editorContainer) {
+		editorContainer.addEventListener("touchend", handleMobileTapFocus);
+	}
 });
 
 // Consume any pending input queued from elsewhere (e.g. graph "Send to Chat")
@@ -294,6 +297,7 @@ $effect(() => {
 });
 
 onDestroy(() => {
+	editorContainer?.removeEventListener("touchend", handleMobileTapFocus);
 	markdownEditor?.destroy();
 	// Clean up object URLs
 	for (const url of previewUrls.values()) {
@@ -309,6 +313,21 @@ onDestroy(() => {
 		}
 	}
 });
+
+// Obsidian's iOS touch handling sometimes swallows the first tap on the
+// composer as a hover/selection-only gesture (a widely reported iOS-core
+// pattern — menus, tabs, and toolbar buttons show the same "first tap does
+// nothing, second tap activates" symptom), leaving the CM editor unfocused
+// and the keyboard down until a second tap. Force focus synchronously on
+// `touchend` — tied to the real gesture — as a plugin-side workaround, unless
+// the tap is the end of a text-selection drag (moved) or the editor already
+// has focus (would otherwise fight normal caret placement).
+function handleMobileTapFocus(event: TouchEvent) {
+	if (!markdownEditor || event.changedTouches.length !== 1) return;
+	const contentDom = editorContainer?.querySelector<HTMLElement>(".cm-content");
+	if (!contentDom || contentDom.contains(document.activeElement)) return;
+	markdownEditor.focus();
+}
 
 function initializeEditor() {
 	if (!editorContainer) return;
@@ -986,9 +1005,15 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     </button>
   {/if}
   <PendingChangesBar {threadPath} />
-  <!-- Input wrapper with glow effect -->
+  <!-- Input wrapper with glow effect.
+       Transition is scoped to the two properties that actually change state
+       (border-color on focus/drag, background on drag-active) rather than
+       `transition-all`, which also animated layout geometry — including the
+       reflow when the mobile keyboard opens. The fullscreen expand/collapse
+       animation is unaffected: it lives on `.chat-input-container`, which has
+       its own explicit transition list. -->
   <div
-    class="chat-input-wrapper flex flex-col gap-3 border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-all duration-200 ease-in-out relative isolate {isFullscreen
+    class="chat-input-wrapper flex flex-col gap-3 border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-[background-color,border-color] duration-200 ease-in-out relative isolate {isFullscreen
       ? 'flex-1 min-h-0'
       : ''} {showDragActive
       ? 'border-[--interactive-accent] chat-input-wrapper-drag-active'

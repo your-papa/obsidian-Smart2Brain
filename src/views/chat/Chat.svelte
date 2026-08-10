@@ -5,6 +5,7 @@ import MessageContainer from "../../components/chat/MessageContainer.svelte";
 import { getSessionRegistry } from "../../stores/chatStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
+import { isMobileUI } from "../../utils/platform";
 import type { ThreadPathStore } from "./threadPathStore.svelte";
 
 interface Props {
@@ -60,6 +61,104 @@ function messageNavHotkeys(node: HTMLElement) {
 		},
 	};
 }
+
+// Re-parent the composer out of the leaf on mobile so it can be positioned
+// against a box that does not go stale when the keyboard opens. See the style
+// block for why this is necessary (`.workspace-leaf` sets `contain: strict`,
+// which no `position`/`inset` can escape) and what it fixes.
+//
+// The composer keeps its own DOM identity — only its parent changes — so Svelte
+// continues to own and update it normally, and the fullscreen transition on
+// `.chat-input-container` is unaffected.
+function portalComposer(node: HTMLElement) {
+	if (!isMobileUI() || typeof document === "undefined") return {};
+	// `.workspace-split.mod-root` rather than `.app-container`: swiping a sidebar
+	// drawer open slides the workspace by transforming this element, so hosting
+	// the composer inside it means the composer inherits that motion natively.
+	// (Mirroring the transform from a sibling was tried and trails by up to 68px
+	// mid-swipe — a sampler can only read the transform after the frame is
+	// already painted.) It is `position: relative`, `contain: none` and
+	// `overflow: visible`, so it is a usable containing block; its own height
+	// goes stale with the keyboard exactly like `.view-content`, but that no
+	// longer matters because the composer is positioned off `100vh`.
+	const host = document.querySelector<HTMLElement>(".workspace-split.mod-root");
+	if (!host) return {};
+
+	let composer: HTMLElement | null = null;
+	let home: HTMLElement | null = null;
+	let nextSibling: ChildNode | null = null;
+	let ro: ResizeObserver | null = null;
+
+	// Horizontal placement and height come from wherever the leaf actually is
+	// (main view, sidebar split, …), so measure rather than assume full width.
+	const publishGeometry = () => {
+		if (!composer) return;
+		const leaf = node.getBoundingClientRect();
+		const height = composer.getBoundingClientRect().height;
+		composer.style.setProperty("--s2b-composer-left", `${Math.round(leaf.left)}px`);
+		composer.style.setProperty("--s2b-composer-width", `${Math.round(leaf.width)}px`);
+		composer.style.setProperty("--s2b-composer-height", `${Math.round(height)}px`);
+		// Also on the view itself: the composer is no longer a descendant, so the
+		// scroller cannot inherit this to reserve room for it.
+		node.style.setProperty("--s2b-composer-height", `${Math.round(height)}px`);
+		// The view's own top edge, so the message area can be sized against the
+		// viewport instead of its stale parent (see `.chat-root` in the styles).
+		// Measured while the keyboard is DOWN only: once it is up this element is
+		// exactly the stale box we are working around, and re-reading it then
+		// would bake the stale value in.
+		if (!Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--keyboard-height"))) {
+			node.style.setProperty("--s2b-view-top", `${Math.round(leaf.top)}px`);
+		}
+	};
+
+	const portal = (found: HTMLElement) => {
+		composer = found;
+		home = found.parentElement;
+		nextSibling = found.nextSibling;
+		publishGeometry();
+		host.appendChild(found);
+		found.classList.add("s2b-composer-portaled");
+		// The composer grows and shrinks with its content (attachments,
+		// multi-line drafts), and the leaf moves when splits resize — both
+		// change the geometry the CSS above is anchored to.
+		ro = new ResizeObserver(publishGeometry);
+		ro.observe(found);
+		ro.observe(node);
+	};
+
+	// `<Input>` is rendered by a child component, so it may not exist yet when
+	// this action runs on the root. Wait for it rather than giving up.
+	const existing = node.querySelector<HTMLElement>(".chat-input-container");
+	const mo = new MutationObserver(() => {
+		if (composer) return;
+		const found = node.querySelector<HTMLElement>(".chat-input-container");
+		if (found) {
+			mo.disconnect();
+			portal(found);
+		}
+	});
+	if (existing) {
+		portal(existing);
+	} else {
+		mo.observe(node, { childList: true, subtree: true });
+	}
+
+	return {
+		destroy() {
+			mo.disconnect();
+			ro?.disconnect();
+			if (!composer) return;
+			composer.classList.remove("s2b-composer-portaled");
+			for (const prop of ["--s2b-composer-left", "--s2b-composer-width", "--s2b-composer-height"]) {
+				composer.style.removeProperty(prop);
+			}
+			node.style.removeProperty("--s2b-composer-height");
+			node.style.removeProperty("--s2b-view-top");
+			// Put it back so Svelte's own teardown finds it where it expects.
+			home?.insertBefore(composer, nextSibling);
+		},
+	};
+}
 </script>
 
 <QueryClientProvider client={plugin.queryClient}>
@@ -72,6 +171,7 @@ function messageNavHotkeys(node: HTMLElement) {
     ondragleave={handleRootDragLeave}
     ondrop={handleRootDrop}
     use:messageNavHotkeys
+    use:portalComposer
   >
     {#if registry}
       <MessageContainer bind:this={messageContainer} {registry} {threadPath} />
@@ -123,7 +223,17 @@ function messageNavHotkeys(node: HTMLElement) {
     padding-top: 44px;
   }
 
-  :global(.chat-root > .chat-input-container) {
+  /* With the composer portaled out of the leaf it no longer takes up flow
+     space, so the conversation would scroll underneath it. Reserve its height
+     (published by `portalComposer`) at the bottom of the scroller instead. */
+  :global(.is-mobile .chat-root .scroll-container) {
+    padding-bottom: calc(var(--s2b-composer-height, 0px) + 12px);
+  }
+
+  /* Also matches the portaled composer, which is no longer a `.chat-root`
+     child (see `portalComposer`); the mobile rule below resets `margin-top`. */
+  :global(.chat-root > .chat-input-container),
+  :global(.chat-input-container.s2b-composer-portaled) {
     margin-top: -12px;
     padding-top: 12px;
     z-index: 10;
@@ -153,14 +263,99 @@ function messageNavHotkeys(node: HTMLElement) {
     --chat-bg: var(--background-secondary);
   }
 
-  /* Obsidian's floating mobile navbar (~52px pill) sits over the full-height
-     chat leaf, covering the composer's action row. The navbar already floats
-     above the device safe area, so we only need to clear the pill itself.
-     When the on-screen keyboard opens Obsidian hides the navbar and grows
-     `--keyboard-height`; fold that clearance away as the keyboard rises so the
-     composer doesn't hop. Keyboard closed → 60px gap; open → 0. */
+  /* Mobile keyboard handling.
+
+     The composer is moved out of the leaf and re-parented to the workspace
+     root (see `portalComposer`), then positioned with core's own formula for
+     `.mobile-toolbar`:
+
+       top: calc(100vh - var(--keyboard-height) - var(--mobile-toolbar-height))
+
+     Why re-parent at all: `--keyboard-height` flips to the real height in one
+     frame, but `.app-container` — and therefore `.view-content` — only reflows
+     to `max-height: calc(100vh - var(--keyboard-height))` ~420ms later. Any
+     descendant of the leaf is pinned to that stale box for the whole gap.
+     Measured on-device: the composer sat frozen at bottom 802, behind the
+     keyboard, while core's toolbar glided 822 → 796 → … → 487, then teleported
+     to 487 when the container finally caught up. That is the "composer
+     vanishes, then jumps up".
+
+     Escaping the leaf is not optional: `.workspace-leaf` sets `contain: strict`,
+     which establishes a containing block AND clips, so no amount of
+     `position`/`inset` on our side gets out. Core's toolbar has no such problem
+     because it is a direct child of `.app-container`, whose nearest positioned
+     ancestor is `body` — a box that never goes stale. Re-parenting puts the
+     composer in exactly that situation.
+
+     Verified on-device: composer bottom goes 822 → 487 in a single frame and
+     holds there for the entire keyboard animation, with the toolbar arriving
+     to meet it. No transition — the value is already correct on frame one, and
+     animating on top of it is what made earlier attempts drift. */
+  /* The message area has the same staleness problem as the composer did: it is
+     an `inset:0` child of `.view-content`, so while the keyboard opens it keeps
+     the pre-keyboard height for ~420ms and its contents (the recommendations
+     block in an empty chat) visibly hang low before snapping up. It cannot be
+     portaled — it scrolls with the conversation and belongs to the leaf — so
+     instead size it against the viewport, which is correct on frame one.
+     `--s2b-view-top` is published by `portalComposer` (the leaf's own top edge,
+     sampled while the keyboard is down); the bottom edge matches the composer's
+     so the two stay flush. */
   :global(.is-mobile) .chat-root {
-    padding-bottom: max(0px, calc(60px - var(--keyboard-height, 0px)));
+    position: absolute;
+    inset: 0;
+    bottom: auto;
+    padding-bottom: 0;
+    height: calc(
+      100vh - var(--s2b-view-top, 0px) -
+        max(
+          calc(var(--keyboard-height, 0px) + var(--mobile-toolbar-height, 52px)),
+          calc(52px + env(safe-area-inset-bottom))
+        )
+    );
+  }
+
+  /* The portaled composer, positioned against `body` like core's toolbar.
+     `--s2b-composer-*` are published by `portalComposer` from the geometry the
+     composer had while still in the leaf, so it keeps the leaf's width and
+     horizontal placement (it can be in a sidebar split, not just full width).
+
+     The bottom edge differs by keyboard state, because a different core element
+     owns that band each time: with the keyboard UP it is `.mobile-toolbar`
+     (`--mobile-toolbar-height`), with it DOWN it is the floating
+     `.mobile-navbar` (52px + the safe-area inset, landing us 2px above the
+     navbar top — the same clearance this view had before the composer was
+     portaled). `max()` picks whichever edge is higher without a conditional.
+
+     No `z-index`: core's navbar and toolbar live outside our host with
+     `z-index: auto`, so leaving this unstyled lets them paint on top where they
+     belong. An explicit stacking value here is what made the composer cover
+     them. */
+  :global(.is-mobile .chat-input-container.s2b-composer-portaled) {
+    position: absolute;
+    /* Inset from the leaf's own edges (published as --s2b-composer-left/width,
+       the leaf's true bounds) rather than the full viewport, so the composer
+       keeps a margin instead of sitting flush against the screen edge — and
+       still respects a sidebar split's actual width. */
+    left: calc(var(--s2b-composer-left, 0px) + 12px);
+    width: calc(var(--s2b-composer-width, 100%) - 24px);
+    /* The host stretches an unsized child to its full height (measured 874px),
+       which would drag the `top` calc below with it. */
+    height: auto;
+    top: calc(
+      100vh - var(--s2b-composer-height, 0px) -
+        max(
+          calc(var(--keyboard-height, 0px) + var(--mobile-toolbar-height, 52px)),
+          calc(52px + env(safe-area-inset-bottom))
+        )
+    );
+    margin-top: 0;
+    z-index: auto;
+  }
+
+  /* Anchor the absolute chat-root to the leaf's content area. `:has` is supported
+     on the iOS WebKit / modern Electron Obsidian runs on. */
+  :global(.is-mobile .view-content:has(> .chat-root)) {
+    position: relative;
   }
 
   .chat-root::after {
