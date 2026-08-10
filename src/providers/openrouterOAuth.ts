@@ -308,9 +308,11 @@ async function openBrowser(url: string): Promise<void> {
 
 /**
  * Navigate a tab opened earlier via {@link openBlankAuthWindow} to the authorize
- * URL. Used on mobile: iOS WKWebView only treats `window.open` as user-gesture-
- * initiated when called synchronously within the tap handler, so the tab must be
- * opened blank up front (before any `await`) and redirected once the URL is ready.
+ * URL. Used on mobile: iOS's WKWebView only hands `window.open` off to Safari for
+ * plain, argument-less calls (no `target`/`features` string — those make WKWebView
+ * treat it as an in-app popup instead of a real navigation), so the tab is opened
+ * blank up front (before any `await`, to stay inside the user-gesture window) with
+ * no extra args, then redirected once the authorize URL is ready.
  */
 function navigateAuthWindow(authWindow: Window, url: string): void {
 	authWindow.location.href = url;
@@ -318,7 +320,7 @@ function navigateAuthWindow(authWindow: Window, url: string): void {
 
 /** Must be called synchronously, before any `await`, so iOS treats it as user-gesture-initiated. */
 function openBlankAuthWindow(): Window | null {
-	const opened = window.open("", "_blank", "noreferrer");
+	const opened = window.open();
 	if (!opened) {
 		Logger.warn("window.open returned a falsy value while opening the OpenRouter sign-in tab");
 	}
