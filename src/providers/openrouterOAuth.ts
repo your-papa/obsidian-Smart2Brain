@@ -15,6 +15,8 @@ const OAUTH_TIMEOUT_MS = 5 * 60_000;
 interface PendingOpenRouterAuth {
 	/** Desktop only: the localhost callback server catching the redirect. */
 	server: Server | null;
+	/** Mobile only: a blank tab opened synchronously on tap, navigated once the authorize URL is ready. */
+	authWindow: Window | null;
 	codeVerifier: string;
 	resolve: (apiKey: string) => void;
 	reject: (error: Error) => void;
@@ -79,6 +81,7 @@ function cleanupPendingOpenRouterAuth() {
 	if (!pendingOpenRouterAuth) return;
 	clearTimeout(pendingOpenRouterAuth.timeoutId);
 	pendingOpenRouterAuth.server?.close();
+	pendingOpenRouterAuth.authWindow?.close();
 	pendingOpenRouterAuth = null;
 }
 
@@ -304,6 +307,25 @@ async function openBrowser(url: string): Promise<void> {
 }
 
 /**
+ * Navigate a tab opened earlier via {@link openBlankAuthWindow} to the authorize
+ * URL. Used on mobile: iOS WKWebView only treats `window.open` as user-gesture-
+ * initiated when called synchronously within the tap handler, so the tab must be
+ * opened blank up front (before any `await`) and redirected once the URL is ready.
+ */
+function navigateAuthWindow(authWindow: Window, url: string): void {
+	authWindow.location.href = url;
+}
+
+/** Must be called synchronously, before any `await`, so iOS treats it as user-gesture-initiated. */
+function openBlankAuthWindow(): Window | null {
+	const opened = window.open("", "_blank", "noreferrer");
+	if (!opened) {
+		Logger.warn("window.open returned a falsy value while opening the OpenRouter sign-in tab");
+	}
+	return opened;
+}
+
+/**
  * Start the OpenRouter OAuth sign-in.
  *
  * Desktop: spins up a localhost callback server, opens the browser to the
@@ -321,6 +343,12 @@ export async function signInWithOpenRouter(): Promise<string> {
 	}
 
 	const isDesktop = Platform.isDesktopApp;
+	// Must happen before any `await` below: iOS WKWebView only honors `window.open`
+	// as user-gesture-initiated when it's called synchronously within the tap that
+	// triggered this function. The tab is opened blank and navigated once the
+	// authorize URL is ready (see navigateAuthWindow).
+	const authWindow = isDesktop ? null : openBlankAuthWindow();
+
 	const codeVerifier = generateRandomString(64);
 	const codeChallenge = await createCodeChallenge(codeVerifier);
 	const redirectUri = isDesktop ? getRedirectUri() : null;
@@ -334,6 +362,7 @@ export async function signInWithOpenRouter(): Promise<string> {
 	return new Promise<string>((resolve, reject) => {
 		pendingOpenRouterAuth = {
 			server,
+			authWindow,
 			codeVerifier,
 			resolve,
 			reject,
@@ -356,10 +385,13 @@ export async function signInWithOpenRouter(): Promise<string> {
 					});
 					await verifyCallbackServer();
 					Logger.info("OpenRouter callback server healthcheck passed");
+					await openBrowser(authorizeUrl);
 				} else {
 					Logger.info("OpenRouter headless sign-in started (mobile) — awaiting pasted code");
+					if (authWindow) {
+						navigateAuthWindow(authWindow, authorizeUrl);
+					}
 				}
-				await openBrowser(authorizeUrl);
 			} catch (error) {
 				if (!pendingOpenRouterAuth || pendingOpenRouterAuth.settled) return;
 				pendingOpenRouterAuth.settled = true;
