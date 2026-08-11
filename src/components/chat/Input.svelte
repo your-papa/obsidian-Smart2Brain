@@ -83,8 +83,11 @@ let dragCounter = 0;
 let dragMessage = $state("Drop files here");
 let dragHasIssue = $state(false);
 let isFullscreen = $state(false);
-/** Enter sends when collapsed; when expanded, Enter is a newline and Mod+Enter sends. */
-const sendShortcutHint = $derived(isFullscreen ? sendShortcut : "↵");
+// On mobile there's no keyboard shortcut at all — Enter is always a newline
+// there (see the `onEnter` handler below) and the send button is the only
+// way to submit, so there's nothing to hint. Desktop: Enter sends when
+// collapsed; when expanded, Enter is a newline and Mod+Enter sends.
+const sendShortcutHint = $derived(isMobileUI() ? "" : isFullscreen ? sendShortcut : "↵");
 let isFullscreenVisible = $state(false);
 let fullscreenNoTransition = $state(false);
 let fullscreenTransitioning = false;
@@ -382,9 +385,14 @@ function initializeEditor() {
 		onEnter: (_editor, _mod, shift) => {
 			// When expanded (fullscreen), Enter always inserts a newline so long,
 			// multi-line drafts flow naturally — sending is Mod+Enter only there.
-			// Otherwise plain Enter sends; Shift+Enter always inserts a newline.
-			// Return false to use the editor's default newline behavior.
-			if (isFullscreen || shift) {
+			// On mobile, Enter is the on-screen keyboard's only return key — there
+			// is no Shift to hold for a newline and no discoverable "hold to send"
+			// convention, so every mainstream mobile chat app (WhatsApp, iMessage,
+			// Telegram) treats it as a newline and reserves the send button as the
+			// only way to submit. Match that instead of sending on it. Otherwise
+			// (desktop, collapsed) plain Enter sends; Shift+Enter always inserts a
+			// newline. Return false to use the editor's default newline behavior.
+			if (isFullscreen || shift || isMobileUI()) {
 				return false;
 			}
 			attemptSend();
@@ -1176,7 +1184,13 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
           <Button
             disabled={!canSendMessage || savingFiles}
             ariaLabel={isEditing ? "save edit" : "send message"}
-            tooltip={isEditing ? `Save edit (${sendShortcutHint})` : `Send message (${sendShortcutHint})`}
+            tooltip={isEditing
+              ? sendShortcutHint
+                ? `Save edit (${sendShortcutHint})`
+                : "Save edit"
+              : sendShortcutHint
+                ? `Send message (${sendShortcutHint})`
+                : "Send message"}
             onClick={attemptSend}
             dataTestId="send-message-button"
             styles="send-message-button p-0 rounded-md border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 disabled:cursor-not-allowed"
