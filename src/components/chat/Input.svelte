@@ -423,7 +423,7 @@ function initializeEditor() {
 }
 
 function expandFullscreen() {
-	if (fullscreenTransitioning || isFullscreen) return;
+	if (isMobileUI() || fullscreenTransitioning || isFullscreen) return;
 	fullscreenTransitioning = true;
 	setFullscreenStartInset();
 	fullscreenNoTransition = true;
@@ -1110,15 +1110,21 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     ondrop={dropTargetMode === "input" ? handleDrop : undefined}
     role="region"
   >
-    <!-- Fullscreen toggle - top right corner -->
-    <Button
-      styles="chat-input-icon-button fullscreen-toggle-button absolute top-1.5 right-1.5 z-10 opacity-0 transition-opacity duration-150"
-      iconId={isFullscreen ? "minimize-2" : "maximize-2"}
-      iconSize="xs"
-      style="pointer-events: auto;"
-      onClick={toggleFullscreen}
-      tooltip={isFullscreen ? "Exit fullscreen (Esc)" : "Fullscreen editor"}
-    />
+    {#if !isMobileUI()}
+      <!-- Fullscreen toggle - top right corner. Desktop only: on mobile the
+           composer already grows with content up to `max-h-[200px]` (see the
+           editor container below), and the fullscreen panel only bought a bit
+           more room at real cost (an extra button, its own transition/keyboard
+           timing to get right) — not worth it on a screen this small. -->
+      <Button
+        styles="chat-input-icon-button fullscreen-toggle-button absolute top-1.5 right-1.5 z-10 opacity-0 transition-opacity duration-150"
+        iconId={isFullscreen ? "minimize-2" : "maximize-2"}
+        iconSize="xs"
+        style="pointer-events: auto;"
+        onClick={toggleFullscreen}
+        tooltip={isFullscreen ? "Exit fullscreen (Esc)" : "Fullscreen editor"}
+      />
+    {/if}
     <div class="flex flex-row flex-wrap items-start gap-1.5 pt-2">
       <ContextTray
         bind:this={contextTrayRef}
@@ -1240,6 +1246,21 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
   :global(.mod-left-split .chat-input-container),
   :global(.mod-right-split .chat-input-container) {
     --input-bg: var(--background-primary);
+  }
+
+  /* On mobile the container is portaled and floats OVER the scrolling
+     message list (see Chat.svelte's `portalComposer`) rather than sitting in
+     normal document flow below it, so its own transparent background lets
+     scrolled-past messages show through wherever the visible wrapper doesn't
+     fully cover the container's box — confirmed on-device: the bottom
+     ~20px spacer (added below, to keep the focus-ring border from looking
+     clipped) left a gap the container's `--s2b-composer-height` still counted
+     as reserved space, so message text was visible bleeding through under the
+     composer at that band. Desktop doesn't have this problem (nothing scrolls
+     underneath a normal-flow sibling), so keep the container transparent
+     there — only mobile needs it opaque. */
+  :global(.is-mobile .chat-input-container) {
+    background: var(--input-bg) !important;
   }
 
   .chat-input-wrapper {
