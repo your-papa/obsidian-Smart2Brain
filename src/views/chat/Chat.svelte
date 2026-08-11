@@ -146,6 +146,17 @@ function portalComposer(node: HTMLElement) {
 		}
 	};
 
+	// Toggling a sidebar on mobile does not resize the leaf — it translates
+	// `.workspace-split.mod-root` instead (a drawer overlay, not a reflow), so
+	// `ResizeObserver` never fires and `--s2b-composer-left`/`-width` are left
+	// stale at whatever they were before the toggle. Confirmed on-device: after
+	// opening then closing the left sidebar, the leaf's own rect was back to
+	// `left: 0, width: 402` but the published vars stayed at the stale
+	// mid-toggle values, leaving the composer shifted off-screen. `resize` is
+	// the event Obsidian fires for exactly this (sidebar collapse/expand) —
+	// see the same workaround in SmartGraphView.svelte's `chatOpenEventRefs`.
+	const resizeEventRef = plugin.app.workspace.on("resize", publishGeometry);
+
 	const portal = (found: HTMLElement) => {
 		composer = found;
 		home = found.parentElement;
@@ -191,6 +202,7 @@ function portalComposer(node: HTMLElement) {
 			ro?.disconnect();
 			leafObserver?.disconnect();
 			classObserver?.disconnect();
+			plugin.app.workspace.offref(resizeEventRef);
 			if (!composer) return;
 			composer.style.display = "";
 			composer.classList.remove("s2b-composer-portaled");
