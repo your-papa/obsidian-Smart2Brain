@@ -167,15 +167,26 @@ function handleCancelSignIn() {
 	oauth?.cancelSignIn?.();
 }
 
-// Manual code-paste fallback for obsidian:// OAuth flows: if the deep-link redirect doesn't
-// route back to Obsidian, the user pastes the code shown in the browser to finish the same
-// pending sign-in. Resolves the in-progress signIn() promise (see handleOAuthSignIn's await).
+// Manual code-paste fallback for the mobile headless OAuth flow (no localhost/redirect
+// available): the user pastes the code shown in the browser to finish the same pending
+// sign-in. Resolves the in-progress signIn() promise (see handleOAuthSignIn's await).
 let manualCode = $state("");
 function handleSubmitManualCode() {
 	const code = manualCode.trim();
 	if (!code) return;
 	oauth?.submitManualCode?.(code);
 	manualCode = "";
+}
+
+// On mobile, shrinking the modal to fit above the keyboard (see the
+// .s2b-provider-setup-modal-container rules below) makes it scrollable, but WKWebView
+// doesn't automatically scroll a newly-focused input into that new scrollable area —
+// confirmed on-device. Nudge it into view once the keyboard has finished animating open.
+function scrollManualCodeIntoView(e: FocusEvent) {
+	if (!Platform.isMobileApp) return;
+	const target = e.currentTarget;
+	if (!(target instanceof HTMLElement)) return;
+	setTimeout(() => target.scrollIntoView({ block: "nearest", behavior: "smooth" }), 350);
 }
 
 function handleOAuthDisconnect() {
@@ -538,7 +549,7 @@ $effect(() => {
         name="Paste authorization code"
         desc="Copy the authorization code shown in the browser and paste it here to finish connecting."
       >
-        <div class="flex gap-2 items-center">
+        <div class="flex gap-2 items-center" onfocusin={scrollManualCodeIntoView}>
           <Text inputType="text" bind:value={manualCode} placeholder="Authorization code" />
           <Button buttonText="Submit" disabled={!manualCode.trim()} onClick={handleSubmitManualCode} />
         </div>
@@ -631,5 +642,23 @@ $effect(() => {
     font-size: var(--font-smaller);
     text-align: center;
     color: var(--text-normal);
+  }
+
+  /* Mobile keyboard avoidance for this modal only (see ProviderSetup.ts onOpen, and
+     scrollManualCodeIntoView above). Obsidian's base .modal-container is pinned to the
+     full pre-keyboard viewport and doesn't react to --keyboard-height, so a field near
+     the bottom (the OAuth manual-code paste input) can end up hidden behind the keyboard.
+     Confirmed on-device: shrinking the container to the visible area makes .modal-content
+     scrollable, which is required before scrollIntoView has anything to scroll within. */
+  :global(.s2b-provider-setup-modal-container) {
+    top: max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px));
+    bottom: var(--keyboard-height, 0px);
+    transition:
+      top 0.15s ease-out,
+      bottom 0.15s ease-out;
+  }
+
+  :global(.s2b-provider-setup-modal-container .modal) {
+    max-height: calc(100% - 24px);
   }
 </style>

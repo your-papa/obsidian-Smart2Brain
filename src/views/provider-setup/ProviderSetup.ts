@@ -79,6 +79,11 @@ export class ProviderSetupModal extends Modal {
 
 	onOpen() {
 		this.isClosed = false;
+		// Marker for mobile keyboard-avoidance CSS (see ProviderSetup.svelte) — Obsidian's
+		// base .modal-container is pinned to the full pre-keyboard viewport and doesn't
+		// reflow when the keyboard opens, so a field near the bottom (e.g. the OAuth
+		// manual-code paste input) can end up hidden behind it.
+		this.containerEl.addClass("s2b-provider-setup-modal-container");
 		void this.openWithProvider();
 	}
 
