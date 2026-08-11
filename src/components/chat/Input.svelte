@@ -1264,23 +1264,52 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     background: linear-gradient(to bottom, transparent 0%, var(--background-primary) 24px) !important;
   }
 
+  /* Overrides for the utility classes on the element itself
+     (`rounded-[14px] gap-3 border-bg-modifier-border`). All platform-neutral:
+     the shape and internal rhythm aren't platform-specific, so keeping
+     desktop squarer or looser would just be an inconsistency.
+
+     `border-color: transparent` drops the resting border and lets the fill
+     define the card. Only safe where the fill actually contrasts with the
+     page: in the main view `--input-bg` is `--background-secondary` (#282828)
+     against a `--background-primary` (#1C1C1C) page. In a sidebar
+     `--input-bg` IS `--background-primary`, identical to the page behind it,
+     so there the border is the only thing separating the composer from the
+     background and has to stay — see the split rule below.
+
+     Plain selector, NOT `:not(:focus-within)` — that has the same specificity
+     as the `:focus-within` rule further down and, coming earlier in the file,
+     would silently win on source order and kill the focus ring entirely.
+     Leaving this unqualified lets `:focus-within` override it as intended. */
   .chat-input-wrapper {
     background: var(--input-bg);
+    border-radius: 22px;
+    border-color: transparent;
+    gap: 8px;
+  }
+
+  :global(.mod-left-split) .chat-input-wrapper,
+  :global(.mod-right-split) .chat-input-wrapper {
+    border-color: var(--background-modifier-border);
+  }
+
+  /* Circular, matching the attach button (already `999px`) and the reference
+     design. The 6px radius made it the odd one out in the action row. */
+  :global(.send-message-button) {
+    border-radius: 999px !important;
   }
 
   /* Tighter inner spacing on mobile, matching the proportions of a native
-     mobile chat composer: 10px side padding (vs the desktop 12px) and an 8px
-     gap between the editor and the action row (vs 12px). Combined with the
-     16px outer margins in Chat.svelte this lands the card at the same
-     geometry as the reference design. `padding-top` stays 0 — the reference's
-     top padding assumes small buttons, whereas the 44px touch-target row here
-     already supplies that breathing room, and adding more only makes the card
-     taller. */
+     mobile chat composer: 10px side padding vs the desktop 12px. Combined
+     with the 16px outer margins in Chat.svelte this lands the card at the
+     same geometry as the reference design. `padding-top` stays 0 — the
+     reference's top padding assumes small buttons, whereas the 44px
+     touch-target row here already supplies that breathing room, and adding
+     more only makes the card taller. */
   :global(.is-mobile) .chat-input-wrapper {
     padding-left: 10px;
     padding-right: 10px;
     padding-bottom: 12px;
-    gap: 8px;
   }
 
   .chat-input-container.chat-input-fullscreen {
@@ -1295,7 +1324,10 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     padding: 0;
     max-width: none;
     opacity: 1;
-    border-radius: 14px;
+    /* Matches `.chat-input-wrapper`'s radius. With `overflow: hidden` here, a
+       tighter radius on the container clips the wrapper's rounder corners and
+       shaves off its bottom edge. */
+    border-radius: 22px;
     overflow: hidden;
     transition:
       top 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
@@ -1342,7 +1374,8 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
           calc(52px + env(safe-area-inset-bottom))
         )
     );
-    border-radius: 14px;
+    /* Keep in step with the wrapper radius, as above. */
+    border-radius: 22px;
   }
 
   .chat-input-container.chat-input-fullscreen.chat-input-fullscreen-no-transition {
