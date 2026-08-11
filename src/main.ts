@@ -26,7 +26,6 @@ import { LexicalSearchService } from "./search/LexicalSearchService";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import { navigateToPendingChange } from "./lib/pendingChangeNavigation";
 import { registerChatEmbed } from "./views/chat/chatEmbed";
-import { registerOpenRouterProtocolHandler } from "./providers/openrouterOAuth";
 import RunningIndicator from "./components/chat/RunningIndicator.svelte";
 import { NoteContextView, VIEW_TYPE_NOTE_CONTEXT } from "./views/note-context/NoteContextView";
 import { OnboardingView, VIEW_TYPE_ONBOARDING } from "./views/onboarding/OnboardingView";
@@ -302,9 +301,6 @@ export default class SecondBrainPlugin extends Plugin {
 
 		// Read-only preview for embedded (![[chat.chat]]) and hovered .chat links.
 		registerChatEmbed(this);
-
-		// obsidian:// redirect target for the mobile OpenRouter OAuth experiment.
-		registerOpenRouterProtocolHandler(this);
 
 		// Intercept .chat file opens so they go directly to the sidebar
 		// without ever replacing the note in the main editor area.

@@ -98,11 +98,9 @@ export const openrouterProvider: EmbeddingProviderDefinition = {
 		signIn: async () => ({ kind: "apiKey", apiKey: await signInWithOpenRouter() }),
 		cancelSignIn: cancelOpenRouterSignIn,
 		supportsApiKey: true,
-		// On mobile we pass an obsidian:// callback_url and register a protocol
-		// handler (registerOpenRouterProtocolHandler in main.ts) to catch the
-		// redirect automatically — OpenRouter's docs only document https:// and
-		// localhost callback URLs, so this may not work; submitManualCode is the
-		// paste fallback if the redirect doesn't route back to Obsidian.
+		// The redirect is caught via an obsidian:// protocol handler, so this flow
+		// works on mobile too (no localhost server). submitManualCode is the paste
+		// fallback if the deep link doesn't route back to Obsidian.
 		worksOnMobile: true,
 		submitManualCode: submitOpenRouterAuthCode,
 	},
