@@ -68,6 +68,19 @@ function startEdit(messagePair: MessagePair) {
 	session?.beginEdit(messagePair.id);
 }
 
+// Tapping the highlighted bubble again while editing it cancels, mirroring
+// the composer's own cancel affordance — the message the user is already
+// looking at doubles as the "never mind" target. Ignore link clicks so a
+// wikilink/URL inside the message still navigates instead of just closing
+// the editor (same guard CollapsibleUserBubble uses for its own expand/
+// collapse tap).
+function handleEditedBubbleClick(event: MouseEvent, messagePair: MessagePair) {
+	if (editingMessageId !== messagePair.id) return;
+	const target = event.target as HTMLElement;
+	if (target.closest("a")) return;
+	session?.cancelEdit();
+}
+
 async function regenerateResponse(messageId: UUIDv7) {
 	try {
 		await session?.regenerateResponse(messageId);
@@ -752,13 +765,19 @@ $effect(() => {
                 {/if}
                 <!-- The wrapper (not the bubble component) carries the gesture so
                      CollapsibleUserBubble keeps its own tap-to-expand contract;
-                     the action swallows the synthesised click after a press. -->
+                     the action swallows the synthesised click after a press.
+                     While editing, a click here (after the bubble's own
+                     expand/collapse handler runs first, since it's the inner
+                     element) cancels the edit — see handleEditedBubbleClick. -->
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div
                   class="flex flex-col items-end w-full s2b-user-press-target"
                   use:longPress={{
                     enabled: onMobile && !isBeingEdited,
                     onLongPress: (x, y) => openUserMessageMenu(messagePair, x, y),
                   }}
+                  onclick={(e) => handleEditedBubbleClick(e, messagePair)}
                 >
                   <CollapsibleUserBubble
                     content={messagePair.userMessage.content}
@@ -944,10 +963,14 @@ $effect(() => {
     </div>
   </div>
 
-  {#if userMessageIds.length > 1}
+  {#if userMessageIds.length > 1 && !onMobile}
     <!-- Message navigation controls. The overlay mirrors the content column's
          max-width so the cluster hugs the right edge of the messages when a wide
-         gutter opens up, while staying near the scrollbar at narrower widths. -->
+         gutter opens up, while staying near the scrollbar at narrower widths.
+         Desktop only: this is a one-message-at-a-time jump/scroll shortcut
+         cluster mirroring Alt+↑/↓, which has no mobile equivalent to shortcut
+         and is redundant with plain touch scrolling — one less floating
+         overlay competing for space on a small screen. -->
     <div class="message-nav-overlay">
       <div class="message-nav" class:message-nav-active={isScrolling} data-testid="message-nav">
         <div class="message-nav-slot" class:message-nav-hidden={!canNavigatePrev}>
@@ -994,11 +1017,15 @@ $effect(() => {
 <style>
   /* Highlights the bubble anchored above the composer while it's being
      edited. `:global` because CollapsibleUserBubble renders its own root
-     element from the `class` prop, outside this component's style scope. */
+     element from the `class` prop, outside this component's style scope.
+     `cursor: pointer` signals the tap-to-cancel affordance even when the
+     message is short (CollapsibleUserBubble's own cursor only turns on for
+     truncated/expandable messages, which is a different concern). */
   :global(.s2b-user-bubble-editing) {
     background: color-mix(in srgb, var(--color-accent) 32%, transparent);
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
+    cursor: pointer;
   }
 
   .history-note-chip {
