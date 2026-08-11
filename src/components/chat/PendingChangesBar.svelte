@@ -210,6 +210,7 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
                     handleAccept(entry);
                   }}
                   title="Accept change"
+                  aria-label="Accept change to {entry.change.path}"
                   type="button"
                 >
                   <div use:icon={"check"} style="--icon-size: 12px"></div>
@@ -221,6 +222,7 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
                     handleReject(entry);
                   }}
                   title="Reject change"
+                  aria-label="Reject change to {entry.change.path}"
                   type="button"
                 >
                   <div use:icon={"x"} style="--icon-size: 12px"></div>

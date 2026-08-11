@@ -969,6 +969,15 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     overflow: hidden;
   }
 
+  /* Obsidian's mobile navbar floats over the bottom of the view, covering the
+     last ~84px of the canvas — nodes that settle down there (isolated ones
+     especially) end up under it and can't be tapped. Reserve the navbar's
+     height the same way the chat composer does, so the graph's usable area
+     ends above it. */
+  :global(.is-mobile) .smart-graph-view {
+    height: calc(100% - (52px + env(safe-area-inset-bottom)));
+  }
+
   .graph-loading {
     display: flex;
     flex-direction: column;

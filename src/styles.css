@@ -893,8 +893,10 @@
 	}
 
 	/* Code-block copy button lives in `<pre>` and is revealed on `pre:hover`.
-	   Show it persistently on touch so code is copyable. */
-	.message-text pre .clickable-icon {
+	   Show it persistently on touch so code is copyable. Code blocks appear in
+	   chat messages and in tool-call output, so cover both containers. */
+	.message-text pre .clickable-icon,
+	.tool-output-content pre .clickable-icon {
 		opacity: 1 !important;
 	}
 
@@ -957,4 +959,79 @@
 .is-mobile .s2b-model-favorite {
 	min-width: 40px;
 	min-height: 40px;
+}
+
+/* Message action rows (edit / copy / regenerate) and the composer's icon
+   buttons pin themselves to `--icon-s` with `min-width: 0 !important` in
+   component scope, which lands them at ~30x26 — roughly half the 44px touch
+   floor and the smallest hit areas in the chat. The component rules win on
+   `!important`, so the mobile override has to match it to raise the floor.
+   Padding (not width/height) does the growing, so the glyph keeps its size
+   and only the tappable box expands. */
+.is-mobile .footer-actions button,
+.is-mobile .attach-context-button.clickable-icon,
+.is-mobile .chat-input-icon-button.clickable-icon,
+.is-mobile .graph-controls .clickable-icon,
+.is-mobile .provider-icon-button.clickable-icon,
+.is-mobile .pcb-action-icon {
+	min-width: 44px !important;
+	min-height: 44px !important;
+	padding: 10px !important;
+	box-sizing: border-box !important;
+}
+
+/* The model/agent pills are text buttons rather than icon boxes — give them
+   the vertical floor without forcing a square, so the label still sets width. */
+.is-mobile .model-select-btn.clickable-icon {
+	min-height: 44px !important;
+	padding-block: 8px !important;
+}
+
+/* The message-nav cluster (jump/step through messages) stacks four 22px
+   buttons vertically in a floating overlay. A full 44px box each would make
+   the stack ~176px tall and cover the conversation, so widen to 44px for the
+   horizontal grab area but keep the rows at 36px — still a comfortable target
+   in the dominant (vertical) axis of a stacked list. The code-copy button sits
+   inside `<pre>` and gets the full square. */
+.is-mobile .message-nav button {
+	min-width: 44px !important;
+	min-height: 36px !important;
+	padding: 6px !important;
+	box-sizing: border-box !important;
+}
+
+/* Code blocks render in chat messages AND in tool-call output
+   (`.tool-output-content`), so key off `pre` rather than a single container. */
+.is-mobile .message-text pre .clickable-icon,
+.is-mobile .tool-output-content pre .clickable-icon {
+	min-width: 44px !important;
+	min-height: 44px !important;
+	padding: 10px !important;
+	box-sizing: border-box !important;
+}
+
+/* Chat markdown tables. `.message-text` is `!w-full !max-w-full`, so a table
+   wider than the bubble gets crushed rather than scrolled: on a 402px phone a
+   3-column table squeezes its prose column to ~112px and wraps one or two
+   words per line. Let the table take its natural width and scroll the wrapper
+   horizontally instead, with a floor on column width so cells stay readable.
+   `-webkit-overflow-scrolling` keeps the scroll momentum native on iOS. */
+.is-mobile .message-text {
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+}
+
+.is-mobile .message-text table {
+	width: max-content;
+	min-width: 100%;
+	table-layout: auto;
+}
+
+.is-mobile .message-text table th,
+.is-mobile .message-text table td {
+	min-width: 8ch;
+	/* Long wikilinks/paths in table cells otherwise break mid-token and stack
+	   into an unreadable column. */
+	word-break: normal;
+	overflow-wrap: anywhere;
 }

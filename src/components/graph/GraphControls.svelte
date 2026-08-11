@@ -3,6 +3,7 @@ import Button from "../ui/Button.svelte";
 import RangeSlider from "../ui/RangeSlider.svelte";
 import Toggle from "../ui/Toggle.svelte";
 import SettingContainer from "../settings/SettingContainer.svelte";
+import { isMobileUI } from "../../utils/platform";
 import {
 	type SmartGraphSettings,
 	type GraphData,
@@ -102,14 +103,22 @@ function handleLinkStrengthChange(val: number) {
 function handleClusterCohesionStrengthChange(val: number) {
 	onSettingsChange({ clusterCohesionStrength: val / 100 });
 }
+
+// Touch devices have no keyboard modifiers or hover, so the desktop shortcut
+// hints ("F", "hold Shift + drag", "shift/⌘ multi-select") describe gestures
+// the user cannot perform. Drop them on mobile rather than advertise a
+// non-existent affordance.
+const onMobile = isMobileUI();
+const fitTooltip = onMobile ? "Fit graph to view" : "Fit graph to view (F)";
+const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Shift + drag)";
 </script>
 
 <!-- Unified vertical toolbar -->
 <div class="graph-toolbar">
-  <Button iconId="maximize" onClick={onFitToView} tooltip="Fit graph to view (F)" />
+  <Button iconId="maximize" onClick={onFitToView} tooltip={fitTooltip} />
   <Button
     iconId="lasso"
-    tooltip={lassoMode ? "Exit lasso selection" : "Lasso selection (or hold Shift + drag)"}
+    tooltip={lassoMode ? "Exit lasso selection" : lassoTooltip}
     onClick={() => onLassoModeChange?.(!lassoMode)}
     styles={lassoMode ? "is-active" : ""}
   />
@@ -163,7 +172,10 @@ function handleClusterCohesionStrengthChange(val: number) {
 
       <!-- ── Topics ───────────────────────────── -->
       {#if segments.length > 0}
-        <span class="section-label">Topics · {segments.length} <span class="section-label-hint">shift/⌘ multi-select</span></span>
+        <span class="section-label"
+          >Topics · {segments.length}
+          {#if !onMobile}<span class="section-label-hint">shift/⌘ multi-select</span>{/if}</span
+        >
         <div class="segment-list">
           {#each segments as seg (seg.id)}
             <button
@@ -332,6 +344,16 @@ function handleClusterCohesionStrengthChange(val: number) {
     flex-direction: column;
     gap: 6px;
     z-index: 11;
+  }
+
+  /* These render at 30x26 — well under the touch floor, and they're the only
+     way to fit/lasso/segment the graph on a phone. Grow the tappable box via
+     padding so the glyphs keep their size. */
+  :global(.is-mobile) .graph-toolbar :global(button) {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 10px;
+    box-sizing: border-box;
   }
 
   .toolbar-icon-wrapper {

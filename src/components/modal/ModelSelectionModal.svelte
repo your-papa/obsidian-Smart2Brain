@@ -251,6 +251,8 @@ function getProviderListDisplay(): string {
             if (showFavorites) selectedConfiguredProvider = null;
           }}
           title="Favorites"
+          aria-label="Favorites"
+          aria-pressed={showFavorites}
         >
           <Icon name="star" size="md" />
         </button>
@@ -265,6 +267,8 @@ function getProviderListDisplay(): string {
               selectedVendor = selectedVendor === vendorFilter.id ? null : vendorFilter.id;
             }}
             title={vendorFilter.name}
+            aria-label={vendorFilter.name}
+            aria-pressed={selectedVendor === vendorFilter.id}
           >
             <VendorLogo width={38} height={38} />
           </button>
