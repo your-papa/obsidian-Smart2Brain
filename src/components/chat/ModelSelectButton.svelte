@@ -90,6 +90,11 @@ function openModelSelectionModal() {
     color: var(--text-muted);
   }
 
+  /* Leave more room for the send button alongside the (now icon-only) agent pill. */
+  :global(.is-mobile) .model-name {
+    max-width: 84px;
+  }
+
   .model-name.no-model {
     color: var(--text-faint);
     font-style: italic;

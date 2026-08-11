@@ -153,6 +153,16 @@ function createNewAgent() {
     max-width: 190px;
   }
 
+  /* Collapse to icon-only on mobile — there isn't enough width for icon +
+     label + model pill + send button on one row without wrapping. */
+  :global(.is-mobile .agent-popover-trigger) {
+    max-width: none;
+  }
+
+  :global(.is-mobile) .agent-pill-label {
+    display: none;
+  }
+
   .agent-pill {
     display: inline-flex;
     align-items: center;
