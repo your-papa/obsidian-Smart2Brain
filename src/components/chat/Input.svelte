@@ -17,6 +17,7 @@ import { getData } from "../../stores/dataStore.svelte";
 import AgentPopover from "./AgentPopover.svelte";
 import ModelSelectButton from "./ModelSelectButton.svelte";
 import PendingChangesBar from "./PendingChangesBar.svelte";
+import EditingMessageBar from "./EditingMessageBar.svelte";
 import ContextTray from "./ContextTray.svelte";
 import ContextUsageCircle from "./ContextUsageCircle.svelte";
 import AttachPopover from "./AttachPopover.svelte";
@@ -58,6 +59,8 @@ const {
 
 // Pinned to this tab's own thread — never follows a global pointer.
 const session = $derived(registry.sessionFor(threadPath));
+const editingPairId = $derived(session?.editingPairId ?? null);
+const isEditing = $derived(editingPairId !== null);
 
 let editorContainer: HTMLDivElement | undefined = $state();
 let attachmentInputEl: HTMLInputElement | undefined = $state();
@@ -231,6 +234,37 @@ $effect(() => {
 	}
 });
 
+// The composer draft in progress when an edit started, restored verbatim if
+// the edit is cancelled. Lives here (not on the session) because this
+// component is the only thing that holds `inputValue`/the CodeMirror instance.
+let stashedDraft: string | null = null;
+
+// Seed the composer with the target message's content when an edit starts.
+// Mirrors the `pendingInput` pattern above: write `inputValue` synchronously
+// so `canSendMessage` reflects it immediately, defer the CodeMirror write to
+// the next frame so its DOM is laid out before the transaction dispatches.
+let lastSeededEditId: string | null = null;
+$effect(() => {
+	if (editingPairId === null) {
+		lastSeededEditId = null;
+		return;
+	}
+	if (editingPairId === lastSeededEditId) return;
+	const pair = session?.getEditingPair();
+	if (!pair) {
+		session?.cancelEdit();
+		return;
+	}
+	lastSeededEditId = editingPairId;
+	stashedDraft = inputValue;
+	const text = pair.userMessage.content;
+	inputValue = text;
+	requestAnimationFrame(() => {
+		markdownEditor?.setValue(text);
+		markdownEditor?.focus();
+	});
+});
+
 $effect(() => {
 	if (registry.pendingSubmitThreadPath && registry.pendingSubmitThreadPath !== threadPath) return;
 	if (!registry.pendingAttachmentPaths || registry.pendingAttachmentPaths.length === 0) {
@@ -360,6 +394,12 @@ function initializeEditor() {
 			// Mod+Enter: send message (works in both collapsed and expanded modes)
 			attemptSend();
 		},
+		onEscape: () => {
+			// Fullscreen has its own Esc handling (collapse first); don't also
+			// cancel an edit on the same keypress.
+			if (isFullscreen) return;
+			cancelActiveEdit();
+		},
 		onFocus: () => {
 			onFocusChange?.(true);
 		},
@@ -436,10 +476,47 @@ function attemptSend() {
 	if (savingFiles) {
 		new Notice("Please wait for attachments to finish saving");
 	} else if (canSendMessage) {
-		sendMessage();
+		if (isEditing) {
+			saveEdit();
+		} else {
+			sendMessage();
+		}
 	} else {
 		new Notice("Add text or attach a file before sending");
 	}
+}
+
+/** Cancel the active edit, restoring whatever draft was in the composer
+ * before the edit started. No-op when not editing. */
+function cancelActiveEdit() {
+	if (!isEditing) return;
+	session?.cancelEdit();
+	const draft = stashedDraft ?? "";
+	stashedDraft = null;
+	inputValue = draft;
+	markdownEditor?.setValue(draft);
+}
+
+function saveEdit() {
+	if (!session || editingPairId === null) return;
+	if (!canSendMessage) {
+		new Notice("Add text before saving");
+		return;
+	}
+
+	const pairId = editingPairId;
+	const contentToSave = inputValue;
+	session.editMessage(pairId, contentToSave).catch((error) => {
+		new Notice(error instanceof Error ? error.message : "Failed to save edit");
+	});
+	// Not session.cancelEdit() — that's for an abandoned edit; this one succeeded.
+	// The draft that was stashed before the edit began is simply gone: the user
+	// asked to save the edit, not to restore what they'd been typing before it.
+	session.editingPairId = null;
+	stashedDraft = null;
+	inputValue = "";
+	markdownEditor?.clear();
+	onMessageSent?.();
 }
 
 function sendMessage() {
@@ -1005,6 +1082,7 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     </button>
   {/if}
   <PendingChangesBar {threadPath} />
+  <EditingMessageBar {registry} {threadPath} onCancel={cancelActiveEdit} />
   <!-- Input wrapper with glow effect.
        Transition is scoped to the two properties that actually change state
        (border-color on focus/drag, background on drag-active) rather than
@@ -1088,13 +1166,13 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
         {#if !session || session.messageState === MessageState.idle}
           <Button
             disabled={!canSendMessage || savingFiles}
-            ariaLabel="send message"
-            tooltip="Send message ({sendShortcutHint})"
-            onClick={sendMessage}
+            ariaLabel={isEditing ? "save edit" : "send message"}
+            tooltip={isEditing ? `Save edit (${sendShortcutHint})` : `Send message (${sendShortcutHint})`}
+            onClick={attemptSend}
             dataTestId="send-message-button"
             styles="send-message-button p-0 rounded-md border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 disabled:cursor-not-allowed"
             style={sendButtonStyle}
-            iconId="send-horizontal"
+            iconId={isEditing ? "check" : "send-horizontal"}
           />
         {:else if session.messageState === MessageState.answering}
           <Button

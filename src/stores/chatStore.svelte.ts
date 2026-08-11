@@ -1488,6 +1488,14 @@ export class ChatSession {
 	messageState = $state<MessageState>(MessageState.idle);
 	summarizingHistory = $state(false);
 
+	/** Id of the user message pair currently being edited in the composer, or
+	 * null when not editing. Lives per-session (not on SessionRegistry) so one
+	 * tab's edit can never leak into another. The composer (Input.svelte) is
+	 * the only thing that holds the actual draft text, so it also owns
+	 * stashing/restoring it around an edit — this is just the on/off switch
+	 * and target id, shared with MessageContainer.svelte so both react to it. */
+	editingPairId = $state<UUIDv7 | null>(null);
+
 	private graphState: CheckpointGraphState;
 	private errorCount: number;
 	private lastErrorMessage: string | undefined;
@@ -1697,6 +1705,24 @@ export class ChatSession {
 		);
 
 		return recovered?.length ? recovered : undefined;
+	}
+
+	/** Enter edit mode for a message pair. The composer reacts to
+	 * `editingPairId` changing to stash its draft and seed the message's text. */
+	beginEdit(pairId: UUIDv7): void {
+		this.editingPairId = pairId;
+	}
+
+	/** Leave edit mode without submitting. The composer is responsible for
+	 * restoring whatever draft it stashed when the edit began. */
+	cancelEdit(): void {
+		this.editingPairId = null;
+	}
+
+	/** The pair currently being edited, or undefined if edit state is stale
+	 * (e.g. the pair was dropped by a branch switch mid-edit). */
+	getEditingPair(): MessagePair | undefined {
+		return this.editingPairId ? this.findPair(this.editingPairId) : undefined;
 	}
 
 	/**

@@ -11,10 +11,17 @@
  * After the menu fires we swallow the click that the browser synthesises on
  * lift, so the press doesn't also trigger the element's own tap handler (the
  * user bubble's expand/collapse, for instance).
+ *
+ * While a press is armed, the node carries `.s2b-long-pressing` so CSS can
+ * give the user a "charging up" cue toward the menu opening.
  */
 
 export const LONG_PRESS_MS = 500;
 const MOVE_TOLERANCE_PX = 10;
+
+/** Class toggled on the node for the duration of an armed press, so CSS can
+ *  animate a "charging up" cue (see `.s2b-long-pressing` in styles.css). */
+const PRESSING_CLASS = "s2b-long-pressing";
 
 interface LongPressOptions {
 	onLongPress: (x: number, y: number) => void;
@@ -34,6 +41,7 @@ export function longPress(node: HTMLElement, options: LongPressOptions) {
 			clearTimeout(timer);
 			timer = null;
 		}
+		node.classList.remove(PRESSING_CLASS);
 	}
 
 	function onPointerDown(e: PointerEvent) {
@@ -44,9 +52,11 @@ export function longPress(node: HTMLElement, options: LongPressOptions) {
 		startX = e.clientX;
 		startY = e.clientY;
 		cancel();
+		node.classList.add(PRESSING_CLASS);
 		timer = setTimeout(() => {
 			timer = null;
 			fired = true;
+			node.classList.remove(PRESSING_CLASS);
 			current.onLongPress(startX, startY);
 		}, LONG_PRESS_MS);
 	}

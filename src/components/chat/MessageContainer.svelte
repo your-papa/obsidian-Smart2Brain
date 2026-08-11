@@ -21,7 +21,6 @@ import Icon from "../ui/Icon.svelte";
 import DotAnimation from "../ui/DotAnimation.svelte";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 import BranchNavigator from "./BranchNavigator.svelte";
-import ChatEditor from "./ChatEditor.svelte";
 import CollapsibleUserBubble from "./CollapsibleUserBubble.svelte";
 import UserAttachmentFiles from "./UserAttachmentFiles.svelte";
 import UserAttachmentImages from "./UserAttachmentImages.svelte";
@@ -54,25 +53,17 @@ const messages = $derived.by(() => {
 	return session?.messages;
 });
 
-// Edit mode state
-let editingMessageId: UUIDv7 | null = $state(null);
+// Edit mode lives on the session (see ChatSession.beginEdit/cancelEdit), not
+// here, so the composer and the message list both react to the same state
+// without prop-drilling through Chat.svelte.
+const editingMessageId = $derived(session?.editingPairId ?? null);
 
 function startEdit(messagePair: MessagePair) {
-	editingMessageId = messagePair.id;
-}
-
-function cancelEdit() {
-	editingMessageId = null;
-}
-
-async function submitEdit(messageId: UUIDv7, newContent: string) {
-	editingMessageId = null;
-	try {
-		await session?.editMessage(messageId, newContent);
-	} catch (error) {
-		Logger.error("[MessageContainer] Edit failed:", error);
-		new Notice(`Edit failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+	if (session?.isRunning) {
+		new Notice("Wait for the current response to finish before editing");
+		return;
 	}
+	session?.beginEdit(messagePair.id);
 }
 
 async function regenerateResponse(messageId: UUIDv7) {
@@ -186,6 +177,44 @@ export async function scrollToLatestMessage() {
 		scrollUserMessageToTop(messages[messages.length - 1].id);
 	}
 }
+
+// Leave a little breathing room between the anchored message and the
+// composer above which it lands (mirrors NAV_TOP_OFFSET's purpose at the
+// other end of the scroller).
+const EDIT_BOTTOM_OFFSET = 12;
+
+// Scroll a specific user message so its bottom edge sits just above the
+// composer, for edit mode. The scroll container already reserves the
+// composer's height in its own bottom padding/flow (see Chat.svelte's
+// `--s2b-composer-height` padding-bottom on mobile, and normal flex flow on
+// desktop where the composer is a sibling, not portaled), so landing on the
+// container's own visible bottom edge already clears the composer on both.
+function scrollUserMessageAboveComposer(id: UUIDv7) {
+	const messageElement = messageRefs.get(`${id}-user`);
+	if (!messageElement || !scrollContainer) return;
+
+	const containerRect = scrollContainer.getBoundingClientRect();
+	const messageRect = messageElement.getBoundingClientRect();
+	const currentScroll = scrollContainer.scrollTop;
+
+	const targetScroll = currentScroll + (messageRect.bottom - containerRect.bottom) + EDIT_BOTTOM_OFFSET;
+
+	animateScrollTo(targetScroll);
+}
+
+// Anchor the message above the composer as soon as it enters edit mode, so
+// the user can see what they're changing without hunting for it in the thread.
+let lastAnchoredEditId: UUIDv7 | null = null;
+$effect(() => {
+	if (editingMessageId === null) {
+		lastAnchoredEditId = null;
+		return;
+	}
+	if (editingMessageId === lastAnchoredEditId) return;
+	lastAnchoredEditId = editingMessageId;
+	const id = editingMessageId;
+	void tick().then(() => scrollUserMessageAboveComposer(id));
+});
 
 // --- Message navigation (jump between user messages) ---
 
@@ -653,55 +682,13 @@ $effect(() => {
               </div>
             </div>
           {:else}
+            {@const isBeingEdited = editingMessageId === messagePair.id}
             <!-- User Message -->
             <div
               use:registerMessageRef={messagePair.id + "-user"}
               class="group mr-2 flex flex-col items-end gap-2 mb-2"
             >
-              {#if editingMessageId === messagePair.id}
-                <!-- Edit Mode -->
-                {#if messagePair.userMessage.attachments?.some( (a) => a.mimeType.startsWith("image/"), )}
-                  <UserAttachmentImages
-                    attachments={messagePair.userMessage.attachments.filter((a) =>
-                      a.mimeType.startsWith("image/"),
-                    )}
-                  />
-                {/if}
-                {#if messagePair.userMessage.attachments?.some((a) => !a.mimeType.startsWith("image/"))}
-                  <UserAttachmentFiles
-                    attachments={messagePair.userMessage.attachments.filter(
-                      (a) => !a.mimeType.startsWith("image/"),
-                    )}
-                  />
-                {/if}
-                <div
-                  class="w-full max-w-[80%] rounded-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] px-4 py-2"
-                >
-                  <ChatEditor
-                    initialValue={messagePair.userMessage.content}
-                    placeholder="Edit your message..."
-                    onSubmit={(content) => submitEdit(messagePair.id, content)}
-                    onCancel={cancelEdit}
-                    minHeight="40px"
-                    maxHeight="200px"
-                  />
-                  <div class="flex justify-end gap-1 mt-2 text-xs text-text-muted">
-                    <span
-                      >Press <kbd class="px-1 py-0.5 rounded bg-background-modifier-hover font-mono"
-                        >Enter</kbd
-                      > to save</span
-                    >
-                    <span class="mx-1">|</span>
-                    <span
-                      >Press <kbd class="px-1 py-0.5 rounded bg-background-modifier-hover font-mono"
-                        >Esc</kbd
-                      > to cancel</span
-                    >
-                  </div>
-                </div>
-              {:else}
-                <!-- Display Mode -->
-                {#if messagePair.userMessage.attachments?.some( (a) => a.mimeType.startsWith("image/"), )}
+              {#if messagePair.userMessage.attachments?.some( (a) => a.mimeType.startsWith("image/"), )}
                   <UserAttachmentImages
                     attachments={messagePair.userMessage.attachments.filter((a) =>
                       a.mimeType.startsWith("image/"),
@@ -783,27 +770,31 @@ $effect(() => {
                      CollapsibleUserBubble keeps its own tap-to-expand contract;
                      the action swallows the synthesised click after a press. -->
                 <div
-                  class="flex flex-col items-end w-full"
+                  class="flex flex-col items-end w-full s2b-user-press-target"
                   use:longPress={{
-                    enabled: onMobile,
+                    enabled: onMobile && !isBeingEdited,
                     onLongPress: (x, y) => openUserMessageMenu(messagePair, x, y),
                   }}
                 >
                   <CollapsibleUserBubble
                     content={messagePair.userMessage.content}
                     attachments={messagePair.userMessage.attachments}
-                    class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] px-4 py-2"
+                    class="max-w-[80%] rounded-t-lg rounded-bl-lg px-4 py-2 {isBeingEdited
+                      ? 's2b-user-bubble-editing'
+                      : 'bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)]'}"
                   />
                 </div>
-              {/if}
 
               <!-- User message actions and branch navigator.
                    On mobile these live in the long-press menu instead (see
                    `openUserMessageMenu`), so the row is dropped entirely —
                    except the branch navigator, which is stateful (‹1/2›) rather
-                   than an action and has no other affordance. -->
+                   than an action and has no other affordance. On desktop the
+                   row stays mounted even while editing (only the Edit/Copy
+                   buttons are suppressed) — removing the whole row collapses
+                   its height and shifts the assistant reply below it. -->
               <div class="flex flex-row items-center gap-2">
-                {#if editingMessageId !== messagePair.id && !(onMobile && !messagePair.userBranchInfo)}
+                {#if !(onMobile && !messagePair.userBranchInfo)}
                   <div
                     class="message-footer flex flex-row items-center gap-3 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
                   >
@@ -817,7 +808,7 @@ $effect(() => {
                           onNavigate={handleBranchNavigate}
                         />
                       {/if}
-                      {#if !onMobile}
+                      {#if !onMobile && !isBeingEdited}
                         <Button
                           iconId="edit"
                           ariaLabel="Edit message"
@@ -1016,6 +1007,15 @@ $effect(() => {
 </div>
 
 <style>
+  /* Highlights the bubble anchored above the composer while it's being
+     edited. `:global` because CollapsibleUserBubble renders its own root
+     element from the `class` prop, outside this component's style scope. */
+  :global(.s2b-user-bubble-editing) {
+    background: color-mix(in srgb, var(--color-accent) 32%, transparent);
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
   .history-note-chip {
     --s2b-pill-bg: color-mix(in srgb, var(--interactive-accent) 5%, var(--background-secondary));
     --s2b-pill-border: color-mix(

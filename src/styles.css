@@ -1013,17 +1013,15 @@
 /* Chat markdown tables. `.message-text` is `!w-full !max-w-full`, so a table
    wider than the bubble gets crushed rather than scrolled: on a 402px phone a
    3-column table squeezes its prose column to ~112px and wraps one or two
-   words per line. Let the table take its natural width and scroll the wrapper
-   horizontally instead, with a floor on column width so cells stay readable.
-   `-webkit-overflow-scrolling` keeps the scroll momentum native on iOS. */
-.is-mobile .message-text {
+   words per line. Scope the horizontal scroll to the table itself (not the
+   whole message) so prose/code around it stays put; `-webkit-overflow-scrolling`
+   keeps the scroll momentum native on iOS. */
+.is-mobile .message-text table {
+	display: block;
+	width: max-content;
+	max-width: 100%;
 	overflow-x: auto;
 	-webkit-overflow-scrolling: touch;
-}
-
-.is-mobile .message-text table {
-	width: max-content;
-	min-width: 100%;
 	table-layout: auto;
 }
 
@@ -1034,4 +1032,23 @@
 	   into an unreadable column. */
 	word-break: normal;
 	overflow-wrap: anywhere;
+}
+
+/* Long-press feedback on user message bubbles (see `longPress.ts`). The
+   bubble is the gesture wrapper's direct child (CollapsibleUserBubble's own
+   root div). Scale/dim it down over the same duration as LONG_PRESS_MS so the
+   shrink completes right as the context menu opens — a "charging up" cue
+   rather than an instant flash. Releasing early (or scrolling, which cancels
+   the press) snaps back much faster since that's just "never mind", not part
+   of the cue. `transform-origin` anchors the bubble's own top-right corner
+   (where it visually starts) instead of shrinking toward its centre. */
+.is-mobile .s2b-user-press-target > div {
+	transform-origin: top right;
+	transition: transform 120ms ease-out, opacity 120ms ease-out;
+}
+
+.is-mobile .s2b-long-pressing > div {
+	transform: scale(0.96);
+	opacity: 0.7;
+	transition: transform 500ms ease-out, opacity 500ms ease-out;
 }
