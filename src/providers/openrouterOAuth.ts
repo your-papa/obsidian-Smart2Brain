@@ -15,8 +15,6 @@ const OAUTH_TIMEOUT_MS = 5 * 60_000;
 interface PendingOpenRouterAuth {
 	/** Desktop only: the localhost callback server catching the redirect. */
 	server: Server | null;
-	/** Mobile only: a blank tab opened synchronously on tap, navigated once the authorize URL is ready. */
-	authWindow: Window | null;
 	codeVerifier: string;
 	resolve: (apiKey: string) => void;
 	reject: (error: Error) => void;
@@ -81,7 +79,6 @@ function cleanupPendingOpenRouterAuth() {
 	if (!pendingOpenRouterAuth) return;
 	clearTimeout(pendingOpenRouterAuth.timeoutId);
 	pendingOpenRouterAuth.server?.close();
-	pendingOpenRouterAuth.authWindow?.close();
 	pendingOpenRouterAuth = null;
 }
 
@@ -307,24 +304,17 @@ async function openBrowser(url: string): Promise<void> {
 }
 
 /**
- * Navigate a tab opened earlier via {@link openBlankAuthWindow} to the authorize
- * URL. Used on mobile: iOS's WKWebView only hands `window.open` off to Safari for
- * plain, argument-less calls (no `target`/`features` string — those make WKWebView
- * treat it as an in-app popup instead of a real navigation), so the tab is opened
- * blank up front (before any `await`, to stay inside the user-gesture window) with
- * no extra args, then redirected once the authorize URL is ready.
+ * Launch the authorize URL on mobile. Obsidian's iOS WKWebView has no `window.open`
+ * support at all — its `WKUIDelegate` never implements window creation, so
+ * `window.open(...)` unconditionally returns `null` regardless of args or gesture
+ * timing (confirmed on-device). A full top-level navigation via `location.href`,
+ * on the other hand, is intercepted by WKWebView's navigation-policy handler for
+ * external `https:` URLs and handed off to Safari — this is also the pattern used
+ * by known-working Obsidian OAuth plugins (e.g. trakt-for-obsidian). The user
+ * returns via the `obsidian://` deep link or by switching apps back manually.
  */
-function navigateAuthWindow(authWindow: Window, url: string): void {
-	authWindow.location.href = url;
-}
-
-/** Must be called synchronously, before any `await`, so iOS treats it as user-gesture-initiated. */
-function openBlankAuthWindow(): Window | null {
-	const opened = window.open();
-	if (!opened) {
-		Logger.warn("window.open returned a falsy value while opening the OpenRouter sign-in tab");
-	}
-	return opened;
+function navigateToAuthorizeUrl(url: string): void {
+	window.location.href = url;
 }
 
 /**
@@ -345,12 +335,6 @@ export async function signInWithOpenRouter(): Promise<string> {
 	}
 
 	const isDesktop = Platform.isDesktopApp;
-	// Must happen before any `await` below: iOS WKWebView only honors `window.open`
-	// as user-gesture-initiated when it's called synchronously within the tap that
-	// triggered this function. The tab is opened blank and navigated once the
-	// authorize URL is ready (see navigateAuthWindow).
-	const authWindow = isDesktop ? null : openBlankAuthWindow();
-
 	const codeVerifier = generateRandomString(64);
 	const codeChallenge = await createCodeChallenge(codeVerifier);
 	const redirectUri = isDesktop ? getRedirectUri() : null;
@@ -364,7 +348,6 @@ export async function signInWithOpenRouter(): Promise<string> {
 	return new Promise<string>((resolve, reject) => {
 		pendingOpenRouterAuth = {
 			server,
-			authWindow,
 			codeVerifier,
 			resolve,
 			reject,
@@ -390,9 +373,7 @@ export async function signInWithOpenRouter(): Promise<string> {
 					await openBrowser(authorizeUrl);
 				} else {
 					Logger.info("OpenRouter headless sign-in started (mobile) — awaiting pasted code");
-					if (authWindow) {
-						navigateAuthWindow(authWindow, authorizeUrl);
-					}
+					navigateToAuthorizeUrl(authorizeUrl);
 				}
 			} catch (error) {
 				if (!pendingOpenRouterAuth || pendingOpenRouterAuth.settled) return;
