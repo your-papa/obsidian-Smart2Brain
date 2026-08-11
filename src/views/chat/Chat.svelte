@@ -93,11 +93,25 @@ function portalComposer(node: HTMLElement) {
 
 	// Horizontal placement and height come from wherever the leaf actually is
 	// (main view, sidebar split, …), so measure rather than assume full width.
+	//
+	// `left` is measured RELATIVE TO `host`, not to the viewport. The composer is
+	// a child of `host`, so it already inherits `host`'s transform — and opening a
+	// sidebar drawer on mobile slides the workspace by transforming exactly that
+	// element. Publishing a viewport-absolute `left` therefore applies the drawer
+	// offset twice: once via the inherited transform, once via `left`. Measured
+	// on-device with the left drawer open (`translateX(-338px)`): the composer's
+	// own rect landed at `left: -664` — roughly double the -338 it should have
+	// been — which is why it disappeared off-screen mid-swipe, and why the offset
+	// stayed baked in after the drawer closed. Subtracting the host's own rect
+	// cancels the transform out, so the published value is drawer-independent
+	// (verified: `leafRect.left - hostRect.left === 0` with the drawer both open
+	// and closed) and needs no re-publish on drawer motion at all.
 	const publishGeometry = () => {
 		if (!composer) return;
 		const leaf = node.getBoundingClientRect();
+		const hostRect = host.getBoundingClientRect();
 		const height = composer.getBoundingClientRect().height;
-		composer.style.setProperty("--s2b-composer-left", `${Math.round(leaf.left)}px`);
+		composer.style.setProperty("--s2b-composer-left", `${Math.round(leaf.left - hostRect.left)}px`);
 		composer.style.setProperty("--s2b-composer-width", `${Math.round(leaf.width)}px`);
 		composer.style.setProperty("--s2b-composer-height", `${Math.round(height)}px`);
 		// Also on the view itself: the composer is no longer a descendant, so the
@@ -146,17 +160,6 @@ function portalComposer(node: HTMLElement) {
 		}
 	};
 
-	// Toggling a sidebar on mobile does not resize the leaf — it translates
-	// `.workspace-split.mod-root` instead (a drawer overlay, not a reflow), so
-	// `ResizeObserver` never fires and `--s2b-composer-left`/`-width` are left
-	// stale at whatever they were before the toggle. Confirmed on-device: after
-	// opening then closing the left sidebar, the leaf's own rect was back to
-	// `left: 0, width: 402` but the published vars stayed at the stale
-	// mid-toggle values, leaving the composer shifted off-screen. `resize` is
-	// the event Obsidian fires for exactly this (sidebar collapse/expand) —
-	// see the same workaround in SmartGraphView.svelte's `chatOpenEventRefs`.
-	const resizeEventRef = plugin.app.workspace.on("resize", publishGeometry);
-
 	const portal = (found: HTMLElement) => {
 		composer = found;
 		home = found.parentElement;
@@ -202,7 +205,6 @@ function portalComposer(node: HTMLElement) {
 			ro?.disconnect();
 			leafObserver?.disconnect();
 			classObserver?.disconnect();
-			plugin.app.workspace.offref(resizeEventRef);
 			if (!composer) return;
 			composer.style.display = "";
 			composer.classList.remove("s2b-composer-portaled");
