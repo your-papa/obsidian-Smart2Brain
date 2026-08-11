@@ -426,8 +426,8 @@ function portalComposer(node: HTMLElement) {
        the leaf's true bounds) rather than the full viewport, so the composer
        keeps a margin instead of sitting flush against the screen edge — and
        still respects a sidebar split's actual width. */
-    left: calc(var(--s2b-composer-left, 0px) + 12px);
-    width: calc(var(--s2b-composer-width, 100%) - 24px);
+    left: calc(var(--s2b-composer-left, 0px) + 16px);
+    width: calc(var(--s2b-composer-width, 100%) - 32px);
     /* The host stretches an unsized child to its full height (measured 874px),
        which would drag the `top` calc below with it. */
     height: auto;

@@ -1268,6 +1268,21 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     background: var(--input-bg);
   }
 
+  /* Tighter inner spacing on mobile, matching the proportions of a native
+     mobile chat composer: 10px side padding (vs the desktop 12px) and an 8px
+     gap between the editor and the action row (vs 12px). Combined with the
+     16px outer margins in Chat.svelte this lands the card at the same
+     geometry as the reference design. `padding-top` stays 0 — the reference's
+     top padding assumes small buttons, whereas the 44px touch-target row here
+     already supplies that breathing room, and adding more only makes the card
+     taller. */
+  :global(.is-mobile) .chat-input-wrapper {
+    padding-left: 10px;
+    padding-right: 10px;
+    padding-bottom: 12px;
+    gap: 8px;
+  }
+
   .chat-input-container.chat-input-fullscreen {
     position: absolute;
     top: var(--fs-top, 0px);
