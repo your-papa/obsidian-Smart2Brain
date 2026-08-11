@@ -1286,6 +1286,10 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     border-radius: 22px;
     border-color: transparent;
     gap: 8px;
+    /* The `pb-2 px-3` utilities on the element leave `padding-top` at 0, which
+       started the text inside the 22px corner's curve — it read as if the
+       first line was crowding the border. Clear the curve. */
+    padding-top: 4px;
   }
 
   :global(.mod-left-split) .chat-input-wrapper,
@@ -1299,17 +1303,18 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     border-radius: 999px !important;
   }
 
-  /* Tighter inner spacing on mobile, matching the proportions of a native
-     mobile chat composer: 10px side padding vs the desktop 12px. Combined
-     with the 16px outer margins in Chat.svelte this lands the card at the
-     same geometry as the reference design. `padding-top` stays 0 — the
-     reference's top padding assumes small buttons, whereas the 44px
-     touch-target row here already supplies that breathing room, and adding
-     more only makes the card taller. */
+  /* Tighter still on mobile, where vertical space is scarce and the card
+     otherwise reads as mostly padding: the 44px touch-target buttons already
+     carry their own visual weight, so the surrounding space can come in
+     without the row feeling cramped. 6px on the sides and bottom sits the
+     action row ~7px from the card's edges (vs ~13px at the previous 12px
+     bottom / 10px sides), and the 2px gap keeps the editor and the row
+     reading as one control. */
   :global(.is-mobile) .chat-input-wrapper {
-    padding-left: 10px;
-    padding-right: 10px;
-    padding-bottom: 12px;
+    padding-left: 6px;
+    padding-right: 6px;
+    padding-bottom: 6px;
+    gap: 2px;
   }
 
   .chat-input-container.chat-input-fullscreen {
