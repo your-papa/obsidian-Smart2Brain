@@ -180,8 +180,12 @@ export async function scrollToLatestMessage() {
 
 // Leave a little breathing room between the anchored message and the
 // composer above which it lands (mirrors NAV_TOP_OFFSET's purpose at the
-// other end of the scroller).
-const EDIT_BOTTOM_OFFSET = 12;
+// other end of the scroller). The user message's own footer row (timestamp/
+// branch-nav strip, ~22px) stays mounted while editing — see the template —
+// and already supplies this gap on its own, so the offset is negative: it
+// pulls the scroll target down INTO that reserved space rather than adding
+// more space on top of it.
+const EDIT_BOTTOM_OFFSET = -16;
 
 // Scroll a specific user message so its bottom edge sits just above the
 // composer, for edit mode. The scroll container already reserves the
@@ -204,6 +208,21 @@ function scrollUserMessageAboveComposer(id: UUIDv7) {
 
 // Anchor the message above the composer as soon as it enters edit mode, so
 // the user can see what they're changing without hunting for it in the thread.
+//
+// On mobile, starting an edit also focuses the composer (Input.svelte's seed
+// effect), which opens the on-screen keyboard. The composer is portaled and
+// repositioned purely off live CSS (`--keyboard-height`, see Chat.svelte) —
+// there is no "keyboard finished opening" event to await, and the OS
+// animation takes real wall-clock time. A single scroll right after `tick()`
+// would measure the composer where it sits BEFORE the keyboard pushes it up,
+// landing the message too low. Instead, keep re-running the same idempotent
+// scroll across a handful of frames spread over the keyboard's open
+// animation (~300ms on iOS) so it tracks the composer into its final
+// position rather than guessing one fixed delay. Desktop has no keyboard, so
+// the first frame already lands correctly and the rest are harmless no-ops
+// (delta below animateScrollTo's own <1px threshold).
+const EDIT_ANCHOR_RETRY_DELAYS_MS = [0, 80, 160, 240, 320];
+
 let lastAnchoredEditId: UUIDv7 | null = null;
 $effect(() => {
 	if (editingMessageId === null) {
@@ -213,7 +232,13 @@ $effect(() => {
 	if (editingMessageId === lastAnchoredEditId) return;
 	lastAnchoredEditId = editingMessageId;
 	const id = editingMessageId;
-	void tick().then(() => scrollUserMessageAboveComposer(id));
+	void tick().then(() => {
+		for (const delay of EDIT_ANCHOR_RETRY_DELAYS_MS) {
+			setTimeout(() => {
+				if (editingMessageId === id) scrollUserMessageAboveComposer(id);
+			}, delay);
+		}
+	});
 });
 
 // --- Message navigation (jump between user messages) ---
@@ -791,14 +816,17 @@ $effect(() => {
                    except the branch navigator, which is stateful (‹1/2›) rather
                    than an action and has no other affordance. On desktop the
                    row stays mounted even while editing (only the Edit/Copy
-                   buttons are suppressed) — removing the whole row collapses
-                   its height and shifts the assistant reply below it. -->
+                   buttons and timestamp are suppressed) — removing the whole
+                   row collapses its height and shifts the assistant reply
+                   below it. Its small residual height while editing (an empty
+                   flex box, when there's no branch nav) is accounted for in
+                   EDIT_BOTTOM_OFFSET rather than hidden. -->
               <div class="flex flex-row items-center gap-2">
                 {#if !(onMobile && !messagePair.userBranchInfo)}
                   <div
                     class="message-footer flex flex-row items-center gap-3 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
                   >
-                    {#if !onMobile && formatMessageTimestamp(messagePair)}
+                    {#if !onMobile && !isBeingEdited && formatMessageTimestamp(messagePair)}
                       <span class="message-timestamp">{formatMessageTimestamp(messagePair)}</span>
                     {/if}
                     <div class="footer-actions flex flex-row items-center gap-1.5">

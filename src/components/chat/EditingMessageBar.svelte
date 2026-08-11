@@ -15,51 +15,35 @@ const isEditing = $derived(Boolean(session?.editingPairId));
 </script>
 
 {#if isEditing}
-  <div class="emb-container">
-    <div class="emb-left">
-      <div class="emb-icon" use:icon={"pencil"} style="--icon-size: var(--icon-xs)"></div>
-      <span class="emb-label">Editing message</span>
-    </div>
+  <div class="emb-row text-xs text-text-muted">
+    <div class="emb-icon" use:icon={"pencil"} style="--icon-size: 11px"></div>
+    <span>Editing message</span>
     <button class="emb-cancel clickable-icon" onclick={onCancel} title="Cancel edit" aria-label="Cancel edit" type="button">
-      <div use:icon={"x"} style="--icon-size: 14px"></div>
+      <div use:icon={"x"} style="--icon-size: 12px"></div>
     </button>
   </div>
 {/if}
 
 <style>
-  .emb-container {
+  .emb-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 6px 10px;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: var(--radius-s);
-    background: color-mix(in srgb, var(--text-accent) 8%, var(--background-secondary));
-    color: var(--text-normal);
-    font-size: var(--font-ui-small);
-  }
-
-  .emb-left {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    justify-content: flex-end;
+    gap: 5px;
+    padding: 0 2px;
   }
 
   .emb-icon {
-    color: var(--text-accent);
     display: flex;
     align-items: center;
-  }
-
-  .emb-label {
-    font-weight: var(--font-medium);
-    font-size: var(--font-ui-smaller);
   }
 
   .emb-cancel {
     display: flex;
     align-items: center;
     justify-content: center;
+    margin-left: 2px;
+    padding: 2px;
   }
 
   :global(.is-mobile) .emb-cancel {
