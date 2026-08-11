@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { SessionRegistry } from "../../stores/chatStore.svelte";
+import { isMobileUI } from "../../utils/platform";
 import { icon } from "../../utils/utils";
 
 interface Props {
@@ -11,7 +12,13 @@ interface Props {
 const { registry, threadPath, onCancel }: Props = $props();
 
 const session = $derived(registry.sessionFor(threadPath));
-const isEditing = $derived(Boolean(session?.editingPairId));
+// Desktop only: the composer has room for this quiet label, and cancel lives
+// right on it. On mobile the same info would sit directly above a floating,
+// keyboard-repositioned composer with no space to spare, so cancel instead
+// lives as its own icon button at the far end of the composer's action row
+// (see Input.svelte) — away from the save button, to avoid a mis-tap between
+// "cancel" and "save" on a cramped row.
+const isEditing = $derived(!isMobileUI() && Boolean(session?.editingPairId));
 </script>
 
 {#if isEditing}
@@ -44,10 +51,5 @@ const isEditing = $derived(Boolean(session?.editingPairId));
     justify-content: center;
     margin-left: 2px;
     padding: 2px;
-  }
-
-  :global(.is-mobile) .emb-cancel {
-    min-width: 44px;
-    min-height: 44px;
   }
 </style>

@@ -1164,6 +1164,15 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
           />
         {/if}
         {#if !session || session.messageState === MessageState.idle}
+          {#if isEditing && isMobileUI()}
+            <Button
+              ariaLabel="Cancel edit"
+              tooltip="Cancel edit"
+              onClick={cancelActiveEdit}
+              styles="chat-input-icon-button clickable-icon mr-2"
+              iconId="x"
+            />
+          {/if}
           <Button
             disabled={!canSendMessage || savingFiles}
             ariaLabel={isEditing ? "save edit" : "send message"}
