@@ -1317,14 +1317,15 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     gap: 2px;
   }
 
-  /* The wrapper's 6px sides put the action row close to the card's edge,
-     which suits the buttons but left the typing caret almost touching it.
-     Inset the editor alone so text starts ~17px in while the buttons stay
-     at ~7px — the row reads as anchored to the edges, the text as centred
-     in the card. Mobile only; desktop's wider card doesn't need it. */
+  /* Keeps the text ~13px from the card's edge while the wrapper's 6px sides
+     put the action row at ~7px. The absolute inset is unchanged from before
+     the wrapper was tightened — what makes it read as inset now is the 6px
+     offset from the button row, not the distance itself. Pushing it further
+     (10px here, ~17px total) overshot. Mobile only; desktop's wider card
+     doesn't need it. */
   :global(.is-mobile) .markdown-editor-container {
-    padding-left: 10px;
-    padding-right: 10px;
+    padding-left: 6px;
+    padding-right: 6px;
   }
 
   .chat-input-container.chat-input-fullscreen {
