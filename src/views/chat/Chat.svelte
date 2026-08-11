@@ -133,12 +133,23 @@ function portalComposer(node: HTMLElement) {
 	// appended to `.workspace-split.mod-root`, visible and interactive, floating
 	// over whichever view the user switches to — its buttons keep real geometry
 	// (`overflow: visible` lets them spill outside the now-zeroed leaf box) and
-	// silently intercept taps meant for the page underneath. Track the leaf's
-	// own `mod-active` class and hide the portaled composer whenever it drops.
+	// silently intercept taps meant for the page underneath.
+	//
+	// Keyed off the leaf's own rendered state, NOT its `mod-active` class:
+	// `mod-active` tracks FOCUS, and swiping a sidebar drawer open moves focus
+	// to the sidebar leaf while the chat leaf stays perfectly visible
+	// underneath. That made the composer vanish for the whole drawer gesture
+	// and pop back only once it finished closing (traced on-device: `display`
+	// flipped to `none` for ~400ms mid-swipe while `opacity`/`visibility`
+	// stayed untouched). `display: none` is what Obsidian actually uses to
+	// background a tab, so reading it distinguishes a real tab switch from a
+	// drawer stealing focus — verified on-device: with the drawer closed the
+	// leaf is `display: flex` at its full 402x874 box even when another leaf
+	// holds `mod-active`.
 	const syncActiveState = () => {
 		if (!composer) return;
-		const active = leafEl?.classList.contains("mod-active") ?? true;
-		composer.style.display = active ? "" : "none";
+		const rendered = leafEl ? getComputedStyle(leafEl).display !== "none" : true;
+		composer.style.display = rendered ? "" : "none";
 	};
 
 	const leafEl = node.closest<HTMLElement>(".workspace-leaf");
@@ -176,7 +187,9 @@ function portalComposer(node: HTMLElement) {
 		if (leafEl) {
 			syncActiveState();
 			leafObserver = new MutationObserver(syncActiveState);
-			leafObserver.observe(leafEl, { attributes: true, attributeFilter: ["class"] });
+			// `style` as well as `class`: `syncActiveState` reads the leaf's
+			// computed `display`, which Obsidian can change either way.
+			leafObserver.observe(leafEl, { attributes: true, attributeFilter: ["class", "style"] });
 		}
 		classObserver = new MutationObserver(ensurePortaledClass);
 		classObserver.observe(found, { attributes: true, attributeFilter: ["class"] });
@@ -283,10 +296,28 @@ function portalComposer(node: HTMLElement) {
   }
 
   /* With the composer portaled out of the leaf it no longer takes up flow
-     space, so the conversation would scroll underneath it. Reserve its height
-     (published by `portalComposer`) at the bottom of the scroller instead. */
+     space, so the conversation would scroll underneath it. Shrink the
+     scroller's own box by the composer's height (published by
+     `portalComposer`) so it ends just above it.
+
+     `height`, NOT `padding-bottom`: padding is part of the border box, so a
+     padded scroller still *occupies* the full height and WebKit draws its
+     scrollbar track down the whole thing — the bar visibly ran past the
+     composer's top edge and down beside the input (confirmed on-device:
+     scroller box 114→788 with the composer at 630→788, i.e. the bottom 158px
+     of track sat behind the composer). Reducing the height moves the box's
+     real bottom edge up, so the track ends where the content does.
+
+     This also removes the need for the composer to paint an opaque
+     background: nothing scrolls behind it any more. */
   :global(.is-mobile .chat-root .scroll-container) {
-    padding-bottom: calc(var(--s2b-composer-height, 0px) + 12px);
+    /* `+ 24px`: run the content 24px PAST the composer's top edge, so it
+       passes under the composer's own top padding band. That band carries a
+       transparent→page-colour gradient (see `.chat-input-container` in
+       Input.svelte) which needs real text underneath it to dissolve — ending
+       the scroller exactly at the composer's top instead leaves the last line
+       hard-cut against a bare slab of page colour, with nothing to fade. */
+    height: calc(100% - var(--s2b-composer-height, 0px) + 24px);
   }
 
   /* Also matches the portaled composer, which is no longer a `.chat-root`

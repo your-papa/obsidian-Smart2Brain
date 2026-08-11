@@ -1248,19 +1248,20 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     --input-bg: var(--background-primary);
   }
 
-  /* On mobile the container is portaled and floats OVER the scrolling
-     message list (see Chat.svelte's `portalComposer`) rather than sitting in
-     normal document flow below it, so its own transparent background lets
-     scrolled-past messages show through wherever the visible wrapper doesn't
-     fully cover the container's box — confirmed on-device: the bottom
-     ~20px spacer (added below, to keep the focus-ring border from looking
-     clipped) left a gap the container's `--s2b-composer-height` still counted
-     as reserved space, so message text was visible bleeding through under the
-     composer at that band. Desktop doesn't have this problem (nothing scrolls
-     underneath a normal-flow sibling), so keep the container transparent
-     there — only mobile needs it opaque. */
+  /* The scroller runs 24px past this container's top edge (see
+     `.scroll-container`'s height calc in Chat.svelte), so message text passes
+     underneath this band on its way behind the input. Fade it out across
+     exactly that distance, so the last visible line dissolves into the page
+     instead of being hard-cut at the input's border.
+
+     Fades to `--background-primary` (the PAGE colour), not `--input-bg` (the
+     wrapper's own surface): matching the wrapper removes the seam at the
+     input border but paints a slab of wrapper-grey across the full width,
+     which against a dark theme's near-black page reads as a distinctly
+     lighter band with visible edges down both sides of the inset input.
+     Verified on-device in dark mode: page `#000` vs wrapper `rgb(30,30,30)`. */
   :global(.is-mobile .chat-input-container) {
-    background: var(--input-bg) !important;
+    background: linear-gradient(to bottom, transparent 0%, var(--background-primary) 24px) !important;
   }
 
   .chat-input-wrapper {
