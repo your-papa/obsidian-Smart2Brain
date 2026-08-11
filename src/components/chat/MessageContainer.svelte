@@ -1,5 +1,5 @@
 <script lang="ts">
-import { Notice } from "obsidian";
+import { Menu, Notice } from "obsidian";
 import { tick } from "svelte";
 import {
 	type AssistantMessage,
@@ -10,6 +10,8 @@ import {
 } from "../../stores/chatStore.svelte";
 import type { UUIDv7 } from "../../utils/uuid7Validator";
 import { Logger } from "../../utils/logging";
+import { isMobileUI } from "../../utils/platform";
+import { longPress } from "../../utils/longPress";
 import { getPlugin, thinkingProcessPref } from "../../stores/state.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { DEFAULT_AGENT_ICON } from "../../types/plugin";
@@ -276,6 +278,12 @@ function navigateNextMessage() {
 	navigateToUserMessage(activeUserIndex + 1);
 }
 
+// Touch devices have no Alt key, so the keyboard hint in these tooltips
+// describes a shortcut the user can't press. Drop it on mobile.
+const onMobile = isMobileUI();
+const prevMessageTooltip = onMobile ? "Previous message" : "Previous message (Alt+↑)";
+const nextMessageTooltip = onMobile ? "Next message" : "Next message (Alt+↓)";
+
 function scrollToTop() {
 	// "Jump to top" targets the first user message, symmetric with jump-to-bottom.
 	if (userMessageIds.length === 0) {
@@ -387,6 +395,44 @@ async function copyToClipboard(content: string) {
 	new Notice("Copied to Clipboard");
 }
 
+/**
+ * Long-press menu for a user message (touch only).
+ *
+ * On mobile the per-message Edit/Copy buttons and the timestamp are hidden —
+ * four turns' worth of always-on chrome crowds a phone screen, and forcing the
+ * hover-reveal buttons to be permanently visible on touch (the `@media (hover:
+ * none)` rule) traded reachability for clutter. A long press surfaces the same
+ * actions on demand, matching the gesture already used for graph nodes.
+ *
+ * The timestamp rides along as a disabled first item so hiding it from the
+ * bubble doesn't lose the information.
+ */
+function openUserMessageMenu(pair: MessagePair, x: number, y: number) {
+	const menu = new Menu();
+	const timestamp = formatMessageTimestamp(pair);
+
+	if (timestamp) {
+		menu.addItem((item) => item.setTitle(timestamp).setIcon("clock").setDisabled(true));
+		menu.addSeparator();
+	}
+
+	menu.addItem((item) =>
+		item
+			.setTitle("Edit message")
+			.setIcon("edit")
+			.onClick(() => startEdit(pair)),
+	);
+
+	menu.addItem((item) =>
+		item
+			.setTitle("Copy message")
+			.setIcon("copy")
+			.onClick(() => copyToClipboard(pair.userMessage.content)),
+	);
+
+	menu.showAtPosition({ x, y });
+}
+
 function formatMessageTimestamp(pair: MessagePair): string | null {
 	const date = getMessagePairTimestamp(pair);
 	if (!date) return null;
@@ -420,6 +466,47 @@ function getGenerationLabel(
 		: null;
 
 	return { agent, agentIcon, model };
+}
+
+/** Identity of the agent+model that produced a turn, for change detection. */
+function generationSignature(pair: MessagePair): string | null {
+	const label = getGenerationLabel(pair);
+	if (!label) return null;
+	return `${label.agent ?? ""}|${label.model ?? ""}`;
+}
+
+/**
+ * Whether to render the agent/model label under a response on mobile.
+ *
+ * The label is identical on every turn of a normal thread, so repeating it is
+ * pure noise on a phone. Show it only when it actually carries information:
+ * the first response in the thread (establishes which agent/model is answering)
+ * and any turn where the agent or model differs from the previous response —
+ * which is exactly the "wait, that answer came from a different model" case.
+ * Desktop keeps the label on every turn; there's room for it there.
+ */
+function shouldShowGenerationLabel(index: number): boolean {
+	if (!onMobile) return true;
+
+	const list = messages;
+	const pair = list?.[index];
+	if (!pair) return false;
+
+	const current = generationSignature(pair);
+	if (!current) return false;
+
+	for (let i = index - 1; i >= 0; i--) {
+		const earlier = list[i];
+		if (!earlier) continue;
+		const previous = generationSignature(earlier);
+		// Skip turns that carry no generation of their own (e.g. summarization
+		// markers) rather than treating them as a change.
+		if (previous === null) continue;
+		return previous !== current;
+	}
+
+	// No earlier response to compare against — this is the thread's first.
+	return true;
 }
 
 // ── Timeline collapse state ──────────────────────────────────────────────
@@ -512,7 +599,14 @@ $effect(() => {
     tabindex="-1"
     onscroll={handleScroll}
   >
-    <div class="w-full max-w-[--file-line-width] mx-auto h-full">
+    <!-- `min-h-full`, NOT `h-full`: this wrapper needs to fill the viewport when
+         the conversation is short (so empty/loading states centre), but `h-full`
+         pins it to the scroller's content-box height, and a long conversation
+         then overflows it instead of growing it. The scroller's mobile
+         `padding-bottom` (which reserves the portaled composer's height) is laid
+         out relative to that collapsed box, so it stops reserving real space and
+         the last message scrolls under the composer. -->
+    <div class="w-full max-w-[--file-line-width] mx-auto min-h-full">
       {#if registry.isLoadingSession}
         <!-- Loading skeleton -->
         <div
@@ -685,20 +779,35 @@ $effect(() => {
                     {/if}
                   </div>
                 {/if}
-                <CollapsibleUserBubble
-                  content={messagePair.userMessage.content}
-                  attachments={messagePair.userMessage.attachments}
-                  class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] px-4 py-2"
-                />
+                <!-- The wrapper (not the bubble component) carries the gesture so
+                     CollapsibleUserBubble keeps its own tap-to-expand contract;
+                     the action swallows the synthesised click after a press. -->
+                <div
+                  class="flex flex-col items-end w-full"
+                  use:longPress={{
+                    enabled: onMobile,
+                    onLongPress: (x, y) => openUserMessageMenu(messagePair, x, y),
+                  }}
+                >
+                  <CollapsibleUserBubble
+                    content={messagePair.userMessage.content}
+                    attachments={messagePair.userMessage.attachments}
+                    class="max-w-[80%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] px-4 py-2"
+                  />
+                </div>
               {/if}
 
-              <!-- User message actions and branch navigator -->
+              <!-- User message actions and branch navigator.
+                   On mobile these live in the long-press menu instead (see
+                   `openUserMessageMenu`), so the row is dropped entirely —
+                   except the branch navigator, which is stateful (‹1/2›) rather
+                   than an action and has no other affordance. -->
               <div class="flex flex-row items-center gap-2">
-                {#if editingMessageId !== messagePair.id}
+                {#if editingMessageId !== messagePair.id && !(onMobile && !messagePair.userBranchInfo)}
                   <div
                     class="message-footer flex flex-row items-center gap-3 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
                   >
-                    {#if formatMessageTimestamp(messagePair)}
+                    {#if !onMobile && formatMessageTimestamp(messagePair)}
                       <span class="message-timestamp">{formatMessageTimestamp(messagePair)}</span>
                     {/if}
                     <div class="footer-actions flex flex-row items-center gap-1.5">
@@ -708,18 +817,20 @@ $effect(() => {
                           onNavigate={handleBranchNavigate}
                         />
                       {/if}
-                      <Button
-                        iconId="edit"
-                        ariaLabel="Edit message"
-                        tooltip="Edit message"
-                        onClick={() => startEdit(messagePair)}
-                      />
-                      <Button
-                        iconId="copy"
-                        ariaLabel="Copy message"
-                        tooltip="Copy message"
-                        onClick={() => copyToClipboard(messagePair.userMessage.content)}
-                      />
+                      {#if !onMobile}
+                        <Button
+                          iconId="edit"
+                          ariaLabel="Edit message"
+                          tooltip="Edit message"
+                          onClick={() => startEdit(messagePair)}
+                        />
+                        <Button
+                          iconId="copy"
+                          ariaLabel="Copy message"
+                          tooltip="Copy message"
+                          onClick={() => copyToClipboard(messagePair.userMessage.content)}
+                        />
+                      {/if}
                     </div>
                   </div>
                 {/if}
@@ -781,8 +892,8 @@ $effect(() => {
                      the only relevant action, and Copy/Regenerate would act on an
                      empty, non-existent response. -->
                 {#if !(messagePair.assistantMessage.state === AssistantState.streaming) && messagePair.assistantMessage.state !== AssistantState.error}
-                {@const genLabel = getGenerationLabel(messagePair)}
-                {@const timestamp = formatMessageTimestamp(messagePair)}
+                {@const genLabel = shouldShowGenerationLabel(index) ? getGenerationLabel(messagePair) : null}
+                {@const timestamp = onMobile ? null : formatMessageTimestamp(messagePair)}
                 <div
                   class="message-footer flex flex-row items-center gap-3 flex-wrap opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
                 >
@@ -876,7 +987,7 @@ $effect(() => {
           <Button
             iconId="chevron-up"
             iconSize="s"
-            tooltip="Previous message (Alt+↑)"
+            tooltip={prevMessageTooltip}
             dataTestId="message-nav-prev"
             onClick={navigatePrevMessage}
           />
@@ -885,7 +996,7 @@ $effect(() => {
           <Button
             iconId="chevron-down"
             iconSize="s"
-            tooltip="Next message (Alt+↓)"
+            tooltip={nextMessageTooltip}
             dataTestId="message-nav-next"
             onClick={navigateNextMessage}
           />
