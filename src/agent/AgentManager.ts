@@ -1607,7 +1607,16 @@ export class AgentManager {
 				leaf = location === "left" ? workspace.getLeftLeaf(false) : workspace.getRightLeaf(false);
 			}
 		} else {
-			leaf = workspace.getLeaf("tab");
+			// Reuse a tab already showing this exact thread instead of always opening a
+			// fresh one — otherwise every reopen of a backgrounded chat (running-indicator
+			// tap, "Ask agent", openLatestChat) stacks a new leaf on top of the old one.
+			// That leaves a stale, unmounted-but-still-registered .chat-root leaf behind,
+			// which corrupts touch hit-testing on mobile (double-tap bug). On mobile there's
+			// effectively one active pane, so getLeaf("tab") duplicating is especially costly.
+			leaf = workspace
+				.getLeavesOfType(VIEW_TYPE_CHAT)
+				.find((l) => (l.view as { file?: TFile }).file?.path === file.path);
+			if (!leaf) leaf = workspace.getLeaf("tab");
 		}
 		if (!leaf) return;
 		await leaf.openFile(file);

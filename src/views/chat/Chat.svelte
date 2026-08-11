@@ -88,6 +88,8 @@ function portalComposer(node: HTMLElement) {
 	let home: HTMLElement | null = null;
 	let nextSibling: ChildNode | null = null;
 	let ro: ResizeObserver | null = null;
+	let leafObserver: MutationObserver | null = null;
+	let classObserver: MutationObserver | null = null;
 
 	// Horizontal placement and height come from wherever the leaf actually is
 	// (main view, sidebar split, …), so measure rather than assume full width.
@@ -111,6 +113,39 @@ function portalComposer(node: HTMLElement) {
 		}
 	};
 
+	// Obsidian hides an inactive leaf with `display: none` rather than
+	// unmounting it, so this Svelte action's own `destroy()` never runs when a
+	// chat tab is merely backgrounded. Without this, the portaled composer stays
+	// appended to `.workspace-split.mod-root`, visible and interactive, floating
+	// over whichever view the user switches to — its buttons keep real geometry
+	// (`overflow: visible` lets them spill outside the now-zeroed leaf box) and
+	// silently intercept taps meant for the page underneath. Track the leaf's
+	// own `mod-active` class and hide the portaled composer whenever it drops.
+	const syncActiveState = () => {
+		if (!composer) return;
+		const active = leafEl?.classList.contains("mod-active") ?? true;
+		composer.style.display = active ? "" : "none";
+	};
+
+	const leafEl = node.closest<HTMLElement>(".workspace-leaf");
+
+	// `<Input>`'s own template drives this element's `class` attribute (it
+	// toggles fullscreen classes reactively on `isFullscreen`), and Svelte
+	// replaces the whole attribute string on each such re-render — silently
+	// dropping `s2b-composer-portaled`, which was added imperatively above and
+	// is invisible to Svelte's reactivity. Losing it mid-render (confirmed via
+	// on-device collapse-from-fullscreen: the class vanished right after
+	// `chat-input-fullscreen*` were removed) leaves the still-portaled composer
+	// with no positioning rule at all, so it falls back to plain in-flow layout
+	// inside `.workspace-split.mod-root` — a small, mispositioned box floating
+	// over the real view instead of the docked composer bar. Re-add it whenever
+	// Svelte's re-render strips it.
+	const ensurePortaledClass = () => {
+		if (composer && !composer.classList.contains("s2b-composer-portaled")) {
+			composer.classList.add("s2b-composer-portaled");
+		}
+	};
+
 	const portal = (found: HTMLElement) => {
 		composer = found;
 		home = found.parentElement;
@@ -124,6 +159,13 @@ function portalComposer(node: HTMLElement) {
 		ro = new ResizeObserver(publishGeometry);
 		ro.observe(found);
 		ro.observe(node);
+		if (leafEl) {
+			syncActiveState();
+			leafObserver = new MutationObserver(syncActiveState);
+			leafObserver.observe(leafEl, { attributes: true, attributeFilter: ["class"] });
+		}
+		classObserver = new MutationObserver(ensurePortaledClass);
+		classObserver.observe(found, { attributes: true, attributeFilter: ["class"] });
 	};
 
 	// `<Input>` is rendered by a child component, so it may not exist yet when
@@ -147,7 +189,10 @@ function portalComposer(node: HTMLElement) {
 		destroy() {
 			mo.disconnect();
 			ro?.disconnect();
+			leafObserver?.disconnect();
+			classObserver?.disconnect();
 			if (!composer) return;
+			composer.style.display = "";
 			composer.classList.remove("s2b-composer-portaled");
 			for (const prop of ["--s2b-composer-left", "--s2b-composer-width", "--s2b-composer-height"]) {
 				composer.style.removeProperty(prop);

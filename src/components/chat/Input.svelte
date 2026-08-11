@@ -1171,11 +1171,40 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
 
   .chat-input-container.chat-input-fullscreen.chat-input-fullscreen-visible {
     opacity: 1;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    border-radius: 0;
+    /* On mobile this sits flush against .chat-root's top (0), which underflows
+       the status bar / dynamic island — clear it with the safe-area inset,
+       same treatment as .s2b-provider-setup-modal-container. Harmless 0px on
+       desktop where neither var is set. */
+    top: max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px));
+    /* Small side margin so the panel isn't flush with the screen edges (matches
+       the 12px gutter the collapsed/portaled composer already uses). */
+    left: 12px;
+    width: calc(100% - 24px);
+    /* `height: calc(100% - ...)` resolves against the portal host
+       (.workspace-split.mod-root), which — like .app-container — only reflows
+       to account for the keyboard ~420ms after --keyboard-height itself flips
+       to the real value in a single frame (see the on-device timing notes on
+       .chat-root/`--s2b-composer-*` below and in Chat.svelte). Sizing off that
+       stale 100% briefly renders the panel too tall, so its bottom row (send
+       button/toolbar) sits underneath where the keyboard is about to appear.
+       Size off `100vh` directly instead — same fix already used for the
+       collapsed composer and `.chat-root` in Chat.svelte — so the send row is
+       never mid-transition-hidden behind the keyboard.
+
+       Bottom clearance mirrors `.s2b-composer-portaled`'s `top` calc in
+       Chat.svelte exactly: with the keyboard UP, core's `.mobile-toolbar` owns
+       that band (`--keyboard-height + --mobile-toolbar-height`); with it DOWN,
+       the floating `.mobile-navbar` does (52px + safe-area-bottom). Without
+       this, keyboard-down leaves --keyboard-height at 0 and the panel stretches
+       to the literal viewport bottom, landing the send row behind the navbar. */
+    height: calc(
+      100vh - max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)) -
+        max(
+          calc(var(--keyboard-height, 0px) + var(--mobile-toolbar-height, 52px)),
+          calc(52px + env(safe-area-inset-bottom))
+        )
+    );
+    border-radius: 14px;
   }
 
   .chat-input-container.chat-input-fullscreen.chat-input-fullscreen-no-transition {
@@ -1244,6 +1273,14 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
   :global(.chat-input-wrapper:hover > .fullscreen-toggle-button.clickable-icon),
   :global(.chat-input-wrapper:focus-within > .fullscreen-toggle-button.clickable-icon),
   :global(.chat-input-fullscreen .chat-input-wrapper > .fullscreen-toggle-button.clickable-icon) {
+    opacity: 1;
+  }
+
+  /* There is no hover affordance on mobile, so the opacity-0 default above left
+     this button invisible until the wrapper happened to gain :focus-within —
+     meaning the first tap only revealed it and a second tap was needed to
+     actually activate it. Always show it there. */
+  :global(.is-mobile .fullscreen-toggle-button.clickable-icon) {
     opacity: 1;
   }
 
