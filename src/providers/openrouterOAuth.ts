@@ -1,5 +1,5 @@
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import { Platform, requestUrl } from "obsidian";
+import { Platform, type Plugin, requestUrl } from "obsidian";
 import { Logger } from "../utils/logging";
 import { escapeHtml } from "../utils/html";
 import { arrayBufferToBase64Url, requireNodeHttp } from "./oauthNode";
@@ -11,6 +11,8 @@ const CALLBACK_PORT = 3000;
 const CALLBACK_PATH = "/";
 const HEALTHCHECK_PATH = "/health";
 const OAUTH_TIMEOUT_MS = 5 * 60_000;
+/** obsidian:// protocol action for the mobile redirect experiment (see registerOpenRouterProtocolHandler). */
+export const OPENROUTER_MOBILE_REDIRECT_ACTION = "smart-second-brain-openrouter";
 
 interface PendingOpenRouterAuth {
 	/** Desktop only: the localhost callback server catching the redirect. */
@@ -106,10 +108,11 @@ async function createCodeChallenge(codeVerifier: string): Promise<string> {
 
 /**
  * Build the authorize URL. On desktop we pass a localhost `callback_url` so the
- * browser redirect is caught by our loopback server. On mobile we OMIT
- * `callback_url` entirely — OpenRouter's headless mode then shows the
- * authorization code on-screen for the user to paste back (there is no localhost
- * server on mobile, and OpenRouter rejects custom URL schemes like obsidian://).
+ * browser redirect is caught by our loopback server. On mobile we try an
+ * `obsidian://` callback_url (see OPENROUTER_MOBILE_REDIRECT_ACTION) as an
+ * experiment — OpenRouter's docs only document https:// and localhost callback
+ * URLs, so this may be silently ignored or rejected server-side, in which case
+ * the existing manual-paste fallback (submitOpenRouterAuthCode) still applies.
  */
 function buildAuthorizeUrl(codeChallenge: string, redirectUri: string | null): string {
 	const params = new URLSearchParams({
@@ -193,6 +196,36 @@ export function submitOpenRouterAuthCode(code: string): void {
 	const trimmed = code.trim();
 	if (!trimmed) return;
 	void completeWithCode(trimmed);
+}
+
+/**
+ * Registers the `obsidian://smart-second-brain-openrouter` handler used for the
+ * mobile OAuth redirect experiment (see the `redirectUri` built in
+ * signInWithOpenRouter). If/when OpenRouter redirects Safari back to this scheme
+ * with a `code` param, this completes the pending sign-in the same way a pasted
+ * code would. A `error` param (or a missing `code`) rejects the pending sign-in
+ * with that message so the setup UI surfaces it instead of just timing out.
+ */
+export function registerOpenRouterProtocolHandler(plugin: Plugin): void {
+	plugin.registerObsidianProtocolHandler(OPENROUTER_MOBILE_REDIRECT_ACTION, (params) => {
+		const pending = pendingOpenRouterAuth;
+		if (!pending || pending.settled) return;
+		const error = params.error;
+		if (error) {
+			pending.settled = true;
+			pending.reject(new Error(error));
+			cleanupPendingOpenRouterAuth();
+			return;
+		}
+		const code = params.code;
+		if (!code) {
+			pending.settled = true;
+			pending.reject(new Error("OpenRouter redirect was missing an authorization code"));
+			cleanupPendingOpenRouterAuth();
+			return;
+		}
+		submitOpenRouterAuthCode(code);
+	});
 }
 
 async function handleOpenRouterCallback(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -324,10 +357,13 @@ function navigateToAuthorizeUrl(url: string): void {
  * authorize URL (with a localhost `callback_url`), and resolves when the browser
  * redirect delivers the code.
  *
- * Mobile: no localhost server (and OpenRouter rejects custom URL schemes), so we
- * use OpenRouter's headless mode — omit `callback_url`, OpenRouter shows the code
- * on-screen, and the user pastes it via `submitOpenRouterAuthCode` (surfaced by
- * the setup UI). The returned promise resolves once the pasted code is exchanged.
+ * Mobile: no localhost server, so we pass an `obsidian://` `callback_url` and
+ * register a protocol handler (see registerOpenRouterProtocolHandler) that feeds
+ * the returned code into `submitOpenRouterAuthCode` automatically. If OpenRouter
+ * rejects/ignores the custom scheme and shows the code on-screen instead, the
+ * user can still paste it via the same `submitOpenRouterAuthCode` (surfaced by
+ * the setup UI) as a fallback. The returned promise resolves once the code is
+ * exchanged either way.
  */
 export async function signInWithOpenRouter(): Promise<string> {
 	if (pendingOpenRouterAuth) {
@@ -337,7 +373,7 @@ export async function signInWithOpenRouter(): Promise<string> {
 	const isDesktop = Platform.isDesktopApp;
 	const codeVerifier = generateRandomString(64);
 	const codeChallenge = await createCodeChallenge(codeVerifier);
-	const redirectUri = isDesktop ? getRedirectUri() : null;
+	const redirectUri = isDesktop ? getRedirectUri() : `obsidian://${OPENROUTER_MOBILE_REDIRECT_ACTION}`;
 	const authorizeUrl = buildAuthorizeUrl(codeChallenge, redirectUri);
 
 	let server: Server | null = null;
