@@ -656,9 +656,12 @@ $effect(() => {
           </div>
         </div>
       {:else if !messages || messages.length === 0}
-        <!-- Empty state -->
-        <div class="flex flex-col items-center justify-center h-full">
-          <ChatRecommendations {registry} />
+        <!-- Empty state. `items-stretch`, not `items-center`: ChatRecommendations
+             is a single left-aligned column that centres itself via its own
+             max-width + auto margins, so centring here would collapse it to its
+             content width and re-ragged the left edge. -->
+        <div class="flex flex-col items-stretch justify-center h-full">
+          <ChatRecommendations {registry} {threadPath} />
         </div>
       {:else}
         {#each messages as messagePair, index (messagePair.stableKey ?? messagePair.id)}

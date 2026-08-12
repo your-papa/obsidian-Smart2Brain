@@ -526,6 +526,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	onboardingComplete: false,
 	onboardingSplashSeen: false,
 	dismissedRecommendations: [],
+	showChatRecommendations: true,
 	thinkingProcessExpanded: true,
 	showActiveAgentsInStatusBar: true,
 
@@ -1393,6 +1394,31 @@ export class PluginDataStore {
 			this.#data.dismissedRecommendations = [...this.#data.dismissedRecommendations, id];
 			this.saveSettings();
 		}
+	}
+	/**
+	 * "Dismiss all" in the chat view. Distinct from `dismissRecommendation(DISMISS_ALL_ID)`
+	 * so it can also flip `showChatRecommendations` off — the settings toggle stays an
+	 * accurate reflection of "is anything showing", not just its own independent switch.
+	 */
+	dismissAllRecommendations(dismissAllId: string) {
+		this.dismissRecommendation(dismissAllId);
+		this.showChatRecommendations = false;
+	}
+
+	get showChatRecommendations() {
+		return this.#data.showChatRecommendations ?? true;
+	}
+	set showChatRecommendations(val: boolean) {
+		// Turning the surface back on is a full reset, not just un-hiding: without this,
+		// re-enabling after "Dismiss all" (which sets this false) would flip the toggle
+		// on but show nothing, since DISMISS_ALL_ID would still be in the dismissed list.
+		// The toggle is the one control users have for "bring recommendations back", so
+		// off->on must actually restore them.
+		if (val && !this.#data.showChatRecommendations) {
+			this.#data.dismissedRecommendations = [];
+		}
+		this.#data.showChatRecommendations = val;
+		this.saveSettings();
 	}
 
 	get searchAlgorithm() {
