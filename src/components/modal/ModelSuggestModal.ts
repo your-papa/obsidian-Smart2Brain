@@ -3,6 +3,7 @@ import type { App } from "obsidian";
 import { MODEL_CAPABILITY_ICONS } from "../../lib/modelCapabilityIcons";
 import { extractVendor } from "../../lib/modelVendorClassification";
 import type { UiClassifiableModel } from "../../lib/modelVendorClassification";
+import { createVendorLogoElement } from "../../lib/vendorLogoSvg";
 import { getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../../types/modelMetadata";
@@ -37,8 +38,14 @@ function formatTokenLimit(tokens?: number): string {
 	return tokens.toString();
 }
 
-function getVariantKeyDisplay(model: HydratedModel): string {
-	return model.provider === "ollama" ? model.variantKey.replace(/:latest$/i, "") : model.variantKey;
+/**
+ * Drop the "Lab: " prefix catalogues put on display names, for rows that show
+ * the lab's logo instead. Only strips a short leading segment so a colon
+ * inside the name itself (e.g. a version string) is left alone.
+ */
+function stripVendorPrefix(displayName: string): string {
+	const match = displayName.match(/^([^:]{1,24}):\s+(.*)$/);
+	return match ? match[2] : displayName;
 }
 
 /**
@@ -209,13 +216,22 @@ export class ModelSuggestModal extends SuggestModal<HydratedModel> {
 		el.toggleClass("s2b-model-suggestion--selected", isSelected);
 
 		const header = el.createDiv({ cls: "s2b-model-suggestion-header" });
-		const info = header.createDiv({ cls: "s2b-model-suggestion-info" });
-		info.createDiv({ text: model.displayName, cls: "s2b-model-suggestion-name" });
 
-		const variantDisplay = getVariantKeyDisplay(model);
-		if (variantDisplay !== model.displayName) {
-			info.createDiv({ text: variantDisplay, cls: "s2b-model-suggestion-slug" });
+		// Catalogue names are prefixed with the lab ("Qwen: Qwen3.8 Max"). When
+		// we have that lab's artwork the prefix is redundant — show the logo and
+		// the bare name. Most labs have no logo, so the prefix stays as text
+		// there rather than collapsing them all into one anonymous glyph.
+		const vendor = this.vendorOf(model);
+		const logo = createVendorLogoElement(vendor);
+		const name = logo ? stripVendorPrefix(model.displayName) : model.displayName;
+
+		if (logo) {
+			const logoWrap = header.createSpan({ cls: "s2b-model-suggestion-logo" });
+			logoWrap.appendChild(logo);
 		}
+
+		const info = header.createDiv({ cls: "s2b-model-suggestion-info" });
+		info.createDiv({ text: name, cls: "s2b-model-suggestion-name" });
 
 		const actions = header.createDiv({ cls: "s2b-model-suggestion-actions" });
 		const isFavorite = this.pluginData.isFavoriteModel(model.provider, model.variantKey);

@@ -1023,16 +1023,20 @@
 .s2b-model-suggestion-name {
 	font-weight: 500;
 	color: var(--text-normal);
-}
-
-.s2b-model-suggestion-slug {
-	font-size: var(--font-ui-smaller);
-	color: var(--text-muted);
-	/* Slugs run long (`nvidia/nemotron-3.5-lightning:free`); truncate rather
-	   than wrap so every row keeps the same height. */
+	/* Without the slug line beneath it the name is the row's only identifier,
+	   so keep it on one line and let the tail truncate rather than reflowing
+	   the row to two lines. */
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.s2b-model-suggestion-logo {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	color: var(--text-normal);
 }
 
 .s2b-model-suggestion-actions {
