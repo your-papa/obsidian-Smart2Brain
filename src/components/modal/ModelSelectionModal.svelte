@@ -488,15 +488,6 @@ function getProviderListDisplay(): string {
     overflow: hidden;
   }
 
-  /* On a phone the vertical vendor rail costs ~75px of a ~400px viewport
-     (rail + its margins + the main column's padding), squeezing the model
-     list to ~256px so model IDs wrap mid-slug. Stack the layout instead and
-     turn the rail into a horizontal strip above the list, so the cards get
-     the full modal width. */
-  :global(.is-mobile) .model-selection-layout {
-    flex-direction: column;
-  }
-
   .model-provider-sidebar {
     display: flex;
     flex-direction: column;
@@ -509,21 +500,6 @@ function getProviderListDisplay(): string {
     overflow-y: auto;
     flex-shrink: 0;
     box-sizing: border-box;
-  }
-
-  :global(.is-mobile) .model-provider-sidebar {
-    flex-direction: row;
-    margin: 12px 12px 0;
-    padding: 6px 8px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    /* Momentum scrolling without a visible bar; the row is a filter strip,
-       so the icons themselves signal that it scrolls. */
-    scrollbar-width: none;
-  }
-
-  :global(.is-mobile) .model-provider-sidebar::-webkit-scrollbar {
-    display: none;
   }
 
   .model-provider-btn {
@@ -559,11 +535,6 @@ function getProviderListDisplay(): string {
     gap: 12px;
     padding: 16px;
     overflow: hidden;
-  }
-
-  :global(.is-mobile) .model-selection-main {
-    padding: 12px;
-    gap: 10px;
   }
 
   .model-search {
@@ -639,13 +610,6 @@ function getProviderListDisplay(): string {
 
   .search-input::placeholder {
     color: var(--text-muted);
-  }
-
-  /* iOS auto-zooms the page when focusing an input under 16px, and doesn't
-     zoom back out on blur — the user is left pinching to recover. 16px is the
-     threshold, not a style preference. */
-  :global(.is-mobile) .search-input {
-    font-size: 16px;
   }
 
   .clear-search {
@@ -807,16 +771,6 @@ function getProviderListDisplay(): string {
   .favorite-btn:hover {
     background: var(--background-modifier-hover);
     color: var(--text-muted);
-  }
-
-  /* 28px square is well under the ~44px touch floor, and this button sits
-     inside a tappable card — an undersized target here means stray taps
-     select the model instead of favouriting it. Grow the box, not the glyph. */
-  :global(.is-mobile) .favorite-btn,
-  :global(.is-mobile) .refresh-models {
-    width: 44px;
-    height: 44px;
-    flex-shrink: 0;
   }
 
   .favorite-btn.is-favorite {

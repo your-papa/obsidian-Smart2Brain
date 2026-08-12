@@ -2,7 +2,9 @@ import { Modal } from "obsidian";
 import { mount, unmount } from "svelte";
 import ModalProvider from "../../lib/QueryClientProvider.svelte";
 import type SecondBrainPlugin from "../../main";
+import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import ModelSelectionModalComponent from "./ModelSelectionModal.svelte";
+import { ModelSuggestModal } from "./ModelSuggestModal";
 import { isMobileUI } from "../../utils/platform";
 import { applyModalLayout } from "./modalLayout";
 
@@ -35,17 +37,38 @@ export class ModelSelectionModal extends Modal {
 		this.onSelect = onSelect;
 	}
 
-	onOpen() {
-		// On a phone the desktop sizing (90vw/80vh) leaves the model list about
-		// 256px wide, which wraps model IDs mid-slug. Go near-fullscreen so the
-		// cards get the whole viewport.
-		const mobile = isMobileUI();
+	/**
+	 * On mobile, hand off to {@link ModelSuggestModal} instead of opening this
+	 * one. Obsidian styles `SuggestModal` natively on a phone — input pinned
+	 * above the keyboard, results flowing upward, full-bleed sheet — which this
+	 * floating modal cannot match without re-implementing keyboard tracking.
+	 * Dispatching here keeps all call sites on the same constructor.
+	 */
+	open(): void {
+		if (isMobileUI()) {
+			const models = useAvailableModels();
+			const hydrated = this.modelType === "chat" ? models.hydratedChatModels : models.hydratedEmbeddingModels;
 
+			new ModelSuggestModal(
+				this.app,
+				this.modelType,
+				hydrated,
+				this.currentSelection,
+				models.openRouterModels,
+				(model) => this.onSelect(model),
+			).open();
+			return;
+		}
+
+		super.open();
+	}
+
+	onOpen() {
 		this.restoreLayout = applyModalLayout(this, {
-			width: mobile ? "96vw" : "min(800px, 90vw)",
-			maxWidth: mobile ? "96vw" : "90vw",
-			height: mobile ? "88vh" : "min(600px, 80vh)",
-			maxHeight: mobile ? "88vh" : "80vh",
+			width: "min(800px, 90vw)",
+			maxWidth: "90vw",
+			height: "min(600px, 80vh)",
+			maxHeight: "80vh",
 			contentPadding: "0",
 			contentOverflow: "hidden",
 		});

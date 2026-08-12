@@ -945,6 +945,154 @@
 	height: 16px;
 }
 
+/* ---------------------------------------------------------------------------
+   Mobile model picker (ModelSuggestModal)
+
+   A SuggestModal rather than the desktop Svelte modal, because Obsidian pins
+   `.prompt` above the keyboard on a phone and flows results upward — behaviour
+   the floating modal can't match without re-implementing keyboard tracking.
+   Rows carry the same information as the desktop cards (name, slug, provider,
+   context, pricing, capabilities, favourite star).
+   --------------------------------------------------------------------------- */
+
+.s2b-model-filter-bar {
+	display: flex;
+	gap: 8px;
+	padding: 8px 12px 4px;
+	/* One scrolling row: a wrapping bar would push the results list down by an
+	   unpredictable amount every time the vendor set changes. */
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+
+.s2b-model-filter-bar::-webkit-scrollbar {
+	display: none;
+}
+
+.s2b-model-filter-bar .s2b-pill {
+	min-height: 36px;
+	padding: 6px 14px;
+	font-size: var(--font-ui-small);
+	flex-shrink: 0;
+}
+
+.s2b-model-filter-bar .s2b-pill.s2b-pill--active {
+	background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-secondary));
+	border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
+	color: var(--text-accent);
+}
+
+.s2b-model-filter-icon {
+	display: inline-flex;
+	align-items: center;
+}
+
+.s2b-model-filter-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+.s2b-model-suggestion {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.s2b-model-suggestion--selected {
+	background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+}
+
+.s2b-model-suggestion-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.s2b-model-suggestion-info {
+	flex: 1;
+	min-width: 0;
+}
+
+.s2b-model-suggestion-name {
+	font-weight: 500;
+	color: var(--text-normal);
+}
+
+.s2b-model-suggestion-slug {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	/* Slugs run long (`nvidia/nemotron-3.5-lightning:free`); truncate rather
+	   than wrap so every row keeps the same height. */
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.s2b-model-suggestion-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+}
+
+/* Full 44px touch target: this sits inside a row that itself selects a model,
+   so an undersized star turns a favourite tap into an accidental selection. */
+.s2b-model-suggestion-fav {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 44px;
+	padding: 0;
+	border: none;
+	border-radius: var(--radius-s);
+	background: transparent;
+	color: var(--text-faint);
+	cursor: pointer;
+	box-shadow: none;
+}
+
+.s2b-model-suggestion-fav.is-favorite {
+	color: var(--text-accent);
+}
+
+.s2b-model-suggestion-fav svg {
+	width: 18px;
+	height: 18px;
+}
+
+.s2b-model-suggestion-check {
+	color: var(--text-accent);
+	font-weight: bold;
+}
+
+.s2b-model-suggestion-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.s2b-model-suggestion-tag {
+	display: inline-block;
+	padding: 2px 8px;
+	font-size: var(--font-ui-smaller);
+	line-height: 1.3;
+	background: var(--background-primary);
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.s2b-model-suggestion-tag--provider {
+	background: var(--background-modifier-border);
+	color: var(--text-normal);
+}
+
+.s2b-model-suggestion-tag.capability {
+	background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+	color: var(--text-accent);
+}
+
 /* Model-management grids are fixed 2/3 columns; a phone can't fit that without
    clipping model names. Collapse to a single column on mobile. */
 .is-mobile .s2b-model-grid {
