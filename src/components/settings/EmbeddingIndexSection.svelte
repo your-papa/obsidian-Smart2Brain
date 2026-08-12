@@ -5,7 +5,6 @@ import { EmbeddingIndexSetupModal } from "../modal/EmbeddingIndexSetupModal";
 import { IndexingReportModal } from "../modal/IndexingReportModal";
 import ManagedEntityItem from "./ManagedEntityItem.svelte";
 import ManagedEntitySection from "./ManagedEntitySection.svelte";
-import Badge from "../ui/Badge.svelte";
 import Button from "../ui/Button.svelte";
 import ProgressBar from "../ui/ProgressBar.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
@@ -175,13 +174,6 @@ function formatDate(timestamp: number | null): string {
 	return new Date(timestamp).toLocaleDateString();
 }
 
-function usedBy(targetIndexId: string): string[] {
-	const purposes: string[] = [];
-	if (pluginData.searchEmbedIndex === targetIndexId) purposes.push("Search");
-	if (pluginData.graphEmbedIndex === targetIndexId) purposes.push("Graph");
-	return purposes;
-}
-
 function describeCurrentSelection(): string {
 	return purpose === "search"
 		? "Embedding indexes power semantic search across your notes."
@@ -254,25 +246,14 @@ function getSelectionGroupLabel(): string {
             .filter(Boolean)
             .join(" · ")}
           {selected}
-          clickable
-          interactiveRole="radio"
-          onclick={() => selectIndex(entry.id)}
+          radio={{
+            selected,
+            onclick: () => selectIndex(entry.id),
+            ariaLabel: `Use ${entry.model} as ${purpose} index`,
+          }}
         >
           {#snippet leading()}
             <EntryLogo width={16} height={16} />
-          {/snippet}
-
-          {#snippet badges()}
-            {#if usedBy(entry.id).includes("Search")}
-              <Badge label="Search" tone="accent" />
-            {/if}
-            {#if usedBy(entry.id).includes("Graph")}
-              <Badge label="Graph" tone="accent" />
-            {/if}
-          {/snippet}
-
-          {#snippet trailing()}
-            <span class:selected class="embedding-index-radio" aria-hidden="true"></span>
           {/snippet}
 
           {#snippet actions()}
@@ -310,38 +291,6 @@ function getSelectionGroupLabel(): string {
   .embedding-index-list {
     display: flex;
     flex-direction: column;
-  }
-
-  .embedding-index-radio {
-    position: relative;
-    width: 16px;
-    height: 16px;
-    border-radius: 999px;
-    border: 1.5px solid var(--background-modifier-border);
-    background: var(--background-primary);
-    flex-shrink: 0;
-    transition:
-      border-color 120ms ease,
-      background-color 120ms ease,
-      box-shadow 120ms ease;
-  }
-
-  .embedding-index-radio.selected {
-    border-color: var(--interactive-accent);
-    background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 14%, transparent);
-  }
-
-  .embedding-index-radio.selected::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-    background: var(--interactive-accent);
-    transform: translate(-50%, -50%);
   }
 
   .index-progress-summary {

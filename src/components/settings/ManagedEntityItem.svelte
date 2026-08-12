@@ -1,6 +1,12 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
 
+interface RadioProps {
+	selected: boolean;
+	onclick: (event: MouseEvent) => void;
+	ariaLabel?: string;
+}
+
 interface Props {
 	name: string;
 	desc?: string;
@@ -11,6 +17,7 @@ interface Props {
 	interactiveRole?: "button" | "radio";
 	class?: string;
 	onclick?: (event: MouseEvent) => void;
+	radio?: RadioProps;
 	leading?: Snippet;
 	badges?: Snippet;
 	children?: Snippet;
@@ -28,6 +35,7 @@ let {
 	interactiveRole = "button",
 	class: className = "",
 	onclick,
+	radio,
 	leading,
 	badges,
 	children,
@@ -51,6 +59,11 @@ function handleKeyDown(event: KeyboardEvent) {
 		onclick?.(event as unknown as MouseEvent);
 	}
 }
+
+function handleRadioClick(event: MouseEvent) {
+	event.stopPropagation();
+	radio?.onclick(event);
+}
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -60,7 +73,7 @@ function handleKeyDown(event: KeyboardEvent) {
   class:disabled
   class:clickable
   role={clickable ? interactiveRole : undefined}
-  aria-checked={clickable && interactiveRole === "radio" ? selected : undefined}
+  aria-checked={clickable && interactiveRole === "radio" && !radio ? selected : undefined}
   tabindex={clickable && !disabled ? 0 : undefined}
   onclick={handleClick}
   onkeydown={handleKeyDown}
@@ -109,7 +122,19 @@ function handleKeyDown(event: KeyboardEvent) {
     </div>
   {/if}
 
-  {#if trailing}
+  {#if radio}
+    <div class="managed-entity-item-trailing">
+      <button
+        type="button"
+        class="managed-entity-item-radio"
+        class:selected={radio.selected}
+        role="radio"
+        aria-checked={radio.selected}
+        aria-label={radio.ariaLabel ?? `Select ${name}`}
+        onclick={handleRadioClick}
+      ></button>
+    </div>
+  {:else if trailing}
     <div class="managed-entity-item-trailing">
       {@render trailing()}
     </div>
@@ -223,5 +248,49 @@ function handleKeyDown(event: KeyboardEvent) {
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
+  }
+
+  .managed-entity-item-radio {
+    position: relative;
+    top: 4px;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border-radius: 999px;
+    border: 1.5px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    flex-shrink: 0;
+    cursor: pointer;
+    transition:
+      border-color 120ms ease,
+      background-color 120ms ease,
+      box-shadow 120ms ease;
+  }
+
+  .managed-entity-item-radio:hover {
+    border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
+  }
+
+  .managed-entity-item-radio:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--interactive-accent) 60%, transparent);
+    outline-offset: 2px;
+  }
+
+  .managed-entity-item-radio.selected {
+    border-color: var(--interactive-accent);
+    background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+  }
+
+  .managed-entity-item-radio.selected::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--interactive-accent);
+    transform: translate(-50%, -50%);
   }
 </style>

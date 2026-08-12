@@ -82,7 +82,7 @@ async function deleteAgent(agentId: string) {
 	}
 }
 
-function setDefaultAgent(agentId: string) {
+function selectDefaultAgent(agentId: string) {
 	if (pluginData.defaultAgentId === agentId) return;
 	pluginData.setDefaultAgentId(agentId);
 }
@@ -129,7 +129,14 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
       <ManagedEntityItem
         name={agent.name}
         desc={getAgentModelSummary(agentId)}
-        selected={pluginData.selectedAgentId === agentId}
+        selected={pluginData.defaultAgentId === agentId}
+        radio={agentIds.length > 1
+          ? {
+              selected: pluginData.defaultAgentId === agentId,
+              onclick: () => selectDefaultAgent(agentId),
+              ariaLabel: `Set ${agent.name} as default agent`,
+            }
+          : undefined}
       >
         {#snippet leading()}
           <span class="agent-avatar" class:agent-avatar--default={pluginData.defaultAgentId === agentId}>
@@ -167,22 +174,6 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
               ariaLabel="Delete agent"
               tooltip="Delete agent"
               onClick={() => deleteAgent(agentId)}
-            />
-          {/if}
-          {#if pluginData.defaultAgentId === agentId}
-            <Button
-              iconId="star"
-              disabled
-              ariaLabel="Default agent"
-              tooltip="Default agent for new chats"
-              style="color: var(--text-accent); opacity: 1;"
-            />
-          {:else}
-            <Button
-              iconId="star"
-              ariaLabel="Set as default"
-              tooltip="Set as default for new chats"
-              onClick={() => setDefaultAgent(agentId)}
             />
           {/if}
           <Button
