@@ -3,6 +3,7 @@ import { mount, unmount } from "svelte";
 import ModalProvider from "../../lib/QueryClientProvider.svelte";
 import type SecondBrainPlugin from "../../main";
 import ModelSelectionModalComponent from "./ModelSelectionModal.svelte";
+import { isMobileUI } from "../../utils/platform";
 import { applyModalLayout } from "./modalLayout";
 
 export type ModelType = "chat" | "embedding";
@@ -35,11 +36,16 @@ export class ModelSelectionModal extends Modal {
 	}
 
 	onOpen() {
+		// On a phone the desktop sizing (90vw/80vh) leaves the model list about
+		// 256px wide, which wraps model IDs mid-slug. Go near-fullscreen so the
+		// cards get the whole viewport.
+		const mobile = isMobileUI();
+
 		this.restoreLayout = applyModalLayout(this, {
-			width: "min(800px, 90vw)",
-			maxWidth: "90vw",
-			height: "min(600px, 80vh)",
-			maxHeight: "80vh",
+			width: mobile ? "96vw" : "min(800px, 90vw)",
+			maxWidth: mobile ? "96vw" : "90vw",
+			height: mobile ? "88vh" : "min(600px, 80vh)",
+			maxHeight: mobile ? "88vh" : "80vh",
 			contentPadding: "0",
 			contentOverflow: "hidden",
 		});
