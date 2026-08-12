@@ -28,9 +28,26 @@ let dragMessage = $state("Drop files here");
 let dragHasIssue = $state(false);
 
 $effect(() => {
-	const sessionId = registry?.sessionFor(threadPath)?.id ?? null;
+	const session = registry?.sessionFor(threadPath) ?? null;
+	const sessionId = session?.id ?? null;
 	if (!sessionId || sessionId === lastSessionId) return;
+
+	// On mobile, autofocusing pops the keyboard, which is welcome for a brand
+	// new chat (about to type) but unwelcome just from opening/switching to an
+	// existing one (reading, not typing yet). Desktop has no such cost, so it
+	// keeps focusing unconditionally as soon as the session id changes.
+	//
+	// A new chat has no messages yet; history for an existing thread loads
+	// asynchronously, so `isLoadingSession` is still true on the first tick
+	// for it — wait for that to settle rather than treating a not-yet-loaded
+	// thread as empty. Only mark this session "handled" (lastSessionId) once
+	// that decision is actually made, so the effect re-runs when loading
+	// finishes instead of only firing on the still-loading first tick.
+	if (isMobileUI() && registry?.isLoadingSession) return;
+
 	lastSessionId = sessionId;
+	if (isMobileUI() && (session?.messages.length ?? 0) > 0) return;
+
 	input?.focusEditor();
 });
 
