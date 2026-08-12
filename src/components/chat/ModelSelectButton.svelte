@@ -4,6 +4,7 @@ import { getPlugin } from "../../stores/state.svelte";
 import { type ChatModel, getSessionRegistry } from "../../stores/chatStore.svelte";
 import { ModelSelectionModal } from "../modal/ModelSelectionModal";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
+import { stripVendorPrefix } from "../../lib/modelMetadataNormalizer";
 import Button from "../ui/Button.svelte";
 
 const data = getData();
@@ -26,7 +27,11 @@ const selectedAgent = $derived(
 function getModelDisplayName(provider: string, model: string): string {
 	const hydrated = models.hydratedChatModelsByKey.get(`${provider}:${model}`);
 	if (hydrated?.displayName) {
-		return hydrated.displayName;
+		// The composer pill is the tightest model surface in the app, and the
+		// agent pill right beside it already implies the vendor — so drop the
+		// catalogue's "Lab: " prefix ("Qwen: Qwen3.8 Max" -> "Qwen3.8 Max") and
+		// spend the width on the part that actually distinguishes the model.
+		return stripVendorPrefix(hydrated.displayName);
 	}
 	return model;
 }

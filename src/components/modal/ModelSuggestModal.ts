@@ -1,6 +1,7 @@
 import { SuggestModal, setIcon } from "obsidian";
 import type { App } from "obsidian";
 import { MODEL_CAPABILITY_ICONS } from "../../lib/modelCapabilityIcons";
+import { stripVendorPrefix } from "../../lib/modelMetadataNormalizer";
 import { extractVendor } from "../../lib/modelVendorClassification";
 import type { UiClassifiableModel } from "../../lib/modelVendorClassification";
 import { createVendorLogoElement } from "../../lib/vendorLogoSvg";
@@ -36,16 +37,6 @@ function formatTokenLimit(tokens?: number): string {
 	if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
 	if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`;
 	return tokens.toString();
-}
-
-/**
- * Drop the "Lab: " prefix catalogues put on display names, for rows that show
- * the lab's logo instead. Only strips a short leading segment so a colon
- * inside the name itself (e.g. a version string) is left alone.
- */
-function stripVendorPrefix(displayName: string): string {
-	const match = displayName.match(/^([^:]{1,24}):\s+(.*)$/);
-	return match ? match[2] : displayName;
 }
 
 /**

@@ -52,6 +52,18 @@ function normalizeParamSize(size?: string): string | undefined {
 	return formatParameterSize(size);
 }
 
+/**
+ * Drop the "Lab: " prefix catalogues put on display names (OpenRouter ships
+ * names like "Qwen: Qwen3.8 Max"), for surfaces that already convey the vendor
+ * some other way — a logo, or simply not having room for it. Only strips a
+ * short leading segment so a colon inside the name itself (e.g. a version
+ * string) is left alone.
+ */
+export function stripVendorPrefix(displayName: string): string {
+	const match = displayName.match(/^([^:]{1,24}):\s+(.*)$/);
+	return match ? match[2] : displayName;
+}
+
 function buildDisplayName(
 	provider: string,
 	variantKey: string,
