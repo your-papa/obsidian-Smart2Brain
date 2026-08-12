@@ -957,8 +957,15 @@
 
 .s2b-model-filter-bar {
 	display: flex;
+	align-items: center;
 	gap: 8px;
 	padding: 8px 12px 4px;
+	/* .prompt is a flex column with a fixed total height (input + this bar +
+	   results); as a plain block child this bar has no intrinsic height for
+	   flexbox to respect, so it gets squeezed to a sliver instead of showing
+	   its pills. flex-shrink: 0 plus an explicit height fixes the basis. */
+	flex-shrink: 0;
+	height: 44px;
 	/* One scrolling row: a wrapping bar would push the results list down by an
 	   unpredictable amount every time the vendor set changes. */
 	overflow-x: auto;
@@ -1089,8 +1096,17 @@
 }
 
 .s2b-model-suggestion-tag.capability {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 4px;
 	background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
 	color: var(--text-accent);
+}
+
+.s2b-model-suggestion-tag.capability svg {
+	width: 13px;
+	height: 13px;
 }
 
 /* Model-management grids are fixed 2/3 columns; a phone can't fit that without

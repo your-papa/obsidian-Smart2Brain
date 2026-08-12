@@ -3,6 +3,7 @@ import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { extractVendor, logUnclassifiedModelsInfo } from "../../lib/modelVendorClassification";
 import type { UiClassifiableModel } from "../../lib/modelVendorClassification";
 import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../../types/modelMetadata";
+import { MODEL_CAPABILITY_ICONS } from "../../lib/modelCapabilityIcons";
 import { getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
@@ -411,16 +412,28 @@ function getProviderListDisplay(): string {
                     {/if}
 
                     {#if model.kind === "chat" && model.capabilities.toolCalls}
-                      <span class="meta-tag capability" title="Tool calling">Tools</span>
+                      {@const { icon, label } = MODEL_CAPABILITY_ICONS.toolCalls}
+                      <span class="meta-tag capability" title={label} aria-label={label}>
+                        <Icon name={icon} size="xs" />
+                      </span>
                     {/if}
                     {#if model.kind === "chat" && model.capabilities.reasoning}
-                      <span class="meta-tag capability" title="Reasoning">Reasoning</span>
+                      {@const { icon, label } = MODEL_CAPABILITY_ICONS.reasoning}
+                      <span class="meta-tag capability" title={label} aria-label={label}>
+                        <Icon name={icon} size="xs" />
+                      </span>
                     {/if}
                     {#if model.kind === "chat" && model.capabilities.vision}
-                      <span class="meta-tag capability" title="Vision/Attachments">Vision</span>
+                      {@const { icon, label } = MODEL_CAPABILITY_ICONS.vision}
+                      <span class="meta-tag capability" title={label} aria-label={label}>
+                        <Icon name={icon} size="xs" />
+                      </span>
                     {/if}
                     {#if model.kind === "chat" && model.capabilities.structuredOutput}
-                      <span class="meta-tag capability" title="Structured output">JSON</span>
+                      {@const { icon, label } = MODEL_CAPABILITY_ICONS.structuredOutput}
+                      <span class="meta-tag capability" title={label} aria-label={label}>
+                        <Icon name={icon} size="xs" />
+                      </span>
                     {/if}
                   </div>
                 </div>
@@ -737,6 +750,10 @@ function getProviderListDisplay(): string {
   }
 
   .meta-tag.capability {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
     background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
     color: var(--text-accent);
   }

@@ -1,5 +1,6 @@
 import { SuggestModal, setIcon } from "obsidian";
 import type { App } from "obsidian";
+import { MODEL_CAPABILITY_ICONS } from "../../lib/modelCapabilityIcons";
 import { extractVendor } from "../../lib/modelVendorClassification";
 import type { UiClassifiableModel } from "../../lib/modelVendorClassification";
 import { getProviderDefinition } from "../../providers/index";
@@ -238,6 +239,12 @@ export class ModelSuggestModal extends SuggestModal<HydratedModel> {
 		const meta = el.createDiv({ cls: "s2b-model-suggestion-meta" });
 		const tag = (text: string, extraCls?: string) =>
 			meta.createSpan({ text, cls: `s2b-model-suggestion-tag${extraCls ? ` ${extraCls}` : ""}` });
+		const iconTag = (icon: string, label: string) => {
+			const span = meta.createSpan({ cls: "s2b-model-suggestion-tag capability" });
+			span.setAttribute("title", label);
+			span.setAttribute("aria-label", label);
+			setIcon(span, icon);
+		};
 
 		tag(this.getProviderDisplayName(model.provider), "s2b-model-suggestion-tag--provider");
 
@@ -246,10 +253,14 @@ export class ModelSuggestModal extends SuggestModal<HydratedModel> {
 			if (model.pricing?.inputUsdPer1M !== undefined || model.pricing?.outputUsdPer1M !== undefined) {
 				tag(`${formatCost(model.pricing?.inputUsdPer1M)}/${formatCost(model.pricing?.outputUsdPer1M)}`);
 			}
-			if (model.capabilities.toolCalls) tag("Tools", "capability");
-			if (model.capabilities.reasoning) tag("Reasoning", "capability");
-			if (model.capabilities.vision) tag("Vision", "capability");
-			if (model.capabilities.structuredOutput) tag("JSON", "capability");
+			if (model.capabilities.toolCalls)
+				iconTag(MODEL_CAPABILITY_ICONS.toolCalls.icon, MODEL_CAPABILITY_ICONS.toolCalls.label);
+			if (model.capabilities.reasoning)
+				iconTag(MODEL_CAPABILITY_ICONS.reasoning.icon, MODEL_CAPABILITY_ICONS.reasoning.label);
+			if (model.capabilities.vision)
+				iconTag(MODEL_CAPABILITY_ICONS.vision.icon, MODEL_CAPABILITY_ICONS.vision.label);
+			if (model.capabilities.structuredOutput)
+				iconTag(MODEL_CAPABILITY_ICONS.structuredOutput.icon, MODEL_CAPABILITY_ICONS.structuredOutput.label);
 		} else {
 			tag(`${formatTokenLimit(model.maxInputTokens)} max input`);
 			if (model.pricing?.inputUsdPer1M !== undefined) {
