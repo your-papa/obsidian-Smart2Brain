@@ -271,16 +271,6 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
         onchange={(checked) => (pluginData.showActiveAgentsInStatusBar = checked)}
       />
     </SettingItem>
-
-    <SettingItem
-      name="Show recommendations"
-      desc="Show suggested queries, plugin skill nudges, and updated-default notices on a new chat's empty state. Turning this back on restores any suggestions you previously dismissed individually."
-    >
-      <Toggle
-        checked={pluginData.showChatRecommendations}
-        onchange={(checked) => (pluginData.showChatRecommendations = checked)}
-      />
-    </SettingItem>
   </SettingGroup>
 </div>
 

@@ -503,13 +503,6 @@ export interface PluginData {
 	/** IDs of new-chat recommendations the user has dismissed. Includes the well-known block id to dismiss the whole surface. */
 	dismissedRecommendations: string[];
 	/**
-	 * Master switch for the new-chat recommendations block (suggested queries, plugin
-	 * skill nudges, updated-default notices). Independent of `dismissedRecommendations`:
-	 * turning this back on restores anything not individually dismissed. Persisted;
-	 * default enabled.
-	 */
-	showChatRecommendations: boolean;
-	/**
 	 * Default collapse state of a chat turn's thinking process when the user hasn't
 	 * toggled that turn individually: expanded (true) or collapsed (false). Persisted
 	 * so the choice survives reloads. Default expanded.

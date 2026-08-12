@@ -111,19 +111,14 @@ const ctx = $derived({
 	hasGraph: indexPopulated(data.graphEmbedIndex),
 });
 
-// "Show recommendations" is a master switch, independent of per-item dismissal:
-// turning it back on restores anything not individually dismissed, since it never
-// touches `dismissedRecommendations`. Suggestions are also hidden (not just the
-// `chat`-gated one) when no model is selected — the model-select CTA takes their
-// place, since none of them can actually be sent yet.
-const suggestions = $derived(
-	data.showChatRecommendations && !noModelSelected ? filterSuggestions(ctx, data.dismissedRecommendations) : [],
-);
+// Suggestions are hidden (not just the `chat`-gated one) when no model is
+// selected — the model-select CTA takes their place, since none of them can
+// actually be sent yet.
+const suggestions = $derived(!noModelSelected ? filterSuggestions(ctx, data.dismissedRecommendations) : []);
 
 // Installed+enabled plugins whose S2B integration isn't switched on for the
 // selected agent yet. Not dismissed = eligible to nudge.
 const pluginNudges = $derived.by<PluginNudge[]>(() => {
-	if (!data.showChatRecommendations) return [];
 	// Depend on the live-plugin refresh signal so this recomputes on install/enable.
 	const _refresh = pluginRefresh;
 	const integrations = plugin.agentManager?.resolvePluginIntegrations() ?? [];
@@ -152,9 +147,7 @@ const pluginNudges = $derived.by<PluginNudge[]>(() => {
 // "Updated default" notices: agents whose customized prompt/guidance couldn't be
 // auto-migrated after a default changed upstream (issue #356). staleGuidance is
 // computed once at startup, so this is a plain read (not reactive to live edits).
-const updateNotices = $derived<UpdateNotice[]>(
-	data.showChatRecommendations ? filterUpdateNotices(data.staleGuidance, data.dismissedRecommendations) : [],
-);
+const updateNotices = $derived<UpdateNotice[]>(filterUpdateNotices(data.staleGuidance, data.dismissedRecommendations));
 
 const hasContent = $derived(updateNotices.length > 0 || pluginNudges.length > 0 || suggestions.length > 0);
 
@@ -200,12 +193,12 @@ async function enablePlugin(nudge: PluginNudge): Promise<void> {
 }
 
 function dismiss(id: string): void {
-	if (id === DISMISS_ALL_ID) {
-		// Also flips the "Show recommendations" setting off, so it stays an accurate
-		// reflection of what's showing rather than silently drifting out of sync.
-		data.dismissAllRecommendations(id);
-		return;
-	}
+	// A plain dismissal, same as any per-item `x` — DISMISS_ALL_ID is just the
+	// well-known id every filter checks. Deliberately does NOT touch the
+	// "Show recommendations" setting: that's a separate, persistent control
+	// (Settings > Agents > Chats), so a future suggestion/nudge that wasn't
+	// covered by this dismissal can still surface, instead of "Dismiss all"
+	// silently and permanently switching the whole surface off.
 	data.dismissRecommendation(id);
 }
 
@@ -227,10 +220,11 @@ function reviewNotice(notice: UpdateNotice): void {
   demoted to a quiet footer below a divider.
 -->
 <div class="chat-recommendations recommendation-stack flex flex-col">
-  <!-- Left-aligned when it anchors the rows below (matching their edge); centred
-       when it's alone, e.g. everything dismissed — a lone left-aligned heading
-       with nothing to anchor reads as off-center in the pane. -->
-  <div class="greeting" class:greeting--centered={!hasContent && !noModelSelected}>
+  <!-- Always centred, even when rows follow below: dismissing the last item is a
+       normal thing to do, and anchoring the greeting to the rows' left edge means
+       it visibly jumps to centre the moment that happens. A fixed position reads
+       as stable. -->
+  <div class="greeting">
     <p class="greeting-title">Start a new conversation</p>
     <p class="greeting-sub">Ask me anything about your notes.</p>
   </div>
@@ -353,6 +347,12 @@ function reviewNotice(notice: UpdateNotice): void {
     gap: 1.25rem;
   }
 
+  /* Always centred, never anchored to the rows' left edge — see the template
+     comment: dismissing the last row would otherwise make it jump. */
+  .greeting {
+    text-align: center;
+  }
+
   .greeting-title {
     font-size: var(--font-ui-large);
     font-weight: var(--font-medium);
@@ -364,10 +364,6 @@ function reviewNotice(notice: UpdateNotice): void {
     font-size: var(--font-ui-small);
     color: var(--text-muted);
     margin: 0.15rem 0 0;
-  }
-
-  .greeting--centered {
-    text-align: center;
   }
 
   .suggestions-group {

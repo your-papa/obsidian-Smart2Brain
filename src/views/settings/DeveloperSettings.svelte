@@ -32,6 +32,16 @@ function openOnboardingView() {
 	void plugin.activateOnboardingView();
 }
 
+function restoreDismissedRecommendations() {
+	const count = pluginData.dismissedRecommendations.length;
+	pluginData.restoreDismissedRecommendations();
+	new Notice(
+		count > 0
+			? `Restored ${count} dismissed recommendation${count === 1 ? "" : "s"}.`
+			: "No dismissed recommendations to restore.",
+	);
+}
+
 function getLangSmithCheckIcon(): string {
 	if (langSmithCheckState === "success") return "check-circle";
 	if (langSmithCheckState === "error") return "x-circle";
@@ -135,6 +145,17 @@ async function handleCheckLangSmithConnection() {
     <Toggle
       checked={pluginData.showToolIODetails}
       onchange={(checked) => (pluginData.showToolIODetails = checked)}
+    />
+  </SettingItem>
+
+  <SettingItem
+    name="Restore dismissed recommendations"
+    desc="Bring back every suggested query, plugin skill nudge, and updated-default notice dismissed from a new chat's empty state."
+  >
+    <Button
+      buttonText="Restore"
+      iconId="rotate-ccw"
+      onClick={restoreDismissedRecommendations}
     />
   </SettingItem>
 </SettingGroup>
