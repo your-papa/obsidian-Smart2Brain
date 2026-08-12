@@ -1156,7 +1156,7 @@
    fully square, so they still read as buttons rather than tiles. */
 .is-mobile .attach-context-button.clickable-icon,
 .is-mobile .send-message-button {
-	border-radius: 14px !important;
+	border-radius: 20px !important;
 }
 
 /* The model/agent pills are text buttons rather than icon boxes — give them
