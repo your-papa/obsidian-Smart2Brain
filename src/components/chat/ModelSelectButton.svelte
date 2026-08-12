@@ -90,9 +90,15 @@ function openModelSelectionModal() {
     color: var(--text-muted);
   }
 
-  /* Leave more room for the send button alongside the (now icon-only) agent pill. */
+  /* On mobile the row is just attach + (icon-only) agent pill + this + send, all
+     at the 44px touch floor, so there's more free width than the old fixed 84px
+     cap used — names like "Claude 4.5 Sonnet" truncated with space to spare.
+     Size to the space that's actually left instead of a guessed constant: the
+     button is `min-width: 0` inside a `flex-wrap` row, so it shrinks (and at
+     worst wraps) rather than pushing the send button off-screen. The `50vw`
+     ceiling keeps it from crowding the row on very wide tablets. */
   :global(.is-mobile) .model-name {
-    max-width: 84px;
+    max-width: min(50vw, 200px);
   }
 
   .model-name.no-model {
