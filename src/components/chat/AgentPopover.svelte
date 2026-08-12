@@ -87,14 +87,16 @@ function createNewAgent() {
     align="start"
     sideOffset={8}
   >
-    {#snippet trigger(open)}
+    <!-- No chevron: the composer row's other picker triggers (the model button and
+         the attach popover) don't use one either, and it's the only affordance
+         here that did. -->
+    {#snippet trigger()}
       <span class="agent-pill" data-testid="agent-pill">
         <span class="agent-pill-icon">
           <Icon name={getAgentIcon(selectedAgent)} size="xs" />
         </span>
         <span class="agent-pill-label">{selectedAgent?.name ?? "Default Agent"}</span>
       </span>
-      <Icon name={open ? "chevron-up" : "chevron-down"} size="xs" />
     {/snippet}
 
     {#each agents as agent (agent.id)}
