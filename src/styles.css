@@ -1148,6 +1148,17 @@
 	box-sizing: border-box !important;
 }
 
+/* The attach and send buttons are deliberately `border-radius: 999px` on
+   desktop (see the comments at their own definitions) — at their small
+   desktop size that reads as a soft accent chip. Grown to the 44px mobile
+   touch floor above, 999px makes them full circles, which felt too far from
+   the input's own softer 22px corner. Squircle them down instead of going
+   fully square, so they still read as buttons rather than tiles. */
+.is-mobile .attach-context-button.clickable-icon,
+.is-mobile .send-message-button {
+	border-radius: 14px !important;
+}
+
 /* The model/agent pills are text buttons rather than icon boxes — give them
    the vertical floor without forcing a square, so the label still sets width. */
 .is-mobile .model-select-btn.clickable-icon {
