@@ -625,14 +625,24 @@ $effect(() => {
     tabindex="-1"
     onscroll={handleScroll}
   >
-    <!-- `min-h-full`, NOT `h-full`: this wrapper needs to fill the viewport when
-         the conversation is short (so empty/loading states centre), but `h-full`
-         pins it to the scroller's content-box height, and a long conversation
-         then overflows it instead of growing it. The scroller's mobile
-         `padding-bottom` (which reserves the portaled composer's height) is laid
-         out relative to that collapsed box, so it stops reserving real space and
-         the last message scrolls under the composer. -->
-    <div class="w-full max-w-[--file-line-width] mx-auto min-h-full">
+    <!-- `min-h-full` when there are messages, NOT `h-full`: a long conversation
+         must be allowed to grow past the scroller's content-box height, or the
+         mobile `padding-bottom` (which reserves the portaled composer's height)
+         gets laid out relative to a collapsed box and the last message scrolls
+         under the composer. But with zero messages there's nothing to scroll
+         under anything, and `min-h-full`'s effective height doesn't reliably
+         resolve to 100% through this ancestor chain (percentage heights need a
+         parent with a *definite* height, and `min-height: 100%` doesn't count as
+         one) — so the empty-state's own centering `h-full` collapses to its
+         content height instead of the pane's, and "Start a new conversation"
+         renders near the top instead of vertically centred. `h-full` here (only
+         for the empty/loading branches) is a definite height and doesn't have
+         that gap. -->
+    <div
+      class="w-full max-w-[--file-line-width] mx-auto"
+      class:min-h-full={messages && messages.length > 0}
+      class:h-full={!messages || messages.length === 0}
+    >
       {#if registry.isLoadingSession}
         <!-- Loading skeleton -->
         <div
