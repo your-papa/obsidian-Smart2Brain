@@ -1,5 +1,6 @@
 <script lang="ts">
-import { Popover } from "bits-ui";
+import PickerPopover from "../ui/PickerPopover.svelte";
+import Button from "../ui/Button.svelte";
 import type { ContextUsageBreakdown } from "../../utils/tokenEstimator";
 
 /**
@@ -84,13 +85,16 @@ const maxContextLabel = $derived.by(() => {
 });
 </script>
 
-<Popover.Root>
-  <Popover.Trigger
-    class="context-usage-trigger group relative w-9 h-9 flex items-center justify-center rounded-md border-none bg-transparent hover:bg-transparent active:bg-transparent focus:bg-transparent p-0 cursor-pointer appearance-none shadow-none"
-    title={tooltipText}
-    aria-label="Open context token distribution"
-  >
-    <svg class="w-full h-full -rotate-90" viewBox="0 0 100 100">
+<PickerPopover
+  triggerStyles="context-usage-trigger"
+  triggerClass="group relative w-9 h-9 flex items-center justify-center rounded-md p-0 appearance-none"
+  contentClass="context-usage-popover"
+  tooltip={tooltipText}
+  align="end"
+  sideOffset={6}
+>
+  {#snippet trigger()}
+    <svg class="w-full h-full -rotate-90" viewBox="0 0 100 100" aria-label="Open context token distribution">
       <!-- Background circle -->
       <circle
         class="stroke-current text-[--background-modifier-border]"
@@ -118,49 +122,48 @@ const maxContextLabel = $derived.by(() => {
     >
       {centerLabel}
     </div>
-  </Popover.Trigger>
+  {/snippet}
 
-  <Popover.Portal>
-    <Popover.Content
-      class="bg-[--background-primary] rounded-md border border-solid border-[--background-modifier-border] shadow-md z-[var(--layer-popover)] p-3 min-w-[240px]"
-      sideOffset={6}
-    >
-      <div class="text-xs font-semibold text-[--text-normal] mb-2">Token Distribution (est.)</div>
-      <div class="mb-2 text-[11px] text-[--text-muted] grid grid-cols-[auto_1fr] gap-x-2">
-        <div>Used:</div>
-        <div>{formatNumber(breakdown.totalTokens)}</div>
-        <div>Max:</div>
-        <div>{maxContextLabel}</div>
-      </div>
-      <div class="space-y-1.5">
-        {#each distributionRows as row}
-          <div class="grid grid-cols-[1fr_auto_auto] gap-2 text-xs items-center">
-            <div class="text-[--text-normal]">{row.label}</div>
-            <div class="text-[--text-muted]">{row.percent.toFixed(0)}%</div>
-            <div class="text-[--text-muted]">{formatNumber(row.tokens)}</div>
-          </div>
-        {/each}
-      </div>
-      {#if breakdown.draftAndPendingTokens > 0}
-        <div class="mt-1 text-[11px] text-[--text-muted]">
-          Draft + pending context: {formatNumber(breakdown.draftAndPendingTokens)}
+  <div class="context-usage-panel">
+    <div class="context-usage-heading">Token Distribution (est.)</div>
+
+    <div class="context-usage-summary">
+      <span>Used</span>
+      <span class="context-usage-summary-value">{formatNumber(breakdown.totalTokens)}</span>
+      <span>Max</span>
+      <span class="context-usage-summary-value">{maxContextLabel}</span>
+    </div>
+
+    <div class="picker-popover-separator menu-separator"></div>
+
+    <div class="context-usage-rows">
+      {#each distributionRows as row}
+        <div class="context-usage-row">
+          <span class="context-usage-row-label">{row.label}</span>
+          <span class="context-usage-row-percent">{row.percent.toFixed(0)}%</span>
+          <span class="context-usage-row-tokens">{formatNumber(row.tokens)}</span>
         </div>
-      {/if}
-      <div class="mt-2 text-[11px] text-[--text-muted]">
-        Older context is automatically compacted at about 80% usage.
+      {/each}
+    </div>
+
+    {#if breakdown.draftAndPendingTokens > 0}
+      <div class="context-usage-note">
+        Draft + pending context: {formatNumber(breakdown.draftAndPendingTokens)}
       </div>
-      <div class="mt-3 flex justify-end">
-        <button
-          class="text-xs px-2 py-1 rounded border border-solid border-[--background-modifier-border] bg-[--background-secondary] text-[--text-normal] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={!canSummarizeNow}
-          onclick={() => onSummarizeNow?.()}
-        >
-          Summarize now
-        </button>
-      </div>
-    </Popover.Content>
-  </Popover.Portal>
-</Popover.Root>
+    {/if}
+
+    <div class="context-usage-note">Older context is automatically compacted at about 80% usage.</div>
+
+    <div class="context-usage-actions">
+      <Button
+        buttonText="Summarize now"
+        cta
+        disabled={!canSummarizeNow}
+        onClick={() => onSummarizeNow?.()}
+      />
+    </div>
+  </div>
+</PickerPopover>
 
 <style>
   :global(.context-usage-trigger),
@@ -172,5 +175,74 @@ const maxContextLabel = $derived.by(() => {
     background: transparent !important;
     box-shadow: none !important;
     border: none !important;
+  }
+
+  :global(.context-usage-popover) {
+    min-width: 0;
+    width: max-content;
+  }
+
+  .context-usage-panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 220px;
+    padding: var(--size-4-3);
+  }
+
+  .context-usage-heading {
+    font-size: var(--font-ui-smaller);
+    font-weight: var(--font-semibold);
+    color: var(--text-normal);
+    margin-bottom: var(--size-4-2);
+  }
+
+  .context-usage-summary {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: var(--size-4-2);
+    row-gap: 2px;
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    margin-bottom: var(--size-4-2);
+  }
+
+  .context-usage-summary-value {
+    color: var(--text-normal);
+  }
+
+  .context-usage-rows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-1);
+  }
+
+  .context-usage-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    column-gap: var(--size-4-2);
+    align-items: center;
+    font-size: var(--font-ui-smaller);
+  }
+
+  .context-usage-row-label {
+    color: var(--text-normal);
+  }
+
+  .context-usage-row-percent,
+  .context-usage-row-tokens {
+    color: var(--text-muted);
+    text-align: right;
+  }
+
+  .context-usage-note {
+    margin-top: var(--size-4-1);
+    font-size: var(--font-ui-smaller);
+    color: var(--text-faint);
+  }
+
+  .context-usage-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--size-4-3);
   }
 </style>

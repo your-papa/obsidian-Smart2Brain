@@ -58,7 +58,6 @@ function isLikelyEmbeddingModel(modelName: string): boolean {
 /**
  * Class that provides reactive access to available models across all configured providers.
  * Models are auto-discovered from providers - no manual configuration needed.
- * Used by ModelPopover and Dropdown components.
  */
 export class AvailableModels {
 	#data = getData();

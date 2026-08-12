@@ -12,6 +12,7 @@ import type { ViewFilter, ViewFilterLeaf, ViewFilterGroup } from "../../types/gr
 import Dropdown from "../ui/Dropdown.svelte";
 import Text from "../ui/Text.svelte";
 import Icon from "../ui/Icon.svelte";
+import PickerOptionRow from "../ui/PickerOptionRow.svelte";
 import ViewFilterBuilder from "./ViewFilterBuilder.svelte";
 
 interface Props {
@@ -234,20 +235,17 @@ function hasCombo(type: string): boolean {
                     onblur={handleComboBlur}
                   />
                   {#if comboOpen && comboTarget === "live" && getSuggestions(liveType, comboQuery).length > 0}
-                    <ul class="filter-combo-list">
-                      {#each getSuggestions(liveType, comboQuery) as suggestion (suggestion)}
-                        <li>
-                          <button
-                            type="button"
-                            class="filter-combo-option"
-                            onmousedown={(e) => {
-                              e.preventDefault();
-                              pickSuggestion(suggestion, "live");
-                            }}>{suggestion}</button
-                          >
-                        </li>
-                      {/each}
-                    </ul>
+                    <div class="filter-combo-list picker-popover-content">
+                      <div class="picker-popover-menu">
+                        {#each getSuggestions(liveType, comboQuery) as suggestion (suggestion)}
+                          <PickerOptionRow onClick={() => pickSuggestion(suggestion, "live")}>
+                            {#snippet content()}
+                              {suggestion}
+                            {/snippet}
+                          </PickerOptionRow>
+                        {/each}
+                      </div>
+                    </div>
                   {/if}
                 </div>
               {:else}
@@ -331,20 +329,17 @@ function hasCombo(type: string): boolean {
             onblur={handleComboBlur}
           />
           {#if comboOpen && comboTarget === "leaf" && getSuggestions(leafType, comboQuery).length > 0}
-            <ul class="filter-combo-list">
-              {#each getSuggestions(leafType, comboQuery) as suggestion (suggestion)}
-                <li>
-                  <button
-                    type="button"
-                    class="filter-combo-option"
-                    onmousedown={(e) => {
-                      e.preventDefault();
-                      pickSuggestion(suggestion, "leaf");
-                    }}>{suggestion}</button
-                  >
-                </li>
-              {/each}
-            </ul>
+            <div class="filter-combo-list picker-popover-content">
+              <div class="picker-popover-menu">
+                {#each getSuggestions(leafType, comboQuery) as suggestion (suggestion)}
+                  <PickerOptionRow onClick={() => pickSuggestion(suggestion, "leaf")}>
+                    {#snippet content()}
+                      {suggestion}
+                    {/snippet}
+                  </PickerOptionRow>
+                {/each}
+              </div>
+            </div>
           {/if}
         </div>
       {:else}
@@ -439,41 +434,14 @@ function hasCombo(type: string): boolean {
     box-shadow: 0 0 0 1px var(--interactive-accent);
   }
 
-  .filter-combo-list {
+  .filter-combo-list.filter-combo-list {
     position: absolute;
     top: calc(100% + 2px);
     left: 0;
     right: 0;
     z-index: 100;
-    margin: 0;
-    padding: 2px;
-    list-style: none;
-    background: var(--background-primary);
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     max-height: 180px;
-    overflow-y: auto;
-  }
-
-  .filter-combo-option {
-    display: block;
-    width: 100%;
-    padding: 4px 8px;
-    text-align: left;
-    font-size: 11px;
-    color: var(--text-normal);
-    background: none;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .filter-combo-option:hover {
-    background: var(--background-modifier-hover);
+    overflow: hidden auto;
   }
 
   /* ── Add row ────────────────────────────────────── */

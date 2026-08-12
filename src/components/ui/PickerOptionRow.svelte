@@ -72,22 +72,12 @@ let {
   .picker-option-row {
     display: flex;
     align-items: center;
-    gap: 0.15rem;
     min-width: 0;
-    padding: 0.1rem;
-    border-radius: 0.65rem;
-    transition:
-      background-color 0.12s ease,
-      box-shadow 0.12s ease;
   }
 
-  .picker-option-row:hover {
-    background: var(--background-modifier-hover);
-  }
-
+  .picker-option-row:hover,
   .picker-option-row.is-active {
-    background: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+    background: var(--background-modifier-hover);
   }
 
   .picker-option-row.is-muted {
@@ -100,9 +90,8 @@ let {
     gap: 0.625rem;
     flex: 1;
     min-width: 0;
-    padding: 0.45rem 0.55rem;
+    padding: var(--size-4-2) var(--size-4-3);
     border: none;
-    border-radius: 0.55rem;
     background: transparent;
     color: var(--text-normal);
     font-size: var(--font-ui-small);

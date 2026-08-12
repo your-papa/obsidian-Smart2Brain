@@ -110,7 +110,7 @@ function handleTriggerClick() {
     min-width: min(236px, calc(100vw - 24px));
     max-width: min(340px, calc(100vw - 24px));
     background: var(--background-primary);
-    border-radius: 10px;
+    border-radius: var(--radius-m);
     border: 1px solid var(--background-modifier-border);
     box-shadow: var(--shadow-s);
     z-index: var(--layer-popover);
@@ -120,13 +120,12 @@ function handleTriggerClick() {
   .picker-popover-menu {
     display: flex;
     flex-direction: column;
-    padding: 0.35rem;
-    gap: 0.2rem;
+    padding: var(--size-4-1);
   }
 
   :global(.picker-popover-separator) {
     height: 1px;
-    margin: 0.3rem 0;
+    margin: var(--size-4-1) 0;
     background: var(--background-modifier-border);
   }
 </style>
