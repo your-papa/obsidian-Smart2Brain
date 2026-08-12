@@ -27,7 +27,8 @@ import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import { navigateToPendingChange } from "./lib/pendingChangeNavigation";
 import { registerChatEmbed } from "./views/chat/chatEmbed";
 import RunningIndicator from "./components/chat/RunningIndicator.svelte";
-import { NoteContextView, VIEW_TYPE_NOTE_CONTEXT } from "./views/note-context/NoteContextView";
+// DISABLED FOR INITIAL RELEASE — Note Context view; see the registerView block in onload().
+// import { NoteContextView, VIEW_TYPE_NOTE_CONTEXT } from "./views/note-context/NoteContextView";
 import { OnboardingView, VIEW_TYPE_ONBOARDING } from "./views/onboarding/OnboardingView";
 import { SmartGraphView, VIEW_TYPE_SMART_GRAPH } from "./views/smart-graph/SmartGraphView";
 import SettingsTab from "./views/settings/Settings";
@@ -339,11 +340,14 @@ export default class SecondBrainPlugin extends Plugin {
 			defaultMod: true,
 		});
 		this.registerView(VIEW_TYPE_SMART_GRAPH, (leaf) => new SmartGraphView(leaf, this));
-		this.registerHoverLinkSource(VIEW_TYPE_NOTE_CONTEXT, {
-			display: "S2B Note Context",
-			defaultMod: true,
-		});
-		this.registerView(VIEW_TYPE_NOTE_CONTEXT, (leaf) => new NoteContextView(leaf, this));
+		// DISABLED FOR INITIAL RELEASE — Note Context view. Re-enable together with the
+		// "open-note-context" command and the graph EmbeddingIndexSection in GraphSettings
+		// (it is the only consumer of graphEmbedIndex / semantic edges).
+		// this.registerHoverLinkSource(VIEW_TYPE_NOTE_CONTEXT, {
+		// 	display: "S2B Note Context",
+		// 	defaultMod: true,
+		// });
+		// this.registerView(VIEW_TYPE_NOTE_CONTEXT, (leaf) => new NoteContextView(leaf, this));
 		this.registerView(VIEW_TYPE_ONBOARDING, (leaf) => new OnboardingView(leaf, this));
 
 		if (this.manifest.dir === undefined) {
@@ -396,12 +400,13 @@ export default class SecondBrainPlugin extends Plugin {
 			callback: () => this.activateSmartGraphView(),
 		});
 
-		this.addCommand({
-			id: "open-note-context",
-			name: "Open Note Context",
-			icon: "git-fork",
-			callback: () => this.activateNoteContextView(),
-		});
+		// DISABLED FOR INITIAL RELEASE — see the Note Context registerView block above.
+		// this.addCommand({
+		// 	id: "open-note-context",
+		// 	name: "Open Note Context",
+		// 	icon: "git-fork",
+		// 	callback: () => this.activateNoteContextView(),
+		// });
 
 		this.addCommand({
 			id: "open-onboarding",
@@ -757,22 +762,23 @@ export default class SecondBrainPlugin extends Plugin {
 		workspace.revealLeaf(leaf);
 	}
 
-	async activateNoteContextView() {
-		const { workspace } = this.app;
-
-		let leaf = workspace.getLeavesOfType(VIEW_TYPE_NOTE_CONTEXT)[0];
-
-		if (!leaf) {
-			const newLeaf = workspace.getLeaf("tab");
-			await newLeaf.setViewState({
-				type: VIEW_TYPE_NOTE_CONTEXT,
-				active: true,
-			});
-			leaf = newLeaf;
-		}
-
-		workspace.revealLeaf(leaf);
-	}
+	// DISABLED FOR INITIAL RELEASE — see the Note Context registerView block in onload().
+	// async activateNoteContextView() {
+	// 	const { workspace } = this.app;
+	//
+	// 	let leaf = workspace.getLeavesOfType(VIEW_TYPE_NOTE_CONTEXT)[0];
+	//
+	// 	if (!leaf) {
+	// 		const newLeaf = workspace.getLeaf("tab");
+	// 		await newLeaf.setViewState({
+	// 			type: VIEW_TYPE_NOTE_CONTEXT,
+	// 			active: true,
+	// 		});
+	// 		leaf = newLeaf;
+	// 	}
+	//
+	// 	workspace.revealLeaf(leaf);
+	// }
 
 	async activateOnboardingView() {
 		const { workspace } = this.app;

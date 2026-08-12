@@ -389,12 +389,14 @@ export class VectorStoreService {
 		try {
 			const data = getData();
 			const searchIndex = data.searchEmbedIndex;
-			const graphIndex = data.graphEmbedIndex;
 
-			// Collect unique index IDs to initialize
+			// Collect unique index IDs to initialize.
+			// NOTE: graphEmbedIndex is deliberately NOT opened while the Note Context view —
+			// its only consumer — is disabled for the initial release. Opening it would load
+			// a full index into memory at startup for a feature nothing can reach, and there
+			// is no UI to deselect it. Restore alongside Note Context (see main.ts).
 			const indexIds = new Set<string>();
 			if (searchIndex) indexIds.add(searchIndex);
-			if (graphIndex) indexIds.add(graphIndex);
 
 			if (indexIds.size > 0) {
 				await Promise.all(Array.from(indexIds, (indexId) => this.initializeInstance(indexId)));
@@ -938,7 +940,8 @@ export class VectorStoreService {
 	 */
 	private isActiveIndex(indexId: string): boolean {
 		const data = getData();
-		return indexId === data.searchEmbedIndex || indexId === data.graphEmbedIndex;
+		// graphEmbedIndex is excluded while Note Context is disabled — see init().
+		return indexId === data.searchEmbedIndex;
 	}
 
 	/**

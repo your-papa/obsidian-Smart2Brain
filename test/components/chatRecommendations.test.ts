@@ -13,14 +13,13 @@ import {
 	updateNoticeId,
 } from "../../src/components/chat/chatRecommendations";
 
-const ALL: RecommendationContext = { hasChat: true, hasSearch: true, hasGraph: true };
-const NONE: RecommendationContext = { hasChat: false, hasSearch: false, hasGraph: false };
+const ALL: RecommendationContext = { hasChat: true, hasSearch: true };
+const NONE: RecommendationContext = { hasChat: false, hasSearch: false };
 
 const CATALOG: SuggestedQuery[] = [
 	{ id: "always", icon: "sparkles", label: "Always" },
 	{ id: "chat", icon: "lightbulb", label: "Chat", requires: "chat" },
 	{ id: "search", icon: "search", label: "Search", requires: "search" },
-	{ id: "graph", icon: "network", label: "Graph", requires: "graph" },
 ];
 
 const ids = (list: SuggestedQuery[]) => list.map((s) => s.id);
@@ -36,11 +35,11 @@ describe("filterSuggestions — feature gating", () => {
 	});
 
 	it("shows gated suggestions when the feature is available", () => {
-		expect(ids(filterSuggestions(ALL, [], CATALOG))).toEqual(["always", "chat", "search", "graph"]);
+		expect(ids(filterSuggestions(ALL, [], CATALOG))).toEqual(["always", "chat", "search"]);
 	});
 
 	it("gates each feature independently", () => {
-		const searchOnly: RecommendationContext = { hasChat: false, hasSearch: true, hasGraph: false };
+		const searchOnly: RecommendationContext = { hasChat: false, hasSearch: true };
 		expect(ids(filterSuggestions(searchOnly, [], CATALOG))).toEqual(["always", "search"]);
 	});
 });
@@ -55,7 +54,7 @@ describe("filterSuggestions — dismissal", () => {
 	});
 
 	it("combines gating and per-item dismissal", () => {
-		const searchOnly: RecommendationContext = { hasChat: false, hasSearch: true, hasGraph: false };
+		const searchOnly: RecommendationContext = { hasChat: false, hasSearch: true };
 		expect(ids(filterSuggestions(searchOnly, ["always"], CATALOG))).toEqual(["search"]);
 	});
 });

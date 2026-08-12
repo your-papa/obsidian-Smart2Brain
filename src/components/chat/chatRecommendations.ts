@@ -6,7 +6,7 @@
  */
 
 /** Feature a suggestion depends on. `undefined` ⇒ always available. */
-export type SuggestionRequirement = "chat" | "search" | "graph";
+export type SuggestionRequirement = "chat" | "search";
 
 export interface SuggestedQuery {
 	/** Stable id, used as the dismissal key. */
@@ -28,7 +28,6 @@ export const DISMISS_ALL_ID = "suggested-queries";
 export interface RecommendationContext {
 	hasChat: boolean;
 	hasSearch: boolean;
-	hasGraph: boolean;
 }
 
 /**
@@ -59,13 +58,11 @@ export const SUGGESTED_QUERIES: SuggestedQuery[] = [
 		id: "vault-themes",
 		icon: "git-fork",
 		label: "What are the main themes in my vault?",
-		requires: "graph",
 	},
 	{
 		id: "connect-ideas",
 		icon: "network",
 		label: "Connect ideas across my notes",
-		requires: "graph",
 	},
 	{
 		id: "brainstorm",
@@ -81,8 +78,6 @@ function requirementMet(requires: SuggestionRequirement | undefined, ctx: Recomm
 			return ctx.hasChat;
 		case "search":
 			return ctx.hasSearch;
-		case "graph":
-			return ctx.hasGraph;
 		default:
 			return true;
 	}

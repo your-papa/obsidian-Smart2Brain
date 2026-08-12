@@ -1,5 +1,4 @@
 <script lang="ts">
-import EmbeddingIndexSection from "../../components/settings/EmbeddingIndexSection.svelte";
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import RangeSlider from "../../components/ui/RangeSlider.svelte";
@@ -16,8 +15,8 @@ function updateSetting<K extends keyof typeof pluginData.smartGraphSettings>(
 }
 </script>
 
-<!-- Embedding Index for Graph -->
-<EmbeddingIndexSection purpose="graph" />
+<!-- Embedding index management lives on the Search settings page while Note Context —
+     the only consumer of graphEmbedIndex — is disabled for the initial release. -->
 
 <SettingGroup heading="Outline View">
   <SettingItem

@@ -108,7 +108,6 @@ function indexPopulated(indexId: string | null): boolean {
 const ctx = $derived({
 	hasChat: models.hasModels,
 	hasSearch: indexPopulated(data.searchEmbedIndex),
-	hasGraph: indexPopulated(data.graphEmbedIndex),
 });
 
 // Suggestions are hidden (not just the `chat`-gated one) when no model is
