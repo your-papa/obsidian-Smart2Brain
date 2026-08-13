@@ -1,5 +1,5 @@
 import { normalizePath } from "obsidian";
-import { BASE_SYSTEM_PROMPT, HISTORICAL_SYSTEM_PROMPTS } from "../agent/prompts";
+import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT, HISTORICAL_SYSTEM_PROMPTS } from "../agent/prompts";
 import {
 	createEmptySpaceFilter,
 	matchesSpaceMembershipDraftPath,
@@ -345,11 +345,11 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 			maxResults: 10,
 		},
 	},
-	update_skill: {
+	manage_skills: {
 		enabled: false,
-		name: "update_skill",
+		name: "manage_skills",
 		description:
-			"Revise one of your own attached skills — rewrite its instructions (body) and optionally its description. Use this after you've verified how to accomplish a task (e.g. discovered a plugin's real API) to make that knowledge permanent, so future runs skip re-discovery. The skill's name and plugin link are locked. All edits are staged for the user to review before they apply.",
+			"Create new skills, revise your own attached skills, or delete skills you created. Changes apply immediately. A skill's name and plugin link are locked once created; only the body and description can change.",
 	},
 };
 
@@ -400,7 +400,7 @@ function createDefaultAgent(): AgentConfig {
 // ---------------------------------------------------------------------------
 
 /** Increment this when making any breaking change to PluginData. Add a corresponding entry to MIGRATIONS. */
-const CURRENT_SCHEMA_VERSION = 6;
+const CURRENT_SCHEMA_VERSION = 8;
 
 type Migration = (data: PluginData) => void;
 
@@ -478,6 +478,43 @@ const MIGRATIONS: Migration[] = [
 			}
 		}
 	},
+	// v6 → v7: the memory prompt moves from this config field to a file
+	//          (Memory Prompts/<Agent Name>.md), same treatment as the v4→v5 base-prompt move.
+	//          If the user CUSTOMIZED it (non-empty and not equal to DEFAULT_MEMORY_PROMPT),
+	//          stash it in a transient so the async seed (PromptFilesService.seedDefaults)
+	//          writes it to the new file instead of clobbering it with the factory default.
+	//          A recognized/absent default is dropped — the file seeds fresh from the default.
+	(data) => {
+		for (const agent of Object.values(data.agents ?? {})) {
+			const a = agent as unknown as Record<string, unknown>;
+			const oldPrompt = typeof a.memoryPrompt === "string" ? (a.memoryPrompt as string) : "";
+			const isShippedDefault = !oldPrompt.trim() || oldPrompt === DEFAULT_MEMORY_PROMPT;
+			if (!isShippedDefault) a.migratedMemoryPrompt = oldPrompt;
+			a.memoryPrompt = undefined;
+		}
+	},
+	// v7 → v8: `update_skill` renamed to `manage_skills` (tool now also creates/deletes skills,
+	//          not just edits them) and its bundled skill folder renamed `update-skills` →
+	//          `manage-skills`. Two independent keyspaces reference the old names and must both
+	//          move, preserving any `enabled: false` veto — otherwise a disabled tool/skill would
+	//          silently read as enabled again under the new key (toolsConfig via its own default,
+	//          agent.skills via the `?? true` fallback in AgentManager.collectEnabledSkills /
+	//          attachedToolIds). The on-disk skill folder itself is renamed by
+	//          SkillsService.migrateCoreSkills, not here — migrations are synchronous and data-only.
+	(data) => {
+		for (const agent of Object.values(data.agents ?? {})) {
+			const toolsConfig = agent.toolsConfig as unknown as Record<string, unknown>;
+			if (toolsConfig && "update_skill" in toolsConfig) {
+				toolsConfig.manage_skills = toolsConfig.update_skill;
+				toolsConfig.update_skill = undefined;
+			}
+			const skills = agent.skills as unknown as Record<string, unknown>;
+			if (skills && "update-skills" in skills) {
+				skills["manage-skills"] = skills["update-skills"];
+				skills["update-skills"] = undefined;
+			}
+		}
+	},
 ];
 
 function runMigrations(data: PluginData): void {
@@ -513,6 +550,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	agentFolder: "Agents",
 	agentFolderMigrated: false,
 	coreSkillsSeeded: false,
+	manageSkillsFolderMigrated: false,
 
 	// Privacy
 	privacyMode: "private-by-default",
@@ -758,6 +796,14 @@ export class PluginDataStore {
 	}
 	set coreSkillsSeeded(val: boolean) {
 		this.#data.coreSkillsSeeded = val;
+		this.saveSettings();
+	}
+
+	get manageSkillsFolderMigrated() {
+		return this.#data.manageSkillsFolderMigrated ?? false;
+	}
+	set manageSkillsFolderMigrated(val: boolean) {
+		this.#data.manageSkillsFolderMigrated = val;
 		this.saveSettings();
 	}
 
@@ -2193,10 +2239,11 @@ export class PluginDataStore {
 let _pluginDataStore: PluginDataStore | null = null;
 
 /**
- * Per-agent staleness for the base system prompt (file `Base Prompts/<id>.md`): stale when the
- * file content is an OLD shipped default (the shipped default moved since the user's copy was
- * written). A user customization we don't recognize is left alone; absence ⇒ live default.
- * Skill/tool guidance moved into skill bodies, so it is no longer tracked here.
+ * Per-agent staleness for the base system prompt (file
+ * `System Prompts/<Agent Name>/Base.md`): stale when the file content is an OLD shipped
+ * default (the shipped default moved since the user's copy was written). A user customization
+ * we don't recognize is left alone; absence ⇒ live default. Skill/tool guidance moved into
+ * skill bodies, so it is no longer tracked here.
  */
 function detectStaleGuidance(agent: AgentConfig, reader: PromptFileReader | null): StaleGuidance[] {
 	const stale: StaleGuidance[] = [];

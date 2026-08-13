@@ -2,7 +2,7 @@ import type { BuiltInToolId } from "../types/plugin";
 
 /**
  * Display metadata for a built-in tool, shown in the Agent editor and the
- * per-skill SkillToolsModal. The runtime tool `name`/`description` come from the
+ * agent-level ToolsModal. The runtime tool `name`/`description` come from the
  * agent's `toolsConfig` (user-editable); these are the fallback defaults + the
  * plugin-requirement hint used purely for UI rendering.
  */
@@ -15,7 +15,7 @@ export interface BuiltInToolMeta {
 
 /**
  * Default display metadata for every built-in tool. Shared by the agent editor and the
- * per-skill `SkillToolsModal` (per-tool sections) so the display-name title-casing and
+ * agent-level `ToolsModal` (per-tool sections) so the display-name title-casing and
  * default descriptions live in exactly one place.
  */
 export const BUILT_IN_TOOL_META: BuiltInToolMeta[] = [
@@ -77,10 +77,10 @@ export const BUILT_IN_TOOL_META: BuiltInToolMeta[] = [
 			"Search the web and return results (title, URL, snippet). Configure the provider and API key in the tool's Configure panel. Prefer vault search first.",
 	},
 	{
-		id: "update_skill",
-		defaultName: "Update Skill",
+		id: "manage_skills",
+		defaultName: "Manage Skills",
 		defaultDescription:
-			"Revise one of the agent's own attached skills — rewrite its instructions and optionally its description to capture verified knowledge. The skill's name and plugin link are locked; edits are staged for your review.",
+			"Create new skills, revise the agent's own attached skills, or delete skills it created. Changes apply immediately. A skill's name and plugin link are locked once created.",
 	},
 ];
 
@@ -107,4 +107,22 @@ export function getToolDisplayName(toolId: BuiltInToolId, configuredName?: strin
 /** Description shown for a tool — configured description first, then the default. */
 export function getToolDescription(toolId: BuiltInToolId, configuredDescription?: string): string {
 	return configuredDescription ?? META_BY_ID.get(toolId)?.defaultDescription ?? "";
+}
+
+/**
+ * Tools with at least one tool-specific setting in `ToolConfigForm` (beyond the
+ * non-editable name/description carried in `toolsConfig`). Kept in sync with that
+ * component's per-tool branches; `ToolsModal` uses this to hide the gear for tools
+ * that would otherwise open an empty config modal.
+ */
+const TOOLS_WITH_SETTINGS = new Set<BuiltInToolId>([
+	"search_notes",
+	"grep_notes",
+	"read_content",
+	"manage_notes",
+	"web_search",
+]);
+
+export function toolHasConfigurableSettings(toolId: BuiltInToolId): boolean {
+	return TOOLS_WITH_SETTINGS.has(toolId);
 }

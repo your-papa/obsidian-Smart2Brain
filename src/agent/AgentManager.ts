@@ -57,7 +57,7 @@ import { createGrepNotesTool } from "./tools/grepNotes";
 import { createLoadSkillTool } from "./tools/loadSkill";
 import { createListDirectoryTool } from "./tools/listDirectory";
 import { createManageNotesTool } from "./tools/manageNotes";
-import { createUpdateSkillTool } from "./tools/updateSkill";
+import { createManageSkillsTool } from "./tools/manageSkills";
 import { createReadContentTool } from "./tools/readContent";
 import { createSearchNotesTool } from "./tools/searchNotes";
 import {
@@ -348,14 +348,19 @@ export class AgentManager {
 		const selectedAgent = agent ?? pluginData.getSelectedAgent();
 
 		let prompt = this.plugin.promptFilesService?.getBasePrompt(selectedAgent.id) ?? BASE_SYSTEM_PROMPT;
-		const hasWriteTools = selectedAgent.toolsConfig.manage_notes?.enabled ?? false;
+		// Must test actual binding, not just the per-tool toggle: `manage_notes` also needs an
+		// enabled skill to attach it. Gating on the toggle alone would inject memory
+		// instructions telling the agent to record memories with a tool it doesn't have
+		// (e.g. toggle on, but the Edit Notes skill disabled).
+		const hasWriteTools = this.isToolBound(selectedAgent, "manage_notes");
 
 		// Memory: long-lived facts stored as notes in the shared memory folder. Gated on the
 		// agent opting in AND manage_notes being enabled (recording a memory is a note
-		// write). The guidance lives in the user-editable `memoryPrompt` and is placed
+		// write). The guidance lives in the user-editable
+		// System Prompts/<Agent Name>/Memory.md note (see PromptFilesService) and is placed
 		// right after the base prompt — adjacent to it, NOT buried in the auto-appended
-		// tool-guideline tail — so it reads as (and is tunable as) agent behavior.
-		// Writes inside the folder auto-apply (see stageNoteOperations).
+		// tool-guideline tail — so it reads as (and is tunable as) agent behavior. Writes
+		// inside the folder auto-apply (see stageNoteOperations).
 		if (selectedAgent.memoryEnabled && hasWriteTools) {
 			const memoryFolder = normalizePath(memoriesDir());
 			// Best-effort ensure the folder exists so search_notes/list_directory have
@@ -368,9 +373,11 @@ export class AgentManager {
 				// ignore — folder is created on first write anyway
 			}
 			// The live memory folder is named by a header we always prepend, so it tracks the
-			// configurable agent folder. The editable `memoryPrompt` is path-agnostic instructions
-			// (no baked-in path to go stale); absent falls back to the default instructions.
-			const instructions = selectedAgent.memoryPrompt?.trim() || DEFAULT_MEMORY_PROMPT;
+			// configurable agent folder. The note's instructions are path-agnostic (no baked-in
+			// path to go stale); an absent file falls back to DEFAULT_MEMORY_PROMPT (see
+			// PromptFilesService.getMemoryPrompt).
+			const instructions =
+				this.plugin.promptFilesService?.getMemoryPrompt(selectedAgent.id) ?? DEFAULT_MEMORY_PROMPT;
 			prompt += `\n\n${buildMemoryFolderHeader(memoryFolder)}\n\n${instructions}`;
 		}
 
@@ -656,6 +663,18 @@ export class AgentManager {
 	}
 
 	/**
+	 * Whether a built-in tool will actually be bound for this agent: some *enabled* skill
+	 * attaches it via `allowed-tools` AND its per-tool `toolsConfig` override hasn't vetoed
+	 * it. This conjunction is the single source of truth for "does the agent have this tool"
+	 * — callers that gate on tool availability (e.g. the memory block in
+	 * `assembleSystemPrompt`, the editor's Memory dependency badge) must use this rather than
+	 * reading `toolsConfig[id].enabled` alone, which is only half the condition.
+	 */
+	isToolBound(agentCfg: AgentConfig, toolId: BuiltInToolId): boolean {
+		return this.attachedToolIds(agentCfg).has(toolId) && (agentCfg.toolsConfig[toolId]?.enabled ?? true);
+	}
+
+	/**
 	 * Builds the built-in tool instances for a given agent config. A built-in tool binds
 	 * iff (a) some enabled skill attaches it via `allowed-tools` AND (b) the per-tool
 	 * override in `toolsConfig` hasn't disabled it (default enabled). Shared between the
@@ -665,6 +684,8 @@ export class AgentManager {
 		const tools: StructuredToolInterface[] = [];
 
 		// A tool must be attached by an enabled skill AND not vetoed by its per-tool override.
+		// Resolved once here rather than via isToolBound per tool, so the skill cache is only
+		// walked a single time while building the whole tool list.
 		const attached = this.attachedToolIds(agentCfg);
 		const isToolEnabled = (toolId: BuiltInToolId): boolean => {
 			return attached.has(toolId) && (agentCfg.toolsConfig[toolId]?.enabled ?? true);
@@ -734,7 +755,7 @@ export class AgentManager {
 			["manage_notes", () => createManageNotesTool(this.plugin.app, agentCfg.id)],
 			["fetch_url", () => createFetchUrlTool()],
 			["web_search", () => createWebSearchTool()],
-			["update_skill", () => createUpdateSkillTool(this.plugin.skillsService, this.plugin.app, agentCfg.id)],
+			["manage_skills", () => createManageSkillsTool(this.plugin.skillsService, this.plugin.app, agentCfg.id)],
 		];
 
 		for (const [toolId, factory] of builtInTools) {
@@ -816,7 +837,7 @@ export class AgentManager {
 	 * The skills switched on for an agent, in a stable display order, each with a resolved
 	 * icon id. Everything is a skill now, so this is:
 	 *   - each enabled, available core / community / auto-discovered plugin skill (the 4 former
-	 *     capabilities — explore-vault/edit-notes/web/update-skills — are core skills here);
+	 *     capabilities — explore-vault/edit-notes/web/manage-skills — are core skills here);
 	 *   - each api-plugin with no skill covering it yet whose exec tool is enabled;
 	 *   - each enabled user-authored custom skill;
 	 *   - each enabled MCP server.
@@ -1071,7 +1092,6 @@ export class AgentManager {
 		// and cheap (skip-if-exists writes over a bounded file set).
 		const promptFiles = this.plugin.promptFilesService;
 		if (promptFiles) {
-			await promptFiles.migrateBasePromptFilenames(getData().agents);
 			await promptFiles.seedDefaults(getData().agents);
 			await promptFiles.refresh(getData().agents);
 		}

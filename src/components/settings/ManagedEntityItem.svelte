@@ -182,8 +182,13 @@ function handleRadioClick(event: MouseEvent) {
     z-index: 1;
     display: flex;
     align-items: flex-start;
-    gap: 12px;
     min-width: 0;
+    /* !important: this element also carries Obsidian's native .setting-item-info class
+       for native modal styling, and some themes (e.g. Cupertino) set flex-direction:
+       column and a smaller gap on that class inside sidebar-layout modals with higher
+       selector specificity than a single custom class can beat. */
+    flex-direction: row !important;
+    gap: 12px !important;
   }
 
   .managed-entity-item-leading {

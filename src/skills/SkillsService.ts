@@ -423,14 +423,71 @@ export class SkillsService {
 	}
 
 	/**
+	 * One-time migration (schema v8): the `update-skills` core skill folder is renamed
+	 * `manage-skills` (the tool gained create/delete, not just edit). Renames the on-disk
+	 * directory so `bootstrapDefaultSkills` doesn't seed a duplicate `manage-skills/` alongside
+	 * an orphaned `update-skills/`. A no-op (and immediately marks done) when no legacy folder
+	 * exists — covers fresh installs. Idempotent via `manageSkillsFolderMigrated`; never clobbers
+	 * an existing `manage-skills/` (e.g. a user who already has a custom skill at that name).
+	 * Must run BEFORE bootstrap so discovery sees the renamed folder, not a stale duplicate.
+	 *
+	 * The directory rename alone is not enough: skills are keyed by `frontmatter.name` during
+	 * discovery, not the folder name (verified live — a folder rename with a stale `name:` inside
+	 * makes the skill vanish from `getCachedSkills()` entirely, silently dropping `manage_skills`
+	 * for every agent). So after the rename, also rewrite the `name:` and `allowed-tools:`
+	 * frontmatter lines to match — these two fields must structurally track the new folder/tool id
+	 * regardless of customization. `description:`, `metadata:`, and the body are left untouched so
+	 * a user's edits to those survive.
+	 */
+	async migrateManageSkillsFolder(): Promise<void> {
+		const data = getData();
+		if (data.manageSkillsFolderMigrated) return;
+
+		const dir = this.getSkillsDir();
+		const oldDir = `${dir}/update-skills`;
+		const newDir = `${dir}/manage-skills`;
+
+		try {
+			if (!(await this.adapter.exists(oldDir))) {
+				data.manageSkillsFolderMigrated = true;
+				return;
+			}
+			if (await this.adapter.exists(newDir)) {
+				// Both exist — leave the legacy folder in place rather than guess which to keep.
+				Log.debug(`Both ${oldDir} and ${newDir} exist; leaving legacy folder for manual cleanup`);
+				data.manageSkillsFolderMigrated = true;
+				return;
+			}
+			await this.adapter.rename(oldDir, newDir);
+
+			const skillPath = `${newDir}/${SKILL_FILENAME}`;
+			if (await this.adapter.exists(skillPath)) {
+				const raw = await this.adapter.read(skillPath);
+				const updated = raw
+					.replace(/^name:\s*update-skills\s*$/m, "name: manage-skills")
+					.replace(/^allowed-tools:\s*update_skill\s*$/m, "allowed-tools: manage_skills");
+				if (updated !== raw) await this.adapter.write(skillPath, updated);
+			}
+
+			Log.info(`Renamed core-skill folder ${oldDir} -> ${newDir}`);
+			data.manageSkillsFolderMigrated = true;
+		} catch (error) {
+			// Leave the flag unset so we retry next start.
+			Log.error("manage-skills folder migration failed:", error);
+		}
+	}
+
+	/**
 	 * Initialize the skills service.
 	 * Consolidates legacy skills into the agent folder's Skills/ dir, cleans up orphaned
-	 * core-skill guidance (v6 core-skill migration), bootstraps default skills if needed, then
-	 * discovers all available skills. Call this once on plugin load.
+	 * core-skill guidance (v6 core-skill migration), renames update-skills -> manage-skills
+	 * (v8), bootstraps default skills if needed, then discovers all available skills. Call this
+	 * once on plugin load.
 	 */
 	async initialize(): Promise<void> {
 		await StartupProfiler.measure("skills:migrate", () => this.migrateAgentFolder());
 		await StartupProfiler.measure("skills:migrate-core", () => this.migrateCoreSkills());
+		await StartupProfiler.measure("skills:migrate-manage-skills", () => this.migrateManageSkillsFolder());
 		await StartupProfiler.measure("skills:bootstrap", () => this.bootstrapDefaultSkills());
 		await StartupProfiler.measure("skills:discover", () => this.discoverSkills());
 	}

@@ -541,9 +541,6 @@ export default class SecondBrainPlugin extends Plugin {
 					// Seed default guidance / base-prompt files (if absent) then load them into cache,
 					// so the assembled system prompt and staleness detection see file content.
 					await StartupProfiler.measure("promptFiles:init", async () => {
-						// Migrate any legacy id-named files to the current name-based scheme first,
-						// so seedDefaults sees the existing (renamed) file and doesn't re-create it.
-						await this.promptFilesService.migrateBasePromptFilenames(this.pluginData.agents);
 						await this.promptFilesService.seedDefaults(this.pluginData.agents);
 						await this.promptFilesService.refresh(this.pluginData.agents);
 					});
@@ -562,10 +559,11 @@ export default class SecondBrainPlugin extends Plugin {
 			})();
 		});
 
-		// Everything under the agent folder now lives in the vault, so an accepted `update_skill`
-		// edit or a manual user edit to a skill / GUIDANCE.md / base-prompt file fires a vault
-		// modify/create/delete event. Re-discover skills, reload the prompt-file caches, and rebuild
-		// the live agent's system prompt so revised content takes effect without a reload.
+		// Everything under the agent folder now lives in the vault, so an accepted `manage_skills`
+		// create/update/delete or a manual user edit to a skill / GUIDANCE.md / base-prompt file
+		// fires a vault modify/create/delete event. Re-discover skills, reload the prompt-file
+		// caches, and rebuild the live agent's system prompt so revised content takes effect
+		// without a reload.
 		const refreshAgentContextOnVaultChange = (file: TFile | { path?: string }) => {
 			const path = file?.path;
 			if (!path || !isAgentFilePath(path)) return;
@@ -719,10 +717,10 @@ export default class SecondBrainPlugin extends Plugin {
 		// Await the agent-root folder before seeding: the `agentFolder` setter's createFolder is
 		// fire-and-forget, so it may not have completed by the time we get here. Obsidian's
 		// DataAdapter.mkdir doesn't create intermediate parents, so bootstrapping the nested
-		// `Skills/`/`Base Prompts/` dirs against a not-yet-created root would throw and abort the
-		// rest of reinit (prompt refresh + cache invalidation), leaving chats on the old folder's
-		// prompts. (bootstrapDefaultSkills/seedDefaults also ensure the root now, but making the
-		// dependency explicit here keeps reinit correct independent of their internals.)
+		// `Skills/`/`System Prompts/` dirs against a not-yet-created root would throw and abort
+		// the rest of reinit (prompt refresh + cache invalidation), leaving chats on the old
+		// folder's prompts. (bootstrapDefaultSkills/seedDefaults also ensure the root now, but
+		// making the dependency explicit here keeps reinit correct independent of their internals.)
 		const root = this.pluginData.agentFolder;
 		if (!this.app.vault.getFolderByPath(root)) {
 			await this.app.vault.adapter.mkdir(root).catch(() => {});
@@ -730,7 +728,6 @@ export default class SecondBrainPlugin extends Plugin {
 		await this.skillsService?.migrateCoreSkills();
 		await this.skillsService?.bootstrapDefaultSkills();
 		await this.skillsService?.discoverSkills();
-		await this.promptFilesService?.migrateBasePromptFilenames(this.pluginData.agents);
 		await this.promptFilesService?.seedDefaults(this.pluginData.agents);
 		// Reload the base-prompt cache from the *new* folder — seedDefaults only writes files,
 		// it doesn't touch the cache, so without this the assembled prompt keeps serving the old

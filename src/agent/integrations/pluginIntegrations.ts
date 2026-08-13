@@ -152,7 +152,7 @@ export const BUNDLED_CORE_SKILL_ICONS: Record<string, string> = {
 	"explore-vault": "compass",
 	"edit-notes": "file-pen",
 	web: "globe",
-	"update-skills": "wand-2",
+	"manage-skills": "wand-2",
 };
 
 /**
@@ -160,7 +160,7 @@ export const BUNDLED_CORE_SKILL_ICONS: Record<string, string> = {
  * both the agent editor's Core Skills list and the agents-summary icon strip so the two never
  * drift. Core-plugin skills (Canvas, Bases, …) are ranked after all of these.
  */
-export const S2B_CORE_SKILL_ORDER = ["explore-vault", "edit-notes", "web", "update-skills"];
+export const S2B_CORE_SKILL_ORDER = ["explore-vault", "edit-notes", "web", "manage-skills"];
 
 /**
  * Sort rank for a core-category skill: listed S2B built-ins first in `S2B_CORE_SKILL_ORDER`,

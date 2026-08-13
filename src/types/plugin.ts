@@ -117,7 +117,7 @@ export const BUILT_IN_TOOL_IDS = [
 	"manage_notes",
 	"fetch_url",
 	"web_search",
-	"update_skill",
+	"manage_skills",
 ] as const;
 
 export type BuiltInToolId = (typeof BUILT_IN_TOOL_IDS)[number];
@@ -129,8 +129,10 @@ export type BuiltInToolId = (typeof BUILT_IN_TOOL_IDS)[number];
  * reactive `staleGuidance` getter.
  */
 export interface PromptFileReader {
-	/** Cached content of `Base Prompts/<agentId>.md`, or null if absent. */
+	/** Cached content of `System Prompts/<Agent Name>/Base.md`, or null if absent. */
 	getBasePrompt(agentId: string): string | null;
+	/** Cached content of `System Prompts/<Agent Name>/Memory.md`, or null if absent. */
+	getMemoryPrompt(agentId: string): string | null;
 }
 
 /**
@@ -410,15 +412,13 @@ export interface AgentConfig {
 	 * Absent = disabled. When enabled (and `manage_notes` is on), the memory guidance is
 	 * interpolated into the assembled system prompt and note writes inside the global
 	 * `Agents/Memories/` folder auto-apply.
+	 *
+	 * The folder is global (remembered facts belong to the user, not to one agent); the
+	 * guidance injected here is per-agent, living in
+	 * `Agents/System Prompts/<Agent Name>/Memory.md` (see `PromptFilesService`), because how
+	 * eagerly to read/record is agent behavior.
 	 */
 	memoryEnabled?: boolean;
-	/**
-	 * User-editable memory instructions injected right after the base system prompt
-	 * (not in the auto-appended tool tail) so the user can read and tune them. Seeded
-	 * with the default guidance when memory is first enabled; absent falls back to the
-	 * default rendered from the global memories folder.
-	 */
-	memoryPrompt?: string;
 }
 
 /**
@@ -461,9 +461,10 @@ export interface PluginData {
 	/**
 	 * Configurable root vault folder for all agent context (default "Agents"). Holds three
 	 * fixed subdirectories: `Memories/` (shared memory notes), `Skills/` (skill
-	 * `<name>/SKILL.md` dirs, core skills included), and `Base Prompts/`
-	 * (`<agent-id>.md` per agent). The whole tree is plugin machinery, excluded from
-	 * indexing/search/graph via `isAgentFilePath`.
+	 * `<name>/SKILL.md` dirs, core skills included), and `System Prompts/` (one
+	 * `<Agent Name>/` subfolder per agent, holding that agent's `Base.md` and `Memory.md`).
+	 * The whole tree is plugin machinery, excluded from indexing/search/graph via
+	 * `isAgentFilePath`.
 	 */
 	agentFolder: string;
 	/**
@@ -480,6 +481,12 @@ export interface PluginData {
 	 * new SKILL.md into the same dirs. Set by `SkillsService.migrateCoreSkills` on success.
 	 */
 	coreSkillsSeeded: boolean;
+	/**
+	 * One-time flag: the `update-skills` → `manage-skills` core-skill folder rename has run
+	 * (schema v8, tool renamed `update_skill` → `manage_skills`). Set by
+	 * `SkillsService.migrateManageSkillsFolder` on success; a no-op when no legacy folder exists.
+	 */
+	manageSkillsFolderMigrated: boolean;
 
 	// ============================================================================
 	// Privacy

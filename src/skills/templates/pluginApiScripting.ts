@@ -8,7 +8,7 @@
  * directly). Instead it is the seed content for a generated, plugin-specific
  * skill the user can then edit and iterate on independently. The template tells
  * the agent to introspect the API, do the task, and then persist a verified
- * replacement — via the `update_skill` tool (staged for review) when available,
+ * replacement — via the `manage_skills` tool (staged for review) when available,
  * or otherwise by emitting a SKILL.md code block the user copies over this file
  * — turning a throwaway introspection session into a durable, documented skill.
  */
@@ -100,13 +100,14 @@ There is no hand-written documentation for **${displayName}** yet — this skill
 starting point. After you have completed a real task and confirmed which \`api\` calls work, fold
 that knowledge back into this skill so future runs start from concrete, verified instructions.
 
-**Preferred: use the \`update_skill\` tool.** If you have an \`update_skill\` tool available, call it
-with \`skillName: "${skillName}"\` and a \`newBody\` that replaces the generic guidance below with the
-**specific, verified** calls — real method names, argument shapes, return values, and any gotchas.
-The edit is staged for the user to review before it applies. Keep the read-only-by-default and
-safety guidance, and only document methods you actually confirmed exist.
+**Preferred: use the \`manage_skills\` tool.** If you have a \`manage_skills\` tool available, call its
+update operation with \`skillName: "${skillName}"\` and a \`newBody\` that replaces the generic guidance
+below with the **specific, verified** calls — real method names, argument shapes, return values, and
+any gotchas. The edit applies immediately, with no review step, so only do this once you're
+confident. Keep the read-only-by-default and safety guidance, and only document methods you
+actually confirmed exist.
 
-**Fallback (no \`update_skill\` tool):** output a complete replacement for this SKILL.md in a single
+**Fallback (no \`manage_skills\` tool):** output a complete replacement for this SKILL.md in a single
 fenced code block and tell the user they can copy it over the skill file at
 \`Skills/${skillName}/SKILL.md\` under the vault's agent folder. Keep the frontmatter exactly as
 below — the \`name\` must stay \`${skillName}\` (it must match the skill's folder name) and

@@ -2,19 +2,18 @@
 import { Notice, getIconIds, normalizePath, type Modal } from "obsidian";
 import { onMount } from "svelte";
 import { AddSkillModal } from "./AddSkillModal";
-import { SkillToolsModal } from "./SkillToolsModal";
+import { ToolsModal } from "./ToolsModal";
 import { MCPServerModal } from "./MCPServerModal";
-import { MemorySettingsModal } from "./MemorySettingsModal";
 import { ModelSelectionModal } from "./ModelSelectionModal";
 import { SystemPromptModal } from "./SystemPromptModal";
 import ManagedEntityItem from "../settings/ManagedEntityItem.svelte";
 import ModelSettingControl from "../settings/ModelSettingControl.svelte";
+import SettingContainer from "../settings/SettingContainer.svelte";
 import SettingGroup from "../settings/SettingGroup.svelte";
 import SettingItem from "../settings/SettingItem.svelte";
 import Badge from "../ui/Badge.svelte";
 import Button from "../ui/Button.svelte";
 import Icon from "../ui/Icon.svelte";
-import PickerOptionRow from "../ui/PickerOptionRow.svelte";
 import PickerPopover from "../ui/PickerPopover.svelte";
 import Search from "../ui/Search.svelte";
 import Text from "../ui/Text.svelte";
@@ -31,7 +30,7 @@ import {
 	toExecToolId,
 } from "../../agent/integrations/pluginIntegrations";
 import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT } from "../../agent/prompts";
-import { basePromptPath } from "../../utils/agentPaths";
+import { agentPromptDir, basePromptPath, memoryPromptPath } from "../../utils/agentPaths";
 import { Logger } from "../../utils/logging";
 import { extractErrorMessage } from "../../utils/errorMessage";
 import { humanizeSkillName } from "../../skills";
@@ -86,11 +85,12 @@ function applyChanges() {
 }
 
 function updateAgentName(name: string) {
-	// Capture the note's current path (derived from the OLD name) before committing the
-	// rename, then reconcile the file on disk to the new name-based path.
-	const oldPath = basePromptPath(agentId);
+	// Capture the prompt subfolder's current path (derived from the OLD name) before
+	// committing the rename, then move the whole folder (Base.md + Memory.md together) to
+	// the new name-based path.
+	const oldPromptDir = agentPromptDir(agentId);
 	pluginData.updateAgent(agentId, { name });
-	void plugin.promptFilesService?.renameBasePrompt(agentId, oldPath);
+	void plugin.promptFilesService?.renameAgentPromptDir(agentId, oldPromptDir);
 	modal.setTitle(`Edit Agent: ${name || "Untitled"}`);
 }
 
@@ -272,6 +272,43 @@ function openBasePromptDiff() {
 	basePromptDriftTick++;
 }
 
+function openMemoryPromptNote() {
+	if (!selectedAgent) return;
+	const path = normalizePath(memoryPromptPath(agentId));
+	// Seed the file from the default if it doesn't exist yet, then open it.
+	void (async () => {
+		await plugin.promptFilesService?.ensureMemoryPrompt(agentId);
+		modal.close();
+		plugin.app.workspace.openLinkText(path, "", true);
+	})();
+}
+
+// Same staleness pattern as the base prompt above, but comparing against DEFAULT_MEMORY_PROMPT.
+let memoryPromptDriftTick = $state(0);
+const memoryPromptDrifted = $derived.by(() => {
+	void memoryPromptDriftTick;
+	if (!selectedAgent) return false;
+	const content = plugin.promptFilesService?.getMemoryPrompt(agentId) ?? DEFAULT_MEMORY_PROMPT;
+	return content.trim() !== DEFAULT_MEMORY_PROMPT.trim();
+});
+
+function openMemoryPromptDiff() {
+	if (!selectedAgent) return;
+	const promptFiles = plugin.promptFilesService;
+	new SystemPromptModal(
+		plugin,
+		{
+			getPrompt: () => promptFiles?.getMemoryPrompt(agentId) ?? DEFAULT_MEMORY_PROMPT,
+			setPrompt: (prompt: string) => {
+				void promptFiles?.writeMemoryPrompt(agentId, prompt).then(() => applyChanges());
+			},
+			defaultPrompt: DEFAULT_MEMORY_PROMPT,
+		},
+		{ title: `Memory Instructions — ${selectedAgent.name}`, showDiff: true },
+	).open();
+	memoryPromptDriftTick++;
+}
+
 function openRenderedSystemPromptModal() {
 	if (!selectedAgent) return;
 	new SystemPromptModal(
@@ -287,9 +324,6 @@ function openRenderedSystemPromptModal() {
 }
 
 let skillsRefreshCounter = $state(0);
-
-// Controls the "+ Add" dropdown on the Custom skills card.
-let isAddSkillMenuOpen = $state(false);
 
 const skills = $derived.by(() => {
 	const _refresh = skillsRefreshCounter;
@@ -544,31 +578,23 @@ function getToolEnabled(toolId: BuiltInToolId): boolean {
 // --- Memory: long-lived facts stored as notes in a per-agent folder ---
 
 const memoryEnabled = $derived(selectedAgent?.memoryEnabled ?? false);
-// Recording a memory is a note write, so memory needs manage_notes enabled.
-const manageNotesEnabled = $derived(getToolEnabled("manage_notes"));
+// Recording a memory is a note write, so memory needs manage_notes actually *bound* — its
+// toggle on AND some enabled skill attaching it. Reads `skills` so this re-derives when a
+// skill is toggled, not just when the tool's own toggle changes.
+const manageNotesEnabled = $derived.by(() => {
+	if (!selectedAgent) return false;
+	void selectedAgent.skills;
+	void selectedAgent.toolsConfig.manage_notes?.enabled;
+	return plugin.agentManager?.isToolBound(selectedAgent, "manage_notes") ?? false;
+});
 
 function handleMemoryToggle(next: boolean) {
-	// Seed the editable memory instructions the first time memory is enabled so the
-	// user can see and tune them (they live in the base-prompt area, not the tool tail).
-	const patch: Partial<AgentConfig> = { memoryEnabled: next };
-	if (next && !selectedAgent?.memoryPrompt?.trim()) {
-		patch.memoryPrompt = DEFAULT_MEMORY_PROMPT;
-	}
-	pluginData.updateAgent(agentId, patch);
+	pluginData.updateAgent(agentId, { memoryEnabled: next });
+	// Seed the editable memory-instructions note the first time memory is enabled, so a
+	// note exists for the user to open and tune (mirrors the base prompt's note lifecycle).
+	// Never clobbers an existing note — see PromptFilesService.ensureMemoryPrompt.
+	if (next) void plugin.promptFilesService?.ensureMemoryPrompt(agentId);
 	void applyChanges();
-}
-
-function openMemorySettingsModal() {
-	if (!selectedAgent) return;
-	new MemorySettingsModal(plugin, agentId, { onChange: () => void applyChanges() }).open();
-}
-
-// --- Per-skill tool overrides (opened from a core skill's gear) ---
-
-/** True when a skill attaches at least one built-in tool via its `allowed-tools` frontmatter. */
-function skillHasTools(skillId: string): boolean {
-	const spec = plugin.skillsService?.getCachedSkills().get(skillId)?.frontmatter.allowedTools;
-	return !!spec && spec.trim().length > 0;
 }
 
 /** Icon for a core-skill row (shared with the agents-list strip via `skillIcon`). */
@@ -576,9 +602,9 @@ function coreSkillIcon(skill: SkillDisplayInfo): string {
 	return skillIcon(skill);
 }
 
-function openSkillToolsModal(skillId: string) {
+function openToolsModal() {
 	if (!selectedAgent) return;
-	new SkillToolsModal(plugin, skillId, agentId, { onChange: () => void applyChanges() }).open();
+	new ToolsModal(plugin, agentId, { onChange: () => void applyChanges() }).open();
 }
 
 // --- Subagents (references to other agents) ---
@@ -738,492 +764,465 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
 {#if selectedAgent}
   <div class="agent-editor-container">
     <div class="agent-editor-pane">
-      <section class="agent-editor-section">
-        <SettingGroup heading="General">
-          <div class="agent-overview-identity">
-            <PickerPopover
-              bind:open={isAgentIconPickerOpen}
-              triggerClass="agent-icon-trigger"
-              contentClass="agent-icon-popover"
-              side="bottom"
-              align="start"
-              sideOffset={8}
-            >
-              {#snippet trigger(open)}
-                <span class="agent-icon-trigger-preview">
-                  <Icon name={selectedAgentIcon} size="m" />
-                </span>
-                <Icon name={open ? "chevron-up" : "chevron-down"} size="xs" />
-              {/snippet}
-
-              <div class="agent-icon-browser">
-                <Search
-                  class="agent-icon-search"
-                  value={agentIconQuery}
-                  placeholder="Search built-in icons"
-                  onchange={(value: string) => (agentIconQuery = value)}
-                />
-
-                <div class="agent-icon-results-header">
-                  <span>{agentIconQuery.trim() ? `Built-in icons (${matchingAgentIconCount})` : "Popular icons"}</span>
-                </div>
-
-                <div class="agent-icon-grid">
-                  {#if matchingAgentIcons.length > 0}
-                    {#each matchingAgentIcons as iconName}
-                      <button
-                        type="button"
-                        class="agent-icon-option"
-                        class:selected={selectedAgentIcon === iconName}
-                        title={iconName}
-                        onclick={() => {
-                          updateAgentIcon(iconName);
-                          isAgentIconPickerOpen = false;
-                        }}
-                      >
-                        <span class="agent-icon-option-preview">
-                          <Icon name={iconName} size="s" />
-                        </span>
-                        <span class="agent-icon-option-label">{iconName}</span>
-                      </button>
-                    {/each}
-                  {:else}
-                    <div class="agent-icon-empty-state">
-                      No built-in icons match this search.
-                    </div>
-                  {/if}
-                </div>
-              </div>
-            </PickerPopover>
-
-            <div class="agent-overview-name">
-              <Text
-                inputType="text"
-                class="agent-overview-name-input"
-                placeholder="Agent name"
-                value={selectedAgent.name}
-                onblur={(value: string) => updateAgentName(value)}
-              />
-              <div class="agent-overview-name-hint">
-                Search built-in Obsidian (Lucide) icons.
-                <button
-                  type="button"
-                  class="agent-icon-inline-edit"
-                  onclick={() => (isAgentIconPickerOpen = true)}
-                >
-                  Change icon
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <SettingItem name="Chat Model" desc="Primary model this agent uses for conversation">
-            <ModelSettingControl
-              available={models.hasProviders && models.hasModels}
-              loading={models.hasProviders && models.isLoadingModels}
-              configureLabel={!models.hasProviders ? "Configure Provider" : "Configure Models"}
-              onConfigure={models.openSettings}
-              placeholder="Select a model"
-              selectedLabel={currentModelDisplay?.model ?? null}
-              selectedLogo={currentModelDisplay?.logo ?? null}
-              onSelect={openModelSelectionModal}
-            />
-          </SettingItem>
-
-          <SettingItem
-            name="Base System Prompt"
-            desc="Customize the base system instructions for this agent"
+      <SettingGroup heading="General">
+        <SettingItem name="Name" desc="This agent's display name and icon">
+          <PickerPopover
+            bind:open={isAgentIconPickerOpen}
+            triggerClass="agent-icon-trigger"
+            contentClass="agent-icon-popover"
+            tooltip="Change icon"
+            side="bottom"
+            align="start"
+            sideOffset={8}
           >
-            <div class="flex items-center gap-2 justify-end">
-              <Button buttonText="Open Prompt Note" onClick={openBasePromptNote} />
-              {#if basePromptDrifted}
-                <Button buttonText="Diff with default" onClick={openBasePromptDiff} />
-              {/if}
-              <Button buttonText="View Final Prompt" onClick={openRenderedSystemPromptModal} />
-            </div>
-          </SettingItem>
-
-          <!-- Memory — a folder the agent manages itself for durable facts and vault pointers.
-               Enabling it injects memory instructions into the system prompt and auto-applies note
-               writes inside the folder. Needs the Manage notes tool. The gear opens the folder +
-               instructions settings. Lives here (not the skills list) as an agent-level capability
-               that shapes the system prompt, alongside the base prompt. -->
-          <SettingItem
-            name="Memory"
-            desc="A folder the agent manages itself for durable facts about you and pointers to where things live in your vault. Note writes inside it apply automatically."
-          >
-            {#snippet nameSuffix()}
-              {#if memoryEnabled && !manageNotesEnabled}
-                <Badge label="Needs Manage notes" tone="warning" />
-              {/if}
+            {#snippet trigger()}
+              <span class="agent-icon-trigger-preview">
+                <Icon name={selectedAgentIcon} size="m" />
+              </span>
             {/snippet}
-            <Button
-              iconId="settings"
-              ariaLabel="Memory settings"
-              tooltip="Memory settings"
-              onClick={openMemorySettingsModal}
-            />
-            <Toggle checked={memoryEnabled} onchange={(next) => handleMemoryToggle(next)} />
-          </SettingItem>
 
-          <SettingItem
-            name="Summarization Model"
-            desc="Model used to compress older chat history when the context window fills up"
-          >
-            <div class="agent-model-setting">
-              <ModelSettingControl
-                available={models.hasProviders && models.hasModels}
-                loading={models.hasProviders && models.isLoadingModels}
-                configureLabel={!models.hasProviders ? "Configure Provider" : "Configure Models"}
-                onConfigure={models.openSettings}
-                placeholder="Auto (same as chat model)"
-                selectedLabel={currentSummarizationModelDisplay?.model ?? null}
-                selectedLogo={currentSummarizationModelDisplay?.logo ?? null}
-                onSelect={openSummarizationModelSelectionModal}
-                secondaryLabel={selectedAgent.summarizationModel ? "Reset" : undefined}
-                onSecondary={selectedAgent.summarizationModel ? resetSummarizationModel : undefined}
+            <div class="agent-icon-browser">
+              <Search
+                class="agent-icon-search"
+                value={agentIconQuery}
+                placeholder="Search built-in icons"
+                onchange={(value: string) => (agentIconQuery = value)}
               />
-              {#if summarizationContextWindowWarning}
-                <div class="agent-model-warning text-sm">{summarizationContextWindowWarning}</div>
-              {/if}
-            </div>
-          </SettingItem>
 
-          <SettingItem
-            name="Title Generation Model"
-            desc="Model used to generate conversation titles from the first user message"
-          >
+              <div class="agent-icon-results-header">
+                <span>{agentIconQuery.trim() ? `Built-in icons (${matchingAgentIconCount})` : "Popular icons"}</span>
+              </div>
+
+              <div class="agent-icon-grid">
+                {#if matchingAgentIcons.length > 0}
+                  {#each matchingAgentIcons as iconName}
+                    <button
+                      type="button"
+                      class="agent-icon-option"
+                      class:selected={selectedAgentIcon === iconName}
+                      title={iconName}
+                      onclick={() => {
+                        updateAgentIcon(iconName);
+                        isAgentIconPickerOpen = false;
+                      }}
+                    >
+                      <span class="agent-icon-option-preview">
+                        <Icon name={iconName} size="s" />
+                      </span>
+                      <span class="agent-icon-option-label">{iconName}</span>
+                    </button>
+                  {/each}
+                {:else}
+                  <div class="agent-icon-empty-state">
+                    No built-in icons match this search.
+                  </div>
+                {/if}
+              </div>
+            </div>
+          </PickerPopover>
+
+          <Text
+            inputType="text"
+            class="agent-overview-name-input"
+            placeholder="Agent name"
+            value={selectedAgent.name}
+            onblur={(value: string) => updateAgentName(value)}
+          />
+        </SettingItem>
+
+        <SettingItem name="Chat Model" desc="Primary model this agent uses for conversation">
+          <ModelSettingControl
+            available={models.hasProviders && models.hasModels}
+            loading={models.hasProviders && models.isLoadingModels}
+            configureLabel={!models.hasProviders ? "Configure Provider" : "Configure Models"}
+            onConfigure={models.openSettings}
+            placeholder="Select a model"
+            selectedLabel={currentModelDisplay?.model ?? null}
+            selectedLogo={currentModelDisplay?.logo ?? null}
+            onSelect={openModelSelectionModal}
+          />
+        </SettingItem>
+
+        <SettingItem
+          name="Base System Prompt"
+          desc="Customize the base system instructions for this agent"
+        >
+          <div class="flex items-center gap-2 justify-end">
+            <Button
+              iconId="pencil"
+              ariaLabel="Open base system prompt note"
+              tooltip="Open base system prompt note"
+              onClick={openBasePromptNote}
+            />
+            {#if basePromptDrifted}
+              <Button buttonText="Diff with default" onClick={openBasePromptDiff} />
+            {/if}
+            <Button
+              iconId="eye"
+              ariaLabel="View final assembled prompt"
+              tooltip="View final assembled prompt"
+              onClick={openRenderedSystemPromptModal}
+            />
+          </div>
+        </SettingItem>
+
+        <!-- Memory — durable facts and vault pointers the agent manages itself. Note the
+             deliberate split: the memory FOLDER (Agents/Memories/) is GLOBAL, shared by every
+             agent, because remembered facts are properties of the user, not of one agent. The
+             memory PROMPT note (Agents/System Prompts/<Agent Name>/Memory.md) is PER-AGENT,
+             because how eagerly to read/record is agent behavior — the same reason the base
+             prompt (Base.md, same folder) is per-agent. Enabling injects that note into the
+             system prompt and auto-applies note writes inside the memory folder. Needs the
+             Manage notes tool. Lives here (not the skills list) as an agent-level capability
+             that shapes the system prompt, alongside the base
+             prompt — same "open the note" + conditional diff pattern as Base System Prompt. -->
+        <SettingItem
+          name="Memory"
+          desc="Durable facts about you and pointers to where things live in your vault, stored in a memory folder shared by all agents. The prompt note sets how THIS agent uses it, and is not shared. Note writes inside the folder apply automatically."
+        >
+          {#snippet nameSuffix()}
+            {#if memoryEnabled && !manageNotesEnabled}
+              <Badge label="Needs Manage notes" tone="warning" />
+            {/if}
+          {/snippet}
+          <div class="flex items-center gap-2 justify-end">
+            <Button
+              iconId="pencil"
+              ariaLabel="Open memory prompt note"
+              tooltip="Open memory prompt note"
+              onClick={openMemoryPromptNote}
+            />
+            {#if memoryPromptDrifted}
+              <Button buttonText="Diff with default" onClick={openMemoryPromptDiff} />
+            {/if}
+            <Toggle checked={memoryEnabled} onchange={(next) => handleMemoryToggle(next)} />
+          </div>
+        </SettingItem>
+
+        <!-- Tools are a pool shared across skills via `allowed-tools`, not owned by any one skill
+             (e.g. the Tasks integration skill attaches search_notes, already attached by Explore
+             vault) — so configuration lives here at the agent level rather than behind any single
+             skill's row. -->
+        <SettingItem
+          name="Tools"
+          desc="Enable, rename, and configure the individual tools your skills attach. A tool is only usable when at least one enabled skill provides it."
+        >
+          <Button buttonText="Manage" onClick={openToolsModal} />
+        </SettingItem>
+
+        <SettingItem
+          name="Summarization Model"
+          desc="Model used to compress older chat history when the context window fills up"
+        >
+          <div class="agent-model-setting">
             <ModelSettingControl
               available={models.hasProviders && models.hasModels}
               loading={models.hasProviders && models.isLoadingModels}
               configureLabel={!models.hasProviders ? "Configure Provider" : "Configure Models"}
               onConfigure={models.openSettings}
               placeholder="Auto (same as chat model)"
-              selectedLabel={currentTitleModelDisplay?.model ?? null}
-              selectedLogo={currentTitleModelDisplay?.logo ?? null}
-              onSelect={openTitleModelSelectionModal}
-              secondaryLabel={selectedAgent.titleModel ? "Reset" : undefined}
-              onSecondary={selectedAgent.titleModel ? resetTitleModel : undefined}
+              selectedLabel={currentSummarizationModelDisplay?.model ?? null}
+              selectedLogo={currentSummarizationModelDisplay?.logo ?? null}
+              onSelect={openSummarizationModelSelectionModal}
+              secondaryLabel={selectedAgent.summarizationModel ? "Reset" : undefined}
+              onSecondary={selectedAgent.summarizationModel ? resetSummarizationModel : undefined}
+            />
+            {#if summarizationContextWindowWarning}
+              <div class="agent-model-warning text-sm">{summarizationContextWindowWarning}</div>
+            {/if}
+          </div>
+        </SettingItem>
+
+        <SettingItem
+          name="Title Generation Model"
+          desc="Model used to generate conversation titles from the first user message"
+        >
+          <ModelSettingControl
+            available={models.hasProviders && models.hasModels}
+            loading={models.hasProviders && models.isLoadingModels}
+            configureLabel={!models.hasProviders ? "Configure Provider" : "Configure Models"}
+            onConfigure={models.openSettings}
+            placeholder="Auto (same as chat model)"
+            selectedLabel={currentTitleModelDisplay?.model ?? null}
+            selectedLogo={currentTitleModelDisplay?.logo ?? null}
+            onSelect={openTitleModelSelectionModal}
+            secondaryLabel={selectedAgent.titleModel ? "Reset" : undefined}
+            onSecondary={selectedAgent.titleModel ? resetTitleModel : undefined}
+          />
+        </SettingItem>
+      </SettingGroup>
+
+      <SettingGroup heading="Core Skills">
+        <div class="setting-item agent-section-intro">
+          <div class="setting-item-info">
+            <div class="setting-item-description">
+              Built-in skills every agent can use — vault exploration, note management, web access,
+              and self-updating skills. Each is a skill: toggle it to attach its tools, or open its
+              note to edit its instructions. Individual tools are configured from the Tools row above.
+            </div>
+          </div>
+        </div>
+
+        <!-- One row per core skill: the built-in vault/notes/web/update skills (which attach
+             built-in tools via allowed-tools) plus Obsidian core-plugin skills (Canvas, Bases, …).
+             Per-tool configuration lives in the agent-level Tools modal (General section), not here —
+             a skill's attached tools may be shared with other skills, so tool config isn't a
+             per-skill concern. -->
+        {#each coreSkills as ext (ext.id)}
+          {@const pluginAvailable = isSkillPluginAvailable(ext)}
+          <SettingItem name={ext.displayName} desc={ext.description}>
+            {#snippet namePrefix()}
+              <Icon name={coreSkillIcon(ext)} size="s" />
+            {/snippet}
+            {#snippet nameSuffix()}
+              {#if !pluginAvailable}
+                <Badge label="Core plugin disabled" tone="warning" />
+              {/if}
+            {/snippet}
+            <Button
+              iconId="pencil"
+              ariaLabel={`Open ${ext.displayName} skill note`}
+              tooltip={`Open ${ext.displayName} skill note`}
+              onClick={() => openSkillNote(ext.id)}
+            />
+            <Toggle
+              checked={ext.enabled && pluginAvailable}
+              disabled={!pluginAvailable}
+              onchange={() => toggleSkill(ext.id, !ext.enabled)}
             />
           </SettingItem>
-        </SettingGroup>
-      </section>
+        {/each}
+      </SettingGroup>
 
-      <section class="agent-editor-section">
-        <SettingGroup heading="Core Skills">
-          <div class="setting-item-description mb-3">
-            Built-in skills every agent can use — vault exploration, note management, web access, and
-            self-updating skills. Each is a skill: toggle it to attach its tools, open its note to edit
-            its instructions, or use the gear to fine-tune individual tools.
-          </div>
-
-          <!-- One row per core skill: the built-in vault/notes/web/update skills (which attach
-               built-in tools via allowed-tools) plus Obsidian core-plugin skills (Canvas, Bases, …).
-               The gear opens the per-skill tool overrides when the skill attaches any tools. -->
-          {#each coreSkills as ext (ext.id)}
-            {@const pluginAvailable = isSkillPluginAvailable(ext)}
-            {@const hasTools = skillHasTools(ext.id)}
-            <SettingItem name={ext.displayName} desc={ext.description}>
-              {#snippet namePrefix()}
-                <Icon name={coreSkillIcon(ext)} size="s" />
-              {/snippet}
-              {#snippet nameSuffix()}
-                {#if !pluginAvailable}
-                  <Badge label="Core plugin disabled" tone="warning" />
-                {/if}
-              {/snippet}
-              {#if hasTools}
-                <Button
-                  iconId="settings"
-                  ariaLabel={`${ext.displayName} tools`}
-                  tooltip={`${ext.displayName} tools`}
-                  onClick={() => openSkillToolsModal(ext.id)}
-                />
-              {/if}
-              <Button
-                iconId="pencil"
-                ariaLabel={`Open ${ext.displayName} skill note`}
-                tooltip={`Open ${ext.displayName} skill note`}
-                onClick={() => openSkillNote(ext.id)}
-              />
-              <Toggle
-                checked={ext.enabled && pluginAvailable}
-                disabled={!pluginAvailable}
-                onchange={() => toggleSkill(ext.id, !ext.enabled)}
-              />
-            </SettingItem>
-          {/each}
-        </SettingGroup>
-      </section>
-
-      <section class="agent-editor-section">
-        <SettingGroup heading="Integrations">
-          <div class="setting-item-description mb-3">
-            Skills backed by your installed community plugins. Each bundles a skill (and, where
-            available, code-scripting) behind one switch.
-          </div>
-
-          <!-- One row per community-plugin skill (Dataview, Tasks, …). -->
-          {#each pluginSkills as ext (ext.id)}
-            {@const pluginAvailable = isSkillPluginAvailable(ext)}
-            {@const execIntegration = skillExecIntegration(ext)}
-            <SettingItem name={ext.displayName} desc={ext.description}>
-              {#snippet namePrefix()}
-                <Icon name={getPluginIcon(ext.linkedPluginId)} size="s" />
-              {/snippet}
-              {#snippet nameSuffix()}
-                {#if !pluginAvailable}
-                  <Badge
-                    label="Not enabled"
-                    tone="warning"
-                    interactive
-                    onclick={() => openPluginPage(ext.linkedPluginId ?? ext.id)}
-                  />
-                {:else if execIntegration && ext.enabled}
-                  <Badge label="API scripting" tone="muted" />
-                {/if}
-              {/snippet}
-              <Button
-                iconId="pencil"
-                ariaLabel={`Open ${ext.displayName} skill note`}
-                tooltip={`Open ${ext.displayName} skill note`}
-                onClick={() => openSkillNote(ext.id)}
-              />
-              <Toggle
-                checked={ext.enabled && pluginAvailable}
-                disabled={!pluginAvailable}
-                onchange={() => toggleSkill(ext.id, !ext.enabled)}
-              />
-            </SettingItem>
-          {/each}
-
-          <!-- Auto-discovered api-plugins with no skill yet. Enabling generates one. -->
-          {#each autoDiscoveredIntegrations as integ (integ.pluginId)}
-            <SettingItem
-              name={integ.displayName}
-              desc="Auto-discovered plugin exposing a public API. Enabling creates an editable API-scripting skill — the agent introspects the API before calling it. Runs on the main thread (not sandboxed)."
-            >
-              {#snippet namePrefix()}
-                <Icon name={getPluginIcon(integ.pluginId)} size="s" />
-              {/snippet}
-              {#snippet nameSuffix()}
-                {#if integ.execEnabled}
-                  <Badge label="API scripting" tone="muted" />
-                {/if}
-              {/snippet}
-              <Toggle
-                checked={integ.execEnabled}
-                onchange={(next) => void toggleAutoIntegration(integ.pluginId, integ.displayName, next)}
-              />
-            </SettingItem>
-          {/each}
-        </SettingGroup>
-      </section>
-
-      <section class="agent-editor-section">
-        <SettingGroup heading="Subagents">
-          <div class="setting-item-description mb-3">
-            Other agents this one can delegate to via the <code>task</code> tool — each subagent runs
-            with its own model, tools, and prompt. Enabling this agent itself delegates to a fresh,
-            isolated-context copy of it (useful for keeping the main conversation clean). Delegation is
-            one level deep (a subagent's own subagents are ignored).
-          </div>
-          {#each subAgentCandidates as candidate (candidate.id)}
-            {@const hasModel = !!candidate.chatModel}
-            {@const isEnabled = isSubAgentEnabled(candidate.id)}
-            <SettingItem
-              name={candidate.id === agentId ? `${candidate.name} (this agent)` : candidate.name}
-              desc={hasModel
-                ? getSubAgentModelLabel(candidate)
-                : "No chat model configured — cannot be used as a subagent"}
-            >
-              {#snippet namePrefix()}
-                <Icon name={candidate.icon?.trim() || DEFAULT_AGENT_ICON} size="s" />
-              {/snippet}
-              <Toggle
-                checked={isEnabled}
-                disabled={!hasModel && !isEnabled}
-                onchange={() => handleSubAgentToggle(candidate.id)}
-              />
-            </SettingItem>
-          {/each}
-        </SettingGroup>
-      </section>
-
-      <section class="agent-editor-section">
-        <SettingGroup heading="Custom">
-          <div class="setting-item-description mb-3">
-            Skills you bring yourself — your own skills and MCP servers.
-          </div>
-
-          <!-- Custom skills — the user's own skills + MCP servers, with a "+ Add" menu. -->
-          <SettingItem
-            name="Add skill"
-            desc={`${customSkills.length} ${customSkills.length === 1 ? "skill" : "skills"} · ${mcpServerIds.length} ${mcpServerIds.length === 1 ? "server" : "servers"}`}
-          >
-            <PickerPopover
-              bind:open={isAddSkillMenuOpen}
-              side="bottom"
-              align="end"
-              sideOffset={6}
-              contentClass="add-skill-popover"
-            >
-              {#snippet trigger(open)}
-                <Icon name="plus" size="xs" />
-                <span>Add</span>
-                <Icon name={open ? "chevron-up" : "chevron-down"} size="xs" />
-              {/snippet}
-
-              <PickerOptionRow
-                onClick={() => {
-                  isAddSkillMenuOpen = false;
-                  openAddSkillModal();
-                }}
-              >
-                {#snippet leading()}
-                  <Icon name="sparkles" size="s" />
-                {/snippet}
-                {#snippet content()}
-                  Custom Skill
-                {/snippet}
-              </PickerOptionRow>
-
-              <PickerOptionRow
-                onClick={() => {
-                  isAddSkillMenuOpen = false;
-                  openAddMCPServer();
-                }}
-              >
-                {#snippet leading()}
-                  <Icon name="server" size="s" />
-                {/snippet}
-                {#snippet content()}
-                  MCP Server
-                {/snippet}
-              </PickerOptionRow>
-            </PickerPopover>
-          </SettingItem>
-
-          <div class="skill-category-header">
-            <span class="skill-category-title">Skills</span>
-            <Badge label="User-defined" pill={false} uppercase />
-          </div>
-          {#each customSkills as ext (ext.id)}
-            <ManagedEntityItem
-              class="skill-entity"
-              name={ext.displayName}
-              desc={ext.description}
-              meta="Stored as a custom skill in the vault configuration."
-            >
-              {#snippet actions()}
-                <Button
-                  iconId="trash"
-                  ariaLabel={`Delete ${ext.displayName}`}
-                  tooltip={`Delete ${ext.displayName}`}
-                  onClick={() => void deleteSkill(ext.id)}
-                />
-                <Button
-                  iconId="pencil"
-                  ariaLabel={`Open ${ext.displayName} skill note`}
-                  tooltip={`Open ${ext.displayName} skill note`}
-                  onClick={() => openSkillNote(ext.id)}
-                />
-                <Toggle checked={ext.enabled} onchange={() => toggleSkill(ext.id, !ext.enabled)} />
-              {/snippet}
-            </ManagedEntityItem>
-          {/each}
-          {#if customSkills.length === 0}
-            <div class="skill-empty-state">No custom skills yet</div>
-          {/if}
-
-          <div class="skill-category-header skill-subgroup-header">
-            <span class="skill-category-title">MCP Servers</span>
-            <Badge label="External tools" pill={false} uppercase />
-          </div>
-          {#if mcpServerIds.length > 0}
-            <div class="mcp-servers-list">
-              {#each mcpServerIds as serverId (serverId)}
-                {@const config = selectedAgent.mcpServers[serverId]}
-                {@const toolsState = getServerToolsState(serverId)}
-                {@const isExpanded = expandedServerId === serverId}
-                <ManagedEntityItem
-                  class="mcp-entity"
-                  name={config.displayName}
-                  desc={config.transport === "stdio"
-                    ? `${config.command} ${config.args.join(" ")}`
-                    : config.url}
-                  meta={config.transport === "stdio"
-                    ? "Local stdio MCP server"
-                    : "Remote HTTP MCP server"}
-                >
-                  {#snippet badges()}
-                    <Badge
-                      label={config.transport === "stdio" ? "Local" : "HTTP"}
-                      tone={config.transport === "stdio" ? "success" : "accent"}
-                    />
-                    <Badge
-                      interactive
-                      onclick={() => toggleToolsList(serverId)}
-                      class={`mcp-tools-badge ${toolsState?.error ? "error" : ""} ${toolsState?.tools && toolsState.tools.length > 0 ? "has-tools" : ""}`}
-                    >
-                      {#if toolsState?.loading}
-                        <Icon name="loader" size="xs" />
-                      {:else if toolsState?.error}
-                        <Icon name="alert-circle" size="xs" />
-                      {:else}
-                        <Icon name="wrench" size="xs" />
-                      {/if}
-                      <span>{getMCPToolsBadgeLabel(serverId, toolsState)}</span>
-                    </Badge>
-                  {/snippet}
-
-                  {#snippet children()}
-                    {#if isExpanded && toolsState}
-                      <div class="mcp-tools-list">
-                        {#if toolsState.loading}
-                          <div class="mcp-tools-loading">Loading tools...</div>
-                        {:else if toolsState.error}
-                          <div class="mcp-tools-error">
-                            <Icon name="alert-circle" size="s" />
-                            <span>{toolsState.error}</span>
-                            <button
-                              class="mcp-tools-retry"
-                              onclick={() => void fetchServerTools(serverId)}>Retry</button
-                            >
-                          </div>
-                        {:else if toolsState.tools.length === 0}
-                          <div class="mcp-tools-empty">No tools available</div>
-                        {:else}
-                          {#each toolsState.tools as tool (tool.name)}
-                            <div class="mcp-tool-item">
-                              <span class="mcp-tool-name">{tool.name}</span>
-                              {#if tool.description}
-                                <span class="mcp-tool-desc">{tool.description}</span>
-                              {/if}
-                            </div>
-                          {/each}
-                        {/if}
-                      </div>
-                    {/if}
-                  {/snippet}
-
-                  {#snippet actions()}
-                    <Button
-                      iconId="pencil"
-                      ariaLabel={`Edit ${config.displayName}`}
-                      tooltip={`Edit ${config.displayName}`}
-                      onClick={() => openEditMCPServer(serverId)}
-                    />
-                    <Toggle checked={config.enabled} onchange={() => toggleMCPServer(serverId)} />
-                  {/snippet}
-                </ManagedEntityItem>
-              {/each}
+      <SettingGroup heading="Integrations">
+        <div class="setting-item agent-section-intro">
+          <div class="setting-item-info">
+            <div class="setting-item-description">
+              Skills backed by your installed community plugins. Each bundles a skill (and, where
+              available, code-scripting) behind one switch.
             </div>
-          {:else}
-            <div class="mcp-empty-state"><p>No MCP servers configured for this agent.</p></div>
-          {/if}
-        </SettingGroup>
-      </section>
+          </div>
+        </div>
+
+        <!-- One row per community-plugin skill (Dataview, Tasks, …). -->
+        {#each pluginSkills as ext (ext.id)}
+          {@const pluginAvailable = isSkillPluginAvailable(ext)}
+          {@const execIntegration = skillExecIntegration(ext)}
+          <SettingItem name={ext.displayName} desc={ext.description}>
+            {#snippet namePrefix()}
+              <Icon name={getPluginIcon(ext.linkedPluginId)} size="s" />
+            {/snippet}
+            {#snippet nameSuffix()}
+              {#if !pluginAvailable}
+                <Badge
+                  label="Not enabled"
+                  tone="warning"
+                  interactive
+                  onclick={() => openPluginPage(ext.linkedPluginId ?? ext.id)}
+                />
+              {:else if execIntegration && ext.enabled}
+                <Badge label="API scripting" tone="muted" />
+              {/if}
+            {/snippet}
+            <Button
+              iconId="pencil"
+              ariaLabel={`Open ${ext.displayName} skill note`}
+              tooltip={`Open ${ext.displayName} skill note`}
+              onClick={() => openSkillNote(ext.id)}
+            />
+            <Toggle
+              checked={ext.enabled && pluginAvailable}
+              disabled={!pluginAvailable}
+              onchange={() => toggleSkill(ext.id, !ext.enabled)}
+            />
+          </SettingItem>
+        {/each}
+
+        <!-- Auto-discovered api-plugins with no skill yet. Enabling generates one. -->
+        {#each autoDiscoveredIntegrations as integ (integ.pluginId)}
+          <SettingItem
+            name={integ.displayName}
+            desc="Auto-discovered plugin exposing a public API. Enabling creates an editable API-scripting skill — the agent introspects the API before calling it. Runs on the main thread (not sandboxed)."
+          >
+            {#snippet namePrefix()}
+              <Icon name={getPluginIcon(integ.pluginId)} size="s" />
+            {/snippet}
+            {#snippet nameSuffix()}
+              {#if integ.execEnabled}
+                <Badge label="API scripting" tone="muted" />
+              {/if}
+            {/snippet}
+            <Toggle
+              checked={integ.execEnabled}
+              onchange={(next) => void toggleAutoIntegration(integ.pluginId, integ.displayName, next)}
+            />
+          </SettingItem>
+        {/each}
+      </SettingGroup>
+
+      <SettingGroup heading="Subagents">
+        <div class="setting-item agent-section-intro">
+          <div class="setting-item-info">
+            <div class="setting-item-description">
+              Other agents this one can delegate to via the <code>task</code> tool — each subagent
+              runs with its own model, tools, and prompt. Enabling this agent itself delegates to a
+              fresh, isolated-context copy of it (useful for keeping the main conversation clean).
+              Delegation is one level deep (a subagent's own subagents are ignored).
+            </div>
+          </div>
+        </div>
+
+        {#each subAgentCandidates as candidate (candidate.id)}
+          {@const hasModel = !!candidate.chatModel}
+          {@const isEnabled = isSubAgentEnabled(candidate.id)}
+          <SettingItem
+            name={candidate.id === agentId ? `${candidate.name} (this agent)` : candidate.name}
+            desc={hasModel
+              ? getSubAgentModelLabel(candidate)
+              : "No chat model configured — cannot be used as a subagent"}
+          >
+            {#snippet namePrefix()}
+              <Icon name={candidate.icon?.trim() || DEFAULT_AGENT_ICON} size="s" />
+            {/snippet}
+            <Toggle
+              checked={isEnabled}
+              disabled={!hasModel && !isEnabled}
+              onchange={() => handleSubAgentToggle(candidate.id)}
+            />
+          </SettingItem>
+        {/each}
+      </SettingGroup>
+
+      <SettingGroup heading="Custom">
+        <div class="setting-item agent-section-intro">
+          <div class="setting-item-info">
+            <div class="setting-item-description">
+              Skills you bring yourself — your own skills and MCP servers.
+            </div>
+          </div>
+        </div>
+
+        <!-- Custom skills — the user's own skills + MCP servers, each sub-group with its
+             own "Add" button on the heading row. -->
+        <SettingContainer name="Skills" isHeading>
+          <Button buttonText="Add skill" onClick={openAddSkillModal} />
+        </SettingContainer>
+        {#each customSkills as ext (ext.id)}
+          <ManagedEntityItem
+            class="skill-entity"
+            name={ext.displayName}
+            desc={ext.description}
+            meta="Stored as a custom skill in the vault configuration."
+          >
+            {#snippet actions()}
+              <Button
+                iconId="trash"
+                ariaLabel={`Delete ${ext.displayName}`}
+                tooltip={`Delete ${ext.displayName}`}
+                onClick={() => void deleteSkill(ext.id)}
+              />
+              <Button
+                iconId="pencil"
+                ariaLabel={`Open ${ext.displayName} skill note`}
+                tooltip={`Open ${ext.displayName} skill note`}
+                onClick={() => openSkillNote(ext.id)}
+              />
+              <Toggle checked={ext.enabled} onchange={() => toggleSkill(ext.id, !ext.enabled)} />
+            {/snippet}
+          </ManagedEntityItem>
+        {/each}
+        {#if customSkills.length === 0}
+          <div class="setting-item-description skill-empty-state">No custom skills yet</div>
+        {/if}
+
+        <SettingContainer name="MCP Servers" isHeading>
+          <Button buttonText="Add server" onClick={openAddMCPServer} />
+        </SettingContainer>
+        {#if mcpServerIds.length > 0}
+          <div class="mcp-servers-list">
+            {#each mcpServerIds as serverId (serverId)}
+              {@const config = selectedAgent.mcpServers[serverId]}
+              {@const toolsState = getServerToolsState(serverId)}
+              {@const isExpanded = expandedServerId === serverId}
+              <ManagedEntityItem
+                class="mcp-entity"
+                name={config.displayName}
+                desc={config.transport === "stdio"
+                  ? `${config.command} ${config.args.join(" ")}`
+                  : config.url}
+                meta={config.transport === "stdio"
+                  ? "Local stdio MCP server"
+                  : "Remote HTTP MCP server"}
+              >
+                {#snippet badges()}
+                  <Badge
+                    label={config.transport === "stdio" ? "Local" : "HTTP"}
+                    tone={config.transport === "stdio" ? "success" : "accent"}
+                  />
+                  <Badge
+                    interactive
+                    onclick={() => toggleToolsList(serverId)}
+                    class={`mcp-tools-badge ${toolsState?.error ? "error" : ""} ${toolsState?.tools && toolsState.tools.length > 0 ? "has-tools" : ""}`}
+                  >
+                    {#if toolsState?.loading}
+                      <Icon name="loader" size="xs" />
+                    {:else if toolsState?.error}
+                      <Icon name="alert-circle" size="xs" />
+                    {:else}
+                      <Icon name="wrench" size="xs" />
+                    {/if}
+                    <span>{getMCPToolsBadgeLabel(serverId, toolsState)}</span>
+                  </Badge>
+                {/snippet}
+
+                {#snippet children()}
+                  {#if isExpanded && toolsState}
+                    <div class="mcp-tools-list">
+                      {#if toolsState.loading}
+                        <div class="mcp-tools-loading">Loading tools...</div>
+                      {:else if toolsState.error}
+                        <div class="mcp-tools-error">
+                          <Icon name="alert-circle" size="s" />
+                          <span>{toolsState.error}</span>
+                          <button
+                            class="mcp-tools-retry"
+                            onclick={() => void fetchServerTools(serverId)}>Retry</button
+                          >
+                        </div>
+                      {:else if toolsState.tools.length === 0}
+                        <div class="mcp-tools-empty">No tools available</div>
+                      {:else}
+                        {#each toolsState.tools as tool (tool.name)}
+                          <div class="mcp-tool-item">
+                            <span class="mcp-tool-name">{tool.name}</span>
+                            {#if tool.description}
+                              <span class="mcp-tool-desc">{tool.description}</span>
+                            {/if}
+                          </div>
+                        {/each}
+                      {/if}
+                    </div>
+                  {/if}
+                {/snippet}
+
+                {#snippet actions()}
+                  <Button
+                    iconId="pencil"
+                    ariaLabel={`Edit ${config.displayName}`}
+                    tooltip={`Edit ${config.displayName}`}
+                    onClick={() => openEditMCPServer(serverId)}
+                  />
+                  <Toggle checked={config.enabled} onchange={() => toggleMCPServer(serverId)} />
+                {/snippet}
+              </ManagedEntityItem>
+            {/each}
+          </div>
+        {:else}
+          <div class="setting-item-description mcp-empty-state">
+            No MCP servers configured for this agent.
+          </div>
+        {/if}
+      </SettingGroup>
     </div>
   </div>
 {/if}
@@ -1239,56 +1238,38 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
     height: 100%;
     overflow-y: auto;
     padding-bottom: 12px;
-  }
-
-  /* Spacing between the skill bands. */
-  .agent-editor-section + .agent-editor-section {
-    margin-top: 24px;
-  }
-
-  .agent-overview-identity {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 4px 0 12px;
-  }
-
-  .agent-overview-name {
-    flex: 1 1 auto;
-    min-width: 0;
+    /* Spacing between the setting groups. Mirrors the settings tab, where the gap comes
+       from the parent (see `.agents-settings` in AgentsSettings.svelte) rather than from
+       margins on the groups themselves. */
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 16px;
   }
 
-  .agent-overview-name :global(.agent-overview-name-input) {
-    width: 100%;
+  /* `.setting-group` collides with an Obsidian core rule (`max-width: 700px; margin: 0 auto`)
+     meant for the native settings tab. Inside this modal that centers and caps the groups;
+     neutralize it here (scoped to this pane) rather than globally. */
+  .agent-editor-pane :global(.setting-group) {
+    max-width: none;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  /* `:global` because the class is handed to `Text.svelte` as a prop, so this component's
+     scope hash never reaches the rendered input. */
+  :global(.agent-overview-name-input) {
     font-size: var(--font-ui-medium);
   }
 
-  .agent-overview-name-hint {
-    font-size: var(--font-ui-smaller);
-    color: var(--text-muted);
-  }
-
-  .agent-icon-inline-edit {
-    border: 0;
-    background: transparent;
-    color: var(--text-accent);
-    cursor: pointer;
-    padding: 0;
-    font-size: inherit;
-  }
-
-  .agent-icon-inline-edit:hover {
-    text-decoration: underline;
-  }
-
+  /* Icon-only trigger sitting immediately left of the name input, sized to match the
+     input's height so the pair reads as one control. */
   :global(.agent-icon-trigger) {
     min-width: 0;
-    width: 54px;
     justify-content: center;
-    padding: 2px 6px;
+    padding: 0;
+    width: var(--input-height);
+    height: var(--input-height);
+    flex-shrink: 0;
   }
 
   .agent-icon-trigger-preview {
@@ -1301,10 +1282,6 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
   :global(.agent-icon-popover) {
     width: min(380px, calc(100vw - 48px));
     max-width: min(380px, calc(100vw - 48px));
-    z-index: calc(var(--layer-popover) + 20);
-  }
-
-  :global(.add-skill-popover) {
     z-index: calc(var(--layer-popover) + 20);
   }
 
@@ -1382,34 +1359,26 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
     color: var(--text-muted);
   }
 
-  .skill-category-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 8px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--background-modifier-border);
-  }
-  /* Space the second sub-group (MCP Servers) away from the first inside a card body. */
-  .skill-subgroup-header {
-    margin-top: 20px;
-  }
-  .skill-category-title {
-    font-weight: 600;
-    font-size: 0.95rem;
-  }
   .mcp-tool-desc {
     font-size: 0.85rem;
     color: var(--text-muted);
     margin-top: 4px;
   }
+  /* Section intro text. Lives INSIDE the card as a native `.setting-item` (rather than in
+     the group heading) so the heading stays the compact 18px the settings tab uses and the
+     16px heading-to-card gap reads the same on both surfaces. Mirrors
+     `.managed-entity-section-header` in ManagedEntitySection.svelte. */
+  .agent-section-intro {
+    padding-bottom: 0 !important;
+  }
+
+  /* Muted text like `ManagedEntitySection`'s empty state, but padded to the native
+     `.setting-item` inset so it lines up with the rows above it instead of sitting
+     20px further left. */
   .skill-empty-state,
   .mcp-empty-state {
-    padding: 16px;
-    text-align: center;
-    color: var(--text-muted);
-    background: var(--background-secondary);
-    border-radius: 8px;
+    margin: 0;
+    padding: 8px var(--size-4-5);
   }
   :global(.skill-entity),
   :global(.mcp-entity) {

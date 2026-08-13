@@ -8,16 +8,14 @@ import {
 import type { BuiltInToolId, DiffViewMode, SearchAlgorithm, ToolConfig } from "../../types/plugin";
 import type { ChatModel } from "../../stores/chatStore.svelte";
 import type SecondBrainPlugin from "../../main";
-import { diffWords } from "diff";
 import { ModelSelectionModal, type SelectedModel } from "./ModelSelectionModal";
 import { NATIVE_PDF_PROVIDERS } from "../../agent/Agent";
 import SecretSelect from "../settings/SecretSelect.svelte";
-import ModalField from "../settings/ModalField.svelte";
+import SettingContainer from "../settings/SettingContainer.svelte";
 import SettingGroup from "../settings/SettingGroup.svelte";
 import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
 import Text from "../ui/Text.svelte";
-import TextArea from "../ui/TextArea.svelte";
 import Toggle from "../ui/Toggle.svelte";
 import { getToolDisplayName } from "../../agent/builtInToolMeta";
 import type { ToolConfigAccessors } from "./ToolConfigModal";
@@ -29,8 +27,8 @@ interface Props {
 	/**
 	 * "modal" — render the standalone-modal footer (Cancel / Reset / Save) and persist
 	 * only when Save is pressed (preserves the old ToolConfigModal UX).
-	 * "none" — no footer; persist on every field commit (inline usage in the per-skill
-	 * SkillToolsModal). A "Reset to default" link is shown when the config is non-default.
+	 * "none" — no footer; persist on every field commit (inline usage in the agent-level
+	 * ToolsModal). A "Reset to default" link is shown when the config is non-default.
 	 */
 	footer?: "modal" | "none";
 	/** Called when the standalone modal saves (footer="modal"). */
@@ -60,6 +58,11 @@ function writeToolConfig(config: Partial<ToolConfig>): void {
 	pluginData.updateAgentToolConfig(pluginData.selectedAgentId, capturedToolId, config);
 }
 
+// Name/description feed the LangChain tool definition seen only by the model, not the user —
+// deliberately not exposed as editable fields here. `toolsConfig.name`/`.description` stay in
+// the data model (existing customizations keep working at runtime and still count toward
+// dirty/default detection below); "Reset to Default" can still clear a stale customization even
+// though there's no field to edit one manually.
 let name = $state(initialToolConfig?.name ?? defaultConfig.name);
 let description = $state(initialToolConfig?.description ?? defaultConfig.description);
 let maxResults = $state(
@@ -111,20 +114,6 @@ let allowMove = $state(
 		true,
 );
 let diffViewMode = $state<DiffViewMode>(pluginData.diffViewMode);
-let showDescriptionDiff = $state(false);
-
-function renderDiffSide(oldText: string, newText: string, side: "old" | "new"): string {
-	const parts = diffWords(oldText, newText);
-	return parts
-		.filter((p) => (side === "old" ? !p.added : !p.removed))
-		.map((p) => {
-			const escaped = p.value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-			if (side === "old" && p.removed) return `<mark class="s2b-prompt-diff-removed">${escaped}</mark>`;
-			if (side === "new" && p.added) return `<mark class="s2b-prompt-diff-added">${escaped}</mark>`;
-			return escaped;
-		})
-		.join("");
-}
 
 const diffViewModeOptions = [
 	{ display: "Two Pane (rendered markdown)", value: "two-pane" as const },
@@ -204,15 +193,6 @@ function resolveHasProcessor(mode: ProcessorMode, proc: ChatModel | null | undef
 	if (mode === "custom") return !!proc;
 	return false;
 }
-
-// Auto-update description when processor mode/selection changes and description is a known default
-$effect(() => {
-	const hasImg = resolveHasProcessor(imageProcessorMode, imageProcessor, chatModelSupportsVision);
-	const hasPdf = resolveHasProcessor(pdfProcessorMode, pdfProcessor, chatModelSupportsPdf);
-	if (capturedToolId === "read_content" && READ_CONTENT_DESC_DEFAULTS.has(description)) {
-		description = getReadContentDescription(hasImg, hasPdf);
-	}
-});
 
 interface ToolConfigSnapshot {
 	name: string;
@@ -306,6 +286,8 @@ const defaultSnapshotKey = snapshotKey(defaultSnapshot);
 
 const isDirty = $derived.by(() => {
 	const currentSnapshot: ToolConfigSnapshot = {
+		// name/description aren't editable in this form; carry the initial (persisted) values
+		// through unchanged so dirty/default detection still reflects any pre-existing customization.
 		name,
 		description,
 		maxResults,
@@ -352,10 +334,9 @@ const showResetToDefault = $derived(!isAtDefault);
 
 /** Build the persisted patch from current field state (shared by Save + live-commit). */
 function buildConfigPatch(): Partial<ToolConfig> {
-	// For read_content, the description auto-swap when processor mode changes is driven by a
-	// deferred $effect. In live-commit mode `commit()` can run synchronously (from a processor-mode
-	// handler) before that effect flushes, so resolve the swap here too — when the current value is
-	// a known default — to avoid persisting a stale variant.
+	// read_content's shipped default description varies by processor capability; if the
+	// persisted description is still one of those known-default variants, keep it in sync with
+	// the current processor mode rather than freezing it at whatever variant was true on load.
 	let resolvedDescription = description;
 	if (capturedToolId === "read_content") {
 		const hasImg = resolveHasProcessor(imageProcessorMode, imageProcessor, chatModelSupportsVision);
@@ -470,65 +451,10 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
 </script>
 
 <div class="tool-config-modal-content">
-  <ModalField label="Tool Name" desc="The name the AI agent sees for this tool. Use snake_case." for="tool-config-name">
-    <Text
-      id="tool-config-name"
-      inputType="text"
-      value={name}
-      placeholder={defaultConfig.name}
-      onblur={(v) => {
-        name = v;
-        commit();
-      }}
-    />
-  </ModalField>
-
-  <ModalField
-    label="Tool Description"
-    desc="Describe what the tool does. The AI uses this to decide when to use the tool."
-    for="tool-config-description"
-  >
-    {#if showDescriptionDiff}
-      <div class="tool-guidance-diff-container">
-        <div class="tool-guidance-diff-pane">
-          <div class="tool-guidance-diff-pane-label">Yours</div>
-          <pre class="tool-guidance-diff-text">{@html renderDiffSide(description, defaultConfig.description, "old")}</pre>
-        </div>
-        <div class="tool-guidance-diff-pane">
-          <div class="tool-guidance-diff-pane-label">Default</div>
-          <pre class="tool-guidance-diff-text">{@html renderDiffSide(description, defaultConfig.description, "new")}</pre>
-        </div>
-      </div>
-    {:else}
-      <TextArea
-        id="tool-config-description"
-        class="w-full h-24"
-        value={description}
-        placeholder={defaultConfig.description}
-        onblur={(v) => {
-          description = v;
-          commit();
-        }}
-      />
-    {/if}
-    {#if description !== defaultConfig.description && !READ_CONTENT_DESC_DEFAULTS.has(description)}
-      <div class="tool-guidance-diff-footer">
-        <button type="button" class="tool-guidance-link" onclick={() => (showDescriptionDiff = !showDescriptionDiff)}>
-          {showDescriptionDiff ? "Back to editor" : "Diff with default"}
-        </button>
-      </div>
-    {/if}
-  </ModalField>
-
   {#if capturedToolId === "search_notes"}
     <SettingGroup heading="Search Settings">
-      <ModalField
-        label="Search Algorithm"
-        desc="Choose the search algorithm the agent uses for retrieving notes."
-        for="tool-config-algorithm"
-      >
+      <SettingContainer name="Search Algorithm" desc="Choose the search algorithm the agent uses for retrieving notes.">
         <Dropdown
-          id="tool-config-algorithm"
           type="options"
           dropdown={[
             { display: "Lexical (BM25)", value: "lexical" as SearchAlgorithm },
@@ -540,14 +466,9 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             commit();
           }}
         />
-      </ModalField>
-      <ModalField
-        label="Max Notes to Return"
-        desc="Maximum number of notes to return to the AI agent."
-        for="tool-config-max-results"
-      >
+      </SettingContainer>
+      <SettingContainer name="Max Notes to Return" desc="Maximum number of notes to return to the AI agent.">
         <Text
-          id="tool-config-max-results"
           inputType="number"
           value={maxResults}
           placeholder="10"
@@ -556,8 +477,8 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             commit();
           }}
         />
-      </ModalField>
-      <ModalField label="Include Paths" desc="Include the full note path for each visible result." inline>
+      </SettingContainer>
+      <SettingContainer name="Include Paths" desc="Include the full note path for each visible result.">
         <Toggle
           checked={searchShowPath}
           onchange={(checked) => {
@@ -565,8 +486,8 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             commit();
           }}
         />
-      </ModalField>
-      <ModalField label="Include Tags" desc="Include normalized note tags in each visible result." inline>
+      </SettingContainer>
+      <SettingContainer name="Include Tags" desc="Include normalized note tags in each visible result.">
         <Toggle
           checked={searchShowTags}
           onchange={(checked) => {
@@ -574,11 +495,10 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             commit();
           }}
         />
-      </ModalField>
-      <ModalField
-        label="Include Match Badges"
+      </SettingContainer>
+      <SettingContainer
+        name="Include Match Badges"
         desc="Include why a note matched, such as title, tag, or content badges."
-        inline
       >
         <Toggle
           checked={searchShowMatchBadges}
@@ -587,11 +507,10 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             commit();
           }}
         />
-      </ModalField>
-      <ModalField
-        label="Include Content Snippets"
+      </SettingContainer>
+      <SettingContainer
+        name="Include Content Snippets"
         desc="Include short match snippets or heading context for each visible result."
-        inline
       >
         <Toggle
           checked={searchShowMatchContext}
@@ -600,17 +519,12 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             commit();
           }}
         />
-      </ModalField>
+      </SettingContainer>
     </SettingGroup>
   {:else if capturedToolId === "grep_notes"}
     <SettingGroup heading="Grep Settings">
-      <ModalField
-        label="Context Lines"
-        desc="Number of surrounding lines to show on each side of a match."
-        for="tool-config-context-lines"
-      >
+      <SettingContainer name="Context Lines" desc="Number of surrounding lines to show on each side of a match.">
         <Text
-          id="tool-config-context-lines"
           inputType="number"
           value={contextLines}
           placeholder="2"
@@ -619,23 +533,22 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             commit();
           }}
         />
-      </ModalField>
+      </SettingContainer>
     </SettingGroup>
   {:else if capturedToolId === "read_content"}
-    <SettingGroup heading="Vision Processors">
-      <p class="tool-config-section-note">
-        Configure how images and PDFs encountered during tool use are processed. Auto uses the chat
-        model if it supports vision.
-      </p>
-      <ModalField label="Image Processor" desc="Vision model to analyze images found in notes.">
-        <Dropdown
-          type="options"
-          dropdown={imageProcessorModeOptions}
-          selected={imageProcessorMode}
-          onchange={handleImageModeChange}
-        />
-        {#if imageProcessorMode === "custom"}
-          <div class="processor-selector">
+    <SettingGroup
+      heading="Vision Processors"
+      headingDesc="Configure how images and PDFs encountered during tool use are processed. Auto uses the chat model if it supports vision."
+    >
+      <SettingContainer name="Image Processor" desc="Vision model to analyze images found in notes.">
+        <div class="processor-control">
+          <Dropdown
+            type="options"
+            dropdown={imageProcessorModeOptions}
+            selected={imageProcessorMode}
+            onchange={handleImageModeChange}
+          />
+          {#if imageProcessorMode === "custom"}
             <Button
               onClick={() =>
                 openProcessorSelectionModal(imageProcessor ?? null, (model) => {
@@ -651,21 +564,18 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
                 <span class="text-[--text-muted]">Select model…</span>
               {/if}
             </Button>
-          </div>
-        {/if}
-      </ModalField>
-      <ModalField
-        label="PDF Processor"
-        desc="Vision model for enhanced PDF analysis (charts, tables, diagrams)."
-      >
-        <Dropdown
-          type="options"
-          dropdown={pdfProcessorModeOptions}
-          selected={pdfProcessorMode}
-          onchange={handlePdfModeChange}
-        />
-        {#if pdfProcessorMode === "custom"}
-          <div class="processor-selector">
+          {/if}
+        </div>
+      </SettingContainer>
+      <SettingContainer name="PDF Processor" desc="Vision model for enhanced PDF analysis (charts, tables, diagrams).">
+        <div class="processor-control">
+          <Dropdown
+            type="options"
+            dropdown={pdfProcessorModeOptions}
+            selected={pdfProcessorMode}
+            onchange={handlePdfModeChange}
+          />
+          {#if pdfProcessorMode === "custom"}
             <Button
               onClick={() =>
                 openProcessorSelectionModal(pdfProcessor ?? null, (model) => {
@@ -681,19 +591,14 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
                 <span class="text-[--text-muted]">Select model…</span>
               {/if}
             </Button>
-          </div>
-        {/if}
-      </ModalField>
+          {/if}
+        </div>
+      </SettingContainer>
     </SettingGroup>
   {:else if capturedToolId === "manage_notes"}
     <SettingGroup heading="Allowed Operations">
-      <ModalField
-        label="Diff View Mode"
-        desc="Choose how pending note edits are previewed in reading view."
-        for="tool-config-diff-view-mode"
-      >
+      <SettingContainer name="Diff View Mode" desc="Choose how pending note edits are previewed in reading view.">
         <Dropdown
-          id="tool-config-diff-view-mode"
           type="options"
           dropdown={diffViewModeOptions}
           selected={diffViewMode}
@@ -702,8 +607,8 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             commit();
           }}
         />
-      </ModalField>
-      <ModalField label="Allow Create" desc="Permit the agent to propose new markdown notes." inline>
+      </SettingContainer>
+      <SettingContainer name="Allow Create" desc="Permit the agent to propose new markdown notes.">
         <Toggle
           checked={allowCreate}
           onchange={(checked) => {
@@ -711,8 +616,8 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             commit();
           }}
         />
-      </ModalField>
-      <ModalField label="Allow Update" desc="Permit targeted edits to existing markdown notes." inline>
+      </SettingContainer>
+      <SettingContainer name="Allow Update" desc="Permit targeted edits to existing markdown notes.">
         <Toggle
           checked={allowUpdate}
           onchange={(checked) => {
@@ -720,8 +625,8 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             commit();
           }}
         />
-      </ModalField>
-      <ModalField label="Allow Delete" desc="Permit the agent to propose note deletions." inline>
+      </SettingContainer>
+      <SettingContainer name="Allow Delete" desc="Permit the agent to propose note deletions.">
         <Toggle
           checked={allowDelete}
           onchange={(checked) => {
@@ -729,8 +634,8 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             commit();
           }}
         />
-      </ModalField>
-      <ModalField label="Allow Move" desc="Permit renaming or relocating markdown notes." inline>
+      </SettingContainer>
+      <SettingContainer name="Allow Move" desc="Permit renaming or relocating markdown notes.">
         <Toggle
           checked={allowMove}
           onchange={(checked) => {
@@ -738,28 +643,26 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             commit();
           }}
         />
-      </ModalField>
+      </SettingContainer>
     </SettingGroup>
   {:else if capturedToolId === "fetch_url"}
     <!-- no tool-specific settings -->
   {:else if capturedToolId === "web_search"}
     <SettingGroup heading="Web Search Settings">
-      <ModalField
-        label="Provider"
+      <SettingContainer
+        name="Provider"
         desc="Search provider used by this tool. The provider and API key are shared across all agents that enable web_search."
-        for="tool-config-web-search-provider"
       >
         <Dropdown
-          id="tool-config-web-search-provider"
           type="options"
           dropdown={webSearchProviderOptions}
           selected={pluginData.webSearchProvider}
           onchange={(val) => (pluginData.webSearchProvider = val)}
         />
-      </ModalField>
+      </SettingContainer>
       {#if pluginData.webSearchProvider}
-        <ModalField
-          label={pluginData.webSearchProvider === "firecrawl" ? "API Key (optional)" : "API Key"}
+        <SettingContainer
+          name={pluginData.webSearchProvider === "firecrawl" ? "API Key (optional)" : "API Key"}
           desc={pluginData.webSearchProvider === "brave"
             ? "Brave Search API key from api.search.brave.com."
             : pluginData.webSearchProvider === "tavily"
@@ -770,7 +673,7 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             value={pluginData.webSearchApiKeyId}
             onChange={(secretId) => (pluginData.webSearchApiKeyId = secretId)}
           />
-        </ModalField>
+        </SettingContainer>
       {/if}
     </SettingGroup>
   {/if}
@@ -812,10 +715,10 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
     margin-right: 0;
   }
 
-  .tool-config-section-note {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    margin: 0 0 4px 0;
+  .processor-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .tool-config-actions {
@@ -843,81 +746,6 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
   }
 
   .tool-config-reset-link:hover {
-    text-decoration: underline;
-  }
-
-  .processor-selector {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 6px;
-  }
-
-  /* ── Prompt guidance diff ── */
-  .tool-guidance-diff-container {
-    display: flex;
-    gap: 10px;
-    min-height: 96px;
-    max-height: 240px;
-    overflow: hidden;
-  }
-
-  /* Stack the two diff panes vertically on mobile — side-by-side is too narrow. */
-  :global(.is-mobile) .tool-guidance-diff-container {
-    flex-direction: column;
-    max-height: none;
-    overflow: auto;
-  }
-
-  .tool-guidance-diff-pane {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    overflow-y: auto;
-    background: var(--background-secondary);
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 8px;
-    padding: 8px 10px;
-  }
-
-  .tool-guidance-diff-pane-label {
-    font-size: var(--font-ui-smaller);
-    font-weight: 600;
-    color: var(--text-muted);
-    margin-bottom: 4px;
-    flex-shrink: 0;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .tool-guidance-diff-text {
-    margin: 0;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: var(--font-text);
-    font-size: 0.9rem;
-    line-height: 1.6;
-    color: var(--text-normal);
-    user-select: text;
-  }
-
-  .tool-guidance-diff-footer {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 4px;
-  }
-
-  .tool-guidance-link {
-    border: 0;
-    background: transparent;
-    color: var(--text-accent);
-    cursor: pointer;
-    padding: 0;
-    font-size: var(--font-ui-smaller);
-  }
-
-  .tool-guidance-link:hover {
     text-decoration: underline;
   }
 </style>

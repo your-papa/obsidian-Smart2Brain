@@ -93,9 +93,11 @@ function handleResetToDefault() {
 	editor?.setValue(defaultPrompt);
 }
 
-function handleUseDefault() {
-	handleResetToDefault();
-	viewMode = "edit";
+// "Use default" in the diff view is a commit, not a preview step — apply and close
+// immediately rather than dropping the user back in the editor with an extra Save to find.
+async function handleUseDefault() {
+	promptValue = defaultPrompt;
+	await handleSave();
 }
 </script>
 
@@ -134,27 +136,29 @@ function handleUseDefault() {
     </div>
   {/if}
 
-  <div class="system-prompt-actions">
-    <Button buttonText={readOnly ? "Close" : "Cancel"} onClick={() => modal.close()} />
-    <div class="flex-1"></div>
-    {#if viewMode === "diff" && canShowDiff}
-      <Button buttonText="Back to editor" onClick={() => (viewMode = "edit")} />
-      <Button buttonText="Use default" cta={true} onClick={handleUseDefault} />
-    {:else}
-      {#if !readOnly && accessors.viewFinalPrompt}
-        <Button buttonText="View Final" onClick={accessors.viewFinalPrompt} />
+  {#if !readOnly}
+    <div class="system-prompt-actions">
+      <Button buttonText="Cancel" onClick={() => modal.close()} />
+      <div class="flex-1"></div>
+      {#if viewMode === "diff" && canShowDiff}
+        <Button buttonText="Back to editor" onClick={() => (viewMode = "edit")} />
+        <Button buttonText="Use default" cta={true} onClick={() => void handleUseDefault()} />
+      {:else}
+        {#if accessors.viewFinalPrompt}
+          <Button buttonText="View Final" onClick={accessors.viewFinalPrompt} />
+        {/if}
+        {#if !isAtDefault}
+          <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
+        {/if}
+        {#if canShowDiff}
+          <Button buttonText="Diff with default" onClick={() => (viewMode = "diff")} />
+        {/if}
+        {#if isDirty}
+          <Button buttonText="Save" cta={true} onClick={handleSave} />
+        {/if}
       {/if}
-      {#if !readOnly && !isAtDefault}
-        <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
-      {/if}
-      {#if canShowDiff}
-        <Button buttonText="Diff with default" onClick={() => (viewMode = "diff")} />
-      {/if}
-      {#if !readOnly && isDirty}
-        <Button buttonText="Save" cta={true} onClick={handleSave} />
-      {/if}
-    {/if}
-  </div>
+    </div>
+  {/if}
 </div>
 
 <style>

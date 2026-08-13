@@ -57,8 +57,8 @@ function duplicateAgent(agentId: string) {
 	if (!sourceAgent) return;
 	const duplicated = pluginData.duplicateAgent(agentId, `${sourceAgent.name} (Copy)`);
 	pluginData.selectedAgentId = duplicated.id;
-	// Carry over the source's edited base prompt to the duplicate's own note.
-	void plugin.promptFilesService?.copyBasePrompt(agentId, duplicated.id);
+	// Carry over the source's edited base + memory prompts to the duplicate's own notes.
+	void plugin.promptFilesService?.copyAgentPrompts(agentId, duplicated.id);
 	openAgentEditor(duplicated.id);
 }
 
@@ -70,11 +70,12 @@ async function deleteAgent(agentId: string) {
 	const agent = agents[agentId];
 	if (!(await confirmDelete(plugin.app, agent?.name ?? agentId))) return;
 	try {
-		// Remove the note BEFORE the agent leaves config, and AWAIT it: deleteBasePrompt
-		// resolves the note path from the agent's (name-based) entry, and only once the
-		// agent is gone can its name be reused by another agent. Fully ordering the removal
-		// closes the window where a reused name could point deletion at the wrong note.
-		await plugin.promptFilesService?.deleteBasePrompt(agentId);
+		// Remove the prompt folder BEFORE the agent leaves config, and AWAIT it:
+		// deleteAgentPrompts resolves the folder path from the agent's (name-based) entry, and
+		// only once the agent is gone can its name be reused by another agent. Fully ordering
+		// the removal closes the window where a reused name could point deletion at the wrong
+		// folder.
+		await plugin.promptFilesService?.deleteAgentPrompts(agentId);
 		pluginData.deleteAgent(agentId);
 		plugin.agentManager?.invalidateAgentRunnable(agentId);
 	} catch (error) {
@@ -128,7 +129,6 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
       {@const skillsSummary = getAgentSkillsSummary(agentId)}
       <ManagedEntityItem
         name={agent.name}
-        desc={getAgentModelSummary(agentId)}
         selected={pluginData.defaultAgentId === agentId}
         radio={agentIds.length > 1
           ? {
@@ -151,10 +151,9 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
         {/snippet}
 
         {#snippet children()}
-          <div class="agent-skills-summary">
-            {#if skillsSummary.count === 0}
-              <span class="agent-skills-empty">No skills enabled</span>
-            {:else}
+          <div class="agent-summary-row">
+            <span class="agent-model-summary">{getAgentModelSummary(agentId)}</span>
+            {#if skillsSummary.count > 0}
               <span class="agent-skills-icons">
                 {#each skillsSummary.icons as icon, i (i)}
                   <Icon name={icon} size="xs" />
@@ -293,14 +292,17 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
   /* These live inside ManagedEntityItem's `children` snippet and are only referenced
      within {#if} branches, so Svelte's scoped-CSS analysis prunes the plain-class rules
      (unlike .agent-avatar, which survives via its class: directive). Scope them with
-     :global so the flex layout actually reaches the rendered icon strip. */
-  :global(.agent-skills-summary) {
+     :global so the flex layout actually reaches the rendered row. */
+  :global(.agent-summary-row) {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 4px;
+    gap: 14px;
     font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  :global(.agent-model-summary) {
     color: var(--text-muted);
   }
 
@@ -308,16 +310,12 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
     display: inline-flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
-    color: var(--text-normal);
+    gap: 8px;
+    color: var(--text-muted);
   }
 
   :global(.agent-skills-overflow) {
     font-size: 0.8rem;
-    color: var(--text-muted);
-  }
-
-  :global(.agent-skills-empty) {
     color: var(--text-muted);
   }
 </style>

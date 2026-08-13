@@ -50,10 +50,10 @@ export function isTextIndexableFile(file: TFile): boolean {
 /**
  * Returns `true` when `path` lives inside the configurable agent root folder (default
  * "Agents"). That folder holds all agent context — `Memories/`, `Skills/` (skill dirs,
- * core skills included), and `Base Prompts/`. These are plugin machinery, not user notes, so they must be
- * kept out of indexing, search, graph, and the agent's vault-facing tools. `agentFolder` is
- * pure/injectable for testing; callers that don't have it use `isAgentFilePath`, which reads
- * it from plugin data.
+ * core skills included), and `System Prompts/` (per-agent subfolders). These are plugin
+ * machinery, not user notes, so they must be kept out of indexing, search, graph, and the
+ * agent's vault-facing tools. `agentFolder` is pure/injectable for testing; callers that
+ * don't have it use `isAgentFilePath`, which reads it from plugin data.
  */
 export function isAgentPath(path: string, agentFolder: string): boolean {
 	if (!agentFolder) return false;
