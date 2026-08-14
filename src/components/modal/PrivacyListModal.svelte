@@ -83,7 +83,11 @@ const initialParsed = parseSpaceMembershipFilter(data.privacyFilter);
 let privacyFilter = $state<ViewFilter>(ensureGroup(data.privacyFilter ?? createEmptySpaceFilter()));
 let showFilters = $state(initialParsed.draft.autoIncludeRules.length > 0);
 
-const privacyMode = $derived.by(() => data.privacyMode);
+// Working copy — edits only touch this local state. `data.setPrivacyFilter` /
+// `data.setPrivacyMode` are called once, from `saveChanges`, so a half-typed
+// condition (e.g. a folder field mid-edit) is never briefly live for tool calls,
+// and closing the modal without saving discards the in-progress edit entirely.
+let privacyMode = $state<PrivacyMode>(data.privacyMode);
 const parsedMembership = $derived.by(() => parseSpaceMembershipFilter(privacyFilter));
 const privacyUniverse = $derived.by(
 	() =>
@@ -134,13 +138,18 @@ const excludedEntries = $derived.by(() =>
 	})),
 );
 
-function savePrivacyFilter(nextFilter: ViewFilter) {
+function updatePrivacyFilter(nextFilter: ViewFilter) {
 	privacyFilter = ensureGroup(nextFilter);
-	data.setPrivacyFilter(nextFilter);
 }
 
-function setPrivacyMode(mode: PrivacyMode) {
-	data.setPrivacyMode(mode);
+function updatePrivacyMode(mode: PrivacyMode) {
+	privacyMode = mode;
+}
+
+function saveChanges() {
+	data.setPrivacyFilter(privacyFilter);
+	data.setPrivacyMode(privacyMode);
+	modal.close();
 }
 
 function updateDraft(mutator: (draft: ReturnType<typeof cloneSpaceMembershipDraft>) => void) {
@@ -148,7 +157,7 @@ function updateDraft(mutator: (draft: ReturnType<typeof cloneSpaceMembershipDraf
 	const draft = cloneSpaceMembershipDraft(currentParsedMembership.draft);
 	mutator(draft);
 	showFilters = showFilters || draft.autoIncludeRules.length > 0;
-	savePrivacyFilter(compileSpaceMembershipDraft(draft));
+	updatePrivacyFilter(compileSpaceMembershipDraft(draft));
 }
 
 function getParentPath(path: string): string {
@@ -181,7 +190,7 @@ function handleRulesFilterChange(nextFilter: ViewFilter) {
 	const simpleRules = extractSpaceMembershipRulesFilter(nextFilter);
 	if (!simpleRules) {
 		showFilters = true;
-		savePrivacyFilter(cloneViewFilter(nextFilter));
+		updatePrivacyFilter(cloneViewFilter(nextFilter));
 		return;
 	}
 
@@ -292,7 +301,7 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
           class="privacy-mode-button"
           class:privacy-mode-button--active={privacyMode === "private-by-default"}
           aria-pressed={privacyMode === "private-by-default"}
-          onclick={() => setPrivacyMode("private-by-default")}
+          onclick={() => updatePrivacyMode("private-by-default")}
         >
           Private by default
         </button>
@@ -301,7 +310,7 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
           class="privacy-mode-button"
           class:privacy-mode-button--active={privacyMode === "public-by-default"}
           aria-pressed={privacyMode === "public-by-default"}
-          onclick={() => setPrivacyMode("public-by-default")}
+          onclick={() => updatePrivacyMode("public-by-default")}
         >
           Public by default
         </button>
@@ -344,7 +353,7 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
   </div>
 
   <div class="modal-button-container">
-    <Button buttonText="Done" onClick={() => modal.close()} />
+    <Button buttonText="Save" cta onClick={saveChanges} />
   </div>
 </div>
 
