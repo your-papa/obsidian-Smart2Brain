@@ -4,6 +4,7 @@ import "./lib/i18n";
 import "./lib/langgraphContext";
 import { Logger as Log, applyVerboseLogging } from "./utils/logging";
 import { isAgentFilePath } from "./utils/fileFiltering";
+import { isMobileUI } from "./utils/platform";
 import { StartupProfiler } from "./utils/startupProfiler";
 import { persistStartupRecord, recordStartupEnvironment } from "./utils/startupTimingsStore";
 import "./styles.css";
@@ -256,6 +257,50 @@ export default class SecondBrainPlugin extends Plugin {
 		await this.pluginData.clearRecentNotes();
 	}
 
+	/**
+	 * Mobile only: route the search button in Obsidian's bottom navbar to S2B
+	 * search, when `overrideMobileNavbarSearch` is on.
+	 *
+	 * That button has no plugin-facing hook — it invokes the `global-search:open`
+	 * command — so the interception happens on the command itself rather than on
+	 * the DOM node, which also covers every other route to core search (palette,
+	 * hotkey) and does not care how the navbar is rendered. The original callback
+	 * is captured and restored on unload, and is still called when the setting is
+	 * off, so toggling takes effect immediately without a reload and disabling
+	 * the plugin leaves core search exactly as it found it.
+	 */
+	private registerMobileNavbarSearchOverride(): void {
+		if (!isMobileUI()) return;
+
+		const commands = (
+			this.app as unknown as {
+				commands?: { commands?: Record<string, { callback?: () => unknown }> };
+			}
+		).commands?.commands;
+		const searchCommand = commands?.["global-search:open"];
+		const originalCallback = searchCommand?.callback;
+		if (!searchCommand || typeof originalCallback !== "function") {
+			Log.warn("[S2B] Could not hook global-search:open — mobile navbar search override unavailable.");
+			return;
+		}
+
+		searchCommand.callback = () => {
+			if (!getData().overrideMobileNavbarSearch) {
+				return originalCallback.call(searchCommand);
+			}
+			new SearchModal(this.app).open();
+		};
+
+		this.register(() => {
+			// Only hand back the original if nothing else has since replaced our
+			// wrapper — clobbering another plugin's hook would be worse than
+			// leaving ours in place.
+			if (searchCommand.callback !== originalCallback) {
+				searchCommand.callback = originalCallback;
+			}
+		});
+	}
+
 	async onload() {
 		StartupProfiler.mark("onload:start", true);
 		// Time (ms) since the renderer process began until our onload ran. A large value
@@ -393,6 +438,8 @@ export default class SecondBrainPlugin extends Plugin {
 			icon: "search",
 			callback: () => new SearchModal(this.app).open(),
 		});
+
+		this.registerMobileNavbarSearchOverride();
 
 		this.addCommand({
 			id: "open-smart-graph",

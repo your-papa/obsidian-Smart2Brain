@@ -524,6 +524,14 @@ export interface PluginData {
 	showActiveAgentsInStatusBar: boolean;
 
 	/**
+	 * Mobile only: make the search button in Obsidian's bottom navbar open S2B
+	 * search instead of core's global search. Overriding a core control is a
+	 * visible change to host behaviour, so it is opt-in rather than silent.
+	 * Core search stays reachable from the command palette.
+	 */
+	overrideMobileNavbarSearch: boolean;
+
+	/**
 	 * Suppresses the warning shown before enabling a plugin integration's `exec_<plugin>`
 	 * tool (unsandboxed main-thread `app` access that bypasses per-provider privacy rules).
 	 * Global across all integrations. Off by default; reset from Developer settings.

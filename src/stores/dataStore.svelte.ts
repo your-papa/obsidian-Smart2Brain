@@ -567,6 +567,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	dismissedRecommendations: [],
 	thinkingProcessExpanded: true,
 	showActiveAgentsInStatusBar: true,
+	overrideMobileNavbarSearch: false,
 	suppressIntegrationPrivacyWarning: false,
 
 	// Debugging & telemetry
@@ -1427,6 +1428,14 @@ export class PluginDataStore {
 	}
 	set showActiveAgentsInStatusBar(val: boolean) {
 		this.#data.showActiveAgentsInStatusBar = val;
+		this.saveSettings();
+	}
+
+	get overrideMobileNavbarSearch() {
+		return this.#data.overrideMobileNavbarSearch ?? false;
+	}
+	set overrideMobileNavbarSearch(val: boolean) {
+		this.#data.overrideMobileNavbarSearch = val;
 		this.saveSettings();
 	}
 

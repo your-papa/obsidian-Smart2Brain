@@ -918,9 +918,26 @@
    on Platform.isMobile; mirrors the Tab / Alt+Enter keyboard actions. */
 .s2b-search-mobile-actions {
 	display: flex;
-	flex-wrap: wrap;
 	gap: 8px;
-	padding: 8px 12px 4px;
+	padding: 8px 12px;
+	/* Same trap as .s2b-model-filter-bar: inside .prompt's fixed-height flex
+	   column a plain block child has no intrinsic basis and gets squeezed, which
+	   clipped the pills. Pin the basis and let the row scroll sideways rather
+	   than wrap — wrapping changed the bar's height (and so the results list's
+	   offset) whenever the button set changed. */
+	flex-shrink: 0;
+	height: calc(36px + 16px);
+	box-sizing: border-box;
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+
+.s2b-search-mobile-actions::-webkit-scrollbar {
+	display: none;
+}
+
+.s2b-search-mobile-actions .s2b-pill {
+	flex-shrink: 0;
 }
 
 .s2b-search-mobile-actions .s2b-pill {
@@ -959,13 +976,19 @@
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	padding: 8px 12px 4px;
+	padding: 8px 12px;
 	/* .prompt is a flex column with a fixed total height (input + this bar +
 	   results); as a plain block child this bar has no intrinsic height for
 	   flexbox to respect, so it gets squeezed to a sliver instead of showing
-	   its pills. flex-shrink: 0 plus an explicit height fixes the basis. */
+	   its pills. flex-shrink: 0 plus an explicit height fixes the basis.
+
+	   The height must cover the pills plus this padding: at 44px with 36px pills
+	   and 12px of vertical padding the content needed 48px, so every pill was
+	   clipped top and bottom. Derive it from the same numbers instead of
+	   hard-coding, so restyling a pill can't silently re-clip the row. */
 	flex-shrink: 0;
-	height: 44px;
+	height: calc(36px + 16px);
+	box-sizing: border-box;
 	/* One scrolling row: a wrapping bar would push the results list down by an
 	   unpredictable amount every time the vendor set changes. */
 	overflow-x: auto;

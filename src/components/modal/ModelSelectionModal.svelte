@@ -2,6 +2,7 @@
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { extractVendor, logUnclassifiedModelsInfo } from "../../lib/modelVendorClassification";
 import type { UiClassifiableModel } from "../../lib/modelVendorClassification";
+import { stripVendorPrefix } from "../../lib/modelMetadataNormalizer";
 import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../../types/modelMetadata";
 import { MODEL_CAPABILITY_ICONS } from "../../lib/modelCapabilityIcons";
 import { getProviderDefinition } from "../../providers/index";
@@ -182,6 +183,29 @@ function getProviderLogo(providerId: string) {
 	return GenericAIIcon;
 }
 
+/** Vendor artwork keyed by the ids `extractVendor` returns — the same nine the
+ *  sidebar filters offer. Catalogues carry many more labs than that, so a miss
+ *  is normal and callers must handle `null`. */
+const VENDOR_LOGOS: Record<string, (typeof AI_VENDORS)[number]["logo"]> = Object.fromEntries(
+	AI_VENDORS.map((vendor) => [vendor.id, vendor.logo]),
+);
+
+/**
+ * Row presentation for a model: its lab's logo plus a name with the redundant
+ * "Lab: " prefix removed. Catalogues ship names like "Qwen: Qwen3.8 Max"; when
+ * we can draw the lab's mark the prefix is just noise, so the logo replaces it.
+ * Without artwork the prefix stays as text rather than collapsing every unknown
+ * lab into one anonymous glyph. Mirrors `ModelSuggestModal.renderSuggestion`.
+ */
+function getModelBranding(model: HydratedModel): {
+	logo: (typeof AI_VENDORS)[number]["logo"] | null;
+	name: string;
+} {
+	const vendor = extractVendor(toClassifiableModel(model), openRouterModels);
+	const logo = vendor ? (VENDOR_LOGOS[vendor] ?? null) : null;
+	return { logo, name: logo ? stripVendorPrefix(model.displayName) : model.displayName };
+}
+
 // Format cost (per 1M tokens)
 function formatCost(costPer1M?: number): string {
 	if (costPer1M === undefined) return "—";
@@ -340,6 +364,8 @@ function getProviderListDisplay(): string {
             <div class="provider-models">
               {#each models as model (`${model.provider}::${model.variantKey}`)}
                 {@const isFavorite = pluginData.isFavoriteModel(model.provider, model.variantKey)}
+                {@const branding = getModelBranding(model)}
+                {@const VendorLogo = branding.logo}
                 <div
                   role="button"
                   tabindex="0"
@@ -350,8 +376,13 @@ function getProviderListDisplay(): string {
                     e.key === "Enter" && handleSelect(model.provider, model.variantKey)}
                 >
                   <div class="model-main">
+                    {#if VendorLogo}
+                      <span class="model-vendor-logo" aria-hidden="true">
+                        <VendorLogo width={20} height={20} />
+                      </span>
+                    {/if}
                     <div class="model-info">
-                      <div class="model-name">{model.displayName}</div>
+                      <div class="model-name">{branding.name}</div>
                       {#if model.displayName !== getVariantKeyDisplay(model)}
                         <div class="model-description">{getVariantKeyDisplay(model)}</div>
                       {/if}
@@ -709,6 +740,16 @@ function getProviderListDisplay(): string {
     gap: 12px;
     width: 100%;
     height: auto;
+  }
+
+  /* Fixed box so names line up across rows whether or not a lab has artwork. */
+  .model-vendor-logo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
   }
 
   .model-info {
