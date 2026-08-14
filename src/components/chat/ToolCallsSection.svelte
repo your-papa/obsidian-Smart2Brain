@@ -1018,7 +1018,9 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
      with the SAME value so nothing shifts at the streaming→settled boundary — an earlier
      settled-only gate made the gap snap tighter the instant the run settled. */
   .tool-timeline:has(.thinking-summary-header.is-collapsed) {
-    margin-bottom: -0.95rem;
+    /* -0.95rem pulled the answer flush enough that the label read as part of it.
+       Giving back ~4px separates the two without reopening the original gap. */
+    margin-bottom: -0.7rem;
   }
 
   /* Rail-less mode: the vertical timeline rail (dots + connecting line) is hidden

@@ -565,13 +565,20 @@ function handleClearSelection() {
 async function handleImmerse() {
 	if (selectedPaths.length === 0) return;
 	immersePaths = new Set(selectedPaths);
-	canvasComponent?.clearSelection();
-	selectedPaths = [];
+	// Immersing rebuilds the graph to contain ONLY these notes, so "selected"
+	// stops meaning anything — every remaining node is in the set. Clearing just
+	// `selectedPaths` + the canvas (as this did) left the focused clusters/segments
+	// and every open chat's context tray still holding the pre-immerse selection,
+	// so the tray showed stale notes and dimming persisted. Reuse the full reset.
+	handleClearSelection();
 	await buildGraph();
 }
 
 async function handleExitImmerse() {
 	immersePaths = null;
+	// Leaving immerse restores the full graph; any selection made inside the
+	// immersed subset refers to a different node set, so drop it too.
+	handleClearSelection();
 	await buildGraph();
 }
 
@@ -891,6 +898,7 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
       showWikiLinks={settings.showWikiLinks}
       {focusedClusters}
       clusterLabels={effectiveClusterLabels}
+      showClusterLabels={settings.showClusterLabels ?? true}
       clusterCohesionStrength={settings.clusterCohesionStrength ?? 0.15}
       onNodeClick={handleNodeClick}
       onRevealFile={handleRevealFile}

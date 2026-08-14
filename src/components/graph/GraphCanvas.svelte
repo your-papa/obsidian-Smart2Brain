@@ -30,6 +30,8 @@ interface Props {
 	showWikiLinks?: boolean;
 	focusedClusters?: Set<number>;
 	clusterLabels?: Record<number, string>;
+	/** When false, the cluster/topic label pills are not drawn over the graph. */
+	showClusterLabels?: boolean;
 	isLabeling?: boolean;
 	/**
 	 * Strength of the cluster cohesion force (0 = off, default 0.15).
@@ -62,6 +64,7 @@ let {
 	showWikiLinks = true,
 	focusedClusters = new Set<number>(),
 	clusterLabels = {},
+	showClusterLabels = true,
 	isLabeling = false,
 	clusterCohesionStrength = 0.15,
 	onNodeClick,
@@ -502,7 +505,7 @@ function render() {
 	// readable threshold — no manual zoom setting needed. The occlusion grid
 	// handles crowding; this threshold handles legibility.
 	const MIN_LABEL_SCREEN_RADIUS = 5; // px — node must be at least this big on screen
-	const showClusterAnchors = clusterRepresentativeNodes.size > 0;
+	const showClusterAnchors = showClusterLabels && clusterRepresentativeNodes.size > 0;
 	const hovId = hoveredNode?.id ?? null;
 	const hoverNeighbors = hovId ? adjacency.get(hovId) : undefined;
 
@@ -1471,6 +1474,7 @@ $effect(() => {
 	void showWikiLinks;
 	void alwaysRefitOnDataChange;
 	void directedWikiEdges;
+	void showClusterLabels;
 	if (pixi) render();
 });
 
