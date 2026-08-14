@@ -77,12 +77,12 @@ interface SearchToolResultPayload {
 	filter?: { pathPrefixes?: string[]; tags?: string[] };
 	totalResults: number;
 	returnedResults: number;
+	skippedPrivateFiles: number;
 	results: Array<{
 		rank: number;
 		name: string;
 		path?: string;
 		score?: number;
-		privacyRestricted: boolean;
 		frontmatter?: Record<string, unknown>;
 		tags?: string[];
 		matchExplanation?: { source: string; text: string; heading?: string };
@@ -384,7 +384,6 @@ describe("performSearch lexical startup behavior", () => {
 				name: "recent-one",
 				path: "Notes/recent-one.md",
 				score: 4.5,
-				privacyRestricted: false,
 				frontmatter: { aliases: ["One"] },
 				tags: ["#one"],
 				matchBadges: ["recent"],
@@ -394,7 +393,6 @@ describe("performSearch lexical startup behavior", () => {
 				name: "recent-two",
 				path: "Notes/recent-two.md",
 				score: 3.75,
-				privacyRestricted: false,
 				tags: ["#two"],
 				matchBadges: ["recent"],
 			},
@@ -427,7 +425,6 @@ describe("performSearch lexical startup behavior", () => {
 				name: "recent-diagram",
 				path: "Assets/recent-diagram.canvas",
 				score: 4.5,
-				privacyRestricted: false,
 				matchBadges: ["recent"],
 			},
 		]);
@@ -673,7 +670,6 @@ describe("performSearch lexical startup behavior", () => {
 				name: "orbital-index",
 				path: "Notes/orbital-index.md",
 				score: 12.345,
-				privacyRestricted: false,
 				frontmatter: { aliases: ["Rocket Science"] },
 				tags: ["#space", "#orbital-index"],
 				matchBadges: ["tag", "content"],
@@ -686,7 +682,7 @@ describe("performSearch lexical startup behavior", () => {
 		]);
 	});
 
-	it("keeps privacy-restricted results visible while redacting content snippets", async () => {
+	it("drops privacy-restricted results entirely instead of exposing their path/name", async () => {
 		mockLexicalSearch.mockResolvedValue([
 			{
 				path: "Private/launch-plan.md",
@@ -713,32 +709,42 @@ describe("performSearch lexical startup behavior", () => {
 		const result = await tool.invoke({ query: "plan" });
 		const parsed: SearchToolResultPayload = JSON.parse(String(result));
 
-		expect(parsed.totalResults).toBe(2);
-		expect(parsed.returnedResults).toBe(2);
+		expect(parsed.totalResults).toBe(1);
+		expect(parsed.returnedResults).toBe(1);
+		expect(parsed.skippedPrivateFiles).toBe(1);
 		expect(parsed.results).toEqual([
 			{
 				rank: 1,
-				name: "launch-plan",
-				path: "Private/launch-plan.md",
-				score: 30,
-				privacyRestricted: true,
-				frontmatter: { owner: "red-team" },
-				tags: ["#secret"],
-				matchBadges: ["title"],
-				matchExplanation: undefined,
-			},
-			{
-				rank: 2,
 				name: "public-plan",
 				path: "Notes/public-plan.md",
 				score: 20,
-				privacyRestricted: false,
 				frontmatter: undefined,
 				tags: ["#public"],
 				matchBadges: undefined,
 				matchExplanation: undefined,
 			},
 		]);
+		expect(parsed.results.some((entry) => entry.name === "launch-plan" || entry.path?.includes("Private"))).toBe(
+			false,
+		);
+	});
+
+	it("fills the result page from beyond the raw limit when leading results are privacy-restricted", async () => {
+		mockToolSettings.showPath = undefined;
+		mockLexicalSearch.mockResolvedValue([
+			{ path: "Private/one.md", name: "private-one", score: 30 },
+			{ path: "Private/two.md", name: "private-two", score: 29 },
+			{ path: "Notes/visible-one.md", name: "visible-one", score: 28 },
+			{ path: "Notes/visible-two.md", name: "visible-two", score: 27 },
+		]);
+		mockShouldBlockFile.mockImplementation((path: string) => path.startsWith("Private/"));
+
+		const tool = createSearchNotesTool({} as App);
+		const result = await tool.invoke({ query: "plan" });
+		const parsed: SearchToolResultPayload = JSON.parse(String(result));
+
+		expect(parsed.skippedPrivateFiles).toBe(2);
+		expect(parsed.results.map((entry) => entry.name)).toEqual(["visible-one", "visible-two"]);
 	});
 
 	it("honors per-tool visibility settings for optional search fields", async () => {
@@ -771,7 +777,6 @@ describe("performSearch lexical startup behavior", () => {
 			rank: 1,
 			name: "orbital-index",
 			score: 12.345,
-			privacyRestricted: false,
 			frontmatter: { aliases: ["Rocket Science"] },
 		});
 	});

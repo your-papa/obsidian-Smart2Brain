@@ -707,6 +707,11 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
       {#if model.payload.recentOnly}
         <span class="tool-output-metric-chip">recent only</span>
       {/if}
+      {#if (model.payload.skippedPrivateFiles ?? 0) > 0}
+        <span class="tool-output-metric-chip tool-output-metric-chip-warning"
+          >skipped private: {model.payload.skippedPrivateFiles}</span
+        >
+      {/if}
     </div>
     {#if model.payload.message}
       <div class="tool-output-message">{model.payload.message}</div>
@@ -720,11 +725,6 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
               <span class="tool-output-result-title"
                 >{result.name ?? result.path ?? "Untitled"}</span
               >
-              {#if result.privacyRestricted}
-                <span class="tool-output-status-badge tool-output-status-badge-warning"
-                  >private</span
-                >
-              {/if}
             </div>
             {#if result.path}
               <div class="tool-output-result-path">{result.path}</div>
@@ -1670,8 +1670,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
     word-break: break-word;
   }
 
-  .tool-output-metric-chip,
-  .tool-output-status-badge {
+  .tool-output-metric-chip {
     display: inline-flex;
     align-items: center;
     padding: 2px 7px;
@@ -1686,8 +1685,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
     background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
   }
 
-  .tool-output-metric-chip-warning,
-  .tool-output-status-badge-warning {
+  .tool-output-metric-chip-warning {
     color: var(--color-orange);
     background: color-mix(in srgb, var(--color-orange) 12%, transparent);
   }
