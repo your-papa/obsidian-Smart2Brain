@@ -8,6 +8,7 @@
  *
  * The component mutates a `ViewFilter` object in-place via `onchange`.
  */
+import { formatPropertyValues, parsePropertyValues } from "../../lib/propertyValues";
 import type { ViewFilter, ViewFilterLeaf, ViewFilterGroup } from "../../types/graph";
 import Dropdown from "../ui/Dropdown.svelte";
 import Text from "../ui/Text.svelte";
@@ -197,24 +198,12 @@ function hasCombo(type: string): boolean {
 }
 
 /**
- * Serialize the optional `values` list of a property leaf for the text input.
- * Empty list and `undefined` both render as "" — the leaf then means
- * "this property exists", regardless of value.
- */
-function formatPropertyValues(values: string[] | undefined): string {
-	return (values ?? []).join(", ");
-}
-
-/**
  * Build a property leaf from a key and the comma-separated values input.
  * An empty input clears `values` entirely (back to an existence check) rather
  * than storing an empty array, so the two states stay distinguishable in saved data.
  */
 function buildPropertyLeaf(key: string, rawValues: string): ViewFilterLeaf {
-	const parsed = rawValues
-		.split(",")
-		.map((entry) => entry.trim())
-		.filter((entry) => entry.length > 0);
+	const parsed = parsePropertyValues(rawValues);
 	return { type: "property", value: key, values: parsed.length > 0 ? parsed : undefined };
 }
 
