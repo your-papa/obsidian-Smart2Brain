@@ -19,7 +19,6 @@ interface SearchToolResultItem {
 	name: string;
 	path?: string;
 	score?: number;
-	privacyRestricted: boolean;
 	frontmatter?: Record<string, unknown>;
 	tags?: string[];
 	matchExplanation?: SearchMatchExplanation;
@@ -34,6 +33,7 @@ interface SearchToolResultPayload {
 	filter?: SearchFilter;
 	totalResults: number;
 	returnedResults: number;
+	skippedPrivateFiles: number;
 	results: SearchToolResultItem[];
 	message?: string;
 }
@@ -53,22 +53,6 @@ function normalizeTags(tags: string[] | undefined): string[] | undefined {
 	}
 
 	return Array.from(new Set(tags.map((tag) => (tag.startsWith("#") ? tag : `#${tag}`))));
-}
-
-function redactRestrictedMatchBadges(
-	badges: SearchMatchBadge[] | undefined,
-	privacyRestricted: boolean,
-): SearchMatchBadge[] | undefined {
-	if (!badges?.length) {
-		return undefined;
-	}
-
-	if (!privacyRestricted) {
-		return badges;
-	}
-
-	const visibleBadges = badges.filter((badge) => badge !== "content" && badge !== "heading" && badge !== "semantic");
-	return visibleBadges.length > 0 ? visibleBadges : undefined;
 }
 
 /**
@@ -253,24 +237,28 @@ export function createSearchNotesTool(app: App) {
 		const results = recentOnly ? getRecentNotes(app, filter) : await performSearch(app, query, algorithm, filter);
 		const currentProvider = pluginData.getSelectedAgent().chatModel?.provider;
 		const store = getPendingChangesStore();
-		const limitedResults = results.slice(0, limit);
-		const items: SearchToolResultItem[] = limitedResults.map((result, index) => {
-			const privacyRestricted = currentProvider ? store.shouldBlockFile(result.path, currentProvider) : false;
 
-			return {
-				rank: index + 1,
-				name: result.name,
-				path: showPath ? result.path : undefined,
-				score: result.score,
-				privacyRestricted,
-				frontmatter: result.frontmatter,
-				tags: showTags ? normalizeTags(result.tags) : undefined,
-				matchExplanation: showMatchContext && !privacyRestricted ? result.matchExplanation : undefined,
-				matchBadges: showMatchBadges
-					? redactRestrictedMatchBadges(result.matchBadges, privacyRestricted)
-					: undefined,
-			};
-		});
+		let skippedPrivateFiles = 0;
+		const visibleResults: SearchResult[] = [];
+		for (const result of results) {
+			if (currentProvider && store.shouldBlockFile(result.path, currentProvider)) {
+				skippedPrivateFiles++;
+				continue;
+			}
+			visibleResults.push(result);
+		}
+
+		const limitedResults = visibleResults.slice(0, limit);
+		const items: SearchToolResultItem[] = limitedResults.map((result, index) => ({
+			rank: index + 1,
+			name: result.name,
+			path: showPath ? result.path : undefined,
+			score: result.score,
+			frontmatter: result.frontmatter,
+			tags: showTags ? normalizeTags(result.tags) : undefined,
+			matchExplanation: showMatchContext ? result.matchExplanation : undefined,
+			matchBadges: showMatchBadges ? result.matchBadges : undefined,
+		}));
 
 		const payload: SearchToolResultPayload = {
 			query,
@@ -278,8 +266,9 @@ export function createSearchNotesTool(app: App) {
 			algorithm,
 			maxResults: limit,
 			filter,
-			totalResults: results.length,
+			totalResults: visibleResults.length,
 			returnedResults: items.length,
+			skippedPrivateFiles,
 			results: items,
 		};
 

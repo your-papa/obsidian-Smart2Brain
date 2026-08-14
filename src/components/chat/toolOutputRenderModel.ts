@@ -3,7 +3,6 @@ interface SearchNotesResult {
 	name?: string;
 	path?: string;
 	score?: number;
-	privacyRestricted?: boolean;
 	tags?: string[];
 	matchExplanation?: string;
 	matchBadges?: string[];
@@ -16,6 +15,7 @@ interface SearchNotesPayload {
 	maxResults?: number;
 	totalResults?: number;
 	returnedResults?: number;
+	skippedPrivateFiles?: number;
 	message?: string;
 	results?: SearchNotesResult[];
 }

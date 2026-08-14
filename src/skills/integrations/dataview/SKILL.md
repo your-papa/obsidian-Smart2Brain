@@ -107,6 +107,10 @@ return byStatus;
   the plugin can. Keep snippets small and focused.
 - **Awaited work times out.** Long-running or hanging promises are cut off; a runaway synchronous
   loop cannot be preempted, so avoid unbounded loops.
+- **Prefer `read_content` / `manage_notes` / `search_notes` for plain note reads and writes.**
+  Those tools respect the user's privacy rules — they skip or redact notes marked private for the
+  current provider. `api` and `app` do not. Reach for `exec_dataview` only for query/aggregation
+  logic Dataview's API uniquely provides.
 - **Report honestly.** If the API can't do what the user asked, say so rather than fabricating a method.
 
 ## Displaying Lists/Tables

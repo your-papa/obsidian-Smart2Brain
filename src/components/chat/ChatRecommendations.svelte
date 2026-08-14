@@ -4,7 +4,11 @@ import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import type { SessionRegistry } from "../../stores/chatStore.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
-import { getPluginIcon, toExecToolId } from "../../agent/integrations/pluginIntegrations";
+import {
+	confirmEnableIntegrationPrivacy,
+	getPluginIcon,
+	toExecToolId,
+} from "../../agent/integrations/pluginIntegrations";
 import { icon } from "../../utils/utils";
 import { Logger } from "../../utils/logging";
 import { extractErrorMessage } from "../../utils/errorMessage";
@@ -157,6 +161,11 @@ function useSuggestion(s: SuggestedQuery): void {
 
 async function enablePlugin(nudge: PluginNudge): Promise<void> {
 	const agent = data.getSelectedAgent();
+	// Unsandboxed main-thread `app` access bypasses per-provider privacy rules — warn before
+	// seeding anything so a cancel leaves no skill and no exec tool enabled. Same gate as
+	// AgentEditorModal.toggleAutoIntegration, shared via confirmEnableIntegrationPrivacy.
+	if (!(await confirmEnableIntegrationPrivacy(plugin.app, data, nudge.displayName))) return;
+
 	// Mirror AgentEditorModal.toggleAutoIntegration exactly: for an auto-discovered
 	// plugin with no documenting skill yet (nudge.skillId absent), seed one on demand
 	// (prewritten bundled skill if available, else an introspect-first template) and

@@ -567,6 +567,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	dismissedRecommendations: [],
 	thinkingProcessExpanded: true,
 	showActiveAgentsInStatusBar: true,
+	suppressIntegrationPrivacyWarning: false,
 
 	// Debugging & telemetry
 	enableLangSmith: false,
@@ -1426,6 +1427,14 @@ export class PluginDataStore {
 	}
 	set showActiveAgentsInStatusBar(val: boolean) {
 		this.#data.showActiveAgentsInStatusBar = val;
+		this.saveSettings();
+	}
+
+	get suppressIntegrationPrivacyWarning() {
+		return this.#data.suppressIntegrationPrivacyWarning ?? false;
+	}
+	set suppressIntegrationPrivacyWarning(val: boolean) {
+		this.#data.suppressIntegrationPrivacyWarning = val;
 		this.saveSettings();
 	}
 

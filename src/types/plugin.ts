@@ -523,6 +523,13 @@ export interface PluginData {
 	 */
 	showActiveAgentsInStatusBar: boolean;
 
+	/**
+	 * Suppresses the warning shown before enabling a plugin integration's `exec_<plugin>`
+	 * tool (unsandboxed main-thread `app` access that bypasses per-provider privacy rules).
+	 * Global across all integrations. Off by default; reset from Developer settings.
+	 */
+	suppressIntegrationPrivacyWarning: boolean;
+
 	// ============================================================================
 	// Web Search
 	// ============================================================================

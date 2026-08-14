@@ -24,6 +24,7 @@ import { installObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
 import {
 	type PluginIntegration,
+	confirmEnableIntegrationPrivacy,
 	getPluginIcon,
 	skillIcon,
 	coreSkillRank,
@@ -435,7 +436,7 @@ function isSkillPluginInstalled(skill: SkillDisplayInfo): boolean {
 	return true;
 }
 
-function toggleSkill(skillId: string, newEnabled: boolean) {
+async function toggleSkill(skillId: string, newEnabled: boolean) {
 	const skill = skills.find((entry) => entry.id === skillId);
 	if (!skill) return;
 	if (skill.category !== "custom") {
@@ -451,10 +452,17 @@ function toggleSkill(skillId: string, newEnabled: boolean) {
 			}
 		}
 	}
-	pluginData.setAgentSkillEnabled(agentId, skillId, newEnabled);
-	// Bundle code-exec with the skill: if the linked plugin exposes a callable `.api`,
-	// enabling the skill also grants API scripting, and disabling revokes it.
+	// Bundle code-exec with the skill: if the linked plugin exposes a callable `.api`, enabling
+	// the skill also grants API scripting (unsandboxed, bypasses per-provider privacy rules —
+	// see createPluginApiExecTool), and disabling revokes it. Warn before granting it; a cancel
+	// here still enables the skill itself, just without the exec tool bundled on.
 	const integration = skillExecIntegration(skill);
+	const grantsExec = newEnabled && !!integration;
+	if (grantsExec && !(await confirmEnableIntegrationPrivacy(plugin.app, pluginData, skill.displayName))) {
+		return;
+	}
+
+	pluginData.setAgentSkillEnabled(agentId, skillId, newEnabled);
 	if (integration) {
 		pluginData.setAgentPluginExecEnabled(agentId, toExecToolId(integration.pluginId), newEnabled);
 	}
@@ -529,6 +537,10 @@ const autoDiscoveredIntegrations = $derived.by<AutoIntegrationDisplay[]>(() => {
 
 async function toggleAutoIntegration(pluginId: string, displayName: string, newEnabled: boolean) {
 	if (newEnabled) {
+		// Unsandboxed main-thread `app` access bypasses per-provider privacy rules — warn
+		// before seeding anything so a cancel leaves no skill and no exec tool enabled.
+		if (!(await confirmEnableIntegrationPrivacy(plugin.app, pluginData, displayName))) return;
+
 		// Seed the integration's skill on demand (prewritten if bundled, else an
 		// introspect-first template), then enable it alongside the exec tool. Re-discover
 		// so the new skill enters the cache and the row re-renders as a curated Plugin Skill.
@@ -988,7 +1000,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
             <Toggle
               checked={ext.enabled && pluginAvailable}
               disabled={!pluginAvailable}
-              onchange={() => toggleSkill(ext.id, !ext.enabled)}
+              onchange={() => void toggleSkill(ext.id, !ext.enabled)}
             />
           </SettingItem>
         {/each}
@@ -1030,11 +1042,18 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
               tooltip={`Open ${ext.displayName} skill note`}
               onClick={() => openSkillNote(ext.id)}
             />
-            <Toggle
-              checked={ext.enabled && pluginAvailable}
-              disabled={!pluginAvailable}
-              onchange={() => toggleSkill(ext.id, !ext.enabled)}
-            />
+            <!-- Keyed on the enabled state: toggleSkill can reject asynchronously (the
+                 privacy-warning modal's Cancel) when this row grants an exec tool, and
+                 Toggle's `checked` is $bindable — a one-way prop only seeds its initial
+                 value, so without a remount the switch would stay visually flipped after
+                 a cancel even though the underlying skill/exec state reverted. -->
+            {#key ext.enabled && pluginAvailable}
+              <Toggle
+                checked={ext.enabled && pluginAvailable}
+                disabled={!pluginAvailable}
+                onchange={() => void toggleSkill(ext.id, !ext.enabled)}
+              />
+            {/key}
           </SettingItem>
         {/each}
 
@@ -1052,10 +1071,20 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
                 <Badge label="API scripting" tone="muted" />
               {/if}
             {/snippet}
-            <Toggle
-              checked={integ.execEnabled}
-              onchange={(next) => void toggleAutoIntegration(integ.pluginId, integ.displayName, next)}
-            />
+            <!--
+              Toggle's `checked` is $bindable, so a plain one-way `checked={...}` only seeds
+              its initial value — the child's own state never re-syncs afterward. That's fine
+              for a synchronous onchange, but toggleAutoIntegration can reject asynchronously
+              (the privacy-warning modal's Cancel), which would otherwise leave the switch
+              visually on while the underlying pluginExecTools value is back to false. Keying
+              on execEnabled forces a remount so the toggle re-reads the real state.
+            -->
+            {#key integ.execEnabled}
+              <Toggle
+                checked={integ.execEnabled}
+                onchange={(next) => void toggleAutoIntegration(integ.pluginId, integ.displayName, next)}
+              />
+            {/key}
           </SettingItem>
         {/each}
       </SettingGroup>
@@ -1127,7 +1156,12 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
                 tooltip={`Open ${ext.displayName} skill note`}
                 onClick={() => openSkillNote(ext.id)}
               />
-              <Toggle checked={ext.enabled} onchange={() => toggleSkill(ext.id, !ext.enabled)} />
+              <!-- See the pluginSkills row above for why this is keyed: toggleSkill can
+                   reject asynchronously if a hand-edited custom skill carries a
+                   linkedPluginId (metadata.category overridden to "custom"). -->
+              {#key ext.enabled}
+                <Toggle checked={ext.enabled} onchange={() => void toggleSkill(ext.id, !ext.enabled)} />
+              {/key}
             {/snippet}
           </ManagedEntityItem>
         {/each}
