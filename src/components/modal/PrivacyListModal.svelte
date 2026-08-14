@@ -11,6 +11,7 @@ import {
 	parseSpaceMembershipFilter,
 	resolveViewFilter,
 	resolveSpaceMembershipDraft,
+	rewriteViewFilterForRename,
 } from "../../lib/views";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
@@ -88,6 +89,19 @@ let showFilters = $state(initialParsed.draft.autoIncludeRules.length > 0);
 // condition (e.g. a folder field mid-edit) is never briefly live for tool calls,
 // and closing the modal without saving discards the in-progress edit entirely.
 let privacyMode = $state<PrivacyMode>(data.privacyMode);
+
+// `dataStore` already follows vault renames for the *persisted* filter (see its
+// constructor), but that rewrite lands underneath this modal's local draft. Without
+// this, a rename while the modal is open would be invisible here, and clicking Save
+// would overwrite the store's just-rewritten filter with this stale draft — silently
+// re-introducing the exact staleness the store-level fix closes. Mirror the same
+// rewrite onto the draft so Save can't regress it.
+$effect(() => {
+	const ref = app.vault.on("rename", (file, oldPath) => {
+		privacyFilter = rewriteViewFilterForRename(privacyFilter, oldPath, file.path);
+	});
+	return () => app.vault.offref(ref);
+});
 const parsedMembership = $derived.by(() => parseSpaceMembershipFilter(privacyFilter));
 const privacyUniverse = $derived.by(
 	() =>

@@ -8,6 +8,7 @@ import {
 	parseSpaceMembershipFilter,
 	resolveSpaceMembershipDraft,
 	resolveViewFilter,
+	rewriteViewFilterForRename,
 } from "../../src/lib/views";
 import type { ViewFilter, ViewFilterGroup } from "../../src/types/graph";
 import type { App, CachedMetadata, TFile } from "obsidian";
@@ -842,5 +843,117 @@ describe("empty leaf values", () => {
 
 		expect(resolveViewFilter(app, { type: "extension", value: "" }, new Set(FILES)).paths.size).toBe(0);
 		expect(resolveViewFilter(app, { type: "tag", value: "" }, new Set(FILES)).paths.size).toBe(0);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// rewriteViewFilterForRename — keep the filter following moved files/folders
+// ---------------------------------------------------------------------------
+
+describe("rewriteViewFilterForRename", () => {
+	it("rewrites a paths leaf entry that matches the old path", () => {
+		const filter: ViewFilter = { type: "paths", value: ["Work/a.md", "Personal/b.md"] };
+		const rewritten = rewriteViewFilterForRename(filter, "Work/a.md", "Archive/a.md");
+
+		expect(rewritten).toEqual({ type: "paths", value: ["Archive/a.md", "Personal/b.md"] });
+	});
+
+	it("leaves a paths leaf untouched when no entry matches", () => {
+		const filter: ViewFilter = { type: "paths", value: ["Work/a.md"] };
+		const rewritten = rewriteViewFilterForRename(filter, "Other/x.md", "Other/y.md");
+
+		// Identity preserved, not just structural equality — callers rely on this
+		// to skip a write when nothing changed.
+		expect(rewritten).toBe(filter);
+	});
+
+	it("rewrites a folder leaf that exactly names the renamed folder", () => {
+		const filter: ViewFilter = { type: "folder", value: "Work" };
+		const rewritten = rewriteViewFilterForRename(filter, "Work", "Projects");
+
+		expect(rewritten).toEqual({ type: "folder", value: "Projects" });
+	});
+
+	it("rewrites a nested folder leaf via its own exact-match rename event", () => {
+		// Obsidian fires a dedicated rename event for every descendant folder of a
+		// renamed parent (verified against a live vault: renaming `A` containing
+		// `A/Sub` fires both `A -> B` and `A/Sub -> B/Sub`), so a leaf naming a
+		// nested folder is rewritten by its own event, not by prefix-matching the
+		// parent's event.
+		const filter: ViewFilter = { type: "folder", value: "Work/Q1" };
+		const rewritten = rewriteViewFilterForRename(filter, "Work/Q1", "Projects/Q1");
+
+		expect(rewritten).toEqual({ type: "folder", value: "Projects/Q1" });
+	});
+
+	it("leaves a folder leaf untouched when it names an unrelated folder", () => {
+		const filter: ViewFilter = { type: "folder", value: "Personal" };
+		const rewritten = rewriteViewFilterForRename(filter, "Work", "Projects");
+
+		expect(rewritten).toBe(filter);
+	});
+
+	it("does not touch tag, extension, or property leaves", () => {
+		const tag: ViewFilter = { type: "tag", value: "#work" };
+		const ext: ViewFilter = { type: "extension", value: "pdf" };
+		const prop: ViewFilter = { type: "property", value: "client", values: ["Acme"] };
+
+		expect(rewriteViewFilterForRename(tag, "Work", "Projects")).toBe(tag);
+		expect(rewriteViewFilterForRename(ext, "Work", "Projects")).toBe(ext);
+		expect(rewriteViewFilterForRename(prop, "Work", "Projects")).toBe(prop);
+	});
+
+	it("recurses through groups and rewrites only the matching leaf", () => {
+		const filter: ViewFilter = {
+			type: "all",
+			conditions: [
+				{ type: "folder", value: "Work" },
+				{
+					type: "none",
+					conditions: [{ type: "paths", value: ["Work/secret.md"] }],
+				},
+			],
+		};
+
+		const rewritten = rewriteViewFilterForRename(filter, "Work/secret.md", "Archive/secret.md");
+
+		expect(rewritten).toEqual({
+			type: "all",
+			conditions: [
+				{ type: "folder", value: "Work" },
+				{
+					type: "none",
+					conditions: [{ type: "paths", value: ["Archive/secret.md"] }],
+				},
+			],
+		});
+	});
+
+	it("preserves identity through a group when nothing inside changed", () => {
+		const filter: ViewFilter = {
+			type: "any",
+			conditions: [
+				{ type: "folder", value: "Personal" },
+				{ type: "tag", value: "#work" },
+			],
+		};
+
+		const rewritten = rewriteViewFilterForRename(filter, "Work", "Projects");
+		expect(rewritten).toBe(filter);
+	});
+
+	it("closes the fail-open this guards: a private file kept private after rename", () => {
+		// Under public-by-default, `privacyFilter` lists what's PRIVATE. If a
+		// rename isn't followed, the moved file drops out of that list and
+		// becomes readable by untrusted providers with no corresponding edit.
+		const privacyFilter: ViewFilter = { type: "paths", value: ["Journal/secret.md"] };
+		const app = createMockApp(["Archive/secret.md"]);
+
+		const rewritten = rewriteViewFilterForRename(privacyFilter, "Journal/secret.md", "Archive/secret.md");
+		const stillPrivate = resolveViewFilter(app, rewritten, new Set(["Archive/secret.md"])).paths.has(
+			"Archive/secret.md",
+		);
+
+		expect(stillPrivate).toBe(true);
 	});
 });

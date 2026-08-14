@@ -14,7 +14,7 @@
 
 import { type App, type TFile, getAllTags } from "obsidian";
 import type { SpaceSegment, ViewFilter, ViewFilterGroup, ViewFilterLeaf } from "../types/graph";
-import { matchesPathPrefix } from "../utils/pathUtils";
+import { matchesPathPrefix, normalizeVaultPath } from "../utils/pathUtils";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -59,6 +59,68 @@ export function cloneViewFilter(filter: ViewFilter): ViewFilter {
 		type: filter.type,
 		conditions: filter.conditions.map((condition) => cloneViewFilter(condition)),
 	};
+}
+
+/**
+ * Rewrite a `ViewFilter` tree to follow a vault rename, so a filter that
+ * references a moved file or folder keeps meaning what the user set it up to
+ * mean instead of silently going stale.
+ *
+ * This matters most for a *privacy* filter under `public-by-default`: there,
+ * the filter lists what's private, so a stale entry means a note the user
+ * marked private silently becomes readable by untrusted providers — a security
+ * regression with no corresponding edit. `private-by-default` fails the other
+ * way (a stale entry just drops out of what's exposed), but both directions are
+ * wrong, so both leaf kinds below are rewritten unconditionally.
+ *
+ * - `paths` leaves: an entry equal to `oldPath` becomes `newPath`.
+ * - `folder` leaves: a value equal to `oldPath` becomes `newPath`. Obsidian
+ *   fires a `rename` event for every descendant folder as well as the renamed
+ *   item itself (verified: renaming `A` containing `A/Sub` fires events for
+ *   both `A → B` and `A/Sub → B/Sub`), so a leaf naming a nested folder gets
+ *   its own exact-match event rather than needing prefix rewriting here. The
+ *   prefix branch below is kept as a defensive fallback in case a caller ever
+ *   invokes this with a coarser-grained rename than Obsidian itself emits.
+ * - Other leaf types (`tag`, `extension`, `property`, `query`) don't reference
+ *   paths and are returned unchanged.
+ *
+ * Returns the original `filter` reference when nothing changed, so callers can
+ * skip a write (and the resulting save/re-render) with a simple identity check.
+ */
+export function rewriteViewFilterForRename(filter: ViewFilter, oldPath: string, newPath: string): ViewFilter {
+	const normalizedOld = normalizeVaultPath(oldPath);
+	const normalizedNew = normalizeVaultPath(newPath);
+
+	if (isLeaf(filter)) {
+		if (filter.type === "paths") {
+			if (!filter.value.some((p) => normalizeVaultPath(p) === normalizedOld)) return filter;
+			return {
+				type: "paths",
+				value: filter.value.map((p) => (normalizeVaultPath(p) === normalizedOld ? newPath : p)),
+			};
+		}
+
+		if (filter.type === "folder") {
+			const normalizedValue = normalizeVaultPath(filter.value);
+			if (normalizedValue === normalizedOld) {
+				return { type: "folder", value: newPath };
+			}
+			if (normalizedValue.startsWith(`${normalizedOld}/`)) {
+				return { type: "folder", value: normalizedNew + normalizedValue.slice(normalizedOld.length) };
+			}
+			return filter;
+		}
+
+		return filter;
+	}
+
+	let changed = false;
+	const conditions = filter.conditions.map((condition) => {
+		const rewritten = rewriteViewFilterForRename(condition, oldPath, newPath);
+		if (rewritten !== condition) changed = true;
+		return rewritten;
+	});
+	return changed ? { type: filter.type, conditions } : filter;
 }
 
 export function cloneSpaceMembershipDraft(draft: SpaceMembershipDraft): SpaceMembershipDraft {
