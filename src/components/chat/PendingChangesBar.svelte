@@ -6,6 +6,7 @@ import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte"
 import type { PendingChangeEntry } from "../../types/shared";
 import { icon } from "../../utils/utils";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
+import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 
 interface Props {
 	threadPath: string | null;
@@ -22,6 +23,30 @@ const pendingEntries = $derived.by(() => {
 const pendingCount = $derived(pendingEntries.length);
 
 let isExpanded = $state(false);
+
+/**
+ * Ids of entries whose content preview is open.
+ *
+ * An `update` can be reviewed in the note itself — the inline-diff decorations
+ * render there, which is what the path link jumps to. A `create` has no note to
+ * jump to yet and a `delete` is about to lose one, so their content was
+ * reviewable nowhere: the row showed only a path. These two render their body
+ * inline here instead.
+ */
+let previewedEntryIds = $state(new Set<string>());
+
+function togglePreview(entryId: string) {
+	const next = new Set(previewedEntryIds);
+	if (!next.delete(entryId)) next.add(entryId);
+	previewedEntryIds = next;
+}
+
+/** The content a row can preview inline, or null when the note itself is the review surface. */
+function previewContentOf(entry: PendingChangeEntry): string | null {
+	if (entry.change.type === "create") return entry.change.content;
+	if (entry.change.type === "delete") return entry.change.originalContent;
+	return null;
+}
 
 function changeTypeLabel(entry: PendingChangeEntry): string {
 	switch (entry.change.type) {
@@ -170,9 +195,26 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     {#if isExpanded}
       <div class="pcb-list">
         {#each pendingEntries as entry (entry.id)}
+          {@const previewContent = previewContentOf(entry)}
+          {@const isPreviewOpen = previewedEntryIds.has(entry.id)}
           <div class="pcb-entry">
             <div class="pcb-entry-header">
               <div class="pcb-entry-left">
+                {#if previewContent !== null}
+                  <button
+                    class="pcb-preview-toggle"
+                    class:pcb-preview-toggle-open={isPreviewOpen}
+                    onclick={() => togglePreview(entry.id)}
+                    title={isPreviewOpen ? "Hide content" : "Show content"}
+                    aria-label={isPreviewOpen
+                      ? `Hide content of ${entry.change.path}`
+                      : `Show content of ${entry.change.path}`}
+                    aria-expanded={isPreviewOpen}
+                    type="button"
+                  >
+                    <div use:icon={"chevron-right"} style="--icon-size: 12px"></div>
+                  </button>
+                {/if}
                 <span class="pcb-badge {changeTypeBadgeClass(entry.change.type)}">
                   {changeTypeLabel(entry)}
                 </span>
@@ -229,6 +271,16 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
                 </button>
               </div>
             </div>
+
+            {#if previewContent !== null && isPreviewOpen}
+              <div class="pcb-preview">
+                {#if previewContent.trim() === ""}
+                  <div class="pcb-preview-empty">This note is empty.</div>
+                {:else}
+                  <MarkdownRenderer content={previewContent} class="pcb-preview-body" />
+                {/if}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -407,6 +459,59 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     align-items: center;
     gap: 2px;
     flex-shrink: 0;
+  }
+
+  /* Reuses the summary chevron's rotate-on-open idiom so the two disclosure
+     affordances in this component read the same. */
+  .pcb-preview-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: transform 100ms ease;
+  }
+
+  .pcb-preview-toggle:hover {
+    color: var(--text-normal);
+  }
+
+  .pcb-preview-toggle-open {
+    transform: rotate(90deg);
+  }
+
+  .pcb-preview {
+    padding: 2px 10px 8px;
+    border-top: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    /* Proposed notes can be long; cap the row so a single create can't push the
+       accept/reject controls of the others out of reach. */
+    max-height: 260px;
+    overflow-y: auto;
+  }
+
+  .pcb-preview :global(.pcb-preview-body) {
+    font-size: var(--font-ui-smaller);
+  }
+
+  /* The renderer's first/last block carry their own margins; drop them so the
+     preview sits flush inside its padding. */
+  .pcb-preview :global(.pcb-preview-body > :first-child) {
+    margin-top: 0;
+  }
+
+  .pcb-preview :global(.pcb-preview-body > :last-child) {
+    margin-bottom: 0;
+  }
+
+  .pcb-preview-empty {
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+    font-style: italic;
   }
 
   .pcb-badge {
