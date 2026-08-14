@@ -31,7 +31,8 @@ export type SpaceMembershipRule =
 	| { type: "folder"; value: string }
 	| { type: "tag"; value: string }
 	| { type: "extension"; value: string }
-	| { type: "query"; value: string; algorithm: "lexical" | "semantic" | "hybrid" };
+	| { type: "query"; value: string; algorithm: "lexical" | "semantic" | "hybrid" }
+	| { type: "property"; value: string; values?: string[] };
 
 export interface SpaceMembershipDraft {
 	manualPaths: string[];
@@ -379,7 +380,13 @@ function collectExcludedPaths(filter: ViewFilterGroup): string[] {
 }
 
 function isSpaceMembershipRule(filter: ViewFilter): filter is SpaceMembershipRule {
-	return filter.type === "folder" || filter.type === "tag" || filter.type === "extension" || filter.type === "query";
+	return (
+		filter.type === "folder" ||
+		filter.type === "tag" ||
+		filter.type === "extension" ||
+		filter.type === "query" ||
+		filter.type === "property"
+	);
 }
 
 function mergeResolvedMembership(
@@ -412,13 +419,19 @@ function describeMembershipRule(rule: SpaceMembershipRule): string {
 			return `Type: ${rule.value.startsWith(".") ? rule.value.slice(1) : rule.value}`;
 		case "query":
 			return `Query: ${rule.value}`;
+		case "property":
+			return rule.values && rule.values.length > 0
+				? `Property: ${rule.value} = ${rule.values.join(", ")}`
+				: `Property: ${rule.value}`;
 	}
 }
 
 function matchesSpaceMembershipRulePath(app: App, rule: SpaceMembershipRule, filePath: string): boolean {
 	switch (rule.type) {
 		case "folder":
-			return matchesPathPrefix(filePath, rule.value);
+			// See `resolveFolder`: a blank folder is an unfinished condition and
+			// must match nothing, not the whole vault.
+			return rule.value.trim() ? matchesPathPrefix(filePath, rule.value) : false;
 		case "extension": {
 			const normalizedExt = rule.value.startsWith(".")
 				? rule.value.slice(1).toLowerCase()
@@ -437,6 +450,8 @@ function matchesSpaceMembershipRulePath(app: App, rule: SpaceMembershipRule, fil
 				return normalizedTag === normalizedFilter || normalizedTag.startsWith(`${normalizedFilter}/`);
 			});
 		}
+		case "property":
+			return matchesPropertyLeaf(app, filePath, rule.value, rule.values);
 		case "query":
 			return false;
 	}
@@ -452,6 +467,8 @@ function cloneSpaceMembershipRule(rule: SpaceMembershipRule): SpaceMembershipRul
 			return { type: "extension", value: rule.value };
 		case "query":
 			return { type: "query", value: rule.value, algorithm: rule.algorithm };
+		case "property":
+			return { type: "property", value: rule.value, values: rule.values ? [...rule.values] : undefined };
 	}
 }
 
@@ -467,6 +484,8 @@ function cloneViewFilterLeaf(filter: ViewFilterLeaf): ViewFilterLeaf {
 			return { type: "paths", value: [...filter.value] };
 		case "query":
 			return { type: "query", value: filter.value, algorithm: filter.algorithm };
+		case "property":
+			return { type: "property", value: filter.value, values: filter.values ? [...filter.values] : undefined };
 	}
 }
 
@@ -503,7 +522,8 @@ function isLeaf(filter: ViewFilter): filter is ViewFilterLeaf {
 		filter.type === "tag" ||
 		filter.type === "extension" ||
 		filter.type === "paths" ||
-		filter.type === "query"
+		filter.type === "query" ||
+		filter.type === "property"
 	);
 }
 
@@ -526,6 +546,8 @@ function resolveLeaf(app: App, leaf: ViewFilterLeaf, universe: Set<string>): Res
 			return resolveExtension(leaf.value, universe);
 		case "paths":
 			return resolvePaths(app, leaf.value);
+		case "property":
+			return resolveProperty(app, leaf.value, leaf.values, universe);
 		case "query":
 			// Query leaves must be resolved async via resolveViewFilterAsync.
 			// Sync fallback returns empty — callers needing real results use the async path.
@@ -534,6 +556,16 @@ function resolveLeaf(app: App, leaf: ViewFilterLeaf, universe: Set<string>): Res
 }
 
 function resolveFolder(folder: string, universe: Set<string>): ResolvedView {
+	// An empty/whitespace folder value is an unfinished condition, not "match
+	// everything". `matchesPathPrefix` treats a blank prefix as matching every
+	// path, which is right for search scoping but wrong here: while the user is
+	// still typing a folder name, a half-written filter would briefly select the
+	// entire vault — and for the privacy filter that means exposing every note.
+	// Match nothing instead, consistent with the extension and property leaves.
+	if (!folder.trim()) {
+		return { paths: new Set(), stalePaths: [] };
+	}
+
 	const paths = new Set<string>();
 	for (const p of universe) {
 		if (matchesPathPrefix(p, folder)) {
@@ -568,6 +600,67 @@ function resolveExtension(ext: string, universe: Set<string>): ResolvedView {
 	for (const p of universe) {
 		const fileExt = p.split(".").pop()?.toLowerCase() ?? "";
 		if (fileExt === normalizedExt) {
+			paths.add(p);
+		}
+	}
+	return { paths, stalePaths: [] };
+}
+
+/**
+ * Normalize a frontmatter value to a flat array of comparable strings.
+ *
+ * YAML gives us strings, numbers, booleans, `null`, or lists of those. Treating a
+ * scalar as a one-element list means `exists` and `equals-any` need only one code
+ * path and list-valued properties work for free. Dates are deliberately compared as
+ * opaque strings — no before/after operators, since a time-relative privacy rule
+ * would let a note change visibility with no edit to the vault.
+ */
+function normalizePropertyValues(raw: unknown): string[] {
+	if (raw === null || raw === undefined) return [];
+	const items = Array.isArray(raw) ? raw : [raw];
+	const out: string[] = [];
+	for (const item of items) {
+		if (item === null || item === undefined) continue;
+		if (typeof item === "object") continue;
+		out.push(String(item).trim().toLowerCase());
+	}
+	return out;
+}
+
+/**
+ * Match a single file against a `property` leaf.
+ *
+ * With no `values`, the leaf means "this key is present and non-empty". With
+ * `values`, it means "this key equals any of them" (case-insensitive, exact —
+ * no substring matching).
+ */
+function matchesPropertyLeaf(app: App, filePath: string, key: string, values: string[] | undefined): boolean {
+	const trimmedKey = key.trim();
+	if (!trimmedKey) return false;
+
+	const file = app.vault.getAbstractFileByPath(filePath);
+	if (!file || !("extension" in file)) return false;
+
+	const frontmatter = app.metadataCache.getFileCache(file as TFile)?.frontmatter;
+	if (!frontmatter) return false;
+
+	// Property keys are matched case-insensitively to mirror how users type them.
+	const matchedKey = Object.keys(frontmatter).find((k) => k.toLowerCase() === trimmedKey.toLowerCase());
+	if (matchedKey === undefined) return false;
+
+	const actual = normalizePropertyValues(frontmatter[matchedKey]);
+	if (actual.length === 0) return false;
+
+	const wanted = (values ?? []).map((v) => v.trim().toLowerCase()).filter((v) => v.length > 0);
+	if (wanted.length === 0) return true;
+
+	return actual.some((v) => wanted.includes(v));
+}
+
+function resolveProperty(app: App, key: string, values: string[] | undefined, universe: Set<string>): ResolvedView {
+	const paths = new Set<string>();
+	for (const p of universe) {
+		if (matchesPropertyLeaf(app, p, key, values)) {
 			paths.add(p);
 		}
 	}
@@ -663,6 +756,10 @@ function describeLeaf(leaf: ViewFilterLeaf): string {
 			return `${leaf.value.length} note${leaf.value.length === 1 ? "" : "s"}`;
 		case "query":
 			return `query(${leaf.algorithm}):${leaf.value.slice(0, 30)}${leaf.value.length > 30 ? "…" : ""}`;
+		case "property":
+			return leaf.values && leaf.values.length > 0
+				? `prop:${leaf.value}=${leaf.values.join("|")}`
+				: `prop:${leaf.value}`;
 	}
 }
 

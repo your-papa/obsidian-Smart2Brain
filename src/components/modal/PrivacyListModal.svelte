@@ -57,6 +57,21 @@ const availableTags = $derived.by(() => {
 	return [...tags].sort();
 });
 
+const availableProperties = $derived.by(() => {
+	const keys = new Set<string>();
+	for (const file of app.vault.getMarkdownFiles()) {
+		if (isAgentFilePath(file.path)) continue;
+		const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
+		if (!frontmatter) continue;
+		for (const key of Object.keys(frontmatter)) {
+			// `position` is Obsidian's internal frontmatter range marker, not a user property.
+			if (key === "position") continue;
+			keys.add(key);
+		}
+	}
+	return [...keys].sort();
+});
+
 function ensureGroup(filter: ViewFilter): ViewFilter {
 	if (filter.type === "all" || filter.type === "any" || filter.type === "none") {
 		return filter;
@@ -319,6 +334,7 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
   		: buildSpaceMembershipRulesEditorFilter(parsedMembership.draft.autoIncludeRules)}
       {availableFolders}
       {availableTags}
+      {availableProperties}
       onFilterChange={handleRulesFilterChange}
       {excludedEntries}
       {excludedTitle}

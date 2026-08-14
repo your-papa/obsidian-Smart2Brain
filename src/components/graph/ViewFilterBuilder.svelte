@@ -30,6 +30,8 @@ interface Props {
 	availableFolders?: string[];
 	/** Available tags for autocomplete */
 	availableTags?: string[];
+	/** Available frontmatter property keys for autocomplete */
+	availableProperties?: string[];
 }
 
 let {
@@ -41,10 +43,11 @@ let {
 	onLiveLeafChange,
 	availableFolders = [],
 	availableTags = [],
+	availableProperties = [],
 }: Props = $props();
 
 // ── Leaf vs group detection ─────────────────────────────
-const leafTypes = ["folder", "tag", "extension"] as const;
+const leafTypes = ["folder", "tag", "extension", "property"] as const;
 type LeafType = (typeof leafTypes)[number];
 
 let isGroup = $derived(filter.type === "all" || filter.type === "any" || filter.type === "none");
@@ -54,6 +57,7 @@ const baseLeafTypeOptions = [
 	{ display: "Folder", value: "folder" as LeafType },
 	{ display: "Tag", value: "tag" as LeafType },
 	{ display: "Extension", value: "extension" as LeafType },
+	{ display: "Property", value: "property" as LeafType },
 ];
 
 function getLeafTypeOptions(selectedType?: LeafType) {
@@ -74,11 +78,29 @@ let comboQuery = $state("");
 let comboTarget: "leaf" | "live" | null = $state(null);
 let closeTimeout: ReturnType<typeof setTimeout> | null = null;
 
+function getSuggestionPool(type: LeafType): string[] {
+	if (type === "folder") return availableFolders;
+	if (type === "tag") return availableTags;
+	if (type === "property") return availableProperties;
+	return [];
+}
+
 function getSuggestions(type: LeafType, query: string): string[] {
-	const pool = type === "folder" ? availableFolders : type === "tag" ? availableTags : [];
+	const pool = getSuggestionPool(type);
 	if (pool.length === 0) return [];
 	const q = query.toLowerCase();
 	return pool.filter((v) => v.toLowerCase().includes(q)).slice(0, 10);
+}
+
+/**
+ * A vault with no frontmatter anywhere yields no property suggestions. Without a
+ * hint the field just sits silent on focus, which reads as a broken control rather
+ * than an empty pool — the value is still free text, so typing a key works fine.
+ * Only shown for `property`: every vault has folders and tags, so those pools are
+ * never legitimately empty.
+ */
+function showsEmptyPoolHint(type: LeafType): boolean {
+	return type === "property" && getSuggestionPool(type).length === 0;
 }
 
 function openCombo(target: "leaf" | "live", currentValue: string) {
@@ -171,7 +193,34 @@ function handleAddGroup() {
 
 // Whether a leaf type supports combobox suggestions
 function hasCombo(type: string): boolean {
-	return type === "folder" || type === "tag";
+	return type === "folder" || type === "tag" || type === "property";
+}
+
+/**
+ * Serialize the optional `values` list of a property leaf for the text input.
+ * Empty list and `undefined` both render as "" — the leaf then means
+ * "this property exists", regardless of value.
+ */
+function formatPropertyValues(values: string[] | undefined): string {
+	return (values ?? []).join(", ");
+}
+
+/**
+ * Build a property leaf from a key and the comma-separated values input.
+ * An empty input clears `values` entirely (back to an existence check) rather
+ * than storing an empty array, so the two states stay distinguishable in saved data.
+ */
+function buildPropertyLeaf(key: string, rawValues: string): ViewFilterLeaf {
+	const parsed = rawValues
+		.split(",")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+	return { type: "property", value: key, values: parsed.length > 0 ? parsed : undefined };
+}
+
+function handlePropertyValuesChange(raw: string) {
+	const leaf = filter as ViewFilterLeaf;
+	onchange(buildPropertyLeaf(leaf.value as string, raw));
 }
 </script>
 
@@ -202,6 +251,7 @@ function hasCombo(type: string): boolean {
           depth={depth + 1}
           {availableFolders}
           {availableTags}
+          {availableProperties}
         />
       {/each}
 
@@ -225,7 +275,11 @@ function hasCombo(type: string): boolean {
                     class="filter-combo-input"
                     type="text"
                     value={liveLeaf.value as string}
-                    placeholder={liveType === "folder" ? "Work/projects" : "#my-tag"}
+                    placeholder={liveType === "folder"
+                      ? "Work/projects"
+                      : liveType === "property"
+                        ? "property name"
+                        : "#my-tag"}
                     oninput={(e) => {
                       const v = (e.target as HTMLInputElement).value;
                       onLiveLeafChange?.({ ...liveLeaf!, value: v } as ViewFilterLeaf);
@@ -246,8 +300,24 @@ function hasCombo(type: string): boolean {
                         {/each}
                       </div>
                     </div>
+                  {:else if comboOpen && comboTarget === "live" && showsEmptyPoolHint(liveType)}
+                    <div class="filter-combo-list picker-popover-content">
+                      <div class="filter-combo-empty">
+                        No properties found in vault — type a name to use it anyway.
+                      </div>
+                    </div>
                   {/if}
                 </div>
+                {#if liveType === "property"}
+                  <Text
+                    inputType="text"
+                    value={formatPropertyValues((liveLeaf as ViewFilterLeaf & { values?: string[] }).values)}
+                    placeholder="any value"
+                    onchange={(v: string) =>
+                      onLiveLeafChange?.(buildPropertyLeaf(liveLeaf!.value as string, v))}
+                    class="filter-leaf-value"
+                  />
+                {/if}
               {:else}
                 <Text
                   inputType="text"
@@ -319,7 +389,11 @@ function hasCombo(type: string): boolean {
             class="filter-combo-input"
             type="text"
             value={(filter as ViewFilterLeaf).value as string}
-            placeholder={leafType === "folder" ? "Work/projects" : "#my-tag"}
+            placeholder={leafType === "folder"
+              ? "Work/projects"
+              : leafType === "property"
+                ? "property name"
+                : "#my-tag"}
             oninput={(e) => {
               const v = (e.target as HTMLInputElement).value;
               handleLeafValueChange(v);
@@ -340,8 +414,21 @@ function hasCombo(type: string): boolean {
                 {/each}
               </div>
             </div>
+          {:else if comboOpen && comboTarget === "leaf" && showsEmptyPoolHint(leafType)}
+            <div class="filter-combo-list picker-popover-content">
+              <div class="filter-combo-empty">No properties found in vault — type a name to use it anyway.</div>
+            </div>
           {/if}
         </div>
+        {#if leafType === "property"}
+          <Text
+            inputType="text"
+            value={formatPropertyValues((filter as ViewFilterLeaf & { values?: string[] }).values)}
+            placeholder="any value"
+            onchange={handlePropertyValuesChange}
+            class="filter-leaf-value"
+          />
+        {/if}
       {:else}
         <Text
           inputType="text"
@@ -442,6 +529,12 @@ function hasCombo(type: string): boolean {
     z-index: 100;
     max-height: 180px;
     overflow: hidden auto;
+  }
+
+  .filter-combo-empty {
+    padding: 8px 10px;
+    color: var(--text-muted);
+    font-size: var(--font-smaller);
   }
 
   /* ── Add row ────────────────────────────────────── */

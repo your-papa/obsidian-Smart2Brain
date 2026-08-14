@@ -22,6 +22,7 @@ import type { App, CachedMetadata, TFile } from "obsidian";
 function createMockApp(
 	files: string[],
 	fileTags: Record<string, string[]> = {},
+	fileFrontmatter: Record<string, Record<string, unknown>> = {},
 ): App {
 	const mockFiles = files.map((path) => ({
 		path,
@@ -32,12 +33,21 @@ function createMockApp(
 
 	const getFileCache = vi.fn((file: TFile): CachedMetadata | null => {
 		const tags = fileTags[file.path];
-		if (!tags) return null;
+		const frontmatter = fileFrontmatter[file.path];
+		if (!tags && !frontmatter) return null;
 		return {
-			tags: tags.map((tag) => ({
-				tag,
-				position: { start: { line: 0, col: 0, offset: 0 }, end: { line: 0, col: 0, offset: 0 } },
-			})),
+			...(tags
+				? {
+						tags: tags.map((tag) => ({
+							tag,
+							position: {
+								start: { line: 0, col: 0, offset: 0 },
+								end: { line: 0, col: 0, offset: 0 },
+							},
+						})),
+					}
+				: {}),
+			...(frontmatter ? { frontmatter: frontmatter as CachedMetadata["frontmatter"] } : {}),
 		};
 	});
 
@@ -626,5 +636,211 @@ describe("space membership draft helpers", () => {
 		expect(matchesSpaceMembershipDraftPath(app, draft, "Assets/diagram.pdf")).toBe(true);
 		expect(matchesSpaceMembershipDraftPath(app, draft, "Research/skip.md")).toBe(false);
 		expect(matchesSpaceMembershipDraftPath(app, draft, "Other/file.md")).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Property leaf
+// ---------------------------------------------------------------------------
+
+describe("property leaf", () => {
+	const FILES = [
+		"Clients/acme.md",
+		"Clients/globex.md",
+		"Clients/untagged.md",
+		"Work/listed.md",
+		"Work/numeric.md",
+		"Work/boolish.md",
+		"Work/empty-value.md",
+		"Personal/none.md",
+	];
+
+	const FRONTMATTER: Record<string, Record<string, unknown>> = {
+		"Clients/acme.md": { client: "Acme" },
+		"Clients/globex.md": { client: "Globex" },
+		"Clients/untagged.md": { unrelated: "x" },
+		// List-valued property — should behave exactly like a scalar per element.
+		"Work/listed.md": { client: ["Acme", "Initech"] },
+		"Work/numeric.md": { revision: 3 },
+		"Work/boolish.md": { confidential: true },
+		// Present key with an empty value must NOT count as "exists".
+		"Work/empty-value.md": { client: null },
+	};
+
+	function app() {
+		return createMockApp(FILES, {}, FRONTMATTER);
+	}
+
+	it("matches key existence when no values are given", () => {
+		const filter: ViewFilter = { type: "property", value: "client" };
+		const result = resolveViewFilter(app(), filter, new Set(FILES));
+
+		expect(result.paths).toEqual(
+			new Set(["Clients/acme.md", "Clients/globex.md", "Work/listed.md"]),
+		);
+	});
+
+	it("treats a present-but-empty value as absent", () => {
+		const filter: ViewFilter = { type: "property", value: "client" };
+		const result = resolveViewFilter(app(), filter, new Set(FILES));
+
+		expect(result.paths.has("Work/empty-value.md")).toBe(false);
+	});
+
+	it("matches a single value exactly", () => {
+		const filter: ViewFilter = { type: "property", value: "client", values: ["Acme"] };
+		const result = resolveViewFilter(app(), filter, new Set(FILES));
+
+		expect(result.paths).toEqual(new Set(["Clients/acme.md", "Work/listed.md"]));
+	});
+
+	it("matches any of several values (equals-any)", () => {
+		const filter: ViewFilter = {
+			type: "property",
+			value: "client",
+			values: ["Acme", "Globex"],
+		};
+		const result = resolveViewFilter(app(), filter, new Set(FILES));
+
+		expect(result.paths).toEqual(
+			new Set(["Clients/acme.md", "Clients/globex.md", "Work/listed.md"]),
+		);
+	});
+
+	it("matches list-valued properties per element", () => {
+		const filter: ViewFilter = { type: "property", value: "client", values: ["Initech"] };
+		const result = resolveViewFilter(app(), filter, new Set(FILES));
+
+		expect(result.paths).toEqual(new Set(["Work/listed.md"]));
+	});
+
+	it("compares keys and values case-insensitively", () => {
+		const filter: ViewFilter = { type: "property", value: "CLIENT", values: ["acme"] };
+		const result = resolveViewFilter(app(), filter, new Set(FILES));
+
+		expect(result.paths).toEqual(new Set(["Clients/acme.md", "Work/listed.md"]));
+	});
+
+	it("does not substring-match values", () => {
+		const filter: ViewFilter = { type: "property", value: "client", values: ["Acm"] };
+		const result = resolveViewFilter(app(), filter, new Set(FILES));
+
+		expect(result.paths.size).toBe(0);
+	});
+
+	it("coerces non-string scalars for comparison", () => {
+		const numeric = resolveViewFilter(
+			app(),
+			{ type: "property", value: "revision", values: ["3"] },
+			new Set(FILES),
+		);
+		expect(numeric.paths).toEqual(new Set(["Work/numeric.md"]));
+
+		const boolish = resolveViewFilter(
+			app(),
+			{ type: "property", value: "confidential", values: ["true"] },
+			new Set(FILES),
+		);
+		expect(boolish.paths).toEqual(new Set(["Work/boolish.md"]));
+	});
+
+	it("matches nothing for a blank key", () => {
+		const filter: ViewFilter = { type: "property", value: "   " };
+		const result = resolveViewFilter(app(), filter, new Set(FILES));
+
+		expect(result.paths.size).toBe(0);
+	});
+
+	it("composes with groups like any other leaf", () => {
+		const filter: ViewFilter = {
+			type: "all",
+			conditions: [
+				{ type: "folder", value: "Clients" },
+				{ type: "property", value: "client", values: ["Acme"] },
+			],
+		};
+		const result = resolveViewFilter(app(), filter, new Set(FILES));
+
+		// Work/listed.md also has client: Acme but is outside the Clients folder.
+		expect(result.paths).toEqual(new Set(["Clients/acme.md"]));
+	});
+
+	it("survives a compile → parse round-trip as a simple rule", () => {
+		const draft = {
+			manualPaths: [],
+			autoIncludeRules: [{ type: "property", value: "client", values: ["Acme"] } as const],
+			excludedPaths: [],
+		};
+
+		const parsed = parseSpaceMembershipFilter(compileSpaceMembershipDraft(draft));
+
+		expect(parsed.isAdvanced).toBe(false);
+		expect(parsed.draft.autoIncludeRules).toEqual([
+			{ type: "property", value: "client", values: ["Acme"] },
+		]);
+	});
+
+	it("agrees between the sync path matcher and the set resolver", () => {
+		const rule = { type: "property", value: "client", values: ["Acme"] } as const;
+		const draft = { manualPaths: [], autoIncludeRules: [rule], excludedPaths: [] };
+		const resolved = resolveViewFilter(app(), rule, new Set(FILES));
+
+		// isFilePrivate() uses the sync matcher in tool loops; it must not
+		// disagree with the set-based resolver used to render the UI.
+		for (const path of FILES) {
+			expect(matchesSpaceMembershipDraftPath(app(), draft, path)).toBe(resolved.paths.has(path));
+		}
+	});
+
+	it("describes property leaves with and without values", () => {
+		expect(describeViewFilter({ type: "property", value: "client" })).toBe("prop:client");
+		expect(
+			describeViewFilter({ type: "property", value: "client", values: ["Acme", "Globex"] }),
+		).toBe("prop:client=Acme|Globex");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Unfinished conditions must not select the whole vault
+// ---------------------------------------------------------------------------
+
+describe("empty leaf values", () => {
+	const FILES = ["Work/a.md", "Work/b.md", "Personal/c.md", "Root.md"];
+
+	it("matches nothing for a blank folder value", () => {
+		const app = createMockApp(FILES);
+		// `matchesPathPrefix` treats a blank prefix as matching everything, which
+		// would expose the entire vault mid-typing. The leaf must not inherit that.
+		for (const blank of ["", "   "]) {
+			const result = resolveViewFilter(app, { type: "folder", value: blank }, new Set(FILES));
+			expect(result.paths.size).toBe(0);
+		}
+	});
+
+	it("matches nothing for a blank folder value via the sync matcher", () => {
+		const app = createMockApp(FILES);
+		const draft = {
+			manualPaths: [],
+			autoIncludeRules: [{ type: "folder", value: "" } as const],
+			excludedPaths: [],
+		};
+
+		for (const path of FILES) {
+			expect(matchesSpaceMembershipDraftPath(app, draft, path)).toBe(false);
+		}
+	});
+
+	it("still matches a real folder value", () => {
+		const app = createMockApp(FILES);
+		const result = resolveViewFilter(app, { type: "folder", value: "Work" }, new Set(FILES));
+
+		expect(result.paths).toEqual(new Set(["Work/a.md", "Work/b.md"]));
+	});
+
+	it("matches nothing for blank extension and tag values", () => {
+		const app = createMockApp(FILES, { "Work/a.md": ["#work"] });
+
+		expect(resolveViewFilter(app, { type: "extension", value: "" }, new Set(FILES)).paths.size).toBe(0);
+		expect(resolveViewFilter(app, { type: "tag", value: "" }, new Set(FILES)).paths.size).toBe(0);
 	});
 });
