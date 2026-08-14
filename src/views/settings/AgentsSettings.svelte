@@ -121,7 +121,7 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
   >
     {#snippet actions()}
       <div class="flex items-center justify-end">
-        <Button buttonText="Add Agent" cta={true} onClick={createNewAgent} />
+        <Button buttonText="Add agent" cta={true} onClick={createNewAgent} />
       </div>
     {/snippet}
 
@@ -195,7 +195,7 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
 
   <SettingGroup heading="Agents Storage">
     <SettingItem
-      name="Agents Folder"
+      name="Agents folder"
       desc="Vault folder holding agent context — skills, memories, and base prompts. Changing it seeds the new location; existing files are left in place."
     >
       <FolderSuggest
@@ -213,7 +213,7 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
   </SettingGroup>
 
   <SettingGroup heading="Chats">
-    <SettingItem name="Chats Folder" desc="Folder to store chat files and related data">
+    <SettingItem name="Chats folder" desc="Folder to store chat files and related data">
       <FolderSuggest
         app={plugin.app}
         value={pluginData.targetFolder}
@@ -228,7 +228,7 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
     </SettingItem>
 
     <SettingItem
-      name="Attachment Folder"
+      name="Attachment folder"
       desc="Folder for chat file attachments. Leave empty to use Obsidian's attachment folder."
     >
       <FolderSuggest

@@ -27,7 +27,7 @@ function openDisplaySettingsModal() {
 
 <SettingGroup heading="Display">
   <SettingItem
-    name="Result Details"
+    name="Result details"
     desc={`Choose which metadata and context appear in each search result. Currently: ${displaySummary}.`}
   >
     <Button buttonText="Configure" onClick={openDisplaySettingsModal} />

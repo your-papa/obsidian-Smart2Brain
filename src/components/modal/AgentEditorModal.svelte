@@ -842,7 +842,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
           />
         </SettingItem>
 
-        <SettingItem name="Chat Model" desc="Primary model this agent uses for conversation">
+        <SettingItem name="Chat model" desc="Primary model this agent uses for conversation">
           <ModelSettingControl
             available={models.hasProviders && models.hasModels}
             loading={models.hasProviders && models.isLoadingModels}
@@ -856,7 +856,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
         </SettingItem>
 
         <SettingItem
-          name="Base System Prompt"
+          name="Base system prompt"
           desc="Customize the base system instructions for this agent"
         >
           <div class="flex items-center gap-2 justify-end">
@@ -923,7 +923,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
         </SettingItem>
 
         <SettingItem
-          name="Summarization Model"
+          name="Summarization model"
           desc="Model used to compress older chat history when the context window fills up"
         >
           <div class="agent-model-setting">
@@ -946,7 +946,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
         </SettingItem>
 
         <SettingItem
-          name="Title Generation Model"
+          name="Title generation model"
           desc="Model used to generate conversation titles from the first user message"
         >
           <ModelSettingControl
@@ -968,15 +968,15 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
         <div class="setting-item agent-section-intro">
           <div class="setting-item-info">
             <div class="setting-item-description">
-              Built-in skills every agent can use — vault exploration, note management, web access,
-              and self-updating skills. Each is a skill: toggle it to attach its tools, or open its
-              note to edit its instructions. Individual tools are configured from the Tools row above.
+              Built-in skills every agent can use — vault exploration, note editing, web access, and
+              skill management. Each is a skill: toggle it to attach its tools, or open its note to
+              edit its instructions. Individual tools are configured from the Tools row above.
             </div>
           </div>
         </div>
 
-        <!-- One row per core skill: the built-in vault/notes/web/update skills (which attach
-             built-in tools via allowed-tools) plus Obsidian core-plugin skills (Canvas, Bases, …).
+        <!-- One row per core skill: the bundled explore-vault/edit-notes/web/manage-skills skills
+             (which attach built-in tools via allowed-tools) plus Obsidian core-plugin skills (Canvas, Bases, …).
              Per-tool configuration lives in the agent-level Tools modal (General section), not here —
              a skill's attached tools may be shared with other skills, so tool config isn't a
              per-skill concern. -->
@@ -1169,7 +1169,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
           <div class="setting-item-description skill-empty-state">No custom skills yet</div>
         {/if}
 
-        <SettingContainer name="MCP Servers" isHeading>
+        <SettingContainer name="MCP servers" isHeading>
           <Button buttonText="Add server" onClick={openAddMCPServer} />
         </SettingContainer>
         {#if mcpServerIds.length > 0}

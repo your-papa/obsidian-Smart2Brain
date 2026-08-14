@@ -218,7 +218,7 @@ function getSelectionGroupLabel(): string {
           onClick={() => void importFromFile()}
         />
         {/if}
-        <Button buttonText="Add Index" cta={true} onClick={openAddIndexModal} />
+        <Button buttonText="Add index" cta={true} onClick={openAddIndexModal} />
       {/if}
     </div>
   {/snippet}

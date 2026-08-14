@@ -69,9 +69,9 @@ export default class SecondBrainPlugin extends Plugin {
 
 	private getAddToChatMenuLabel(selectedCount: number): string {
 		if (selectedCount <= 1) {
-			return "Add to Chat";
+			return "Add to chat";
 		}
-		return `Add ${selectedCount} files to Chat`;
+		return `Add ${selectedCount} files to chat`;
 	}
 
 	/** Thread path for pending-change navigation: the focused chat if there is one,
@@ -400,8 +400,8 @@ export default class SecondBrainPlugin extends Plugin {
 			throw new Error("Cannot localize plugin directory.");
 		}
 
-		this.addRibbonIcon("message-square", "New Chat", () => this.createNewChat());
-		this.addRibbonIcon("search", "Search Notes", () => new SearchModal(this.app).open());
+		this.addRibbonIcon("message-square", "New chat", () => this.createNewChat());
+		this.addRibbonIcon("search", "Search notes", () => new SearchModal(this.app).open());
 		this.addRibbonIcon("git-fork", "Graph", () => this.activateSmartGraphView());
 
 		// Create Agent Manager (v2) + session registry BEFORE mounting the status-bar
@@ -420,21 +420,21 @@ export default class SecondBrainPlugin extends Plugin {
 
 		this.addCommand({
 			id: "open-chat",
-			name: "Open Chat",
+			name: "Open chat",
 			icon: "message-square",
 			callback: async () => await this.agentManager.openLatestChat(),
 		});
 
 		this.addCommand({
 			id: "new-chat",
-			name: "New Chat",
+			name: "New chat",
 			icon: "plus",
 			callback: async () => await this.agentManager.createNewChat(),
 		});
 
 		this.addCommand({
 			id: "search-notes",
-			name: "Search Notes",
+			name: "Search notes",
 			icon: "search",
 			callback: () => new SearchModal(this.app).open(),
 		});
@@ -443,7 +443,7 @@ export default class SecondBrainPlugin extends Plugin {
 
 		this.addCommand({
 			id: "open-smart-graph",
-			name: "Open Graph",
+			name: "Open graph",
 			icon: "git-fork",
 			callback: () => this.activateSmartGraphView(),
 		});
@@ -458,7 +458,7 @@ export default class SecondBrainPlugin extends Plugin {
 
 		this.addCommand({
 			id: "open-onboarding",
-			name: "Show Welcome",
+			name: "Show welcome",
 			icon: "zap",
 			callback: () => this.activateOnboardingView(),
 		});

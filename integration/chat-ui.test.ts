@@ -67,9 +67,9 @@ describe("chat view UI", () => {
 		expect(domCount('input[type="file"]#attachment')).toBeGreaterThanOrEqual(1);
 	});
 
-	it("should have a New Chat ribbon icon or command available", () => {
-		// New Chat button was removed from input area; it's accessible via ribbon icon and command palette
-		expect(domCount('[aria-label="New Chat"]')).toBeGreaterThanOrEqual(1);
+	it("should have a New chat ribbon icon or command available", () => {
+		// New chat button was removed from input area; it's accessible via ribbon icon and command palette
+		expect(domCount('[aria-label="New chat"]')).toBeGreaterThanOrEqual(1);
 	});
 
 	it("should display a context usage indicator in the input area", () => {

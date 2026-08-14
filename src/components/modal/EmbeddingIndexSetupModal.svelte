@@ -162,7 +162,7 @@ function handleSave() {
 
 <div class="modal-button-container">
   <Button buttonText="Cancel" onClick={() => modal.close()} />
-  <Button buttonText="Start Indexing" cta={true} onClick={handleSave} disabled={!selectedModel} />
+  <Button buttonText="Start indexing" cta={true} onClick={handleSave} disabled={!selectedModel} />
 </div>
 
 <style>

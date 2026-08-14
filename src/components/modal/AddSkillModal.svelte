@@ -30,7 +30,7 @@ type Mode = "create" | "import";
 let mode = $state<Mode>("create");
 
 const SKILL_MODE_TABS: SlidingTab<Mode>[] = [
-	{ id: "create", label: "Create New", icon: "plus" },
+	{ id: "create", label: "Create new", icon: "plus" },
 	{ id: "import", label: "Import from URL", icon: "download" },
 ];
 
@@ -247,7 +247,7 @@ async function handleSave() {
         disabled={importLoading || !importUrl.trim()}
       />
     {:else}
-      <Button buttonText="Add & Open Note" cta={true} onClick={handleSave} disabled={!isValid} />
+      <Button buttonText="Add & open note" cta={true} onClick={handleSave} disabled={!isValid} />
     {/if}
   </div>
 </div>

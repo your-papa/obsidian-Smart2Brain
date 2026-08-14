@@ -152,7 +152,7 @@ let embedModelsByProvider = $derived.by(() => {
 <!-- Quick Actions -->
 {#if configuredProviders.length > 0}
   <SettingGroup heading="Quick Actions">
-    <SettingItem name="Add Models" desc="Quickly add models to configured providers">
+    <SettingItem name="Add models" desc="Quickly add models to configured providers">
       <div class="flex gap-2 flex-wrap">
         {#each configuredProviders as provider}
           {#if isGenProvider(provider)}

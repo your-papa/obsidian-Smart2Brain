@@ -104,5 +104,5 @@ function openKeychainSettings() {
 
 <div class="modal-button-container">
 	<Button buttonText="Cancel" onClick={() => modal.close()} />
-	<Button buttonText="Save Secret" cta={true} disabled={!isValidId || !secretValue} onClick={handleSave} />
+	<Button buttonText="Save secret" cta={true} disabled={!isValidId || !secretValue} onClick={handleSave} />
 </div>

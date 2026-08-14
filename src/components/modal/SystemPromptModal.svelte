@@ -145,10 +145,10 @@ async function handleUseDefault() {
         <Button buttonText="Use default" cta={true} onClick={() => void handleUseDefault()} />
       {:else}
         {#if accessors.viewFinalPrompt}
-          <Button buttonText="View Final" onClick={accessors.viewFinalPrompt} />
+          <Button buttonText="View final" onClick={accessors.viewFinalPrompt} />
         {/if}
         {#if !isAtDefault}
-          <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
+          <Button buttonText="Reset to default" onClick={handleResetToDefault} />
         {/if}
         {#if canShowDiff}
           <Button buttonText="Diff with default" onClick={() => (viewMode = "diff")} />

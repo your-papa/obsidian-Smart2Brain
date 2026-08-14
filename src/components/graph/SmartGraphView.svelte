@@ -927,10 +927,10 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
         {#if selectedPaths.length > 0}
           <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
           <Button buttonText="Immerse" onClick={handleImmerse} tooltip="Rebuild graph with selected notes only" />
-          <Button buttonText="Open All" onClick={handleOpenAllSelected} tooltip="Open all selected notes in new tabs" />
+          <Button buttonText="Open all" onClick={handleOpenAllSelected} tooltip="Open all selected notes in new tabs" />
           {#if !hasOpenChat}
             <Button
-              buttonText="Open in Chat"
+              buttonText="Open in chat"
               onClick={handleSendToChat}
               tooltip="Reveal the chat and attach the selected notes"
             />

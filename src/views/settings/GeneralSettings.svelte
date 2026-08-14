@@ -32,7 +32,7 @@ function handleOpenProviderSetup() {
 >
   {#snippet actions()}
     <div class="flex items-center justify-end w-full">
-      <Button buttonText="Add Provider" cta={true} onClick={handleOpenProviderSetup} />
+      <Button buttonText="Add provider" cta={true} onClick={handleOpenProviderSetup} />
     </div>
   {/snippet}
 
