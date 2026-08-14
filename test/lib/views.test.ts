@@ -893,14 +893,90 @@ describe("rewriteViewFilterForRename", () => {
 		expect(rewritten).toBe(filter);
 	});
 
-	it("does not touch tag, extension, or property leaves", () => {
+	it("does not touch tag or extension leaves, or plain property values", () => {
 		const tag: ViewFilter = { type: "tag", value: "#work" };
 		const ext: ViewFilter = { type: "extension", value: "pdf" };
+		// A non-link property value is just a string — a note rename must not
+		// rewrite it even if the text happens to resemble the renamed note.
 		const prop: ViewFilter = { type: "property", value: "client", values: ["Acme"] };
 
 		expect(rewriteViewFilterForRename(tag, "Work", "Projects")).toBe(tag);
 		expect(rewriteViewFilterForRename(ext, "Work", "Projects")).toBe(ext);
-		expect(rewriteViewFilterForRename(prop, "Work", "Projects")).toBe(prop);
+		expect(rewriteViewFilterForRename(prop, "Acme.md", "Acme Holdings.md")).toBe(prop);
+	});
+
+	describe("wikilink property values", () => {
+		it("rewrites a basename wikilink to the renamed note", () => {
+			const filter: ViewFilter = { type: "property", value: "client", values: ["[[Acme Corp]]"] };
+			const rewritten = rewriteViewFilterForRename(filter, "Acme Corp.md", "Acme Holdings.md");
+
+			expect(rewritten).toEqual({ type: "property", value: "client", values: ["[[Acme Holdings]]"] });
+		});
+
+		it("rewrites only the matching value in a multi-value leaf", () => {
+			const filter: ViewFilter = {
+				type: "property",
+				value: "client",
+				values: ["[[Acme Corp]]", "[[Globex]]", "Plain Text"],
+			};
+			const rewritten = rewriteViewFilterForRename(filter, "Acme Corp.md", "Acme Holdings.md");
+
+			expect(rewritten).toEqual({
+				type: "property",
+				value: "client",
+				values: ["[[Acme Holdings]]", "[[Globex]]", "Plain Text"],
+			});
+		});
+
+		it("preserves an alias", () => {
+			const filter: ViewFilter = { type: "property", value: "client", values: ["[[Acme Corp|The Client]]"] };
+			const rewritten = rewriteViewFilterForRename(filter, "Acme Corp.md", "Acme Holdings.md");
+
+			expect(rewritten).toEqual({
+				type: "property",
+				value: "client",
+				values: ["[[Acme Holdings|The Client]]"],
+			});
+		});
+
+		it("preserves a subpath", () => {
+			const filter: ViewFilter = { type: "property", value: "client", values: ["[[Acme Corp#Billing]]"] };
+			const rewritten = rewriteViewFilterForRename(filter, "Acme Corp.md", "Acme Holdings.md");
+
+			expect(rewritten).toEqual({
+				type: "property",
+				value: "client",
+				values: ["[[Acme Holdings#Billing]]"],
+			});
+		});
+
+		it("keeps a full-path link written as a full path", () => {
+			const filter: ViewFilter = { type: "property", value: "client", values: ["[[Work/Acme Corp]]"] };
+			const rewritten = rewriteViewFilterForRename(filter, "Work/Acme Corp.md", "Archive/Acme Corp.md");
+
+			expect(rewritten).toEqual({
+				type: "property",
+				value: "client",
+				values: ["[[Archive/Acme Corp]]"],
+			});
+		});
+
+		it("matches link text case-insensitively, as Obsidian resolves links", () => {
+			const filter: ViewFilter = { type: "property", value: "client", values: ["[[acme corp]]"] };
+			const rewritten = rewriteViewFilterForRename(filter, "Acme Corp.md", "Acme Holdings.md");
+
+			expect(rewritten).toEqual({ type: "property", value: "client", values: ["[[Acme Holdings]]"] });
+		});
+
+		it("leaves a wikilink pointing at an unrelated note alone", () => {
+			const filter: ViewFilter = { type: "property", value: "client", values: ["[[Globex]]"] };
+			expect(rewriteViewFilterForRename(filter, "Acme Corp.md", "Acme Holdings.md")).toBe(filter);
+		});
+
+		it("leaves a values-less (existence-check) property leaf alone", () => {
+			const filter: ViewFilter = { type: "property", value: "client" };
+			expect(rewriteViewFilterForRename(filter, "Acme Corp.md", "Acme Holdings.md")).toBe(filter);
+		});
 	});
 
 	it("recurses through groups and rewrites only the matching leaf", () => {

@@ -81,12 +81,68 @@ export function cloneViewFilter(filter: ViewFilter): ViewFilter {
  *   its own exact-match event rather than needing prefix rewriting here. The
  *   prefix branch below is kept as a defensive fallback in case a caller ever
  *   invokes this with a coarser-grained rename than Obsidian itself emits.
- * - Other leaf types (`tag`, `extension`, `property`, `query`) don't reference
- *   paths and are returned unchanged.
+ * - `property` leaves: values that are wikilinks (`[[Acme Corp]]`) are rewritten
+ *   to the renamed note, preserving subpath and alias. Obsidian rewrites the
+ *   *frontmatter* on rename, so a filter left alone would drift out of sync with
+ *   the very notes it targets. Plain (non-link) values are left alone.
+ * - Other leaf types (`tag`, `extension`, `query`) don't reference paths and are
+ *   returned unchanged.
  *
  * Returns the original `filter` reference when nothing changed, so callers can
  * skip a write (and the resulting save/re-render) with a simple identity check.
  */
+/** Strip a path's directory and extension, e.g. `Work/Acme Corp.md` → `Acme Corp`. */
+function pathToLinkText(path: string): string {
+	const withoutFolder = path.slice(path.lastIndexOf("/") + 1);
+	return withoutFolder.replace(/\.md$/i, "");
+}
+
+/**
+ * Rewrite a property-filter value that is a wikilink (`[[Acme Corp]]`) to follow a
+ * rename, preserving any subpath and alias (`[[Note#Heading|Display]]`).
+ *
+ * Users filter on link-valued properties by typing the link exactly as it appears
+ * in the frontmatter. Obsidian rewrites the *note's* frontmatter on rename, so
+ * without this the vault would say `[[New Name]]` while the saved filter still
+ * said `[[Old Name]]` — the rule silently stops matching, which under
+ * `public-by-default` means a note the user marked private becomes readable.
+ *
+ * Links may be written by basename (`[[Acme Corp]]`, the common case) or by full
+ * vault path (`[[Work/Acme Corp]]`); both are matched. A link carrying its own
+ * alias keeps that alias, since the user's chosen display text isn't ours to change.
+ * Non-link values are returned unchanged.
+ */
+function rewriteWikiLinkValue(value: string, normalizedOldPath: string, normalizedNewPath: string): string {
+	const match = /^\[\[([^\]]+)\]\]$/.exec(value.trim());
+	if (!match) return value;
+
+	const inner = match[1];
+	const aliasSplit = inner.indexOf("|");
+	const target = aliasSplit === -1 ? inner : inner.slice(0, aliasSplit);
+	const alias = aliasSplit === -1 ? "" : inner.slice(aliasSplit);
+
+	const subpathSplit = target.search(/[#^]/);
+	const linkPath = subpathSplit === -1 ? target : target.slice(0, subpathSplit);
+	const subpath = subpathSplit === -1 ? "" : target.slice(subpathSplit);
+
+	const trimmedLink = linkPath.trim();
+	const oldLinkText = pathToLinkText(normalizedOldPath);
+	// Match either the bare basename or the full vault path, case-insensitively —
+	// Obsidian resolves links case-insensitively too.
+	const matchesOld =
+		trimmedLink.toLowerCase() === oldLinkText.toLowerCase() ||
+		trimmedLink.toLowerCase() === normalizedOldPath.toLowerCase() ||
+		trimmedLink.toLowerCase() === normalizedOldPath.replace(/\.md$/i, "").toLowerCase();
+	if (!matchesOld) return value;
+
+	// Keep the reference style the user wrote: a basename link stays a basename
+	// link, a full-path link stays a full-path link.
+	const wroteFullPath = trimmedLink.toLowerCase() !== oldLinkText.toLowerCase();
+	const replacement = wroteFullPath ? normalizedNewPath.replace(/\.md$/i, "") : pathToLinkText(normalizedNewPath);
+
+	return `[[${replacement}${subpath}${alias}]]`;
+}
+
 export function rewriteViewFilterForRename(filter: ViewFilter, oldPath: string, newPath: string): ViewFilter {
 	const normalizedOld = normalizeVaultPath(oldPath);
 	const normalizedNew = normalizeVaultPath(newPath);
@@ -109,6 +165,16 @@ export function rewriteViewFilterForRename(filter: ViewFilter, oldPath: string, 
 				return { type: "folder", value: normalizedNew + normalizedValue.slice(normalizedOld.length) };
 			}
 			return filter;
+		}
+
+		if (filter.type === "property" && filter.values) {
+			let changedValue = false;
+			const values = filter.values.map((value) => {
+				const rewritten = rewriteWikiLinkValue(value, normalizedOld, normalizedNew);
+				if (rewritten !== value) changedValue = true;
+				return rewritten;
+			});
+			return changedValue ? { type: "property", value: filter.value, values } : filter;
 		}
 
 		return filter;
