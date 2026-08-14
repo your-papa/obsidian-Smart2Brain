@@ -1256,7 +1256,17 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.refreshMobileSemanticButton();
 	}
 
-	/** Sync the mobile semantic toggle's label/active state with `semanticEnabled`. */
+	/**
+	 * Sync the mobile semantic toggle's label/active state with `semanticEnabled`.
+	 *
+	 * The label is the constant "Semantic" and the pressed state carries on/off,
+	 * rather than the text spelling out "Semantic: on" / "Semantic: off". Two
+	 * reasons: a control whose text mutates between two similar strings has to be
+	 * re-read to be understood (and "Semantic: off" reads at a glance as if it
+	 * would turn something off), and the changing width made the row reflow on
+	 * every tap. `aria-pressed` gives assistive tech the state that the visual
+	 * fill conveys, so nothing is lost by dropping it from the text.
+	 */
 	private refreshMobileSemanticButton(): void {
 		const btn = this.mobileSemanticButtonEl;
 		if (!btn) return;
@@ -1265,8 +1275,10 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		icon.className = "s2b-search-mobile-icon";
 		setIcon(icon, "sparkles");
 		btn.appendChild(icon);
-		btn.appendChild(document.createTextNode(this.semanticEnabled ? "Semantic: on" : "Semantic: off"));
+		btn.appendChild(document.createTextNode("Semantic"));
 		btn.toggleClass("s2b-pill--active", this.semanticEnabled);
+		btn.setAttribute("aria-pressed", String(this.semanticEnabled));
+		btn.setAttribute("aria-label", this.semanticEnabled ? "Semantic search on" : "Semantic search off");
 	}
 
 	private scheduleInputFocus(): void {
