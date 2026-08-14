@@ -1,5 +1,7 @@
 <script lang="ts">
+import { Notice } from "obsidian";
 import { ModelSelectionModal } from "../../components/modal/ModelSelectionModal";
+import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
 import Button from "../../components/ui/Button.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import type SecondBrainPlugin from "../../main";
@@ -12,6 +14,15 @@ import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
 // wordmark's fixed fill is overridden to currentColor via CSS below so it
 // adapts to the active theme.
 import logoSvg from "../../../assets/logo-light.svg?raw";
+
+// Mirrors the CSS stagger constants (base delay, per-step increment) and the
+// highest --s2b-order used on any element below, so the click-to-skip timeout
+// stays in sync with the animation instead of being a hand-copied number that
+// silently goes stale whenever an element is added, removed, or reordered.
+const SPLASH_HOLD_MS = 2100;
+const STAGGER_STEP_MS = 80;
+const FADE_DURATION_MS = 500;
+const MAX_ORDER = 8; // highest --s2b-order in the markup below (the footer)
 
 interface Props {
 	plugin: SecondBrainPlugin;
@@ -40,7 +51,45 @@ if (playIntro) {
 // pixel distance into the keyframe via `--s2b-splash-offset`, then start the
 // animation. This is a legitimate $effect (DOM measurement + one-time init).
 let logoEl = $state<HTMLElement | null>(null);
+let rootEl = $state<HTMLElement | null>(null);
 let splashReady = $state(false);
+// Guards against a flash of unstyled content: when the plugin's onload runs
+// mid-workspace-render (e.g. re-enabling from Community plugins), this component's
+// DOM can be mounted and painted before the plugin's stylesheet lands in the
+// document — so .s2b-fade-in's `opacity: 0` isn't there yet and everything briefly
+// renders as plain, fully-visible text. An inline style applies instantly
+// regardless of stylesheet load timing, so hide the whole tree that way.
+//
+// Waiting a fixed number of frames doesn't work: a frame tick says nothing about
+// whether the *external* styles.css Obsidian loads has been parsed yet. Instead,
+// probe for a sentinel custom property that only the scoped rule below defines,
+// and reveal once it's actually computed. Capped so a future rename of the
+// sentinel degrades to "reveal anyway" rather than a permanently blank view.
+let stylesReady = $state(false);
+$effect(() => {
+	const el = rootEl;
+	if (!el) return;
+	let frames = 0;
+	let raf = 0;
+	const probe = () => {
+		if (getComputedStyle(el).getPropertyValue("--s2b-styles-loaded").trim() === "1" || ++frames > 30) {
+			stylesReady = true;
+			return;
+		}
+		raf = requestAnimationFrame(probe);
+	};
+	raf = requestAnimationFrame(probe);
+	return () => cancelAnimationFrame(raf);
+});
+// Lets an impatient user jump straight to the settled page instead of waiting out
+// the ~2.8s intro. Reuses the same "skip all animation" styling as
+// prefers-reduced-motion rather than duplicating it, since the end state is
+// identical either way.
+let introSkipped = $state(false);
+// The full-page click catcher only needs to exist while something is still
+// animating — once the intro finishes on its own it must stop intercepting
+// clicks meant for the real page underneath.
+let introPlaying = $state(false);
 
 $effect(() => {
 	if (!playIntro || !logoEl) return;
@@ -52,11 +101,55 @@ $effect(() => {
 	const offset = viewportCenterY - logoCenterY;
 	logoEl.style.setProperty("--s2b-splash-offset", `${offset}px`);
 	splashReady = true;
+	introPlaying = true;
+	const timer = window.setTimeout(
+		() => {
+			introPlaying = false;
+		},
+		SPLASH_HOLD_MS + MAX_ORDER * STAGGER_STEP_MS + FADE_DURATION_MS,
+	);
+	return () => window.clearTimeout(timer);
 });
+
+function skipIntro() {
+	introSkipped = true;
+}
 
 // Reactive completion signals derived from the data store — no $effect for state sync.
 let configuredProviders = $derived(data.getConfiguredProviders());
 let hasProvider = $derived(configuredProviders.length > 0);
+
+// Privacy-note state. The note is advice about a decision the user can only act
+// on once a provider exists, and its meaning inverts under public-by-default —
+// so derive the case rather than asserting one static claim.
+let isPublicByDefault = $derived(data.privacyMode === "public-by-default");
+// Local providers (ollama/omlx) seed trustedForPrivateData, so a user who
+// connected one is already unblocked and needs no call to action.
+let trustedProviders = $derived(configuredProviders.filter((p) => data.isProviderTrusted(p)));
+let privacyCase = $derived(
+	!hasProvider
+		? "no-provider"
+		: isPublicByDefault
+			? "public"
+			: trustedProviders.length === configuredProviders.length
+				? "all-trusted"
+				: trustedProviders.length > 0
+					? "some-trusted"
+					: "none-trusted",
+);
+
+// Providers still blocked from private notes, named so the copy can point at
+// something concrete instead of "a provider".
+let untrustedNames = $derived(
+	configuredProviders.filter((p) => !data.isProviderTrusted(p)).map((p) => data.getProviderMeta(p)?.displayName ?? p),
+);
+let untrustedLabel = $derived(
+	untrustedNames.length === 1
+		? untrustedNames[0]
+		: untrustedNames.length === 2
+			? `${untrustedNames[0]} and ${untrustedNames[1]}`
+			: `${untrustedNames.slice(0, -1).join(", ")}, and ${untrustedNames[untrustedNames.length - 1]}`,
+);
 // Onboarding sets the model on the selected agent (same as the chat header
 // selector), so completion tracks the agent's chat model, not added configs.
 let selectedAgent = $derived(data.getSelectedAgent());
@@ -64,6 +157,10 @@ let hasChatModel = $derived(Boolean(selectedAgent?.chatModel));
 
 function openProviderSetup() {
 	new ProviderSetupModal(plugin, {}).open();
+}
+
+function openPrivacySettings() {
+	new PrivacyListModal(plugin.app).open();
 }
 
 function buildPersistedChatModel(provider: string, model: string, existing?: ChatModel | null): ChatModel {
@@ -93,7 +190,10 @@ function openChatModelSetup() {
 	}).open();
 }
 
-function finish() {
+// Every exit completes onboarding so it never auto-opens again — reopening on
+// each restart would nag users who deliberately skipped (search and graph need
+// no provider at all). Reachable afterwards via the "Show Welcome" command.
+function skip() {
 	data.onboardingComplete = true;
 	close();
 }
@@ -110,6 +210,10 @@ async function exploreGraph() {
 	close();
 }
 
+// Deep-links into Obsidian's Hotkeys tab and pre-filters it to the search command.
+// This walks undocumented internals (app.setting.*), so every hop is checked: if
+// the shape changes in a future Obsidian release the click must explain itself
+// rather than silently doing nothing.
 function openHotkeysSettings() {
 	const app = plugin.app as typeof plugin.app & {
 		setting?: {
@@ -118,15 +222,38 @@ function openHotkeysSettings() {
 			activeTab?: { searchComponent?: { setValue: (v: string) => void; changeCallback: (v: string) => void } };
 		};
 	};
-	app.setting?.open();
-	app.setting?.openTabById("hotkeys");
+	const setting = app.setting;
+	if (!setting?.open || !setting?.openTabById) {
+		new Notice("Couldn't open Hotkeys — open Settings → Hotkeys and search for “Search notes”.");
+		return;
+	}
+
+	setting.open();
+	setting.openTabById("hotkeys");
+
+	// Pre-filtering is a nicety: landing on the Hotkeys tab is already useful, so
+	// a missing search component isn't worth a warning.
+	const search = setting.activeTab?.searchComponent;
+	if (!search) return;
 	const query = "search notes";
-	app.setting?.activeTab?.searchComponent?.setValue(query);
-	app.setting?.activeTab?.searchComponent?.changeCallback(query);
+	search.setValue(query);
+	search.changeCallback(query);
 }
 </script>
 
-<div class="s2b-onboarding">
+{#if playIntro && introPlaying && !introSkipped}
+	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+	<div class="s2b-onboarding-skip-intro" onclick={skipIntro} aria-hidden="true"></div>
+{/if}
+
+<div
+	bind:this={rootEl}
+	class="s2b-onboarding"
+	class:s2b-intro-skipped={introSkipped}
+	style="--s2b-splash-hold: {SPLASH_HOLD_MS}ms; --s2b-stagger-step: {STAGGER_STEP_MS}ms; opacity: {stylesReady
+		? 1
+		: 0}"
+>
 	<header class="s2b-onboarding-header">
 		<!-- eslint-disable-next-line svelte/no-at-html-tags -- static, build-inlined asset -->
 		<div
@@ -134,58 +261,60 @@ function openHotkeysSettings() {
 			class="s2b-onboarding-logo"
 			class:s2b-logo-splash={splashReady}
 			class:s2b-logo-settled={!playIntro}
-			role="img"
-			aria-label="Smart Second Brain"
+			role="presentation"
 		>
 			{@html logoSvg}
 		</div>
-		<h1 class="s2b-onboarding-title" class:s2b-fade-in={playIntro} style="--s2b-delay: 2100ms">
+		<h1 class="s2b-onboarding-title" class:s2b-fade-in={playIntro} style="--s2b-order: 0">
 			Welcome to Smart Second Brain
 		</h1>
-		<p class="s2b-onboarding-subtitle" class:s2b-fade-in={playIntro} style="--s2b-delay: 2200ms">
-			Turn your vault into an AI-assisted second brain — chat with your notes, search smarter, and explore
-			connections in a graph.
+		<p class="s2b-onboarding-subtitle" class:s2b-fade-in={playIntro} style="--s2b-order: 1">
+			Turn your vault into an AI-assisted second brain — search smarter, explore connections in a graph,
+			and chat with your notes.
 		</p>
 	</header>
 
 	<section class="s2b-onboarding-pillars">
-		<div class="s2b-onboarding-pillar" class:s2b-fade-in={playIntro} style="--s2b-delay: 2300ms">
-			<span class="s2b-onboarding-pillar-icon" use:icon={"message-square"} aria-hidden="true"></span>
-			<div>
-				<div class="s2b-onboarding-pillar-title">Chat with your notes</div>
-				<div class="s2b-onboarding-pillar-desc">Ask questions and get answers grounded in your vault.</div>
-			</div>
-		</div>
-		<div class="s2b-onboarding-pillar" class:s2b-fade-in={playIntro} style="--s2b-delay: 2380ms">
+		<div class="s2b-onboarding-pillar" class:s2b-fade-in={playIntro} style="--s2b-order: 2">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"search"} aria-hidden="true"></span>
 			<div>
 				<div class="s2b-onboarding-pillar-title">Smarter search</div>
 				<div class="s2b-onboarding-pillar-desc">
-					Works right away — no setup required. Tip: assign a hotkey to <em>Smart Second Brain: Search
-					notes</em> in <button class="s2b-onboarding-link" onclick={openHotkeysSettings}>Settings → Hotkeys</button> for instant access.
+					Find notes by title, content, tags, and folders — with fuzzy matching. No setup needed. Add
+					an embedding model later for semantic search, or <button
+						class="s2b-onboarding-link"
+						onclick={openHotkeysSettings}>set a hotkey</button
+					> for instant access.
 				</div>
 			</div>
 		</div>
-		<div class="s2b-onboarding-pillar" class:s2b-fade-in={playIntro} style="--s2b-delay: 2460ms">
+		<div class="s2b-onboarding-pillar" class:s2b-fade-in={playIntro} style="--s2b-order: 3">
 			<span class="s2b-onboarding-pillar-icon" use:icon={"git-fork"} aria-hidden="true"></span>
 			<div>
-				<div class="s2b-onboarding-pillar-title">Smart graph</div>
-				<div class="s2b-onboarding-pillar-desc">Explore how your notes connect. Also works right away.</div>
+				<div class="s2b-onboarding-pillar-title">Smarter graph</div>
+				<div class="s2b-onboarding-pillar-desc">
+					See how your notes connect and cluster into topics. No setup needed.
+				</div>
+			</div>
+		</div>
+		<div class="s2b-onboarding-pillar" class:s2b-fade-in={playIntro} style="--s2b-order: 4">
+			<span class="s2b-onboarding-pillar-icon" use:icon={"message-square"} aria-hidden="true"></span>
+			<div>
+				<div class="s2b-onboarding-pillar-title">Chat with your notes</div>
+				<div class="s2b-onboarding-pillar-desc">
+					Ask questions grounded in your vault, with web search and plugins like Dataview and Tasks
+					integrated in. Needs an AI provider — set one up below.
+				</div>
 			</div>
 		</div>
 	</section>
 
 	<section class="s2b-onboarding-steps">
-		<div class="s2b-onboarding-note" class:s2b-fade-in={playIntro} style="--s2b-delay: 2560ms">
-			Search and the graph work immediately. To chat with your notes, connect an AI provider below — this
-			step is optional and you can do it anytime from settings.
-		</div>
-
 		<!-- Step 1: Connect a provider -->
 		<div
 			class="s2b-onboarding-step"
 			class:s2b-fade-in={playIntro}
-			style="--s2b-delay: 2640ms"
+			style="--s2b-order: 5"
 			class:s2b-onboarding-step--done={hasProvider}
 		>
 			<span
@@ -214,7 +343,7 @@ function openHotkeysSettings() {
 		<div
 			class="s2b-onboarding-step"
 			class:s2b-fade-in={playIntro}
-			style="--s2b-delay: 2720ms"
+			style="--s2b-order: 6"
 			class:s2b-onboarding-step--done={hasChatModel}
 			class:s2b-onboarding-step--disabled={!hasProvider}
 		>
@@ -244,22 +373,60 @@ function openHotkeysSettings() {
 		</div>
 	</section>
 
-	<!-- Privacy note -->
-	<div class="s2b-onboarding-privacy" class:s2b-fade-in={playIntro} style="--s2b-delay: 2800ms">
-		<span class="s2b-onboarding-privacy-icon" use:icon={"shield"} aria-hidden="true"></span>
+	<!-- Privacy note — copy tracks the actual provider/trust state, since the
+	     advice only becomes actionable once a provider exists and its meaning
+	     inverts entirely under public-by-default. -->
+	<div
+		class="s2b-onboarding-privacy"
+		class:s2b-onboarding-privacy--ok={privacyCase === "all-trusted"}
+		class:s2b-fade-in={playIntro}
+		style="--s2b-order: 7"
+	>
+		<span
+			class="s2b-onboarding-privacy-icon"
+			use:icon={privacyCase === "all-trusted" ? "shield-check" : privacyCase === "public" ? "shield-alert" : "shield"}
+			aria-hidden="true"
+		></span>
 		<div>
-			<div class="s2b-onboarding-privacy-title">Note access is private by default</div>
+			<div class="s2b-onboarding-privacy-title">
+				{#if privacyCase === "public"}
+					Your notes are shared by default
+				{:else if privacyCase === "all-trusted"}
+					Note access is granted
+				{:else if privacyCase === "none-trusted" || privacyCase === "some-trusted"}
+					Your notes are still private
+				{:else}
+					Note access is private by default
+				{/if}
+			</div>
 			<div class="s2b-onboarding-privacy-desc">
-				By default your notes are <strong>not</strong> shared with AI providers. You can unblock access
-				two ways: mark a specific provider as <strong>trusted</strong> in its settings (that provider
-				only), or switch to <strong>public by default</strong> in <strong>Settings → Privacy</strong> to
-				allow all providers.
+				{#if privacyCase === "no-provider"}
+					Your notes are <strong>not</strong> shared with AI providers unless you allow it. Once you
+					connect a provider above, you can grant it access — nothing leaves your vault before then.
+				{:else if privacyCase === "public"}
+					Note access is set to <strong>public by default</strong>, so providers can read your notes
+					except the ones you exclude. <button class="s2b-onboarding-link" onclick={openPrivacySettings}
+						>Review note access</button
+					>.
+				{:else if privacyCase === "all-trusted"}
+					{configuredProviders.length === 1 ? "Your provider is" : "Your providers are"} marked
+					<strong>trusted</strong>, so the agent can read your notes. <button
+						class="s2b-onboarding-link"
+						onclick={openPrivacySettings}>Review note access</button
+					> to keep specific notes private.
+				{:else}
+					<strong>{untrustedLabel}</strong> can't read your notes yet — chat will work, but answers
+					won't be grounded in your vault. Mark
+					{untrustedNames.length === 1 ? "it" : "them"} as <strong>trusted</strong> in provider settings,
+					or <button class="s2b-onboarding-link" onclick={openPrivacySettings}>change note access</button
+					> to allow all providers.
+				{/if}
 			</div>
 		</div>
 	</div>
 
-	<footer class="s2b-onboarding-footer" class:s2b-fade-in={playIntro} style="--s2b-delay: 2920ms">
-		<Button buttonText="Skip for now" onClick={finish} />
+	<footer class="s2b-onboarding-footer" class:s2b-fade-in={playIntro} style="--s2b-order: 8">
+		<Button buttonText="Skip" onClick={skip} />
 		<div class="s2b-onboarding-footer-primary">
 			<Button buttonText="Explore the graph" onClick={exploreGraph} />
 			<Button
@@ -274,12 +441,19 @@ function openHotkeysSettings() {
 </div>
 
 <style>
-	/* Staggered entrance: each element fades up in document order, driven by a
-	   per-element `--s2b-delay` set inline. `both` fill keeps them hidden until
-	   their delay elapses (no flash of the full layout on mount). */
+	/* Staggered entrance: each element fades up in document order. Delay is derived
+	   from a small per-element `--s2b-order` index (0, 1, 2, ...) rather than a
+	   hand-tuned millisecond value, so inserting/reordering/removing an element
+	   only means renumbering small integers. --s2b-splash-hold/--s2b-stagger-step
+	   are set inline from the script's SPLASH_HOLD_MS/STAGGER_STEP_MS constants
+	   (see script block), which the click-to-skip timeout also reads — one source
+	   of truth for both the visual timing and when the skip-catcher unmounts.
+	   `both` fill keeps elements hidden until their delay elapses (no flash of the
+	   full layout on mount). */
 	.s2b-fade-in {
 		opacity: 0;
-		animation: s2b-onboarding-fade-in 0.5s ease-out var(--s2b-delay, 0ms) both;
+		animation: s2b-onboarding-fade-in 0.5s ease-out
+			calc(var(--s2b-splash-hold) + var(--s2b-order, 0) * var(--s2b-stagger-step)) both;
 	}
 
 	@keyframes s2b-onboarding-fade-in {
@@ -339,6 +513,21 @@ function openHotkeysSettings() {
 		}
 	}
 
+	/* Shared "settle instantly" end-state: reached either via prefers-reduced-motion
+	   (accessibility) or by clicking through the intro (impatience). Both want the
+	   exact same result — everything visible, nothing animating — so one rule set
+	   serves both triggers instead of duplicating it per-trigger. */
+	.s2b-intro-skipped .s2b-fade-in,
+	.s2b-intro-skipped .s2b-logo-splash {
+		opacity: 1;
+		animation: none;
+	}
+
+	.s2b-intro-skipped .s2b-logo-splash :global(svg path) {
+		opacity: 1;
+		animation: none;
+	}
+
 	@media (prefers-reduced-motion: reduce) {
 		.s2b-fade-in {
 			opacity: 1;
@@ -356,7 +545,24 @@ function openHotkeysSettings() {
 		}
 	}
 
+	/* Invisible full-view click catcher, shown only while the intro is still
+	   playing. .s2b-onboarding-container is set on the view's contentEl by
+	   OnboardingView.ts, so this covers exactly the scrollable view area. */
+	:global(.s2b-onboarding-container) {
+		position: relative;
+	}
+
+	.s2b-onboarding-skip-intro {
+		position: absolute;
+		inset: 0;
+		z-index: 1;
+		cursor: pointer;
+	}
+
 	.s2b-onboarding {
+		/* Sentinel probed from the script: its presence in the computed style is
+		   proof this stylesheet is live, which a frame tick alone can't tell us. */
+		--s2b-styles-loaded: 1;
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
@@ -465,14 +671,6 @@ function openHotkeysSettings() {
 		gap: 0.75rem;
 	}
 
-	.s2b-onboarding-note {
-		color: var(--text-muted);
-		font-size: var(--font-ui-small);
-		padding: 0.75rem;
-		border-radius: var(--radius-m);
-		background: var(--background-secondary);
-	}
-
 	.s2b-onboarding-step {
 		display: flex;
 		align-items: center;
@@ -524,6 +722,14 @@ function openHotkeysSettings() {
 		border: 1px solid color-mix(in srgb, var(--color-blue) 25%, transparent);
 	}
 
+	/* Granted state reads as resolved rather than as a standing warning. Uses the
+	   hex --color-green with color-mix; the --color-green-hsl variant is undefined
+	   in some themes (e.g. Cupertino) and would render fully transparent. */
+	.s2b-onboarding-privacy--ok {
+		background: color-mix(in srgb, var(--color-green) 10%, var(--background-secondary));
+		border-color: color-mix(in srgb, var(--color-green) 25%, transparent);
+	}
+
 	.s2b-onboarding-privacy-icon {
 		display: inline-flex;
 		align-items: center;
@@ -533,6 +739,10 @@ function openHotkeysSettings() {
 		color: var(--color-blue);
 		flex-shrink: 0;
 		margin-top: 2px;
+	}
+
+	.s2b-onboarding-privacy--ok .s2b-onboarding-privacy-icon {
+		color: var(--color-green);
 	}
 
 	.s2b-onboarding-privacy-title {

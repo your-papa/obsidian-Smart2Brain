@@ -1,4 +1,4 @@
-import { type EventRef, MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { type EventRef, MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import { mount, unmount } from "svelte";
 import "./lib/i18n";
 import "./lib/langgraphContext";
@@ -25,7 +25,7 @@ import { setPlugin } from "./stores/state.svelte";
 import { LexicalSearchService } from "./search/LexicalSearchService";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import { navigateToPendingChange } from "./lib/pendingChangeNavigation";
-import { registerChatEmbed } from "./views/chat/chatEmbed";
+import { registerChatEmbed, unregisterChatEmbed } from "./views/chat/chatEmbed";
 import RunningIndicator from "./components/chat/RunningIndicator.svelte";
 // DISABLED FOR INITIAL RELEASE — Note Context view; see the registerView block in onload().
 // import { NoteContextView, VIEW_TYPE_NOTE_CONTEXT } from "./views/note-context/NoteContextView";
@@ -356,6 +356,7 @@ export default class SecondBrainPlugin extends Plugin {
 		}
 
 		this.addRibbonIcon("message-square", "New Chat", () => this.createNewChat());
+		this.addRibbonIcon("search", "Search Notes", () => new SearchModal(this.app).open());
 		this.addRibbonIcon("git-fork", "Graph", () => this.activateSmartGraphView());
 
 		// Create Agent Manager (v2) + session registry BEFORE mounting the status-bar
@@ -410,7 +411,7 @@ export default class SecondBrainPlugin extends Plugin {
 
 		this.addCommand({
 			id: "open-onboarding",
-			name: "Show Welcome / Onboarding",
+			name: "Show Welcome",
 			icon: "zap",
 			callback: () => this.activateOnboardingView(),
 		});
@@ -563,15 +564,25 @@ export default class SecondBrainPlugin extends Plugin {
 		// create/update/delete or a manual user edit to a skill / GUIDANCE.md / base-prompt file
 		// fires a vault modify/create/delete event. Re-discover skills, reload the prompt-file
 		// caches, and rebuild the live agent's system prompt so revised content takes effect
-		// without a reload.
+		// without a reload. Debounced: a burst of events (Obsidian replaying `create` for every
+		// existing file while the vault resolves on plugin enable, or bootstrap/migration writing
+		// many skill files at once) previously re-ran full discovery — and its per-skill logging —
+		// once per event instead of once for the whole burst.
+		const refreshAgentContext = debounce(
+			() => {
+				void (async () => {
+					await this.skillsService?.discoverSkills();
+					await this.promptFilesService?.refresh(this.pluginData.agents);
+					this.agentManager?.invalidateSystemPromptCaches();
+				})();
+			},
+			500,
+			true,
+		);
 		const refreshAgentContextOnVaultChange = (file: TFile | { path?: string }) => {
 			const path = file?.path;
 			if (!path || !isAgentFilePath(path)) return;
-			void (async () => {
-				await this.skillsService?.discoverSkills();
-				await this.promptFilesService?.refresh(this.pluginData.agents);
-				this.agentManager?.invalidateSystemPromptCaches();
-			})();
+			refreshAgentContext();
 		};
 		this.registerEvent(this.app.vault.on("modify", refreshAgentContextOnVaultChange));
 		this.registerEvent(this.app.vault.on("create", refreshAgentContextOnVaultChange));
@@ -701,6 +712,22 @@ export default class SecondBrainPlugin extends Plugin {
 		if (this.agentManager) void this.agentManager.cleanup();
 		if (this.pendingChangesStore) this.pendingChangesStore.cleanup();
 		terminateClusteringWorker();
+
+		// Two separate Obsidian registries were populated in onload via registerExtensions
+		// calls that have no public unregister counterpart on Plugin — unlike
+		// registerView/registerEvent/etc., neither is torn down automatically by the
+		// Component lifecycle:
+		//  - app.viewRegistry (this.registerExtensions(["chat"], VIEW_TYPE_CHAT) in onload)
+		//  - app.embedRegistry (registerChatEmbed in onload — see chatEmbed.ts)
+		// Leaving either stale after unload throws "Attempting to register a
+		// view/embed for an already registered extension" the next time the plugin
+		// loads. Both are undocumented internal APIs, so calls are optional-chained —
+		// if a shape changes upstream this silently does nothing rather than throwing
+		// during unload.
+		(
+			this.app as typeof this.app & { viewRegistry?: { unregisterExtensions?: (extensions: string[]) => void } }
+		).viewRegistry?.unregisterExtensions?.(["chat"]);
+		unregisterChatEmbed(this);
 	}
 
 	async createNewChat() {
@@ -778,6 +805,14 @@ export default class SecondBrainPlugin extends Plugin {
 	// }
 
 	async activateOnboardingView() {
+		// Enabling the plugin from Settings → Community plugins fires onLayoutReady
+		// (and this auto-open) while the Settings modal is still on top of the
+		// workspace — revealing the leaf underneath would be invisible otherwise.
+		// Same applies if "Show Welcome" is run manually with Settings open.
+		// app.setting is undocumented internal API, so every hop is optional —
+		// if the shape changes upstream this silently does nothing rather than throw.
+		(this.app as typeof this.app & { setting?: { close?: () => void } }).setting?.close?.();
+
 		const { workspace } = this.app;
 
 		let leaf = workspace.getLeavesOfType(VIEW_TYPE_ONBOARDING)[0];
