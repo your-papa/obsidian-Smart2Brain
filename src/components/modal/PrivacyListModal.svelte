@@ -260,6 +260,15 @@ const introBody = $derived.by(() =>
 		? "Untrusted providers can only access the files listed below. Everything else stays private unless the provider is marked as trusted."
 		: "Untrusted providers can access vault files by default, except for the files listed below as private. Trusted providers always bypass this restriction.",
 );
+// This protects file *content*. File and folder names/paths in the vault are not
+// hidden from untrusted providers — they can appear in search results, directory
+// listings, and elsewhere regardless of a file's privacy status. Renaming/moving
+// files and folders is safe: rules that reference a path (folder, or a wikilink
+// inside a property value) follow the rename automatically, so this list won't
+// drift out of date.
+const pathVisibilityNote =
+	"This controls file content, not file or folder names — those can still appear to any provider. " +
+	"Rules here follow renames automatically, so you can freely rename or move files without breaking this list.";
 const sectionTitle = $derived.by(() =>
 	privacyMode === "private-by-default" ? "Files exposed to untrusted providers" : "Private files",
 );
@@ -307,6 +316,7 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
             ? ""
             : "s"}. {privateFileCount} file{privateFileCount === 1 ? "" : "s"} remain private.
         </p>
+        <p class="privacy-mode-note">{pathVisibilityNote}</p>
       </div>
 
       <div class="privacy-mode-toggle" role="tablist" aria-label="Privacy mode">
@@ -409,6 +419,11 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
 
   .privacy-mode-copy p {
     margin: 0;
+  }
+
+  .privacy-mode-note {
+    color: var(--text-muted);
+    font-size: var(--font-smaller);
   }
 
   .privacy-mode-title {
