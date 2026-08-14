@@ -172,27 +172,25 @@ function previewFileLink(event: Event): void {
 </script>
 
 <div class="space-file-row" class:space-file-row--compact={compact} title={entry.path}>
-  <div class="min-w-0 flex-1">
-    <div class="space-file-link-row">
-      <span
-        class="space-file-link-icon s2b-search-result-note-icon"
-        aria-hidden="true"
-        use:iconDirective={getFileIconName(entry.path)}
-        use:lazyFileIcon={{ app, path: entry.path }}
-      ></span>
-      <a
-        class="internal-link space-file-link truncate"
-        href={entry.path}
-        data-href={entry.path}
-        onclick={handleFileLinkClick}
-        onmouseover={previewFileLink}
-        onfocus={previewFileLink}
-      >
-        {entry.displayName ?? getFileDisplayName(entry.path)}
-      </a>
-    </div>
+  <div class="space-file-link-row">
+    <span
+      class="space-file-link-icon s2b-search-result-note-icon"
+      aria-hidden="true"
+      use:iconDirective={getFileIconName(entry.path)}
+      use:lazyFileIcon={{ app, path: entry.path }}
+    ></span>
+    <a
+      class="internal-link space-file-link truncate"
+      href={entry.path}
+      data-href={entry.path}
+      onclick={handleFileLinkClick}
+      onmouseover={previewFileLink}
+      onfocus={previewFileLink}
+    >
+      {entry.displayName ?? getFileDisplayName(entry.path)}
+    </a>
     {#if entry.contextLabel}
-      <div class="space-file-context truncate">{entry.contextLabel}</div>
+      <span class="space-file-context truncate">{entry.contextLabel}</span>
     {/if}
   </div>
 
@@ -204,32 +202,44 @@ function previewFileLink(event: Event): void {
 </div>
 
 <style>
+  /*
+   * Flat rows with a hover highlight, matching Obsidian's own list surfaces
+   * (file explorer, search results) rather than boxing each entry in a card.
+   * Keeps long lists scannable and the row height uniform whether or not the
+   * entry has a context label.
+   */
   .space-file-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    padding: 8px 10px;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 6px;
+    gap: 8px;
+    padding: 2px 6px;
+    border-radius: var(--radius-s);
+    min-height: 28px;
+  }
+
+  .space-file-row:hover {
+    background: var(--background-modifier-hover);
   }
 
   .space-file-row--compact {
-    padding-block: 7px;
     opacity: 0.85;
   }
 
   .space-file-link-row {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: 6px;
     min-width: 0;
-    max-width: 100%;
+    flex: 1;
   }
 
   .space-file-link-icon {
     flex-shrink: 0;
     color: var(--text-faint);
+    align-self: center;
+    display: flex;
+    align-items: center;
   }
 
   .space-file-link {
@@ -243,16 +253,29 @@ function previewFileLink(event: Event): void {
     text-decoration: underline;
   }
 
+  /* Trails the filename inline; shrinks first so the name keeps priority. */
   .space-file-context {
-    font-size: 0.75rem;
-    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    color: var(--text-faint);
+    flex-shrink: 1;
+    min-width: 0;
   }
 
   .space-file-actions {
     display: flex;
-    flex-wrap: wrap;
     justify-content: flex-end;
-    gap: 6px;
+    gap: 4px;
     flex-shrink: 0;
+  }
+
+  /*
+   * Shrink the action buttons to match the tighter row. Scoped to this row's
+   * buttons so the modal's other controls keep their normal sizing.
+   */
+  .space-file-actions :global(button) {
+    height: auto;
+    padding: 3px 8px;
+    font-size: var(--font-smaller);
+    box-shadow: none;
   }
 </style>
