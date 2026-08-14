@@ -5,6 +5,7 @@ import {
 	matchesSpaceMembershipDraftPath,
 	parseSpaceMembershipFilter,
 	resolveViewFilter,
+	rewriteViewFilterForRename,
 } from "../lib/views";
 import { getSecret, listSecrets, removeSecret, setSecret } from "../lib/secretStorage";
 import { isAgentFilePath } from "../utils/fileFiltering";
@@ -623,6 +624,23 @@ export class PluginDataStore {
 	constructor(plugin: SecondBrainPlugin, initialData: PluginData) {
 		this._plugin = plugin;
 		this.#data = $state(initialData);
+
+		// Keep the privacy filter following renames instead of silently going stale.
+		// Under `public-by-default` a stale entry drops out of the *private* set —
+		// a note the user marked private would then be readable by untrusted
+		// providers with no corresponding edit — so this isn't just UI hygiene.
+		// Obsidian fires a `rename` event for every renamed file AND folder
+		// (including each descendant folder of a renamed parent), so a single
+		// exact-match rewrite per event is sufficient; see `rewriteViewFilterForRename`.
+		this._plugin.registerEvent(
+			this._plugin.app.vault.on("rename", (file, oldPath) => {
+				const rewritten = rewriteViewFilterForRename(this.#data.privacyFilter, oldPath, file.path);
+				if (rewritten !== this.#data.privacyFilter) {
+					this.#data.privacyFilter = rewritten;
+					this.saveSettings();
+				}
+			}),
+		);
 	}
 
 	/**

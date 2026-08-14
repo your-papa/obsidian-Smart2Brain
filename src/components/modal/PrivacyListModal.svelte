@@ -11,6 +11,7 @@ import {
 	parseSpaceMembershipFilter,
 	resolveViewFilter,
 	resolveSpaceMembershipDraft,
+	rewriteViewFilterForRename,
 } from "../../lib/views";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
@@ -57,6 +58,21 @@ const availableTags = $derived.by(() => {
 	return [...tags].sort();
 });
 
+const availableProperties = $derived.by(() => {
+	const keys = new Set<string>();
+	for (const file of app.vault.getMarkdownFiles()) {
+		if (isAgentFilePath(file.path)) continue;
+		const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
+		if (!frontmatter) continue;
+		for (const key of Object.keys(frontmatter)) {
+			// `position` is Obsidian's internal frontmatter range marker, not a user property.
+			if (key === "position") continue;
+			keys.add(key);
+		}
+	}
+	return [...keys].sort();
+});
+
 function ensureGroup(filter: ViewFilter): ViewFilter {
 	if (filter.type === "all" || filter.type === "any" || filter.type === "none") {
 		return filter;
@@ -68,7 +84,24 @@ const initialParsed = parseSpaceMembershipFilter(data.privacyFilter);
 let privacyFilter = $state<ViewFilter>(ensureGroup(data.privacyFilter ?? createEmptySpaceFilter()));
 let showFilters = $state(initialParsed.draft.autoIncludeRules.length > 0);
 
-const privacyMode = $derived.by(() => data.privacyMode);
+// Working copy — edits only touch this local state. `data.setPrivacyFilter` /
+// `data.setPrivacyMode` are called once, from `saveChanges`, so a half-typed
+// condition (e.g. a folder field mid-edit) is never briefly live for tool calls,
+// and closing the modal without saving discards the in-progress edit entirely.
+let privacyMode = $state<PrivacyMode>(data.privacyMode);
+
+// `dataStore` already follows vault renames for the *persisted* filter (see its
+// constructor), but that rewrite lands underneath this modal's local draft. Without
+// this, a rename while the modal is open would be invisible here, and clicking Save
+// would overwrite the store's just-rewritten filter with this stale draft — silently
+// re-introducing the exact staleness the store-level fix closes. Mirror the same
+// rewrite onto the draft so Save can't regress it.
+$effect(() => {
+	const ref = app.vault.on("rename", (file, oldPath) => {
+		privacyFilter = rewriteViewFilterForRename(privacyFilter, oldPath, file.path);
+	});
+	return () => app.vault.offref(ref);
+});
 const parsedMembership = $derived.by(() => parseSpaceMembershipFilter(privacyFilter));
 const privacyUniverse = $derived.by(
 	() =>
@@ -119,13 +152,18 @@ const excludedEntries = $derived.by(() =>
 	})),
 );
 
-function savePrivacyFilter(nextFilter: ViewFilter) {
+function updatePrivacyFilter(nextFilter: ViewFilter) {
 	privacyFilter = ensureGroup(nextFilter);
-	data.setPrivacyFilter(nextFilter);
 }
 
-function setPrivacyMode(mode: PrivacyMode) {
-	data.setPrivacyMode(mode);
+function updatePrivacyMode(mode: PrivacyMode) {
+	privacyMode = mode;
+}
+
+function saveChanges() {
+	data.setPrivacyFilter(privacyFilter);
+	data.setPrivacyMode(privacyMode);
+	modal.close();
 }
 
 function updateDraft(mutator: (draft: ReturnType<typeof cloneSpaceMembershipDraft>) => void) {
@@ -133,7 +171,7 @@ function updateDraft(mutator: (draft: ReturnType<typeof cloneSpaceMembershipDraf
 	const draft = cloneSpaceMembershipDraft(currentParsedMembership.draft);
 	mutator(draft);
 	showFilters = showFilters || draft.autoIncludeRules.length > 0;
-	savePrivacyFilter(compileSpaceMembershipDraft(draft));
+	updatePrivacyFilter(compileSpaceMembershipDraft(draft));
 }
 
 function getParentPath(path: string): string {
@@ -166,7 +204,7 @@ function handleRulesFilterChange(nextFilter: ViewFilter) {
 	const simpleRules = extractSpaceMembershipRulesFilter(nextFilter);
 	if (!simpleRules) {
 		showFilters = true;
-		savePrivacyFilter(cloneViewFilter(nextFilter));
+		updatePrivacyFilter(cloneViewFilter(nextFilter));
 		return;
 	}
 
@@ -222,6 +260,15 @@ const introBody = $derived.by(() =>
 		? "Untrusted providers can only access the files listed below. Everything else stays private unless the provider is marked as trusted."
 		: "Untrusted providers can access vault files by default, except for the files listed below as private. Trusted providers always bypass this restriction.",
 );
+// This protects file *content*. File and folder names/paths in the vault are not
+// hidden from untrusted providers — they can appear in search results, directory
+// listings, and elsewhere regardless of a file's privacy status. Renaming/moving
+// files and folders is safe: rules that reference a path (folder, or a wikilink
+// inside a property value) follow the rename automatically, so this list won't
+// drift out of date.
+const pathVisibilityNote =
+	"This controls file content, not file or folder names — those can still appear to any provider. " +
+	"Rules here follow renames automatically, so you can freely rename or move files without breaking this list.";
 const sectionTitle = $derived.by(() =>
 	privacyMode === "private-by-default" ? "Files exposed to untrusted providers" : "Private files",
 );
@@ -269,6 +316,7 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
             ? ""
             : "s"}. {privateFileCount} file{privateFileCount === 1 ? "" : "s"} remain private.
         </p>
+        <p class="privacy-mode-note">{pathVisibilityNote}</p>
       </div>
 
       <div class="privacy-mode-toggle" role="tablist" aria-label="Privacy mode">
@@ -277,7 +325,7 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
           class="privacy-mode-button"
           class:privacy-mode-button--active={privacyMode === "private-by-default"}
           aria-pressed={privacyMode === "private-by-default"}
-          onclick={() => setPrivacyMode("private-by-default")}
+          onclick={() => updatePrivacyMode("private-by-default")}
         >
           Private by default
         </button>
@@ -286,7 +334,7 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
           class="privacy-mode-button"
           class:privacy-mode-button--active={privacyMode === "public-by-default"}
           aria-pressed={privacyMode === "public-by-default"}
-          onclick={() => setPrivacyMode("public-by-default")}
+          onclick={() => updatePrivacyMode("public-by-default")}
         >
           Public by default
         </button>
@@ -319,6 +367,7 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
   		: buildSpaceMembershipRulesEditorFilter(parsedMembership.draft.autoIncludeRules)}
       {availableFolders}
       {availableTags}
+      {availableProperties}
       onFilterChange={handleRulesFilterChange}
       {excludedEntries}
       {excludedTitle}
@@ -328,7 +377,7 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
   </div>
 
   <div class="modal-button-container">
-    <Button buttonText="Done" onClick={() => modal.close()} />
+    <Button buttonText="Save" cta onClick={saveChanges} />
   </div>
 </div>
 
@@ -370,6 +419,11 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
 
   .privacy-mode-copy p {
     margin: 0;
+  }
+
+  .privacy-mode-note {
+    color: var(--text-muted);
+    font-size: var(--font-smaller);
   }
 
   .privacy-mode-title {

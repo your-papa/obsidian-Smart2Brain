@@ -56,11 +56,16 @@ function createMockPlugin() {
 				getAbstractFileByPath: vi.fn(),
 				getFolderByPath: vi.fn().mockReturnValue(null),
 				createFolder: vi.fn().mockResolvedValue(undefined),
+				// `PluginDataStore` subscribes to vault renames (to keep the privacy
+				// filter from going stale) directly in its constructor, so every store
+				// under test needs this even when the test has nothing to do with renames.
+				on: vi.fn().mockReturnValue({}),
 			},
 			appId: "test-vault-id",
 		},
 		manifest: { id: "smart-second-brain", dir: "smart-second-brain" },
 		saveData: vi.fn().mockResolvedValue(undefined),
+		registerEvent: vi.fn(),
 	};
 }
 

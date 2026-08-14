@@ -52,6 +52,7 @@ interface Props {
 	filterBuilderFilter?: ViewFilter | null;
 	availableFolders?: string[];
 	availableTags?: string[];
+	availableProperties?: string[];
 	onFilterChange?: ((nextFilter: ViewFilter) => void) | undefined;
 	excludedEntries?: FileSetListEntry[];
 	excludedTitle?: string;
@@ -88,6 +89,7 @@ let {
 	filterBuilderFilter = null,
 	availableFolders = [],
 	availableTags = [],
+	availableProperties = [],
 	onFilterChange,
 	excludedEntries = [],
 	excludedTitle = "Excluded files",
@@ -166,6 +168,7 @@ function handleAddButtonClick() {
         onchange={onFilterChange}
         {availableFolders}
         {availableTags}
+        {availableProperties}
       />
     </div>
   {/if}
@@ -378,7 +381,9 @@ function handleAddButtonClick() {
     overflow: auto;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    /* Rows are flat with a hover highlight, so they sit close rather than
+       being separated like cards. */
+    gap: 1px;
   }
 
   .file-set-editor-empty {
