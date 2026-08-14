@@ -68,7 +68,7 @@ export function runWithAiTransportContext<T>(context: AiTransportContext, fn: ()
  * scope; a plain run() around the generator body would lose the context on
  * every yield. Binding each pull instead keeps the context active precisely
  * when the underlying LangChain stream resumes (and issues its fetch, which
- * reads the context via getCurrentMode) — isolated per run even under
+ * reads the context via getCurrentMode), isolated per run even under
  * concurrent streams. See src/lib/aiTransport ALS notes.
  */
 export function bindAsyncIterableToTransportContext<T>(
@@ -120,18 +120,10 @@ async function getElectronNetFetch(): Promise<typeof fetch | null> {
 				net?: { fetch?: typeof fetch };
 				remote?: { net?: { fetch?: typeof fetch } };
 			};
-
-			const remoteNet = electron.remote?.net;
-			const remoteFetch = remoteNet?.fetch;
-			if (typeof remoteFetch === "function") {
-				Logger.debug("aiTransport.electron_fetch_resolved", { source: "electron.remote.net.fetch" });
-				return remoteFetch.bind(remoteNet);
-			}
-
-			const electronFetch = electron.net?.fetch;
-			if (typeof electronFetch === "function") {
-				Logger.debug("aiTransport.electron_fetch_resolved", { source: "electron.net.fetch" });
-				return electronFetch.bind(electron.net);
+			const electronNet = electron.remote?.net ?? electron.net;
+			if (typeof electronNet?.fetch === "function") {
+				Logger.debug("aiTransport.electron_fetch_resolved");
+				return electronNet.fetch.bind(electronNet);
 			}
 		} catch {
 			// Try the next resolution path.
@@ -143,26 +135,9 @@ async function getElectronNetFetch(): Promise<typeof fetch | null> {
 			net?: { fetch?: typeof fetch };
 			remote?: { net?: { fetch?: typeof fetch } };
 		};
-
-		const remoteNet = electron.remote?.net;
-		const remoteFetch = remoteNet?.fetch;
-		if (typeof remoteFetch === "function") {
-			Logger.debug("aiTransport.electron_fetch_resolved", {
-				source: "imported electron.remote.net.fetch",
-			});
-			return remoteFetch.bind(remoteNet);
-		}
-
-		const electronFetch = electron.net?.fetch;
-		if (typeof electronFetch === "function") {
-			Logger.debug("aiTransport.electron_fetch_resolved", { source: "imported electron.net.fetch" });
-			return electronFetch.bind(electron.net);
-		}
-
-		Logger.debug("aiTransport.electron_fetch_unavailable");
-		return null;
+		const electronNet = electron.remote?.net ?? electron.net;
+		return typeof electronNet?.fetch === "function" ? electronNet.fetch.bind(electronNet) : null;
 	} catch {
-		Logger.debug("aiTransport.electron_fetch_unavailable");
 		return null;
 	}
 }
@@ -172,76 +147,26 @@ function cloneHeaders(headers: HeadersInit | undefined): Headers {
 }
 
 function toHeaderRecord(headers: HeadersInit | undefined): Record<string, string> {
-	const result: Record<string, string> = {};
-	new Headers(headers).forEach((value, key) => {
-		result[key] = value;
-	});
-	return result;
+	return Object.fromEntries(new Headers(headers).entries());
 }
 
-function normalizeResponseHeaders(headers: unknown): Headers {
-	if (headers instanceof Headers) {
-		return headers;
-	}
+/** Remove renderer-owned objects before RequestInit crosses Electron's remote bridge. */
+export function normalizeElectronNetRequestInit(init: RequestInit): RequestInit {
+	if (init.signal == null) return init;
 
-	try {
-		return new Headers(headers as HeadersInit);
-	} catch {
-		const normalized = new Headers();
-
-		if (headers && typeof headers === "object") {
-			const maybeIterable = headers as {
-				forEach?: (callback: (value: string, key: string) => void) => void;
-				raw?: () => Record<string, string | string[]>;
-				toJSON?: () => Record<string, string>;
-			};
-
-			if (typeof maybeIterable.forEach === "function") {
-				maybeIterable.forEach((value, key) => normalized.append(key, value));
-				return normalized;
-			}
-
-			if (typeof maybeIterable.raw === "function") {
-				const raw = maybeIterable.raw();
-				for (const [key, value] of Object.entries(raw)) {
-					if (Array.isArray(value)) {
-						for (const entry of value) normalized.append(key, entry);
-					} else {
-						normalized.append(key, value);
-					}
-				}
-				return normalized;
-			}
-
-			if (typeof maybeIterable.toJSON === "function") {
-				const json = maybeIterable.toJSON();
-				for (const [key, value] of Object.entries(json)) {
-					normalized.append(key, value);
-				}
-				return normalized;
-			}
-
-			for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
-				if (typeof value === "string") {
-					normalized.append(key, value);
-				}
-			}
-		}
-
-		return normalized;
-	}
+	const { signal: _rendererSignal, ...electronInit } = init;
+	return electronInit;
 }
 
 function normalizeFetchLikeResponse(response: Response): Response {
 	try {
 		Object.defineProperty(response, "headers", {
-			value: normalizeResponseHeaders((response as Response & { headers: unknown }).headers),
+			value: new Headers(response.headers as unknown as HeadersInit),
 			configurable: true,
 		});
 	} catch {
-		// If the runtime makes headers non-configurable, fall back to the original response.
+		// Keep the original headers if this runtime already exposes compatible ones.
 	}
-
 	return response;
 }
 
@@ -465,25 +390,28 @@ function isTransportFailure(error: unknown): boolean {
 
 async function performPrimaryFetch(normalized: NormalizedRequest): Promise<Response> {
 	const electronFetch = await getElectronNetFetch();
-	const primaryFetch = electronFetch ?? globalThis.fetch.bind(globalThis);
+	const rendererSignal = normalized.init.signal;
+	rendererSignal?.throwIfAborted();
 	const parsedBody = parseRequestBody(normalized.init.body);
 	const normalizedBody =
 		parsedBody && normalized.url.includes("/chat/completions")
 			? normalizeChatCompletionMessages(parsedBody)
 			: undefined;
 	const requestBody = normalizedBody ? stringifyRequestBody(normalizedBody) : normalized.init.body;
-	const requestInit =
-		electronFetch && normalized.init.headers
-			? {
+	const response = await (electronFetch ?? globalThis.fetch.bind(globalThis))(
+		normalized.url,
+		electronFetch
+			? normalizeElectronNetRequestInit({
 					...normalized.init,
 					body: requestBody,
 					headers: toHeaderRecord(normalized.init.headers),
-				}
-			: {
-					...normalized.init,
-					body: requestBody,
-				};
-	const response = await primaryFetch(normalized.url, requestInit);
+				})
+			: { ...normalized.init, body: requestBody },
+	);
+	if (electronFetch && rendererSignal?.aborted) {
+		await response.body?.cancel().catch(() => undefined);
+		rendererSignal.throwIfAborted();
+	}
 	if (!response.ok && normalized.url.includes("/chat/completions")) {
 		let responseText: string | undefined;
 		try {
@@ -560,10 +488,10 @@ export function createAiProviderFetch(providerId: string): typeof fetch {
 }
 
 /**
- * Fetch implementation that always routes through Obsidian's buffered `requestUrl`
- * (never Electron's `net.fetch`). Subagent models are invoked non-streaming (via the
+ * Fetch implementation that always routes through Obsidian's buffered `requestUrl`.
+ * Subagent models are invoked non-streaming (via the
  * deepagents `task` tool's `.invoke()`), and the LiteLLM/OpenAI-compatible endpoints
- * used here return an empty body for a non-streaming request served over `net.fetch` —
+ * used here can return an empty body for a non-streaming request served over renderer fetch,
  * which surfaces as "Cannot read properties of undefined (reading 'message')" inside
  * `BaseChatModel.invoke`. Routing through `requestUrl` returns a usable buffered body.
  * Pair with `disableStreaming: true` on the model (see chatProviders) so LangChain

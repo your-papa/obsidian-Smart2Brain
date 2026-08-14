@@ -189,6 +189,8 @@ export const setIcon = vi.fn((node: HTMLElement, iconId: string) => {
 	node.setAttribute("data-icon", iconId);
 });
 
+export const requestUrl = vi.fn();
+
 export function getAllTags(cache: CachedMetadata | null): string[] {
 	if (!cache) return [];
 	const tags: string[] = [];

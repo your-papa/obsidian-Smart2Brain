@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildToolOutputRenderModel } from "../../src/components/chat/toolOutputRenderModel";
+import {
+	buildToolOutputRenderModel,
+	MAX_RENDERED_TOOL_OUTPUT_CHARS,
+} from "../../src/components/chat/toolOutputRenderModel";
 
 describe("buildToolOutputRenderModel", () => {
 	it("renders search_notes payloads as a specialized model", () => {
@@ -91,6 +94,18 @@ describe("buildToolOutputRenderModel", () => {
 		expect(model.payload.target).toBe("Spec.pdf");
 		expect(model.payload.analysisLabel).toBe("Analyzed via vision model");
 		expect(model.payload.label).toBe("page(s) 2 of 4");
+	});
+
+	it("caps large read_content previews before markdown rendering", () => {
+		const content = "x".repeat(MAX_RENDERED_TOOL_OUTPUT_CHARS * 8);
+		const model = buildToolOutputRenderModel("read_content", `Content of "Large.md":\n\n${content}`);
+
+		expect(model.kind).toBe("read_content");
+		if (model.kind !== "read_content") return;
+		expect(model.payload.truncated).toBe(true);
+		expect(model.payload.content.length).toBeLessThan(MAX_RENDERED_TOOL_OUTPUT_CHARS + 100);
+		expect(model.payload.content).toContain("[UI preview truncated:");
+		expect(model.rawText.length).toBeLessThan(MAX_RENDERED_TOOL_OUTPUT_CHARS + 100);
 	});
 
 	it("renders execute_javascript outputs as a specialized model", () => {

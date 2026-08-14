@@ -14,6 +14,7 @@ vi.mock("langchain", () => ({
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { Agent, sanitizeRunnableName } from "../../src/agent/Agent";
+import { AiTransportDowngradeRequiredError, getCurrentAiTransportModeForTest } from "../../src/lib/aiTransport";
 
 function makeRegistry() {
 	return {
@@ -238,5 +239,48 @@ describe("Agent streamTokens subagent-content suppression", () => {
 		]);
 
 		expect(tokens).toEqual(["Hello ", "world"]);
+	});
+});
+
+describe("Agent stream transport downgrade", () => {
+	it("uses buffered fallback when stream initialization fails", async () => {
+		const agent = new Agent({ registry: makeRegistry() as never });
+		const streamError = new AiTransportDowngradeRequiredError(
+			"openai-compatible",
+			"http://localhost:10100/v1/chat/completions",
+			new TypeError("Failed to fetch"),
+		);
+		let fallbackMode: string | undefined;
+		const runnable = {
+			stream: vi.fn().mockRejectedValue(streamError),
+			invoke: vi.fn().mockImplementation(async () => {
+				fallbackMode = getCurrentAiTransportModeForTest();
+				return {
+					messages: [
+						{ id: "final", content: "buffered response", getType: () => "ai", text: "buffered response" },
+					],
+				};
+			}),
+		};
+
+		const chunks = [];
+		for await (const chunk of agent.streamTokens({
+			query: "hi",
+			threadId: "t1",
+			resolved: {
+				runnable,
+				selectedModel: { provider: "openai-compatible", name: "local", instance: {} },
+				supportsVision: false,
+				currentProvider: "openai-compatible",
+			},
+		} as never)) {
+			chunks.push(chunk);
+		}
+
+		expect(runnable.stream).toHaveBeenCalledOnce();
+		expect(runnable.invoke).toHaveBeenCalledOnce();
+		expect(fallbackMode).toBe("buffered");
+		expect(chunks).toHaveLength(1);
+		expect(chunks[0]).toMatchObject({ type: "result" });
 	});
 });
