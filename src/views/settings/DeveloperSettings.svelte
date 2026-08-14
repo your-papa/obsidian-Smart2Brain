@@ -9,6 +9,7 @@ import Toggle from "../../components/ui/Toggle.svelte";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
+import { VIEW_TYPE_ONBOARDING } from "../onboarding/OnboardingView";
 
 const pluginData = getData();
 const plugin = getPlugin();
@@ -25,11 +26,26 @@ $effect(() => {
 
 function replayOnboardingIntro() {
 	pluginData.onboardingSplashSeen = false;
-	new Notice("Onboarding intro reset — it will play again next time the Welcome view opens.");
-}
+	pluginData.onboardingComplete = false;
 
-function openOnboardingView() {
+	// activateOnboardingView reveals an existing Welcome leaf rather than remounting
+	// it, so if one is already open (likely, in a dev vault) the flag reset above
+	// would silently not replay anything — playIntro is only computed once, at the
+	// Svelte component's construction. Detach any existing leaf first to force a
+	// fresh mount; this is specific to this dev action, not activateOnboardingView
+	// itself, since the real "reveal what's already open" behavior is correct for
+	// the startup auto-open.
+	for (const leaf of plugin.app.workspace.getLeavesOfType(VIEW_TYPE_ONBOARDING)) {
+		leaf.detach();
+	}
+
+	// Startup auto-open also requires zero configured providers (see main.ts), which
+	// a dev/test vault rarely has — so resetting the flags alone would silently do
+	// nothing visible here. Open it directly instead of waiting on that gate; this
+	// also closes Settings first (activateOnboardingView's own behavior), matching
+	// what a real first run looks like when the plugin is enabled from Settings.
 	void plugin.activateOnboardingView();
+	new Notice("Onboarding reset and reopened — the intro will replay from the start.");
 }
 
 function restoreDismissedRecommendations() {
@@ -137,12 +153,9 @@ async function handleCheckLangSmithConnection() {
 <SettingGroup heading="Onboarding">
   <SettingItem
     name="Replay onboarding intro"
-    desc="Reset the splash animation flag so the Welcome view plays its intro again the next time it opens."
+    desc="Reset the splash animation and completion flags — the Welcome view plays its intro again, and auto-opens on startup as if this were a first run (until a provider is configured)."
   >
-    <div class="flex gap-2 flex-wrap">
-      <Button buttonText="Reset intro" iconId="rotate-ccw" onClick={replayOnboardingIntro} />
-      <Button buttonText="Open Welcome view" iconId="zap" onClick={openOnboardingView} />
-    </div>
+    <Button buttonText="Reset intro" iconId="rotate-ccw" onClick={replayOnboardingIntro} />
   </SettingItem>
 </SettingGroup>
 
