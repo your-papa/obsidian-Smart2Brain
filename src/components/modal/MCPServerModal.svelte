@@ -14,6 +14,7 @@ import Text from "../ui/Text.svelte";
 import Toggle from "../ui/Toggle.svelte";
 import { confirmDelete } from "./ConfirmModal";
 import ModalField from "../settings/ModalField.svelte";
+import SettingContainer from "../settings/SettingContainer.svelte";
 import SettingGroup from "../settings/SettingGroup.svelte";
 import TextArea from "../ui/TextArea.svelte";
 import type { MCPServerAccessors, MCPServerModal, MCPServerModalCallback } from "./MCPServerModal";
@@ -328,29 +329,35 @@ async function handleTestConnection() {
 </script>
 
 <div class="mcp-modal-content">
-  <ModalField label="Name" desc="A name for this MCP server" for="mcp-server-name">
-    <Text
-      id="mcp-server-name"
-      inputType="text"
-      value={name}
-      placeholder="My MCP Server"
-      onblur={(v) => (name = v)}
-    />
-  </ModalField>
+  <!-- Short controls use the native horizontal settings row (name/desc left,
+       control right). The wide inputs below stay on ModalField's stacked
+       variant, which exists because a URL or a KEY=VALUE textarea needs the
+       full modal width rather than the right-hand column. -->
+  <SettingGroup heading="Server">
+    <SettingContainer name="Name" desc="A name for this MCP server">
+      <Text
+        id="mcp-server-name"
+        inputType="text"
+        value={name}
+        placeholder="My MCP Server"
+        onblur={(v) => (name = v)}
+      />
+    </SettingContainer>
 
-  <ModalField label="Enabled" desc="Whether this server is active and provides tools" inline>
-    <Toggle checked={enabled} onchange={(checked) => (enabled = checked)} />
-  </ModalField>
+    <SettingContainer name="Enabled" desc="Whether this server is active and provides tools">
+      <Toggle checked={enabled} onchange={(checked) => (enabled = checked)} />
+    </SettingContainer>
 
-  <ModalField label="Transport Type" desc="How to connect to the MCP server" for="mcp-server-transport">
-    <Dropdown
-      id="mcp-server-transport"
-      type="options"
-      dropdown={transportOptions}
-      selected={transport}
-      onchange={(v) => (transport = v)}
-    />
-  </ModalField>
+    <SettingContainer name="Transport type" desc="How to connect to the MCP server">
+      <Dropdown
+        id="mcp-server-transport"
+        type="options"
+        dropdown={transportOptions}
+        selected={transport}
+        onchange={(v) => (transport = v)}
+      />
+    </SettingContainer>
+  </SettingGroup>
 
   {#if transport === "stdio"}
     <SettingGroup heading="Command Configuration">
@@ -459,8 +466,10 @@ async function handleTestConnection() {
     </div>
   {/if}
 
-  <!-- Actions -->
-  <div class="mcp-actions">
+  <!-- Actions. `modal-button-container` is Obsidian's own footer class, so these
+       sit where a core modal's buttons do. Delete/Test are pushed to the left
+       edge since they are not the confirm action. -->
+  <div class="modal-button-container mcp-actions">
     {#if isEditing}
       <Button buttonText="Delete" styles="mod-warning" onClick={handleDelete} />
     {/if}
@@ -502,14 +511,14 @@ async function handleTestConnection() {
     box-shadow: 0 0 0 1px var(--interactive-accent);
   }
 
+  /* `modal-button-container` supplies the border, padding and spacing; this only
+     adds what it doesn't: a flex row so the `.flex-1` spacer can push Cancel/Save
+     right while Delete/Test stay left, and wrapping for narrow panes. */
   .mcp-actions {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
-    border-top: 1px solid var(--background-modifier-border);
-    padding-top: 16px;
-    margin-top: 8px;
   }
 
   /* Test Results Styles */
