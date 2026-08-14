@@ -54,6 +54,13 @@ interface Props {
 	availableTags?: string[];
 	availableProperties?: string[];
 	onFilterChange?: ((nextFilter: ViewFilter) => void) | undefined;
+	/**
+	 * Cap on how many included rows are mounted at once. Rows are not virtualized,
+	 * so a caller whose list can run to whole-vault size passes a cap to keep the
+	 * panel responsive. The cap applies AFTER the search filter, so filtering still
+	 * reaches entries beyond it. Undefined means no cap.
+	 */
+	maxVisibleEntries?: number;
 	excludedEntries?: FileSetListEntry[];
 	excludedTitle?: string;
 	resolveIncludedActions?: ((entry: FileSetListEntry) => FileSetAction[]) | undefined;
@@ -91,6 +98,7 @@ let {
 	availableTags = [],
 	availableProperties = [],
 	onFilterChange,
+	maxVisibleEntries,
 	excludedEntries = [],
 	excludedTitle = "Excluded files",
 	resolveIncludedActions,
@@ -98,11 +106,16 @@ let {
 }: Props = $props();
 
 let includedQuery = $state("");
-const filteredIncludedEntries = $derived.by(() => {
+const matchingIncludedEntries = $derived.by(() => {
 	const query = includedQuery.trim().toLowerCase();
 	if (!query) return includedEntries;
 	return includedEntries.filter((entry) => (entry.searchable ?? entry.path).toLowerCase().includes(query));
 });
+// Cap AFTER filtering, so a search still finds entries past the cap.
+const filteredIncludedEntries = $derived.by(() =>
+	maxVisibleEntries === undefined ? matchingIncludedEntries : matchingIncludedEntries.slice(0, maxVisibleEntries),
+);
+const hiddenIncludedCount = $derived(matchingIncludedEntries.length - filteredIncludedEntries.length);
 
 const showSearchInput = $derived.by(() => includedEntries.length > searchThreshold || includedQuery.trim().length > 0);
 const hasAddButton = $derived.by(() => Boolean(onAddFile || onAddPaths));
@@ -210,6 +223,13 @@ function handleAddButtonClick() {
             {/if}
           {/each}
         </div>
+
+        {#if hiddenIncludedCount > 0}
+          <div class="file-set-editor-truncation">
+            {hiddenIncludedCount} more file{hiddenIncludedCount === 1 ? "" : "s"} not shown — search to
+            narrow the list.
+          </div>
+        {/if}
       {/if}
     </div>
   {/if}
@@ -389,5 +409,12 @@ function handleAddButtonClick() {
   .file-set-editor-empty {
     font-size: 0.75rem;
     color: var(--text-muted);
+  }
+
+  .file-set-editor-truncation {
+    padding: 6px 2px 0;
+    font-size: 0.75rem;
+    color: var(--text-faint);
+    font-style: italic;
   }
 </style>
