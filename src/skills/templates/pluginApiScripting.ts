@@ -81,8 +81,12 @@ a string — read it, adjust, and retry with a corrected call.
   plugin can. Keep snippets small and focused.
 - **Awaited work times out.** Long-running or hanging promises are cut off; a runaway synchronous
   loop cannot be preempted, so avoid unbounded loops.
-- **Prefer existing tools when they fit.** For reading/writing notes use \`read_content\` /
-  \`manage_notes\`; reach for \`${execToolName}\` only for logic ${displayName}'s API uniquely provides.
+- **Prefer existing tools when they fit.** \`read_content\`, \`manage_notes\`, and \`search_notes\`
+  respect the user's privacy rules — they skip or redact notes marked private for the current
+  provider. \`api\` and \`app\` do not: this is unsandboxed main-thread access and a call can read
+  or write any note regardless of privacy settings. Use \`read_content\` / \`manage_notes\` /
+  \`search_notes\` for ordinary note reads and writes; reach for \`${execToolName}\` only for logic
+  ${displayName}'s API uniquely provides.
 - **Report honestly.** If introspection shows the API can't do what the user asked, say so rather
   than fabricating a method.
 

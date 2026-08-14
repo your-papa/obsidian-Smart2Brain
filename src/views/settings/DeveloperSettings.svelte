@@ -42,6 +42,16 @@ function restoreDismissedRecommendations() {
 	);
 }
 
+function restoreIntegrationPrivacyWarning() {
+	const wasSuppressed = pluginData.suppressIntegrationPrivacyWarning;
+	pluginData.suppressIntegrationPrivacyWarning = false;
+	new Notice(
+		wasSuppressed
+			? "Integration privacy warning restored — it will show again next time an integration is enabled."
+			: "Integration privacy warning was not suppressed.",
+	);
+}
+
 function getLangSmithCheckIcon(): string {
 	if (langSmithCheckState === "success") return "check-circle";
 	if (langSmithCheckState === "error") return "x-circle";
@@ -156,6 +166,17 @@ async function handleCheckLangSmithConnection() {
       buttonText="Restore"
       iconId="rotate-ccw"
       onClick={restoreDismissedRecommendations}
+    />
+  </SettingItem>
+
+  <SettingItem
+    name="Restore integration privacy warning"
+    desc="Undo 'Don't ask again' on the warning shown before enabling a plugin integration's code-exec tool (it bypasses per-provider privacy rules)."
+  >
+    <Button
+      buttonText="Restore"
+      iconId="rotate-ccw"
+      onClick={restoreIntegrationPrivacyWarning}
     />
   </SettingItem>
 </SettingGroup>

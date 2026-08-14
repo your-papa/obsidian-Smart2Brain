@@ -13,15 +13,24 @@ metadata:
 
 This skill works with tasks managed by the [TaskNotes](https://github.com/callumalpass/tasknotes) plugin. Each task is a Markdown file with YAML frontmatter stored in a configurable folder (default: `TaskNotes/Tasks/`).
 
-**Operate on tasks through the plugin's API, not by editing files.** When this skill is enabled and the integration is approved you have an `exec_tasknotes` tool that runs JavaScript against the TaskNotes `api` object (in scope as `api`) on the main thread. The API is the correct interface: it manages ids, dates, recurrence, and completion for you, and validates input. Prefer it over hand-editing frontmatter for every read, query, create, update, and complete.
+**Operate on task mutations through the plugin's API, not by hand-editing frontmatter.** When this skill is enabled and the integration is approved you have an `exec_tasknotes` tool that runs JavaScript against the TaskNotes `api` object (in scope as `api`) on the main thread. The API is the correct interface for create/update/complete: it manages ids, dates, recurrence, and completion for you, and validates input.
 
 - `api` is the TaskNotes plugin API (`apiVersion === 1`); `app` is the Obsidian app.
 - Tasks are addressed by their file `path`.
 - Init happens at layout-ready. If a call fails early, guard with `if (!api.lifecycle.isReady()) await api.lifecycle.ready()` first.
-- Not sandboxed; awaited work times out. Keep snippets read-only unless the user asked to modify data.
+- **Not sandboxed, and this includes reads.** `api` runs on the main thread with full `app`
+  access, the same as raw `app.vault` calls — `api.getTask`, `api.listTasks`, and
+  `api.query.tasks` read task file content directly and do **not** respect the user's per-provider
+  privacy rules the way `search_notes` / `read_content` / `grep_notes` do. Awaited work times out.
+  Keep snippets read-only unless the user asked to modify data.
 - If unsure of the surface at runtime, introspect: `return Object.keys(api)` or `return api.capabilities`.
 
 ## Reading & Querying
+
+**Prefer `search_notes` / `grep_notes` / `read_content` to find and read individual tasks** — they
+respect the user's privacy rules for restricted notes, `api` reads do not. Reach for
+`api.getTask` / `api.listTasks` only when you specifically need TaskNotes' parsed, typed fields
+(status/priority/recurrence resolved from frontmatter) rather than raw content:
 
 ```javascript
 // One task by path
@@ -31,7 +40,11 @@ return await api.getTask("TaskNotes/Tasks/Buy groceries.md");
 return await api.listTasks();
 ```
 
-For structured queries with predicates, sorting, grouping, and pagination use `api.query.tasks(query)`:
+For structured queries with predicates, sorting, grouping, and pagination across many tasks —
+something `search_notes`/`grep_notes` can't express — use `api.query.tasks(query)`. This is the
+one case where `api` is worth its privacy trade-off: filtering/aggregating by status, priority, or
+due date across the whole task folder in one call. Mention to the user that results may include
+tasks they've marked private if they ask, since this path doesn't filter them:
 
 ```javascript
 // Open tasks due within a week, soonest first
@@ -164,7 +177,7 @@ The `api` reads/writes these; this is for understanding a task file's shape, not
 
 ## Tips & Constraints
 
-- Prefer the `api` for all reads and mutations — it validates input and manages plugin-owned fields. Only fall back to `search_notes`/`read_content`/`manage_notes` if the `exec_tasknotes` tool is not available (integration off), and say so.
+- Prefer `search_notes`/`read_content`/`grep_notes` to find and read individual tasks — they respect the user's privacy rules; `api` reads do not. Prefer the `api` for mutations (create/update/complete) and for cross-task queries/aggregation `search_notes` can't express — it validates input and manages plugin-owned fields. If the `exec_tasknotes` tool is not available (integration off), do everything through `search_notes`/`read_content`/`manage_notes` and say so.
 - Read the user's configured statuses/priorities via `api.catalog.*` before filtering on values that may have been customized.
 - Task folder path is configurable; the `api` resolves paths for you, so you rarely need to know it.
 - Tasks vs TaskNotes: if each task is its own file with YAML frontmatter, this is the right skill; if the user's tasks are `- [ ]` checkbox lines inside notes, use the **tasks** skill instead.

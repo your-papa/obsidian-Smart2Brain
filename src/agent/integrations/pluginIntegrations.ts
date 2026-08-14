@@ -1,4 +1,6 @@
 import type { App } from "obsidian";
+import { IntegrationPrivacyWarningModal } from "../../components/modal/IntegrationPrivacyWarningModal";
+import type { PluginDataStore } from "../../stores/dataStore.svelte";
 
 /**
  * A plugin integration exposes another Obsidian community plugin's public api
@@ -90,6 +92,30 @@ export function isInternalPluginEnabled(app: App, pluginId: string): boolean {
 
 /** Config key used to persist the per-plugin exec enable state on an agent. */
 export const toExecToolId = (pluginId: string): string => `exec:${pluginId}`;
+
+/**
+ * Shows the privacy warning before enabling a plugin integration's `exec_<plugin>` tool, unless
+ * the user has suppressed it (`pluginData.suppressIntegrationPrivacyWarning`). Shared by every
+ * enable surface (AgentEditorModal's Integrations list, the chat empty-state plugin nudge) so
+ * the gate can't be skipped by adding a new one — see `createPluginApiExecTool` for why this
+ * tool needs the warning: it bypasses `shouldBlockFile` entirely.
+ *
+ * @returns true if the caller should proceed with enabling the integration.
+ */
+export async function confirmEnableIntegrationPrivacy(
+	app: App,
+	pluginData: Pick<PluginDataStore, "suppressIntegrationPrivacyWarning">,
+	displayName: string,
+): Promise<boolean> {
+	if (pluginData.suppressIntegrationPrivacyWarning) return true;
+
+	const modal = new IntegrationPrivacyWarningModal(app, displayName);
+	const { confirmed, dontAskAgain } = await modal.prompt();
+	if (dontAskAgain) {
+		pluginData.suppressIntegrationPrivacyWarning = true;
+	}
+	return confirmed;
+}
 
 /**
  * Runtime tool name bound to the agent. Must be a valid identifier-ish token for
