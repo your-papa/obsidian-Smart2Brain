@@ -122,7 +122,12 @@
 .s2b-inline-chips-container.prompt-input-container {
 	display: flex;
 	flex-wrap: nowrap;
-	align-items: flex-start;
+	/* Centre, not flex-start: mobile core sizes the input to a fixed 52px while
+	   this container is also 52px with 6px padding, so a top-aligned input spilled
+	   6px out of the bottom and the text rode low the moment a query was typed.
+	   The input is sized to its line box below; centring keeps it on the pill's
+	   axis in both the empty and typed states. */
+	align-items: center;
 	gap: 8px;
 	min-height: var(--prompt-input-height, 40px);
 	height: auto;
@@ -147,11 +152,18 @@
 	display: contents;
 }
 
+/* Centred on the container's axis rather than a fixed offset, so they track
+   whatever height it takes. `bottom: auto` and the `!important` on `top` are
+   both load-bearing: core sets its own `top` for these (computed ~25.7px, sized
+   for the taller empty-state container) and wins without them, which left the
+   clear "x" 5px above the container top and 13px below it — visibly high once
+   the container settles at 52px. */
 .s2b-inline-chips-container.prompt-input-container > .search-input-icon,
 .s2b-inline-chips-container.prompt-input-container > .search-input-clear-button,
 .s2b-inline-chips-container.prompt-input-container > .prompt-input-cta {
 	position: absolute;
-	top: 50%;
+	top: 50% !important;
+	bottom: auto !important;
 	transform: translateY(-50%);
 	z-index: 1;
 }
@@ -194,6 +206,25 @@
 	border: none !important;
 	border-radius: 0 !important;
 	box-shadow: none !important;
+
+	/* Text dropped ~6px the moment the first character was typed. Mobile core
+	   sizes BOTH `.prompt-input-container` and `.prompt-input` to a fixed 52px,
+	   and the container adds 6px padding top and bottom — so the 52px input can
+	   never fit inside the container's 40px content box. While empty the
+	   container was 65px and the overflow was invisible; once a query exists it
+	   collapses to 52px and, with the container's `align-items: flex-start`, the
+	   input spills 6px past the bottom and the text rides low. Measured
+	   on-device: empty → input 473-525 inside container 466-531; typed → input
+	   485-537 against container 479-531.
+
+	   Drop core's fixed height and the vertical padding that made it that tall,
+	   so the input collapses to its line box; the container then centres it (see
+	   the `align-items` override below). Verified on-device: 15px above and
+	   below in BOTH the empty and typed states, so nothing moves as you type. */
+	height: auto !important;
+	min-height: 0 !important;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
 }
 
 .s2b-inline-input-content.s2b-inline-input-content-has-chips .s2b-inline-input {
