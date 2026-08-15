@@ -262,12 +262,17 @@ export default class SecondBrainPlugin extends Plugin {
 	 * search, when `overrideMobileNavbarSearch` is on.
 	 *
 	 * That button has no plugin-facing hook — it invokes the `global-search:open`
-	 * command — so the interception happens on the command itself rather than on
-	 * the DOM node, which also covers every other route to core search (palette,
-	 * hotkey) and does not care how the navbar is rendered. The original callback
-	 * is captured and restored on unload, and is still called when the setting is
-	 * off, so toggling takes effect immediately without a reload and disabling
-	 * the plugin leaves core search exactly as it found it.
+	 * command — so the interception has to happen on the command. But the command
+	 * is shared: the palette, any hotkey, and our own tag-click handler in
+	 * `MarkdownRenderer` all route through it, and those must still reach CORE
+	 * search (a tag click that opened S2B search instead of the tag's results
+	 * would be a plain regression). So the wrapper redirects only while a
+	 * navbar-originated invocation is in flight, flagged by a capture-phase
+	 * pointer listener on the navbar button; every other caller falls through to
+	 * the original callback untouched.
+	 *
+	 * The flag is armed on pointerdown and disarmed on a microtask, so it spans
+	 * the synchronous command dispatch the tap triggers and nothing later.
 	 */
 	private registerMobileNavbarSearchOverride(): void {
 		if (!isMobileUI()) return;
@@ -284,18 +289,40 @@ export default class SecondBrainPlugin extends Plugin {
 			return;
 		}
 
-		searchCommand.callback = () => {
-			if (!getData().overrideMobileNavbarSearch) {
+		let navbarTapInFlight = false;
+		this.registerDomEvent(
+			document,
+			"pointerdown",
+			(evt) => {
+				const target = evt.target;
+				if (!(target instanceof Element)) return;
+				// The navbar's search action; `.mobile-navbar-action` is the button
+				// wrapper core renders. Matching on the ancestor keeps this working
+				// whether the tap lands on the button or its inner icon/svg.
+				if (!target.closest(".mobile-navbar .mobile-navbar-action, .mobile-navbar [data-icon='search']")) {
+					return;
+				}
+				navbarTapInFlight = true;
+				queueMicrotask(() => {
+					navbarTapInFlight = false;
+				});
+			},
+			{ capture: true },
+		);
+
+		const ourCallback = () => {
+			if (!navbarTapInFlight || !getData().overrideMobileNavbarSearch) {
 				return originalCallback.call(searchCommand);
 			}
 			new SearchModal(this.app).open();
 		};
+		searchCommand.callback = ourCallback;
 
 		this.register(() => {
-			// Only hand back the original if nothing else has since replaced our
-			// wrapper — clobbering another plugin's hook would be worse than
-			// leaving ours in place.
-			if (searchCommand.callback !== originalCallback) {
+			// Restore only if OUR wrapper is still the installed callback. If someone
+			// else hooked the command after us, theirs is live and writing the
+			// original back would silently uninstall it.
+			if (searchCommand.callback === ourCallback) {
 				searchCommand.callback = originalCallback;
 			}
 		});

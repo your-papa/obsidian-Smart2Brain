@@ -266,7 +266,7 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
     {#if isMobileUI()}
       <SettingItem
         name="Use S2B search in the navbar"
-        desc="Make the search button in the bottom navbar open Smart Second Brain search instead of Obsidian's. Obsidian's search stays available from the command palette."
+        desc="Make the search button in the bottom navbar open Smart Second Brain search instead of Obsidian's. Only that button changes — Obsidian's search still opens from the command palette and its hotkey."
       >
         <Toggle
           checked={pluginData.overrideMobileNavbarSearch}
