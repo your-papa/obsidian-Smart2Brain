@@ -147,6 +147,8 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private currentQuery = "";
 	private isSearching = false;
 	private isClosed = false;
+	/** Guards the once-per-render-pass scheduling of the mobile results footer. */
+	private resultsFooterScheduled = false;
 	private semanticEnabled = false;
 	/** When Tab arms a one-shot semantic search, this holds the query it was
 	 * armed for. Semantic stays on (results visible) until the query text
@@ -179,8 +181,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private selectionSummaryEl: HTMLElement | null = null;
 	/** Mobile-only tap bar: exposes semantic-toggle + ask-agent, which are
 	   otherwise bound only to Tab / Alt+Enter (unreachable without a keyboard). */
-	private mobileActionsEl: HTMLElement | null = null;
-	private mobileSemanticButtonEl: HTMLElement | null = null;
 	private pendingPostOpenFrameId: number | null = null;
 	private pendingFocusFrameId: number | null = null;
 	private pendingFocusTimeoutIds: ReturnType<typeof globalThis.setTimeout>[] = [];
@@ -439,7 +439,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		// so it reverts to lexical once the user changes what they're searching.
 		this.semanticOneShotQuery = this.semanticEnabled ? this.currentQuery : null;
 		this.updateInstructions();
-		this.refreshMobileSemanticButton();
 		this.syncGlowAnimation();
 
 		if (this.currentQuery.trim() || this.activeFilters.length > 0) {
@@ -1058,9 +1057,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.inlineChipsEl = null;
 		this.inlineInputContentEl?.remove();
 		this.inlineInputContentEl = null;
-		this.mobileActionsEl?.remove();
-		this.mobileActionsEl = null;
-		this.mobileSemanticButtonEl = null;
 		this.cachedAutocompleteTags = [];
 		this.cachedTagChildCount.clear();
 		this.cachedAutocompleteFolders = [];
@@ -1098,7 +1094,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 			this.buildAutocompleteCaches();
 			this.setupInlineChips();
-			this.setupMobileActions();
 			this.createSelectionSummary();
 			this.updateSelectionSummary();
 			if (this.activeFilters.length > 0) {
@@ -1210,81 +1205,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	private getInputEl(): HTMLInputElement | null {
 		return this.modalEl.querySelector<HTMLInputElement>(".prompt-input");
-	}
-
-	/**
-	 * Mobile-only tap bar. Semantic-search toggle and "Ask the agent" are
-	 * otherwise reachable only via Tab / Alt+Enter, which a phone without a
-	 * hardware keyboard can't produce. Insert visible buttons right after the
-	 * input container so both are one tap away. Desktop keeps the compact
-	 * keyboard-hint footer unchanged.
-	 */
-	private setupMobileActions(): void {
-		if (!isMobileUI()) return;
-		const inputContainer = this.modalEl.querySelector<HTMLElement>(".prompt-input-container");
-		if (!inputContainer) return;
-
-		const bar = document.createElement("div");
-		bar.className = "s2b-search-mobile-actions";
-
-		// Semantic-search toggle (Tab on desktop). Hidden in picker mode where
-		// the agent/semantic flow doesn't apply.
-		if (!this.isPickerMode()) {
-			const semanticBtn = document.createElement("button");
-			semanticBtn.className = "s2b-pill s2b-pill--interactive";
-			semanticBtn.type = "button";
-			this.mobileSemanticButtonEl = semanticBtn;
-			semanticBtn.addEventListener("click", (evt) => {
-				evt.preventDefault();
-				this.toggleSemanticMode();
-				this.refreshMobileSemanticButton();
-			});
-			bar.appendChild(semanticBtn);
-
-			const askBtn = document.createElement("button");
-			askBtn.className = "s2b-pill s2b-pill--interactive s2b-search-mobile-ask";
-			askBtn.type = "button";
-			const askIcon = document.createElement("span");
-			askIcon.className = "s2b-search-mobile-icon";
-			setIcon(askIcon, "bot");
-			askBtn.appendChild(askIcon);
-			askBtn.appendChild(document.createTextNode("Ask agent"));
-			askBtn.addEventListener("click", (evt) => {
-				evt.preventDefault();
-				void this.askAgentWithQuery();
-			});
-			bar.appendChild(askBtn);
-		}
-
-		if (!bar.hasChildNodes()) return;
-		inputContainer.insertAdjacentElement("afterend", bar);
-		this.mobileActionsEl = bar;
-		this.refreshMobileSemanticButton();
-	}
-
-	/**
-	 * Sync the mobile semantic toggle's label/active state with `semanticEnabled`.
-	 *
-	 * The label is the constant "Semantic" and the pressed state carries on/off,
-	 * rather than the text spelling out "Semantic: on" / "Semantic: off". Two
-	 * reasons: a control whose text mutates between two similar strings has to be
-	 * re-read to be understood (and "Semantic: off" reads at a glance as if it
-	 * would turn something off), and the changing width made the row reflow on
-	 * every tap. `aria-pressed` gives assistive tech the state that the visual
-	 * fill conveys, so nothing is lost by dropping it from the text.
-	 */
-	private refreshMobileSemanticButton(): void {
-		const btn = this.mobileSemanticButtonEl;
-		if (!btn) return;
-		btn.empty();
-		const icon = document.createElement("span");
-		icon.className = "s2b-search-mobile-icon";
-		setIcon(icon, "sparkles");
-		btn.appendChild(icon);
-		btn.appendChild(document.createTextNode("Semantic"));
-		btn.toggleClass("s2b-pill--active", this.semanticEnabled);
-		btn.setAttribute("aria-pressed", String(this.semanticEnabled));
-		btn.setAttribute("aria-label", this.semanticEnabled ? "Semantic search on" : "Semantic search off");
 	}
 
 	private scheduleInputFocus(): void {
@@ -2019,6 +1939,11 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return;
 		}
 
+		// `SuggestModal` renders row-by-row with no "list finished" hook, so the
+		// footer is scheduled once per render pass and appended on a microtask,
+		// after the last row has landed.
+		this.scheduleResultsFooter();
+
 		const result = item;
 		el.dataset.searchResultPath = result.path;
 		el.toggleClass("s2b-search-result-item-selected", this.selectedResultsByPath.has(result.path));
@@ -2204,16 +2129,93 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	}
 
 	/**
+	 * Append the semantic offer beneath a populated result list, once per render.
+	 *
+	 * Autocomplete passes (typing `#tag` / `folder/`) render their own rows and
+	 * must not carry it — the user is mid-token there, not judging results.
+	 */
+	private scheduleResultsFooter(): void {
+		if (!isMobileUI() || this.resultsFooterScheduled) return;
+		this.resultsFooterScheduled = true;
+		queueMicrotask(() => {
+			this.resultsFooterScheduled = false;
+			if (this.isClosed) return;
+			const container = this.resultContainerEl;
+			if (!container) return;
+			// Already appended for this pass, or nothing to append under.
+			if (container.querySelector(".s2b-search-followup")) return;
+			if (!container.querySelector(".suggestion-item")) return;
+			if (container.querySelector(".s2b-search-autocomplete")) return;
+			this.appendSemanticHint();
+		});
+	}
+
+	/**
 	 * Append a hint encouraging the user to enable semantic search.
 	 * Only shown when semantic is off and an embedding index is configured.
+	 *
+	 * On desktop this stays a keyboard hint. On mobile it is a real tappable
+	 * control, and it is the ONLY way in — semantic used to be a toggle in a strip
+	 * above the input, which asked the user to predict they'd need it before
+	 * seeing a single result. Offering it beneath the results puts it where the
+	 * doubt actually forms ("these aren't what I meant"), and matches what the
+	 * feature already does: `semanticOneShotQuery` clears the mode as soon as the
+	 * query text changes, so it was never the sticky mode a toggle implied.
 	 */
 	private appendSemanticHint(): void {
 		if (this.semanticEnabled) return;
 		if (!this.hasSearchEmbeddingIndex()) return;
 
-		const tabKey = Platform.isMacOS ? "⇥" : "Tab";
-		const hint = this.resultContainerEl.createDiv({ cls: "s2b-search-semantic-hint" });
-		hint.setText(`Press ${tabKey} to enhance results with semantic search`);
+		if (!isMobileUI()) {
+			const tabKey = Platform.isMacOS ? "⇥" : "Tab";
+			const hint = this.resultContainerEl.createDiv({ cls: "s2b-search-semantic-hint" });
+			hint.setText(`Press ${tabKey} to enhance results with semantic search`);
+			return;
+		}
+
+		const row = this.resultContainerEl.createDiv({ cls: "s2b-search-followup" });
+		row.createSpan({ cls: "s2b-search-followup-label", text: "Not what you meant?" });
+
+		const btn = row.createEl("button", { cls: "s2b-pill s2b-pill--interactive s2b-search-followup-action" });
+		btn.type = "button";
+		const icon = btn.createSpan({ cls: "s2b-search-mobile-icon" });
+		setIcon(icon, "sparkles");
+		btn.appendChild(document.createTextNode("Search by meaning"));
+		// Pointerdown, not click: the input keeps focus on mobile and a tap that
+		// blurs it first can dismiss the sheet before the click lands.
+		btn.addEventListener("pointerdown", (evt) => {
+			evt.preventDefault();
+			this.toggleSemanticMode();
+		});
+	}
+
+	/**
+	 * "Ask the agent" for mobile, rendered in the empty state.
+	 *
+	 * It used to sit beside the semantic toggle above the input, which read as a
+	 * sibling filter — but it is not a filter at all: it closes the modal, opens a
+	 * fresh chat, and carries the query plus the active tag/folder filters as
+	 * scope. That is worth keeping (redoing it by hand means retyping the query),
+	 * but it earns its place at the moment search has failed, not before the user
+	 * has searched at all.
+	 *
+	 * Note it can only ever carry the QUERY on mobile: multi-select is Shift-gated
+	 * throughout, so `getSelectedResults()` is always empty on a phone.
+	 */
+	private appendAskAgentAction(): void {
+		if (!isMobileUI() || this.isPickerMode()) return;
+		if (!this.currentQuery.trim()) return;
+
+		const row = this.resultContainerEl.createDiv({ cls: "s2b-search-followup" });
+		const btn = row.createEl("button", { cls: "s2b-pill s2b-pill--interactive s2b-search-followup-action" });
+		btn.type = "button";
+		const icon = btn.createSpan({ cls: "s2b-search-mobile-icon" });
+		setIcon(icon, "bot");
+		btn.appendChild(document.createTextNode("Ask the agent instead"));
+		btn.addEventListener("pointerdown", (evt) => {
+			evt.preventDefault();
+			void this.askAgentWithQuery();
+		});
 	}
 
 	/**
@@ -2228,6 +2230,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		} else if (this.currentQuery.trim()) {
 			emptyEl.setText("No notes found");
 			this.appendSemanticHint();
+			this.appendAskAgentAction();
 		} else {
 			emptyEl.setText("No recent notes yet. Open a note to see it here, or type to search your notes.");
 		}

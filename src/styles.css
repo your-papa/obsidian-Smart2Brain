@@ -963,45 +963,30 @@
 	}
 }
 
-/* Search modal mobile action bar (semantic toggle + ask agent). Rendered only
-   on Platform.isMobile; mirrors the Tab / Alt+Enter keyboard actions. */
-.s2b-search-mobile-actions {
+/* Follow-up actions under the mobile result list / empty state: the semantic
+   offer and "Ask the agent". These replaced a toggle strip above the input,
+   which asked the user to pick a search mode before seeing a single result.
+   Rendered inline with the results so the offer sits where the doubt forms. */
+.s2b-search-followup {
 	display: flex;
+	align-items: center;
 	gap: 8px;
-	padding: 8px 12px;
-	/* Same trap as .s2b-model-filter-bar: inside .prompt's fixed-height flex
-	   column a plain block child has no intrinsic basis and gets squeezed, which
-	   clipped the pills. Pin the basis and let the row scroll sideways rather
-	   than wrap — wrapping changed the bar's height (and so the results list's
-	   offset) whenever the button set changed. */
-	flex-shrink: 0;
-	min-height: calc(36px + 16px);
-	box-sizing: border-box;
-	/* See .s2b-model-filter-bar: `overflow-x: auto` implies `auto` on the block
-	   axis too, which let this exactly-full row scroll a few pixels vertically. */
-	overflow-x: auto;
-	overflow-y: hidden;
-	scrollbar-width: none;
+	padding: 10px 14px;
+	border-top: 1px solid var(--background-modifier-border);
 }
 
-.s2b-search-mobile-actions::-webkit-scrollbar {
-	display: none;
+.s2b-search-followup-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
 }
 
-.s2b-search-mobile-actions .s2b-pill {
-	flex-shrink: 0;
-}
-
-.s2b-search-mobile-actions .s2b-pill {
+.s2b-search-followup-action {
 	min-height: 36px;
 	padding: 6px 14px;
 	font-size: var(--font-ui-small);
-}
-
-.s2b-search-mobile-actions .s2b-pill.s2b-pill--active {
-	background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-secondary));
-	border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
-	color: var(--text-accent);
+	/* Sits at the row's end so the label reads first, action second. */
+	margin-left: auto;
+	flex-shrink: 0;
 }
 
 .s2b-search-mobile-icon {
