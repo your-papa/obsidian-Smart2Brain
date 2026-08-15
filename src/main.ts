@@ -258,34 +258,36 @@ export default class SecondBrainPlugin extends Plugin {
 	}
 
 	/**
-	 * Mobile only: route the search button in Obsidian's bottom navbar to S2B
+	 * Mobile only: route the magnifier button in Obsidian's bottom navbar to S2B
 	 * search, when `overrideMobileNavbarSearch` is on.
 	 *
-	 * That button has no plugin-facing hook — it invokes the `global-search:open`
-	 * command — so the interception has to happen on the command. But the command
-	 * is shared: the palette, any hotkey, and our own tag-click handler in
-	 * `MarkdownRenderer` all route through it, and those must still reach CORE
-	 * search (a tag click that opened S2B search instead of the tag's results
-	 * would be a plain regression). So the wrapper redirects only while a
-	 * navbar-originated invocation is in flight, flagged by a capture-phase
-	 * pointer listener on the navbar button; every other caller falls through to
-	 * the original callback untouched.
+	 * That button draws a `lucide-search` icon, but it is NOT global search — core
+	 * builds it as `mobile-navbar-action-quick-switcher` and its click handler
+	 * calls the switcher internal plugin directly:
 	 *
-	 * The flag is armed on pointerdown and disarmed on a microtask, so it spans
-	 * the synchronous command dispatch the tap triggers and nothing later.
+	 *     internalPlugins.getPluginById("switcher").instance.onOpen()
+	 *
+	 * It never dispatches a command, which is why wrapping `global-search:open`
+	 * did nothing here. So the hook goes on that `onOpen`.
+	 *
+	 * The switcher is also reachable by hotkey and from the command palette, and
+	 * those must still open the real quick switcher — only the navbar tap is
+	 * redirected. A capture-phase `pointerdown` on the navbar action arms a flag
+	 * that a microtask clears, so it spans exactly the synchronous `onOpen` that
+	 * tap triggers and nothing else.
 	 */
 	private registerMobileNavbarSearchOverride(): void {
 		if (!isMobileUI()) return;
 
-		const commands = (
+		type SwitcherInstance = { onOpen?: () => unknown };
+		const switcherInstance = (
 			this.app as unknown as {
-				commands?: { commands?: Record<string, { callback?: () => unknown }> };
+				internalPlugins?: { getPluginById?: (id: string) => { instance?: SwitcherInstance } | undefined };
 			}
-		).commands?.commands;
-		const searchCommand = commands?.["global-search:open"];
-		const originalCallback = searchCommand?.callback;
-		if (!searchCommand || typeof originalCallback !== "function") {
-			Log.warn("[S2B] Could not hook global-search:open — mobile navbar search override unavailable.");
+		).internalPlugins?.getPluginById?.("switcher")?.instance;
+		const originalOnOpen = switcherInstance?.onOpen;
+		if (!switcherInstance || typeof originalOnOpen !== "function") {
+			Log.warn("[S2B] Could not hook the quick switcher — mobile navbar search override unavailable.");
 			return;
 		}
 
@@ -296,12 +298,8 @@ export default class SecondBrainPlugin extends Plugin {
 			(evt) => {
 				const target = evt.target;
 				if (!(target instanceof Element)) return;
-				// The navbar's search action; `.mobile-navbar-action` is the button
-				// wrapper core renders. Matching on the ancestor keeps this working
-				// whether the tap lands on the button or its inner icon/svg.
-				if (!target.closest(".mobile-navbar .mobile-navbar-action, .mobile-navbar [data-icon='search']")) {
-					return;
-				}
+				// Match the ancestor so a tap on the inner icon/svg counts too.
+				if (!target.closest(".mobile-navbar-action-quick-switcher")) return;
 				navbarTapInFlight = true;
 				queueMicrotask(() => {
 					navbarTapInFlight = false;
@@ -310,20 +308,24 @@ export default class SecondBrainPlugin extends Plugin {
 			{ capture: true },
 		);
 
-		const ourCallback = () => {
+		// `onOpen` is called as a method on the switcher instance, so the wrapper is
+		// a plain function that forwards `this` — an arrow would capture the wrong
+		// receiver and break core's own switcher when it falls through.
+		const app = this.app;
+		const ourOnOpen = function (this: SwitcherInstance, ...args: unknown[]) {
 			if (!navbarTapInFlight || !getData().overrideMobileNavbarSearch) {
-				return originalCallback.call(searchCommand);
+				return (originalOnOpen as (...a: unknown[]) => unknown).apply(this, args);
 			}
-			new SearchModal(this.app).open();
+			new SearchModal(app).open();
 		};
-		searchCommand.callback = ourCallback;
+		switcherInstance.onOpen = ourOnOpen;
 
 		this.register(() => {
-			// Restore only if OUR wrapper is still the installed callback. If someone
-			// else hooked the command after us, theirs is live and writing the
-			// original back would silently uninstall it.
-			if (searchCommand.callback === ourCallback) {
-				searchCommand.callback = originalCallback;
+			// Restore only if OUR hook is still installed. If someone else wrapped
+			// it after us, theirs is live and writing the original back would
+			// silently uninstall it.
+			if (switcherInstance.onOpen === ourOnOpen) {
+				switcherInstance.onOpen = originalOnOpen;
 			}
 		});
 	}

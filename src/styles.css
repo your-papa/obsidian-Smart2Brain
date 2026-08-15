@@ -926,9 +926,12 @@
 	   than wrap — wrapping changed the bar's height (and so the results list's
 	   offset) whenever the button set changed. */
 	flex-shrink: 0;
-	height: calc(36px + 16px);
+	min-height: calc(36px + 16px);
 	box-sizing: border-box;
+	/* See .s2b-model-filter-bar: `overflow-x: auto` implies `auto` on the block
+	   axis too, which let this exactly-full row scroll a few pixels vertically. */
 	overflow-x: auto;
+	overflow-y: hidden;
 	scrollbar-width: none;
 }
 
@@ -987,11 +990,18 @@
 	   clipped top and bottom. Derive it from the same numbers instead of
 	   hard-coding, so restyling a pill can't silently re-clip the row. */
 	flex-shrink: 0;
-	height: calc(36px + 16px);
+	min-height: calc(36px + 16px);
 	box-sizing: border-box;
 	/* One scrolling row: a wrapping bar would push the results list down by an
-	   unpredictable amount every time the vendor set changes. */
+	   unpredictable amount every time the vendor set changes.
+
+	   `overflow-y: hidden` is load-bearing, not decoration. `overflow-x: auto`
+	   alone computes to `auto` on BOTH axes, and since the pills' 36px min-height
+	   plus this 16px of padding exactly fills the box, any sub-pixel rounding
+	   leaves a few stray pixels of vertical scroll — the row could be nudged up
+	   and down. Pinning the block axis makes the bar horizontal-only. */
 	overflow-x: auto;
+	overflow-y: hidden;
 	scrollbar-width: none;
 }
 

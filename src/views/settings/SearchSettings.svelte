@@ -4,8 +4,10 @@ import EmbeddingIndexSection from "../../components/settings/EmbeddingIndexSecti
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
+import Toggle from "../../components/ui/Toggle.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
+import { isMobileUI } from "../../utils/platform";
 
 const pluginData = getData();
 const plugin = getPlugin();
@@ -32,6 +34,18 @@ function openDisplaySettingsModal() {
   >
     <Button buttonText="Configure" onClick={openDisplaySettingsModal} />
   </SettingItem>
+
+  {#if isMobileUI()}
+    <SettingItem
+      name="Use S2B search in the navbar"
+      desc="Make the magnifier button in the bottom navbar open Smart Second Brain search instead of Obsidian's quick switcher. Only that button changes — the quick switcher still opens from the command palette and its hotkey."
+    >
+      <Toggle
+        checked={pluginData.overrideMobileNavbarSearch}
+        onchange={(checked) => (pluginData.overrideMobileNavbarSearch = checked)}
+      />
+    </SettingItem>
+  {/if}
 </SettingGroup>
 
 <EmbeddingIndexSection purpose="search" />

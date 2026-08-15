@@ -16,7 +16,6 @@ import { getProviderDefinition } from "../../providers/index";
 import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { DEFAULT_AGENT_ICON, type ChatOpenLocation } from "../../types/plugin";
-import { isMobileUI } from "../../utils/platform";
 
 const pluginData = getData();
 const plugin = getPlugin();
@@ -262,18 +261,6 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
         onchange={(checked) => (pluginData.showActiveAgentsInStatusBar = checked)}
       />
     </SettingItem>
-
-    {#if isMobileUI()}
-      <SettingItem
-        name="Use S2B search in the navbar"
-        desc="Make the search button in the bottom navbar open Smart Second Brain search instead of Obsidian's. Only that button changes — Obsidian's search still opens from the command palette and its hotkey."
-      >
-        <Toggle
-          checked={pluginData.overrideMobileNavbarSearch}
-          onchange={(checked) => (pluginData.overrideMobileNavbarSearch = checked)}
-        />
-      </SettingItem>
-    {/if}
   </SettingGroup>
 </div>
 
