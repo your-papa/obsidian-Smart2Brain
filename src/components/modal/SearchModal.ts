@@ -193,9 +193,15 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			...(this.pickerOptions?.pickerExistingPaths ?? []),
 			...(this.pickerOptions?.pickerIncludedPaths ?? []),
 		]);
+		// The agent hint names a keyboard shortcut, which a phone has no way to
+		// produce — and the mobile action bar already offers "Ask agent" as a
+		// button right above this field, so the hint is both unusable and
+		// redundant there. Keep the syntax help, drop the shortcut.
 		this.setPlaceholder(
 			this.pickerOptions?.pickerText?.searchPlaceholder ??
-				`Search notes with #tag or /folder, or ${Platform.isMacOS ? "⌥↵" : "Alt+↵"} to ask the agent...`,
+				(isMobileUI()
+					? "Search notes with #tag or /folder..."
+					: `Search notes with #tag or /folder, or ${Platform.isMacOS ? "⌥↵" : "Alt+↵"} to ask the agent...`),
 		);
 		this.updateInstructions();
 

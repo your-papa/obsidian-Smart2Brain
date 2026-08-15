@@ -272,9 +272,17 @@ export default class SecondBrainPlugin extends Plugin {
 	 *
 	 * The switcher is also reachable by hotkey and from the command palette, and
 	 * those must still open the real quick switcher — only the navbar tap is
-	 * redirected. A capture-phase `pointerdown` on the navbar action arms a flag
-	 * that a microtask clears, so it spans exactly the synchronous `onOpen` that
-	 * tap triggers and nothing else.
+	 * redirected. A capture-phase `pointerdown` on the navbar action arms a flag,
+	 * which `onOpen` consumes.
+	 *
+	 * The flag is cleared on a TIMER, not a microtask. Core's handler is bound to
+	 * `click`, which on a real finger tap lands 50–300ms after `pointerdown`; a
+	 * microtask cleared the flag within the same millisecond, so by the time
+	 * `onOpen` ran the flag was already down and every tap fell through to the
+	 * core switcher. Verified on-device: firing `onOpen` 60ms after a synthetic
+	 * `pointerdown` took the fall-through branch. The window is generous enough to
+	 * cover a slow tap and is consumed on first use, so it cannot leak into a
+	 * later unrelated `onOpen`.
 	 */
 	private registerMobileNavbarSearchOverride(): void {
 		if (!isMobileUI()) return;
@@ -291,7 +299,9 @@ export default class SecondBrainPlugin extends Plugin {
 			return;
 		}
 
-		let navbarTapInFlight = false;
+		/** How long after a navbar tap an `onOpen` still counts as coming from it. */
+		const NAVBAR_TAP_WINDOW_MS = 700;
+		let navbarTapAt = 0;
 		this.registerDomEvent(
 			document,
 			"pointerdown",
@@ -300,10 +310,7 @@ export default class SecondBrainPlugin extends Plugin {
 				if (!(target instanceof Element)) return;
 				// Match the ancestor so a tap on the inner icon/svg counts too.
 				if (!target.closest(".mobile-navbar-action-quick-switcher")) return;
-				navbarTapInFlight = true;
-				queueMicrotask(() => {
-					navbarTapInFlight = false;
-				});
+				navbarTapAt = Date.now();
 			},
 			{ capture: true },
 		);
@@ -313,7 +320,11 @@ export default class SecondBrainPlugin extends Plugin {
 		// receiver and break core's own switcher when it falls through.
 		const app = this.app;
 		const ourOnOpen = function (this: SwitcherInstance, ...args: unknown[]) {
-			if (!navbarTapInFlight || !getData().overrideMobileNavbarSearch) {
+			const fromNavbar = navbarTapAt > 0 && Date.now() - navbarTapAt < NAVBAR_TAP_WINDOW_MS;
+			// Consume it either way: one tap may only ever redirect one open, so a
+			// hotkey press moments later can't ride on a stale tap.
+			navbarTapAt = 0;
+			if (!fromNavbar || !getData().overrideMobileNavbarSearch) {
 				return (originalOnOpen as (...a: unknown[]) => unknown).apply(this, args);
 			}
 			new SearchModal(app).open();

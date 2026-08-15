@@ -3,10 +3,12 @@ import { Notice } from "obsidian";
 import { ModelSelectionModal } from "../../components/modal/ModelSelectionModal";
 import { PrivacyListModal } from "../../components/modal/PrivacyListModal";
 import Button from "../../components/ui/Button.svelte";
+import Toggle from "../../components/ui/Toggle.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import type SecondBrainPlugin from "../../main";
 import { type ChatModel } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
+import { isMobileUI } from "../../utils/platform";
 import { icon } from "../../utils/utils";
 import { ProviderSetupModal } from "../provider-setup/ProviderSetup";
 // Inlined at build time (?raw) so it ships inside main.js — the single-file
@@ -281,11 +283,25 @@ function openHotkeysSettings() {
 				<div class="s2b-onboarding-pillar-title">Smarter search</div>
 				<div class="s2b-onboarding-pillar-desc">
 					Find notes by title, content, tags, and folders — with fuzzy matching. No setup needed. Add
-					an embedding model later for semantic search, or <button
-						class="s2b-onboarding-link"
-						onclick={openHotkeysSettings}>set a hotkey</button
-					> for instant access.
+					an embedding model later for semantic search.
+					{#if !isMobileUI()}
+						Or <button class="s2b-onboarding-link" onclick={openHotkeysSettings}>set a hotkey</button
+						> for instant access.
+					{/if}
 				</div>
+				<!-- A hotkey is meaningless on a phone with no keyboard, so the quick
+				     way in there is the navbar magnifier instead. Same setting as
+				     Settings → Search; offered here because this is where a new user
+				     is being told how to reach search fast. -->
+				{#if isMobileUI()}
+					<label class="s2b-onboarding-navbar-toggle">
+						<Toggle
+							checked={data.overrideMobileNavbarSearch}
+							onchange={(checked) => (data.overrideMobileNavbarSearch = checked)}
+						/>
+						<span>Open this search from the navbar magnifier instead of the quick switcher</span>
+					</label>
+				{/if}
 			</div>
 		</div>
 		<div class="s2b-onboarding-pillar" class:s2b-fade-in={playIntro} style="--s2b-order: 3">
@@ -678,6 +694,35 @@ function openHotkeysSettings() {
 		padding: 0.75rem;
 		border: 1px solid var(--background-modifier-border);
 		border-radius: var(--radius-m);
+	}
+
+	.s2b-onboarding-navbar-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+		font-size: var(--font-ui-smaller);
+		color: var(--text-muted);
+		cursor: pointer;
+	}
+
+	/* On a phone the three-column row (status | body | action) leaves the button
+	   a sliver of width, so its label wraps or truncates. Break it onto its own
+	   full-width line under the description instead: the status icon keeps its
+	   column beside the text, and the action gets the whole row. */
+	:global(.is-mobile) .s2b-onboarding-step {
+		flex-wrap: wrap;
+		align-items: flex-start;
+	}
+
+	:global(.is-mobile) .s2b-onboarding-step-body {
+		/* Force the action past the icon+body pair onto the next line. */
+		min-width: calc(100% - 1.75rem);
+	}
+
+	:global(.is-mobile) .s2b-onboarding-step :global(button) {
+		width: 100%;
+		justify-content: center;
 	}
 
 	.s2b-onboarding-step--disabled {

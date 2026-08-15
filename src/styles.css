@@ -176,6 +176,24 @@
 	padding-inline-end: 0 !important;
 	margin-left: 0 !important;
 	text-indent: 0 !important;
+	/* Mobile Obsidian gives `.prompt-input` its own pill: a 44px radius plus a
+	   visible border. Normally that IS the search field, but our inline-chips
+	   wrapper re-parents it inside `.prompt-input-container`, which already draws
+	   the same pill — so the two nest and it reads as an input inside an input.
+	   The container is the real field here; strip the inner chrome and let the
+	   input be plain text on top of it. Desktop is unaffected (no border/radius
+	   is set on `.prompt-input` there).
+
+	   `appearance: none` is the load-bearing one: iOS paints the native rounded
+	   text-field chrome for `-webkit-appearance: auto`, and that outline survives
+	   `border`/`background`/`box-shadow` overrides — verified on-device, where the
+	   pill was still drawn with computed `border-width: 0`. */
+	appearance: none !important;
+	-webkit-appearance: none !important;
+	background: transparent !important;
+	border: none !important;
+	border-radius: 0 !important;
+	box-shadow: none !important;
 }
 
 .s2b-inline-input-content.s2b-inline-input-content-has-chips .s2b-inline-input {
