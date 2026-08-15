@@ -292,14 +292,18 @@ function openHotkeysSettings() {
 				<!-- A hotkey is meaningless on a phone with no keyboard, so the quick
 				     way in there is the navbar magnifier instead. Same setting as
 				     Settings → Search; offered here because this is where a new user
-				     is being told how to reach search fast. -->
+				     is being told how to reach search fast.
+
+				     Laid out label-left / control-right like a settings row (and like
+				     the step rows below), rather than switch-then-text stacked under
+				     the description where it read as another paragraph. -->
 				{#if isMobileUI()}
 					<label class="s2b-onboarding-navbar-toggle">
+						<span>Open from the navbar magnifier instead of the quick switcher</span>
 						<Toggle
 							checked={data.overrideMobileNavbarSearch}
 							onchange={(checked) => (data.overrideMobileNavbarSearch = checked)}
 						/>
-						<span>Open this search from the navbar magnifier instead of the quick switcher</span>
 					</label>
 				{/if}
 			</div>
@@ -699,11 +703,22 @@ function openHotkeysSettings() {
 	.s2b-onboarding-navbar-toggle {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		/* Label takes the slack, switch keeps its intrinsic width on the right —
+		   the same shape as a settings row. */
+		justify-content: space-between;
+		gap: 0.75rem;
 		margin-top: 0.5rem;
 		font-size: var(--font-ui-smaller);
 		color: var(--text-muted);
 		cursor: pointer;
+	}
+
+	.s2b-onboarding-navbar-toggle > span {
+		min-width: 0;
+	}
+
+	.s2b-onboarding-navbar-toggle :global(.checkbox-container) {
+		flex-shrink: 0;
 	}
 
 	/* On a phone the three-column row (status | body | action) leaves the button
@@ -824,5 +839,55 @@ function openHotkeysSettings() {
 		display: flex;
 		gap: 0.5rem;
 		margin-left: auto;
+	}
+
+	/* On a phone the three buttons don't fit on one line, and `flex-wrap` on a
+	   `space-between` row broke them into a ragged stack — Skip alone on one line,
+	   the other two sharing the next, each a different width.
+
+	   Stack deliberately instead, ordered by intent rather than by source order:
+	   the primary action (Start chatting) on top, then the secondary, with Skip
+	   last and visually quiet. `order` does the reordering so the DOM keeps
+	   Skip-first for tab order and screen readers. */
+	:global(.is-mobile) .s2b-onboarding-footer {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 0.5rem;
+	}
+
+	/* The floating `.mobile-navbar` overlays the bottom of the view, leaving the
+	   last footer button (Skip) tucked underneath it — measured on-device as a
+	   5px overlap. The scroll container is `.view-content`, whose own 34px bottom
+	   padding is short of the navbar's ~52px + home-indicator inset, so the
+	   clearance has to go there: padding on the footer itself just extends a box
+	   that is already scrolled to its end. */
+	:global(.is-mobile .view-content.s2b-onboarding-container) {
+		padding-bottom: calc(52px + env(safe-area-inset-bottom) + 12px) !important;
+	}
+
+	:global(.is-mobile) .s2b-onboarding-footer-primary {
+		display: contents;
+	}
+
+	:global(.is-mobile) .s2b-onboarding-footer :global(button) {
+		width: 100%;
+		justify-content: center;
+	}
+
+	/* Start chatting is the CTA — first. */
+	:global(.is-mobile) .s2b-onboarding-footer-primary :global(button:last-child) {
+		order: -2;
+	}
+
+	:global(.is-mobile) .s2b-onboarding-footer-primary :global(button:first-child) {
+		order: -1;
+	}
+
+	/* Skip stays last and reads as the low-emphasis way out. */
+	:global(.is-mobile) .s2b-onboarding-footer > :global(button) {
+		order: 0;
+		background: transparent;
+		box-shadow: none;
+		color: var(--text-muted);
 	}
 </style>
